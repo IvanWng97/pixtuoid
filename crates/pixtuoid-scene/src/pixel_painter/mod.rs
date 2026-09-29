@@ -673,7 +673,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // V before H: at an inside corner the vertical's stitched `y_bot` ties the
     // horizontal's south-base anchor, and inserting V first keeps H winning
     // that tie under the stable sort.
-    enqueue_room_walls_v(ctx.layout, top_wall_h, &mut drawables);
+    enqueue_room_walls_v(ctx.layout, &mut drawables);
     enqueue_room_walls_h(ctx.layout, &mut drawables);
 
     // `sort_by_key` is stable, so ties preserve the insertion order above —

@@ -1,13 +1,12 @@
 //! The wall's RENDER half — room-divider partitions drawn as frosted glass.
-//! The painter-side counterpart to the GEOMETRY half in `layout::rooms::walls`;
-//! the two stay bound by the shared `WALL_THICK_*` consts +
-//! `stitch_vertical_wall` (single source, no drift).
+//! The painter-side counterpart to the GEOMETRY half in `layout::rooms::walls`,
+//! whose `wall_pieces` every painter draws from.
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::drawable::{Drawable, DrawableKind};
 use super::palette::blend_pixel;
-use crate::layout::{crossing_h_rows, stitch_vertical_wall, Layout, WallSegment};
+use crate::layout::{wall_pieces, Layout, WallPiece};
 
 // The E-W wall shows its face while the N-S wall is seen edge-on; the 3:2
 // thickness ratio sells the top-down fake-3D. Both DERIVE from the core mask
@@ -164,78 +163,57 @@ pub(super) fn paint_door_jamb_v(
     }
 }
 
-/// Horizontal (E-W) room dividers join the y-sort, anchored at their south
-/// (front) edge so a character standing north of the wall is composited over by
-/// the frosted glass rather than painting on top of it. Emitted LAST so a
-/// character tied with a wall row still paints behind it.
+/// Horizontal (E-W) room dividers join the y-sort on [`WallPiece::sort_row`],
+/// so a character standing north of the wall is composited over by the frosted
+/// glass rather than painting on top of it. Emitted LAST so a character tied
+/// with a wall row still paints behind it.
 pub(super) fn enqueue_room_walls_h<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
-    for &WallSegment { start, end } in &layout.room_walls {
-        if start.y == end.y {
-            let (x0, x1) = (start.x.min(end.x), start.x.max(end.x));
-            // A cut end abutting a doorway gets a jamb — flagged HERE because
-            // the paint pass has no layout access.
-            let jamb_right = layout
-                .doorways
-                .iter()
-                .any(|d| d.start.y == start.y && d.end.y == start.y && d.start.x == x1);
-            let jamb_left = layout
-                .doorways
-                .iter()
-                .any(|d| d.start.y == start.y && d.end.y == start.y && d.end.x == x0);
+    for piece in wall_pieces(&layout.room_walls, &layout.doorways, layout.top_margin) {
+        if let WallPiece::Horizontal {
+            x0,
+            x1,
+            y_face,
+            jamb_west,
+            jamb_east,
+        } = piece
+        {
             drawables.push(Drawable {
-                anchor_y: start.y + (WALL_THICK_H_PX - 1),
+                anchor_y: piece.sort_row(),
                 kind: DrawableKind::RoomWallH {
                     x0,
                     x1,
-                    y_top: start.y,
-                    jamb_left,
-                    jamb_right,
+                    y_top: y_face,
+                    jamb_left: jamb_west,
+                    jamb_right: jamb_east,
                 },
             });
         }
     }
 }
 
-/// Vertical (N-S, edge-on) room dividers join the y-sort. Each segment carries
-/// its own stitched `[y_top, y_bot]` for PAINT — the layout emits raw geometry;
-/// the render offsets that plug the joints live in `stitch_vertical_wall`.
-pub(super) fn enqueue_room_walls_v<'a>(
-    layout: &'a Layout,
-    top_wall_h: u16,
-    drawables: &mut Vec<Drawable<'a>>,
-) {
-    for &WallSegment { start, end } in &layout.room_walls {
-        if start.x != end.x {
-            continue; // horizontal walls handled by enqueue_room_walls_h
+/// Vertical (N-S, edge-on) room dividers join the y-sort on
+/// [`WallPiece::sort_row`], each painted over its stitched `[y_top, y_bot]`.
+pub(super) fn enqueue_room_walls_v<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
+    for piece in wall_pieces(&layout.room_walls, &layout.doorways, layout.top_margin) {
+        if let WallPiece::Vertical {
+            x,
+            y_top,
+            y_bot,
+            jamb_north,
+            jamb_south,
+            ..
+        } = piece
+        {
+            drawables.push(Drawable {
+                anchor_y: piece.sort_row(),
+                kind: DrawableKind::RoomWallV {
+                    x,
+                    y_top,
+                    y_bot,
+                    jamb_north,
+                    jamb_south,
+                },
+            });
         }
-        // The SAME x-filtered crossing rows the mask footprint uses, so the
-        // painted glass and the blocked ground bridge off the same H walls.
-        let h_rows = crossing_h_rows(start.x, &layout.room_walls);
-        let (y_top, y_bot) =
-            stitch_vertical_wall(start.y, end.y, layout.top_margin, top_wall_h, &h_rows);
-        // Jamb flags on the RAW cut ends — a door cut is never a stitch joint,
-        // so the stitched y_top/y_bot the paint arm uses equal these.
-        let jamb_south = layout
-            .doorways
-            .iter()
-            .any(|d| d.start.x == start.x && d.end.x == start.x && d.start.y == end.y);
-        let jamb_north = layout
-            .doorways
-            .iter()
-            .any(|d| d.start.x == start.x && d.end.x == start.x && d.end.y == start.y);
-        drawables.push(Drawable {
-            // z-key = the RAW south end, NOT the stitched `y_bot`: at a corner
-            // the stitch extends `y_bot` down into the crossing H wall to fill
-            // the L-notch, and anchoring there would paint the vertical glass
-            // OVER that H wall (and the pantry counter).
-            anchor_y: end.y,
-            kind: DrawableKind::RoomWallV {
-                x: start.x,
-                y_top,
-                y_bot,
-                jamb_north,
-                jamb_south,
-            },
-        });
     }
 }

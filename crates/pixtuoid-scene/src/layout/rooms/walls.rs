@@ -197,6 +197,128 @@ pub(crate) fn wall_segment_rect(
     }
 }
 
+/// One room wall as every painter draws it: where its glass stands, which of
+/// its ends a doorway frames, and the row it sorts on. Built once from
+/// [`Layout::room_walls`](crate::layout::Layout::room_walls) and
+/// [`Layout::doorways`](crate::layout::Layout::doorways), so no painter
+/// re-derives a room's perimeter, closes a doorway, or stands a wall the
+/// layout never cut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WallPiece {
+    /// An E-W wall seen face-on: its face rows start at `y_face`, its
+    /// visual-only cap rises [`WALL_H`]'s `cap` rows above them, and it sorts
+    /// on its face's last row, so a figure standing north of it paints behind
+    /// the glass.
+    Horizontal {
+        x0: u16,
+        x1: u16,
+        y_face: u16,
+        jamb_west: bool,
+        jamb_east: bool,
+    },
+    /// A N-S wall seen edge-on, [`WALL_THICK_V`] wide, its glass stitched to
+    /// its joints `[y_top, y_bot]`. It sorts on its RAW south end, `south`: a
+    /// stitch that runs down into a crossing E-W wall must not carry the sort
+    /// row with it, or the edge-on glass paints over that wall.
+    Vertical {
+        x: u16,
+        y_top: u16,
+        y_bot: u16,
+        south: u16,
+        jamb_north: bool,
+        jamb_south: bool,
+    },
+}
+
+impl WallPiece {
+    /// The box its glass fills: an E-W wall's face and the cap above it, or a
+    /// N-S wall's stitched run.
+    pub(crate) fn visual(self) -> (Point, Size) {
+        match self {
+            WallPiece::Horizontal { x0, x1, y_face, .. } => (
+                Point {
+                    x: x0,
+                    y: y_face.saturating_sub(WALL_H.cap),
+                },
+                Size {
+                    w: x1 - x0 + 1,
+                    h: WALL_H.cap + WALL_H.thickness,
+                },
+            ),
+            WallPiece::Vertical {
+                x, y_top, y_bot, ..
+            } => (
+                Point { x, y: y_top },
+                Size {
+                    w: WALL_V.thickness,
+                    h: y_bot - y_top + 1,
+                },
+            ),
+        }
+    }
+
+    /// The row this wall sorts on among the office's pieces.
+    pub(crate) fn sort_row(self) -> u16 {
+        match self {
+            WallPiece::Horizontal { y_face, .. } => y_face + (WALL_THICK_H - 1),
+            WallPiece::Vertical { south, .. } => south,
+        }
+    }
+}
+
+/// Every room wall of `room_walls` as a [`WallPiece`], its jambs where
+/// `doorways` cut its ends.
+pub(crate) fn wall_pieces(
+    room_walls: &[WallSegment],
+    doorways: &[Doorway],
+    top_margin: u16,
+) -> Vec<WallPiece> {
+    let top_wall_h = top_margin.saturating_sub(WALL_BAND_TO_TOP_MARGIN);
+    room_walls
+        .iter()
+        .map(|&WallSegment { start, end }| {
+            if start.y == end.y {
+                let (x0, x1) = (start.x.min(end.x), start.x.max(end.x));
+                let cut = |x: u16, at_end: bool| {
+                    doorways.iter().any(|d| {
+                        d.start.y == start.y
+                            && d.end.y == start.y
+                            && if at_end { d.start.x == x } else { d.end.x == x }
+                    })
+                };
+                WallPiece::Horizontal {
+                    x0,
+                    x1,
+                    y_face: start.y,
+                    jamb_west: cut(x0, false),
+                    jamb_east: cut(x1, true),
+                }
+            } else {
+                let h_rows = crossing_h_rows(start.x, room_walls);
+                let (y_top, y_bot) =
+                    stitch_vertical_wall(start.y, end.y, top_margin, top_wall_h, &h_rows);
+                // Jambs sit on the RAW cut ends: a door cut is never a stitch
+                // joint, so they equal the stitched ends wherever one is framed.
+                let cut = |y: u16, at_end: bool| {
+                    doorways.iter().any(|d| {
+                        d.start.x == start.x
+                            && d.end.x == start.x
+                            && if at_end { d.start.y == y } else { d.end.y == y }
+                    })
+                };
+                WallPiece::Vertical {
+                    x: start.x,
+                    y_top,
+                    y_bot,
+                    south: end.y,
+                    jamb_north: cut(start.y, false),
+                    jamb_south: cut(end.y, true),
+                }
+            }
+        })
+        .collect()
+}
+
 /// An opening the resolver CUT into a wall run. The resolver is the one place
 /// that knows every door, so it hands the openings to the renderer instead of
 /// the painter re-inferring them from segment adjacency. Axis is implicit:
@@ -437,6 +559,52 @@ fn emit(req: &WallRequest, out: &mut Vec<WallSegment>, doorways: &mut Vec<Doorwa
 mod tests {
     use super::*;
     use crate::layout::MeetingTrio;
+
+    #[test]
+    fn stitch_vertical_wall_connects_each_joint() {
+        let top_margin = 48u16;
+        let top_wall_h = top_margin - 4;
+        let h_y = 90u16;
+        let h_rows = [h_y];
+
+        let (yt, _) = stitch_vertical_wall(top_margin, 70, top_margin, top_wall_h, &h_rows);
+        assert_eq!(
+            yt, top_wall_h,
+            "top segment should connect up to the window band"
+        );
+
+        let (_, yb) = stitch_vertical_wall(60, h_y, top_margin, top_wall_h, &h_rows);
+        assert_eq!(
+            yb,
+            h_y + (WALL_THICK_H - 1),
+            "bottom should fill the corner"
+        );
+
+        let (yt2, _) = stitch_vertical_wall(h_y + 6, 120, top_margin, top_wall_h, &h_rows);
+        assert_eq!(yt2, h_y, "lower segment should bridge up to the cross wall");
+
+        let (yt3, yb3) = stitch_vertical_wall(h_y + 20, 130, top_margin, top_wall_h, &h_rows);
+        assert_eq!(
+            (yt3, yb3),
+            (h_y + 20, 130),
+            "distant segment must not bridge"
+        );
+        let (yt4, yb4) = stitch_vertical_wall(60, 80, top_margin, top_wall_h, &[]);
+        assert_eq!((yt4, yb4), (60, 80), "no joints → unchanged");
+    }
+
+    #[test]
+    fn vertical_wall_top_raise_lands_on_the_band_row() {
+        let top_margin = 48u16;
+        let tbm = WALL_BAND_TO_TOP_MARGIN;
+        let top_wall_h = top_margin - tbm;
+        let band_row = top_margin.saturating_sub(tbm);
+        let (stitch_raise, _) = stitch_vertical_wall(top_margin, 90, top_margin, top_wall_h, &[]);
+        assert_eq!(
+            stitch_raise, band_row,
+            "the shared stitch must raise a band-rooted vertical wall top to the band row"
+        );
+    }
 
     #[test]
     fn vertical_wall_free_terminus_reserves_a_north_walk_behind_cap() {

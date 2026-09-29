@@ -2,61 +2,13 @@ use super::anchors::{
     back_couch_anchor, seated_anchor_facing, walking_anchor, waypoint_anchor, CHARACTER_SPRITE_W,
 };
 use super::seat::{settle_seat, Seat};
-use super::wall::WALL_THICK_H_PX;
 use super::*;
-use crate::layout::stitch_vertical_wall;
 use crate::pose;
 use pixtuoid_core::sprite::{Frame, Pixel};
 use pixtuoid_core::state::{GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use std::path::PathBuf;
 use std::sync::Arc;
-
-#[test]
-fn stitch_vertical_wall_connects_each_joint() {
-    let top_margin = 48u16;
-    let top_wall_h = top_margin - 4;
-    let h_y = 90u16;
-    let h_rows = [h_y];
-
-    let (yt, _) = stitch_vertical_wall(top_margin, 70, top_margin, top_wall_h, &h_rows);
-    assert_eq!(
-        yt, top_wall_h,
-        "top segment should connect up to the window band"
-    );
-
-    let (_, yb) = stitch_vertical_wall(60, h_y, top_margin, top_wall_h, &h_rows);
-    assert_eq!(
-        yb,
-        h_y + (WALL_THICK_H_PX - 1),
-        "bottom should fill the corner"
-    );
-
-    let (yt2, _) = stitch_vertical_wall(h_y + 6, 120, top_margin, top_wall_h, &h_rows);
-    assert_eq!(yt2, h_y, "lower segment should bridge up to the cross wall");
-
-    let (yt3, yb3) = stitch_vertical_wall(h_y + 20, 130, top_margin, top_wall_h, &h_rows);
-    assert_eq!(
-        (yt3, yb3),
-        (h_y + 20, 130),
-        "distant segment must not bridge"
-    );
-    let (yt4, yb4) = stitch_vertical_wall(60, 80, top_margin, top_wall_h, &[]);
-    assert_eq!((yt4, yb4), (60, 80), "no joints → unchanged");
-}
-
-#[test]
-fn vertical_wall_top_raise_lands_on_the_band_row() {
-    let top_margin = 48u16;
-    let tbm = crate::layout::WALL_BAND_TO_TOP_MARGIN;
-    let top_wall_h = top_margin - tbm;
-    let band_row = top_margin.saturating_sub(tbm);
-    let (stitch_raise, _) = stitch_vertical_wall(top_margin, 90, top_margin, top_wall_h, &[]);
-    assert_eq!(
-        stitch_raise, band_row,
-        "the shared stitch must raise a band-rooted vertical wall top to the band row"
-    );
-}
 
 #[test]
 fn v_door_jambs_sit_flush_on_both_cut_ends() {
@@ -138,7 +90,7 @@ fn v_wall_jamb_flags_and_south_anchor_on_the_doorway_cut_ends() {
         .find(|d| d.start.x == d.end.x)
         .expect("the meeting room's centered vertical door");
     let mut drawables = Vec::new();
-    enqueue_room_walls_v(&l, l.wall_band_h(), &mut drawables);
+    enqueue_room_walls_v(&l, &mut drawables);
     let walls: Vec<_> = drawables
         .iter()
         .filter_map(|d| match d.kind {

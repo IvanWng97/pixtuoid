@@ -58,9 +58,6 @@ const SKYLINE_MIN_H: u16 = 2;
 /// Logical rows between a head and its name badge.
 const LABEL_GAP_PX: u16 = 2;
 
-/// Thickness of a room's glass wall, in logical units.
-const ROOM_WALL_PX: u16 = 1;
-
 /// How many ramp levels the lit glass sits below its glow colour.
 const SCREEN_GLASS_LEVEL: i8 = -3;
 
@@ -120,9 +117,14 @@ fn paint_backdrop(
         paint_rug(rug, theme, pen, buf);
     }
     paint_wall(layout, theme, scale, buf);
-    // Wall decor hangs on the north band, so it is NOT floor-sorted: it paints
-    // with the wall, before anything standing on the floor can occlude it.
-    for item in &layout.wall_decor {
+    // Decor that only hangs on the north band paints with the wall, before
+    // anything standing on the floor can occlude it; what stands on the floor
+    // sorts among the floor's pieces ([`push_props`]).
+    for item in layout
+        .wall_decor
+        .iter()
+        .filter(|i| !stands_on_floor(i.kind))
+    {
         paint_wall_decor(item.pos, item.kind.sprite_name(), pack, scale, buf);
     }
 }
@@ -244,7 +246,12 @@ fn fingerprint(kind: &PieceKind) -> u64 {
     let mut h = std::hash::DefaultHasher::new();
     std::mem::discriminant(kind).hash(&mut h);
     match *kind {
-        PieceKind::WallSeg { at, w, h: height } => (at, w, height).hash(&mut h),
+        PieceKind::WallSeg {
+            at,
+            w,
+            h: height,
+            jambs,
+        } => (at, w, height, jambs).hash(&mut h),
         PieceKind::Desk { at, art, screen } => (at, art, screen).hash(&mut h),
         PieceKind::Chair { at } => at.hash(&mut h),
         PieceKind::Prop {
@@ -327,7 +334,9 @@ fn paint_piece(
         }
         PieceKind::Table { at } => paint_table(at, theme, scale, buf),
         PieceKind::Appliance { at, kind } => paint_appliance(at, kind, theme, scale, buf),
-        PieceKind::WallSeg { at, w, h } => paint_wall_seg(at, w, h, theme, scale, buf),
+        PieceKind::WallSeg { at, w, h, jambs } => {
+            paint_wall_seg(at, (w, h), jambs, theme, scale, buf)
+        }
     }
 }
 
@@ -561,6 +570,19 @@ fn push_props(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) 
     for d in &layout.pod_decor {
         push_prop(order, d.pos, d.kind.sprite_name());
     }
+    // Wall decor that stands on the floor (a whiteboard between pods, a
+    // bookshelf) sorts like any other floor piece. The layout places it by its
+    // top-left; a prop takes its centre.
+    for item in layout.wall_decor.iter().filter(|i| stands_on_floor(i.kind)) {
+        let sprite = item.kind.sprite_name();
+        if let Some((w, h)) = art_size(pack, sprite) {
+            let at = crate::layout::Point {
+                x: item.pos.x + w / 2,
+                y: item.pos.y + h / 2,
+            };
+            push_prop(order, at, sprite);
+        }
+    }
     // The lounge couch is a meeting sofa seen from behind, facing the window.
     if let Some(at) = layout.couch_sprite_center() {
         push_sofa(order, pack, at, true);
@@ -762,8 +784,18 @@ fn push_sofa(
         return;
     }
     if let Some((w, h)) = art_size(pack, "meeting_sofa") {
+        let span = piece_span(crate::layout::Anchor::Center, at, w, h, 1);
+        // The front view sorts WITH its sitters, who are pushed after the
+        // furniture and so land on it; on its own south edge its backrest
+        // would paint over their bodies. The flipped back view keeps that
+        // edge: it stands in front of the sitters it faces away from.
+        let span = if back_view {
+            span
+        } else {
+            span.with_depth(at.y + crate::pixel_painter::seat::SEATED_Z_OFF)
+        };
         order.push((
-            piece_span(crate::layout::Anchor::Center, at, w, h, 1),
+            span,
             PieceKind::Prop {
                 at,
                 sprite: "meeting_sofa",
@@ -780,75 +812,99 @@ fn push_sofa(
 /// easily.
 const WALL_SEG_H: u16 = 4;
 
-/// Queue every room's walls as sorted pieces, vertical runs split into
-/// [`WALL_SEG_H`]-row segments: the long-object case [`crate::cutaway::order`]
-/// documents.
+/// Queue every room wall the layout cut ([`crate::layout::wall_pieces`]) as
+/// sorted pieces, a vertical run split into [`WALL_SEG_H`]-row segments: the
+/// long-object case [`crate::cutaway::order`] documents. A segment never sorts
+/// south of its wall's own sort row, where a stitch into a crossing wall would
+/// carry it over that wall.
 fn wall_segments(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
-    let rooms = layout
-        .meeting_rooms
-        .iter()
-        .map(|r| r.bounds)
-        .chain(layout.pantry.iter().map(|p| p.bounds));
-    for b in rooms {
-        if b.width < ROOM_WALL_PX || b.height < ROOM_WALL_PX {
-            continue;
-        }
-        let mut push = |x: u16, y: u16, w: u16, h: u16| {
-            order.push((
-                Span::new(x, y, w, h, 0),
-                PieceKind::WallSeg {
-                    at: crate::layout::Point { x, y },
-                    w,
-                    h,
-                },
-            ));
-        };
-        let south = b.y + b.height - ROOM_WALL_PX;
-        push(b.x, b.y, b.width, ROOM_WALL_PX);
-        push(b.x, south, b.width, ROOM_WALL_PX);
-        for side_x in [b.x, b.x + b.width - ROOM_WALL_PX] {
-            let mut y = b.y;
-            while y < b.y + b.height {
-                let h = WALL_SEG_H.min(b.y + b.height - y);
-                push(side_x, y, ROOM_WALL_PX, h);
-                y += h;
+    use crate::layout::WallPiece;
+    let mut push = |x: u16, y: u16, w: u16, h: u16, depth: u16, jambs: (bool, bool)| {
+        order.push((
+            Span::new(x, y, w, h, 0).with_depth(depth),
+            PieceKind::WallSeg {
+                at: crate::layout::Point { x, y },
+                w,
+                h,
+                jambs,
+            },
+        ));
+    };
+    for piece in crate::layout::wall_pieces(&layout.room_walls, &layout.doorways, layout.top_margin)
+    {
+        let (at, size) = piece.visual();
+        match piece {
+            WallPiece::Horizontal {
+                jamb_west,
+                jamb_east,
+                ..
+            } => push(
+                at.x,
+                at.y,
+                size.w,
+                size.h,
+                piece.sort_row(),
+                (jamb_west, jamb_east),
+            ),
+            WallPiece::Vertical {
+                jamb_north,
+                jamb_south,
+                ..
+            } => {
+                let end = at.y + size.h;
+                let mut y = at.y;
+                while y < end {
+                    let h = WALL_SEG_H.min(end - y);
+                    let (first, last) = (y == at.y, y + h == end);
+                    let depth = (y + h - 1).min(piece.sort_row());
+                    push(
+                        at.x,
+                        y,
+                        size.w,
+                        h,
+                        depth,
+                        (first && jamb_north, last && jamb_south),
+                    );
+                    y += h;
+                }
             }
         }
     }
 }
 
-/// One wall segment. A horizontal run gets the top-lit [`slab`] the procedural
-/// solids here carry; a vertical one is seen edge-on, so it is a flat fill —
-/// an edge tone on a 1-column strip would read as a highlight, not a material.
+/// How far a door's jamb runs along its wall, in logical units: a post, not a
+/// panel.
+const DOOR_JAMB: u16 = 1;
+
+/// One wall segment, and the jamb posts at the ends a doorway frames. A
+/// horizontal run gets the top-lit [`slab`] the procedural solids here carry; a
+/// vertical one is seen edge-on, so it is a flat fill — an edge tone on a thin
+/// strip would read as a highlight, not a material.
 fn paint_wall_seg(
     at: crate::layout::Point,
-    w: u16,
-    h: u16,
+    (w, h): (u16, u16),
+    (jamb_start, jamb_end): (bool, bool),
     theme: &Theme,
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
     let glass = Ramp::from_base(theme.office.room_wall_trim_light);
     let (x, y) = (scale.to_buffer(at.x), scale.to_buffer(at.y));
+    let (bw, bh) = (scale.to_buffer(w), scale.to_buffer(h));
     if w > h {
-        slab(
-            buf,
-            x,
-            y,
-            scale.to_buffer(w),
-            scale.to_buffer(h),
-            &glass,
-            scale,
-        );
+        slab(buf, x, y, bw, bh, &glass, scale);
     } else {
-        fill(
-            buf,
-            x,
-            y,
-            scale.to_buffer(w),
-            scale.to_buffer(h),
-            glass.base,
-        );
+        fill(buf, x, y, bw, bh, glass.base);
+    }
+    let post = scale.to_buffer(DOOR_JAMB);
+    let jamb = theme.office.room_wall_trim_dark;
+    let horizontal = w > h;
+    for (on, far) in [(jamb_start, false), (jamb_end, true)] {
+        match (on, horizontal) {
+            (false, _) => {}
+            (true, true) => fill(buf, if far { x + bw - post } else { x }, y, post, bh, jamb),
+            (true, false) => fill(buf, x, if far { y + bh - post } else { y }, bw, post, jamb),
+        }
     }
 }
 
@@ -869,6 +925,8 @@ pub(crate) enum PieceKind {
         at: crate::layout::Point,
         w: u16,
         h: u16,
+        /// Whether a doorway frames its west/north end, and its east/south end.
+        jambs: (bool, bool),
     },
     Desk {
         at: crate::layout::Point,
@@ -1102,12 +1160,16 @@ fn push_pantry_counter(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, Piec
     let Some((w, h)) = art_size(pack, sprite) else {
         return;
     };
-    // Centred across the room, one row clear of its north wall; the classic
-    // painter centres it on the Pantry waypoint instead. `paint_prop` takes a
-    // centre.
-    let at = crate::layout::Point {
-        x: pantry.bounds.x + pantry.bounds.width.saturating_sub(w) / 2 + w / 2,
-        y: pantry.bounds.y + ROOM_WALL_PX + 1 + h / 2,
+    // Centred on the Pantry waypoint, where the layout stands it: the walkable
+    // mask, the classic painter and the hover box all read that point, so a
+    // visitor at the counter stands at the counter.
+    let Some(at) = layout
+        .waypoints
+        .iter()
+        .find(|wp| wp.kind == crate::layout::WaypointKind::Pantry)
+        .map(|wp| wp.pos)
+    else {
+        return;
     };
     order.push((
         piece_span(crate::layout::Anchor::Center, at, w, h, 1),
@@ -1333,6 +1395,14 @@ fn dominant_opaque_row(
 /// classic painter's `Anchor::TopLeft` z-sort rather than the centre-pinned
 /// furniture, so centring would hang every board up and west of where it
 /// belongs; and touching no floor, a contact shadow would land up the wall.
+/// Whether a piece of wall decor stands on the floor, by the layout's own
+/// authority: it has a footprint to block.
+fn stands_on_floor(kind: crate::layout::WallDecor) -> bool {
+    crate::layout::furniture_def(kind.furniture())
+        .footprint
+        .is_some()
+}
+
 fn paint_wall_decor(
     pos: crate::layout::Point,
     sprite: &str,
@@ -1446,10 +1516,11 @@ fn label_anchor(
 fn waypoint_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
     use crate::layout::WaypointKind as K;
     match kind {
-        K::PhoneBooth => Some("phone_booth"),
-        K::StandingDesk => Some("standing_desk"),
         K::SnackShelf => Some("snack_shelf"),
-        K::Couch
+        // Pod decor draws these; their waypoint is only where a visitor stands.
+        K::PhoneBooth
+        | K::StandingDesk
+        | K::Couch
         | K::Pantry
         | K::VendingMachine
         | K::Printer
@@ -3324,6 +3395,152 @@ S B B B B B B S
             }
         }
         assert!(checked > 0, "the sizes lay out meeting trios");
+    }
+
+    /// Layouts across the sizes and seeds that place every kind of piece this
+    /// module draws: pods with booths and desks, meeting rooms, a pantry.
+    fn many_layouts() -> impl Iterator<Item = Layout> {
+        [(160, 96), (200, 120), (240, 144), (320, 180)]
+            .into_iter()
+            .flat_map(|(w, h)| {
+                (0..4).filter_map(move |seed| Layout::compute_with_seed(w, h, None, seed))
+            })
+    }
+
+    /// The front sofa sorts with its sitters, who are pushed after it and land
+    /// on it: on its own south edge its backrest painted over their bodies.
+    #[test]
+    fn a_front_view_sofa_ties_its_sitters() {
+        let pack = pack();
+        let sofa = crate::layout::Point { x: 40, y: 30 };
+        let mut order = Vec::new();
+        push_sofa(&mut order, &pack, sofa, false);
+        let [(
+            span,
+            PieceKind::Prop {
+                mirrored: false, ..
+            },
+        )] = order.as_slice()
+        else {
+            panic!("a front sofa is one prop: {order:?}");
+        };
+        assert_eq!(
+            span.depth,
+            sofa.y + crate::pixel_painter::seat::SEATED_Z_OFF
+        );
+    }
+
+    /// Every wall this module stands is one the layout cut: nothing closes a
+    /// doorway, and every doorway is framed.
+    #[test]
+    fn walls_leave_every_doorway_open_and_frame_it() {
+        let mut checked = 0;
+        for layout in many_layouts() {
+            let mut order = Vec::new();
+            wall_segments(&layout, &mut order);
+            for d in &layout.doorways {
+                let (lo, hi) = if d.start.x == d.end.x {
+                    (d.start.y.min(d.end.y), d.start.y.max(d.end.y))
+                } else {
+                    (d.start.x.min(d.end.x), d.start.x.max(d.end.x))
+                };
+                for v in lo + 1..hi {
+                    let (x, y) = if d.start.x == d.end.x {
+                        (d.start.x, v)
+                    } else {
+                        (v, d.start.y)
+                    };
+                    let blocked = order
+                        .iter()
+                        .any(|(s, _)| (s.x0..=s.x1).contains(&x) && (s.y0..=s.y1).contains(&y));
+                    assert!(
+                        !blocked,
+                        "a wall stands in the doorway at ({x}, {y}): {d:?}"
+                    );
+                }
+                checked += 1;
+            }
+            let jambs = order
+                .iter()
+                .filter_map(|(_, k)| match k {
+                    PieceKind::WallSeg { jambs, .. } => {
+                        Some(u32::from(jambs.0) + u32::from(jambs.1))
+                    }
+                    _ => None,
+                })
+                .sum::<u32>();
+            assert_eq!(
+                jambs as usize,
+                2 * layout.doorways.len(),
+                "two jambs a doorway"
+            );
+        }
+        assert!(checked > 0, "the layouts cut doorways");
+    }
+
+    /// The pantry counter stands where the layout stands it: on the Pantry
+    /// waypoint the mask blocks and the visitor faces.
+    #[test]
+    fn the_pantry_counter_stands_on_its_waypoint() {
+        let pack = pack();
+        let mut checked = 0;
+        for layout in many_layouts() {
+            let Some(wp) = layout
+                .waypoints
+                .iter()
+                .find(|wp| wp.kind == crate::layout::WaypointKind::Pantry)
+            else {
+                continue;
+            };
+            let mut order = Vec::new();
+            push_pantry_counter(&layout, &pack, &mut order);
+            let [(_, PieceKind::Prop { at, .. })] = order.as_slice() else {
+                panic!("one counter: {order:?}");
+            };
+            assert_eq!(*at, wp.pos);
+            checked += 1;
+        }
+        assert!(checked > 0, "the layouts have pantries");
+    }
+
+    /// No piece is queued twice: a phone booth or a standing desk is pod
+    /// decor, and its waypoint is only where a visitor stands.
+    #[test]
+    fn no_piece_is_queued_twice() {
+        let pack = pack();
+        for layout in many_layouts() {
+            let mut order = Vec::new();
+            push_props(&layout, &pack, &mut order);
+            let mut seen = std::collections::HashSet::new();
+            for (span, kind) in &order {
+                assert!(
+                    seen.insert((span.x0, span.y0, span.x1, span.y1, fingerprint(kind))),
+                    "{} queued twice at {span:?}",
+                    kind_name(kind)
+                );
+            }
+        }
+    }
+
+    /// Wall decor that stands on the floor sorts among the floor's pieces, so a
+    /// figure north of a whiteboard between pods goes behind it; decor that
+    /// only hangs on the band is left to the backdrop.
+    #[test]
+    fn floor_standing_wall_decor_sorts_with_the_floor() {
+        let pack = pack();
+        let mut standing = 0;
+        for layout in many_layouts() {
+            let mut order = Vec::new();
+            push_props(&layout, &pack, &mut order);
+            for item in &layout.wall_decor {
+                let queued = order.iter().any(|(_, k)| {
+                    matches!(k, PieceKind::Prop { sprite, .. } if *sprite == item.kind.sprite_name())
+                });
+                assert_eq!(queued, stands_on_floor(item.kind), "{:?}", item.kind);
+                standing += usize::from(queued);
+            }
+        }
+        assert!(standing > 0, "the layouts place floor-standing decor");
     }
 
     /// Splitting the back-view sofa loses and moves nothing: its bands paint

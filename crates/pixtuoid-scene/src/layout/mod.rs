@@ -33,7 +33,7 @@ pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 // Both SHARED with the pixel painter's `enqueue_room_walls_v`, so the blocked
 // ground and the drawn glass meet the band / crossing walls at the same joints
 // and over the same crossing-wall inputs.
-pub(crate) use rooms::walls::{crossing_h_rows, stitch_vertical_wall};
+pub(crate) use rooms::walls::{wall_pieces, WallPiece};
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
 // Painter tests tile walls no `SceneLayout` has.
 #[cfg(test)]
