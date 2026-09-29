@@ -148,6 +148,29 @@ pub struct Lounge {
     pub fish_tank: Option<Point>,
 }
 
+/// The lounge rug's size.
+const LOUNGE_RUG: Size = Size { w: 22, h: 7 };
+/// How far south of the couch centre the lounge rug's centre sits, so it reaches
+/// out in front of the couch.
+const LOUNGE_RUG_DY: u16 = 3;
+
+impl Lounge {
+    /// The rug the couch stands on.
+    pub(crate) fn rug(&self) -> Bounds {
+        let centre = Point {
+            x: self.couch_center.x,
+            y: self.couch_center.y + LOUNGE_RUG_DY,
+        };
+        let tl = anchored_top_left(Anchor::Center, centre, LOUNGE_RUG.w, LOUNGE_RUG.h);
+        Bounds {
+            x: tl.x,
+            y: tl.y,
+            width: LOUNGE_RUG.w,
+            height: LOUNGE_RUG.h,
+        }
+    }
+}
+
 /// The computed office geometry for one floor — quadrant bounds, per-agent
 /// desks, waypoints, decor, walls, and the walkability mask. Built once per
 /// `(buf_w, buf_h, max_desks)`.
@@ -465,6 +488,15 @@ impl SceneLayout {
     /// [`Self::meeting_rooms`] index.
     pub fn meeting_room_bounds(&self, room_id: usize) -> Option<Bounds> {
         self.meeting_rooms.get(room_id).map(|r| r.bounds)
+    }
+
+    /// Every rug in the office: one under each meeting trio, then the lounge's.
+    pub(crate) fn rugs(&self) -> impl Iterator<Item = Bounds> + '_ {
+        self.meeting_rooms
+            .iter()
+            .filter_map(|r| r.trio.as_ref())
+            .map(|t| t.rug(self.buf_h))
+            .chain(self.lounge.as_ref().map(Lounge::rug))
     }
 
     /// Couch sprite centre (middle of the 3 seats) — `Some` iff the lounge

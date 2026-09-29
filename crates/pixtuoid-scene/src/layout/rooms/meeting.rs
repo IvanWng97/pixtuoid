@@ -1,6 +1,8 @@
 //! The meeting room aggregate: bounds + the sofa/table trio.
 
-use crate::layout::{furniture_def, pct, Bounds, Furniture, Point, OBSTACLE_PAD_PX};
+use crate::layout::{
+    anchored_top_left, furniture_def, pct, Anchor, Bounds, Furniture, Point, OBSTACLE_PAD_PX,
+};
 
 /// One meeting room's furniture trio. The fixed-size array encodes the
 /// invariant that a fitted room produces exactly 2 sofas + 1 table.
@@ -10,6 +12,36 @@ pub struct MeetingTrio {
     pub sofas: [Point; 2],
     /// The table centre, midway between the two sofas (pixel-space).
     pub table: Point,
+}
+
+/// A meeting rug's width.
+const MEETING_RUG_W: u16 = 18;
+/// How far a meeting rug runs past the two sofa centres, both ends together.
+const MEETING_RUG_OVERHANG: u16 = 8;
+
+impl MeetingTrio {
+    /// The rug under this trio's table, reaching from sofa to sofa but no
+    /// further than the table's distance to the office's south edge (plus the
+    /// same overhang), in a `buf_h`-tall office.
+    pub(crate) fn rug(&self, buf_h: u16) -> Bounds {
+        let [north, south] = self.sofas;
+        let h = south
+            .y
+            .saturating_sub(north.y)
+            .saturating_add(MEETING_RUG_OVERHANG)
+            .min(
+                buf_h
+                    .saturating_sub(self.table.y)
+                    .saturating_add(MEETING_RUG_OVERHANG),
+            );
+        let tl = anchored_top_left(Anchor::Center, self.table, MEETING_RUG_W, h);
+        Bounds {
+            x: tl.x,
+            y: tl.y,
+            width: MEETING_RUG_W,
+            height: h,
+        }
+    }
 }
 
 /// A meeting room: its bounds plus the trio it hosts. Its index in
@@ -147,5 +179,30 @@ impl MeetingRoom {
                 .map_or(0, |s| s.w);
             t.sofas[0].x + sofa_fp_w / 2 + OBSTACLE_PAD_PX
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_meeting_rug_reaches_no_further_than_the_table_is_from_the_south_edge() {
+        let x = 40;
+        let trio = MeetingTrio {
+            sofas: [Point { x, y: 50 }, Point { x, y: 90 }],
+            table: Point { x, y: 70 },
+        };
+        let buf_h = 96;
+        assert_eq!(
+            trio.rug(buf_h).height,
+            buf_h - trio.table.y + MEETING_RUG_OVERHANG,
+            "held to the table's distance from the office's south edge"
+        );
+        assert_eq!(
+            trio.rug(200).height,
+            90 - 50 + MEETING_RUG_OVERHANG,
+            "sofa to sofa where the office allows"
+        );
     }
 }

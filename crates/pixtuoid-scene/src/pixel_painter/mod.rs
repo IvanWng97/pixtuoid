@@ -144,7 +144,7 @@ fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
 pub(crate) use background::BaseFillCache;
 pub(crate) use dense::densest_frame;
 #[cfg(test)]
-pub(crate) use furniture::COOLER_WATER;
+pub(crate) use furniture::{paint_area_rug, COOLER_WATER};
 // `floor::FloorSession::observe` is the public entry to the sim tick; the step
 // itself and its per-call borrow-set stay crate-internal.
 pub(crate) use sim::{sim_step, SimStores};
@@ -1094,20 +1094,10 @@ fn enqueue_gateway_mascots<'a>(
 /// breaks the tie in its sitter's favor.
 fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
     for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
-        let table = trio.table;
-        let [ts, bs] = trio.sofas;
-        let rug_w = 18u16;
-        let rug_h =
-            bs.y.saturating_sub(ts.y)
-                .saturating_add(8)
-                .min(layout.buf_h.saturating_sub(table.y).saturating_add(8));
+        let rug = trio.rug(layout.buf_h);
         drawables.push(Drawable {
-            anchor_y: table.y.saturating_sub(rug_h / 2),
-            kind: DrawableKind::AreaRug {
-                pos: table,
-                width: rug_w,
-                height: rug_h,
-            },
+            anchor_y: rug.y,
+            kind: DrawableKind::AreaRug(rug),
         });
     }
     for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
@@ -1164,17 +1154,11 @@ fn enqueue_lounge_pantry_appliances<'a>(
 
     // Pushed before the character loop so the y-sort tie-break keeps the couch
     // behind its sitters; the rug anchors north of it so the couch sits on it.
-    if let Some(center) = layout.couch_sprite_center() {
+    if let Some(lounge) = layout.lounge {
+        let center = lounge.couch_center;
         drawables.push(Drawable {
             anchor_y: center.y.saturating_sub(2),
-            kind: DrawableKind::AreaRug {
-                pos: Point {
-                    x: center.x,
-                    y: center.y + 3,
-                },
-                width: 22,
-                height: 7,
-            },
+            kind: DrawableKind::AreaRug(lounge.rug()),
         });
         drawables.push(Drawable {
             anchor_y: z_sort_row(

@@ -30,6 +30,24 @@ const FLOOR_LIT_NUMER: u16 = 1;
 /// Denominator of [`FLOOR_LIT_NUMER`].
 const FLOOR_LIT_DENOM: u16 = 3;
 
+/// A carpet tile's side, in logical units: seams on this grid are what turn a
+/// flat tone into a floor you could walk on.
+const FLOOR_TILE: u16 = 4;
+/// How many ramp stops a seam sits under the floor it crosses.
+const SEAM_LEVEL: i8 = -1;
+/// The smallest tile, in art pixels, that its seams leave reading as floor;
+/// seams on a smaller one turn the floor to plaid.
+const MIN_SEAMED_TILE: u16 = 8;
+
+/// A rug's lattice pitch, in art pixels: diamonds this far apart.
+const RUG_LATTICE: u16 = 6;
+/// How many ramp stops the lattice sits under the rug's field: a pattern woven
+/// in, not printed on.
+const RUG_MOTIF_LEVEL: i8 = -1;
+/// How many ramp stops a rug's fringe sits over its trim: loose threads catch
+/// the light the bound edge doesn't.
+const RUG_FRINGE_LEVEL: i8 = 2;
+
 /// Narrowest skyline building, in logical units.
 const SKYLINE_MIN_W: u16 = 3;
 /// How much wider than [`SKYLINE_MIN_W`] a building may be.
@@ -86,8 +104,8 @@ pub fn render_cutaway(
     list.labels().collect()
 }
 
-/// Everything under the floor-standing pieces: floor, north wall band and the
-/// decor hung on it. None of it moves within a layout, theme, pack and scale.
+/// Everything under the floor-standing pieces: floor, its rugs, north wall band
+/// and the decor hung on it. None of it moves within a layout, theme, pack and scale.
 fn paint_backdrop(
     layout: &Layout,
     pack: &Pack,
@@ -95,7 +113,12 @@ fn paint_backdrop(
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    paint_floor(layout, theme, Pen::for_pack(scale, pack), buf);
+    let pen = Pen::for_pack(scale, pack);
+    paint_floor(layout, theme, pen, buf);
+    // Rugs lie flat on the floor, under everything that stands on it.
+    for rug in layout.rugs() {
+        paint_rug(rug, theme, pen, buf);
+    }
     paint_wall(layout, theme, scale, buf);
     // Wall decor hangs on the north band, so it is NOT floor-sorted: it paints
     // with the wall, before anything standing on the floor can occlude it.
@@ -940,13 +963,11 @@ const WINDOW_INSET_DENOM: u16 = 4;
 
 /// Paint the north wall band: wall, glass, skyline and sill.
 ///
-/// Its height is the layout's own derivation, not a re-guess — the band ends
-/// `WALL_BAND_TO_TOP_MARGIN` above `top_margin`, and the rows between are floor
-/// the agents walk on, so a band drawn to `top_margin` would paint over them.
+/// Its height is [`Layout::wall_band_h`], not `top_margin`: the rows between
+/// are floor the agents walk on, so a band drawn to `top_margin` would paint
+/// over them.
 fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
-    let band_h = layout
-        .top_margin
-        .saturating_sub(crate::layout::WALL_BAND_TO_TOP_MARGIN);
+    let band_h = layout.wall_band_h();
     if band_h == 0 {
         return;
     }
@@ -1083,8 +1104,9 @@ fn push_pantry_counter(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, Piec
     ));
 }
 
-/// The carpet, lit near the windows and falling off south, on the art grid:
-/// every edge and dither step lands on an art pixel, whatever the scale.
+/// The carpet, lit near the windows, falling off south and laid in tiles, on
+/// the art grid: every edge, dither step and seam lands on an art pixel,
+/// whatever the scale.
 fn paint_floor(layout: &Layout, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
     let lit = theme.surface.carpet_light;
     let base = theme.surface.carpet_base;
@@ -1100,10 +1122,10 @@ fn paint_floor(layout: &Layout, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
     };
     pen.fill(buf, band(0, h.0), base);
 
-    // Anchored at `top_margin`, where the layout says the floor begins, not
-    // buffer row 0: the wall band paints over the top of the buffer, so a lit
-    // zone anchored there would start behind it.
-    let floor_top = pen.art(layout.top_margin).0;
+    // Anchored at the wall's foot, where the floor begins, not buffer row 0: the
+    // wall band paints over the top of the buffer, so a lit zone anchored there
+    // would start behind it.
+    let floor_top = pen.art(layout.wall_band_h()).0;
     let floor_h = h.0.saturating_sub(floor_top);
 
     // The lit share of the floor: its first half solid, dithering to base by its
@@ -1118,6 +1140,73 @@ fn paint_floor(layout: &Layout, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
         lit,
     );
     pen.dither_band(buf, ArtPx(h.0.saturating_sub(lit_h / 2)), h, dark, base);
+
+    let tile = pen.art(FLOOR_TILE);
+    if tile.0 >= MIN_SEAMED_TILE {
+        pen.shade_grid(buf, band(floor_top, floor_h), tile, SEAM_LEVEL);
+    }
+}
+
+/// A rug on the art grid: the classic's trim, accent line and field, then a
+/// woven lattice and fringe at its short ends wherever the density has room.
+fn paint_rug(rug: crate::layout::Bounds, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
+    let f = &theme.furniture;
+    let d = pen.art(1).0;
+    let (x0, y0, w, h) = (
+        pen.art(rug.x).0,
+        pen.art(rug.y).0,
+        pen.art(rug.width).0,
+        pen.art(rug.height).0,
+    );
+    let rect = |x: u16, y: u16, w: u16, h: u16| ArtRect {
+        x: ArtPx(x),
+        y: ArtPx(y),
+        w: ArtPx(w),
+        h: ArtPx(h),
+    };
+    let inset = |i: u16| {
+        rect(
+            x0 + i,
+            y0 + i,
+            w.saturating_sub(2 * i),
+            h.saturating_sub(2 * i),
+        )
+    };
+    // Half a logical unit wide, so at 1x this is the classic's rug, cell for cell.
+    let trim = (d / 2).max(1);
+    pen.fill(buf, inset(0), f.rug_trim);
+    pen.fill(buf, inset(trim), f.rug_accent);
+    pen.fill(buf, inset(trim + 1), f.rug_field);
+    if d == 1 {
+        return;
+    }
+
+    // Mirrored about the rug's centre column, so it sits square in the field.
+    let motif = f.rug_field.ramp(RUG_MOTIF_LEVEL);
+    let lattice = inset(trim + 3);
+    for y in lattice.y.0..lattice.y.0 + lattice.h.0 {
+        for x in lattice.x.0..lattice.x.0 + lattice.w.0 {
+            let (dx, dy) = (x - x0, y - y0);
+            if (dx + dy).is_multiple_of(RUG_LATTICE)
+                || (w - 1 - dx + dy).is_multiple_of(RUG_LATTICE)
+            {
+                pen.fill(buf, rect(x, y, 1, 1), motif);
+            }
+        }
+    }
+    // A tassel every other pixel along each short end, as long as the trim.
+    let tassel = f.rug_trim.ramp(RUG_FRINGE_LEVEL);
+    if w >= h {
+        for y in (y0 + 1..y0 + h - 1).step_by(2) {
+            pen.fill(buf, rect(x0.saturating_sub(trim), y, trim, 1), tassel);
+            pen.fill(buf, rect(x0 + w, y, trim, 1), tassel);
+        }
+    } else {
+        for x in (x0 + 1..x0 + w - 1).step_by(2) {
+            pen.fill(buf, rect(x, y0.saturating_sub(trim), 1, trim), tassel);
+            pen.fill(buf, rect(x, y0 + h, 1, trim), tassel);
+        }
+    }
 }
 
 fn paint_desk(
@@ -2394,9 +2483,7 @@ mod tests {
     #[test]
     fn the_wall_band_stops_where_the_layout_says_the_floor_begins() {
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
-        let band_h = layout
-            .top_margin
-            .saturating_sub(crate::layout::WALL_BAND_TO_TOP_MARGIN);
+        let band_h = layout.wall_band_h();
         assert!(band_h > 0, "a laid-out office has a wall band");
         assert!(
             band_h < layout.top_margin,
@@ -2404,6 +2491,132 @@ mod tests {
              band {band_h}, top_margin {}",
             layout.top_margin
         );
+    }
+
+    /// The floor is tiled on its own grid, from the wall's foot: a seam sits
+    /// under the tile beside it, on the lit floor and the dark alike.
+    #[test]
+    fn the_floor_is_tiled_from_the_wall_foot() {
+        let layout = Layout::compute_with_seed(160, 110, None, 0).expect("lays out");
+        assert_ne!(
+            layout.wall_band_h() % FLOOR_TILE,
+            0,
+            "a wall foot off the buffer's own grid, or one anchored at row 0 passes too"
+        );
+        let s = 8;
+        let (pen, buf) = floor(&layout, s, 4);
+        let luma = |x: u16, y: u16| {
+            let c = buf.get(x, y);
+            u32::from(c.r) + u32::from(c.g) + u32::from(c.b)
+        };
+        let k = s / 4;
+        let tile = pen.art(FLOOR_TILE).0 * k;
+        let floor_top = layout.wall_band_h() * s;
+        let seam = tile * 3;
+        let mid = seam + tile / 2;
+        assert!(
+            luma(mid, floor_top) < luma(mid, floor_top + k),
+            "the first seam runs along the wall's foot, one art pixel deep"
+        );
+        for y in [floor_top + tile + tile / 2, buf.height() - tile / 2] {
+            assert!(
+                luma(seam, y) < luma(seam + tile / 2, y),
+                "row {y}: the seam at column {seam} must sit under its tile"
+            );
+        }
+    }
+
+    /// At 1x a seam every tile would be a quarter of the floor, so there are
+    /// none: the lit zone is one flat tone.
+    #[test]
+    fn a_1x_floor_has_no_seams() {
+        let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let (_, buf) = floor(&layout, 1, 1);
+        let y = layout.wall_band_h() + 1;
+        assert!(
+            (0..buf.width()).all(|x| buf.get(x, y) == crate::theme::NORMAL.surface.carpet_light),
+            "row {y} of the lit zone is unbroken"
+        );
+    }
+
+    /// The floor alone at scale `s`, drawn from art at density `d`, in the
+    /// normal theme.
+    fn floor(layout: &Layout, s: u16, d: u16) -> (Pen, RgbBuffer) {
+        let scale = RenderScale::new(s).expect("nonzero");
+        let pen = Pen::new(scale, d).expect("d divides s");
+        let mut buf = RgbBuffer::filled(
+            scale.to_buffer(layout.buf_w),
+            scale.to_buffer(layout.buf_h),
+            pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
+        );
+        paint_floor(layout, &crate::theme::NORMAL, pen, &mut buf);
+        (pen, buf)
+    }
+
+    /// Every rug in the office lies on the floor, the lounge's among them.
+    #[test]
+    fn every_rug_lies_on_the_floor() {
+        let pack = pack();
+        let theme = &crate::theme::NORMAL;
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let f = &theme.furniture;
+        let (mut trios, mut lounges) = (0, 0);
+        for (w, h) in [(160, 96), (200, 120), (240, 144), (480, 270)] {
+            for seed in 0..3 {
+                let layout = Layout::compute_with_seed(w, h, None, seed).expect("lays out");
+                trios += layout
+                    .meeting_rooms
+                    .iter()
+                    .filter(|r| r.trio.is_some())
+                    .count();
+                lounges += usize::from(layout.lounge.is_some());
+                let mut buf = RgbBuffer::filled(
+                    scale.to_buffer(layout.buf_w),
+                    scale.to_buffer(layout.buf_h),
+                    pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
+                );
+                paint_backdrop(&layout, &pack, theme, scale, &mut buf);
+                for rug in layout.rugs() {
+                    let c = buf.get(
+                        scale.to_buffer(rug.x + rug.width / 2),
+                        scale.to_buffer(rug.y + rug.height / 2),
+                    );
+                    assert!(
+                        c == f.rug_field || c == f.rug_field.ramp(RUG_MOTIF_LEVEL),
+                        "{w}x{h} seed {seed}: the rug at {rug:?} is woven, not floor: {c:?}"
+                    );
+                }
+            }
+        }
+        assert!(
+            trios > 0 && lounges > 0,
+            "the sweep lays meeting rooms and a lounge"
+        );
+    }
+
+    /// At 1x the cutaway's rug is the classic painter's, cell for cell, the
+    /// lounge rug's short side included.
+    #[test]
+    fn a_1x_rug_is_the_classic_rug() {
+        let theme = &crate::theme::NORMAL;
+        let pen = Pen::new(RenderScale::new(1).expect("nonzero"), 1).expect("1 divides 1");
+        for (width, height) in [(18, 24), (22, 7), (3, 3)] {
+            let rug = crate::layout::Bounds {
+                x: 2,
+                y: 2,
+                width,
+                height,
+            };
+            let blank =
+                || RgbBuffer::filled(32, 32, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
+            let (mut cutaway, mut classic) = (blank(), blank());
+            paint_rug(rug, theme, pen, &mut cutaway);
+            crate::pixel_painter::paint_area_rug(&mut classic, rug, theme);
+            assert!(
+                cutaway.as_slice() == classic.as_slice(),
+                "the {width}x{height} rug"
+            );
+        }
     }
 
     /// The bundled pack.

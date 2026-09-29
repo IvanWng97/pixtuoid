@@ -61,9 +61,12 @@ pub struct SurfaceColors {
     pub wall_trim: Rgb,
     /// Carpet base fill.
     pub carpet_base: Rgb,
-    /// Lighter carpet speckle.
+    /// The carpet toward the light: a fleck in the classic painter, the lit
+    /// floor by the windows in the cutaway, so it must read both as a fleck and
+    /// as a field.
     pub carpet_light: Rgb,
-    /// Darker carpet speckle.
+    /// The carpet in shadow: a fleck in the classic painter, the far floor and
+    /// the contact tone in the cutaway.
     pub carpet_dark: Rgb,
     /// Floor-to-ceiling window frame / mullions.
     pub window_frame: Rgb,
