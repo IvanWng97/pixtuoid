@@ -292,8 +292,8 @@ fn disc_clips_above_the_glass_at_the_arc_apex() {
 
 #[test]
 fn short_window_apex_does_not_panic() {
-    // top_wall_h=10 shrinks `window_h`/`glass_h` to their floor while the apex
-    // disc's `cy` is solidly negative.
+    // top_wall_h=10 leaves a short window while the apex disc's `cy` is solidly
+    // negative.
     let _ = render_office_at(12, Weather::Clear, 96, 10);
 }
 
