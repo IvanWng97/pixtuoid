@@ -1738,6 +1738,9 @@ fn every_hover_size_is_its_painted_sprite_size() {
         def(Furniture::MeetingSofaBody, "meeting_sofa_north"),
         def(Furniture::SnackShelf, "snack_shelf"),
         def(Furniture::FloorLamp, "floor_lamp"),
+        def(Furniture::VendingMachine, "vending_machine"),
+        def(Furniture::Printer, "printer"),
+        def(Furniture::MeetingTable, "meeting_table"),
         (
             "ELEVATOR".into(),
             Size {
@@ -3747,86 +3750,66 @@ fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
     );
 }
 
-#[test]
-fn busy_printer_ejects_a_page_and_idle_printer_stays_still() {
+/// Paint the appliance `sprite` at `ms` past the epoch, `busy` or not.
+fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
     let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
         .expect("pack");
     let mut cache = FrameCache::new();
-    let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let pos = Point { x: 30, y: 20 };
-    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(600); // mid-eject
-    let bg = Rgb { r: 1, g: 2, b: 3 };
-    let mut render = |busy: bool| {
-        let mut buf = RgbBuffer::filled(60, 40, bg);
-        let d = Drawable {
-            anchor_y: pos.y + 2,
-            kind: DrawableKind::Printer { pos, busy },
-        };
-        paint_drawable(
-            &d,
-            &mut super::drawable::DrawableCtx {
-                buf: &mut buf,
-                pack: &pack,
-                cache: &mut cache,
-                now,
-                theme,
-            },
-        );
-        buf
+    let mut buf = RgbBuffer::filled(60, 40, Rgb { r: 1, g: 2, b: 3 });
+    let d = Drawable {
+        anchor_y: 23,
+        kind: DrawableKind::Appliance {
+            pos: Point { x: 30, y: 20 },
+            sprite,
+            busy,
+        },
     };
-    let busy = render(true);
-    let idle = render(false);
-    let paper = theme.appliance.printer_paper;
-    let below = (1..=3u16).any(|dx| busy.get(pos.x - 2 + dx, pos.y + 2) == paper);
-    assert!(below, "busy printer shows paper emerging below the tray");
-    assert!(
-        (1..=3u16).all(|dx| idle.get(pos.x - 2 + dx, pos.y + 2) == bg),
-        "idle printer paints nothing below the tray"
+    paint_drawable(
+        &d,
+        &mut super::drawable::DrawableCtx {
+            buf: &mut buf,
+            pack: &pack,
+            cache: &mut cache,
+            now: SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms),
+            theme: crate::theme::theme_by_name("normal").expect("theme"),
+        },
     );
+    buf
 }
 
+/// An idle appliance holds still; a busy one plays its loop, and a vend drops
+/// one of the machine's drinks where the idle machine shows none.
 #[test]
-fn busy_vending_machine_drops_a_can_and_idle_stays_stocked() {
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("pack");
-    let mut cache = FrameCache::new();
-    let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let pos = Point { x: 30, y: 20 };
-    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(1_200); // mid-drop
-    let bg = Rgb { r: 1, g: 2, b: 3 };
-    let mut render = |busy: bool| {
-        let mut buf = RgbBuffer::filled(60, 40, bg);
-        let d = Drawable {
-            anchor_y: pos.y + 3,
-            kind: DrawableKind::VendingMachine { pos, busy },
-        };
-        paint_drawable(
-            &d,
-            &mut super::drawable::DrawableCtx {
-                buf: &mut buf,
-                pack: &pack,
-                cache: &mut cache,
-                now,
-                theme,
-            },
+fn a_busy_appliance_animates_and_an_idle_one_holds_still() {
+    let drinks = crate::theme::theme_by_name("normal")
+        .expect("theme")
+        .appliance
+        .vending_drinks;
+    for sprite in ["vending_machine", "printer"] {
+        let rest = appliance_at(sprite, false, 0);
+        let sweep = (0..40).map(|i| i * 150);
+        assert!(
+            sweep
+                .clone()
+                .all(|ms| appliance_at(sprite, false, ms).as_slice() == rest.as_slice()),
+            "{sprite}: an idle appliance moves"
         );
-        buf
-    };
-    let busy = render(true);
-    let idle = render(false);
-    let (sdx, sdy) = super::drawable::VENDING_PICKUP_SLOT;
-    let slot = (pos.x.saturating_sub(2) + sdx, pos.y.saturating_sub(3) + sdy);
+        assert!(
+            sweep
+                .map(|ms| appliance_at(sprite, true, ms))
+                .any(|b| b.as_slice() != rest.as_slice()),
+            "{sprite}: a busy appliance never leaves its rest frame"
+        );
+    }
+    let rest = appliance_at("vending_machine", false, 0);
+    let vend = appliance_at("vending_machine", true, 1_200);
+    let dropped = (0..rest.height())
+        .flat_map(|y| (0..rest.width()).map(move |x| (x, y)))
+        .filter(|&(x, y)| rest.get(x, y) != vend.get(x, y))
+        .any(|(x, y)| drinks.contains(&vend.get(x, y)));
     assert!(
-        theme
-            .appliance
-            .vending_drinks
-            .contains(&busy.get(slot.0, slot.1)),
-        "busy vending drops a can into the slot"
-    );
-    assert_eq!(
-        idle.get(slot.0, slot.1),
-        theme.appliance.vending_trim,
-        "idle vending keeps the plain slot"
+        dropped,
+        "mid-vend, a drink lands where the idle machine shows none"
     );
 }
 
@@ -3927,7 +3910,11 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
     let busy_flag = drawables
         .iter()
         .find_map(|d| match d.kind {
-            DrawableKind::Printer { busy, .. } => Some(busy),
+            DrawableKind::Appliance {
+                sprite: "printer",
+                busy,
+                ..
+            } => Some(busy),
             _ => None,
         })
         .expect("printer drawable enqueued");

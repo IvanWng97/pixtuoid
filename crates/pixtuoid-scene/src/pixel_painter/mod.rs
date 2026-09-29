@@ -91,7 +91,7 @@ pub use anchors::seated_anchor_facing;
 #[cfg(test)]
 pub(crate) use drawable::DESK_BEZEL_RAISE;
 pub(crate) use drawable::{desk_art_top, desk_sprite_name, DESK_CHAIR_SPRITE};
-pub(crate) use palette::{SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
+pub(crate) use palette::{appliance_overrides, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
 
 // The ToolKind→glow-hue seam the binary's footer tints tool segments with. The
 // footer paints this hue RAW; the sprite's glow then takes the hour's wash, so
@@ -142,7 +142,7 @@ fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
     })
 }
 pub(crate) use background::BaseFillCache;
-pub(crate) use dense::densest_frame;
+pub(crate) use dense::{densest_frame, DenseFrame};
 #[cfg(test)]
 pub(crate) use furniture::{paint_area_rug, COOLER_WATER};
 // `floor::FloorSession::observe` is the public entry to the sim tick; the step
@@ -772,6 +772,34 @@ pub(super) fn frame_index(anim: &Sprite, idx: usize) -> usize {
     }
 }
 
+/// The pack art a corridor appliance at a `kind` waypoint is drawn from.
+pub(crate) fn appliance_art(kind: crate::layout::WaypointKind) -> Option<&'static str> {
+    use crate::layout::WaypointKind as K;
+    match kind {
+        K::VendingMachine => Some("vending_machine"),
+        K::Printer => Some("printer"),
+        K::Couch
+        | K::Pantry
+        | K::PhoneBooth
+        | K::StandingDesk
+        | K::MeetingSofa
+        | K::MeetingChair
+        | K::Island
+        | K::SnackShelf => None,
+    }
+}
+
+/// The frame of an appliance's `anim` showing at `now`: frame 0 at rest, else
+/// its busy loop — the frames after 0, one each of the art's own `frame_ms`.
+pub(crate) fn appliance_frame(anim: &Sprite, busy: bool, now: std::time::SystemTime) -> usize {
+    let loop_len = anim.frames().len().saturating_sub(1);
+    if !busy || loop_len == 0 {
+        return 0;
+    }
+    let step = crate::anim::epoch_ms(now) / u64::from(anim.frame_ms().max(1));
+    1 + usize::try_from(step % loop_len as u64).unwrap_or(0)
+}
+
 /// One chair per NORTH-facing home desk, occupied or not. Keyed to TIE with its
 /// occupant, so the stable sort paints it over them.
 fn enqueue_desk_chairs<'a>(layout: &Layout, pack: &Pack, drawables: &mut Vec<Drawable<'a>>) {
@@ -1110,17 +1138,17 @@ fn enqueue_lounge_pantry_appliances<'a>(
                 });
             }
             WaypointKind::PhoneBooth | WaypointKind::StandingDesk => {}
-            WaypointKind::VendingMachine => {
-                drawables.push(Drawable {
-                    anchor_y: z_sort_row(Anchor::Center, wp.pos, visual_h),
-                    kind: DrawableKind::VendingMachine { pos: wp.pos, busy },
-                });
-            }
-            WaypointKind::Printer => {
-                drawables.push(Drawable {
-                    anchor_y: z_sort_row(Anchor::Center, wp.pos, visual_h),
-                    kind: DrawableKind::Printer { pos: wp.pos, busy },
-                });
+            WaypointKind::VendingMachine | WaypointKind::Printer => {
+                if let Some(sprite) = appliance_art(wp.kind) {
+                    drawables.push(Drawable {
+                        anchor_y: z_sort_row(Anchor::Center, wp.pos, visual_h),
+                        kind: DrawableKind::Appliance {
+                            pos: wp.pos,
+                            sprite,
+                            busy,
+                        },
+                    });
+                }
             }
             WaypointKind::SnackShelf => {
                 drawables.push(Drawable {

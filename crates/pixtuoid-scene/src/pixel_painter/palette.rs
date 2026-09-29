@@ -343,6 +343,29 @@ pub(crate) const SCREEN_GLASS_KEY: char = 'j';
 /// The pack key of the dim content an idle screen shows on its glass.
 pub(crate) const SCREEN_TEXT_KEY: char = 'J';
 
+/// The pack keys a corridor appliance's art is drawn in, each with the
+/// [`ApplianceColors`](crate::theme::ApplianceColors) role it takes: the art
+/// owns the form, the theme the palette. The pack's [ramps] of these keys are
+/// the shading, re-derived by the recolour.
+pub(crate) fn appliance_overrides(a: &crate::theme::ApplianceColors) -> [(char, Pixel); 13] {
+    let [d0, d1, d2, d3] = a.vending_drinks;
+    [
+        ('Б', Some(a.vending_body)),
+        ('П', Some(a.vending_panel)),
+        ('Ч', Some(d0)),
+        ('Ш', Some(d1)),
+        ('Щ', Some(d2)),
+        ('Э', Some(d3)),
+        ('Ф', Some(a.vending_trim)),
+        ('Ы', Some(a.vending_dark)),
+        ('Ю', Some(a.printer_body)),
+        ('Я', Some(a.printer_top)),
+        ('Ё', Some(a.printer_glass)),
+        ('Й', Some(a.printer_paper)),
+        ('Ц', Some(a.printer_tray)),
+    ]
+}
+
 /// One agent's colors, as the palette overrides a character frame is
 /// recolored with. `Some(glow_tint)` blends the skin toward the monitor glow so
 /// a seated agent reads as lit by their screen.

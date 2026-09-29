@@ -421,7 +421,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
         } => (at, sprite, mirrored).hash(&mut h),
         PieceKind::PropBand { at, sprite, rows } => (at, sprite, rows).hash(&mut h),
         PieceKind::Table { at } => at.hash(&mut h),
-        PieceKind::Appliance { at, kind } => (at, kind).hash(&mut h),
+        PieceKind::Appliance { at, sprite, frame } => (at, sprite, frame).hash(&mut h),
         // The label is the caller's, and the body follows from `at` and `key`.
         PieceKind::Character {
             figure:
@@ -455,7 +455,7 @@ fn collect_pieces(
     push_hung_decor(layout, pack, &mut order);
     push_desks(frame, office, &mut order);
     push_props(layout, pack, &mut order);
-    push_appliances(layout, &mut order);
+    push_appliances(layout, frame, pack, moment.now, &mut order);
     push_meeting_trios(layout, pack, &mut order);
     let carried = push_characters(frame, office, moment.now, &mut order);
     push_chairs(layout, pack, &carried, &mut order);
@@ -494,8 +494,10 @@ fn paint_piece(
         PieceKind::PropBand { at, sprite, rows } => {
             paint_prop_band(at, sprite, rows, pack, scale, buf);
         }
-        PieceKind::Table { at } => paint_table(at, theme, scale, buf),
-        PieceKind::Appliance { at, kind } => paint_appliance(at, kind, theme, scale, buf),
+        PieceKind::Table { at } => paint_table(at, pack, scale, buf),
+        PieceKind::Appliance { at, sprite, frame } => {
+            paint_appliance(at, sprite, frame, pack, theme, scale, buf);
+        }
         PieceKind::WallSeg {
             piece,
             rows: (y0, y1),
@@ -549,7 +551,7 @@ fn desk_art(pack: &Pack, facing: crate::layout::Facing) -> Option<&'static str> 
 }
 
 /// The box a desk drawn with `art` at `desk` occupies at `scale`: the art and
-/// the face rows [`desk_face_rows`] derives under it, sorted on the last of
+/// the face rows [`face_rows`] derives under it, sorted on the last of
 /// those. A taller art grows upward from the same bottom row
 /// ([`desk_art_top`](crate::pixel_painter::desk_art_top)), so its depth never moves.
 fn desk_span(
@@ -567,18 +569,19 @@ fn desk_span(
         },
         w,
         h,
-        desk_face_rows(pack, art, scale),
+        face_rows(pack, art, scale),
     );
     Some(span)
 }
 
-/// The rows of front face the cutaway derives under desk `art` at `scale`.
+/// The rows of front face the cutaway derives under a top-down piece's `art`
+/// at `scale`: a desk's, the meeting table's.
 ///
 /// Only this profile draws a density variant (the classic painter's scale is 1,
 /// where `densest_frame` returns the base), so `@Nx` art is authored for this
 /// profile with its whole front; a derived face under it would read as a plank
 /// on the floor.
-fn desk_face_rows(pack: &Pack, art: &str, scale: RenderScale) -> u16 {
+fn face_rows(pack: &Pack, art: &str, scale: RenderScale) -> u16 {
     match crate::pixel_painter::densest_frame(pack, art, 0, scale) {
         Some(d) if d.density.get() > 1 => 0,
         _ => desk_front_h(),
@@ -763,26 +766,29 @@ fn push_props(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) 
     }
 }
 
-/// Queue the corridor appliances ([`paint_appliance`]).
-fn push_appliances(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
-    for wp in layout.waypoints.iter().filter(|wp| {
-        matches!(
-            wp.kind,
-            crate::layout::WaypointKind::VendingMachine | crate::layout::WaypointKind::Printer
-        )
-    }) {
-        let def = crate::layout::furniture_def(wp.kind.furniture());
+/// Queue the corridor appliances ([`paint_appliance`]), each on the frame it
+/// shows at `now`: its busy loop while someone stands at it.
+fn push_appliances(
+    layout: &Layout,
+    frame: &SimFrame,
+    pack: &Pack,
+    now: std::time::SystemTime,
+    order: &mut Vec<(Span, PieceKind)>,
+) {
+    for (i, wp) in layout.waypoints.iter().enumerate() {
+        let Some(sprite) = crate::pixel_painter::appliance_art(wp.kind) else {
+            continue;
+        };
+        let (Some(anim), Some((w, h))) = (pack.animation(sprite), art_size(pack, sprite)) else {
+            continue;
+        };
+        let busy = frame.occupied_waypoints.contains(&i);
         order.push((
-            piece_span(
-                crate::layout::Anchor::Center,
-                wp.pos,
-                def.visual.w,
-                def.visual.h,
-                0,
-            ),
+            piece_span(crate::layout::Anchor::Center, wp.pos, w, h, 0),
             PieceKind::Appliance {
                 at: wp.pos,
-                kind: wp.kind,
+                sprite,
+                frame: crate::pixel_painter::appliance_frame(anim, busy, now),
             },
         ));
     }
@@ -1054,9 +1060,12 @@ pub(crate) enum PieceKind {
     Table {
         at: crate::layout::Point,
     },
+    /// A corridor appliance's art ([`crate::pixel_painter::appliance_art`]) on
+    /// `frame`, in the theme's appliance colours.
     Appliance {
         at: crate::layout::Point,
-        kind: crate::layout::WaypointKind,
+        sprite: &'static str,
+        frame: usize,
     },
     Character {
         figure: Figure,
@@ -1107,6 +1116,9 @@ fn piece_span(
     let tl = crate::layout::anchored_top_left(anchor, pos, w, h);
     Span::new(tl.x, tl.y, w, h, below)
 }
+
+/// The meeting table's pack art.
+const MEETING_TABLE: &str = "meeting_table";
 
 /// Frame 0's LOGICAL size: the size the sort space lays a static piece out in,
 /// whichever density it is drawn from. An animated figure sizes from the frame
@@ -1451,31 +1463,47 @@ fn paint_desk(
         None => desk.frame,
     };
     blit_frame_scaled(art, x, top_y, desk.blit_at, buf);
+    paint_derived_face(
+        &desk,
+        (x, top_y),
+        face_rows(pack, art_name, scale),
+        scale,
+        buf,
+    );
+}
 
+/// `rows` of front face under `art` drawn at `top_left`, in the material of its
+/// bottom row ([`dominant_opaque_row`]).
+fn paint_derived_face(
+    art: &crate::pixel_painter::DenseFrame<'_>,
+    top_left: (u16, u16),
+    rows: u16,
+    scale: RenderScale,
+    buf: &mut RgbBuffer,
+) {
+    if rows == 0 {
+        return;
+    }
+    let Some(material) = dominant_opaque_row(art.frame, art.frame.height().saturating_sub(1))
+    else {
+        return;
+    };
     // The drawn size, from the logical size: variant art blits at `blit_at`, so
-    // its own pixel size times the scale would drop a base's face a whole desk
+    // its own pixel size times the scale would drop a base's face a whole piece
     // low.
     let (drawn_w, drawn_h) = (
-        scale.to_buffer(desk.logical.0),
-        scale.to_buffer(desk.logical.1),
+        scale.to_buffer(art.logical.0),
+        scale.to_buffer(art.logical.1),
     );
-    let base_y = top_y + drawn_h;
-    let face_h = scale.to_buffer(desk_face_rows(pack, art_name, scale));
-    if face_h > 0 {
-        let Some(material) = dominant_opaque_row(desk.frame, desk.frame.height().saturating_sub(1))
-        else {
-            return;
-        };
-        slab(
-            buf,
-            x,
-            base_y,
-            drawn_w,
-            face_h,
-            &Ramp::from_base(material),
-            scale,
-        );
-    }
+    slab(
+        buf,
+        top_left.0,
+        top_left.1 + drawn_h,
+        drawn_w,
+        scale.to_buffer(rows),
+        &Ramp::from_base(material),
+        scale,
+    );
 }
 
 /// The desk art with its screen lit in `glow`: the glass takes a dark step of
@@ -1647,76 +1675,57 @@ fn waypoint_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
     }
 }
 
-/// The meeting table — a slab, because the classic painter draws it
-/// procedurally too and there is no sprite to reuse.
-fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
-    let ramp = Ramp::from_base(theme.furniture.wood_top);
-    let crate::layout::Size { w, h } =
-        crate::layout::furniture_def(crate::layout::Furniture::MeetingTable).visual;
-    let crate::layout::Point { x, y } =
-        crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
-    slab(
-        buf,
-        scale.to_buffer(x),
-        scale.to_buffer(y),
-        scale.to_buffer(w),
-        scale.to_buffer(h),
-        &ramp,
+/// The meeting table's art, centred on its layout point, over the front face
+/// [`face_rows`] derives under a base-density drawing.
+fn paint_table(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &mut RgbBuffer) {
+    let Some(table) = crate::pixel_painter::densest_frame(pack, MEETING_TABLE, 0, scale) else {
+        return;
+    };
+    let (x, y) = centred_top_left(at, table.logical, scale);
+    blit_frame_scaled(table.frame, x, y, table.blit_at, buf);
+    paint_derived_face(
+        &table,
+        (x, y),
+        face_rows(pack, MEETING_TABLE, scale),
         scale,
-    );
-    // A front face, as the base desk gets one.
-    slab(
         buf,
-        scale.to_buffer(x),
-        scale.to_buffer(y + h),
-        scale.to_buffer(w),
-        scale.to_buffer(desk_front_h()),
-        &Ramp::from_base(theme.furniture.wood_trim),
-        scale,
     );
 }
 
-/// A corridor appliance as a cutaway solid. Vending machine and printer have no
-/// sprite — classic paints them per-pixel — so this gives them a lit body; its
-/// shadow is [`ground_shadow`]'s. Its box is [`furniture_def`](crate::layout::furniture_def)'s
-/// `visual`, the box the classic painter draws it at, not a second set of numbers.
+/// A corridor appliance's `frame`, centred on its layout point and recoloured
+/// in the theme's appliance colours
+/// ([`appliance_overrides`](crate::pixel_painter::appliance_overrides)); its
+/// shadow is [`ground_shadow`]'s.
 fn paint_appliance(
     at: crate::layout::Point,
-    kind: crate::layout::WaypointKind,
+    sprite: &str,
+    frame: usize,
+    pack: &Pack,
     theme: &Theme,
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    use crate::layout::WaypointKind as K;
-    let def = crate::layout::furniture_def(kind.furniture());
-    let (body, panel) = match kind {
-        K::Printer => (theme.appliance.printer_body, theme.appliance.printer_glass),
-        _ => (theme.appliance.vending_body, theme.appliance.vending_panel),
+    let Some(art) = crate::pixel_painter::densest_frame(pack, sprite, frame, scale) else {
+        return;
     };
-    let (w, h) = (def.visual.w, def.visual.h);
+    let themed = art
+        .recolorable
+        .recolored(&crate::pixel_painter::appliance_overrides(&theme.appliance));
+    let (x, y) = centred_top_left(at, art.logical, scale);
+    blit_frame_scaled(&themed, x, y, art.blit_at, buf);
+}
+
+/// The buffer top-left of a `logical`-sized piece centred on `at`, for
+/// `blit_frame_scaled`, which takes a top-left: the centring is undone in
+/// logical space before converting, so the piece lands on the layout's grid.
+fn centred_top_left(
+    at: crate::layout::Point,
+    logical: (u16, u16),
+    scale: RenderScale,
+) -> (u16, u16) {
     let crate::layout::Point { x, y } =
-        crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
-    slab(
-        buf,
-        scale.to_buffer(x),
-        scale.to_buffer(y),
-        scale.to_buffer(w),
-        scale.to_buffer(h),
-        &Ramp::from_base(body),
-        scale,
-    );
-    // The lit face — a vending display or a printer's glass — is what stops
-    // these reading as anonymous blocks in a dark corridor.
-    if w > 2 && h > 2 {
-        fill(
-            buf,
-            scale.to_buffer(x + 1),
-            scale.to_buffer(y + 1),
-            scale.to_buffer(w.saturating_sub(2)),
-            scale.to_buffer((h / 2).max(1)),
-            panel,
-        );
-    }
+        crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, logical.0, logical.1);
+    (scale.to_buffer(x), scale.to_buffer(y))
 }
 
 /// Blit a floor-standing prop from the pack, centred on its layout point; its
@@ -1739,18 +1748,8 @@ fn paint_prop(
     } else {
         dense.frame
     };
-    // The layout's point is the piece's CENTRE; `blit_frame_scaled` takes a
-    // top-left, so undo the centring in logical space before converting.
-    let (w, h) = dense.logical;
-    let crate::layout::Point { x, y } =
-        crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
-    blit_frame_scaled(
-        art,
-        scale.to_buffer(x),
-        scale.to_buffer(y),
-        dense.blit_at,
-        buf,
-    );
+    let (x, y) = centred_top_left(at, dense.logical, scale);
+    blit_frame_scaled(art, x, y, dense.blit_at, buf);
 }
 
 /// Blit rows `rows` of a centred prop ([`PieceKind::PropBand`]).
@@ -4196,7 +4195,7 @@ S B B B B B B S
         }
     }
 
-    /// [`desk_face_rows`]' rule, through the real paint.
+    /// [`face_rows`]' rule, through the real paint.
     #[test]
     #[cfg(feature = "density-art")]
     fn only_the_top_down_base_desk_gets_a_derived_front_face() {
