@@ -679,9 +679,9 @@ fn character_frame_takes_a_density_variant_recolored_like_the_base() {
         "typing", 0, &slot, &pack, false, None, scale, &mut cache, now,
     )
     .expect("art");
-    let got = (dense.frame.width(), dense.logical, dense.blit_at.get());
+    let got = (dense.frame.width(), dense.blit_at.get());
     let dense_shirt = dense.frame.get(0, 0).copied().flatten();
-    assert_eq!(got, (2, (1, 1), 2));
+    assert_eq!(got, (2, 2));
 
     let classic = seat::character_frame(
         "typing",
@@ -697,7 +697,7 @@ fn character_frame_takes_a_density_variant_recolored_like_the_base() {
     .expect("art");
     // Same agent, animation and frame through one cache: only the density key
     // keeps the classic request from being served the dense recolor.
-    assert_eq!((classic.frame.width(), classic.logical), (1, (1, 1)));
+    assert_eq!(classic.frame.width(), 1);
     assert_eq!(dense_shirt, classic.frame.get(0, 0).copied().flatten());
     assert_ne!(
         dense_shirt,

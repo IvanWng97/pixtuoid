@@ -5,18 +5,10 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
+use crate::ground::Ellipse;
 use crate::pixel_painter::epoch_ms;
 use crate::pixel_painter::palette::{blend_rgb, BLACK, WHITE};
 use crate::theme::Theme;
-
-/// An axis-aligned ellipse for the radial floor pools (light + shadow).
-#[derive(Clone, Copy)]
-pub(in crate::pixel_painter) struct Ellipse {
-    pub cx: u16,
-    pub cy: u16,
-    pub half_w: u16,
-    pub half_h: u16,
-}
 
 /// Float ellipse geometry for [`paint_radial_falloff`] — all `f32`, so a caller
 /// can centre on `(w-1)/2` (half-cell correct) as well as an integer cell.
@@ -63,8 +55,7 @@ pub(in crate::pixel_painter) fn paint_radial_falloff(
     blend_falloff(buf, g.min_x..g.max_x, g.min_y..g.max_y, color, |x, y| {
         let nx = (x as f32 - g.cx) / g.rx_norm;
         let ny = (y as f32 - g.cy) / g.ry_norm;
-        let r2 = nx * nx + ny * ny;
-        (r2 <= 1.0).then_some((1.0 - r2) * strength)
+        crate::ground::falloff(nx, ny).map(|f| f * strength)
     });
 }
 

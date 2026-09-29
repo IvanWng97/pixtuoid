@@ -52,8 +52,7 @@ pub(crate) struct Span {
 
 impl Span {
     /// A box of `w`x`h` whose top-left is `(x, y)`, plus `below` extra rows its
-    /// painter draws underneath (a front face, a contact shadow), sorted on its
-    /// south edge.
+    /// painter draws underneath (a front face), sorted on its south edge.
     pub(crate) fn new(x: u16, y: u16, w: u16, h: u16, below: u16) -> Self {
         let y1 = y.saturating_add(h.saturating_sub(1)).saturating_add(below);
         Self {
@@ -68,15 +67,6 @@ impl Span {
     /// The same bounds, sorted on `depth` instead.
     pub(crate) fn with_depth(self, depth: u16) -> Self {
         Self { depth, ..self }
-    }
-
-    /// The same depth, its bounds grown `rows` further south: rows a piece
-    /// paints under the part it sorts on.
-    pub(crate) fn painting_below(self, rows: u16) -> Self {
-        Self {
-            y1: self.y1.saturating_add(rows),
-            ..self
-        }
     }
 
     fn overlaps_x(self, other: Self) -> bool {

@@ -205,10 +205,11 @@ const _: () = assert!(NEON_PANEL_INNER_H > 0 && NEON_PANEL_INNER_H < NEON_PANEL_
 
 use crate::atmosphere::Look;
 use crate::creatures::{gateway_mascot_def, mascot_position, pet_position};
+use crate::ground::Ellipse;
 use anchors::compute_door_frame_idx;
 use background::{
     paint_ceiling_pool, paint_clock, paint_corridor_runner, paint_floor_and_walls,
-    paint_floor_lamp_halo, paint_floor_wash, paint_neon_panel, paint_shadow, Ellipse,
+    paint_floor_lamp_halo, paint_floor_wash, paint_neon_panel, paint_shadow,
 };
 use drawable::{paint_drawable, Drawable, DrawableKind};
 use palette::{agent_overrides, outfit_seed_for};
@@ -622,9 +623,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     }
     wash_since(ctx.buf, &pre_floor_fixtures, look.object_wash);
 
-    // Strength is a function of daylight so noon shadows are crisp and night
-    // shadows subtle.
-    let shadow_strength = 0.5 - 0.3 * look.darkness;
+    let shadow_strength = crate::ground::shadow_strength(look.darkness);
     for ell in floor_shadow_ellipses(ctx.layout) {
         paint_shadow(ctx.buf, ell, shadow_strength, ctx.theme);
     }
