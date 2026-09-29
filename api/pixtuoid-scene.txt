@@ -491,6 +491,33 @@ impl core::marker::Unpin for pixtuoid_scene::layout::WallDecor
 impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::WallDecor
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::WallDecor
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::WallDecor
+pub enum pixtuoid_scene::layout::WallSegment
+pub pixtuoid_scene::layout::WallSegment::Horizontal
+pub pixtuoid_scene::layout::WallSegment::Horizontal::x0: u16
+pub pixtuoid_scene::layout::WallSegment::Horizontal::x1: u16
+pub pixtuoid_scene::layout::WallSegment::Horizontal::y: u16
+pub pixtuoid_scene::layout::WallSegment::Vertical
+pub pixtuoid_scene::layout::WallSegment::Vertical::x: u16
+pub pixtuoid_scene::layout::WallSegment::Vertical::y0: u16
+pub pixtuoid_scene::layout::WallSegment::Vertical::y1: u16
+impl core::clone::Clone for pixtuoid_scene::layout::WallSegment
+pub fn pixtuoid_scene::layout::WallSegment::clone(&self) -> pixtuoid_scene::layout::WallSegment
+impl core::cmp::Eq for pixtuoid_scene::layout::WallSegment
+impl core::cmp::PartialEq for pixtuoid_scene::layout::WallSegment
+pub fn pixtuoid_scene::layout::WallSegment::eq(&self, &pixtuoid_scene::layout::WallSegment) -> bool
+impl core::fmt::Debug for pixtuoid_scene::layout::WallSegment
+pub fn pixtuoid_scene::layout::WallSegment::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for pixtuoid_scene::layout::WallSegment
+pub fn pixtuoid_scene::layout::WallSegment::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for pixtuoid_scene::layout::WallSegment
+impl core::marker::StructuralPartialEq for pixtuoid_scene::layout::WallSegment
+impl core::marker::Freeze for pixtuoid_scene::layout::WallSegment
+impl core::marker::Send for pixtuoid_scene::layout::WallSegment
+impl core::marker::Sync for pixtuoid_scene::layout::WallSegment
+impl core::marker::Unpin for pixtuoid_scene::layout::WallSegment
+impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::WallSegment
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::WallSegment
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::WallSegment
 pub enum pixtuoid_scene::layout::WaypointKind
 pub pixtuoid_scene::layout::WaypointKind::Couch
 pub pixtuoid_scene::layout::WaypointKind::Island
@@ -898,27 +925,6 @@ impl core::marker::Unpin for pixtuoid_scene::layout::WallDecorItem
 impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::WallDecorItem
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::WallDecorItem
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::WallDecorItem
-pub struct pixtuoid_scene::layout::WallSegment
-pub pixtuoid_scene::layout::WallSegment::end: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::layout::WallSegment::start: pixtuoid_scene::layout::Point
-impl core::clone::Clone for pixtuoid_scene::layout::WallSegment
-pub fn pixtuoid_scene::layout::WallSegment::clone(&self) -> pixtuoid_scene::layout::WallSegment
-impl core::cmp::Eq for pixtuoid_scene::layout::WallSegment
-impl core::cmp::PartialEq for pixtuoid_scene::layout::WallSegment
-pub fn pixtuoid_scene::layout::WallSegment::eq(&self, &pixtuoid_scene::layout::WallSegment) -> bool
-impl core::fmt::Debug for pixtuoid_scene::layout::WallSegment
-pub fn pixtuoid_scene::layout::WallSegment::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for pixtuoid_scene::layout::WallSegment
-pub fn pixtuoid_scene::layout::WallSegment::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for pixtuoid_scene::layout::WallSegment
-impl core::marker::StructuralPartialEq for pixtuoid_scene::layout::WallSegment
-impl core::marker::Freeze for pixtuoid_scene::layout::WallSegment
-impl core::marker::Send for pixtuoid_scene::layout::WallSegment
-impl core::marker::Sync for pixtuoid_scene::layout::WallSegment
-impl core::marker::Unpin for pixtuoid_scene::layout::WallSegment
-impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::WallSegment
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::WallSegment
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::WallSegment
 pub struct pixtuoid_scene::layout::Waypoint
 pub pixtuoid_scene::layout::Waypoint::facing: pixtuoid_scene::layout::Facing
 pub pixtuoid_scene::layout::Waypoint::kind: pixtuoid_scene::layout::WaypointKind
@@ -1332,6 +1338,7 @@ pub pixtuoid_scene::pixel_painter::CharacterPlacement::flip_x: bool
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::frame_idx: usize
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::glow: pixtuoid_scene::pixel_painter::CharacterGlow
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::seat_desk: core::option::Option<pixtuoid_scene::layout::Point>
+pub pixtuoid_scene::pixel_painter::CharacterPlacement::seated: bool
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::sleep_z_seed: core::option::Option<u64>
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::waiting_bubble: bool
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::walking_dust_frame: core::option::Option<usize>
