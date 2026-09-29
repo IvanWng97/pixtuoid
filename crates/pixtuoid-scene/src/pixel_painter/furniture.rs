@@ -1,5 +1,4 @@
-//! Standalone furniture paint helpers — the pieces the pixel painter stamps
-//! without pack art (rugs, the side table and island, the room-fill decor).
+//! Furniture the pixel painter stamps procedurally, without pack art.
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 

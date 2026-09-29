@@ -590,4 +590,38 @@ mod tests {
             "in-bounds pixel unchanged"
         );
     }
+
+    /// The appliance art's keys are the bundled pack's, and the pack's colour
+    /// for each is the normal theme's, as `pack.toml` says: a painter that does
+    /// not recolour still shows the normal office.
+    #[test]
+    fn the_packs_appliance_keys_are_the_normal_themes_colours() {
+        let pack = crate::embedded_pack::test_default_pack();
+        let normal = crate::theme::theme_by_name("normal").expect("theme");
+        for (key, pixel) in appliance_overrides(&normal.appliance) {
+            assert_eq!(pack.palette().get(key), Some(pixel), "key {key:?}");
+        }
+    }
+
+    /// A recolour re-derives the shading: one shaded cell of the vending art
+    /// is a different colour in two themes whose appliance bodies differ.
+    #[test]
+    fn a_recolour_reshades_the_appliance_art() {
+        let pack = crate::embedded_pack::test_default_pack();
+        let art = pack
+            .animation("vending_machine@4x")
+            .and_then(|a| a.recolorable(0))
+            .expect("the vending art");
+        let [a, b] = ["normal", "cyberpunk"].map(|name| {
+            let theme = crate::theme::theme_by_name(name).expect("theme");
+            art.recolored(&appliance_overrides(&theme.appliance))
+        });
+        let shade = pack.palette().get('ъ').flatten().expect("the body's shade");
+        let plain = art.recolored(&[]);
+        let (x, y) = (0..plain.height())
+            .flat_map(|y| (0..plain.width()).map(move |x| (x, y)))
+            .find(|&(x, y)| plain.get(x, y) == Some(&Some(shade)))
+            .expect("the art draws the body's shade");
+        assert_ne!(a.get(x, y), b.get(x, y), "the shade kept the pack's colour");
+    }
 }

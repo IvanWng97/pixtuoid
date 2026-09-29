@@ -90,7 +90,9 @@ pub use anchors::character_anchor;
 pub use anchors::seated_anchor_facing;
 #[cfg(test)]
 pub(crate) use drawable::DESK_BEZEL_RAISE;
-pub(crate) use drawable::{desk_art_top, desk_sprite_name, DESK_CHAIR_SPRITE};
+pub(crate) use drawable::{
+    desk_art_top, desk_sprite_name, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE,
+};
 pub(crate) use palette::{appliance_overrides, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
 
 // The ToolKind→glow-hue seam the binary's footer tints tool segments with. The
@@ -1062,10 +1064,20 @@ fn enqueue_lounge_pantry_appliances<'a>(
 
     for (wp_idx, wp) in layout.waypoints.iter().enumerate() {
         use crate::layout::{furniture_def, WaypointKind};
-        let busy = occupied_waypoints.contains(&wp_idx);
         // The VISUAL height, not the (shallow) footprint, so an overhang still
         // sorts by what's painted.
         let visual_h = furniture_def(wp.kind.furniture()).visual.h;
+        if let Some(sprite) = appliance_art(wp.kind) {
+            drawables.push(Drawable {
+                anchor_y: z_sort_row(Anchor::Center, wp.pos, visual_h),
+                kind: DrawableKind::Appliance {
+                    pos: wp.pos,
+                    sprite,
+                    busy: occupied_waypoints.contains(&wp_idx),
+                },
+            });
+            continue;
+        }
         match wp.kind {
             WaypointKind::Couch => {}
             WaypointKind::Pantry => {
@@ -1079,18 +1091,8 @@ fn enqueue_lounge_pantry_appliances<'a>(
                 });
             }
             WaypointKind::PhoneBooth | WaypointKind::StandingDesk => {}
-            WaypointKind::VendingMachine | WaypointKind::Printer => {
-                if let Some(sprite) = appliance_art(wp.kind) {
-                    drawables.push(Drawable {
-                        anchor_y: z_sort_row(Anchor::Center, wp.pos, visual_h),
-                        kind: DrawableKind::Appliance {
-                            pos: wp.pos,
-                            sprite,
-                            busy,
-                        },
-                    });
-                }
-            }
+            // Their art is `appliance_art`'s, pushed above.
+            WaypointKind::VendingMachine | WaypointKind::Printer => {}
             WaypointKind::SnackShelf => {
                 drawables.push(Drawable {
                     anchor_y: z_sort_row(Anchor::Center, wp.pos, visual_h),

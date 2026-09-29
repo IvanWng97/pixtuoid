@@ -1740,7 +1740,7 @@ fn every_hover_size_is_its_painted_sprite_size() {
         def(Furniture::FloorLamp, "floor_lamp"),
         def(Furniture::VendingMachine, "vending_machine"),
         def(Furniture::Printer, "printer"),
-        def(Furniture::MeetingTable, "meeting_table"),
+        def(Furniture::MeetingTable, super::MEETING_TABLE_SPRITE),
         (
             "ELEVATOR".into(),
             Size {
@@ -3775,6 +3775,31 @@ fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
         },
     );
     buf
+}
+
+/// A busy appliance reads busy for most of its loop at every density: fewer
+/// than half its busy frames may show it at rest.
+#[test]
+fn a_busy_loop_spends_most_of_its_frames_away_from_rest() {
+    let pack = crate::embedded_pack::test_default_pack();
+    for name in [
+        "vending_machine",
+        "printer",
+        "vending_machine@4x",
+        "printer@4x",
+    ] {
+        let frames = pack.animation(name).expect("the appliance art").frames();
+        let (rest, busy) = frames.split_first().expect("a rest frame");
+        let at_rest = busy
+            .iter()
+            .filter(|f| f.as_slice() == rest.as_slice())
+            .count();
+        assert!(
+            at_rest * 2 < busy.len(),
+            "{name}: {at_rest} of {} busy frames show it at rest",
+            busy.len()
+        );
+    }
 }
 
 /// An idle appliance holds still; a busy one plays its loop, and a vend drops

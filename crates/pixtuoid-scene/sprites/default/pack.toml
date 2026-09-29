@@ -94,9 +94,8 @@ version = "1"
 "ξ" = "#7c7c86"   # steel, shaded
 "Ξ" = "#1c2a36"   # j's colour on a key the cutaway never relights: a TV's, a slide's glass
 "Ж" = "#34424e"   # J's colour: a sheen on dark glass (a display, a microwave's window)
-# The corridor appliances' keys: a painter recolours each from the theme's
-# `ApplianceColors` (`pixel_painter::palette::appliance_overrides`); these are
-# the normal theme's, what a painter that does not recolour shows.
+# The corridor appliances' keys, each recoloured from the theme's ApplianceColors
+# (pixel_painter::palette::appliance_overrides); the values are theme::normal's.
 "Б" = "#323741"   # vending machine body
 "П" = "#b43c3c"   # vending machine brand panel
 "Ч" = "#dc3232"   # a vending machine's first drink
@@ -417,6 +416,7 @@ frame_ms = 500
 frames   = ["vending_machine@4x.sprite"]
 frame_ms = 500
 
+# As the vending machine: frame 0 at rest, then its busy loop.
 [animations.printer]
 frames   = ["printer.sprite"]
 frame_ms = 300

@@ -370,7 +370,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             }
         }
         DrawableKind::MeetingTable { pos } => {
-            blit_centered_first_frame(pack, "meeting_table", *pos, buf);
+            blit_centered_first_frame(pack, MEETING_TABLE_SPRITE, *pos, buf);
         }
         DrawableKind::AreaRug(rug) => paint_area_rug(buf, *rug, theme),
         DrawableKind::LoungeSideTable { pos } => {
@@ -514,6 +514,9 @@ fn paint_desk_coffee(
 
 /// The desk task chair's pack animation.
 pub(crate) const DESK_CHAIR_SPRITE: &str = "desk_chair";
+
+/// The meeting table's pack animation.
+pub(crate) const MEETING_TABLE_SPRITE: &str = "meeting_table";
 
 /// The desk task chair's art — the ONE authority for its size, so the enqueue
 /// site centres on what is actually drawn even under a custom pack.
@@ -1063,8 +1066,8 @@ mod tests {
         buf
     }
 
-    /// The art owns the form and the theme the palette: in every theme, each
-    /// role lands on the cells the 1x vending art draws in it.
+    /// In every theme, each `appliance_overrides` role
+    /// lands on the cells the 1x vending art draws in it.
     #[test]
     fn a_vending_machine_takes_its_themes_colours() {
         let pos = Point { x: 30, y: 30 };
@@ -1097,7 +1100,7 @@ mod tests {
             let buf = appliance_at_rest("printer", pos, th);
             for ((dx, dy), want, role) in [
                 ((2, 0), a.printer_glass, "the scanner glass"),
-                ((0, 0), a.printer_top, "the lid"),
+                ((4, 0), a.printer_top, "the lid, east of its lit end"),
                 ((2, 3), a.printer_paper, "the stack"),
                 ((0, 1), a.printer_tray, "a side"),
                 ((2, 1), a.printer_body, "the chassis"),

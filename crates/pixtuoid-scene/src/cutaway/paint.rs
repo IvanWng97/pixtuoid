@@ -15,8 +15,9 @@ use crate::pixel_painter::SimFrame;
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
-/// The front face the cutaway derives under a top-down desk's art (and under the
-/// meeting table's slab), as a fraction of `DESK_H` so it tracks the desk.
+/// The front face the cutaway derives under a top-down piece's base-density art
+/// (a desk's, the meeting table's), as a fraction of `DESK_H` so it tracks the
+/// desk.
 /// Without one there is no thickness and the office reads as a floor plan.
 const DESK_FRONT_NUMER: u16 = 2;
 /// Denominator of [`DESK_FRONT_NUMER`].
@@ -456,7 +457,7 @@ fn collect_pieces(
     push_desks(frame, office, &mut order);
     push_props(layout, pack, &mut order);
     push_appliances(layout, frame, pack, moment.now, &mut order);
-    push_meeting_trios(layout, pack, &mut order);
+    push_meeting_trios(layout, pack, office.scale, &mut order);
     let carried = push_characters(frame, office, moment.now, &mut order);
     push_chairs(layout, pack, &carried, &mut order);
     wall_segments(layout, &mut order);
@@ -798,20 +799,24 @@ fn push_appliances(
 /// [`MeetingTrio::sofas`](crate::layout::MeetingTrio::sofas)' south sofa is
 /// seen from behind: that is what makes the pair FACE each other across the
 /// table.
-fn push_meeting_trios(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) {
+fn push_meeting_trios(
+    layout: &Layout,
+    pack: &Pack,
+    scale: RenderScale,
+    order: &mut Vec<(Span, PieceKind)>,
+) {
     let table = crate::layout::furniture_def(crate::layout::Furniture::MeetingTable).visual;
     for t in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
         for (i, sofa) in t.sofas.iter().enumerate() {
             push_sofa(order, pack, *sofa, i % 2 != 0);
         }
         order.push((
-            // A front face below.
             piece_span(
                 crate::layout::Anchor::Center,
                 t.table,
                 table.w,
                 table.h,
-                desk_front_h(),
+                face_rows(pack, crate::pixel_painter::MEETING_TABLE_SPRITE, scale),
             ),
             PieceKind::Table { at: t.table },
         ));
@@ -1116,9 +1121,6 @@ fn piece_span(
     let tl = crate::layout::anchored_top_left(anchor, pos, w, h);
     Span::new(tl.x, tl.y, w, h, below)
 }
-
-/// The meeting table's pack art.
-const MEETING_TABLE: &str = "meeting_table";
 
 /// Frame 0's LOGICAL size: the size the sort space lays a static piece out in,
 /// whichever density it is drawn from. An animated figure sizes from the frame
@@ -1678,7 +1680,12 @@ fn waypoint_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
 /// The meeting table's art, centred on its layout point, over the front face
 /// [`face_rows`] derives under a base-density drawing.
 fn paint_table(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &mut RgbBuffer) {
-    let Some(table) = crate::pixel_painter::densest_frame(pack, MEETING_TABLE, 0, scale) else {
+    let Some(table) = crate::pixel_painter::densest_frame(
+        pack,
+        crate::pixel_painter::MEETING_TABLE_SPRITE,
+        0,
+        scale,
+    ) else {
         return;
     };
     let (x, y) = centred_top_left(at, table.logical, scale);
@@ -1686,7 +1693,7 @@ fn paint_table(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &
     paint_derived_face(
         &table,
         (x, y),
-        face_rows(pack, MEETING_TABLE, scale),
+        face_rows(pack, crate::pixel_painter::MEETING_TABLE_SPRITE, scale),
         scale,
         buf,
     );
@@ -3926,7 +3933,7 @@ S B B B B B B S
                     continue;
                 };
                 let mut order = Vec::new();
-                push_meeting_trios(&layout, &pack, &mut order);
+                push_meeting_trios(&layout, &pack, RenderScale::ONE, &mut order);
                 let seats = order.iter().filter_map(|(s, k)| match k {
                     PieceKind::PropBand { rows: (0, _), .. } => Some(s.depth),
                     _ => None,
@@ -3942,6 +3949,38 @@ S B B B B B B S
             }
         }
         assert!(checked > 0, "the sizes lay out meeting trios");
+    }
+
+    /// The table's span ends on the last row it paints, at the base density
+    /// (with the face derived under it) and at the densest (whose art draws its
+    /// own front): a span reaching past it would sort the table and cast its
+    /// shadow rows below where it stands.
+    #[test]
+    fn the_tables_span_ends_where_it_paints() {
+        let pack = pack();
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        for s in [1, pack.max_density_variant()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            let mut order = Vec::new();
+            push_meeting_trios(&layout, &pack, scale, &mut order);
+            let (span, kind) = order
+                .iter()
+                .find(|(_, k)| matches!(k, PieceKind::Table { .. }))
+                .expect("a meeting trio");
+            let [a, b] = painted_over_two_fills(kind, &layout, &pack, theme, scale);
+            let bottom = (0..a.height())
+                .rev()
+                .find(|&y| {
+                    (0..a.width()).any(|x| a.get(x, y) != UNDER[0] || b.get(x, y) != UNDER[1])
+                })
+                .expect("the table paints");
+            assert_eq!(
+                span.y1,
+                bottom / s,
+                "scale {s}: the span's south row is not the table's painted bottom"
+            );
+        }
     }
 
     /// Layouts across the sizes and seeds that place every kind of piece this
