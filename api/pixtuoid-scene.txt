@@ -365,12 +365,81 @@ impl core::marker::Unpin for pixtuoid_scene::layout::Facing
 impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::Facing
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Facing
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::Facing
+pub enum pixtuoid_scene::layout::FixtureKind
+pub pixtuoid_scene::layout::FixtureKind::Clock
+pub pixtuoid_scene::layout::FixtureKind::CoatRack
+pub pixtuoid_scene::layout::FixtureKind::CoatRack::room: usize
+pub pixtuoid_scene::layout::FixtureKind::Desk(pixtuoid_core::state::FloorLocalDeskIndex)
+pub pixtuoid_scene::layout::FixtureKind::DeskChair(pixtuoid_core::state::FloorLocalDeskIndex)
+pub pixtuoid_scene::layout::FixtureKind::Door
+pub pixtuoid_scene::layout::FixtureKind::Doormat
+pub pixtuoid_scene::layout::FixtureKind::Doormat::room: usize
+pub pixtuoid_scene::layout::FixtureKind::FilingCabinet(pixtuoid_core::state::FloorLocalDeskIndex)
+pub pixtuoid_scene::layout::FixtureKind::FishTank
+pub pixtuoid_scene::layout::FixtureKind::FloorLamp
+pub pixtuoid_scene::layout::FixtureKind::IslandMat
+pub pixtuoid_scene::layout::FixtureKind::KitchenIsland
+pub pixtuoid_scene::layout::FixtureKind::LoungeCouch
+pub pixtuoid_scene::layout::FixtureKind::LoungeRug
+pub pixtuoid_scene::layout::FixtureKind::MeetingChair
+pub pixtuoid_scene::layout::FixtureKind::MeetingChair::facing: pixtuoid_scene::layout::Facing
+pub pixtuoid_scene::layout::FixtureKind::MeetingChair::waypoint: usize
+pub pixtuoid_scene::layout::FixtureKind::MeetingRug
+pub pixtuoid_scene::layout::FixtureKind::MeetingRug::room: usize
+pub pixtuoid_scene::layout::FixtureKind::MeetingSofa
+pub pixtuoid_scene::layout::FixtureKind::MeetingSofa::faces_away: bool
+pub pixtuoid_scene::layout::FixtureKind::MeetingSofa::room: usize
+pub pixtuoid_scene::layout::FixtureKind::MeetingSofa::seat: usize
+pub pixtuoid_scene::layout::FixtureKind::MeetingTable
+pub pixtuoid_scene::layout::FixtureKind::MeetingTable::room: usize
+pub pixtuoid_scene::layout::FixtureKind::NeonSign
+pub pixtuoid_scene::layout::FixtureKind::NoticeBoard
+pub pixtuoid_scene::layout::FixtureKind::NoticeBoard::room: usize
+pub pixtuoid_scene::layout::FixtureKind::PantryMat
+pub pixtuoid_scene::layout::FixtureKind::Plant
+pub pixtuoid_scene::layout::FixtureKind::Plant::item: usize
+pub pixtuoid_scene::layout::FixtureKind::Plant::kind: pixtuoid_scene::layout::PlantKind
+pub pixtuoid_scene::layout::FixtureKind::Pod
+pub pixtuoid_scene::layout::FixtureKind::Pod::item: usize
+pub pixtuoid_scene::layout::FixtureKind::Pod::kind: pixtuoid_scene::layout::PodDecor
+pub pixtuoid_scene::layout::FixtureKind::Runner
+pub pixtuoid_scene::layout::FixtureKind::SideTable
+pub pixtuoid_scene::layout::FixtureKind::Station
+pub pixtuoid_scene::layout::FixtureKind::Station::station: pixtuoid_scene::layout::Station
+pub pixtuoid_scene::layout::FixtureKind::Station::waypoint: usize
+pub pixtuoid_scene::layout::FixtureKind::TrashBin
+pub pixtuoid_scene::layout::FixtureKind::Wall
+pub pixtuoid_scene::layout::FixtureKind::Wall::item: usize
+pub pixtuoid_scene::layout::FixtureKind::Wall::kind: pixtuoid_scene::layout::WallDecor
+pub pixtuoid_scene::layout::FixtureKind::WaterCooler
+impl pixtuoid_scene::layout::FixtureKind
+pub fn pixtuoid_scene::layout::FixtureKind::hover_label(self) -> core::option::Option<&'static str>
+impl core::clone::Clone for pixtuoid_scene::layout::FixtureKind
+pub fn pixtuoid_scene::layout::FixtureKind::clone(&self) -> pixtuoid_scene::layout::FixtureKind
+impl core::cmp::Eq for pixtuoid_scene::layout::FixtureKind
+impl core::cmp::PartialEq for pixtuoid_scene::layout::FixtureKind
+pub fn pixtuoid_scene::layout::FixtureKind::eq(&self, &pixtuoid_scene::layout::FixtureKind) -> bool
+impl core::fmt::Debug for pixtuoid_scene::layout::FixtureKind
+pub fn pixtuoid_scene::layout::FixtureKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for pixtuoid_scene::layout::FixtureKind
+pub fn pixtuoid_scene::layout::FixtureKind::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for pixtuoid_scene::layout::FixtureKind
+impl core::marker::StructuralPartialEq for pixtuoid_scene::layout::FixtureKind
+impl core::marker::Freeze for pixtuoid_scene::layout::FixtureKind
+impl core::marker::Send for pixtuoid_scene::layout::FixtureKind
+impl core::marker::Sync for pixtuoid_scene::layout::FixtureKind
+impl core::marker::Unpin for pixtuoid_scene::layout::FixtureKind
+impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::FixtureKind
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::FixtureKind
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::FixtureKind
 pub enum pixtuoid_scene::layout::Furniture
 pub pixtuoid_scene::layout::Furniture::Bookshelf
 pub pixtuoid_scene::layout::Furniture::BulletinBoard
 pub pixtuoid_scene::layout::Furniture::Couch
 pub pixtuoid_scene::layout::Furniture::Desk
+pub pixtuoid_scene::layout::Furniture::DeskChair
 pub pixtuoid_scene::layout::Furniture::ExitSign
+pub pixtuoid_scene::layout::Furniture::FilingCabinet
 pub pixtuoid_scene::layout::Furniture::FishTank
 pub pixtuoid_scene::layout::Furniture::FloorLamp
 pub pixtuoid_scene::layout::Furniture::IslandStand
@@ -468,6 +537,29 @@ impl core::marker::Unpin for pixtuoid_scene::layout::PodDecor
 impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::PodDecor
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::PodDecor
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::PodDecor
+pub enum pixtuoid_scene::layout::Station
+pub pixtuoid_scene::layout::Station::PantryCounter
+pub pixtuoid_scene::layout::Station::Printer
+pub pixtuoid_scene::layout::Station::SnackShelf
+pub pixtuoid_scene::layout::Station::VendingMachine
+impl core::clone::Clone for pixtuoid_scene::layout::Station
+pub fn pixtuoid_scene::layout::Station::clone(&self) -> pixtuoid_scene::layout::Station
+impl core::cmp::Eq for pixtuoid_scene::layout::Station
+impl core::cmp::PartialEq for pixtuoid_scene::layout::Station
+pub fn pixtuoid_scene::layout::Station::eq(&self, &pixtuoid_scene::layout::Station) -> bool
+impl core::fmt::Debug for pixtuoid_scene::layout::Station
+pub fn pixtuoid_scene::layout::Station::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for pixtuoid_scene::layout::Station
+pub fn pixtuoid_scene::layout::Station::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for pixtuoid_scene::layout::Station
+impl core::marker::StructuralPartialEq for pixtuoid_scene::layout::Station
+impl core::marker::Freeze for pixtuoid_scene::layout::Station
+impl core::marker::Send for pixtuoid_scene::layout::Station
+impl core::marker::Sync for pixtuoid_scene::layout::Station
+impl core::marker::Unpin for pixtuoid_scene::layout::Station
+impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::Station
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Station
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::Station
 pub enum pixtuoid_scene::layout::WallDecor
 pub pixtuoid_scene::layout::WallDecor::Bookshelf
 pub pixtuoid_scene::layout::WallDecor::BulletinBoard
@@ -695,7 +787,6 @@ pub struct pixtuoid_scene::layout::MeetingRoom
 pub pixtuoid_scene::layout::MeetingRoom::bounds: pixtuoid_scene::layout::Bounds
 pub pixtuoid_scene::layout::MeetingRoom::trio: core::option::Option<pixtuoid_scene::layout::MeetingTrio>
 impl pixtuoid_scene::layout::MeetingRoom
-pub fn pixtuoid_scene::layout::MeetingRoom::coat_rack_rect(&self) -> core::option::Option<pixtuoid_scene::layout::Bounds>
 pub fn pixtuoid_scene::layout::MeetingRoom::doormat_rect(&self) -> core::option::Option<pixtuoid_scene::layout::Bounds>
 impl core::clone::Clone for pixtuoid_scene::layout::MeetingRoom
 pub fn pixtuoid_scene::layout::MeetingRoom::clone(&self) -> pixtuoid_scene::layout::MeetingRoom
@@ -879,6 +970,9 @@ pub fn pixtuoid_scene::layout::SceneLayout::meeting_room_bounds(&self, usize) ->
 pub fn pixtuoid_scene::layout::SceneLayout::pantry_counter_size(&self) -> pixtuoid_scene::layout::Size
 pub fn pixtuoid_scene::layout::SceneLayout::stand_point(&self, pixtuoid_scene::layout::WaypointKind, pixtuoid_scene::layout::Point, pixtuoid_scene::layout::Point, pixtuoid_scene::layout::Facing) -> pixtuoid_scene::layout::Point
 pub fn pixtuoid_scene::layout::SceneLayout::wall_band_h(&self) -> u16
+impl pixtuoid_scene::layout::SceneLayout
+pub fn pixtuoid_scene::layout::SceneLayout::coffee_machine(&self) -> core::option::Option<pixtuoid_scene::layout::Bounds>
+pub fn pixtuoid_scene::layout::SceneLayout::fixture_at(&self, pixtuoid_scene::layout::Bounds) -> core::option::Option<pixtuoid_scene::layout::FixtureKind>
 impl core::clone::Clone for pixtuoid_scene::layout::SceneLayout
 pub fn pixtuoid_scene::layout::SceneLayout::clone(&self) -> pixtuoid_scene::layout::SceneLayout
 impl core::fmt::Debug for pixtuoid_scene::layout::SceneLayout
@@ -965,6 +1059,11 @@ pub const pixtuoid_scene::layout::INTER_POD_AISLE_Y: u16
 pub const pixtuoid_scene::layout::INTRA_POD_GAP_X: u16
 pub const pixtuoid_scene::layout::INTRA_POD_GAP_Y: u16
 pub const pixtuoid_scene::layout::MIN_TOP_MARGIN: u16
+pub const pixtuoid_scene::layout::NEON_PANEL_INNER_H: u16
+pub const pixtuoid_scene::layout::NEON_PANEL_INNER_W: u16
+pub const pixtuoid_scene::layout::NEON_PANEL_INNER_X: u16
+pub const pixtuoid_scene::layout::NEON_PANEL_INNER_Y: u16
+pub const pixtuoid_scene::layout::NEON_PANEL_W: u16
 pub const pixtuoid_scene::layout::OBSTACLE_PAD_PX: u16
 pub const pixtuoid_scene::layout::PANTRY_COUNTER_LARGE_W: u16
 pub const pixtuoid_scene::layout::PANTRY_FOOTPRINT_DEPTH: u16
@@ -1429,13 +1528,6 @@ impl core::marker::Unpin for pixtuoid_scene::pixel_painter::SimFrame
 impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::SimFrame
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::SimFrame
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::SimFrame
-pub const pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_H: u16
-pub const pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_W: u16
-pub const pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_X: u16
-pub const pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_Y: u16
-pub const pixtuoid_scene::pixel_painter::NEON_PANEL_W: u16
-pub const pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_LARGE: (u16, u16)
-pub const pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_SMALL: (u16, u16)
 pub fn pixtuoid_scene::pixel_painter::character_anchor(&pixtuoid_core::state::AgentSlot, &pixtuoid_scene::layout::Layout, std::time::SystemTime, &mut pixtuoid_scene::pose::RouteCtx<'_>) -> core::option::Option<pixtuoid_scene::layout::Point>
 pub fn pixtuoid_scene::pixel_painter::force_weather(core::option::Option<&str>) -> core::result::Result<(), alloc::vec::Vec<&'static str>>
 pub fn pixtuoid_scene::pixel_painter::hour_is_day(f32) -> bool

@@ -32,17 +32,6 @@ pub(crate) fn paint_area_rug(
     }
 }
 
-/// A `w`×`h` mat's box, centred on `centre`.
-fn mat_bounds(centre: crate::layout::Point, w: u16, h: u16) -> crate::layout::Bounds {
-    let tl = crate::layout::anchored_top_left(crate::layout::Anchor::Center, centre, w, h);
-    crate::layout::Bounds {
-        x: tl.x,
-        y: tl.y,
-        width: w,
-        height: h,
-    }
-}
-
 /// Lounge side table next to the viewing couch, opposite the floor lamp, with a
 /// magazine stack on top so the silhouette reads as "side table with a book".
 pub(super) fn paint_side_table(buf: &mut RgbBuffer, cx: u16, cy: u16, theme: &crate::theme::Theme) {
@@ -141,21 +130,18 @@ pub(super) fn paint_kitchen_island(
     putxy(buf, w - 5, 0, accents[2]);
 }
 
-/// Notice board on the meeting room's south wall.
-pub(super) fn paint_notice_board(buf: &mut RgbBuffer, mr: Bounds, theme: &crate::theme::Theme) {
-    if !(mr.height > 20 && mr.width > 15) {
-        return;
-    }
+/// Notice board filling `board`, the box
+/// [`MeetingRoom::notice_board_rect`](crate::layout::MeetingRoom::notice_board_rect)
+/// places and gates.
+pub(super) fn paint_notice_board(buf: &mut RgbBuffer, board: Bounds, theme: &crate::theme::Theme) {
     let wall_color = theme.office.room_wall_trim_dark;
     let accent = theme.furniture.rug_accent;
-    let bx = mr.x + 4;
-    let by = mr.y + mr.height - 8;
-    for dy in 0..5u16 {
-        for dx in 0..8u16 {
-            let px = bx + dx;
-            let py = by + dy;
+    for dy in 0..board.height {
+        for dx in 0..board.width {
+            let px = board.x + dx;
+            let py = board.y + dy;
             if px < buf.width() && py < buf.height() {
-                let on_edge = dx == 0 || dx == 7 || dy == 0 || dy == 4;
+                let on_edge = dx == 0 || dx == board.width - 1 || dy == 0 || dy == board.height - 1;
                 buf.put(px, py, if on_edge { wall_color } else { accent });
             }
         }
@@ -290,53 +276,6 @@ pub(super) fn paint_trash_bin(buf: &mut RgbBuffer, room: &crate::layout::PantryR
             }
         }
     }
-}
-
-/// Entry mat centered under the pantry's north doorway. One clear floor row
-/// separates it from the wall face — the offset derives from the SAME
-/// `WALL_THICK_H` the wall painter is thick by, so they can't drift.
-pub(super) fn paint_pantry_entry_mat(
-    buf: &mut RgbBuffer,
-    layout: &crate::layout::SceneLayout,
-    theme: &crate::theme::Theme,
-) {
-    const ENTRY_MAT_W: u16 = 16;
-    const ENTRY_MAT_H: u16 = 5;
-    let Some(p) = layout.pantry else { return };
-    let Some(dw) = layout
-        .doorways
-        .iter()
-        .find(|d| d.start.y == d.end.y && d.start.y == p.bounds.y)
-    else {
-        return;
-    };
-    let centre = crate::layout::Point {
-        x: (dw.start.x + dw.end.x) / 2,
-        y: dw.start.y + crate::layout::WALL_THICK_H + 1 + ENTRY_MAT_H / 2,
-    };
-    paint_area_rug(buf, mat_bounds(centre, ENTRY_MAT_W, ENTRY_MAT_H), theme);
-}
-
-/// Thin bar mat under the kitchen island: the island body covers most of it,
-/// leaving a sliver peeking out along the bar's south serving front.
-pub(super) fn paint_island_bar_mat(
-    buf: &mut RgbBuffer,
-    layout: &crate::layout::SceneLayout,
-    theme: &crate::theme::Theme,
-) {
-    const BAR_MAT_W: u16 = 26;
-    const BAR_MAT_H: u16 = 4;
-    // The island anchor is its body center; +4 drops the mat's center to the
-    // seat row so the sliver clears the body's south edge (mock-verified).
-    const BAR_MAT_Y_OFF: u16 = 4;
-    let Some(isl) = layout.pantry.and_then(|p| p.kitchen_island) else {
-        return;
-    };
-    let centre = crate::layout::Point {
-        x: isl.x,
-        y: isl.y + BAR_MAT_Y_OFF,
-    };
-    paint_area_rug(buf, mat_bounds(centre, BAR_MAT_W, BAR_MAT_H), theme);
 }
 
 /// Aquarium on a low cabinet: theme water behind a shared-dark frame, two fish

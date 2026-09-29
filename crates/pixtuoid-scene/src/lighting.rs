@@ -301,13 +301,10 @@ impl Lights {
                     strength: pool_strength,
                 })
                 .collect(),
-            floor_lamp: layout.floor_lamp().map(|lamp| Emitter {
+            floor_lamp: layout.floor_lamp_base().map(|centre| Emitter {
                 kind: EmitterKind::FloorLamp,
                 light: Light::Halo {
-                    centre: Point {
-                        x: lamp.x,
-                        y: lamp.y + crate::pixel_painter::floor_lamp_south_offset(),
-                    },
+                    centre,
                     radius: FLOOR_LAMP_RADIUS,
                     share: 1.0,
                 },
@@ -331,11 +328,11 @@ impl Lights {
                 kind: EmitterKind::NeonGlow,
                 light: Light::Glow {
                     at: Point {
-                        x: crate::pixel_painter::NEON_PANEL_X,
-                        y: crate::pixel_painter::NEON_PANEL_Y,
+                        x: crate::layout::NEON_PANEL.x,
+                        y: crate::layout::NEON_PANEL.y,
                     },
-                    w: crate::pixel_painter::NEON_PANEL_W,
-                    h: crate::pixel_painter::NEON_PANEL_H,
+                    w: crate::layout::NEON_PANEL.width,
+                    h: crate::layout::NEON_PANEL.height,
                     reach: NEON_HALO_RADIUS,
                 },
                 strength: neon_halo_strength(inputs.neon, inputs.now, darkness),
