@@ -187,6 +187,16 @@ mod tests {
                 TOWER,
                 "two materials in one key",
             ),
+            (
+                format!("{}{base}", CITY.replace("sign=\"L\"\n", "")),
+                TOWER,
+                "a material with no key",
+            ),
+            (
+                format!("{CITY}neon=\"L\"\n{base}"),
+                TOWER,
+                "a key naming no material",
+            ),
         ];
         for (extra, art, why) in rejected {
             assert!(load(&extra, art, TOWER_2X).is_err(), "{why}");
@@ -422,23 +432,9 @@ struct PackToml {
     ramps: BTreeMap<String, RampToml>,
     animations: HashMap<String, AnimationToml>,
     #[serde(default)]
-    city: Option<CityToml>,
+    city: Option<BTreeMap<String, String>>,
     #[serde(default)]
     buildings: BTreeMap<String, BuildingToml>,
-}
-
-/// The `[city]` table: the palette key each [`Material`] of the `[buildings]`
-/// art is drawn in.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CityToml {
-    facade: String,
-    shade: String,
-    roof: String,
-    glass: String,
-    mullion: String,
-    detail: String,
-    sign: String,
 }
 
 /// One `[buildings.<name>]` table (the base art, with the planes the building
@@ -505,6 +501,23 @@ pub enum Material {
 }
 
 impl Material {
+    /// Its name as `[city]` keys it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Material::Facade => "facade",
+            Material::Shade => "shade",
+            Material::Roof => "roof",
+            Material::Glass => "glass",
+            Material::Mullion => "mullion",
+            Material::Detail => "detail",
+            Material::Sign => "sign",
+        }
+    }
+
+    fn from_name(name: &str) -> Option<Self> {
+        Material::ALL.into_iter().find(|m| m.name() == name)
+    }
+
     /// Every material, in declaration order.
     pub const ALL: [Material; 7] = [
         Material::Facade,
@@ -741,7 +754,7 @@ fn redrawn_pieces(name: &str) -> impl Iterator<Item = &str> {
 /// `get_src(frame_name)`. The path-traversal guard MUST stay inside
 /// [`load_pack`]'s closure: [`load_pack_from_strings`] has no filesystem and no
 /// untrusted paths to escape.
-fn build_pack(parsed: PackToml, mut get_src: impl FnMut(&str) -> Result<String>) -> Result<Pack> {
+fn build_pack(parsed: PackToml, get_src: &mut dyn FnMut(&str) -> Result<String>) -> Result<Pack> {
     let palette = Arc::new(build_palette(&parsed.palette, &parsed.ramps)?);
     let mut animations = HashMap::new();
     for (anim_name, anim) in parsed.animations {
@@ -761,10 +774,14 @@ fn build_pack(parsed: PackToml, mut get_src: impl FnMut(&str) -> Result<String>)
     let city_materials = parsed
         .city
         .map(|c| -> Result<CityMaterials> {
+            if let Some(other) = c.keys().find(|k| Material::from_name(k).is_none()) {
+                bail!("[city] names {other:?}, which is no material");
+            }
             let mut keys = BTreeMap::new();
-            for (material, key) in Material::ALL.into_iter().zip([
-                &c.facade, &c.shade, &c.roof, &c.glass, &c.mullion, &c.detail, &c.sign,
-            ]) {
+            for material in Material::ALL {
+                let Some(key) = c.get(material.name()) else {
+                    bail!("[city] names no key for {:?}", material.name());
+                };
                 let key = single_char(key, "[city] material")?;
                 if !matches!(palette.get(key), Some(Some(_))) {
                     bail!("[city] material {key:?} is not an opaque key of the palette");
@@ -787,7 +804,7 @@ fn build_pack(parsed: PackToml, mut get_src: impl FnMut(&str) -> Result<String>)
             bail!("building {key:?} needs a [city] table naming its materials");
         };
         let (name, density) = split_density_variant(&key).unwrap_or((&key, 1));
-        let art = building_art(&building.sprite, &palette, materials, &mut get_src)?;
+        let art = building_art(&building.sprite, &palette, materials, get_src)?;
         match (density, building.planes) {
             (1, Some(planes)) => {
                 let planes = planes
@@ -847,7 +864,7 @@ fn building_art(
     fname: &str,
     palette: &Arc<Palette>,
     materials: &CityMaterials,
-    get_src: &mut impl FnMut(&str) -> Result<String>,
+    get_src: &mut dyn FnMut(&str) -> Result<String>,
 ) -> Result<BuildingArt> {
     let src = get_src(fname)?;
     let marked = parse_indexed(&src, palette).with_context(|| format!("decoding {fname}"))?;
@@ -932,7 +949,7 @@ pub fn load_pack(dir: &Path) -> Result<Pack> {
         .canonicalize()
         .with_context(|| format!("canonicalizing {}", dir.display()))?;
 
-    build_pack(parsed, |fname| {
+    build_pack(parsed, &mut |fname| {
         if Path::new(fname)
             .components()
             .any(|c| c == std::path::Component::ParentDir)
@@ -957,7 +974,7 @@ pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Resul
     let parsed: PackToml = toml::from_str(pack_toml).context("parsing pack.toml")?;
     let frame_lookup: HashMap<&str, &str> = frames.iter().copied().collect();
 
-    build_pack(parsed, |fname| {
+    build_pack(parsed, &mut |fname| {
         frame_lookup
             .get(fname)
             .map(|s| s.to_string())

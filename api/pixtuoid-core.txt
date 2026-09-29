@@ -770,6 +770,7 @@ pub pixtuoid_core::sprite::format::Material::Shade
 pub pixtuoid_core::sprite::format::Material::Sign
 impl pixtuoid_core::sprite::format::Material
 pub const pixtuoid_core::sprite::format::Material::ALL: [pixtuoid_core::sprite::format::Material; 7]
+pub fn pixtuoid_core::sprite::format::Material::name(self) -> &'static str
 impl core::clone::Clone for pixtuoid_core::sprite::format::Material
 pub fn pixtuoid_core::sprite::format::Material::clone(&self) -> pixtuoid_core::sprite::format::Material
 impl core::cmp::Eq for pixtuoid_core::sprite::format::Material
