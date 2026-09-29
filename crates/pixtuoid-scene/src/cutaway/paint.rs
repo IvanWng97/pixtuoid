@@ -404,7 +404,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::PropBand { at, sprite, rows } => (at, sprite, rows).hash(&mut h),
         PieceKind::Table { at } => at.hash(&mut h),
         PieceKind::Appliance { at, kind } => (at, kind).hash(&mut h),
-        // `paint_piece` never reads the label or body: they are the caller's.
+        // The label is the caller's, and the body follows from `at` and `key`.
         PieceKind::Character {
             figure:
                 Figure {
@@ -2873,11 +2873,36 @@ mod tests {
                     let at = chair.expect("a desk sitter carries their chair");
                     let (w, h) = art_size(&pack, crate::pixel_painter::DESK_CHAIR_SPRITE)
                         .expect("chair art");
-                    assert_eq!(cast, crate::ground::Contact::under(at.x, w, at.y + h));
+                    let empty = piece_span(crate::layout::Anchor::TopLeft, at, w, h, 0);
+                    assert_eq!(
+                        Some(cast),
+                        ground_shadow(empty, &PieceKind::Chair { at }, &pack),
+                        "the chair casts the shadow it cast empty"
+                    );
                 }
             }
         }
         assert!(standing && sitting, "the walk in and the sit");
+    }
+
+    /// A pack drawing no back view of its own gets the front view flipped,
+    /// sorted a row south of its sitters: it stands in front of those it faces
+    /// away from.
+    #[test]
+    fn a_flipped_sofa_sorts_in_front_of_its_sitters() {
+        let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\".\"=\"transparent\"\n\
+             \"F\"=\"#202020\"\n[animations.meeting_sofa]\nframes=[\"s.sprite\"]\nframe_ms=100\n",
+            &[("s.sprite", "@frame 0\nF F F\nF F F\n")],
+        )
+        .expect("a pack of one sofa loads");
+        let at = crate::layout::Point { x: 40, y: 30 };
+        let mut order = Vec::new();
+        push_sofa(&mut order, &pack, at, true);
+        let [(span, PieceKind::Prop { mirrored: true, .. })] = order.as_slice() else {
+            panic!("a flipped sofa is one mirrored prop: {order:?}");
+        };
+        assert!(span.depth > crate::pixel_painter::seat::sofa_sitter_z_key(at));
     }
 
     /// Every piece's shadow falls inside its [`Piece::reach`], so a repaint of
