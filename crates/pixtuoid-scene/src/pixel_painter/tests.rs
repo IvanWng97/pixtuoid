@@ -475,7 +475,7 @@ fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
     );
 }
 
-fn make_slot(id: pixtuoid_core::AgentId, state: ActivityState) -> AgentSlot {
+pub(crate) fn make_slot(id: pixtuoid_core::AgentId, state: ActivityState) -> AgentSlot {
     let now = SystemTime::UNIX_EPOCH;
     AgentSlot {
         agent_id: id,
@@ -4014,44 +4014,6 @@ fn desk_shadow_tracks_the_desk_zsort_row_not_a_hardcoded_offset() {
 }
 
 #[test]
-fn ceiling_pool_regions_yields_desks_then_pantry_then_corridor_in_order() {
-    let l =
-        Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("192x160 fits");
-    let pools: Vec<_> = ceiling_pool_regions(&l).collect();
-    assert_eq!(
-        pools.len(),
-        l.home_desks.len() + l.pantry.is_some() as usize + l.corridor.is_some() as usize
-    );
-    let mut desk_rows = std::collections::HashSet::new();
-    for (i, (pool, desk)) in pools.iter().zip(&l.home_desks).enumerate() {
-        // Derived from the ONE authority rather than restating its arithmetic.
-        let want = crate::layout::desk_ceiling_pool_center(
-            *desk,
-            l.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)),
-        );
-        assert_eq!((pool.cx, pool.cy), (want.x, want.y));
-        assert_eq!((pool.half_w, pool.half_h), (10, 5));
-        desk_rows.insert(pool.cy as i32 - desk.y as i32);
-    }
-    // Negative control: with one lift, a facing-blind impl passes the loop above.
-    assert!(
-        desk_rows.len() >= 2,
-        "this layout seats both sides, so its desk lights must sit at two \
-         different offsets — got {desk_rows:?}"
-    );
-    if let Some(pr) = l.pantry.map(|p| p.bounds) {
-        let p = pools[l.home_desks.len()];
-        assert_eq!((p.cx, p.cy), (pr.x + pr.width / 2, pr.y + pr.height / 2));
-        assert_eq!((p.half_w, p.half_h), (12, 6));
-    }
-    if let Some(c) = l.corridor {
-        let p = *pools.last().unwrap();
-        assert_eq!((p.cx, p.cy), (c.x + c.width / 2, c.y + c.height / 2));
-        assert_eq!((p.half_w, p.half_h), (14, 5));
-    }
-}
-
-#[test]
 fn floor_shadow_ellipses_fit_each_family_in_paint_order() {
     use crate::layout::WaypointKind;
     let l =
@@ -4434,49 +4396,6 @@ fn a_back_turned_seat_puts_the_occupant_past_the_desk_body() {
 }
 
 #[test]
-fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
-    use crate::layout::Facing;
-    // A lamp is a FIXTURE on the desk's west wing, visible from either side; the
-    // standby SCREEN is the one that gates on facing.
-    for darkness in [0.0_f32, 0.5, 1.0] {
-        let north = super::desk_light(Facing::North, darkness, 1.0);
-        let south = super::desk_light(Facing::South, darkness, 1.0);
-        assert_eq!(
-            north.lamp, south.lamp,
-            "the lamp may not depend on facing (darkness {darkness})"
-        );
-        assert!(
-            south.screen_idle == 0.0 && north.screen_idle >= south.screen_idle,
-            "only a back-turned desk shows its screen (darkness {darkness})"
-        );
-    }
-    assert!(
-        super::desk_light(Facing::South, 1.0, 1.0).lamp > 0.0,
-        "a viewer-facing desk must still light its lamp after dark"
-    );
-}
-
-/// The two desk emitters (`lamp`, `screen_idle`); the ceiling pools and the floor lamp share the
-/// rule but not this pin. Dropping either factor makes that emitter's two
-/// readings equal.
-#[test]
-fn an_emptied_floor_takes_both_desk_emitters_down_with_the_level() {
-    use crate::layout::Facing;
-    let min = crate::floor::LightingState::MIN_LEVEL;
-    let lit = super::desk_light(Facing::North, 1.0, 1.0);
-    let empty = super::desk_light(Facing::North, 1.0, min);
-    for (what, lit, empty) in [
-        ("lamp", lit.lamp, empty.lamp),
-        ("screen_idle", lit.screen_idle, empty.screen_idle),
-    ] {
-        assert!(
-            (empty - lit * min).abs() < f32::EPSILON,
-            "an empty floor's {what} must scale with the level, got {empty} against {lit}"
-        );
-    }
-}
-
-#[test]
 fn a_lamp_casting_no_pool_is_not_drawn_lit() {
     // Whatever the fixture reads as, it must track the light it casts.
     let theme = crate::theme::theme_by_name("normal").expect("theme");
@@ -4484,7 +4403,11 @@ fn a_lamp_casting_no_pool_is_not_drawn_lit() {
     let bg = Rgb { r: 9, g: 9, b: 9 };
     let render = |strength: f32| {
         let mut buf = RgbBuffer::filled(60, 40, bg);
-        super::drawable::paint_desk_lamp(&mut buf, desk, strength, theme);
+        super::drawable::paint_desk_lamp(
+            &mut buf,
+            &crate::lighting::DeskLights::new(desk, strength, 0.0),
+            theme,
+        );
         buf
     };
     let (dim, bright) = (render(0.05), render(1.0));

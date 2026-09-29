@@ -49,6 +49,7 @@ pub mod frame_cache;
 pub(crate) mod glass;
 pub(crate) mod ground;
 pub mod layout;
+pub(crate) mod lighting;
 // Test-only: local wall-clock instants, so an hour-dependent assertion names
 // the hour instead of inheriting the runner's $TZ.
 #[cfg(test)]
