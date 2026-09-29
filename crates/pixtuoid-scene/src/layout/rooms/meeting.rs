@@ -1,6 +1,8 @@
 //! The meeting room aggregate: bounds + the sofa/table trio.
 
-use crate::layout::{furniture_def, pct, Bounds, Furniture, Point, OBSTACLE_PAD_PX};
+use crate::layout::{
+    anchored_top_left, furniture_def, pct, Anchor, Bounds, Furniture, Point, OBSTACLE_PAD_PX,
+};
 
 /// One meeting room's furniture trio. The fixed-size array encodes the
 /// invariant that a fitted room produces exactly 2 sofas + 1 table.
@@ -10,6 +12,29 @@ pub struct MeetingTrio {
     pub sofas: [Point; 2],
     /// The table centre, midway between the two sofas (pixel-space).
     pub table: Point,
+}
+
+/// A meeting rug's width.
+const MEETING_RUG_W: u16 = 18;
+/// How far a meeting rug runs past the two sofa centres, both ends together.
+const MEETING_RUG_OVERHANG: u16 = 8;
+
+impl MeetingTrio {
+    /// The rug under this trio's table, reaching from sofa to sofa.
+    pub(crate) fn rug(&self) -> Bounds {
+        let [north, south] = self.sofas;
+        let h = south
+            .y
+            .saturating_sub(north.y)
+            .saturating_add(MEETING_RUG_OVERHANG);
+        let tl = anchored_top_left(Anchor::Center, self.table, MEETING_RUG_W, h);
+        Bounds {
+            x: tl.x,
+            y: tl.y,
+            width: MEETING_RUG_W,
+            height: h,
+        }
+    }
 }
 
 /// A meeting room: its bounds plus the trio it hosts. Its index in

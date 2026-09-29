@@ -28,38 +28,42 @@ pub(super) fn paint_meeting_table(
     }
 }
 
-/// Bordered area rug centred on `cx,cy` — the meeting rug and both pantry mats.
-pub(super) fn paint_area_rug(
+/// Bordered area rug filling `rug` — the meeting and lounge rugs and both
+/// pantry mats.
+pub(crate) fn paint_area_rug(
     buf: &mut RgbBuffer,
-    cx: u16,
-    cy: u16,
-    w: u16,
-    h: u16,
+    rug: crate::layout::Bounds,
     theme: &crate::theme::Theme,
 ) {
-    let rug_field = theme.furniture.rug_field;
-    let rug_trim = theme.furniture.rug_trim;
-    let rug_accent = theme.furniture.rug_accent;
-    let half_w = w as i32 / 2;
-    let half_h = h as i32 / 2;
-    for dy in 0..h as i32 {
-        for dx in 0..w as i32 {
-            let px = cx as i32 - half_w + dx;
-            let py = cy as i32 - half_h + dy;
-            if px < 0 || py < 0 || px >= buf.width() as i32 || py >= buf.height() as i32 {
+    let f = &theme.furniture;
+    for dy in 0..rug.height {
+        for dx in 0..rug.width {
+            let (x, y) = (rug.x.saturating_add(dx), rug.y.saturating_add(dy));
+            if x >= buf.width() || y >= buf.height() {
                 continue;
             }
-            let on_border = dx == 0 || dx == w as i32 - 1 || dy == 0 || dy == h as i32 - 1;
-            let on_inner_border = dx == 1 || dx == w as i32 - 2 || dy == 1 || dy == h as i32 - 2;
+            let on_border = dx == 0 || dx + 1 == rug.width || dy == 0 || dy + 1 == rug.height;
+            let on_inner_border = dx == 1 || dx + 2 == rug.width || dy == 1 || dy + 2 == rug.height;
             let color = if on_border {
-                rug_trim
+                f.rug_trim
             } else if on_inner_border {
-                rug_accent
+                f.rug_accent
             } else {
-                rug_field
+                f.rug_field
             };
-            buf.put(px as u16, py as u16, color);
+            buf.put(x, y, color);
         }
+    }
+}
+
+/// A `w`×`h` mat's box, centred on `centre`.
+fn mat_bounds(centre: crate::layout::Point, w: u16, h: u16) -> crate::layout::Bounds {
+    let tl = crate::layout::anchored_top_left(crate::layout::Anchor::Center, centre, w, h);
+    crate::layout::Bounds {
+        x: tl.x,
+        y: tl.y,
+        width: w,
+        height: h,
     }
 }
 
@@ -330,9 +334,11 @@ pub(super) fn paint_pantry_entry_mat(
     else {
         return;
     };
-    let cx = (dw.start.x + dw.end.x) / 2;
-    let cy = dw.start.y + crate::layout::WALL_THICK_H + 1 + ENTRY_MAT_H / 2;
-    paint_area_rug(buf, cx, cy, ENTRY_MAT_W, ENTRY_MAT_H, theme);
+    let centre = crate::layout::Point {
+        x: (dw.start.x + dw.end.x) / 2,
+        y: dw.start.y + crate::layout::WALL_THICK_H + 1 + ENTRY_MAT_H / 2,
+    };
+    paint_area_rug(buf, mat_bounds(centre, ENTRY_MAT_W, ENTRY_MAT_H), theme);
 }
 
 /// Thin bar mat under the kitchen island: the island body covers most of it,
@@ -350,14 +356,11 @@ pub(super) fn paint_island_bar_mat(
     let Some(isl) = layout.pantry.and_then(|p| p.kitchen_island) else {
         return;
     };
-    paint_area_rug(
-        buf,
-        isl.x,
-        isl.y + BAR_MAT_Y_OFF,
-        BAR_MAT_W,
-        BAR_MAT_H,
-        theme,
-    );
+    let centre = crate::layout::Point {
+        x: isl.x,
+        y: isl.y + BAR_MAT_Y_OFF,
+    };
+    paint_area_rug(buf, mat_bounds(centre, BAR_MAT_W, BAR_MAT_H), theme);
 }
 
 /// Aquarium on a low cabinet: theme water behind a shared-dark frame, two fish
