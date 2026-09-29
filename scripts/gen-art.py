@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Author the bundled pack's generated sprite art: the cutaway profile's `@Nx`
-pieces (N = `S`), and the classic profile's 1x pieces drawn from the same
-layout.
+pieces (N = `S`), and the 1x pieces drawn from the same layout: the classic
+profile's desks and the cutaway's base-density back-view sofa.
 
 Draws in PALETTE-KEY space, so the output is .sprite text and the recolor keys
 (H/B/S/P and their [ramps] shades) survive per-agent recoloring. The .sprite
@@ -15,8 +15,9 @@ drawn here (a write deletes those).
 
 It resolves no colour itself: the engine owns the palette and its ramps, so look
 at the result through the real renderer: `cargo run --release --example
-cutaway_snapshot -- <out.png>` for the `@Nx` art, `cargo run --release --example
-snapshot -- --crop-furniture desk <out.png>` for the 1x desk.
+cutaway_snapshot -- <out.png>` for the `@Nx` art (`--scale 1` for the base-density
+sofa), `cargo run --release --example snapshot -- --crop-furniture desk <out.png>`
+for the 1x desk.
 """
 
 import argparse
@@ -56,8 +57,15 @@ CHAIR, CHAIR_RIM, CHAIR_BASE = "T", "I", "/"
 # material.
 SILHOUETTE = "κ"
 COFFEE = "ρ"
-INK, CYAN, RED, DARK_RED, ORANGE, BLUE, GOLD, TAN, BROWN, PINK = (
-    "q", "c", "r", "N", "o", "b", "y", "x", "z", "^")
+# furniture materials
+LEAF, LEAF_SH, LEAF_HI, LEAF_DK = "l", "L", "Φ", "Ψ"
+POT, POT_SH, POT_HI = "g", "Γ", "δ"
+ALU, ALU_DK = "Π", "θ"
+FABRIC, FABRIC_HI, FABRIC_SH, FABRIC_SEAM = "C", "G", "Λ", "Ω"
+# fixed hues, named by hue: the 1x art's own keys, lent to the furniture
+INK, CYAN, RED, DARK_RED, VERMILION, BLUE, GOLD, TAN, BROWN, PINK, GREEN = (
+    "q", "c", "r", "N", "o", "b", "y", "x", "z", "^", "λ")
+PETAL_R, PETAL_Y, PETAL_HI = RED, GOLD, "ζ"
 T = "."
 
 def canvas(w, h):
@@ -184,50 +192,33 @@ def desk_north_1x():
     return g
 
 
-# ---- shared strokes ----------------------------------------------------------
-def capsule(g, pts, r, key, only_empty=False):
-    """Stroke a polyline of radius `r` — an arm or a leg."""
-    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
-        steps = int(max(abs(x1 - x0), abs(y1 - y0)) * 2) + 1
-        for i in range(steps + 1):
-            t = i / steps
-            px, py = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t
-            for y in range(int(py - r) - 1, int(py + r) + 2):
-                for x in range(int(px - r) - 1, int(px + r) + 2):
-                    if (x + 0.5 - px) ** 2 + (y + 0.5 - py) ** 2 <= r * r:
-                        if not only_empty or (0 <= y < len(g) and 0 <= x < len(g[0]) and g[y][x] == T):
-                            put(g, x, y, key)
-
-
-# ---- furniture: plants, whiteboard, bookshelf, meeting sofa ------------------------
-LEAF, LEAF_SH, LEAF_HI, LEAF_DK = "l", "L", "Φ", "Ψ"
-POT, POT_SH, POT_HI = "g", "Γ", "δ"
-PETAL_R, PETAL_Y, PETAL_HI = RED, GOLD, "ζ"
-ALU, ALU_DK = "Π", "θ"
-FABRIC, FABRIC_HI, FABRIC_SH, FABRIC_SEAM = "C", "G", "Λ", "Ω"
-
-
-# ---- the meeting sofa seen from behind: facing north ----------------------------
-# One layout for both densities, in classic rows. A back-view sitter's anchor
-# (`back_couch_anchor`) lands their shoulders on the seat rows and their lap on
-# the backrest's rows, so the seat sits under a sitter and the backrest over one.
+# ---- the meeting sofas: one layout for both views and densities, in logical rows ----
+# `Furniture::MeetingSofaBody`'s visual box
+# (`every_hover_size_is_its_painted_sprite_size`).
 SOFA_W, SOFA_H = 20, 7
-SOFA_SEAT_ROWS = 3  # rows [0, SOFA_SEAT_ROWS): the seat; the backrest below
+# The back view's seat rows, under its sitter; the backrest below draws over
+# their lap. `cutaway::paint`'s `NORTH_SOFA_SEAT_ROWS`
+# (`the_north_sofas_backrest_starts_on_its_lit_ridge`).
+SOFA_SEAT_ROWS = 3
 SOFA_RIDGE_ROWS = 1  # the backrest's lit top, then its back panel to the foot
+# The front view's backrest rows, above its seam: `meeting_sofa.sprite`'s.
+SOFA_BACK_ROWS = 3
 # The three seats' centres (the seat waypoints' `SEAT_DX` about the sofa's
-# centre column), on column boundaries.
+# centre column), on column boundaries, and half the pitch between them: where
+# one cushion ends and the next begins.
 SOFA_SEAT_COLS = (4, 10, 16)
+SOFA_SEAT_HALF = 3
 
 
 def meeting_sofa_north_1x():
-    """The north-facing sofa at classic density: lit cushion tops, a seam where
-    the seat meets the backrest, its lit ridge, and the back panel shading down."""
+    """The north-facing sofa at base density: lit cushion tops, a seam where the
+    seat meets the backrest, its lit ridge, and the back panel shading down."""
     ridge = SOFA_SEAT_ROWS
     g = canvas(SOFA_W, SOFA_H)
     rect(g, 0, 1, SOFA_W, SOFA_H - 1, FABRIC)
     rect(g, 2, 1, SOFA_W - 1, 2, FABRIC_HI)
-    for c in SOFA_SEAT_COLS[1:]:  # the seams between cushions, a column left of each boundary
-        put(g, c - 3, 1, OUTLINE)
+    for c in SOFA_SEAT_COLS[1:]:  # a seam midway between each two seat centres
+        put(g, c - SOFA_SEAT_HALF, 1, OUTLINE)
     rect(g, 1, ridge - 1, SOFA_W - 1, ridge, OUTLINE)
     rect(g, 1, ridge, SOFA_W - 1, ridge + SOFA_RIDGE_ROWS, FABRIC_HI)
     rect(g, 1, SOFA_H - 2, SOFA_W - 1, SOFA_H - 1, FABRIC_SH)
@@ -1308,15 +1299,16 @@ def meeting_sofa():
     """The south-facing sofa: the backrest, arms, three seat cushions
     with their fronts, feet."""
     w, h = SOFA_W * S, SOFA_H * S
-    seat = SOFA_SEAT_ROWS * S  # the backrest's foot, the seat's back
+    seat = SOFA_BACK_ROWS * S  # the backrest's foot, the seat's back
     g = canvas(w, h)
     # backrest
     rect(g, 3, 1, w - 3, seat, FABRIC)
     rect(g, 3, 1, w - 3, 4, FABRIC_HI)
     rect(g, 3, seat - 2, w - 3, seat, FABRIC_SH)
-    # seat cushions
+    # seat cushions, the seam showing between them as it does from behind
+    rect(g, 6, seat, w - 6, h - 4, FABRIC_SEAM)
     for c in SOFA_SEAT_COLS:
-        x0, x1 = c * S - 3 * S + 1, c * S + 3 * S - 1
+        x0, x1 = (c - SOFA_SEAT_HALF) * S + 1, (c + SOFA_SEAT_HALF) * S - 1
         x0, x1 = max(x0, 6), min(x1, w - 6)
         rect(g, x0, seat, x1, h - 4, FABRIC)
         rect(g, x0 + 1, seat + 1, x1 - 1, seat + 3, FABRIC_HI)
@@ -1335,6 +1327,14 @@ def meeting_sofa():
     return g
 
 
+def fade_into_shade(g, x0, x1, y0, y1):
+    """Fabric dithering into shade from row `y0`, solid shade its last two rows."""
+    for y in range(y0, y1):
+        for x in range(x0, x1):
+            if y >= y1 - 2 or (x + y) % 2 == 0:
+                g[y][x] = FABRIC_SH
+
+
 def meeting_sofa_north():
     """The north-facing sofa: three cushions beyond the backrest, its lit
     ridge, a back panel dithering into shade, arms, feet."""
@@ -1344,29 +1344,23 @@ def meeting_sofa_north():
     g = canvas(w, h)
     rect(g, 5, 2, w - 5, seat, FABRIC_SEAM)
     for c in SOFA_SEAT_COLS:
-        x0, x1 = max(c * S - 3 * S + 1, 5), min(c * S + 3 * S - 1, w - 5)
+        x0, x1 = max((c - SOFA_SEAT_HALF) * S + 1, 5), min((c + SOFA_SEAT_HALF) * S - 1, w - 5)
         rect(g, x0, 2, x1, seat, FABRIC)
         rect(g, x0 + 1, 3, x1 - 1, 5, FABRIC_HI)
         rect(g, x0, seat - 2, x1, seat, FABRIC_SH)
-    # ridge
+    # the seam closes the seat, so the backrest band opens on its lit ridge
+    rect(g, 3, seat - 1, w - 3, seat, FABRIC_SEAM)
     rect(g, 3, seat, w - 3, ridge_end, FABRIC_HI)
-    rect(g, 3, seat, w - 3, seat + 1, FABRIC_SEAM)
     rect(g, 3, ridge_end - 1, w - 3, ridge_end, FABRIC)
     # back panel, dithering into shade in its lower half
     rect(g, 1, ridge_end, w - 1, panel_end, FABRIC)
     shade = ridge_end + (panel_end - ridge_end) // 2
-    for y in range(shade, panel_end):
-        for x in range(1, w - 1):
-            if y >= panel_end - 2 or (x + y) % 2 == 0:
-                g[y][x] = FABRIC_SH
+    fade_into_shade(g, 1, w - 1, shade, panel_end)
     # arms, a column in from each edge so the outline fits the canvas
     for ax, inner in ((1, 6), (w - 7, w - 7)):
         rect(g, ax, 1, ax + 6, panel_end, FABRIC)
         rect(g, ax, 1, ax + 6, 4, FABRIC_HI)
-        for y in range(shade, panel_end):
-            for x in range(ax, ax + 6):
-                if y >= panel_end - 2 or (x + y) % 2 == 0:
-                    g[y][x] = FABRIC_SH
+        fade_into_shade(g, ax, ax + 6, shade, panel_end)
         rect(g, inner, 4, inner + 1, panel_end, FABRIC_SEAM)
     rect(g, 3, panel_end, 6, h, KEY_DK)
     rect(g, w - 6, panel_end, w - 3, h, KEY_DK)
@@ -1417,7 +1411,7 @@ def planter(g, cx, top, bot, half_top, half_bot, dark=False):
 
 def plant_bush():
     """A leafy bush in terracotta: long pointed leaves fanning up and out from
-    the pot, back ones first, every tip clear of its neighbours."""
+    the pot, every tip clear of its neighbours."""
     g = canvas(6 * S, 7 * S)
     for ang, ln, wd, side in ((-2.95, 10.0, 2.4, 1), (-0.2, 10.0, 2.4, -1), (-2.55, 12.0, 2.6, 1),
                               (-0.6, 12.0, 2.6, -1), (-1.35, 14.5, 2.6, -1), (-1.8, 14.0, 2.6, 1),
@@ -1429,7 +1423,7 @@ def plant_bush():
 
 
 def plant_tall():
-    """A tall palm in a dark pot: a slim trunk, and long leaves arching out from
+    """A tall palm in a dark pot: a slim trunk, and long leaves fanning out from
     its crown and from one joint below it."""
     g = canvas(6 * S, 10 * S)
     rect(g, 11, 10, 13, 31, BROWN)
@@ -1443,13 +1437,26 @@ def plant_tall():
     return g
 
 
+def stem(g, pts, r, key):
+    """Stroke a polyline of radius `r`: a flower's stem."""
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        steps = int(max(abs(x1 - x0), abs(y1 - y0)) * 2) + 1
+        for i in range(steps + 1):
+            t = i / steps
+            px, py = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t
+            for y in range(int(py - r) - 1, int(py + r) + 2):
+                for x in range(int(px - r) - 1, int(px + r) + 2):
+                    if (x + 0.5 - px) ** 2 + (y + 0.5 - py) ** 2 <= r * r:
+                        put(g, x, y, key)
+
+
 def plant_flower():
     """Potted flowers: a cluster of red and gold blooms over two leaves."""
     g = canvas(6 * S, 6 * S)
     blooms = [(8.5, 7.0, PETAL_R), (15.5, 6.0, PETAL_Y), (12, 3.5, PETAL_R), (6.5, 11.0, PETAL_Y),
               (17.5, 10.5, PETAL_R), (12, 9.5, PETAL_Y)]
     for bx, by, _ in blooms:
-        capsule(g, [(12, 16), (bx, by + 1)], 0.5, LEAF_DK)
+        stem(g, [(12, 16), (bx, by + 1)], 0.5, LEAF_DK)
     blade(g, 12, 16, -2.55, 7.5, 2.6, 1, rib=False)
     blade(g, 12, 16, -0.6, 7.5, 2.6, -1, rib=False)
     for bx, by, col in blooms:
@@ -1477,7 +1484,7 @@ def plant_succulent():
 
 # ---- furniture: fixtures, boards, shelves, screens, the pantry -------------------
 CORK, CORK_SH, STEEL, STEEL_SH = "Δ", "π", "K", "ξ"
-BOOKS = (RED, BLUE, GOLD, FABRIC, TAN, DARK_RED, ORANGE, "λ")
+BOOKS = (RED, BLUE, GOLD, FABRIC, TAN, DARK_RED, VERMILION, GREEN)
 
 
 def floor_lamp():
@@ -1506,7 +1513,8 @@ def filing_cabinet():
     rect(g, 12, 2, 15, 23, STEEL_SH)
     for i in range(3):
         y0 = 3 + i * 7
-        rect(g, 2, y0 + 6, 15, y0 + 7, SHADOW)
+        if i < 2:  # between drawers; the last one's foot is the cabinet's
+            rect(g, 2, y0 + 6, 15, y0 + 7, SHADOW)
         rect(g, 5, y0 + 2, 11, y0 + 3, OFFWHITE)
         rect(g, 6, y0 + 4, 10, y0 + 5, KEY_DK)
     union_outline(g)
@@ -1624,6 +1632,9 @@ def bookshelf():
     return g
 
 
+SLIDE_BAR_PITCH = 4
+
+
 def slide(g, x0, y0, x1, y1):
     """A lit slide sized to its screen: a title bar, bullet lines, a bar chart."""
     rect(g, x0, y0, x1, y1, DISPLAY)
@@ -1632,10 +1643,13 @@ def slide(g, x0, y0, x1, y1):
     for i in range(3):
         put(g, x0 + 3, y0 + 7 + i * 3, GREY)
         rect(g, x0 + 5, y0 + 7 + i * 3, x0 + 5 + w * (3 if i % 2 else 4) // 10, y0 + 8 + i * 3, GREY)
-    bx, base = x0 + w // 2 + 4, y1 - 3
-    for i, frac in enumerate((0.4, 0.65, 0.5, 0.85)):
+    bars = (0.4, 0.65, 0.5, 0.85)
+    # the chart hangs from the glass's east edge, so a narrow screen keeps it
+    bx, base = x1 - 2 - len(bars) * SLIDE_BAR_PITCH, y1 - 3
+    for i, frac in enumerate(bars):
         top = base - int((base - y0 - 8) * frac)
-        rect(g, bx + i * 4, top, bx + i * 4 + 3, base, BLUE if i % 2 else LEAF)
+        x = bx + i * SLIDE_BAR_PITCH
+        rect(g, x, top, x + SLIDE_BAR_PITCH - 1, base, BLUE if i % 2 else LEAF)
     rect(g, bx - 1, base, x1 - 2, base + 1, GREY)
     for y in range(y0, y1):  # a soft sheen across the glass
         for x in range(x0, x1):
@@ -1747,9 +1761,9 @@ def pantry_small():
 def snack_shelf():
     """A wooden rack of snack packets, three shelves, a drawer below."""
     g = canvas(7 * S, 10 * S)
-    rect(g, 1, 1, 27, 38, WOOD)
+    rect(g, 1, 1, 27, 40, WOOD)
     rect(g, 1, 1, 27, 2, WOOD_LT)
-    rect(g, 24, 2, 27, 38, WOOD_SH)
+    rect(g, 24, 2, 27, 40, WOOD_SH)
     rect(g, 3, 3, 24, 30, WOOD_DK)
     rng = random.Random(33)
     for shelf in range(3):
@@ -1758,7 +1772,7 @@ def snack_shelf():
         while x < 22:
             pw = rng.choice((3, 4))
             ph = rng.randrange(4, 7)
-            col = (GOLD, RED, BLUE, LEAF, CYAN, ORANGE)[rng.randrange(6)]
+            col = (GOLD, RED, BLUE, LEAF, CYAN, VERMILION)[rng.randrange(6)]
             rect(g, x, yb - ph, min(24, x + pw), yb, col)
             rect(g, x, yb - ph, min(24, x + pw), yb - ph + 1, WHITE)
             x += pw + 1
@@ -1777,9 +1791,9 @@ def tv_stand():
     rect(g, 1, 1, 39, 2, SLATE)
     slide(g, 3, 3, 37, 22)
     rect(g, 18, 24, 22, 29, BEZEL)
-    rect(g, 4, 29, 36, 38, WOOD)
+    rect(g, 4, 29, 36, 40, WOOD)
     rect(g, 4, 29, 36, 30, WOOD_LT)
-    rect(g, 4, 37, 36, 38, WOOD_SH)
+    rect(g, 4, 38, 36, 40, WOOD_SH)
     rect(g, 19, 31, 20, 37, WOOD_DK)
     rect(g, 15, 33, 18, 34, STEEL)
     rect(g, 22, 33, 25, 34, STEEL)
@@ -1810,7 +1824,7 @@ def phone_booth():
 
 
 def standing_desk():
-    """A sit-stand desk with a lit laptop, on telescoping legs."""
+    """A sit-stand desk with a lit laptop, on slim legs."""
     g = canvas(8 * S, 8 * S)
     rect(g, 1, 1, 31, 17, WOOD)
     rect(g, 1, 1, 31, 2, WOOD_LT)
