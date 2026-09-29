@@ -20,9 +20,9 @@ pub(crate) fn embedded_without_density_art(pack_toml: &str) -> (String, BTreeSet
 ///
 /// Every `@` key in the bundled manifest's `[animations]` and `[buildings]` is a
 /// density variant: `embedded_default_pack_animations_are_all_in_the_registry`
-/// fails on any other animation, so core's `DENSITY_VARIANT_SEP` alone
-/// identifies them here, where its `split_density_variant` is crate-private and
-/// core is no build-dependency.
+/// fails on any other animation, and core refuses a building base named with
+/// one. So core's `DENSITY_VARIANT_SEP` alone identifies them here, where its
+/// `split_density_variant` is crate-private and core is no build-dependency.
 fn strip_density_art(pack_toml: &str) -> (String, BTreeSet<String>) {
     let mut doc: toml_edit::DocumentMut = pack_toml.parse().expect("the bundled pack.toml parses");
     let mut dropped: BTreeSet<String> = BTreeSet::new();

@@ -43,7 +43,13 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
         let sky = Sky::at_with(now, Weather::Storm).with_flash(flash);
         let look = Look::resolve(&sky, theme);
         let sky_row = sky_rows(30, &look);
-        let city = CityStrip::draw(&pack(), (WINDOW_W, 28), 0.0, &look, theme, now);
+        let city = CityStrip::draw(
+            &pack(),
+            (WINDOW_W, 28),
+            0.0,
+            (&look, theme, now),
+            std::num::NonZeroU16::MIN,
+        );
         let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 8, g: 8, b: 10 });
         paint_floor_to_ceiling_window(
             &mut buf,

@@ -158,8 +158,8 @@ pub fn load_sprite_pack(source: PackSource) -> Result<Pack> {
     }
 }
 
-/// The custom pack in `dir`, with the furniture it leaves out inherited from
-/// `base`.
+/// The custom pack in `dir`, with the furniture it leaves out, and the city if
+/// it draws none, inherited from `base`.
 fn load_custom_over(base: &Pack, dir: &Path, origin: &str) -> Result<Pack> {
     let mut custom = load_pack(dir)?;
     tracing::info!(origin, path = ?dir, "loaded custom sprite pack");
@@ -334,8 +334,8 @@ mod tests {
         assert_eq!(report.warning_count(), 0, "{report:?}");
     }
 
-    /// `build.rs` embeds every sprite in `sprites/default/`, so one neither an
-    /// animation nor a hairstyle registers — a generated file whose `pack.toml`
+    /// `build.rs` embeds every sprite in `sprites/default/`, so one no animation,
+    /// hairstyle or building registers — a generated file whose `pack.toml`
     /// entry was never written — ships as dead bytes and draws nothing. A sprite
     /// the pack still loads without is exactly that.
     #[test]
@@ -378,9 +378,10 @@ mod tests {
             pack.buildings().next().is_some(),
             "the city keeps its buildings"
         );
+        let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
         assert!(
             pack.buildings()
-                .all(|b| b.art(1).is_some() && b.art(4).is_none()),
+                .all(|b| b.art(d(1)).is_some() && b.art(d(4)).is_none()),
             "at their base alone"
         );
         let report = validate_pack(&pack);
@@ -398,8 +399,9 @@ mod tests {
         assert_eq!(test_default_pack().max_density_variant(), 4);
     }
 
-    /// The cutaway draws the city at the bundled art's density, so each building
-    /// ships one there beside the base the classic painter draws.
+    /// Each bundled building ships a variant at the bundled art's density,
+    /// beside the base the classic painter draws, for a city drawn on that
+    /// art's grid.
     #[test]
     #[cfg(feature = "density-art")]
     fn every_bundled_building_is_drawn_at_1x_and_4x() {
@@ -408,8 +410,13 @@ mod tests {
             pack.buildings().next().is_some(),
             "the bundled pack draws a city"
         );
+        let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
         for b in pack.buildings() {
-            assert!(b.art(1).is_some() && b.art(4).is_some(), "{}", b.name());
+            assert!(
+                b.art(d(1)).is_some() && b.art(d(4)).is_some(),
+                "{}",
+                b.name()
+            );
         }
     }
 

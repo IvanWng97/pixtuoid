@@ -107,8 +107,10 @@ the palette key of each of its seven materials — `facade`, `shade`, `roof`,
 alone, since its colours come from its depth and the sky rather than the pack.
 `[buildings.<name>]` is one building: a one-frame `sprite` and the `planes`
 (`"mid"`, `"near"`) it may stand in. `[buildings."<name>@<N>x"]` redraws its
-sprite at `N` times the size, as an animation's variant does. Each connected run
-of `glass` is one window, and more of them burn as night falls. Every window
+sprite at exactly `N` times the size. A building that breaks these rules fails
+the pack's load. Each connected run of `glass` is one window, and more of them
+burn as night falls. How tall the city stands is a share of the window, so a
+short window shows the tops of the towers and a tall one shows them whole. Every window
 looks out on one city, the pack's buildings standing in front of plain blocks
 on the horizon. A pack with no `[buildings]` of its own takes the bundled city
 whole, materials and all.

@@ -6,13 +6,12 @@
 //! orchestrator (`pixel_painter/mod.rs`) calls it.
 
 mod celestial;
-mod city;
 mod floor_wash;
 mod lighting;
 
 use celestial::{
     compute_disc, star_exists, star_twinkle, Disc, GLOW_ALPHA, GLOW_PX, MOON_SHADOW,
-    STAR_ALPHA_MAX, STAR_COLOR, STAR_SKY_BAND_FRAC,
+    STAR_ALPHA_MAX, STAR_COLOR,
 };
 pub(super) use floor_wash::paint_floor_wash;
 pub(super) use lighting::{
@@ -26,8 +25,6 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use city::CityStrip;
-
 use super::ambient::SunbeamColumn;
 use super::epoch_ms;
 use super::palette::{blend, blend_pixel, blend_rgb, RgbLut, WHITE};
@@ -35,6 +32,7 @@ use super::palette::{blend, blend_pixel, blend_rgb, RgbLut, WHITE};
 use crate::atmosphere::Look;
 use crate::layout::{wall_trim_row, window_rows, window_run, Layout, WindowBay, WINDOW_W};
 use crate::sky::{Sky, Weather};
+use crate::skyline::CityStrip;
 use crate::theme::Theme;
 
 /// Vertical depth of the warm spill band below each window.
@@ -175,11 +173,10 @@ pub(super) fn paint_floor_and_walls(
     let run = window_run(buf_w);
     let city = CityStrip::draw(
         pack,
-        (run.end - run.start, window_h.saturating_sub(2)),
+        (run.end - run.start, glass_rows(window_h)),
         altitude,
-        look,
-        theme,
-        now,
+        (look, theme, now),
+        std::num::NonZeroU16::MIN,
     );
     let disc = compute_disc(sky, buf_w, top_wall_h, theme);
     for w in bays {
@@ -369,10 +366,16 @@ fn wash_glass(buf: &mut RgbBuffer, x0: u16, y0: u16, w: u16, h: u16, color: Rgb,
     }
 }
 
+/// The glass rows of a window `window_h` tall: all but its top and bottom
+/// frame rows.
+fn glass_rows(window_h: u16) -> u16 {
+    window_h.saturating_sub(2)
+}
+
 /// The sky's colour on each row of the glass, shared by every window: all panes
 /// in a frame have the same height and `look`.
 fn sky_rows(h: u16, look: &Look) -> Vec<Rgb> {
-    let glass_h = h.saturating_sub(2);
+    let glass_h = glass_rows(h);
     let sky_norm = (glass_h as f32) * 0.7;
     (0..glass_h)
         .map(|gy| {
@@ -383,7 +386,7 @@ fn sky_rows(h: u16, look: &Look) -> Vec<Rgb> {
 }
 
 /// Floor-to-ceiling window with frame, mullion, and the city behind its glass:
-/// its part of `city`, a strip whose west end stands at column `city.1`, over
+/// its part of `city`, a strip whose west end stands at column `run_x0`, over
 /// the sky's rows (`sky_rows`).
 #[allow(clippy::too_many_arguments)]
 fn paint_floor_to_ceiling_window(
@@ -401,7 +404,8 @@ fn paint_floor_to_ceiling_window(
     disc: Option<Disc>,
     look: &Look,
 ) {
-    let glass_h = h.saturating_sub(2);
+    let glass_h = glass_rows(h);
+    let clear_sky = crate::skyline::clear_sky_rows(glass_h);
     let building_at = |px: u16, glass_dy: u16| city.at(px.wrapping_sub(run_x0), glass_dy);
 
     for dy in 0..h {
@@ -425,7 +429,7 @@ fn paint_floor_to_ceiling_window(
                 // Stars paint into the sky BEFORE the disc, so an overlapping
                 // disc pixel always wins (painted next, below).
                 if look.star_strength > 0.0
-                    && (glass_dy as f32) < glass_h as f32 * STAR_SKY_BAND_FRAC
+                    && glass_dy < clear_sky
                     && star_exists(px, py)
                     && star_twinkle(px, py, now)
                 {

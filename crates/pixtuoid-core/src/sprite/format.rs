@@ -190,21 +190,29 @@ mod tests {
         let tower = pack.buildings().next().expect("the tower");
         assert_eq!((tower.name(), tower.size()), ("tower", (2, 3)));
         assert!(tower.stands_in(CityPlane::Mid) && tower.stands_in(CityPlane::Near));
-        let base = tower.art(1).expect("every building has its base");
+        let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
+        let base = tower.art(d(1)).expect("every building has its base");
         assert_eq!(
             base.windows(),
             [vec![(0, 1), (1, 1)]],
             "one run of glass, one window"
         );
-        let dense = tower.art(2).expect("the 2x variant");
+        let dense = tower.art(d(2)).expect("the 2x variant");
         assert_eq!(
             dense.windows().len(),
             2,
             "each density finds its own windows: the mullion splits this one"
         );
-        assert!(tower.art(4).is_none());
+        assert!(tower.art(d(4)).is_none());
         let materials = pack.city_materials().expect("[city]");
         assert_eq!(materials.key(Material::Glass), 'W');
+    }
+
+    #[test]
+    fn every_material_has_its_own_place() {
+        for (i, m) in Material::ALL.into_iter().enumerate() {
+            assert_eq!(m.index(), i, "{m:?}");
+        }
     }
 
     #[test]
@@ -230,7 +238,34 @@ mod tests {
             (
                 format!("{CITY}[buildings.tower]\nsprite=\"t.sprite\"\n"),
                 TOWER,
+                "a base naming no planes",
+            ),
+            (
+                format!("{CITY}[buildings.tower]\nsprite=\"t.sprite\"\nplanes=[]\n"),
+                TOWER,
                 "a base standing in no plane",
+            ),
+            (
+                format!("{CITY}[buildings.\"tower@1x\"]\nsprite=\"t.sprite\"\nplanes=[\"near\"]\n"),
+                TOWER,
+                "a base named like a variant",
+            ),
+            (
+                format!(
+                    "{CITY}[buildings.\"tower@big\"]\nsprite=\"t.sprite\"\nplanes=[\"near\"]\n"
+                ),
+                TOWER,
+                "a base named with a variant's mark",
+            ),
+            (
+                format!("{CITY}{base}"),
+                "@frame 0\nR R\nW W\nF f\n@frame 1\nR R\nW W\nF f\n",
+                "a building of two frames",
+            ),
+            (
+                format!("{}{base}", CITY.replace("sign=\"L\"", "sign=\".\"")),
+                TOWER,
+                "a material drawn in a transparent key",
             ),
             (
                 format!("{CITY}[buildings.\"tower@2x\"]\nsprite=\"t2.sprite\"\n"),
@@ -705,8 +740,8 @@ struct AnimationToml {
     frame_ms: u32,
 }
 
-/// A loaded sprite pack: a named, versioned palette, its animations, and the
-/// hairstyles that dress them.
+/// A loaded sprite pack: a named, versioned palette, its animations, the
+/// hairstyles that dress them, and the city behind the windows.
 #[derive(Debug, Clone)]
 pub struct Pack {
     /// Pack name from the `[pack]` table in `pack.toml`.
@@ -744,7 +779,7 @@ pub enum Material {
 
 impl Material {
     /// Its name as `[city]` keys it.
-    pub fn name(self) -> &'static str {
+    fn name(self) -> &'static str {
         match self {
             Material::Facade => "facade",
             Material::Shade => "shade",
@@ -760,7 +795,21 @@ impl Material {
         Material::ALL.into_iter().find(|m| m.name() == name)
     }
 
-    /// Every material, in declaration order.
+    /// Its place in [`Material::ALL`]; a new material fails to compile here
+    /// until it has one.
+    fn index(self) -> usize {
+        match self {
+            Material::Facade => 0,
+            Material::Shade => 1,
+            Material::Roof => 2,
+            Material::Glass => 3,
+            Material::Mullion => 4,
+            Material::Detail => 5,
+            Material::Sign => 6,
+        }
+    }
+
+    /// Every material, in [`index`](Self::index) order.
     pub const ALL: [Material; 7] = [
         Material::Facade,
         Material::Shade,
@@ -774,12 +823,12 @@ impl Material {
 
 /// The palette key each [`Material`] is drawn in, from `[city]`.
 #[derive(Debug, Clone)]
-pub struct CityMaterials(BTreeMap<Material, char>);
+pub struct CityMaterials([char; Material::ALL.len()]);
 
 impl CityMaterials {
     /// The key `material` is drawn in.
     pub fn key(&self, material: Material) -> char {
-        self.0[&material]
+        self.0[material.index()]
     }
 }
 
@@ -834,8 +883,8 @@ impl Building {
 
     /// Its art at `density`, where it is drawn at that density; `1` is the
     /// base, which every building has.
-    pub fn art(&self, density: u16) -> Option<&BuildingArt> {
-        self.art.get(&density)
+    pub fn art(&self, density: std::num::NonZeroU16) -> Option<&BuildingArt> {
+        self.art.get(&density.get())
     }
 }
 
@@ -1000,7 +1049,9 @@ impl Pack {
     }
 
     /// Merge [`OPTIONAL_FURNITURE_ANIMATIONS`] — and their density variants —
-    /// from `base` into self: the keys `RegisteredKey::is_inherited` passes.
+    /// from `base` into self: the keys `RegisteredKey::is_inherited` passes;
+    /// and `base`'s whole city, its buildings and `[city]`, when self has no
+    /// buildings.
     ///
     /// Driven by what `base` HAS rather than by the registry: the registry names
     /// PIECES, not the densities each is drawn at, so enumerating from it would
@@ -1090,7 +1141,7 @@ fn build_pack(
             if let Some(other) = c.keys().find(|k| Material::from_name(k).is_none()) {
                 bail!("[city] names {other:?}, which is no material");
             }
-            let mut keys = BTreeMap::new();
+            let mut keys = [' '; Material::ALL.len()];
             for material in Material::ALL {
                 let Some(key) = c.get(material.name()) else {
                     bail!("[city] names no key for {:?}", material.name());
@@ -1099,10 +1150,10 @@ fn build_pack(
                 if !matches!(palette.get(key), Some(Some(_))) {
                     bail!("[city] material {key:?} is not an opaque key of the palette");
                 }
-                if keys.values().any(|&k| k == key) {
+                if keys[..material.index()].contains(&key) {
                     bail!("[city] draws two materials in {key:?}");
                 }
-                keys.insert(material, key);
+                keys[material.index()] = key;
             }
             Ok(CityMaterials(keys))
         })
@@ -1117,9 +1168,15 @@ fn build_pack(
             bail!("building {key:?} needs a [city] table naming its materials");
         };
         let (name, density) = split_density_variant(&key).unwrap_or((&key, 1));
+        if density == 1 && key.contains(DENSITY_VARIANT_SEP) {
+            bail!(
+                "building {key:?}: `{DENSITY_VARIANT_SEP}` marks a density variant, \
+                 `<name>{DENSITY_VARIANT_SEP}<N>x` with N from 2 to {MAX_DENSITY_VARIANT}"
+            );
+        }
         let art = building_art(&building.sprite, &palette, materials, get_src)?;
         match (density, building.planes) {
-            (1, Some(planes)) => {
+            (1, Some(planes)) if !planes.is_empty() => {
                 let planes = planes
                     .iter()
                     .map(|p| {
@@ -1137,24 +1194,18 @@ fn build_pack(
                     },
                 );
             }
-            (1, None) => bail!("building {key:?} names no planes to stand in"),
+            (1, _) => bail!("building {key:?} names no planes to stand in"),
             (_, Some(_)) => bail!("building variant {key:?} names planes: its base's are its own"),
             (_, None) => {
                 let Some(base) = buildings.get_mut(name) else {
                     bail!("building variant {key:?} has no base `[buildings.{name}]`");
                 };
-                let size = |a: &BuildingArt| {
-                    a.sprite
-                        .frames()
-                        .first()
-                        .map_or((0, 0), |f| (f.width(), f.height()))
+                let Some(base_art) = base.art.get(&1) else {
+                    bail!("building variant {key:?} has no base art");
                 };
-                let (bw, bh) = base.size();
-                let (w, h) = size(&art);
-                if (w, h) != (bw.saturating_mul(density), bh.saturating_mul(density)) {
-                    bail!(
-                        "building variant {key:?} is {w}x{h}, not {density} times its base's {bw}x{bh}"
-                    );
+                if !variant_redraws(&base_art.sprite, density, &art.sprite) {
+                    let (bw, bh) = base.size();
+                    bail!("building variant {key:?} is not {density} times its base's {bw}x{bh}");
                 }
                 base.art.insert(density, art);
             }

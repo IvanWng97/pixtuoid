@@ -25,8 +25,8 @@ pub(crate) struct WindowBay {
     /// The window's left edge.
     pub(crate) x: u16,
     /// The window's place in the tiling, counted from the left over every
-    /// window, those the door covers included, so a window's skyline and
-    /// weather seed stay put whether or not a door takes the one before it.
+    /// window, those the door covers included, so a window's weather seed
+    /// stays put whether or not a door takes the one before it.
     pub(crate) idx: u16,
 }
 

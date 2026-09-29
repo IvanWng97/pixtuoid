@@ -31,7 +31,7 @@ pub(crate) struct Look {
     /// The weather's veil over the window glass, lit for this frame, as
     /// `(color, alpha)`, or `None` where the city shows crisp.
     pub(crate) glass_veil: Option<(Rgb, f32)>,
-    /// How strongly the golden hour blazes on the city, 0..=1.
+    /// How strongly the golden hour blazes in the sky around the city, 0..=1.
     pub(crate) golden_hour: f32,
     /// How brightly the star field shows, 0..=1; zero wherever it would be too
     /// faint to read.
@@ -302,7 +302,7 @@ fn veil_lum(e: &Emitter) -> f32 {
     NIGHT_VEIL_FLOOR + (1.0 - NIGHT_VEIL_FLOOR) * e.emitter_lum.clamp(0.0, 1.0)
 }
 
-/// Golden-hour blaze strength on the city silhouette — SUN-only: a low moon
+/// Golden-hour blaze strength in the sky around the city — SUN-only: a low moon
 /// must never paint an orange cast, however warm/lit it computes, so the gate
 /// is absolute rather than incidental.
 fn golden_hour_blaze(e: &Emitter, a: &Atmo) -> f32 {
