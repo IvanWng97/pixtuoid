@@ -48,8 +48,6 @@ version = "1"
 "I" = "#67676b"   # desk task-chair lit top edge (a flat shell reads as a hole in the floor)
 # --- the generator's materials (scripts/gen-art.py): every @Nx piece and the
 # 1x pieces it owns
-"&" = "#e2e8f0"   # white
-"*" = "#aab2c4"   # white, shaded
 "O" = "#b07a42"   # wood, lit
 "σ" = "#c89058"   # wood, brightest edge
 "ψ" = "#3e2710"   # wood, darkest
@@ -60,31 +58,16 @@ version = "1"
 "6" = "#626470"   # mid grey
 "7" = "#2e3038"   # desk lamp body
 "Θ" = "#5c606c"   # desk lamp, lit edge
-"9" = "#ffe6a0"   # warm light: a bulb or a lit glyph
+"9" = "#ffe6a0"   # warm light: a lamp's bulb
 "!" = "#b8b2a4"   # off-white, shaded
-"$" = "#969288"   # print: lines on paper, grain
+"$" = "#969288"   # print: lines on paper
 "%" = "#968c78"   # mug, shaded side
 "/" = "#1e1f25"   # task-chair seat edge and base
-"^" = "#e89a8a"   # cheek blush
+"κ" = "#16121a"   # the @Nx art's outline: one near-black line round each piece's whole silhouette (the 1x art outlines in n)
+"ρ" = "#4a2c18"   # coffee in a mug
 "¤" = "#d2d4d8"   # off-white: a night office has no pure white
 ";" = "#2a2226"   # shoe leather
 ":" = "#4a3e40"   # shoe, lit toe
-"Φ" = "#76b85c"   # leaf, lit
-"Ψ" = "#1f4a1a"   # leaf midrib / darkest
-"Γ" = "#8f4f33"   # terracotta pot, shaded
-"δ" = "#de946c"   # terracotta pot, lit rim
-"Σ" = "#3a2618"   # potting soil
-"ζ" = "#ff9f8a"   # petal highlight
-"Π" = "#a4aab4"   # aluminium frame
-"θ" = "#5e646e"   # aluminium, shaded
-"Λ" = "#3a5058"   # sofa fabric, shaded
-"Ω" = "#2a3a40"   # sofa seam and tufting
-"λ" = "#5a8a4e"   # book spine, green
-"Δ" = "#b8895a"   # cork
-"π" = "#8a6440"   # cork grain
-"ξ" = "#7c7c86"   # steel, shaded
-"Ξ" = "#1c2a36"   # a display's dark glass (slides, TVs)
-"Ж" = "#34424e"   # a display's sheen or dim content
 
 # Shades of a recolor key, derived from it: `level` steps along the key's ramp
 # (`Rgb::ramp`). They carry no colour of their own, so a per-agent recolor
@@ -93,78 +76,77 @@ version = "1"
 "h" = { of = "H", level = -2 }   # hair, turned from the light
 "Y" = { of = "H", level = 2 }    # hair, catching the light
 "Z" = { of = "H", level = 5 }    # hair, curl highlight
-"X" = { of = "H", level = -4 }   # hair outline
 "s" = { of = "S", level = -1 }   # skin, shaded
-"i" = { of = "S", level = -3 }   # skin, deep shade under the hair
+"i" = { of = "S", level = -3 }   # skin, deepest shade: the neck, the mouth, the collar
 "v" = { of = "B", level = -2 }   # shirt, shaded
 "W" = { of = "B", level = 2 }    # shirt, lit shoulder
-"U" = { of = "B", level = -5 }   # shirt outline
+"U" = { of = "B", level = -5 }   # shirt, deepest shade: a sleeve's crease
 "p" = { of = "P", level = -2 }   # pants, shaded
 "(" = { of = "P", level = 2 }    # pants, lit thigh
-")" = { of = "P", level = -4 }   # pants outline
 
 [animations.seated]
 frames   = ["seated.sprite"]
 frame_ms = 600
 
-[animations."seated@8x"]
-frames   = ["seated@8x.sprite"]
+# Density variants (`@Nx`): docs/CONFIGURATION.md#custom-sprite-packs.
+[animations."seated@4x"]
+frames   = ["seated@4x.sprite"]
 frame_ms = 600
 
 [animations.seated_back]
 frames   = ["seated_back.sprite"]
 frame_ms = 600
 
-[animations."seated_back@8x"]
-frames   = ["seated_back@8x.sprite"]
+[animations."seated_back@4x"]
+frames   = ["seated_back@4x.sprite"]
 frame_ms = 600
 
 [animations.side_seated]
 frames   = ["side_seated.sprite"]
 frame_ms = 600
 
-[animations."side_seated@8x"]
-frames   = ["side_seated@8x.sprite"]
+[animations."side_seated@4x"]
+frames   = ["side_seated@4x.sprite"]
 frame_ms = 600
 
 [animations.typing]
 frames   = ["typing_0.sprite", "typing_1.sprite"]
 frame_ms = 140
 
-[animations."typing@8x"]
-frames   = ["typing_0@8x.sprite", "typing_1@8x.sprite"]
+[animations."typing@4x"]
+frames   = ["typing_0@4x.sprite", "typing_1@4x.sprite"]
 frame_ms = 140
 
 [animations.standing]
 frames   = ["standing.sprite"]
 frame_ms = 600
 
-[animations."standing@8x"]
-frames   = ["standing@8x.sprite"]
+[animations."standing@4x"]
+frames   = ["standing@4x.sprite"]
 frame_ms = 600
 
 [animations.walking]
 frames   = ["walking_0.sprite", "walking_1.sprite"]
 frame_ms = 220
 
-[animations."walking@8x"]
-frames   = ["walking_0@8x.sprite", "walking_1@8x.sprite"]
+[animations."walking@4x"]
+frames   = ["walking_0@4x.sprite", "walking_1@4x.sprite"]
 frame_ms = 220
 
 [animations.walking_back]
 frames   = ["walking_back_0.sprite", "walking_back_1.sprite"]
 frame_ms = 220
 
-[animations."walking_back@8x"]
-frames   = ["walking_back_0@8x.sprite", "walking_back_1@8x.sprite"]
+[animations."walking_back@4x"]
+frames   = ["walking_back_0@4x.sprite", "walking_back_1@4x.sprite"]
 frame_ms = 220
 
 [animations.walking_coffee]
 frames   = ["walking_coffee_0.sprite", "walking_coffee_1.sprite"]
 frame_ms = 220
 
-[animations."walking_coffee@8x"]
-frames   = ["walking_coffee_0@8x.sprite", "walking_coffee_1@8x.sprite"]
+[animations."walking_coffee@4x"]
+frames   = ["walking_coffee_0@4x.sprite", "walking_coffee_1@4x.sprite"]
 frame_ms = 220
 
 # BACK view of the typing pose. OPTIONAL: a pack without it falls back to the
@@ -173,20 +155,16 @@ frame_ms = 220
 frames   = ["typing_back_0.sprite", "typing_back_1.sprite"]
 frame_ms = 220
 
-[animations."typing_back@8x"]
-frames   = ["typing_back_0@8x.sprite", "typing_back_1@8x.sprite"]
+[animations."typing_back@4x"]
+frames   = ["typing_back_0@4x.sprite", "typing_back_1@4x.sprite"]
 frame_ms = 220
 
 [animations.desk]
 frames   = ["desk.sprite"]
 frame_ms = 600
 
-# The cutaway's desk, drawn at 8x. A density variant is OPTIONAL: a pack
-# without it draws the upscaled `desk`. The `@8x` is a CLAIM validate-pack
-# proves against `desk`'s own size, and a renderer uses it only at a scale 8
-# divides.
-[animations."desk@8x"]
-frames   = ["desk@8x.sprite"]
+[animations."desk@4x"]
+frames   = ["desk@4x.sprite"]
 frame_ms = 600
 
 # The desk of a NORTH-facing seat: same width and same bottom row as `desk`,
@@ -196,40 +174,24 @@ frame_ms = 600
 frames   = ["desk_north.sprite"]
 frame_ms = 600
 
-[animations."desk_north@8x"]
-frames   = ["desk_north@8x.sprite"]
+[animations."desk_north@4x"]
+frames   = ["desk_north@4x.sprite"]
 frame_ms = 600
 
 [animations.plant]
 frames   = ["plant.sprite"]
 frame_ms = 600
 
-[animations."plant@8x"]
-frames   = ["plant@8x.sprite"]
-frame_ms = 600
-
 [animations.plant_tall]
 frames   = ["plant_tall.sprite"]
-frame_ms = 600
-
-[animations."plant_tall@8x"]
-frames   = ["plant_tall@8x.sprite"]
 frame_ms = 600
 
 [animations.plant_flower]
 frames   = ["plant_flower.sprite"]
 frame_ms = 600
 
-[animations."plant_flower@8x"]
-frames   = ["plant_flower@8x.sprite"]
-frame_ms = 600
-
 [animations.plant_succulent]
 frames   = ["plant_succulent.sprite"]
-frame_ms = 600
-
-[animations."plant_succulent@8x"]
-frames   = ["plant_succulent@8x.sprite"]
 frame_ms = 600
 
 [animations.floor_lamp]
@@ -246,24 +208,16 @@ frame_ms = 999999
 frames   = ["bulletin_board.sprite"]
 frame_ms = 600
 
-[animations."bulletin_board@8x"]
-frames   = ["bulletin_board@8x.sprite"]
-frame_ms = 600
-
 [animations.exit_sign]
 frames   = ["exit_sign.sprite"]
-frame_ms = 600
-
-[animations."exit_sign@8x"]
-frames   = ["exit_sign@8x.sprite"]
 frame_ms = 600
 
 [animations.desk_chair]
 frames   = ["desk_chair.sprite"]
 frame_ms = 600
 
-[animations."desk_chair@8x"]
-frames   = ["desk_chair@8x.sprite"]
+[animations."desk_chair@4x"]
+frames   = ["desk_chair@4x.sprite"]
 frame_ms = 600
 
 [animations.filing_cabinet]
@@ -307,24 +261,12 @@ frame_ms = 600
 frames   = ["meeting_sofa.sprite"]
 frame_ms = 600
 
-[animations."meeting_sofa@8x"]
-frames   = ["meeting_sofa@8x.sprite"]
-frame_ms = 600
-
 [animations.meeting_screen]
 frames   = ["meeting_screen.sprite"]
 frame_ms = 600
 
-[animations."meeting_screen@8x"]
-frames   = ["meeting_screen@8x.sprite"]
-frame_ms = 600
-
 [animations.pantry]
 frames   = ["pantry.sprite"]
-frame_ms = 600
-
-[animations."pantry@8x"]
-frames   = ["pantry@8x.sprite"]
 frame_ms = 600
 
 [animations.pantry_small]
@@ -332,86 +274,58 @@ frame_ms = 600
 frames   = ["pantry_small.sprite"]
 frame_ms = 600
 
-[animations."pantry_small@8x"]
-frames   = ["pantry_small@8x.sprite"]
-frame_ms = 600
-
 [animations.whiteboard]
 frames   = ["whiteboard.sprite"]
-frame_ms = 600
-
-[animations."whiteboard@8x"]
-frames   = ["whiteboard@8x.sprite"]
 frame_ms = 600
 
 [animations.bookshelf]
 frames   = ["bookshelf.sprite"]
 frame_ms = 600
 
-[animations."bookshelf@8x"]
-frames   = ["bookshelf@8x.sprite"]
-frame_ms = 600
-
 [animations.snack_shelf]
 frames   = ["snack_shelf.sprite"]
-frame_ms = 600
-
-[animations."snack_shelf@8x"]
-frames   = ["snack_shelf@8x.sprite"]
 frame_ms = 600
 
 [animations.tv_stand]
 frames   = ["tv_stand.sprite"]
 frame_ms = 600
 
-[animations."tv_stand@8x"]
-frames   = ["tv_stand@8x.sprite"]
-frame_ms = 600
-
 [animations.phone_booth]
 frames   = ["phone_booth.sprite"]
-frame_ms = 600
-
-[animations."phone_booth@8x"]
-frames   = ["phone_booth@8x.sprite"]
 frame_ms = 600
 
 [animations.standing_desk]
 frames   = ["standing_desk.sprite"]
 frame_ms = 600
 
-[animations."standing_desk@8x"]
-frames   = ["standing_desk@8x.sprite"]
-frame_ms = 600
-
 [animations.back_couch]
 frames   = ["back_couch.sprite"]
 frame_ms = 600
 
-[animations."back_couch@8x"]
-frames   = ["back_couch@8x.sprite"]
+[animations."back_couch@4x"]
+frames   = ["back_couch@4x.sprite"]
 frame_ms = 600
 
 [animations.seated_sleeping]
 frames   = ["seated_sleeping.sprite"]
 frame_ms = 600
 
-[animations."seated_sleeping@8x"]
-frames   = ["seated_sleeping@8x.sprite"]
+[animations."seated_sleeping@4x"]
+frames   = ["seated_sleeping@4x.sprite"]
 frame_ms = 600
 
 [animations.seated_sleeping_alt]
 frames   = ["seated_sleeping_alt.sprite"]
 frame_ms = 600
 
-[animations."seated_sleeping_alt@8x"]
-frames   = ["seated_sleeping_alt@8x.sprite"]
+[animations."seated_sleeping_alt@4x"]
+frames   = ["seated_sleeping_alt@4x.sprite"]
 frame_ms = 600
 
 [animations.holding_coffee]
 frames   = ["holding_coffee.sprite"]
 frame_ms = 600
 
-[animations."holding_coffee@8x"]
-frames   = ["holding_coffee@8x.sprite"]
+[animations."holding_coffee@4x"]
+frames   = ["holding_coffee@4x.sprite"]
 frame_ms = 600

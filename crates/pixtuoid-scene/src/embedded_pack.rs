@@ -332,7 +332,7 @@ mod tests {
     }
 
     /// `build.rs` embeds every sprite in `sprites/default/`, so one no animation
-    /// registers — a generated `@8x` whose `pack.toml` entry was never written —
+    /// registers — a generated `@Nx` whose `pack.toml` entry was never written —
     /// ships as dead bytes and draws nothing. A sprite the pack still loads
     /// without is exactly that.
     #[test]
@@ -382,8 +382,8 @@ mod tests {
     /// change to the bundled art's densest variant should be a decision.
     #[test]
     #[cfg(feature = "density-art")]
-    fn the_bundled_pack_is_drawn_at_most_at_8x() {
-        assert_eq!(test_default_pack().max_density_variant(), 8);
+    fn the_bundled_pack_is_drawn_at_most_at_4x() {
+        assert_eq!(test_default_pack().max_density_variant(), 4);
     }
 
     #[test]

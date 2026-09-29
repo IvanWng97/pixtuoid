@@ -111,7 +111,8 @@ mod tests {
              [animations.\"seated@2x\"]\nframes=[\"a2.sprite\", \"c3.sprite\"]\nframe_ms=100\n\
              [animations.holding_coffee]\nframes=[\"a1.sprite\"]\nframe_ms=100\n\
              [animations.\"holding_coffee@2x\"]\nframes=[\"a2.sprite\"]\nframe_ms=100\n\
-             [animations.\"holding_coffee@4x\"]\nframes=[\"a4.sprite\"]\nframe_ms=100\n",
+             [animations.\"holding_coffee@4x\"]\nframes=[\"a4.sprite\"]\nframe_ms=100\n\
+             [animations.desk]\nframes=[\"a1.sprite\"]\nframe_ms=100\n",
             &[
                 ("a1.sprite", "@frame 0\nA"),
                 ("b1.sprite", "@frame 0\nB"),
@@ -218,6 +219,16 @@ mod tests {
             (d.density.get(), d.frame.get(0, 0).copied().flatten()),
             (2, Some(a))
         );
+    }
+
+    /// The flip side of one piece at a time: a piece with no variant draws its
+    /// base while another's lands at the same scale, or adding one `@Nx` sprite
+    /// would be a flag day for all of them.
+    #[test]
+    fn a_piece_with_no_variant_draws_its_base_while_anothers_lands() {
+        let pack = variant_pack();
+        assert_eq!(at(&pack, "holding_coffee", 0, 4), (4, 4, 1));
+        assert_eq!(at(&pack, "desk", 0, 4), (1, 1, 4));
     }
 
     #[test]

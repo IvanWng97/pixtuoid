@@ -118,9 +118,10 @@ pub(crate) enum ClassicReason {
     /// and redraws.
     TmuxNeedsKitty(ImageProtocol),
     /// The terminal has a protocol, but its cell is too small for any scale the
-    /// pack's art lands on: a small font against dense art (a 5-px-wide cell
-    /// cannot reach 8x art within [`RenderScale::fit`]'s bound), or a 1-px
-    /// cell, where one pixel per logical unit IS the classic density.
+    /// pack's art lands on: a cell whose natural scale lies further than
+    /// [`RenderScale::fit`]'s bound from every multiple of the pack's least
+    /// density, or a 1-px cell, where one pixel per logical unit IS the classic
+    /// density.
     CellTooSmall {
         /// The cell the terminal reported.
         cell: CellSize,
@@ -214,7 +215,7 @@ fn raw_scale_for_cell(cell: CellSize) -> u16 {
 /// that lands.
 ///
 /// The densest that lands, not the densest alone: one outlier `@16x` sprite
-/// must not switch the cutaway off on a terminal its 8x art lands on. A pack
+/// must not switch the cutaway off on a terminal the rest of its art lands on. A pack
 /// with no variants lands its base art at the natural scale.
 pub(crate) fn render_scale_for_cell(cell: CellSize, densities: &[u16]) -> Option<RenderScale> {
     let natural = raw_scale_for_cell(cell);
@@ -361,8 +362,17 @@ mod tests {
     const CELL_8X16: CellSize = CellSize { w: 8, h: 16 };
     /// A pack with no density variants.
     const BASE_ONLY: &[u16] = &[];
-    /// The bundled pack's densities.
-    const BUNDLED: &[u16] = &[8];
+    /// The bundled pack's densities (`bundled_is_the_embedded_packs_densities`).
+    const BUNDLED: &[u16] = &[4];
+
+    #[test]
+    fn bundled_is_the_embedded_packs_densities() {
+        let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
+            pixtuoid_scene::embedded_pack::PackSource::Bundled,
+        )
+        .expect("the embedded pack loads");
+        assert_eq!(pack.density_variants(), BUNDLED);
+    }
 
     fn answered(protocol: Option<ImageProtocol>, cell: CellSize, tmux: bool) -> Probe {
         Probe::Detected(Detected {
@@ -495,7 +505,7 @@ mod tests {
     /// cell, not about a switch to kitty that would not help.
     #[test]
     fn a_cell_too_small_is_reported_before_tmux() {
-        let tiny = CellSize { w: 5, h: 10 };
+        let tiny = CellSize { w: 2, h: 4 };
         assert_eq!(
             resolve(
                 GraphicsMode::Auto,
@@ -505,7 +515,7 @@ mod tests {
             Plan::Classic {
                 reason: ClassicReason::CellTooSmall {
                     cell: tiny,
-                    density: 8
+                    density: 4
                 }
             }
         );
@@ -550,11 +560,11 @@ mod tests {
                 BASE_ONLY,
                 too_small(CellSize { w: 1, h: 2 }, 1),
             ),
-            // 5 cannot reach 8x art within the fit's bound.
+            // 2 cannot reach 4x art within the fit's bound.
             (
-                capable(CellSize { w: 5, h: 10 }),
+                capable(CellSize { w: 2, h: 4 }),
                 BUNDLED,
-                too_small(CellSize { w: 5, h: 10 }, 8),
+                too_small(CellSize { w: 2, h: 4 }, 4),
             ),
         ];
         for (probe, densities, want) in cases {
@@ -573,9 +583,9 @@ mod tests {
     #[test]
     fn a_cell_too_small_names_the_art_it_is_too_small_for() {
         let reason = |cell, density| ClassicReason::CellTooSmall { cell, density }.describe();
-        let small_font = reason(CellSize { w: 5, h: 10 }, 8);
-        assert!(small_font.contains("the pack's 8x art"), "{small_font}");
-        let no_pixels = reason(CellSize { w: 1, h: 2 }, 8);
+        let small_font = reason(CellSize { w: 2, h: 4 }, 4);
+        assert!(small_font.contains("the pack's 4x art"), "{small_font}");
+        let no_pixels = reason(CellSize { w: 1, h: 2 }, 4);
         assert!(no_pixels.ends_with("too small to subdivide"), "{no_pixels}");
     }
 
@@ -613,7 +623,7 @@ mod tests {
     }
 
     /// A real Retina Ghostty reports a 17x41 cell: 17 is what the cell alone
-    /// allows, and the pack's 8x art moves it to the nearest multiple.
+    /// allows, and the pack's 4x art moves it to the nearest multiple.
     #[test]
     fn the_cell_gives_the_natural_scale_and_the_pack_fits_it() {
         assert_eq!(raw_scale_for_cell(CellSize { w: 17, h: 41 }), 17);

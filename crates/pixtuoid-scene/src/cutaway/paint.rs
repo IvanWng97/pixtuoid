@@ -2862,25 +2862,6 @@ S B B B B B B S
         }
     }
 
-    /// The flip side of `densest_frame`'s "one piece at a time" (its own tests
-    /// pin a variant winning): a piece with no variant that lands at the scale
-    /// must be untouched by the lookup, or adding one `@Nx` sprite would be a
-    /// flag day for all of them. `plant` ships only 8x art, and 8 does not
-    /// divide 4.
-    #[test]
-    fn a_piece_with_no_variant_at_the_scale_renders_exactly_as_it_did_before() {
-        let pack = pack();
-        assert!(
-            pack.animation("plant@4x").is_none() && pack.animation("plant@2x").is_none(),
-            "this test is only meaningful while no `plant` variant divides 4"
-        );
-        let (bw, _) = base_size(&pack, "plant");
-        let scale = RenderScale::new(4).expect("nonzero");
-        let d = crate::pixel_painter::densest_frame(&pack, "plant", 0, scale)
-            .expect("plant is in the pack");
-        assert_eq!((d.frame.width(), d.blit_at.get()), (bw, 4));
-    }
-
     /// [`desk_face_rows`]' rule, through the real paint.
     #[test]
     #[cfg(feature = "density-art")]
