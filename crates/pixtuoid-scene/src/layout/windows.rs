@@ -88,6 +88,26 @@ pub(crate) fn window_rows(band_h: u16) -> Range<u16> {
     WINDOW_TOP..wall_trim_row(band_h).max(WINDOW_TOP)
 }
 
+/// The glass rows of a window `window_h` tall: all but its top and bottom
+/// frame rows.
+pub(crate) fn glass_rows(window_h: u16) -> u16 {
+    window_h.saturating_sub(2)
+}
+
+/// Where a window's transom crosses it, in percent of its height from the top.
+const TRANSOM_PCT: u16 = 70;
+
+/// Whether the cell `(dx, dy)` of a window `h` rows tall is its frame — its
+/// edge, its centre mullion or its transom — which no glass shows through.
+pub(crate) fn window_frame(dx: u16, dy: u16, h: u16) -> bool {
+    dx == 0
+        || dx == WINDOW_W - 1
+        || dy == 0
+        || dy + 1 == h
+        || dx == WINDOW_W / 2
+        || dy == h * TRANSOM_PCT / 100
+}
+
 impl SceneLayout {
     /// The windows this office's north wall shows, left to right.
     pub(crate) fn window_bays(&self) -> impl Iterator<Item = WindowBay> {

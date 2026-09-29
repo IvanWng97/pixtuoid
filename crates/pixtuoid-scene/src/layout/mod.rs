@@ -35,7 +35,9 @@ pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 // Painter tests tile walls no `SceneLayout` has.
 #[cfg(test)]
 pub(crate) use windows::window_bays;
-pub(crate) use windows::{wall_trim_row, window_rows, window_run, WindowBay, WINDOW_W};
+pub(crate) use windows::{
+    glass_rows, wall_trim_row, window_frame, window_rows, window_run, WindowBay, WINDOW_W,
+};
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
 pub(crate) use coarse::{cell_walkable, snap, COARSE_CELL_SIZE, NEIGHBORS_8};
 
