@@ -250,6 +250,12 @@ pub(super) struct Seat {
     facing: crate::layout::Facing,
 }
 
+/// How far south of their seat a sitter on seated furniture (couch, sofa,
+/// meeting chair) sorts. The classic painter keys a back-view sofa one row
+/// further south, over its sitter, and a front sofa on this row, where
+/// insertion order puts the sitter on top.
+pub(crate) const SEATED_Z_OFF: u16 = 2;
+
 impl Seat {
     pub(super) fn at_waypoint(
         kind: crate::layout::WaypointKind,
@@ -399,9 +405,7 @@ impl Seat {
     /// mid-glide, then jumps behind it.
     pub(super) fn z_key(self) -> u16 {
         if self.seated_furniture() {
-            // Behind a couch/sofa back or tied with a front sofa, where
-            // insertion order puts the sitter on top.
-            return self.pos.y + 2;
+            return self.pos.y + SEATED_Z_OFF;
         }
         // The plain feet row, which for the bartender sits INSIDE the island
         // body — so the whole arc stays behind the counter.

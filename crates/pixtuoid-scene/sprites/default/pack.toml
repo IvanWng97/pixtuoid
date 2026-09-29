@@ -19,7 +19,7 @@ version = "1"
 "M" = "#3a3a40"   # monitor frame
 "E" = "#6e7280"   # elevator frame — brushed steel: between `NORMAL.surface.wall` and
                   # chrome (K) so it reads as a metal box embedded in the wall
-"k" = "#1a1a22"   # keyboard
+"k" = "#1a1a22"   # near-black: a keyboard, feet and casters, pulls
 "D" = "#8b5a2b"   # desk wood
 "d" = "#5a3818"   # desk shadow
 "n" = "#3a2a1c"   # outline / nose shadow
@@ -36,11 +36,11 @@ version = "1"
 "b" = "#3a5a9e"   # book spine blue
 "y" = "#c8a64c"   # book spine yellow / paperback
 "q" = "#1d1d1d"   # marker / whiteboard scribble
-"x" = "#c8a060"   # dog tan fur
-"z" = "#7a5030"   # dog dark brown (ears, tail tip, nose)
+"x" = "#c8a060"   # tan: the dog's fur; a book, a box
+"z" = "#7a5030"   # dark brown: the dog's ears, tail tip and nose; a palm's trunk
 "R" = "#c45050"   # dog nose/tongue
-"o" = "#d2402f"   # lobster body red
-"N" = "#9e2a20"   # lobster shade (dark red)
+"o" = "#d2402f"   # vermilion: the lobster's body; a book, a snack
+"N" = "#9e2a20"   # dark red: the lobster's shade; lettering, a book, a bloom's heart
 "Q" = "#f0895a"   # lobster highlight (orange carapace)
 "A" = "#e85540"   # lobster claw (lit)
 "a" = "#c83828"   # lobster antenna
@@ -53,14 +53,14 @@ version = "1"
 "ψ" = "#3e2710"   # wood, darkest
 "ω" = "#d6a064"   # desk lamp's warm pool on the wood
 "3" = "#4a4e5a"   # slate: a dark surface's lit edge
-"4" = "#18191f"   # near-black: seams and cast shadow
+"4" = "#18191f"   # near-black: seams, cast shadow, a dark casing
 "φ" = "#3c3e48"   # charcoal: keycaps and buttons
 "6" = "#626470"   # mid grey
-"7" = "#2e3038"   # desk lamp body
-"Θ" = "#5c606c"   # desk lamp, lit edge
-"9" = "#ffe6a0"   # warm light: a lamp's bulb
+"7" = "#2e3038"   # lamp body
+"Θ" = "#5c606c"   # lamp body, lit edge
+"9" = "#ffe6a0"   # warm light: a bulb, a lit sign's panel
 "!" = "#b8b2a4"   # off-white, shaded
-"$" = "#969288"   # print: lines on paper
+"$" = "#969288"   # print: lines on paper, a spine's title
 "%" = "#968c78"   # mug, shaded side
 "/" = "#1e1f25"   # task-chair seat edge and base
 "κ" = "#16121a"   # the @Nx art's outline: one near-black line round each piece's whole silhouette (the 1x art outlines in n)
@@ -68,6 +68,23 @@ version = "1"
 "¤" = "#d2d4d8"   # off-white: a night office has no pure white
 ";" = "#2a2226"   # shoe leather
 ":" = "#4a3e40"   # shoe, lit toe
+"&" = "#e2e8f0"   # the brightest neutral, still short of pure white: a lit edge, a glint
+"^" = "#e89a8a"   # pink: a sticky note
+"Φ" = "#76b85c"   # leaf, lit
+"Ψ" = "#1f4a1a"   # leaf midrib / darkest
+"Γ" = "#8f4f33"   # terracotta pot, shaded
+"δ" = "#de946c"   # terracotta pot, lit: its west side and rim
+"ζ" = "#ff9f8a"   # petal highlight
+"Π" = "#a4aab4"   # aluminium frame
+"θ" = "#5e646e"   # aluminium, shaded
+"Λ" = "#3a5058"   # couch fabric, shaded
+"Ω" = "#2a3a40"   # couch fabric's seam: between cushions, inside the arms, the front rail
+"λ" = "#5a8a4e"   # book spine, green
+"Δ" = "#b8895a"   # cork
+"π" = "#8a6440"   # cork grain
+"ξ" = "#7c7c86"   # steel, shaded
+"Ξ" = "#1c2a36"   # j's colour on a key the cutaway never relights: a TV's, a slide's glass
+"Ж" = "#34424e"   # J's colour: a sheen on dark glass (a display, a microwave's window)
 
 # Shades of a recolor key, derived from it: `level` steps along the key's ramp
 # (`Rgb::ramp`). They carry no colour of their own, so a per-agent recolor
@@ -182,20 +199,40 @@ frame_ms = 600
 frames   = ["plant.sprite"]
 frame_ms = 600
 
+[animations."plant@4x"]
+frames   = ["plant@4x.sprite"]
+frame_ms = 600
+
 [animations.plant_tall]
 frames   = ["plant_tall.sprite"]
+frame_ms = 600
+
+[animations."plant_tall@4x"]
+frames   = ["plant_tall@4x.sprite"]
 frame_ms = 600
 
 [animations.plant_flower]
 frames   = ["plant_flower.sprite"]
 frame_ms = 600
 
+[animations."plant_flower@4x"]
+frames   = ["plant_flower@4x.sprite"]
+frame_ms = 600
+
 [animations.plant_succulent]
 frames   = ["plant_succulent.sprite"]
 frame_ms = 600
 
+[animations."plant_succulent@4x"]
+frames   = ["plant_succulent@4x.sprite"]
+frame_ms = 600
+
 [animations.floor_lamp]
 frames   = ["floor_lamp.sprite"]
+frame_ms = 600
+
+[animations."floor_lamp@4x"]
+frames   = ["floor_lamp@4x.sprite"]
 frame_ms = 600
 
 [animations.door]
@@ -208,8 +245,16 @@ frame_ms = 999999
 frames   = ["bulletin_board.sprite"]
 frame_ms = 600
 
+[animations."bulletin_board@4x"]
+frames   = ["bulletin_board@4x.sprite"]
+frame_ms = 600
+
 [animations.exit_sign]
 frames   = ["exit_sign.sprite"]
+frame_ms = 600
+
+[animations."exit_sign@4x"]
+frames   = ["exit_sign@4x.sprite"]
 frame_ms = 600
 
 [animations.desk_chair]
@@ -222,6 +267,10 @@ frame_ms = 600
 
 [animations.filing_cabinet]
 frames   = ["filing_cabinet.sprite"]
+frame_ms = 600
+
+[animations."filing_cabinet@4x"]
+frames   = ["filing_cabinet@4x.sprite"]
 frame_ms = 600
 
 [animations.cat_walk]
@@ -257,16 +306,41 @@ frames   = ["lobster_rest.sprite"]
 frame_ms = 600
 
 [animations.meeting_sofa]
-# Shared by the meeting room AND the lounge couch.
+# The front view. The classic painter also draws the back view with it, flipped:
+# the south sofa of a meeting trio and the lounge couch.
 frames   = ["meeting_sofa.sprite"]
+frame_ms = 600
+
+[animations."meeting_sofa@4x"]
+frames   = ["meeting_sofa@4x.sprite"]
+frame_ms = 600
+
+[animations.meeting_sofa_north]
+# The meeting sofa seen from behind (the south sofa of a meeting trio and the
+# lounge couch, both facing north), drawn only by the cutaway, which sorts its
+# top rows under the sitter and the rest over their lap. OPTIONAL: a pack
+# without it gets its own `meeting_sofa`, flipped.
+frames   = ["meeting_sofa_north.sprite"]
+frame_ms = 600
+
+[animations."meeting_sofa_north@4x"]
+frames   = ["meeting_sofa_north@4x.sprite"]
 frame_ms = 600
 
 [animations.meeting_screen]
 frames   = ["meeting_screen.sprite"]
 frame_ms = 600
 
+[animations."meeting_screen@4x"]
+frames   = ["meeting_screen@4x.sprite"]
+frame_ms = 600
+
 [animations.pantry]
 frames   = ["pantry.sprite"]
+frame_ms = 600
+
+[animations."pantry@4x"]
+frames   = ["pantry@4x.sprite"]
 frame_ms = 600
 
 [animations.pantry_small]
@@ -274,28 +348,56 @@ frame_ms = 600
 frames   = ["pantry_small.sprite"]
 frame_ms = 600
 
+[animations."pantry_small@4x"]
+frames   = ["pantry_small@4x.sprite"]
+frame_ms = 600
+
 [animations.whiteboard]
 frames   = ["whiteboard.sprite"]
+frame_ms = 600
+
+[animations."whiteboard@4x"]
+frames   = ["whiteboard@4x.sprite"]
 frame_ms = 600
 
 [animations.bookshelf]
 frames   = ["bookshelf.sprite"]
 frame_ms = 600
 
+[animations."bookshelf@4x"]
+frames   = ["bookshelf@4x.sprite"]
+frame_ms = 600
+
 [animations.snack_shelf]
 frames   = ["snack_shelf.sprite"]
+frame_ms = 600
+
+[animations."snack_shelf@4x"]
+frames   = ["snack_shelf@4x.sprite"]
 frame_ms = 600
 
 [animations.tv_stand]
 frames   = ["tv_stand.sprite"]
 frame_ms = 600
 
+[animations."tv_stand@4x"]
+frames   = ["tv_stand@4x.sprite"]
+frame_ms = 600
+
 [animations.phone_booth]
 frames   = ["phone_booth.sprite"]
 frame_ms = 600
 
+[animations."phone_booth@4x"]
+frames   = ["phone_booth@4x.sprite"]
+frame_ms = 600
+
 [animations.standing_desk]
 frames   = ["standing_desk.sprite"]
+frame_ms = 600
+
+[animations."standing_desk@4x"]
+frames   = ["standing_desk@4x.sprite"]
 frame_ms = 600
 
 [animations.back_couch]
