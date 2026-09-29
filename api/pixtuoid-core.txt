@@ -734,6 +734,225 @@ pub mod pixtuoid_core::sprite
 pub mod pixtuoid_core::sprite::blit
 pub fn pixtuoid_core::sprite::blit::blit_frame(&pixtuoid_core::sprite::Frame, u16, u16, &mut pixtuoid_core::sprite::RgbBuffer)
 pub fn pixtuoid_core::sprite::blit::blit_frame_scaled(&pixtuoid_core::sprite::Frame, u16, u16, core::num::nonzero::NonZeroU16, &mut pixtuoid_core::sprite::RgbBuffer)
+pub mod pixtuoid_core::sprite::error
+#[non_exhaustive] pub enum pixtuoid_core::sprite::error::ColorError
+#[non_exhaustive] pub pixtuoid_core::sprite::error::ColorError::Hex
+pub pixtuoid_core::sprite::error::ColorError::Hex::value: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::ColorError::Prefix
+pub pixtuoid_core::sprite::error::ColorError::Prefix::value: alloc::string::String
+impl core::clone::Clone for pixtuoid_core::sprite::error::ColorError
+pub fn pixtuoid_core::sprite::error::ColorError::clone(&self) -> pixtuoid_core::sprite::error::ColorError
+impl core::cmp::Eq for pixtuoid_core::sprite::error::ColorError
+impl core::cmp::PartialEq for pixtuoid_core::sprite::error::ColorError
+pub fn pixtuoid_core::sprite::error::ColorError::eq(&self, &pixtuoid_core::sprite::error::ColorError) -> bool
+impl core::error::Error for pixtuoid_core::sprite::error::ColorError
+impl core::fmt::Debug for pixtuoid_core::sprite::error::ColorError
+pub fn pixtuoid_core::sprite::error::ColorError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for pixtuoid_core::sprite::error::ColorError
+pub fn pixtuoid_core::sprite::error::ColorError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::error::ColorError
+impl core::marker::Freeze for pixtuoid_core::sprite::error::ColorError
+impl core::marker::Send for pixtuoid_core::sprite::error::ColorError
+impl core::marker::Sync for pixtuoid_core::sprite::error::ColorError
+impl core::marker::Unpin for pixtuoid_core::sprite::error::ColorError
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::error::ColorError
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::error::ColorError
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::error::ColorError
+#[non_exhaustive] pub enum pixtuoid_core::sprite::error::KeySite
+pub pixtuoid_core::sprite::error::KeySite::CharacterOutline
+pub pixtuoid_core::sprite::error::KeySite::CityMaterial
+pub pixtuoid_core::sprite::error::KeySite::Palette
+pub pixtuoid_core::sprite::error::KeySite::Ramp
+pub pixtuoid_core::sprite::error::KeySite::RampBase
+impl core::clone::Clone for pixtuoid_core::sprite::error::KeySite
+pub fn pixtuoid_core::sprite::error::KeySite::clone(&self) -> pixtuoid_core::sprite::error::KeySite
+impl core::cmp::Eq for pixtuoid_core::sprite::error::KeySite
+impl core::cmp::PartialEq for pixtuoid_core::sprite::error::KeySite
+pub fn pixtuoid_core::sprite::error::KeySite::eq(&self, &pixtuoid_core::sprite::error::KeySite) -> bool
+impl core::error::Error for pixtuoid_core::sprite::error::KeySite
+impl core::fmt::Debug for pixtuoid_core::sprite::error::KeySite
+pub fn pixtuoid_core::sprite::error::KeySite::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for pixtuoid_core::sprite::error::KeySite
+pub fn pixtuoid_core::sprite::error::KeySite::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for pixtuoid_core::sprite::error::KeySite
+pub fn pixtuoid_core::sprite::error::KeySite::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for pixtuoid_core::sprite::error::KeySite
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::error::KeySite
+impl core::marker::Freeze for pixtuoid_core::sprite::error::KeySite
+impl core::marker::Send for pixtuoid_core::sprite::error::KeySite
+impl core::marker::Sync for pixtuoid_core::sprite::error::KeySite
+impl core::marker::Unpin for pixtuoid_core::sprite::error::KeySite
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::error::KeySite
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::error::KeySite
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::error::KeySite
+#[non_exhaustive] pub enum pixtuoid_core::sprite::error::LineError
+pub pixtuoid_core::sprite::error::LineError::DataBeforeFrame
+pub pixtuoid_core::sprite::error::LineError::DuplicateMark
+pub pixtuoid_core::sprite::error::LineError::FrameNumber
+#[non_exhaustive] pub pixtuoid_core::sprite::error::LineError::HeadWithoutView
+pub pixtuoid_core::sprite::error::LineError::HeadWithoutView::name: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::LineError::KeyPastCapacity
+pub pixtuoid_core::sprite::error::LineError::KeyPastCapacity::key: char
+#[non_exhaustive] pub pixtuoid_core::sprite::error::LineError::MarkCoordinate
+pub pixtuoid_core::sprite::error::LineError::MarkCoordinate::value: alloc::string::String
+pub pixtuoid_core::sprite::error::LineError::MarkFields
+#[non_exhaustive] pub pixtuoid_core::sprite::error::LineError::MarkName
+pub pixtuoid_core::sprite::error::LineError::MarkName::name: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::LineError::MarkOutside
+pub pixtuoid_core::sprite::error::LineError::MarkOutside::height: u16
+pub pixtuoid_core::sprite::error::LineError::MarkOutside::name: alloc::string::String
+pub pixtuoid_core::sprite::error::LineError::MarkOutside::width: u16
+pub pixtuoid_core::sprite::error::LineError::MarkOutside::x: u16
+pub pixtuoid_core::sprite::error::LineError::MarkOutside::y: u16
+pub pixtuoid_core::sprite::error::LineError::NoRows
+#[non_exhaustive] pub pixtuoid_core::sprite::error::LineError::PixelToken
+pub pixtuoid_core::sprite::error::LineError::PixelToken::token: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::LineError::Ragged
+pub pixtuoid_core::sprite::error::LineError::Ragged::expected: usize
+pub pixtuoid_core::sprite::error::LineError::Ragged::got: usize
+pub pixtuoid_core::sprite::error::LineError::Ragged::row: usize
+#[non_exhaustive] pub pixtuoid_core::sprite::error::LineError::TooManyRows
+pub pixtuoid_core::sprite::error::LineError::TooManyRows::rows: usize
+#[non_exhaustive] pub pixtuoid_core::sprite::error::LineError::TooWide
+pub pixtuoid_core::sprite::error::LineError::TooWide::width: usize
+#[non_exhaustive] pub pixtuoid_core::sprite::error::LineError::UnknownKey
+pub pixtuoid_core::sprite::error::LineError::UnknownKey::key: char
+impl core::clone::Clone for pixtuoid_core::sprite::error::LineError
+pub fn pixtuoid_core::sprite::error::LineError::clone(&self) -> pixtuoid_core::sprite::error::LineError
+impl core::cmp::Eq for pixtuoid_core::sprite::error::LineError
+impl core::cmp::PartialEq for pixtuoid_core::sprite::error::LineError
+pub fn pixtuoid_core::sprite::error::LineError::eq(&self, &pixtuoid_core::sprite::error::LineError) -> bool
+impl core::error::Error for pixtuoid_core::sprite::error::LineError
+impl core::fmt::Debug for pixtuoid_core::sprite::error::LineError
+pub fn pixtuoid_core::sprite::error::LineError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for pixtuoid_core::sprite::error::LineError
+pub fn pixtuoid_core::sprite::error::LineError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::error::LineError
+impl core::marker::Freeze for pixtuoid_core::sprite::error::LineError
+impl core::marker::Send for pixtuoid_core::sprite::error::LineError
+impl core::marker::Sync for pixtuoid_core::sprite::error::LineError
+impl core::marker::Unpin for pixtuoid_core::sprite::error::LineError
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::error::LineError
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::error::LineError
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::error::LineError
+#[non_exhaustive] pub enum pixtuoid_core::sprite::error::PackError
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::BuildingDensity
+pub pixtuoid_core::sprite::error::PackError::BuildingDensity::key: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::BuildingFrames
+pub pixtuoid_core::sprite::error::PackError::BuildingFrames::file: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::BuildingOutsideMaterials
+pub pixtuoid_core::sprite::error::PackError::BuildingOutsideMaterials::file: alloc::string::String
+pub pixtuoid_core::sprite::error::PackError::BuildingOutsideMaterials::x: usize
+pub pixtuoid_core::sprite::error::PackError::BuildingOutsideMaterials::y: usize
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::BuildingPlane
+pub pixtuoid_core::sprite::error::PackError::BuildingPlane::key: alloc::string::String
+pub pixtuoid_core::sprite::error::PackError::BuildingPlane::plane: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::BuildingWithoutCity
+pub pixtuoid_core::sprite::error::PackError::BuildingWithoutCity::key: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::BuildingWithoutPlanes
+pub pixtuoid_core::sprite::error::PackError::BuildingWithoutPlanes::key: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::Canonicalize
+pub pixtuoid_core::sprite::error::PackError::Canonicalize::path: std::path::PathBuf
+pub pixtuoid_core::sprite::error::PackError::Canonicalize::source: core::io::error::Error
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::CityKeyShared
+pub pixtuoid_core::sprite::error::PackError::CityKeyShared::key: char
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::CityMissingMaterial
+pub pixtuoid_core::sprite::error::PackError::CityMissingMaterial::material: pixtuoid_core::sprite::format::Material
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::CityUnknownMaterial
+pub pixtuoid_core::sprite::error::PackError::CityUnknownMaterial::name: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::Color
+pub pixtuoid_core::sprite::error::PackError::Color::key: alloc::string::String
+pub pixtuoid_core::sprite::error::PackError::Color::source: pixtuoid_core::sprite::error::ColorError
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::Decode
+pub pixtuoid_core::sprite::error::PackError::Decode::file: alloc::string::String
+pub pixtuoid_core::sprite::error::PackError::Decode::source: pixtuoid_core::sprite::error::SpriteError
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::FramePathEscapes
+pub pixtuoid_core::sprite::error::PackError::FramePathEscapes::file: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::FramePathParent
+pub pixtuoid_core::sprite::error::PackError::FramePathParent::file: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::HairLayerFrames
+pub pixtuoid_core::sprite::error::PackError::HairLayerFrames::file: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::HairLayerHead
+pub pixtuoid_core::sprite::error::PackError::HairLayerHead::file: alloc::string::String
+pub pixtuoid_core::sprite::error::PackError::HairLayerHead::view: pixtuoid_core::sprite::HeadView
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::HairstyleDensity
+pub pixtuoid_core::sprite::error::PackError::HairstyleDensity::key: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::HairstylesDiffer
+pub pixtuoid_core::sprite::error::PackError::HairstylesDiffer::first: u16
+pub pixtuoid_core::sprite::error::PackError::HairstylesDiffer::other: u16
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::Manifest
+pub pixtuoid_core::sprite::error::PackError::Manifest::path: core::option::Option<std::path::PathBuf>
+pub pixtuoid_core::sprite::error::PackError::Manifest::source: toml::de::error::Error
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::MissingEmbeddedFrame
+pub pixtuoid_core::sprite::error::PackError::MissingEmbeddedFrame::file: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::NotOneChar
+pub pixtuoid_core::sprite::error::PackError::NotOneChar::key: alloc::string::String
+pub pixtuoid_core::sprite::error::PackError::NotOneChar::what: pixtuoid_core::sprite::error::KeySite
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::NotOpaque
+pub pixtuoid_core::sprite::error::PackError::NotOpaque::key: char
+pub pixtuoid_core::sprite::error::PackError::NotOpaque::what: pixtuoid_core::sprite::error::KeySite
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::PaletteAndRamp
+pub pixtuoid_core::sprite::error::PackError::PaletteAndRamp::key: char
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::PaletteTooLarge
+pub pixtuoid_core::sprite::error::PackError::PaletteTooLarge::keys: usize
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::RampBase
+pub pixtuoid_core::sprite::error::PackError::RampBase::key: char
+pub pixtuoid_core::sprite::error::PackError::RampBase::of: char
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::RampLevel
+pub pixtuoid_core::sprite::error::PackError::RampLevel::key: char
+pub pixtuoid_core::sprite::error::PackError::RampLevel::level: i8
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::Read
+pub pixtuoid_core::sprite::error::PackError::Read::path: std::path::PathBuf
+pub pixtuoid_core::sprite::error::PackError::Read::source: core::io::error::Error
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::Resolve
+pub pixtuoid_core::sprite::error::PackError::Resolve::path: std::path::PathBuf
+pub pixtuoid_core::sprite::error::PackError::Resolve::source: core::io::error::Error
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::VariantPlanes
+pub pixtuoid_core::sprite::error::PackError::VariantPlanes::key: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::VariantSize
+pub pixtuoid_core::sprite::error::PackError::VariantSize::base_h: u16
+pub pixtuoid_core::sprite::error::PackError::VariantSize::base_w: u16
+pub pixtuoid_core::sprite::error::PackError::VariantSize::density: u16
+pub pixtuoid_core::sprite::error::PackError::VariantSize::key: alloc::string::String
+#[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::VariantWithoutBase
+pub pixtuoid_core::sprite::error::PackError::VariantWithoutBase::base: alloc::string::String
+pub pixtuoid_core::sprite::error::PackError::VariantWithoutBase::key: alloc::string::String
+impl core::error::Error for pixtuoid_core::sprite::error::PackError
+pub fn pixtuoid_core::sprite::error::PackError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for pixtuoid_core::sprite::error::PackError
+pub fn pixtuoid_core::sprite::error::PackError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for pixtuoid_core::sprite::error::PackError
+pub fn pixtuoid_core::sprite::error::PackError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for pixtuoid_core::sprite::error::PackError
+impl core::marker::Send for pixtuoid_core::sprite::error::PackError
+impl core::marker::Sync for pixtuoid_core::sprite::error::PackError
+impl core::marker::Unpin for pixtuoid_core::sprite::error::PackError
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::error::PackError
+impl !core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::error::PackError
+impl !core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::error::PackError
+#[non_exhaustive] pub enum pixtuoid_core::sprite::error::SpriteError
+#[non_exhaustive] pub pixtuoid_core::sprite::error::SpriteError::Line
+pub pixtuoid_core::sprite::error::SpriteError::Line::kind: pixtuoid_core::sprite::error::LineError
+pub pixtuoid_core::sprite::error::SpriteError::Line::line: usize
+pub pixtuoid_core::sprite::error::SpriteError::NoFrames
+impl core::clone::Clone for pixtuoid_core::sprite::error::SpriteError
+pub fn pixtuoid_core::sprite::error::SpriteError::clone(&self) -> pixtuoid_core::sprite::error::SpriteError
+impl core::cmp::Eq for pixtuoid_core::sprite::error::SpriteError
+impl core::cmp::PartialEq for pixtuoid_core::sprite::error::SpriteError
+pub fn pixtuoid_core::sprite::error::SpriteError::eq(&self, &pixtuoid_core::sprite::error::SpriteError) -> bool
+impl core::error::Error for pixtuoid_core::sprite::error::SpriteError
+impl core::fmt::Debug for pixtuoid_core::sprite::error::SpriteError
+pub fn pixtuoid_core::sprite::error::SpriteError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for pixtuoid_core::sprite::error::SpriteError
+pub fn pixtuoid_core::sprite::error::SpriteError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::error::SpriteError
+impl core::marker::Freeze for pixtuoid_core::sprite::error::SpriteError
+impl core::marker::Send for pixtuoid_core::sprite::error::SpriteError
+impl core::marker::Sync for pixtuoid_core::sprite::error::SpriteError
+impl core::marker::Unpin for pixtuoid_core::sprite::error::SpriteError
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::error::SpriteError
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::error::SpriteError
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::error::SpriteError
 pub mod pixtuoid_core::sprite::format
 pub enum pixtuoid_core::sprite::format::CityPlane
 pub pixtuoid_core::sprite::format::CityPlane::Mid
@@ -1042,8 +1261,8 @@ pub const pixtuoid_core::sprite::format::REQUIRED_CHARACTER_ANIMATIONS: &[&str]
 pub fn pixtuoid_core::sprite::format::claimed_variant_size(&pixtuoid_core::sprite::Frame, u16) -> (u32, u32)
 pub fn pixtuoid_core::sprite::format::density_variant_name(&str, u16) -> alloc::string::String
 pub fn pixtuoid_core::sprite::format::density_variant_name_into(&mut alloc::string::String, &str, u16)
-pub fn pixtuoid_core::sprite::format::load_pack(&std::path::Path) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
-pub fn pixtuoid_core::sprite::format::load_pack_from_strings(&str, &[(&str, &str)]) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
+pub fn pixtuoid_core::sprite::format::load_pack(&std::path::Path) -> core::result::Result<pixtuoid_core::sprite::format::Pack, pixtuoid_core::sprite::error::PackError>
+pub fn pixtuoid_core::sprite::format::load_pack_from_strings(&str, &[(&str, &str)]) -> core::result::Result<pixtuoid_core::sprite::format::Pack, pixtuoid_core::sprite::error::PackError>
 pub fn pixtuoid_core::sprite::format::validate_pack_animations(&pixtuoid_core::sprite::format::Pack, &[alloc::vec::Vec<&'static str>]) -> pixtuoid_core::sprite::format::ValidationReport
 pub fn pixtuoid_core::sprite::format::variant_fits(&pixtuoid_core::sprite::Frame, u16, &pixtuoid_core::sprite::Frame) -> bool
 pub fn pixtuoid_core::sprite::format::variant_redraws(&pixtuoid_core::sprite::Sprite, u16, &pixtuoid_core::sprite::Sprite) -> bool
