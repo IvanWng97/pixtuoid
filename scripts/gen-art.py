@@ -1852,6 +1852,262 @@ def standing_desk():
     return g
 
 
+# ---- the corridor appliances and the meeting table ---------------------------------
+# Drawn in the theme's appliance keys (pixel_painter::palette::appliance_overrides).
+VEND_BODY, VEND_BODY_LT, VEND_BODY_SH = "Б", "Ъ", "ъ"
+VEND_PANEL, VEND_PANEL_LT = "П", "п"
+VEND_DRINKS = ("Ч", "Ш", "Щ", "Э")
+VEND_TRIM, VEND_DARK = "Ф", "Ы"
+PRN_BODY, PRN_BODY_SH = "Ю", "ю"
+PRN_TOP, PRN_TOP_LT = "Я", "я"
+PRN_GLASS = "Ё"
+PRN_PAPER, PRN_PAPER_SH = "Й", "й"
+PRN_TRAY = "Ц"
+LED_ON = GREEN
+# A vend, one loop per drink: the panel flashes as the pick's can leaves its
+# shelf, falls past the shelf below, and waits in the tray until it is taken.
+VEND_STEPS = 6  # rest, falling, three in the tray, taken
+PRINT_STEPS = 8
+
+
+def vend_can(g, x, y, drink):
+    """A can 2 wide, 3 tall, its lid catching the light."""
+    rect(g, x, y, x + 2, y + 3, drink)
+    put(g, x, y, WHITE)
+
+
+# The vending machine's glass, in canvas coordinates: 3 columns x 3 shelves of
+# cans; drink `i` stands at column `i % 3`, shelf `i // 3` of the first four
+# slots, and the rest of the shelves repeat the rotation.
+VEND_GLASS = (2, 6, 11, 18)  # x0, y0, x1, y1
+VEND_CAN_COLS = (3, 6, 9)
+VEND_SHELVES = (7, 11, 15)
+VEND_TRAY = (3, 20, 10, 22)  # x0, y0, x1, y1: the pickup recess
+# The glass's glint: a short diagonal in the column and row no can stands in, so
+# it reads the same in every frame.
+VEND_GLINT = ((3, 6), (2, 7), (2, 8))
+
+
+def vending_body():
+    """The machine at rest: a lit brand panel over a glass front of cans on
+    three shelves, a keypad and a coin plate on the shaded east side, the
+    pickup flap below."""
+    g = canvas(4 * S, 6 * S)
+    rect(g, 1, 1, 15, 23, VEND_BODY)
+    rect(g, 1, 1, 15, 2, VEND_BODY_LT)
+    rect(g, 12, 2, 15, 23, VEND_BODY_SH)
+    rect(g, 2, 2, 12, 5, VEND_PANEL)
+    rect(g, 2, 2, 12, 3, VEND_PANEL_LT)
+    x0, y0, x1, y1 = VEND_GLASS
+    rect(g, x0, y0, x1, y1, VEND_DARK)
+    for si, sy in enumerate(VEND_SHELVES):
+        for ci, cx in enumerate(VEND_CAN_COLS):
+            vend_can(g, cx, sy, VEND_DRINKS[(si * 3 + ci) % len(VEND_DRINKS)])
+        rect(g, x0, sy + 3, x1, sy + 4, SLATE)  # the shelf under them
+    for x, y in VEND_GLINT:
+        put(g, x, y, VEND_BODY_LT)
+    for k in range(3):  # the keypad
+        put(g, 13, 7 + k * 2, KEYCAP)
+    rect(g, 12, 13, 15, 17, VEND_TRIM)  # the coin plate, a slit through it
+    rect(g, 13, 14, 14, 16, VEND_DARK)
+    tx0, ty0, tx1, ty1 = VEND_TRAY
+    rect(g, tx0 - 1, ty0 - 1, tx1 + 1, ty0, VEND_BODY_SH)
+    rect(g, tx0, ty0, tx1, ty1, VEND_DARK)
+    return g
+
+
+def vending_machine():
+    """A vending machine: at rest, then a vend per drink, the panel flashing
+    as the pick's can leaves its shelf, falls in front of the shelf below and
+    lands in the tray."""
+    rest = vending_body()
+    frames = [rest]
+    for drink in range(len(VEND_DRINKS)):
+        col, shelf = VEND_CAN_COLS[drink % 3], VEND_SHELVES[drink // 3]
+        for step in range(VEND_STEPS):
+            g = [row[:] for row in rest]
+            if 1 <= step <= 4:  # its slot stands empty
+                rect(g, col, shelf, col + 2, shelf + 3, VEND_DARK)
+                rect(g, 2, 2, 12, 3, WHITE)  # the panel flashes while it vends
+            if step == 1:  # falling past the shelf edge below it, tipped off the cans' grid
+                vend_can(g, col - 1, shelf + 3, VEND_DRINKS[drink])
+            if 2 <= step <= 4:
+                tx0, ty0, _, _ = VEND_TRAY
+                rect(g, tx0 + 2, ty0, tx0 + 5, ty0 + 2, VEND_DRINKS[drink])  # lying in the tray
+                put(g, tx0 + 2, ty0, WHITE)
+            frames.append(g)
+    return [union_outlined(f) for f in frames]
+
+
+def union_outlined(g):
+    union_outline(g)
+    return g
+
+
+def vending_machine_1x():
+    """The vending machine at 1x: its lit panel over two shelves of drinks,
+    the coin plate, the dark pickup row; a vend darkens the pick's cell and
+    shows its can in the coin plate's cell."""
+    def body():
+        g = canvas(4, 6)
+        rect(g, 0, 0, 4, 6, VEND_BODY)
+        rect(g, 0, 0, 4, 1, VEND_PANEL)
+        for i, drink in enumerate(VEND_DRINKS):
+            put(g, 1 + i % 2, 1 + i // 2, drink)
+        rect(g, 3, 1, 4, 5, VEND_BODY_SH)
+        put(g, 2, 4, VEND_TRIM)
+        rect(g, 0, 5, 4, 6, VEND_DARK)
+        return g
+    rest = body()
+    frames = [rest]
+    for drink in range(len(VEND_DRINKS)):
+        for step in range(VEND_STEPS):
+            g = [row[:] for row in rest]
+            if 1 <= step <= 4:
+                put(g, 1 + drink % 2, 1 + drink // 2, VEND_DARK)
+            if 2 <= step <= 4:
+                put(g, 2, 4, VEND_DRINKS[drink])
+            frames.append(g)
+    return frames
+
+
+PRN_GLASS_SPAN = (3, 14)  # the scanner glass's columns, half-open
+PRN_SLOT_Y = 9
+PRN_TRAY_Y = 12
+
+
+def printer_body(scan=None, led=False, page=0):
+    """The printer: a dark lid with its scanner glass and a status light, the
+    light chassis with its paper slot, the output tray and its stack. `scan`
+    lights the glass's column under the scan bar, `led` the status light,
+    `page` the rows of a page slid out of the slot."""
+    g = canvas(5 * S, 4 * S)
+    rect(g, 1, 1, 19, 15, PRN_BODY)
+    rect(g, 16, 6, 19, 15, PRN_BODY_SH)
+    rect(g, 1, 1, 19, 6, PRN_TOP)
+    rect(g, 1, 1, 19, 2, PRN_TOP_LT)
+    gx0, gx1 = PRN_GLASS_SPAN
+    rect(g, gx0, 3, gx1, 5, PRN_GLASS)
+    if scan is not None:
+        rect(g, scan, 3, scan + 1, 5, WHITE)
+    put(g, 16, 3, LED_ON if led else KEY_DK)
+    put(g, 17, 3, KEYCAP)
+    rect(g, 4, PRN_SLOT_Y, 15, PRN_SLOT_Y + 1, SHADOW)
+    rect(g, 1, PRN_TRAY_Y, 19, 15, PRN_TRAY)
+    rect(g, 5, PRN_TRAY_Y, 14, 14, PRN_PAPER)
+    rect(g, 5, 14, 14, 15, PRN_PAPER_SH)
+    for r in range(page):
+        rect(g, 6, PRN_SLOT_Y + 1 + r, 13, PRN_SLOT_Y + 2 + r, PRN_PAPER)
+        if r % 2:
+            rect(g, 7, PRN_SLOT_Y + 1 + r, 11, PRN_SLOT_Y + 2 + r, PRINT)
+    return g
+
+
+def printer():
+    """A printer: at rest, then a print: the scan bar sweeps the glass as the
+    page feeds out onto the stack, the status light blinking."""
+    gx0, gx1 = PRN_GLASS_SPAN
+    sweep = [gx0 + (gx1 - gx0 - 1) * i // 3 for i in range(4)]
+    busy = [
+        dict(scan=sweep[0], led=True),
+        dict(scan=sweep[1], led=False, page=1),
+        dict(scan=sweep[2], led=True, page=2),
+        dict(scan=sweep[3], led=False, page=3),
+        dict(led=True, page=3),
+        dict(led=False, page=3),
+        dict(led=True, page=3),
+        dict(led=False),
+    ]
+    assert len(busy) == PRINT_STEPS
+    return [union_outlined(printer_body(**f)) for f in [{}] + busy]
+
+
+def printer_1x():
+    """The printer at 1x: a dark lid lit along its west end over its glass
+    strip, the light chassis shaded east between its tray-grey sides, the stack
+    in the tray; a print sweeps a light across the glass as a page feeds out
+    over the chassis, printed as it goes."""
+    def body(scan=None, page=0):
+        g = canvas(5, 4)
+        rect(g, 0, 0, 5, 1, PRN_TOP)
+        put(g, 0, 0, PRN_TOP_LT)
+        rect(g, 1, 0, 4, 1, PRN_GLASS)
+        rect(g, 0, 1, 5, 3, PRN_TRAY)
+        rect(g, 1, 1, 4, 3, PRN_BODY)
+        rect(g, 3, 1, 4, 3, PRN_BODY_SH)
+        rect(g, 0, 3, 5, 4, PRN_TRAY)
+        rect(g, 1, 3, 4, 4, PRN_PAPER)
+        if scan is not None:
+            put(g, scan, 0, WHITE)
+        if page >= 1:  # the page's edge out of the slot
+            rect(g, 1, 2, 4, 3, PRN_PAPER)
+        if page >= 2:  # and the printed page above it
+            rect(g, 1, 1, 4, 2, PRN_PAPER)
+            put(g, 2, 1, PRINT)
+        return g
+    steps = [dict(scan=1), dict(scan=2, page=1), dict(scan=3, page=2), dict(page=2),
+             dict(page=2), dict(page=2), dict(page=1), dict()]
+    assert len(steps) == PRINT_STEPS
+    return [body()] + [body(**f) for f in steps]
+
+
+# `Furniture::MeetingTable`'s visual box.
+TABLE_W, TABLE_H = 11, 5
+# The props on the @4x table, (x0, y0, x1, y1) half-open: the grain keeps clear
+# of each.
+TABLE_LAPTOP = (5, 4, 15, 10)
+TABLE_PAD = (19, 5, 30, 12)  # the notepad, its shaded edge and the pen
+TABLE_MUG = (34, 5, 39, 9)
+
+
+def meeting_table():
+    """The meeting table: a wood top lit along its far edge with a board seam
+    and grain, its near edge catching the light over the front face; a closed
+    laptop, a notepad with a pen, and a mug, set well apart."""
+    w, h = TABLE_W * S, TABLE_H * S
+    g = canvas(w, h)
+    rng = random.Random(11)
+    front = h - 4
+    rect(g, 1, 1, w - 1, front, WOOD)
+    rect(g, 1, 1, w - 1, 2, WOOD_LT)
+    rect(g, 1, front // 2, w - 1, front // 2 + 1, WOOD_SH)
+    clear = [(x0 - 1, y0 - 1, x1 + 1, y1 + 1) for x0, y0, x1, y1 in (TABLE_LAPTOP, TABLE_PAD, TABLE_MUG)]
+    for _ in range(6):
+        y = rng.randrange(3, front - 2)
+        sx = rng.randrange(4, w - 12)
+        ex = sx + rng.randrange(5, 9)
+        if y == front // 2 or any(y0 <= y < y1 and sx < x1 and ex > x0 for x0, y0, x1, y1 in clear):
+            continue
+        rect(g, sx, y, ex, y + 1, WOOD_SH)
+    rect(g, 1, front, w - 1, h - 1, WOOD_SH)
+    rect(g, 1, front, w - 1, front + 1, WOOD_HI)
+    x0, y0, x1, y1 = TABLE_LAPTOP  # shut
+    rect(g, x0, y0, x1, y1, BEZEL)
+    rect(g, x0, y0, x1, y0 + 1, SLATE)
+    put(g, (x0 + x1) // 2, (y0 + y1) // 2, GREY)
+    x0, y0, x1, y1 = TABLE_PAD  # the pad, then its pen
+    rect(g, x0, y0, x1 - 4, y1, OFFWHITE)
+    rect(g, x1 - 4, y0 + 1, x1 - 3, y1, OFFWHITE_SH)
+    for i in range(3):
+        rect(g, x0 + 1, y0 + 2 + i * 2, x1 - 5 - (i % 2) * 2, y0 + 3 + i * 2, PRINT)
+    rect(g, x1 - 2, y0 + 1, x1 - 1, y1 - 1, BLUE)
+    desk_mug(g, TABLE_MUG[0], TABLE_MUG[1])
+    union_outline(g)
+    return g
+
+
+def meeting_table_1x():
+    """The meeting table at 1x: the lit far edge, the top, a notepad and a cup
+    of coffee apart on it, the near edge in shade."""
+    g = canvas(TABLE_W, TABLE_H)
+    rect(g, 0, 0, TABLE_W, TABLE_H - 1, WOOD)
+    rect(g, 0, 0, TABLE_W, 1, WOOD_LT)
+    rect(g, 0, TABLE_H - 1, TABLE_W, TABLE_H, WOOD_SH)
+    put(g, 3, 2, OFFWHITE)
+    put(g, 8, 1, COFFEE)
+    return g
+
+
 # ---- the city behind the windows: its buildings ------------------------------------
 # Drawn only in the [city] materials: a painter colours each by its depth and the
 # sky, so no drawing here carries a colour of its own. Each is drawn at `S`; its base
@@ -2192,11 +2448,17 @@ def main():
         "desk_north": (desk_north.__doc__, [desk_north()]),
         "meeting_sofa": (meeting_sofa.__doc__, [meeting_sofa()]),
         "meeting_sofa_north": (meeting_sofa_north.__doc__, [meeting_sofa_north()]),
+        "vending_machine": (vending_machine.__doc__, vending_machine()),
+        "printer": (printer.__doc__, printer()),
+        "meeting_table": (meeting_table.__doc__, [meeting_table()]),
     }
     classic = {
         "meeting_sofa_north": (meeting_sofa_north_1x.__doc__, [meeting_sofa_north_1x()]),
         "desk": (desk_south_1x.__doc__, [desk_south_1x()]),
         "desk_north": (desk_north_1x.__doc__, [desk_north_1x()]),
+        "vending_machine": (vending_machine_1x.__doc__, vending_machine_1x()),
+        "printer": (printer_1x.__doc__, printer_1x()),
+        "meeting_table": (meeting_table_1x.__doc__, [meeting_table_1x()]),
     }
     sprites = {
         f"{base}@{S}x.sprite": render_sprite(header, frames)
