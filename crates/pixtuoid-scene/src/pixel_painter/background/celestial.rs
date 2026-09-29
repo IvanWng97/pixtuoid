@@ -8,7 +8,7 @@ use pixtuoid_core::sprite::Rgb;
 
 use super::epoch_ms;
 use super::{window_columns, WINDOW_W};
-use crate::sky::{Atmo, Body, Emitter, Sky};
+use crate::sky::{Body, Sky};
 use crate::theme::Theme;
 
 /// One frame's celestial disc (sun by day, moon by night), arcing across the
@@ -118,17 +118,6 @@ pub(super) const STAR_ALPHA_MAX: f32 = 0.55;
 const STAR_TWINKLE_CYCLE_BASE_MS: u64 = 2000;
 const STAR_TWINKLE_CYCLE_SPAN_MS: u64 = 3000;
 
-/// How brightly the star field shows this frame. Stars only appear once the
-/// emitter is the MOON: dawn/dusk twilight has a high `darkness` yet the
-/// brightening sky washes stars out, so gating on `darkness` alone paints a
-/// full starfield at ~7am.
-pub(super) fn night_star_strength(sky: &Sky, darkness: f32) -> f32 {
-    match sky.emitter().body {
-        Body::Moon => (darkness * sky.atmo().disc).clamp(0.0, 1.0),
-        Body::Sun => 0.0,
-    }
-}
-
 /// Deterministic sparse star field, hashed on the ABSOLUTE buffer `(px, py)`
 /// so it reads as one continuous sky rather than a per-window reseed.
 pub(super) fn star_exists(px: u16, py: u16) -> bool {
@@ -146,14 +135,4 @@ pub(super) fn star_twinkle(px: u16, py: u16, now: SystemTime) -> bool {
     let phase = now_ms / cycle_ms;
     let hash = seed.wrapping_add(phase).wrapping_mul(0x9e37_79b9_7f4a_7c15);
     (hash % 10) < 7
-}
-
-/// Golden-hour blaze strength on the city silhouette — SUN-only: a low moon
-/// must never paint an orange cast, however warm/lit it computes, so the gate
-/// is absolute rather than incidental.
-pub(super) fn golden_hour_blaze(e: &Emitter, a: &Atmo) -> f32 {
-    match e.body {
-        Body::Sun => (e.warmth * e.emitter_lum * a.disc).clamp(0.0, 1.0),
-        Body::Moon => 0.0,
-    }
 }

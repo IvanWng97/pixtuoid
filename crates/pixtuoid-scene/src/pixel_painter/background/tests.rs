@@ -1,87 +1,6 @@
 use super::*;
-use crate::sky::{hour_is_day, set_weather_override, Atmo, Body, ForcedWeather};
-
-// Hand-built Emitter/Atmo values, not real clock times: a real moon's low
-// altitude/luminance could never produce these, so a maximally warm/lit MOON
-// proves the gate is absolute rather than merely well-behaved in practice.
-#[test]
-fn golden_hour_blaze_is_sun_only() {
-    let full_atmo = Atmo {
-        direct: 1.0,
-        diffuse: 1.0,
-        disc: 1.0,
-    };
-    let moon = Emitter {
-        body: Body::Moon,
-        altitude: 1.0,
-        azimuth: 0.5,
-        warmth: 1.0,
-        emitter_lum: 1.0,
-    };
-    assert_eq!(
-        golden_hour_blaze(&moon, &full_atmo),
-        0.0,
-        "a moon must never blaze, even at maximal warmth/luminance"
-    );
-    let sun = Emitter {
-        body: Body::Sun,
-        ..moon
-    };
-    assert!(
-        golden_hour_blaze(&sun, &full_atmo) > 0.9,
-        "a maximal sun should blaze near-full"
-    );
-}
-
-#[test]
-fn weather_floor_tint_differs_by_variant() {
-    let clear = weather_floor_tint(Weather::Clear);
-    let rain = weather_floor_tint(Weather::Rain);
-    let fog = weather_floor_tint(Weather::Fog);
-    assert_ne!(clear, rain, "rain biases floor cooler");
-    assert_ne!(clear, fog, "fog desaturates");
-    assert!(
-        rain.b >= rain.r,
-        "rain tint should be cool (blue >= red), got {:?}",
-        rain
-    );
-}
-
-#[test]
-fn weather_floor_tint_clear_is_near_neutral() {
-    let clear = weather_floor_tint(Weather::Clear);
-    assert!(
-        clear.r > 200 && clear.g > 200 && clear.b > 200,
-        "clear should be a near-white slight-warm tint, got {:?}",
-        clear
-    );
-}
-
-#[test]
-fn fog_floor_tint_is_brighter_than_overcast() {
-    let fog = weather_floor_tint(Weather::Fog);
-    let oc = weather_floor_tint(Weather::Overcast);
-    let lum = |c: Rgb| c.r as u16 + c.g as u16 + c.b as u16;
-    assert!(
-        lum(fog) > lum(oc),
-        "fog {fog:?} should outshine overcast {oc:?}"
-    );
-}
-
-#[test]
-fn skyline_haze_obscures_fog_and_storm_only_when_expected() {
-    let fog = skyline_haze(Weather::Fog).expect("fog hazes").1;
-    let storm = skyline_haze(Weather::Storm).expect("storm hazes").1;
-    assert!(fog > storm, "fog should obscure more than storm");
-    assert!(
-        skyline_haze(Weather::Clear).is_none(),
-        "clear skyline is crisp"
-    );
-    assert!(
-        skyline_haze(Weather::Snow).is_none(),
-        "snow skyline is crisp"
-    );
-}
+use crate::atmosphere::{night_star_strength, time_of_day_look, TimeOfDayLook};
+use crate::sky::{hour_is_day, set_weather_override, ForcedWeather};
 
 #[test]
 fn lightning_flash_storm_only_and_mid_strike_only() {
@@ -335,6 +254,24 @@ fn rain_hides_the_disc_like_overcast() {
     assert_eq!(
         overcast_n, 0,
         "overcast should hide the disc entirely, got {overcast_n}"
+    );
+}
+
+#[test]
+fn thick_cloud_hides_the_disc_uniformly() {
+    let min_disc_vis = celestial::MIN_DISC_VIS;
+    let overcast = crate::sky::atmo(Weather::Overcast).disc;
+    let rain = crate::sky::atmo(Weather::Rain).disc;
+    let storm = crate::sky::atmo(Weather::Storm).disc;
+    assert!(
+        overcast >= rain && rain >= storm,
+        "disc visibility must not increase as cloud thickens: \
+         overcast={overcast} rain={rain} storm={storm}"
+    );
+    assert!(
+        overcast < min_disc_vis && rain < min_disc_vis && storm < min_disc_vis,
+        "overcast/rain/storm should all hide the disc (below MIN_DISC_VIS={min_disc_vis}): \
+         overcast={overcast} rain={rain} storm={storm}"
     );
 }
 

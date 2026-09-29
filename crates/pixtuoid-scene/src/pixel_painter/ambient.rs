@@ -7,10 +7,9 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::FloorLocalDeskIndex;
 
+use crate::atmosphere::{sun_on_wall, TimeOfDayLook, WallSide};
 use crate::layout::Layout;
-use crate::pixel_painter::background::{
-    paint_radial_falloff, sun_on_wall, window_spill_columns, RadialFalloff, TimeOfDayLook, WallSide,
-};
+use crate::pixel_painter::background::{paint_radial_falloff, window_spill_columns, RadialFalloff};
 use crate::pixel_painter::palette::{blend_pixel, blend_rgb, WHITE};
 use crate::pixel_painter::PaintCtx;
 use crate::sky::Sky;
@@ -312,7 +311,7 @@ pub(super) fn paint_sun_spot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pixel_painter::background::time_of_day_look;
+    use crate::atmosphere::time_of_day_look;
     use crate::sky::Weather;
     use std::time::Duration;
 
