@@ -1,5 +1,5 @@
-//! Drop the bundled pack's density variants, for a build without the
-//! `density-art` feature. `build.rs` and `the_pack_without_density_art_loads_whole`
+//! Drop the bundled pack's density art — its `@Nx` animations and the
+//! hairstyles that dress them — for a build without the `density-art` feature. `build.rs` and `the_pack_without_density_art_loads_whole`
 //! both run it, so the manifest a feature-less build embeds is one a test has
 //! loaded.
 
@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 /// `pack_toml` without its density-variant animations and its hairstyles (which
 /// only ever dress density art), and the frame files only those drew.
 ///
-/// Every `@` key in the bundled manifest is a density variant:
+/// Every `@` key in the bundled manifest's `[animations]` is a density variant:
 /// `embedded_default_pack_animations_are_all_in_the_registry` fails on any
 /// other, so core's `DENSITY_VARIANT_SEP` alone identifies them here, where its
 /// `split_density_variant` is crate-private and core is no build-dependency.

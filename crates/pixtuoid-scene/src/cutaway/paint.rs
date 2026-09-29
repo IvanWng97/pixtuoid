@@ -665,7 +665,10 @@ fn push_characters(
         let at = cutaway_anchor(c);
         let shadow = c.seat_desk.is_none();
         // The drawn box reaches up over the hair its style dresses it in.
-        let hair = hair_headroom(pack, c.anim_name, c.frame_idx, key.frame.agent_id, scale);
+        let hair = key
+            .dress
+            .as_ref()
+            .map_or(0, |d| d.rise.div_ceil(key.frame.density.get()));
         let top = crate::layout::Point {
             x: at.x,
             y: at.y.saturating_sub(hair),
@@ -695,29 +698,6 @@ fn push_characters(
         ));
     }
     carried
-}
-
-/// The logical rows a figure's hair reaches above its art's own box at `scale`:
-/// what [`paint_figure`] draws above `at` ([`crate::pixel_painter::hair::rise`]),
-/// rounded up to whole rows.
-fn hair_headroom(
-    pack: &Pack,
-    anim: &str,
-    frame_idx: usize,
-    agent: pixtuoid_core::AgentId,
-    scale: RenderScale,
-) -> u16 {
-    let Some(dense) = crate::pixel_painter::densest_frame(pack, anim, frame_idx, scale) else {
-        return 0;
-    };
-    let density = dense.density.get();
-    dense
-        .head
-        .zip(crate::pixel_painter::hair::pick(pack, agent, density))
-        .map_or(0, |(head, style)| {
-            crate::pixel_painter::hair::rise(head, style, pack.hair_outline().flatten().is_some())
-                .div_ceil(density)
-        })
 }
 
 /// A figure's piece: its drawn bounds, sorted on `depth` — the sim's own z-key,
@@ -1405,12 +1385,30 @@ fn paint_figure(
     if shadow {
         contact_shadow(at, art_w, art_h, theme, scale, buf);
     }
-    // A dressed frame reaches up over its hair: its art's top stays at `at`.
-    let rise = art.rise.saturating_mul(art.blit_at.get());
+    // A dressed frame reaches up over its hair, its art's top staying at `at`:
+    // whatever rows would start above the buffer are cut, not the whole figure
+    // pushed down.
+    let blit = i32::from(art.blit_at.get());
+    let top = i32::from(scale.to_buffer(at.y)) - i32::from(art.rise) * blit;
+    let cut = u16::try_from((-top).max(0).unsigned_abs().div_ceil(blit.unsigned_abs()))
+        .unwrap_or(u16::MAX);
+    let clipped;
+    let frame = if cut == 0 {
+        art.frame
+    } else {
+        let f = art.frame;
+        let rows = f.height().saturating_sub(cut);
+        let px = (cut..f.height())
+            .flat_map(|y| (0..f.width()).map(move |x| (x, y)))
+            .map(|(x, y)| f.get(x, y).copied().flatten())
+            .collect();
+        clipped = pixtuoid_core::sprite::Frame::from_pixels(f.width(), rows, px);
+        &clipped
+    };
     blit_frame_scaled(
-        art.frame,
+        frame,
         scale.to_buffer(at.x),
-        scale.to_buffer(at.y).saturating_sub(rise),
+        u16::try_from(top + i32::from(cut) * blit).unwrap_or(0),
         art.blit_at,
         buf,
     );
@@ -2170,6 +2168,17 @@ mod tests {
         facing: crate::layout::Facing,
         seated_ticks: usize,
     ) -> (Layout, Pack, Vec<SimFrame>, crate::layout::Point) {
+        let id = pixtuoid_core::AgentId::from_transcript_path("/cutaway/sit.jsonl");
+        sit_down_as(pack, facing, seated_ticks, id)
+    }
+
+    /// [`sit_down_in`] with `id` doing the walking.
+    fn sit_down_as(
+        pack: Pack,
+        facing: crate::layout::Facing,
+        seated_ticks: usize,
+        id: pixtuoid_core::AgentId,
+    ) -> (Layout, Pack, Vec<SimFrame>, crate::layout::Point) {
         use crate::floor::{FloorMeta, FloorSession};
         use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, ToolKind};
         use std::time::{Duration, SystemTime};
@@ -2181,7 +2190,6 @@ mod tests {
             .find(|&i| layout.desk_facing(FloorLocalDeskIndex(i)) == facing)
             .expect("the office has a desk facing that way");
         let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-        let id = pixtuoid_core::AgentId::from_transcript_path("/cutaway/sit.jsonl");
         let mut scene = pixtuoid_core::SceneState::uniform(16);
         scene.agents.insert(
             id,
@@ -2778,6 +2786,38 @@ mod tests {
                 false,
             );
         }
+        // ...the mover in every style the pack draws, so a box that forgot the
+        // rows a style's hair rises by shows...
+        let styles: std::collections::BTreeSet<_> =
+            pack().hairstyles().map(|s| s.name().to_owned()).collect();
+        let mut worn = std::collections::BTreeSet::new();
+        for i in 0..1000 {
+            let pack = pack();
+            let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+            let dense = crate::pixel_painter::densest_frame(&pack, "walking", 0, scale)
+                .expect("the walk's art");
+            let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/style/{i}.jsonl"));
+            let style = crate::pixel_painter::hair::dress_for(
+                &pack,
+                id,
+                dense.frame,
+                dense.head,
+                dense.density,
+            )
+            .and_then(|d| d.style);
+            let Some(style) = style.filter(|s| !worn.contains(s)) else {
+                continue;
+            };
+            worn.insert(style);
+            let (layout, pack, frames, _) = sit_down_as(pack, crate::layout::Facing::South, 0, id);
+            for frame in &frames {
+                check(&pack, frame, &layout, true);
+            }
+            if worn == styles {
+                break;
+            }
+        }
+        assert_eq!(worn, styles, "the walks wore every style");
         // ...a walk whose frames differ in size, so a span sized from the wrong
         // frame shows...
         const LONG_STRIDE: &str = "\

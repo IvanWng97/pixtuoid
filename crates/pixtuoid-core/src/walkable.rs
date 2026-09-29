@@ -102,14 +102,12 @@ impl OccupancyOverlay {
     pub fn signature(&self) -> u64 {
         let mut sorted: Vec<(u16, u16, u16, u16)> = self.rects.clone();
         sorted.sort_unstable();
-        let mut hash: u64 = crate::id::FNV_OFFSET_BASIS;
-        for &(x, y, w, h) in &sorted {
-            for v in [x, y, w, h] {
-                hash ^= v as u64;
-                hash = hash.wrapping_mul(crate::id::FNV_PRIME);
-            }
-        }
-        hash
+        crate::id::fnv1a(
+            sorted
+                .iter()
+                .flat_map(|&(x, y, w, h)| [x, y, w, h])
+                .map(u64::from),
+        )
     }
 }
 

@@ -54,7 +54,8 @@ OFFWHITE, OFFWHITE_SH, PRINT = "¤", "!", "$"
 MUG, MUG_SH = "V", "%"
 CHAIR, CHAIR_RIM, CHAIR_BASE = "T", "I", "/"
 # The @Nx art's one outline, round each piece's whole silhouette whatever its
-# material.
+# material, and a bun's rim where it sits on the head (`ball`); pack.toml's
+# `[characters] outline` names it for the renderer.
 SILHOUETTE = "κ"
 COFFEE = "ρ"
 # furniture materials
@@ -67,6 +68,7 @@ INK, CYAN, RED, DARK_RED, VERMILION, BLUE, GOLD, TAN, BROWN, PINK, GREEN = (
     "q", "c", "r", "N", "o", "b", "y", "x", "z", "^", "λ")
 PETAL_R, PETAL_Y, PETAL_HI = RED, GOLD, "ζ"
 T = "."
+
 
 def canvas(w, h):
     return [[T] * w for _ in range(h)]
@@ -232,15 +234,14 @@ def meeting_sofa_north_1x():
 
 
 
-
 # ---- the characters ----------------------------------------------------------
 # A chibi figure: a big head over a small body, one near-black line round the
 # whole silhouette. Every pose is a bald BODY, the face or the back of the head
 # but never a scalp, that a hairstyle's layers dress per view: `behind` under
-# the body, `over` on top. The union is outlined last, so no line runs between
-# hair and face.
+# the body, `over` on top. Neither is outlined here: the renderer outlines the
+# dressed union, so no line runs between hair and face.
 FIG_W = 8 * S
-FIG_CX = (FIG_W - 1) / 2
+FIG_CX = FIG_W / 2  # sampled at pixel centres (x + 0.5): x mirrors to FIG_W - 1 - x
 # Each pose's height in logical rows, the frame height its 1x base shares.
 STANDING_ROWS, TYPING_ROWS, SEATED_ROWS, COUCH_ROWS = 12, 11, 10, 9
 # Rows every standing and front- or back-view seated pose shares: the face
@@ -420,7 +421,7 @@ def side_locks(locks, top=8):
 
 
 def nape_cut(g, half=6, rows=(20, 23)):
-    """Short hair stops above the nape: clear its middle so the neck shows."""
+    """Hair gathered up leaves the nape bare: clear its middle so the neck shows."""
     for y in range(rows[0] + o, rows[1] + o):
         for x in range(1, FIG_W - 1):
             if g[y][x] != T and abs(x + 0.5 - FIG_CX) < half:
@@ -572,11 +573,11 @@ def style_long():
                 ((12, 26), (11, 34)), ((19, 26), (20, 34))], o)
     sb = layer()
     disc(sb, SIDE_CX, SIDE_CY + o, 11.0)
-    lock(sb, 7.5, 12 + o, 5.5, 38 + o, 9, 6)
+    lock(sb, 8.5, 12 + o, 6.0, 38 + o, 11, 6)  # full enough to meet the neck
     rim_light(sb, [(9, 18 + o), (8, 24 + o), (7, 30 + o), (11, 7 + o)], [(14, 2 + o), (15, 2 + o)])
     so = side_locks([(19.5, 13, 2.2), (22.5, 12.5, 2.2), (24.5, 12, 1.6)])
     strand = layer()
-    lock(strand, 15, 14 + o, 15.5, 24 + o, 3, 2)
+    lock(strand, 14.5, 14 + o, 15.0, 24 + o, 3, 2)  # its west edge on the face's
     paste(so, rim_light(strand))
     c = layer()
     ellipse(c, CROWN_CX, CROWN_CY + 4 + o, 12.5, 13.5)
@@ -592,8 +593,7 @@ def style_long():
 
 
 def style_bun():
-    """Pulled back tight into a bun on the crown (the reference's grey updo):
-    combed lines run up to it, the ears show, the bun rises into the headroom."""
+    """Pulled back tight into a bun on the crown: combed lines run up to it, the ears show, the bun rises into the headroom."""
     b = layer()
     ellipse(b, FIG_CX, 13.0 + o, 10.4, 9.6)
     rim_light(b, [(11, 6 + o), (11, 8 + o), (20, 6 + o), (20, 8 + o)])
@@ -619,7 +619,7 @@ def style_bun():
 
 def style_crop():
     """Short and close to the skull, the fringe cut in points, the ears
-    showing (the reference's man by the lift)."""
+    showing."""
     b = layer()
     ellipse(b, FIG_CX, 13.0 + o, 10.2, 9.6)
     rim_light(b, [(12, 6 + o), (19, 6 + o)], [(12, 5 + o), (13, 5 + o)])
@@ -644,8 +644,7 @@ def style_crop():
 
 
 def style_curls():
-    """Tight curls in a close cap (the reference's curly hair): rows of small
-    rounds, each lit on its own."""
+    """Tight curls in a close cap: rows of small rounds, each lit on its own."""
     b = layer()
     ellipse(b, FIG_CX, 12.5 + o, 10.6, 10.0)
     rim_light(b)
@@ -685,8 +684,7 @@ def style_curls():
 
 
 def style_shaggy():
-    """A shaggy mop whose fringe falls in locks to the eyes (the reference's boy
-    in green)."""
+    """A shaggy mop whose fringe falls in locks to the eyes."""
     b = layer()
     for px, py, r in ((FIG_CX, 12.0, 10.8), (5.2, 14.5, 3.8), (26.2, 14.5, 3.8), (5.6, 19.0, 2.8), (25.8, 19.0, 2.8)):
         disc(b, px, py + o, r)
@@ -763,7 +761,8 @@ HAIRSTYLES = {
 
 
 # ---- bodies ------------------------------------------------------------------------
-# Drawn on the pose grid, shifted down `dy` rows onto a dressing canvas.
+# Drawn on the pose grid, shifted down `dy` rows onto a taller canvas (a hair
+# layer's).
 def mitt(g, x, y, wrist_west=False):
     """A hand: a skin block, shaded along its foot, rounded at the bottom but
     for a corner its wrist joins: rounded there, it leaves a notch against the
@@ -1079,15 +1078,19 @@ def body_frame(pose):
 
 def finished(lyr, skin, cover):
     """`lyr` shaded where it meets bare skin in the dressed frame: `skin` holds
-    the view's bald head, `cover` the layer that will lie over this one."""
+    the view's bald head, `cover` the layer that will lie over this one. Skin
+    is bare where nothing lies over it: for the over layer, where the layer
+    itself does not; for the behind layer, which the body lies over, where the
+    over layer does not."""
     out = [row[:] for row in lyr]
+    top = lyr if cover is None else cover
     for y in range(LAYER_H):
         for x in range(1, FIG_W - 1):
             if lyr[y][x] not in (HAIR, HAIR_LT):
                 continue
             for dx, dy in ((1, 0), (-1, 0), (0, 1)):
                 nx, ny = x + dx, y + dy
-                if ny < LAYER_H and skin[ny][nx] in SKIN_KEYS and (cover is None or cover[ny][nx] == T):
+                if ny < LAYER_H and skin[ny][nx] in SKIN_KEYS and top[ny][nx] == T:
                     out[y][x] = HAIR_SH
                     break
     return out
@@ -1095,8 +1098,9 @@ def finished(lyr, skin, cover):
 
 def hair_layers(style):
     """`style`'s layers per view as the renderer lays them: `(behind, over)`,
-    each shaded where it meets bare skin, the ears added under the hair when
-    the style leaves them bare."""
+    each shaded where it meets bare skin, and the ears where the style leaves
+    them bare: drawn over the behind layer, or in profile, where the ear lies on
+    the face, under the over layer's hair."""
     look = HAIRSTYLES[style]()
     views = {}
     for view in ("front", "back", "side", "crown"):
@@ -1104,10 +1108,14 @@ def hair_layers(style):
         if look["ears"] and view in EARS:
             ears = layer()
             EARS[view](ears, o)
-            if behind is not None:
-                paste(ears, behind)
-                EARS[view](ears, o)
-            behind = ears
+            if view == "side":
+                paste(ears, over)
+                over = ears
+            else:
+                if behind is not None:
+                    paste(ears, behind)
+                    EARS[view](ears, o)
+                behind = ears
         skin = layer()
         if view == "crown":
             asleep_body(skin, o, 0)
@@ -1856,7 +1864,8 @@ def render_sprite(header, frames, heads=()):
     for i, g in enumerate(frames):
         body.append(f"@frame {i}")
         if i < len(heads) and heads[i] is not None:
-            body.append("@head {} {} {}".format(*heads[i]))
+            view, x, y = heads[i]
+            body.append(f"@mark head.{view} {x} {y}")
         body.extend(" ".join(r) for r in g)
     return "\n".join(lines + body) + "\n"
 

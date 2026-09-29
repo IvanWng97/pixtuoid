@@ -477,8 +477,9 @@ fn agent_overrides_are_deterministic_per_id() {
     );
 }
 
-/// Frame `i` of `anim` as a viewer sees it under `overrides`: recolored and,
-/// where the art marks its head, dressed in each of the pack's hairstyles.
+/// Every look of frame `i` of `anim` a viewer could see under `overrides`:
+/// recolored and, where the art marks its head, dressed in each of the pack's
+/// hairstyles.
 fn looks(
     pack: &pixtuoid_core::sprite::format::Pack,
     anim: &pixtuoid_core::sprite::Sprite,
@@ -486,11 +487,15 @@ fn looks(
     overrides: &[(char, pixtuoid_core::sprite::Pixel)],
 ) -> Vec<pixtuoid_core::sprite::Frame> {
     let bare = anim.recolorable(i).expect("frame").recolored(overrides);
+    let line = pack.character_outline();
     match anim.head(i) {
         None => vec![bare],
         Some(head) => pack
             .hairstyles()
-            .map(|s| super::hair::dress(&bare, head, s, overrides, pack.hair_outline().flatten()))
+            .map(|s| {
+                let dress = super::hair::Dress::of(&bare, head, Some(s), line.is_some());
+                super::hair::dress(&bare, &dress, Some(s), overrides, line)
+            })
             .collect(),
     }
 }
@@ -4659,4 +4664,43 @@ fn wash_since_washes_exactly_the_diff_set_and_matches_the_naive_reference() {
             }
         }
     }
+}
+
+/// A facing flip mirrors the dressed frame; it never dresses a mirrored one. A
+/// style's layers are drawn for the art as authored, so profile hair laid on a
+/// flipped body would land on the face side.
+#[test]
+#[cfg(feature = "density-art")]
+fn a_facing_flip_mirrors_the_dressed_frame() {
+    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
+        .expect("the embedded pack loads");
+    let scale = crate::render_scale::RenderScale::new(pack.max_density_variant()).expect("nonzero");
+    let mut cache = crate::frame_cache::FrameCache::new();
+    let now = SystemTime::UNIX_EPOCH;
+    let mut asymmetric = 0;
+    for i in 0..12 {
+        let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/flip/{i}.jsonl"));
+        let slot = make_slot(id, ActivityState::Idle);
+        let mut look = |flip| {
+            seat::character_frame(
+                "side_seated",
+                0,
+                &slot,
+                &pack,
+                flip,
+                None,
+                scale,
+                &mut cache,
+                now,
+            )
+            .expect("the side view")
+            .frame
+            .clone()
+        };
+        let (east, west) = (look(false), look(true));
+        let mirrored = east.mirror_horizontal();
+        assert_eq!(west.as_slice(), mirrored.as_slice(), "agent {i}");
+        asymmetric += usize::from(east.as_slice() != mirrored.as_slice());
+    }
+    assert!(asymmetric > 0, "a profile is not its own mirror");
 }

@@ -432,12 +432,11 @@ frame_ms = 600
 frames   = ["holding_coffee@4x.sprite"]
 frame_ms = 600
 
-# Per-agent hairstyles: each agent wears one (a rendezvous pick on its id), laid
-# over the bald @Nx characters by their `@head` marks, `behind` under the body
-# and `over` on top, then one line round the union in `[hair]`'s outline. The
-# layers are scripts/gen-art.py's HAIRSTYLES, registered here by hand; the 1x
-# art is never dressed.
-[hair]
+# Hairstyles and the line round every marked @Nx character:
+# docs/CONFIGURATION.md#custom-sprite-packs. The layers are scripts/gen-art.py's
+# HAIRSTYLES, registered here by hand (`every_embedded_sprite_is_a_frame_the_pack_loads`
+# fails on one left out).
+[characters]
 outline = "κ"
 
 [hairstyles."bun@4x"]

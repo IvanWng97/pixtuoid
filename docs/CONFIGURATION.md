@@ -81,16 +81,25 @@ densest variant whose `N` divides its render scale and draws it as it is — a
 variant carries its own front, where a desk's top-down base art gets a front
 face derived under it. The recolor keys and `[ramps]` apply at every density.
 
-A pack can dress its variant characters in hairstyles. A frame marks its head
-with `@head <view> <x> <y>` in its `@frame` block, `view` being `front`, `back`,
-`side` or `crown`. A `[hairstyles."<name>@<N>x"]` table gives each view a
-`behind` layer, drawn under the body, and an `over` layer, drawn on top: each a
-one-frame sprite whose own `@head` mark in that view is laid on the frame's.
-Every agent wears one of the pack's styles at the frame's density, picked from
-its id, and the hair takes the agent's `H` recolor. `[hair] outline = "<key>"`
-draws one line round the dressed union, so a pack that sets it draws its bodies
-unoutlined and no line runs between hair and face. Base art is never dressed,
-and a custom pack never wears the default pack's styles.
+A frame can name points on itself for the renderer: `@mark <name> <x> <y>` in
+its `@frame` block, at column `x` and row `y` from the frame's top-left. A
+frame names each mark once. `head.<view>` is its head, with `view` one of
+`front`, `back`, `side` or `crown`; a frame has at most one.
+
+A pack can dress its variant characters in hairstyles. A
+`[hairstyles."<name>@<N>x"]` table gives any of the views a `behind` layer, drawn
+under the body, and an `over` layer, drawn on top. Each layer is a one-frame
+sprite marking its own head in that view, and it is laid mark on mark on the
+frame's. Every agent wears one of the pack's styles, picked by name from its id,
+so a pack ships the same styles at every density it dresses. The layers take
+the agent's recolor as the body does. A frame whose view its style leaves out is
+drawn bare.
+
+`[characters] outline = "<key>"` draws one line round every marked variant
+frame, bare or dressed: a pack that sets it draws its bodies and layers
+unoutlined, so no line runs between hair and face. A dressed frame may rise
+above its body's box, by the hair and the line over it. Base art is never
+dressed or outlined, and a custom pack never wears the default pack's styles.
 
 ## Logging & troubleshooting
 
