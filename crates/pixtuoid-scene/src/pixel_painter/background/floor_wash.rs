@@ -21,10 +21,9 @@ pub(in crate::pixel_painter) fn paint_floor_wash(
 }
 
 /// Blend `tint` over every floor pixel in the band `top_y..bottom_y` at
-/// strength `s`. `s <= 0.0` early-returns: byte-identical to blending, but it
-/// skips the whole pass every clear frame. Tint and strength are constant across
-/// the band, so the blend runs through an [`RgbLut`] — byte-identical to
-/// per-pixel [`blend_rgb`] (#900).
+/// strength `s`. `s <= 0.0` early-returns, skipping the whole pass every clear
+/// frame. Tint and strength are constant across the band, so the blend runs
+/// through an [`RgbLut`] — byte-identical to per-pixel [`blend_rgb`] (#900).
 fn blend_floor_band(buf: &mut RgbBuffer, top_y: u16, bottom_y: u16, tint: Rgb, s: f32) {
     if s <= 0.0 {
         return;

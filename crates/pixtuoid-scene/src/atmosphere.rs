@@ -313,10 +313,9 @@ fn golden_hour_blaze(e: &Emitter, a: &Atmo) -> f32 {
 }
 
 /// How brightly the star field would show this frame, before [`STAR_MIN`]'s
-/// gate. Stars only appear once the
-/// emitter is the MOON: dawn/dusk twilight has a high `darkness` yet the
-/// brightening sky washes stars out, so gating on `darkness` alone paints a
-/// full starfield at ~7am.
+/// gate. Stars only appear once the emitter is the MOON: dawn/dusk twilight has
+/// a high `darkness` yet the brightening sky washes stars out, so gating on
+/// `darkness` alone paints a full starfield at ~7am.
 fn night_star_strength(sky: &Sky, darkness: f32) -> f32 {
     match sky.emitter().body {
         Body::Moon => (darkness * sky.atmo().disc).clamp(0.0, 1.0),
@@ -437,7 +436,8 @@ mod tests {
             Look::resolve(&Sky::at_with(at(h), Weather::Clear), &crate::theme::NORMAL).floor_wash
         };
         let [(_, noon_dim), (tint, noon_lift)] = wash(12);
-        let [(_, night_dim), (_, night_lift)] = wash(0);
+        let [(dim_tint, night_dim), (_, night_lift)] = wash(0);
+        assert_eq!(dim_tint, crate::theme::NORMAL.lighting.night_tint);
         assert_eq!(tint, SUN_TINT);
         assert!(noon_lift > 0.0, "a clear noon lifts the floor");
         assert_eq!(night_lift, 0.0, "the moon lifts nothing");
