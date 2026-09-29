@@ -207,20 +207,40 @@ frame_ms = 600
 frames   = ["plant.sprite"]
 frame_ms = 600
 
+[animations."plant@4x"]
+frames   = ["plant@4x.sprite"]
+frame_ms = 600
+
 [animations.plant_tall]
 frames   = ["plant_tall.sprite"]
+frame_ms = 600
+
+[animations."plant_tall@4x"]
+frames   = ["plant_tall@4x.sprite"]
 frame_ms = 600
 
 [animations.plant_flower]
 frames   = ["plant_flower.sprite"]
 frame_ms = 600
 
+[animations."plant_flower@4x"]
+frames   = ["plant_flower@4x.sprite"]
+frame_ms = 600
+
 [animations.plant_succulent]
 frames   = ["plant_succulent.sprite"]
 frame_ms = 600
 
+[animations."plant_succulent@4x"]
+frames   = ["plant_succulent@4x.sprite"]
+frame_ms = 600
+
 [animations.floor_lamp]
 frames   = ["floor_lamp.sprite"]
+frame_ms = 600
+
+[animations."floor_lamp@4x"]
+frames   = ["floor_lamp@4x.sprite"]
 frame_ms = 600
 
 [animations.door]
@@ -233,8 +253,16 @@ frame_ms = 999999
 frames   = ["bulletin_board.sprite"]
 frame_ms = 600
 
+[animations."bulletin_board@4x"]
+frames   = ["bulletin_board@4x.sprite"]
+frame_ms = 600
+
 [animations.exit_sign]
 frames   = ["exit_sign.sprite"]
+frame_ms = 600
+
+[animations."exit_sign@4x"]
+frames   = ["exit_sign@4x.sprite"]
 frame_ms = 600
 
 [animations.desk_chair]
@@ -247,6 +275,10 @@ frame_ms = 600
 
 [animations.filing_cabinet]
 frames   = ["filing_cabinet.sprite"]
+frame_ms = 600
+
+[animations."filing_cabinet@4x"]
+frames   = ["filing_cabinet@4x.sprite"]
 frame_ms = 600
 
 [animations.cat_walk]
@@ -286,12 +318,34 @@ frame_ms = 600
 frames   = ["meeting_sofa.sprite"]
 frame_ms = 600
 
+[animations."meeting_sofa@4x"]
+frames   = ["meeting_sofa@4x.sprite"]
+frame_ms = 600
+
+[animations.meeting_sofa_north]
+# The meeting sofa seen from behind: the south sofa of a meeting trio and the
+# lounge couch, both facing north.
+frames   = ["meeting_sofa_north.sprite"]
+frame_ms = 600
+
+[animations."meeting_sofa_north@4x"]
+frames   = ["meeting_sofa_north@4x.sprite"]
+frame_ms = 600
+
 [animations.meeting_screen]
 frames   = ["meeting_screen.sprite"]
 frame_ms = 600
 
+[animations."meeting_screen@4x"]
+frames   = ["meeting_screen@4x.sprite"]
+frame_ms = 600
+
 [animations.pantry]
 frames   = ["pantry.sprite"]
+frame_ms = 600
+
+[animations."pantry@4x"]
+frames   = ["pantry@4x.sprite"]
 frame_ms = 600
 
 [animations.pantry_small]
@@ -299,28 +353,56 @@ frame_ms = 600
 frames   = ["pantry_small.sprite"]
 frame_ms = 600
 
+[animations."pantry_small@4x"]
+frames   = ["pantry_small@4x.sprite"]
+frame_ms = 600
+
 [animations.whiteboard]
 frames   = ["whiteboard.sprite"]
+frame_ms = 600
+
+[animations."whiteboard@4x"]
+frames   = ["whiteboard@4x.sprite"]
 frame_ms = 600
 
 [animations.bookshelf]
 frames   = ["bookshelf.sprite"]
 frame_ms = 600
 
+[animations."bookshelf@4x"]
+frames   = ["bookshelf@4x.sprite"]
+frame_ms = 600
+
 [animations.snack_shelf]
 frames   = ["snack_shelf.sprite"]
+frame_ms = 600
+
+[animations."snack_shelf@4x"]
+frames   = ["snack_shelf@4x.sprite"]
 frame_ms = 600
 
 [animations.tv_stand]
 frames   = ["tv_stand.sprite"]
 frame_ms = 600
 
+[animations."tv_stand@4x"]
+frames   = ["tv_stand@4x.sprite"]
+frame_ms = 600
+
 [animations.phone_booth]
 frames   = ["phone_booth.sprite"]
 frame_ms = 600
 
+[animations."phone_booth@4x"]
+frames   = ["phone_booth@4x.sprite"]
+frame_ms = 600
+
 [animations.standing_desk]
 frames   = ["standing_desk.sprite"]
+frame_ms = 600
+
+[animations."standing_desk@4x"]
+frames   = ["standing_desk@4x.sprite"]
 frame_ms = 600
 
 [animations.back_couch]

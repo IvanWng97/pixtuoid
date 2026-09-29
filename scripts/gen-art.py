@@ -247,6 +247,39 @@ ALU, ALU_DK = "Π", "θ"
 FABRIC, FABRIC_HI, FABRIC_SH, FABRIC_SEAM = "C", "G", "Λ", "Ω"
 
 
+# ---- the meeting sofa seen from behind: facing north ----------------------------
+# One layout for both densities, in classic rows. A back-view sitter's anchor
+# (`back_couch_anchor`) lands their shoulders on the seat rows and their lap on
+# the backrest's rows, so the seat sits under a sitter and the backrest over one.
+SOFA_W, SOFA_H = 20, 7
+SOFA_SEAT_ROWS = 3  # rows [0, SOFA_SEAT_ROWS): the seat; the backrest below
+SOFA_RIDGE_ROWS = 1  # the backrest's lit top, then its back panel to the foot
+# The three seats' centres (the seat waypoints' `SEAT_DX` about the sofa's
+# centre column), on column boundaries.
+SOFA_SEAT_COLS = (4, 10, 16)
+
+
+def meeting_sofa_north_1x():
+    """The north-facing sofa at classic density: lit cushion tops, a seam where
+    the seat meets the backrest, its lit ridge, and the back panel shading down."""
+    ridge = SOFA_SEAT_ROWS
+    g = canvas(SOFA_W, SOFA_H)
+    rect(g, 0, 1, SOFA_W, SOFA_H - 1, FABRIC)
+    rect(g, 2, 1, SOFA_W - 1, 2, FABRIC_HI)
+    for c in SOFA_SEAT_COLS[1:]:  # the seams between cushions, a column left of each boundary
+        put(g, c - 3, 1, OUTLINE)
+    rect(g, 1, ridge - 1, SOFA_W - 1, ridge, OUTLINE)
+    rect(g, 1, ridge, SOFA_W - 1, ridge + SOFA_RIDGE_ROWS, FABRIC_HI)
+    rect(g, 1, SOFA_H - 2, SOFA_W - 1, SOFA_H - 1, FABRIC_SH)
+    for y in range(1, SOFA_H - 1):
+        put(g, 0, y, OUTLINE)
+        put(g, SOFA_W - 1, y, OUTLINE)
+    put(g, 1, 1, OUTLINE)
+    rect(g, 1, 0, SOFA_W - 1, 1, OUTLINE)
+    rect(g, 1, SOFA_H - 1, SOFA_W - 1, SOFA_H, OUTLINE)
+    return g
+
+
 # ---- the characters ----------------------------------------------------------
 # A chibi figure: a big head over a small body, one near-black line round the
 # whole silhouette. Every pose is a bald BODY, the face or the back of the head
@@ -905,6 +938,531 @@ def desk_north():
     return g
 
 
+# ---- the sofas ---------------------------------------------------------------
+def meeting_sofa():
+    """The south-facing sofa: the backrest, arms, three seat cushions
+    with their fronts, feet."""
+    w, h = SOFA_W * S, SOFA_H * S
+    seat = SOFA_SEAT_ROWS * S  # the backrest's foot, the seat's back
+    g = canvas(w, h)
+    # backrest
+    rect(g, 3, 1, w - 3, seat, FABRIC)
+    rect(g, 3, 1, w - 3, 4, FABRIC_HI)
+    rect(g, 3, seat - 2, w - 3, seat, FABRIC_SH)
+    # seat cushions
+    for c in SOFA_SEAT_COLS:
+        x0, x1 = c * S - 3 * S + 1, c * S + 3 * S - 1
+        x0, x1 = max(x0, 6), min(x1, w - 6)
+        rect(g, x0, seat, x1, h - 4, FABRIC)
+        rect(g, x0 + 1, seat + 1, x1 - 1, seat + 3, FABRIC_HI)
+        rect(g, x0, h - 6, x1, h - 4, FABRIC_SH)
+    rect(g, 5, seat, w - 5, seat + 1, FABRIC_SEAM)
+    # arms
+    for ax in (0, w - 6):
+        rect(g, ax, 3, ax + 6, h - 3, FABRIC)
+        rect(g, ax, 3, ax + 6, 6, FABRIC_HI)
+        rect(g, ax + (5 if ax == 0 else 0), 6, ax + (6 if ax == 0 else 1), h - 3, FABRIC_SEAM)
+    # front rail, feet
+    rect(g, 6, h - 4, w - 6, h - 3, FABRIC_SEAM)
+    rect(g, 3, h - 2, 6, h, KEY_DK)
+    rect(g, w - 6, h - 2, w - 3, h, KEY_DK)
+    outline(g, {FABRIC, FABRIC_HI, FABRIC_SH, FABRIC_SEAM}, OUTLINE)
+    return g
+
+
+def meeting_sofa_north():
+    """The north-facing sofa: three cushions beyond the backrest, its lit
+    ridge, a back panel dithering into shade, arms, feet."""
+    w, h = SOFA_W * S, SOFA_H * S
+    seat, ridge_end = SOFA_SEAT_ROWS * S, (SOFA_SEAT_ROWS + SOFA_RIDGE_ROWS) * S
+    panel_end = h - 2
+    g = canvas(w, h)
+    rect(g, 5, 2, w - 5, seat, FABRIC_SEAM)
+    for c in SOFA_SEAT_COLS:
+        x0, x1 = max(c * S - 3 * S + 1, 5), min(c * S + 3 * S - 1, w - 5)
+        rect(g, x0, 2, x1, seat, FABRIC)
+        rect(g, x0 + 1, 3, x1 - 1, 5, FABRIC_HI)
+        rect(g, x0, seat - 2, x1, seat, FABRIC_SH)
+    # ridge
+    rect(g, 3, seat, w - 3, ridge_end, FABRIC_HI)
+    rect(g, 3, seat, w - 3, seat + 1, FABRIC_SEAM)
+    rect(g, 3, ridge_end - 1, w - 3, ridge_end, FABRIC)
+    # back panel, dithering into shade in its lower half
+    rect(g, 0, ridge_end, w, panel_end, FABRIC)
+    shade = ridge_end + (panel_end - ridge_end) // 2
+    for y in range(shade, panel_end):
+        for x in range(w):
+            if y >= panel_end - 2 or (x + y) % 2 == 0:
+                g[y][x] = FABRIC_SH
+    # arms
+    for ax, inner in ((0, 5), (w - 6, w - 6)):
+        rect(g, ax, 1, ax + 6, panel_end, FABRIC)
+        rect(g, ax, 1, ax + 6, 4, FABRIC_HI)
+        for y in range(shade, panel_end):
+            for x in range(ax, ax + 6):
+                if y >= panel_end - 2 or (x + y) % 2 == 0:
+                    g[y][x] = FABRIC_SH
+        rect(g, inner, 4, inner + 1, panel_end, FABRIC_SEAM)
+    rect(g, 3, panel_end, 6, h, KEY_DK)
+    rect(g, w - 6, panel_end, w - 3, h, KEY_DK)
+    outline(g, {FABRIC, FABRIC_HI, FABRIC_SH, FABRIC_SEAM}, OUTLINE)
+    return g
+
+
+# ---- the plants ----------------------------------------------------------------
+def blade(g, x0, y0, ang, length, width, lit_side=1, rib=True):
+    """One leaf from (x0, y0) along `ang` (radians), drawn over the leaves
+    behind it: lit on the half facing the window, a dark rim along its
+    lower-right edge so it parts from the leaf it covers, a midrib if long."""
+    ca, sa = math.cos(ang), math.sin(ang)
+    mask = set()
+    for y in range(len(g)):
+        for x in range(len(g[0])):
+            dx, dy = x + 0.5 - x0, y + 0.5 - y0
+            u, v = dx * ca + dy * sa, -dx * sa + dy * ca
+            t = u / length  # widest a third of the way out, tapering to a point
+            if 0 <= t <= 1 and abs(v) <= width * 2.2 * t ** 0.6 * (1 - t):
+                mask.add((x, y, u, v))
+    cells = {(x, y) for x, y, _, _ in mask}
+    for x, y, u, v in mask:
+        if (x + 1, y) not in cells or (x, y + 1) not in cells:
+            g[y][x] = LEAF_DK
+        elif rib and abs(v) < 0.6 and 1.5 < u < length - 1.5:
+            g[y][x] = LEAF_SH if (v > 0) == (lit_side > 0) else LEAF_DK
+        elif (v > 0) == (lit_side > 0):
+            g[y][x] = LEAF_HI if u < length * 0.55 and abs(v) > width * 0.35 else LEAF
+        else:
+            g[y][x] = LEAF_SH
+
+
+def planter(g, cx, top, bot, half_top, half_bot, dark=False):
+    """A pot tapering from its rim down: lit west, shaded east, a rim a pixel
+    proud of the body with its top edge lit."""
+    body, lit_, shade, rim = (SHADOW, SLATE, KEY_DK, SLATE) if dark else (POT, POT_HI, POT_SH, POT_HI)
+    for y in range(top + 2, bot):
+        t = (y - top - 2) / max(1, bot - top - 3)
+        half = half_top + (half_bot - half_top) * t
+        for x in range(len(g[0])):
+            d = x + 0.5 - cx
+            if abs(d) <= half:
+                g[y][x] = lit_ if d < -half * 0.5 else shade if d > half * 0.45 else body
+    rect(g, int(cx - half_top - 1), top, int(cx + half_top + 1) + 1, top + 2, body)
+    rect(g, int(cx - half_top - 1), top, int(cx + half_top + 1) + 1, top + 1, rim)
+
+
+def plant_bush():
+    """A leafy bush in terracotta: long pointed leaves fanning up and out from
+    the pot, back ones first, every tip clear of its neighbours."""
+    g = canvas(6 * S, 7 * S)
+    for ang, ln, wd, side in ((-2.95, 10.0, 2.4, 1), (-0.2, 10.0, 2.4, -1), (-2.55, 12.0, 2.6, 1),
+                              (-0.6, 12.0, 2.6, -1), (-1.35, 14.5, 2.6, -1), (-1.8, 14.0, 2.6, 1),
+                              (-2.2, 12.0, 2.6, 1), (-0.95, 12.0, 2.6, -1), (-1.57, 10.0, 2.4, 1)):
+        blade(g, 12, 18.5, ang, ln, wd, side)
+    planter(g, 12, 17, 27, 6.0, 4.5)
+    union_outline(g)
+    return g
+
+
+def plant_tall():
+    """A tall palm in a dark pot: a slim trunk, and long leaves arching out from
+    its crown and from one joint below it."""
+    g = canvas(6 * S, 10 * S)
+    rect(g, 11, 10, 13, 31, BROWN)
+    rect(g, 12, 10, 13, 31, WOOD_DK)
+    for ang, ln, side, y in ((-2.5, 10.0, 1, 21), (-0.64, 10.0, -1, 21),
+                             (-2.95, 10.5, 1, 11), (-0.2, 10.5, -1, 11), (-2.45, 11.5, 1, 11),
+                             (-0.7, 11.5, -1, 11), (-1.9, 11.0, 1, 11), (-1.25, 11.0, -1, 11)):
+        blade(g, 12, y, ang, ln, 2.4, side, rib=False)
+    planter(g, 12, 30, 39, 6.0, 4.8, dark=True)
+    union_outline(g)
+    return g
+
+
+def plant_flower():
+    """Potted flowers: a cluster of red and gold blooms over two leaves."""
+    g = canvas(6 * S, 6 * S)
+    blooms = [(8.5, 7.0, PETAL_R), (15.5, 6.0, PETAL_Y), (12, 3.5, PETAL_R), (6.5, 11.0, PETAL_Y),
+              (17.5, 10.5, PETAL_R), (12, 9.5, PETAL_Y)]
+    for bx, by, _ in blooms:
+        capsule(g, [(12, 16), (bx, by + 1)], 0.5, LEAF_DK)
+    blade(g, 12, 16, -2.55, 7.5, 2.6, 1, rib=False)
+    blade(g, 12, 16, -0.6, 7.5, 2.6, -1, rib=False)
+    for bx, by, col in blooms:
+        disc(g, bx, by, 2.4, col)
+        put(g, int(bx) - 1, int(by) - 1, PETAL_HI)
+        put(g, int(bx), int(by), GOLD if col == PETAL_R else DARK_RED)
+    planter(g, 12, 15, 23, 4.5, 3.5)
+    union_outline(g)
+    return g
+
+
+def plant_succulent():
+    """A succulent rosette in a wide shallow pot: plump pointed leaves, the
+    inner ones standing up over the outer."""
+    g = canvas(5 * S, 4 * S)
+    for i in range(7):
+        ang = -math.pi + 0.15 + i * (math.pi - 0.3) / 6
+        blade(g, 10, 10, ang, 7.0, 2.6, 1 if i < 3 else -1, rib=False)
+    for ang in (-2.05, -1.1):
+        blade(g, 10, 10, ang, 6.0, 2.4, 1 if ang < -1.57 else -1, rib=False)
+    planter(g, 10, 9, 15, 6.5, 5.0)
+    union_outline(g)
+    return g
+
+
+# ---- furniture: fixtures, boards, shelves, screens, the pantry -------------------
+CORK, CORK_SH, STEEL, STEEL_SH = "Δ", "π", "K", "ξ"
+BOOKS = (RED, BLUE, GOLD, FABRIC, TAN, DARK_RED, ORANGE, "λ")
+
+
+def floor_lamp():
+    """A floor lamp: a weighted base, a slim pole, a drum shade lit from within,
+    the bulb glowing at its open foot."""
+    g = canvas(4 * S, 10 * S)
+    rect(g, 3, 36, 13, 39, LAMP)
+    rect(g, 3, 36, 13, 37, LAMP_HI)
+    rect(g, 7, 10, 9, 36, LAMP)
+    rect(g, 7, 10, 8, 36, LAMP_HI)
+    rect(g, 2, 2, 14, 10, OFFWHITE)
+    rect(g, 3, 1, 13, 2, OFFWHITE)
+    rect(g, 10, 1, 14, 10, OFFWHITE_SH)
+    rect(g, 2, 9, 14, 10, BULB)
+    rect(g, 5, 10, 11, 11, BULB)
+    union_outline(g)
+    return g
+
+
+def filing_cabinet():
+    """A steel filing cabinet: three drawers, each with a pull and a label slot,
+    the top catching the light."""
+    g = canvas(4 * S, 6 * S)
+    rect(g, 1, 1, 15, 23, STEEL)
+    rect(g, 1, 1, 15, 2, WHITE)
+    rect(g, 12, 2, 15, 23, STEEL_SH)
+    for i in range(3):
+        y0 = 3 + i * 7
+        rect(g, 2, y0 + 6, 15, y0 + 7, SHADOW)
+        rect(g, 5, y0 + 2, 11, y0 + 3, OFFWHITE)
+        rect(g, 6, y0 + 4, 10, y0 + 5, KEY_DK)
+    union_outline(g)
+    return g
+
+
+def bulletin_board():
+    """A corkboard in a wooden frame, notes pinned across it."""
+    g = canvas(10 * S, 6 * S)
+    rect(g, 1, 1, 39, 23, WOOD)
+    rect(g, 1, 1, 39, 2, WOOD_LT)
+    rect(g, 3, 3, 37, 21, CORK)
+    for x, y in ((6, 5), (14, 17), (22, 8), (30, 15), (33, 5), (9, 12), (27, 19)):
+        put(g, x, y, CORK_SH)
+    for x0, y0, c in ((5, 5, GOLD), (13, 4, CYAN), (22, 6, BLUSH), (30, 4, OFFWHITE), (8, 13, OFFWHITE),
+                      (18, 13, GOLD), (27, 13, CYAN)):
+        rect(g, x0, y0, x0 + 6, y0 + 6, c)
+        rect(g, x0 + 1, y0 + 2, x0 + 5, y0 + 3, PRINT)
+        rect(g, x0 + 1, y0 + 4, x0 + 4, y0 + 5, PRINT)
+        put(g, x0 + 3, y0, RED)
+    union_outline(g)
+    return g
+
+
+EXIT_GLYPHS = {"E": ("111", "100", "110", "100", "111"), "X": ("101", "101", "010", "101", "101"),
+               "I": ("1",) * 5, "T": ("111", "010", "010", "010", "010")}
+
+
+def exit_sign():
+    """A lit EXIT sign: dark red letters on a warm-lit panel in a red frame."""
+    w, h = 5 * S, 3 * S
+    g = canvas(w, h)
+    rect(g, 1, 1, w - 1, h - 1, RED)
+    rect(g, 2, 2, w - 2, h - 2, BULB)
+    x = 4
+    for letter in "EXIT":
+        rows = EXIT_GLYPHS[letter]
+        for r, row in enumerate(rows):
+            for c, bit in enumerate(row):
+                if bit == "1":
+                    put(g, x + c, 3 + r, DARK_RED)
+        x += len(rows[0]) + 1
+    union_outline(g)
+    return g
+
+
+def whiteboard():
+    """A mobile whiteboard: an aluminium frame round a sprint board of sticky
+    notes and a burndown line, a marker tray, a wheeled stand."""
+    g = canvas(14 * S, 11 * S)
+    rect(g, 1, 1, 55, 30, ALU)
+    rect(g, 1, 1, 55, 2, WHITE)
+    rect(g, 1, 29, 55, 30, ALU_DK)
+    rect(g, 3, 3, 53, 28, OFFWHITE)
+    rect(g, 3, 26, 53, 28, OFFWHITE_SH)
+    for i, x0 in enumerate((6, 20, 34)):
+        rect(g, x0, 5, x0 + 11, 6, INK)
+        for r in range(2 + (i != 1)):
+            c = (GOLD, CYAN, BLUSH)[(i + r) % 3]
+            rect(g, x0 + 1, 8 + r * 6, x0 + 8, 13 + r * 6, c)
+            rect(g, x0 + 2, 10 + r * 6, x0 + 6, 11 + r * 6, PRINT)
+    for x in (17, 31):
+        rect(g, x, 5, x + 1, 25, INK)
+    for t in range(12):
+        put(g, 42 + t, 10 + t + (t % 3 == 1), RED)
+    rect(g, 12, 30, 44, 32, ALU_DK)
+    rect(g, 16, 30, 20, 31, RED)
+    rect(g, 22, 30, 26, 31, BLUE)
+    for lx in (10, 44):
+        rect(g, lx, 32, lx + 2, 41, ALU_DK)
+        rect(g, lx - 3, 41, lx + 5, 43, KEY_DK)
+    rect(g, 10, 36, 46, 37, ALU_DK)
+    union_outline(g)
+    return g
+
+
+def bookshelf():
+    """A wooden bookshelf: three shelves of books, one leaning, a potted sprig
+    and a box on the top shelf, a cabinet below."""
+    g = canvas(8 * S, 12 * S)
+    rect(g, 1, 1, 31, 46, WOOD)
+    rect(g, 1, 1, 31, 2, WOOD_LT)
+    rect(g, 28, 2, 31, 46, WOOD_SH)
+    rect(g, 3, 3, 29, 34, WOOD_DK)
+    rng = random.Random(21)
+    for shelf in range(3):
+        floor_y = 12 + shelf * 11
+        x = 4
+        while x < 27:
+            bw = rng.choice((2, 2, 3))
+            bh = rng.randrange(6, 9)
+            col = BOOKS[rng.randrange(len(BOOKS))]
+            if shelf == 0 and x > 18:
+                break
+            rect(g, x, floor_y - bh, min(27, x + bw), floor_y, col)
+            put(g, x, floor_y - bh, WHITE if col in (BLUE, DARK_RED, FABRIC) else PRINT)
+            x += bw + (1 if rng.random() < 0.25 else 0)
+        if shelf == 1:
+            for t in range(7):  # a book leaning on its neighbour
+                put(g, 24 + t // 3, floor_y - 1 - t, RED)
+                put(g, 25 + t // 3, floor_y - 1 - t, RED)
+        rect(g, 3, floor_y, 29, floor_y + 2, WOOD)
+        rect(g, 3, floor_y, 29, floor_y + 1, WOOD_LT)
+    rect(g, 21, 7, 26, 12, POT)  # a potted sprig and a box on the top shelf
+    rect(g, 21, 7, 26, 8, POT_HI)
+    for x, y in ((22, 5), (23, 4), (24, 5), (25, 3), (23, 6)):
+        put(g, x, y, LEAF)
+    rect(g, 4, 9, 9, 12, TAN)
+    rect(g, 3, 35, 29, 45, WOOD)
+    rect(g, 3, 35, 29, 36, WOOD_LT)
+    rect(g, 15, 36, 16, 45, WOOD_DK)
+    rect(g, 12, 39, 14, 41, GREY)
+    rect(g, 17, 39, 19, 41, GREY)
+    union_outline(g)
+    return g
+
+
+def slide(g, x0, y0, x1, y1):
+    """A lit slide sized to its screen: a title bar, bullet lines, a bar chart."""
+    rect(g, x0, y0, x1, y1, DISPLAY)
+    rect(g, x0 + 2, y0 + 2, x1 - 2, y0 + 4, CYAN)
+    w = x1 - x0
+    for i in range(3):
+        put(g, x0 + 3, y0 + 7 + i * 3, GREY)
+        rect(g, x0 + 5, y0 + 7 + i * 3, x0 + 5 + w * (3 if i % 2 else 4) // 10, y0 + 8 + i * 3, GREY)
+    bx, base = x0 + w // 2 + 4, y1 - 3
+    for i, frac in enumerate((0.4, 0.65, 0.5, 0.85)):
+        top = base - int((base - y0 - 8) * frac)
+        rect(g, bx + i * 4, top, bx + i * 4 + 3, base, BLUE if i % 2 else LEAF)
+    rect(g, bx - 1, base, x1 - 2, base + 1, GREY)
+    for y in range(y0, y1):  # a soft sheen across the glass
+        for x in range(x0, x1):
+            if (x + y) % 23 == 0 and g[y][x] == DISPLAY:
+                g[y][x] = DISPLAY_SHEEN
+
+
+def meeting_screen():
+    """A wall-mounted widescreen showing a slide, on its bracket."""
+    g = canvas(14 * S, 12 * S)
+    rect(g, 1, 3, 55, 39, SHADOW)
+    rect(g, 1, 3, 55, 4, SLATE)
+    slide(g, 3, 5, 53, 37)
+    rect(g, 22, 39, 34, 42, BEZEL)
+    rect(g, 26, 42, 30, 47, SHADOW)
+    union_outline(g)
+    return g
+
+
+def fridge(g, x0, y0, w, h):
+    """A fridge: a freezer door over the main one, each with a steel handle,
+    two magnets, the east side in shade."""
+    seam = y0 + h * 2 // 5
+    rect(g, x0, y0, x0 + w, y0 + h, OFFWHITE)
+    rect(g, x0 + w - max(2, w // 7), y0, x0 + w, y0 + h, OFFWHITE_SH)
+    rect(g, x0, y0, x0 + w, y0 + 1, WHITE)
+    rect(g, x0, seam, x0 + w, seam + 1, OFFWHITE_SH)
+    hx = x0 + w - max(2, w // 7) - 3
+    rect(g, hx, y0 + 3, hx + 1, seam - 2, STEEL)
+    rect(g, hx, seam + 3, hx + 1, seam + 3 + (y0 + h - seam) // 2, STEEL)
+    rect(g, x0 + 3, y0 + h - 9, x0 + 5, y0 + h - 7, CYAN)
+    rect(g, x0 + 7, y0 + h - 8, x0 + 9, y0 + h - 6, RED)
+
+
+def counter(g, x0, x1, top, bottom):
+    """A counter: a lit top edge, cabinet doors with pulls below it."""
+    rect(g, x0, top, x1, bottom, WOOD)
+    rect(g, x0, top, x1, top + 2, WOOD_HI)
+    rect(g, x0, top + 2, x1, top + 3, WOOD_SH)
+    for cx in range(x0 + 10, x1 - 4, 12):
+        rect(g, cx, top + 4, cx + 1, bottom - 1, WOOD_DK)
+        rect(g, cx - 3, top + 6, cx - 1, top + 7, STEEL)
+        rect(g, cx + 2, top + 6, cx + 4, top + 7, STEEL)
+
+
+def espresso(g, x0, y0):
+    rect(g, x0, y0, x0 + 12, y0 + 12, STEEL)
+    rect(g, x0, y0, x0 + 12, y0 + 1, WHITE)
+    rect(g, x0 + 9, y0, x0 + 12, y0 + 12, STEEL_SH)
+    rect(g, x0 + 2, y0 + 2, x0 + 7, y0 + 4, CYAN)
+    rect(g, x0 + 4, y0 + 6, x0 + 8, y0 + 7, SHADOW)
+    rect(g, x0 + 4, y0 + 8, x0 + 7, y0 + 11, MUG)
+
+
+def microwave(g, x0, y0, w):
+    rect(g, x0, y0, x0 + w, y0 + 10, BEZEL)
+    rect(g, x0, y0, x0 + w, y0 + 1, SLATE)
+    rect(g, x0 + 2, y0 + 2, x0 + w - 6, y0 + 8, INK)
+    rect(g, x0 + 3, y0 + 3, x0 + 6, y0 + 4, DISPLAY_SHEEN)
+    rect(g, x0 + w - 4, y0 + 2, x0 + w - 1, y0 + 4, CYAN)
+    rect(g, x0 + w - 4, y0 + 5, x0 + w - 1, y0 + 6, KEYCAP)
+    rect(g, x0 + w - 4, y0 + 7, x0 + w - 1, y0 + 8, KEYCAP)
+
+
+def bottle(g, x0, y0, col):
+    rect(g, x0, y0 + 3, x0 + 3, y0 + 10, col)
+    rect(g, x0 + 1, y0, x0 + 2, y0 + 3, col)
+    rect(g, x0, y0 + 4, x0 + 1, y0 + 9, WHITE)
+
+
+def pantry():
+    """The office pantry: a fridge, an espresso counter with mugs, a microwave
+    counter with bottles."""
+    g = canvas(32 * S, 10 * S)
+    fridge(g, 1, 1, 26, 38)
+    counter(g, 32, 76, 16, 39)
+    espresso(g, 38, 4)
+    for x in (54, 60):
+        desk_mug(g, x, 12)
+    counter(g, 82, 127, 16, 39)
+    microwave(g, 86, 5, 22)
+    bottle(g, 112, 6, GOLD)
+    bottle(g, 117, 6, RED)
+    bottle(g, 122, 6, LEAF)
+    union_outline(g)
+    return g
+
+
+def pantry_small():
+    """The compact pantry: a vending machine lit from within, a mini fridge, a
+    coffee-and-microwave counter."""
+    g = canvas(20 * S, 8 * S)
+    rect(g, 1, 1, 15, 31, BEZEL)
+    rect(g, 1, 1, 15, 2, SLATE)
+    rect(g, 3, 3, 12, 22, INK)
+    for r in range(4):
+        for c in range(3):
+            rect(g, 4 + c * 3, 4 + r * 5, 6 + c * 3, 7 + r * 5, (RED, GOLD, BLUE, LEAF)[(r + c) % 4])
+    rect(g, 13, 6, 14, 10, CYAN)
+    rect(g, 3, 24, 12, 27, KEY_DK)
+    fridge(g, 18, 9, 14, 22)
+    counter(g, 36, 79, 14, 31)
+    espresso(g, 40, 2)
+    microwave(g, 56, 4, 20)
+    union_outline(g)
+    return g
+
+
+def snack_shelf():
+    """A wooden rack of snack packets, three shelves, a drawer below."""
+    g = canvas(7 * S, 10 * S)
+    rect(g, 1, 1, 27, 38, WOOD)
+    rect(g, 1, 1, 27, 2, WOOD_LT)
+    rect(g, 24, 2, 27, 38, WOOD_SH)
+    rect(g, 3, 3, 24, 30, WOOD_DK)
+    rng = random.Random(33)
+    for shelf in range(3):
+        yb = 11 + shelf * 9
+        x = 4
+        while x < 22:
+            pw = rng.choice((3, 4))
+            ph = rng.randrange(4, 7)
+            col = (GOLD, RED, BLUE, LEAF, CYAN, ORANGE)[rng.randrange(6)]
+            rect(g, x, yb - ph, min(24, x + pw), yb, col)
+            rect(g, x, yb - ph, min(24, x + pw), yb - ph + 1, WHITE)
+            x += pw + 1
+        rect(g, 3, yb, 24, yb + 2, WOOD)
+        rect(g, 3, yb, 24, yb + 1, WOOD_LT)
+    rect(g, 3, 31, 24, 37, WOOD)
+    rect(g, 11, 33, 16, 34, STEEL)
+    union_outline(g)
+    return g
+
+
+def tv_stand():
+    """A lit TV on a slim neck over a low media cabinet."""
+    g = canvas(10 * S, 10 * S)
+    rect(g, 1, 1, 39, 24, SHADOW)
+    rect(g, 1, 1, 39, 2, SLATE)
+    slide(g, 3, 3, 37, 22)
+    rect(g, 18, 24, 22, 29, BEZEL)
+    rect(g, 4, 29, 36, 38, WOOD)
+    rect(g, 4, 29, 36, 30, WOOD_LT)
+    rect(g, 4, 37, 36, 38, WOOD_SH)
+    rect(g, 19, 31, 20, 37, WOOD_DK)
+    rect(g, 15, 33, 18, 34, STEEL)
+    rect(g, 22, 33, 25, 34, STEEL)
+    union_outline(g)
+    return g
+
+
+def phone_booth():
+    """A glass privacy pod: a dark frame round tinted glass with streaks of
+    reflection, a stool and a shelf inside, its occupied LED on the roof."""
+    g = canvas(6 * S, 12 * S)
+    rect(g, 1, 1, 23, 47, BEZEL)
+    rect(g, 1, 1, 23, 2, SLATE)
+    rect(g, 9, 2, 15, 4, BULB)
+    rect(g, 3, 6, 21, 40, CYAN)
+    for y in range(6, 40):
+        for x in range(3, 21):
+            if (x - y * 0.6) % 13 < 1.5:
+                g[y][x] = WHITE
+    rect(g, 3, 20, 21, 22, BEZEL)  # the transom
+    rect(g, 7, 26, 17, 28, WOOD)  # the shelf inside
+    rect(g, 10, 33, 14, 40, SHADOW)  # a stool
+    rect(g, 3, 40, 21, 46, WOOD)
+    rect(g, 3, 40, 21, 41, WOOD_LT)
+    rect(g, 17, 42, 19, 44, STEEL)
+    union_outline(g)
+    return g
+
+
+def standing_desk():
+    """A sit-stand desk with a lit laptop, on telescoping legs."""
+    g = canvas(8 * S, 8 * S)
+    rect(g, 1, 1, 31, 17, WOOD)
+    rect(g, 1, 1, 31, 2, WOOD_LT)
+    rect(g, 1, 15, 31, 17, WOOD_SH)
+    rect(g, 7, 3, 25, 11, BEZEL)
+    rect(g, 8, 4, 24, 10, CYAN)
+    rect(g, 9, 5, 17, 6, WHITE)
+    rect(g, 9, 7, 14, 8, WHITE)
+    rect(g, 6, 11, 26, 14, KEYCAP)
+    rect(g, 6, 11, 26, 12, GREY)
+    for lx in (4, 26):
+        rect(g, lx, 17, lx + 2, 29, STEEL_SH)
+        rect(g, lx - 2, 29, lx + 4, 31, KEY_DK)
+    union_outline(g)
+    return g
+
+
 # ---- output -----------------------------------------------------------------
 PROVENANCE = "Generated by scripts/gen-art.py: edit the generator, not this file."
 ENCODING = "utf-8"  # the keys include σ/ψ/Θ, and the locale's encoding need not be the file's
@@ -991,11 +1549,31 @@ def main():
         parser.error(f"not a directory: {args.pack}")
     pieces = {
         **{pose: (CHARACTER_HEADERS[pose], [dressed(pose, BAKED_STYLE)]) for pose in POSES},
+        "plant": ("A leafy bush in terracotta: long pointed leaves fanning out.", [plant_bush()]),
+        "plant_tall": ("A tall palm in a dark pot.", [plant_tall()]),
+        "plant_flower": ("Potted flowers: red and gold blooms over two leaves.", [plant_flower()]),
+        "plant_succulent": ("A succulent rosette in a wide shallow pot.", [plant_succulent()]),
+        "floor_lamp": ("A floor lamp: a drum shade lit from within.", [floor_lamp()]),
+        "filing_cabinet": ("A steel filing cabinet of three drawers.", [filing_cabinet()]),
+        "bulletin_board": ("A corkboard of pinned notes.", [bulletin_board()]),
+        "exit_sign": ("A lit EXIT sign.", [exit_sign()]),
+        "whiteboard": ("A mobile whiteboard: a sprint board, a marker tray, a wheeled stand.", [whiteboard()]),
+        "bookshelf": ("A bookshelf: three shelves of books, a cabinet below.", [bookshelf()]),
+        "meeting_screen": ("A wall-mounted screen showing a slide.", [meeting_screen()]),
+        "pantry": ("The office pantry: a fridge, an espresso counter, a microwave counter.", [pantry()]),
+        "pantry_small": ("The compact pantry: a vending machine, a mini fridge, a counter.", [pantry_small()]),
+        "snack_shelf": ("A rack of snack packets.", [snack_shelf()]),
+        "tv_stand": ("A lit TV over a media cabinet.", [tv_stand()]),
+        "phone_booth": ("A glass privacy pod, its occupied LED on the roof.", [phone_booth()]),
+        "standing_desk": ("A sit-stand desk with a lit laptop.", [standing_desk()]),
         "desk_chair": ("The task chair from behind: a padded back, arm pads, a five-star base on\ncasters.", [desk_chair()]),
         "desk": ("The viewer-facing desk: the monitor turns its BACK to us (casing, vents,\nbadge), a lamp west, papers and a mug east.", [desk_south()]),
         "desk_north": ("The back-turned desk: the raised monitor's glass, a keyboard band, a\nlamp east, papers and a mug west.", [desk_north()]),
+        "meeting_sofa": ("A three-seat sofa facing south: backrest, arms, three cushions, feet.", [meeting_sofa()]),
+        "meeting_sofa_north": ("A three-seat sofa from behind: cushions beyond the backrest, its lit\nridge, a back panel dithering into shade.", [meeting_sofa_north()]),
     }
     classic = {
+        "meeting_sofa_north": ("The sofa from behind: seat rows under a sitter, the backrest over one.", [meeting_sofa_north_1x()]),
         "desk": ("The viewer-facing desk: the monitor's back on its stand, the wood lit\nalong its back edge and front lip.", [desk_south_1x()]),
         "desk_north": ("The back-turned desk: its raised monitor outlined in grey, dim text on\nthe glass, a keyboard a row clear of the stand.", [desk_north_1x()]),
     }
