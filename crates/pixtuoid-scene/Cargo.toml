@@ -36,9 +36,6 @@ anyhow        = { workspace = true }
 tracing       = { workspace = true }
 # `clock` gives Local::now() w/ system timezone for the wall clock.
 chrono        = { version = "0.4", default-features = false, features = ["clock"] }
-# Lab-space color blending — perceptually-correct twilight transitions and dim
-# overlays vs naive sRGB linear blend.
-palette       = { workspace = true }
 
 [build-dependencies]
 toml_edit = { workspace = true }

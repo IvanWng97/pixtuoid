@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use palette::convert::FromColorUnclamped;
-use palette::{FromColor, IsWithinBounds, LinSrgb, Oklab, Srgb};
+use palette::{FromColor, IsWithinBounds, LinSrgb, Mix, Oklab, Srgb};
 
 use crate::grid::Grid;
 
@@ -72,13 +72,24 @@ impl Rgb {
         Rgb::from_oklab_in_gamut(Oklab::new(l, base.a + pull * cos, base.b + pull * sin))
     }
 
+    /// The color `t` of the way from this one to `other`, `t` clamped to
+    /// `0..=1`.
+    ///
+    /// Interpolated in OKLab, the space [`Rgb::ramp`] steps in, so a mix's
+    /// lightness moves evenly with `t` where an sRGB mix of two hues sags
+    /// through a darker, muddier middle.
+    pub fn mix(self, other: Rgb, t: f32) -> Rgb {
+        debug_assert!(!t.is_nan(), "a NaN t survives the clamp");
+        Rgb::from_oklab_in_gamut(self.to_oklab().mix(other.to_oklab(), t))
+    }
+
     fn to_oklab(self) -> Oklab {
         Oklab::from_color(Srgb::new(self.r, self.g, self.b).into_format::<f32>())
     }
 
     /// The sRGB color at `c`'s lightness and hue with as much of its chroma as
-    /// fits. Clipping each channel instead shifts the hue and can undo the step
-    /// outright: lit yellow clips back to the yellow itself.
+    /// fits. Clipping each channel instead shifts the hue and can undo a ramp
+    /// step outright: lit yellow clips back to the yellow itself.
     fn from_oklab_in_gamut(c: Oklab) -> Rgb {
         let at =
             |share: f32| LinSrgb::from_color_unclamped(Oklab::new(c.l, c.a * share, c.b * share));
@@ -468,6 +479,21 @@ mod tests {
     }
 
     #[test]
+    fn a_mix_runs_from_one_color_to_the_other_evenly_in_lightness() {
+        let (navy, amber) = (rgb(18, 26, 52), rgb(252, 215, 110));
+        assert_eq!(navy.mix(amber, 0.0), navy);
+        assert_eq!(navy.mix(amber, 1.0), amber);
+        assert_eq!(navy.mix(amber, -1.0), navy, "t clamps below");
+        assert_eq!(navy.mix(amber, 2.0), amber, "t clamps above");
+        let l = |t: f32| navy.mix(amber, t).to_oklab().l;
+        let (l0, l1) = (l(0.0), l(1.0));
+        for t in [0.25, 0.5, 0.75] {
+            let even = l0 + (l1 - l0) * t;
+            assert!((l(t) - even).abs() < 0.01, "t={t}: {} vs {even}", l(t));
+        }
+    }
+
+    #[test]
     fn a_ramp_warms_its_lights_and_cools_its_shadows_even_on_a_grey() {
         let grey = rgb(128, 128, 128);
         let (lit, shaded) = (grey.ramp(1), grey.ramp(-1));
@@ -476,6 +502,29 @@ mod tests {
             shaded.b > shaded.r,
             "shaded grey should lean cool: {shaded:?}"
         );
+    }
+
+    /// Blue to yellow leaves the sRGB gamut just past blue: the mix gives up
+    /// chroma and keeps the hue it interpolated, where clipping each channel
+    /// would turn it.
+    #[test]
+    fn a_mix_that_leaves_the_gamut_keeps_its_hue() {
+        let (blue, yellow) = (rgb(0, 0, 255), rgb(255, 255, 0));
+        let (from, to) = (blue.to_oklab(), yellow.to_oklab());
+        let hue = |c: Oklab| c.b.atan2(c.a).to_degrees();
+        for t in [0.05, 0.1] {
+            let lerped = from.mix(to, t);
+            assert!(
+                !LinSrgb::from_color_unclamped(lerped).is_within_bounds(),
+                "t={t} must leave the gamut, or this checks nothing"
+            );
+            let got = hue(blue.mix(yellow, t).to_oklab());
+            assert!(
+                (got - hue(lerped)).abs() < 0.3,
+                "t={t}: hue {got} vs {}",
+                hue(lerped)
+            );
+        }
     }
 
     #[test]

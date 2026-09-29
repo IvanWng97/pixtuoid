@@ -970,6 +970,7 @@ pub pixtuoid_core::sprite::Rgb::b: u8
 pub pixtuoid_core::sprite::Rgb::g: u8
 pub pixtuoid_core::sprite::Rgb::r: u8
 impl pixtuoid_core::sprite::Rgb
+pub fn pixtuoid_core::sprite::Rgb::mix(self, pixtuoid_core::sprite::Rgb, f32) -> pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_core::sprite::Rgb::ramp(self, i8) -> pixtuoid_core::sprite::Rgb
 impl core::clone::Clone for pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_core::sprite::Rgb::clone(&self) -> pixtuoid_core::sprite::Rgb
@@ -1849,6 +1850,7 @@ pub pixtuoid_core::Rgb::b: u8
 pub pixtuoid_core::Rgb::g: u8
 pub pixtuoid_core::Rgb::r: u8
 impl pixtuoid_core::sprite::Rgb
+pub fn pixtuoid_core::sprite::Rgb::mix(self, pixtuoid_core::sprite::Rgb, f32) -> pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_core::sprite::Rgb::ramp(self, i8) -> pixtuoid_core::sprite::Rgb
 impl core::clone::Clone for pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_core::sprite::Rgb::clone(&self) -> pixtuoid_core::sprite::Rgb
