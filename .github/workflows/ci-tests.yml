@@ -143,7 +143,7 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/pip install -r requirements-dev.txt
-      - name: Artifact-drift gate (everything `just gen` writes + the wasm pair integrity)
+      - name: Artifact-drift gate (everything `just gen` writes)
         run: just gen-check
       - name: Upload gen-check diff overlays
         if: always()
