@@ -108,6 +108,30 @@ impl Depths {
     }
 }
 
+/// One floor's [`Depths::cells`], kept across frames: the contacts change only
+/// with the layout, so the cells are rebuilt only when they do.
+#[derive(Default)]
+pub(crate) struct DepthsCache {
+    key: Option<(Vec<Contact>, u16)>,
+    cells: Vec<(u16, u16, f32)>,
+}
+
+impl DepthsCache {
+    /// The cells of `contacts` at `per`, rebuilt only when either changed.
+    pub(crate) fn cells(&mut self, contacts: Vec<Contact>, per: u16) -> &[(u16, u16, f32)] {
+        if self
+            .key
+            .as_ref()
+            .is_none_or(|(cached, p)| *cached != contacts || *p != per)
+        {
+            self.cells = Depths::of(contacts.iter().copied(), per)
+                .map_or_else(Vec::new, |d| d.cells().collect());
+            self.key = Some((contacts, per));
+        }
+        &self.cells
+    }
+}
+
 /// How much of a pool lands `nx`, `ny` radii from its centre: most at its
 /// centre and fading to nothing at its rim, so a pool, stepped into its
 /// painter's tones, reads as rings and not a stamped oval.
@@ -184,5 +208,25 @@ mod tests {
     fn night_softens_a_shadow() {
         assert!(shadow_strength(1.0) < shadow_strength(0.0));
         assert!(shadow_strength(1.0) > 0.0, "a lamp still casts one");
+    }
+
+    #[test]
+    fn the_depths_cache_rebuilds_only_for_new_contacts() {
+        let fresh = |contacts: &[Contact]| -> Vec<(u16, u16, f32)> {
+            Depths::of(contacts.iter().copied(), 1)
+                .expect("contacts")
+                .cells()
+                .collect()
+        };
+        let a = [Contact::under(5, 10, 10)];
+        let b = [Contact::under(5, 10, 10), Contact::under(30, 6, 20)];
+        let mut cache = DepthsCache::default();
+        assert_eq!(cache.cells(a.to_vec(), 1), fresh(&a));
+        assert_eq!(cache.cells(a.to_vec(), 1), fresh(&a), "kept");
+        assert_eq!(cache.cells(b.to_vec(), 1), fresh(&b), "rebuilt");
+        assert!(
+            cache.cells(Vec::new(), 1).is_empty(),
+            "no contacts, no shadow"
+        );
     }
 }
