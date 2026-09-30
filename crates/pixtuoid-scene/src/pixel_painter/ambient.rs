@@ -13,7 +13,7 @@ use crate::pixel_painter::PaintCtx;
 use crate::pixel_painter::background::{
     RadialFalloff, paint_light, paint_radial_falloff, window_spill_columns,
 };
-use crate::pixel_painter::palette::{WHITE, blend_pixel, blend_rgb};
+use crate::pixel_painter::palette::blend_pixel;
 use crate::theme::Theme;
 
 pub(super) struct SunbeamColumn {
@@ -151,10 +151,7 @@ pub(super) fn paint_sun_spot(buf: &mut RgbBuffer, theme: &Theme, layout: &Layout
     if effective_intensity <= 0.0 {
         return;
     }
-    let warm = theme.lighting.sun_spill;
-    // Blend warm toward white as the sun climbs (warmth → 0 at noon).
-    let cool = 1.0 - spot.warmth;
-    let color = blend_rgb(warm, WHITE, cool * 0.6);
+    let color = crate::celestial::wall_spot_colour(spot.warmth, theme);
 
     // A visible sun rectangle, not a 4px speck: keep a generous floor size so
     // the radial falloff doesn't collapse the spot to nothing on the dark wall.
