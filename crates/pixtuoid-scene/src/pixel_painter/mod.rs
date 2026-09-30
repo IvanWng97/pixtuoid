@@ -425,7 +425,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
     // ascending and painting in order puts things closer to the camera in
     // front: the painter's algorithm on a top-down 2D scene.
     let pet_pos = frame.pet.map(|pet| enqueue_pet(ctx, pet, &mut drawables));
-    let roster_mascots = enqueue_gateway_mascots(ctx, &frame.mascots, &mut drawables);
+    let mascot_frames = enqueue_gateway_mascots(ctx, &frame.mascots, &mut drawables);
     enqueue_characters(ctx, frame, &mut drawables);
     enqueue_room_walls(ctx.layout, &mut drawables);
     drawable::sort_drawables(&mut drawables);
@@ -434,7 +434,9 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
         mascots: drawables
             .iter()
             .filter_map(|d| match d.kind {
-                DrawableKind::GatewayMascot { roster, .. } => Some(roster_mascots[roster].clone()),
+                DrawableKind::GatewayMascot { mascot_idx, .. } => {
+                    Some(mascot_frames[mascot_idx].clone())
+                }
                 _ => None,
             })
             .collect(),
@@ -596,7 +598,7 @@ fn enqueue_gateway_mascots<'a>(
     mascots
         .iter()
         .enumerate()
-        .map(|(roster, m)| {
+        .map(|(mascot_idx, m)| {
             let pos = m.pos;
             let Size {
                 w: mascot_w,
@@ -606,7 +608,7 @@ fn enqueue_gateway_mascots<'a>(
                 anchor_y: z_sort_row(Anchor::Center, pos, mascot_h),
                 layer: Layer::Figure,
                 kind: DrawableKind::GatewayMascot {
-                    roster,
+                    mascot_idx,
                     pos,
                     anim_name: m.anim_name,
                     frame_idx: m.frame_idx,

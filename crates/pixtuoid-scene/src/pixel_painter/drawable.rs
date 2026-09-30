@@ -161,8 +161,8 @@ pub(super) enum DrawableKind<'a> {
     /// agent (lives in `daemons`, not `scene.agents`); y-sorted at its south row
     /// like a pet.
     GatewayMascot {
-        /// Its index in `enqueue_gateway_mascots`' returned frames.
-        roster: usize,
+        /// Its index in [`SimFrame::mascots`](super::SimFrame::mascots).
+        mascot_idx: usize,
         pos: Point,
         anim_name: &'static str,
         frame_idx: usize,
@@ -462,7 +462,7 @@ pub(super) fn paint_drawable(
             }
         }
         DrawableKind::GatewayMascot {
-            roster: _,
+            mascot_idx: _,
             pos,
             anim_name,
             frame_idx,
@@ -1164,7 +1164,7 @@ mod tests {
             anchor_y: 30,
             layer: Layer::Figure,
             kind: DrawableKind::GatewayMascot {
-                roster: 0,
+                mascot_idx: 0,
                 pos: Point { x: 30, y: 30 },
                 anim_name: "nonexistent_anim",
                 frame_idx: 0,
@@ -1205,7 +1205,7 @@ mod tests {
                 anchor_y: pos.y,
                 layer: Layer::Figure,
                 kind: DrawableKind::GatewayMascot {
-                    roster: 0,
+                    mascot_idx: 0,
                     pos,
                     anim_name: def.rest,
                     frame_idx: 0,
