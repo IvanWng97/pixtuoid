@@ -8,8 +8,8 @@ use serde::Deserialize;
 use crate::grid::Grid;
 use crate::sprite::error::{ColorError, KeySite, LineError, PackError, SpriteError};
 use crate::sprite::{
-    Frame, HeadMark, HeadView, IndexedFrame, Mark, Palette, PaletteIndex, Pixel, Rgb, Sprite,
-    HEAD_MARK, PALETTE_CAPACITY,
+    Frame, HEAD_MARK, HeadMark, HeadView, IndexedFrame, Mark, PALETTE_CAPACITY, Palette,
+    PaletteIndex, Pixel, Rgb, Sprite,
 };
 
 type Result<T, E = PackError> = std::result::Result<T, E>;
@@ -410,9 +410,10 @@ mod tests {
         let front = mop.layers(HeadView::Front).expect("a front view");
         assert_eq!(front.behind().and_then(|l| l.head(0)).map(|h| h.y), Some(1));
         assert!(front.over().is_some());
-        assert!(mop
-            .layers(HeadView::Back)
-            .is_some_and(|l| l.behind().is_none()));
+        assert!(
+            mop.layers(HeadView::Back)
+                .is_some_and(|l| l.behind().is_none())
+        );
         assert!(mop.layers(HeadView::Side).is_none());
         assert_eq!(
             pack.character_outline(),

@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use pixtuoid_core::sprite::error::PackError;
 #[cfg(feature = "native")]
-use pixtuoid_core::sprite::format::{load_pack, DensityMismatch, FrameCountMismatch};
+use pixtuoid_core::sprite::format::{DensityMismatch, FrameCountMismatch, load_pack};
 use pixtuoid_core::sprite::format::{
-    load_pack_from_strings, validate_pack_animations, Pack, ValidationReport,
+    Pack, ValidationReport, load_pack_from_strings, validate_pack_animations,
 };
 
 /// Where a sprite pack's custom half comes from. The source decides what a

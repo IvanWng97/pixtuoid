@@ -2,12 +2,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use pixtuoid_core::source::claude_code::claude_config_dir;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
+use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::merge;
 use crate::install::target::MergeOutcome;
-use crate::install::SENTINEL_KEY;
 
 pub(crate) const EVENTS: &[&str] = &[
     "SessionStart",
@@ -79,7 +79,7 @@ pub(crate) fn hook_entry(cmd: &str, exec_form: bool) -> Value {
 }
 
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
-    use crate::install::verify::{assemble, SchemaParse, ShimRef};
+    use crate::install::verify::{SchemaParse, ShimRef, assemble};
     let Ok(doc) = serde_json::from_str::<Value>(content) else {
         return SchemaParse::broken("settings.json no longer parses as JSON");
     };

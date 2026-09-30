@@ -11,8 +11,8 @@
 
 use serde_json::{Map, Value};
 
-use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
+use crate::source::{AgentEvent, ToolDetail};
 
 const TOOL_CALL: &str = "tool_call";
 const TOOL_CALL_UPDATE: &str = "tool_call_update";
@@ -96,11 +96,13 @@ mod tests {
         match decode(json!({"sessionUpdate": "tool_call", "toolCallId": "c1", "title": "grep"}))
             .as_slice()
         {
-            [AgentEvent::ActivityStart {
-                tool_use_id: Some(id),
-                detail: Some(ToolDetail::Generic { display }),
-                ..
-            }] => {
+            [
+                AgentEvent::ActivityStart {
+                    tool_use_id: Some(id),
+                    detail: Some(ToolDetail::Generic { display }),
+                    ..
+                },
+            ] => {
                 assert_eq!(id, "c1");
                 assert_eq!(display, "grep");
             }
@@ -112,10 +114,12 @@ mod tests {
             )
             .as_slice()
             {
-                [AgentEvent::ActivityEnd {
-                    tool_use_id: Some(id),
-                    ..
-                }] => assert_eq!(id, "c1"),
+                [
+                    AgentEvent::ActivityEnd {
+                        tool_use_id: Some(id),
+                        ..
+                    },
+                ] => assert_eq!(id, "c1"),
                 other => panic!("expected one ActivityEnd for {status}, got {other:?}"),
             }
         }

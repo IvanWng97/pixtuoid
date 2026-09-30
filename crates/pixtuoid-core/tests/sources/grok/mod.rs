@@ -9,9 +9,9 @@
 //! parent's `subagent_start` names the child and the CHILD's own `subagent_stop`
 //! ends it.
 
+use pixtuoid_core::AgentId;
 use pixtuoid_core::harness::{Drive, Driven};
 use pixtuoid_core::source::{AgentEvent, ToolDetail};
-use pixtuoid_core::AgentId;
 
 const PARENT: &str = "01a006a5-e63d-7543-b1af-da3127a85c3b";
 const CHILD: &str = "01a006a6-0659-7690-a9cc-20da7c827b72";

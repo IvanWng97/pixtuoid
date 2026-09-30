@@ -10,14 +10,14 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use pixtuoid_core::harness::{Drive, Reach, DRIVEN_DESKS};
+use pixtuoid_core::SceneState;
+use pixtuoid_core::harness::{DRIVEN_DESKS, Drive, Reach};
 use pixtuoid_core::source::daemon::apply_presence;
 use pixtuoid_core::source::registry;
-use pixtuoid_core::SceneState;
-use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
+use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
 use pixtuoid_scene::theme::NORMAL;
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 
 use pixtuoid::tui::tui_renderer::TuiRenderer;
 

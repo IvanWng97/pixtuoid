@@ -6,12 +6,12 @@
 use std::time::{Duration, SystemTime};
 
 use crate::layout::{
-    desk_furniture_def, desk_walk_anchor_facing, furniture_def, Bounds, DwellWindow, Point,
-    SceneLayout, WaypointKind,
+    Bounds, DwellWindow, Point, SceneLayout, WaypointKind, desk_furniture_def,
+    desk_walk_anchor_facing, furniture_def,
 };
 use crate::motion::{WanderKind, WanderTarget};
-use pixtuoid_core::state::{ActivityState, AgentSlot};
 use pixtuoid_core::AgentId;
+use pixtuoid_core::state::{ActivityState, AgentSlot};
 
 /// How long after the last event an Idle agent stays in the "thinking" pose
 /// (seated, awake, no z's) before entering the wander/sleep cycle — sized to

@@ -2,7 +2,7 @@
 //! furniture and waypoint kind in the office, plus THE table giving each its
 //! geometry. Kept separate so a new sprite kind doesn't churn the layout math.
 
-use super::{Anchor, Point, Size, DESK_FOOT_H, DESK_H, DESK_W};
+use super::{Anchor, DESK_FOOT_H, DESK_H, DESK_W, Point, Size};
 
 /// Wander destinations the Idle state machine can pick — each kind controls the
 /// pose + sprite an arriving agent takes. Plants/lamps are decor, not waypoints.
