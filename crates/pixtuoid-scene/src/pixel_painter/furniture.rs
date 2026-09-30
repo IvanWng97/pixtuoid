@@ -149,7 +149,7 @@ pub(super) fn paint_notice_board(buf: &mut RgbBuffer, board: Bounds, theme: &cra
 }
 
 /// Small doormat at the meeting-room entrance. Placement + fit-gate come from
-/// [`MeetingRoom::doormat_rect`] — the ONE authority the hover hit-test shares.
+/// [`MeetingRoom::doormat_rect`](crate::layout::MeetingRoom::doormat_rect) — the ONE authority the hover hit-test shares.
 pub(super) fn paint_doormat(
     buf: &mut RgbBuffer,
     room: &crate::layout::MeetingRoom,
@@ -180,7 +180,7 @@ pub(crate) const COOLER_WATER: Rgb = Rgb {
     b: 230,
 };
 
-/// Water cooler; placement + fit-gate come from [`PantryRoom::water_cooler_rect`]
+/// Water cooler; placement + fit-gate come from [`PantryRoom::water_cooler_rect`](crate::layout::PantryRoom::water_cooler_rect)
 /// — the ONE authority the hover hit-test shares.
 pub(super) fn paint_water_cooler(
     buf: &mut RgbBuffer,
@@ -219,7 +219,7 @@ pub(super) fn paint_water_cooler(
 
 /// Trash bin near the pantry counter. Its colours are intentionally un-themed
 /// neutral greys (a semantic object, like the water bottle's blue), so it takes no
-/// theme; placement + fit-gate come from [`PantryRoom::trash_bin_rect`] — the ONE
+/// theme; placement + fit-gate come from [`PantryRoom::trash_bin_rect`](crate::layout::PantryRoom::trash_bin_rect) — the ONE
 /// authority the hover hit-test shares.
 pub(super) fn paint_trash_bin(buf: &mut RgbBuffer, room: &crate::layout::PantryRoom) {
     let Some(bin) = room.trash_bin_rect() else {

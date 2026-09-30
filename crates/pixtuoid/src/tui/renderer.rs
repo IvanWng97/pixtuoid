@@ -510,29 +510,10 @@ pub(super) fn paint_overlays(
         paint_theme_picker(f, idx, bounds, theme);
     }
     if dashboard.open {
-        paint_dashboard(
-            f,
-            &dashboard.rows,
-            dashboard.selected,
-            dashboard.scroll,
-            now,
-            bounds,
-            theme,
-        );
+        paint_dashboard(f, dashboard, now, bounds, theme);
     }
     if connection.open {
-        paint_connection_panel(
-            f,
-            &connection.rows,
-            &connection.live,
-            connection.selected,
-            connection.confirm,
-            connection.result.as_deref(),
-            &connection.socket_line,
-            now,
-            bounds,
-            theme,
-        );
+        paint_connection_panel(f, connection, now, bounds, theme);
     }
     if popup_scale > 0.0 {
         paint_version_popup(f, env!("CARGO_PKG_VERSION"), bounds, theme, popup_scale);

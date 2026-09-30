@@ -135,12 +135,23 @@ fn a_spills_bounds_hold_every_row_whichever_way_it_leans() {
 }
 
 #[test]
-fn a_monitor_halo_hangs_over_each_seated_agent_mid_tool_call_only() {
+fn a_monitor_halo_hangs_over_each_lit_screen_only() {
     let layout = Layout::compute(192, 80, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
+    let facing = |i: usize| layout.desk_facing(FloorLocalDeskIndex(i));
+    let north: Vec<usize> = (0..layout.home_desks.len())
+        .filter(|&i| facing(i) == Facing::North)
+        .collect();
+    let south = (0..layout.home_desks.len())
+        .find(|&i| facing(i) == Facing::South)
+        .expect("this layout seats both ways");
+    let [lit, walking, idle, ..] = north[..] else {
+        panic!("this layout needs three screens facing us: {north:?}");
+    };
     let id = |p: &str| pixtuoid_core::AgentId::from_transcript_path(p);
+    // No tool detail: a screen lights for any tool call.
     let active = pixtuoid_core::state::ActivityState::Active {
         tool_use_id: None,
-        detail: Some(std::sync::Arc::from("Edit src/main.rs")),
+        detail: None,
         kind: pixtuoid_core::state::ToolKind::Edit,
     };
     let at_desk = |path: &str, desk: usize, state: pixtuoid_core::state::ActivityState| {
@@ -149,14 +160,20 @@ fn a_monitor_halo_hangs_over_each_seated_agent_mid_tool_call_only() {
         a
     };
     let agents = [
-        at_desk("/seated.jsonl", 0, active.clone()),
-        at_desk("/walking.jsonl", 1, active),
-        at_desk("/idle.jsonl", 2, pixtuoid_core::state::ActivityState::Idle),
+        at_desk("/lit.jsonl", lit, active.clone()),
+        at_desk("/walking.jsonl", walking, active.clone()),
+        at_desk(
+            "/idle.jsonl",
+            idle,
+            pixtuoid_core::state::ActivityState::Idle,
+        ),
+        at_desk("/back.jsonl", south, active),
     ];
     let seated = HashMap::from([
-        (FloorLocalDeskIndex(0), true),
-        (FloorLocalDeskIndex(1), false),
-        (FloorLocalDeskIndex(2), true),
+        (FloorLocalDeskIndex(lit), true),
+        (FloorLocalDeskIndex(walking), false),
+        (FloorLocalDeskIndex(idle), true),
+        (FloorLocalDeskIndex(south), true),
     ]);
     let sky = Sky::at_with(crate::localclock::at_hour(0), Weather::Clear);
     let lights = Lights::of(
@@ -176,9 +193,10 @@ fn a_monitor_halo_hangs_over_each_seated_agent_mid_tool_call_only() {
         kinds,
         [EmitterKind::MonitorHalo(
             pixtuoid_core::state::ToolKind::Edit
-        )]
+        )],
+        "only the seated, mid-call agent at a screen facing us"
     );
-    let desk = layout.home_desks[0];
+    let desk = layout.home_desks[lit];
     assert_eq!(
         lights.monitor_halos[0].light,
         Light::Patch {
@@ -296,5 +314,54 @@ fn a_light_sampled_between_cells_stays_inside_its_bounds() {
                 }
             }
         }
+    }
+}
+
+/// A painter steps a light's levels down from its peak, so the peak must be
+/// the level its brightest cell actually gets — every shape.
+#[test]
+fn a_lights_peak_is_its_brightest_cell() {
+    let at = |x, y| Point { x, y };
+    let lights = [
+        Light::Halo {
+            centre: at(30, 20),
+            radius: 11,
+            share: 1.0,
+        },
+        Light::Halo {
+            centre: at(30, 20),
+            radius: 5,
+            share: 0.42,
+        },
+        Light::Glow {
+            at: at(20, 20),
+            w: 30,
+            h: 8,
+            reach: NEON_HALO_RADIUS,
+        },
+        Light::Spill {
+            x: 20,
+            w: WINDOW_W,
+            top: 10,
+            slant: 0.3,
+        },
+        Light::Patch { centre: at(30, 20) },
+    ];
+    for light in lights {
+        let e = Emitter {
+            kind: EmitterKind::FloorLamp,
+            light,
+            strength: 0.6,
+        };
+        let ((x0, y0), (x1, y1)) = e.bounds();
+        let brightest = (y0..y1)
+            .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+            .filter_map(|(x, y)| e.level_at(x, y))
+            .fold(0.0_f32, f32::max);
+        assert!(
+            (e.peak() - brightest).abs() < 1e-6,
+            "{light:?}: peak {} vs brightest {brightest}",
+            e.peak()
+        );
     }
 }
