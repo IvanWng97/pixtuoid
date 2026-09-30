@@ -1,14 +1,11 @@
-use std::time::SystemTime;
-
-use pixtuoid_core::state::DaemonState;
-use pixtuoid_core::SceneState;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 
-use super::{display_width, to_color, StateCounts};
+use super::{display_width, to_color};
 use crate::tui::renderer::clip_widget_rect;
+use pixtuoid_scene::board::BoardModel;
 
 /// The wall board's text width, DERIVED from the painted neon panel's dark
 /// interior so the lit sign's letters can never overrun the glowing frame
@@ -40,29 +37,16 @@ fn board_tone_color(
 /// the mood pulse (L2), the office context row (L3). It owns nothing critical
 /// exclusively, since it may clip off-screen; the must-not-miss signals live in
 /// the footer.
-#[allow(clippy::too_many_arguments)] // a painter's distinct inputs (like paint_footer)
 pub(crate) fn paint_wall_display(
     f: &mut ratatui::Frame<'_>,
-    scene: &SceneState,
+    model: &BoardModel,
     scene_rect: Rect,
-    now: SystemTime,
-    counts: StateCounts,
-    floor_info: Option<crate::tui::renderer::FloorInfo>,
-    gateway: Option<DaemonState>,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
     use ratatui::style::Modifier;
     use ratatui::text::Line;
 
     let (cell_x, cell_y) = board_cell_origin(scene_rect);
-
-    let model = pixtuoid_scene::board::build_board(
-        counts,
-        pixtuoid_scene::board::scene_uptime_secs(scene, now),
-        floor_info.map(|fi| (fi.current, fi.total_floors)),
-        gateway,
-        now,
-    );
 
     // The star right-flushes to the panel edge — the SAME position
     // `star_hit_rect` derives the click target from. The assert is STRICT (`<`)
@@ -141,6 +125,10 @@ pub(crate) fn star_hit_rect(scene_rect: Rect) -> Option<Rect> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::widgets::StateCounts;
+    use pixtuoid_core::state::DaemonState;
+    use pixtuoid_core::SceneState;
+    use std::time::SystemTime;
 
     fn full_bounds(w: u16, h: u16) -> Rect {
         Rect {
@@ -172,16 +160,14 @@ mod tests {
         let scene_rect = full_bounds(120, 44);
         let mut term = Terminal::new(TestBackend::new(120, 44)).unwrap();
         term.draw(|f| {
-            paint_wall_display(
-                f,
-                &scene,
-                scene_rect,
-                SystemTime::UNIX_EPOCH,
+            let model = pixtuoid_scene::board::build_board(
                 counts,
+                pixtuoid_scene::board::scene_uptime_secs(&scene, SystemTime::UNIX_EPOCH),
                 None,
                 Some(DaemonState::Idle),
-                &pixtuoid_scene::theme::NORMAL,
+                SystemTime::UNIX_EPOCH,
             );
+            paint_wall_display(f, &model, scene_rect, &pixtuoid_scene::theme::NORMAL);
         })
         .unwrap();
         let buf = term.backend().buffer();
