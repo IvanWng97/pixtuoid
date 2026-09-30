@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use pixtuoid_core::sprite::error::{LineError, PackError, SpriteError};
 use pixtuoid_core::sprite::format::{load_pack, load_pack_from_strings, validate_pack_animations};
 use pixtuoid_core::sprite::{Frame, Rgb};
 
@@ -12,6 +13,36 @@ fn parse(src: &str) -> anyhow::Result<Vec<Frame>> {
         &[("f.sprite", src)],
     )?;
     Ok(pack.animation("idle").expect("idle").frames().to_vec())
+}
+
+/// A caller can match the failure, and `{:#}` names each step of it once.
+#[test]
+fn a_bad_pixel_is_matchable_and_its_chain_prints_each_step_once() {
+    let err = load_pack_from_strings(
+        "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+         [animations.idle]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+        &[("f.sprite", "@frame 0\nA z")],
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            PackError::Decode {
+                file,
+                source: SpriteError::Line {
+                    line: 2,
+                    kind: LineError::UnknownKey { key: 'z', .. },
+                    ..
+                },
+                ..
+            } if file == "f.sprite"
+        ),
+        "{err:?}"
+    );
+    assert_eq!(
+        format!("{:#}", anyhow::Error::from(err)),
+        "decoding f.sprite: unknown palette key 'z' (line 2)"
+    );
 }
 
 #[test]
@@ -78,7 +109,9 @@ fn rejects_palette_key_longer_than_one_char() {
     let pack_toml = "[pack]\nname=\"x\"\nversion=\"1\"\n\
          [palette]\n\"AB\"=\"#010203\"\n\
          [animations.idle]\nframes=[\"i.sprite\"]\nframe_ms=100\n";
-    let err = load_pack_from_strings(pack_toml, &[("i.sprite", "@frame 0\nA")]).unwrap_err();
+    let err = anyhow::Error::from(
+        load_pack_from_strings(pack_toml, &[("i.sprite", "@frame 0\nA")]).unwrap_err(),
+    );
     assert!(
         format!("{err:#}").contains("exactly one character"),
         "a >1-char palette key must bail; got: {err:#}"
@@ -90,7 +123,9 @@ fn rejects_palette_value_not_six_hex_digits() {
     let pack_toml = "[pack]\nname=\"x\"\nversion=\"1\"\n\
          [palette]\n\"A\"=\"#12345\"\n\
          [animations.idle]\nframes=[\"i.sprite\"]\nframe_ms=100\n";
-    let err = load_pack_from_strings(pack_toml, &[("i.sprite", "@frame 0\nA")]).unwrap_err();
+    let err = anyhow::Error::from(
+        load_pack_from_strings(pack_toml, &[("i.sprite", "@frame 0\nA")]).unwrap_err(),
+    );
     assert!(
         format!("{err:#}").contains("6 hex digits"),
         "a non-6-hex-digit color must bail; got: {err:#}"
