@@ -55,10 +55,9 @@ API_NIGHTLY := "nightly-2026-07-22"
 # churning goldens.
 API_PUBLIC_API := "0.52.0"
 
-# The non-linux triples `doc-check` renders: one per OS release.yml ships,
-# because nothing cfgs on arch or env. rustdoc links nothing, so a triple's std
-# is all it needs while no dependency on it builds C (`cargo doc` still runs
-# build scripts).
+# The non-linux triples `doc-check` renders, one per OS release.yml ships.
+# rustdoc links nothing, so a triple's std is all it needs while no dependency on
+# it builds C (`cargo doc` still runs build scripts).
 DOC_TARGETS := "x86_64-pc-windows-msvc aarch64-apple-darwin"
 
 # List available recipes.
@@ -459,12 +458,10 @@ _api-toolchain:
 # (the link docs.rs would render broken). The broken/private intra-doc-link
 # classes are already `deny` in `[workspace.lints.rustdoc]`; `-D warnings` adds
 # bare URLs, invalid HTML, redundant links, and any future rustdoc lint. "Every
-# item" spans every unit rustdoc renders: the `pixtuoid` bin, the examples (on
-# the host), and one pass per `DOC_TARGETS` triple, whose `cfg` arms the host
-# pass compiles out — `cfg(target_os = "linux")` arms render only on a linux
-# host, i.e. in CI; (2) RUN the doctests — `cargo nextest` does NOT execute
-# doctests, so the crate-root examples would otherwise go ungated. CI-only in
-# practice (the doc builds + a doctest run).
+# item" spans every unit rustdoc renders: the `pixtuoid` bin, the examples, and
+# each `DOC_TARGETS` triple, whose `cfg` arms the host pass compiles out
+# (`cfg(target_os = "linux")` arms render only in CI); (2) RUN the doctests —
+# nextest does not.
 [doc('Doc gate: cargo doc (private items, bin, examples, DOC_TARGETS) with -D warnings + the doctests nextest skips (CI-only)')]
 [group('rust')]
 doc-check: _doc-targets
