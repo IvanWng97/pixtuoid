@@ -8,9 +8,8 @@ const API = 'https://api.github.com/repos/IvanWng97/pixtuoid';
 // fails every build-time GitHub call the same way.
 export const GH_FETCH_TIMEOUT_MS = 5000;
 
-// What a `GH_STARS_E2E` build pins and the e2e suite asserts: an unauthenticated
-// runner's API call rate-limits to null, which hides the star chip and silently
-// no-ops its assertion.
+// An unauthenticated runner's API call rate-limits to null, which hides the chip
+// the e2e suite asserts.
 export const E2E_STAR_COUNT = '842';
 
 /**

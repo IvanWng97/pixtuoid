@@ -1024,7 +1024,7 @@ test('statusline install chip on mobile: label stays readable at rest, flash swa
   expect(errors()).toEqual([]);
 });
 
-test('statusline install chip: the ★ star segment renders the overridden count, never a literal null/undefined', async ({
+test('statusline install chip: the ★ star segment renders the pinned count, never a literal null/undefined', async ({
   page,
 }) => {
   // `just site-e2e` and CI both build with GH_STARS_E2E — a build made without it fails here, and the broad shape

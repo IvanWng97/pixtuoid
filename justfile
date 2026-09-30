@@ -787,7 +787,6 @@ site-e2e:
     #!/usr/bin/env sh
     set -eu
     cd site
-    # pins the ★ count to config/gh-stars.mjs's E2E_STAR_COUNT
     export GH_STARS_E2E=1
     npm run build
     npx playwright test

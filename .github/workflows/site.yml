@@ -35,7 +35,6 @@ jobs:
       - run: npm run check
       - run: npm run knip
       - run: npm run test:unit
-      # pins the ★ count to config/gh-stars.mjs's E2E_STAR_COUNT
       - run: npm run build
         env:
           GH_STARS_E2E: 1
