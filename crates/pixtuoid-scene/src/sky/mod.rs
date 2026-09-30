@@ -8,8 +8,6 @@
 use std::cell::Cell;
 use std::time::SystemTime;
 
-use pixtuoid_core::id::splitmix64;
-
 #[cfg(test)]
 mod tests;
 
@@ -96,11 +94,6 @@ impl Drop for ForcedWeather {
 /// How long one weather holds before the next slot picks again.
 const WEATHER_CYCLE_SECS: u64 = 600;
 
-/// splitmix64's golden-ratio increment: `splitmix64(x + GAMMA)` is the first
-/// draw of a splitmix64 stream seeded at `x`, not the bare finalizer (which
-/// maps 0 to 0).
-const SPLITMIX64_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
-
 /// The weather at `now`: one hashed pick per [`WEATHER_CYCLE_SECS`] slot.
 fn weather_at(now: SystemTime) -> Weather {
     if let Some(forced) = WEATHER_OVERRIDE.with(Cell::get) {
@@ -111,7 +104,7 @@ fn weather_at(now: SystemTime) -> Weather {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let cycle = secs / WEATHER_CYCLE_SECS;
-    match splitmix64(cycle.wrapping_add(SPLITMIX64_GAMMA)) % 15 {
+    match crate::splitmix_draw(cycle, 1) % 15 {
         0..=5 => Weather::Clear,
         6..=7 => Weather::Rain,
         8 => Weather::Storm,
@@ -318,7 +311,7 @@ fn lightning_envelope(since_strike_ms: u64) -> f32 {
 /// fixed metronome. Each `LIGHTNING_PERIOD_MS`-long bucket hashes to its own
 /// offset in `[0, PERIOD - FLASH)`, keeping the whole flash inside the bucket.
 fn strike_offset(bucket: u64) -> u64 {
-    splitmix64(bucket.wrapping_add(SPLITMIX64_GAMMA)) % (LIGHTNING_PERIOD_MS - LIGHTNING_FLASH_MS)
+    crate::splitmix_draw(bucket, 1) % (LIGHTNING_PERIOD_MS - LIGHTNING_FLASH_MS)
 }
 
 /// [`lightning_envelope`] for the clock at `now`, or 0 when not mid-strike —

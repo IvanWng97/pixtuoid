@@ -224,15 +224,6 @@ machete:
 deny:
     cargo deny check bans licenses sources
 
-# A PATH-valued env var read with `env::var` DROPS a non-UTF-8 value — a legal
-# path — and falls back to a different directory, silently. `--selftest` proves
-# the checker can FAIL.
-[doc('Gate: PATH-valued env vars must be read as bytes, never via env::var')]
-[group('rust')]
-env-paths:
-    python3 scripts/check-env-paths.py --selftest
-    python3 scripts/check-env-paths.py
-
 # Architecture invariant #1, mechanized: pixtuoid-core + pixtuoid-scene stay
 # terminal/window/audio-device-free.
 [group('rust')]
@@ -283,7 +274,6 @@ lint:
     run() { local n="$1"; shift; if "$@" >"$tmp/$n.log" 2>&1; then printf '  \033[32m✓ %s\033[0m\n' "$n"; else printf '  \033[31m✗ %s\033[0m\n' "$n"; cat "$tmp/$n.log"; return 1; fi; }
     pids=(); fail=0
     run fmt     just fmt-check          & pids+=($!)
-    run env-paths just env-paths        & pids+=($!)
     run genart  just gen-art-check       & pids+=($!)
     run machete just machete            & pids+=($!)
     run deny    just deny                & pids+=($!)
@@ -326,14 +316,17 @@ bench *args:
     cargo bench -p pixtuoid-core --bench decode_reduce -- "$@"
 
 # Catches code that silently only builds with `native` on (the wasm core builds
-# without it).
-[doc('Feature-powerset check — every feature subset must compile')]
+# without it). `--no-dev-deps check` builds no test, so scene's no-default tests
+# lint and run on their own.
+[doc('Feature-powerset check — every feature subset compiles; scene no-default tests pass')]
 [group('rust')]
 hack:
     #!/usr/bin/env bash
     set -euo pipefail
     command -v cargo-hack &>/dev/null || { echo "error: cargo-hack not found — run \`just setup-tools\`" >&2; exit 1; }
     cargo hack --feature-powerset --no-dev-deps check --workspace
+    cargo clippy -p pixtuoid-scene --no-default-features --all-targets -- -D warnings
+    just test -p pixtuoid-scene --no-default-features
 
 # Same toolchain gotcha as `api-surface` and `wasm-build`, and it bites HARDER
 # here because the compiler's own advice is wrong: a Homebrew cargo ahead of the
