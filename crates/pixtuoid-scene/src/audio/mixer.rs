@@ -107,11 +107,7 @@ impl Mixer {
     /// The scalar every one-shot's gain multiplies through — mute silences them
     /// instantly (one-shots are transient; no ramp needed).
     pub fn one_shot_gain(&self) -> f32 {
-        if self.muted {
-            0.0
-        } else {
-            self.master_amp()
-        }
+        if self.muted { 0.0 } else { self.master_amp() }
     }
 
     /// Advance every gain toward its target; returns `(stem, gain)` pairs

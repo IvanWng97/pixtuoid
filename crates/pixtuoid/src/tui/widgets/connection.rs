@@ -4,10 +4,10 @@
 
 use std::time::{Duration, SystemTime};
 
-use super::{marquee_or_truncate, marquee_window, source_badge_span, to_color, Overflow, Panel};
+use super::{Overflow, Panel, marquee_or_truncate, marquee_window, source_badge_span, to_color};
 
 use crate::tui::connection::{
-    no_action_hint, ConnState, ConnectionFrame, ConnectionRow, LiveFacet, LiveInfo,
+    ConnState, ConnectionFrame, ConnectionRow, LiveFacet, LiveInfo, no_action_hint,
 };
 use pixtuoid_scene::theme::Theme;
 use ratatui::layout::Rect;
@@ -286,10 +286,12 @@ mod tests {
         let badge = &line.spans[1];
         assert_eq!(badge.style.fg, Some(to_color(NORMAL.source.codex)));
         assert!(!badge.style.add_modifier.contains(Modifier::REVERSED));
-        assert!(line.spans[3]
-            .style
-            .add_modifier
-            .contains(Modifier::REVERSED));
+        assert!(
+            line.spans[3]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
     }
 
     // Char-count == column here only because every glyph is single-width BMP.

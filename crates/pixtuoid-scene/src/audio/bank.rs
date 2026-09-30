@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use super::mixer::LoopStem;
-use super::{dsp, synth, OneShot, TrackId};
+use super::{OneShot, TrackId, dsp, synth};
 
 /// Per-key / per-drop variant pool sizes: playback picks randomly so
 /// typing/rain never sound repeated, while runtime stays synthesis-free.

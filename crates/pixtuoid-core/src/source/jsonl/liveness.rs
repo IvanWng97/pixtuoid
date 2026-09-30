@@ -6,9 +6,9 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::debug;
 
-use crate::source::exit_watch::ExitWatch;
-use crate::source::{fd_probe, AgentEvent, TaggedSender, Transport};
 use crate::AgentId;
+use crate::source::exit_watch::ExitWatch;
+use crate::source::{AgentEvent, TaggedSender, Transport, fd_probe};
 
 use super::walk::{check_session_ended, park_if_truncated_below_cursor, walk_jsonl};
 use super::{SourceDecoders, WatchCtx};

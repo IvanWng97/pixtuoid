@@ -12,7 +12,7 @@ use pixtuoid_core::{AgentId, SceneState};
 
 use super::palette::blend_pixel;
 use crate::layout::{
-    desk_walk_anchor_facing, furniture_def, Furniture, Layout, Point, Size, WaypointKind,
+    Furniture, Layout, Point, Size, WaypointKind, desk_walk_anchor_facing, furniture_def,
 };
 use crate::motion::MotionState;
 use pixtuoid_core::state::FloorLocalDeskIndex;

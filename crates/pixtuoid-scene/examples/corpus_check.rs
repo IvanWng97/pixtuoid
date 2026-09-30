@@ -22,7 +22,7 @@ use pixtuoid_core::harness::{Drive, LineFailure};
 use pixtuoid_core::source::decoder::TailActivity;
 use pixtuoid_core::source::registry;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
+use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
 use pixtuoid_scene::floor::{FloorMeta, FloorSession};
 
 /// The instant the whole census runs at — the drive's fold and the observe

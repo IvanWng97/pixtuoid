@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use super::{copilot_home, decode_copilot_line, SOURCE_NAME};
+use super::{SOURCE_NAME, copilot_home, decode_copilot_line};
 use crate::source::decoder::parsed_tail_lines;
 use crate::source::jsonl::JsonlWatcher;
 use crate::source::{Source, TaggedSender};

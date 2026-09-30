@@ -19,38 +19,38 @@ mod windows;
 // The deep interface is `SceneLayout::{stand_point,approach_point}`; these free
 // fns stay for this crate's own synthetic-mask unit tests.
 pub(crate) use approach::{approach_point, first_reachable_on_side, stand_point};
-pub use compute::{min_layout_size, PANTRY_COUNTER_LARGE_W};
+pub use compute::{PANTRY_COUNTER_LARGE_W, min_layout_size};
 pub use decor::{
-    desk_furniture_def, desk_walk_anchor_facing, furniture_def, seated_foot_cell, ApproachSides,
-    DwellWindow, Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind,
-    DESK_APPROACH, SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
+    ApproachSides, DESK_APPROACH, DwellWindow, Facing, Furniture, FurnitureDef, PlantKind,
+    PodDecor, SEAT_RENDER_Y_OFF, WALKING_Y_OFF, WallDecor, WaypointKind, desk_furniture_def,
+    desk_walk_anchor_facing, furniture_def, seated_foot_cell,
 };
 pub(crate) use decor::{repels_plants, seated_z_key};
-pub use placement::{anchored_top_left, z_sort_row, Anchor};
+pub use placement::{Anchor, anchored_top_left, z_sort_row};
 pub use reach::ReachSet;
-pub(crate) use rooms::meeting::{coat_rack_rect_at, COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W};
+pub(crate) use rooms::meeting::{COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W, coat_rack_rect_at};
 pub(crate) use rooms::pantry::{COMPACT_COUNTER, LARGE_COUNTER};
 pub(crate) use rooms::walls::WallPiece;
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
-#[cfg(test)]
-pub(crate) use roster::{coffee_machine_cols, NEON_PANEL_H};
 pub(crate) use roster::{
-    desk_chair_top_left, desk_chair_z_key, Depth, Fixture, Layer, Tie, CLOCK, NEON_PANEL,
-    NEON_PANEL_BORDER,
+    CLOCK, Depth, Fixture, Layer, NEON_PANEL, NEON_PANEL_BORDER, Tie, desk_chair_top_left,
+    desk_chair_z_key,
 };
 pub use roster::{
-    FixtureKind, Station, NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X,
-    NEON_PANEL_INNER_Y, NEON_PANEL_W,
+    FixtureKind, NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
+    NEON_PANEL_W, Station,
 };
+#[cfg(test)]
+pub(crate) use roster::{NEON_PANEL_H, coffee_machine_cols};
 // Painter tests tile walls no `SceneLayout` has.
 #[cfg(test)]
 pub(crate) use windows::window_bays;
 pub(crate) use windows::{
-    glass_rows, wall_trim_row, window_frame, window_rows, window_run, WindowBay, WINDOW_W,
+    WINDOW_W, WindowBay, glass_rows, wall_trim_row, window_frame, window_rows, window_run,
 };
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
-pub(crate) use coarse::{cell_walkable, snap, COARSE_CELL_SIZE, NEIGHBORS_8};
+pub(crate) use coarse::{COARSE_CELL_SIZE, NEIGHBORS_8, cell_walkable, snap};
 
 use pixtuoid_core::state::FloorLocalDeskIndex;
 use pixtuoid_core::walkable::WalkableMask;
