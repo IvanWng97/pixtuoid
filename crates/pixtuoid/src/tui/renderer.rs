@@ -90,7 +90,8 @@ pub struct DrawCtx<'a> {
     /// Animated scale for the version popup (0.0 = hidden, 1.0 = fully shown).
     pub popup_scale: f32,
     pub help_open: bool,
-    /// Footer warning when a source has died; `None` while healthy.
+    /// The footer warning, pre-merged death>drift
+    /// ([`pixtuoid_scene::footer::FooterInputs::source_warning`]); `None` while healthy.
     pub source_warning: Option<&'a str>,
     pub dashboard: &'a crate::tui::dashboard::DashboardFrame,
     pub connection: &'a crate::tui::connection::ConnectionFrame,
@@ -291,7 +292,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let scene_rect = scene_rect(full_rect);
     let theme = ctx.theme;
     let floor_info = ctx.floor_info;
-    let source_warning = ctx.source_warning;
     let floor = ctx.floor;
 
     // `per_floor` is copied out of `ctx` before the mutable buffer borrows below,
@@ -304,7 +304,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         audio_audible: ctx.audio_audible,
         volume_flash: ctx.volume_flash,
         floor_info,
-        source_warning,
+        source_warning: ctx.source_warning,
     };
     let overlays = OverlayFrame {
         theme_picker: ctx.theme_picker,
@@ -376,7 +376,9 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let board = pixtuoid_scene::board::build_board(
         footer_stats.counts,
         pixtuoid_scene::board::scene_uptime_secs(scene, now),
-        floor_info.map(|fi| (fi.current, fi.total_floors)),
+        footer_stats
+            .floor_info
+            .map(|fi| (fi.current, fi.total_floors)),
         footer_stats.gateway,
         now,
     );
@@ -396,22 +398,17 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             let current = floor_info.map(|fi| fi.current).unwrap_or(1);
             paint_elevator_indicator(f, door, current, actual_scene, theme);
         }
-        if let (Some(agent_id), Some((mx, my))) = (hovered, mouse_pos) {
-            let at = TooltipAt {
-                mx,
-                my,
-                scene_rect: actual_scene,
-            };
+        let at = mouse_pos.map(|(mx, my)| TooltipAt {
+            mx,
+            my,
+            scene_rect: actual_scene,
+        });
+        if let (Some(agent_id), Some(at)) = (hovered, at) {
             paint_hover_tooltip(f, scene, agent_id, at, now, theme);
         }
         if hovered.is_none() {
-            if let Some((mx, my)) = mouse_pos {
-                let cell = CellArea::half_block(mx, my);
-                let at = TooltipAt {
-                    mx,
-                    my,
-                    scene_rect: actual_scene,
-                };
+            if let Some(at) = at {
+                let cell = CellArea::half_block(at.mx, at.my);
                 // `.filter` keeps the pet arm a single branch, so a
                 // present-but-not-hit pet falls through to the next arm.
                 // Coffee before pet here must match the click arms in

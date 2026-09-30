@@ -23,9 +23,9 @@ pub(crate) struct FooterStats<'a> {
     pub audio_audible: bool,
     /// `Some(percent)` for ~1s after a volume nudge; renders as `♩ N%`.
     pub volume_flash: Option<u8>,
-    /// The floor breadcrumb; `None` for a single-floor office.
+    /// As [`DrawCtx::floor_info`](crate::tui::renderer::DrawCtx::floor_info).
     pub floor_info: Option<crate::tui::renderer::FloorInfo>,
-    /// Dead-source warning; `None` while healthy.
+    /// As [`DrawCtx::source_warning`](crate::tui::renderer::DrawCtx::source_warning).
     pub source_warning: Option<&'a str>,
 }
 

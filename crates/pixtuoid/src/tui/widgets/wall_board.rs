@@ -193,7 +193,7 @@ mod tests {
         assert!(l3.contains("\u{2b22}gw ok"), "gateway chip: {l3:?}");
         assert!(
             !l3.contains('F'),
-            "no floor breadcrumb when floor_info is None: {l3:?}"
+            "no floor breadcrumb when floor is None: {l3:?}"
         );
     }
 

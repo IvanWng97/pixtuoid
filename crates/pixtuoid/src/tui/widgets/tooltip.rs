@@ -372,13 +372,7 @@ pub(crate) fn paint_mascot_tooltip(
     at: TooltipAt,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
-    let text = mascot_tooltip_text(
-        mascot.name,
-        mascot.instance.as_deref(),
-        mascot.busy,
-        mascot.degraded,
-        mascot.active_sessions,
-    );
+    let text = mascot_tooltip_text(mascot);
     paint_simple_tooltip(f, &text, at, theme);
 }
 
@@ -386,13 +380,15 @@ pub(crate) fn paint_mascot_tooltip(
 /// [`pixtuoid_scene::pixel_painter::MascotFrame::busy`] for why the run state,
 /// not the session count — and `degraded` outranks busy/idle. Plain text (no
 /// emoji) to keep the caller's width math exact.
-fn mascot_tooltip_text(
-    name: &str,
-    instance: Option<&str>,
-    busy: bool,
-    degraded: bool,
-    active_sessions: u32,
-) -> String {
+fn mascot_tooltip_text(mascot: &MascotFrame) -> String {
+    let &MascotFrame {
+        name,
+        ref instance,
+        busy,
+        degraded,
+        active_sessions,
+        ..
+    } = mascot;
     // `OpenClaw:19789` — the painter sets `instance` only when there IS a sibling to
     // tell apart, so the single-gateway tooltip stays byte-unchanged.
     let name = match instance {
@@ -485,13 +481,18 @@ mod tests {
     }
 
     /// A lone `OpenClaw` mascot; only the tooltip-bearing fields vary.
-    fn mascot(busy: bool, degraded: bool, active_sessions: u32) -> MascotFrame {
+    fn mascot(
+        instance: Option<&str>,
+        busy: bool,
+        degraded: bool,
+        active_sessions: u32,
+    ) -> MascotFrame {
         MascotFrame {
             pos: pixtuoid_scene::layout::Point { x: 0, y: 0 },
             w: 0,
             h: 0,
             name: "OpenClaw",
-            instance: None,
+            instance: instance.map(str::to_string),
             busy,
             degraded,
             active_sessions,
@@ -504,7 +505,7 @@ mod tests {
         term.draw(|f| {
             super::paint_mascot_tooltip(
                 f,
-                &mascot(true, false, 1),
+                &mascot(None, true, false, 1),
                 TooltipAt {
                     mx: 10,
                     my: 3,
@@ -529,7 +530,7 @@ mod tests {
             .draw(|f| {
                 super::paint_mascot_tooltip(
                     f,
-                    &mascot(true, true, 1),
+                    &mascot(None, true, true, 1),
                     TooltipAt {
                         mx: 10,
                         my: 3,
@@ -812,19 +813,19 @@ mod tests {
     #[test]
     fn mascot_tooltip_verb_keys_on_run_state_not_session_count() {
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, false, false, 0),
+            mascot_tooltip_text(&mascot(None, false, false, 0)),
             " OpenClaw gateway · idle "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, false, false, 1),
+            mascot_tooltip_text(&mascot(None, false, false, 1)),
             " OpenClaw gateway · idle "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, true, false, 1),
+            mascot_tooltip_text(&mascot(None, true, false, 1)),
             " OpenClaw gateway · working "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, true, false, 3),
+            mascot_tooltip_text(&mascot(None, true, false, 3)),
             " OpenClaw gateway · working · 3 sessions "
         );
     }
@@ -832,15 +833,15 @@ mod tests {
     #[test]
     fn mascot_tooltip_names_the_instance_only_when_there_is_a_sibling() {
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", Some("19789"), true, false, 0),
+            mascot_tooltip_text(&mascot(Some("19789"), true, false, 0)),
             " OpenClaw:19789 gateway · working "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", Some("18789"), false, true, 2),
+            mascot_tooltip_text(&mascot(Some("18789"), false, true, 2)),
             " OpenClaw:18789 gateway · model error · 2 sessions "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, false, false, 0),
+            mascot_tooltip_text(&mascot(None, false, false, 0)),
             " OpenClaw gateway · idle ",
             "a single gateway's tooltip stays byte-identical"
         );
@@ -849,15 +850,15 @@ mod tests {
     #[test]
     fn mascot_tooltip_degraded_overrides_busy_and_idle() {
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, false, true, 0),
+            mascot_tooltip_text(&mascot(None, false, true, 0)),
             " OpenClaw gateway · model error "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, true, true, 1),
+            mascot_tooltip_text(&mascot(None, true, true, 1)),
             " OpenClaw gateway · model error "
         );
         assert_eq!(
-            mascot_tooltip_text("OpenClaw", None, true, true, 3),
+            mascot_tooltip_text(&mascot(None, true, true, 3)),
             " OpenClaw gateway · model error · 3 sessions "
         );
     }
