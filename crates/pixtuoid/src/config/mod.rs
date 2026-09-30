@@ -164,7 +164,10 @@ fn pack_source(
         return PackSource::Explicit(dir);
     }
     base.map(|b| b.join("pixtuoid").join("sprites"))
-        .filter(|dir| dir.join("pack.toml").is_file())
+        .filter(|dir| {
+            dir.join(pixtuoid_core::sprite::format::PACK_MANIFEST)
+                .is_file()
+        })
         .map_or(PackSource::Bundled, PackSource::Discovered)
 }
 
