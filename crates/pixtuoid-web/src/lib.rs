@@ -146,7 +146,7 @@ impl Office {
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
         let pack =
-            load_sprite_pack(PackSource::Bundled).map_err(|e| JsError::new(&e.to_string()))?;
+            load_sprite_pack(PackSource::Bundled).map_err(|e| JsError::new(&format!("{e:#}")))?;
         Ok(Office {
             // Capacity starts empty and is synced from the CANVAS's own layout
             // on every `step` before any beat fires, so the reducer only admits

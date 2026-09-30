@@ -343,6 +343,9 @@ pub(crate) const SCREEN_GLASS_KEY: char = 'j';
 /// The pack key of the dim content an idle screen shows on its glass.
 pub(crate) const SCREEN_TEXT_KEY: char = 'J';
 
+/// The pack key of a desk lamp's bulb, which glows of its own at any hour.
+pub(crate) const DESK_BULB_KEY: char = '9';
+
 /// The pack keys a corridor appliance's art is drawn in, each with the
 /// [`ApplianceColors`](crate::theme::ApplianceColors) role it takes: the art
 /// owns the form, the theme the palette. The pack's [ramps] of these keys are

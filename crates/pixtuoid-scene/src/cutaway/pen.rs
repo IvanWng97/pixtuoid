@@ -192,6 +192,26 @@ impl Pen {
         }
     }
 
+    /// Recolour every buffer pixel of the art pixels of `r` from what lies there,
+    /// clipped to the buffer: `f` gets the buffer pixel and its colour. Unlike
+    /// [`recolour`](Self::recolour), pixels of one art pixel may differ.
+    pub(crate) fn recolour_px(
+        self,
+        buf: &mut RgbBuffer,
+        r: ArtRect,
+        mut f: impl FnMut(u16, u16, Rgb) -> Rgb,
+    ) {
+        let (x0, y0) = (self.buffer(r.x), self.buffer(r.y));
+        let x1 = x0.saturating_add(self.buffer(r.w)).min(buf.width());
+        let y1 = y0.saturating_add(self.buffer(r.h)).min(buf.height());
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let c = f(x, y, buf.get(x, y));
+                buf.put(x, y, c);
+            }
+        }
+    }
+
     /// Dither a full-width band from `light` at its top to `dark` at its
     /// bottom, `y1` exclusive; a band with no height paints nothing.
     ///
