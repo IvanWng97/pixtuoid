@@ -5,12 +5,12 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use serde_json::Value;
 
+use crate::AgentId;
 use crate::id::normalize_path_key;
 use crate::source::{AgentEvent, ToolDetail};
-use crate::AgentId;
 
 /// The JSONL line-decoder fn pointer: `(transcript_path, source, raw_line) ->
 /// events`. Defined HERE, NOT in the `native`-gated `jsonl` module, so the
@@ -165,11 +165,7 @@ pub(crate) fn rfc3339_to_epoch_secs(s: &str) -> Option<u64> {
             let oh = num(i + 1..i + 3)?;
             let om = num(i + 4..i + 6)?;
             let mag = oh * 3600 + om * 60;
-            if *sign == b'+' {
-                mag
-            } else {
-                -mag
-            }
+            if *sign == b'+' { mag } else { -mag }
         }
         _ => return None,
     };
@@ -1334,12 +1330,14 @@ mod tests {
     #[test]
     fn the_hook_planes_required_field_bails_leave_drift_breadcrumbs() {
         let renamed_event = capture_logs(|| {
-            assert!(decode_hook_payload(json!({
-                "hookEventNameZ": "Stop",
-                "session_id": "ses-1",
-                "_pixtuoid_source": "claude-code",
-            }))
-            .is_err());
+            assert!(
+                decode_hook_payload(json!({
+                    "hookEventNameZ": "Stop",
+                    "session_id": "ses-1",
+                    "_pixtuoid_source": "claude-code",
+                }))
+                .is_err()
+            );
         });
         for needle in [
             crate::source::drift::TARGET,
@@ -1353,12 +1351,14 @@ mod tests {
         }
 
         let renamed_session = capture_logs(|| {
-            assert!(decode_hook_payload(json!({
-                "hook_event_name": "Stop",
-                "sessionIdZ": "ses-1",
-                "_pixtuoid_source": "claude-code",
-            }))
-            .is_err());
+            assert!(
+                decode_hook_payload(json!({
+                    "hook_event_name": "Stop",
+                    "sessionIdZ": "ses-1",
+                    "_pixtuoid_source": "claude-code",
+                }))
+                .is_err()
+            );
         });
         for needle in [crate::source::drift::TARGET, "missing_field", "session_id"] {
             assert!(
@@ -1368,12 +1368,14 @@ mod tests {
         }
 
         let cross_fire = capture_logs(|| {
-            assert!(decode_hook_payload(json!({
-                "hookEventName": "pre_tool_use",
-                "sessionId": "ses-1",
-                "_pixtuoid_source": "claude-code",
-            }))
-            .is_ok());
+            assert!(
+                decode_hook_payload(json!({
+                    "hookEventName": "pre_tool_use",
+                    "sessionId": "ses-1",
+                    "_pixtuoid_source": "claude-code",
+                }))
+                .is_ok()
+            );
         });
         assert!(
             !cross_fire.contains("missing_field"),
@@ -1875,9 +1877,10 @@ mod tests {
     fn grok_tagged_grok_envelope_decodes_via_the_custom_decoder() {
         let evs = decode_hook_payload(grok_envelope("grok")).expect("decodes");
         assert_eq!(evs.len(), 2, "Identity + ActivityStart");
-        assert!(evs
-            .iter()
-            .all(|e| e.agent_id() == crate::AgentId::from_parts("grok", "0197fa30-sess")));
+        assert!(
+            evs.iter()
+                .all(|e| e.agent_id() == crate::AgentId::from_parts("grok", "0197fa30-sess"))
+        );
     }
 
     /// cursor's UNSTAMPED invocations, which used to reach CC's arms and bail.

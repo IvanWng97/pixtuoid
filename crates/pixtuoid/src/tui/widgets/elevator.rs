@@ -46,8 +46,8 @@ mod tests {
 
     #[test]
     fn elevator_indicator_centers_by_display_columns_not_bytes() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
         let theme = &pixtuoid_scene::theme::NORMAL;
         let door = pixtuoid_scene::layout::Point { x: 20, y: 10 };
         let mut term = Terminal::new(TestBackend::new(80, 30)).unwrap();

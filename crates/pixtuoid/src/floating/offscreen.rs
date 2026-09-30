@@ -7,11 +7,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
-use pixtuoid_core::state::{SceneState, MAX_FLOORS};
+use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 
 use pixtuoid_scene::floor::{FloorSession, FrameInputs};
 use pixtuoid_scene::footer::{
-    build_footer, footer_tone_rgb, footer_tool_tally, FooterInputs, FooterModel,
+    FooterInputs, FooterModel, build_footer, footer_tone_rgb, footer_tool_tally,
 };
 use pixtuoid_scene::theme::Theme;
 use winit::dpi::PhysicalSize;

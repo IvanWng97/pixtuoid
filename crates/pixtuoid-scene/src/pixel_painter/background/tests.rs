@@ -2,7 +2,7 @@ use super::*;
 use crate::atmosphere::Look;
 use crate::layout::{window_bays, window_run};
 use crate::lighting::SPILL_DEPTH;
-use crate::sky::{hour_is_day, set_weather_override, ForcedWeather};
+use crate::sky::{ForcedWeather, hour_is_day, set_weather_override};
 use std::time::SystemTime;
 
 #[test]

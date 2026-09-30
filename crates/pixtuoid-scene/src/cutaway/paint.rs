@@ -2,15 +2,15 @@
 //! (weather, steam, the pet) stay with the classic pass. It never advances the
 //! sim; a mover here would desync the profiles.
 
+use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::sprite::RgbBuffer;
 
 use crate::atmosphere::Moment;
-use crate::cutaway::order::{depth_sort, Span};
+use crate::cutaway::order::{Span, depth_sort};
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
-use crate::cutaway::shade::{fill, slab, Ramp};
-use crate::layout::{Bounds, Depth, Fixture, FixtureKind, Layout, Point, Station, DESK_H};
+use crate::cutaway::shade::{Ramp, fill, slab};
+use crate::layout::{Bounds, DESK_H, Depth, Fixture, FixtureKind, Layout, Point, Station};
 use crate::pixel_painter::SimFrame;
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
@@ -835,8 +835,8 @@ fn paint_ground_shadows(
     // One level per art pixel over the shadows' joint bounds, row-major.
     let Some(((x0, y0), (x1, y1))) = shadows.clone().map(|c| c.bounds()).reduce(|a, b| {
         (
-            (a.0 .0.min(b.0 .0), a.0 .1.min(b.0 .1)),
-            (a.1 .0.max(b.1 .0), a.1 .1.max(b.1 .1)),
+            (a.0.0.min(b.0.0), a.0.1.min(b.0.1)),
+            (a.1.0.max(b.1.0), a.1.1.max(b.1.1)),
         )
     }) else {
         return;
@@ -3573,7 +3573,7 @@ mod tests {
     /// The seat side is the LAYOUT's to decide, and both profiles read it.
     #[test]
     fn both_profiles_seat_an_occupant_on_the_side_the_layout_chose() {
-        use crate::layout::{Facing, CHARACTER_SPRITE_W};
+        use crate::layout::{CHARACTER_SPRITE_W, Facing};
         let desk = crate::layout::Point { x: 40, y: 30 };
         let near =
             crate::pixel_painter::seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::North);
@@ -3992,17 +3992,19 @@ mod tests {
         let at = crate::layout::Point { x: 40, y: 30 };
         let mut order = Vec::new();
         push_sofa(&mut order, &pack, at, true);
-        let [(
-            span,
-            PieceKind::Prop {
-                art:
-                    Art {
-                        flip: Flip::Vertical,
-                        ..
-                    },
-                ..
-            },
-        )] = order.as_slice()
+        let [
+            (
+                span,
+                PieceKind::Prop {
+                    art:
+                        Art {
+                            flip: Flip::Vertical,
+                            ..
+                        },
+                    ..
+                },
+            ),
+        ] = order.as_slice()
         else {
             panic!("a flipped sofa is one mirrored prop: {order:?}");
         };
@@ -5516,8 +5518,10 @@ S B B B B B B S
         let sofa = crate::layout::Point { x: 40, y: 30 };
         let mut order = Vec::new();
         push_sofa(&mut order, &pack, sofa, true);
-        let [(seat, PieceKind::PropBand { rows: under, .. }), (back, PieceKind::PropBand { rows: over, .. })] =
-            order.as_slice()
+        let [
+            (seat, PieceKind::PropBand { rows: under, .. }),
+            (back, PieceKind::PropBand { rows: over, .. }),
+        ] = order.as_slice()
         else {
             panic!("a back-view sofa is two bands: {order:?}");
         };
@@ -6027,15 +6031,17 @@ S B B B B B B S
         let sofa = crate::layout::Point { x: 40, y: 30 };
         let mut order = Vec::new();
         push_sofa(&mut order, &pack, sofa, false);
-        let [(
-            span,
-            PieceKind::Prop {
-                art: Art {
-                    flip: Flip::None, ..
+        let [
+            (
+                span,
+                PieceKind::Prop {
+                    art: Art {
+                        flip: Flip::None, ..
+                    },
+                    ..
                 },
-                ..
-            },
-        )] = order.as_slice()
+            ),
+        ] = order.as_slice()
         else {
             panic!("a front sofa is one prop: {order:?}");
         };

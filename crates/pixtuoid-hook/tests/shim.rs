@@ -197,7 +197,9 @@ fn codewhale_event_mode_builds_envelope_from_env_and_ignores_stdin() {
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            panic!("env-mode shim did not exit within 2s — it must NOT read stdin (the inherited, never-EOF TUI terminal would block it; tool_call_before runs synchronously)");
+            panic!(
+                "env-mode shim did not exit within 2s — it must NOT read stdin (the inherited, never-EOF TUI terminal would block it; tool_call_before runs synchronously)"
+            );
         }
         std::thread::sleep(Duration::from_millis(20));
     };

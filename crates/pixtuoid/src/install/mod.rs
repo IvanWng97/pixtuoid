@@ -23,9 +23,9 @@ pub(crate) mod verify;
 
 use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
-use target::{BinaryStrategy, Target, BACKUP_SUFFIX};
+use target::{BACKUP_SUFFIX, BinaryStrategy, Target};
 
 /// The idempotency sentinel stamped on every hook entry pixtuoid installs — the
 /// config-file targets key install/uninstall/detect on this, not the command shape.
@@ -80,7 +80,7 @@ pub(crate) fn verify_target(
             return verify::SchemaVerifyResult {
                 issues: vec!["no config path resolves (no home dir)".into()],
                 notes: vec![],
-            }
+            };
         }
     };
     let content = match io::read_config(&path) {
@@ -88,14 +88,14 @@ pub(crate) fn verify_target(
             return verify::SchemaVerifyResult {
                 issues: vec!["config is empty — hooks are not installed".into()],
                 notes: vec![],
-            }
+            };
         }
         Ok(c) => c,
         Err(_) => {
             return verify::SchemaVerifyResult {
                 issues: vec![format!("config unreadable: {}", crate::display_path(&path))],
                 notes: vec![],
-            }
+            };
         }
     };
     let parse = (t.verify_schema)(&content);

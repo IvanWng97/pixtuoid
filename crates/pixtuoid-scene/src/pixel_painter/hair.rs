@@ -5,10 +5,10 @@
 
 use std::num::NonZeroU16;
 
+use pixtuoid_core::AgentId;
 use pixtuoid_core::id::{fnv1a, splitmix64};
 use pixtuoid_core::sprite::format::{Hairstyle, Pack};
 use pixtuoid_core::sprite::{Frame, HeadMark, Pixel, Rgb, Sprite};
-use pixtuoid_core::AgentId;
 
 /// Separates the pick's seed from the other per-agent draws that finalize the
 /// same id through `splitmix64` (`physics`, `pose::pure`), so the style is no

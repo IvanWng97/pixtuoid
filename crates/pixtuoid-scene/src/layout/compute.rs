@@ -1307,11 +1307,7 @@ impl FloorGeometry {
 /// Which way a desk on pod row `r` seats its occupant — a pod's two rows face EACH
 /// OTHER across the inner gap. A partial bottom row is the next pod's row 0.
 fn pod_row_facing(r: u16) -> Facing {
-    if r == 0 {
-        Facing::South
-    } else {
-        Facing::North
-    }
+    if r == 0 { Facing::South } else { Facing::North }
 }
 
 /// Pod-grid desk placement: full pods, partial columns at right edge,
