@@ -2109,7 +2109,7 @@ def meeting_table_1x():
 
 
 # ---- the fixtures: the pantry's island and corner, the lounge, the meeting room, the wall -
-# The keys the classic takes from the theme; the values in pack.toml are theme::normal's.
+# Recoloured from the theme (pixel_painter::palette::fixture_overrides).
 TANK_WATER, TANK_WATER_DP, TANK_LINE = "Д", "д", "З"
 TANK_FISH, TANK_FISH_SH, TANK_FISH_ALT, TANK_FISH_ALT_SH = "И", "и", "Л", "л"
 TANK_PLANT, TANK_PLANT_SH = "Ь", "ь"
@@ -2157,7 +2157,6 @@ def kitchen_island():
     rect(g, 1, top + 1, w - 1, top + 2, WOOD_SH)
     for x, y in ((1, 1), (w - 2, 1), (1, top + 1), (w - 2, top + 1)):
         put(g, x, y, T)  # rounded corners
-    # a fruit bowl, west
     rect(g, 9, 3, 21, 7, OFFWHITE)
     rect(g, 10, 7, 20, 8, OFFWHITE_SH)
     for x, y, k in ((10, 2, RED), (13, 2, GREEN), (16, 2, VERMILION), (12, 4, GOLD), (15, 4, RED)):
@@ -2322,8 +2321,7 @@ def trash_bin_1x():
     return g
 
 
-# `Furniture::FishTank`'s visual box, in rows: the frame's top, the water with its
-# surface line and gravel bed, the frame's foot, the cabinet.
+# `Furniture::FishTank`'s visual box.
 TANK_W, TANK_H = 14, 11
 TANK_WATER_ROWS = (1, 8)  # half-open: the surface line, then water, the gravel last
 TANK_CABINET_Y = 9
@@ -2402,7 +2400,6 @@ def fish_tank():
             rect(g, bx, by, bx + 2, by + 2, TANK_LINE)
         for x, y in ((6, top + 3), (5, top + 4), (5, top + 5)):
             put(g, x, y, WHITE)  # the glass's glint
-        # the cabinet
         rect(g, 1, TANK_CABINET_Y * S, w - 1, h - 1, WOOD)
         rect(g, 1, TANK_CABINET_Y * S, w - 1, TANK_CABINET_Y * S + 1, WOOD_HI)
         rect(g, 1, h - 3, w - 1, h - 1, WOOD_SH)
@@ -2543,9 +2540,8 @@ def notice_board_1x():
     return g
 
 
-# `layout::CLOCK`, the wall clock's face. The painter draws the hands over it
-# from the time: a hand's position is a reading, not art, and twelve hours of
-# minutes would be 720 frames.
+# `layout::CLOCK`. The dial only: the painter draws the hands from the time, which
+# as art would be 720 frames.
 CLOCK_W, CLOCK_H = 7, 7
 # Art pixels from the dial's edge to its face: the outline and the rim.
 CLOCK_RIM_PX = 3
@@ -2595,8 +2591,7 @@ def wall_clock_1x():
     return g
 
 
-# `Furniture::MeetingChair`'s visual box. Drawn with its back to the west, the
-# sitter facing east; the painter flips it for the chair across the table.
+# `Furniture::MeetingChair`'s visual box, drawn for a sitter facing east.
 CHAIR_W, CHAIR_H = 7, 7
 CHAIR_SEAT_ROWS = (1, 5)  # half-open
 CHAIR_LEG_COLS = (1, 5)
@@ -2637,8 +2632,7 @@ def meeting_chair_1x():
     return g
 
 
-# The 1x elevator door (`door.sprite` and its half-open and open frames): its
-# columns and rows, the panel's rows, and how far each frame has the doors apart.
+# The 1x `door.sprite`'s size, its panels' rows, and each frame's gap.
 DOOR_W, DOOR_H = 16, 14
 DOOR_PANEL_ROWS = (3, 13)  # half-open
 DOOR_GAPS = (0, 4, 8)  # shut, half-open, open: the shaft columns showing

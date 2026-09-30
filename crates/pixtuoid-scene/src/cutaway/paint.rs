@@ -1,8 +1,6 @@
-//! The cutaway profile's paint pass — the second reader of `SimFrame`: every
-//! fixture the roster yields (`push_fixture`), the people, the walls and the
-//! windows, lit for the hour by the room's own lights (`lights`, then one
-//! `net_pass`). EFFECTS (weather, steam, the pet) stay with the classic pass. It
-//! never advances the sim; a mover here would desync the profiles.
+//! The cutaway profile's paint pass — the second reader of `SimFrame`. EFFECTS
+//! (weather, steam, the pet) stay with the classic pass. It never advances the
+//! sim; a mover here would desync the profiles.
 
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
 use pixtuoid_core::sprite::format::Pack;
@@ -173,9 +171,8 @@ pub fn render_cutaway(
     list.labels().collect()
 }
 
-/// Everything under the list's pieces: floor, its coverings ([`covering`]), and
-/// the north wall band with its window frames. None of it moves within a
-/// layout, theme, pack and scale.
+/// Everything under the list's pieces, none of which moves within a layout,
+/// theme, pack and scale.
 fn paint_backdrop(
     layout: &Layout,
     theme: &Theme,
@@ -184,7 +181,6 @@ fn paint_backdrop(
     buf: &mut RgbBuffer,
 ) {
     paint_floor(layout, theme, pen, buf);
-    // Under everything that stands on them, and under the shadows it casts.
     for fixture in layout.fixtures() {
         match covering(fixture.kind) {
             Some(Covering::Rug) => paint_rug(fixture.visual, theme, pen, buf),
@@ -543,8 +539,6 @@ fn paint_pieces(
                     _ => Glow::Lit,
                 };
                 let glow = match piece.kind {
-                    // The sky, which the look already resolved; the room's lights
-                    // still show in it.
                     PieceKind::Glass { .. } => Glow::Pane,
                     PieceKind::Neon { .. } => Glow::Emissive,
                     PieceKind::Desk { .. }
@@ -642,9 +636,9 @@ enum Placed {
     TopLeft(Point),
 }
 
-/// Mark into `marks` where `art` placed so draws a bulb
-/// ([`DESK_BULB_KEY`](crate::pixel_painter::DESK_BULB_KEY)): a light of its
-/// own, which the room's darkness leaves lit. Returns whether it marked any.
+/// Mark emissive where `art` draws a bulb
+/// ([`DESK_BULB_KEY`](crate::pixel_painter::DESK_BULB_KEY)); whether it marked
+/// any.
 fn mark_bulbs(
     placed: Placed,
     art: Art,
@@ -883,10 +877,8 @@ fn fingerprint(kind: &PieceKind) -> u64 {
     h.finish()
 }
 
-/// Every piece of the office, each with its [`Span`]: the windows, the roster's
-/// fixtures ([`push_fixture`]), the people and the walls. The push order breaks
-/// depth ties, so it is part of the result: the roster's, with the people
-/// queued before the first fixture that paints over its sitter.
+/// Every piece of the office, each with its [`Span`]. The push order breaks
+/// depth ties, so it is part of the result.
 fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<(Span, PieceKind)> {
     let layout = office.layout;
     let build = Build {
@@ -915,7 +907,6 @@ fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<
     order
 }
 
-/// What one frame's pieces are built from.
 #[derive(Clone, Copy)]
 struct Build<'a, 'f> {
     frame: &'f SimFrame,
@@ -923,9 +914,8 @@ struct Build<'a, 'f> {
     moment: &'f Moment,
 }
 
-/// Whether a fixture paints over whoever sits in it where the two tie, so it is
-/// queued after the people: the roster yields it last. A desk chair's backrest
-/// crosses its sitter's lap.
+/// Whether a fixture paints over its sitter on a tie, so it queues after the
+/// people: a desk chair's backrest crosses its sitter's lap.
 fn paints_over_its_sitter(kind: FixtureKind) -> bool {
     matches!(kind, FixtureKind::DeskChair(_))
 }
@@ -938,8 +928,7 @@ fn sort_row(depth: Depth) -> u16 {
     }
 }
 
-/// The point `b`'s art lands on when centred: a centred box of `b`'s size lands
-/// on `b` exactly.
+/// Where to centre art of `b`'s size so it lands on `b`.
 fn centre_of(b: Bounds) -> Point {
     Point {
         x: b.x + b.width / 2,
@@ -947,7 +936,6 @@ fn centre_of(b: Bounds) -> Point {
     }
 }
 
-/// What the cutaway lays on the floor under everything instead of queueing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Covering {
     Rug,
@@ -988,14 +976,11 @@ fn covering(kind: FixtureKind) -> Option<Covering> {
     }
 }
 
-/// The elevator's art: its frames shut, parting and open.
+/// The elevator's art.
 const DOOR_SPRITE: &str = "door";
 
-/// Queue one of the roster's fixtures as the cutaway draws it, sorted on the
-/// roster's depth ([`sort_row`]) but for the sofas, which sort with their
-/// sitters ([`push_sofa`]). Every kind has its arm, so a new one is a compile
-/// error here until the cutaway decides how to draw it. A desk chair whose desk
-/// is in `carried` rides its sitter's piece instead.
+/// Queue one of the roster's fixtures, sorted on its depth ([`sort_row`]). A
+/// desk chair whose desk is in `carried` rides its sitter's piece instead.
 fn push_fixture(
     fixture: Fixture,
     build: Build<'_, '_>,
@@ -1068,7 +1053,6 @@ fn push_fixture(
                     depth,
                     Motion::Still,
                 ),
-                // Its busy loop plays while someone stands at it.
                 Station::VendingMachine | Station::Printer => {
                     let Some(sprite) = crate::pixel_painter::appliance_art(wp.kind) else {
                         return;
@@ -1102,8 +1086,6 @@ fn push_fixture(
             depth,
             Motion::Still,
         ),
-        // What stands on the floor sorts among the floor's pieces; what hangs
-        // on the north band, after the glass it may cover.
         K::Wall { kind, .. } if kind.stands_on_floor() => push_art(
             order,
             pack,
@@ -1130,7 +1112,7 @@ fn push_fixture(
                 push_sofa(order, pack, at, faces_away);
             }
         }
-        // A meeting sofa seen from behind, facing the window.
+        // Seen from behind: it faces the window.
         K::LoungeCouch => push_sofa(order, pack, centre, true),
         K::MeetingTable { .. } => {
             let table = crate::layout::furniture_def(crate::layout::Furniture::MeetingTable).visual;
@@ -1151,7 +1133,7 @@ fn push_fixture(
                 PieceKind::Table { at: centre },
             ));
         }
-        // Drawn with its back to the west, as a sitter facing east sits in it.
+        // The art's back is west, for a sitter facing east.
         K::MeetingChair { facing, .. } => {
             let flip = if facing == crate::layout::Facing::East {
                 Flip::None
@@ -1259,7 +1241,6 @@ enum Motion {
     Playing,
 }
 
-/// Queue `art` centred on `at`, sorted on `depth`.
 fn push_art(
     order: &mut Vec<(Span, PieceKind)>,
     pack: &Pack,
@@ -1281,7 +1262,6 @@ fn push_art(
     ));
 }
 
-/// Queue `sprite`'s loop centred on `at`, on the frame it shows at `now`.
 fn push_looping(
     order: &mut Vec<(Span, PieceKind)>,
     pack: &Pack,
@@ -1301,7 +1281,6 @@ fn push_looping(
     push_art(order, pack, at, art, depth, Motion::Playing);
 }
 
-/// Queue `sprite` hung from its top-left `at`, sorted on `depth`.
 fn push_hung(
     order: &mut Vec<(Span, PieceKind)>,
     pack: &Pack,
@@ -1830,8 +1809,7 @@ pub(crate) enum PieceKind {
         at: crate::layout::Point,
         art: Art,
     },
-    /// Art centred on `at` on the frame it shows now: an appliance's busy loop,
-    /// the aquarium's patrol, the cooler's glug.
+    /// Art centred on `at`, on the frame it shows now.
     Animated {
         at: crate::layout::Point,
         art: Art,
@@ -1852,8 +1830,7 @@ pub(crate) enum PieceKind {
         at: crate::layout::Point,
         frame: usize,
     },
-    /// The neon sign over `at`: its tube's lit core, the hue it glows at the
-    /// core's edges, and its dark interior this frame.
+    /// The neon sign over `at`, in this frame's colours.
     Neon {
         at: Bounds,
         tube: pixtuoid_core::sprite::Rgb,
@@ -1896,9 +1873,8 @@ impl Art {
     }
 }
 
-/// How a prop's art is turned: the classic's back-view sofa is its front one
-/// flipped top to bottom, and the meeting chair across the table from the
-/// art's is flipped side to side.
+/// How a prop's art is turned: the back-view sofa top to bottom, the far
+/// meeting chair side to side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Flip {
     None,
@@ -2447,10 +2423,7 @@ fn paint_table(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &
     );
 }
 
-/// Blit `art` centred on `at`, in the theme's colours for the keys a piece
-/// takes from it ([`appliance_overrides`](crate::pixel_painter::appliance_overrides),
-/// [`fixture_overrides`](crate::pixel_painter::fixture_overrides)); its shadow
-/// is [`ground_shadow`]'s.
+/// Blit `art` centred on `at`, in the theme's colours ([`theme_overrides`]).
 fn paint_art(
     at: Point,
     art: Art,
@@ -2468,7 +2441,7 @@ fn paint_art(
     blit_frame_scaled(&art.flip.turn(themed), x, y, dense.blit_at, buf);
 }
 
-/// Every pack key a piece's art takes from `theme`.
+/// The pack keys art takes from the theme.
 fn theme_overrides(theme: &Theme) -> Vec<(char, pixtuoid_core::sprite::Pixel)> {
     crate::pixel_painter::appliance_overrides(&theme.appliance)
         .into_iter()
@@ -2476,7 +2449,6 @@ fn theme_overrides(theme: &Theme) -> Vec<(char, pixtuoid_core::sprite::Pixel)> {
         .collect()
 }
 
-/// The elevator's `frame` from its top-left `at`.
 fn paint_door(at: Point, frame: usize, pack: &Pack, scale: RenderScale, buf: &mut RgbBuffer) {
     let Some(art) = crate::pixel_painter::densest_frame(pack, DOOR_SPRITE, frame, scale) else {
         return;
@@ -2490,10 +2462,9 @@ fn paint_door(at: Point, frame: usize, pack: &Pack, scale: RenderScale, buf: &mu
     );
 }
 
-/// The neon sign over `at`: its dark interior, framed by the tube in its
-/// border. At base density the border is the tube, the classic's sign cell for
-/// cell; denser, the tube is a lit core one art pixel wide, its hue a pixel
-/// either side, on a pixel of the interior's dark.
+/// The neon sign over `at`. At base density its border is the tube, as the
+/// classic draws it; denser, the tube is a one-pixel lit core between two
+/// pixels of its hue.
 fn paint_neon(
     at: Bounds,
     [tube, hue, interior]: [pixtuoid_core::sprite::Rgb; 3],
@@ -2537,9 +2508,9 @@ fn paint_neon(
     }
 }
 
-/// The wall clock's dial from its top-left `at`, its hands drawn over it at
-/// `reading` on the art grid: at base density the classic's octant hands, and
-/// denser a line of art pixels from the centre pin, the hour hand the shorter.
+/// The wall clock's dial from its top-left `at`, its hands at `reading` on the
+/// art grid: the classic's octant hands at base density, a line from the
+/// centre pin denser.
 fn paint_clock(
     at: Point,
     reading: crate::pixel_painter::ClockReading,
@@ -2615,10 +2586,9 @@ fn paint_clock(
 /// The dial's art.
 const CLOCK_SPRITE: &str = "wall_clock";
 
-/// How far the `dial` art's face reaches from its centre, in art pixels at
-/// density `d`: along its middle row, from the first pixel drawn in
-/// [`CLOCK_FACE_KEY`](crate::pixel_painter::CLOCK_FACE_KEY) to the centre, so
-/// the hands stay inside the rim the art draws. `None` for art without a face.
+/// How far the `dial` art's face ([`CLOCK_FACE_KEY`](crate::pixel_painter::CLOCK_FACE_KEY))
+/// reaches from its centre along its middle row, in art pixels at density
+/// `d`: the hands stay inside the rim the art draws.
 fn face_radius(dial: &crate::pixel_painter::DenseFrame<'_>, d: u16) -> Option<f32> {
     let face = drawn_in(dial, &[crate::pixel_painter::CLOCK_FACE_KEY]);
     let (w, h) = (
@@ -2634,9 +2604,7 @@ fn face_radius(dial: &crate::pixel_painter::DenseFrame<'_>, d: u16) -> Option<f3
 const CLOCK_HOUR_HAND_SHARE: f32 = 0.5;
 const CLOCK_MINUTE_HAND_SHARE: f32 = 0.85;
 
-/// The corridor's runner on the art grid: the classic's edges, base and
-/// diamond lattice, each a line of one art pixel, the lattice at the classic's
-/// pitch in layout units.
+/// The classic's corridor runner on the art grid, its lines one art pixel wide.
 fn paint_runner(b: Bounds, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
     let o = &theme.office;
     let (x0, y0, w, h) = (
@@ -4059,8 +4027,7 @@ mod tests {
     }
 
     /// The pieces the fixtures `keep` picks queue ([`push_fixture`]) in an
-    /// empty office, the desks in `carried` sat at so their chairs ride their
-    /// sitters.
+    /// empty office.
     fn queued(
         layout: &Layout,
         pack: &Pack,
@@ -5730,6 +5697,69 @@ S B B B B B B S
             signs == 1 && lamps > 0 && cars > 0,
             "sign {signs}, lamp {lamps}, car {cars}"
         );
+    }
+
+    /// At night a window's sky keeps its own light, never darkened with the
+    /// room, while the sign's glow still lifts the glass beside it.
+    #[test]
+    fn a_window_pane_keeps_its_sky_and_takes_the_signs_glow() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = pack();
+        let layout = lively_office();
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale,
+        };
+        let frame = SimFrame {
+            neon: crate::floor::NeonLevels::ALERT,
+            ..empty_frame(&layout)
+        };
+        let list = list_at(&frame, office, 23);
+        let pen = Pen::for_pack(scale, &pack);
+        let blank = || {
+            RgbBuffer::filled(
+                scale.to_buffer(layout.buf_w),
+                scale.to_buffer(layout.buf_h),
+                pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
+            )
+        };
+        let mut cache = crate::frame_cache::FrameCache::new();
+        let painted = |keep: &dyn Fn(&PieceKind) -> bool, cache: &mut _| {
+            let mut buf = blank();
+            paint_backdrop(&layout, theme, scale, pen, &mut buf);
+            for p in list.pieces().iter().filter(|p| keep(&p.kind)) {
+                paint_piece(&p.kind, &pack, theme, scale, cache, &mut buf);
+            }
+            buf
+        };
+        let backdrop = painted(&|_| false, &mut cache);
+        let glass = painted(&|k| matches!(k, PieceKind::Glass { .. }), &mut cache);
+        let all = painted(&|_| true, &mut cache);
+        let mut night = blank();
+        paint_backdrop(&layout, theme, scale, pen, &mut night);
+        paint_list(&list, &mut cache, &mut night);
+        let luma = |c: pixtuoid_core::sprite::Rgb| u32::from(c.r) + u32::from(c.g) + u32::from(c.b);
+        let (mut kept, mut lifted) = (0, 0);
+        for y in 0..night.height() {
+            for x in 0..night.width() {
+                let pane =
+                    glass.get(x, y) != backdrop.get(x, y) && all.get(x, y) == glass.get(x, y);
+                if !pane {
+                    continue;
+                }
+                let (lit, sky) = (night.get(x, y), all.get(x, y));
+                assert!(
+                    luma(lit) >= luma(sky),
+                    "the night darkened a pane at ({x}, {y})"
+                );
+                kept += usize::from(lit == sky);
+                lifted += usize::from(luma(lit) > luma(sky));
+            }
+        }
+        assert!(kept > 0 && lifted > 0, "panes kept {kept}, lifted {lifted}");
     }
 
     /// The clock's hands stay inside the face its dial art draws, at every

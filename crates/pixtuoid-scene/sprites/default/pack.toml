@@ -109,8 +109,8 @@ version = "1"
 "Ё" = "#82b4c8"   # printer scanner glass
 "Й" = "#f5f5f0"   # printer paper
 "Ц" = "#b4b4b9"   # printer output tray
-# The fixtures' keys the theme recolours (the classic's FurnitureColors and
-# OfficeColors roles); the values are theme::normal's.
+# The fixtures' keys, recoloured from the theme (pixel_painter::palette::fixture_overrides);
+# the values are theme::normal's.
 "Д" = "#2e6f86"   # aquarium water
 "З" = "#9adbe8"   # aquarium surface line and bubbles; the water cooler's glug
 "И" = "#e0862f"   # the aquarium's first fish
@@ -503,7 +503,6 @@ frame_ms = 600
 frames   = ["pantry_bin@4x.sprite"]
 frame_ms = 600
 
-# One lap of the fish patrol.
 [animations.fish_tank]
 frames   = ["fish_tank.sprite"]
 frame_ms = 450

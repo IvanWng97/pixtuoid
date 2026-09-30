@@ -263,7 +263,7 @@ fn the_coffee_machine_follows_the_counter_size() {
 
 /// A meeting room's notice board hangs on the band, the north wall the viewer
 /// sees: inside its room's columns, under the band's last row, and clear of
-/// the band's decor, the door and the plants.
+/// every other fixture, the sign and the clock on the band among them.
 #[test]
 fn a_notice_board_hangs_on_the_band_clear_of_its_neighbours() {
     let mut hung = 0;
@@ -288,15 +288,16 @@ fn a_notice_board_hangs_on_the_band_clear_of_its_neighbours() {
                     || v.y + v.height <= board.y
                     || board.y + board.height <= v.y
             };
-            for f in l.fixtures() {
-                if f.kind != (FixtureKind::NoticeBoard { room }) && f.depth != Depth::Backdrop {
-                    assert!(
-                        apart(f.visual),
-                        "{board:?} hangs over {:?} at {:?}",
-                        f.kind,
-                        f.visual
-                    );
-                }
+            for f in l
+                .fixtures()
+                .filter(|f| f.kind != FixtureKind::NoticeBoard { room })
+            {
+                assert!(
+                    apart(f.visual),
+                    "{board:?} hangs over {:?} at {:?}",
+                    f.kind,
+                    f.visual
+                );
             }
         }
     }

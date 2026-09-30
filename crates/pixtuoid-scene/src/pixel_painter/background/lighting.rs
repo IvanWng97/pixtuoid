@@ -230,16 +230,15 @@ pub(crate) struct ClockReading {
 }
 
 impl ClockReading {
-    /// Where the hour and the minute hands point, as fractions of a turn from
-    /// twelve o'clock.
+    /// The hour and the minute hands, as turns from twelve o'clock.
     pub(crate) fn turns(self) -> (f32, f32) {
         let (hour, minute) = (self.hour as f32, self.minute as f32);
         ((hour + minute / 60.0) / 12.0, minute / 60.0)
     }
 }
 
-/// The clock's reading at `now`. Its own decode, not `sky::local_hour_frac`:
-/// the hands need the raw `hour % 12` and `minute`.
+/// Its own decode, not `sky::local_hour_frac`: the hands need the raw
+/// `hour % 12` and `minute`.
 pub(crate) fn clock_reading(now: SystemTime) -> ClockReading {
     let unix_now = now
         .duration_since(std::time::UNIX_EPOCH)

@@ -92,8 +92,7 @@ pub(crate) enum Glow {
     /// Darkened with the room but never lit: a dark screen's glass, which a
     /// lamp would show only as a reflection.
     Shaded,
-    /// Its own light, but lit by the room's lights as well: a window's sky,
-    /// where the room's lights reflect.
+    /// Its own light, which the room's lights still lift: a window's sky.
     Pane,
 }
 

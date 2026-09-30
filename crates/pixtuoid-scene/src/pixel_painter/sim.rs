@@ -199,7 +199,7 @@ pub struct SimFrame {
     /// [`home_desks`](crate::layout::SceneLayout::home_desks); read through
     /// [`Self::desk`].
     pub(crate) desks: Vec<DeskProps>,
-    /// How far the elevator stands open: its art's frame, shut to open.
+    /// The elevator art's frame, shut to open.
     pub(crate) door_frame: usize,
 }
 
@@ -228,8 +228,7 @@ pub(crate) struct SimInputs<'a> {
     pub(crate) floor: FloorMeta,
     /// The tick's time — a parameter, never read from the clock here (wasm).
     pub(crate) now: SystemTime,
-    /// The floor's longest in-flight entry or exit walk, which holds the
-    /// elevator open ([`FloorCtx::door_anim_max_ms`](crate::floor::FloorCtx::door_anim_max_ms)).
+    /// [`FloorCtx::door_anim_max_ms`](crate::floor::FloorCtx::door_anim_max_ms).
     pub(crate) door_anim_max_ms: u64,
 }
 

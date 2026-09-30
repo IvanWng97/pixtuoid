@@ -349,8 +349,7 @@ pub(crate) const DESK_BULB_KEY: char = '9';
 /// The pack key of the wall clock's face, inside its rim.
 pub(crate) const CLOCK_FACE_KEY: char = 'ц';
 
-/// The pack keys the fixtures' art takes from the theme, each with the role it
-/// takes, as [`appliance_overrides`] does the appliances'.
+/// The fixtures' [`appliance_overrides`].
 pub(crate) fn fixture_overrides(theme: &crate::theme::Theme) -> [(char, Pixel); 16] {
     let (f, o) = (&theme.furniture, &theme.office);
     let [c0, c1, c2] = theme.appliance.coats;
@@ -635,8 +634,8 @@ mod tests {
         }
     }
 
-    /// As the appliances': the pack's own colours for the fixtures' keys are
-    /// what [`fixture_overrides`] gives the normal theme.
+    /// The pack's own colours for [`fixture_overrides`]' keys are the normal
+    /// theme's.
     #[test]
     fn the_packs_fixture_keys_are_the_normal_themes_colours() {
         let pack = crate::embedded_pack::test_default_pack();
@@ -646,8 +645,7 @@ mod tests {
         }
     }
 
-    /// A theme's fixtures take its colours: the aquarium's water differs
-    /// between two themes whose tank water differs.
+    /// A theme's fixtures take its colours.
     #[test]
     fn a_recolour_rethemes_the_fixture_art() {
         let pack = crate::embedded_pack::test_default_pack();

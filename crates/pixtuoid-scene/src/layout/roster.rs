@@ -254,12 +254,10 @@ pub(crate) const NEON_PANEL: Bounds = Bounds {
     height: NEON_PANEL_H,
 };
 
-/// A meeting room's notice board.
 const NOTICE_BOARD: Size = Size { w: 8, h: 5 };
-/// Rows between the board's foot and the band's last row, so it hangs clear of
-/// the wall's trim.
+/// Rows from the board's foot up off the band's trim.
 const NOTICE_BOARD_SILL: u16 = 2;
-/// Clear columns the board keeps from its neighbours on the wall.
+/// Clear columns the board keeps from its neighbours.
 const NOTICE_BOARD_GAP: u16 = 1;
 
 /// How far north of the couch centre the lounge rug sorts: under the couch,
@@ -569,7 +567,6 @@ impl SceneLayout {
                     }
                 }),
         )
-        // Hung on the band, as the wall decor is.
         .chain((0..meeting_rooms.len()).filter_map(move |room| {
             self.notice_board_rect(room)
                 .map(|b| upright(FixtureKind::NoticeBoard { room }, b))
@@ -604,11 +601,10 @@ impl SceneLayout {
             .map(|(_, f)| f.kind)
     }
 
-    /// Where meeting room `room` hangs its notice board: on the north wall the
-    /// viewer looks at, the band, centred in the widest stretch of the room's
-    /// width that the band's decor, the door and the plants leave clear —
-    /// `None` for a room whose north wall is not the band, or where no stretch
-    /// is wide enough.
+    /// Where meeting room `room` hangs its notice board: on the band, its north
+    /// wall, centred in the widest stretch of its width nothing else stands
+    /// in — `None` for a room whose north wall is not the band, or with no
+    /// stretch wide enough.
     pub(crate) fn notice_board_rect(&self, room: usize) -> Option<Bounds> {
         let b = self.meeting_rooms.get(room)?.bounds;
         if b.y > self.top_margin {
@@ -638,6 +634,7 @@ impl SceneLayout {
                     .map(|p| centred(p.pos, furniture_def(p.kind.furniture()).visual)),
             )
             .chain(door)
+            .chain([NEON_PANEL, boxed(self.clock_pos(), CLOCK)])
             .filter(|&v| meets_rows(v))
             .map(|v| {
                 (
@@ -711,8 +708,7 @@ impl SceneLayout {
             },
             ENTRY_MAT,
         );
-        // A short pantry stands its island where the mat would lie; the mat
-        // gives way, as a half-hidden mat reads as a stain under the counter.
+        // Gives way to an island over it: half hidden, it reads as a stain.
         let island = p
             .kitchen_island
             .map(|at| centred(at, furniture_def(Furniture::KitchenIsland).visual));
