@@ -22,3 +22,4 @@ mutants.out.old/
 # Recorder output awaiting a diff — promote it or delete it, never commit it.
 *.jsonl.new
 provenance.json.new
+/result
