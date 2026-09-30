@@ -5,6 +5,7 @@ pose/motion/pathfinding, the pixel pass (`render_to_rgb_buffer` — the shared
 world render), the color-theme MODEL, pets, chitchat, frame cache, embedded
 sprite pack. The three painters (`tui`, `floating`, `pixtuoid-web`) sit on top.
 Module map: `ls src/` — each file's `//!` header is its annotation.
+Cross-cutting rules: workspace [`CLAUDE.md`](../../CLAUDE.md).
 
 ## Screen-space compass (THE convention — read before reasoning about N/S)
 
@@ -12,7 +13,8 @@ Directions in this crate are **SCREEN-SPACE**, map-style (north = up), NOT
 real-world headings. Pin this and stop re-deriving it:
 
 - **North = −y = screen TOP** — the far wall, the floor-to-ceiling windows,
-  the city skyline (the "north wall band" in `layout/mod.rs`). "Behind" a piece.
+  the city skyline (the north wall band, `layout/compute.rs::top_margin`).
+  "Behind" a piece.
 - **South = +y = screen BOTTOM** — the near side, the FRONT, toward the
   viewer. This is the z-sort **"south row"** (`placement.rs` pins the z-sort
   row to the box's south row) and the **south-anchored** ground strip

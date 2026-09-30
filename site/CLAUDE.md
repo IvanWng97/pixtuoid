@@ -64,7 +64,7 @@ CSP; regressions surface in `just site-e2e`'s console watchdog.
 
 `just site-dev-bg` daemonizes (`astro dev --background`, polls the dev-only
 `/_astro/status` endpoint); `just site-dev-stop` frees the port. Two edges:
-the status endpoint is dev-server only (astro's `create-vite.js` registers it
+the status endpoint is dev-server only (astro 7.3.2's `core/create-vite.js` registers it
 under `command === "dev"`; `astro preview` daemonizes too but has nothing to
 poll), and dev/preview share port 4321 — stop the
 daemon before `just site-e2e` (its webServer fails loud on a squatted port).

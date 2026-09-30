@@ -16,7 +16,7 @@ by reading actual code — no guessing, no "this might be an issue."
 
 ### Must check
 
-1. **Architecture invariant violations** (the 6 invariants in CLAUDE.md), and
+1. **Architecture invariant violations** (CLAUDE.md's "Architecture invariants"), and
    the "Things NOT to do" list there.
 
 2. **Real bugs**: logic errors, off-by-one, race conditions, missing error propagation.

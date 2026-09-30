@@ -5,7 +5,8 @@ flush). Owns the half-block flush, the widgets, mouse hit-testing, the version
 popup, the crossterm event loop + terminal lifecycle, and the per-session UI
 models. The screen-space compass every N/S claim here rests on is in the
 [scene guide](../../../pixtuoid-scene/CLAUDE.md). Module map: `ls` this
-directory — each file's `//!` header is its annotation.
+directory — each file's `//!` header is its annotation. Cross-cutting rules:
+workspace [`CLAUDE.md`](../../../../CLAUDE.md).
 
 ## When refactoring
 

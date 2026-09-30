@@ -6,7 +6,7 @@ metadata:
   scope: "pixtuoid repo only"
 ---
 
-# beautify-decoration (v1)
+# beautify-decoration
 
 A repo-specific iteration loop for visually redesigning a decoration in `pixtuoid`. Follow this when the user says "beautify X" or "make Y look better" — it short-circuits several rebuild traps and visual-design dead ends that aren't obvious from the codebase alone.
 
@@ -105,7 +105,7 @@ Run this checklist before each render you send in a beautify loop, and state eac
 | Visually differs | Diff is noticeable, not a sub-pixel tweak. If hash-identical to last attempt, you didn't actually rebuild. |
 | Subzone width | Each new sub-element ≥ 5 **display** cells wide (§3). |
 | Color distinctness | New elements use colors distinct from immediate neighbours. |
-| `cargo test` | Connectivity test passes (`cargo test --workspace`, or `just test`). |
+| `cargo test` | The connectivity tests pass (§6 step 3). |
 | `--debug-walkable` | Rendered the overlay and visually checked no narrow / isolated walkable pockets near the new element. |
 
 ## Workflow when adding a NEW decoration

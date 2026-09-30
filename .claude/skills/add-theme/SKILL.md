@@ -1,7 +1,7 @@
 ---
 name: add-theme
 version: 2.0.0
-description: "Add a new color theme to pixtuoid (a full ~90-role palette across 9 groups, rendered into the office). Use when the user says 'add a <name> theme', 'new color scheme', or 'port <palette> to pixtuoid'. Orchestrates the Rust registration PLUS the two steps agents miss — the site manifest bridge test and the committed-media regen."
+description: "Add a new color theme to pixtuoid (a full `Theme` palette, rendered into the office). Use when the user says 'add a <name> theme', 'new color scheme', or 'port <palette> to pixtuoid'. Orchestrates the Rust registration PLUS the two steps agents miss — the site manifest bridge test and the committed-media regen."
 metadata:
   scope: "pixtuoid repo only"
 ---
@@ -12,9 +12,8 @@ metadata:
    existing theme (e.g. `theme/dracula.rs`) for the full field set.
 2. Create `crates/pixtuoid-scene/src/theme/<name>.rs` defining
    `pub static <NAME>: Theme = Theme { ... }`.
-3. Register it: add the `mod` in `theme/mod.rs`, append `&<NAME>` to the
-   `ALL_THEMES` slice, and make sure `theme_by_name()` resolves the kebab-case
-   name.
+3. Register it: add the `mod` in `theme/mod.rs` and append `&<NAME>` to the
+   `ALL_THEMES` slice; its `name` field is the kebab-case `--theme` id.
 4. Add a row to `site/src/themes.json` (`id` = the kebab-case `name`, plus its
    presentation fields). `theme_gallery_manifest_matches_all_themes` asserts the
    manifest ids == `ALL_THEMES` names — the site never runs the binary, so this
@@ -26,5 +25,5 @@ metadata:
 6. Run `just test`; update insta snapshots if the theme list changed.
 7. Visually verify with the **beautify-decoration** skill's snapshot loop — a
    palette that passes the legibility guards can still read badly.
-8. `just preflight`, then the **two-lens-review** skill — a theme is
-   public-facing, so add the editorial/film-critic lens for the rendered stills.
+8. `just preflight`, then the **two-lens-review** skill — the regenerated
+   stills fire its "Generated art / clips" escalation row.

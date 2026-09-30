@@ -58,8 +58,8 @@ it is clear.
 - **Toolchain bumps must stay within what Raycast DECLARES — check the peers,
   don't guess.** `eslint`/`typescript` are gated by `@raycast/eslint-config`'s
   peerDependencies — read the installed version's ranges before a bump;
-  `@types/node` stays on the MAJOR `.github/dependabot.yml` pins (dependabot
-  bumps minors within it). `@raycast/api`'s exact peer is a warning-level
+  `@types/node` stays on its current major (`.github/dependabot.yml` ignores
+  its major updates; minors still flow). `@raycast/api`'s exact peer is a warning-level
   mismatch npm tolerates under the committed lockfile, not a hard pin the
   manifest must equal. `ray build` type-checks with its OWN bundled tsc (read
   its version from the installed `@raycast/api`), so `tsconfig.json` must stay

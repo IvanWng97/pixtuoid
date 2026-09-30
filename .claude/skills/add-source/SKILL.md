@@ -6,7 +6,7 @@ metadata:
   scope: "pixtuoid repo only"
 ---
 
-# add-source (v1)
+# add-source
 
 Adding an agent CLI spans `pixtuoid-core` (decoder + registry + tests), the
 `pixtuoid` binary (runtime wiring + install target + badge hue), and the site
@@ -22,11 +22,6 @@ manifest.
 Follow **[`docs/CONTRIBUTING.md`](../../../docs/CONTRIBUTING.md#adding-a-new-agent-cli)**
 "Adding a new agent CLI" step by step; its test steps are in
 [`crates/pixtuoid-core/tests/CLAUDE.md`](../../../crates/pixtuoid-core/tests/CLAUDE.md).
-
-Decide **transcript-bearing vs hook-only** first (invariant #3): a hook-only CLI
-(every `transcript: None` row in `source/registry.rs`) skips the runtime wiring
-and the `Source` impl, and ships a `hook.custom` decoder + an `install/` target
-instead.
 
 ## The trap: `--lib` is not the suite
 

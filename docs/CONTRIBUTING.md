@@ -226,34 +226,10 @@ Advisory backstops that surface risk but never gate:
 (which recorded fixtures a local CLI has moved past; LOCAL-only) ·
 `just bench` / CodSpeed (local numbers authoritative; CI benches advisory).
 
-## Conventions (the short version — see [`CLAUDE.md`](../CLAUDE.md) for the full set)
+## Conventions and architecture invariants
 
-- **TDD first** — failing test → minimal impl. No code without a test.
-- **DRY, YAGNI** — nothing beyond the current scope.
-- **No `unwrap()` in non-test code**; `anyhow` (app) / `thiserror` (core); the
-  hook listener and JSONL watcher log-and-continue, never panic.
-- **Comments explain WHY, not what.**
-- **Keep docs current** — structure/API/workflow changes update the relevant
-  `CLAUDE.md`/`README.md` in the same commit.
-- **macOS-first** — BSD CLI; `shellcheck` any `.sh` you touch.
-- **Sprite changes need visual verification** — `beautify-decoration` skill;
-  an intentional visual change commits the `just gen`-regenerated references
-  in the same change (CI pixel-diffs against `docs/images/reference-*.png`).
-
-## Architecture invariants (don't break these)
-
-1. `pixtuoid-core` and `pixtuoid-scene` have **no terminal, window or
-   audio-device dependencies** (`just arch` + the crate boundary enforce it);
-   that code lives in the binary's `tui/`/`floating/` painters and audio gateway.
-2. Events flow through **one** channel typed `mpsc::Sender<(Transport,
-   AgentEvent)>`; the `Transport` tag is load-bearing (hook-wins dedup).
-3. The **`Source` trait** is the only seam for a transcript-bearing agent CLI
-   (hook-only CLIs ship a hook decoder + an install `Target` instead).
-4. Hook install writes **through symlinks** (`resolve_symlink`).
-5. The hook shim **never blocks CC** — always exit 0; the send bound
-   (pixtuoid-hook's `transport::WRITE_TIMEOUT`) is watchdog-enforced on both
-   platforms.
-6. Walkable mask = **ground footprint only**; sprites may be visually larger.
+Both live in [`CLAUDE.md`](../CLAUDE.md) ("Conventions", "Architecture
+invariants"), which every contributor and agent reads first.
 
 ## Pull requests
 
@@ -324,11 +300,10 @@ guards; steps 1–3, 11 and 12 are on you.
    projects `REGISTRY`, and the conformance suite then requires a fixture. The
    `sources --json` golden (`crates/pixtuoid/tests/snapshots/cli/sources.json`)
    must list it: `SNAPSHOTS=overwrite cargo test -p pixtuoid --test cli_json`.
-6. **Drop a sanitized real-capture fixture** exercising the SessionStart hook
-   under `tests/sources/fixtures/<name>/<scenario>/` (see the fixtures README for
-   provenance rules), then `cargo insta review`. The conformance harness
-   asserts all of a session's events coalesce to ONE `AgentId`. Test-layout
-   map: [`crates/pixtuoid-core/tests/CLAUDE.md`](../crates/pixtuoid-core/tests/CLAUDE.md).
+6. **Record the fixture** — the test steps in
+   [`crates/pixtuoid-core/tests/CLAUDE.md`](../crates/pixtuoid-core/tests/CLAUDE.md)
+   (a RECORDED SessionStart scenario via `just capture-fixture`), then
+   `cargo insta review`.
 7. **Wire it into `runtime/driver.rs::build_source_set`** (the one
    construction site; the registry drives the guard test, not the spawning).
 8. **If the CLI has hooks**, add an `install/` target (a `Target` row +

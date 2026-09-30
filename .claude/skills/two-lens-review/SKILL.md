@@ -1,19 +1,18 @@
 ---
 name: two-lens-review
-version: 1.2.0
+version: 1.3.0
 description: "Run pixtuoid's review protocol at either scope — the mandatory pre-merge DIFF gate (2+ differentiated-lens agents on the diff) or a whole-codebase AUDIT (subsystem × factor fan-out over the whole tree). Both draw ONE shared factor taxonomy + verify contract + disposition; they differ only in population and orchestration. Use before merging ANY PR, on 'review this PR/branch' / 'is this ready to merge' (diff scope), or on 'whole-codebase review' / pre-release / periodic audit (whole-codebase scope). Encodes the convergence contract (churn budget, two-fix-round cap, HIGH-only blocking), the five hard requirements, the escalation triggers, the adversarial finder→verify fan-out, and the disposition sweep the repo learned the hard way."
 metadata:
   scope: "pixtuoid repo only"
 ---
 
-# two-lens-review (v1.2) — the review gate + the whole-codebase audit
+# two-lens-review — the review gate + the whole-codebase audit
 
 ONE protocol, two SCOPES over the SAME factors:
 
-- **Diff scope** — the repo's **mandatory** merge gate ("Don't merge a PR without
-  the two-lens review" — workspace `CLAUDE.md`, "Things NOT to do"; PR #23 merged
-  unreviewed with a critical path-traversal). 2+ differentiated-lens agents on the
-  diff, disposition in the PR thread.
+- **Diff scope** — the repo's **mandatory** merge gate (workspace `CLAUDE.md`,
+  "Things NOT to do"). 2+ differentiated-lens agents on the diff, disposition in
+  the PR thread.
 - **Whole-codebase scope** — the periodic / pre-release AUDIT. A diff review and
   an audit scan DIFFERENT populations (fix-introduced-in-one-change vs existing
   code + cross-PR accumulation), so the audit is a SEPARATE pass, not a bigger
@@ -124,7 +123,7 @@ Hence:
    convergence contract above: dispositioned findings + zero open confirmed
    HIGH, within the two-fix-round cap. If the bot ERRORED or left no
    findings comment at HEAD (it can fail on a very large diff — `error_max_turns`
-   with no comment — or on a spent quota, which the workflow now states itself in
+   with no comment — or on a spent quota, which the workflow states itself in
    an `<!-- absent-<marker>:<sha> -->` comment; do NOT read that as a review),
    the gate is unsatisfiable as written: split the PR smaller,
    else fall back to one extra differentiated lens + owner merge, recorded in the
@@ -151,7 +150,6 @@ scope).
 
 | Thought | Reality |
 |---------|---------|
-| "It's a tiny/doc-only PR" | The gate has no size exemption; run it (lens count can shrink, the gate can't). |
 | "CI is green, that's enough" | CI can't see design, blast radius, drift, or a deliberate-looking real bug. |
 | "One thorough agent is fine" | Two differentiated lenses is the floor; one lens's blind spots go uncaught. |
 | "I'll note the finding and move on" | Every finding needs a terminal state — dropped findings become release blockers. |

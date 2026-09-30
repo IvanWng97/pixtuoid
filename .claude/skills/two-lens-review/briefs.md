@@ -27,12 +27,8 @@ where the rule would otherwise look arbitrary enough to get "fixed" away.
 - Terminal egress strips Cc controls AND Cf bidi overrides (Trojan-Source).
 - IPC endpoints: owner-only at creation (create-restricted-then-rename,
   never a process-global umask); treat a pre-existing endpoint as hostile.
-- Per-CLI resolution POLICY is mirrored from that CLI's own resolver — the
-  generic dirs/shellexpand answer IS the bug (#343).
 - Upgrade path: state written by RELEASED versions survives; a fresh-install
   assumption that wipes an upgrader's config is a HIGH (#457).
-- Compare `PathBuf` structurally — a path-string assert with a hardcoded
-  separator reds only in windows-test.
 - A dead fallback is debt, not safety: an arm whose trigger cannot fire, or
   that duplicates/contradicts an authority, gets flagged — but documented
   load-bearing defense (shim exit-0, config-never-wipe, liveness ladders)
