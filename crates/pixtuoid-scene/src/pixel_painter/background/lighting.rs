@@ -5,6 +5,7 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
+use crate::dither::FALLOFF_TONES;
 use crate::lighting::Emitter;
 use crate::pixel_painter::palette::{BLACK, WHITE, blend_rgb};
 use crate::theme::Theme;
@@ -21,11 +22,6 @@ pub(in crate::pixel_painter) struct RadialFalloff {
     pub rx_norm: f32,
     pub ry_norm: f32,
 }
-
-/// How many flat tones a falloff steps through from its peak down, the seam
-/// between each pair dithered.
-const FALLOFF_TONES: u8 = 3;
-const _: () = assert!(FALLOFF_TONES > 0);
 
 /// The composite every light shares: [`blend_tone`] over the caller-clipped
 /// `xs` × `ys` at each pixel's `t(x, y)`; `None` leaves the pixel alone. A

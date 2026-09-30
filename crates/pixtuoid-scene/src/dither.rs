@@ -20,6 +20,11 @@ pub(crate) fn takes_next(x: u16, y: u16, coverage: f32) -> bool {
     BAYER_4X4[usize::from(y % PERIOD)][usize::from(x % PERIOD)] < level
 }
 
+/// How many flat tones a falloff steps through from its peak down, the seam
+/// between each pair dithered.
+pub(crate) const FALLOFF_TONES: u8 = 3;
+const _: () = assert!(FALLOFF_TONES > 0);
+
 /// The share of each band, at its top, that dithers into the next: a whole band
 /// of dither reads as grain.
 pub(crate) const SEAM: f32 = 0.3;

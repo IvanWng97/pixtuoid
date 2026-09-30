@@ -36,7 +36,9 @@ pub mod audio;
 pub mod board;
 #[doc(hidden)]
 pub mod burn;
+pub(crate) mod celestial;
 pub mod chitchat;
+pub(crate) mod composite;
 pub(crate) mod creatures;
 #[doc(hidden)]
 pub mod cutaway;
