@@ -130,7 +130,7 @@ impl FloatingApp {
         let (Some(nw), Some(nh)) = (NonZeroU32::new(win_w), NonZeroU32::new(win_h)) else {
             return; // a 0-area window: nothing to draw
         };
-        // Cloned out so the `self.live` borrow ends before the `&mut self` writes below.
+        // Cloned out: a held `watch::Ref` read-locks the channel, stalling the sender.
         let Some((scene, floor_caps)) = self
             .live
             .as_ref()
