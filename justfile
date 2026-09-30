@@ -332,6 +332,7 @@ hack:
     set -euo pipefail
     command -v cargo-hack &>/dev/null || { echo "error: cargo-hack not found — run \`just setup-tools\`" >&2; exit 1; }
     cargo hack --feature-powerset --no-dev-deps check --workspace
+    cargo clippy -p pixtuoid-scene --no-default-features --all-targets -- -D warnings
 
 # Cross-lint the workspace for Windows (clippy subsumes check; no linking).
 # Same toolchain gotcha as `api-surface` and `wasm-build`, and it bites HARDER

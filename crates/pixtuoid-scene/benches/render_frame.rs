@@ -150,12 +150,13 @@ fn render_frame(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("render_floor");
     for (name, scene, size) in cases {
+        // Outside the closure: criterion re-runs it per sample, restarting the sim.
+        let mut fctx = FloorCtx::new();
+        let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
+        let mut coffee = CoffeeState::new();
+        let mut chitchat = HashMap::new();
+        let mut i = 0u32;
         group.bench_function(name, |b| {
-            let mut fctx = FloorCtx::new();
-            let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
-            let mut coffee = CoffeeState::new();
-            let mut chitchat = HashMap::new();
-            let mut i = 0u32;
             b.iter(|| {
                 i = (i + 1) % SIM_WINDOW_FRAMES;
                 render_floor(

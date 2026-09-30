@@ -121,7 +121,7 @@ impl ActiveChitchat {
         chat.seed = chat
             .participants
             .iter()
-            .fold(ms.wrapping_mul(0x9e37_79b9_7f4a_7c15), |acc, a| {
+            .fold(ms.wrapping_mul(crate::GOLDEN_GAMMA), |acc, a| {
                 acc.rotate_left(7) ^ a.raw()
             });
         chat

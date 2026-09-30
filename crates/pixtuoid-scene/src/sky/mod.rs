@@ -99,7 +99,7 @@ const WEATHER_CYCLE_SECS: u64 = 600;
 /// splitmix64's golden-ratio increment: `splitmix64(x + GAMMA)` is the first
 /// draw of a splitmix64 stream seeded at `x`, not the bare finalizer (which
 /// maps 0 to 0).
-const SPLITMIX64_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
+const SPLITMIX64_GAMMA: u64 = crate::GOLDEN_GAMMA;
 
 /// The weather at `now`: one hashed pick per [`WEATHER_CYCLE_SECS`] slot.
 fn weather_at(now: SystemTime) -> Weather {

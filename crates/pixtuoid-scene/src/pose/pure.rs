@@ -84,7 +84,7 @@ pub fn dwell_ms(kind: WaypointKind, agent_id: AgentId) -> u64 {
 
 /// Absolute dwell (ms) an agent sits at its desk between wander trips.
 pub fn seated_dwell_ms(agent_id: AgentId) -> u64 {
-    jittered_dwell(desk_furniture_def().dwell, agent_id, 0x9e37_79b9_7f4a_7c15)
+    jittered_dwell(desk_furniture_def().dwell, agent_id, crate::GOLDEN_GAMMA)
 }
 
 /// Estimated full wander-cycle wall-time for an agent (desk dwell + two walk
@@ -120,7 +120,7 @@ pub fn personality_for(agent_id: AgentId) -> Personality {
 /// trip on this cycle, or stay seated?
 pub fn takes_trip(agent_id: AgentId, cycle_n: u64) -> bool {
     let p = personality_for(agent_id);
-    let mix = agent_id.raw() ^ cycle_n.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    let mix = agent_id.raw() ^ cycle_n.wrapping_mul(crate::GOLDEN_GAMMA);
     (mix % 100) < p.trip_chance_pct as u64
 }
 
@@ -333,7 +333,7 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> P
     const AIMLESS_SAMPLE_ATTEMPTS: u64 = 32;
     for i in 0..AIMLESS_SAMPLE_ATTEMPTS {
         let h = seed
-            .wrapping_add(i.wrapping_mul(0x9e37_79b9_7f4a_7c15))
+            .wrapping_add(i.wrapping_mul(crate::GOLDEN_GAMMA))
             .wrapping_mul(0xc6a4_a793_5bd1_e995);
         let x = zone.x + (h as u16) % zone.width.max(1);
         let y = zone.y + ((h >> 16) as u16) % zone.height.max(1);

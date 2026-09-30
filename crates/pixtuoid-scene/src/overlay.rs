@@ -182,13 +182,10 @@ mod tests {
         badge_hue, build_overlay, disambig_suffix, truncate_label, LabelElement, LabelTone,
     };
     use crate::layout::Layout;
-    use crate::motion::MotionState;
     use crate::pathfind::AStarRouter;
-    use crate::pose::{PoseHistory, RouteCtx};
+    use crate::pose::RouteRig;
     use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
-    use pixtuoid_core::walkable::OccupancyOverlay;
     use pixtuoid_core::AgentId;
-    use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::{Duration, SystemTime};
@@ -245,18 +242,13 @@ mod tests {
     }
 
     fn overlay_of(scene: &SceneState, hovered: Option<AgentId>) -> Vec<LabelElement> {
-        let l = layout();
-        let mut router = AStarRouter::new();
-        let occ = OccupancyOverlay::new();
-        let mut history = PoseHistory::new();
-        let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
-        let mut rctx = RouteCtx {
-            router: &mut router,
-            overlay: &occ,
-            history: &mut history,
-            motion: &mut motion,
-        };
-        build_overlay(scene, &l, now(), &mut rctx, hovered)
+        build_overlay(
+            scene,
+            &layout(),
+            now(),
+            &mut RouteRig::new(AStarRouter::new()).rctx(),
+            hovered,
+        )
     }
 
     #[test]

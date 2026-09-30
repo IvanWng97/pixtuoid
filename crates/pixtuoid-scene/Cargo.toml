@@ -65,3 +65,4 @@ harness = false
 [[example]]
 name = "corpus_check"
 test = true
+required-features = ["native"]

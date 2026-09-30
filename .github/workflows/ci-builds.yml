@@ -37,6 +37,8 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-alsa
       - uses: ./.github/actions/setup-cargo-just
+        with:
+          components: clippy
       - uses: taiki-e/install-action@cargo-hack
       - run: just hack
 
