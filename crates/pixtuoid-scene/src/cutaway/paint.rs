@@ -4164,8 +4164,7 @@ mod tests {
 
     /// The bundled pack.
     fn pack() -> Pack {
-        crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-            .expect("the embedded pack loads")
+        crate::embedded_pack::test_default_pack()
     }
 
     fn near_seat(desk: crate::layout::Point) -> crate::layout::Point {

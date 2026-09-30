@@ -171,10 +171,13 @@ fn load_custom_over(base: &Pack, dir: &Path, origin: &str) -> Result<Pack> {
     Ok(custom)
 }
 
-/// The bundled pack, for unit tests.
+/// The bundled pack, for unit tests: parsed once per process, since the parse
+/// dominates a test that loads it per frame; each caller gets its own copy.
 #[cfg(test)]
 pub(crate) fn test_default_pack() -> Pack {
-    load_sprite_pack(PackSource::Bundled).expect("default pack loads")
+    static PACK: std::sync::OnceLock<Pack> = std::sync::OnceLock::new();
+    PACK.get_or_init(|| load_sprite_pack(PackSource::Bundled).expect("default pack loads"))
+        .clone()
 }
 
 /// The default pack's manifest, as `build.rs` embeds it.
