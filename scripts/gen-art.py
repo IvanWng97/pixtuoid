@@ -257,6 +257,15 @@ CUFF_Y = 34
 SKIN_KEYS = {SKIN, SKIN_SH}
 
 
+def grounded(frames):
+    """`frames` moved down together until their lowest drawn row is the canvas's
+    last: both painters ground and sort a piece on its box's bottom row."""
+    blank = min(
+        next((i for i, row in enumerate(reversed(g)) if any(c != T for c in row)), 0) for g in frames
+    )
+    return [[[T] * len(g[0])] * blank + g[: len(g) - blank] for g in frames]
+
+
 def union_outline(g, k=SILHOUETTE):
     """One line round everything drawn, whatever its material."""
     outline(g, {c for row in g for c in row} - {T, k}, k)
@@ -3054,7 +3063,7 @@ def main():
         "meeting_chair": (meeting_chair_1x.__doc__, [meeting_chair_1x()]),
     }
     sprites = {
-        f"{base}@{S}x.sprite": render_sprite(header, frames)
+        f"{base}@{S}x.sprite": render_sprite(header, grounded(frames))
         for base, (header, frames) in pieces.items()
     }
     for pose, (*_, header) in POSES.items():
@@ -3069,7 +3078,9 @@ def main():
                         [lyr],
                         [(view, HEAD_MARK[0], HEAD_MARK[1] + o)],
                     )
-    sprites |= {f"{base}.sprite": render_sprite(header, frames) for base, (header, frames) in classic.items()}
+    sprites |= {
+        f"{base}.sprite": render_sprite(header, grounded(frames)) for base, (header, frames) in classic.items()
+    }
     for name, draw in BUILDINGS.items():
         art = draw()
         sprites[f"building_{name}@{S}x.sprite"] = render_sprite(draw.__doc__, [art])
