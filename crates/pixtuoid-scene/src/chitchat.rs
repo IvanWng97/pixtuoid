@@ -287,13 +287,13 @@ pub fn update_and_collect(
             .or_insert_with(|| ActiveChitchat::new(*venue, present.clone(), now));
         chat.set_participants(present);
 
-        if let Some((speaker_id, text)) = chat.current_bubble(now) {
-            if let Some((_, anchor)) = agents.iter().find(|(id, _)| *id == speaker_id) {
-                bubbles.push(ChitchatBubble {
-                    text,
-                    anchor: *anchor,
-                });
-            }
+        if let Some((speaker_id, text)) = chat.current_bubble(now)
+            && let Some((_, anchor)) = agents.iter().find(|(id, _)| *id == speaker_id)
+        {
+            bubbles.push(ChitchatBubble {
+                text,
+                anchor: *anchor,
+            });
         }
     }
 

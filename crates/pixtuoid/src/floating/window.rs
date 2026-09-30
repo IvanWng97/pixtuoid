@@ -243,10 +243,10 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // else let the OS place it. A window last closed on a now-disconnected
         // monitor would otherwise restore fully off-screen and be unrecoverable
         // (frameless + no taskbar + always-on-top → no way to drag it back).
-        if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y) {
-            if position_on_a_monitor(event_loop, x, y, self.cfg.width, self.cfg.height) {
-                attrs = attrs.with_position(PhysicalPosition::new(x, y));
-            }
+        if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y)
+            && position_on_a_monitor(event_loop, x, y, self.cfg.width, self.cfg.height)
+        {
+            attrs = attrs.with_position(PhysicalPosition::new(x, y));
         }
         #[cfg(target_os = "macos")]
         {
@@ -391,10 +391,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // sleeps and both cadences collapse to max-rate (see `super::cadence`).
         let (paint, deadline) = self.clock.poll(Instant::now(), office_idle);
         event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        if paint {
-            if let Some(window) = &self.window {
-                window.request_redraw();
-            }
+        if paint && let Some(window) = &self.window {
+            window.request_redraw();
         }
     }
 }

@@ -127,10 +127,11 @@ pub(crate) fn dress(
                     continue;
                 };
                 let (tx, ty) = (i32::from(x) + dx, i32::from(y) + dy + i32::from(up));
-                if let (Ok(tx), Ok(ty)) = (u16::try_from(tx), u16::try_from(ty)) {
-                    if tx < w && ty < h {
-                        px[usize::from(ty) * usize::from(w) + usize::from(tx)] = Some(c);
-                    }
+                if let (Ok(tx), Ok(ty)) = (u16::try_from(tx), u16::try_from(ty))
+                    && tx < w
+                    && ty < h
+                {
+                    px[usize::from(ty) * usize::from(w) + usize::from(tx)] = Some(c);
                 }
             }
         }

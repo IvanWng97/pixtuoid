@@ -4540,11 +4540,11 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
                 door_anim_max_ms: 0,
             },
         );
-        if let Some(Pose::AtWaypoint { wp, kind }) = frame.poses.get(&id).copied().flatten() {
-            if furniture_def(kind.furniture()).occupies_pos {
-                sat_at = Some(wp);
-                break;
-            }
+        if let Some(Pose::AtWaypoint { wp, kind }) = frame.poses.get(&id).copied().flatten()
+            && furniture_def(kind.furniture()).occupies_pos
+        {
+            sat_at = Some(wp);
+            break;
         }
     }
     let sat_at = sat_at.expect("agent never reached a seat");
@@ -5181,10 +5181,10 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
                     door_anim_max_ms: 0,
                 },
             );
-            if let Some(Some(Pose::AimlessAt { dest })) = f.poses.get(&id) {
-                if waypoint_anchor(*dest, w).x + w > layout.buf_w {
-                    hit += 1;
-                }
+            if let Some(Some(Pose::AimlessAt { dest })) = f.poses.get(&id)
+                && waypoint_anchor(*dest, w).x + w > layout.buf_w
+            {
+                hit += 1;
             }
             for c in &f.characters {
                 let fw = pack
