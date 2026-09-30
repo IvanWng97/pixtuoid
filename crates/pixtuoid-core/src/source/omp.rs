@@ -620,10 +620,10 @@ fn omp_label(source: &str, text: &str) -> String {
 // registry conformance test is the only other caller.
 #[cfg(any(feature = "native", test))]
 pub(crate) fn omp_derive_label(path: &Path, source: &str, cwd: &Path) -> String {
-    if omp_parent_key_from_path(path).is_some() {
-        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-            return omp_label(source, stem);
-        }
+    if omp_parent_key_from_path(path).is_some()
+        && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+    {
+        return omp_label(source, stem);
     }
     crate::source::decoder::derive_prefixed_label(source, cwd)
 }

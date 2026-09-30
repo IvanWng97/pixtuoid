@@ -222,10 +222,10 @@ impl SourceDiagnostics {
     /// The single worst issue as a one-line, glyph-prefixed summary. Priority:
     /// install-broken (hooks can't fire) > decode-drift.
     pub(crate) fn summary(&self) -> Option<String> {
-        if let Some(i) = &self.install {
-            if !i.is_sound() {
-                return Some(format!("⚠ install broken: {}", i.issues.join("; ")));
-            }
+        if let Some(i) = &self.install
+            && !i.is_sound()
+        {
+            return Some(format!("⚠ install broken: {}", i.issues.join("; ")));
         }
         let n = self.drift.total();
         if n > 0 {

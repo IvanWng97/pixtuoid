@@ -118,14 +118,14 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     let mut parse = crate::install::verify::flat_json_verify(content, CURSOR_EVENTS, SENTINEL_KEY);
     // Only reachable on parseable JSON — an unparseable file is already a HARD
     // "no longer parses" issue from `flat_json_verify`.
-    if let Ok(doc) = serde_json::from_str::<Value>(content) {
-        if !doc.get("version").is_some_and(|v| v.is_number()) {
-            parse.issues.push(
-                "hooks.json has no numeric top-level `version` key — Cursor requires it, \
+    if let Ok(doc) = serde_json::from_str::<Value>(content)
+        && !doc.get("version").is_some_and(|v| v.is_number())
+    {
+        parse.issues.push(
+            "hooks.json has no numeric top-level `version` key — Cursor requires it, \
                  so no hooks load (reconnect via the Sources panel)"
-                    .to_string(),
-            );
-        }
+                .to_string(),
+        );
     }
     parse
 }

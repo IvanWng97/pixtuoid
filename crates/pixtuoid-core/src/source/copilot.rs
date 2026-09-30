@@ -1072,10 +1072,10 @@ mod tests {
         let mut read: Vec<&str> = Vec::new();
         for m in src.match_indices("str_at(") {
             let rest = &src[m.0..];
-            if let Some(q) = rest.find('"') {
-                if let Some(end) = rest[q + 1..].find('"') {
-                    read.push(&rest[q + 1..q + 1 + end]);
-                }
+            if let Some(q) = rest.find('"')
+                && let Some(end) = rest[q + 1..].find('"')
+            {
+                read.push(&rest[q + 1..q + 1 + end]);
             }
         }
         for pat in ["\t.get(\"", ".get(\""] {

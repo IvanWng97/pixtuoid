@@ -96,13 +96,12 @@ impl Emission {
     }
 
     pub(crate) fn set(&mut self, x: u16, y: u16, glow: Glow) {
-        if x < self.w {
-            if let Some(g) = self
+        if x < self.w
+            && let Some(g) = self
                 .glow
                 .get_mut(usize::from(y) * usize::from(self.w) + usize::from(x))
-            {
-                *g = glow;
-            }
+        {
+            *g = glow;
         }
     }
 
@@ -352,10 +351,10 @@ const NET_MEMO_CAP: usize = 1 << 16;
 impl NetMemo {
     fn of(&mut self, under: Rgb, glow: Glow, lift: u8, tint: Option<Rgb>, ambient: Ambient) -> Rgb {
         let key = (under, glow, lift, tint, ambient);
-        if let Some((k, c)) = self.last {
-            if k == key {
-                return c;
-            }
+        if let Some((k, c)) = self.last
+            && k == key
+        {
+            return c;
         }
         if self.colours.len() >= NET_MEMO_CAP {
             self.colours.clear();

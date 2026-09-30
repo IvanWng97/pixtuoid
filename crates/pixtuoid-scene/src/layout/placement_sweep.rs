@@ -451,23 +451,23 @@ fn every_piece_stays_inside_the_buffer() {
         };
         for p in pieces(l) {
             for (what, rect) in [("ground", p.ground), ("visual", Some(p.visual))] {
-                if let Some((tl, sz)) = rect {
-                    if !rect_in_bounds(tl, sz, buffer) {
-                        v.push(format!(
-                            "{w}x{h} seed {seed}: {} {what} {tl:?}+{sz:?} leaves the buffer",
-                            p.label
-                        ));
-                    }
-                }
-            }
-            if let Some((pos, vis)) = p.center_fit {
-                if pos.x < vis.w / 2 || pos.y < vis.h / 2 {
+                if let Some((tl, sz)) = rect
+                    && !rect_in_bounds(tl, sz, buffer)
+                {
                     v.push(format!(
-                        "{w}x{h} seed {seed}: {} centered at {pos:?} spills its {vis:?} \
-                         visual west/north (silently clamped by saturating_sub)",
+                        "{w}x{h} seed {seed}: {} {what} {tl:?}+{sz:?} leaves the buffer",
                         p.label
                     ));
                 }
+            }
+            if let Some((pos, vis)) = p.center_fit
+                && (pos.x < vis.w / 2 || pos.y < vis.h / 2)
+            {
+                v.push(format!(
+                    "{w}x{h} seed {seed}: {} centered at {pos:?} spills its {vis:?} \
+                         visual west/north (silently clamped by saturating_sub)",
+                    p.label
+                ));
             }
         }
     });
@@ -488,13 +488,13 @@ fn every_piece_ground_stays_in_its_container() {
                 }
                 continue;
             };
-            if let Some((tl, sz)) = p.ground {
-                if !rect_in_bounds(tl, sz, b) {
-                    v.push(format!(
-                        "{w}x{h} seed {seed}: {} ground {tl:?}+{sz:?} leaves its {:?} {b:?}",
-                        p.label, p.container
-                    ));
-                }
+            if let Some((tl, sz)) = p.ground
+                && !rect_in_bounds(tl, sz, b)
+            {
+                v.push(format!(
+                    "{w}x{h} seed {seed}: {} ground {tl:?}+{sz:?} leaves its {:?} {b:?}",
+                    p.label, p.container
+                ));
             }
             if p.visual_in_container {
                 let (tl, sz) = p.visual;
