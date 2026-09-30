@@ -506,12 +506,6 @@ impl std::ops::Deref for RgbBuffer {
     }
 }
 
-impl std::ops::DerefMut for RgbBuffer {
-    fn deref_mut(&mut self) -> &mut Grid<Rgb> {
-        &mut self.pixels
-    }
-}
-
 impl RgbBuffer {
     /// A `width × height` buffer with every pixel set to `fill`.
     pub fn filled(width: u16, height: u16, fill: Rgb) -> Self {
@@ -572,6 +566,26 @@ impl RgbBuffer {
         }
     }
 
+    /// Every pixel, row-major, to write in bulk. While
+    /// [`begin_writes`](Self::begin_writes) tracks, the whole buffer counts as
+    /// written this epoch, since a bulk write may touch any of it.
+    pub fn as_mut_slice(&mut self) -> &mut [Rgb] {
+        if let Some(w) = &mut self.writes {
+            w.at.fill(w.now);
+        }
+        self.pixels.as_mut_slice()
+    }
+
+    /// Resize to `width × height` with every pixel `fill`: a write of every
+    /// pixel, as [`as_mut_slice`](Self::as_mut_slice) counts one.
+    pub fn resize_fill(&mut self, width: u16, height: u16, fill: Rgb) {
+        self.pixels.resize_fill(width, height, fill);
+        if let Some(w) = &mut self.writes {
+            w.at.resize(self.pixels.as_slice().len(), 0);
+            w.at.fill(w.now);
+        }
+    }
+
     fn write(&mut self, i: usize, rgb: Rgb) {
         self.pixels.as_mut_slice()[i] = rgb;
         if let Some(w) = &mut self.writes {
@@ -581,7 +595,6 @@ impl RgbBuffer {
 
     /// Start a write epoch and return it, for [`written_in`](Self::written_in):
     /// unlike a diff, it sees a pixel written in the colour already there.
-    /// Writes through the derefed [`Grid`] go unnoted.
     pub fn begin_writes(&mut self) -> u32 {
         let n = self.pixels.as_slice().len();
         let w = self.writes.get_or_insert_with(|| Writes {
@@ -616,6 +629,18 @@ mod tests {
 
     const fn rgb(r: u8, g: u8, b: u8) -> Rgb {
         Rgb { r, g, b }
+    }
+
+    #[test]
+    fn a_bulk_write_counts_as_writing_every_pixel() {
+        let mut buf = RgbBuffer::filled(3, 2, rgb(0, 0, 0));
+        let epoch = buf.begin_writes();
+        assert!(!buf.written_in(1, 1, epoch));
+        buf.as_mut_slice()[0] = rgb(9, 9, 9);
+        assert!((0..2).all(|y| (0..3).all(|x| buf.written_in(x, y, epoch))));
+        let epoch = buf.begin_writes();
+        buf.resize_fill(4, 4, rgb(1, 1, 1));
+        assert!(buf.written_in(3, 3, epoch), "a resize writes every pixel");
     }
 
     /// Mid grey, dark hair, skin, and red, blue and yellow, which a lit step
