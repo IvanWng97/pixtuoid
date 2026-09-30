@@ -75,10 +75,9 @@ run. The jobs:
 - **One automatic Claude reviewer per [`REVIEW.md`](../REVIEW.md) lens**
   rides `claude-readonly-review.yml`: a
   read-only model job on the trusted default branch, the PR diff as inert
-  data, a separate least-privilege publisher that opens a review thread per
-  finding — and a third job that comments
-  when the model job fails or declines, because absence otherwise renders as
-  a pass (#809). `claude.yml` refuses fork PR heads.
+  data, and a separate least-privilege publisher that opens a review thread
+  per finding and sets the lens's `claude-review/<lens>` status; a run that
+  does not publish sets it to failure. `claude.yml` refuses fork PR heads.
 - **CodeQL** stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).
@@ -254,8 +253,7 @@ disposition; zero open confirmed `issue (blocking)`; each matching
 [`two-lens-review`](../.claude/skills/two-lens-review/SKILL.md) skill is
 otherwise an optional pre-flight. A published review passes whatever it
 found; a failed or missing status is no review: comment `/claude-review`, else
-split the PR smaller, else run one extra differentiated local lens and the
-owner merges, recorded in a PR comment.
+split the PR smaller.
 
 The bots never review a fork PR on their own: a maintainer approves its CI
 run, then comments `/claude-review`, again after every push. Its author can

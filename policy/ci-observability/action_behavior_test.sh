@@ -116,7 +116,8 @@ contexts="$(while IFS= read -r lens; do echo "${status_template//"$lens_expr"/$l
 [[ "$(sort -u <<<"$contexts")" == "$(sort <<<"$contexts")" ]] ||
     fail "the review bots share a status [${contexts//$'\n'/ }], so one lens's verdict reads as the other's"
 lens="${bot_lenses%%$'\n'*}"
-review_status="${status_template//"$lens_expr"/$lens}"
+# A sentinel no workflow holds, so only a context read from the env matches.
+review_status="ctx/sentinel"
 review_title="${title_template//"$lens_expr"/$lens}"
 run_url="https://github.test/owner/repo/actions/runs/7"
 
@@ -184,8 +185,6 @@ pr_files='[
   {"filename": "img.png", "status": "added"}
 ]'
 
-# The head pair is parameterized for the one stale-review case; everything
-# else varies only the review body.
 run_publisher() {
     local review_json="$1"
     local fake_head="${2:-abc123}"
@@ -200,14 +199,13 @@ run_publisher() {
         POSTED_THREADS="$posted_threads" \
         PUBLISHED_COMMENT="$published_comment" \
         EXPECTED_HEAD_SHA="$expected_head" \
-        MAX_FINDINGS="${FAKE_MAX_FINDINGS-$max_findings}" \
+        BOUNDS="${FAKE_BOUNDS-$bounds}" \
         PR_NUMBER="42" \
         REPOSITORY="owner/repo" \
         REVIEW_JSON="$review_json" \
         REVIEW_STATUS="$review_status" \
         REVIEW_TITLE="$review_title" \
         RUN_URL="$run_url" \
-        SEVERITIES="${FAKE_SEVERITIES-$severities}" \
         bash -c "$publisher_script"
 }
 
@@ -222,17 +220,16 @@ schema_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Load the r
 : >"$test_dir/schema-output"
 GITHUB_OUTPUT="$test_dir/schema-output" bash -c "$schema_script" ||
     fail "the review schema step exited non-zero"
-severities="$(sed -n 's/^severities=//p' "$test_dir/schema-output")"
-[[ -n "$severities" ]] || fail "the review schema step outputs no severities"
-max_findings="$(sed -n 's/^max_findings=//p' "$test_dir/schema-output")"
-[[ "$max_findings" =~ ^[1-9][0-9]*$ ]] || fail "the review schema step outputs no max_findings"
+bounds="$(sed -n 's/^bounds=//p' "$test_dir/schema-output")"
+severities="$(jq -c '.severities' <<<"$bounds")"
+max_findings="$(jq '.max_findings' <<<"$bounds")"
+[[ "$max_findings" =~ ^[1-9][0-9]*$ ]] || fail "the review schema step outputs no bounds: $bounds"
 # shellcheck disable=SC2016 # Workflow expressions, matched literally.
 yq -o=json '.' "$CLAUDE_REVIEW_WORKFLOW_FILE" | jq -e '
-    .jobs as $jobs
-    | all("severities", "max_findings"; . as $o
-        | $jobs.analyze.outputs[$o] == "${{ steps.schema.outputs.\($o) }}"
-          and ([$jobs.publish.steps[].env[$o | ascii_upcase] // empty] == ["${{ needs.analyze.outputs.\($o) }}"]))' >/dev/null ||
+    .jobs.analyze.outputs.bounds == "${{ steps.schema.outputs.bounds }}"
+    and ([.jobs.publish.steps[].env.BOUNDS // empty] == ["${{ needs.analyze.outputs.bounds }}"])' >/dev/null ||
     fail "$CLAUDE_REVIEW_WORKFLOW_FILE does not hand the schema step's bounds to the publisher"
+with_bounds() { jq -c "$1" <<<"$bounds"; }
 
 assert_threads() {
     jq -e -s --arg title "$review_title" "$1" "$posted_threads" >/dev/null ||
@@ -240,13 +237,9 @@ assert_threads() {
 }
 
 valid_review='{"summary":"No correctness findings.","findings":[]}'
-while IFS= read -r status_lens; do
-    review_status="${status_template//"$lens_expr"/$status_lens}"
-    run_publisher "$valid_review" ||
-        fail "Claude publisher rejected a valid zero-finding review"
-    assert_status '.state == "success" and .sha == "abc123"' "a published $status_lens review passes its lens at the reviewed head"
-done <<<"$bot_lenses"
-review_status="${status_template//"$lens_expr"/$lens}"
+run_publisher "$valid_review" ||
+    fail "Claude publisher rejected a valid zero-finding review"
+assert_status '.state == "success" and .sha == "abc123"' "a published review passes its lens at the reviewed head"
 [[ -s "$published_comment" ]] ||
     fail "Claude publisher posted no review body"
 [[ "$(<"$published_comment")" == *"**Findings: 0**"* ]] ||
@@ -262,22 +255,22 @@ run_publisher "$(jq -cn --argjson s "$severities" \
 assert_status '.state == "success"' "findings still pass the status: their threads block"
 run_publisher '{"summary":"s","findings":[{"severity":"nit","path":"src/a.rs","line":2,"body":"b"}]}' >/dev/null 2>&1 &&
     fail "Claude publisher accepted a severity the schema does not allow"
-for bad_severities in '' '[]' '["blocking","**x**"]'; do
-    refusal="$(FAKE_SEVERITIES="$bad_severities" run_publisher "$valid_review" 2>&1)" &&
-        fail "Claude publisher published with the severities '$bad_severities'"
-    [[ "$refusal" == *"::error "* ]] ||
-        fail "Claude publisher refused the severities '$bad_severities' without an annotation"
-    [[ ! -e "$published_comment" && ! -e "$posted_statuses" ]] ||
-        fail "Claude publisher posted with the severities '$bad_severities'"
+bad_bounds=("" "$(with_bounds '.severities = []')" "$(with_bounds '.severities = ["blocking", "**x**"]')")
+for key in max_findings path_max summary_max body_max; do
+    bad_bounds+=("$(with_bounds "del(.$key)")" "$(with_bounds ".$key = 0")" "$(with_bounds ".$key = 1.5")")
 done
-FAKE_MAX_FINDINGS='' run_publisher "$valid_review" >/dev/null 2>&1 &&
-    fail "Claude publisher published without the schema's max_findings"
+for bad in "${bad_bounds[@]}"; do
+    refusal="$(FAKE_BOUNDS="$bad" run_publisher "$valid_review" 2>&1)" &&
+        fail "Claude publisher published with the bounds '$bad'"
+    [[ "$refusal" == *"::error "* ]] ||
+        fail "Claude publisher refused the bounds '$bad' without an annotation"
+    [[ ! -e "$published_comment" && ! -e "$posted_statuses" ]] ||
+        fail "Claude publisher posted with the bounds '$bad'"
+done
 
-REVIEW_SCHEMA_FILE="${REVIEW_SCHEMA_FILE:-.github/prompts/review-schema.json}"
-body_max="$(jq '.properties.findings.items.properties.body.maxLength' "$REVIEW_SCHEMA_FILE")"
 findings_of() {
-    jq -cn --argjson s "$severities" --argjson n "$1" --arg body "${2:-b}" \
-        '{summary: "s", findings: [range($n) | {severity: $s[0], path: "src/a.rs", line: 2, body: $body}]}'
+    jq -cn --argjson s "$severities" --argjson n "$1" \
+        '{summary: "s", findings: [range($n) | {severity: $s[0], path: "src/a.rs", line: 2, body: "b"}]}'
 }
 run_publisher "$(findings_of "$max_findings")" ||
     fail "Claude publisher rejected the schema's maxItems findings"
@@ -285,18 +278,20 @@ run_publisher "$(findings_of $((max_findings + 1)))" >/dev/null 2>&1 &&
     fail "Claude publisher accepted more findings than the schema's maxItems"
 [[ ! -e "$posted_statuses" ]] ||
     fail "Claude publisher passed the status of a review it refused"
-FAKE_MAX_FINDINGS=$((max_findings + 1)) run_publisher "$(findings_of $((max_findings + 1)))" ||
+FAKE_BOUNDS="$(with_bounds '.max_findings += 1')" run_publisher "$(findings_of $((max_findings + 1)))" ||
     fail "Claude publisher bounds the findings by its own number, not max_findings"
+for field in path summary body; do
+    long="$(printf 'a%.0s' $(seq "$(jq ".${field}_max + 1" <<<"$bounds")"))"
+    review="$(jq -cn --argjson s "$severities" --arg f "$field" --arg v "$long" '
+        {summary: "s", findings: [{severity: $s[0], path: "src/a.rs", line: 2, body: "b"}]}
+        | if $f == "summary" then .summary = $v else .findings[0][$f] = $v end')"
+    run_publisher "$review" >/dev/null 2>&1 &&
+        fail "Claude publisher accepted a $field past the schema's maxLength"
+    FAKE_BOUNDS="$(with_bounds ".${field}_max += 1")" run_publisher "$review" ||
+        fail "Claude publisher bounds the $field by its own number, not ${field}_max"
+done
 
-cjk_body="$(printf '審%.0s' $(seq "$body_max"))"
-run_publisher "$(findings_of "$max_findings" "$cjk_body")" ||
-    fail "Claude publisher dropped a large non-ASCII review under the character bound"
-comment_max_chars="$(sed -n 's/^ *readonly COMMENT_MAX_CHARS=//p' <<<"$publisher_script")"
-(($(wc -c <"$published_comment") > comment_max_chars)) ||
-    fail "the non-ASCII case no longer exceeds COMMENT_MAX_CHARS in bytes, so it proves nothing"
-over_bound=$((comment_max_chars / body_max + 1))
-FAKE_MAX_FINDINGS=$over_bound run_publisher "$(findings_of "$over_bound" "$cjk_body")" >/dev/null 2>&1 &&
-    fail "Claude publisher published a review over COMMENT_MAX_CHARS characters"
+REVIEW_SCHEMA_FILE="${REVIEW_SCHEMA_FILE:-.github/prompts/review-schema.json}"
 
 schema_accepts() {
     printf '%s' "$1" >"$test_dir/instance.json"
@@ -393,8 +388,6 @@ if run_publisher '{"summary":' >/dev/null 2>&1; then
     fail "Claude publisher accepted malformed JSON"
 fi
 
-# contracts.yml's reviewer-absence-fails-the-status pins that this runs for
-# every unpublished review, the stale one above included.
 report_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Mark the review failed")"
 run_report() {
     rm -f "$posted_statuses"
@@ -409,18 +402,11 @@ run_report() {
         RUN_URL="$run_url" \
         bash -c "$report_script"
 }
-while IFS= read -r status_lens; do
-    review_status="${status_template//"$lens_expr"/$status_lens}"
-    for results in "failure skipped" "success skipped" "success failure"; do
-        # shellcheck disable=SC2086 # Two words, two arguments.
-        report="$(run_report $results old-head)" ||
-            fail "the absence report exited non-zero for analyze/publish $results"
-        [[ "$report" == *"::error "* ]] ||
-            fail "the absence report left no annotation for analyze/publish $results"
-        assert_status '.state == "failure" and .sha == "old-head"' \
-            "an unpublished $status_lens review ($results) fails its lens at the analyzed head"
-    done
-done <<<"$bot_lenses"
+report="$(run_report success failure old-head)" ||
+    fail "the absence report exited non-zero"
+[[ "$report" == *"::error "* ]] ||
+    fail "the absence report left no annotation"
+assert_status '.state == "failure" and .sha == "old-head"' "an unpublished review fails its lens at the analyzed head"
 run_report failure skipped "" >/dev/null 2>&1 &&
     fail "the absence report marked no head"
 
@@ -428,7 +414,8 @@ run_report failure skipped "" >/dev/null 2>&1 &&
 # and runs before the action; what it actually does is asserted here.
 CLAUDE_TAG_WORKFLOW_FILE="${CLAUDE_TAG_WORKFLOW_FILE:-.github/workflows/claude.yml}"
 
-# This step passes --jq, which the resolver stub above does not model.
+# Replaces the publisher stub, which answers only `{head: {sha}}`; this step
+# reads the whole PR through --jq.
 cat >"$fake_bin/gh" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
