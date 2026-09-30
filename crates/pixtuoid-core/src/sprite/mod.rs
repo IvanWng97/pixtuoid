@@ -487,35 +487,51 @@ impl RecolorableFrame<'_> {
 
 /// A flat RGB buffer used as a blit target.
 #[derive(Debug, Clone)]
-pub struct RgbBuffer(Grid<Rgb>);
+pub struct RgbBuffer {
+    pixels: Grid<Rgb>,
+    writes: Option<Writes>,
+}
+
+/// Each pixel's epoch of its last [`put`](RgbBuffer::put).
+#[derive(Debug, Clone)]
+struct Writes {
+    at: Vec<u32>,
+    now: u32,
+}
 
 impl std::ops::Deref for RgbBuffer {
     type Target = Grid<Rgb>;
     fn deref(&self) -> &Grid<Rgb> {
-        &self.0
+        &self.pixels
     }
 }
 
 impl std::ops::DerefMut for RgbBuffer {
     fn deref_mut(&mut self) -> &mut Grid<Rgb> {
-        &mut self.0
+        &mut self.pixels
     }
 }
 
 impl RgbBuffer {
     /// A `width × height` buffer with every pixel set to `fill`.
     pub fn filled(width: u16, height: u16, fill: Rgb) -> Self {
-        RgbBuffer(Grid::filled(width, height, fill))
+        RgbBuffer {
+            pixels: Grid::filled(width, height, fill),
+            writes: None,
+        }
     }
 
     /// Build from a row-major `Vec<Rgb>` (length = `width * height`).
     pub fn from_pixels(width: u16, height: u16, pixels: Vec<Rgb>) -> Self {
-        RgbBuffer(Grid::from_vec(width, height, pixels))
+        RgbBuffer {
+            pixels: Grid::from_vec(width, height, pixels),
+            writes: None,
+        }
     }
 
     #[inline]
     fn raw_index(&self, x: u16, y: u16) -> usize {
-        (y as usize) * (self.0.width as usize) + (x as usize)
+        (y as usize) * (self.pixels.width as usize) + (x as usize)
     }
 
     /// [`raw_index`](Self::raw_index) guarded by a debug-only bounds assert: a
@@ -524,10 +540,10 @@ impl RgbBuffer {
     #[inline]
     fn checked_index(&self, x: u16, y: u16) -> usize {
         debug_assert!(
-            x < self.0.width && y < self.0.height,
+            x < self.pixels.width && y < self.pixels.height,
             "RgbBuffer index out of bounds: ({x},{y}) in {}x{}",
-            self.0.width,
-            self.0.height
+            self.pixels.width,
+            self.pixels.height
         );
         self.raw_index(x, y)
     }
@@ -535,14 +551,14 @@ impl RgbBuffer {
     /// Read the `Rgb` at `(x, y)`. Debug-asserts the point is in bounds;
     /// unchecked in release (the hot blit path clips first).
     pub fn get(&self, x: u16, y: u16) -> Rgb {
-        self.0.as_slice()[self.checked_index(x, y)]
+        self.pixels.as_slice()[self.checked_index(x, y)]
     }
 
     /// Write `rgb` at `(x, y)`. Debug-asserts the point is in bounds; use
     /// [`put_checked`](Self::put_checked) when `(x, y)` may fall outside.
     pub fn put(&mut self, x: u16, y: u16, rgb: Rgb) {
         let i = self.checked_index(x, y);
-        self.0.as_mut_slice()[i] = rgb;
+        self.write(i, rgb);
     }
 
     /// Bounds-checked write: a no-op when `(x, y)` falls outside the buffer.
@@ -550,10 +566,47 @@ impl RgbBuffer {
     /// pre-clip; the hot blit path clips its loop bounds once and keeps the
     /// unchecked [`put`](Self::put).
     pub fn put_checked(&mut self, x: u16, y: u16, rgb: Rgb) {
-        if x < self.0.width && y < self.0.height {
+        if x < self.pixels.width && y < self.pixels.height {
             let i = self.raw_index(x, y);
-            self.0.as_mut_slice()[i] = rgb;
+            self.write(i, rgb);
         }
+    }
+
+    fn write(&mut self, i: usize, rgb: Rgb) {
+        self.pixels.as_mut_slice()[i] = rgb;
+        if let Some(w) = &mut self.writes {
+            w.at[i] = w.now;
+        }
+    }
+
+    /// Start a write epoch and return it, for [`written_in`](Self::written_in):
+    /// unlike a diff, it sees a pixel written in the colour already there.
+    /// Writes through the derefed [`Grid`] go unnoted.
+    pub fn begin_writes(&mut self) -> u32 {
+        let n = self.pixels.as_slice().len();
+        let w = self.writes.get_or_insert_with(|| Writes {
+            at: vec![0; n],
+            now: 0,
+        });
+        if w.at.len() != n {
+            w.at = vec![0; n];
+        }
+        w.now = w.now.wrapping_add(1);
+        if w.now == 0 {
+            w.at.fill(0);
+            w.now = 1;
+        }
+        w.now
+    }
+
+    /// Whether `(x, y)` was written in `epoch` ([`begin_writes`](Self::begin_writes)).
+    pub fn written_in(&self, x: u16, y: u16, epoch: u32) -> bool {
+        x < self.pixels.width
+            && y < self.pixels.height
+            && self
+                .writes
+                .as_ref()
+                .is_some_and(|w| w.at.get(self.raw_index(x, y)) == Some(&epoch))
     }
 }
 
@@ -589,6 +642,25 @@ mod tests {
                 "{base:?}: {lightness:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_write_is_noted_in_its_epoch_even_in_the_colour_already_there() {
+        let grey = rgb(128, 128, 128);
+        let mut buf = RgbBuffer::filled(4, 2, grey);
+        let first = buf.begin_writes();
+        buf.put(1, 0, grey);
+        buf.put_checked(9, 9, grey);
+        assert!(buf.written_in(1, 0, first));
+        assert!(!buf.written_in(2, 0, first));
+        assert!(!buf.written_in(9, 9, first));
+        let second = buf.begin_writes();
+        assert!(
+            !buf.written_in(1, 0, second),
+            "an epoch sees only its own writes"
+        );
+        buf.put(3, 1, grey);
+        assert!(buf.written_in(3, 1, second));
     }
 
     #[test]
