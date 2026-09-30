@@ -787,10 +787,8 @@ site-e2e:
     #!/usr/bin/env sh
     set -eu
     cd site
-    # deterministic ★ count for the whole suite (config/gh-stars.mjs GH_STARS_OVERRIDE
-    # seam) — an unauthenticated build would otherwise rate-limit to null and hide
-    # the star chip, silently no-op-ing its e2e assertion.
-    export GH_STARS_OVERRIDE=842
+    # pins the ★ count to config/gh-stars.mjs's E2E_STAR_COUNT
+    export GH_STARS_E2E=1
     npm run build
     npx playwright test
 
@@ -1294,7 +1292,7 @@ fixture-pii-selftest:
 # Which recorded fixtures have drifted from the CLI that produced them — version
 # first (the sharp signal), age second. LOCAL and advisory: CI has none of these
 # CLIs to compare against, and a stale fixture is a re-capture candidate, not a
-# defect. Exit 3 = candidates found (the `corpus-all` convention).
+# defect.
 [group('rust')]
 [doc('Report recorded fixtures whose CLI has moved on (advisory, exit 3 = stale)')]
 fixture-age *args:

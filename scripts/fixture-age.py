@@ -14,8 +14,8 @@ Two axes, in order of sharpness:
    CLIs installed, so there is nothing for it to compare against.
 2. **Age** — a recorded fixture older than `--max-age-days`.
 
-Advisory by design, exit 3 for "candidates found" (the `corpus-all` convention:
-a stale fixture is a re-capture candidate, not a defect). The capture-tree RULES
+Advisory by design, exit 3 for "candidates found": a stale fixture is a
+re-capture candidate, not a defect. The capture-tree RULES
 are not advisory and are not here — they are Rust tests in
 `tests/sources/captures.rs`, so they ride `just test` on all three platforms.
 
