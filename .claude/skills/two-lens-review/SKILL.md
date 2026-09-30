@@ -1,6 +1,6 @@
 ---
 name: two-lens-review
-version: 1.3.0
+version: 1.4.0
 description: "Run pixtuoid's review protocol at either scope — the mandatory pre-merge DIFF gate (2+ differentiated-lens agents on the diff) or a whole-codebase AUDIT (subsystem × factor fan-out over the whole tree). Both draw ONE shared factor taxonomy + verify contract + disposition; they differ only in population and orchestration. Use before merging ANY PR, on 'review this PR/branch' / 'is this ready to merge' (diff scope), or on 'whole-codebase review' / pre-release / periodic audit (whole-codebase scope). Encodes the convergence contract (churn budget, two-fix-round cap, HIGH-only blocking), the five hard requirements, the escalation triggers, the adversarial finder→verify fan-out, and the disposition sweep the repo learned the hard way."
 metadata:
   scope: "pixtuoid repo only"
@@ -11,8 +11,8 @@ metadata:
 ONE protocol, two SCOPES over the SAME factors:
 
 - **Diff scope** — the repo's **mandatory** merge gate (workspace `AGENTS.md`,
-  "Things NOT to do"). 2+ differentiated-lens agents on the diff, disposition in
-  the PR thread.
+  "Things NOT to do"). 2+ differentiated-lens agents on the diff, each finding
+  a PR review thread its disposition resolves.
 - **Whole-codebase scope** — the periodic / pre-release AUDIT. A diff review and
   an audit scan DIFFERENT populations (fix-introduced-in-one-change vs existing
   code + cross-PR accumulation), so the audit is a SEPARATE pass, not a bigger
@@ -127,8 +127,8 @@ Hence:
    with no comment — or on a spent quota, which the workflow states itself in
    an `<!-- absent-<marker>:<sha> -->` comment; do NOT read that as a review),
    the gate is unsatisfiable as written: split the PR smaller,
-   else fall back to one extra differentiated lens + owner merge, recorded in the
-   PR thread. State the condition behaviorally (errored/absent), never a fixed
+   else fall back to one extra differentiated lens + owner merge, recorded in a
+   PR comment. State the condition behaviorally (errored/absent), never a fixed
    LOC ceiling.
 
 ## Whole-codebase scope — how to run (orchestration)
@@ -145,8 +145,25 @@ becomes a FOLLOW-UP PR.
 
 Drive every reviewer/finder/bot finding to **exactly one of the four terminal
 states** defined in `briefs.md`'s "Orchestrator notes (diff scope)" —
-recorded in the PR thread (diff scope) or the ranked report (whole-codebase
-scope).
+recorded in the ranked report (whole-codebase scope), or (diff scope) in the
+finding's review thread, which main's required conversation resolution holds
+open until resolved. The bots open their own threads; open each local-lens
+finding the same way, then reply with its disposition and resolve:
+
+```sh
+pr=<N>; head=$(gh pr view $pr --json headRefOid -q .headRefOid)
+# Off the diff's lines: `-f subject_type=file` instead of line + side; a path
+# outside the diff (or removed by it) goes on the first surviving changed file,
+# its location in the body.
+gh api repos/{owner}/{repo}/pulls/$pr/comments -f commit_id=$head \
+  -f path=<path> -F line=<n> -f side=RIGHT -F body=@<finding file>
+threads='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){reviewThreads(first:100){totalCount nodes{id isResolved isOutdated path line comments(first:50){nodes{body}}}}}}}'
+gh api graphql -F owner='{owner}' -F name='{repo}' -F n=$pr -f query="$threads"
+gh api graphql -f t=<thread id> -F b=@<disposition file> \
+  -f query='mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{id}}}'
+gh api graphql -f t=<thread id> \
+  -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}'
+```
 
 ## Red flags (you're about to skip the gate / short the audit)
 
