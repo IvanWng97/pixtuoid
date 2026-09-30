@@ -580,6 +580,7 @@ fn paint_pieces(
             }
         }
     }
+    buf.end_writes();
     emission
 }
 
