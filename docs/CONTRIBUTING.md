@@ -74,7 +74,10 @@ run. The jobs:
   read-only model job on the trusted default branch, the PR diff as inert
   data, a separate least-privilege publisher — and a third job that comments
   when the model job fails or declines, because absence otherwise renders as
-  a pass (#809). `claude.yml` refuses fork PR heads.
+  a pass (#809). They start when `ci` passes on a PR, as a `workflow_run`
+  that is not one of the PR's checks, so their verdict is the comment;
+  `/claude-review` and `/security-review` re-run them. `claude.yml` refuses
+  fork PR heads.
 - **CodeQL** stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).
@@ -216,7 +219,7 @@ crate IS.
 | before push | nothing — the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
 | while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
 | once you need a PR number | open it as a draft: the light tier runs, and `ci-gate` stays red by design |
-| once the draft's light tier is green | mark it ready: the full tier and the billed review bots start together, so a failure only the full tier catches costs one extra review round until the bots are chained after CI |
+| once the draft's light tier is green | mark it ready: the full tier runs, and the billed review bots start once it is green |
 | before merge | the two-lens review |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 

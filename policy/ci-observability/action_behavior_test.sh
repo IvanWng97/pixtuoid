@@ -25,29 +25,47 @@ export RUNNER_TEMP="$test_dir"
 fake_bin="$test_dir/bin"
 mkdir -p "$fake_bin"
 
+# The resolver lists a commit's PRs on workflow_run, then reads one PR.
 # shellcheck disable=SC2016 # The generated gh stub reads the fixture when it runs.
 printf '%s\n' \
     '#!/usr/bin/env bash' \
     'set -euo pipefail' \
     '[[ "$1" == api ]]' \
-    'printf "%s\n" "$FAKE_PR_JSON"' \
+    'case "$2" in' \
+    '*/commits/*/pulls) printf "%s\n" "$FAKE_PULLS_JSON" ;;' \
+    '*/pulls/42) printf "%s\n" "$FAKE_PR_JSON" ;;' \
+    '*) exit 1 ;;' \
+    'esac' \
     >"$fake_bin/gh"
 chmod +x "$fake_bin/gh"
 
+# An empty head_sha is the `/claude-review` path, which names the PR; a set one
+# is workflow_run's, whose payload list is never read. `false` is a refusal the
+# PR is told about, `skip` a silent one.
 assert_reviewability() {
     local script="$1"
     local fixture="$2"
     local expected="$3"
     local label="$4"
+    local head_sha="${5:-}"
+    local head_repo="${6:-}"
+    local pulls="${7:-[]}"
     local output_file="$test_dir/pr-resolution-output"
+    local pr_number=42
+    if [[ -n "$head_sha" ]]; then
+        pr_number=0
+    fi
     : >"$output_file"
 
     PATH="$fake_bin:$PATH" \
         DEFAULT_BRANCH="main" \
         FAKE_PR_JSON="$fixture" \
+        FAKE_PULLS_JSON="$pulls" \
         GH_TOKEN="test-token" \
         GITHUB_OUTPUT="$output_file" \
-        PR_NUMBER="42" \
+        HEAD_REPO="$head_repo" \
+        HEAD_SHA="$head_sha" \
+        PR_NUMBER="$pr_number" \
         REPOSITORY="owner/repo" \
         bash -c "$script" ||
         fail "$label resolver exited non-zero"
@@ -59,21 +77,47 @@ assert_reviewability() {
             fail "$label resolver rejected an open internal default-branch PR"
         [[ "$output" == *"number=42"* && "$output" == *"head_sha=abc123"* ]] ||
             fail "$label resolver omitted the immutable PR identity"
-    elif [[ "$output" != "reviewable=false" ]]; then
-        fail "$label resolver accepted a PR outside its trust boundary"
+    elif [[ "$output" != *"reviewable=$expected" || "$output" == *"reviewable=true"* ]]; then
+        fail "$label resolver did not refuse with reviewable=$expected: $output"
     fi
 }
 
-valid_pr='{"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"open"}'
-fork_pr='{"head":{"repo":{"full_name":"fork/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"open"}'
-wrong_base_pr='{"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"release"},"state":"open"}'
-closed_pr='{"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"closed"}'
+valid_pr='{"number":42,"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"open"}'
+fork_pr='{"number":42,"head":{"repo":{"full_name":"fork/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"open"}'
+wrong_base_pr='{"number":42,"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"release"},"state":"open"}'
+closed_pr='{"number":42,"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"closed"}'
+moved_pr='{"number":42,"head":{"repo":{"full_name":"owner/repo"},"sha":"def456"},"base":{"ref":"main"},"state":"open"}'
 resolver_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Resolve pull request")"
 label="$(basename "$CLAUDE_REVIEW_WORKFLOW_FILE")"
 assert_reviewability "$resolver_script" "$valid_pr" true "$label"
 assert_reviewability "$resolver_script" "$fork_pr" false "$label fork"
 assert_reviewability "$resolver_script" "$wrong_base_pr" false "$label base"
 assert_reviewability "$resolver_script" "$closed_pr" false "$label state"
+
+stacked_pr='{"number":43,"head":{"repo":{"full_name":"owner/repo"},"sha":"def456"},"base":{"ref":"feature"},"state":"open"}'
+assert_reviewability "$resolver_script" "$valid_pr" true "$label workflow_run, no PR number in the payload" \
+    abc123 owner/repo "[$closed_pr,$stacked_pr,$valid_pr]"
+assert_reviewability "$resolver_script" "$fork_pr" skip "$label workflow_run fork" \
+    abc123 fork/repo "[$fork_pr]"
+assert_reviewability "$resolver_script" "$valid_pr" skip "$label workflow_run fork, same commit as a branch" \
+    abc123 fork/repo "[$valid_pr]"
+assert_reviewability "$resolver_script" "$wrong_base_pr" skip "$label workflow_run base" \
+    abc123 owner/repo "[$wrong_base_pr]"
+assert_reviewability "$resolver_script" "$moved_pr" skip "$label workflow_run moved head" \
+    abc123 owner/repo "[$moved_pr]"
+assert_reviewability "$resolver_script" "$moved_pr" skip "$label workflow_run head moved mid-resolve" \
+    abc123 owner/repo "[$valid_pr]"
+assert_reviewability "$resolver_script" "$valid_pr" skip "$label workflow_run no PR" \
+    abc123 owner/repo "[]"
+
+# The callers name `ci` by its `name:`, so a rename would stop every review
+# without turning anything red.
+ci_name="$(yq -r '.name' .github/workflows/ci.yml)"
+for caller in .github/workflows/claude-review.yml .github/workflows/claude-security-review.yml; do
+    yq -o=json '.on.workflow_run.workflows' "$caller" |
+        jq -e --arg name "$ci_name" '. == [$name]' >/dev/null ||
+        fail "$caller does not wait on the workflow named \"$ci_name\""
+done
 
 publisher_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Publish validated Claude review")"
 published_comment="$test_dir/published-comment"

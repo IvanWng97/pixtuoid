@@ -4,9 +4,20 @@ on:
   workflow_call:
     inputs:
       pr_number:
-        description: Pull request number to review
-        required: true
+        description: Pull request number to review; 0 when head_sha names it
+        required: false
+        default: 0
         type: number
+      head_sha:
+        description: Commit CI passed; the one PR still at it is reviewed
+        required: false
+        default: ""
+        type: string
+      head_repo:
+        description: Repository head_sha was pushed to
+        required: false
+        default: ""
+        type: string
       prompt_path:
         description: Trusted default-branch review prompt
         required: true
@@ -54,25 +65,51 @@ jobs:
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GH_TOKEN: ${{ github.token }}
+          HEAD_REPO: ${{ inputs.head_repo }}
+          HEAD_SHA: ${{ inputs.head_sha }}
           PR_NUMBER: ${{ inputs.pr_number }}
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
+          # Only a manual request is told it is out of scope (report_absence).
+          # An automatic run fires on every green PR CI run, stacked PRs
+          # included, so it declines silently; a head that moved on gets its own.
+          refusal=false
+          if [[ -n "$HEAD_SHA" ]]; then
+            refusal=skip
+            # workflow_run's own pull_requests list is empty for a fork head and
+            # need not name the PR that ran, so the PR is found from the commit;
+            # that lookup also returns merged PRs and ones that moved past it.
+            gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/pulls" > "$RUNNER_TEMP/pull-requests.json"
+            PR_NUMBER="$(jq -r --arg sha "$HEAD_SHA" --arg repo "$HEAD_REPO" '
+              [.[] | select(.state == "open" and .head.sha == $sha and .head.repo.full_name == $repo) | .number]
+              | if length == 1 then .[0] else "" end
+            ' "$RUNNER_TEMP/pull-requests.json")"
+            if [[ -z "$PR_NUMBER" ]]; then
+              echo "reviewable=skip" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
           api_path="repos/${REPOSITORY}/pulls/${PR_NUMBER}"
           gh api "$api_path" > "$RUNNER_TEMP/pull-request.json"
-          head_repo="$(jq -r '.head.repo.full_name // ""' "$RUNNER_TEMP/pull-request.json")"
+          pr_head_repo="$(jq -r '.head.repo.full_name // ""' "$RUNNER_TEMP/pull-request.json")"
+          pr_head_sha="$(jq -r '.head.sha' "$RUNNER_TEMP/pull-request.json")"
           base_ref="$(jq -r '.base.ref // ""' "$RUNNER_TEMP/pull-request.json")"
           state="$(jq -r '.state // ""' "$RUNNER_TEMP/pull-request.json")"
 
-          if [[ "$head_repo" != "$REPOSITORY" || "$base_ref" != "$DEFAULT_BRANCH" || "$state" != open ]]; then
-            echo "reviewable=false" >> "$GITHUB_OUTPUT"
+          # A head CI did not pass would be reviewed only for the publisher to
+          # refuse it as stale.
+          if [[ "$pr_head_repo" != "$REPOSITORY" || "$base_ref" != "$DEFAULT_BRANCH" || "$state" != open ||
+                ( -n "$HEAD_SHA" && "$pr_head_sha" != "$HEAD_SHA" ) ]]; then
+            echo "reviewable=$refusal" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           {
             echo "reviewable=true"
-            echo "number=$PR_NUMBER"
-            echo "head_sha=$(jq -r '.head.sha' "$RUNNER_TEMP/pull-request.json")"
+            echo "head_sha=$pr_head_sha"
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout trusted default branch
@@ -169,12 +206,14 @@ jobs:
   # shapes, and the quieter one is greener: analyze FAILS, or it DECLINES
   # (`reviewable=false` exits 0, so that arm has no red job at all).
   # `!cancelled()` is load-bearing: without a status function an implicit
-  # `success()` skips this job in exactly the situation it exists for.
+  # `success()` skips this job in exactly the situation it exists for. A
+  # workflow_run review is not a PR check, so this comment is the only place its
+  # failure shows; one that failed before resolving a PR has nowhere to post.
   report_absence:
     name: Report a missing review
     needs: analyze
     if: >
-      !cancelled() &&
+      !cancelled() && needs.analyze.outputs.number != '' &&
       (needs.analyze.result == 'failure' || needs.analyze.outputs.reviewable == 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -185,7 +224,7 @@ jobs:
         env:
           ANALYZE_RESULT: ${{ needs.analyze.result }}
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_NUMBER: ${{ needs.analyze.outputs.number }}
           REPOSITORY: ${{ github.repository }}
           REVIEW_MARKER: ${{ inputs.review_marker }}
           REVIEW_TITLE: ${{ inputs.review_title }}
