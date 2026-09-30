@@ -5,9 +5,11 @@ built with [Astro](https://astro.build). Deploys to GitHub Pages at
 **https://pixtuoid.dev/** (the old project page
 https://ivanwng97.github.io/pixtuoid/ redirects there).
 
-Self-contained: a Node project living in `site/`, independent of the Rust
-workspace. CI (`.github/workflows/site.yml`) runs the same checks as
-`npm run verify`; deploys run via `.github/workflows/pages.yml`. Agent notes,
+A Node project living in `site/`. The live office's `public/wasm/` is
+gitignored output of `just gen-wasm` (needs Rust); `dev` and `verify` work
+without it on the poster fallback. CI (`.github/workflows/site.yml`) runs
+`npm run verify`'s checks except `audit`, plus e2e and Lighthouse; deploys
+run via `.github/workflows/pages.yml`, which audits first. Agent notes,
 build-input coupling, and CSP details: [`AGENTS.md`](AGENTS.md). Generated
 content and its sources: [`SINGLE-SOURCED.md`](SINGLE-SOURCED.md).
 
@@ -26,11 +28,11 @@ ready; stop it before `just site-e2e` (dev and preview share port 4321).
 
 ```sh
 npm run verify     # format:check → lint → check → knip → test:unit → build → check:docs → audit
-npm run e2e        # Playwright smoke suite vs the PRODUCTION build
 npm run lighthouse # three-run a11y / SEO / performance budgets (in-repo runner)
 ```
 
-From the repo root: `just site-check`, `just site-fmt`, `just site-e2e`.
+From the repo root: `just site-check`, `just site-fmt`, and `just site-e2e` for
+the Playwright smoke suite (not bare `npm run e2e`: it builds the wasm first).
 `audit` runs LAST in `verify` on purpose (it resolves advisories live —
 someone else's publish would short-circuit every check below it); `pages.yml`
 keeps it FIRST — that one ships. npm 12 is required (`packageManager` +

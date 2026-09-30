@@ -45,7 +45,7 @@ serde              = { workspace = true }
 # READ→MERGE→WRITE round-trip and serde_json's default BTreeMap-backed `Map`
 # re-emits every object ALPHABETICALLY, silently reordering the user's own
 # hand-authored file on a `connect`. Scoped to this crate so `pixtuoid-web` need
-# not pay indexmap's code size in the committed wasm artifact.
+# not pay indexmap's code size in the site's wasm.
 serde_json         = { workspace = true, features = ["preserve_order"] }
 toml               = { workspace = true }
 toml_edit          = { workspace = true }
