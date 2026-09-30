@@ -1,5 +1,4 @@
 use super::*;
-use crate::atmosphere::Look;
 use crate::layout::{window_bays, window_run};
 use crate::lighting::SPILL_DEPTH;
 use crate::sky::{ForcedWeather, hour_is_day, set_weather_override};
@@ -945,13 +944,15 @@ fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
         (!xs.is_empty()).then(|| xs.iter().sum::<f32>() / xs.len() as f32)
     };
     for hour in [6, 19] {
-        let sky = Sky::at_with(crate::localclock::at_hour(hour), Weather::Clear);
-        let look = Look::resolve(&sky, theme);
-        let disc = crate::celestial::Disc::of(&sky, BUF_W, TOP_WALL_H).expect("a clear low sun");
+        let at = crate::localclock::at_hour(hour);
+        let moment =
+            crate::atmosphere::Moment::resolve(Sky::at_with(at, Weather::Clear), theme, 0.0, at);
+        let (sky, look) = (&moment.sky, &moment.look);
+        let disc = crate::celestial::Disc::of(sky, BUF_W, TOP_WALL_H).expect("a clear low sun");
         let disc_side = (disc.cx - mid).signum();
 
         let mut buf = RgbBuffer::filled(BUF_W, BUF_H, FILL);
-        crate::pixel_painter::ambient::paint_sun_spot(&mut buf, theme, &layout, &sky, &look);
+        crate::pixel_painter::ambient::paint_sun_spot(&mut buf, theme, &layout, &moment);
         let spot_x = lit_x(&buf, 0..BUF_H).expect("a low sun paints a wall spot");
         assert_eq!(
             (spot_x - mid).signum(),

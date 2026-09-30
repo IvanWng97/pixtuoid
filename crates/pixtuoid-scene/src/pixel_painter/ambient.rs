@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::RgbBuffer;
 
-use crate::atmosphere::{Look, WallSide};
+use crate::atmosphere::{Moment, WallSide};
 use crate::layout::Layout;
 use crate::lighting::{Emitter, EmitterKind};
 use crate::pixel_painter::PaintCtx;
@@ -14,7 +14,6 @@ use crate::pixel_painter::background::{
     RadialFalloff, paint_light, paint_radial_falloff, window_spill_columns,
 };
 use crate::pixel_painter::palette::{WHITE, blend_pixel, blend_rgb};
-use crate::sky::Sky;
 use crate::theme::Theme;
 
 pub(super) struct SunbeamColumn {
@@ -79,17 +78,9 @@ pub(super) fn dust_mote_positions(
     out
 }
 
-pub(super) fn paint_ambient(ctx: &mut PaintCtx<'_>, look: &Look, monitor_halos: &[Emitter]) {
-    paint_sun_spot(ctx.buf, ctx.theme, ctx.layout, &ctx.sky, look);
-    paint_dust_motes(
-        ctx.buf,
-        ctx.theme,
-        ctx.layout,
-        ctx.floor.floor_seed,
-        ctx.now,
-        &ctx.sky,
-        look,
-    );
+pub(super) fn paint_ambient(ctx: &mut PaintCtx<'_>, moment: &Moment, monitor_halos: &[Emitter]) {
+    paint_sun_spot(ctx.buf, ctx.theme, ctx.layout, moment);
+    paint_dust_motes(ctx.buf, ctx.theme, ctx.layout, ctx.floor.floor_seed, moment);
     paint_ceiling_halos(ctx.buf, ctx.theme, monitor_halos);
 }
 
@@ -114,10 +105,9 @@ pub(super) fn paint_dust_motes(
     theme: &Theme,
     layout: &Layout,
     floor_seed: u64,
-    now: SystemTime,
-    sky: &Sky,
-    look: &Look,
+    moment: &Moment,
 ) {
+    let (sky, look) = (&moment.sky, &moment.look);
     if look.sun_spot.is_none() {
         return;
     }
@@ -134,20 +124,15 @@ pub(super) fn paint_dust_motes(
     }
     let warm = theme.lighting.sun_spill;
     for col in window_spill_columns(layout) {
-        for DustMote { x, y, alpha } in dust_mote_positions(floor_seed, now, &col) {
+        for DustMote { x, y, alpha } in dust_mote_positions(floor_seed, moment.now, &col) {
             let strength = alpha * 0.7 * visibility;
             blend_pixel(buf, x, y, warm, strength);
         }
     }
 }
 
-pub(super) fn paint_sun_spot(
-    buf: &mut RgbBuffer,
-    theme: &Theme,
-    layout: &Layout,
-    sky: &Sky,
-    look: &Look,
-) {
+pub(super) fn paint_sun_spot(buf: &mut RgbBuffer, theme: &Theme, layout: &Layout, moment: &Moment) {
+    let (sky, look) = (&moment.sky, &moment.look);
     let Some(spot) = look.sun_spot else {
         return;
     };
@@ -231,8 +216,7 @@ pub(super) fn paint_sun_spot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::atmosphere::Look;
-    use crate::sky::Weather;
+    use crate::sky::{Sky, Weather};
     use pixtuoid_core::sprite::Rgb;
     use std::time::Duration;
 
@@ -357,8 +341,12 @@ mod tests {
                     b: 24,
                 },
             );
-            let sky = Sky::at(now);
-            paint_sun_spot(&mut buf, theme, &layout, &sky, &Look::resolve(&sky, theme));
+            paint_sun_spot(
+                &mut buf,
+                theme,
+                &layout,
+                &Moment::resolve(Sky::at(now), theme, 0.0, now),
+            );
             let mut sum = 0u64;
             for y in 0..buf.height() {
                 for x in 0..buf.width() {
@@ -392,9 +380,11 @@ mod tests {
         let theme = &crate::theme::NORMAL;
         let layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
         let sunrise = crate::localclock::at_hour(5);
-        let sky = Sky::at(sunrise);
-        let look = Look::resolve(&sky, theme);
-        let spot = look.sun_spot.expect("sun is up (just risen) at 05:00");
+        let moment = Moment::resolve(Sky::at(sunrise), theme, 0.0, sunrise);
+        let spot = moment
+            .look
+            .sun_spot
+            .expect("sun is up (just risen) at 05:00");
         assert_eq!(spot.intensity, 0.0, "altitude is exactly zero at sunrise");
 
         let fill = Rgb {
@@ -403,7 +393,7 @@ mod tests {
             b: 24,
         };
         let mut buf = RgbBuffer::filled(192, 80, fill);
-        paint_sun_spot(&mut buf, theme, &layout, &sky, &look);
+        paint_sun_spot(&mut buf, theme, &layout, &moment);
         for y in 0..buf.height() {
             for x in 0..buf.width() {
                 assert_eq!(
@@ -436,15 +426,12 @@ mod tests {
         // buffer far smaller than the layout's spill columns don't panic.
         let fill = Rgb { r: 0, g: 0, b: 0 };
         let mut buf = RgbBuffer::filled(1, 1, fill);
-        let sky = Sky::at(now);
         paint_dust_motes(
             &mut buf,
             theme,
             &layout,
             7,
-            now,
-            &sky,
-            &Look::resolve(&sky, theme),
+            &Moment::resolve(Sky::at(now), theme, 0.0, now),
         );
     }
 
@@ -466,8 +453,8 @@ mod tests {
             b: 24,
         };
         let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, fill);
-        let sky = Sky::at(clear_morning);
-        paint_sun_spot(&mut buf, theme, &layout, &sky, &Look::resolve(&sky, theme));
+        let moment = Moment::resolve(Sky::at(clear_morning), theme, 0.0, clear_morning);
+        paint_sun_spot(&mut buf, theme, &layout, &moment);
         for y in 0..buf.height() {
             for x in 0..buf.width() {
                 assert_eq!(buf.get(x, y), fill, "zero wall band → no sun spot");

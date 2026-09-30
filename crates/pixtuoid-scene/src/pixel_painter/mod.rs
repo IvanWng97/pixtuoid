@@ -546,7 +546,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         paint_shadow(ctx.buf, ell, shadow_strength, ctx.theme);
     });
 
-    ambient::paint_ambient(ctx, look, &lights.monitor_halos);
+    ambient::paint_ambient(ctx, &moment, &lights.monitor_halos);
 
     // Every entity gets an `anchor_y` — its floor-touching row — so sorting
     // ascending and painting in order puts things closer to the camera in
@@ -558,7 +558,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     drawable::sort_drawables(&mut drawables);
     // A per-pixel diff finds EXACTLY what the foreground wrote; a rectangular
     // band seamed the window glass and washed floor-between-pieces twice.
-    // AFTER `paint_shadow`/`paint_ambient`: both already take `look`, so folding
+    // AFTER `paint_shadow`/`paint_ambient`: both already take the hour, so folding
     // them in here would apply the hour twice.
     let pre_foreground = ctx.buf.clone();
     for d in &drawables {
