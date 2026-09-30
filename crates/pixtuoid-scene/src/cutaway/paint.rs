@@ -469,7 +469,15 @@ pub(crate) fn paint_list(
         w: pen.art(list.scale.logical(buf.width()).saturating_add(1)),
         h: pen.art(list.scale.logical(buf.height()).saturating_add(1)),
     };
-    crate::cutaway::light::net_pass(whole, &lights, list.ambient, &emission, pen, buf);
+    crate::cutaway::light::net_pass(
+        whole,
+        &lights,
+        list.ambient,
+        &emission,
+        pen,
+        &mut cache.net_colours,
+        buf,
+    );
 }
 
 /// Paint every piece but the lights, back to front as by day, and return the
@@ -483,30 +491,28 @@ fn paint_pieces(
     let mut emission = Emission::new(buf.width(), buf.height());
     let mut marks = RgbBuffer::filled(buf.width(), buf.height(), NO_MARK);
     for piece in &list.pieces {
-        // What the piece painted: its span's pixels that changed.
         let (x0, y0) = (
             list.scale.to_buffer(piece.span.x0),
             list.scale.to_buffer(piece.span.y0),
         );
         let x1 = list.scale.to_buffer(piece.span.x1 + 1).min(buf.width());
         let y1 = list.scale.to_buffer(piece.span.y1 + 1).min(buf.height());
-        let before: Vec<pixtuoid_core::sprite::Rgb> = (y0..y1)
-            .flat_map(|y| (x0..x1).map(move |x| (x, y)))
-            .map(|(x, y)| buf.get(x, y))
-            .collect();
+        let epoch = buf.begin_writes();
         paint_piece(&piece.kind, list.pack, list.theme, list.scale, cache, buf);
+        let drawn = (list.pack, list.scale);
+        let art_cache = &mut cache.cutaway_art;
         let glowing = match piece.kind {
             PieceKind::Desk { at, art, screen } => {
-                mark_glow(at, art, screen, list.pack, list.scale, &mut marks)
+                mark_glow(at, art, screen, drawn, art_cache, &mut marks)
             }
             PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => {
-                mark_bulbs(Placed::Centred(at), art, list.pack, list.scale, &mut marks)
+                mark_bulbs(Placed::Centred(at), art, drawn, art_cache, &mut marks)
             }
             PieceKind::Hung { at, sprite } => mark_bulbs(
                 Placed::TopLeft(at),
                 Art::still(sprite),
-                list.pack,
-                list.scale,
+                drawn,
+                art_cache,
                 &mut marks,
             ),
             PieceKind::Door { at, frame } => mark_bulbs(
@@ -516,8 +522,8 @@ fn paint_pieces(
                     frame,
                     flip: Flip::None,
                 },
-                list.pack,
-                list.scale,
+                drawn,
+                art_cache,
                 &mut marks,
             ),
             PieceKind::Glass { .. }
@@ -529,10 +535,9 @@ fn paint_pieces(
             | PieceKind::Neon { .. }
             | PieceKind::Clock { .. } => false,
         };
-        let mut old = before.iter();
         for y in y0..y1 {
             for x in x0..x1 {
-                if old.next() == Some(&buf.get(x, y)) {
+                if !buf.written_in(x, y, epoch) {
                     continue;
                 }
                 let marked = || match marks.get(x, y) {
@@ -589,10 +594,10 @@ const SHADED_MARK: pixtuoid_core::sprite::Rgb = pixtuoid_core::sprite::Rgb { r: 
 /// it is the art's own at any density. Returns whether it marked anything.
 fn mark_glow(
     at: crate::layout::Point,
-    art_name: &str,
+    art_name: &'static str,
     screen: Screen,
-    pack: &Pack,
-    scale: RenderScale,
+    (pack, scale): (&Pack, RenderScale),
+    art: &mut ArtCache,
     marks: &mut RgbBuffer,
 ) -> bool {
     use crate::pixel_painter::{DESK_BULB_KEY, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
@@ -602,10 +607,10 @@ fn mark_glow(
     ) else {
         return false;
     };
-    let (screen_cells, bulb) = (
-        drawn_in(&desk, &[SCREEN_GLASS_KEY, SCREEN_TEXT_KEY]),
-        drawn_in(&desk, &[DESK_BULB_KEY]),
-    );
+    let screen_cells = art
+        .cells(art_name, 0, &desk, &[SCREEN_GLASS_KEY, SCREEN_TEXT_KEY])
+        .to_vec();
+    let bulb = art.cells(art_name, 0, &desk, &[DESK_BULB_KEY]);
     let screen_mark = match screen {
         Screen::Off => SHADED_MARK,
         Screen::Standby(_) | Screen::Lit(_) => EMISSIVE_MARK,
@@ -644,15 +649,20 @@ enum Placed {
 fn mark_bulbs(
     placed: Placed,
     art: Art,
-    pack: &Pack,
-    scale: RenderScale,
+    (pack, scale): (&Pack, RenderScale),
+    cache: &mut ArtCache,
     marks: &mut RgbBuffer,
 ) -> bool {
     let Some(dense) = crate::pixel_painter::densest_frame(pack, art.sprite, art.frame, scale)
     else {
         return false;
     };
-    let bulbs = drawn_in(&dense, &[crate::pixel_painter::DESK_BULB_KEY]);
+    let bulbs = cache.cells(
+        art.sprite,
+        art.frame,
+        &dense,
+        &[crate::pixel_painter::DESK_BULB_KEY],
+    );
     if !bulbs.iter().any(|&b| b) {
         return false;
     }
@@ -672,6 +682,48 @@ impl Placed {
         match self {
             Self::Centred(at) => centred_top_left(at, logical, scale),
             Self::TopLeft(at) => (scale.to_buffer(at.x), scale.to_buffer(at.y)),
+        }
+    }
+}
+
+/// Art found by recolouring, kept across frames; keyed by sprite name, so one
+/// cache serves one pack.
+#[derive(Default)]
+pub(crate) struct ArtCache {
+    cells: std::collections::HashMap<(&'static str, usize, u16, &'static [char]), Vec<bool>>,
+    screens: std::collections::HashMap<(&'static str, u16, Screen), pixtuoid_core::sprite::Frame>,
+}
+
+impl ArtCache {
+    fn cells(
+        &mut self,
+        sprite: &'static str,
+        frame: usize,
+        dense: &crate::pixel_painter::DenseFrame<'_>,
+        keys: &'static [char],
+    ) -> &[bool] {
+        self.cells
+            .entry((sprite, frame, dense.density.get(), keys))
+            .or_insert_with(|| drawn_in(dense, keys))
+    }
+
+    fn desk(
+        &mut self,
+        art: &'static str,
+        desk: &crate::pixel_painter::DenseFrame<'_>,
+        screen: Screen,
+    ) -> Option<&pixtuoid_core::sprite::Frame> {
+        match screen {
+            Screen::Off => None,
+            Screen::Standby(_) | Screen::Lit(_) => Some(
+                self.screens
+                    .entry((art, desk.density.get(), screen))
+                    .or_insert_with(|| {
+                        screen
+                            .on(desk.recolorable)
+                            .unwrap_or_else(|| desk.frame.clone())
+                    }),
+            ),
         }
     }
 }
@@ -1309,7 +1361,9 @@ fn paint_piece(
     buf: &mut RgbBuffer,
 ) {
     match *kind {
-        PieceKind::Desk { at, art, screen } => paint_desk(at, art, screen, pack, scale, buf),
+        PieceKind::Desk { at, art, screen } => {
+            paint_desk(at, art, screen, (pack, scale), &mut cache.cutaway_art, buf);
+        }
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
         PieceKind::Character {
             ref figure, chair, ..
@@ -2199,10 +2253,10 @@ fn paint_rug(rug: crate::layout::Bounds, theme: &Theme, pen: Pen, buf: &mut RgbB
 
 fn paint_desk(
     at: crate::layout::Point,
-    art_name: &str,
+    art_name: &'static str,
     screen: Screen,
-    pack: &Pack,
-    scale: RenderScale,
+    (pack, scale): (&Pack, RenderScale),
+    art: &mut ArtCache,
     buf: &mut RgbBuffer,
 ) {
     let (Some(span), Some(desk)) = (
@@ -2212,9 +2266,8 @@ fn paint_desk(
         return;
     };
     let (x, top_y) = (scale.to_buffer(span.x0), scale.to_buffer(span.y0));
-    let relit = screen.on(desk.recolorable);
     blit_frame_scaled(
-        relit.as_ref().unwrap_or(desk.frame),
+        art.desk(art_name, &desk, screen).unwrap_or(desk.frame),
         x,
         top_y,
         desk.blit_at,
@@ -4552,6 +4605,7 @@ S B B B B B B S
             list.ambient,
             &crate::cutaway::light::Emission::new(w, h),
             pen,
+            &mut crate::cutaway::light::NetMemo::default(),
             &mut buf,
         );
         buf
@@ -4929,6 +4983,46 @@ S B B B B B B S
             over > 0,
             "no sitter covers a screen, so nothing was compared"
         );
+    }
+
+    #[test]
+    fn a_piece_takes_the_pixels_it_paints_in_the_colour_already_there() {
+        use crate::cutaway::light::Glow;
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, desk) = sit_down(crate::layout::Facing::North, 2);
+        let frame = frames.last().expect("a seated frame");
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale,
+        };
+        let mut list = list_at(frame, office, 12);
+        let (painted, _) = by_day(&list, &layout);
+        let pen = Pen::for_pack(scale, &pack);
+        let (w, h) = (pen.art(4).0, pen.art(2).0);
+        let (x, y) = (pen.art(desk.x).0, pen.art(desk.y).0);
+        let (bx, by) = (pen.buffer(ArtPx(x)), pen.buffer(ArtPx(y)));
+        let px = (0..h)
+            .flat_map(|dy| (0..w).map(move |dx| (dx, dy)))
+            .map(|(dx, dy)| Some(painted.get(pen.buffer(ArtPx(x + dx)), pen.buffer(ArtPx(y + dy)))))
+            .collect();
+        list.pieces.push(Piece {
+            span: Span::new(desk.x, desk.y, 4, 2, 0),
+            kind: PieceKind::Glass {
+                view: WindowView { x, y, w, px },
+            },
+            shadow: None,
+            fingerprint: 0,
+        });
+        let (repainted, glow) = by_day(&list, &layout);
+        assert_eq!(
+            repainted.get(bx, by),
+            painted.get(bx, by),
+            "the pane repaints the desk's colour"
+        );
+        assert_eq!(glow.get(bx, by), Glow::Pane);
     }
 
     /// The hour reaches the room: over the whole frame, the night room is
@@ -6273,7 +6367,14 @@ S B B B B B B S
                 scale.to_buffer(span.y0 + bh + desk_front_h() + 1),
                 floor,
             );
-            paint_desk(at, "desk", Screen::Off, &pack, scale, &mut buf);
+            paint_desk(
+                at,
+                "desk",
+                Screen::Off,
+                (&pack, scale),
+                &mut ArtCache::default(),
+                &mut buf,
+            );
             let (x, below) = (
                 scale.to_buffer(at.x + bw / 2),
                 scale.to_buffer(span.y0 + bh),
