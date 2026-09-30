@@ -73,7 +73,7 @@ run. The jobs:
 - **The two automatic Claude reviewers** ride `claude-readonly-review.yml`: a
   read-only model job on the trusted default branch, the PR diff as inert
   data, a separate least-privilege publisher that opens a review thread per
-  finding (main requires every thread resolved) — and a third job that comments
+  finding — and a third job that comments
   when the model job fails or declines, because absence otherwise renders as
   a pass (#809). `claude.yml` refuses fork PR heads.
 - **CodeQL** stays the advanced workflow (`codeql.yml`): explicit languages,

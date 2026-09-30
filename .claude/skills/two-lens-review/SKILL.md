@@ -127,8 +127,8 @@ Hence:
    with no comment — or on a spent quota, which the workflow states itself in
    an `<!-- absent-<marker>:<sha> -->` comment; do NOT read that as a review),
    the gate is unsatisfiable as written: split the PR smaller,
-   else fall back to one extra differentiated lens + owner merge, recorded in the
-   PR thread. State the condition behaviorally (errored/absent), never a fixed
+   else fall back to one extra differentiated lens + owner merge, recorded in a
+   PR comment. State the condition behaviorally (errored/absent), never a fixed
    LOC ceiling.
 
 ## Whole-codebase scope — how to run (orchestration)
@@ -153,25 +153,16 @@ finding the same way, then reply with its disposition and resolve:
 ```sh
 pr=<N>; head=$(gh pr view $pr --json headRefOid -q .headRefOid)
 # Off the diff's lines: `-f subject_type=file` instead of line + side; a path
-# outside the diff goes on the first changed file, its location in the body.
+# outside the diff (or removed by it) goes on the first surviving changed file,
+# its location in the body.
 gh api repos/{owner}/{repo}/pulls/$pr/comments -f commit_id=$head \
-  -f path=<path> -F line=<n> -f side=RIGHT -f body='<finding>'
-threads='query($n:Int!){repository(owner:"IvanWng97",name:"pixtuoid"){pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved comments(first:50){nodes{body}}}}}}}'
-gh api graphql -F n=$pr -f query="$threads"   # thread ids + every reply
-gh api graphql -f t=<thread id> -f b='FOLLOW-UP → #<M>: …' \
+  -f path=<path> -F line=<n> -f side=RIGHT -F body=@<finding file>
+threads='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){reviewThreads(first:100){totalCount nodes{id isResolved isOutdated path line comments(first:50){nodes{body}}}}}}}'
+gh api graphql -F owner='{owner}' -F name='{repo}' -F n=$pr -f query="$threads"
+gh api graphql -f t=<thread id> -F b=@<disposition file> \
   -f query='mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{id}}}'
 gh api graphql -f t=<thread id> \
   -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}'
-```
-
-Before merge, every `#N` a FOLLOW-UP / RE-SCOPED reply cites must print
-`OPEN` or `MERGED`:
-
-```sh
-gh api graphql -F n=$pr -f query="$threads" \
-  --jq '.data.repository.pullRequest.reviewThreads.nodes[].comments.nodes[].body' |
-  grep -oE '^(\*\*)?(FOLLOW-UP|RE-SCOPED)(\*\*)? *(→|->) *#[0-9]+' | grep -oE '[0-9]+$' |
-  sort -u | xargs -I{} gh pr view {} --json number,state -q '"#\(.number) \(.state)"'
 ```
 
 ## Red flags (you're about to skip the gate / short the audit)

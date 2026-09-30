@@ -96,7 +96,12 @@ api)
     case "$path" in
     repos/owner/repo/pulls/42) jq -n -r --arg sha "$FAKE_PR_HEAD" "{head: {sha: \$sha}} | $jq_expr" ;;
     repos/owner/repo/pulls/42/files) jq -r "$jq_expr" <<<"$FAKE_PR_FILES" ;;
-    repos/owner/repo/pulls/42/comments) jq -c . >>"$POSTED_THREADS" ;;
+    repos/owner/repo/pulls/42/comments)
+        posts=$(($(cat "$POSTED_THREADS.count" 2>/dev/null || echo 0) + 1))
+        echo "$posts" >"$POSTED_THREADS.count"
+        [[ "$posts" != "${FAKE_FAIL_POST:-}" ]] || exit 1
+        jq -c . >>"$POSTED_THREADS"
+        ;;
     *) exit 1 ;;
     esac
     ;;
@@ -117,9 +122,10 @@ STUB
 chmod +x "$fake_bin/gh"
 
 pr_files='[
-  {"filename": "src/a.rs", "patch": "@@ -1,2 +1,3 @@\n a\n+b\n c\n@@ -10,0 +20,2 @@\n+x\n+y"},
-  {"filename": "src/b.rs", "patch": "@@ -5 +5 @@\n-q\n+r"},
-  {"filename": "img.png"}
+  {"filename": "gone.rs", "status": "removed", "patch": "@@ -1,2 +0,0 @@\n-a\n-b"},
+  {"filename": "src/a.rs", "status": "modified", "patch": "@@ -1,2 +1,3 @@\n a\n+b\n c\n@@ -10,0 +20,2 @@\n+x\n+y"},
+  {"filename": "src/b.rs", "status": "modified", "patch": "@@ -5 +5 @@\n-q\n+r"},
+  {"filename": "img.png", "status": "added"}
 ]'
 
 # The head pair is parameterized for the one stale-review case; everything
@@ -128,10 +134,11 @@ run_publisher() {
     local review_json="$1"
     local fake_head="${2:-abc123}"
     local expected_head="${3:-abc123}"
-    rm -f "$posted_threads"
+    rm -f "$posted_threads" "$posted_threads.count" "$published_comment"
     PATH="$fake_bin:$PATH" \
         FAKE_PR_HEAD="$fake_head" \
         FAKE_PR_FILES="$pr_files" \
+        FAKE_FAIL_POST="${FAKE_FAIL_POST:-}" \
         POSTED_THREADS="$posted_threads" \
         PUBLISHED_COMMENT="$published_comment" \
         EXPECTED_HEAD_SHA="$expected_head" \
@@ -156,7 +163,6 @@ published_content="$(<"$published_comment")"
 [[ ! -e "$posted_threads" ]] ||
     fail "Claude publisher posted a review thread for zero findings"
 
-# $1 is a jq predicate over the array of posted threads; $2 names what it checks.
 assert_threads() {
     jq -e -s "$1" "$posted_threads" >/dev/null ||
         fail "Claude publisher's review threads: $2: $(<"$posted_threads")"
@@ -176,18 +182,28 @@ assert_threads '[.[:3][] | [.path, .line, .side]] == [["src/a.rs", 2, "RIGHT"], 
     "a finding on a diff line is an inline comment on that line"
 assert_threads '[.[3:][] | [.path, .subject_type, has("line")]] == [["src/a.rs", "file", false], ["img.png", "file", false]]' \
     "a finding off the diff's lines is file-level on its own file"
-assert_threads '.[3].body | contains("src/a.rs:10")' \
-    "a file-level comment names the finding's line"
+assert_threads '[.[].body | split(" — ")[0][1:-1]] == ["src/a.rs:2", "src/a.rs:21", "src/b.rs:5", "src/a.rs:10", "img.png:1"]' \
+    "every thread opens with the finding's own location"
+
+FAKE_FAIL_POST=2 run_publisher "$in_diff_review" >/dev/null 2>&1 &&
+    fail "Claude publisher exited zero with a thread not opened"
+assert_threads 'length == 4 and ([.[].body] | any(contains("src/a.rs:21")) | not)' \
+    "one failed thread stops none of the others"
+[[ "$(<"$published_comment")" == *"not opened:** src/a.rs:21"* ]] ||
+    fail "Claude publisher's summary does not name the thread it failed to open"
 
 hostile_body="it's \"quoted\" \$(touch $test_dir/pwned) \`touch $test_dir/pwned\` \\n end"
 hostile_review="$(jq -cn --arg b "$hostile_body" \
-    '{summary: "s", findings: [{severity: "HIGH", path: "docs/other.md", line: 9, body: $b}]}')"
+    '{summary: "s", findings: [{severity: "HIGH", path: "docs/other.md", line: 9, body: $b},
+        {severity: "MEDIUM", path: "gone.rs", line: 1, body: "removed file"}]}')"
 run_publisher "$hostile_review" ||
     fail "Claude publisher rejected a finding outside the diff"
 [[ ! -e "$test_dir/pwned" ]] ||
     fail "Claude publisher executed finding text"
-assert_threads 'length == 1 and .[0].path == "src/a.rs" and .[0].subject_type == "file"' \
-    "a finding in a file outside the diff anchors to the first changed file"
+assert_threads 'length == 2 and all(.[]; .path == "src/a.rs" and .subject_type == "file")' \
+    "a finding outside the diff or on a removed file anchors to the first surviving file"
+assert_threads '.[1].body | split(" — ")[0][1:-1] == "gone.rs:1"' \
+    "a finding on a removed file keeps its location"
 jq -e -s --arg b "$hostile_body" '.[0].body | contains("docs/other.md:9") and contains($b)' \
     "$posted_threads" >/dev/null ||
     fail "Claude publisher did not carry hostile finding text literally: $(<"$posted_threads")"
@@ -204,9 +220,11 @@ published_content="$(<"$published_comment")"
 [[ "$published_content" == *"\`crates/pixtuoid-scene/sprites/default/desk@8x.sprite:6\`"* ]] ||
     fail "Claude publisher omitted the density-variant finding location"
 
-if run_publisher "$valid_review" new-head old-head >/dev/null 2>&1; then
+if run_publisher "$in_diff_review" new-head old-head >/dev/null 2>&1; then
     fail "Claude publisher accepted a stale review"
 fi
+[[ ! -e "$published_comment" && ! -e "$posted_threads" ]] ||
+    fail "Claude publisher posted a stale review"
 
 if run_publisher '{"summary":' >/dev/null 2>&1; then
     fail "Claude publisher accepted malformed JSON"

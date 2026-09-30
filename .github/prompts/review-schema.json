@@ -28,7 +28,8 @@
           },
           "line": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "description": "For a line the diff shows, the head-side line counted from the +start of its hunk, else the base line; the publisher anchors any line outside a hunk file-level."
           },
           "body": {
             "type": "string",

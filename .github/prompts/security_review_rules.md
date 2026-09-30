@@ -43,8 +43,7 @@ Output:
 - Return the required structured output only.
 - `summary` is one sentence.
 - `findings` contains at most five objects with `severity`, repository-relative
-  `path`, exact positive head-side `line` (a line the diff shows counts from its
-  hunk's `+start`), and a concise verified `body`.
+  `path`, exact positive `line`, and a concise verified `body`.
 - Return an empty `findings` array when the review is clean.
 - Do not post comments or call GitHub APIs. Publication belongs to a separate
   least-privilege job.

@@ -272,6 +272,10 @@ jobs:
 
           [[ "$REVIEW_MARKER" =~ ^[a-z0-9-]+$ ]]
           [[ -n "$REVIEW_TITLE" ]]
+          files_json="$RUNNER_TEMP/pr-files.json"
+          gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" \
+            --jq '.[] | {filename, status, patch}' > "$files_json"
+          # Read after the files, so they are the reviewed head's.
           current_head="$(
             gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha'
           )"
@@ -315,17 +319,12 @@ jobs:
             echo "::error title=Claude review too large::$comment_bytes bytes exceeds the publisher bound"
             exit 1
           fi
-          gh pr comment "$PR_NUMBER" \
-            --repo "$REPOSITORY" \
-            --body-file "$review_file"
 
           # Each finding also becomes a review thread, which main's required
           # conversation resolution holds open until a disposition resolves it.
           # One call per finding: the batch reviews endpoint takes no
           # `subject_type`, so it cannot carry a file-level thread.
-          files_json="$RUNNER_TEMP/pr-files.json"
-          gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" \
-            --jq '.[] | {filename, patch}' > "$files_json"
+          threads="$RUNNER_TEMP/claude-review-threads.jsonl"
           jq -c --slurpfile files "$files_json" \
             --arg sha "$EXPECTED_HEAD_SHA" \
             --arg title "$REVIEW_TITLE" '
@@ -336,22 +335,37 @@ jobs:
                   | capture("^@@ -[0-9,]+ \\+(?<start>[0-9]+)(,(?<count>[0-9]+))? @@")
                   | (.start | tonumber) as $start
                   | [$start, $start + ((.count // "1") | tonumber) - 1]];
-              ($files | map({key: .filename, value: right_ranges}) | from_entries) as $hunks
+              ($files | map(select(.status != "removed"))) as $live
+              | ($live | map({key: .filename, value: right_ranges}) | from_entries) as $hunks
               | .findings[] | . as $f
-              | "**\($title) · \(.severity)**\n\n\(.body)" as $text
               | $hunks[.path] as $ranges
-              | if $ranges and any($ranges[]; .[0] <= $f.line and $f.line <= .[1]) then
-                  {path, line, side: "RIGHT", body: $text}
-                else
-                  # A path outside the diff cannot hold a thread, so the first
-                  # changed file carries it.
-                  {path: (if $ranges then .path else $files[0].filename end),
-                   subject_type: "file",
-                   body: "`\(.path):\(.line)` — \($text)"}
-                end
-              | .commit_id = $sha
-            ' <<< "$REVIEW_JSON" |
-            while IFS= read -r thread; do
+              | {where: "\(.path):\(.line)",
+                 request: ({body: "`\(.path):\(.line)` — **\($title) · \(.severity)**\n\n\(.body)",
+                            commit_id: $sha}
+                   + if $ranges and any($ranges[]; .[0] <= $f.line and $f.line <= .[1]) then
+                       {path, line, side: "RIGHT"}
+                     else
+                       # A path outside the diff, or removed by it, cannot hold
+                       # a thread, so the first surviving file carries it.
+                       {path: (if $ranges then .path else $live[0].filename end),
+                        subject_type: "file"}
+                     end)}
+            ' <<< "$REVIEW_JSON" > "$threads"
+          failed=()
+          while IFS= read -r thread; do
+            jq -c .request <<< "$thread" |
               gh api --method POST "repos/${REPOSITORY}/pulls/${PR_NUMBER}/comments" \
-                --input - <<< "$thread" > /dev/null
-            done
+                --input - > /dev/null ||
+              failed+=("$(jq -r .where <<< "$thread")")
+          done < "$threads"
+
+          if (( ${#failed[@]} > 0 )); then
+            printf '\n**Review threads not opened:** %s\n' "${failed[*]}" >> "$review_file"
+          fi
+          gh pr comment "$PR_NUMBER" \
+            --repo "$REPOSITORY" \
+            --body-file "$review_file"
+          if (( ${#failed[@]} > 0 )); then
+            echo "::error title=Claude review threads not opened::${failed[*]}"
+            exit 1
+          fi

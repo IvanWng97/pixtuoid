@@ -142,7 +142,9 @@ the PR, and is fixed in #N; a defect in another session's tree cites that
 session's PR). A disposition is the reply that resolves the thread, STARTING
 with its state: `FIXED: …` · `REFUTED: … — <mechanism>` · `RE-SCOPED → #N: …`
 · `FOLLOW-UP → #N: …`, where #N is an open or merged PR other than this one.
-Agents never file issues; "acknowledged" and "surfaced" are not states.
+A re-flag of an already-dispositioned finding replies with the original's
+disposition (link it). Agents never file issues; "acknowledged" and "surfaced"
+are not states.
 Sweep at the FINAL merge head; check WHICH commit a bot re-flag was raised
 against before re-litigating. Orchestration (dispatch,
 premise verify, the fold, the bot-verdict gate), round caps, blocking bar and
