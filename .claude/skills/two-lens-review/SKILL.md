@@ -29,8 +29,8 @@ paraphrase here.
    You are the <correctness|design|row> lens for <PR/branch> on pixtuoid.
    Worktree: <path> (branch <name>, base <sha>), read-only.
    Diff: git -C <path> diff <base>..HEAD.
-   Read AGENTS.md, then apply REVIEW.md's <lens or row>, its Lenses preamble,
-   Do not flag and Output.
+   Read AGENTS.md, then apply REVIEW.md's <lens or row>, its Lenses preamble
+   and Do not flag.
    <change-specific claims (from the PR body's impl-plan answers) or design
    questions, one per line>
    Your final message is the report, ending in one verdict: APPROVE or

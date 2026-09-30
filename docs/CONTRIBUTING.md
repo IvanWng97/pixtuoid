@@ -70,7 +70,8 @@ run. The jobs:
   capture-tree rules ride `just test` instead.
 - **zizmor** — workflow/action security: symbolic-or-SHA pins,
   credential-dropping checkouts, exact inline suppressions.
-- **The two automatic Claude reviewers**, ruled by [`REVIEW.md`](../REVIEW.md), ride `claude-readonly-review.yml`: a
+- **The two automatic Claude reviewers**, ruled by [`REVIEW.md`](../REVIEW.md),
+  ride `claude-readonly-review.yml`: a
   read-only model job on the trusted default branch, the PR diff as inert
   data, a separate least-privilege publisher that opens a review thread per
   finding — and a third job that comments
@@ -258,8 +259,9 @@ The bots never review a fork PR on their own: a maintainer approves its CI
 run, then comments `/claude-review` and `/security-review`, again after every
 push. Its author can resolve their own threads, so before merging read each
 thread's `resolvedBy` and its reply. Its bot verdict is advisory, since the
-author can steer it through the diff, so the maintainer reads the diff too. The bots skip Dependabot as an actor, so
-a maintainer comments both commands on its PRs too.
+author can steer it through the diff, so the maintainer reads the diff too.
+The bots skip Dependabot as an actor, so a maintainer comments both commands
+on its PRs too.
 
 ### Dispositions
 

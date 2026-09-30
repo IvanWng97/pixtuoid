@@ -1,8 +1,6 @@
 # Review rules
 
 Read [`AGENTS.md`](AGENTS.md) first; these rules add to generic defect hunting.
-Nested `AGENTS.md` files (crates/*, tests/, site/, integrations/raycast/) add
-rules for their trees.
 
 ## Scope
 
@@ -184,8 +182,7 @@ post or call GitHub APIs:
 
 - `summary`: one sentence.
 - `path`: repository-relative (the `b/` side of `pr.diff`), never absolute.
-- `line`: the absolute head-side line, never invented; when unsure, the
-  nearest line read, with the location described in the body.
+- `line`: the absolute head-side line, never invented.
 - At most the schema's `maxItems` findings, blocking first, pre-existing last.
 - Each `body` opens with its label, then the verified finding and a concrete
   failure scenario.
