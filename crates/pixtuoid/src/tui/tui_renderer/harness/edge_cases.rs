@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::tui::connection::ConnectionFrame;
+
 #[test]
 fn too_small_terminal_returns_no_layout_no_panic() {
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
@@ -199,15 +201,11 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
     );
 
     let mut r = build(cols, rows, vec![]);
-    r.set_connection_frame_parts(
-        true,
-        Vec::new(),
-        Vec::new(),
-        0,
-        None,
-        None,
-        "socket  /tmp/p.sock".into(),
-    );
+    r.set_connection_frame(ConnectionFrame {
+        open: true,
+        socket_line: "socket  /tmp/p.sock".into(),
+        ..Default::default()
+    });
     r.render(&scene, &pack(), t0()).expect("render");
     let text = frame_text(r.frame_buffer());
     assert!(
