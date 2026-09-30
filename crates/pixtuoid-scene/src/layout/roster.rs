@@ -480,7 +480,9 @@ impl SceneLayout {
         };
         let desk = furniture_def(Furniture::Desk).visual;
 
-        std::iter::once(backdrop(FixtureKind::NeonSign, NEON_PANEL))
+        self.neon_panel()
+            .map(|b| backdrop(FixtureKind::NeonSign, b))
+            .into_iter()
             .chain(
                 self.clock_pos()
                     .map(|at| backdrop(FixtureKind::Clock, boxed(at, CLOCK))),
@@ -727,9 +729,10 @@ impl SceneLayout {
     }
 
     /// Where meeting room `room` hangs its notice board: on the band, its north
-    /// wall, within one window pane or the wall under the neon, in the free
-    /// spot nearest its centre, on whichever is nearest the room's middle —
-    /// `None` for a room whose north wall is not the band, or with none free.
+    /// wall, within one window pane or the plain wall west of the windows, in
+    /// the free spot nearest its centre, on whichever is nearest the room's
+    /// middle — `None` for a room whose north wall is not the band, or with
+    /// none free.
     pub(crate) fn notice_board_rect(&self, room: usize) -> Option<Bounds> {
         let b = self.meeting_rooms.get(room)?.bounds;
         if b.y > self.top_margin {
@@ -748,7 +751,7 @@ impl SceneLayout {
                     .map(|p| centred(p.pos, furniture_def(p.kind.furniture()).visual)),
             )
             .chain(self.door_rect())
-            .chain(std::iter::once(NEON_PANEL))
+            .chain(self.neon_panel())
             .chain(self.clock_pos().map(|at| boxed(at, CLOCK)))
             .collect();
         let clear = |board: Bounds| {
@@ -761,7 +764,7 @@ impl SceneLayout {
         };
         let (lo, hi) = (b.x + 1, (b.x + b.width).saturating_sub(1));
         let middle = b.x + b.width / 2;
-        std::iter::once(NEON_PANEL.x..NEON_PANEL.x + NEON_PANEL.width)
+        std::iter::once(NEON_PANEL.x..super::window_run(self.buf_w).start)
             .chain(self.window_bays().flat_map(WindowBay::panes))
             .filter_map(|pane| {
                 // The free spot nearest the pane's centre the room's wall allows.
@@ -776,21 +779,18 @@ impl SceneLayout {
             .min_by_key(|board| (board.x + board.width / 2).abs_diff(middle))
     }
 
-    /// Whether desk `i` stands a filing cabinet beside it.
-    pub(crate) fn desk_has_cabinet(&self, i: FloorLocalDeskIndex) -> bool {
-        i.0.is_multiple_of(2)
+    /// Where desk `i`'s filing cabinet stands ([`filing_cabinet_top_left`]).
+    pub(crate) fn filing_cabinet_top_left(&self, i: FloorLocalDeskIndex) -> Option<Point> {
+        filing_cabinet_top_left(*self.home_desks.get(i.0)?, i, self.buf_h)
     }
 
-    /// Where desk `i`'s filing cabinet stands — one clear column west of the
-    /// desk — or `None` for a desk without one, or whose cabinet would run off
-    /// the office's south edge.
-    pub(crate) fn filing_cabinet_top_left(&self, i: FloorLocalDeskIndex) -> Option<Point> {
-        let desk = *self.home_desks.get(i.0)?;
-        let cab = furniture_def(Furniture::FilingCabinet).visual;
-        (self.desk_has_cabinet(i) && desk.y + cab.h <= self.buf_h).then(|| Point {
-            x: desk.x.saturating_sub(cab.w + 1),
-            y: desk.y,
-        })
+    /// The neon sign's box, or `None` on a wall too narrow to hang it west of
+    /// the door.
+    pub fn neon_panel(&self) -> Option<Bounds> {
+        let east = NEON_PANEL.x + NEON_PANEL.width;
+        self.door_rect()
+            .is_none_or(|d| d.x >= east)
+            .then_some(NEON_PANEL)
     }
 
     /// The wall clock's top-left: centred on the window post as wide as it
@@ -898,6 +898,26 @@ pub(crate) fn coffee_machine_cols(counter_w: u16) -> (u16, u16) {
     } else {
         PANTRY_COFFEE_COLS_SMALL
     }
+}
+
+/// Whether desk `i` stands a filing cabinet beside it.
+pub(crate) fn desk_has_cabinet(i: FloorLocalDeskIndex) -> bool {
+    i.0.is_multiple_of(2)
+}
+
+/// Where desk `i`, at `desk`, stands its filing cabinet — one clear column west
+/// of the desk — or `None` for a desk without one, or whose cabinet would run
+/// off a `buf_h`-tall office's south edge.
+pub(crate) fn filing_cabinet_top_left(
+    desk: Point,
+    i: FloorLocalDeskIndex,
+    buf_h: u16,
+) -> Option<Point> {
+    let cab = furniture_def(Furniture::FilingCabinet).visual;
+    (desk_has_cabinet(i) && desk.y + cab.h <= buf_h).then(|| Point {
+        x: desk.x.saturating_sub(cab.w + 1),
+        y: desk.y,
+    })
 }
 
 /// Where the task chair stands at `desk`, or `None` for a desk that does not

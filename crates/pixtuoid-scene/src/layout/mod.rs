@@ -35,21 +35,21 @@ pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 pub(crate) use roster::{
     CLOCK, Depth, Fixture, Layer, NEON_PANEL, NEON_PANEL_BORDER, Tie, desk_chair_top_left,
-    desk_chair_z_key,
+    desk_chair_z_key, filing_cabinet_top_left,
 };
 pub use roster::{
     FixtureKind, NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
     NEON_PANEL_W, Station,
 };
 #[cfg(test)]
-pub(crate) use roster::{NEON_PANEL_H, coffee_machine_cols};
+pub(crate) use roster::{NEON_PANEL_H, coffee_machine_cols, desk_has_cabinet};
 // Painter tests tile walls no `SceneLayout` has.
+#[cfg(test)]
+pub(crate) use windows::{TWO_WINDOW_WALL_W, window_bays, window_slots};
 pub(crate) use windows::{
     WINDOW_TOP, WINDOW_W, WindowBay, door_x, glass_rows, wall_trim_row, window_frame, window_posts,
     window_rows, window_run,
 };
-#[cfg(test)]
-pub(crate) use windows::{window_bays, window_slots};
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
 pub(crate) use coarse::{COARSE_CELL_SIZE, NEIGHBORS_8, cell_walkable, snap};
 

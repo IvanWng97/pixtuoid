@@ -15,8 +15,8 @@ use crate::cutaway::pen::Stepped;
 use crate::layout::WallPiece;
 use crate::theme::Theme;
 
-/// Mullion (partition post) spacing along a run, in logical units: a post this
-/// often reads as panelled partitions instead of one unbroken sheet.
+/// Mullion (partition post) spacing along a run, in logical units: a post
+/// about this often reads as panelled partitions instead of one unbroken sheet.
 const MULLION_STRIDE: u16 = 10;
 
 /// How far into a pane, in logical units along plus across, its glint runs:
@@ -50,9 +50,12 @@ pub(crate) struct Glass {
     post: Rgb,
     pane: Stepped,
     view: View,
-    run: u16,
     depth: u16,
     per_unit: u16,
+    /// Where each mullion stands along the run, in cells, west or north first:
+    /// spread evenly over its [`clear_run`](WallPiece::clear_run), so none
+    /// doubles a jamb or a joint's frame.
+    posts: Vec<u16>,
 }
 
 impl Glass {
@@ -60,10 +63,16 @@ impl Glass {
     pub(crate) fn of(theme: &Theme, piece: WallPiece, per_unit: u16) -> Self {
         let per_unit = per_unit.max(1);
         let (_, size) = piece.visual();
-        let (view, run, depth) = match piece {
-            WallPiece::Horizontal { .. } => (View::Face, size.w, size.h),
-            WallPiece::Vertical { .. } => (View::EdgeOn, size.h, size.w),
+        let (view, depth) = match piece {
+            WallPiece::Horizontal { .. } => (View::Face, size.h),
+            WallPiece::Vertical { .. } => (View::EdgeOn, size.w),
         };
+        let clear = piece.clear_run();
+        let len = clear.end - clear.start;
+        let panes = ((len + MULLION_STRIDE / 2) / MULLION_STRIDE).max(1);
+        let posts = (1..panes)
+            .map(|k| (clear.start + len * k / panes) * per_unit)
+            .collect();
         let trim = theme.office.room_wall_trim_light;
         let lift = |[r, g, b]: [u8; 3]| Rgb {
             r: trim.r.saturating_add(r),
@@ -79,9 +88,9 @@ impl Glass {
             post: lift(POST_LIFT),
             pane: Stepped::new(PANE_LIFT + denser),
             view,
-            run: run.saturating_mul(per_unit),
             depth: depth.saturating_mul(per_unit),
             per_unit,
+            posts,
         }
     }
 
@@ -92,15 +101,12 @@ impl Glass {
             View::Face => (dx, dy),
             View::EdgeOn => (dy, dx),
         };
-        // Interior posts only: one in a run's last unit would double its door
-        // frame or corner joint.
-        let mullion = along > 0
-            && along + self.per_unit < self.run
-            && along.is_multiple_of(MULLION_STRIDE * self.per_unit);
+        let pane = self.posts.iter().rev().find(|&&p| p <= along);
+        let mullion = pane == Some(&along);
         // Only a pane seen face-on catches one; edge-on, the glass shows only
         // its thickness.
         let glint = self.view == View::Face
-            && (along % (MULLION_STRIDE * self.per_unit) + across)
+            && (along - pane.unwrap_or(&0) + across)
                 .checked_sub(GLINT_AT * self.per_unit)
                 .is_some_and(|c| c == 0 || c == GLINT_GAP);
         if mullion || across + 1 == self.depth {
@@ -215,16 +221,69 @@ mod tests {
     }
 
     #[test]
-    fn no_mullion_stands_in_a_runs_last_unit_at_any_density() {
-        let units = MULLION_STRIDE * 4 + 1;
-        for per_unit in [1, 4] {
-            let mut glass = Glass::of(&crate::theme::NORMAL, run(units), per_unit);
-            let last = (units - 1) * per_unit;
-            assert_eq!(
-                glass.over(BEHIND, last, 2 * per_unit),
-                BEHIND.ramp(PANE_LIFT),
-                "at {per_unit}x the last unit is pane, not a post against the run's end"
-            );
+    fn a_mullion_keeps_two_units_clear_of_every_jamb_and_joint() {
+        const CLEAR: u16 = 2;
+        let other = Rgb {
+            r: 10,
+            g: 200,
+            b: 90,
+        };
+        let mut met = 0;
+        for (w, h) in [(120, 72), (160, 96), (192, 108), (240, 135), (320, 180)] {
+            for seed in 0..12 {
+                let l =
+                    crate::layout::Layout::compute_with_seed(w, h, None, seed).expect("lays out");
+                for &piece in &l.wall_pieces {
+                    let (at, size) = piece.visual();
+                    let mut glass = Glass::of(&crate::theme::NORMAL, piece, 1);
+                    // Across, a line clear of the rim, the sill and every glint.
+                    let (run, across) = match piece {
+                        WallPiece::Horizontal { .. } => (size.w, size.h - 2),
+                        WallPiece::Vertical { .. } => (size.h, size.w / 2),
+                    };
+                    for along in 0..run {
+                        let (dx, dy, near) = match piece {
+                            WallPiece::Horizontal { .. } => (
+                                along,
+                                across,
+                                (at.x + along).saturating_sub(CLEAR)..at.x + along + CLEAR + 1,
+                            ),
+                            WallPiece::Vertical { .. } => (
+                                across,
+                                along,
+                                (at.y + along).saturating_sub(CLEAR)..at.y + along + CLEAR + 1,
+                            ),
+                        };
+                        if glass.over(BEHIND, dx, dy) != glass.over(other, dx, dy) {
+                            continue;
+                        }
+                        met += 1;
+                        let (cross_at, cross_len) = match piece {
+                            WallPiece::Horizontal { .. } => (at.y, size.h),
+                            WallPiece::Vertical { .. } => (at.x, size.w),
+                        };
+                        let clear = |(p, s): (crate::layout::Point, crate::layout::Size)| {
+                            let (lo, len, c, c_len) = match piece {
+                                WallPiece::Horizontal { .. } => (p.x, s.w, p.y, s.h),
+                                WallPiece::Vertical { .. } => (p.y, s.h, p.x, s.w),
+                            };
+                            lo + len <= near.start
+                                || near.end <= lo
+                                || c + c_len <= cross_at
+                                || cross_at + cross_len <= c
+                        };
+                        assert!(
+                            piece.jambs().all(clear)
+                                && l.wall_pieces
+                                    .iter()
+                                    .filter(|&&p| p != piece)
+                                    .all(|p| clear(p.visual())),
+                            "{w}x{h} seed {seed}: {piece:?}'s post {along} units along"
+                        );
+                    }
+                }
+            }
         }
+        assert!(met > 0, "the sweep met a mullion");
     }
 }

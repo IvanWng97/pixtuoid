@@ -300,8 +300,13 @@ impl Office {
             }
             out.push('}');
         }
+        out.push_str("],\"board\":");
+        let Some(board) = board else {
+            out.push_str("null}");
+            return out;
+        };
         out.push_str(&format!(
-            "],\"board\":{{\"rect\":{{\"x\":{NEON_PANEL_INNER_X},\"y\":{NEON_PANEL_INNER_Y},\"w\":{NEON_PANEL_INNER_W},\"h\":{NEON_PANEL_INNER_H}}},"
+            "{{\"rect\":{{\"x\":{NEON_PANEL_INNER_X},\"y\":{NEON_PANEL_INNER_Y},\"w\":{NEON_PANEL_INNER_W},\"h\":{NEON_PANEL_INNER_H}}},"
         ));
         push_board_segment(&mut out, "brand", &board.brand, theme);
         out.push(',');
@@ -864,6 +869,16 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&o.overlay_json()).expect("valid JSON");
         assert!(v["labels"].as_array().unwrap().is_empty());
         assert!(v["board"].is_null());
+    }
+
+    #[test]
+    fn overlay_json_exports_no_board_on_a_wall_too_narrow_for_the_neon() {
+        let mut o = office();
+        for (w, hangs) in [(96, true), (48, false)] {
+            o.step(T0_MS, w, 60);
+            let v: serde_json::Value = serde_json::from_str(&o.overlay_json()).expect("valid JSON");
+            assert_eq!(v["board"].is_object(), hangs, "{w} wide: {v}");
+        }
     }
 
     #[test]

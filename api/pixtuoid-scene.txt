@@ -209,7 +209,7 @@ pub pixtuoid_scene::floor::FloorSession::floor: pixtuoid_scene::floor::PerFloor
 pub pixtuoid_scene::floor::FloorSession::office: pixtuoid_scene::floor::PerOffice
 impl pixtuoid_scene::floor::FloorSession
 pub fn pixtuoid_scene::floor::FloorSession::audio_frame(&mut self, &pixtuoid_core::state::SceneState, usize, std::time::SystemTime) -> AudioFrame
-pub fn pixtuoid_scene::floor::FloorSession::board(&self, &pixtuoid_core::state::SceneState, std::time::SystemTime, core::option::Option<(usize, usize)>) -> crate::board::BoardModel
+pub fn pixtuoid_scene::floor::FloorSession::board(&self, &pixtuoid_core::state::SceneState, std::time::SystemTime, core::option::Option<(usize, usize)>) -> core::option::Option<crate::board::BoardModel>
 pub fn pixtuoid_scene::floor::FloorSession::buf(&self) -> &pixtuoid_core::sprite::RgbBuffer
 pub fn pixtuoid_scene::floor::FloorSession::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::FloorSession::new() -> Self
@@ -999,6 +999,7 @@ pub fn pixtuoid_scene::layout::SceneLayout::wall_band_h(&self) -> u16
 impl pixtuoid_scene::layout::SceneLayout
 pub fn pixtuoid_scene::layout::SceneLayout::coffee_machine(&self) -> core::option::Option<pixtuoid_scene::layout::Bounds>
 pub fn pixtuoid_scene::layout::SceneLayout::fixture_at(&self, pixtuoid_scene::layout::Bounds) -> core::option::Option<pixtuoid_scene::layout::FixtureKind>
+pub fn pixtuoid_scene::layout::SceneLayout::neon_panel(&self) -> core::option::Option<pixtuoid_scene::layout::Bounds>
 impl core::clone::Clone for pixtuoid_scene::layout::SceneLayout
 pub fn pixtuoid_scene::layout::SceneLayout::clone(&self) -> pixtuoid_scene::layout::SceneLayout
 impl core::fmt::Debug for pixtuoid_scene::layout::SceneLayout

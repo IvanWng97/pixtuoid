@@ -73,8 +73,13 @@ impl OfficeRenderer {
         self.session.overlay(scene, now, None)
     }
 
-    /// The neon wall-board model for the current scene — one floor, so `floor = None`.
-    pub fn board(&self, scene: &SceneState, now: SystemTime) -> pixtuoid_scene::board::BoardModel {
+    /// The neon wall-board model for the current scene — one floor, so `floor = None` —
+    /// or `None` where the last frame hung no neon.
+    pub fn board(
+        &self,
+        scene: &SceneState,
+        now: SystemTime,
+    ) -> Option<pixtuoid_scene::board::BoardModel> {
         self.session.board(scene, now, None)
     }
 

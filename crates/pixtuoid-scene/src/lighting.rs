@@ -280,8 +280,8 @@ pub(crate) struct Lights {
     pub(crate) desks: Vec<DeskLights>,
     /// Over each [`lit_screen`].
     pub(crate) monitor_halos: Vec<Emitter>,
-    /// The neon sign's halo on the wall around it.
-    pub(crate) neon: Emitter,
+    /// The neon sign's halo on the wall around it, where it hangs.
+    pub(crate) neon: Option<Emitter>,
     /// The sun through each window, left to right; none while it is down.
     pub(crate) spills: Vec<Emitter>,
 }
@@ -327,19 +327,19 @@ impl Lights {
                 })
                 .collect(),
             monitor_halos: monitor_halos(layout, inputs),
-            neon: Emitter {
+            neon: layout.neon_panel().map(|panel| Emitter {
                 kind: EmitterKind::NeonGlow,
                 light: Light::Glow {
                     at: Point {
-                        x: crate::layout::NEON_PANEL.x,
-                        y: crate::layout::NEON_PANEL.y,
+                        x: panel.x,
+                        y: panel.y,
                     },
-                    w: crate::layout::NEON_PANEL.width,
-                    h: crate::layout::NEON_PANEL.height,
+                    w: panel.width,
+                    h: panel.height,
                     reach: NEON_HALO_RADIUS,
                 },
                 strength: neon_halo_strength(inputs.neon, inputs.now, darkness),
-            },
+            }),
             // `sunlight` already carries the weather, so heavy cloud dims the
             // spill with it.
             spills: if look.sunlight > 0.0 {

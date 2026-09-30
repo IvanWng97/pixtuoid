@@ -17,6 +17,10 @@ const NEON_EAST: u16 = NEON_PANEL.x + NEON_PANEL.width;
 const DOOR_INSET: u16 = (WINDOW_W - ELEVATOR_W) / 2;
 /// The wall east of the door's slot.
 const WINDOW_EDGE_MARGIN: u16 = 2;
+/// The narrowest wall two windows fit on beside the door's slot.
+#[cfg(test)]
+pub(crate) const TWO_WINDOW_WALL_W: u16 =
+    NEON_EAST + 3 * (WINDOW_W + MIN_POST_W) + WINDOW_EDGE_MARGIN;
 /// The windows' top frame row; one wall row stands above it.
 pub(crate) const WINDOW_TOP: u16 = 1;
 
@@ -75,16 +79,23 @@ pub(crate) fn window_slots(buf_w: u16) -> impl Iterator<Item = WindowBay> {
 /// slot after the first. Shared out evenly, the easternmost taking the
 /// columns that don't divide — but where no post between two slots is as
 /// wide as the [`CLOCK`], the one nearest the wall's middle is widened to
-/// hang it on, from the spare wall, if that leaves the rest [`MIN_POST_W`].
+/// hang it on, from the spare wall, leaving the rest [`MIN_POST_W`]; a wall
+/// that can't spare it gives up a window for it, but its last.
 fn slot_gaps(buf_w: u16) -> Vec<u16> {
     let Some(span) = door_slot_x(buf_w).and_then(|x| x.checked_sub(NEON_EAST)) else {
         return Vec::new();
     };
-    let windows = span.saturating_sub(MIN_POST_W) / (WINDOW_W + MIN_POST_W);
+    let fits = span.saturating_sub(MIN_POST_W) / (WINDOW_W + MIN_POST_W);
+    let spares_a_clock = |windows: u16| span - windows * WINDOW_W >= CLOCK.w + windows * MIN_POST_W;
+    let windows = if fits > 1 && !spares_a_clock(fits) {
+        fits - 1
+    } else {
+        fits
+    };
     let wall = span - windows * WINDOW_W;
     let even = spread(wall, windows + 1);
     let has_clock_post = even.iter().skip(1).any(|&g| g >= CLOCK.w);
-    if windows == 0 || has_clock_post || wall < CLOCK.w + windows * MIN_POST_W {
+    if windows == 0 || has_clock_post || !spares_a_clock(windows) {
         return even;
     }
     let middle = buf_w / 2;
@@ -237,13 +248,24 @@ mod tests {
             }
             let one_more = (windows + 1) * WINDOW_W + (windows + 2) * MIN_POST_W;
             assert!(
-                NEON_EAST + one_more > door.x,
-                "{buf_w}: another window fits"
+                NEON_EAST + one_more - MIN_POST_W + CLOCK.w > door.x,
+                "{buf_w}: another window fits beside the clock"
             );
             assert_eq!(window_run(buf_w), slots[0].x..door.span().end);
             assert_eq!(door_x(buf_w), Some(door.x + DOOR_INSET));
         }
         assert!(walls_with_a_window > 0);
+    }
+
+    #[test]
+    fn every_wall_two_windows_fit_on_has_a_post_to_hang_the_clock() {
+        for buf_w in TWO_WINDOW_WALL_W..400 {
+            assert!(
+                window_posts(buf_w).any(|p| p.len() >= usize::from(CLOCK.w)),
+                "{buf_w}: {:?}",
+                window_posts(buf_w).collect::<Vec<_>>()
+            );
+        }
     }
 
     #[test]

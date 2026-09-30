@@ -37,8 +37,8 @@ pub const WALL_THICK_V: u16 = 4;
 /// North-end walk-behind overhang for a FREE vertical terminus (a segment whose
 /// north end is NOT on a joint — e.g. the run below a door): the top rows of the
 /// glass are visual-only, so a character parked behind the wall's top cap is
-/// occluded by the y-sorted glass. Sized to the E-W wall's cap: a 2px cap
-/// only grazed a walker's feet, so the walk-behind read as clipping, not depth.
+/// occluded by the y-sorted glass. Sized to the E-W wall's cap, deep enough to
+/// hide a walker's feet, so the walk-behind reads as depth, not clipping.
 pub(crate) const WALL_TOP_OVERHANG_PX: u16 = WALL_THICK_H;
 
 /// A linear wall's geometry policy — the wall analog of a `FurnitureDef` row.
@@ -181,6 +181,28 @@ impl WallPiece {
                     h: y_bot - y_top + 1,
                 },
             ),
+        }
+    }
+
+    /// The stretch of its run, in units from its visual's start, clear of the
+    /// walls it joins: a stitched end runs into a crossing wall's box.
+    pub(crate) fn clear_run(self) -> Range<u16> {
+        match self {
+            WallPiece::Horizontal { .. } => 0..self.visual().1.w,
+            WallPiece::Vertical {
+                y_top,
+                y_bot,
+                north,
+                south,
+                ..
+            } => {
+                let end = if y_bot > south {
+                    south.saturating_sub(WALL_H.cap)
+                } else {
+                    y_bot + 1
+                };
+                north - y_top..end.max(north) - y_top
+            }
         }
     }
 
@@ -354,11 +376,9 @@ pub struct Doorway {
     pub end: Point,
 }
 
-/// Doorway width in ABSOLUTE pixels — NOT a percentage, which shrinks to zero on
-/// small terminals and, after the 2-px wall padding, leaves no walkable cell for
-/// A* and disconnects the room. 14 opens a 13-px gap (the segment cuts are
-/// endpoint-inclusive), a 9-px effective gap after the padding on each side —
-/// still wide enough for the coarse 4×4 router to keep a walkable row through it.
+/// Doorway width in ABSOLUTE pixels — NOT a percentage, which shrinks to nothing
+/// on a small terminal and disconnects the room. The cuts are endpoint-inclusive,
+/// so the opening is one narrower.
 const DOOR_GAP: u16 = 14;
 
 /// Where along its wall run a door sits.
@@ -888,5 +908,67 @@ mod tests {
             }),
         );
         assert!(w.is_empty() && d.is_empty());
+    }
+
+    #[test]
+    fn a_walls_sort_bands_tile_its_glass_none_sorting_south_of_its_raw_end() {
+        let mut met = 0;
+        for (w, h) in [
+            (48, 46),
+            (96, 60),
+            (160, 96),
+            (240, 135),
+            (320, 180),
+            (160, 192),
+        ] {
+            for seed in 0..12 {
+                let l =
+                    crate::layout::Layout::compute_with_seed(w, h, None, seed).expect("lays out");
+                for &piece in &l.wall_pieces {
+                    met += 1;
+                    let (at, size) = piece.visual();
+                    let mut next = at.y;
+                    for (rows, depth) in piece.sort_bands() {
+                        let at = format!("{w}x{h} seed {seed}: {piece:?} {rows:?}");
+                        assert_eq!(rows.start, next, "{at}: tiles");
+                        assert!(rows.start < rows.end && depth < rows.end, "{at}");
+                        match piece {
+                            WallPiece::Horizontal { y_face, .. } => {
+                                assert_eq!(rows.len(), usize::from(size.h), "{at}: whole");
+                                assert_eq!(depth, y_face + WALL_THICK_H - 1, "{at}");
+                            }
+                            WallPiece::Vertical { south, .. } => {
+                                assert!(rows.len() <= usize::from(SORT_BAND_ROWS), "{at}");
+                                assert!(depth <= south, "{at}");
+                            }
+                        }
+                        next = rows.end;
+                    }
+                    assert_eq!(
+                        next,
+                        at.y + size.h,
+                        "{w}x{h} seed {seed}: {piece:?} covered"
+                    );
+                }
+            }
+        }
+        assert!(met > 0, "the sweep met a wall");
+    }
+
+    #[test]
+    fn a_stitched_walls_bands_below_its_raw_end_sort_on_it() {
+        let piece = WallPiece::Vertical {
+            x: 0,
+            y_top: 0,
+            y_bot: 15,
+            north: 0,
+            south: 10,
+            jamb_north: false,
+            jamb_south: false,
+        };
+        assert_eq!(
+            piece.sort_bands().collect::<Vec<_>>(),
+            [(0..4, 3), (4..8, 7), (8..12, 10), (12..16, 10)]
+        );
     }
 }

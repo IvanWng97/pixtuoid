@@ -954,10 +954,15 @@ fn free_standing_furniture_never_stands_inside_a_pod() {
 }
 
 /// `snap_inter_pod_ground_y` answers `None` by design and the caller drops the board
-/// with no trace, so a broken snap surfaces only as one fewer whiteboard.
+/// with no trace, so a broken snap surfaces only as one fewer whiteboard. A lone pod
+/// column leaves the aisle no stretch between two pods to stand it in.
 fn assert_the_whiteboard_lands_when_an_aisle_exists(w: u16, h: u16, seed: u64, l: &SceneLayout) {
     let has_side_rooms = !l.meeting_rooms.is_empty() || l.pantry.is_some();
-    if !has_side_rooms || pod_y_extents(l).len() < 2 {
+    let mut desk_columns: Vec<u16> = l.home_desks.iter().map(|d| d.x).collect();
+    desk_columns.sort_unstable();
+    desk_columns.dedup();
+    let pod_columns = desk_columns.len().div_ceil(usize::from(POD_SIDE));
+    if !has_side_rooms || pod_y_extents(l).len() < 2 || pod_columns < 2 {
         return;
     }
     assert!(
@@ -976,28 +981,71 @@ fn the_whiteboard_lands_whenever_an_inter_pod_aisle_exists() {
     sweep_production_floors(assert_the_whiteboard_lands_when_an_aisle_exists);
 }
 
-/// The 32x120 seed-3 repro that forced the aisle rule — board +3px east of the
-/// divider, wall flush west, desk column east, sealing the south — is under
-/// `MIN_LAYOUT_W` now, so this re-pins at the width floor. Unsnapped, two desks'
-/// south approach goes unroutable (`severed` fires, not a pocket) and the guard
-/// spends the board: reverting `snap_inter_pod_ground_y` reds the assert below.
+fn assert_the_whiteboard_hides_no_desk_or_wall(w: u16, h: u16, seed: u64, l: &SceneLayout) {
+    let Some(board) = l.fixtures().find(|f| {
+        matches!(
+            f.kind,
+            FixtureKind::Wall {
+                kind: super::WallDecor::Whiteboard,
+                ..
+            }
+        )
+    }) else {
+        return;
+    };
+    let b = board.visual;
+    let as_rect = |v: Bounds| {
+        (
+            Point { x: v.x, y: v.y },
+            Size {
+                w: v.width,
+                h: v.height,
+            },
+        )
+    };
+    for f in l.fixtures().filter(|f| {
+        matches!(
+            f.kind,
+            FixtureKind::Desk(_)
+                | FixtureKind::DeskChair(_)
+                | FixtureKind::FilingCabinet(_)
+                | FixtureKind::Pod { .. }
+        )
+    }) {
+        assert!(
+            !rects_overlap(as_rect(b), as_rect(f.visual)),
+            "{w}x{h} seed {seed}: the whiteboard {b:?} over {:?} {:?}",
+            f.kind,
+            f.visual
+        );
+    }
+    for p in &l.wall_pieces {
+        assert!(
+            !rects_overlap(as_rect(b), p.visual()),
+            "{w}x{h} seed {seed}: the whiteboard {b:?} over the wall {p:?}"
+        );
+    }
+    for twin in l.fixtures().filter(|f| {
+        matches!(
+            f.kind,
+            FixtureKind::Pod {
+                kind: super::PodDecor::Whiteboard,
+                ..
+            }
+        )
+    }) {
+        let t = twin.visual;
+        assert!(
+            t.x + t.width <= b.x || b.x + b.width <= t.x,
+            "{w}x{h} seed {seed}: the whiteboard {b:?} in a pod whiteboard's columns {t:?}"
+        );
+    }
+}
+
 #[test]
-fn free_standing_whiteboard_survives_the_west_aisle_it_used_to_seal() {
-    let (w, h, seed) = (super::compute::MIN_LAYOUT_W, 120, 3);
-    let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("the width floor lays out");
-    assert_walkable_connected(w, h, seed, &l);
-    assert!(
-        l.wall_decor
-            .iter()
-            .any(|d| matches!(d.kind, super::WallDecor::Whiteboard)),
-        "the whiteboard must survive — an aisle-seated board severs nothing, so the \
-         connectivity guard has no cause to spend it"
-    );
-    assert_eq!(
-        l.plants.len(),
-        2,
-        "the two far-south plants survive alongside it — the guard spends nothing here"
-    );
+fn the_whiteboard_hides_no_desk_and_stands_clear_of_the_walls_and_its_twin() {
+    sweep(assert_the_whiteboard_hides_no_desk_or_wall);
+    sweep_production_floors(assert_the_whiteboard_hides_no_desk_or_wall);
 }
 
 /// The boundary scan can't catch an over-drop: dropping the couch only IMPROVES
