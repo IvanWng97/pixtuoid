@@ -399,15 +399,45 @@ pub(crate) fn cells_to_rgba(
     rgba
 }
 
-/// One gif capture: the output file, the cell grid it encodes, the timeline, and
-/// what it renders.
+/// A capture's frame clock — `secs` of frames at `fps` from `start` — shared by
+/// the gif encoders and the proof frames.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Timeline {
+    pub(crate) fps: u64,
+    pub(crate) secs: u64,
+    pub(crate) start: SystemTime,
+}
+
+impl Timeline {
+    pub(crate) fn frame_count(&self) -> usize {
+        (self.secs * self.fps) as usize
+    }
+
+    /// Frame `i`'s offset from `start`. Exact, not `i * frame_ms`: the truncated
+    /// `frame_ms` accumulates, drifting every time-derived element off the wall
+    /// clock by the last frame — and a late --navigate-at then never fires.
+    ///
+    /// This does NOT make the site's `loop`ed clip seam-free, and no timing choice
+    /// can: `mascot_wander` picks each cycle's destination from a hash of the cycle
+    /// NUMBER, so the wander is aperiodic BY DESIGN and frame N is never frame 0
+    /// however the duration is chosen. Closing it would mean a scripted
+    /// (non-wandering) timeline for the demo — a media decision, not a rendering one.
+    pub(crate) fn elapsed_ms(&self, i: usize) -> u64 {
+        i as u64 * 1000 / self.fps.max(1)
+    }
+
+    pub(crate) fn now(&self, i: usize) -> SystemTime {
+        self.start + Duration::from_millis(self.elapsed_ms(i))
+    }
+}
+
+/// One gif capture. `scene`, `pack` and `theme` are what each path's per-frame
+/// render reads; [`GifJob::encode`] itself only clocks and encodes.
 pub(crate) struct GifJob<'a> {
     pub(crate) path: &'a Path,
     pub(crate) cols: u16,
     pub(crate) rows: u16,
-    pub(crate) fps: u64,
-    pub(crate) duration_secs: u64,
-    pub(crate) start: SystemTime,
+    pub(crate) timeline: Timeline,
     pub(crate) scene: &'a SceneState,
     pub(crate) pack: &'a Pack,
     pub(crate) theme: &'static Theme,
@@ -423,9 +453,9 @@ impl GifJob<'_> {
         mut render: impl FnMut(&mut S, SystemTime, u64) -> Result<()>,
         cells: impl Fn(&S) -> &ratatui::buffer::Buffer,
     ) -> Result<()> {
-        let fps = self.fps.max(1);
-        let frame_count = (self.duration_secs * self.fps) as usize;
-        let frame_ms = 1000 / fps;
+        let Timeline { fps, secs, .. } = self.timeline;
+        let frame_count = self.timeline.frame_count();
+        let frame_ms = 1000 / fps.max(1);
         let skip_frames = (skip_ms / frame_ms.max(1)) as usize;
         let img_w = self.cols as u32 * CELL_W;
         let img_h = self.rows as u32 * CELL_H;
@@ -435,21 +465,8 @@ impl GifJob<'_> {
         encoder.set_repeat(Repeat::Infinite)?;
 
         for i in 0..(skip_frames + frame_count) {
-            // Exact, not `i * frame_ms`: the truncated `frame_ms` accumulates, drifting
-            // every time-derived element off the wall clock by the last frame — and a
-            // late --navigate-at then never fires.
-            //
-            // This does NOT make the site's `loop`ed clip seam-free, and no timing choice
-            // can: `mascot_wander` picks each cycle's destination from a hash of the cycle
-            // NUMBER, so the wander is aperiodic BY DESIGN and frame N is never frame 0
-            // however the duration is chosen. Closing it would mean a scripted
-            // (non-wandering) timeline for the demo — a media decision, not a rendering one.
-            let elapsed_ms = i as u64 * 1000 / fps;
-            render(
-                state,
-                self.start + Duration::from_millis(elapsed_ms),
-                elapsed_ms,
-            )?;
+            let elapsed_ms = self.timeline.elapsed_ms(i);
+            render(state, self.timeline.now(i), elapsed_ms)?;
             if i < skip_frames {
                 continue;
             }
@@ -457,15 +474,11 @@ impl GifJob<'_> {
             let delay = Delay::from_numer_denom_ms(frame_ms as u32, 1);
             encoder.encode_frame(GifFrame::from_parts(rgba, 0, 0, delay))?;
             let cap = i + 1 - skip_frames;
-            if cap.is_multiple_of(self.fps as usize) {
-                eprint!(
-                    "\r  encoding: {}/{}s",
-                    cap / self.fps as usize,
-                    self.duration_secs
-                );
+            if cap.is_multiple_of(fps as usize) {
+                eprint!("\r  encoding: {}/{secs}s", cap / fps as usize);
             }
         }
-        eprintln!("\r  encoded {frame_count} frames @ {}fps", self.fps);
+        eprintln!("\r  encoded {frame_count} frames @ {fps}fps");
         Ok(())
     }
 }
@@ -480,7 +493,9 @@ pub(crate) fn save_renderer_gif(
 ) -> Result<()> {
     let mut r = pixtuoid::tui::tui_renderer::TuiRenderer::new(term, job.theme, pets);
     let mut fired = vec![false; navigations.len()];
-    // No pre-roll: the --navigate-at timeline starts at the first encoded frame.
+    // 0, not the caller's skip_ms: clap keeps every pre-roll flag off this path
+    // (`conflicts_with` on --navigate-at / --pets), and a pre-roll would shift the
+    // --navigate-at schedule off the encoded clip's t=0.
     job.encode(
         0,
         &mut r,
@@ -494,9 +509,8 @@ pub(crate) fn save_renderer_gif(
     )
 }
 
-/// Drive `draw_scene` over one floor and encode it. `skip_ms` of pre-roll advances
-/// the persistent motion state first, so an `--anim` capture starts at the agent's
-/// walk-out instead of its long seated dwell.
+/// Drive `draw_scene` over one floor and encode it; `skip_ms` (from --anim,
+/// --meeting or --warmup-secs) starts the clip mid-action.
 pub(crate) fn save_as_gif(
     job: &GifJob,
     term: &mut Terminal<TestBackend>,

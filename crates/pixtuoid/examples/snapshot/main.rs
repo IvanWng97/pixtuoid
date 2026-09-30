@@ -19,7 +19,7 @@ use ratatui::Terminal;
 
 use crate::encode::{
     centered_crop, compute_crop_rect, debug_paint_walkable_overlay, save_as_gif,
-    save_backend_as_png, save_renderer_gif, GifJob,
+    save_backend_as_png, save_renderer_gif, GifJob, Timeline,
 };
 use crate::scenes::{
     anim_scene, capture_live_scene, dashboard_scene, inject_openclaw_presence, meeting_scene,
@@ -434,12 +434,14 @@ fn main() -> Result<()> {
             frames_dir,
             cols,
             rows,
-            fps: args.proof_fps,
-            secs: args.proof_secs,
+            timeline: Timeline {
+                fps: args.proof_fps,
+                secs: args.proof_secs,
+                start: now,
+            },
             max_desks: args.max_desks,
             theme,
             pack: &pack,
-            start: now,
         })?;
         println!("wrote proof frames → {}", frames_dir.display());
         return Ok(());
@@ -472,9 +474,11 @@ fn main() -> Result<()> {
         path: &args.out,
         cols,
         rows,
-        fps: args.gif_fps,
-        duration_secs: args.gif_duration,
-        start: now,
+        timeline: Timeline {
+            fps: args.gif_fps,
+            secs: args.gif_duration,
+            start: now,
+        },
         scene: &scene,
         pack: &pack,
         theme,
@@ -485,9 +489,9 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    let mut floor_meta = pixtuoid_scene::floor::FloorMeta::ground();
+    floor_meta.floor_seed = args.floor_seed;
     if args.gif || args.anim.is_some() {
-        let mut floor_meta = pixtuoid_scene::floor::FloorMeta::ground();
-        floor_meta.floor_seed = args.floor_seed;
         save_as_gif(
             &gif_job,
             &mut term,
@@ -692,11 +696,7 @@ fn main() -> Result<()> {
         gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
         audio_audible: false,
         volume_flash: None,
-        floor: {
-            let mut m = pixtuoid_scene::floor::FloorMeta::ground();
-            m.floor_seed = args.floor_seed;
-            m
-        },
+        floor: floor_meta,
         active_pet: None,
         last_pet_pos: None,
         last_mascots: Vec::new(),
@@ -796,14 +796,23 @@ mod tests {
         }
     }
 
+    /// The committed multi-floor clip's clock: 10s at 15fps.
+    fn clip_timeline() -> Timeline {
+        Timeline {
+            fps: 15,
+            secs: 10,
+            start: std::time::UNIX_EPOCH,
+        }
+    }
+
     #[test]
     fn due_navigations_fires_each_exactly_once_in_schedule_order() {
         let navs = vec![(7000u64, 0usize), (3000, 1)];
         let mut fired = vec![false; navs.len()];
-        let mut hits: Vec<(u64, usize)> = Vec::new();
-        for i in 0..150u64 {
-            let elapsed_ms = i * 1000 / 15;
-            for floor in due_navigations(&navs, &mut fired, elapsed_ms) {
+        let mut hits: Vec<(usize, usize)> = Vec::new();
+        let timeline = clip_timeline();
+        for i in 0..timeline.frame_count() {
+            for floor in due_navigations(&navs, &mut fired, timeline.elapsed_ms(i)) {
                 hits.push((i, floor));
             }
         }
@@ -817,9 +826,9 @@ mod tests {
         let navs = vec![(9900u64, 1usize)];
         let mut fired = vec![false; 1];
         let mut hit = None;
-        for i in 0..150u64 {
-            let elapsed_ms = i * 1000 / 15;
-            if !due_navigations(&navs, &mut fired, elapsed_ms).is_empty() {
+        let timeline = clip_timeline();
+        for i in 0..timeline.frame_count() {
+            if !due_navigations(&navs, &mut fired, timeline.elapsed_ms(i)).is_empty() {
                 hit = Some(i);
             }
         }
