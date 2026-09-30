@@ -50,8 +50,8 @@ site/     Astro landing page; integrations/raycast/  Raycast extension
 ## Build & test
 
 ```
-just build [--release] · just test (nextest)         # scope to one crate while iterating
-cargo test -p <crate> --lib <filter>                 # fast loop
+just build [--release] · just test                   # the one test runner (nextest)
+just test -p <crate> <filter>                        # fast loop
 just preflight [full]                                # pre-push gate: lint → clippy; `full` adds hack → test (CI's Rust recipes)
 cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 ```

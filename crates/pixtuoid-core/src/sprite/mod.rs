@@ -84,6 +84,13 @@ impl Rgb {
         Rgb::from_oklab_in_gamut(self.to_oklab().mix(other.to_oklab(), t))
     }
 
+    /// How light this color looks, from black at 0 to white at 1: OKLab's
+    /// lightness, the axis [`Rgb::ramp`] steps along and [`Rgb::mix`] runs
+    /// evenly on.
+    pub fn lightness(self) -> f32 {
+        self.to_oklab().l
+    }
+
     fn to_oklab(self) -> Oklab {
         Oklab::from_color(Srgb::new(self.r, self.g, self.b).into_format::<f32>())
     }
@@ -700,7 +707,7 @@ mod tests {
         let max = format::MAX_RAMP_LEVEL;
         for base in RAMP_BASES {
             assert_eq!(base.ramp(0), base);
-            let lightness: Vec<f32> = (-max..=max).map(|n| base.ramp(n).to_oklab().l).collect();
+            let lightness: Vec<f32> = (-max..=max).map(|n| base.ramp(n).lightness()).collect();
             assert!(
                 lightness.windows(2).all(|w| w[0] < w[1]),
                 "{base:?}: {lightness:?}"
@@ -734,12 +741,22 @@ mod tests {
         assert_eq!(navy.mix(amber, 1.0), amber);
         assert_eq!(navy.mix(amber, -1.0), navy, "t clamps below");
         assert_eq!(navy.mix(amber, 2.0), amber, "t clamps above");
-        let l = |t: f32| navy.mix(amber, t).to_oklab().l;
+        let l = |t: f32| navy.mix(amber, t).lightness();
         let (l0, l1) = (l(0.0), l(1.0));
         for t in [0.25, 0.5, 0.75] {
             let even = l0 + (l1 - l0) * t;
             assert!((l(t) - even).abs() < 0.01, "t={t}: {} vs {even}", l(t));
         }
+    }
+
+    #[test]
+    fn lightness_runs_from_black_to_white_as_the_eye_sees_it() {
+        assert!(rgb(0, 0, 0).lightness().abs() < 1e-4);
+        assert!((rgb(255, 255, 255).lightness() - 1.0).abs() < 1e-4);
+        assert!(
+            rgb(0, 0, 255).lightness() < rgb(0, 160, 0).lightness(),
+            "perceived, not a channel sum: pure blue is darker than a dimmer green"
+        );
     }
 
     #[test]
