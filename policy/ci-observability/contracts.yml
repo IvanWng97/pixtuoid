@@ -175,24 +175,6 @@
     - (.jobs[] | select(has("uses")) | .if) += " || (github.event_name == 'issue_comment' && github.event.issue.pull_request)"
     - .jobs.second = (.jobs[] | select(has("uses")))
 
-- id: reviewer-lenses-run-independently
-  file: .github/workflows/claude-review.yml
-  why: >-
-    Each lens is one matrix leg. A cancelled leg posts no absence notice
-    (report_absence runs on `!cancelled()`), so its lens has silently no review
-    at the head. fail-fast, on by default, cancels the other leg when one fails
-    (docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstrategyfail-fast),
-    and a concurrency group without the lens lets one cancel the other.
-  assert: |
-    [.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml")] as $jobs
-    | ($jobs | length == 1)
-      and $jobs[0].strategy["fail-fast"] == false
-      and ($jobs[0].concurrency.group | contains("${{ matrix.lens }}"))
-  break:
-    - del(.jobs.review.strategy["fail-fast"])
-    - .jobs.review.concurrency.group |= sub("\\$\\{\\{ matrix.lens \\}\\}-"; "")
-    - .jobs.second = .jobs.review
-
 # ── claude.yml: the only Claude job with contents:write
 
 - id: claude-review-events-need-a-same-repo-head

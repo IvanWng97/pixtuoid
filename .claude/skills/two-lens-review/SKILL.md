@@ -64,7 +64,7 @@ paraphrase here.
    ```
 
 6. **Before merge**, read each lens bot's LATEST comment at HEAD
-   (`<!-- claude-review-<correctness|design>:<sha> -->`, `Findings: N`) and
+   (`claude-review-<lens>:<sha>`, `Findings: N`) and
    `mergeStateStatus`, and judge against
    [the gate](../../../docs/CONTRIBUTING.md#the-merge-gate). Record each local
    row's run as REVIEW.md's escalation section says.

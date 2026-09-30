@@ -4,11 +4,13 @@ Read [`AGENTS.md`](AGENTS.md) first; these rules add to generic defect hunting.
 
 ## Scope
 
-Each reviewer, bot or local, is the one [lens](#lenses) its prompt or brief
-names, and applies [What to check](#what-to-check) through it, every matching
-[escalation](#escalation) row (naming local rows in its summary),
-[Do not flag](#do-not-flag), the Lenses preamble, [Severity](#severity) and
-[Output](#output).
+- A lens bot applies [What to check](#what-to-check) and its
+  [lens](#lenses); the **correctness** bot also applies every matching
+  non-local [escalation](#escalation) row and names the local rows in its
+  summary.
+- A local row lens applies only its [row](#escalation).
+- All apply [Do not flag](#do-not-flag), the Lenses preamble,
+  [Severity](#severity) and [Output](#output).
 
 ## What to check
 

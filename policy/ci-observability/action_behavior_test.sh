@@ -86,8 +86,8 @@ assert_reviewability "$resolver_script" "$valid_pr" true "$label approved same-r
 assert_reviewability "$resolver_script" "$fork_wrong_base_pr" false "$label approved fork base" true
 assert_reviewability "$resolver_script" "$fork_closed_pr" false "$label approved fork state" true
 
-# The analyzer prompt names its bot's lens and REVIEW.md routes on that heading,
-# so a renamed lens or heading silently leaves one lens with no bot.
+# Each bot's lens must be a REVIEW.md `### <lens>` heading, one bot each, or a
+# lens silently has no bot.
 REVIEW_RULES_FILE="${REVIEW_RULES_FILE:-REVIEW.md}"
 # shellcheck disable=SC2016 # A workflow expression, matched literally.
 yq -e '.jobs.analyze.steps[] | select(.name == "Run read-only Claude review") | .with.prompt
@@ -103,6 +103,22 @@ bot_lenses="$(
 )"
 [[ "$bot_lenses" == "$review_lenses" ]] ||
     fail "the review bots' lenses [${bot_lenses//$'\n'/ }] are not $REVIEW_RULES_FILE's lens headings [${review_lenses//$'\n'/ }], one bot each"
+
+marker_template="$(yq -e -r '.env.REVIEW_MARKER' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
+    fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no workflow-level REVIEW_MARKER"
+title_template="$(yq -e -r '.env.REVIEW_TITLE' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
+    fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no workflow-level REVIEW_TITLE"
+# shellcheck disable=SC2016 # A workflow expression, substituted literally.
+lens_expr='${{ inputs.lens }}'
+markers="$(while IFS= read -r lens; do echo "${marker_template//"$lens_expr"/$lens}"; done <<<"$bot_lenses")"
+while IFS= read -r marker; do
+    [[ "$marker" =~ ^[a-z0-9-]+$ ]] || fail "review marker \"$marker\" is not [a-z0-9-]+"
+done <<<"$markers"
+[[ "$(sort -u <<<"$markers")" == "$(sort <<<"$markers")" ]] ||
+    fail "the review bots share a marker [${markers//$'\n'/ }], so one lens's review reads as the other's"
+lens="${bot_lenses%%$'\n'*}"
+review_marker="${marker_template//"$lens_expr"/$lens}"
+review_title="${title_template//"$lens_expr"/$lens}"
 
 publisher_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Publish validated Claude review")"
 published_comment="$test_dir/published-comment"
@@ -182,8 +198,8 @@ run_publisher() {
         PR_NUMBER="42" \
         REPOSITORY="owner/repo" \
         REVIEW_JSON="$review_json" \
-        REVIEW_MARKER="claude-review-correctness" \
-        REVIEW_TITLE="Claude correctness review" \
+        REVIEW_MARKER="$review_marker" \
+        REVIEW_TITLE="$review_title" \
         bash -c "$publisher_script"
 }
 
@@ -193,7 +209,7 @@ run_publisher "$valid_review" ||
 [[ -s "$published_comment" ]] ||
     fail "Claude publisher posted no review body"
 published_content="$(<"$published_comment")"
-[[ "$published_content" == *"<!-- claude-review-correctness:abc123 -->"* ]] ||
+[[ "$published_content" == *"<!-- $review_marker:abc123 -->"* ]] ||
     fail "Claude publisher omitted the exact-head marker"
 [[ "$published_content" == *"**Findings: 0**"* ]] ||
     fail "Claude publisher omitted the zero-finding count"
@@ -210,9 +226,13 @@ run_publisher "$(jq -cn --argjson s "$severities" \
     fail "Claude publisher's count line does not count each of $REVIEW_SCHEMA_FILE's severities: $(<"$published_comment")"
 run_publisher '{"summary":"s","findings":[{"severity":"nit","path":"src/a.rs","line":2,"body":"b"}]}' >/dev/null 2>&1 &&
     fail "Claude publisher accepted a severity $REVIEW_SCHEMA_FILE does not allow"
+review_labels="$(awk '/^## /{on = ($0 == "## Severity")} on' "$REVIEW_RULES_FILE" |
+    sed -n 's/^- .issue (\([a-z-]*\)).*/\1/p')"
+[[ "$review_labels" == "$(jq -r '.[]' <<<"$severities")" ]] ||
+    fail "$REVIEW_RULES_FILE's Severity labels [${review_labels//$'\n'/ }] are not $REVIEW_SCHEMA_FILE's enum $severities, in order"
 
 assert_threads() {
-    jq -e -s "$1" "$posted_threads" >/dev/null ||
+    jq -e -s --arg title "$review_title" "$1" "$posted_threads" >/dev/null ||
         fail "Claude publisher's review threads: $2: $(<"$posted_threads")"
 }
 
@@ -232,8 +252,10 @@ assert_threads '[.[3:][] | [.path, .subject_type, has("line")]] == [["src/a.rs",
     "a finding off the diff's lines is file-level on its own file"
 assert_threads '[.[].body | split(" — ")[0][1:-1]] == ["src/a.rs:2", "src/a.rs:21", "src/b.rs:5", "src/a.rs:10", "img.png:1"]' \
     "every thread opens with the finding's own location"
-assert_threads '.[0].body | contains("**Claude correctness review · issue (blocking)**")' \
-    "every thread names its lens and its Conventional Comments label"
+# shellcheck disable=SC2016 # jq's $title.
+assert_threads '[.[].body | capture("\\*\\*\($title) · (?<l>issue \\([a-z-]+\\))\\*\\*").l]
+    == ["issue (blocking)", "issue (non-blocking)", "issue (non-blocking)", "issue (blocking)", "issue (pre-existing)"]' \
+    "every thread names its lens and its finding's Conventional Comments label"
 
 FAKE_FAIL_POST=2 run_publisher "$in_diff_review" >/dev/null 2>&1 &&
     fail "Claude publisher exited zero with a thread not opened"
