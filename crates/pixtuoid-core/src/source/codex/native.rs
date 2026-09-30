@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use super::{codex_home, codex_id_from_path, decode_codex_line, SOURCE_NAME};
+use super::{SOURCE_NAME, codex_home, codex_id_from_path, decode_codex_line};
 use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
 

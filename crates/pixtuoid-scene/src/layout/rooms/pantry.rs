@@ -1,8 +1,8 @@
 //! The pantry aggregate: bounds + the counter size + the island.
 
 use crate::layout::{
-    furniture_def, pct, Bounds, Facing, Furniture, Point, Size, Waypoint, WaypointKind,
-    OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W, WALL_THICK_H,
+    Bounds, Facing, Furniture, OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W, Point, Size, WALL_THICK_H,
+    Waypoint, WaypointKind, furniture_def, pct,
 };
 
 /// The compact counter — the fallback for a pantry too narrow for

@@ -7,7 +7,7 @@ use crate::layout::WALKING_Y_OFF;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::epoch_ms;
-use super::palette::{blend_pixel, blend_rgb, WHITE};
+use super::palette::{WHITE, blend_pixel, blend_rgb};
 use crate::layout::Point;
 use crate::theme::Theme;
 

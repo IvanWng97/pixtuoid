@@ -12,9 +12,8 @@ use pixtuoid_core::source::registry;
 
 use crate::config;
 use crate::install::{
-    self,
-    target::{by_source, is_present, Target},
-    InstallReport, UninstallReport,
+    self, InstallReport, UninstallReport,
+    target::{Target, by_source, is_present},
 };
 
 /// The wire-facing outcome token — a CLOSED set, published in the JSON schema

@@ -5,24 +5,24 @@
 #[cfg(feature = "audio")]
 pub(crate) mod sink;
 
-use std::sync::mpsc;
 #[cfg(feature = "audio")]
 use std::sync::Arc;
+use std::sync::mpsc;
 #[cfg(feature = "audio")]
 use std::time::Instant;
 
-#[cfg(feature = "audio")]
-use pixtuoid_scene::audio::mixer::LoopStem;
 use pixtuoid_scene::audio::AudioFrame;
 #[cfg(feature = "audio")]
-use pixtuoid_scene::audio::{dsp, synth, AudioEngine, BUILD_SEED, MAX_DT_S};
+use pixtuoid_scene::audio::mixer::LoopStem;
+#[cfg(feature = "audio")]
+use pixtuoid_scene::audio::{AudioEngine, BUILD_SEED, MAX_DT_S, dsp, synth};
 #[cfg(all(feature = "audio", test))]
 use pixtuoid_scene::audio::{OneShot, TrackId};
 #[cfg(feature = "audio")]
 use sink::AudioSink;
 
 #[cfg(feature = "audio")]
-use pixtuoid_scene::audio::bank::{AssetBank, TrackBeds, TRACK_STEMS};
+use pixtuoid_scene::audio::bank::{AssetBank, TRACK_STEMS, TrackBeds};
 
 /// The +/- keys' volume increment.
 pub(crate) const VOLUME_STEP: f32 = 0.05;

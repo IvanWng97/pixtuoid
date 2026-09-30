@@ -1021,9 +1021,11 @@ fn floating_config_defaults_and_explicit_roundtrip() {
         (480, 300, Some(10), Some(20))
     );
     assert!((f.opacity - 0.8).abs() < 1e-6);
-    assert!(!toml::to_string(&AppConfig::default())
-        .unwrap()
-        .contains("[floating]"));
+    assert!(
+        !toml::to_string(&AppConfig::default())
+            .unwrap()
+            .contains("[floating]")
+    );
 }
 
 #[test]

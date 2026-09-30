@@ -9,28 +9,28 @@ mod pure;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
-use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::AgentId;
+use pixtuoid_core::state::AgentSlot;
 
 use crate::motion::{
-    advance_wander, snapshot_leg_profile, walking_position, LegPlan, MotionState, Settle, WalkLeg,
-    WalkPathSnapshot, WanderKind, WanderPhase,
+    LegPlan, MotionState, Settle, WalkLeg, WalkPathSnapshot, WanderKind, WanderPhase,
+    advance_wander, snapshot_leg_profile, walking_position,
 };
-use crate::physics::{walk_arrived, walk_progress, WalkIntent, WalkProfile};
+use crate::physics::{WalkIntent, WalkProfile, walk_arrived, walk_progress};
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 pub use pure::{
-    aimless_wander_seed, derive, derive_state_only, dwell_ms, est_wander_cycle_ms,
-    is_aimless_cycle, personality_for, pick_aimless_dest, seated_dwell_ms, stale_resume_gap_ms,
-    takes_trip, walking_frame, waypoint_index_for_cycle, Personality, Pose, ENTRY_ANIMATION_MS,
-    STALE_RESUME_GAP_BASE_MS, STALE_RESUME_GAP_RANGE_MS, THINKING_WINDOW_SECS, TYPING_FRAMES,
-    TYPING_FRAME_MS, WALKING_FRAMES, WALKING_FRAME_MS, WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS,
+    ENTRY_ANIMATION_MS, Personality, Pose, STALE_RESUME_GAP_BASE_MS, STALE_RESUME_GAP_RANGE_MS,
+    THINKING_WINDOW_SECS, TYPING_FRAME_MS, TYPING_FRAMES, WALKING_FRAME_MS, WALKING_FRAMES,
+    WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS, aimless_wander_seed, derive, derive_state_only,
+    dwell_ms, est_wander_cycle_ms, is_aimless_cycle, personality_for, pick_aimless_dest,
+    seated_dwell_ms, stale_resume_gap_ms, takes_trip, walking_frame, waypoint_index_for_cycle,
 };
 // These stay crate-internal: a `pub use` would try to widen their `pub(crate)`
 // visibility.
-pub(crate) use pure::{resolve_wander_target, SpotClaims};
+pub(crate) use pure::{SpotClaims, resolve_wander_target};
 
-use crate::layout::{desk_walk_anchor_facing, Layout, Point};
+use crate::layout::{Layout, Point, desk_walk_anchor_facing};
 use crate::pathfind::Router;
 
 /// The per-frame routing engine state threaded through pose derivation,
@@ -77,11 +77,7 @@ impl PoseHistory {
     pub fn recent(&self, agent_id: AgentId, max_age_ms: u64, now: SystemTime) -> Option<Point> {
         let (pt, when) = self.last.get(&agent_id).copied()?;
         let age = now.duration_since(when).ok()?.as_millis() as u64;
-        if age <= max_age_ms {
-            Some(pt)
-        } else {
-            None
-        }
+        if age <= max_age_ms { Some(pt) } else { None }
     }
 }
 
@@ -111,7 +107,7 @@ const EXIT_BUDGET_MARGIN_MS: u64 = 300;
 /// the EAST — the east side would read as walled-off. `None` only in a
 /// degenerate layout where every allowed side is walled off.
 pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> {
-    use crate::layout::{desk_walk_anchor_facing, Furniture};
+    use crate::layout::{Furniture, desk_walk_anchor_facing};
     // The desk's OWN facing, not a constant: `ApproachSides` is canonical (facing-South) and
     // rotated by it, so a back-turned desk is approached from its south front, not walled off there.
     let facing = layout.desk_facing_at(desk);

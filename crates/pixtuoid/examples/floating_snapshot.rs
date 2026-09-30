@@ -10,10 +10,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use image::{Rgb as ImgRgb, RgbImage};
 use pixtuoid::floating::offscreen::{
-    paint_labels_into_surface, window_buffer_geometry, OfficeRenderer, XrgbSurface,
+    OfficeRenderer, XrgbSurface, paint_labels_into_surface, window_buffer_geometry,
 };
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};

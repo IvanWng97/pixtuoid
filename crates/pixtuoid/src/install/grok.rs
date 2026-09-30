@@ -19,7 +19,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
@@ -92,11 +92,7 @@ pub(crate) fn detect_installed() -> bool {
 }
 
 fn grok_binary_name() -> &'static str {
-    if cfg!(windows) {
-        "grok.exe"
-    } else {
-        "grok"
-    }
+    if cfg!(windows) { "grok.exe" } else { "grok" }
 }
 
 /// grok's own shell heuristic, mirrored so `hook_command` knows when quoting is
@@ -401,17 +397,21 @@ mod tests {
 
         let mut doc: Value = serde_json::from_str(&installed.content).unwrap();
         doc["hooks"]["Stop"][0]["hooks"][0]["env"] = json!({});
-        assert!(verify_schema(&doc.to_string())
-            .issues
-            .iter()
-            .any(|i| i.contains("PIXTUOID_SOURCE")));
+        assert!(
+            verify_schema(&doc.to_string())
+                .issues
+                .iter()
+                .any(|i| i.contains("PIXTUOID_SOURCE"))
+        );
 
         let mut doc: Value = serde_json::from_str(&installed.content).unwrap();
         doc["hooks"]["SessionStart"][0]["matcher"] = json!("*");
-        assert!(verify_schema(&doc.to_string())
-            .issues
-            .iter()
-            .any(|i| i.contains("matcher")));
+        assert!(
+            verify_schema(&doc.to_string())
+                .issues
+                .iter()
+                .any(|i| i.contains("matcher"))
+        );
 
         assert!(!verify_schema(r#"{"hooks":{}}"#).issues.is_empty());
         assert!(!verify_schema("not json").issues.is_empty());

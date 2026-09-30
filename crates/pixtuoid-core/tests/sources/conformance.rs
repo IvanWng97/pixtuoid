@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use pixtuoid_core::harness::{Drive, Driven};
-use pixtuoid_core::source::{registry, AgentEvent};
+use pixtuoid_core::source::{AgentEvent, registry};
 
 // ONE set of tree helpers, in `captures.rs`. This file kept byte-identical
 // copies whose `read_dir` SWALLOWED errors where the other panics — an
