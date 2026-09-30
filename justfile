@@ -45,6 +45,12 @@ API_NIGHTLY := "nightly-2026-07-22"
 # churning goldens.
 API_PUBLIC_API := "0.52.0"
 
+# The non-linux triples `doc-check` renders: one per OS release.yml ships,
+# because nothing cfgs on arch or env. rustdoc links nothing, so a triple's std
+# is all it needs while no dependency on it builds C (`cargo doc` still runs
+# build scripts).
+DOC_TARGETS := "x86_64-pc-windows-msvc aarch64-apple-darwin"
+
 # List available recipes.
 default:
     @just --list
@@ -457,43 +463,39 @@ _api-toolchain:
 # (the link docs.rs would render broken). The broken/private intra-doc-link
 # classes are already `deny` in `[workspace.lints.rustdoc]`; `-D warnings` adds
 # bare URLs, invalid HTML, redundant links, and any future rustdoc lint. "Every
-# item" means every target that renders one: the examples, and each of
-# {{ DOC_TARGETS }} as well as the host, whose `cfg`-gated arms a host build
-# compiles out; (2) RUN the doctests — `cargo nextest` does NOT execute
+# item" spans every unit rustdoc renders: the `pixtuoid` bin, the examples (on
+# the host), and one pass per `DOC_TARGETS` triple, whose `cfg` arms the host
+# pass compiles out — `cfg(target_os = "linux")` arms render only on a linux
+# host, i.e. in CI; (2) RUN the doctests — `cargo nextest` does NOT execute
 # doctests, so the crate-root examples would otherwise go ungated. CI-only in
 # practice (the doc builds + a doctest run).
 [group('rust')]
-[doc('Doc gate: cargo doc (private items, examples, each OS) with -D warnings + the doctests nextest skips (CI-only)')]
+[doc('Doc gate: cargo doc (private items, bin, examples, DOC_TARGETS) with -D warnings + the doctests nextest skips (CI-only)')]
 doc-check: _doc-targets
     #!/usr/bin/env bash
     set -euo pipefail
-    # rustup's proxy cargo, so `--target` finds the std `_doc-targets` added (see `api-surface`).
+    # rustup's proxy cargo, so `--target` finds the std `_doc-targets` added (see `check-windows`).
     export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
-    export RUSTDOCFLAGS="-D warnings"
-    for target in host {{ DOC_TARGETS }}; do
-        flag=""
-        [ "$target" = host ] || flag="--target $target"
-        # The `pixtuoid` bin shares its lib's name, so the workspace pass skips it, and
-        # cargo still warns that the two share one output path (cargo#6313) — a warning
-        # only, rustdoc's own diagnostics are unaffected. Bin first, so the lib's docs
-        # are the ones left on disk.
-        # shellcheck disable=SC2086 # $flag is empty or two words, by design
-        cargo doc --no-deps --document-private-items -p pixtuoid --bin pixtuoid $flag
-        # shellcheck disable=SC2086
-        cargo doc --no-deps --document-private-items --workspace $flag
+    doc() { RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items "$@"; }
+    host="$(rustc -vV | sed -n 's/^host: //p')"
+    for target in "" {{ DOC_TARGETS }}; do
+        [ "$target" = "$host" ] && continue # the "" pass already rendered it
+        # The `pixtuoid` bin shares its lib's name, so the workspace pass skips it
+        # (cargo still warns the two share one output path: cargo#6313).
+        doc -p pixtuoid --bin pixtuoid ${target:+--target "$target"}
+        doc --workspace ${target:+--target "$target"}
     done
-    cargo doc --no-deps --document-private-items --workspace --examples
+    doc --workspace --examples
     cargo test --doc --workspace
-
-# The non-host targets `doc-check` renders. rustdoc links nothing, so a target's
-# std is all it needs — no cross linker or SDK.
-DOC_TARGETS := "x86_64-pc-windows-msvc aarch64-apple-darwin"
 
 _doc-targets:
     #!/usr/bin/env bash
     set -euo pipefail
     command -v rustup >/dev/null || { echo "rustup not found — add the std for {{ DOC_TARGETS }} manually for doc-check" >&2; exit 1; }
-    rustup target add {{ DOC_TARGETS }}
+    installed="$(rustup target list --installed)"
+    for target in {{ DOC_TARGETS }}; do
+        grep -qx "$target" <<<"$installed" || rustup target add "$target"
+    done
 
 # Coverage + JUnit XML in one run — the exact command ci-tests.yml's coverage job uses.
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
