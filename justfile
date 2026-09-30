@@ -4,17 +4,18 @@
 #
 # Recipes are grouped by intent (see `just --list`):
 #   rust     — build, test and lint the repo (Rust, shell, workflows), plus the
-#              release builds and the on-demand e2e / capture / fixture recipes
+#              on-demand e2e / capture / fixture recipes
 #   site     — the Astro landing page under site/ (npm, its own CI)
 #   gen      — regenerate + check committed artifacts
-#   release  — npm-check (the Node gates)
+#   release  — what release.yml builds and checks: the cross builds, the .deb,
+#              the version read, and the Node gates (npm-check)
 #   meta     — tooling setup, the local gate (preflight), the fixture
 #              gates, and the gates' selftests
 
-# Git Bash is preinstalled on GHA windows runners; keeps every recipe
-# single-sourced cross-platform (ci-tests.yml's windows jobs call recipes, never
-# inline commands).
-set windows-shell := ["bash", "-cu"]
+# One dialect on every platform: bash, strict. Git Bash is preinstalled on GHA
+# windows runners, so every recipe stays single-sourced cross-platform
+# (ci-tests.yml's windows jobs call recipes, never inline commands).
+set shell := ["bash", "-euo", "pipefail", "-c"]
 
 # ── variables ─────────────────────────────────────────────────────
 # just evaluates these globally regardless of position; kept at the top (the
@@ -34,9 +35,10 @@ PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
 # scalar in place — so adding a file here is not enough for embedded shell.
 SHELL_SOURCES := "scripts/lib/*.sh .githooks/* policy/ci-observability/*.sh"
 
-# The non-cargo tools `lint` needs: `setup-tools` brew-installs exactly these and
-# `lint` refuses to start without them (plus the cargo ones setup-tools installs).
+# The tools `lint` refuses to start without: `setup-tools` brew-installs the
+# first list and cargo-installs the second.
 LINT_BREW_TOOLS := "shfmt actionlint shellcheck zizmor yq jq check-jsonschema gitleaks"
+LINT_CARGO_TOOLS := "cargo-machete cargo-deny lychee"
 
 # The nightly the api-surface goldens are pinned to (rustdoc JSON is
 # nightly-only). Provisioned by `_api-toolchain`.
@@ -55,7 +57,9 @@ default:
 # ── rust ──────────────────────────────────────────────────────────
 
 # Format check only — fast, gates pre-commit. The justfile has a canonical
-# format too (`just --fmt`), so it is checked with the Rust.
+# format too (`just --fmt`), so it is checked with the Rust; just gives its
+# formatter no cross-version guarantee, so `setup-just` pins CI's just and a
+# local one on another version may disagree.
 [group('rust')]
 fmt-check:
     cargo fmt --all --check
@@ -67,7 +71,6 @@ fmt:
     cargo fmt --all
     just --fmt
 
-# Shell-format check (shfmt) — the `.sh` analog of `fmt-check`.
 # Pairs with the shellcheck house rule: shellcheck lints, shfmt formats. `-i 4`
 # (4-space) matches the prevailing style; no `-ci` so case bodies stay
 # un-indented as written.
@@ -267,7 +270,7 @@ lint:
     # Fail fast with an actionable message when a lint tool is missing, instead
     # of a bare `command not found` (exit 127) buried in a parallel job's log.
     missing=()
-    for t in {{ LINT_BREW_TOOLS }} cargo-machete cargo-deny lychee; do
+    for t in {{ LINT_BREW_TOOLS }} {{ LINT_CARGO_TOOLS }}; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -365,8 +368,9 @@ msrv:
     echo "declared MSRV: $msrv"
     rustup toolchain install "$msrv" --profile minimal --no-self-update >/dev/null 2>&1 || true
     # Clear RUSTFLAGS so the default linker is used: this gate verifies
-    # COMPILATION on the floor, and `.cargo/config.toml`'s lld pin is a linker
-    # choice. (RUSTFLAGS env overrides target.*.rustflags wholesale.)
+    # COMPILATION on the floor and must not also require the lld that
+    # `.cargo/config.toml` pins for x86_64 Linux. (RUSTFLAGS env overrides
+    # target.*.rustflags wholesale.)
     RUSTFLAGS="" rustup run "$msrv" cargo check --workspace
 
 # Reproduce release-plz's semver verdict LOCALLY. Not a gate and not in CI:
@@ -672,55 +676,6 @@ replay fixture delay="3":
 build *args:
     cargo build --workspace {{ args }}
 
-# packaging-build/action.yml keeps its own just-free parse of the same line —
-# that composite deliberately never installs just (see ci-builds.yml).
-[doc("Print the workspace version — release.yml's tag check and release-plz.yml's tag assertion read it")]
-[group('rust')]
-workspace-version:
-    @grep -m1 '^version' Cargo.toml | cut -d'"' -f2
-
-# Pass `true` for targets that need the Docker-backed `cross` toolchain
-# (CI installs it via taiki-e/install-action@cross); anything but true/false
-# fails loudly (the case below).
-[doc('Cross-compile a release for ONE target triple (release.yml build matrix)')]
-[group('rust')]
-build-target target cross="false":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    use_cross="{{ cross }}"
-    # Anything but the two legal words means the caller's positional args
-    # shifted, so fail loudly rather than infer "not true, so cargo".
-    case "$use_cross" in
-    true | false) ;;
-    *)
-        echo "error: cross must be 'true' or 'false', got '$use_cross' (positional args shifted?)" >&2
-        exit 1
-        ;;
-    esac
-    # Every LINUX artifact builds --no-default-features (musl can't link ALSA
-    # statically; the aarch64 cross image has no ALSA headers), so prebuilt
-    # Linux binaries ship SILENT and Linux audio is a from-source feature
-    # (#633; see docs/CONFIGURATION.md). Derived here, not passed: the flag
-    # is a property of the target. $flags stays UNQUOTED below — quoting the
-    # empty non-Linux case would pass cargo an empty positional arg.
-    flags=""
-    case "{{ target }}" in
-    *linux*) flags="--no-default-features" ;;
-    esac
-    if [ "$use_cross" = "true" ]; then
-        cross build --release --target "{{ target }}" $flags
-    else
-        cargo build --release --target "{{ target }}" $flags
-    fi
-
-# `--no-build`: the target is already built by `build-target`. Needs cargo-deb
-# (CI installs it via taiki-e/install-action@cargo-deb).
-[doc('Package the .deb for ONE already-built target (release.yml deb job)')]
-[group('rust')]
-deb target:
-    cargo deb -p pixtuoid --no-build --no-strip --target {{ target }}
-    cargo deb -p pixtuoid-hook --no-build --no-strip --target {{ target }}
-
 # ── site ──────────────────────────────────────────────────────────
 # The Astro landing page — a self-contained Node project under site/ with its
 # own CI (.github/workflows/site.yml). See site/README.md.
@@ -974,7 +929,7 @@ gen-wasm-check:
     done
     echo "gen-wasm-check OK: $W ($WIRE bytes gzipped <= $CAP), pair manifest verified"
 
-# What `--check` compares is scripts/gen-media.py's docstring. Run by
+# scripts/gen-media.py's docstring says what `--check` compares. Run by
 # ci-tests.yml's smoke job; runnable locally
 # before pushing a visual change. A red check after an INTENTIONAL office change
 # means: run `just gen` and commit everything it rewrote in the same change.
@@ -989,6 +944,55 @@ gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check 
     .venv/bin/python3 scripts/gen-pix-icons.py --check
 
 # ── release ───────────────────────────────────────────────────────
+
+# packaging-build/action.yml keeps its own just-free parse of the same line —
+# that composite deliberately never installs just (see ci-builds.yml).
+[doc("Print the workspace version — release.yml's tag check and release-plz.yml's tag assertion read it")]
+[group('release')]
+workspace-version:
+    @grep -m1 '^version' Cargo.toml | cut -d'"' -f2
+
+# Pass `true` for targets that need the Docker-backed `cross` toolchain
+# (CI installs it via taiki-e/install-action@cross); anything but true/false
+# fails loudly (the case below).
+[doc('Cross-compile a release for ONE target triple (release.yml build matrix)')]
+[group('release')]
+build-target target cross="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    use_cross="{{ cross }}"
+    # Anything but the two legal words means the caller's positional args
+    # shifted, so fail loudly rather than infer "not true, so cargo".
+    case "$use_cross" in
+    true | false) ;;
+    *)
+        echo "error: cross must be 'true' or 'false', got '$use_cross' (positional args shifted?)" >&2
+        exit 1
+        ;;
+    esac
+    # Every LINUX artifact builds --no-default-features (musl can't link ALSA
+    # statically; the aarch64 cross image has no ALSA headers), so prebuilt
+    # Linux binaries ship SILENT and Linux audio is a from-source feature
+    # (#633; see docs/CONFIGURATION.md). Derived here, not passed: the flag
+    # is a property of the target. $flags stays UNQUOTED below — quoting the
+    # empty non-Linux case would pass cargo an empty positional arg.
+    flags=""
+    case "{{ target }}" in
+    *linux*) flags="--no-default-features" ;;
+    esac
+    if [ "$use_cross" = "true" ]; then
+        cross build --release --target "{{ target }}" $flags
+    else
+        cargo build --release --target "{{ target }}" $flags
+    fi
+
+# `--no-build`: the target is already built by `build-target`. Needs cargo-deb
+# (CI installs it via taiki-e/install-action@cargo-deb).
+[doc('Package the .deb for ONE already-built target (release.yml deb job)')]
+[group('release')]
+deb target:
+    cargo deb -p pixtuoid --no-build --no-strip --target {{ target }}
+    cargo deb -p pixtuoid-hook --no-build --no-strip --target {{ target }}
 
 # The repo's NODE-side gate (no cargo): the npm package generator AND the bundled
 # OpenClaw plugin contract.
@@ -1035,7 +1039,7 @@ setup-tools:
     # cargo-edit: `cargo set-version --workspace` raises a release PR's version
     # by hand for a break cargo-semver-checks cannot see
     # (docs/CONTRIBUTING.md#releasing).
-    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-edit cargo-insta lychee cargo-public-api@{{ API_PUBLIC_API }})
+    tools=(cargo-nextest {{ LINT_CARGO_TOOLS }} cargo-hack cargo-edit cargo-insta cargo-public-api@{{ API_PUBLIC_API }})
     if command -v cargo-binstall &>/dev/null; then
         cargo binstall -y "${tools[@]}"
     else
@@ -1053,12 +1057,9 @@ setup-tools:
         rustup component add rust-analyzer >/dev/null 2>&1 ||
             echo "could not add the rust-analyzer component — install it for LSP support" >&2
     fi
-    # Non-cargo lint tools `just lint` refuses to start without: shfmt/shellcheck
-    # cover the shell sources, actionlint/zizmor the workflows, yq + jq the CI
-    # contracts, check-jsonschema the schemas. brew on macOS. gitleaks backs
-    # `just fixture-pii`, a REQUIRED gate: without it on PATH the recipe cannot
-    # run at all (it does not degrade to a weaker scan, because a weaker scan is
-    # what it replaced).
+    # `LINT_BREW_TOOLS`, via brew. gitleaks is among them because `just
+    # fixture-pii` is a REQUIRED gate that does not degrade to a weaker scan
+    # without it (a weaker scan is what it replaced).
     for t in {{ LINT_BREW_TOOLS }}; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
