@@ -17,8 +17,9 @@
           "severity": {
             "type": "string",
             "enum": [
-              "HIGH",
-              "MEDIUM"
+              "blocking",
+              "non-blocking",
+              "pre-existing"
             ]
           },
           "path": {

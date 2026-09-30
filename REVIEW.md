@@ -4,12 +4,11 @@ Read [`AGENTS.md`](AGENTS.md) first; these rules add to generic defect hunting.
 
 ## Scope
 
-- **Claude Security Review** applies only [§ Security](#security).
-- Every other reviewer (**Claude Review**, local lenses) applies
-  [What to check](#what-to-check), both [lenses](#lenses) and every matching
-  [escalation](#escalation) row, naming local rows in its summary.
-- All apply [Do not flag](#do-not-flag), the Lenses preamble,
-  [Severity](#severity) and [Output](#output).
+Each reviewer, bot or local, is the one [lens](#lenses) its prompt or brief
+names, and applies [What to check](#what-to-check) through it, every matching
+[escalation](#escalation) row (naming local rows in its summary),
+[Do not flag](#do-not-flag), the Lenses preamble, [Severity](#severity) and
+[Output](#output).
 
 ## What to check
 
@@ -105,9 +104,8 @@ neither bin modules nor examples).
 A trust boundary is the hook shim or socket/named-pipe transport; config
 writes or install targets; path, home, process, permission or credential
 handling; transcript, hook, JSONL, pack or asset ingestion. When the diff
-touches none, the security bot returns clean and its summary says so.
-Otherwise report only a concrete attack or invariant-breaking sequence
-against:
+touches none, the summary says so. Otherwise report only a concrete attack or
+invariant-breaking sequence against:
 
 1. The shim: always exits 0, never blocks the agent CLI, keeps
    `pixtuoid-hook`'s `transport::WRITE_TIMEOUT` bound.
@@ -171,9 +169,6 @@ taste are never posted. Dispositions:
 - `issue (non-blocking)` — any other real defect this PR introduced.
 - `issue (pre-existing)` — real, not introduced here.
 
-Until `review-schema.json`'s enum follows, a bot's `severity` is `HIGH` for
-blocking and `MEDIUM` otherwise.
-
 ## Output
 
 Bots return only the structured result
@@ -181,8 +176,8 @@ Bots return only the structured result
 post or call GitHub APIs:
 
 - `summary`: one sentence.
+- `severity`: the [label](#severity)'s decoration.
 - `path`: repository-relative (the `b/` side of `pr.diff`), never absolute.
 - `line`: the absolute head-side line, never invented.
 - At most the schema's `maxItems` findings, blocking first, pre-existing last.
-- Each `body` opens with its label, then the verified finding and a concrete
-  failure scenario.
+- Each `body`: the verified finding and a concrete failure scenario.

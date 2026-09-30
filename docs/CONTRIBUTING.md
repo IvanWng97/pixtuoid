@@ -72,8 +72,8 @@ run. The jobs:
   capture-tree rules ride `just test` instead.
 - **zizmor** — workflow/action security: symbolic-or-SHA pins,
   credential-dropping checkouts, exact inline suppressions.
-- **The two automatic Claude reviewers**, ruled by [`REVIEW.md`](../REVIEW.md),
-  ride `claude-readonly-review.yml`: a
+- **The two automatic Claude reviewers**, one per [`REVIEW.md`](../REVIEW.md)
+  lens, ride `claude-readonly-review.yml`: a
   read-only model job on the trusted default branch, the PR diff as inert
   data, a separate least-privilege publisher that opens a review thread per
   finding — and a third job that comments
@@ -247,9 +247,10 @@ invariants"), which every contributor and agent reads first.
 
 ### The merge gate
 
-Green CI; both review bots' reviews at the final head; every finding's review
-thread resolved by its disposition; zero open confirmed `issue (blocking)`;
-each matching [local row](../REVIEW.md#escalation) recorded. The local
+Green CI; both lens bots' reviews (`claude-review-correctness`,
+`claude-review-design`) at the final head; every finding's review thread
+resolved by its disposition; zero open confirmed `issue (blocking)`; each
+matching [local row](../REVIEW.md#escalation) recorded. The local
 [`two-lens-review`](../.claude/skills/two-lens-review/SKILL.md) skill is
 otherwise an optional pre-flight. The review job passes even when it posts
 findings, so read each bot's latest comment at HEAD, never the check table
@@ -258,12 +259,12 @@ split the PR smaller, else run one extra differentiated local lens and the
 owner merges, recorded in a PR comment.
 
 The bots never review a fork PR on their own: a maintainer approves its CI
-run, then comments `/claude-review` and `/security-review`, again after every
-push. Its author can resolve their own threads, so before merging read each
+run, then comments `/claude-review` (both lenses), again after every push.
+Its author can resolve their own threads, so before merging read each
 thread's `resolvedBy` and its reply. Its bot verdict is advisory, since the
 author can steer it through the diff, so the maintainer reads the diff too.
-The bots skip Dependabot as an actor, so a maintainer comments both commands
-on its PRs too.
+The bots skip Dependabot as an actor, so a maintainer comments it on its PRs
+too.
 
 ### Dispositions
 
