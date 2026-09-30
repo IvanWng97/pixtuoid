@@ -262,26 +262,25 @@ pub(crate) async fn handle_conn(
                     presence_tx.as_ref(),
                     v.get("_pixtuoid_source")
                         .and_then(serde_json::Value::as_str),
-                ) {
-                    if let Some(decode) = crate::source::registry::presence_decoder_for(src) {
-                        match decode(&v) {
-                            Ok(decoded) => {
-                                let key = crate::source::daemon::DaemonInstanceKey::new(
-                                    src,
-                                    decoded.instance,
-                                );
-                                for u in decoded.updates {
-                                    let _ = ptx.send(crate::source::daemon::PresenceMsg {
-                                        key: key.clone(),
-                                        delta: u,
-                                    });
-                                }
+                ) && let Some(decode) = crate::source::registry::presence_decoder_for(src)
+                {
+                    match decode(&v) {
+                        Ok(decoded) => {
+                            let key = crate::source::daemon::DaemonInstanceKey::new(
+                                src,
+                                decoded.instance,
+                            );
+                            for u in decoded.updates {
+                                let _ = ptx.send(crate::source::daemon::PresenceMsg {
+                                    key: key.clone(),
+                                    delta: u,
+                                });
                             }
-                            Err(e) => warn!(error = %e, "daemon presence decode error"),
                         }
-                        // A daemon produces no AgentEvents — never the agent arms.
-                        continue;
+                        Err(e) => warn!(error = %e, "daemon presence decode error"),
                     }
+                    // A daemon produces no AgentEvents — never the agent arms.
+                    continue;
                 }
                 // Peek the shim-supplied CLI pid BEFORE `v` is consumed by
                 // decode. Deliberately NOT gated on `pid_watch`: the exit-watch

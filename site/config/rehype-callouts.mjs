@@ -11,7 +11,7 @@ function textOf(node) {
   return (node.children || []).map(textOf).join('');
 }
 
-// The FIRST <strong> in document order — the docs' "**Don't chain …**" idiom
+// The FIRST <strong> in document order — the docs' "**Don't …**" idiom
 // puts the imperative there; a plain editorial quote has none → note.
 function firstStrongText(node) {
   if (node.type === 'element' && node.tagName === 'strong') return textOf(node);

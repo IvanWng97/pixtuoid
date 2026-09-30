@@ -41,10 +41,10 @@ pub(crate) fn cascade_exit(
     stamp_root: StampRoot,
     now: SystemTime,
 ) {
-    if stamp_root == StampRoot::Yes {
-        if let Some(slot) = scene.agents.get_mut(&root) {
-            fsm::mark_exiting(slot, now);
-        }
+    if stamp_root == StampRoot::Yes
+        && let Some(slot) = scene.agents.get_mut(&root)
+    {
+        fsm::mark_exiting(slot, now);
     }
     let mut visited: HashSet<AgentId> = HashSet::new();
     visited.insert(root);

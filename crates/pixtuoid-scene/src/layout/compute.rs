@@ -27,8 +27,10 @@ pub(super) const FISH_TANK_ELEVATOR_CLEARANCE: u16 = 2;
 fn couch_pos(cubicle_band: &Bounds, top_margin: u16, west_clear_x: u16) -> Point {
     // `west_clear_x` is the divider wall's east edge — the westmost seat's ground must
     // stay east of it (== band start with no wall, so the clamp is a no-op).
-    let couch_west_reach =
+    let seat_reach =
         (-SEAT_DX[0]) as u16 + furniture_def(Furniture::Couch).footprint.map_or(0, |f| f.w) / 2;
+    // Its side table stands west of it ([`LoungeFlanks`]).
+    let couch_west_reach = seat_reach.max(LoungeFlanks::west_reach());
     Point {
         x: (cubicle_band.x + pct(cubicle_band.width, 35)).max(west_clear_x + couch_west_reach),
         y: top_margin + 3,
@@ -402,7 +404,9 @@ pub(super) fn compute_with_seed(
         + SEAT_DX[SEAT_DX.len() - 1] as u16
         + furniture_def(Furniture::Couch).footprint.map_or(0, |f| f.w) / 2
         + WAYPOINT_STAMP_PAD_PX;
-    let couch_clears_door = door_threshold.is_none_or(|dt| couch_east_ground <= dt.x);
+    let flanks = LoungeFlanks::of(couch_x);
+    let couch_clears_door =
+        door_threshold.is_none_or(|dt| couch_east_ground.max(flanks.east_ground()) <= dt.x);
     let lounge_fits = plan.cubicle_band.width >= LOUNGE_MIN_BAND_W && couch_clears_door;
 
     let (mut waypoints, couch_sprite_center) = compute_waypoints(&plan, &pod_decor, lounge_fits);
@@ -462,14 +466,7 @@ pub(super) fn compute_with_seed(
         floor_lamp,
         side_table: lounge_side_table,
         fish_tank,
-    } = place_lounge_vignette(
-        couch_x,
-        couch_y,
-        plan.lounge_west_clear,
-        buf_w,
-        door,
-        lounge_fits,
-    );
+    } = place_lounge_vignette(couch_x, couch_y, buf_w, door, lounge_fits);
 
     // Two Ficus spots — greeting plant west of the elevator, and the lounge's west flank.
     // On a narrower band each seals a top-strip pocket, hence the ROOMY gate.
@@ -484,20 +481,19 @@ pub(super) fn compute_with_seed(
             });
         }
         if lounge_fits {
-            // Ground is centred on `pos`, so keep its west edge east of the divider.
-            let ficus_half_w = furniture_def(PlantKind::Ficus.furniture())
-                .footprint
-                .map_or(0, |f| f.w)
-                / 2;
-            plant_candidates.push(PlantItem {
-                kind: PlantKind::Ficus,
-                pos: Point {
-                    x: couch_x
-                        .saturating_sub(17)
-                        .max(plan.lounge_west_clear + ficus_half_w),
-                    y: couch_y,
-                },
-            });
+            // A plant's clearance west of the side table, and its ground east
+            // of the divider, or no Ficus.
+            let ficus = furniture_def(PlantKind::Ficus.furniture());
+            let ficus_half_w = ficus.footprint.map_or(0, |f| f.w) / 2;
+            let x = flanks
+                .west()
+                .saturating_sub(PLANT_OBSTACLE_CLEARANCE_PX + ficus.visual.w - ficus.visual.w / 2);
+            if x >= plan.lounge_west_clear + ficus_half_w {
+                plant_candidates.push(PlantItem {
+                    kind: PlantKind::Ficus,
+                    pos: Point { x, y: couch_y },
+                });
+            }
         }
     }
 
@@ -817,6 +813,53 @@ fn bookshelf_x(
     }
 }
 
+/// Clear columns between the lounge couch's drawn box and each flank.
+const LOUNGE_FLANK_GAP: u16 = 1;
+
+/// The columns the lounge couch's flanks stand on, [`LOUNGE_FLANK_GAP`] off its
+/// drawn box: the box is wider than its seats, so a flank inside it paints
+/// over an arm.
+struct LoungeFlanks {
+    side_table_x: u16,
+    lamp_x: u16,
+}
+
+impl LoungeFlanks {
+    fn of(couch_x: u16) -> Self {
+        let couch_w = furniture_def(Furniture::MeetingSofaBody).visual.w;
+        let couch_west = couch_x.saturating_sub(couch_w / 2);
+        let side_w = furniture_def(Furniture::LoungeSideTable).visual.w;
+        let lamp_w = furniture_def(Furniture::FloorLamp).visual.w;
+        Self {
+            side_table_x: couch_west.saturating_sub(LOUNGE_FLANK_GAP + side_w - side_w / 2),
+            lamp_x: couch_west + couch_w + LOUNGE_FLANK_GAP + lamp_w / 2,
+        }
+    }
+
+    /// Columns from the couch's centre west to the side table's west edge.
+    fn west_reach() -> u16 {
+        let couch_w = furniture_def(Furniture::MeetingSofaBody).visual.w;
+        let side_w = furniture_def(Furniture::LoungeSideTable).visual.w;
+        couch_w / 2 + LOUNGE_FLANK_GAP + side_w
+    }
+
+    /// The side table's west column.
+    fn west(&self) -> u16 {
+        self.side_table_x
+            .saturating_sub(furniture_def(Furniture::LoungeSideTable).visual.w / 2)
+    }
+
+    /// The column past the floor lamp's padded ground.
+    fn east_ground(&self) -> u16 {
+        self.lamp_x
+            + furniture_def(Furniture::FloorLamp)
+                .footprint
+                .map_or(0, |f| f.w)
+                / 2
+            + OBSTACLE_PAD_PX
+    }
+}
+
 /// The lounge vignette singletons, all anchored to the viewing couch and gated
 /// as ONE cluster on `lounge_fits`.
 struct LoungeVignette {
@@ -827,26 +870,23 @@ struct LoungeVignette {
 
 /// The lounge vignette around the viewing couch — floor lamp, side table, aquarium.
 /// The lamp sits just east so its halo bathes the seating area at night; the side table
-/// takes the OPPOSITE (west) flank, clamped clear of the room-divider column. The
+/// takes the OPPOSITE (west) flank ([`LoungeFlanks`]). The
 /// aquarium carries an EXTRA gate the other two don't: it must stay clear of the
 /// elevator `door` column so the spawn threshold never routes around it.
 fn place_lounge_vignette(
     couch_x: u16,
     couch_y: u16,
-    west_clear_x: u16,
     buf_w: u16,
     door: Option<Point>,
     lounge_fits: bool,
 ) -> LoungeVignette {
+    let flanks = LoungeFlanks::of(couch_x);
     let floor_lamp = lounge_fits.then_some(Point {
-        x: couch_x + 9,
+        x: flanks.lamp_x,
         y: couch_y + 2,
     });
-    let side_half_w = furniture_def(Furniture::LoungeSideTable).visual.w / 2;
-    // The west edge must clear `west_clear_x`, else at the minimum band width
-    // `couch_x − 10` drops the table onto the wall.
     let side_table = lounge_fits.then_some(Point {
-        x: couch_x.saturating_sub(10).max(west_clear_x + side_half_w),
+        x: flanks.side_table_x,
         y: couch_y + 2,
     });
     let fish_tank = floor_lamp.and_then(|lamp| {
@@ -1545,14 +1585,7 @@ fn compute_waypoints(
         }
     }
     for &PodDecorItem { kind, pos } in pod_decor {
-        // Exhaustive (no `_`): a NEW PodDecor must make a deliberate wander decision
-        // here — `None` = pure decor, `Some(kind)` = also a walkable destination.
-        let wp_kind = match kind {
-            PodDecor::PhoneBooth => Some(WaypointKind::PhoneBooth),
-            PodDecor::StandingDesk => Some(WaypointKind::StandingDesk),
-            PodDecor::PlantTall | PodDecor::Whiteboard | PodDecor::Tv => None,
-        };
-        if let Some(wp_kind) = wp_kind {
+        if let Some(wp_kind) = kind.waypoint() {
             waypoints.push(Waypoint {
                 pos,
                 kind: wp_kind,

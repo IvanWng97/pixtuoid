@@ -728,10 +728,10 @@ async fn codex_permission_flow_fixture_drives_the_reducer_through_waiting() {
         match tokio::time::timeout(Duration::from_millis(300), rx.recv()).await {
             Ok(Some((transport, ev))) => {
                 reducer.apply(&mut scene, ev, std::time::SystemTime::now(), transport);
-                if let Some(slot) = scene.agents.values().next() {
-                    if states.last() != Some(&slot.state) {
-                        states.push(slot.state.clone());
-                    }
+                if let Some(slot) = scene.agents.values().next()
+                    && states.last() != Some(&slot.state)
+                {
+                    states.push(slot.state.clone());
                 }
             }
             // A quiet gap once the finite fixture has been folded is the normal

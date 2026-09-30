@@ -14,10 +14,10 @@ Two axes, in order of sharpness:
    CLIs installed, so there is nothing for it to compare against.
 2. **Age** — a recorded fixture older than `--max-age-days`.
 
-Advisory by design, exit 3 for "candidates found" (`corpus_check`'s advisory code:
-a stale fixture is a re-capture candidate, not a defect). The capture-tree RULES
-are not advisory and are not here — they are Rust tests in
-`tests/sources/captures.rs`, so they ride `just test` on all three platforms.
+Advisory by design, exit 3 for "candidates found": a stale fixture is a
+re-capture candidate, not a defect. The capture-tree RULES are not advisory and
+are not here — they are Rust tests in `tests/sources/captures.rs`, so they ride
+`just test` on all three platforms.
 
     scripts/fixture-age.py                     # the report
 """
@@ -57,7 +57,7 @@ def version_probes() -> dict[str, list[str]]:
     """The registry's OWN probes, read through `corpus_check --roster` column 5.
 
     A hand-copied table here shipped already missing `agy`, silently — the exact
-    "reuse an authority, never re-copy it" rule the root CLAUDE.md states. An
+    "reuse an authority, never re-copy it" rule the root AGENTS.md states. An
     unbuilt roster degrades to no version comparison rather than a wrong one.
     """
     if not ROSTER.is_file():

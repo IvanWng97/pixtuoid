@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
@@ -6,7 +6,9 @@ use image::codecs::gif::{GifEncoder, Repeat};
 use image::{Delay, Frame as GifFrame, Rgb as ImgRgb, RgbImage, Rgba, RgbaImage};
 use pixtuoid::tui::renderer::{DrawCtx, draw_scene};
 use pixtuoid_core::SceneState;
-use pixtuoid_core::sprite::RgbBuffer;
+use pixtuoid_core::sprite::format::Pack;
+use pixtuoid_scene::floor::{FloorMeta, PerFloor};
+use pixtuoid_scene::theme::Theme;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
@@ -397,150 +399,169 @@ pub(crate) fn cells_to_rgba(
     rgba
 }
 
+/// A capture's frame clock — `secs` of frames at `fps` from `start` — shared by
+/// the gif encoders and the proof frames.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Timeline {
+    pub(crate) fps: u64,
+    pub(crate) secs: u64,
+    pub(crate) start: SystemTime,
+}
+
+impl Timeline {
+    pub(crate) fn frame_count(&self) -> usize {
+        (self.secs * self.fps) as usize
+    }
+
+    /// Frame `i`'s offset from `start`. Exact, not `i * frame_ms`: the truncated
+    /// `frame_ms` accumulates, drifting every time-derived element off the wall
+    /// clock by the last frame — and a late --navigate-at then never fires.
+    ///
+    /// This does NOT make the site's `loop`ed clip seam-free, and no timing choice
+    /// can: `mascot_wander` picks each cycle's destination from a hash of the cycle
+    /// NUMBER, so the wander is aperiodic BY DESIGN and frame N is never frame 0
+    /// however the duration is chosen. Closing it would mean a scripted
+    /// (non-wandering) timeline for the demo — a media decision, not a rendering one.
+    pub(crate) fn elapsed_ms(&self, i: usize) -> u64 {
+        i as u64 * 1000 / self.fps.max(1)
+    }
+
+    pub(crate) fn now(&self, i: usize) -> SystemTime {
+        self.start + Duration::from_millis(self.elapsed_ms(i))
+    }
+}
+
+/// One gif capture. `scene`, `pack` and `theme` are what each path's per-frame
+/// render reads; [`GifJob::encode`] itself only clocks and encodes.
+pub(crate) struct GifJob<'a> {
+    pub(crate) path: &'a Path,
+    pub(crate) cols: u16,
+    pub(crate) rows: u16,
+    pub(crate) timeline: Timeline,
+    pub(crate) scene: &'a SceneState,
+    pub(crate) pack: &'a Pack,
+    pub(crate) theme: &'static Theme,
+}
+
+impl GifJob<'_> {
+    /// Call `render` once per frame on `state` — `skip_ms` of pre-roll first,
+    /// rendered but not encoded — then encode the cell buffer `cells` reads back.
+    fn encode<S>(
+        &self,
+        skip_ms: u64,
+        state: &mut S,
+        mut render: impl FnMut(&mut S, SystemTime, u64) -> Result<()>,
+        cells: impl Fn(&S) -> &ratatui::buffer::Buffer,
+    ) -> Result<()> {
+        let Timeline { fps, secs, .. } = self.timeline;
+        let frame_count = self.timeline.frame_count();
+        let frame_ms = 1000 / fps.max(1);
+        let skip_frames = (skip_ms / frame_ms.max(1)) as usize;
+        let img_w = self.cols as u32 * CELL_W;
+        let img_h = self.rows as u32 * CELL_H;
+
+        let file = std::fs::File::create(self.path)?;
+        let mut encoder = GifEncoder::new(file);
+        encoder.set_repeat(Repeat::Infinite)?;
+
+        for i in 0..(skip_frames + frame_count) {
+            let elapsed_ms = self.timeline.elapsed_ms(i);
+            render(state, self.timeline.now(i), elapsed_ms)?;
+            if i < skip_frames {
+                continue;
+            }
+            let rgba = cells_to_rgba(cells(state), self.cols, self.rows, img_w, img_h);
+            let delay = Delay::from_numer_denom_ms(frame_ms as u32, 1);
+            encoder.encode_frame(GifFrame::from_parts(rgba, 0, 0, delay))?;
+            let cap = i + 1 - skip_frames;
+            if cap.is_multiple_of(fps as usize) {
+                eprint!("\r  encoding: {}/{secs}s", cap / fps as usize);
+            }
+        }
+        eprintln!("\r  encoded {frame_count} frames @ {fps}fps");
+        Ok(())
+    }
+}
+
 /// Drive the real TuiRenderer (slide transition, footer floor chip, pet motion) frame by
 /// frame and encode its TestBackend cell buffer.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn save_renderer_gif(
+    job: &GifJob,
     term: Terminal<TestBackend>,
-    scene: &SceneState,
-    pack: &pixtuoid_core::sprite::format::Pack,
-    start_now: SystemTime,
-    path: &PathBuf,
-    cols: u16,
-    rows: u16,
-    fps: u64,
-    duration_secs: u64,
-    theme: &'static pixtuoid_scene::theme::Theme,
     navigations: &[(u64, usize)],
     pets: Vec<pixtuoid_scene::pet::Pet>,
 ) -> Result<()> {
-    let frame_count = (duration_secs * fps) as usize;
-    let frame_ms = 1000 / fps.max(1);
-    let img_w = cols as u32 * CELL_W;
-    let img_h = rows as u32 * CELL_H;
-
-    let file = std::fs::File::create(path)?;
-    let mut encoder = GifEncoder::new(file);
-    encoder.set_repeat(Repeat::Infinite)?;
-
-    let mut r = pixtuoid::tui::tui_renderer::TuiRenderer::new(term, theme, pets);
+    let mut r = pixtuoid::tui::tui_renderer::TuiRenderer::new(term, job.theme, pets);
     let mut fired = vec![false; navigations.len()];
-    for i in 0..frame_count {
-        // Exact, not `i * frame_ms`: the truncated `frame_ms` accumulates, and the gif
-        // then ends early enough that a late --navigate-at never fires.
-        let elapsed_ms = i as u64 * 1000 / fps.max(1);
-        let now = start_now + Duration::from_millis(elapsed_ms);
-        for floor in due_navigations(navigations, &mut fired, elapsed_ms) {
-            r.navigate_floor(floor, now);
-        }
-        r.render(scene, pack, now)?;
-        let rgba = cells_to_rgba(r.terminal.backend().buffer(), cols, rows, img_w, img_h);
-        let delay = Delay::from_numer_denom_ms(frame_ms as u32, 1);
-        encoder.encode_frame(GifFrame::from_parts(rgba, 0, 0, delay))?;
-        let cap = i + 1;
-        if cap.is_multiple_of(fps as usize) {
-            eprint!("\r  encoding: {}/{}s", cap / fps as usize, duration_secs);
-        }
-    }
-    eprintln!("\r  encoded {frame_count} frames @ {fps}fps");
-    Ok(())
+    // 0, not the caller's skip_ms: clap keeps every pre-roll flag off this path
+    // (`conflicts_with` on --navigate-at / --pets), and a pre-roll would shift the
+    // --navigate-at schedule off the encoded clip's t=0.
+    job.encode(
+        0,
+        &mut r,
+        |r, now, elapsed_ms| {
+            for floor in due_navigations(navigations, &mut fired, elapsed_ms) {
+                r.navigate_floor(floor, now);
+            }
+            r.render(job.scene, job.pack, now)
+        },
+        |r| r.terminal.backend().buffer(),
+    )
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Drive `draw_scene` over one floor and encode it; `skip_ms` (from --anim,
+/// --meeting or --warmup-secs) starts the clip mid-action.
 pub(crate) fn save_as_gif(
+    job: &GifJob,
     term: &mut Terminal<TestBackend>,
-    scene: &SceneState,
-    pack: &pixtuoid_core::sprite::format::Pack,
-    start_now: SystemTime,
-    path: &PathBuf,
-    cols: u16,
-    rows: u16,
-    buf: &mut RgbBuffer,
-    store: &mut pixtuoid_scene::floor::FloorCtx,
-    fps: u64,
-    duration_secs: u64,
-    theme: &pixtuoid_scene::theme::Theme,
-    floor_seed: u64,
+    floor: &mut PerFloor,
+    floor_meta: FloorMeta,
     skip_ms: u64,
     debug_walkable: bool,
 ) -> Result<()> {
-    let frame_count = (duration_secs * fps) as usize;
-    let frame_ms = 1000 / fps.max(1);
-    // Pre-roll: render (advancing the persistent motion state) WITHOUT encoding for
-    // `skip_ms`, so an `--anim` capture starts at the agent's walk-out instead of its
-    // long seated dwell.
-    let skip_frames = (skip_ms / frame_ms.max(1)) as usize;
-    let img_w = cols as u32 * CELL_W;
-    let img_h = rows as u32 * CELL_H;
-
-    let file = std::fs::File::create(path)?;
-    let mut encoder = GifEncoder::new(file);
-    encoder.set_repeat(Repeat::Infinite)?;
-
+    let scene = job.scene;
     let mut chitchat_state = std::collections::HashMap::new();
-    for i in 0..(skip_frames + frame_count) {
-        // Exact, not `i * frame_ms` — the truncated frame_ms accumulates, drifting
-        // every time-derived element off the wall clock by the last frame.
-        //
-        // This does NOT make the site's `loop`ed clip seam-free, and no timing choice
-        // can: `mascot_wander` picks each cycle's destination from a hash of the cycle
-        // NUMBER, so the wander is aperiodic BY DESIGN and frame N is never frame 0
-        // however the duration is chosen. Closing it would mean a scripted
-        // (non-wandering) timeline for the demo — a media decision, not a rendering one.
-        let now = start_now + Duration::from_millis(i as u64 * 1000 / fps.max(1));
-        let mut draw_ctx = DrawCtx {
-            buf,
-            store,
-            mouse_pos: None,
-            debug_walkable,
-            theme,
-            theme_picker: None,
-            floor_info: None,
-            per_floor: Default::default(),
-            // DERIVED from the scene, as the runtime does — all THREE DrawCtx sites in
-            // this example must agree. A hardcoded `None` keeps the `⬢gw` chip off the
-            // very clip whose job is demoing the gateway, and clips are NOT pixel-gated
-            // by `gen-check`, so nothing would catch it.
-            gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-            audio_audible: false,
-            volume_flash: None,
-            floor: {
-                let mut m = pixtuoid_scene::floor::FloorMeta::ground();
-                m.floor_seed = floor_seed;
-                m
-            },
-            active_pet: None,
-            last_pet_pos: None,
-            last_mascots: Vec::new(),
-            floor_pet: None,
-            chitchat_state: &mut chitchat_state,
-            chitchat_bubbles: Vec::new(),
-            coffee: &std::collections::HashMap::new(),
-            new_coffee_carriers: Vec::new(),
-            occupied_waypoints: Default::default(),
-            popup_scale: 0.0,
-            help_open: false,
-            source_warning: None,
-            dashboard: &pixtuoid::tui::dashboard::DashboardFrame::default(),
-            connection: &pixtuoid::tui::connection::ConnectionFrame::default(),
-            onboarding: &pixtuoid::tui::welcome::OnboardingFrame::default(),
-        };
-        draw_scene(term, scene, pack, now, &mut draw_ctx)?;
-        if i < skip_frames {
-            continue; // pre-roll: advance the motion state, don't encode
-        }
-
-        let rgba = cells_to_rgba(term.backend().buffer(), cols, rows, img_w, img_h);
-        let delay = Delay::from_numer_denom_ms(frame_ms as u32, 1);
-        let frame = GifFrame::from_parts(rgba, 0, 0, delay);
-        encoder.encode_frame(frame)?;
-        let cap = i + 1 - skip_frames;
-        if cap.is_multiple_of(fps as usize) {
-            eprint!("\r  encoding: {}/{}s", cap / fps as usize, duration_secs);
-        }
-    }
-    eprintln!("\r  encoded {frame_count} frames @ {fps}fps");
-    Ok(())
+    job.encode(
+        skip_ms,
+        term,
+        |term, now, _| {
+            let mut draw_ctx = DrawCtx {
+                buf: &mut floor.buf,
+                store: &mut floor.ctx,
+                mouse_pos: None,
+                debug_walkable,
+                theme: job.theme,
+                theme_picker: None,
+                floor_info: None,
+                per_floor: Default::default(),
+                // DERIVED from the scene, as the runtime does — all THREE DrawCtx sites in
+                // this example must agree. A hardcoded `None` keeps the `⬢gw` chip off the
+                // very clip whose job is demoing the gateway, and clips are NOT pixel-gated
+                // by `gen-check`, so nothing would catch it.
+                gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
+                audio_audible: false,
+                volume_flash: None,
+                floor: floor_meta,
+                active_pet: None,
+                last_pet_pos: None,
+                last_mascots: Vec::new(),
+                floor_pet: None,
+                chitchat_state: &mut chitchat_state,
+                chitchat_bubbles: Vec::new(),
+                coffee: &std::collections::HashMap::new(),
+                new_coffee_carriers: Vec::new(),
+                occupied_waypoints: Default::default(),
+                popup_scale: 0.0,
+                help_open: false,
+                source_warning: None,
+                dashboard: &pixtuoid::tui::dashboard::DashboardFrame::default(),
+                connection: &pixtuoid::tui::connection::ConnectionFrame::default(),
+                onboarding: &pixtuoid::tui::welcome::OnboardingFrame::default(),
+            };
+            draw_scene(term, scene, job.pack, now, &mut draw_ctx).map(drop)
+        },
+        |term| term.backend().buffer(),
+    )
 }
 
 /// Bounded rect fill shared by the RGB + RGBA paths — generic over
