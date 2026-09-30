@@ -591,15 +591,14 @@ mod tests {
                         + std::time::Duration::from_millis(cycle * 40_000 + 34_000);
                     if let Some((p, _, anim, _)) =
                         pet_position(PetKind::Cat, &l, &pack, now, &[], false, seed)
+                        && !anim.contains("walk")
                     {
-                        if !anim.contains("walk") {
-                            assert!(
-                                l.is_visually_clear(p),
-                                "{w}x{h} seed {seed} cycle {cycle}: a resting cat at {p:?} \
+                        assert!(
+                            l.is_visually_clear(p),
+                            "{w}x{h} seed {seed} cycle {cycle}: a resting cat at {p:?} \
                                  is under a sprite that paints over it"
-                            );
-                            rests += 1;
-                        }
+                        );
+                        rests += 1;
                     }
                 }
             }

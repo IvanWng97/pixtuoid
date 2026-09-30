@@ -29,6 +29,8 @@ impl MeetingTrio {
             .y
             .saturating_sub(north.y)
             .saturating_add(MEETING_RUG_OVERHANG)
+            // A trio by the south edge shortens its rug, still centred on the
+            // table.
             .min(
                 buf_h
                     .saturating_sub(self.table.y)
@@ -163,23 +165,6 @@ impl MeetingRoom {
         })
     }
 
-    /// The notice board's box, in the room's south-west corner — `None` on a
-    /// room too small to hang it.
-    pub(crate) fn notice_board_rect(&self) -> Option<Bounds> {
-        const BOARD: crate::layout::Size = crate::layout::Size { w: 8, h: 5 };
-        /// Columns from the room's west edge to the board.
-        const BOARD_DX: u16 = 4;
-        /// Rows from the room's south edge up to the board's top.
-        const BOARD_RISE: u16 = 8;
-        let b = self.bounds;
-        (b.height > 20 && b.width > 15).then(|| Bounds {
-            x: b.x + BOARD_DX,
-            y: b.y + b.height - BOARD_RISE,
-            width: BOARD.w,
-            height: BOARD.h,
-        })
-    }
-
     /// The east edge past which the wall-band bookshelf must drain to clear the
     /// sofa's padded ground — read from the REAL placed sofa, NOT reconstructed
     /// from `bounds`, so a sofa resize can't desync it from `mask`'s
@@ -199,6 +184,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_meeting_rug_ends_on_the_floor() {
+        for (w, h) in [(96u16, 60u16), (160, 96), (240, 144), (320, 180)] {
+            for seed in 0..8 {
+                let Some(layout) = crate::layout::Layout::compute_with_seed(w, h, None, seed)
+                else {
+                    continue;
+                };
+                for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio) {
+                    let rug = trio.rug(layout.buf_h);
+                    assert!(
+                        rug.y + rug.height <= layout.buf_h,
+                        "{w}x{h} seed {seed}: {rug:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn a_meeting_rug_reaches_no_further_than_the_table_is_from_the_south_edge() {
         let x = 40;
         let trio = MeetingTrio {
@@ -215,6 +219,12 @@ mod tests {
             trio.rug(200).height,
             90 - 50 + MEETING_RUG_OVERHANG,
             "sofa to sofa where the office allows"
+        );
+        let edge = trio.table.y + MEETING_RUG_OVERHANG / 2;
+        assert_eq!(
+            trio.rug(edge).height,
+            edge - trio.table.y + MEETING_RUG_OVERHANG,
+            "nearer the edge than the overhang"
         );
     }
 }

@@ -117,7 +117,6 @@ DESK_ART_W = 14
 DESK_BEZEL_RAISE = 1
 # `layout`'s `DESK_SURFACE_ROWS`, `DESK_FRONT_ROWS`, `DESK_LEG_ROWS`.
 DESK_SURFACE_ROWS, DESK_FRONT_ROWS, DESK_LEG_ROWS = 5, 1, 2
-DESK_ART_H = DESK_BEZEL_RAISE + DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS
 # The back-turned desk's extra rows, all above, so the occupant (who y-sorts in
 # FRONT of the desk) leaves the upper screen row clear. Its lower screen row
 # sits inside the wood, flanked by it: the owner picked a monitor standing on
@@ -255,6 +254,15 @@ SEAT_Y, BELT_Y = 36, 38
 # Where a sleeve ends and a hanging hand begins.
 CUFF_Y = 34
 SKIN_KEYS = {SKIN, SKIN_SH}
+
+
+def grounded(frames):
+    """`frames` moved down together until their lowest drawn row is the canvas's
+    last: both painters ground and sort a piece on its box's bottom row."""
+    blank = min(
+        next((i for i, row in enumerate(reversed(g)) if any(c != T for c in row)), 0) for g in frames
+    )
+    return [[[T] * len(g[0])] * blank + g[: len(g) - blank] for g in frames]
 
 
 def union_outline(g, k=SILHOUETTE):
@@ -2108,6 +2116,580 @@ def meeting_table_1x():
     return g
 
 
+# ---- the fixtures: the pantry's island and corner, the lounge, the meeting room, the wall -
+# Recoloured from the theme (pixel_painter::palette::fixture_overrides).
+TANK_WATER, TANK_WATER_DP, TANK_LINE = "Д", "д", "З"
+TANK_FISH, TANK_FISH_SH, TANK_FISH_ALT, TANK_FISH_ALT_SH = "И", "и", "Л", "л"
+TANK_PLANT, TANK_PLANT_SH = "Ь", "ь"
+TRIM_DARK, TRIM_DARK_LT = "ж", "ν"
+COOLER, COOLER_LT, COOLER_SH = "б", "в", "ё"
+MAGAZINE, MAGAZINE_EDGE = "ы", "э"
+COATS, COATS_SH = ("ч", "ш", "щ"), ("α", "β", "γ")
+CLOCK_RIM, CLOCK_RIM_LT, CLOCK_FACE, CLOCK_FACE_SH, CLOCK_HAND = "ф", "η", "ц", "ε", "з"
+# Un-themed: the cooler's bottle in the classic's own blue, the bin in the pack's nearest greys.
+WATER, WATER_SH = "χ", "τ"
+BIN, BIN_RIM, BIN_SH = "φ", "6", "7"
+DOOR_FRAME, CHROME = "E", "K"
+
+
+# `Furniture::KitchenIsland`'s visual box; its top two rows are the counter.
+ISLAND_W, ISLAND_H = 20, 7
+ISLAND_TOP_ROWS = 2
+
+
+def kitchen_island():
+    """The kitchen island: a lit wood counter overhanging its cabinets, a fruit
+    bowl and a mug on it, four doors with their pulls, the toe-kick in shade."""
+    w, h = ISLAND_W * S, ISLAND_H * S
+    g = canvas(w, h)
+    top = ISLAND_TOP_ROWS * S
+    # the cabinets, a logical column in under the counter's overhang
+    rect(g, S + 1, top, w - S - 1, h - 3, WOOD)
+    rect(g, w - S - 4, top, w - S - 1, h - 3, WOOD_SH)  # the east face turned from the light
+    rect(g, S + 1, top, w - S - 1, top + 1, WOOD_DK)  # the counter's shadow on the doors
+    doors = 4
+    span = (w - 2 * S - 2) // doors
+    for i in range(doors):
+        x0 = S + 1 + i * span
+        rect(g, x0 + 2, top + 3, x0 + span - 2, h - 6, WOOD_SH)  # the recessed panel
+        rect(g, x0 + 3, top + 4, x0 + span - 3, h - 7, WOOD)
+        if i:
+            rect(g, x0, top + 1, x0 + 1, h - 3, WOOD_DK)  # the seam between doors
+        px = x0 + span - 4 if i % 2 == 0 else x0 + 3  # the pulls face the seam they share
+        rect(g, px, top + 6, px + 1, top + 10, LAMP_HI)
+    rect(g, S + 1, h - 5, w - S - 1, h - 3, SHADOW)  # the toe-kick
+    # the counter: lit top, its far edge catching the light, its lip in shade
+    rect(g, 1, 1, w - 1, top + 2, WOOD_LT)
+    rect(g, 1, 1, w - 1, 2, WOOD_HI)
+    rect(g, 1, top, w - 1, top + 2, WOOD)
+    rect(g, 1, top + 1, w - 1, top + 2, WOOD_SH)
+    for x, y in ((1, 1), (w - 2, 1), (1, top + 1), (w - 2, top + 1)):
+        put(g, x, y, T)  # rounded corners
+    rect(g, 9, 3, 21, 7, OFFWHITE)
+    rect(g, 10, 7, 20, 8, OFFWHITE_SH)
+    for x, y, k in ((10, 2, RED), (13, 2, GREEN), (16, 2, VERMILION), (12, 4, GOLD), (15, 4, RED)):
+        rect(g, x, y, x + 3, y + 3, k)
+        put(g, x, y, WHITE)
+    # a mug, east, clear of the bowl
+    desk_mug(g, w - 16, 3)
+    union_outline(g)
+    return g
+
+
+def kitchen_island_1x():
+    """The kitchen island at 1x: the counter lit along its far edge with the
+    fruit and a mug on it, the cabinets under its overhang split into two doors
+    with their pulls, the base in shade."""
+    g = canvas(ISLAND_W, ISLAND_H)
+    rect(g, 0, 0, ISLAND_W, 1, WOOD_HI)
+    rect(g, 0, 1, ISLAND_W, ISLAND_TOP_ROWS, WOOD_LT)
+    rect(g, 1, ISLAND_TOP_ROWS, ISLAND_W - 1, ISLAND_H - 1, WOOD)
+    rect(g, 1, ISLAND_H - 1, ISLAND_W - 1, ISLAND_H, WOOD_SH)
+    for x, y in ((0, 0), (ISLAND_W - 1, 0)):
+        put(g, x, y, T)
+    mid = ISLAND_W // 2
+    rect(g, mid, ISLAND_TOP_ROWS, mid + 1, ISLAND_H - 1, WOOD_DK)
+    put(g, mid - 2, 3, WOOD_DK)
+    put(g, mid + 2, 3, WOOD_DK)
+    put(g, 3, 0, RED)
+    put(g, 4, 0, GOLD)
+    put(g, ISLAND_W - 5, 0, MUG)
+    return g
+
+
+# `Furniture::LoungeSideTable`'s visual box.
+SIDE_TABLE_W, SIDE_TABLE_H = 7, 4
+
+
+def side_table():
+    """The lounge side table: a lit wood top with a magazine lying on a second,
+    its front edge in shade on two legs."""
+    w, h = SIDE_TABLE_W * S, SIDE_TABLE_H * S
+    g = canvas(w, h)
+    rect(g, 1, 1, w - 1, 11, WOOD_LT)
+    rect(g, 1, 1, w - 1, 2, WOOD_HI)
+    rect(g, 1, 10, w - 1, 12, WOOD)
+    rect(g, 1, 11, w - 1, 12, WOOD_SH)
+    for x0 in (3, w - 6):
+        rect(g, x0, 12, x0 + 3, h - 1, WOOD_DK)
+        rect(g, x0, 12, x0 + 1, h - 1, WOOD_SH)
+    # the magazines: the lower one askew, the upper with its title band
+    rect(g, 10, 4, 22, 9, MAGAZINE_EDGE)
+    rect(g, 7, 3, 19, 9, MAGAZINE)
+    rect(g, 7, 8, 19, 9, MAGAZINE_EDGE)
+    rect(g, 9, 4, 17, 5, WHITE)
+    rect(g, 9, 6, 13, 7, OFFWHITE)
+    union_outline(g)
+    return g
+
+
+def side_table_1x():
+    """The side table at 1x: its lit top with a magazine on it, the front edge
+    in shade."""
+    g = canvas(SIDE_TABLE_W, SIDE_TABLE_H)
+    rect(g, 0, 0, SIDE_TABLE_W, 1, WOOD_HI)
+    rect(g, 0, 1, SIDE_TABLE_W, SIDE_TABLE_H - 1, WOOD_LT)
+    rect(g, 0, SIDE_TABLE_H - 1, SIDE_TABLE_W, SIDE_TABLE_H, WOOD_SH)
+    cx, cy = SIDE_TABLE_W // 2, SIDE_TABLE_H // 2
+    rect(g, cx - 1, cy - 1, cx + 2, cy, MAGAZINE)
+    rect(g, cx - 1, cy, cx + 2, cy + 1, MAGAZINE_EDGE)
+    return g
+
+
+# `PantryRoom::water_cooler_rect`'s size.
+COOLER_W, COOLER_H = 3, 6
+# The glug: a bubble climbs the bottle, then the water stills.
+GLUG_STEPS = 5
+
+
+def water_cooler():
+    """A water cooler: the upturned bottle lit down its west side over the
+    cabinet, its hot and cold taps over the drip tray; a bubble glugs up the
+    bottle, then the water stills."""
+    def body(bubble):
+        w, h = COOLER_W * S, COOLER_H * S
+        g = canvas(w, h)
+        rect(g, 2, 1, w - 2, 10, WATER)  # the bottle, upside down
+        put(g, 2, 1, T)
+        put(g, w - 3, 1, T)
+        rect(g, w - 4, 2, w - 2, 10, WATER_SH)
+        rect(g, 3, 3, 4, 8, CYAN)  # its glint
+        rect(g, 4, 10, w - 4, 12, WATER_SH)  # the neck, into the cabinet
+        rect(g, 1, 11, w - 1, h - 1, COOLER)
+        rect(g, 1, 11, w - 1, 12, COOLER_LT)
+        rect(g, w - 3, 12, w - 1, h - 1, COOLER_SH)
+        rect(g, 3, 14, w - 3, 19, SHADOW)  # the dispensing alcove
+        put(g, 4, 14, RED)
+        put(g, 4, 15, RED)
+        put(g, w - 5, 14, BLUE)
+        put(g, w - 5, 15, BLUE)
+        rect(g, 3, 18, w - 3, 19, GREY)  # the drip tray
+        if bubble is not None:
+            bx, by = bubble
+            rect(g, bx, by, bx + 2, by + 2, TANK_LINE)
+        union_outline(g)
+        return g
+    rises = [(5, 7), (5, 3)]
+    return [body(rises[i] if i < len(rises) else None) for i in range(GLUG_STEPS)]
+
+
+def water_cooler_1x():
+    """The water cooler at 1x: the bottle, glinting west, over the cabinet shaded
+    east; a bubble glugs up the bottle, then the water stills."""
+    def body(bubble_y):
+        g = canvas(COOLER_W, COOLER_H)
+        rect(g, 0, 0, COOLER_W, 2, WATER)
+        put(g, 0, 0, CYAN)
+        rect(g, 0, 2, COOLER_W, COOLER_H, COOLER)
+        rect(g, COOLER_W - 1, 2, COOLER_W, COOLER_H, COOLER_SH)
+        if bubble_y is not None:
+            put(g, 1, bubble_y, TANK_LINE)
+        return g
+    rises = [1, 0]
+    return [body(rises[i] if i < len(rises) else None) for i in range(GLUG_STEPS)]
+
+
+# `PantryRoom::trash_bin_rect`'s size.
+BIN_W, BIN_H = 4, 5
+
+
+def trash_bin():
+    """The pantry's trash bin: its rim lit, the bag's liner folded over it with a crumpled
+    sheet on top, the ribbed body shaded east."""
+    w, h = BIN_W * S, BIN_H * S
+    g = canvas(w, h)
+    rect(g, 2, 7, w - 2, h - 1, BIN)  # the body
+    rect(g, 3, 15, w - 3, h - 1, BIN)
+    rect(g, 2, 15, 3, h - 1, T)
+    rect(g, w - 3, 15, w - 2, h - 1, T)
+    rect(g, 2, 7, 4, 15, BIN_RIM)
+    rect(g, w - 4, 7, w - 2, 15, BIN_SH)
+    for x in range(5, w - 4, 3):
+        rect(g, x, 8, x + 1, h - 2, BIN_SH)  # ribs
+    rect(g, 1, 3, w - 1, 7, BIN_RIM)  # the rim
+    rect(g, 3, 4, w - 3, 7, OFFWHITE)  # the liner inside it
+    rect(g, 3, 6, w - 3, 7, OFFWHITE_SH)
+    rect(g, 7, 1, 11, 5, OFFWHITE)  # a crumpled sheet
+    put(g, 9, 2, OFFWHITE_SH)
+    put(g, 8, 3, OFFWHITE_SH)
+    put(g, 10, 4, OFFWHITE_SH)
+    union_outline(g)
+    return g
+
+
+def trash_bin_1x():
+    """The trash bin at 1x: the rim round the liner, the bag's fill, the body
+    shaded east."""
+    g = canvas(BIN_W, BIN_H)
+    rect(g, 0, 0, BIN_W, 1, BIN_RIM)
+    rect(g, 1, 0, BIN_W - 1, 1, OFFWHITE)
+    rect(g, 0, 1, BIN_W, BIN_H, BIN)
+    rect(g, 1, 1, BIN_W - 1, 2, OFFWHITE_SH)
+    rect(g, BIN_W - 1, 2, BIN_W, BIN_H, BIN_SH)
+    return g
+
+
+# `Furniture::FishTank`'s visual box.
+TANK_W, TANK_H = 14, 11
+TANK_WATER_ROWS = (1, 8)  # half-open: the surface line, then water, the gravel last
+TANK_CABINET_Y = 9
+# The fish patrol: each swims its lane to the far wall and back, one column a step,
+# the second TANK_FISH_LAG steps behind the first so the pair never mirror.
+TANK_LANES = (3, 5)
+TANK_SPAN = TANK_W - 5
+TANK_STEPS = 2 * TANK_SPAN
+TANK_FISH_LAG = 7
+TANK_FISH_LEN = 3
+# A bubble climbs from the gravel to the surface, then the next one starts.
+TANK_BUBBLE_X = TANK_W - 3
+TANK_BUBBLE_ROWS = (6, 5, 4, 3, 2, None)
+TANK_PLANT_AT = ((2, 5), (2, 6), (2, 7), (3, 6))
+assert TANK_STEPS % len(TANK_BUBBLE_ROWS) == 0
+
+
+def tank_fish_at(step):
+    """Where a fish starts its lane and which way it swims, `step` of its lap."""
+    step %= TANK_STEPS
+    if step < TANK_SPAN:
+        return 1 + step, 1
+    return 1 + TANK_STEPS - step, -1
+
+
+def fish_tank():
+    """An aquarium on its cabinet: two fish patrolling opposite lanes past the
+    swaying weed, a bubble rising from the gravel, the surface rippling, the
+    glass catching the light."""
+    w, h = TANK_W * S, TANK_H * S
+    top, bottom = TANK_WATER_ROWS[0] * S, TANK_WATER_ROWS[1] * S
+    frames = []
+    for step in range(TANK_STEPS):
+        g = canvas(w, h)
+        rect(g, 1, 1, w - 1, bottom + S, TRIM_DARK)  # the frame
+        rect(g, 1, 1, w - 1, 2, TRIM_DARK_LT)
+        rect(g, 4, top, w - 4, bottom - S, TANK_WATER)
+        for y in range(top + 2 * S, bottom - S):  # the deep water, dithered in
+            for x in range(4, w - 4):
+                deep = y - (top + 2 * S) >= 2 * S or (x + y) % 2 == 0 and y - (top + 2 * S) >= S
+                if deep:
+                    put(g, x, y, TANK_WATER_DP)
+        for x in range(4, w - 4):  # the surface, rippling
+            put(g, x, top, TANK_LINE)
+            if (x + step) % 6 < 2:
+                put(g, x, top + 1, TANK_LINE)
+        for x in range(4, w - 4):  # the gravel bed
+            for y in range(bottom - S, bottom):
+                put(g, x, y, (TAN, BROWN, GOLD, BROWN)[(x * 3 + y * 5) % 4])
+        # the weed, its tips swaying with the water
+        sway = (0, 1, 1, 0, -1, -1)[step % 6]
+        for x0, y0, tall in ((7, bottom - S, 16), (w - 12, bottom - S, 10)):
+            for i in range(tall):
+                dx = sway if i > tall // 2 else 0
+                put(g, x0 + dx, y0 - i, TANK_PLANT)
+                put(g, x0 + dx + 1, y0 - i, TANK_PLANT_SH)
+                if i % 4 == 2:
+                    put(g, x0 + dx - 1, y0 - i, TANK_PLANT)
+        for lane, lag, body, shade in ((TANK_LANES[0], 0, TANK_FISH, TANK_FISH_SH),
+                                       (TANK_LANES[1], TANK_FISH_LAG, TANK_FISH_ALT, TANK_FISH_ALT_SH)):
+            start, heading = tank_fish_at(step + lag)
+            x0, y0 = start * S, lane * S
+            fl = TANK_FISH_LEN * S - 2
+            rect(g, x0 + 1, y0, x0 + fl, y0 + 3, body)
+            rect(g, x0 + 2, y0 - 1, x0 + fl - 2, y0, body)
+            rect(g, x0 + 1, y0 + 2, x0 + fl, y0 + 3, shade)
+            tail = x0 if heading > 0 else x0 + fl
+            rect(g, tail, y0 - 1, tail + 1, y0 + 4, shade)  # the tail fin, flicking
+            if step % 2:
+                put(g, tail, y0 - 1, TANK_WATER)
+            head = x0 + fl - 2 if heading > 0 else x0 + 2
+            put(g, head, y0, KEY_DK)
+        row = TANK_BUBBLE_ROWS[step % len(TANK_BUBBLE_ROWS)]
+        if row is not None:
+            bx, by = TANK_BUBBLE_X * S, row * S + 1
+            rect(g, bx, by, bx + 2, by + 2, TANK_LINE)
+        for x, y in ((6, top + 3), (5, top + 4), (5, top + 5)):
+            put(g, x, y, WHITE)  # the glass's glint
+        rect(g, 1, TANK_CABINET_Y * S, w - 1, h - 1, WOOD)
+        rect(g, 1, TANK_CABINET_Y * S, w - 1, TANK_CABINET_Y * S + 1, WOOD_HI)
+        rect(g, 1, h - 3, w - 1, h - 1, WOOD_SH)
+        mid = w // 2
+        rect(g, mid, TANK_CABINET_Y * S + 1, mid + 1, h - 1, WOOD_DK)
+        put(g, mid - 3, TANK_CABINET_Y * S + 3, LAMP_HI)
+        put(g, mid + 3, TANK_CABINET_Y * S + 3, LAMP_HI)
+        union_outline(g)
+        frames.append(g)
+    return frames
+
+
+def fish_tank_1x():
+    """The aquarium at 1x: the frame lit along its top, the surface line, two
+    fish patrolling their lanes, a bubble rising, a weed sprig on the gravel,
+    the cabinet under it."""
+    frames = []
+    for step in range(TANK_STEPS):
+        g = canvas(TANK_W, TANK_H)
+        rect(g, 0, 0, TANK_W, TANK_WATER_ROWS[1] + 1, TRIM_DARK)
+        rect(g, 0, 0, TANK_W, 1, TRIM_DARK_LT)
+        rect(g, 1, TANK_WATER_ROWS[0], TANK_W - 1, TANK_WATER_ROWS[1] - 1, TANK_WATER)
+        rect(g, 1, TANK_WATER_ROWS[0], TANK_W - 1, TANK_WATER_ROWS[0] + 1, TANK_LINE)
+        for x in range(1, TANK_W - 1):
+            put(g, x, TANK_WATER_ROWS[1] - 1, BROWN if x % 2 == 0 else TAN)
+        for lane, lag, body in ((TANK_LANES[0], 0, TANK_FISH), (TANK_LANES[1], TANK_FISH_LAG, TANK_FISH_ALT)):
+            start, _ = tank_fish_at(step + lag)
+            rect(g, start, lane, start + TANK_FISH_LEN, lane + 1, body)
+        row = TANK_BUBBLE_ROWS[step % len(TANK_BUBBLE_ROWS)]
+        if row is not None:
+            put(g, TANK_BUBBLE_X, row, TANK_LINE)
+        for x, y in TANK_PLANT_AT:  # last, so the fish swim behind it
+            put(g, x, y, TANK_PLANT)
+        rect(g, 0, TANK_CABINET_Y, TANK_W, TANK_H - 1, WOOD_LT)
+        put(g, TANK_W // 2, TANK_CABINET_Y, WOOD_DK)
+        rect(g, 0, TANK_H - 1, TANK_W, TANK_H, WOOD_SH)
+        frames.append(g)
+    return frames
+
+
+# `coat_rack_rect_at`'s box around the pole, and where its coats hang: the
+# layout's `COAT_HOOK_DX`, `COAT_W`, `COAT_RACK_BASE_DY`.
+COAT_HOOK_DX, COAT_W, COAT_RACK_BASE_DY = 1, 2, 7
+COAT_REACH = COAT_HOOK_DX + COAT_W - 1
+RACK_W, RACK_H = 2 * COAT_REACH + 1, COAT_RACK_BASE_DY + 1
+
+
+def coat_hooks():
+    """Each coat's (x0, y0) in logical units: alternating sides down the pole."""
+    return [(0 if i % 2 == 0 else COAT_REACH + COAT_HOOK_DX, 1 + i * 2) for i in range(len(COATS))]
+
+
+def coat_rack():
+    """A coat rack: a turned wood pole with its knob and foot, three coats hung
+    on alternating pegs, each hanging from its shoulders and flaring to its hem,
+    its collar turned down, its front edge closed, the side away from the light
+    in shade."""
+    w, h = RACK_W * S, RACK_H * S
+    g = canvas(w, h)
+    mid = COAT_REACH * S + S // 2
+    rect(g, mid - 1, 3, mid + 1, h - 3, WOOD)  # the pole
+    rect(g, mid - 1, 3, mid, h - 3, WOOD_LT)
+    rect(g, mid - 2, 1, mid + 2, 4, WOOD_LT)  # its knob
+    put(g, mid - 2, 1, WOOD_HI)
+    rect(g, 3, h - 4, w - 3, h - 2, WOOD)  # its foot
+    rect(g, 3, h - 4, w - 3, h - 3, WOOD_LT)
+    for (lx, ly), coat, shade in zip(coat_hooks(), COATS, COATS_SH):
+        west = lx == 0
+        x0, y0 = lx * S, ly * S
+        peg = x0 + COAT_W * S - 1 if west else x0
+        rect(g, min(peg, mid), y0, max(peg, mid) + 1, y0 + 1, WOOD_DK)  # the peg
+        # Hung from the peg's end: narrow at the shoulders, flaring to the hem.
+        top, hem = y0 + 1, y0 + 2 * S + 1
+        cx = peg - 1 if west else peg + 1
+        for y in range(top, hem):
+            half = 1 + (y - top) * 3 // (hem - top)
+            rect(g, cx - half, y, cx + half + 1, y + 1, coat)
+            put(g, cx + half if west else cx - half, y, shade)  # away from the light
+        rect(g, cx - 1, top, cx + 2, top + 1, WHITE if coat != COATS[2] else OFFWHITE_SH)  # the collar
+        for y in range(top + 1, hem - 1):
+            put(g, cx, y, shade)  # the front edge
+        half = 1 + (hem - 1 - top) * 3 // (hem - top)
+        rect(g, cx - half, hem - 1, cx + half + 1, hem, shade)  # the hem
+    union_outline(g)
+    return g
+
+
+def coat_rack_1x():
+    """The coat rack at 1x: the pole with its knob and foot, three coats on
+    alternating hooks, each lit at its shoulders and shaded at its hem."""
+    g = canvas(RACK_W, RACK_H)
+    rect(g, COAT_REACH, 0, COAT_REACH + 1, RACK_H, WOOD_SH)
+    put(g, COAT_REACH, 0, WOOD_LT)
+    rect(g, COAT_REACH - 1, RACK_H - 1, COAT_REACH + 2, RACK_H, WOOD)
+    for (x0, y0), coat, shade in zip(coat_hooks(), COATS, COATS_SH):
+        rect(g, x0, y0, x0 + COAT_W, y0 + 1, coat)
+        rect(g, x0, y0 + 1, x0 + COAT_W, y0 + 2, shade)
+    return g
+
+
+# `MeetingRoom::notice_board_rect`'s size.
+BOARD_W, BOARD_H = 8, 5
+
+
+def notice_board():
+    """A meeting room's notice board: cork in a wood frame lit along its top, a
+    sticky note, an agenda and a card pinned to it."""
+    w, h = BOARD_W * S, BOARD_H * S
+    g = canvas(w, h)
+    rect(g, 1, 1, w - 1, h - 1, WOOD)
+    rect(g, 1, 1, w - 1, 2, WOOD_LT)
+    rect(g, 1, h - 2, w - 1, h - 1, WOOD_SH)
+    rect(g, 3, 3, w - 3, h - 3, CORK)
+    for x, y in ((5, 14), (12, 4), (19, 15), (26, 6), (9, 9)):
+        put(g, x, y, CORK_SH)
+    rect(g, 4, 5, 9, 10, PINK)  # a sticky note
+    rect(g, 5, 7, 8, 8, PRINT)
+    rect(g, 12, 6, 19, 15, OFFWHITE)  # the agenda
+    for i in range(3):
+        rect(g, 13, 8 + i * 2, 18 - (i % 2) * 2, 9 + i * 2, PRINT)
+    rect(g, 22, 5, 27, 10, GOLD)  # a card
+    rect(g, 23, 7, 26, 8, PRINT)
+    for x, y in ((6, 5), (15, 6), (24, 5)):
+        put(g, x, y, RED)  # the pins
+    union_outline(g)
+    return g
+
+
+def notice_board_1x():
+    """The notice board at 1x: cork in a wood frame, a sticky note and a sheet
+    pinned to it."""
+    g = canvas(BOARD_W, BOARD_H)
+    rect(g, 0, 0, BOARD_W, BOARD_H, WOOD)
+    rect(g, 0, 0, BOARD_W, 1, WOOD_LT)
+    rect(g, 1, 1, BOARD_W - 1, BOARD_H - 1, CORK)
+    put(g, 2, 1, PINK)
+    rect(g, 4, 2, 6, 3, OFFWHITE)
+    return g
+
+
+# `layout::CLOCK`. The dial only: the painter draws the hands from the time, which
+# as art would be 720 frames.
+CLOCK_W, CLOCK_H = 7, 7
+# Art pixels from the dial's edge to its face: the outline and the rim.
+CLOCK_RIM_PX = 3
+CLOCK_1X = ("..RRR..", ".RFFFR.", "RFFFFFR", "RFFFFFR", "RFFFFFR", ".RFFFR.", "..RRR..")
+
+
+def wall_clock():
+    """The wall clock's dial: the rim lit on its upper west, the face shaded
+    round its lower east, the hour ticks and the centre pin the hands turn on."""
+    w, h = CLOCK_W * S, CLOCK_H * S
+    g = canvas(w, h)
+    c = (w / 2, h / 2)
+    r_out, r_face = w / 2 - 1, w / 2 - CLOCK_RIM_PX
+    for y in range(h):
+        for x in range(w):
+            dx, dy = x + 0.5 - c[0], y + 0.5 - c[1]
+            d = math.hypot(dx, dy)
+            if d > r_out:
+                continue
+            if d > r_face:
+                put(g, x, y, CLOCK_RIM_LT if dx + dy < -r_face * 0.6 else CLOCK_RIM)
+            elif d > r_face - 1.5 and dx + dy > r_face * 0.8:
+                put(g, x, y, CLOCK_FACE_SH)
+            else:
+                put(g, x, y, CLOCK_FACE)
+    for i in range(12):
+        a = i * math.pi / 6
+        major = i % 3 == 0
+        for rr in ((r_face - 1.5, r_face - 3.5) if major else (r_face - 1.5,)):
+            put(g, int(c[0] + rr * math.sin(a)), int(c[1] - rr * math.cos(a)), CLOCK_HAND)
+    rect(g, int(c[0]) - 1, int(c[1]) - 1, int(c[0]) + 1, int(c[1]) + 1, CLOCK_HAND)
+    union_outline(g)
+    return g
+
+
+def wall_clock_1x():
+    """The wall clock's dial at 1x: the rim lit along its top, the face, the
+    centre pin the hands turn on."""
+    g = canvas(CLOCK_W, CLOCK_H)
+    for y, row in enumerate(CLOCK_1X):
+        for x, ch in enumerate(row):
+            if ch != ".":
+                put(g, x, y, CLOCK_RIM if ch == "R" else CLOCK_FACE)
+    for x in range(2, 5):
+        put(g, x, 0, CLOCK_RIM_LT)
+    put(g, CLOCK_W // 2, CLOCK_H // 2, CLOCK_HAND)
+    return g
+
+
+# `Furniture::MeetingChair`'s visual box, drawn for a sitter facing east.
+CHAIR_W, CHAIR_H = 7, 7
+CHAIR_SEAT_ROWS = (1, 5)  # half-open
+CHAIR_LEG_COLS = (1, 5)
+
+
+def meeting_chair():
+    """A head-of-table meeting chair in the sofas' fabric: its back to the
+    west, the seat cushion lit along its far edge and shaded at its front, on
+    four wood legs."""
+    w, h = CHAIR_W * S, CHAIR_H * S
+    g = canvas(w, h)
+    y0, y1 = CHAIR_SEAT_ROWS[0] * S, CHAIR_SEAT_ROWS[1] * S
+    for lx in CHAIR_LEG_COLS:
+        rect(g, lx * S, y1, lx * S + 3, h - 1, WOOD_DK)
+        rect(g, lx * S, y1, lx * S + 1, h - 1, WOOD_SH)
+    rect(g, S, y0, w - 2, y1, FABRIC)  # the seat
+    rect(g, S, y0, w - 2, y0 + 2, FABRIC_HI)
+    rect(g, S, y1 - 3, w - 2, y1, FABRIC_SH)
+    rect(g, S + 2, y0 + 3, w - 4, y1 - 4, FABRIC)  # its cushion's welt
+    rect(g, S + 1, y0 + 2, S + 2, y1 - 3, FABRIC_SEAM)
+    rect(g, 1, 1, S, y1, FABRIC)  # the back
+    rect(g, 1, 1, S, 3, FABRIC_HI)
+    rect(g, 1, 1, 2, y1, FABRIC_HI)
+    rect(g, S - 1, 3, S, y1, FABRIC_SEAM)
+    union_outline(g)
+    return g
+
+
+def meeting_chair_1x():
+    """The meeting chair at 1x: its back to the west in the seat's fabric, the
+    seat lit along its far edge, two legs showing."""
+    g = canvas(CHAIR_W, CHAIR_H)
+    rect(g, 0, 0, 1, CHAIR_SEAT_ROWS[1], FABRIC_SH)
+    rect(g, 1, CHAIR_SEAT_ROWS[0], CHAIR_W - 1, CHAIR_SEAT_ROWS[1], FABRIC)
+    rect(g, 1, CHAIR_SEAT_ROWS[0], CHAIR_W - 1, CHAIR_SEAT_ROWS[0] + 1, FABRIC_HI)
+    for lx in CHAIR_LEG_COLS:
+        rect(g, lx, CHAIR_SEAT_ROWS[1], lx + 1, CHAIR_H, WOOD_DK)
+    return g
+
+
+# The 1x `door.sprite`'s size, its panels' rows, and each frame's gap.
+DOOR_W, DOOR_H = 16, 14
+DOOR_PANEL_ROWS = (3, 13)  # half-open
+DOOR_GAPS = (0, 4, 8)  # shut, half-open, open: the shaft columns showing
+
+
+def elevator_door():
+    """The elevator: a brushed-steel frame lit along its top and west, the
+    floor display, and the chrome doors: shut, parting, open on a car lit
+    from its ceiling, its handrail and floor."""
+    w, h = DOOR_W * S, DOOR_H * S
+    frames = []
+    for gap in DOOR_GAPS:
+        g = canvas(w, h)
+        rect(g, 1, 1, w - 1, h - 1, DOOR_FRAME)
+        rect(g, 1, 1, w - 1, 2, ALU)
+        rect(g, 1, 1, 2, h - 1, ALU)
+        rect(g, 4, 4, w - 4, 8, CYAN)  # the display
+        rect(g, 4, 4, w - 4, 5, WHITE)
+        for x in range(8, 13):  # the floor arrow
+            put(g, x, 6 - min(x - 8, 12 - x) // 2, GOLD)
+        rect(g, 16, 6, 18, 7, GOLD)
+        rect(g, 20, 6, 22, 7, GOLD)
+        p0, p1 = DOOR_PANEL_ROWS[0] * S, DOOR_PANEL_ROWS[1] * S
+        x0, x1 = S, w - S
+        mid = w // 2
+        half = gap * S // 2
+        if gap:  # the car, lit from its ceiling
+            rect(g, mid - half, p0, mid + half, p1, LAMP)
+            rect(g, mid - half, p0, mid + half, p0 + 2, BULB)
+            rect(g, mid - half, p0 + 2, mid + half, p0 + 4, LAMP_HI)
+            rect(g, mid - half, p0 + 22, mid + half, p0 + 23, GREY)  # the handrail
+            rect(g, mid - half, p1 - 4, mid + half, p1, SLATE)
+        for a, b in ((x0, mid - half), (mid + half, x1)):
+            if b - a <= 0:
+                continue
+            rect(g, a, p0, b, p1, CHROME)
+            rect(g, a, p0, a + 1, p1, WHITE)  # the lit edge of each leaf
+            rect(g, b - 2, p0, b, p1, STEEL_SH)
+            for x in range(a + 4, b - 3, 5):
+                rect(g, x, p0 + 3, x + 1, p1 - 8, STEEL_SH)  # the brushing
+            rect(g, a, p1 - 6, b, p1, STEEL_SH)  # the kick plate
+        if not gap:
+            rect(g, mid - 1, p0, mid + 1, p1, SHADOW)  # the doors' meeting line
+        rect(g, 1, p1, w - 1, p1 + 1, ALU)  # the sill
+        union_outline(g)
+        frames.append(g)
+    return frames
+
+
 # ---- the city behind the windows: its buildings ------------------------------------
 # Drawn only in the [city] materials: a painter colours each by its depth and the
 # sky, so no drawing here carries a colour of its own. Each is drawn at `S`; its base
@@ -2351,22 +2933,26 @@ def orphans(pack, sprites):
     )
 
 
-def city_drift(pack):
-    """Why pack.toml's `[city]` names other keys than `CITY` draws in, or None."""
+def manifest_drift(pack):
+    """Why pack.toml names other keys than the ones drawn in, or None."""
     manifest = pack / "pack.toml"
     if not manifest.is_file():
         return None
-    named = tomllib.loads(manifest.read_text(encoding=ENCODING)).get("city")
+    toml = tomllib.loads(manifest.read_text(encoding=ENCODING))
+    named = toml.get("city")
     if named is not None and named != CITY:
         return f"gen-art --check: pack.toml [city] {named} is not the keys drawn in, {CITY}"
+    outline = toml.get("characters", {}).get("outline")
+    if outline != SILHOUETTE:
+        return f"gen-art --check: pack.toml [characters] outline {outline!r} is not the art's, {SILHOUETTE!r}"
     return None
 
 
 def check(pack, sprites):
     """Why the committed pack is not what `sprites` draws, or None when it is."""
-    city = city_drift(pack)
-    if city:
-        return city
+    drift = manifest_drift(pack)
+    if drift:
+        return drift
     stale = sorted(
         name
         for name, text in sprites.items()
@@ -2411,6 +2997,12 @@ def selftest(sprites):
         assert check(pack, sprites) is None, "a write must delete the orphan"
         (pack / "hand.sprite").write_text(f"# copied from {first}: {PROVENANCE}\n@frame 0\n.\n", encoding=ENCODING)
         assert check(pack, sprites) is None, "hand art quoting the provenance is not an orphan"
+        (pack / "pack.toml").write_text('[characters]\noutline = "n"\n', encoding=ENCODING)
+        assert check(pack, sprites) is not None, "an outline the art does not draw must fail"
+        (pack / "pack.toml").write_text("[pack]\n", encoding=ENCODING)
+        assert check(pack, sprites) is not None, "a pack naming no outline must fail"
+        (pack / "pack.toml").write_text(f'[characters]\noutline = "{SILHOUETTE}"\n', encoding=ENCODING)
+        assert check(pack, sprites) is None, "the art's own outline passes"
     print(f"gen-art --selftest: OK ({len(sprites)} sprites)")
 
 
@@ -2451,6 +3043,16 @@ def main():
         "vending_machine": (vending_machine.__doc__, vending_machine()),
         "printer": (printer.__doc__, printer()),
         "meeting_table": (meeting_table.__doc__, [meeting_table()]),
+        "kitchen_island": (kitchen_island.__doc__, [kitchen_island()]),
+        "side_table": (side_table.__doc__, [side_table()]),
+        "water_cooler": (water_cooler.__doc__, water_cooler()),
+        "pantry_bin": (trash_bin.__doc__, [trash_bin()]),
+        "fish_tank": (fish_tank.__doc__, fish_tank()),
+        "coat_rack": (coat_rack.__doc__, [coat_rack()]),
+        "notice_board": (notice_board.__doc__, [notice_board()]),
+        "wall_clock": (wall_clock.__doc__, [wall_clock()]),
+        "meeting_chair": (meeting_chair.__doc__, [meeting_chair()]),
+        "door": (elevator_door.__doc__, elevator_door()),
     }
     classic = {
         "meeting_sofa_north": (meeting_sofa_north_1x.__doc__, [meeting_sofa_north_1x()]),
@@ -2459,9 +3061,18 @@ def main():
         "vending_machine": (vending_machine_1x.__doc__, vending_machine_1x()),
         "printer": (printer_1x.__doc__, printer_1x()),
         "meeting_table": (meeting_table_1x.__doc__, [meeting_table_1x()]),
+        "kitchen_island": (kitchen_island_1x.__doc__, [kitchen_island_1x()]),
+        "side_table": (side_table_1x.__doc__, [side_table_1x()]),
+        "water_cooler": (water_cooler_1x.__doc__, water_cooler_1x()),
+        "pantry_bin": (trash_bin_1x.__doc__, [trash_bin_1x()]),
+        "fish_tank": (fish_tank_1x.__doc__, fish_tank_1x()),
+        "coat_rack": (coat_rack_1x.__doc__, [coat_rack_1x()]),
+        "notice_board": (notice_board_1x.__doc__, [notice_board_1x()]),
+        "wall_clock": (wall_clock_1x.__doc__, [wall_clock_1x()]),
+        "meeting_chair": (meeting_chair_1x.__doc__, [meeting_chair_1x()]),
     }
     sprites = {
-        f"{base}@{S}x.sprite": render_sprite(header, frames)
+        f"{base}@{S}x.sprite": render_sprite(header, grounded(frames))
         for base, (header, frames) in pieces.items()
     }
     for pose, (*_, header) in POSES.items():
@@ -2476,7 +3087,9 @@ def main():
                         [lyr],
                         [(view, HEAD_MARK[0], HEAD_MARK[1] + o)],
                     )
-    sprites |= {f"{base}.sprite": render_sprite(header, frames) for base, (header, frames) in classic.items()}
+    sprites |= {
+        f"{base}.sprite": render_sprite(header, grounded(frames)) for base, (header, frames) in classic.items()
+    }
     for name, draw in BUILDINGS.items():
         art = draw()
         sprites[f"building_{name}@{S}x.sprite"] = render_sprite(draw.__doc__, [art])

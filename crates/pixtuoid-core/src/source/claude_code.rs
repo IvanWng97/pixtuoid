@@ -94,17 +94,17 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
             .filter(|s| !s.is_empty())
             .map(|p| cc_id_from_path(Path::new(&crate::id::normalize_path_key(p))))
             .filter(|s| !s.is_empty());
-        if let Some(ref k) = path_key {
-            if *k != prefixed {
-                // Upstream scheme change: hook-FIRST Start registrations go phantom.
-                crate::source::drift::shape_drift(
-                    SOURCE_NAME,
-                    &format!(
-                        "SubagentStop transcript stem `{k}` != prefixed agent_id \
+        if let Some(ref k) = path_key
+            && *k != prefixed
+        {
+            // Upstream scheme change: hook-FIRST Start registrations go phantom.
+            crate::source::drift::shape_drift(
+                SOURCE_NAME,
+                &format!(
+                    "SubagentStop transcript stem `{k}` != prefixed agent_id \
                          `{prefixed}`; keying on the stem"
-                    ),
-                );
-            }
+                ),
+            );
         }
         Ok(Some(vec![AgentEvent::SessionEnd {
             agent_id: AgentId::from_parts(SOURCE_NAME, &path_key.unwrap_or(prefixed)),
@@ -221,14 +221,14 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
         out.push(AgentEvent::Rename { agent_id, label });
     }
 
-    if ty == "attachment" {
-        if let Some(effort) = attachment_effort(obj) {
-            out.push(AgentEvent::ModelInfo {
-                agent_id,
-                model: None,
-                effort: Some(effort.to_string()),
-            });
-        }
+    if ty == "attachment"
+        && let Some(effort) = attachment_effort(obj)
+    {
+        out.push(AgentEvent::ModelInfo {
+            agent_id,
+            model: None,
+            effort: Some(effort.to_string()),
+        });
     }
 
     let Some(message) = message else {

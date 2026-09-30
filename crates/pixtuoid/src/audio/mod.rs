@@ -113,20 +113,19 @@ impl AudioController {
     /// boot-spawn here (iff a persisted unmute wants sound), tear down in `Drop`.
     /// Each painter builds it AFTER its fallible boot steps, so no device thread
     /// can exist before its Drop-owner and `Drop` alone covers EVERY exit path.
-    pub(crate) fn new(muted: bool, volume: f32, config_path: std::path::PathBuf) -> Self {
-        Self::new_with(muted, volume, config_path, respawn)
+    pub(crate) fn new(cfg: crate::config::AudioConfig, config_path: std::path::PathBuf) -> Self {
+        Self::new_with(cfg, config_path, respawn)
     }
 
-    /// [`Self::new`] with the boot-spawn injected, so a test can pin the boot decision
-    /// without opening an output device. `pub(crate)` for the same reason it
-    /// exists: `tui`'s key-action tests need an UNMUTED controller, and an
-    /// unmuted `new` boot-spawns the real device.
+    /// [`Self::new`] with the boot-spawn injected, so a test can build an UNMUTED
+    /// controller without opening an output device — `pub(crate)` because `tui`'s
+    /// key-action tests need one.
     pub(crate) fn new_with(
-        muted: bool,
-        volume: f32,
+        cfg: crate::config::AudioConfig,
         config_path: std::path::PathBuf,
         respawn: impl FnOnce(&AudioHandle, f32),
     ) -> Self {
+        let crate::config::AudioConfig { muted, volume } = cfg;
         let handle = AudioHandle::disabled();
         if !muted {
             respawn(&handle, volume);
@@ -152,10 +151,10 @@ impl AudioController {
         respawn: impl FnOnce(&AudioHandle, f32),
     ) {
         let persist = apply_audio_action(&mut self.ui, action, paused, respawn);
-        if persist.muted {
-            if let Err(e) = crate::config::save_audio_muted(&self.config_path, self.ui.muted) {
-                tracing::warn!(error = %e, "failed to persist audio mute");
-            }
+        if persist.muted
+            && let Err(e) = crate::config::save_audio_muted(&self.config_path, self.ui.muted)
+        {
+            tracing::warn!(error = %e, "failed to persist audio mute");
         }
         if persist.volume_nudged {
             self.volume_dirty = true;
@@ -220,6 +219,7 @@ impl Drop for AudioController {
 #[cfg(test)]
 mod controller_tests {
     use super::*;
+    use crate::config::AudioConfig;
     use std::time::{Duration, Instant};
 
     fn ctl(muted: bool, volume: f32) -> (AudioController, tempfile::TempDir) {
@@ -227,7 +227,7 @@ mod controller_tests {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "theme = \"normal\"\n").unwrap();
         // A no-op boot-spawn: the fixture must never open a real device.
-        let c = AudioController::new_with(muted, volume, path, |_, _| {});
+        let c = AudioController::new_with(AudioConfig { muted, volume }, path, |_, _| {});
         (c, dir)
     }
 
@@ -243,24 +243,38 @@ mod controller_tests {
         std::fs::write(&path, "theme = \"normal\"\n").unwrap();
 
         let muted_spawned = std::cell::Cell::new(false);
-        let c = AudioController::new_with(true, 0.4, path.clone(), |_, _| muted_spawned.set(true));
+        let c = AudioController::new_with(
+            AudioConfig {
+                muted: true,
+                volume: 0.4,
+            },
+            path.clone(),
+            |_, _| muted_spawned.set(true),
+        );
         assert!(!muted_spawned.get(), "a muted boot spawns no device thread");
         assert!(!c.handle().is_enabled());
         drop(c);
 
         let done = std::sync::Arc::new(AtomicBool::new(false));
         let got_vol = std::cell::Cell::new(0.0f32);
-        let c = AudioController::new_with(false, 0.6, path, |h, v| {
-            got_vol.set(v);
-            let rx = h.install_test_channel();
-            let flag = std::sync::Arc::clone(&done);
-            let thread = std::thread::spawn(move || {
-                while rx.recv().is_ok() {}
-                std::thread::sleep(std::time::Duration::from_millis(TEARDOWN_MS));
-                flag.store(true, Ordering::SeqCst);
-            });
-            *h.join.lock().unwrap() = Some(thread);
-        });
+        let c = AudioController::new_with(
+            AudioConfig {
+                muted: false,
+                volume: 0.6,
+            },
+            path,
+            |h, v| {
+                got_vol.set(v);
+                let rx = h.install_test_channel();
+                let flag = std::sync::Arc::clone(&done);
+                let thread = std::thread::spawn(move || {
+                    while rx.recv().is_ok() {}
+                    std::thread::sleep(std::time::Duration::from_millis(TEARDOWN_MS));
+                    flag.store(true, Ordering::SeqCst);
+                });
+                *h.join.lock().unwrap() = Some(thread);
+            },
+        );
         assert_eq!(
             got_vol.get(),
             0.6,
@@ -962,7 +976,7 @@ mod tests {
 /// The LISTEN gate: renders each busy-ness tier through the REAL
 /// mixer/schedulers/synth into wav files for the owner's audition.
 /// `#[ignore]` — run explicitly:
-/// `cargo test -p pixtuoid --lib audio::listen_gate -- --ignored --nocapture`
+/// `just test -p pixtuoid --lib audio::listen_gate --run-ignored only --no-capture`
 #[cfg(all(test, feature = "audio"))]
 mod listen_gate {
     use super::*;

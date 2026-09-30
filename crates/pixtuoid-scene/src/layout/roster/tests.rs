@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 
 /// Every roster kind's census key, by an exhaustive match: a new kind fails to
 /// compile here until it has one.
-fn kind_key(kind: FixtureKind) -> &'static str {
+pub(crate) fn kind_key(kind: FixtureKind) -> &'static str {
     match kind {
         FixtureKind::Desk(_) => "Desk",
         FixtureKind::FilingCabinet(_) => "FilingCabinet",
@@ -36,34 +36,9 @@ fn kind_key(kind: FixtureKind) -> &'static str {
     }
 }
 
-/// The offices the census and the hover sweep lay out.
-fn offices() -> impl Iterator<Item = SceneLayout> {
+/// Every kind's census key: the census fails on a kind placed but missing here.
+pub(crate) fn every_kind_key() -> BTreeSet<&'static str> {
     [
-        (96u16, 60u16),
-        (160, 120),
-        (192, 158),
-        (240, 160),
-        (320, 180),
-    ]
-    .into_iter()
-    .flat_map(|(w, h)| {
-        (0..12).filter_map(move |seed| SceneLayout::compute_with_seed(w, h, None, seed))
-    })
-}
-
-#[test]
-fn every_fixture_kind_is_placed_on_some_office() {
-    let mut seen = BTreeSet::new();
-    let mut stations = std::collections::HashSet::new();
-    for l in offices() {
-        for f in l.fixtures() {
-            seen.insert(kind_key(f.kind));
-            if let FixtureKind::Station { station, .. } = f.kind {
-                stations.insert(station);
-            }
-        }
-    }
-    let all: BTreeSet<&str> = [
         "Desk",
         "FilingCabinet",
         "DeskChair",
@@ -94,7 +69,37 @@ fn every_fixture_kind_is_placed_on_some_office() {
         "Clock",
     ]
     .into_iter()
-    .collect();
+    .collect()
+}
+
+/// The offices the census and the hover sweep lay out.
+fn offices() -> impl Iterator<Item = SceneLayout> {
+    [
+        (96u16, 60u16),
+        (160, 120),
+        (192, 158),
+        (240, 160),
+        (320, 180),
+    ]
+    .into_iter()
+    .flat_map(|(w, h)| {
+        (0..12).filter_map(move |seed| SceneLayout::compute_with_seed(w, h, None, seed))
+    })
+}
+
+#[test]
+fn every_fixture_kind_is_placed_on_some_office() {
+    let mut seen = BTreeSet::new();
+    let mut stations = std::collections::HashSet::new();
+    for l in offices() {
+        for f in l.fixtures() {
+            seen.insert(kind_key(f.kind));
+            if let FixtureKind::Station { station, .. } = f.kind {
+                stations.insert(station);
+            }
+        }
+    }
+    let all = every_kind_key();
     assert_eq!(
         seen.difference(&all).collect::<Vec<_>>(),
         Vec::<&&str>::new(),
@@ -114,7 +119,7 @@ fn backdrop_fixtures_come_first() {
     let depths: Vec<Depth> = l.fixtures().map(|f| f.depth).collect();
     let first_sorted = depths
         .iter()
-        .position(|d| matches!(d, Depth::Sorted(_)))
+        .position(|d| matches!(d, Depth::Sorted { .. }))
         .expect("a sorted fixture");
     assert!(depths[..first_sorted].iter().all(|&d| d == Depth::Backdrop));
     assert!(depths[first_sorted..].iter().all(|&d| d != Depth::Backdrop));
@@ -134,7 +139,7 @@ fn the_pantry_uprights_sort_at_their_south_row() {
         let rect = rect.expect("fits this pantry");
         let f = l.fixtures().find(|f| f.kind == kind).expect("rostered");
         assert_eq!(f.visual, rect, "{kind:?}");
-        assert_eq!(f.depth, Depth::Sorted(rect.y + rect.height - 1), "{kind:?}");
+        assert_eq!(f.depth, Depth::sorted(rect.y + rect.height - 1), "{kind:?}");
     }
 }
 
@@ -256,26 +261,126 @@ fn the_coffee_machine_follows_the_counter_size() {
     assert_eq!(l.coffee_machine(), None);
 }
 
+/// A meeting room's notice board hangs on the band, the north wall the viewer
+/// sees: inside its room's columns, under the band's last row, and clear of
+/// every other fixture, the sign and the clock on the band among them.
 #[test]
-fn a_notice_board_hangs_only_in_a_room_that_fits_it() {
-    let room = |width, height| crate::layout::MeetingRoom {
-        bounds: Bounds {
-            x: 10,
-            y: 20,
-            width,
-            height,
-        },
-        trio: None,
+fn a_notice_board_hangs_on_the_band_clear_of_its_neighbours() {
+    let mut hung = 0;
+    for l in offices() {
+        for room in 0..l.meeting_rooms.len() {
+            let Some(board) = l.notice_board_rect(room) else {
+                continue;
+            };
+            hung += 1;
+            let r = l.meeting_rooms[room].bounds;
+            assert!(
+                board.x > r.x && board.x + board.width < r.x + r.width,
+                "{board:?} in {r:?}"
+            );
+            assert!(
+                board.y + board.height <= l.wall_band_h(),
+                "{board:?} leaves the band"
+            );
+            let apart = |v: Bounds| {
+                v.x + v.width <= board.x
+                    || board.x + board.width <= v.x
+                    || v.y + v.height <= board.y
+                    || board.y + board.height <= v.y
+            };
+            for f in l
+                .fixtures()
+                .filter(|f| f.kind != FixtureKind::NoticeBoard { room })
+            {
+                assert!(
+                    apart(f.visual),
+                    "{board:?} hangs over {:?} at {:?}",
+                    f.kind,
+                    f.visual
+                );
+            }
+        }
+    }
+    assert!(hung > 0, "no office hangs a notice board");
+}
+
+/// The pieces that stand together keep apart: the lounge's couch, lamp, side
+/// table and aquarium, and the kitchen island clear of every mat.
+#[test]
+fn the_lounge_and_the_island_keep_clear_of_their_neighbours() {
+    let apart = |a: Bounds, b: Bounds| {
+        a.x + a.width <= b.x
+            || b.x + b.width <= a.x
+            || a.y + a.height <= b.y
+            || b.y + b.height <= a.y
     };
-    assert_eq!(room(15, 40).notice_board_rect(), None);
-    assert_eq!(room(30, 20).notice_board_rect(), None);
-    assert_eq!(
-        room(16, 21).notice_board_rect(),
-        Some(Bounds {
-            x: 14,
-            y: 33,
-            width: 8,
-            height: 5
-        })
-    );
+    let mut checked = 0;
+    for l in offices().chain(
+        [(200u16, 120u16), (240, 144), (320, 180)]
+            .into_iter()
+            .flat_map(|(w, h)| {
+                (0..4).filter_map(move |s| SceneLayout::compute_with_seed(w, h, None, s))
+            }),
+    ) {
+        let lounge: Vec<Fixture> = l
+            .fixtures()
+            .filter(|f| {
+                matches!(
+                    f.kind,
+                    FixtureKind::LoungeCouch
+                        | FixtureKind::FloorLamp
+                        | FixtureKind::SideTable
+                        | FixtureKind::FishTank
+                )
+            })
+            .collect();
+        for (i, a) in lounge.iter().enumerate() {
+            for b in &lounge[i + 1..] {
+                assert!(
+                    apart(a.visual, b.visual),
+                    "{}x{}: {:?} over {:?}",
+                    l.buf_w,
+                    l.buf_h,
+                    a,
+                    b
+                );
+                checked += 1;
+            }
+        }
+        let island = l.fixtures().find(|f| f.kind == FixtureKind::KitchenIsland);
+        for mat in l
+            .fixtures()
+            .filter(|f| matches!(f.kind, FixtureKind::Doormat { .. } | FixtureKind::PantryMat))
+        {
+            if let Some(island) = island {
+                assert!(
+                    apart(island.visual, mat.visual),
+                    "{}x{}: island over {:?}",
+                    l.buf_w,
+                    l.buf_h,
+                    mat
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 0, "no office sets a lounge or an island");
+}
+
+/// Hover orders fixtures on [`Tie`], and a painter on the [`Layer`] it maps
+/// to: the two orders must agree, with a figure between the two ties.
+#[test]
+fn a_tie_maps_to_a_layer_in_the_same_order() {
+    const TIES: [Tie; 2] = [Tie::FigureOver, Tie::FixtureOver];
+    // A new tie fails to compile here until `TIES` lists it.
+    let _ = |t: Tie| match t {
+        Tie::FigureOver | Tie::FixtureOver => (),
+    };
+    assert!(Layer::from(Tie::FigureOver) < Layer::Figure);
+    assert!(Layer::Figure < Layer::from(Tie::FixtureOver));
+    for a in TIES {
+        for b in TIES {
+            assert_eq!(a < b, Layer::from(a) < Layer::from(b), "{a:?} vs {b:?}");
+        }
+    }
 }

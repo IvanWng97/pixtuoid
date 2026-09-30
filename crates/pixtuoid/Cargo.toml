@@ -52,7 +52,7 @@ toml_edit          = { workspace = true }
 # YAML parse+emit for the Hermes install target — the maintained yaml-rust
 # successor, serde_yaml and serde_yml both being abandoned. It data-preserves a
 # user's other config keys on merge but does NOT round-trip comments.
-saphyr             = "0.0.12"
+saphyr             = "0.1.0"
 anyhow             = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -82,14 +82,17 @@ clap_mangen = "0.3.0"
 
 # Ambient office audio: rodio's playback half only (cpal underneath) — no decoder
 # features, every sound is synthesized into raw sample buffers at startup.
-# Optional so `--no-default-features` builds a silent binary (and skips cpal's
-# Linux ALSA system-header requirement). `tracing` routes rodio's OWN diagnostics
+# Optional, and left out of `portable`, because cpal needs the ALSA system
+# headers on Linux. `tracing` routes rodio's OWN diagnostics
 # to `tracing::error!/debug!` instead of its default `eprintln!` — a raw stderr
 # write mid-altscreen corrupts the TUI.
 rodio = { version = "0.22.2", default-features = false, features = ["playback", "tracing"], optional = true }
 
 [features]
-default = ["audio", "graphics"]
+# `build-target` builds the Linux release artifacts with `portable` alone, so a
+# new default feature goes in `portable` unless it can't build on those targets.
+default = ["audio", "portable"]
+portable = ["graphics"]
 # Ambient sound (config-OFF at runtime regardless; this gates the DEPENDENCY).
 audio = ["dep:rodio"]
 # Terminal image-protocol detection. Gates the DEPENDENCY, not a runtime switch:
@@ -143,6 +146,7 @@ windows-sys = { version = "0.61", features = [
 # `pixtuoid_core::harness` pipeline, which is behind core's dev-only feature.
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", features = ["harness"] }
 tempfile = "3"
+temp-env = { workspace = true }
 # End-to-end CLI golden for `sources --json`, the Raycast contract (tests/cli_json.rs).
 # Goldens update with SNAPSHOTS=overwrite.
 snapbox  = { version = "1", features = ["json"] }

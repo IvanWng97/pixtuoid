@@ -309,15 +309,15 @@ mod imp {
                 }
             }
             for ev in events.iter() {
-                if let EventFilter::Proc { pid, flags } = ev.filter() {
-                    if flags.contains(ProcessEvents::EXIT) {
-                        let pid = pid.as_raw_pid();
-                        // The knote already self-removed (EV_ONESHOT); drop our
-                        // bookkeeping so a recycled pid can be re-watched.
-                        watched.remove(&pid);
-                        if exit_tx.send(pid).is_err() {
-                            return;
-                        }
+                if let EventFilter::Proc { pid, flags } = ev.filter()
+                    && flags.contains(ProcessEvents::EXIT)
+                {
+                    let pid = pid.as_raw_pid();
+                    // The knote already self-removed (EV_ONESHOT); drop our
+                    // bookkeeping so a recycled pid can be re-watched.
+                    watched.remove(&pid);
+                    if exit_tx.send(pid).is_err() {
+                        return;
                     }
                 }
                 // EVFILT_USER ident 0 is the wake — the drain above handles it.

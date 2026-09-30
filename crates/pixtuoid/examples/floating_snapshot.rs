@@ -1,6 +1,6 @@
 //! Render ONE frame of the `pixtuoid floating` office to a PNG — visual verification for
-//! the floating window. It drives the SAME `OfficeRenderer` and `paint_labels_into_surface`
-//! the live window uses, so the PNG is byte-faithful to what the window blits.
+//! the floating window. It drives the SAME `OfficeRenderer`, `XrgbSurface` upscale and
+//! overlay painters the live window uses, so the PNG is byte-faithful to what it blits.
 //!
 //! Usage:
 //! `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N]`
@@ -12,10 +12,11 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
 use image::{Rgb as ImgRgb, RgbImage};
-use pixtuoid::floating::offscreen::{OfficeRenderer, paint_labels_into_surface};
+use pixtuoid::floating::offscreen::{OfficeRenderer, XrgbSurface, paint_labels_into_surface};
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::floor::FloorMeta;
+use pixtuoid_scene::floor::{FloorMeta, FrameInputs};
+use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::theme_by_name;
 
 /// The two `cc` labels are a DELIBERATE collision, so the snapshot exercises the
@@ -144,33 +145,33 @@ fn main() -> Result<()> {
     let mut scene = SceneState::uniform(64);
     populate_demo_agents(&mut scene, now, n_agents);
     let mut renderer = OfficeRenderer::new();
-    // Mirror floating::window EXACTLY: render at window/SCALE, nearest-neighbor upscale into
-    // a `u32` surface, then blit the name badges — otherwise the PNG is not byte-faithful.
+    // Mirror floating::window: render at window / `office_scale`, then the same surface
+    // upscale and overlays.
     let (win_w, win_h) = (size.0 as u32, size.1 as u32);
     let scale = pixtuoid::floating::offscreen::office_scale(win_h); // shared with the live window
     let ow = (win_w / scale).max(1).min(u16::MAX as u32) as u16;
     let oh = (win_h / scale).max(1).min(u16::MAX as u32) as u16;
-    let buf = renderer.render(&scene, &pack, theme, now, ow, oh, FloorMeta::ground(), None);
-    let (bw, bh) = (buf.width() as u32, buf.height() as u32);
-
+    let buf = renderer.render(FrameInputs {
+        scene: &scene,
+        pack: &pack,
+        theme,
+        now,
+        size: Size { w: ow, h: oh },
+        floor_meta: FloorMeta::ground(),
+        active_pet: None,
+        floor_pet: None,
+        debug_walkable: false,
+    });
     let (ww, wh) = (win_w as usize, win_h as usize);
     let mut sb: Vec<u32> = vec![0; ww * wh];
-    for wy in 0..win_h {
-        let oy = (wy / scale).min(bh - 1);
-        for wx in 0..win_w {
-            let ox = (wx / scale).min(bw - 1);
-            let p = buf.as_slice()[(oy * bw + ox) as usize];
-            sb[wy as usize * ww + wx as usize] =
-                (p.r as u32) << 16 | (p.g as u32) << 8 | p.b as u32;
-        }
-    }
+    let mut surf = XrgbSurface::new(&mut sb, ww, wh).expect("sized to the window");
+    surf.fill_upscaled(buf, scale as usize);
+    let (bw, bh) = (buf.width(), buf.height());
     let labels = renderer.labels(&scene, now);
-    paint_labels_into_surface(&mut sb, ww, wh, &labels, scale as i32, theme);
+    paint_labels_into_surface(&mut surf, &labels, scale as i32, theme);
     let board = renderer.board(&scene, now);
     pixtuoid::floating::offscreen::paint_wall_board_into_surface(
-        &mut sb,
-        ww,
-        wh,
+        &mut surf,
         &board,
         scale as i32,
         theme,
@@ -178,7 +179,7 @@ fn main() -> Result<()> {
     // Audible so the ♩ suffix shows; no transient flash in a static snapshot.
     let budget = pixtuoid::floating::offscreen::footer_budget(ww);
     let footer = renderer.footer(&scene, budget, true, None);
-    pixtuoid::floating::offscreen::paint_footer_into_surface(&mut sb, ww, wh, &footer, theme);
+    pixtuoid::floating::offscreen::paint_footer_into_surface(&mut surf, &footer, theme);
 
     let mut img = RgbImage::new(win_w, win_h);
     for wy in 0..win_h {
