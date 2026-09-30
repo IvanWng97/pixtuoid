@@ -195,6 +195,9 @@ fn phase_kind(phase: WanderPhase) -> PhaseKind {
     }
 }
 
+/// [`WanderRig::advance_until_leaves`]'s poll step.
+const POLL_STEP_MS: u64 = 1_000;
+
 /// One agent's wander machine over the standard layout: the slot plus every
 /// store `advance_wander` threads, so a test drives it by `now` alone.
 struct WanderRig<R: Router> {
@@ -243,7 +246,7 @@ impl<R: Router> WanderRig<R> {
     }
 
     /// Poll [`WanderRig::advance`] until the agent's phase KIND is no longer
-    /// `from_phase`, returning the new `now`. The ~1 s step stays well under the
+    /// `from_phase`, returning the new `now`. [`POLL_STEP_MS`] stays well under the
     /// `stale_resume_gap_ms` trigger, so a long seated/dwell beat is crossed
     /// exactly as real per-frame rendering would, never looking like an
     /// off-screen gap.
@@ -253,7 +256,6 @@ impl<R: Router> WanderRig<R> {
         from_phase: PhaseKind,
         timeout_ms: u64,
     ) -> SystemTime {
-        const STEP_MS: u64 = 1_000;
         let start = now;
         while self
             .motion
@@ -269,7 +271,7 @@ impl<R: Router> WanderRig<R> {
                 elapsed <= timeout_ms,
                 "phase {from_phase:?} did not transition within {timeout_ms}ms"
             );
-            now += Duration::from_millis(STEP_MS);
+            now += Duration::from_millis(POLL_STEP_MS);
             self.advance(now);
         }
         now
@@ -470,10 +472,10 @@ fn dwell_time_independent_of_path_length() {
         measured.push(dwell);
     }
 
-    // The slack is one 1 s poll step.
+    // The slack is one poll step.
     let diff = measured[0].abs_diff(measured[1]);
     assert!(
-        diff <= 1_000,
+        diff <= POLL_STEP_MS,
         "dwell must be path-length-independent: {measured:?}"
     );
 }
@@ -513,6 +515,23 @@ fn far_waypoint_full_cycle_is_longer() {
 }
 
 #[test]
+fn settle_collapses_a_seat_pair_and_gives_it_back() {
+    let p = Point { x: 1, y: 1 };
+    let q = Point { x: 2, y: 2 };
+    let cases = [
+        (None, None, Settle::None),
+        (Some(p), None, Settle::Start(p)),
+        (None, Some(q), Settle::End(q)),
+        (Some(p), Some(q), Settle::Both { start: p, end: q }),
+    ];
+    for (start, end, want) in cases {
+        let got = Settle::from_pair(start, end);
+        assert_eq!(got, want, "({start:?}, {end:?})");
+        assert_eq!((got.start(), got.end()), (start, end), "{got:?}");
+    }
+}
+
+#[test]
 fn snapshot_leg_profile_measures_the_routed_leg_plus_settles() {
     use crate::physics::{walk_profile, WalkIntent};
 
@@ -533,14 +552,13 @@ fn snapshot_leg_profile_measures_the_routed_leg_plus_settles() {
         LegPlan {
             from,
             to,
-            start_settle: None,
-            end_settle: Some(seat),
+            settle: Settle::End(seat),
             intent: WalkIntent::WanderOut,
         },
     );
     let path = route_jittered(&mut Straight, &mask, &overlay, id, from, to);
     let expect = walk_profile(
-        measured_leg_len(&path, None, Some(seat)),
+        measured_leg_len(&path, Settle::End(seat)),
         WalkIntent::WanderOut,
         id,
     );
@@ -555,8 +573,7 @@ fn snapshot_leg_profile_measures_the_routed_leg_plus_settles() {
         LegPlan {
             from,
             to,
-            start_settle: None,
-            end_settle: None,
+            settle: Settle::None,
             intent: WalkIntent::WanderOut,
         },
     );
@@ -729,7 +746,7 @@ fn long_dwell_never_trips_stale_resume_on_screen() {
     ));
 
     // Base the window on the ACTUAL AtWaypoint phase start — the poll-observed
-    // `t2` can lag the real transition by up to one 1 s step — and leave a 2 s
+    // `t2` can lag the real transition by up to one poll step — and leave a 2 s
     // margin so the loop stops before the dwell genuinely ends.
     let at_wp_start = rig.state().wander.phase_started_at;
     let dwell_dur = rig.current_dwell_dur();
@@ -828,10 +845,14 @@ fn wander_dest_for_pantry_is_the_home_desk_stand_point() {
         .expect("an agent lands at the pantry on cycle 0");
 
     let now = t0();
-    let mut rig = WanderRig::new(idle_slot(&path, now), Straight); // desk_index 0
+    let mut rig = WanderRig {
+        layout: l,
+        ..WanderRig::new(idle_slot(&path, now), Straight) // desk_index 0
+    };
     rig.advance(now);
     rig.advance_until_leaves(now, PhaseKind::Seated, 120_000);
 
+    let l = &rig.layout;
     let ms = rig.state();
     assert!(matches!(
         ms.wander.target.kind,

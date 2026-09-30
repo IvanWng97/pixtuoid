@@ -296,7 +296,7 @@ impl CoffeeState {
 
 /// The shared per-frame EPILOGUE: stamp this frame's new coffee carriers and
 /// refresh the door-cosmetic clamp. `pub` so the TUI's `draw_scene` — which
-/// can't call [`render_floor`]/`observe` — runs THIS seam instead of
+/// can't call [`render_floor`]/[`FloorSession::observe`] — runs THIS seam instead of
 /// re-inlining the pair.
 pub fn frame_epilogue(
     fctx: &mut FloorCtx,
@@ -309,8 +309,8 @@ pub fn frame_epilogue(
 }
 
 /// The IMMUTABLE per-frame render inputs threaded through [`render_floor`] /
-/// [`FloorSession::render`]. The MUTABLE per-floor stores
-/// (`fctx`/`buf`/`coffee`/`chitchat`) stay SEPARATE params on `render_floor`: a
+/// [`FloorSession::render`]. The MUTABLE stores (the floor's `fctx`/`buf`, the
+/// office's `coffee`/`chitchat`) stay SEPARATE params on `render_floor`: a
 /// painter that composes floors (the TUI) borrows those disjointly per floor via
 /// `split_at_mut`, so they can't fold into one bundle.
 pub struct FrameInputs<'a> {
