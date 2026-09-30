@@ -4815,21 +4815,7 @@ S B B B B B B S
         let layout = Layout::compute_with_seed(240, 144, None, 0).expect("lays out");
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         let pen = Pen::for_pack(scale, &pack);
-        let frame = SimFrame {
-            agents: Vec::new(),
-            poses: std::collections::HashMap::new(),
-            seated_agents: std::collections::HashMap::new(),
-            characters: Vec::new(),
-            indoor_scale: 1.0,
-            neon: crate::floor::NeonLevels::CALM,
-            chitchat_bubbles: Vec::new(),
-            new_coffee_carriers: Vec::new(),
-            occupied_waypoints: Default::default(),
-            pet: None,
-            mascots: Vec::new(),
-            desks: vec![Default::default(); layout.home_desks.len()],
-            door_frame: 0,
-        };
+        let frame = empty_frame(&layout);
         let list = list_at(
             &frame,
             Office {
@@ -5112,21 +5098,7 @@ S B B B B B B S
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = pack();
         let layout = Layout::compute_with_seed(240, 144, None, 0).expect("lays out");
-        let idle = SimFrame {
-            agents: Vec::new(),
-            poses: std::collections::HashMap::new(),
-            seated_agents: std::collections::HashMap::new(),
-            characters: Vec::new(),
-            indoor_scale: 1.0,
-            neon: crate::floor::NeonLevels::CALM,
-            chitchat_bubbles: Vec::new(),
-            new_coffee_carriers: Vec::new(),
-            occupied_waypoints: Default::default(),
-            pet: None,
-            mascots: Vec::new(),
-            desks: vec![Default::default(); layout.home_desks.len()],
-            door_frame: 0,
-        };
+        let idle = empty_frame(&layout);
         let mut busy = idle.clone();
         busy.occupied_waypoints = (0..layout.waypoints.len()).collect();
         let office = Office {
