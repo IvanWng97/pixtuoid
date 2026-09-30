@@ -58,6 +58,9 @@ run. The jobs:
   full suite on a real Windows runner.
 - **wasm-check** — builds the site's wasm (`just gen-wasm`) and caps its
   gzipped size (`just gen-wasm-check`).
+- **site** (full tier) — `site.yml`: the site's static checks, then e2e and
+  Lighthouse on a build with freshly built wasm, so a Rust change that breaks
+  a wasm export the page calls fails before it deploys.
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
   `just test` can't see.
 - **hygiene** — the same `just lint` recipes preflight runs (its CI job exists

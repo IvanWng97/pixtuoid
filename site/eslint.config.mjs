@@ -8,7 +8,6 @@ import astro from 'eslint-plugin-astro';
 import prettier from 'eslint-config-prettier';
 
 export default [
-  // public/wasm/ is generated wasm-bindgen glue (`just gen-wasm`).
   { ignores: ['dist/', '.astro/', 'node_modules/', 'public/wasm/'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,

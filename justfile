@@ -670,8 +670,8 @@ build *args:
     cargo build --workspace "$@"
 
 # ── site ──────────────────────────────────────────────────────────
-# The Astro landing page — a self-contained Node project under site/ with its
-# own CI (.github/workflows/site.yml). See site/README.md.
+# The Astro landing page — a Node project under site/, checked by
+# .github/workflows/site.yml. See site/README.md.
 
 [doc('Install the site npm deps + the e2e browser (run once per clone)')]
 [group('site')]
@@ -808,7 +808,7 @@ gen-icons:
 # via PATH. So the recipe prepends the RUSTUP toolchain bin (via `rustup which`)
 # and invokes that cargo explicitly.
 [doc('Build pixtuoid-web (wasm) + JS glue into site/public/wasm/')]
-[group('gen')]
+[group('site')]
 gen-wasm:
     #!/usr/bin/env sh
     set -eu
@@ -818,14 +818,10 @@ gen-wasm:
     rustup target list --toolchain stable --installed | grep -q wasm32-unknown-unknown \
         || { echo "needs the wasm target: rustup target add wasm32-unknown-unknown"; exit 1; }
     TB="$(dirname "$(rustup which --toolchain stable rustc)")"
-    # The remap keeps the builder's home directory out of the panic locations.
-    PATH="$TB:$PATH" "$TB/cargo" build -p pixtuoid-web --target wasm32-unknown-unknown --profile wasm-release \
-        --config "target.wasm32-unknown-unknown.rustflags=['--remap-path-prefix=$HOME=~']"
-    mkdir -p site/public/wasm
+    PATH="$TB:$PATH" "$TB/cargo" build -p pixtuoid-web --target wasm32-unknown-unknown --profile wasm-release
     wasm-bindgen --target web --out-dir site/public/wasm \
         target/wasm32-unknown-unknown/wasm-release/pixtuoid_web.wasm
     wasm-opt -Oz -o site/public/wasm/pixtuoid_web_bg.wasm site/public/wasm/pixtuoid_web_bg.wasm
-    ls -la site/public/wasm/
 
 # Bloat gate for the wasm the site ships. Size: the hero must stay
 # a lazy-load behind the poster, so a silent size regression (a dep pulling in
@@ -839,7 +835,7 @@ gen-wasm:
 # budget for the scene the hero runs, not a margin over today's payload, so a
 # regression shows as the printed gap shrinking, not as a red.
 [doc('Fail if the built wasm is missing or over its gzipped size cap')]
-[group('gen')]
+[group('site')]
 gen-wasm-check:
     #!/usr/bin/env sh
     set -eu

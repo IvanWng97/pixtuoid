@@ -29,9 +29,8 @@ build:
   generic by design — it globs every rendered `article.prose` — and needs no
   edit), `lighthouserc.json`, and the smoke viewport table.
 
-`public/wasm/` is gitignored `just gen-wasm` output from the Rust crates, built
-by every workflow that runs `astro build` for e2e or deploy; without it the
-live office silently stays on its poster, so `just site-e2e` builds it first.
+`public/wasm/` is gitignored `just gen-wasm` output; without it the office
+silently stays on its poster.
 
 **The architecture diagram renders at build**, in process
 (`config/rehype-beautiful-mermaid.mjs` — no browser); Playwright's Chromium is

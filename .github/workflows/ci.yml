@@ -21,8 +21,8 @@ permissions:
 
 # `full` is false only on a draft PR (off pull_request the flag dereferences to
 # an empty string, which `!` makes true); a draft skips the `if: inputs.full`
-# jobs to spare the macOS and Windows queue, and require-jobs counts those skips
-# red, so its ci-gate is red by construction.
+# jobs and the site call to spare the runner queue, and require-jobs
+# counts those skips red, so its ci-gate is red by construction.
 jobs:
   lint:
     name: Lint & Hygiene
@@ -43,10 +43,15 @@ jobs:
     with:
       full: ${{ !github.event.pull_request.draft }}
 
+  site:
+    name: Site
+    if: ${{ !github.event.pull_request.draft }}
+    uses: ./.github/workflows/site.yml
+
   gate:
     name: ci-gate
     if: ${{ always() }}
-    needs: [lint, builds, tests]
+    needs: [lint, builds, tests, site]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

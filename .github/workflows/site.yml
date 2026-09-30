@@ -1,16 +1,10 @@
 name: site
 
 on:
-  # PR-only: pages.yml owns the on-main build + deploy, so a main push here would
-  # be a redundant 2nd Astro build.
-  pull_request:
+  workflow_call:
 
 permissions:
   contents: read
-
-concurrency:
-  group: site-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   check:
