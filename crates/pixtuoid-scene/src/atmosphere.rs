@@ -184,9 +184,9 @@ pub(crate) struct SunSpot {
     pub(crate) wall: WallSide,
     /// 0.0..=1.0 along the wall (left→right for North, top→bottom for East/West).
     pub(crate) along: f32,
-    /// 0.0=dim, 1.0=brightest at noon.
+    /// 0.0=dim, 1.0=brightest, at the sun's apex.
     pub(crate) intensity: f32,
-    /// 0.0=neutral white (noon), 1.0=very warm gold (sunrise/sunset).
+    /// 0.0=neutral white (apex), 1.0=very warm gold (sunrise/sunset).
     pub(crate) warmth: f32,
 }
 
