@@ -53,6 +53,7 @@ jobs:
       number: ${{ steps.pr.outputs.number }}
       review: ${{ steps.claude.outputs.structured_output }}
       reviewable: ${{ steps.pr.outputs.reviewable }}
+      severities: ${{ steps.schema.outputs.severities }}
     steps:
       - name: Resolve pull request
         id: pr
@@ -128,6 +129,9 @@ jobs:
             "$(jq -c . .github/prompts/review-schema.json |
               python3 -c 'import shlex,sys; sys.stdout.write(shlex.quote(sys.stdin.read().strip()))')" \
             >>"$GITHUB_OUTPUT"
+          printf 'severities=%s\n' \
+            "$(jq -c '.properties.findings.items.properties.severity.enum' .github/prompts/review-schema.json)" \
+            >>"$GITHUB_OUTPUT"
 
       - name: Run read-only Claude review
         if: steps.pr.outputs.reviewable == 'true'
@@ -170,7 +174,7 @@ jobs:
           jq --exit-status '
             type == "object"
             and (.summary | type == "string" and length > 0)
-            and (.findings | type == "array" and length <= 5)
+            and (.findings | type == "array")
           ' <<< "$REVIEW_JSON" > /dev/null
 
   # Absence renders as a pass: publish skips, nothing comments, and `ci-gate`
@@ -247,13 +251,14 @@ jobs:
           PR_NUMBER: ${{ needs.analyze.outputs.number }}
           REPOSITORY: ${{ github.repository }}
           REVIEW_JSON: ${{ needs.analyze.outputs.review }}
+          # review-schema.json's enum, which this job has no checkout to read.
+          SEVERITIES: ${{ needs.analyze.outputs.severities }}
         run: |
           set -euo pipefail
           readonly COMMENT_MAX_BYTES=60000
-          # review-schema.json's enum, which this job cannot read (no checkout);
-          # action_behavior_test.sh pins the pair.
-          readonly SEVERITIES='["blocking", "non-blocking", "pre-existing"]'
 
+          jq --exit-status 'type == "array" and length > 0 and all(.[]; type == "string")' \
+            <<< "$SEVERITIES" > /dev/null
           jq --exit-status --argjson severities "$SEVERITIES" '
             def valid_path:
               type == "string"
@@ -268,7 +273,7 @@ jobs:
             and (
               .findings
               | type == "array"
-              and length <= 5
+              and length <= 10
               and all(.[];
                 type == "object"
                 and ((keys | sort) == ["body", "line", "path", "severity"])

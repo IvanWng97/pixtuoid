@@ -171,6 +171,9 @@ taste are never posted. Dispositions:
 - `issue (non-blocking)` — any other real defect this PR introduced.
 - `issue (pre-existing)` — real, not introduced here.
 
+The labels are [`review-schema.json`](.github/prompts/review-schema.json)'s
+`severity` enum.
+
 ## Output
 
 Bots return only the structured result
@@ -181,5 +184,7 @@ post or call GitHub APIs:
 - `severity`: the [label](#severity)'s decoration.
 - `path`: repository-relative (the `b/` side of `pr.diff`), never absolute.
 - `line`: the absolute head-side line, never invented.
-- At most the schema's `maxItems` findings, blocking first, pre-existing last.
+- Every blocking finding, first; then at most 5 non-blocking and pre-existing
+  ones, pre-existing last. The summary counts every finding left out,
+  including any past the schema's `maxItems` ceiling.
 - Each `body`: the verified finding and a concrete failure scenario.

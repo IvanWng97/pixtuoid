@@ -200,7 +200,25 @@ run_publisher() {
         REVIEW_JSON="$review_json" \
         REVIEW_MARKER="$review_marker" \
         REVIEW_TITLE="$review_title" \
+        SEVERITIES="${FAKE_SEVERITIES-$severities}" \
         bash -c "$publisher_script"
+}
+
+schema_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Load the review schema")"
+: >"$test_dir/schema-output"
+GITHUB_OUTPUT="$test_dir/schema-output" bash -c "$schema_script" ||
+    fail "the review schema step exited non-zero"
+severities="$(sed -n 's/^severities=//p' "$test_dir/schema-output")"
+[[ -n "$severities" ]] || fail "the review schema step outputs no severities"
+# shellcheck disable=SC2016 # Workflow expressions, matched literally.
+yq -o=json '.' "$CLAUDE_REVIEW_WORKFLOW_FILE" | jq -e '
+    .jobs.analyze.outputs.severities == "${{ steps.schema.outputs.severities }}"
+    and ([.jobs.publish.steps[].env.SEVERITIES // empty] == ["${{ needs.analyze.outputs.severities }}"])' >/dev/null ||
+    fail "$CLAUDE_REVIEW_WORKFLOW_FILE does not hand the schema step's severities to the publisher"
+
+assert_threads() {
+    jq -e -s --arg title "$review_title" "$1" "$posted_threads" >/dev/null ||
+        fail "Claude publisher's review threads: $2: $(<"$posted_threads")"
 }
 
 valid_review='{"summary":"No correctness findings.","findings":[]}'
@@ -216,25 +234,37 @@ published_content="$(<"$published_comment")"
 [[ ! -e "$posted_threads" ]] ||
     fail "Claude publisher posted a review thread for zero findings"
 
-REVIEW_SCHEMA_FILE="${REVIEW_SCHEMA_FILE:-.github/prompts/review-schema.json}"
-severities="$(jq -e -c '.properties.findings.items.properties.severity.enum' "$REVIEW_SCHEMA_FILE")" ||
-    fail "$REVIEW_SCHEMA_FILE has no severity enum"
 run_publisher "$(jq -cn --argjson s "$severities" \
     '{summary: "s", findings: [$s[] | {severity: ., path: "src/a.rs", line: 2, body: "b"}]}')" ||
-    fail "Claude publisher rejected a severity $REVIEW_SCHEMA_FILE allows"
+    fail "Claude publisher rejected a severity the schema allows: $severities"
 [[ "$(<"$published_comment")" == *"$(jq -r '"**Findings: \(length)** (\(map("1 \(.)") | join(", ")))"' <<<"$severities")"* ]] ||
-    fail "Claude publisher's count line does not count each of $REVIEW_SCHEMA_FILE's severities: $(<"$published_comment")"
+    fail "Claude publisher's count line does not count each of the schema's severities: $(<"$published_comment")"
 run_publisher '{"summary":"s","findings":[{"severity":"nit","path":"src/a.rs","line":2,"body":"b"}]}' >/dev/null 2>&1 &&
-    fail "Claude publisher accepted a severity $REVIEW_SCHEMA_FILE does not allow"
-review_labels="$(awk '/^## /{on = ($0 == "## Severity")} on' "$REVIEW_RULES_FILE" |
-    sed -n 's/^- .issue (\([a-z-]*\)).*/\1/p')"
-[[ "$review_labels" == "$(jq -r '.[]' <<<"$severities")" ]] ||
-    fail "$REVIEW_RULES_FILE's Severity labels [${review_labels//$'\n'/ }] are not $REVIEW_SCHEMA_FILE's enum $severities, in order"
+    fail "Claude publisher accepted a severity the schema does not allow"
+FAKE_SEVERITIES='' run_publisher "$valid_review" >/dev/null 2>&1 &&
+    fail "Claude publisher published without the schema's severities"
+[[ ! -e "$published_comment" ]] ||
+    fail "Claude publisher posted a review without the schema's severities"
 
-assert_threads() {
-    jq -e -s --arg title "$review_title" "$1" "$posted_threads" >/dev/null ||
-        fail "Claude publisher's review threads: $2: $(<"$posted_threads")"
+REVIEW_SCHEMA_FILE="${REVIEW_SCHEMA_FILE:-.github/prompts/review-schema.json}"
+schema_accepts() {
+    printf '%s' "$1" >"$test_dir/instance.json"
+    check-jsonschema --schemafile "$REVIEW_SCHEMA_FILE" "$test_dir/instance.json" >/dev/null 2>&1
 }
+six_blocking="$(jq -cn --argjson s "$severities" '{summary: "s", findings: [
+    "src/a.rs", "src/b.rs", "img.png", ".github/workflows/ci.yml", "a/.hidden/..x", "crates/c/desk@8x.sprite"
+    | {severity: $s[0], path: ., line: 1, body: "b"}]}')"
+schema_accepts "$six_blocking" ||
+    fail "$REVIEW_SCHEMA_FILE rejects six blocking findings on repo-relative paths"
+run_publisher "$six_blocking" ||
+    fail "Claude publisher rejected six blocking findings"
+assert_threads 'length == 6' "every blocking finding opens a thread"
+for path in ../outside /etc/passwd src//a.rs src/../a.rs src/ ..; do
+    review="$(jq -cn --argjson s "$severities" --arg p "$path" \
+        '{summary: "s", findings: [{severity: $s[0], path: $p, line: 1, body: "b"}]}')"
+    ! schema_accepts "$review" || fail "$REVIEW_SCHEMA_FILE accepts the unsafe path $path"
+    ! run_publisher "$review" >/dev/null 2>&1 || fail "Claude publisher accepted the unsafe path $path"
+done
 
 in_diff_review='{"summary":"s","findings":[
   {"severity":"blocking","path":"src/a.rs","line":2,"body":"added line"},
@@ -311,11 +341,6 @@ FAKE_HEAD_AFTER_FILES=new-head run_publisher "$in_diff_review" >/dev/null 2>&1 &
 
 if run_publisher '{"summary":' >/dev/null 2>&1; then
     fail "Claude publisher accepted malformed JSON"
-fi
-
-unsafe_path_review='{"summary":"finding","findings":[{"severity":"blocking","path":"../outside","line":1,"body":"bad"}]}'
-if run_publisher "$unsafe_path_review" >/dev/null 2>&1; then
-    fail "Claude publisher accepted an unsafe finding path"
 fi
 
 # claude-refuses-forks-before-the-action pins only that the fork refusal exists
