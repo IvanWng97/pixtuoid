@@ -2,7 +2,7 @@
 Thanks for contributing to pixtuoid! Before you open this PR:
 - Read AGENTS.md (root) — architecture invariants & conventions are load-bearing.
 - Push: the pre-push hook runs `just preflight` (lint + clippy); CI runs the tests. `just preflight full` runs CI's Rust recipes locally.
-- From a fork: a maintainer starts the Claude review bots by comment once your CI run is approved ([REVIEW.md](https://github.com/IvanWng97/pixtuoid/blob/main/REVIEW.md#scope)).
+- From a fork: a maintainer starts the review ([how](https://github.com/IvanWng97/pixtuoid/blob/main/docs/CONTRIBUTING.md#the-merge-gate)).
 Delete sections that don't apply. Keep it short — the diff speaks for itself.
 -->
 

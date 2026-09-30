@@ -1,26 +1,22 @@
 ---
 name: two-lens-review
 version: 2.0.0
-description: "Run pixtuoid's review locally at either scope — a DIFF review (the correctness + design lenses as parallel agents, optional pre-flight before the bots, mandatory for REVIEW.md's local escalation rows: render-and-watch motion, drive a page, live CLI runs) or a whole-codebase AUDIT (subsystem × factor fan-out). Every rule lives in REVIEW.md; this skill only orchestrates: dispatch, premise verify, the fold, the disposition threads. Use on 'review this PR/branch', 'is this ready to merge', a diff touching a local-only row, or 'whole-codebase review' / pre-release / periodic audit."
+description: "Run pixtuoid's review locally at either scope — a DIFF review (the correctness + design lenses as parallel agents; an optional pre-flight before the bots, mandatory for REVIEW.md's local escalation rows) or a whole-codebase AUDIT (subsystem × factor fan-out). Use on 'review this PR/branch', 'is this ready to merge', a diff touching a local-only row, or 'whole-codebase review' / pre-release / periodic audit."
 metadata:
   scope: "pixtuoid repo only"
 ---
 
 # two-lens-review — local orchestration of REVIEW.md
 
-Every rule — checks, lenses, escalation rows, severity, dispositions, the
-convergence contract, the output shape — is [`REVIEW.md`](../../../REVIEW.md)'s.
-Fill briefs from THAT file, never a paraphrase here.
+Every rule is [`REVIEW.md`](../../../REVIEW.md)'s; fill briefs from it, never a
+paraphrase here.
 
 ## When to run
 
-- **Diff scope**, optional pre-flight: before marking a PR ready, to spend the
-  bots' round on what a local pass can't catch.
+- **Diff scope**, optional pre-flight: before marking a PR ready.
 - **Diff scope**, mandatory: the diff matches a REVIEW.md escalation row
   marked **local**.
 - **Whole-codebase scope**: "audit the repo", a pre-release or periodic sweep.
-  A diff review and an audit scan different populations, so the audit is its
-  own pass.
 
 ## Diff scope
 
@@ -31,10 +27,14 @@ Fill briefs from THAT file, never a paraphrase here.
 
    ```
    You are the <correctness|design|row> lens for <PR/branch> on pixtuoid.
-   Worktree: <path> (branch <name>, base <sha>). Diff: git -C <path> diff <base>..HEAD.
-   Read AGENTS.md, then apply REVIEW.md's <lens or row>.
-   <change-specific claims or design questions, one per line>
-   Your final message is the report.
+   Worktree: <path> (branch <name>, base <sha>), read-only.
+   Diff: git -C <path> diff <base>..HEAD.
+   Read AGENTS.md, then apply REVIEW.md's <lens or row>, its Lenses preamble,
+   Do not flag and Output.
+   <change-specific claims (from the PR body's impl-plan answers) or design
+   questions, one per line>
+   Your final message is the report, ending in one verdict: APPROVE or
+   REQUEST-CHANGES.
    ```
 
    The filled slots are the quality lever; a lazily filled one turns every
@@ -64,8 +64,9 @@ Fill briefs from THAT file, never a paraphrase here.
    ```
 
 6. **Before merge**, read each bot's LATEST comment at HEAD (`Findings: N`) and
-   `mergeStateStatus`: the review job passes even when it posts findings, so
-   the check table can't gate. Judge against REVIEW.md's gate.
+   `mergeStateStatus`, and judge against
+   [the gate](../../../docs/CONTRIBUTING.md#the-merge-gate). Record each local
+   row's run as REVIEW.md's escalation section says.
 
 ## Whole-codebase scope
 
@@ -94,4 +95,3 @@ the owner keeps becomes a FOLLOW-UP PR.
 | "The diff looks clean, we're done" (audit) | Drift, debt accretion and erosion accumulate between PRs; only the audit sees them. |
 | "The finder found it, report it" (audit) | A separate skeptic tries to REFUTE each survivor first. |
 | "Just unify the duplication" | Some duplication is documented deliberate separation; read the item's comments first. |
-| "The fold is committed — the bots will catch the rest" | A fold above ~100 behavioral lines is the one unreviewed commit: dispatch the round-2 delta verify when it lands. |

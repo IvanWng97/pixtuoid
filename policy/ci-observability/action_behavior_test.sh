@@ -86,6 +86,21 @@ assert_reviewability "$resolver_script" "$valid_pr" true "$label approved same-r
 assert_reviewability "$resolver_script" "$fork_wrong_base_pr" false "$label approved fork base" true
 assert_reviewability "$resolver_script" "$fork_closed_pr" false "$label approved fork state" true
 
+# The analyzer prompt names each bot by its review_title and REVIEW.md routes on
+# that name, so a renamed title silently falls to the default route.
+REVIEW_RULES_FILE="${REVIEW_RULES_FILE:-REVIEW.md}"
+review_scope="$(awk '/^## /{on = ($0 == "## Scope")} on' "$REVIEW_RULES_FILE")"
+[[ -n "$review_scope" ]] || fail "$REVIEW_RULES_FILE has no \"## Scope\" section"
+callers=0
+for caller in .github/workflows/*.yml; do
+    while IFS= read -r title; do
+        callers=$((callers + 1))
+        [[ "$review_scope" == *"**$title**"* ]] ||
+            fail "$caller's review_title \"$title\" is not named in $REVIEW_RULES_FILE's Scope"
+    done < <(yq -r '.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml") | .with.review_title' "$caller")
+done
+((callers > 0)) || fail "no workflow calls claude-readonly-review.yml"
+
 publisher_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Publish validated Claude review")"
 published_comment="$test_dir/published-comment"
 posted_threads="$test_dir/posted-threads"

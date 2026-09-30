@@ -190,10 +190,8 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    gets its entire comment population re-read against `AGENTS.md`'s comment
    rules, and the cleanup rides the same PR (population and dispositions:
    [`REVIEW.md`](../REVIEW.md#design)'s comment audit). Not the merge gate.
-8. **Merge gate (non-negotiable)** — [`REVIEW.md`](../REVIEW.md#convergence-contract)'s
-   gate: the review bots at the final head + green CI + every finding's review
-   thread resolved by its disposition, plus a local run of each matching
-   local-only escalation row. **A human merges.**
+8. **Merge gate** — [the gate](#the-merge-gate); the `two-lens-review` skill
+   runs its local rows. **A human merges.**
 9. **Wrap** — retro; durable lessons go to the agent's own memory layer, not
    new repo docs.
 
@@ -241,10 +239,59 @@ invariants"), which every contributor and agent reads first.
 
 ## Pull requests
 
-- Review rules, severity, dispositions, the recurring pitfalls and how an
-  outside contributor's PR gets reviewed: [`REVIEW.md`](../REVIEW.md). Every
-  finding's review thread is resolved by its disposition.
+- Review rules: [`REVIEW.md`](../REVIEW.md).
 - AI-authored PRs get the `needs-human-verify` label and a human visual check.
+
+### The merge gate
+
+Green CI; both review bots' reviews at the final head; every finding's review
+thread resolved by its disposition; zero open confirmed `issue (blocking)`;
+each matching [local row](../REVIEW.md#escalation) recorded. The local
+[`two-lens-review`](../.claude/skills/two-lens-review/SKILL.md) skill is
+otherwise an optional pre-flight. The review job passes even when it posts
+findings, so read each bot's latest comment at HEAD, never the check table
+(#448). An `absent-<marker>:<sha>` comment, or none at HEAD, is no review:
+split the PR smaller, else run one extra differentiated local lens and the
+owner merges, recorded in a PR comment.
+
+The bots never review a fork PR on their own: a maintainer approves its CI
+run, then comments `/claude-review` and `/security-review`, again after every
+push. Its author can resolve their own threads, so before merging read each
+thread's `resolvedBy` and its reply. The bots skip Dependabot as an actor, so
+a maintainer comments both commands on its PRs too.
+
+### Dispositions
+
+Every finding reaches exactly one terminal state in its review thread: FIXED ·
+REFUTED (cite the mechanism, per AGENTS.md; add one where none exists) ·
+RE-SCOPED → #N (real and INTRODUCED — or first made reachable — by this
+change, and bigger than the PR: split it off into #N; a redesign that brings
+the finding into scope ends FIXED) · FOLLOW-UP → #N (real and PRE-EXISTING,
+whether or not this change touched its file: it never grows the PR, and is
+fixed in #N; a defect in another session's tree cites that session's PR). A
+disposition is the reply that resolves the thread, STARTING with its state:
+`FIXED: …` · `REFUTED: … — <mechanism>` · `RE-SCOPED → #N: …` ·
+`FOLLOW-UP → #N: …`, where #N is an open or merged PR other than this one. A
+re-flag of an already-dispositioned finding replies with the original's
+disposition (link it). "Acknowledged" and "surfaced" are not states. Sweep at
+the FINAL merge head; check WHICH commit a bot re-flag was raised against
+before re-litigating.
+
+### Convergence contract
+
+- **Churn budget** — a diff whose added + modified lines exceed ~1500 is split
+  (stacked PRs) before review. Pure deletions are exempt once censused; a
+  change that both adds and deletes at scale is two PRs.
+- **Deletion census** — before deleting N members of a class, the full list
+  and its criterion land in the first commit or the PR body (#943).
+- **Two fix rounds, hard cap.** Round 1 folds every accepted finding into ONE
+  commit. Round 2 verifies the dispositions; a round-2 finding outside round
+  1's fold is dispositioned, never folded. A blocking issue confirmed in round
+  1's fixes STOPS the loop: revert the fold and re-land smaller, or re-scope.
+  No round 3.
+- **Round 2's fold** is the last behavior change and is verified, not
+  re-reviewed: each fix is a revert, a deletion, or a change shipping a test
+  that fails without it. Anything else reverts the fold.
 
 ### Handy `gh` commands
 
