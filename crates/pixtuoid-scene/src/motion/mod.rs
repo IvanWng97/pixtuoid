@@ -305,11 +305,13 @@ pub fn advance_wander(
                         &layout.walkable,
                         overlay,
                         id,
-                        from,
-                        dest,
-                        chair_settle,
-                        seat,
-                        WalkIntent::WanderOut,
+                        LegPlan {
+                            from,
+                            to: dest,
+                            start_settle: chair_settle,
+                            end_settle: seat,
+                            intent: WalkIntent::WanderOut,
+                        },
                     ));
                     ms.wander.phase_started_at = ms
                         .wander
@@ -454,25 +456,36 @@ fn spot_claims(motion: &HashMap<AgentId, MotionState>, exclude: AgentId) -> Spot
     claims
 }
 
+/// One walk leg to freeze a profile for: its routed endpoints, the settle
+/// segments the router never plans, and why the agent walks it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LegPlan {
+    /// Routed origin.
+    pub(crate) from: Point,
+    /// Routed destination.
+    pub(crate) to: Point,
+    /// The seat the agent rises off at `from`, if any.
+    pub(crate) start_settle: Option<Point>,
+    /// The seat the agent glides onto at `to`, if any.
+    pub(crate) end_settle: Option<Point>,
+    /// Why the agent walks this leg — picks the gait.
+    pub(crate) intent: WalkIntent,
+}
+
 /// Freeze one one-shot walk leg's timing profile. Measuring the ROUTED (not raw)
 /// polyline is load-bearing: the duration must cover the whole path or `t`
 /// reaches 1000 before the sprite arrives and it pops.
-#[allow(clippy::too_many_arguments)] // each arg is a distinct leg parameter
 pub(crate) fn snapshot_leg_profile(
     router: &mut dyn Router,
     mask: &WalkableMask,
     overlay: &OccupancyOverlay,
     id: AgentId,
-    from: Point,
-    to: Point,
-    start_settle: Option<Point>,
-    end_settle: Option<Point>,
-    intent: WalkIntent,
+    leg: LegPlan,
 ) -> WalkProfile {
-    let path = route_jittered(router, mask, overlay, id, from, to);
+    let path = route_jittered(router, mask, overlay, id, leg.from, leg.to);
     walk_profile(
-        measured_leg_len(&path, start_settle, end_settle),
-        intent,
+        measured_leg_len(&path, leg.start_settle, leg.end_settle),
+        leg.intent,
         id,
     )
 }
@@ -497,11 +510,13 @@ fn snapshot_back_profile(
         &layout.walkable,
         overlay,
         slot.agent_id,
-        ms.wander.target.dest,
-        snap_to,
-        ms.wander.target.kind.seat(),
-        chair_settle,
-        WalkIntent::WanderBack,
+        LegPlan {
+            from: ms.wander.target.dest,
+            to: snap_to,
+            start_settle: ms.wander.target.kind.seat(),
+            end_settle: chair_settle,
+            intent: WalkIntent::WanderBack,
+        },
     )
 }
 

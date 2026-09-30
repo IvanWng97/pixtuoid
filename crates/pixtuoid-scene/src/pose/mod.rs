@@ -13,8 +13,8 @@ use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::AgentId;
 
 use crate::motion::{
-    advance_wander, snapshot_leg_profile, walking_position, MotionState, WalkLeg, WalkPathSnapshot,
-    WanderKind, WanderPhase,
+    advance_wander, snapshot_leg_profile, walking_position, LegPlan, MotionState, WalkLeg,
+    WalkPathSnapshot, WanderKind, WanderPhase,
 };
 use crate::physics::{walk_arrived, walk_progress, WalkIntent, WalkProfile};
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
@@ -243,11 +243,13 @@ pub fn derive_with_routing(
                 &layout.walkable,
                 rctx.overlay,
                 slot.agent_id,
-                route_from,
-                door_target,
-                chair_rise,
-                None,
-                WalkIntent::Exit,
+                LegPlan {
+                    from: route_from,
+                    to: door_target,
+                    start_settle: chair_rise,
+                    end_settle: None,
+                    intent: WalkIntent::Exit,
+                },
             );
             // Store the ORIGIN so the render can detect a desk departure and
             // re-derive the same approach + settle.
@@ -329,11 +331,13 @@ pub fn derive_with_routing(
                 &layout.walkable,
                 rctx.overlay,
                 slot.agent_id,
-                entry_from,
-                approach,
-                None,
-                chair_settle,
-                WalkIntent::Entry,
+                LegPlan {
+                    from: entry_from,
+                    to: approach,
+                    start_settle: None,
+                    end_settle: chair_settle,
+                    intent: WalkIntent::Entry,
+                },
             );
             mstate.entry = Some(WalkLeg {
                 started_at: if re_enter.is_some() {
@@ -503,11 +507,13 @@ pub fn derive_with_routing(
                             &layout.walkable,
                             rctx.overlay,
                             slot.agent_id,
-                            prev,
-                            snap_target,
-                            None,
-                            chair_settle,
-                            WalkIntent::SnapBack,
+                            LegPlan {
+                                from: prev,
+                                to: snap_target,
+                                start_settle: None,
+                                end_settle: chair_settle,
+                                intent: WalkIntent::SnapBack,
+                            },
                         );
                         ms_entry.snap_back = Some(WalkLeg {
                             started_at: slot.state_started_at,
