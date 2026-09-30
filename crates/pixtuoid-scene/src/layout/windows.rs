@@ -112,9 +112,9 @@ fn spread(wall: u16, n: u16) -> Vec<u16> {
     (0..n).map(|k| base + u16::from(k >= narrow)).collect()
 }
 
-/// The windows a wall `buf_w` wide shows, left to right: the tiling less every
-/// window `door` overlaps, whose glass would otherwise show through the
-/// elevator's frame.
+/// The windows a wall `buf_w` wide shows, left to right: every slot less those
+/// `door` overlaps, whose glass would otherwise show through the elevator's
+/// frame.
 pub(crate) fn window_bays(buf_w: u16, door: Option<Range<u16>>) -> impl Iterator<Item = WindowBay> {
     window_slots(buf_w).filter(move |b| {
         !door
