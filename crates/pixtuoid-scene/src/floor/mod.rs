@@ -157,6 +157,22 @@ impl FloorCtx {
         }
     }
 
+    /// This floor's stores for one `sim_step`, beside the office's `chitchat`.
+    pub(crate) fn sim_stores<'a>(
+        &'a mut self,
+        chitchat: &'a mut HashMap<VenueKey, ActiveChitchat>,
+    ) -> SimStores<'a> {
+        SimStores {
+            router: &mut self.router,
+            overlay: &mut self.overlay,
+            history: &mut self.history,
+            motion: &mut self.motion,
+            light: &mut self.light,
+            neon: &mut self.neon,
+            chitchat,
+        }
+    }
+
     /// The per-frame layout — memoized `compute_with_seed(w, h, None, seed)` +
     /// the router corridor re-point, the ONE frame prologue every painter rides.
     /// Returns a cheap `Arc` handle so callers can hold it across later
@@ -697,15 +713,7 @@ impl FloorSession {
         let layout = fctx.frame_layout(size.w, size.h, floor_meta.floor_seed)?;
         let door_anim_max_ms = fctx.door_anim_max_ms;
         let frame = sim_step(
-            &mut SimStores {
-                router: &mut fctx.router,
-                overlay: &mut fctx.overlay,
-                history: &mut fctx.history,
-                motion: &mut fctx.motion,
-                light: &mut fctx.light,
-                neon: &mut fctx.neon,
-                chitchat: &mut self.office.chitchat,
-            },
+            &mut fctx.sim_stores(&mut self.office.chitchat),
             SimInputs {
                 scene,
                 layout: &layout,

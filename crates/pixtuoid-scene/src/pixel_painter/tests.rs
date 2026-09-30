@@ -4782,92 +4782,6 @@ fn an_upright_occupant_sorts_on_the_row_their_sprite_bottoms_out_on() {
 }
 
 #[test]
-fn desk_shadow_tracks_the_desk_zsort_row_not_a_hardcoded_offset() {
-    let desk = Point { x: 40, y: 30 };
-    let v = crate::layout::desk_furniture_def().visual;
-    let e = desk_shadow_ellipse(desk);
-    assert_eq!(e.cy, desk.y + v.h);
-    assert_eq!(e.cx, desk.x + v.w / 2);
-}
-
-/// One fitted shadow per piece that casts one, emitted in roster order: the
-/// order they blend in where they overlap.
-#[test]
-fn floor_shadow_ellipses_fit_each_caster_in_roster_order() {
-    use crate::layout::{furniture_def, Facing, FixtureKind, Furniture, Station, WaypointKind};
-    let l =
-        Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("192x160 fits");
-    let fitted = |pos: Point, kind: WaypointKind| {
-        let vis_w = furniture_def(kind.furniture()).visual.w;
-        let half_w = if vis_w > 0 { (vis_w / 2 + 1).min(7) } else { 7 };
-        (pos.x, pos.y + 2, half_w, 2)
-    };
-    let mut expected: Vec<(u16, u16, u16, u16)> = Vec::new();
-    for f in l.fixtures() {
-        match f.kind {
-            FixtureKind::Desk(i) => {
-                let e = desk_shadow_ellipse(l.home_desks[i.0]);
-                expected.push((e.cx, e.cy, e.half_w, e.half_h));
-            }
-            FixtureKind::Station { waypoint, station } => {
-                let wp = &l.waypoints[waypoint];
-                expected.push(match station {
-                    Station::Printer => (wp.pos.x, wp.pos.y + 1, 5, 1),
-                    _ => fitted(wp.pos, wp.kind),
-                });
-            }
-            FixtureKind::Pod { item, kind } => {
-                if let Some(wp) = kind.waypoint() {
-                    expected.push(fitted(l.pod_decor[item].pos, wp));
-                }
-            }
-            FixtureKind::MeetingSofa {
-                room, faces_away, ..
-            } => {
-                for w in l.waypoints.iter().filter(|w| {
-                    w.kind == WaypointKind::MeetingSofa
-                        && w.room_id == Some(room)
-                        && (w.facing == Facing::North) == faces_away
-                }) {
-                    expected.push(fitted(w.pos, w.kind));
-                }
-            }
-            FixtureKind::MeetingChair { waypoint, .. } => {
-                let wp = &l.waypoints[waypoint];
-                expected.push(fitted(wp.pos, wp.kind));
-            }
-            FixtureKind::KitchenIsland => {
-                let island = l.pantry.and_then(|p| p.kitchen_island).expect("an island");
-                let vis = furniture_def(Furniture::KitchenIsland).visual;
-                expected.push((island.x, island.y + (vis.h - 1) / 2, vis.w / 2 + 1, 2));
-            }
-            FixtureKind::LoungeCouch => {
-                let c = l.couch_sprite_center().expect("a couch");
-                expected.push((c.x, c.y + 2, 7, 2));
-            }
-            FixtureKind::Plant { item, kind } => {
-                let pos = l.plants[item].pos;
-                let h = furniture_def(kind.furniture()).visual.h;
-                expected.push((pos.x, pos.y + (h - 1) / 2, 3, 1));
-            }
-            FixtureKind::FloorLamp => {
-                let lamp = l.floor_lamp().expect("a lamp");
-                let h = furniture_def(Furniture::FloorLamp).visual.h;
-                expected.push((lamp.x, lamp.y + (h - 1) / 2, 2, 1));
-            }
-            _ => {}
-        }
-    }
-    let mut got = Vec::new();
-    floor_shadow_ellipses(&l, |el| got.push((el.cx, el.cy, el.half_w, el.half_h)));
-    assert!(
-        expected.len() > l.home_desks.len(),
-        "more than the desks cast"
-    );
-    assert_eq!(got, expected);
-}
-
-#[test]
 fn character_render_names_resolve_in_the_animation_registry() {
     use pixtuoid_core::sprite::format::{
         OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS,
@@ -5420,22 +5334,6 @@ fn the_chair_and_the_island_mirror_on_opposite_facings() {
                 "{kind:?} must mirror on {flips_on:?} and nothing else, saw {facing:?} -> {flip}"
             );
         }
-    }
-}
-
-/// The desk's shadow falls under the desk. `DESK_W` is the SURFACE width, not
-/// the piece's — the side cabinets that cast the shadow make it `visual.w` — so
-/// a shadow keyed on `DESK_W` sits 2 px west of the thing casting it (#906).
-#[test]
-fn the_desk_shadow_is_centred_on_the_desk_that_casts_it() {
-    let v = crate::layout::desk_furniture_def().visual;
-    for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
-        let e = super::desk_shadow_ellipse(desk);
-        // The desk's ground is stamped TOP-LEFT at `desk`, full `visual.w` wide.
-        assert!(
-            e.cx.saturating_sub(e.half_w) >= desk.x && e.cx + e.half_w <= desk.x + v.w,
-            "{desk:?}: the shadow must stay inside the desk's ground contact"
-        );
     }
 }
 

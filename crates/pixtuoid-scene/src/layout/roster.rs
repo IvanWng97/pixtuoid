@@ -31,6 +31,43 @@ impl Fixture {
     pub(crate) fn top_left(&self) -> Point {
         top_left(self.visual)
     }
+
+    /// The shadow it casts where its art's box meets the floor, or `None` for a
+    /// fixture that lies flat on the floor or hangs on a wall.
+    pub(crate) fn contact(&self) -> Option<crate::ground::Contact> {
+        let stands = match self.kind {
+            FixtureKind::Wall { kind, .. } => kind.stands_on_floor(),
+            FixtureKind::Desk(_)
+            | FixtureKind::FilingCabinet(_)
+            | FixtureKind::DeskChair(_)
+            | FixtureKind::Station { .. }
+            | FixtureKind::Plant { .. }
+            | FixtureKind::Pod { .. }
+            | FixtureKind::MeetingSofa { .. }
+            | FixtureKind::MeetingTable { .. }
+            | FixtureKind::MeetingChair { .. }
+            | FixtureKind::CoatRack { .. }
+            | FixtureKind::LoungeCouch
+            | FixtureKind::SideTable
+            | FixtureKind::FloorLamp
+            | FixtureKind::FishTank
+            | FixtureKind::KitchenIsland
+            | FixtureKind::WaterCooler
+            | FixtureKind::TrashBin => true,
+            FixtureKind::MeetingRug { .. }
+            | FixtureKind::Doormat { .. }
+            | FixtureKind::NoticeBoard { .. }
+            | FixtureKind::LoungeRug
+            | FixtureKind::PantryMat
+            | FixtureKind::IslandMat
+            | FixtureKind::Door
+            | FixtureKind::Runner
+            | FixtureKind::NeonSign
+            | FixtureKind::Clock => false,
+        };
+        let v = self.visual;
+        stands.then(|| crate::ground::Contact::under(v.x, v.width, v.y + v.height))
+    }
 }
 
 /// Where a fixture sorts. The derived order is the paint order: every
