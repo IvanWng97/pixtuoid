@@ -552,7 +552,8 @@ pub(crate) struct AudioHandle {
     volume: std::sync::Arc<std::sync::atomic::AtomicU32>,
     /// The device thread's join handle, so [`shutdown`](Self::shutdown) can WAIT
     /// for `run_loop` to drop its `RodioSink` (the OS device close) before the
-    /// process exits.
+    /// process exits: detached, its teardown races exit, and on macOS CoreAudio a
+    /// half-closed output strands playback (`sudo killall coreaudiod`).
     join: std::sync::Arc<std::sync::Mutex<Option<std::thread::JoinHandle<()>>>>,
 }
 
@@ -646,9 +647,8 @@ impl AudioHandle {
 
     /// Stop the device thread SYNCHRONOUSLY: dropping the sole sender makes `run_loop` return
     /// and drop its `RodioSink` (the OS device close); the JOIN makes that Drop finish before
-    /// the process exits. Detached it races teardown, and on macOS CoreAudio a half-closed
-    /// output strands playback (music keeps going; `sudo killall coreaudiod`). INVARIANT: only
-    /// from `AudioController::drop`, after the painter's loop ended — nothing races `tx`/`join`.
+    /// the process exits (see `join`). INVARIANT: only from `AudioController::drop`, after the
+    /// painter's loop ended — nothing races `tx`/`join`.
     pub(crate) fn shutdown(&self) {
         *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let handle = self.join.lock().unwrap_or_else(|e| e.into_inner()).take();

@@ -281,6 +281,7 @@ pub fn paint_labels_into_surface(
     theme: &Theme,
 ) {
     for el in labels {
+        debug_assert!(!el.hovered, "floating paints no hover state");
         let color = pack_xrgb(pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme));
         let marker = "\u{25cf}";
         let text = format!("{marker}{}", el.text);
