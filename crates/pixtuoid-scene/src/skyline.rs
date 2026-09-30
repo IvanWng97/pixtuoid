@@ -17,7 +17,7 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::format::{Building, CityMaterials, CityPlane, Material, Pack};
 use pixtuoid_core::sprite::{Frame, Pixel, Rgb};
 
-use crate::atmosphere::Look;
+use crate::atmosphere::{Look, Moment};
 use crate::layout::pct;
 use crate::theme::Theme;
 
@@ -372,17 +372,17 @@ pub(crate) struct CityStrip {
 }
 
 impl CityStrip {
-    /// `pack`'s city across a run `run_w` wide behind glass `glass_h` tall,
-    /// seen from `altitude`, under `look`'s sky at `now`, at `density`. A
-    /// building the pack draws no art for at `density` is its base, each pixel
-    /// grown to fill its cell.
+    /// `pack`'s city across a run `run_w` wide behind glass `glass_h` tall, at
+    /// `moment`, at `density`. A building the pack draws no art for at
+    /// `density` is its base, each pixel grown to fill its cell.
     pub(crate) fn draw(
         pack: &Pack,
         (run_w, glass_h): (u16, u16),
-        altitude: f32,
-        (look, theme, now): (&Look, &Theme, SystemTime),
+        moment: &Moment,
+        theme: &Theme,
         density: NonZeroU16,
     ) -> Self {
+        let (look, altitude, now) = (&moment.look, moment.altitude, moment.now);
         let d = density.get();
         let mut strip = CityStrip {
             w: run_w.saturating_mul(d),
@@ -660,13 +660,13 @@ mod tests {
     fn a_denser_strip_draws_the_denser_art_on_the_same_city() {
         let pack = pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let look = Look::resolve(&crate::sky::Sky::at(SystemTime::UNIX_EPOCH), theme);
+        let sky = crate::sky::Sky::at(SystemTime::UNIX_EPOCH);
         let strip = |d| {
             CityStrip::draw(
                 &pack,
                 (60, 20),
-                0.0,
-                (&look, theme, SystemTime::UNIX_EPOCH),
+                &Moment::resolve(sky, theme, 0.0, SystemTime::UNIX_EPOCH),
+                theme,
                 NonZeroU16::new(d).expect("nonzero"),
             )
         };

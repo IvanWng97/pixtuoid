@@ -19,8 +19,6 @@ pub(super) use lighting::{
     paint_radial_falloff, paint_shadow, RadialFalloff,
 };
 
-use std::time::SystemTime;
-
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
@@ -28,9 +26,10 @@ use super::ambient::SunbeamColumn;
 use super::epoch_ms;
 use super::palette::{blend, blend_pixel, blend_rgb, RgbLut, WHITE};
 
-use crate::atmosphere::Look;
+use crate::atmosphere::{Look, Moment};
 use crate::layout::{
-    glass_rows, wall_trim_row, window_frame, window_rows, window_run, Layout, WindowBay, WINDOW_W,
+    glass_rows, wall_trim_row, window_frame, window_rows, window_run, Bounds, Layout, WindowBay,
+    WINDOW_W,
 };
 use crate::sky::{Sky, Weather};
 use crate::skyline::CityStrip;
@@ -123,21 +122,19 @@ impl BaseFillCache {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// The floor and the north wall band `top_wall_h` tall with the windows `bays`,
+/// over the whole of `buf`, at `moment`.
 pub(super) fn paint_floor_and_walls(
     base_fill: &mut BaseFillCache,
     buf: &mut RgbBuffer,
-    buf_w: u16,
-    buf_h: u16,
-    now: SystemTime,
-    sky: &Sky,
-    look: &Look,
     top_wall_h: u16,
     bays: impl IntoIterator<Item = WindowBay>,
+    moment: &Moment,
     pack: &Pack,
     theme: &Theme,
-    altitude: f32,
 ) {
+    let (buf_w, buf_h) = (buf.width(), buf.height());
+    let (sky, look) = (&moment.sky, &moment.look);
     let window_frame = theme.surface.window_frame;
     let carpet_base = theme.surface.carpet_base;
     let carpet_light = theme.surface.carpet_light;
@@ -172,33 +169,29 @@ pub(super) fn paint_floor_and_walls(
     let city = CityStrip::draw(
         pack,
         (run.end - run.start, glass_rows(window_h)),
-        altitude,
-        (look, theme, now),
+        moment,
+        theme,
         std::num::NonZeroU16::MIN,
     );
-    let disc = compute_disc(sky, buf_w, top_wall_h, theme);
+    let view = GlassView {
+        city: &city,
+        run_x0: run.start,
+        sky_row: &sky_row,
+        disc: compute_disc(sky, buf_w, top_wall_h, theme),
+    };
     for w in bays {
-        let x = w.x;
-        // The disc paints ONLY in the window its centre sits over. Ungated, a
-        // disc near an inter-window gap is wide enough (radius+glow) to reach
-        // BOTH neighbours' glass and render twice, bleeding through the solid
-        // wall pillar between them.
-        let span = w.span();
-        let win_disc = disc.filter(|d| d.cx >= f32::from(span.start) && d.cx < f32::from(span.end));
         paint_floor_to_ceiling_window(
             buf,
-            x,
-            window_y,
-            WINDOW_W,
-            window_h,
+            Bounds {
+                x: w.x,
+                y: window_y,
+                width: WINDOW_W,
+                height: window_h,
+            },
             window_frame,
             w.idx,
-            now,
-            sky,
-            (&city, run.start),
-            &sky_row,
-            win_disc,
-            look,
+            moment,
+            view,
         );
     }
 
@@ -305,13 +298,13 @@ fn paint_streaks(
     }
 }
 
-/// Wash a flat translucent color over the glass INTERIOR — the inset rect
-/// `(x0+1 .. x0+w-1, y0+1 .. y0+h-1)`. This is NOT the streaks' `x+1/y+1`
-/// inset: it takes the raw window rect and does its own offset math.
-fn wash_glass(buf: &mut RgbBuffer, x0: u16, y0: u16, w: u16, h: u16, color: Rgb, alpha: f32) {
-    for dy in 1..h.saturating_sub(1) {
-        for dx in 1..w.saturating_sub(1) {
-            blend_pixel(buf, x0 + dx, y0 + dy, color, alpha);
+/// Wash a flat translucent color over `pane`'s glass INTERIOR, one pixel in
+/// from each edge. This is NOT the streaks' `x+1/y+1` inset: it takes the raw
+/// window rect and does its own offset math.
+fn wash_glass(buf: &mut RgbBuffer, pane: Bounds, color: Rgb, alpha: f32) {
+    for dy in 1..pane.height.saturating_sub(1) {
+        for dx in 1..pane.width.saturating_sub(1) {
+            blend_pixel(buf, pane.x + dx, pane.y + dy, color, alpha);
         }
     }
 }
@@ -330,25 +323,47 @@ fn sky_rows(h: u16, look: &Look) -> Vec<Rgb> {
         .collect()
 }
 
-/// Floor-to-ceiling window with frame, mullion, and the city behind its glass:
-/// its part of `city`, a strip whose west end stands at column `run_x0`, over
-/// the sky's rows (`sky_rows`).
-#[allow(clippy::too_many_arguments)]
+/// What one frame's windows look out on, the same through every pane.
+#[derive(Clone, Copy)]
+struct GlassView<'a> {
+    /// The city along the whole run of windows.
+    city: &'a CityStrip,
+    /// The column the city strip's west end stands at.
+    run_x0: u16,
+    /// The sky's colour on each glass row ([`sky_rows`]).
+    sky_row: &'a [Rgb],
+    /// The sun or moon, where it is up.
+    disc: Option<Disc>,
+}
+
+/// Floor-to-ceiling window `pane`, framed in `frame` and seeded by its tiling
+/// index `window_idx`, with mullion, and `view` behind its glass at `moment`.
 fn paint_floor_to_ceiling_window(
     buf: &mut RgbBuffer,
-    x: u16,
-    y: u16,
-    w: u16,
-    h: u16,
+    pane: Bounds,
     frame: Rgb,
     window_idx: u16,
-    now: SystemTime,
-    sky: &Sky,
-    (city, run_x0): (&CityStrip, u16),
-    sky_row: &[Rgb],
-    disc: Option<Disc>,
-    look: &Look,
+    moment: &Moment,
+    view: GlassView<'_>,
 ) {
+    let Bounds {
+        x,
+        y,
+        width: w,
+        height: h,
+    } = pane;
+    let (sky, look, now) = (&moment.sky, &moment.look, moment.now);
+    let GlassView {
+        city,
+        run_x0,
+        sky_row,
+        disc,
+    } = view;
+    // The disc paints ONLY in the window its centre sits over. Ungated, a disc
+    // near an inter-window gap is wide enough (radius+glow) to reach BOTH
+    // neighbours' glass and render twice, bleeding through the solid wall pillar
+    // between them.
+    let disc = disc.filter(|d| d.cx >= f32::from(x) && d.cx < f32::from(x + w));
     let glass_h = glass_rows(h);
     let clear_sky = crate::skyline::clear_sky_rows(glass_h);
     let building_at = |px: u16, glass_dy: u16| city.at(px.wrapping_sub(run_x0), glass_dy);
@@ -415,7 +430,7 @@ fn paint_floor_to_ceiling_window(
     // The veil goes on BEFORE the streaks and the bolt, so rain and lightning
     // still read on top of the murk.
     if let Some((color, alpha)) = look.glass_veil {
-        wash_glass(buf, x, y, w, h, color, alpha);
+        wash_glass(buf, pane, color, alpha);
     }
 
     let elapsed_ms = epoch_ms(now);
@@ -485,7 +500,7 @@ fn paint_floor_to_ceiling_window(
             // flash level so it fires in lockstep with `paint_lightning_flash`.
             let level = sky.flash();
             if level > 0.0 {
-                wash_glass(buf, x, y, w, h, WHITE, 0.6 * level);
+                wash_glass(buf, pane, WHITE, 0.6 * level);
             }
         }
         Weather::Snow => paint_streaks(
