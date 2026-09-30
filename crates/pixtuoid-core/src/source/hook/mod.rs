@@ -208,7 +208,7 @@ fn bind_targets(evs: &[AgentEvent]) -> std::collections::BTreeMap<AgentId, bool>
 /// batch — the per-source decoders never see the envelope key, so this single
 /// patch point IS the whole focus-jump wiring.
 ///
-/// The gate is the registry's [`FocusChannel`] capability. `TranscriptProbe`
+/// The gate is the registry's [`FocusChannel`](crate::source::registry::FocusChannel) capability. `TranscriptProbe`
 /// sources are skipped: the
 /// shim's resolved pid is the nearest non-shell ancestor, not necessarily the CLI,
 /// and a stamped stale pid would shadow the probe's recycle guard in

@@ -187,7 +187,7 @@ fn load_embedded_pack() -> Result<Pack, pixtuoid_core::sprite::error::PackError>
 /// Every default sprite as `(filename, source)`: every `.sprite` in
 /// `sprites/default/`, listed by `build.rs` (less, without `density-art`, the
 /// frames only a density variant draws), so a sprite committed there cannot be
-/// left out by omission. [`test_pack_with`] swaps files within this EXACT set.
+/// left out by omission. `test_pack_with` swaps files within this EXACT set.
 fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
     const SPRITES: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/embedded_sprites.rs"));
     SPRITES.to_vec()

@@ -23,39 +23,57 @@ pub(in crate::pixel_painter) struct RadialFalloff {
     pub ry_norm: f32,
 }
 
-/// The composite every light and the shadows share: blend `color`
-/// over the caller-clipped `xs` × `ys` at each pixel's `t(x, y)`; `None` leaves
-/// the pixel alone. A light owns its falloff SHAPE and its clip, never the blend.
+/// How many flat tones a falloff steps through from its peak down, the seam
+/// between each pair dithered.
+const FALLOFF_TONES: u8 = 3;
+const _: () = assert!(FALLOFF_TONES > 0);
+
+/// The composite every light and the shadows share: blend `color` over the
+/// caller-clipped `xs` × `ys` at each pixel's `t(x, y)`, stepped to one of
+/// [`FALLOFF_TONES`] tones of `peak` by [`crate::dither::stepped`]; `None`
+/// leaves the pixel alone. A light owns its falloff SHAPE and its clip, never
+/// the blend.
 fn blend_falloff(
     buf: &mut RgbBuffer,
     xs: std::ops::Range<u16>,
     ys: std::ops::Range<u16>,
     color: Rgb,
+    peak: f32,
     t: impl Fn(u16, u16) -> Option<f32>,
 ) {
     for y in ys {
         for x in xs.clone() {
             if let Some(t) = t(x, y) {
-                let cur = buf.get(x, y);
-                buf.put(x, y, blend_rgb(cur, color, t));
+                let tone = crate::dither::stepped(t, peak, FALLOFF_TONES, x, y);
+                if tone > 0.0 {
+                    let cur = buf.get(x, y);
+                    buf.put(x, y, blend_rgb(cur, color, tone));
+                }
             }
         }
     }
 }
 
 /// Blend `color` over the region by [`crate::ground::falloff`] at `strength`,
-/// so it reads as a soft round patch rather than a stamped oval.
+/// so it reads as a round patch stepped in dithered tones, not a stamped oval.
 pub(in crate::pixel_painter) fn paint_radial_falloff(
     buf: &mut RgbBuffer,
     g: RadialFalloff,
     strength: f32,
     color: Rgb,
 ) {
-    blend_falloff(buf, g.min_x..g.max_x, g.min_y..g.max_y, color, |x, y| {
-        let nx = (x as f32 - g.cx) / g.rx_norm;
-        let ny = (y as f32 - g.cy) / g.ry_norm;
-        crate::ground::falloff(nx, ny).map(|f| f * strength)
-    });
+    blend_falloff(
+        buf,
+        g.min_x..g.max_x,
+        g.min_y..g.max_y,
+        color,
+        strength,
+        |x, y| {
+            let nx = (x as f32 - g.cx) / g.rx_norm;
+            let ny = (y as f32 - g.cy) / g.ry_norm;
+            crate::ground::falloff(nx, ny).map(|f| f * strength)
+        },
+    );
 }
 
 /// Blend `color` over an integer-centred ellipse: a floor shadow.
@@ -90,7 +108,9 @@ pub(in crate::pixel_painter) fn paint_light(buf: &mut RgbBuffer, emitter: &Emitt
     }
     let ((x0, y0), (x1, y1)) = emitter.bounds();
     let (xs, ys) = (x0..x1.min(buf.width()), y0..y1.min(buf.height()));
-    blend_falloff(buf, xs, ys, color, |x, y| emitter.level_at(x, y));
+    blend_falloff(buf, xs, ys, color, emitter.peak(), |x, y| {
+        emitter.level_at(x, y)
+    });
 }
 
 /// The neon sign's colors for one frame: a bright TUBE, a colored HALO that
@@ -270,7 +290,7 @@ pub(in crate::pixel_painter) fn paint_corridor_runner(
     }
 }
 
-/// Soft elliptical contact shadow under furniture / characters — grounds
+/// Elliptical contact shadow under furniture / characters — grounds
 /// floating sprites so they read as standing on the floor, not hovering.
 pub(in crate::pixel_painter) fn paint_shadow(
     buf: &mut RgbBuffer,
@@ -366,20 +386,41 @@ mod tests {
     fn the_halo_lights_the_wall_beside_the_tube_and_stops_at_its_radius() {
         let (buf, _) = lit_wall(NeonLevels::ALERT);
         let mid_y = PANEL_AT + NEON_PANEL_H / 2;
-        let beside = buf.get(PANEL_AT - 1, mid_y);
-        let further = buf.get(PANEL_AT - 3, mid_y);
-        assert_ne!(beside, WALL, "the wall next to the tube is lit");
-        assert_ne!(further, WALL);
+        let lit = |x: u16| buf.get(x, mid_y) != WALL;
+        assert!(lit(PANEL_AT - 1), "the wall next to the tube is lit");
+        assert!(!lit(PANEL_AT - NEON_HALO_RADIUS), "nothing AT the radius");
+        // A 4x4 tile's worth of the reach, beside the tube and near its edge:
+        // the dither lights fewer of the far cells.
+        let lit_in = |x0: u16| {
+            (0..4u16)
+                .flat_map(|dx| (0..4u16).map(move |dy| (x0 - dx, mid_y - 2 + dy)))
+                .filter(|&(x, y)| buf.get(x, y) != WALL)
+                .count()
+        };
         assert!(
-            beside.r > further.r,
-            "and the light falls off with distance: {beside:?} vs {further:?}"
+            lit_in(PANEL_AT - 1) > lit_in(PANEL_AT - 3),
+            "and the light thins out with distance"
         );
-        assert_eq!(
-            buf.get(PANEL_AT - NEON_HALO_RADIUS, mid_y),
-            WALL,
-            "nothing AT the radius"
+    }
+
+    /// The pixel-art rule: a falloff is a few flat tones, dithered, never a
+    /// soft blend with a tone per pixel.
+    #[test]
+    fn a_halo_paints_no_more_tones_than_its_ramp_has() {
+        let (buf, look) = lit_wall(NeonLevels::ALERT);
+        let tones: std::collections::HashSet<Rgb> = buf
+            .as_slice()
+            .iter()
+            .copied()
+            .filter(|&c| c != WALL && c != look.tube && c != look.interior)
+            .collect();
+        // A literal, not FALLOFF_TONES: the rule is "a few", whatever the
+        // constant grows to.
+        assert!(
+            (1..=4).contains(&tones.len()),
+            "{} tones: {tones:?}",
+            tones.len()
         );
-        assert_ne!(buf.get(PANEL_AT - NEON_HALO_RADIUS + 1, mid_y), WALL);
     }
 
     #[test]
@@ -391,87 +432,6 @@ mod tests {
             look(NeonLevels::EMPTY).halo,
         );
         assert!((0..40).all(|y| (0..60).all(|x| buf.get(x, y) == WALL)));
-    }
-
-    /// The two lights that pre-date [`blend_falloff`], re-derived the way they were
-    /// written before it: the shared loop must not move one of their pixels.
-    #[test]
-    fn the_shared_falloff_loop_matches_the_loops_it_replaced() {
-        let fill = Rgb {
-            r: 40,
-            g: 70,
-            b: 110,
-        };
-        let tint = Rgb {
-            r: 250,
-            g: 200,
-            b: 90,
-        };
-        let (w, h) = (40u16, 30u16);
-
-        let g = || RadialFalloff {
-            min_x: 3,
-            max_x: 37,
-            min_y: 2,
-            max_y: 28,
-            cx: 19.5,
-            cy: 14.5,
-            rx_norm: 16.5,
-            ry_norm: 12.5,
-        };
-        let mut got = RgbBuffer::filled(w, h, fill);
-        paint_radial_falloff(&mut got, g(), 0.63, tint);
-        let mut want = RgbBuffer::filled(w, h, fill);
-        let e = g();
-        for y in e.min_y..e.max_y {
-            for x in e.min_x..e.max_x {
-                let nx = (x as f32 - e.cx) / e.rx_norm;
-                let ny = (y as f32 - e.cy) / e.ry_norm;
-                let r2 = nx * nx + ny * ny;
-                if r2 > 1.0 {
-                    continue;
-                }
-                let cur = want.get(x, y);
-                want.put(x, y, blend_rgb(cur, tint, (1.0 - r2) * 0.63));
-            }
-        }
-        assert!(got.as_slice() == want.as_slice(), "radial falloff moved");
-
-        // Off-centre and clipped by two edges, like a lamp in a corner.
-        let (cx, cy, radius) = (36u16, 4u16, 11u16);
-        let mut got = RgbBuffer::filled(w, h, fill);
-        paint_light(
-            &mut got,
-            &Emitter {
-                kind: EmitterKind::FloorLamp,
-                light: Light::Halo {
-                    centre: Point { x: cx, y: cy },
-                    radius,
-                    share: 1.0,
-                },
-                strength: 0.47,
-            },
-            tint,
-        );
-        let mut want = RgbBuffer::filled(w, h, fill);
-        let r2max = (radius as f32) * (radius as f32);
-        for y in cy.saturating_sub(radius)..(cy + radius).min(h) {
-            for x in cx.saturating_sub(radius)..(cx + radius).min(w) {
-                let dx = x as f32 - cx as f32;
-                let dy = y as f32 - cy as f32;
-                let r2 = dx * dx + dy * dy;
-                if r2 > r2max {
-                    continue;
-                }
-                let cur = want.get(x, y);
-                want.put(
-                    x,
-                    y,
-                    blend_rgb(cur, tint, (1.0 - (r2 / r2max).sqrt()) * 0.47),
-                );
-            }
-        }
-        assert!(got.as_slice() == want.as_slice(), "warm halo moved");
     }
 
     #[test]

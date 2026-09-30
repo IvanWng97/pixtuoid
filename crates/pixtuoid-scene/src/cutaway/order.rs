@@ -12,7 +12,7 @@
 //! which is a total order, so the graph is acyclic by construction and a plain
 //! sort produces the same list. The graph earns its place two other ways:
 //!
-//! - [`check_order`] turns every pairwise fact into an assertion. While
+//! - `check_order` (test-only) turns every pairwise fact into an assertion. While
 //!   [`Span::behind`] is acyclic it guards the sort itself; it becomes the
 //!   detector the day an edge can contradict the base-row order.
 //! - The relation is pairwise, so it still holds if the draw order ever stops
