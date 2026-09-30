@@ -110,7 +110,7 @@ pub(crate) fn window_frame(dx: u16, dy: u16, h: u16) -> bool {
 
 impl SceneLayout {
     /// The windows this office's north wall shows, left to right.
-    pub(crate) fn window_bays(&self) -> impl Iterator<Item = WindowBay> + use<> {
+    pub(crate) fn window_bays(&self) -> impl Iterator<Item = WindowBay> {
         window_bays(self.buf_w, self.door.map(|d| d.x..d.x + ELEVATOR_W))
     }
 }
