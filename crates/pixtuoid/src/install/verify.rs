@@ -163,17 +163,17 @@ pub(crate) fn shell_shim_ref(command: &str) -> ShimRef {
     // Windows bare path never does even when it CONTAINS apostrophes
     // (`C:\O'Brien\…`). Decode by REVERSING the escaping (`'\''` → `'`) rather
     // than splitting on whitespace, which would truncate a spaced path.
-    if head.ends_with('\'') {
-        if let Some(start) = head.find('\'') {
-            let end = head.len() - 1; // the closing `'` (a 1-byte apostrophe)
-            if start < end {
-                let p = posix_unquote(&head[start..=end]);
-                return if p.is_empty() {
-                    ShimRef::Unknown
-                } else {
-                    ShimRef::Absolute(PathBuf::from(p))
-                };
-            }
+    if head.ends_with('\'')
+        && let Some(start) = head.find('\'')
+    {
+        let end = head.len() - 1; // the closing `'` (a 1-byte apostrophe)
+        if start < end {
+            let p = posix_unquote(&head[start..=end]);
+            return if p.is_empty() {
+                ShimRef::Unknown
+            } else {
+                ShimRef::Absolute(PathBuf::from(p))
+            };
         }
     }
     if let Some((path, _)) = head.split_once(crate::install::hook_cmd::SOURCE_FLAG) {

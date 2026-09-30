@@ -1044,10 +1044,10 @@ impl FloorTransition {
         // larger than the transition's own duration can't be render-loop jitter;
         // treat it as done. Smaller wobbles keep the saturate-to-0 convention
         // every other animation uses.
-        if let Ok(behind) = self.started_at.duration_since(now) {
-            if behind.as_millis() as u64 > self.duration_ms {
-                return true;
-            }
+        if let Ok(behind) = self.started_at.duration_since(now)
+            && behind.as_millis() as u64 > self.duration_ms
+        {
+            return true;
         }
         self.t(now) >= 1.0
     }

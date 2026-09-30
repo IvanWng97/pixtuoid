@@ -1025,34 +1025,40 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var_os("COPILOT_HOME");
 
-        std::env::set_var("COPILOT_HOME", "/custom/cp");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("COPILOT_HOME", "/custom/cp") };
         assert_eq!(
             copilot_home(),
             PathBuf::from("/custom/cp"),
             "a non-empty COPILOT_HOME is used verbatim"
         );
 
-        std::env::set_var("COPILOT_HOME", "");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("COPILOT_HOME", "") };
         assert!(
             copilot_home().ends_with(".copilot"),
             "empty COPILOT_HOME → ~/.copilot fallback"
         );
 
-        std::env::set_var("COPILOT_HOME", "   ");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("COPILOT_HOME", "   ") };
         assert!(
             copilot_home().ends_with(".copilot"),
             "whitespace-only COPILOT_HOME → ~/.copilot fallback"
         );
 
-        std::env::remove_var("COPILOT_HOME");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("COPILOT_HOME") };
         assert!(
             copilot_home().ends_with(".copilot"),
             "unset COPILOT_HOME → ~/.copilot fallback"
         );
 
         match saved {
-            Some(v) => std::env::set_var("COPILOT_HOME", v),
-            None => std::env::remove_var("COPILOT_HOME"),
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var("COPILOT_HOME", v) },
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var("COPILOT_HOME") },
         }
     }
 
@@ -1066,10 +1072,10 @@ mod tests {
         let mut read: Vec<&str> = Vec::new();
         for m in src.match_indices("str_at(") {
             let rest = &src[m.0..];
-            if let Some(q) = rest.find('"') {
-                if let Some(end) = rest[q + 1..].find('"') {
-                    read.push(&rest[q + 1..q + 1 + end]);
-                }
+            if let Some(q) = rest.find('"')
+                && let Some(end) = rest[q + 1..].find('"')
+            {
+                read.push(&rest[q + 1..q + 1 + end]);
             }
         }
         for pat in ["\t.get(\"", ".get(\""] {

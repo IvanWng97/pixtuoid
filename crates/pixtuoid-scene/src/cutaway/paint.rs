@@ -756,7 +756,7 @@ fn desk_bulb(
     for (i, _) in drawn_in(&desk, &[crate::pixel_painter::DESK_BULB_KEY])
         .iter()
         .enumerate()
-        .filter(|(_, &b)| b)
+        .filter(|&(_, &b)| b)
     {
         n += 1;
         sx += (i % w) as u32;
@@ -4795,7 +4795,7 @@ S B B B B B B S
                 let hits: Vec<(f32, f32)> = cells
                     .iter()
                     .enumerate()
-                    .filter(|(_, &b)| b)
+                    .filter(|&(_, &b)| b)
                     .map(|(i, _)| ((i % w) as f32, (i / w) as f32))
                     .collect();
                 // Art pixels of this art, on the pen's grid.
@@ -5745,7 +5745,7 @@ S B B B B B B S
             let k = dense.blit_at.get();
             lit.iter()
                 .enumerate()
-                .filter(|(_, &b)| b)
+                .filter(|&(_, &b)| b)
                 .map(|(i, _)| (x0 + (i % w) as u16 * k, y0 + (i / w) as u16 * k))
                 .collect()
         };

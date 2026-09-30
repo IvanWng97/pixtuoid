@@ -231,18 +231,18 @@ fn pet_walk_never_clips_through_furniture() {
         for step in 0..35u64 {
             let now = t0() + Duration::from_millis(cycle * 40_000 + step * 400);
             r.render(&scene, &pack(), now).unwrap();
-            if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos() {
-                if anim == PetKind::Cat.walk_anim() {
-                    // Coarse-cell walkable is the predicate A* itself guarantees;
-                    // per-pixel `is_walkable` is stricter than the router delivers
-                    // and would hold the pet to a higher bar than the agents.
-                    assert!(
-                        pixtuoid_scene::pathfind::point_in_walkable_cell(&layout.walkable, pos),
-                        "walking pet at ({},{}) is in a blocked routing cell (cycle={cycle} step={step})",
-                        pos.x,
-                        pos.y
-                    );
-                }
+            if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos()
+                && anim == PetKind::Cat.walk_anim()
+            {
+                // Coarse-cell walkable is the predicate A* itself guarantees;
+                // per-pixel `is_walkable` is stricter than the router delivers
+                // and would hold the pet to a higher bar than the agents.
+                assert!(
+                    pixtuoid_scene::pathfind::point_in_walkable_cell(&layout.walkable, pos),
+                    "walking pet at ({},{}) is in a blocked routing cell (cycle={cycle} step={step})",
+                    pos.x,
+                    pos.y
+                );
             }
         }
     }
@@ -258,17 +258,17 @@ fn pet_rest_pos_is_walkable() {
         for step in 0..10u64 {
             let now = t0() + Duration::from_millis(cycle * 40_000 + 14_200 + step * 2_600);
             r.render(&scene, &pack(), now).unwrap();
-            if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos() {
-                if anim != PetKind::Cat.walk_anim() {
-                    // Rest pose is a snapped cell center, so the stronger per-pixel
-                    // check applies here (unlike the walk phase above).
-                    assert!(
-                        layout.walkable.is_walkable(pos.x, pos.y),
-                        "resting pet at ({},{}) is on a blocked cell (cycle={cycle} step={step})",
-                        pos.x,
-                        pos.y
-                    );
-                }
+            if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos()
+                && anim != PetKind::Cat.walk_anim()
+            {
+                // Rest pose is a snapped cell center, so the stronger per-pixel
+                // check applies here (unlike the walk phase above).
+                assert!(
+                    layout.walkable.is_walkable(pos.x, pos.y),
+                    "resting pet at ({},{}) is on a blocked cell (cycle={cycle} step={step})",
+                    pos.x,
+                    pos.y
+                );
             }
         }
     }
@@ -331,11 +331,11 @@ fn pet_tooltip_shows_sleeping_when_all_idle() {
     for i in 0..40u64 {
         let now = t0() + Duration::from_secs(i);
         r.render(&scene, &pack(), now).unwrap();
-        if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos() {
-            if anim == PetKind::Cat.sleep_anim() {
-                hit = Some((pos, now));
-                break;
-            }
+        if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos()
+            && anim == PetKind::Cat.sleep_anim()
+        {
+            hit = Some((pos, now));
+            break;
         }
     }
     let (pos, now) = hit.expect("a long-idle cat must enter its sleep anim within the window");
