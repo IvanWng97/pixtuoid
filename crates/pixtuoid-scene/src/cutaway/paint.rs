@@ -684,9 +684,8 @@ impl Placed {
     }
 }
 
-/// Which of `art`'s pixels, row by row, it draws in one of `keys`: those that
-/// go transparent when the keys are painted so.
-/// Art found by recolouring, kept across frames: the art never changes.
+/// Art found by recolouring, kept across frames; keyed by sprite name, so one
+/// cache serves one pack.
 #[derive(Default)]
 pub(crate) struct ArtCache {
     cells: std::collections::HashMap<(&'static str, usize, u16, &'static [char]), Vec<bool>>,
@@ -727,6 +726,8 @@ impl ArtCache {
     }
 }
 
+/// Which of `art`'s pixels, row by row, it draws in one of `keys`: those that
+/// go transparent when the keys are painted so.
 fn drawn_in(art: &crate::pixel_painter::DenseFrame<'_>, keys: &[char]) -> Vec<bool> {
     let without = art
         .recolorable
@@ -4965,8 +4966,6 @@ S B B B B B B S
         );
     }
 
-    /// A pane laid over a desk in the desk's own colours changes no pixel, yet
-    /// those pixels are glass now.
     #[test]
     fn a_piece_takes_the_pixels_it_paints_in_the_colour_already_there() {
         use crate::cutaway::light::Glow;

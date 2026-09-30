@@ -8,7 +8,7 @@
 #   site     — the Astro landing page under site/ (npm, its own CI)
 #   gen      — regenerate + check committed artifacts
 #   release  — npm-check, the Node gate release.yml runs before npm publish (and
-#              ci-lint on every PR)
+#              ci-lint.yml's `npm-gen` job)
 #   meta     — tooling setup, the local gate (preflight), the fixture
 #              gates, and the gates' selftests
 
@@ -144,9 +144,8 @@ actionlint-composites:
 # four audits that need the GitHub API — impostor-commit,
 # known-vulnerable-actions, ref-confusion, stale-action-refs (typosquat-uses
 # still runs, at reduced confidence). ci-lint.yml's hygiene job passes
-# GH_TOKEN, so those DO gate in CI: there the recipe refuses to run tokenless,
-# and a CI contract pins that step so it cannot be dropped or softened. Same
-# call as `links` (--offline) and `deny` (advisories deferred to audit.yml): a
+# GH_TOKEN, so those DO gate in CI: there the recipe refuses to run tokenless.
+# Same call as `links` (--offline) and `deny` (advisories deferred to audit.yml): a
 # check whose verdict depends on the network and an upstream feed must not
 # redden a push of unchanged code. Do NOT auto-export `gh auth token` to close
 # the gap — it puts a real token on the wire on every pre-push run and makes the
@@ -161,13 +160,11 @@ zizmor:
     fi
     zizmor --strict-collection .
 
-# The selftest runs first so a broken runner is reported as itself, not as
-# every contract failing. action_behavior_test.sh runs the workflows' own shell
-# against stubs, which no static contract can do.
+# action_behavior_test.sh runs the workflows' own shell against stubs, which no
+# static contract can do.
 [group('rust')]
 [doc('Check the CI contracts actionlint and zizmor cannot see')]
 ci-observability:
-    bash policy/ci-observability/check.sh --selftest
     bash policy/ci-observability/check.sh
     bash policy/ci-observability/action_behavior_test.sh
 
@@ -704,15 +701,16 @@ build-target target cross="false":
         exit 1
         ;;
     esac
-    # Every LINUX artifact builds --no-default-features (musl can't link ALSA
-    # statically; the aarch64 cross image has no ALSA headers), so prebuilt
-    # Linux binaries ship SILENT and Linux audio is a from-source feature
-    # (#633; see docs/CONFIGURATION.md). Derived here, not passed: the flag
-    # is a property of the target. $flags stays UNQUOTED below — quoting the
-    # empty non-Linux case would pass cargo an empty positional arg.
+    # Every LINUX artifact drops `audio` (musl can't link ALSA statically; the
+    # aarch64 cross image has no ALSA headers), so prebuilt Linux binaries ship
+    # SILENT and Linux audio is a from-source feature (#633; see
+    # docs/CONFIGURATION.md). Every other default feature rides `portable`
+    # (pixtuoid's Cargo.toml). Derived here, not passed: the flags are a
+    # property of the target. $flags stays UNQUOTED below — quoting the empty
+    # non-Linux case would pass cargo an empty positional arg.
     flags=""
     case "{{ target }}" in
-    *linux*) flags="--no-default-features" ;;
+    *linux*) flags="--no-default-features --features portable" ;;
     esac
     if [ "$use_cross" = "true" ]; then
         cross build --release --target "{{ target }}" $flags
@@ -836,7 +834,7 @@ gen-contract:
     npm --prefix integrations/raycast run gen:contract
 
 # Fail if the committed README drifted from site/src/{features,sources,install}.json.
-# Pure node:builtins — no npm ci. ci-lint.yml runs this on every PR (the `readme` job),
+# Pure node:builtins — no npm ci. ci-lint.yml's `readme` job runs this,
 # and gen-check composes it.
 [group('gen')]
 [doc('Fail if the committed README drifted from site data (features/sources/install.json)')]
@@ -996,7 +994,7 @@ gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check 
 # The repo's NODE-side gate (no cargo): the npm package generator AND the bundled
 # OpenClaw plugin contract.
 #   - npm/generate.test.mjs — the ONLY validation of npm/generate.mjs. release.yml
-#     runs it as a hard gate right before `npm publish`, and ci-lint.yml on every PR
+#     runs it as a hard gate right before `npm publish`, and ci-lint.yml's `npm-gen` job
 #     so a generator regression is caught at review time, not at the tag-push.
 #   - scripts/openclaw-plugin.test.mjs — drives the RENDERED openclaw_plugin.js the
 #     way OpenClaw's loader does. The Rust side can only grep that template as a

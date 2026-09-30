@@ -299,18 +299,22 @@ pub(crate) fn net_pass(
         .collect();
     lights.sort_by_key(|l| l.rank);
     let (w, h) = (usize::from(rect.w.0), usize::from(rect.h.0));
-    // Each art pixel's brightest light: the first of them, in rank order.
+    // The first of the brightest, in rank order.
     let mut lift = vec![0u8; w * h];
     let mut tint: Vec<Option<Rgb>> = vec![None; w * h];
     for l in &lights {
         let r = l.rect();
         let (x0, x1) = (
             r.x.0.max(rect.x.0),
-            (r.x.0 + r.w.0).min(rect.x.0 + rect.w.0),
+            r.x.0
+                .saturating_add(r.w.0)
+                .min(rect.x.0.saturating_add(rect.w.0)),
         );
         let (y0, y1) = (
             r.y.0.max(rect.y.0),
-            (r.y.0 + r.h.0).min(rect.y.0 + rect.h.0),
+            r.y.0
+                .saturating_add(r.h.0)
+                .min(rect.y.0.saturating_add(rect.h.0)),
         );
         for ay in y0..y1 {
             for ax in x0..x1 {
@@ -329,6 +333,7 @@ pub(crate) fn net_pass(
     let by1 = by0.saturating_add(pen.buffer(rect.h)).min(buf.height());
     let bw = usize::from(buf.width());
     let pixels = buf.as_mut_slice();
+    debug_assert_eq!(emission.glow.len(), pixels.len(), "one class per pixel");
     for by in by0..by1 {
         let art_row = usize::from(by / k - rect.y.0) * w;
         for bx in bx0..bx1 {
@@ -348,22 +353,20 @@ pub(crate) fn net_pass(
 /// every frame.
 #[derive(Default)]
 pub(crate) struct NetMemo {
-    colours: std::collections::HashMap<u64, Rgb, std::hash::BuildHasherDefault<SplitMix>>,
+    colours: std::collections::HashMap<NetKey, Rgb, std::hash::BuildHasherDefault<SplitMix>>,
     /// Neighbouring pixels mostly ask the last question again.
-    last: Option<(u64, Rgb)>,
+    last: Option<(NetKey, Rgb)>,
 }
+
+/// Everything [`net_colour`] reads for one pixel.
+type NetKey = (Rgb, Glow, u8, Option<Rgb>, Ambient);
 
 /// Bounds the memo in a room whose colours never settle.
 const NET_MEMO_CAP: usize = 1 << 16;
 
 impl NetMemo {
     fn of(&mut self, under: Rgb, glow: Glow, lift: u8, tint: Option<Rgb>, ambient: Ambient) -> Rgb {
-        let rgb = |c: Rgb| u64::from(c.r) << 16 | u64::from(c.g) << 8 | u64::from(c.b);
-        let key = rgb(under)
-            | (glow as u64) << 24
-            | u64::from(lift) << 26
-            | u64::from(ambient.0) << 34
-            | tint.map_or(0, |t| (1 << 24 | rgb(t)) << 38);
+        let key = (under, glow, lift, tint, ambient);
         if let Some((k, c)) = self.last {
             if k == key {
                 return c;
@@ -383,21 +386,18 @@ impl NetMemo {
     }
 }
 
-/// A packed `u64` key needs mixing, not SipHash.
+/// A small fixed key needs mixing, not SipHash.
 #[derive(Default)]
 pub(crate) struct SplitMix(u64);
 
 impl std::hash::Hasher for SplitMix {
     fn finish(&self) -> u64 {
-        self.0
+        pixtuoid_core::id::splitmix64(self.0)
     }
     fn write(&mut self, bytes: &[u8]) {
         for &b in bytes {
-            self.0 = pixtuoid_core::id::splitmix64(self.0 ^ u64::from(b));
+            self.0 = self.0.rotate_left(8) ^ u64::from(b);
         }
-    }
-    fn write_u64(&mut self, n: u64) {
-        self.0 = pixtuoid_core::id::splitmix64(n);
     }
 }
 
