@@ -16,7 +16,8 @@ via scripts/compare-screenshots.py); video clips (.mp4/.webm) and the animated
 demo.gif are presence-checked only, since ffmpeg/gifsicle output is not
 byte-stable across versions. Exits non-zero on any drift.
 
-Requires the .venv (Pillow) + ffmpeg + gifsicle. Run via `.venv/bin/python3`.
+Requires the .venv (Pillow) + ffmpeg + gifsicle for a full run (`--check` needs
+neither). Run via `.venv/bin/python3`.
 """
 
 import argparse
@@ -48,6 +49,8 @@ CHECK_MODE = False
 # A live-agent capture and a hand-made banner: committed but not generated here,
 # so --check must never compare them.
 NOT_GENERATED = {"screenshot-real.png", "sprite-banner.png"}
+# The snapshot's `--frames-dir` naming (its `FrameSink::Pngs`).
+FRAME_PATTERN = "f%04d.png"
 
 
 def build_once():
@@ -62,7 +65,7 @@ def expand_ref(ref):
 
 
 def snap(out_path, *, cols, rows, hour, day=None, theme=None, weather=None,
-         extra=(), gif=None):
+         extra=(), gif=None, frames_dir=None):
     cmd = [str(SNAP), "--cols", str(cols), "--rows", str(rows), "--now-hour", str(hour)]
     if day is not None:
         cmd += ["--now-day", str(day)]
@@ -73,7 +76,7 @@ def snap(out_path, *, cols, rows, hour, day=None, theme=None, weather=None,
     if gif is not None:
         cmd += ["--gif", "--gif-duration", str(gif["duration"]), "--gif-fps", str(gif["fps"])]
     cmd += list(extra)
-    cmd += [str(out_path)]
+    cmd += ["--frames-dir", str(frames_dir)] if frames_dir is not None else [str(out_path)]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
 
 
@@ -105,6 +108,16 @@ def run_render(job, out_dirs, work, intermediates):
             shutil.copyfile(raw, dst)
 
 
+def crop_box(img, spec, job_id):
+    """`img` cropped to `spec` ("W:H:X:Y"); a box past the image edge exits,
+    where Pillow would pad it with black."""
+    w, h, x, y = map(int, spec.split(":"))
+    if x < 0 or y < 0 or x + w > img.width or y + h > img.height:
+        sys.exit(f"gen-media: job '{job_id}' crop {spec} falls outside its "
+                 f"{img.width}x{img.height} source")
+    return img.crop((x, y, x + w, y + h))
+
+
 def run_crop(job, out_dirs, work, intermediates):
     src = intermediates.get(job["from"])
     if src is None:
@@ -112,8 +125,8 @@ def run_crop(job, out_dirs, work, intermediates):
             f"gen-media: crop job '{job['id']}' needs its source render '{job['from']}' "
             f"— include it, e.g. --jobs {job['from']},{job['id']}"
         )
+    img = Image.open(src).convert("RGB")
     if "quadrants" in job:
-        img = Image.open(src).convert("RGB")
         w, h = img.size
         scale = job.get("scale", 1)
         for name, (x0, y0, x1, y1) in job["quadrants"].items():
@@ -123,8 +136,9 @@ def run_crop(job, out_dirs, work, intermediates):
                 out.save(d / f"{job['id']}-{name}.png")
     else:
         for key, spec in job["crops"].items():
+            out = crop_box(img, spec, job["id"])
             for d in out_dirs:
-                ffmpeg("-i", str(src), "-vf", f"crop={spec}", str(d / f"{job['id']}_{key}.png"))
+                out.save(d / f"{job['id']}_{key}.png")
 
 
 def run_composite(job, out_dirs, work, intermediates):
@@ -182,8 +196,9 @@ def run_matrix(job, out_dirs, work, intermediates):
                  hour=job["hour"], **kwargs)
 
 
-# H.264 and VP9 both require even width/height.
-SCALE_EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+# H.264 and VP9 both require even width/height. `neighbor`: the pixel-art rule
+# (no smoothing), where swscale's default is bicubic.
+SCALE_EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=neighbor"
 # VP9 constant-quality knob (with `-b:v 0`, no target bitrate).
 VP9_CRF = "36"
 # Without it the muxers stamp every file with ffmpeg's version (MP4's `©too`
@@ -194,7 +209,7 @@ BITEXACT = ("-fflags", "+bitexact")
 
 
 def encode_mp4_webm(frames_glob, fps, vf, out_stem):
-    """Encode an `f%04d.png` frame sequence at `fps`, through the `vf` filter, to
+    """Encode a FRAME_PATTERN sequence at `fps`, through the `vf` filter, to
     BOTH `{out_stem}.mp4` and `{out_stem}.webm`."""
     ffmpeg("-framerate", str(fps), "-i", frames_glob,
            "-movflags", "+faststart", "-pix_fmt", "yuv420p", *BITEXACT, "-vf", vf,
@@ -205,31 +220,32 @@ def encode_mp4_webm(frames_glob, fps, vf, out_stem):
            f"{out_stem}.webm")
 
 
+def poster_frame(frames_dir, job):
+    """The frame `job["poster"]` seconds in, else the first: a staged clip whose
+    opening seconds are pre-action posters on the money shot."""
+    return frames_dir / (FRAME_PATTERN % (int(round(job.get("poster", 0) * job["fps"], 6)) + 1))
+
+
 def run_clip(job, out_dirs, work, intermediates):
-    gif = work / f"{job['id']}.gif"
-    snap(gif, cols=job["cols"], rows=job["rows"], hour=job["hour"],
-         extra=job.get("extra", ()), gif={"duration": job["duration"], "fps": job["fps"]})
     fps = job["fps"]
     cid = job["id"]
-    # Optional `crop` (ffmpeg "W:H:X:Y", in the unscaled render's px space) frames
+    frames = work / f"frames-{cid}"
+    snap(None, cols=job["cols"], rows=job["rows"], hour=job["hour"],
+         extra=job.get("extra", ()), gif={"duration": job["duration"], "fps": fps},
+         frames_dir=frames)
+    # Optional `crop` ("W:H:X:Y", in the unscaled render's px space) frames
     # a close-up on a fixed region. NB: this singular clip-level `crop` is
     # unrelated to the separate kind:"crop" job (run_crop), which reads a plural
     # `crops` dict off a `from` render — different mechanism, different key.
     crop = job.get("crop")
     vf = f"crop={crop},{SCALE_EVEN}" if crop else SCALE_EVEN
-    poster_vf = ["-vf", f"crop={crop}"] if crop else []
+    # RGB, not a copy of the frame: the snapshot writes opaque RGBA, far larger.
+    poster = Image.open(poster_frame(frames, job)).convert("RGB")
+    if crop:
+        poster = crop_box(poster, crop, cid)
     for d in out_dirs:
-        frames = work / f"frames-{cid}"
-        frames.mkdir(exist_ok=True)
-        # re-encode from frames so it's a true loop at `fps` (the GIF's own frame
-        # delays otherwise confuse ffmpeg into a fast clip).
-        ffmpeg("-i", str(gif), str(frames / "f%04d.png"))
-        encode_mp4_webm(str(frames / "f%04d.png"), fps, vf, str(d / cid))
-        # `poster` (seconds into the clip) lets a staged clip whose opening
-        # seconds are pre-action poster on the money shot instead of frame 0.
-        poster_seek = ["-ss", str(job["poster"])] if "poster" in job else []
-        ffmpeg(*poster_seek, "-i", str(gif), *poster_vf, "-vframes", "1",
-               str(d / f"{cid}-poster.png"))
+        encode_mp4_webm(str(frames / FRAME_PATTERN), fps, vf, str(d / cid))
+        poster.save(d / f"{cid}-poster.png")
 
 
 def run_wasm_still(job, out_dirs, work, intermediates):
@@ -271,7 +287,6 @@ def run_proof(job, out_dirs, work, intermediates):
     # same fixture-driven reducer replay; the poster is a designated frame COPY,
     # so it stays pixel-gated while the encodes stay presence-only.
     fps = job["fps"]
-    poster_idx = int(job["poster"] * fps) + 1
     # In --check only the poster frame matters: rendering a deterministic PREFIX
     # of the timeline (through the poster frame) yields the identical poster.
     secs = int(job["poster"]) + 2 if CHECK_MODE else job["duration"]
@@ -287,11 +302,11 @@ def run_proof(job, out_dirs, work, intermediates):
     for layout, suffix in (("wide", ""), ("tall", "-tall")):
         ldir = frames / layout
         for d in out_dirs:
-            shutil.copyfile(ldir / f"f{poster_idx:04d}.png",
+            shutil.copyfile(poster_frame(ldir, job),
                             d / f"{job['id']}{suffix}-poster.png")
             if CHECK_MODE:
                 continue
-            encode_mp4_webm(str(ldir / "f%04d.png"), fps, SCALE_EVEN,
+            encode_mp4_webm(str(ldir / FRAME_PATTERN), fps, SCALE_EVEN,
                             str(d / f"{job['id']}{suffix}"))
 
 
@@ -308,9 +323,9 @@ HANDLERS = {
 
 
 def _presence_only_names(manifest, target):
-    """Filenames owned by clip/gif jobs for `target` — ffmpeg/gifsicle outputs
-    whose bytes aren't stable cross-version, so they're presence-checked, never
-    pixel-gated. Derived from the MANIFEST, not a name-shape rule: a
+    """Filenames owned by clip/gif jobs for `target` — outputs --check skips
+    rendering (their encodes aren't byte-stable cross-version), so they're
+    presence-checked, never pixel-gated. Derived from the MANIFEST, not a name-shape rule: a
     `-poster.png` suffix rule silently exempted a deterministic render still that
     merely kept a poster name when its job flipped clip→render."""
     return {
@@ -334,7 +349,7 @@ def _expected_presence_outputs(job):
 
 def run_check(out_base, work, manifest, only=None):
     """Pixel-diff every committed STILL against a fresh render; presence-check the
-    ffmpeg/gifsicle outputs (clips/gif/posters) without regenerating them."""
+    clip/gif jobs' outputs (clips, gif, clip posters) without regenerating them."""
     failures = []
     DIFF_DIR.mkdir(parents=True, exist_ok=True)
     for target, tdir in out_base.items():

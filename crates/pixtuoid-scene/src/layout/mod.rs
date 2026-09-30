@@ -44,11 +44,12 @@ pub use roster::{
 #[cfg(test)]
 pub(crate) use roster::{NEON_PANEL_H, coffee_machine_cols};
 // Painter tests tile walls no `SceneLayout` has.
-#[cfg(test)]
-pub(crate) use windows::window_bays;
 pub(crate) use windows::{
-    WINDOW_W, WindowBay, glass_rows, wall_trim_row, window_frame, window_rows, window_run,
+    WINDOW_TOP, WINDOW_W, WindowBay, door_x, glass_rows, wall_trim_row, window_frame, window_posts,
+    window_rows, window_run,
 };
+#[cfg(test)]
+pub(crate) use windows::{window_bays, window_slots};
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
 pub(crate) use coarse::{
     COARSE_CELL_SIZE, cell_anchor, cell_center, cell_walkable, snap, walkable_neighbors,
@@ -163,7 +164,7 @@ pub struct Waypoint {
 pub type Layout = SceneLayout;
 
 /// The lounge vignette placed as one unit. Couch + floor lamp + side table
-/// share the one `lounge_fits` gate (hence non-optional here); the aquarium
+/// share one fit gate (hence non-optional here); the aquarium
 /// carries an EXTRA east-clearance gate against the elevator door, so it
 /// stays `Option`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -303,6 +304,8 @@ pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 /// side cabinets included) and the overhang rides the aisle, so every band-EDGE
 /// clamp reads `DESK_GROUND_W`, not `DESK_W` (the #549 2px-overflow drift).
 pub const DESK_W: u16 = 10;
+/// Glass columns offset from the desk sprite's left edge.
+pub(crate) const SCREEN_GLASS_COLS: std::ops::RangeInclusive<u16> = 4..=9;
 /// Rows of desk SURFACE below `desk.y`; both desk sprites are cut to it.
 pub(crate) const DESK_SURFACE_ROWS: u16 = 5;
 pub(crate) const DESK_FRONT_ROWS: u16 = 1;
@@ -338,6 +341,27 @@ pub const CHARACTER_SPRITE_H: u16 = 12;
 pub const ELEVATOR_W: u16 = 16;
 /// Elevator-door sprite height in buffer px — the door's z-sort anchor row.
 pub const ELEVATOR_H: u16 = 14;
+
+/// The buffer rows a half-block terminal cell shows.
+const CELL_ROWS: u16 = 2;
+
+/// The rows over a door whose top row is `door_y` that the terminal's floor
+/// indicator writes its text across: the whole cell above the door's.
+pub fn floor_indicator_rows(door_y: u16) -> std::ops::Range<u16> {
+    let top = (door_y / CELL_ROWS).saturating_sub(1) * CELL_ROWS;
+    top..top + CELL_ROWS
+}
+
+/// Where the exit sign hangs over a door at `door`: centred above its floor
+/// indicator, or `None` where that would climb above the windows' head.
+pub(crate) fn exit_sign_pos(door: Point) -> Option<Point> {
+    let sign = furniture_def(WallDecor::ExitSign.furniture()).visual;
+    let y = floor_indicator_rows(door.y).start.checked_sub(sign.h)?;
+    (y >= WINDOW_TOP).then_some(Point {
+        x: door.x + (ELEVATOR_W - sign.w) / 2,
+        y,
+    })
+}
 /// NOT a cap — production layouts fill the buffer's physical space
 /// (`max_desks: None`). This is the stable "one classic office worth of desks"
 /// reference, and the `snapshot` example that renders the docs/CI media
