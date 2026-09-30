@@ -646,9 +646,8 @@ openclaw-multi-e2e *ports:
 # The EXPENSIVE one: a real `openclaw gateway run` PLUS one real model turn on
 # the claude-cli backend, proving the gateway's lobster and its backend's `cc·`
 # desk sprite coexist live. Real account footprint (your gateway's channels
-# connect) and it bills a turn — recipe exists so the script has an invocation
-# site and cannot silently rot on a summary-format change, NOT because it should
-# be run casually.
+# connect) and it bills a turn, so no CI job runs it: a change to the headless
+# `agents=`/`daemons=` line it greps breaks it silently until it is run by hand.
 [doc('OpenClaw + claude-cli backend live-e2e — REAL gateway AND one BILLED model turn')]
 [group('rust')]
 openclaw-backend-e2e:
