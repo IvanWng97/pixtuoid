@@ -12,8 +12,8 @@ pub const PANTRY_COUNTER_LARGE_W: u16 = 32;
 /// anchor — shared by the lounge couch and the meeting sofas.
 const SEAT_DX: [i16; 3] = [-6, 0, 6];
 
-/// A band this wide has room for flanking greenery (the lounge pot's west edge
-/// needs 58 by derivation; +2 breathing).
+/// A band this wide has room for flanking greenery: the lounge pot's west edge,
+/// plus breathing room.
 pub(super) const ROOMY_BAND_MIN_W: u16 = 60;
 
 /// Air kept between a scatter plant's sprite box and any obstacle waypoint's
