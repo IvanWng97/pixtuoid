@@ -3470,7 +3470,7 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
     assert_eq!(held.anim_name, pet.kind.sit_anim());
     assert_eq!(held.petted_ms, Some(0));
 
-    // Held in the canvas's corner, its frame is fitted back on for both painters.
+    // Held in the canvas's corner, its frame is fitted back on.
     let in_corner = crate::pet::PetState {
         pet_pos: Point { x: 0, y: 0 },
         ..petting

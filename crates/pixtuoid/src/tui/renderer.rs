@@ -47,8 +47,7 @@ pub struct FloorInfo {
 pub struct DrawCtx<'a> {
     pub world: FloorInputs<'a>,
     pub buf: &'a mut RgbBuffer,
-    /// `buf` is deliberately NOT part of this group: it is a sibling of the
-    /// `FloorCtx` on a `PerFloor`, borrowed disjointly.
+    /// A sibling of `buf` on a `PerFloor`, borrowed disjointly.
     pub store: &'a mut pixtuoid_scene::floor::FloorCtx,
     pub mouse_pos: Option<(u16, u16)>,
     /// Walkable/approach/route debug layer toggle (`w`) — transient, never

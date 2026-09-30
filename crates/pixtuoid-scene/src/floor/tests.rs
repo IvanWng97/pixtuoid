@@ -852,11 +852,14 @@ fn floor_session_observe_advances_the_world_without_a_pixel_buffer() {
 
     let frame = session
         .observe(
-            &scene,
-            &pack,
+            crate::floor::FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: t,
+                floor: FloorMeta::ground(),
+                pets: crate::floor::PetInputs::default(),
+            },
             Size { w: 160, h: 96 },
-            FloorMeta::ground(),
-            t,
         )
         .expect("a layoutable size observes")
         .frame;
@@ -880,7 +883,16 @@ fn floor_session_observe_advances_the_world_without_a_pixel_buffer() {
 
     assert!(
         session
-            .observe(&scene, &pack, Size { w: 8, h: 8 }, FloorMeta::ground(), t)
+            .observe(
+                crate::floor::FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now: t,
+                    floor: FloorMeta::ground(),
+                    pets: crate::floor::PetInputs::default()
+                },
+                Size { w: 8, h: 8 }
+            )
             .is_none(),
         "an unlayoutable size observes nothing"
     );
@@ -895,7 +907,16 @@ fn observe_hands_back_the_layout_the_sim_stepped_on() {
     let meta = FloorMeta::ground();
     let mut session = FloorSession::new();
     let observed = session
-        .observe(&scene, &pack, size, meta, t0())
+        .observe(
+            crate::floor::FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: t0(),
+                floor: meta,
+                pets: crate::floor::PetInputs::default(),
+            },
+            size,
+        )
         .expect("a layoutable size observes");
     let stepped = session
         .floor

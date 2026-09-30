@@ -4,7 +4,7 @@
 
 use std::time::SystemTime;
 
-use crate::layout::{Anchor, Size, SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
+use crate::layout::{Anchor, Layout, Size, SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
 use super::epoch_ms;
@@ -82,8 +82,7 @@ pub(super) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
 /// Nudge a sprite so the whole frame lands inside the canvas, answering in the
 /// SAME anchor space `pos` came in.
 ///
-/// It moves a figure's paint anchor, never its sim position: invariant #6 runs
-/// one way, and sprite size never moves where the sim put a figure.
+/// It moves a figure's paint anchor, never its sim position (invariant #6).
 pub(crate) fn keep_sprite_on_canvas(anchor: Anchor, pos: Point, size: Size, buf: Size) -> Point {
     match anchor {
         // `min` before `max`: on a buffer narrower than the sprite the lower
@@ -104,6 +103,16 @@ pub(crate) fn keep_sprite_on_canvas(anchor: Anchor, pos: Point, size: Size, buf:
             y: pos.y.min(buf.h.saturating_sub(size.h)),
         },
     }
+}
+
+/// `pos`, in `anchor` space, moved so a `size` frame lands on `layout`'s canvas:
+/// the one fit every figure's placement takes.
+pub(crate) fn on_canvas(layout: &Layout, anchor: Anchor, pos: Point, size: Size) -> Point {
+    let canvas = Size {
+        w: layout.buf_w,
+        h: layout.buf_h,
+    };
+    keep_sprite_on_canvas(anchor, pos, size, canvas)
 }
 
 /// How far a later arrival steps aside along x so two agents at one
@@ -176,16 +185,13 @@ pub fn character_anchor(
             from, to, t_x1000, ..
         } => walking_anchor(walking_position(from, to, t_x1000), w),
     };
-    Some(keep_sprite_on_canvas(
+    Some(on_canvas(
+        layout,
         Anchor::TopLeft,
         anchor,
         Size {
             w,
             h: crate::layout::CHARACTER_SPRITE_H,
-        },
-        Size {
-            w: layout.buf_w,
-            h: layout.buf_h,
         },
     ))
 }

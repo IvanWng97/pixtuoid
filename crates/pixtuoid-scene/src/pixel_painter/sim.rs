@@ -25,7 +25,7 @@ use crate::pet::PetKind;
 use crate::pose::{self, Pose, PoseHistory};
 
 use super::anchors::{
-    keep_sprite_on_canvas, walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath,
+    on_canvas, walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath,
     CHARACTER_SPRITE_W,
 };
 use super::seat::{settle_seat, Seat};
@@ -355,16 +355,6 @@ pub(super) fn frame_size(pack: &Pack, anim: &str, frame_idx: usize, fallback: Si
             w: f.width(),
             h: f.height(),
         })
-}
-
-/// `pos`, in `anchor` space, moved so a `size` frame lands on `layout`'s canvas:
-/// the one fit every figure's placement takes.
-fn on_canvas(layout: &Layout, anchor: Anchor, pos: Point, size: Size) -> Point {
-    let canvas = Size {
-        w: layout.buf_w,
-        h: layout.buf_h,
-    };
-    keep_sprite_on_canvas(anchor, pos, size, canvas)
 }
 
 /// The bundled cat's size, for a pack that lacks the pet's anim.

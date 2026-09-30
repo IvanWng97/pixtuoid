@@ -213,7 +213,7 @@ pub fn pixtuoid_scene::floor::FloorSession::board(&self, &pixtuoid_core::state::
 pub fn pixtuoid_scene::floor::FloorSession::buf(&self) -> &pixtuoid_core::sprite::RgbBuffer
 pub fn pixtuoid_scene::floor::FloorSession::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::FloorSession::new() -> Self
-pub fn pixtuoid_scene::floor::FloorSession::observe(&mut self, &pixtuoid_core::state::SceneState, &pixtuoid_core::sprite::format::Pack, pixtuoid_scene::layout::Size, pixtuoid_scene::floor::FloorMeta, std::time::SystemTime) -> core::option::Option<pixtuoid_scene::floor::ObservedFloor>
+pub fn pixtuoid_scene::floor::FloorSession::observe(&mut self, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::ObservedFloor>
 pub fn pixtuoid_scene::floor::FloorSession::overlay(&mut self, &pixtuoid_core::state::SceneState, std::time::SystemTime, core::option::Option<pixtuoid_core::id::AgentId>) -> alloc::vec::Vec<crate::overlay::LabelElement>
 pub fn pixtuoid_scene::floor::FloorSession::render(&mut self, pixtuoid_scene::floor::FrameInputs<'_>) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::Layout>>
 pub fn pixtuoid_scene::floor::FloorSession::reset_frame_cache(&mut self)

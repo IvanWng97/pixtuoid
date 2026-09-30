@@ -237,7 +237,16 @@ fn render_cutaway_frame(c: &mut Criterion) {
             .map(|i| {
                 let now = base + Duration::from_millis(i * FRAME_STEP_MS);
                 let floor = session
-                    .observe(&scene, &pack, CUTAWAY_LOGICAL, meta, now)
+                    .observe(
+                        pixtuoid_scene::floor::FloorInputs {
+                            scene: &scene,
+                            pack: &pack,
+                            now,
+                            floor: meta,
+                            pets: pixtuoid_scene::floor::PetInputs::default(),
+                        },
+                        CUTAWAY_LOGICAL,
+                    )
                     .expect("the cutaway extent lays out");
                 (now, floor)
             })

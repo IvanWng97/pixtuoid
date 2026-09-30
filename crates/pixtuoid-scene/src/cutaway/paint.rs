@@ -3314,14 +3314,17 @@ mod tests {
         for n in 1..=1200u64 {
             let frame = session
                 .observe(
-                    &scene,
-                    &pack,
+                    crate::floor::FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now: now0 + Duration::from_millis(100 * n),
+                        floor: meta,
+                        pets: crate::floor::PetInputs::default(),
+                    },
                     crate::layout::Size {
                         w: LOGICAL.0,
                         h: LOGICAL.1,
                     },
-                    meta,
-                    now0 + Duration::from_millis(100 * n),
                 )
                 .expect("lays out")
                 .frame;
@@ -4369,11 +4372,14 @@ S B B B B B B S
         for (w, h) in [(240u16, 144u16), (100, 60)] {
             let observed = FloorSession::new()
                 .observe(
-                    &pixtuoid_core::SceneState::uniform(16),
-                    &pack,
+                    crate::floor::FloorInputs {
+                        scene: &pixtuoid_core::SceneState::uniform(16),
+                        pack: &pack,
+                        now: std::time::SystemTime::UNIX_EPOCH,
+                        floor: FloorMeta::ground(),
+                        pets: crate::floor::PetInputs::default(),
+                    },
                     crate::layout::Size { w, h },
-                    FloorMeta::ground(),
-                    std::time::SystemTime::UNIX_EPOCH,
                 )
                 .expect("lays out");
             check(&pack, &observed.frame, &observed.layout, false);
@@ -6405,11 +6411,14 @@ S B B B B B B S
         let seated = frames.last().expect("a seated frame");
         let office = FloorSession::new()
             .observe(
-                &pixtuoid_core::SceneState::uniform(16),
-                &pack,
+                crate::floor::FloorInputs {
+                    scene: &pixtuoid_core::SceneState::uniform(16),
+                    pack: &pack,
+                    now: std::time::SystemTime::UNIX_EPOCH,
+                    floor: FloorMeta::ground(),
+                    pets: crate::floor::PetInputs::default(),
+                },
                 crate::layout::Size { w: 240, h: 144 },
-                FloorMeta::ground(),
-                std::time::SystemTime::UNIX_EPOCH,
             )
             .expect("lays out");
         assert!(

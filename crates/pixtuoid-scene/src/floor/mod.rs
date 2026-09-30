@@ -325,8 +325,7 @@ pub struct PetInputs<'a> {
 pub struct FloorInputs<'a> {
     /// The scene to render (the full live scene, or a projected single-floor one).
     pub scene: &'a SceneState,
-    /// The sprite pack — a sim input too: character anchors center on its
-    /// sprite width, and placement is position.
+    /// The sprite pack.
     pub pack: &'a Pack,
     /// This frame's time — a parameter; the engine never reads the clock (wasm).
     pub now: SystemTime,
@@ -689,20 +688,13 @@ impl FloorSession {
     }
 
     /// Advance the world one tick WITHOUT painting: the session's eviction, then
-    /// [`render_floor`]'s layout prologue, sim tick (with no pet) and epilogue,
+    /// [`render_floor`]'s layout prologue, sim tick and epilogue,
     /// minus its paint pass. `size` is the layout's logical extent, whatever scale a painter
     /// draws it at. `None` when the size can't lay out.
-    pub fn observe(
-        &mut self,
-        scene: &SceneState,
-        pack: &Pack,
-        size: Size,
-        floor_meta: FloorMeta,
-        now: SystemTime,
-    ) -> Option<ObservedFloor> {
-        self.evict_missing(scene);
+    pub fn observe(&mut self, world: FloorInputs<'_>, size: Size) -> Option<ObservedFloor> {
+        self.evict_missing(world.scene);
         let fctx = &mut self.floor.ctx;
-        let layout = fctx.frame_layout(size.w, size.h, floor_meta.floor_seed)?;
+        let layout = fctx.frame_layout(size.w, size.h, world.floor.floor_seed)?;
         let door_anim_max_ms = fctx.door_anim_max_ms;
         let frame = sim_step(
             &mut SimStores {
@@ -715,15 +707,7 @@ impl FloorSession {
                 chitchat: &mut self.office.chitchat,
             },
             SimInputs {
-                world: FloorInputs {
-                    scene,
-                    pack,
-                    now,
-                    floor: floor_meta,
-                    // The pet needs the painter's config and click state, which `observe`
-                    // does not take; widen it when an observer draws the pet.
-                    pets: PetInputs::default(),
-                },
+                world,
                 layout: &layout,
                 coffee: self.office.coffee.map(),
                 door_anim_max_ms,
@@ -733,7 +717,7 @@ impl FloorSession {
             fctx,
             &mut self.office.coffee,
             frame.new_coffee_carriers.iter().copied(),
-            now,
+            world.now,
         );
         Some(ObservedFloor { layout, frame })
     }
