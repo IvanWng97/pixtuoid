@@ -14,9 +14,8 @@ comments on the lines it governs, before changing it.
 
 Requires a recent stable Rust toolchain and [`just`](https://github.com/casey/just)
 (`brew install just`). On Linux you also need `lld`, `pkg-config` and the ALSA
-headers (`apt install lld pkg-config libasound2-dev`). The git hooks and the
-Rust and hygiene CI jobs call `justfile` recipes rather than re-spelling their
-commands; the site, Raycast and CodSpeed workflows run their tools directly.
+headers (`apt install lld pkg-config libasound2-dev`). The git hooks and most
+CI jobs call `justfile` recipes; the site, Raycast and CodSpeed workflows don't.
 
 ```bash
 just              # list recipes
@@ -26,9 +25,8 @@ just test         # the whole suite (cargo-nextest if installed, else cargo test
 cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
 ```
 
-> **Don't expect clippy to warm `test`'s build** — clippy's check-mode
-> artifacts, deps included, are unusable by test's codegen, so each compiles the
-> workspace from scratch. While iterating, run only the one you need.
+> **Don't expect clippy to warm `test`'s build** — they share no artifacts,
+> deps included. Iterate with one.
 
 Activate the git hooks once per clone: `git config core.hooksPath .githooks`
 (`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`, lint + clippy;
@@ -39,7 +37,14 @@ the tests are CI's).
 CI is the gate. Beyond the tests and the feature powerset (`just preflight full`
 runs those locally), it runs the jobs below; all but **hygiene** and zizmor's
 offline audits are invisible to preflight, so a green preflight does not mean a
-green PR:
+green PR.
+
+A draft PR runs only the **light tier**, every job without
+`if: inputs.full`; a ready PR, a push to `main` and a manual dispatch run
+both tiers, and CodeQL and CodSpeed skip drafts. The skipped jobs make a draft's `ci-gate` red by design,
+so read its light-tier verdict from the individual job checks. If a ready PR's
+`ci-gate` reports only a draft run, re-run the cancelled `ready_for_review`
+run. The jobs:
 
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
@@ -208,7 +213,9 @@ crate IS.
 | before code, if non-trivial (new seam / ≥3 files) | plan against [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) |
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` |
 | before push | nothing — the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
-| opening the PR | open it as a draft; mark it ready once CI is green — the billed review bots skip drafts, so a red push doesn't buy a review of a head that's about to be replaced |
+| while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
+| once you need a PR number | open it as a draft: the light tier runs, and `ci-gate` stays red by design |
+| once the draft's light tier is green | mark it ready: the full tier and the billed review bots start together, so a failure only the full tier catches costs one extra review round until the bots are chained after CI |
 | before merge | the two-lens review |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 
@@ -240,7 +247,7 @@ invariants"), which every contributor and agent reads first.
   `claude-security-review` workflows plus your local two-lens pass.
 - AI-authored PRs get the `needs-human-verify` label and a human visual check.
 - **Every reviewer/bot finding reaches exactly one terminal state in the PR
-  thread** — FIXED · REFUTED-with-trace · RE-SCOPED · SURFACED, defined ONCE
+  thread** — FIXED · REFUTED · RE-SCOPED → #N · FOLLOW-UP → #N, defined ONCE
   in [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md). Agents
   never file issues, and "acknowledged, no action" is not a state.
 
@@ -323,10 +330,10 @@ theme guards; steps 1–3 and 11 are on you.
     const, the `insert` in that crate's `src/drift_surface.rs`,
     `just gen-drift-surface` (commit both fragments), and the `SURFACE_ROWS`
     row plus its selftest case (the case census fails without it).
-12. **Three roster literals in three test binaries**, so a scoped test run
-    misses the ones outside it: the row-by-row byte pin in `corpus_check.rs`;
-    `TOOL_ID_KEY_UNPROVEN` in `tests/sources/captures.rs`; a case row +
-    `#[test]` in `crates/pixtuoid/tests/wire_to_pixels.rs`.
+12. **Three roster literals in three test binaries** (a scoped run misses
+    them): the row-by-row byte pin in `corpus_check.rs`; `TOOL_ID_KEY_UNPROVEN`
+    in `tests/sources/captures.rs`; a case row + `#[test]` in
+    `crates/pixtuoid/tests/wire_to_pixels.rs`.
 
 ## License
 

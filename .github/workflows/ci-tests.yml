@@ -2,6 +2,11 @@ name: ci-tests
 
 on:
   workflow_call:
+    inputs:
+      full:
+        description: 'False on a draft PR: only the jobs without `if: inputs.full` run'
+        type: boolean
+        required: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -10,6 +15,7 @@ env:
 jobs:
   windows-test:
     name: windows-test
+    if: ${{ inputs.full }}
     # Track windows-latest deliberately: this gate catches hosted-image changes.
     runs-on: windows-latest
     timeout-minutes: 30
@@ -36,6 +42,7 @@ jobs:
 
   macos-test:
     name: macos-test
+    if: ${{ inputs.full }}
     # macos-14 exercises the Apple Silicon build; macOS diverges on BSD CLI,
     # launchd, and config paths.
     runs-on: macos-14
@@ -63,6 +70,7 @@ jobs:
 
   coverage:
     name: coverage
+    if: ${{ inputs.full }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -100,6 +108,7 @@ jobs:
   # atomic-write retries, plus macOS paths and launchd.
   coverage-windows:
     name: coverage-windows
+    if: ${{ inputs.full }}
     runs-on: windows-latest
     # nextest owns per-test hang limits.
     timeout-minutes: 20
@@ -130,6 +139,7 @@ jobs:
 
   coverage-macos:
     name: coverage-macos
+    if: ${{ inputs.full }}
     runs-on: macos-14
     timeout-minutes: 15
     permissions:
@@ -177,6 +187,7 @@ jobs:
 
   smoke:
     name: smoke
+    if: ${{ inputs.full }}
     permissions:
       contents: read
     runs-on: ubuntu-latest

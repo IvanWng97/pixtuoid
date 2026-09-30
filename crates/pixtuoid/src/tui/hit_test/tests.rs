@@ -520,6 +520,10 @@ fn assert_centered_hover_box(
 fn layout_with_lounge(lounge: pixtuoid_scene::layout::Lounge) -> Layout {
     let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
     layout.lounge = Some(lounge);
+    // The probes stand the pieces where the real office has its plants and its
+    // meeting room's band decor: either would be the topmost fixture there.
+    layout.plants.clear();
+    layout.meeting_rooms.clear();
     layout
 }
 
