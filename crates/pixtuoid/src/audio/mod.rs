@@ -204,8 +204,8 @@ impl AudioController {
 /// RAII teardown — the ONE exit verb for BOTH halves of the audio protocol:
 /// PERSIST a pending debounced volume, THEN stop the device thread. Both run
 /// unconditionally, so a Ctrl-C / terminate / error can't lose a nudge that
-/// landed inside the debounce window. Both halves are panic-free (the save logs its
-/// error, the join discards its result), so this is safe to run during unwind.
+/// landed inside the debounce window. Both halves are panic-free, so this is safe to run
+/// during unwind.
 impl Drop for AudioController {
     fn drop(&mut self) {
         self.flush_on_exit();
@@ -509,14 +509,10 @@ mod controls_tests {
     }
 
     #[test]
-    fn frame_on_a_disabled_handle_is_a_no_op_so_painters_call_it_unguarded() {
+    fn frame_on_a_disabled_handle_does_not_panic_and_an_enabled_one_delivers() {
         let handle = AudioHandle::disabled();
         handle.frame(AudioFrame::default());
         let rx = handle.install_test_channel();
-        assert!(
-            drain_frames(&rx).is_empty(),
-            "a frame pushed while disabled is dropped, not queued for a later spawn"
-        );
         handle.frame(AudioFrame::default());
         assert_eq!(drain_frames(&rx).len(), 1, "an enabled handle delivers");
     }
@@ -540,8 +536,7 @@ mod controls_tests {
     }
 }
 
-/// The painters' handle — clone-cheap, non-blocking; a [`disabled`](Self::disabled)
-/// one drops every frame.
+/// The painters' handle — clone-cheap, non-blocking.
 #[derive(Clone)]
 pub(crate) struct AudioHandle {
     /// The live device sender, swappable IN PLACE behind a shared cell: every
@@ -577,7 +572,8 @@ impl AudioHandle {
     }
 
     /// Push one frame of audio intent. `try_send` — a saturated audio thread
-    /// drops frames rather than ever stalling the render loop.
+    /// drops frames rather than ever stalling the render loop. A disabled handle drops
+    /// it, so callers need no `is_enabled` guard.
     pub(crate) fn frame(&self, frame: AudioFrame) {
         if let Some(tx) = self.tx.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             let _ = tx.try_send(frame);
@@ -686,7 +682,6 @@ impl AudioHandle {
     }
 }
 
-/// How long [`install_slow_fake_device`]'s thread takes to tear down.
 #[cfg(test)]
 const FAKE_TEARDOWN_MS: u64 = 300;
 
@@ -731,7 +726,7 @@ const SHUTDOWN_JOIN_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 /// Join `handle`, but give up after `timeout` so a hung device-close (or a
 /// still-in-flight synth build, see [`SHUTDOWN_JOIN_TIMEOUT`]) can't block the
 /// exit forever. On timeout the helper thread is left detached, still blocked on
-/// the real join — no worse than the always-detached behaviour this replaces.
+/// the real join.
 /// std has no timed `JoinHandle::join`, hence the channel dance.
 fn join_with_timeout(handle: std::thread::JoinHandle<()>, timeout: std::time::Duration) {
     let (done_tx, done_rx) = mpsc::channel();
@@ -746,8 +741,7 @@ fn join_with_timeout(handle: std::thread::JoinHandle<()>, timeout: std::time::Du
     }
 }
 
-/// The production spawn: [`AudioController::new`]'s boot spawn and every painter's
-/// [`AudioController::apply`] lazy respawn — a named fn so the callers can't drift.
+/// The production spawn every caller injects — a named fn so they can't drift.
 pub(crate) fn respawn(handle: &AudioHandle, volume: f32) {
     handle.respawn_in_place(volume);
 }
@@ -786,8 +780,6 @@ fn run_loop(
 ) {
     use std::sync::atomic::Ordering::Relaxed;
 
-    // Frames try_sent during this build drop harmlessly once the channel fills: levels
-    // re-send every render frame.
     let built_at = Instant::now();
     let mut rng = dsp::NoiseStream::new(BUILD_SEED);
     let bank = AssetBank::build(&mut rng);
@@ -970,7 +962,8 @@ mod tests {
 }
 
 /// The LISTEN gate: renders each busy-ness tier through the REAL
-/// mixer/schedulers/synth into wav files for the owner's audition.
+/// mixer/schedulers/synth into wav files for the owner's audition. No track gets bus-glue
+/// compression (rodio has no insert), so every mix is verified by ear.
 /// `#[ignore]` — run explicitly:
 /// `cargo test -p pixtuoid --lib audio::listen_gate -- --ignored --nocapture`
 #[cfg(all(test, feature = "audio"))]
@@ -1151,8 +1144,6 @@ mod listen_gate {
             );
             write_wav(&out.join(format!("{name}.wav")), &buf);
         }
-        // The night take auditions too: no track gets bus-glue compression (rodio has
-        // no insert), so each track's mix is verified by ear.
         for (name, stems) in [("night_moderate", moderate), ("night_rainy", rainy)] {
             let buf = render_tier(&bank, &night, &rain, TrackId::GenNight(0), stems, &[], 60.0);
             assert!(

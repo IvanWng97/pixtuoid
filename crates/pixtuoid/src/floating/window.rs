@@ -122,8 +122,7 @@ impl FloatingApp {
     }
 
     fn redraw(&mut self) {
-        // Clone the Rc to release the `self.window` borrow before touching `self.surface`.
-        let Some(window) = self.window.clone() else {
+        let Some(window) = self.window.as_ref() else {
             return;
         };
         let size = window.inner_size();
@@ -139,8 +138,6 @@ impl FloatingApp {
         else {
             return;
         };
-        // Audio state for the footer's ♩ suffix, resolved BEFORE the surface
-        // borrow below.
         let audio_now = Instant::now();
         self.audio_ctl.tick(audio_now);
         let audio_audible = self.audio_ctl.handle().is_audible();
@@ -181,8 +178,6 @@ impl FloatingApp {
             return;
         };
         surf.fill_upscaled(office, scale);
-        // Name badges, the neon wall board and the footer, drawn POST-upscale at
-        // native surface res so the text stays crisply anti-aliased.
         let labels = self.renderer.labels(&scene, now);
         super::offscreen::paint_labels_into_surface(&mut surf, &labels, scale as i32, self.theme);
         let board = self.renderer.board(&scene, now);
@@ -202,8 +197,6 @@ impl FloatingApp {
     }
 }
 
-/// [`window_visible_on_monitors`](super::geometry::window_visible_on_monitors) over the
-/// live monitor set.
 fn position_on_a_monitor(event_loop: &ActiveEventLoop, x: i32, y: i32, w: u32, h: u32) -> bool {
     super::geometry::window_visible_on_monitors(
         (x, y, w, h),

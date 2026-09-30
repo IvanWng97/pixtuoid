@@ -199,19 +199,15 @@ struct OnboardingFailure {
 fn reflect_onboarding_outcomes(
     connected: &crate::runtime::ConnectedSources,
     choices: &[(&'static str, bool)],
-    outcomes: &[(String, crate::sources::ChangeOutcome)],
+    outcomes: &[(String, crate::sources::AppliedChange)],
 ) -> Vec<OnboardingFailure> {
-    use crate::sources::ChangeOutcome;
+    use crate::sources::AppliedChange;
     let mut failures = Vec::new();
     for ((_, want), (id, oc)) in choices.iter().zip(outcomes) {
         match oc {
-            ChangeOutcome::Connected => connected.set(id, true),
-            ChangeOutcome::Disconnected => connected.set(id, false),
-            // Unreachable from `apply_choices`, which only connects or disconnects. A no-op
-            // leaves the source as wanted, so a CHECKED row's gate stays OPEN — else its live
-            // agents would vanish on confirmation.
-            ChangeOutcome::NoOp => connected.set(id, *want),
-            ChangeOutcome::Failed(e) => {
+            AppliedChange::Connected => connected.set(id, true),
+            AppliedChange::Disconnected => connected.set(id, false),
+            AppliedChange::Failed(e) => {
                 connected.set(id, false);
                 // `Failed` covers all three operations: connect, disconnect (an UNCHECKED
                 // row, which `freeze_for_skip` makes the common case), and the fold below.
@@ -345,9 +341,7 @@ impl FloorCapacitySweep {
     }
 }
 
-/// Modal precedence, highest first: onboarding > help > version popup > connection >
-/// dashboard > theme picker > normal scene. The body's early returns are that chain's
-/// single source of truth.
+/// Modal precedence, highest first, is the body's early-return order.
 fn dispatch_key(
     code: KeyCode,
     mods: KeyModifiers,
@@ -570,18 +564,15 @@ fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
 }
 
 /// Whether a left-click at `(col, row)` landed on the version popup's URL, given the
-/// terminal's `(cols, rows)`. `scale` is the PAINTER's own last frame-scale, so the hit
-/// geometry matches what was actually painted rather than the popup's resting size — the
-/// popup is clickable mid-animation.
+/// terminal's `(cols, rows)`. `scale` is the popup's last painted scale.
 fn version_popup_url_clicked(col: u16, row: u16, scale: f32, term: (u16, u16)) -> bool {
     let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
     widgets::version_popup_url_rect(bounds, scale)
         .is_some_and(|rect| rect.contains(ratatui::layout::Position { x: col, y: row }))
 }
 
-/// Everything an applied [`KeyAction`] may touch: three `&mut` surfaces plus
-/// the read-only context. A parameter object, not an abstraction — it exists so
-/// the arm list takes one argument.
+/// Everything an applied [`KeyAction`] may touch — a parameter object, so the arm list
+/// takes one argument.
 struct KeyCtx<'a, B: ratatui::backend::Backend<Error: Send + Sync + 'static>> {
     ui: &'a mut ui_state::UiState,
     renderer: &'a mut TuiRenderer<B>,
@@ -794,7 +785,7 @@ fn apply_onboarding_skip<B: ratatui::backend::Backend<Error: Send + Sync + 'stat
 /// scene behind them, where a coffee-machine or branding hit launches a browser — then the
 /// version popup's URL, then the scene. Help is tested before the popup guard so it wins even
 /// mid popup-dismiss animation. The picker/dashboard/connection overlays are inert BY DESIGN:
-/// they have explicit close keys (Tab / s / Enter / Esc), so a click never dismisses them.
+/// they close only by key (see [`dispatch_key`]), so a click never dismisses them.
 fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     m: crossterm::event::MouseEvent,
     ui: &mut ui_state::UiState,
@@ -1213,8 +1204,6 @@ mod teardown_tests {
 
 #[cfg(test)]
 mod runtime_model {
-    // Pins why the loop takes no `block_in_place`: it runs as the `block_on` ROOT
-    // future, where `block_in_place` is inert rather than a yield.
     #[test]
     fn block_in_place_is_inert_on_the_block_on_thread() {
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -1232,7 +1221,7 @@ mod runtime_model {
                 got, 1,
                 "the spawned worker progressed while the loop blocked"
             );
-            // Without the wrap: observably identical, so the wrap was a no-op.
+            // Without it: observably identical.
             let (tx2, rx2) = std::sync::mpsc::channel::<u8>();
             tokio::spawn(async move {
                 tx2.send(2).expect("send");
@@ -1900,37 +1889,15 @@ mod dispatch_tests {
     }
 
     #[test]
-    fn onboarding_noop_outcome_keeps_the_desired_gate_state() {
-        use crate::sources::ChangeOutcome;
-        let connected = crate::runtime::ConnectedSources::new(
-            std::iter::once("antigravity".to_string()).collect(),
-        );
-        let choices: Vec<(&'static str, bool)> = vec![("antigravity", true), ("codex", false)];
-        let outcomes = vec![
-            ("antigravity".to_string(), ChangeOutcome::NoOp),
-            ("codex".to_string(), ChangeOutcome::NoOp),
-        ];
-        super::reflect_onboarding_outcomes(&connected, &choices, &outcomes);
-        assert!(
-            connected.is_connected("antigravity"),
-            "NoOp on a checked row must leave the gate open"
-        );
-        assert!(
-            !connected.is_connected("codex"),
-            "NoOp on an unchecked row keeps the gate closed"
-        );
-    }
-
-    #[test]
     fn onboarding_outcomes_map_connected_disconnected_failed() {
-        use crate::sources::ChangeOutcome;
+        use crate::sources::AppliedChange;
         let connected = crate::runtime::ConnectedSources::default();
         let choices: Vec<(&'static str, bool)> =
             vec![("antigravity", true), ("codex", false), ("cursor", true)];
         let outcomes = vec![
-            ("antigravity".to_string(), ChangeOutcome::Connected),
-            ("codex".to_string(), ChangeOutcome::Disconnected),
-            ("cursor".to_string(), ChangeOutcome::Failed("boom".into())),
+            ("antigravity".to_string(), AppliedChange::Connected),
+            ("codex".to_string(), AppliedChange::Disconnected),
+            ("cursor".to_string(), AppliedChange::Failed("boom".into())),
         ];
         super::reflect_onboarding_outcomes(&connected, &choices, &outcomes);
         assert!(connected.is_connected("antigravity"));
@@ -1943,15 +1910,15 @@ mod dispatch_tests {
 
     #[test]
     fn a_failed_onboarding_connect_reports_the_reason_to_the_caller() {
-        use crate::sources::ChangeOutcome;
+        use crate::sources::AppliedChange;
         let connected = crate::runtime::ConnectedSources::default();
         let choices: Vec<(&'static str, bool)> = vec![("cursor", true), ("antigravity", true)];
         let outcomes = vec![
             (
                 "cursor".to_string(),
-                ChangeOutcome::Failed("settings is valid JSON but not an object".into()),
+                AppliedChange::Failed("settings is valid JSON but not an object".into()),
             ),
-            ("antigravity".to_string(), ChangeOutcome::Connected),
+            ("antigravity".to_string(), AppliedChange::Connected),
         ];
         let failures = super::reflect_onboarding_outcomes(&connected, &choices, &outcomes);
         assert_eq!(
@@ -1988,17 +1955,17 @@ mod dispatch_tests {
 
     #[test]
     fn an_onboarding_failure_names_the_operation_that_actually_failed() {
-        use crate::sources::ChangeOutcome;
+        use crate::sources::AppliedChange;
         let connected = crate::runtime::ConnectedSources::default();
         let choices: Vec<(&'static str, bool)> = vec![("cursor", false), ("openclaw", false)];
         let outcomes = vec![
             (
                 "cursor".to_string(),
-                ChangeOutcome::Failed("config is not writable".into()),
+                AppliedChange::Failed("config is not writable".into()),
             ),
             (
                 "openclaw".to_string(),
-                ChangeOutcome::Failed(format!(
+                AppliedChange::Failed(format!(
                     "{}openclaw.json is JSON5, not strict JSON",
                     crate::sources::HOOK_REMOVAL_FAILED_PREFIX
                 )),
@@ -2085,13 +2052,11 @@ mod dispatch_tests {
 
     #[test]
     fn onboarding_skip_reflects_its_freeze_into_the_live_gate() {
-        use crate::sources::ChangeOutcome;
-        // `apply_choices` maps every want to Connect/Disconnect, never NoOp, so the
-        // skip path's semantic-no-op re-install really does emit `Connected`.
+        use crate::sources::AppliedChange;
         let connected = crate::runtime::ConnectedSources::default();
         assert!(!connected.is_connected("antigravity"), "gate starts empty");
         let freeze: Vec<(&'static str, bool)> = vec![("antigravity", true)];
-        let outcomes = vec![("antigravity".to_string(), ChangeOutcome::Connected)];
+        let outcomes = vec![("antigravity".to_string(), AppliedChange::Connected)];
         super::reflect_onboarding_outcomes(&connected, &freeze, &outcomes);
         assert!(
             connected.is_connected("antigravity"),

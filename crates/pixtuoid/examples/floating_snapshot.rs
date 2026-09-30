@@ -103,7 +103,11 @@ fn main() -> Result<()> {
         anyhow!("usage: floating_snapshot <out.png> [WxH] [--theme <name>] [--agents N]")
     })?;
 
-    let mut size = (720u16, 480u16); // Retina default (360x240 logical @2x)
+    const RETINA_SCALE_FACTOR: u32 = 2;
+    let mut size = (
+        u16::try_from(pixtuoid::config::FLOATING_DEFAULT_W * RETINA_SCALE_FACTOR)?,
+        u16::try_from(pixtuoid::config::FLOATING_DEFAULT_H * RETINA_SCALE_FACTOR)?,
+    );
     let mut theme_name = "normal".to_string();
     let mut n_agents = 0usize;
     let rest: Vec<String> = args.collect();

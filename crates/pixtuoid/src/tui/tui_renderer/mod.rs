@@ -79,7 +79,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     onboarding: crate::tui::welcome::OnboardingFrame,
     /// Ambient-audio gateway; inert unless installed.
     audio: crate::audio::AudioHandle,
-    /// Transient +/- volume readout (percent); `None` outside the ~1s flash window.
+    /// Transient +/- volume readout (percent); `None` past [`crate::audio::VOLUME_FLASH_MS`].
     volume_flash: Option<u8>,
 }
 
@@ -291,9 +291,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         }
     }
 
-    /// The scale computed during the most recent `render()`. Prefer this over
-    /// `version_popup_scale(SystemTime::now())` in the mouse handler so click
-    /// geometry matches what was painted.
+    /// The scale computed during the most recent `render()`.
     pub fn last_popup_scale(&self) -> f32 {
         self.popup.last_scale
     }
@@ -660,11 +658,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let occupied_waypoints = std::mem::take(&mut draw_ctx.occupied_waypoints);
         drop(draw_ctx);
         // Ambient audio: one AudioFrame per rendered frame, floor-scoped (you hear
-        // the floor you're LOOKING AT; rain stays global). The observer runs EVERY
-        // frame, even muted, so its cue edges stay warm — re-enabling audio fires
-        // no volley for what arrived while silent; only DELIVERY is gated. The
-        // kind-map resolves against THIS frame's layout (the `result` handle, not
-        // `self.cached_layout`, which is still last frame's until set below).
+        // the floor you're LOOKING AT; rain stays global). The kind-map resolves against
+        // THIS frame's layout (the `result` handle, not `self.cached_layout`, which is
+        // still last frame's until set below).
         let frame_layout = result.as_ref().ok().and_then(|o| o.as_deref());
         let audio_frame = self.office.audio.frame(
             scene,
