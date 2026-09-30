@@ -9,8 +9,8 @@ env:
 
 jobs:
   # `just hack` checks the host graph only; this job catches target-gated deps
-  # and native calls escaping the core `native` boundary. It deliberately does
-  # not byte-compare wasm output — latest-stable builds drift.
+  # and native calls escaping the core `native` boundary, and owns the committed
+  # site/public/wasm/ artifact's gates.
   wasm-check:
     name: wasm-check
     runs-on: ubuntu-latest
@@ -22,10 +22,11 @@ jobs:
       - uses: ./.github/actions/setup-cargo-just
         with:
           targets: wasm32-unknown-unknown
+      # gen-wasm-check (size, pair, freshness) plus its negative controls. None
+      # of it compiles, so a stale artifact reds before the build below.
+      - run: just wasm-check-selftest
       # gen-wasm uses this same build recipe, preventing local/CI command drift.
       - run: just wasm-build
-      # The size cap IS deterministic even when the rebuilt bytes are not.
-      - run: just gen-wasm-check
 
   hack:
     name: feature combinations

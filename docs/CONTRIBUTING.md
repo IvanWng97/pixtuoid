@@ -51,8 +51,9 @@ green PR:
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
   full suite on a real Windows runner.
 - **wasm-check** — the wasm32 build plus the committed `site/public/wasm/`
-  pair's integrity and size cap (`just gen-wasm-check`); nothing checks the
-  pair is fresh, so a core/scene/web change runs `just gen-wasm` by hand.
+  pair's integrity, size cap and freshness (`just gen-wasm-check`): a change
+  to any input the wasm build reads, recorded by `just gen-wasm`, reds until
+  `just gen-wasm` is rerun and committed.
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
   plain `cargo test` can't see.
 - **hygiene** — the same `just lint` recipes preflight runs (its CI job exists

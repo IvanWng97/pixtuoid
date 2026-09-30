@@ -45,6 +45,16 @@ API_NIGHTLY := "nightly-2026-07-22"
 # churning goldens.
 API_PUBLIC_API := "0.52.0"
 
+# The committed wasm build: what `wasm-build` compiles, where the artifact and
+# its dep-info land, and the identity scripts/wasm-inputs.py records it under,
+# so `gen-wasm` and `gen-wasm-check` derive its inputs from the same build.
+WASM_PACKAGE := "pixtuoid-web"
+WASM_TARGET := "wasm32-unknown-unknown"
+WASM_PROFILE := "wasm-release"
+WASM_ARTIFACT := "target/" + WASM_TARGET + "/" + WASM_PROFILE + "/" + replace(WASM_PACKAGE, "-", "_")
+WASM_BUILD := "--package " + WASM_PACKAGE + " --target " + WASM_TARGET + " --profile " + WASM_PROFILE
+WASM_INPUTS := "site/public/wasm/inputs.txt"
+
 # List available recipes.
 default:
     @just --list
@@ -867,17 +877,17 @@ wasm-build:
     #!/usr/bin/env sh
     set -eu
     command -v rustup >/dev/null || { echo "needs rustup (Homebrew rust has no wasm std)"; exit 1; }
-    rustup target list --toolchain stable --installed | grep -q wasm32-unknown-unknown \
-        || { echo "needs the wasm target: rustup target add wasm32-unknown-unknown"; exit 1; }
+    rustup target list --toolchain stable --installed | grep -q {{ WASM_TARGET }} \
+        || { echo "needs the wasm target: rustup target add {{ WASM_TARGET }}"; exit 1; }
     TB="$(dirname "$(rustup which --toolchain stable rustc)")"
-    PATH="$TB:$PATH" "$TB/cargo" build -p pixtuoid-web --target wasm32-unknown-unknown --profile wasm-release
+    PATH="$TB:$PATH" "$TB/cargo" build -p {{ WASM_PACKAGE }} --target {{ WASM_TARGET }} --profile {{ WASM_PROFILE }}
 
 # The gen-only tool preflight — a SEPARATE recipe so it runs BEFORE the wasm-build
 # dependency, failing fast if wasm-bindgen/wasm-opt are missing instead of after a
 # minutes-long `wasm-build` compile. wasm-bindgen-cli must match the crate's pinned
 # wasm-bindgen (see crates/pixtuoid-web/Cargo.toml); wasm-opt (binaryen) shrinks
-# the blob. (ci-builds.yml's wasm-check calls `wasm-build` directly, then checks
-# the committed pair — neither step needs these.)
+# the blob. (ci-builds.yml's wasm-check checks the committed artifact, then calls
+# `wasm-build` directly — neither step needs these.)
 [private]
 gen-wasm-tools:
     #!/usr/bin/env sh
@@ -895,12 +905,14 @@ gen-wasm: gen-wasm-tools wasm-build
     #!/usr/bin/env sh
     set -eu
     mkdir -p site/public/wasm
-    wasm-bindgen --target web --out-dir site/public/wasm \
-        target/wasm32-unknown-unknown/wasm-release/pixtuoid_web.wasm
+    wasm-bindgen --target web --out-dir site/public/wasm {{ WASM_ARTIFACT }}.wasm
     wasm-opt -Oz -o site/public/wasm/pixtuoid_web_bg.wasm site/public/wasm/pixtuoid_web_bg.wasm
-    # Stamp the wasm/glue PAIR (#424): every emitted file's sha256 lands in one
-    # manifest, which gen-wasm-check verifies (its header says why a stamp and
-    # not a rebuild comparison).
+    # Record the inputs this build read; gen-wasm-check re-derives them from the
+    # checkout to prove the artifact fresh.
+    python3 scripts/wasm-inputs.py {{ WASM_BUILD }} write {{ WASM_ARTIFACT }}.d {{ WASM_INPUTS }}
+    # Stamp the wasm/glue PAIR (#424), input record included: every emitted
+    # file's sha256 lands in one manifest, which gen-wasm-check verifies (its
+    # header says why a stamp and not a rebuild comparison).
     # `! -name '.*'` keeps dotfiles out: a Finder-dropped .DS_Store is gitignored,
     # so stamping it would verify locally and fail CI (missing file) — local-green/CI-red.
     (cd site/public/wasm && find . -maxdepth 1 -type f ! -name manifest.sha256 ! -name '.*' | LC_ALL=C sort | xargs shasum -a 256 > manifest.sha256)
@@ -922,18 +934,13 @@ gen-wasm: gen-wasm-tools wasm-build
 # wasm-bindgen JS glue's ABI must match the exact .wasm it was generated with;
 # a one-sided merge resolution or partial regen ships a silent runtime throw,
 # so every committed file must match gen-wasm's sha256 manifest AND every file
-# must be covered by it. Byte-exact rebuild-match is deliberately NOT checked
-# in CI — wasm output drifts across rustc versions, and CI installs latest
-# stable, so local `just gen-wasm` + review is the freshness authority. Nothing
-# here reads a scene/core/web source, so a merge that skips `just gen-wasm`
-# ships a stale hero with every gate green; the compensating control is root
-# CLAUDE.md's "Build & test" gen-wasm note, not this recipe.
-# No input-hash stamp: pixtuoid-core's `native` source runtime is code the wasm
-# never links, so a stamp would demand a wasm regen on changes that cannot alter
-# it. That reason does not cover scene or web, where any change can move the
-# wasm (panic locations carry line numbers); gating those is an open owner call.
+# must be covered by it. Freshness: a merge that skips `just gen-wasm` ships a
+# stale hero, and a rebuild cannot catch it — wasm bytes drift across rustc
+# versions and CI installs latest stable — so this compares the build's INPUTS
+# against the record gen-wasm wrote (scripts/wasm-inputs.py says what the record
+# holds and why that set is complete). Nothing here compiles.
 [group('gen')]
-[doc('Fail if the committed wasm pair is missing, over the size cap, or hash-mismatched')]
+[doc('Fail if the committed wasm pair is missing, over the size cap, hash-mismatched, or stale against its inputs')]
 gen-wasm-check:
     #!/usr/bin/env sh
     set -eu
@@ -972,10 +979,10 @@ gen-wasm-check:
         awk -v want="./$b" '$2 == want { found = 1 } END { exit !found }' "$M" \
             || { echo "$f is not covered by $M — run 'just gen-wasm'"; exit 1; }
     done
-    echo "gen-wasm-check OK: $W ($WIRE bytes gzipped <= $CAP), pair manifest verified"
+    python3 scripts/wasm-inputs.py {{ WASM_BUILD }} check {{ WASM_INPUTS }}
+    echo "gen-wasm-check OK: $W ($WIRE bytes gzipped <= $CAP), pair manifest and build inputs verified"
 
-# Drift gate: fail if anything `just gen` writes is stale, or the committed wasm
-# pair is broken (`gen-wasm-check`).
+# Drift gate: fail if anything `just gen` writes is stale.
 # Pixel-diffs every PNG (threshold 0); video clips + demo.gif are presence-only
 # (ffmpeg/gifsicle bytes aren't stable cross-version, but the renders feeding
 # them ARE pixel-deterministic). Run by ci-tests.yml's smoke job; runnable locally
@@ -983,8 +990,8 @@ gen-wasm-check:
 # means: run `just gen` and commit everything it rewrote in the same change.
 # Requires the .venv + ffmpeg + node; it builds the examples it renders with.
 [group('gen')]
-[doc('Fail if anything `just gen` writes has drifted, or the wasm pair is broken')]
-gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check gen-art-check
+[doc('Fail if anything `just gen` writes has drifted')]
+gen-check: compare-selftest gen-readme-check gen-art-check
     #!/usr/bin/env sh
     set -eu
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
@@ -1085,18 +1092,19 @@ setup-tools:
     # so a skipped local hook still meets them at merge.
     git config core.hooksPath .githooks
 
-# The size gate's own negative control, because nothing else can be one: the
+# gen-wasm-check's own negative controls, because nothing else can be one: the
 # justfile is outside SHELL_SOURCES, so shellcheck never reads a recipe body, and
-# a size cap that stops measuring reports success for any artifact at all. This
-# pins the FAIL-OPEN class specifically — the pipe hazard gen-wasm-check's gzip
-# step is written around: driving the real recipe with a gzip that exits 1 must
-# red it.
+# a gate that stops measuring reports success for any artifact at all. Each pins
+# a FAIL-OPEN class: a gzip that exits 1 must red the size cap (the pipe hazard
+# its gzip step is written around), and an input record one hash off must red
+# the freshness check. The prerequisite run is the positive control, so CI runs
+# the gate once by running this.
 # Not covered, deliberately: the over-cap and empty-artifact arms, which would
 # have to mutate the committed wasm to exercise. Their failures are loud; the
 # fail-open one is the silent class worth a test.
 [group('meta')]
-[doc('Self-test the wasm size gate: prove it still reds when its measurement breaks')]
-wasm-check-selftest:
+[doc('Run gen-wasm-check, then prove it still reds when its measurement or its input record breaks')]
+wasm-check-selftest: gen-wasm-check
     #!/usr/bin/env sh
     set -eu
     stub=$(mktemp -d)
@@ -1108,8 +1116,13 @@ wasm-check-selftest:
         echo "  the size measurement is fail-OPEN. Did the gzip call become a pipe?"
         exit 1
     fi
-    just gen-wasm-check >/dev/null
-    echo "wasm-check-selftest: OK (reds on a broken measurement, greens on a real one)"
+    awk '!done && /^file / { $2 = "0"; done = 1 } { print }' {{ WASM_INPUTS }} > "$stub/inputs.txt"
+    if python3 scripts/wasm-inputs.py {{ WASM_BUILD }} check "$stub/inputs.txt" >/dev/null 2>&1; then
+        echo "wasm-check-selftest: FAIL — the freshness check passed a record whose first"
+        echo "  file hash is wrong; it no longer compares the record against the checkout."
+        exit 1
+    fi
+    echo "wasm-check-selftest: OK (reds on a broken measurement and a stale record, greens on the real ones)"
 
 # The pixel comparator is the primitive under `gen-check` and the smoke job; an
 # always-green comparator reports success for any render at all. Its own recipe
