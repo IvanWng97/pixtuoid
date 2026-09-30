@@ -71,3 +71,9 @@ pub(crate) mod skyline;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;
 pub mod token_meter;
+
+/// ⌊2⁶⁴/φ⌋, φ the golden ratio: the Fibonacci-hashing multiplier and splitmix64's increment.
+pub(crate) const GOLDEN_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
+pub(crate) const GOLDEN_GAMMA_32: u32 = (GOLDEN_GAMMA >> 32) as u32;
+pub(crate) const MURMUR64A_M: u64 = 0xc6a4_a793_5bd1_e995;
+pub(crate) const MURMUR3_FMIX32_M1: u32 = 0x85eb_ca6b;

@@ -312,7 +312,6 @@ impl core::marker::Unpin for pixtuoid_scene::floor::ProjectedSlot
 impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::ProjectedSlot
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::ProjectedSlot
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::ProjectedSlot
-pub const pixtuoid_scene::floor::FLOOR_SEED_MULTIPLIER: u64
 pub fn pixtuoid_scene::floor::build_floor_scene(&pixtuoid_core::state::SceneState, usize) -> alloc::vec::Vec<pixtuoid_scene::floor::ProjectedSlot>
 pub fn pixtuoid_scene::floor::floor_capacity(u16, u16, u64) -> usize
 pub fn pixtuoid_scene::floor::floor_seed(usize) -> u64

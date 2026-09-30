@@ -24,7 +24,7 @@ impl NoiseStream {
         self.counter = self.counter.wrapping_add(1);
         pixtuoid_core::id::splitmix64(
             self.seed
-                .wrapping_add(self.counter.wrapping_mul(0x9E37_79B9_7F4A_7C15)),
+                .wrapping_add(self.counter.wrapping_mul(crate::GOLDEN_GAMMA)),
         )
     }
 

@@ -63,6 +63,9 @@ pub fn stale_resume_gap_ms(agent_id: AgentId) -> u64 {
     STALE_RESUME_GAP_BASE_MS + (agent_id.raw() >> 16) % STALE_RESUME_GAP_RANGE_MS
 }
 
+/// ⌊2⁶⁴/φ₃⌋, φ₃ the real root of x⁴ = x + 1.
+const PHI3_GAMMA: u64 = 0xd1b5_4a32_d192_ed03;
+
 /// Base dwell plus deterministic per-agent jitter within `window`. `tag` is NOT
 /// a cryptographic salt — it decorrelates the callers' jitter from each other
 /// and from the id-bit-slicing knobs (`speed_mult` / `pause_ms` / `cycle_ms`).
@@ -75,16 +78,12 @@ fn jittered_dwell(window: DwellWindow, agent_id: AgentId, tag: u64) -> u64 {
 /// per-agent jitter. A sofa / meeting seat is a long lounge; a vending grab
 /// is quick.
 pub fn dwell_ms(kind: WaypointKind, agent_id: AgentId) -> u64 {
-    jittered_dwell(
-        furniture_def(kind.furniture()).dwell,
-        agent_id,
-        0xd1b5_4a32_d192_ed03,
-    )
+    jittered_dwell(furniture_def(kind.furniture()).dwell, agent_id, PHI3_GAMMA)
 }
 
 /// Absolute dwell (ms) an agent sits at its desk between wander trips.
 pub fn seated_dwell_ms(agent_id: AgentId) -> u64 {
-    jittered_dwell(desk_furniture_def().dwell, agent_id, 0x9e37_79b9_7f4a_7c15)
+    jittered_dwell(desk_furniture_def().dwell, agent_id, crate::GOLDEN_GAMMA)
 }
 
 /// Estimated full wander-cycle wall-time for an agent (desk dwell + two walk
@@ -120,7 +119,7 @@ pub fn personality_for(agent_id: AgentId) -> Personality {
 /// trip on this cycle, or stay seated?
 pub fn takes_trip(agent_id: AgentId, cycle_n: u64) -> bool {
     let p = personality_for(agent_id);
-    let mix = agent_id.raw() ^ cycle_n.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    let mix = agent_id.raw() ^ cycle_n.wrapping_mul(crate::GOLDEN_GAMMA);
     (mix % 100) < p.trip_chance_pct as u64
 }
 
@@ -128,7 +127,7 @@ pub fn takes_trip(agent_id: AgentId, cycle_n: u64) -> bool {
 /// wander (random cubicle_aisle point) or a directed visit to a named waypoint?
 pub fn is_aimless_cycle(agent_id: AgentId, cycle_n: u64) -> bool {
     let p = personality_for(agent_id);
-    let type_mix = agent_id.raw() ^ cycle_n.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    let type_mix = agent_id.raw() ^ cycle_n.wrapping_mul(pixtuoid_core::id::SPLITMIX64_M1);
     (type_mix % 100) < p.aimless_pref_pct as u64
 }
 
@@ -287,7 +286,7 @@ pub fn derive_state_only(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout
 /// `idle_pose` and the routed `pick_wander_dest` so the two can't drift to
 /// different aimless destinations.
 pub fn aimless_wander_seed(agent_id: AgentId, cycle_n: u64) -> u64 {
-    agent_id.raw() ^ cycle_n.wrapping_mul(0xd1b5_4a32_d192_ed03)
+    agent_id.raw() ^ cycle_n.wrapping_mul(PHI3_GAMMA)
 }
 
 /// Pick an aimless wander destination: a weighted zone choice, then
@@ -333,8 +332,8 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> P
     const AIMLESS_SAMPLE_ATTEMPTS: u64 = 32;
     for i in 0..AIMLESS_SAMPLE_ATTEMPTS {
         let h = seed
-            .wrapping_add(i.wrapping_mul(0x9e37_79b9_7f4a_7c15))
-            .wrapping_mul(0xc6a4_a793_5bd1_e995);
+            .wrapping_add(i.wrapping_mul(crate::GOLDEN_GAMMA))
+            .wrapping_mul(crate::MURMUR64A_M);
         let x = zone.x + (h as u16) % zone.width.max(1);
         let y = zone.y + ((h >> 16) as u16) % zone.height.max(1);
         if routable(x, y) {

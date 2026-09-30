@@ -49,8 +49,8 @@ pub(super) fn dust_mote_positions(
         // one pixel.
         let s = pixtuoid_core::id::splitmix64(
             floor_seed
-                .wrapping_add((col.x as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9))
-                .wrapping_add((i as u64).wrapping_mul(0x94d0_49bb_1331_11eb)),
+                .wrapping_add((col.x as u64).wrapping_mul(pixtuoid_core::id::SPLITMIX64_M1))
+                .wrapping_add((i as u64).wrapping_mul(pixtuoid_core::id::SPLITMIX64_M2)),
         );
         let phase = (s % 6283) as f32 / 1000.0;
         let speed_y = 0.6 + ((s >> 12) & 0x3) as f32 * 0.2;

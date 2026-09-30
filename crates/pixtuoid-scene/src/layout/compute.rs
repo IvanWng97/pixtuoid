@@ -1198,8 +1198,8 @@ impl PodGrid {
     }
 }
 
-/// The five hand-authored floor geometries. `floor_seed` selects one via
-/// Fibonacci hashing; floors past the fifth cycle through the same looks.
+/// The hand-authored floor geometries. `floor_seed` selects one via
+/// [`Self::from_seed`]; floors past [`Self::COUNT`] repeat the same looks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum FloorVariant {
     /// Meeting + pantry, vertical wall between them and the cubicle area,
@@ -1231,11 +1231,10 @@ impl FloorVariant {
         FloorVariant::Lounge,
     ];
     const COUNT: u64 = Self::ALL.len() as u64;
-    /// Fibonacci-hash multiplier, chosen so the standard floor seeds each map to
-    /// a distinct variant.
-    const HASH_MULT: u64 = 0x4737819096da1dad;
+    /// Searched, not Fibonacci-derived: it maps floors `0..COUNT` to distinct
+    /// variants, which `floor_variant_hash_gives_unique_layouts_per_floor` pins.
+    const HASH_MULT: u64 = 0x4737_8190_96da_1dad;
 
-    /// Select the variant for a floor seed (Fibonacci hashing).
     fn from_seed(floor_seed: u64) -> Self {
         Self::ALL[(floor_seed.wrapping_mul(Self::HASH_MULT) % Self::COUNT) as usize]
     }
