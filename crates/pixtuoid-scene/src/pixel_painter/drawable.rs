@@ -1098,11 +1098,11 @@ mod tests {
             let a = &th.appliance;
             let buf = appliance_at_rest("vending_machine", pos, th);
             for ((dx, dy), want, role) in [
-                ((0, 0), a.vending_panel, "the top row: its panel"),
-                ((1, 1), a.vending_drinks[0], "the first drink"),
-                ((2, 2), a.vending_drinks[3], "the fourth drink"),
-                ((2, 4), a.vending_trim, "the coin plate"),
-                ((0, 5), a.vending_dark, "the pickup row"),
+                ((0, 1), a.vending_panel, "the panel, under its lit top row"),
+                ((1, 2), a.vending_drinks[0], "the first drink"),
+                ((4, 2), a.vending_drinks[3], "the fourth drink"),
+                ((5, 5), a.vending_trim, "the coin plate"),
+                ((1, 10), a.vending_dark, "the pickup tray"),
                 ((0, 2), a.vending_body, "the body"),
             ] {
                 assert_eq!(buf.get(vx + dx, vy + dy), want, "{}: {role}", th.name);
@@ -1120,11 +1120,11 @@ mod tests {
             let a = &th.appliance;
             let buf = appliance_at_rest("printer", pos, th);
             for ((dx, dy), want, role) in [
-                ((2, 0), a.printer_glass, "the scanner glass"),
+                ((2, 1), a.printer_glass, "the scanner glass"),
                 ((4, 0), a.printer_top, "the lid, east of its lit end"),
                 ((2, 3), a.printer_paper, "the stack"),
-                ((0, 1), a.printer_tray, "a side"),
-                ((2, 1), a.printer_body, "the chassis"),
+                ((1, 2), a.printer_tray, "the output bay"),
+                ((2, 4), a.printer_body, "the chassis"),
             ] {
                 assert_eq!(buf.get(px + dx, py + dy), want, "{}: {role}", th.name);
             }

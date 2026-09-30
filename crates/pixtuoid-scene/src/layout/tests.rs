@@ -1052,10 +1052,10 @@ fn pantry_and_meeting_procedural_rects_match_the_painted_geometry() {
     assert_eq!(
         pantry.water_cooler_rect(),
         Some(Bounds {
-            x: 10 + 40 - 6,
-            y: 20 + 8,
-            width: 3,
-            height: 6,
+            x: 10 + 40 - 7,
+            y: 20 + 6,
+            width: 4,
+            height: 9,
         }),
     );
     assert_eq!(
@@ -1141,4 +1141,96 @@ fn sofa_east_drain_edge_reads_the_placed_sofa_and_is_none_when_bare() {
 
     let bare = MeetingRoom { bounds, trio: None };
     assert_eq!(bare.sofa_east_drain_edge(), None);
+}
+
+/// A standing fixture's height as a percent band of [`CHARACTER_SPRITE_H`].
+struct HeightBand {
+    min_pct: u16,
+    max_pct: u16,
+}
+
+/// Person-height: a figure reaches the brand panel.
+const VENDING_MACHINE_HEIGHT: HeightBand = HeightBand {
+    min_pct: 100,
+    max_pct: 115,
+};
+/// A floor-standing copier: its lid at a figure's waist.
+const PRINTER_HEIGHT: HeightBand = HeightBand {
+    min_pct: 60,
+    max_pct: 75,
+};
+/// Its taps at a standing figure's hand.
+const WATER_COOLER_HEIGHT: HeightBand = HeightBand {
+    min_pct: 70,
+    max_pct: 80,
+};
+/// Coats hang at a figure's shoulders.
+const COAT_RACK_HEIGHT: HeightBand = HeightBand {
+    min_pct: 95,
+    max_pct: 105,
+};
+/// The shade at a figure's head.
+const FLOOR_LAMP_HEIGHT: HeightBand = HeightBand {
+    min_pct: 95,
+    max_pct: 110,
+};
+/// A room its occupant steps into.
+const PHONE_BOOTH_HEIGHT: HeightBand = HeightBand {
+    min_pct: 120,
+    max_pct: 135,
+};
+
+#[test]
+fn standing_fixtures_are_in_proportion_to_a_figure() {
+    let visual_h = |f: Furniture| furniture_def(f).visual.h;
+    for (name, h, band) in [
+        (
+            "vending machine",
+            visual_h(Furniture::VendingMachine),
+            VENDING_MACHINE_HEIGHT,
+        ),
+        ("printer", visual_h(Furniture::Printer), PRINTER_HEIGHT),
+        (
+            "water cooler",
+            super::rooms::pantry::WATER_COOLER.h,
+            WATER_COOLER_HEIGHT,
+        ),
+        (
+            "coat rack",
+            coat_rack_rect_at(Point { x: 10, y: 10 }).height,
+            COAT_RACK_HEIGHT,
+        ),
+        (
+            "floor lamp",
+            visual_h(Furniture::FloorLamp),
+            FLOOR_LAMP_HEIGHT,
+        ),
+        (
+            "phone booth",
+            visual_h(Furniture::PhoneBooth),
+            PHONE_BOOTH_HEIGHT,
+        ),
+    ] {
+        let pct = h * 100 / CHARACTER_SPRITE_H;
+        assert!(
+            (band.min_pct..=band.max_pct).contains(&pct),
+            "{name}: {h}px is {pct}% of a figure, outside {}..={}%",
+            band.min_pct,
+            band.max_pct
+        );
+    }
+}
+
+#[test]
+fn waypoint_depth_baseline_is_its_grounds_south_row() {
+    let pos = Point { x: 40, y: 40 };
+    for kind in [WaypointKind::VendingMachine, WaypointKind::Printer] {
+        let def = furniture_def(kind.furniture());
+        let (tl, size) = def.ground_rect(Anchor::Center, pos).expect("has footprint");
+        assert_eq!(
+            z_sort_row(Anchor::Center, pos, def.visual.h),
+            tl.y + size.h - 1,
+            "{kind:?}: sorts on the row it stands on"
+        );
+    }
 }

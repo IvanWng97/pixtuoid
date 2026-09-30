@@ -883,10 +883,16 @@ fn place_lounge_vignette(
     door: Option<Point>,
     lounge_fits: bool,
 ) -> LoungeVignette {
+    /// Rows from the couch's centre down to the lamp's base: the art grows
+    /// north from it (invariant #6), clear of the desks to the south.
+    const LAMP_BASE_DY: u16 = 6;
     let flanks = LoungeFlanks::of(couch_x);
     let floor_lamp = lounge_fits.then_some(Point {
         x: flanks.lamp_x,
-        y: couch_y + 2,
+        y: super::placement::centre_y_standing_on(
+            couch_y + LAMP_BASE_DY,
+            furniture_def(Furniture::FloorLamp).visual.h,
+        ),
     });
     let side_table = lounge_fits.then_some(Point {
         x: flanks.side_table_x,
@@ -1605,11 +1611,22 @@ fn compute_waypoints(
     const VENDING_MIN_AISLE_W: u16 = 30;
     const PRINTER_MIN_AISLE_H: u16 = 9;
     const PRINTER_MIN_AISLE_W: u16 = 40;
+    /// Columns from the band's west edge to the vending machine's, clear of a
+    /// vertical wall's foot there.
+    const VENDING_WEST_GAP: u16 = 3;
+    // Each appliance's base stands one row off the aisle's south edge, its art
+    // overhanging north (invariant #6).
+    let appliance_y = |kind: Furniture| {
+        let base = (cubicle_aisle.y + cubicle_aisle.height).saturating_sub(2);
+        super::placement::centre_y_standing_on(base, furniture_def(kind).visual.h)
+    };
     if cubicle_aisle.height >= VENDING_MIN_AISLE_H && cubicle_aisle.width > VENDING_MIN_AISLE_W {
         waypoints.push(Waypoint {
             pos: Point {
-                x: right_x + 5,
-                y: cubicle_aisle.y + 3,
+                x: right_x
+                    + VENDING_WEST_GAP
+                    + furniture_def(Furniture::VendingMachine).visual.w / 2,
+                y: appliance_y(Furniture::VendingMachine),
             },
             kind: WaypointKind::VendingMachine,
             facing: Facing::South,
@@ -1620,7 +1637,7 @@ fn compute_waypoints(
         waypoints.push(Waypoint {
             pos: Point {
                 x: right_x + right_w.saturating_sub(10),
-                y: cubicle_aisle.y + 2,
+                y: appliance_y(Furniture::Printer),
             },
             kind: WaypointKind::Printer,
             facing: Facing::South,

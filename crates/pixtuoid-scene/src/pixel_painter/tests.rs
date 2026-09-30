@@ -1369,21 +1369,6 @@ fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
     }
 }
 
-#[test]
-fn waypoint_depth_baseline_is_center_pinned_sprite_south() {
-    use crate::layout::{WaypointKind, furniture_def};
-    let south_off = |k: WaypointKind| {
-        furniture_def(k.furniture())
-            .footprint
-            .expect("has footprint")
-            .h
-            / 2
-            - 1
-    };
-    assert_eq!(south_off(WaypointKind::VendingMachine), 2);
-    assert_eq!(south_off(WaypointKind::Printer), 1);
-}
-
 /// The seat centre is the PAINTED desk's midline, not the layout box's — the two
 /// differ (`DESK_W` 10 vs a 14 px sprite), which is why the chair used to sit 2 px
 /// left of the desk it belongs to. Centring here is what makes a symmetric jitter
@@ -4228,7 +4213,8 @@ fn water_cooler_glugs_a_rising_bubble() {
         buf
     };
     let bubble = theme.furniture.tank_water_line;
-    let (wx, wy) = (pr.x + pr.width - 6, pr.y + 8);
+    let cooler = pantry.water_cooler_rect().expect("fits");
+    let (wx, wy) = (cooler.x, cooler.y);
     let a = render(100); // phase 0: bubble low
     let b = render(500); // phase 1: bubble high
     assert_eq!(
