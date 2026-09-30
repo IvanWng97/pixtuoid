@@ -9,12 +9,12 @@ use std::time::{Duration, SystemTime};
 use pixtuoid::tui::renderer::draw_scene;
 use pixtuoid_core::state::{ActivityState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
-use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
+use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
 use pixtuoid_scene::floor::FloorMeta;
 use pixtuoid_scene::pixel_painter::force_weather;
 use pixtuoid_scene::theme::{self, Theme};
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 
 fn fixture_scene(now: SystemTime) -> SceneState {
     let mut s = SceneState::uniform(12);
@@ -76,9 +76,9 @@ fn render_hash(scene: &SceneState, now: SystemTime, theme: &Theme, floor: FloorM
     let backend = TestBackend::new(96, 36);
     let mut term = Terminal::new(backend).unwrap();
     let pack = load_sprite_pack(PackSource::Bundled).unwrap();
-    make_draw_ctx!(draw_ctx, theme: theme);
-    draw_ctx.floor = floor;
-    draw_scene(&mut term, scene, &pack, now, &mut draw_ctx).unwrap();
+    make_draw_ctx!(draw_ctx, scene, &pack, now, theme: theme);
+    draw_ctx.world.floor = floor;
+    draw_scene(&mut term, &mut draw_ctx).unwrap();
 
     let mut hasher = DefaultHasher::new();
     for px in draw_ctx.buf.as_slice() {

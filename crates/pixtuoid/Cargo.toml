@@ -45,14 +45,14 @@ serde              = { workspace = true }
 # READ→MERGE→WRITE round-trip and serde_json's default BTreeMap-backed `Map`
 # re-emits every object ALPHABETICALLY, silently reordering the user's own
 # hand-authored file on a `connect`. Scoped to this crate so `pixtuoid-web` need
-# not pay indexmap's code size in the committed wasm artifact.
+# not pay indexmap's code size in the site's wasm.
 serde_json         = { workspace = true, features = ["preserve_order"] }
 toml               = { workspace = true }
 toml_edit          = { workspace = true }
 # YAML parse+emit for the Hermes install target — the maintained yaml-rust
 # successor, serde_yaml and serde_yml both being abandoned. It data-preserves a
 # user's other config keys on merge but does NOT round-trip comments.
-saphyr             = "0.0.12"
+saphyr             = "0.1.0"
 anyhow             = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -146,6 +146,7 @@ windows-sys = { version = "0.61", features = [
 # `pixtuoid_core::harness` pipeline, which is behind core's dev-only feature.
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", features = ["harness"] }
 tempfile = "3"
+temp-env = { workspace = true }
 # End-to-end CLI golden for `sources --json`, the Raycast contract (tests/cli_json.rs).
 # Goldens update with SNAPSHOTS=overwrite.
 snapbox  = { version = "1", features = ["json"] }

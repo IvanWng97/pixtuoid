@@ -9,11 +9,11 @@ use std::time::{Duration, SystemTime};
 use pixtuoid::tui::renderer::draw_scene;
 use pixtuoid_core::state::{ActivityState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
-use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
+use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
 use pixtuoid_scene::theme;
+use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
-use ratatui::Terminal;
 
 const NOW_SECS: u64 = 1_716_286_800;
 
@@ -87,8 +87,8 @@ fn render_and_get_buffer(
     let backend = TestBackend::new(w, h);
     let mut term = Terminal::new(backend).unwrap();
     let pack = load_sprite_pack(PackSource::Bundled).unwrap();
-    make_draw_ctx!(draw_ctx, floor_info: floor_info);
-    draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx).unwrap();
+    make_draw_ctx!(draw_ctx, &scene, &pack, now, floor_info: floor_info);
+    draw_scene(&mut term, &mut draw_ctx).unwrap();
     let buffer = term.backend().buffer().clone();
     (buffer, w, h)
 }

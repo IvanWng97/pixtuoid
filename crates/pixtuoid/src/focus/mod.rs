@@ -98,15 +98,15 @@ pub(crate) fn resolve_pid(
         return None;
     }
     if let Some(cached) = slot.pid {
-        if let Some(stamped) = cached.started {
-            if table.start_time(cached.pid) != Some(stamped) {
-                tracing::debug!(
-                    agent = %slot.label,
-                    pid = cached.pid,
-                    "focus: refused — cached pid gone or recycled (start marker mismatch)"
-                );
-                return None;
-            }
+        if let Some(stamped) = cached.started
+            && table.start_time(cached.pid) != Some(stamped)
+        {
+            tracing::debug!(
+                agent = %slot.label,
+                pid = cached.pid,
+                "focus: refused — cached pid gone or recycled (start marker mismatch)"
+            );
+            return None;
         }
         return Some(cached.pid);
     }
@@ -177,11 +177,11 @@ pub(crate) fn focus_agent(
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) use linux::{activate_os, OsProcessTable};
+pub(crate) use linux::{OsProcessTable, activate_os};
 #[cfg(target_os = "macos")]
-pub(crate) use macos::{activate_os, OsProcessTable};
+pub(crate) use macos::{OsProcessTable, activate_os};
 #[cfg(windows)]
-pub(crate) use windows::{activate_os, OsProcessTable};
+pub(crate) use windows::{OsProcessTable, activate_os};
 
 #[cfg(test)]
 mod tests {

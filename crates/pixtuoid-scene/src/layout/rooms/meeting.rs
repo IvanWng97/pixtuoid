@@ -1,7 +1,7 @@
 //! The meeting room aggregate: bounds + the sofa/table trio.
 
 use crate::layout::{
-    anchored_top_left, furniture_def, pct, Anchor, Bounds, Furniture, Point, OBSTACLE_PAD_PX,
+    Anchor, Bounds, Furniture, OBSTACLE_PAD_PX, Point, anchored_top_left, furniture_def, pct,
 };
 
 /// One meeting room's furniture trio. The fixed-size array encodes the
@@ -29,6 +29,8 @@ impl MeetingTrio {
             .y
             .saturating_sub(north.y)
             .saturating_add(MEETING_RUG_OVERHANG)
+            // A trio by the south edge shortens its rug, still centred on the
+            // table.
             .min(
                 buf_h
                     .saturating_sub(self.table.y)
@@ -67,7 +69,7 @@ pub(crate) const COAT_HOOK_DX: u16 = 1;
 pub(crate) const COAT_W: u16 = 2;
 
 /// Rows from a coat rack's pole top to its base: the row it y-sorts at.
-pub(crate) const COAT_RACK_BASE_DY: u16 = 7;
+pub(crate) const COAT_RACK_BASE_DY: u16 = 11;
 
 /// The box a coat rack whose pole top is `pos` is drawn in: the one authority
 /// for its painter, its y-sort row, its hover box and the chair-clearance gate.
@@ -86,13 +88,15 @@ impl MeetingRoom {
     /// room-centre row) — or `None` when a fitted room is too narrow for the
     /// rack's coats to clear the east chair and its sitter.
     pub(crate) fn coat_rack_pos(&self) -> Option<Point> {
+        /// Rows from the room-centre row down to the rack's base.
+        const BASE_BELOW_MID: u16 = 3;
         let b = self.bounds;
         if b.width <= 20 {
             return None;
         }
         let pos = Point {
             x: b.x + b.width - 5,
-            y: b.y + b.height / 2 - 4,
+            y: (b.y + b.height / 2 + BASE_BELOW_MID).checked_sub(COAT_RACK_BASE_DY)?,
         };
         if let Some(t) = &self.trio {
             // The seated sprite shares the chair body's east edge, so the
@@ -182,6 +186,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_meeting_rug_ends_on_the_floor() {
+        for (w, h) in [(96u16, 60u16), (160, 96), (240, 144), (320, 180)] {
+            for seed in 0..8 {
+                let Some(layout) = crate::layout::Layout::compute_with_seed(w, h, None, seed)
+                else {
+                    continue;
+                };
+                for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio) {
+                    let rug = trio.rug(layout.buf_h);
+                    assert!(
+                        rug.y + rug.height <= layout.buf_h,
+                        "{w}x{h} seed {seed}: {rug:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn a_meeting_rug_reaches_no_further_than_the_table_is_from_the_south_edge() {
         let x = 40;
         let trio = MeetingTrio {
@@ -198,6 +221,12 @@ mod tests {
             trio.rug(200).height,
             90 - 50 + MEETING_RUG_OVERHANG,
             "sofa to sofa where the office allows"
+        );
+        let edge = trio.table.y + MEETING_RUG_OVERHANG / 2;
+        assert_eq!(
+            trio.rug(edge).height,
+            edge - trio.table.y + MEETING_RUG_OVERHANG,
+            "nearer the edge than the overhang"
         );
     }
 }

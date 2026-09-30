@@ -1,8 +1,8 @@
 //! The pantry aggregate: bounds + the counter size + the island.
 
 use crate::layout::{
-    furniture_def, pct, Bounds, Facing, Furniture, Point, Size, Waypoint, WaypointKind,
-    OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W, WALL_THICK_H,
+    Bounds, Facing, Furniture, OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W, Point, Size, WALL_THICK_H,
+    Waypoint, WaypointKind, furniture_def, pct,
 };
 
 /// The compact counter — the fallback for a pantry too narrow for
@@ -17,6 +17,9 @@ pub(crate) const LARGE_COUNTER: Size = Size {
     w: PANTRY_COUNTER_LARGE_W,
     h: 10,
 };
+
+/// The water cooler's size, [`PantryRoom::water_cooler_rect`]'s box.
+pub(crate) const WATER_COOLER: Size = Size { w: 4, h: 9 };
 
 /// The pantry room: its bounds plus what it owns — the counter's chosen
 /// footprint and the kitchen-island body centre (`None` when the room can't host
@@ -77,14 +80,18 @@ impl PantryRoom {
     /// AND the binary's hover hit-test both read, so the drawn sprite and its
     /// hover box can't drift across the crate boundary.
     pub fn water_cooler_rect(&self) -> Option<Bounds> {
+        /// Columns between the cooler's east edge and the room's.
+        const EAST_GAP: u16 = 3;
+        /// Rows from the room's top to just past the cooler's base.
+        const BASE_DY: u16 = 15;
         let b = self.bounds;
-        // Lazy `.then` (not `.then_some`): the `b.width - 6` etc. must not run
-        // for a sub-gate room (it would `u16`-underflow).
+        // Lazy `.then` (not `.then_some`): the `b.width - …` must not run for a
+        // sub-gate room (it would `u16`-underflow).
         (b.height > 25 && b.width > 12).then(|| Bounds {
-            x: b.x + b.width - 6,
-            y: b.y + 8,
-            width: 3,
-            height: 6,
+            x: b.x + b.width - EAST_GAP - WATER_COOLER.w,
+            y: b.y + BASE_DY - WATER_COOLER.h,
+            width: WATER_COOLER.w,
+            height: WATER_COOLER.h,
         })
     }
 

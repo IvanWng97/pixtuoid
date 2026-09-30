@@ -87,8 +87,8 @@ impl Pen {
     /// The pen for `pack` at `scale`: the densest of its variant densities that
     /// divides `scale`, else the base art's. [`densest_frame`](crate::pixel_painter::densest_frame)
     /// applies the same rule per piece, so the room shares every piece's grid
-    /// only while the pack draws its variants at one common density, as the
-    /// bundled pack does.
+    /// only while the pack draws its variants at one density
+    /// (`the_bundled_pack_draws_every_variant_at_one_density`).
     pub(crate) fn for_pack(scale: RenderScale, pack: &Pack) -> Self {
         pack.density_variants()
             .into_iter()
@@ -106,7 +106,7 @@ impl Pen {
     }
 
     /// `a` art pixels, as buffer pixels.
-    fn buffer(self, a: ArtPx) -> u16 {
+    pub(crate) fn buffer(self, a: ArtPx) -> u16 {
         a.0.saturating_mul(self.k.get())
     }
 
@@ -192,33 +192,13 @@ impl Pen {
         }
     }
 
-    /// Recolour every buffer pixel of the art pixels of `r` from what lies there,
-    /// clipped to the buffer: `f` gets the buffer pixel and its colour. Unlike
-    /// [`recolour`](Self::recolour), pixels of one art pixel may differ.
-    pub(crate) fn recolour_px(
-        self,
-        buf: &mut RgbBuffer,
-        r: ArtRect,
-        mut f: impl FnMut(u16, u16, Rgb) -> Rgb,
-    ) {
-        let (x0, y0) = (self.buffer(r.x), self.buffer(r.y));
-        let x1 = x0.saturating_add(self.buffer(r.w)).min(buf.width());
-        let y1 = y0.saturating_add(self.buffer(r.h)).min(buf.height());
-        for y in y0..y1 {
-            for x in x0..x1 {
-                let c = f(x, y, buf.get(x, y));
-                buf.put(x, y, c);
-            }
-        }
-    }
-
     /// Dither a full-width band from `light` at its top to `dark` at its
     /// bottom, `y1` exclusive; a band with no height paints nothing.
     ///
     /// One matrix cell is one art pixel on both axes, and the level steps once
     /// per art row: a cell or a step any finer would be a pixel smaller than the
-    /// art's. The indices stay ABSOLUTE (`% 4` of the art coordinate, not of its
-    /// offset in the band), so the pattern tiles across every band sharing the
+    /// art's. The matrix is indexed by the ABSOLUTE art coordinate, not its
+    /// offset in the band, so the pattern tiles across every band sharing the
     /// buffer with no seam at a band's boundary.
     pub(crate) fn dither_band(
         self,
@@ -235,11 +215,13 @@ impl Pen {
         let span = u32::from(y1.0 - y0.0);
         let columns = buf.width().div_ceil(k);
         for y in y0.0..y1.0 {
-            // How far through the transition this row sits, on the matrix's scale.
-            let level = (u32::from(y - y0.0) * crate::dither::BAYER_LEVELS / span) as u8;
+            let through = f32::from(y - y0.0) / span as f32;
             for x in 0..columns {
-                let threshold = crate::dither::BAYER_4X4[usize::from(y % 4)][usize::from(x % 4)];
-                let c = if threshold < level { dark } else { light };
+                let c = if crate::dither::takes_next(x, y, through) {
+                    dark
+                } else {
+                    light
+                };
                 self.fill(
                     buf,
                     ArtRect {
@@ -255,15 +237,23 @@ impl Pen {
     }
 }
 
-/// Whether the art pixel at `(x, y)` takes the next tone of an ordered dither
-/// covering `coverage` of its area, the matrix [`Pen::dither_band`] steps by.
-pub(crate) fn dithered(x: ArtPx, y: ArtPx, coverage: f32) -> bool {
-    crate::dither::takes_next(x.0, y.0, coverage)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(feature = "density-art")]
+    fn the_bundled_pack_draws_every_variant_at_one_density() {
+        let pack =
+            crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
+                .expect("the embedded pack loads");
+        assert_eq!(
+            pack.density_variants().len(),
+            1,
+            "{:?}",
+            pack.density_variants()
+        );
+    }
 
     const LIGHT: Rgb = Rgb {
         r: 200,

@@ -1,6 +1,6 @@
 # Implementation-plan brief — the review, shifted left
 
-The upstream twin of [`two-lens-review/briefs.md`](../../.claude/skills/two-lens-review/briefs.md): the review
+The upstream twin of [`REVIEW.md`](../../REVIEW.md): the review
 protocol catches the repo's known failure classes after the code exists; this
 brief front-loads the same classes while each costs one plan line instead of
 a finding plus a fix round.
@@ -23,23 +23,18 @@ Every section gets an answer; "n/a" counts only with a reason.
    add another shallow one = AI-slop?). Name any big-radius refactor the
    deepening warrants — a slop-reducing refactor is in-scope here, not deferred
    by default.
-1. **Data shapes** — for every NEW field, config key, map, or collection:
-   name its identity/key-space. If it overlaps an existing structure's
-   identity (two collections keyed by the same id; an attribute map
-   shadowing an entity list), the plan consolidates into one entity type or
-   justifies why not. Shared IDENTITY consolidates; shared TOPIC stays
-   separate (the `[pet-names]` lesson). A JOIN of two existing collections
-   names its join key and verifies it against the real production constants
-   IN THE PLAN — the plan that ASSUMED registry id == install-target name
-   shipped a CRITICAL caught only at review (R0613-16).
+1. **Data shapes** — for every NEW field, config key, map, or collection,
+   answer REVIEW.md's design-lens data-shape rule IN THE PLAN — the plan that
+   ASSUMED registry id == install-target name shipped a CRITICAL caught only
+   at review (#283).
 2. **Consumers** — every new field, parameter, or asset names the consumer
    this same change wires up. A plan line "add X" without "Y reads X at Z"
-   is the unwired-addition smell (CONTRIBUTING pitfall 5) at its cheapest
+   is REVIEW.md's unwired-addition sweep at its cheapest
    fix point — `_snap_prev` shipped unconsumed and defeated its own PR.
 3. **Siblings** — every guard, fix, or NEW SURFACE enumerates its sibling
    paths up front (Unix/Windows arms, twin call sites, parallel manifests —
    for a config key: the docs and manifest twins) and says which get the
-   same treatment in this change (pitfall 2's in-diff form).
+   same treatment in this change (REVIEW.md's siblings sweep, in-diff).
 3b. **Reachability** — a guard protects an OUTCOME, so enumerate every path
    that reaches that outcome, not just the one the bug arrived through, and
    give each a disposition (guarded here / already guarded at X / genuinely
@@ -56,22 +51,19 @@ Every section gets an answer; "n/a" counts only with a reason.
    timing-dependent (boot-then-write vs write-then-boot): they are reachability
    in the time axis and the verification plan must exercise each.
 4. **Untrusted input** — if the change touches transcript/hook/file/config
-   input, name the decode boundary where it is sanitized (pitfall 3), and
-   whether any user-visible truncation is char-safe (pitfall 1). A
-   denylist's enumeration cites the platform's DOCUMENTED set, never memory
-   (pitfall 6).
+   input, answer REVIEW.md's decode-boundary, char-safe-truncation and
+   denylist traps.
 5. **Tests** — name the failing test each implementation step starts with
    (the repo is TDD-first), then the refusal paths those tests will pin —
-   BOTH sides of every window/threshold, with offsets derived from the
-   constant under test (pitfall 4).
+   as REVIEW.md's test-teeth sweep requires.
 6. **Sharp edges** — read the comments on every item this design touches (doc
    comments and the ones on the lines they govern) and list the constraints they
    state (tests/, Raycast and site keep theirs in the guide). They are the
    documented hazards exactly where you are about to work: what looks like a bug
    and is deliberate.
-7. **Verification plan** — the gates to run, and any watch-it requirement:
-   motion/pose changes render an animation and WATCH it; sprite changes run
-   the `beautify-decoration` loop. Verification steps are blocking plan
+7. **Verification plan** — the gates to run, every REVIEW.md escalation row
+   marked local that the change matches, and the `beautify-decoration` loop
+   for sprite changes. Verification steps are blocking plan
    items, not checkboxes — PR #61 shipped five walk regressions behind an
    unchecked "live run" checkbox. Name the CI-ONLY gates the change can red
    (`docs/CONTRIBUTING.md#ci-gates` lists them): `just preflight full` is blind to all of them, so "preflight green"
@@ -96,8 +88,8 @@ Every section gets an answer; "n/a" counts only with a reason.
 ## The contract with review
 
 The plan's answers BECOME the review's change-specific checklist: put the
-section answers (or the claim list) in the PR body — that is where lens 1's
-slot is filled from; a plan that exists only in the planning session closes
+section answers (or the claim list) in the PR body — that is where the correctness
+lens's slot is filled from; a plan that exists only in the planning session closes
 no loop. A review finding the plan never named is a measured failure of the
 plan stage, not just a bug in the code: the orchestrator records it as a
 `plan-miss:` line in the review-round commit message, so the planning brief

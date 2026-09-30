@@ -15,19 +15,21 @@ use wasm_bindgen::prelude::*;
 
 use pixtuoid_core::source::daemon::apply_presence;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::state::reducer::Reducer;
 use pixtuoid_core::state::SceneState;
+use pixtuoid_core::state::reducer::Reducer;
 use pixtuoid_core::{AgentEvent, AgentId, Transport};
 
 use crate::script::{
-    hero_gateway, hero_script, hire_beats, lobster_beats, Beat, PresenceBeat, LOOP_MS,
+    Beat, LOOP_MS, PresenceBeat, hero_gateway, hero_script, hire_beats, lobster_beats,
 };
 
 use pixtuoid_scene::audio::OneShotPool;
-use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
-use pixtuoid_scene::floor::{floor_capacity, FloorMeta, FloorSession, FrameInputs};
-use pixtuoid_scene::layout::{Size, CHARACTER_SPRITE_W};
-use pixtuoid_scene::theme::{Theme, ALL_THEMES};
+use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
+use pixtuoid_scene::floor::{
+    FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs, floor_capacity,
+};
+use pixtuoid_scene::layout::{CHARACTER_SPRITE_W, Size};
+use pixtuoid_scene::theme::{ALL_THEMES, Theme};
 
 /// A visitor hire's one-shot event, queued OUTSIDE the loop machinery so a
 /// hire's lifecycle never replays on wrap.
@@ -608,14 +610,15 @@ impl Office {
             ..FloorMeta::for_floor(0, 1)
         };
         self.session.render(FrameInputs {
-            scene: &self.scene,
-            pack: &self.pack,
+            world: FloorInputs {
+                scene: &self.scene,
+                pack: &self.pack,
+                now,
+                floor: floor_meta,
+                pets: PetInputs::default(),
+            },
             theme: self.theme,
-            now,
             size: Size { w: buf_w, h: buf_h },
-            floor_meta,
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         });
     }

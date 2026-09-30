@@ -4,10 +4,10 @@
 //! decisions — which protocol, which cell — are pure and tested; only
 //! [`probe`] touches the terminal.
 
+use ratatui_image::picker::ProtocolType;
 use ratatui_image::picker::cap_parser::QueryStdioOptions;
 #[cfg(any(unix, test))]
 use ratatui_image::picker::cap_parser::{Parser, Response};
-use ratatui_image::picker::ProtocolType;
 
 use super::{CellSize, Detected, ImageProtocol, Probe};
 
@@ -32,15 +32,18 @@ struct EnvHints {
 impl EnvHints {
     #[cfg(unix)]
     fn read() -> Self {
-        let var = |name| std::env::var(name).ok().filter(|v: &String| !v.is_empty());
+        let var = |name| pixtuoid_core::platform::text_env(name).filter(|v| !v.is_empty());
+        // Presence only, and `WEZTERM_EXECUTABLE`/`TMUX` hold paths: a non-UTF-8 value
+        // is still a set marker.
+        let set = |name| std::env::var_os(name).is_some_and(|v| !v.is_empty());
         Self {
             term: var("TERM"),
             term_program: var("TERM_PROGRAM"),
             lc_terminal: var("LC_TERMINAL"),
-            wezterm: var("WEZTERM_EXECUTABLE").is_some(),
-            konsole: var("KONSOLE_VERSION").is_some(),
-            iterm_session: var("ITERM_SESSION_ID").is_some(),
-            tmux_client: var("TMUX").is_some(),
+            wezterm: set("WEZTERM_EXECUTABLE"),
+            konsole: set("KONSOLE_VERSION"),
+            iterm_session: set("ITERM_SESSION_ID"),
+            tmux_client: set("TMUX"),
         }
     }
 
@@ -273,8 +276,8 @@ pub(crate) fn probe(ask: bool) -> Probe {
             h: font.height,
         }),
         tmux: in_tmux(
-            std::env::var("TERM").ok().as_deref(),
-            std::env::var("TERM_PROGRAM").ok().as_deref(),
+            pixtuoid_core::platform::text_env("TERM").as_deref(),
+            pixtuoid_core::platform::text_env("TERM_PROGRAM").as_deref(),
         ),
     })
 }

@@ -37,6 +37,10 @@ pub fn path_env_trimmed(name: &str) -> Option<PathBuf> {
     }
 }
 
+/// A TEXT-valued env var (a location is [`path_env`]; `env::var` is banned by `clippy.toml`).
+pub fn text_env(name: &str) -> Option<String> {
+    std::env::var_os(name)?.into_string().ok()
+}
 /// Whitespace test that never rejects a non-UTF-8 value: the lossy form is used
 /// ONLY for the emptiness question, never as the value, and its replacement
 /// chars are not whitespace — so ill-formed bytes read as present, not blank.
@@ -236,25 +240,12 @@ mod tests {
         use std::ffi::OsString;
         use std::os::unix::ffi::OsStringExt;
 
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var_os("HOME");
-        let saved_up = std::env::var_os("USERPROFILE");
-        std::env::remove_var("USERPROFILE");
-
         // 0xFF is never valid UTF-8, and is a legal byte in a Unix path.
         let bad = OsString::from_vec(b"/tmp/pixtuoid-caf\xFF".to_vec());
-        std::env::set_var("HOME", &bad);
-        let got = user_home_opt();
-
-        match saved {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
-        if let Some(v) = saved_up {
-            std::env::set_var("USERPROFILE", v);
-        }
+        let got = temp_env::with_vars(
+            [("USERPROFILE", None), ("HOME", Some(bad.as_os_str()))],
+            user_home_opt,
+        );
 
         assert_eq!(
             got,
@@ -268,35 +259,27 @@ mod tests {
     /// that already went through here.
     #[test]
     fn path_env_filters_blanks_and_the_trimmed_twin_strips() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
         const K: &str = "PIXTUOID_PATH_ENV_TEST";
-        let saved = std::env::var_os(K);
 
-        std::env::remove_var(K);
-        assert_eq!(path_env(K), None, "unset");
+        temp_env::with_var_unset(K, || assert_eq!(path_env(K), None, "unset"));
         for blank in ["", "   ", "\t \n"] {
-            std::env::set_var(K, blank);
-            assert_eq!(path_env(K), None, "{blank:?} counts as unset");
-            assert_eq!(path_env_trimmed(K), None, "{blank:?} counts as unset");
+            temp_env::with_var(K, Some(blank), || {
+                assert_eq!(path_env(K), None, "{blank:?} counts as unset");
+                assert_eq!(path_env_trimmed(K), None, "{blank:?} counts as unset");
+            });
         }
-        std::env::set_var(K, " /srv/hm ");
-        assert_eq!(
-            path_env(K),
-            Some(PathBuf::from(" /srv/hm ")),
-            "the plain read TESTS the padding, it does not strip it"
-        );
-        assert_eq!(
-            path_env_trimmed(K),
-            Some(PathBuf::from("/srv/hm")),
-            "the trimming twin mirrors hermes's `os.environ.get(K, '').strip()`"
-        );
-
-        match saved {
-            Some(v) => std::env::set_var(K, v),
-            None => std::env::remove_var(K),
-        }
+        temp_env::with_var(K, Some(" /srv/hm "), || {
+            assert_eq!(
+                path_env(K),
+                Some(PathBuf::from(" /srv/hm ")),
+                "the plain read TESTS the padding, it does not strip it"
+            );
+            assert_eq!(
+                path_env_trimmed(K),
+                Some(PathBuf::from("/srv/hm")),
+                "the trimming twin mirrors hermes's `os.environ.get(K, '').strip()`"
+            );
+        });
     }
 
     /// The whole point of reading as bytes: an ill-formed value survives BOTH
@@ -308,25 +291,17 @@ mod tests {
         use std::ffi::OsString;
         use std::os::unix::ffi::OsStringExt;
 
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
         const K: &str = "PIXTUOID_PATH_ENV_BYTES_TEST";
-        let saved = std::env::var_os(K);
 
         let bad = OsString::from_vec(b"/tmp/caf\xFF".to_vec());
-        std::env::set_var(K, &bad);
-        assert!(
-            std::env::var(K).is_err(),
-            "precondition: env::var is what DROPS this value"
-        );
-        assert_eq!(path_env(K), Some(PathBuf::from(&bad)));
-        assert_eq!(path_env_trimmed(K), Some(PathBuf::from(&bad)));
-
-        match saved {
-            Some(v) => std::env::set_var(K, v),
-            None => std::env::remove_var(K),
-        }
+        temp_env::with_var(K, Some(&bad), || {
+            #[expect(clippy::disallowed_methods, reason = "self-test of clippy.toml's ban")]
+            let dropped = std::env::var(K).is_err();
+            assert!(dropped, "precondition: env::var is what DROPS this value");
+            assert_eq!(text_env(K), None, "text_env keeps env::var's semantics");
+            assert_eq!(path_env(K), Some(PathBuf::from(&bad)));
+            assert_eq!(path_env_trimmed(K), Some(PathBuf::from(&bad)));
+        });
     }
 
     #[test]

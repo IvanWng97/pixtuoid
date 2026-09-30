@@ -1,10 +1,6 @@
-//! Render one frame of the CUTAWAY profile to a PNG — the first time the 2.5D
-//! work is visible rather than merely tested.
-//!
-//! It drives the real seam end to end: the real sim produces a `SimFrame`, the
-//! real layout is computed at LOGICAL size, and `render_cutaway` paints it into
-//! a buffer sized in pixels at `--scale`. Nothing here is a stand-in, so what it
-//! shows is what the profile actually does today.
+//! Render one frame of the CUTAWAY profile to a PNG, through the real seam: the
+//! real sim produces a `SimFrame`, the real layout is computed at LOGICAL size,
+//! and `render_cutaway` paints it into a buffer sized in pixels at `--scale`.
 //!
 //! Usage:
 //!   cargo run --release --example cutaway_snapshot -- <out.png> [--scale N]
@@ -15,12 +11,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use image::{Rgb as ImgRgb, RgbImage};
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::cutaway::paint::{render_cutaway, Office};
+use pixtuoid_scene::cutaway::paint::{Office, render_cutaway};
 use pixtuoid_scene::floor::{FloorMeta, FloorSession, ObservedFloor};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::render_scale::RenderScale;
@@ -172,14 +168,22 @@ fn main() -> Result<()> {
     // The real sim, at LOGICAL size — the cutaway is its second reader.
     let mut session = FloorSession::new();
     let ObservedFloor { layout, frame } = session
-        .observe(&scene, &pack, Size { w: lw, h: lh }, meta, now)
+        .observe(
+            pixtuoid_scene::floor::FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: meta,
+                pets: pixtuoid_scene::floor::PetInputs::default(),
+            },
+            Size { w: lw, h: lh },
+        )
         .ok_or_else(|| anyhow!("{lw}x{lh} does not lay out"))?;
 
     let (bw, bh) = (scale.to_buffer(lw), scale.to_buffer(lh));
     let mut buf = RgbBuffer::filled(bw, bh, theme.surface.bg_fallback);
-    // The recolor cache the classic painter uses — the cutaway blits the SAME
-    // per-agent sprites, so it needs the same cache rather than recoloring
-    // twelve characters afresh every frame.
+    // The classic painter's recolor cache: the cutaway blits the same per-agent
+    // sprites.
     let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
     let labels = render_cutaway(
         &frame,

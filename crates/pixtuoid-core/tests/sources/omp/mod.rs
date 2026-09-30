@@ -9,13 +9,13 @@
 
 use std::time::{Duration, SystemTime};
 
+use pixtuoid_core::AgentId;
 use pixtuoid_core::harness::Drive;
 use pixtuoid_core::id::normalize_path_key;
 use pixtuoid_core::source::omp::{decode_omp_line, omp_id_from_path};
 use pixtuoid_core::source::{AgentEvent, Transport};
-use pixtuoid_core::state::reducer::{Reducer, EXIT_GRACE_WINDOW};
 use pixtuoid_core::state::SceneState;
-use pixtuoid_core::AgentId;
+use pixtuoid_core::state::reducer::{EXIT_GRACE_WINDOW, Reducer};
 
 /// A raw path's session key through the decoder's own fold — the ONE way an
 /// expectation may be spelled here (a literal holds on Unix and reds only in
@@ -119,17 +119,20 @@ fn a_task_round_is_two_linked_lifecycles_under_one_pid() {
         .iter()
         .filter(|e| matches!(e, AgentEvent::SessionStart { .. }))
         .collect();
-    let [AgentEvent::SessionStart {
-        agent_id: parent,
-        session_id: parent_key,
-        parent_id: None,
-        ..
-    }, AgentEvent::SessionStart {
-        agent_id: child,
-        session_id: child_key,
-        parent_id: Some(linked),
-        ..
-    }] = starts.as_slice()
+    let [
+        AgentEvent::SessionStart {
+            agent_id: parent,
+            session_id: parent_key,
+            parent_id: None,
+            ..
+        },
+        AgentEvent::SessionStart {
+            agent_id: child,
+            session_id: child_key,
+            parent_id: Some(linked),
+            ..
+        },
+    ] = starts.as_slice()
     else {
         panic!("expected a parentless start then a linked child start: {starts:?}");
     };

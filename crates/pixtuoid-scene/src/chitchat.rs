@@ -121,7 +121,7 @@ impl ActiveChitchat {
         chat.seed = chat
             .participants
             .iter()
-            .fold(ms.wrapping_mul(0x9e37_79b9_7f4a_7c15), |acc, a| {
+            .fold(ms.wrapping_mul(crate::GOLDEN_GAMMA), |acc, a| {
                 acc.rotate_left(7) ^ a.raw()
             });
         chat
@@ -287,13 +287,13 @@ pub fn update_and_collect(
             .or_insert_with(|| ActiveChitchat::new(*venue, present.clone(), now));
         chat.set_participants(present);
 
-        if let Some((speaker_id, text)) = chat.current_bubble(now) {
-            if let Some((_, anchor)) = agents.iter().find(|(id, _)| *id == speaker_id) {
-                bubbles.push(ChitchatBubble {
-                    text,
-                    anchor: *anchor,
-                });
-            }
+        if let Some((speaker_id, text)) = chat.current_bubble(now)
+            && let Some((_, anchor)) = agents.iter().find(|(id, _)| *id == speaker_id)
+        {
+            bubbles.push(ChitchatBubble {
+                text,
+                anchor: *anchor,
+            });
         }
     }
 
@@ -439,9 +439,10 @@ mod tests {
     fn no_bubble_after_four_turns() {
         let start = base_time();
         let chat = ActiveChitchat::new(vk(0), vec![aid("/a"), aid("/b")], start);
-        assert!(chat
-            .current_bubble(start + Duration::from_millis(6_000))
-            .is_none());
+        assert!(
+            chat.current_bubble(start + Duration::from_millis(6_000))
+                .is_none()
+        );
     }
 
     #[test]

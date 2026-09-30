@@ -25,7 +25,7 @@ use winit::window::{ResizeDirection, Window, WindowId, WindowLevel};
 
 use super::offscreen::OfficeRenderer;
 use crate::config::{self, FloatingConfig};
-use pixtuoid_scene::floor::{FloorMeta, FrameInputs};
+use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FrameInputs, PetInputs};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::Theme;
 
@@ -157,15 +157,19 @@ impl FloatingApp {
         let floor_pet =
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
         let office = self.renderer.render(FrameInputs {
-            scene: &scene,
-            pack: &self.pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &self.pack,
+                now: SystemTime::now(),
+                floor: floor_meta,
+                pets: PetInputs {
+                    pet: floor_pet,
+                    // Click-to-pet needs window pointer hit-testing (deferred).
+                    petting: None,
+                },
+            },
             theme: self.theme,
-            now: SystemTime::now(),
             size: Size { w: buf_w, h: buf_h },
-            floor_meta,
-            // Click-to-pet needs window pointer hit-testing (deferred).
-            active_pet: None,
-            floor_pet,
             debug_walkable: false,
         });
         let Some(surface) = self.surface.as_mut() else {
@@ -239,10 +243,10 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // else let the OS place it. A window last closed on a now-disconnected
         // monitor would otherwise restore fully off-screen and be unrecoverable
         // (frameless + no taskbar + always-on-top → no way to drag it back).
-        if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y) {
-            if position_on_a_monitor(event_loop, x, y, self.cfg.width, self.cfg.height) {
-                attrs = attrs.with_position(PhysicalPosition::new(x, y));
-            }
+        if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y)
+            && position_on_a_monitor(event_loop, x, y, self.cfg.width, self.cfg.height)
+        {
+            attrs = attrs.with_position(PhysicalPosition::new(x, y));
         }
         #[cfg(target_os = "macos")]
         {
@@ -387,10 +391,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // sleeps and both cadences collapse to max-rate (see `super::cadence`).
         let (paint, deadline) = self.clock.poll(Instant::now(), office_idle);
         event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        if paint {
-            if let Some(window) = &self.window {
-                window.request_redraw();
-            }
+        if paint && let Some(window) = &self.window {
+            window.request_redraw();
         }
     }
 }

@@ -604,14 +604,15 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
         &mut coffee,
         &mut chitchat,
         FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 192, h: 160 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         },
     )
@@ -634,14 +635,15 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
         &mut coffee2,
         &mut chitchat2,
         FrameInputs {
-            scene: &plain,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &plain,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 192, h: 160 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         },
     )
@@ -678,14 +680,15 @@ fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
         &mut coffee,
         &mut chitchat,
         FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 8, h: 8 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         },
     );
@@ -702,14 +705,15 @@ fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
         &mut coffee,
         &mut chitchat,
         FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 160, h: 96 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         },
     );
@@ -739,14 +743,15 @@ fn floor_session_render_owns_the_dual_eviction() {
 
     let scene = SceneState::new([8; MAX_FLOORS]);
     let layout = session.render(FrameInputs {
-        scene: &scene,
-        pack: &pack,
+        world: FloorInputs {
+            scene: &scene,
+            pack: &pack,
+            now,
+            floor: FloorMeta::ground(),
+            pets: PetInputs::default(),
+        },
         theme,
-        now,
         size: Size { w: 160, h: 96 },
-        floor_meta: FloorMeta::ground(),
-        active_pet: None,
-        floor_pet: None,
         debug_walkable: false,
     });
     assert!(layout.is_some(), "a layoutable size renders");
@@ -783,14 +788,15 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
         let now = now0 + Duration::from_secs(3 * step);
         let layout = session
             .render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w: 160, h: 96 },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             })
             .expect("160x96 lays out");
@@ -818,14 +824,15 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
         "occupancy never fell back to empty — last_occupied accumulates instead of tracking the frame"
     );
     let none = session.render(FrameInputs {
-        scene: &scene,
-        pack: &pack,
+        world: FloorInputs {
+            scene: &scene,
+            pack: &pack,
+            now: now0,
+            floor: FloorMeta::ground(),
+            pets: PetInputs::default(),
+        },
         theme,
-        now: now0,
         size: Size { w: 8, h: 8 },
-        floor_meta: FloorMeta::ground(),
-        active_pet: None,
-        floor_pet: None,
         debug_walkable: false,
     });
     assert!(none.is_none());
@@ -845,11 +852,14 @@ fn floor_session_observe_advances_the_world_without_a_pixel_buffer() {
 
     let frame = session
         .observe(
-            &scene,
-            &pack,
+            crate::floor::FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: t,
+                floor: FloorMeta::ground(),
+                pets: crate::floor::PetInputs::default(),
+            },
             Size { w: 160, h: 96 },
-            FloorMeta::ground(),
-            t,
         )
         .expect("a layoutable size observes")
         .frame;
@@ -873,7 +883,16 @@ fn floor_session_observe_advances_the_world_without_a_pixel_buffer() {
 
     assert!(
         session
-            .observe(&scene, &pack, Size { w: 8, h: 8 }, FloorMeta::ground(), t)
+            .observe(
+                crate::floor::FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now: t,
+                    floor: FloorMeta::ground(),
+                    pets: crate::floor::PetInputs::default()
+                },
+                Size { w: 8, h: 8 }
+            )
             .is_none(),
         "an unlayoutable size observes nothing"
     );
@@ -888,7 +907,16 @@ fn observe_hands_back_the_layout_the_sim_stepped_on() {
     let meta = FloorMeta::ground();
     let mut session = FloorSession::new();
     let observed = session
-        .observe(&scene, &pack, size, meta, t0())
+        .observe(
+            crate::floor::FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: t0(),
+                floor: meta,
+                pets: crate::floor::PetInputs::default(),
+            },
+            size,
+        )
         .expect("a layoutable size observes");
     let stepped = session
         .floor
@@ -918,7 +946,7 @@ fn session_types_default_equals_new() {
 #[test]
 fn reset_frame_cache_clears_cached_sprites() {
     use crate::frame_cache::FrameKey;
-    use pixtuoid_core::{sprite::Frame, AgentId};
+    use pixtuoid_core::{AgentId, sprite::Frame};
 
     let mut s = FloorSession::new();
     // Prime the cache, so the assertion below distinguishes a real reset from a
@@ -1053,14 +1081,15 @@ fn the_foreground_layer_is_lit_by_the_clock() {
             &mut coffee,
             &mut chitchat,
             FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w: 192, h: 160 },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             },
         )
@@ -1309,9 +1338,11 @@ fn neon_a_painter_slower_than_a_flash_never_shows_one() {
         assert_eq!(levels, NeonLevels::EMPTY, "{ms}ms at a {shortest:?} tick");
     }
     let just_faster = shortest - Duration::from_millis(1);
-    assert!(starved_cycle(just_faster)
-        .iter()
-        .any(|(_, levels)| *levels == NeonLevels::FLASH));
+    assert!(
+        starved_cycle(just_faster)
+            .iter()
+            .any(|(_, levels)| *levels == NeonLevels::FLASH)
+    );
     let in_a_flash = in_stutter_cycle(NeonState::STUTTER_FLASHES_MS[0].0);
     assert_eq!(
         NeonState::new().tick(neon_mood(0, 0, 0), ROOM_DIMMED, in_a_flash),
@@ -1339,4 +1370,47 @@ fn neon_never_flashes_while_lit_or_while_still_coasting_down() {
     }
     assert_ne!(last, NeonLevels::FLASH);
     assert!(last.power > NeonLevels::EMPTY.power, "{last:?}");
+}
+
+/// The classic looks out from its own floor.
+#[test]
+fn the_classic_sees_the_skyline_from_its_floors_altitude() {
+    let pack = crate::embedded_pack::test_default_pack();
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let scene = make_scene(1, 8);
+    let render = |floor_meta: FloorMeta| {
+        let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
+        render_floor(
+            &mut FloorCtx::new(),
+            &mut buf,
+            &mut CoffeeState::new(),
+            &mut HashMap::new(),
+            FrameInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: floor_meta,
+                    pets: PetInputs::default(),
+                },
+                theme,
+                size: Size { w: 192, h: 160 },
+                debug_walkable: false,
+            },
+        )
+        .expect("layout");
+        buf
+    };
+    let ground = render(FloorMeta::ground());
+    let top = render(FloorMeta {
+        altitude: 1.0,
+        ..FloorMeta::ground()
+    });
+    assert!(
+        (0..ground.height())
+            .flat_map(|y| (0..ground.width()).map(move |x| (x, y)))
+            .any(|(x, y)| ground.get(x, y) != top.get(x, y)),
+        "the top floor's windows show the ground floor's skyline"
+    );
 }

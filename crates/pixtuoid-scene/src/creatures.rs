@@ -39,7 +39,7 @@ fn walkable_target(layout: &Layout, seed: u64, n: u64) -> Point {
     if w == 0 || h == 0 {
         return Point { x: 0, y: 0 };
     }
-    let mut z = seed ^ n.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    let mut z = seed ^ n.wrapping_mul(crate::GOLDEN_GAMMA);
     let mut last = Point { x: 0, y: 0 };
     for _ in 0..TARGET_TRIES {
         z = pixtuoid_core::id::splitmix64(z);
@@ -591,15 +591,14 @@ mod tests {
                         + std::time::Duration::from_millis(cycle * 40_000 + 34_000);
                     if let Some((p, _, anim, _)) =
                         pet_position(PetKind::Cat, &l, &pack, now, &[], false, seed)
+                        && !anim.contains("walk")
                     {
-                        if !anim.contains("walk") {
-                            assert!(
-                                l.is_visually_clear(p),
-                                "{w}x{h} seed {seed} cycle {cycle}: a resting cat at {p:?} \
+                        assert!(
+                            l.is_visually_clear(p),
+                            "{w}x{h} seed {seed} cycle {cycle}: a resting cat at {p:?} \
                                  is under a sprite that paints over it"
-                            );
-                            rests += 1;
-                        }
+                        );
+                        rests += 1;
                     }
                 }
             }
@@ -1031,7 +1030,7 @@ mod tests {
     #[test]
     fn an_idle_gateway_that_is_killed_still_walks_out_instead_of_vanishing() {
         use pixtuoid_core::source::daemon::{
-            apply_presence, DaemonInstanceKey, DaemonPresenceUpdate,
+            DaemonInstanceKey, DaemonPresenceUpdate, apply_presence,
         };
         use pixtuoid_core::state::{DaemonInstanceId, SceneState};
 

@@ -13,8 +13,8 @@
 use std::collections::{BTreeMap, HashSet};
 use std::time::SystemTime;
 
-use crate::state::{fsm, ActivityState, AgentSlot, SceneState};
 use crate::AgentId;
+use crate::state::{ActivityState, AgentSlot, SceneState, fsm};
 
 /// Whether [`cascade_exit`] also marks the `root` seed itself exiting — EXPLICIT
 /// at each call site, replacing the old implicit "did the caller stamp
@@ -41,10 +41,10 @@ pub(crate) fn cascade_exit(
     stamp_root: StampRoot,
     now: SystemTime,
 ) {
-    if stamp_root == StampRoot::Yes {
-        if let Some(slot) = scene.agents.get_mut(&root) {
-            fsm::mark_exiting(slot, now);
-        }
+    if stamp_root == StampRoot::Yes
+        && let Some(slot) = scene.agents.get_mut(&root)
+    {
+        fsm::mark_exiting(slot, now);
     }
     let mut visited: HashSet<AgentId> = HashSet::new();
     visited.insert(root);

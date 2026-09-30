@@ -19,37 +19,39 @@ mod windows;
 // The deep interface is `SceneLayout::{stand_point,approach_point}`; these free
 // fns stay for this crate's own synthetic-mask unit tests.
 pub(crate) use approach::{approach_point, first_reachable_on_side, stand_point};
-pub use compute::{min_layout_size, PANTRY_COUNTER_LARGE_W};
+pub use compute::{PANTRY_COUNTER_LARGE_W, min_layout_size};
 pub use decor::{
-    desk_furniture_def, desk_walk_anchor_facing, furniture_def, seated_foot_cell, ApproachSides,
-    DwellWindow, Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind,
-    DESK_APPROACH, SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
+    ApproachSides, DESK_APPROACH, DwellWindow, Facing, Furniture, FurnitureDef, PlantKind,
+    PodDecor, SEAT_RENDER_Y_OFF, WALKING_Y_OFF, WallDecor, WaypointKind, desk_furniture_def,
+    desk_walk_anchor_facing, furniture_def, seated_foot_cell,
 };
 pub(crate) use decor::{repels_plants, seated_z_key};
-pub use placement::{anchored_top_left, z_sort_row, Anchor};
+pub use placement::{Anchor, anchored_top_left, z_sort_row};
 pub use reach::ReachSet;
-pub(crate) use rooms::meeting::{coat_rack_rect_at, COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W};
+pub(crate) use rooms::meeting::{COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W, coat_rack_rect_at};
 pub(crate) use rooms::pantry::{COMPACT_COUNTER, LARGE_COUNTER};
 pub(crate) use rooms::walls::WallPiece;
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
-#[cfg(test)]
-pub(crate) use roster::{coffee_machine_cols, NEON_PANEL_H};
 pub(crate) use roster::{
-    desk_chair_top_left, desk_chair_z_key, Depth, Fixture, CLOCK, NEON_PANEL, NEON_PANEL_BORDER,
+    CLOCK, Depth, Fixture, Layer, NEON_PANEL, NEON_PANEL_BORDER, Tie, desk_chair_top_left,
+    desk_chair_z_key,
 };
 pub use roster::{
-    FixtureKind, Station, NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X,
-    NEON_PANEL_INNER_Y, NEON_PANEL_W,
+    FixtureKind, NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
+    NEON_PANEL_W, Station,
 };
-// Painter tests tile walls no `SceneLayout` has.
 #[cfg(test)]
-pub(crate) use windows::window_bays;
+pub(crate) use roster::{NEON_PANEL_H, coffee_machine_cols};
+// Painter tests tile walls no `SceneLayout` has.
 pub(crate) use windows::{
-    glass_rows, wall_trim_row, window_frame, window_rows, window_run, WindowBay, WINDOW_W,
+    WINDOW_TOP, WINDOW_W, WindowBay, door_x, glass_rows, wall_trim_row, window_frame, window_posts,
+    window_rows, window_run,
 };
+#[cfg(test)]
+pub(crate) use windows::{window_bays, window_slots};
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
-pub(crate) use coarse::{cell_walkable, snap, COARSE_CELL_SIZE, NEIGHBORS_8};
+pub(crate) use coarse::{COARSE_CELL_SIZE, NEIGHBORS_8, cell_walkable, snap};
 
 use pixtuoid_core::state::FloorLocalDeskIndex;
 use pixtuoid_core::walkable::WalkableMask;
@@ -160,7 +162,7 @@ pub struct Waypoint {
 pub type Layout = SceneLayout;
 
 /// The lounge vignette placed as one unit. Couch + floor lamp + side table
-/// share the one `lounge_fits` gate (hence non-optional here); the aquarium
+/// share one fit gate (hence non-optional here); the aquarium
 /// carries an EXTRA east-clearance gate against the elevator door, so it
 /// stays `Option`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,6 +302,8 @@ pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 /// side cabinets included) and the overhang rides the aisle, so every band-EDGE
 /// clamp reads `DESK_GROUND_W`, not `DESK_W` (the #549 2px-overflow drift).
 pub const DESK_W: u16 = 10;
+/// Glass columns offset from the desk sprite's left edge.
+pub(crate) const SCREEN_GLASS_COLS: std::ops::RangeInclusive<u16> = 4..=9;
 /// Rows of desk SURFACE below `desk.y`; both desk sprites are cut to it.
 pub(crate) const DESK_SURFACE_ROWS: u16 = 5;
 pub(crate) const DESK_FRONT_ROWS: u16 = 1;
@@ -335,6 +339,27 @@ pub const CHARACTER_SPRITE_H: u16 = 12;
 pub const ELEVATOR_W: u16 = 16;
 /// Elevator-door sprite height in buffer px — the door's z-sort anchor row.
 pub const ELEVATOR_H: u16 = 14;
+
+/// The buffer rows a half-block terminal cell shows.
+const CELL_ROWS: u16 = 2;
+
+/// The rows over a door whose top row is `door_y` that the terminal's floor
+/// indicator writes its text across: the whole cell above the door's.
+pub fn floor_indicator_rows(door_y: u16) -> std::ops::Range<u16> {
+    let top = (door_y / CELL_ROWS).saturating_sub(1) * CELL_ROWS;
+    top..top + CELL_ROWS
+}
+
+/// Where the exit sign hangs over a door at `door`: centred above its floor
+/// indicator, or `None` where that would climb above the windows' head.
+pub(crate) fn exit_sign_pos(door: Point) -> Option<Point> {
+    let sign = furniture_def(WallDecor::ExitSign.furniture()).visual;
+    let y = floor_indicator_rows(door.y).start.checked_sub(sign.h)?;
+    (y >= WINDOW_TOP).then_some(Point {
+        x: door.x + (ELEVATOR_W - sign.w) / 2,
+        y,
+    })
+}
 /// NOT a cap — production layouts fill the buffer's physical space
 /// (`max_desks: None`). This is the stable "one classic office worth of desks"
 /// reference, and the `snapshot` example that renders the docs/CI media

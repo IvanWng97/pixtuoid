@@ -2,7 +2,7 @@ use super::*;
 use crate::atmosphere::Look;
 use crate::layout::{window_bays, window_run};
 use crate::lighting::SPILL_DEPTH;
-use crate::sky::{hour_is_day, set_weather_override, ForcedWeather};
+use crate::sky::{ForcedWeather, hour_is_day, set_weather_override};
 use std::time::SystemTime;
 
 #[test]
@@ -43,8 +43,6 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let render_lum = |flash: f32| -> u64 {
         let sky = Sky::at_with(now, Weather::Storm).with_flash(flash);
-        let look = Look::resolve(&sky, theme);
-        let sky_row = sky_rows(30, &look);
         let moment = &Moment::resolve(sky, theme, 0.0, now);
         let city = CityStrip::draw(
             &pack(),
@@ -68,8 +66,7 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
             GlassView {
                 city: &city,
                 run_x0: 0,
-                sky_row: &sky_row,
-                disc: None,
+                sky: &crate::celestial::SkyView::of(moment, 40, 40, theme),
             },
         );
         let mut sum = 0u64;
@@ -266,7 +263,7 @@ fn rain_hides_the_disc_like_overcast() {
 
 #[test]
 fn thick_cloud_hides_the_disc_uniformly() {
-    let min_disc_vis = celestial::MIN_DISC_VIS;
+    let min_disc_vis = crate::celestial::MIN_DISC_VIS;
     let overcast = crate::sky::atmo(Weather::Overcast).disc;
     let rain = crate::sky::atmo(Weather::Rain).disc;
     let storm = crate::sky::atmo(Weather::Storm).disc;
@@ -285,7 +282,7 @@ fn thick_cloud_hides_the_disc_uniformly() {
 #[test]
 fn disc_clips_above_the_glass_at_the_arc_apex() {
     // `top_wall_h` is CONSTANT across both renders so the only difference is the
-    // sun's altitude: at the apex `compute_disc`'s `cy` bracket goes negative
+    // sun's altitude: at the apex `Disc::of`'s `cy` bracket goes negative
     // whatever the wall height, so the apex ALWAYS clips by construction.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
@@ -342,10 +339,10 @@ fn disc_lands_in_a_window_never_on_the_wall_margin() {
 
 #[test]
 fn disc_sweeps_across_a_single_window_buffer() {
-    // buf_w=40 paints EXACTLY one window (too narrow for a second pane) — the
+    // buf_w=64 paints EXACTLY one window (too narrow for a second pane) — the
     // degenerate case where a center-to-center azimuth mapping has zero span and
     // freezes `cx` on the mullion.
-    let buf_w = 40u16;
+    let buf_w = 64u16;
     let top_wall_h = 40u16;
     let morning = render_office_at(7, Weather::Clear, buf_w, top_wall_h);
     let evening = render_office_at(18, Weather::Clear, buf_w, top_wall_h);
@@ -453,15 +450,13 @@ fn crescent_moon_leaves_the_dark_limb_unlit() {
     // 21:00 Clear puts the disc in-glass at FULL atmo visibility, so every
     // disc-interior pixel is EXACTLY `moon_core` or EXACTLY `MOON_SHADOW` — no
     // partial blend to muddy the count. (cx, cy, r) depend only on the hour, not
-    // the date, so one `compute_disc` call gives the bounding box for every day.
+    // the date, so one `Disc::of` call gives the bounding box for every day.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
-    let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let geom = compute_disc(
+    let geom = crate::celestial::Disc::of(
         &Sky::at_with(crate::localclock::at_hour(21), Weather::Clear),
         buf_w,
         top_wall_h,
-        theme,
     )
     .expect("moon disc visible at 21:00 under Clear");
 
@@ -489,7 +484,7 @@ fn crescent_moon_leaves_the_dark_limb_unlit() {
                     continue; // outside the disc proper
                 }
                 let p = buf.get(px as u16, py as u16);
-                if p == MOON_SHADOW {
+                if p == crate::celestial::MOON_SHADOW {
                     dark += 1;
                 } else if p.b > 200 && p.b > p.r.saturating_add(10) {
                     bright += 1;
@@ -534,11 +529,10 @@ fn a_waning_moon_lights_its_left_limb() {
     let buf_w = 96u16;
     let top_wall_h = 40u16;
     let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let geom = compute_disc(
+    let geom = crate::celestial::Disc::of(
         &Sky::at_with(crate::localclock::at_hour(21), Weather::Clear),
         buf_w,
         top_wall_h,
-        theme,
     )
     .expect("moon disc visible at 21:00 under Clear");
     // Lit disc pixels left and right of the disc's centre column.
@@ -623,7 +617,7 @@ fn moon_glow_dims_at_new_moon() {
 /// Mean channel value over every PAINTED window pane's glass interior. The
 /// day-over-night invariant is asserted on THIS, not on
 /// [`Look::darkness`]: the weather veils are painted onto the glass
-/// AFTER the light model produced `sky_row`, so a `darkness`-only assertion is
+/// AFTER the light model resolved the sky, so a `darkness`-only assertion is
 /// structurally blind to them.
 fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {
     let rows = window_rows(top_wall_h);
@@ -924,7 +918,7 @@ fn lightning_flash_matches_the_per_pixel_blend_reference() {
 }
 
 /// Light through a window lands across the room from the sun. The disc
-/// (`compute_disc`), the wall spot (`paint_sun_spot`) and the spill
+/// (`Disc::of`), the wall spot (`paint_sun_spot`) and the spill
 /// (`Light::Spill`) each map the one azimuth to a side on their own,
 /// so this is the only check that sees them disagree, read off the pixels each
 /// paints.
@@ -953,7 +947,7 @@ fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
     for hour in [6, 19] {
         let sky = Sky::at_with(crate::localclock::at_hour(hour), Weather::Clear);
         let look = Look::resolve(&sky, theme);
-        let disc = compute_disc(&sky, BUF_W, TOP_WALL_H, theme).expect("a clear low sun");
+        let disc = crate::celestial::Disc::of(&sky, BUF_W, TOP_WALL_H).expect("a clear low sun");
         let disc_side = (disc.cx - mid).signum();
 
         let mut buf = RgbBuffer::filled(BUF_W, BUF_H, FILL);
@@ -1039,4 +1033,139 @@ fn spill(x: u16, slant: f32) -> crate::lighting::Emitter {
 fn pack() -> Pack {
     crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
         .expect("the embedded pack loads")
+}
+
+/// Every pane shows its own stretch of the one city, read from the run's west
+/// end.
+#[test]
+fn a_window_shows_the_city_strip_from_its_own_column() {
+    // Overcast noon: no stars and no disc, which key on the screen column, not
+    // the city's; the sky's dither does too, so the far pane sits a whole
+    // number of its periods east.
+    let now = crate::localclock::on_day(15, 12);
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let moment = &Moment::resolve(Sky::at_with(now, Weather::Overcast), theme, 0.0, now);
+    let sky = crate::celestial::SkyView::of(moment, WINDOW_W * 3, 40, theme);
+    let dx = 7;
+    let far = (WINDOW_W + dx).next_multiple_of(crate::dither::PERIOD);
+    let city = CityStrip::draw(
+        &pack(),
+        (WINDOW_W * 2, 28),
+        moment,
+        theme,
+        std::num::NonZeroU16::MIN,
+    );
+    let pane = |x: u16, run_x0: u16| {
+        let mut buf = RgbBuffer::filled(WINDOW_W * 3, 30, Rgb { r: 8, g: 8, b: 10 });
+        paint_floor_to_ceiling_window(
+            &mut buf,
+            Bounds {
+                x,
+                y: 0,
+                width: WINDOW_W,
+                height: 30,
+            },
+            theme.surface.window_frame,
+            0,
+            moment,
+            GlassView {
+                city: &city,
+                run_x0,
+                sky: &sky,
+            },
+        );
+        (0..30u16)
+            .flat_map(|y| (0..WINDOW_W).map(move |c| (c, y)))
+            .map(|(c, y)| buf.get(x + c, y))
+            .collect::<Vec<_>>()
+    };
+    let (west, east) = (pane(0, 0), pane(far, far));
+    assert_eq!(west, east, "a pane shows the strip from the run's west end");
+    assert_ne!(
+        pane(dx, 0),
+        west,
+        "a pane {dx} columns east shows a different stretch of city"
+    );
+}
+
+#[test]
+fn the_wall_between_two_windows_is_one_frame_post() {
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let now = crate::localclock::on_day(1, 12);
+    let (buf_w, buf_h, top_wall_h) = (160u16, 96u16, 24u16);
+    let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 9, g: 9, b: 9 });
+    paint_floor_and_walls(
+        &mut BaseFillCache::new(),
+        &mut buf,
+        top_wall_h,
+        window_bays(buf_w, None),
+        &Moment::resolve(Sky::at(now), theme, 0.0, now),
+        &pack(),
+        theme,
+    );
+    let mut posts = 0;
+    for post in crate::layout::window_posts(buf_w) {
+        posts += 1;
+        for x in post.clone() {
+            for y in window_rows(top_wall_h) {
+                assert_eq!(
+                    buf.get(x, y),
+                    theme.surface.window_frame,
+                    "post {post:?} at ({x}, {y})"
+                );
+            }
+        }
+    }
+    assert!(posts > 0, "this wall has posts");
+}
+
+#[test]
+fn a_rain_streak_steps_down_through_the_falloff_tones() {
+    const ALPHA_BASE: f32 = 0.35;
+    let white = Rgb {
+        r: 255,
+        g: 255,
+        b: 255,
+    };
+    let black = Rgb { r: 0, g: 0, b: 0 };
+    let spec = StreakSpec {
+        count: 8,
+        seed_mult: 7,
+        sx_mult: 0x9e37_79b9,
+        speed_base: 60,
+        speed_span: 50,
+        color: white,
+        particle: Particle::Streak {
+            len_base: 6,
+            len_mod: 3,
+            alpha_base: ALPHA_BASE,
+            alpha_falloff: 0.3,
+            drift: false,
+        },
+    };
+    let tones: Vec<u8> = (1..=crate::dither::FALLOFF_TONES)
+        .map(|k| {
+            let alpha = ALPHA_BASE * f32::from(k) / f32::from(crate::dither::FALLOFF_TONES);
+            blend(0, 255, alpha)
+        })
+        .collect();
+    let mut buf = RgbBuffer::filled(20, 30, black);
+    let glass = GlassRect {
+        x0: 1,
+        y0: 1,
+        w: 18,
+        h: 28,
+    };
+    paint_streaks(&mut buf, &spec, 0, glass, 12_345);
+    let touched: Vec<u8> = buf
+        .as_slice()
+        .iter()
+        .filter(|&&p| p != black)
+        .map(|p| p.r)
+        .collect();
+    assert!(!touched.is_empty(), "the streaks painted");
+    assert!(
+        touched.iter().all(|r| tones.contains(r)),
+        "{touched:?} vs {tones:?}"
+    );
 }

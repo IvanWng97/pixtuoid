@@ -4,7 +4,7 @@
 
 use std::time::SystemTime;
 
-use crate::layout::{Anchor, Size, SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
+use crate::layout::{Anchor, Layout, SEAT_RENDER_Y_OFF, Size, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
 use super::epoch_ms;
@@ -50,11 +50,7 @@ fn breath_offset_y(agent_id: pixtuoid_core::AgentId, now: SystemTime) -> u16 {
     const CYCLE_MS: u64 = 4500;
     let offset_ms = agent_id.raw() % CYCLE_MS;
     let phase = elapsed_ms.wrapping_add(offset_ms) % CYCLE_MS;
-    if phase < CYCLE_MS / 2 {
-        0
-    } else {
-        1
-    }
+    if phase < CYCLE_MS / 2 { 0 } else { 1 }
 }
 
 pub(super) fn with_breath(
@@ -82,8 +78,7 @@ pub(super) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
 /// Nudge a sprite so the whole frame lands inside the canvas, answering in the
 /// SAME anchor space `pos` came in.
 ///
-/// Lives at PAINT because invariant #6 runs one way: sprite size never moves a
-/// sim position.
+/// It moves a figure's paint anchor, never its sim position (invariant #6).
 pub(crate) fn keep_sprite_on_canvas(anchor: Anchor, pos: Point, size: Size, buf: Size) -> Point {
     match anchor {
         // `min` before `max`: on a buffer narrower than the sprite the lower
@@ -104,6 +99,16 @@ pub(crate) fn keep_sprite_on_canvas(anchor: Anchor, pos: Point, size: Size, buf:
             y: pos.y.min(buf.h.saturating_sub(size.h)),
         },
     }
+}
+
+/// `pos`, in `anchor` space, moved so a `size` frame lands on `layout`'s canvas:
+/// the one fit every figure's placement takes.
+pub(crate) fn on_canvas(layout: &Layout, anchor: Anchor, pos: Point, size: Size) -> Point {
+    let canvas = Size {
+        w: layout.buf_w,
+        h: layout.buf_h,
+    };
+    keep_sprite_on_canvas(anchor, pos, size, canvas)
 }
 
 /// How far a later arrival steps aside along x so two agents at one
@@ -176,16 +181,13 @@ pub fn character_anchor(
             from, to, t_x1000, ..
         } => walking_anchor(walking_position(from, to, t_x1000), w),
     };
-    Some(keep_sprite_on_canvas(
+    Some(on_canvas(
+        layout,
         Anchor::TopLeft,
         anchor,
         Size {
             w,
             h: crate::layout::CHARACTER_SPRITE_H,
-        },
-        Size {
-            w: layout.buf_w,
-            h: layout.buf_h,
         },
     ))
 }
@@ -233,24 +235,24 @@ pub(super) fn compute_door_frame_idx(
 
     let mut max_frame: usize = 0;
     for a in agents {
-        if a.exiting_at.is_none() {
-            if let Ok(d) = now.duration_since(a.created_at) {
-                let ms = d.as_millis() as u64;
-                if ms < entry_window_ms {
-                    max_frame = max_frame.max(frame_for_progress(ms, entry_window_ms));
-                }
+        if a.exiting_at.is_none()
+            && let Ok(d) = now.duration_since(a.created_at)
+        {
+            let ms = d.as_millis() as u64;
+            if ms < entry_window_ms {
+                max_frame = max_frame.max(frame_for_progress(ms, entry_window_ms));
             }
         }
-        if let Some(exit_at) = a.exiting_at {
-            if let Ok(d) = now.duration_since(exit_at) {
-                let ms = d.as_millis() as u64;
-                // The same window the reducer uses to GC exiting slots, so the
-                // door closes right as the agent's slot disappears.
-                let exit_window_ms =
-                    pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW.as_millis() as u64;
-                if ms < exit_window_ms {
-                    max_frame = max_frame.max(frame_for_progress(ms, exit_window_ms));
-                }
+        if let Some(exit_at) = a.exiting_at
+            && let Ok(d) = now.duration_since(exit_at)
+        {
+            let ms = d.as_millis() as u64;
+            // The same window the reducer uses to GC exiting slots, so the
+            // door closes right as the agent's slot disappears.
+            let exit_window_ms =
+                pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW.as_millis() as u64;
+            if ms < exit_window_ms {
+                max_frame = max_frame.max(frame_for_progress(ms, exit_window_ms));
             }
         }
     }

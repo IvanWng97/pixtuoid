@@ -240,66 +240,55 @@ fn resolve_pets_collects_unknown_kind_warnings() {
     assert!(w[2].contains("no pets will appear"), "got: {w:?}");
 }
 
-// config_path reads process-global env, so save+restore both vars and drive every
-// branch in ONE test; TEST_ENV_LOCK serializes against the binary's other
-// env-mutating tests so they can't race under plain `cargo test`.
 #[test]
 fn config_path_xdg_home_and_relative_branches() {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
-    let saved_home = std::env::var_os("HOME");
-    let saved_userprofile = std::env::var_os("USERPROFILE");
-
-    // Clear USERPROFILE for the whole test: on Windows it outranks HOME in
-    // user_home(), so both the HOME arm and the relative-fallback arm need it
-    // absent to reach their branches.
-    std::env::remove_var("USERPROFILE");
-
     // A leading-slash path is not absolute on Windows (no drive prefix).
     let abs_xdg = if cfg!(windows) {
         "C:/xdg/base"
     } else {
         "/xdg/base"
     };
-    std::env::set_var("XDG_CONFIG_HOME", abs_xdg);
-    std::env::set_var("HOME", "/home/u");
-    assert_eq!(
-        config_path(),
-        PathBuf::from(abs_xdg).join("pixtuoid").join("config.toml")
-    );
 
-    for invalid in ["", "   ", "rel/xdg"] {
-        std::env::set_var("XDG_CONFIG_HOME", invalid);
-        assert_eq!(
-            config_path(),
-            PathBuf::from("/home/u/.config/pixtuoid/config.toml"),
-            "invalid XDG_CONFIG_HOME {invalid:?} must fall to $HOME/.config"
+    // Clear USERPROFILE for the whole test: on Windows it outranks HOME in
+    // user_home(), so both the HOME arm and the relative-fallback arm need it
+    // absent to reach their branches.
+    temp_env::with_var_unset("USERPROFILE", || {
+        temp_env::with_vars(
+            [
+                ("XDG_CONFIG_HOME", Some(abs_xdg)),
+                ("HOME", Some("/home/u")),
+            ],
+            || {
+                assert_eq!(
+                    config_path(),
+                    PathBuf::from(abs_xdg).join("pixtuoid").join("config.toml")
+                );
+            },
         );
-    }
 
-    std::env::remove_var("XDG_CONFIG_HOME");
-    assert_eq!(
-        config_path(),
-        PathBuf::from("/home/u/.config/pixtuoid/config.toml")
-    );
+        temp_env::with_var("HOME", Some("/home/u"), || {
+            for invalid in ["", "   ", "rel/xdg"] {
+                temp_env::with_var("XDG_CONFIG_HOME", Some(invalid), || {
+                    assert_eq!(
+                        config_path(),
+                        PathBuf::from("/home/u/.config/pixtuoid/config.toml"),
+                        "invalid XDG_CONFIG_HOME {invalid:?} must fall to $HOME/.config"
+                    );
+                });
+            }
 
-    std::env::remove_var("HOME");
-    assert_eq!(config_path(), PathBuf::from(".config/pixtuoid/config.toml"));
+            temp_env::with_var_unset("XDG_CONFIG_HOME", || {
+                assert_eq!(
+                    config_path(),
+                    PathBuf::from("/home/u/.config/pixtuoid/config.toml")
+                );
+            });
+        });
 
-    match saved_xdg {
-        Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-        None => std::env::remove_var("XDG_CONFIG_HOME"),
-    }
-    match saved_home {
-        Some(v) => std::env::set_var("HOME", v),
-        None => std::env::remove_var("HOME"),
-    }
-    match saved_userprofile {
-        Some(v) => std::env::set_var("USERPROFILE", v),
-        None => std::env::remove_var("USERPROFILE"),
-    }
+        temp_env::with_vars_unset(["XDG_CONFIG_HOME", "HOME"], || {
+            assert_eq!(config_path(), PathBuf::from(".config/pixtuoid/config.toml"));
+        });
+    });
 }
 
 #[test]
@@ -556,24 +545,15 @@ fn a_named_pack_outranks_the_users_own_which_outranks_the_bundled_one() {
     assert_eq!(pack_source(&none, None, None), PackSource::Bundled);
 }
 
-// Reads process-global env, so it holds TEST_ENV_LOCK like
-// `config_path_xdg_home_and_relative_branches`.
 #[test]
 fn resolve_pack_source_finds_the_users_pack_under_xdg_config_home() {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
     let base = tempfile::TempDir::new().expect("tempdir");
     let sprites = base.path().join("pixtuoid").join("sprites");
     std::fs::create_dir_all(&sprites).expect("mkdir sprites");
     std::fs::write(sprites.join("pack.toml"), b"").expect("write pack.toml");
-    std::env::set_var("XDG_CONFIG_HOME", base.path());
-    let found = resolve_pack_source(&AppConfig::default(), None);
-    match saved_xdg {
-        Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-        None => std::env::remove_var("XDG_CONFIG_HOME"),
-    }
+    let found = temp_env::with_var("XDG_CONFIG_HOME", Some(base.path()), || {
+        resolve_pack_source(&AppConfig::default(), None)
+    });
     assert_eq!(
         found,
         pixtuoid_scene::embedded_pack::PackSource::Discovered(sprites)
@@ -1021,9 +1001,11 @@ fn floating_config_defaults_and_explicit_roundtrip() {
         (480, 300, Some(10), Some(20))
     );
     assert!((f.opacity - 0.8).abs() < 1e-6);
-    assert!(!toml::to_string(&AppConfig::default())
-        .unwrap()
-        .contains("[floating]"));
+    assert!(
+        !toml::to_string(&AppConfig::default())
+            .unwrap()
+            .contains("[floating]")
+    );
 }
 
 #[test]

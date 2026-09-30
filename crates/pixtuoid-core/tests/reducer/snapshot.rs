@@ -6,10 +6,10 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use pixtuoid_core::source::{AgentEvent, ToolDetail, Transport};
-use pixtuoid_core::state::reducer::Reducer;
-use pixtuoid_core::state::SceneState;
 use pixtuoid_core::AgentId;
+use pixtuoid_core::source::{AgentEvent, ToolDetail, Transport};
+use pixtuoid_core::state::SceneState;
+use pixtuoid_core::state::reducer::Reducer;
 
 /// Fixed wall-clock so the snapshot's `SystemTime` fields are deterministic.
 fn at(secs: u64) -> SystemTime {

@@ -9,28 +9,28 @@ mod pure;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
-use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::AgentId;
+use pixtuoid_core::state::AgentSlot;
 
 use crate::motion::{
-    advance_wander, snapshot_leg_profile, walking_position, LegPlan, MotionState, Settle, WalkLeg,
-    WalkPathSnapshot, WanderKind, WanderPhase,
+    LegPlan, MotionState, Settle, WalkLeg, WalkPathSnapshot, WanderKind, WanderPhase,
+    advance_wander, snapshot_leg_profile, walking_position,
 };
-use crate::physics::{walk_arrived, walk_progress, WalkIntent, WalkProfile};
+use crate::physics::{WalkIntent, WalkProfile, walk_arrived, walk_progress};
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 pub use pure::{
-    aimless_wander_seed, derive, derive_state_only, dwell_ms, est_wander_cycle_ms,
-    is_aimless_cycle, personality_for, pick_aimless_dest, seated_dwell_ms, stale_resume_gap_ms,
-    takes_trip, walking_frame, waypoint_index_for_cycle, Personality, Pose, ENTRY_ANIMATION_MS,
-    STALE_RESUME_GAP_BASE_MS, STALE_RESUME_GAP_RANGE_MS, THINKING_WINDOW_SECS, TYPING_FRAMES,
-    TYPING_FRAME_MS, WALKING_FRAMES, WALKING_FRAME_MS, WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS,
+    ENTRY_ANIMATION_MS, Personality, Pose, STALE_RESUME_GAP_BASE_MS, STALE_RESUME_GAP_RANGE_MS,
+    THINKING_WINDOW_SECS, TYPING_FRAME_MS, TYPING_FRAMES, WALKING_FRAME_MS, WALKING_FRAMES,
+    WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS, aimless_wander_seed, derive, derive_state_only,
+    dwell_ms, est_wander_cycle_ms, is_aimless_cycle, personality_for, pick_aimless_dest,
+    seated_dwell_ms, stale_resume_gap_ms, takes_trip, walking_frame, waypoint_index_for_cycle,
 };
 // These stay crate-internal: a `pub use` would try to widen their `pub(crate)`
 // visibility.
-pub(crate) use pure::{resolve_wander_target, SpotClaims};
+pub(crate) use pure::{SpotClaims, resolve_wander_target};
 
-use crate::layout::{desk_walk_anchor_facing, Layout, Point};
+use crate::layout::{Layout, Point, desk_walk_anchor_facing};
 use crate::pathfind::Router;
 
 /// The per-frame routing engine state threaded through pose derivation,
@@ -45,6 +45,36 @@ pub struct RouteCtx<'a> {
     pub history: &'a mut PoseHistory,
     /// Per-agent walk-timing state, keyed by `AgentId`.
     pub motion: &'a mut HashMap<AgentId, MotionState>,
+}
+
+/// Owns the stores a [`RouteCtx`] borrows, so a test threads one value.
+#[cfg(test)]
+pub(crate) struct RouteRig<R> {
+    pub(crate) router: R,
+    pub(crate) overlay: OccupancyOverlay,
+    pub(crate) history: PoseHistory,
+    pub(crate) motion: HashMap<AgentId, MotionState>,
+}
+
+#[cfg(test)]
+impl<R: Router> RouteRig<R> {
+    pub(crate) fn new(router: R) -> Self {
+        Self {
+            router,
+            overlay: OccupancyOverlay::new(),
+            history: PoseHistory::new(),
+            motion: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn rctx(&mut self) -> RouteCtx<'_> {
+        RouteCtx {
+            router: &mut self.router,
+            overlay: &self.overlay,
+            history: &mut self.history,
+            motion: &mut self.motion,
+        }
+    }
 }
 
 /// Per-agent rendered position cache, consulted on state transitions so an agent
@@ -77,11 +107,7 @@ impl PoseHistory {
     pub fn recent(&self, agent_id: AgentId, max_age_ms: u64, now: SystemTime) -> Option<Point> {
         let (pt, when) = self.last.get(&agent_id).copied()?;
         let age = now.duration_since(when).ok()?.as_millis() as u64;
-        if age <= max_age_ms {
-            Some(pt)
-        } else {
-            None
-        }
+        if age <= max_age_ms { Some(pt) } else { None }
     }
 }
 
@@ -111,7 +137,7 @@ const EXIT_BUDGET_MARGIN_MS: u64 = 300;
 /// the EAST — the east side would read as walled-off. `None` only in a
 /// degenerate layout where every allowed side is walled off.
 pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> {
-    use crate::layout::{desk_walk_anchor_facing, Furniture};
+    use crate::layout::{Furniture, desk_walk_anchor_facing};
     // The desk's OWN facing, not a constant: `ApproachSides` is canonical (facing-South) and
     // rotated by it, so a back-turned desk is approached from its south front, not walled off there.
     let facing = layout.desk_facing_at(desk);
@@ -191,14 +217,14 @@ fn exit_elapsed_ms(profile: &WalkProfile, elapsed_ms: u64) -> u64 {
 }
 
 /// Routed variant of `derive`: Walking poses trace an A*-routed polyline
-/// (layout mask + per-frame `overlay`) corner-by-corner instead of cutting
-/// through obstacles or other agents.
+/// (layout mask + per-frame [`RouteCtx::overlay`]) corner-by-corner instead of
+/// cutting through obstacles or other agents.
 ///
-/// `motion` drives entry/exit physics — the A* path length is snapshotted into a
-/// `WalkProfile` on first sighting (commit-to-route), and later frames compute
-/// `t_x1000` against that frozen profile. `history` is consulted on state
-/// transitions so an agent whose pose flipped mid-wander walks back to the desk
-/// instead of teleporting.
+/// [`RouteCtx::motion`] drives entry/exit physics — the A* path length is
+/// snapshotted into a `WalkProfile` on first sighting (commit-to-route), and
+/// later frames compute `t_x1000` against that frozen profile.
+/// [`RouteCtx::history`] is consulted on state transitions so an agent whose
+/// pose flipped mid-wander walks back to the desk instead of teleporting.
 pub fn derive_with_routing(
     slot: &AgentSlot,
     now: SystemTime,
@@ -488,36 +514,33 @@ pub fn derive_with_routing(
             matches!(&ms_entry.snap_back, Some(leg) if leg.started_at == slot.state_started_at);
         if !already_armed {
             ms_entry.snap_back = None;
-            if since_state < SNAP_BACK_MS {
-                if let Some(prev) = rctx.history.recent(slot.agent_id, HISTORY_RECENT_MS, now) {
-                    // To the CHAIR, not the desk origin: the chair is offset, so a
-                    // desk-origin gate re-fires forever once the agent settles on it.
-                    let chair = desk_walk_anchor_facing(desk, layout.desk_facing_at(desk));
-                    let dist = (prev.x as i32 - chair.x as i32).abs()
-                        + (prev.y as i32 - chair.y as i32).abs();
-                    if dist >= SNAP_BACK_MIN_DIST {
-                        // Against the same jittered goal the render route uses: the
-                        // profile must measure `route_walking_pose`'s own A* polyline,
-                        // or a detour covers a longer path in a straight-line duration.
-                        let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
-                        let p = snapshot_leg_profile(
-                            rctx.router,
-                            &layout.walkable,
-                            rctx.overlay,
-                            slot.agent_id,
-                            LegPlan {
-                                from: prev,
-                                to: snap_target,
-                                settle: chair_settle.map_or(Settle::None, Settle::End),
-                                intent: WalkIntent::SnapBack,
-                            },
-                        );
-                        ms_entry.snap_back = Some(WalkLeg {
-                            started_at: slot.state_started_at,
-                            profile: p,
+            if since_state < SNAP_BACK_MS
+                && let Some(prev) = rctx.history.recent(slot.agent_id, HISTORY_RECENT_MS, now)
+            {
+                // To the CHAIR, not the desk origin: the chair is offset, so a
+                // desk-origin gate re-fires forever once the agent settles on it.
+                let chair = desk_walk_anchor_facing(desk, layout.desk_facing_at(desk));
+                let dist =
+                    (prev.x as i32 - chair.x as i32).abs() + (prev.y as i32 - chair.y as i32).abs();
+                if dist >= SNAP_BACK_MIN_DIST {
+                    let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
+                    let p = snapshot_leg_profile(
+                        rctx.router,
+                        &layout.walkable,
+                        rctx.overlay,
+                        slot.agent_id,
+                        LegPlan {
                             from: prev,
-                        });
-                    }
+                            to: snap_target,
+                            settle: chair_settle.map_or(Settle::None, Settle::End),
+                            intent: WalkIntent::SnapBack,
+                        },
+                    );
+                    ms_entry.snap_back = Some(WalkLeg {
+                        started_at: slot.state_started_at,
+                        profile: p,
+                        from: prev,
+                    });
                 }
             }
         }
@@ -557,10 +580,10 @@ pub fn derive_with_routing(
     } else {
         // Clear any stale snap-back so the next transition snapshots afresh rather
         // than replaying a previous one.
-        if let Some(ms) = rctx.motion.get_mut(&slot.agent_id) {
-            if ms.snap_back.is_some() {
-                ms.snap_back = None;
-            }
+        if let Some(ms) = rctx.motion.get_mut(&slot.agent_id)
+            && ms.snap_back.is_some()
+        {
+            ms.snap_back = None;
         }
         raw
     };

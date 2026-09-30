@@ -17,8 +17,8 @@
 //! land on the caller's runtime either way.
 
 use std::path::PathBuf;
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 
 use pixtuoid_core::source::daemon;
 use pixtuoid_core::source::manager::{SourceDeath, SourceManager};
@@ -27,8 +27,8 @@ use pixtuoid_core::{AgentEvent, SceneState, Transport};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
-use super::driver::{build_source_set, reducer_task};
 use super::ConnectedSources;
+use super::driver::{build_source_set, reducer_task};
 
 /// The live pipeline's caller-facing handles. The spawned source tasks are kept
 /// alive by the caller's tokio RUNTIME, not by `_source_handles` — dropping a

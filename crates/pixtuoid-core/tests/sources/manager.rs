@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
-use pixtuoid_core::source::{manager::SourceManager, AgentEvent, Source, TaggedSender, Transport};
 use pixtuoid_core::AgentId;
+use pixtuoid_core::source::{AgentEvent, Source, TaggedSender, Transport, manager::SourceManager};
 
 struct StaticSource {
     name: &'static str,
@@ -62,11 +62,10 @@ async fn manager_isolates_a_failing_source_from_siblings() {
     while tokio::time::Instant::now() < deadline {
         if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
             tokio::time::timeout(Duration::from_millis(50), rx.recv()).await
+            && agent_id == good_id
         {
-            if agent_id == good_id {
-                got_good = true;
-                break;
-            }
+            got_good = true;
+            break;
         }
     }
     assert!(

@@ -173,7 +173,7 @@ sessions, and the harness recurses to find it.
 here is a registered source. Single-owner fixtures read by one module — decode's
 `sources/decode/fixtures/`, codex's `sources/codex/fixtures/`, render's
 `render/fixtures/` — live with their module, NOT here. See
-[`tests/CLAUDE.md`](../../CLAUDE.md) for the governing principle.)
+[`tests/AGENTS.md`](../../AGENTS.md) for the governing principle.)
 
 The harness, for each fixture dir:
 1. decodes the transcript lines (via the source's `LineDecoder`) and the hook

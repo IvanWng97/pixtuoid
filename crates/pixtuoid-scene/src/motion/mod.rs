@@ -3,18 +3,18 @@
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
-use crate::physics::{walk_arrived, walk_profile, WalkIntent, WalkProfile};
+use crate::physics::{WalkIntent, WalkProfile, walk_arrived, walk_profile};
+use pixtuoid_core::AgentId;
 use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
-use pixtuoid_core::AgentId;
 
 use crate::layout::{Layout, Point, WaypointKind};
 use crate::pathfind::Router;
-use crate::pose::{desk_leg_endpoint, octile_distance, route_jittered};
 use crate::pose::{
-    dwell_ms, est_wander_cycle_ms, seated_dwell_ms, stale_resume_gap_ms, takes_trip, SpotClaims,
-    WANDER_DWELL_EST_MS,
+    SpotClaims, WANDER_DWELL_EST_MS, dwell_ms, est_wander_cycle_ms, seated_dwell_ms,
+    stale_resume_gap_ms, takes_trip,
 };
+use crate::pose::{desk_leg_endpoint, octile_distance, route_jittered};
 
 /// Frozen A* polyline for one in-flight walk leg. Snapshotted when the leg's
 /// `(from, to)` first appear and reused unchanged: per-frame occupancy churn
@@ -446,10 +446,10 @@ fn spot_claims(motion: &HashMap<AgentId, MotionState>, exclude: AgentId) -> Spot
         if *id == exclude || matches!(ms.wander.phase, WanderPhase::Seated) {
             continue;
         }
-        if let WanderKind::Named { wp_idx, kind, .. } = ms.wander.target.kind {
-            if crate::layout::furniture_def(kind.furniture()).exclusive {
-                claims.claim(wp_idx);
-            }
+        if let WanderKind::Named { wp_idx, kind, .. } = ms.wander.target.kind
+            && crate::layout::furniture_def(kind.furniture()).exclusive
+        {
+            claims.claim(wp_idx);
         }
     }
     claims

@@ -20,8 +20,7 @@ pub(crate) fn paint_elevator_indicator(
     // glyphs, so a byte-length anchor lands 2 cells left of the door's center.
     let label_w = super::display_width(&label) as u16;
     let door_cell_x = door.x + 8u16.saturating_sub(label_w / 2);
-    let door_cell_y = door.y / 2;
-    let indicator_y = door_cell_y.saturating_sub(1);
+    let indicator_y = pixtuoid_scene::layout::floor_indicator_rows(door.y).start / 2;
 
     if let Some(r) = crate::tui::renderer::clip_widget_rect(
         Rect {
@@ -46,8 +45,8 @@ mod tests {
 
     #[test]
     fn elevator_indicator_centers_by_display_columns_not_bytes() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
         let theme = &pixtuoid_scene::theme::NORMAL;
         let door = pixtuoid_scene::layout::Point { x: 20, y: 10 };
         let mut term = Terminal::new(TestBackend::new(80, 30)).unwrap();

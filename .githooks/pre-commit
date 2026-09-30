@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-commit hook: fast format check only (~sub-second).
+# Pre-commit hook: format check only.
 # Everything else: pre-push (`just preflight`) and CI.
 #
 # Set up once per clone with:

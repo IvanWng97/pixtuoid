@@ -130,14 +130,14 @@ jobs:
       - run: just json-schemas
       - run: just links
       - run: just drift-selftest
-      - run: just env-paths
       - run: just gen-art-check
       - run: just tuidrive-selftest
       - run: just e2e-scrub-selftest
       - run: just star-history-selftest
-      # `just fixture-metadata` is NOT here: it became Rust tests in #929, so it
-      # already rides `just test` in windows-test, macos-test and coverage —
-      # three platforms instead of this job's one, and no toolchain in a lint job.
+      # The capture-tree provenance rules are NOT here: they are Rust tests
+      # (`tests/sources/captures.rs`, #929) riding `just coverage` in ci-tests.yml's
+      # three-platform matrix instead of this job's one, and no toolchain in a
+      # lint job.
       - run: just fixture-pii
       - run: just fixture-pii-selftest
 
@@ -178,8 +178,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # Deliberately here rather than in the path-filtered site workflow, so it
-      # can be a required check.
+      # Here rather than in site.yml, which a draft PR skips.
       - uses: actions/setup-node@v7
         with:
           node-version: 22

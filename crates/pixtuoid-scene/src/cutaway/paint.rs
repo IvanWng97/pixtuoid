@@ -2,15 +2,17 @@
 //! (weather, steam, the pet) stay with the classic pass. It never advances the
 //! sim; a mover here would desync the profiles.
 
+use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::sprite::RgbBuffer;
 
 use crate::atmosphere::Moment;
-use crate::cutaway::order::{depth_sort, Span};
+use crate::cutaway::order::{Span, depth_sort};
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
-use crate::cutaway::shade::{fill, slab, Ramp};
-use crate::layout::{Bounds, Depth, Fixture, FixtureKind, Layout, Point, Station, DESK_H};
+use crate::cutaway::shade::{Ramp, fill, slab};
+use crate::layout::{
+    Bounds, DESK_H, Depth, Fixture, FixtureKind, Layer, Layout, Point, Station, Tie,
+};
 use crate::pixel_painter::SimFrame;
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
@@ -421,7 +423,7 @@ fn lights(
         .filter_map(|e| {
             crate::cutaway::light::LightView::of(
                 e,
-                crate::cutaway::light::tint_of(e.kind, theme),
+                crate::cutaway::light::tint_of(e.kind, theme, frame.neon),
                 ambient,
                 pen,
                 (layout.buf_w, layout.buf_h),
@@ -467,7 +469,15 @@ pub(crate) fn paint_list(
         w: pen.art(list.scale.logical(buf.width()).saturating_add(1)),
         h: pen.art(list.scale.logical(buf.height()).saturating_add(1)),
     };
-    crate::cutaway::light::net_pass(whole, &lights, list.ambient, &emission, pen, buf);
+    crate::cutaway::light::net_pass(
+        whole,
+        &lights,
+        list.ambient,
+        &emission,
+        pen,
+        &mut cache.net_colours,
+        buf,
+    );
 }
 
 /// Paint every piece but the lights, back to front as by day, and return the
@@ -481,30 +491,28 @@ fn paint_pieces(
     let mut emission = Emission::new(buf.width(), buf.height());
     let mut marks = RgbBuffer::filled(buf.width(), buf.height(), NO_MARK);
     for piece in &list.pieces {
-        // What the piece painted: its span's pixels that changed.
         let (x0, y0) = (
             list.scale.to_buffer(piece.span.x0),
             list.scale.to_buffer(piece.span.y0),
         );
         let x1 = list.scale.to_buffer(piece.span.x1 + 1).min(buf.width());
         let y1 = list.scale.to_buffer(piece.span.y1 + 1).min(buf.height());
-        let before: Vec<pixtuoid_core::sprite::Rgb> = (y0..y1)
-            .flat_map(|y| (x0..x1).map(move |x| (x, y)))
-            .map(|(x, y)| buf.get(x, y))
-            .collect();
+        let epoch = buf.begin_writes();
         paint_piece(&piece.kind, list.pack, list.theme, list.scale, cache, buf);
+        let drawn = (list.pack, list.scale);
+        let art_cache = &mut cache.cutaway_art;
         let glowing = match piece.kind {
             PieceKind::Desk { at, art, screen } => {
-                mark_glow(at, art, screen, list.pack, list.scale, &mut marks)
+                mark_glow(at, art, screen, drawn, art_cache, &mut marks)
             }
             PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => {
-                mark_bulbs(Placed::Centred(at), art, list.pack, list.scale, &mut marks)
+                mark_bulbs(Placed::Centred(at), art, drawn, art_cache, &mut marks)
             }
             PieceKind::Hung { at, sprite } => mark_bulbs(
                 Placed::TopLeft(at),
                 Art::still(sprite),
-                list.pack,
-                list.scale,
+                drawn,
+                art_cache,
                 &mut marks,
             ),
             PieceKind::Door { at, frame } => mark_bulbs(
@@ -514,8 +522,8 @@ fn paint_pieces(
                     frame,
                     flip: Flip::None,
                 },
-                list.pack,
-                list.scale,
+                drawn,
+                art_cache,
                 &mut marks,
             ),
             PieceKind::Glass { .. }
@@ -527,10 +535,9 @@ fn paint_pieces(
             | PieceKind::Neon { .. }
             | PieceKind::Clock { .. } => false,
         };
-        let mut old = before.iter();
         for y in y0..y1 {
             for x in x0..x1 {
-                if old.next() == Some(&buf.get(x, y)) {
+                if !buf.written_in(x, y, epoch) {
                     continue;
                 }
                 let marked = || match marks.get(x, y) {
@@ -573,6 +580,7 @@ fn paint_pieces(
             }
         }
     }
+    buf.end_writes();
     emission
 }
 
@@ -587,10 +595,10 @@ const SHADED_MARK: pixtuoid_core::sprite::Rgb = pixtuoid_core::sprite::Rgb { r: 
 /// it is the art's own at any density. Returns whether it marked anything.
 fn mark_glow(
     at: crate::layout::Point,
-    art_name: &str,
+    art_name: &'static str,
     screen: Screen,
-    pack: &Pack,
-    scale: RenderScale,
+    (pack, scale): (&Pack, RenderScale),
+    art: &mut ArtCache,
     marks: &mut RgbBuffer,
 ) -> bool {
     use crate::pixel_painter::{DESK_BULB_KEY, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
@@ -600,10 +608,10 @@ fn mark_glow(
     ) else {
         return false;
     };
-    let (screen_cells, bulb) = (
-        drawn_in(&desk, &[SCREEN_GLASS_KEY, SCREEN_TEXT_KEY]),
-        drawn_in(&desk, &[DESK_BULB_KEY]),
-    );
+    let screen_cells = art
+        .cells(art_name, 0, &desk, &[SCREEN_GLASS_KEY, SCREEN_TEXT_KEY])
+        .to_vec();
+    let bulb = art.cells(art_name, 0, &desk, &[DESK_BULB_KEY]);
     let screen_mark = match screen {
         Screen::Off => SHADED_MARK,
         Screen::Standby(_) | Screen::Lit(_) => EMISSIVE_MARK,
@@ -642,15 +650,20 @@ enum Placed {
 fn mark_bulbs(
     placed: Placed,
     art: Art,
-    pack: &Pack,
-    scale: RenderScale,
+    (pack, scale): (&Pack, RenderScale),
+    cache: &mut ArtCache,
     marks: &mut RgbBuffer,
 ) -> bool {
     let Some(dense) = crate::pixel_painter::densest_frame(pack, art.sprite, art.frame, scale)
     else {
         return false;
     };
-    let bulbs = drawn_in(&dense, &[crate::pixel_painter::DESK_BULB_KEY]);
+    let bulbs = cache.cells(
+        art.sprite,
+        art.frame,
+        &dense,
+        &[crate::pixel_painter::DESK_BULB_KEY],
+    );
     if !bulbs.iter().any(|&b| b) {
         return false;
     }
@@ -670,6 +683,48 @@ impl Placed {
         match self {
             Self::Centred(at) => centred_top_left(at, logical, scale),
             Self::TopLeft(at) => (scale.to_buffer(at.x), scale.to_buffer(at.y)),
+        }
+    }
+}
+
+/// Art found by recolouring, kept across frames; keyed by sprite name, so one
+/// cache serves one pack.
+#[derive(Default)]
+pub(crate) struct ArtCache {
+    cells: std::collections::HashMap<(&'static str, usize, u16, &'static [char]), Vec<bool>>,
+    screens: std::collections::HashMap<(&'static str, u16, Screen), pixtuoid_core::sprite::Frame>,
+}
+
+impl ArtCache {
+    fn cells(
+        &mut self,
+        sprite: &'static str,
+        frame: usize,
+        dense: &crate::pixel_painter::DenseFrame<'_>,
+        keys: &'static [char],
+    ) -> &[bool] {
+        self.cells
+            .entry((sprite, frame, dense.density.get(), keys))
+            .or_insert_with(|| drawn_in(dense, keys))
+    }
+
+    fn desk(
+        &mut self,
+        art: &'static str,
+        desk: &crate::pixel_painter::DenseFrame<'_>,
+        screen: Screen,
+    ) -> Option<&pixtuoid_core::sprite::Frame> {
+        match screen {
+            Screen::Off => None,
+            Screen::Standby(_) | Screen::Lit(_) => Some(
+                self.screens
+                    .entry((art, desk.density.get(), screen))
+                    .or_insert_with(|| {
+                        screen
+                            .on(desk.recolorable)
+                            .unwrap_or_else(|| desk.frame.clone())
+                    }),
+            ),
         }
     }
 }
@@ -704,7 +759,7 @@ fn desk_bulb(
     for (i, _) in drawn_in(&desk, &[crate::pixel_painter::DESK_BULB_KEY])
         .iter()
         .enumerate()
-        .filter(|(_, &b)| b)
+        .filter(|&(_, &b)| b)
     {
         n += 1;
         sx += (i % w) as u32;
@@ -771,64 +826,37 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
 }
 
 /// Step the floor darker under `shadows`, toward each one's centre: its falloff
-/// at `strength` in whole ramp stops, dithered between them on the art grid. A
-/// shadow is the ground it falls on, darker, never a colour of its own, and where
-/// two overlap the deeper one wins rather than the two compounding.
+/// at `strength`, rounded to whole ramp stops by
+/// [`nearest`](crate::dither::nearest) on the art grid, over their
+/// [`Depths`](crate::ground::Depths). A shadow is the ground it falls on,
+/// darker, never a colour of its own.
 fn paint_ground_shadows(
     shadows: impl Iterator<Item = crate::ground::Contact> + Clone,
     strength: f32,
     pen: Pen,
     buf: &mut RgbBuffer,
 ) {
-    // One level per art pixel over the shadows' joint bounds, row-major.
-    let Some(((x0, y0), (x1, y1))) = shadows.clone().map(|c| c.bounds()).reduce(|a, b| {
-        (
-            (a.0 .0.min(b.0 .0), a.0 .1.min(b.0 .1)),
-            (a.1 .0.max(b.1 .0), a.1 .1.max(b.1 .1)),
-        )
-    }) else {
+    let Some(depths) = crate::ground::Depths::of(shadows, pen.art(1).0) else {
         return;
     };
-    let (ax0, ay0) = (pen.art(x0).0, pen.art(y0).0);
-    let w = usize::from(pen.art(x1).0 - ax0);
-    let h = usize::from(pen.art(y1).0 - ay0);
-    let mut depth = vec![0i8; w * h];
-    let d = f32::from(pen.art(1).0);
-    let at = |a: u16| (f32::from(a) + 0.5) / d;
-    for c in shadows {
-        let ((cx0, cy0), (cx1, cy1)) = c.bounds();
-        for ay in pen.art(cy0).0..pen.art(cy1).0 {
-            for ax in pen.art(cx0).0..pen.art(cx1).0 {
-                let Some(f) = c.falloff(at(ax), at(ay)) else {
-                    continue;
-                };
-                let stops = f * strength * SHADOW_STOPS_PER_STRENGTH;
-                let whole = stops.floor();
-                let level = whole as i8
-                    + i8::from(crate::cutaway::pen::dithered(
-                        ArtPx(ax),
-                        ArtPx(ay),
-                        stops - whole,
-                    ));
-                let slot = &mut depth[usize::from(ay - ay0) * w + usize::from(ax - ax0)];
-                *slot = (*slot).max(level);
-            }
-        }
-    }
     let mut stepped: Vec<crate::cutaway::pen::Stepped> = Vec::new();
-    for (i, &level) in depth.iter().enumerate().filter(|&(_, &l)| l > 0) {
-        while stepped.len() < level as usize {
+    for (ax, ay, depth) in depths.cells() {
+        let level = crate::dither::nearest(depth * strength * SHADOW_STOPS_PER_STRENGTH, ax, ay);
+        if level == 0 {
+            continue;
+        }
+        while stepped.len() < usize::from(level) {
             stepped.push(crate::cutaway::pen::Stepped::new(
                 -(stepped.len() as i8 + 1),
             ));
         }
         let r = ArtRect {
-            x: ArtPx(ax0 + (i % w) as u16),
-            y: ArtPx(ay0 + (i / w) as u16),
+            x: ArtPx(ax),
+            y: ArtPx(ay),
             w: ArtPx(1),
             h: ArtPx(1),
         };
-        let memo = &mut stepped[level as usize - 1];
+        let memo = &mut stepped[usize::from(level) - 1];
         pen.recolour(buf, r, |_, _, under| memo.of(under));
     }
 }
@@ -877,8 +905,8 @@ fn fingerprint(kind: &PieceKind) -> u64 {
     h.finish()
 }
 
-/// Every piece of the office, each with its [`Span`]. The push order breaks
-/// depth ties, so it is part of the result.
+/// Every piece of the office, each with its [`Span`]. At one depth and layer,
+/// push order breaks the tie, so it is part of the result.
 fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<(Span, PieceKind)> {
     let layout = office.layout;
     let build = Build {
@@ -888,20 +916,9 @@ fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<
     };
     let mut order: Vec<(Span, PieceKind)> = Vec::new();
     push_windows(office, moment, &mut order);
-    let mut carried = None;
+    let carried = push_characters(frame, office, moment.now, &mut order);
     for fixture in layout.fixtures() {
-        if carried.is_none() && paints_over_its_sitter(fixture.kind) {
-            carried = Some(push_characters(frame, office, moment.now, &mut order));
-        }
-        push_fixture(
-            fixture,
-            build,
-            carried.as_deref().unwrap_or_default(),
-            &mut order,
-        );
-    }
-    if carried.is_none() {
-        push_characters(frame, office, moment.now, &mut order);
+        push_fixture(fixture, build, &carried, &mut order);
     }
     wall_segments(layout, &mut order);
     order
@@ -914,17 +931,51 @@ struct Build<'a, 'f> {
     moment: &'f Moment,
 }
 
-/// Whether a fixture paints over its sitter on a tie, so it queues after the
-/// people: a desk chair's backrest crosses its sitter's lap.
-fn paints_over_its_sitter(kind: FixtureKind) -> bool {
-    matches!(kind, FixtureKind::DeskChair(_))
+/// How `fixture` ties a figure at its row here: the roster's tie, but for
+/// the lounge couch.
+fn tie_of(fixture: Fixture) -> Option<Tie> {
+    use FixtureKind as K;
+    let Depth::Sorted { tie, .. } = fixture.depth else {
+        return None;
+    };
+    Some(match fixture.kind {
+        // Seen from behind, facing the window, where the classic draws its front.
+        K::LoungeCouch => Tie::FixtureOver,
+        K::Desk(_)
+        | K::FilingCabinet(_)
+        | K::DeskChair(_)
+        | K::Station { .. }
+        | K::Plant { .. }
+        | K::Pod { .. }
+        | K::Wall { .. }
+        | K::MeetingRug { .. }
+        | K::MeetingSofa { .. }
+        | K::MeetingTable { .. }
+        | K::MeetingChair { .. }
+        | K::CoatRack { .. }
+        | K::Doormat { .. }
+        | K::NoticeBoard { .. }
+        | K::LoungeRug
+        | K::SideTable
+        | K::FloorLamp
+        | K::FishTank
+        | K::KitchenIsland
+        | K::PantryMat
+        | K::IslandMat
+        | K::WaterCooler
+        | K::TrashBin
+        | K::Door
+        | K::Runner
+        | K::NeonSign
+        | K::Clock => tie,
+    })
 }
 
 /// The row the cutaway sorts a fixture on: a backdrop one at the very back.
 fn sort_row(depth: Depth) -> u16 {
     match depth {
         Depth::Backdrop => 0,
-        Depth::Sorted(row) => row,
+        Depth::Sorted { row, .. } => row,
     }
 }
 
@@ -1000,6 +1051,7 @@ fn push_fixture(
         ..
     } = office;
     let depth = sort_row(fixture.depth);
+    let first = order.len();
     let centre = centre_of(fixture.visual);
     let top_left = Point {
         x: fixture.visual.x,
@@ -1096,8 +1148,8 @@ fn push_fixture(
         ),
         K::Wall { kind, .. } => push_hung(order, pack, top_left, kind.sprite_name(), depth),
         K::NoticeBoard { .. } => push_hung(order, pack, top_left, "notice_board", depth),
-        // Not on the roster's depth: a back-view sofa splits into bands its
-        // sitter sorts between, a front one ties them ([`push_sofa`]).
+        // A back-view sofa splits into bands its sitter sorts between
+        // ([`push_sofa`]), so it lays its own layers.
         K::MeetingSofa {
             room,
             seat,
@@ -1108,12 +1160,17 @@ fn push_fixture(
                 .get(room)
                 .and_then(|r| r.trio)
                 .and_then(|t| t.sofas.get(seat).copied());
-            if let Some(at) = sofa {
-                push_sofa(order, pack, at, faces_away);
+            if let (Some(at), Some(tie)) = (sofa, tie_of(fixture)) {
+                push_sofa(order, pack, at, faces_away, tie);
             }
+            return;
         }
-        // Seen from behind: it faces the window.
-        K::LoungeCouch => push_sofa(order, pack, centre, true),
+        K::LoungeCouch => {
+            if let Some(tie) = tie_of(fixture) {
+                push_sofa(order, pack, centre, true, tie);
+            }
+            return;
+        }
         K::MeetingTable { .. } => {
             let table = crate::layout::furniture_def(crate::layout::Furniture::MeetingTable).visual;
             let face = face_rows(
@@ -1232,6 +1289,11 @@ fn push_fixture(
         | K::IslandMat
         | K::Runner => {}
     }
+    if let Some(tie) = tie_of(fixture) {
+        for (span, _) in &mut order[first..] {
+            *span = span.with_layer(Layer::from(tie));
+        }
+    }
 }
 
 /// Whether an art piece's frame moves between builds.
@@ -1306,7 +1368,9 @@ fn paint_piece(
     buf: &mut RgbBuffer,
 ) {
     match *kind {
-        PieceKind::Desk { at, art, screen } => paint_desk(at, art, screen, pack, scale, buf),
+        PieceKind::Desk { at, art, screen } => {
+            paint_desk(at, art, screen, (pack, scale), &mut cache.cutaway_art, buf);
+        }
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
         PieceKind::Character {
             ref figure, chair, ..
@@ -1437,7 +1501,17 @@ fn face_rows(pack: &Pack, art: &str, scale: RenderScale) -> u16 {
 /// The deepest a noon shadow steps the floor.
 #[cfg(test)]
 fn deepest_shadow_stop() -> i8 {
-    (crate::ground::shadow_strength(NOON_DARKNESS) * SHADOW_STOPS_PER_STRENGTH).ceil() as i8
+    let stops = crate::ground::shadow_strength(NOON_DARKNESS) * SHADOW_STOPS_PER_STRENGTH;
+    let phases = 0..crate::dither::PERIOD;
+    phases
+        .clone()
+        .flat_map(|y| {
+            phases
+                .clone()
+                .map(move |x| crate::dither::nearest(stops, x, y))
+        })
+        .max()
+        .map_or(0, |deepest| deepest as i8)
 }
 
 /// A clear noon's darkness, the hour the shadow tests pin.
@@ -1631,7 +1705,7 @@ fn push_characters(
 /// neighbour mid-breath. A back-turned sitter and their chair are one piece,
 /// bounding the chair's whole box too.
 fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
-    let body = body.with_depth(depth);
+    let body = body.with_depth(depth).with_layer(Layer::Figure);
     match chair {
         Some(chair) => Span {
             x0: body.x0.min(chair.x0),
@@ -1639,6 +1713,7 @@ fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
             y0: body.y0.min(chair.y0),
             y1: body.y1.max(chair.y1),
             depth: body.depth.max(chair.depth),
+            layer: Layer::Figure,
         },
         None => body,
     }
@@ -1652,11 +1727,11 @@ const MEETING_SOFA_NORTH: &str = "meeting_sofa_north";
 /// `SOFA_SEAT_ROWS` draws to it (`the_north_sofas_backrest_starts_on_its_lit_ridge`).
 const NORTH_SOFA_SEAT_ROWS: u16 = 3;
 
-/// Queue one sofa body: the front view, or the `back_view`. A pack that draws
-/// [`MEETING_SOFA_NORTH`] gets it as two bands, the seat sorted with its sitter
-/// and the backrest over their lap ([`NORTH_SOFA_SEAT_ROWS`]); one that draws
-/// only its own `meeting_sofa` gets that flipped top-to-bottom, as the classic
-/// painter draws it.
+/// Queue one sofa body, sorted with its sitters at `tie`: the front view, or
+/// the `back_view`. A pack that draws [`MEETING_SOFA_NORTH`] gets it as two
+/// bands, the seat under its sitter and the backrest over their lap
+/// ([`NORTH_SOFA_SEAT_ROWS`]); one that draws only its own `meeting_sofa` gets
+/// that flipped top-to-bottom, as the classic painter draws it.
 ///
 /// NOT `back_couch`: the pack documents that as a character seen from behind, so
 /// it would draw a headless torso where the couch belongs.
@@ -1665,7 +1740,9 @@ fn push_sofa(
     pack: &Pack,
     at: crate::layout::Point,
     back_view: bool,
+    tie: Tie,
 ) {
+    let sitters = crate::pixel_painter::seat::sofa_sitter_z_key(at);
     if let Some((w, h)) = art_size(pack, MEETING_SOFA_NORTH).filter(|_| back_view) {
         let tl = crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
         let split = NORTH_SOFA_SEAT_ROWS.min(h);
@@ -1674,27 +1751,20 @@ fn push_sofa(
             sprite: MEETING_SOFA_NORTH,
             rows,
         };
-        // The seat sorts WITH its sitter, who is pushed after the furniture and
-        // so lands on it; its own south edge lies rows north of where the sofa
-        // stands, where a table in a short room ties it and paints over it.
-        let seat = Span::new(tl.x, tl.y, w, split, 0)
-            .with_depth(crate::pixel_painter::seat::sofa_sitter_z_key(at));
+        // Its own south edge lies rows north of where the sofa stands, where a
+        // table in a short room would tie it and paint over it.
+        let seat = Span::new(tl.x, tl.y, w, split, 0).with_depth(sitters);
         order.push((seat, band((0, split))));
         order.push((
-            Span::new(tl.x, tl.y + split, w, h - split, 0),
+            Span::new(tl.x, tl.y + split, w, h - split, 0).with_layer(Layer::from(tie)),
             band((split, h)),
         ));
         return;
     }
     if let Some((w, h)) = art_size(pack, "meeting_sofa") {
-        // The front view sorts WITH its sitters, who are pushed after the
-        // furniture and so land on it; on its own south edge its backrest
-        // would paint over their bodies. The flipped back view sorts a row
-        // south of them, as the classic painter keys it: it stands in front of
-        // the sitters it faces away from.
-        let sitters = crate::pixel_painter::seat::sofa_sitter_z_key(at);
         let span = piece_span(crate::layout::Anchor::Center, at, w, h, 0)
-            .with_depth(sitters + u16::from(back_view));
+            .with_depth(sitters)
+            .with_layer(Layer::from(tie));
         order.push((
             span,
             PieceKind::Prop {
@@ -1720,7 +1790,9 @@ fn wall_segments(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
         let (at, size) = piece.visual();
         for (rows, depth) in piece.sort_bands() {
             order.push((
-                Span::new(at.x, rows.start, size.w, rows.end - rows.start, 0).with_depth(depth),
+                Span::new(at.x, rows.start, size.w, rows.end - rows.start, 0)
+                    .with_depth(depth)
+                    .with_layer(Layer::Over),
                 PieceKind::WallSeg {
                     piece,
                     rows: (rows.start, rows.end),
@@ -1975,6 +2047,15 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, pen: Pen, buf:
             }
         }
     }
+    for post in crate::layout::window_posts(layout.buf_w) {
+        let cell = ArtRect {
+            x: pen.art(post.start),
+            y: pen.art(rows.start),
+            w: pen.art(post.end - post.start),
+            h: pen.art(window_h),
+        };
+        pen.fill(buf, cell, theme.surface.window_frame);
+    }
     fill(
         buf,
         0,
@@ -1983,8 +2064,18 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, pen: Pen, buf:
         s,
         theme.surface.wall_trim,
     );
-    // The wall's own contact line with the floor.
-    fill(buf, 0, scale.to_buffer(band_h), w, s, contact_tone(theme));
+    // The wall's contact line: the floor under it, a shade step down.
+    let mut contact = crate::cutaway::pen::Stepped::new(crate::cutaway::shade::RAMP_SHADE_LEVEL);
+    pen.recolour(
+        buf,
+        ArtRect {
+            x: ArtPx(0),
+            y: pen.art(band_h),
+            w: pen.art(layout.buf_w),
+            h: pen.art(1),
+        },
+        |_, _, under| contact.of(under),
+    );
 }
 
 /// Queue each window's glass as a piece: what it looks out on — the one city
@@ -2034,7 +2125,7 @@ fn push_windows(office: Office<'_>, moment: &Moment, order: &mut Vec<(Span, Piec
                 Some(city.at(cx, cy).unwrap_or_else(|| {
                     let share =
                         crate::atmosphere::sky_share((f32::from(cy) + 0.5) / f32::from(d), glass_h);
-                    if crate::cutaway::pen::dithered(ArtPx(x0 + ax), ArtPx(y0 + ay), share) {
+                    if crate::dither::takes_next(x0 + ax, y0 + ay, share) {
                         look.glass_a
                     } else {
                         look.glass_b
@@ -2190,10 +2281,10 @@ fn paint_rug(rug: crate::layout::Bounds, theme: &Theme, pen: Pen, buf: &mut RgbB
 
 fn paint_desk(
     at: crate::layout::Point,
-    art_name: &str,
+    art_name: &'static str,
     screen: Screen,
-    pack: &Pack,
-    scale: RenderScale,
+    (pack, scale): (&Pack, RenderScale),
+    art: &mut ArtCache,
     buf: &mut RgbBuffer,
 ) {
     let (Some(span), Some(desk)) = (
@@ -2203,9 +2294,8 @@ fn paint_desk(
         return;
     };
     let (x, top_y) = (scale.to_buffer(span.x0), scale.to_buffer(span.y0));
-    let relit = screen.on(desk.recolorable);
     blit_frame_scaled(
-        relit.as_ref().unwrap_or(desk.frame),
+        art.desk(art_name, &desk, screen).unwrap_or(desk.frame),
         x,
         top_y,
         desk.blit_at,
@@ -2695,12 +2785,6 @@ fn paint_prop_band(
     );
 }
 
-/// The tone of the line where the wall meets the floor: the carpet's own shade
-/// under the key light, so contact reads as weight rather than as a colour.
-fn contact_tone(theme: &Theme) -> pixtuoid_core::sprite::Rgb {
-    Ramp::from_base(theme.surface.carpet_dark).shade
-}
-
 /// A task chair from the pack's art.
 fn paint_chair(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &mut RgbBuffer) {
     let Some(art) = crate::pixel_painter::densest_frame(
@@ -2901,6 +2985,7 @@ mod tests {
             &own,
             crate::layout::Point { x: 10, y: 10 },
             true,
+            Tie::FixtureOver,
         );
         assert!(
             matches!(
@@ -3267,14 +3352,17 @@ mod tests {
         for n in 1..=1200u64 {
             let frame = session
                 .observe(
-                    &scene,
-                    &pack,
+                    crate::floor::FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now: now0 + Duration::from_millis(100 * n),
+                        floor: meta,
+                        pets: crate::floor::PetInputs::default(),
+                    },
                     crate::layout::Size {
                         w: LOGICAL.0,
                         h: LOGICAL.1,
                     },
-                    meta,
-                    now0 + Duration::from_millis(100 * n),
                 )
                 .expect("lays out")
                 .frame;
@@ -3526,7 +3614,7 @@ mod tests {
     /// The seat side is the LAYOUT's to decide, and both profiles read it.
     #[test]
     fn both_profiles_seat_an_occupant_on_the_side_the_layout_chose() {
-        use crate::layout::{Facing, CHARACTER_SPRITE_W};
+        use crate::layout::{CHARACTER_SPRITE_W, Facing};
         let desk = crate::layout::Point { x: 40, y: 30 };
         let near =
             crate::pixel_painter::seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::North);
@@ -3611,10 +3699,7 @@ mod tests {
         );
         let s = 8;
         let (pen, buf) = floor(&layout, s, 4);
-        let luma = |x: u16, y: u16| {
-            let c = buf.get(x, y);
-            u32::from(c.r) + u32::from(c.g) + u32::from(c.b)
-        };
+        let luma = |x: u16, y: u16| buf.get(x, y).lightness();
         let k = s / 4;
         let tile = pen.art(FLOOR_TILE).0 * k;
         let floor_top = layout.wall_band_h() * s;
@@ -3767,6 +3852,21 @@ mod tests {
         crate::ground::Contact::under(2, 8, 6)
     }
 
+    /// A shadow short of one whole stop still darkens the floor: the falloff
+    /// rounds to its nearest stop, where flooring would drop it.
+    #[test]
+    fn a_shadow_short_of_one_stop_still_darkens_the_floor() {
+        let pen = Pen::new(RenderScale::ONE, 1).expect("d divides s");
+        let mut buf = RgbBuffer::filled(12, 12, WEST);
+        paint_ground_shadows(
+            std::iter::once(seam_shadow()),
+            0.6 / SHADOW_STOPS_PER_STRENGTH,
+            pen,
+            &mut buf,
+        );
+        assert!(buf.as_slice().iter().any(|&p| p != WEST));
+    }
+
     /// A shadow is the floor it falls on, darker toward its centre: whole ramp
     /// stops of that floor's own colour, never a colour of its own.
     #[test]
@@ -3808,7 +3908,7 @@ mod tests {
             shadowed(8, 4, &[wide, narrow]),
         );
         assert!(ab.as_slice() == ba.as_slice(), "order-free");
-        let lum = |c: pixtuoid_core::sprite::Rgb| u32::from(c.r) + u32::from(c.g) + u32::from(c.b);
+        let lum = pixtuoid_core::sprite::Rgb::lightness;
         let mut mixed = false;
         for ((&both, &a), &b) in ab.as_slice().iter().zip(a.as_slice()).zip(b.as_slice()) {
             let deeper = if lum(a) <= lum(b) { a } else { b };
@@ -3916,9 +4016,7 @@ mod tests {
         assert!(standing && sitting, "the walk in and the sit");
     }
 
-    /// A pack drawing no back view of its own gets the front view flipped,
-    /// sorted a row south of its sitters: it stands in front of those it faces
-    /// away from.
+    /// A pack with no back-view art flips its front view, over the sitters.
     #[test]
     fn a_flipped_sofa_sorts_in_front_of_its_sitters() {
         let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
@@ -3929,22 +4027,30 @@ mod tests {
         .expect("a pack of one sofa loads");
         let at = crate::layout::Point { x: 40, y: 30 };
         let mut order = Vec::new();
-        push_sofa(&mut order, &pack, at, true);
-        let [(
-            span,
-            PieceKind::Prop {
-                art:
-                    Art {
-                        flip: Flip::Vertical,
-                        ..
-                    },
-                ..
-            },
-        )] = order.as_slice()
+        push_sofa(&mut order, &pack, at, true, Tie::FixtureOver);
+        let [
+            (
+                span,
+                PieceKind::Prop {
+                    art:
+                        Art {
+                            flip: Flip::Vertical,
+                            ..
+                        },
+                    ..
+                },
+            ),
+        ] = order.as_slice()
         else {
             panic!("a flipped sofa is one mirrored prop: {order:?}");
         };
-        assert!(span.depth > crate::pixel_painter::seat::sofa_sitter_z_key(at));
+        let sitter = Span::new(at.x, at.y, 1, 1, 0)
+            .with_depth(crate::pixel_painter::seat::sofa_sitter_z_key(at))
+            .with_layer(Layer::Figure);
+        assert_eq!(
+            crate::cutaway::order::depth_sort(vec![(*span, "sofa"), (sitter, "sitter")]),
+            ["sitter", "sofa"]
+        );
     }
 
     /// Every piece's shadow falls inside its [`Piece::reach`], so a repaint of
@@ -4164,9 +4270,40 @@ mod tests {
         assert!(glass > 0 && buildings > 0, "windows, and a city in them");
     }
 
-    /// The whole draw list of a REAL office, checked against every pairwise
-    /// "must be behind" fact its own geometry states — what a sort key cannot
-    /// give you.
+    #[test]
+    fn the_wall_between_two_windows_is_one_frame_post() {
+        let pack = pack();
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let pen = Pen::for_pack(scale, &pack);
+        let mut buf = RgbBuffer::filled(
+            scale.to_buffer(layout.buf_w),
+            scale.to_buffer(layout.buf_h),
+            theme.surface.bg_fallback,
+        );
+        paint_backdrop(&layout, theme, scale, pen, &mut buf);
+        let k = scale.get() / pen.art(1).0;
+        let rows = crate::layout::window_rows(layout.wall_band_h());
+        let mut posts = 0;
+        for post in crate::layout::window_posts(layout.buf_w) {
+            posts += 1;
+            for x in post.clone() {
+                for y in rows.clone() {
+                    let (ax, ay) = (pen.art(x).0, pen.art(y).0);
+                    assert_eq!(
+                        buf.get(ax * k, ay * k),
+                        theme.surface.window_frame,
+                        "post {post:?} at ({x}, {y})"
+                    );
+                }
+            }
+        }
+        assert!(posts > 0, "this wall has posts");
+    }
+
+    /// A REAL office's draw list, checked against every pairwise "must be
+    /// behind" fact its own geometry states — what a sort key cannot give you.
     #[test]
     fn a_real_offices_draw_list_satisfies_every_ordering_constraint() {
         let pack = pack();
@@ -4229,6 +4366,16 @@ mod tests {
                         None,
                         "{kind:?} at scale {s} wrote a logical pixel outside {span:?}"
                     );
+                    // At the densities the cutaway draws at.
+                    if s % pack.max_density_variant() == 0
+                        && ground_shadow(span, &kind, pack).is_some()
+                    {
+                        assert_eq!(
+                            lowest_painted_row(&kind, layout, pack, theme, scale),
+                            Some(span.y1),
+                            "{kind:?} at scale {s} is grounded on a row it doesn't reach: {span:?}"
+                        );
+                    }
                 }
             }
         };
@@ -4307,11 +4454,14 @@ S B B B B B B S
         for (w, h) in [(240u16, 144u16), (100, 60)] {
             let observed = FloorSession::new()
                 .observe(
-                    &pixtuoid_core::SceneState::uniform(16),
-                    &pack,
+                    crate::floor::FloorInputs {
+                        scene: &pixtuoid_core::SceneState::uniform(16),
+                        pack: &pack,
+                        now: std::time::SystemTime::UNIX_EPOCH,
+                        floor: FloorMeta::ground(),
+                        pets: crate::floor::PetInputs::default(),
+                    },
                     crate::layout::Size { w, h },
-                    FloorMeta::ground(),
-                    std::time::SystemTime::UNIX_EPOCH,
                 )
                 .expect("lays out");
             check(&pack, &observed.frame, &observed.layout, false);
@@ -4366,8 +4516,8 @@ S B B B B B B S
     /// fingerprint paint the same pixels, so one may stand in for the other.
     /// Walked over every tick of a walk to a desk and a sit, where the figure's
     /// and the desk's fingerprints both change (asserted below). Every piece is
-    /// compared at scale 1; at the densest scale only figures, whose art the
-    /// scale picks (the glass's is walked in
+    /// compared at scale 1; at the densest scale only figures, the kind that
+    /// changes tick to tick (the glass is walked in
     /// `a_window_s_fingerprint_moves_with_the_moment_it_shows`).
     #[test]
     fn one_span_and_fingerprint_always_paint_the_same_pixels() {
@@ -4533,6 +4683,7 @@ S B B B B B B S
             list.ambient,
             &crate::cutaway::light::Emission::new(w, h),
             pen,
+            &mut crate::cutaway::light::NetMemo::default(),
             &mut buf,
         );
         buf
@@ -4690,30 +4841,54 @@ S B B B B B B S
         );
     }
 
+    #[test]
+    fn the_neon_glow_takes_its_tubes_hue() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = pack();
+        let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale: RenderScale::new(pack.max_density_variant()).expect("nonzero"),
+        };
+        for neon in [
+            crate::floor::NeonLevels::CALM,
+            crate::floor::NeonLevels::ALERT,
+            crate::floor::NeonLevels {
+                alert: 0.5,
+                power: 1.0,
+            },
+        ] {
+            let frame = SimFrame {
+                neon,
+                ..empty_frame(&layout)
+            };
+            let list = list_at(&frame, office, 23);
+            let hue = list.pieces().iter().find_map(|p| match p.kind {
+                PieceKind::Neon { hue, .. } => Some(hue),
+                _ => None,
+            });
+            let glow = list
+                .lights()
+                .iter()
+                .find(|l| l.view.is(crate::lighting::EmitterKind::NeonGlow))
+                .map(|l| l.view.tint());
+            assert_eq!(glow, Some(hue), "{neon:?}");
+        }
+    }
+
     /// Every desk's lamp pools where its art hangs the bulb, whichever way the
     /// desk faces: the cutaway's art stands it on the side the desk faces.
     #[test]
+    #[cfg(feature = "density-art")]
     fn a_desk_lamp_pools_under_its_painted_bulb() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = pack();
         let layout = Layout::compute_with_seed(240, 144, None, 0).expect("lays out");
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         let pen = Pen::for_pack(scale, &pack);
-        let frame = SimFrame {
-            agents: Vec::new(),
-            poses: std::collections::HashMap::new(),
-            seated_agents: std::collections::HashMap::new(),
-            characters: Vec::new(),
-            indoor_scale: 1.0,
-            neon: crate::floor::NeonLevels::CALM,
-            chitchat_bubbles: Vec::new(),
-            new_coffee_carriers: Vec::new(),
-            occupied_waypoints: Default::default(),
-            pet: None,
-            mascots: Vec::new(),
-            desks: vec![Default::default(); layout.home_desks.len()],
-            door_frame: 0,
-        };
+        let frame = empty_frame(&layout);
         let list = list_at(
             &frame,
             Office {
@@ -4741,7 +4916,7 @@ S B B B B B B S
                 let hits: Vec<(f32, f32)> = cells
                     .iter()
                     .enumerate()
-                    .filter(|(_, &b)| b)
+                    .filter(|&(_, &b)| b)
                     .map(|(i, _)| ((i % w) as f32, (i / w) as f32))
                     .collect();
                 // Art pixels of this art, on the pen's grid.
@@ -4912,6 +5087,46 @@ S B B B B B B S
         );
     }
 
+    #[test]
+    fn a_piece_takes_the_pixels_it_paints_in_the_colour_already_there() {
+        use crate::cutaway::light::Glow;
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, desk) = sit_down(crate::layout::Facing::North, 2);
+        let frame = frames.last().expect("a seated frame");
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale,
+        };
+        let mut list = list_at(frame, office, 12);
+        let (painted, _) = by_day(&list, &layout);
+        let pen = Pen::for_pack(scale, &pack);
+        let (w, h) = (pen.art(4).0, pen.art(2).0);
+        let (x, y) = (pen.art(desk.x).0, pen.art(desk.y).0);
+        let (bx, by) = (pen.buffer(ArtPx(x)), pen.buffer(ArtPx(y)));
+        let px = (0..h)
+            .flat_map(|dy| (0..w).map(move |dx| (dx, dy)))
+            .map(|(dx, dy)| Some(painted.get(pen.buffer(ArtPx(x + dx)), pen.buffer(ArtPx(y + dy)))))
+            .collect();
+        list.pieces.push(Piece {
+            span: Span::new(desk.x, desk.y, 4, 2, 0),
+            kind: PieceKind::Glass {
+                view: WindowView { x, y, w, px },
+            },
+            shadow: None,
+            fingerprint: 0,
+        });
+        let (repainted, glow) = by_day(&list, &layout);
+        assert_eq!(
+            repainted.get(bx, by),
+            painted.get(bx, by),
+            "the pane repaints the desk's colour"
+        );
+        assert_eq!(glow.get(bx, by), Glow::Pane);
+    }
+
     /// The hour reaches the room: over the whole frame, the night room is
     /// darker than the noon one.
     #[test]
@@ -4956,21 +5171,7 @@ S B B B B B B S
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = pack();
         let layout = Layout::compute_with_seed(240, 144, None, 0).expect("lays out");
-        let idle = SimFrame {
-            agents: Vec::new(),
-            poses: std::collections::HashMap::new(),
-            seated_agents: std::collections::HashMap::new(),
-            characters: Vec::new(),
-            indoor_scale: 1.0,
-            neon: crate::floor::NeonLevels::CALM,
-            chitchat_bubbles: Vec::new(),
-            new_coffee_carriers: Vec::new(),
-            occupied_waypoints: Default::default(),
-            pet: None,
-            mascots: Vec::new(),
-            desks: vec![Default::default(); layout.home_desks.len()],
-            door_frame: 0,
-        };
+        let idle = empty_frame(&layout);
         let mut busy = idle.clone();
         busy.occupied_waypoints = (0..layout.waypoints.len()).collect();
         let office = Office {
@@ -5344,6 +5545,84 @@ S B B B B B B S
             .find(|&(x, y)| !((span.x0..=span.x1).contains(&x) && (span.y0..=span.y1).contains(&y)))
     }
 
+    #[test]
+    fn the_walls_contact_row_is_the_floor_a_shade_down() {
+        let pack = pack();
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let pen = Pen::for_pack(scale, &pack);
+        let layout = Layout::compute_with_seed(240, 144, None, 0).expect("lays out");
+        let blank = || {
+            RgbBuffer::filled(
+                scale.to_buffer(layout.buf_w),
+                scale.to_buffer(layout.buf_h),
+                UNDER[0],
+            )
+        };
+        let (mut floor, mut laid) = (blank(), blank());
+        paint_floor(&layout, theme, pen, &mut floor);
+        paint_backdrop(&layout, theme, scale, pen, &mut laid);
+        let row = scale.to_buffer(layout.wall_band_h());
+        for x in 0..floor.width() {
+            assert_eq!(
+                laid.get(x, row),
+                floor
+                    .get(x, row)
+                    .ramp(crate::cutaway::shade::RAMP_SHADE_LEVEL),
+                "column {x}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_rug_is_mirrored_about_its_centre_column() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = pack();
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let pen = Pen::for_pack(scale, &pack);
+        let rug = crate::layout::Bounds {
+            x: 4,
+            y: 3,
+            width: 18,
+            height: 11,
+        };
+        let (w, h) = (
+            scale.to_buffer(rug.x * 2 + rug.width),
+            scale.to_buffer(rug.y * 2 + rug.height),
+        );
+        let mut buf = RgbBuffer::filled(w, h, UNDER[0]);
+        paint_rug(rug, theme, pen, &mut buf);
+        for y in 0..h {
+            for x in 0..w {
+                assert_eq!(buf.get(x, y), buf.get(w - 1 - x, y), "({x}, {y})");
+            }
+        }
+    }
+
+    fn lowest_painted_row(
+        kind: &PieceKind,
+        layout: &Layout,
+        pack: &Pack,
+        theme: &Theme,
+        scale: RenderScale,
+    ) -> Option<u16> {
+        let w = usize::from(scale.to_buffer(layout.buf_w));
+        let [a, b] = painted_over_two_fills(kind, layout, pack, theme, scale);
+        a.as_slice()
+            .iter()
+            .zip(b.as_slice())
+            .enumerate()
+            .filter(|(_, (pa, pb))| {
+                if kind.reads_under() {
+                    [**pa, **pb] != UNDER
+                } else {
+                    pa == pb
+                }
+            })
+            .map(|(i, _)| scale.logical((i / w) as u16))
+            .max()
+    }
+
     /// Splitting is what makes the office above orderable, so pin it directly:
     /// no band of a N-S wall may be tall enough to span a figure. An E-W wall
     /// is whole on one row, which a figure is wholly north or south of.
@@ -5412,9 +5691,11 @@ S B B B B B B S
         let pack = pack();
         let sofa = crate::layout::Point { x: 40, y: 30 };
         let mut order = Vec::new();
-        push_sofa(&mut order, &pack, sofa, true);
-        let [(seat, PieceKind::PropBand { rows: under, .. }), (back, PieceKind::PropBand { rows: over, .. })] =
-            order.as_slice()
+        push_sofa(&mut order, &pack, sofa, true, Tie::FixtureOver);
+        let [
+            (seat, PieceKind::PropBand { rows: under, .. }),
+            (back, PieceKind::PropBand { rows: over, .. }),
+        ] = order.as_slice()
         else {
             panic!("a back-view sofa is two bands: {order:?}");
         };
@@ -5507,11 +5788,12 @@ S B B B B B B S
                     FixtureKind::FishTank,
                     FixtureKind::WaterCooler,
                     FixtureKind::Door,
+                    FixtureKind::Clock,
                 ]
                 .iter()
                 .all(|k| kinds.contains(k))
             })
-            .expect("an office has a lounge aquarium, a pantry cooler and an elevator")
+            .expect("an office has a lounge aquarium, a pantry cooler, an elevator and a clock")
     }
 
     /// `frame`'s list at `now`, under a clear sky.
@@ -5601,6 +5883,7 @@ S B B B B B B S
     /// a floor lamp's bulb, and the ceiling of an open elevator's car, while
     /// the room around them darkens.
     #[test]
+    #[cfg(feature = "density-art")]
     fn what_glows_of_its_own_keeps_its_colour_at_night() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = pack();
@@ -5649,7 +5932,7 @@ S B B B B B B S
             let k = dense.blit_at.get();
             lit.iter()
                 .enumerate()
-                .filter(|(_, &b)| b)
+                .filter(|&(_, &b)| b)
                 .map(|(i, _)| (x0 + (i % w) as u16 * k, y0 + (i / w) as u16 * k))
                 .collect()
         };
@@ -5717,8 +6000,25 @@ S B B B B B B S
             neon: crate::floor::NeonLevels::ALERT,
             ..empty_frame(&layout)
         };
-        let list = list_at(&frame, office, 23);
+        let mut list = list_at(&frame, office, 23);
         let pen = Pen::for_pack(scale, &pack);
+        // The neon hangs on plain wall, so a pane is hung in its halo.
+        let neon = crate::layout::NEON_PANEL;
+        let (x, w) = (neon.x + neon.width, 2);
+        let (aw, ah) = (pen.art(w).0, pen.art(neon.height).0);
+        list.pieces.push(Piece {
+            span: Span::new(x, neon.y, w, neon.height, 0),
+            kind: PieceKind::Glass {
+                view: WindowView {
+                    x: pen.art(x).0,
+                    y: pen.art(neon.y).0,
+                    w: aw,
+                    px: vec![Some(theme.surface.window_frame); usize::from(aw * ah)],
+                },
+            },
+            shadow: None,
+            fingerprint: 0,
+        });
         let blank = || {
             RgbBuffer::filled(
                 scale.to_buffer(layout.buf_w),
@@ -5741,7 +6041,7 @@ S B B B B B B S
         let mut night = blank();
         paint_backdrop(&layout, theme, scale, pen, &mut night);
         paint_list(&list, &mut cache, &mut night);
-        let luma = |c: pixtuoid_core::sprite::Rgb| u32::from(c.r) + u32::from(c.g) + u32::from(c.b);
+        let luma = pixtuoid_core::sprite::Rgb::lightness;
         let (mut kept, mut lifted) = (0, 0);
         for y in 0..night.height() {
             for x in 0..night.width() {
@@ -5829,7 +6129,7 @@ S B B B B B B S
             .fixtures()
             .find(|f| matches!(f.kind, FixtureKind::Desk(_)))
             .expect("a desk");
-        let Depth::Sorted(row) = desk.depth else {
+        let Depth::Sorted { row, .. } = desk.depth else {
             panic!("a desk sorts: {desk:?}");
         };
         let [(span, PieceKind::Desk { .. })] =
@@ -5847,6 +6147,114 @@ S B B B B B B S
                 "a walker sorted on {depth}, the desk on {row}"
             );
         }
+    }
+
+    /// A figure at a fixture piece's row paints over it, but for a desk chair
+    /// and a sofa seen from behind, which hide their sitters; a back-view
+    /// sofa's seat, which its sitter sits on, stays under.
+    #[test]
+    fn a_fixture_ties_a_figure_as_the_roster_says() {
+        let pack = pack();
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let mut over = std::collections::BTreeSet::new();
+        for layout in many_layouts() {
+            for fixture in layout.fixtures() {
+                if fixture.depth == Depth::Backdrop {
+                    continue;
+                }
+                use FixtureKind as K;
+                let hides_its_sitter = match fixture.kind {
+                    K::DeskChair(_) | K::LoungeCouch => true,
+                    K::MeetingSofa { faces_away, .. } => faces_away,
+                    K::Desk(_)
+                    | K::FilingCabinet(_)
+                    | K::Station { .. }
+                    | K::Plant { .. }
+                    | K::Pod { .. }
+                    | K::Wall { .. }
+                    | K::MeetingRug { .. }
+                    | K::MeetingTable { .. }
+                    | K::MeetingChair { .. }
+                    | K::CoatRack { .. }
+                    | K::Doormat { .. }
+                    | K::NoticeBoard { .. }
+                    | K::LoungeRug
+                    | K::SideTable
+                    | K::FloorLamp
+                    | K::FishTank
+                    | K::KitchenIsland
+                    | K::PantryMat
+                    | K::IslandMat
+                    | K::WaterCooler
+                    | K::TrashBin
+                    | K::Door
+                    | K::Runner
+                    | K::NeonSign
+                    | K::Clock => false,
+                };
+                for (span, kind) in queued(&layout, &pack, scale, &[], |k| k == fixture.kind) {
+                    let seat = matches!(kind, PieceKind::PropBand { rows: (0, _), .. });
+                    let body = Span::new(span.x0, span.y0, 1, 1, 0);
+                    let figure = occupant_span(body, span.depth, None);
+                    // The figure queued first, so push order alone would draw it under.
+                    let drawn = crate::cutaway::order::depth_sort(vec![
+                        (figure, "figure"),
+                        (span, "fixture"),
+                    ]);
+                    let want = if hides_its_sitter && !seat {
+                        over.insert(crate::layout::roster::tests::kind_key(fixture.kind));
+                        ["figure", "fixture"]
+                    } else {
+                        ["fixture", "figure"]
+                    };
+                    assert_eq!(drawn, want, "{:?}: {kind:?}", fixture.kind);
+                }
+            }
+        }
+        assert_eq!(
+            over.len(),
+            3,
+            "the chair and both sofas hide a sitter: {over:?}"
+        );
+    }
+
+    /// A glass wall band composites over whoever stands behind it at its row.
+    #[test]
+    fn a_wall_band_draws_over_a_figure_at_its_row() {
+        let mut walls = 0;
+        for layout in many_layouts() {
+            let mut order = Vec::new();
+            wall_segments(&layout, &mut order);
+            for (span, _) in order {
+                let figure = occupant_span(Span::new(span.x0, span.y0, 1, 1, 0), span.depth, None);
+                let drawn =
+                    crate::cutaway::order::depth_sort(vec![(span, "wall"), (figure, "figure")]);
+                assert_eq!(drawn, ["figure", "wall"], "{span:?}");
+                walls += 1;
+            }
+        }
+        assert!(walls > 0, "no office had a wall");
+    }
+
+    /// The lounge couch faces the window, so the cutaway draws its back.
+    #[test]
+    fn the_lounge_couch_is_drawn_from_behind() {
+        let pack = pack();
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let layout = many_layouts()
+            .find(|l| l.lounge.is_some())
+            .expect("an office with a lounge");
+        let pieces = queued(&layout, &pack, scale, &[], |k| {
+            k == FixtureKind::LoungeCouch
+        });
+        assert!(
+            !pieces.is_empty()
+                && pieces.iter().all(|(_, k)| matches!(
+                    k,
+                    PieceKind::PropBand { sprite, .. } if *sprite == MEETING_SOFA_NORTH
+                )),
+            "{pieces:?}"
+        );
     }
 
     /// Every fixture the roster yields is drawn: queued as a piece of the list,
@@ -5896,6 +6304,31 @@ S B B B B B B S
         );
     }
 
+    /// The cutaway grounds exactly the fixtures the roster says stand
+    /// ([`Fixture::contact`](crate::layout::Fixture::contact)): the two
+    /// painters cast from one answer.
+    #[test]
+    fn the_cutaway_grounds_what_the_roster_says_stands() {
+        let pack = pack();
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        for layout in many_layouts() {
+            for fixture in layout.fixtures() {
+                let grounded = covering(fixture.kind).is_none()
+                    && queued(&layout, &pack, scale, &[], |k| k == fixture.kind)
+                        .iter()
+                        .any(|(span, kind)| ground_shadow(*span, kind, &pack).is_some());
+                assert_eq!(
+                    grounded,
+                    fixture.contact().is_some(),
+                    "{:?} on {}x{}",
+                    fixture.kind,
+                    layout.buf_w,
+                    layout.buf_h
+                );
+            }
+        }
+    }
+
     /// Layouts across the sizes and seeds that place every kind of piece this
     /// module draws: pods with booths and desks, meeting rooms, a pantry.
     fn many_layouts() -> impl Iterator<Item = Layout> {
@@ -5923,16 +6356,18 @@ S B B B B B B S
         let pack = pack();
         let sofa = crate::layout::Point { x: 40, y: 30 };
         let mut order = Vec::new();
-        push_sofa(&mut order, &pack, sofa, false);
-        let [(
-            span,
-            PieceKind::Prop {
-                art: Art {
-                    flip: Flip::None, ..
+        push_sofa(&mut order, &pack, sofa, false, Tie::FigureOver);
+        let [
+            (
+                span,
+                PieceKind::Prop {
+                    art: Art {
+                        flip: Flip::None, ..
+                    },
+                    ..
                 },
-                ..
-            },
-        )] = order.as_slice()
+            ),
+        ] = order.as_slice()
         else {
             panic!("a front sofa is one prop: {order:?}");
         };
@@ -6155,7 +6590,7 @@ S B B B B B B S
                     .copied()
                     .flatten()
                     .expect("the sofa is opaque at its centre");
-                u32::from(c.r) + u32::from(c.g) + u32::from(c.b)
+                c.lightness()
             };
             assert!(
                 luma(split) > luma(split - 1),
@@ -6180,7 +6615,14 @@ S B B B B B B S
                 scale.to_buffer(span.y0 + bh + desk_front_h() + 1),
                 floor,
             );
-            paint_desk(at, "desk", Screen::Off, &pack, scale, &mut buf);
+            paint_desk(
+                at,
+                "desk",
+                Screen::Off,
+                (&pack, scale),
+                &mut ArtCache::default(),
+                &mut buf,
+            );
             let (x, below) = (
                 scale.to_buffer(at.x + bw / 2),
                 scale.to_buffer(span.y0 + bh),
@@ -6295,11 +6737,14 @@ S B B B B B B S
         let seated = frames.last().expect("a seated frame");
         let office = FloorSession::new()
             .observe(
-                &pixtuoid_core::SceneState::uniform(16),
-                &pack,
+                crate::floor::FloorInputs {
+                    scene: &pixtuoid_core::SceneState::uniform(16),
+                    pack: &pack,
+                    now: std::time::SystemTime::UNIX_EPOCH,
+                    floor: FloorMeta::ground(),
+                    pets: crate::floor::PetInputs::default(),
+                },
                 crate::layout::Size { w: 240, h: 144 },
-                FloorMeta::ground(),
-                std::time::SystemTime::UNIX_EPOCH,
             )
             .expect("lays out");
         assert!(

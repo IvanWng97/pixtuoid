@@ -84,6 +84,13 @@ impl Rgb {
         Rgb::from_oklab_in_gamut(self.to_oklab().mix(other.to_oklab(), t))
     }
 
+    /// How light this color looks, from black at 0 to white at 1: OKLab's
+    /// lightness, the axis [`Rgb::ramp`] steps along and [`Rgb::mix`] runs
+    /// evenly on.
+    pub fn lightness(self) -> f32 {
+        self.to_oklab().l
+    }
+
     fn to_oklab(self) -> Oklab {
         Oklab::from_color(Srgb::new(self.r, self.g, self.b).into_format::<f32>())
     }
@@ -487,35 +494,64 @@ impl RecolorableFrame<'_> {
 
 /// A flat RGB buffer used as a blit target.
 #[derive(Debug, Clone)]
-pub struct RgbBuffer(Grid<Rgb>);
+pub struct RgbBuffer {
+    pixels: Grid<Rgb>,
+    writes: Option<Writes>,
+}
+
+/// A write epoch of the one buffer whose [`RgbBuffer::begin_writes`] minted it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WriteEpoch(u32);
+
+/// Each pixel's epoch of its last noted write.
+#[derive(Debug, Clone)]
+struct Writes {
+    at: Vec<u32>,
+    now: u32,
+    tracking: bool,
+}
+
+impl Writes {
+    fn note(&mut self, i: usize) {
+        if self.tracking {
+            self.at[i] = self.now;
+        }
+    }
+
+    fn note_all(&mut self) {
+        if self.tracking {
+            self.at.fill(self.now);
+        }
+    }
+}
 
 impl std::ops::Deref for RgbBuffer {
     type Target = Grid<Rgb>;
     fn deref(&self) -> &Grid<Rgb> {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for RgbBuffer {
-    fn deref_mut(&mut self) -> &mut Grid<Rgb> {
-        &mut self.0
+        &self.pixels
     }
 }
 
 impl RgbBuffer {
     /// A `width × height` buffer with every pixel set to `fill`.
     pub fn filled(width: u16, height: u16, fill: Rgb) -> Self {
-        RgbBuffer(Grid::filled(width, height, fill))
+        RgbBuffer {
+            pixels: Grid::filled(width, height, fill),
+            writes: None,
+        }
     }
 
     /// Build from a row-major `Vec<Rgb>` (length = `width * height`).
     pub fn from_pixels(width: u16, height: u16, pixels: Vec<Rgb>) -> Self {
-        RgbBuffer(Grid::from_vec(width, height, pixels))
+        RgbBuffer {
+            pixels: Grid::from_vec(width, height, pixels),
+            writes: None,
+        }
     }
 
     #[inline]
     fn raw_index(&self, x: u16, y: u16) -> usize {
-        (y as usize) * (self.0.width as usize) + (x as usize)
+        (y as usize) * (self.pixels.width as usize) + (x as usize)
     }
 
     /// [`raw_index`](Self::raw_index) guarded by a debug-only bounds assert: a
@@ -524,10 +560,10 @@ impl RgbBuffer {
     #[inline]
     fn checked_index(&self, x: u16, y: u16) -> usize {
         debug_assert!(
-            x < self.0.width && y < self.0.height,
+            x < self.pixels.width && y < self.pixels.height,
             "RgbBuffer index out of bounds: ({x},{y}) in {}x{}",
-            self.0.width,
-            self.0.height
+            self.pixels.width,
+            self.pixels.height
         );
         self.raw_index(x, y)
     }
@@ -535,14 +571,14 @@ impl RgbBuffer {
     /// Read the `Rgb` at `(x, y)`. Debug-asserts the point is in bounds;
     /// unchecked in release (the hot blit path clips first).
     pub fn get(&self, x: u16, y: u16) -> Rgb {
-        self.0.as_slice()[self.checked_index(x, y)]
+        self.pixels.as_slice()[self.checked_index(x, y)]
     }
 
     /// Write `rgb` at `(x, y)`. Debug-asserts the point is in bounds; use
     /// [`put_checked`](Self::put_checked) when `(x, y)` may fall outside.
     pub fn put(&mut self, x: u16, y: u16, rgb: Rgb) {
         let i = self.checked_index(x, y);
-        self.0.as_mut_slice()[i] = rgb;
+        self.write(i, rgb);
     }
 
     /// Bounds-checked write: a no-op when `(x, y)` falls outside the buffer.
@@ -550,10 +586,77 @@ impl RgbBuffer {
     /// pre-clip; the hot blit path clips its loop bounds once and keeps the
     /// unchecked [`put`](Self::put).
     pub fn put_checked(&mut self, x: u16, y: u16, rgb: Rgb) {
-        if x < self.0.width && y < self.0.height {
+        if x < self.pixels.width && y < self.pixels.height {
             let i = self.raw_index(x, y);
-            self.0.as_mut_slice()[i] = rgb;
+            self.write(i, rgb);
         }
+    }
+
+    /// Every pixel, row-major, to write in bulk. While
+    /// [`begin_writes`](Self::begin_writes) tracks, the whole buffer counts as
+    /// written this epoch, since a bulk write may touch any of it.
+    pub fn as_mut_slice(&mut self) -> &mut [Rgb] {
+        if let Some(w) = &mut self.writes {
+            w.note_all();
+        }
+        self.pixels.as_mut_slice()
+    }
+
+    /// Resize to `width × height` with every pixel `fill`, which counts as
+    /// writing every pixel.
+    pub fn resize_fill(&mut self, width: u16, height: u16, fill: Rgb) {
+        let reshaped = (width, height) != (self.pixels.width, self.pixels.height);
+        self.pixels.resize_fill(width, height, fill);
+        if let Some(w) = &mut self.writes {
+            if reshaped {
+                w.at.clear();
+                w.at.resize(self.pixels.as_slice().len(), 0);
+            }
+            w.note_all();
+        }
+    }
+
+    fn write(&mut self, i: usize, rgb: Rgb) {
+        self.pixels.as_mut_slice()[i] = rgb;
+        if let Some(w) = &mut self.writes {
+            w.note(i);
+        }
+    }
+
+    /// Start a write epoch and return it, for [`written_in`](Self::written_in):
+    /// unlike a diff, it sees a pixel written in the colour already there.
+    pub fn begin_writes(&mut self) -> WriteEpoch {
+        let n = self.pixels.as_slice().len();
+        let w = self.writes.get_or_insert_with(|| Writes {
+            at: vec![0; n],
+            now: 0,
+            tracking: false,
+        });
+        w.tracking = true;
+        w.now = w.now.wrapping_add(1);
+        if w.now == 0 {
+            w.at.fill(0);
+            w.now = 1;
+        }
+        WriteEpoch(w.now)
+    }
+
+    /// Stop noting writes until the next [`begin_writes`](Self::begin_writes);
+    /// epochs already noted still answer [`written_in`](Self::written_in).
+    pub fn end_writes(&mut self) {
+        if let Some(w) = &mut self.writes {
+            w.tracking = false;
+        }
+    }
+
+    /// Whether `(x, y)` was last written in `epoch` ([`begin_writes`](Self::begin_writes)).
+    pub fn written_in(&self, x: u16, y: u16, epoch: WriteEpoch) -> bool {
+        x < self.pixels.width
+            && y < self.pixels.height
+            && self
+                .writes
+                .as_ref()
+                .is_some_and(|w| w.at.get(self.raw_index(x, y)) == Some(&epoch.0))
     }
 }
 
@@ -563,6 +666,55 @@ mod tests {
 
     const fn rgb(r: u8, g: u8, b: u8) -> Rgb {
         Rgb { r, g, b }
+    }
+
+    #[test]
+    fn a_bulk_write_counts_as_writing_every_pixel() {
+        let mut buf = RgbBuffer::filled(3, 2, rgb(0, 0, 0));
+        let epoch = buf.begin_writes();
+        assert!(!buf.written_in(1, 1, epoch));
+        buf.as_mut_slice()[0] = rgb(9, 9, 9);
+        assert!((0..2).all(|y| (0..3).all(|x| buf.written_in(x, y, epoch))));
+        let epoch = buf.begin_writes();
+        buf.resize_fill(4, 4, rgb(1, 1, 1));
+        assert!(buf.written_in(3, 3, epoch), "a resize writes every pixel");
+    }
+
+    #[test]
+    fn a_write_after_end_writes_leaves_the_last_epoch_standing() {
+        let mut buf = RgbBuffer::filled(2, 1, rgb(0, 0, 0));
+        let epoch = buf.begin_writes();
+        buf.put(0, 0, rgb(9, 9, 9));
+        buf.end_writes();
+        buf.put(1, 0, rgb(9, 9, 9));
+        assert!(buf.written_in(0, 0, epoch));
+        assert!(
+            !buf.written_in(1, 0, epoch),
+            "a write after end_writes is not noted"
+        );
+    }
+
+    #[test]
+    fn a_reshape_forgets_epochs_noted_in_the_old_layout() {
+        let mut buf = RgbBuffer::filled(4, 2, rgb(0, 0, 0));
+        let epoch = buf.begin_writes();
+        buf.put(0, 1, rgb(9, 9, 9));
+        buf.end_writes();
+        buf.resize_fill(2, 4, rgb(0, 0, 0));
+        assert!(!(0..4).any(|y| (0..2).any(|x| buf.written_in(x, y, epoch))));
+    }
+
+    #[test]
+    fn an_epoch_past_the_last_never_reads_an_unwritten_pixel_as_written() {
+        let mut buf = RgbBuffer::filled(2, 1, rgb(0, 0, 0));
+        buf.begin_writes();
+        buf.put(0, 0, rgb(9, 9, 9));
+        if let Some(w) = &mut buf.writes {
+            w.now = u32::MAX;
+        }
+        let epoch = buf.begin_writes();
+        assert!(!buf.written_in(0, 0, epoch));
+        assert!(!buf.written_in(1, 0, epoch));
     }
 
     /// Mid grey, dark hair, skin, and red, blue and yellow, which a lit step
@@ -583,12 +735,31 @@ mod tests {
         let max = format::MAX_RAMP_LEVEL;
         for base in RAMP_BASES {
             assert_eq!(base.ramp(0), base);
-            let lightness: Vec<f32> = (-max..=max).map(|n| base.ramp(n).to_oklab().l).collect();
+            let lightness: Vec<f32> = (-max..=max).map(|n| base.ramp(n).lightness()).collect();
             assert!(
                 lightness.windows(2).all(|w| w[0] < w[1]),
                 "{base:?}: {lightness:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_write_is_noted_in_its_epoch_even_in_the_colour_already_there() {
+        let grey = rgb(128, 128, 128);
+        let mut buf = RgbBuffer::filled(4, 2, grey);
+        let first = buf.begin_writes();
+        buf.put(1, 0, grey);
+        buf.put_checked(9, 9, grey);
+        assert!(buf.written_in(1, 0, first));
+        assert!(!buf.written_in(2, 0, first));
+        assert!(!buf.written_in(9, 9, first));
+        let second = buf.begin_writes();
+        assert!(
+            !buf.written_in(1, 0, second),
+            "an epoch sees only its own writes"
+        );
+        buf.put(3, 1, grey);
+        assert!(buf.written_in(3, 1, second));
     }
 
     #[test]
@@ -598,12 +769,22 @@ mod tests {
         assert_eq!(navy.mix(amber, 1.0), amber);
         assert_eq!(navy.mix(amber, -1.0), navy, "t clamps below");
         assert_eq!(navy.mix(amber, 2.0), amber, "t clamps above");
-        let l = |t: f32| navy.mix(amber, t).to_oklab().l;
+        let l = |t: f32| navy.mix(amber, t).lightness();
         let (l0, l1) = (l(0.0), l(1.0));
         for t in [0.25, 0.5, 0.75] {
             let even = l0 + (l1 - l0) * t;
             assert!((l(t) - even).abs() < 0.01, "t={t}: {} vs {even}", l(t));
         }
+    }
+
+    #[test]
+    fn lightness_runs_from_black_to_white_as_the_eye_sees_it() {
+        assert!(rgb(0, 0, 0).lightness().abs() < 1e-4);
+        assert!((rgb(255, 255, 255).lightness() - 1.0).abs() < 1e-4);
+        assert!(
+            rgb(0, 0, 255).lightness() < rgb(0, 160, 0).lightness(),
+            "perceived, not a channel sum: pure blue is darker than a dimmer green"
+        );
     }
 
     #[test]

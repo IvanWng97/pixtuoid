@@ -26,4 +26,4 @@ metadata:
 7. Visually verify with the **beautify-decoration** skill's snapshot loop — a
    palette that passes the legibility guards can still read badly.
 8. `just preflight full`, then the **two-lens-review** skill — the regenerated
-   stills fire its "Generated art / clips" escalation row.
+   stills fire REVIEW.md's local "Generated art / clips" row.

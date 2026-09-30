@@ -6,31 +6,31 @@
 use std::time::SystemTime;
 
 use anyhow::Result;
-use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::SceneState;
+use pixtuoid_core::sprite::RgbBuffer;
+use ratatui::Terminal;
 use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
-use ratatui::Terminal;
 
 use std::sync::Arc;
 
+use pixtuoid_scene::floor::FloorInputs;
 use pixtuoid_scene::layout::Layout;
 use pixtuoid_scene::pet::PetFrame;
-use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, MascotFrame, PixelCtx};
+use pixtuoid_scene::pixel_painter::{MascotFrame, PixelCtx, render_to_rgb_buffer};
 
 use crate::tui::geometry::CellArea;
 pub(crate) use crate::tui::hit_test::{
     hit_test_agent, hit_test_coffee_machine, hit_test_furniture, hit_test_mascot, hit_test_pet,
 };
+pub(crate) use crate::tui::widgets::{TooltipAt, paint_hover_tooltip};
 pub(super) use crate::tui::widgets::{
     paint_chitchat_bubbles, paint_coffee_tooltip, paint_connection_panel, paint_dashboard,
     paint_elevator_indicator, paint_footer, paint_furniture_tooltip, paint_help_overlay,
     paint_label_widgets, paint_mascot_tooltip, paint_pet_tooltip, paint_theme_picker,
     paint_version_popup, paint_wall_display, paint_welcome,
 };
-pub(crate) use crate::tui::widgets::{paint_hover_tooltip, TooltipAt};
 
 pub use pixtuoid_scene::pet::PetState;
 
@@ -45,9 +45,9 @@ pub struct FloorInfo {
 }
 
 pub struct DrawCtx<'a> {
+    pub world: FloorInputs<'a>,
     pub buf: &'a mut RgbBuffer,
-    /// `buf` is deliberately NOT part of this group: it is a sibling of the
-    /// `FloorCtx` on a `PerFloor`, borrowed disjointly.
+    /// A sibling of `buf` on a `PerFloor`, borrowed disjointly.
     pub store: &'a mut pixtuoid_scene::floor::FloorCtx,
     pub mouse_pos: Option<(u16, u16)>,
     /// Walkable/approach/route debug layer toggle (`w`) — transient, never
@@ -69,13 +69,9 @@ pub struct DrawCtx<'a> {
     pub audio_audible: bool,
     /// Transient volume readout, in percent.
     pub volume_flash: Option<u8>,
-    pub floor: pixtuoid_scene::floor::FloorMeta,
-    pub active_pet: Option<&'a PetState>,
     pub last_pet_pos: Option<PetFrame>,
     /// Every gateway mascot's frame this render, for hover identity.
     pub last_mascots: Vec<MascotFrame>,
-    /// `None` when no pets are configured or none maps to this floor seed.
-    pub floor_pet: Option<&'a pixtuoid_scene::pet::Pet>,
     pub chitchat_state: &'a mut std::collections::HashMap<
         pixtuoid_scene::chitchat::VenueKey,
         pixtuoid_scene::chitchat::ActiveChitchat,
@@ -277,9 +273,6 @@ fn paint_too_small_notice(
 
 pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
-    scene: &SceneState,
-    pack: &Pack,
-    now: SystemTime,
     ctx: &mut DrawCtx<'_>,
 ) -> Result<Option<Arc<Layout>>> {
     let term_size = term.size()?;
@@ -292,7 +285,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let scene_rect = scene_rect(full_rect);
     let theme = ctx.theme;
     let floor_info = ctx.floor_info;
-    let floor = ctx.floor;
+    let world = ctx.world;
+    let FloorInputs { scene, now, .. } = world;
 
     // `per_floor` is copied out of `ctx` before the mutable buffer borrows below,
     // so `FooterStats` can borrow it across the early-returns and the main paint.
@@ -323,7 +317,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let buf_w = scene_rect.width;
     let buf_h = scene_rect.height.saturating_mul(2);
     ctx.buf.resize_fill(buf_w, buf_h, theme.surface.bg_fallback);
-    let Some(layout) = ctx.store.frame_layout(buf_w, buf_h, floor.floor_seed) else {
+    let Some(layout) = ctx.store.frame_layout(buf_w, buf_h, world.floor.floor_seed) else {
         draw_footer_only_frame(term, scene, &footer_stats, theme, &overlays, now)?;
         return Ok(None);
     };
@@ -331,14 +325,9 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let pixel_result = render_to_rgb_buffer(&mut PixelCtx {
         store: &mut *ctx.store,
         buf: &mut *ctx.buf,
-        scene,
+        world,
         layout: &layout,
-        pack,
-        now,
         theme,
-        floor,
-        active_pet: ctx.active_pet,
-        floor_pet: ctx.floor_pet,
         coffee: ctx.coffee,
         chitchat_state: ctx.chitchat_state,
         debug_walkable: ctx.debug_walkable,
@@ -406,34 +395,35 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         if let (Some(agent_id), Some(at)) = (hovered, at) {
             paint_hover_tooltip(f, scene, agent_id, at, now, theme);
         }
-        if hovered.is_none() {
-            if let Some(at) = at {
-                let cell = CellArea::half_block(at.mx, at.my);
-                // `.filter` keeps the pet arm a single branch, so a
-                // present-but-not-hit pet falls through to the next arm.
-                // Coffee before pet here must match the click arms in
-                // `tui::handle_mouse_event`; the agent-wins half above needs no such care,
-                // `hovered.is_none()` skips this block outright.
-                let pet_hit = ctx
-                    .last_pet_pos
-                    .filter(|f| hit_test_pet(f.kind, f.pos, f.anim, cell));
-                if hit_test_coffee_machine(&layout, cell) {
-                    paint_coffee_tooltip(f, at, theme);
-                } else if let Some(PetFrame { anim, kind, .. }) = pet_hit {
-                    let on_cooldown = ctx.active_pet.is_some_and(|p| p.is_active(now));
-                    // `last_pet_pos` is only `Some` on the normal render path,
-                    // where it was written from `floor_pet` — so the kinds agree
-                    // and the `default_name` arm is not a live path.
-                    let display_name = ctx
-                        .floor_pet
-                        .map(|p| p.name.as_str())
-                        .unwrap_or_else(|| kind.default_name());
-                    paint_pet_tooltip(f, kind, anim, on_cooldown, display_name, at, theme);
-                } else if let Some(m) = topmost_mascot_at(&ctx.last_mascots, cell) {
-                    paint_mascot_tooltip(f, m, at, theme);
-                } else if let Some(label) = hit_test_furniture(&layout, cell) {
-                    paint_furniture_tooltip(f, label, at, theme);
-                }
+        if hovered.is_none()
+            && let Some(at) = at
+        {
+            let cell = CellArea::half_block(at.mx, at.my);
+            // `.filter` keeps the pet arm a single branch, so a
+            // present-but-not-hit pet falls through to the next arm.
+            // Coffee before pet here must match the click arms in
+            // `tui::handle_mouse_event`; the agent-wins half above needs no such care,
+            // `hovered.is_none()` skips this block outright.
+            let pet_hit = ctx
+                .last_pet_pos
+                .filter(|f| hit_test_pet(f.kind, f.pos, f.anim, cell));
+            if hit_test_coffee_machine(&layout, cell) {
+                paint_coffee_tooltip(f, at, theme);
+            } else if let Some(PetFrame { anim, kind, .. }) = pet_hit {
+                let on_cooldown = world.pets.petting.is_some_and(|p| p.is_active(now));
+                // `last_pet_pos` is only `Some` on the normal render path,
+                // where it was written from `pets.pet` — so the kinds agree
+                // and the `default_name` arm is not a live path.
+                let display_name = world
+                    .pets
+                    .pet
+                    .map(|p| p.name.as_str())
+                    .unwrap_or_else(|| kind.default_name());
+                paint_pet_tooltip(f, kind, anim, on_cooldown, display_name, at, theme);
+            } else if let Some(m) = topmost_mascot_at(&ctx.last_mascots, cell) {
+                paint_mascot_tooltip(f, m, at, theme);
+            } else if let Some(label) = hit_test_furniture(&layout, cell) {
+                paint_furniture_tooltip(f, label, at, theme);
             }
         }
         paint_overlays(f, &overlays, now, actual_full, theme);

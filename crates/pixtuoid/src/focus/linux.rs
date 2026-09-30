@@ -33,9 +33,9 @@ enum LinuxFocusChannel {
 /// `SWAYSOCK` behind, and reading that as "sway is running" routes both halves
 /// to `swaymsg` on a host where EWMH would have worked.
 fn detect_channel() -> LinuxFocusChannel {
-    if crate::install::io::nonempty_env(SWAY_ENV).is_some() {
+    if pixtuoid_core::platform::path_env(SWAY_ENV).is_some() {
         LinuxFocusChannel::Sway
-    } else if crate::install::io::nonempty_env(HYPRLAND_ENV).is_some() {
+    } else if pixtuoid_core::platform::path_env(HYPRLAND_ENV).is_some() {
         LinuxFocusChannel::Hyprland
     } else {
         LinuxFocusChannel::X11
@@ -111,10 +111,9 @@ fn x11_window_of(pid: i32) -> Option<u32> {
         if let Ok(Ok(prop)) = conn
             .get_property(false, win, net_wm_pid, AtomEnum::CARDINAL, 0, 1)
             .map(|c| c.reply())
+            && prop.value32().and_then(|mut v| v.next()) == Some(pid as u32)
         {
-            if prop.value32().and_then(|mut v| v.next()) == Some(pid as u32) {
-                return Some(win);
-            }
+            return Some(win);
         }
     }
     None

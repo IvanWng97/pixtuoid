@@ -5,13 +5,13 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::ground::Ellipse;
+use crate::dither::FALLOFF_TONES;
 use crate::lighting::Emitter;
-use crate::pixel_painter::palette::{blend_rgb, BLACK, WHITE};
+use crate::pixel_painter::palette::{BLACK, WHITE, blend_rgb};
 use crate::theme::Theme;
 
 /// Float ellipse geometry for [`paint_radial_falloff`] — all `f32`, so a caller
-/// can centre on `(w-1)/2` (half-cell correct) as well as an integer cell.
+/// can centre on `(w-1)/2` (half-cell correct).
 pub(in crate::pixel_painter) struct RadialFalloff {
     pub min_x: u16,
     pub max_x: u16,
@@ -23,16 +23,9 @@ pub(in crate::pixel_painter) struct RadialFalloff {
     pub ry_norm: f32,
 }
 
-/// How many flat tones a falloff steps through from its peak down, the seam
-/// between each pair dithered.
-const FALLOFF_TONES: u8 = 3;
-const _: () = assert!(FALLOFF_TONES > 0);
-
-/// The composite every light and the shadows share: blend `color` over the
-/// caller-clipped `xs` × `ys` at each pixel's `t(x, y)`, stepped to one of
-/// [`FALLOFF_TONES`] tones of `peak` by [`crate::dither::stepped`]; `None`
-/// leaves the pixel alone. A light owns its falloff SHAPE and its clip, never
-/// the blend.
+/// The composite every light shares: [`blend_tone`] over the caller-clipped
+/// `xs` × `ys` at each pixel's `t(x, y)`; `None` leaves the pixel alone. A
+/// light owns its falloff SHAPE and its clip, never the blend.
 fn blend_falloff(
     buf: &mut RgbBuffer,
     xs: std::ops::Range<u16>,
@@ -44,12 +37,33 @@ fn blend_falloff(
     for y in ys {
         for x in xs.clone() {
             if let Some(t) = t(x, y) {
-                let tone = crate::dither::stepped(t, peak, FALLOFF_TONES, x, y);
-                if tone > 0.0 {
-                    let cur = buf.get(x, y);
-                    buf.put(x, y, blend_rgb(cur, color, tone));
-                }
+                blend_tone(buf, x, y, color, t, peak);
             }
+        }
+    }
+}
+
+/// Blend `color` over the pixel at `(x, y)` by `level`, stepped to one of
+/// [`FALLOFF_TONES`] tones of `peak`.
+fn blend_tone(buf: &mut RgbBuffer, x: u16, y: u16, color: Rgb, level: f32, peak: f32) {
+    let tone = crate::dither::stepped(level, peak, FALLOFF_TONES, x, y);
+    if tone > 0.0 {
+        let cur = buf.get(x, y);
+        buf.put(x, y, blend_rgb(cur, color, tone));
+    }
+}
+
+/// The floor's shadows ([`Depths`](crate::ground::Depths) at one cell a
+/// pixel) in `color`, `strength` deep at a shadow's centre.
+pub(in crate::pixel_painter) fn paint_shadows(
+    buf: &mut RgbBuffer,
+    cells: &[(u16, u16, f32)],
+    strength: f32,
+    color: Rgb,
+) {
+    for &(x, y, d) in cells {
+        if x < buf.width() && y < buf.height() {
+            blend_tone(buf, x, y, color, d * strength, strength);
         }
     }
 }
@@ -73,30 +87,6 @@ pub(in crate::pixel_painter) fn paint_radial_falloff(
             let ny = (y as f32 - g.cy) / g.ry_norm;
             crate::ground::falloff(nx, ny).map(|f| f * strength)
         },
-    );
-}
-
-/// Blend `color` over an integer-centred ellipse: a floor shadow.
-fn paint_ellipse_blend(buf: &mut RgbBuffer, e: Ellipse, strength: f32, color: Rgb) {
-    if e.half_w == 0 || e.half_h == 0 || strength <= 0.0 {
-        return;
-    }
-    let ((min_x, min_y), (max_x, max_y)) = e.bounds();
-    let (max_x, max_y) = (max_x.min(buf.width()), max_y.min(buf.height()));
-    paint_radial_falloff(
-        buf,
-        RadialFalloff {
-            min_x,
-            max_x,
-            min_y,
-            max_y,
-            cx: e.cx as f32,
-            cy: e.cy as f32,
-            rx_norm: e.half_w as f32,
-            ry_norm: e.half_h as f32,
-        },
-        strength,
-        color,
     );
 }
 
@@ -307,23 +297,12 @@ pub(in crate::pixel_painter) fn paint_corridor_runner(
     }
 }
 
-/// Elliptical contact shadow under furniture / characters — grounds
-/// floating sprites so they read as standing on the floor, not hovering.
-pub(in crate::pixel_painter) fn paint_shadow(
-    buf: &mut RgbBuffer,
-    ellipse: Ellipse,
-    strength: f32,
-    theme: &Theme,
-) {
-    paint_ellipse_blend(buf, ellipse, strength, theme.office.shadow);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     use crate::floor::NeonLevels;
-    use crate::layout::{Point, NEON_PANEL_BORDER, NEON_PANEL_H, NEON_PANEL_W};
+    use crate::layout::{NEON_PANEL_BORDER, NEON_PANEL_H, NEON_PANEL_W, Point};
     use crate::lighting::{EmitterKind, Light, NEON_HALO_RADIUS};
 
     fn look(levels: NeonLevels) -> NeonLook {
@@ -451,73 +430,29 @@ mod tests {
         assert!((0..40).all(|y| (0..60).all(|x| buf.get(x, y) == WALL)));
     }
 
+    /// A shadow darkens the floor under its solid at strength, and paints
+    /// nothing at none.
     #[test]
-    fn ellipse_blend_degenerate_is_a_noop() {
-        let theme = &crate::theme::NORMAL;
+    fn a_shadow_paints_only_at_strength() {
+        let shadow = crate::theme::NORMAL.office.shadow;
         let fill = Rgb {
             r: 30,
             g: 30,
             b: 30,
         };
+        let cells: Vec<_> =
+            crate::ground::Depths::of(std::iter::once(crate::ground::Contact::under(5, 10, 10)), 1)
+                .expect("one contact")
+                .cells()
+                .collect();
         let mut buf = RgbBuffer::filled(20, 20, fill);
-        paint_ellipse_blend(
-            &mut buf,
-            Ellipse {
-                cx: 10,
-                cy: 10,
-                half_w: 0,
-                half_h: 5,
-            },
-            0.8,
-            theme.office.shadow,
+        paint_shadows(&mut buf, &cells, 0.0, shadow);
+        assert!(
+            buf.as_slice().iter().all(|&p| p == fill),
+            "none at no strength"
         );
-        for y in 0..buf.height() {
-            for x in 0..buf.width() {
-                assert_eq!(buf.get(x, y), fill, "half_w==0 must paint nothing");
-            }
-        }
-        let mut buf = RgbBuffer::filled(20, 20, fill);
-        paint_ellipse_blend(
-            &mut buf,
-            Ellipse {
-                cx: 10,
-                cy: 10,
-                half_w: 5,
-                half_h: 5,
-            },
-            0.0,
-            theme.office.shadow,
-        );
-        for y in 0..buf.height() {
-            for x in 0..buf.width() {
-                assert_eq!(buf.get(x, y), fill, "strength<=0 must paint nothing");
-            }
-        }
-    }
-
-    // Negative control for `ellipse_blend_degenerate_is_a_noop`: without this a
-    // painter that never painted at all would pass it vacuously.
-    #[test]
-    fn ellipse_blend_paints_when_valid() {
-        let theme = &crate::theme::NORMAL;
-        let fill = Rgb {
-            r: 30,
-            g: 30,
-            b: 30,
-        };
-        let mut buf = RgbBuffer::filled(20, 20, fill);
-        paint_ellipse_blend(
-            &mut buf,
-            Ellipse {
-                cx: 10,
-                cy: 10,
-                half_w: 5,
-                half_h: 5,
-            },
-            0.9,
-            theme.office.shadow,
-        );
-        assert_ne!(buf.get(10, 10), fill, "the ellipse centre must be tinted");
+        paint_shadows(&mut buf, &cells, 0.9, shadow);
+        assert_ne!(buf.get(10, 10), fill, "under the solid's middle");
     }
 
     /// A painter that lights a cell outside an emitter's bounds breaks every

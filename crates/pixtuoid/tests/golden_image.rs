@@ -14,10 +14,10 @@ use std::time::{Duration, SystemTime};
 use pixtuoid::tui::renderer::draw_scene;
 use pixtuoid_core::state::{ActivityState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
-use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
+use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
 use pixtuoid_scene::theme;
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 
 fn now() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_292_800)
@@ -85,8 +85,8 @@ fn render_hash(scene: &SceneState, now: SystemTime, t: &theme::Theme, floor_seed
     let backend = TestBackend::new(96, 36);
     let mut term = Terminal::new(backend).unwrap();
     let pack = load_sprite_pack(PackSource::Bundled).unwrap();
-    make_draw_ctx!(draw_ctx, theme: t, floor_seed: floor_seed);
-    draw_scene(&mut term, scene, &pack, now, &mut draw_ctx).unwrap();
+    make_draw_ctx!(draw_ctx, scene, &pack, now, theme: t, floor_seed: floor_seed);
+    draw_scene(&mut term, &mut draw_ctx).unwrap();
 
     let mut hasher = DefaultHasher::new();
     for px in draw_ctx.buf.as_slice() {

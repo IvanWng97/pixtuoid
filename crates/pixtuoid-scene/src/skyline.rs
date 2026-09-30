@@ -419,13 +419,9 @@ impl CityStrip {
                     let Some(materials) = pack.city_materials() else {
                         continue;
                     };
-                    let (art, grow) = match building.art(density) {
-                        Some(art) => (art, 1),
-                        None => match building.art(NonZeroU16::MIN) {
-                            Some(base) => (base, d),
-                            None => continue,
-                        },
-                    };
+                    let (art, grow) = building
+                        .variant(density)
+                        .map_or((building.base(), d), |a| (a, 1));
                     let frame = match recoloured
                         .iter()
                         .position(|(n, p, _)| *n == building.name() && *p == plane)
@@ -470,10 +466,11 @@ impl CityStrip {
     }
 
     fn put(&mut self, x: i32, y: i32, colour: Rgb) {
-        if let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) {
-            if x < self.w && y < self.h {
-                self.px[usize::from(y) * usize::from(self.w) + usize::from(x)] = Some(colour);
-            }
+        if let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y))
+            && x < self.w
+            && y < self.h
+        {
+            self.px[usize::from(y) * usize::from(self.w) + usize::from(x)] = Some(colour);
         }
     }
 
@@ -504,7 +501,7 @@ fn pick_in(range: &RangeInclusive<u16>, n: u32) -> u16 {
 /// A deterministic hash for the city: the same office always gets the same
 /// skyline and the same lit windows, where a per-frame reshuffle would flicker.
 fn hash(n: u32) -> u32 {
-    let mut v = n.wrapping_mul(0x9E37_79B9);
+    let mut v = n.wrapping_mul(crate::GOLDEN_GAMMA_32);
     v ^= v >> 15;
     v = v.wrapping_mul(0x85EB_CA6B);
     v ^ (v >> 13)
@@ -657,6 +654,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "density-art")]
     fn a_denser_strip_draws_the_denser_art_on_the_same_city() {
         let pack = pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");

@@ -10,7 +10,7 @@ pub(crate) mod kimi;
 // cross-crate reachable — only its env filters and owner-only file-mode
 // helpers (below) are re-exported.
 pub(crate) mod io;
-pub use io::{nonempty, nonempty_abs_env, nonempty_env, owner_only_create, tighten_to_owner_only};
+pub use io::{nonempty_abs_env, owner_only_create, tighten_to_owner_only};
 pub(crate) mod dsh;
 pub(crate) mod merge;
 pub(crate) mod omp;
@@ -23,9 +23,9 @@ pub(crate) mod verify;
 
 use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
-use target::{BinaryStrategy, Target, BACKUP_SUFFIX};
+use target::{BACKUP_SUFFIX, BinaryStrategy, Target};
 
 /// The idempotency sentinel stamped on every hook entry pixtuoid installs — the
 /// config-file targets key install/uninstall/detect on this, not the command shape.
@@ -80,7 +80,7 @@ pub(crate) fn verify_target(
             return verify::SchemaVerifyResult {
                 issues: vec!["no config path resolves (no home dir)".into()],
                 notes: vec![],
-            }
+            };
         }
     };
     let content = match io::read_config(&path) {
@@ -88,14 +88,14 @@ pub(crate) fn verify_target(
             return verify::SchemaVerifyResult {
                 issues: vec!["config is empty — hooks are not installed".into()],
                 notes: vec![],
-            }
+            };
         }
         Ok(c) => c,
         Err(_) => {
             return verify::SchemaVerifyResult {
                 issues: vec![format!("config unreadable: {}", crate::display_path(&path))],
                 notes: vec![],
-            }
+            };
         }
     };
     let parse = (t.verify_schema)(&content);
@@ -356,7 +356,7 @@ pub(crate) fn install_target(
     let path = config
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
-    let env_hook = io::nonempty_env(io::HOOK_OVERRIDE_ENV);
+    let env_hook = pixtuoid_core::platform::path_env(io::HOOK_OVERRIDE_ENV);
     let (binary, explicit_hook) =
         resolve_hook_binary_from(t, hook_path, env_hook, io::default_hook_binary)?;
     let hook_cmd = (t.hook_command)(&binary, explicit_hook)?;

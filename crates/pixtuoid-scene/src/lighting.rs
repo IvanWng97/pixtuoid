@@ -12,7 +12,6 @@ use pixtuoid_core::{AgentSlot, ToolKind};
 use crate::anim::epoch_ms;
 use crate::atmosphere::Look;
 use crate::floor::NeonLevels;
-use crate::ground::Ellipse;
 use crate::layout::{Facing, Layout, Point, WINDOW_W};
 
 /// The floor lamp's level at full dark, before the room's own level.
@@ -39,9 +38,8 @@ const MONITOR_HALO_INTENSITY: f32 = 0.8;
 /// The share of it the halo's centre gets.
 const MONITOR_HALO_SHARE: f32 = 0.4;
 /// The halo's column offset from the desk: the middle of the screen's glass.
-const MONITOR_HALO_DX: u16 = (*crate::pixel_painter::SCREEN_GLASS_COLS.start()
-    + *crate::pixel_painter::SCREEN_GLASS_COLS.end())
-    / 2;
+const MONITOR_HALO_DX: u16 =
+    (*crate::layout::SCREEN_GLASS_COLS.start() + *crate::layout::SCREEN_GLASS_COLS.end()) / 2;
 /// The halo's footprint.
 const MONITOR_HALO_W: u16 = 5;
 const MONITOR_HALO_H: u16 = 2;
@@ -127,17 +125,17 @@ pub(crate) struct Emitter {
 }
 
 impl Emitter {
-    /// The first column and row it can light, and the ones just past the last,
-    /// like [`Ellipse::bounds`]: [`Self::level_at`] is `None` everywhere else.
+    /// The first column and row it can light, and the ones just past the last:
+    /// [`Self::level_at`] is `None` everywhere else.
     pub(crate) fn bounds(&self) -> ((u16, u16), (u16, u16)) {
         match self.light {
-            Light::Halo { centre, radius, .. } => Ellipse {
-                cx: centre.x,
-                cy: centre.y,
-                half_w: radius,
-                half_h: radius,
-            }
-            .bounds(),
+            Light::Halo { centre, radius, .. } => (
+                (
+                    centre.x.saturating_sub(radius),
+                    centre.y.saturating_sub(radius),
+                ),
+                (centre.x + radius, centre.y + radius),
+            ),
             Light::Glow { at, w, h, reach } => (
                 (at.x.saturating_sub(reach), at.y.saturating_sub(reach)),
                 (at.x + w + reach, at.y + h + reach),

@@ -1,5 +1,5 @@
 use super::*;
-use crate::pose::{is_aimless_cycle, waypoint_index_for_cycle};
+use crate::pose::{RouteRig, is_aimless_cycle, waypoint_index_for_cycle};
 use pixtuoid_core::{AgentId, GlobalDeskIndex};
 
 fn id() -> AgentId {
@@ -60,8 +60,8 @@ fn path_len_multi_segment_sums() {
 use crate::layout::Layout;
 use crate::pathfind::Router;
 use crate::pose::{
-    dwell_ms, est_wander_cycle_ms, seated_dwell_ms, stale_resume_gap_ms, takes_trip,
-    WANDER_DWELL_EST_MS,
+    WANDER_DWELL_EST_MS, dwell_ms, est_wander_cycle_ms, seated_dwell_ms, stale_resume_gap_ms,
+    takes_trip,
 };
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
@@ -114,8 +114,7 @@ impl Router for FixedLen {
         from: Point,
         _to: Point,
     ) -> Vec<Point> {
-        // Each orthogonal 1 px step is 10 octile units.
-        let steps = (self.octile_len / 10) as u16;
+        let steps = (self.octile_len / crate::pathfind::OCTILE_STRAIGHT_COST) as u16;
         let mid = Point {
             x: from.x + steps / 2,
             y: from.y,
@@ -195,7 +194,8 @@ fn phase_kind(phase: WanderPhase) -> PhaseKind {
     }
 }
 
-/// [`WanderRig::advance_until_leaves`]'s poll step.
+/// The wander tests' poll step, well under [`stale_resume_gap_ms`] so a poll
+/// reads as per-frame rendering, never an off-screen gap.
 const POLL_STEP_MS: u64 = 1_000;
 
 /// One agent's wander machine over the standard layout: the slot plus every
@@ -203,9 +203,7 @@ const POLL_STEP_MS: u64 = 1_000;
 struct WanderRig<R: Router> {
     slot: AgentSlot,
     layout: Layout,
-    router: R,
-    overlay: OccupancyOverlay,
-    motion: HashMap<AgentId, MotionState>,
+    route: RouteRig<R>,
 }
 
 impl<R: Router> WanderRig<R> {
@@ -213,9 +211,7 @@ impl<R: Router> WanderRig<R> {
         Self {
             slot,
             layout: layout(),
-            router,
-            overlay: OccupancyOverlay::new(),
-            motion: HashMap::new(),
+            route: RouteRig::new(router),
         }
     }
 
@@ -224,14 +220,15 @@ impl<R: Router> WanderRig<R> {
             &self.slot,
             now,
             &self.layout,
-            &mut self.router,
-            &self.overlay,
-            &mut self.motion,
+            &mut self.route.router,
+            &self.route.overlay,
+            &mut self.route.motion,
         );
     }
 
     fn state(&self) -> &MotionState {
-        self.motion
+        self.route
+            .motion
             .get(&self.slot.agent_id)
             .expect("state inserted")
     }
@@ -246,10 +243,7 @@ impl<R: Router> WanderRig<R> {
     }
 
     /// Poll [`WanderRig::advance`] until the agent's phase KIND is no longer
-    /// `from_phase`, returning the new `now`. [`POLL_STEP_MS`] stays well under the
-    /// `stale_resume_gap_ms` trigger, so a long seated/dwell beat is crossed
-    /// exactly as real per-frame rendering would, never looking like an
-    /// off-screen gap.
+    /// `from_phase`, returning the new `now`.
     fn advance_until_leaves(
         &mut self,
         mut now: SystemTime,
@@ -258,6 +252,7 @@ impl<R: Router> WanderRig<R> {
     ) -> SystemTime {
         let start = now;
         while self
+            .route
             .motion
             .get(&self.slot.agent_id)
             .map(|m| phase_kind(m.wander.phase))
@@ -333,10 +328,10 @@ fn non_trip_cycle_stays_seated() {
     let mut rig = WanderRig::new(slot, Straight);
 
     rig.advance(now);
-    // Poll well past the longest seated dwell (30 s).
+    let past_dwell = now + Duration::from_millis(seated_dwell_ms(stay_id) + POLL_STEP_MS);
     let mut t = now;
-    for _ in 0..40 {
-        t += Duration::from_millis(1_000);
+    while t < past_dwell {
+        t += Duration::from_millis(POLL_STEP_MS);
         rig.advance(t);
         assert!(
             matches!(rig.state().wander.phase, WanderPhase::Seated),
@@ -482,7 +477,7 @@ fn dwell_time_independent_of_path_length() {
 
 #[test]
 fn far_waypoint_full_cycle_is_longer() {
-    use crate::physics::{walk_profile, WalkIntent};
+    use crate::physics::{WalkIntent, walk_profile};
 
     let trip_id = trip_agent("far");
     let seated_dur = seated_dwell_ms(trip_id);
@@ -533,7 +528,7 @@ fn settle_collapses_a_seat_pair_and_gives_it_back() {
 
 #[test]
 fn snapshot_leg_profile_measures_the_routed_leg_plus_settles() {
-    use crate::physics::{walk_profile, WalkIntent};
+    use crate::physics::{WalkIntent, walk_profile};
 
     let mask = WalkableMask::new_open(64, 64);
     let overlay = OccupancyOverlay::new();
@@ -585,7 +580,7 @@ fn snapshot_leg_profile_measures_the_routed_leg_plus_settles() {
 
 #[test]
 fn arrival_pause_holds_walking_out_phase() {
-    use crate::physics::{walk_arrived, walk_profile, WalkIntent};
+    use crate::physics::{WalkIntent, walk_arrived, walk_profile};
 
     let trip_id = trip_agent("pause");
     let now = t0();
@@ -768,7 +763,7 @@ fn long_dwell_never_trips_stale_resume_on_screen() {
 
 use crate::pose::jitter_dest;
 
-/// A trip agent whose ±4px goal jitter is nonzero, so the lockstep
+/// A trip agent whose [`crate::pose::JITTER_MAX_PX`] goal jitter is nonzero, so the lockstep
 /// assertions below have teeth.
 fn jittering_trip_agent(prefix: &str) -> AgentId {
     let probe = Point { x: 50, y: 50 };
@@ -793,7 +788,12 @@ fn wander_out_profile_routes_to_the_jittered_goal_the_render_uses() {
 
     let ms = rig.state();
     assert!(matches!(ms.wander.phase, WanderPhase::WalkingOut(_)));
-    let (_, routed_to) = *rig.router.calls.last().expect("the trip snapshot routed");
+    let (_, routed_to) = *rig
+        .route
+        .router
+        .calls
+        .last()
+        .expect("the trip snapshot routed");
     assert_eq!(
         routed_to,
         jitter_dest(trip_id, ms.wander.target.dest),

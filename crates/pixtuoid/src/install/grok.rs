@@ -19,7 +19,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
@@ -64,7 +64,7 @@ pub(crate) const GROK_EVENTS: &[&str] = &[
 /// `grok_home()`'s degenerate fallback would land hooks grok never reads.
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     if !home_resolvable(
-        crate::install::io::nonempty_env("GROK_HOME").as_deref(),
+        pixtuoid_core::platform::path_env("GROK_HOME").as_deref(),
         pixtuoid_core::platform::user_home_opt().as_deref(),
     ) {
         anyhow::bail!(
@@ -92,11 +92,7 @@ pub(crate) fn detect_installed() -> bool {
 }
 
 fn grok_binary_name() -> &'static str {
-    if cfg!(windows) {
-        "grok.exe"
-    } else {
-        "grok"
-    }
+    if cfg!(windows) { "grok.exe" } else { "grok" }
 }
 
 /// grok's own shell heuristic, mirrored so `hook_command` knows when quoting is
@@ -138,10 +134,10 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     {
         // The 8.3 short name is metachar-free by construction, so the command
         // drops back to the direct-exec path — immune to grok's shell cascade.
-        if let Some(short) = crate::install::hook_cmd::windows_short_path(path) {
-            if !needs_shell_route(&short) {
-                return Ok(short);
-            }
+        if let Some(short) = crate::install::hook_cmd::windows_short_path(path)
+            && !needs_shell_route(&short)
+        {
+            return Ok(short);
         }
         // 8.3 disabled on the volume: the PowerShell call-operator form, correct
         // for grok's DEFAULT shells. A Git-Bash or `GROK_SHELL=cmd` setup with a
@@ -243,10 +239,10 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
                          would attribute to claude-code and be dropped; reconnect grok"
                     ));
                 }
-                if let Some(cmd) = handler.get("command").and_then(|c| c.as_str()) {
-                    if let Some(path) = extract_shim_path(cmd) {
-                        shim = ShimRef::Absolute(path);
-                    }
+                if let Some(cmd) = handler.get("command").and_then(|c| c.as_str())
+                    && let Some(path) = extract_shim_path(cmd)
+                {
+                    shim = ShimRef::Absolute(path);
                 }
             }
         }
@@ -401,17 +397,21 @@ mod tests {
 
         let mut doc: Value = serde_json::from_str(&installed.content).unwrap();
         doc["hooks"]["Stop"][0]["hooks"][0]["env"] = json!({});
-        assert!(verify_schema(&doc.to_string())
-            .issues
-            .iter()
-            .any(|i| i.contains("PIXTUOID_SOURCE")));
+        assert!(
+            verify_schema(&doc.to_string())
+                .issues
+                .iter()
+                .any(|i| i.contains("PIXTUOID_SOURCE"))
+        );
 
         let mut doc: Value = serde_json::from_str(&installed.content).unwrap();
         doc["hooks"]["SessionStart"][0]["matcher"] = json!("*");
-        assert!(verify_schema(&doc.to_string())
-            .issues
-            .iter()
-            .any(|i| i.contains("matcher")));
+        assert!(
+            verify_schema(&doc.to_string())
+                .issues
+                .iter()
+                .any(|i| i.contains("matcher"))
+        );
 
         assert!(!verify_schema(r#"{"hooks":{}}"#).issues.is_empty());
         assert!(!verify_schema("not json").issues.is_empty());

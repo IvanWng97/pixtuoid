@@ -11,15 +11,16 @@ use std::time::SystemTime;
 
 use anyhow::{Context as _, Result};
 use clap::Parser;
-use pixtuoid::tui::renderer::{draw_scene, DrawCtx};
+use pixtuoid::tui::renderer::{DrawCtx, draw_scene};
 use pixtuoid_core::SceneState;
-use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
-use ratatui::backend::TestBackend;
+use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
+use pixtuoid_scene::floor::{FloorInputs, PetInputs};
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 
 use crate::encode::{
-    centered_crop, compute_crop_rect, debug_paint_walkable_overlay, save_as_gif,
-    save_backend_as_png, save_renderer_gif, GifJob, Timeline,
+    AnimJob, Timeline, centered_crop, compute_crop_rect, debug_paint_walkable_overlay,
+    save_animation, save_backend_as_png, save_renderer_animation,
 };
 use crate::scenes::{
     anim_scene, capture_live_scene, dashboard_scene, inject_openclaw_presence, meeting_scene,
@@ -33,6 +34,7 @@ const CELL_H: u32 = 16;
 
 #[derive(Debug, Parser)]
 #[command(about = "Render the TUI off-screen to a PNG for verification")]
+#[command(group(clap::ArgGroup::new("animation").args(["gif", "anim", "proof"]).multiple(true)))]
 struct SnapshotArgs {
     /// Output PNG path.
     #[arg(default_value = "snapshot.png")]
@@ -268,8 +270,10 @@ struct SnapshotArgs {
           "crop_agent", "crop_furniture", "crop_mascot", "debug_walkable"])]
     proof: Option<std::path::PathBuf>,
 
-    /// Output directory for --proof frame sequences (wide/ + tall/ created inside).
-    #[arg(long, value_hint = clap::ValueHint::DirPath, requires = "proof")]
+    /// Output directory for an animation's lossless PNG frames (`f0001.png`, …):
+    /// --gif/--anim write them here INSTEAD of the GIF at OUT; --proof writes its
+    /// two sequences into wide/ + tall/ inside it.
+    #[arg(long, value_hint = clap::ValueHint::DirPath, requires = "animation")]
     frames_dir: Option<std::path::PathBuf>,
 
     /// --proof frame rate.
@@ -470,8 +474,9 @@ fn main() -> Result<()> {
              TuiRenderer derives per-floor seeds internally"
         );
     }
-    let gif_job = GifJob {
+    let anim_job = AnimJob {
         path: &args.out,
+        frames_dir: args.frames_dir.as_deref(),
         cols,
         rows,
         timeline: Timeline {
@@ -483,24 +488,25 @@ fn main() -> Result<()> {
         pack: &pack,
         theme,
     };
+    let anim_dest = args.frames_dir.as_deref().unwrap_or(&args.out);
     if !navigations.is_empty() || !pet_vec.is_empty() {
-        save_renderer_gif(&gif_job, term, &navigations, pet_vec)?;
-        println!("wrote {}", args.out.display());
+        save_renderer_animation(&anim_job, term, &navigations, pet_vec)?;
+        println!("wrote {}", anim_dest.display());
         return Ok(());
     }
 
     let mut floor_meta = pixtuoid_scene::floor::FloorMeta::ground();
     floor_meta.floor_seed = args.floor_seed;
     if args.gif || args.anim.is_some() {
-        save_as_gif(
-            &gif_job,
+        save_animation(
+            &anim_job,
             &mut term,
             &mut floor,
             floor_meta,
             skip_ms,
             args.debug_walkable,
         )?;
-        println!("wrote {}", args.out.display());
+        println!("wrote {}", anim_dest.display());
         return Ok(());
     }
 
@@ -679,6 +685,13 @@ fn main() -> Result<()> {
         socket_line: connection_socket_line,
     };
     let mut draw_ctx = DrawCtx {
+        world: FloorInputs {
+            scene: &scene,
+            pack: &pack,
+            now,
+            floor: floor_meta,
+            pets: PetInputs::default(),
+        },
         buf: &mut floor.buf,
         store: &mut floor.ctx,
         mouse_pos: args.hover.as_deref().and_then(|s| {
@@ -696,11 +709,8 @@ fn main() -> Result<()> {
         gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
         audio_audible: false,
         volume_flash: None,
-        floor: floor_meta,
-        active_pet: None,
         last_pet_pos: None,
         last_mascots: Vec::new(),
-        floor_pet: None,
         chitchat_state: &mut chitchat_state,
         chitchat_bubbles: Vec::new(),
         coffee: &std::collections::HashMap::new(),
@@ -713,7 +723,7 @@ fn main() -> Result<()> {
         connection: &connection_frame,
         onboarding: &onboarding_frame,
     };
-    draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
+    draw_scene(&mut term, &mut draw_ctx)?;
 
     if args.debug_walkable {
         debug_paint_walkable_overlay(&mut term, args.floor_seed)?;
@@ -893,9 +903,11 @@ mod tests {
         let scene = sample_scene(now, 12, 12);
         let history = pixtuoid_scene::pose::PoseHistory::new();
         let args = crop_args(&[]);
-        assert!(compute_crop_rect(&args, &scene, &history, 192, 64, now)
-            .unwrap()
-            .is_none());
+        assert!(
+            compute_crop_rect(&args, &scene, &history, 192, 64, now)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -916,14 +928,16 @@ mod tests {
     #[test]
     fn crop_flags_conflict_with_gif_and_anim() {
         assert!(SnapshotArgs::try_parse_from(["snapshot", "--gif", "--crop-agent", "x"]).is_err());
-        assert!(SnapshotArgs::try_parse_from([
-            "snapshot",
-            "--anim",
-            "couch",
-            "--crop-furniture",
-            "pantry"
-        ])
-        .is_err());
+        assert!(
+            SnapshotArgs::try_parse_from([
+                "snapshot",
+                "--anim",
+                "couch",
+                "--crop-furniture",
+                "pantry"
+            ])
+            .is_err()
+        );
     }
 
     #[test]
@@ -960,28 +974,46 @@ mod tests {
             SnapshotArgs::try_parse_from(["snapshot", "--gif", "--warmup-secs", "13.5"]).is_ok()
         );
         assert!(SnapshotArgs::try_parse_from(["snapshot", "--warmup-secs", "5"]).is_err());
-        assert!(SnapshotArgs::try_parse_from([
-            "snapshot",
-            "--gif",
-            "--warmup-secs",
-            "5",
-            "--anim",
-            "sofa"
-        ])
-        .is_err());
+        assert!(
+            SnapshotArgs::try_parse_from([
+                "snapshot",
+                "--gif",
+                "--warmup-secs",
+                "5",
+                "--anim",
+                "sofa"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn frames_dir_needs_an_animation() {
+        for ok in [
+            vec!["snapshot", "--gif", "--frames-dir", "d"],
+            vec!["snapshot", "--anim", "sofa", "--frames-dir", "d"],
+            vec!["snapshot", "--proof", "f.jsonl", "--frames-dir", "d"],
+        ] {
+            assert!(
+                SnapshotArgs::try_parse_from(ok.clone()).is_ok(),
+                "rejected {ok:?}"
+            );
+        }
+        assert_eq!(
+            SnapshotArgs::try_parse_from(["snapshot", "--frames-dir", "d"])
+                .unwrap_err()
+                .kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
     }
 
     #[test]
     fn dashboard_flag_parses_and_conflicts_with_anim() {
         assert!(SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard"]).is_ok());
-        assert!(SnapshotArgs::try_parse_from([
-            "snapshot",
-            "out.png",
-            "--dashboard",
-            "--anim",
-            "desk"
-        ])
-        .is_err());
+        assert!(
+            SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard", "--anim", "desk"])
+                .is_err()
+        );
         assert!(
             SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard", "--gif"]).is_err()
         );

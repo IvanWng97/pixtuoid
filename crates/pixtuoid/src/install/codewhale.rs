@@ -18,12 +18,12 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use toml::value::Table;
 
+use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::target::MergeOutcome;
-use crate::install::SENTINEL_KEY;
 
 /// Events we register == events we decode (`source/codewhale.rs`). The `bool` is
 /// `env_mode`: `true` events carry identity via `DEEPSEEK_*` env vars, so their
@@ -62,9 +62,11 @@ pub(crate) const CODEWHALE_EVENTS: &[(&str, bool)] = &[
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     // CodeWhale only TRIMS its overrides — it does NOT `~`-expand — so `home: None`.
     resolve_config_path(
-        io::nonempty_env("CODEWHALE_CONFIG_PATH").map(|v| io::expand_tilde(&v, None)),
-        io::nonempty_env("DEEPSEEK_CONFIG_PATH").map(|v| io::expand_tilde(&v, None)),
-        io::nonempty_env("CODEWHALE_HOME").map(|v| io::expand_tilde(&v, None)),
+        pixtuoid_core::platform::path_env("CODEWHALE_CONFIG_PATH")
+            .map(|v| io::expand_tilde(&v, None)),
+        pixtuoid_core::platform::path_env("DEEPSEEK_CONFIG_PATH")
+            .map(|v| io::expand_tilde(&v, None)),
+        pixtuoid_core::platform::path_env("CODEWHALE_HOME").map(|v| io::expand_tilde(&v, None)),
         pixtuoid_core::platform::home_first_dir(),
         |p| p.exists(),
     )
@@ -118,7 +120,9 @@ fn resolve_config_path(
 /// first launch) rather than the file we write.
 pub(crate) fn detect_installed() -> bool {
     let os_home = pixtuoid_core::platform::home_first_dir();
-    let modern = match io::nonempty_env("CODEWHALE_HOME").map(|v| io::expand_tilde(&v, None)) {
+    let modern = match pixtuoid_core::platform::path_env("CODEWHALE_HOME")
+        .map(|v| io::expand_tilde(&v, None))
+    {
         Some(h) => Some(h),
         None => os_home.as_ref().map(|h| h.join(".codewhale")),
     };
@@ -166,7 +170,7 @@ fn managed_entry(event: &str, env_mode: bool, base_cmd: &str) -> toml::Value {
 /// gates ALL hooks, so entries present under `enabled = false` is a silent-dead
 /// the other checks miss.
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
-    use crate::install::verify::{assemble, shell_shim_ref, SchemaParse, ShimRef};
+    use crate::install::verify::{SchemaParse, ShimRef, assemble, shell_shim_ref};
     let Ok(doc) = toml::from_str::<toml::Value>(content) else {
         return SchemaParse::broken("config.toml no longer parses as TOML");
     };

@@ -25,9 +25,9 @@ default     = ["native", "density-art"]
 # Without it the render engine builds for wasm32 (no tokio/notify): the
 # WebAssembly office hero.
 native      = ["pixtuoid-core/native"]
-# The bundled `@Nx` art. Only a render scale above `RenderScale::ONE` looks it
-# up (`densest_frame`), and the wasm hero renders at ONE, so building without
-# this keeps those bytes out of the page.
+# The bundled `@Nx` art and hair dressing, which only a render scale above
+# `RenderScale::ONE` reaches (`densest_frame`, `dress_for`); the wasm hero
+# renders at ONE, so building without this keeps those bytes out of the page.
 density-art = []
 
 [dependencies]
@@ -65,3 +65,4 @@ harness = false
 [[example]]
 name = "corpus_check"
 test = true
+required-features = ["native"]

@@ -4,8 +4,8 @@ Thanks for your interest! PRs are welcome — especially **new themes**, sprite 
 decoration polish, and **`Source` adapters** for agent CLIs we don't support yet
 (the agent CLIs plus the OpenClaw gateway already wired up are listed in the README).
 
-Before you start, read [`CLAUDE.md`](../CLAUDE.md) at the repo root (and the
-nested `crates/*/CLAUDE.md` for the crate you touch). It holds the load-bearing
+Before you start, read [`AGENTS.md`](../AGENTS.md) at the repo root (and the
+nested `crates/*/AGENTS.md` for the crate you touch). It holds the load-bearing
 architecture invariants and conventions. Many things that look like bugs are
 documented, intentional design: read the whole item, its doc comment and the
 comments on the lines it governs, before changing it.
@@ -14,21 +14,20 @@ comments on the lines it governs, before changing it.
 
 Requires a recent stable Rust toolchain and [`just`](https://github.com/casey/just)
 (`brew install just`). On Linux you also need `lld`, `pkg-config` and the ALSA
-headers (`apt install lld pkg-config libasound2-dev`). The `justfile` is the
-single source of truth for every check — CI and the git hooks call the same
-recipes.
+headers (`apt install lld pkg-config libasound2-dev`). The git hooks and most
+CI jobs call `justfile` recipes.
 
 ```bash
 just              # list recipes
 just preflight    # pre-push gate: lint → clippy; `just preflight full` adds hack → test (CI's Rust recipes)
 just fmt          # auto-format
-just test         # the whole suite (cargo-nextest if installed, else cargo test)
-cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
+just test         # the whole suite, under cargo-nextest (`just setup-tools`)
+just test -p <crate> <filter>   # fast loop while iterating on one crate
 ```
 
-> **Don't chain `cargo clippy && cargo test`** — clippy and test use *separate*
-> build caches, so chaining recompiles the whole workspace twice. Run
-> `just preflight full`, or one check at a time.
+> **Don't expect clippy to warm `test`'s build** — its check-mode (rmeta)
+> builds carry over only build scripts and proc-macros, so iterate with one of
+> them.
 
 Activate the git hooks once per clone: `git config core.hooksPath .githooks`
 (`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`, lint + clippy;
@@ -57,11 +56,13 @@ run. The jobs:
   freshness, and the npm package generator + OpenClaw plugin contract.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
   full suite on a real Windows runner.
-- **wasm-check** — the wasm32 build plus the committed `site/public/wasm/`
-  pair's integrity and size cap (`just gen-wasm-check`); nothing checks the
-  pair is fresh, so a core/scene/web change runs `just gen-wasm` by hand.
+- **wasm-check** — builds the site's wasm (`just gen-wasm`) and caps its
+  gzipped size (`just gen-wasm-check`).
+- **site** — `site.yml`: the site's static checks, then e2e and
+  Lighthouse on a build with freshly built wasm, so a Rust change that breaks
+  a wasm export the page calls fails before it deploys.
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
-  plain `cargo test` can't see.
+  `just test` can't see.
 - **hygiene** — the same `just lint` recipes preflight runs (its CI job exists
   so a skipped local preflight can't land a lint break), including `just ci-observability`
   (`policy/ci-observability/`: contracts for the silent, costly workflow
@@ -71,11 +72,12 @@ run. The jobs:
   capture-tree rules ride `just test` instead.
 - **zizmor** — workflow/action security: symbolic-or-SHA pins,
   credential-dropping checkouts, exact inline suppressions.
-- **The two automatic Claude reviewers** ride `claude-readonly-review.yml`: a
-  read-only model job on the trusted default branch, the PR diff as inert
-  data, a separate least-privilege publisher — and a third job that comments
-  when the model job fails or declines, because absence otherwise renders as
-  a pass (#809). `claude.yml` refuses fork PR heads.
+- **One automatic Claude reviewer per [`REVIEW.md`](../REVIEW.md) lens**
+  rides `claude-readonly-review.yml`: a read-only model job on the trusted
+  default branch, the PR diff and the lens's prior threads as inert data, and
+  a separate least-privilege publisher that opens a review thread per finding
+  and sets the lens's `claude-review/<lens>` status. `claude.yml` refuses fork
+  PR heads.
 - **CodeQL** stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).
@@ -153,8 +155,7 @@ our release never builds. Two consequences:
 
 - **A from-source build break lands in Homebrew's CI, not ours.** Anything
   adding a system-library dependency needs a matching `depends_on` in the core
-  formula, in the same bump PR. Outstanding now: the default-on `audio`
-  feature needs `depends_on "alsa-lib"` — [#731](https://github.com/IvanWng97/pixtuoid/issues/731).
+  formula, in the same bump PR.
 - **Their `test do` block is a public contract** — see the "homebrew-core
   contract" comments at `crates/pixtuoid/src/validate.rs`,
   `crates/pixtuoid/src/sources_cli.rs`,
@@ -188,16 +189,11 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
 6. **Build** — TDD: failing test → minimal impl → commit.
 7. **Self-review** — a standards+spec pass before pushing, INCLUDING the
    whole-file comment audit: every file the PR touches — even by one line —
-   gets its entire comment population re-read against `CLAUDE.md`'s comment
+   gets its entire comment population re-read against `AGENTS.md`'s comment
    rules, and the cleanup rides the same PR (population and dispositions:
-   [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md)'s
-   always-on comment row). Not the merge gate.
-8. **Merge gate (non-negotiable)** — the **two-lens review** (2+ differentiated
-   lenses on the diff) + green CI + every online-bot finding dispositioned,
-   judged under the `two-lens-review` skill's **convergence contract**: churn
-   budget before review, a two-fix-round hard cap, only a confirmed HIGH
-   blocks, and a bot `Findings: 0` is evidence, not the gate. (Bot errored or
-   absent at HEAD → the skill's step 6 owns the fallback.) **A human merges.**
+   [`REVIEW.md`](../REVIEW.md#design)'s comment audit). Not the merge gate.
+8. **Merge gate** — [the gate](#the-merge-gate); the `two-lens-review` skill
+   runs its local rows. **A human merges.**
 9. **Wrap** — retro; durable lessons go to the agent's own memory layer, not
    new repo docs.
 
@@ -206,7 +202,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
 On a fresh machine or a non-Claude tool, `git clone` gives you the repo skills
 and every `just` gate; this section IS the loop for tools without skills. Do
 not scaffold a `CONTEXT.md`/`docs/adr/` convention here — a declaration's own
-doc comment is the design record, and the nested `CLAUDE.md` says only what its
+doc comment is the design record, and the nested `AGENTS.md` says only what its
 crate IS.
 
 ### The running order
@@ -219,7 +215,7 @@ crate IS.
 | while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
 | once you need a PR number | open it as a draft: the light tier runs, and `ci-gate` stays red by design |
 | once the draft's light tier is green | mark it ready: the full tier and the billed review bots start together, so a failure only the full tier catches costs one extra review round until the bots are chained after CI |
-| before merge | the two-lens review |
+| before marking ready (optional), or when a REVIEW.md local row matches (mandatory) | the `two-lens-review` skill |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 
 One change spanning the Rust lib + the site + the Raycast extension:
@@ -240,35 +236,65 @@ Advisory backstops that surface risk but never gate:
 
 ## Conventions and architecture invariants
 
-Both live in [`CLAUDE.md`](../CLAUDE.md) ("Conventions", "Architecture
+Both live in [`AGENTS.md`](../AGENTS.md) ("Conventions", "Architecture
 invariants"), which every contributor and agent reads first.
 
 ## Pull requests
 
-- Every PR is reviewed by **2+ agents with differentiated lenses** before
-  merge — no exceptions. The mechanical teeth are the `claude-review` +
-  `claude-security-review` workflows plus your local two-lens pass.
+- Review rules: [`REVIEW.md`](../REVIEW.md).
 - AI-authored PRs get the `needs-human-verify` label and a human visual check.
-- **Every reviewer/bot finding reaches exactly one terminal state in the PR
-  thread** — FIXED · REFUTED · RE-SCOPED → #N · FOLLOW-UP → #N, defined ONCE
-  in [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md). Agents
-  never file issues, and "acknowledged, no action" is not a state.
 
-### Recurring pitfalls (this codebase's review history, distilled)
+### The merge gate
 
-1. **Byte-vs-char slicing** — user-visible text truncates on `char`/grapheme
-   boundaries, never bytes.
-2. **Parallel-implementation drift** — a value in two places (platform arms,
-   core+tui twins, manifest+enum) gets single-sourced or a bridge test; when
-   your diff guards one path, grep for its siblings (#159→#172).
-3. **Sanitize at the decode boundary** — untrusted input is cleaned where it
-   enters, not at each use site.
-4. **Negative-branch test gaps** — pin the REFUSAL path, both sides of any
-   window/threshold, with offsets derived from the constant under test.
-5. **Unwired additions** — every new field/parameter/asset needs a consumer
-   wired in the same diff (`_x` bindings and `pub` fields evade the lints; #61).
-6. **Denylist completeness** — diff any strip-set against the platform's
-   documented set; prefer an allowlist (#198/#201/#206).
+Green `ci-gate`; every lens bot's required `claude-review/<lens>` status
+`success` at the final head; every finding's review thread resolved by its
+disposition; zero open confirmed `issue (blocking)`; each matching
+[local row](../REVIEW.md#escalation) recorded. The local
+[`two-lens-review`](../.claude/skills/two-lens-review/SKILL.md) skill is
+otherwise an optional pre-flight. A published review passes whatever it
+found; a failed or missing status is no review: comment `/claude-review`, else
+split the PR smaller.
+
+The bots never review a fork PR on their own: a maintainer approves its CI
+run, then comments `/claude-review`, again after every push. Its author can
+resolve their own threads, so before merging read each thread's `resolvedBy`
+and its reply. Its bot verdict is advisory, since the
+author can steer it through the diff, so the maintainer reads the diff too.
+The bots skip Dependabot as an actor, so a maintainer comments it on its PRs
+too.
+
+### Dispositions
+
+Every finding reaches exactly one terminal state in its review thread: FIXED ·
+REFUTED (cite the mechanism, per AGENTS.md; add one where none exists) ·
+RE-SCOPED → #N (real and INTRODUCED — or first made reachable — by this
+change, and bigger than the PR: split it off into #N; a redesign that brings
+the finding into scope ends FIXED) · FOLLOW-UP → #N (real and PRE-EXISTING,
+whether or not this change touched its file: it never grows the PR, and is
+fixed in #N; a defect in another session's tree cites that session's PR). A
+disposition is the reply that resolves the thread, STARTING with its state:
+`FIXED: …` · `REFUTED: … — <mechanism>` · `RE-SCOPED → #N: …` ·
+`FOLLOW-UP → #N: …`, where #N is an open or merged PR other than this one. A
+re-flag of an already-dispositioned finding replies with the original's
+disposition (link it). "Acknowledged" and "surfaced" are not states. Sweep at
+the FINAL merge head; check WHICH commit a bot re-flag was raised against
+before re-litigating.
+
+### Convergence contract
+
+- **Churn budget** — a diff whose added + modified lines exceed ~1500 is split
+  (stacked PRs) before review. Pure deletions are exempt once censused; a
+  change that both adds and deletes at scale is two PRs.
+- **Deletion census** — before deleting N members of a class, the full list
+  and its criterion land in the first commit or the PR body (#943).
+- **Two fix rounds, hard cap.** Round 1 folds every accepted finding into ONE
+  commit. Round 2 verifies the dispositions; a round-2 finding outside round
+  1's fold is dispositioned, never folded. A blocking issue confirmed in round
+  1's fixes STOPS the loop: revert the fold and re-land smaller, or re-scope.
+  No round 3.
+- **Round 2's fold** is the last behavior change and is verified, not
+  re-reviewed: each fix is a revert, a deletion, or a change shipping a test
+  that fails without it. Anything else reverts the fold.
 
 ### Handy `gh` commands
 
@@ -281,9 +307,9 @@ gh run rerun --failed                        # rerun only failed CI jobs
 
 ## Adding a new agent CLI
 
-The registration steps (4–7, 9) are test-forced — skipping one fails
-`just test`. Step 8 is forced only for hook-only sources; step 10 by the theme
-guards; steps 1–3, 11 and 12 are on you.
+The registration steps (4–7, 9) and step 12's roster literals are test-forced —
+skipping one fails `just test`. Step 8 is forced only for hook-only sources;
+step 10 by the theme guards; steps 1–3, 11 and step 12's `#[test]` are on you.
 
 1. **Verify the wire format against the CLI's actual source/releases first** —
    transcript location, line shape, hooks, session identity; pin every fact
@@ -311,9 +337,9 @@ guards; steps 1–3, 11 and 12 are on you.
 5. The descriptor's `name` **is the roster** — `registered_source_names()`
    projects `REGISTRY`, and the conformance suite then requires a fixture. The
    `sources --json` golden (`crates/pixtuoid/tests/snapshots/cli/sources.json`)
-   must list it: `SNAPSHOTS=overwrite cargo test -p pixtuoid --test cli_json`.
+   must list it: `SNAPSHOTS=overwrite just test -p pixtuoid --test cli_json`.
 6. **Record the fixture** — the test steps in
-   [`crates/pixtuoid-core/tests/CLAUDE.md`](../crates/pixtuoid-core/tests/CLAUDE.md)
+   [`crates/pixtuoid-core/tests/AGENTS.md`](../crates/pixtuoid-core/tests/AGENTS.md)
    (a RECORDED SessionStart scenario via `just capture-fixture`), then
    `cargo insta review`.
 7. **Wire it into `runtime/driver.rs::build_source_set`** (the one
@@ -333,9 +359,9 @@ guards; steps 1–3, 11 and 12 are on you.
     const, the `insert` in that crate's `src/drift_surface.rs`,
     `just gen-drift-surface` (commit both fragments), and the `SURFACE_ROWS`
     row plus its selftest case (the case census fails without it).
-12. **Three roster literals no failure message spells out**: the row-by-row
-    byte pin in `corpus_check.rs`; `TOOL_ID_KEY_UNPROVEN` in
-    `tests/sources/captures.rs`; a case row + `#[test]` in
+12. **Three roster literals in three test binaries** (a scoped run misses
+    them): the row-by-row byte pin in `corpus_check.rs`; `TOOL_ID_KEY_UNPROVEN`
+    in `tests/sources/captures.rs`; a case row + `#[test]` in
     `crates/pixtuoid/tests/wire_to_pixels.rs`.
 
 ## License

@@ -12,7 +12,7 @@ use pixtuoid_core::source::manager::SourceDeath;
 use pixtuoid_core::state::SceneState;
 use pixtuoid_scene::theme;
 
-use super::{connection, dashboard, welcome, widgets, ModalState};
+use super::{ModalState, connection, dashboard, welcome, widgets};
 use connection::{ConnectionFrame, ConnectionRow, ConnectionUi};
 use dashboard::{DashboardFrame, DashboardUi};
 use welcome::{OnboardingFrame, WelcomeUi};
@@ -257,25 +257,24 @@ impl UiState {
     /// (now collapsed) root so it stays visible; on a root, collapse it.
     pub(crate) fn dashboard_fold_left(&mut self, scene: &SceneState) {
         let rows = dashboard::build_dashboard_rows(scene, &self.dashboard.folds);
-        if let Some(sel) = self.dashboard.selected {
-            if let Some(row) = rows.iter().find(|r| r.agent_id == sel) {
-                let root = row.parent_id.unwrap_or(sel);
-                self.dashboard.folds.fold_all([root]);
-                self.dashboard.selected = Some(root);
-            }
+        if let Some(sel) = self.dashboard.selected
+            && let Some(row) = rows.iter().find(|r| r.agent_id == sel)
+        {
+            let root = row.parent_id.unwrap_or(sel);
+            self.dashboard.folds.fold_all([root]);
+            self.dashboard.selected = Some(root);
         }
     }
 
     /// `→/l`: only roots are collapsible; expand the selected one.
     pub(crate) fn dashboard_fold_right(&mut self, scene: &SceneState) {
         let rows = dashboard::build_dashboard_rows(scene, &self.dashboard.folds);
-        if let Some(sel) = self.dashboard.selected {
-            if rows
+        if let Some(sel) = self.dashboard.selected
+            && rows
                 .iter()
                 .any(|r| r.agent_id == sel && r.parent_id.is_none())
-            {
-                self.dashboard.folds.unfold_all([sel]);
-            }
+        {
+            self.dashboard.folds.unfold_all([sel]);
         }
     }
 

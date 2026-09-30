@@ -46,6 +46,38 @@ fn a_bad_pixel_is_matchable_and_its_chain_prints_each_step_once() {
 }
 
 #[test]
+fn a_shape_error_names_the_line_at_fault() {
+    let line_of = |sprite: &str| match load_pack_from_strings(
+        "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+         [animations.idle]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+        &[("f.sprite", sprite)],
+    )
+    .unwrap_err()
+    {
+        PackError::Decode {
+            source: SpriteError::Line { line, .. },
+            ..
+        } => line,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        line_of("@frame 0\nA A\nA\nA A\n@frame 1\nA A"),
+        3,
+        "the ragged row"
+    );
+    assert_eq!(
+        line_of("@frame 0\n@mark hat 5 0\nA A\nA A\n"),
+        2,
+        "the mark outside"
+    );
+    assert_eq!(
+        line_of("@frame 0\nA\n@frame 1\n@frame 2\nA"),
+        3,
+        "the empty frame"
+    );
+}
+
+#[test]
 fn parses_two_frame_mini_sprite() {
     let src = std::fs::read_to_string("tests/render/fixtures/mini.sprite").unwrap();
     let frames = parse(&src).unwrap();
