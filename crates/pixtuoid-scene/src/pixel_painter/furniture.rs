@@ -131,7 +131,7 @@ pub(super) fn paint_kitchen_island(
 }
 
 /// Notice board filling `board`, the box
-/// [`MeetingRoom::notice_board_rect`](crate::layout::MeetingRoom::notice_board_rect)
+/// [`SceneLayout::notice_board_rect`](crate::layout::SceneLayout::notice_board_rect)
 /// places and gates.
 pub(super) fn paint_notice_board(buf: &mut RgbBuffer, board: Bounds, theme: &crate::theme::Theme) {
     let wall_color = theme.office.room_wall_trim_dark;

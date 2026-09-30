@@ -1826,8 +1826,8 @@ fn classic_queue(kind: crate::layout::FixtureKind) -> ClassicQueue {
         FixtureKind::FishTank => Sorted("tank"),
         FixtureKind::KitchenIsland => Sorted("island"),
         FixtureKind::Door => Sorted("door"),
+        FixtureKind::NoticeBoard { .. } => Sorted("notice board"),
         FixtureKind::Doormat { .. }
-        | FixtureKind::NoticeBoard { .. }
         | FixtureKind::PantryMat
         | FixtureKind::IslandMat
         | FixtureKind::Runner
@@ -1844,7 +1844,6 @@ fn classic_backdrop_call(kind: crate::layout::FixtureKind) -> Option<&'static st
         FixtureKind::NeonSign => Some("paint_neon_panel("),
         FixtureKind::Clock => Some("paint_clock("),
         FixtureKind::Runner => Some("paint_corridor_runner("),
-        FixtureKind::NoticeBoard { .. } => Some("furniture::paint_notice_board("),
         FixtureKind::Doormat { .. } => Some("furniture::paint_doormat("),
         FixtureKind::PantryMat => Some("ctx.layout.pantry_entry_mat()"),
         FixtureKind::IslandMat => Some("ctx.layout.island_bar_mat()"),
@@ -1868,6 +1867,7 @@ fn classic_backdrop_call(kind: crate::layout::FixtureKind) -> Option<&'static st
         | FixtureKind::FloorLamp
         | FixtureKind::FishTank
         | FixtureKind::KitchenIsland
+        | FixtureKind::NoticeBoard { .. }
         | FixtureKind::Door => None,
     }
 }
@@ -1896,7 +1896,7 @@ fn the_roster_backdrop_is_the_classic_background_order() {
             }
         }
     }
-    assert_eq!(calls.len(), 9, "every background kind placed: {calls:?}");
+    assert_eq!(calls.len(), 8, "every background kind placed: {calls:?}");
     let at: Vec<usize> = calls
         .iter()
         .map(|c| src.find(c).unwrap_or_else(|| panic!("{c} is gone")))
@@ -2003,6 +2003,7 @@ fn the_roster_sorts_as_the_classic_painter_queues() {
                         DrawableKind::MeetingChair { .. } => &["chair"],
                         DrawableKind::FishTank { .. } => &["tank"],
                         DrawableKind::CoatRack { .. } => &["rack"],
+                        DrawableKind::NoticeBoard { .. } => &["notice board"],
                         DrawableKind::Door { .. } => &["door"],
                         DrawableKind::WallDecor { .. } => &["wall"],
                         DrawableKind::Character { .. }
@@ -2673,9 +2674,7 @@ fn furniture_room_decor_large_bounds_paint() {
             .any(|(x, y)| buf.get(x, y) != bg);
         assert!(painted, "large bounds must paint the decor");
     };
-    assert_paints(&|b| {
-        paint_notice_board(b, big_meeting.notice_board_rect().expect("fits"), theme)
-    });
+    assert_paints(&|b| paint_notice_board(b, big, theme));
     assert_paints(&|b| paint_doormat(b, &big_meeting, theme));
     assert_paints(&|b| {
         paint_water_cooler(b, &big_pantry, std::time::SystemTime::UNIX_EPOCH, theme)

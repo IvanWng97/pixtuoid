@@ -49,7 +49,7 @@ fn step_at(stops: f32, x: ArtPx, y: ArtPx) -> u8 {
 
 /// How dark the room is: the sky's darkness in whole steps, so a frame's tone
 /// changes a handful of times a day rather than every frame.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub(crate) struct Ambient(u8);
 
 impl Ambient {
@@ -92,6 +92,9 @@ pub(crate) enum Glow {
     /// Darkened with the room but never lit: a dark screen's glass, which a
     /// lamp would show only as a reflection.
     Shaded,
+    /// Its own light, but lit by the room's lights as well: a window's sky,
+    /// where the room's lights reflect.
+    Pane,
 }
 
 /// Each buffer pixel's [`Glow`], set by the last piece that painted it, so a
@@ -326,6 +329,7 @@ pub(crate) fn net_pass(
                         Glow::Lit => net_colour(under, lift, ambient, tint),
                         Glow::Emissive => under,
                         Glow::Shaded => ambient.on(under),
+                        Glow::Pane => net_colour(under, lift, Ambient::default(), tint),
                     })
             });
         }

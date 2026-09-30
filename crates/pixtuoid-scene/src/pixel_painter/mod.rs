@@ -97,7 +97,8 @@ pub(crate) use drawable::{
     desk_art_top, desk_sprite_name, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE,
 };
 pub(crate) use palette::{
-    appliance_overrides, fixture_overrides, DESK_BULB_KEY, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY,
+    appliance_overrides, fixture_overrides, CLOCK_FACE_KEY, DESK_BULB_KEY, SCREEN_GLASS_KEY,
+    SCREEN_TEXT_KEY,
 };
 
 // The ToolKind→glow-hue seam the binary's footer tints tool segments with. The
@@ -531,9 +532,6 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // background pass — it would double-paint under its y-sorted copy below.
     // Only these small mask-free items do.
     for room in &ctx.layout.meeting_rooms {
-        if let Some(board) = room.notice_board_rect() {
-            furniture::paint_notice_board(ctx.buf, board, ctx.theme);
-        }
         furniture::paint_doormat(ctx.buf, room, ctx.theme);
     }
     // Floor-level mats paint FIRST so they sit under every upright pantry
@@ -1044,8 +1042,8 @@ fn enqueue_pod_decor_and_plants<'a>(layout: &'a Layout, drawables: &mut Vec<Draw
     }
 }
 
-/// Free-standing fixtures, and the elevator door at the frame
-/// `compute_door_frame_idx` picks.
+/// Free-standing fixtures, and the elevator door at the sim's
+/// [`SimFrame::door_frame`].
 fn enqueue_floor_fixtures<'a>(
     ctx: &PaintCtx<'_>,
     door_frame: usize,
@@ -1123,6 +1121,12 @@ fn enqueue_wall_decor<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>)
         drawables.push(Drawable {
             anchor_y: z_sort_row(Anchor::TopLeft, pos, h),
             kind: DrawableKind::WallDecor { kind, pos },
+        });
+    }
+    for board in (0..layout.meeting_rooms.len()).filter_map(|r| layout.notice_board_rect(r)) {
+        drawables.push(Drawable {
+            anchor_y: board.y + board.height - 1,
+            kind: DrawableKind::NoticeBoard { board },
         });
     }
 }

@@ -261,26 +261,107 @@ fn the_coffee_machine_follows_the_counter_size() {
     assert_eq!(l.coffee_machine(), None);
 }
 
+/// A meeting room's notice board hangs on the band, the north wall the viewer
+/// sees: inside its room's columns, under the band's last row, and clear of
+/// the band's decor, the door and the plants.
 #[test]
-fn a_notice_board_hangs_only_in_a_room_that_fits_it() {
-    let room = |width, height| crate::layout::MeetingRoom {
-        bounds: Bounds {
-            x: 10,
-            y: 20,
-            width,
-            height,
-        },
-        trio: None,
+fn a_notice_board_hangs_on_the_band_clear_of_its_neighbours() {
+    let mut hung = 0;
+    for l in offices() {
+        for room in 0..l.meeting_rooms.len() {
+            let Some(board) = l.notice_board_rect(room) else {
+                continue;
+            };
+            hung += 1;
+            let r = l.meeting_rooms[room].bounds;
+            assert!(
+                board.x > r.x && board.x + board.width < r.x + r.width,
+                "{board:?} in {r:?}"
+            );
+            assert!(
+                board.y + board.height <= l.wall_band_h(),
+                "{board:?} leaves the band"
+            );
+            let apart = |v: Bounds| {
+                v.x + v.width <= board.x
+                    || board.x + board.width <= v.x
+                    || v.y + v.height <= board.y
+                    || board.y + board.height <= v.y
+            };
+            for f in l.fixtures() {
+                if f.kind != (FixtureKind::NoticeBoard { room }) && f.depth != Depth::Backdrop {
+                    assert!(
+                        apart(f.visual),
+                        "{board:?} hangs over {:?} at {:?}",
+                        f.kind,
+                        f.visual
+                    );
+                }
+            }
+        }
+    }
+    assert!(hung > 0, "no office hangs a notice board");
+}
+
+/// The pieces that stand together keep apart: the lounge's couch, lamp, side
+/// table and aquarium, and the kitchen island clear of every mat.
+#[test]
+fn the_lounge_and_the_island_keep_clear_of_their_neighbours() {
+    let apart = |a: Bounds, b: Bounds| {
+        a.x + a.width <= b.x
+            || b.x + b.width <= a.x
+            || a.y + a.height <= b.y
+            || b.y + b.height <= a.y
     };
-    assert_eq!(room(15, 40).notice_board_rect(), None);
-    assert_eq!(room(30, 20).notice_board_rect(), None);
-    assert_eq!(
-        room(16, 21).notice_board_rect(),
-        Some(Bounds {
-            x: 14,
-            y: 33,
-            width: 8,
-            height: 5
-        })
-    );
+    let mut checked = 0;
+    for l in offices().chain(
+        [(200u16, 120u16), (240, 144), (320, 180)]
+            .into_iter()
+            .flat_map(|(w, h)| {
+                (0..4).filter_map(move |s| SceneLayout::compute_with_seed(w, h, None, s))
+            }),
+    ) {
+        let lounge: Vec<Fixture> = l
+            .fixtures()
+            .filter(|f| {
+                matches!(
+                    f.kind,
+                    FixtureKind::LoungeCouch
+                        | FixtureKind::FloorLamp
+                        | FixtureKind::SideTable
+                        | FixtureKind::FishTank
+                )
+            })
+            .collect();
+        for (i, a) in lounge.iter().enumerate() {
+            for b in &lounge[i + 1..] {
+                assert!(
+                    apart(a.visual, b.visual),
+                    "{}x{}: {:?} over {:?}",
+                    l.buf_w,
+                    l.buf_h,
+                    a,
+                    b
+                );
+                checked += 1;
+            }
+        }
+        let island = l.fixtures().find(|f| f.kind == FixtureKind::KitchenIsland);
+        for mat in l
+            .fixtures()
+            .filter(|f| matches!(f.kind, FixtureKind::Doormat { .. } | FixtureKind::PantryMat))
+        {
+            if let Some(island) = island {
+                assert!(
+                    apart(island.visual, mat.visual),
+                    "{}x{}: island over {:?}",
+                    l.buf_w,
+                    l.buf_h,
+                    mat
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 0, "no office sets a lounge or an island");
 }

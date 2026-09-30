@@ -346,6 +346,9 @@ pub(crate) const SCREEN_TEXT_KEY: char = 'J';
 /// The pack key of a desk lamp's bulb, which glows of its own at any hour.
 pub(crate) const DESK_BULB_KEY: char = '9';
 
+/// The pack key of the wall clock's face, inside its rim.
+pub(crate) const CLOCK_FACE_KEY: char = 'ц';
+
 /// The pack keys the fixtures' art takes from the theme, each with the role it
 /// takes, as [`appliance_overrides`] does the appliances'.
 pub(crate) fn fixture_overrides(theme: &crate::theme::Theme) -> [(char, Pixel); 16] {
@@ -365,7 +368,7 @@ pub(crate) fn fixture_overrides(theme: &crate::theme::Theme) -> [(char, Pixel); 
         ('ш', Some(c1)),
         ('щ', Some(c2)),
         ('ф', Some(o.clock_rim)),
-        ('ц', Some(o.clock_face)),
+        (CLOCK_FACE_KEY, Some(o.clock_face)),
         ('з', Some(o.clock_hand)),
         // Un-themed: the classic draws the cooler's bottle in its own blue.
         ('χ', Some(super::furniture::COOLER_WATER)),

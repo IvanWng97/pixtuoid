@@ -2118,7 +2118,7 @@ COOLER, COOLER_LT, COOLER_SH = "б", "в", "ё"
 MAGAZINE, MAGAZINE_EDGE = "ы", "э"
 COATS, COATS_SH = ("ч", "ш", "щ"), ("α", "β", "γ")
 CLOCK_RIM, CLOCK_RIM_LT, CLOCK_FACE, CLOCK_FACE_SH, CLOCK_HAND = "ф", "η", "ц", "ε", "з"
-# Un-themed, as the classic draws them: the cooler's bottle, the bin's greys.
+# Un-themed: the cooler's bottle in the classic's own blue, the bin in the pack's nearest greys.
 WATER, WATER_SH = "χ", "τ"
 BIN, BIN_RIM, BIN_SH = "φ", "6", "7"
 DOOR_FRAME, CHROME = "E", "K"
@@ -2229,9 +2229,9 @@ def side_table_1x():
     return g
 
 
-# `PantryRoom::water_cooler_rect`'s size, and its glug: a bubble climbs the bottle,
-# then the water stills.
+# `PantryRoom::water_cooler_rect`'s size.
 COOLER_W, COOLER_H = 3, 6
+# The glug: a bubble climbs the bottle, then the water stills.
 GLUG_STEPS = 5
 
 
@@ -2327,8 +2327,8 @@ def trash_bin_1x():
 TANK_W, TANK_H = 14, 11
 TANK_WATER_ROWS = (1, 8)  # half-open: the surface line, then water, the gravel last
 TANK_CABINET_Y = 9
-# The fish patrol: each swims its lane to the far wall and back, one column a
-# step, the second a lap behind the first so the pair never mirror.
+# The fish patrol: each swims its lane to the far wall and back, one column a step,
+# the second TANK_FISH_LAG steps behind the first so the pair never mirror.
 TANK_LANES = (3, 5)
 TANK_SPAN = TANK_W - 5
 TANK_STEPS = 2 * TANK_SPAN
@@ -2457,7 +2457,9 @@ def coat_hooks():
 
 def coat_rack():
     """A coat rack: a turned wood pole with its knob and foot, three coats hung
-    on alternating hooks, each with its collar, its folds and its hem."""
+    on alternating pegs, each hanging from its shoulders and flaring to its hem,
+    its collar turned down, its front edge closed, the side away from the light
+    in shade."""
     w, h = RACK_W * S, RACK_H * S
     g = canvas(w, h)
     mid = COAT_REACH * S + S // 2
@@ -2468,33 +2470,36 @@ def coat_rack():
     rect(g, 3, h - 4, w - 3, h - 2, WOOD)  # its foot
     rect(g, 3, h - 4, w - 3, h - 3, WOOD_LT)
     for (lx, ly), coat, shade in zip(coat_hooks(), COATS, COATS_SH):
-        x0, y0 = lx * S, ly * S
-        x1, y1 = x0 + COAT_W * S, y0 + 2 * S
         west = lx == 0
-        hook = x1 if west else x0 - 1
-        rect(g, min(hook, mid), y0, max(hook, mid) + 1, y0 + 1, WOOD_DK)  # the peg
-        x0, x1 = (x0 + 1, x1) if west else (x0, x1 - 1)
-        rect(g, x0 + 1, y0 + 1, x1 - 1, y1, coat)  # the shoulders, then the drop
-        rect(g, x0, y0 + 3, x1, y1, coat)
-        away = x0 if west else x1 - 1
-        rect(g, away, y0 + 3, away + 1, y1, shade)  # the side turned from the pole
-        rect(g, x0 + 1, y1 - 1, x1 - 1, y1, shade)  # the hem
-        put(g, (x0 + x1) // 2, y0 + 3, shade)  # a fold
-        put(g, (x0 + x1) // 2, y0 + 5, shade)
-        rect(g, x0 + 2, y0 + 1, x1 - 2, y0 + 2, WHITE if coat != COATS[2] else OFFWHITE_SH)  # the collar
+        x0, y0 = lx * S, ly * S
+        peg = x0 + COAT_W * S - 1 if west else x0
+        rect(g, min(peg, mid), y0, max(peg, mid) + 1, y0 + 1, WOOD_DK)  # the peg
+        # Hung from the peg's end: narrow at the shoulders, flaring to the hem.
+        top, hem = y0 + 1, y0 + 2 * S + 1
+        cx = peg - 1 if west else peg + 1
+        for y in range(top, hem):
+            half = 1 + (y - top) * 3 // (hem - top)
+            rect(g, cx - half, y, cx + half + 1, y + 1, coat)
+            put(g, cx + half if west else cx - half, y, shade)  # away from the light
+        rect(g, cx - 1, top, cx + 2, top + 1, WHITE if coat != COATS[2] else OFFWHITE_SH)  # the collar
+        for y in range(top + 1, hem - 1):
+            put(g, cx, y, shade)  # the front edge
+        half = 1 + (hem - 1 - top) * 3 // (hem - top)
+        rect(g, cx - half, hem - 1, cx + half + 1, hem, shade)  # the hem
     union_outline(g)
     return g
 
 
 def coat_rack_1x():
     """The coat rack at 1x: the pole with its knob and foot, three coats on
-    alternating hooks."""
+    alternating hooks, each lit at its shoulders and shaded at its hem."""
     g = canvas(RACK_W, RACK_H)
     rect(g, COAT_REACH, 0, COAT_REACH + 1, RACK_H, WOOD_SH)
     put(g, COAT_REACH, 0, WOOD_LT)
     rect(g, COAT_REACH - 1, RACK_H - 1, COAT_REACH + 2, RACK_H, WOOD)
-    for (x0, y0), coat in zip(coat_hooks(), COATS):
-        rect(g, x0, y0, x0 + COAT_W, y0 + 2, coat)
+    for (x0, y0), coat, shade in zip(coat_hooks(), COATS, COATS_SH):
+        rect(g, x0, y0, x0 + COAT_W, y0 + 1, coat)
+        rect(g, x0, y0 + 1, x0 + COAT_W, y0 + 2, shade)
     return g
 
 
@@ -2542,6 +2547,8 @@ def notice_board_1x():
 # from the time: a hand's position is a reading, not art, and twelve hours of
 # minutes would be 720 frames.
 CLOCK_W, CLOCK_H = 7, 7
+# Art pixels from the dial's edge to its face: the outline and the rim.
+CLOCK_RIM_PX = 3
 CLOCK_1X = ("..RRR..", ".RFFFR.", "RFFFFFR", "RFFFFFR", "RFFFFFR", ".RFFFR.", "..RRR..")
 
 
@@ -2551,7 +2558,7 @@ def wall_clock():
     w, h = CLOCK_W * S, CLOCK_H * S
     g = canvas(w, h)
     c = (w / 2, h / 2)
-    r_out, r_face = w / 2 - 1, w / 2 - 3
+    r_out, r_face = w / 2 - 1, w / 2 - CLOCK_RIM_PX
     for y in range(h):
         for x in range(w):
             dx, dy = x + 0.5 - c[0], y + 0.5 - c[1]
@@ -2619,10 +2626,10 @@ def meeting_chair():
 
 
 def meeting_chair_1x():
-    """The meeting chair at 1x: its back to the west, the seat lit along its
-    far edge, two legs showing."""
+    """The meeting chair at 1x: its back to the west in the seat's fabric, the
+    seat lit along its far edge, two legs showing."""
     g = canvas(CHAIR_W, CHAIR_H)
-    rect(g, 0, 0, 1, CHAIR_SEAT_ROWS[1], WOOD_DK)
+    rect(g, 0, 0, 1, CHAIR_SEAT_ROWS[1], FABRIC_SH)
     rect(g, 1, CHAIR_SEAT_ROWS[0], CHAIR_W - 1, CHAIR_SEAT_ROWS[1], FABRIC)
     rect(g, 1, CHAIR_SEAT_ROWS[0], CHAIR_W - 1, CHAIR_SEAT_ROWS[0] + 1, FABRIC_HI)
     for lx in CHAIR_LEG_COLS:
