@@ -11,7 +11,6 @@ only carries what no gate can.
 | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------- |
 | Root `README.md` features table + install block + tools glimpse | `src/features.json` / `src/install.json` / `src/sources.json`                                                         | `just gen-readme` | `just gen-readme-check` (CI `readme` job)                                                           |
 | `public/demos/*` stills + clips                                 | `scripts/media.json` → `gen-media.py` (real TuiRenderer; wasm `hero_still` for `hero-wide.png` / `vibing-poster.png`) | `just gen-media`  | `just gen-check` (stills pixel-diffed; clips presence-gated — encodes are non-deterministic)        |
-| `public/wasm/*`                                                 | `pixtuoid-web` crate                                                                                                  | `just gen-wasm`   | `gen-wasm-check` (sha256 manifest pins the wasm/glue ABI pair)                                      |
 | `src/assets/pix-icons/*.png`                                    | sprite pack palette (`pack.toml`) → `gen-pix-icons.py`                                                                | `just gen-icons`  | `just gen-check` (decode-compared); `config/pix-icons.test.mjs` bridges `features.json` `pix` names |
 
 Notes no gate carries:
@@ -80,8 +79,7 @@ Notes no gate carries:
   memory (views dangle on `memory.grow`); sound rides the same pause-shifted
   `nowMs` as the render. **iOS silent-switch bypass is DELIBERATE (#664)**:
   `navigator.audioSession.type = 'playback'` before the context, else the
-  Ring/Silent switch mutes a deliberate ♩ tap. Regenerate `public/wasm/` when
-  the `Office` audio surface changes.
+  Ring/Silent switch mutes a deliberate ♩ tap.
 - **The VIBING channel is a SECOND live `Office` (#468)**: `force_weather` is
   a thread-local shared by both offices (each `step` re-applies its own —
   Rust-side invariant), and both consumers MUST share ONE `init()` via

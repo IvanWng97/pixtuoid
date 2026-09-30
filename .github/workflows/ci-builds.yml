@@ -14,8 +14,8 @@ env:
 
 jobs:
   # `just hack` checks the host graph only; this job catches target-gated deps
-  # and native calls escaping the core `native` boundary. It deliberately does
-  # not byte-compare wasm output — latest-stable builds drift.
+  # and native calls escaping the core `native` boundary, and caps the size of
+  # the wasm the site ships.
   wasm-check:
     name: wasm-check
     runs-on: ubuntu-latest
@@ -24,13 +24,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup-cargo-just
-        with:
-          targets: wasm32-unknown-unknown
-      # gen-wasm uses this same build recipe, preventing local/CI command drift.
-      - run: just wasm-build
-      # The size cap IS deterministic even when the rebuilt bytes are not.
-      - run: just gen-wasm-check
+      - uses: ./.github/actions/gen-wasm
+      - run: just gen-wasm-check wasm-check-selftest
 
   hack:
     name: feature combinations
@@ -42,7 +37,10 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-alsa
       - uses: ./.github/actions/setup-cargo-just
+        with:
+          components: clippy
       - uses: taiki-e/install-action@cargo-hack
+      - uses: taiki-e/install-action@cargo-nextest
       - run: just hack
 
   windows-check:

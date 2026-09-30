@@ -34,7 +34,7 @@ pub(crate) const PLUGIN_TEMPLATE: &str = include_str!("dsh_plugin.mjs");
 /// somewhere new each launch. No configured path reaches the mount, so the
 /// env axis is the whole surface here.
 fn dsh_home() -> Result<PathBuf> {
-    if let Some(p) = crate::install::io::nonempty_env("DSH_HOME") {
+    if let Some(p) = pixtuoid_core::platform::path_env("DSH_HOME") {
         if !p.is_absolute() {
             bail!(
                 "DSH_HOME={} is not absolute — dsh would expand `~` and \

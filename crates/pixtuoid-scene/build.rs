@@ -15,8 +15,9 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 fn main() {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set");
-    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR must be set");
+    let manifest_dir =
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set");
+    let out_dir = std::env::var_os("OUT_DIR").expect("OUT_DIR must be set");
     let out_dir = Path::new(&out_dir);
     let asset_dir = Path::new(&manifest_dir).join("sprites/default");
 

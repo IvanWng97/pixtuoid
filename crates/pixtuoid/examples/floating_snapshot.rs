@@ -17,7 +17,7 @@ use pixtuoid::floating::offscreen::{
 };
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::floor::{FloorMeta, FrameInputs};
+use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FrameInputs, PetInputs};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::theme_by_name;
 
@@ -154,14 +154,15 @@ fn main() -> Result<()> {
     let (win_w, win_h) = (size.0 as u32, size.1 as u32);
     let (scale, ow, oh) = window_buffer_geometry(winit::dpi::PhysicalSize::new(win_w, win_h));
     let buf = renderer.render(FrameInputs {
-        scene: &scene,
-        pack: &pack,
+        world: FloorInputs {
+            scene: &scene,
+            pack: &pack,
+            now,
+            floor: FloorMeta::ground(),
+            pets: PetInputs::default(),
+        },
         theme,
-        now,
         size: Size { w: ow, h: oh },
-        floor_meta: FloorMeta::ground(),
-        active_pet: None,
-        floor_pet: None,
         debug_walkable: false,
     });
     let (ww, wh) = (win_w as usize, win_h as usize);
