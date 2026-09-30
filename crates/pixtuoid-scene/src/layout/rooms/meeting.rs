@@ -70,7 +70,7 @@ pub(crate) const COAT_HOOK_DX: u16 = 1;
 pub(crate) const COAT_W: u16 = 2;
 
 /// Rows from a coat rack's pole top to its base: the row it y-sorts at.
-pub(crate) const COAT_RACK_BASE_DY: u16 = 7;
+pub(crate) const COAT_RACK_BASE_DY: u16 = 11;
 
 /// The box a coat rack whose pole top is `pos` is drawn in: the one authority
 /// for its painter, its y-sort row, its hover box and the chair-clearance gate.
@@ -89,13 +89,15 @@ impl MeetingRoom {
     /// room-centre row) — or `None` when a fitted room is too narrow for the
     /// rack's coats to clear the east chair and its sitter.
     pub(crate) fn coat_rack_pos(&self) -> Option<Point> {
+        /// Rows from the room-centre row down to the rack's base.
+        const BASE_BELOW_MID: u16 = 3;
         let b = self.bounds;
         if b.width <= 20 {
             return None;
         }
         let pos = Point {
             x: b.x + b.width - 5,
-            y: b.y + b.height / 2 - 4,
+            y: (b.y + b.height / 2 + BASE_BELOW_MID).checked_sub(COAT_RACK_BASE_DY)?,
         };
         if let Some(t) = &self.trio {
             // The seated sprite shares the chair body's east edge, so the

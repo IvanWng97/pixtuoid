@@ -118,6 +118,8 @@ pub struct FloorCtx {
     pub cache: FrameCache,
     /// Memoized carpet+wall base fill (see `BaseFillCache`).
     pub(crate) base_fill: crate::pixel_painter::BaseFillCache,
+    /// The classic's floor shadows, kept per layout.
+    pub(crate) shadows: crate::ground::DepthsCache,
     /// This floor's indoor-lighting fade state.
     pub light: LightingState,
     /// This floor's neon-sign fade state.
@@ -149,6 +151,7 @@ impl FloorCtx {
             history: PoseHistory::new(),
             cache: FrameCache::new(),
             base_fill: crate::pixel_painter::BaseFillCache::new(),
+            shadows: crate::ground::DepthsCache::default(),
             light: LightingState::new(),
             neon: NeonState::new(),
             motion: HashMap::new(),
