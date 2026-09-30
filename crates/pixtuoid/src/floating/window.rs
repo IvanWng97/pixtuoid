@@ -25,7 +25,8 @@ use winit::window::{ResizeDirection, Window, WindowId, WindowLevel};
 
 use super::offscreen::OfficeRenderer;
 use crate::config::{self, FloatingConfig};
-use pixtuoid_scene::floor::FloorMeta;
+use pixtuoid_scene::floor::{FloorMeta, FrameInputs};
+use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::Theme;
 
 /// Wake reasons delivered to the winit loop from the background tokio pipeline.
@@ -70,7 +71,6 @@ pub(crate) struct FloatingApp {
 const RESIZE_CORNER_PX: f64 = 18.0;
 
 impl FloatingApp {
-    #[allow(clippy::too_many_arguments)] // flat construction inputs; bundling adds no clarity
     pub(crate) fn new(
         cfg: FloatingConfig,
         theme: &'static Theme,
@@ -78,14 +78,12 @@ impl FloatingApp {
         config_path: PathBuf,
         pets: Vec<pixtuoid_scene::pet::Pet>,
         boot: super::PipelineBoot,
-        audio_muted: bool,
-        audio_volume: f32,
+        audio: config::AudioConfig,
     ) -> Self {
         // Built here, AFTER floating::run's fallible boot steps, so a boot
         // failure means no device thread ever existed and every later exit drops
         // `app` → the join runs. See `AudioController`.
-        let audio_ctl =
-            crate::audio::AudioController::new(audio_muted, audio_volume, config_path.clone());
+        let audio_ctl = crate::audio::AudioController::new(audio, config_path.clone());
         let mut renderer = OfficeRenderer::new();
         renderer.set_audio(audio_ctl.handle().clone());
         Self {
@@ -158,16 +156,18 @@ impl FloatingApp {
         let floor_meta = FloorMeta::ground();
         let floor_pet =
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
-        let office = self.renderer.render(
-            &scene,
-            &self.pack,
-            self.theme,
-            SystemTime::now(),
-            buf_w,
-            buf_h,
+        let office = self.renderer.render(FrameInputs {
+            scene: &scene,
+            pack: &self.pack,
+            theme: self.theme,
+            now: SystemTime::now(),
+            size: Size { w: buf_w, h: buf_h },
             floor_meta,
+            // Click-to-pet needs window pointer hit-testing (deferred).
+            active_pet: None,
             floor_pet,
-        );
+            debug_walkable: false,
+        });
         let (ow, oh) = (office.width() as usize, office.height() as usize);
         let opx: Vec<u32> = office
             .as_slice()
@@ -199,20 +199,12 @@ impl FloatingApp {
         }
         // Name badges + the neon wall board, drawn POST-upscale at native surface
         // res so the text stays crisply anti-aliased.
+        let mut surf = super::offscreen::XrgbSurface::new(&mut sb, win_w, win_h);
         let labels = self.renderer.labels(&scene, SystemTime::now());
-        super::offscreen::paint_labels_into_surface(
-            &mut sb,
-            win_w,
-            win_h,
-            &labels,
-            scale as i32,
-            self.theme,
-        );
+        super::offscreen::paint_labels_into_surface(&mut surf, &labels, scale as i32, self.theme);
         let board = self.renderer.board(&scene, SystemTime::now());
         super::offscreen::paint_wall_board_into_surface(
-            &mut sb,
-            win_w,
-            win_h,
+            &mut surf,
             &board,
             scale as i32,
             self.theme,
@@ -221,7 +213,7 @@ impl FloatingApp {
         let footer = self
             .renderer
             .footer(&scene, budget, audio_audible, volume_flash);
-        super::offscreen::paint_footer_into_surface(&mut sb, win_w, win_h, &footer, self.theme);
+        super::offscreen::paint_footer_into_surface(&mut surf, &footer, self.theme);
         window.pre_present_notify();
         let _ = sb.present();
     }

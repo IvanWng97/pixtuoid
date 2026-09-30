@@ -6,14 +6,13 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
 
-use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
+use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{SceneState, MAX_FLOORS};
 
-use pixtuoid_scene::floor::{FloorMeta, FloorSession, FrameInputs};
+use pixtuoid_scene::floor::{FloorSession, FrameInputs};
 use pixtuoid_scene::footer::{
     build_footer, footer_tone_rgb, footer_tool_tally, FooterInputs, FooterModel,
 };
-use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::Theme;
 use winit::dpi::PhysicalSize;
 
@@ -46,37 +45,16 @@ impl OfficeRenderer {
         self.audio = audio;
     }
 
-    /// Render `scene`'s floor into the owned buffer at `buf_w`×`buf_h` PIXELS — the
-    /// caller maps window px → cells → pixels (`buf_h = rows * 2`, the half-block 1:2
-    /// cell aspect; floating has no footer row to subtract, unlike `draw_scene`). On a
-    /// too-small / uncomputable layout it returns the buffer unchanged — never panics.
-    #[allow(clippy::too_many_arguments)] // the render inputs are genuinely flat (scene/pack/theme/clock/size/floor)
-    pub fn render(
-        &mut self,
-        scene: &SceneState,
-        pack: &Pack,
-        theme: &'static Theme,
-        now: SystemTime,
-        buf_w: u16,
-        buf_h: u16,
-        floor_meta: FloorMeta,
-        floor_pet: Option<&pixtuoid_scene::pet::Pet>,
-    ) -> &RgbBuffer {
-        // active_pet stays None: click-to-pet needs window pointer hit-testing (deferred).
-        self.session.render(FrameInputs {
-            scene,
-            pack,
-            theme,
-            now,
-            size: Size { w: buf_w, h: buf_h },
-            floor_meta,
-            active_pet: None,
-            floor_pet,
-            debug_walkable: false,
-        });
+    /// Render the floor into the owned buffer at `inputs.size` PIXELS — the caller
+    /// maps window px → pixels (floating has no footer row to subtract, unlike
+    /// `draw_scene`). On a too-small / uncomputable layout it returns the buffer
+    /// unchanged — never panics.
+    pub fn render(&mut self, inputs: FrameInputs<'_>) -> &RgbBuffer {
+        let (scene, floor_idx, now) = (inputs.scene, inputs.floor_meta.floor_idx, inputs.now);
+        self.session.render(inputs);
         // Compose EVERY frame, even muted, so the observer's cue edges stay warm —
         // re-enabling then fires no volley; only DELIVERY is gated.
-        let audio_frame = self.session.audio_frame(scene, floor_meta.floor_idx, now);
+        let audio_frame = self.session.audio_frame(scene, floor_idx, now);
         if self.audio.is_enabled() {
             self.audio.frame(audio_frame);
         }
@@ -238,46 +216,44 @@ const FOOTER_KEYS: &str = " [m]ute [+/-]vol ";
 /// [`footer_budget`] column math read it, so they can't drift.
 const FOOTER_MARGIN_PX: i32 = 6;
 
-/// Alpha-composite `color` over the surface pixel at `(x, y)` by `coverage` — a straight
-/// linear blend in `0x00RRGGBB` space; the badge/board sit on opaque office pixels, so
-/// there is no alpha channel to keep.
-fn blend_xrgb(
-    sb: &mut [u32],
-    win_w: usize,
-    win_h: usize,
-    x: i32,
-    y: i32,
-    color: u32,
-    coverage: f32,
-) {
-    if x < 0 || y < 0 || (x as usize) >= win_w || (y as usize) >= win_h {
-        return;
-    }
-    let idx = y as usize * win_w + x as usize;
-    let bg = sb[idx];
-    let chan = |v: u32, sh: u32| ((v >> sh) & 0xff) as u8;
-    let mix =
-        |sh: u32| crate::aa_text::blend_channel(chan(bg, sh), chan(color, sh), coverage) as u32;
-    sb[idx] = (mix(16) << 16) | (mix(8) << 8) | mix(0);
+/// The window's row-major `0x00RRGGBB` pixel surface, `w`×`h`, that the text
+/// overlays composite into.
+pub struct XrgbSurface<'a> {
+    px: &'a mut [u32],
+    w: usize,
+    h: usize,
 }
 
-#[allow(clippy::too_many_arguments)] // flat surface + placement + style inputs, like paint_labels
-fn draw_badge_text(
-    sb: &mut [u32],
-    win_w: usize,
-    win_h: usize,
-    text: &str,
-    x: i32,
-    top_y: i32,
-    px: f32,
-    color: u32,
-) {
-    crate::aa_text::draw_text_at(text, x + 1, top_y + 1, px, |gx, gy, cov| {
-        blend_xrgb(sb, win_w, win_h, gx, gy, BADGE_SHADOW, cov)
-    });
-    crate::aa_text::draw_text_at(text, x, top_y, px, |gx, gy, cov| {
-        blend_xrgb(sb, win_w, win_h, gx, gy, color, cov)
-    });
+impl<'a> XrgbSurface<'a> {
+    /// Wrap `px`, which holds at least `w * h` pixels.
+    pub fn new(px: &'a mut [u32], w: usize, h: usize) -> Self {
+        Self { px, w, h }
+    }
+
+    /// Alpha-composite `color` over the pixel at `(x, y)` by `coverage` — a straight
+    /// linear blend in `0x00RRGGBB` space; the badge/board sit on opaque office
+    /// pixels, so there is no alpha channel to keep. Off-surface is a no-op.
+    fn blend(&mut self, x: i32, y: i32, color: u32, coverage: f32) {
+        if x < 0 || y < 0 || (x as usize) >= self.w || (y as usize) >= self.h {
+            return;
+        }
+        let idx = y as usize * self.w + x as usize;
+        let bg = self.px[idx];
+        let chan = |v: u32, sh: u32| ((v >> sh) & 0xff) as u8;
+        let mix =
+            |sh: u32| crate::aa_text::blend_channel(chan(bg, sh), chan(color, sh), coverage) as u32;
+        self.px[idx] = (mix(16) << 16) | (mix(8) << 8) | mix(0);
+    }
+
+    /// `text` at `(x, top_y)` in `color`, over a one-pixel drop shadow.
+    fn draw_badge_text(&mut self, text: &str, x: i32, top_y: i32, font_px: f32, color: u32) {
+        crate::aa_text::draw_text_at(text, x + 1, top_y + 1, font_px, |gx, gy, cov| {
+            self.blend(gx, gy, BADGE_SHADOW, cov)
+        });
+        crate::aa_text::draw_text_at(text, x, top_y, font_px, |gx, gy, cov| {
+            self.blend(gx, gy, color, cov)
+        });
+    }
 }
 
 /// Paint name badges into the upscaled `u32` surface (`0x00RRGGBB`). Each label's
@@ -285,9 +261,7 @@ fn draw_badge_text(
 /// is centered horizontally over the anchor and sits just above the head. Drawn at
 /// native surface res, not upscaled, so it stays a sharp caption over the chunky sprites.
 pub fn paint_labels_into_surface(
-    sb: &mut [u32],
-    win_w: usize,
-    win_h: usize,
+    sb: &mut XrgbSurface<'_>,
     labels: &[pixtuoid_scene::overlay::LabelElement],
     scale: i32,
     theme: &Theme,
@@ -316,19 +290,10 @@ pub fn paint_labels_into_surface(
         match badge {
             Some(hue) => {
                 let mw = crate::aa_text::text_width(marker, LABEL_FONT_PX);
-                draw_badge_text(sb, win_w, win_h, marker, cx, cy, LABEL_FONT_PX, color);
-                draw_badge_text(
-                    sb,
-                    win_w,
-                    win_h,
-                    &el.text,
-                    cx + mw,
-                    cy,
-                    LABEL_FONT_PX,
-                    pack_xrgb(hue),
-                );
+                sb.draw_badge_text(marker, cx, cy, LABEL_FONT_PX, color);
+                sb.draw_badge_text(&el.text, cx + mw, cy, LABEL_FONT_PX, pack_xrgb(hue));
             }
-            None => draw_badge_text(sb, win_w, win_h, &text, cx, cy, LABEL_FONT_PX, color),
+            None => sb.draw_badge_text(&text, cx, cy, LABEL_FONT_PX, color),
         }
     }
 }
@@ -339,9 +304,7 @@ pub fn paint_labels_into_surface(
 /// badges) — the three rows always fit inside the glowing frame. At a very small office
 /// scale the rows would be sub-legible; there we leave the panel empty rather than mush.
 pub fn paint_wall_board_into_surface(
-    sb: &mut [u32],
-    win_w: usize,
-    win_h: usize,
+    sb: &mut XrgbSurface<'_>,
     board: &pixtuoid_scene::board::BoardModel,
     scale: i32,
     theme: &Theme,
@@ -365,10 +328,7 @@ pub fn paint_wall_board_into_surface(
     let font_px = row_h as f32 * 0.85;
     let glow = |tone| pack_xrgb(pixtuoid_scene::board::tone_rgb(tone, theme));
 
-    draw_badge_text(
-        sb,
-        win_w,
-        win_h,
+    sb.draw_badge_text(
         &board.brand.text,
         inner_x,
         inner_y,
@@ -377,10 +337,7 @@ pub fn paint_wall_board_into_surface(
     );
     let star_w = crate::aa_text::text_width(&board.star.text, font_px);
     let star_x = inner_x + (inner_w - star_w).max(0);
-    draw_badge_text(
-        sb,
-        win_w,
-        win_h,
+    sb.draw_badge_text(
         &board.star.text,
         star_x,
         inner_y,
@@ -392,7 +349,7 @@ pub fn paint_wall_board_into_surface(
         let mut x = inner_x;
         let y = inner_y + row * row_h;
         for seg in segs {
-            draw_badge_text(sb, win_w, win_h, &seg.text, x, y, font_px, glow(seg.tone));
+            sb.draw_badge_text(&seg.text, x, y, font_px, glow(seg.tone));
             x += crate::aa_text::text_width(&seg.text, font_px);
         }
     }
@@ -411,18 +368,12 @@ pub fn footer_budget(win_w: usize) -> u16 {
 /// An OVERLAY over the office's bottom rows: it never insets the buffer (that would
 /// shift the desk-capacity lockstep). Fixed caption height like the name badges, so it
 /// stays crisp at any office scale.
-pub fn paint_footer_into_surface(
-    sb: &mut [u32],
-    win_w: usize,
-    win_h: usize,
-    model: &FooterModel,
-    theme: &Theme,
-) {
-    let y = (win_h as i32 - crate::aa_text::line_height(LABEL_FONT_PX) - FOOTER_MARGIN_PX).max(0);
+pub fn paint_footer_into_surface(sb: &mut XrgbSurface<'_>, model: &FooterModel, theme: &Theme) {
+    let y = (sb.h as i32 - crate::aa_text::line_height(LABEL_FONT_PX) - FOOTER_MARGIN_PX).max(0);
     let mut x = FOOTER_MARGIN_PX;
     for seg in &model.segments {
         let color = pack_xrgb(footer_tone_rgb(seg.tone, theme));
-        draw_badge_text(sb, win_w, win_h, &seg.text, x, y, LABEL_FONT_PX, color);
+        sb.draw_badge_text(&seg.text, x, y, LABEL_FONT_PX, color);
         x += crate::aa_text::text_width(&seg.text, LABEL_FONT_PX);
     }
 }
@@ -430,6 +381,8 @@ pub fn paint_footer_into_surface(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pixtuoid_scene::floor::FloorMeta;
+    use pixtuoid_scene::layout::Size;
     use winit::dpi::LogicalSize;
 
     #[test]
@@ -456,16 +409,17 @@ mod tests {
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
-        let buf = renderer.render(
-            &scene,
-            &pack,
+        let buf = renderer.render(FrameInputs {
+            scene: &scene,
+            pack: &pack,
             theme,
             now,
-            160,
-            96,
-            FloorMeta::ground(),
-            None,
-        );
+            size: Size { w: 160, h: 96 },
+            floor_meta: FloorMeta::ground(),
+            active_pet: None,
+            floor_pet: None,
+            debug_walkable: false,
+        });
         assert_eq!((buf.width(), buf.height()), (160, 96));
         // `ensure_size` pre-fills with `bg_fallback` (non-black) BEFORE the painter runs,
         // so "any non-black pixel" would pass even if the painter no-op'd.
@@ -711,7 +665,12 @@ mod tests {
             (LabelTone::Exiting, theme.ui.label_exiting),
         ] {
             let mut sb = vec![0u32; 100 * 100];
-            paint_labels_into_surface(&mut sb, 100, 100, &badge_dot(tone, false), 2, theme);
+            paint_labels_into_surface(
+                &mut XrgbSurface::new(&mut sb, 100, 100),
+                &badge_dot(tone, false),
+                2,
+                theme,
+            );
             assert!(
                 sb.contains(&as_u32(expected)),
                 "tone {tone:?} must paint its theme color {expected:?}"
@@ -727,18 +686,14 @@ mod tests {
         };
         let mut hover_sb = vec![0u32; 100 * 100];
         paint_labels_into_surface(
-            &mut hover_sb,
-            100,
-            100,
+            &mut XrgbSurface::new(&mut hover_sb, 100, 100),
             &badge(LabelTone::Idle, true),
             2,
             theme,
         );
         let mut idle_sb = vec![0u32; 100 * 100];
         paint_labels_into_surface(
-            &mut idle_sb,
-            100,
-            100,
+            &mut XrgbSurface::new(&mut idle_sb, 100, 100),
             &badge(LabelTone::Idle, false),
             2,
             theme,
@@ -767,7 +722,7 @@ mod tests {
             hovered: false,
         }];
         let mut sb = vec![0u32; 120 * 120];
-        paint_labels_into_surface(&mut sb, 120, 120, &label, 2, theme);
+        paint_labels_into_surface(&mut XrgbSurface::new(&mut sb, 120, 120), &label, 2, theme);
         assert!(
             sb.contains(&as_u32(tone_rgb)),
             "the ● dot must paint the activity tone {tone_rgb:?}"
@@ -792,7 +747,7 @@ mod tests {
             tone: LabelTone::Active,
             hovered: false,
         }];
-        paint_labels_into_surface(&mut sb, 200, 60, &badge, 2, theme);
+        paint_labels_into_surface(&mut XrgbSurface::new(&mut sb, 200, 60), &badge, 2, theme);
         let ink = pack_xrgb(theme.ui.label_active);
         let shadow = 0x0000_0000u32;
         let intermediate = sb.iter().any(|&p| p != white && p != ink && p != shadow);
@@ -827,7 +782,7 @@ mod tests {
         let scale = 8i32;
         let (w, h) = (320usize, 96usize);
         let mut sb = vec![0u32; w * h];
-        paint_wall_board_into_surface(&mut sb, w, h, &board, scale, theme);
+        paint_wall_board_into_surface(&mut XrgbSurface::new(&mut sb, w, h), &board, scale, theme);
         assert!(
             sb.contains(&pack_xrgb(theme.ui.neon_brand)),
             "L1 brand paints the neon-brand hue"
@@ -837,7 +792,7 @@ mod tests {
             "the ● work mood segment paints the active hue"
         );
         let mut tiny = vec![0u32; w * h];
-        paint_wall_board_into_surface(&mut tiny, w, h, &board, 1, theme);
+        paint_wall_board_into_surface(&mut XrgbSurface::new(&mut tiny, w, h), &board, 1, theme);
         assert!(
             tiny.iter().all(|&p| p == 0),
             "a scale-1 office suppresses the sub-legible board"
@@ -909,16 +864,17 @@ mod tests {
         let mut renderer = OfficeRenderer::new();
         let (handle, rx) = crate::audio::AudioHandle::test_pair();
         renderer.set_audio(handle);
-        renderer.render(
-            &scene,
-            &pack,
+        renderer.render(FrameInputs {
+            scene: &scene,
+            pack: &pack,
             theme,
             now,
-            160,
-            96,
-            FloorMeta::ground(),
-            None,
-        );
+            size: Size { w: 160, h: 96 },
+            floor_meta: FloorMeta::ground(),
+            active_pet: None,
+            floor_pet: None,
+            debug_walkable: false,
+        });
         let frames = crate::audio::drain_frames(&rx);
         assert!(!frames.is_empty(), "an enabled handle receives frames");
         let stems = frames.last().unwrap().stems;
@@ -963,7 +919,7 @@ mod tests {
         let (w, h) = (400usize, 160usize);
         let model = build_footer(&inputs, footer_budget(w));
         let mut sb = vec![0u32; w * h];
-        paint_footer_into_surface(&mut sb, w, h, &model, theme);
+        paint_footer_into_surface(&mut XrgbSurface::new(&mut sb, w, h), &model, theme);
         let changed: Vec<usize> = sb
             .iter()
             .enumerate()
@@ -1007,16 +963,17 @@ mod tests {
             let now = now0 + std::time::Duration::from_secs(2 * step);
             // 192x160: tall enough that the corridor hosts BOTH appliances
             // (the vending/printer height gates in layout::compute).
-            renderer.render(
-                &scene,
-                &pack,
+            renderer.render(FrameInputs {
+                scene: &scene,
+                pack: &pack,
                 theme,
                 now,
-                192,
-                160,
-                FloorMeta::ground(),
-                None,
-            );
+                size: Size { w: 192, h: 160 },
+                floor_meta: FloorMeta::ground(),
+                active_pet: None,
+                floor_pet: None,
+                debug_walkable: false,
+            });
             heard.extend(
                 crate::audio::drain_frames(&rx)
                     .into_iter()
@@ -1052,31 +1009,33 @@ mod tests {
 
         let mut agents = vec![active_on("/d/f0.jsonl", 0, 0)];
         let scene = scene_with(agents.clone(), cap);
-        renderer.render(
-            &scene,
-            &pack,
+        renderer.render(FrameInputs {
+            scene: &scene,
+            pack: &pack,
             theme,
             now,
-            160,
-            96,
-            FloorMeta::ground(),
-            None,
-        );
+            size: Size { w: 160, h: 96 },
+            floor_meta: FloorMeta::ground(),
+            active_pet: None,
+            floor_pet: None,
+            debug_walkable: false,
+        });
         crate::audio::drain_frames(&rx); // discard the priming frames
 
         agents.push(active_on("/d/f1-new.jsonl", 1, cap));
         let scene = scene_with(agents.clone(), cap);
         now += std::time::Duration::from_millis(33);
-        renderer.render(
-            &scene,
-            &pack,
+        renderer.render(FrameInputs {
+            scene: &scene,
+            pack: &pack,
             theme,
             now,
-            160,
-            96,
-            FloorMeta::ground(),
-            None,
-        );
+            size: Size { w: 160, h: 96 },
+            floor_meta: FloorMeta::ground(),
+            active_pet: None,
+            floor_pet: None,
+            debug_walkable: false,
+        });
         let off_floor: Vec<_> = crate::audio::drain_frames(&rx)
             .into_iter()
             .flat_map(|f| f.events)
@@ -1089,16 +1048,17 @@ mod tests {
         agents.push(active_on("/d/f0-new.jsonl", 0, 1));
         let scene = scene_with(agents, cap);
         now += std::time::Duration::from_millis(33);
-        renderer.render(
-            &scene,
-            &pack,
+        renderer.render(FrameInputs {
+            scene: &scene,
+            pack: &pack,
             theme,
             now,
-            160,
-            96,
-            FloorMeta::ground(),
-            None,
-        );
+            size: Size { w: 160, h: 96 },
+            floor_meta: FloorMeta::ground(),
+            active_pet: None,
+            floor_pet: None,
+            debug_walkable: false,
+        });
         let on_floor: Vec<_> = crate::audio::drain_frames(&rx)
             .into_iter()
             .flat_map(|f| f.events)
@@ -1139,16 +1099,17 @@ mod tests {
 
         // No frame rendered yet → no cached layout → the guard returns empty.
         assert!(renderer.labels(&scene, now).is_empty());
-        renderer.render(
-            &scene,
-            &pack,
+        renderer.render(FrameInputs {
+            scene: &scene,
+            pack: &pack,
             theme,
             now,
-            160,
-            96,
-            FloorMeta::ground(),
-            None,
-        );
+            size: Size { w: 160, h: 96 },
+            floor_meta: FloorMeta::ground(),
+            active_pet: None,
+            floor_pet: None,
+            debug_walkable: false,
+        });
         let labels = renderer.labels(&scene, now);
         assert_eq!(labels.len(), 1, "one seeded agent → one name badge");
         let anchor = labels[0].anchor_px;

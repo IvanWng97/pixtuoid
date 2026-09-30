@@ -938,8 +938,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     // A LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins
     // the device thread it owns; built after the pack-load `?`, so a pack that
     // fails to load can't strand it.
-    let mut audio_ctl =
-        crate::audio::AudioController::new(audio_cfg.muted, audio_cfg.volume, config_path.clone());
+    let mut audio_ctl = crate::audio::AudioController::new(audio_cfg, config_path.clone());
     renderer.set_audio(audio_ctl.handle().clone());
     // With no agent CLIs detected there is nothing to connect: the overlay stays closed.
     let detected_clis = if first_run {
@@ -2151,8 +2150,10 @@ mod apply_key_action_tests {
                 // UNMUTED via `new_with` + a no-op spawn: an unmuted `new` opens the real
                 // device, and a MUTED one hides pause (`set_paused` ORs the mute flag in).
                 audio_ctl: crate::audio::AudioController::new_with(
-                    false,
-                    1.0,
+                    crate::config::AudioConfig {
+                        muted: false,
+                        volume: 1.0,
+                    },
                     config_path.clone(),
                     no_respawn,
                 ),

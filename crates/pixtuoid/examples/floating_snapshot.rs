@@ -12,10 +12,11 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
 use image::{Rgb as ImgRgb, RgbImage};
-use pixtuoid::floating::offscreen::{paint_labels_into_surface, OfficeRenderer};
+use pixtuoid::floating::offscreen::{paint_labels_into_surface, OfficeRenderer, XrgbSurface};
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::floor::FloorMeta;
+use pixtuoid_scene::floor::{FloorMeta, FrameInputs};
+use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::theme_by_name;
 
 /// The two `cc` labels are a DELIBERATE collision, so the snapshot exercises the
@@ -150,7 +151,17 @@ fn main() -> Result<()> {
     let scale = pixtuoid::floating::offscreen::office_scale(win_h); // shared with the live window
     let ow = (win_w / scale).max(1).min(u16::MAX as u32) as u16;
     let oh = (win_h / scale).max(1).min(u16::MAX as u32) as u16;
-    let buf = renderer.render(&scene, &pack, theme, now, ow, oh, FloorMeta::ground(), None);
+    let buf = renderer.render(FrameInputs {
+        scene: &scene,
+        pack: &pack,
+        theme,
+        now,
+        size: Size { w: ow, h: oh },
+        floor_meta: FloorMeta::ground(),
+        active_pet: None,
+        floor_pet: None,
+        debug_walkable: false,
+    });
     let (bw, bh) = (buf.width() as u32, buf.height() as u32);
 
     let (ww, wh) = (win_w as usize, win_h as usize);
@@ -165,12 +176,15 @@ fn main() -> Result<()> {
         }
     }
     let labels = renderer.labels(&scene, now);
-    paint_labels_into_surface(&mut sb, ww, wh, &labels, scale as i32, theme);
+    paint_labels_into_surface(
+        &mut XrgbSurface::new(&mut sb, ww, wh),
+        &labels,
+        scale as i32,
+        theme,
+    );
     let board = renderer.board(&scene, now);
     pixtuoid::floating::offscreen::paint_wall_board_into_surface(
-        &mut sb,
-        ww,
-        wh,
+        &mut XrgbSurface::new(&mut sb, ww, wh),
         &board,
         scale as i32,
         theme,
@@ -178,7 +192,11 @@ fn main() -> Result<()> {
     // Audible so the ♩ suffix shows; no transient flash in a static snapshot.
     let budget = pixtuoid::floating::offscreen::footer_budget(ww);
     let footer = renderer.footer(&scene, budget, true, None);
-    pixtuoid::floating::offscreen::paint_footer_into_surface(&mut sb, ww, wh, &footer, theme);
+    pixtuoid::floating::offscreen::paint_footer_into_surface(
+        &mut XrgbSurface::new(&mut sb, ww, wh),
+        &footer,
+        theme,
+    );
 
     let mut img = RgbImage::new(win_w, win_h);
     for wy in 0..win_h {
