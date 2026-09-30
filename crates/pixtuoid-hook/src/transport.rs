@@ -181,36 +181,37 @@ mod peer {
     ///
     /// SAFETY: `process` is a valid process handle for the call's duration.
     unsafe fn token_user_blob(process: HANDLE) -> Option<Vec<u64>> {
-        unsafe {
-            let mut token: HANDLE = std::ptr::null_mut();
-            if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
-                return None;
-            }
-            // Size probe (returns 0 + sets `len`), then the real read.
-            let mut len: u32 = 0;
-            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut len);
-            let blob = if len == 0 {
-                None
-            } else {
-                let mut buf = vec![0u64; (len as usize).div_ceil(8)];
-                if GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), len, &mut len)
-                    == 0
-                {
-                    None
-                } else {
-                    Some(buf)
-                }
-            };
-            CloseHandle(token);
-            blob
+        let mut token: HANDLE = std::ptr::null_mut();
+        // SAFETY: `process` is forwarded from this fn's contract; `token` is a live out-param.
+        if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
+            return None;
         }
+        // Size probe (returns 0 + sets `len`), then the real read.
+        let mut len: u32 = 0;
+        // SAFETY: `token` is open; a null buffer of length 0 is the documented size probe.
+        unsafe { GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut len) };
+        let blob = if len == 0 {
+            None
+        } else {
+            let mut buf = vec![0u64; (len as usize).div_ceil(8)];
+            // SAFETY: `token` is open and `buf` spans at least `len` bytes for the call.
+            let read = unsafe {
+                GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), len, &mut len)
+            };
+            if read == 0 { None } else { Some(buf) }
+        };
+        // SAFETY: `token` is open, and this is its only close.
+        unsafe { CloseHandle(token) };
+        blob
     }
 
     /// The `PSID` embedded in a `TOKEN_USER` blob. Valid only while `blob` lives.
     ///
     /// SAFETY: `blob` is a `TOKEN_USER` written by `GetTokenInformation`, u64-aligned.
     unsafe fn sid_of(blob: &[u64]) -> PSID {
-        unsafe { (*(blob.as_ptr().cast::<TOKEN_USER>())).User.Sid }
+        let user = blob.as_ptr().cast::<TOKEN_USER>();
+        // SAFETY: forwarded from this fn's contract.
+        unsafe { (*user).User.Sid }
     }
 
     /// True iff the pipe server behind `file` runs as our user. Fail-closed.
