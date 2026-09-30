@@ -10,12 +10,14 @@
 const BAYER_4X4: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
 /// How many threshold levels [`BAYER_4X4`] spreads.
 const BAYER_LEVELS: u32 = 16;
+/// The columns and rows after which an ordered dither repeats.
+pub(crate) const PERIOD: u16 = BAYER_4X4.len() as u16;
 
 /// Whether the pixel at `(x, y)` takes the next tone of an ordered dither
 /// covering `coverage` of its area.
 pub(crate) fn takes_next(x: u16, y: u16, coverage: f32) -> bool {
     let level = (coverage.clamp(0.0, 1.0) * BAYER_LEVELS as f32) as u8;
-    BAYER_4X4[usize::from(y % 4)][usize::from(x % 4)] < level
+    BAYER_4X4[usize::from(y % PERIOD)][usize::from(x % PERIOD)] < level
 }
 
 /// The share of each band, at its top, that dithers into the next: a whole band

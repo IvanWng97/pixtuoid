@@ -1,6 +1,5 @@
 //! What lies on the floor under the room's light, pixel-free: elliptical
-//! shadows. The classic painter blends one per pixel; the cutaway steps it on
-//! its art grid.
+//! shadows.
 
 /// A shadow's strength at noon, where a solid's shadow is crispest.
 const NOON_SHADOW: f32 = 0.5;
@@ -15,28 +14,6 @@ const CONTACT_FLATTEN: u16 = 3;
 /// How deep a contact shadow reaches either side of its base, in rows: at
 /// least enough to read as a pool rather than a stroke under a narrow solid.
 const CONTACT_HALF_H: std::ops::RangeInclusive<u16> = 2..=3;
-
-/// An axis-aligned ellipse on the floor, in logical units.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct Ellipse {
-    pub(crate) cx: u16,
-    pub(crate) cy: u16,
-    pub(crate) half_w: u16,
-    pub(crate) half_h: u16,
-}
-
-impl Ellipse {
-    /// The first column and row it can reach, and the ones just past it.
-    pub(crate) fn bounds(self) -> ((u16, u16), (u16, u16)) {
-        (
-            (
-                self.cx.saturating_sub(self.half_w),
-                self.cy.saturating_sub(self.half_h),
-            ),
-            (self.cx + self.half_w, self.cy + self.half_h),
-        )
-    }
-}
 
 /// The shadow a solid casts where it meets the floor, in logical units: centred
 /// under the solid's middle on the row under its south edge, so the solid hides

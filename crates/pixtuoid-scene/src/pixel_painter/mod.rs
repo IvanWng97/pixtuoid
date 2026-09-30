@@ -423,8 +423,8 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     drawable::sort_drawables(&mut drawables);
     // A per-pixel diff finds EXACTLY what the foreground wrote; a rectangular
     // band seamed the window glass and washed floor-between-pieces twice.
-    // AFTER `paint_shadows`/`paint_ambient`: both already take `look`, so folding
-    // them in here would apply the hour twice.
+    // AFTER `paint_shadows`/`paint_ambient`: both already carry the hour, so
+    // folding them in here would apply it twice.
     let pre_foreground = ctx.buf.clone();
     for d in &drawables {
         paint_drawable(&d.kind, &mut ctx.drawable_ctx());

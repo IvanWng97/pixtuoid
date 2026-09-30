@@ -385,9 +385,8 @@ fn a_tie_maps_to_a_layer_in_the_same_order() {
     }
 }
 
-/// A fixture that lies flat or hangs casts no shadow. One that stands casts it
-/// centred under its whole art box, on the row under it: a desk's side
-/// cabinets included, not just its surface (#906).
+/// A standing fixture's shadow is centred under its whole art box, on the row
+/// under it: a desk's side cabinets included, not just its surface (#906).
 #[test]
 fn a_standing_fixture_casts_its_shadow_under_its_whole_box() {
     let mut desks = 0;

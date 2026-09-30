@@ -10,7 +10,7 @@ use crate::pixel_painter::palette::{blend_rgb, BLACK, WHITE};
 use crate::theme::Theme;
 
 /// Float ellipse geometry for [`paint_radial_falloff`] — all `f32`, so a caller
-/// can centre on `(w-1)/2` (half-cell correct) as well as an integer cell.
+/// can centre on `(w-1)/2` (half-cell correct).
 pub(in crate::pixel_painter) struct RadialFalloff {
     pub min_x: u16,
     pub max_x: u16,
@@ -27,11 +27,9 @@ pub(in crate::pixel_painter) struct RadialFalloff {
 const FALLOFF_TONES: u8 = 3;
 const _: () = assert!(FALLOFF_TONES > 0);
 
-/// The composite every light and the shadows share: blend `color` over the
-/// caller-clipped `xs` × `ys` at each pixel's `t(x, y)`, stepped to one of
-/// [`FALLOFF_TONES`] tones of `peak` by [`crate::dither::stepped`]; `None`
-/// leaves the pixel alone. A light owns its falloff SHAPE and its clip, never
-/// the blend.
+/// The composite every light shares: [`blend_tone`] over the caller-clipped
+/// `xs` × `ys` at each pixel's `t(x, y)`; `None` leaves the pixel alone. A
+/// light owns its falloff SHAPE and its clip, never the blend.
 fn blend_falloff(
     buf: &mut RgbBuffer,
     xs: std::ops::Range<u16>,

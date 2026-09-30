@@ -824,8 +824,8 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
 
 /// Step the floor darker under `shadows`, toward each one's centre: its falloff
 /// at `strength`, rounded to whole ramp stops by
-/// [`nearest`](crate::dither::nearest) on the art grid, deepest where two overlap
-/// ([`Depths`](crate::ground::Depths)). A shadow is the ground it falls on,
+/// [`nearest`](crate::dither::nearest) on the art grid, over their
+/// [`Depths`](crate::ground::Depths). A shadow is the ground it falls on,
 /// darker, never a colour of its own.
 fn paint_ground_shadows(
     shadows: impl Iterator<Item = crate::ground::Contact> + Clone,
@@ -1465,8 +1465,14 @@ fn face_rows(pack: &Pack, art: &str, scale: RenderScale) -> u16 {
 #[cfg(test)]
 fn deepest_shadow_stop() -> i8 {
     let stops = crate::ground::shadow_strength(NOON_DARKNESS) * SHADOW_STOPS_PER_STRENGTH;
-    (0..4)
-        .flat_map(|y| (0..4).map(move |x| crate::dither::nearest(stops, x, y)))
+    let phases = 0..crate::dither::PERIOD;
+    phases
+        .clone()
+        .flat_map(|y| {
+            phases
+                .clone()
+                .map(move |x| crate::dither::nearest(stops, x, y))
+        })
         .max()
         .map_or(0, |deepest| deepest as i8)
 }
@@ -5980,6 +5986,31 @@ S B B B B B B S
             crate::layout::roster::tests::every_kind_key(),
             "a fixture kind was never met"
         );
+    }
+
+    /// The cutaway grounds exactly the fixtures the roster says stand
+    /// ([`Fixture::contact`](crate::layout::Fixture::contact)): the two
+    /// painters cast from one answer.
+    #[test]
+    fn the_cutaway_grounds_what_the_roster_says_stands() {
+        let pack = pack();
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        for layout in many_layouts() {
+            for fixture in layout.fixtures() {
+                let grounded = covering(fixture.kind).is_none()
+                    && queued(&layout, &pack, scale, &[], |k| k == fixture.kind)
+                        .iter()
+                        .any(|(span, kind)| ground_shadow(*span, kind, &pack).is_some());
+                assert_eq!(
+                    grounded,
+                    fixture.contact().is_some(),
+                    "{:?} on {}x{}",
+                    fixture.kind,
+                    layout.buf_w,
+                    layout.buf_h
+                );
+            }
+        }
     }
 
     /// Layouts across the sizes and seeds that place every kind of piece this
