@@ -95,7 +95,8 @@ pub struct DrawCtx<'a> {
 }
 
 impl<'a> DrawCtx<'a> {
-    /// An offscreen still of one floor, every input and overlay off. The live `TuiRenderer`
+    /// An offscreen still of one floor, every input and overlay off; the office-wide
+    /// tallies and gateway come from `scene`, as the live renderer's do. The live `TuiRenderer`
     /// keeps its exhaustive literal, so a new field is a compile error there, not a silent default.
     #[doc(hidden)]
     pub fn offscreen(
