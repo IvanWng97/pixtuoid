@@ -472,16 +472,13 @@ mod tests {
 
     #[test]
     fn token_paper_is_legible_on_the_desk_for_every_theme() {
-        fn lum(c: Rgb) -> u32 {
-            c.r as u32 + c.g as u32 + c.b as u32
-        }
-        // Half the appliance guard's printer margin: the tower is 3px wide,
-        // so it needs real contrast, but themes like gruvbox run warm/low.
-        const MIN_PAPER_MARGIN: u32 = 120;
+        // The tower is 3px wide, so it needs real contrast, but themes like
+        // gruvbox run warm and low.
+        const MIN_PAPER_MARGIN: f32 = 0.15;
         for t in ALL_THEMES {
             let f = &t.furniture;
             assert!(
-                lum(f.paper) >= lum(f.wood_top) + MIN_PAPER_MARGIN,
+                f.paper.lightness() >= f.wood_top.lightness() + MIN_PAPER_MARGIN,
                 "{}: paper must read bright against the desk wood",
                 t.name
             );
@@ -560,15 +557,12 @@ mod tests {
 
     #[test]
     fn appliance_palette_is_legible_for_every_theme() {
-        fn lum(c: Rgb) -> u32 {
-            c.r as u32 + c.g as u32 + c.b as u32
-        }
         for t in ALL_THEMES {
             let a = &t.appliance;
             assert!(
-                lum(a.printer_paper) > lum(a.printer_body)
-                    && lum(a.printer_body) > lum(a.printer_top),
-                "{}: printer must layer paper > body > top by luminance",
+                a.printer_paper.lightness() > a.printer_body.lightness()
+                    && a.printer_body.lightness() > a.printer_top.lightness(),
+                "{}: printer must layer paper > body > top by lightness",
                 t.name
             );
             assert_ne!(
@@ -611,9 +605,13 @@ mod tests {
                     t.name
                 );
             }
-            let brightest_drink = a.vending_drinks.iter().map(|c| lum(*c)).max().unwrap();
+            let brightest_drink = a
+                .vending_drinks
+                .iter()
+                .map(|c| c.lightness())
+                .fold(0.0, f32::max);
             assert!(
-                lum(a.vending_body) < brightest_drink,
+                a.vending_body.lightness() < brightest_drink,
                 "{}: vending body should be darker than its drinks",
                 t.name
             );
@@ -622,20 +620,19 @@ mod tests {
 
     #[test]
     fn source_badges_legible_for_every_theme() {
-        fn lum(c: Rgb) -> u32 {
-            c.r as u32 + c.g as u32 + c.b as u32
-        }
         // Floor at which two source badges read as different colors at the 2-char
         // badge scale — new themes/sources must clear it, not merely differ by
         // one bit.
         const MIN_SOURCE_HUE_DIST: u32 = 60;
+        // A 2-char badge on the tooltip must stand out by lightness alone.
+        const MIN_BADGE_LIGHTNESS_GAP: f32 = 0.1;
         for t in ALL_THEMES {
             let s = &t.source;
             let bg = t.ui.tooltip_bg;
             let hues = s.all();
             for (i, h) in hues.iter().enumerate() {
                 assert!(
-                    lum(*h).abs_diff(lum(bg)) >= 80,
+                    h.lightness() >= bg.lightness() + MIN_BADGE_LIGHTNESS_GAP,
                     "{}: source hue {i} too close to tooltip_bg",
                     t.name
                 );

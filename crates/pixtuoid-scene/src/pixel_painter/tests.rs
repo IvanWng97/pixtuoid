@@ -5295,9 +5295,8 @@ fn a_lamp_casting_no_pool_is_not_drawn_lit() {
         buf
     };
     let (dim, bright) = (render(0.05), render(1.0));
-    let lum = |c: Rgb| 0.299 * c.r as f32 + 0.587 * c.g as f32 + 0.114 * c.b as f32;
     assert!(
-        lum(dim.get(desk.x, desk.y)) < lum(bright.get(desk.x, desk.y)),
+        dim.get(desk.x, desk.y).lightness() < bright.get(desk.x, desk.y).lightness(),
         "a barely-lit lamp must not paint the same shade as a fully-lit one: \
          {:?} vs {:?}",
         dim.get(desk.x, desk.y),
