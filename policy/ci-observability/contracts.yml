@@ -4,8 +4,9 @@
 # it happens does not belong here: it gets noticed without a contract.
 #
 # check.sh parses each `file` with yq and evaluates `assert` over it with
-# `jq -e`; false, null and a jq error all count as red, so a renamed job or a
-# deleted key fails its contract instead of slipping past it. Each `break` is a jq edit
+# `jq -e`, binding `$expected` to the entry's `expected` when there is one.
+# false, null and a jq error all count as red, so a renamed job or a deleted
+# key fails its contract instead of slipping past it. Each `break` is a jq edit
 # of the same document that must turn `assert` red, and every run applies them
 # all; a clause is proven able to fire only while some break falsifies it alone.
 
@@ -42,18 +43,29 @@
   file: .github/workflows/claude-readonly-review.yml
   why: >-
     The model reads untrusted diff text and its answer is published, so any
-    reach beyond the built-in read tools lets an injection act, or read a runner
-    secret and publish it. dontAsk denies a read outside the working directory
-    unless an allow rule pre-approves it, which a bare `Read` rule does for
-    every path (code.claude.com/docs/en/agent-sdk/permissions), so no flag or
-    input may add an allow rule or widen the tools.
+    reach beyond reading the checkout lets an injection act, or read a runner
+    secret such as the CLI's own environment and publish it. `--tools` leaves
+    only the built-in read tools, and dontAsk denies a read outside the working
+    directory unless an allow rule pre-approves it, which a bare `Read` rule
+    does for every path (code.claude.com/docs/en/agent-sdk/permissions). Any
+    flag or action input can add one, so the arguments and the step's inputs
+    are pinned exactly; `--json-schema` keeps the answer structured for the
+    publisher to validate.
+  expected: >-
+    --max-turns ${{ inputs.max_turns }}
+    --max-budget-usd ${{ inputs.max_budget_usd }}
+    --permission-mode dontAsk
+    --tools Read,Glob,Grep
+    --json-schema ${{ steps.schema.outputs.json }}
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length == 1
-      and (.[0].with | has("settings") | not)
-      and (.[0].with.claude_args | test("(^|\\s)--permission-mode dontAsk(\\s|$)"))
-      and (.[0].with.claude_args | test("(^|\\s)--tools Read,Glob,Grep(\\s|$)"))
-      and (.[0].with.claude_args | test("--allowedTools|--settings") | not)
+      and (.[0].with | keys) == [
+            "anthropic_federation_rule_id", "anthropic_organization_id",
+            "anthropic_service_account_id", "classify_inline_comments", "claude_args",
+            "claude_code_oauth_token", "display_report", "github_token",
+            "include_fix_links", "prompt", "show_full_output", "track_progress"]
+      and .[0].with.claude_args == $expected
   break:
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
@@ -68,9 +80,43 @@
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub("--tools Read,Glob,Grep"; "--tools Read,Glob,Grep,Bash")
     - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub(" --json-schema [^ ]+"; "")
+    - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with)
       += {"settings": "{}"}
     - '.jobs.analyze.steps += [{"uses": "anthropics/claude-code-action@v1", "with": {"claude_args": "--tools Bash"}}]'
+
+- id: reviewer-model-auth-is-scoped
+  file: .github/workflows/claude-readonly-review.yml
+  why: >-
+    The model authenticates with short-lived workload-identity credentials and
+    the job's own token; the long-lived OAuth secret may only be the fallback
+    for a repository with neither WIF variable set, never a credential every
+    run receives.
+  expected: >-
+    ${{ vars.ANTHROPIC_FEDERATION_RULE_ID == '' && vars.ANTHROPIC_ORGANIZATION_ID == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+  assert: |
+    [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
+    | length == 1
+      and .[0].with.github_token == "${{ github.token }}"
+      and .[0].with.anthropic_federation_rule_id == "${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}"
+      and .[0].with.anthropic_organization_id == "${{ vars.ANTHROPIC_ORGANIZATION_ID }}"
+      and .[0].with.claude_code_oauth_token == $expected
+  break:
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_code_oauth_token)
+      = "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.github_token)
+      = "${{ secrets.REVIEW_PAT }}"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.anthropic_federation_rule_id)
+      = "${{ secrets.FEDERATION_RULE_ID }}"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.anthropic_organization_id)
+      = "${{ secrets.ORGANIZATION_ID }}"
+    - '.jobs.analyze.steps += [(.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")))]'
 
 - id: reviewer-output-stays-private
   file: .github/workflows/claude-readonly-review.yml

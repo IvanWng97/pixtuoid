@@ -22,12 +22,13 @@ shape=$(jq -r '
     else
         (map(.id) | group_by(.)[] | select(length > 1) | "duplicate id \(.[0])"),
         (.[] | (.id // "?") as $id
-            | ((keys - ["id", "file", "why", "assert", "break"])[] | "\($id): unknown key `\(.)`"),
+            | ((keys - ["id", "file", "why", "assert", "break", "expected"])[] | "\($id): unknown key `\(.)`"),
               ((["id", "file", "why", "assert", "break"] - keys)[] | "\($id): missing `\(.)`"),
               (select((.id | text) and (.why | text) and (.assert | text) | not)
                   | "\($id): id, why and assert must be non-empty strings"),
               (select(.file | texts | not) | "\($id): file must be a path or a non-empty list of paths"),
-              (select(.break | texts | not) | "\($id): break must be a jq edit or a non-empty list of them"))
+              (select(.break | texts | not) | "\($id): break must be a jq edit or a non-empty list of them"),
+              (select(has("expected") and (.expected | type) != "string") | "\($id): expected must be a string"))
     end' <<<"$contracts")
 if [[ -n $shape ]]; then
     printf 'error: %s: %s\n' "$contracts_path" "$shape" >&2
@@ -42,6 +43,7 @@ for ((i = 0; i < count; i++)); do
     assertion="[$(jq -r ".[$i].assert" <<<"$contracts")] | length == 1 and .[0] != false and .[0] != null"
     # One JSON string per line: a break written as a YAML block spans lines.
     breaks=$(jq -c ".[$i].break | [.] | flatten | .[]" <<<"$contracts")
+    expected=$(jq -r ".[$i].expected // \"\"" <<<"$contracts")
     files=$(jq -r ".[$i].file | [.] | flatten | .[]" <<<"$contracts")
     while IFS= read -r file; do
         # yq's `==` is false for any two maps or arrays, identical ones included,
@@ -51,7 +53,7 @@ for ((i = 0; i < count; i++)); do
             failed=1
             continue
         fi
-        if ! jq -e "$assertion" <<<"$document" >/dev/null; then
+        if ! jq -e --arg expected "$expected" "$assertion" <<<"$document" >/dev/null; then
             printf 'error: %s breaks contract %s\n  %s\n' "$file" "$id" "$(jq -r ".[$i].why" <<<"$contracts")" >&2
             failed=1
             continue
@@ -62,7 +64,7 @@ for ((i = 0; i < count; i++)); do
                 [[ $(jq -s 'length == 1 and (.[0] | type) == "object"' <<<"$broken") != true ]]; then
                 printf "error: %s's break does not yield one document from %s:\n%s\n" "$id" "$file" "$breakage" >&2
                 failed=1
-            elif jq -e "$assertion" <<<"$broken" >/dev/null 2>&1; then
+            elif jq -e --arg expected "$expected" "$assertion" <<<"$broken" >/dev/null 2>&1; then
                 printf 'error: %s still passes on %s after this break, so that clause cannot fire:\n%s\n' "$id" "$file" "$breakage" >&2
                 failed=1
             fi
