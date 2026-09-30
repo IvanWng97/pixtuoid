@@ -29,7 +29,8 @@ use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::{AgentSlot, SceneState};
 use pixtuoid_scene::cutaway::paint::{render_cutaway, Office};
 use pixtuoid_scene::floor::{
-    render_floor, CoffeeState, FloorCtx, FloorMeta, FloorSession, FrameInputs, ObservedFloor,
+    render_floor, CoffeeState, FloorCtx, FloorInputs, FloorMeta, FloorSession, FrameInputs,
+    ObservedFloor, PetInputs,
 };
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::localclock;
@@ -184,14 +185,15 @@ fn render_frame(c: &mut Criterion) {
                     &mut coffee,
                     &mut chitchat,
                     FrameInputs {
-                        scene,
-                        pack: &pack,
+                        world: FloorInputs {
+                            scene,
+                            pack: &pack,
+                            now: base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS),
+                            floor: FloorMeta::ground(),
+                            pets: PetInputs::default(),
+                        },
                         theme,
-                        now: base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS),
                         size,
-                        floor_meta: FloorMeta::ground(),
-                        active_pet: None,
-                        floor_pet: None,
                         debug_walkable: false,
                     },
                 )

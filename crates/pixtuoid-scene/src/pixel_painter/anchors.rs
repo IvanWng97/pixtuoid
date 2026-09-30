@@ -82,8 +82,8 @@ pub(super) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
 /// Nudge a sprite so the whole frame lands inside the canvas, answering in the
 /// SAME anchor space `pos` came in.
 ///
-/// Lives at PAINT because invariant #6 runs one way: sprite size never moves a
-/// sim position.
+/// It moves a figure's paint anchor, never its sim position: invariant #6 runs
+/// one way, and sprite size never moves where the sim put a figure.
 pub(crate) fn keep_sprite_on_canvas(anchor: Anchor, pos: Point, size: Size, buf: Size) -> Point {
     match anchor {
         // `min` before `max`: on a buffer narrower than the sprite the lower

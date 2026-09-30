@@ -101,8 +101,8 @@ fn tui_renderer_render_paints_a_full_frame() {
     );
 }
 
-/// The transition path must not hardcode `active_pet: None`, `floor_pet_kind: None` or
-/// empty coffee state — pets, cups and steam vanish during the slide if it does.
+/// The transition path must not hardcode `PetInputs::default()` or empty
+/// coffee state — pets, cups and steam vanish during the slide if it does.
 #[test]
 fn tui_renderer_transition_paints_pets_and_coffee() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);

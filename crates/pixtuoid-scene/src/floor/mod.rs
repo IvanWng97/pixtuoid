@@ -24,7 +24,7 @@ use crate::motion::MotionState;
 use crate::pathfind::{AStarRouter, Router};
 use crate::pet::{Pet, PetState};
 use crate::pixel_painter::{
-    render_to_rgb_buffer, sim_step, PetInputs, PixelCtx, SimFrame, SimInputs, SimStores,
+    render_to_rgb_buffer, sim_step, PixelCtx, SimFrame, SimInputs, SimStores,
 };
 use crate::pose::PoseHistory;
 use crate::theme::Theme;
@@ -308,29 +308,47 @@ pub fn frame_epilogue(
     fctx.recompute_door_anim_max_ms(now);
 }
 
+/// A floor's pet and the live interaction with it.
+#[derive(Clone, Copy, Default)]
+pub struct PetInputs<'a> {
+    /// This floor's configured pet; `None` when no pets are configured or none
+    /// maps to this floor seed.
+    pub pet: Option<&'a Pet>,
+    /// The last petting, if any; honoured only while it plays, for this
+    /// floor's pet.
+    pub petting: Option<&'a PetState>,
+}
+
+/// What one floor shows at one instant — the inputs the frame, the paint pass
+/// and the sim share.
+#[derive(Clone, Copy)]
+pub struct FloorInputs<'a> {
+    /// The scene to render (the full live scene, or a projected single-floor one).
+    pub scene: &'a SceneState,
+    /// The sprite pack — a sim input too: character anchors center on its
+    /// sprite width, and placement is position.
+    pub pack: &'a Pack,
+    /// This frame's time — a parameter; the engine never reads the clock (wasm).
+    pub now: SystemTime,
+    /// This floor's index, altitude, and layout seed.
+    pub floor: FloorMeta,
+    /// This floor's pet and the live interaction with it.
+    pub pets: PetInputs<'a>,
+}
+
 /// The IMMUTABLE per-frame render inputs threaded through [`render_floor`] /
 /// [`FloorSession::render`]. The MUTABLE stores (the floor's `fctx`/`buf`, the
 /// office's `coffee`/`chitchat`) stay SEPARATE params on `render_floor`: a
 /// painter that composes floors (the TUI) borrows those disjointly per floor via
 /// `split_at_mut`, so they can't fold into one bundle.
 pub struct FrameInputs<'a> {
-    /// The scene to render (the full live scene, or a projected single-floor one).
-    pub scene: &'a SceneState,
-    /// The character sprite pack.
-    pub pack: &'a Pack,
+    /// The floor this frame shows.
+    pub world: FloorInputs<'a>,
     /// The active color theme.
     pub theme: &'static Theme,
-    /// This frame's wall-clock time.
-    pub now: SystemTime,
     /// Target pixel-buffer size. Buffer pixels ARE layout units in this pass,
     /// so this is also the office's logical extent.
     pub size: Size,
-    /// This floor's index, altitude, and layout seed.
-    pub floor_meta: FloorMeta,
-    /// The pet's live interaction state, if a pet is present.
-    pub active_pet: Option<&'a PetState>,
-    /// This floor's configured pet, if any.
-    pub floor_pet: Option<&'a Pet>,
     /// Composite the walkable / approach / route debug layer (the `w` toggle).
     pub debug_walkable: bool,
 }
@@ -357,36 +375,26 @@ pub fn render_floor(
     inputs: FrameInputs,
 ) -> Option<FloorFrame> {
     let FrameInputs {
-        scene,
-        pack,
+        world,
         theme,
-        now,
         size,
-        floor_meta,
-        active_pet,
-        floor_pet,
         debug_walkable,
     } = inputs;
     buf.resize_fill(size.w, size.h, theme.surface.bg_fallback);
-    let layout = fctx.frame_layout(size.w, size.h, floor_meta.floor_seed)?;
+    let layout = fctx.frame_layout(size.w, size.h, world.floor.floor_seed)?;
     let result = render_to_rgb_buffer(&mut PixelCtx {
         // Reborrow: `frame_epilogue` uses `fctx` after this render.
         store: &mut *fctx,
         buf,
-        scene,
+        world,
         layout: &layout,
-        pack,
-        now,
         theme,
-        floor: floor_meta,
-        active_pet,
-        floor_pet,
         coffee: coffee.map(),
         chitchat_state: chitchat,
         debug_walkable,
     });
     let occupied_waypoints = result.occupied_waypoints;
-    frame_epilogue(fctx, coffee, result.new_coffee_carriers, now);
+    frame_epilogue(fctx, coffee, result.new_coffee_carriers, world.now);
     Some(FloorFrame {
         layout,
         occupied_waypoints,
@@ -584,7 +592,7 @@ impl FloorSession {
     /// pixels), or `None` when the size can't lay out. `scene` MUST be the full
     /// live scene — the session evicts against it.
     pub fn render(&mut self, inputs: FrameInputs) -> Option<Arc<crate::layout::Layout>> {
-        self.evict_missing(inputs.scene);
+        self.evict_missing(inputs.world.scene);
         let frame = render_floor(
             &mut self.floor.ctx,
             &mut self.floor.buf,
@@ -707,15 +715,17 @@ impl FloorSession {
                 chitchat: &mut self.office.chitchat,
             },
             SimInputs {
-                scene,
+                world: FloorInputs {
+                    scene,
+                    pack,
+                    now,
+                    floor: floor_meta,
+                    // The pet needs the painter's config and click state, which `observe`
+                    // does not take; widen it when an observer draws the pet.
+                    pets: PetInputs::default(),
+                },
                 layout: &layout,
-                pack,
                 coffee: self.office.coffee.map(),
-                // The pet needs the painter's config and click state, which `observe`
-                // does not take; widen it when an observer draws the pet.
-                pets: PetInputs::default(),
-                floor: floor_meta,
-                now,
                 door_anim_max_ms,
             },
         );

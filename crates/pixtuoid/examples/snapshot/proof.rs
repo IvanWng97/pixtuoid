@@ -12,6 +12,7 @@ use pixtuoid_core::source::claude_code::{
 };
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::{AgentId, Reducer, SceneState, Transport};
+use pixtuoid_scene::floor::{FloorInputs, PetInputs};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use std::collections::VecDeque;
@@ -637,6 +638,13 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
         // Idle once the fixture's events are drained.
         reducer.tick(&mut scene, now);
         let mut draw_ctx = DrawCtx {
+            world: FloorInputs {
+                scene: &scene,
+                pack: job.pack,
+                now,
+                floor: pixtuoid_scene::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             buf: &mut floor.buf,
             store: &mut floor.ctx,
             mouse_pos: None,
@@ -651,11 +659,8 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
             audio_audible: false,
             volume_flash: None,
-            floor: pixtuoid_scene::floor::FloorMeta::ground(),
-            active_pet: None,
             last_pet_pos: None,
             last_mascots: Vec::new(),
-            floor_pet: None,
             chitchat_state: &mut chitchat_state,
             chitchat_bubbles: Vec::new(),
             coffee: &std::collections::HashMap::new(),
@@ -668,7 +673,7 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             connection: &pixtuoid::tui::connection::ConnectionFrame::default(),
             onboarding: &pixtuoid::tui::welcome::OnboardingFrame::default(),
         };
-        draw_scene(&mut term, &scene, job.pack, now, &mut draw_ctx)?;
+        draw_scene(&mut term, &mut draw_ctx)?;
         let office = cells_to_rgba(
             term.backend().buffer(),
             job.cols,

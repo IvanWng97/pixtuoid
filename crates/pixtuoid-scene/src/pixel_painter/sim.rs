@@ -17,11 +17,11 @@ use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 
 use crate::chitchat::{self, ActiveChitchat, ChitchatBubble, VenueKey};
 use crate::creatures::{gateway_mascot_def, mascot_position, mascot_seed, pet_position};
-use crate::floor::{CoffeeState, FloorMeta, LightingState};
+use crate::floor::{CoffeeState, FloorInputs, FloorMeta, LightingState, PetInputs};
 use crate::layout::{Anchor, Layout, Point, Size, WALKING_Y_OFF};
 use crate::motion::{walking_position, MotionState};
 use crate::pathfind::Router;
-use crate::pet::{Pet, PetKind, PetState};
+use crate::pet::PetKind;
 use crate::pose::{self, Pose, PoseHistory};
 
 use super::anchors::{
@@ -87,23 +87,12 @@ pub struct CharacterPlacement {
     pub seated: bool,
 }
 
-/// A floor's pet and the live interaction with it, as the sim reads them.
-#[derive(Clone, Copy, Default)]
-pub(crate) struct PetInputs<'a> {
-    /// This floor's configured pet, if any.
-    pub(crate) pet: Option<&'a Pet>,
-    /// The last petting, if any; honoured only while it plays, for this
-    /// floor's pet.
-    pub(crate) petting: Option<&'a PetState>,
-}
-
 /// The office pet this tick.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PetPlacement {
     /// Which pet.
     pub(crate) kind: PetKind,
-    /// Its centre, in layout units, before a painter fits its sprite to the
-    /// canvas.
+    /// Its centre, in layout units, fitted so its frame lands on the canvas.
     pub(crate) pos: Point,
     /// Whether to mirror the sprite horizontally.
     pub(crate) flip: bool,
@@ -119,8 +108,7 @@ pub(crate) struct PetPlacement {
 /// One gateway mascot this tick.
 #[derive(Debug, Clone)]
 pub(crate) struct MascotPlacement {
-    /// Its centre, in layout units, before a painter fits its sprite to the
-    /// canvas.
+    /// Its centre, in layout units, fitted so its frame lands on the canvas.
     pub(crate) pos: Point,
     /// The sprite animation to draw.
     pub(crate) anim_name: &'static str,
@@ -191,7 +179,7 @@ pub struct SimFrame {
     /// feedback animations.
     pub occupied_waypoints: std::collections::HashSet<usize>,
     /// The office pet this tick; `None` on a floor without one, or where
-    /// [`SimInputs::pets`] brings none.
+    /// [`FloorInputs::pets`] brings none.
     pub(crate) pet: Option<PetPlacement>,
     /// Each gateway mascot present this tick.
     pub(crate) mascots: Vec<MascotPlacement>,
@@ -216,18 +204,10 @@ impl SimFrame {
 
 /// What one `sim_step` reads, besides the stores it advances.
 pub(crate) struct SimInputs<'a> {
-    pub(crate) scene: &'a SceneState,
+    pub(crate) world: FloorInputs<'a>,
     pub(crate) layout: &'a Layout,
-    /// A genuine sim input: character anchors center on the pack's sprite
-    /// width, and placement is position.
-    pub(crate) pack: &'a Pack,
     /// Carrier → fetch time of each desk cup.
     pub(crate) coffee: &'a HashMap<AgentId, SystemTime>,
-    pub(crate) pets: PetInputs<'a>,
-    /// Which floor this is, and its seed.
-    pub(crate) floor: FloorMeta,
-    /// The tick's time — a parameter, never read from the clock here (wasm).
-    pub(crate) now: SystemTime,
     /// [`FloorCtx::door_anim_max_ms`](crate::floor::FloorCtx::door_anim_max_ms).
     pub(crate) door_anim_max_ms: u64,
 }
@@ -236,13 +216,16 @@ pub(crate) struct SimInputs<'a> {
 /// painter reads.
 pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> SimFrame {
     let SimInputs {
-        scene,
+        world:
+            FloorInputs {
+                scene,
+                pack,
+                now,
+                floor,
+                pets,
+            },
         layout,
-        pack,
         coffee,
-        pets,
-        floor,
-        now,
         door_anim_max_ms,
     } = inputs;
     let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
@@ -342,7 +325,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
     let chitchat_bubbles =
         chitchat::update_and_collect(stores.chitchat, floor.floor_idx, &waypoint_visitors, now);
     let pet = pet_placement(&agents, layout, pack, pets, floor, now);
-    let mascots = mascot_placements(scene, layout, now);
+    let mascots = mascot_placements(scene, layout, pack, now);
     let desks = desk_props(&agents, layout, coffee, now);
 
     let door_frame = super::anchors::compute_door_frame_idx(&agents, now, door_anim_max_ms);
@@ -363,6 +346,32 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
     }
 }
 
+/// The size of `anim`'s frame `frame_idx`, or `fallback` where the pack lacks
+/// it, so a figure still sorts and fits sanely while its blit no-ops.
+pub(super) fn frame_size(pack: &Pack, anim: &str, frame_idx: usize, fallback: Size) -> Size {
+    pack.animation(anim)
+        .and_then(|a| super::frame_at(a, frame_idx))
+        .map_or(fallback, |f| Size {
+            w: f.width(),
+            h: f.height(),
+        })
+}
+
+/// `pos`, in `anchor` space, moved so a `size` frame lands on `layout`'s canvas:
+/// the one fit every figure's placement takes.
+fn on_canvas(layout: &Layout, anchor: Anchor, pos: Point, size: Size) -> Point {
+    let canvas = Size {
+        w: layout.buf_w,
+        h: layout.buf_h,
+    };
+    keep_sprite_on_canvas(anchor, pos, size, canvas)
+}
+
+/// The bundled cat's size, for a pack that lacks the pet's anim.
+pub(super) const PET_FALLBACK: Size = Size { w: 8, h: 6 };
+/// The bundled lobster's size, for a pack that lacks the mascot's anim.
+pub(super) const MASCOT_FALLBACK: Size = Size { w: 14, h: 12 };
+
 /// The floor's pet this tick. A pet being petted holds still where it was
 /// clicked; otherwise `pet_position` roams it around the idle desks.
 fn pet_placement(
@@ -377,10 +386,18 @@ fn pet_placement(
     let petting = pets
         .petting
         .filter(|p| p.is_active(now) && p.kind == kind && p.floor_idx == floor.floor_idx);
+    let fit = |anim, frame_idx, pos| {
+        on_canvas(
+            layout,
+            Anchor::Center,
+            pos,
+            frame_size(pack, anim, frame_idx, PET_FALLBACK),
+        )
+    };
     if let Some(p) = petting {
         return Some(PetPlacement {
             kind,
-            pos: p.pet_pos,
+            pos: fit(kind.sit_anim(), 0, p.pet_pos),
             flip: false,
             anim_name: kind.sit_anim(),
             frame_idx: 0,
@@ -412,7 +429,7 @@ fn pet_placement(
     )?;
     Some(PetPlacement {
         kind,
-        pos,
+        pos: fit(anim_name, frame_idx, pos),
         flip,
         anim_name,
         frame_idx,
@@ -423,7 +440,12 @@ fn pet_placement(
 /// Every gateway mascot present in the scene's daemon roster. The runtime keeps
 /// the roster honest, so "entry present" tracks "connected + alive", not merely
 /// "a hook arrived"; only the ground floor carries it, so each mascot shows once.
-fn mascot_placements(scene: &SceneState, layout: &Layout, now: SystemTime) -> Vec<MascotPlacement> {
+fn mascot_placements(
+    scene: &SceneState,
+    layout: &Layout,
+    pack: &Pack,
+    now: SystemTime,
+) -> Vec<MascotPlacement> {
     scene
         .daemons()
         .filter_map(|(source, instance, presence)| {
@@ -431,8 +453,9 @@ fn mascot_placements(scene: &SceneState, layout: &Layout, now: SystemTime) -> Ve
             let seed = mascot_seed(source, instance);
             let (pos, anim_name, frame_idx) =
                 mascot_position(layout, presence, def.walk, def.rest, now, seed)?;
+            let size = frame_size(pack, anim_name, frame_idx, MASCOT_FALLBACK);
             Some(MascotPlacement {
-                pos,
+                pos: on_canvas(layout, Anchor::Center, pos, size),
                 anim_name,
                 frame_idx,
                 name: def.display_name,
@@ -687,25 +710,13 @@ fn resolve_characters(
     }
     // ONE guard for every pose arm, on the frame each placement will blit.
     // `anchor` only — the z-key and the chitchat visitor keep pre-clamp geometry.
-    let buf = Size {
-        w: layout.buf_w,
-        h: layout.buf_h,
+    let fallback = Size {
+        w: char_w,
+        h: crate::layout::CHARACTER_SPRITE_H,
     };
     for p in &mut placements {
-        let size = pack
-            .animation(p.anim_name)
-            .and_then(|a| super::frame_at(a, p.frame_idx))
-            .map_or(
-                Size {
-                    w: char_w,
-                    h: crate::layout::CHARACTER_SPRITE_H,
-                },
-                |f| Size {
-                    w: f.width(),
-                    h: f.height(),
-                },
-            );
-        p.anchor = keep_sprite_on_canvas(Anchor::TopLeft, p.anchor, size, buf);
+        let size = frame_size(pack, p.anim_name, p.frame_idx, fallback);
+        p.anchor = on_canvas(layout, Anchor::TopLeft, p.anchor, size);
     }
 
     // wp_rank's keys ARE this tick's occupied waypoints — every AtWaypoint

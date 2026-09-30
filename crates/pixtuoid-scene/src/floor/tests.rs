@@ -604,14 +604,15 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
         &mut coffee,
         &mut chitchat,
         FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 192, h: 160 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         },
     )
@@ -634,14 +635,15 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
         &mut coffee2,
         &mut chitchat2,
         FrameInputs {
-            scene: &plain,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &plain,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 192, h: 160 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         },
     )
@@ -678,14 +680,15 @@ fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
         &mut coffee,
         &mut chitchat,
         FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 8, h: 8 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         },
     );
@@ -702,14 +705,15 @@ fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
         &mut coffee,
         &mut chitchat,
         FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 160, h: 96 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         },
     );
@@ -739,14 +743,15 @@ fn floor_session_render_owns_the_dual_eviction() {
 
     let scene = SceneState::new([8; MAX_FLOORS]);
     let layout = session.render(FrameInputs {
-        scene: &scene,
-        pack: &pack,
+        world: FloorInputs {
+            scene: &scene,
+            pack: &pack,
+            now,
+            floor: FloorMeta::ground(),
+            pets: PetInputs::default(),
+        },
         theme,
-        now,
         size: Size { w: 160, h: 96 },
-        floor_meta: FloorMeta::ground(),
-        active_pet: None,
-        floor_pet: None,
         debug_walkable: false,
     });
     assert!(layout.is_some(), "a layoutable size renders");
@@ -783,14 +788,15 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
         let now = now0 + Duration::from_secs(3 * step);
         let layout = session
             .render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w: 160, h: 96 },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             })
             .expect("160x96 lays out");
@@ -818,14 +824,15 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
         "occupancy never fell back to empty — last_occupied accumulates instead of tracking the frame"
     );
     let none = session.render(FrameInputs {
-        scene: &scene,
-        pack: &pack,
+        world: FloorInputs {
+            scene: &scene,
+            pack: &pack,
+            now: now0,
+            floor: FloorMeta::ground(),
+            pets: PetInputs::default(),
+        },
         theme,
-        now: now0,
         size: Size { w: 8, h: 8 },
-        floor_meta: FloorMeta::ground(),
-        active_pet: None,
-        floor_pet: None,
         debug_walkable: false,
     });
     assert!(none.is_none());
@@ -1053,14 +1060,15 @@ fn the_foreground_layer_is_lit_by_the_clock() {
             &mut coffee,
             &mut chitchat,
             FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w: 192, h: 160 },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             },
         )
@@ -1356,14 +1364,15 @@ fn the_classic_sees_the_skyline_from_its_floors_altitude() {
             &mut CoffeeState::new(),
             &mut HashMap::new(),
             FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: floor_meta,
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w: 192, h: 160 },
-                floor_meta,
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             },
         )

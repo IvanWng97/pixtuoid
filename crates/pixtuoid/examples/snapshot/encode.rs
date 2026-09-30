@@ -7,7 +7,7 @@ use image::{Delay, Frame as GifFrame, Rgb as ImgRgb, RgbImage, Rgba, RgbaImage};
 use pixtuoid::tui::renderer::{draw_scene, DrawCtx};
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::SceneState;
-use pixtuoid_scene::floor::{FloorMeta, PerFloor};
+use pixtuoid_scene::floor::{FloorInputs, FloorMeta, PerFloor, PetInputs};
 use pixtuoid_scene::theme::Theme;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
@@ -526,6 +526,13 @@ pub(crate) fn save_as_gif(
         term,
         |term, now, _| {
             let mut draw_ctx = DrawCtx {
+                world: FloorInputs {
+                    scene,
+                    pack: job.pack,
+                    now,
+                    floor: floor_meta,
+                    pets: PetInputs::default(),
+                },
                 buf: &mut floor.buf,
                 store: &mut floor.ctx,
                 mouse_pos: None,
@@ -541,11 +548,8 @@ pub(crate) fn save_as_gif(
                 gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
                 audio_audible: false,
                 volume_flash: None,
-                floor: floor_meta,
-                active_pet: None,
                 last_pet_pos: None,
                 last_mascots: Vec::new(),
-                floor_pet: None,
                 chitchat_state: &mut chitchat_state,
                 chitchat_bubbles: Vec::new(),
                 coffee: &std::collections::HashMap::new(),
@@ -558,7 +562,7 @@ pub(crate) fn save_as_gif(
                 connection: &pixtuoid::tui::connection::ConnectionFrame::default(),
                 onboarding: &pixtuoid::tui::welcome::OnboardingFrame::default(),
             };
-            draw_scene(term, scene, job.pack, now, &mut draw_ctx).map(drop)
+            draw_scene(term, &mut draw_ctx).map(drop)
         },
         |term| term.backend().buffer(),
     )
