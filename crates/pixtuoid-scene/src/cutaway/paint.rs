@@ -3697,10 +3697,7 @@ mod tests {
         );
         let s = 8;
         let (pen, buf) = floor(&layout, s, 4);
-        let luma = |x: u16, y: u16| {
-            let c = buf.get(x, y);
-            u32::from(c.r) + u32::from(c.g) + u32::from(c.b)
-        };
+        let luma = |x: u16, y: u16| buf.get(x, y).lightness();
         let k = s / 4;
         let tile = pen.art(FLOOR_TILE).0 * k;
         let floor_top = layout.wall_band_h() * s;
@@ -3909,7 +3906,7 @@ mod tests {
             shadowed(8, 4, &[wide, narrow]),
         );
         assert!(ab.as_slice() == ba.as_slice(), "order-free");
-        let lum = |c: pixtuoid_core::sprite::Rgb| u32::from(c.r) + u32::from(c.g) + u32::from(c.b);
+        let lum = pixtuoid_core::sprite::Rgb::lightness;
         let mut mixed = false;
         for ((&both, &a), &b) in ab.as_slice().iter().zip(a.as_slice()).zip(b.as_slice()) {
             let deeper = if lum(a) <= lum(b) { a } else { b };
@@ -5974,7 +5971,7 @@ S B B B B B B S
         let mut night = blank();
         paint_backdrop(&layout, theme, scale, pen, &mut night);
         paint_list(&list, &mut cache, &mut night);
-        let luma = |c: pixtuoid_core::sprite::Rgb| u32::from(c.r) + u32::from(c.g) + u32::from(c.b);
+        let luma = pixtuoid_core::sprite::Rgb::lightness;
         let (mut kept, mut lifted) = (0, 0);
         for y in 0..night.height() {
             for x in 0..night.width() {
@@ -6471,7 +6468,7 @@ S B B B B B B S
                     .copied()
                     .flatten()
                     .expect("the sofa is opaque at its centre");
-                u32::from(c.r) + u32::from(c.g) + u32::from(c.b)
+                c.lightness()
             };
             assert!(
                 luma(split) > luma(split - 1),
