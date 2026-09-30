@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+    # ready_for_review: `analyze` skips drafts, so a PR's first scan runs when
+    # it leaves draft.
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     - cron: '29 11 * * 3'
   workflow_dispatch:
@@ -21,6 +24,9 @@ concurrency:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
+    # Not a required check, so a skip on a draft blocks nothing; ci.yml's
+    # light tier is the draft's feedback.
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:

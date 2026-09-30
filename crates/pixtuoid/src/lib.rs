@@ -185,7 +185,7 @@ fn is_bidi_control(c: char) -> bool {
 
 /// Test-only mutex serializing tests that mutate process-global environment
 /// variables. Unit tests share one binary, so two env-mutating tests race under
-/// plain `cargo test` (nextest isolates per-process; the `justfile` falls back).
+/// plain `cargo test` (nextest isolates per-process).
 #[cfg(test)]
 pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import sourcesData from '../../src/sources.json' with { type: 'json' };
+import { E2E_STAR_COUNT } from '../../config/gh-stars.mjs';
 
 type SourceRow = { badge: string; badge_color: string; name: string; status: string };
 const supportedSources = (sourcesData as SourceRow[]).filter((s) => s.status === 'supported');
@@ -1023,15 +1024,15 @@ test('statusline install chip on mobile: label stays readable at rest, flash swa
   expect(errors()).toEqual([]);
 });
 
-test('statusline install chip: the ★ star segment renders the overridden count, never a literal null/undefined', async ({
+test('statusline install chip: the ★ star segment renders the pinned count, never a literal null/undefined', async ({
   page,
 }) => {
-  // `just site-e2e` and CI both set GH_STARS_OVERRIDE (config/gh-stars.mjs) so the build-time __GH_STARS__ fetch is
-  // deterministic — a build made without it fails here, and the broad shape guard keeps the stringified-null class red.
+  // `just site-e2e` and CI both build with GH_STARS_E2E — a build made without it fails here, and the broad shape
+  // guard keeps the stringified-null class red.
   await gotoLive(page);
   const stars = page.locator('#sl-install .sl__stars');
   await expect(stars).toBeVisible();
-  await expect(stars).toHaveText('★ 842');
+  await expect(stars).toHaveText(`★ ${E2E_STAR_COUNT}`);
   await expect(stars).toHaveText(/^\s*★\s*\d+\s*$/);
 });
 

@@ -1427,13 +1427,15 @@ impl core::marker::Unpin for pixtuoid_core::sprite::Rgb
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::Rgb
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::Rgb
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::Rgb
-pub struct pixtuoid_core::sprite::RgbBuffer(_)
+pub struct pixtuoid_core::sprite::RgbBuffer
 impl pixtuoid_core::sprite::RgbBuffer
+pub fn pixtuoid_core::sprite::RgbBuffer::begin_writes(&mut self) -> u32
 pub fn pixtuoid_core::sprite::RgbBuffer::filled(u16, u16, pixtuoid_core::sprite::Rgb) -> Self
 pub fn pixtuoid_core::sprite::RgbBuffer::from_pixels(u16, u16, alloc::vec::Vec<pixtuoid_core::sprite::Rgb>) -> Self
 pub fn pixtuoid_core::sprite::RgbBuffer::get(&self, u16, u16) -> pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_core::sprite::RgbBuffer::put(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
 pub fn pixtuoid_core::sprite::RgbBuffer::put_checked(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
+pub fn pixtuoid_core::sprite::RgbBuffer::written_in(&self, u16, u16, u32) -> bool
 impl core::clone::Clone for pixtuoid_core::sprite::RgbBuffer
 pub fn pixtuoid_core::sprite::RgbBuffer::clone(&self) -> pixtuoid_core::sprite::RgbBuffer
 impl core::fmt::Debug for pixtuoid_core::sprite::RgbBuffer
@@ -2310,13 +2312,15 @@ impl core::marker::Unpin for pixtuoid_core::sprite::Rgb
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::Rgb
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::Rgb
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::Rgb
-pub struct pixtuoid_core::RgbBuffer(_)
+pub struct pixtuoid_core::RgbBuffer
 impl pixtuoid_core::sprite::RgbBuffer
+pub fn pixtuoid_core::sprite::RgbBuffer::begin_writes(&mut self) -> u32
 pub fn pixtuoid_core::sprite::RgbBuffer::filled(u16, u16, pixtuoid_core::sprite::Rgb) -> Self
 pub fn pixtuoid_core::sprite::RgbBuffer::from_pixels(u16, u16, alloc::vec::Vec<pixtuoid_core::sprite::Rgb>) -> Self
 pub fn pixtuoid_core::sprite::RgbBuffer::get(&self, u16, u16) -> pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_core::sprite::RgbBuffer::put(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
 pub fn pixtuoid_core::sprite::RgbBuffer::put_checked(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
+pub fn pixtuoid_core::sprite::RgbBuffer::written_in(&self, u16, u16, u32) -> bool
 impl core::clone::Clone for pixtuoid_core::sprite::RgbBuffer
 pub fn pixtuoid_core::sprite::RgbBuffer::clone(&self) -> pixtuoid_core::sprite::RgbBuffer
 impl core::fmt::Debug for pixtuoid_core::sprite::RgbBuffer

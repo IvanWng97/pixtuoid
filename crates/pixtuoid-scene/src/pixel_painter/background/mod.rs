@@ -3,7 +3,8 @@
 //! floor shadows, and weather effects.
 //!
 //! Everything here paints BEFORE the y-sorted entity pass, in the order the
-//! orchestrator (`pixel_painter/mod.rs`) calls it.
+//! orchestrator (`pixel_painter/mod.rs`) calls it; the backdrop fixtures
+//! among it (clock, runner, mats) in roster order.
 
 mod celestial;
 mod floor_wash;
@@ -14,9 +15,12 @@ use celestial::{
     STAR_ALPHA_MAX, STAR_COLOR,
 };
 pub(super) use floor_wash::paint_floor_wash;
+pub(crate) use lighting::{
+    clock_reading, neon_look, octant_offset, ClockReading, RUNNER_LATTICE_STRIDE,
+};
 pub(super) use lighting::{
-    neon_look, paint_clock, paint_corridor_runner, paint_light, paint_neon_panel,
-    paint_radial_falloff, paint_shadow, RadialFalloff,
+    paint_clock, paint_corridor_runner, paint_light, paint_neon_panel, paint_radial_falloff,
+    paint_shadow, NeonLook, RadialFalloff,
 };
 
 use pixtuoid_core::sprite::format::Pack;

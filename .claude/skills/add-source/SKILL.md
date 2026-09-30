@@ -21,7 +21,7 @@ manifest.
 
 Follow **[`docs/CONTRIBUTING.md`](../../../docs/CONTRIBUTING.md#adding-a-new-agent-cli)**
 "Adding a new agent CLI" step by step; its test steps are in
-[`crates/pixtuoid-core/tests/CLAUDE.md`](../../../crates/pixtuoid-core/tests/CLAUDE.md).
+[`crates/pixtuoid-core/tests/AGENTS.md`](../../../crates/pixtuoid-core/tests/AGENTS.md).
 
 ## The trap: `--lib` is not the suite
 
