@@ -1052,3 +1052,20 @@ fn a_claimed_seat_sends_the_agent_to_the_next_seat_of_the_same_venue() {
         "the probe should find another meeting slot, got {kind:?}"
     );
 }
+
+#[test]
+fn leg_pixels_are_every_position_a_walk_lands_on() {
+    let legs = [
+        (Point { x: 3, y: 5 }, Point { x: 6, y: 7 }),
+        (Point { x: 20, y: 4 }, Point { x: 13, y: 15 }),
+        (Point { x: 8, y: 8 }, Point { x: 8, y: 1 }),
+        (Point { x: 2, y: 2 }, Point { x: 2, y: 2 }),
+    ];
+    for (a, b) in legs {
+        let mut walked: Vec<Point> = (0..=crate::physics::PROGRESS_SCALE)
+            .map(|t| walking_position(a, b, t))
+            .collect();
+        walked.dedup();
+        assert_eq!(leg_pixels(a, b).collect::<Vec<_>>(), walked, "{a:?}->{b:?}");
+    }
+}

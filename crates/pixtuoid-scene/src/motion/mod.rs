@@ -586,5 +586,29 @@ pub(crate) fn walking_position(from: Point, to: Point, t_x1000: u16) -> Point {
     }
 }
 
+/// Every pixel [`walking_position`] lands on along `from → to`, in walk order,
+/// each once: the progress values where either axis's truncated offset steps.
+#[cfg(test)]
+pub(crate) fn leg_pixels(from: Point, to: Point) -> impl Iterator<Item = Point> {
+    let scale = u32::from(crate::physics::PROGRESS_SCALE);
+    let steps = |a: u16, b: u16| {
+        let d = u32::from(a.abs_diff(b));
+        (1..=d).map(move |k| (k * scale).div_ceil(d))
+    };
+    let mut ts: Vec<u32> = std::iter::once(0)
+        .chain(steps(from.x, to.x))
+        .chain(steps(from.y, to.y))
+        .collect();
+    ts.sort_unstable();
+    ts.dedup();
+    ts.into_iter().map(move |t| {
+        walking_position(
+            from,
+            to,
+            u16::try_from(t).unwrap_or(crate::physics::PROGRESS_SCALE),
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests;
