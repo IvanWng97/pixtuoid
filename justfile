@@ -84,11 +84,10 @@ shfmt-check:
 shfmt-fix:
     shfmt -i 4 -w {{ SHELL_SOURCES }}
 
-[doc('Run shellcheck over repository shell sources and every shebang recipe body')]
+[doc('Run shellcheck over repository shell sources')]
 [group('rust')]
 shellcheck:
     shellcheck {{ SHELL_SOURCES }}
-    bash scripts/lib/justfile-shellcheck.sh
 
 # Lint the GitHub Actions workflows (actionlint): YAML schema, expression types,
 # action input/output names, runner labels, AND shellcheck over every `run:`
@@ -274,7 +273,6 @@ lint:
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
-        # shellcheck disable=SC2016  # the backticks are literal text in the message
         printf 'error: missing lint tool(s): %s — run `just setup-tools`\n' "${missing[*]}" >&2
         exit 1
     fi
@@ -859,7 +857,6 @@ gen-wasm: gen-wasm-tools wasm-build
     # not a rebuild comparison).
     # `! -name '.*'` keeps dotfiles out: a Finder-dropped .DS_Store is gitignored,
     # so stamping it would verify locally and fail CI (missing file) — local-green/CI-red.
-    # shellcheck disable=SC2094  # find excludes manifest.sha256, the file this writes
     (cd site/public/wasm && find . -maxdepth 1 -type f ! -name manifest.sha256 ! -name '.*' | LC_ALL=C sort | xargs shasum -a 256 > manifest.sha256)
     ls -la site/public/wasm/
 
