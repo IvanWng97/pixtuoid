@@ -8,9 +8,10 @@
 //!
 //! ## Why not just sort by the base row
 //!
-//! Today it WOULD be equivalent. [`Span::behind`] derives its edges from the base row,
-//! which is a total order, so the graph is acyclic by construction and a plain
-//! sort produces the same list. The graph earns its place two other ways:
+//! Today it WOULD be equivalent. [`Span::behind`] derives its edges from the
+//! base row and then the layer, a total order, so the graph is acyclic by
+//! construction and a plain sort produces the same list. The graph earns its
+//! place two other ways:
 //!
 //! - `check_order` (test-only) turns every pairwise fact into an assertion. While
 //!   [`Span::behind`] is acyclic it guards the sort itself; it becomes the
@@ -28,6 +29,8 @@
 //! a cycle"). `paint.rs` splits wall runs; this module assumes it happened, and
 //! `no_wall_segment_is_taller_than_the_cast` pins that no segment is tall
 //! enough to straddle a figure.
+
+use crate::layout::Layer;
 
 /// A piece's painted bounds in LOGICAL units, inclusive on both ends, and the
 /// row it sorts on.
@@ -50,6 +53,8 @@ pub(crate) struct Span {
     pub y1: u16,
     /// The row it sorts on (the module's "base row"); greater draws later.
     pub depth: u16,
+    /// Which draws later among pieces at one `depth` ([`Layer`]).
+    pub layer: Layer,
 }
 
 impl Span {
@@ -63,12 +68,22 @@ impl Span {
             y0: y,
             y1,
             depth: y1,
+            layer: Layer::Under,
         }
     }
 
     /// The same bounds, sorted on `depth` instead.
     pub(crate) fn with_depth(self, depth: u16) -> Self {
         Self { depth, ..self }
+    }
+
+    /// The same bounds, in `layer` at its depth.
+    pub(crate) fn with_layer(self, layer: Layer) -> Self {
+        Self { layer, ..self }
+    }
+
+    fn key(self) -> (u16, Layer) {
+        (self.depth, self.layer)
     }
 
     fn overlaps_x(self, other: Self) -> bool {
@@ -82,20 +97,20 @@ impl Span {
     /// which is what keeps the graph sparse: a desk on the west wall and a
     /// walker on the east one can be drawn in either order.
     fn behind(self, other: Self) -> bool {
-        self.overlaps_x(other) && self.depth < other.depth
+        self.overlaps_x(other) && self.key() < other.key()
     }
 }
 
 /// Order `items` back to front.
 ///
 /// Kahn's algorithm over the [`Span::behind`] graph, with the ready set kept in
-/// base-row order so the result is deterministic (a topological order is not
-/// unique, and a render that reshuffles equal-depth pieces between frames
-/// flickers).
+/// (base row, layer) order so the result is deterministic (a topological order
+/// is not unique, and a render that reshuffles equal-depth pieces between
+/// frames flickers).
 ///
 /// A cycle cannot arise from the current predicate, so the recovery arm is a
 /// backstop rather than a live path: the pieces still in the graph are emitted
-/// in base-row order. That degrades to a plain base-row sort instead of
+/// in (base row, layer) order. That degrades to a plain sort instead of
 /// dropping them, which is the one outcome a renderer must never have.
 pub(crate) fn depth_sort<T>(items: Vec<(Span, T)>) -> Vec<T> {
     let n = items.len();
@@ -115,15 +130,14 @@ pub(crate) fn depth_sort<T>(items: Vec<(Span, T)>) -> Vec<T> {
         }
     }
 
-    // A min-heap on (base row, index): among pieces that are mutually
+    // A min-heap on (base row, layer, index): among pieces that are mutually
     // unconstrained the shallower one wins, so the result matches the plain
-    // base-row order the office produces today; the index is the fn doc's
-    // determinism.
+    // sort the office produces today; the index is the fn doc's determinism.
     use std::cmp::Reverse;
     use std::collections::BinaryHeap;
-    let mut ready: BinaryHeap<Reverse<(u16, usize)>> = (0..n)
+    let mut ready: BinaryHeap<Reverse<((u16, Layer), usize)>> = (0..n)
         .filter(|&i| indegree[i] == 0)
-        .map(|i| Reverse((spans[i].depth, i)))
+        .map(|i| Reverse((spans[i].key(), i)))
         .collect();
 
     let mut out = Vec::with_capacity(n);
@@ -134,7 +148,7 @@ pub(crate) fn depth_sort<T>(items: Vec<(Span, T)>) -> Vec<T> {
         for &j in &edges[i] {
             indegree[j] -= 1;
             if indegree[j] == 0 {
-                ready.push(Reverse((spans[j].depth, j)));
+                ready.push(Reverse((spans[j].key(), j)));
             }
         }
     }
@@ -147,7 +161,7 @@ pub(crate) fn depth_sort<T>(items: Vec<(Span, T)>) -> Vec<T> {
             n - out.len()
         );
         let mut rest: Vec<usize> = (0..n).filter(|&i| !drawn[i]).collect();
-        rest.sort_by_key(|&i| (spans[i].depth, i));
+        rest.sort_by_key(|&i| (spans[i].key(), i));
         out.extend(rest);
     }
 
