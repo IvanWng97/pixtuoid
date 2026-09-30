@@ -499,6 +499,10 @@ pub struct RgbBuffer {
     writes: Option<Writes>,
 }
 
+/// A write epoch, only ever minted by [`RgbBuffer::begin_writes`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WriteEpoch(u32);
+
 /// Each pixel's epoch of its last noted write.
 #[derive(Debug, Clone)]
 struct Writes {
@@ -601,9 +605,13 @@ impl RgbBuffer {
     /// Resize to `width × height` with every pixel `fill`, which counts as
     /// writing every pixel.
     pub fn resize_fill(&mut self, width: u16, height: u16, fill: Rgb) {
+        let reshaped = (width, height) != (self.pixels.width, self.pixels.height);
         self.pixels.resize_fill(width, height, fill);
         if let Some(w) = &mut self.writes {
-            w.at.resize(self.pixels.as_slice().len(), 0);
+            if reshaped {
+                w.at.clear();
+                w.at.resize(self.pixels.as_slice().len(), 0);
+            }
             w.note_all();
         }
     }
@@ -617,7 +625,7 @@ impl RgbBuffer {
 
     /// Start a write epoch and return it, for [`written_in`](Self::written_in):
     /// unlike a diff, it sees a pixel written in the colour already there.
-    pub fn begin_writes(&mut self) -> u32 {
+    pub fn begin_writes(&mut self) -> WriteEpoch {
         let n = self.pixels.as_slice().len();
         let w = self.writes.get_or_insert_with(|| Writes {
             at: vec![0; n],
@@ -633,7 +641,7 @@ impl RgbBuffer {
             w.at.fill(0);
             w.now = 1;
         }
-        w.now
+        WriteEpoch(w.now)
     }
 
     /// Stop noting writes until the next [`begin_writes`](Self::begin_writes);
@@ -645,13 +653,13 @@ impl RgbBuffer {
     }
 
     /// Whether `(x, y)` was written in `epoch` ([`begin_writes`](Self::begin_writes)).
-    pub fn written_in(&self, x: u16, y: u16, epoch: u32) -> bool {
+    pub fn written_in(&self, x: u16, y: u16, epoch: WriteEpoch) -> bool {
         x < self.pixels.width
             && y < self.pixels.height
             && self
                 .writes
                 .as_ref()
-                .is_some_and(|w| w.at.get(self.raw_index(x, y)) == Some(&epoch))
+                .is_some_and(|w| w.at.get(self.raw_index(x, y)) == Some(&epoch.0))
     }
 }
 
@@ -687,6 +695,29 @@ mod tests {
             !buf.written_in(1, 0, epoch),
             "a write after end_writes is not noted"
         );
+    }
+
+    #[test]
+    fn a_reshape_forgets_epochs_noted_in_the_old_layout() {
+        let mut buf = RgbBuffer::filled(4, 2, rgb(0, 0, 0));
+        let epoch = buf.begin_writes();
+        buf.put(0, 1, rgb(9, 9, 9));
+        buf.end_writes();
+        buf.resize_fill(2, 4, rgb(0, 0, 0));
+        assert!(!(0..4).any(|y| (0..2).any(|x| buf.written_in(x, y, epoch))));
+    }
+
+    #[test]
+    fn an_epoch_past_the_last_never_reads_an_unwritten_pixel_as_written() {
+        let mut buf = RgbBuffer::filled(2, 1, rgb(0, 0, 0));
+        buf.begin_writes();
+        buf.put(0, 0, rgb(9, 9, 9));
+        if let Some(w) = &mut buf.writes {
+            w.now = u32::MAX;
+        }
+        let epoch = buf.begin_writes();
+        assert!(!buf.written_in(0, 0, epoch));
+        assert!(!buf.written_in(1, 0, epoch));
     }
 
     /// Mid grey, dark hair, skin, and red, blue and yellow, which a lit step
