@@ -100,12 +100,18 @@ pub use anchors::character_anchor;
 
 #[doc(hidden)]
 pub use anchors::seated_anchor_facing;
+pub(crate) use background::{
+    clock_reading, neon_look, octant_offset, ClockReading, RUNNER_LATTICE_STRIDE,
+};
 #[cfg(test)]
 pub(crate) use drawable::DESK_BEZEL_RAISE;
 pub(crate) use drawable::{
     desk_art_top, desk_sprite_name, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE,
 };
-pub(crate) use palette::{appliance_overrides, DESK_BULB_KEY, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
+pub(crate) use palette::{
+    appliance_overrides, fixture_overrides, CLOCK_FACE_KEY, DESK_BULB_KEY, SCREEN_GLASS_KEY,
+    SCREEN_TEXT_KEY,
+};
 
 // The ToolKind→glow-hue seam the binary's footer tints tool segments with. The
 // footer paints this hue RAW; the sprite's glow then takes the hour's wash, so
@@ -182,7 +188,6 @@ pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
 use crate::atmosphere::Moment;
 use crate::ground::Ellipse;
 use crate::lighting::{DeskLights, LightInputs, Lights};
-use anchors::compute_door_frame_idx;
 use background::{
     paint_clock, paint_corridor_runner, paint_floor_and_walls, paint_floor_wash, paint_light,
     paint_neon_panel, paint_shadow,
@@ -294,7 +299,6 @@ struct PaintCtx<'a> {
     theme: &'a crate::theme::Theme,
     floor: crate::floor::FloorMeta,
     motion: &'a HashMap<pixtuoid_core::AgentId, MotionState>,
-    door_anim_max_ms: u64,
     debug_walkable: bool,
 }
 
@@ -322,6 +326,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             },
             floor: ctx.floor,
             now: ctx.now,
+            door_anim_max_ms: ctx.store.door_anim_max_ms,
         },
     );
     let (pet_pos, mascots, agents) = paint_frame(
@@ -337,7 +342,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             theme: ctx.theme,
             floor: ctx.floor,
             motion: &ctx.store.motion,
-            door_anim_max_ms: ctx.store.door_anim_max_ms,
             debug_walkable: ctx.debug_walkable,
         },
         &frame,
@@ -541,9 +545,6 @@ fn paint_frame(
     // background pass — it would double-paint under its y-sorted copy below.
     // Only these small mask-free items do.
     for room in &ctx.layout.meeting_rooms {
-        if let Some(board) = room.notice_board_rect() {
-            furniture::paint_notice_board(ctx.buf, board, ctx.theme);
-        }
         furniture::paint_doormat(ctx.buf, room, ctx.theme);
     }
     // Floor-level mats paint FIRST so they sit under every upright pantry
@@ -587,7 +588,7 @@ fn paint_frame(
     enqueue_lounge_pantry_appliances(ctx.layout, &frame.occupied_waypoints, &mut drawables);
 
     enqueue_pod_decor_and_plants(ctx.layout, &mut drawables);
-    enqueue_floor_fixtures(ctx, agents, &mut drawables);
+    enqueue_floor_fixtures(ctx, frame.door_frame, &mut drawables);
     enqueue_wall_decor(ctx.layout, &mut drawables);
 
     let resolved_pet_pos = frame.pet.map(|pet| enqueue_pet(ctx, pet, &mut drawables));
@@ -716,6 +717,14 @@ pub(crate) fn appliance_frame(anim: &Sprite, busy: bool, now: std::time::SystemT
     }
     let step = crate::anim::epoch_ms(now) / u64::from(anim.frame_ms().max(1));
     1 + usize::try_from(step % loop_len as u64).unwrap_or(0)
+}
+
+/// The frame of a looping `anim` showing at `now`: one each of the art's own
+/// `frame_ms`, round and round.
+pub(crate) fn looping_frame(anim: &Sprite, now: std::time::SystemTime) -> usize {
+    let frames = anim.frames().len().max(1) as u64;
+    let step = crate::anim::epoch_ms(now) / u64::from(anim.frame_ms().max(1));
+    usize::try_from(step % frames).unwrap_or(0)
 }
 
 /// One chair per NORTH-facing home desk, occupied or not. Keyed to TIE with its
@@ -1055,11 +1064,11 @@ fn enqueue_pod_decor_and_plants<'a>(layout: &'a Layout, drawables: &mut Vec<Draw
     }
 }
 
-/// Free-standing fixtures, and the elevator door at the frame
-/// `compute_door_frame_idx` picks.
+/// Free-standing fixtures, and the elevator door at the sim's
+/// [`SimFrame::door_frame`].
 fn enqueue_floor_fixtures<'a>(
     ctx: &PaintCtx<'_>,
-    agents: &[AgentSlot],
+    door_frame: usize,
     drawables: &mut Vec<Drawable<'a>>,
 ) {
     if let Some(lamp) = ctx.layout.floor_lamp() {
@@ -1116,12 +1125,11 @@ fn enqueue_floor_fixtures<'a>(
         });
     }
     if let Some(door_pos) = ctx.layout.door {
-        let frame_idx = compute_door_frame_idx(agents, ctx.now, ctx.door_anim_max_ms);
         drawables.push(Drawable {
             anchor_y: door_pos.y + ELEVATOR_H,
             kind: DrawableKind::Door {
                 pos: door_pos,
-                frame_idx,
+                frame_idx: door_frame,
             },
         });
     }
@@ -1135,6 +1143,12 @@ fn enqueue_wall_decor<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>)
         drawables.push(Drawable {
             anchor_y: z_sort_row(Anchor::TopLeft, pos, h),
             kind: DrawableKind::WallDecor { kind, pos },
+        });
+    }
+    for board in (0..layout.meeting_rooms.len()).filter_map(|r| layout.notice_board_rect(r)) {
+        drawables.push(Drawable {
+            anchor_y: board.y + board.height - 1,
+            kind: DrawableKind::NoticeBoard { board },
         });
     }
 }
