@@ -1428,12 +1428,15 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::Rgb
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::Rgb
 pub struct pixtuoid_core::sprite::RgbBuffer
 impl pixtuoid_core::sprite::RgbBuffer
+pub fn pixtuoid_core::sprite::RgbBuffer::as_mut_slice(&mut self) -> &mut [pixtuoid_core::sprite::Rgb]
 pub fn pixtuoid_core::sprite::RgbBuffer::begin_writes(&mut self) -> u32
+pub fn pixtuoid_core::sprite::RgbBuffer::end_writes(&mut self)
 pub fn pixtuoid_core::sprite::RgbBuffer::filled(u16, u16, pixtuoid_core::sprite::Rgb) -> Self
 pub fn pixtuoid_core::sprite::RgbBuffer::from_pixels(u16, u16, alloc::vec::Vec<pixtuoid_core::sprite::Rgb>) -> Self
 pub fn pixtuoid_core::sprite::RgbBuffer::get(&self, u16, u16) -> pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_core::sprite::RgbBuffer::put(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
 pub fn pixtuoid_core::sprite::RgbBuffer::put_checked(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
+pub fn pixtuoid_core::sprite::RgbBuffer::resize_fill(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
 pub fn pixtuoid_core::sprite::RgbBuffer::written_in(&self, u16, u16, u32) -> bool
 impl core::clone::Clone for pixtuoid_core::sprite::RgbBuffer
 pub fn pixtuoid_core::sprite::RgbBuffer::clone(&self) -> pixtuoid_core::sprite::RgbBuffer
@@ -1442,8 +1445,6 @@ pub fn pixtuoid_core::sprite::RgbBuffer::fmt(&self, &mut core::fmt::Formatter<'_
 impl core::ops::deref::Deref for pixtuoid_core::sprite::RgbBuffer
 pub type pixtuoid_core::sprite::RgbBuffer::Target = pixtuoid_core::grid::Grid<pixtuoid_core::sprite::Rgb>
 pub fn pixtuoid_core::sprite::RgbBuffer::deref(&self) -> &pixtuoid_core::grid::Grid<pixtuoid_core::sprite::Rgb>
-impl core::ops::deref::DerefMut for pixtuoid_core::sprite::RgbBuffer
-pub fn pixtuoid_core::sprite::RgbBuffer::deref_mut(&mut self) -> &mut pixtuoid_core::grid::Grid<pixtuoid_core::sprite::Rgb>
 impl core::marker::Freeze for pixtuoid_core::sprite::RgbBuffer
 impl core::marker::Send for pixtuoid_core::sprite::RgbBuffer
 impl core::marker::Sync for pixtuoid_core::sprite::RgbBuffer
@@ -2312,12 +2313,15 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::Rgb
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::Rgb
 pub struct pixtuoid_core::RgbBuffer
 impl pixtuoid_core::sprite::RgbBuffer
+pub fn pixtuoid_core::sprite::RgbBuffer::as_mut_slice(&mut self) -> &mut [pixtuoid_core::sprite::Rgb]
 pub fn pixtuoid_core::sprite::RgbBuffer::begin_writes(&mut self) -> u32
+pub fn pixtuoid_core::sprite::RgbBuffer::end_writes(&mut self)
 pub fn pixtuoid_core::sprite::RgbBuffer::filled(u16, u16, pixtuoid_core::sprite::Rgb) -> Self
 pub fn pixtuoid_core::sprite::RgbBuffer::from_pixels(u16, u16, alloc::vec::Vec<pixtuoid_core::sprite::Rgb>) -> Self
 pub fn pixtuoid_core::sprite::RgbBuffer::get(&self, u16, u16) -> pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_core::sprite::RgbBuffer::put(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
 pub fn pixtuoid_core::sprite::RgbBuffer::put_checked(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
+pub fn pixtuoid_core::sprite::RgbBuffer::resize_fill(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
 pub fn pixtuoid_core::sprite::RgbBuffer::written_in(&self, u16, u16, u32) -> bool
 impl core::clone::Clone for pixtuoid_core::sprite::RgbBuffer
 pub fn pixtuoid_core::sprite::RgbBuffer::clone(&self) -> pixtuoid_core::sprite::RgbBuffer
@@ -2326,8 +2330,6 @@ pub fn pixtuoid_core::sprite::RgbBuffer::fmt(&self, &mut core::fmt::Formatter<'_
 impl core::ops::deref::Deref for pixtuoid_core::sprite::RgbBuffer
 pub type pixtuoid_core::sprite::RgbBuffer::Target = pixtuoid_core::grid::Grid<pixtuoid_core::sprite::Rgb>
 pub fn pixtuoid_core::sprite::RgbBuffer::deref(&self) -> &pixtuoid_core::grid::Grid<pixtuoid_core::sprite::Rgb>
-impl core::ops::deref::DerefMut for pixtuoid_core::sprite::RgbBuffer
-pub fn pixtuoid_core::sprite::RgbBuffer::deref_mut(&mut self) -> &mut pixtuoid_core::grid::Grid<pixtuoid_core::sprite::Rgb>
 impl core::marker::Freeze for pixtuoid_core::sprite::RgbBuffer
 impl core::marker::Send for pixtuoid_core::sprite::RgbBuffer
 impl core::marker::Sync for pixtuoid_core::sprite::RgbBuffer
