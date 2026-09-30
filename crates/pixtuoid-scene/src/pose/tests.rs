@@ -2776,34 +2776,6 @@ fn route_walking_pose_t_overshoot_snaps_to_final_segment() {
     );
 }
 
-#[test]
-fn settle_from_pair_both_none_is_settle_none() {
-    // The (None, None) arm is unreachable from the wander orchestration, which
-    // always supplies at least one seat — so drive the private fn directly.
-    let p = Point { x: 1, y: 1 };
-    let q = Point { x: 2, y: 2 };
-
-    assert!(
-        matches!(settle_from_pair(None, None), Settle::None),
-        "(None, None) collapses to Settle::None"
-    );
-    assert!(
-        matches!(settle_from_pair(Some(p), None), Settle::Start(s) if s == p),
-        "(Some, None) collapses to Settle::Start(start)"
-    );
-    assert!(
-        matches!(settle_from_pair(None, Some(q)), Settle::End(e) if e == q),
-        "(None, Some) collapses to Settle::End(end)"
-    );
-    assert!(
-        matches!(
-            settle_from_pair(Some(p), Some(q)),
-            Settle::Both { start, end } if start == p && end == q
-        ),
-        "(Some, Some) collapses to Settle::Both start,end"
-    );
-}
-
 /// Drive `derive_with_routing` and return the pose, keeping the caller's stores.
 fn pose_at(
     slot: &AgentSlot,

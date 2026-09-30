@@ -13,8 +13,8 @@ use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::AgentId;
 
 use crate::motion::{
-    advance_wander, snapshot_leg_profile, walking_position, MotionState, WalkLeg, WalkPathSnapshot,
-    WanderKind, WanderPhase,
+    advance_wander, snapshot_leg_profile, walking_position, LegPlan, MotionState, Settle, WalkLeg,
+    WalkPathSnapshot, WanderKind, WanderPhase,
 };
 use crate::physics::{walk_arrived, walk_progress, WalkIntent, WalkProfile};
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
@@ -243,11 +243,12 @@ pub fn derive_with_routing(
                 &layout.walkable,
                 rctx.overlay,
                 slot.agent_id,
-                route_from,
-                door_target,
-                chair_rise,
-                None,
-                WalkIntent::Exit,
+                LegPlan {
+                    from: route_from,
+                    to: door_target,
+                    settle: chair_rise.map_or(Settle::None, Settle::Start),
+                    intent: WalkIntent::Exit,
+                },
             );
             // Store the ORIGIN so the render can detect a desk departure and
             // re-derive the same approach + settle.
@@ -329,11 +330,12 @@ pub fn derive_with_routing(
                 &layout.walkable,
                 rctx.overlay,
                 slot.agent_id,
-                entry_from,
-                approach,
-                None,
-                chair_settle,
-                WalkIntent::Entry,
+                LegPlan {
+                    from: entry_from,
+                    to: approach,
+                    settle: chair_settle.map_or(Settle::None, Settle::End),
+                    intent: WalkIntent::Entry,
+                },
             );
             mstate.entry = Some(WalkLeg {
                 started_at: if re_enter.is_some() {
@@ -396,7 +398,7 @@ pub fn derive_with_routing(
                 let dest = wf.dest;
                 let seat = wf.kind.seat();
                 let (from, chair_settle) = desk_leg_endpoint(desk_point, layout);
-                let settle = settle_from_pair(chair_settle, seat);
+                let settle = Settle::from_pair(chair_settle, seat);
                 let elapsed_phase = crate::anim::elapsed_ms(now, wf.phase_started_at);
                 let frame = walking_frame(elapsed_phase);
                 return route_walking_pose(
@@ -428,7 +430,7 @@ pub fn derive_with_routing(
                 let carrying_coffee = wf.kind.carries_coffee();
                 let seat = wf.kind.seat();
                 let (snap_target, chair_settle) = desk_leg_endpoint(desk_point, layout);
-                let settle = settle_from_pair(seat, chair_settle);
+                let settle = Settle::from_pair(seat, chair_settle);
                 let elapsed_phase = crate::anim::elapsed_ms(now, wf.phase_started_at);
                 let frame = walking_frame(elapsed_phase);
                 return route_walking_pose(
@@ -503,11 +505,12 @@ pub fn derive_with_routing(
                             &layout.walkable,
                             rctx.overlay,
                             slot.agent_id,
-                            prev,
-                            snap_target,
-                            None,
-                            chair_settle,
-                            WalkIntent::SnapBack,
+                            LegPlan {
+                                from: prev,
+                                to: snap_target,
+                                settle: chair_settle.map_or(Settle::None, Settle::End),
+                                intent: WalkIntent::SnapBack,
+                            },
                         );
                         ms_entry.snap_back = Some(WalkLeg {
                             started_at: slot.state_started_at,
@@ -563,30 +566,6 @@ pub fn derive_with_routing(
     };
 
     route_walking_pose(slot, now, layout, rctx, pose, final_settle)
-}
-
-/// How a walk leg extends its polyline onto a seat — a short terminal motion the
-/// A* router never plans (the seat cell may be blocked). `End` = sit down on
-/// arrival (append the seat); `Start` = stand up on departure (prepend it).
-/// Makes walk-end ≡ render-feet so seat arrival/departure don't pop.
-#[derive(Clone, Copy)]
-enum Settle {
-    None,
-    End(Point),
-    Start(Point),
-    Both { start: Point, end: Point },
-}
-
-/// Collapse a leg's `(start_settle, end_settle)` pair into a single [`Settle`].
-/// Argument order encodes direction: `start` = the seat to rise OFF (prepended),
-/// `end` = the seat to glide ONTO (appended).
-fn settle_from_pair(start: Option<Point>, end: Option<Point>) -> Settle {
-    match (start, end) {
-        (Some(start), Some(end)) => Settle::Both { start, end },
-        (Some(start), None) => Settle::Start(start),
-        (None, Some(end)) => Settle::End(end),
-        (None, None) => Settle::None,
-    }
 }
 
 fn route_walking_pose(
