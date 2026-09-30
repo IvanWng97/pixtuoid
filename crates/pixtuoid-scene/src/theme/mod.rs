@@ -124,8 +124,6 @@ pub struct LightingColors {
     pub twilight_b: Rgb,
     /// Warm sunlight spill on the floor and walls.
     pub sun_spill: Rgb,
-    /// Soft overhead ceiling light-pool tint.
-    pub ceiling_pool: Rgb,
     /// Lounge floor-lamp glow halo.
     pub floor_lamp_halo: Rgb,
     /// Per-desk task-lamp light — WARM in every theme, or the night's warm-against-cold read is lost.

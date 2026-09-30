@@ -15,15 +15,6 @@ use crate::floor::NeonLevels;
 use crate::ground::Ellipse;
 use crate::layout::{Facing, Layout, Point, WINDOW_W};
 
-/// A ceiling fluorescent's pool at noon, as a blend strength.
-const POOL_BASE: f32 = 0.15;
-/// How much a fully dark hour adds to [`POOL_BASE`].
-const POOL_NIGHT_GAIN: f32 = 0.30;
-/// Half-extents of a tube's lit footprint, per pool kind.
-const DESK_POOL_HALF: (u16, u16) = (10, 5);
-const PANTRY_POOL_HALF: (u16, u16) = (12, 6);
-const CORRIDOR_POOL_HALF: (u16, u16) = (14, 5);
-
 /// The floor lamp's level at full dark, before the room's own level.
 const FLOOR_LAMP_GAIN: f32 = 0.55;
 /// A room-corner fixture, so much wider than a desk lamp's pool.
@@ -82,7 +73,6 @@ const SPILL_MAX_WIDEN: u16 = 3;
 /// What an emitter is, for the painter choosing its colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EmitterKind {
-    CeilingPool,
     FloorLamp,
     DeskLamp,
     /// Over a monitor lit by a call of this tool, and tinted by it.
@@ -96,8 +86,6 @@ pub(crate) enum EmitterKind {
 /// emitter's level: all of it, unless the shape says otherwise.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Light {
-    /// Brightest at the centre, falling off by [`crate::ground::falloff`].
-    Pool(Ellipse),
     /// A disc falling off linearly from `centre` to `radius`; its centre gets
     /// `share` of the level.
     Halo {
@@ -143,7 +131,6 @@ impl Emitter {
     /// like [`Ellipse::bounds`]: [`Self::level_at`] is `None` everywhere else.
     pub(crate) fn bounds(&self) -> ((u16, u16), (u16, u16)) {
         match self.light {
-            Light::Pool(e) => e.bounds(),
             Light::Halo { centre, radius, .. } => Ellipse {
                 cx: centre.x,
                 cy: centre.y,
@@ -179,14 +166,6 @@ impl Emitter {
     pub(crate) fn level_at(&self, x: u16, y: u16) -> Option<f32> {
         let strength = self.strength;
         match self.light {
-            Light::Pool(e) => {
-                if e.half_w == 0 || e.half_h == 0 {
-                    return None;
-                }
-                let nx = (x as f32 - e.cx as f32) / e.half_w as f32;
-                let ny = (y as f32 - e.cy as f32) / e.half_h as f32;
-                crate::ground::falloff(nx, ny).map(|f| f * strength)
-            }
             Light::Halo {
                 centre,
                 radius,
@@ -261,9 +240,6 @@ pub(crate) struct DeskLights {
 /// Every light in the room this frame.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Lights {
-    /// The ceiling fluorescents' pools: over the desks, then the pantry, then
-    /// the corridor.
-    pub(crate) pools: Vec<Emitter>,
     pub(crate) floor_lamp: Option<Emitter>,
     /// Index-parallel to [`home_desks`](crate::layout::SceneLayout::home_desks).
     pub(crate) desks: Vec<DeskLights>,
@@ -292,15 +268,7 @@ impl Lights {
     /// The lights `layout` shows under `look`.
     pub(crate) fn of(layout: &Layout, look: &Look, inputs: &LightInputs<'_>) -> Self {
         let (darkness, indoor) = (look.darkness, inputs.indoor_scale);
-        let pool_strength = (POOL_BASE + POOL_NIGHT_GAIN * darkness) * indoor;
         Self {
-            pools: pool_regions(layout)
-                .map(|e| Emitter {
-                    kind: EmitterKind::CeilingPool,
-                    light: Light::Pool(e),
-                    strength: pool_strength,
-                })
-                .collect(),
             floor_lamp: layout.floor_lamp_base().map(|centre| Emitter {
                 kind: EmitterKind::FloorLamp,
                 light: Light::Halo {
@@ -404,36 +372,6 @@ impl DeskLights {
             y: self.fixture.y + DESK_LAMP_BULB.1,
         }
     }
-}
-
-/// The fluorescents' pools, in paint order. Centred from the SEAT, so the light
-/// tracks the occupant; a hardcoded lift left it over empty floor.
-fn pool_regions(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ {
-    let desks = layout.home_desks.iter().enumerate().map(|(i, desk)| {
-        let c = crate::layout::desk_ceiling_pool_center(
-            *desk,
-            layout.desk_facing(FloorLocalDeskIndex(i)),
-        );
-        Ellipse {
-            cx: c.x,
-            cy: c.y,
-            half_w: DESK_POOL_HALF.0,
-            half_h: DESK_POOL_HALF.1,
-        }
-    });
-    let pantry = layout.pantry.map(|p| p.bounds).map(|pr| Ellipse {
-        cx: pr.x + pr.width / 2,
-        cy: pr.y + pr.height / 2,
-        half_w: PANTRY_POOL_HALF.0,
-        half_h: PANTRY_POOL_HALF.1,
-    });
-    let corridor = layout.corridor.map(|c| Ellipse {
-        cx: c.x + c.width / 2,
-        cy: c.y + c.height / 2,
-        half_w: CORRIDOR_POOL_HALF.0,
-        half_h: CORRIDOR_POOL_HALF.1,
-    });
-    desks.chain(pantry).chain(corridor)
 }
 
 /// One halo per agent mid-tool-call and seated at their desk right now — not

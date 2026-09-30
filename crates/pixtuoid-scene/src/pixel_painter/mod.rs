@@ -489,12 +489,9 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         paint_light(ctx.buf, spill, ctx.theme.lighting.sun_spill);
     }
 
-    // An empty floor reads dark because its four artificial lights go out with
+    // An empty floor reads dark because its artificial lights go out with
     // `indoor_scale`, not because the FLOOR takes a second darkening of its own.
     paint_floor_wash(ctx.buf, top_wall_h, buf_h, look.floor_wash);
-    for pool in &lights.pools {
-        paint_light(ctx.buf, pool, ctx.theme.lighting.ceiling_pool);
-    }
     if let Some(lamp) = &lights.floor_lamp {
         paint_light(ctx.buf, lamp, ctx.theme.lighting.floor_lamp_halo);
     }
@@ -517,7 +514,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // they paint before the drawable snapshot, so that pass cannot either — the
     // corridor runner used to stay full-daylight tan in a dimmed office, the
     // brightest thing in the room. Hence their own group, which also keeps the
-    // EMITTERS painted above (ceiling pools, floor-lamp halo) and the self-lit
+    // EMITTERS painted above (the floor-lamp halo) and the self-lit
     // wall fixtures (neon panel, clock) out of it.
     let pre_floor_fixtures = ctx.buf.clone();
     if let Some(corridor) = ctx.layout.corridor {

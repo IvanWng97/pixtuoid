@@ -151,11 +151,6 @@ pub static CYBERPUNK: Theme = Theme {
             g: 100,
             b: 255,
         },
-        ceiling_pool: Rgb {
-            r: 120,
-            g: 60,
-            b: 255,
-        },
         floor_lamp_halo: Rgb {
             r: 0,
             g: 200,

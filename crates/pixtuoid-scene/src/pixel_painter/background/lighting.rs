@@ -58,7 +58,7 @@ pub(in crate::pixel_painter) fn paint_radial_falloff(
     });
 }
 
-/// Blend `color` over an integer-centred ellipse — the ceiling pool + shadow.
+/// Blend `color` over an integer-centred ellipse: a floor shadow.
 fn paint_ellipse_blend(buf: &mut RgbBuffer, e: Ellipse, strength: f32, color: Rgb) {
     if e.half_w == 0 || e.half_h == 0 || strength <= 0.0 {
         return;
@@ -492,7 +492,7 @@ mod tests {
                 half_h: 5,
             },
             0.8,
-            theme.lighting.ceiling_pool,
+            theme.office.shadow,
         );
         for y in 0..buf.height() {
             for x in 0..buf.width() {
@@ -509,7 +509,7 @@ mod tests {
                 half_h: 5,
             },
             0.0,
-            theme.lighting.ceiling_pool,
+            theme.office.shadow,
         );
         for y in 0..buf.height() {
             for x in 0..buf.width() {
@@ -538,7 +538,7 @@ mod tests {
                 half_h: 5,
             },
             0.9,
-            theme.lighting.ceiling_pool,
+            theme.office.shadow,
         );
         assert_ne!(buf.get(10, 10), fill, "the ellipse centre must be tinted");
     }
@@ -573,9 +573,8 @@ mod tests {
             strength: 1.0,
         };
         let emitters: Vec<Emitter> = lights
-            .pools
+            .floor_lamp
             .iter()
-            .chain(&lights.floor_lamp)
             .chain(lights.desks.iter().map(|d| &d.lamp))
             .chain(std::iter::once(&lights.neon))
             .chain(&lights.spills)
