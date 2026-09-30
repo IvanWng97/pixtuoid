@@ -395,35 +395,35 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         if let (Some(agent_id), Some(at)) = (hovered, at) {
             paint_hover_tooltip(f, scene, agent_id, at, now, theme);
         }
-        if hovered.is_none() {
-            if let Some(at) = at {
-                let cell = CellArea::half_block(at.mx, at.my);
-                // `.filter` keeps the pet arm a single branch, so a
-                // present-but-not-hit pet falls through to the next arm.
-                // Coffee before pet here must match the click arms in
-                // `tui::handle_mouse_event`; the agent-wins half above needs no such care,
-                // `hovered.is_none()` skips this block outright.
-                let pet_hit = ctx
-                    .last_pet_pos
-                    .filter(|f| hit_test_pet(f.kind, f.pos, f.anim, cell));
-                if hit_test_coffee_machine(&layout, cell) {
-                    paint_coffee_tooltip(f, at, theme);
-                } else if let Some(PetFrame { anim, kind, .. }) = pet_hit {
-                    let on_cooldown = world.pets.petting.is_some_and(|p| p.is_active(now));
-                    // `last_pet_pos` is only `Some` on the normal render path,
-                    // where it was written from `pets.pet` — so the kinds agree
-                    // and the `default_name` arm is not a live path.
-                    let display_name = world
-                        .pets
-                        .pet
-                        .map(|p| p.name.as_str())
-                        .unwrap_or_else(|| kind.default_name());
-                    paint_pet_tooltip(f, kind, anim, on_cooldown, display_name, at, theme);
-                } else if let Some(m) = topmost_mascot_at(&ctx.last_mascots, cell) {
-                    paint_mascot_tooltip(f, m, at, theme);
-                } else if let Some(label) = hit_test_furniture(&layout, cell) {
-                    paint_furniture_tooltip(f, label, at, theme);
-                }
+        if hovered.is_none()
+            && let Some(at) = at
+        {
+            let cell = CellArea::half_block(at.mx, at.my);
+            // `.filter` keeps the pet arm a single branch, so a
+            // present-but-not-hit pet falls through to the next arm.
+            // Coffee before pet here must match the click arms in
+            // `tui::handle_mouse_event`; the agent-wins half above needs no such care,
+            // `hovered.is_none()` skips this block outright.
+            let pet_hit = ctx
+                .last_pet_pos
+                .filter(|f| hit_test_pet(f.kind, f.pos, f.anim, cell));
+            if hit_test_coffee_machine(&layout, cell) {
+                paint_coffee_tooltip(f, at, theme);
+            } else if let Some(PetFrame { anim, kind, .. }) = pet_hit {
+                let on_cooldown = world.pets.petting.is_some_and(|p| p.is_active(now));
+                // `last_pet_pos` is only `Some` on the normal render path,
+                // where it was written from `pets.pet` — so the kinds agree
+                // and the `default_name` arm is not a live path.
+                let display_name = world
+                    .pets
+                    .pet
+                    .map(|p| p.name.as_str())
+                    .unwrap_or_else(|| kind.default_name());
+                paint_pet_tooltip(f, kind, anim, on_cooldown, display_name, at, theme);
+            } else if let Some(m) = topmost_mascot_at(&ctx.last_mascots, cell) {
+                paint_mascot_tooltip(f, m, at, theme);
+            } else if let Some(label) = hit_test_furniture(&layout, cell) {
+                paint_furniture_tooltip(f, label, at, theme);
             }
         }
         paint_overlays(f, &overlays, now, actual_full, theme);
