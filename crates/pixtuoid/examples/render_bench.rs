@@ -13,7 +13,7 @@ use anyhow::Result;
 use pixtuoid::floating::offscreen::OfficeRenderer;
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::floor::{FloorMeta, FrameInputs};
+use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FrameInputs, PetInputs};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::theme_by_name;
 
@@ -96,14 +96,15 @@ fn main() -> Result<()> {
         for i in 0..15u64 {
             let now = base + Duration::from_millis(i * 33);
             let _ = r.render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w, h },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             });
         }
@@ -115,14 +116,15 @@ fn main() -> Result<()> {
             let now = base + Duration::from_millis((15 + i) * 33);
             let t = Instant::now();
             let _ = r.render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w, h },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             });
             samples.push(t.elapsed().as_secs_f64() * 1000.0);
@@ -159,14 +161,15 @@ fn main() -> Result<()> {
         for i in 0..15u64 {
             let now = base + Duration::from_millis(i * 33);
             let _ = r.render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w: 768, h: 640 },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             });
         }
@@ -175,14 +178,15 @@ fn main() -> Result<()> {
             let now = base + Duration::from_millis((15 + i) * 33);
             let t = Instant::now();
             let _ = r.render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w: 768, h: 640 },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             });
             best = best.min(t.elapsed().as_secs_f64() * 1000.0);
@@ -223,14 +227,15 @@ fn main() -> Result<()> {
         for i in 0..12u64 {
             let now = base + Duration::from_millis(i * 33);
             let buf = r.render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w, h },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             });
             let (bw, bh) = (buf.width() as usize, buf.height() as usize);
@@ -253,14 +258,15 @@ fn main() -> Result<()> {
         // encoder is an instrument; an instrument nobody validated is a guess.
         if let Some(dir) = pixtuoid_core::platform::path_env("PIXTUOID_BENCH_DUMP") {
             let buf = r.render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now: base,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now: base,
                 size: Size { w, h },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             });
             let (bw, bh) = (buf.width() as u32, buf.height() as u32);

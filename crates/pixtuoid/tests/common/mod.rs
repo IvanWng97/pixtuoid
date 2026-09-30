@@ -2,7 +2,7 @@
 /// takes stay valid.
 #[macro_export]
 macro_rules! make_draw_ctx {
-    ($name:ident $(, $key:ident : $val:expr)* ) => {
+    ($name:ident, $scene:expr, $pack:expr, $now:expr $(, $key:ident : $val:expr)* ) => {
         let mut _buf = pixtuoid_core::sprite::RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
         let mut _store = pixtuoid_scene::floor::FloorCtx::new();
         let mut _chitchat_state = std::collections::HashMap::new();
@@ -16,6 +16,13 @@ macro_rules! make_draw_ctx {
         )*
 
         let mut $name = pixtuoid::tui::renderer::DrawCtx {
+            world: pixtuoid_scene::floor::FloorInputs {
+                scene: $scene,
+                pack: $pack,
+                now: $now,
+                floor: _floor,
+                pets: Default::default(),
+            },
             buf: &mut _buf,
             store: &mut _store,
             mouse_pos: None,
@@ -27,11 +34,8 @@ macro_rules! make_draw_ctx {
             gateway: None,
             audio_audible: false,
             volume_flash: None,
-            floor: _floor,
-            active_pet: None,
             last_pet_pos: None,
             last_mascots: Vec::new(),
-            floor_pet: None,
             chitchat_state: &mut _chitchat_state,
             chitchat_bubbles: Vec::new(),
             coffee: &std::collections::HashMap::new(),
