@@ -283,9 +283,7 @@ fn paint_streaks(
                 }
             }
             Particle::Flake => {
-                let wiggle = if (elapsed_ms / 400 + seed.wrapping_mul(crate::GOLDEN_GAMMA))
-                    .is_multiple_of(2)
-                {
+                let wiggle = if (elapsed_ms / 400 + seed).is_multiple_of(2) {
                     0
                 } else {
                     1

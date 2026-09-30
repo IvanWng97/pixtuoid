@@ -323,10 +323,11 @@ bench *args:
     cargo bench -p pixtuoid-scene --bench render_frame -- {{ args }}
     cargo bench -p pixtuoid-core --bench decode_reduce -- {{ args }}
 
-# Feature-combination check — every feature subset must compile. Catches code
+# Feature-combination check — every feature subset must compile, and scene's
+# no-default tests lint (`--no-dev-deps check` builds no test). Catches code
 # that silently only builds with `native` on (the wasm core builds without it).
 [group('rust')]
-[doc('Feature-powerset check — every feature subset must compile')]
+[doc('Feature-powerset check — every feature subset compiles; scene no-default tests lint')]
 hack:
     #!/usr/bin/env bash
     set -euo pipefail

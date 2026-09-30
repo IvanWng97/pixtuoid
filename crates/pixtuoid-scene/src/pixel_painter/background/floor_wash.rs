@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn blend_floor_band_matches_the_per_pixel_blend_reference() {
-        let mut lcg = crate::GOLDEN_GAMMA_32;
+        let mut lcg = 0x9E3779B9u32;
         let mut next = || {
             lcg = lcg.wrapping_mul(1664525).wrapping_add(1013904223);
             Rgb {

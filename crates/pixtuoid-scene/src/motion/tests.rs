@@ -194,7 +194,8 @@ fn phase_kind(phase: WanderPhase) -> PhaseKind {
     }
 }
 
-/// [`WanderRig::advance_until_leaves`]'s poll step.
+/// The wander tests' poll step, well under [`stale_resume_gap_ms`] so a poll
+/// reads as per-frame rendering, never an off-screen gap.
 const POLL_STEP_MS: u64 = 1_000;
 
 /// One agent's wander machine over the standard layout: the slot plus every
@@ -242,10 +243,7 @@ impl<R: Router> WanderRig<R> {
     }
 
     /// Poll [`WanderRig::advance`] until the agent's phase KIND is no longer
-    /// `from_phase`, returning the new `now`. [`POLL_STEP_MS`] stays well under the
-    /// `stale_resume_gap_ms` trigger, so a long seated/dwell beat is crossed
-    /// exactly as real per-frame rendering would, never looking like an
-    /// off-screen gap.
+    /// `from_phase`, returning the new `now`.
     fn advance_until_leaves(
         &mut self,
         mut now: SystemTime,

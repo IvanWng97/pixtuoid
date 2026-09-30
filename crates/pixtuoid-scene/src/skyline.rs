@@ -657,6 +657,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "density-art")]
     fn a_denser_strip_draws_the_denser_art_on_the_same_city() {
         let pack = pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");

@@ -4088,6 +4088,7 @@ S B B B B B B S
     /// Every desk's lamp pools where its art hangs the bulb, whichever way the
     /// desk faces: the cutaway's art stands it on the side the desk faces.
     #[test]
+    #[cfg(feature = "density-art")]
     fn a_desk_lamp_pools_under_its_painted_bulb() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = pack();
