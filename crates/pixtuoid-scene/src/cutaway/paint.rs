@@ -7,6 +7,7 @@ use pixtuoid_core::sprite::blit::blit_frame_scaled;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::RgbBuffer;
 
+use crate::atmosphere::Moment;
 use crate::cutaway::order::{depth_sort, Span};
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::cutaway::shade::{fill, slab, Ramp};
@@ -145,15 +146,6 @@ pub struct Office<'a> {
     pub scale: RenderScale,
 }
 
-/// The moment a frame shows: the sky's look at `now`, seen from `altitude`
-/// ([`FloorMeta::altitude`](crate::floor::FloorMeta::altitude)).
-#[derive(Clone, Copy)]
-pub(crate) struct Moment<'a> {
-    pub(crate) look: &'a crate::atmosphere::Look,
-    pub(crate) altitude: f32,
-    pub(crate) now: std::time::SystemTime,
-}
-
 /// Paint `frame`'s `office` into `buf` as an orthographic cutaway — the
 /// classic painter's sibling, not its successor — as `floor` of the building
 /// looks at `now`: its windows on the sky from its altitude, its room lit for
@@ -174,13 +166,8 @@ pub fn render_cutaway(
         scale,
     } = office;
     paint_backdrop(layout, theme, scale, Pen::for_pack(scale, pack), buf);
-    let look = crate::atmosphere::Look::resolve(&crate::sky::Sky::at(now), theme);
-    let moment = Moment {
-        look: &look,
-        altitude: floor.altitude,
-        now,
-    };
-    let list = build_list(frame, office, moment, floor.floor_idx);
+    let moment = Moment::resolve(crate::sky::Sky::at(now), theme, floor.altitude, now);
+    let list = build_list(frame, office, &moment, floor.floor_idx);
     paint_list(&list, cache, buf);
     list.labels().collect()
 }
@@ -335,13 +322,13 @@ impl<'a> DrawList<'a> {
 pub(crate) fn build_list<'a>(
     frame: &SimFrame,
     office: Office<'a>,
-    moment: Moment<'_>,
+    moment: &Moment,
     floor_idx: usize,
 ) -> DrawList<'a> {
     let Office {
         pack, theme, scale, ..
     } = office;
-    let ambient = crate::cutaway::light::Ambient::of(moment.look);
+    let ambient = crate::cutaway::light::Ambient::of(&moment.look);
     let collected = collect_pieces(frame, office, moment);
     let sorted = depth_sort(
         collected
@@ -372,7 +359,7 @@ pub(crate) fn build_list<'a>(
 fn lights(
     frame: &SimFrame,
     office: Office<'_>,
-    moment: Moment<'_>,
+    moment: &Moment,
     floor_idx: usize,
     ambient: crate::cutaway::light::Ambient,
 ) -> Vec<LightPiece> {
@@ -384,7 +371,7 @@ fn lights(
     } = office;
     let lights = crate::lighting::Lights::of(
         layout,
-        moment.look,
+        &moment.look,
         &crate::lighting::LightInputs {
             agents: &frame.agents,
             seated: &frame.seated_agents,
@@ -805,11 +792,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
 /// Every piece of the office, each with its [`Span`]. The push
 /// order breaks depth ties, so it is part of the result: a chair pushed after
 /// the people keeps it over a sitter who shares its depth.
-fn collect_pieces(
-    frame: &SimFrame,
-    office: Office<'_>,
-    moment: Moment<'_>,
-) -> Vec<(Span, PieceKind)> {
+fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<(Span, PieceKind)> {
     let Office { layout, pack, .. } = office;
     let mut order: Vec<(Span, PieceKind)> =
         Vec::with_capacity(layout.home_desks.len() + frame.characters.len());
@@ -1588,18 +1571,14 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, pen: Pen, buf:
 /// backdrop.
 ///
 /// [`CityStrip`]: crate::skyline::CityStrip
-fn push_windows(office: Office<'_>, moment: Moment<'_>, order: &mut Vec<(Span, PieceKind)>) {
+fn push_windows(office: Office<'_>, moment: &Moment, order: &mut Vec<(Span, PieceKind)>) {
     let Office {
         layout,
         pack,
         theme,
         scale,
     } = office;
-    let Moment {
-        look,
-        altitude,
-        now,
-    } = moment;
+    let look = &moment.look;
     let pen = Pen::for_pack(scale, pack);
     let rows = crate::layout::window_rows(layout.wall_band_h());
     let window_h = rows.end - rows.start;
@@ -1611,8 +1590,8 @@ fn push_windows(office: Office<'_>, moment: Moment<'_>, order: &mut Vec<(Span, P
     let city = crate::skyline::CityStrip::draw(
         pack,
         (run.end - run.start, glass_h),
-        altitude,
-        (look, theme, now),
+        moment,
+        theme,
         density,
     );
     let d = density.get();
@@ -2901,11 +2880,12 @@ mod tests {
                 theme,
                 scale: RenderScale::ONE,
             },
-            Moment {
-                look: &sky(theme),
-                altitude: 0.0,
-                now: std::time::UNIX_EPOCH,
-            },
+            &Moment::resolve(
+                crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                theme,
+                0.0,
+                std::time::UNIX_EPOCH,
+            ),
         );
         let (person, person_span) = order
             .iter()
@@ -3355,11 +3335,12 @@ mod tests {
                     theme,
                     scale: RenderScale::ONE,
                 },
-                Moment {
-                    look: &sky(theme),
-                    altitude: 0.0,
-                    now: std::time::UNIX_EPOCH,
-                },
+                &Moment::resolve(
+                    crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                    theme,
+                    0.0,
+                    std::time::UNIX_EPOCH,
+                ),
             ) {
                 let PieceKind::Character {
                     ref figure,
@@ -3434,11 +3415,12 @@ mod tests {
                 theme,
                 scale,
             },
-            Moment {
-                look: &sky(theme),
-                altitude: 0.0,
-                now: std::time::UNIX_EPOCH,
-            },
+            &Moment::resolve(
+                crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                theme,
+                0.0,
+                std::time::UNIX_EPOCH,
+            ),
             0,
         );
         let mut cast = 0;
@@ -3470,11 +3452,6 @@ mod tests {
             }
         }
         assert!(cast > 0, "the office casts shadows");
-    }
-
-    /// The sky at the tests' fixed `now`, resolved for `theme`.
-    fn sky(theme: &Theme) -> crate::atmosphere::Look {
-        crate::atmosphere::Look::resolve(&crate::sky::Sky::at(std::time::UNIX_EPOCH), theme)
     }
 
     /// The bundled pack.
@@ -3526,11 +3503,7 @@ mod tests {
                 theme,
                 scale,
             },
-            Moment {
-                look: &look,
-                altitude: 0.0,
-                now,
-            },
+            &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
             &mut order,
         );
         assert_eq!(
@@ -3548,11 +3521,12 @@ mod tests {
         let rows = crate::layout::window_rows(layout.wall_band_h());
         let window_h = rows.end - rows.start;
         let run = crate::layout::window_run(layout.buf_w);
+        let sky = crate::sky::Sky::at(now);
         let city = crate::skyline::CityStrip::draw(
             &pack,
             (run.end - run.start, crate::layout::glass_rows(window_h)),
-            0.0,
-            (&look, theme, now),
+            &Moment::resolve(sky, theme, 0.0, now),
+            theme,
             std::num::NonZeroU16::new(d).expect("nonzero"),
         );
         let k = scale.get() / d;
@@ -3661,11 +3635,12 @@ mod tests {
                         theme,
                         scale,
                     },
-                    Moment {
-                        look: &sky(theme),
-                        altitude: 0.0,
-                        now: std::time::UNIX_EPOCH,
-                    },
+                    &Moment::resolve(
+                        crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                        theme,
+                        0.0,
+                        std::time::UNIX_EPOCH,
+                    ),
                 ) {
                     if only_people && !matches!(kind, PieceKind::Character { .. }) {
                         continue;
@@ -3824,11 +3799,7 @@ S B B B B B B S
                             theme,
                             scale,
                         },
-                        Moment {
-                            look: &sky(theme),
-                            altitude: 0.0,
-                            now,
-                        },
+                        &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
                         0,
                     );
                     repeats += same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
@@ -3868,7 +3839,6 @@ S B B B B B B S
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         let mut painted = std::collections::HashMap::new();
         let glass = |now: std::time::SystemTime, painted: &mut _| {
-            let look = crate::atmosphere::Look::resolve(&crate::sky::Sky::at(now), theme);
             let list = build_list(
                 &frames[0],
                 Office {
@@ -3877,11 +3847,7 @@ S B B B B B B S
                     theme,
                     scale,
                 },
-                Moment {
-                    look: &look,
-                    altitude: 0.0,
-                    now,
-                },
+                &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
                 0,
             );
             let is_glass = |p: &Piece| matches!(p.kind, PieceKind::Glass { .. });
@@ -3909,29 +3875,14 @@ S B B B B B B S
         assert_eq!(glass(noon, &mut painted), b, "one moment, one fingerprint");
     }
 
-    /// The look of a clear sky at local `hour`.
-    fn look_at(theme: &Theme, hour: u32) -> crate::atmosphere::Look {
-        crate::atmosphere::Look::resolve(
-            &crate::sky::Sky::at_with(crate::localclock::at_hour(hour), crate::sky::Weather::Clear),
-            theme,
-        )
-    }
-
     /// `frame`'s list at local `hour`, under a clear sky.
-    fn list_at<'a>(
-        frame: &SimFrame,
-        office: Office<'a>,
-        look: &crate::atmosphere::Look,
-        hour: u32,
-    ) -> DrawList<'a> {
+    fn list_at<'a>(frame: &SimFrame, office: Office<'a>, hour: u32) -> DrawList<'a> {
+        let now = crate::localclock::at_hour(hour);
+        let sky = crate::sky::Sky::at_with(now, crate::sky::Weather::Clear);
         build_list(
             frame,
             office,
-            Moment {
-                look,
-                altitude: 0.0,
-                now: crate::localclock::at_hour(hour),
-            },
+            &Moment::resolve(sky, office.theme, 0.0, now),
             0,
         )
     }
@@ -3951,11 +3902,7 @@ S B B B B B B S
                 theme,
                 scale: RenderScale::new(s).expect("nonzero"),
             };
-            let (noon_look, night_look) = (look_at(theme, 12), look_at(theme, 23));
-            let (noon, night) = (
-                list_at(frame, office, &noon_look, 12),
-                list_at(frame, office, &night_look, 23),
-            );
+            let (noon, night) = (list_at(frame, office, 12), list_at(frame, office, 23));
             let at_rest = |list: &DrawList| -> Vec<(Span, u64)> {
                 list.pieces()
                     .iter()
@@ -4016,7 +3963,6 @@ S B B B B B B S
         for s in [1, pack.max_density_variant()] {
             let scale = RenderScale::new(s).expect("nonzero");
             for hour in [18, 20, 23] {
-                let look = look_at(theme, hour);
                 for frame in frames.iter().step_by(4) {
                     let list = list_at(
                         frame,
@@ -4026,7 +3972,6 @@ S B B B B B B S
                             theme,
                             scale,
                         },
-                        &look,
                         hour,
                     );
                     for light in list.lights() {
@@ -4084,7 +4029,6 @@ S B B B B B B S
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
-        let look = look_at(theme, 23);
         let mut lights = 0;
         for s in [1, 3, pack.max_density_variant()] {
             let scale = RenderScale::new(s).expect("nonzero");
@@ -4094,7 +4038,7 @@ S B B B B B B S
                 theme,
                 scale,
             };
-            let list = list_at(frame, office, &look, 23);
+            let list = list_at(frame, office, 23);
             for light in list.lights() {
                 lights += 1;
                 let buf = lights_over(&list, &layout, light.span);
@@ -4134,8 +4078,7 @@ S B B B B B B S
         };
         let mut lamps = 0;
         for hour in [12, 18, 23] {
-            let look = look_at(theme, hour);
-            for light in list_at(frame, office, &look, hour).lights() {
+            for light in list_at(frame, office, hour).lights() {
                 assert!(
                     !light.view.is(crate::lighting::EmitterKind::CeilingPool)
                         && !light.view.is(crate::lighting::EmitterKind::NeonGlow),
@@ -4174,7 +4117,6 @@ S B B B B B B S
             mascots: Vec::new(),
             desks: vec![Default::default(); layout.home_desks.len()],
         };
-        let look = look_at(theme, 23);
         let list = list_at(
             &frame,
             Office {
@@ -4183,7 +4125,6 @@ S B B B B B B S
                 theme,
                 scale,
             },
-            &look,
             23,
         );
         // Each painted bulb's middle, in art pixels.
@@ -4273,14 +4214,13 @@ S B B B B B B S
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
-        let look = look_at(theme, 23);
         let office = Office {
             layout: &layout,
             pack: &pack,
             theme,
             scale,
         };
-        let list = list_at(frame, office, &look, 23);
+        let list = list_at(frame, office, 23);
         assert!(list.ambient.darkness() > 0.0, "23:00 is dark");
         let (day, emission) = by_day(&list, &layout);
         let mut cache = crate::frame_cache::FrameCache::new();
@@ -4348,14 +4288,13 @@ S B B B B B B S
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
-        let look = look_at(theme, 23);
         let office = Office {
             layout: &layout,
             pack: &pack,
             theme,
             scale,
         };
-        let mut list = list_at(frame, office, &look, 23);
+        let mut list = list_at(frame, office, 23);
         let (with, glow) = by_day(&list, &layout);
         list.pieces
             .retain(|p| !matches!(p.kind, PieceKind::Character { .. }));
@@ -4446,8 +4385,7 @@ S B B B B B B S
             [(&idle, 12), (&busy, 12), (&idle, 23), (&busy, 23)]
                 .into_iter()
                 .map(|(frame, hour)| {
-                    let look = look_at(theme, hour);
-                    list_at(frame, office, &look, hour)
+                    list_at(frame, office, hour)
                         .pieces()
                         .iter()
                         .map(|p| {
@@ -4566,11 +4504,7 @@ S B B B B B B S
                             theme,
                             scale,
                         },
-                        Moment {
-                            look: &sky(theme),
-                            altitude: 0.0,
-                            now,
-                        },
+                        &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
                         0,
                     );
                     same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
@@ -4679,11 +4613,7 @@ S B B B B B B S
                     theme,
                     scale: RenderScale::ONE
                 },
-                Moment {
-                    look: &sky(theme),
-                    altitude: 0.0,
-                    now
-                },
+                &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
                 0
             )),
             summary(&build_list(
@@ -4694,11 +4624,7 @@ S B B B B B B S
                     theme,
                     scale: RenderScale::ONE
                 },
-                Moment {
-                    look: &sky(theme),
-                    altitude: 0.0,
-                    now
-                },
+                &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
                 0
             )),
         );
@@ -4719,11 +4645,12 @@ S B B B B B B S
                     theme,
                     scale: RenderScale::ONE,
                 },
-                Moment {
-                    look: &sky(theme),
-                    altitude: 0.0,
-                    now: std::time::SystemTime::UNIX_EPOCH,
-                },
+                &Moment::resolve(
+                    crate::sky::Sky::at(std::time::SystemTime::UNIX_EPOCH),
+                    theme,
+                    0.0,
+                    std::time::SystemTime::UNIX_EPOCH,
+                ),
                 0,
             );
             let pieces: Vec<&Piece> = list
