@@ -211,6 +211,9 @@ fn paint_backdrop(
 /// occlusion pass.
 pub(crate) struct DrawList<'a> {
     pieces: Vec<Piece>,
+    /// The room's own lights, which paint over every piece at once
+    /// ([`paint_list`]).
+    lights: Vec<LightPiece>,
     /// How dark the room is: every non-emissive pixel is painted under it, so a
     /// change repaints the whole frame.
     ambient: crate::cutaway::light::Ambient,
@@ -246,6 +249,22 @@ pub(crate) struct Piece {
     pub(crate) fingerprint: u64,
 }
 
+/// One of the room's lights: what it lifts, over which cells. A change repaints
+/// its span from every light that meets it, which alone light a rect as the
+/// frame does ([`net_pass`](crate::cutaway::light::net_pass)).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the incremental canvas diffs lights by span and fingerprint"
+    )
+)]
+pub(crate) struct LightPiece {
+    pub(crate) span: Span,
+    pub(crate) view: crate::cutaway::light::LightView,
+    pub(crate) fingerprint: u64,
+}
+
 impl Piece {
     /// Every logical cell painting it touches: its span, and the floor its
     /// shadow falls on. A repaint of a damaged rect is complete only over the
@@ -276,6 +295,16 @@ impl<'a> DrawList<'a> {
     )]
     pub(crate) fn pieces(&self) -> &[Piece] {
         &self.pieces
+    }
+
+    /// The room's lights, in no order that matters: a pixel's light is the
+    /// brightest's, ties to the lowest rank.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the incremental canvas walks them")
+    )]
+    pub(crate) fn lights(&self) -> &[LightPiece] {
+        &self.lights
     }
 
     /// Where each drawn agent's badge belongs, in draw order.
@@ -320,10 +349,8 @@ pub(crate) fn build_list<'a>(
             .map(|(span, kind)| (span, (span, kind)))
             .collect(),
     );
-    // The lights come last: they lift whatever lies under them, piece or floor.
     let pieces = sorted
         .into_iter()
-        .chain(lights(frame, office, moment, floor_idx, ambient))
         .map(|(span, kind)| Piece {
             span,
             fingerprint: fingerprint(&kind),
@@ -333,6 +360,7 @@ pub(crate) fn build_list<'a>(
         .collect();
     DrawList {
         pieces,
+        lights: lights(frame, office, moment, floor_idx, ambient),
         ambient,
         pack,
         theme,
@@ -349,7 +377,7 @@ fn lights(
     moment: Moment<'_>,
     floor_idx: usize,
     ambient: crate::cutaway::light::Ambient,
-) -> Vec<(Span, PieceKind)> {
+) -> Vec<LightPiece> {
     let Office {
         layout,
         pack,
@@ -369,12 +397,40 @@ fn lights(
         },
     );
     let pen = Pen::for_pack(scale, pack);
+    // Each desk's lamp shines from the bulb its art draws, which the cutaway's
+    // art stands on the side the desk faces; the model's is the classic's.
+    let lamps: Vec<crate::lighting::Emitter> = lights
+        .desks
+        .iter()
+        .enumerate()
+        .map(|(i, d)| {
+            let facing = layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i));
+            let bulb = layout
+                .home_desks
+                .get(i)
+                .zip(desk_art(pack, facing))
+                .and_then(|(&at, art)| desk_bulb(at, art, pack, scale));
+            match (bulb, d.lamp.light) {
+                (Some(centre), crate::lighting::Light::Halo { radius, share, .. }) => {
+                    crate::lighting::Emitter {
+                        light: crate::lighting::Light::Halo {
+                            centre,
+                            radius,
+                            share,
+                        },
+                        ..d.lamp
+                    }
+                }
+                _ => d.lamp,
+            }
+        })
+        .collect();
     lights
         .spills
         .iter()
         .chain(&lights.pools)
         .chain(&lights.floor_lamp)
-        .chain(lights.desks.iter().map(|d| &d.lamp))
+        .chain(&lamps)
         .chain(&lights.monitor_halos)
         .filter_map(|e| {
             crate::cutaway::light::LightView::of(
@@ -385,7 +441,16 @@ fn lights(
                 (layout.buf_w, layout.buf_h),
             )
         })
-        .map(|(span, view)| (span, PieceKind::Light { view }))
+        .map(|(span, view)| {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::hash::DefaultHasher::new();
+            view.hash(&mut h);
+            LightPiece {
+                span,
+                fingerprint: h.finish(),
+                view,
+            }
+        })
         .collect()
 }
 
@@ -408,14 +473,8 @@ pub(crate) fn paint_list(
         buf,
     );
     let emission = paint_pieces(list, cache, buf);
-    let lights: Vec<&crate::cutaway::light::LightView> = list
-        .pieces
-        .iter()
-        .filter_map(|p| match p.kind {
-            PieceKind::Light { ref view } => Some(view),
-            _ => None,
-        })
-        .collect();
+    let lights: Vec<&crate::cutaway::light::LightView> =
+        list.lights.iter().map(|l| &l.view).collect();
     let whole = ArtRect {
         x: ArtPx(0),
         y: ArtPx(0),
@@ -437,9 +496,6 @@ fn paint_pieces(
     let mut emission = Emission::new(buf.width(), buf.height());
     let mut marks = RgbBuffer::filled(buf.width(), buf.height(), NO_MARK);
     for piece in &list.pieces {
-        if matches!(piece.kind, PieceKind::Light { .. }) {
-            continue;
-        }
         // What the piece painted: its span's pixels that changed.
         let (x0, y0) = (
             list.scale.to_buffer(piece.span.x0),
@@ -512,27 +568,22 @@ fn mark_glow(
     ) else {
         return false;
     };
-    let without = |keys: &[char]| {
-        desk.recolorable
-            .recolored(&keys.iter().map(|&k| (k, None)).collect::<Vec<_>>())
-    };
-    let (no_screen, no_bulb) = (
-        without(&[SCREEN_GLASS_KEY, SCREEN_TEXT_KEY]),
-        without(&[DESK_BULB_KEY]),
+    let (screen_cells, bulb) = (
+        drawn_in(&desk, &[SCREEN_GLASS_KEY, SCREEN_TEXT_KEY]),
+        drawn_in(&desk, &[DESK_BULB_KEY]),
     );
     let screen_mark = match screen {
         Screen::Off => SHADED_MARK,
         Screen::Standby(_) | Screen::Lit(_) => EMISSIVE_MARK,
     };
     let (w, h) = (desk.frame.width(), desk.frame.height());
-    let pixels: Vec<pixtuoid_core::sprite::Pixel> = (0..h)
-        .flat_map(|y| (0..w).map(move |x| (x, y)))
-        .map(|(x, y)| {
-            desk.frame.get(x, y).and_then(|p| *p)?;
-            let gone = |f: &pixtuoid_core::sprite::Frame| f.get(x, y).and_then(|p| *p).is_none();
-            if gone(&no_bulb) {
+    let pixels: Vec<pixtuoid_core::sprite::Pixel> = bulb
+        .iter()
+        .zip(&screen_cells)
+        .map(|(&bulb, &screen)| {
+            if bulb {
                 Some(EMISSIVE_MARK)
-            } else if gone(&no_screen) {
+            } else if screen {
                 Some(screen_mark)
             } else {
                 None
@@ -546,6 +597,54 @@ fn mark_glow(
     any
 }
 
+/// Which of `art`'s pixels, row by row, it draws in one of `keys`: those that
+/// go transparent when the keys are painted so.
+fn drawn_in(art: &crate::pixel_painter::DenseFrame<'_>, keys: &[char]) -> Vec<bool> {
+    let without = art
+        .recolorable
+        .recolored(&keys.iter().map(|&k| (k, None)).collect::<Vec<_>>());
+    let (w, h) = (art.frame.width(), art.frame.height());
+    let opaque = |f: &pixtuoid_core::sprite::Frame, x, y| f.get(x, y).and_then(|p| *p).is_some();
+    (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .map(|(x, y)| opaque(art.frame, x, y) && !opaque(&without, x, y))
+        .collect()
+}
+
+/// The layout cell of the desk lamp's bulb the desk `art_name` at `at` draws at
+/// `scale`: the middle of its [`DESK_BULB_KEY`](crate::pixel_painter::DESK_BULB_KEY)
+/// pixels, or `None` for art that draws no bulb.
+fn desk_bulb(
+    at: crate::layout::Point,
+    art_name: &str,
+    pack: &Pack,
+    scale: RenderScale,
+) -> Option<crate::layout::Point> {
+    let span = desk_span(pack, art_name, at, scale)?;
+    let desk = crate::pixel_painter::densest_frame(pack, art_name, 0, scale)?;
+    let w = usize::from(desk.frame.width());
+    let (mut n, mut sx, mut sy) = (0u32, 0u32, 0u32);
+    for (i, _) in drawn_in(&desk, &[crate::pixel_painter::DESK_BULB_KEY])
+        .iter()
+        .enumerate()
+        .filter(|(_, &b)| b)
+    {
+        n += 1;
+        sx += (i % w) as u32;
+        sy += (i / w) as u32;
+    }
+    if n == 0 {
+        return None;
+    }
+    // An art pixel's middle, in cells of the layout, rounded to the cell it lies in.
+    let d = f32::from(desk.density.get());
+    let cell = |sum: u32| ((sum as f32 / n as f32 + 0.5) / d) as u16;
+    Some(crate::layout::Point {
+        x: span.x0 + cell(sx),
+        y: span.y0 + cell(sy),
+    })
+}
+
 /// Ramp stops a shadow steps the floor at its centre, per unit of
 /// [`shadow_strength`].
 ///
@@ -555,7 +654,7 @@ const SHADOW_STOPS_PER_STRENGTH: f32 = 6.0;
 /// Where a piece meets the floor, as the shadow it casts there: on the row under
 /// its south edge, a standing figure's under its feet. A sitter is grounded by
 /// what they sit on, which casts its own: a desk chair a sitter carries, under
-/// the chair. Walls, window glass, hung decor and light meet no floor.
+/// the chair. Walls, window glass and hung decor meet no floor.
 fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::ground::Contact> {
     let under = |s: Span| {
         Some(crate::ground::Contact::under(
@@ -565,10 +664,7 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
         ))
     };
     match *kind {
-        PieceKind::WallSeg { .. }
-        | PieceKind::Glass { .. }
-        | PieceKind::Hung { .. }
-        | PieceKind::Light { .. } => None,
+        PieceKind::WallSeg { .. } | PieceKind::Glass { .. } | PieceKind::Hung { .. } => None,
         PieceKind::Character {
             ref figure,
             body,
@@ -691,7 +787,6 @@ fn fingerprint(kind: &PieceKind) -> u64 {
         } => (at, shadow, key, chair).hash(&mut h),
         PieceKind::Glass { ref view } => view.hash(&mut h),
         PieceKind::Hung { at, sprite } => (at, sprite).hash(&mut h),
-        PieceKind::Light { ref view } => view.hash(&mut h),
     }
     h.finish()
 }
@@ -762,14 +857,6 @@ fn paint_piece(
         }
         PieceKind::Glass { ref view } => paint_glass(view, Pen::for_pack(scale, pack), buf),
         PieceKind::Hung { at, sprite } => paint_wall_decor(at, sprite, pack, scale, buf),
-        PieceKind::Light { ref view } => crate::cutaway::light::net_pass(
-            view.rect(),
-            &[view],
-            view.ambient(),
-            &crate::cutaway::light::Emission::new(buf.width(), buf.height()),
-            Pen::for_pack(scale, pack),
-            buf,
-        ),
     }
 }
 
@@ -1283,13 +1370,13 @@ fn wall_segments(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
 impl PieceKind {
     /// Whether it recolours what lies under it rather than painting colours of
     /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window's
-    /// [`PieceKind::Glass`], and a light.
+    /// [`PieceKind::Glass`].
     #[cfg_attr(
         not(test),
         expect(dead_code, reason = "the incremental canvas repaints under it")
     )]
     pub(crate) fn reads_under(&self) -> bool {
-        matches!(self, PieceKind::WallSeg { .. } | PieceKind::Light { .. })
+        matches!(self, PieceKind::WallSeg { .. })
     }
 
     /// Whether two builds of one office always give it one fingerprint: what a
@@ -1310,7 +1397,6 @@ impl PieceKind {
             // Its frame plays while it is busy.
             PieceKind::Appliance { .. }
             | PieceKind::Glass { .. }
-            | PieceKind::Light { .. }
             | PieceKind::Desk { .. }
             | PieceKind::Character { .. } => false,
         }
@@ -1376,10 +1462,6 @@ pub(crate) enum PieceKind {
         at: crate::layout::Point,
         sprite: &'static str,
         frame: usize,
-    },
-    /// One of the room's lights and the steps it lifts what it falls on.
-    Light {
-        view: crate::cutaway::light::LightView,
     },
     Character {
         figure: Figure,
@@ -3873,24 +3955,50 @@ S B B B B B B S
             assert_eq!(at_rest(&noon), at_rest(&night), "a static piece moved");
             assert_ne!(noon.ambient, night.ambient, "the room keeps its noon tone");
             let lit = |list: &DrawList| -> Vec<u64> {
-                list.pieces()
-                    .iter()
-                    .filter(|p| matches!(p.kind, PieceKind::Light { .. }))
-                    .map(|p| p.fingerprint)
-                    .collect()
+                list.lights().iter().map(|l| l.fingerprint).collect()
             };
             assert_ne!(lit(&noon), lit(&night), "the lights keep their noon levels");
         }
     }
 
-    /// The light half of the fingerprint property: a light keeps its span while
-    /// its bands move with the hour and the walker, so two sharing a span and a
-    /// fingerprint must paint alike, at scale 1 and the densest.
+    /// `list`'s lights over a flat `under`, relit over `rect` alone by the
+    /// frame's own pass: every light that meets it, over an all-lit room.
+    fn lights_over(list: &DrawList<'_>, layout: &Layout, rect: Span) -> RgbBuffer {
+        let (w, h) = (
+            list.scale.to_buffer(layout.buf_w),
+            list.scale.to_buffer(layout.buf_h),
+        );
+        let mut buf = RgbBuffer::filled(w, h, list.theme.surface.bg_fallback);
+        let pen = Pen::for_pack(list.scale, list.pack);
+        let lights: Vec<&crate::cutaway::light::LightView> =
+            list.lights().iter().map(|l| &l.view).collect();
+        crate::cutaway::light::net_pass(
+            ArtRect {
+                x: pen.art(rect.x0),
+                y: pen.art(rect.y0),
+                w: pen.art(rect.x1 - rect.x0 + 1),
+                h: pen.art(rect.y1 - rect.y0 + 1),
+            },
+            &lights,
+            list.ambient,
+            &crate::cutaway::light::Emission::new(w, h),
+            pen,
+            &mut buf,
+        );
+        buf
+    }
+
+    /// The light half of the fingerprint property, through the frame's own
+    /// pass: a light's span relit from the same lights over the same room paints
+    /// alike, so a canvas repainting a light's span on a change to any light
+    /// that meets it is complete. Over a walk at three hours, at scale 1 and
+    /// the densest, where some light changes its bands in place.
     #[test]
-    fn one_light_fingerprint_one_set_of_pixels() {
+    fn one_set_of_lights_one_set_of_pixels() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
-        let mut painted = std::collections::HashMap::new();
+        let mut painted: std::collections::HashMap<(u16, Span, Vec<u64>), u64> =
+            std::collections::HashMap::new();
         let mut seen: std::collections::HashMap<(u16, Span), std::collections::BTreeSet<u64>> =
             std::collections::HashMap::new();
         let mut repeats = 0;
@@ -3910,12 +4018,42 @@ S B B B B B B S
                         &look,
                         hour,
                     );
-                    repeats += same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
-                        matches!(p.kind, PieceKind::Light { .. })
-                    });
-                    for p in list.pieces() {
-                        if matches!(p.kind, PieceKind::Light { .. }) {
-                            seen.entry((s, p.span)).or_default().insert(p.fingerprint);
+                    for light in list.lights() {
+                        seen.entry((s, light.span))
+                            .or_default()
+                            .insert(light.fingerprint);
+                        let meeting: Vec<u64> = list
+                            .lights()
+                            .iter()
+                            .filter(|l| {
+                                l.span.x0 <= light.span.x1
+                                    && light.span.x0 <= l.span.x1
+                                    && l.span.y0 <= light.span.y1
+                                    && light.span.y0 <= l.span.y1
+                            })
+                            .map(|l| l.fingerprint)
+                            .collect();
+                        let pixels = {
+                            use std::hash::{Hash, Hasher};
+                            let mut h = std::hash::DefaultHasher::new();
+                            lights_over(&list, &layout, light.span)
+                                .as_slice()
+                                .hash(&mut h);
+                            (list.ambient, h.finish())
+                        };
+                        match painted.entry((s, light.span, meeting)) {
+                            std::collections::hash_map::Entry::Occupied(e) => {
+                                assert_eq!(
+                                    *e.get(),
+                                    pixels.1,
+                                    "one set of lights at {:?} painted two ways",
+                                    light.span
+                                );
+                                repeats += 1;
+                            }
+                            std::collections::hash_map::Entry::Vacant(v) => {
+                                v.insert(pixels.1);
+                            }
                         }
                     }
                 }
@@ -3928,7 +4066,8 @@ S B B B B B B S
         );
     }
 
-    /// A light painted alone writes nothing outside its span, at every scale.
+    /// A light's span relit by the frame's own pass writes nothing outside it,
+    /// at every scale.
     #[test]
     fn a_light_paints_only_inside_its_span() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
@@ -3944,20 +4083,116 @@ S B B B B B B S
                 theme,
                 scale,
             };
-            for piece in list_at(frame, office, &look, 23).pieces() {
-                if !matches!(piece.kind, PieceKind::Light { .. }) {
-                    continue;
-                }
+            let list = list_at(frame, office, &look, 23);
+            for light in list.lights() {
                 lights += 1;
+                let buf = lights_over(&list, &layout, light.span);
+                let w = buf.width();
+                let stray = buf.as_slice().iter().enumerate().find(|&(i, &c)| {
+                    let (x, y) = (
+                        scale.logical((i % usize::from(w)) as u16),
+                        scale.logical((i / usize::from(w)) as u16),
+                    );
+                    c != theme.surface.bg_fallback
+                        && !((light.span.x0..=light.span.x1).contains(&x)
+                            && (light.span.y0..=light.span.y1).contains(&y))
+                });
                 assert_eq!(
-                    stray_pixel(&piece.kind, piece.span, &layout, &pack, theme, scale),
+                    stray.map(|(i, _)| i),
                     None,
                     "a light at scale {s} wrote outside {:?}",
-                    piece.span
+                    light.span
                 );
             }
         }
         assert!(lights > 0, "the night office has no lights");
+    }
+
+    /// Every desk's lamp pools where its art hangs the bulb, whichever way the
+    /// desk faces: the cutaway's art stands it on the side the desk faces.
+    #[test]
+    fn a_desk_lamp_pools_under_its_painted_bulb() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = pack();
+        let layout = Layout::compute_with_seed(240, 144, None, 0).expect("lays out");
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let pen = Pen::for_pack(scale, &pack);
+        let frame = SimFrame {
+            agents: Vec::new(),
+            poses: std::collections::HashMap::new(),
+            seated_agents: std::collections::HashMap::new(),
+            characters: Vec::new(),
+            indoor_scale: 1.0,
+            neon: crate::floor::NeonLevels::CALM,
+            chitchat_bubbles: Vec::new(),
+            new_coffee_carriers: Vec::new(),
+            occupied_waypoints: Default::default(),
+            pet: None,
+            mascots: Vec::new(),
+            desks: vec![Default::default(); layout.home_desks.len()],
+        };
+        let look = look_at(theme, 23);
+        let list = list_at(
+            &frame,
+            Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale,
+            },
+            &look,
+            23,
+        );
+        // Each painted bulb's middle, in art pixels.
+        let bulbs: Vec<(f32, f32)> = layout
+            .home_desks
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &at)| {
+                let art = desk_art(
+                    &pack,
+                    layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)),
+                )?;
+                let span = desk_span(&pack, art, at, scale)?;
+                let desk = crate::pixel_painter::densest_frame(&pack, art, 0, scale)?;
+                let cells = drawn_in(&desk, &[crate::pixel_painter::DESK_BULB_KEY]);
+                let w = usize::from(desk.frame.width());
+                let hits: Vec<(f32, f32)> = cells
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, &b)| b)
+                    .map(|(i, _)| ((i % w) as f32, (i / w) as f32))
+                    .collect();
+                // Art pixels of this art, on the pen's grid.
+                let k = f32::from(pen.art(1).0) / f32::from(desk.density.get());
+                (!hits.is_empty()).then(|| {
+                    let n = hits.len() as f32;
+                    (
+                        f32::from(pen.art(span.x0).0)
+                            + hits.iter().map(|h| h.0).sum::<f32>() / n * k,
+                        f32::from(pen.art(span.y0).0)
+                            + hits.iter().map(|h| h.1).sum::<f32>() / n * k,
+                    )
+                })
+            })
+            .collect();
+        assert!(!bulbs.is_empty(), "the pack's desks draw no bulb");
+        let lamps: Vec<(f32, f32)> = list
+            .lights()
+            .iter()
+            .filter(|l| l.view.is_desk_lamp())
+            .map(|l| l.view.peak())
+            .collect();
+        assert_eq!(lamps.len(), bulbs.len(), "one pool a bulb");
+        let near = f32::from(pen.art(1).0);
+        for bulb in &bulbs {
+            assert!(
+                lamps
+                    .iter()
+                    .any(|p| (p.0 - bulb.0).abs() <= near && (p.1 - bulb.1).abs() <= near),
+                "no lamp pools within {near} art px of the bulb at {bulb:?}: {lamps:?}"
+            );
+        }
     }
 
     /// `list` painted as by day, over its backdrop and shadows, with each
@@ -4015,14 +4250,8 @@ S B B B B B B S
             &mut night,
         );
         paint_list(&list, &mut cache, &mut night);
-        let lights: Vec<&crate::cutaway::light::LightView> = list
-            .pieces()
-            .iter()
-            .filter_map(|p| match p.kind {
-                PieceKind::Light { ref view } => Some(view),
-                _ => None,
-            })
-            .collect();
+        let lights: Vec<&crate::cutaway::light::LightView> =
+            list.lights().iter().map(|l| &l.view).collect();
         let k = scale.get() / Pen::for_pack(scale, &pack).art(1).0;
         let walls: Vec<Span> = list
             .pieces()
@@ -4500,7 +4729,6 @@ S B B B B B B S
             PieceKind::Character { .. } => "character",
             PieceKind::Glass { .. } => "glass",
             PieceKind::Hung { .. } => "hung decor",
-            PieceKind::Light { .. } => "light",
         }
     }
 

@@ -122,6 +122,9 @@ impl Emission {
     }
 
     pub(crate) fn get(&self, x: u16, y: u16) -> Glow {
+        if x >= self.w {
+            return Glow::Lit;
+        }
         self.glow
             .get(usize::from(y) * usize::from(self.w) + usize::from(x))
             .copied()
@@ -141,8 +144,9 @@ pub(crate) struct LightView {
     tint: Option<Rgb>,
     ambient: Ambient,
     /// Where two lights lift a pixel alike, the lower rank lights it: a total
-    /// order on what the light is, so the list's order cannot decide.
-    rank: (u8, u16, u16),
+    /// order on what the light is — its kind, where it stands and its tint —
+    /// so the list's order cannot decide.
+    rank: (u8, u16, u16, (u8, u8, u8)),
 }
 
 impl LightView {
@@ -189,7 +193,12 @@ impl LightView {
                     lift,
                     tint,
                     ambient,
-                    rank: (rank_of(emitter.kind), x0, y0),
+                    rank: (
+                        rank_of(emitter.kind),
+                        x0,
+                        y0,
+                        tint.map_or((0, 0, 0), |t| (t.r, t.g, t.b)),
+                    ),
                 },
             )
         })
@@ -206,9 +215,24 @@ impl LightView {
         }
     }
 
-    /// The room it lights.
-    pub(crate) fn ambient(&self) -> Ambient {
-        self.ambient
+    /// Whether it is a desk lamp's.
+    #[cfg(test)]
+    pub(crate) fn is_desk_lamp(&self) -> bool {
+        self.rank.0 == rank_of(EmitterKind::DeskLamp)
+    }
+
+    /// Where it lifts most, in art pixels: the middle of its brightest.
+    #[cfg(test)]
+    pub(crate) fn peak(&self) -> (f32, f32) {
+        let top = self.lift.iter().copied().max().unwrap_or(0);
+        let w = usize::from(self.w.max(1));
+        let (mut n, mut sx, mut sy) = (0.0, 0.0, 0.0);
+        for (i, _) in self.lift.iter().enumerate().filter(|(_, &l)| l == top) {
+            n += 1.0;
+            sx += (i % w) as f32;
+            sy += (i / w) as f32;
+        }
+        (f32::from(self.x) + sx / n, f32::from(self.y) + sy / n)
     }
 
     /// Its lift at art pixel `(x, y)`, 0 outside its box.
