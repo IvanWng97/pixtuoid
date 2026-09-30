@@ -44,11 +44,12 @@ pub use roster::{
 #[cfg(test)]
 pub(crate) use roster::{NEON_PANEL_H, coffee_machine_cols};
 // Painter tests tile walls no `SceneLayout` has.
-#[cfg(test)]
-pub(crate) use windows::window_bays;
 pub(crate) use windows::{
-    WINDOW_W, WindowBay, glass_rows, wall_trim_row, window_frame, window_rows, window_run,
+    WINDOW_TOP, WINDOW_W, WindowBay, door_x, glass_rows, wall_trim_row, window_frame, window_posts,
+    window_rows, window_run,
 };
+#[cfg(test)]
+pub(crate) use windows::{window_bays, window_slots};
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
 pub(crate) use coarse::{COARSE_CELL_SIZE, NEIGHBORS_8, cell_walkable, snap};
 
@@ -337,10 +338,25 @@ pub const ELEVATOR_W: u16 = 16;
 /// Elevator-door sprite height in buffer px — the door's z-sort anchor row.
 pub const ELEVATOR_H: u16 = 14;
 
-/// The column the exit sign hangs at beside a door at `door_x`: west of it,
-/// since the door paints over whatever it covers.
-pub(crate) fn exit_sign_x(door_x: u16) -> u16 {
-    door_x.saturating_sub(furniture_def(WallDecor::ExitSign.furniture()).visual.w + 1)
+/// The buffer rows a half-block terminal cell shows.
+const CELL_ROWS: u16 = 2;
+
+/// The rows over a door whose top row is `door_y` that the terminal's floor
+/// indicator writes its text across: the whole cell above the door's.
+pub fn floor_indicator_rows(door_y: u16) -> std::ops::Range<u16> {
+    let top = (door_y / CELL_ROWS).saturating_sub(1) * CELL_ROWS;
+    top..top + CELL_ROWS
+}
+
+/// Where the exit sign hangs over a door at `door`: centred above its floor
+/// indicator, or `None` where that would climb above the windows' head.
+pub(crate) fn exit_sign_pos(door: Point) -> Option<Point> {
+    let sign = furniture_def(WallDecor::ExitSign.furniture()).visual;
+    let y = floor_indicator_rows(door.y).start.checked_sub(sign.h)?;
+    (y >= WINDOW_TOP).then_some(Point {
+        x: door.x + (ELEVATOR_W - sign.w) / 2,
+        y,
+    })
 }
 /// NOT a cap — production layouts fill the buffer's physical space
 /// (`max_desks: None`). This is the stable "one classic office worth of desks"

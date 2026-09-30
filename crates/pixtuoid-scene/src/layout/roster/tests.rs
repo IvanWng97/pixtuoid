@@ -385,43 +385,196 @@ fn a_tie_maps_to_a_layer_in_the_same_order() {
     }
 }
 
+/// The sizes the north-wall census rendered, each at a few seeds.
+fn north_wall_census() -> impl Iterator<Item = SceneLayout> {
+    [
+        (96u16, 60u16),
+        (120, 72),
+        (140, 80),
+        (160, 96),
+        (192, 108),
+        (240, 135),
+        (320, 180),
+        (160, 192),
+    ]
+    .into_iter()
+    .flat_map(|(w, h)| {
+        (0..3).map(move |seed| {
+            SceneLayout::compute_with_seed(w, h, None, seed).expect("a census size lays out")
+        })
+    })
+}
+
+fn overlaps(a: Bounds, b: Bounds) -> bool {
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+}
+
+fn is_exit_sign(k: &FixtureKind) -> bool {
+    matches!(
+        k,
+        FixtureKind::Wall {
+            kind: WallDecor::ExitSign,
+            ..
+        }
+    )
+}
+
 #[test]
-fn the_exit_sign_hangs_clear_of_the_elevator_door() {
+fn the_door_is_centred_in_the_last_window_slot() {
+    for l in north_wall_census() {
+        let at = format!("{}x{}", l.buf_w, l.buf_h);
+        let door = l.door_rect().expect("a door at every census size");
+        let roster = l.fixtures().find(|f| f.kind == FixtureKind::Door);
+        assert_eq!(roster.map(|f| f.visual), Some(door), "{at}");
+        let slots: Vec<_> = super::super::window_slots(l.buf_w).collect();
+        let slot = *slots.last().expect("a door stands in a slot");
+        assert!(
+            slot.x < door.x && door.x + door.width < slot.span().end,
+            "{at}"
+        );
+        assert_eq!(
+            door.x - slot.x,
+            slot.span().end - (door.x + door.width),
+            "{at}: centred in its slot"
+        );
+        assert_eq!(l.window_bays().count() + 1, slots.len(), "{at}");
+        assert!(
+            l.window_bays()
+                .all(|b| b.span().end <= door.x || door.x + door.width <= b.x),
+            "{at}: a window under the door"
+        );
+    }
+}
+
+#[test]
+fn the_exit_sign_hangs_centred_over_the_door_indicator_below_the_window_head() {
     let mut met = 0;
-    for l in offices() {
-        let visual =
-            |want: fn(&FixtureKind) -> bool| l.fixtures().find(|f| want(&f.kind)).map(|f| f.visual);
-        let (Some(sign), Some(door)) = (
-            visual(|k| {
-                matches!(
-                    k,
-                    FixtureKind::Wall {
-                        kind: WallDecor::ExitSign,
-                        ..
-                    }
-                )
-            }),
-            visual(|k| matches!(k, FixtureKind::Door)),
-        ) else {
+    for l in north_wall_census().chain(offices()) {
+        let at = format!("{}x{}", l.buf_w, l.buf_h);
+        let Some(sign) = l.fixtures().find(|f| is_exit_sign(&f.kind)) else {
             continue;
         };
         met += 1;
-        let apart = sign.x + sign.width <= door.x
-            || door.x + door.width <= sign.x
-            || sign.y + sign.height <= door.y
-            || door.y + door.height <= sign.y;
-        assert!(
-            apart,
-            "{}x{}: sign {sign:?} under door {door:?}",
-            l.buf_w, l.buf_h
+        let (sign, door) = (sign.visual, l.door_rect().expect("a sign marks a door"));
+        let (west, east) = (
+            sign.x - door.x,
+            (door.x + door.width) - (sign.x + sign.width),
         );
         assert!(
-            l.window_bays()
-                .all(|b| b.span().end <= sign.x || sign.x + sign.width <= b.span().start),
-            "{}x{}: sign {sign:?} over a window",
+            west.abs_diff(east) <= 1,
+            "{at}: {sign:?} centred over {door:?}"
+        );
+        assert!(
+            sign.y + sign.height <= super::super::floor_indicator_rows(door.y).start,
+            "{at}: {sign:?} above {door:?} and its floor indicator"
+        );
+        assert!(
+            sign.y >= super::super::window_rows(l.wall_band_h()).start,
+            "{at}: {sign:?} under the ceiling"
+        );
+    }
+    assert!(met > 0, "the sweep met an exit sign");
+}
+
+#[test]
+fn a_notice_board_hangs_within_one_pane_or_under_the_neon() {
+    let mut met = 0;
+    for l in north_wall_census().chain(offices()) {
+        for f in l.fixtures() {
+            let FixtureKind::NoticeBoard { .. } = f.kind else {
+                continue;
+            };
+            met += 1;
+            let b = f.visual;
+            let neon = NEON_PANEL.x..NEON_PANEL.x + NEON_PANEL.width;
+            assert!(
+                l.window_bays()
+                    .flat_map(|bay| bay.panes())
+                    .chain([neon])
+                    .any(|p| p.start <= b.x && b.x + b.width <= p.end),
+                "{}x{}: {b:?} straddles a frame",
+                l.buf_w,
+                l.buf_h
+            );
+        }
+    }
+    assert!(met > 0, "the sweep met a notice board");
+}
+
+/// The sizes whose meeting room hung a board before it snapped to a pane, but
+/// 140x80, whose room's north wall has no free pane.
+#[test]
+fn snapping_to_a_pane_keeps_the_notice_board() {
+    for (w, h) in [(160, 96), (192, 108), (200, 120), (240, 144), (320, 180)] {
+        let l = SceneLayout::compute_with_seed(w, h, None, 0).expect("lays out");
+        assert!(
+            l.fixtures()
+                .any(|f| matches!(f.kind, FixtureKind::NoticeBoard { .. })),
+            "{w}x{h}"
+        );
+    }
+}
+
+#[test]
+fn the_clock_hangs_centred_on_a_window_post() {
+    for l in north_wall_census() {
+        let clock = l
+            .fixtures()
+            .find(|f| f.kind == FixtureKind::Clock)
+            .expect("a clock at every census size")
+            .visual;
+        let centre = clock.x + clock.width / 2;
+        assert!(
+            super::super::window_posts(l.buf_w).any(|p| (p.start + p.end) / 2 == centre),
+            "{}x{}: {clock:?} off every post",
             l.buf_w,
             l.buf_h
         );
     }
-    assert!(met > 0, "the sweep met a sign beside a door");
+}
+
+#[test]
+fn the_neon_sign_hangs_a_post_west_of_the_first_window() {
+    for l in north_wall_census() {
+        let first = super::super::window_slots(l.buf_w).next().expect("a slot");
+        let gap = first.x - (NEON_PANEL.x + NEON_PANEL.width);
+        assert!(
+            super::super::window_posts(l.buf_w).all(|p| (p.end - p.start).abs_diff(gap) <= 1),
+            "{}x{}: the neon stands a post's width west of the first window",
+            l.buf_w,
+            l.buf_h
+        );
+    }
+}
+
+#[test]
+fn no_two_north_wall_fixtures_overlap() {
+    for l in north_wall_census().chain(offices()) {
+        let wall: Vec<_> = l
+            .fixtures()
+            .filter(|f| {
+                matches!(
+                    f.kind,
+                    FixtureKind::NeonSign
+                        | FixtureKind::Clock
+                        | FixtureKind::Door
+                        | FixtureKind::NoticeBoard { .. }
+                ) || is_exit_sign(&f.kind)
+            })
+            .collect();
+        for (i, a) in wall.iter().enumerate() {
+            for b in &wall[i + 1..] {
+                assert!(
+                    !overlaps(a.visual, b.visual),
+                    "{}x{}: {:?} {:?} over {:?} {:?}",
+                    l.buf_w,
+                    l.buf_h,
+                    a.kind,
+                    a.visual,
+                    b.kind,
+                    b.visual
+                );
+            }
+        }
+    }
 }

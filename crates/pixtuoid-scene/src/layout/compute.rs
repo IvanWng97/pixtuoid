@@ -367,23 +367,21 @@ pub(super) fn compute_with_seed(
     let (room_walls, doorways) =
         super::rooms::walls::derive_room_walls(&plan.meeting_rooms, plan.pantry);
 
-    // Elevator door — at the east end of the window wall, taking out any window it
-    // overlaps; above the lounge gate so that gate can check couch↔door clearance.
-    // It needs windows at least as tall as itself.
+    // Elevator door — in the window wall's last slot; above the lounge gate so
+    // that gate can check couch↔door clearance. It needs windows at least as
+    // tall as itself.
     let top_wall_h = plan
         .top_margin
         .saturating_sub(super::WALL_BAND_TO_TOP_MARGIN);
     let windows_h = super::window_rows(top_wall_h).len();
-    let door = if buf_w >= ELEVATOR_W + 4 && windows_h >= usize::from(ELEVATOR_H) {
-        Some(Point {
-            x: buf_w.saturating_sub(ELEVATOR_W + 2),
+    let door = super::door_x(buf_w)
+        .filter(|_| windows_h >= usize::from(ELEVATOR_H))
+        .map(|x| Point {
+            x,
             // Its bottom row is the band's trim row, so it stands on the floor
             // line instead of floating mid-wall.
             y: super::wall_trim_row(top_wall_h) + 1 - ELEVATOR_H,
-        })
-    } else {
-        None
-    };
+        });
     /// How far SOUTH of the floor line the elevator spawn sits, so a character entering
     /// stands on open floor, not on the wall apron the straddling wall decor stamps into.
     const DOOR_THRESHOLD_CLEARANCE_PX: u16 = 4;
@@ -688,7 +686,7 @@ pub(super) fn compute_with_seed(
 /// the last wall-band row however tall the band grows. The screen hugs room 0's WEST
 /// corner and the bookshelf spreads EAST — LOAD-BEARING, not taste: the carpet apron
 /// between the two grounds must drain south AROUND the tucked sofa. Any item whose
-/// clamped slot would pierce the divider/exit sign/elevator drops, reopening the lane.
+/// clamped slot would pierce the divider/elevator drops, reopening the lane.
 fn place_wall_decor(plan: &FloorPlan, door: Option<Point>) -> Vec<WallDecorItem> {
     let FloorPlan {
         buf_w,
@@ -708,12 +706,11 @@ fn place_wall_decor(plan: &FloorPlan, door: Option<Point>) -> Vec<WallDecorItem>
         (sx + screen_w < mr.bounds.x + mr.bounds.width).then_some(sx)
     });
     let bookshelf_x = bookshelf_x(buf_w, screen_w, bookshelf_w, meeting_screen_x, meeting_room);
-    let exit_sign_x = door.map_or(buf_w.saturating_sub(9), |d| super::exit_sign_x(d.x));
     // WEST of the vertical divider too: on narrow trio rooms the drain clamp can push it
     // onto the wall's top segment, where it pierces the glass. Dropping reopens the apron.
     let bookshelf_east_limit = meeting_room
         .map_or(u16::MAX, |mr| mr.bounds.x + mr.bounds.width)
-        .min(exit_sign_x);
+        .min(door.map_or(buf_w, |d| d.x));
     let mut wall_decor = Vec::new();
     if bookshelf_x + bookshelf_w < bookshelf_east_limit {
         wall_decor.push(WallDecorItem {
@@ -724,13 +721,13 @@ fn place_wall_decor(plan: &FloorPlan, door: Option<Point>) -> Vec<WallDecorItem>
             },
         });
     }
-    wall_decor.push(WallDecorItem {
-        kind: WallDecor::ExitSign,
-        pos: Point {
-            x: exit_sign_x,
-            y: top_margin.saturating_sub(13),
-        },
-    });
+    wall_decor.extend(
+        door.and_then(super::exit_sign_pos)
+            .map(|pos| WallDecorItem {
+                kind: WallDecor::ExitSign,
+                pos,
+            }),
+    );
     // `usable_h / 3` is a hint, not a slot: unsnapped it drops the board on a desk row
     // or in the intra-pod gap, where the wheel strip plugs the pod's own west lane.
     let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
