@@ -337,11 +337,11 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     let extract = cwd_extractor_for(source);
     let mut first_sight_cwd = extract_cwd(new_bytes, extract);
     let mut head_label = None;
-    if first_sight_cwd.is_none() && seen.lock().await.get(path) != Some(&true) {
-        if let Some(head) = read_head(path, MAX_PENDING_BYTES).await {
-            (first_sight_cwd, head_label) =
-                extract_head_fields(&head, extract, decoders.head_label);
-        }
+    if first_sight_cwd.is_none()
+        && seen.lock().await.get(path) != Some(&true)
+        && let Some(head) = read_head(path, MAX_PENDING_BYTES).await
+    {
+        (first_sight_cwd, head_label) = extract_head_fields(&head, extract, decoders.head_label);
     }
     if !matches!(
         (decoders.activity_recency)(new_bytes),

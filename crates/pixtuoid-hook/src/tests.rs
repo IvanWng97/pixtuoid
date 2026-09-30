@@ -326,28 +326,35 @@ fn default_socket_path_branches() {
     let prior_socket = std::env::var("PIXTUOID_SOCKET").ok();
     let prior_xdg = std::env::var("XDG_RUNTIME_DIR").ok();
 
-    std::env::set_var("PIXTUOID_SOCKET", "/explicit/path.sock");
-    std::env::set_var("XDG_RUNTIME_DIR", "/run/user/0");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("PIXTUOID_SOCKET", "/explicit/path.sock") };
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("XDG_RUNTIME_DIR", "/run/user/0") };
     assert_eq!(
         default_socket_path(),
         std::path::Path::new("/explicit/path.sock")
     );
 
     // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy).
-    std::env::set_var("PIXTUOID_SOCKET", "");
-    std::env::set_var("XDG_RUNTIME_DIR", "/run/user/0");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("PIXTUOID_SOCKET", "") };
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("XDG_RUNTIME_DIR", "/run/user/0") };
     assert_eq!(
         default_socket_path(),
         std::path::Path::new("/run/user/0/pixtuoid.sock")
     );
-    std::env::set_var("PIXTUOID_SOCKET", "   ");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("PIXTUOID_SOCKET", "   ") };
     assert_eq!(
         default_socket_path(),
         std::path::Path::new("/run/user/0/pixtuoid.sock")
     );
 
-    std::env::remove_var("PIXTUOID_SOCKET");
-    std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var("PIXTUOID_SOCKET") };
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000") };
     assert_eq!(
         default_socket_path(),
         std::path::Path::new("/run/user/1000/pixtuoid.sock")
@@ -358,25 +365,32 @@ fn default_socket_path_branches() {
     let uid = unsafe { libc::getuid() };
     let tmp_fallback = format!("/tmp/pixtuoid-{uid}/pixtuoid.sock");
     for invalid in ["", "   ", "relative/run"] {
-        std::env::set_var("XDG_RUNTIME_DIR", invalid);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("XDG_RUNTIME_DIR", invalid) };
         assert_eq!(default_socket_path(), tmp_fallback);
     }
 
     // #485: the per-user 0700 SUBDIR, not a flat squattable name.
-    std::env::remove_var("PIXTUOID_SOCKET");
-    std::env::remove_var("XDG_RUNTIME_DIR");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var("PIXTUOID_SOCKET") };
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
     assert_eq!(
         default_socket_path(),
         format!("/tmp/pixtuoid-{uid}/pixtuoid.sock")
     );
 
     match prior_socket {
-        Some(v) => std::env::set_var("PIXTUOID_SOCKET", v),
-        None => std::env::remove_var("PIXTUOID_SOCKET"),
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var("PIXTUOID_SOCKET", v) },
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var("PIXTUOID_SOCKET") },
     }
     match prior_xdg {
-        Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
-        None => std::env::remove_var("XDG_RUNTIME_DIR"),
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var("XDG_RUNTIME_DIR", v) },
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var("XDG_RUNTIME_DIR") },
     }
 }
 
@@ -419,51 +433,63 @@ fn default_socket_path_branches_windows() {
     let prior_socket = std::env::var("PIXTUOID_SOCKET").ok();
     let prior_user = std::env::var("USERNAME").ok();
 
-    std::env::set_var("PIXTUOID_SOCKET", r"\\.\pipe\explicit");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("PIXTUOID_SOCKET", r"\\.\pipe\explicit") };
     assert_eq!(
         default_socket_path(),
         std::path::Path::new(r"\\.\pipe\explicit")
     );
 
     // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy).
-    std::env::set_var("PIXTUOID_SOCKET", "");
-    std::env::set_var("USERNAME", "ada");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("PIXTUOID_SOCKET", "") };
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("USERNAME", "ada") };
     assert_eq!(
         default_socket_path(),
         std::path::Path::new(r"\\.\pipe\pixtuoid-ada")
     );
-    std::env::set_var("PIXTUOID_SOCKET", "   ");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("PIXTUOID_SOCKET", "   ") };
     assert_eq!(
         default_socket_path(),
         std::path::Path::new(r"\\.\pipe\pixtuoid-ada")
     );
 
-    std::env::remove_var("PIXTUOID_SOCKET");
-    std::env::set_var("USERNAME", "ada");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var("PIXTUOID_SOCKET") };
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("USERNAME", "ada") };
     assert_eq!(
         default_socket_path(),
         std::path::Path::new(r"\\.\pipe\pixtuoid-ada")
     );
 
     // DOMAIN\user form is sanitized (backslashes are illegal in pipe names).
-    std::env::set_var("USERNAME", r"CORP\alice");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("USERNAME", r"CORP\alice") };
     assert_eq!(
         default_socket_path(),
         std::path::Path::new(r"\\.\pipe\pixtuoid-CORP-alice")
     );
 
-    std::env::remove_var("USERNAME");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var("USERNAME") };
     assert_eq!(
         default_socket_path(),
         std::path::Path::new(r"\\.\pipe\pixtuoid-default")
     );
 
     match prior_socket {
-        Some(v) => std::env::set_var("PIXTUOID_SOCKET", v),
-        None => std::env::remove_var("PIXTUOID_SOCKET"),
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var("PIXTUOID_SOCKET", v) },
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var("PIXTUOID_SOCKET") },
     }
     match prior_user {
-        Some(v) => std::env::set_var("USERNAME", v),
-        None => std::env::remove_var("USERNAME"),
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var("USERNAME", v) },
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var("USERNAME") },
     }
 }
