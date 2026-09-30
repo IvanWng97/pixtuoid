@@ -453,3 +453,54 @@ fn theme_picker_renders_during_floor_transition() {
         "theme picker must paint over a floor transition; frame:\n{text}"
     );
 }
+
+/// The board's context row is wired in `draw_scene` from the floor breadcrumb
+/// and the OFFICE-WIDE gateway: the projected floor scene carries daemons only
+/// on floor 0, so a board built from it would drop the `⬢gw` chip upstairs.
+#[test]
+fn the_wall_board_upstairs_shows_the_breadcrumb_and_the_office_gateway() {
+    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
+        pixtuoid_scene::embedded_pack::PackSource::Bundled,
+    )
+    .expect("embedded pack");
+    let theme = pixtuoid_scene::theme::ALL_THEMES[0];
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let cap = 16;
+    let mut scene = SceneState::uniform(cap);
+    let a = AgentId::from_transcript_path("/h/board0.jsonl");
+    let b = AgentId::from_transcript_path("/h/board1.jsonl");
+    scene.agents.insert(a, slot(a, 0, 0, t0));
+    scene.agents.insert(b, slot(b, 1, cap, t0));
+    scene.insert_daemon(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty"),
+        pixtuoid_core::state::DaemonPresence {
+            liveness: pixtuoid_core::state::DaemonLiveness::UP,
+            active_sessions: 0,
+            last_seen: t0,
+            entered_at: t0,
+            in_flight_runs: Default::default(),
+            current_pid: Some(1),
+        },
+    );
+
+    let term = Terminal::new(TestBackend::new(120, 44)).expect("test backend");
+    let mut r = TuiRenderer::new(term, theme, vec![]);
+    let mut now = t0;
+    r.render(&scene, &pack, now).expect("render");
+    r.navigate_floor(1, now);
+    render_until_settled(&mut r, &scene, &pack, &mut now, 1);
+
+    // Above the footer row, which carries its own floor indicator.
+    let text = frame_text(r.frame_buffer());
+    let rows: Vec<&str> = text.lines().collect();
+    let office = rows[..rows.len() - usize::from(crate::tui::renderer::FOOTER_ROWS)].join("\n");
+    assert!(
+        office.contains("F2/2"),
+        "board breadcrumb names floor 2 of 2:\n{office}"
+    );
+    assert!(
+        office.contains("\u{2b22}gw"),
+        "board keeps the office-wide gateway chip upstairs:\n{office}"
+    );
+}

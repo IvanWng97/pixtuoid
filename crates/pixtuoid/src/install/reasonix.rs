@@ -399,19 +399,12 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn user_config_dir_uses_appdata_on_windows() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var_os("APPDATA");
-        std::env::set_var("APPDATA", r"C:\Users\ada\AppData\Roaming");
-        assert_eq!(
-            user_config_dir(),
-            Some(PathBuf::from(r"C:\Users\ada\AppData\Roaming"))
-        );
-        match saved {
-            Some(v) => std::env::set_var("APPDATA", v),
-            None => std::env::remove_var("APPDATA"),
-        }
+        temp_env::with_var("APPDATA", Some(r"C:\Users\ada\AppData\Roaming"), || {
+            assert_eq!(
+                user_config_dir(),
+                Some(PathBuf::from(r"C:\Users\ada\AppData\Roaming"))
+            );
+        });
     }
 
     #[test]

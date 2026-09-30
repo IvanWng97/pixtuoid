@@ -13,7 +13,7 @@ mod mask;
 mod placement;
 mod reach;
 mod rooms;
-mod roster;
+pub(crate) mod roster;
 mod windows;
 
 // The deep interface is `SceneLayout::{stand_point,approach_point}`; these free
@@ -34,14 +34,15 @@ pub(crate) use rooms::walls::WallPiece;
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 pub(crate) use roster::{
-    CLOCK, NEON_PANEL, NEON_PANEL_BORDER, desk_chair_top_left, desk_chair_z_key,
+    CLOCK, Depth, Fixture, Layer, NEON_PANEL, NEON_PANEL_BORDER, Tie, desk_chair_top_left,
+    desk_chair_z_key,
 };
-#[cfg(test)]
-pub(crate) use roster::{Depth, NEON_PANEL_H, coffee_machine_cols};
 pub use roster::{
     FixtureKind, NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
     NEON_PANEL_W, Station,
 };
+#[cfg(test)]
+pub(crate) use roster::{NEON_PANEL_H, coffee_machine_cols};
 // Painter tests tile walls no `SceneLayout` has.
 #[cfg(test)]
 pub(crate) use windows::window_bays;
@@ -484,15 +485,6 @@ impl SceneLayout {
     /// [`Self::meeting_rooms`] index.
     pub fn meeting_room_bounds(&self, room_id: usize) -> Option<Bounds> {
         self.meeting_rooms.get(room_id).map(|r| r.bounds)
-    }
-
-    /// Every rug in the office: one under each meeting trio, then the lounge's.
-    pub(crate) fn rugs(&self) -> impl Iterator<Item = Bounds> + '_ {
-        self.meeting_rooms
-            .iter()
-            .filter_map(|r| r.trio.as_ref())
-            .map(|t| t.rug(self.buf_h))
-            .chain(self.lounge.as_ref().map(Lounge::rug))
     }
 
     /// Couch sprite centre (middle of the 3 seats) — `Some` iff the lounge

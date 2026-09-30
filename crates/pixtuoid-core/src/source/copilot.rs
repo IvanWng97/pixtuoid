@@ -1020,40 +1020,34 @@ mod tests {
 
     #[test]
     fn copilot_home_honors_non_empty_env_override() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var_os("COPILOT_HOME");
+        temp_env::with_var("COPILOT_HOME", Some("/custom/cp"), || {
+            assert_eq!(
+                copilot_home(),
+                PathBuf::from("/custom/cp"),
+                "a non-empty COPILOT_HOME is used verbatim"
+            );
+        });
 
-        std::env::set_var("COPILOT_HOME", "/custom/cp");
-        assert_eq!(
-            copilot_home(),
-            PathBuf::from("/custom/cp"),
-            "a non-empty COPILOT_HOME is used verbatim"
-        );
+        temp_env::with_var("COPILOT_HOME", Some(""), || {
+            assert!(
+                copilot_home().ends_with(".copilot"),
+                "empty COPILOT_HOME → ~/.copilot fallback"
+            );
+        });
 
-        std::env::set_var("COPILOT_HOME", "");
-        assert!(
-            copilot_home().ends_with(".copilot"),
-            "empty COPILOT_HOME → ~/.copilot fallback"
-        );
+        temp_env::with_var("COPILOT_HOME", Some("   "), || {
+            assert!(
+                copilot_home().ends_with(".copilot"),
+                "whitespace-only COPILOT_HOME → ~/.copilot fallback"
+            );
+        });
 
-        std::env::set_var("COPILOT_HOME", "   ");
-        assert!(
-            copilot_home().ends_with(".copilot"),
-            "whitespace-only COPILOT_HOME → ~/.copilot fallback"
-        );
-
-        std::env::remove_var("COPILOT_HOME");
-        assert!(
-            copilot_home().ends_with(".copilot"),
-            "unset COPILOT_HOME → ~/.copilot fallback"
-        );
-
-        match saved {
-            Some(v) => std::env::set_var("COPILOT_HOME", v),
-            None => std::env::remove_var("COPILOT_HOME"),
-        }
+        temp_env::with_var_unset("COPILOT_HOME", || {
+            assert!(
+                copilot_home().ends_with(".copilot"),
+                "unset COPILOT_HOME → ~/.copilot fallback"
+            );
+        });
     }
 
     /// Every field the decoder reads by a LITERAL key is declared here — reads
@@ -1066,10 +1060,10 @@ mod tests {
         let mut read: Vec<&str> = Vec::new();
         for m in src.match_indices("str_at(") {
             let rest = &src[m.0..];
-            if let Some(q) = rest.find('"') {
-                if let Some(end) = rest[q + 1..].find('"') {
-                    read.push(&rest[q + 1..q + 1 + end]);
-                }
+            if let Some(q) = rest.find('"')
+                && let Some(end) = rest[q + 1..].find('"')
+            {
+                read.push(&rest[q + 1..q + 1 + end]);
             }
         }
         for pat in ["\t.get(\"", ".get(\""] {

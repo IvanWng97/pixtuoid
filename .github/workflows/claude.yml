@@ -23,7 +23,7 @@ jobs:
     # CLOSED at the yaml layer too, independent of the floating action tag. Each
     # event shape needs its OWN author_association field. The pull_request_review*
     # arms also need the same-repo guard: refs/pull/<n>/merge would stage
-    # fork-authored files — including a repo-root CLAUDE.md the agent auto-loads
+    # fork-authored files — including the AGENTS.md files the agent auto-loads
     # as instructions — in the job holding contents:write and the OAuth token (#799).
     if: >
       (github.event_name == 'issues' && contains(github.event.issue.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)) ||
