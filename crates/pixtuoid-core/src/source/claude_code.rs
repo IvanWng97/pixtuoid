@@ -4,17 +4,17 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::source::decoder::{
-    cwd_basename_label, ellipsize, make_tool_detail, parsed_tail_lines, TailActivity,
-    MAX_DECODED_FIELD_CHARS,
+    MAX_DECODED_FIELD_CHARS, TailActivity, cwd_basename_label, ellipsize, make_tool_detail,
+    parsed_tail_lines,
 };
 
-use crate::source::AgentEvent;
 use crate::AgentId;
+use crate::source::AgentEvent;
 
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
-pub use native::{cc_watcher, live_cc_session_ids, ClaudeCodeSource};
+pub use native::{ClaudeCodeSource, cc_watcher, live_cc_session_ids};
 
 /// homebrew-core contract: their formula's `test do` asserts this exact id, so
 /// renaming it breaks Homebrew's CI on the next autobump. Coordinate a core PR.
@@ -1159,7 +1159,9 @@ mod cc_id_tests {
 
     #[test]
     fn cc_id_from_path_subagent_is_agent_stem() {
-        let p = Path::new("/Users/me/.claude/projects/-Users-me-proj/01000000-0000-7000-8000-0000000000cc/subagents/agent-a0a7dc28dd772bd0d.jsonl");
+        let p = Path::new(
+            "/Users/me/.claude/projects/-Users-me-proj/01000000-0000-7000-8000-0000000000cc/subagents/agent-a0a7dc28dd772bd0d.jsonl",
+        );
         assert_eq!(cc_id_from_path(p), "agent-a0a7dc28dd772bd0d");
     }
 

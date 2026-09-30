@@ -60,11 +60,7 @@ impl Ambient {
     /// The most a light may lift a pixel in a room this dark: back to its
     /// daylight tone and never past it, or [`DAYLIGHT_LIFT`] by day.
     fn ceiling(self) -> u8 {
-        if self.0 == 0 {
-            DAYLIGHT_LIFT
-        } else {
-            self.0
-        }
+        if self.0 == 0 { DAYLIGHT_LIFT } else { self.0 }
     }
 }
 

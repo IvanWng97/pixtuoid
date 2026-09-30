@@ -6,11 +6,11 @@ use std::time::Duration;
 use anyhow::Result;
 
 use super::{
-    decode_omp_line, omp_derive_label, omp_head_title, omp_id_from_path, omp_profile_sessions_dirs,
-    omp_sessions_dir, SOURCE_NAME,
+    SOURCE_NAME, decode_omp_line, omp_derive_label, omp_head_title, omp_id_from_path,
+    omp_profile_sessions_dirs, omp_sessions_dir,
 };
 use crate::source::decoder::parsed_tail_lines;
-use crate::source::jsonl::{JsonlWatcher, ProbeSnapshot, DEFAULT_POLL_INTERVAL};
+use crate::source::jsonl::{DEFAULT_POLL_INTERVAL, JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
 
 /// The profile-roots lister [`OmpSource::run`] re-invokes on its rescan tick,

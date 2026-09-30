@@ -4,17 +4,17 @@
 //! frame itself), the per-floor fade states ([`LightingState`], the neon
 //! sign's), and the per-office [`CoffeeState`] bookkeeping.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::physics::{walk_arrived, WalkProfile};
+use crate::physics::{WalkProfile, walk_arrived};
+use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{AgentSlot, FloorLocalDeskIndex, GlobalDeskIndex, SceneState};
 use pixtuoid_core::walkable::OccupancyOverlay;
-use pixtuoid_core::AgentId;
 
 use crate::audio::{AudioCueTracker, AudioFrame};
 use crate::chitchat::{ActiveChitchat, VenueKey};
@@ -24,7 +24,7 @@ use crate::motion::MotionState;
 use crate::pathfind::{AStarRouter, Router};
 use crate::pet::{Pet, PetState};
 use crate::pixel_painter::{
-    render_to_rgb_buffer, sim_step, PixelCtx, SimFrame, SimInputs, SimStores,
+    PixelCtx, SimFrame, SimInputs, SimStores, render_to_rgb_buffer, sim_step,
 };
 use crate::pose::PoseHistory;
 use crate::theme::Theme;

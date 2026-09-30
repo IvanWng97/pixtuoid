@@ -1,14 +1,14 @@
-use pixtuoid_core::state::{DaemonState, MAX_FLOORS};
 use pixtuoid_core::SceneState;
+use pixtuoid_core::state::{DaemonState, MAX_FLOORS};
 use pixtuoid_scene::footer::{
-    build_footer, footer_tone_rgb, footer_tool_tally, FooterFloor, FooterInputs, ToolTally,
+    FooterFloor, FooterInputs, ToolTally, build_footer, footer_tone_rgb, footer_tool_tally,
 };
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 
-use super::{to_color, StateCounts};
+use super::{StateCounts, to_color};
 
 const KEYS_STATS: &str = " [?]help [p]ause [t]heme [q]uit ";
 const KEYS_ALERT: &str = " [q]uit ";

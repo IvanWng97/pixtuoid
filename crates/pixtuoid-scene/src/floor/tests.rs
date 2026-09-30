@@ -946,7 +946,7 @@ fn session_types_default_equals_new() {
 #[test]
 fn reset_frame_cache_clears_cached_sprites() {
     use crate::frame_cache::FrameKey;
-    use pixtuoid_core::{sprite::Frame, AgentId};
+    use pixtuoid_core::{AgentId, sprite::Frame};
 
     let mut s = FloorSession::new();
     // Prime the cache, so the assertion below distinguishes a real reset from a
@@ -1338,9 +1338,11 @@ fn neon_a_painter_slower_than_a_flash_never_shows_one() {
         assert_eq!(levels, NeonLevels::EMPTY, "{ms}ms at a {shortest:?} tick");
     }
     let just_faster = shortest - Duration::from_millis(1);
-    assert!(starved_cycle(just_faster)
-        .iter()
-        .any(|(_, levels)| *levels == NeonLevels::FLASH));
+    assert!(
+        starved_cycle(just_faster)
+            .iter()
+            .any(|(_, levels)| *levels == NeonLevels::FLASH)
+    );
     let in_a_flash = in_stutter_cycle(NeonState::STUTTER_FLASHES_MS[0].0);
     assert_eq!(
         NeonState::new().tick(neon_mood(0, 0, 0), ROOM_DIMMED, in_a_flash),

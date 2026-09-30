@@ -21,7 +21,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use toml::value::Table;
 
 use crate::install::io;
@@ -180,7 +180,7 @@ fn toml_merge_uninstall(mut doc: toml::Value) -> toml::Value {
 /// `[[hooks]]` entry (detected by the command marker, not a sentinel), and the
 /// shim path extracted for `install::verify_target` to stat.
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
-    use crate::install::verify::{assemble, shell_shim_ref, SchemaParse, ShimRef};
+    use crate::install::verify::{SchemaParse, ShimRef, assemble, shell_shim_ref};
     let Ok(doc) = toml::from_str::<toml::Value>(content) else {
         return SchemaParse::broken("config.toml no longer parses as TOML");
     };
@@ -441,10 +441,11 @@ command = "terminal-notifier -message done"
         use crate::install::verify::ShimRef;
         let res = verify_schema("not = = toml");
         assert_eq!(res.shim, ShimRef::Unknown);
-        assert!(res
-            .issues
-            .iter()
-            .any(|i| i.contains("no longer parses as TOML")));
+        assert!(
+            res.issues
+                .iter()
+                .any(|i| i.contains("no longer parses as TOML"))
+        );
     }
 
     #[cfg(unix)]

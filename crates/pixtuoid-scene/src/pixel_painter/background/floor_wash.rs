@@ -5,7 +5,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 #[cfg(doc)]
 use crate::atmosphere::Look;
-use crate::pixel_painter::palette::{blend_rgb, RgbLut};
+use crate::pixel_painter::palette::{RgbLut, blend_rgb};
 
 /// Lay each of `wash`'s `(tint, strength)` blends over the floor band
 /// `top_y..bottom_y`, in order.

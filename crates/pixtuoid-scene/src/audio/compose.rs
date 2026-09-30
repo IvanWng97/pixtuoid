@@ -826,11 +826,7 @@ fn night_drums(rng: &mut NoiseStream, beat_s: f32) -> (Vec<(f32, DrumKind, f32)>
 /// bass-register authority.
 fn sub_note(pc: u8) -> u8 {
     let b = 24 + (pc % 12);
-    if b < 26 {
-        b + 12
-    } else {
-        b
-    }
+    if b < 26 { b + 12 } else { b }
 }
 
 /// The bass lane: the ONE on every bar, an optional answer, an occasional day

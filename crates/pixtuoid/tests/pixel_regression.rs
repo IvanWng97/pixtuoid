@@ -9,12 +9,12 @@ use std::time::{Duration, SystemTime};
 use pixtuoid::tui::renderer::draw_scene;
 use pixtuoid_core::state::{ActivityState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
-use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
+use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
 use pixtuoid_scene::floor::FloorMeta;
 use pixtuoid_scene::pixel_painter::force_weather;
 use pixtuoid_scene::theme::{self, Theme};
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 
 fn fixture_scene(now: SystemTime) -> SceneState {
     let mut s = SceneState::uniform(12);

@@ -4,8 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
-use super::format::{Material, DENSITY_VARIANT_SEP, PACK_MANIFEST};
 use super::HeadView;
+use super::format::{DENSITY_VARIANT_SEP, Material, PACK_MANIFEST};
 
 /// A sprite pack that could not be loaded.
 #[derive(Debug, thiserror::Error)]
@@ -260,7 +260,9 @@ pub enum PackError {
         y: usize,
     },
     /// A hairstyle's key names no density of 2x and up.
-    #[error("hairstyle {key:?} must be `<name>{DENSITY_VARIANT_SEP}<N>x`: only art of 2x and up is dressed")]
+    #[error(
+        "hairstyle {key:?} must be `<name>{DENSITY_VARIANT_SEP}<N>x`: only art of 2x and up is dressed"
+    )]
     #[non_exhaustive]
     HairstyleDensity {
         /// The hairstyle's key.

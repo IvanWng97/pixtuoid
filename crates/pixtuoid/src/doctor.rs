@@ -687,11 +687,7 @@ struct Ink {
 
 impl Ink {
     fn s(&self, s: &str, f: impl FnOnce(&str) -> String) -> String {
-        if self.on {
-            f(s)
-        } else {
-            s.to_string()
-        }
+        if self.on { f(s) } else { s.to_string() }
     }
     fn ok(&self, s: &str) -> String {
         use crossterm::style::Stylize;
@@ -1300,11 +1296,7 @@ fn home_split_category(r: &DoctorReport) -> Option<Category> {
 }
 
 fn plural_s(n: usize) -> &'static str {
-    if n == 1 {
-        ""
-    } else {
-        "s"
-    }
+    if n == 1 { "" } else { "s" }
 }
 
 /// The ONE report: flutter-doctor-style categories — a `[✓]`/`[!]`/`[✗]`
