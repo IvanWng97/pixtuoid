@@ -423,7 +423,7 @@ fn lights(
         .filter_map(|e| {
             crate::cutaway::light::LightView::of(
                 e,
-                crate::cutaway::light::tint_of(e.kind, theme),
+                crate::cutaway::light::tint_of(e.kind, theme, frame.neon),
                 ambient,
                 pen,
                 (layout.buf_w, layout.buf_h),
@@ -4809,6 +4809,43 @@ S B B B B B B S
             lamps > 0,
             "nothing lights the night room, so this pins nothing"
         );
+    }
+
+    #[test]
+    fn the_neon_glow_takes_its_tubes_hue() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = pack();
+        let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale: RenderScale::new(pack.max_density_variant()).expect("nonzero"),
+        };
+        for neon in [
+            crate::floor::NeonLevels::CALM,
+            crate::floor::NeonLevels::ALERT,
+            crate::floor::NeonLevels {
+                alert: 0.5,
+                power: 1.0,
+            },
+        ] {
+            let frame = SimFrame {
+                neon,
+                ..empty_frame(&layout)
+            };
+            let list = list_at(&frame, office, 23);
+            let hue = list.pieces().iter().find_map(|p| match p.kind {
+                PieceKind::Neon { hue, .. } => Some(hue),
+                _ => None,
+            });
+            let glow = list
+                .lights()
+                .iter()
+                .find(|l| l.view.is(crate::lighting::EmitterKind::NeonGlow))
+                .map(|l| l.view.tint());
+            assert_eq!(glow, Some(hue), "{neon:?}");
+        }
     }
 
     /// Every desk's lamp pools where its art hangs the bulb, whichever way the
