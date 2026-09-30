@@ -247,6 +247,11 @@ invariants"), which every contributor and agent reads first.
 - Every PR is reviewed by **2+ agents with differentiated lenses** before
   merge — no exceptions. The mechanical teeth are the `claude-review` +
   `claude-security-review` workflows plus your local two-lens pass.
+- **An outside contributor's PR** gets the same review, but never on its own:
+  a maintainer approves its CI run, then comments `/claude-review` and
+  `/security-review`, and comments again after every push. Before merging,
+  read each thread's `resolvedBy` and its reply, since a PR author can resolve
+  their own threads.
 - AI-authored PRs get the `needs-human-verify` label and a human visual check.
 - **Every reviewer/bot finding reaches exactly one terminal state in the PR
   thread** — FIXED · REFUTED · RE-SCOPED → #N · FOLLOW-UP → #N, defined ONCE
