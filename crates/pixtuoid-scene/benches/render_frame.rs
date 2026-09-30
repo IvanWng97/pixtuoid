@@ -9,6 +9,10 @@
 //! `cargo bench -p pixtuoid-scene --bench render_frame -- --profile-time 10`
 //! under `samply record`. Numbers are LOCAL statistical evidence: shared-CI
 //! wall-clock is noise, so CI runs this advisory-only.
+//! A second group, `render_cutaway`, costs the 2.5D painter alone: the sim
+//! window is observed up front, so each iteration is paint only — the part the
+//! cutaway adds on top of the shared sim — at the scale and extent it ships at,
+//! once at noon and once at night (the night room lights its lamps).
 //! Distinct instrument:
 //! `crates/pixtuoid/examples/render_bench.rs` measures buffer-size SCALING
 //! through the floating offscreen renderer for the 2.5D design gate.
@@ -23,8 +27,12 @@ use pixtuoid_core::id::AgentId;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::{AgentSlot, SceneState};
-use pixtuoid_scene::floor::{render_floor, CoffeeState, FloorCtx, FloorMeta, FrameInputs};
+use pixtuoid_scene::cutaway::paint::{render_cutaway, Office};
+use pixtuoid_scene::floor::{
+    render_floor, CoffeeState, FloorCtx, FloorMeta, FloorSession, FrameInputs, ObservedFloor,
+};
 use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::render_scale::RenderScale;
 
 // Inside a weather slot (`sky::WEATHER_CYCLE_SECS`, crate-private) with room to
 // spare, so the `SIM_WINDOW_FRAMES` × `FRAME_STEP_MS` window below never
@@ -39,6 +47,17 @@ const FRAME_STEP_MS: u64 = 100;
 const FLOATING_DEFAULT: Size = Size { w: 360, h: 240 };
 /// Crowds above the 12 the size axis fixes — a busy pod-farm and a near-full floor.
 const OCCUPANCY: [usize; 2] = [32, 64];
+/// The cutaway's logical office and the density it paints it at.
+const CUTAWAY_LOGICAL: Size = Size { w: 240, h: 144 };
+const CUTAWAY_SCALE: u16 = 4;
+/// Observed sim frames each cutaway case cycles through — enough that walks
+/// and bubbles move under the painter, few enough to hold in memory at once.
+const CUTAWAY_FRAMES: u32 = 60;
+/// Local wall-clock hours: the sky and the room's lighting decode `now`
+/// through `chrono::Local`, so a fixed epoch would be a different hour in
+/// every `$TZ`.
+const NOON: u32 = 12;
+const NIGHT: u32 = 23;
 
 fn office_scene(n: usize, max_desks: usize, base: SystemTime, busy: bool) -> SceneState {
     let mut s = SceneState::uniform(max_desks);
@@ -182,5 +201,73 @@ fn render_frame(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, render_frame);
+/// Local `hour:00` on a fixed January day.
+fn local_hour(hour: u32) -> SystemTime {
+    use chrono::TimeZone;
+    chrono::Local
+        .with_ymd_and_hms(2026, 1, 1, hour, 0, 0)
+        .single()
+        .expect("a fixed January local time is unambiguous")
+        .into()
+}
+
+fn render_cutaway_frame(c: &mut Criterion) {
+    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
+        pixtuoid_scene::embedded_pack::PackSource::Bundled,
+    )
+    .expect("embedded pack");
+    let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
+    let scale = RenderScale::new(CUTAWAY_SCALE).expect("nonzero scale");
+    // The sky otherwise picks its weather from the clock, so noon and night
+    // would each also be a different weather.
+    pixtuoid_scene::pixel_painter::force_weather(Some("clear")).expect("clear is a weather");
+    let meta = FloorMeta::ground();
+
+    let mut group = c.benchmark_group("render_cutaway");
+    for (label, hour) in [("noon", NOON), ("night", NIGHT)] {
+        let base = local_hour(hour);
+        let scene = office_scene(12, 16, base, true);
+        let mut session = FloorSession::new();
+        let observed: Vec<ObservedFloor> = (0..CUTAWAY_FRAMES)
+            .map(|i| {
+                let now = base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS);
+                session
+                    .observe(&scene, &pack, CUTAWAY_LOGICAL, meta, now)
+                    .expect("the cutaway extent lays out")
+            })
+            .collect();
+        let Size { w, h } = CUTAWAY_LOGICAL;
+        group.bench_function(format!("busy12_{w}x{h}_x{CUTAWAY_SCALE}_{label}"), |b| {
+            let mut buf = RgbBuffer::filled(
+                scale.to_buffer(w),
+                scale.to_buffer(h),
+                theme.surface.bg_fallback,
+            );
+            let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
+            let mut i = 0u32;
+            b.iter(|| {
+                let ObservedFloor { layout, frame } = &observed[i as usize];
+                let now = base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS);
+                i = (i + 1) % CUTAWAY_FRAMES;
+                render_cutaway(
+                    frame,
+                    Office {
+                        layout,
+                        pack: &pack,
+                        theme,
+                        scale,
+                    },
+                    meta,
+                    now,
+                    &mut cache,
+                    &mut buf,
+                )
+            });
+        });
+    }
+    group.finish();
+    pixtuoid_scene::pixel_painter::force_weather(None).expect("None always resets");
+}
+
+criterion_group!(benches, render_frame, render_cutaway_frame);
 criterion_main!(benches);
