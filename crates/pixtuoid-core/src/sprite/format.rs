@@ -2,40 +2,51 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 
 use crate::grid::Grid;
+use crate::sprite::error::{ColorError, KeySite, LineError, PackError, SpriteError};
 use crate::sprite::{
     Frame, HeadMark, HeadView, IndexedFrame, Mark, Palette, PaletteIndex, Pixel, Rgb, Sprite,
     HEAD_MARK, PALETTE_CAPACITY,
 };
+
+type Result<T, E = PackError> = std::result::Result<T, E>;
 
 /// A frame's rows as parsed, and its marks.
 type MarkedRows = (Vec<Vec<PaletteIndex>>, Vec<Mark>);
 
 /// Parse a `.sprite` text file: one indexed frame per `@frame N` block, each
 /// with the `@mark <name> <x> <y>` lines its block carries.
-fn parse_indexed(src: &str, palette: &Palette) -> Result<Vec<(IndexedFrame, Vec<Mark>)>> {
+fn parse_indexed(
+    src: &str,
+    palette: &Palette,
+) -> Result<Vec<(IndexedFrame, Vec<Mark>)>, SpriteError> {
     let mut frames = Vec::new();
     let mut current: Option<MarkedRows> = None;
     let mut last_lineno = 0;
-    let finish = |(rows, marks): MarkedRows, lineno: usize| -> Result<(IndexedFrame, Vec<Mark>)> {
-        let frame = rows_to_frame(rows).map_err(|e| anyhow!("{e} (line {})", lineno + 1))?;
+    let at = |lineno: usize| {
+        move |kind| SpriteError::Line {
+            line: lineno + 1,
+            kind,
+        }
+    };
+    let finish = |(rows, marks): MarkedRows,
+                  lineno: usize|
+     -> Result<(IndexedFrame, Vec<Mark>), SpriteError> {
+        let frame = rows_to_frame(rows).map_err(at(lineno))?;
         let grid = &frame.0;
         if let Some(m) = marks
             .iter()
             .find(|m| m.x() >= grid.width() || m.y() >= grid.height())
         {
-            bail!(
-                "@mark {} {} {} lies outside its {}x{} frame (line {})",
-                m.name(),
-                m.x(),
-                m.y(),
-                grid.width(),
-                grid.height(),
-                lineno + 1
-            );
+            return Err(at(lineno)(LineError::MarkOutside {
+                name: m.name().to_owned(),
+                x: m.x(),
+                y: m.y(),
+                width: grid.width(),
+                height: grid.height(),
+            }));
         }
         Ok((frame, marks))
     };
@@ -54,32 +65,29 @@ fn parse_indexed(src: &str, palette: &Palette) -> Result<Vec<(IndexedFrame, Vec<
             let _ = rest
                 .trim()
                 .parse::<u32>()
-                .map_err(|_| anyhow!("@frame requires a number (line {})", lineno + 1))?;
+                .map_err(|_| at(lineno)(LineError::FrameNumber))?;
             current = Some((Vec::new(), Vec::new()));
             continue;
         }
 
         let (rows, marks) = current
             .as_mut()
-            .ok_or_else(|| anyhow!("pixel data before any @frame (line {})", lineno + 1))?;
+            .ok_or_else(|| at(lineno)(LineError::DataBeforeFrame))?;
 
         if let Some(rest) = line.strip_prefix("@mark") {
-            let mark = parse_mark(rest).map_err(|e| anyhow!("{e} (line {})", lineno + 1))?;
+            let mark = parse_mark(rest).map_err(at(lineno))?;
             let head = |m: &Mark| m.name().starts_with(HEAD_MARK);
             if marks
                 .iter()
                 .any(|m| m.name() == mark.name() || (head(m) && head(&mark)))
             {
-                bail!(
-                    "a frame names each mark once, and one head (line {})",
-                    lineno + 1
-                );
+                return Err(at(lineno)(LineError::DuplicateMark));
             }
             marks.push(mark);
             continue;
         }
 
-        let row = parse_row(line, palette).map_err(|e| anyhow!("{e} (line {})", lineno + 1))?;
+        let row = parse_row(line, palette).map_err(at(lineno))?;
         rows.push(row);
     }
 
@@ -88,34 +96,36 @@ fn parse_indexed(src: &str, palette: &Palette) -> Result<Vec<(IndexedFrame, Vec<
     }
 
     if frames.is_empty() {
-        bail!("sprite file contains no frames");
+        return Err(SpriteError::NoFrames);
     }
     Ok(frames)
 }
 
 /// The fields of an `@mark <name> <x> <y>` line after its keyword. A head mark
 /// must name a view.
-fn parse_mark(fields: &str) -> Result<Mark> {
+fn parse_mark(fields: &str) -> Result<Mark, LineError> {
     let mut it = fields.split_whitespace();
     let (Some(name), Some(x), Some(y), None) = (it.next(), it.next(), it.next(), it.next()) else {
-        bail!("@mark takes a name and a column and a row");
+        return Err(LineError::MarkFields);
     };
     if !name
         .chars()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_')
     {
-        bail!("@mark name {name:?} is not lowercase letters, digits, '.' and '_'");
+        return Err(LineError::MarkName {
+            name: name.to_owned(),
+        });
     }
     let coord = |v: &str| {
-        v.parse::<u16>()
-            .map_err(|_| anyhow!("@mark {v:?} is not a pixel coordinate"))
+        v.parse::<u16>().map_err(|_| LineError::MarkCoordinate {
+            value: v.to_owned(),
+        })
     };
     let mark = Mark::new(name.to_owned(), coord(x)?, coord(y)?);
     if name.starts_with(HEAD_MARK) && HeadMark::of(&mark).is_none() {
-        bail!(
-            "@mark {name} names no view: a head is {HEAD_MARK}<one of {:?}>",
-            HeadView::ALL.map(HeadView::name)
-        );
+        return Err(LineError::HeadWithoutView {
+            name: name.to_owned(),
+        });
     }
     Ok(mark)
 }
@@ -307,13 +317,15 @@ mod tests {
 
     /// A pack whose one animation, `seated`, draws `f.sprite`, plus `extra`
     /// tables; `frames` holds every file by name.
-    fn hair_pack(extra: &str, frames: &[(&str, &str)]) -> Result<Pack> {
+    /// As a caller sees the failure: through `anyhow`, whose `{:#}` walks the
+    /// chain.
+    fn hair_pack(extra: &str, frames: &[(&str, &str)]) -> anyhow::Result<Pack> {
         let toml = format!(
             "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\".\"=\"transparent\"\n\
              \"H\"=\"#28140a\"\n\"k\"=\"#101010\"\n\
              [animations.seated]\nframes=[\"f.sprite\"]\nframe_ms=100\n{extra}"
         );
-        load_pack_from_strings(&toml, frames)
+        Ok(load_pack_from_strings(&toml, frames)?)
     }
 
     #[test]
@@ -473,13 +485,13 @@ mod tests {
         assert!(bare.hairstyles().next().is_none());
     }
 
-    fn ramp_pack(palette: &str, ramps: &str, sprite: &str) -> Result<Pack> {
+    fn ramp_pack(palette: &str, ramps: &str, sprite: &str) -> anyhow::Result<Pack> {
         let toml = format!(
             "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n{palette}\n\
              [ramps]\n{ramps}\n\
              [animations.seated]\nframes=[\"f.sprite\"]\nframe_ms=100\n"
         );
-        load_pack_from_strings(&toml, &[("f.sprite", sprite)])
+        Ok(load_pack_from_strings(&toml, &[("f.sprite", sprite)])?)
     }
 
     const HAIR: Rgb = Rgb {
@@ -620,45 +632,46 @@ mod tests {
     }
 }
 
-fn parse_row(line: &str, palette: &Palette) -> Result<Vec<PaletteIndex>> {
+fn parse_row(line: &str, palette: &Palette) -> Result<Vec<PaletteIndex>, LineError> {
     let mut out = Vec::new();
     for tok in line.split_whitespace() {
         let mut chars = tok.chars();
-        let key = chars.next().ok_or_else(|| anyhow!("empty token"))?;
-        if chars.next().is_some() {
-            bail!("each pixel must be a single character (got {tok:?})");
-        }
+        let (Some(key), None) = (chars.next(), chars.next()) else {
+            return Err(LineError::PixelToken {
+                token: tok.to_owned(),
+            });
+        };
         let index = palette
             .drawable_index(key)
-            .ok_or_else(|| anyhow!("unknown palette key {key:?}"))?;
-        let index = PaletteIndex::try_from(index).map_err(|_| {
-            anyhow!("palette key {key:?} is past the {PALETTE_CAPACITY} a frame can index")
-        })?;
+            .ok_or(LineError::UnknownKey { key })?;
+        let index =
+            PaletteIndex::try_from(index).map_err(|_| LineError::KeyPastCapacity { key })?;
         out.push(index);
     }
     Ok(out)
 }
 
-fn rows_to_frame(rows: Vec<Vec<PaletteIndex>>) -> Result<IndexedFrame> {
+fn rows_to_frame(rows: Vec<Vec<PaletteIndex>>) -> Result<IndexedFrame, LineError> {
     if rows.is_empty() {
-        bail!("frame has no rows");
+        return Err(LineError::NoRows);
     }
     // Grid dims are u16: an `as u16` truncation would wrap them while `data`
     // keeps its full length, and `Grid::from_vec`'s length assert would panic
     // on pack input instead of rejecting it.
     if rows.len() > u16::MAX as usize {
-        bail!("frame has {} rows (maximum {})", rows.len(), u16::MAX);
+        return Err(LineError::TooManyRows { rows: rows.len() });
     }
     let w = rows[0].len();
     if w > u16::MAX as usize {
-        bail!("frame row width {w} exceeds the maximum {}", u16::MAX);
+        return Err(LineError::TooWide { width: w });
     }
     for (i, r) in rows.iter().enumerate() {
         if r.len() != w {
-            bail!(
-                "inconsistent row width at row {i} (expected {w}, got {})",
-                r.len()
-            );
+            return Err(LineError::Ragged {
+                row: i,
+                expected: w,
+                got: r.len(),
+            });
         }
     }
     let height = rows.len() as u16;
@@ -779,7 +792,7 @@ pub enum Material {
 
 impl Material {
     /// Its name as `[city]` keys it.
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Material::Facade => "facade",
             Material::Shade => "shade",
@@ -1125,8 +1138,7 @@ fn build_pack(
         let mut frames = Vec::new();
         for fname in &anim.frames {
             let src = get_src(fname)?;
-            let mut decoded =
-                parse_indexed(&src, &palette).with_context(|| format!("decoding {fname}"))?;
+            let mut decoded = decode(fname, &src, &palette)?;
             frames.append(&mut decoded);
         }
         animations.insert(
@@ -1139,19 +1151,22 @@ fn build_pack(
         .city
         .map(|c| -> Result<CityMaterials> {
             if let Some(other) = c.keys().find(|k| Material::from_name(k).is_none()) {
-                bail!("[city] names {other:?}, which is no material");
+                return Err(PackError::CityUnknownMaterial {
+                    name: other.clone(),
+                });
             }
             let mut keys = [' '; Material::ALL.len()];
             for material in Material::ALL {
                 let Some(key) = c.get(material.name()) else {
-                    bail!("[city] names no key for {:?}", material.name());
+                    return Err(PackError::CityMissingMaterial { material });
                 };
-                let key = single_char(key, "[city] material")?;
+                let what = KeySite::CityMaterial;
+                let key = single_char(key, what)?;
                 if !matches!(palette.get(key), Some(Some(_))) {
-                    bail!("[city] material {key:?} is not an opaque key of the palette");
+                    return Err(PackError::NotOpaque { what, key });
                 }
                 if keys[..material.index()].contains(&key) {
-                    bail!("[city] draws two materials in {key:?}");
+                    return Err(PackError::CityKeyShared { key });
                 }
                 keys[material.index()] = key;
             }
@@ -1165,14 +1180,11 @@ fn build_pack(
         .partition(|(key, _)| split_density_variant(key).is_some());
     for (key, building) in bases.into_iter().chain(variants) {
         let Some(materials) = city_materials.as_ref() else {
-            bail!("building {key:?} needs a [city] table naming its materials");
+            return Err(PackError::BuildingWithoutCity { key });
         };
         let (name, density) = split_density_variant(&key).unwrap_or((&key, 1));
         if density == 1 && key.contains(DENSITY_VARIANT_SEP) {
-            bail!(
-                "building {key:?}: `{DENSITY_VARIANT_SEP}` marks a density variant, \
-                 `<name>{DENSITY_VARIANT_SEP}<N>x` with N from 2 to {MAX_DENSITY_VARIANT}"
-            );
+            return Err(PackError::BuildingDensity { key });
         }
         let art = building_art(&building.sprite, &palette, materials, get_src)?;
         match (density, building.planes) {
@@ -1180,8 +1192,9 @@ fn build_pack(
                 let planes = planes
                     .iter()
                     .map(|p| {
-                        CityPlane::from_name(p).ok_or_else(|| {
-                            anyhow!("building {key:?} stands in {p:?}: the planes are \"mid\" and \"near\"")
+                        CityPlane::from_name(p).ok_or_else(|| PackError::BuildingPlane {
+                            key: key.clone(),
+                            plane: p.clone(),
                         })
                     })
                     .collect::<Result<Vec<_>>>()?;
@@ -1194,18 +1207,27 @@ fn build_pack(
                     },
                 );
             }
-            (1, _) => bail!("building {key:?} names no planes to stand in"),
-            (_, Some(_)) => bail!("building variant {key:?} names planes: its base's are its own"),
+            (1, _) => return Err(PackError::BuildingWithoutPlanes { key }),
+            (_, Some(_)) => return Err(PackError::VariantPlanes { key }),
             (_, None) => {
+                let no_base = |key| PackError::VariantWithoutBase {
+                    base: name.to_owned(),
+                    key,
+                };
                 let Some(base) = buildings.get_mut(name) else {
-                    bail!("building variant {key:?} has no base `[buildings.{name}]`");
+                    return Err(no_base(key.clone()));
                 };
                 let Some(base_art) = base.art.get(&1) else {
-                    bail!("building variant {key:?} has no base art");
+                    return Err(no_base(key.clone()));
                 };
                 if !variant_redraws(&base_art.sprite, density, &art.sprite) {
-                    let (bw, bh) = base.size();
-                    bail!("building variant {key:?} is not {density} times its base's {bw}x{bh}");
+                    let (base_w, base_h) = base.size();
+                    return Err(PackError::VariantSize {
+                        key,
+                        density,
+                        base_w,
+                        base_h,
+                    });
                 }
                 base.art.insert(density, art);
             }
@@ -1215,32 +1237,34 @@ fn build_pack(
     let character_outline = parsed
         .characters
         .map(|c| -> Result<Rgb> {
-            let key = single_char(&c.outline, "[characters] outline")?;
+            let what = KeySite::CharacterOutline;
+            let key = single_char(&c.outline, what)?;
             match palette.get(key) {
                 Some(Some(rgb)) => Ok(rgb),
-                _ => bail!("[characters] outline {key:?} is not an opaque key of the palette"),
+                _ => Err(PackError::NotOpaque { what, key }),
             }
         })
         .transpose()?;
     let mut hairstyles = BTreeMap::new();
     for (key, style) in parsed.hairstyles {
-        let Some((name, density)) = split_density_variant(&key) else {
-            bail!("hairstyle {key:?} must be `<name>@<N>x`: only art of 2x and up is dressed");
+        let Some((name, density)) =
+            split_density_variant(&key).and_then(|(n, d)| Some((n, std::num::NonZeroU16::new(d)?)))
+        else {
+            return Err(PackError::HairstyleDensity { key });
         };
-        let density = std::num::NonZeroU16::new(density)
-            .ok_or_else(|| anyhow!("hairstyle {key:?} has no density"))?;
         let mut layer = |view: HeadView, fname: &str| -> Result<Sprite> {
             let src = get_src(fname)?;
-            let marked =
-                parse_indexed(&src, &palette).with_context(|| format!("decoding {fname}"))?;
+            let marked = decode(fname, &src, &palette)?;
             let [(_, marks)] = marked.as_slice() else {
-                bail!("hair layer {fname} must be one frame");
+                return Err(PackError::HairLayerFrames {
+                    file: fname.to_owned(),
+                });
             };
             if marks.iter().find_map(HeadMark::of).map(|h| h.view) != Some(view) {
-                bail!(
-                    "hair layer {fname} must mark its head `{HEAD_MARK}{}`",
-                    view.name()
-                );
+                return Err(PackError::HairLayerHead {
+                    file: fname.to_owned(),
+                    view,
+                });
             }
             Ok(Sprite::new(marked, Arc::clone(&palette), 0))
         };
@@ -1278,7 +1302,10 @@ fn build_pack(
     let densities: std::collections::BTreeSet<_> = hairstyles.values().map(|s| s.density).collect();
     if let [first, rest @ ..] = densities.iter().copied().collect::<Vec<_>>().as_slice() {
         if let Some(d) = rest.iter().find(|&&d| names_at(d) != names_at(*first)) {
-            bail!("hairstyles must be the same styles at every density: {first}x and {d}x differ");
+            return Err(PackError::HairstylesDiffer {
+                first: first.get(),
+                other: d.get(),
+            });
         }
     }
 
@@ -1303,9 +1330,11 @@ fn building_art(
     get_src: &mut dyn FnMut(&str) -> Result<String>,
 ) -> Result<BuildingArt> {
     let src = get_src(fname)?;
-    let marked = parse_indexed(&src, palette).with_context(|| format!("decoding {fname}"))?;
+    let marked = decode(fname, &src, palette)?;
     let [(frame, _)] = marked.as_slice() else {
-        bail!("building {fname} must be one frame");
+        return Err(PackError::BuildingFrames {
+            file: fname.to_owned(),
+        });
     };
     let pixels = palette.resolved();
     let index = |m: Material| palette.index_of(materials.key(m));
@@ -1315,11 +1344,11 @@ fn building_art(
         let p = usize::from(p);
         if pixels.get(p).copied().flatten().is_some() && !drawn.contains(&p) {
             let w = usize::from(grid.width());
-            bail!(
-                "building {fname} draws ({}, {}) outside its [city] materials",
-                i % w,
-                i / w
-            );
+            return Err(PackError::BuildingOutsideMaterials {
+                file: fname.to_owned(),
+                x: i % w,
+                y: i / w,
+            });
         }
     }
     let glass = index(Material::Glass).and_then(|i| PaletteIndex::try_from(i).ok());
@@ -1376,52 +1405,79 @@ fn runs_of(grid: &Grid<PaletteIndex>, index: PaletteIndex) -> Vec<Vec<(u16, u16)
 /// each frame path against directory traversal outside `dir`.
 pub fn load_pack(dir: &Path) -> Result<Pack> {
     let toml_path = dir.join("pack.toml");
-    let toml_src = std::fs::read_to_string(&toml_path)
-        .with_context(|| format!("reading {}", toml_path.display()))?;
-    let parsed: PackToml =
-        toml::from_str(&toml_src).with_context(|| format!("parsing {}", toml_path.display()))?;
+    let toml_src = std::fs::read_to_string(&toml_path).map_err(|source| PackError::Read {
+        path: toml_path.clone(),
+        source,
+    })?;
+    let parsed: PackToml = toml::from_str(&toml_src).map_err(|source| PackError::Manifest {
+        path: Some(toml_path.clone()),
+        source,
+    })?;
 
     let canon_dir = dir
         .canonicalize()
-        .with_context(|| format!("canonicalizing {}", dir.display()))?;
+        .map_err(|source| PackError::Canonicalize {
+            path: dir.to_owned(),
+            source,
+        })?;
 
     build_pack(parsed, &mut |fname| {
         if Path::new(fname)
             .components()
             .any(|c| c == std::path::Component::ParentDir)
         {
-            bail!("frame path {:?} contains '..' and is not allowed", fname);
+            return Err(PackError::FramePathParent {
+                file: fname.to_owned(),
+            });
         }
         let path = dir.join(fname);
         let canon_path = path
             .canonicalize()
-            .with_context(|| format!("resolving {}", path.display()))?;
+            .map_err(|source| PackError::Resolve { path, source })?;
         if !canon_path.starts_with(&canon_dir) {
-            bail!("frame path {:?} escapes the pack directory", fname);
+            return Err(PackError::FramePathEscapes {
+                file: fname.to_owned(),
+            });
         }
-        std::fs::read_to_string(&canon_path)
-            .with_context(|| format!("reading {}", canon_path.display()))
+        std::fs::read_to_string(&canon_path).map_err(|source| PackError::Read {
+            path: canon_path,
+            source,
+        })
     })
 }
 
 /// Same as [`load_pack`] but takes in-memory strings — used by the embedded
 /// default pack, which `include_str!`s its assets at compile time.
 pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Result<Pack> {
-    let parsed: PackToml = toml::from_str(pack_toml).context("parsing pack.toml")?;
+    let parsed: PackToml =
+        toml::from_str(pack_toml).map_err(|source| PackError::Manifest { path: None, source })?;
     let frame_lookup: HashMap<&str, &str> = frames.iter().copied().collect();
 
     build_pack(parsed, &mut |fname| {
         frame_lookup
             .get(fname)
             .map(|s| s.to_string())
-            .ok_or_else(|| anyhow!("missing embedded frame {fname}"))
+            .ok_or_else(|| PackError::MissingEmbeddedFrame {
+                file: fname.to_owned(),
+            })
     })
 }
 
-fn single_char(k: &str, what: &str) -> Result<char> {
+/// Frame file `file`'s source, decoded against `palette`.
+fn decode(file: &str, src: &str, palette: &Palette) -> Result<Vec<(IndexedFrame, Vec<Mark>)>> {
+    parse_indexed(src, palette).map_err(|source| PackError::Decode {
+        file: file.to_owned(),
+        source,
+    })
+}
+
+fn single_char(k: &str, what: KeySite) -> Result<char> {
     let mut it = k.chars();
     let (Some(key), None) = (it.next(), it.next()) else {
-        bail!("{what} {k:?} must be exactly one character");
+        return Err(PackError::NotOneChar {
+            what,
+            key: k.to_owned(),
+        });
     };
     Ok(key)
 }
@@ -1436,31 +1492,34 @@ fn build_palette(
 ) -> Result<Palette> {
     let keys = colors.len() + ramps.len();
     if keys > PALETTE_CAPACITY {
-        bail!("the palette declares {keys} keys; a frame can index at most {PALETTE_CAPACITY}");
+        return Err(PackError::PaletteTooLarge { keys });
     }
     let mut palette = Palette::new();
     for (k, v) in colors {
-        let key = single_char(k, "palette key")?;
-        let pixel = parse_palette_value(v).with_context(|| format!("palette key {k:?}"))?;
+        let key = single_char(k, KeySite::Palette)?;
+        let pixel = parse_palette_value(v).map_err(|source| PackError::Color {
+            key: k.clone(),
+            source,
+        })?;
         palette.insert(key, pixel);
     }
     for (k, ramp) in ramps {
-        let key = single_char(k, "ramp key")?;
-        let of = single_char(&ramp.of, "ramp `of`")?;
+        let key = single_char(k, KeySite::Ramp)?;
+        let of = single_char(&ramp.of, KeySite::RampBase)?;
         if colors.contains_key(k) {
-            bail!("{key:?} is declared in both [palette] and [ramps]");
+            return Err(PackError::PaletteAndRamp { key });
         }
         // `colors`, not the palette being built, names the possible bases, so
         // an earlier-loaded ramp is never one.
         if !colors.contains_key(&ramp.of) || !matches!(palette.get(of), Some(Some(_))) {
-            bail!("ramp {key:?} steps from {of:?}, which has no opaque color in [palette]");
+            return Err(PackError::RampBase { key, of });
         }
         // Zero is a second name for the base itself.
         if ramp.level == 0 || ramp.level.unsigned_abs() > MAX_RAMP_LEVEL.unsigned_abs() {
-            bail!(
-                "ramp {key:?} level {} must be nonzero and within ±{MAX_RAMP_LEVEL}",
-                ramp.level
-            );
+            return Err(PackError::RampLevel {
+                key,
+                level: ramp.level,
+            });
         }
         palette.insert_ramp(key, of, ramp.level);
     }
@@ -2697,23 +2756,22 @@ mod validation_floor_tests {
     }
 }
 
-fn parse_palette_value(v: &str) -> Result<Pixel> {
+fn parse_palette_value(v: &str) -> Result<Pixel, ColorError> {
     if v.eq_ignore_ascii_case("transparent") {
         return Ok(None);
     }
-    let hex = v
-        .strip_prefix('#')
-        .ok_or_else(|| anyhow!("color must start with '#' or be 'transparent', got {v:?}"))?;
-    if hex.len() != 6 {
-        bail!("color {v:?} must be 6 hex digits");
-    }
+    let not_hex = || ColorError::Hex {
+        value: v.to_owned(),
+    };
+    let hex = v.strip_prefix('#').ok_or_else(|| ColorError::Prefix {
+        value: v.to_owned(),
+    })?;
     // `u8::from_str_radix` accepts a leading '+', so `#+f0102` would slice to
     // `+f`/`01`/`02` and parse as a valid color without this explicit hex check.
-    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-        bail!("color {v:?} must be 6 hex digits");
+    if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(not_hex());
     }
-    let r = u8::from_str_radix(&hex[0..2], 16)?;
-    let g = u8::from_str_radix(&hex[2..4], 16)?;
-    let b = u8::from_str_radix(&hex[4..6], 16)?;
+    let channel = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| not_hex());
+    let (r, g, b) = (channel(0)?, channel(2)?, channel(4)?);
     Ok(Some(Rgb { r, g, b }))
 }
