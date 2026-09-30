@@ -6,7 +6,7 @@ metadata:
   scope: "pixtuoid repo only"
 ---
 
-# beautify-decoration (v1)
+# beautify-decoration
 
 A repo-specific iteration loop for visually redesigning a decoration in `pixtuoid`. Follow this when the user says "beautify X" or "make Y look better" — it short-circuits several rebuild traps and visual-design dead ends that aren't obvious from the codebase alone.
 
@@ -24,7 +24,7 @@ A repo-specific iteration loop for visually redesigning a decoration in `pixtuoi
    ↓
 2. cargo build --release --example snapshot
    ↓
-3. ./target/release/examples/snapshot --cols 192 --rows 80 /tmp/snap.png
+3. ./target/release/examples/snapshot /tmp/snap.png
    ↓
 4. .venv/bin/python3 scripts/crop-snapshot.py /tmp/snap.png --scale 3 -q <quadrant>
    (its QUADRANTS table is the zone map — or skip the quadrant guessing: snapshot --crop-furniture pantry|couch|vending|
@@ -33,14 +33,14 @@ A repo-specific iteration loop for visually redesigning a decoration in `pixtuoi
    ↓
 5. Read the cropped PNG → self-critique → back to step 1
    ↓
-6. When happy, send to user with SendUserFile and short caption
+6. When the checklist below passes, send the crop to the user with a short caption
    ↓
 7. cargo build --release --workspace    ← rebuild the LIVE binary too
    ↓
 8. Commit with iteration history (which designs were tried, why rejected)
 ```
 
-The user is the final judge of "does it look like a fridge / coffee machine / etc." — but you should self-critique before sending. Three iterations of self-critique before bothering the user.
+The user is the final judge of "does it look like a fridge / coffee machine / etc." — send only once your own critique against the checklist below passes.
 
 **Step 7 is mandatory.** `cargo build --release --example snapshot` does NOT rebuild the main binary. Users testing with `./target/release/pixtuoid run` won't see sprite changes until the workspace is rebuilt. Forgetting this step is how "I changed the sprite but nothing happened in the live TUI" bugs get filed.
 
@@ -56,7 +56,7 @@ The user is the final judge of "does it look like a fridge / coffee machine / et
 
 ### 2. Snapshot size gates the large sprite variants
 
-`examples/snapshot` defaults to 192×80 cells → buffer 192×160. Several layouts (pantry, corridor appliances) have conditional variants based on room dimensions. Corridor items (vending machine, printer) only appear when the cubicle aisle clears `VENDING_MIN_AISLE_*` / `PRINTER_MIN_AISLE_*` (`layout/compute.rs`). The default size clears every gate — don't shrink it while iterating.
+`examples/snapshot` defaults to its `COLS`×`ROWS` cells. Several layouts (pantry, corridor appliances) have conditional variants based on room dimensions. Corridor items (vending machine, printer) only appear when the cubicle aisle clears `VENDING_MIN_AISLE_*` / `PRINTER_MIN_AISLE_*` (`layout/compute.rs`). The default size clears every gate — don't shrink it while iterating.
 
 Pantry-specific threshold: the large `pantry` counter needs the left column to fit `PANTRY_COUNTER_LARGE_W` plus margin (the `pantry_counter_size` pick in `layout/compute.rs`); below that, `pantry_small.sprite` is used (`pixel_painter::pantry_counter_anim`).
 
@@ -95,9 +95,9 @@ When a sprite **changes size**:
 5. Register both `foo.sprite` and `foo_small.sprite` in `crates/pixtuoid-scene/sprites/default/pack.toml` if you added a variant (an unregistered sprite fails `every_embedded_sprite_is_a_frame_the_pack_loads`).
 6. If the piece has a density variant (`foo@Nx.sprite`, drawn by `scripts/gen-art.py`), resize it there too, with its 1x where the generator owns that; a variant not exactly N× its base reds `validate-pack`.
 
-## Self-critique checklist — MANDATORY before every SendUserFile
+## Self-critique checklist — before sending a render to the user
 
-You **must** run this checklist explicitly before each `SendUserFile` in a beautify loop. State the result of each row in the message (✅/⚠️/❌). Fix any ❌ before sending; if you ship a ⚠️, call it out so the user knows the trade-off.
+Run this checklist before each render you send in a beautify loop, and state each row's result (✅/⚠️/❌) in the message. Fix any ❌ first; call out any ⚠️ you ship so the user sees the trade-off.
 
 | Check | What it means |
 |---|---|
@@ -105,10 +105,8 @@ You **must** run this checklist explicitly before each `SendUserFile` in a beaut
 | Visually differs | Diff is noticeable, not a sub-pixel tweak. If hash-identical to last attempt, you didn't actually rebuild. |
 | Subzone width | Each new sub-element ≥ 5 **display** cells wide (§3). |
 | Color distinctness | New elements use colors distinct from immediate neighbours. |
-| `cargo test` | Connectivity test passes (`cargo test --workspace`, or `just test`). |
+| `cargo test` | The connectivity tests pass (§6 step 3). |
 | `--debug-walkable` | Rendered the overlay and visually checked no narrow / isolated walkable pockets near the new element. |
-
-Skipping this checklist defeats the point of the skill — the whole reason it exists is that past sessions shipped invisible / unverified changes.
 
 ## Workflow when adding a NEW decoration
 
@@ -119,17 +117,5 @@ Skipping this checklist defeats the point of the skill — the whole reason it e
 5. Decide where it lives in the layout — add a `Point` placement in `SceneLayout::compute`.
 6. Give it a `Furniture` variant + `furniture_def` row (§6 step 1). A new plant, wall-decor or pod-decor kind is then stamped by its collection's loop in `mask::build_walkable_mask`; a one-off piece also needs a `MaskObstacles` field and its own `stamp_ground` from that row, like `fish_tank` (or add a waypoint kind if it's interactive).
 7. Add a `DrawableKind::Foo` variant + `paint_drawable` arm if z-sorting matters.
-8. Run `cargo test -p pixtuoid-scene` — the layout/walkable-connectivity and painter tests this checklist relies on live there.
+8. Run the connectivity tests (§6 step 3).
 9. Snapshot + iterate.
-
-## Recap of the pantry session (case study)
-
-What we did: replaced the 20×8 pantry counter with a 32×10 design through 8 iterations:
-
-- **v1–v3**: Too crowded, 6 zones × 3 cells each = unreadable.
-- **v4**: Simplified to 3 zones (fridge / coffee / microwave-snacks) at 8/10/10 cells.
-- **v5–v6**: Tried adding detail (handle pairs, dividers). User said "no difference between v5/v6" — too subtle to read at scale.
-- **v7**: Discovered `cargo build --workspace` was not rebuilding the snapshot example, so v6 was never actually rendered. Fixed by rebuilding the example explicitly (step 2).
-- **v8**: Color-coded for identity — solid WHITE fridge vs. dark coffee + dark microwave. Strong silhouette differentiation. (Honest self-critique: still looks washing-machine-y due to H-frame.)
-
-Lessons: **silhouette + color over detail**, **always rebuild the example explicitly**, **keep the default snapshot size for the large variant**.

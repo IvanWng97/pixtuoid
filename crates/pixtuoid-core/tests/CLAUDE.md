@@ -15,7 +15,7 @@ tests/
 │   │                    on one and misses the other. `conformance.rs` imports its
 │   │                    tree helpers, so dropping `mod captures;` fails to COMPILE.
 │   ├── decode/          cross-CLI decoder unit tests; its fixtures/{hooks,jsonl}/ are
-│   │                    hand-built decoder inputs, NOT captures (`capture_dirs()` skips it)
+│   │                    hand-built decoder inputs, NOT captures (`harness::captures` skips it)
 │   ├── conformance.rs   per-source SessionStart→tool snapshot harness (insta), a
 │   │                    `harness::Drive` shell; also pins first-sight seed ↔ decoder keying
 │   ├── manager.rs       SourceManager spawn/health
@@ -60,7 +60,8 @@ feature): `conformance.rs`, `sources/{grok,cursor,delegation}`,
 `pixtuoid/tests/wire_to_pixels.rs`, and the on-demand
 tools (`decoder_fuzz`, `corpus_check`). A shell supplies bytes and asserts;
 it does NOT re-roll decode→reduce and never re-derives the first-sight seed's
-`AgentId` (that comes from the source's registry row — core guide).
+`AgentId` (that comes from the source's row in `source/registry.rs`; a driver
+keyed off anything else registers NOTHING).
 `benches/decode_reduce.rs` SYNTHESIZES its lines — a bench-shaped fixture
 under `sources/fixtures/` would be mis-scanned.
 
@@ -75,10 +76,9 @@ under `sources/fixtures/` would be mis-scanned.
    source name (`claude-code`, not `claude`); transcript-bearing fixtures are
    driven WITH the first-sight seed, so a wrong `id_from_path` fails here
    instead of shipping two sprites for one session.
-2. **Always:** a case row + `#[test] fn` in `pixtuoid/tests/wire_to_pixels.rs`
-   (`wire_matrix_covers_every_registered_source` forces it), and settle
-   `TOOL_ID_KEY_UNPROVEN` in `captures.rs`. The third, `corpus_check.rs`'s byte
-   pin, is in [CONTRIBUTING's add-a-CLI checklist](../../../docs/CONTRIBUTING.md#adding-a-new-agent-cli).
+2. **Always:** the three roster literals in
+   [CONTRIBUTING's add-a-CLI checklist](../../../docs/CONTRIBUTING.md#adding-a-new-agent-cli)
+   (its last step).
 3. **Only for unique behavior** (subagent hooks, custom lifecycle): a
    `tests/sources/<cli>/` module registered in `sources/main.rs`. Plain CLIs
    (antigravity, reasonix) need none.

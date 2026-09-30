@@ -16,16 +16,8 @@ by reading actual code — no guessing, no "this might be an issue."
 
 ### Must check
 
-1. **Architecture invariant violations** (the 6 invariants in CLAUDE.md):
-   - `pixtuoid-core` OR `pixtuoid-scene` importing terminal/window dependencies
-     (ratatui, crossterm, winit, softbuffer) — both crates are backend-free by
-     the crate boundary + `just arch`; terminal/window code lives only in the
-     `pixtuoid` binary's painters over the engine's render seam
-   - Events bypassing the typed `mpsc` channel or hardcoding `Transport::Hook`
-   - Source implementations not going through the `Source` trait
-   - `install::install_target`/`uninstall_target` not going through the `ConfigLock` round (`write_config_atomic`) for settings.json
-   - Hook shim doing anything other than exit 0 on error
-   - Walkable mask blocking more than ground footprint
+1. **Architecture invariant violations** (CLAUDE.md's "Architecture invariants"), and
+   the "Things NOT to do" list there.
 
 2. **Real bugs**: logic errors, off-by-one, race conditions, missing error propagation.
 
@@ -33,7 +25,7 @@ by reading actual code — no guessing, no "this might be an issue."
 
 4. **`unwrap()` in non-test code**: always a finding.
 
-5. **Scope creep**: changes that add v2 features or speculative abstractions not in the v1 spec.
+5. **Scope creep**: features or speculative abstractions beyond what the PR states it does.
 
 6. **Stale docs**: if the PR changes module structure, architecture, or public API without
    updating CLAUDE.md/README.md.
@@ -86,7 +78,7 @@ high-risk seam, and they require looking BEYOND the diff:
 - Performance unless measurable (this is a TUI rendering ~30fps, not a hot loop)
 - Absence of defense-in-depth where a PRIMARY defense already exists (a missing
   belt when the suspenders hold) — matches the two-lens protocol's negative space
-  (`pr-review.prompt.md`); a genuinely missing PRIMARY guard is a real bug, flag that
+  (`.claude/skills/two-lens-review/briefs.md`); a genuinely missing PRIMARY guard is a real bug, flag that
 
 ## Anti-hallucination protocol
 
@@ -99,8 +91,7 @@ high-risk seam, and they require looking BEYOND the diff:
   data is stale by construction. Verify via `gh api`/the registry in this
   session first: a 404 you observed is evidence, a recollection is not. If
   this environment can't reach the registry, say "unverified" at most — do
-  not assert. (Repeat offenses: `checkout@v6` in #80, the homebrew tap in
-  #112 — both existed.)
+  not assert.
 
 ## Severity
 
