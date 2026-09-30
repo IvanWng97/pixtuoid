@@ -936,6 +936,20 @@ fn coat_rack_yields_to_the_east_chair_in_narrow_fitted_rooms() {
 }
 
 #[test]
+fn a_room_too_short_for_the_rack_drops_it() {
+    let room = MeetingRoom {
+        bounds: Bounds {
+            x: 0,
+            y: 0,
+            width: 30,
+            height: 4,
+        },
+        trio: None,
+    };
+    assert_eq!(room.coat_rack_pos(), None);
+}
+
+#[test]
 fn pod_grid_fills_every_desk_row_that_fits() {
     // #552: a phantom trailing aisle below the last pod row starved residual_h, so
     // a bottom row that physically fits never fired.

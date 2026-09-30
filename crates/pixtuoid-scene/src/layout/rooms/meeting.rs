@@ -96,7 +96,7 @@ impl MeetingRoom {
         }
         let pos = Point {
             x: b.x + b.width - 5,
-            y: (b.y + b.height / 2 + BASE_BELOW_MID).saturating_sub(COAT_RACK_BASE_DY),
+            y: (b.y + b.height / 2 + BASE_BELOW_MID).checked_sub(COAT_RACK_BASE_DY)?,
         };
         if let Some(t) = &self.trio {
             // The seated sprite shares the chair body's east edge, so the
