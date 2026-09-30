@@ -84,8 +84,8 @@ impl Contact {
 }
 
 /// How much of a pool lands `nx`, `ny` radii from its centre: most at its
-/// centre and fading smoothly to nothing at its rim, so a pool reads as a soft
-/// patch and not a stamped oval.
+/// centre and fading to nothing at its rim, so a pool, stepped into its
+/// painter's tones, reads as rings and not a stamped oval.
 pub(crate) fn falloff(nx: f32, ny: f32) -> Option<f32> {
     let r2 = nx * nx + ny * ny;
     (r2 <= 1.0).then_some(1.0 - r2)

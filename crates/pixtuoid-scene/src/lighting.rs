@@ -174,6 +174,22 @@ impl Emitter {
         }
     }
 
+    /// The strength its brightest cell gets: the top of the ramp a painter
+    /// steps [`Self::level_at`] down.
+    pub(crate) fn peak(&self) -> f32 {
+        match self.light {
+            Light::Halo { share, .. } => self.strength * share,
+            // Nothing lights inside the panel: its brightest cells stand one
+            // out from its edge.
+            Light::Glow { reach, .. } => {
+                let near = 1.0 - 1.0 / reach as f32;
+                self.strength * near * near
+            }
+            Light::Patch { .. } => self.strength * MONITOR_HALO_SHARE,
+            Light::Pool(_) | Light::Spill { .. } => self.strength,
+        }
+    }
+
     /// The blend strength it lights cell `(x, y)` with, or `None` where it
     /// doesn't reach.
     pub(crate) fn level_at(&self, x: u16, y: u16) -> Option<f32> {
@@ -288,7 +304,7 @@ pub(crate) struct Lights {
     pub(crate) floor_lamp: Option<Emitter>,
     /// Index-parallel to [`home_desks`](crate::layout::SceneLayout::home_desks).
     pub(crate) desks: Vec<DeskLights>,
-    /// Over each monitor whose seated occupant is mid-tool-call.
+    /// Over each [`lit_screen`].
     pub(crate) monitor_halos: Vec<Emitter>,
     /// The neon sign's halo on the wall around it.
     pub(crate) neon: Emitter,
@@ -467,34 +483,32 @@ fn pool_regions(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ {
     desks.chain(pantry).chain(corridor)
 }
 
-/// One halo per agent mid-tool-call and seated at their desk right now — not
-/// mid-walk (entry or snap-back) during the Active grace window — one row
-/// above the desk, so it lands in the wall band rather than on the monitor.
+/// The tool lighting the screen of a desk facing `facing`, whose occupant
+/// `agent` sits there right now (`seated`, so not mid-walk during the Active
+/// grace window): `None` where the screen is dark, or shows us the monitor's
+/// back — a glow there would be light leaking out of a case. The one rule the
+/// screen glow and its halo share.
+pub(crate) fn lit_screen(agent: &AgentSlot, facing: Facing, seated: bool) -> Option<ToolKind> {
+    match agent.state {
+        ActivityState::Active { kind, .. } if seated && facing == Facing::North => Some(kind),
+        _ => None,
+    }
+}
+
+/// One halo over each [`lit_screen`], on the row above its desk, clear of the
+/// monitor.
 fn monitor_halos(layout: &Layout, inputs: &LightInputs<'_>) -> Vec<Emitter> {
     inputs
         .agents
         .iter()
-        .filter(|agent| {
-            agent.exiting_at.is_none()
-                && agent.floor_idx == inputs.floor_idx
-                && inputs
-                    .seated
-                    .get(&agent.desk_index.single_floor_local())
-                    .copied()
-                    .unwrap_or(false)
-        })
+        .filter(|agent| agent.exiting_at.is_none() && agent.floor_idx == inputs.floor_idx)
         .filter_map(|agent| {
-            let ActivityState::Active {
-                detail: Some(_),
-                kind,
-                ..
-            } = agent.state
-            else {
-                return None;
-            };
-            let desk = layout.home_desk(agent.desk_index.single_floor_local())?;
+            let local = agent.desk_index.single_floor_local();
+            let seated = inputs.seated.get(&local).copied().unwrap_or(false);
+            let tool = lit_screen(agent, layout.desk_facing(local), seated)?;
+            let desk = layout.home_desk(local)?;
             Some(Emitter {
-                kind: EmitterKind::MonitorHalo(kind),
+                kind: EmitterKind::MonitorHalo(tool),
                 light: Light::Patch {
                     centre: Point {
                         x: desk.x + MONITOR_HALO_DX,
