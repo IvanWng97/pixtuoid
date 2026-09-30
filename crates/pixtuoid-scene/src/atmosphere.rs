@@ -38,6 +38,8 @@ pub(crate) struct Look {
     pub(crate) star_strength: f32,
     /// Where the sun lands on the office walls, while it is up.
     pub(crate) sun_spot: Option<SunSpot>,
+    /// The sun's direct beam through the weather ([`Sky::beam`]), 0..=1.
+    pub(crate) beam: f32,
 }
 
 /// The moment a frame shows, to either painter: the sky at `now` and its
@@ -158,6 +160,7 @@ impl Look {
                 0.0
             },
             sun_spot: sun_on_wall(sky),
+            beam: sky.beam(),
         }
     }
 }

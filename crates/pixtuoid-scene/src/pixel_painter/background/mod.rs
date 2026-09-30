@@ -15,8 +15,7 @@ pub(crate) use lighting::{
     ClockReading, RUNNER_LATTICE_STRIDE, clock_reading, neon_look, octant_offset,
 };
 pub(super) use lighting::{
-    NeonLook, RadialFalloff, paint_clock, paint_corridor_runner, paint_light, paint_neon_panel,
-    paint_radial_falloff, paint_shadows,
+    NeonLook, paint_clock, paint_corridor_runner, paint_light, paint_neon_panel, paint_shadows,
 };
 
 use pixtuoid_core::sprite::format::Pack;

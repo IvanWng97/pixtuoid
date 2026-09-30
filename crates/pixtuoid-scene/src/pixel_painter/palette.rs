@@ -495,7 +495,7 @@ pub(super) fn degraded_frame(frame: &Frame) -> Frame {
 
 /// A pixel transform tabulated over the diagonal greys — byte-identical to
 /// calling `f` per pixel, but three L1 loads instead of the f32 chain, ONLY
-/// for channel-separable `f` (every constant-tint [`blend`] chain is; a
+/// for channel-separable `f` (every constant-tint [`blend`](crate::composite::blend) chain is; a
 /// transform where one output channel reads another input channel tabulates
 /// wrong). Amortizes when a pass touches ≫256 pixels.
 pub(super) struct RgbLut {

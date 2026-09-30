@@ -6,13 +6,11 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::RgbBuffer;
 
-use crate::atmosphere::{Moment, WallSide};
+use crate::atmosphere::Moment;
 use crate::layout::Layout;
 use crate::lighting::{Emitter, EmitterKind};
 use crate::pixel_painter::PaintCtx;
-use crate::pixel_painter::background::{
-    RadialFalloff, paint_light, paint_radial_falloff, window_spill_columns,
-};
+use crate::pixel_painter::background::{paint_light, window_spill_columns};
 use crate::pixel_painter::palette::blend_pixel;
 use crate::theme::Theme;
 
@@ -107,18 +105,17 @@ pub(super) fn paint_dust_motes(
     floor_seed: u64,
     moment: &Moment,
 ) {
-    let (sky, look) = (&moment.sky, &moment.look);
+    let look = &moment.look;
     if look.sun_spot.is_none() {
         return;
     }
-    // Motes scatter the DIRECT beam, so density rides [`Sky::beam`] (full
+    // Motes scatter the DIRECT beam, so density rides [`Look::beam`](crate::atmosphere::Look::beam) (full
     // under clear sky, faint through haze/snow-glare, zero under thick
     // overcast/rain); `look.sunlight` adds the daylight ramp.
-    let beam = sky.beam();
-    if beam <= 0.0 {
+    if look.beam <= 0.0 {
         return;
     }
-    let visibility = look.sunlight * beam;
+    let visibility = look.sunlight * look.beam;
     if visibility <= 0.0 {
         return;
     }
@@ -131,83 +128,16 @@ pub(super) fn paint_dust_motes(
     }
 }
 
+/// The sun's spot on a side wall, in the colour its warmth gives it.
 pub(super) fn paint_sun_spot(buf: &mut RgbBuffer, theme: &Theme, layout: &Layout, moment: &Moment) {
-    let (sky, look) = (&moment.sky, &moment.look);
-    let Some(spot) = look.sun_spot else {
-        return;
-    };
-    // The north wall is the glass: a spot painted on it would ghost-glow over the
-    // skyline, and the floor spill already conveys midday sun.
-    if matches!(spot.wall, WallSide::North) {
-        return;
+    let look = &moment.look;
+    if let (Some(spot), Some(sun)) = (crate::lighting::wall_spot(layout, look), look.sun_spot) {
+        paint_light(
+            buf,
+            &spot,
+            crate::celestial::wall_spot_colour(sun.warmth, theme),
+        );
     }
-    // The spot is the projected DIRECT beam, so diffuse light under thick
-    // overcast/rain reaches the wall but never as a defined rectangle.
-    let beam = sky.beam();
-    if beam <= 0.0 {
-        return;
-    }
-    let effective_intensity = spot.intensity * look.sunlight * beam;
-    if effective_intensity <= 0.0 {
-        return;
-    }
-    let color = crate::celestial::wall_spot_colour(spot.warmth, theme);
-
-    // A visible sun rectangle, not a 4px speck: keep a generous floor size so
-    // the radial falloff doesn't collapse the spot to nothing on the dark wall.
-    let base_w = 10u16;
-    let base_h = 4u16;
-    let w = (((base_w as f32) * effective_intensity).round() as u16).max(7);
-    let h = (((base_h as f32) * effective_intensity).round() as u16).max(3);
-
-    let wall_band_h = layout.wall_band_h();
-    if wall_band_h == 0 {
-        return;
-    }
-
-    // Slide range keeps the spot WITHIN the wall band: along_px ∈ [0, band−h].
-    // A band shorter than the spot gives 0, pinning it to the band top.
-    let along_range = wall_band_h.saturating_sub(h) as f32;
-    let (rx, ry) = match spot.wall {
-        WallSide::East => {
-            let along_px = along_range * spot.along.min(1.0);
-            let cx = layout.buf_w.saturating_sub(w);
-            (cx, along_px as u16)
-        }
-        WallSide::West => {
-            let along_px = along_range * spot.along.min(1.0);
-            (0u16, along_px as u16)
-        }
-        WallSide::North => unreachable!("guarded above"),
-    };
-
-    // Visible warm lift on the dark wall: a strong base so the small, radially
-    // falling-off spot actually reads, gently scaled by how direct the light is.
-    let tint_strength = (0.45 + 0.35 * effective_intensity).min(0.7);
-    let max_x = (rx + w).min(buf.width());
-    let max_y = (ry + h).min(buf.height());
-    // Centre on (w−1)/2 so the ellipse spans the loop's full inclusive index
-    // range symmetrically; `w/2` biases it half a cell off-grid, sampling only
-    // the top-left quadrant at small sizes.
-    let cx = rx as f32 + (w.saturating_sub(1)) as f32 * 0.5;
-    let cy = ry as f32 + (h.saturating_sub(1)) as f32 * 0.5;
-    let rx_norm = ((w.saturating_sub(1)) as f32 * 0.5).max(1.0);
-    let ry_norm = ((h.saturating_sub(1)) as f32 * 0.5).max(1.0);
-    paint_radial_falloff(
-        buf,
-        RadialFalloff {
-            min_x: rx,
-            max_x,
-            min_y: ry,
-            max_y,
-            cx,
-            cy,
-            rx_norm,
-            ry_norm,
-        },
-        tint_strength,
-        color,
-    );
 }
 
 #[cfg(test)]

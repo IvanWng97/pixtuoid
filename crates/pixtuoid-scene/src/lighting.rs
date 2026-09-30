@@ -10,7 +10,7 @@ use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::{AgentSlot, ToolKind};
 
 use crate::anim::epoch_ms;
-use crate::atmosphere::Look;
+use crate::atmosphere::{Look, WallSide};
 use crate::floor::NeonLevels;
 use crate::layout::{Facing, Layout, Point, WINDOW_W};
 
@@ -68,6 +68,18 @@ const SPILL_SILL: f32 = 0.32;
 /// The most the spill widens past the window on either side.
 const SPILL_MAX_WIDEN: u16 = 3;
 
+/// The wall spot's size at a full beam, and the least it shrinks to: under
+/// that, the falloff leaves it too faint to read on a dark wall.
+const WALL_SPOT_W: f32 = 10.0;
+const WALL_SPOT_H: f32 = 4.0;
+const WALL_SPOT_MIN_W: u16 = 7;
+const WALL_SPOT_MIN_H: u16 = 3;
+/// The wall spot's level: a strong base, so the small spot reads, lifted by
+/// how direct the beam is, up to a ceiling.
+const WALL_SPOT_BASE: f32 = 0.45;
+const WALL_SPOT_GAIN: f32 = 0.35;
+const WALL_SPOT_MAX: f32 = 0.7;
+
 /// What an emitter is, for the painter choosing its colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EmitterKind {
@@ -77,6 +89,8 @@ pub(crate) enum EmitterKind {
     MonitorHalo(ToolKind),
     NeonGlow,
     WindowSpill,
+    /// The sun's spot on a side wall.
+    WallSpot,
 }
 
 /// The shape an emitter lights and how its light falls off across it, in
@@ -112,6 +126,9 @@ pub(crate) enum Light {
     /// row holds `centre`, falling off by Manhattan distance from it; the
     /// centre gets [`MONITOR_HALO_SHARE`] of the level.
     Patch { centre: Point },
+    /// A `w`×`h` box at `(x, y)` lit by the ellipse inscribed in it, falling
+    /// off by [`ground::falloff`](crate::ground::falloff).
+    Spot { x: u16, y: u16, w: u16, h: u16 },
 }
 
 /// One light in the room this frame.
@@ -156,6 +173,7 @@ impl Emitter {
                     (x0 + MONITOR_HALO_W, centre.y + 1),
                 )
             }
+            Light::Spot { x, y, w, h } => ((x, y), (x + w, y + h)),
         }
     }
 
@@ -171,7 +189,7 @@ impl Emitter {
                 self.strength * near * near
             }
             Light::Patch { .. } => self.strength * MONITOR_HALO_SHARE,
-            Light::Spill { .. } => self.strength,
+            Light::Spill { .. } | Light::Spot { .. } => self.strength,
         }
     }
 
@@ -243,8 +261,40 @@ impl Emitter {
                 let dist = ((dx - f32::from(MONITOR_HALO_W / 2)).abs() + dy) / MONITOR_HALO_REACH;
                 Some((strength * (1.0 - dist).max(0.0) * MONITOR_HALO_SHARE).clamp(0.0, 1.0))
             }
+            Light::Spot { x: sx, y: sy, w, h } => {
+                // Centred on `(w − 1) / 2`, so the ellipse spans the box's cells
+                // symmetrically; `w / 2` would sample only its top-left quadrant.
+                let half = |n: u16| f32::from(n.saturating_sub(1)) * 0.5;
+                let (cx, cy) = (f32::from(sx) + half(w), f32::from(sy) + half(h));
+                let (rx, ry) = (half(w).max(1.0), half(h).max(1.0));
+                crate::ground::falloff((x - cx) / rx, (y - cy) / ry).map(|f| f * strength)
+            }
         }
     }
+}
+
+/// The sun's spot on the east or west wall, sized and lit by how directly its
+/// beam lands; none on the north wall, which is glass, or with no beam.
+pub(crate) fn wall_spot(layout: &Layout, look: &Look) -> Option<Emitter> {
+    let spot = look.sun_spot?;
+    let level = spot.intensity * look.sunlight * look.beam;
+    let band = layout.wall_band_h();
+    if spot.wall == WallSide::North || level <= 0.0 || band == 0 {
+        return None;
+    }
+    let w = ((WALL_SPOT_W * level).round() as u16).max(WALL_SPOT_MIN_W);
+    let h = ((WALL_SPOT_H * level).round() as u16).max(WALL_SPOT_MIN_H);
+    // Slid within the band; one shorter than the spot pins it to the top.
+    let y = (f32::from(band.saturating_sub(h)) * spot.along.min(1.0)) as u16;
+    let x = match spot.wall {
+        WallSide::East => layout.buf_w.saturating_sub(w),
+        WallSide::West | WallSide::North => 0,
+    };
+    Some(Emitter {
+        kind: EmitterKind::WallSpot,
+        light: Light::Spot { x, y, w, h },
+        strength: (WALL_SPOT_BASE + WALL_SPOT_GAIN * level).min(WALL_SPOT_MAX),
+    })
 }
 
 /// The columns each row of a spill spans, top row first, unclipped: the
