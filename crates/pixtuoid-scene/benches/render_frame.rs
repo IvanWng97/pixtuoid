@@ -170,13 +170,20 @@ fn render_frame(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("render_floor");
     for (name, scene, size) in cases {
+        // Hoisted past criterion's per-sample closure; rebuilt at each wrap, where `now` steps back.
+        let mut fctx = FloorCtx::new();
+        let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
+        let mut coffee = CoffeeState::new();
+        let mut chitchat = HashMap::new();
+        let mut i = 0u32;
         group.bench_function(name, |b| {
-            let mut fctx = FloorCtx::new();
-            let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
-            let mut coffee = CoffeeState::new();
-            let mut chitchat = HashMap::new();
-            let mut i = 0u32;
             b.iter(|| {
+                if i == 0 {
+                    fctx = FloorCtx::new();
+                    coffee = CoffeeState::new();
+                    chitchat.clear();
+                }
+                let now = base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS);
                 i = (i + 1) % SIM_WINDOW_FRAMES;
                 render_floor(
                     &mut fctx,
@@ -187,7 +194,7 @@ fn render_frame(c: &mut Criterion) {
                         scene,
                         pack: &pack,
                         theme,
-                        now: base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS),
+                        now,
                         size,
                         floor_meta: FloorMeta::ground(),
                         active_pet: None,

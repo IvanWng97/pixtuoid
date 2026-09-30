@@ -73,3 +73,13 @@ pub(crate) mod skyline;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;
 pub mod token_meter;
+
+/// ⌊2⁶⁴/φ⌋, φ the golden ratio: the Fibonacci-hashing multiplier and splitmix64's increment.
+pub(crate) const GOLDEN_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
+pub(crate) const GOLDEN_GAMMA_32: u32 = (GOLDEN_GAMMA >> 32) as u32;
+
+/// Draw `n` of the splitmix64 stream seeded at `seed`, counting from 1: draw 0
+/// is the bare finalizer, which maps 0 to 0.
+pub(crate) fn splitmix_draw(seed: u64, n: u64) -> u64 {
+    pixtuoid_core::id::splitmix64(seed.wrapping_add(n.wrapping_mul(GOLDEN_GAMMA)))
+}

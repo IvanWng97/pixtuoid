@@ -149,7 +149,7 @@ const STAR_TWINKLE_CYCLE_SPAN_MS: u64 = 3000;
 /// Deterministic sparse star field, hashed on the ABSOLUTE buffer `(px, py)`
 /// so it reads as one continuous sky rather than a per-window reseed.
 fn star_exists(px: u16, py: u16) -> bool {
-    let mut h = (px as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    let mut h = (px as u64).wrapping_mul(crate::GOLDEN_GAMMA);
     h ^= (py as u64).wrapping_mul(0xc6a4_a793_5bd1_e995);
     h = (h ^ (h >> 17)).wrapping_mul(0x94d0_49bb_1331_11eb);
     h.is_multiple_of(STAR_SPARSITY)
@@ -161,7 +161,7 @@ fn star_twinkle(px: u16, py: u16, now: SystemTime) -> bool {
     let seed = (px as u64).wrapping_mul(131) ^ (py as u64).wrapping_mul(521);
     let cycle_ms = STAR_TWINKLE_CYCLE_BASE_MS + (seed % STAR_TWINKLE_CYCLE_SPAN_MS);
     let phase = now_ms / cycle_ms;
-    let hash = seed.wrapping_add(phase).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    let hash = seed.wrapping_add(phase).wrapping_mul(crate::GOLDEN_GAMMA);
     (hash % 10) < 7
 }
 
