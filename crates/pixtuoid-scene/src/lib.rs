@@ -40,6 +40,7 @@ pub mod chitchat;
 pub(crate) mod creatures;
 #[doc(hidden)]
 pub mod cutaway;
+pub(crate) mod dither;
 pub mod embedded_pack;
 pub mod floor;
 #[doc(hidden)]
