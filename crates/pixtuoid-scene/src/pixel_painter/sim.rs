@@ -199,6 +199,8 @@ pub struct SimFrame {
     /// [`home_desks`](crate::layout::SceneLayout::home_desks); read through
     /// [`Self::desk`].
     pub(crate) desks: Vec<DeskProps>,
+    /// How far the elevator stands open: its art's frame, shut to open.
+    pub(crate) door_frame: usize,
 }
 
 impl SimFrame {
@@ -226,6 +228,9 @@ pub(crate) struct SimInputs<'a> {
     pub(crate) floor: FloorMeta,
     /// The tick's time — a parameter, never read from the clock here (wasm).
     pub(crate) now: SystemTime,
+    /// The floor's longest in-flight entry or exit walk, which holds the
+    /// elevator open ([`FloorCtx::door_anim_max_ms`](crate::floor::FloorCtx::door_anim_max_ms)).
+    pub(crate) door_anim_max_ms: u64,
 }
 
 /// Advance the world one tick WITHOUT painting, into the [`SimFrame`] every
@@ -239,6 +244,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
         pets,
         floor,
         now,
+        door_anim_max_ms,
     } = inputs;
     let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
 
@@ -340,6 +346,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
     let mascots = mascot_placements(scene, layout, now);
     let desks = desk_props(&agents, layout, coffee, now);
 
+    let door_frame = super::anchors::compute_door_frame_idx(&agents, now, door_anim_max_ms);
     SimFrame {
         agents,
         poses,
@@ -353,6 +360,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
         pet,
         mascots,
         desks,
+        door_frame,
     }
 }
 

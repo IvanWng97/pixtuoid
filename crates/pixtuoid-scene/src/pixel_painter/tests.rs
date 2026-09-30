@@ -1,5 +1,6 @@
 use super::anchors::{
-    back_couch_anchor, seated_anchor_facing, walking_anchor, waypoint_anchor, CHARACTER_SPRITE_W,
+    back_couch_anchor, compute_door_frame_idx, seated_anchor_facing, walking_anchor,
+    waypoint_anchor, CHARACTER_SPRITE_W,
 };
 use super::seat::{settle_seat, Seat};
 use super::*;
@@ -729,6 +730,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             pets: PetInputs::default(),
             floor: crate::floor::FloorMeta::ground(),
             now: now0 + std::time::Duration::from_millis(250),
+            door_anim_max_ms: 0,
         },
     );
     let anim = frame
@@ -886,6 +888,7 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
             pets: PetInputs::default(),
             floor: crate::floor::FloorMeta::ground(),
             now: now0 + std::time::Duration::from_secs(40),
+            door_anim_max_ms: 0,
         },
     );
 
@@ -1008,6 +1011,7 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
                     pets: PetInputs::default(),
                     floor: crate::floor::FloorMeta::ground(),
                     now: now0 + Duration::from_millis(100 * n),
+                    door_anim_max_ms: 0,
                 },
             )
         })
@@ -1028,6 +1032,7 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
             pets: PetInputs::default(),
             floor: crate::floor::FloorMeta::ground(),
             now: now0,
+            door_anim_max_ms: 0,
         },
     );
 
@@ -1926,7 +1931,6 @@ fn the_roster_sorts_as_the_classic_painter_queues() {
                 theme,
                 floor: crate::floor::FloorMeta::ground(),
                 motion: &motion,
-                door_anim_max_ms: 0,
                 debug_walkable: false,
             };
             let frame = SimFrame {
@@ -1942,6 +1946,7 @@ fn the_roster_sorts_as_the_classic_painter_queues() {
                 pet: None,
                 mascots: Vec::new(),
                 desks: vec![Default::default(); layout.home_desks.len()],
+                door_frame: 0,
             };
             let mut d = Vec::new();
             let lights = crate::lighting::Lights::of(
@@ -1960,7 +1965,7 @@ fn the_roster_sorts_as_the_classic_painter_queues() {
             enqueue_meeting_furniture(&layout, &mut d);
             enqueue_lounge_pantry_appliances(&layout, &Default::default(), &mut d);
             enqueue_pod_decor_and_plants(&layout, &mut d);
-            enqueue_floor_fixtures(&ctx, &[], &mut d);
+            enqueue_floor_fixtures(&ctx, 0, &mut d);
             enqueue_wall_decor(&layout, &mut d);
             enqueue_desk_chairs(&layout, &mut d);
             let queued: Vec<(u16, &str)> = d
@@ -3041,6 +3046,7 @@ fn sim_step_keeps_the_sign_lit_through_a_gap_in_a_room_that_once_dimmed() {
                         pets: PetInputs::default(),
                         floor: crate::floor::FloorMeta::ground(),
                         now,
+                        door_anim_max_ms: 0,
                     },
                 )
                 .neon,
@@ -3137,6 +3143,7 @@ fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
                 pets: PetInputs::default(),
                 floor: crate::floor::FloorMeta::ground(),
                 now,
+                door_anim_max_ms: 0,
             },
         );
         reserved_bbox_width(&owned.overlay, bw, bh)
@@ -3182,6 +3189,7 @@ fn seat_desk_is_set_exactly_when_the_sim_seats_someone_at_a_desk() {
                 pets: PetInputs::default(),
                 floor: crate::floor::FloorMeta::ground(),
                 now: now0 + Duration::from_millis(ms),
+                door_anim_max_ms: 0,
             },
         );
         let Some(c) = f.characters.first() else {
@@ -3243,6 +3251,7 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
                 pets: PetInputs::default(),
                 floor: crate::floor::FloorMeta::ground(),
                 now,
+                door_anim_max_ms: 0,
             },
         )
         .desks
@@ -3290,6 +3299,7 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
                 pets,
                 floor,
                 now: now0,
+                door_anim_max_ms: 0,
             },
         )
         .pet
@@ -3390,7 +3400,6 @@ fn a_mascots_state_reaches_its_hover_and_its_sprite() {
         theme: crate::theme::theme_by_name("normal").expect("theme"),
         floor: crate::floor::FloorMeta::ground(),
         motion: &motion,
-        door_anim_max_ms: 0,
         debug_walkable: false,
     };
     for (state, busy, degraded) in [
@@ -3457,6 +3466,7 @@ fn sim_step_walks_a_mascot_in_for_each_gateway_present() {
             pets: PetInputs::default(),
             floor: crate::floor::FloorMeta::ground(),
             now: now0 + Duration::from_secs(6),
+            door_anim_max_ms: 0,
         },
     );
     let [mascot] = frame.mascots.as_slice() else {
@@ -3490,6 +3500,7 @@ fn sim_step_advances_motion_without_painting() {
             pets: PetInputs::default(),
             floor: crate::floor::FloorMeta::ground(),
             now: now0 + Duration::from_millis(50),
+            door_anim_max_ms: 0,
         },
     );
     let f2 = sim_step(
@@ -3502,6 +3513,7 @@ fn sim_step_advances_motion_without_painting() {
             pets: PetInputs::default(),
             floor: crate::floor::FloorMeta::ground(),
             now: now0 + Duration::from_millis(250),
+            door_anim_max_ms: 0,
         },
     );
     assert!(
@@ -3554,6 +3566,7 @@ fn a_waiting_agent_stays_seated_and_gets_its_bubble_whichever_way_the_desk_faces
                 pets: PetInputs::default(),
                 floor: crate::floor::FloorMeta::ground(),
                 now,
+                door_anim_max_ms: 0,
             },
         );
         let p = f
@@ -3601,6 +3614,7 @@ fn paint_frame_is_pure_and_byte_identical() {
             pets: PetInputs::default(),
             floor: crate::floor::FloorMeta::ground(),
             now,
+            door_anim_max_ms: 0,
         },
     );
 
@@ -3629,7 +3643,6 @@ fn paint_frame_is_pure_and_byte_identical() {
                 theme,
                 floor: crate::floor::FloorMeta::ground(),
                 motion: &owned.motion,
-                door_anim_max_ms: 0,
                 debug_walkable: false,
             },
             &frame,
@@ -4122,6 +4135,7 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
                 pets: PetInputs::default(),
                 floor: crate::floor::FloorMeta::ground(),
                 now,
+                door_anim_max_ms: 0,
             },
         );
         let at_wp: Vec<usize> = f
@@ -4212,6 +4226,7 @@ fn no_two_agents_ever_occupy_the_same_exclusive_waypoint() {
                 pets: PetInputs::default(),
                 floor: crate::floor::FloorMeta::ground(),
                 now,
+                door_anim_max_ms: 0,
             },
         );
         let mut occupants: HashMap<usize, usize> = HashMap::new();
@@ -4272,6 +4287,7 @@ fn a_placement_is_seated_exactly_when_its_figure_sits_on_furniture() {
                 pets: PetInputs::default(),
                 floor: crate::floor::FloorMeta::ground(),
                 now,
+                door_anim_max_ms: 0,
             },
         );
         for c in &frame.characters {
@@ -4337,6 +4353,7 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
                 pets: PetInputs::default(),
                 floor: crate::floor::FloorMeta::ground(),
                 now,
+                door_anim_max_ms: 0,
             },
         );
         if let Some(Pose::AtWaypoint { wp, kind }) = frame.poses.get(&id).copied().flatten() {
@@ -4373,6 +4390,7 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
             pets: PetInputs::default(),
             floor: crate::floor::FloorMeta::ground(),
             now,
+            door_anim_max_ms: 0,
         },
     );
 
@@ -4478,6 +4496,7 @@ fn one_meeting_sofa_still_seats_three_agents_at_once() {
                 pets: PetInputs::default(),
                 floor: crate::floor::FloorMeta::ground(),
                 now,
+                door_anim_max_ms: 0,
             },
         );
         let n = frame
@@ -4534,6 +4553,7 @@ fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
                     pets: PetInputs::default(),
                     floor: crate::floor::FloorMeta::ground(),
                     now,
+                    door_anim_max_ms: 0,
                 },
             )
         };
@@ -4781,6 +4801,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                     },
                     floor,
                     now,
+                    door_anim_max_ms: 0,
                 },
             );
             let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
@@ -4798,7 +4819,6 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 theme,
                 floor,
                 motion: &motion,
-                door_anim_max_ms: 0,
                 debug_walkable: false,
             };
             let mut drawables = Vec::new();
@@ -4944,6 +4964,7 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
                     pets: PetInputs::default(),
                     floor: crate::floor::FloorMeta::ground(),
                     now,
+                    door_anim_max_ms: 0,
                 },
             );
             if let Some(Some(Pose::AimlessAt { dest })) = f.poses.get(&id) {

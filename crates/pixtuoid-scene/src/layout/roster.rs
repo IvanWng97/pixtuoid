@@ -731,4 +731,4 @@ pub(crate) fn desk_chair_z_key(desk: Point, facing: Facing) -> u16 {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

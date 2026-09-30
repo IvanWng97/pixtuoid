@@ -532,7 +532,14 @@ fn every_piece_ground_is_blocked_in_the_mask() {
 fn every_rug_lies_whole_on_the_floor() {
     let mut v = Vec::new();
     sweep(|w, h, seed, l| {
-        for rug in l.rugs() {
+        let rugs = l.fixtures().filter_map(|f| {
+            matches!(
+                f.kind,
+                FixtureKind::MeetingRug { .. } | FixtureKind::LoungeRug
+            )
+            .then_some(f.visual)
+        });
+        for rug in rugs {
             let on_floor = rug.x > 0
                 && rug.y >= l.wall_band_h()
                 && rug.x + rug.width <= l.buf_w

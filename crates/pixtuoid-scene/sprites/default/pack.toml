@@ -126,9 +126,8 @@ version = "1"
 "ф" = "#c8c8d2"   # the wall clock's rim
 "ц" = "#f0f0f0"   # its face
 "з" = "#141419"   # its hands, ticks and centre pin
-# Un-themed, as the classic draws it.
+# Un-themed, as the classic draws it (pixel_painter::furniture::COOLER_WATER).
 "χ" = "#64b4e6"   # the water cooler's bottle
-"τ" = "#3c7cae"   # its water, shaded
 
 # Shades of a recolor key, derived from it: `level` steps along the key's ramp
 # (`Rgb::ramp`). They carry no colour of their own, so a per-agent recolor
@@ -162,6 +161,7 @@ version = "1"
 "γ" = { of = "щ", level = -2 }   # the third
 "η" = { of = "ф", level = 2 }    # the clock's rim, lit upper west
 "ε" = { of = "ц", level = -2 }   # the clock's face, shaded lower east
+"τ" = { of = "χ", level = -3 }   # the water cooler's bottle, shaded
 
 [animations.seated]
 frames   = ["seated.sprite"]

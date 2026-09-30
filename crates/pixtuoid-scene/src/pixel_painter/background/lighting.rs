@@ -96,7 +96,7 @@ pub(in crate::pixel_painter) fn paint_light(buf: &mut RgbBuffer, emitter: &Emitt
 /// The neon sign's colors for one frame: a bright TUBE, a colored HALO that
 /// spills onto the wall and whatever hangs there, and a faintly tinted interior.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(in crate::pixel_painter) struct NeonLook {
+pub(crate) struct NeonLook {
     pub tube: Rgb,
     pub interior: Rgb,
     pub halo: Rgb,
@@ -109,10 +109,7 @@ const NEON_TUBE_WHITEN: f32 = 0.38;
 const NEON_INTERIOR_TINT: f32 = 0.07;
 /// Map the sim's theme-free `levels` to this frame's colors; how strongly the
 /// halo throws them is the [`Lights`](crate::lighting::Lights)' call.
-pub(in crate::pixel_painter) fn neon_look(
-    levels: crate::floor::NeonLevels,
-    theme: &Theme,
-) -> NeonLook {
+pub(crate) fn neon_look(levels: crate::floor::NeonLevels, theme: &Theme) -> NeonLook {
     let power = levels.power;
     let hue = theme.ui.neon_brand.mix(theme.ui.neon_alert, levels.alert);
     NeonLook {
@@ -180,19 +177,7 @@ pub(in crate::pixel_painter) fn paint_clock(
         }
     }
 
-    // Its own decode, not `sky::local_hour_frac`: the hands need the raw
-    // `hour % 12` and `minute`.
-    let unix_now = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let local = chrono::DateTime::<chrono::Local>::from(std::time::UNIX_EPOCH + unix_now);
-    use chrono::Timelike;
-    let hour = local.hour() % 12;
-    let minute = local.minute();
-
-    // Fractional positions around the clock (0.0 = 12 o'clock, 0.25 = 3 o'clock).
-    let hour_turns = (hour as f32 + minute as f32 / 60.0) / 12.0;
-    let min_turns = minute as f32 / 60.0;
+    let (hour_turns, min_turns) = clock_reading(now).turns();
 
     let put = |buf: &mut RgbBuffer, ox: i32, oy: i32, color: Rgb| {
         let px = x as i32 + 3 + ox;
@@ -216,9 +201,40 @@ pub(in crate::pixel_painter) fn paint_clock(
     }
 }
 
+/// What a wall clock reads at `now`, local time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ClockReading {
+    /// On a twelve-hour dial.
+    pub(crate) hour: u32,
+    pub(crate) minute: u32,
+}
+
+impl ClockReading {
+    /// Where the hour and the minute hands point, as fractions of a turn from
+    /// twelve o'clock.
+    pub(crate) fn turns(self) -> (f32, f32) {
+        let (hour, minute) = (self.hour as f32, self.minute as f32);
+        ((hour + minute / 60.0) / 12.0, minute / 60.0)
+    }
+}
+
+/// The clock's reading at `now`. Its own decode, not `sky::local_hour_frac`:
+/// the hands need the raw `hour % 12` and `minute`.
+pub(crate) fn clock_reading(now: SystemTime) -> ClockReading {
+    let unix_now = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let local = chrono::DateTime::<chrono::Local>::from(std::time::UNIX_EPOCH + unix_now);
+    use chrono::Timelike;
+    ClockReading {
+        hour: local.hour() % 12,
+        minute: local.minute(),
+    }
+}
+
 /// Quantize a fractional turn (0.0..1.0, 0.0 = north) to one of 8 octant
 /// (dx, dy) unit offsets.
-fn octant_offset(turn: f32) -> (i32, i32) {
+pub(crate) fn octant_offset(turn: f32) -> (i32, i32) {
     // rem_euclid(8) maps every i32 (incl. a NaN turn's 0 cast) into 0..=7, so
     // the table is total — a match would need a dead wildcard arm.
     const OCTANTS: [(i32, i32); 8] = [
@@ -235,6 +251,11 @@ fn octant_offset(turn: f32) -> (i32, i32) {
     OCTANTS[oct as usize]
 }
 
+/// The corridor runner's diamond lattice pitch, in logical px. Taste pin: a
+/// tighter stride read as bathroom tiling rather than a woven runner at
+/// half-block scale.
+pub(crate) const RUNNER_LATTICE_STRIDE: i32 = 10;
+
 /// Office corridor runner, painted along the cubicle_aisle band so the eye
 /// traces a path connecting the door, meeting room, pantry, cubicles and lounge.
 /// Just texture over the floor — walls and decor paint on top.
@@ -246,9 +267,6 @@ pub(in crate::pixel_painter) fn paint_corridor_runner(
     let runner_base = theme.office.runner_base;
     let runner_stripe = theme.office.runner_stripe;
     let runner_edge = theme.office.runner_edge;
-    // Taste pin: a tighter stride read as bathroom tiling rather than a woven
-    // runner at half-block scale.
-    const RUNNER_LATTICE_STRIDE: i32 = 10;
     let max_x = (rect.x + rect.width).min(buf.width());
     let max_y = (rect.y + rect.height).min(buf.height());
     for y in rect.y..max_y {

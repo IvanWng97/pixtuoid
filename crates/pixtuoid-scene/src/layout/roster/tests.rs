@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 
 /// Every roster kind's census key, by an exhaustive match: a new kind fails to
 /// compile here until it has one.
-fn kind_key(kind: FixtureKind) -> &'static str {
+pub(crate) fn kind_key(kind: FixtureKind) -> &'static str {
     match kind {
         FixtureKind::Desk(_) => "Desk",
         FixtureKind::FilingCabinet(_) => "FilingCabinet",
@@ -36,34 +36,9 @@ fn kind_key(kind: FixtureKind) -> &'static str {
     }
 }
 
-/// The offices the census and the hover sweep lay out.
-fn offices() -> impl Iterator<Item = SceneLayout> {
+/// Every kind's census key: the census fails on a kind placed but missing here.
+pub(crate) fn every_kind_key() -> BTreeSet<&'static str> {
     [
-        (96u16, 60u16),
-        (160, 120),
-        (192, 158),
-        (240, 160),
-        (320, 180),
-    ]
-    .into_iter()
-    .flat_map(|(w, h)| {
-        (0..12).filter_map(move |seed| SceneLayout::compute_with_seed(w, h, None, seed))
-    })
-}
-
-#[test]
-fn every_fixture_kind_is_placed_on_some_office() {
-    let mut seen = BTreeSet::new();
-    let mut stations = std::collections::HashSet::new();
-    for l in offices() {
-        for f in l.fixtures() {
-            seen.insert(kind_key(f.kind));
-            if let FixtureKind::Station { station, .. } = f.kind {
-                stations.insert(station);
-            }
-        }
-    }
-    let all: BTreeSet<&str> = [
         "Desk",
         "FilingCabinet",
         "DeskChair",
@@ -94,7 +69,37 @@ fn every_fixture_kind_is_placed_on_some_office() {
         "Clock",
     ]
     .into_iter()
-    .collect();
+    .collect()
+}
+
+/// The offices the census and the hover sweep lay out.
+fn offices() -> impl Iterator<Item = SceneLayout> {
+    [
+        (96u16, 60u16),
+        (160, 120),
+        (192, 158),
+        (240, 160),
+        (320, 180),
+    ]
+    .into_iter()
+    .flat_map(|(w, h)| {
+        (0..12).filter_map(move |seed| SceneLayout::compute_with_seed(w, h, None, seed))
+    })
+}
+
+#[test]
+fn every_fixture_kind_is_placed_on_some_office() {
+    let mut seen = BTreeSet::new();
+    let mut stations = std::collections::HashSet::new();
+    for l in offices() {
+        for f in l.fixtures() {
+            seen.insert(kind_key(f.kind));
+            if let FixtureKind::Station { station, .. } = f.kind {
+                stations.insert(station);
+            }
+        }
+    }
+    let all = every_kind_key();
     assert_eq!(
         seen.difference(&all).collect::<Vec<_>>(),
         Vec::<&&str>::new(),

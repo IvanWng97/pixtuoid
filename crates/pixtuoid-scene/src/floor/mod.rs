@@ -420,6 +420,7 @@ pub(crate) fn observe_floor(
     now: SystemTime,
 ) -> Option<ObservedFloor> {
     let layout = fctx.frame_layout(size.w, size.h, floor_meta.floor_seed)?;
+    let door_anim_max_ms = fctx.door_anim_max_ms;
     let frame = sim_step(
         &mut SimStores {
             router: &mut fctx.router,
@@ -440,6 +441,7 @@ pub(crate) fn observe_floor(
             pets: PetInputs::default(),
             floor: floor_meta,
             now,
+            door_anim_max_ms,
         },
     );
     frame_epilogue(fctx, coffee, frame.new_coffee_carriers.iter().copied(), now);
