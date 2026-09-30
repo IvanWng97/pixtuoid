@@ -4267,7 +4267,7 @@ mod tests {
 
     #[test]
     fn the_wall_between_two_windows_is_one_frame_post() {
-        let pack = pack();
+        let pack = test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");

@@ -1095,7 +1095,7 @@ fn the_wall_between_two_windows_is_one_frame_post() {
         top_wall_h,
         window_bays(buf_w, None),
         &Moment::resolve(Sky::at(now), theme, 0.0, now),
-        &pack(),
+        &test_default_pack(),
         theme,
     );
     let mut posts = 0;
