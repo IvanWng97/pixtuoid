@@ -375,6 +375,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 gateway: crate::tui::widgets::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
                 audio_audible: self.audio.is_audible(),
                 volume_flash: self.volume_flash,
+                floor_info,
+                source_warning: source_warning.as_deref(),
             };
             // The modals survive the slide (`Tab`/`s` aren't transition-gated), so
             // they paint here too — their key handlers stay live at every size.
@@ -393,8 +395,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 scene,
                 &footer_stats,
                 theme,
-                floor_info,
-                source_warning.as_deref(),
                 &overlays,
                 now,
             )?;
@@ -531,20 +531,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             gateway: crate::tui::widgets::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
             audio_audible: self.audio.is_audible(),
             volume_flash: self.volume_flash,
+            floor_info: transition_floor_info,
+            source_warning: source_warning.as_deref(),
         };
 
         self.terminal.draw(|f| {
             let actual_full = f.area();
             let actual_scene = crate::tui::renderer::scene_rect(actual_full);
-            crate::tui::renderer::paint_footer(
-                f,
-                &to_scene,
-                &footer_stats,
-                actual_full,
-                theme,
-                transition_floor_info,
-                source_warning.as_deref(),
-            );
+            crate::tui::renderer::paint_footer(f, &to_scene, &footer_stats, actual_full, theme);
             flush_buffer_to_term_at_offset(f, from_buf, actual_scene, from_offset);
             flush_buffer_to_term_at_offset(f, to_buf, actual_scene, to_offset);
 
