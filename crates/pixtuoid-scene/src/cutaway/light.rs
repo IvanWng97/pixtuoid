@@ -208,6 +208,11 @@ impl LightView {
         self.rank.0 == rank_of(kind)
     }
 
+    #[cfg(test)]
+    pub(crate) fn tint(&self) -> Option<Rgb> {
+        self.tint
+    }
+
     /// Where it lifts most, in art pixels: the middle of its brightest.
     #[cfg(all(test, feature = "density-art"))]
     pub(crate) fn peak(&self) -> (f32, f32) {
@@ -246,17 +251,21 @@ fn rank_of(kind: EmitterKind) -> u8 {
     }
 }
 
-/// The colour a light of `kind` tints toward under `theme`, or `None` for one
-/// the cutaway leaves untinted. A monitor's tool light tints only a dark
-/// theme's room, as in the classic's `pixel_painter::ambient::paint_ceiling_halos`:
-/// on a light one it reads as grime.
-pub(crate) fn tint_of(kind: EmitterKind, theme: &Theme) -> Option<Rgb> {
+/// The colour a light of `kind` tints toward under `theme` and the sign's
+/// `neon`, or `None` for one the cutaway leaves untinted. A monitor's tool light
+/// tints only a dark theme's room, as in the classic's
+/// `pixel_painter::ambient::paint_ceiling_halos`: on a light one it reads as grime.
+pub(crate) fn tint_of(
+    kind: EmitterKind,
+    theme: &Theme,
+    neon: crate::floor::NeonLevels,
+) -> Option<Rgb> {
     let lighting = &theme.lighting;
     match kind {
         EmitterKind::FloorLamp => Some(lighting.floor_lamp_halo),
         EmitterKind::DeskLamp => Some(lighting.desk_lamp),
         EmitterKind::WindowSpill => Some(lighting.sun_spill),
-        EmitterKind::NeonGlow => Some(theme.ui.neon_brand),
+        EmitterKind::NeonGlow => Some(crate::pixel_painter::neon_look(neon, theme).halo),
         EmitterKind::MonitorHalo(tool) => (theme.kind == crate::theme::ThemeKind::Dark)
             .then(|| crate::pixel_painter::tool_glow_for_kind(tool, &theme.tool_glow)),
     }
