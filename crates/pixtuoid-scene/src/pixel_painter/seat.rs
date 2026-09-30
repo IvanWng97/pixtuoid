@@ -9,6 +9,45 @@ use super::*;
 
 use super::anchors::{back_couch_anchor, waypoint_anchor};
 
+/// Which image of a character's art to draw: the part of its
+/// [`FrameKey`](crate::frame_cache::FrameKey) the sim's placement decides; the
+/// agent, its burn tier and the scale's density key the rest. A request, not
+/// the cache's key, which is published and keys the image it made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SpritePose {
+    pub(crate) anim_name: &'static str,
+    pub(crate) frame_idx: usize,
+    /// Which way the character FACES: the art mirrored horizontally.
+    pub(crate) flip_x: bool,
+    /// Blended into the skin by [`agent_overrides`](super::palette::agent_overrides),
+    /// so a row of typing agents shows their tools at a glance; `None` unless
+    /// typing or thinking at a desk.
+    pub(crate) glow_tint: Option<Rgb>,
+}
+
+impl SpritePose {
+    /// The pose `placement` draws `agent` in under `theme`. The ONE resolution
+    /// of the sim's theme-free [`CharacterGlow`], shared by both profiles: were
+    /// each to resolve it, the same agent would glow differently in the two for
+    /// no reason anyone chose.
+    pub(crate) fn of(
+        placement: &super::sim::CharacterPlacement,
+        agent: &AgentSlot,
+        theme: &crate::theme::Theme,
+    ) -> Self {
+        Self {
+            anim_name: placement.anim_name,
+            frame_idx: placement.frame_idx,
+            flip_x: placement.flip_x,
+            glow_tint: match placement.glow {
+                CharacterGlow::None => None,
+                CharacterGlow::Thinking => Some(theme.tool_glow.default),
+                CharacterGlow::Tool => super::palette::tool_glow_tint(agent, &theme.tool_glow),
+            },
+        }
+    }
+}
+
 /// The per-agent RECOLORED sprite for one character, and where the art marks a
 /// head, DRESSED, from the cache.
 ///
@@ -21,22 +60,16 @@ use super::anchors::{back_couch_anchor, waypoint_anchor};
 /// cwd-keyed outfit are how a viewer tells two agents apart, so an agent who is
 /// auburn in one profile and default-brown in the other is two different
 /// people to the eye.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn character_frame<'c>(
-    anim_name: &'static str,
-    frame_idx: usize,
+    pose: SpritePose,
     agent: &AgentSlot,
     pack: &Pack,
-    flip_x: bool,
-    glow_tint: Option<Rgb>,
     scale: crate::render_scale::RenderScale,
     cache: &'c mut FrameCache,
     now: SystemTime,
 ) -> Option<CharacterFrame<'c>> {
-    let dense = super::densest_frame(pack, anim_name, frame_idx, scale)?;
-    let key = character_key_at(
-        &dense, pack, anim_name, frame_idx, agent, flip_x, glow_tint, now,
-    );
+    let dense = super::densest_frame(pack, pose.anim_name, pose.frame_idx, scale)?;
+    let key = character_key_at(&dense, pack, pose, agent, now);
     Some(recolor(dense, &key, pack, cache))
 }
 
@@ -80,7 +113,6 @@ fn recolor<'c>(
             None => bare,
         };
         if flip_x {
-            // HORIZONTAL: `flip_x` is which way the character FACES.
             recolored.mirror_horizontal()
         } else {
             recolored
@@ -112,34 +144,30 @@ pub(crate) struct CharacterKey {
 
 /// [`character_frame`]'s [`CharacterKey`], without the recolor; `None` where it
 /// draws nothing.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn character_key(
-    anim_name: &'static str,
-    frame_idx: usize,
+    pose: SpritePose,
     agent: &AgentSlot,
     pack: &Pack,
-    flip_x: bool,
-    glow_tint: Option<Rgb>,
     scale: crate::render_scale::RenderScale,
     now: SystemTime,
 ) -> Option<CharacterKey> {
-    let dense = super::densest_frame(pack, anim_name, frame_idx, scale)?;
-    Some(character_key_at(
-        &dense, pack, anim_name, frame_idx, agent, flip_x, glow_tint, now,
-    ))
+    let dense = super::densest_frame(pack, pose.anim_name, pose.frame_idx, scale)?;
+    Some(character_key_at(&dense, pack, pose, agent, now))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn character_key_at(
     dense: &super::dense::DenseFrame<'_>,
     pack: &Pack,
-    anim_name: &'static str,
-    frame_idx: usize,
+    pose: SpritePose,
     agent: &AgentSlot,
-    flip_x: bool,
-    glow_tint: Option<Rgb>,
     now: SystemTime,
 ) -> CharacterKey {
+    let SpritePose {
+        anim_name,
+        frame_idx,
+        flip_x,
+        glow_tint,
+    } = pose;
     let burn = crate::burn::slot_burn_tier(agent, now);
     let density = dense.density;
     CharacterKey {
@@ -170,19 +198,13 @@ pub(crate) struct CharacterFrame<'c> {
     pub(crate) rise: u16,
 }
 
-/// Paint a character at an arbitrary anchor with per-agent recolor. `glow_tint`
-/// carries the tool-derived monitor color when the character is at a lit screen,
-/// tinting the skin so the eye reads "the monitor is lighting their face."
-#[allow(clippy::too_many_arguments)]
+/// Paint a character at an arbitrary anchor with per-agent recolor.
 pub(crate) fn paint_character_at(
     buf: &mut RgbBuffer,
-    anim_name: &'static str,
-    frame_idx: usize,
+    pose: SpritePose,
     anchor: Point,
     agent: &AgentSlot,
     pack: &Pack,
-    flip_x: bool,
-    glow_tint: Option<Rgb>,
     cache: &mut FrameCache,
     now: SystemTime,
 ) {
@@ -192,12 +214,9 @@ pub(crate) fn paint_character_at(
         blit_at: _,
         rise: _,
     }) = character_frame(
-        anim_name,
-        frame_idx,
+        pose,
         agent,
         pack,
-        flip_x,
-        glow_tint,
         crate::render_scale::RenderScale::ONE,
         cache,
         now,

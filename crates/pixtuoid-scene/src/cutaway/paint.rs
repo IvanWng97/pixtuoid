@@ -1205,24 +1205,20 @@ fn push_characters(
         let Some(agent) = frame.agents.get(c.agent_idx) else {
             continue;
         };
+        let pose = crate::pixel_painter::seat::SpritePose::of(c, agent, theme);
         // The frame `paint_figure` draws: an animation's frames need not
         // share a size.
-        let Some((w, h)) =
-            crate::pixel_painter::densest_frame(pack, c.anim_name, c.frame_idx, RenderScale::ONE)
-                .map(|d| d.logical)
-        else {
+        let Some((w, h)) = crate::pixel_painter::densest_frame(
+            pack,
+            pose.anim_name,
+            pose.frame_idx,
+            RenderScale::ONE,
+        )
+        .map(|d| d.logical) else {
             continue;
         };
-        let Some(key) = crate::pixel_painter::seat::character_key(
-            c.anim_name,
-            c.frame_idx,
-            agent,
-            pack,
-            c.flip_x,
-            crate::pixel_painter::character_glow_tint(c.glow, agent, theme),
-            scale,
-            now,
-        ) else {
+        let Some(key) = crate::pixel_painter::seat::character_key(pose, agent, pack, scale, now)
+        else {
             continue;
         };
         let seat = c.seat_desk.map(|d| (d, layout.desk_facing_at(d)));
