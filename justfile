@@ -316,14 +316,17 @@ bench *args:
     cargo bench -p pixtuoid-core --bench decode_reduce -- "$@"
 
 # Catches code that silently only builds with `native` on (the wasm core builds
-# without it).
-[doc('Feature-powerset check — every feature subset must compile')]
+# without it). `--no-dev-deps check` builds no test, so scene's no-default tests
+# lint and run on their own.
+[doc('Feature-powerset check — every feature subset compiles; scene no-default tests pass')]
 [group('rust')]
 hack:
     #!/usr/bin/env bash
     set -euo pipefail
     command -v cargo-hack &>/dev/null || { echo "error: cargo-hack not found — run \`just setup-tools\`" >&2; exit 1; }
     cargo hack --feature-powerset --no-dev-deps check --workspace
+    cargo clippy -p pixtuoid-scene --no-default-features --all-targets -- -D warnings
+    just test -p pixtuoid-scene --no-default-features
 
 # Same toolchain gotcha as `api-surface` and `gen-wasm`, and it bites HARDER
 # here because the compiler's own advice is wrong: a Homebrew cargo ahead of the
