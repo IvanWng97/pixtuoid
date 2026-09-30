@@ -40,6 +40,34 @@ pub(crate) struct Look {
     pub(crate) sun_spot: Option<SunSpot>,
 }
 
+/// The moment a frame shows, to either painter: the sky at `now` and its
+/// [`Look`], seen from `altitude` ([`FloorMeta::altitude`](crate::floor::FloorMeta::altitude)).
+pub(crate) struct Moment {
+    pub(crate) sky: Sky,
+    /// Always `sky`'s, resolved against the frame's theme.
+    pub(crate) look: Look,
+    pub(crate) altitude: f32,
+    pub(crate) now: std::time::SystemTime,
+}
+
+impl Moment {
+    /// `sky`, looked at under `theme` from `altitude` at `now`. The sky is
+    /// given, not derived from `now`, so a forced weather or flash carries.
+    pub(crate) fn resolve(
+        sky: Sky,
+        theme: &Theme,
+        altitude: f32,
+        now: std::time::SystemTime,
+    ) -> Self {
+        Self {
+            look: Look::resolve(&sky, theme),
+            sky,
+            altitude,
+            now,
+        }
+    }
+}
+
 /// The steepest the window spill leans, at the low-sun extremes.
 const SPILL_SLANT_MAX: f32 = 0.7;
 
