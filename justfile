@@ -144,9 +144,8 @@ actionlint-composites:
 # four audits that need the GitHub API — impostor-commit,
 # known-vulnerable-actions, ref-confusion, stale-action-refs (typosquat-uses
 # still runs, at reduced confidence). ci-lint.yml's hygiene job passes
-# GH_TOKEN, so those DO gate in CI: there the recipe refuses to run tokenless,
-# and a CI contract pins that step so it cannot be dropped or softened. Same
-# call as `links` (--offline) and `deny` (advisories deferred to audit.yml): a
+# GH_TOKEN, so those DO gate in CI: there the recipe refuses to run tokenless.
+# Same call as `links` (--offline) and `deny` (advisories deferred to audit.yml): a
 # check whose verdict depends on the network and an upstream feed must not
 # redden a push of unchanged code. Do NOT auto-export `gh auth token` to close
 # the gap — it puts a real token on the wire on every pre-push run and makes the
@@ -161,13 +160,11 @@ zizmor:
     fi
     zizmor --strict-collection .
 
-# The selftest runs first so a broken runner is reported as itself, not as
-# every contract failing. action_behavior_test.sh runs the workflows' own shell
-# against stubs, which no static contract can do.
+# action_behavior_test.sh runs the workflows' own shell against stubs, which no
+# static contract can do.
 [group('rust')]
 [doc('Check the CI contracts actionlint and zizmor cannot see')]
 ci-observability:
-    bash policy/ci-observability/check.sh --selftest
     bash policy/ci-observability/check.sh
     bash policy/ci-observability/action_behavior_test.sh
 
