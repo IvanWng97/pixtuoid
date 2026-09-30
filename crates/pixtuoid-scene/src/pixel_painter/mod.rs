@@ -173,7 +173,9 @@ pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
 
 use crate::atmosphere::Moment;
 use crate::lighting::{DeskLights, LightInputs, Lights};
-use background::{paint_floor_and_walls, paint_floor_wash, paint_light, paint_shadows};
+use background::{
+    paint_floor_and_walls, paint_floor_wash, paint_light, paint_neon_halo, paint_shadows,
+};
 use drawable::{Drawable, DrawableKind, Layer, paint_drawable};
 use palette::{agent_overrides, outfit_seed_for};
 use seat::paint_character_at;
@@ -419,7 +421,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // LATE, so the light lands ON the shelf and the clock instead of hiding
     // behind them; after the wash, since the sign is an emitter and its light
     // isn't dimmed with the room it falls on.
-    paint_light(ctx.buf, &lights.neon, neon.halo);
+    paint_neon_halo(ctx.buf, ctx.layout, &lights.neon, neon.halo);
 
     // LAST, so a Storm strike briefly flares the whole interior (floor, walls,
     // furniture, characters), not just the window strip.
