@@ -13,7 +13,8 @@ use anyhow::Result;
 use pixtuoid::floating::offscreen::OfficeRenderer;
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::floor::FloorMeta;
+use pixtuoid_scene::floor::{FloorMeta, FrameInputs};
+use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::theme_by_name;
 
 fn populate(scene: &mut SceneState, now: SystemTime, n: usize) {
@@ -94,7 +95,17 @@ fn main() -> Result<()> {
         // what a running office pays, not the first frame.
         for i in 0..15u64 {
             let now = base + Duration::from_millis(i * 33);
-            let _ = r.render(&scene, &pack, theme, now, w, h, FloorMeta::ground(), None);
+            let _ = r.render(FrameInputs {
+                scene: &scene,
+                pack: &pack,
+                theme,
+                now,
+                size: Size { w, h },
+                floor_meta: FloorMeta::ground(),
+                active_pet: None,
+                floor_pet: None,
+                debug_walkable: false,
+            });
         }
 
         const ITERS: u64 = 120;
@@ -103,7 +114,17 @@ fn main() -> Result<()> {
             // Advance time each frame so animation/motion actually re-derives.
             let now = base + Duration::from_millis((15 + i) * 33);
             let t = Instant::now();
-            let _ = r.render(&scene, &pack, theme, now, w, h, FloorMeta::ground(), None);
+            let _ = r.render(FrameInputs {
+                scene: &scene,
+                pack: &pack,
+                theme,
+                now,
+                size: Size { w, h },
+                floor_meta: FloorMeta::ground(),
+                active_pet: None,
+                floor_pet: None,
+                debug_walkable: false,
+            });
             samples.push(t.elapsed().as_secs_f64() * 1000.0);
         }
         samples.sort_by(f64::total_cmp);
@@ -137,31 +158,33 @@ fn main() -> Result<()> {
         let mut r = OfficeRenderer::new();
         for i in 0..15u64 {
             let now = base + Duration::from_millis(i * 33);
-            let _ = r.render(
-                &scene,
-                &pack,
+            let _ = r.render(FrameInputs {
+                scene: &scene,
+                pack: &pack,
                 theme,
                 now,
-                768,
-                640,
-                FloorMeta::ground(),
-                None,
-            );
+                size: Size { w: 768, h: 640 },
+                floor_meta: FloorMeta::ground(),
+                active_pet: None,
+                floor_pet: None,
+                debug_walkable: false,
+            });
         }
         let mut best = f64::MAX;
         for i in 0..60u64 {
             let now = base + Duration::from_millis((15 + i) * 33);
             let t = Instant::now();
-            let _ = r.render(
-                &scene,
-                &pack,
+            let _ = r.render(FrameInputs {
+                scene: &scene,
+                pack: &pack,
                 theme,
                 now,
-                768,
-                640,
-                FloorMeta::ground(),
-                None,
-            );
+                size: Size { w: 768, h: 640 },
+                floor_meta: FloorMeta::ground(),
+                active_pet: None,
+                floor_pet: None,
+                debug_walkable: false,
+            });
             best = best.min(t.elapsed().as_secs_f64() * 1000.0);
         }
         println!("  {n:>3} agents: {best:>7.3} ms");
@@ -199,7 +222,17 @@ fn main() -> Result<()> {
         let mut bytes = 0usize;
         for i in 0..12u64 {
             let now = base + Duration::from_millis(i * 33);
-            let buf = r.render(&scene, &pack, theme, now, w, h, FloorMeta::ground(), None);
+            let buf = r.render(FrameInputs {
+                scene: &scene,
+                pack: &pack,
+                theme,
+                now,
+                size: Size { w, h },
+                floor_meta: FloorMeta::ground(),
+                active_pet: None,
+                floor_pet: None,
+                debug_walkable: false,
+            });
             let (bw, bh) = (buf.width() as usize, buf.height() as usize);
             let t = Instant::now();
             sixel_encode(buf.as_slice(), bw, bh, &mut out);
@@ -219,7 +252,17 @@ fn main() -> Result<()> {
         // (img2sixel) can be run over the same input as a cross-check. Our
         // encoder is an instrument; an instrument nobody validated is a guess.
         if let Ok(dir) = std::env::var("PIXTUOID_BENCH_DUMP") {
-            let buf = r.render(&scene, &pack, theme, base, w, h, FloorMeta::ground(), None);
+            let buf = r.render(FrameInputs {
+                scene: &scene,
+                pack: &pack,
+                theme,
+                now: base,
+                size: Size { w, h },
+                floor_meta: FloorMeta::ground(),
+                active_pet: None,
+                floor_pet: None,
+                debug_walkable: false,
+            });
             let (bw, bh) = (buf.width() as u32, buf.height() as u32);
             let mut img = image::RgbImage::new(bw, bh);
             for (i, p) in buf.as_slice().iter().enumerate() {
