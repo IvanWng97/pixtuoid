@@ -1,10 +1,6 @@
-//! Render one frame of the CUTAWAY profile to a PNG — the first time the 2.5D
-//! work is visible rather than merely tested.
-//!
-//! It drives the real seam end to end: the real sim produces a `SimFrame`, the
-//! real layout is computed at LOGICAL size, and `render_cutaway` paints it into
-//! a buffer sized in pixels at `--scale`. Nothing here is a stand-in, so what it
-//! shows is what the profile actually does today.
+//! Render one frame of the CUTAWAY profile to a PNG, through the real seam: the
+//! real sim produces a `SimFrame`, the real layout is computed at LOGICAL size,
+//! and `render_cutaway` paints it into a buffer sized in pixels at `--scale`.
 //!
 //! Usage:
 //!   cargo run --release --example cutaway_snapshot -- <out.png> [--scale N]
