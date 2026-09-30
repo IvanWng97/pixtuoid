@@ -222,7 +222,10 @@ mod tests {
         let b = [Contact::under(5, 10, 10), Contact::under(30, 6, 20)];
         let mut cache = DepthsCache::default();
         assert_eq!(cache.cells(a.to_vec(), 1), fresh(&a));
-        assert_eq!(cache.cells(a.to_vec(), 1), fresh(&a), "kept");
+        // A rebuild allocates its cells while the old ones still live, so the
+        // same address means they were kept.
+        let built = cache.cells(a.to_vec(), 1).as_ptr();
+        assert_eq!(cache.cells(a.to_vec(), 1).as_ptr(), built, "kept");
         assert_eq!(cache.cells(b.to_vec(), 1), fresh(&b), "rebuilt");
         assert!(
             cache.cells(Vec::new(), 1).is_empty(),
