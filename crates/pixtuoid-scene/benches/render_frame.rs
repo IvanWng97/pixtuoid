@@ -29,7 +29,8 @@ use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::{AgentSlot, SceneState};
 use pixtuoid_scene::cutaway::paint::{Office, render_cutaway};
 use pixtuoid_scene::floor::{
-    CoffeeState, FloorCtx, FloorMeta, FloorSession, FrameInputs, ObservedFloor, render_floor,
+    CoffeeState, FloorCtx, FloorInputs, FloorMeta, FloorSession, FrameInputs, ObservedFloor,
+    PetInputs, render_floor,
 };
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::localclock;
@@ -170,13 +171,20 @@ fn render_frame(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("render_floor");
     for (name, scene, size) in cases {
+        // Hoisted past criterion's per-sample closure; rebuilt at each wrap, where `now` steps back.
+        let mut fctx = FloorCtx::new();
+        let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
+        let mut coffee = CoffeeState::new();
+        let mut chitchat = HashMap::new();
+        let mut i = 0u32;
         group.bench_function(name, |b| {
-            let mut fctx = FloorCtx::new();
-            let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
-            let mut coffee = CoffeeState::new();
-            let mut chitchat = HashMap::new();
-            let mut i = 0u32;
             b.iter(|| {
+                if i == 0 {
+                    fctx = FloorCtx::new();
+                    coffee = CoffeeState::new();
+                    chitchat.clear();
+                }
+                let now = base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS);
                 i = (i + 1) % SIM_WINDOW_FRAMES;
                 render_floor(
                     &mut fctx,
@@ -184,14 +192,15 @@ fn render_frame(c: &mut Criterion) {
                     &mut coffee,
                     &mut chitchat,
                     FrameInputs {
-                        scene,
-                        pack: &pack,
+                        world: FloorInputs {
+                            scene,
+                            pack: &pack,
+                            now,
+                            floor: FloorMeta::ground(),
+                            pets: PetInputs::default(),
+                        },
                         theme,
-                        now: base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS),
                         size,
-                        floor_meta: FloorMeta::ground(),
-                        active_pet: None,
-                        floor_pet: None,
                         debug_walkable: false,
                     },
                 )
@@ -235,7 +244,16 @@ fn render_cutaway_frame(c: &mut Criterion) {
             .map(|i| {
                 let now = base + Duration::from_millis(i * FRAME_STEP_MS);
                 let floor = session
-                    .observe(&scene, &pack, CUTAWAY_LOGICAL, meta, now)
+                    .observe(
+                        pixtuoid_scene::floor::FloorInputs {
+                            scene: &scene,
+                            pack: &pack,
+                            now,
+                            floor: meta,
+                            pets: pixtuoid_scene::floor::PetInputs::default(),
+                        },
+                        CUTAWAY_LOGICAL,
+                    )
                     .expect("the cutaway extent lays out");
                 (now, floor)
             })

@@ -1,24 +1,22 @@
 name: site
 
 on:
-  # PR-only: pages.yml owns the on-main build + deploy, so a main push here would
-  # be a redundant 2nd Astro build. README drift is gated by ci-lint.yml's
-  # `readme` job instead, so README.md is deliberately absent from the paths.
-  pull_request:
-    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/site.yml', '.github/workflows/pages.yml', '.github/actions/setup-site-node/**']
+  workflow_call:
+    inputs:
+      full:
+        description: 'False on a draft PR: only the jobs without `if: inputs.full` run'
+        type: boolean
+        required: true
 
 permissions:
   contents: read
 
-concurrency:
-  group: site-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   check:
-    name: audit · format · lint · types · build
+    name: format · lint · types · build
+    if: ${{ inputs.full }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: site
@@ -35,6 +33,7 @@ jobs:
       - run: npm run check
       - run: npm run knip
       - run: npm run test:unit
+      - uses: ./.github/actions/gen-wasm
       - run: npm run build
         env:
           GH_STARS_E2E: 1
@@ -52,9 +51,6 @@ jobs:
       - run: npx playwright install --with-deps chromium chromium-headless-shell
       - run: npm run e2e
       - run: npm run lighthouse
-      # LAST: it resolves advisories live, so at step one someone else's publish
-      # skips every check below it (#847/#849). pages.yml keeps it first — it ships.
-      - run: npm run audit
       # The run logs carry only failing scores, not element-level violations.
       # `path` is workspace-root-relative, hence the site/ prefix despite the job cwd.
       - name: Upload Lighthouse reports
@@ -66,3 +62,18 @@ jobs:
           retention-days: 7
           include-hidden-files: true
           if-no-files-found: error
+
+  required:
+    name: required-site-jobs
+    if: ${{ always() }}
+    needs: [check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/require-jobs
+        with:
+          results: ${{ toJSON(needs) }}
+          label: "Required site job failed"

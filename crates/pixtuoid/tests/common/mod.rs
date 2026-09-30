@@ -2,15 +2,17 @@
 /// borrows live in the caller's scope.
 #[macro_export]
 macro_rules! make_draw_ctx {
-    ($name:ident, $scene:expr) => {
+    ($name:ident, $scene:expr, $pack:expr, $now:expr) => {
         let mut _floor = pixtuoid_scene::floor::PerFloor::new();
         let mut _chitchat_state = std::collections::HashMap::new();
         let mut $name = pixtuoid::tui::renderer::DrawCtx::offscreen(
             &mut _floor,
             &mut _chitchat_state,
             &pixtuoid_scene::theme::NORMAL,
-            pixtuoid_scene::floor::FloorMeta::ground(),
             $scene,
+            $pack,
+            $now,
+            pixtuoid_scene::floor::FloorMeta::ground(),
         );
     };
 }
@@ -90,10 +92,10 @@ pub(crate) fn render_hash(
         pixtuoid_scene::embedded_pack::PackSource::Bundled,
     )
     .unwrap();
-    make_draw_ctx!(draw_ctx, scene);
+    make_draw_ctx!(draw_ctx, scene, &pack, now);
     draw_ctx.theme = theme;
-    draw_ctx.floor = floor;
-    pixtuoid::tui::renderer::draw_scene(&mut term, scene, &pack, now, &mut draw_ctx).unwrap();
+    draw_ctx.world.floor = floor;
+    pixtuoid::tui::renderer::draw_scene(&mut term, &mut draw_ctx).unwrap();
 
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for px in draw_ctx.buf.as_slice() {

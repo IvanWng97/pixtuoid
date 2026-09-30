@@ -307,7 +307,7 @@ fn rasterize_cells<I: image::GenericImage>(
 }
 
 /// A capture's frame clock — `secs` of frames at `fps` from `start` — shared by
-/// the gif encoders and the proof frames.
+/// the animation encoders and the proof frames.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Timeline {
     pub(crate) fps: u64,
@@ -338,17 +338,66 @@ impl Timeline {
     }
 }
 
-/// One gif capture. `scene`, `pack` and `theme` are what each path's per-frame
-/// render reads; [`GifJob::encode`] itself only clocks and encodes.
-pub(crate) struct GifJob<'a> {
+/// Where an animation's frames go.
+pub(crate) enum FrameSink {
+    Gif {
+        encoder: GifEncoder<std::fs::File>,
+        delay: Delay,
+    },
+    /// Lossless PNGs for a consumer that re-encodes (gen-media's clips and their
+    /// posters): the GIF encoder NeuQuant-quantises every frame past 256 colours
+    /// (`gif::Frame::from_rgba_speed`), and a re-encode of the GIF inherits that loss.
+    /// Named `f%04d.png` from 1, as gen-media.py's `poster_frame` reads.
+    Pngs { dir: PathBuf, written: usize },
+}
+
+impl FrameSink {
+    pub(crate) fn open(gif_path: &Path, frames_dir: Option<&Path>, frame_ms: u64) -> Result<Self> {
+        if let Some(dir) = frames_dir {
+            return Self::pngs(dir);
+        }
+        let mut encoder = GifEncoder::new(std::fs::File::create(gif_path)?);
+        encoder.set_repeat(Repeat::Infinite)?;
+        Ok(Self::Gif {
+            encoder,
+            delay: Delay::from_numer_denom_ms(frame_ms as u32, 1),
+        })
+    }
+
+    pub(crate) fn pngs(dir: &Path) -> Result<Self> {
+        std::fs::create_dir_all(dir)?;
+        Ok(Self::Pngs {
+            dir: dir.to_path_buf(),
+            written: 0,
+        })
+    }
+
+    pub(crate) fn push(&mut self, rgba: RgbaImage) -> Result<()> {
+        match self {
+            Self::Gif { encoder, delay } => {
+                encoder.encode_frame(GifFrame::from_parts(rgba, 0, 0, *delay))?;
+            }
+            Self::Pngs { dir, written } => {
+                *written += 1;
+                rgba.save(dir.join(format!("f{written:04}.png")))?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// One animation capture. `scene`, `pack` and `theme` are what each path's per-frame
+/// render reads; [`AnimJob::encode`] itself only clocks and encodes.
+pub(crate) struct AnimJob<'a> {
     pub(crate) path: &'a Path,
+    pub(crate) frames_dir: Option<&'a Path>,
     pub(crate) timeline: Timeline,
     pub(crate) scene: &'a SceneState,
     pub(crate) pack: &'a Pack,
     pub(crate) theme: &'static Theme,
 }
 
-impl GifJob<'_> {
+impl AnimJob<'_> {
     /// Call `render` once per frame on `state` — `skip_ms` of pre-roll first,
     /// rendered but not encoded — then encode the cell buffer `cells` reads back.
     fn encode<S>(
@@ -363,19 +412,14 @@ impl GifJob<'_> {
         let frame_ms = 1000 / fps.max(1);
         let skip_frames = (skip_ms / frame_ms.max(1)) as usize;
 
-        let file = std::fs::File::create(self.path)?;
-        let mut encoder = GifEncoder::new(file);
-        encoder.set_repeat(Repeat::Infinite)?;
-
+        let mut sink = FrameSink::open(self.path, self.frames_dir, frame_ms)?;
         for i in 0..(skip_frames + frame_count) {
             let elapsed_ms = self.timeline.elapsed_ms(i);
             render(state, self.timeline.now(i), elapsed_ms)?;
             if i < skip_frames {
                 continue;
             }
-            let rgba = cells_to_rgba(cells(state));
-            let delay = Delay::from_numer_denom_ms(frame_ms as u32, 1);
-            encoder.encode_frame(GifFrame::from_parts(rgba, 0, 0, delay))?;
+            sink.push(cells_to_rgba(cells(state)))?;
             let cap = i + 1 - skip_frames;
             if cap.is_multiple_of(fps as usize) {
                 eprint!("\r  encoding: {}/{secs}s", cap / fps as usize);
@@ -388,8 +432,8 @@ impl GifJob<'_> {
 
 /// Drive the real TuiRenderer (slide transition, footer floor chip, pet motion) frame by
 /// frame and encode its TestBackend cell buffer.
-pub(crate) fn save_renderer_gif(
-    job: &GifJob,
+pub(crate) fn save_renderer_animation(
+    job: &AnimJob,
     term: Terminal<TestBackend>,
     navigations: &[(u64, usize)],
     pets: Vec<pixtuoid_scene::pet::Pet>,
@@ -414,8 +458,8 @@ pub(crate) fn save_renderer_gif(
 
 /// Drive `draw_scene` over one floor and encode it; `skip_ms` (from --anim,
 /// --meeting or --warmup-secs) starts the clip mid-action.
-pub(crate) fn save_as_gif(
-    job: &GifJob,
+pub(crate) fn save_animation(
+    job: &AnimJob,
     term: &mut Terminal<TestBackend>,
     floor: &mut PerFloor,
     floor_meta: FloorMeta,
@@ -430,9 +474,17 @@ pub(crate) fn save_as_gif(
         |term, now, _| {
             let mut draw_ctx = DrawCtx {
                 debug_walkable,
-                ..DrawCtx::offscreen(floor, &mut chitchat_state, job.theme, floor_meta, scene)
+                ..DrawCtx::offscreen(
+                    floor,
+                    &mut chitchat_state,
+                    job.theme,
+                    scene,
+                    job.pack,
+                    now,
+                    floor_meta,
+                )
             };
-            draw_scene(term, scene, job.pack, now, &mut draw_ctx).map(drop)
+            draw_scene(term, &mut draw_ctx).map(drop)
         },
         |term| term.backend().buffer(),
     )

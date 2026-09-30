@@ -5,7 +5,7 @@
 # Recipes are grouped by intent (see `just --list`):
 #   rust     — build, test and lint the repo (Rust, shell, workflows), plus the
 #              on-demand e2e / capture / fixture recipes
-#   site     — the Astro landing page under site/ (npm, its own CI)
+#   site     — the Astro landing page under site/ (npm + the wasm build)
 #   gen      — regenerate + check committed artifacts
 #   release  — what release.yml builds and checks: the cross builds, the .deb,
 #              the version read, and the Node gates (npm-check)
@@ -316,16 +316,19 @@ bench *args:
     cargo bench -p pixtuoid-core --bench decode_reduce -- "$@"
 
 # Catches code that silently only builds with `native` on (the wasm core builds
-# without it).
-[doc('Feature-powerset check — every feature subset must compile')]
+# without it). `--no-dev-deps check` builds no test, so scene's no-default tests
+# lint and run on their own.
+[doc('Feature-powerset check — every feature subset compiles; scene no-default tests pass')]
 [group('rust')]
 hack:
     #!/usr/bin/env bash
     set -euo pipefail
     command -v cargo-hack &>/dev/null || { echo "error: cargo-hack not found — run \`just setup-tools\`" >&2; exit 1; }
     cargo hack --feature-powerset --no-dev-deps check --workspace
+    cargo clippy -p pixtuoid-scene --no-default-features --all-targets -- -D warnings
+    just test -p pixtuoid-scene --no-default-features
 
-# Same toolchain gotcha as `api-surface` and `wasm-build`, and it bites HARDER
+# Same toolchain gotcha as `api-surface` and `gen-wasm`, and it bites HARDER
 # here because the compiler's own advice is wrong: a Homebrew cargo ahead of the
 # rustup proxy on PATH ships only the host std, so the cross-lint dies on E0463
 # "can't find crate for `core`" while suggesting `rustup target add
@@ -667,8 +670,8 @@ build *args:
     cargo build --workspace "$@"
 
 # ── site ──────────────────────────────────────────────────────────
-# The Astro landing page — a self-contained Node project under site/ with its
-# own CI (.github/workflows/site.yml). See site/README.md.
+# The Astro landing page — a Node project under site/, checked by
+# .github/workflows/site.yml. See site/README.md.
 
 [doc('Install the site npm deps + the e2e browser (run once per clone)')]
 [group('site')]
@@ -723,7 +726,7 @@ site-fmt:
 
 [doc('E2E smoke suite vs the PRODUCTION build (astro preview) — the runtime-contract gate')]
 [group('site')]
-site-e2e:
+site-e2e: gen-wasm
     #!/usr/bin/env sh
     set -eu
     cd site
@@ -799,57 +802,28 @@ gen-media *args:
 gen-icons:
     .venv/bin/python3 scripts/gen-pix-icons.py
 
-# The ONE wasm compile step — gen-wasm (below) and ci-builds.yml's wasm-check job both
-# call this, so the package/target/profile CI checks can't drift from what
-# gen-wasm ships. Toolchain gotcha: the PATH cargo/rustc may be Homebrew's, which
-# has NO wasm32 std — and even `rustup run stable cargo` fails because cargo
-# resolves `rustc` via PATH. So the recipe prepends the RUSTUP toolchain bin (via
-# `rustup which`) and invokes that cargo explicitly.
-[doc('Compile pixtuoid-web for wasm32 (the size-tuned wasm-release profile) — shared by gen-wasm + CI wasm-check')]
-[group('gen')]
-wasm-build:
+# The output is gitignored; CI builds it through .github/actions/gen-wasm.
+# Toolchain gotcha: the PATH cargo/rustc may be Homebrew's, which has NO wasm32
+# std — and even `rustup run stable cargo` fails because cargo resolves `rustc`
+# via PATH. So the recipe prepends the RUSTUP toolchain bin (via `rustup which`)
+# and invokes that cargo explicitly.
+[doc('Build pixtuoid-web (wasm) + JS glue into site/public/wasm/')]
+[group('site')]
+gen-wasm:
     #!/usr/bin/env sh
     set -eu
+    command -v wasm-bindgen >/dev/null || { echo "needs wasm-bindgen-cli at Cargo.lock's wasm-bindgen version: cargo install wasm-bindgen-cli --locked --version X.Y.Z"; exit 1; }
+    command -v wasm-opt >/dev/null || { echo "needs wasm-opt: brew install binaryen"; exit 1; }
     command -v rustup >/dev/null || { echo "needs rustup (Homebrew rust has no wasm std)"; exit 1; }
     rustup target list --toolchain stable --installed | grep -q wasm32-unknown-unknown \
         || { echo "needs the wasm target: rustup target add wasm32-unknown-unknown"; exit 1; }
     TB="$(dirname "$(rustup which --toolchain stable rustc)")"
     PATH="$TB:$PATH" "$TB/cargo" build -p pixtuoid-web --target wasm32-unknown-unknown --profile wasm-release
-
-# The gen-only tool preflight — a SEPARATE recipe so it runs BEFORE the wasm-build
-# dependency, failing fast if wasm-bindgen/wasm-opt are missing instead of after a
-# minutes-long `wasm-build` compile. wasm-bindgen-cli must match the crate's pinned
-# wasm-bindgen (see crates/pixtuoid-web/Cargo.toml); wasm-opt (binaryen) shrinks
-# the blob. (ci-builds.yml's wasm-check calls `wasm-build` directly, then checks
-# the committed pair — neither step needs these.)
-[private]
-gen-wasm-tools:
-    #!/usr/bin/env sh
-    set -eu
-    command -v wasm-bindgen >/dev/null || { echo "needs wasm-bindgen-cli: cargo install wasm-bindgen-cli --locked"; exit 1; }
-    command -v wasm-opt >/dev/null || { echo "needs wasm-opt: brew install binaryen"; exit 1; }
-
-# site/public/wasm/ is a COMMITTED artifact (like public/demos/), so the site CI
-# stays Node-only. The compile itself is the shared `wasm-build` recipe; the
-# gen-only tools are checked first via the gen-wasm-tools pre-dep (fail-fast).
-[doc('Build pixtuoid-web (wasm) + JS glue into site/public/wasm/')]
-[group('gen')]
-gen-wasm: gen-wasm-tools wasm-build
-    #!/usr/bin/env sh
-    set -eu
-    mkdir -p site/public/wasm
     wasm-bindgen --target web --out-dir site/public/wasm \
         target/wasm32-unknown-unknown/wasm-release/pixtuoid_web.wasm
     wasm-opt -Oz -o site/public/wasm/pixtuoid_web_bg.wasm site/public/wasm/pixtuoid_web_bg.wasm
-    # Stamp the wasm/glue PAIR (#424): every emitted file's sha256 lands in one
-    # manifest, which gen-wasm-check verifies (its header says why a stamp and
-    # not a rebuild comparison).
-    # `! -name '.*'` keeps dotfiles out: a Finder-dropped .DS_Store is gitignored,
-    # so stamping it would verify locally and fail CI (missing file) — local-green/CI-red.
-    (cd site/public/wasm && find . -maxdepth 1 -type f ! -name manifest.sha256 ! -name '.*' | LC_ALL=C sort | xargs shasum -a 256 > manifest.sha256)
-    ls -la site/public/wasm/
 
-# Bloat + PAIR gate for the committed wasm artifact. Size: the hero must stay
+# Bloat gate for the wasm the site ships. Size: the hero must stay
 # a lazy-load behind the poster, so a silent size regression (a dep pulling in
 # formatting machinery, an accidental debug build) fails loudly. The cap is on
 # the GZIPPED size, because the wire cost is what the poster is hiding.
@@ -859,28 +833,14 @@ gen-wasm: gen-wasm-tools wasm-build
 # twice on purpose — here, naming the wasm, and there via its byte budgets under
 # simulated throttling, sized to admit a wasm AT this cap. The cap is growth
 # budget for the scene the hero runs, not a margin over today's payload, so a
-# regression shows as the printed gap shrinking, not as a red. Pair (#424): the
-# wasm-bindgen JS glue's ABI must match the exact .wasm it was generated with;
-# a one-sided merge resolution or partial regen ships a silent runtime throw,
-# so every committed file must match gen-wasm's sha256 manifest AND every file
-# must be covered by it. Byte-exact rebuild-match is deliberately NOT checked
-# in CI — wasm output drifts across rustc versions, and CI installs latest
-# stable, so local `just gen-wasm` + review is the freshness authority. Nothing
-# here reads a scene/core/web source, so a merge that skips `just gen-wasm`
-# ships a stale hero with every gate green; the compensating control is root
-# AGENTS.md's "Build & test" gen-wasm note, not this recipe.
-# No input-hash stamp: pixtuoid-core's `native` source runtime is code the wasm
-# never links, so a stamp would demand a wasm regen on changes that cannot alter
-# it. That reason does not cover scene or web, where any change can move the
-# wasm (panic locations carry line numbers); gating those is an open owner call.
-[doc('Fail if the committed wasm pair is missing, over the size cap, or hash-mismatched')]
-[group('gen')]
+# regression shows as the printed gap shrinking, not as a red.
+[doc('Fail if the built wasm is missing or over its gzipped size cap')]
+[group('site')]
 gen-wasm-check:
     #!/usr/bin/env sh
     set -eu
     W=site/public/wasm/pixtuoid_web_bg.wasm
-    M=site/public/wasm/manifest.sha256
-    # -s, not -f: an EMPTY committed wasm passes -f, and the ratio below divides
+    # -s, not -f: an EMPTY wasm passes -f, and the ratio below divides
     # by its size. Failing here says what is wrong; failing there says "division
     # by 0".
     test -s "$W" || { echo "missing or empty $W — run 'just gen-wasm'"; exit 1; }
@@ -904,25 +864,15 @@ gen-wasm-check:
     # be read against. The ratio does — it is gzipped-over-raw, so RISING means
     # new poorly-compressible code and falling means new sprite text.
     echo "wasm $WIRE / $CAP bytes gzipped ($((WIRE * 100 / CAP))% of cap, $(((CAP - WIRE) / 1024)) KB headroom; $RAW raw, compressing to $((WIRE * 100 / RAW))%)"
-    test -f "$M" || { echo "missing $M — run 'just gen-wasm' (the wasm/glue pair manifest)"; exit 1; }
-    (cd site/public/wasm && shasum -a 256 --strict -c manifest.sha256 >/dev/null) \
-        || { echo "wasm/glue pair MISMATCH vs $M — a partial regen or one-sided merge; run 'just gen-wasm' and commit all of site/public/wasm/"; exit 1; }
-    for f in site/public/wasm/*; do
-        b=$(basename "$f")
-        [ "$b" = manifest.sha256 ] && continue
-        awk -v want="./$b" '$2 == want { found = 1 } END { exit !found }' "$M" \
-            || { echo "$f is not covered by $M — run 'just gen-wasm'"; exit 1; }
-    done
-    echo "gen-wasm-check OK: $W ($WIRE bytes gzipped <= $CAP), pair manifest verified"
 
 # scripts/gen-media.py's docstring says what `--check` compares. Run by
 # ci-tests.yml's smoke job; runnable locally
 # before pushing a visual change. A red check after an INTENTIONAL office change
 # means: run `just gen` and commit everything it rewrote in the same change.
-# Requires the .venv + ffmpeg + node; it builds the examples it renders with.
-[doc('Fail if anything `just gen` writes has drifted, or the wasm pair is broken')]
+# Requires the .venv + node; it builds the examples it renders with.
+[doc('Fail if anything `just gen` writes has drifted')]
 [group('gen')]
-gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check gen-art-check
+gen-check: compare-selftest gen-readme-check gen-art-check
     #!/usr/bin/env sh
     set -eu
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
@@ -1077,7 +1027,7 @@ setup-tools:
 # step is written around: driving the real recipe with a gzip that exits 1 must
 # red it.
 # Not covered, deliberately: the over-cap and empty-artifact arms, which would
-# have to mutate the committed wasm to exercise. Their failures are loud; the
+# have to mutate the built wasm to exercise. Their failures are loud; the
 # fail-open one is the silent class worth a test.
 [doc('Self-test the wasm size gate: prove it still reds when its measurement breaks')]
 [group('meta')]

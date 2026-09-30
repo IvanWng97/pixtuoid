@@ -158,7 +158,16 @@ fn main() -> Result<()> {
     // The real sim, at LOGICAL size — the cutaway is its second reader.
     let mut session = FloorSession::new();
     let ObservedFloor { layout, frame } = session
-        .observe(&scene, &pack, Size { w: lw, h: lh }, meta, now)
+        .observe(
+            pixtuoid_scene::floor::FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: meta,
+                pets: pixtuoid_scene::floor::PetInputs::default(),
+            },
+            Size { w: lw, h: lh },
+        )
         .ok_or_else(|| anyhow!("{lw}x{lh} does not lay out"))?;
 
     let (bw, bh) = (scale.to_buffer(lw), scale.to_buffer(lh));

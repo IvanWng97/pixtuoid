@@ -18,7 +18,7 @@ use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
 
-use crate::encode::{Timeline, cells_to_rgba, fill_rect};
+use crate::encode::{FrameSink, Timeline, cells_to_rgba, fill_rect};
 use crate::{CELL_H, CELL_W};
 
 // Geometry (px); every canvas dim must stay even so yuv420p never crops.
@@ -600,10 +600,8 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
     let mut reducer = Reducer::new();
     let mut chitchat_state = std::collections::HashMap::new();
 
-    let wide_dir = job.frames_dir.join("wide");
-    let tall_dir = job.frames_dir.join("tall");
-    fs::create_dir_all(&wide_dir)?;
-    fs::create_dir_all(&tall_dir)?;
+    let mut wide = FrameSink::pngs(&job.frames_dir.join("wide"))?;
+    let mut tall = FrameSink::pngs(&job.frames_dir.join("tall"))?;
 
     let Timeline { fps, secs, .. } = job.timeline;
     let frames = job.timeline.frame_count();
@@ -623,17 +621,18 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             &mut floor,
             &mut chitchat_state,
             job.theme,
-            pixtuoid_scene::floor::FloorMeta::ground(),
             &scene,
+            job.pack,
+            now,
+            pixtuoid_scene::floor::FloorMeta::ground(),
         );
-        draw_scene(&mut term, &scene, job.pack, now, &mut draw_ctx)?;
+        draw_scene(&mut term, &mut draw_ctx)?;
         let office = cells_to_rgba(term.backend().buffer());
-        for (kind, dir) in [
-            (ProofLayout::Wide, &wide_dir),
-            (ProofLayout::Tall, &tall_dir),
+        for (kind, sink) in [
+            (ProofLayout::Wide, &mut wide),
+            (ProofLayout::Tall, &mut tall),
         ] {
-            compose_frame(&kind, &office, &script, elapsed, desk_px)
-                .save(dir.join(format!("f{:04}.png", i + 1)))?;
+            sink.push(compose_frame(&kind, &office, &script, elapsed, desk_px))?;
         }
         if (i + 1).is_multiple_of(fps as usize) {
             eprint!("\r  proof: {}/{secs}s", (i + 1) / fps as usize);

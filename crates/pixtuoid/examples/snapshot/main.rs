@@ -19,8 +19,8 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 use crate::encode::{
-    GifJob, Timeline, centered_crop, compute_crop_rect, print_walkability_report, save_as_gif,
-    save_backend_as_png, save_renderer_gif,
+    AnimJob, Timeline, centered_crop, compute_crop_rect, print_walkability_report, save_animation,
+    save_backend_as_png, save_renderer_animation,
 };
 use crate::scenes::{
     anim_scene, capture_live_scene, dashboard_scene, inject_openclaw_presence, meeting_scene,
@@ -34,6 +34,7 @@ const CELL_H: u32 = 16;
 
 #[derive(Debug, Parser)]
 #[command(about = "Render the TUI off-screen to a PNG, GIF or proof frames for verification")]
+#[command(group(clap::ArgGroup::new("animation").args(["gif", "anim", "proof"]).multiple(true)))]
 struct SnapshotArgs {
     /// Output PNG path.
     #[arg(default_value = "snapshot.png")]
@@ -273,8 +274,10 @@ struct SnapshotArgs {
           "crop_agent", "crop_furniture", "crop_mascot", "debug_walkable"])]
     proof: Option<std::path::PathBuf>,
 
-    /// Output directory for --proof frame sequences (wide/ + tall/ created inside).
-    #[arg(long, value_hint = clap::ValueHint::DirPath, requires = "proof")]
+    /// Output directory for an animation's lossless PNG frames (`f0001.png`, …):
+    /// --gif/--anim write them here INSTEAD of the GIF at OUT; --proof writes its
+    /// two sequences into wide/ + tall/ inside it.
+    #[arg(long, value_hint = clap::ValueHint::DirPath, requires = "animation")]
     frames_dir: Option<std::path::PathBuf>,
 
     /// --proof frame rate.
@@ -467,8 +470,9 @@ fn main() -> Result<()> {
              TuiRenderer derives per-floor seeds internally"
         );
     }
-    let gif_job = GifJob {
+    let anim_job = AnimJob {
         path: &args.out,
+        frames_dir: args.frames_dir.as_deref(),
         timeline: Timeline {
             fps: args.gif_fps,
             secs: args.gif_duration,
@@ -478,24 +482,25 @@ fn main() -> Result<()> {
         pack: &pack,
         theme,
     };
+    let anim_dest = args.frames_dir.as_deref().unwrap_or(&args.out);
     if !navigations.is_empty() || !pet_vec.is_empty() {
-        save_renderer_gif(&gif_job, term, &navigations, pet_vec)?;
-        println!("wrote {}", args.out.display());
+        save_renderer_animation(&anim_job, term, &navigations, pet_vec)?;
+        println!("wrote {}", anim_dest.display());
         return Ok(());
     }
 
     let mut floor_meta = pixtuoid_scene::floor::FloorMeta::ground();
     floor_meta.floor_seed = args.floor_seed;
     if args.gif || args.anim.is_some() {
-        save_as_gif(
-            &gif_job,
+        save_animation(
+            &anim_job,
             &mut term,
             &mut floor,
             floor_meta,
             skip_ms,
             args.debug_walkable,
         )?;
-        println!("wrote {}", args.out.display());
+        println!("wrote {}", anim_dest.display());
         return Ok(());
     }
 
@@ -686,9 +691,17 @@ fn main() -> Result<()> {
         dashboard: &dashboard_frame,
         connection: &connection_frame,
         onboarding: &onboarding_frame,
-        ..DrawCtx::offscreen(&mut floor, &mut chitchat_state, theme, floor_meta, &scene)
+        ..DrawCtx::offscreen(
+            &mut floor,
+            &mut chitchat_state,
+            theme,
+            &scene,
+            &pack,
+            now,
+            floor_meta,
+        )
     };
-    draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
+    draw_scene(&mut term, &mut draw_ctx)?;
 
     if args.debug_walkable {
         print_walkability_report(&term, args.floor_seed)?;
@@ -987,6 +1000,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn frames_dir_needs_an_animation() {
+        for ok in [
+            vec!["snapshot", "--gif", "--frames-dir", "d"],
+            vec!["snapshot", "--anim", "sofa", "--frames-dir", "d"],
+            vec!["snapshot", "--proof", "f.jsonl", "--frames-dir", "d"],
+        ] {
+            assert!(
+                SnapshotArgs::try_parse_from(ok.clone()).is_ok(),
+                "rejected {ok:?}"
+            );
+        }
+        assert_eq!(
+            SnapshotArgs::try_parse_from(["snapshot", "--frames-dir", "d"])
+                .unwrap_err()
+                .kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
     }
 
     #[test]
