@@ -21,8 +21,8 @@ CI jobs call `justfile` recipes.
 just              # list recipes
 just preflight    # pre-push gate: lint → clippy; `just preflight full` adds hack → test (CI's Rust recipes)
 just fmt          # auto-format
-just test         # the whole suite (cargo-nextest if installed, else cargo test)
-cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
+just test         # the whole suite, under cargo-nextest (`just setup-tools`)
+just test -p <crate> <filter>   # fast loop while iterating on one crate
 ```
 
 > **Don't expect clippy to warm `test`'s build** — its check-mode (rmeta)
@@ -60,7 +60,7 @@ run. The jobs:
   pair's integrity and size cap (`just gen-wasm-check`); nothing checks the
   pair is fresh, so a core/scene/web change runs `just gen-wasm` by hand.
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
-  plain `cargo test` can't see.
+  `just test` can't see.
 - **hygiene** — the same `just lint` recipes preflight runs (its CI job exists
   so a skipped local preflight can't land a lint break), including `just ci-observability`
   (`policy/ci-observability/`: contracts for the silent, costly workflow
@@ -309,7 +309,7 @@ step 10 by the theme guards; steps 1–3, 11 and step 12's `#[test]` are on you.
 5. The descriptor's `name` **is the roster** — `registered_source_names()`
    projects `REGISTRY`, and the conformance suite then requires a fixture. The
    `sources --json` golden (`crates/pixtuoid/tests/snapshots/cli/sources.json`)
-   must list it: `SNAPSHOTS=overwrite cargo test -p pixtuoid --test cli_json`.
+   must list it: `SNAPSHOTS=overwrite just test -p pixtuoid --test cli_json`.
 6. **Record the fixture** — the test steps in
    [`crates/pixtuoid-core/tests/AGENTS.md`](../crates/pixtuoid-core/tests/AGENTS.md)
    (a RECORDED SessionStart scenario via `just capture-fixture`), then
