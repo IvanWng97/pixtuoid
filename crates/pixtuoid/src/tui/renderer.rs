@@ -607,6 +607,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_offscreen_still_shows_its_scenes_gateway() {
+        let t0 = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let mut scene = SceneState::uniform(16);
+        scene.insert_daemon(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty"),
+            pixtuoid_core::state::DaemonPresence {
+                liveness: pixtuoid_core::state::DaemonLiveness::UP,
+                active_sessions: 0,
+                last_seen: t0,
+                entered_at: t0,
+                in_flight_runs: Default::default(),
+                current_pid: Some(1),
+            },
+        );
+        let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
+            pixtuoid_scene::embedded_pack::PackSource::Bundled,
+        )
+        .expect("pack");
+        let mut floor = pixtuoid_scene::floor::PerFloor::new();
+        let mut chitchat = std::collections::HashMap::new();
+        let ctx = DrawCtx::offscreen(
+            &mut floor,
+            &mut chitchat,
+            &pixtuoid_scene::theme::NORMAL,
+            &scene,
+            &pack,
+            t0,
+            pixtuoid_scene::floor::FloorMeta::ground(),
+        );
+        assert!(ctx.gateway.is_some());
+    }
+
+    #[test]
     fn hovering_overlapping_mascots_names_the_one_painted_on_top() {
         use pixtuoid_scene::layout::Point;
         use pixtuoid_scene::pixel_painter::MascotFrame;
