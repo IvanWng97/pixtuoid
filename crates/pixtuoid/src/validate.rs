@@ -3,8 +3,8 @@ use std::path::Path;
 
 use anyhow::{bail, Result};
 use pixtuoid_core::sprite::format::{
-    load_pack, DensityMismatch, FrameCountMismatch, MissingOptional, OrphanDerived, PartialSet,
-    StandIn, ValidationReport,
+    load_pack, DensityMismatch, FrameCountMismatch, HairOverhang, MissingHairView, MissingOptional,
+    OrphanDerived, PartialSet, StandIn, UnmarkedHead, ValidationReport,
 };
 
 use crate::{cli_stdout, strip_control_chars};
@@ -73,8 +73,6 @@ fn orphan_derived_line(o: &OrphanDerived) -> String {
 }
 
 /// The `ERROR:` line for a density variant with a frame that misses its claim.
-/// The name is a key from the pack's own table, so it is stripped as
-/// [`unknown_line`]'s is.
 fn mismatched_density_line(m: &DensityMismatch) -> String {
     // Destructured without `..`, for the reason `validate_pack` gives.
     let DensityMismatch {
@@ -94,7 +92,6 @@ fn mismatched_density_line(m: &DensityMismatch) -> String {
 }
 
 /// The `ERROR:` line for a density variant whose frame count is not its base's.
-/// The name is stripped as [`mismatched_density_line`]'s is.
 fn frame_count_line(m: &FrameCountMismatch) -> String {
     // Destructured without `..`, for the reason `validate_pack` gives.
     let FrameCountMismatch {
@@ -110,11 +107,47 @@ fn frame_count_line(m: &FrameCountMismatch) -> String {
 }
 
 /// The `ERROR:` line for a density variant whose base the pack does not ship.
-/// The name is stripped as [`mismatched_density_line`]'s is.
 fn orphan_variant_line(name: &str) -> String {
     format!(
         "ERROR: \"{}\" is a density variant of an animation this pack does not ship",
         strip_control_chars(name)
+    )
+}
+
+fn unmarked_head_line(u: &UnmarkedHead) -> String {
+    format!(
+        "WARN:  \"{}\" frame {} (from 0) has no head mark: it is drawn without hair",
+        strip_control_chars(&u.name),
+        u.frame
+    )
+}
+
+fn missing_hair_view_line(m: &MissingHairView) -> String {
+    format!(
+        "WARN:  hairstyle \"{}\" has no \"{}\" layers: a head facing that way (\"{}\") is \
+         drawn without hair",
+        strip_control_chars(&m.style),
+        m.view.name(),
+        strip_control_chars(&m.needed_by)
+    )
+}
+
+fn overhanging_hair_line(o: &HairOverhang) -> String {
+    format!(
+        "WARN:  hairstyle \"{}\" \"{}\" hair reaches past the sides of \"{}\" frame {} \
+         (from 0): the rest is cut off",
+        strip_control_chars(&o.style),
+        o.view.name(),
+        strip_control_chars(&o.name),
+        o.frame
+    )
+}
+
+fn orphan_hairstyle_line(style: &str) -> String {
+    format!(
+        "ERROR: hairstyle \"{}\" is at a density this pack draws no character animation at: \
+         nobody wears it",
+        strip_control_chars(style)
     )
 }
 
@@ -137,6 +170,10 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
         mismatched_frame_counts,
         partial_sets,
         orphan_derived,
+        unmarked_heads,
+        missing_hair_views,
+        overhanging_hair,
+        orphan_hairstyles,
     } = &report;
     // ERROR diagnostics and the final tally go to stderr so stdout stays the
     // parseable channel even when a caller redirects it.
@@ -159,6 +196,9 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
     for name in orphan_variants {
         let _ = writeln!(err, "{}", orphan_variant_line(name));
     }
+    for style in orphan_hairstyles {
+        let _ = writeln!(err, "{}", orphan_hairstyle_line(style));
+    }
     for m in missing_optional {
         writeln!(out, "{}", missing_optional_line(m))?;
     }
@@ -167,6 +207,15 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
     }
     for o in orphan_derived {
         writeln!(out, "{}", orphan_derived_line(o))?;
+    }
+    for u in unmarked_heads {
+        writeln!(out, "{}", unmarked_head_line(u))?;
+    }
+    for m in missing_hair_views {
+        writeln!(out, "{}", missing_hair_view_line(m))?;
+    }
+    for o in overhanging_hair {
+        writeln!(out, "{}", overhanging_hair_line(o))?;
     }
     for name in unknown {
         writeln!(out, "{}", unknown_line(name))?;
@@ -189,6 +238,7 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pixtuoid_core::sprite::HeadView;
 
     #[test]
     fn ok_line_strips_control_chars_from_untrusted_pack_fields() {
@@ -257,6 +307,41 @@ mod tests {
         assert_eq!(
             orphan_variant_line("desk@4x\u{1b}]0;x\u{7}"),
             "ERROR: \"desk@4x]0;x\" is a density variant of an animation this pack does not ship"
+        );
+    }
+
+    #[test]
+    fn the_hair_lines_name_the_style_the_view_and_the_frame() {
+        assert_eq!(
+            unmarked_head_line(&UnmarkedHead {
+                name: "standing@4x\u{1b}".to_string(),
+                frame: 2,
+            }),
+            "WARN:  \"standing@4x\" frame 2 (from 0) has no head mark: it is drawn without hair"
+        );
+        assert_eq!(
+            missing_hair_view_line(&MissingHairView {
+                style: "mop@4x\u{7}".to_string(),
+                view: HeadView::Back,
+                needed_by: "walking_back@4x\u{202e}".to_string(),
+            }),
+            "WARN:  hairstyle \"mop@4x\" has no \"back\" layers: a head facing that way \
+             (\"walking_back@4x\") is drawn without hair"
+        );
+        assert_eq!(
+            overhanging_hair_line(&HairOverhang {
+                style: "mop@4x".to_string(),
+                view: HeadView::Front,
+                name: "standing@4x".to_string(),
+                frame: 0,
+            }),
+            "WARN:  hairstyle \"mop@4x\" \"front\" hair reaches past the sides of \
+             \"standing@4x\" frame 0 (from 0): the rest is cut off"
+        );
+        assert_eq!(
+            orphan_hairstyle_line("mop@2x\u{1b}"),
+            "ERROR: hairstyle \"mop@2x\" is at a density this pack draws no character \
+             animation at: nobody wears it"
         );
     }
 

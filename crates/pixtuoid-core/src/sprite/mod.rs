@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use palette::convert::FromColorUnclamped;
-use palette::{FromColor, IsWithinBounds, LinSrgb, Mix, Oklab, Srgb};
+use palette::{FromColor, LinSrgb, Mix, Oklab, Srgb};
 
 use crate::grid::Grid;
 
@@ -41,6 +41,12 @@ const RAMP_COOL_HUE_DEG: f32 = 280.0;
 /// Halvings of an out-of-gamut color's chroma search; far past the point where
 /// a further halving moves no 8-bit channel.
 const GAMUT_BISECTION_STEPS: u32 = 16;
+
+/// How far past `0..=1` a linear channel still counts as in gamut: half an 8-bit
+/// step where the sRGB curve is steepest (its toe, slope 12.92), so an OKLab
+/// round trip's float noise keeps its chroma, and what passes rounds as a clip
+/// would.
+const GAMUT_TOLERANCE: f32 = 0.5 / (u8::MAX as f32 * 12.92);
 
 impl Rgb {
     /// This color `level` steps along a hue-shifted ramp: lighter and warmer
@@ -94,12 +100,18 @@ impl Rgb {
     fn from_oklab_in_gamut(c: Oklab) -> Rgb {
         let at =
             |share: f32| LinSrgb::from_color_unclamped(Oklab::new(c.l, c.a * share, c.b * share));
+        let in_gamut = |share: f32| {
+            let s = at(share);
+            [s.red, s.green, s.blue]
+                .iter()
+                .all(|v| (-GAMUT_TOLERANCE..=1.0 + GAMUT_TOLERANCE).contains(v))
+        };
         let mut share = 1.0;
-        if !at(share).is_within_bounds() {
+        if !in_gamut(share) {
             let (mut fits, mut spills) = (0.0, 1.0);
             for _ in 0..GAMUT_BISECTION_STEPS {
                 let mid = (fits + spills) / 2.0;
-                if at(mid).is_within_bounds() {
+                if in_gamut(mid) {
                     fits = mid;
                 } else {
                     spills = mid;
@@ -560,6 +572,7 @@ impl RgbBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use palette::IsWithinBounds;
 
     const fn rgb(r: u8, g: u8, b: u8) -> Rgb {
         Rgb { r, g, b }

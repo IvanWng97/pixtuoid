@@ -4,16 +4,21 @@
 //! (`sprites/default/` is the canonical example); [`PackSource`] names where it
 //! comes from, and deciding that is the caller's job.
 
+#[cfg(feature = "native")]
 use std::path::{Path, PathBuf};
 
+#[cfg(feature = "native")]
 use anyhow::{Context, Result};
+use pixtuoid_core::sprite::error::PackError;
+#[cfg(feature = "native")]
+use pixtuoid_core::sprite::format::{load_pack, DensityMismatch, FrameCountMismatch};
 use pixtuoid_core::sprite::format::{
-    load_pack, load_pack_from_strings, validate_pack_animations, DensityMismatch,
-    FrameCountMismatch, Pack, ValidationReport,
+    load_pack_from_strings, validate_pack_animations, Pack, ValidationReport,
 };
 
 /// Where a sprite pack's custom half comes from. The source decides what a
 /// custom pack that fails to load means.
+#[cfg(feature = "native")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackSource {
     /// The compiled-in default alone.
@@ -55,6 +60,7 @@ pub fn validate_pack(pack: &Pack) -> ValidationReport {
 /// required pose LOADS fine and then renders it as NOTHING, so without this the
 /// only signal is agents silently vanishing. Warn, don't fail — a
 /// partially-authored pack still renders every pose it does carry.
+#[cfg(feature = "native")]
 fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
     let report = validate_pack(pack);
     // Destructured without `..`: a field added to the report does not compile
@@ -68,9 +74,14 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         mismatched_density,
         orphan_variants,
         mismatched_frame_counts,
-        // A mixed look still renders every piece: `validate-pack` reports it.
+        // A mixed look or a bare or clipped head still renders: `validate-pack`
+        // reports it.
         partial_sets: _,
         orphan_derived: _,
+        unmarked_heads: _,
+        missing_hair_views: _,
+        overhanging_hair: _,
+        orphan_hairstyles,
     } = &report;
     for name in missing_required {
         tracing::warn!(
@@ -131,14 +142,23 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
              renderers skip it for the densest art that fits"
         );
     }
+    for style in orphan_hairstyles {
+        tracing::warn!(
+            origin,
+            hairstyle = ?style,
+            "custom sprite pack ships a hairstyle at a density it draws no character at — \
+             nobody wears it"
+        );
+    }
     report
 }
 
 /// Load the compiled-in default pack, with `source`'s custom pack merged over
 /// it. Reads nothing but the path `source` names, so a test, a benchmark or a
 /// committed snapshot draws the same art on every machine.
+#[cfg(feature = "native")]
 pub fn load_sprite_pack(source: PackSource) -> Result<Pack> {
-    let base = load_embedded_pack()?;
+    let base = load_bundled_pack()?;
     match source {
         PackSource::Bundled => Ok(base),
         PackSource::Explicit(dir) => load_custom_over(&base, &dir, "explicit")
@@ -160,6 +180,7 @@ pub fn load_sprite_pack(source: PackSource) -> Result<Pack> {
 
 /// The custom pack in `dir`, with the furniture it leaves out, and the city if
 /// it draws none, inherited from `base`.
+#[cfg(feature = "native")]
 fn load_custom_over(base: &Pack, dir: &Path, origin: &str) -> Result<Pack> {
     let mut custom = load_pack(dir)?;
     tracing::info!(origin, path = ?dir, "loaded custom sprite pack");
@@ -174,13 +195,15 @@ fn load_custom_over(base: &Pack, dir: &Path, origin: &str) -> Result<Pack> {
 /// The bundled pack, for unit tests.
 #[cfg(test)]
 pub(crate) fn test_default_pack() -> Pack {
-    load_sprite_pack(PackSource::Bundled).expect("default pack loads")
+    load_bundled_pack().expect("default pack loads")
 }
 
 /// The default pack's manifest, as `build.rs` embeds it.
 const EMBEDDED_PACK_TOML: &str = include_str!(concat!(env!("OUT_DIR"), "/embedded_pack.toml"));
 
-fn load_embedded_pack() -> Result<Pack, pixtuoid_core::sprite::error::PackError> {
+/// The compiled-in default pack alone: all a build without `native`, which reads
+/// no files, can load.
+pub fn load_bundled_pack() -> Result<Pack, PackError> {
     load_pack_from_strings(EMBEDDED_PACK_TOML, &embedded_sprite_srcs())
 }
 
@@ -326,7 +349,7 @@ mod tests {
     /// in it silently falls back to the upscaled base.
     #[test]
     fn the_embedded_pack_passes_its_own_validation() {
-        let pack = load_embedded_pack().expect("embedded pack");
+        let pack = load_bundled_pack().expect("embedded pack");
         let report = validate_pack(&pack);
         assert!(!report.has_errors(), "{report:?}");
         // `StandIn::DefaultPack` promises the default draws what a custom pack

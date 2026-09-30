@@ -93,7 +93,9 @@ sprite marking its own head in that view, and it is laid mark on mark on the
 frame's. Every agent wears one of the pack's styles, picked by name from its id,
 so a pack ships the same styles at every density it dresses. The layers take
 the agent's recolor as the body does. A frame whose view its style leaves out is
-drawn bare.
+drawn bare, as is a variant frame with no head mark, and a layer reaching past
+the frame's sides is cut off: `validate-pack` warns of each, and fails a style
+at a density the pack draws no character at.
 
 `[characters] outline = "<key>"` draws one line round every marked variant
 frame, bare or dressed: a pack that sets it draws its bodies and layers
