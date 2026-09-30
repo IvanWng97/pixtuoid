@@ -58,9 +58,6 @@ pub(crate) fn display_width(s: &str) -> usize {
 
 pub(crate) use pixtuoid_scene::board::compact_hms;
 
-// Each state carries FOUR redundant channels (glyph/letter/word/hue); hue is never the
-// sole carrier, so the design survives colour removal, a colour-blind viewer, and a
-// terminal that tofus a glyph.
 pub(crate) use pixtuoid_scene::footer::RungKind as StateKind;
 
 /// A [`StateKind`]'s themed ratatui hue — the binary shim over the shared

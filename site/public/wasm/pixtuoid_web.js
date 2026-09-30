@@ -229,8 +229,8 @@ export class Office {
         }
     }
     /**
-     * Recolor the whole office to a theme by name (`"normal"|"cyberpunk"|
-     * "dracula"|"tokyo-night"|"catppuccin"|"gruvbox"`). Unknown name = no-op.
+     * Recolor the whole office to one of the [`ALL_THEMES`] by name. Unknown
+     * name = no-op.
      * @param {string} name
      */
     set_theme(name) {
@@ -239,9 +239,8 @@ export class Office {
         wasm.office_set_theme(this.__wbg_ptr, ptr0, len0);
     }
     /**
-     * Force the office's weather (`"clear"|"rain"|"storm"|"snow"|"fog"|
-     * "overcast"|"windy"|"smog"`), or `None` to follow the clock-based cycle.
-     * An unrecognized name renders as the clock-based cycle.
+     * Force one of the [`weather_names`](pixtuoid_scene::pixel_painter::weather_names),
+     * or `None` (or an unrecognized name) to follow the clock-based cycle.
      * @param {string | null} [name]
      */
     set_weather(name) {

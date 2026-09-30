@@ -96,7 +96,7 @@ fn floor_transition_completes_and_lands() {
         "layout is cleared during a transition"
     );
 
-    now += Duration::from_millis(600); // total 1050ms > 900ms duration
+    now += Duration::from_millis(600); // past `FloorTransition::duration_ms`
     r.render(&scene, &p, now).unwrap();
     assert!(r.transition().is_none(), "transition complete");
     assert_eq!(r.current_floor(), 1, "landed on the target floor");

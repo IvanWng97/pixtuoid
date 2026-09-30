@@ -111,14 +111,13 @@ export class Office {
      */
     overlay_json(): string;
     /**
-     * Recolor the whole office to a theme by name (`"normal"|"cyberpunk"|
-     * "dracula"|"tokyo-night"|"catppuccin"|"gruvbox"`). Unknown name = no-op.
+     * Recolor the whole office to one of the [`ALL_THEMES`] by name. Unknown
+     * name = no-op.
      */
     set_theme(name: string): void;
     /**
-     * Force the office's weather (`"clear"|"rain"|"storm"|"snow"|"fog"|
-     * "overcast"|"windy"|"smog"`), or `None` to follow the clock-based cycle.
-     * An unrecognized name renders as the clock-based cycle.
+     * Force one of the [`weather_names`](pixtuoid_scene::pixel_painter::weather_names),
+     * or `None` (or an unrecognized name) to follow the clock-based cycle.
      */
     set_weather(name?: string | null): void;
     /**

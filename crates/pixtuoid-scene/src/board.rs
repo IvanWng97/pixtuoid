@@ -86,6 +86,11 @@ pub fn gateway_rollup<'a>(
         .max_by_key(|s| severity(*s))
 }
 
+/// The [`gateway_rollup`] over every daemon in `scene`.
+pub fn office_gateway(scene: &SceneState) -> Option<DaemonState> {
+    gateway_rollup(scene.daemons().map(|(_, _, p)| p))
+}
+
 /// The oldest in-scene agent's age in seconds — every agent still in the scene
 /// (live or walking out; swept ones are gone).
 pub fn scene_uptime_secs(scene: &SceneState, now: SystemTime) -> u64 {

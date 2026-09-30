@@ -7,7 +7,7 @@
 //! type, so the hues can't drift across surfaces.
 //!
 //! [`build_footer`] owns the WHOLE tier/priority policy in one place, and is PURE:
-//! its one scene read is extracted to the free feeder [`footer_tool_tally`].
+//! every scene read happens in [`FooterInputs::new`] and [`FooterContext::new`].
 
 use std::collections::HashMap;
 
@@ -162,6 +162,8 @@ pub struct FooterFloor {
     pub total_agents: usize,
 }
 
+const TOOL_TALLY_CAP: usize = 4;
+
 /// One aggregate tool-tally entry: the raw display `token` (kept verbatim), the
 /// TYPED [`ToolKind`] for the hue, and how many Active slots show it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,8 +176,9 @@ pub struct ToolTally {
 /// The aggregate tool tally: group Active slots by their raw display token (the
 /// first alphanumeric run of the detail, kept verbatim) but carry the TYPED
 /// [`ToolKind`] for the hue — a Task slot displays "Delegating" yet tints via
-/// `kind = Task`, never the name. Sorted by count desc then name, capped at 4.
-pub fn footer_tool_tally(scene: &SceneState) -> Vec<ToolTally> {
+/// `kind = Task`, never the name. Sorted by count desc then name, capped at
+/// [`TOOL_TALLY_CAP`].
+pub(crate) fn footer_tool_tally(scene: &SceneState) -> Vec<ToolTally> {
     let mut tool_counts: HashMap<String, (ToolKind, usize)> = HashMap::new();
     for slot in scene.agents.values() {
         if let ActivityState::Active { detail, kind, .. } = &slot.state {
@@ -193,15 +196,15 @@ pub fn footer_tool_tally(scene: &SceneState) -> Vec<ToolTally> {
         .map(|(token, (kind, count))| ToolTally { token, kind, count })
         .collect();
     tools.sort_by(|a, b| b.count.cmp(&a.count).then(a.token.cmp(&b.token)));
-    tools.truncate(4);
+    tools.truncate(TOOL_TALLY_CAP);
     tools
 }
 
 /// The per-frame inputs `build_footer` renders: `counts` and `tools` come from
 /// the drawn floor's scene, everything else from the [`FooterContext`].
 pub struct FooterInputs<'a> {
-    pub counts: StateCounts,
-    pub tools: Vec<ToolTally>,
+    counts: StateCounts,
+    tools: Vec<ToolTally>,
     pub context: FooterContext<'a>,
 }
 
@@ -213,6 +216,11 @@ impl<'a> FooterInputs<'a> {
             tools: footer_tool_tally(drawn),
             context,
         }
+    }
+
+    /// The drawn floor's [`StateCounts`].
+    pub fn counts(&self) -> StateCounts {
+        self.counts
     }
 }
 
@@ -235,6 +243,30 @@ pub struct FooterContext<'a> {
     pub keys_stats: &'a str,
     /// The alert-tier right keybind tail.
     pub keys_alert: &'a str,
+}
+
+impl<'a> FooterContext<'a> {
+    /// The context over `office`, the FULL scene — never a projected floor.
+    pub fn new(
+        office: &SceneState,
+        floor: Option<FooterFloor>,
+        audio_audible: bool,
+        volume_flash: Option<u8>,
+        source_warning: Option<&'a str>,
+        keys_stats: &'a str,
+        keys_alert: &'a str,
+    ) -> Self {
+        Self {
+            per_floor: crate::board::per_floor_counts(office),
+            gateway: crate::board::office_gateway(office),
+            floor,
+            audio_audible,
+            volume_flash,
+            source_warning,
+            keys_stats,
+            keys_alert,
+        }
+    }
 }
 
 /// Column width of a footer string. The footer's own glyph vocabulary is ALL
@@ -688,5 +720,29 @@ mod tests {
             !narrow.contains("[t]"),
             "no dangling half-token: {narrow:?}"
         );
+    }
+
+    #[test]
+    fn context_derives_the_office_wide_halves_from_the_full_scene() {
+        use pixtuoid_core::state::{DaemonInstanceId, DaemonLiveness, DaemonPresence};
+        let mut scene = SceneState::uniform(16);
+        let mut upstairs = waiting_slot("/p/up.jsonl");
+        upstairs.floor_idx = 1;
+        scene.agents.insert(upstairs.agent_id, upstairs);
+        scene.insert_daemon(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            DaemonInstanceId::new("18789").expect("non-empty"),
+            DaemonPresence {
+                liveness: DaemonLiveness::Down,
+                active_sessions: 0,
+                last_seen: SystemTime::UNIX_EPOCH,
+                entered_at: SystemTime::UNIX_EPOCH,
+                in_flight_runs: Default::default(),
+                current_pid: None,
+            },
+        );
+        let ctx = FooterContext::new(&scene, None, false, None, None, KEYS_STATS, KEYS_ALERT);
+        assert_eq!(ctx.per_floor[1].waiting, 1, "the upstairs agent counts");
+        assert_eq!(ctx.gateway, Some(DaemonState::Down));
     }
 }

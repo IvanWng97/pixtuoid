@@ -333,7 +333,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         hovered,
     );
     let board = pixtuoid_scene::board::build_board(
-        footer.counts,
+        footer.counts(),
         pixtuoid_scene::board::scene_uptime_secs(scene, now),
         floor_info.map(|fi| (fi.current, fi.total_floors)),
         footer.context.gateway,
@@ -476,10 +476,9 @@ fn flush_buffer_to_term(f: &mut ratatui::Frame<'_>, buf: &RgbBuffer, scene_rect:
     flush_buffer_to_term_at_offset(f, buf, scene_rect, 0);
 }
 
-const UNDIMMED: f32 = 0.999;
-
 /// Multiply every pixel of `buf` down by `factor` — the modal-backdrop dim.
 pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
+    const UNDIMMED: f32 = 0.999;
     if factor >= UNDIMMED {
         return;
     }

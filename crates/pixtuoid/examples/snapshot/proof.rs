@@ -519,9 +519,8 @@ pub(crate) fn compose_frame(
                 (office_origin.0 + desk_px.0) as i32,
                 (office_origin.1 + desk_px.1) as i32,
             );
-            // Clears the top edge of the ceiling halo `paint_ceiling_halos` burns
-            // over a lit monitor (up to 16px above desk.1 in PNG space) with an
-            // 8px margin, so the connector/dot never sits inside the glow.
+            // Clears the halo `paint_ceiling_halos` burns over a lit monitor, with a
+            // margin, so the connector/dot never sits inside the glow.
             const GLOW_CLEARANCE: i32 = 24;
             let anchor_y = desk.1 - GLOW_CLEARANCE;
             match layout {

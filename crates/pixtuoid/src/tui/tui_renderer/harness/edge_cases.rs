@@ -379,8 +379,7 @@ fn floor_transition_clears_stale_pet_position() {
 #[test]
 fn layout_compute_none_bails_to_footer_only() {
     let scene = scene_with(vec![idle("/lc/0.jsonl", 0, t0())], 16);
-    // scene_rect 28×39: width 28 ≥ 20 (passes gate), buf_w 28 < MIN_W → compute
-    // returns None, hitting the second bail arm.
+    // Clears `MIN_SCENE_WIDTH` but not the layout's `MIN_LAYOUT_W`: the second bail arm.
     let mut r = build(28, 40, vec![]);
     r.render(&scene, &pack(), t0())
         .expect("render must not error on the compute-None bail");

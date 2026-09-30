@@ -89,16 +89,15 @@ impl OfficeRenderer {
     ) -> FooterModel {
         let inputs = FooterInputs::new(
             scene,
-            FooterContext {
-                per_floor: pixtuoid_scene::board::per_floor_counts(scene),
-                gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-                floor: None,
+            FooterContext::new(
+                scene,
+                None,
                 audio_audible,
                 volume_flash,
-                source_warning: None,
-                keys_stats: FOOTER_KEYS,
-                keys_alert: FOOTER_KEYS,
-            },
+                None,
+                FOOTER_KEYS,
+                FOOTER_KEYS,
+            ),
         );
         build_footer(&inputs, budget)
     }
@@ -973,7 +972,6 @@ mod tests {
 
     #[test]
     fn paint_footer_blits_into_the_bottom_band_and_tones_via_the_shared_authority() {
-        use pixtuoid_scene::board::per_floor_counts;
         use pixtuoid_scene::footer::{FooterTone, RungKind};
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let mut scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
@@ -981,16 +979,7 @@ mod tests {
         scene.agents.insert(slot.agent_id, slot);
         let inputs = FooterInputs::new(
             &scene,
-            FooterContext {
-                per_floor: per_floor_counts(&scene),
-                gateway: None,
-                floor: None,
-                audio_audible: true,
-                volume_flash: None,
-                source_warning: None,
-                keys_stats: FOOTER_KEYS,
-                keys_alert: FOOTER_KEYS,
-            },
+            FooterContext::new(&scene, None, true, None, None, FOOTER_KEYS, FOOTER_KEYS),
         );
         let (w, h) = (400usize, 160usize);
         let model = build_footer(&inputs, footer_budget(w));

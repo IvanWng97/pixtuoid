@@ -1,5 +1,4 @@
 use pixtuoid_core::SceneState;
-use pixtuoid_scene::board::{gateway_rollup, per_floor_counts};
 use pixtuoid_scene::footer::{
     build_footer, footer_tone_rgb, FooterContext, FooterFloor, FooterInputs,
 };
@@ -13,7 +12,7 @@ use super::to_color;
 const KEYS_STATS: &str = " [?]help [p]ause [t]heme [q]uit ";
 const KEYS_ALERT: &str = " [q]uit ";
 
-/// The TUI's [`FooterContext`]; `office` is the FULL scene, never a projected floor.
+/// [`FooterContext::new`] with the TUI's keybind tails.
 pub fn footer_context<'a>(
     office: &SceneState,
     floor: Option<FooterFloor>,
@@ -21,16 +20,15 @@ pub fn footer_context<'a>(
     volume_flash: Option<u8>,
     source_warning: Option<&'a str>,
 ) -> FooterContext<'a> {
-    FooterContext {
-        per_floor: per_floor_counts(office),
-        gateway: gateway_rollup(office.daemons().map(|(_, _, p)| p)),
+    FooterContext::new(
+        office,
         floor,
         audio_audible,
         volume_flash,
         source_warning,
-        keys_stats: KEYS_STATS,
-        keys_alert: KEYS_ALERT,
-    }
+        KEYS_STATS,
+        KEYS_ALERT,
+    )
 }
 
 /// One-line footer warning for dead sources; `None` while healthy.
