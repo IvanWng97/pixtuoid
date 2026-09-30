@@ -75,7 +75,7 @@ high-risk seam, and they require looking BEYOND the diff:
 - Clippy warnings (enforced in CI with `-D warnings`)
 - Speculative future issues ("this could become a problem if...")
 - Anything cargo-deny, cargo-machete, or CI already catches
-- Performance unless measurable (this is a TUI rendering ~30fps, not a hot loop)
+- Performance unless measurable (the TUI ticks at `FRAME_TICK_MS`, not a hot loop)
 - Absence of defense-in-depth where a PRIMARY defense already exists (a missing
   belt when the suspenders hold) — matches the two-lens protocol's negative space
   (`.claude/skills/two-lens-review/briefs.md`); a genuinely missing PRIMARY guard is a real bug, flag that

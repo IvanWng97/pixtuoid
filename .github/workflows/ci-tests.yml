@@ -13,66 +13,33 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  windows-test:
-    name: windows-test
+  test:
+    name: ${{ matrix.platform }}-test
     if: ${{ inputs.full }}
-    # Track windows-latest deliberately: this gate catches hosted-image changes.
-    runs-on: windows-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-cargo-just
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@cargo-nextest
-      - run: just test
-        env:
-          NEXTEST_PROFILE: ci
-      - name: Upload test results to Codecov
-        if: ${{ !cancelled() }}
-        uses: ./.github/actions/upload-codecov
-        with:
-          file: target/nextest/ci/junit.xml
-          flag: windows
-          report_type: test_results
-
-  macos-test:
-    name: macos-test
-    if: ${{ inputs.full }}
-    # macos-14 exercises the Apple Silicon build; macOS diverges on BSD CLI,
-    # launchd, and config paths.
-    runs-on: macos-14
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-cargo-just
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@cargo-nextest
-      - run: just test
-        env:
-          NEXTEST_PROFILE: ci
-      - name: Upload test results to Codecov
-        if: ${{ !cancelled() }}
-        uses: ./.github/actions/upload-codecov
-        with:
-          file: target/nextest/ci/junit.xml
-          flag: macos
-          report_type: test_results
-
-  coverage:
-    name: coverage
-    if: ${{ inputs.full }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runner: ubuntu-latest
+            flag: unit
+            timeout: 25
+          # Track windows-latest deliberately: this gate catches hosted-image
+          # changes. Its coverage sees the Windows pipes and atomic-write
+          # retries the Linux entry compiles out.
+          - platform: windows
+            runner: windows-latest
+            flag: windows
+            timeout: 25
+          # macos-14 exercises the Apple Silicon build; macOS diverges on BSD
+          # CLI, launchd, and config paths, which the Linux entry compiles out.
+          - platform: macos
+            runner: macos-14
+            flag: macos
+            timeout: 20
+    runs-on: ${{ matrix.runner }}
+    # nextest owns per-test hang limits.
+    timeout-minutes: ${{ matrix.timeout }}
     permissions:
       contents: read
       id-token: write
@@ -84,87 +51,25 @@ jobs:
       - uses: ./.github/actions/setup-cargo-just
         with:
           components: llvm-tools-preview
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
-      - name: Generate coverage + JUnit XML (single test run)
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate coverage + JUnit XML (single instrumented test run)
         run: just coverage
       - name: Upload coverage to Codecov
         uses: ./.github/actions/upload-codecov
         with:
           file: lcov.info
-          flag: unit
+          flag: ${{ matrix.flag }}
           report_type: coverage
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
         uses: ./.github/actions/upload-codecov
         with:
           file: target/nextest/ci/junit.xml
-          flag: unit
+          flag: ${{ matrix.flag }}
           report_type: test_results
-
-  # Platform coverage compiles code the Linux job cannot see: Windows pipes and
-  # atomic-write retries, plus macOS paths and launchd.
-  coverage-windows:
-    name: coverage-windows
-    if: ${{ inputs.full }}
-    runs-on: windows-latest
-    # nextest owns per-test hang limits.
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-cargo-just
-        with:
-          components: llvm-tools-preview
-      # rust-cache separates this from windows-test by job ID and RUSTFLAGS.
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@cargo-nextest
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Generate coverage + JUnit XML (single instrumented test run)
-        run: just coverage
-      # lcov only: windows-test already uploads this platform's JUnit report.
-      - name: Upload coverage to Codecov
-        uses: ./.github/actions/upload-codecov
-        with:
-          file: lcov.info
-          flag: windows
-          report_type: coverage
-
-  coverage-macos:
-    name: coverage-macos
-    if: ${{ inputs.full }}
-    runs-on: macos-14
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-cargo-just
-        with:
-          components: llvm-tools-preview
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@cargo-nextest
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Generate coverage + JUnit XML (single instrumented test run)
-        run: just coverage
-      # lcov only: macos-test already uploads this platform's JUnit report.
-      - name: Upload coverage to Codecov
-        uses: ./.github/actions/upload-codecov
-        with:
-          file: lcov.info
-          flag: macos
-          report_type: coverage
 
   snapshots:
     name: snapshot hygiene
@@ -257,7 +162,7 @@ jobs:
     # single protected ci-gate silently lose coverage.
     if: ${{ always() }}
     needs:
-      [windows-test, macos-test, coverage, coverage-windows, coverage-macos, snapshots, smoke]
+      [test, snapshots, smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
