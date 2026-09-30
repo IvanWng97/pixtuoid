@@ -504,3 +504,118 @@ assert_required '{"a":{"result":"success"},"b":{"result":"skipped"}}' fail "a sk
 assert_required '{"a":{"result":"success"},"b":{"result":"cancelled"}}' fail "a cancelled job"
 assert_required '{}' fail "an empty needs map"
 assert_required '' fail "no results at all"
+
+# ── dispositions: every review finding's disposition is terminal ──────────────
+# The check reads the PR body, human comments and human review bodies through
+# the API, so a stub gh serves each path from a fixture and applies the
+# caller's own --jq filter to it.
+DISPOSITIONS_WORKFLOW_FILE="${DISPOSITIONS_WORKFLOW_FILE:-.github/workflows/dispositions.yml}"
+dispo_bin="$test_dir/dispo-bin"
+mkdir -p "$dispo_bin"
+# shellcheck disable=SC2016 # The generated gh stub expands its own variables.
+printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'if [[ "$1" != api ]]; then' \
+    '    printf "%s\n" "$*" >>"$DISPO_GH_LOG"' \
+    '    case "$1 $2" in' \
+    '    "pr view") jq -r "${@: -1}" <<<"$FAKE_PR_VIEW" ;;' \
+    '    "run list") jq -r "${@: -1}" <<<"$FAKE_RUNS" ;;' \
+    '    esac' \
+    '    exit 0' \
+    'fi' \
+    'shift' \
+    'path="" filter="."' \
+    'while (($#)); do' \
+    '    case "$1" in' \
+    '    --jq) filter=$2; shift 2 ;;' \
+    '    -*) shift ;;' \
+    '    *) path=$1; shift ;;' \
+    '    esac' \
+    'done' \
+    'case "$path" in' \
+    '"repos/$GH_REPO/pulls/$PR") json=$FAKE_PR_BODY ;;' \
+    '"repos/$GH_REPO/issues/$PR/comments") json=$FAKE_COMMENTS ;;' \
+    '"repos/$GH_REPO/pulls/$PR/reviews") json=$FAKE_REVIEWS ;;' \
+    '"repos/$GH_REPO/pulls/"*)' \
+    '    json=$(jq -ce --arg n "${path##*/}" '"'"'.[$n] // empty'"'"' <<<"$FAKE_PRS") ||' \
+    '        { echo "gh: Not Found (HTTP 404)" >&2; exit 1; } ;;' \
+    '*) echo "gh stub: unexpected path $path" >&2; exit 2 ;;' \
+    'esac' \
+    'jq -r "$filter" <<<"$json"' \
+    >"$dispo_bin/gh"
+chmod +x "$dispo_bin/gh"
+
+dispositions_script="$(workflow_step_script "$DISPOSITIONS_WORKFLOW_FILE" "Check disposition lines")"
+known_prs='{"10":{"state":"open","merged_at":null},"11":{"state":"closed","merged_at":"2026-09-29T00:00:00Z"},"12":{"state":"closed","merged_at":null}}'
+human='{"type":"User"}'
+bot='{"type":"Bot"}'
+
+# $1 PR body, $2 comments JSON, $3 reviews JSON, $4 pass|fail, $5 label,
+# $6 the text the failure must name (fail cases only).
+assert_dispositions() {
+    local output
+    local rc=0
+    output="$(
+        PATH="$dispo_bin:$PATH" \
+            GH_REPO="owner/repo" \
+            PR="7" \
+            FAKE_PR_BODY="$(jq -cn --arg b "$1" '{body: $b}')" \
+            FAKE_COMMENTS="$2" \
+            FAKE_REVIEWS="$3" \
+            FAKE_PRS="$known_prs" \
+            bash -c "$dispositions_script" 2>&1
+    )" || rc=$?
+    if [[ "$4" == pass ]]; then
+        [[ "$rc" == 0 ]] || fail "dispositions rejected $5: $output"
+    else
+        [[ "$rc" != 0 ]] || fail "dispositions accepted $5"
+        [[ "$output" == *"$6"* ]] || fail "dispositions failed $5 without naming $6: $output"
+        [[ "$output" == *"briefs.md"* ]] || fail "dispositions failed $5 without citing its authority"
+    fi
+}
+
+comment() { jq -cn --arg b "$1" --argjson u "$2" '[{body: $b, user: $u}]'; }
+terminal_body=$'## Dispositions\n- FIXED: the clamp\n- FOLLOW-UP → #10: the stale doc\n- RE-SCOPED → #11: the split-off half\n- REFUTED: the premise (test `pins_it`)'
+
+assert_dispositions "$terminal_body" '[]' '[]' pass "every state terminal (open + merged #N)"
+assert_dispositions "No review yet." '[]' '[]' pass "a body with no dispositions"
+assert_dispositions "ok" "$(comment $'```\nSURFACED\nFOLLOW-UP with no number\n```' "$human")" '[]' pass \
+    "the old vocabulary quoted inside a code fence"
+assert_dispositions "ok" "$(comment "SURFACED by the bot, FOLLOW-UP too" "$bot")" '[]' pass \
+    "a bot's comment (not a disposition)"
+assert_dispositions "ok" "$(comment "- FOLLOW-UP: the stale doc" "$human")" '[]' fail \
+    "a FOLLOW-UP naming no #N" "names no #N"
+assert_dispositions "- RE-SCOPED: split later" '[]' '[]' fail \
+    "a RE-SCOPED naming no #N" "names no #N"
+assert_dispositions "ok" '[]' "$(comment "- FOLLOW-UP → #99: gone" "$human")" fail \
+    "a dangling #N in a review body" "#99"
+assert_dispositions "- FOLLOW-UP → #12: closed" '[]' '[]' fail \
+    "a #N that closed unmerged" "#12"
+assert_dispositions "ok" "$(comment "**SURFACED** — the owner decides" "$human")" '[]' fail \
+    "a bare SURFACED" "SURFACED"
+
+# A comment or review event cannot fail the PR's check itself (its run hangs off
+# the default branch), so it re-runs the pull_request run for the PR's head.
+rerun_script="$(workflow_step_script "$DISPOSITIONS_WORKFLOW_FILE" "Re-run the dispositions check")"
+assert_rerun() {
+    local pr_view="$1" runs="$2" expect="$3" label="$4"
+    local log="$test_dir/dispo-gh.log"
+    : >"$log"
+    PATH="$dispo_bin:$PATH" \
+        GH_REPO="owner/repo" \
+        PR="7" \
+        DISPO_GH_LOG="$log" \
+        FAKE_PR_VIEW="$pr_view" \
+        FAKE_RUNS="$runs" \
+        bash -c "$rerun_script" >/dev/null 2>&1 ||
+        fail "dispositions re-run exited non-zero for $label"
+    if [[ -n "$expect" ]]; then
+        grep -qx "run rerun $expect" "$log" || fail "dispositions re-run did not re-run $expect for $label: $(<"$log")"
+    elif grep -q "run rerun" "$log"; then
+        fail "dispositions re-run re-ran something for $label: $(<"$log")"
+    fi
+}
+assert_rerun '{"state":"OPEN","headRefOid":"abc123"}' '[{"databaseId":555}]' 555 "an open PR with a run"
+assert_rerun '{"state":"CLOSED","headRefOid":"abc123"}' '[{"databaseId":555}]' "" "a closed PR"
+assert_rerun '{"state":"OPEN","headRefOid":"abc123"}' '[]' "" "a head with no run yet"
