@@ -14,9 +14,9 @@ comments on the lines it governs, before changing it.
 
 Requires a recent stable Rust toolchain and [`just`](https://github.com/casey/just)
 (`brew install just`). On Linux you also need `lld`, `pkg-config` and the ALSA
-headers (`apt install lld pkg-config libasound2-dev`). The `justfile` is the
-single source of truth for every check — CI and the git hooks call the same
-recipes.
+headers (`apt install lld pkg-config libasound2-dev`). The git hooks and the
+Rust and hygiene CI jobs call `justfile` recipes rather than re-spelling their
+commands; the site, Raycast and CodSpeed workflows run their tools directly.
 
 ```bash
 just              # list recipes
@@ -26,9 +26,9 @@ just test         # the whole suite (cargo-nextest if installed, else cargo test
 cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
 ```
 
-> **Don't chain `cargo clippy && cargo test`** — clippy and test use *separate*
-> build caches, so chaining recompiles the whole workspace twice. Run
-> `just preflight full`, or one check at a time.
+> **Don't expect clippy to warm `test`'s build** — clippy's check-mode
+> artifacts, deps included, are unusable by test's codegen, so each compiles the
+> workspace from scratch. While iterating, run only the one you need.
 
 Activate the git hooks once per clone: `git config core.hooksPath .githooks`
 (`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`, lint + clippy;
@@ -146,8 +146,7 @@ our release never builds. Two consequences:
 
 - **A from-source build break lands in Homebrew's CI, not ours.** Anything
   adding a system-library dependency needs a matching `depends_on` in the core
-  formula, in the same bump PR. Outstanding now: the default-on `audio`
-  feature needs `depends_on "alsa-lib"` — [#731](https://github.com/IvanWng97/pixtuoid/issues/731).
+  formula, in the same bump PR.
 - **Their `test do` block is a public contract** — see the "homebrew-core
   contract" comments at `crates/pixtuoid/src/validate.rs`,
   `crates/pixtuoid/src/sources_cli.rs`,
@@ -272,9 +271,9 @@ gh run rerun --failed                        # rerun only failed CI jobs
 
 ## Adding a new agent CLI
 
-The registration steps (4–7, 9) are test-forced — skipping one fails
-`just test`. Step 8 is forced only for hook-only sources; step 10 by the theme
-guards; steps 1–3, 11 and 12 are on you.
+The registration steps (4–7, 9) and step 12 are test-forced — skipping one
+fails `just test`. Step 8 is forced only for hook-only sources; step 10 by the
+theme guards; steps 1–3 and 11 are on you.
 
 1. **Verify the wire format against the CLI's actual source/releases first** —
    transcript location, line shape, hooks, session identity; pin every fact
@@ -324,10 +323,10 @@ guards; steps 1–3, 11 and 12 are on you.
     const, the `insert` in that crate's `src/drift_surface.rs`,
     `just gen-drift-surface` (commit both fragments), and the `SURFACE_ROWS`
     row plus its selftest case (the case census fails without it).
-12. **Three roster literals no failure message spells out**: the row-by-row
-    byte pin in `corpus_check.rs`; `TOOL_ID_KEY_UNPROVEN` in
-    `tests/sources/captures.rs`; a case row + `#[test]` in
-    `crates/pixtuoid/tests/wire_to_pixels.rs`.
+12. **Three roster literals in three test binaries**, so a scoped test run
+    misses the ones outside it: the row-by-row byte pin in `corpus_check.rs`;
+    `TOOL_ID_KEY_UNPROVEN` in `tests/sources/captures.rs`; a case row +
+    `#[test]` in `crates/pixtuoid/tests/wire_to_pixels.rs`.
 
 ## License
 

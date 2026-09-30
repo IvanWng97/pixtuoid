@@ -70,9 +70,9 @@ it is clear.
 
 ## Gates
 
-CI (`.github/workflows/raycast.yml`, Linux runner): `npm ci` → `npm run audit` →
-the `gen:contract` freshness diff → `npx tsc --noEmit` → `npx eslint .`. Run them
-locally before "done." **`ray build` /
+CI (`.github/workflows/raycast.yml`, Linux runner): `npm ci` → the
+`gen:contract` freshness diff → `npx tsc --noEmit` → `npx eslint .` →
+`npm run audit`. Run them locally before "done." **`ray build` /
 `ray lint`** (manifest + icon validation, the Prettier pass) need the **macOS
 Raycast app** and only run before a store publish — they are NOT in CI, so a
 green PR does not prove the manifest is publishable. See the

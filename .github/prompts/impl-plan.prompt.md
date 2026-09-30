@@ -31,7 +31,8 @@ Every section gets an answer; "n/a" counts only with a reason.
    separate (the `[pet-names]` lesson). A JOIN of two existing collections
    names its join key and verifies it against the real production constants
    IN THE PLAN — the plan that ASSUMED registry id == install-target name
-   shipped a CRITICAL caught only at review (R0613-16).
+   shipped a CRITICAL caught only at review (#283: Claude's registry id is
+   `claude-code`, its install target `claude`).
 2. **Consumers** — every new field, parameter, or asset names the consumer
    this same change wires up. A plan line "add X" without "Y reads X at Z"
    is the unwired-addition smell (CONTRIBUTING pitfall 5) at its cheapest
