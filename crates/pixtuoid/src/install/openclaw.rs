@@ -11,8 +11,8 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, anyhow};
+use serde_json::{Value, json};
 
 use crate::install::io;
 use crate::install::merge::{prune_empty, prune_empty_root};
@@ -335,10 +335,11 @@ pub(crate) fn merge_install(content: &str, _hook_cmd: &str) -> Result<MergeOutco
         // Upstream gates on `allow.length === 0 || allow.includes(id)`, so a curated
         // list omitting us never loads the plugin however enabled its entry — while
         // an EMPTY list is already NO restriction, with nothing to join.
-        if let Some(allow) = plugins.get_mut("allow").and_then(Value::as_array_mut) {
-            if !allow.is_empty() && !allow.iter().any(is_plugin_id) {
-                allow.push(json!(PLUGIN_ID));
-            }
+        if let Some(allow) = plugins.get_mut("allow").and_then(Value::as_array_mut)
+            && !allow.is_empty()
+            && !allow.iter().any(is_plugin_id)
+        {
+            allow.push(json!(PLUGIN_ID));
         }
     }
     let changed = root != before;
@@ -457,14 +458,14 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     // Upstream marks `plugins.load` — the key we write — `kind: "restart"`, so `off`
     // and `hot` leave a RUNNING gateway serving without the plugin while
     // `restart`/`hybrid` pick it up. A NOTE: the install is sound, just not applied.
-    if let Some(mode) = root["gateway"]["reload"]["mode"].as_str() {
-        if mode == "off" || mode == "hot" {
-            notes.push(format!(
-                "openclaw.json `gateway.reload.mode = \"{mode}\"` never applies a restart-kind \
+    if let Some(mode) = root["gateway"]["reload"]["mode"].as_str()
+        && (mode == "off" || mode == "hot")
+    {
+        notes.push(format!(
+            "openclaw.json `gateway.reload.mode = \"{mode}\"` never applies a restart-kind \
                  change, and the plugin registration is one — a RUNNING gateway keeps serving \
                  without pixtuoid until it is restarted (`openclaw gateway restart`)"
-            ));
-        }
+        ));
     }
     // Both FAIL-CLOSED for us and invisible to the checks above. An EMPTY allow list
     // is NO restriction upstream (`allow.length === 0 || …`), so it stays silent.

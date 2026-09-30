@@ -15,9 +15,9 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
-use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
+use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
+use crate::source::{AgentEvent, ToolDetail};
 
 #[cfg(feature = "native")]
 mod native;
@@ -620,10 +620,10 @@ fn omp_label(source: &str, text: &str) -> String {
 // registry conformance test is the only other caller.
 #[cfg(any(feature = "native", test))]
 pub(crate) fn omp_derive_label(path: &Path, source: &str, cwd: &Path) -> String {
-    if omp_parent_key_from_path(path).is_some() {
-        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-            return omp_label(source, stem);
-        }
+    if omp_parent_key_from_path(path).is_some()
+        && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+    {
+        return omp_label(source, stem);
     }
     crate::source::decoder::derive_prefixed_label(source, cwd)
 }
@@ -1278,13 +1278,15 @@ mod tests {
     fn session_header_registers_root_with_cwd_and_no_parent() {
         let line = r#"{"type":"session","version":3,"id":"0197f0aa-0000-7000-8000-000000000001","timestamp":"2026-07-09T08:00:00.000Z","cwd":"/home/u/proj"}"#;
         match &decode(line)[..] {
-            [AgentEvent::SessionStart {
-                agent_id,
-                source,
-                session_id,
-                cwd,
-                parent_id,
-            }] => {
+            [
+                AgentEvent::SessionStart {
+                    agent_id,
+                    source,
+                    session_id,
+                    cwd,
+                    parent_id,
+                },
+            ] => {
                 assert_eq!(*agent_id, root());
                 assert_eq!(source, "omp");
                 assert_eq!(
@@ -1302,11 +1304,13 @@ mod tests {
     fn subagent_header_registers_child_parented_to_the_root() {
         let line = r#"{"type":"session","version":3,"id":"0197f0cc-0000-7000-8000-000000000003","timestamp":"2026-07-09T08:01:00.000Z","cwd":"/home/u/proj"}"#;
         match &decode_at(CHILD, line)[..] {
-            [AgentEvent::SessionStart {
-                agent_id,
-                parent_id,
-                ..
-            }] => {
+            [
+                AgentEvent::SessionStart {
+                    agent_id,
+                    parent_id,
+                    ..
+                },
+            ] => {
                 assert_eq!(
                     *agent_id,
                     AgentId::from_parts(SOURCE_NAME, &format!("{ROOT_KEY}/Alpha"))
@@ -1427,11 +1431,13 @@ mod tests {
     fn assistant_tool_calls_start_activity_keyed_on_block_id() {
         let line = r#"{"type":"message","id":"m1","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"text","text":"Reading."},{"type":"toolCall","id":"toolu_01AAA","name":"read","arguments":{"path":"/home/u/proj/main.rs"}}],"stopReason":"toolUse","timestamp":1720512000000}}"#;
         match &decode(line)[..] {
-            [AgentEvent::ActivityStart {
-                agent_id,
-                tool_use_id,
-                detail: Some(ToolDetail::Generic { display }),
-            }] => {
+            [
+                AgentEvent::ActivityStart {
+                    agent_id,
+                    tool_use_id,
+                    detail: Some(ToolDetail::Generic { display }),
+                },
+            ] => {
                 assert_eq!(*agent_id, root());
                 assert_eq!(tool_use_id.as_deref(), Some("toolu_01AAA"));
                 assert!(
@@ -1453,10 +1459,12 @@ mod tests {
                 r#"{{"type":"message","id":"m1","parentId":null,"timestamp":"t","message":{{"role":"assistant","content":[{{"type":"toolCall","id":"t1","name":"edit","arguments":{args}}}],"timestamp":1}}}}"#
             );
             match &decode(&line)[..] {
-                [AgentEvent::ActivityStart {
-                    detail: Some(ToolDetail::Generic { display }),
-                    ..
-                }] => display.clone(),
+                [
+                    AgentEvent::ActivityStart {
+                        detail: Some(ToolDetail::Generic { display }),
+                        ..
+                    },
+                ] => display.clone(),
                 other => panic!("expected one ActivityStart, got {other:?}"),
             }
         };
@@ -1491,11 +1499,14 @@ mod tests {
     fn assistant_message_surfaces_model_info_for_the_burn_tier() {
         let line = r#"{"type":"message","id":"m1","parentId":null,"timestamp":"t","message":{"role":"assistant","provider":"kimi-code","model":"kimi-for-coding","content":[{"type":"toolCall","id":"t1","name":"bash","arguments":{"command":"ls"}}],"timestamp":1}}"#;
         match &decode(line)[..] {
-            [AgentEvent::ModelInfo {
-                agent_id,
-                model: Some(model),
-                effort: None,
-            }, AgentEvent::ActivityStart { .. }] => {
+            [
+                AgentEvent::ModelInfo {
+                    agent_id,
+                    model: Some(model),
+                    effort: None,
+                },
+                AgentEvent::ActivityStart { .. },
+            ] => {
                 assert_eq!(*agent_id, root());
                 assert_eq!(model.as_str(), "kimi-for-coding");
             }
@@ -1529,11 +1540,13 @@ mod tests {
     fn thinking_level_change_is_an_effort_observation_that_spares_the_model() {
         let line = r#"{"type":"thinking_level_change","id":"3576fccd","parentId":"db62fa97","timestamp":"2026-06-23T12:22:24.469Z","thinkingLevel":"xhigh","configured":null}"#;
         match &decode(line)[..] {
-            [AgentEvent::ModelInfo {
-                agent_id,
-                model: None,
-                effort: Some(effort),
-            }] => {
+            [
+                AgentEvent::ModelInfo {
+                    agent_id,
+                    model: None,
+                    effort: Some(effort),
+                },
+            ] => {
                 assert_eq!(*agent_id, root());
                 // Forwarded RAW: `burn::MAX_EFFORTS` already contains "xhigh"
                 assert_eq!(effort.as_str(), "xhigh");
@@ -1544,9 +1557,11 @@ mod tests {
         // running level wins.
         let pinned = r#"{"type":"thinking_level_change","id":"a","parentId":null,"timestamp":"t","thinkingLevel":"max","configured":"xhigh"}"#;
         match &decode(pinned)[..] {
-            [AgentEvent::ModelInfo {
-                effort: Some(e), ..
-            }] => assert_eq!(e.as_str(), "max"),
+            [
+                AgentEvent::ModelInfo {
+                    effort: Some(e), ..
+                },
+            ] => assert_eq!(e.as_str(), "max"),
             other => panic!("expected the RUNNING level, got {other:?}"),
         }
         // Absent/blank stays silent rather than stamping an empty effort, which
@@ -1566,11 +1581,14 @@ mod tests {
         let evs = decode(line);
         assert_eq!(evs.len(), 2, "one ActivityStart per toolCall block");
         match &evs[..] {
-            [AgentEvent::ActivityStart {
-                tool_use_id: id1, ..
-            }, AgentEvent::ActivityStart {
-                tool_use_id: id2, ..
-            }] => {
+            [
+                AgentEvent::ActivityStart {
+                    tool_use_id: id1, ..
+                },
+                AgentEvent::ActivityStart {
+                    tool_use_id: id2, ..
+                },
+            ] => {
                 assert_eq!(id1.as_deref(), Some("t1"));
                 assert_eq!(id2.as_deref(), Some("t2"));
             }
@@ -1582,10 +1600,12 @@ mod tests {
     fn tool_result_ends_activity_keyed_on_tool_call_id() {
         let line = r#"{"type":"message","id":"m2","parentId":"m1","timestamp":"t","message":{"role":"toolResult","toolCallId":"toolu_01AAA","toolName":"read","content":[{"type":"text","text":"fn main() {}"}],"isError":false,"timestamp":1720512001000}}"#;
         match &decode(line)[..] {
-            [AgentEvent::ActivityEnd {
-                agent_id,
-                tool_use_id,
-            }] => {
+            [
+                AgentEvent::ActivityEnd {
+                    agent_id,
+                    tool_use_id,
+                },
+            ] => {
                 assert_eq!(*agent_id, root());
                 assert_eq!(tool_use_id.as_deref(), Some("toolu_01AAA"));
             }
@@ -1597,9 +1617,11 @@ mod tests {
     fn task_dispatch_is_delegating() {
         let line = r#"{"type":"message","id":"m3","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"t3","name":"task","arguments":{"task":"fix the flaky test","id":"Alpha"}}],"timestamp":1}}"#;
         match &decode(line)[..] {
-            [AgentEvent::ActivityStart {
-                detail: Some(d), ..
-            }] => assert!(d.is_task(), "task tool must be Delegating, got {d:?}"),
+            [
+                AgentEvent::ActivityStart {
+                    detail: Some(d), ..
+                },
+            ] => assert!(d.is_task(), "task tool must be Delegating, got {d:?}"),
             other => panic!("expected Delegating ActivityStart, got {other:?}"),
         }
     }
@@ -1608,9 +1630,11 @@ mod tests {
     fn spoofed_subagent_type_arg_does_not_make_a_task() {
         let line = r#"{"type":"message","id":"m4","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"t4","name":"read","arguments":{"path":"x.rs","subagent_type":null}}],"timestamp":1}}"#;
         match &decode(line)[..] {
-            [AgentEvent::ActivityStart {
-                detail: Some(d), ..
-            }] => assert!(
+            [
+                AgentEvent::ActivityStart {
+                    detail: Some(d), ..
+                },
+            ] => assert!(
                 !d.is_task(),
                 "a spoofed subagent_type arg must stay Generic, got {d:?}"
             ),
@@ -1622,15 +1646,18 @@ mod tests {
     fn ask_call_starts_activity_then_waits_on_the_question() {
         let line = r#"{"type":"message","id":"m7","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"tool_ASK1","name":"ask","arguments":{"i":"Resolving packages/ui collision","questions":[{"id":"ui_collision","question":"packages/ui already exists. What should happen?","options":[{"label":"Replace"},{"label":"Merge"}]}]}}],"timestamp":1}}"#;
         match &decode(line)[..] {
-            [AgentEvent::ActivityStart {
-                agent_id,
-                tool_use_id,
-                ..
-            }, AgentEvent::Waiting {
-                agent_id: wid,
-                reason,
-                ..
-            }] => {
+            [
+                AgentEvent::ActivityStart {
+                    agent_id,
+                    tool_use_id,
+                    ..
+                },
+                AgentEvent::Waiting {
+                    agent_id: wid,
+                    reason,
+                    ..
+                },
+            ] => {
                 assert_eq!(*agent_id, root());
                 assert_eq!(*wid, root());
                 assert_eq!(tool_use_id.as_deref(), Some("tool_ASK1"));
@@ -1661,11 +1688,15 @@ mod tests {
     fn ask_batched_with_parallel_tool_calls_decodes_last() {
         let line = r#"{"type":"message","id":"mB","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"tool_ASK5","name":"ask","arguments":{"i":"Confirming scope"}},{"type":"toolCall","id":"t7","name":"bash","arguments":{"command":"cargo check"}}],"timestamp":1}}"#;
         match &decode(line)[..] {
-            [AgentEvent::ActivityStart {
-                tool_use_id: bash, ..
-            }, AgentEvent::ActivityStart {
-                tool_use_id: ask, ..
-            }, AgentEvent::Waiting { .. }] => {
+            [
+                AgentEvent::ActivityStart {
+                    tool_use_id: bash, ..
+                },
+                AgentEvent::ActivityStart {
+                    tool_use_id: ask, ..
+                },
+                AgentEvent::Waiting { .. },
+            ] => {
                 assert_eq!(bash.as_deref(), Some("t7"));
                 assert_eq!(ask.as_deref(), Some("tool_ASK5"));
             }
@@ -1702,11 +1733,13 @@ mod tests {
         }
         let no_name = r#"{"type":"message","id":"m6","parentId":null,"timestamp":"t","message":{"role":"assistant","content":[{"type":"toolCall","id":"t6","arguments":{}}],"timestamp":1}}"#;
         let out = crate::test_capture::capture_logs(|| match &decode(no_name)[..] {
-            [AgentEvent::ActivityStart {
-                tool_use_id,
-                detail: Some(d),
-                ..
-            }] => {
+            [
+                AgentEvent::ActivityStart {
+                    tool_use_id,
+                    detail: Some(d),
+                    ..
+                },
+            ] => {
                 assert_eq!(tool_use_id.as_deref(), Some("t6"));
                 assert!(!d.is_task());
             }
@@ -1757,12 +1790,16 @@ mod tests {
         ] {
             assert!(decode(line).is_empty(), "expected no events for {line}");
         }
-        assert!(decode_omp_line(ROOT, SOURCE_NAME, json!("not an object"))
-            .unwrap()
-            .is_empty());
-        assert!(decode_omp_line(ROOT, SOURCE_NAME, json!(["array"]))
-            .unwrap()
-            .is_empty());
+        assert!(
+            decode_omp_line(ROOT, SOURCE_NAME, json!("not an object"))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            decode_omp_line(ROOT, SOURCE_NAME, json!(["array"]))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -2382,14 +2419,16 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var_os("PI_CODING_AGENT_DIR");
 
-        std::env::set_var("PI_CODING_AGENT_DIR", "/custom/agent");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("PI_CODING_AGENT_DIR", "/custom/agent") };
         assert_eq!(
             omp_sessions_dir(),
             PathBuf::from("/custom/agent").join("sessions")
         );
 
         for blank in ["", "   "] {
-            std::env::set_var("PI_CODING_AGENT_DIR", blank);
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var("PI_CODING_AGENT_DIR", blank) };
             let dflt = omp_sessions_dir();
             assert!(
                 dflt.ends_with(Path::new(".omp/agent/sessions")),
@@ -2397,12 +2436,15 @@ mod tests {
             );
         }
 
-        std::env::remove_var("PI_CODING_AGENT_DIR");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("PI_CODING_AGENT_DIR") };
         assert!(omp_sessions_dir().ends_with(Path::new(".omp/agent/sessions")));
 
         match saved {
-            Some(v) => std::env::set_var("PI_CODING_AGENT_DIR", v),
-            None => std::env::remove_var("PI_CODING_AGENT_DIR"),
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var("PI_CODING_AGENT_DIR", v) },
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var("PI_CODING_AGENT_DIR") },
         }
     }
 
@@ -2435,13 +2477,16 @@ mod tests {
             "sessionId": "01a05668-057f-7559-8fed-f28ff062e3ca", "cwd": "/repo",
         }));
         match &evs[..] {
-            [AgentEvent::SessionStart {
-                agent_id,
-                source,
-                session_id,
-                cwd,
-                parent_id,
-            }, AgentEvent::Identity { pid: None, .. }] => {
+            [
+                AgentEvent::SessionStart {
+                    agent_id,
+                    source,
+                    session_id,
+                    cwd,
+                    parent_id,
+                },
+                AgentEvent::Identity { pid: None, .. },
+            ] => {
                 assert_eq!(*agent_id, hook_id(HOOK_ROOT));
                 assert_eq!(source, "omp");
                 assert_eq!(session_id, &hook_key(HOOK_ROOT));
@@ -2460,12 +2505,15 @@ mod tests {
             "sessionId": "01a05668-0f13-7438-82b1-d239cb124270", "cwd": "/repo",
         }));
         match &evs[..] {
-            [AgentEvent::SessionStart {
-                agent_id,
-                session_id,
-                parent_id,
-                ..
-            }, AgentEvent::Identity { .. }] => {
+            [
+                AgentEvent::SessionStart {
+                    agent_id,
+                    session_id,
+                    parent_id,
+                    ..
+                },
+                AgentEvent::Identity { .. },
+            ] => {
                 let key = hook_key(&child);
                 assert_eq!(*agent_id, AgentId::from_parts("omp", &key));
                 assert_eq!(session_id, &key);
@@ -2482,11 +2530,14 @@ mod tests {
             "sessionId": "01a05668-057f-7559-8fed-f28ff062e3ca", "cwd": "/repo",
         }));
         match &evs[..] {
-            [AgentEvent::SessionStart {
-                agent_id,
-                session_id,
-                ..
-            }, AgentEvent::Identity { .. }] => {
+            [
+                AgentEvent::SessionStart {
+                    agent_id,
+                    session_id,
+                    ..
+                },
+                AgentEvent::Identity { .. },
+            ] => {
                 assert_eq!(
                     *agent_id,
                     AgentId::from_parts("omp", "01a05668-057f-7559-8fed-f28ff062e3ca")
@@ -2530,12 +2581,16 @@ mod tests {
             "sessionId": "01a05668-057f-7559-8fed-f28ff062e3ca", "cwd": "/repo",
         }));
         match &evs[..] {
-            [AgentEvent::SessionEnd {
-                agent_id: ended,
-                as_child: false,
-            }, AgentEvent::SessionStart {
-                agent_id: started, ..
-            }, AgentEvent::Identity { .. }] => {
+            [
+                AgentEvent::SessionEnd {
+                    agent_id: ended,
+                    as_child: false,
+                },
+                AgentEvent::SessionStart {
+                    agent_id: started, ..
+                },
+                AgentEvent::Identity { .. },
+            ] => {
                 assert_eq!(*ended, hook_id(prev));
                 assert_eq!(*started, hook_id(HOOK_ROOT));
             }
@@ -2568,11 +2623,14 @@ mod tests {
             "toolCallId": "call_1", "toolName": "bash",
         }));
         match &evs[..] {
-            [AgentEvent::Identity { agent_id: iid, .. }, AgentEvent::Waiting {
-                agent_id,
-                reason,
-                tool_use_id,
-            }] => {
+            [
+                AgentEvent::Identity { agent_id: iid, .. },
+                AgentEvent::Waiting {
+                    agent_id,
+                    reason,
+                    tool_use_id,
+                },
+            ] => {
                 assert_eq!(iid, agent_id);
                 assert_eq!(*agent_id, hook_id(HOOK_ROOT));
                 assert_eq!(reason, "bash", "empty reason falls back to the tool name");
@@ -2600,11 +2658,14 @@ mod tests {
             "toolCallId": "call_1", "toolName": "bash", "approved": true,
         }));
         match &evs[..] {
-            [AgentEvent::Identity { .. }, AgentEvent::ActivityStart {
-                agent_id,
-                tool_use_id,
-                detail,
-            }] => {
+            [
+                AgentEvent::Identity { .. },
+                AgentEvent::ActivityStart {
+                    agent_id,
+                    tool_use_id,
+                    detail,
+                },
+            ] => {
                 assert_eq!(*agent_id, hook_id(HOOK_ROOT));
                 assert_eq!(tool_use_id.as_deref(), Some("call_1"));
                 assert_eq!(detail.as_ref().map(|d| d.display()), Some("bash"));
@@ -2622,10 +2683,13 @@ mod tests {
             "reason": "denied by user",
         }));
         match &evs[..] {
-            [AgentEvent::Identity { .. }, AgentEvent::ActivityEnd {
-                agent_id,
-                tool_use_id,
-            }] => {
+            [
+                AgentEvent::Identity { .. },
+                AgentEvent::ActivityEnd {
+                    agent_id,
+                    tool_use_id,
+                },
+            ] => {
                 assert_eq!(*agent_id, hook_id(HOOK_ROOT));
                 assert_eq!(tool_use_id.as_deref(), Some("call_1"));
             }
@@ -2635,11 +2699,13 @@ mod tests {
 
     #[test]
     fn an_unknown_hook_type_decodes_to_nothing() {
-        assert!(hook(serde_json::json!({
-            "type": "credential_disabled", "sessionFile": HOOK_ROOT,
-            "sessionId": "x", "cwd": "/repo",
-        }))
-        .is_empty());
+        assert!(
+            hook(serde_json::json!({
+                "type": "credential_disabled", "sessionFile": HOOK_ROOT,
+                "sessionId": "x", "cwd": "/repo",
+            }))
+            .is_empty()
+        );
         assert!(hook(serde_json::json!({"no_type": true})).is_empty());
     }
 
@@ -2688,7 +2754,10 @@ mod tests {
             "sessionId": "x", "cwd": "/repo",
         }));
         match &evs[..] {
-            [AgentEvent::SessionStart { agent_id, .. }, AgentEvent::Identity { .. }] => {
+            [
+                AgentEvent::SessionStart { agent_id, .. },
+                AgentEvent::Identity { .. },
+            ] => {
                 assert_eq!(
                     *agent_id,
                     AgentId::from_parts("omp", &omp_id_from_path(Path::new(&folded)))

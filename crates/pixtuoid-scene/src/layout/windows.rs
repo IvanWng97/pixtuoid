@@ -4,7 +4,7 @@
 
 use std::ops::Range;
 
-use super::{SceneLayout, ELEVATOR_W};
+use super::{ELEVATOR_W, SceneLayout};
 
 /// A window's width, frame included — fixed, so the skyline detail reads the
 /// same on every terminal.
@@ -110,7 +110,7 @@ pub(crate) fn window_frame(dx: u16, dy: u16, h: u16) -> bool {
 
 impl SceneLayout {
     /// The windows this office's north wall shows, left to right.
-    pub(crate) fn window_bays(&self) -> impl Iterator<Item = WindowBay> {
+    pub(crate) fn window_bays(&self) -> impl Iterator<Item = WindowBay> + use<> {
         window_bays(self.buf_w, self.door.map(|d| d.x..d.x + ELEVATOR_W))
     }
 }

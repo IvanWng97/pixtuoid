@@ -126,8 +126,8 @@ pub(crate) fn star_hit_rect(scene_rect: Rect) -> Option<Rect> {
 mod tests {
     use super::*;
     use crate::tui::widgets::StateCounts;
-    use pixtuoid_core::state::DaemonState;
     use pixtuoid_core::SceneState;
+    use pixtuoid_core::state::DaemonState;
     use std::time::SystemTime;
 
     fn full_bounds(w: u16, h: u16) -> Rect {
@@ -145,8 +145,8 @@ mod tests {
 
     #[test]
     fn wall_board_renders_the_three_model_lines_over_the_panel() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
         // Uptime reads the scene, empty here → "<1m". A gateway + no floor
         // exercises the L3 chip and the single-floor (no breadcrumb) context.
         let counts = StateCounts {

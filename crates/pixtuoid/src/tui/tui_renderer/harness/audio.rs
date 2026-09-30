@@ -2,7 +2,7 @@
 //! renderer must feed the audio thread ONLY the floor being viewed.
 
 use super::*;
-use crate::audio::{drain_frames, AudioHandle};
+use crate::audio::{AudioHandle, drain_frames};
 
 fn active_on(path: &str, floor_idx: usize, desk: usize) -> AgentSlot {
     let mut s = slot(AgentId::from_transcript_path(path), floor_idx, desk, t0());

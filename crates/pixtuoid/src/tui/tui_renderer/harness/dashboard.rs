@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::tui::connection::ConnectionFrame;
-use crate::tui::dashboard::{build_dashboard_rows, DashboardFolds, DashboardFrame};
+use crate::tui::dashboard::{DashboardFolds, DashboardFrame, build_dashboard_rows};
 
 #[test]
 fn dashboard_popup_renders_labels_states_and_live_tool() {
@@ -406,10 +406,10 @@ fn dash_popup(buf: &ratatui::buffer::Buffer) -> String {
     for y in area.y..area.y + area.height {
         let mut row = String::new();
         for x in area.x..area.x + area.width {
-            if let Some(cell) = buf.cell((x, y)) {
-                if cell.bg == bg {
-                    row.push_str(cell.symbol());
-                }
+            if let Some(cell) = buf.cell((x, y))
+                && cell.bg == bg
+            {
+                row.push_str(cell.symbol());
             }
         }
         if !row.trim().is_empty() {

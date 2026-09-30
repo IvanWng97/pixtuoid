@@ -1,10 +1,10 @@
 use std::io::Write;
 use std::path::Path;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use pixtuoid_core::sprite::format::{
-    load_pack, DensityMismatch, FrameCountMismatch, MissingOptional, OrphanDerived, PartialSet,
-    StandIn, ValidationReport,
+    DensityMismatch, FrameCountMismatch, MissingOptional, OrphanDerived, PartialSet, StandIn,
+    ValidationReport, load_pack,
 };
 
 use crate::{cli_stdout, strip_control_chars};

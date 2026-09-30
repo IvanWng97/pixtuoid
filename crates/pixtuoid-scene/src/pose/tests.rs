@@ -879,18 +879,20 @@ fn delegates_to_derive_for_oob_desk() {
     let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
     let mut router = StubRouter::straight();
     let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
-    assert!(derive_with_routing(
-        &slot,
-        now,
-        &l,
-        &mut crate::pose::RouteCtx {
-            router: &mut router,
-            overlay: &overlay,
-            history: &mut history,
-            motion: &mut motion
-        }
-    )
-    .is_none());
+    assert!(
+        derive_with_routing(
+            &slot,
+            now,
+            &l,
+            &mut crate::pose::RouteCtx {
+                router: &mut router,
+                overlay: &overlay,
+                history: &mut history,
+                motion: &mut motion
+            }
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -1448,16 +1450,26 @@ fn exit_far_completes_before_grace_window_no_vanish() {
     let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
     let mut hist = PoseHistory::new();
     let mut motion = HashMap::new();
-    match derive_with_routing(&slot, now, &l, &mut crate::pose::RouteCtx { router: &mut router, overlay: &overlay, history: &mut hist, motion: &mut motion }) {
-            // Walking at the end of the path, or already arrived (None, GC
-            // imminent) — either way NOT stuck mid-corridor.
-            Some(Pose::Walking { t_x1000, .. }) => assert!(
-                t_x1000 >= 950,
-                "far exit must reach the door by the grace window (no mid-corridor vanish), got t_x1000={t_x1000}"
-            ),
-            None => {}
-            other => panic!("expected Walking near the door or None (arrived), got {other:?}"),
-        }
+    match derive_with_routing(
+        &slot,
+        now,
+        &l,
+        &mut crate::pose::RouteCtx {
+            router: &mut router,
+            overlay: &overlay,
+            history: &mut hist,
+            motion: &mut motion,
+        },
+    ) {
+        // Walking at the end of the path, or already arrived (None, GC
+        // imminent) — either way NOT stuck mid-corridor.
+        Some(Pose::Walking { t_x1000, .. }) => assert!(
+            t_x1000 >= 950,
+            "far exit must reach the door by the grace window (no mid-corridor vanish), got t_x1000={t_x1000}"
+        ),
+        None => {}
+        other => panic!("expected Walking near the door or None (arrived), got {other:?}"),
+    }
     let dur = motion[&slot.agent_id]
         .exit
         .as_ref()
@@ -1628,7 +1640,7 @@ fn entry_walk_coordinates_are_continuous() {
 /// the desk's stamped ground — it is not a property every chair has.
 #[test]
 fn desk_approach_cell_is_never_inside_the_blocked_desk() {
-    use crate::layout::{furniture_def, Facing, Furniture, OBSTACLE_PAD_PX};
+    use crate::layout::{Facing, Furniture, OBSTACLE_PAD_PX, furniture_def};
     let l = layout();
     // The ONE table `mask::stamp_ground` reads, so this can't drift when the sprite is resized.
     let def = furniture_def(Furniture::Desk);
@@ -1784,10 +1796,10 @@ fn wander_legs_approach_the_desk_via_an_allowed_side_not_through_the_front() {
         let Some(snap) = motion.get(&trip_id).and_then(|m| m.walk_path.as_ref()) else {
             continue;
         };
-        if let (Some(&f), Some(&la)) = (snap.path.first(), snap.path.last()) {
-            if !seen_ends.contains(&(f, la)) {
-                seen_ends.push((f, la));
-            }
+        if let (Some(&f), Some(&la)) = (snap.path.first(), snap.path.last())
+            && !seen_ends.contains(&(f, la))
+        {
+            seen_ends.push((f, la));
         }
         if snap.path.first() == Some(&chair) {
             saw_out = true;
@@ -2019,9 +2031,9 @@ fn wander_interrupted_by_active_does_not_teleport() {
         }
     }
     assert!(
-            max_step <= MAX_FRAME_STEP_PX,
-            "interrupted wander teleported back to desk: max frame jump {max_step}px (> {MAX_FRAME_STEP_PX})"
-        );
+        max_step <= MAX_FRAME_STEP_PX,
+        "interrupted wander teleported back to desk: max frame jump {max_step}px (> {MAX_FRAME_STEP_PX})"
+    );
 }
 
 #[test]
@@ -2193,9 +2205,9 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
         .abs()
         .max((first_exit.y as i32 - last.y as i32).abs());
     assert!(
-            jump <= MAX_FRAME_STEP_PX,
-            "exit-while-wandering teleported {jump}px from the waypoint ({last:?}) to the exit start ({first_exit:?})"
-        );
+        jump <= MAX_FRAME_STEP_PX,
+        "exit-while-wandering teleported {jump}px from the waypoint ({last:?}) to the exit start ({first_exit:?})"
+    );
 
     let mut prev = first_exit;
     let mut max_step = 0i32;
@@ -2259,9 +2271,9 @@ fn wander_continuous_across_layouts_and_agents() {
             // ~20 s ⇒ 2–3 full wander cycles per agent.
             let (max_step, _) = max_anchor_step(&slot, &l, now, 600, true);
             assert!(
-                    max_step <= MAX_FRAME_STEP_PX,
-                    "geometry {w}x{h} seed={seed} desk={k}: max frame jump {max_step}px (> {MAX_FRAME_STEP_PX})"
-                );
+                max_step <= MAX_FRAME_STEP_PX,
+                "geometry {w}x{h} seed={seed} desk={k}: max frame jump {max_step}px (> {MAX_FRAME_STEP_PX})"
+            );
         }
     }
 }
@@ -2369,9 +2381,9 @@ fn frozen_leg_anchor_continuous_across_router_shape_change() {
         }
     }
     assert!(
-            max_step <= 20,
-            "frozen leg must keep the anchor continuous despite a mid-leg router shape change (max jump {max_step}px)"
-        );
+        max_step <= 20,
+        "frozen leg must keep the anchor continuous despite a mid-leg router shape change (max jump {max_step}px)"
+    );
 }
 
 #[test]
@@ -2410,10 +2422,10 @@ fn multiple_agents_share_overlay_without_teleport() {
         // that re-routes the other walkers.
         overlay.clear();
         for s in &slots {
-            if let Some(Pose::AtWaypoint { wp, .. }) = derive(s, t, &l) {
-                if let Some(w) = l.waypoints.get(wp) {
-                    overlay.add(w.pos.x.saturating_sub(4), w.pos.y.saturating_sub(6), 8, 12);
-                }
+            if let Some(Pose::AtWaypoint { wp, .. }) = derive(s, t, &l)
+                && let Some(w) = l.waypoints.get(wp)
+            {
+                overlay.add(w.pos.x.saturating_sub(4), w.pos.y.saturating_sub(6), 8, 12);
             }
         }
         for s in &slots {

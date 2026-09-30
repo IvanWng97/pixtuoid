@@ -18,9 +18,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::AgentId;
 use crate::source::exit_watch::ExitWatch;
 use crate::source::{AgentEvent, TaggedSender, Transport};
-use crate::AgentId;
 
 /// Cloneable handle (one per hook connection task) over a shared pid→agents
 /// registry + the process-exit watcher.

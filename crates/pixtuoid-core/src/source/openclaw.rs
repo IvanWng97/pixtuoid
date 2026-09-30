@@ -19,7 +19,7 @@
 
 use std::num::NonZeroU16;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde_json::Value;
 
 use crate::source::daemon::{DaemonPresenceUpdate, DecodedPresence};
@@ -145,10 +145,11 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<DecodedPresence> {
     // for a mid-attached daemon; prepend it so the pid is adopted before the state
     // update applies. An unmapped event stays empty — a lone `PidSeen` would
     // resurrect nothing.
-    if event != "gateway_start" && !out.is_empty() {
-        if let Some(pid) = pid {
-            out.insert(0, DaemonPresenceUpdate::PidSeen { pid });
-        }
+    if event != "gateway_start"
+        && !out.is_empty()
+        && let Some(pid) = pid
+    {
+        out.insert(0, DaemonPresenceUpdate::PidSeen { pid });
     }
     Ok(DecodedPresence {
         instance,

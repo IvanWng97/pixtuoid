@@ -7,8 +7,8 @@ use serde::Deserialize;
 use crate::grid::Grid;
 use crate::sprite::error::{ColorError, KeySite, LineError, PackError, SpriteError};
 use crate::sprite::{
-    Frame, HeadMark, HeadView, IndexedFrame, Mark, Palette, PaletteIndex, Pixel, Rgb, Sprite,
-    HEAD_MARK, PALETTE_CAPACITY,
+    Frame, HEAD_MARK, HeadMark, HeadView, IndexedFrame, Mark, PALETTE_CAPACITY, Palette,
+    PaletteIndex, Pixel, Rgb, Sprite,
 };
 
 type Result<T, E = PackError> = std::result::Result<T, E>;
@@ -414,9 +414,10 @@ mod tests {
         let front = mop.layers(HeadView::Front).expect("a front view");
         assert_eq!(front.behind().and_then(|l| l.head(0)).map(|h| h.y), Some(1));
         assert!(front.over().is_some());
-        assert!(mop
-            .layers(HeadView::Back)
-            .is_some_and(|l| l.behind().is_none()));
+        assert!(
+            mop.layers(HeadView::Back)
+                .is_some_and(|l| l.behind().is_none())
+        );
         assert!(mop.layers(HeadView::Side).is_none());
         assert_eq!(
             pack.character_outline(),
@@ -1316,13 +1317,13 @@ fn build_pack(
             .collect()
     };
     let densities: std::collections::BTreeSet<_> = hairstyles.values().map(|s| s.density).collect();
-    if let [first, rest @ ..] = densities.iter().copied().collect::<Vec<_>>().as_slice() {
-        if let Some(d) = rest.iter().find(|&&d| names_at(d) != names_at(*first)) {
-            return Err(PackError::HairstylesDiffer {
-                first: first.get(),
-                other: d.get(),
-            });
-        }
+    if let [first, rest @ ..] = densities.iter().copied().collect::<Vec<_>>().as_slice()
+        && let Some(d) = rest.iter().find(|&&d| names_at(d) != names_at(*first))
+    {
+        return Err(PackError::HairstylesDiffer {
+            first: first.get(),
+            other: d.get(),
+        });
     }
 
     Ok(Pack {
@@ -1989,14 +1990,12 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
             // draws nothing; an empty OPTIONAL entry also SHADOWS the embedded
             // default in `Pack::merge_from` (`contains_key` is true).
             .map_or(1, |&(_, min)| min);
-        if let Some(anim) = pack.animation(name) {
-            if anim.frames().len() < min_frames {
-                report.insufficient_frames.push((
-                    name.to_string(),
-                    min_frames,
-                    anim.frames().len(),
-                ));
-            }
+        if let Some(anim) = pack.animation(name)
+            && anim.frames().len() < min_frames
+        {
+            report
+                .insufficient_frames
+                .push((name.to_string(), min_frames, anim.frames().len()));
         }
     };
     for name in registered_animation_names() {

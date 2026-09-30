@@ -4,12 +4,12 @@ use tempfile::TempDir;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 
-use pixtuoid_core::source::codex::CodexSource;
-use pixtuoid_core::source::jsonl::ChildEndUnclaims;
+use pixtuoid_core::AgentId;
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::source::Source;
 use pixtuoid_core::source::Transport;
-use pixtuoid_core::AgentId;
+use pixtuoid_core::source::codex::CodexSource;
+use pixtuoid_core::source::jsonl::ChildEndUnclaims;
 
 use crate::{cc_subagent_line, cc_watcher, fast_watch, write_lines};
 
@@ -45,11 +45,10 @@ async fn child_end_unclaim_lets_a_turn_n_plus_1_append_re_register() {
     while tokio::time::Instant::now() < deadline {
         if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
             tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && agent_id == expected
         {
-            if agent_id == expected {
-                registered = true;
-                break;
-            }
+            registered = true;
+            break;
         }
     }
     assert!(registered, "turn N must register the child transcript");
@@ -83,11 +82,10 @@ async fn child_end_unclaim_lets_a_turn_n_plus_1_append_re_register() {
         while tokio::time::Instant::now() < wait_until {
             if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
                 tokio::time::timeout(Duration::from_millis(100), rx.recv()).await
+                && agent_id == expected
             {
-                if agent_id == expected {
-                    revived = true;
-                    break;
-                }
+                revived = true;
+                break;
             }
         }
     }

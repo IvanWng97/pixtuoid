@@ -4,17 +4,17 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::source::decoder::{
-    cwd_basename_label, ellipsize, make_tool_detail, parsed_tail_lines, TailActivity,
-    MAX_DECODED_FIELD_CHARS,
+    MAX_DECODED_FIELD_CHARS, TailActivity, cwd_basename_label, ellipsize, make_tool_detail,
+    parsed_tail_lines,
 };
 
-use crate::source::AgentEvent;
 use crate::AgentId;
+use crate::source::AgentEvent;
 
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
-pub use native::{cc_watcher, live_cc_session_ids, ClaudeCodeSource};
+pub use native::{ClaudeCodeSource, cc_watcher, live_cc_session_ids};
 
 /// homebrew-core contract: their formula's `test do` asserts this exact id, so
 /// renaming it breaks Homebrew's CI on the next autobump. Coordinate a core PR.
@@ -94,17 +94,17 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
             .filter(|s| !s.is_empty())
             .map(|p| cc_id_from_path(Path::new(&crate::id::normalize_path_key(p))))
             .filter(|s| !s.is_empty());
-        if let Some(ref k) = path_key {
-            if *k != prefixed {
-                // Upstream scheme change: hook-FIRST Start registrations go phantom.
-                crate::source::drift::shape_drift(
-                    SOURCE_NAME,
-                    &format!(
-                        "SubagentStop transcript stem `{k}` != prefixed agent_id \
+        if let Some(ref k) = path_key
+            && *k != prefixed
+        {
+            // Upstream scheme change: hook-FIRST Start registrations go phantom.
+            crate::source::drift::shape_drift(
+                SOURCE_NAME,
+                &format!(
+                    "SubagentStop transcript stem `{k}` != prefixed agent_id \
                          `{prefixed}`; keying on the stem"
-                    ),
-                );
-            }
+                ),
+            );
         }
         Ok(Some(vec![AgentEvent::SessionEnd {
             agent_id: AgentId::from_parts(SOURCE_NAME, &path_key.unwrap_or(prefixed)),
@@ -221,14 +221,14 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
         out.push(AgentEvent::Rename { agent_id, label });
     }
 
-    if ty == "attachment" {
-        if let Some(effort) = attachment_effort(obj) {
-            out.push(AgentEvent::ModelInfo {
-                agent_id,
-                model: None,
-                effort: Some(effort.to_string()),
-            });
-        }
+    if ty == "attachment"
+        && let Some(effort) = attachment_effort(obj)
+    {
+        out.push(AgentEvent::ModelInfo {
+            agent_id,
+            model: None,
+            effort: Some(effort.to_string()),
+        });
     }
 
     let Some(message) = message else {
@@ -1159,7 +1159,9 @@ mod cc_id_tests {
 
     #[test]
     fn cc_id_from_path_subagent_is_agent_stem() {
-        let p = Path::new("/Users/me/.claude/projects/-Users-me-proj/01000000-0000-7000-8000-0000000000cc/subagents/agent-a0a7dc28dd772bd0d.jsonl");
+        let p = Path::new(
+            "/Users/me/.claude/projects/-Users-me-proj/01000000-0000-7000-8000-0000000000cc/subagents/agent-a0a7dc28dd772bd0d.jsonl",
+        );
         assert_eq!(cc_id_from_path(p), "agent-a0a7dc28dd772bd0d");
     }
 

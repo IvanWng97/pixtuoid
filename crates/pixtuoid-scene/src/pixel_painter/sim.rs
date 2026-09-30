@@ -19,16 +19,16 @@ use crate::chitchat::{self, ActiveChitchat, ChitchatBubble, VenueKey};
 use crate::creatures::{gateway_mascot_def, mascot_position, mascot_seed, pet_position};
 use crate::floor::{CoffeeState, FloorMeta, LightingState};
 use crate::layout::{Anchor, Layout, Point, Size, WALKING_Y_OFF};
-use crate::motion::{walking_position, MotionState};
+use crate::motion::{MotionState, walking_position};
 use crate::pathfind::Router;
 use crate::pet::{Pet, PetKind, PetState};
 use crate::pose::{self, Pose, PoseHistory};
 
 use super::anchors::{
-    keep_sprite_on_canvas, walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath,
-    CHARACTER_SPRITE_W,
+    CHARACTER_SPRITE_W, keep_sprite_on_canvas, walking_anchor, waypoint_anchor,
+    waypoint_rank_offset_x, with_breath,
 };
-use super::seat::{settle_seat, Seat};
+use super::seat::{Seat, settle_seat};
 
 /// The mutable world state one `sim_step` advances.
 pub(crate) struct SimStores<'a> {
@@ -270,22 +270,22 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
         let Some(pose) = pose::derive(agent, now, layout) else {
             continue;
         };
-        if let Pose::AtWaypoint { wp, .. } = pose {
-            if let Some(w) = layout.waypoints.get(wp) {
-                // Reserve the cell the agent actually stands on, NOT the
-                // blocked furniture center — else another agent's A* routes
-                // straight through the stander.
-                let origin = layout
-                    .home_desk(agent.desk_index.single_floor_local())
-                    .unwrap_or(w.pos);
-                let stand = layout.stand_point(w.kind, w.pos, origin, w.facing);
-                stores.overlay.add(
-                    stand.x.saturating_sub(char_w / 2),
-                    stand.y.saturating_sub(WALKING_Y_OFF / 2),
-                    char_w,
-                    WALKING_Y_OFF,
-                );
-            }
+        if let Pose::AtWaypoint { wp, .. } = pose
+            && let Some(w) = layout.waypoints.get(wp)
+        {
+            // Reserve the cell the agent actually stands on, NOT the
+            // blocked furniture center — else another agent's A* routes
+            // straight through the stander.
+            let origin = layout
+                .home_desk(agent.desk_index.single_floor_local())
+                .unwrap_or(w.pos);
+            let stand = layout.stand_point(w.kind, w.pos, origin, w.facing);
+            stores.overlay.add(
+                stand.x.saturating_sub(char_w / 2),
+                stand.y.saturating_sub(WALKING_Y_OFF / 2),
+                char_w,
+                WALKING_Y_OFF,
+            );
         }
     }
 
@@ -466,11 +466,7 @@ fn desk_props(
                     let fresh = now
                         .duration_since(*t)
                         .is_ok_and(|d| d.as_secs() < CoffeeState::STEAM_WINDOW_SECS);
-                    if fresh {
-                        Cup::Steaming
-                    } else {
-                        Cup::Cold
-                    }
+                    if fresh { Cup::Steaming } else { Cup::Cold }
                 }),
                 token_tier: occupant.map_or(0, |a| crate::token_meter::token_tier(a.tokens_used)),
                 sheet_fall: occupant.and_then(|a| crate::token_meter::sheet_fall_dist(a, now)),

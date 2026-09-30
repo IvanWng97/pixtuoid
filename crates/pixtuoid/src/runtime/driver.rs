@@ -10,11 +10,12 @@
 //! tested here, as the headless loop's signal and stdout are.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
+use pixtuoid_core::source::DynSource;
 use pixtuoid_core::source::antigravity::AntigravitySource;
 use pixtuoid_core::source::claude_code::ClaudeCodeSource;
 use pixtuoid_core::source::codex::CodexSource;
@@ -24,15 +25,14 @@ use pixtuoid_core::source::grok::GrokSource;
 use pixtuoid_core::source::hook::HookRouter;
 use pixtuoid_core::source::jsonl::ChildEndUnclaims;
 use pixtuoid_core::source::omp::OmpSource;
-use pixtuoid_core::source::DynSource;
 use pixtuoid_core::state::MAX_FLOORS;
 use pixtuoid_core::{Reducer, SceneState, TaggedReceiver};
 use tokio::sync::watch;
 
 use super::gate;
 use super::{
-    boot_capacities_for, resolve_boot_caps, summarize, ConnectedSources, RunConfig, SceneRx,
-    FALLBACK_DESKS,
+    ConnectedSources, FALLBACK_DESKS, RunConfig, SceneRx, boot_capacities_for, resolve_boot_caps,
+    summarize,
 };
 
 pub fn run(cfg: RunConfig) -> Result<()> {

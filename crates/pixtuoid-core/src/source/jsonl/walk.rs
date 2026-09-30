@@ -7,10 +7,10 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
+use crate::AgentId;
 use crate::source::decoder::{CwdExtractor, SUBAGENTS_DIR};
 use crate::source::registry::cwd_extractor_for;
 use crate::source::{AgentEvent, TaggedSender, Transport};
-use crate::AgentId;
 
 use super::health::FailureLatch;
 use super::liveness::{probe_admits, revouch_gated_files};
@@ -160,7 +160,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
             return;
         }
     };
-    use crate::source::admit::{classify, Entry};
+    use crate::source::admit::{Entry, classify};
     // Shared with the offline drivers, so a fixture can never be recorded from a
     // file production would not read (#931).
     let entry = classify(&meta, path, &|p| (decoders.path_filter)(p));
@@ -337,11 +337,11 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     let extract = cwd_extractor_for(source);
     let mut first_sight_cwd = extract_cwd(new_bytes, extract);
     let mut head_label = None;
-    if first_sight_cwd.is_none() && seen.lock().await.get(path) != Some(&true) {
-        if let Some(head) = read_head(path, MAX_PENDING_BYTES).await {
-            (first_sight_cwd, head_label) =
-                extract_head_fields(&head, extract, decoders.head_label);
-        }
+    if first_sight_cwd.is_none()
+        && seen.lock().await.get(path) != Some(&true)
+        && let Some(head) = read_head(path, MAX_PENDING_BYTES).await
+    {
+        (first_sight_cwd, head_label) = extract_head_fields(&head, extract, decoders.head_label);
     }
     if !matches!(
         (decoders.activity_recency)(new_bytes),

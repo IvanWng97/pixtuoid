@@ -8,8 +8,8 @@ use notify::{Config, PollWatcher, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
-use crate::source::exit_watch::ExitWatch;
 use crate::source::TaggedSender;
+use crate::source::exit_watch::ExitWatch;
 
 mod health;
 mod liveness;
@@ -25,8 +25,8 @@ pub use unclaim::ChildEndUnclaims;
 
 pub(crate) use health::FailureLatch;
 use liveness::{
-    emit_proof_of_life, emit_session_exit, refresh_probe_snapshot, ProbeLadder,
-    NEGATIVE_VOUCH_MIN_SPAN,
+    NEGATIVE_VOUCH_MIN_SPAN, ProbeLadder, emit_proof_of_life, emit_session_exit,
+    refresh_probe_snapshot,
 };
 use unclaim::drain_child_end_unclaims;
 use walk::{scan_root, walk_jsonl};

@@ -1,5 +1,5 @@
 use super::*;
-use crate::install::target::{MergeOutcome, Target, CLAUDE, CODEX, OPENCLAW};
+use crate::install::target::{CLAUDE, CODEX, MergeOutcome, OPENCLAW, Target};
 
 /// Callers must hold `TEST_ENV_LOCK` first, declared BEFORE this guard: locals
 /// drop in reverse order, so the env restore happens while the lock is held.
@@ -11,7 +11,8 @@ struct EnvVarOverride {
 impl EnvVarOverride {
     fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
         let prior = std::env::var_os(key);
-        std::env::set_var(key, value);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var(key, value) };
         Self { key, prior }
     }
 }
@@ -19,8 +20,10 @@ impl EnvVarOverride {
 impl Drop for EnvVarOverride {
     fn drop(&mut self) {
         match self.prior.take() {
-            Some(v) => std::env::set_var(self.key, v),
-            None => std::env::remove_var(self.key),
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var(self.key, v) },
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var(self.key) },
         }
     }
 }
@@ -247,15 +250,20 @@ fn empty_env_override_counts_as_unset_at_the_live_read() {
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let saved = std::env::var_os("PIXTUOID_HOOK");
-    std::env::set_var("PIXTUOID_HOOK", "");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("PIXTUOID_HOOK", "") };
     let empty = io::nonempty_env("PIXTUOID_HOOK");
-    std::env::set_var("PIXTUOID_HOOK", "   ");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("PIXTUOID_HOOK", "   ") };
     let blank = io::nonempty_env("PIXTUOID_HOOK");
-    std::env::set_var("PIXTUOID_HOOK", "/real/hook");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("PIXTUOID_HOOK", "/real/hook") };
     let real = io::nonempty_env("PIXTUOID_HOOK");
     match saved {
-        Some(v) => std::env::set_var("PIXTUOID_HOOK", v),
-        None => std::env::remove_var("PIXTUOID_HOOK"),
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var("PIXTUOID_HOOK", v) },
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var("PIXTUOID_HOOK") },
     }
     assert_eq!(empty, None);
     assert_eq!(blank, None);

@@ -15,15 +15,15 @@ mod welcome;
 pub(super) use connection::paint_connection_panel;
 pub(super) use dashboard::paint_dashboard;
 pub(super) use elevator::paint_elevator_indicator;
-pub(super) use footer::{paint_footer, FooterStats};
+pub(super) use footer::{FooterStats, paint_footer};
 pub(super) use help::paint_help_overlay;
-pub(crate) use panel::{borderless_panel, Overflow, Panel, PanelGeometry};
+pub(crate) use panel::{Overflow, Panel, PanelGeometry, borderless_panel};
 pub(super) use theme_picker::paint_theme_picker;
 pub use tooltip::paint_chitchat_bubbles;
+pub(crate) use tooltip::{TooltipAt, paint_hover_tooltip, paint_label_widgets};
 pub(super) use tooltip::{
     paint_coffee_tooltip, paint_furniture_tooltip, paint_mascot_tooltip, paint_pet_tooltip,
 };
-pub(crate) use tooltip::{paint_hover_tooltip, paint_label_widgets, TooltipAt};
 pub(super) use version_popup::{paint_version_popup, release_url, version_popup_url_rect};
 pub(super) use wall_board::{paint_wall_display, star_hit_rect};
 pub(super) use welcome::paint_welcome;

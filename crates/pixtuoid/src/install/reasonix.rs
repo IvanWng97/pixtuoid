@@ -16,13 +16,13 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, anyhow};
+use serde_json::{Value, json};
 
+use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::merge;
 use crate::install::target::MergeOutcome;
-use crate::install::SENTINEL_KEY;
 
 /// Events we register == events we decode, enforced by
 /// `every_registered_reasonix_event_decodes` below. PostToolUseFailure /
@@ -403,14 +403,17 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var_os("APPDATA");
-        std::env::set_var("APPDATA", r"C:\Users\ada\AppData\Roaming");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("APPDATA", r"C:\Users\ada\AppData\Roaming") };
         assert_eq!(
             user_config_dir(),
             Some(PathBuf::from(r"C:\Users\ada\AppData\Roaming"))
         );
         match saved {
-            Some(v) => std::env::set_var("APPDATA", v),
-            None => std::env::remove_var("APPDATA"),
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var("APPDATA", v) },
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var("APPDATA") },
         }
     }
 
