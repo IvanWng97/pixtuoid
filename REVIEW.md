@@ -4,10 +4,10 @@ Read [`AGENTS.md`](AGENTS.md) first; these rules add to generic defect hunting.
 
 ## Scope
 
-- A lens bot applies [What to check](#what-to-check) and its
-  [lens](#lenses); the **correctness** bot also applies every matching
-  non-local [escalation](#escalation) row and names the local rows in its
-  summary.
+- A lens bot applies [What to check](#what-to-check), its [lens](#lenses)
+  and [Re-review](#re-review); the **correctness** bot also applies every
+  matching non-local [escalation](#escalation) row and names the local rows in
+  its summary.
 - A local row lens applies only its [row](#escalation).
 - All apply [Do not flag](#do-not-flag), the Lenses preamble,
   [Severity](#severity) and [Output](#output).
@@ -171,8 +171,12 @@ taste are never posted. Dispositions:
 - `issue (non-blocking)` — any other real defect this PR introduced.
 - `issue (pre-existing)` — real, not introduced here.
 
-The labels are [`review-schema.json`](.github/prompts/review-schema.json)'s
-`severity` enum.
+## Re-review
+
+When `.claude-review/prior-threads.json`, this lens's own threads on the PR,
+is non-empty, post only new `issue (blocking)` findings and never re-flag one
+that already has a thread, resolved or not
+([re-review convergence](https://code.claude.com/docs/en/code-review#what-you-can-tune)).
 
 ## Output
 
