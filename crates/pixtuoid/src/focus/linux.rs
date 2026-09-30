@@ -111,10 +111,9 @@ fn x11_window_of(pid: i32) -> Option<u32> {
         if let Ok(Ok(prop)) = conn
             .get_property(false, win, net_wm_pid, AtomEnum::CARDINAL, 0, 1)
             .map(|c| c.reply())
+            && prop.value32().and_then(|mut v| v.next()) == Some(pid as u32)
         {
-            if prop.value32().and_then(|mut v| v.next()) == Some(pid as u32) {
-                return Some(win);
-            }
+            return Some(win);
         }
     }
     None

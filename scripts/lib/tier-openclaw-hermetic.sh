@@ -79,9 +79,8 @@ FAILED=0
 # 120x0.25s for ONE real gateway predates that work. So "a real gateway appears" is
 # an established ~30s class and "a hermetic transition lands" an 8s one, with no
 # single correct shared value — a shared helper would take the timing as parameters
-# and hide ~12 lines behind a 4-argument interface. The drift that actually bit (a
-# `daemons=` format change rotting a script unseen) is caught by the recipes, not by
-# sharing this. In-FILE duplication WAS collapsed: `expect` delegates here.
+# and hide ~12 lines behind a 4-argument interface. In-FILE duplication WAS
+# collapsed: `expect` delegates here.
 expect_line() {
     local want="$1" label="$2" last
     for _ in $(seq 1 40); do

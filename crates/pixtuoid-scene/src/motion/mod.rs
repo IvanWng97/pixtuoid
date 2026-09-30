@@ -446,10 +446,10 @@ fn spot_claims(motion: &HashMap<AgentId, MotionState>, exclude: AgentId) -> Spot
         if *id == exclude || matches!(ms.wander.phase, WanderPhase::Seated) {
             continue;
         }
-        if let WanderKind::Named { wp_idx, kind, .. } = ms.wander.target.kind {
-            if crate::layout::furniture_def(kind.furniture()).exclusive {
-                claims.claim(wp_idx);
-            }
+        if let WanderKind::Named { wp_idx, kind, .. } = ms.wander.target.kind
+            && crate::layout::furniture_def(kind.furniture()).exclusive
+        {
+            claims.claim(wp_idx);
         }
     }
     claims

@@ -181,14 +181,13 @@ pub struct ToolTally {
 pub(crate) fn footer_tool_tally(scene: &SceneState) -> Vec<ToolTally> {
     let mut tool_counts: HashMap<String, (ToolKind, usize)> = HashMap::new();
     for slot in scene.agents.values() {
-        if let ActivityState::Active { detail, kind, .. } = &slot.state {
-            if let Some(token) = detail
+        if let ActivityState::Active { detail, kind, .. } = &slot.state
+            && let Some(token) = detail
                 .as_deref()
                 .and_then(|d| d.split(|c: char| !c.is_alphanumeric()).next())
                 .filter(|t| !t.is_empty())
-            {
-                tool_counts.entry(token.to_string()).or_insert((*kind, 0)).1 += 1;
-            }
+        {
+            tool_counts.entry(token.to_string()).or_insert((*kind, 0)).1 += 1;
         }
     }
     let mut tools: Vec<ToolTally> = tool_counts

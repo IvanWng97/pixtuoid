@@ -134,10 +134,10 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     {
         // The 8.3 short name is metachar-free by construction, so the command
         // drops back to the direct-exec path — immune to grok's shell cascade.
-        if let Some(short) = crate::install::hook_cmd::windows_short_path(path) {
-            if !needs_shell_route(&short) {
-                return Ok(short);
-            }
+        if let Some(short) = crate::install::hook_cmd::windows_short_path(path)
+            && !needs_shell_route(&short)
+        {
+            return Ok(short);
         }
         // 8.3 disabled on the volume: the PowerShell call-operator form, correct
         // for grok's DEFAULT shells. A Git-Bash or `GROK_SHELL=cmd` setup with a
@@ -239,10 +239,10 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
                          would attribute to claude-code and be dropped; reconnect grok"
                     ));
                 }
-                if let Some(cmd) = handler.get("command").and_then(|c| c.as_str()) {
-                    if let Some(path) = extract_shim_path(cmd) {
-                        shim = ShimRef::Absolute(path);
-                    }
+                if let Some(cmd) = handler.get("command").and_then(|c| c.as_str())
+                    && let Some(path) = extract_shim_path(cmd)
+                {
+                    shim = ShimRef::Absolute(path);
                 }
             }
         }

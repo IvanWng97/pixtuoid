@@ -29,10 +29,10 @@ pub(crate) fn default_socket_path() -> PathBuf {
     {
         // XDG spec: absolute-only. Empty → `/pixtuoid.sock` (fatal bind); relative →
         // shim/daemon cwd mis-rendezvous. Non-absolute is invalid → treated as unset.
-        if let Some(dir) = path_env("XDG_RUNTIME_DIR") {
-            if dir.is_absolute() {
-                return dir.join("pixtuoid.sock");
-            }
+        if let Some(dir) = path_env("XDG_RUNTIME_DIR")
+            && dir.is_absolute()
+        {
+            return dir.join("pixtuoid.sock");
         }
         // No XDG_RUNTIME_DIR (macOS, bare Linux): a per-user subdir the daemon
         // creates 0700-owned-by-us, NOT a flat predictable /tmp name. A

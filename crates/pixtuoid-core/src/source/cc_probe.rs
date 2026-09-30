@@ -84,16 +84,15 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
             }
             if let (Some(claimed_ms), Some(actual_secs)) =
                 (reg.started_at_ms, pid_start_time_secs(reg.pid))
+                && (claimed_ms / 1000).abs_diff(actual_secs) > PID_START_TOLERANCE_SECS
             {
-                if (claimed_ms / 1000).abs_diff(actual_secs) > PID_START_TOLERANCE_SECS {
-                    tracing::debug!(
-                        pid = reg.pid,
-                        claimed_secs = claimed_ms / 1000,
-                        actual_secs,
-                        "pid recycled — registry startedAt does not match process start; skipping"
-                    );
-                    continue;
-                }
+                tracing::debug!(
+                    pid = reg.pid,
+                    claimed_secs = claimed_ms / 1000,
+                    actual_secs,
+                    "pid recycled — registry startedAt does not match process start; skipping"
+                );
+                continue;
             }
             match winners.entry(reg.session_id.clone()) {
                 std::collections::hash_map::Entry::Vacant(slot) => {
