@@ -35,8 +35,8 @@ where the rule would otherwise look arbitrary enough to get "fixed" away.
   STAYS.
 - Version adjudication: does THIS diff move the public surface or ship a
   feature, and is the 0.x bump right (patch=fix, minor=feature/breaking)?
-- Comments follow CLAUDE.md's comment rules verbatim (WHY-only, semantic,
-  no length cap for an earned WHY).
+- Comments follow CLAUDE.md's comment rules verbatim (WHY-only; the default
+  is fewer).
 
 ## Sweeps that must LEAVE the diff (a diff read can't see these)
 
@@ -119,7 +119,7 @@ quality lever is the change-specific `<...>` checklist, never the lens name.
 | Generated art / clips | Extract frames and READ them; census the money shot. |
 | Reducer / liveness / motion state machine | Trace the downstream interaction graph (rebind, sweeps, TTLs, polarity) + provenance of every newly-keyed signal. |
 | Public-facing rendered artifact | DRIVE the built page and MEASURE: WCAG in every interactive state, mobile pan, no-JS (#455: state-sweep, not spot-check). |
-| Every diff (this row always fires) | The whole-file comment audit: for EVERY file the diff touches — a one-line change included — read the file's ENTIRE comment population against the CODE and CLAUDE.md's comment rules (accuracy/value/rot/vestigial/self-repetition; one home per story — echoes become references); report N items each WITH a disposition, never "passed". The population is FILES touched, never hunks: a diff-scoped read is how a constant quietly accretes ten comment lines (owner rule, PR #964). |
+| Every diff (this row always fires) | The whole-file comment audit: for EVERY file the diff touches — a one-line change included — read the file's ENTIRE comment population against the CODE and CLAUDE.md's comment rules (accuracy/value/rot/vestigial/self-repetition; one home per story — echoes become references); report N items each WITH a disposition, never "passed"; report the diff's net added comment lines, and list every sentence that could be deleted with nothing lost. The population is FILES touched, never hunks: a diff-scoped read is how a constant quietly accretes ten comment lines (owner rule, PR #964). |
 | Interactive TUI flow | WALK each user path end-to-end: first run, failure branches, the no-CLI user (#359). |
 | `pixtuoid-hook` (the shim) | Audit the WHOLE shim for the never-panic contract: `args_os()`, bounded reads, every error path exit(0) (#198). |
 | Motion / pose / walk-leg | Render and WATCH before the verdict (#61: five regressions shipped past code-only review). |
