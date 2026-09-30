@@ -1,4 +1,5 @@
-/target
+# Any depth: a bench run from a crate directory writes crates/<crate>/target/.
+target/
 **/*.rs.bk
 Cargo.lock.bak
 .DS_Store
