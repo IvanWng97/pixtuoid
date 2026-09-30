@@ -136,11 +136,15 @@ other docs point here): FIXED · REFUTED-with-trace (cite the MECHANISM that
 refutes it — a test, a compile-time constraint, a CI gate; ADD one where none
 exists, never prose) · RE-SCOPED (real and INTRODUCED — or first made reachable — by this
 change, and bigger than the PR: the PR is wrong-sized, split or redesign it
-until the finding is IN scope) · SURFACED (real and PRE-EXISTING — one line
-to the owner, who decides, whether or not this change touched its file; a
-pre-existing defect never grows the PR). Agents never file issues;
-"acknowledged" is not a state. Sweep at the FINAL merge head; check WHICH commit a bot
-re-flag was raised against before re-litigating. Orchestration (dispatch,
+until the finding is IN scope; the split-off half is cited as `→ #N`) ·
+FOLLOW-UP → #N (real and PRE-EXISTING, whether or not this change touched
+its file: a pre-existing defect never grows the PR, but it is FIXED, in PR
+#N, which exists — a draft, or already merged — before this PR merges; a
+defect in another session's tree gets that session's PR number). A
+disposition line that names no live `#N` is not terminal. Agents never
+file issues; "acknowledged" and "surfaced to the owner" are not states.
+Sweep at the FINAL merge head; check WHICH commit a bot re-flag was raised
+against before re-litigating. Orchestration (dispatch,
 premise verify, the fold, the bot-verdict gate), round caps, blocking bar and
 churn budget: the `two-lens-review` skill.
 
