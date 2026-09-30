@@ -100,16 +100,16 @@ unsafe fn create_hook_pipe(
     attributes_ptr: *mut c_void,
     first: bool,
 ) -> std::io::Result<NamedPipeServer> {
-    unsafe {
-        let mut opts = ServerOptions::new();
-        if first {
-            opts.first_pipe_instance(true);
-        }
-        opts.reject_remote_clients(true)
-            .pipe_mode(PipeMode::Byte)
-            .in_buffer_size(IN_BUFFER_SIZE)
-            .create_with_security_attributes_raw(name, attributes_ptr)
+    let mut opts = ServerOptions::new();
+    if first {
+        opts.first_pipe_instance(true);
     }
+    opts.reject_remote_clients(true)
+        .pipe_mode(PipeMode::Byte)
+        .in_buffer_size(IN_BUFFER_SIZE);
+    // SAFETY: this fn's contract — `attributes_ptr` is a well-formed
+    // `SECURITY_ATTRIBUTES` valid for the call.
+    unsafe { opts.create_with_security_attributes_raw(name, attributes_ptr) }
 }
 
 impl Listener {
