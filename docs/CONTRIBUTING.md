@@ -181,7 +181,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    whole-file comment audit: every file the PR touches — even by one line —
    gets its entire comment population re-read against `CLAUDE.md`'s comment
    rules, and the cleanup rides the same PR (population and dispositions:
-   [`pr-review.prompt.md`](../.github/prompts/pr-review.prompt.md)'s
+   [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md)'s
    always-on comment row). Not the merge gate.
 8. **Merge gate (non-negotiable)** — the **two-lens review** (2+ differentiated
    lenses on the diff) + green CI + every online-bot finding dispositioned,
@@ -263,7 +263,7 @@ Advisory backstops that surface risk but never gate:
 - AI-authored PRs get the `needs-human-verify` label and a human visual check.
 - **Every reviewer/bot finding reaches exactly one terminal state in the PR
   thread** — FIXED · REFUTED-with-trace · RE-SCOPED · SURFACED, defined ONCE
-  in [`pr-review.prompt.md`](../.github/prompts/pr-review.prompt.md). Agents
+  in [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md). Agents
   never file issues, and "acknowledged, no action" is not a state.
 
 ### Recurring pitfalls (this codebase's review history, distilled)
@@ -304,6 +304,9 @@ guards; steps 1–3, 11 and 12 are on you.
    unmirrored axis is fail-silent: the watcher polls a directory the CLI
    never writes and the office stays empty (#880). Resolver axes are
    deliberately NOT drift-watched — re-run the probe matrix when the CLI majors.
+   A custom root gets ONE `pub fn <cli>_home()`, called by both the watcher's
+   `default_paths()` and the installer's `default_config_path()` so they
+   can't disagree.
 2. **Write the source module** — `crates/pixtuoid-core/src/source/<name>.rs`:
    `SOURCE_NAME`, a `LineDecoder` fn (one JSONL line → `Vec<AgentEvent>`), a
    label deriver, unit tests per event mapping. Format knowledge lives HERE.
@@ -318,14 +321,16 @@ guards; steps 1–3, 11 and 12 are on you.
    capability flags, `verified_version` + `version_probe`. Lifecycle policy
    derives from the flags; you do **not** edit the reducer.
 5. The descriptor's `name` **is the roster** — `registered_source_names()`
-   projects `REGISTRY`, and the conformance suite then requires a fixture.
-6. **Drop a sanitized real-capture fixture** under
-   `tests/sources/fixtures/<name>/<scenario>/` (see the fixtures README for
+   projects `REGISTRY`, and the conformance suite then requires a fixture. The
+   `sources --json` golden (`crates/pixtuoid/tests/snapshots/cli/sources.json`)
+   must list it: `SNAPSHOTS=overwrite cargo test -p pixtuoid --test cli_json`.
+6. **Drop a sanitized real-capture fixture** exercising the SessionStart hook
+   under `tests/sources/fixtures/<name>/<scenario>/` (see the fixtures README for
    provenance rules), then `cargo insta review`. The conformance harness
    asserts all of a session's events coalesce to ONE `AgentId`. Test-layout
    map: [`crates/pixtuoid-core/tests/CLAUDE.md`](../crates/pixtuoid-core/tests/CLAUDE.md).
-7. **Wire it into `runtime/driver.rs::run_async`** (the registry drives the
-   guard test, not the spawning).
+7. **Wire it into `runtime/driver.rs::build_source_set`** (the one
+   construction site; the registry drives the guard test, not the spawning).
 8. **If the CLI has hooks**, add an `install/` target (a `Target` row +
    `merge_install`/`merge_uninstall` + a `verify_schema` fn mirroring the
    target's own config format + the registered-events↔decoder-arms guard).
@@ -335,8 +340,8 @@ guards; steps 1–3, 11 and 12 are on you.
 10. **Add the per-source badge hue** — a `SourceColors` field + value in EVERY
     theme file + `badge_color` in the manifest row; the coverage, legibility
     and site-bridge tests fail until it exists.
-11. **Docs in the same PR**: the nested `crates/pixtuoid-core/CLAUDE.md` entry,
-    and a `check_upstream_drift.py` row where one is owed — which surfaces owe
+11. **Drift-watch in the same PR**: a `check_upstream_drift.py` row where one
+    is owed — which surfaces owe
     one is `source/drift.rs`'s header, read it there. A row is four steps: the
     const, the `insert` in that crate's `src/drift_surface.rs`,
     `just gen-drift-surface` (commit both fragments), and the `SURFACE_ROWS`

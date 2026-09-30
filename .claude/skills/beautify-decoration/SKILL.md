@@ -24,7 +24,7 @@ A repo-specific iteration loop for visually redesigning a decoration in `pixtuoi
    ↓
 2. cargo build --release --example snapshot
    ↓
-3. ./target/release/examples/snapshot --cols 192 --rows 80 /tmp/snap.png
+3. ./target/release/examples/snapshot /tmp/snap.png
    ↓
 4. .venv/bin/python3 scripts/crop-snapshot.py /tmp/snap.png --scale 3 -q <quadrant>
    (its QUADRANTS table is the zone map — or skip the quadrant guessing: snapshot --crop-furniture pantry|couch|vending|
@@ -56,7 +56,7 @@ The user is the final judge of "does it look like a fridge / coffee machine / et
 
 ### 2. Snapshot size gates the large sprite variants
 
-`examples/snapshot` defaults to 192×80 cells → buffer 192×160. Several layouts (pantry, corridor appliances) have conditional variants based on room dimensions. Corridor items (vending machine, printer) only appear when the cubicle aisle clears `VENDING_MIN_AISLE_*` / `PRINTER_MIN_AISLE_*` (`layout/compute.rs`). The default size clears every gate — don't shrink it while iterating.
+`examples/snapshot` defaults to its `COLS`×`ROWS` cells. Several layouts (pantry, corridor appliances) have conditional variants based on room dimensions. Corridor items (vending machine, printer) only appear when the cubicle aisle clears `VENDING_MIN_AISLE_*` / `PRINTER_MIN_AISLE_*` (`layout/compute.rs`). The default size clears every gate — don't shrink it while iterating.
 
 Pantry-specific threshold: the large `pantry` counter needs the left column to fit `PANTRY_COUNTER_LARGE_W` plus margin (the `pantry_counter_size` pick in `layout/compute.rs`); below that, `pantry_small.sprite` is used (`pixel_painter::pantry_counter_anim`).
 
@@ -117,5 +117,5 @@ Run this checklist before each render you send in a beautify loop, and state eac
 5. Decide where it lives in the layout — add a `Point` placement in `SceneLayout::compute`.
 6. Give it a `Furniture` variant + `furniture_def` row (§6 step 1). A new plant, wall-decor or pod-decor kind is then stamped by its collection's loop in `mask::build_walkable_mask`; a one-off piece also needs a `MaskObstacles` field and its own `stamp_ground` from that row, like `fish_tank` (or add a waypoint kind if it's interactive).
 7. Add a `DrawableKind::Foo` variant + `paint_drawable` arm if z-sorting matters.
-8. Run `cargo test -p pixtuoid-scene` — the layout/walkable-connectivity and painter tests this checklist relies on live there.
+8. Run the connectivity tests (§6 step 3).
 9. Snapshot + iterate.

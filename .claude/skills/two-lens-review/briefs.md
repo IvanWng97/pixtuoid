@@ -88,10 +88,10 @@ Read CLAUDE.md first; read the actual code, not just the diff.
 1. <change-specific claims to verify, one per line — from the impl-plan
    brief in the PR body when one shipped; a finding the plan never named is
    a plan-stage miss — flag it>
-2. The repo-specific traps + the out-of-diff sweeps (the prompt file above).
+2. The repo-specific traps + the out-of-diff sweeps (this file, above).
 3. Run the applicable gates yourself; report the EXIT CODE you observed,
-   never through a pipe. NAME any CI-only gate this diff can red (api-surface,
-   gen-check, wasm-check, windows-test, insta orphans); `--lib` builds
+   never through a pipe. NAME any CI-only gate this diff can red
+   (`docs/CONTRIBUTING.md#ci-gates`); `--lib` builds
    neither bin modules nor examples.
 [the five hard requirements] Your final message is the report.
 ```
@@ -135,10 +135,7 @@ quality lever is the change-specific `<...>` checklist, never the lens name.
 
 ## Orchestrator notes (diff scope)
 
-Dispatch lenses in parallel, in the worktree, in the background. Verify every
-MEDIUM+ finding's premise (read the item's comments) before coding a fix.
-ONE fold commit per round (`plan-miss:` lines for plan misses). Every finding
-reaches exactly one terminal state in the PR thread (this list is CANONICAL —
+Every finding reaches exactly one terminal state in the PR thread (this list is CANONICAL —
 other docs point here): FIXED · REFUTED-with-trace (cite the MECHANISM that
 refutes it — a test, a compile-time constraint, a CI gate; ADD one where none
 exists, never prose) · RE-SCOPED (real and INTRODUCED — or first made reachable — by this
@@ -147,10 +144,9 @@ until the finding is IN scope) · SURFACED (real and PRE-EXISTING — one line
 to the owner, who decides, whether or not this change touched its file; a
 pre-existing defect never grows the PR). Agents never file issues;
 "acknowledged" is not a state. Sweep at the FINAL merge head; check WHICH commit a bot
-re-flag was raised against before re-litigating. Gate on the bot's latest
-COMMENT verdict + `mergeStateStatus`, never the check table; an
-`<!-- absent-… -->` notice is an unreviewed head. Round caps, blocking bar,
-churn budget: the skill's convergence contract.
+re-flag was raised against before re-litigating. Orchestration (dispatch,
+premise verify, the fold, the bot-verdict gate), round caps, blocking bar and
+churn budget: the `two-lens-review` skill.
 
 ## Whole-codebase scope — orchestration
 
