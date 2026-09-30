@@ -86,20 +86,39 @@ assert_reviewability "$resolver_script" "$valid_pr" true "$label approved same-r
 assert_reviewability "$resolver_script" "$fork_wrong_base_pr" false "$label approved fork base" true
 assert_reviewability "$resolver_script" "$fork_closed_pr" false "$label approved fork state" true
 
-# The analyzer prompt names each bot by its review_title and REVIEW.md routes on
-# that name, so a renamed title silently falls to the default route.
+# Each bot's lens must be a REVIEW.md `### <lens>` heading, one bot each, or a
+# lens silently has no bot.
 REVIEW_RULES_FILE="${REVIEW_RULES_FILE:-REVIEW.md}"
-review_scope="$(awk '/^## /{on = ($0 == "## Scope")} on' "$REVIEW_RULES_FILE")"
-[[ -n "$review_scope" ]] || fail "$REVIEW_RULES_FILE has no \"## Scope\" section"
-callers=0
-for caller in .github/workflows/*.yml; do
-    while IFS= read -r title; do
-        callers=$((callers + 1))
-        [[ "$review_scope" == *"**$title**"* ]] ||
-            fail "$caller's review_title \"$title\" is not named in $REVIEW_RULES_FILE's Scope"
-    done < <(yq -r '.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml") | .with.review_title' "$caller")
-done
-((callers > 0)) || fail "no workflow calls claude-readonly-review.yml"
+# shellcheck disable=SC2016 # A workflow expression, matched literally.
+yq -e '.jobs.analyze.steps[] | select(.name == "Run read-only Claude review") | .with.prompt
+    | contains("${{ inputs.lens }} lens")' "$CLAUDE_REVIEW_WORKFLOW_FILE" >/dev/null ||
+    fail "$CLAUDE_REVIEW_WORKFLOW_FILE's prompt does not name its lens input"
+review_lenses="$(awk '/^## /{on = ($0 == "## Lenses")} on && /^### /{print tolower(substr($0, 5))}' "$REVIEW_RULES_FILE" | sort)"
+[[ -n "$review_lenses" ]] || fail "$REVIEW_RULES_FILE has no \"### <lens>\" under \"## Lenses\""
+bot_lenses="$(
+    for caller in .github/workflows/*.yml; do
+        yq -o=json '.' "$caller" | jq -r '.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml")
+            | if .with.lens == "${{ matrix.lens }}" then .strategy.matrix.lens[] else .with.lens end'
+    done | sort
+)"
+[[ "$bot_lenses" == "$review_lenses" ]] ||
+    fail "the review bots' lenses [${bot_lenses//$'\n'/ }] are not $REVIEW_RULES_FILE's lens headings [${review_lenses//$'\n'/ }], one bot each"
+
+marker_template="$(yq -e -r '.env.REVIEW_MARKER' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
+    fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no workflow-level REVIEW_MARKER"
+title_template="$(yq -e -r '.env.REVIEW_TITLE' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
+    fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no workflow-level REVIEW_TITLE"
+# shellcheck disable=SC2016 # A workflow expression, substituted literally.
+lens_expr='${{ inputs.lens }}'
+markers="$(while IFS= read -r lens; do echo "${marker_template//"$lens_expr"/$lens}"; done <<<"$bot_lenses")"
+while IFS= read -r marker; do
+    [[ "$marker" =~ ^[a-z0-9-]+$ ]] || fail "review marker \"$marker\" is not [a-z0-9-]+"
+done <<<"$markers"
+[[ "$(sort -u <<<"$markers")" == "$(sort <<<"$markers")" ]] ||
+    fail "the review bots share a marker [${markers//$'\n'/ }], so one lens's review reads as the other's"
+lens="${bot_lenses%%$'\n'*}"
+review_marker="${marker_template//"$lens_expr"/$lens}"
+review_title="${title_template//"$lens_expr"/$lens}"
 
 publisher_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Publish validated Claude review")"
 published_comment="$test_dir/published-comment"
@@ -179,9 +198,27 @@ run_publisher() {
         PR_NUMBER="42" \
         REPOSITORY="owner/repo" \
         REVIEW_JSON="$review_json" \
-        REVIEW_MARKER="claude-auto-review" \
-        REVIEW_TITLE="Claude Review" \
+        REVIEW_MARKER="$review_marker" \
+        REVIEW_TITLE="$review_title" \
+        SEVERITIES="${FAKE_SEVERITIES-$severities}" \
         bash -c "$publisher_script"
+}
+
+schema_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Load the review schema")"
+: >"$test_dir/schema-output"
+GITHUB_OUTPUT="$test_dir/schema-output" bash -c "$schema_script" ||
+    fail "the review schema step exited non-zero"
+severities="$(sed -n 's/^severities=//p' "$test_dir/schema-output")"
+[[ -n "$severities" ]] || fail "the review schema step outputs no severities"
+# shellcheck disable=SC2016 # Workflow expressions, matched literally.
+yq -o=json '.' "$CLAUDE_REVIEW_WORKFLOW_FILE" | jq -e '
+    .jobs.analyze.outputs.severities == "${{ steps.schema.outputs.severities }}"
+    and ([.jobs.publish.steps[].env.SEVERITIES // empty] == ["${{ needs.analyze.outputs.severities }}"])' >/dev/null ||
+    fail "$CLAUDE_REVIEW_WORKFLOW_FILE does not hand the schema step's severities to the publisher"
+
+assert_threads() {
+    jq -e -s --arg title "$review_title" "$1" "$posted_threads" >/dev/null ||
+        fail "Claude publisher's review threads: $2: $(<"$posted_threads")"
 }
 
 valid_review='{"summary":"No correctness findings.","findings":[]}'
@@ -190,24 +227,51 @@ run_publisher "$valid_review" ||
 [[ -s "$published_comment" ]] ||
     fail "Claude publisher posted no review body"
 published_content="$(<"$published_comment")"
-[[ "$published_content" == *"<!-- claude-auto-review:abc123 -->"* ]] ||
+[[ "$published_content" == *"<!-- $review_marker:abc123 -->"* ]] ||
     fail "Claude publisher omitted the exact-head marker"
 [[ "$published_content" == *"**Findings: 0**"* ]] ||
     fail "Claude publisher omitted the zero-finding count"
 [[ ! -e "$posted_threads" ]] ||
     fail "Claude publisher posted a review thread for zero findings"
 
-assert_threads() {
-    jq -e -s "$1" "$posted_threads" >/dev/null ||
-        fail "Claude publisher's review threads: $2: $(<"$posted_threads")"
+run_publisher "$(jq -cn --argjson s "$severities" \
+    '{summary: "s", findings: [$s[] | {severity: ., path: "src/a.rs", line: 2, body: "b"}]}')" ||
+    fail "Claude publisher rejected a severity the schema allows: $severities"
+[[ "$(<"$published_comment")" == *"$(jq -r '"**Findings: \(length)** (\(map("1 \(.)") | join(", ")))"' <<<"$severities")"* ]] ||
+    fail "Claude publisher's count line does not count each of the schema's severities: $(<"$published_comment")"
+run_publisher '{"summary":"s","findings":[{"severity":"nit","path":"src/a.rs","line":2,"body":"b"}]}' >/dev/null 2>&1 &&
+    fail "Claude publisher accepted a severity the schema does not allow"
+FAKE_SEVERITIES='' run_publisher "$valid_review" >/dev/null 2>&1 &&
+    fail "Claude publisher published without the schema's severities"
+[[ ! -e "$published_comment" ]] ||
+    fail "Claude publisher posted a review without the schema's severities"
+
+REVIEW_SCHEMA_FILE="${REVIEW_SCHEMA_FILE:-.github/prompts/review-schema.json}"
+schema_accepts() {
+    printf '%s' "$1" >"$test_dir/instance.json"
+    check-jsonschema --schemafile "$REVIEW_SCHEMA_FILE" "$test_dir/instance.json" >/dev/null 2>&1
 }
+six_blocking="$(jq -cn --argjson s "$severities" '{summary: "s", findings: [
+    "src/a.rs", "src/b.rs", "img.png", ".github/workflows/ci.yml", "a/.hidden/..x", "crates/c/desk@8x.sprite"
+    | {severity: $s[0], path: ., line: 1, body: "b"}]}')"
+schema_accepts "$six_blocking" ||
+    fail "$REVIEW_SCHEMA_FILE rejects six blocking findings on repo-relative paths"
+run_publisher "$six_blocking" ||
+    fail "Claude publisher rejected six blocking findings"
+assert_threads 'length == 6' "every blocking finding opens a thread"
+for path in ../outside /etc/passwd src//a.rs src/../a.rs src/ ..; do
+    review="$(jq -cn --argjson s "$severities" --arg p "$path" \
+        '{summary: "s", findings: [{severity: $s[0], path: $p, line: 1, body: "b"}]}')"
+    ! schema_accepts "$review" || fail "$REVIEW_SCHEMA_FILE accepts the unsafe path $path"
+    ! run_publisher "$review" >/dev/null 2>&1 || fail "Claude publisher accepted the unsafe path $path"
+done
 
 in_diff_review='{"summary":"s","findings":[
-  {"severity":"HIGH","path":"src/a.rs","line":2,"body":"added line"},
-  {"severity":"MEDIUM","path":"src/a.rs","line":21,"body":"second hunk"},
-  {"severity":"MEDIUM","path":"src/b.rs","line":5,"body":"count-less hunk header"},
-  {"severity":"HIGH","path":"src/a.rs","line":10,"body":"between hunks"},
-  {"severity":"MEDIUM","path":"img.png","line":1,"body":"no patch"}]}'
+  {"severity":"blocking","path":"src/a.rs","line":2,"body":"added line"},
+  {"severity":"non-blocking","path":"src/a.rs","line":21,"body":"second hunk"},
+  {"severity":"non-blocking","path":"src/b.rs","line":5,"body":"count-less hunk header"},
+  {"severity":"blocking","path":"src/a.rs","line":10,"body":"between hunks"},
+  {"severity":"pre-existing","path":"img.png","line":1,"body":"no patch"}]}'
 run_publisher "$in_diff_review" ||
     fail "Claude publisher rejected findings inside the diff"
 assert_threads 'length == 5 and all(.[]; .commit_id == "abc123")' \
@@ -218,6 +282,10 @@ assert_threads '[.[3:][] | [.path, .subject_type, has("line")]] == [["src/a.rs",
     "a finding off the diff's lines is file-level on its own file"
 assert_threads '[.[].body | split(" — ")[0][1:-1]] == ["src/a.rs:2", "src/a.rs:21", "src/b.rs:5", "src/a.rs:10", "img.png:1"]' \
     "every thread opens with the finding's own location"
+# shellcheck disable=SC2016 # jq's $title.
+assert_threads '[.[].body | capture("\\*\\*\($title) · (?<l>issue \\([a-z-]+\\))\\*\\*").l]
+    == ["issue (blocking)", "issue (non-blocking)", "issue (non-blocking)", "issue (blocking)", "issue (pre-existing)"]' \
+    "every thread names its lens and its finding's Conventional Comments label"
 
 FAKE_FAIL_POST=2 run_publisher "$in_diff_review" >/dev/null 2>&1 &&
     fail "Claude publisher exited zero with a thread not opened"
@@ -228,8 +296,8 @@ assert_threads 'length == 4 and ([.[].body] | any(contains("src/a.rs:21")) | not
 
 hostile_body="it's \"quoted\" \$(touch $test_dir/pwned) \`touch $test_dir/pwned\` \\n end"
 hostile_review="$(jq -cn --arg b "$hostile_body" \
-    '{summary: "s", findings: [{severity: "HIGH", path: "docs/other.md", line: 9, body: $b},
-        {severity: "MEDIUM", path: "gone.rs", line: 1, body: "removed file"}]}')"
+    '{summary: "s", findings: [{severity: "blocking", path: "docs/other.md", line: 9, body: $b},
+        {severity: "pre-existing", path: "gone.rs", line: 1, body: "removed file"}]}')"
 run_publisher "$hostile_review" ||
     fail "Claude publisher rejected a finding outside the diff"
 [[ ! -e "$test_dir/pwned" ]] ||
@@ -253,7 +321,7 @@ jq -e -s --arg b "$hostile_body" '.[0].body | contains("docs/other.md:9") and co
 # a `::error` annotation — so a rejected character reads in the checks table as
 # "the bot never posted", not "the bot was blocked", and the merge gate silently
 # becomes unsatisfiable for every finding on those files.
-variant_review='{"summary":"One finding on a density variant.","findings":[{"severity":"MEDIUM","path":"crates/pixtuoid-scene/sprites/default/desk@8x.sprite","line":6,"body":"Header names a scheme that does not exist."}]}'
+variant_review='{"summary":"One finding on a density variant.","findings":[{"severity":"non-blocking","path":"crates/pixtuoid-scene/sprites/default/desk@8x.sprite","line":6,"body":"Header names a scheme that does not exist."}]}'
 run_publisher "$variant_review" ||
     fail "Claude publisher rejected a finding on an '@' density-variant path"
 published_content="$(<"$published_comment")"
@@ -273,11 +341,6 @@ FAKE_HEAD_AFTER_FILES=new-head run_publisher "$in_diff_review" >/dev/null 2>&1 &
 
 if run_publisher '{"summary":' >/dev/null 2>&1; then
     fail "Claude publisher accepted malformed JSON"
-fi
-
-unsafe_path_review='{"summary":"finding","findings":[{"severity":"HIGH","path":"../outside","line":1,"body":"bad"}]}'
-if run_publisher "$unsafe_path_review" >/dev/null 2>&1; then
-    fail "Claude publisher accepted an unsafe finding path"
 fi
 
 # claude-refuses-forks-before-the-action pins only that the fork refusal exists

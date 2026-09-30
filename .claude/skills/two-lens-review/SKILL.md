@@ -63,7 +63,8 @@ paraphrase here.
      -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}'
    ```
 
-6. **Before merge**, read each bot's LATEST comment at HEAD (`Findings: N`) and
+6. **Before merge**, read each lens bot's LATEST comment at HEAD
+   (`claude-review-<lens>:<sha>`, `Findings: N`) and
    `mergeStateStatus`, and judge against
    [the gate](../../../docs/CONTRIBUTING.md#the-merge-gate). Record each local
    row's run as REVIEW.md's escalation section says.
