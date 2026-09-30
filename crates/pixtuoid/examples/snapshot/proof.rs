@@ -306,35 +306,35 @@ pub(crate) fn build_script(fixture: &Path) -> Result<ProofScript> {
         last_ms = last_ms.max(rel);
         let ty = v.get("type").and_then(|s| s.as_str()).unwrap_or("");
         let content = v.get("message").and_then(|m| m.get("content"));
-        if ty == "user" {
-            if let Some(text) = content.and_then(|c| c.as_str()) {
-                lines.push(PanelLine {
-                    at_ms: rel,
-                    text: format!("> {text}"),
-                    prompt: true,
-                    annotation: None,
-                });
-                continue; // plain prompt: decode_cc_line emits nothing for it
-            }
+        if ty == "user"
+            && let Some(text) = content.and_then(|c| c.as_str())
+        {
+            lines.push(PanelLine {
+                at_ms: rel,
+                text: format!("> {text}"),
+                prompt: true,
+                annotation: None,
+            });
+            continue; // plain prompt: decode_cc_line emits nothing for it
         }
-        if ty == "assistant" {
-            if let Some(blocks) = content.and_then(|c| c.as_array()) {
-                for b in blocks {
-                    if b.get("type").and_then(|s| s.as_str()) == Some("tool_use") {
-                        let name = b.get("name").and_then(|s| s.as_str()).unwrap_or("?");
-                        let annotation = Some(match tool_idx {
-                            0 => "-- that's you",
-                            1 => "monitor flips",
-                            _ => "monitor flips again",
-                        });
-                        tool_idx += 1;
-                        lines.push(PanelLine {
-                            at_ms: rel,
-                            text: format!("[{name}] {}", tool_arg(b.get("input"))),
-                            prompt: false,
-                            annotation,
-                        });
-                    }
+        if ty == "assistant"
+            && let Some(blocks) = content.and_then(|c| c.as_array())
+        {
+            for b in blocks {
+                if b.get("type").and_then(|s| s.as_str()) == Some("tool_use") {
+                    let name = b.get("name").and_then(|s| s.as_str()).unwrap_or("?");
+                    let annotation = Some(match tool_idx {
+                        0 => "-- that's you",
+                        1 => "monitor flips",
+                        _ => "monitor flips again",
+                    });
+                    tool_idx += 1;
+                    lines.push(PanelLine {
+                        at_ms: rel,
+                        text: format!("[{name}] {}", tool_arg(b.get("input"))),
+                        prompt: false,
+                        annotation,
+                    });
                 }
             }
         }
@@ -513,48 +513,48 @@ pub(crate) fn compose_frame(
     }
 
     // Anchored to the ACTUAL working sprite's desk — no hand-placed coordinates.
-    if let Some(i) = active_annotation(&script.lines, elapsed_ms) {
-        if let Some(label) = script.lines[i].annotation {
-            let desk = (
-                (office_origin.0 + desk_px.0) as i32,
-                (office_origin.1 + desk_px.1) as i32,
-            );
-            // Clears the top edge of the ceiling halo `paint_ceiling_halos` burns
-            // over a lit monitor (up to 16px above desk.1 in PNG space) with an
-            // 8px margin, so the connector/dot never sits inside the glow.
-            const GLOW_CLEARANCE: i32 = 24;
-            let anchor_y = desk.1 - GLOW_CLEARANCE;
-            match layout {
-                ProofLayout::Wide => {
-                    let text_w = aa_text_width_at(label, ANNOT_FONT_PX);
-                    let label_x = (desk.0 - text_w - 16).max((PANEL_W + PAD) as i32);
-                    dashed_h(
-                        &mut img,
-                        (PANEL_W - PAD) as i32,
-                        desk.0 - 10,
-                        anchor_y,
-                        ANNOT,
-                    );
-                    text(
-                        &mut img,
-                        label,
-                        label_x,
-                        anchor_y - 22 + 1,
-                        Rgba([0, 0, 0, 255]),
-                    );
-                    text(&mut img, label, label_x, anchor_y - 22, ANNOT);
-                    dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
-                }
-                ProofLayout::Tall => {
-                    // No cross-panel connector line — the panel sits above, not
-                    // beside.
-                    let text_w = aa_text_width_at(label, ANNOT_FONT_PX);
-                    let label_x = (desk.0 - text_w - 16).max(PAD as i32);
-                    let label_y = anchor_y - 22;
-                    text(&mut img, label, label_x, label_y + 1, Rgba([0, 0, 0, 255]));
-                    text(&mut img, label, label_x, label_y, ANNOT);
-                    dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
-                }
+    if let Some(i) = active_annotation(&script.lines, elapsed_ms)
+        && let Some(label) = script.lines[i].annotation
+    {
+        let desk = (
+            (office_origin.0 + desk_px.0) as i32,
+            (office_origin.1 + desk_px.1) as i32,
+        );
+        // Clears the top edge of the ceiling halo `paint_ceiling_halos` burns
+        // over a lit monitor (up to 16px above desk.1 in PNG space) with an
+        // 8px margin, so the connector/dot never sits inside the glow.
+        const GLOW_CLEARANCE: i32 = 24;
+        let anchor_y = desk.1 - GLOW_CLEARANCE;
+        match layout {
+            ProofLayout::Wide => {
+                let text_w = aa_text_width_at(label, ANNOT_FONT_PX);
+                let label_x = (desk.0 - text_w - 16).max((PANEL_W + PAD) as i32);
+                dashed_h(
+                    &mut img,
+                    (PANEL_W - PAD) as i32,
+                    desk.0 - 10,
+                    anchor_y,
+                    ANNOT,
+                );
+                text(
+                    &mut img,
+                    label,
+                    label_x,
+                    anchor_y - 22 + 1,
+                    Rgba([0, 0, 0, 255]),
+                );
+                text(&mut img, label, label_x, anchor_y - 22, ANNOT);
+                dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
+            }
+            ProofLayout::Tall => {
+                // No cross-panel connector line — the panel sits above, not
+                // beside.
+                let text_w = aa_text_width_at(label, ANNOT_FONT_PX);
+                let label_x = (desk.0 - text_w - 16).max(PAD as i32);
+                let label_y = anchor_y - 22;
+                text(&mut img, label, label_x, label_y + 1, Rgba([0, 0, 0, 255]));
+                text(&mut img, label, label_x, label_y, ANNOT);
+                dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
             }
         }
     }

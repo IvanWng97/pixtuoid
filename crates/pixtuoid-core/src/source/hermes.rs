@@ -509,9 +509,12 @@ mod tests {
         let saved_up = std::env::var_os("USERPROFILE");
 
         // A relative HOME makes the DERIVED default relative, with no override set.
-        std::env::remove_var("HERMES_HOME");
-        std::env::set_var("HOME", "relative-home");
-        std::env::set_var("USERPROFILE", "relative-home");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("HERMES_HOME") };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("HOME", "relative-home") };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("USERPROFILE", "relative-home") };
         let quiet = crate::test_capture::capture_logs(|| {
             let _ = hermes_home();
         });
@@ -521,7 +524,8 @@ mod tests {
         );
 
         // Positive control: the ENV branch still warns, or the gate is inert.
-        std::env::set_var("HERMES_HOME", "rel/hm");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("HERMES_HOME", "rel/hm") };
         let loud = crate::test_capture::capture_logs(|| {
             let _ = hermes_home();
         });
@@ -536,8 +540,10 @@ mod tests {
             ("USERPROFILE", saved_up),
         ] {
             match v {
-                Some(val) => std::env::set_var(k, val),
-                None => std::env::remove_var(k),
+                // FIXME: Audit that the environment access only happens in single-threaded code.
+                Some(val) => unsafe { std::env::set_var(k, val) },
+                // FIXME: Audit that the environment access only happens in single-threaded code.
+                None => unsafe { std::env::remove_var(k) },
             }
         }
     }
@@ -554,12 +560,15 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var_os("HERMES_HOME");
 
-        std::env::set_var("HERMES_HOME", "  /custom/hm  ");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("HERMES_HOME", "  /custom/hm  ") };
         let got = hermes_home();
 
         match saved {
-            Some(v) => std::env::set_var("HERMES_HOME", v),
-            None => std::env::remove_var("HERMES_HOME"),
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var("HERMES_HOME", v) },
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var("HERMES_HOME") },
         }
         assert_eq!(got, Some(PathBuf::from("/custom/hm")));
     }

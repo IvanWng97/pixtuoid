@@ -275,11 +275,13 @@ mod tests {
         let _env = super::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let saved_log = std::env::var_os("PIXTUOID_LOG");
         let saved_xdg = std::env::var_os("XDG_STATE_HOME");
-        std::env::remove_var("PIXTUOID_LOG");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("PIXTUOID_LOG") };
         let home = pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
         let cache = home.join(".cache").join("pixtuoid").join("log");
         for rel in ["", "   ", "rel/state", "~/state"] {
-            std::env::set_var("XDG_STATE_HOME", rel);
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var("XDG_STATE_HOME", rel) };
             assert_eq!(
                 log_file_path(),
                 cache,
@@ -289,18 +291,23 @@ mod tests {
         // A leading slash is not absolute on Windows, so pick per-platform. The
         // literal's `/` is fine: `PathBuf` equality compares components.
         let abs = if cfg!(windows) { "C:/state" } else { "/state" };
-        std::env::set_var("XDG_STATE_HOME", abs);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("XDG_STATE_HOME", abs) };
         assert_eq!(
             log_file_path(),
             PathBuf::from(format!("{abs}/pixtuoid/log"))
         );
         match saved_log {
-            Some(v) => std::env::set_var("PIXTUOID_LOG", v),
-            None => std::env::remove_var("PIXTUOID_LOG"),
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var("PIXTUOID_LOG", v) },
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var("PIXTUOID_LOG") },
         }
         match saved_xdg {
-            Some(v) => std::env::set_var("XDG_STATE_HOME", v),
-            None => std::env::remove_var("XDG_STATE_HOME"),
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var("XDG_STATE_HOME", v) },
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var("XDG_STATE_HOME") },
         }
     }
 

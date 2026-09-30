@@ -1317,13 +1317,13 @@ fn build_pack(
             .collect()
     };
     let densities: std::collections::BTreeSet<_> = hairstyles.values().map(|s| s.density).collect();
-    if let [first, rest @ ..] = densities.iter().copied().collect::<Vec<_>>().as_slice() {
-        if let Some(d) = rest.iter().find(|&&d| names_at(d) != names_at(*first)) {
-            return Err(PackError::HairstylesDiffer {
-                first: first.get(),
-                other: d.get(),
-            });
-        }
+    if let [first, rest @ ..] = densities.iter().copied().collect::<Vec<_>>().as_slice()
+        && let Some(d) = rest.iter().find(|&&d| names_at(d) != names_at(*first))
+    {
+        return Err(PackError::HairstylesDiffer {
+            first: first.get(),
+            other: d.get(),
+        });
     }
 
     Ok(Pack {
@@ -1990,14 +1990,12 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
             // draws nothing; an empty OPTIONAL entry also SHADOWS the embedded
             // default in `Pack::merge_from` (`contains_key` is true).
             .map_or(1, |&(_, min)| min);
-        if let Some(anim) = pack.animation(name) {
-            if anim.frames().len() < min_frames {
-                report.insufficient_frames.push((
-                    name.to_string(),
-                    min_frames,
-                    anim.frames().len(),
-                ));
-            }
+        if let Some(anim) = pack.animation(name)
+            && anim.frames().len() < min_frames
+        {
+            report
+                .insufficient_frames
+                .push((name.to_string(), min_frames, anim.frames().len()));
         }
     };
     for name in registered_animation_names() {

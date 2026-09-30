@@ -2,7 +2,7 @@
 /// takes stay valid.
 #[macro_export]
 macro_rules! make_draw_ctx {
-    ($name:ident $(, $key:ident : $val:expr)* ) => {
+    ($name:ident $(, $key:ident : $val:expr_2021)* ) => {
         let mut _buf = pixtuoid_core::sprite::RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
         let mut _store = pixtuoid_scene::floor::FloorCtx::new();
         let mut _chitchat_state = std::collections::HashMap::new();
@@ -46,13 +46,13 @@ macro_rules! make_draw_ctx {
         };
     };
 
-    (@override $theme:ident, $floor:ident, $floor_info:ident, theme, $val:expr) => {
+    (@override $theme:ident, $floor:ident, $floor_info:ident, theme, $val:expr_2021) => {
         $theme = $val;
     };
-    (@override $theme:ident, $floor:ident, $floor_info:ident, floor_seed, $val:expr) => {
+    (@override $theme:ident, $floor:ident, $floor_info:ident, floor_seed, $val:expr_2021) => {
         $floor.floor_seed = $val;
     };
-    (@override $theme:ident, $floor:ident, $floor_info:ident, floor_info, $val:expr) => {
+    (@override $theme:ident, $floor:ident, $floor_info:ident, floor_info, $val:expr_2021) => {
         $floor_info = $val;
     };
 }

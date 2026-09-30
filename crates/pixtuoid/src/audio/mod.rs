@@ -151,10 +151,10 @@ impl AudioController {
         respawn: impl FnOnce(&AudioHandle, f32),
     ) {
         let persist = apply_audio_action(&mut self.ui, action, paused, respawn);
-        if persist.muted {
-            if let Err(e) = crate::config::save_audio_muted(&self.config_path, self.ui.muted) {
-                tracing::warn!(error = %e, "failed to persist audio mute");
-            }
+        if persist.muted
+            && let Err(e) = crate::config::save_audio_muted(&self.config_path, self.ui.muted)
+        {
+            tracing::warn!(error = %e, "failed to persist audio mute");
         }
         if persist.volume_nudged {
             self.volume_dirty = true;
