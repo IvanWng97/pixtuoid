@@ -57,7 +57,8 @@ pub(crate) const MOON_SHADOW: Rgb = Rgb {
 // the glass entirely rather than tracking the full window height.
 const HORIZON_FRAC: f32 = 0.55;
 const ARC_RISE_FRAC: f32 = 0.80;
-/// Below this atmo `disc` visibility, thick cloud swallows the disc entirely.
+/// Below this [`Transmission::disc`](crate::sky::Transmission::disc), thick cloud
+/// swallows the disc entirely.
 pub(crate) const MIN_DISC_VIS: f32 = 0.08;
 
 impl Disc {
@@ -65,7 +66,7 @@ impl Disc {
     /// thick cloud.
     pub(crate) fn of(sky: &Sky, buf_w: u16, top_wall_h: u16) -> Option<Self> {
         let e = sky.emitter();
-        let vis = sky.atmo().disc;
+        let vis = sky.transmission().disc;
         if vis < MIN_DISC_VIS {
             return None;
         }

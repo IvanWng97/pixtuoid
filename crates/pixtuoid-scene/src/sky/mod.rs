@@ -118,7 +118,7 @@ fn weather_at(now: SystemTime) -> Weather {
 
 // Weights folding the two transmission channels into one interior illuminance,
 // calibrated so a CLEAR noon lands at full brightness
-// (`K_BEAM + atmo(Clear).diffuse · K_FILL ≈ 1`).
+// (`K_BEAM + transmission(Clear).diffuse · K_FILL ≈ 1`).
 const K_BEAM: f32 = 0.70;
 const K_FILL: f32 = 0.55;
 
@@ -146,17 +146,16 @@ fn city_bounce(w: Weather) -> f32 {
     v
 }
 
-/// Weather as an ATMOSPHERE: how much of the emitter's light survives to the
-/// interior, split into a hard directional beam, a flat diffuse fill, and the
-/// disc's own visibility through the medium.
+/// How much of the emitter's light the weather lets through to the interior:
+/// a hard directional beam, a flat diffuse fill, and the disc's own visibility.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Atmo {
+pub(crate) struct Transmission {
     pub(crate) direct: f32,
     pub(crate) diffuse: f32,
     pub(crate) disc: f32,
 }
 
-pub(crate) fn atmo(w: Weather) -> Atmo {
+pub(crate) fn transmission(w: Weather) -> Transmission {
     // Storm < Rain in BOTH transmission channels (denser cloud), and
     // Overcast/Rain/Storm share one near-zero disc (below `MIN_DISC_VIS`) so a
     // thicker cloud never shows MORE of the disc than a thinner one.
@@ -174,9 +173,9 @@ pub(crate) fn atmo(w: Weather) -> Atmo {
         [direct, diffuse, disc]
             .iter()
             .all(|c| (0.0..=1.0).contains(c)),
-        "Atmo channels must be 0..=1: {w:?} -> ({direct}, {diffuse}, {disc})"
+        "Transmission channels must be 0..=1: {w:?} -> ({direct}, {diffuse}, {disc})"
     );
-    Atmo {
+    Transmission {
         direct,
         diffuse,
         disc,
@@ -383,8 +382,8 @@ impl Sky {
         &self.emitter
     }
 
-    pub(crate) fn atmo(&self) -> Atmo {
-        atmo(self.weather)
+    pub(crate) fn transmission(&self) -> Transmission {
+        transmission(self.weather)
     }
 
     /// [`moon_phase_at`] at this instant.
@@ -408,7 +407,7 @@ impl Sky {
     /// beam) and under thick cloud.
     pub(crate) fn beam(&self) -> f32 {
         match self.emitter.body {
-            Body::Sun => self.emitter.emitter_lum * self.atmo().direct,
+            Body::Sun => self.emitter.emitter_lum * self.transmission().direct,
             Body::Moon => 0.0,
         }
     }
@@ -427,7 +426,7 @@ impl Sky {
 
     pub(crate) fn light(&self) -> InteriorLight {
         let e = &self.emitter;
-        let a = self.atmo();
+        let a = self.transmission();
         // The moon casts no USABLE direct beam (mirrors `beam`'s gate) — a
         // moonlit night must never out-light a cloudy solar noon, so the moon's
         // illuminance is diffuse-fill only.

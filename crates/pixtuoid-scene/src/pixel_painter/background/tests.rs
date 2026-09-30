@@ -264,9 +264,9 @@ fn rain_hides_the_disc_like_overcast() {
 #[test]
 fn thick_cloud_hides_the_disc_uniformly() {
     let min_disc_vis = crate::celestial::MIN_DISC_VIS;
-    let overcast = crate::sky::atmo(Weather::Overcast).disc;
-    let rain = crate::sky::atmo(Weather::Rain).disc;
-    let storm = crate::sky::atmo(Weather::Storm).disc;
+    let overcast = crate::sky::transmission(Weather::Overcast).disc;
+    let rain = crate::sky::transmission(Weather::Rain).disc;
+    let storm = crate::sky::transmission(Weather::Storm).disc;
     assert!(
         overcast >= rain && rain >= storm,
         "disc visibility must not increase as cloud thickens: \
