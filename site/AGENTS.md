@@ -92,8 +92,8 @@ watchdog) that tsc/knip/build are blind to. CI: `site.yml` / `pages.yml`.
   doubled collect list. The audit runs THROUGH `startPagesLikeProxy`, which
   gzips the wasm as GitHub Pages does and `astro preview` doesn't: at Lantern's
   `mobileSlow4G` throughput, `interactive`/LCP are BYTE budgets. They and
-  `speed-index` are measured with the wasm padded to `just gen-wasm-check`'s
-  cap, plus the run spread.
+  `speed-index` were sized once (#1124): wasm padded to `just
+  gen-wasm-check`'s cap, plus run spread.
 - **Fonts**: Fontsource WOFF2 with `font-display: optional` + preloads — do
   not switch to the default `swap` (Ubuntu cold visits reflow past the CLS
   budget; `font-layout.spec.ts` reproduces it deliberately).
