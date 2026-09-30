@@ -17,7 +17,7 @@
 //! dir, every dir a registered source — so a bench-shaped fixture there would be
 //! mis-scanned and panic.
 
-use criterion::{criterion_main, Criterion};
+use criterion::{Criterion, criterion_main};
 use pixtuoid_core::harness::Drive;
 
 const SESSION: &str = "01000000-0000-7000-8000-0000000000cc";

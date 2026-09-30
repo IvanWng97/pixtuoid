@@ -12,7 +12,7 @@ use std::collections::{BinaryHeap, HashMap};
 
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
-use crate::layout::{cell_walkable, snap, Bounds, Point, COARSE_CELL_SIZE, NEIGHBORS_8};
+use crate::layout::{Bounds, COARSE_CELL_SIZE, NEIGHBORS_8, Point, cell_walkable, snap};
 
 /// Cell size in pixels — the coarse routing-grid edge, re-exported from the
 /// SHARED `layout::coarse` so router coarsening can't drift from reachability

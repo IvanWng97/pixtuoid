@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use super::{cc_derive_label, cc_session_ended, claude_config_dir, decode_cc_line, SOURCE_NAME};
+use super::{SOURCE_NAME, cc_derive_label, cc_session_ended, claude_config_dir, decode_cc_line};
 use crate::source::cc_probe::cc_sessions_dir;
 pub use crate::source::cc_probe::live_cc_session_ids;
 use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher};

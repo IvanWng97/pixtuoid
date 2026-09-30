@@ -8,12 +8,12 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::source::decoder::{
-    accept_all_paths, default_id_from_path, extract_top_level_cwd, CwdExtractor, IdDeriver,
-    LineDecoder, PathFilter,
+    CwdExtractor, IdDeriver, LineDecoder, PathFilter, accept_all_paths, default_id_from_path,
+    extract_top_level_cwd,
 };
 use crate::source::{
-    antigravity, claude_code, codewhale, codex, copilot, cursor, dsh, grok, hermes, kimi, omp,
-    openclaw, opencode, reasonix, AgentEvent,
+    AgentEvent, antigravity, claude_code, codewhale, codex, copilot, cursor, dsh, grok, hermes,
+    kimi, omp, openclaw, opencode, reasonix,
 };
 
 /// How the shared hook decoder derives the AgentId for this source. Moot for a

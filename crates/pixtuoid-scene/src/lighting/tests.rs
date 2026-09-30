@@ -120,9 +120,10 @@ fn a_spills_bounds_hold_every_row_whichever_way_it_leans() {
         let ((x0, y0), (x1, y1)) = spill.bounds();
         assert_eq!((y0, y1), (10, 10 + SPILL_DEPTH));
         let rows: Vec<_> = spill_rows(40, WINDOW_W, slant).collect();
-        assert!(rows
-            .iter()
-            .all(|r| r.start >= i32::from(x0) && r.end <= i32::from(x1)));
+        assert!(
+            rows.iter()
+                .all(|r| r.start >= i32::from(x0) && r.end <= i32::from(x1))
+        );
         assert!(
             rows.iter().any(|r| r.start == i32::from(x0)),
             "{slant}: tight on the west"

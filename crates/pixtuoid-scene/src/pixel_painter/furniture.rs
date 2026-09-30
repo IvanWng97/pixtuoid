@@ -259,18 +259,10 @@ pub(super) fn paint_trash_bin(buf: &mut RgbBuffer, room: &crate::layout::PantryR
                 let on_edge = dx == 0 || dx == bin.width - 1;
                 let color = if dy == 0 {
                     // Rim row.
-                    if on_edge {
-                        bin_rim
-                    } else {
-                        bag_liner
-                    }
+                    if on_edge { bin_rim } else { bag_liner }
                 } else if dy == 1 {
                     // Bag-liner peek.
-                    if on_edge {
-                        bin_outer
-                    } else {
-                        bag_fill
-                    }
+                    if on_edge { bin_outer } else { bag_fill }
                 } else {
                     // Body.
                     bin_outer
@@ -290,7 +282,7 @@ pub(super) fn paint_fish_tank(
     now: std::time::SystemTime,
     theme: &crate::theme::Theme,
 ) {
-    use crate::layout::{furniture_def, Furniture};
+    use crate::layout::{Furniture, furniture_def};
     let def = furniture_def(Furniture::FishTank);
     let (w, h) = (def.visual.w, def.visual.h);
     let x0 = pos.x.saturating_sub(w / 2);

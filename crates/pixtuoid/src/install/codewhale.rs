@@ -18,12 +18,12 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use toml::value::Table;
 
+use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::target::MergeOutcome;
-use crate::install::SENTINEL_KEY;
 
 /// Events we register == events we decode (`source/codewhale.rs`). The `bool` is
 /// `env_mode`: `true` events carry identity via `DEEPSEEK_*` env vars, so their
@@ -170,7 +170,7 @@ fn managed_entry(event: &str, env_mode: bool, base_cmd: &str) -> toml::Value {
 /// gates ALL hooks, so entries present under `enabled = false` is a silent-dead
 /// the other checks miss.
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
-    use crate::install::verify::{assemble, shell_shim_ref, SchemaParse, ShimRef};
+    use crate::install::verify::{SchemaParse, ShimRef, assemble, shell_shim_ref};
     let Ok(doc) = toml::from_str::<toml::Value>(content) else {
         return SchemaParse::broken("config.toml no longer parses as TOML");
     };

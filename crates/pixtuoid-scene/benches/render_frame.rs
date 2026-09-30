@@ -22,14 +22,14 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use criterion::{criterion_main, Criterion};
+use criterion::{Criterion, criterion_main};
 use pixtuoid_core::id::AgentId;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::{AgentSlot, SceneState};
-use pixtuoid_scene::cutaway::paint::{render_cutaway, Office};
+use pixtuoid_scene::cutaway::paint::{Office, render_cutaway};
 use pixtuoid_scene::floor::{
-    render_floor, CoffeeState, FloorCtx, FloorMeta, FloorSession, FrameInputs, ObservedFloor,
+    CoffeeState, FloorCtx, FloorMeta, FloorSession, FrameInputs, ObservedFloor, render_floor,
 };
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::localclock;

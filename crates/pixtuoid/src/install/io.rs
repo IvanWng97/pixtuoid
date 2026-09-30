@@ -2,7 +2,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 
 /// [`pixtuoid_core::platform::path_env`] that ALSO requires an ABSOLUTE path — for XDG base-dir reads
 /// (`XDG_CONFIG_HOME`/`XDG_STATE_HOME`): the XDG spec says a relative value is

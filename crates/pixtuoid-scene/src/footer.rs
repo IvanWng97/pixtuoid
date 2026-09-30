@@ -11,11 +11,11 @@
 
 use std::collections::HashMap;
 
-use pixtuoid_core::sprite::Rgb;
-use pixtuoid_core::state::{ActivityState, DaemonState, ToolKind, MAX_FLOORS};
 use pixtuoid_core::SceneState;
+use pixtuoid_core::sprite::Rgb;
+use pixtuoid_core::state::{ActivityState, DaemonState, MAX_FLOORS, ToolKind};
 
-use crate::board::{gateway_label, StateCounts, GATEWAY_GLYPH};
+use crate::board::{GATEWAY_GLYPH, StateCounts, gateway_label};
 use crate::theme::Theme;
 
 /// The four agent activity buckets as a shared vocabulary — each carries

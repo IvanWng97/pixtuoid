@@ -15,7 +15,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 use crate::install::io;
 use crate::install::target::MergeOutcome;
