@@ -2047,6 +2047,15 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, pen: Pen, buf:
             }
         }
     }
+    for post in crate::layout::window_posts(layout.buf_w) {
+        let cell = ArtRect {
+            x: pen.art(post.start),
+            y: pen.art(rows.start),
+            w: pen.art(post.end - post.start),
+            h: pen.art(window_h),
+        };
+        pen.fill(buf, cell, theme.surface.window_frame);
+    }
     fill(
         buf,
         0,
@@ -4261,6 +4270,38 @@ mod tests {
         assert!(glass > 0 && buildings > 0, "windows, and a city in them");
     }
 
+    #[test]
+    fn the_wall_between_two_windows_is_one_frame_post() {
+        let pack = pack();
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let pen = Pen::for_pack(scale, &pack);
+        let mut buf = RgbBuffer::filled(
+            scale.to_buffer(layout.buf_w),
+            scale.to_buffer(layout.buf_h),
+            theme.surface.bg_fallback,
+        );
+        paint_backdrop(&layout, theme, scale, pen, &mut buf);
+        let k = scale.get() / pen.art(1).0;
+        let rows = crate::layout::window_rows(layout.wall_band_h());
+        let mut posts = 0;
+        for post in crate::layout::window_posts(layout.buf_w) {
+            posts += 1;
+            for x in post.clone() {
+                for y in rows.clone() {
+                    let (ax, ay) = (pen.art(x).0, pen.art(y).0);
+                    assert_eq!(
+                        buf.get(ax * k, ay * k),
+                        theme.surface.window_frame,
+                        "post {post:?} at ({x}, {y})"
+                    );
+                }
+            }
+        }
+        assert!(posts > 0, "this wall has posts");
+    }
+
     /// A REAL office's draw list, checked against every pairwise "must be
     /// behind" fact its own geometry states — what a sort key cannot give you.
     #[test]
@@ -5775,11 +5816,12 @@ S B B B B B B S
                     FixtureKind::FishTank,
                     FixtureKind::WaterCooler,
                     FixtureKind::Door,
+                    FixtureKind::Clock,
                 ]
                 .iter()
                 .all(|k| kinds.contains(k))
             })
-            .expect("an office has a lounge aquarium, a pantry cooler and an elevator")
+            .expect("an office has a lounge aquarium, a pantry cooler, an elevator and a clock")
     }
 
     /// `frame`'s list at `now`, under a clear sky.
@@ -5986,8 +6028,25 @@ S B B B B B B S
             neon: crate::floor::NeonLevels::ALERT,
             ..empty_frame(&layout)
         };
-        let list = list_at(&frame, office, 23);
+        let mut list = list_at(&frame, office, 23);
         let pen = Pen::for_pack(scale, &pack);
+        // The neon hangs on plain wall, so a pane is hung in its halo.
+        let neon = crate::layout::NEON_PANEL;
+        let (x, w) = (neon.x + neon.width, 2);
+        let (aw, ah) = (pen.art(w).0, pen.art(neon.height).0);
+        list.pieces.push(Piece {
+            span: Span::new(x, neon.y, w, neon.height, 0),
+            kind: PieceKind::Glass {
+                view: WindowView {
+                    x: pen.art(x).0,
+                    y: pen.art(neon.y).0,
+                    w: aw,
+                    px: vec![Some(theme.surface.window_frame); usize::from(aw * ah)],
+                },
+            },
+            shadow: None,
+            fingerprint: 0,
+        });
         let blank = || {
             RgbBuffer::filled(
                 scale.to_buffer(layout.buf_w),
