@@ -440,7 +440,8 @@ command = "/hand/written/pixtuoid-hook"
         let saved = std::env::var_os("CODEX_HOME");
         let fallback_suffix = PathBuf::from(".codex").join("config.toml");
 
-        std::env::remove_var("CODEX_HOME");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("CODEX_HOME") };
         assert!(
             default_config_path().unwrap().ends_with(&fallback_suffix),
             "unset CODEX_HOME must end with .codex/config.toml, got {:?}",
@@ -449,24 +450,29 @@ command = "/hand/written/pixtuoid-hook"
 
         let custom = std::env::temp_dir().join("pixtuoid-codex-home-cfg-test");
         std::fs::create_dir_all(&custom).unwrap();
-        std::env::set_var("CODEX_HOME", &custom);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("CODEX_HOME", &custom) };
         assert_eq!(default_config_path().unwrap(), custom.join("config.toml"));
 
         // A non-existent dir falls back, matching upstream codex's own gate.
         let missing = std::env::temp_dir().join("pixtuoid-codex-home-cfg-missing");
         let _ = std::fs::remove_dir_all(&missing);
-        std::env::set_var("CODEX_HOME", &missing);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("CODEX_HOME", &missing) };
         assert!(
             default_config_path().unwrap().ends_with(&fallback_suffix),
             "non-existent CODEX_HOME must fall back to .codex/config.toml"
         );
 
-        std::env::set_var("CODEX_HOME", "");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("CODEX_HOME", "") };
         assert!(default_config_path().unwrap().ends_with(&fallback_suffix));
 
         match saved {
-            Some(v) => std::env::set_var("CODEX_HOME", v),
-            None => std::env::remove_var("CODEX_HOME"),
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var("CODEX_HOME", v) },
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var("CODEX_HOME") },
         }
         let _ = std::fs::remove_dir_all(&custom);
     }
