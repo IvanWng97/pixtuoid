@@ -546,6 +546,7 @@ fn agent_overrides_are_deterministic_per_id() {
 /// Every look of frame `i` of `anim` a viewer could see under `overrides`:
 /// recolored and, where the art marks its head, dressed in each of the pack's
 /// hairstyles.
+#[cfg(feature = "density-art")]
 fn looks(
     pack: &pixtuoid_core::sprite::format::Pack,
     anim: &pixtuoid_core::sprite::Sprite,
@@ -567,6 +568,7 @@ fn looks(
 }
 
 /// Whether recoloring `key` changes some pixel of every look of frame `i`.
+#[cfg(feature = "density-art")]
 fn recolors(
     pack: &pixtuoid_core::sprite::format::Pack,
     anim: &pixtuoid_core::sprite::Sprite,
@@ -3101,10 +3103,7 @@ fn agent_overrides_same_id_different_cwd_changes_outfit() {
 }
 
 struct OwnedSimStores {
-    router: crate::pathfind::AStarRouter,
-    overlay: OccupancyOverlay,
-    history: pose::PoseHistory,
-    motion: std::collections::HashMap<pixtuoid_core::AgentId, crate::motion::MotionState>,
+    route: pose::RouteRig<crate::pathfind::AStarRouter>,
     light: LightingState,
     neon: crate::floor::NeonState,
     chitchat: std::collections::HashMap<crate::chitchat::VenueKey, crate::chitchat::ActiveChitchat>,
@@ -3113,10 +3112,7 @@ struct OwnedSimStores {
 impl OwnedSimStores {
     fn new() -> Self {
         Self {
-            router: crate::pathfind::AStarRouter::new(),
-            overlay: OccupancyOverlay::new(),
-            history: pose::PoseHistory::new(),
-            motion: std::collections::HashMap::new(),
+            route: pose::RouteRig::new(crate::pathfind::AStarRouter::new()),
             light: LightingState::new(),
             neon: crate::floor::NeonState::new(),
             chitchat: std::collections::HashMap::new(),
@@ -3125,10 +3121,10 @@ impl OwnedSimStores {
 
     fn stores(&mut self) -> SimStores<'_> {
         SimStores {
-            router: &mut self.router,
-            overlay: &mut self.overlay,
-            history: &mut self.history,
-            motion: &mut self.motion,
+            router: &mut self.route.router,
+            overlay: &mut self.route.overlay,
+            history: &mut self.route.history,
+            motion: &mut self.route.motion,
             light: &mut self.light,
             neon: &mut self.neon,
             chitchat: &mut self.chitchat,
@@ -3281,7 +3277,7 @@ fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
                 door_anim_max_ms: 0,
             },
         );
-        reserved_bbox_width(&owned.overlay, bw, bh)
+        reserved_bbox_width(&owned.route.overlay, bw, bh)
     };
     assert_eq!(
         reserve(&wide),
@@ -3699,7 +3695,11 @@ fn sim_step_advances_motion_without_painting() {
     );
     let _ = stores;
     assert!(
-        owned.motion.get(&id).is_some_and(|m| m.entry.is_some()),
+        owned
+            .route
+            .motion
+            .get(&id)
+            .is_some_and(|m| m.entry.is_some()),
         "sim_step snapshotted the entry walk profile into the motion store"
     );
 }
@@ -3792,8 +3792,8 @@ fn paint_frame_is_pure_and_byte_identical() {
     );
 
     let light_before = owned.light.level();
-    let motion_before = format!("{:?}", owned.motion);
-    let history_before = format!("{:?}", owned.history);
+    let motion_before = format!("{:?}", owned.route.motion);
+    let history_before = format!("{:?}", owned.route.history);
     let chitchat_before = owned.chitchat.len();
 
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
@@ -3815,7 +3815,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 base_fill: &mut base_fill,
                 theme,
                 floor: crate::floor::FloorMeta::ground(),
-                motion: &owned.motion,
+                motion: &owned.route.motion,
                 debug_walkable: false,
             },
             &frame,
@@ -3837,12 +3837,12 @@ fn paint_frame_is_pure_and_byte_identical() {
         "paint must not tick lighting"
     );
     assert_eq!(
-        format!("{:?}", owned.motion),
+        format!("{:?}", owned.route.motion),
         motion_before,
         "paint must not move motion state"
     );
     assert_eq!(
-        format!("{:?}", owned.history),
+        format!("{:?}", owned.route.history),
         history_before,
         "paint must not record pose history"
     );
@@ -4191,6 +4191,7 @@ fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
 /// A busy appliance reads busy for most of its loop at every density: fewer
 /// than half its busy frames may show it at rest.
 #[test]
+#[cfg(feature = "density-art")]
 fn a_busy_loop_spends_most_of_its_frames_away_from_rest() {
     let pack = crate::embedded_pack::test_default_pack();
     for name in [
@@ -4550,7 +4551,7 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     let sat_at = sat_at.expect("agent never reached a seat");
     assert!(
         matches!(
-            owned.motion[&id].wander.target.kind,
+            owned.route.motion[&id].wander.target.kind,
             WanderKind::Named { wp_idx, .. } if wp_idx == sat_at
         ),
         "the seated agent should hold its seat's claim"
@@ -4581,7 +4582,10 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     );
 
     assert!(
-        matches!(owned.motion[&id].wander.target.kind, WanderKind::Aimless),
+        matches!(
+            owned.route.motion[&id].wander.target.kind,
+            WanderKind::Aimless
+        ),
         "an agent that left the wander machine must release its seat claim"
     );
 }
@@ -4707,7 +4711,7 @@ fn one_meeting_sofa_still_seats_three_agents_at_once() {
 #[test]
 fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
     use crate::layout::{TEST_DEFAULT_DESKS, WaypointKind, stand_point};
-    use crate::pose::{Pose, RouteCtx};
+    use crate::pose::Pose;
     use std::time::Duration;
 
     let pack = crate::embedded_pack::test_default_pack();
@@ -4772,12 +4776,7 @@ fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
         // Idempotent re-derive at the same `now` (sim_step already stamped
         // last_advanced_at, so no wander transition fires here).
         let label = {
-            let mut rctx = RouteCtx {
-                router: &mut owned.router,
-                overlay: &owned.overlay,
-                history: &mut owned.history,
-                motion: &mut owned.motion,
-            };
+            let mut rctx = owned.route.rctx();
             character_anchor(agent, &layout, now, &mut rctx).expect("chair sitter is visible")
         };
         let seat = back_couch_anchor(stand, CHARACTER_SPRITE_W);
@@ -5234,12 +5233,7 @@ fn a_character_badge_is_never_anchored_off_the_canvas() {
                 &slot,
                 &layout,
                 now0 + Duration::from_secs(secs),
-                &mut pose::RouteCtx {
-                    router: &mut owned.router,
-                    overlay: &owned.overlay,
-                    history: &mut owned.history,
-                    motion: &mut owned.motion,
-                },
+                &mut owned.route.rctx(),
             ) else {
                 continue;
             };
