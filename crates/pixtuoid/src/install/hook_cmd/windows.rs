@@ -49,10 +49,10 @@ fn resolve_windows_command(
     };
     // With 8.3 generation disabled on the volume GetShortPathNameW returns the
     // long path unchanged, so the short form is re-checked before it is accepted.
-    if let Some(s) = short_path(path) {
-        if first_cmd_unsafe_char(&s).is_none() {
-            return Ok(format!("{s}{}{source}", super::SOURCE_FLAG));
-        }
+    if let Some(s) = short_path(path)
+        && first_cmd_unsafe_char(&s).is_none()
+    {
+        return Ok(format!("{s}{}{source}", super::SOURCE_FLAG));
     }
     anyhow::bail!(
         "pixtuoid-hook is at a path containing {bad:?} ({path}) that the cmd.exe /C hook \

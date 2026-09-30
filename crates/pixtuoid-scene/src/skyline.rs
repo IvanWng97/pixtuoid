@@ -466,10 +466,11 @@ impl CityStrip {
     }
 
     fn put(&mut self, x: i32, y: i32, colour: Rgb) {
-        if let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) {
-            if x < self.w && y < self.h {
-                self.px[usize::from(y) * usize::from(self.w) + usize::from(x)] = Some(colour);
-            }
+        if let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y))
+            && x < self.w
+            && y < self.h
+        {
+            self.px[usize::from(y) * usize::from(self.w) + usize::from(x)] = Some(colour);
         }
     }
 
