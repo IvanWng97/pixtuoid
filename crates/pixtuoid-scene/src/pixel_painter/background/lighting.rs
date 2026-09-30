@@ -10,19 +10,6 @@ use crate::lighting::Emitter;
 use crate::pixel_painter::palette::{BLACK, WHITE, blend_rgb};
 use crate::theme::Theme;
 
-/// Float ellipse geometry for [`paint_radial_falloff`] — all `f32`, so a caller
-/// can centre on `(w-1)/2` (half-cell correct).
-pub(in crate::pixel_painter) struct RadialFalloff {
-    pub min_x: u16,
-    pub max_x: u16,
-    pub min_y: u16,
-    pub max_y: u16,
-    pub cx: f32,
-    pub cy: f32,
-    pub rx_norm: f32,
-    pub ry_norm: f32,
-}
-
 /// The composite every light shares: [`blend_tone`] over the caller-clipped
 /// `xs` × `ys` at each pixel's `t(x, y)`; `None` leaves the pixel alone. A
 /// light owns its falloff SHAPE and its clip, never the blend.
@@ -66,28 +53,6 @@ pub(in crate::pixel_painter) fn paint_shadows(
             blend_tone(buf, x, y, color, d * strength, strength);
         }
     }
-}
-
-/// Blend `color` over the region by [`crate::ground::falloff`] at `strength`,
-/// so it reads as a round patch stepped in dithered tones, not a stamped oval.
-pub(in crate::pixel_painter) fn paint_radial_falloff(
-    buf: &mut RgbBuffer,
-    g: RadialFalloff,
-    strength: f32,
-    color: Rgb,
-) {
-    blend_falloff(
-        buf,
-        g.min_x..g.max_x,
-        g.min_y..g.max_y,
-        color,
-        strength,
-        |x, y| {
-            let nx = (x as f32 - g.cx) / g.rx_norm;
-            let ny = (y as f32 - g.cy) / g.ry_norm;
-            crate::ground::falloff(nx, ny).map(|f| f * strength)
-        },
-    );
 }
 
 /// Blend `emitter`'s light in `color` over what is already painted, at the

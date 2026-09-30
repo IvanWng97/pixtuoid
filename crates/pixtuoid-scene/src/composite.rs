@@ -4,6 +4,16 @@
 
 use pixtuoid_core::sprite::Rgb;
 
+/// The blend anchors: a lit fixture is its tint pushed toward [`WHITE`], an unlit
+/// one toward [`BLACK`] — one pair, so the lamps, the screens and the neon tube
+/// cannot disagree on what "white" is.
+pub(crate) const WHITE: Rgb = Rgb {
+    r: 255,
+    g: 255,
+    b: 255,
+};
+pub(crate) const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
+
 /// Channel `b` over `a` at coverage `t`: cheap per pixel, and channel-separable,
 /// so a constant-tint pass can tabulate it.
 pub(crate) fn blend(a: u8, b: u8, t: f32) -> u8 {

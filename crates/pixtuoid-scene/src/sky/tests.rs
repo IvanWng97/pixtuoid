@@ -133,8 +133,8 @@ fn weather_override_forces_a_fixed_variant_then_restores() {
 
 #[test]
 fn storm_transmits_less_than_rain_overall() {
-    let s = atmo(Weather::Storm);
-    let r = atmo(Weather::Rain);
+    let s = transmission(Weather::Storm);
+    let r = transmission(Weather::Rain);
     assert!(
         s.direct <= r.direct && s.diffuse < r.diffuse,
         "storm steady-state darker than rain: {s:?} vs {r:?}"
@@ -143,17 +143,24 @@ fn storm_transmits_less_than_rain_overall() {
 
 #[test]
 fn clear_beams_hard_overcast_kills_the_beam() {
-    assert!(atmo(Weather::Clear).direct > 0.9, "clear = hard beam");
+    assert!(
+        transmission(Weather::Clear).direct > 0.9,
+        "clear = hard beam"
+    );
     for w in [Weather::Overcast, Weather::Rain, Weather::Storm] {
-        assert_eq!(atmo(w).direct, 0.0, "{w:?} scatters the beam to nothing");
+        assert_eq!(
+            transmission(w).direct,
+            0.0,
+            "{w:?} scatters the beam to nothing"
+        );
     }
 }
 
 #[test]
 fn fog_is_a_luminous_diffuse_whiteout() {
-    let f = atmo(Weather::Fog);
+    let f = transmission(Weather::Fog);
     assert!(
-        f.diffuse >= atmo(Weather::Overcast).diffuse,
+        f.diffuse >= transmission(Weather::Overcast).diffuse,
         "fog is a bright veil"
     );
     assert!(f.direct < 0.2, "fog is near-shadowless");
@@ -162,13 +169,13 @@ fn fog_is_a_luminous_diffuse_whiteout() {
 
 #[test]
 fn disc_visibility_is_clear_then_hazy_then_gone() {
-    assert!(atmo(Weather::Clear).disc > 0.9);
+    assert!(transmission(Weather::Clear).disc > 0.9);
     assert!(
-        (0.0..0.6).contains(&atmo(Weather::Smog).disc),
+        (0.0..0.6).contains(&transmission(Weather::Smog).disc),
         "haze half-hides the disc"
     );
     assert!(
-        atmo(Weather::Overcast).disc < 0.1,
+        transmission(Weather::Overcast).disc < 0.1,
         "overcast hides the disc"
     );
 }
@@ -176,7 +183,7 @@ fn disc_visibility_is_clear_then_hazy_then_gone() {
 #[test]
 fn windy_near_full_beam() {
     assert!(
-        atmo(Weather::Windy).direct > 0.5,
+        transmission(Weather::Windy).direct > 0.5,
         "windy keeps a strong beam"
     );
 }
@@ -184,7 +191,7 @@ fn windy_near_full_beam() {
 #[test]
 fn haze_and_snow_keep_a_faint_but_nonzero_beam() {
     for w in [Weather::Snow, Weather::Fog, Weather::Smog] {
-        let d = atmo(w).direct;
+        let d = transmission(w).direct;
         assert!(
             0.0 < d && d < 0.5,
             "{w:?} should keep a faint but nonzero beam: {d}"
@@ -195,7 +202,7 @@ fn haze_and_snow_keep_a_faint_but_nonzero_beam() {
 #[test]
 fn storm_diffuse_dimmer_than_overcast() {
     assert!(
-        atmo(Weather::Storm).diffuse < atmo(Weather::Overcast).diffuse,
+        transmission(Weather::Storm).diffuse < transmission(Weather::Overcast).diffuse,
         "storm diffuse should be dimmer than overcast"
     );
 }

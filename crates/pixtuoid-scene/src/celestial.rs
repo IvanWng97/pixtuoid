@@ -8,7 +8,7 @@ use pixtuoid_core::sprite::Rgb;
 
 use crate::anim::epoch_ms;
 use crate::atmosphere::Moment;
-use crate::composite::blend_rgb;
+use crate::composite::{WHITE, blend, blend_rgb};
 use crate::dither::FALLOFF_TONES;
 use crate::layout::window_run;
 use crate::sky::{Body, Sky};
@@ -57,7 +57,8 @@ pub(crate) const MOON_SHADOW: Rgb = Rgb {
 // the glass entirely rather than tracking the full window height.
 const HORIZON_FRAC: f32 = 0.55;
 const ARC_RISE_FRAC: f32 = 0.80;
-/// Below this atmo `disc` visibility, thick cloud swallows the disc entirely.
+/// Below this [`Transmission::disc`](crate::sky::Transmission::disc), thick cloud
+/// swallows the disc entirely.
 pub(crate) const MIN_DISC_VIS: f32 = 0.08;
 
 impl Disc {
@@ -65,7 +66,7 @@ impl Disc {
     /// thick cloud.
     pub(crate) fn of(sky: &Sky, buf_w: u16, top_wall_h: u16) -> Option<Self> {
         let e = sky.emitter();
-        let vis = sky.atmo().disc;
+        let vis = sky.transmission().disc;
         if vis < MIN_DISC_VIS {
             return None;
         }
@@ -171,6 +172,54 @@ const SKY_TONES: usize = 4;
 /// A colour for each band of the sky, zenith first.
 type Tones = [Rgb; SKY_TONES];
 
+/// Below this [`Look::golden_hour`](crate::atmosphere::Look::golden_hour) the
+/// blaze is too faint to paint.
+const BLAZE_MIN: f32 = 0.05;
+/// How far a full golden hour pulls open sky toward [`BLAZE`].
+const BLAZE_SHARE: f32 = 0.35;
+/// The golden hour's colour, and how far each channel leans toward it: red
+/// most, so the cast reads orange over any sky tone.
+const BLAZE: Rgb = Rgb {
+    r: 255,
+    g: 160,
+    b: 60,
+};
+const BLAZE_LEAN: [f32; 3] = [0.4, 0.25, 0.1];
+
+/// The golden hour's warm cast over open sky, at one strength a frame.
+#[derive(Clone, Copy)]
+pub(crate) struct Blaze(f32);
+
+impl Blaze {
+    fn of(golden_hour: f32) -> Option<Self> {
+        (golden_hour > BLAZE_MIN).then_some(Self(golden_hour * BLAZE_SHARE))
+    }
+
+    /// `cur` under the blaze.
+    pub(crate) fn over(self, cur: Rgb) -> Rgb {
+        let [r, g, b] = BLAZE_LEAN.map(|lean| self.0 * lean);
+        Rgb {
+            r: blend(cur.r, BLAZE.r, r),
+            g: blend(cur.g, BLAZE.g, g),
+            b: blend(cur.b, BLAZE.b, b),
+        }
+    }
+}
+
+/// How far a sun at its apex pales the wall spot from the theme's warm spill
+/// toward white.
+const WALL_SPOT_PALE: f32 = 0.6;
+
+/// The sun's spot on a side wall at `warmth`: the theme's warm spill, paling
+/// toward white as the sun climbs.
+pub(crate) fn wall_spot_colour(warmth: f32, theme: &Theme) -> Rgb {
+    blend_rgb(
+        theme.lighting.sun_spill,
+        WHITE,
+        (1.0 - warmth) * WALL_SPOT_PALE,
+    )
+}
+
 /// The window sky one frame shows: its disc and stars, and every tone they
 /// paint in, resolved once so a pixel only picks among them.
 pub(crate) struct SkyView {
@@ -182,6 +231,7 @@ pub(crate) struct SkyView {
     lit: Tones,
     dark: Tones,
     halo: [[Rgb; FALLOFF_TONES as usize]; SKY_TONES],
+    blaze: Option<Blaze>,
 }
 
 impl SkyView {
@@ -209,7 +259,13 @@ impl SkyView {
             lit: over(core, vis),
             dark: over(MOON_SHADOW, vis),
             halo: sky.map(|s| std::array::from_fn(|k| blend_rgb(s, core, tone(k)))),
+            blaze: Blaze::of(look.golden_hour),
         }
+    }
+
+    /// The golden hour's cast over the open sky, while it shows.
+    pub(crate) fn blaze(&self) -> Option<Blaze> {
+        self.blaze
     }
 
     /// One pane's glass, over columns `x..x + w` and `glass_h` rows tall.
