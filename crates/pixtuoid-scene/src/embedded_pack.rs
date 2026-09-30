@@ -180,7 +180,7 @@ pub(crate) fn test_default_pack() -> Pack {
 /// The default pack's manifest, as `build.rs` embeds it.
 const EMBEDDED_PACK_TOML: &str = include_str!(concat!(env!("OUT_DIR"), "/embedded_pack.toml"));
 
-fn load_embedded_pack() -> Result<Pack> {
+fn load_embedded_pack() -> Result<Pack, pixtuoid_core::sprite::error::PackError> {
     load_pack_from_strings(EMBEDDED_PACK_TOML, &embedded_sprite_srcs())
 }
 

@@ -83,6 +83,7 @@ toml               = "1"
 # survive a round-trip.
 toml_edit          = "0.25"
 anyhow             = "1"
+thiserror          = "2"
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 notify             = "8"

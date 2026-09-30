@@ -23,11 +23,11 @@ use super::epoch_ms;
 use super::frame_at;
 use super::furniture::{
     paint_area_rug, paint_coat_rack, paint_fish_tank, paint_kitchen_island, paint_meeting_chair,
-    paint_meeting_table, paint_printer, paint_side_table, paint_vending_machine,
+    paint_side_table,
 };
 use super::paint_character_at;
 use crate::frame_cache::FrameCache;
-use crate::layout::{Point, Size};
+use crate::layout::Point;
 use crate::pet::PetKind;
 
 /// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
@@ -45,17 +45,6 @@ fn pantry_steam_dx(anim: &str) -> i16 {
         PANTRY_STEAM_DX_SMALL
     }
 }
-
-/// Vending pickup-slot offset from the sprite's top-left — the ONE cell where
-/// the idle trim paints and the busy can-drop lands.
-pub(crate) const VENDING_PICKUP_SLOT: (u16, u16) = (2, 4);
-
-/// Vending machine + printer body sizes — CENTER-anchored on their waypoint
-/// `pos` (origin = `pos − body/2`), read from the table the hover box reads.
-pub(crate) const VENDING_BODY: Size =
-    crate::layout::furniture_def(crate::layout::Furniture::VendingMachine).visual;
-pub(crate) const PRINTER_BODY: Size =
-    crate::layout::furniture_def(crate::layout::Furniture::Printer).visual;
 
 pub(super) struct Drawable<'a> {
     pub(super) anchor_y: u16,
@@ -141,14 +130,12 @@ pub(super) enum DrawableKind<'a> {
         kind: crate::layout::WallDecor,
         pos: Point,
     },
-    VendingMachine {
+    /// A corridor appliance: its pack art ([`super::appliance_art`]), centred at
+    /// `pos`.
+    Appliance {
         pos: Point,
-        /// An agent stands here this frame — drives the drink-drop animation.
-        busy: bool,
-    },
-    Printer {
-        pos: Point,
-        /// An agent stands here this frame — drives the page-eject animation.
+        sprite: &'static str,
+        /// An agent stands here this frame: the art plays its busy loop.
         busy: bool,
     },
     Pet {
@@ -368,11 +355,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             }
         }
         DrawableKind::MeetingTable { pos } => {
-            // Size from the furniture def (== footprint here) so the painted
-            // table can't drift from the masked obstacle.
-            let Size { w, h } =
-                crate::layout::furniture_def(crate::layout::Furniture::MeetingTable).visual;
-            paint_meeting_table(buf, pos.x, pos.y, w, h, theme);
+            blit_centered_first_frame(pack, MEETING_TABLE_SPRITE, *pos, buf);
         }
         DrawableKind::AreaRug(rug) => paint_area_rug(buf, *rug, theme),
         DrawableKind::LoungeSideTable { pos } => {
@@ -407,11 +390,14 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 blit_frame(f, pos.x, pos.y, buf);
             }
         }
-        DrawableKind::VendingMachine { pos, busy } => {
-            paint_vending_machine(buf, *pos, *busy, now, theme);
-        }
-        DrawableKind::Printer { pos, busy } => {
-            paint_printer(buf, *pos, *busy, now, theme);
+        DrawableKind::Appliance { pos, sprite, busy } => {
+            let art = pack
+                .animation(sprite)
+                .and_then(|anim| anim.recolorable(super::appliance_frame(anim, *busy, now)));
+            if let Some(art) = art {
+                let themed = art.recolored(&super::palette::appliance_overrides(&theme.appliance));
+                blit_centered(&themed, *pos, buf);
+            }
         }
         DrawableKind::Pet {
             kind,
@@ -513,6 +499,9 @@ fn paint_desk_coffee(
 
 /// The desk task chair's pack animation.
 pub(crate) const DESK_CHAIR_SPRITE: &str = "desk_chair";
+
+/// The meeting table's pack animation.
+pub(crate) const MEETING_TABLE_SPRITE: &str = "meeting_table";
 
 /// The desk task chair's art — the ONE authority for its size, so the enqueue
 /// site centres on what is actually drawn even under a custom pack.
@@ -1037,18 +1026,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn vending_machine_paints_panel_drinks_and_trim_cells() {
+    /// Paint the appliance `sprite` at rest, centred at `pos`, in `th`.
+    fn appliance_at_rest(sprite: &'static str, pos: Point, th: &crate::theme::Theme) -> RgbBuffer {
         let pack = test_pack();
         let mut cache = FrameCache::new();
-        let now = SystemTime::UNIX_EPOCH;
-        let th = theme();
-        let pos = Point { x: 30, y: 30 };
-        let bg = Rgb { r: 1, g: 2, b: 3 };
-        let mut buf = RgbBuffer::filled(80, 80, bg);
+        let mut buf = RgbBuffer::filled(80, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = Drawable {
             anchor_y: pos.y,
-            kind: DrawableKind::VendingMachine { pos, busy: false },
+            kind: DrawableKind::Appliance {
+                pos,
+                sprite,
+                busy: false,
+            },
         };
         paint_drawable(
             &d,
@@ -1056,90 +1045,55 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now,
+                now: SystemTime::UNIX_EPOCH,
                 theme: th,
             },
         );
-        let vx = pos.x - VENDING_BODY.w / 2;
-        let vy = pos.y - VENDING_BODY.h / 2;
-        assert_eq!(
-            buf.get(vx, vy),
-            th.appliance.vending_panel,
-            "top row = panel"
-        );
-        // Drink index = (dy-1)*2 + (dx-1).
-        assert_eq!(
-            buf.get(vx + 1, vy + 1),
-            th.appliance.vending_drinks[0],
-            "first drink slot = drinks[0]"
-        );
-        assert_eq!(
-            buf.get(vx + 2, vy + 4),
-            th.appliance.vending_trim,
-            "the (2,4) cell = trim"
-        );
-        assert_eq!(
-            buf.get(vx, vy + 5),
-            th.appliance.vending_dark,
-            "bottom row = dark"
-        );
-        assert_eq!(
-            buf.get(vx, vy + 2),
-            th.appliance.vending_body,
-            "a non-special cell = body"
-        );
+        buf
     }
 
+    /// In every theme, each `appliance_overrides` role
+    /// lands on the cells the 1x vending art draws in it.
     #[test]
-    fn printer_paints_glass_paper_and_tray_cells() {
-        let pack = test_pack();
-        let mut cache = FrameCache::new();
-        let now = SystemTime::UNIX_EPOCH;
-        let th = theme();
+    fn a_vending_machine_takes_its_themes_colours() {
         let pos = Point { x: 30, y: 30 };
-        let bg = Rgb { r: 4, g: 5, b: 6 };
-        let mut buf = RgbBuffer::filled(80, 80, bg);
-        let d = Drawable {
-            anchor_y: pos.y,
-            kind: DrawableKind::Printer { pos, busy: false },
-        };
-        paint_drawable(
-            &d,
-            &mut DrawableCtx {
-                buf: &mut buf,
-                pack: &pack,
-                cache: &mut cache,
-                now,
-                theme: th,
-            },
-        );
-        let px0 = pos.x - PRINTER_BODY.w / 2;
-        let py0 = pos.y - PRINTER_BODY.h / 2;
-        assert_eq!(
-            buf.get(px0 + 2, py0),
-            th.appliance.printer_glass,
-            "top-centre = glass"
-        );
-        assert_eq!(
-            buf.get(px0, py0),
-            th.appliance.printer_top,
-            "top-corner = top_dark"
-        );
-        assert_eq!(
-            buf.get(px0 + 2, py0 + 3),
-            th.appliance.printer_paper,
-            "bottom-centre = paper"
-        );
-        assert_eq!(
-            buf.get(px0, py0 + 1),
-            th.appliance.printer_tray,
-            "side column = tray"
-        );
-        assert_eq!(
-            buf.get(px0 + 2, py0 + 1),
-            th.appliance.printer_body,
-            "interior = body"
-        );
+        let vis = crate::layout::furniture_def(crate::layout::Furniture::VendingMachine).visual;
+        let (vx, vy) = (pos.x - vis.w / 2, pos.y - vis.h / 2);
+        for th in crate::theme::ALL_THEMES {
+            let a = &th.appliance;
+            let buf = appliance_at_rest("vending_machine", pos, th);
+            for ((dx, dy), want, role) in [
+                ((0, 0), a.vending_panel, "the top row: its panel"),
+                ((1, 1), a.vending_drinks[0], "the first drink"),
+                ((2, 2), a.vending_drinks[3], "the fourth drink"),
+                ((2, 4), a.vending_trim, "the coin plate"),
+                ((0, 5), a.vending_dark, "the pickup row"),
+                ((0, 2), a.vending_body, "the body"),
+            ] {
+                assert_eq!(buf.get(vx + dx, vy + dy), want, "{}: {role}", th.name);
+            }
+        }
+    }
+
+    /// See [`a_vending_machine_takes_its_themes_colours`].
+    #[test]
+    fn a_printer_takes_its_themes_colours() {
+        let pos = Point { x: 30, y: 30 };
+        let vis = crate::layout::furniture_def(crate::layout::Furniture::Printer).visual;
+        let (px, py) = (pos.x - vis.w / 2, pos.y - vis.h / 2);
+        for th in crate::theme::ALL_THEMES {
+            let a = &th.appliance;
+            let buf = appliance_at_rest("printer", pos, th);
+            for ((dx, dy), want, role) in [
+                ((2, 0), a.printer_glass, "the scanner glass"),
+                ((4, 0), a.printer_top, "the lid, east of its lit end"),
+                ((2, 3), a.printer_paper, "the stack"),
+                ((0, 1), a.printer_tray, "a side"),
+                ((2, 1), a.printer_body, "the chassis"),
+            ] {
+                assert_eq!(buf.get(px + dx, py + dy), want, "{}: {role}", th.name);
+            }
+        }
     }
 
     #[test]
