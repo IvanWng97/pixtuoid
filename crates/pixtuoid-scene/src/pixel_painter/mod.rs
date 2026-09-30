@@ -639,9 +639,7 @@ pub(super) fn frame_index(anim: &Sprite, idx: usize) -> usize {
     }
 }
 
-/// The vending machine's pack animation.
 const VENDING_MACHINE_SPRITE: &str = "vending_machine";
-/// The printer's pack animation.
 const PRINTER_SPRITE: &str = "printer";
 
 /// The pack art a corridor appliance at a `kind` waypoint is drawn from.

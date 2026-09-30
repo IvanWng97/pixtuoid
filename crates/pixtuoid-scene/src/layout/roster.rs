@@ -44,7 +44,6 @@ pub(crate) enum Depth {
     /// against a figure and against a fixture of the other tie; roster order
     /// orders it against a fixture of the same tie.
     Sorted {
-        /// The row it sorts at.
         row: u16,
         /// Which paints on top where a figure sorts at `row` too.
         tie: Tie,

@@ -80,7 +80,6 @@ pub(super) enum DrawableKind<'a> {
         waiting_bubble: bool,
         walking_dust_frame: Option<usize>,
     },
-    /// The filing cabinet beside a desk, its top-left at `pos`.
     FilingCabinet {
         pos: Point,
     },
@@ -191,22 +190,16 @@ pub(super) enum DrawableKind<'a> {
         pos: Point,
         back_west: bool,
     },
-    /// The pantry's water cooler, filling its box.
     WaterCooler(crate::layout::Bounds),
-    /// The pantry's trash bin, filling its box.
     TrashBin(crate::layout::Bounds),
-    /// A meeting room's doormat, filling its box.
     Doormat(crate::layout::Bounds),
-    /// A meeting room's notice board, filling its box.
     NoticeBoard(crate::layout::Bounds),
-    /// The corridor's runner carpet, filling its box.
     Runner(crate::layout::Bounds),
     /// The neon sign's panel in this frame's colours.
     NeonSign {
         panel: crate::layout::Bounds,
         look: super::background::NeonLook,
     },
-    /// The wall clock, its top-left at `pos`.
     Clock {
         pos: Point,
     },

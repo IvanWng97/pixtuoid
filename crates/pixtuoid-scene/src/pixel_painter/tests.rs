@@ -1897,7 +1897,6 @@ fn swept_offices() -> impl Iterator<Item = Layout> {
     .flat_map(|(w, h)| (0..12).filter_map(move |seed| Layout::compute_with_seed(w, h, None, seed)))
 }
 
-/// What a fixture kind paints as, by an exhaustive match.
 fn paints_as(kind: crate::layout::FixtureKind) -> &'static str {
     use crate::layout::{FixtureKind, Station};
     match kind {
