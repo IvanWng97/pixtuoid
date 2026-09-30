@@ -1,8 +1,8 @@
 //! The cutaway's time of day: the room darkens with the sky, and its own lights
 //! ([`crate::lighting`]) lift what they fall on, in whole [`Rgb::ramp`] steps
-//! on the art grid ([`crate::dither::step`]), and its colour is a tint at
-//! fixed stops, so the room stays a palette: nothing blends continuously, the rule the rest of the cutaway is
-//! drawn by.
+//! on the art grid ([`crate::dither::step`]), and a light's colour is a tint
+//! at fixed stops, so the room stays a palette: nothing blends continuously,
+//! the rule the rest of the cutaway is drawn by.
 //!
 //! The pieces are painted as by day; one pass ([`net_pass`]) then takes each
 //! pixel `lift − ambient` steps along its ramp in a single step, so a pixel is
@@ -251,10 +251,8 @@ fn rank_of(kind: EmitterKind) -> u8 {
     }
 }
 
-/// The colour a light of `kind` tints toward under `theme` and the sign's
-/// `neon`, or `None` for one the cutaway leaves untinted. A monitor's tool light
-/// tints only a dark theme's room, as in the classic's
-/// `pixel_painter::ambient::paint_ceiling_halos`: on a light one it reads as grime.
+/// The colour a light of `kind` tints toward, or `None` for one the cutaway
+/// leaves untinted.
 pub(crate) fn tint_of(
     kind: EmitterKind,
     theme: &Theme,
@@ -266,6 +264,8 @@ pub(crate) fn tint_of(
         EmitterKind::DeskLamp => Some(lighting.desk_lamp),
         EmitterKind::WindowSpill => Some(lighting.sun_spill),
         EmitterKind::NeonGlow => Some(crate::pixel_painter::neon_look(neon, theme).halo),
+        // Dark themes only, as in the classic's
+        // `pixel_painter::ambient::paint_ceiling_halos`: on a light one it reads as grime.
         EmitterKind::MonitorHalo(tool) => (theme.kind == crate::theme::ThemeKind::Dark)
             .then(|| crate::pixel_painter::tool_glow_for_kind(tool, &theme.tool_glow)),
     }

@@ -4805,9 +4805,8 @@ S B B B B B B S
         );
     }
 
-    /// The sign's glow is the tube's live hue, alert or not.
     #[test]
-    fn the_signs_glow_takes_its_tubes_hue() {
+    fn the_neon_glow_takes_its_tubes_hue() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = pack();
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
@@ -4819,9 +4818,11 @@ S B B B B B B S
         };
         for neon in [
             crate::floor::NeonLevels::CALM,
-            crate::floor::NeonLevels::BUSY,
             crate::floor::NeonLevels::ALERT,
-            crate::floor::NeonLevels::FLASH,
+            crate::floor::NeonLevels {
+                alert: 0.5,
+                power: 1.0,
+            },
         ] {
             let frame = SimFrame {
                 neon,
