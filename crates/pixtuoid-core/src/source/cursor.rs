@@ -36,12 +36,12 @@
 //!   arrive through a different non-shell ancestor, so the pid is not stable and
 //!   corroboration often withholds the arm (#896).
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use serde_json::Value;
 
-use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
-use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
+use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
+use crate::source::{AgentEvent, ToolDetail};
 
 /// The Cursor CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "cursor";
@@ -526,10 +526,12 @@ mod tests {
     #[test]
     fn no_session_id_cwd_or_workspace_is_malformed_but_session_id_alone_is_ok() {
         assert!(decode_cursor_hook_payload(&json!({"hook_event_name": "stop"})).is_err());
-        assert!(decode_cursor_hook_payload(
-            &json!({"hook_event_name": "stop", "cwd": "", "workspace_roots": []})
-        )
-        .is_err());
+        assert!(
+            decode_cursor_hook_payload(
+                &json!({"hook_event_name": "stop", "cwd": "", "workspace_roots": []})
+            )
+            .is_err()
+        );
         assert!(
             decode_cursor_hook_payload(&json!({"hook_event_name": "stop", "session_id": "s"}))
                 .is_ok()

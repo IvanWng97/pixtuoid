@@ -10,12 +10,12 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, FALSE, HWND, INVALID_HANDLE_VALUE, LPARAM, TRUE,
 };
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
-    PeekMessageW, SetForegroundWindow, ShowWindow, MSG, PM_NOREMOVE, SW_RESTORE, WM_USER,
+    EnumWindows, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible, MSG,
+    PM_NOREMOVE, PeekMessageW, SW_RESTORE, SetForegroundWindow, ShowWindow, WM_USER,
 };
 
 use super::ProcessTable;

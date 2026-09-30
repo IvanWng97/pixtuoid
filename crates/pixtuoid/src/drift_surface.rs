@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Where the committed fragment lives, relative to the workspace root.
 const FRAGMENT: &str = "crates/pixtuoid/drift-surface.json";

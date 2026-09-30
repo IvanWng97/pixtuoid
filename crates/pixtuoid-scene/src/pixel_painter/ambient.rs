@@ -9,11 +9,11 @@ use pixtuoid_core::sprite::RgbBuffer;
 use crate::atmosphere::{Look, WallSide};
 use crate::layout::Layout;
 use crate::lighting::{Emitter, EmitterKind};
-use crate::pixel_painter::background::{
-    paint_light, paint_radial_falloff, window_spill_columns, RadialFalloff,
-};
-use crate::pixel_painter::palette::{blend_pixel, blend_rgb, WHITE};
 use crate::pixel_painter::PaintCtx;
+use crate::pixel_painter::background::{
+    RadialFalloff, paint_light, paint_radial_falloff, window_spill_columns,
+};
+use crate::pixel_painter::palette::{WHITE, blend_pixel, blend_rgb};
 use crate::sky::Sky;
 use crate::theme::Theme;
 

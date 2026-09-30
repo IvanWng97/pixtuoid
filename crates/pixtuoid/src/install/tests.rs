@@ -1,5 +1,5 @@
 use super::*;
-use crate::install::target::{MergeOutcome, Target, CLAUDE, CODEX, OPENCLAW};
+use crate::install::target::{CLAUDE, CODEX, MergeOutcome, OPENCLAW, Target};
 
 /// Callers must hold `TEST_ENV_LOCK` first, declared BEFORE this guard: locals
 /// drop in reverse order, so the env restore happens while the lock is held.
