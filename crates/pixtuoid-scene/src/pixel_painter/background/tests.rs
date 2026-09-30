@@ -339,10 +339,10 @@ fn disc_lands_in_a_window_never_on_the_wall_margin() {
 
 #[test]
 fn disc_sweeps_across_a_single_window_buffer() {
-    // buf_w=40 paints EXACTLY one window (too narrow for a second pane) — the
+    // buf_w=64 paints EXACTLY one window (too narrow for a second pane) — the
     // degenerate case where a center-to-center azimuth mapping has zero span and
     // freezes `cx` on the mullion.
-    let buf_w = 40u16;
+    let buf_w = 64u16;
     let top_wall_h = 40u16;
     let morning = render_office_at(7, Weather::Clear, buf_w, top_wall_h);
     let evening = render_office_at(18, Weather::Clear, buf_w, top_wall_h);
@@ -1086,6 +1086,37 @@ fn a_window_shows_the_city_strip_from_its_own_column() {
         west,
         "a pane {dx} columns east shows a different stretch of city"
     );
+}
+
+#[test]
+fn the_wall_between_two_windows_is_one_frame_post() {
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let now = crate::localclock::on_day(1, 12);
+    let (buf_w, buf_h, top_wall_h) = (160u16, 96u16, 24u16);
+    let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 9, g: 9, b: 9 });
+    paint_floor_and_walls(
+        &mut BaseFillCache::new(),
+        &mut buf,
+        top_wall_h,
+        window_bays(buf_w, None),
+        &Moment::resolve(Sky::at(now), theme, 0.0, now),
+        &pack(),
+        theme,
+    );
+    let mut posts = 0;
+    for post in crate::layout::window_posts(buf_w) {
+        posts += 1;
+        for x in post.clone() {
+            for y in window_rows(top_wall_h) {
+                assert_eq!(
+                    buf.get(x, y),
+                    theme.surface.window_frame,
+                    "post {post:?} at ({x}, {y})"
+                );
+            }
+        }
+    }
+    assert!(posts > 0, "this wall has posts");
 }
 
 #[test]
