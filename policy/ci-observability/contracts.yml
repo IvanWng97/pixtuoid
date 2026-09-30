@@ -536,15 +536,24 @@
     A comment runs this with `actions: write` in the base context, so only a
     maintainer who is not a bot may start it, and a fork's review (read-only
     token) never does; the job may only re-run, never check anything out.
+  expected: >-
+    (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+    github.event.comment.user.type != 'Bot' &&
+    contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+    (github.event_name == 'pull_request_review' &&
+    github.event.pull_request.head.repo.full_name == github.repository &&
+    github.event.review.user.type != 'Bot' &&
+    contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)) ||
+    (github.event_name == 'pull_request_review_comment' &&
+    github.event.pull_request.head.repo.full_name == github.repository &&
+    github.event.comment.user.type != 'Bot' &&
+    contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
   assert: |
-    (.jobs.rerun.if | test("contains\\(fromJSON\\('\\[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"\\]'\\), github.event.comment.author_association\\)"))
-    and (.jobs.rerun.if | test("contains\\(fromJSON\\('\\[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"\\]'\\), github.event.review.author_association\\)"))
-    and (.jobs.rerun.if | test("github.event.comment.user.type != 'Bot'"))
-    and (.jobs.rerun.if | test("github.event.pull_request.head.repo.full_name == github.repository"))
+    (.jobs.rerun.if | gsub("\r?\n[ \t]*"; " ") | sub("^\\s+"; "") | sub("\\s+$"; "")) == $expected
     and .jobs.rerun.permissions == {"actions": "write", "pull-requests": "read"}
     and all(.jobs.rerun.steps[]; has("uses") | not)
   break:
-    - .jobs.rerun.if |= sub(" &&\n?\\s*contains\\(fromJSON\\('\\[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"\\]'\\), github.event.comment.author_association\\)"; "")
+    - .jobs.rerun.if |= sub(" &&\\s*contains\\(fromJSON\\('\\[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"\\]'\\), github.event.comment.author_association\\)"; "")
     - .jobs.rerun.if |= sub("github.event.pull_request.head.repo.full_name == github.repository &&"; "")
     - .jobs.rerun.permissions.contents = "write"
     - '.jobs.rerun.steps = [{"uses": "actions/checkout@v5"}] + .jobs.rerun.steps'

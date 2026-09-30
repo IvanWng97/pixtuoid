@@ -538,6 +538,7 @@ printf '%s\n' \
     '"repos/$GH_REPO/pulls/$PR") json=$FAKE_PR_BODY ;;' \
     '"repos/$GH_REPO/issues/$PR/comments") json=$FAKE_COMMENTS ;;' \
     '"repos/$GH_REPO/pulls/$PR/reviews") json=$FAKE_REVIEWS ;;' \
+    '"repos/$GH_REPO/pulls/$PR/comments") json=${FAKE_THREADS:-[]} ;;' \
     '"repos/$GH_REPO/pulls/"*)' \
     '    json=$(jq -ce --arg n "${path##*/}" '"'"'.[$n] // empty'"'"' <<<"$FAKE_PRS") ||' \
     '        { echo "gh: Not Found (HTTP 404)" >&2; exit 1; } ;;' \
@@ -562,6 +563,7 @@ assert_dispositions() {
             FAKE_REVIEWS="$reviews" \
             FAKE_PRS="$known_prs" \
             FAKE_FAIL_PATH="$fail_path" \
+            FAKE_THREADS="${FAKE_THREADS:-[]}" \
             bash -c "$dispositions_script" 2>&1
     )" || rc=$?
     if [[ "$expect" == pass ]]; then
@@ -598,6 +600,8 @@ assert_dispositions $'body\n```\nunclosed' "$(comment "- SURFACED: x" User OWNER
     "a later comment after a body's unclosed fence" "SURFACED is not a terminal disposition"
 assert_dispositions "ok" "$(comment "- SURFACED: x" User OWNER)" '[]' fail \
     "a comments fetch that failed" "502" "repos/owner/repo/issues/7/comments"
+FAKE_THREADS="$(comment "- FOLLOW-UP: in a thread" User OWNER)" \
+    assert_dispositions "ok" '[]' '[]' fail "an inline review-thread reply" "names no → #N"
 
 rerun_script="$(workflow_step_script "$DISPOSITIONS_RERUN_WORKFLOW_FILE" "Re-run the dispositions check")"
 assert_rerun() {

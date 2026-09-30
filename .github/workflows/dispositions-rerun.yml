@@ -8,6 +8,8 @@ on:
     types: [created, edited, deleted]
   pull_request_review:
     types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
 
 permissions: {}
 
@@ -23,7 +25,11 @@ jobs:
       (github.event_name == 'pull_request_review' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.review.user.type != 'Bot' &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association))
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.comment.user.type != 'Bot' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # One re-run at a time per PR; the queued one reads the newest text.

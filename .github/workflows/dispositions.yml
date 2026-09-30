@@ -37,7 +37,8 @@ jobs:
           body="$(gh api "repos/$GH_REPO/pulls/$PR" --jq '[.body // ""]')"
           comments="$(gh api --paginate "repos/$GH_REPO/issues/$PR/comments" --jq "[.[] | $trusted | .body // \"\"]")"
           reviews="$(gh api --paginate "repos/$GH_REPO/pulls/$PR/reviews" --jq "[.[] | $trusted | .body // \"\"]")"
-          docs="$(jq -s 'add' <<<"$body$comments$reviews")"
+          threads="$(gh api --paginate "repos/$GH_REPO/pulls/$PR/comments" --jq "[.[] | $trusted | .body // \"\"]")"
+          docs="$(jq -s 'add' <<<"$body$comments$reviews$threads")"
           # A disposition STARTS its line with its state; the word anywhere else
           # is prose. A fence quotes, and each document opens unfenced.
           state='^[[:space:]]*([-*+][[:space:]]+|[0-9]+\.[[:space:]]+)?(\*\*)?(FIXED|REFUTED|RE-SCOPED|FOLLOW-UP|SURFACED)(\*\*)?([^[:alnum:]_-]|$)'
