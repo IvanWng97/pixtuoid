@@ -45,6 +45,9 @@ green PR:
   regenerate with `just api-surface` + commit when the public surface moves.
 - **docs** — `cargo doc --document-private-items` with `-D warnings`
   (broken/private intra-doc links deny) plus the doctests nextest skips.
+- **dispositions** — every review finding's disposition line is terminal, as
+  [`briefs.md`](../.claude/skills/two-lens-review/briefs.md) defines; a comment or
+  review re-runs it.
 - **smoke (`just gen-check`) · readme drift (`just gen-readme-check`) · npm
   package generator (`just npm-check`)** — committed media and icons, README
   freshness, and the npm package generator + OpenClaw plugin contract.

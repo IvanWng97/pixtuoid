@@ -505,11 +505,11 @@ assert_required '{"a":{"result":"success"},"b":{"result":"cancelled"}}' fail "a 
 assert_required '{}' fail "an empty needs map"
 assert_required '' fail "no results at all"
 
-# ── dispositions: every review finding's disposition is terminal ──────────────
-# The check reads the PR body, human comments and human review bodies through
-# the API, so a stub gh serves each path from a fixture and applies the
-# caller's own --jq filter to it.
+# ── dispositions: a disposition line must be terminal ──────────────────────────
+# The stub applies the caller's own --jq to each fixture, so the trust filter is
+# under test too.
 DISPOSITIONS_WORKFLOW_FILE="${DISPOSITIONS_WORKFLOW_FILE:-.github/workflows/dispositions.yml}"
+DISPOSITIONS_RERUN_WORKFLOW_FILE="${DISPOSITIONS_RERUN_WORKFLOW_FILE:-.github/workflows/dispositions-rerun.yml}"
 dispo_bin="$test_dir/dispo-bin"
 mkdir -p "$dispo_bin"
 # shellcheck disable=SC2016 # The generated gh stub expands its own variables.
@@ -533,6 +533,7 @@ printf '%s\n' \
     '    *) path=$1; shift ;;' \
     '    esac' \
     'done' \
+    '[[ "$path" != "${FAKE_FAIL_PATH:-}" ]] || { echo "gh: Server Error (HTTP 502)" >&2; exit 1; }' \
     'case "$path" in' \
     '"repos/$GH_REPO/pulls/$PR") json=$FAKE_PR_BODY ;;' \
     '"repos/$GH_REPO/issues/$PR/comments") json=$FAKE_COMMENTS ;;' \
@@ -548,56 +549,57 @@ chmod +x "$dispo_bin/gh"
 
 dispositions_script="$(workflow_step_script "$DISPOSITIONS_WORKFLOW_FILE" "Check disposition lines")"
 known_prs='{"10":{"state":"open","merged_at":null},"11":{"state":"closed","merged_at":"2026-09-29T00:00:00Z"},"12":{"state":"closed","merged_at":null}}'
-human='{"type":"User"}'
-bot='{"type":"Bot"}'
 
-# $1 PR body, $2 comments JSON, $3 reviews JSON, $4 pass|fail, $5 label,
-# $6 the text the failure must name (fail cases only).
 assert_dispositions() {
-    local output
-    local rc=0
+    local body="$1" comments="$2" reviews="$3" expect="$4" label="$5" names="${6:-}" fail_path="${7:-}"
+    local output rc=0
     output="$(
         PATH="$dispo_bin:$PATH" \
             GH_REPO="owner/repo" \
             PR="7" \
-            FAKE_PR_BODY="$(jq -cn --arg b "$1" '{body: $b}')" \
-            FAKE_COMMENTS="$2" \
-            FAKE_REVIEWS="$3" \
+            FAKE_PR_BODY="$(jq -cn --arg b "$body" '{body: $b}')" \
+            FAKE_COMMENTS="$comments" \
+            FAKE_REVIEWS="$reviews" \
             FAKE_PRS="$known_prs" \
+            FAKE_FAIL_PATH="$fail_path" \
             bash -c "$dispositions_script" 2>&1
     )" || rc=$?
-    if [[ "$4" == pass ]]; then
-        [[ "$rc" == 0 ]] || fail "dispositions rejected $5: $output"
+    if [[ "$expect" == pass ]]; then
+        [[ "$rc" == 0 ]] || fail "dispositions rejected $label: $output"
     else
-        [[ "$rc" != 0 ]] || fail "dispositions accepted $5"
-        [[ "$output" == *"$6"* ]] || fail "dispositions failed $5 without naming $6: $output"
-        [[ "$output" == *"briefs.md"* ]] || fail "dispositions failed $5 without citing its authority"
+        [[ "$rc" != 0 ]] || fail "dispositions accepted $label"
+        [[ "$output" == *"$names"* ]] || fail "dispositions failed $label without naming $names: $output"
     fi
 }
 
-comment() { jq -cn --arg b "$1" --argjson u "$2" '[{body: $b, user: $u}]'; }
-terminal_body=$'## Dispositions\n- FIXED: the clamp\n- FOLLOW-UP → #10: the stale doc\n- RE-SCOPED → #11: the split-off half\n- REFUTED: the premise (test `pins_it`)'
+# $1 body, $2 author type (User|Bot), $3 author_association.
+comment() { jq -cn --arg b "$1" --arg t "$2" --arg a "$3" '[{body: $b, user: {type: $t}, author_association: $a}]'; }
+terminal_body=$'## Dispositions\n- FIXED: the clamp\n- FOLLOW-UP → #10: the stale doc\n- **RE-SCOPED** -> #11: the split-off half\n1. REFUTED: the premise (test `pins_it`)'
 
 assert_dispositions "$terminal_body" '[]' '[]' pass "every state terminal (open + merged #N)"
 assert_dispositions "No review yet." '[]' '[]' pass "a body with no dispositions"
-assert_dispositions "ok" "$(comment $'```\nSURFACED\nFOLLOW-UP with no number\n```' "$human")" '[]' pass \
-    "the old vocabulary quoted inside a code fence"
-assert_dispositions "ok" "$(comment "SURFACED by the bot, FOLLOW-UP too" "$bot")" '[]' pass \
-    "a bot's comment (not a disposition)"
-assert_dispositions "ok" "$(comment "- FOLLOW-UP: the stale doc" "$human")" '[]' fail \
-    "a FOLLOW-UP naming no #N" "names no #N"
-assert_dispositions "- RE-SCOPED: split later" '[]' '[]' fail \
-    "a RE-SCOPED naming no #N" "names no #N"
-assert_dispositions "ok" '[]' "$(comment "- FOLLOW-UP → #99: gone" "$human")" fail \
+assert_dispositions "This replaces \`SURFACED\` with **FOLLOW-UP → #N**; a line naming no FOLLOW-UP number fails." \
+    '[]' '[]' pass "the vocabulary in prose"
+assert_dispositions "ok" "$(comment $'```\n- SURFACED\n- FOLLOW-UP: x\n```' User OWNER)" '[]' pass \
+    "the old vocabulary inside a fence"
+assert_dispositions "ok" "$(comment "- SURFACED: x" Bot NONE)" '[]' pass "a bot's comment"
+assert_dispositions "ok" "$(comment "- SURFACED: x" User NONE)" '[]' pass "an outsider's comment"
+assert_dispositions "ok" "$(comment "- FOLLOW-UP: the stale doc" User OWNER)" '[]' fail \
+    "a FOLLOW-UP naming no #N" "names no → #N"
+assert_dispositions "- FOLLOW-UP: see #10" '[]' '[]' fail "a #N without the arrow" "names no → #N"
+assert_dispositions "- RE-SCOPED: split later" '[]' '[]' fail "a RE-SCOPED naming no #N" "names no → #N"
+assert_dispositions "ok" '[]' "$(comment "- FOLLOW-UP → #99: gone" User MEMBER)" fail \
     "a dangling #N in a review body" "#99"
-assert_dispositions "- FOLLOW-UP → #12: closed" '[]' '[]' fail \
-    "a #N that closed unmerged" "#12"
-assert_dispositions "ok" "$(comment "**SURFACED** — the owner decides" "$human")" '[]' fail \
-    "a bare SURFACED" "SURFACED"
+assert_dispositions "- FOLLOW-UP → #12: closed" '[]' '[]' fail "a #N that closed unmerged" "#12"
+assert_dispositions "- FOLLOW-UP → #7: me" '[]' '[]' fail "the PR citing itself" "#7 is this PR"
+assert_dispositions "ok" "$(comment "**SURFACED** — the owner decides" User COLLABORATOR)" '[]' fail \
+    "a bare SURFACED" "SURFACED is not a terminal disposition"
+assert_dispositions $'body\n```\nunclosed' "$(comment "- SURFACED: x" User OWNER)" '[]' fail \
+    "a later comment after a body's unclosed fence" "SURFACED is not a terminal disposition"
+assert_dispositions "ok" "$(comment "- SURFACED: x" User OWNER)" '[]' fail \
+    "a comments fetch that failed" "502" "repos/owner/repo/issues/7/comments"
 
-# A comment or review event cannot fail the PR's check itself (its run hangs off
-# the default branch), so it re-runs the pull_request run for the PR's head.
-rerun_script="$(workflow_step_script "$DISPOSITIONS_WORKFLOW_FILE" "Re-run the dispositions check")"
+rerun_script="$(workflow_step_script "$DISPOSITIONS_RERUN_WORKFLOW_FILE" "Re-run the dispositions check")"
 assert_rerun() {
     local pr_view="$1" runs="$2" expect="$3" label="$4"
     local log="$test_dir/dispo-gh.log"

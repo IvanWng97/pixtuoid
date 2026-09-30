@@ -1,26 +1,17 @@
 name: dispositions
 
-# Every review finding's disposition is terminal as
-# .claude/skills/two-lens-review/briefs.md defines the four states. Nothing
-# here checks out or runs PR code: it reads the PR's text through the API.
+# Fails a PR whose disposition lines are not terminal as
+# .claude/skills/two-lens-review/briefs.md defines them. It reads the PR's text
+# through the API and never checks out or runs PR code.
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize, ready_for_review]
-  # Dispositions usually land in a comment after the push. Both events hand a
-  # fork PR a read-only token, so there the re-check needs a body edit instead.
-  issue_comment:
-    types: [created, edited, deleted]
-  pull_request_review:
-    types: [submitted, edited, dismissed]
 
-# Per-job grants: with more than one job, a workflow-level grant is zizmor's
-# excessive-permissions class.
 permissions: {}
 
 jobs:
   check:
     name: dispositions
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     concurrency:
@@ -39,69 +30,51 @@ jobs:
         run: |
           set -euo pipefail
           authority=".claude/skills/two-lens-review/briefs.md"
-          # Human text only: a bot's review is a finding, not a disposition.
-          text="$(
-              gh api "repos/$GH_REPO/pulls/$PR" --jq '.body // ""'
-              gh api --paginate "repos/$GH_REPO/issues/$PR/comments" \
-                  --jq '.[] | select(.user.type != "Bot") | .body // ""'
-              gh api --paginate "repos/$GH_REPO/pulls/$PR/reviews" \
-                  --jq '.[] | select(.user.type != "Bot") | .body // ""'
-          )"
-          # A fenced block quotes vocabulary; it disposes of nothing.
-          lines="$(awk '/^[[:space:]]*```/ { fenced = !fenced; next } !fenced' <<<"$text")"
+          # Only a maintainer's comment or review disposes of a finding; a bot's
+          # is a finding, and anyone else's must not be able to redden a PR.
+          trusted='select(.user.type != "Bot" and (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR")))'
+          # One assignment per source, so a failed fetch fails the step.
+          body="$(gh api "repos/$GH_REPO/pulls/$PR" --jq '[.body // ""]')"
+          comments="$(gh api --paginate "repos/$GH_REPO/issues/$PR/comments" --jq "[.[] | $trusted | .body // \"\"]")"
+          reviews="$(gh api --paginate "repos/$GH_REPO/pulls/$PR/reviews" --jq "[.[] | $trusted | .body // \"\"]")"
+          docs="$(jq -s 'add' <<<"$body$comments$reviews")"
+          # A disposition STARTS its line with its state; the word anywhere else
+          # is prose. A fence quotes, and each document opens unfenced.
+          state='^[[:space:]]*([-*+][[:space:]]+|[0-9]+\.[[:space:]]+)?(\*\*)?(FIXED|REFUTED|RE-SCOPED|FOLLOW-UP|SURFACED)(\*\*)?([^[:alnum:]_-]|$)'
           bad=0
-          while IFS= read -r line; do
-              if grep -qw SURFACED <<<"$line"; then
-                  echo "::error::SURFACED is not a terminal disposition ($authority): $line"
-                  bad=1
-              fi
-              grep -qwE 'FOLLOW-UP|RE-SCOPED' <<<"$line" || continue
-              refs="$(grep -oE '#[0-9]+' <<<"$line" | tr -d '#' || true)"
-              if [[ -z "$refs" ]]; then
-                  echo "::error::this disposition names no #N ($authority): $line"
-                  bad=1
-                  continue
-              fi
-              for n in $refs; do
-                  state="$(gh api "repos/$GH_REPO/pulls/$n" \
-                      --jq 'if .merged_at then "merged" else .state end' 2>/dev/null || echo "not a PR")"
-                  case "$state" in
+          for i in $(seq 0 $(($(jq length <<<"$docs") - 1))); do
+              while IFS= read -r line; do
+                  [[ "$line" =~ $state ]] || continue
+                  case "${BASH_REMATCH[3]}" in
+                  FIXED | REFUTED) continue ;;
+                  SURFACED)
+                      echo "::error::SURFACED is not a terminal disposition ($authority): $line"
+                      bad=1
+                      continue
+                      ;;
+                  esac
+                  if [[ ! "$line" =~ (FOLLOW-UP|RE-SCOPED)(\*\*)?[[:space:]]*(→|->)[[:space:]]*#([0-9]+) ]]; then
+                      echo "::error::this disposition names no → #N ($authority): $line"
+                      bad=1
+                      continue
+                  fi
+                  n="${BASH_REMATCH[4]}"
+                  if [[ "$n" == "$PR" ]]; then
+                      echo "::error::#$n is this PR, not its follow-up ($authority): $line"
+                      bad=1
+                      continue
+                  fi
+                  # An error here is the API's, so it fails with the API's message.
+                  state_of="$(gh api "repos/$GH_REPO/pulls/$n" --jq 'if .merged_at then "merged" else .state end' 2>&1)" ||
+                      state_of="not a PR ($state_of)"
+                  case "$state_of" in
                   open | merged) ;;
                   *)
-                      echo "::error::#$n is $state, not an open or merged PR ($authority): $line"
+                      echo "::error::#$n is $state_of, not an open or merged PR ($authority): $line"
                       bad=1
                       ;;
                   esac
-              done
-          done <<<"$lines"
+              done < <(jq -r --argjson i "$i" '.[$i]' <<<"$docs" |
+                  awk '/^[[:space:]]*(```|~~~)/ { fenced = !fenced; next } !fenced')
+          done
           exit "$bad"
-
-  rerun:
-    name: re-check dispositions
-    if: >-
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request)
-      || github.event_name == 'pull_request_review'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      actions: write
-      pull-requests: read
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-      PR: ${{ github.event.issue.number || github.event.pull_request.number }}
-    steps:
-      # A comment or review run hangs off another ref, so it cannot fail the
-      # PR's check itself: it re-runs the head's pull_request run instead.
-      - name: Re-run the dispositions check
-        shell: bash
-        run: |
-          set -euo pipefail
-          head="$(gh pr view "$PR" --json state,headRefOid --jq 'select(.state == "OPEN") | .headRefOid')"
-          [[ -n "$head" ]] || exit 0
-          run="$(gh run list --workflow dispositions.yml --event pull_request --commit "$head" \
-              --json databaseId --jq '.[0].databaseId // empty')"
-          [[ -n "$run" ]] || exit 0
-          # A run still in flight cannot be re-run.
-          gh run watch "$run" >/dev/null 2>&1 || true
-          gh run rerun "$run"

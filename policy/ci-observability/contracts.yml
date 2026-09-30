@@ -399,7 +399,7 @@
 - id: ci-gate-judges-every-group
   file: .github/workflows/ci.yml
   why: >-
-    `gate` is the only CI check branch protection requires. A job skipped
+    `gate` is the check branch protection requires for CI. A job skipped
     because a job it needs failed reports "Success" and does not block a merge
     (docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions),
     so `gate` must run on `always()`; it must also need every group call and
@@ -507,3 +507,44 @@
   break:
     - del(.workspace.release_always)
     - .workspace.release_always = true
+
+- id: dispositions-check-cannot-skip
+  file: .github/workflows/dispositions.yml
+  why: >-
+    Branch protection requires this check, and a skipped or continue-on-error
+    job reports Success
+    (docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions):
+    it must run on every event that changes the PR's own text, carry no
+    condition, and only read.
+  assert: |
+    (.on | keys) == ["pull_request"]
+    and (.on.pull_request.types | sort) == ["edited", "opened", "ready_for_review", "reopened", "synchronize"]
+    and .jobs.check.name == "dispositions"
+    and ((.jobs.check | has("if") or has("continue-on-error")) | not)
+    and .jobs.check.permissions == {"pull-requests": "read", "issues": "read"}
+    and all(.jobs.check.steps[]; has("uses") | not)
+  break:
+    - .jobs.check.if = "false"
+    - .jobs.check["continue-on-error"] = true
+    - .on.pull_request.types |= map(select(. != "edited"))
+    - .jobs.check.permissions["pull-requests"] = "write"
+    - '.jobs.check.steps = [{"uses": "actions/checkout@v5"}] + .jobs.check.steps'
+
+- id: dispositions-rerun-guard
+  file: .github/workflows/dispositions-rerun.yml
+  why: >-
+    A comment runs this with `actions: write` in the base context, so only a
+    maintainer who is not a bot may start it, and a fork's review (read-only
+    token) never does; the job may only re-run, never check anything out.
+  assert: |
+    (.jobs.rerun.if | test("contains\\(fromJSON\\('\\[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"\\]'\\), github.event.comment.author_association\\)"))
+    and (.jobs.rerun.if | test("contains\\(fromJSON\\('\\[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"\\]'\\), github.event.review.author_association\\)"))
+    and (.jobs.rerun.if | test("github.event.comment.user.type != 'Bot'"))
+    and (.jobs.rerun.if | test("github.event.pull_request.head.repo.full_name == github.repository"))
+    and .jobs.rerun.permissions == {"actions": "write", "pull-requests": "read"}
+    and all(.jobs.rerun.steps[]; has("uses") | not)
+  break:
+    - .jobs.rerun.if |= sub(" &&\n?\\s*contains\\(fromJSON\\('\\[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"\\]'\\), github.event.comment.author_association\\)"; "")
+    - .jobs.rerun.if |= sub("github.event.pull_request.head.repo.full_name == github.repository &&"; "")
+    - .jobs.rerun.permissions.contents = "write"
+    - '.jobs.rerun.steps = [{"uses": "actions/checkout@v5"}] + .jobs.rerun.steps'

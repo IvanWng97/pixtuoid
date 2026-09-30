@@ -1,0 +1,52 @@
+name: dispositions re-check
+
+# Dispositions usually land in a comment or review after the push. Checking in
+# place would add a second `dispositions` check to the head, so these events
+# re-run the head's pull_request run instead: one producer for the required check.
+on:
+  issue_comment:
+    types: [created, edited, deleted]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions: {}
+
+jobs:
+  rerun:
+    name: re-check dispositions
+    # The same trust bar the check applies; a fork's review token is read-only,
+    # so there a body edit re-runs the check instead.
+    if: >-
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+      github.event.comment.user.type != 'Bot' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.review.user.type != 'Bot' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # One re-run at a time per PR; the queued one reads the newest text.
+    concurrency:
+      group: dispositions-rerun-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      actions: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.issue.number || github.event.pull_request.number }}
+    steps:
+      - name: Re-run the dispositions check
+        shell: bash
+        run: |
+          set -euo pipefail
+          head="$(gh pr view "$PR" --json state,headRefOid --jq 'select(.state == "OPEN") | .headRefOid')"
+          [[ -n "$head" ]] || exit 0
+          run="$(gh run list --workflow dispositions.yml --event pull_request --commit "$head" \
+              --json databaseId --jq '.[0].databaseId // empty')"
+          [[ -n "$run" ]] || exit 0
+          # A run still in flight cannot be re-run.
+          gh run watch "$run" >/dev/null 2>&1 || true
+          gh run rerun "$run"
