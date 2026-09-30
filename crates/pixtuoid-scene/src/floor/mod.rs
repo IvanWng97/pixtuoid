@@ -32,7 +32,7 @@ use crate::theme::Theme;
 pub use pixtuoid_core::state::MAX_FLOORS;
 
 /// Fibonacci hash multiplier for floor seed derivation.
-pub const FLOOR_SEED_MULTIPLIER: u64 = 0x9e37_79b9_7f4a_7c15;
+pub const FLOOR_SEED_MULTIPLIER: u64 = crate::GOLDEN_GAMMA;
 
 /// Derive a floor's layout seed from its index — the ONE definition every call
 /// site shares, so a floor's look + capacity can't drift between paths.
@@ -690,8 +690,8 @@ impl FloorSession {
     }
 
     /// Flush the per-floor recolored-sprite cache. Call after a theme change so
-    /// cached AGENT sprites don't render with the old palette; env
-    /// (walls/floor/sky) needs no flush since it repaints fresh each frame.
+    /// cached AGENT sprites don't render with the old palette; the env base
+    /// fill needs no flush, since `BaseFillCache` keys on the palette.
     pub fn reset_frame_cache(&mut self) {
         self.floor.ctx.cache = crate::frame_cache::FrameCache::new();
     }

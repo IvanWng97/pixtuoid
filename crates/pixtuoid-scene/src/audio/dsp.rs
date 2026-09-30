@@ -22,10 +22,7 @@ impl NoiseStream {
 
     fn next_u64(&mut self) -> u64 {
         self.counter = self.counter.wrapping_add(1);
-        pixtuoid_core::id::splitmix64(
-            self.seed
-                .wrapping_add(self.counter.wrapping_mul(0x9E37_79B9_7F4A_7C15)),
-        )
+        crate::splitmix_draw(self.seed, self.counter)
     }
 
     /// Uniform in [0, 1).

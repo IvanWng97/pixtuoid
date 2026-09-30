@@ -287,7 +287,7 @@ fn paint_streaks(
                 }
             }
             Particle::Flake => {
-                let wiggle = if (elapsed_ms / 400 + seed.wrapping_mul(0x9e37)).is_multiple_of(2) {
+                let wiggle = if (elapsed_ms / 400 + seed).is_multiple_of(2) {
                     0
                 } else {
                     1
@@ -454,7 +454,7 @@ fn paint_floor_to_ceiling_window(
             &StreakSpec {
                 count: 4,
                 seed_mult: 7,
-                sx_mult: 0x9e37_79b9,
+                sx_mult: u64::from(crate::GOLDEN_GAMMA_32),
                 speed_base: 60,
                 speed_span: 50,
                 color: Rgb {
@@ -480,7 +480,7 @@ fn paint_floor_to_ceiling_window(
                 &StreakSpec {
                     count: 6,
                     seed_mult: 7,
-                    sx_mult: 0x9e37_79b9,
+                    sx_mult: u64::from(crate::GOLDEN_GAMMA_32),
                     speed_base: 40,
                     speed_span: 40,
                     color: Rgb {
@@ -531,7 +531,7 @@ fn paint_floor_to_ceiling_window(
             &StreakSpec {
                 count: 5,
                 seed_mult: 7,
-                sx_mult: 0x9e37_79b9,
+                sx_mult: u64::from(crate::GOLDEN_GAMMA_32),
                 speed_base: 50,
                 speed_span: 40,
                 color: Rgb {

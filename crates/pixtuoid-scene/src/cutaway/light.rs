@@ -209,7 +209,7 @@ impl LightView {
     }
 
     /// Where it lifts most, in art pixels: the middle of its brightest.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "density-art"))]
     pub(crate) fn peak(&self) -> (f32, f32) {
         let top = self.lift.iter().copied().max().unwrap_or(0);
         let w = usize::from(self.w.max(1));
