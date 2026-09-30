@@ -413,15 +413,11 @@ fn lights(
     lights
         .spills
         .iter()
-        .chain(&lights.pools)
         .chain(&lights.floor_lamp)
         .chain(&lamps)
         .chain(&lights.monitor_halos)
         .chain(std::iter::once(&lights.neon))
         .filter(|e| match e.kind {
-            // A pool over every desk reads as a second lamp: the night room is
-            // lit by its lamps and screens.
-            crate::lighting::EmitterKind::CeilingPool => false,
             // The glow waits for its sign, which the cutaway does not draw yet:
             // a glow with no tube in it reads as a stain on the wall.
             crate::lighting::EmitterKind::NeonGlow => false,
@@ -1205,24 +1201,20 @@ fn push_characters(
         let Some(agent) = frame.agents.get(c.agent_idx) else {
             continue;
         };
+        let pose = crate::pixel_painter::seat::SpritePose::of(c, agent, theme);
         // The frame `paint_figure` draws: an animation's frames need not
         // share a size.
-        let Some((w, h)) =
-            crate::pixel_painter::densest_frame(pack, c.anim_name, c.frame_idx, RenderScale::ONE)
-                .map(|d| d.logical)
-        else {
+        let Some((w, h)) = crate::pixel_painter::densest_frame(
+            pack,
+            pose.anim_name,
+            pose.frame_idx,
+            RenderScale::ONE,
+        )
+        .map(|d| d.logical) else {
             continue;
         };
-        let Some(key) = crate::pixel_painter::seat::character_key(
-            c.anim_name,
-            c.frame_idx,
-            agent,
-            pack,
-            c.flip_x,
-            crate::pixel_painter::character_glow_tint(c.glow, agent, theme),
-            scale,
-            now,
-        ) else {
+        let Some(key) = crate::pixel_painter::seat::character_key(pose, agent, pack, scale, now)
+        else {
             continue;
         };
         let seat = c.seat_desk.map(|d| (d, layout.desk_facing_at(d)));
@@ -4063,10 +4055,10 @@ S B B B B B B S
         assert!(lights > 0, "the night office has no lights");
     }
 
-    /// The cutaway hangs no ceiling pool and no neon glow, at any hour: its night
-    /// is lit by its lamps and screens.
+    /// The cutaway hangs no neon glow at any hour, while its lamps light the
+    /// night room.
     #[test]
-    fn the_cutaway_hangs_no_ceiling_pool() {
+    fn the_cutaway_hangs_no_neon_glow() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
@@ -4080,9 +4072,8 @@ S B B B B B B S
         for hour in [12, 18, 23] {
             for light in list_at(frame, office, hour).lights() {
                 assert!(
-                    !light.view.is(crate::lighting::EmitterKind::CeilingPool)
-                        && !light.view.is(crate::lighting::EmitterKind::NeonGlow),
-                    "{hour}:00 hangs a pool or a neon glow at {:?}",
+                    !light.view.is(crate::lighting::EmitterKind::NeonGlow),
+                    "{hour}:00 hangs a neon glow at {:?}",
                     light.span
                 );
                 lamps += usize::from(light.view.is(crate::lighting::EmitterKind::DeskLamp));

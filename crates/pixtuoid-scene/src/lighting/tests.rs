@@ -209,44 +209,6 @@ fn a_monitor_halo_hangs_over_each_lit_screen_only() {
 }
 
 #[test]
-fn ceiling_pool_regions_yields_desks_then_pantry_then_corridor_in_order() {
-    let l = crate::layout::Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS))
-        .expect("192x160 fits");
-    let pools: Vec<_> = pool_regions(&l).collect();
-    assert_eq!(
-        pools.len(),
-        l.home_desks.len() + l.pantry.is_some() as usize + l.corridor.is_some() as usize
-    );
-    let mut desk_rows = std::collections::HashSet::new();
-    for (i, (pool, desk)) in pools.iter().zip(&l.home_desks).enumerate() {
-        // Derived from the ONE authority rather than restating its arithmetic.
-        let want = crate::layout::desk_ceiling_pool_center(
-            *desk,
-            l.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)),
-        );
-        assert_eq!((pool.cx, pool.cy), (want.x, want.y));
-        assert_eq!((pool.half_w, pool.half_h), DESK_POOL_HALF);
-        desk_rows.insert(pool.cy as i32 - desk.y as i32);
-    }
-    // Negative control: with one lift, a facing-blind impl passes the loop above.
-    assert!(
-        desk_rows.len() >= 2,
-        "this layout seats both sides, so its desk lights must sit at two \
-         different offsets — got {desk_rows:?}"
-    );
-    if let Some(pr) = l.pantry.map(|p| p.bounds) {
-        let p = pools[l.home_desks.len()];
-        assert_eq!((p.cx, p.cy), (pr.x + pr.width / 2, pr.y + pr.height / 2));
-        assert_eq!((p.half_w, p.half_h), PANTRY_POOL_HALF);
-    }
-    if let Some(c) = l.corridor {
-        let p = *pools.last().unwrap();
-        assert_eq!((p.cx, p.cy), (c.x + c.width / 2, c.y + c.height / 2));
-        assert_eq!((p.half_w, p.half_h), CORRIDOR_POOL_HALF);
-    }
-}
-
-#[test]
 fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
     use crate::layout::Facing;
     // A lamp is a FIXTURE on the desk's west wing, visible from either side; the
@@ -269,7 +231,7 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
     );
 }
 
-/// The two desk emitters (`lamp`, `screen_idle`); the ceiling pools and the floor lamp share the
+/// The two desk emitters (`lamp`, `screen_idle`); the floor lamp shares the
 /// rule but not this pin. Dropping either factor makes that emitter's two
 /// readings equal.
 #[test]
@@ -290,22 +252,13 @@ fn an_emptied_floor_takes_both_desk_emitters_down_with_the_level() {
 }
 
 /// One of every shape, lit.
-fn every_shape() -> [Emitter; 5] {
+fn every_shape() -> [Emitter; 4] {
     let lit = |kind, light| Emitter {
         kind,
         light,
         strength: 0.8,
     };
     [
-        lit(
-            EmitterKind::CeilingPool,
-            Light::Pool(Ellipse {
-                cx: 30,
-                cy: 20,
-                half_w: 10,
-                half_h: 5,
-            }),
-        ),
         lit(
             EmitterKind::DeskLamp,
             Light::Halo {
@@ -370,12 +323,6 @@ fn a_light_sampled_between_cells_stays_inside_its_bounds() {
 fn a_lights_peak_is_its_brightest_cell() {
     let at = |x, y| Point { x, y };
     let lights = [
-        Light::Pool(Ellipse {
-            cx: 30,
-            cy: 20,
-            half_w: 10,
-            half_h: 5,
-        }),
         Light::Halo {
             centre: at(30, 20),
             radius: 11,

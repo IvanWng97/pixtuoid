@@ -1075,7 +1075,6 @@ pub const pixtuoid_scene::layout::WALL_BAND_TO_TOP_MARGIN: u16
 pub const pixtuoid_scene::layout::WALL_THICK_H: u16
 pub const pixtuoid_scene::layout::WALL_THICK_V: u16
 pub fn pixtuoid_scene::layout::anchored_top_left(pixtuoid_scene::layout::Anchor, pixtuoid_scene::layout::Point, u16, u16) -> pixtuoid_scene::layout::Point
-pub fn pixtuoid_scene::layout::desk_ceiling_pool_center(pixtuoid_scene::layout::Point, pixtuoid_scene::layout::Facing) -> pixtuoid_scene::layout::Point
 pub const fn pixtuoid_scene::layout::desk_furniture_def() -> pixtuoid_scene::layout::FurnitureDef
 pub fn pixtuoid_scene::layout::desk_walk_anchor_facing(pixtuoid_scene::layout::Point, pixtuoid_scene::layout::Facing) -> pixtuoid_scene::layout::Point
 pub const fn pixtuoid_scene::layout::furniture_def(pixtuoid_scene::layout::Furniture) -> pixtuoid_scene::layout::FurnitureDef
@@ -1765,7 +1764,6 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::theme::FurnitureColors
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::theme::FurnitureColors
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::theme::FurnitureColors
 pub struct pixtuoid_scene::theme::LightingColors
-pub pixtuoid_scene::theme::LightingColors::ceiling_pool: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::LightingColors::day_sky_a: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::LightingColors::day_sky_b: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::LightingColors::desk_lamp: pixtuoid_core::sprite::Rgb

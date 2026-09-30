@@ -1,6 +1,6 @@
-//! What lies on the floor under the room's light, pixel-free: elliptical pools of
-//! light and of shadow. The classic painter blends a pool per pixel; the cutaway
-//! steps it on its art grid.
+//! What lies on the floor under the room's light, pixel-free: elliptical
+//! shadows. The classic painter blends one per pixel; the cutaway steps it on
+//! its art grid.
 
 /// A shadow's strength at noon, where a solid's shadow is crispest.
 const NOON_SHADOW: f32 = 0.5;
