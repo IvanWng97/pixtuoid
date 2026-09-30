@@ -114,8 +114,8 @@ def run_crop(job, out_dirs, work, intermediates):
             f"gen-media: crop job '{job['id']}' needs its source render '{job['from']}' "
             f"— include it, e.g. --jobs {job['from']},{job['id']}"
         )
+    img = Image.open(src).convert("RGB")
     if "quadrants" in job:
-        img = Image.open(src).convert("RGB")
         w, h = img.size
         scale = job.get("scale", 1)
         for name, (x0, y0, x1, y1) in job["quadrants"].items():
@@ -125,8 +125,10 @@ def run_crop(job, out_dirs, work, intermediates):
                 out.save(d / f"{job['id']}-{name}.png")
     else:
         for key, spec in job["crops"].items():
+            w, h, x, y = map(int, spec.split(":"))
+            out = img.crop((x, y, x + w, y + h))
             for d in out_dirs:
-                ffmpeg("-i", str(src), "-vf", f"crop={spec}", str(d / f"{job['id']}_{key}.png"))
+                out.save(d / f"{job['id']}_{key}.png")
 
 
 def run_composite(job, out_dirs, work, intermediates):

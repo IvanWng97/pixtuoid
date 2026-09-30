@@ -113,26 +113,10 @@ jobs:
           out=$(echo '{}' | ./target/release/pixtuoid-hook 2>&1)
           test -z "$out"
           echo "hook shim exited 0 silently (expected no-op with no socket)"
-      # gen-check needs Node, Pillow, and ffmpeg, but not gifsicle in check mode.
+      # gen-check needs Node and Pillow.
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - name: Install ffmpeg
-        # setup-alsa's mirror-retry envelope, for a package that composite
-        # doesn't own; do not pipe the version command through head under pipefail.
-        run: |
-          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-          for attempt in 1 2 3; do
-            if sudo apt-get update "${apt_opts[@]}" \
-              && sudo apt-get install -y "${apt_opts[@]}" ffmpeg; then
-              ffmpeg -version
-              exit 0
-            fi
-            echo "ffmpeg install attempt $attempt failed; retrying in $((attempt * 15))s..." >&2
-            sleep "$((attempt * 15))"
-          done
-          echo "ffmpeg install failed after 3 attempts" >&2
-          exit 1
       - name: Cache pip downloads
         uses: actions/cache@v6
         with:
