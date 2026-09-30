@@ -38,9 +38,9 @@ pub mod board;
 pub mod burn;
 pub(crate) mod celestial;
 pub mod chitchat;
-#[doc(hidden)]
 pub(crate) mod composite;
 pub(crate) mod creatures;
+#[doc(hidden)]
 pub mod cutaway;
 pub(crate) mod dither;
 pub mod embedded_pack;
