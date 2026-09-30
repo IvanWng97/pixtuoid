@@ -145,15 +145,35 @@
 - id: reviewer-publisher-only-comments
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    publish can comment on the PR, and any action there, a checkout included,
-    runs with that scope: an action reads `github.token` without being passed it
+    publish can comment on the PR and set the merge gate's status, and any
+    action there, a checkout included, runs with that scope: an action reads
+    `github.token` without being passed it
     (docs.github.com/en/actions/tutorials/authenticate-with-github_token).
   assert: |
-    .jobs.publish.permissions == {"issues": "write", "pull-requests": "write"}
+    .jobs.publish.permissions == {"issues": "write", "pull-requests": "write", "statuses": "write"}
       and ([.jobs.publish.steps[] | select(has("uses"))] | length == 0)
   break:
     - '.jobs.publish.steps += [{"uses": "actions/checkout@v7"}]'
     - .jobs.publish.permissions.contents = "write"
+
+- id: reviewer-absence-fails-the-status
+  file: .github/workflows/claude-readonly-review.yml
+  why: >-
+    A publish that did not succeed must fail the lens's status, and its skip
+    arm (analyze failed or declined) is invisible to action_behavior_test.sh,
+    which cannot run an `if:`. The job only sets that status.
+  assert: |
+    .jobs.report_absence as $job
+    | $job.permissions == {"statuses": "write"}
+      and ($job.needs | sort) == ["analyze", "publish"]
+      and $job.if == "${{ !cancelled() && needs.publish.result != 'success' }}"
+      and ([$job.steps[] | select(has("uses"))] | length == 0)
+  break:
+    - .jobs.report_absence.if = "${{ needs.publish.result == 'failure' }}"
+    - .jobs.report_absence.if = "${{ needs.publish.result != 'success' }}"
+    - .jobs.report_absence.needs = ["analyze"]
+    - .jobs.report_absence.permissions["pull-requests"] = "write"
+    - '.jobs.report_absence.steps += [{"uses": "actions/checkout@v7"}]'
 
 - id: reviewer-fork-head-needs-a-maintainer
   file: .github/workflows/claude-review.yml

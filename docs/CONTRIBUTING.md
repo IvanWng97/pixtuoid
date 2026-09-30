@@ -247,13 +247,13 @@ invariants"), which every contributor and agent reads first.
 
 ### The merge gate
 
-Green CI; every lens bot's review (`claude-review-<lens>`) at the final head;
-every finding's review thread resolved by its disposition; zero open confirmed
-`issue (blocking)`; each matching [local row](../REVIEW.md#escalation)
-recorded. The local [`two-lens-review`](../.claude/skills/two-lens-review/SKILL.md)
-skill is otherwise an optional pre-flight. The review job passes even when it posts
-findings, so read each bot's latest comment at HEAD, never the check table
-(#448). An `absent-<marker>:<sha>` comment, or none at HEAD, is no review:
+Green `ci-gate`; every lens bot's required `claude-review/<lens>` status
+`success` at the final head; every finding's review thread resolved by its
+disposition; zero open confirmed `issue (blocking)`; each matching
+[local row](../REVIEW.md#escalation) recorded. The local
+[`two-lens-review`](../.claude/skills/two-lens-review/SKILL.md) skill is
+otherwise an optional pre-flight. A published review passes whatever it
+found; a failed or missing status is no review: comment `/claude-review`, else
 split the PR smaller, else run one extra differentiated local lens and the
 owner merges, recorded in a PR comment.
 
