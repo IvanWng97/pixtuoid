@@ -302,8 +302,8 @@ const SKIN_PRESETS: &[Rgb] = &[
 ];
 
 /// Deterministic seed from a normalized cwd string: byte-fold, then the
-/// splitmix64 finalizer. NOT `DefaultHasher` — its per-process randomization
-/// would flicker colors across runs.
+/// splitmix64 finalizer. NOT `DefaultHasher`: its algorithm may change between
+/// Rust releases, which would re-dress every agent on a toolchain bump.
 fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
     let folded = cwd_norm
         .bytes()
