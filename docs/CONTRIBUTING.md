@@ -43,8 +43,9 @@ green PR:
 
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
-- **docs** — `cargo doc --document-private-items` with `-D warnings`
-  (broken/private intra-doc links deny) plus the doctests nextest skips.
+- **docs** — `cargo doc --document-private-items` with `-D warnings` over the
+  bins, the examples and each of `DOC_TARGETS` (broken/private intra-doc links
+  deny) plus the doctests nextest skips.
 - **smoke (`just gen-check`) · readme drift (`just gen-readme-check`) · npm
   package generator (`just npm-check`)** — committed media and icons, README
   freshness, and the npm package generator + OpenClaw plugin contract.

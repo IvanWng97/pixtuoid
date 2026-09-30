@@ -253,7 +253,7 @@ struct SnapshotArgs {
     flame: Option<String>,
 
     /// Crop the generated PNG to a window centered on the gateway lobster mascot.
-    /// Needs a VISIBLE mascot: pass --openclaw <state> — enforced at runtime, not
+    /// Needs a VISIBLE mascot: pass `--openclaw <state>` — enforced at runtime, not
     /// by clap, since "visible" isn't expressible as a static flag dependency.
     /// Static-PNG path only.
     #[arg(long, conflicts_with_all = ["crop_agent", "crop_furniture", "gif", "anim"])]
