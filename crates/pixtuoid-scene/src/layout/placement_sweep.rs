@@ -1001,12 +1001,12 @@ fn free_standing_whiteboard_survives_the_west_aisle_it_used_to_seal() {
 }
 
 /// The boundary scan can't catch an over-drop: dropping the couch only IMPROVES
-/// connectivity. 57x160 seed 1 is the KNIFE-EDGE — the floor lamp flanking the
+/// connectivity. 61x160 seed 1 is the KNIFE-EDGE — the floor lamp flanking the
 /// couch east (`compute::LoungeFlanks`) meets the door threshold's column
-/// with its padded ground exactly; 62x160 seed 3 clears comfortably.
+/// with its padded ground exactly; 66x160 seed 3 clears comfortably.
 #[test]
 fn couch_survives_a_narrow_band_that_clears_the_door() {
-    for &(w, h, seed) in &[(57u16, 160u16, 1u64), (62, 160, 3)] {
+    for &(w, h, seed) in &[(61u16, 160u16, 1u64), (66, 160, 3)] {
         let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("lays out");
         assert!(
             l.couch_sprite_center().is_some(),

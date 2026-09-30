@@ -63,7 +63,7 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
 /// → Windows `%APPDATA%\reasonix` → else `<home>/.reasonix`.
 fn reasonix_home() -> Option<PathBuf> {
     resolve_reasonix_home(
-        io::nonempty_env("REASONIX_HOME").map(|v| io::expand_tilde(&v, None)),
+        pixtuoid_core::platform::path_env("REASONIX_HOME").map(|v| io::expand_tilde(&v, None)),
         cfg!(windows),
         user_config_dir(),
         pixtuoid_core::platform::user_home_opt(),
@@ -113,8 +113,7 @@ fn user_config_dir() -> Option<PathBuf> {
 }
 
 /// Pure core for [`user_config_dir`]: `None` when the arm the OS/env select would
-/// fall back to a home join and no home resolves. `io::nonempty` mirrors the core
-/// fn's own empty-as-unset filter so the two can't disagree on when that fires.
+/// fall back to a home join and no home resolves.
 fn user_config_dir_checked(
     os: &str,
     appdata: Option<PathBuf>,
