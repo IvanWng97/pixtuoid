@@ -24,13 +24,13 @@ use crate::tui::geometry::CellArea;
 pub(crate) use crate::tui::hit_test::{
     hit_test_agent, hit_test_coffee_machine, hit_test_furniture, hit_test_mascot, hit_test_pet,
 };
-pub(crate) use crate::tui::widgets::paint_hover_tooltip;
 pub(super) use crate::tui::widgets::{
     paint_chitchat_bubbles, paint_coffee_tooltip, paint_connection_panel, paint_dashboard,
     paint_elevator_indicator, paint_footer, paint_furniture_tooltip, paint_help_overlay,
     paint_label_widgets, paint_mascot_tooltip, paint_pet_tooltip, paint_theme_picker,
     paint_version_popup, paint_wall_display, paint_welcome,
 };
+pub(crate) use crate::tui::widgets::{paint_hover_tooltip, TooltipAt};
 
 pub use pixtuoid_scene::pet::PetState;
 
@@ -90,7 +90,8 @@ pub struct DrawCtx<'a> {
     /// Animated scale for the version popup (0.0 = hidden, 1.0 = fully shown).
     pub popup_scale: f32,
     pub help_open: bool,
-    /// Footer warning when a source has died; `None` while healthy.
+    /// The footer warning, pre-merged death>drift
+    /// ([`pixtuoid_scene::footer::FooterInputs::source_warning`]); `None` while healthy.
     pub source_warning: Option<&'a str>,
     pub dashboard: &'a crate::tui::dashboard::DashboardFrame,
     pub connection: &'a crate::tui::connection::ConnectionFrame,
@@ -160,22 +161,17 @@ pub(crate) struct OverlayFrame<'a> {
 /// size, so suppressing the overlay here made `?`/`s`/`Tab` toggle something
 /// invisible on any terminal below the office layout's minimum — and first run
 /// opens the onboarding modal there.
-// The footer half travels as one `FooterStats` and the modal half as one
-// `OverlayFrame`; what remains is irreducible.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     scene: &SceneState,
     stats: &crate::tui::widgets::FooterStats<'_>,
     theme: &pixtuoid_scene::theme::Theme,
-    floor_info: Option<FloorInfo>,
-    source_warning: Option<&str>,
     overlays: &OverlayFrame<'_>,
     now: SystemTime,
 ) -> Result<()> {
     term.draw(|f| {
         let actual = f.area();
-        paint_footer(f, scene, stats, actual, theme, floor_info, source_warning);
+        paint_footer(f, scene, stats, actual, theme);
         paint_overlays(f, overlays, now, actual, theme);
         // LAST: a modal centres on the same rows, and first run opens one here —
         // so painting the notice first left the black screen unexplained in the
@@ -296,7 +292,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let scene_rect = scene_rect(full_rect);
     let theme = ctx.theme;
     let floor_info = ctx.floor_info;
-    let source_warning = ctx.source_warning;
     let floor = ctx.floor;
 
     // `per_floor` is copied out of `ctx` before the mutable buffer borrows below,
@@ -308,6 +303,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         gateway: ctx.gateway,
         audio_audible: ctx.audio_audible,
         volume_flash: ctx.volume_flash,
+        floor_info,
+        source_warning: ctx.source_warning,
     };
     let overlays = OverlayFrame {
         theme_picker: ctx.theme_picker,
@@ -319,16 +316,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     };
 
     if scene_rect.width < MIN_SCENE_WIDTH || scene_rect.height < MIN_SCENE_HEIGHT {
-        draw_footer_only_frame(
-            term,
-            scene,
-            &footer_stats,
-            theme,
-            floor_info,
-            source_warning,
-            &overlays,
-            now,
-        )?;
+        draw_footer_only_frame(term, scene, &footer_stats, theme, &overlays, now)?;
         return Ok(None);
     }
 
@@ -336,16 +324,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let buf_h = scene_rect.height.saturating_mul(2);
     ctx.buf.resize_fill(buf_w, buf_h, theme.surface.bg_fallback);
     let Some(layout) = ctx.store.frame_layout(buf_w, buf_h, floor.floor_seed) else {
-        draw_footer_only_frame(
-            term,
-            scene,
-            &footer_stats,
-            theme,
-            floor_info,
-            source_warning,
-            &overlays,
-            now,
-        )?;
+        draw_footer_only_frame(term, scene, &footer_stats, theme, &overlays, now)?;
         return Ok(None);
     };
 
@@ -387,6 +366,22 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         apply_dim(ctx.buf, ctx.onboarding.dim);
     }
 
+    let labels = pixtuoid_scene::overlay::build_overlay(
+        scene,
+        &layout,
+        now,
+        &mut ctx.store.route_ctx(),
+        hovered,
+    );
+    let board = pixtuoid_scene::board::build_board(
+        footer_stats.counts,
+        pixtuoid_scene::board::scene_uptime_secs(scene, now),
+        footer_stats
+            .floor_info
+            .map(|fi| (fi.current, fi.total_floors)),
+        footer_stats.gateway,
+        now,
+    );
     let buf = &ctx.buf;
     let chitchat_bubbles = &ctx.chitchat_bubbles;
     term.draw(|f| {
@@ -394,47 +389,26 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         // terminal resize between term.size() and term.draw().
         let actual_full = f.area();
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
-        paint_footer(
-            f,
-            scene,
-            &footer_stats,
-            actual_full,
-            theme,
-            floor_info,
-            source_warning,
-        );
+        paint_footer(f, scene, &footer_stats, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
-        paint_label_widgets(
-            f,
-            scene,
-            &layout,
-            now,
-            &mut ctx.store.route_ctx(),
-            actual_scene,
-            hovered,
-            theme,
-        );
+        paint_label_widgets(f, &labels, actual_scene, theme);
         paint_chitchat_bubbles(f, chitchat_bubbles, actual_scene, theme);
-        paint_wall_display(
-            f,
-            scene,
-            actual_scene,
-            now,
-            footer_stats.counts,
-            floor_info,
-            footer_stats.gateway,
-            theme,
-        );
+        paint_wall_display(f, &board, actual_scene, theme);
         if let Some(door) = layout.door {
             let current = floor_info.map(|fi| fi.current).unwrap_or(1);
             paint_elevator_indicator(f, door, current, actual_scene, theme);
         }
-        if let (Some(agent_id), Some((mx, my))) = (hovered, mouse_pos) {
-            paint_hover_tooltip(f, scene, agent_id, mx, my, actual_scene, now, theme);
+        let at = mouse_pos.map(|(mx, my)| TooltipAt {
+            mx,
+            my,
+            scene_rect: actual_scene,
+        });
+        if let (Some(agent_id), Some(at)) = (hovered, at) {
+            paint_hover_tooltip(f, scene, agent_id, at, now, theme);
         }
         if hovered.is_none() {
-            if let Some((mx, my)) = mouse_pos {
-                let cell = CellArea::half_block(mx, my);
+            if let Some(at) = at {
+                let cell = CellArea::half_block(at.mx, at.my);
                 // `.filter` keeps the pet arm a single branch, so a
                 // present-but-not-hit pet falls through to the next arm.
                 // Coffee before pet here must match the click arms in
@@ -444,7 +418,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                     .last_pet_pos
                     .filter(|f| hit_test_pet(f.kind, f.pos, f.anim, cell));
                 if hit_test_coffee_machine(&layout, cell) {
-                    paint_coffee_tooltip(f, mx, my, actual_scene, theme);
+                    paint_coffee_tooltip(f, at, theme);
                 } else if let Some(PetFrame { anim, kind, .. }) = pet_hit {
                     let on_cooldown = ctx.active_pet.is_some_and(|p| p.is_active(now));
                     // `last_pet_pos` is only `Some` on the normal render path,
@@ -454,32 +428,11 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                         .floor_pet
                         .map(|p| p.name.as_str())
                         .unwrap_or_else(|| kind.default_name());
-                    paint_pet_tooltip(
-                        f,
-                        kind,
-                        anim,
-                        on_cooldown,
-                        display_name,
-                        mx,
-                        my,
-                        actual_scene,
-                        theme,
-                    );
+                    paint_pet_tooltip(f, kind, anim, on_cooldown, display_name, at, theme);
                 } else if let Some(m) = topmost_mascot_at(&ctx.last_mascots, cell) {
-                    paint_mascot_tooltip(
-                        f,
-                        m.name,
-                        m.instance.as_deref(),
-                        m.busy,
-                        m.degraded,
-                        m.active_sessions,
-                        mx,
-                        my,
-                        actual_scene,
-                        theme,
-                    );
+                    paint_mascot_tooltip(f, m, at, theme);
                 } else if let Some(label) = hit_test_furniture(&layout, cell) {
-                    paint_furniture_tooltip(f, label, mx, my, actual_scene, theme);
+                    paint_furniture_tooltip(f, label, at, theme);
                 }
             }
         }
