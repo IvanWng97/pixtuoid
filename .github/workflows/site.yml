@@ -2,13 +2,19 @@ name: site
 
 on:
   workflow_call:
+    inputs:
+      full:
+        description: 'False on a draft PR: only the jobs without `if: inputs.full` run'
+        type: boolean
+        required: true
 
 permissions:
   contents: read
 
 jobs:
   check:
-    name: audit · format · lint · types · build
+    name: format · lint · types · build
+    if: ${{ inputs.full }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -45,9 +51,6 @@ jobs:
       - run: npx playwright install --with-deps chromium chromium-headless-shell
       - run: npm run e2e
       - run: npm run lighthouse
-      # LAST: it resolves advisories live, so at step one someone else's publish
-      # skips every check below it (#847/#849). pages.yml keeps it first — it ships.
-      - run: npm run audit
       # The run logs carry only failing scores, not element-level violations.
       # `path` is workspace-root-relative, hence the site/ prefix despite the job cwd.
       - name: Upload Lighthouse reports
@@ -59,3 +62,18 @@ jobs:
           retention-days: 7
           include-hidden-files: true
           if-no-files-found: error
+
+  required:
+    name: required-site-jobs
+    if: ${{ always() }}
+    needs: [check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/require-jobs
+        with:
+          results: ${{ toJSON(needs) }}
+          label: "Required site job failed"

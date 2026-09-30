@@ -8,8 +8,8 @@ https://ivanwng97.github.io/pixtuoid/ redirects there).
 A Node project living in `site/`. The live office's `public/wasm/` is
 gitignored output of `just gen-wasm` (needs Rust); `dev` and `verify` work
 without it on the poster fallback. CI (`.github/workflows/site.yml`) runs
-`npm run verify`'s checks plus e2e and Lighthouse; deploys run via
-`.github/workflows/pages.yml`. Agent notes,
+`npm run verify`'s checks except `audit`, plus e2e and Lighthouse; deploys
+run via `.github/workflows/pages.yml`, which audits first. Agent notes,
 build-input coupling, and CSP details: [`AGENTS.md`](AGENTS.md). Generated
 content and its sources: [`SINGLE-SOURCED.md`](SINGLE-SOURCED.md).
 

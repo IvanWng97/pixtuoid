@@ -5,7 +5,7 @@
 # Recipes are grouped by intent (see `just --list`):
 #   rust     — build, test and lint the repo (Rust, shell, workflows), plus the
 #              on-demand e2e / capture / fixture recipes
-#   site     — the Astro landing page under site/ (npm, its own CI)
+#   site     — the Astro landing page under site/ (npm + the wasm build)
 #   gen      — regenerate + check committed artifacts
 #   release  — what release.yml builds and checks: the cross builds, the .deb,
 #              the version read, and the Node gates (npm-check)
