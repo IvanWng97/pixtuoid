@@ -1,11 +1,9 @@
 # Implementation-plan brief — the review, shifted left
 
-The upstream twin of [`pr-review.prompt.md`](pr-review.prompt.md): the review
+The upstream twin of [`two-lens-review/briefs.md`](../../.claude/skills/two-lens-review/briefs.md): the review
 protocol catches the repo's known failure classes after the code exists; this
 brief front-loads the same classes while each costs one plan line instead of
-a finding plus a fix round. Census grounding: at least 4 of the 7 post-merge
-escapes and the one design-class miss (PR #86's parallel config structure)
-were plan-preventable.
+a finding plus a fix round.
 
 **When to use:** new feature, new config key / CLI flag, new seam or module,
 any change touching a documented sharp edge, or any change you expect to
@@ -76,7 +74,7 @@ Every section gets an answer; "n/a" counts only with a reason.
    the `beautify-decoration` loop. Verification steps are blocking plan
    items, not checkboxes — PR #61 shipped five walk regressions behind an
    unchecked "live run" checkbox. Name the CI-ONLY gates the change can red
-   (api-surface, doc-check, gen-check, wasm-check, windows-test, snapshots): `just preflight` is blind to all of them, so "preflight green"
+   (`docs/CONTRIBUTING.md#ci-gates` lists them): `just preflight full` is blind to all of them, so "preflight green"
    is a claim about a SUBSET and must say so — the ghost-gate arc reported
    all-green with api-surface and doc-check both red. And reproduce the
    REPORTED scenario, including its ordering (item 3b), not a convenient one:

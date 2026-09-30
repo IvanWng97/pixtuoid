@@ -38,13 +38,9 @@ TS-type↔usage `tsc --noEmit` pass. **After changing `SourceStatus` or
 and commit all of it. `src/contract.ts` / `src/contract-outcome.ts` are
 generated — eslint/prettier-ignored, never hand-edit them. This is
 `PARALLEL-DELIVERY.md`'s "codegen-from-one-source" applied to pixtuoid itself.
-(The `source_status_json_shape` / `outcome_row_json_shape` byte tests still pin
-the exact wire JSON; `OutcomeRow` is `{id, outcome, message?}` — a bare machine
-token plus an optional failure-detail field, split from the old folded
-`failed: <msg>` form back when this in-repo copy was the only consumer. The
-wire is PUBLISHED — installed store copies parse it independently of the
-binary's version; `OutcomeRow`'s doc comment in `crates/pixtuoid/src/sources.rs`
-owns that rule.)
+(The `source_status_json_shape` / `outcome_row_json_shape` byte tests pin the
+exact wire JSON; `OutcomeRow`'s doc comment in `crates/pixtuoid/src/sources.rs`
+owns its shape and the published-wire rule.)
 
 **A republish may still be owed.** The split (`e21ec7f0`, 2026-07-02) landed
 AFTER the local `ray publish` marker `__raycast_latest_publish_ext/pixtuoid__`
@@ -61,17 +57,16 @@ it is clear.
 
 - **Toolchain bumps must stay within what Raycast DECLARES — check the peers,
   don't guess.** `eslint`/`typescript` are gated by `@raycast/eslint-config`'s
-  peerDependencies (2.2.0 declares `eslint ^10`, `typescript <6.1.0` — so
-  eslint 10 + TS 6.0 are in-range); `@types/node` stays on the `22.x` MAJOR
-  (dependabot bumps minors within it — `.github/dependabot.yml` ignores only
-  the major). `@raycast/api`'s exact peer is a warning-level mismatch npm
-  tolerates under the committed lockfile, not a hard pin the manifest must
-  equal. `ray build` type-checks with its OWN bundled tsc (5.6 as of api
-  1.104.21), so `tsconfig.json` must stay parseable by BOTH that and the local
-  TS: the TS 6 migration was `moduleResolution: "Bundler"` + an explicit
-  `types: ["node"]` (TS 6.0 stopped auto-including `node_modules/@types`);
-  `ignoreDeprecations: "6.0"` would have broken `ray build` (TS 5.x rejects the
-  value).
+  peerDependencies — read the installed version's ranges before a bump;
+  `@types/node` stays on its current major (`.github/dependabot.yml` ignores
+  its major updates; minors still flow). `@raycast/api`'s exact peer is a warning-level
+  mismatch npm tolerates under the committed lockfile, not a hard pin the
+  manifest must equal. `ray build` type-checks with its OWN bundled tsc (read
+  its version from the installed `@raycast/api`), so `tsconfig.json` must stay
+  parseable by BOTH that and the local TS: hence `moduleResolution: "Bundler"` +
+  an explicit `types: ["node"]` (TS 6.0 stopped auto-including
+  `node_modules/@types`), and no `ignoreDeprecations` value the bundled tsc
+  rejects.
 
 ## Gates
 
@@ -83,18 +78,13 @@ Raycast app** and only run before a store publish — they are NOT in CI, so a
 green PR does not prove the manifest is publishable. See the
 [README](README.md) for `npm run {build,dev,lint}`.
 
-- **`npm run audit` is plain `npm audit --audit-level=low`, same as site's.** It
-  was a per-advisory allow-list script until its one entry, GHSA-mh99-v99m-4gvg,
-  cleared — upstream BACKPORTED that fix to **2.1.3**, so the pinned 2.x copy
-  took it in-range at 2.1.4 and the chain never had to move (the deleted entry's
-  "first patched 5.0.8, so 2.x is unfixable" is the stale reading, and it has
-  already misled one reviewer);
+- **`npm run audit` is plain `npm audit --audit-level=low`, same as site's.**
   `npm audit` has no per-advisory ignore, so if an unfixable advisory recurs
-  here, restore that script from history rather than lowering `--audit-level`,
-  which blinds a whole severity band to hide one id. Unfixable is realistic:
-  the last one arrived via `@oclif/core → ejs ^3 → jake ^10 → filelist ^1 →
-  minimatch ^5`, a chain we own no link of, and the override that would have
-  patched it made audit green over code that throws (#792).
+  here, restore the per-advisory allow-list script from history rather than
+  lowering `--audit-level`,
+  which blinds a whole severity band to hide one id. Unfixable is realistic —
+  a transitive chain we own no link of — and an `overrides` patch can green the
+  audit over code that throws (#792).
 - **A chord Raycast RESERVES is swallowed, so its Action is unreachable — and
   `@raycast/no-reserved-shortcut` is escalated to `error` here.** Upstream ships
   it at warn and `eslint .` exits 0 on warnings, which is how an `Open Extension
