@@ -695,6 +695,7 @@ impl FloorSession {
         self.evict_missing(scene);
         let fctx = &mut self.floor.ctx;
         let layout = fctx.frame_layout(size.w, size.h, floor_meta.floor_seed)?;
+        let door_anim_max_ms = fctx.door_anim_max_ms;
         let frame = sim_step(
             &mut SimStores {
                 router: &mut fctx.router,
@@ -715,6 +716,7 @@ impl FloorSession {
                 pets: PetInputs::default(),
                 floor: floor_meta,
                 now,
+                door_anim_max_ms,
             },
         );
         frame_epilogue(
