@@ -385,8 +385,6 @@ fn a_tie_maps_to_a_layer_in_the_same_order() {
     }
 }
 
-/// The exit sign hangs where the elevator door leaves it showing: its box is
-/// clear of the door's, which paints over whatever it covers.
 #[test]
 fn the_exit_sign_hangs_clear_of_the_elevator_door() {
     let mut met = 0;
@@ -416,6 +414,13 @@ fn the_exit_sign_hangs_clear_of_the_elevator_door() {
             apart,
             "{}x{}: sign {sign:?} under door {door:?}",
             l.buf_w, l.buf_h
+        );
+        assert!(
+            l.window_bays()
+                .all(|b| b.span().end <= sign.x || sign.x + sign.width <= b.span().start),
+            "{}x{}: sign {sign:?} over a window",
+            l.buf_w,
+            l.buf_h
         );
     }
     assert!(met > 0, "the sweep met a sign beside a door");

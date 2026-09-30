@@ -161,7 +161,7 @@ pub struct Waypoint {
 pub type Layout = SceneLayout;
 
 /// The lounge vignette placed as one unit. Couch + floor lamp + side table
-/// share the one `lounge_fits` gate (hence non-optional here); the aquarium
+/// share one fit gate (hence non-optional here); the aquarium
 /// carries an EXTRA east-clearance gate against the elevator door, so it
 /// stays `Option`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -336,6 +336,12 @@ pub const CHARACTER_SPRITE_H: u16 = 12;
 pub const ELEVATOR_W: u16 = 16;
 /// Elevator-door sprite height in buffer px — the door's z-sort anchor row.
 pub const ELEVATOR_H: u16 = 14;
+
+/// The column the exit sign hangs at beside a door at `door_x`: west of it,
+/// since the door paints over whatever it covers.
+pub(crate) fn exit_sign_x(door_x: u16) -> u16 {
+    door_x.saturating_sub(furniture_def(WallDecor::ExitSign.furniture()).visual.w + 1)
+}
 /// NOT a cap — production layouts fill the buffer's physical space
 /// (`max_desks: None`). This is the stable "one classic office worth of desks"
 /// reference, and the `snapshot` example that renders the docs/CI media
