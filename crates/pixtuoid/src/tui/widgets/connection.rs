@@ -4,12 +4,11 @@
 
 use std::time::{Duration, SystemTime};
 
-use super::{
-    marquee_or_truncate, marquee_window, paint_panel, panel_inner_width, source_badge_span,
-    to_color, Overflow,
-};
+use super::{marquee_or_truncate, marquee_window, source_badge_span, to_color, Overflow, Panel};
 
-use crate::tui::connection::{no_action_hint, ConnState, ConnectionRow, LiveFacet, LiveInfo};
+use crate::tui::connection::{
+    no_action_hint, ConnState, ConnectionFrame, ConnectionRow, LiveFacet, LiveInfo,
+};
 use pixtuoid_scene::theme::Theme;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -32,25 +31,28 @@ fn column_header() -> String {
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_connection_panel(
     f: &mut ratatui::Frame<'_>,
-    rows: &[ConnectionRow],
-    live: &[LiveInfo],
-    selected: usize,
-    confirm: Option<usize>,
-    last_result: Option<&str>,
-    socket_line: &str,
+    frame: &ConnectionFrame,
     now: SystemTime,
     bounds: Rect,
     theme: &Theme,
 ) {
+    let &ConnectionFrame {
+        open: _,
+        ref rows,
+        ref live,
+        selected,
+        confirm,
+        ref result,
+        ref socket_line,
+    } = frame;
     let dim = Style::default().fg(to_color(theme.ui.label_idle));
 
     // The detail marquee's width budget needs the inner WIDTH before the row count
     // (hence the height) is known — the height-independent two-phase seam. `None`
     // ⇒ the terminal is too narrow to render at all.
-    let Some(inner_w) = panel_inner_width(bounds, CONNECTION_POPUP_W, 1.0) else {
+    let Some(inner_w) = Panel::inner_width(bounds, CONNECTION_POPUP_W) else {
         return;
     };
 
@@ -72,8 +74,8 @@ pub(crate) fn paint_connection_panel(
     let detail = if let Some(ci) = confirm {
         let name = rows.get(ci).map_or("", |r| r.display_name);
         format!("\u{26a0} disconnect {name}? (y/n)")
-    } else if let Some(res) = last_result {
-        res.to_string()
+    } else if let Some(res) = result {
+        res.clone()
     } else if let Some(row) = rows.get(selected) {
         if let Some(h) = &row.health {
             h.clone()
@@ -107,22 +109,19 @@ pub(crate) fn paint_connection_panel(
         )),
     ];
 
-    paint_panel(
-        f,
-        theme,
-        Some("Sources \u{2014} s/esc close"),
-        bounds,
-        CONNECTION_POPUP_W,
-        1.0,
+    Panel {
+        title: Some("Sources \u{2014} s/esc close"),
+        content_w: CONNECTION_POPUP_W,
         above,
         list,
         below,
-        Overflow::Follow {
+        overflow: Overflow::Follow {
             selected: Some(selected),
             scroll: 0,
             cap: None,
         },
-    );
+    }
+    .paint(f, bounds, theme);
 }
 
 /// One CLI row: a colored badge, the name (tinted/reversed by selection), the

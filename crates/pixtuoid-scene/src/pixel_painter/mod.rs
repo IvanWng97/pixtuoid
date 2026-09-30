@@ -349,7 +349,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     }
 }
 
-/// The soft floor shadow under one home desk. `cy` is the row the roster sorts
+/// The floor shadow under one home desk. `cy` is the row the roster sorts
 /// the desk at, off the same furniture row, so a `DESK_H` retune moves the
 /// shadow WITH the sprite's south base. `half_h` is a taste literal.
 fn desk_shadow_ellipse(desk: Point) -> Ellipse {
@@ -365,7 +365,7 @@ fn desk_shadow_ellipse(desk: Point) -> Ellipse {
     }
 }
 
-/// The classic painter's soft floor shadows, handed to `shadow` in roster
+/// The classic painter's floor shadows, handed to `shadow` in roster
 /// order, which is their PAINT ORDER — the overlaps blend, so the order is
 /// load-bearing (a meeting sofa's seat shadows overlap each other). The
 /// per-piece `half_w`/`half_h` are owner-tuned taste literals.
@@ -672,9 +672,8 @@ pub(crate) fn appliance_frame(anim: &Sprite, busy: bool, now: std::time::SystemT
     1 + usize::try_from(step % loop_len as u64).unwrap_or(0)
 }
 
-/// The glow of a desk's screen: its seated occupant's tool, on a desk that
-/// faces north. A far-seated desk shows the monitor's BACK — a glow there would
-/// be light leaking out of a case. Both profiles light screens from this.
+/// The glow of a desk's screen: its occupant's [`lit_screen`](crate::lighting::lit_screen),
+/// tinted by the tool. Both profiles light screens from this.
 pub(crate) fn desk_screen_glow(
     occupant: Option<&AgentSlot>,
     facing: crate::layout::Facing,
@@ -682,8 +681,8 @@ pub(crate) fn desk_screen_glow(
     theme: &crate::theme::Theme,
 ) -> Option<pixtuoid_core::sprite::Rgb> {
     occupant
-        .filter(|_| facing == crate::layout::Facing::North && seated)
-        .and_then(|a| palette::tool_glow_tint(a, &theme.tool_glow))
+        .and_then(|a| crate::lighting::lit_screen(a, facing, seated))
+        .map(|tool| palette::tool_glow_for_kind(tool, &theme.tool_glow))
 }
 
 /// The office pet, y-sorted at its anim's south row, since the anims differ in

@@ -236,9 +236,9 @@ impl Pen {
         let columns = buf.width().div_ceil(k);
         for y in y0.0..y1.0 {
             // How far through the transition this row sits, on the matrix's scale.
-            let level = (u32::from(y - y0.0) * BAYER_LEVELS / span) as u8;
+            let level = (u32::from(y - y0.0) * crate::dither::BAYER_LEVELS / span) as u8;
             for x in 0..columns {
-                let threshold = BAYER_4X4[usize::from(y % 4)][usize::from(x % 4)];
+                let threshold = crate::dither::BAYER_4X4[usize::from(y % 4)][usize::from(x % 4)];
                 let c = if threshold < level { dark } else { light };
                 self.fill(
                     buf,
@@ -255,20 +255,10 @@ impl Pen {
     }
 }
 
-/// The 4x4 ordered (Bayer) threshold matrix.
-///
-/// Its evenly-spread levels are why a dither reads as a smooth ramp rather than
-/// as noise or as banding: the classic pixel-art answer, and the reason the
-/// floor falloff needs two tones instead of a dozen.
-const BAYER_4X4: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
-/// How many threshold levels [`BAYER_4X4`] spreads.
-const BAYER_LEVELS: u32 = 16;
-
 /// Whether the art pixel at `(x, y)` takes the next tone of an ordered dither
 /// covering `coverage` of its area, the matrix [`Pen::dither_band`] steps by.
 pub(crate) fn dithered(x: ArtPx, y: ArtPx, coverage: f32) -> bool {
-    let level = (coverage.clamp(0.0, 1.0) * BAYER_LEVELS as f32) as u8;
-    BAYER_4X4[usize::from(y.0 % 4)][usize::from(x.0 % 4)] < level
+    crate::dither::takes_next(x.0, y.0, coverage)
 }
 
 #[cfg(test)]

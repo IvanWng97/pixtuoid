@@ -1,4 +1,4 @@
-use super::{paint_panel, to_color, Overflow};
+use super::{to_color, Overflow, Panel};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 
@@ -39,22 +39,19 @@ pub(crate) fn paint_theme_picker(
             ])
         })
         .collect();
-    paint_panel(
-        f,
-        theme,
-        Some("Theme [\u{2191}\u{2193}/jk] Enter/Esc"),
-        bounds,
-        THEME_W,
-        1.0,
-        vec![],
-        items,
-        vec![],
-        Overflow::Follow {
+    Panel {
+        title: Some("Theme [\u{2191}\u{2193}/jk] Enter/Esc"),
+        content_w: THEME_W,
+        above: vec![],
+        list: items,
+        below: vec![],
+        overflow: Overflow::Follow {
             selected: Some(selected),
             scroll: 0,
             cap: None,
         },
-    );
+    }
+    .paint(f, bounds, theme);
 }
 
 #[cfg(test)]

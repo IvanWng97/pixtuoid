@@ -684,32 +684,49 @@ fn swing_delay(s: f32, eighth_s: f32) -> f32 {
     (s - 0.5) * eighth_s
 }
 
+/// One bar of a groove: where it starts, how long its beats are, and the
+/// velocity wobble every hit in it shares.
+#[derive(Clone, Copy)]
+struct Bar {
+    start: f32,
+    beat_s: f32,
+    wobble: f32,
+}
+
+impl Bar {
+    /// The time of bar-relative beat `beat`.
+    fn at(self, beat: f32) -> f32 {
+        self.start + beat * self.beat_s
+    }
+
+    /// An eighth note's length: the swing's unit.
+    fn eighth(self) -> f32 {
+        self.beat_s / 2.0
+    }
+}
+
 /// Place ONE humanized kick at bar-relative beat `at_beat`, pushing it to `out`
 /// and its time to `kicks`. The RNG DRAW ORDER is LOAD-BEARING (frozen-seed
 /// fidelity): the jitter draw FIRST, then the gain-wobble draw.
-#[allow(clippy::too_many_arguments)]
 fn push_kick(
     out: &mut Vec<(f32, DrumKind, f32)>,
     kicks: &mut Vec<f32>,
-    b0: f32,
+    bar: Bar,
+    drag: f32,
     at_beat: f32,
     gain: f32,
-    drag: f32,
-    wobble: f32,
-    beat_s: f32,
-    eighth: f32,
     rng: &mut NoiseStream,
 ) {
-    let mut at = b0 + at_beat * beat_s + drag;
+    let mut at = bar.at(at_beat) + drag;
     if (at_beat * 2.0) % 2.0 != 0.0 {
-        at += swing_delay(SWING_KICK, eighth);
+        at += swing_delay(SWING_KICK, bar.eighth());
     }
     let jit = (rng.unit() - 0.3) * 0.010;
     let at = (at + jit).max(0.0);
     out.push((
         at,
         DrumKind::Kick,
-        gain * wobble * (0.95 + 0.1 * rng.unit()),
+        gain * bar.wobble * (0.95 + 0.1 * rng.unit()),
     ));
     kicks.push(at);
 }
@@ -722,12 +739,14 @@ fn day_drums(
     beat_s: f32,
 ) -> (Vec<(f32, DrumKind, f32)>, Vec<f32>) {
     let bar_s = beat_s * super::score::BEATS_PER_BAR;
-    let eighth = beat_s / 2.0;
     let mut out = Vec::new();
     let mut kicks = Vec::new();
     for bar in 0..GEN_LOOP_BARS {
-        let b0 = bar as f32 * bar_s;
-        let wobble = 0.9 + 0.2 * rng.unit();
+        let at = Bar {
+            start: bar as f32 * bar_s,
+            beat_s,
+            wobble: 0.9 + 0.2 * rng.unit(),
+        };
         let k2 = if bar % 2 == 0 {
             g.kick2_even
         } else {
@@ -738,37 +757,26 @@ fn day_drums(
             kick_beats.push((3.75, 0.35));
         }
         for (at_beat, gain) in kick_beats {
-            push_kick(
-                &mut out,
-                &mut kicks,
-                b0,
-                at_beat,
-                gain,
-                DRAG_KICK_S,
-                wobble,
-                beat_s,
-                eighth,
-                rng,
-            );
+            push_kick(&mut out, &mut kicks, at, DRAG_KICK_S, at_beat, gain, rng);
         }
         let snare_beats: &[f32] = if g.half_time { &[2.0] } else { &[1.0, 3.0] };
         for &sb in snare_beats {
-            let at = b0 + sb * beat_s + 0.008 + (rng.unit() - 0.3) * 0.008;
+            let t = at.at(sb) + 0.008 + (rng.unit() - 0.3) * 0.008;
             out.push((
-                at.max(0.0),
+                t.max(0.0),
                 DrumKind::Snare,
-                0.85 * wobble * (0.95 + 0.1 * rng.unit()),
+                0.85 * at.wobble * (0.95 + 0.1 * rng.unit()),
             ));
         }
         for e in 0..8 {
             if chance(rng, g.hat_skip) {
                 continue;
             }
-            let mut at = b0 + e as f32 * eighth;
+            let mut t = at.start + e as f32 * at.eighth();
             if e % 2 == 1 {
-                at += swing_delay(SWING_HATS_DAY, eighth);
+                t += swing_delay(SWING_HATS_DAY, at.eighth());
             }
-            at += (rng.unit() - 0.5) * 0.012;
+            t += (rng.unit() - 0.5) * 0.012;
             let open = g
                 .open_hat_bar_mod
                 .is_some_and(|m| e == 7 && bar % m == m - 1);
@@ -777,7 +785,7 @@ fn day_drums(
             } else {
                 DrumKind::Hat
             };
-            out.push((at.max(0.0), kind, (0.4 + 0.2 * rng.unit()) * wobble));
+            out.push((t.max(0.0), kind, (0.4 + 0.2 * rng.unit()) * at.wobble));
         }
     }
     (out, kicks)
@@ -786,36 +794,28 @@ fn day_drums(
 /// The night groove: kick + soft closed hats only (the sleepy register).
 fn night_drums(rng: &mut NoiseStream, beat_s: f32) -> (Vec<(f32, DrumKind, f32)>, Vec<f32>) {
     let bar_s = beat_s * super::score::BEATS_PER_BAR;
-    let eighth = beat_s / 2.0;
     let mut out = Vec::new();
     let mut kicks = Vec::new();
     for bar in 0..GEN_LOOP_BARS {
-        let b0 = bar as f32 * bar_s;
-        let wobble = 0.9 + 0.2 * rng.unit();
+        let at = Bar {
+            start: bar as f32 * bar_s,
+            beat_s,
+            wobble: 0.9 + 0.2 * rng.unit(),
+        };
         for (at_beat, g) in [(0.0f32, 0.6f32), (2.5, 0.4)] {
-            push_kick(
-                &mut out,
-                &mut kicks,
-                b0,
-                at_beat,
-                g,
-                DRAG_KICK_NIGHT_S,
-                wobble,
-                beat_s,
-                eighth,
-                rng,
-            );
+            push_kick(&mut out, &mut kicks, at, DRAG_KICK_NIGHT_S, at_beat, g, rng);
         }
         for e in 0..8 {
             if e % 2 == 0 || chance(rng, 0.45) {
                 continue;
             }
-            let mut at = b0 + e as f32 * eighth + swing_delay(SWING_HATS_NIGHT, eighth);
-            at += (rng.unit() - 0.5) * 0.012;
+            let mut t =
+                at.start + e as f32 * at.eighth() + swing_delay(SWING_HATS_NIGHT, at.eighth());
+            t += (rng.unit() - 0.5) * 0.012;
             out.push((
-                at.max(0.0),
+                t.max(0.0),
                 DrumKind::Hat,
-                (0.40 + 0.24 * rng.unit()) * wobble,
+                (0.40 + 0.24 * rng.unit()) * at.wobble,
             ));
         }
     }
