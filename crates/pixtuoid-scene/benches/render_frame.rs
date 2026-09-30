@@ -127,10 +127,7 @@ fn office_scene(n: usize, max_desks: usize, base: SystemTime, busy: bool) -> Sce
 }
 
 fn render_frame(c: &mut Criterion) {
-    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-        pixtuoid_scene::embedded_pack::PackSource::Bundled,
-    )
-    .expect("embedded pack");
+    let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack");
     let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
     let base = SystemTime::UNIX_EPOCH + Duration::from_secs(BASE_EPOCH_SECS);
     let busy = office_scene(12, 16, base, true);
@@ -203,10 +200,7 @@ fn render_frame(c: &mut Criterion) {
 }
 
 fn render_cutaway_frame(c: &mut Criterion) {
-    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-        pixtuoid_scene::embedded_pack::PackSource::Bundled,
-    )
-    .expect("embedded pack");
+    let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack");
     let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
     let scale = RenderScale::new(pack.max_density_variant()).expect("a nonzero density");
     // The case names are claims about the sky model; hold it to them.

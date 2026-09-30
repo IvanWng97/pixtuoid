@@ -65,7 +65,7 @@ export const BOTTOM_CLAMP_EPSILON_PX = 2;
 export const DIM_RESTING = 0.55;
 
 // Reading order = the prev/next sequence AND the Nav dropdown order. Adding a
-// rendered doc still needs its content collection + page file (site/CLAUDE.md).
+// rendered doc still needs its content collection + page file (site/AGENTS.md).
 export interface DocPage {
   id: string;
   route: string; // base-path-relative slug (asset(route))

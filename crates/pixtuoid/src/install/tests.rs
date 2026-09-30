@@ -1,30 +1,6 @@
 use super::*;
 use crate::install::target::{CLAUDE, CODEX, MergeOutcome, OPENCLAW, Target};
 
-/// Callers must hold `TEST_ENV_LOCK` first, declared BEFORE this guard: locals
-/// drop in reverse order, so the env restore happens while the lock is held.
-struct EnvVarOverride {
-    key: &'static str,
-    prior: Option<std::ffi::OsString>,
-}
-
-impl EnvVarOverride {
-    fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
-        let prior = std::env::var_os(key);
-        std::env::set_var(key, value);
-        Self { key, prior }
-    }
-}
-
-impl Drop for EnvVarOverride {
-    fn drop(&mut self) {
-        match self.prior.take() {
-            Some(v) => std::env::set_var(self.key, v),
-            None => std::env::remove_var(self.key),
-        }
-    }
-}
-
 static FAKE: Target = Target {
     name: "fake",
     core_source: "fake",
@@ -243,23 +219,14 @@ fn resolve_hook_binary_no_overrides_uses_locate() {
 fn empty_env_override_counts_as_unset_at_the_live_read() {
     // io::nonempty_env is the live seam install_target reads PIXTUOID_HOOK
     // through: empty/whitespace must read as unset, or "" becomes the command.
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    let saved = std::env::var_os("PIXTUOID_HOOK");
-    std::env::set_var("PIXTUOID_HOOK", "");
-    let empty = io::nonempty_env("PIXTUOID_HOOK");
-    std::env::set_var("PIXTUOID_HOOK", "   ");
-    let blank = io::nonempty_env("PIXTUOID_HOOK");
-    std::env::set_var("PIXTUOID_HOOK", "/real/hook");
-    let real = io::nonempty_env("PIXTUOID_HOOK");
-    match saved {
-        Some(v) => std::env::set_var("PIXTUOID_HOOK", v),
-        None => std::env::remove_var("PIXTUOID_HOOK"),
-    }
-    assert_eq!(empty, None);
-    assert_eq!(blank, None);
-    assert_eq!(real, Some("/real/hook".into()));
+    let read = |v| {
+        temp_env::with_var("PIXTUOID_HOOK", Some(v), || {
+            io::nonempty_env("PIXTUOID_HOOK")
+        })
+    };
+    assert_eq!(read(""), None);
+    assert_eq!(read("   "), None);
+    assert_eq!(read("/real/hook"), Some("/real/hook".into()));
 }
 
 #[test]
@@ -508,49 +475,51 @@ fn uninstall_target_reports_removed_then_nothing() {
 #[test]
 fn install_target_round_trips_every_registered_target() {
     // OpenClaw's plugin dir resolves from openclaw_state_dir(), NOT the config
-    // override, so a temp home keeps this off the real ~/.openclaw; TEST_ENV_LOCK
-    // serializes that process-global set against sibling env-mutating tests.
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    // override, so a temp home keeps this off the real ~/.openclaw.
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
     // Same class: dsh's plugin file resolves from $DSH_HOME.
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
-    for t in target::TARGETS {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let cfg = tmp.path().join("cfg");
-        let hook = || Some(PathBuf::from("/fake/pixtuoid-hook"));
+    temp_env::with_vars(
+        [
+            ("OPENCLAW_STATE_DIR", Some(oc_home.path())),
+            ("DSH_HOME", Some(dsh_home.path())),
+        ],
+        || {
+            for t in target::TARGETS {
+                let tmp = tempfile::TempDir::new().unwrap();
+                let cfg = tmp.path().join("cfg");
+                let hook = || Some(PathBuf::from("/fake/pixtuoid-hook"));
 
-        let r = install_target(t, Some(cfg.clone()), hook()).unwrap();
-        assert!(
-            matches!(r.outcome, InstallOutcome::Installed),
-            "{}: first install must write hooks",
-            t.name
-        );
-        assert!(cfg.exists(), "{}: install wrote a config", t.name);
+                let r = install_target(t, Some(cfg.clone()), hook()).unwrap();
+                assert!(
+                    matches!(r.outcome, InstallOutcome::Installed),
+                    "{}: first install must write hooks",
+                    t.name
+                );
+                assert!(cfg.exists(), "{}: install wrote a config", t.name);
 
-        let r2 = install_target(t, Some(cfg.clone()), hook()).unwrap();
-        assert!(
-            matches!(r2.outcome, InstallOutcome::AlreadyUpToDate),
-            "{}: re-install must be a no-op (sentinel idempotency)",
-            t.name
-        );
+                let r2 = install_target(t, Some(cfg.clone()), hook()).unwrap();
+                assert!(
+                    matches!(r2.outcome, InstallOutcome::AlreadyUpToDate),
+                    "{}: re-install must be a no-op (sentinel idempotency)",
+                    t.name
+                );
 
-        let u = uninstall_target(t, Some(cfg.clone())).unwrap();
-        assert!(
-            matches!(u.outcome, UninstallOutcome::Removed),
-            "{}: uninstall must remove the managed entries",
-            t.name
-        );
-        let u2 = uninstall_target(t, Some(cfg.clone())).unwrap();
-        assert!(
-            matches!(u2.outcome, UninstallOutcome::NothingToRemove),
-            "{}: re-uninstall must find nothing to remove",
-            t.name
-        );
-    }
+                let u = uninstall_target(t, Some(cfg.clone())).unwrap();
+                assert!(
+                    matches!(u.outcome, UninstallOutcome::Removed),
+                    "{}: uninstall must remove the managed entries",
+                    t.name
+                );
+                let u2 = uninstall_target(t, Some(cfg.clone())).unwrap();
+                assert!(
+                    matches!(u2.outcome, UninstallOutcome::NothingToRemove),
+                    "{}: re-uninstall must find nothing to remove",
+                    t.name
+                );
+            }
+        },
+    );
 }
 
 // The detect⇄install symmetry, per detection mechanism. A literal
@@ -592,28 +561,25 @@ fn config_present_target_file_is_absent_before_then_present_after_install() {
 fn openclaw_is_present_is_false_before_then_true_after_install() {
     use crate::install::target::is_present;
     // OPENCLAW_STATE_DIR points at a NON-EXISTENT dir so the probe starts FALSE.
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
     let oc_home = tempfile::TempDir::new().unwrap();
     let state = oc_home.path().join("ocstate"); // not yet created
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", &state);
+    temp_env::with_var("OPENCLAW_STATE_DIR", Some(&state), || {
+        assert!(
+            !is_present(&OPENCLAW),
+            "OpenClaw must be undetected before install (empty isolated state dir)"
+        );
 
-    assert!(
-        !is_present(&OPENCLAW),
-        "OpenClaw must be undetected before install (empty isolated state dir)"
-    );
+        let exe = std::env::current_exe().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("openclaw.json");
+        install_target(&OPENCLAW, Some(cfg), Some(exe)).unwrap();
 
-    let exe = std::env::current_exe().unwrap();
-    let tmp = tempfile::TempDir::new().unwrap();
-    let cfg = tmp.path().join("openclaw.json");
-    install_target(&OPENCLAW, Some(cfg), Some(exe)).unwrap();
-
-    assert!(
-        is_present(&OPENCLAW),
-        "install must create the state dir the presence probe detects \
+        assert!(
+            is_present(&OPENCLAW),
+            "install must create the state dir the presence probe detects \
          (detect⇄install symmetry — else installed-but-invisible)"
-    );
+        );
+    });
 }
 
 #[test]
@@ -696,60 +662,65 @@ fn install_on_a_malformed_config_errors_without_rewriting_or_backing_up() {
 fn install_on_a_malformed_config_leaves_no_orphan_extra_artifacts() {
     // A present-but-malformed config must bail BEFORE the extra artifacts are
     // written, else a partial install strands orphan plugin files.
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
+    temp_env::with_vars(
+        [
+            ("OPENCLAW_STATE_DIR", Some(oc_home.path())),
+            ("DSH_HOME", Some(dsh_home.path())),
+        ],
+        || {
+            let tmp = tempfile::TempDir::new().unwrap();
+            let cfg = tmp.path().join("openclaw.json");
+            std::fs::write(&cfg, "{ not valid json,,, ").unwrap();
+            let before = std::fs::read_to_string(&cfg).unwrap();
 
-    let tmp = tempfile::TempDir::new().unwrap();
-    let cfg = tmp.path().join("openclaw.json");
-    std::fs::write(&cfg, "{ not valid json,,, ").unwrap();
-    let before = std::fs::read_to_string(&cfg).unwrap();
-
-    let err = install_target(
-        &OPENCLAW,
-        Some(cfg.clone()),
-        Some(PathBuf::from("/fake/pixtuoid-hook")),
-    )
-    .unwrap_err();
-    // OpenClaw's parse guard words itself differently (its config is JSON5, so a
-    // document our strict parser rejects may be perfectly valid).
-    assert!(
-        format!("{err:#}").contains("will not rewrite the file"),
-        "the bail must come from the parse guard, got: {err:#}"
-    );
-    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), before);
-    assert!(
-        !oc_home.path().join("plugins").exists(),
-        "a malformed-config bail must not leave orphan plugin artifacts on disk"
+            let err = install_target(
+                &OPENCLAW,
+                Some(cfg.clone()),
+                Some(PathBuf::from("/fake/pixtuoid-hook")),
+            )
+            .unwrap_err();
+            // OpenClaw's parse guard words itself differently (its config is JSON5, so a
+            // document our strict parser rejects may be perfectly valid).
+            assert!(
+                format!("{err:#}").contains("will not rewrite the file"),
+                "the bail must come from the parse guard, got: {err:#}"
+            );
+            assert_eq!(std::fs::read_to_string(&cfg).unwrap(), before);
+            assert!(
+                !oc_home.path().join("plugins").exists(),
+                "a malformed-config bail must not leave orphan plugin artifacts on disk"
+            );
+        },
     );
 }
 
 #[test]
 fn verify_target_is_sound_after_a_real_install_for_every_target() {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
-    let exe = std::env::current_exe().unwrap(); // a real, executable file
-    for &t in target::TARGETS {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let cfg = tmp.path().join("cfg");
-        install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
-        let v = verify_target(t, Some(cfg));
-        assert!(
-            v.is_sound(),
-            "{}: a fresh install must verify sound, got issues {:?}",
-            t.name,
-            v.issues
-        );
-    }
+    temp_env::with_vars(
+        [
+            ("OPENCLAW_STATE_DIR", Some(oc_home.path())),
+            ("DSH_HOME", Some(dsh_home.path())),
+        ],
+        || {
+            let exe = std::env::current_exe().unwrap(); // a real, executable file
+            for &t in target::TARGETS {
+                let tmp = tempfile::TempDir::new().unwrap();
+                let cfg = tmp.path().join("cfg");
+                install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
+                let v = verify_target(t, Some(cfg));
+                assert!(
+                    v.is_sound(),
+                    "{}: a fresh install must verify sound, got issues {:?}",
+                    t.name,
+                    v.issues
+                );
+            }
+        },
+    );
 }
 
 #[test]
@@ -827,48 +798,51 @@ fn verify_target_flags_a_non_executable_shim() {
 // no matching check in `verify_target` fails here.
 #[test]
 fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_target() {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
-    let exe = std::env::current_exe().unwrap();
-    let mut covered = 0;
-    for &t in target::TARGETS {
-        let Some(make) = t.extra_artifacts else {
-            continue;
-        };
-        let tmp = tempfile::TempDir::new().unwrap();
-        let cfg = tmp.path().join("config");
-        install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
-        assert!(
-            verify_target(t, Some(cfg.clone())).is_sound(),
-            "{}: a fresh install must verify sound",
-            t.name
-        );
-        for (p, _) in make(&exe).unwrap() {
-            let _ = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir_all(&p));
-        }
-        let v = verify_target(t, Some(cfg));
-        // Form-agnostic on purpose: the INVARIANT is a hard issue naming the
-        // artifacts, not a fixed sentence.
-        assert!(
-            !v.is_sound()
-                && v.issues
-                    .iter()
-                    .any(|i| i.contains("artifact") && i.contains("missing")),
-            "{}: a missing code artifact must be a HARD verify issue (the silent-dead \
+    temp_env::with_vars(
+        [
+            ("OPENCLAW_STATE_DIR", Some(oc_home.path())),
+            ("DSH_HOME", Some(dsh_home.path())),
+        ],
+        || {
+            let exe = std::env::current_exe().unwrap();
+            let mut covered = 0;
+            for &t in target::TARGETS {
+                let Some(make) = t.extra_artifacts else {
+                    continue;
+                };
+                let tmp = tempfile::TempDir::new().unwrap();
+                let cfg = tmp.path().join("config");
+                install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
+                assert!(
+                    verify_target(t, Some(cfg.clone())).is_sound(),
+                    "{}: a fresh install must verify sound",
+                    t.name
+                );
+                for (p, _) in make(&exe).unwrap() {
+                    let _ = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir_all(&p));
+                }
+                let v = verify_target(t, Some(cfg));
+                // Form-agnostic on purpose: the INVARIANT is a hard issue naming the
+                // artifacts, not a fixed sentence.
+                assert!(
+                    !v.is_sound()
+                        && v.issues
+                            .iter()
+                            .any(|i| i.contains("artifact") && i.contains("missing")),
+                    "{}: a missing code artifact must be a HARD verify issue (the silent-dead \
              invariant) — got {:?}",
-            t.name,
-            v.issues
-        );
-        covered += 1;
-    }
-    assert!(
-        covered >= 1,
-        "expected at least one extra_artifacts target (OpenClaw) — did the registry change?"
+                    t.name,
+                    v.issues
+                );
+                covered += 1;
+            }
+            assert!(
+                covered >= 1,
+                "expected at least one extra_artifacts target (OpenClaw) — did the registry change?"
+            );
+        },
     );
 }
 
@@ -878,43 +852,46 @@ fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_ta
 /// doctor — the silent-dead class, one artifact short of the invariant.
 #[test]
 fn verify_target_flags_a_stale_code_artifact_for_every_extra_artifacts_target() {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
-    let exe = std::env::current_exe().unwrap();
-    let mut covered = 0;
-    for &t in target::TARGETS {
-        let Some(make) = t.extra_artifacts else {
-            continue;
-        };
-        for (idx, _) in make(&exe).unwrap().iter().enumerate() {
-            let tmp = tempfile::TempDir::new().unwrap();
-            let cfg = tmp.path().join("config");
-            install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
-            let (p, _) = make(&exe).unwrap().swap_remove(idx);
-            let mut body = std::fs::read_to_string(&p).unwrap();
-            body.push_str("\n// drifted\n");
-            std::fs::write(&p, body).unwrap();
-            let v = verify_target(t, Some(cfg));
+    temp_env::with_vars(
+        [
+            ("OPENCLAW_STATE_DIR", Some(oc_home.path())),
+            ("DSH_HOME", Some(dsh_home.path())),
+        ],
+        || {
+            let exe = std::env::current_exe().unwrap();
+            let mut covered = 0;
+            for &t in target::TARGETS {
+                let Some(make) = t.extra_artifacts else {
+                    continue;
+                };
+                for (idx, _) in make(&exe).unwrap().iter().enumerate() {
+                    let tmp = tempfile::TempDir::new().unwrap();
+                    let cfg = tmp.path().join("config");
+                    install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
+                    let (p, _) = make(&exe).unwrap().swap_remove(idx);
+                    let mut body = std::fs::read_to_string(&p).unwrap();
+                    body.push_str("\n// drifted\n");
+                    std::fs::write(&p, body).unwrap();
+                    let v = verify_target(t, Some(cfg));
+                    assert!(
+                        v.issues
+                            .iter()
+                            .any(|i| i.contains("differs from the plugin this pixtuoid ships")),
+                        "{}: a stale {} must be a HARD verify issue — got {:?}",
+                        t.name,
+                        p.display(),
+                        v.issues
+                    );
+                    covered += 1;
+                }
+            }
             assert!(
-                v.issues
-                    .iter()
-                    .any(|i| i.contains("differs from the plugin this pixtuoid ships")),
-                "{}: a stale {} must be a HARD verify issue — got {:?}",
-                t.name,
-                p.display(),
-                v.issues
+                covered >= 3,
+                "expected OpenClaw's three artifacts to be swept, saw {covered} — did the roster change?"
             );
-            covered += 1;
-        }
-    }
-    assert!(
-        covered >= 3,
-        "expected OpenClaw's three artifacts to be swept, saw {covered} — did the roster change?"
+        },
     );
 }
 
@@ -1046,97 +1023,103 @@ fn no_targets_uninstall_merge_claims_a_change_on_an_empty_config() {
 // the mascot never appears while doctor reports the source healthy.
 #[test]
 fn verify_target_hard_flags_a_moved_baked_shim_for_every_extra_artifacts_target() {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
-    let mut covered = 0;
-    for &t in target::TARGETS {
-        if t.extra_artifacts.is_none() {
-            continue;
-        }
-        let shim_dir = tempfile::TempDir::new().unwrap();
-        let shim = shim_dir.path().join("pixtuoid-hook");
-        std::fs::copy(std::env::current_exe().unwrap(), &shim).unwrap();
-        let tmp = tempfile::TempDir::new().unwrap();
-        let cfg = tmp.path().join("config");
-        install_target(t, Some(cfg.clone()), Some(shim.clone())).unwrap();
-        assert!(
-            verify_target(t, Some(cfg.clone())).is_sound(),
-            "{}: a fresh install with a real shim must verify sound",
-            t.name
-        );
-        std::fs::remove_file(&shim).unwrap();
-        let v = verify_target(t, Some(cfg));
-        assert!(
-            !v.is_sound() && v.issues.iter().any(|i| i.contains("shim binary missing")),
-            "{}: a moved baked shim must be a HARD verify issue — got {:?} / notes {:?}",
-            t.name,
-            v.issues,
-            v.notes
-        );
-        covered += 1;
-    }
-    assert!(
-        covered >= 1,
-        "expected at least one extra_artifacts target (OpenClaw) — did the registry change?"
+    temp_env::with_vars(
+        [
+            ("OPENCLAW_STATE_DIR", Some(oc_home.path())),
+            ("DSH_HOME", Some(dsh_home.path())),
+        ],
+        || {
+            let mut covered = 0;
+            for &t in target::TARGETS {
+                if t.extra_artifacts.is_none() {
+                    continue;
+                }
+                let shim_dir = tempfile::TempDir::new().unwrap();
+                let shim = shim_dir.path().join("pixtuoid-hook");
+                std::fs::copy(std::env::current_exe().unwrap(), &shim).unwrap();
+                let tmp = tempfile::TempDir::new().unwrap();
+                let cfg = tmp.path().join("config");
+                install_target(t, Some(cfg.clone()), Some(shim.clone())).unwrap();
+                assert!(
+                    verify_target(t, Some(cfg.clone())).is_sound(),
+                    "{}: a fresh install with a real shim must verify sound",
+                    t.name
+                );
+                std::fs::remove_file(&shim).unwrap();
+                let v = verify_target(t, Some(cfg));
+                assert!(
+                    !v.is_sound() && v.issues.iter().any(|i| i.contains("shim binary missing")),
+                    "{}: a moved baked shim must be a HARD verify issue — got {:?} / notes {:?}",
+                    t.name,
+                    v.issues,
+                    v.notes
+                );
+                covered += 1;
+            }
+            assert!(
+                covered >= 1,
+                "expected at least one extra_artifacts target (OpenClaw) — did the registry change?"
+            );
+        },
     );
 }
 
 #[test]
 fn reinstall_heals_a_deleted_extra_artifact_even_on_a_config_no_op() {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
-    let exe = std::env::current_exe().unwrap();
-    let mut covered = 0;
-    for &t in target::TARGETS {
-        let Some(make) = t.extra_artifacts else {
-            continue;
-        };
-        let tmp = tempfile::TempDir::new().unwrap();
-        let cfg = tmp.path().join("config");
-        install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
+    temp_env::with_vars(
+        [
+            ("OPENCLAW_STATE_DIR", Some(oc_home.path())),
+            ("DSH_HOME", Some(dsh_home.path())),
+        ],
+        || {
+            let exe = std::env::current_exe().unwrap();
+            let mut covered = 0;
+            for &t in target::TARGETS {
+                let Some(make) = t.extra_artifacts else {
+                    continue;
+                };
+                let tmp = tempfile::TempDir::new().unwrap();
+                let cfg = tmp.path().join("config");
+                install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
 
-        let (victim, want) = make(&exe).unwrap().into_iter().next().unwrap();
-        std::fs::remove_file(&victim).unwrap();
-        assert!(
-            !victim.exists(),
-            "{}: precondition — artifact deleted",
-            t.name
-        );
+                let (victim, want) = make(&exe).unwrap().into_iter().next().unwrap();
+                std::fs::remove_file(&victim).unwrap();
+                assert!(
+                    !victim.exists(),
+                    "{}: precondition — artifact deleted",
+                    t.name
+                );
 
-        let r = install_target(t, Some(cfg), Some(exe.clone())).unwrap();
-        assert!(
-            matches!(r.outcome, InstallOutcome::AlreadyUpToDate),
-            "{}: config already current — the heal must fire despite the no-op",
-            t.name
-        );
-        // The artifact write runs BEFORE the `!changed` early-return; moving it
-        // after would leave the deleted file gone.
-        assert!(
-            victim.exists(),
-            "{}: a no-op re-install must re-create the deleted plugin file",
-            t.name
-        );
-        assert_eq!(
-            std::fs::read_to_string(&victim).unwrap(),
-            want,
-            "{}: the healed artifact must carry the correct baked content",
-            t.name
-        );
-        covered += 1;
-    }
-    assert!(
-        covered >= 1,
-        "expected at least one extra_artifacts target (OpenClaw) — did the registry change?"
+                let r = install_target(t, Some(cfg), Some(exe.clone())).unwrap();
+                assert!(
+                    matches!(r.outcome, InstallOutcome::AlreadyUpToDate),
+                    "{}: config already current — the heal must fire despite the no-op",
+                    t.name
+                );
+                // The artifact write runs BEFORE the `!changed` early-return; moving it
+                // after would leave the deleted file gone.
+                assert!(
+                    victim.exists(),
+                    "{}: a no-op re-install must re-create the deleted plugin file",
+                    t.name
+                );
+                assert_eq!(
+                    std::fs::read_to_string(&victim).unwrap(),
+                    want,
+                    "{}: the healed artifact must carry the correct baked content",
+                    t.name
+                );
+                covered += 1;
+            }
+            assert!(
+                covered >= 1,
+                "expected at least one extra_artifacts target (OpenClaw) — did the registry change?"
+            );
+        },
     );
 }
 
@@ -1268,34 +1251,37 @@ fn every_target_that_writes_a_config_names_us_in_it() {
     // The invariant `has_hooks`'s unparseable-config fallback rests on: a config we
     // wrote mentions us, so a substring probe answers "is this ours?" when the parse
     // fails. The fixture shim must therefore be named `pixtuoid-hook`, as in prod.
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
-    let tmpdir = tempfile::TempDir::new().unwrap();
-    let hook = tmpdir.path().join("pixtuoid-hook");
-    std::fs::write(&hook, b"#!/bin/sh\n").unwrap();
-    for t in crate::install::TARGETS {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let cfg = tmp.path().join(format!("{}-cfg", t.name));
-        install_target(t, Some(cfg.clone()), Some(hook.clone()))
-            .unwrap_or_else(|e| panic!("{}: install failed: {e:#}", t.name));
-        let content = std::fs::read_to_string(&cfg)
-            .unwrap_or_else(|e| panic!("{}: config unreadable: {e}", t.name));
-        assert!(
-            super::config_mentions_us(&content),
-            "{}: a config we wrote must satisfy the PRODUCTION fallback predicate",
-            t.name
-        );
-        assert!(
-            has_hooks(t, Some(cfg)),
-            "{}: has_hooks must see the install it just wrote",
-            t.name
-        );
-    }
+    temp_env::with_vars(
+        [
+            ("OPENCLAW_STATE_DIR", Some(oc_home.path())),
+            ("DSH_HOME", Some(dsh_home.path())),
+        ],
+        || {
+            let tmpdir = tempfile::TempDir::new().unwrap();
+            let hook = tmpdir.path().join("pixtuoid-hook");
+            std::fs::write(&hook, b"#!/bin/sh\n").unwrap();
+            for t in crate::install::TARGETS {
+                let tmp = tempfile::TempDir::new().unwrap();
+                let cfg = tmp.path().join(format!("{}-cfg", t.name));
+                install_target(t, Some(cfg.clone()), Some(hook.clone()))
+                    .unwrap_or_else(|e| panic!("{}: install failed: {e:#}", t.name));
+                let content = std::fs::read_to_string(&cfg)
+                    .unwrap_or_else(|e| panic!("{}: config unreadable: {e}", t.name));
+                assert!(
+                    super::config_mentions_us(&content),
+                    "{}: a config we wrote must satisfy the PRODUCTION fallback predicate",
+                    t.name
+                );
+                assert!(
+                    has_hooks(t, Some(cfg)),
+                    "{}: has_hooks must see the install it just wrote",
+                    t.name
+                );
+            }
+        },
+    );
 }
 
 /// The fallback's ONE marker-carrier that is not the shim path: kimi ships no

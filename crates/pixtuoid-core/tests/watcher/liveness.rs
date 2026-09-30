@@ -198,11 +198,10 @@ async fn admitted_with_mutable_probe(
     while tokio::time::Instant::now() < deadline {
         if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
             tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && agent_id == expected
         {
-            if agent_id == expected {
-                registered = true;
-                break;
-            }
+            registered = true;
+            break;
         }
     }
     assert!(
@@ -255,11 +254,10 @@ async fn negative_vouch_emits_session_end_after_sustained_disappearance() {
                 as_child: false,
             },
         ))) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && agent_id == expected
         {
-            if agent_id == expected {
-                ended = true;
-                break;
-            }
+            ended = true;
+            break;
         }
     }
     assert!(
@@ -289,11 +287,10 @@ async fn negative_vouch_emits_session_end_after_sustained_disappearance() {
     while tokio::time::Instant::now() < deadline {
         if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
             tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && agent_id == expected
         {
-            if agent_id == expected {
-                restarted = true;
-                break;
-            }
+            restarted = true;
+            break;
         }
     }
     assert!(
@@ -393,11 +390,10 @@ async fn probe_failure_changes_nothing() {
     while tokio::time::Instant::now() < deadline {
         if let Ok(Some((_, AgentEvent::ActivityStart { tool_use_id, .. }))) =
             tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && tool_use_id.as_deref() == Some("tu_after_failure")
         {
-            if tool_use_id.as_deref() == Some("tu_after_failure") {
-                got_activity = true;
-                break;
-            }
+            got_activity = true;
+            break;
         }
     }
     assert!(
@@ -443,11 +439,10 @@ async fn probe_panic_changes_nothing() {
     while tokio::time::Instant::now() < deadline {
         if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
             tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && agent_id == expected
         {
-            if agent_id == expected {
-                registered = true;
-                break;
-            }
+            registered = true;
+            break;
         }
     }
     assert!(
@@ -511,11 +506,10 @@ async fn instant_exit_emits_session_end_when_bound_pid_dies() {
                 as_child: false,
             },
         ))) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && agent_id == expected
         {
-            if agent_id == expected {
-                ended = true;
-                break;
-            }
+            ended = true;
+            break;
         }
     }
     assert!(
@@ -546,11 +540,10 @@ async fn instant_exit_emits_session_end_when_bound_pid_dies() {
     while tokio::time::Instant::now() < deadline {
         if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
             tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && agent_id == expected
         {
-            if agent_id == expected {
-                restarted = true;
-                break;
-            }
+            restarted = true;
+            break;
         }
     }
     assert!(
@@ -595,11 +588,10 @@ async fn negative_vouch_confirm_unbinds_pid_so_a_later_exit_is_quiet() {
                 as_child: false,
             },
         ))) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && agent_id == expected
         {
-            if agent_id == expected {
-                ended = true;
-                break;
-            }
+            ended = true;
+            break;
         }
     }
     assert!(ended, "the negative vouch must confirm the first exit");
@@ -656,11 +648,10 @@ async fn instant_exit_under_probe_failure_does_not_resurrect_the_session() {
                 as_child: false,
             },
         ))) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && agent_id == expected
         {
-            if agent_id == expected {
-                ended = true;
-                break;
-            }
+            ended = true;
+            break;
         }
     }
     assert!(ended, "the instant exit must emit the SessionEnd");
@@ -732,11 +723,10 @@ async fn rebound_session_survives_old_pid_death_and_follows_the_new_pid() {
                 as_child: false,
             },
         ))) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && agent_id == expected
         {
-            if agent_id == expected {
-                ended = true;
-                break;
-            }
+            ended = true;
+            break;
         }
     }
     assert!(

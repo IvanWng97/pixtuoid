@@ -1,1 +1,16 @@
-CLAUDE.md
+# pixtuoid/tui — terminal renderer agent guide
+
+The **terminal painter**: ratatui `App` + `TuiRenderer` (its inherent `render`
+flush). Owns the half-block flush, the widgets, mouse hit-testing, the version
+popup, the crossterm event loop + terminal lifecycle, and the per-session UI
+models. The screen-space compass every N/S claim here rests on is in the
+[scene guide](../../../pixtuoid-scene/AGENTS.md). Module map: `ls` this
+directory — each file's `//!` header is its annotation. Cross-cutting rules:
+workspace [`AGENTS.md`](../../../../AGENTS.md).
+
+## When refactoring
+
+Changes to `draw_scene`, the widgets, or the dispatch precedence add or update
+a harness test (`tui_renderer/harness` drives the real `TuiRenderer` through a
+ratatui `TestBackend`, output-first). Don't reach back into `floating/` from
+here.

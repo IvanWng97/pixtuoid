@@ -14,8 +14,11 @@ use crate::sprite::{
 
 type Result<T, E = PackError> = std::result::Result<T, E>;
 
-/// A frame's rows as parsed, and its marks.
-type MarkedRows = (Vec<Vec<PaletteIndex>>, Vec<Mark>);
+struct Block {
+    header: usize,
+    rows: Vec<Vec<PaletteIndex>>,
+    marks: Vec<(Mark, usize)>,
+}
 
 /// Parse a `.sprite` text file: one indexed frame per `@frame N` block, each
 /// with the `@mark <name> <x> <y>` lines its block carries.
@@ -24,24 +27,22 @@ fn parse_indexed(
     palette: &Palette,
 ) -> Result<Vec<(IndexedFrame, Vec<Mark>)>, SpriteError> {
     let mut frames = Vec::new();
-    let mut current: Option<MarkedRows> = None;
-    let mut last_lineno = 0;
+    let mut current: Option<Block> = None;
     let at = |lineno: usize| {
         move |kind| SpriteError::Line {
             line: lineno + 1,
             kind,
         }
     };
-    let finish = |(rows, marks): MarkedRows,
-                  lineno: usize|
-     -> Result<(IndexedFrame, Vec<Mark>), SpriteError> {
-        let frame = rows_to_frame(rows).map_err(at(lineno))?;
+    let finish = |block: Block| -> Result<(IndexedFrame, Vec<Mark>), SpriteError> {
+        let frame = rows_to_frame(block.rows).map_err(at(block.header))?;
         let grid = &frame.0;
-        if let Some(m) = marks
+        if let Some((m, lineno)) = block
+            .marks
             .iter()
-            .find(|m| m.x() >= grid.width() || m.y() >= grid.height())
+            .find(|(m, _)| m.x() >= grid.width() || m.y() >= grid.height())
         {
-            return Err(at(lineno)(LineError::MarkOutside {
+            return Err(at(*lineno)(LineError::MarkOutside {
                 name: m.name().to_owned(),
                 x: m.x(),
                 y: m.y(),
@@ -49,7 +50,7 @@ fn parse_indexed(
                 height: grid.height(),
             }));
         }
-        Ok((frame, marks))
+        Ok((frame, block.marks.into_iter().map(|(m, _)| m).collect()))
     };
 
     for (lineno, raw) in src.lines().enumerate() {
@@ -57,21 +58,24 @@ fn parse_indexed(
         if line.is_empty() {
             continue;
         }
-        last_lineno = lineno;
 
         if let Some(rest) = line.strip_prefix("@frame") {
             if let Some(block) = current.take() {
-                frames.push(finish(block, lineno)?);
+                frames.push(finish(block)?);
             }
             let _ = rest
                 .trim()
                 .parse::<u32>()
                 .map_err(|_| at(lineno)(LineError::FrameNumber))?;
-            current = Some((Vec::new(), Vec::new()));
+            current = Some(Block {
+                header: lineno,
+                rows: Vec::new(),
+                marks: Vec::new(),
+            });
             continue;
         }
 
-        let (rows, marks) = current
+        let Block { rows, marks, .. } = current
             .as_mut()
             .ok_or_else(|| at(lineno)(LineError::DataBeforeFrame))?;
 
@@ -80,20 +84,20 @@ fn parse_indexed(
             let head = |m: &Mark| m.name().starts_with(HEAD_MARK);
             if marks
                 .iter()
-                .any(|m| m.name() == mark.name() || (head(m) && head(&mark)))
+                .any(|(m, _)| m.name() == mark.name() || (head(m) && head(&mark)))
             {
                 return Err(at(lineno)(LineError::DuplicateMark));
             }
-            marks.push(mark);
+            marks.push((mark, lineno));
             continue;
         }
 
         let row = parse_row(line, palette).map_err(at(lineno))?;
-        rows.push(row);
+        push_row(rows, row).map_err(at(lineno))?;
     }
 
     if let Some(block) = current.take() {
-        frames.push(finish(block, last_lineno)?);
+        frames.push(finish(block)?);
     }
 
     if frames.is_empty() {
@@ -202,19 +206,20 @@ mod tests {
         assert_eq!((tower.name(), tower.size()), ("tower", (2, 3)));
         assert!(tower.stands_in(CityPlane::Mid) && tower.stands_in(CityPlane::Near));
         let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
-        let base = tower.art(d(1)).expect("every building has its base");
+        let base = tower.base();
+        assert!(tower.variant(d(1)).is_none(), "the base is no variant");
         assert_eq!(
             base.windows(),
             [vec![(0, 1), (1, 1)]],
             "one run of glass, one window"
         );
-        let dense = tower.art(d(2)).expect("the 2x variant");
+        let dense = tower.variant(d(2)).expect("the 2x variant");
         assert_eq!(
             dense.windows().len(),
             2,
             "each density finds its own windows: the mullion splits this one"
         );
-        assert!(tower.art(d(4)).is_none());
+        assert!(tower.variant(d(4)).is_none());
         let materials = pack.city_materials().expect("[city]");
         assert_eq!(materials.key(Material::Glass), 'W');
     }
@@ -653,31 +658,38 @@ fn parse_row(line: &str, palette: &Palette) -> Result<Vec<PaletteIndex>, LineErr
     Ok(out)
 }
 
-fn rows_to_frame(rows: Vec<Vec<PaletteIndex>>) -> Result<IndexedFrame, LineError> {
-    if rows.is_empty() {
-        return Err(LineError::NoRows);
+/// Append `row` to a frame's `rows`, rejected where it breaks the frame's
+/// shape, so the error names the row's own line.
+fn push_row(rows: &mut Vec<Vec<PaletteIndex>>, row: Vec<PaletteIndex>) -> Result<(), LineError> {
+    // Grid dims are u16: past them a frame's `data` would outgrow its grid.
+    if u16::try_from(rows.len() + 1).is_err() {
+        return Err(LineError::TooManyRows {
+            rows: rows.len() + 1,
+        });
     }
-    // Grid dims are u16: an `as u16` truncation would wrap them while `data`
-    // keeps its full length, and `Grid::from_vec`'s length assert would panic
-    // on pack input instead of rejecting it.
-    if rows.len() > u16::MAX as usize {
-        return Err(LineError::TooManyRows { rows: rows.len() });
-    }
-    let w = rows[0].len();
-    if w > u16::MAX as usize {
-        return Err(LineError::TooWide { width: w });
-    }
-    for (i, r) in rows.iter().enumerate() {
-        if r.len() != w {
+    match rows.first() {
+        None if u16::try_from(row.len()).is_err() => {
+            return Err(LineError::TooWide { width: row.len() });
+        }
+        Some(first) if row.len() != first.len() => {
             return Err(LineError::Ragged {
-                row: i,
-                expected: w,
-                got: r.len(),
+                row: rows.len(),
+                expected: first.len(),
+                got: row.len(),
             });
         }
+        _ => {}
     }
-    let height = rows.len() as u16;
-    let width = w as u16;
+    rows.push(row);
+    Ok(())
+}
+
+fn rows_to_frame(rows: Vec<Vec<PaletteIndex>>) -> Result<IndexedFrame, LineError> {
+    let height =
+        u16::try_from(rows.len()).map_err(|_| LineError::TooManyRows { rows: rows.len() })?;
+    let first = rows.first().ok_or(LineError::NoRows)?;
+    let width =
+        u16::try_from(first.len()).map_err(|_| LineError::TooWide { width: first.len() })?;
     let data = rows.into_iter().flatten().collect();
     Ok(IndexedFrame(Grid::from_vec(width, height, data)))
 }
@@ -874,7 +886,8 @@ impl CityPlane {
 pub struct Building {
     name: String,
     planes: Vec<CityPlane>,
-    art: BTreeMap<u16, BuildingArt>,
+    base: BuildingArt,
+    variants: BTreeMap<u16, BuildingArt>,
 }
 
 impl Building {
@@ -890,16 +903,21 @@ impl Building {
 
     /// Its size in logical units: its base art's.
     pub fn size(&self) -> (u16, u16) {
-        self.art
-            .get(&1)
-            .and_then(|a| a.sprite.frames().first())
+        self.base
+            .sprite
+            .frames()
+            .first()
             .map_or((0, 0), |f| (f.width(), f.height()))
     }
 
-    /// Its art at `density`, where it is drawn at that density; `1` is the
-    /// base, which every building has.
-    pub fn art(&self, density: std::num::NonZeroU16) -> Option<&BuildingArt> {
-        self.art.get(&density.get())
+    /// Its base art, at 1x.
+    pub fn base(&self) -> &BuildingArt {
+        &self.base
+    }
+
+    /// Its variant drawn at `density`, above its [`base`](Self::base).
+    pub fn variant(&self, density: std::num::NonZeroU16) -> Option<&BuildingArt> {
+        self.variants.get(&density.get())
     }
 }
 
@@ -1203,7 +1221,8 @@ fn build_pack(
                     Building {
                         name: key.clone(),
                         planes,
-                        art: BTreeMap::from([(1, art)]),
+                        base: art,
+                        variants: BTreeMap::new(),
                     },
                 );
             }
@@ -1217,10 +1236,7 @@ fn build_pack(
                 let Some(base) = buildings.get_mut(name) else {
                     return Err(no_base(key.clone()));
                 };
-                let Some(base_art) = base.art.get(&1) else {
-                    return Err(no_base(key.clone()));
-                };
-                if !variant_redraws(&base_art.sprite, density, &art.sprite) {
+                if !variant_redraws(&base.base.sprite, density, &art.sprite) {
                     let (base_w, base_h) = base.size();
                     return Err(PackError::VariantSize {
                         key,
@@ -1229,7 +1245,7 @@ fn build_pack(
                         base_h,
                     });
                 }
-                base.art.insert(density, art);
+                base.variants.insert(density, art);
             }
         }
     }
@@ -1300,13 +1316,13 @@ fn build_pack(
             .collect()
     };
     let densities: std::collections::BTreeSet<_> = hairstyles.values().map(|s| s.density).collect();
-    if let [first, rest @ ..] = densities.iter().copied().collect::<Vec<_>>().as_slice() {
-        if let Some(d) = rest.iter().find(|&&d| names_at(d) != names_at(*first)) {
-            return Err(PackError::HairstylesDiffer {
-                first: first.get(),
-                other: d.get(),
-            });
-        }
+    if let [first, rest @ ..] = densities.iter().copied().collect::<Vec<_>>().as_slice()
+        && let Some(d) = rest.iter().find(|&&d| names_at(d) != names_at(*first))
+    {
+        return Err(PackError::HairstylesDiffer {
+            first: first.get(),
+            other: d.get(),
+        });
     }
 
     Ok(Pack {
@@ -1401,14 +1417,25 @@ fn runs_of(grid: &Grid<PaletteIndex>, index: PaletteIndex) -> Vec<Vec<(u16, u16)
     runs
 }
 
-/// Load a `Pack` from `dir/pack.toml` and its on-disk frame files, guarding
-/// each frame path against directory traversal outside `dir`.
+/// The file a pack directory's manifest is read from.
+pub const PACK_MANIFEST: &str = "pack.toml";
+
+/// Load a `Pack` from `dir`'s [`PACK_MANIFEST`] and its on-disk frame files,
+/// guarding each frame path against directory traversal outside `dir`.
 #[cfg(feature = "native")]
 pub fn load_pack(dir: &Path) -> Result<Pack> {
-    let toml_path = dir.join("pack.toml");
-    let toml_src = std::fs::read_to_string(&toml_path).map_err(|source| PackError::Read {
-        path: toml_path.clone(),
-        source,
+    let toml_path = dir.join(PACK_MANIFEST);
+    let toml_src = std::fs::read_to_string(&toml_path).map_err(|source| {
+        if source.kind() == std::io::ErrorKind::NotFound {
+            PackError::NoManifest {
+                dir: dir.to_owned(),
+            }
+        } else {
+            PackError::Read {
+                path: toml_path.clone(),
+                source,
+            }
+        }
     })?;
     let parsed: PackToml = toml::from_str(&toml_src).map_err(|source| PackError::Manifest {
         path: Some(toml_path.clone()),
@@ -1681,6 +1708,15 @@ pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "vending_machine",
     "printer",
     "meeting_table",
+    "kitchen_island",
+    "side_table",
+    "water_cooler",
+    "pantry_bin",
+    "fish_tank",
+    "coat_rack",
+    "notice_board",
+    "wall_clock",
+    "meeting_chair",
 ];
 
 const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[
@@ -2011,14 +2047,12 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
             // draws nothing; an empty OPTIONAL entry also SHADOWS the embedded
             // default in `Pack::merge_from` (`contains_key` is true).
             .map_or(1, |&(_, min)| min);
-        if let Some(anim) = pack.animation(name) {
-            if anim.frames().len() < min_frames {
-                report.insufficient_frames.push((
-                    name.to_string(),
-                    min_frames,
-                    anim.frames().len(),
-                ));
-            }
+        if let Some(anim) = pack.animation(name)
+            && anim.frames().len() < min_frames
+        {
+            report
+                .insufficient_frames
+                .push((name.to_string(), min_frames, anim.frames().len()));
         }
     };
     for name in registered_animation_names() {

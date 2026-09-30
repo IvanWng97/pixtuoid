@@ -484,36 +484,36 @@ pub fn derive_with_routing(
             matches!(&ms_entry.snap_back, Some(leg) if leg.started_at == slot.state_started_at);
         if !already_armed {
             ms_entry.snap_back = None;
-            if since_state < SNAP_BACK_MS {
-                if let Some(prev) = rctx.history.recent(slot.agent_id, HISTORY_RECENT_MS, now) {
-                    // To the CHAIR, not the desk origin: the chair is offset, so a
-                    // desk-origin gate re-fires forever once the agent settles on it.
-                    let chair = desk_walk_anchor_facing(desk, layout.desk_facing_at(desk));
-                    let dist = (prev.x as i32 - chair.x as i32).abs()
-                        + (prev.y as i32 - chair.y as i32).abs();
-                    if dist >= SNAP_BACK_MIN_DIST {
-                        // Against the same jittered goal the render route uses: the
-                        // profile must measure `route_walking_pose`'s own A* polyline,
-                        // or a detour covers a longer path in a straight-line duration.
-                        let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
-                        let p = snapshot_leg_profile(
-                            rctx.router,
-                            &layout.walkable,
-                            rctx.overlay,
-                            slot.agent_id,
-                            LegPlan {
-                                from: prev,
-                                to: snap_target,
-                                settle: chair_settle.map_or(Settle::None, Settle::End),
-                                intent: WalkIntent::SnapBack,
-                            },
-                        );
-                        ms_entry.snap_back = Some(WalkLeg {
-                            started_at: slot.state_started_at,
-                            profile: p,
+            if since_state < SNAP_BACK_MS
+                && let Some(prev) = rctx.history.recent(slot.agent_id, HISTORY_RECENT_MS, now)
+            {
+                // To the CHAIR, not the desk origin: the chair is offset, so a
+                // desk-origin gate re-fires forever once the agent settles on it.
+                let chair = desk_walk_anchor_facing(desk, layout.desk_facing_at(desk));
+                let dist =
+                    (prev.x as i32 - chair.x as i32).abs() + (prev.y as i32 - chair.y as i32).abs();
+                if dist >= SNAP_BACK_MIN_DIST {
+                    // Against the same jittered goal the render route uses: the
+                    // profile must measure `route_walking_pose`'s own A* polyline,
+                    // or a detour covers a longer path in a straight-line duration.
+                    let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
+                    let p = snapshot_leg_profile(
+                        rctx.router,
+                        &layout.walkable,
+                        rctx.overlay,
+                        slot.agent_id,
+                        LegPlan {
                             from: prev,
-                        });
-                    }
+                            to: snap_target,
+                            settle: chair_settle.map_or(Settle::None, Settle::End),
+                            intent: WalkIntent::SnapBack,
+                        },
+                    );
+                    ms_entry.snap_back = Some(WalkLeg {
+                        started_at: slot.state_started_at,
+                        profile: p,
+                        from: prev,
+                    });
                 }
             }
         }
@@ -553,10 +553,10 @@ pub fn derive_with_routing(
     } else {
         // Clear any stale snap-back so the next transition snapshots afresh rather
         // than replaying a previous one.
-        if let Some(ms) = rctx.motion.get_mut(&slot.agent_id) {
-            if ms.snap_back.is_some() {
-                ms.snap_back = None;
-            }
+        if let Some(ms) = rctx.motion.get_mut(&slot.agent_id)
+            && ms.snap_back.is_some()
+        {
+            ms.snap_back = None;
         }
         raw
     };

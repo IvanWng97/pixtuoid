@@ -98,15 +98,15 @@ pub(crate) fn resolve_pid(
         return None;
     }
     if let Some(cached) = slot.pid {
-        if let Some(stamped) = cached.started {
-            if table.start_time(cached.pid) != Some(stamped) {
-                tracing::debug!(
-                    agent = %slot.label,
-                    pid = cached.pid,
-                    "focus: refused — cached pid gone or recycled (start marker mismatch)"
-                );
-                return None;
-            }
+        if let Some(stamped) = cached.started
+            && table.start_time(cached.pid) != Some(stamped)
+        {
+            tracing::debug!(
+                agent = %slot.label,
+                pid = cached.pid,
+                "focus: refused — cached pid gone or recycled (start marker mismatch)"
+            );
+            return None;
         }
         return Some(cached.pid);
     }

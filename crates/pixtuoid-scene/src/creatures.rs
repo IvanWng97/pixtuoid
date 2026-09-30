@@ -568,9 +568,7 @@ mod tests {
     /// answers with a coarse CELL CENTRE, so a clear destination is not enough.
     #[test]
     fn no_resting_creature_settles_under_a_sprite_that_paints_over_it() {
-        let pack =
-            crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-                .expect("pack");
+        let pack = crate::embedded_pack::test_default_pack();
         let mut rests = 0u32;
         let min = crate::layout::min_layout_size();
         for &(w, h) in &[
@@ -591,15 +589,14 @@ mod tests {
                         + std::time::Duration::from_millis(cycle * 40_000 + 34_000);
                     if let Some((p, _, anim, _)) =
                         pet_position(PetKind::Cat, &l, &pack, now, &[], false, seed)
+                        && !anim.contains("walk")
                     {
-                        if !anim.contains("walk") {
-                            assert!(
-                                l.is_visually_clear(p),
-                                "{w}x{h} seed {seed} cycle {cycle}: a resting cat at {p:?} \
+                        assert!(
+                            l.is_visually_clear(p),
+                            "{w}x{h} seed {seed} cycle {cycle}: a resting cat at {p:?} \
                                  is under a sprite that paints over it"
-                            );
-                            rests += 1;
-                        }
+                        );
+                        rests += 1;
                     }
                 }
             }

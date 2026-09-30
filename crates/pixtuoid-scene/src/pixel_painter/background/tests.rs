@@ -1037,6 +1037,56 @@ fn spill(x: u16, slant: f32) -> crate::lighting::Emitter {
 
 /// The bundled pack, whose city the windows show.
 fn pack() -> Pack {
-    crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("the embedded pack loads")
+    crate::embedded_pack::test_default_pack()
+}
+
+/// Every pane shows its own stretch of the one city, read from the run's west
+/// end.
+#[test]
+fn a_window_shows_the_city_strip_from_its_own_column() {
+    // Noon: the night's stars are keyed to the screen column, not the city's.
+    let now = crate::localclock::on_day(15, 12);
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let moment = &Moment::resolve(Sky::at_with(now, Weather::Clear), theme, 0.0, now);
+    let sky_row = sky_rows(30, &moment.look);
+    let dx = 7;
+    let city = CityStrip::draw(
+        &pack(),
+        (WINDOW_W * 2, 28),
+        moment,
+        theme,
+        std::num::NonZeroU16::MIN,
+    );
+    let pane = |x: u16, run_x0: u16| {
+        let mut buf = RgbBuffer::filled(WINDOW_W * 3, 30, Rgb { r: 8, g: 8, b: 10 });
+        paint_floor_to_ceiling_window(
+            &mut buf,
+            Bounds {
+                x,
+                y: 0,
+                width: WINDOW_W,
+                height: 30,
+            },
+            theme.surface.window_frame,
+            0,
+            moment,
+            GlassView {
+                city: &city,
+                run_x0,
+                sky_row: &sky_row,
+                disc: None,
+            },
+        );
+        (0..30u16)
+            .flat_map(|y| (0..WINDOW_W).map(move |c| (c, y)))
+            .map(|(c, y)| buf.get(x + c, y))
+            .collect::<Vec<_>>()
+    };
+    let (west, east) = (pane(0, 0), pane(WINDOW_W + dx, WINDOW_W + dx));
+    assert_eq!(west, east, "a pane shows the strip from the run's west end");
+    assert_ne!(
+        pane(dx, 0),
+        west,
+        "a pane {dx} columns east shows a different stretch of city"
+    );
 }

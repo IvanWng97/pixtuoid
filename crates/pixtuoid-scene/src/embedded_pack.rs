@@ -272,7 +272,9 @@ mod comments;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "native")]
     use std::fs;
+    #[cfg(feature = "native")]
     use std::path::Path;
 
     #[test]
@@ -297,6 +299,7 @@ mod tests {
     /// tautological, and it lives INSIDE pixtuoid-scene so `cargo test` passes
     /// from an extracted .crate — it must NOT reach into the sibling `pixtuoid`
     /// binary crate's skeleton.
+    #[cfg(feature = "native")]
     fn copy_skeleton_pack(dst: &Path) {
         fs::create_dir_all(dst).expect("mkdir pack dir");
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
@@ -311,6 +314,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "native")]
     fn load_sprite_pack_from_custom_dir_merges_with_embedded() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let pack_dir = tmp.path().join("custom");
@@ -327,8 +331,10 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "native")]
     #[derive(Clone)]
     struct WarnCounter(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    #[cfg(feature = "native")]
     impl tracing::Subscriber for WarnCounter {
         fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
             metadata.level() == &tracing::Level::WARN
@@ -403,8 +409,7 @@ mod tests {
         );
         let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
         assert!(
-            pack.buildings()
-                .all(|b| b.art(d(1)).is_some() && b.art(d(4)).is_none()),
+            pack.buildings().all(|b| b.variant(d(4)).is_none()),
             "at their base alone"
         );
         let report = validate_pack(&pack);
@@ -435,19 +440,52 @@ mod tests {
         );
         let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
         for b in pack.buildings() {
-            assert!(
-                b.art(d(1)).is_some() && b.art(d(4)).is_some(),
-                "{}",
-                b.name()
-            );
+            assert!(b.variant(d(4)).is_some(), "{}", b.name());
         }
+    }
+
+    /// A transparent last row lifts a piece off the floor both painters ground
+    /// it on.
+    #[test]
+    fn every_bundled_furniture_frame_draws_its_bottom_row() {
+        let pack = test_default_pack();
+        // Pets and mascots stand on their feet, wherever their frame ends.
+        let figures: std::collections::HashSet<&str> = crate::pet::PetKind::ALL
+            .iter()
+            .flat_map(|k| [k.walk_anim(), k.sit_anim(), k.sleep_anim()])
+            .chain(
+                pixtuoid_core::source::registry::registered_source_names()
+                    .filter_map(crate::creatures::gateway_mascot_def)
+                    .flat_map(|m| [m.walk, m.rest]),
+            )
+            .collect();
+        let floating: Vec<String> = pack
+            .animation_names()
+            .into_iter()
+            .filter(|name| {
+                let base = name.split('@').next().unwrap_or(name);
+                pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS.contains(&base)
+                    && !figures.contains(base)
+            })
+            .filter(|name| {
+                pack.animation(name).is_some_and(|s| {
+                    s.frames().iter().any(|f| {
+                        let w = usize::from(f.width());
+                        f.as_slice()[f.as_slice().len() - w..]
+                            .iter()
+                            .all(Option::is_none)
+                    })
+                })
+            })
+            .collect();
+        assert!(floating.is_empty(), "{floating:?}");
     }
 
     #[test]
     fn embedded_default_pack_animations_are_all_in_the_registry() {
         // An animation the EMBEDDED pack ships but the registry doesn't know is
         // falsely reported "unused by renderer" by validate-pack.
-        let pack = load_sprite_pack(PackSource::Bundled).expect("embedded pack");
+        let pack = test_default_pack();
         let report = validate_pack(&pack);
         assert!(
             report.unknown.is_empty(),
@@ -457,6 +495,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "native")]
     fn custom_pack_missing_required_pose_loads_with_a_load_time_warning() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let pack_dir = tmp.path().join("gappy");
@@ -493,6 +532,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "native")]
     fn load_sprite_pack_from_missing_custom_dir_errors() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let missing = tmp.path().join("does-not-exist");
@@ -503,6 +543,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "native")]
     fn a_discovered_pack_loads_over_the_default_and_a_broken_one_falls_back() {
         let seated = |p: &Pack| p.animation("seated").expect("seated").frames()[0].clone();
         let embedded = seated(&test_default_pack());
@@ -538,6 +579,7 @@ mod tests {
     /// of the default's desk, so a check after the merge finds nothing to warn
     /// about.
     #[test]
+    #[cfg(feature = "native")]
     fn a_custom_variant_without_its_base_warns_at_load() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         copy_skeleton_pack(tmp.path());

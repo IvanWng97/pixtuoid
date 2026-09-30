@@ -137,12 +137,12 @@ impl WebAudioDriver {
             Some(p) => p.build.step(&mut self.rng),
             None => None,
         };
-        if let Some(beds) = finished {
-            if let Some(p) = self.pending.take() {
-                self.beds = Some(TrackBeds::from_arcs(beds));
-                self.track = p.to;
-                cmds.swap = Some(p.to);
-            }
+        if let Some(beds) = finished
+            && let Some(p) = self.pending.take()
+        {
+            self.beds = Some(TrackBeds::from_arcs(beds));
+            self.track = p.to;
+            cmds.swap = Some(p.to);
         }
         cmds
     }
