@@ -163,11 +163,6 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 200,
             b: 255,
         },
-        ceiling_pool: Rgb {
-            r: 160,
-            g: 190,
-            b: 255,
-        },
         floor_lamp_halo: Rgb {
             r: 122,
             g: 162,

@@ -833,15 +833,6 @@ pub fn desk_walk_anchor_facing(desk: Point, facing: Facing) -> Point {
     }
 }
 
-/// Where a desk's ceiling tube pools its light — derived from the SEAT, not the desk origin, since the facing places the workstation.
-pub fn desk_ceiling_pool_center(desk: Point, facing: Facing) -> Point {
-    let walk = desk_walk_anchor_facing(desk, facing);
-    Point {
-        x: walk.x,
-        y: walk.y.saturating_sub(WALKING_Y_OFF / 2),
-    }
-}
-
 /// The cell where a seated agent's WALK visually ends so the seated sprite renders
 /// with no arrival jump — the inverse of the render anchor under
 /// [`WALKING_Y_OFF`], solving `walking_anchor(S) == render_anchor(pos)`. `Some`
@@ -1290,35 +1281,5 @@ mod tests {
                 "sprite_name {n:?} is not a registered OPTIONAL_FURNITURE_ANIMATIONS key"
             );
         }
-    }
-
-    #[test]
-    fn the_desk_light_follows_the_seat_and_leaves_a_far_seat_where_it_was() {
-        // The lift the pool hardcoded before it read the facing.
-        const HISTORICAL_CY_LIFT: u16 = 2;
-        let desk = Point { x: 40, y: 30 };
-
-        let far = desk_ceiling_pool_center(desk, Facing::South);
-        assert_eq!(
-            far,
-            Point {
-                // The pool follows the SEAT, so it reads the seat's own x rather
-                // than re-deriving a midline that would drift from it.
-                x: desk_walk_anchor_facing(desk, Facing::South).x,
-                y: desk.y - HISTORICAL_CY_LIFT,
-            },
-            "a viewer-facing desk lights the seat, at the historical lift"
-        );
-
-        let near = desk_ceiling_pool_center(desk, Facing::North);
-        assert!(
-            near.y > desk.y,
-            "a back-turned desk seats its occupant SOUTH, so its light must move \
-             there too: {near:?} vs desk {desk:?}"
-        );
-        assert!(
-            near.y < desk_walk_anchor_facing(desk, Facing::North).y,
-            "...but stay on the body rather than drop to their feet: {near:?}"
-        );
     }
 }

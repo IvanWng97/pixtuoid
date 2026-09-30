@@ -164,11 +164,6 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 226,
             b: 175,
         },
-        ceiling_pool: Rgb {
-            r: 205,
-            g: 214,
-            b: 244,
-        },
         floor_lamp_halo: Rgb {
             r: 249,
             g: 226,

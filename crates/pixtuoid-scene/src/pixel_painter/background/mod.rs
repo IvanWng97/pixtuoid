@@ -1,6 +1,6 @@
 //! Background pass — depth-independent floor, walls, windows, skyline,
-//! clock, corridor runner, entry mat, time-of-day overlays, ceiling
-//! light pools, lamp halo, floor shadows, and weather effects.
+//! clock, corridor runner, entry mat, time-of-day overlays, lamp halo,
+//! floor shadows, and weather effects.
 //!
 //! Everything here paints BEFORE the y-sorted entity pass, in the order the
 //! orchestrator (`pixel_painter/mod.rs`) calls it.

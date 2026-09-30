@@ -163,11 +163,6 @@ pub static NORMAL: Theme = Theme {
             g: 230,
             b: 160,
         },
-        ceiling_pool: Rgb {
-            r: 255,
-            g: 246,
-            b: 215,
-        },
         floor_lamp_halo: Rgb {
             r: 255,
             g: 210,

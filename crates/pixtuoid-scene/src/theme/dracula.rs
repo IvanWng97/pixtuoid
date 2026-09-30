@@ -163,11 +163,6 @@ pub static DRACULA: Theme = Theme {
             g: 184,
             b: 108,
         },
-        ceiling_pool: Rgb {
-            r: 255,
-            g: 180,
-            b: 220,
-        },
         floor_lamp_halo: Rgb {
             r: 255,
             g: 121,
