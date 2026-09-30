@@ -1,6 +1,6 @@
 // Invariant #5 (non-negotiable): the shim must never block CC — it always exits 0
 // silently on any error. A prod `unwrap()`/`expect()`/`panic!` violates that, so
-// they are compiler-denied here (tests unwrap freely). Scoped to the shim only.
+// they are compiler-denied here (tests unwrap freely).
 // Indexing joins them because `release` sets `panic = "abort"`: an out-of-bounds
 // slice is a SIGABRT the agent CLI sees, and the parsers this crate feeds on
 // untrusted process rows are exactly where one would land.
@@ -14,6 +14,7 @@
     )
 )]
 
+use std::ffi::OsString;
 use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -28,23 +29,18 @@ use paths::default_socket_path;
 
 mod transport;
 
-/// Headroom reserved below the daemon's 1MiB pipe quota for what the shim ADDS
-/// to stdin (the `_shim_ts_ms`/`_pixtuoid_source` stamps and the trailing
-/// newline). Without it a near-1MiB payload re-serializes to a wire line past
-/// the quota, and the sync write can stall until the watchdog fires (event
-/// dropped).
+/// What the shim adds to stdin: the `_shim_ts_ms`/`_pixtuoid_source` stamps and
+/// the trailing newline.
 const STAMP_HEADROOM: u64 = 256;
 
-/// Stdin cap. `STDIN_CAP + STAMP_HEADROOM` equals the daemon's Windows pipe
-/// in-buffer quota, so a stamped payload fits the pipe and the shim's sync write
-/// can't stall on quota. The headroom covers only what the SHIM adds; a
-/// pathological body (number canonicalization, an absurdly long `--source`) can
-/// still exceed it and degrade to the pre-existing stall→watchdog→drop mode,
-/// never a block of CC.
+/// `STDIN_CAP + STAMP_HEADROOM` is the daemon's pipe `IN_BUFFER_SIZE` (pinned by
+/// `tests/pipe_quota_parity.rs`), so a stamped payload can't stall the sync
+/// write; a pathological body can still exceed it and degrade to
+/// stall→watchdog→drop, never a block of CC.
 const STDIN_CAP: u64 = (1 << 20) - STAMP_HEADROOM;
 
-/// Saturating `u128 → u64` narrowing — a truncating `as` cast would WRAP a
-/// > u64::MAX value to a small number.
+/// Saturating `u128 → u64` narrowing: a truncating `as` cast would wrap anything
+/// above `u64::MAX` to a small number.
 fn ms_u128_to_u64(ms: u128) -> u64 {
     u64::try_from(ms).unwrap_or(u64::MAX)
 }
@@ -116,7 +112,7 @@ fn main() -> Result<()> {
 
 /// CodeWhale env-mode: synthesize the hook envelope from `DEEPSEEK_*` env vars.
 /// The `std::env` reads live here so `env_payload_from` stays testable without
-/// mutating process-global env. No `_pid`: `enrich_payload` is the one stamper.
+/// mutating process-global env.
 fn env_payload(event: &str) -> serde_json::Map<String, Value> {
     // CodeWhale runs the hook with current_dir = its working dir (= the
     // workspace), so the shim's own cwd is the reliable fallback.
@@ -132,24 +128,15 @@ fn env_payload(event: &str) -> serde_json::Map<String, Value> {
 /// daemon's pipe quota instead of building one the watchdog would drop.
 const ENV_FIELD_CAP: usize = 128 * 1024;
 
-/// Byte-bounded, char-safe truncation: a scalar straddling the cap is dropped, so
-/// the cap is a hard ceiling.
 fn cap_env_field(mut val: String) -> String {
-    if val.len() > ENV_FIELD_CAP {
-        let end = val
-            .char_indices()
-            .take_while(|(i, c)| i + c.len_utf8() <= ENV_FIELD_CAP)
-            .last()
-            .map_or(0, |(i, c)| i + c.len_utf8());
-        val.truncate(end);
-    }
+    val.truncate(val.floor_char_boundary(ENV_FIELD_CAP));
     val
 }
 
 fn env_payload_from(
     event: &str,
     cwd_fallback: Option<String>,
-    get: impl Fn(&str) -> Option<std::ffi::OsString>,
+    get: impl Fn(&str) -> Option<OsString>,
 ) -> serde_json::Map<String, Value> {
     let get = |k: &str| get(k).map(|v| v.to_string_lossy().into_owned());
     let mut map = serde_json::Map::new();
