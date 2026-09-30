@@ -54,7 +54,7 @@ fn stale_threshold(slot: &AgentSlot) -> Duration {
 
 /// Policy half of [`stale_threshold`], split from the registry lookup so caps
 /// combinations no registered source has YET are unit-testable with a synthetic
-/// [`SourceCaps`].
+/// [`SourceCaps`](crate::source::registry::SourceCaps).
 fn stale_threshold_with_caps(
     slot: &AgentSlot,
     caps: Option<crate::source::registry::SourceCaps>,
@@ -83,7 +83,7 @@ fn stale_threshold_with_caps(
 }
 
 /// Exactly the registry prefix (a `LabelDeriver`'s empty-cwd fallback) is a
-/// [`LabelProvenance::PrefixFallback`] the back-fill may still upgrade;
+/// [`LabelProvenance::PrefixFallback`](crate::state::LabelProvenance::PrefixFallback) the back-fill may still upgrade;
 /// anything else is a real display name. Judged at the mint, not at back-fill
 /// time — a bare-prefix Rename always lands on a slot whose source is already
 /// set, so the slot's prefix is the right yardstick.

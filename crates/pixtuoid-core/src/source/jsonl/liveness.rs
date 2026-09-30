@@ -103,7 +103,7 @@ impl ProbeSnapshot {
         ))
     }
 
-    /// The PURE join half of [`from_open_fds`], drivable with synthetic
+    /// The PURE join half of [`Self::from_open_fds`], drivable with synthetic
     /// `(pid, path)` pairs.
     pub(crate) fn from_open_fd_pairs(
         root: &Path,

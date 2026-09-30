@@ -1,5 +1,5 @@
 //! The glass room partition's look, pixel-free: what the glass does to
-//! each cell of a [`WallPiece`](crate::layout::WallPiece)'s box. Both painters
+//! each cell of a [`WallPiece`]'s box. Both painters
 //! walk their own grid over that box and ask it, so the glass is one design
 //! drawn at two densities.
 //!
