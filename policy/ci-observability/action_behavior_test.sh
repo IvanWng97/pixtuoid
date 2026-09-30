@@ -94,8 +94,15 @@ api)
         esac
     done
     case "$path" in
-    repos/owner/repo/pulls/42) jq -n -r --arg sha "$FAKE_PR_HEAD" "{head: {sha: \$sha}} | $jq_expr" ;;
-    repos/owner/repo/pulls/42/files) jq -r "$jq_expr" <<<"$FAKE_PR_FILES" ;;
+    repos/owner/repo/pulls/42)
+        sha=$FAKE_PR_HEAD
+        [[ -z "$FAKE_HEAD_AFTER_FILES" || ! -e "$POSTED_THREADS.files-read" ]] || sha=$FAKE_HEAD_AFTER_FILES
+        jq -n -r --arg sha "$sha" "{head: {sha: \$sha}} | $jq_expr"
+        ;;
+    repos/owner/repo/pulls/42/files)
+        touch "$POSTED_THREADS.files-read"
+        jq -r "$jq_expr" <<<"$FAKE_PR_FILES"
+        ;;
     repos/owner/repo/pulls/42/comments)
         posts=$(($(cat "$POSTED_THREADS.count" 2>/dev/null || echo 0) + 1))
         echo "$posts" >"$POSTED_THREADS.count"
@@ -134,10 +141,11 @@ run_publisher() {
     local review_json="$1"
     local fake_head="${2:-abc123}"
     local expected_head="${3:-abc123}"
-    rm -f "$posted_threads" "$posted_threads.count" "$published_comment"
+    rm -f "$posted_threads" "$posted_threads".{count,files-read} "$published_comment"
     PATH="$fake_bin:$PATH" \
         FAKE_PR_HEAD="$fake_head" \
-        FAKE_PR_FILES="$pr_files" \
+        FAKE_PR_FILES="${PR_FILES:-$pr_files}" \
+        FAKE_HEAD_AFTER_FILES="${FAKE_HEAD_AFTER_FILES:-}" \
         FAKE_FAIL_POST="${FAKE_FAIL_POST:-}" \
         POSTED_THREADS="$posted_threads" \
         PUBLISHED_COMMENT="$published_comment" \
@@ -204,6 +212,12 @@ assert_threads 'length == 2 and all(.[]; .path == "src/a.rs" and .subject_type =
     "a finding outside the diff or on a removed file anchors to the first surviving file"
 assert_threads '.[1].body | split(" — ")[0][1:-1] == "gone.rs:1"' \
     "a finding on a removed file keeps its location"
+
+PR_FILES='[{"filename": "gone.rs", "status": "removed", "patch": "@@ -1,2 +0,0 @@\n-a\n-b"}]' \
+    run_publisher "$hostile_review" ||
+    fail "Claude publisher rejected findings on a diff that only removes files"
+assert_threads 'length == 2 and all(.[]; .path == "gone.rs" and .subject_type == "file")' \
+    "a diff that only removes files still anchors every finding on a changed file"
 jq -e -s --arg b "$hostile_body" '.[0].body | contains("docs/other.md:9") and contains($b)' \
     "$posted_threads" >/dev/null ||
     fail "Claude publisher did not carry hostile finding text literally: $(<"$posted_threads")"
@@ -225,6 +239,11 @@ if run_publisher "$in_diff_review" new-head old-head >/dev/null 2>&1; then
 fi
 [[ ! -e "$published_comment" && ! -e "$posted_threads" ]] ||
     fail "Claude publisher posted a stale review"
+
+FAKE_HEAD_AFTER_FILES=new-head run_publisher "$in_diff_review" >/dev/null 2>&1 &&
+    fail "Claude publisher accepted a head that moved while it read the files"
+[[ ! -e "$published_comment" && ! -e "$posted_threads" ]] ||
+    fail "Claude publisher posted threads anchored on a moved head's files"
 
 if run_publisher '{"summary":' >/dev/null 2>&1; then
     fail "Claude publisher accepted malformed JSON"

@@ -345,9 +345,9 @@ jobs:
                    + if $ranges and any($ranges[]; .[0] <= $f.line and $f.line <= .[1]) then
                        {path, line, side: "RIGHT"}
                      else
-                       # A path outside the diff, or removed by it, cannot hold
-                       # a thread, so the first surviving file carries it.
-                       {path: (if $ranges then .path else $live[0].filename end),
+                       # A path outside the diff goes on the first changed
+                       # file, preferring one that still exists.
+                       {path: (if $ranges then .path else ($live[0] // $files[0]).filename end),
                         subject_type: "file"}
                      end)}
             ' <<< "$REVIEW_JSON" > "$threads"
