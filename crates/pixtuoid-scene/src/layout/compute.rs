@@ -153,7 +153,7 @@ const fn couch_to_desk_extra(buf_h: u16) -> u16 {
 const COUCH_GAP_GROWTH_BASE_H: u16 = 60;
 
 /// A meeting room narrower than this can't host the sofa body with enough
-/// walkable margin for the coarse router ([`COARSE_CELL_SIZE`](super::COARSE_CELL_SIZE)) to reach the
+/// walkable margin for the coarse router ([`COARSE_CELL_SIZE`]) to reach the
 /// seats buried in it —
 /// find_path returns None and an idle agent sent there TELEPORTS. Below it the
 /// room degrades to bare floor.
