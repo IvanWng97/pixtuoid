@@ -57,7 +57,7 @@ def version_probes() -> dict[str, list[str]]:
     """The registry's OWN probes, read through `corpus_check --roster` column 5.
 
     A hand-copied table here shipped already missing `agy`, silently — the exact
-    "reuse an authority, never re-copy it" rule the root CLAUDE.md states. An
+    "reuse an authority, never re-copy it" rule the root AGENTS.md states. An
     unbuilt roster degrades to no version comparison rather than a wrong one.
     """
     if not ROSTER.is_file():

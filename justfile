@@ -4,18 +4,18 @@
 #
 # Recipes are grouped by intent (see `just --list`):
 #   rust     — build, test and lint the repo (Rust, shell, workflows), plus the
-#              release builds and the on-demand e2e / capture / fixture recipes
+#              on-demand e2e / capture / fixture recipes
 #   site     — the Astro landing page under site/ (npm, its own CI)
 #   gen      — regenerate + check committed artifacts
-#   release  — npm-check, the Node gate release.yml runs before npm publish (and
-#              ci-lint.yml's `npm-gen` job)
+#   release  — what release.yml builds and checks: the cross builds, the .deb,
+#              the version read, and the Node gates (npm-check)
 #   meta     — tooling setup, the local gate (preflight), the fixture
 #              gates, and the gates' selftests
 
-# Git Bash is preinstalled on GHA windows runners; keeps every recipe
-# single-sourced cross-platform (ci-tests.yml's windows jobs call recipes, never
-# inline commands).
-set windows-shell := ["bash", "-cu"]
+# One dialect on every platform: bash, strict. Git Bash is preinstalled on GHA
+# windows runners, so every recipe stays single-sourced cross-platform
+# (ci-tests.yml's windows jobs call recipes, never inline commands).
+set shell := ["bash", "-euo", "pipefail", "-c"]
 
 # Recipe arguments reach the shell as "$1".."$@", never as `{{ param }}`: an
 # interpolated value is re-parsed as shell code, so a quote or `$(...)` in it
@@ -40,6 +40,11 @@ PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
 # scalar in place — so adding a file here is not enough for embedded shell.
 SHELL_SOURCES := "scripts/lib/*.sh .githooks/* policy/ci-observability/*.sh"
 
+# The tools `lint` refuses to start without: `setup-tools` brew-installs the
+# first list and cargo-installs the second.
+LINT_BREW_TOOLS := "shfmt actionlint shellcheck zizmor yq jq check-jsonschema gitleaks"
+LINT_CARGO_TOOLS := "cargo-machete cargo-deny lychee"
+
 # The nightly the api-surface goldens are pinned to (rustdoc JSON is
 # nightly-only). Provisioned by `_api-toolchain`.
 API_NIGHTLY := "nightly-2026-07-22"
@@ -56,43 +61,45 @@ default:
 
 # ── rust ──────────────────────────────────────────────────────────
 
-# Format check only — fast, gates pre-commit.
+# Format check only — fast, gates pre-commit. The justfile has a canonical
+# format too (`just --fmt`), so it is checked with the Rust; just gives its
+# formatter no cross-version guarantee, so `setup-just` pins CI's just and a
+# local one on another version may disagree.
 [group('rust')]
 fmt-check:
     cargo fmt --all --check
+    just --fmt --check
 
 # Apply formatting in place.
 [group('rust')]
 fmt:
     cargo fmt --all
+    just --fmt
 
-# Shell-format check (shfmt) — the `.sh` analog of `fmt-check`, gated via `lint`.
 # Pairs with the shellcheck house rule: shellcheck lints, shfmt formats. `-i 4`
 # (4-space) matches the prevailing style; no `-ci` so case bodies stay
 # un-indented as written.
-[group('rust')]
 [doc('Shell-format check over repository shell sources')]
+[group('rust')]
 shfmt-check:
     shfmt -i 4 -d {{ SHELL_SOURCES }}
 
-# Apply shell formatting in place (the `.sh` analog of `fmt`).
-[group('rust')]
 [doc('Apply shfmt formatting in place over repository shell sources')]
+[group('rust')]
 shfmt-fix:
     shfmt -i 4 -w {{ SHELL_SOURCES }}
 
-[group('rust')]
 [doc('Run shellcheck over repository shell sources')]
+[group('rust')]
 shellcheck:
     shellcheck {{ SHELL_SOURCES }}
 
 # Lint the GitHub Actions workflows (actionlint): YAML schema, expression types,
 # action input/output names, runner labels, AND shellcheck over every `run:`
 # block (so a shell bug inside a workflow is caught at author time, not on a red
-# main). Gated via `lint`; the CI `hygiene` job runs it too. Needs shellcheck on
-# PATH for the run-block checks (the house-rule tool — already required).
-[group('rust')]
+# main). Needs shellcheck on PATH for the run-block checks.
 [doc('Lint the GitHub Actions workflows (actionlint + shellcheck over run: blocks)')]
+[group('rust')]
 actionlint:
     actionlint
 
@@ -101,8 +108,8 @@ actionlint:
 # ("jobs section is missing"). Shell that moves from a workflow into a composite
 # action therefore loses its shellcheck coverage silently. Pull each `run:` out
 # ourselves and check it with the same linter.
-[group('rust')]
 [doc('Shellcheck every run: block inside the composite actions (actionlint cannot parse action.yml)')]
+[group('rust')]
 actionlint-composites:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -145,10 +152,9 @@ actionlint-composites:
 # ref-or-SHA pin policy and every accepted finding is suppressed at its exact
 # source location with a WHY.
 # The operating MODE is env-derived, not chosen here, and the asymmetry is
-# deliberate: tokenless it runs OFFLINE (it says so on stderr) and skips the
-# four audits that need the GitHub API — impostor-commit,
-# known-vulnerable-actions, ref-confusion, stale-action-refs (typosquat-uses
-# still runs, at reduced confidence). ci-lint.yml's hygiene job passes
+# deliberate: tokenless it runs OFFLINE (it says so on stderr) and skips every
+# audit that needs the GitHub API (`RUST_LOG=debug zizmor` names each;
+# typosquat-uses still runs, at reduced confidence). ci-lint.yml's hygiene job passes
 # GH_TOKEN, so those DO gate in CI: there the recipe refuses to run tokenless.
 # Same call as `links` (--offline) and `deny` (advisories deferred to audit.yml): a
 # check whose verdict depends on the network and an upstream feed must not
@@ -156,19 +162,19 @@ actionlint-composites:
 # the gap — it puts a real token on the wire on every pre-push run and makes the
 # local gate depend on gh auth + API rate limits, the exact flakiness those two
 # siblings were written to avoid.
-[group('rust')]
 [doc('Audit GitHub automation security with zizmor')]
+[group('rust')]
 zizmor:
     @if [ -n "${GITHUB_ACTIONS:-}" ] && [ -z "${GH_TOKEN:-}" ]; then \
-        echo "error: zizmor would run offline in CI and skip its four online audits; give this step a GH_TOKEN" >&2; \
+        echo "error: zizmor would run offline in CI and skip its online audits; give this step a GH_TOKEN" >&2; \
         exit 1; \
     fi
     zizmor --strict-collection .
 
 # action_behavior_test.sh runs the workflows' own shell against stubs, which no
 # static contract can do.
-[group('rust')]
 [doc('Check the CI contracts actionlint and zizmor cannot see')]
+[group('rust')]
 ci-observability:
     bash policy/ci-observability/check.sh
     bash policy/ci-observability/action_behavior_test.sh
@@ -177,8 +183,8 @@ ci-observability:
 # consumer reads at runtime — the review schema reaches the Claude CLI, the
 # raycast ones pin the `--json` shape — and nothing else parses them: a broken
 # one is invisible until the consumer refuses to start.
-[group('rust')]
 [doc('Validate every committed JSON Schema against the metaschema (check-jsonschema)')]
+[group('rust')]
 json-schemas:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -189,13 +195,13 @@ json-schemas:
     echo "${#schemas[@]} JSON Schemas validated"
 
 # Offline link + anchor check (lychee) over the repo's OWN markdown: every
-# relative cross-link between the nested CLAUDE.md/AGENTS.md guides + docs/ must
+# relative cross-link between the nested AGENTS.md guides + docs/ must
 # resolve, and `#anchor` fragments must exist. Directory-walk mode respects
 # .gitignore (vendored node_modules etc. auto-skipped); `--offline` = no network,
 # so it's deterministic + flake-free. External-URL decay is deliberately NOT
-# gated here (it's flaky on the PR path). Gated via `lint`; CI `hygiene` runs it.
-[group('rust')]
+# gated here (it's flaky on the PR path).
 [doc('Offline link + anchor check (lychee) over the repo markdown — no network, .gitignore-aware')]
+[group('rust')]
 links:
     # Source CSS uses Vite package specifiers; its module graph belongs to the
     # site build, while this gate owns documentation links and anchors.
@@ -221,8 +227,8 @@ deny:
 # A PATH-valued env var read with `env::var` DROPS a non-UTF-8 value — a legal
 # path — and falls back to a different directory, silently. `--selftest` proves
 # the checker can FAIL.
-[group('rust')]
 [doc('Gate: PATH-valued env vars must be read as bytes, never via env::var')]
+[group('rust')]
 env-paths:
     python3 scripts/check-env-paths.py --selftest
     python3 scripts/check-env-paths.py
@@ -233,9 +239,9 @@ env-paths:
 arch:
     #!/usr/bin/env bash
     set -euo pipefail
-    # The backend-agnostic layers — neither may pull a terminal (ratatui/crossterm),
-    # window (winit/softbuffer), OR audio-device (rodio/cpal) crate; the binary's
-    # painters + audio gateway own those. The
+    # The backend-agnostic layers — neither may pull a terminal, window OR
+    # audio-device crate (the regex below is the list); the binary's painters +
+    # audio gateway own those. The
     # crate boundary already makes this a COMPILER fact; this pins it at the dep-tree
     # level too (a transitive pull-in via a feature would slip past the boundary).
     # `--target all` + `--all-features` are LOAD-BEARING, not thoroughness: cargo
@@ -252,7 +258,7 @@ arch:
         # which would print the green line without having checked anything.
         deps="$(cargo tree -p "$crate" --edges normal --prefix none --target all --all-features)"
         if grep -qE '^(ratatui|crossterm|winit|softbuffer|rodio|cpal)' <<<"$deps"; then
-            echo "ARCH VIOLATION: $crate depends on a terminal/window/audio-device crate (CLAUDE.md invariant #1)"; exit 1
+            echo "ARCH VIOLATION: $crate depends on a terminal/window/audio-device crate (AGENTS.md invariant #1)"; exit 1
         fi
     done
     echo "arch: pixtuoid-core + pixtuoid-scene are terminal/window/audio-device-free"
@@ -265,7 +271,7 @@ lint:
     # Fail fast with an actionable message when a lint tool is missing, instead
     # of a bare `command not found` (exit 127) buried in a parallel job's log.
     missing=()
-    for t in shfmt shellcheck actionlint zizmor check-jsonschema yq jq cargo-machete cargo-deny lychee gitleaks; do
+    for t in {{ LINT_BREW_TOOLS }} {{ LINT_CARGO_TOOLS }}; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -276,10 +282,10 @@ lint:
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
     run() { local n="$1"; shift; if "$@" >"$tmp/$n.log" 2>&1; then printf '  \033[32m✓ %s\033[0m\n' "$n"; else printf '  \033[31m✗ %s\033[0m\n' "$n"; cat "$tmp/$n.log"; return 1; fi; }
     pids=(); fail=0
-    run fmt     cargo fmt --all --check & pids+=($!)
+    run fmt     just fmt-check          & pids+=($!)
     run env-paths just env-paths        & pids+=($!)
     run genart  just gen-art-check       & pids+=($!)
-    run machete cargo machete           & pids+=($!)
+    run machete just machete            & pids+=($!)
     run deny    just deny                & pids+=($!)
     run arch    just arch                & pids+=($!)
     run shfmt   just shfmt-check         & pids+=($!)
@@ -299,10 +305,9 @@ lint:
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
-# Workspace tests — nextest if available (parallel + JUnit), else cargo test.
-# Extra args are forwarded: `just test reducer::` filters; preflight passes none.
-[group('rust')]
+# Extra args are forwarded: `just test reducer::` filters.
 [doc('Run the workspace tests (nextest if installed); forwards a filter')]
+[group('rust')]
 test *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -312,41 +317,36 @@ test *args:
         cargo test --workspace "$@"
     fi
 
-# Frame + wire benchmarks — LOCAL statistical numbers (criterion). CI's
-# bench.yml runs the same recipe on-demand, advisory-only: shared-runner
-# wall-clock is noise (criterion's own FAQ), so no benchmark ever gates.
-# `render_frame` costs a FRAME, `decode_reduce` costs an EVENT; codspeed.yml
-# instruments both. Filter forwards to both targets, and a filter matching
-# nothing in one of them is not an error: `just bench 360` runs every 360x240
-# case, `just bench hook` only the hook-transport fold.
-[group('rust')]
+# The filter forwards to both targets, and one matching nothing in a target is
+# not an error: `just bench 360` runs every 360x240 case, `just bench hook` only
+# the hook-transport fold.
 [doc('Render-path + wire-path criterion benchmarks; forwards a filter')]
+[group('rust')]
 bench *args:
     cargo bench -p pixtuoid-scene --bench render_frame -- "$@"
     cargo bench -p pixtuoid-core --bench decode_reduce -- "$@"
 
-# Feature-combination check — every feature subset must compile. Catches code
-# that silently only builds with `native` on (the wasm core builds without it).
-[group('rust')]
+# Catches code that silently only builds with `native` on (the wasm core builds
+# without it).
 [doc('Feature-powerset check — every feature subset must compile')]
+[group('rust')]
 hack:
     #!/usr/bin/env bash
     set -euo pipefail
     command -v cargo-hack &>/dev/null || { echo "error: cargo-hack not found — run \`just setup-tools\`" >&2; exit 1; }
     cargo hack --feature-powerset --no-dev-deps check --workspace
 
-# Cross-lint the workspace for Windows (clippy subsumes check; no linking).
 # Same toolchain gotcha as `api-surface` and `wasm-build`, and it bites HARDER
 # here because the compiler's own advice is wrong: a Homebrew cargo ahead of the
 # rustup proxy on PATH ships only the host std, so the cross-lint dies on E0463
 # "can't find crate for `core`" while suggesting `rustup target add
 # x86_64-pc-windows-msvc` for a target rustup already has. Prepending the proxy
 # (a no-op on CI, where it is already first) fixes it; the explicit preflight
-# then owns the genuinely-missing case with an accurate message. This is the
-# documented way to pre-verify a path-string change against `windows-test`,
-# which local preflight is otherwise blind to — so it has to actually run.
-[group('rust')]
+# then owns the genuinely-missing case with an accurate message. It catches
+# cfg(windows)-only compile and lint errors locally; a string path assert still
+# fails only in `windows-test`.
 [doc('Cross-lint the workspace for x86_64-pc-windows-msvc via clippy (no linking; ubuntu runner suffices)')]
+[group('rust')]
 check-windows:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -355,25 +355,22 @@ check-windows:
         || { echo "needs the target: rustup target add x86_64-pc-windows-msvc" >&2; exit 1; }
     cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings
 
-# Verify the workspace builds on the DECLARED MSRV (rust-version in Cargo.toml).
 # Catches a dep bump (or newer stdlib use) that silently raises the floor past
 # the version we advertise to crates.io consumers of pixtuoid-core. CI-only in
 # practice (installs a pinned toolchain + a full check), NOT in preflight.
 # Reads the version from Cargo.toml so there's one source of truth.
-[group('rust')]
 [doc('Check the workspace builds on the declared MSRV (rust-version in Cargo.toml)')]
+[group('rust')]
 msrv:
     #!/usr/bin/env bash
     set -euo pipefail
     msrv="$(grep -m1 '^rust-version' Cargo.toml | sed -E 's/.*"([0-9]+\.[0-9]+(\.[0-9]+)?)".*/\1/')"
     echo "declared MSRV: $msrv"
     rustup toolchain install "$msrv" --profile minimal --no-self-update >/dev/null 2>&1 || true
-    # Clear RUSTFLAGS so the DEFAULT linker is used. This gate verifies COMPILATION
-    # on the floor; the linker is irrelevant to MSRV. `.cargo/config.toml`'s
-    # `-fuse-ld=lld` perf flag (x86_64-linux only) needs lld, which a fresh
-    # minimal-toolchain build on the CI runner can't resolve — the cached perf
-    # jobs never re-link build scripts so they never hit it, but this no-cache
-    # gate links them fresh. (RUSTFLAGS env overrides target.*.rustflags wholesale.)
+    # Clear RUSTFLAGS so the default linker is used: this gate verifies
+    # COMPILATION on the floor and must not also require the lld that
+    # `.cargo/config.toml` pins for x86_64 Linux. (RUSTFLAGS env overrides
+    # target.*.rustflags wholesale.)
     RUSTFLAGS="" rustup run "$msrv" cargo check --workspace
 
 # Reproduce release-plz's semver verdict LOCALLY. Not a gate and not in CI:
@@ -381,10 +378,10 @@ msrv:
 # bump when it finds a break, so this exists only so a human can see the same
 # answer before dispatching. Needs network for the baseline crates, and
 # cargo-semver-checks on PATH (`cargo binstall cargo-semver-checks`).
-[group('rust')]
 [doc("Reproduce release-plz's semver verdict for the published crates (local, not a gate)")]
+[group('rust')]
 semver:
-    cargo semver-checks $(printf -- '--package %s ' {{PUBLISHED_CRATES}})
+    cargo semver-checks $(printf -- '--package %s ' {{ PUBLISHED_CRATES }})
 
 # Public-API surface snapshot for the PUBLISHED libraries. COMPLEMENTS
 # release-plz's own semver check: that answers "is the release bump enough?" on
@@ -394,40 +391,38 @@ semver:
 # `Into`/`Receiver`; auto-derived `Clone`/`Serialize`/… STAY, since
 # adding/removing a derive IS a public-API change). cargo-public-api takes one
 # crate per call, so a golden file is regenerated per crate. rustdoc JSON is
-# nightly-only, so both recipes PIN {{API_NIGHTLY}}. CI runs `api-surface-check`.
+# nightly-only, so it PINS `API_NIGHTLY`. `check` diffs instead of writing; CI
+# runs it as `api-surface-check`.
+[doc('Regenerate the api/<crate>.txt public-API goldens (cargo-public-api + pinned nightly); `check` diffs them')]
 [group('rust')]
-[doc('Regenerate the api/<crate>.txt public-API goldens (cargo-public-api + pinned nightly)')]
-api-surface: _api-toolchain
+api-surface mode="": _api-toolchain
     #!/usr/bin/env bash
     set -euo pipefail
+    mode="$1"
+    case "$mode" in
+    "") out=api ;;
+    check) out=$(mktemp -d); trap 'rm -rf "$out"' EXIT ;;
+    *) echo "usage: just api-surface [check]" >&2; exit 2 ;;
+    esac
     # cargo-public-api only honors RUSTUP_TOOLCHAIN when the invoked `cargo` is
     # the rustup PROXY. A Homebrew/system cargo ahead of it on PATH ignores the
     # env, so cargo-public-api falls back to rust-toolchain.toml's STABLE pin and
     # dies on `-Z` (nightly-only). Prepend the rustup bin so the proxy wins (a
     # no-op on CI, where it's already first).
     export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
-    for crate in {{PUBLISHED_CRATES}}; do
-        RUSTUP_TOOLCHAIN={{API_NIGHTLY}} cargo public-api -p "$crate" -s > "api/$crate.txt"
-    done
-
-[group('rust')]
-[doc("Fail if a published crate's public API drifted from the api/ goldens (CI-only)")]
-api-surface-check: _api-toolchain
-    #!/usr/bin/env bash
-    set -euo pipefail
-    # See `api-surface`: force the rustup proxy cargo so RUSTUP_TOOLCHAIN is honored.
-    export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
-    tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' EXIT
     fail=0
-    for crate in {{PUBLISHED_CRATES}}; do
-        RUSTUP_TOOLCHAIN={{API_NIGHTLY}} cargo public-api -p "$crate" -s > "$tmp/$crate.txt"
-        if ! diff -u "api/$crate.txt" "$tmp/$crate.txt"; then
+    for crate in {{ PUBLISHED_CRATES }}; do
+        RUSTUP_TOOLCHAIN={{ API_NIGHTLY }} cargo public-api -p "$crate" -s > "$out/$crate.txt"
+        if [ "$out" != api ] && ! diff -u "api/$crate.txt" "$out/$crate.txt"; then
             echo "error: public API of $crate drifted from api/$crate.txt — run 'just api-surface' and commit the update" >&2
             fail=1
         fi
     done
     exit "$fail"
+
+[doc("Fail if a published crate's public API drifted from the api/ goldens (CI-only)")]
+[group('rust')]
+api-surface-check: (api-surface "check")
 
 # Both halves of the goldens' reproducibility contract: refuse a mismatched
 # cargo-public-api, then self-provision the pinned nightly (rustdoc JSON is
@@ -446,10 +441,10 @@ _api-toolchain:
         echo "error: cargo-public-api $have installed, goldens need {{ API_PUBLIC_API }} (just setup-tools)" >&2
         exit 1
     fi
-    command -v rustup >/dev/null || { echo "rustup not found — install {{API_NIGHTLY}} manually for api-surface" >&2; exit 1; }
-    rustup toolchain list | grep -q '{{API_NIGHTLY}}' && exit 0
-    echo "installing {{API_NIGHTLY}} (api-surface needs nightly rustdoc JSON)…" >&2
-    rustup toolchain install {{API_NIGHTLY}} --profile minimal
+    command -v rustup >/dev/null || { echo "rustup not found — install {{ API_NIGHTLY }} manually for api-surface" >&2; exit 1; }
+    rustup toolchain list | grep -q '{{ API_NIGHTLY }}' && exit 0
+    echo "installing {{ API_NIGHTLY }} (api-surface needs nightly rustdoc JSON)…" >&2
+    rustup toolchain install {{ API_NIGHTLY }} --profile minimal
 
 # Doc-rendering gate. Two things `cargo build`/`clippy`/`nextest` can't see:
 # (1) build every item's docs, private ones included, with EVERY rustdoc
@@ -460,37 +455,37 @@ _api-toolchain:
 # classes are already `deny` in `[workspace.lints.rustdoc]`; `-D warnings` adds
 # bare URLs, invalid HTML, redundant links, and any future rustdoc lint; (2) RUN
 # the doctests — `cargo nextest` does NOT execute doctests, so the crate-root
-# examples would otherwise go ungated. CI-only in practice (a doc build + a doctest run).
-[group('rust')]
+# examples would otherwise go ungated. CI-only in practice (a doc build + a
+# doctest run).
 [doc('Doc gate: cargo doc (incl. private items) with -D warnings + run the doctests nextest skips (CI-only)')]
+[group('rust')]
 doc-check:
     #!/usr/bin/env bash
     set -euo pipefail
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --document-private-items
     cargo test --doc --workspace
 
-# Coverage + JUnit XML in one run — the exact command ci-tests.yml's coverage job uses.
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
 # profile. Writes lcov.info + target/nextest/ci/junit.xml.
-[group('rust')]
 [doc('Coverage + JUnit XML — the exact command ci-tests.yml runs (needs llvm-cov + nextest)')]
+[group('rust')]
 coverage:
     cargo llvm-cov nextest --workspace --lcov --output-path lcov.info --profile ci
 
-# Snapshot hygiene (cargo-insta): runs the suite under nextest and FAILS on a
+# Runs the suite under nextest and FAILS on a
 # pending (un-accepted `.snap.new`) OR unreferenced (orphan `.snap` — e.g. a
 # deleted test's leftover) snapshot. This is the gap plain `cargo test` misses:
 # a CHANGED snapshot already fails its own assertion, but an ORPHAN one rots
 # silently. CI-only in practice (a second full test run, like coverage) —
 # NOT in preflight; run it after adding/removing an insta-snapshot test. Needs
 # cargo-insta + cargo-nextest.
-[group('rust')]
 [doc('Snapshot hygiene (cargo-insta): fail on pending OR orphan snapshots — CI-only')]
+[group('rust')]
 snapshots:
     cargo insta test --check --unreferenced=reject --test-runner nextest --workspace
 
-# Mutation testing (cargo-mutants): inject bugs into the CHANGED lines and check
-# the tests catch them — the "do your assertions have TEETH?" dimension that
+# Injects bugs into the CHANGED lines and checks the tests catch them — the
+# "do your assertions have TEETH?" dimension that
 # line/region coverage can't see (a covered-but-toothless assertion). DIFF-scoped
 # (`--in-diff` vs `$MUTANTS_BASE`, default origin/main) so cost scales with the
 # change, not the whole tree; reads `.cargo/mutants.toml` (nextest + the
@@ -498,8 +493,8 @@ snapshots:
 # mutant is a hint to strengthen a test, not a merge gate. Run on a
 # reducer/decoder/layout PR; forwards args (e.g. `just mutants --list`). Needs
 # cargo-mutants + nextest.
-[group('rust')]
 [doc('Mutation-test the diff vs origin/main (cargo-mutants --in-diff) — advisory')]
+[group('rust')]
 mutants *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -519,7 +514,7 @@ mutants *args:
     # failure class this gate exists to remove, so it must not commit it.
     if ! listed=$(cargo mutants --in-diff target/mutants.diff --list 2>/dev/null); then
         echo "error: \`cargo mutants --list\` failed — the mutant count is unknown." >&2
-        echo "  Usually a missing cargo-mutants (\`just setup-tools\`) or an" >&2
+        echo "  Usually a missing cargo-mutants (\`cargo binstall cargo-mutants\`) or an" >&2
         echo "  unparseable .cargo/mutants.toml. Rerunning with stderr shown:" >&2
         cargo mutants --in-diff target/mutants.diff --list >/dev/null || true
         exit 1
@@ -541,21 +536,21 @@ mutants *args:
 # `{prompt}` expands to the shared scenario prompt; a custom one is a quoted arg.
 #   just capture-fixture cursor tool-run cursor-agent -p --trust '{prompt}'
 #   just capture-fixture kimi permission-flow "$SHELL"   # drive the TUI yourself
-[group('rust')]
 [doc('Record a conformance fixture from a real CLI run (BILLED — one model turn)')]
+[group('rust')]
 capture-fixture source scenario *cmd:
     cargo run --release -q -p pixtuoid-core --example capture_fixture -- "$@"
 
-[group('rust')]
 [doc('Strip every committed fixture of what no decoder reads, in place (local, unbilled)')]
+[group('rust')]
 restrip-fixtures:
     cargo run --release -q -p pixtuoid-core --example capture_fixture -- --strip-corpus
 
 # The corpus census, every transcript-bearing source in one pass — the drift half
 # of the pair: fixtures catch a decode regression, real bytes catch the wire
 # changing under us. Roster and roots both come from the registry.
-[group('rust')]
 [doc('Census every transcript-bearing source against its real local corpus')]
+[group('rust')]
 corpus-all:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -607,8 +602,8 @@ corpus-all:
 #   # sessions to hit the shape. Its codex samples are single .json objects,
 #   # which this recipe's *.jsonl glob does not admit.
 #   git clone --depth 1 https://github.com/daaain/claude-code-log /tmp/ccl && just fuzz claude-code /tmp/ccl/dev-docs/messages
-[group('rust')]
 [doc('Never-panic fuzz a source decoder over a JSONL corpus dir: just fuzz claude-code ~/.claude/projects')]
+[group('rust')]
 fuzz source dir:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -622,13 +617,18 @@ fuzz source dir:
     cargo build --release --example decoder_fuzz -p pixtuoid-core
     find "$dir" -name '*.jsonl' -print0 | xargs -0 cat | ./target/release/examples/decoder_fuzz "$source"
 
+[doc('Report recorded fixtures whose CLI has moved on (advisory, exit 3 = stale)')]
+[group('rust')]
+fixture-age *args:
+    python3 scripts/fixture-age.py "$@"
+
 # Hermetic OpenClaw daemon live-e2e: drives the REAL shim with crafted gateway
 # envelopes on an isolated socket and asserts the lobster's
 # idle/busy/degraded/down via the headless `daemons=` line. Zero gateway, zero
 # model calls. Same on-demand local tier as `fuzz` — it needs a release build
 # and an ExitWatch backend (macOS kqueue / Linux pidfd), so it is not a CI gate.
-[group('rust')]
 [doc('Hermetic OpenClaw daemon live-e2e (needs `just build --release`)')]
+[group('rust')]
 openclaw-e2e:
     scripts/lib/tier-openclaw-hermetic.sh
 
@@ -637,9 +637,9 @@ openclaw-e2e:
 # `openclaw@<port>` row per gateway, instance-local death, and OpenClaw's OWN
 # `plugins list` confirming our plugin loads. Zero model calls, zero account
 # footprint, but it needs a real `openclaw` on PATH — same on-demand local tier
-# as `openclaw-e2e`. Ports are forwarded (default: four consecutive ones).
-[group('rust')]
+# as `openclaw-e2e`. Ports are forwarded (default: the script's `PORTS`).
 [doc('Multi-gateway live-e2e against the REAL openclaw CLI (needs `just build --release`)')]
+[group('rust')]
 openclaw-multi-e2e *ports:
     scripts/lib/tier-openclaw-multi.sh "$@"
 
@@ -649,23 +649,23 @@ openclaw-multi-e2e *ports:
 # connect) and it bills a turn — recipe exists so the script has an invocation
 # site and cannot silently rot on a summary-format change, NOT because it should
 # be run casually.
-[group('rust')]
 [doc('OpenClaw + claude-cli backend live-e2e — REAL gateway AND one BILLED model turn')]
+[group('rust')]
 openclaw-backend-e2e:
     scripts/lib/tier-openclaw-backend.sh
 
 # The broadest tier: launches each installed agent CLI non-interactively and
 # asserts ITS badge renders. One real model turn PER CLI, on each provider's own
 # account — the only proof a real CLI's real output reaches a real sprite.
-[group('rust')]
 [doc('Live multi-source e2e — every installed agent CLI, one BILLED turn each')]
+[group('rust')]
 live-sources *ids:
     scripts/lib/tier-live-sources.sh "$@"
 
 # Replays a captured rollout through the FULL headless path — real watcher, real
 # socket, only the input is fixed.
-[group('rust')]
 [doc('Replay a captured rollout fixture through a hermetic headless run')]
+[group('rust')]
 replay fixture delay="3":
     scripts/lib/tier-replay.sh "$@"
 
@@ -673,75 +673,23 @@ replay fixture delay="3":
 #   just build                                # debug
 #   just build --release                      # release
 #   just build --release --bins --examples    # what ci-tests.yml's smoke job builds
-[group('rust')]
 [doc('Compile the workspace; forwards args (e.g. --release --bins --examples)')]
+[group('rust')]
 build *args:
     cargo build --workspace "$@"
-
-# packaging-build/action.yml keeps its own just-free parse of the same line —
-# that composite deliberately never installs just (see ci-builds.yml).
-[group('rust')]
-[doc("Print the workspace version — release.yml's tag check and release-plz.yml's tag assertion read it")]
-workspace-version:
-    @grep -m1 '^version' Cargo.toml | cut -d'"' -f2
-
-# Cross-compile a release build for ONE target triple (release.yml's build
-# matrix). Pass `true` for targets that need the Docker-backed `cross` toolchain
-# (CI installs it via taiki-e/install-action@cross); anything but true/false
-# fails loudly (the case below).
-[group('rust')]
-[doc('Cross-compile a release for ONE target triple (release.yml build matrix)')]
-build-target target cross="false":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    target="$1"
-    use_cross="$2"
-    # Anything but the two legal words means the caller's positional args
-    # shifted, so fail loudly rather than infer "not true, so cargo".
-    case "$use_cross" in
-    true | false) ;;
-    *)
-        echo "error: cross must be 'true' or 'false', got '$use_cross' (positional args shifted?)" >&2
-        exit 1
-        ;;
-    esac
-    # Every LINUX artifact drops `audio` (musl can't link ALSA statically; the
-    # aarch64 cross image has no ALSA headers), so prebuilt Linux binaries ship
-    # SILENT and Linux audio is a from-source feature (#633; see
-    # docs/CONFIGURATION.md). Every other default feature rides `portable`
-    # (pixtuoid's Cargo.toml). Derived here, not passed: the flags are a
-    # property of the target. $flags stays UNQUOTED below — quoting the empty
-    # non-Linux case would pass cargo an empty positional arg.
-    flags=""
-    case "$target" in
-    *linux*) flags="--no-default-features --features portable" ;;
-    esac
-    if [ "$use_cross" = "true" ]; then
-        cross build --release --target "$target" $flags
-    else
-        cargo build --release --target "$target" $flags
-    fi
-
-# Package the .deb for ONE already-built target (release.yml's deb job, hence
-# --no-build). Needs cargo-deb (CI installs it via taiki-e/install-action@cargo-deb).
-[group('rust')]
-[doc('Package the .deb for ONE already-built target (release.yml deb job)')]
-deb target:
-    cargo deb -p pixtuoid --no-build --no-strip --target "$1"
-    cargo deb -p pixtuoid-hook --no-build --no-strip --target "$1"
 
 # ── site ──────────────────────────────────────────────────────────
 # The Astro landing page — a self-contained Node project under site/ with its
 # own CI (.github/workflows/site.yml). See site/README.md.
 
-[group('site')]
 [doc('Install the site npm deps + the e2e browser (run once per clone)')]
+[group('site')]
 site-setup:
     npm --prefix site ci
     npx --prefix site playwright install chromium chromium-headless-shell
 
-[group('site')]
 [doc('Site dev server with HMR → http://localhost:4321/ (foreground; agents: site-dev-bg)')]
+[group('site')]
 site-dev:
     npm --prefix site run dev
 
@@ -752,48 +700,49 @@ site-dev:
 # the astro bin is called directly like playwright.config.ts does (same cwd, no
 # npm wrapper layer). NOTE: dev and preview share port 4321 — stop the daemon
 # (site-dev-stop) before `just site-e2e`, or its webServer spawn fails loud.
-[group('site')]
 [doc('Dev server as a background daemon (survives stdin EOF) — waits on /_astro/status; stop: just site-dev-stop')]
+[group('site')]
 site-dev-bg:
     #!/usr/bin/env sh
     set -eu
     cd site
     node node_modules/astro/bin/astro.mjs dev --background
-    # 60 × 0.5s = 30s readiness budget
-    for _ in $(seq 1 60); do
+    tries=60 step=0.5
+    for _ in $(seq 1 "$tries"); do
         if curl -fsS -m 2 http://localhost:4321/_astro/status >/dev/null 2>&1; then
             echo "ready → http://localhost:4321/  (logs: cd site && npx astro dev logs --follow)"
             exit 0
         fi
-        sleep 0.5
+        sleep "$step"
     done
-    echo "site-dev-bg: daemon started but /_astro/status not ready after 30s" >&2
+    echo "site-dev-bg: daemon started but /_astro/status not ready after $tries polls, ${step}s apart" >&2
     exit 1
 
-[group('site')]
 [doc('Stop the background dev server (astro dev stop; no-op if none is running)')]
+[group('site')]
 site-dev-stop:
     cd site && node node_modules/astro/bin/astro.mjs dev stop
 
+[doc('Site static tier: `npm run verify` (site/package.json owns the steps; site CI adds e2e + lighthouse)')]
 [group('site')]
-[doc('Site static tier: format-check → lint → astro check → knip → unit tests → build → check:docs → audit (site CI runs e2e + lighthouse before the audit)')]
 site-check:
     npm --prefix site run verify
 
-[group('site')]
 [doc('Auto-format the site')]
+[group('site')]
 site-fmt:
     npm --prefix site run format
 
-[group('site')]
 [doc('E2E smoke suite vs the PRODUCTION build (astro preview) — the runtime-contract gate')]
+[group('site')]
 site-e2e:
     #!/usr/bin/env sh
     set -eu
     cd site
     # deterministic ★ count for the whole suite (config/gh-stars.mjs GH_STARS_OVERRIDE
     # seam) — an unauthenticated build would otherwise rate-limit to null and hide
-    # the star chip, silently no-op-ing its e2e assertion.
+    # the star chip, silently no-op-ing its e2e assertion. The value must equal
+    # the count smoke.spec.ts asserts, and site.yml sets the same one for CI.
     export GH_STARS_OVERRIDE=842
     npm run build
     npx playwright test
@@ -802,25 +751,24 @@ site-e2e:
 # Regenerate the committed artifacts that derive from a single source of truth,
 # and check the committed copies (each `*-check` header says against what).
 
-[group('gen')]
 [doc('Regenerate the committed art (generated sprites + icons + README sections + docs images + site demos)')]
+[group('gen')]
 gen: gen-art gen-icons gen-media gen-readme
 
-[group('gen')]
 [doc("Regenerate the bundled pack's generated sprites (every @Nx variant + the 1x pieces it owns) from scripts/gen-art.py")]
+[group('gen')]
 gen-art:
     python3 scripts/gen-art.py crates/pixtuoid-scene/sprites/default
 
 # Stdlib-only, so `lint` runs it without the venv `gen-check` needs.
-[group('gen')]
 [doc('Fail if a committed generated sprite differs from what scripts/gen-art.py draws')]
+[group('gen')]
 gen-art-check:
     python3 scripts/gen-art.py --selftest
     python3 scripts/gen-art.py --check crates/pixtuoid-scene/sprites/default
 
-# Sync the README's install/features/tools sections from site/src/*.json.
-[group('gen')]
 [doc('Sync README install/features/tools sections from site/src/*.json')]
+[group('gen')]
 gen-readme:
     node scripts/gen-readme.mjs
 
@@ -831,29 +779,38 @@ gen-readme:
 # the raycast CI's `gen:contract` diff) FAIL until you run this — so the Rust
 # producer and the TS consumer can't hand-drift. Needs raycast deps installed
 # (`npm --prefix integrations/raycast ci`).
-[group('gen')]
 [doc('Regenerate the --json contract: the SourceStatus + OutcomeRow JSON Schemas (Rust) + the Raycast TS types')]
+[group('gen')]
 gen-contract:
     UPDATE_CONTRACT_SCHEMA=1 cargo test -p pixtuoid --lib schema_matches_the_committed_contract
     npm --prefix integrations/raycast run gen:contract
 
-# Fail if the committed README drifted from site/src/{features,sources,install}.json.
-# Pure node:builtins — no npm ci. ci-lint.yml's `readme` job runs this,
-# and gen-check composes it.
+# Regenerate the committed drift-surface fragments — what each crate declares it
+# READS (pixtuoid-core) and REGISTERS (pixtuoid). `check_upstream_drift.py` reads
+# these instead of parsing our Rust, so a rename must be re-emitted or the watch
+# narrows. The gate is the crates' own tests, which fail on a stale file; this is
+# just the writer.
+[doc('Regenerate crates/*/drift-surface.json after changing a decoded/registered name')]
 [group('gen')]
+gen-drift-surface:
+    UPDATE_DRIFT_SURFACE=1 cargo test -p pixtuoid-core --lib drift_surface
+    UPDATE_DRIFT_SURFACE=1 cargo test -p pixtuoid --lib drift_surface
+
+# Pure node:builtins — no npm ci.
 [doc('Fail if the committed README drifted from site data (features/sources/install.json)')]
+[group('gen')]
 gen-readme-check:
     node scripts/gen-readme.mjs --check
 
 # Args are forwarded; scripts/gen-media.py's docstring owns the jobs, flags and
 # toolchain.
-[group('gen')]
 [doc('Regenerate docs/images/ + site/public/demos/ from scripts/media.json')]
+[group('gen')]
 gen-media *args:
     .venv/bin/python3 scripts/gen-media.py "$@"
 
-[group('gen')]
 [doc('Regenerate site/src/assets/pix-icons/ from the embedded sprite-pack palette')]
+[group('gen')]
 gen-icons:
     .venv/bin/python3 scripts/gen-pix-icons.py
 
@@ -863,8 +820,8 @@ gen-icons:
 # has NO wasm32 std — and even `rustup run stable cargo` fails because cargo
 # resolves `rustc` via PATH. So the recipe prepends the RUSTUP toolchain bin (via
 # `rustup which`) and invokes that cargo explicitly.
-[group('gen')]
 [doc('Compile pixtuoid-web for wasm32 (the size-tuned wasm-release profile) — shared by gen-wasm + CI wasm-check')]
+[group('gen')]
 wasm-build:
     #!/usr/bin/env sh
     set -eu
@@ -887,12 +844,11 @@ gen-wasm-tools:
     command -v wasm-bindgen >/dev/null || { echo "needs wasm-bindgen-cli: cargo install wasm-bindgen-cli --locked"; exit 1; }
     command -v wasm-opt >/dev/null || { echo "needs wasm-opt: brew install binaryen"; exit 1; }
 
-# Build the live-office wasm module (pixtuoid-web) + its JS glue into
-# site/public/wasm/ — a COMMITTED artifact (like public/demos/), so the site CI
+# site/public/wasm/ is a COMMITTED artifact (like public/demos/), so the site CI
 # stays Node-only. The compile itself is the shared `wasm-build` recipe; the
 # gen-only tools are checked first via the gen-wasm-tools pre-dep (fail-fast).
-[group('gen')]
 [doc('Build pixtuoid-web (wasm) + JS glue into site/public/wasm/')]
+[group('gen')]
 gen-wasm: gen-wasm-tools wasm-build
     #!/usr/bin/env sh
     set -eu
@@ -914,11 +870,9 @@ gen-wasm: gen-wasm-tools wasm-build
 # the GZIPPED size, because the wire cost is what the poster is hiding.
 # Raw is REPORTED, never gated as wire: the runner prices the wasm gzipped, as
 # GitHub Pages ships it (`startPagesLikeProxy`), so site/lighthouserc.json sees raw
-# growth only as parse/compile cost (total-blocking-time and
-# user-timings:pixtuoid-revealed, `error`-level; site.yml fires on site/**, where
-# the wasm lives). WIRE cost is gated twice on purpose — here, naming the wasm,
-# and there via `interactive`/`largest-contentful-paint`, byte budgets under
-# simulated throttling sized to admit a wasm AT this cap. The cap is growth
+# growth only as parse/compile cost (its CPU-time assertions). WIRE cost is gated
+# twice on purpose — here, naming the wasm, and there via its byte budgets under
+# simulated throttling, sized to admit a wasm AT this cap. The cap is growth
 # budget for the scene the hero runs, not a margin over today's payload, so a
 # regression shows as the printed gap shrinking, not as a red. Pair (#424): the
 # wasm-bindgen JS glue's ABI must match the exact .wasm it was generated with;
@@ -929,13 +883,13 @@ gen-wasm: gen-wasm-tools wasm-build
 # stable, so local `just gen-wasm` + review is the freshness authority. Nothing
 # here reads a scene/core/web source, so a merge that skips `just gen-wasm`
 # ships a stale hero with every gate green; the compensating control is root
-# CLAUDE.md's "Build & test" gen-wasm note, not this recipe.
+# AGENTS.md's "Build & test" gen-wasm note, not this recipe.
 # No input-hash stamp: pixtuoid-core's `native` source runtime is code the wasm
 # never links, so a stamp would demand a wasm regen on changes that cannot alter
 # it. That reason does not cover scene or web, where any change can move the
 # wasm (panic locations carry line numbers); gating those is an open owner call.
-[group('gen')]
 [doc('Fail if the committed wasm pair is missing, over the size cap, or hash-mismatched')]
+[group('gen')]
 gen-wasm-check:
     #!/usr/bin/env sh
     set -eu
@@ -976,16 +930,13 @@ gen-wasm-check:
     done
     echo "gen-wasm-check OK: $W ($WIRE bytes gzipped <= $CAP), pair manifest verified"
 
-# Drift gate: fail if anything `just gen` writes is stale, or the committed wasm
-# pair is broken (`gen-wasm-check`).
-# Pixel-diffs every PNG (threshold 0); video clips + demo.gif are presence-only
-# (ffmpeg/gifsicle bytes aren't stable cross-version, but the renders feeding
-# them ARE pixel-deterministic). Run by ci-tests.yml's smoke job; runnable locally
+# scripts/gen-media.py's docstring says what `--check` compares. Run by
+# ci-tests.yml's smoke job; runnable locally
 # before pushing a visual change. A red check after an INTENTIONAL office change
 # means: run `just gen` and commit everything it rewrote in the same change.
 # Requires the .venv + ffmpeg + node; it builds the examples it renders with.
-[group('gen')]
 [doc('Fail if anything `just gen` writes has drifted, or the wasm pair is broken')]
+[group('gen')]
 gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check gen-art-check
     #!/usr/bin/env sh
     set -eu
@@ -994,6 +945,57 @@ gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check 
     .venv/bin/python3 scripts/gen-pix-icons.py --check
 
 # ── release ───────────────────────────────────────────────────────
+
+# packaging-build/action.yml keeps its own just-free parse of the same line —
+# that composite deliberately never installs just (see ci-builds.yml).
+[doc("Print the workspace version — release.yml's tag check and release-plz.yml's tag assertion read it")]
+[group('release')]
+workspace-version:
+    @grep -m1 '^version' Cargo.toml | cut -d'"' -f2
+
+# Pass `true` for targets that need the Docker-backed `cross` toolchain
+# (CI installs it via taiki-e/install-action@cross); anything but true/false
+# fails loudly (the case below).
+[doc('Cross-compile a release for ONE target triple (release.yml build matrix)')]
+[group('release')]
+build-target target cross="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target="$1"
+    use_cross="$2"
+    # Anything but the two legal words means the caller's positional args
+    # shifted, so fail loudly rather than infer "not true, so cargo".
+    case "$use_cross" in
+    true | false) ;;
+    *)
+        echo "error: cross must be 'true' or 'false', got '$use_cross' (positional args shifted?)" >&2
+        exit 1
+        ;;
+    esac
+    # Every LINUX artifact drops `audio` (musl can't link ALSA statically; the
+    # aarch64 cross image has no ALSA headers), so prebuilt Linux binaries ship
+    # SILENT and Linux audio is a from-source feature (#633; see
+    # docs/CONFIGURATION.md). Every other default feature rides `portable`
+    # (pixtuoid's Cargo.toml). Derived here, not passed: the flags are a
+    # property of the target. $flags stays UNQUOTED below — quoting the empty
+    # non-Linux case would pass cargo an empty positional arg.
+    flags=""
+    case "$target" in
+    *linux*) flags="--no-default-features --features portable" ;;
+    esac
+    if [ "$use_cross" = "true" ]; then
+        cross build --release --target "$target" $flags
+    else
+        cargo build --release --target "$target" $flags
+    fi
+
+# `--no-build`: the target is already built by `build-target`. Needs cargo-deb
+# (CI installs it via taiki-e/install-action@cargo-deb).
+[doc('Package the .deb for ONE already-built target (release.yml deb job)')]
+[group('release')]
+deb target:
+    cargo deb -p pixtuoid --no-build --no-strip --target "$1"
+    cargo deb -p pixtuoid-hook --no-build --no-strip --target "$1"
 
 # The repo's NODE-side gate (no cargo): the npm package generator AND the bundled
 # OpenClaw plugin contract.
@@ -1006,8 +1008,8 @@ gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check 
 #     gateway / never forward content / always stamp the gateway identity) is
 #     actually EXECUTED.
 # NOT in preflight: a Rust pre-push shouldn't require a Node toolchain. Needs Node ≥ 22.
-[group('release')]
 [doc('Node gates: the npm package generator + the OpenClaw plugin contract (CI + release; not in preflight)')]
+[group('release')]
 npm-check:
     node --test npm/generate.test.mjs scripts/openclaw-plugin.test.mjs
 
@@ -1018,8 +1020,8 @@ npm-check:
 # suite on one shared machine. `full` adds the feature powerset and the tests —
 # the Rust recipes CI's lint/clippy/hack/test jobs run; what it still can't see
 # is in CONTRIBUTING.md#ci-gates.
-[group('meta')]
 [doc('Local gate: lint → clippy; `full` = lint → clippy → hack → test')]
+[group('meta')]
 preflight mode="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1032,8 +1034,8 @@ preflight mode="":
 
 # Install the dev tools every check + recipe relies on (idempotent). Prefers
 # cargo-binstall (prebuilt) and falls back to cargo install (compiles).
-[group('meta')]
 [doc('Install the dev tools the checks + recipes need (idempotent)')]
+[group('meta')]
 setup-tools:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1041,7 +1043,7 @@ setup-tools:
     # cargo-edit: `cargo set-version --workspace` raises a release PR's version
     # by hand for a break cargo-semver-checks cannot see
     # (docs/CONTRIBUTING.md#releasing).
-    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-edit cargo-insta lychee cargo-public-api@{{ API_PUBLIC_API }})
+    tools=(cargo-nextest {{ LINT_CARGO_TOOLS }} cargo-hack cargo-edit cargo-insta cargo-public-api@{{ API_PUBLIC_API }})
     if command -v cargo-binstall &>/dev/null; then
         cargo binstall -y "${tools[@]}"
     else
@@ -1059,13 +1061,10 @@ setup-tools:
         rustup component add rust-analyzer >/dev/null 2>&1 ||
             echo "could not add the rust-analyzer component — install it for LSP support" >&2
     fi
-    # Non-cargo lint tools `just lint` refuses to start without: shfmt/shellcheck
-    # cover the shell sources, actionlint/zizmor the workflows, yq + jq the CI
-    # contracts, check-jsonschema the schemas. brew on macOS. gitleaks backs
-    # `just fixture-pii`, a REQUIRED gate: without it on PATH the recipe cannot
-    # run at all (it does not degrade to a weaker scan, because a weaker scan is
-    # what it replaced).
-    for t in shfmt actionlint shellcheck zizmor yq jq check-jsonschema gitleaks; do
+    # `LINT_BREW_TOOLS`, via brew. gitleaks is among them because `just
+    # fixture-pii` is a REQUIRED gate that does not degrade to a weaker scan
+    # without it (a weaker scan is what it replaced).
+    for t in {{ LINT_BREW_TOOLS }}; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
             brew install "$t" || true
@@ -1073,10 +1072,9 @@ setup-tools:
     done
     # Re-verify AFTER the install attempts: a `brew install` that exits 0 without
     # putting the binary on PATH (transient failure), or no brew at all, must be
-    # caught here — not silently pass as a successful setup (the #283-class silent
-    # no-op this recipe is meant to prevent).
+    # caught here — not silently pass as a successful setup.
     missing=()
-    for t in shfmt actionlint shellcheck zizmor yq jq check-jsonschema gitleaks; do
+    for t in {{ LINT_BREW_TOOLS }}; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -1088,17 +1086,17 @@ setup-tools:
     # so a skipped local hook still meets them at merge.
     git config core.hooksPath .githooks
 
-# The size gate's own negative control, because nothing else can be one: the
-# justfile is outside SHELL_SOURCES, so shellcheck never reads a recipe body, and
-# a size cap that stops measuring reports success for any artifact at all. This
-# pins the FAIL-OPEN class specifically — the pipe hazard gen-wasm-check's gzip
+# The size gate's own negative control: a size cap that stops measuring reports
+# success for any artifact at all, which no linter can see. This pins the
+# FAIL-OPEN class specifically — the pipe hazard gen-wasm-check's gzip
 # step is written around: driving the real recipe with a gzip that exits 1 must
 # red it.
 # Not covered, deliberately: the over-cap and empty-artifact arms, which would
 # have to mutate the committed wasm to exercise. Their failures are loud; the
 # fail-open one is the silent class worth a test.
-[group('meta')]
 [doc('Self-test the wasm size gate: prove it still reds when its measurement breaks')]
+[group('meta')]
+[private]
 wasm-check-selftest:
     #!/usr/bin/env sh
     set -eu
@@ -1118,8 +1116,8 @@ wasm-check-selftest:
 # always-green comparator reports success for any render at all. Its own recipe
 # because it needs only Pillow, while `gen-check` needs the toolchain its header
 # lists: a developer who cannot run that gate should still be able to run this.
-[group('meta')]
 [doc('Self-test the pixel comparator that gen-check and smoke ride on')]
+[group('meta')]
 compare-selftest:
     #!/usr/bin/env sh
     set -eu
@@ -1128,32 +1126,20 @@ compare-selftest:
     if [ -x .venv/bin/python3 ]; then py=.venv/bin/python3; else py=python3; fi
     "$py" scripts/compare-screenshots.py --selftest
 
-# Regenerate the committed drift-surface fragments — what each crate declares it
-# READS (pixtuoid-core) and REGISTERS (pixtuoid). `check_upstream_drift.py` reads
-# these instead of parsing our Rust, so a rename must be re-emitted or the watch
-# narrows. The gate is the crates' own tests, which fail on a stale file; this is
-# just the writer.
-[group('gen')]
-[doc('Regenerate crates/*/drift-surface.json after changing a decoded/registered name')]
-gen-drift-surface:
-    UPDATE_DRIFT_SURFACE=1 cargo test -p pixtuoid-core --lib drift_surface
-    UPDATE_DRIFT_SURFACE=1 cargo test -p pixtuoid --lib drift_surface
-
-# Self-test the upstream-drift watcher — its ONLY test. A regex-parser regression
-# is a silent monitor death (the script returns empty / raises, the weekly job
-# alarms on junk or watches nothing); this pins the parsers + the fetch
-# classifier. Pure Python, no deps, no network.
-[group('meta')]
+# The upstream-drift watcher's ONLY test. A regex-parser regression is a silent
+# monitor death (the script returns empty / raises, the weekly job alarms on junk
+# or watches nothing). Pure Python, no deps, no network.
 [doc('Self-test the upstream-drift watcher (parsers + fetch classifier)')]
+[group('meta')]
 drift-selftest:
     python3 scripts/check_upstream_drift_selftest.py
 
 # The pty driver's pure halves — the ANSI stripper, the composer comparison, the
 # gate/menu wording. Each fails silently, at the price of a BILLED turn: a broken
 # stripper just stops matching, and the capture comes back empty blaming the
-# CLI. Runs in `lint`; CI's hygiene job enumerates it separately.
-[group('meta')]
+# CLI.
 [doc("Self-test the TUI capture driver's pure logic")]
+[group('meta')]
 tuidrive-selftest:
     python3 scripts/lib/tuidrive.py --selftest
 
@@ -1163,51 +1149,24 @@ tuidrive-selftest:
 # while printing nothing. The suite runs the unscrubbed form first and proves
 # it leaks, so a scrub that stopped scrubbing cannot pass. Hermetic: one
 # mktemp -d, no network, no real repo.
-[group('meta')]
 [doc("Self-test the git env scrub — the e2e helper and the pre-push hook")]
+[group('meta')]
 e2e-scrub-selftest:
     bash scripts/lib/e2e-common-selftest.sh
 
 # The README star chart's renderer — bitmap font, axes, paging. (Its copied
 # office colours are pinned from Rust: scene's `tests/readme_chart_palette.rs`.)
-# Runs in `lint`; CI's hygiene job enumerates it separately; the star-history
-# workflow runs it before each render.
-[group('meta')]
 [doc("Self-test the README star-chart renderer")]
+[group('meta')]
 star-history-selftest:
     python3 scripts/star-history.py --selftest
-
-
-# The capture-tree rules — every scenario declares what
-# fixtures/provenance.schema.json requires, and a recorded one's claims are
-# falsified by its own bytes. They are RUST TESTS (`tests/sources/captures.rs`)
-# and so already ride `just test` on all three platforms; this recipe is the
-# named entry point for a human who wants only this answer.
-#
-# They stay Rust: a Python rule would need its own copy of the capture walk kept
-# in step with `harness::captures`, and GitHub's Windows images ship `python.exe`
-# with no `python3` while no test job installs Python, so windows-test and
-# coverage-windows would red.
-[group('meta')]
-[doc("Assert every capture declares its provenance and its claims are falsifiable")]
-fixture-metadata:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    # A filter that matches NOTHING exits 0 having run no rule, so rename the
-    # module and this named gate passes vacuously — the class the file's own
-    # floors exist to prevent. Count what ran and require it.
-    out=$(cargo test -p pixtuoid-core --test sources captures:: -- --nocapture 2>&1) || { echo "$out"; exit 1; }
-    echo "$out"
-    ran=$(echo "$out" | sed -n 's/^test result: ok\. \([0-9]*\) passed.*/\1/p' | head -1)
-    [ "${ran:-0}" -gt 0 ] || { echo "fixture-metadata: the \`captures::\` filter matched no test — the module moved" >&2; exit 1; }
 
 # The recorder refuses a capture carrying its own identity, but that check runs
 # ONCE, on the capturer's terminal. This re-scans what is actually COMMITTED, so
 # a fixture added by hand, edited later, or captured before the check existed is
 # covered too. gitleaks, not a hand-rolled scanner: `.gitleaks.toml` says why.
-# Runs in `lint`; CI's hygiene job enumerates it separately.
-[group('meta')]
 [doc("Scan the committed fixture tree for secrets and the recorder's identity")]
+[group('meta')]
 fixture-pii:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1225,8 +1184,8 @@ fixture-pii:
 # the default global allowlist, and `fixture-pii` would still exit 0 — the exact
 # half-dead state this pair was split to prevent. Credential probes are assembled
 # at RUNTIME so no token-shaped literal is ever committed.
-[group('meta')]
 [doc('Prove the fixture-pii configs red on a leak and green on a legitimate path')]
+[group('meta')]
 fixture-pii-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1257,7 +1216,7 @@ fixture-pii-selftest:
     # allowlist waives it by substring.
     printf '{"api_key":"msg_%s"}\n' "Xq7RvN2bK9wLpT4mZs8cHf1jY6dQ3aGe0uVi5nBr" > "$d/probe/cred-disguised.txt"
     # The RESIDUAL, pinned so it is visible rather than assumed closed: a secret
-    # that lands INSIDE the wire id's own 20-32 length window still rides the
+    # that lands INSIDE the wire-id allowlist's own length window (`.gitleaks.toml`) still rides the
     # allowlist. Any shape-based waiver admits a secret wearing that shape; what
     # stops this class is `no_identity_key_holds_a_value_outside_a_pinned_exemption`,
     # which reads the committed bytes — and an exempt capture, being outside it, is
@@ -1295,12 +1254,3 @@ fixture-pii-selftest:
     done
     [ "$fail" -eq 0 ] || exit 1
     echo "fixture-pii-selftest: OK (each rule reds on its own probe, green on legitimate paths)"
-
-# Which recorded fixtures have drifted from the CLI that produced them — version
-# first (the sharp signal), age second. LOCAL and advisory: CI has none of these
-# CLIs to compare against, and a stale fixture is a re-capture candidate, not a
-# defect. Exit 3 = candidates found (the `corpus-all` convention).
-[group('rust')]
-[doc('Report recorded fixtures whose CLI has moved on (advisory, exit 3 = stale)')]
-fixture-age *args:
-    python3 scripts/fixture-age.py "$@"
