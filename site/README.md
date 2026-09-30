@@ -8,7 +8,7 @@ https://ivanwng97.github.io/pixtuoid/ redirects there).
 Self-contained: a Node project living in `site/`, independent of the Rust
 workspace. CI (`.github/workflows/site.yml`) runs the same checks as
 `npm run verify`; deploys run via `.github/workflows/pages.yml`. Agent notes,
-build-input coupling, and CSP details: [`CLAUDE.md`](CLAUDE.md). Generated
+build-input coupling, and CSP details: [`AGENTS.md`](AGENTS.md). Generated
 content and its sources: [`SINGLE-SOURCED.md`](SINGLE-SOURCED.md).
 
 ## Develop

@@ -924,7 +924,7 @@ fn paints_over_its_sitter(kind: FixtureKind) -> bool {
 fn sort_row(depth: Depth) -> u16 {
     match depth {
         Depth::Backdrop => 0,
-        Depth::Sorted(row) => row,
+        Depth::Sorted { row, .. } => row,
     }
 }
 
@@ -5829,7 +5829,7 @@ S B B B B B B S
             .fixtures()
             .find(|f| matches!(f.kind, FixtureKind::Desk(_)))
             .expect("a desk");
-        let Depth::Sorted(row) = desk.depth else {
+        let Depth::Sorted { row, .. } = desk.depth else {
             panic!("a desk sorts: {desk:?}");
         };
         let [(span, PieceKind::Desk { .. })] =

@@ -9,7 +9,7 @@ changes reviewer BEHAVIOR: a repo-specific trap whose obvious reading is
 wrong, a rule about what NOT to flag, or a verification act beyond reading
 the diff. Generic defect hunting (logic, races, error handling, unwrap,
 perf, design-debt judgment) is assumed — do it as on any codebase.
-Architecture invariants and house conventions live in `CLAUDE.md`, which
+Architecture invariants and house conventions live in `AGENTS.md`, which
 every reviewer reads first; don't restate them here. An issue# appears only
 where the rule would otherwise look arbitrary enough to get "fixed" away.
 
@@ -35,7 +35,7 @@ where the rule would otherwise look arbitrary enough to get "fixed" away.
   STAYS.
 - Version adjudication: does THIS diff move the public surface or ship a
   feature, and is the 0.x bump right (patch=fix, minor=feature/breaking)?
-- Comments follow CLAUDE.md's comment rules verbatim (WHY-only; the default
+- Comments follow AGENTS.md's comment rules verbatim (WHY-only; the default
   is fewer).
 
 ## Sweeps that must LEAVE the diff (a diff read can't see these)
@@ -80,7 +80,7 @@ where the rule would otherwise look arbitrary enough to get "fixed" away.
 ```
 You are reviewer 1/2 (correctness lens) for <PR/branch> on pixtuoid.
 Worktree: <path> (branch <name>, base <sha>). Diff: git -C <path> diff <base>..HEAD.
-Read CLAUDE.md first; read the actual code, not just the diff.
+Read AGENTS.md first; read the actual code, not just the diff.
 1. <change-specific claims to verify, one per line — from the impl-plan
    brief in the PR body when one shipped; a finding the plan never named is
    a plan-stage miss — flag it>
@@ -97,7 +97,7 @@ Read CLAUDE.md first; read the actual code, not just the diff.
 ```
 You are reviewer 2/2 (design lens) for <PR/branch> on pixtuoid.
 Worktree: <path>, read-only. Diff: git -C <path> diff <base>..HEAD.
-Read CLAUDE.md first. Judge as a demanding critic:
+Read AGENTS.md first. Judge as a demanding critic:
 1. <the design questions, one per line>
 2. Trace the two nearest consumers of every changed surface for
    contradiction; propose replacement text where you object.
@@ -119,7 +119,7 @@ quality lever is the change-specific `<...>` checklist, never the lens name.
 | Generated art / clips | Extract frames and READ them; census the money shot. |
 | Reducer / liveness / motion state machine | Trace the downstream interaction graph (rebind, sweeps, TTLs, polarity) + provenance of every newly-keyed signal. |
 | Public-facing rendered artifact | DRIVE the built page and MEASURE: WCAG in every interactive state, mobile pan, no-JS (#455: state-sweep, not spot-check). |
-| Every diff (this row always fires) | The whole-file comment audit: for EVERY file the diff touches — a one-line change included — read the file's ENTIRE comment population against the CODE and CLAUDE.md's comment rules (accuracy/value/rot/vestigial/self-repetition; one home per story — echoes become references); report N items each WITH a disposition, never "passed"; report the diff's net added comment lines, and list every sentence that could be deleted with nothing lost. The population is FILES touched, never hunks: a diff-scoped read is how a constant quietly accretes ten comment lines (owner rule, PR #964). |
+| Every diff (this row always fires) | The whole-file comment audit: for EVERY file the diff touches — a one-line change included — read the file's ENTIRE comment population against the CODE and AGENTS.md's comment rules (accuracy/value/rot/vestigial/self-repetition; one home per story — echoes become references); report N items each WITH a disposition, never "passed"; report the diff's net added comment lines, and list every sentence that could be deleted with nothing lost. The population is FILES touched, never hunks: a diff-scoped read is how a constant quietly accretes ten comment lines (owner rule, PR #964). |
 | Interactive TUI flow | WALK each user path end-to-end: first run, failure branches, the no-CLI user (#359). |
 | `pixtuoid-hook` (the shim) | Audit the WHOLE shim for the never-panic contract: `args_os()`, bounded reads, every error path exit(0) (#198). |
 | Motion / pose / walk-leg | Render and WATCH before the verdict (#61: five regressions shipped past code-only review). |

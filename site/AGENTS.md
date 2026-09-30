@@ -1,1 +1,108 @@
-CLAUDE.md
+# site — agent guide
+
+The **landing page**: a self-contained **Astro** static site (NOT Rust) →
+GitHub Pages. A *consumer* of the Rust workspace's outputs — version, rendered
+docs, demo media all flow in from outside `site/`. Parent guide: the workspace
+[`../AGENTS.md`](../AGENTS.md). Human detail: [`README.md`](README.md).
+
+> **You are in the Astro consumer, not the Rust producer.** Rust house rules
+> (`cargo`/`clippy`, `just preflight`, the crate CI gates) do not apply to a
+> site-only change. The gates here are `just site-check` (+ `just site-fmt`)
+> and `just site-e2e`.
+
+## Cross-boundary build inputs (the coupling that bites)
+
+`astro build` reads **these files from OUTSIDE `site/`** (workspace
+`Cargo.toml` + the `docs/` pages below); a rename/move of any FAILS the
+build, and every one sits in the `site.yml` / `pages.yml` path filters:
+
+- workspace `Cargo.toml` → displayed-version FALLBACK only; the primary source
+  is the latest release tag (`config/released-version.mjs`, unit-tested — main
+  runs ahead of the released version mid-cycle). Both workflows checkout with
+  `fetch-depth: 0`. `pages.yml` deploys on push to `main`, not on tag push, so
+  a fresh tag shows after the next `main` commit or a `workflow_dispatch`.
+- `docs/{CONFIGURATION, ARCHITECTURE, CONTRIBUTING, PARALLEL-DELIVERY}.md`
+  → rendered routes via glob loaders in `src/content.config.ts`. **Adding,
+  renaming, or REMOVING a rendered doc is a multi-point edit**: glob
+  pattern, `src/pages/*.astro`, the `DOCS` entry in `consts.ts` (`Nav.astro`
+  and `Docs.astro`'s sidebar/pager derive from it; `assert-docs-rendered` is
+  generic by design — it globs every rendered `article.prose` — and needs no
+  edit), both workflow path filters, `lighthouserc.json`, and the smoke
+  viewport table.
+
+**The architecture diagram renders at build**, in process
+(`config/rehype-beautiful-mermaid.mjs` — no browser); Playwright's Chromium is
+installed only for `site.yml`'s e2e step. The empty-render class is
+gated by `config/assert-docs-rendered.mjs` (`check:docs`), whose header owns
+the mechanism; `pages.yml`'s pins carry their own.
+
+**Docs shell**: the doc routes (the `DOCS` manifest in `consts.ts` is the
+roster) mount the Statusline doc variant (no PR feed fetch); `Docs.astro`'s
+sidebar reads the one `FLOORS` manifest.
+Blockquotes promote to terminal callouts (`config/rehype-callouts.mjs`,
+unit-tested, registered AFTER `rehypeRepoLinks`). Adding a `.prose` colour rule
+needs a twin under `.callout__body` — the specificity arithmetic and its
+theme-prefixed tie are on the rule itself in `Docs.astro`, and the smoke
+suite's callout AA sweep grades it.
+
+## Single-sourced content
+
+Every generated artifact, manifest seam, and rendered-copy sharp edge:
+[`SINGLE-SOURCED.md`](SINGLE-SOURCED.md) — read it before touching this area.
+
+## CSP (hash-based, two coordinated halves in astro.config.mjs)
+
+`cspInlineHashes()` in `astro.config.mjs` owns the WHY; `config/csp-hashes.mjs`
+owns the parse. The rules a page author needs: an `is:inline` script needs NO
+manual CSP step; a hand-written `public/*.js` loaded by URL rides
+`script-src 'self'`; `style-src` must stay hash-free (one hash disables
+unsafe-inline for the directive, and inline style ATTRIBUTES cannot be hashed —
+so keep Prism's class-based highlighting, not Shiki). `astro dev` serves NO
+CSP; regressions surface in `just site-e2e`'s console watchdog.
+
+## Dev server (agent-driving)
+
+`just site-dev-bg` daemonizes (`astro dev --background`, polls the dev-only
+`/_astro/status` endpoint); `just site-dev-stop` frees the port. Two edges:
+the status endpoint is dev-server only (astro 7.3.2's `core/create-vite.js` registers it
+under `command === "dev"`; `astro preview` daemonizes too but has nothing to
+poll), and dev/preview share port 4321 — stop the
+daemon before `just site-e2e` (its webServer fails loud on a squatted port).
+`npm run lighthouse` needs 4321 AND `collect.previewPort` free: its preview
+moves there so the gzip proxy can take the audited port.
+
+## Gates
+
+`just site-check` = `npm run verify` (format:check → lint → check → knip →
+test:unit → build → check:docs → audit). `just site-e2e` = Playwright vs the
+PRODUCTION build — the runtime-contract tier (`__pixLights`/`pix:onair`/
+`data-lit` seams, scrollspy keys, docs-nav variant, reduced-motion, console
+watchdog) that tsc/knip/build are blind to. CI: `site.yml` / `pages.yml`.
+
+- **Lighthouse** (`npm run lighthouse`, in-repo runner
+  `config/lighthouse-runner.mjs`, lighthouse 13 programmatic API, median of
+  three serial runs; runner-semantics pinned by its test — a renamed audit
+  FAILS instead of passing vacuously). **A category score is a budget, not a
+  contract**: `color-contrast` is a small weight in the a11y category, so a total
+  contrast failure still clears the category budget — anything that must never regress gets
+  its own per-audit assertion with `aggregationMethod: pessimistic` (median
+  greens a binary audit that failed one run). Collect URLs pin `?theme=day`
+  (otherwise the wall clock picks the palette — half of CI runs would audit
+  each). **The theme matrix is `smoke.spec.ts`** (day/night/dracula), not a
+  doubled collect list. The audit runs THROUGH `startPagesLikeProxy`: `astro
+  preview` serves the wasm raw while GitHub Pages gzips it, and under simulated
+  throttling `interactive`/LCP are BYTE budgets — so they price the wasm at
+  what a visitor downloads, and are sized to admit a wasm at `just
+  gen-wasm-check`'s gzip cap, no more.
+- **Fonts**: Fontsource WOFF2 with `font-display: optional` + preloads — do
+  not switch to the default `swap` (Ubuntu cold visits reflow past the CLS
+  budget; `font-layout.spec.ts` reproduces it deliberately).
+- **npm**: `audit` runs LAST in `verify` (a live advisory would short-circuit
+  the checks below it — #847/#849) but FIRST in `pages.yml` (that one ships).
+  npm 12 pinned (`packageManager` + `engine-strict`); install scripts
+  fail-closed (`strict-allow-scripts`, exact-version `allowScripts`, explicit
+  `fsevents` denial) — review with `npm install-scripts ls`.
+- **Nothing gates a STALE `overrides` entry**: to retire one, fresh-resolve
+  `--package-lock-only` in a scratch dir with and without it and diff the
+  `packages` maps — `npm audit` cannot clear an entry (the retired
+  `chrome-launcher` pin guarded a chain no advisory covered).

@@ -135,9 +135,10 @@ jobs:
       - run: just tuidrive-selftest
       - run: just e2e-scrub-selftest
       - run: just star-history-selftest
-      # `just fixture-metadata` is NOT here: it became Rust tests in #929, so it
-      # already rides `just test` in windows-test, macos-test and linux-test —
-      # three platforms instead of this job's one, and no toolchain in a lint job.
+      # The capture-tree provenance rules are NOT here: they are Rust tests
+      # (`tests/sources/captures.rs`, #929) riding `just test` in windows-test,
+      # macos-test and linux-test — three platforms instead of this job's one, and
+      # no toolchain in a lint job.
       - run: just fixture-pii
       - run: just fixture-pii-selftest
 
