@@ -34,8 +34,6 @@ fn unknown_line(name: &str) -> String {
     )
 }
 
-/// The `WARN:` line for an optional animation the pack leaves out, naming
-/// what draws in its place.
 fn missing_optional_line(m: &MissingOptional) -> String {
     let stand_in = match m.stand_in {
         StandIn::DefaultPack => "the default pack draws it, in its own style".to_string(),
@@ -48,7 +46,6 @@ fn missing_optional_line(m: &MissingOptional) -> String {
     )
 }
 
-/// The `WARN:` line for an art set the pack ships only part of.
 fn partial_set_line(set: &PartialSet) -> String {
     let quoted = |names: &[&str]| {
         names
@@ -64,7 +61,6 @@ fn partial_set_line(set: &PartialSet) -> String {
     )
 }
 
-/// The `WARN:` line for a derived piece shipped without its source.
 fn orphan_derived_line(o: &OrphanDerived) -> String {
     format!(
         "WARN:  ships \"{}\" without \"{}\": the default pack draws \"{}\", in its own style",
@@ -72,7 +68,6 @@ fn orphan_derived_line(o: &OrphanDerived) -> String {
     )
 }
 
-/// The `ERROR:` line for a density variant with a frame that misses its claim.
 fn mismatched_density_line(m: &DensityMismatch) -> String {
     // Destructured without `..`, for the reason `validate_pack` gives.
     let DensityMismatch {
@@ -91,7 +86,6 @@ fn mismatched_density_line(m: &DensityMismatch) -> String {
     )
 }
 
-/// The `ERROR:` line for a density variant whose frame count is not its base's.
 fn frame_count_line(m: &FrameCountMismatch) -> String {
     // Destructured without `..`, for the reason `validate_pack` gives.
     let FrameCountMismatch {
@@ -106,7 +100,6 @@ fn frame_count_line(m: &FrameCountMismatch) -> String {
     )
 }
 
-/// The `ERROR:` line for a density variant whose base the pack does not ship.
 fn orphan_variant_line(name: &str) -> String {
     format!(
         "ERROR: \"{}\" is a density variant of an animation this pack does not ship",
@@ -115,31 +108,37 @@ fn orphan_variant_line(name: &str) -> String {
 }
 
 fn unmarked_head_line(u: &UnmarkedHead) -> String {
+    let UnmarkedHead { name, frame } = u;
     format!(
-        "WARN:  \"{}\" frame {} (from 0) has no head mark: it is drawn without hair",
-        strip_control_chars(&u.name),
-        u.frame
+        "WARN:  \"{}\" frame {frame} (from 0) has no head mark: it is drawn without hair",
+        strip_control_chars(name)
     )
 }
 
 fn missing_hair_view_line(m: &MissingHairView) -> String {
+    let MissingHairView { style, view, name } = m;
     format!(
         "WARN:  hairstyle \"{}\" has no \"{}\" layers: a head facing that way (\"{}\") is \
          drawn without hair",
-        strip_control_chars(&m.style),
-        m.view.name(),
-        strip_control_chars(&m.needed_by)
+        strip_control_chars(style),
+        view.name(),
+        strip_control_chars(name)
     )
 }
 
 fn overhanging_hair_line(o: &HairOverhang) -> String {
+    let HairOverhang {
+        style,
+        view,
+        name,
+        frame,
+    } = o;
     format!(
-        "WARN:  hairstyle \"{}\" \"{}\" hair reaches past the sides of \"{}\" frame {} \
+        "WARN:  hairstyle \"{}\" \"{}\" hair reaches past the sides of \"{}\" frame {frame} \
          (from 0): the rest is cut off",
-        strip_control_chars(&o.style),
-        o.view.name(),
-        strip_control_chars(&o.name),
-        o.frame
+        strip_control_chars(style),
+        view.name(),
+        strip_control_chars(name)
     )
 }
 
@@ -323,7 +322,7 @@ mod tests {
             missing_hair_view_line(&MissingHairView {
                 style: "mop@4x\u{7}".to_string(),
                 view: HeadView::Back,
-                needed_by: "walking_back@4x\u{202e}".to_string(),
+                name: "walking_back@4x\u{202e}".to_string(),
             }),
             "WARN:  hairstyle \"mop@4x\" has no \"back\" layers: a head facing that way \
              (\"walking_back@4x\") is drawn without hair"

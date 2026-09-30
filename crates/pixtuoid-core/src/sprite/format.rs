@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 #[cfg(feature = "native")]
 use std::path::Path;
 use std::sync::Arc;
@@ -1038,11 +1038,10 @@ impl Pack {
         self.animation(self.piece_or_source(key)?)
     }
 
-    /// The name of the animation that draws `key`: [`animation_or_source`]'s
-    /// pick. A painter that takes a piece's density variants looks them up under
-    /// this name, since a derived piece the pack lacks draws its source's.
-    ///
-    /// [`animation_or_source`]: Self::animation_or_source
+    /// The name of the animation that draws `key`:
+    /// [`animation_or_source`](Self::animation_or_source)'s pick. A painter that
+    /// takes a piece's density variants looks them up under this name, since a
+    /// derived piece the pack lacks draws its source's.
     pub fn piece_or_source<'k>(&self, key: &'k str) -> Option<&'k str> {
         if self.animation(key).is_some() {
             return Some(key);
@@ -1069,7 +1068,7 @@ impl Pack {
     /// ([`variant_redraws`]) counts: a stray key names nothing a painter asks
     /// for, and every renderer skips a variant that does not redraw its base.
     pub fn density_variants(&self) -> Vec<u16> {
-        let densities: std::collections::BTreeSet<u16> = self
+        let densities: BTreeSet<u16> = self
             .animations
             .iter()
             .filter_map(|(name, variant)| {
@@ -1142,7 +1141,7 @@ fn redrawn_pieces(name: &str) -> impl Iterator<Item = &str> {
     variant_base.into_iter().chain(source)
 }
 
-/// The path-traversal guard MUST stay inside [`load_pack`]'s `get_src`:
+/// The path-traversal guard MUST stay inside `load_pack`'s `get_src`:
 /// [`load_pack_from_strings`] has no filesystem and no untrusted paths to escape.
 fn build_pack(
     parsed: PackToml,
@@ -1308,14 +1307,14 @@ fn build_pack(
     }
     // A style changing with the density the renderer lands on would change an
     // agent's look with the window's size.
-    let names_at = |d| -> std::collections::BTreeSet<&str> {
+    let names_at = |d| -> BTreeSet<&str> {
         hairstyles
             .values()
             .filter(|s| s.density == d)
             .map(|s| s.name.as_str())
             .collect()
     };
-    let densities: std::collections::BTreeSet<_> = hairstyles.values().map(|s| s.density).collect();
+    let densities: BTreeSet<_> = hairstyles.values().map(|s| s.density).collect();
     if let [first, rest @ ..] = densities.iter().copied().collect::<Vec<_>>().as_slice()
         && let Some(d) = rest.iter().find(|&&d| names_at(d) != names_at(*first))
     {
@@ -1474,7 +1473,7 @@ pub fn load_pack(dir: &Path) -> Result<Pack> {
     })
 }
 
-/// [`load_pack`] from in-memory strings, so it reads no files.
+/// `load_pack` from in-memory strings, so it reads no files.
 pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Result<Pack> {
     let parsed: PackToml =
         toml::from_str(pack_toml).map_err(|source| PackError::Manifest { path: None, source })?;
@@ -1640,12 +1639,11 @@ fn registered_animation_names() -> impl Iterator<Item = &'static str> {
 /// since a character is redrawn at density like furniture; only furniture is
 /// inherited ([`RegisteredKey::is_inherited`]).
 ///
-/// Variants are legal BY DERIVATION rather than by their own registry rows, so
-/// authoring one needs no registry row. A second list would have to be kept in
-/// step with the first, and forgetting an entry fails QUIETLY in its least
-/// visible direction: the variant loads for the bundled pack but
-/// [`Pack::merge_from`] never inherits it, so a `--pack-dir` user silently
-/// drops back to the upscale.
+/// Variants are legal BY DERIVATION rather than by their own registry rows. A
+/// second list would have to be kept in step with the first, and forgetting an
+/// entry fails QUIETLY in its least visible direction: the variant loads for
+/// the bundled pack but [`Pack::merge_from`] never inherits it, so a
+/// `--pack-dir` user silently drops back to the upscale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RegisteredKey {
     /// The registered animation the key names or redraws.
@@ -1851,11 +1849,10 @@ pub struct MissingHairView {
     /// The view.
     pub view: HeadView,
     /// The first animation, by name, with such a head.
-    pub needed_by: String,
+    pub name: String,
 }
 
-/// A hairstyle view with a layer reaching past a character frame's sides: a
-/// dressed frame is its body's width, so the rest is cut off.
+/// A hairstyle view with a layer reaching past a character frame's sides.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HairOverhang {
     /// The style's key, e.g. `mop@4x`.
@@ -1913,8 +1910,7 @@ pub struct ValidationReport {
 }
 
 impl ValidationReport {
-    /// How many findings make the pack unusable: the fields this destructure
-    /// counts. A field bound to `_` is reported, not counted.
+    /// How many findings make the pack unusable: the fields this destructure counts.
     pub fn error_count(&self) -> usize {
         // No `..`: a new report field must be classed error-or-not here before
         // this compiles.
@@ -1942,7 +1938,7 @@ impl ValidationReport {
     }
 
     /// How many findings leave the pack usable but not as authored: the fields
-    /// this destructure counts. A field bound to `_` is reported, not counted.
+    /// this destructure counts.
     pub fn warning_count(&self) -> usize {
         // No `..`, for the reason `error_count` gives.
         let ValidationReport {
@@ -2061,7 +2057,6 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
 
     for &(name, variant, base, density) in &variants {
         let Some(base) = pack.animation(base).filter(|a| !a.frames().is_empty()) else {
-            // No base, no claim to check: see `ValidationReport::orphan_variants`.
             report.orphan_variants.push(name.to_string());
             continue;
         };
@@ -2103,8 +2098,7 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
         .map(|&(name, sprite, _, density)| (name, sprite, density))
         .collect();
     characters.sort_unstable_by_key(|&(name, ..)| name);
-    let dressed_densities: std::collections::BTreeSet<u16> =
-        pack.hairstyles().map(|s| s.density().get()).collect();
+    let dressed_densities: BTreeSet<u16> = pack.hairstyles().map(|s| s.density().get()).collect();
     for &(name, sprite, density) in &characters {
         if !dressed_densities.contains(&density) {
             continue;
@@ -2136,16 +2130,16 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
                         report.missing_hair_views.push(MissingHairView {
                             style: key.clone(),
                             view: head.view,
-                            needed_by: name.to_owned(),
+                            name: name.to_owned(),
                         });
                     }
                     continue;
                 };
-                let overhangs = [layers.behind(), layers.over()]
+                let clipped = [layers.behind(), layers.over()]
                     .into_iter()
                     .flatten()
                     .any(|layer| overhangs(layer, body, head));
-                if overhangs && !overhung.contains(&head.view) {
+                if clipped && !overhung.contains(&head.view) {
                     overhung.push(head.view);
                     report.overhanging_hair.push(HairOverhang {
                         style: key.clone(),
@@ -2167,14 +2161,13 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
     report
 }
 
-/// Whether `layer`, its head mark laid on `head`, puts an opaque pixel past
-/// `body`'s sides. Not its bottom: that is where the body's art ends, at
-/// whatever hides the rest (`back_couch`'s seat back), and hair ends there too.
+/// Whether `layer`, [laid on](Sprite::laid_on) `head`, puts an opaque pixel
+/// past `body`'s sides: a dressed frame grows up, never wider. Not its bottom,
+/// where the body's art ends at whatever hides the rest (`back_couch`'s seat back).
 fn overhangs(layer: &Sprite, body: &Frame, head: HeadMark) -> bool {
-    let (Some(art), Some(mark)) = (layer.frames().first(), layer.head(0)) else {
+    let Some((art, dx, _)) = layer.laid_on(head) else {
         return false;
     };
-    let dx = i32::from(head.x) - i32::from(mark.x);
     (0..art.height()).any(|y| {
         (0..art.width()).any(|x| {
             let tx = i32::from(x) + dx;
@@ -2733,7 +2726,7 @@ mod validation_floor_tests {
             missing_hair_views: vec![MissingHairView {
                 style: "mop@4x".to_string(),
                 view: HeadView::Back,
-                needed_by: "walking_back@4x".to_string(),
+                name: "walking_back@4x".to_string(),
             }],
             overhanging_hair: vec![HairOverhang {
                 style: "mop@4x".to_string(),
@@ -2835,10 +2828,8 @@ mod validation_floor_tests {
         );
     }
 
-    /// The density is pack-author input to arithmetic that multiplies it by a
-    /// frame dimension. Unbounded, `desk@60000x` panicked every debug build —
-    /// including `run --pack-dir`, where the crash hook offered to file a bug
-    /// for a typo — and wrapped to a nonsense dimension in release.
+    /// A density is author input multiplied by a frame dimension: unbounded, a
+    /// typo like `desk@60000x` overflows it.
     #[test]
     fn a_density_past_the_ceiling_is_not_a_variant_at_all() {
         assert_eq!(split_density_variant("desk@60000x"), None);
@@ -3005,7 +2996,7 @@ mod validation_floor_tests {
             vec![MissingHairView {
                 style: "mop@2x".into(),
                 view: HeadView::Back,
-                needed_by: "standing@2x".into(),
+                name: "standing@2x".into(),
             }]
         );
         assert_eq!(hair_counts(&report), (0, 1));

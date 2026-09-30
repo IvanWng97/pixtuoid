@@ -42,11 +42,12 @@ const RAMP_COOL_HUE_DEG: f32 = 280.0;
 /// a further halving moves no 8-bit channel.
 const GAMUT_BISECTION_STEPS: u32 = 16;
 
+/// The slope of the sRGB curve's linear segment near black (IEC 61966-2-1).
+const SRGB_TOE_SLOPE: f32 = 12.92;
+
 /// How far past `0..=1` a linear channel still counts as in gamut: half an 8-bit
-/// step where the sRGB curve is steepest (its toe, slope 12.92), so an OKLab
-/// round trip's float noise keeps its chroma, and what passes rounds as a clip
-/// would.
-const GAMUT_TOLERANCE: f32 = 0.5 / (u8::MAX as f32 * 12.92);
+/// step at the curve's steepest, [`SRGB_TOE_SLOPE`], so float noise keeps chroma.
+const GAMUT_TOLERANCE: f32 = 0.5 / (u8::MAX as f32 * SRGB_TOE_SLOPE);
 
 impl Rgb {
     /// This color `level` steps along a hue-shifted ramp: lighter and warmer
@@ -459,6 +460,16 @@ impl Sprite {
         self.marks(idx).iter().find_map(HeadMark::of)
     }
 
+    /// Frame 0 and its offset when its own head mark is laid on `head`.
+    pub fn laid_on(&self, head: HeadMark) -> Option<(&Frame, i32, i32)> {
+        let mark = self.head(0)?;
+        Some((
+            self.frames.first()?,
+            i32::from(head.x) - i32::from(mark.x),
+            i32::from(head.y) - i32::from(mark.y),
+        ))
+    }
+
     /// The frames, played in order.
     pub fn frames(&self) -> &[Frame] {
         &self.frames
@@ -757,7 +768,25 @@ mod tests {
     }
 
     #[test]
-    fn every_srgb_color_survives_an_oklab_round_trip() {
+    fn srgb_toe_slope_is_the_transfer_functions() {
+        let dark = 0.001;
+        assert_eq!(
+            Srgb::<f32>::from_linear(LinSrgb::new(dark, 0.0, 0.0)).red,
+            SRGB_TOE_SLOPE * dark
+        );
+    }
+
+    #[test]
+    fn a_ramp_step_grazing_the_gamut_by_float_noise_keeps_its_chroma() {
+        assert_eq!(
+            rgb(11, 86, 249).ramp(-3),
+            rgb(0, 0, 207),
+            "not (0, 39, 185), where a strict bounds check stops the chroma search"
+        );
+    }
+
+    #[test]
+    fn an_srgb_lattice_survives_an_oklab_round_trip() {
         let levels = (0..=255u8).step_by(15);
         for r in levels.clone() {
             for g in levels.clone() {

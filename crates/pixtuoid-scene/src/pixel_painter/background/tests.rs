@@ -1,5 +1,6 @@
 use super::*;
 use crate::atmosphere::Look;
+use crate::embedded_pack::test_default_pack;
 use crate::layout::{window_bays, window_run};
 use crate::lighting::SPILL_DEPTH;
 use crate::sky::{ForcedWeather, hour_is_day, set_weather_override};
@@ -45,7 +46,7 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
         let sky = Sky::at_with(now, Weather::Storm).with_flash(flash);
         let moment = &Moment::resolve(sky, theme, 0.0, now);
         let city = CityStrip::draw(
-            &pack(),
+            &test_default_pack(),
             (WINDOW_W, 28),
             moment,
             theme,
@@ -103,7 +104,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
         top_wall_h,
         window_bays(buf_w, None),
         &Moment::resolve(Sky::at(now), theme, 0.0, now),
-        &pack(),
+        &test_default_pack(),
         theme,
     );
     let spill = crate::lighting::Emitter {
@@ -164,7 +165,7 @@ fn render_office_themed(
         top_wall_h,
         window_bays(buf_w, None),
         &Moment::resolve(Sky::at(now), theme, 0.0, now),
-        &pack(),
+        &test_default_pack(),
         theme,
     );
     buf
@@ -775,7 +776,7 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
             top_wall_h,
             window_bays(buf_w, None),
             &Moment::resolve(Sky::at(now), theme, 0.0, now),
-            &pack(),
+            &test_default_pack(),
             theme,
         );
         buf
@@ -833,7 +834,7 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
             14,
             window_bays(w, None),
             &Moment::resolve(Sky::at(now), theme, 0.0, now),
-            &pack(),
+            &test_default_pack(),
             theme,
         );
         buf
@@ -1029,11 +1030,6 @@ fn spill(x: u16, slant: f32) -> crate::lighting::Emitter {
     }
 }
 
-/// The bundled pack, whose city the windows show.
-fn pack() -> Pack {
-    crate::embedded_pack::test_default_pack()
-}
-
 /// Every pane shows its own stretch of the one city, read from the run's west
 /// end.
 #[test]
@@ -1048,7 +1044,7 @@ fn a_window_shows_the_city_strip_from_its_own_column() {
     let dx = 7;
     let far = (WINDOW_W + dx).next_multiple_of(crate::dither::PERIOD);
     let city = CityStrip::draw(
-        &pack(),
+        &test_default_pack(),
         (WINDOW_W * 2, 28),
         moment,
         theme,

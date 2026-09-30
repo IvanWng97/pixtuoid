@@ -1,7 +1,7 @@
 //! Sprite packs: the compiled-in default (`include_str!`, so the binary ships
 //! standalone), with at most one custom pack merged over it. A custom pack is a
 //! directory holding `pack.toml` + each `.sprite` file it references
-//! (`sprites/default/` is the canonical example); [`PackSource`] names where it
+//! (`sprites/default/` is the canonical example); `PackSource` names where it
 //! comes from, and deciding that is the caller's job.
 
 #[cfg(feature = "native")]
@@ -74,8 +74,7 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         mismatched_density,
         orphan_variants,
         mismatched_frame_counts,
-        // A mixed look or a bare or clipped head still renders: `validate-pack`
-        // reports it.
+        // These still render: `validate-pack` reports them.
         partial_sets: _,
         orphan_derived: _,
         unmarked_heads: _,
@@ -201,8 +200,7 @@ pub(crate) fn test_default_pack() -> Pack {
 /// The default pack's manifest, as `build.rs` embeds it.
 const EMBEDDED_PACK_TOML: &str = include_str!(concat!(env!("OUT_DIR"), "/embedded_pack.toml"));
 
-/// The compiled-in default pack alone: all a build without `native`, which reads
-/// no files, can load.
+/// The compiled-in default pack alone: all a build without `native` can load.
 pub fn load_bundled_pack() -> Result<Pack, PackError> {
     load_pack_from_strings(EMBEDDED_PACK_TOML, &embedded_sprite_srcs())
 }
@@ -294,11 +292,8 @@ mod tests {
         }
     }
 
-    /// Copy this crate's char-only pack fixture into `dst`. It carries NO
-    /// furniture, so the merge-from-embedded-default assertion isn't
-    /// tautological, and it lives INSIDE pixtuoid-scene so `cargo test` passes
-    /// from an extracted .crate — it must NOT reach into the sibling `pixtuoid`
-    /// binary crate's skeleton.
+    /// Copy this crate's char-only fixture into `dst`: no furniture, so the merge
+    /// assertion bites; in-crate, so `cargo test` passes from an extracted .crate.
     #[cfg(feature = "native")]
     fn copy_skeleton_pack(dst: &Path) {
         fs::create_dir_all(dst).expect("mkdir pack dir");
@@ -355,7 +350,7 @@ mod tests {
     /// in it silently falls back to the upscaled base.
     #[test]
     fn the_embedded_pack_passes_its_own_validation() {
-        let pack = load_bundled_pack().expect("embedded pack");
+        let pack = test_default_pack();
         let report = validate_pack(&pack);
         assert!(!report.has_errors(), "{report:?}");
         // `StandIn::DefaultPack` promises the default draws what a custom pack

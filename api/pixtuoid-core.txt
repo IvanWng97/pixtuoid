@@ -1172,7 +1172,7 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::Hairstyle
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::Hairstyle
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Hairstyle
 pub struct pixtuoid_core::sprite::format::MissingHairView
-pub pixtuoid_core::sprite::format::MissingHairView::needed_by: alloc::string::String
+pub pixtuoid_core::sprite::format::MissingHairView::name: alloc::string::String
 pub pixtuoid_core::sprite::format::MissingHairView::style: alloc::string::String
 pub pixtuoid_core::sprite::format::MissingHairView::view: pixtuoid_core::sprite::HeadView
 impl core::clone::Clone for pixtuoid_core::sprite::format::MissingHairView
@@ -1524,6 +1524,7 @@ impl pixtuoid_core::sprite::Sprite
 pub fn pixtuoid_core::sprite::Sprite::frame_ms(&self) -> u32
 pub fn pixtuoid_core::sprite::Sprite::frames(&self) -> &[pixtuoid_core::sprite::Frame]
 pub fn pixtuoid_core::sprite::Sprite::head(&self, usize) -> core::option::Option<pixtuoid_core::sprite::HeadMark>
+pub fn pixtuoid_core::sprite::Sprite::laid_on(&self, pixtuoid_core::sprite::HeadMark) -> core::option::Option<(&pixtuoid_core::sprite::Frame, i32, i32)>
 pub fn pixtuoid_core::sprite::Sprite::marks(&self, usize) -> &[pixtuoid_core::sprite::Mark]
 pub fn pixtuoid_core::sprite::Sprite::recolorable(&self, usize) -> core::option::Option<pixtuoid_core::sprite::RecolorableFrame<'_>>
 impl core::clone::Clone for pixtuoid_core::sprite::Sprite
@@ -2487,6 +2488,7 @@ impl pixtuoid_core::sprite::Sprite
 pub fn pixtuoid_core::sprite::Sprite::frame_ms(&self) -> u32
 pub fn pixtuoid_core::sprite::Sprite::frames(&self) -> &[pixtuoid_core::sprite::Frame]
 pub fn pixtuoid_core::sprite::Sprite::head(&self, usize) -> core::option::Option<pixtuoid_core::sprite::HeadMark>
+pub fn pixtuoid_core::sprite::Sprite::laid_on(&self, pixtuoid_core::sprite::HeadMark) -> core::option::Option<(&pixtuoid_core::sprite::Frame, i32, i32)>
 pub fn pixtuoid_core::sprite::Sprite::marks(&self, usize) -> &[pixtuoid_core::sprite::Mark]
 pub fn pixtuoid_core::sprite::Sprite::recolorable(&self, usize) -> core::option::Option<pixtuoid_core::sprite::RecolorableFrame<'_>>
 impl core::clone::Clone for pixtuoid_core::sprite::Sprite

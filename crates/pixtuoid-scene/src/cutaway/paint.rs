@@ -2798,6 +2798,7 @@ fn paint_chair(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::embedded_pack::test_default_pack;
 
     /// A piece's base row — the ordering key — through the SAME `piece_span`
     /// the draw list builds with. Width does not affect the base row, so the
@@ -2816,7 +2817,7 @@ mod tests {
     /// over the surface" reading needs no special case.
     #[test]
     fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
-        let pack = pack();
+        let pack = test_default_pack();
         let desk = crate::layout::Point { x: 0, y: 10 };
         let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
         let desk_z = desk_span(&pack, art, desk, RenderScale::ONE)
@@ -2835,7 +2836,7 @@ mod tests {
     #[test]
     #[cfg(feature = "density-art")]
     fn someone_just_south_of_a_variant_desk_sorts_in_front_of_it() {
-        let pack = pack();
+        let pack = test_default_pack();
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         let desk = crate::layout::Point { x: 0, y: 20 };
         let art = desk_art(&pack, crate::layout::Facing::South).expect("desk art");
@@ -2878,7 +2879,7 @@ mod tests {
     /// what gives the office depth rather than a flat plan.
     #[test]
     fn a_character_north_of_the_desk_sorts_behind_it() {
-        let pack = pack();
+        let pack = test_default_pack();
         let desk = crate::layout::Point { x: 0, y: 20 };
         let (_, body_h) = base_size(&pack, "standing");
 
@@ -2906,7 +2907,7 @@ mod tests {
     /// standing behind them.
     #[test]
     fn an_aisle_prop_sorts_between_the_desk_and_its_occupant() {
-        let pack = pack();
+        let pack = test_default_pack();
         let desk = crate::layout::Point { x: 0, y: 10 };
         let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
         let desk_box = desk_span(&pack, art, desk, RenderScale::ONE).expect("desk");
@@ -2943,7 +2944,7 @@ mod tests {
     /// the same base row as the plain desk, so swapping the art moves no depth.
     #[test]
     fn a_back_turned_desk_grows_upward_and_keeps_its_base_row() {
-        let pack = pack();
+        let pack = test_default_pack();
         let desk = crate::layout::Point { x: 20, y: 30 };
         let north = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
         let south = desk_art(&pack, crate::layout::Facing::South).expect("desk art");
@@ -2969,7 +2970,7 @@ mod tests {
             &[("one.sprite", "@frame 0\nA")],
         )
         .expect("pack builds");
-        own.merge_from(&pack());
+        own.merge_from(&test_default_pack());
         let mut order = Vec::new();
         push_sofa(
             &mut order,
@@ -3015,7 +3016,7 @@ mod tests {
     /// sitter's box covers the chair's at either phase of the breathing bob.
     #[test]
     fn a_back_turned_sitter_carries_their_own_chair() {
-        let pack = pack();
+        let pack = test_default_pack();
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let north: Vec<crate::layout::Point> = layout
             .home_desks
@@ -3089,7 +3090,7 @@ mod tests {
     /// depths by inequality, which a one-row shift passes.
     #[test]
     fn a_desks_shadow_centres_on_the_row_under_where_it_sorts() {
-        let pack = pack();
+        let pack = test_default_pack();
         let desk = crate::layout::Point { x: 20, y: 30 };
         for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
             let art = desk_art(&pack, facing).expect("desk art");
@@ -3111,7 +3112,7 @@ mod tests {
     /// A standing chair sorts on the classic painter's own chair key.
     #[test]
     fn a_chair_sorts_on_the_classic_chair_key() {
-        let pack = pack();
+        let pack = test_default_pack();
         let desk = crate::layout::Point { x: 20, y: 30 };
         let (span, _) = chair_span(&pack, crate::layout::Facing::North, desk)
             .expect("a back-turned desk stands a chair");
@@ -3212,7 +3213,7 @@ mod tests {
     #[test]
     #[cfg(feature = "density-art")]
     fn the_bundled_back_turned_desk_draws_its_screen_in_the_screen_keys() {
-        let pack = pack();
+        let pack = test_default_pack();
         let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
         let sentinel = pixtuoid_core::sprite::Rgb {
             r: 255,
@@ -3247,7 +3248,7 @@ mod tests {
     /// every base-art face in the cutaway and nothing else notices.
     #[test]
     fn a_bundled_base_desks_face_is_its_shadow_wood() {
-        let pack = pack();
+        let pack = test_default_pack();
         let shadow = pack
             .palette()
             .get('d')
@@ -3274,7 +3275,7 @@ mod tests {
         facing: crate::layout::Facing,
         seated_ticks: usize,
     ) -> (Layout, Pack, Vec<SimFrame>, crate::layout::Point) {
-        sit_down_in(pack(), facing, seated_ticks)
+        sit_down_in(test_default_pack(), facing, seated_ticks)
     }
 
     /// [`sit_down`] with `pack` drawing the office.
@@ -3738,7 +3739,7 @@ mod tests {
     /// Every rug in the office lies on the floor, the lounge's among them.
     #[test]
     fn every_rug_lies_on_the_floor() {
-        let pack = pack();
+        let pack = test_default_pack();
         let theme = &crate::theme::NORMAL;
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         let f = &theme.furniture;
@@ -3925,7 +3926,7 @@ mod tests {
     /// not.
     #[test]
     fn what_meets_the_floor_casts_a_shadow() {
-        let pack = pack();
+        let pack = test_default_pack();
         let span = Span::new(10, 10, 8, 12, 0);
         let chair = PieceKind::Chair {
             at: crate::layout::Point { x: 10, y: 10 },
@@ -4153,11 +4154,6 @@ mod tests {
         order
     }
 
-    /// The bundled pack.
-    fn pack() -> Pack {
-        crate::embedded_pack::test_default_pack()
-    }
-
     fn near_seat(desk: crate::layout::Point) -> crate::layout::Point {
         crate::pixel_painter::seated_anchor_facing(
             desk,
@@ -4179,7 +4175,7 @@ mod tests {
     /// pixel.
     #[test]
     fn the_windows_look_out_on_the_one_city_where_the_layout_tiles_them() {
-        let pack = pack();
+        let pack = test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
@@ -4264,7 +4260,7 @@ mod tests {
     /// behind" fact its own geometry states — what a sort key cannot give you.
     #[test]
     fn a_real_offices_draw_list_satisfies_every_ordering_constraint() {
-        let pack = pack();
+        let pack = test_default_pack();
         for (w, h) in [(160u16, 96u16), (240, 144), (100, 60)] {
             let layout = Layout::compute_with_seed(w, h, None, 0).expect("lays out");
             let mut order = queued(&layout, &pack, RenderScale::ONE, &[], |_| true);
@@ -4354,11 +4350,13 @@ mod tests {
         }
         // ...the mover in every style the pack draws, so a box that forgot the
         // rows a style's hair rises by shows...
-        let styles: std::collections::BTreeSet<_> =
-            pack().hairstyles().map(|s| s.name().to_owned()).collect();
+        let styles: std::collections::BTreeSet<_> = test_default_pack()
+            .hairstyles()
+            .map(|s| s.name().to_owned())
+            .collect();
         let mut worn = std::collections::BTreeSet::new();
         for i in 0..1000 {
-            let pack = pack();
+            let pack = test_default_pack();
             let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
             let dense = crate::pixel_painter::densest_frame(&pack, "walking", 0, scale)
                 .expect("the walk's art");
@@ -4408,7 +4406,7 @@ S B B B B B B S
             check(&uneven, frame, &layout, true);
         }
         // ...and offices whose sizes gate in the pieces 160x96 lacks, empty.
-        let pack = pack();
+        let pack = test_default_pack();
         for (w, h) in [(240u16, 144u16), (100, 60)] {
             let observed = FloorSession::new()
                 .observe(
@@ -4802,7 +4800,7 @@ S B B B B B B S
     #[test]
     fn the_neon_glow_takes_its_tubes_hue() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pack = pack();
+        let pack = test_default_pack();
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let office = Office {
             layout: &layout,
@@ -4842,7 +4840,7 @@ S B B B B B B S
     #[cfg(feature = "density-art")]
     fn a_desk_lamp_pools_under_its_painted_bulb() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pack = pack();
+        let pack = test_default_pack();
         let layout = Layout::compute_with_seed(240, 144, None, 0).expect("lays out");
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         let pen = Pen::for_pack(scale, &pack);
@@ -5141,7 +5139,7 @@ S B B B B B B S
     #[test]
     fn a_static_piece_holds_through_the_hours_and_the_queue() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pack = pack();
+        let pack = test_default_pack();
         let layout = Layout::compute_with_seed(240, 144, None, 0).expect("lays out");
         let idle = SimFrame {
             agents: Vec::new(),
@@ -5533,7 +5531,7 @@ S B B B B B B S
 
     #[test]
     fn the_walls_contact_row_is_the_floor_a_shade_down() {
-        let pack = pack();
+        let pack = test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         let pen = Pen::for_pack(scale, &pack);
@@ -5563,7 +5561,7 @@ S B B B B B B S
     #[test]
     fn a_rug_is_mirrored_about_its_centre_column() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pack = pack();
+        let pack = test_default_pack();
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         let pen = Pen::for_pack(scale, &pack);
         let rug = crate::layout::Bounds {
@@ -5614,7 +5612,7 @@ S B B B B B B S
     /// is whole on one row, which a figure is wholly north or south of.
     #[test]
     fn no_wall_segment_is_taller_than_the_cast() {
-        let pack = pack();
+        let pack = test_default_pack();
         let (_, body_h) = base_size(&pack, "standing");
         let layout = Layout::compute_with_seed(240, 144, None, 0).expect("lays out");
         let mut order: Vec<(Span, PieceKind)> = Vec::new();
@@ -5647,7 +5645,7 @@ S B B B B B B S
     /// still renders, with its foot a whole desk below the surface.
     #[test]
     fn the_drawn_size_is_the_same_whichever_density_the_art_came_from() {
-        let pack = pack();
+        let pack = test_default_pack();
         let (bw, bh) = base_size(&pack, "desk");
         for s in 1..=12u16 {
             let scale = RenderScale::new(s).expect("nonzero");
@@ -5674,7 +5672,7 @@ S B B B B B B S
     /// them, the backrest, nearest the viewer, over their lap.
     #[test]
     fn a_back_view_sofa_seats_its_sitter_between_its_seat_and_its_backrest() {
-        let pack = pack();
+        let pack = test_default_pack();
         let sofa = crate::layout::Point { x: 40, y: 30 };
         let mut order = Vec::new();
         push_sofa(&mut order, &pack, sofa, true, Tie::FixtureOver);
@@ -5701,7 +5699,7 @@ S B B B B B B S
     /// table there, and the table, pushed after it, painted over its cushions.
     #[test]
     fn the_table_sorts_behind_the_back_view_sofas_seat_in_the_tightest_room() {
-        let pack = pack();
+        let pack = test_default_pack();
         let mut checked = 0;
         for (w, h) in [(110, 66), (130, 90)] {
             for seed in 0..4 {
@@ -5737,7 +5735,7 @@ S B B B B B B S
     /// shadow rows below where it stands.
     #[test]
     fn the_tables_span_ends_where_it_paints() {
-        let pack = pack();
+        let pack = test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
         for s in [1, pack.max_density_variant()] {
@@ -5803,7 +5801,7 @@ S B B B B B B S
     #[test]
     fn a_moving_pieces_fingerprint_moves_with_what_it_shows() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pack = pack();
+        let pack = test_default_pack();
         let layout = lively_office();
         let office = Office {
             layout: &layout,
@@ -5871,7 +5869,7 @@ S B B B B B B S
     #[cfg(feature = "density-art")]
     fn what_glows_of_its_own_keeps_its_colour_at_night() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pack = pack();
+        let pack = test_default_pack();
         let layout = lively_office();
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         let office = Office {
@@ -5972,7 +5970,7 @@ S B B B B B B S
     #[test]
     fn a_window_pane_keeps_its_sky_and_takes_the_signs_glow() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pack = pack();
+        let pack = test_default_pack();
         let layout = lively_office();
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         let office = Office {
@@ -6035,7 +6033,7 @@ S B B B B B B S
     #[test]
     fn the_clocks_hands_stay_on_its_face() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pack = pack();
+        let pack = test_default_pack();
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         let at = Point { x: 2, y: 2 };
         let dial =
@@ -6091,7 +6089,7 @@ S B B B B B B S
     /// south of it draws over it, one row north draws under it.
     #[test]
     fn a_walker_just_south_of_a_desk_front_draws_over_it() {
-        let pack = pack();
+        let pack = test_default_pack();
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let desk = layout
             .fixtures()
@@ -6122,7 +6120,7 @@ S B B B B B B S
     /// sofa's seat, which its sitter sits on, stays under.
     #[test]
     fn a_fixture_ties_a_figure_as_the_roster_says() {
-        let pack = pack();
+        let pack = test_default_pack();
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         let mut over = std::collections::BTreeSet::new();
         for layout in many_layouts() {
@@ -6207,7 +6205,7 @@ S B B B B B B S
     /// The lounge couch faces the window, so the cutaway draws its back.
     #[test]
     fn the_lounge_couch_is_drawn_from_behind() {
-        let pack = pack();
+        let pack = test_default_pack();
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         let layout = many_layouts()
             .find(|l| l.lounge.is_some())
@@ -6230,7 +6228,7 @@ S B B B B B B S
     /// roster has is met on some office.
     #[test]
     fn the_cutaway_draws_every_fixture_the_roster_yields() {
-        let pack = pack();
+        let pack = test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         let pen = Pen::for_pack(scale, &pack);
@@ -6277,7 +6275,7 @@ S B B B B B B S
     /// painters cast from one answer.
     #[test]
     fn the_cutaway_grounds_what_the_roster_says_stands() {
-        let pack = pack();
+        let pack = test_default_pack();
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         for layout in many_layouts() {
             for fixture in layout.fixtures() {
@@ -6321,7 +6319,7 @@ S B B B B B B S
     /// it.
     #[test]
     fn a_front_view_sofa_ties_its_sitters() {
-        let pack = pack();
+        let pack = test_default_pack();
         let sofa = crate::layout::Point { x: 40, y: 30 };
         let mut order = Vec::new();
         push_sofa(&mut order, &pack, sofa, false, Tie::FigureOver);
@@ -6421,7 +6419,7 @@ S B B B B B B S
     /// waypoint the mask blocks and the visitor faces.
     #[test]
     fn the_pantry_counter_stands_on_its_waypoint() {
-        let pack = pack();
+        let pack = test_default_pack();
         let mut checked = 0;
         for layout in many_layouts() {
             let Some(wp) = layout
@@ -6454,7 +6452,7 @@ S B B B B B B S
     /// visitor stands.
     #[test]
     fn no_piece_is_queued_twice() {
-        let pack = pack();
+        let pack = test_default_pack();
         let mut booths = 0;
         for layout in many_layouts() {
             let order = queued(&layout, &pack, RenderScale::ONE, &[], |_| true);
@@ -6486,7 +6484,7 @@ S B B B B B B S
     /// only hangs on the band is left to the backdrop.
     #[test]
     fn floor_standing_wall_decor_sorts_with_the_floor() {
-        let pack = pack();
+        let pack = test_default_pack();
         let mut standing = 0;
         for layout in many_layouts() {
             let order = queued(&layout, &pack, RenderScale::ONE, &[], |k| {
@@ -6507,7 +6505,7 @@ S B B B B B B S
     /// the art whole.
     #[test]
     fn a_sofas_bands_paint_its_art_whole() {
-        let pack = pack();
+        let pack = test_default_pack();
         let sofa = crate::layout::Point { x: 20, y: 10 };
         let (w, h) = base_size(&pack, MEETING_SOFA_NORTH);
         for s in [1, pack.max_density_variant()] {
@@ -6540,7 +6538,7 @@ S B B B B B B S
     /// meets it, so the seam paints under the sitter and the ridge over them.
     #[test]
     fn the_north_sofas_backrest_starts_on_its_lit_ridge() {
-        let pack = pack();
+        let pack = test_default_pack();
         let densities = std::iter::once(1).chain(pack.density_variants());
         for d in densities {
             let name = if d == 1 {
@@ -6571,7 +6569,7 @@ S B B B B B B S
     #[test]
     #[cfg(feature = "density-art")]
     fn only_the_top_down_base_desk_gets_a_derived_front_face() {
-        let pack = pack();
+        let pack = test_default_pack();
         let floor = pixtuoid_core::sprite::Rgb { r: 1, g: 2, b: 3 };
         let at = crate::layout::Point { x: 1, y: 1 };
         let (bw, bh) = base_size(&pack, "desk");
@@ -6698,7 +6696,7 @@ S B B B B B B S
     #[test]
     fn the_cutaway_paints_whole_art_pixels() {
         use crate::floor::{FloorMeta, FloorSession};
-        let pack = pack();
+        let pack = test_default_pack();
         let d = pack.max_density_variant();
         let (walk_layout, _, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let walking = &frames[frames.len() / 2];
