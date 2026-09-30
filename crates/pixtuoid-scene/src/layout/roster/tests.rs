@@ -517,12 +517,13 @@ fn snapping_to_a_pane_keeps_the_notice_board() {
 
 #[test]
 fn the_clock_hangs_centred_on_a_window_post() {
+    let mut met = 0;
     for l in north_wall_census() {
-        let clock = l
-            .fixtures()
-            .find(|f| f.kind == FixtureKind::Clock)
-            .expect("a clock at every census size")
-            .visual;
+        let Some(clock) = l.fixtures().find(|f| f.kind == FixtureKind::Clock) else {
+            continue;
+        };
+        met += 1;
+        let clock = clock.visual;
         let centre = clock.x + clock.width / 2;
         assert!(
             super::super::window_posts(l.buf_w).any(|p| (p.start + p.end) / 2 == centre),
@@ -531,6 +532,27 @@ fn the_clock_hangs_centred_on_a_window_post() {
             l.buf_h
         );
     }
+    assert!(met > 0, "the census met a clock");
+}
+
+#[test]
+fn the_clock_covers_no_window() {
+    let mut met = 0;
+    for l in north_wall_census() {
+        let Some(clock) = l.fixtures().find(|f| f.kind == FixtureKind::Clock) else {
+            continue;
+        };
+        met += 1;
+        let clock = clock.visual;
+        assert!(
+            l.window_bays()
+                .all(|b| clock.x + clock.width <= b.x || b.span().end <= clock.x),
+            "{}x{}: {clock:?} over a window",
+            l.buf_w,
+            l.buf_h
+        );
+    }
+    assert!(met > 0, "the census met a clock");
 }
 
 #[test]
@@ -538,8 +560,14 @@ fn the_neon_sign_hangs_a_post_west_of_the_first_window() {
     for l in north_wall_census() {
         let first = super::super::window_slots(l.buf_w).next().expect("a slot");
         let gap = first.x - (NEON_PANEL.x + NEON_PANEL.width);
+        let clock = l.fixtures().find(|f| f.kind == FixtureKind::Clock);
+        let holds_clock = |p: &std::ops::Range<u16>| {
+            clock.is_some_and(|c| p.start <= c.visual.x && c.visual.x < p.end)
+        };
         assert!(
-            super::super::window_posts(l.buf_w).all(|p| (p.end - p.start).abs_diff(gap) <= 1),
+            super::super::window_posts(l.buf_w)
+                .filter(|p| !holds_clock(p))
+                .all(|p| (p.end - p.start).abs_diff(gap) <= 1),
             "{}x{}: the neon stands a post's width west of the first window",
             l.buf_w,
             l.buf_h

@@ -756,11 +756,12 @@ impl SceneLayout {
         })
     }
 
-    /// The wall clock's top-left: centred on the window post nearest the
-    /// wall's middle, or `None` on a wall with no post.
+    /// The wall clock's top-left: centred on the window post as wide as it
+    /// nearest the wall's middle, or `None` on a wall with no such post.
     pub(crate) fn clock_pos(&self) -> Option<Point> {
         let middle = self.buf_w / 2;
         super::window_posts(self.buf_w)
+            .filter(|post| post.len() >= usize::from(CLOCK.w))
             .map(|post| (post.start + post.end) / 2)
             .min_by_key(|centre| centre.abs_diff(middle))
             .map(|centre| Point {

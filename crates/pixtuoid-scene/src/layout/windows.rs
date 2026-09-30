@@ -4,7 +4,7 @@
 
 use std::ops::Range;
 
-use super::{Bounds, ELEVATOR_H, ELEVATOR_W, NEON_PANEL, SceneLayout};
+use super::{Bounds, CLOCK, ELEVATOR_H, ELEVATOR_W, NEON_PANEL, SceneLayout};
 
 /// A window's width, frame included — fixed, so the skyline detail reads the
 /// same on every terminal.
@@ -55,22 +55,61 @@ fn door_slot_x(buf_w: u16) -> Option<u16> {
 }
 
 /// Every window slot a wall `buf_w` wide fits, left to right, ending in the
-/// door's: as many windows as leave every post at least [`MIN_POST_W`], the
-/// wall between the neon and the door's slot shared out evenly between the
-/// posts, the easternmost taking the columns that don't divide.
+/// door's: as many windows as leave every post at least [`MIN_POST_W`], with
+/// the wall between the neon and the door's slot shared out between the
+/// posts ([`slot_gaps`]).
 pub(crate) fn window_slots(buf_w: u16) -> impl Iterator<Item = WindowBay> {
-    let span = door_slot_x(buf_w).and_then(|x| x.checked_sub(NEON_EAST));
-    let windows = span.map_or(0, |s| {
-        s.saturating_sub(MIN_POST_W) / (WINDOW_W + MIN_POST_W)
-    });
-    let posts = windows + 1;
-    let wall = span.map_or(0, |s| s - windows * WINDOW_W);
-    let (post, narrow) = (wall / posts, posts - wall % posts);
-    let slots = if span.is_some() { posts } else { 0 };
-    (0..slots).map(move |idx| WindowBay {
-        x: NEON_EAST + (idx + 1) * post + (idx + 1).saturating_sub(narrow) + idx * WINDOW_W,
-        idx,
-    })
+    let mut x = NEON_EAST;
+    slot_gaps(buf_w)
+        .into_iter()
+        .zip(0..)
+        .map(move |(gap, idx)| {
+            x += gap;
+            let slot = WindowBay { x, idx };
+            x += WINDOW_W;
+            slot
+        })
+}
+
+/// The wall west of each slot: the neon's gap, then the post before each
+/// slot after the first. Shared out evenly, the easternmost taking the
+/// columns that don't divide — but where no post between two slots is as
+/// wide as the [`CLOCK`], the one nearest the wall's middle is widened to
+/// hang it on, from the spare wall, if that leaves the rest [`MIN_POST_W`].
+fn slot_gaps(buf_w: u16) -> Vec<u16> {
+    let Some(span) = door_slot_x(buf_w).and_then(|x| x.checked_sub(NEON_EAST)) else {
+        return Vec::new();
+    };
+    let windows = span.saturating_sub(MIN_POST_W) / (WINDOW_W + MIN_POST_W);
+    let wall = span - windows * WINDOW_W;
+    let even = spread(wall, windows + 1);
+    let has_clock_post = even.iter().skip(1).any(|&g| g >= CLOCK.w);
+    if windows == 0 || has_clock_post || wall < CLOCK.w + windows * MIN_POST_W {
+        return even;
+    }
+    let middle = buf_w / 2;
+    let mut west = NEON_EAST;
+    let nearest = even
+        .iter()
+        .enumerate()
+        .map(|(k, &gap)| {
+            let centre = west + gap / 2;
+            west += gap + WINDOW_W;
+            (k, centre)
+        })
+        .skip(1)
+        .min_by_key(|&(_, centre)| centre.abs_diff(middle))
+        .map_or(1, |(k, _)| k);
+    let mut gaps = spread(wall - CLOCK.w, windows);
+    gaps.insert(nearest, CLOCK.w);
+    gaps
+}
+
+/// `wall` shared out between `n` gaps, the easternmost taking the columns
+/// that don't divide.
+fn spread(wall: u16, n: u16) -> Vec<u16> {
+    let (base, narrow) = (wall / n, n - wall % n);
+    (0..n).map(|k| base + u16::from(k >= narrow)).collect()
 }
 
 /// The windows a wall `buf_w` wide shows, left to right: the tiling less every
@@ -179,10 +218,14 @@ mod tests {
                 .zip(slots.iter().map(|s| s.x))
                 .map(|(west, east)| east - west)
                 .collect();
-            let (min, max) = (gaps.iter().min(), gaps.iter().max());
+            let mut rest = gaps.clone();
+            if let Some(k) = rest.iter().skip(1).position(|&g| g == CLOCK.w) {
+                rest.remove(k + 1);
+            }
+            let (min, max) = (rest.iter().min(), rest.iter().max());
             assert!(
-                max.zip(min).is_some_and(|(a, b)| a - b <= 1),
-                "{buf_w}: {gaps:?}"
+                max.zip(min).is_none_or(|(a, b)| a - b <= 1),
+                "{buf_w}: {gaps:?} evenly, but a clock's post"
             );
             for (k, s) in slots.iter().enumerate() {
                 assert_eq!(usize::from(s.idx), k);

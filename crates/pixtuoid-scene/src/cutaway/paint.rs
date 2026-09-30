@@ -5821,11 +5821,12 @@ S B B B B B B S
                     FixtureKind::FishTank,
                     FixtureKind::WaterCooler,
                     FixtureKind::Door,
+                    FixtureKind::Clock,
                 ]
                 .iter()
                 .all(|k| kinds.contains(k))
             })
-            .expect("an office has a lounge aquarium, a pantry cooler and an elevator")
+            .expect("an office has a lounge aquarium, a pantry cooler, an elevator and a clock")
     }
 
     /// `frame`'s list at `now`, under a clear sky.
