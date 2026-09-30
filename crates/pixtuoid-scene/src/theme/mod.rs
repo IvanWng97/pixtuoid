@@ -562,7 +562,7 @@ mod tests {
             assert!(
                 a.printer_paper.lightness() > a.printer_body.lightness()
                     && a.printer_body.lightness() > a.printer_top.lightness(),
-                "{}: printer must layer paper > body > top by luminance",
+                "{}: printer must layer paper > body > top by lightness",
                 t.name
             );
             assert_ne!(
@@ -632,7 +632,7 @@ mod tests {
             let hues = s.all();
             for (i, h) in hues.iter().enumerate() {
                 assert!(
-                    (h.lightness() - bg.lightness()).abs() >= MIN_BADGE_LIGHTNESS_GAP,
+                    h.lightness() >= bg.lightness() + MIN_BADGE_LIGHTNESS_GAP,
                     "{}: source hue {i} too close to tooltip_bg",
                     t.name
                 );

@@ -590,7 +590,7 @@ mod tests {
         let max = format::MAX_RAMP_LEVEL;
         for base in RAMP_BASES {
             assert_eq!(base.ramp(0), base);
-            let lightness: Vec<f32> = (-max..=max).map(|n| base.ramp(n).to_oklab().l).collect();
+            let lightness: Vec<f32> = (-max..=max).map(|n| base.ramp(n).lightness()).collect();
             assert!(
                 lightness.windows(2).all(|w| w[0] < w[1]),
                 "{base:?}: {lightness:?}"
@@ -613,13 +613,14 @@ mod tests {
         }
     }
 
-    /// Lightness is perceived, not a channel sum: pure blue reads darker than
-    /// a green with far less in its channels.
     #[test]
     fn lightness_runs_from_black_to_white_as_the_eye_sees_it() {
         assert!(rgb(0, 0, 0).lightness().abs() < 1e-4);
         assert!((rgb(255, 255, 255).lightness() - 1.0).abs() < 1e-4);
-        assert!(rgb(0, 0, 255).lightness() < rgb(0, 160, 0).lightness());
+        assert!(
+            rgb(0, 0, 255).lightness() < rgb(0, 160, 0).lightness(),
+            "perceived, not a channel sum: pure blue is darker than a dimmer green"
+        );
     }
 
     #[test]
