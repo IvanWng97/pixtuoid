@@ -496,10 +496,10 @@ fn activation_backend() -> (&'static str, bool) {
     #[cfg(target_os = "linux")]
     {
         let (msg, healthy) = linux_activation_backend(
-            marker_set(std::env::var(crate::focus::SWAY_ENV).ok()),
-            marker_set(std::env::var(crate::focus::HYPRLAND_ENV).ok()),
-            marker_set(std::env::var("WAYLAND_DISPLAY").ok()),
-            marker_set(std::env::var("DISPLAY").ok()),
+            marker_set(crate::focus::SWAY_ENV),
+            marker_set(crate::focus::HYPRLAND_ENV),
+            marker_set("WAYLAND_DISPLAY"),
+            marker_set("DISPLAY"),
         );
         (msg, healthy)
     }
@@ -520,10 +520,10 @@ fn activation_backend() -> (&'static str, bool) {
 /// UNSET, NOT bare presence: a leftover `WAYLAND_DISPLAY=`/`SWAYSOCK=` (systemd user units
 /// and non-forwarded ssh sessions leave them routinely) would otherwise print a confidently
 /// wrong verdict at a user whose X11 EWMH channel works fine. `focus::linux::detect_channel`
-/// keys the live channel on the SAME rule.
+/// keys the live channel through the SAME reader.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn marker_set(value: Option<String>) -> bool {
-    crate::install::io::nonempty(value).is_some()
+fn marker_set(name: &str) -> bool {
+    pixtuoid_core::platform::path_env(name).is_some()
 }
 
 /// Mirrors `focus/linux.rs`'s ONE-channel-per-env order (sway IPC → hyprland IPC → X11
@@ -805,11 +805,11 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
     let connected = crate::config::resolve_connected(&cfg);
     let (log, log_warning) = read_log(log_path);
 
-    let term_env = std::env::var("TERM").ok();
-    let colorterm_env = std::env::var("COLORTERM").ok();
-    let clicolor_force = std::env::var("CLICOLOR_FORCE").ok();
+    let term_env = pixtuoid_core::platform::text_env("TERM");
+    let colorterm_env = pixtuoid_core::platform::text_env("COLORTERM");
+    let clicolor_force = pixtuoid_core::platform::text_env("CLICOLOR_FORCE");
     let color_pf = crate::term::color_preflight(
-        std::env::var("NO_COLOR").ok().as_deref(),
+        pixtuoid_core::platform::text_env("NO_COLOR").as_deref(),
         clicolor_force.as_deref(),
         term_env.as_deref(),
     );
@@ -1409,19 +1409,24 @@ mod tests {
 
     #[test]
     fn an_exported_but_blank_compositor_marker_is_not_a_running_compositor() {
-        assert!(!marker_set(None));
-        assert!(!marker_set(Some(String::new())), "SWAYSOCK= is a leftover");
-        assert!(!marker_set(Some("  \t ".to_string())));
-        assert!(marker_set(Some("/run/user/1000/sway-ipc.sock".to_string())));
-        assert_eq!(
-            linux_activation_backend(
-                marker_set(Some(String::new())),
-                marker_set(None),
-                marker_set(Some(String::new())),
-                marker_set(Some(":0".to_string())),
-            ),
-            ("X11 EWMH ($DISPLAY)", true)
-        );
+        const KEY: &str = "PIXTUOID_TEST_DOCTOR_MARKER";
+        temp_env::with_var_unset(KEY, || assert!(!marker_set(KEY)));
+        for blank in ["", "  \t "] {
+            temp_env::with_var(KEY, Some(blank), || {
+                assert!(!marker_set(KEY), "SWAYSOCK={blank:?} is a leftover");
+            });
+        }
+        temp_env::with_var(KEY, Some("/run/user/1000/sway-ipc.sock"), || {
+            assert!(marker_set(KEY));
+        });
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            let path = std::ffi::OsString::from_vec(b"/run/user/1000/caf\xFF.sock".to_vec());
+            temp_env::with_var(KEY, Some(&path), || {
+                assert!(marker_set(KEY), "a non-UTF-8 socket path is still set");
+            });
+        }
     }
 
     #[test]
@@ -1527,13 +1532,8 @@ mod tests {
         assert!(pack_densities(PackSource::Bundled).is_ok());
     }
 
-    // Reads process-global env (the config path), so it holds TEST_ENV_LOCK like
-    // `run_renders_the_category_report`.
     #[test]
     fn a_config_pack_dir_that_fails_to_load_shows_in_the_report() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
         let base = tempfile::TempDir::new().expect("tempdir");
         let config_dir = base.path().join("pixtuoid");
         std::fs::create_dir_all(&config_dir).expect("mkdir config");
@@ -1552,29 +1552,19 @@ mod tests {
             format!("pack-dir = {:?}\n", pack.to_string_lossy()),
         )
         .expect("write config.toml");
-        let saved: Vec<(&str, Option<std::ffi::OsString>)> =
-            ["XDG_CONFIG_HOME", "CLICOLOR_FORCE", "NO_COLOR"]
-                .iter()
-                .map(|k| (*k, std::env::var_os(k)))
-                .collect();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", base.path()) };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("CLICOLOR_FORCE") };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("NO_COLOR") };
-        let out = run(
-            std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
-            crate::GraphicsMode::Auto,
+        let out = temp_env::with_vars(
+            [
+                ("XDG_CONFIG_HOME", Some(base.path().as_os_str())),
+                ("CLICOLOR_FORCE", None),
+                ("NO_COLOR", None),
+            ],
+            || {
+                run(
+                    std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+                    crate::GraphicsMode::Auto,
+                )
+            },
         );
-        for (k, v) in saved {
-            match v {
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                Some(v) => unsafe { std::env::set_var(k, v) },
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                None => unsafe { std::env::remove_var(k) },
-            }
-        }
         let out = out.expect("doctor runs");
         assert!(out.contains("failed to load sprite pack"), "{out}");
         assert!(!out.contains(['\u{1b}', '\u{202e}']), "{out:?}");
@@ -1584,29 +1574,12 @@ mod tests {
     fn run_renders_the_category_report() {
         // A dev shell exporting CLICOLOR_FORCE would force escapes even under
         // captured stdout — pin the env so the plain-text asserts hold anywhere.
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved: Vec<(&str, Option<std::ffi::OsString>)> = ["CLICOLOR_FORCE", "NO_COLOR"]
-            .iter()
-            .map(|k| (*k, std::env::var_os(k)))
-            .collect();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("CLICOLOR_FORCE") };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("NO_COLOR") };
-        let out = run(
-            std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
-            crate::GraphicsMode::Auto,
-        );
-        for (k, v) in saved {
-            match v {
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                Some(v) => unsafe { std::env::set_var(k, v) },
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                None => unsafe { std::env::remove_var(k) },
-            }
-        }
+        let out = temp_env::with_vars_unset(["CLICOLOR_FORCE", "NO_COLOR"], || {
+            run(
+                std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+                crate::GraphicsMode::Auto,
+            )
+        });
         let out = out.unwrap();
         assert!(out.starts_with("pixtuoid doctor\n"), "{out}");
         assert!(out.contains("log    "), "{out}");
@@ -2062,9 +2035,6 @@ mod tests {
     #[test]
     fn run_never_spawns_a_version_probe_for_a_cli_it_has_no_evidence_of() {
         use std::os::unix::fs::PermissionsExt;
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         let (home, bin) = (dir.path().join("home"), dir.path().join("bin"));
         std::fs::create_dir_all(&home).unwrap();
@@ -2079,32 +2049,22 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let saved: Vec<(&str, Option<std::ffi::OsString>)> =
-            ["HOME", "XDG_CONFIG_HOME", "PATH", "OPENCODE_CONFIG_DIR"]
-                .iter()
-                .map(|k| (*k, std::env::var_os(k)))
-                .collect();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("HOME", &home) };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", home.join(".config")) };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("OPENCODE_CONFIG_DIR") };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("PATH", &bin) };
-        let out = run(
-            std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
-            crate::GraphicsMode::Auto,
+        let xdg_config = home.join(".config");
+        let out = temp_env::with_vars(
+            [
+                ("HOME", Some(home.as_path())),
+                ("XDG_CONFIG_HOME", Some(xdg_config.as_path())),
+                ("OPENCODE_CONFIG_DIR", None),
+                ("PATH", Some(bin.as_path())),
+            ],
+            || {
+                run(
+                    std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+                    crate::GraphicsMode::Auto,
+                )
+            },
         );
         let spawned = marker.exists();
-        for (k, v) in saved {
-            match v {
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                Some(v) => unsafe { std::env::set_var(k, v) },
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                None => unsafe { std::env::remove_var(k) },
-            }
-        }
 
         out.expect("the report still builds");
         assert!(

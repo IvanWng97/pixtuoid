@@ -256,7 +256,7 @@ fn main() -> Result<()> {
         // Dump the EXACT pixels just encoded, so an independent encoder
         // (img2sixel) can be run over the same input as a cross-check. Our
         // encoder is an instrument; an instrument nobody validated is a guess.
-        if let Ok(dir) = std::env::var("PIXTUOID_BENCH_DUMP") {
+        if let Some(dir) = pixtuoid_core::platform::path_env("PIXTUOID_BENCH_DUMP") {
             let buf = r.render(FrameInputs {
                 world: FloorInputs {
                     scene: &scene,
@@ -274,9 +274,9 @@ fn main() -> Result<()> {
             for (i, p) in buf.as_slice().iter().enumerate() {
                 img.put_pixel(i as u32 % bw, i as u32 / bw, image::Rgb([p.r, p.g, p.b]));
             }
-            let path = format!("{dir}/frame_{w}x{h}.png");
+            let path = dir.join(format!("frame_{w}x{h}.png"));
             img.save(&path).ok();
-            println!("      dumped {path}");
+            println!("      dumped {}", path.display());
         }
     }
 

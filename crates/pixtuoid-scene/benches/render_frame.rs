@@ -22,7 +22,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_main};
 use pixtuoid_core::id::AgentId;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
@@ -287,5 +287,13 @@ fn render_cutaway_frame(c: &mut Criterion) {
     pixtuoid_scene::pixel_painter::force_weather(None).expect("None always resets");
 }
 
-criterion_group!(benches, render_frame, render_cutaway_frame);
-criterion_main!(benches);
+// A module, because rustc ignores a lint attribute on the macro call itself.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "codspeed's `criterion_group!` reads CODSPEED_ENV and CODSPEED_CARGO_WORKSPACE_ROOT with `env::var`"
+)]
+mod group {
+    use super::{render_cutaway_frame, render_frame};
+    criterion::criterion_group!(benches, render_frame, render_cutaway_frame);
+}
+criterion_main!(group::benches);

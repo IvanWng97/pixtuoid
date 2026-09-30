@@ -130,7 +130,6 @@ jobs:
       - run: just json-schemas
       - run: just links
       - run: just drift-selftest
-      - run: just env-paths
       - run: just gen-art-check
       - run: just tuidrive-selftest
       - run: just e2e-scrub-selftest

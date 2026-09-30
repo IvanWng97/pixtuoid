@@ -87,8 +87,8 @@ impl Pen {
     /// The pen for `pack` at `scale`: the densest of its variant densities that
     /// divides `scale`, else the base art's. [`densest_frame`](crate::pixel_painter::densest_frame)
     /// applies the same rule per piece, so the room shares every piece's grid
-    /// only while the pack draws its variants at one common density, as the
-    /// bundled pack does.
+    /// only while the pack draws its variants at one density
+    /// (`the_bundled_pack_draws_every_variant_at_one_density`).
     pub(crate) fn for_pack(scale: RenderScale, pack: &Pack) -> Self {
         pack.density_variants()
             .into_iter()
@@ -240,6 +240,19 @@ impl Pen {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_bundled_pack_draws_every_variant_at_one_density() {
+        let pack =
+            crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
+                .expect("the embedded pack loads");
+        assert_eq!(
+            pack.density_variants().len(),
+            1,
+            "{:?}",
+            pack.density_variants()
+        );
+    }
 
     const LIGHT: Rgb = Rgb {
         r: 200,
