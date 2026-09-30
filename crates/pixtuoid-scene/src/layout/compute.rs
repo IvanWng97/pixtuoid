@@ -1576,6 +1576,42 @@ fn clears_the_seats(kind: Furniture, pos: Point, home_desks: &[Point]) -> bool {
     })
 }
 
+/// Which way a corridor appliance slides from its corner.
+#[derive(Clone, Copy)]
+enum Slide {
+    East,
+    West,
+}
+
+/// Where corridor appliance `kind` stands: at `corner`, or slid `toward` the
+/// aisle's middle by up to `reach` columns, into the gap between two pods'
+/// seats, when a south-row sitter stands over it — `None` with no clear spot.
+fn slid_clear_of_the_seats(
+    kind: Furniture,
+    corner: Point,
+    toward: Slide,
+    reach: u16,
+    home_desks: &[Point],
+) -> Option<Point> {
+    (0..=reach)
+        .map(|d| Point {
+            x: match toward {
+                Slide::East => corner.x + d,
+                Slide::West => corner.x.saturating_sub(d),
+            },
+            ..corner
+        })
+        .find(|&p| clears_the_seats(kind, p, home_desks))
+}
+
+pub(super) const VENDING_MIN_AISLE_H: u16 = 10;
+pub(super) const VENDING_MIN_AISLE_W: u16 = 30;
+pub(super) const PRINTER_MIN_AISLE_H: u16 = 9;
+pub(super) const PRINTER_MIN_AISLE_W: u16 = 40;
+/// Columns from the band's west edge to the vending machine's, clear of a
+/// vertical wall's foot there.
+const VENDING_WEST_GAP: u16 = 3;
+
 /// Waypoints: couch, pantry, pod-decor-promoted (PhoneBooth/StandingDesk), corridor
 /// appliances (VendingMachine/Printer).
 fn compute_waypoints(
@@ -1643,26 +1679,25 @@ fn compute_waypoints(
         }
     }
 
-    const VENDING_MIN_AISLE_H: u16 = 10;
-    const VENDING_MIN_AISLE_W: u16 = 30;
-    const PRINTER_MIN_AISLE_H: u16 = 9;
-    const PRINTER_MIN_AISLE_W: u16 = 40;
-    /// Columns from the band's west edge to the vending machine's, clear of a
-    /// vertical wall's foot there.
-    const VENDING_WEST_GAP: u16 = 3;
     // Each appliance's base stands one row off the aisle's south edge, its art
     // overhanging north (invariant #6).
     let appliance_y = |kind: Furniture| {
         let base = (cubicle_aisle.y + cubicle_aisle.height).saturating_sub(2);
         super::placement::centre_y_standing_on(base, furniture_def(kind).visual.h)
     };
-    let vending = Point {
-        x: right_x + VENDING_WEST_GAP + furniture_def(Furniture::VendingMachine).visual.w / 2,
-        y: appliance_y(Furniture::VendingMachine),
-    };
-    if cubicle_aisle.height >= VENDING_MIN_AISLE_H
+    let vending = slid_clear_of_the_seats(
+        Furniture::VendingMachine,
+        Point {
+            x: right_x + VENDING_WEST_GAP + furniture_def(Furniture::VendingMachine).visual.w / 2,
+            y: appliance_y(Furniture::VendingMachine),
+        },
+        Slide::East,
+        pod_grid.stride_x,
+        home_desks,
+    );
+    if let Some(vending) = vending
+        && cubicle_aisle.height >= VENDING_MIN_AISLE_H
         && cubicle_aisle.width > VENDING_MIN_AISLE_W
-        && clears_the_seats(Furniture::VendingMachine, vending, home_desks)
     {
         waypoints.push(Waypoint {
             pos: vending,
@@ -1671,14 +1706,16 @@ fn compute_waypoints(
             room_id: None,
         });
     }
-    // Slid west from its corner, a pod's stride at most, into the gap between
-    // two pods' seats when a south-row sitter stands over it.
-    let printer = (0..=pod_grid.stride_x)
-        .map(|dx| Point {
-            x: (right_x + right_w).saturating_sub(10 + dx),
+    let printer = slid_clear_of_the_seats(
+        Furniture::Printer,
+        Point {
+            x: (right_x + right_w).saturating_sub(10),
             y: appliance_y(Furniture::Printer),
-        })
-        .find(|&p| clears_the_seats(Furniture::Printer, p, home_desks));
+        },
+        Slide::West,
+        pod_grid.stride_x,
+        home_desks,
+    );
     if let Some(printer) = printer
         && cubicle_aisle.height >= PRINTER_MIN_AISLE_H
         && cubicle_aisle.width > PRINTER_MIN_AISLE_W

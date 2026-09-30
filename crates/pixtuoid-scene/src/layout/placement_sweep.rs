@@ -1048,6 +1048,41 @@ fn the_whiteboard_hides_no_desk_and_stands_clear_of_the_walls_and_its_twin() {
     sweep_production_floors(assert_the_whiteboard_hides_no_desk_or_wall);
 }
 
+/// A machine is placed only where it clears every sitter, so a corner whose
+/// seat check fails is dropped with no trace: every aisle that clears a
+/// machine's gates must hold one, slid clear of the seats.
+fn assert_each_appliance_lands_where_its_aisle_fits(w: u16, h: u16, seed: u64, l: &SceneLayout) {
+    use super::compute::{
+        PRINTER_MIN_AISLE_H, PRINTER_MIN_AISLE_W, VENDING_MIN_AISLE_H, VENDING_MIN_AISLE_W,
+    };
+    let aisle = l.cubicle_aisle;
+    for (kind, min_h, min_w) in [
+        (
+            WaypointKind::VendingMachine,
+            VENDING_MIN_AISLE_H,
+            VENDING_MIN_AISLE_W,
+        ),
+        (
+            WaypointKind::Printer,
+            PRINTER_MIN_AISLE_H,
+            PRINTER_MIN_AISLE_W,
+        ),
+    ] {
+        if aisle.height >= min_h && aisle.width > min_w {
+            assert!(
+                l.waypoints.iter().any(|wp| wp.kind == kind),
+                "{w}x{h} seed {seed}: the aisle {aisle:?} fits a {kind:?}, but none stands"
+            );
+        }
+    }
+}
+
+#[test]
+fn each_appliance_lands_wherever_its_aisle_fits() {
+    sweep(assert_each_appliance_lands_where_its_aisle_fits);
+    sweep_production_floors(assert_each_appliance_lands_where_its_aisle_fits);
+}
+
 /// The boundary scan can't catch an over-drop: dropping the couch only IMPROVES
 /// connectivity. 61x160 seed 1 is the KNIFE-EDGE — the floor lamp flanking the
 /// couch east (`compute::LoungeFlanks`) meets the door threshold's column
