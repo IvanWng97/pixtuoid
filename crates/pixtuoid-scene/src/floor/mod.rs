@@ -296,7 +296,7 @@ impl CoffeeState {
 
 /// The shared per-frame EPILOGUE: stamp this frame's new coffee carriers and
 /// refresh the door-cosmetic clamp. `pub` so the TUI's `draw_scene` — which
-/// can't call [`render_floor`]/`observe` — runs THIS seam instead of
+/// can't call [`render_floor`]/[`FloorSession::observe`] — runs THIS seam instead of
 /// re-inlining the pair.
 pub fn frame_epilogue(
     fctx: &mut FloorCtx,
@@ -309,8 +309,8 @@ pub fn frame_epilogue(
 }
 
 /// The IMMUTABLE per-frame render inputs threaded through [`render_floor`] /
-/// [`FloorSession::render`]. The MUTABLE per-floor stores
-/// (`fctx`/`buf`/`coffee`/`chitchat`) stay SEPARATE params on `render_floor`: a
+/// [`FloorSession::render`]. The MUTABLE stores (the floor's `fctx`/`buf`, the
+/// office's `coffee`/`chitchat`) stay SEPARATE params on `render_floor`: a
 /// painter that composes floors (the TUI) borrows those disjointly per floor via
 /// `split_at_mut`, so they can't fold into one bundle.
 pub struct FrameInputs<'a> {
@@ -402,48 +402,6 @@ pub struct ObservedFloor {
     pub layout: Arc<crate::layout::Layout>,
     /// The world, advanced one tick.
     pub frame: SimFrame,
-}
-
-/// [`render_floor`] without the classic paint pass: the same layout prologue, sim
-/// tick and bookkeeping epilogue, over the same disjoint per-floor borrows, for a
-/// painter that draws the frame some other way. `None` when the size can't lay
-/// out; eviction stays the caller's, as there.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn observe_floor(
-    fctx: &mut FloorCtx,
-    coffee: &mut CoffeeState,
-    chitchat: &mut HashMap<VenueKey, ActiveChitchat>,
-    scene: &SceneState,
-    pack: &Pack,
-    size: Size,
-    floor_meta: FloorMeta,
-    now: SystemTime,
-) -> Option<ObservedFloor> {
-    let layout = fctx.frame_layout(size.w, size.h, floor_meta.floor_seed)?;
-    let frame = sim_step(
-        &mut SimStores {
-            router: &mut fctx.router,
-            overlay: &mut fctx.overlay,
-            history: &mut fctx.history,
-            motion: &mut fctx.motion,
-            light: &mut fctx.light,
-            neon: &mut fctx.neon,
-            chitchat,
-        },
-        SimInputs {
-            scene,
-            layout: &layout,
-            pack,
-            coffee: coffee.map(),
-            // The pet needs the painter's config and click state, which `observe`
-            // does not take; widen it when an observer draws the pet.
-            pets: PetInputs::default(),
-            floor: floor_meta,
-            now,
-        },
-    );
-    frame_epilogue(fctx, coffee, frame.new_coffee_carriers.iter().copied(), now);
-    Some(ObservedFloor { layout, frame })
 }
 
 /// The per-FLOOR half of a painter's persistent session state: the sim/paint
@@ -725,7 +683,7 @@ impl FloorSession {
     /// Advance the world one tick WITHOUT painting: the session's eviction, then
     /// [`render_floor`]'s layout prologue, sim tick (with no pet) and epilogue,
     /// minus its paint pass. `size` is the layout's logical extent, whatever scale a painter
-    /// draws it at.
+    /// draws it at. `None` when the size can't lay out.
     pub fn observe(
         &mut self,
         scene: &SceneState,
@@ -735,16 +693,37 @@ impl FloorSession {
         now: SystemTime,
     ) -> Option<ObservedFloor> {
         self.evict_missing(scene);
-        observe_floor(
-            &mut self.floor.ctx,
+        let fctx = &mut self.floor.ctx;
+        let layout = fctx.frame_layout(size.w, size.h, floor_meta.floor_seed)?;
+        let frame = sim_step(
+            &mut SimStores {
+                router: &mut fctx.router,
+                overlay: &mut fctx.overlay,
+                history: &mut fctx.history,
+                motion: &mut fctx.motion,
+                light: &mut fctx.light,
+                neon: &mut fctx.neon,
+                chitchat: &mut self.office.chitchat,
+            },
+            SimInputs {
+                scene,
+                layout: &layout,
+                pack,
+                coffee: self.office.coffee.map(),
+                // The pet needs the painter's config and click state, which `observe`
+                // does not take; widen it when an observer draws the pet.
+                pets: PetInputs::default(),
+                floor: floor_meta,
+                now,
+            },
+        );
+        frame_epilogue(
+            fctx,
             &mut self.office.coffee,
-            &mut self.office.chitchat,
-            scene,
-            pack,
-            size,
-            floor_meta,
+            frame.new_coffee_carriers.iter().copied(),
             now,
-        )
+        );
+        Some(ObservedFloor { layout, frame })
     }
 }
 

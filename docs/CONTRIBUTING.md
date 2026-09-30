@@ -20,7 +20,7 @@ recipes.
 
 ```bash
 just              # list recipes
-just preflight    # full pre-push gate: lint → clippy → hack → test (the exact CI order)
+just preflight    # pre-push gate: lint → clippy; `just preflight full` adds hack → test (CI's Rust recipes)
 just fmt          # auto-format
 just test         # the whole suite (cargo-nextest if installed, else cargo test)
 cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
@@ -28,16 +28,18 @@ cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
 
 > **Don't chain `cargo clippy && cargo test`** — clippy and test use *separate*
 > build caches, so chaining recompiles the whole workspace twice. Run
-> `just preflight` (the exact CI order), or one check at a time.
+> `just preflight full`, or one check at a time.
 
 Activate the git hooks once per clone: `git config core.hooksPath .githooks`
-(`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`).
+(`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`, lint + clippy;
+the tests are CI's).
 
 ## CI gates
 
-`just preflight` is the local gate. CI runs the jobs below, and all but
-**hygiene** and zizmor's offline audits are invisible to preflight, so a green
-preflight does not mean a green PR:
+CI is the gate. Beyond the tests and the feature powerset (`just preflight full`
+runs those locally), it runs the jobs below; all but **hygiene** and zizmor's
+offline audits are invisible to preflight, so a green preflight does not mean a
+green PR:
 
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
@@ -181,7 +183,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    whole-file comment audit: every file the PR touches — even by one line —
    gets its entire comment population re-read against `CLAUDE.md`'s comment
    rules, and the cleanup rides the same PR (population and dispositions:
-   [`pr-review.prompt.md`](../.github/prompts/pr-review.prompt.md)'s
+   [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md)'s
    always-on comment row). Not the merge gate.
 8. **Merge gate (non-negotiable)** — the **two-lens review** (2+ differentiated
    lenses on the diff) + green CI + every online-bot finding dispositioned,
@@ -206,7 +208,8 @@ crate IS.
 |---|---|
 | before code, if non-trivial (new seam / ≥3 files) | plan against [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) |
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` |
-| before push | `just preflight` (never piped — a pipe eats the exit code) |
+| before push | nothing — the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
+| opening the PR | open it as a draft; mark it ready once CI is green — the billed review bots skip drafts, so a red push doesn't buy a review of a head that's about to be replaced |
 | before merge | the two-lens review |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 
@@ -226,34 +229,10 @@ Advisory backstops that surface risk but never gate:
 (which recorded fixtures a local CLI has moved past; LOCAL-only) ·
 `just bench` / CodSpeed (local numbers authoritative; CI benches advisory).
 
-## Conventions (the short version — see [`CLAUDE.md`](../CLAUDE.md) for the full set)
+## Conventions and architecture invariants
 
-- **TDD first** — failing test → minimal impl. No code without a test.
-- **DRY, YAGNI** — nothing beyond the current scope.
-- **No `unwrap()` in non-test code**; `anyhow` (app) / `thiserror` (core); the
-  hook listener and JSONL watcher log-and-continue, never panic.
-- **Comments explain WHY, not what.**
-- **Keep docs current** — structure/API/workflow changes update the relevant
-  `CLAUDE.md`/`README.md` in the same commit.
-- **macOS-first** — BSD CLI; `shellcheck` any `.sh` you touch.
-- **Sprite changes need visual verification** — `beautify-decoration` skill;
-  an intentional visual change commits the `just gen`-regenerated references
-  in the same change (CI pixel-diffs against `docs/images/reference-*.png`).
-
-## Architecture invariants (don't break these)
-
-1. `pixtuoid-core` and `pixtuoid-scene` have **no terminal, window or
-   audio-device dependencies** (`just arch` + the crate boundary enforce it);
-   that code lives in the binary's `tui/`/`floating/` painters and audio gateway.
-2. Events flow through **one** channel typed `mpsc::Sender<(Transport,
-   AgentEvent)>`; the `Transport` tag is load-bearing (hook-wins dedup).
-3. The **`Source` trait** is the only seam for a transcript-bearing agent CLI
-   (hook-only CLIs ship a hook decoder + an install `Target` instead).
-4. Hook install writes **through symlinks** (`resolve_symlink`).
-5. The hook shim **never blocks CC** — always exit 0; the send bound
-   (pixtuoid-hook's `transport::WRITE_TIMEOUT`) is watchdog-enforced on both
-   platforms.
-6. Walkable mask = **ground footprint only**; sprites may be visually larger.
+Both live in [`CLAUDE.md`](../CLAUDE.md) ("Conventions", "Architecture
+invariants"), which every contributor and agent reads first.
 
 ## Pull requests
 
@@ -263,7 +242,7 @@ Advisory backstops that surface risk but never gate:
 - AI-authored PRs get the `needs-human-verify` label and a human visual check.
 - **Every reviewer/bot finding reaches exactly one terminal state in the PR
   thread** — FIXED · REFUTED-with-trace · RE-SCOPED · SURFACED, defined ONCE
-  in [`pr-review.prompt.md`](../.github/prompts/pr-review.prompt.md). Agents
+  in [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md). Agents
   never file issues, and "acknowledged, no action" is not a state.
 
 ### Recurring pitfalls (this codebase's review history, distilled)
@@ -304,6 +283,9 @@ guards; steps 1–3, 11 and 12 are on you.
    unmirrored axis is fail-silent: the watcher polls a directory the CLI
    never writes and the office stays empty (#880). Resolver axes are
    deliberately NOT drift-watched — re-run the probe matrix when the CLI majors.
+   A custom root gets ONE `pub fn <cli>_home()`, called by both the watcher's
+   `default_paths()` and the installer's `default_config_path()` so they
+   can't disagree.
 2. **Write the source module** — `crates/pixtuoid-core/src/source/<name>.rs`:
    `SOURCE_NAME`, a `LineDecoder` fn (one JSONL line → `Vec<AgentEvent>`), a
    label deriver, unit tests per event mapping. Format knowledge lives HERE.
@@ -318,14 +300,15 @@ guards; steps 1–3, 11 and 12 are on you.
    capability flags, `verified_version` + `version_probe`. Lifecycle policy
    derives from the flags; you do **not** edit the reducer.
 5. The descriptor's `name` **is the roster** — `registered_source_names()`
-   projects `REGISTRY`, and the conformance suite then requires a fixture.
-6. **Drop a sanitized real-capture fixture** under
-   `tests/sources/fixtures/<name>/<scenario>/` (see the fixtures README for
-   provenance rules), then `cargo insta review`. The conformance harness
-   asserts all of a session's events coalesce to ONE `AgentId`. Test-layout
-   map: [`crates/pixtuoid-core/tests/CLAUDE.md`](../crates/pixtuoid-core/tests/CLAUDE.md).
-7. **Wire it into `runtime/driver.rs::run_async`** (the registry drives the
-   guard test, not the spawning).
+   projects `REGISTRY`, and the conformance suite then requires a fixture. The
+   `sources --json` golden (`crates/pixtuoid/tests/snapshots/cli/sources.json`)
+   must list it: `SNAPSHOTS=overwrite cargo test -p pixtuoid --test cli_json`.
+6. **Record the fixture** — the test steps in
+   [`crates/pixtuoid-core/tests/CLAUDE.md`](../crates/pixtuoid-core/tests/CLAUDE.md)
+   (a RECORDED SessionStart scenario via `just capture-fixture`), then
+   `cargo insta review`.
+7. **Wire it into `runtime/driver.rs::build_source_set`** (the one
+   construction site; the registry drives the guard test, not the spawning).
 8. **If the CLI has hooks**, add an `install/` target (a `Target` row +
    `merge_install`/`merge_uninstall` + a `verify_schema` fn mirroring the
    target's own config format + the registered-events↔decoder-arms guard).
@@ -335,8 +318,8 @@ guards; steps 1–3, 11 and 12 are on you.
 10. **Add the per-source badge hue** — a `SourceColors` field + value in EVERY
     theme file + `badge_color` in the manifest row; the coverage, legibility
     and site-bridge tests fail until it exists.
-11. **Docs in the same PR**: the nested `crates/pixtuoid-core/CLAUDE.md` entry,
-    and a `check_upstream_drift.py` row where one is owed — which surfaces owe
+11. **Drift-watch in the same PR**: a `check_upstream_drift.py` row where one
+    is owed — which surfaces owe
     one is `source/drift.rs`'s header, read it there. A row is four steps: the
     const, the `insert` in that crate's `src/drift_surface.rs`,
     `just gen-drift-surface` (commit both fragments), and the `SURFACE_ROWS`
