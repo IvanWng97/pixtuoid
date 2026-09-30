@@ -609,7 +609,9 @@ struct RootStatus {
 
 /// The density variants of the pack `source` loads, or why that pack fails to
 /// load: `run` refuses to start on it, so doctor says so.
-fn pack_densities(source: pixtuoid_scene::embedded_pack::PackSource) -> Result<Vec<u16>, String> {
+fn pack_densities(
+    source: pixtuoid_scene::embedded_pack::PackSource,
+) -> Result<Vec<pixtuoid_core::sprite::format::Density>, String> {
     use pixtuoid_core::sprite::error::PackError;
     pixtuoid_scene::embedded_pack::load_sprite_pack(source)
         .map(|pack| pack.density_variants())
@@ -644,7 +646,7 @@ struct DoctorReport {
     color_pf: crate::term::ColorPreflight,
     graphics: crate::GraphicsMode,
     graphics_probe: crate::graphics::Probe,
-    densities: Vec<u16>,
+    densities: Vec<pixtuoid_core::sprite::format::Density>,
     rows: Vec<DoctorSourceRow>,
     roots: Vec<RootStatus>,
     backend: &'static str,

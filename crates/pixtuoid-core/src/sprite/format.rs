@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::num::NonZeroU16;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -204,7 +205,7 @@ mod tests {
         let tower = pack.buildings().next().expect("the tower");
         assert_eq!((tower.name(), tower.size()), ("tower", (2, 3)));
         assert!(tower.stands_in(CityPlane::Mid) && tower.stands_in(CityPlane::Near));
-        let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
+        let d = |n| Density::new(n).expect("nonzero");
         let base = tower.base();
         assert!(tower.variant(d(1)).is_none(), "the base is no variant");
         assert_eq!(
@@ -886,7 +887,7 @@ pub struct Building {
     name: String,
     planes: Vec<CityPlane>,
     base: BuildingArt,
-    variants: BTreeMap<u16, BuildingArt>,
+    variants: BTreeMap<Density, BuildingArt>,
 }
 
 impl Building {
@@ -915,8 +916,8 @@ impl Building {
     }
 
     /// Its variant drawn at `density`, above its [`base`](Self::base).
-    pub fn variant(&self, density: std::num::NonZeroU16) -> Option<&BuildingArt> {
-        self.variants.get(&density.get())
+    pub fn variant(&self, density: Density) -> Option<&BuildingArt> {
+        self.variants.get(&density)
     }
 }
 
@@ -947,7 +948,7 @@ impl BuildingArt {
 #[derive(Debug, Clone)]
 pub struct Hairstyle {
     name: String,
-    density: std::num::NonZeroU16,
+    density: Density,
     views: [Option<HairLayers>; HeadView::ALL.len()],
 }
 
@@ -958,7 +959,7 @@ impl Hairstyle {
     }
 
     /// The density of the art it dresses.
-    pub fn density(&self) -> std::num::NonZeroU16 {
+    pub fn density(&self) -> Density {
         self.density
     }
 
@@ -1010,7 +1011,7 @@ impl Pack {
     }
 
     /// The style `name` at `density`, where the pack draws one.
-    pub fn hairstyle(&self, name: &str, density: std::num::NonZeroU16) -> Option<&Hairstyle> {
+    pub fn hairstyle(&self, name: &str, density: Density) -> Option<&Hairstyle> {
         self.hairstyles.get(&format!("{name}@{density}x"))
     }
 
@@ -1054,9 +1055,13 @@ impl Pack {
         self.animations.keys().cloned().collect()
     }
 
-    /// The densest of [`Pack::density_variants`], or 1 when the pack ships none.
-    pub fn max_density_variant(&self) -> u16 {
-        self.density_variants().first().copied().unwrap_or(1)
+    /// The densest of [`Pack::density_variants`], or [`Density::ONE`] when the
+    /// pack ships none.
+    pub fn max_density_variant(&self) -> Density {
+        self.density_variants()
+            .first()
+            .copied()
+            .unwrap_or(Density::ONE)
     }
 
     /// The densities this pack's variants are drawn at, densest first, each
@@ -1067,8 +1072,8 @@ impl Pack {
     /// divides. Only a variant of a registered animation that redraws its base
     /// ([`variant_redraws`]) counts: a stray key names nothing a painter asks
     /// for, and every renderer skips a variant that does not redraw its base.
-    pub fn density_variants(&self) -> Vec<u16> {
-        let densities: std::collections::BTreeSet<u16> = self
+    pub fn density_variants(&self) -> Vec<Density> {
+        let densities: std::collections::BTreeSet<Density> = self
             .animations
             .iter()
             .filter_map(|(name, variant)| {
@@ -1202,13 +1207,13 @@ fn build_pack(
         let Some(materials) = city_materials.as_ref() else {
             return Err(PackError::BuildingWithoutCity { key });
         };
-        let (name, density) = split_density_variant(&key).unwrap_or((&key, 1));
-        if density == 1 && key.contains(DENSITY_VARIANT_SEP) {
+        let (name, density) = split_density_variant(&key).unwrap_or((&key, Density::ONE));
+        if density == Density::ONE && key.contains(DENSITY_VARIANT_SEP) {
             return Err(PackError::BuildingDensity { key });
         }
         let art = building_art(&building.sprite, &palette, materials, get_src)?;
         match (density, building.planes) {
-            (1, Some(planes)) if !planes.is_empty() => {
+            (Density::ONE, Some(planes)) if !planes.is_empty() => {
                 let planes = planes
                     .iter()
                     .map(|p| {
@@ -1228,7 +1233,7 @@ fn build_pack(
                     },
                 );
             }
-            (1, _) => return Err(PackError::BuildingWithoutPlanes { key }),
+            (Density::ONE, _) => return Err(PackError::BuildingWithoutPlanes { key }),
             (_, Some(_)) => return Err(PackError::VariantPlanes { key }),
             (_, None) => {
                 let no_base = |key| PackError::VariantWithoutBase {
@@ -1265,9 +1270,7 @@ fn build_pack(
         .transpose()?;
     let mut hairstyles = BTreeMap::new();
     for (key, style) in parsed.hairstyles {
-        let Some((name, density)) =
-            split_density_variant(&key).and_then(|(n, d)| Some((n, std::num::NonZeroU16::new(d)?)))
-        else {
+        let Some((name, density)) = split_density_variant(&key) else {
             return Err(PackError::HairstyleDensity { key });
         };
         let mut layer = |view: HeadView, fname: &str| -> Result<Sprite> {
@@ -1322,8 +1325,8 @@ fn build_pack(
         && let Some(d) = rest.iter().find(|&&d| names_at(d) != names_at(*first))
     {
         return Err(PackError::HairstylesDiffer {
-            first: first.get(),
-            other: d.get(),
+            first: *first,
+            other: *d,
         });
     }
 
@@ -1586,8 +1589,37 @@ pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &[
 /// meaning dependent on whichever render scale happens to measure it.
 pub(crate) const DENSITY_VARIANT_SEP: char = '@';
 
+/// The grid art is authored on, in art pixels per logical unit: 1 for base
+/// art, `N` for a `<name>@<N>x` variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Density(NonZeroU16);
+
+impl Density {
+    /// The base art's density.
+    pub const ONE: Self = Self(NonZeroU16::MIN);
+
+    /// `n` as a density, or `None` for 0.
+    pub const fn new(n: u16) -> Option<Self> {
+        match NonZeroU16::new(n) {
+            Some(n) => Some(Self(n)),
+            None => None,
+        }
+    }
+
+    /// The density as a number.
+    pub const fn get(self) -> u16 {
+        self.0.get()
+    }
+}
+
+impl std::fmt::Display for Density {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// The animation name for `base` drawn at `density`x.
-pub fn density_variant_name(base: &str, density: u16) -> String {
+pub fn density_variant_name(base: &str, density: Density) -> String {
     let mut out = String::with_capacity(base.len() + 4);
     density_variant_name_into(&mut out, base, density);
     out
@@ -1595,7 +1627,7 @@ pub fn density_variant_name(base: &str, density: u16) -> String {
 
 /// [`density_variant_name`] into a caller-owned buffer, so a lookup loop reuses
 /// one allocation.
-pub fn density_variant_name_into(out: &mut String, base: &str, density: u16) {
+pub fn density_variant_name_into(out: &mut String, base: &str, density: Density) {
     use std::fmt::Write;
     // Writing to a String is infallible.
     let _ = write!(out, "{base}{DENSITY_VARIANT_SEP}{density}x");
@@ -1613,7 +1645,7 @@ pub(crate) const MAX_DENSITY_VARIANT: u16 = 64;
 ///
 /// `1x` is deliberately NOT a variant: it would be a second name for the base
 /// animation, and one thing with two names is how a pack ends up shipping both.
-pub(crate) fn split_density_variant(name: &str) -> Option<(&str, u16)> {
+pub(crate) fn split_density_variant(name: &str) -> Option<(&str, Density)> {
     let (base, density) = name.rsplit_once(DENSITY_VARIANT_SEP)?;
     let digits = density.strip_suffix('x')?;
     // Digits only, with no leading zero. `u16::from_str` accepts a leading `+`
@@ -1623,8 +1655,9 @@ pub(crate) fn split_density_variant(name: &str) -> Option<(&str, u16)> {
     if digits.is_empty() || digits.starts_with('0') || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    let n: u16 = digits.parse().ok()?;
-    (2..=MAX_DENSITY_VARIANT).contains(&n).then_some((base, n))
+    let density = Density::new(digits.parse().ok()?)
+        .filter(|d| (2..=MAX_DENSITY_VARIANT).contains(&d.get()))?;
+    Some((base, density))
 }
 
 /// Every registered animation: the required and optional character poses, the
@@ -1654,7 +1687,7 @@ struct RegisteredKey {
     /// The registered animation the key names or redraws.
     base: &'static str,
     /// The density a variant is drawn at; `None` for the animation itself.
-    density: Option<u16>,
+    density: Option<Density>,
 }
 
 impl RegisteredKey {
@@ -1746,16 +1779,16 @@ const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[
 ///
 /// Wider than a frame dimension: a claim past `u16::MAX` stays a size no frame
 /// can meet, where a saturated one would equal a `u16::MAX`-wide frame.
-pub fn claimed_variant_size(base: &Frame, density: u16) -> (u32, u32) {
+pub fn claimed_variant_size(base: &Frame, density: Density) -> (u32, u32) {
     (
-        u32::from(base.width()) * u32::from(density),
-        u32::from(base.height()) * u32::from(density),
+        u32::from(base.width()) * u32::from(density.get()),
+        u32::from(base.height()) * u32::from(density.get()),
     )
 }
 
 /// Whether `variant` is exactly the size its density claims over `base`
 /// ([`claimed_variant_size`]).
-pub fn variant_fits(base: &Frame, density: u16, variant: &Frame) -> bool {
+pub fn variant_fits(base: &Frame, density: Density, variant: &Frame) -> bool {
     claimed_variant_size(base, density) == (u32::from(variant.width()), u32::from(variant.height()))
 }
 
@@ -1763,7 +1796,7 @@ pub fn variant_fits(base: &Frame, density: u16, variant: &Frame) -> bool {
 /// exactly the size its density claims over the matching base frame
 /// ([`variant_fits`]). The one rule a renderer takes a variant by and
 /// [`validate_pack_animations`] passes one by.
-pub fn variant_redraws(base: &Sprite, density: u16, variant: &Sprite) -> bool {
+pub fn variant_redraws(base: &Sprite, density: Density, variant: &Sprite) -> bool {
     let (base, variant) = (base.frames(), variant.frames());
     !variant.is_empty()
         && variant.len() == base.len()
@@ -1983,7 +2016,7 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
         .collect();
     report.missing_optional = missing_optional;
 
-    let variants: Vec<(&str, &Sprite, &'static str, u16)> = pack
+    let variants: Vec<(&str, &Sprite, &'static str, Density)> = pack
         .animations
         .iter()
         .filter_map(|(name, variant)| {
@@ -2062,6 +2095,10 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
 mod validation_floor_tests {
     use super::*;
 
+    fn d(n: u16) -> Density {
+        Density::new(n).expect("nonzero")
+    }
+
     /// A pack of `animations` whose frame files are `frames`.
     fn pack_with_frames(animations: &str, frames: &[(&str, &str)]) -> Pack {
         let toml = format!(
@@ -2098,14 +2135,14 @@ mod validation_floor_tests {
     fn a_key_names_a_registered_animation_or_a_density_variant_of_one() {
         let key = |base, density| Some(RegisteredKey { base, density });
         assert_eq!(RegisteredKey::parse("desk"), key("desk", None));
-        assert_eq!(RegisteredKey::parse("desk@4x"), key("desk", Some(4)));
+        assert_eq!(RegisteredKey::parse("desk@4x"), key("desk", Some(d(4))));
         assert_eq!(
             RegisteredKey::parse("standing@2x"),
-            key("standing", Some(2))
+            key("standing", Some(d(2)))
         );
         assert_eq!(
             RegisteredKey::parse("walking_coffee@8x"),
-            key("walking_coffee", Some(8))
+            key("walking_coffee", Some(d(8)))
         );
         // The BASE must be registered, or a typo'd `dsek@4x` would validate.
         assert_eq!(RegisteredKey::parse("dsek@4x"), None);
@@ -2138,15 +2175,15 @@ mod validation_floor_tests {
             validate_pack_animations(&pack, &[]).unknown,
             vec!["desk@02x".to_string()]
         );
-        assert_eq!(pack.max_density_variant(), 1);
+        assert_eq!(pack.max_density_variant(), Density::ONE);
     }
 
     #[test]
     fn a_variant_name_carries_the_density_it_is_drawn_at() {
         // The name is the CLAIM a renderer looks up by, so it round-trips.
-        assert_eq!(density_variant_name("desk", 4), "desk@4x");
-        assert_eq!(split_density_variant("desk@4x"), Some(("desk", 4)));
-        assert_eq!(split_density_variant("desk@12x"), Some(("desk", 12)));
+        assert_eq!(density_variant_name("desk", d(4)), "desk@4x");
+        assert_eq!(split_density_variant("desk@4x"), Some(("desk", d(4))));
+        assert_eq!(split_density_variant("desk@12x"), Some(("desk", d(12))));
         assert_eq!(split_density_variant("desk@1x"), None);
         assert_eq!(split_density_variant("desk@0x"), None);
         // Malformed claims are not variants; they fall through to the plain
@@ -2238,7 +2275,7 @@ mod validation_floor_tests {
                 && report.orphan_variants.is_empty(),
             "{report:?}"
         );
-        assert_eq!(pack.max_density_variant(), 2);
+        assert_eq!(pack.max_density_variant(), d(2));
 
         let mut custom = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
         custom.merge_from(&pack);
@@ -2260,10 +2297,10 @@ mod validation_floor_tests {
         );
         assert_eq!(
             pack.density_variants(),
-            vec![4, 2],
+            vec![d(4), d(2)],
             "3x does not redraw its base"
         );
-        assert_eq!(pack.max_density_variant(), 4);
+        assert_eq!(pack.max_density_variant(), d(4));
         let plain = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
         assert!(plain.density_variants().is_empty());
     }
@@ -2347,7 +2384,7 @@ mod validation_floor_tests {
             SIZED_FRAMES,
         );
         let anim = |n| pack.animation(n).expect("in the pack");
-        assert!(variant_redraws(anim("walking"), 2, anim("walking@2x")));
+        assert!(variant_redraws(anim("walking"), d(2), anim("walking@2x")));
         let report = validate_pack_animations(&pack, &[]);
         assert!(report.mismatched_density.is_empty(), "{report:?}");
         assert_eq!(
@@ -2383,7 +2420,7 @@ mod validation_floor_tests {
             ("standing@2x", "standing", false),
         ] {
             let anim = |n| pack.animation(n).expect("in the pack");
-            let verdict = variant_redraws(anim(base), 2, anim(name));
+            let verdict = variant_redraws(anim(base), d(2), anim(name));
             let found = report.mismatched_density.iter().any(|m| m.name == name)
                 || report
                     .mismatched_frame_counts
@@ -2644,24 +2681,24 @@ mod validation_floor_tests {
         let plain = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
         assert_eq!(
             plain.max_density_variant(),
-            1,
+            Density::ONE,
             "a pack with no variants must not push a painter off the cell's own scale"
         );
         assert_eq!(
             pack("[animations.\"plant@4x\"]\nframes=[\"four.sprite\"]\nframe_ms=100\n")
                 .max_density_variant(),
-            4
+            d(4)
         );
         assert_eq!(
             pack("[animations.\"typo@64x\"]\nframes=[\"one.sprite\"]\nframe_ms=100\n")
                 .max_density_variant(),
-            2,
+            d(2),
             "a variant of an unregistered base must not inflate the pack's density"
         );
         assert_eq!(
             pack("[animations.\"plant@8x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n")
                 .max_density_variant(),
-            2,
+            d(2),
             "a variant every renderer skips must not round a painter's scale to it"
         );
     }
@@ -2705,7 +2742,7 @@ mod validation_floor_tests {
         // The boundary from both sides, so a future `<` typo cannot slip through.
         assert_eq!(
             split_density_variant("desk@64x"),
-            Some(("desk", MAX_DENSITY_VARIANT))
+            Some(("desk", d(MAX_DENSITY_VARIANT)))
         );
         assert_eq!(split_density_variant("desk@65x"), None);
         // An out-of-range density is not a variant, so the name is simply

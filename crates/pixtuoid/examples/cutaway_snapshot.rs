@@ -139,7 +139,7 @@ fn main() -> Result<()> {
         pixtuoid_scene::embedded_pack::PackSource::Bundled,
     )?;
     // Defaults to the pack's densest art, the density it was drawn for.
-    let scale_n = scale_n.unwrap_or_else(|| pack.max_density_variant());
+    let scale_n = scale_n.unwrap_or_else(|| pack.max_density_variant().get());
     let scale = RenderScale::new(scale_n).ok_or_else(|| anyhow!("--scale must be nonzero"))?;
     // The sky otherwise cycles its weather with the clock, so an hour alone
     // does not say what the room looks like.

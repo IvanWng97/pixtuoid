@@ -217,7 +217,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
     )
     .expect("embedded pack");
     let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
-    let scale = RenderScale::new(pack.max_density_variant()).expect("a nonzero density");
+    let scale = RenderScale::new(pack.max_density_variant().get()).expect("a nonzero density");
     // The case names are claims about the sky model; hold it to them.
     assert!(
         hour_is_day(NOON as f32) && !hour_is_day(NIGHT as f32),

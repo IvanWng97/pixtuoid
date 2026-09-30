@@ -235,7 +235,7 @@ pub enum PackError {
         /// The variant's key.
         key: String,
         /// Its density.
-        density: u16,
+        density: super::format::Density,
         /// The base's width.
         base_w: u16,
         /// The base's height.
@@ -289,9 +289,9 @@ pub enum PackError {
     #[non_exhaustive]
     HairstylesDiffer {
         /// The lowest density.
-        first: u16,
+        first: super::format::Density,
         /// A density whose styles differ from it.
-        other: u16,
+        other: super::format::Density,
     },
 }
 

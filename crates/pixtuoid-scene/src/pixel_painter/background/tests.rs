@@ -49,7 +49,7 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
             (WINDOW_W, 28),
             moment,
             theme,
-            std::num::NonZeroU16::MIN,
+            pixtuoid_core::sprite::format::Density::ONE,
         );
         let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 8, g: 8, b: 10 });
         paint_floor_to_ceiling_window(
@@ -1053,7 +1053,7 @@ fn a_window_shows_the_city_strip_from_its_own_column() {
         (WINDOW_W * 2, 28),
         moment,
         theme,
-        std::num::NonZeroU16::MIN,
+        pixtuoid_core::sprite::format::Density::ONE,
     );
     let pane = |x: u16, run_x0: u16| {
         let mut buf = RgbBuffer::filled(WINDOW_W * 3, 30, Rgb { r: 8, g: 8, b: 10 });

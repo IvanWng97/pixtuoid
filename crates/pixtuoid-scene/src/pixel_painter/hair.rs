@@ -3,11 +3,9 @@
 //! frame's head. A frame is dressed only at a density of 2 and up
 //! ([`dress_for`]), so the classic 1x art never is.
 
-use std::num::NonZeroU16;
-
 use pixtuoid_core::AgentId;
 use pixtuoid_core::id::{fnv1a, splitmix64};
-use pixtuoid_core::sprite::format::{Hairstyle, Pack};
+use pixtuoid_core::sprite::format::{Density, Hairstyle, Pack};
 use pixtuoid_core::sprite::{Frame, HeadMark, Pixel, Rgb, Sprite};
 
 /// Separates the pick's seed from the other per-agent draws that finalize the
@@ -44,7 +42,7 @@ pub(crate) fn dress_for(
     agent: AgentId,
     body: &Frame,
     head: Option<HeadMark>,
-    density: NonZeroU16,
+    density: Density,
 ) -> Option<Dress> {
     let head = head.filter(|_| cfg!(feature = "density-art") && density.get() > 1)?;
     let style = pick(pack, agent).and_then(|name| pack.hairstyle(name, density));
@@ -211,7 +209,7 @@ mod tests {
     #[cfg(feature = "density-art")]
     const LINE: Rgb = Rgb { r: 1, g: 1, b: 1 };
     #[cfg(feature = "density-art")]
-    const TWO: NonZeroU16 = NonZeroU16::MIN.saturating_add(1);
+    const TWO: Density = Density::new(2).expect("nonzero");
 
     /// A pack of `body` marked `head` (the `head.front` mark's column and row),
     /// outlined, and the styles `styles` at 2x, each a front-view over layer of
@@ -286,9 +284,9 @@ mod tests {
         let sprite = pack.animation("seated").expect("the body");
         let body = &sprite.frames()[0];
         let agent = AgentId::from_parts("x", "y");
-        assert!(dress_for(&pack, agent, body, sprite.head(0), NonZeroU16::MIN).is_none());
+        assert!(dress_for(&pack, agent, body, sprite.head(0), Density::ONE).is_none());
         assert!(dress_for(&pack, agent, body, None, TWO).is_none());
-        let four = NonZeroU16::MIN.saturating_add(3);
+        let four = Density::new(4).expect("nonzero");
         let bare = dress_for(&pack, agent, body, sprite.head(0), four).expect("marked at 4x");
         assert_eq!(bare.style, None, "no style at 4x: the head is bare");
     }

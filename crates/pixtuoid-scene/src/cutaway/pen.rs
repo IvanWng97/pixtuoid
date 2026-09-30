@@ -92,7 +92,7 @@ impl Pen {
     pub(crate) fn for_pack(scale: RenderScale, pack: &Pack) -> Self {
         pack.density_variants()
             .into_iter()
-            .find_map(|d| Self::new(scale, d))
+            .find_map(|d| Self::new(scale, d.get()))
             .unwrap_or(Self {
                 d: NonZeroU16::MIN,
                 k: scale.factor(),
@@ -288,7 +288,7 @@ mod tests {
         let pack =
             crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
                 .expect("the embedded pack loads");
-        let d = pack.max_density_variant();
+        let d = pack.max_density_variant().get();
         let at = |s: u16| Pen::for_pack(RenderScale::new(s).expect("nonzero"), &pack);
         assert_eq!(at(d * 2), pen(d * 2, d), "the variant's grid");
         assert_eq!(at(1), pen(1, 1), "no variant fits: the base art's grid");

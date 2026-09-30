@@ -249,6 +249,7 @@ mod comments;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pixtuoid_core::sprite::format::Density;
     use std::fs;
     use std::path::Path;
 
@@ -376,12 +377,12 @@ mod tests {
             .filter(|(name, _)| !dropped.contains(*name))
             .collect();
         let pack = load_pack_from_strings(&toml, &srcs).expect("loads without density art");
-        assert_eq!(pack.max_density_variant(), 1);
+        assert_eq!(pack.max_density_variant(), Density::ONE);
         assert!(
             pack.buildings().next().is_some(),
             "the city keeps its buildings"
         );
-        let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
+        let d = |n| Density::new(n).expect("nonzero");
         assert!(
             pack.buildings().all(|b| b.variant(d(4)).is_none()),
             "at their base alone"
@@ -398,7 +399,7 @@ mod tests {
     #[test]
     #[cfg(feature = "density-art")]
     fn the_bundled_pack_is_drawn_at_most_at_4x() {
-        assert_eq!(test_default_pack().max_density_variant(), 4);
+        assert_eq!(test_default_pack().max_density_variant().get(), 4);
     }
 
     /// Each bundled building ships a variant at the bundled art's density,
@@ -412,7 +413,7 @@ mod tests {
             pack.buildings().next().is_some(),
             "the bundled pack draws a city"
         );
-        let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
+        let d = |n| Density::new(n).expect("nonzero");
         for b in pack.buildings() {
             assert!(b.variant(d(4)).is_some(), "{}", b.name());
         }

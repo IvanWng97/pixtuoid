@@ -170,7 +170,7 @@ pub(super) fn paint_floor_and_walls(
         (run.end - run.start, glass_rows(window_h)),
         moment,
         theme,
-        std::num::NonZeroU16::MIN,
+        pixtuoid_core::sprite::format::Density::ONE,
     );
     let view = GlassView {
         city: &city,
