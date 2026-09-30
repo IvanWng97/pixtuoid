@@ -704,15 +704,16 @@ build-target target cross="false":
         exit 1
         ;;
     esac
-    # Every LINUX artifact builds --no-default-features (musl can't link ALSA
-    # statically; the aarch64 cross image has no ALSA headers), so prebuilt
-    # Linux binaries ship SILENT and Linux audio is a from-source feature
-    # (#633; see docs/CONFIGURATION.md). Derived here, not passed: the flag
-    # is a property of the target. $flags stays UNQUOTED below — quoting the
-    # empty non-Linux case would pass cargo an empty positional arg.
+    # Every LINUX artifact drops `audio` (musl can't link ALSA statically; the
+    # aarch64 cross image has no ALSA headers), so prebuilt Linux binaries ship
+    # SILENT and Linux audio is a from-source feature (#633; see
+    # docs/CONFIGURATION.md). Every other default feature rides `portable`
+    # (pixtuoid's Cargo.toml). Derived here, not passed: the flags are a
+    # property of the target. $flags stays UNQUOTED below — quoting the empty
+    # non-Linux case would pass cargo an empty positional arg.
     flags=""
     case "{{ target }}" in
-    *linux*) flags="--no-default-features" ;;
+    *linux*) flags="--no-default-features --features portable" ;;
     esac
     if [ "$use_cross" = "true" ]; then
         cross build --release --target "{{ target }}" $flags
