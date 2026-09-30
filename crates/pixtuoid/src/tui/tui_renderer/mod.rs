@@ -130,45 +130,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.connection = frame;
     }
 
-    #[cfg(test)]
-    pub fn set_dashboard_frame_parts(
-        &mut self,
-        open: bool,
-        rows: Vec<crate::tui::dashboard::DashboardRow>,
-        selected: Option<pixtuoid_core::AgentId>,
-        scroll: usize,
-    ) {
-        self.dashboard = crate::tui::dashboard::DashboardFrame {
-            open,
-            rows,
-            selected,
-            scroll,
-        };
-    }
-
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
-    pub fn set_connection_frame_parts(
-        &mut self,
-        open: bool,
-        rows: Vec<crate::tui::connection::ConnectionRow>,
-        live: Vec<crate::tui::connection::LiveInfo>,
-        selected: usize,
-        confirm: Option<usize>,
-        result: Option<String>,
-        socket_line: String,
-    ) {
-        self.connection = crate::tui::connection::ConnectionFrame {
-            open,
-            rows,
-            live,
-            selected,
-            confirm,
-            result,
-            socket_line,
-        };
-    }
-
     pub fn set_onboarding_frame(&mut self, frame: crate::tui::welcome::OnboardingFrame) {
         self.onboarding = frame;
     }
