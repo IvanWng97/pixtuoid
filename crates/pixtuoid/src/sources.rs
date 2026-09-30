@@ -657,7 +657,7 @@ mod tests {
     #[test]
     fn connect_then_disconnect_a_no_target_source_persists_the_flag() {
         // Antigravity has no install target → a pure flag flip, so this touches no
-        // real agent config and mutates no env (no TEST_ENV_LOCK needed).
+        // real agent config and mutates no env.
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
 

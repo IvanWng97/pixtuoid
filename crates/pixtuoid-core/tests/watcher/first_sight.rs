@@ -741,11 +741,10 @@ async fn watcher_skips_oversized_pending_tail() {
     while tokio::time::Instant::now() < deadline {
         if let Ok(Some((_, AgentEvent::ActivityStart { tool_use_id, .. }))) =
             tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && tool_use_id.as_deref() == Some("tu_after_junk")
         {
-            if tool_use_id.as_deref() == Some("tu_after_junk") {
-                got_after = true;
-                break;
-            }
+            got_after = true;
+            break;
         }
     }
     assert!(

@@ -225,10 +225,10 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 config::FLOATING_MIN_W as f64,
                 config::FLOATING_MIN_H as f64,
             ));
-        if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y) {
-            if position_on_a_monitor(event_loop, x, y, self.cfg.width, self.cfg.height) {
-                attrs = attrs.with_position(PhysicalPosition::new(x, y));
-            }
+        if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y)
+            && position_on_a_monitor(event_loop, x, y, self.cfg.width, self.cfg.height)
+        {
+            attrs = attrs.with_position(PhysicalPosition::new(x, y));
         }
         #[cfg(target_os = "macos")]
         {
@@ -373,10 +373,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // sleeps and both cadences collapse to max-rate (see `super::cadence`).
         let (paint, deadline) = self.clock.poll(Instant::now(), office_idle);
         event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        if paint {
-            if let Some(window) = &self.window {
-                window.request_redraw();
-            }
+        if paint && let Some(window) = &self.window {
+            window.request_redraw();
         }
     }
 }

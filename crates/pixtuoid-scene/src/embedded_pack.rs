@@ -380,8 +380,7 @@ mod tests {
         );
         let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
         assert!(
-            pack.buildings()
-                .all(|b| b.art(d(1)).is_some() && b.art(d(4)).is_none()),
+            pack.buildings().all(|b| b.variant(d(4)).is_none()),
             "at their base alone"
         );
         let report = validate_pack(&pack);
@@ -412,12 +411,45 @@ mod tests {
         );
         let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
         for b in pack.buildings() {
-            assert!(
-                b.art(d(1)).is_some() && b.art(d(4)).is_some(),
-                "{}",
-                b.name()
-            );
+            assert!(b.variant(d(4)).is_some(), "{}", b.name());
         }
+    }
+
+    /// A transparent last row lifts a piece off the floor both painters ground
+    /// it on.
+    #[test]
+    fn every_bundled_furniture_frame_draws_its_bottom_row() {
+        let pack = test_default_pack();
+        // Pets and mascots stand on their feet, wherever their frame ends.
+        let figures: std::collections::HashSet<&str> = crate::pet::PetKind::ALL
+            .iter()
+            .flat_map(|k| [k.walk_anim(), k.sit_anim(), k.sleep_anim()])
+            .chain(
+                pixtuoid_core::source::registry::registered_source_names()
+                    .filter_map(crate::creatures::gateway_mascot_def)
+                    .flat_map(|m| [m.walk, m.rest]),
+            )
+            .collect();
+        let floating: Vec<String> = pack
+            .animation_names()
+            .into_iter()
+            .filter(|name| {
+                let base = name.split('@').next().unwrap_or(name);
+                pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS.contains(&base)
+                    && !figures.contains(base)
+            })
+            .filter(|name| {
+                pack.animation(name).is_some_and(|s| {
+                    s.frames().iter().any(|f| {
+                        let w = usize::from(f.width());
+                        f.as_slice()[f.as_slice().len() - w..]
+                            .iter()
+                            .all(Option::is_none)
+                    })
+                })
+            })
+            .collect();
+        assert!(floating.is_empty(), "{floating:?}");
     }
 
     #[test]

@@ -106,8 +106,9 @@ unsafe fn create_hook_pipe(
     }
     opts.reject_remote_clients(true)
         .pipe_mode(PipeMode::Byte)
-        .in_buffer_size(IN_BUFFER_SIZE)
-        .create_with_security_attributes_raw(name, attributes_ptr)
+        .in_buffer_size(IN_BUFFER_SIZE);
+    // SAFETY: forwarded from this fn's contract.
+    unsafe { opts.create_with_security_attributes_raw(name, attributes_ptr) }
 }
 
 impl Listener {
