@@ -995,7 +995,7 @@ deb target:
 # The repo's NODE-side gate (no cargo): the npm package generator AND the bundled
 # OpenClaw plugin contract.
 #   - npm/generate.test.mjs — the ONLY validation of npm/generate.mjs. release.yml
-#     runs it as a hard gate right before `npm publish`, and ci-lint.yml on every PR
+#     runs it as a hard gate right before `npm publish`, and ci-lint.yml's `npm-gen` job
 #     so a generator regression is caught at review time, not at the tag-push.
 #   - scripts/openclaw-plugin.test.mjs — drives the RENDERED openclaw_plugin.js the
 #     way OpenClaw's loader does. The Rust side can only grep that template as a
