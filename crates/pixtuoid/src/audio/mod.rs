@@ -976,7 +976,7 @@ mod tests {
 /// The LISTEN gate: renders each busy-ness tier through the REAL
 /// mixer/schedulers/synth into wav files for the owner's audition.
 /// `#[ignore]` — run explicitly:
-/// `cargo test -p pixtuoid --lib audio::listen_gate -- --ignored --nocapture`
+/// `just test -p pixtuoid --lib audio::listen_gate --run-ignored only --no-capture`
 #[cfg(all(test, feature = "audio"))]
 mod listen_gate {
     use super::*;

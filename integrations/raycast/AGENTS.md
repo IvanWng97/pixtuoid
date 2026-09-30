@@ -70,8 +70,7 @@ it is clear.
 
 ## Gates
 
-CI (`.github/workflows/raycast.yml`, Linux runner): `npm ci` → `npm run audit` →
-the `gen:contract` freshness diff → `npx tsc --noEmit` → `npx eslint .`. Run them
+CI runs `.github/workflows/raycast.yml`'s steps on a Linux runner; run them
 locally before "done." **`ray build` /
 `ray lint`** (manifest + icon validation, the Prettier pass) need the **macOS
 Raycast app** and only run before a store publish — they are NOT in CI, so a

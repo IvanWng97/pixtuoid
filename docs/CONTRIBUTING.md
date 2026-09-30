@@ -14,21 +14,20 @@ comments on the lines it governs, before changing it.
 
 Requires a recent stable Rust toolchain and [`just`](https://github.com/casey/just)
 (`brew install just`). On Linux you also need `lld`, `pkg-config` and the ALSA
-headers (`apt install lld pkg-config libasound2-dev`). The `justfile` is the
-single source of truth for every check — CI and the git hooks call the same
-recipes.
+headers (`apt install lld pkg-config libasound2-dev`). The git hooks and most
+CI jobs call `justfile` recipes.
 
 ```bash
 just              # list recipes
 just preflight    # pre-push gate: lint → clippy; `just preflight full` adds hack → test (CI's Rust recipes)
 just fmt          # auto-format
-just test         # the whole suite (cargo-nextest if installed, else cargo test)
-cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
+just test         # the whole suite, under cargo-nextest (`just setup-tools`)
+just test -p <crate> <filter>   # fast loop while iterating on one crate
 ```
 
-> **Don't chain `cargo clippy && cargo test`** — clippy and test use *separate*
-> build caches, so chaining recompiles the whole workspace twice. Run
-> `just preflight full`, or one check at a time.
+> **Don't expect clippy to warm `test`'s build** — its check-mode (rmeta)
+> builds carry over only build scripts and proc-macros, so iterate with one of
+> them.
 
 Activate the git hooks once per clone: `git config core.hooksPath .githooks`
 (`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`, lint + clippy;
@@ -61,7 +60,7 @@ run. The jobs:
   pair's integrity and size cap (`just gen-wasm-check`); nothing checks the
   pair is fresh, so a core/scene/web change runs `just gen-wasm` by hand.
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
-  plain `cargo test` can't see.
+  `just test` can't see.
 - **hygiene** — the same `just lint` recipes preflight runs (its CI job exists
   so a skipped local preflight can't land a lint break), including `just ci-observability`
   (`policy/ci-observability/`: contracts for the silent, costly workflow
@@ -153,8 +152,7 @@ our release never builds. Two consequences:
 
 - **A from-source build break lands in Homebrew's CI, not ours.** Anything
   adding a system-library dependency needs a matching `depends_on` in the core
-  formula, in the same bump PR. Outstanding now: the default-on `audio`
-  feature needs `depends_on "alsa-lib"` — [#731](https://github.com/IvanWng97/pixtuoid/issues/731).
+  formula, in the same bump PR.
 - **Their `test do` block is a public contract** — see the "homebrew-core
   contract" comments at `crates/pixtuoid/src/validate.rs`,
   `crates/pixtuoid/src/sources_cli.rs`,
@@ -281,9 +279,9 @@ gh run rerun --failed                        # rerun only failed CI jobs
 
 ## Adding a new agent CLI
 
-The registration steps (4–7, 9) are test-forced — skipping one fails
-`just test`. Step 8 is forced only for hook-only sources; step 10 by the theme
-guards; steps 1–3, 11 and 12 are on you.
+The registration steps (4–7, 9) and step 12's roster literals are test-forced —
+skipping one fails `just test`. Step 8 is forced only for hook-only sources;
+step 10 by the theme guards; steps 1–3, 11 and step 12's `#[test]` are on you.
 
 1. **Verify the wire format against the CLI's actual source/releases first** —
    transcript location, line shape, hooks, session identity; pin every fact
@@ -311,7 +309,7 @@ guards; steps 1–3, 11 and 12 are on you.
 5. The descriptor's `name` **is the roster** — `registered_source_names()`
    projects `REGISTRY`, and the conformance suite then requires a fixture. The
    `sources --json` golden (`crates/pixtuoid/tests/snapshots/cli/sources.json`)
-   must list it: `SNAPSHOTS=overwrite cargo test -p pixtuoid --test cli_json`.
+   must list it: `SNAPSHOTS=overwrite just test -p pixtuoid --test cli_json`.
 6. **Record the fixture** — the test steps in
    [`crates/pixtuoid-core/tests/AGENTS.md`](../crates/pixtuoid-core/tests/AGENTS.md)
    (a RECORDED SessionStart scenario via `just capture-fixture`), then
@@ -333,9 +331,9 @@ guards; steps 1–3, 11 and 12 are on you.
     const, the `insert` in that crate's `src/drift_surface.rs`,
     `just gen-drift-surface` (commit both fragments), and the `SURFACE_ROWS`
     row plus its selftest case (the case census fails without it).
-12. **Three roster literals no failure message spells out**: the row-by-row
-    byte pin in `corpus_check.rs`; `TOOL_ID_KEY_UNPROVEN` in
-    `tests/sources/captures.rs`; a case row + `#[test]` in
+12. **Three roster literals in three test binaries** (a scoped run misses
+    them): the row-by-row byte pin in `corpus_check.rs`; `TOOL_ID_KEY_UNPROVEN`
+    in `tests/sources/captures.rs`; a case row + `#[test]` in
     `crates/pixtuoid/tests/wire_to_pixels.rs`.
 
 ## License

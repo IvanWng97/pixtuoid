@@ -50,13 +50,13 @@ site/     Astro landing page; integrations/raycast/  Raycast extension
 ## Build & test
 
 ```
-just build [--release] · just test (nextest)         # scope to one crate while iterating
-cargo test -p <crate> --lib <filter>                 # fast loop
+just build [--release] · just test                   # the one test runner (nextest)
+just test -p <crate> <filter>                        # fast loop
 just preflight [full]                                # pre-push gate: lint → clippy; `full` adds hack → test (CI's Rust recipes)
 cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 ```
 
-- Don't chain `cargo clippy && cargo test` (two build caches) — `just preflight full` or one at a time. Never pipe preflight through `tail`/`head` (exit code eaten).
+- clippy doesn't warm test's build ([why](docs/CONTRIBUTING.md#build--test)) — iterate with one of them. Never pipe preflight through `tail`/`head` (exit code eaten).
 - Touched `--json` / `SourceStatus` / `OutcomeRow` / the source roster → `just gen-contract` (regenerates schemas + Raycast types).
 - Renamed a decoded/registered wire name → `just gen-drift-surface`, commit both `crates/*/drift-surface.json` — the crate's own test fails on a stale fragment; regenerate, don't hand-edit.
 - Look-changing PR → `just gen`, commit everything it rewrote; a core/scene/web change ALSO needs `just gen-wasm` + commit `site/public/wasm/` (`gen` deliberately excludes it, and nothing catches a skip).
@@ -64,7 +64,7 @@ cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 - Fixtures are RECORDED, never composed (`just capture-fixture` — BILLED), and the recorder blanks every subtree no decoder reads (derived by probe, never listed); every scenario declares `provenance.json`. Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md). `just restrip-fixtures` re-strips the committed corpus offline; `just corpus-all` censuses local corpora; `just fixture-age` is advisory/local.
 - Visual verification for sprite work: snapshot example → `scripts/crop-snapshot.py` → READ the PNG; loop in `.claude/skills/beautify-decoration/SKILL.md`.
 - CI gates, and which of them preflight can't see (a green preflight is NOT a green PR): [`CONTRIBUTING.md#ci-gates`](docs/CONTRIBUTING.md#ci-gates) lists them and what each catches. A draft PR runs only the light tier and its `ci-gate` is red by design; marking it ready runs the full tier.
-- On-demand advisory (never gates): `just mutants`, `just bench`, CodSpeed.
+- Advisory (never gates): `just mutants`, `just bench`, CodSpeed.
 - Hooks: `git config core.hooksPath .githooks` once per clone; `just setup-tools` installs cargo tools (incl. rust-analyzer — without it the agent LSP degrades to grep).
 - Release is a human step: [`CONTRIBUTING.md#releasing`](docs/CONTRIBUTING.md#releasing).
 
