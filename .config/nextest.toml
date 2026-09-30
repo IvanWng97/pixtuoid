@@ -28,6 +28,17 @@ threads-required = "num-cpus"
 filter = 'test(connected_codex_rollout_becomes_a_sprite) | test(disconnected_codex_rollout_is_dropped_by_the_gate)'
 threads-required = "num-cpus"
 
+# Heavy render sweeps, 90-150 s on CI: co-scheduled under load they hit the
+# 180 s slow-timeout. `num-test-threads` takes every slot, so each runs alone.
+# Delete this entry once the tests are made cheap.
+[[profile.default.overrides]]
+filter = '''
+    (package(pixtuoid) & test(=tui::tui_renderer::harness::theme_lighting::occupied_floor_stays_lit))
+  | (package(pixtuoid-scene) & test(=pixel_painter::background::tests::no_weather_flattens_the_glass_day_night_contrast))
+  | (package(pixtuoid-scene) & test(=pixel_painter::background::tests::no_night_pane_outshines_the_clear_solar_noon_pane))
+'''
+threads-required = "num-test-threads"
+
 # The synth tests deliberately have NO override. Their slowness was the `test`
 # profile inheriting `dev`'s opt-level 0, not irreducible work, and is fixed by
 # `[profile.dev.package.pixtuoid-scene] opt-level = 2` in the workspace
