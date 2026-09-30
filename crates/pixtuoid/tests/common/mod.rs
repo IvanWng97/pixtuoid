@@ -9,7 +9,7 @@ macro_rules! make_draw_ctx {
 
         let mut _theme: &pixtuoid_scene::theme::Theme = &pixtuoid_scene::theme::NORMAL;
         let mut _floor = pixtuoid_scene::floor::FloorMeta::ground();
-        let mut _floor_info: Option<pixtuoid::tui::renderer::FloorInfo> = None;
+        let mut _floor_info: Option<pixtuoid_scene::footer::FooterFloor> = None;
 
         $(
             make_draw_ctx!(@override _theme, _floor, _floor_info, $key, $val);
@@ -22,11 +22,13 @@ macro_rules! make_draw_ctx {
             debug_walkable: false,
             theme: _theme,
             theme_picker: None,
-            floor_info: _floor_info,
-            per_floor: Default::default(),
-            gateway: None,
-            audio_audible: false,
-            volume_flash: None,
+            footer: pixtuoid::tui::widgets::footer_context(
+                &pixtuoid_core::SceneState::default(),
+                _floor_info,
+                false,
+                None,
+                None,
+            ),
             floor: _floor,
             active_pet: None,
             last_pet_pos: None,
@@ -39,7 +41,6 @@ macro_rules! make_draw_ctx {
             occupied_waypoints: Default::default(),
             popup_scale: 0.0,
             help_open: false,
-            source_warning: None,
             dashboard: &pixtuoid::tui::dashboard::DashboardFrame::default(),
             connection: &pixtuoid::tui::connection::ConnectionFrame::default(),
             onboarding: &pixtuoid::tui::welcome::OnboardingFrame::default(),

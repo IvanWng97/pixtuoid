@@ -15,7 +15,8 @@ mod welcome;
 pub(super) use connection::paint_connection_panel;
 pub(super) use dashboard::paint_dashboard;
 pub(super) use elevator::paint_elevator_indicator;
-pub(super) use footer::{paint_footer, FooterStats};
+pub use footer::footer_context;
+pub(super) use footer::paint_footer;
 pub(super) use help::paint_help_overlay;
 pub(crate) use panel::{borderless_panel, Overflow, Panel, PanelGeometry};
 pub(super) use theme_picker::paint_theme_picker;
@@ -55,11 +56,7 @@ pub(crate) fn display_width(s: &str) -> usize {
     s.width()
 }
 
-// `StateCounts` stays `pub`: it is reachable via the pub `DrawCtx::per_floor` field.
-pub use pixtuoid_scene::board::StateCounts;
-pub(crate) use pixtuoid_scene::board::{
-    compact_hms, gateway_rollup, per_floor_counts, scene_stats,
-};
+pub(crate) use pixtuoid_scene::board::compact_hms;
 
 // Each state carries FOUR redundant channels (glyph/letter/word/hue); hue is never the
 // sole carrier, so the design survives colour removal, a colour-blind viewer, and a

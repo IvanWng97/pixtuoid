@@ -378,8 +378,7 @@ pub(crate) fn paint_mascot_tooltip(
 
 /// The mascot tooltip's text. The verb keys on `busy` — see
 /// [`pixtuoid_scene::pixel_painter::MascotFrame::busy`] for why the run state,
-/// not the session count — and `degraded` outranks busy/idle. Plain text (no
-/// emoji) to keep the caller's width math exact.
+/// not the session count — and `degraded` outranks busy/idle.
 fn mascot_tooltip_text(mascot: &MascotFrame) -> String {
     let &MascotFrame {
         name,

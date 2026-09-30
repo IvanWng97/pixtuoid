@@ -125,9 +125,9 @@ pub(crate) fn star_hit_rect(scene_rect: Rect) -> Option<Rect> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::widgets::StateCounts;
     use pixtuoid_core::state::DaemonState;
     use pixtuoid_core::SceneState;
+    use pixtuoid_scene::board::StateCounts;
     use std::time::SystemTime;
 
     fn full_bounds(w: u16, h: u16) -> Rect {

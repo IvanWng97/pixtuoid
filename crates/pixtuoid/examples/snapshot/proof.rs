@@ -648,14 +648,7 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             debug_walkable: false,
             theme: job.theme,
             theme_picker: None,
-            floor_info: None,
-            per_floor: Default::default(),
-            // DERIVED from the scene, as the runtime does — a hardcoded `None`
-            // here keeps the `⬢gw` chip off the very clip demoing the gateway,
-            // and clips are NOT pixel-gated by `gen-check`, so nothing catches it.
-            gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-            audio_audible: false,
-            volume_flash: None,
+            footer: pixtuoid::tui::widgets::footer_context(&scene, None, false, None, None),
             floor: pixtuoid_scene::floor::FloorMeta::ground(),
             active_pet: None,
             last_pet_pos: None,
@@ -668,7 +661,6 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             occupied_waypoints: Default::default(),
             popup_scale: 0.0,
             help_open: false,
-            source_warning: None,
             dashboard: &pixtuoid::tui::dashboard::DashboardFrame::default(),
             connection: &pixtuoid::tui::connection::ConnectionFrame::default(),
             onboarding: &pixtuoid::tui::welcome::OnboardingFrame::default(),

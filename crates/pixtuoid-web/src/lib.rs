@@ -279,7 +279,7 @@ impl Office {
         let theme = self.theme;
 
         let labels = self.session.overlay(&self.scene, now, None);
-        let board = self.session.board(&self.scene, now, None);
+        let board = self.session.board(&self.scene, now);
 
         let mut out = String::from("{\"labels\":[");
         for (i, el) in labels.iter().enumerate() {

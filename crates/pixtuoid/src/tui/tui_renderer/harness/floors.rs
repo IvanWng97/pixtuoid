@@ -253,7 +253,7 @@ fn transition_at_narrow_terminal_paints_no_agents_no_panic() {
         ],
         cap,
     );
-    // 30 cols: scene_rect 30×39 passes the 20×12 transition gate; buf_w=30<34
+    // 30 cols: scene_rect 30×39 passes the `MIN_SCENE_*` transition gate; buf_w=30
     // fails compute_with_seed's office minimum.
     let mut r = TuiRenderer::new(
         Terminal::new(TestBackend::new(30, 40)).expect("test backend"),
@@ -327,7 +327,7 @@ fn source_death_warning_survives_floor_transition() {
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("source died"),
-        "the warning must not vanish during the ~400ms floor slide"
+        "the warning must not vanish during the floor slide"
     );
 }
 
@@ -367,8 +367,35 @@ fn help_overlay_renders_during_floor_transition() {
 }
 
 #[test]
+fn a_too_small_slide_footers_the_destination_floor() {
+    let cap = 16;
+    let scene = scene_with(
+        vec![
+            active("/d/0.jsonl", 0, "Grep x", t0()),
+            slot(AgentId::from_transcript_path("/d/1.jsonl"), 1, cap, t0()),
+        ],
+        cap,
+    );
+    let mut r = build(120, crate::tui::renderer::MIN_SCENE_HEIGHT, vec![]);
+    r.render(&scene, &pack(), t0()).unwrap();
+    r.navigate_floor(1, t0());
+    r.render(&scene, &pack(), t0() + Duration::from_millis(100))
+        .unwrap();
+    let text = frame_text(r.frame_buffer());
+    let footer = text.lines().last().expect("a footer row");
+    assert!(
+        footer.contains(" 1/2 ") && footer.contains("F2/2"),
+        "{footer}"
+    );
+    assert!(
+        !footer.contains("Grep"),
+        "floor 1 tallies floor 0's tool: {footer}"
+    );
+}
+
+#[test]
 fn transition_on_too_small_terminal_clears_state_and_lands() {
-    // A sub-20×12 terminal hits the render_transition too-small bail.
+    // Under the `MIN_SCENE_*` gate: render_transition's too-small bail.
     let scene = two_floor_scene();
     let mut r = build(18, 10, vec![PetKind::Cat]);
     let now = t0();
@@ -379,10 +406,6 @@ fn transition_on_too_small_terminal_clears_state_and_lands() {
     assert!(r.cached_layout().is_none());
     assert!(r.cached_pet_pos().is_none());
     assert_eq!(r.last_popup_scale(), 0.0);
-    // Landing matters: render_transition returns before ensure_size, so the floor
-    // buffer's size signature never changes and the resize detector can't fire
-    // cancel_transition — the slide would stay live on the no-draw path for its whole
-    // ~400 ms timer, freezing a stale frame.
     assert!(
         r.transition().is_none(),
         "the too-small gate should land (cancel) the stuck transition"

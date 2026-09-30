@@ -11,7 +11,7 @@ use pixtuoid_core::state::{SceneState, MAX_FLOORS};
 
 use pixtuoid_scene::floor::{FloorMeta, FloorSession, FrameInputs};
 use pixtuoid_scene::footer::{
-    build_footer, footer_tone_rgb, footer_tool_tally, FooterInputs, FooterModel,
+    build_footer, footer_tone_rgb, FooterContext, FooterInputs, FooterModel,
 };
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::Theme;
@@ -93,9 +93,9 @@ impl OfficeRenderer {
         self.session.overlay(scene, now, None)
     }
 
-    /// The neon wall-board model for the current scene — one floor, so `floor = None`.
+    /// The neon wall-board model for the current scene.
     pub fn board(&self, scene: &SceneState, now: SystemTime) -> pixtuoid_scene::board::BoardModel {
-        self.session.board(scene, now, None)
+        self.session.board(scene, now)
     }
 
     /// The status-footer model for the current scene — single-floor, so `floor = None`
@@ -109,20 +109,19 @@ impl OfficeRenderer {
         audio_audible: bool,
         volume_flash: Option<u8>,
     ) -> FooterModel {
-        let per_floor = pixtuoid_scene::board::per_floor_counts(scene);
-        let tools = footer_tool_tally(scene);
-        let inputs = FooterInputs {
-            counts: pixtuoid_scene::board::scene_stats(scene),
-            per_floor: &per_floor,
-            gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-            floor: None,
-            tools: &tools,
-            audio_audible,
-            volume_flash,
-            source_warning: None,
-            keys_stats: FOOTER_KEYS,
-            keys_alert: FOOTER_KEYS,
-        };
+        let inputs = FooterInputs::new(
+            scene,
+            FooterContext {
+                per_floor: pixtuoid_scene::board::per_floor_counts(scene),
+                gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
+                floor: None,
+                audio_audible,
+                volume_flash,
+                source_warning: None,
+                keys_stats: FOOTER_KEYS,
+                keys_alert: FOOTER_KEYS,
+            },
+        );
         build_footer(&inputs, budget)
     }
 }
@@ -940,26 +939,25 @@ mod tests {
 
     #[test]
     fn paint_footer_blits_into_the_bottom_band_and_tones_via_the_shared_authority() {
-        use pixtuoid_scene::board::{per_floor_counts, scene_stats};
+        use pixtuoid_scene::board::per_floor_counts;
         use pixtuoid_scene::footer::{FooterTone, RungKind};
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let mut scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
         let slot = active_on("/p/a.jsonl", 0, 0);
         scene.agents.insert(slot.agent_id, slot);
-        let per_floor = per_floor_counts(&scene);
-        let tools = footer_tool_tally(&scene);
-        let inputs = FooterInputs {
-            counts: scene_stats(&scene),
-            per_floor: &per_floor,
-            gateway: None,
-            floor: None,
-            tools: &tools,
-            audio_audible: true,
-            volume_flash: None,
-            source_warning: None,
-            keys_stats: FOOTER_KEYS,
-            keys_alert: FOOTER_KEYS,
-        };
+        let inputs = FooterInputs::new(
+            &scene,
+            FooterContext {
+                per_floor: per_floor_counts(&scene),
+                gateway: None,
+                floor: None,
+                audio_audible: true,
+                volume_flash: None,
+                source_warning: None,
+                keys_stats: FOOTER_KEYS,
+                keys_alert: FOOTER_KEYS,
+            },
+        );
         let (w, h) = (400usize, 160usize);
         let model = build_footer(&inputs, footer_budget(w));
         let mut sb = vec![0u32; w * h];

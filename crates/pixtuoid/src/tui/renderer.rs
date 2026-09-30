@@ -1,7 +1,5 @@
-//! Terminal-coupled rendering: the `draw_scene` orchestrator, the half-block
-//! flush, and the label/tooltip/notice widget overlays. The pure-pixel pass
-//! (floor/walls/decor/characters -> `RgbBuffer`) lives in the
-//! `pixtuoid_scene::pixel_painter` engine crate.
+//! Terminal-coupled rendering: the `draw_scene` orchestrator and the half-block
+//! flush of the `pixtuoid_scene::pixel_painter` buffer.
 
 use std::time::SystemTime;
 
@@ -16,6 +14,7 @@ use ratatui::Terminal;
 
 use std::sync::Arc;
 
+use pixtuoid_scene::footer::{FooterContext, FooterInputs};
 use pixtuoid_scene::layout::Layout;
 use pixtuoid_scene::pet::PetFrame;
 use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, MascotFrame, PixelCtx};
@@ -34,16 +33,6 @@ pub(crate) use crate::tui::widgets::{paint_hover_tooltip, TooltipAt};
 
 pub use pixtuoid_scene::pet::PetState;
 
-/// Multi-floor display state, bundled so a renderer never sees the navigation
-/// breadcrumb without the global agent count.
-#[derive(Debug, Clone, Copy)]
-pub struct FloorInfo {
-    /// 1-indexed, for display (e.g. "F2/3").
-    pub current: usize,
-    pub total_floors: usize,
-    pub total_agents: usize,
-}
-
 pub struct DrawCtx<'a> {
     pub buf: &'a mut RgbBuffer,
     /// `buf` is deliberately NOT part of this group: it is a sibling of the
@@ -55,20 +44,8 @@ pub struct DrawCtx<'a> {
     pub debug_walkable: bool,
     pub theme: &'a pixtuoid_scene::theme::Theme,
     pub theme_picker: Option<usize>,
-    /// `Some` iff there's more than one floor.
-    pub floor_info: Option<FloorInfo>,
-    /// Office-wide per-floor state tally, bucketed from the FULL, un-projected
-    /// scene. ALWAYS present — unlike `floor_info` it never vanishes for a
-    /// single-floor office. Distinct from the footer's per-state integers
-    /// (`scene_stats` on the PROJECTED floor): don't derive one from the other.
-    pub per_floor: [crate::tui::widgets::StateCounts; pixtuoid_core::state::MAX_FLOORS],
-    /// Worst-of daemon-liveness rollup; `None` = no daemon configured (chip
-    /// suppressed).
-    pub gateway: Option<pixtuoid_core::state::DaemonState>,
-    /// "You would hear sound right now" — drives the footer's ♩ glyph.
-    pub audio_audible: bool,
-    /// Transient volume readout, in percent.
-    pub volume_flash: Option<u8>,
+    /// From [`footer_context`](crate::tui::widgets::footer_context).
+    pub footer: FooterContext<'a>,
     pub floor: pixtuoid_scene::floor::FloorMeta,
     pub active_pet: Option<&'a PetState>,
     pub last_pet_pos: Option<PetFrame>,
@@ -90,9 +67,6 @@ pub struct DrawCtx<'a> {
     /// Animated scale for the version popup (0.0 = hidden, 1.0 = fully shown).
     pub popup_scale: f32,
     pub help_open: bool,
-    /// The footer warning, pre-merged death>drift
-    /// ([`pixtuoid_scene::footer::FooterInputs::source_warning`]); `None` while healthy.
-    pub source_warning: Option<&'a str>,
     pub dashboard: &'a crate::tui::dashboard::DashboardFrame,
     pub connection: &'a crate::tui::connection::ConnectionFrame,
     pub onboarding: &'a crate::tui::welcome::OnboardingFrame,
@@ -163,15 +137,14 @@ pub(crate) struct OverlayFrame<'a> {
 /// opens the onboarding modal there.
 pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
-    scene: &SceneState,
-    stats: &crate::tui::widgets::FooterStats<'_>,
+    footer: &FooterInputs<'_>,
     theme: &pixtuoid_scene::theme::Theme,
     overlays: &OverlayFrame<'_>,
     now: SystemTime,
 ) -> Result<()> {
     term.draw(|f| {
         let actual = f.area();
-        paint_footer(f, scene, stats, actual, theme);
+        paint_footer(f, footer, actual, theme);
         paint_overlays(f, overlays, now, actual, theme);
         // LAST: a modal centres on the same rows, and first run opens one here —
         // so painting the notice first left the black screen unexplained in the
@@ -291,21 +264,9 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     };
     let scene_rect = scene_rect(full_rect);
     let theme = ctx.theme;
-    let floor_info = ctx.floor_info;
     let floor = ctx.floor;
-
-    // `per_floor` is copied out of `ctx` before the mutable buffer borrows below,
-    // so `FooterStats` can borrow it across the early-returns and the main paint.
-    let footer_per_floor = ctx.per_floor;
-    let footer_stats = crate::tui::widgets::FooterStats {
-        counts: crate::tui::widgets::scene_stats(scene),
-        per_floor: &footer_per_floor,
-        gateway: ctx.gateway,
-        audio_audible: ctx.audio_audible,
-        volume_flash: ctx.volume_flash,
-        floor_info,
-        source_warning: ctx.source_warning,
-    };
+    let footer = FooterInputs::new(scene, ctx.footer);
+    let floor_info = footer.context.floor;
     let overlays = OverlayFrame {
         theme_picker: ctx.theme_picker,
         dashboard: ctx.dashboard,
@@ -316,7 +277,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     };
 
     if scene_rect.width < MIN_SCENE_WIDTH || scene_rect.height < MIN_SCENE_HEIGHT {
-        draw_footer_only_frame(term, scene, &footer_stats, theme, &overlays, now)?;
+        draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
         return Ok(None);
     }
 
@@ -324,7 +285,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let buf_h = scene_rect.height.saturating_mul(2);
     ctx.buf.resize_fill(buf_w, buf_h, theme.surface.bg_fallback);
     let Some(layout) = ctx.store.frame_layout(buf_w, buf_h, floor.floor_seed) else {
-        draw_footer_only_frame(term, scene, &footer_stats, theme, &overlays, now)?;
+        draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
         return Ok(None);
     };
 
@@ -362,9 +323,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 
     // The dim is decoupled from `onboarding.open`, so the office keeps fading back
     // up for a beat AFTER the card is gone.
-    if ctx.onboarding.dim < 0.999 {
-        apply_dim(ctx.buf, ctx.onboarding.dim);
-    }
+    apply_dim(ctx.buf, ctx.onboarding.dim);
 
     let labels = pixtuoid_scene::overlay::build_overlay(
         scene,
@@ -374,12 +333,10 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         hovered,
     );
     let board = pixtuoid_scene::board::build_board(
-        footer_stats.counts,
+        footer.counts,
         pixtuoid_scene::board::scene_uptime_secs(scene, now),
-        footer_stats
-            .floor_info
-            .map(|fi| (fi.current, fi.total_floors)),
-        footer_stats.gateway,
+        floor_info.map(|fi| (fi.current, fi.total_floors)),
+        footer.context.gateway,
         now,
     );
     let buf = &ctx.buf;
@@ -389,7 +346,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         // terminal resize between term.size() and term.draw().
         let actual_full = f.area();
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
-        paint_footer(f, scene, &footer_stats, actual_full, theme);
+        paint_footer(f, &footer, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
         paint_label_widgets(f, &labels, actual_scene, theme);
         paint_chitchat_bubbles(f, chitchat_bubbles, actual_scene, theme);
@@ -519,9 +476,13 @@ fn flush_buffer_to_term(f: &mut ratatui::Frame<'_>, buf: &RgbBuffer, scene_rect:
     flush_buffer_to_term_at_offset(f, buf, scene_rect, 0);
 }
 
-/// Multiply every pixel of `buf` down by `factor` — the modal-backdrop dim. The
-/// `factor >= 0.999` no-op short-circuit is the CALLER's; both gate on it.
+const UNDIMMED: f32 = 0.999;
+
+/// Multiply every pixel of `buf` down by `factor` — the modal-backdrop dim.
 pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
+    if factor >= UNDIMMED {
+        return;
+    }
     for px in buf.as_mut_slice() {
         px.r = (px.r as f32 * factor) as u8;
         px.g = (px.g as f32 * factor) as u8;
@@ -530,10 +491,8 @@ pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
 }
 
 /// The mascot under the cursor that the user can actually SEE — the one painted on
-/// TOP, not merely the first in the roster. The painter y-sorts its drawables
-/// ascending, so among overlapping mascots the greatest `pos.y` is drawn LAST and
-/// occludes the others; picking the FIRST hit named whichever gateway sorted
-/// earliest in the roster, regardless of which lobster was visible.
+/// TOP. The painter y-sorts its drawables ascending, so among overlapping mascots
+/// the greatest `pos.y` is drawn LAST and occludes the others.
 fn topmost_mascot_at(
     mascots: &[pixtuoid_scene::pixel_painter::MascotFrame],
     cell: CellArea,

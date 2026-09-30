@@ -79,7 +79,7 @@ fn fixture_scene(now: SystemTime) -> SceneState {
 
 fn render_and_get_buffer(
     now: SystemTime,
-    floor_info: Option<pixtuoid::tui::renderer::FloorInfo>,
+    floor_info: Option<pixtuoid_scene::footer::FooterFloor>,
 ) -> (Buffer, u16, u16) {
     let w = 96u16;
     let h = 48u16;
@@ -123,7 +123,7 @@ fn elevator_indicator_visible() {
     // Pass floor_info so the elevator door is placed and the indicator paints.
     let (buf, w, h) = render_and_get_buffer(
         now(),
-        Some(pixtuoid::tui::renderer::FloorInfo {
+        Some(pixtuoid_scene::footer::FooterFloor {
             current: 1,
             total_floors: 2,
             total_agents: 0,

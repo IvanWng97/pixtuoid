@@ -495,15 +495,7 @@ pub(crate) fn save_as_gif(
             debug_walkable,
             theme,
             theme_picker: None,
-            floor_info: None,
-            per_floor: Default::default(),
-            // DERIVED from the scene, as the runtime does — all THREE DrawCtx sites in
-            // this example must agree. A hardcoded `None` keeps the `⬢gw` chip off the
-            // very clip whose job is demoing the gateway, and clips are NOT pixel-gated
-            // by `gen-check`, so nothing would catch it.
-            gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-            audio_audible: false,
-            volume_flash: None,
+            footer: pixtuoid::tui::widgets::footer_context(scene, None, false, None, None),
             floor: {
                 let mut m = pixtuoid_scene::floor::FloorMeta::ground();
                 m.floor_seed = floor_seed;
@@ -520,7 +512,6 @@ pub(crate) fn save_as_gif(
             occupied_waypoints: Default::default(),
             popup_scale: 0.0,
             help_open: false,
-            source_warning: None,
             dashboard: &pixtuoid::tui::dashboard::DashboardFrame::default(),
             connection: &pixtuoid::tui::connection::ConnectionFrame::default(),
             onboarding: &pixtuoid::tui::welcome::OnboardingFrame::default(),

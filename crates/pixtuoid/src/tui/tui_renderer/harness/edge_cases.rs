@@ -5,7 +5,7 @@ use crate::tui::connection::ConnectionFrame;
 #[test]
 fn too_small_terminal_returns_no_layout_no_panic() {
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
-    let mut r = build(15, 8, vec![]); // below the 20×12 scene minimum
+    let mut r = build(15, 8, vec![]); // under the `MIN_SCENE_*` gate
     r.render(&scene, &pack(), t0())
         .expect("render must not panic");
     assert!(
@@ -137,7 +137,7 @@ fn colliding_labels_with_multibyte_session_ids_do_not_panic() {
 
 #[test]
 fn no_layout_frame_paints_the_popup_at_its_clickable_scale() {
-    // 100x16 → scene_rect 100x15 passes render()'s 20x12 gate, but buf_h=30 is
+    // 100x16 → scene_rect 100x15 passes render()'s `MIN_SCENE_*` gate, but buf_h=30 is
     // below compute_with_seed's office minimum → draw_scene returns Ok(None).
     let scene = scene_with(vec![idle("/nl/0.jsonl", 0, t0())], 16);
     let mut r = build(100, 16, vec![]);
@@ -217,8 +217,12 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
 #[test]
 fn modal_overlays_still_paint_during_a_slide_on_a_too_small_terminal() {
     let scene = two_floor_scene();
-    // 19 cols ⇒ scene_rect 19x11, under the 20x12 gate on BOTH axes.
-    let mut r = build(19, 12, vec![]);
+    // Under the gate on BOTH axes.
+    let mut r = build(
+        crate::tui::renderer::MIN_SCENE_WIDTH - 1,
+        crate::tui::renderer::MIN_SCENE_HEIGHT - 1 + crate::tui::renderer::FOOTER_ROWS,
+        vec![],
+    );
     let now = t0();
     r.render(&scene, &pack(), now).expect("render");
     r.set_help_open(true);

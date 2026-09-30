@@ -695,14 +695,13 @@ fn main() -> Result<()> {
         debug_walkable: args.debug_walkable,
         theme,
         theme_picker: args.theme_picker,
-        floor_info: None,
-        // Single-floor still: empty office-wide tallies (no cross-floor cue).
-        per_floor: Default::default(),
-        // DERIVED from the scene, exactly as the runtime does — a hardcoded `None`
-        // here renders the `--openclaw` lobster with its `⬢gw` chip off.
-        gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-        audio_audible: false,
-        volume_flash: None,
+        footer: pixtuoid::tui::widgets::footer_context(
+            &scene,
+            None,
+            false,
+            None,
+            warning_text.as_deref(),
+        ),
         floor: {
             let mut m = pixtuoid_scene::floor::FloorMeta::ground();
             m.floor_seed = args.floor_seed;
@@ -719,7 +718,6 @@ fn main() -> Result<()> {
         occupied_waypoints: Default::default(),
         popup_scale: if args.popup { 1.0 } else { 0.0 },
         help_open: args.help_open,
-        source_warning: warning_text.as_deref(),
         dashboard: &dashboard_frame,
         connection: &connection_frame,
         onboarding: &onboarding_frame,
