@@ -134,7 +134,7 @@ impl Look {
                 theme.lighting.night_tint,
                 darkness * NIGHT_FLOOR_DIM * OBJECT_WASH_SHARE,
             ),
-            (SUN_TINT, interior * DAYLIGHT_FLOOR_LIFT * OBJECT_WASH_SHARE),
+            (SUN_TINT, sunlight * DAYLIGHT_FLOOR_LIFT * OBJECT_WASH_SHARE),
         ];
 
         let weather = sky.weather();
@@ -484,6 +484,19 @@ mod tests {
             night_dim < NIGHT_FLOOR_DIM,
             "the dim rides the darkness, which the city's glow keeps short of full"
         );
+    }
+
+    #[test]
+    fn a_lit_object_takes_the_floors_daylight_at_its_share() {
+        for (h, m) in [(0, 0), (3, 0), (7, 0), (12, 30), (19, 30), (22, 0)] {
+            let look = Look::resolve(
+                &Sky::at_with(at_hour_min(h, m), Weather::Clear),
+                &crate::theme::NORMAL,
+            );
+            let [_, (_, floor_lift)] = look.floor_wash;
+            let [_, (_, object_lift)] = look.object_wash;
+            assert_eq!(object_lift, floor_lift * OBJECT_WASH_SHARE, "{h:02}:{m:02}");
+        }
     }
 
     /// The veil keeps the weather reading after dark: dimmer than by day, but
