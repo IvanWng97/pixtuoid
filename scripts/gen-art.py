@@ -2924,22 +2924,26 @@ def orphans(pack, sprites):
     )
 
 
-def city_drift(pack):
-    """Why pack.toml's `[city]` names other keys than `CITY` draws in, or None."""
+def manifest_drift(pack):
+    """Why pack.toml names other keys than the ones drawn in, or None."""
     manifest = pack / "pack.toml"
     if not manifest.is_file():
         return None
-    named = tomllib.loads(manifest.read_text(encoding=ENCODING)).get("city")
+    toml = tomllib.loads(manifest.read_text(encoding=ENCODING))
+    named = toml.get("city")
     if named is not None and named != CITY:
         return f"gen-art --check: pack.toml [city] {named} is not the keys drawn in, {CITY}"
+    outline = toml.get("characters", {}).get("outline")
+    if outline is not None and outline != SILHOUETTE:
+        return f"gen-art --check: pack.toml [characters] outline {outline!r} is not the art's, {SILHOUETTE!r}"
     return None
 
 
 def check(pack, sprites):
     """Why the committed pack is not what `sprites` draws, or None when it is."""
-    city = city_drift(pack)
-    if city:
-        return city
+    drift = manifest_drift(pack)
+    if drift:
+        return drift
     stale = sorted(
         name
         for name, text in sprites.items()
@@ -2984,6 +2988,10 @@ def selftest(sprites):
         assert check(pack, sprites) is None, "a write must delete the orphan"
         (pack / "hand.sprite").write_text(f"# copied from {first}: {PROVENANCE}\n@frame 0\n.\n", encoding=ENCODING)
         assert check(pack, sprites) is None, "hand art quoting the provenance is not an orphan"
+        (pack / "pack.toml").write_text('[characters]\noutline = "n"\n', encoding=ENCODING)
+        assert check(pack, sprites) is not None, "an outline the art does not draw must fail"
+        (pack / "pack.toml").write_text(f'[characters]\noutline = "{SILHOUETTE}"\n', encoding=ENCODING)
+        assert check(pack, sprites) is None, "the art's own outline passes"
     print(f"gen-art --selftest: OK ({len(sprites)} sprites)")
 
 
