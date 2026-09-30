@@ -1,8 +1,7 @@
 //! The cutaway's time of day: the room darkens with the sky, and its own lights
 //! ([`crate::lighting`]) lift what they fall on, in whole [`Rgb::ramp`] steps
-//! on the art grid. A light's bands are solid, dithered into the next only at
-//! their seam, and its colour is a tint at fixed stops, so the room stays a
-//! palette: nothing blends continuously, the rule the rest of the cutaway is
+//! on the art grid ([`crate::dither::step`]), and its colour is a tint at
+//! fixed stops, so the room stays a palette: nothing blends continuously, the rule the rest of the cutaway is
 //! drawn by.
 //!
 //! The pieces are painted as by day; one pass ([`net_pass`]) then takes each
@@ -168,6 +167,8 @@ impl LightView {
                 };
                 let stops = level * LIFT_STOPS_PER_LEVEL;
                 solid |= stops >= 1.0;
+                // Floored, not rounded: a lamp never lifts past its level, and
+                // the lift constants and the `solid` test are tuned in whole steps.
                 crate::dither::step(stops, ax, ay).min(ambient.ceiling())
             })
             .collect();

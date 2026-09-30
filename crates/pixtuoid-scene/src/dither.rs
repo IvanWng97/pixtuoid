@@ -1,6 +1,7 @@
 //! Ordered dither: how a gradient is drawn on a pixel grid, the one threshold
-//! matrix both painters step by. A falloff is a few flat tones with a dithered
-//! seam between each pair, never a soft blend.
+//! matrix both painters step by, never a soft blend. A ramp of several tones is
+//! flat bands with a dithered seam ([`step`]); a gradient between two is
+//! dithered across its span ([`takes_next`]).
 
 /// The 4x4 ordered (Bayer) threshold matrix.
 ///
@@ -17,8 +18,8 @@ pub(crate) fn takes_next(x: u16, y: u16, coverage: f32) -> bool {
     BAYER_4X4[usize::from(y % 4)][usize::from(x % 4)] < level
 }
 
-/// The share at the top of each step over which a ramp dithers into the next;
-/// below it the band is solid, since a whole band of dither reads as grain.
+/// The share of each band, at its top, that dithers into the next: a whole band
+/// of dither reads as grain.
 pub(crate) const SEAM: f32 = 0.3;
 
 /// The whole tone a ramp `stops` along paints at `(x, y)`: solid through each
@@ -95,8 +96,7 @@ mod tests {
         assert!(seam.iter().all(|&t| t == tone || t == tone * 2.0));
     }
 
-    /// A band is one step through its middle; only the seam at its top mixes
-    /// in the next.
+    /// A band is one tone below its [`SEAM`], mixed with the next across it.
     #[test]
     fn a_band_is_solid_but_for_its_seam() {
         for band in 0..4u8 {

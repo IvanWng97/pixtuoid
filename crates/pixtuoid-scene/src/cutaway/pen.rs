@@ -217,8 +217,8 @@ impl Pen {
     ///
     /// One matrix cell is one art pixel on both axes, and the level steps once
     /// per art row: a cell or a step any finer would be a pixel smaller than the
-    /// art's. The indices stay ABSOLUTE (`% 4` of the art coordinate, not of its
-    /// offset in the band), so the pattern tiles across every band sharing the
+    /// art's. The matrix is indexed by the ABSOLUTE art coordinate, not its
+    /// offset in the band, so the pattern tiles across every band sharing the
     /// buffer with no seam at a band's boundary.
     pub(crate) fn dither_band(
         self,
@@ -237,7 +237,7 @@ impl Pen {
         for y in y0.0..y1.0 {
             let through = f32::from(y - y0.0) / span as f32;
             for x in 0..columns {
-                let c = if dithered(ArtPx(x), ArtPx(y), through) {
+                let c = if crate::dither::takes_next(x, y, through) {
                     dark
                 } else {
                     light
@@ -255,12 +255,6 @@ impl Pen {
             }
         }
     }
-}
-
-/// Whether the art pixel at `(x, y)` takes the next tone of an ordered dither
-/// covering `coverage` of its area, the matrix [`Pen::dither_band`] steps by.
-pub(crate) fn dithered(x: ArtPx, y: ArtPx, coverage: f32) -> bool {
-    crate::dither::takes_next(x.0, y.0, coverage)
 }
 
 #[cfg(test)]

@@ -682,8 +682,8 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
 }
 
 /// Step the floor darker under `shadows`, toward each one's centre: its falloff
-/// at `strength` in whole ramp stops, each the [`nearest`](crate::dither::nearest) on the art grid. A
-/// shadow is the ground it falls on, darker, never a colour of its own, and where
+/// at `strength`, rounded to whole ramp stops by
+/// [`nearest`](crate::dither::nearest) on the art grid. A shadow is the ground it falls on, darker, never a colour of its own, and where
 /// two overlap the deeper one wins rather than the two compounding.
 fn paint_ground_shadows(
     shadows: impl Iterator<Item = crate::ground::Contact> + Clone,
@@ -703,7 +703,7 @@ fn paint_ground_shadows(
     let (ax0, ay0) = (pen.art(x0).0, pen.art(y0).0);
     let w = usize::from(pen.art(x1).0 - ax0);
     let h = usize::from(pen.art(y1).0 - ay0);
-    let mut depth = vec![0i8; w * h];
+    let mut depth = vec![0u8; w * h];
     let d = f32::from(pen.art(1).0);
     let at = |a: u16| (f32::from(a) + 0.5) / d;
     for c in shadows {
@@ -714,7 +714,7 @@ fn paint_ground_shadows(
                     continue;
                 };
                 let stops = f * strength * SHADOW_STOPS_PER_STRENGTH;
-                let level = crate::dither::nearest(stops, ax, ay) as i8;
+                let level = crate::dither::nearest(stops, ax, ay);
                 let slot = &mut depth[usize::from(ay - ay0) * w + usize::from(ax - ax0)];
                 *slot = (*slot).max(level);
             }
@@ -935,7 +935,7 @@ fn face_rows(pack: &Pack, art: &str, scale: RenderScale) -> u16 {
 /// The deepest a noon shadow steps the floor.
 #[cfg(test)]
 fn deepest_shadow_stop() -> i8 {
-    (crate::ground::shadow_strength(NOON_DARKNESS) * SHADOW_STOPS_PER_STRENGTH).ceil() as i8
+    (crate::ground::shadow_strength(NOON_DARKNESS) * SHADOW_STOPS_PER_STRENGTH).round() as i8
 }
 
 /// A clear noon's darkness, the hour the shadow tests pin.
@@ -1597,7 +1597,7 @@ fn push_windows(office: Office<'_>, moment: &Moment, order: &mut Vec<(Span, Piec
                 Some(city.at(cx, cy).unwrap_or_else(|| {
                     let share =
                         crate::atmosphere::sky_share((f32::from(cy) + 0.5) / f32::from(d), glass_h);
-                    if crate::cutaway::pen::dithered(ArtPx(x0 + ax), ArtPx(y0 + ay), share) {
+                    if crate::dither::takes_next(x0 + ax, y0 + ay, share) {
                         look.glass_a
                     } else {
                         look.glass_b
@@ -3210,6 +3210,21 @@ mod tests {
     /// A shadow centred on the seam at `(6, 6)`.
     fn seam_shadow() -> crate::ground::Contact {
         crate::ground::Contact::under(2, 8, 6)
+    }
+
+    /// A shadow short of one whole stop still darkens the floor: the falloff
+    /// rounds to its nearest stop, where flooring would drop it.
+    #[test]
+    fn a_shadow_short_of_one_stop_still_darkens_the_floor() {
+        let pen = Pen::new(RenderScale::ONE, 1).expect("d divides s");
+        let mut buf = RgbBuffer::filled(12, 12, WEST);
+        paint_ground_shadows(
+            std::iter::once(seam_shadow()),
+            0.6 / SHADOW_STOPS_PER_STRENGTH,
+            pen,
+            &mut buf,
+        );
+        assert!(buf.as_slice().iter().any(|&p| p != WEST));
     }
 
     /// A shadow is the floor it falls on, darker toward its centre: whole ramp
