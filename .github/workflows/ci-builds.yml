@@ -2,11 +2,6 @@ name: ci-builds
 
 on:
   workflow_call:
-    inputs:
-      full:
-        description: 'False on a draft PR: only the jobs without `if: inputs.full` run'
-        type: boolean
-        required: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -60,7 +55,6 @@ jobs:
 
   packaging-linux:
     name: packaging-build (ubuntu-latest)
-    if: ${{ inputs.full }}
     # The only clean `cargo install --locked`, default-features build on both
     # Homebrew bottle platforms: it catches stale lockfiles and new system
     # dependencies before an external autobump does.
@@ -78,7 +72,6 @@ jobs:
 
   packaging-macos:
     name: packaging-build (macos-14)
-    if: ${{ inputs.full }}
     runs-on: macos-14
     timeout-minutes: 45
     steps:

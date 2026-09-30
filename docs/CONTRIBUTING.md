@@ -39,14 +39,7 @@ the tests are CI's).
 CI is the gate. Beyond the tests and the feature powerset (`just preflight full`
 runs those locally), it runs the jobs below; all but **hygiene** and zizmor's
 offline audits are invisible to preflight, so a green preflight does not mean a
-green PR.
-
-A draft PR runs only the **light tier**, every job without
-`if: inputs.full`; a ready PR, a push to `main` and a manual dispatch run
-both tiers, and CodeQL and CodSpeed skip drafts. The skipped jobs make a draft's `ci-gate` red by design,
-so read its light-tier verdict from the individual job checks. If a ready PR's
-`ci-gate` reports only a draft run, re-run the cancelled `ready_for_review`
-run. The jobs:
+green PR:
 
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
@@ -216,9 +209,7 @@ crate IS.
 | before code, if non-trivial (new seam / ≥3 files) | plan against [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) |
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` |
 | before push | nothing — the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
-| while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
-| once you need a PR number | open it as a draft: the light tier runs, and `ci-gate` stays red by design |
-| once the draft's light tier is green | mark it ready: the full tier and the billed review bots start together, so a failure only the full tier catches costs one extra review round until the bots are chained after CI |
+| opening the PR | open it as a draft; mark it ready once CI is green — the billed review bots skip drafts, so a red push doesn't buy a review of a head that's about to be replaced |
 | before merge | the two-lens review |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 
@@ -250,7 +241,7 @@ invariants"), which every contributor and agent reads first.
   `claude-security-review` workflows plus your local two-lens pass.
 - AI-authored PRs get the `needs-human-verify` label and a human visual check.
 - **Every reviewer/bot finding reaches exactly one terminal state in the PR
-  thread** — FIXED · REFUTED · RE-SCOPED → #N · FOLLOW-UP → #N, defined ONCE
+  thread** — FIXED · REFUTED-with-trace · RE-SCOPED · SURFACED, defined ONCE
   in [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md). Agents
   never file issues, and "acknowledged, no action" is not a state.
 
