@@ -29,6 +29,8 @@ impl MeetingTrio {
             .y
             .saturating_sub(north.y)
             .saturating_add(MEETING_RUG_OVERHANG)
+            // A trio by the south edge shortens its rug, still centred on the
+            // table, rather than run it off the floor.
             .min(
                 buf_h
                     .saturating_sub(self.table.y)
@@ -180,6 +182,25 @@ impl MeetingRoom {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_meeting_rug_ends_on_the_floor() {
+        for (w, h) in [(96u16, 60u16), (160, 96), (240, 144), (320, 180)] {
+            for seed in 0..8 {
+                let Some(layout) = crate::layout::Layout::compute_with_seed(w, h, None, seed)
+                else {
+                    continue;
+                };
+                for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio) {
+                    let rug = trio.rug(layout.buf_h);
+                    assert!(
+                        rug.y + rug.height <= layout.buf_h,
+                        "{w}x{h} seed {seed}: {rug:?}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn a_meeting_rug_reaches_no_further_than_the_table_is_from_the_south_edge() {

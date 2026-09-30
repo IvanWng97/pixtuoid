@@ -5354,6 +5354,31 @@ S B B B B B B S
             .find(|&(x, y)| !((span.x0..=span.x1).contains(&x) && (span.y0..=span.y1).contains(&y)))
     }
 
+    #[test]
+    fn a_rug_is_mirrored_about_its_centre_column() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = pack();
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let pen = Pen::for_pack(scale, &pack);
+        let rug = crate::layout::Bounds {
+            x: 4,
+            y: 3,
+            width: 18,
+            height: 11,
+        };
+        let (w, h) = (
+            scale.to_buffer(rug.x * 2 + rug.width),
+            scale.to_buffer(rug.y * 2 + rug.height),
+        );
+        let mut buf = RgbBuffer::filled(w, h, UNDER[0]);
+        paint_rug(rug, theme, pen, &mut buf);
+        for y in 0..h {
+            for x in 0..w {
+                assert_eq!(buf.get(x, y), buf.get(w - 1 - x, y), "({x}, {y})");
+            }
+        }
+    }
+
     fn lowest_painted_row(
         kind: &PieceKind,
         layout: &Layout,
