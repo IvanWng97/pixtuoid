@@ -368,9 +368,7 @@ pub(crate) fn build_list<'a>(
     }
 }
 
-/// The room's own lights (`crate::lighting`) this frame, as the cutaway paints
-/// them. The neon sign's glow waits for the sign: the cutaway does not draw it
-/// yet, and a glow with no tube in it reads as a stain on the wall.
+/// The room's own lights (`crate::lighting`) this frame that the cutaway paints.
 fn lights(
     frame: &SimFrame,
     office: Office<'_>,
@@ -432,6 +430,19 @@ fn lights(
         .chain(&lights.floor_lamp)
         .chain(&lamps)
         .chain(&lights.monitor_halos)
+        .chain(std::iter::once(&lights.neon))
+        .filter(|e| match e.kind {
+            // A pool over every desk reads as a second lamp: the night room is
+            // lit by its lamps and screens.
+            crate::lighting::EmitterKind::CeilingPool => false,
+            // The glow waits for its sign, which the cutaway does not draw yet:
+            // a glow with no tube in it reads as a stain on the wall.
+            crate::lighting::EmitterKind::NeonGlow => false,
+            crate::lighting::EmitterKind::FloorLamp
+            | crate::lighting::EmitterKind::DeskLamp
+            | crate::lighting::EmitterKind::MonitorHalo(_)
+            | crate::lighting::EmitterKind::WindowSpill => true,
+        })
         .filter_map(|e| {
             crate::cutaway::light::LightView::of(
                 e,
@@ -4108,6 +4119,38 @@ S B B B B B B S
         assert!(lights > 0, "the night office has no lights");
     }
 
+    /// The cutaway hangs no ceiling pool and no neon glow, at any hour: its night
+    /// is lit by its lamps and screens.
+    #[test]
+    fn the_cutaway_hangs_no_ceiling_pool() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        let frame = frames.last().expect("a seated frame");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale: RenderScale::new(pack.max_density_variant()).expect("nonzero"),
+        };
+        let mut lamps = 0;
+        for hour in [12, 18, 23] {
+            let look = look_at(theme, hour);
+            for light in list_at(frame, office, &look, hour).lights() {
+                assert!(
+                    !light.view.is(crate::lighting::EmitterKind::CeilingPool)
+                        && !light.view.is(crate::lighting::EmitterKind::NeonGlow),
+                    "{hour}:00 hangs a pool or a neon glow at {:?}",
+                    light.span
+                );
+                lamps += usize::from(light.view.is(crate::lighting::EmitterKind::DeskLamp));
+            }
+        }
+        assert!(
+            lamps > 0,
+            "nothing lights the night room, so this pins nothing"
+        );
+    }
+
     /// Every desk's lamp pools where its art hangs the bulb, whichever way the
     /// desk faces: the cutaway's art stands it on the side the desk faces.
     #[test]
@@ -4180,7 +4223,7 @@ S B B B B B B S
         let lamps: Vec<(f32, f32)> = list
             .lights()
             .iter()
-            .filter(|l| l.view.is_desk_lamp())
+            .filter(|l| l.view.is(crate::lighting::EmitterKind::DeskLamp))
             .map(|l| l.view.peak())
             .collect();
         assert_eq!(lamps.len(), bulbs.len(), "one pool a bulb");

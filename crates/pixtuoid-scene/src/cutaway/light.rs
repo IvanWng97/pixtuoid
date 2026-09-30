@@ -215,10 +215,10 @@ impl LightView {
         }
     }
 
-    /// Whether it is a desk lamp's.
+    /// Whether it is a `kind`'s light.
     #[cfg(test)]
-    pub(crate) fn is_desk_lamp(&self) -> bool {
-        self.rank.0 == rank_of(EmitterKind::DeskLamp)
+    pub(crate) fn is(&self, kind: EmitterKind) -> bool {
+        self.rank.0 == rank_of(kind)
     }
 
     /// Where it lifts most, in art pixels: the middle of its brightest.
