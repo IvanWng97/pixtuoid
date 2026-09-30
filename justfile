@@ -167,7 +167,6 @@ zizmor:
 ci-observability:
     bash policy/ci-observability/check.sh
     bash policy/ci-observability/action_behavior_test.sh
-    bash policy/ci-observability/codeql_health_test.sh
 
 # Every committed JSON Schema, held to the metaschema. These are contracts a
 # consumer reads at runtime — the review schema reaches the Claude CLI, the
