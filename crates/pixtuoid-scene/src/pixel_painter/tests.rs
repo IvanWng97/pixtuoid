@@ -798,7 +798,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
                 theme,
                 scale,
             },
-            0.0,
+            crate::floor::FloorMeta::ground(),
             now0,
             &mut cache,
             &mut buf,
@@ -845,6 +845,22 @@ fn grid_anchor(density: u16, key: char) -> (String, [(&'static str, String); 2])
             ("c2.sprite", format!("@frame 0\n{}", square(density))),
         ],
     )
+}
+
+/// A night the desk-foot tests render at: no sun spills through the windows,
+/// so with the room's lights off ([`unlit_room`]) only its darkness reaches the
+/// floor, which [`assert_variant_desk_foot`](crate::cutaway::paint::assert_variant_desk_foot)
+/// accounts for.
+fn desk_foot_hour() -> SystemTime {
+    crate::localclock::at_hour(23)
+}
+
+/// `frame` with the room's own lights switched off.
+fn unlit_room(frame: &SimFrame) -> SimFrame {
+    SimFrame {
+        indoor_scale: 0.0,
+        ..frame.clone()
+    }
 }
 
 /// A desk drawn from a variant that is exactly its base upscaled lands where the
@@ -925,15 +941,15 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
         );
         let mut cache = crate::frame_cache::FrameCache::new();
         crate::cutaway::paint::render_cutaway(
-            &frame,
+            &unlit_room(&frame),
             crate::cutaway::paint::Office {
                 layout: &layout,
                 pack,
                 theme,
                 scale,
             },
-            0.0,
-            now0,
+            crate::floor::FloorMeta::ground(),
+            desk_foot_hour(),
             &mut cache,
             &mut buf,
         );
@@ -948,6 +964,7 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
         &pack(None),
         theme,
         scale,
+        desk_foot_hour(),
     );
     assert!(
         render(&pack(Some('F'))) != base_px,
@@ -1071,15 +1088,15 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
         );
         let mut cache = crate::frame_cache::FrameCache::new();
         crate::cutaway::paint::render_cutaway(
-            frame,
+            &unlit_room(frame),
             crate::cutaway::paint::Office {
                 layout: &layout,
                 pack,
                 theme,
                 scale,
             },
-            0.0,
-            now0,
+            crate::floor::FloorMeta::ground(),
+            desk_foot_hour(),
             &mut cache,
             &mut buf,
         );
@@ -1098,6 +1115,7 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
         &pack(None),
         theme,
         scale,
+        desk_foot_hour(),
     );
     assert!(
         render(&frame, &pack(Some('D'))) != base_px,

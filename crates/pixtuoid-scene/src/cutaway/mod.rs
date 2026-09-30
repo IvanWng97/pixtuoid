@@ -8,6 +8,7 @@
 //! crates.io consumer. `shade` has no cross-crate caller and stays
 //! `pub(crate)`: a `pub` item on a published crate is the one thing a follow-up
 //! cannot quietly undo.
+pub(crate) mod light;
 pub(crate) mod order;
 #[doc(hidden)]
 pub mod paint;
