@@ -454,7 +454,11 @@ _api-toolchain:
 # broken/private intra-doc-link classes are already `deny` in
 # `[workspace.lints.rustdoc]`, and `-D warnings` also catches bare URLs, invalid
 # HTML, redundant links, and any future rustdoc lint, so `cargo doc` output stays
-# pristine (dead links render as broken anchors on docs.rs); (2) RUN the doctests
+# pristine (dead links render as broken anchors on docs.rs) — then AGAIN with
+# `--document-private-items`, because a doc on a private item is never rendered
+# by the first pass, so its links are never resolved and rot unseen (the first
+# pass still owns the public-links-to-private-item class, which the second
+# pass cannot see); (2) RUN the doctests
 # — `cargo nextest` does NOT execute doctests, so the crate-root examples would
 # otherwise go ungated. CI-only in practice (a doc build + a doctest run).
 [group('rust')]
@@ -463,6 +467,7 @@ doc-check:
     #!/usr/bin/env bash
     set -euo pipefail
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
+    RUSTDOCFLAGS="-D warnings --document-private-items" cargo doc --no-deps --workspace
     cargo test --doc --workspace
 
 # Coverage + JUnit XML in one run — the exact command ci-tests.yml's coverage job uses.

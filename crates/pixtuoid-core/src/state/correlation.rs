@@ -134,7 +134,7 @@ pub(super) struct Correlation {
     /// `ended_at` gates a PARENTED re-registration (the dead child's late
     /// echo), while a PARENTLESS start ADOPTS the remembered parent.
     pub(super) child_ledger: HashMap<AgentId, ChildLedgerEntry>,
-    /// Sweep-exemption timestamps from [`AgentEvent::ProofOfLife`] (#220):
+    /// Sweep-exemption timestamps from [`AgentEvent::ProofOfLife`](crate::AgentEvent::ProofOfLife) (#220):
     /// a slot vouched for within [`PROOF_OF_LIFE_TTL`] is skipped by
     /// `sweep_stale`'s candidate collection.
     pub(super) recent_proof_of_life: HashMap<AgentId, SystemTime>,
