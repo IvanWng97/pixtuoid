@@ -20,7 +20,7 @@ recipes.
 
 ```bash
 just              # list recipes
-just preflight    # full pre-push gate: lint → clippy → hack → test (the exact CI order)
+just preflight    # pre-push gate: lint → clippy; `just preflight full` adds hack → test (the exact CI order)
 just fmt          # auto-format
 just test         # the whole suite (cargo-nextest if installed, else cargo test)
 cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
@@ -28,16 +28,18 @@ cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
 
 > **Don't chain `cargo clippy && cargo test`** — clippy and test use *separate*
 > build caches, so chaining recompiles the whole workspace twice. Run
-> `just preflight` (the exact CI order), or one check at a time.
+> `just preflight full` (the exact CI order), or one check at a time.
 
 Activate the git hooks once per clone: `git config core.hooksPath .githooks`
-(`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`).
+(`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`, lint + clippy;
+the tests are CI's).
 
 ## CI gates
 
-`just preflight` is the local gate. CI runs the jobs below, and all but
-**hygiene** and zizmor's offline audits are invisible to preflight, so a green
-preflight does not mean a green PR:
+CI is the gate. Beyond the tests and the feature powerset (`just preflight full`
+runs those locally), it runs the jobs below; all but **hygiene** and zizmor's
+offline audits are invisible to preflight, so a green preflight does not mean a
+green PR:
 
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
@@ -206,7 +208,7 @@ crate IS.
 |---|---|
 | before code, if non-trivial (new seam / ≥3 files) | plan against [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) |
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` |
-| before push | `just preflight` (never piped — a pipe eats the exit code) |
+| before push | nothing — the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
 | before merge | the two-lens review |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 

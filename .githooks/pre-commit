@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pre-commit hook: fast format check only (~sub-second).
-# Full preflight (clippy, tests, deny, machete) runs in pre-push.
+# Lint and clippy run in pre-push (`just preflight`); tests run in CI.
 #
 # Set up once per clone with:
 #   git config core.hooksPath .githooks
