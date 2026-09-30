@@ -23,7 +23,7 @@ const BASE: (i32, u32, u32) = (2026, 1, 1);
 /// in exactly the zones whose day-hash sequence needs the extra days.
 fn try_local(day: u32, h: u32, m: u32) -> Option<SystemTime> {
     let date = chrono::NaiveDate::from_ymd_opt(BASE.0, BASE.1, BASE.2)?
-        + chrono::Days::new(u64::from(day));
+        .checked_add_days(chrono::Days::new(u64::from(day)))?;
     let local = chrono::Local.from_local_datetime(&date.and_hms_opt(h, m, 0)?);
     local.single().map(Into::into)
 }
@@ -49,7 +49,8 @@ pub fn on_day(day: u32, h: u32) -> SystemTime {
     local(day, h, 0)
 }
 
-/// [`on_day`], or `None` where `h` is no hour or that local time is skipped or ambiguous.
+/// [`on_day`], or `None` where the date is past chrono's calendar, `h` is no hour, or that
+/// local time is skipped or ambiguous.
 pub fn try_on_day(day: u32, h: u32) -> Option<SystemTime> {
     try_local(day, h, 0)
 }
@@ -81,8 +82,9 @@ mod tests {
     }
 
     #[test]
-    fn the_fallible_form_refuses_a_non_hour_and_agrees_otherwise() {
+    fn the_fallible_form_refuses_a_non_hour_or_day_and_agrees_otherwise() {
         assert_eq!(try_on_day(0, 24), None);
+        assert_eq!(try_on_day(u32::MAX, 0), None);
         assert_eq!(try_on_day(45, 7), Some(on_day(45, 7)));
     }
 
