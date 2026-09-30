@@ -6089,13 +6089,38 @@ S B B B B B B S
         let mut over = std::collections::BTreeSet::new();
         for layout in many_layouts() {
             for fixture in layout.fixtures() {
-                let Depth::Sorted { tie, .. } = fixture.depth else {
+                if fixture.depth == Depth::Backdrop {
                     continue;
-                };
+                }
+                use FixtureKind as K;
                 let hides_its_sitter = match fixture.kind {
-                    FixtureKind::LoungeCouch => true,
-                    FixtureKind::MeetingSofa { faces_away, .. } => faces_away,
-                    _ => tie == Tie::FixtureOver,
+                    K::DeskChair(_) | K::LoungeCouch => true,
+                    K::MeetingSofa { faces_away, .. } => faces_away,
+                    K::Desk(_)
+                    | K::FilingCabinet(_)
+                    | K::Station { .. }
+                    | K::Plant { .. }
+                    | K::Pod { .. }
+                    | K::Wall { .. }
+                    | K::MeetingRug { .. }
+                    | K::MeetingTable { .. }
+                    | K::MeetingChair { .. }
+                    | K::CoatRack { .. }
+                    | K::Doormat { .. }
+                    | K::NoticeBoard { .. }
+                    | K::LoungeRug
+                    | K::SideTable
+                    | K::FloorLamp
+                    | K::FishTank
+                    | K::KitchenIsland
+                    | K::PantryMat
+                    | K::IslandMat
+                    | K::WaterCooler
+                    | K::TrashBin
+                    | K::Door
+                    | K::Runner
+                    | K::NeonSign
+                    | K::Clock => false,
                 };
                 for (span, kind) in queued(&layout, &pack, scale, &[], |k| k == fixture.kind) {
                     let seat = matches!(kind, PieceKind::PropBand { rows: (0, _), .. });

@@ -10,7 +10,8 @@
 //!
 //! Today it WOULD be equivalent. [`Span::behind`] derives its edges from the
 //! base row and then the layer, a total order, so the graph is acyclic by
-//! construction and a plain sort produces the same list. The graph earns its place two other ways:
+//! construction and a plain sort produces the same list. The graph earns its
+//! place two other ways:
 //!
 //! - `check_order` (test-only) turns every pairwise fact into an assertion. While
 //!   [`Span::behind`] is acyclic it guards the sort itself; it becomes the
@@ -103,9 +104,9 @@ impl Span {
 /// Order `items` back to front.
 ///
 /// Kahn's algorithm over the [`Span::behind`] graph, with the ready set kept in
-/// (base row, layer) order so the result is deterministic (a topological order is not
-/// unique, and a render that reshuffles equal-depth pieces between frames
-/// flickers).
+/// (base row, layer) order so the result is deterministic (a topological order
+/// is not unique, and a render that reshuffles equal-depth pieces between
+/// frames flickers).
 ///
 /// A cycle cannot arise from the current predicate, so the recovery arm is a
 /// backstop rather than a live path: the pieces still in the graph are emitted
