@@ -58,6 +58,8 @@ assert_reviewability() {
     output="$(<"$output_file")"
     [[ "$output" == *"head_sha=abc123"* ]] ||
         fail "$label resolver omitted the head its status goes on"
+    [[ "$output" == *"state=$(jq -r .state <<<"$fixture")"* ]] ||
+        fail "$label resolver omitted the PR state the absence report reads"
     if [[ "$expected" == true ]]; then
         [[ "$output" == *"reviewable=true"* ]] ||
             fail "$label resolver rejected an open default-branch PR inside its trust boundary"
@@ -445,6 +447,7 @@ run_report() {
         ANALYZE_RESULT="$1" \
         PUBLISH_RESULT="$2" \
         HEAD_SHA="$3" \
+        PR_STATE="${4:-open}" \
         POSTED_STATUSES="$posted_statuses" \
         REPOSITORY="owner/repo" \
         REVIEW_STATUS="$review_status" \
@@ -459,6 +462,19 @@ report="$(run_report success failure old-head)" ||
 assert_status '.state == "failure" and .sha == "old-head"' "an unpublished review fails its lens at the analyzed head"
 run_report failure skipped "" >/dev/null 2>&1 &&
     fail "the absence report marked no head"
+run_report success skipped declined-head >/dev/null ||
+    fail "the absence report exited non-zero on an open PR it declined"
+assert_status '.state == "failure" and .sha == "declined-head"' "an open PR declined for its base still fails its lens"
+# A late run on a merged PR would overwrite its head's published verdict.
+run_report success skipped merged-head closed >/dev/null ||
+    fail "the absence report exited non-zero on a closed PR"
+[[ ! -e "$posted_statuses" ]] ||
+    fail "the absence report set a closed PR's lens status: $(<"$posted_statuses")"
+# shellcheck disable=SC2016 # Workflow expressions, matched literally.
+yq -o=json '.' "$CLAUDE_REVIEW_WORKFLOW_FILE" | jq -e '
+    .jobs.analyze.outputs.state == "${{ steps.pr.outputs.state }}"
+    and ([.jobs.report_absence.steps[].env.PR_STATE // empty] == ["${{ needs.analyze.outputs.state }}"])' >/dev/null ||
+    fail "$CLAUDE_REVIEW_WORKFLOW_FILE does not hand the resolved PR state to the absence report"
 
 # claude-refuses-forks-before-the-action pins only that the fork refusal exists
 # and runs before the action; what it actually does is asserted here.
