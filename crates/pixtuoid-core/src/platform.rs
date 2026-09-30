@@ -236,30 +236,13 @@ mod tests {
         use std::ffi::OsString;
         use std::os::unix::ffi::OsStringExt;
 
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var_os("HOME");
-        let saved_up = std::env::var_os("USERPROFILE");
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("USERPROFILE") };
+        let mut env = crate::test_env::EnvGuard::lock();
+        env.remove("USERPROFILE");
 
         // 0xFF is never valid UTF-8, and is a legal byte in a Unix path.
         let bad = OsString::from_vec(b"/tmp/pixtuoid-caf\xFF".to_vec());
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("HOME", &bad) };
+        env.set("HOME", &bad);
         let got = user_home_opt();
-
-        match saved {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var("HOME", v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var("HOME") },
-        }
-        if let Some(v) = saved_up {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            unsafe { std::env::set_var("USERPROFILE", v) };
-        }
 
         assert_eq!(
             got,
@@ -273,23 +256,17 @@ mod tests {
     /// that already went through here.
     #[test]
     fn path_env_filters_blanks_and_the_trimmed_twin_strips() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut env = crate::test_env::EnvGuard::lock();
         const K: &str = "PIXTUOID_PATH_ENV_TEST";
-        let saved = std::env::var_os(K);
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var(K) };
+        env.remove(K);
         assert_eq!(path_env(K), None, "unset");
         for blank in ["", "   ", "\t \n"] {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            unsafe { std::env::set_var(K, blank) };
+            env.set(K, blank);
             assert_eq!(path_env(K), None, "{blank:?} counts as unset");
             assert_eq!(path_env_trimmed(K), None, "{blank:?} counts as unset");
         }
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var(K, " /srv/hm ") };
+        env.set(K, " /srv/hm ");
         assert_eq!(
             path_env(K),
             Some(PathBuf::from(" /srv/hm ")),
@@ -300,13 +277,6 @@ mod tests {
             Some(PathBuf::from("/srv/hm")),
             "the trimming twin mirrors hermes's `os.environ.get(K, '').strip()`"
         );
-
-        match saved {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var(K, v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var(K) },
-        }
     }
 
     /// The whole point of reading as bytes: an ill-formed value survives BOTH
@@ -318,28 +288,17 @@ mod tests {
         use std::ffi::OsString;
         use std::os::unix::ffi::OsStringExt;
 
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut env = crate::test_env::EnvGuard::lock();
         const K: &str = "PIXTUOID_PATH_ENV_BYTES_TEST";
-        let saved = std::env::var_os(K);
 
         let bad = OsString::from_vec(b"/tmp/caf\xFF".to_vec());
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var(K, &bad) };
+        env.set(K, &bad);
         assert!(
             std::env::var(K).is_err(),
             "precondition: env::var is what DROPS this value"
         );
         assert_eq!(path_env(K), Some(PathBuf::from(&bad)));
         assert_eq!(path_env_trimmed(K), Some(PathBuf::from(&bad)));
-
-        match saved {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var(K, v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var(K) },
-        }
     }
 
     #[test]

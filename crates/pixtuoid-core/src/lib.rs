@@ -54,6 +54,10 @@ pub mod sprite;
 /// The reducer and `SceneState` — the event coordinator turning `AgentEvent`s
 /// into per-agent slot state.
 pub mod state;
+/// The scoped environment guard every test that sets or removes a variable
+/// holds, in this crate's tests and in its dependents'.
+#[cfg(feature = "harness")]
+pub mod test_env;
 // `WalkableMask` is an ALIAS for `Grid<bool>` whose obstacle ops are an
 // inherent `impl Grid<bool>`, and the orphan rule pins that impl to the crate
 // owning `Grid` — so the mask vocabulary stays here even though its producers
@@ -77,10 +81,3 @@ mod drift_surface;
 
 #[cfg(test)]
 pub(crate) mod test_capture;
-
-/// Test-only mutex serializing tests that mutate process-global environment
-/// variables: the crate's unit tests share one binary under plain `cargo test`
-/// (nextest isolates per-process), so they would race. Lock it for the whole
-/// test.
-#[cfg(test)]
-pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

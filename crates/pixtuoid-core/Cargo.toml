@@ -37,9 +37,10 @@ workspace = true
 # builds against.
 #
 # `harness` (NON-default) adds the offline decode→reduce driver the
-# fixture/corpus/fuzz/render call sites ride. Dev scaffolding: keeping it out of
-# a default build keeps it out of `cargo public-api` + `cargo semver-checks`, so
-# it never becomes a semver commitment.
+# fixture/corpus/fuzz/render call sites ride, and the `test_env` guard every
+# env-mutating test in this crate and the binary holds. Dev scaffolding:
+# keeping it out of a default build keeps it out of `cargo public-api` +
+# `cargo semver-checks`, so it never becomes a semver commitment.
 [features]
 default = ["native"]
 native  = ["dep:tokio", "dep:notify"]

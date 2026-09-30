@@ -175,16 +175,10 @@ mod tests {
 
     #[test]
     fn default_config_path_honors_claude_config_dir() {
-        // std::env is process-global: serialize against the other env-mutating tests
-        // in this binary.
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved_config = std::env::var_os("CLAUDE_CONFIG_DIR");
+        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         let fallback_suffix = PathBuf::from(".claude").join("settings.json");
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+        env.remove("CLAUDE_CONFIG_DIR");
         let unset_path = default_config_path().unwrap();
         assert!(
             unset_path.ends_with(&fallback_suffix),
@@ -192,27 +186,18 @@ mod tests {
         );
 
         let custom_dir = std::env::temp_dir().join("pixtuoid-claude-config-dir");
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &custom_dir) };
+        env.set("CLAUDE_CONFIG_DIR", &custom_dir);
         assert_eq!(
             default_config_path().unwrap(),
             custom_dir.join("settings.json")
         );
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", "") };
+        env.set("CLAUDE_CONFIG_DIR", "");
         let empty_path = default_config_path().unwrap();
         assert!(
             empty_path.ends_with(&fallback_suffix),
             "empty CLAUDE_CONFIG_DIR must fall back to .claude/settings.json, got {empty_path:?}"
         );
-
-        match saved_config {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") },
-        }
     }
 
     #[test]

@@ -1284,21 +1284,13 @@ mod tests {
     #[cfg(feature = "native")]
     #[test]
     fn every_declared_home_env_actually_moves_that_sources_root() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut env = crate::test_env::EnvGuard::lock();
 
         // A named profile derives its own agent dir and IGNORES the override
         // (`dirs.ts`), so an exported OMP_PROFILE/PI_PROFILE reds this gate blaming
-        // the resolver. Scrub them — we already hold TEST_ENV_LOCK.
-        let saved_profiles: Vec<_> = ["OMP_PROFILE", "PI_PROFILE"]
-            .iter()
-            .map(|k| (*k, std::env::var_os(k)))
-            .collect();
-        for (k, _) in &saved_profiles {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            unsafe { std::env::remove_var(k) };
-        }
+        // the resolver. Scrub them.
+        env.remove("OMP_PROFILE");
+        env.remove("PI_PROFILE");
 
         let declared: Vec<_> = REGISTRY
             .iter()
@@ -1309,26 +1301,17 @@ mod tests {
             "a floor, so an emptied column can't make this pass vacuously: {declared:?}"
         );
 
-        // Collect rather than assert in-loop: an in-loop panic would leak the
-        // scrubbed profile vars into every later test in this process.
+        // Collect rather than assert in-loop, so one run names every source
+        // that fails.
         let mut failures: Vec<String> = Vec::new();
         for (name, var) in declared {
             // A REAL dir: upstream `find_codex_home` gates `CODEX_HOME` on the path
             // existing, so a bare string silently falls back.
             let tmp = tempfile::tempdir().expect("tempdir");
             let root_env = tmp.path().to_path_buf();
-            let saved = std::env::var_os(var);
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            unsafe { std::env::set_var(var, &root_env) };
+            env.set(var, &root_env);
 
             let resolved = crate::source::resolved_source_root(name);
-
-            match saved {
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                Some(v) => unsafe { std::env::set_var(var, v) },
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                None => unsafe { std::env::remove_var(var) },
-            }
 
             match resolved {
                 None => failures.push(format!(
@@ -1345,14 +1328,6 @@ mod tests {
             }
         }
 
-        for (k, v) in &saved_profiles {
-            match v {
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                Some(val) => unsafe { std::env::set_var(k, val) },
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                None => unsafe { std::env::remove_var(k) },
-            }
-        }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
@@ -1361,9 +1336,7 @@ mod tests {
     #[cfg(feature = "native")]
     #[test]
     fn a_source_root_does_not_wander_into_an_unset_overrides_directory() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = crate::test_env::EnvGuard::lock();
 
         let tmp = tempfile::tempdir().expect("tempdir");
         for (name, root) in [

@@ -704,9 +704,7 @@ mod tests {
         // Serialize against config.rs's env-mutating tests, which null HOME and
         // USERPROFILE in a window that makes `home_first_dir()` return None under
         // plain `cargo test` — nextest's per-process isolation masks it.
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         let arts = plugin_artifacts(Path::new("/opt/bin/pixtuoid-hook")).unwrap();
         assert_eq!(arts.len(), 3, "manifest + package.json + index.js");
         let index = &arts
@@ -753,9 +751,7 @@ mod tests {
 
     #[test]
     fn merge_install_adds_load_path_enabled_and_the_grant() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         let out = merge_install("{}", "/opt/bin/pixtuoid-hook").unwrap();
         assert!(out.changed);
         let v: Value = serde_json::from_str(&out.content).unwrap();
@@ -784,9 +780,7 @@ mod tests {
     /// openclaw e2e scripts.
     #[test]
     fn default_config_path_is_always_a_real_openclaw_config_file() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         let p = default_config_path().expect("a dev machine resolves a home");
         assert!(
             !p.as_os_str().is_empty(),
@@ -817,9 +811,7 @@ mod tests {
 
     #[test]
     fn merge_install_is_idempotent() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         let a = merge_install("{}", "/x").unwrap();
         let b = merge_install(&a.content, "/x").unwrap();
         assert!(!b.changed, "re-install of the same state is a no-op");
@@ -827,9 +819,7 @@ mod tests {
 
     #[test]
     fn merge_install_preserves_foreign_config() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         let foreign = r#"{"gateway":{"mode":"local"},"plugins":{"entries":{"anthropic":{"enabled":true}},"load":{"paths":["/some/other/plugin"]}}}"#;
         let out = merge_install(foreign, "/x").unwrap();
         let v: Value = serde_json::from_str(&out.content).unwrap();
@@ -847,9 +837,7 @@ mod tests {
 
     #[test]
     fn include_is_detected_at_any_depth_and_only_when_present() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
 
         for clean in [
             json!({}),
@@ -902,9 +890,7 @@ mod tests {
 
     #[test]
     fn removing_only_our_load_path_still_counts_as_ours() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         // A full install, then hand-drop the entry so ONLY the path identifies us.
         let installed = merge_install(r#"{"plugins":{"allow":["anthropic"]}}"#, "").unwrap();
         let mut v: Value = serde_json::from_str(&installed.content).unwrap();
@@ -942,9 +928,7 @@ mod tests {
 
     #[test]
     fn install_joins_a_curated_allowlist_but_never_an_empty_one() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         let curated = merge_install(r#"{"plugins":{"allow":["anthropic"]}}"#, "").unwrap();
         let v: Value = serde_json::from_str(&curated.content).unwrap();
         let allow = v["plugins"]["allow"].as_array().unwrap();
@@ -996,9 +980,7 @@ mod tests {
 
     #[test]
     fn verify_flags_every_fail_closed_switch_that_silently_stops_the_plugin() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         let installed = merge_install("{}", "").unwrap();
         let with = |mutate: &dyn Fn(&mut Value)| {
             let mut v: Value = serde_json::from_str(&installed.content).unwrap();
@@ -1064,9 +1046,7 @@ mod tests {
 
     #[test]
     fn verify_flags_an_allowlist_that_omits_us_and_notes_json5_and_include() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         let installed = merge_install("{}", "").unwrap();
         assert!(verify_schema(&installed.content).issues.is_empty());
 
@@ -1107,9 +1087,7 @@ mod tests {
 
     #[test]
     fn a_reload_mode_that_never_applies_our_write_is_noted_but_not_a_break() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         let installed = merge_install("{}", "").unwrap();
         let with_mode = |mode: &str| {
             let mut v: Value = serde_json::from_str(&installed.content).unwrap();
@@ -1152,9 +1130,7 @@ mod tests {
 
     #[test]
     fn uninstall_prunes_its_own_husk_but_keeps_anything_foreign() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         let installed = merge_install("{}", "").unwrap();
         let removed = merge_uninstall(&installed.content).unwrap();
         assert!(removed.changed);
@@ -1174,9 +1150,7 @@ mod tests {
 
     #[test]
     fn uninstall_revokes_the_grant_but_keeps_foreign_entries() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         let installed = merge_install(
             r#"{"plugins":{"entries":{"anthropic":{"enabled":true}}}}"#,
             "/x",
@@ -1207,9 +1181,7 @@ mod tests {
 
     #[test]
     fn uninstall_of_unmanaged_config_is_a_no_op() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         // `changed` IS the `has_hooks` signal, so any shape we did not write must
         // report false — including the empty containers our own prune produces.
         for unmanaged in [
@@ -1231,9 +1203,7 @@ mod tests {
 
     #[test]
     fn uninstall_undoes_the_allowlist_join_without_ever_emptying_it() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         let joined = merge_install(r#"{"plugins":{"allow":["anthropic"]}}"#, "").unwrap();
         let v: Value = serde_json::from_str(&merge_uninstall(&joined.content).unwrap().content)
             .expect("valid json");
@@ -1265,9 +1235,7 @@ mod tests {
 
     #[test]
     fn uninstall_never_empties_the_allowlist_even_when_every_entry_is_ours() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         // Upstream trims, so a padded copy is the SAME id — the first two inputs are
         // lists whose every entry is ours.
         for input in [
@@ -1288,9 +1256,7 @@ mod tests {
 
     #[test]
     fn merge_refuses_a_json5_document_instead_of_dropping_its_comments() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         // VALID JSON5 that serde_json cannot represent: a comment plus a trailing
         // comma.
         let json5 = "{\n  // my gateway notes — DO NOT LOSE\n  \"gateway\": { \"port\": 19789 },\n  \"plugins\": {},\n}\n";
@@ -1308,9 +1274,7 @@ mod tests {
 
     #[test]
     fn install_then_uninstall_round_trips() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         let installed = merge_install("{}", "/x").unwrap();
         let removed = merge_uninstall(&installed.content).unwrap();
         let v: Value = serde_json::from_str(&removed.content).unwrap();
@@ -1319,9 +1283,7 @@ mod tests {
 
     #[test]
     fn empty_content_is_treated_as_empty_document() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _env = pixtuoid_core::test_env::EnvGuard::lock();
         let out = merge_install("", "/x").unwrap();
         assert!(out.changed);
         assert!(serde_json::from_str::<Value>(&out.content).is_ok());

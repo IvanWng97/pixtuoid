@@ -462,12 +462,9 @@ mod tests {
 
     #[test]
     fn install_mounts_once_idempotently_and_preserves_foreign_rows() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         let home = tempfile::tempdir().unwrap();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("DSH_HOME", home.path()) };
+        env.set("DSH_HOME", home.path());
 
         let foreign =
             "- insert:\n    - id: timer\n      name: '@deepseek-ai/cordis-plugin-timer'\n";
@@ -485,23 +482,16 @@ mod tests {
         assert!(removed.content.contains("timer"));
         assert!(!removed.content.contains(PLUGIN_ID));
         assert!(!merge_uninstall(foreign).unwrap().changed);
-
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("DSH_HOME") };
     }
 
     #[test]
     fn a_moved_home_re_mounts_the_new_plugin_path() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         let a = tempfile::tempdir().unwrap();
         let b = tempfile::tempdir().unwrap();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("DSH_HOME", a.path()) };
+        env.set("DSH_HOME", a.path());
         let first = merge_install("", "/unused").unwrap();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("DSH_HOME", b.path()) };
+        env.set("DSH_HOME", b.path());
         let second = merge_install(&first.content, "/unused").unwrap();
         assert!(second.changed, "a stale mount path must be rewritten");
         // Structural, not string: saphyr quote-escapes a Windows path in the
@@ -509,18 +499,13 @@ mod tests {
         // re-merge under home B is a no-op exactly when the row already
         // carries B's plugin path.
         assert!(!merge_install(&second.content, "/unused").unwrap().changed);
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("DSH_HOME") };
     }
 
     #[test]
     fn a_foreign_entry_batched_in_our_row_survives_connect_and_disconnect() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         let home = tempfile::tempdir().unwrap();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("DSH_HOME", home.path()) };
+        env.set("DSH_HOME", home.path());
         // A user hand-batches a foreign plugin into the same `insert:` op as
         // an (old) pixtuoid mount — entry-granular ownership must not eat it.
         let batched = "- insert:\n    - id: timer\n      name: '@deepseek-ai/cordis-plugin-timer'\n    - id: pixtuoid\n      name: /old/pixtuoid-dsh.mjs\n";
@@ -532,18 +517,13 @@ mod tests {
         assert!(removed.changed);
         assert!(removed.content.contains("timer"), "{}", removed.content);
         assert!(!removed.content.contains(PLUGIN_ID));
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("DSH_HOME") };
     }
 
     #[test]
     fn duplicate_our_entries_collapse_on_reconnect_as_the_doctor_line_says() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         let home = tempfile::tempdir().unwrap();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("DSH_HOME", home.path()) };
+        env.set("DSH_HOME", home.path());
         let one = merge_install("", "/unused").unwrap();
         let dup = format!("{}{}", one.content, one.content);
         assert!(
@@ -555,8 +535,6 @@ mod tests {
         let collapsed = merge_install(&dup, "/unused").unwrap();
         assert!(collapsed.changed);
         assert!(verify_schema(&collapsed.content).issues.is_empty());
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("DSH_HOME") };
     }
 
     #[test]
@@ -567,12 +545,9 @@ mod tests {
 
     #[test]
     fn a_mapping_shaped_insert_is_refused_loud_not_silently_unseen() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         let home = tempfile::tempdir().unwrap();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("DSH_HOME", home.path()) };
+        env.set("DSH_HOME", home.path());
         // Message-anchored (the openclaw refusal-test standard): a different
         // error passing `is_err()` for the wrong reason must not count.
         let mapping = "- insert:\n    id: pixtuoid\n    name: /old/pixtuoid-dsh.mjs\n";
@@ -602,18 +577,13 @@ mod tests {
         // throws at boot; a string spreads into per-char garbage entries).
         let err = merge_install("- insert: 42\n", "/unused").unwrap_err();
         assert!(err.to_string().contains("is not a list"), "{err}");
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("DSH_HOME") };
     }
 
     #[test]
     fn verify_reports_the_missing_row_and_the_relative_path() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         let home = tempfile::tempdir().unwrap();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("DSH_HOME", home.path()) };
+        env.set("DSH_HOME", home.path());
 
         let none = verify_schema("");
         assert!(
@@ -633,8 +603,7 @@ mod tests {
         // A row carried over from a relocated home: the artifact loop stats
         // only the CURRENT home's derived path, so the schema owns this.
         let other = tempfile::tempdir().unwrap();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("DSH_HOME", other.path()) };
+        env.set("DSH_HOME", other.path());
         let stale = verify_schema(&merged.content);
         assert!(
             stale
@@ -643,15 +612,11 @@ mod tests {
                 .any(|i| i.contains("not this home's plugin")),
             "{stale:?}"
         );
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("DSH_HOME", home.path()) };
+        env.set("DSH_HOME", home.path());
 
         let relative = "- insert:\n    - id: pixtuoid\n      name: relative/plugin.mjs\n";
         let rel = verify_schema(relative);
         assert!(rel.issues.iter().any(|i| i.contains("not absolute")));
-
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("DSH_HOME") };
     }
 
     /// The mount entry's `name` is a hand-editable YAML scalar and `$DSH_HOME`
@@ -659,9 +624,7 @@ mod tests {
     /// issues.
     #[test]
     fn a_hostile_mount_entry_reaches_the_issues_stripped() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         let dir = tempfile::tempdir().unwrap();
         // Windows forbids the Cc half in a path component; U+202E it allows.
         let home = if cfg!(windows) {
@@ -669,8 +632,7 @@ mod tests {
         } else {
             dir.path().join("home\u{1b}]0;pwned\u{7}\u{202e}")
         };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("DSH_HOME", &home) };
+        env.set("DSH_HOME", &home);
         // Absolute on each platform: Windows needs the drive prefix.
         let abs = if cfg!(windows) { "C:/abs" } else { "/abs" };
         let issues: Vec<String> = [abs, "rel"]
@@ -682,8 +644,6 @@ mod tests {
             })
             .flat_map(|content| verify_schema(&content).issues)
             .collect();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("DSH_HOME") };
         assert!(
             issues.iter().any(|i| i.contains("not this home's plugin"))
                 && issues.iter().any(|i| i.contains("not absolute")),
@@ -696,12 +656,9 @@ mod tests {
 
     #[test]
     fn plugin_artifacts_bake_the_hook_path_and_carry_the_sentinel() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         let home = tempfile::tempdir().unwrap();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("DSH_HOME", home.path()) };
+        env.set("DSH_HOME", home.path());
         let arts = plugin_artifacts(Path::new("/opt/bin/pixtuoid-hook")).unwrap();
         assert_eq!(arts.len(), 1);
         let (path, content) = &arts[0];
@@ -709,19 +666,12 @@ mod tests {
         assert!(content.contains(SENTINEL));
         assert!(content.contains("\"/opt/bin/pixtuoid-hook\""));
         assert!(!content.contains(HOOK_PLACEHOLDER));
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("DSH_HOME") };
     }
 
     #[test]
     fn dsh_home_refuses_a_relative_override() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("DSH_HOME", "relative/home") };
+        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
+        env.set("DSH_HOME", "relative/home");
         assert!(dsh_home().is_err());
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("DSH_HOME") };
     }
 }

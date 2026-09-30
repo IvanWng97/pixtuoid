@@ -119,36 +119,27 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn default_socket_path_env_precedence_and_default_paths() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved_socket = std::env::var_os("PIXTUOID_SOCKET");
-        let saved_xdg = std::env::var_os("XDG_RUNTIME_DIR");
+        let mut env = crate::test_env::EnvGuard::lock();
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("PIXTUOID_SOCKET", "/tmp/explicit.sock") };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000") };
+        env.set("PIXTUOID_SOCKET", "/tmp/explicit.sock");
+        env.set("XDG_RUNTIME_DIR", "/run/user/1000");
         assert_eq!(
             ClaudeCodeSource::default_socket_path(),
             PathBuf::from("/tmp/explicit.sock")
         );
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("PIXTUOID_SOCKET", "") };
+        env.set("PIXTUOID_SOCKET", "");
         assert_eq!(
             ClaudeCodeSource::default_socket_path(),
             PathBuf::from("/run/user/1000/pixtuoid.sock")
         );
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("PIXTUOID_SOCKET", "   ") };
+        env.set("PIXTUOID_SOCKET", "   ");
         assert_eq!(
             ClaudeCodeSource::default_socket_path(),
             PathBuf::from("/run/user/1000/pixtuoid.sock")
         );
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("PIXTUOID_SOCKET") };
+        env.remove("PIXTUOID_SOCKET");
         assert_eq!(
             ClaudeCodeSource::default_socket_path(),
             PathBuf::from("/run/user/1000/pixtuoid.sock")
@@ -157,42 +148,23 @@ mod tests {
         let uid = rustix::process::getuid().as_raw();
         let tmp_fallback = PathBuf::from(format!("/tmp/pixtuoid-{uid}/pixtuoid.sock"));
         for invalid in ["", "   ", "relative/run"] {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            unsafe { std::env::set_var("XDG_RUNTIME_DIR", invalid) };
+            env.set("XDG_RUNTIME_DIR", invalid);
             assert_eq!(ClaudeCodeSource::default_socket_path(), tmp_fallback);
         }
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
+        env.remove("XDG_RUNTIME_DIR");
         assert_eq!(
             ClaudeCodeSource::default_socket_path(),
             PathBuf::from(format!("/tmp/pixtuoid-{uid}/pixtuoid.sock"))
         );
-
-        match saved_socket {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var("PIXTUOID_SOCKET", v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var("PIXTUOID_SOCKET") },
-        }
-        match saved_xdg {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var("XDG_RUNTIME_DIR", v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var("XDG_RUNTIME_DIR") },
-        }
     }
 
     #[test]
     fn default_paths_projects_root_honors_claude_config_dir() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved_config = std::env::var_os("CLAUDE_CONFIG_DIR");
+        let mut env = crate::test_env::EnvGuard::lock();
         let fallback_suffix = PathBuf::from(".claude").join("projects");
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+        env.remove("CLAUDE_CONFIG_DIR");
         let unset_paths = ClaudeCodeSource::default_paths();
         assert!(
             unset_paths.projects_root.ends_with(&fallback_suffix),
@@ -201,27 +173,18 @@ mod tests {
         );
 
         let custom_dir = std::env::temp_dir().join("pixtuoid-claude-config-dir");
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &custom_dir) };
+        env.set("CLAUDE_CONFIG_DIR", &custom_dir);
         assert_eq!(
             ClaudeCodeSource::default_paths().projects_root,
             custom_dir.join("projects")
         );
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", "") };
+        env.set("CLAUDE_CONFIG_DIR", "");
         let empty_paths = ClaudeCodeSource::default_paths();
         assert!(
             empty_paths.projects_root.ends_with(&fallback_suffix),
             "empty CLAUDE_CONFIG_DIR must fall back to .claude/projects, got {:?}",
             empty_paths.projects_root
         );
-
-        match saved_config {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") },
-        }
     }
 }

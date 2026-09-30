@@ -1512,13 +1512,9 @@ mod tests {
         assert!(pack_densities(PackSource::Bundled).is_ok());
     }
 
-    // Reads process-global env (the config path), so it holds TEST_ENV_LOCK like
-    // `run_renders_the_category_report`.
     #[test]
     fn a_config_pack_dir_that_fails_to_load_shows_in_the_report() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         let base = tempfile::TempDir::new().expect("tempdir");
         let config_dir = base.path().join("pixtuoid");
         std::fs::create_dir_all(&config_dir).expect("mkdir config");
@@ -1537,29 +1533,13 @@ mod tests {
             format!("pack-dir = {:?}\n", pack.to_string_lossy()),
         )
         .expect("write config.toml");
-        let saved: Vec<(&str, Option<std::ffi::OsString>)> =
-            ["XDG_CONFIG_HOME", "CLICOLOR_FORCE", "NO_COLOR"]
-                .iter()
-                .map(|k| (*k, std::env::var_os(k)))
-                .collect();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", base.path()) };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("CLICOLOR_FORCE") };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("NO_COLOR") };
+        env.set("XDG_CONFIG_HOME", base.path());
+        env.remove("CLICOLOR_FORCE");
+        env.remove("NO_COLOR");
         let out = run(
             std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
             crate::GraphicsMode::Auto,
         );
-        for (k, v) in saved {
-            match v {
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                Some(v) => unsafe { std::env::set_var(k, v) },
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                None => unsafe { std::env::remove_var(k) },
-            }
-        }
         let out = out.expect("doctor runs");
         assert!(out.contains("failed to load sprite pack"), "{out}");
         assert!(!out.contains(['\u{1b}', '\u{202e}']), "{out:?}");
@@ -1569,29 +1549,13 @@ mod tests {
     fn run_renders_the_category_report() {
         // A dev shell exporting CLICOLOR_FORCE would force escapes even under
         // captured stdout — pin the env so the plain-text asserts hold anywhere.
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved: Vec<(&str, Option<std::ffi::OsString>)> = ["CLICOLOR_FORCE", "NO_COLOR"]
-            .iter()
-            .map(|k| (*k, std::env::var_os(k)))
-            .collect();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("CLICOLOR_FORCE") };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("NO_COLOR") };
+        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
+        env.remove("CLICOLOR_FORCE");
+        env.remove("NO_COLOR");
         let out = run(
             std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
             crate::GraphicsMode::Auto,
         );
-        for (k, v) in saved {
-            match v {
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                Some(v) => unsafe { std::env::set_var(k, v) },
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                None => unsafe { std::env::remove_var(k) },
-            }
-        }
         let out = out.unwrap();
         assert!(out.starts_with("pixtuoid doctor\n"), "{out}");
         assert!(out.contains("log    "), "{out}");
@@ -2047,9 +2011,7 @@ mod tests {
     #[test]
     fn run_never_spawns_a_version_probe_for_a_cli_it_has_no_evidence_of() {
         use std::os::unix::fs::PermissionsExt;
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         let dir = tempfile::tempdir().unwrap();
         let (home, bin) = (dir.path().join("home"), dir.path().join("bin"));
         std::fs::create_dir_all(&home).unwrap();
@@ -2064,32 +2026,15 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let saved: Vec<(&str, Option<std::ffi::OsString>)> =
-            ["HOME", "XDG_CONFIG_HOME", "PATH", "OPENCODE_CONFIG_DIR"]
-                .iter()
-                .map(|k| (*k, std::env::var_os(k)))
-                .collect();
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("HOME", &home) };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", home.join(".config")) };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("OPENCODE_CONFIG_DIR") };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("PATH", &bin) };
+        env.set("HOME", &home);
+        env.set("XDG_CONFIG_HOME", home.join(".config"));
+        env.remove("OPENCODE_CONFIG_DIR");
+        env.set("PATH", &bin);
         let out = run(
             std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
             crate::GraphicsMode::Auto,
         );
         let spawned = marker.exists();
-        for (k, v) in saved {
-            match v {
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                Some(v) => unsafe { std::env::set_var(k, v) },
-                // FIXME: Audit that the environment access only happens in single-threaded code.
-                None => unsafe { std::env::remove_var(k) },
-            }
-        }
 
         out.expect("the report still builds");
         assert!(

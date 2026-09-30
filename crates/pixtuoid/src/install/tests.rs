@@ -1,33 +1,6 @@
 use super::*;
 use crate::install::target::{CLAUDE, CODEX, MergeOutcome, OPENCLAW, Target};
 
-/// Callers must hold `TEST_ENV_LOCK` first, declared BEFORE this guard: locals
-/// drop in reverse order, so the env restore happens while the lock is held.
-struct EnvVarOverride {
-    key: &'static str,
-    prior: Option<std::ffi::OsString>,
-}
-
-impl EnvVarOverride {
-    fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
-        let prior = std::env::var_os(key);
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var(key, value) };
-        Self { key, prior }
-    }
-}
-
-impl Drop for EnvVarOverride {
-    fn drop(&mut self) {
-        match self.prior.take() {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var(self.key, v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var(self.key) },
-        }
-    }
-}
-
 static FAKE: Target = Target {
     name: "fake",
     core_source: "fake",
@@ -246,25 +219,13 @@ fn resolve_hook_binary_no_overrides_uses_locate() {
 fn empty_env_override_counts_as_unset_at_the_live_read() {
     // io::nonempty_env is the live seam install_target reads PIXTUOID_HOOK
     // through: empty/whitespace must read as unset, or "" becomes the command.
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    let saved = std::env::var_os("PIXTUOID_HOOK");
-    // FIXME: Audit that the environment access only happens in single-threaded code.
-    unsafe { std::env::set_var("PIXTUOID_HOOK", "") };
+    let mut env = pixtuoid_core::test_env::EnvGuard::lock();
+    env.set("PIXTUOID_HOOK", "");
     let empty = io::nonempty_env("PIXTUOID_HOOK");
-    // FIXME: Audit that the environment access only happens in single-threaded code.
-    unsafe { std::env::set_var("PIXTUOID_HOOK", "   ") };
+    env.set("PIXTUOID_HOOK", "   ");
     let blank = io::nonempty_env("PIXTUOID_HOOK");
-    // FIXME: Audit that the environment access only happens in single-threaded code.
-    unsafe { std::env::set_var("PIXTUOID_HOOK", "/real/hook") };
+    env.set("PIXTUOID_HOOK", "/real/hook");
     let real = io::nonempty_env("PIXTUOID_HOOK");
-    match saved {
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        Some(v) => unsafe { std::env::set_var("PIXTUOID_HOOK", v) },
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        None => unsafe { std::env::remove_var("PIXTUOID_HOOK") },
-    }
     assert_eq!(empty, None);
     assert_eq!(blank, None);
     assert_eq!(real, Some("/real/hook".into()));
@@ -516,16 +477,13 @@ fn uninstall_target_reports_removed_then_nothing() {
 #[test]
 fn install_target_round_trips_every_registered_target() {
     // OpenClaw's plugin dir resolves from openclaw_state_dir(), NOT the config
-    // override, so a temp home keeps this off the real ~/.openclaw; TEST_ENV_LOCK
-    // serializes that process-global set against sibling env-mutating tests.
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    // override, so a temp home keeps this off the real ~/.openclaw.
+    let mut env = pixtuoid_core::test_env::EnvGuard::lock();
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
+    env.set("OPENCLAW_STATE_DIR", oc_home.path());
     // Same class: dsh's plugin file resolves from $DSH_HOME.
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
+    env.set("DSH_HOME", dsh_home.path());
     for t in target::TARGETS {
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg = tmp.path().join("cfg");
@@ -600,12 +558,10 @@ fn config_present_target_file_is_absent_before_then_present_after_install() {
 fn openclaw_is_present_is_false_before_then_true_after_install() {
     use crate::install::target::is_present;
     // OPENCLAW_STATE_DIR points at a NON-EXISTENT dir so the probe starts FALSE.
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let mut env = pixtuoid_core::test_env::EnvGuard::lock();
     let oc_home = tempfile::TempDir::new().unwrap();
     let state = oc_home.path().join("ocstate"); // not yet created
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", &state);
+    env.set("OPENCLAW_STATE_DIR", &state);
 
     assert!(
         !is_present(&OPENCLAW),
@@ -704,13 +660,11 @@ fn install_on_a_malformed_config_errors_without_rewriting_or_backing_up() {
 fn install_on_a_malformed_config_leaves_no_orphan_extra_artifacts() {
     // A present-but-malformed config must bail BEFORE the extra artifacts are
     // written, else a partial install strands orphan plugin files.
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let mut env = pixtuoid_core::test_env::EnvGuard::lock();
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
+    env.set("OPENCLAW_STATE_DIR", oc_home.path());
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
+    env.set("DSH_HOME", dsh_home.path());
 
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("openclaw.json");
@@ -738,13 +692,11 @@ fn install_on_a_malformed_config_leaves_no_orphan_extra_artifacts() {
 
 #[test]
 fn verify_target_is_sound_after_a_real_install_for_every_target() {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let mut env = pixtuoid_core::test_env::EnvGuard::lock();
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
+    env.set("OPENCLAW_STATE_DIR", oc_home.path());
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
+    env.set("DSH_HOME", dsh_home.path());
     let exe = std::env::current_exe().unwrap(); // a real, executable file
     for &t in target::TARGETS {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -835,13 +787,11 @@ fn verify_target_flags_a_non_executable_shim() {
 // no matching check in `verify_target` fails here.
 #[test]
 fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_target() {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let mut env = pixtuoid_core::test_env::EnvGuard::lock();
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
+    env.set("OPENCLAW_STATE_DIR", oc_home.path());
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
+    env.set("DSH_HOME", dsh_home.path());
     let exe = std::env::current_exe().unwrap();
     let mut covered = 0;
     for &t in target::TARGETS {
@@ -886,13 +836,11 @@ fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_ta
 /// doctor — the silent-dead class, one artifact short of the invariant.
 #[test]
 fn verify_target_flags_a_stale_code_artifact_for_every_extra_artifacts_target() {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let mut env = pixtuoid_core::test_env::EnvGuard::lock();
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
+    env.set("OPENCLAW_STATE_DIR", oc_home.path());
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
+    env.set("DSH_HOME", dsh_home.path());
     let exe = std::env::current_exe().unwrap();
     let mut covered = 0;
     for &t in target::TARGETS {
@@ -1054,13 +1002,11 @@ fn no_targets_uninstall_merge_claims_a_change_on_an_empty_config() {
 // the mascot never appears while doctor reports the source healthy.
 #[test]
 fn verify_target_hard_flags_a_moved_baked_shim_for_every_extra_artifacts_target() {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let mut env = pixtuoid_core::test_env::EnvGuard::lock();
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
+    env.set("OPENCLAW_STATE_DIR", oc_home.path());
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
+    env.set("DSH_HOME", dsh_home.path());
     let mut covered = 0;
     for &t in target::TARGETS {
         if t.extra_artifacts.is_none() {
@@ -1096,13 +1042,11 @@ fn verify_target_hard_flags_a_moved_baked_shim_for_every_extra_artifacts_target(
 
 #[test]
 fn reinstall_heals_a_deleted_extra_artifact_even_on_a_config_no_op() {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let mut env = pixtuoid_core::test_env::EnvGuard::lock();
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
+    env.set("OPENCLAW_STATE_DIR", oc_home.path());
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
+    env.set("DSH_HOME", dsh_home.path());
     let exe = std::env::current_exe().unwrap();
     let mut covered = 0;
     for &t in target::TARGETS {
@@ -1276,13 +1220,11 @@ fn every_target_that_writes_a_config_names_us_in_it() {
     // The invariant `has_hooks`'s unparseable-config fallback rests on: a config we
     // wrote mentions us, so a substring probe answers "is this ours?" when the parse
     // fails. The fixture shim must therefore be named `pixtuoid-hook`, as in prod.
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let mut env = pixtuoid_core::test_env::EnvGuard::lock();
     let oc_home = tempfile::TempDir::new().unwrap();
-    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
+    env.set("OPENCLAW_STATE_DIR", oc_home.path());
     let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
+    env.set("DSH_HOME", dsh_home.path());
     let tmpdir = tempfile::TempDir::new().unwrap();
     let hook = tmpdir.path().join("pixtuoid-hook");
     std::fs::write(&hook, b"#!/bin/sh\n").unwrap();

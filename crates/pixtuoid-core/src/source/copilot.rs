@@ -1020,46 +1020,32 @@ mod tests {
 
     #[test]
     fn copilot_home_honors_non_empty_env_override() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var_os("COPILOT_HOME");
+        let mut env = crate::test_env::EnvGuard::lock();
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("COPILOT_HOME", "/custom/cp") };
+        env.set("COPILOT_HOME", "/custom/cp");
         assert_eq!(
             copilot_home(),
             PathBuf::from("/custom/cp"),
             "a non-empty COPILOT_HOME is used verbatim"
         );
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("COPILOT_HOME", "") };
+        env.set("COPILOT_HOME", "");
         assert!(
             copilot_home().ends_with(".copilot"),
             "empty COPILOT_HOME → ~/.copilot fallback"
         );
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("COPILOT_HOME", "   ") };
+        env.set("COPILOT_HOME", "   ");
         assert!(
             copilot_home().ends_with(".copilot"),
             "whitespace-only COPILOT_HOME → ~/.copilot fallback"
         );
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("COPILOT_HOME") };
+        env.remove("COPILOT_HOME");
         assert!(
             copilot_home().ends_with(".copilot"),
             "unset COPILOT_HOME → ~/.copilot fallback"
         );
-
-        match saved {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var("COPILOT_HOME", v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var("COPILOT_HOME") },
-        }
     }
 
     /// Every field the decoder reads by a LITERAL key is declared here — reads
