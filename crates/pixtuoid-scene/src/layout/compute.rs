@@ -415,7 +415,12 @@ pub(super) fn compute_with_seed(
         )
     });
 
-    let mut waypoints = compute_waypoints(&plan, &pod_decor, lounge.map(|l| l.couch_center));
+    let mut waypoints = compute_waypoints(
+        &plan,
+        &pod_decor,
+        lounge.map(|l| l.couch_center),
+        &home_desks,
+    );
 
     // NOT the pantry (a plant + pad blocks the only bridge to the cubicle area), NOT the
     // cubicle top strip (a 7-px wall-to-couch gap), NOT a meeting interior (seals the door).
@@ -850,10 +855,16 @@ impl LoungeFlanks {
 /// aquarium carries an EXTRA gate the other two don't: it must stay clear of the
 /// elevator `door` column so the spawn threshold never routes around it.
 fn place_lounge(couch: Point, buf_w: u16, door: Option<Point>) -> Lounge {
+    /// Rows from the couch's centre down to the lamp's base: the art grows
+    /// north from it (invariant #6), clear of the desks to the south.
+    const LAMP_BASE_DY: u16 = 6;
     let flanks = LoungeFlanks::of(couch.x);
     let floor_lamp = Point {
         x: flanks.lamp_x,
-        y: couch.y + 2,
+        y: super::placement::centre_y_standing_on(
+            couch.y + LAMP_BASE_DY,
+            furniture_def(Furniture::FloorLamp).visual.h,
+        ),
     };
     let side_table = Point {
         x: flanks.side_table_x,
@@ -1432,6 +1443,10 @@ pub(super) fn decor_for_slot(floor_seed: u64, slot_idx: usize) -> PodDecor {
     bag[slot_idx % n]
 }
 
+/// Rows from an aisle slot's centre down to the row every piece in it stands
+/// on, so a taller piece grows north (invariant #6) rather than out of its aisle.
+const POD_DECOR_BASE_DY: u16 = 4;
+
 /// Decor items placed in aisles between desk pods.
 pub(super) fn compute_pod_decor(grid: PodGrid, floor_seed: u64) -> Vec<PodDecorItem> {
     let cubicle_band = &grid.band;
@@ -1452,12 +1467,13 @@ pub(super) fn compute_pod_decor(grid: PodGrid, floor_seed: u64) -> Vec<PodDecorI
     // Vertical twin: the LAST POD ROW's slot centre can sit close enough to the bottom
     // that a tall centred visual crosses into cubicle_aisle and blocks its cells.
     let band_bottom = cubicle_band.y + cubicle_band.height;
-    let mut push_slot = |pod_decor: &mut Vec<PodDecorItem>, x: u16, y: u16| {
+    let mut push_slot = |pod_decor: &mut Vec<PodDecorItem>, x: u16, slot_y: u16| {
         let kind = decor_for_slot(floor_seed, slot_idx);
         // The cycle advances even when the slot drops, so survivors keep the kinds
         // they'd have on a wider floor.
         slot_idx += 1;
         let vis = furniture_def(kind.furniture()).visual;
+        let y = super::placement::centre_y_standing_on(slot_y + POD_DECOR_BASE_DY, vis.h);
         // Same centred-blit math the painter uses (pos − h/2 .. pos − h/2 + h).
         if x.saturating_sub(vis.w / 2) + vis.w > band_right
             || y.saturating_sub(vis.h / 2) + vis.h > band_bottom
@@ -1488,12 +1504,35 @@ pub(super) fn compute_pod_decor(grid: PodGrid, floor_seed: u64) -> Vec<PodDecorI
     pod_decor
 }
 
+/// Whether a corridor appliance centred at `pos` keeps its art off every home
+/// desk's sitter: a south-row sitter hangs into the aisle, over the art's top.
+/// Both facings, since a narrow band demotes a back-turned desk after this runs.
+fn clears_the_seats(kind: Furniture, pos: Point, home_desks: &[Point]) -> bool {
+    let art = furniture_def(kind).visual;
+    let art = (anchored_top_left(Anchor::Center, pos, art.w, art.h), art);
+    let sitter = Size {
+        w: CHARACTER_SPRITE_W,
+        h: CHARACTER_SPRITE_H,
+    };
+    home_desks.iter().all(|&desk| {
+        [Facing::North, Facing::South].into_iter().all(|facing| {
+            let foot = desk_walk_anchor_facing(desk, facing);
+            let top_left = Point {
+                x: foot.x.saturating_sub(sitter.w / 2),
+                y: foot.y.saturating_sub(WALKING_Y_OFF),
+            };
+            !super::placement::rects_overlap(art, (top_left, sitter))
+        })
+    })
+}
+
 /// Waypoints: couch, pantry, pod-decor-promoted (PhoneBooth/StandingDesk), corridor
 /// appliances (VendingMachine/Printer).
 fn compute_waypoints(
     plan: &FloorPlan,
     pod_decor: &[PodDecorItem],
     couch: Option<Point>,
+    home_desks: &[Point],
 ) -> Vec<Waypoint> {
     let FloorPlan {
         pantry: pantry_room,
@@ -1557,23 +1596,44 @@ fn compute_waypoints(
     const VENDING_MIN_AISLE_W: u16 = 30;
     const PRINTER_MIN_AISLE_H: u16 = 9;
     const PRINTER_MIN_AISLE_W: u16 = 40;
-    if cubicle_aisle.height >= VENDING_MIN_AISLE_H && cubicle_aisle.width > VENDING_MIN_AISLE_W {
+    /// Columns from the band's west edge to the vending machine's, clear of a
+    /// vertical wall's foot there.
+    const VENDING_WEST_GAP: u16 = 3;
+    // Each appliance's base stands one row off the aisle's south edge, its art
+    // overhanging north (invariant #6).
+    let appliance_y = |kind: Furniture| {
+        let base = (cubicle_aisle.y + cubicle_aisle.height).saturating_sub(2);
+        super::placement::centre_y_standing_on(base, furniture_def(kind).visual.h)
+    };
+    let vending = Point {
+        x: right_x + VENDING_WEST_GAP + furniture_def(Furniture::VendingMachine).visual.w / 2,
+        y: appliance_y(Furniture::VendingMachine),
+    };
+    if cubicle_aisle.height >= VENDING_MIN_AISLE_H
+        && cubicle_aisle.width > VENDING_MIN_AISLE_W
+        && clears_the_seats(Furniture::VendingMachine, vending, home_desks)
+    {
         waypoints.push(Waypoint {
-            pos: Point {
-                x: right_x + 5,
-                y: cubicle_aisle.y + 3,
-            },
+            pos: vending,
             kind: WaypointKind::VendingMachine,
             facing: Facing::South,
             room_id: None,
         });
     }
-    if cubicle_aisle.height >= PRINTER_MIN_AISLE_H && cubicle_aisle.width > PRINTER_MIN_AISLE_W {
+    // Slid west from its corner, a pod's stride at most, into the gap between
+    // two pods' seats when a south-row sitter stands over it.
+    let printer = (0..=pod_grid.stride_x)
+        .map(|dx| Point {
+            x: (right_x + right_w).saturating_sub(10 + dx),
+            y: appliance_y(Furniture::Printer),
+        })
+        .find(|&p| clears_the_seats(Furniture::Printer, p, home_desks));
+    if let Some(printer) = printer
+        && cubicle_aisle.height >= PRINTER_MIN_AISLE_H
+        && cubicle_aisle.width > PRINTER_MIN_AISLE_W
+    {
         waypoints.push(Waypoint {
-            pos: Point {
-                x: right_x + right_w.saturating_sub(10),
-                y: cubicle_aisle.y + 2,
-            },
+            pos: printer,
             kind: WaypointKind::Printer,
             facing: Facing::South,
             room_id: None,
