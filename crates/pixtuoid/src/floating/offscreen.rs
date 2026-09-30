@@ -45,10 +45,10 @@ impl OfficeRenderer {
         self.audio = audio;
     }
 
-    /// Render the floor into the owned buffer at `inputs.size` PIXELS — the caller
-    /// maps window px → pixels (floating has no footer row to subtract, unlike
-    /// `draw_scene`). On a too-small / uncomputable layout it returns the buffer
-    /// unchanged — never panics.
+    /// Render the floor into the owned buffer at `inputs.size` office-buffer pixels —
+    /// the window downscaled by `window_buffer_geometry`, with no footer row
+    /// subtracted. A too-small layout leaves the buffer filled with the theme's
+    /// `bg_fallback`.
     pub fn render(&mut self, inputs: FrameInputs<'_>) -> &RgbBuffer {
         let (scene, floor_idx, now) = (inputs.scene, inputs.floor_meta.floor_idx, inputs.now);
         self.session.render(inputs);
@@ -225,9 +225,30 @@ pub struct XrgbSurface<'a> {
 }
 
 impl<'a> XrgbSurface<'a> {
-    /// Wrap `px`, which holds at least `w * h` pixels.
-    pub fn new(px: &'a mut [u32], w: usize, h: usize) -> Self {
-        Self { px, w, h }
+    /// Wrap `px` as a `w`×`h` surface; `None` when it holds fewer than `w * h`
+    /// pixels (a transient resize race on the live window).
+    pub fn new(px: &'a mut [u32], w: usize, h: usize) -> Option<Self> {
+        (px.len() >= w * h).then_some(Self { px, w, h })
+    }
+
+    /// Fill the whole surface with `office` upscaled by `scale`, nearest-neighbour.
+    /// Source indices clamp, so the integer-division remainder at the right and
+    /// bottom edges repeats the last office pixel. An empty `office` leaves the
+    /// surface as it was.
+    pub fn fill_upscaled(&mut self, office: &RgbBuffer, scale: usize) {
+        let (ow, oh) = (usize::from(office.width()), usize::from(office.height()));
+        if ow == 0 || oh == 0 {
+            return;
+        }
+        let scale = scale.max(1);
+        let src = office.as_slice();
+        for wy in 0..self.h {
+            let src_row = (wy / scale).min(oh - 1) * ow;
+            let dst_row = wy * self.w;
+            for wx in 0..self.w {
+                self.px[dst_row + wx] = pack_xrgb(src[src_row + (wx / scale).min(ow - 1)]);
+            }
+        }
     }
 
     /// Alpha-composite `color` over the pixel at `(x, y)` by `coverage` — a straight
@@ -240,13 +261,16 @@ impl<'a> XrgbSurface<'a> {
         let idx = y as usize * self.w + x as usize;
         let bg = self.px[idx];
         let chan = |v: u32, sh: u32| ((v >> sh) & 0xff) as u8;
-        let mix =
-            |sh: u32| crate::aa_text::blend_channel(chan(bg, sh), chan(color, sh), coverage) as u32;
-        self.px[idx] = (mix(16) << 16) | (mix(8) << 8) | mix(0);
+        let mix = |sh: u32| crate::aa_text::blend_channel(chan(bg, sh), chan(color, sh), coverage);
+        self.px[idx] = pack_xrgb(Rgb {
+            r: mix(16),
+            g: mix(8),
+            b: mix(0),
+        });
     }
 
     /// `text` at `(x, top_y)` in `color`, over a one-pixel drop shadow.
-    fn draw_badge_text(&mut self, text: &str, x: i32, top_y: i32, font_px: f32, color: u32) {
+    fn draw_shadowed_text(&mut self, text: &str, x: i32, top_y: i32, font_px: f32, color: u32) {
         crate::aa_text::draw_text_at(text, x + 1, top_y + 1, font_px, |gx, gy, cov| {
             self.blend(gx, gy, BADGE_SHADOW, cov)
         });
@@ -256,7 +280,7 @@ impl<'a> XrgbSurface<'a> {
     }
 }
 
-/// Paint name badges into the upscaled `u32` surface (`0x00RRGGBB`). Each label's
+/// Paint name badges into the upscaled [`XrgbSurface`]. Each label's
 /// `anchor_px` is office-buffer space → multiply by `scale` for screen space; the badge
 /// is centered horizontally over the anchor and sits just above the head. Drawn at
 /// native surface res, not upscaled, so it stays a sharp caption over the chunky sprites.
@@ -290,10 +314,10 @@ pub fn paint_labels_into_surface(
         match badge {
             Some(hue) => {
                 let mw = crate::aa_text::text_width(marker, LABEL_FONT_PX);
-                sb.draw_badge_text(marker, cx, cy, LABEL_FONT_PX, color);
-                sb.draw_badge_text(&el.text, cx + mw, cy, LABEL_FONT_PX, pack_xrgb(hue));
+                sb.draw_shadowed_text(marker, cx, cy, LABEL_FONT_PX, color);
+                sb.draw_shadowed_text(&el.text, cx + mw, cy, LABEL_FONT_PX, pack_xrgb(hue));
             }
-            None => sb.draw_badge_text(&text, cx, cy, LABEL_FONT_PX, color),
+            None => sb.draw_shadowed_text(&text, cx, cy, LABEL_FONT_PX, color),
         }
     }
 }
@@ -328,7 +352,7 @@ pub fn paint_wall_board_into_surface(
     let font_px = row_h as f32 * 0.85;
     let glow = |tone| pack_xrgb(pixtuoid_scene::board::tone_rgb(tone, theme));
 
-    sb.draw_badge_text(
+    sb.draw_shadowed_text(
         &board.brand.text,
         inner_x,
         inner_y,
@@ -337,7 +361,7 @@ pub fn paint_wall_board_into_surface(
     );
     let star_w = crate::aa_text::text_width(&board.star.text, font_px);
     let star_x = inner_x + (inner_w - star_w).max(0);
-    sb.draw_badge_text(
+    sb.draw_shadowed_text(
         &board.star.text,
         star_x,
         inner_y,
@@ -349,7 +373,7 @@ pub fn paint_wall_board_into_surface(
         let mut x = inner_x;
         let y = inner_y + row * row_h;
         for seg in segs {
-            sb.draw_badge_text(&seg.text, x, y, font_px, glow(seg.tone));
+            sb.draw_shadowed_text(&seg.text, x, y, font_px, glow(seg.tone));
             x += crate::aa_text::text_width(&seg.text, font_px);
         }
     }
@@ -373,7 +397,7 @@ pub fn paint_footer_into_surface(sb: &mut XrgbSurface<'_>, model: &FooterModel, 
     let mut x = FOOTER_MARGIN_PX;
     for seg in &model.segments {
         let color = pack_xrgb(footer_tone_rgb(seg.tone, theme));
-        sb.draw_badge_text(&seg.text, x, y, LABEL_FONT_PX, color);
+        sb.draw_shadowed_text(&seg.text, x, y, LABEL_FONT_PX, color);
         x += crate::aa_text::text_width(&seg.text, LABEL_FONT_PX);
     }
 }
@@ -384,6 +408,40 @@ mod tests {
     use pixtuoid_scene::floor::FloorMeta;
     use pixtuoid_scene::layout::Size;
     use winit::dpi::LogicalSize;
+
+    #[test]
+    fn fill_upscaled_repeats_the_last_office_pixel_into_the_remainder_edge() {
+        let px = |v: u8| Rgb { r: v, g: v, b: v };
+        let mut office = RgbBuffer::filled(2, 2, px(0));
+        for (x, y, v) in [(0, 0, 10), (1, 0, 20), (0, 1, 30), (1, 1, 40)] {
+            office.put(x, y, px(v));
+        }
+        // 5 = 2 office px × scale 2, plus a 1-px remainder at the right/bottom edge.
+        let mut sb = vec![0u32; 5 * 5];
+        XrgbSurface::new(&mut sb, 5, 5)
+            .expect("sized")
+            .fill_upscaled(&office, 2);
+        let at = |x: usize, y: usize| sb[y * 5 + x];
+        assert_eq!(at(0, 0), pack_xrgb(px(10)));
+        assert_eq!(at(3, 0), pack_xrgb(px(20)));
+        assert_eq!(
+            at(4, 0),
+            pack_xrgb(px(20)),
+            "right remainder repeats the last column"
+        );
+        assert_eq!(
+            at(0, 4),
+            pack_xrgb(px(30)),
+            "bottom remainder repeats the last row"
+        );
+        assert_eq!(at(4, 4), pack_xrgb(px(40)));
+    }
+
+    #[test]
+    fn a_surface_shorter_than_its_extent_is_refused() {
+        let mut sb = vec![0u32; 3];
+        assert!(XrgbSurface::new(&mut sb, 2, 2).is_none());
+    }
 
     #[test]
     fn pack_xrgb_is_0x00rrggbb() {
@@ -666,7 +724,7 @@ mod tests {
         ] {
             let mut sb = vec![0u32; 100 * 100];
             paint_labels_into_surface(
-                &mut XrgbSurface::new(&mut sb, 100, 100),
+                &mut XrgbSurface::new(&mut sb, 100, 100).expect("sized"),
                 &badge_dot(tone, false),
                 2,
                 theme,
@@ -686,14 +744,14 @@ mod tests {
         };
         let mut hover_sb = vec![0u32; 100 * 100];
         paint_labels_into_surface(
-            &mut XrgbSurface::new(&mut hover_sb, 100, 100),
+            &mut XrgbSurface::new(&mut hover_sb, 100, 100).expect("sized"),
             &badge(LabelTone::Idle, true),
             2,
             theme,
         );
         let mut idle_sb = vec![0u32; 100 * 100];
         paint_labels_into_surface(
-            &mut XrgbSurface::new(&mut idle_sb, 100, 100),
+            &mut XrgbSurface::new(&mut idle_sb, 100, 100).expect("sized"),
             &badge(LabelTone::Idle, false),
             2,
             theme,
@@ -722,7 +780,12 @@ mod tests {
             hovered: false,
         }];
         let mut sb = vec![0u32; 120 * 120];
-        paint_labels_into_surface(&mut XrgbSurface::new(&mut sb, 120, 120), &label, 2, theme);
+        paint_labels_into_surface(
+            &mut XrgbSurface::new(&mut sb, 120, 120).expect("sized"),
+            &label,
+            2,
+            theme,
+        );
         assert!(
             sb.contains(&as_u32(tone_rgb)),
             "the ● dot must paint the activity tone {tone_rgb:?}"
@@ -747,7 +810,12 @@ mod tests {
             tone: LabelTone::Active,
             hovered: false,
         }];
-        paint_labels_into_surface(&mut XrgbSurface::new(&mut sb, 200, 60), &badge, 2, theme);
+        paint_labels_into_surface(
+            &mut XrgbSurface::new(&mut sb, 200, 60).expect("sized"),
+            &badge,
+            2,
+            theme,
+        );
         let ink = pack_xrgb(theme.ui.label_active);
         let shadow = 0x0000_0000u32;
         let intermediate = sb.iter().any(|&p| p != white && p != ink && p != shadow);
@@ -782,7 +850,12 @@ mod tests {
         let scale = 8i32;
         let (w, h) = (320usize, 96usize);
         let mut sb = vec![0u32; w * h];
-        paint_wall_board_into_surface(&mut XrgbSurface::new(&mut sb, w, h), &board, scale, theme);
+        paint_wall_board_into_surface(
+            &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
+            &board,
+            scale,
+            theme,
+        );
         assert!(
             sb.contains(&pack_xrgb(theme.ui.neon_brand)),
             "L1 brand paints the neon-brand hue"
@@ -792,7 +865,12 @@ mod tests {
             "the ● work mood segment paints the active hue"
         );
         let mut tiny = vec![0u32; w * h];
-        paint_wall_board_into_surface(&mut XrgbSurface::new(&mut tiny, w, h), &board, 1, theme);
+        paint_wall_board_into_surface(
+            &mut XrgbSurface::new(&mut tiny, w, h).expect("sized"),
+            &board,
+            1,
+            theme,
+        );
         assert!(
             tiny.iter().all(|&p| p == 0),
             "a scale-1 office suppresses the sub-legible board"
@@ -919,7 +997,11 @@ mod tests {
         let (w, h) = (400usize, 160usize);
         let model = build_footer(&inputs, footer_budget(w));
         let mut sb = vec![0u32; w * h];
-        paint_footer_into_surface(&mut XrgbSurface::new(&mut sb, w, h), &model, theme);
+        paint_footer_into_surface(
+            &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
+            &model,
+            theme,
+        );
         let changed: Vec<usize> = sb
             .iter()
             .enumerate()

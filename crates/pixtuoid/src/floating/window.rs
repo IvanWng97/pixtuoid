@@ -168,13 +168,6 @@ impl FloatingApp {
             floor_pet,
             debug_walkable: false,
         });
-        let (ow, oh) = (office.width() as usize, office.height() as usize);
-        let opx: Vec<u32> = office
-            .as_slice()
-            .iter()
-            .map(|p| super::offscreen::pack_xrgb(*p))
-            .collect();
-
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -184,22 +177,16 @@ impl FloatingApp {
         let Ok(mut sb) = surface.buffer_mut() else {
             return;
         };
-        // Nearest-neighbor upscale. Source indices are clamped so the
-        // integer-division remainder edge repeats the last office pixel.
         let (win_w, win_h, scale) = (win_w as usize, win_h as usize, scale as usize);
-        if ow == 0 || oh == 0 || sb.len() < win_w * win_h {
-            return; // nothing rendered / a transient resize race — skip this frame
+        if office.width() == 0 || office.height() == 0 {
+            return; // nothing rendered — skip this frame
         }
-        for wy in 0..win_h {
-            let src_row = (wy / scale).min(oh - 1) * ow;
-            let dst_row = wy * win_w;
-            for wx in 0..win_w {
-                sb[dst_row + wx] = opx[src_row + (wx / scale).min(ow - 1)];
-            }
-        }
-        // Name badges + the neon wall board, drawn POST-upscale at native surface
-        // res so the text stays crisply anti-aliased.
-        let mut surf = super::offscreen::XrgbSurface::new(&mut sb, win_w, win_h);
+        let Some(mut surf) = super::offscreen::XrgbSurface::new(&mut sb, win_w, win_h) else {
+            return;
+        };
+        surf.fill_upscaled(office, scale);
+        // Name badges, the neon wall board and the footer, drawn POST-upscale at
+        // native surface res so the text stays crisply anti-aliased.
         let labels = self.renderer.labels(&scene, SystemTime::now());
         super::offscreen::paint_labels_into_surface(&mut surf, &labels, scale as i32, self.theme);
         let board = self.renderer.board(&scene, SystemTime::now());

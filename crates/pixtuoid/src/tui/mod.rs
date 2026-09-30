@@ -2147,8 +2147,8 @@ mod apply_key_action_tests {
                     &theme::NORMAL,
                     Vec::new(),
                 ),
-                // UNMUTED via `new_with` + a no-op spawn: an unmuted `new` opens the real
-                // device, and a MUTED one hides pause (`set_paused` ORs the mute flag in).
+                // UNMUTED, because a MUTED controller hides pause (`set_paused` ORs the
+                // mute flag in).
                 audio_ctl: crate::audio::AudioController::new_with(
                     crate::config::AudioConfig {
                         muted: false,

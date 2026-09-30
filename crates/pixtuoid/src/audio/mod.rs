@@ -117,10 +117,9 @@ impl AudioController {
         Self::new_with(cfg, config_path, respawn)
     }
 
-    /// [`Self::new`] with the boot-spawn injected, so a test can pin the boot decision
-    /// without opening an output device. `pub(crate)` for the same reason it
-    /// exists: `tui`'s key-action tests need an UNMUTED controller, and an
-    /// unmuted `new` boot-spawns the real device.
+    /// [`Self::new`] with the boot-spawn injected, so a test can build an UNMUTED
+    /// controller without opening an output device — `pub(crate)` because `tui`'s
+    /// key-action tests need one.
     pub(crate) fn new_with(
         cfg: crate::config::AudioConfig,
         config_path: std::path::PathBuf,
