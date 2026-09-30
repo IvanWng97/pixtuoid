@@ -305,11 +305,12 @@ pub fn advance_wander(
                         &layout.walkable,
                         overlay,
                         id,
-                        from,
-                        dest,
-                        chair_settle,
-                        seat,
-                        WalkIntent::WanderOut,
+                        LegPlan {
+                            from,
+                            to: dest,
+                            settle: Settle::from_pair(chair_settle, seat),
+                            intent: WalkIntent::WanderOut,
+                        },
                     ));
                     ms.wander.phase_started_at = ms
                         .wander
@@ -454,27 +455,68 @@ fn spot_claims(motion: &HashMap<AgentId, MotionState>, exclude: AgentId) -> Spot
     claims
 }
 
-/// Freeze one one-shot walk leg's timing profile. Measuring the ROUTED (not raw)
+/// How a walk leg extends its polyline onto a seat — a short terminal motion the
+/// A* router never plans (the seat cell may be blocked). `End` = sit down on
+/// arrival (append the seat); `Start` = stand up on departure (prepend it).
+/// The profile snapshot and the render route share it, so walk-end ≡
+/// render-feet and seat arrival/departure don't pop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Settle {
+    None,
+    End(Point),
+    Start(Point),
+    Both { start: Point, end: Point },
+}
+
+impl Settle {
+    /// Argument order encodes direction: `start` = the seat to rise OFF
+    /// (prepended), `end` = the seat to glide ONTO (appended).
+    pub(crate) fn from_pair(start: Option<Point>, end: Option<Point>) -> Self {
+        match (start, end) {
+            (Some(start), Some(end)) => Self::Both { start, end },
+            (Some(start), None) => Self::Start(start),
+            (None, Some(end)) => Self::End(end),
+            (None, None) => Self::None,
+        }
+    }
+
+    fn start(self) -> Option<Point> {
+        match self {
+            Self::Start(start) | Self::Both { start, .. } => Some(start),
+            Self::None | Self::End(_) => None,
+        }
+    }
+
+    fn end(self) -> Option<Point> {
+        match self {
+            Self::End(end) | Self::Both { end, .. } => Some(end),
+            Self::None | Self::Start(_) => None,
+        }
+    }
+}
+
+/// One walk leg to freeze a profile for.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LegPlan {
+    pub(crate) from: Point,
+    pub(crate) to: Point,
+    pub(crate) settle: Settle,
+    /// Why the agent walks this leg — picks the gait.
+    pub(crate) intent: WalkIntent,
+}
+
+/// Freeze one walk leg's timing profile. Measuring the ROUTED (not raw)
 /// polyline is load-bearing: the duration must cover the whole path or `t`
 /// reaches 1000 before the sprite arrives and it pops.
-#[allow(clippy::too_many_arguments)] // each arg is a distinct leg parameter
 pub(crate) fn snapshot_leg_profile(
     router: &mut dyn Router,
     mask: &WalkableMask,
     overlay: &OccupancyOverlay,
     id: AgentId,
-    from: Point,
-    to: Point,
-    start_settle: Option<Point>,
-    end_settle: Option<Point>,
-    intent: WalkIntent,
+    leg: LegPlan,
 ) -> WalkProfile {
-    let path = route_jittered(router, mask, overlay, id, from, to);
-    walk_profile(
-        measured_leg_len(&path, start_settle, end_settle),
-        intent,
-        id,
-    )
+    let path = route_jittered(router, mask, overlay, id, leg.from, leg.to);
+    walk_profile(measured_leg_len(&path, leg.settle), leg.intent, id)
 }
 
 /// Freeze the WanderBack profile. The endpoint is the desk APPROACH cell
@@ -497,11 +539,12 @@ fn snapshot_back_profile(
         &layout.walkable,
         overlay,
         slot.agent_id,
-        ms.wander.target.dest,
-        snap_to,
-        ms.wander.target.kind.seat(),
-        chair_settle,
-        WalkIntent::WanderBack,
+        LegPlan {
+            from: ms.wander.target.dest,
+            to: snap_to,
+            settle: Settle::from_pair(ms.wander.target.kind.seat(), chair_settle),
+            intent: WalkIntent::WanderBack,
+        },
     )
 }
 
@@ -520,18 +563,12 @@ pub(crate) fn settle_len(approach: Point, seat: Option<Point>) -> u32 {
     seat.map_or(0, |s| octile_distance(approach, s))
 }
 
-/// Rendered-polyline length of a walk leg: the routed polyline plus the settle
-/// segments the router never plans (rise off `start_settle` at the FIRST point,
-/// glide onto `end_settle` at the LAST), floored at 1. The profile's DURATION is
-/// derived from this so it covers the FULL rendered leg and `t` can't reach 1000
-/// before the sprite arrives (no pop).
-pub(crate) fn measured_leg_len(
-    route: &[Point],
-    start_settle: Option<Point>,
-    end_settle: Option<Point>,
-) -> u32 {
-    let start = route.first().map_or(0, |&p| settle_len(p, start_settle));
-    let end = route.last().map_or(0, |&p| settle_len(p, end_settle));
+/// Rendered-polyline length of a walk leg: the routed polyline plus its
+/// [`Settle`] segments, floored at 1. The profile's DURATION is derived from
+/// this so it covers the FULL rendered leg.
+pub(crate) fn measured_leg_len(route: &[Point], settle: Settle) -> u32 {
+    let start = route.first().map_or(0, |&p| settle_len(p, settle.start()));
+    let end = route.last().map_or(0, |&p| settle_len(p, settle.end()));
     (octile_path_len(route) + start + end).max(1)
 }
 

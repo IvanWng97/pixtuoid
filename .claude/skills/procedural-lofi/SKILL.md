@@ -9,9 +9,7 @@ description: "Generate a royalty-free lofi (or rain / typing / chime / any ambie
 This skill is the end-to-end recipe for a lofi bed (and its sibling ambient sounds:
 rain, keystrokes, door chimes, printer, water cooler…) that is **synthesized at
 runtime from constants** — zero audio files, zero royalties, and no two minutes ever
-sound the same. It was proven out on a real shipping product (an animated pixel-art
-office that plays ambient sound scaled by how busy the on-screen agents are), then
-distilled here.
+sound the same.
 
 Two documents ship alongside this one:
 
@@ -183,10 +181,6 @@ Port the numpy synth to your runtime language reading the frozen tables. Key eng
 (The `scripts/` are the real working prototypes from this project, kept as a concrete
 starting point — not a turnkey CLI; `synth_audition.py` runs standalone, and `export_score.py`
 imports `phase2_audition.py` — both are bundled. Adapt the voices to your own reference.)
-
-The whole discipline in one line: **fingerprint a reference you love, drive your own
-synthesis to the numbers, freeze the one take a human blesses, then let a long-enough loop +
-runtime-stochastic layers + busy-ness stem-gating keep it from ever sounding the same.**
 
 ---
 
