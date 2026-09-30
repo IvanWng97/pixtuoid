@@ -1474,6 +1474,10 @@ pub(super) fn decor_for_slot(floor_seed: u64, slot_idx: usize) -> PodDecor {
     bag[slot_idx % n]
 }
 
+/// Rows from an aisle slot's centre down to the row every piece in it stands
+/// on, so a taller piece grows north (invariant #6) rather than out of its aisle.
+const POD_DECOR_BASE_DY: u16 = 4;
+
 /// Decor items placed in aisles between 2x2 desk pods.
 pub(super) fn compute_pod_decor(
     cubicle_band: &Bounds,
@@ -1497,12 +1501,13 @@ pub(super) fn compute_pod_decor(
     // Vertical twin: the LAST POD ROW's slot centre can sit close enough to the bottom
     // that a tall centred visual crosses into cubicle_aisle and blocks its cells.
     let band_bottom = cubicle_band.y + cubicle_band.height;
-    let mut push_slot = |pod_decor: &mut Vec<PodDecorItem>, x: u16, y: u16| {
+    let mut push_slot = |pod_decor: &mut Vec<PodDecorItem>, x: u16, slot_y: u16| {
         let kind = decor_for_slot(floor_seed, slot_idx);
         // The cycle advances even when the slot drops, so survivors keep the kinds
         // they'd have on a wider floor.
         slot_idx += 1;
         let vis = furniture_def(kind.furniture()).visual;
+        let y = super::placement::centre_y_standing_on(slot_y + POD_DECOR_BASE_DY, vis.h);
         // Same centred-blit math the painter uses (pos − h/2 .. pos − h/2 + h).
         if x.saturating_sub(vis.w / 2) + vis.w > band_right
             || y.saturating_sub(vis.h / 2) + vis.h > band_bottom
