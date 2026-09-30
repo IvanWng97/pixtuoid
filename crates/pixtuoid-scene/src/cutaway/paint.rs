@@ -10,7 +10,9 @@ use crate::atmosphere::Moment;
 use crate::cutaway::order::{depth_sort, Span};
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::cutaway::shade::{fill, slab, Ramp};
-use crate::layout::{Bounds, Depth, Fixture, FixtureKind, Layout, Point, Station, DESK_H};
+use crate::layout::{
+    Bounds, Depth, Fixture, FixtureKind, Layer, Layout, Point, Station, Tie, DESK_H,
+};
 use crate::pixel_painter::SimFrame;
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
@@ -888,20 +890,9 @@ fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<
     };
     let mut order: Vec<(Span, PieceKind)> = Vec::new();
     push_windows(office, moment, &mut order);
-    let mut carried = None;
+    let carried = push_characters(frame, office, moment.now, &mut order);
     for fixture in layout.fixtures() {
-        if carried.is_none() && paints_over_its_sitter(fixture.kind) {
-            carried = Some(push_characters(frame, office, moment.now, &mut order));
-        }
-        push_fixture(
-            fixture,
-            build,
-            carried.as_deref().unwrap_or_default(),
-            &mut order,
-        );
-    }
-    if carried.is_none() {
-        push_characters(frame, office, moment.now, &mut order);
+        push_fixture(fixture, build, &carried, &mut order);
     }
     wall_segments(layout, &mut order);
     order
@@ -914,13 +905,18 @@ struct Build<'a, 'f> {
     moment: &'f Moment,
 }
 
-/// Whether a fixture paints over its sitter on a tie, so it queues after the
-/// people: a desk chair's backrest crosses its sitter's lap.
-fn paints_over_its_sitter(kind: FixtureKind) -> bool {
-    matches!(kind, FixtureKind::DeskChair(_))
+/// The row the cutaway sorts a fixture on: a backdrop one at the very back.
+/// How `fixture` ties a figure at its row here: the roster's tie, but the
+/// lounge couch, which the cutaway shows from behind facing the window where
+/// the classic draws its front, stands over its sitters.
+fn tie_of(fixture: Fixture) -> Option<Tie> {
+    match (fixture.kind, fixture.depth) {
+        (FixtureKind::LoungeCouch, Depth::Sorted { .. }) => Some(Tie::FixtureOver),
+        (_, Depth::Sorted { tie, .. }) => Some(tie),
+        (_, Depth::Backdrop) => None,
+    }
 }
 
-/// The row the cutaway sorts a fixture on: a backdrop one at the very back.
 fn sort_row(depth: Depth) -> u16 {
     match depth {
         Depth::Backdrop => 0,
@@ -1000,6 +996,7 @@ fn push_fixture(
         ..
     } = office;
     let depth = sort_row(fixture.depth);
+    let first = order.len();
     let centre = centre_of(fixture.visual);
     let top_left = Point {
         x: fixture.visual.x,
@@ -1096,24 +1093,25 @@ fn push_fixture(
         ),
         K::Wall { kind, .. } => push_hung(order, pack, top_left, kind.sprite_name(), depth),
         K::NoticeBoard { .. } => push_hung(order, pack, top_left, "notice_board", depth),
-        // Not on the roster's depth: a back-view sofa splits into bands its
-        // sitter sorts between, a front one ties them ([`push_sofa`]).
-        K::MeetingSofa {
-            room,
-            seat,
-            faces_away,
-        } => {
+        // A back-view sofa splits into bands its sitter sorts between
+        // ([`push_sofa`]), so it lays its own layers.
+        K::MeetingSofa { room, seat, .. } => {
             let sofa = layout
                 .meeting_rooms
                 .get(room)
                 .and_then(|r| r.trio)
                 .and_then(|t| t.sofas.get(seat).copied());
-            if let Some(at) = sofa {
-                push_sofa(order, pack, at, faces_away);
+            if let (Some(at), Some(tie)) = (sofa, tie_of(fixture)) {
+                push_sofa(order, pack, at, tie);
             }
+            return;
         }
-        // Seen from behind: it faces the window.
-        K::LoungeCouch => push_sofa(order, pack, centre, true),
+        K::LoungeCouch => {
+            if let Some(tie) = tie_of(fixture) {
+                push_sofa(order, pack, centre, tie);
+            }
+            return;
+        }
         K::MeetingTable { .. } => {
             let table = crate::layout::furniture_def(crate::layout::Furniture::MeetingTable).visual;
             let face = face_rows(
@@ -1231,6 +1229,11 @@ fn push_fixture(
         | K::PantryMat
         | K::IslandMat
         | K::Runner => {}
+    }
+    if let Some(tie) = tie_of(fixture) {
+        for (span, _) in &mut order[first..] {
+            *span = span.with_layer(Layer::from(tie));
+        }
     }
 }
 
@@ -1631,7 +1634,7 @@ fn push_characters(
 /// neighbour mid-breath. A back-turned sitter and their chair are one piece,
 /// bounding the chair's whole box too.
 fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
-    let body = body.with_depth(depth);
+    let body = body.with_depth(depth).with_layer(Layer::Figure);
     match chair {
         Some(chair) => Span {
             x0: body.x0.min(chair.x0),
@@ -1639,6 +1642,7 @@ fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
             y0: body.y0.min(chair.y0),
             y1: body.y1.max(chair.y1),
             depth: body.depth.max(chair.depth),
+            layer: Layer::Figure,
         },
         None => body,
     }
@@ -1660,12 +1664,9 @@ const NORTH_SOFA_SEAT_ROWS: u16 = 3;
 ///
 /// NOT `back_couch`: the pack documents that as a character seen from behind, so
 /// it would draw a headless torso where the couch belongs.
-fn push_sofa(
-    order: &mut Vec<(Span, PieceKind)>,
-    pack: &Pack,
-    at: crate::layout::Point,
-    back_view: bool,
-) {
+fn push_sofa(order: &mut Vec<(Span, PieceKind)>, pack: &Pack, at: crate::layout::Point, tie: Tie) {
+    let back_view = tie == Tie::FixtureOver;
+    let sitters = crate::pixel_painter::seat::sofa_sitter_z_key(at);
     if let Some((w, h)) = art_size(pack, MEETING_SOFA_NORTH).filter(|_| back_view) {
         let tl = crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
         let split = NORTH_SOFA_SEAT_ROWS.min(h);
@@ -1674,27 +1675,23 @@ fn push_sofa(
             sprite: MEETING_SOFA_NORTH,
             rows,
         };
-        // The seat sorts WITH its sitter, who is pushed after the furniture and
-        // so lands on it; its own south edge lies rows north of where the sofa
-        // stands, where a table in a short room ties it and paints over it.
-        let seat = Span::new(tl.x, tl.y, w, split, 0)
-            .with_depth(crate::pixel_painter::seat::sofa_sitter_z_key(at));
+        // The seat sorts WITH its sitter, who lands on it; its own south edge
+        // lies rows north of where the sofa stands, where a table in a short
+        // room ties it and paints over it.
+        let seat = Span::new(tl.x, tl.y, w, split, 0).with_depth(sitters);
         order.push((seat, band((0, split))));
         order.push((
-            Span::new(tl.x, tl.y + split, w, h - split, 0),
+            Span::new(tl.x, tl.y + split, w, h - split, 0).with_layer(Layer::from(tie)),
             band((split, h)),
         ));
         return;
     }
     if let Some((w, h)) = art_size(pack, "meeting_sofa") {
-        // The front view sorts WITH its sitters, who are pushed after the
-        // furniture and so land on it; on its own south edge its backrest
-        // would paint over their bodies. The flipped back view sorts a row
-        // south of them, as the classic painter keys it: it stands in front of
-        // the sitters it faces away from.
-        let sitters = crate::pixel_painter::seat::sofa_sitter_z_key(at);
+        // It sorts WITH its sitters, at `tie`: on its own south edge a front
+        // view's backrest would paint over their bodies.
         let span = piece_span(crate::layout::Anchor::Center, at, w, h, 0)
-            .with_depth(sitters + u16::from(back_view));
+            .with_depth(sitters)
+            .with_layer(Layer::from(tie));
         order.push((
             span,
             PieceKind::Prop {
@@ -1720,7 +1717,9 @@ fn wall_segments(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
         let (at, size) = piece.visual();
         for (rows, depth) in piece.sort_bands() {
             order.push((
-                Span::new(at.x, rows.start, size.w, rows.end - rows.start, 0).with_depth(depth),
+                Span::new(at.x, rows.start, size.w, rows.end - rows.start, 0)
+                    .with_depth(depth)
+                    .with_layer(Layer::Over),
                 PieceKind::WallSeg {
                     piece,
                     rows: (rows.start, rows.end),
@@ -2904,7 +2903,7 @@ mod tests {
             &mut order,
             &own,
             crate::layout::Point { x: 10, y: 10 },
-            true,
+            Tie::FixtureOver,
         );
         assert!(
             matches!(
@@ -3921,8 +3920,8 @@ mod tests {
     }
 
     /// A pack drawing no back view of its own gets the front view flipped,
-    /// sorted a row south of its sitters: it stands in front of those it faces
-    /// away from.
+    /// sorted with its sitters and over them: it stands in front of those it
+    /// faces away from.
     #[test]
     fn a_flipped_sofa_sorts_in_front_of_its_sitters() {
         let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
@@ -3933,7 +3932,7 @@ mod tests {
         .expect("a pack of one sofa loads");
         let at = crate::layout::Point { x: 40, y: 30 };
         let mut order = Vec::new();
-        push_sofa(&mut order, &pack, at, true);
+        push_sofa(&mut order, &pack, at, Tie::FixtureOver);
         let [(
             span,
             PieceKind::Prop {
@@ -3948,7 +3947,13 @@ mod tests {
         else {
             panic!("a flipped sofa is one mirrored prop: {order:?}");
         };
-        assert!(span.depth > crate::pixel_painter::seat::sofa_sitter_z_key(at));
+        let sitter = Span::new(at.x, at.y, 1, 1, 0)
+            .with_depth(crate::pixel_painter::seat::sofa_sitter_z_key(at))
+            .with_layer(Layer::Figure);
+        assert_eq!(
+            crate::cutaway::order::depth_sort(vec![(*span, "sofa"), (sitter, "sitter")]),
+            ["sitter", "sofa"]
+        );
     }
 
     /// Every piece's shadow falls inside its [`Piece::reach`], so a repaint of
@@ -5475,7 +5480,7 @@ S B B B B B B S
         let pack = pack();
         let sofa = crate::layout::Point { x: 40, y: 30 };
         let mut order = Vec::new();
-        push_sofa(&mut order, &pack, sofa, true);
+        push_sofa(&mut order, &pack, sofa, Tie::FixtureOver);
         let [(seat, PieceKind::PropBand { rows: under, .. }), (back, PieceKind::PropBand { rows: over, .. })] =
             order.as_slice()
         else {
@@ -5915,6 +5920,31 @@ S B B B B B B S
     /// Every fixture the roster yields is drawn: queued as a piece of the list,
     /// or laid by the backdrop as a covering, over the floor. Every kind the
     /// roster has is met on some office.
+    /// The cutaway orders a fixture against a figure at its row by its tie
+    /// ([`tie_of`]); only a back-view sofa's seat, which its sitter sits on,
+    /// lies under them.
+    #[test]
+    fn a_fixture_ties_a_figure_as_the_roster_says() {
+        let pack = pack();
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let mut over = 0;
+        for layout in many_layouts() {
+            for fixture in layout.fixtures() {
+                let Some(tie) = tie_of(fixture) else {
+                    continue;
+                };
+                let pieces = queued(&layout, &pack, scale, &[], |k| k == fixture.kind);
+                for (span, kind) in &pieces {
+                    let seat = matches!(kind, PieceKind::PropBand { rows: (0, _), .. });
+                    let want = if seat { Layer::Under } else { Layer::from(tie) };
+                    assert_eq!(span.layer, want, "{:?}: {kind:?}", fixture.kind);
+                    over += usize::from(span.layer == Layer::Over);
+                }
+            }
+        }
+        assert!(over > 0, "no fixture paints over its sitter");
+    }
+
     #[test]
     fn the_cutaway_draws_every_fixture_the_roster_yields() {
         let pack = pack();
@@ -5986,7 +6016,7 @@ S B B B B B B S
         let pack = pack();
         let sofa = crate::layout::Point { x: 40, y: 30 };
         let mut order = Vec::new();
-        push_sofa(&mut order, &pack, sofa, false);
+        push_sofa(&mut order, &pack, sofa, Tie::FigureOver);
         let [(
             span,
             PieceKind::Prop {
