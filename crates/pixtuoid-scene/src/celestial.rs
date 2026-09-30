@@ -66,7 +66,12 @@ impl Disc {
     /// thick cloud.
     pub(crate) fn of(sky: &Sky, buf_w: u16, top_wall_h: u16) -> Option<Self> {
         let e = sky.emitter();
-        let vis = sky.transmission().disc;
+        let vis = match e.body {
+            Body::Sun => sky.transmission().disc,
+            // A moon below the horizon shows no disc; one up fades in with the night.
+            Body::Moon if e.altitude <= 0.0 => return None,
+            Body::Moon => sky.transmission().disc * sky.nightfall(),
+        };
         if vis < MIN_DISC_VIS {
             return None;
         }

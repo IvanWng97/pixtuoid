@@ -94,7 +94,7 @@ const OBJECT_WASH_SHARE: f32 = 0.55;
 const FLOOR_TINT_SHARE: f32 = 0.15;
 
 /// Below this strength the star field is too faint to read, so none shows —
-/// by day and under thick cloud or fog.
+/// by day and under thick cloud or fog; above it the stars ramp in from nothing.
 const STAR_MIN: f32 = 0.15;
 
 impl Look {
@@ -154,11 +154,7 @@ impl Look {
             floor_tint: (weather_floor_tint(weather), FLOOR_TINT_SHARE),
             glass_veil: glass_veil(weather).map(|(color, alpha)| (lit(color, veil), alpha)),
             golden_hour: golden_hour_blaze(e, &sky.transmission()),
-            star_strength: if star_strength > STAR_MIN {
-                star_strength
-            } else {
-                0.0
-            },
+            star_strength: ((star_strength - STAR_MIN) / (1.0 - STAR_MIN)).max(0.0),
             sun_spot: sun_on_wall(sky),
             beam: sky.beam(),
         }
@@ -344,14 +340,10 @@ fn golden_hour_blaze(e: &Emitter, a: &Transmission) -> f32 {
 }
 
 /// How brightly the star field would show this frame, before [`STAR_MIN`]'s
-/// gate. Stars only appear once the emitter is the MOON: dawn/dusk twilight has
-/// a high `darkness` yet the brightening sky washes stars out, so gating on
-/// `darkness` alone paints a full starfield at ~7am.
+/// ramp. Stars ride [`Sky::nightfall`], not `darkness` alone: the dawn and dusk
+/// sky is dark enough to pass a darkness gate, yet washes stars out.
 fn night_star_strength(sky: &Sky, darkness: f32) -> f32 {
-    match sky.emitter().body {
-        Body::Moon => (darkness * sky.transmission().disc).clamp(0.0, 1.0),
-        Body::Sun => 0.0,
-    }
+    (darkness * sky.transmission().disc * sky.nightfall()).clamp(0.0, 1.0)
 }
 
 /// How far down the glass, as a share of it, the sky reaches its horizon
@@ -399,6 +391,69 @@ mod tests {
             golden_hour_blaze(&sun, &full) > 0.9,
             "a maximal sun should blaze near-full"
         );
+    }
+
+    /// Every value the sky hands the painters moves by at most a step a minute,
+    /// through every hour, weather and moon age: none flips at dusk or dawn.
+    #[test]
+    fn the_look_moves_without_a_step_minute_by_minute() {
+        const MAX_STEP: f32 = 0.04;
+        const MAX_CHANNEL_STEP: i16 = 4;
+        let scalars = |l: &Look| {
+            [
+                ("darkness", l.darkness),
+                ("sunlight", l.sunlight),
+                ("floor dim", l.floor_wash[0].1),
+                ("floor lift", l.floor_wash[1].1),
+                ("object dim", l.object_wash[0].1),
+                ("object lift", l.object_wash[1].1),
+                ("golden hour", l.golden_hour),
+                ("stars", l.star_strength),
+                ("beam", l.beam),
+                ("sun spot", l.sun_spot.map_or(0.0, |s| s.intensity)),
+            ]
+        };
+        let channels = |l: &Look| {
+            let veil = l.glass_veil.map_or(Rgb { r: 0, g: 0, b: 0 }, |v| v.0);
+            [
+                ("glass a", l.glass_a),
+                ("glass b", l.glass_b),
+                ("veil", veil),
+            ]
+        };
+        let weathers = [Weather::Clear, Weather::Fog, Weather::Snow, Weather::Storm];
+        for day in [0, 4, 8, 11, 15, 19, 23, 26] {
+            let midnight = crate::localclock::on_day(day, 0);
+            for w in weathers {
+                let look = |m: u64| {
+                    let now = midnight + std::time::Duration::from_secs(60 * m);
+                    Look::resolve(&Sky::at_with(now, w), &crate::theme::NORMAL)
+                };
+                let mut prev = look(0);
+                for m in 1..24 * 60 {
+                    let next = look(m);
+                    let at = format!("day {day} {w:?} {:02}:{:02}", m / 60, m % 60);
+                    for ((name, a), (_, b)) in scalars(&prev).into_iter().zip(scalars(&next)) {
+                        assert!(
+                            (b - a).abs() <= MAX_STEP,
+                            "{name} stepped {a} -> {b} at {at}"
+                        );
+                    }
+                    for ((name, a), (_, b)) in channels(&prev).into_iter().zip(channels(&next)) {
+                        let step = [(a.r, b.r), (a.g, b.g), (a.b, b.b)]
+                            .map(|(x, y)| (i16::from(y) - i16::from(x)).abs())
+                            .into_iter()
+                            .max()
+                            .unwrap_or(0);
+                        assert!(
+                            step <= MAX_CHANNEL_STEP,
+                            "{name} stepped {a:?} -> {b:?} at {at}"
+                        );
+                    }
+                    prev = next;
+                }
+            }
+        }
     }
 
     #[test]

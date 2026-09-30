@@ -445,57 +445,64 @@ fn disc_never_bleeds_across_a_window_pillar() {
     }
 }
 
+/// The first whole hour of `day`'s night its moon stands low in the glass,
+/// fully faded in under a clear sky, with that disc: low, since a high moon
+/// clips above the glass like a midday sun. Every pixel inside it is then
+/// EXACTLY `moon_core` or EXACTLY `MOON_SHADOW`.
+fn low_moon(day: u32, buf_w: u16, top_wall_h: u16) -> Option<(u32, crate::celestial::Disc)> {
+    (0..24u32).find_map(|h| {
+        let sky = Sky::at_with(crate::localclock::on_day(day, h), Weather::Clear);
+        let e = sky.emitter();
+        let low = e.body == crate::sky::Body::Moon && (0.2..0.5).contains(&e.altitude);
+        if !low || sky.nightfall() < 1.0 {
+            return None;
+        }
+        crate::celestial::Disc::of(&sky, buf_w, top_wall_h).map(|d| (h, d))
+    })
+}
+
 #[test]
 fn crescent_moon_leaves_the_dark_limb_unlit() {
-    // 21:00 Clear puts the disc in-glass at FULL atmo visibility, so every
-    // disc-interior pixel is EXACTLY `moon_core` or EXACTLY `MOON_SHADOW` — no
-    // partial blend to muddy the count. (cx, cy, r) depend only on the hour, not
-    // the date, so one `Disc::of` call gives the bounding box for every day.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
-    let geom = crate::celestial::Disc::of(
-        &Sky::at_with(crate::localclock::at_hour(21), Weather::Clear),
-        buf_w,
-        top_wall_h,
-    )
-    .expect("moon disc visible at 21:00 under Clear");
+    let shown = |pick: fn(f32) -> bool| {
+        (1..=31u32)
+            .filter(|&d| pick(Sky::at(crate::localclock::on_day(d, 0)).moon_phase()))
+            .find_map(|d| low_moon(d, buf_w, top_wall_h).map(|(h, geom)| (d, h, geom)))
+    };
+    let crescent = shown(|p| p < 0.35).expect("a crescent shows low some January night");
+    let full = shown(|p| p > 0.9).expect("a near-full moon shows low some January night");
 
-    let crescent_day = (1..=31u32)
-        .find(|&d| Sky::at(crate::localclock::on_day(d, 21)).moon_phase() < 0.35)
-        .expect("a crescent night exists in January 2026");
-    let full_day = (1..=31u32)
-        .find(|&d| Sky::at(crate::localclock::on_day(d, 21)).moon_phase() > 0.9)
-        .expect("a near-full night exists in January 2026");
-
-    let count_dark_and_bright = |day: u32| -> (usize, usize) {
-        let buf = render_office_on(day, 21, Weather::Clear, buf_w, top_wall_h);
-        let r = geom.r.ceil() as i32;
-        let (cx, cy) = (geom.cx.round() as i32, geom.cy.round() as i32);
-        let mut dark = 0usize;
-        let mut bright = 0usize;
-        for py in (cy - r)..=(cy + r) {
-            for px in (cx - r)..=(cx + r) {
-                if px < 0 || py < 0 || px as u16 >= buf.width() || py as u16 >= buf.height() {
-                    continue;
-                }
-                let dx = px as f32 - geom.cx;
-                let dy = py as f32 - geom.cy;
-                if dx * dx + dy * dy > geom.r * geom.r {
-                    continue; // outside the disc proper
-                }
-                let p = buf.get(px as u16, py as u16);
-                if p == crate::celestial::MOON_SHADOW {
-                    dark += 1;
-                } else if p.b > 200 && p.b > p.r.saturating_add(10) {
-                    bright += 1;
+    let count_dark_and_bright =
+        |(day, hour, geom): (u32, u32, crate::celestial::Disc)| -> (usize, usize) {
+            let buf = render_office_on(day, hour, Weather::Clear, buf_w, top_wall_h);
+            let r = geom.r.ceil() as i32;
+            let (cx, cy) = (geom.cx.round() as i32, geom.cy.round() as i32);
+            let mut dark = 0usize;
+            let mut bright = 0usize;
+            for py in (cy - r)..=(cy + r) {
+                for px in (cx - r)..=(cx + r) {
+                    if px < 0 || py < 0 || px as u16 >= buf.width() || py as u16 >= buf.height() {
+                        continue;
+                    }
+                    let dx = px as f32 - geom.cx;
+                    let dy = py as f32 - geom.cy;
+                    if dx * dx + dy * dy > geom.r * geom.r {
+                        continue; // outside the disc proper
+                    }
+                    let p = buf.get(px as u16, py as u16);
+                    if p == crate::celestial::MOON_SHADOW {
+                        dark += 1;
+                    } else if p.b > 200 && p.b > p.r.saturating_add(10) {
+                        bright += 1;
+                    }
                 }
             }
-        }
-        (dark, bright)
-    };
+            (dark, bright)
+        };
 
-    let (crescent_dark, crescent_bright) = count_dark_and_bright(crescent_day);
-    let (full_dark, full_bright) = count_dark_and_bright(full_day);
+    let (crescent_dark, crescent_bright) = count_dark_and_bright(crescent);
+    let (full_dark, full_bright) = count_dark_and_bright(full);
 
     assert!(
         crescent_bright >= 2,
@@ -529,15 +536,10 @@ fn a_waning_moon_lights_its_left_limb() {
     let buf_w = 96u16;
     let top_wall_h = 40u16;
     let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let geom = crate::celestial::Disc::of(
-        &Sky::at_with(crate::localclock::at_hour(21), Weather::Clear),
-        buf_w,
-        top_wall_h,
-    )
-    .expect("moon disc visible at 21:00 under Clear");
     // Lit disc pixels left and right of the disc's centre column.
     let lit_sides = |day: u32| -> (usize, usize) {
-        let buf = render_office_on(day, 21, Weather::Clear, buf_w, top_wall_h);
+        let (hour, geom) = low_moon(day, buf_w, top_wall_h).expect("the quarter moon shows low");
+        let buf = render_office_on(day, hour, Weather::Clear, buf_w, top_wall_h);
         let r = geom.r.ceil() as i32;
         let (cx, cy) = (geom.cx.round() as i32, geom.cy.round() as i32);
         let (mut left, mut right) = (0usize, 0usize);
