@@ -1,4 +1,4 @@
-//! Local wall-clock instants for tests.
+//! Local wall-clock instants for tests and benches.
 //!
 //! The sky model decodes `now` back through `chrono::Local`, so a test building
 //! its instants as epoch offsets is really asking for whatever local hours the
@@ -32,19 +32,19 @@ fn local(day: u32, h: u32, m: u32) -> SystemTime {
 }
 
 /// Local `h:00` on the reference day.
-pub(crate) fn at_hour(h: u32) -> SystemTime {
+pub fn at_hour(h: u32) -> SystemTime {
     local(0, h, 0)
 }
 
 /// Local `h:m` on the reference day.
-pub(crate) fn at_hour_min(h: u32, m: u32) -> SystemTime {
+pub fn at_hour_min(h: u32, m: u32) -> SystemTime {
     local(0, h, m)
 }
 
 /// Local `h:00`, `day` days after the base date — weather and moon phase vary by
 /// day at a fixed hour, so a search over days reaches different sky states. Any
 /// `day` is valid, including past the end of the month.
-pub(crate) fn on_day(day: u32, h: u32) -> SystemTime {
+pub fn on_day(day: u32, h: u32) -> SystemTime {
     local(day, h, 0)
 }
 
@@ -146,9 +146,11 @@ fn bypasses_in(root: &std::path::Path) -> Vec<String> {
     out
 }
 
+/// Every tree whose code can build a local instant: the library and its benches.
 #[cfg(test)]
-fn crate_src() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+fn crate_roots() -> [std::path::PathBuf; 2] {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    [root.join("src"), root.join("benches")]
 }
 
 #[cfg(test)]
@@ -158,7 +160,10 @@ mod sweep {
     /// broke UTC-6 is not statically detectable — this pins the half that is.
     #[test]
     fn nothing_outside_this_module_builds_a_local_instant() {
-        let found = super::bypasses_in(&super::crate_src());
+        let found: Vec<String> = super::crate_roots()
+            .iter()
+            .flat_map(|root| super::bypasses_in(root))
+            .collect();
         assert!(
             found.is_empty(),
             "a TEST building a local instant goes through `localclock` (production reads the clock): {found:?}"
