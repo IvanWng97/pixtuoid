@@ -4,10 +4,7 @@
 
 use std::time::{Duration, SystemTime};
 
-use super::{
-    marquee_or_truncate, marquee_window, panel_inner_width, source_badge_span, to_color, Overflow,
-    Panel,
-};
+use super::{marquee_or_truncate, marquee_window, source_badge_span, to_color, Overflow, Panel};
 
 use crate::tui::connection::{
     no_action_hint, ConnState, ConnectionFrame, ConnectionRow, LiveFacet, LiveInfo,
@@ -41,22 +38,21 @@ pub(crate) fn paint_connection_panel(
     bounds: Rect,
     theme: &Theme,
 ) {
-    let ConnectionFrame {
+    let &ConnectionFrame {
         open: _,
-        rows,
-        live,
+        ref rows,
+        ref live,
         selected,
         confirm,
-        result,
-        socket_line,
+        ref result,
+        ref socket_line,
     } = frame;
-    let (selected, confirm) = (*selected, *confirm);
     let dim = Style::default().fg(to_color(theme.ui.label_idle));
 
     // The detail marquee's width budget needs the inner WIDTH before the row count
     // (hence the height) is known — the height-independent two-phase seam. `None`
     // ⇒ the terminal is too narrow to render at all.
-    let Some(inner_w) = panel_inner_width(bounds, CONNECTION_POPUP_W, 1.0) else {
+    let Some(inner_w) = Panel::inner_width(bounds, CONNECTION_POPUP_W) else {
         return;
     };
 

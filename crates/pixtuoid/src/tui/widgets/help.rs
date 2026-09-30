@@ -130,7 +130,8 @@ mod tests {
 
     #[test]
     fn help_overlay_renders_without_panic_across_sizes() {
-        // `Panel::paint` guards away below 4×3, so the last two sizes paint nothing.
+        // Once the footer row is reserved, the last two sizes fall under
+        // `PanelGeometry`'s minimum envelope and paint nothing.
         for (w, h) in [(200, 60), (40, 20), (24, 30), (10, 4), (4, 3), (2, 2)] {
             render_at(w, h);
         }

@@ -124,7 +124,7 @@ impl PanelGeometry {
 /// The inner content WIDTH alone — height-independent, so a width-dependent row
 /// builder (word-wrap, marquee) can size before the row count is known. Pinned to
 /// agree with `compute(..).inner().width` by a test.
-pub(crate) fn panel_inner_width(bounds: Rect, content_w: u16, scale: f32) -> Option<u16> {
+fn panel_inner_width(bounds: Rect, content_w: u16, scale: f32) -> Option<u16> {
     let scale = scale.clamp(0.0, 1.0);
     let full_w = content_w.saturating_add(2 * PANEL_PAD_X).min(bounds.width);
     let w = (full_w as f32 * scale).round() as u16;
@@ -229,27 +229,33 @@ pub(crate) enum Overflow {
     None,
 }
 
-/// One centered borderless popup's content: callers hand PRE-STYLED lines, and
-/// [`Panel::paint`] owns framing, windowing and cue. The three bands are named
-/// fields because they share one type, so a positional swap would compile.
+/// One list-bearing popup: callers hand PRE-STYLED lines. The three bands are
+/// named fields because they share one type, so a positional swap would compile.
 pub(crate) struct Panel<'a> {
     pub(crate) title: Option<&'a str>,
     /// Content width in cells, before padding.
     pub(crate) content_w: u16,
-    /// Chrome pinned above the list.
     pub(crate) above: Vec<Line<'static>>,
     /// The band windowed into the space between `above` and `below`.
     pub(crate) list: Vec<Line<'static>>,
-    /// Chrome pinned below the list.
     pub(crate) below: Vec<Line<'static>>,
     pub(crate) overflow: Overflow,
 }
 
 impl Panel<'_> {
-    /// THE one painter for a centered borderless popup: it frames (backing,
-    /// title), windows the `list` band, and appends the overflow cue.
-    /// Auto-heights to the ACTUAL band lengths, so no caller-side row count can
-    /// drift from the lines pushed.
+    /// A panel never animates its size; only the version popup, which paints
+    /// through [`PanelGeometry`] itself, does.
+    const SCALE: f32 = 1.0;
+
+    /// The inner content WIDTH of a panel `content_w` wide, before its bands
+    /// exist — for a width-dependent row builder (word-wrap, marquee).
+    pub(crate) fn inner_width(bounds: Rect, content_w: u16) -> Option<u16> {
+        panel_inner_width(bounds, content_w, Self::SCALE)
+    }
+
+    /// Frame (backing, title), window the `list` band, and append the overflow
+    /// cue. Auto-heights to the ACTUAL band lengths, so no caller-side row count
+    /// can drift from the lines pushed.
     pub(crate) fn paint(self, f: &mut ratatui::Frame<'_>, bounds: Rect, theme: &Theme) {
         let Panel {
             title,
@@ -265,7 +271,7 @@ impl Panel<'_> {
         };
         let list_size_rows = cap.map_or(list.len(), |c| list.len().min(c as usize));
         let content_rows = (above.len() + list_size_rows + below.len()) as u16;
-        let geom = PanelGeometry::compute(bounds, content_w, content_rows, title, 1.0);
+        let geom = PanelGeometry::compute(bounds, content_w, content_rows, title, Self::SCALE);
         let Some(outer) = geom.outer() else {
             return;
         };

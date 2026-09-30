@@ -378,7 +378,11 @@ fn dashboard_collapsed_big_tree_shows_badge_and_hides_children() {
 fn dashboard_closed_paints_no_popup() {
     let mut r = build(120, 44, vec![]);
     let scene = scene_with(vec![idle("/h/a.jsonl", 0, t0())], 16);
+    // Real rows, so only the `open` gate stands between them and an `Agents (1)` title.
+    let rows = build_dashboard_rows(&scene, &DashboardFolds::default());
     r.set_dashboard_frame(DashboardFrame {
+        open: false,
+        rows,
         ..Default::default()
     });
     r.render(&scene, &pack(), t0()).unwrap();

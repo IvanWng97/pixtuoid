@@ -24,13 +24,12 @@ pub(crate) fn paint_dashboard(
     bounds: Rect,
     theme: &Theme,
 ) {
-    let DashboardFrame {
+    let &DashboardFrame {
         open: _,
-        rows,
+        ref rows,
         selected,
         scroll,
     } = frame;
-    let selected = *selected;
     if rows.is_empty() {
         /// Fits "No active agents".
         const EMPTY_W: u16 = 24;
@@ -69,7 +68,7 @@ pub(crate) fn paint_dashboard(
         below: vec![],
         overflow: Overflow::Follow {
             selected: selected_idx,
-            scroll: *scroll,
+            scroll,
             cap: Some(DASHBOARD_VIEWPORT_ROWS as u16),
         },
     }

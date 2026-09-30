@@ -17,7 +17,7 @@ pub(super) use dashboard::paint_dashboard;
 pub(super) use elevator::paint_elevator_indicator;
 pub(super) use footer::{paint_footer, FooterStats};
 pub(super) use help::paint_help_overlay;
-pub(crate) use panel::{borderless_panel, panel_inner_width, Overflow, Panel, PanelGeometry};
+pub(crate) use panel::{borderless_panel, Overflow, Panel, PanelGeometry};
 pub(super) use theme_picker::paint_theme_picker;
 pub use tooltip::paint_chitchat_bubbles;
 pub(super) use tooltip::{
