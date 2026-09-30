@@ -682,7 +682,7 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
 }
 
 /// Step the floor darker under `shadows`, toward each one's centre: its falloff
-/// at `strength` in whole ramp stops, dithered between them on the art grid. A
+/// at `strength` in whole ramp stops, each the [`nearest`](crate::dither::nearest) on the art grid. A
 /// shadow is the ground it falls on, darker, never a colour of its own, and where
 /// two overlap the deeper one wins rather than the two compounding.
 fn paint_ground_shadows(
@@ -714,13 +714,7 @@ fn paint_ground_shadows(
                     continue;
                 };
                 let stops = f * strength * SHADOW_STOPS_PER_STRENGTH;
-                let whole = stops.floor();
-                let level = whole as i8
-                    + i8::from(crate::cutaway::pen::dithered(
-                        ArtPx(ax),
-                        ArtPx(ay),
-                        stops - whole,
-                    ));
+                let level = crate::dither::nearest(stops, ax, ay) as i8;
                 let slot = &mut depth[usize::from(ay - ay0) * w + usize::from(ax - ax0)];
                 *slot = (*slot).max(level);
             }

@@ -235,11 +235,13 @@ impl Pen {
         let span = u32::from(y1.0 - y0.0);
         let columns = buf.width().div_ceil(k);
         for y in y0.0..y1.0 {
-            // How far through the transition this row sits, on the matrix's scale.
-            let level = (u32::from(y - y0.0) * crate::dither::BAYER_LEVELS / span) as u8;
+            let through = f32::from(y - y0.0) / span as f32;
             for x in 0..columns {
-                let threshold = crate::dither::BAYER_4X4[usize::from(y % 4)][usize::from(x % 4)];
-                let c = if threshold < level { dark } else { light };
+                let c = if dithered(ArtPx(x), ArtPx(y), through) {
+                    dark
+                } else {
+                    light
+                };
                 self.fill(
                     buf,
                     ArtRect {
