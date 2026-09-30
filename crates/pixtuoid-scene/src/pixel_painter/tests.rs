@@ -3638,6 +3638,61 @@ fn sim_step_walks_a_mascot_in_for_each_gateway_present() {
 }
 
 #[test]
+fn sim_step_fits_every_mascot_frame_on_the_canvas() {
+    use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
+    use pixtuoid_core::state::DaemonInstanceId;
+    use std::time::Duration;
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    let coffee = HashMap::new();
+    for port in 0..32 {
+        let key = DaemonInstanceKey::new(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            DaemonInstanceId::new(format!("{}", 18789 + port)).expect("id"),
+        );
+        apply_presence(
+            &mut scene,
+            &key,
+            DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+            now0,
+        );
+    }
+    let mut owned = OwnedSimStores::new();
+    let mut edge = false;
+    for s in 0..600 {
+        let frame = sim_step(
+            &mut owned.stores(),
+            SimInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now: now0 + Duration::from_secs(s),
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                layout: &layout,
+                coffee: &coffee,
+                door_anim_max_ms: 0,
+            },
+        );
+        for m in &frame.mascots {
+            let size = sim::frame_size(&pack, m.anim_name, m.frame_idx, sim::MASCOT_FALLBACK);
+            let (Some(x0), Some(y0)) = (
+                m.pos.x.checked_sub(size.w / 2),
+                m.pos.y.checked_sub(size.h / 2),
+            ) else {
+                panic!("{m:?} overruns the canvas's west or north edge");
+            };
+            assert!(
+                x0 + size.w <= layout.buf_w && y0 + size.h <= layout.buf_h,
+                "{m:?} overruns the canvas"
+            );
+            edge |= x0 == 0 || y0 == 0;
+        }
+    }
+    assert!(edge, "the sweep never walked a mascot to the canvas edge");
+}
+
+#[test]
 fn sim_step_advances_motion_without_painting() {
     use crate::pose::Pose;
     use std::time::Duration;
