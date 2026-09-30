@@ -37,6 +37,10 @@ pub fn path_env_trimmed(name: &str) -> Option<PathBuf> {
     }
 }
 
+/// A TEXT-valued env var (a location is [`path_env`]; `env::var` is banned by `clippy.toml`).
+pub fn text_env(name: &str) -> Option<String> {
+    std::env::var_os(name)?.into_string().ok()
+}
 /// Whitespace test that never rejects a non-UTF-8 value: the lossy form is used
 /// ONLY for the emptiness question, never as the value, and its replacement
 /// chars are not whitespace — so ill-formed bytes read as present, not blank.
@@ -291,10 +295,10 @@ mod tests {
 
         let bad = OsString::from_vec(b"/tmp/caf\xFF".to_vec());
         temp_env::with_var(K, Some(&bad), || {
-            assert!(
-                std::env::var(K).is_err(),
-                "precondition: env::var is what DROPS this value"
-            );
+            #[expect(clippy::disallowed_methods, reason = "self-test of clippy.toml's ban")]
+            let dropped = std::env::var(K).is_err();
+            assert!(dropped, "precondition: env::var is what DROPS this value");
+            assert_eq!(text_env(K), None, "text_env keeps env::var's semantics");
             assert_eq!(path_env(K), Some(PathBuf::from(&bad)));
             assert_eq!(path_env_trimmed(K), Some(PathBuf::from(&bad)));
         });

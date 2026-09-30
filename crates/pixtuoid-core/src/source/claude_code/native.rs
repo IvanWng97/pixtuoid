@@ -55,8 +55,8 @@ impl ClaudeCodeSource {
         {
             // Mirrors pixtuoid-hook/src/paths.rs — parity-pinned by
             // tests/socket_path_parity.rs, not shared (no dep edge).
-            let user = std::env::var("USERNAME")
-                .unwrap_or_else(|_| "default".into())
+            let user = crate::platform::text_env("USERNAME")
+                .unwrap_or_else(|| "default".into())
                 .replace('\\', "-");
             PathBuf::from(format!(r"\\.\pipe\pixtuoid-{user}"))
         }

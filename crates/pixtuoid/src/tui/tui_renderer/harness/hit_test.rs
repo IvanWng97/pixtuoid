@@ -120,14 +120,17 @@ fn drawn_anchor(
     let layout = r.cached_layout().expect("rendered layout");
     let observed = pixtuoid_scene::floor::FloorSession::new()
         .observe(
-            scene,
-            &pack(),
+            pixtuoid_scene::floor::FloorInputs {
+                scene,
+                pack: &pack(),
+                now,
+                floor: pixtuoid_scene::floor::FloorMeta::for_floor(0, 1),
+                pets: pixtuoid_scene::floor::PetInputs::default(),
+            },
             pixtuoid_scene::layout::Size {
                 w: layout.buf_w,
                 h: layout.buf_h,
             },
-            pixtuoid_scene::floor::FloorMeta::for_floor(0, 1),
-            now,
         )
         .expect("observable floor");
     let frame = &observed.frame;

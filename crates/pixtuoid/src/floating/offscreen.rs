@@ -9,7 +9,7 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 
-use pixtuoid_scene::floor::{FloorSession, FrameInputs};
+use pixtuoid_scene::floor::{FloorInputs, FloorSession, FrameInputs};
 use pixtuoid_scene::footer::{
     FooterInputs, FooterModel, build_footer, footer_tone_rgb, footer_tool_tally,
 };
@@ -50,11 +50,13 @@ impl OfficeRenderer {
     /// subtracted. A too-small layout leaves the buffer filled with the theme's
     /// `bg_fallback`.
     pub fn render(&mut self, inputs: FrameInputs<'_>) -> &RgbBuffer {
-        let (scene, floor_idx, now) = (inputs.scene, inputs.floor_meta.floor_idx, inputs.now);
+        let FloorInputs {
+            scene, floor, now, ..
+        } = inputs.world;
         self.session.render(inputs);
         // Compose EVERY frame, even muted, so the observer's cue edges stay warm —
         // re-enabling then fires no volley; only DELIVERY is gated.
-        let audio_frame = self.session.audio_frame(scene, floor_idx, now);
+        let audio_frame = self.session.audio_frame(scene, floor.floor_idx, now);
         if self.audio.is_enabled() {
             self.audio.frame(audio_frame);
         }
@@ -405,7 +407,7 @@ pub fn paint_footer_into_surface(sb: &mut XrgbSurface<'_>, model: &FooterModel, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pixtuoid_scene::floor::FloorMeta;
+    use pixtuoid_scene::floor::{FloorMeta, PetInputs};
     use pixtuoid_scene::layout::Size;
     use winit::dpi::LogicalSize;
 
@@ -468,14 +470,15 @@ mod tests {
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
         let buf = renderer.render(FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 160, h: 96 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         });
         assert_eq!((buf.width(), buf.height()), (160, 96));
@@ -943,14 +946,15 @@ mod tests {
         let (handle, rx) = crate::audio::AudioHandle::test_pair();
         renderer.set_audio(handle);
         renderer.render(FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 160, h: 96 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         });
         let frames = crate::audio::drain_frames(&rx);
@@ -1046,14 +1050,15 @@ mod tests {
             // 192x160: tall enough that the corridor hosts BOTH appliances
             // (the vending/printer height gates in layout::compute).
             renderer.render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w: 192, h: 160 },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             });
             heard.extend(
@@ -1092,14 +1097,15 @@ mod tests {
         let mut agents = vec![active_on("/d/f0.jsonl", 0, 0)];
         let scene = scene_with(agents.clone(), cap);
         renderer.render(FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 160, h: 96 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         });
         crate::audio::drain_frames(&rx); // discard the priming frames
@@ -1108,14 +1114,15 @@ mod tests {
         let scene = scene_with(agents.clone(), cap);
         now += std::time::Duration::from_millis(33);
         renderer.render(FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 160, h: 96 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         });
         let off_floor: Vec<_> = crate::audio::drain_frames(&rx)
@@ -1131,14 +1138,15 @@ mod tests {
         let scene = scene_with(agents, cap);
         now += std::time::Duration::from_millis(33);
         renderer.render(FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 160, h: 96 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         });
         let on_floor: Vec<_> = crate::audio::drain_frames(&rx)
@@ -1182,14 +1190,15 @@ mod tests {
         // No frame rendered yet → no cached layout → the guard returns empty.
         assert!(renderer.labels(&scene, now).is_empty());
         renderer.render(FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 160, h: 96 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         });
         let labels = renderer.labels(&scene, now);

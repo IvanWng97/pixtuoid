@@ -6,21 +6,17 @@
 //! orchestrator (`pixel_painter/mod.rs`) calls it; the backdrop fixtures
 //! among it (clock, runner, mats) in roster order.
 
-mod celestial;
 mod floor_wash;
 mod lighting;
 
-use celestial::{
-    Disc, GLOW_ALPHA, GLOW_PX, MOON_SHADOW, STAR_ALPHA_MAX, STAR_COLOR, compute_disc, star_exists,
-    star_twinkle,
-};
+use crate::celestial::SkyView;
 pub(super) use floor_wash::paint_floor_wash;
 pub(crate) use lighting::{
     ClockReading, RUNNER_LATTICE_STRIDE, clock_reading, neon_look, octant_offset,
 };
 pub(super) use lighting::{
     NeonLook, RadialFalloff, paint_clock, paint_corridor_runner, paint_light, paint_neon_panel,
-    paint_radial_falloff, paint_shadow,
+    paint_radial_falloff, paint_shadows,
 };
 
 use pixtuoid_core::sprite::format::Pack;
@@ -30,7 +26,7 @@ use super::ambient::SunbeamColumn;
 use super::epoch_ms;
 use super::palette::{RgbLut, WHITE, blend, blend_pixel, blend_rgb};
 
-use crate::atmosphere::{Look, Moment};
+use crate::atmosphere::Moment;
 use crate::layout::{
     Bounds, Layout, WINDOW_W, WindowBay, glass_rows, wall_trim_row, window_frame, window_rows,
     window_run,
@@ -138,7 +134,7 @@ pub(super) fn paint_floor_and_walls(
     theme: &Theme,
 ) {
     let (buf_w, buf_h) = (buf.width(), buf.height());
-    let (sky, look) = (&moment.sky, &moment.look);
+    let look = &moment.look;
     let window_frame = theme.surface.window_frame;
     let carpet_base = theme.surface.carpet_base;
     let carpet_light = theme.surface.carpet_light;
@@ -168,7 +164,6 @@ pub(super) fn paint_floor_and_walls(
 
     let rows = window_rows(top_wall_h);
     let (window_y, window_h) = (rows.start, rows.end - rows.start);
-    let sky_row = sky_rows(window_h, look);
     let run = window_run(buf_w);
     let city = CityStrip::draw(
         pack,
@@ -180,8 +175,7 @@ pub(super) fn paint_floor_and_walls(
     let view = GlassView {
         city: &city,
         run_x0: run.start,
-        sky_row: &sky_row,
-        disc: compute_disc(sky, buf_w, top_wall_h, theme),
+        sky: &SkyView::of(moment, buf_w, top_wall_h, theme),
     };
     for w in bays {
         paint_floor_to_ceiling_window(
@@ -211,8 +205,8 @@ pub(super) fn paint_floor_and_walls(
 /// Snow is a `Flake`.
 #[derive(Clone, Copy)]
 enum Particle {
-    /// A vertical streak `len_base + seed % len_mod` px long, alpha fading from
-    /// `alpha_base` by `alpha_falloff` over its length, blended over the glass;
+    /// A vertical streak `len_base + seed % len_mod` px long, alpha stepping down
+    /// from `alpha_base` by `alpha_falloff` over its length, blended over the glass;
     /// `drift` slants it +x by `dy/2` per row (the wind lean).
     Streak {
         len_base: u16,
@@ -282,12 +276,19 @@ fn paint_streaks(
                     let dx = if drift { dy / 2 } else { 0 };
                     let px = glass_x0 + (sx + dx) % gw;
                     let py = glass_y0 + ((phase as u16 + dy) % gh);
-                    let alpha = alpha_base - (dy as f32 / len as f32) * alpha_falloff;
+                    let fade = alpha_base - (dy as f32 / len as f32) * alpha_falloff;
+                    let alpha = crate::dither::stepped(
+                        fade,
+                        alpha_base,
+                        crate::dither::FALLOFF_TONES,
+                        px,
+                        py,
+                    );
                     blend_pixel(buf, px, py, spec.color, alpha);
                 }
             }
             Particle::Flake => {
-                let wiggle = if (elapsed_ms / 400 + seed.wrapping_mul(0x9e37)).is_multiple_of(2) {
+                let wiggle = if (elapsed_ms / 400 + seed).is_multiple_of(2) {
                     0
                 } else {
                     1
@@ -313,20 +314,6 @@ fn wash_glass(buf: &mut RgbBuffer, pane: Bounds, color: Rgb, alpha: f32) {
     }
 }
 
-/// The sky's colour on each row of the glass, shared by every window: all panes
-/// in a frame have the same height and `look`.
-fn sky_rows(h: u16, look: &Look) -> Vec<Rgb> {
-    let glass_h = glass_rows(h);
-    (0..glass_h)
-        .map(|gy| {
-            look.glass_b.mix(
-                look.glass_a,
-                crate::atmosphere::sky_share(gy as f32, glass_h),
-            )
-        })
-        .collect()
-}
-
 /// What one frame's windows look out on, the same through every pane.
 #[derive(Clone, Copy)]
 struct GlassView<'a> {
@@ -334,10 +321,7 @@ struct GlassView<'a> {
     city: &'a CityStrip,
     /// The column the city strip's west end stands at.
     run_x0: u16,
-    /// The sky's colour on each glass row ([`sky_rows`]).
-    sky_row: &'a [Rgb],
-    /// The sun or moon, where it is up.
-    disc: Option<Disc>,
+    sky: &'a SkyView,
 }
 
 /// Floor-to-ceiling window `pane`, framed in `frame` and seeded by its tiling
@@ -360,16 +344,10 @@ fn paint_floor_to_ceiling_window(
     let GlassView {
         city,
         run_x0,
-        sky_row,
-        disc,
+        sky: sky_view,
     } = view;
-    // The disc paints ONLY in the window its centre sits over. Ungated, a disc
-    // near an inter-window gap is wide enough (radius+glow) to reach BOTH
-    // neighbours' glass and render twice, bleeding through the solid wall pillar
-    // between them.
-    let disc = disc.filter(|d| d.cx >= f32::from(x) && d.cx < f32::from(x + w));
     let glass_h = glass_rows(h);
-    let clear_sky = crate::skyline::clear_sky_rows(glass_h);
+    let glass = sky_view.pane(x, w, glass_h);
     let building_at = |px: u16, glass_dy: u16| city.at(px.wrapping_sub(run_x0), glass_dy);
 
     for dy in 0..h {
@@ -387,43 +365,11 @@ fn paint_floor_to_ceiling_window(
             if let Some(building) = building_at(px, glass_dy) {
                 buf.put(px, py, building);
             } else {
-                let mut col = sky_row[glass_dy as usize];
-                // Stars paint into the sky BEFORE the disc, so an overlapping
-                // disc pixel always wins (painted next, below).
-                if look.star_strength > 0.0
-                    && glass_dy < clear_sky
-                    && star_exists(px, py)
-                    && star_twinkle(px, py, now)
-                {
-                    col = blend_rgb(col, STAR_COLOR, look.star_strength * STAR_ALPHA_MAX);
-                }
-                if let Some(d) = disc {
-                    let dx = px as f32 - d.cx;
-                    let dy = py as f32 - d.cy;
-                    let dist = (dx * dx + dy * dy).sqrt();
-                    if dist <= d.r {
-                        // The sun is always lit; the moon darkens its
-                        // un-illuminated side via an elliptical terminator.
-                        let target = if d.lit_frac >= 1.0 {
-                            d.core
-                        } else {
-                            let terminator_x =
-                                (1.0 - 2.0 * d.lit_frac) * (d.r * d.r - dy * dy).max(0.0).sqrt();
-                            let toward_lit_limb = if d.lit_right { dx } else { -dx };
-                            if toward_lit_limb >= terminator_x {
-                                d.core
-                            } else {
-                                MOON_SHADOW
-                            }
-                        };
-                        col = blend_rgb(col, target, d.vis);
-                    } else if dist <= d.r + GLOW_PX {
-                        let falloff = 1.0 - (dist - d.r) / GLOW_PX;
-                        // Scaling by `lit_frac` keeps a new moon's near-dark
-                        // core from casting a full-bright halo.
-                        col = blend_rgb(col, d.glow, d.vis * falloff * GLOW_ALPHA * d.lit_frac);
-                    }
-                }
+                let col = glass.colour(
+                    (f32::from(px), f32::from(py)),
+                    (px, py),
+                    f32::from(glass_dy),
+                );
                 buf.put(px, py, col);
             }
         }
@@ -454,7 +400,7 @@ fn paint_floor_to_ceiling_window(
             &StreakSpec {
                 count: 4,
                 seed_mult: 7,
-                sx_mult: 0x9e37_79b9,
+                sx_mult: u64::from(crate::GOLDEN_GAMMA_32),
                 speed_base: 60,
                 speed_span: 50,
                 color: Rgb {
@@ -480,7 +426,7 @@ fn paint_floor_to_ceiling_window(
                 &StreakSpec {
                     count: 6,
                     seed_mult: 7,
-                    sx_mult: 0x9e37_79b9,
+                    sx_mult: u64::from(crate::GOLDEN_GAMMA_32),
                     speed_base: 40,
                     speed_span: 40,
                     color: Rgb {
@@ -531,7 +477,7 @@ fn paint_floor_to_ceiling_window(
             &StreakSpec {
                 count: 5,
                 seed_mult: 7,
-                sx_mult: 0x9e37_79b9,
+                sx_mult: u64::from(crate::GOLDEN_GAMMA_32),
                 speed_base: 50,
                 speed_span: 40,
                 color: Rgb {

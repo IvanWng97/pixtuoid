@@ -18,8 +18,8 @@ use ratatui::layout::Rect;
 
 use crate::tui::renderer::{DrawCtx, PetState, draw_scene, flush_buffer_to_term_at_offset};
 use pixtuoid_scene::floor::{
-    FloorMeta, FloorTransition, FrameInputs, PerFloor, PerOffice, num_floors, project_floor_scene,
-    render_floor,
+    FloorInputs, FloorMeta, FloorTransition, FrameInputs, PerFloor, PerOffice, PetInputs,
+    num_floors, project_floor_scene, render_floor,
 };
 use pixtuoid_scene::layout::{Layout, Size};
 use pixtuoid_scene::pathfind::Router;
@@ -458,14 +458,18 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             &mut self.office.coffee,
             &mut transition_chitchat,
             FrameInputs {
-                scene: &from_scene,
-                pack,
+                world: FloorInputs {
+                    scene: &from_scene,
+                    pack,
+                    now,
+                    floor: from_meta,
+                    pets: PetInputs {
+                        pet: from_pet,
+                        petting: from_active_pet,
+                    },
+                },
                 theme: self.theme,
-                now,
                 size: Size { w: buf_w, h: buf_h },
-                floor_meta: from_meta,
-                active_pet: from_active_pet,
-                floor_pet: from_pet,
                 debug_walkable: self.debug_walkable,
             },
         );
@@ -475,14 +479,18 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             &mut self.office.coffee,
             &mut transition_chitchat,
             FrameInputs {
-                scene: &to_scene,
-                pack,
+                world: FloorInputs {
+                    scene: &to_scene,
+                    pack,
+                    now,
+                    floor: to_meta,
+                    pets: PetInputs {
+                        pet: to_pet,
+                        petting: to_active_pet,
+                    },
+                },
                 theme: self.theme,
-                now,
                 size: Size { w: buf_w, h: buf_h },
-                floor_meta: to_meta,
-                active_pet: to_active_pet,
-                floor_pet: to_pet,
                 debug_walkable: self.debug_walkable,
             },
         );
@@ -611,6 +619,19 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let popup_scale = self.version_popup_scale(now);
         let pf = &mut self.floors[self.current_floor];
         let mut draw_ctx = DrawCtx {
+            world: FloorInputs {
+                scene: &floor_scene,
+                pack,
+                now,
+                floor: floor_meta,
+                pets: PetInputs {
+                    pet: pixtuoid_scene::pet::select_pet_for_floor(
+                        floor_meta.floor_seed,
+                        &self.pets,
+                    ),
+                    petting: self.active_pet.as_ref(),
+                },
+            },
             buf: &mut pf.buf,
             store: &mut pf.ctx,
             mouse_pos: self.mouse_pos,
@@ -624,12 +645,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             gateway: crate::tui::widgets::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
             audio_audible: self.audio.is_audible(),
             volume_flash: self.volume_flash,
-            floor: floor_meta,
-            active_pet: self.active_pet.as_ref(),
             last_pet_pos: None,
             last_mascots: Vec::new(),
             last_agents: Vec::new(),
-            floor_pet: pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets),
             chitchat_state: &mut self.office.chitchat,
             chitchat_bubbles: Vec::new(),
             coffee: self.office.coffee.map(),
@@ -642,7 +660,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             connection: &self.connection,
             onboarding: &self.onboarding,
         };
-        let result = draw_scene(&mut self.terminal, &floor_scene, pack, now, &mut draw_ctx);
+        let result = draw_scene(&mut self.terminal, &mut draw_ctx);
         self.last_pet_pos = draw_ctx.last_pet_pos;
         self.last_agents = std::mem::take(&mut draw_ctx.last_agents);
         // `take` avoids a partial move so the explicit `drop` below can follow.

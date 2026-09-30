@@ -791,9 +791,9 @@ pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
 
 /// A point packed into one hash input, so a per-spot seed is derived the same
 /// way everywhere it is needed. The PACKING is load-bearing, not an
-/// implementation detail: every committed still and the wasm were rendered
-/// against it, and swapping the halves re-seeds every seat and pot while every
-/// property test still passes — pinned by `point_seed_packing_is_frozen`.
+/// implementation detail: every committed still was rendered against it, and
+/// swapping the halves re-seeds every seat and pot while every property test
+/// still passes — pinned by `point_seed_packing_is_frozen`.
 pub(super) fn point_seed(p: Point) -> u64 {
     (u64::from(p.x) << 32) | u64::from(p.y)
 }

@@ -1,5 +1,6 @@
 //! Per-agent colors and the color math the painters share.
 
+pub(super) use crate::composite::{blend, blend_rgb};
 use pixtuoid_core::AgentSlot;
 use pixtuoid_core::id::normalize_path_key;
 use pixtuoid_core::sprite::{Frame, Pixel, Rgb, RgbBuffer};
@@ -492,16 +493,6 @@ pub(super) fn degraded_frame(frame: &Frame) -> Frame {
     Frame::from_pixels(frame.width(), frame.height(), pixels)
 }
 
-/// Per-channel sRGB lerp, the classic's compositing primitive: cheap per pixel,
-/// and channel-separable, so a constant-tint pass tabulates it through an
-/// [`RgbLut`]. A gradient between two hues whose middle must not sag is
-/// [`Rgb::mix`].
-pub(super) fn blend(a: u8, b: u8, t: f32) -> u8 {
-    ((a as f32) * (1.0 - t) + (b as f32) * t)
-        .round()
-        .clamp(0.0, 255.0) as u8
-}
-
 /// The blend anchors: a lit fixture is its tint pushed toward [`WHITE`], an unlit
 /// one toward [`BLACK`] — one pair, so the lamps, the screens and the neon tube
 /// cannot disagree on what "white" is.
@@ -511,15 +502,6 @@ pub(super) const WHITE: Rgb = Rgb {
     b: 255,
 };
 pub(super) const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
-
-/// [`blend`] on each channel of an `Rgb` triple, with one shared `t`.
-pub(super) fn blend_rgb(a: Rgb, b: Rgb, t: f32) -> Rgb {
-    Rgb {
-        r: blend(a.r, b.r, t),
-        g: blend(a.g, b.g, t),
-        b: blend(a.b, b.b, t),
-    }
-}
 
 /// A pixel transform tabulated over the diagonal greys — byte-identical to
 /// calling `f` per pixel, but three L1 loads instead of the f32 chain, ONLY
@@ -647,6 +629,7 @@ mod tests {
 
     /// A theme's fixtures take its colours.
     #[test]
+    #[cfg(feature = "density-art")]
     fn a_recolour_rethemes_the_fixture_art() {
         let pack = crate::embedded_pack::test_default_pack();
         let art = pack
@@ -669,6 +652,7 @@ mod tests {
     /// A recolour re-derives the shading: one shaded cell of the vending art
     /// is a different colour in two themes whose appliance bodies differ.
     #[test]
+    #[cfg(feature = "density-art")]
     fn a_recolour_reshades_the_appliance_art() {
         let pack = crate::embedded_pack::test_default_pack();
         let art = pack

@@ -24,7 +24,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use toml::value::Table;
 
-use crate::install::io;
 use crate::install::target::MergeOutcome;
 use pixtuoid_core::source::kimi::SOURCE_NAME;
 
@@ -54,7 +53,7 @@ const KIMI_HOOK_TIMEOUT_SECS: i64 = 5;
 /// value is already shell-expanded/absolute.
 fn kimi_config_dir() -> Option<PathBuf> {
     resolve_config_dir(
-        io::nonempty_env("KIMI_CODE_HOME"),
+        pixtuoid_core::platform::path_env("KIMI_CODE_HOME"),
         pixtuoid_core::platform::user_home_opt(),
     )
 }

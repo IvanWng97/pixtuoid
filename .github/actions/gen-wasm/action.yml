@@ -1,0 +1,39 @@
+name: 'Generate the site wasm'
+description: 'Installs the wasm toolchain and runs `just gen-wasm` into site/public/wasm/'
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: ./.github/actions/setup-cargo-just
+      with:
+        targets: wasm32-unknown-unknown
+        shared-key: gen-wasm
+
+    # The CLI must match the crate's wasm-bindgen exactly; Cargo.lock is that authority.
+    - id: bindgen
+      shell: bash
+      run: |
+        set -euo pipefail
+        ver=$(awk '$0 == "name = \"wasm-bindgen\"" { getline; gsub(/"/, "", $3); print $3 }' "$GITHUB_WORKSPACE/Cargo.lock")
+        test -n "$ver"
+        echo "version=$ver" >> "$GITHUB_OUTPUT"
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: wasm-bindgen@${{ steps.bindgen.outputs.version }}
+        fallback: none
+
+    # Not via taiki-e/install-action: binaryen is not in its TOOLS.md (checked).
+    - name: Install wasm-opt
+      shell: bash
+      run: |
+        set -euo pipefail
+        ver=133
+        url="https://github.com/WebAssembly/binaryen/releases/download/version_$ver/binaryen-version_${ver}-x86_64-linux.tar.gz"
+        curl -fsSL --retry 5 --retry-all-errors "$url" -o /tmp/binaryen.tar.gz
+        echo "2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489  /tmp/binaryen.tar.gz" | sha256sum -c -
+        tar -xzf /tmp/binaryen.tar.gz -C /tmp "binaryen-version_$ver/bin/wasm-opt"
+        sudo install -m 0755 "/tmp/binaryen-version_$ver/bin/wasm-opt" /usr/local/bin/wasm-opt
+        wasm-opt --version
+
+    - shell: bash
+      run: just gen-wasm

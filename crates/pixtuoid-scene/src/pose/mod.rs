@@ -47,6 +47,36 @@ pub struct RouteCtx<'a> {
     pub motion: &'a mut HashMap<AgentId, MotionState>,
 }
 
+/// Owns the stores a [`RouteCtx`] borrows, so a test threads one value.
+#[cfg(test)]
+pub(crate) struct RouteRig<R> {
+    pub(crate) router: R,
+    pub(crate) overlay: OccupancyOverlay,
+    pub(crate) history: PoseHistory,
+    pub(crate) motion: HashMap<AgentId, MotionState>,
+}
+
+#[cfg(test)]
+impl<R: Router> RouteRig<R> {
+    pub(crate) fn new(router: R) -> Self {
+        Self {
+            router,
+            overlay: OccupancyOverlay::new(),
+            history: PoseHistory::new(),
+            motion: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn rctx(&mut self) -> RouteCtx<'_> {
+        RouteCtx {
+            router: &mut self.router,
+            overlay: &self.overlay,
+            history: &mut self.history,
+            motion: &mut self.motion,
+        }
+    }
+}
+
 /// Per-agent rendered position cache, consulted on state transitions so an agent
 /// who was mid-walk when their state flipped can complete the walk visually
 /// instead of teleporting back to their desk.
@@ -187,14 +217,14 @@ fn exit_elapsed_ms(profile: &WalkProfile, elapsed_ms: u64) -> u64 {
 }
 
 /// Routed variant of `derive`: Walking poses trace an A*-routed polyline
-/// (layout mask + per-frame `overlay`) corner-by-corner instead of cutting
-/// through obstacles or other agents.
+/// (layout mask + per-frame [`RouteCtx::overlay`]) corner-by-corner instead of
+/// cutting through obstacles or other agents.
 ///
-/// `motion` drives entry/exit physics — the A* path length is snapshotted into a
-/// `WalkProfile` on first sighting (commit-to-route), and later frames compute
-/// `t_x1000` against that frozen profile. `history` is consulted on state
-/// transitions so an agent whose pose flipped mid-wander walks back to the desk
-/// instead of teleporting.
+/// [`RouteCtx::motion`] drives entry/exit physics — the A* path length is
+/// snapshotted into a `WalkProfile` on first sighting (commit-to-route), and
+/// later frames compute `t_x1000` against that frozen profile.
+/// [`RouteCtx::history`] is consulted on state transitions so an agent whose
+/// pose flipped mid-wander walks back to the desk instead of teleporting.
 pub fn derive_with_routing(
     slot: &AgentSlot,
     now: SystemTime,
@@ -493,9 +523,6 @@ pub fn derive_with_routing(
                 let dist =
                     (prev.x as i32 - chair.x as i32).abs() + (prev.y as i32 - chair.y as i32).abs();
                 if dist >= SNAP_BACK_MIN_DIST {
-                    // Against the same jittered goal the render route uses: the
-                    // profile must measure `route_walking_pose`'s own A* polyline,
-                    // or a detour covers a longer path in a straight-line duration.
                     let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
                     let p = snapshot_leg_profile(
                         rctx.router,
