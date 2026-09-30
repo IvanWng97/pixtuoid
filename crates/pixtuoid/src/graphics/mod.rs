@@ -259,7 +259,7 @@ pub(crate) fn resolve(mode: GraphicsMode, probe: Probe, densities: &[u16]) -> Pl
             return classic(ClassicReason::CellTooSmall {
                 cell,
                 density: densities.iter().copied().min().unwrap_or(1),
-            })
+            });
         }
     };
     if d.tmux && protocol != ImageProtocol::Kitty {

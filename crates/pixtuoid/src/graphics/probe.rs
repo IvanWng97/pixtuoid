@@ -4,10 +4,10 @@
 //! decisions — which protocol, which cell — are pure and tested; only
 //! [`probe`] touches the terminal.
 
+use ratatui_image::picker::ProtocolType;
 use ratatui_image::picker::cap_parser::QueryStdioOptions;
 #[cfg(any(unix, test))]
 use ratatui_image::picker::cap_parser::{Parser, Response};
-use ratatui_image::picker::ProtocolType;
 
 use super::{CellSize, Detected, ImageProtocol, Probe};
 

@@ -1,4 +1,4 @@
-use super::{to_color, Overflow, Panel};
+use super::{Overflow, Panel, to_color};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 
@@ -61,9 +61,9 @@ mod tests {
     // 24 is narrower than THEME_W: an unclamped Clear panics indexing past the buffer.
     #[test]
     fn theme_picker_narrow_terminal_does_not_panic() {
+        use ratatui::Terminal;
         use ratatui::backend::TestBackend;
         use ratatui::layout::Rect;
-        use ratatui::Terminal;
         let mut term = Terminal::new(TestBackend::new(24, 30)).unwrap();
         term.draw(|f| {
             paint_theme_picker(

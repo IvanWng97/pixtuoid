@@ -9,10 +9,10 @@ mod tasks;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use pixtuoid_core::source::{AgentEvent, Transport};
-use pixtuoid_core::state::reducer::Reducer;
-use pixtuoid_core::state::SceneState;
 use pixtuoid_core::AgentId;
+use pixtuoid_core::source::{AgentEvent, Transport};
+use pixtuoid_core::state::SceneState;
+use pixtuoid_core::state::reducer::Reducer;
 
 fn start(reducer: &mut Reducer, scene: &mut SceneState, id: AgentId) {
     reducer.apply(

@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::source::codex::{
     EM_RESUME, EM_SEARCH, EM_TOKENS, EM_TURN_END, EM_TURN_START, EVENT_MSG, RESPONSE_ITEM,

@@ -19,7 +19,7 @@ use crate::chitchat::{ActiveChitchat, ChitchatBubble};
 #[cfg(test)]
 use crate::floor::LightingState;
 use crate::frame_cache::FrameCache;
-use crate::layout::{z_sort_row, Anchor, Depth, Facing, FixtureKind, Layout, Point, Size, Station};
+use crate::layout::{Anchor, Depth, Facing, FixtureKind, Layout, Point, Size, Station, z_sort_row};
 use crate::motion::MotionState;
 use crate::pet::PetFrame;
 
@@ -87,16 +87,16 @@ pub use anchors::character_anchor;
 #[doc(hidden)]
 pub use anchors::seated_anchor_facing;
 pub(crate) use background::{
-    clock_reading, neon_look, octant_offset, ClockReading, RUNNER_LATTICE_STRIDE,
+    ClockReading, RUNNER_LATTICE_STRIDE, clock_reading, neon_look, octant_offset,
 };
 #[cfg(test)]
 pub(crate) use drawable::DESK_BEZEL_RAISE;
 pub(crate) use drawable::{
-    desk_art_top, desk_sprite_name, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE,
+    DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, desk_art_top, desk_sprite_name,
 };
 pub(crate) use palette::{
-    appliance_overrides, fixture_overrides, CLOCK_FACE_KEY, DESK_BULB_KEY, SCREEN_GLASS_KEY,
-    SCREEN_TEXT_KEY,
+    CLOCK_FACE_KEY, DESK_BULB_KEY, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, appliance_overrides,
+    fixture_overrides,
 };
 
 // The ToolKind→glow-hue seam the binary's footer tints tool segments with. The
@@ -148,13 +148,13 @@ fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
     })
 }
 pub(crate) use background::BaseFillCache;
-pub(crate) use dense::{densest_frame, DenseFrame};
+pub(crate) use dense::{DenseFrame, densest_frame};
 #[cfg(test)]
-pub(crate) use furniture::{paint_area_rug, COOLER_WATER};
+pub(crate) use furniture::{COOLER_WATER, paint_area_rug};
 // `floor::FloorSession::observe` is the public entry to the sim tick; the step
 // itself and its per-call borrow-set stay crate-internal.
-pub(crate) use sim::{desk_occupant, sim_step, PetInputs, SimInputs, SimStores};
 pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
+pub(crate) use sim::{PetInputs, SimInputs, SimStores, desk_occupant, sim_step};
 pub(crate) use wall::paint_wall;
 
 /// The pantry counter sprites, compact then large.
@@ -174,7 +174,7 @@ pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
 use crate::atmosphere::Moment;
 use crate::lighting::{DeskLights, LightInputs, Lights};
 use background::{paint_floor_and_walls, paint_floor_wash, paint_light, paint_shadows};
-use drawable::{paint_drawable, Drawable, DrawableKind, Layer};
+use drawable::{Drawable, DrawableKind, Layer, paint_drawable};
 use palette::{agent_overrides, outfit_seed_for};
 use seat::paint_character_at;
 use wall::enqueue_room_walls;
@@ -484,11 +484,7 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
 /// with fewer frames than the shared cycle's `frame_idx` would
 /// otherwise vanish the sprite.
 pub(super) fn frame_index(anim: &Sprite, idx: usize) -> usize {
-    if idx < anim.frames().len() {
-        idx
-    } else {
-        0
-    }
+    if idx < anim.frames().len() { idx } else { 0 }
 }
 
 const VENDING_MACHINE_SPRITE: &str = "vending_machine";

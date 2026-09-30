@@ -11,16 +11,16 @@ mod floor_wash;
 mod lighting;
 
 use celestial::{
-    compute_disc, star_exists, star_twinkle, Disc, GLOW_ALPHA, GLOW_PX, MOON_SHADOW,
-    STAR_ALPHA_MAX, STAR_COLOR,
+    Disc, GLOW_ALPHA, GLOW_PX, MOON_SHADOW, STAR_ALPHA_MAX, STAR_COLOR, compute_disc, star_exists,
+    star_twinkle,
 };
 pub(super) use floor_wash::paint_floor_wash;
 pub(crate) use lighting::{
-    clock_reading, neon_look, octant_offset, ClockReading, RUNNER_LATTICE_STRIDE,
+    ClockReading, RUNNER_LATTICE_STRIDE, clock_reading, neon_look, octant_offset,
 };
 pub(super) use lighting::{
-    paint_clock, paint_corridor_runner, paint_light, paint_neon_panel, paint_radial_falloff,
-    paint_shadows, NeonLook, RadialFalloff,
+    NeonLook, RadialFalloff, paint_clock, paint_corridor_runner, paint_light, paint_neon_panel,
+    paint_radial_falloff, paint_shadows,
 };
 
 use pixtuoid_core::sprite::format::Pack;
@@ -28,12 +28,12 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::ambient::SunbeamColumn;
 use super::epoch_ms;
-use super::palette::{blend, blend_pixel, blend_rgb, RgbLut, WHITE};
+use super::palette::{RgbLut, WHITE, blend, blend_pixel, blend_rgb};
 
 use crate::atmosphere::{Look, Moment};
 use crate::layout::{
-    glass_rows, wall_trim_row, window_frame, window_rows, window_run, Bounds, Layout, WindowBay,
-    WINDOW_W,
+    Bounds, Layout, WINDOW_W, WindowBay, glass_rows, wall_trim_row, window_frame, window_rows,
+    window_run,
 };
 use crate::sky::{Sky, Weather};
 use crate::skyline::CityStrip;

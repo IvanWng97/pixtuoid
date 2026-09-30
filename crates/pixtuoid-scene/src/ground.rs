@@ -76,8 +76,8 @@ impl Depths {
         let cell = |logical: u16| logical.saturating_mul(per);
         let ((x0, y0), (x1, y1)) = contacts.clone().map(Contact::bounds).reduce(|a, b| {
             (
-                (a.0 .0.min(b.0 .0), a.0 .1.min(b.0 .1)),
-                (a.1 .0.max(b.1 .0), a.1 .1.max(b.1 .1)),
+                (a.0.0.min(b.0.0), a.0.1.min(b.0.1)),
+                (a.1.0.max(b.1.0), a.1.1.max(b.1.1)),
             )
         })?;
         let (x0, y0, w, h) = (cell(x0), cell(y0), cell(x1 - x0), cell(y1 - y0));
