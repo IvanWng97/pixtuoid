@@ -1378,21 +1378,6 @@ fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
     }
 }
 
-#[test]
-fn waypoint_depth_baseline_is_center_pinned_sprite_south() {
-    use crate::layout::{WaypointKind, furniture_def};
-    let south_off = |k: WaypointKind| {
-        furniture_def(k.furniture())
-            .footprint
-            .expect("has footprint")
-            .h
-            / 2
-            - 1
-    };
-    assert_eq!(south_off(WaypointKind::VendingMachine), 2);
-    assert_eq!(south_off(WaypointKind::Printer), 1);
-}
-
 /// The seat centre is the PAINTED desk's midline, not the layout box's — the two
 /// differ (`DESK_W` 10 vs a 14 px sprite), which is why the chair used to sit 2 px
 /// left of the desk it belongs to. Centring here is what makes a symmetric jitter
@@ -4334,7 +4319,8 @@ fn water_cooler_glugs_a_rising_bubble() {
         buf
     };
     let bubble = theme.furniture.tank_water_line;
-    let (wx, wy) = (pr.x + pr.width - 6, pr.y + 8);
+    let cooler = pantry.water_cooler_rect().expect("fits");
+    let (wx, wy) = (cooler.x, cooler.y);
     let a = render(100); // phase 0: bubble low
     let b = render(500); // phase 1: bubble high
     assert_eq!(
@@ -5690,4 +5676,93 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
         asymmetric += usize::from(east.as_slice() != mirrored.as_slice());
     }
     assert!(asymmetric > 0, "a profile is not its own mirror");
+}
+
+/// A corridor appliance's art overhangs north of its aisle (invariant #6), but
+/// never onto a desk, its chair or its sitter: swept over the census sizes plus
+/// every size whose aisle is 10–14 rows, where the overhang reaches the band.
+#[test]
+fn corridor_appliance_art_never_lands_on_a_workstation() {
+    use crate::layout::{CHARACTER_SPRITE_H, CHARACTER_SPRITE_W, FixtureKind, Station};
+    const TALL_AISLES: std::ops::RangeInclusive<u16> = 10..=14;
+    let overlaps = |a: crate::layout::Bounds, b: crate::layout::Bounds| {
+        a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+    };
+    let mut sizes = vec![
+        (96, 60),
+        (120, 72),
+        (140, 80),
+        (160, 96),
+        (192, 108),
+        (240, 135),
+        (320, 180),
+        (160, 192),
+    ];
+    let mut tall_seen = std::collections::BTreeSet::new();
+    for w in (96u16..=320).step_by(8) {
+        for h in 90u16..=240 {
+            let Some(l) = Layout::compute_with_seed(w, h, None, 0) else {
+                continue;
+            };
+            if TALL_AISLES.contains(&l.cubicle_aisle.height) {
+                tall_seen.insert(l.cubicle_aisle.height);
+                sizes.push((w, h));
+            }
+        }
+    }
+    assert!(
+        TALL_AISLES.clone().all(|h| tall_seen.contains(&h)),
+        "the sweep must reach every tall aisle, saw {tall_seen:?}"
+    );
+    let mut placed = 0;
+    let mut violations = Vec::new();
+    for (w, h) in sizes {
+        for seed in 0..3u64 {
+            let Some(l) = Layout::compute_with_seed(w, h, None, seed) else {
+                continue;
+            };
+            let fixtures: Vec<_> = l.fixtures().collect();
+            let mut workstations: Vec<crate::layout::Bounds> = fixtures
+                .iter()
+                .filter(|f| matches!(f.kind, FixtureKind::Desk(_) | FixtureKind::DeskChair(_)))
+                .map(|f| f.visual)
+                .collect();
+            workstations.extend(l.home_desks.iter().enumerate().map(|(i, &desk)| {
+                let at = seated_anchor_facing(
+                    desk,
+                    CHARACTER_SPRITE_W,
+                    l.desk_facing(FloorLocalDeskIndex(i)),
+                );
+                crate::layout::Bounds {
+                    x: at.x,
+                    y: at.y,
+                    width: CHARACTER_SPRITE_W,
+                    height: CHARACTER_SPRITE_H,
+                }
+            }));
+            for f in &fixtures {
+                let FixtureKind::Station {
+                    station: station @ (Station::VendingMachine | Station::Printer),
+                    ..
+                } = f.kind
+                else {
+                    continue;
+                };
+                placed += 1;
+                violations.extend(
+                    workstations
+                        .iter()
+                        .filter(|&&ws| overlaps(f.visual, ws))
+                        .map(|ws| {
+                            format!(
+                                "{w}x{h} seed {seed} aisle {:?}: {station:?} art {:?} on {ws:?}",
+                                l.cubicle_aisle, f.visual
+                            )
+                        }),
+                );
+            }
+        }
+    }
+    assert!(placed > 0, "no appliance was placed, so this pins nothing");
+    assert!(violations.is_empty(), "{}", violations.join("\n"));
 }
