@@ -28,11 +28,11 @@ Follow **[`docs/CONTRIBUTING.md`](../../../docs/CONTRIBUTING.md#adding-a-new-age
 The `sources --json` golden (`cli_json`) and the `wire_to_pixels` matrix live in
 `pixtuoid/tests/*.rs` INTEGRATION BINARIES that `-p <crate> --lib` never builds —
 the #692 (kimi) miss: a green `--lib` run AND a multi-lens review both passed
-while these two were red, caught only by the pre-push `just preflight`. Run
+while these two were red, caught only by the full suite. Run
 `just test` (NOT just `--lib`) before declaring green.
 
 ## Finish
 
 - `just gen-contract` only if you touched the `--json`/`SourceStatus`/`OutcomeRow`
   SHAPE (adding a row doesn't).
-- `just preflight` before the PR, then run the **two-lens-review** skill.
+- `just preflight full` before the PR, then run the **two-lens-review** skill.

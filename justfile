@@ -9,7 +9,7 @@
 #   gen      — regenerate + check committed artifacts
 #   release  — npm-check, the Node gate release.yml runs before npm publish (and
 #              ci-lint on every PR)
-#   meta     — tooling setup, the full pre-push / full-stack gates, the fixture
+#   meta     — tooling setup, the local gate (preflight), the fixture
 #              gates, and the gates' selftests
 
 # Git Bash is preinstalled on GHA windows runners; keeps every recipe
@@ -1009,17 +1009,21 @@ npm-check:
 
 # ── meta ──────────────────────────────────────────────────────────
 
-# Full pre-push gate: the Rust checks worth running locally before a push.
-# (coverage and the gen/smoke gates are CI-only — heavy builds / venv+ffmpeg.)
+# The local gate `.githooks/pre-push` runs: lint + clippy, fast over warm build
+# caches. Tests are CI's: in the hook, every worktree's push re-ran the whole
+# suite on one shared machine. `full` adds the feature powerset and the tests —
+# the Rust recipes CI's lint/clippy/hack/test jobs run; what it still can't see
+# is in CONTRIBUTING.md#ci-gates.
 [group('meta')]
-[doc('Full pre-push gate: lint → clippy → hack → test')]
-preflight: lint clippy hack test
-
-# Everything: the Rust pre-push gate + the site gate + the artifact-drift gate.
-# Heavier than preflight (needs the site npm deps + the .venv + ffmpeg).
-[group('meta')]
-[doc('Full-stack gate: preflight + site-check + gen-check')]
-verify: preflight site-check gen-check
+[doc('Local gate: lint → clippy; `full` = lint → clippy → hack → test')]
+preflight mode="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ mode }}" in
+    "") just lint && just clippy ;;
+    full) just lint && just clippy && just hack && just test ;;
+    *) echo "usage: just preflight [full]" >&2; exit 2 ;;
+    esac
 
 # Install the dev tools every check + recipe relies on (idempotent). Prefers
 # cargo-binstall (prebuilt) and falls back to cargo install (compiles).
@@ -1075,8 +1079,8 @@ setup-tools:
         exit 1
     fi
     # Activate the local pre-push gate (dormant by default in a fresh clone, so CI
-    # would otherwise be the only gate). Idempotent. CI re-runs `just preflight`
-    # regardless, so a skipped local hook still meets the same checks at merge.
+    # would otherwise be the only gate). Idempotent. CI runs every gate itself,
+    # so a skipped local hook still meets them at merge.
     git config core.hooksPath .githooks
 
 # The size gate's own negative control, because nothing else can be one: the
