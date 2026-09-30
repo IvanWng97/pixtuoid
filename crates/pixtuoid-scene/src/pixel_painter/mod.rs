@@ -97,8 +97,8 @@ pub(crate) use drawable::{
     desk_art_top, desk_sprite_name, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE,
 };
 pub(crate) use palette::{
-    appliance_overrides, blend_rgb, fixture_overrides, CLOCK_FACE_KEY, DESK_BULB_KEY,
-    SCREEN_GLASS_KEY, SCREEN_TEXT_KEY,
+    appliance_overrides, fixture_overrides, CLOCK_FACE_KEY, DESK_BULB_KEY, SCREEN_GLASS_KEY,
+    SCREEN_TEXT_KEY,
 };
 
 // The ToolKind→glow-hue seam the binary's footer tints tool segments with. The

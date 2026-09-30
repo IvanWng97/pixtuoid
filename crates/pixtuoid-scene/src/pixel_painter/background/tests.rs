@@ -282,7 +282,7 @@ fn thick_cloud_hides_the_disc_uniformly() {
 #[test]
 fn disc_clips_above_the_glass_at_the_arc_apex() {
     // `top_wall_h` is CONSTANT across both renders so the only difference is the
-    // sun's altitude: at the apex `compute_disc`'s `cy` bracket goes negative
+    // sun's altitude: at the apex `Disc::of`'s `cy` bracket goes negative
     // whatever the wall height, so the apex ALWAYS clips by construction.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
@@ -617,7 +617,7 @@ fn moon_glow_dims_at_new_moon() {
 /// Mean channel value over every PAINTED window pane's glass interior. The
 /// day-over-night invariant is asserted on THIS, not on
 /// [`Look::darkness`]: the weather veils are painted onto the glass
-/// AFTER the light model produced `sky_row`, so a `darkness`-only assertion is
+/// AFTER the light model resolved the sky, so a `darkness`-only assertion is
 /// structurally blind to them.
 fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {
     let rows = window_rows(top_wall_h);
@@ -918,7 +918,7 @@ fn lightning_flash_matches_the_per_pixel_blend_reference() {
 }
 
 /// Light through a window lands across the room from the sun. The disc
-/// (`compute_disc`), the wall spot (`paint_sun_spot`) and the spill
+/// (`Disc::of`), the wall spot (`paint_sun_spot`) and the spill
 /// (`Light::Spill`) each map the one azimuth to a side on their own,
 /// so this is the only check that sees them disagree, read off the pixels each
 /// paints.
@@ -1085,5 +1085,56 @@ fn a_window_shows_the_city_strip_from_its_own_column() {
         pane(dx, 0),
         west,
         "a pane {dx} columns east shows a different stretch of city"
+    );
+}
+
+#[test]
+fn a_rain_streak_steps_down_through_the_falloff_tones() {
+    const ALPHA_BASE: f32 = 0.35;
+    let white = Rgb {
+        r: 255,
+        g: 255,
+        b: 255,
+    };
+    let black = Rgb { r: 0, g: 0, b: 0 };
+    let spec = StreakSpec {
+        count: 8,
+        seed_mult: 7,
+        sx_mult: 0x9e37_79b9,
+        speed_base: 60,
+        speed_span: 50,
+        color: white,
+        particle: Particle::Streak {
+            len_base: 6,
+            len_mod: 3,
+            alpha_base: ALPHA_BASE,
+            alpha_falloff: 0.3,
+            drift: false,
+        },
+    };
+    let tones: Vec<u8> = (1..=crate::dither::FALLOFF_TONES)
+        .map(|k| {
+            let alpha = ALPHA_BASE * f32::from(k) / f32::from(crate::dither::FALLOFF_TONES);
+            blend(0, 255, alpha)
+        })
+        .collect();
+    let mut buf = RgbBuffer::filled(20, 30, black);
+    let glass = GlassRect {
+        x0: 1,
+        y0: 1,
+        w: 18,
+        h: 28,
+    };
+    paint_streaks(&mut buf, &spec, 0, glass, 12_345);
+    let touched: Vec<u8> = buf
+        .as_slice()
+        .iter()
+        .filter(|&&p| p != black)
+        .map(|p| p.r)
+        .collect();
+    assert!(!touched.is_empty(), "the streaks painted");
+    assert!(
+        touched.iter().all(|r| tones.contains(r)),
+        "{touched:?} vs {tones:?}"
     );
 }

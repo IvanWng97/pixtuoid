@@ -1,11 +1,11 @@
 //! Paints the room's lights ([`crate::lighting`]) and the shadows, the corridor
 //! runner's texture, the neon sign's panel, and the wall clock.
 
-use crate::dither::FALLOFF_TONES;
 use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
+use crate::dither::FALLOFF_TONES;
 use crate::ground::Ellipse;
 use crate::lighting::Emitter;
 use crate::pixel_painter::palette::{blend_rgb, BLACK, WHITE};

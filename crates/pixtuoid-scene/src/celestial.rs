@@ -1,6 +1,6 @@
-//! The sun, the moon and the stars behind the windows, pixel-free: where the
-//! disc stands, and what the glass shows at a point, as a few tones resolved
-//! once a frame and picked per pixel by ordered dither.
+//! The sun, the moon and the stars behind the windows: where the disc stands,
+//! and what a pane's glass shows at a point, as a few tones resolved once a
+//! frame and picked per pixel by ordered dither.
 
 use std::time::SystemTime;
 
@@ -8,9 +8,9 @@ use pixtuoid_core::sprite::Rgb;
 
 use crate::anim::epoch_ms;
 use crate::atmosphere::Moment;
+use crate::composite::blend_rgb;
 use crate::dither::FALLOFF_TONES;
 use crate::layout::window_run;
-use crate::pixel_painter::blend_rgb;
 use crate::sky::{Body, Sky};
 use crate::theme::Theme;
 
@@ -22,21 +22,19 @@ pub(crate) struct Disc {
     pub(crate) cx: f32,
     pub(crate) cy: f32,
     pub(crate) r: f32,
-    pub(crate) vis: f32,
+    vis: f32,
     /// Illuminated fraction (0 new..1 full) — `1.0` for the sun; for the moon it
     /// drives the elliptical terminator.
-    pub(crate) lit_frac: f32,
+    lit_frac: f32,
     /// The lit limb is on the right, as a northern-hemisphere sky shows a waxing
-    /// moon; `false` puts it on the left ([`Sky::moon_waxing`]). The sun is
-    /// fully lit, so it never reads this.
-    pub(crate) lit_right: bool,
+    /// moon; `false` puts it on the left ([`Sky::moon_waxing`]).
+    lit_right: bool,
     body: Body,
 }
 
 /// What of the disc lands at a point of glass.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum DiscPart {
-    /// Its lit face.
+enum DiscPart {
     Lit,
     /// The moon's dark limb, past the terminator.
     Dark,
@@ -45,8 +43,8 @@ pub(crate) enum DiscPart {
 }
 
 const DISC_RADIUS_PX: f32 = 5.0;
-pub(crate) const GLOW_PX: f32 = 3.0;
-pub(crate) const GLOW_ALPHA: f32 = 0.55;
+const GLOW_PX: f32 = 3.0;
+const GLOW_ALPHA: f32 = 0.55;
 /// The moon's dark (un-illuminated) limb, near the night sky's own base colour
 /// so the shadowed side recedes into the backdrop instead of reading as a
 /// hard-edged bite out of the disc.
@@ -57,8 +55,8 @@ pub(crate) const MOON_SHADOW: Rgb = Rgb {
 };
 // "Real low window": the horizon sits low in the band and the apex climbs off
 // the glass entirely rather than tracking the full window height.
-const HORIZON_FRAC: f32 = 0.55; // horizon_y = top_wall_h * HORIZON_FRAC
-const ARC_RISE_FRAC: f32 = 0.80; // apex lifts top_wall_h * ARC_RISE_FRAC above horizon
+const HORIZON_FRAC: f32 = 0.55;
+const ARC_RISE_FRAC: f32 = 0.80;
 /// Below this atmo `disc` visibility, thick cloud swallows the disc entirely.
 pub(crate) const MIN_DISC_VIS: f32 = 0.08;
 
@@ -104,8 +102,7 @@ impl Disc {
         self.cx >= f32::from(x) && self.cx < f32::from(x + w)
     }
 
-    /// What of the disc lands at `(x, y)`, if any.
-    pub(crate) fn at(&self, x: f32, y: f32) -> Option<DiscPart> {
+    fn at(&self, x: f32, y: f32) -> Option<DiscPart> {
         let (dx, dy) = (x - self.cx, y - self.cy);
         let dist = (dx * dx + dy * dy).sqrt();
         if dist <= self.r {
@@ -137,13 +134,13 @@ impl Disc {
 /// Roughly 1-in-`STAR_SPARSITY` sky pixels host a star — prime so the
 /// hash-modulo grid can't line up into a visible lattice.
 const STAR_SPARSITY: u64 = 47;
-pub(crate) const STAR_COLOR: Rgb = Rgb {
+const STAR_COLOR: Rgb = Rgb {
     r: 255,
     g: 255,
     b: 255,
 };
 /// Cap on the star blend alpha — a faint glimmer, not a bright dot.
-pub(crate) const STAR_ALPHA_MAX: f32 = 0.55;
+const STAR_ALPHA_MAX: f32 = 0.55;
 /// Per-star twinkle cycle length range (ms), hashed per position so the field
 /// doesn't blink in unison.
 const STAR_TWINKLE_CYCLE_BASE_MS: u64 = 2000;
@@ -151,7 +148,7 @@ const STAR_TWINKLE_CYCLE_SPAN_MS: u64 = 3000;
 
 /// Deterministic sparse star field, hashed on the ABSOLUTE buffer `(px, py)`
 /// so it reads as one continuous sky rather than a per-window reseed.
-pub(crate) fn star_exists(px: u16, py: u16) -> bool {
+fn star_exists(px: u16, py: u16) -> bool {
     let mut h = (px as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
     h ^= (py as u64).wrapping_mul(0xc6a4_a793_5bd1_e995);
     h = (h ^ (h >> 17)).wrapping_mul(0x94d0_49bb_1331_11eb);
@@ -159,7 +156,7 @@ pub(crate) fn star_exists(px: u16, py: u16) -> bool {
 }
 
 /// Per-star twinkle: a hashed per-star cycle length, rerolled on/off each cycle.
-pub(crate) fn star_twinkle(px: u16, py: u16, now: SystemTime) -> bool {
+fn star_twinkle(px: u16, py: u16, now: SystemTime) -> bool {
     let now_ms = epoch_ms(now);
     let seed = (px as u64).wrapping_mul(131) ^ (py as u64).wrapping_mul(521);
     let cycle_ms = STAR_TWINKLE_CYCLE_BASE_MS + (seed % STAR_TWINKLE_CYCLE_SPAN_MS);
@@ -168,8 +165,7 @@ pub(crate) fn star_twinkle(px: u16, py: u16, now: SystemTime) -> bool {
     (hash % 10) < 7
 }
 
-/// The flat bands the window sky steps through from zenith to horizon, each
-/// seam between two dithered.
+/// The flat bands the window sky steps through from zenith to horizon.
 const SKY_TONES: usize = 4;
 
 /// A colour for each band of the sky, zenith first.
@@ -216,45 +212,60 @@ impl SkyView {
         }
     }
 
-    /// The disc, where one is up.
-    pub(crate) fn disc(&self) -> Option<Disc> {
-        self.disc
+    /// One pane's glass, over columns `x..x + w` and `glass_h` rows tall.
+    pub(crate) fn pane(&self, x: u16, w: u16, glass_h: u16) -> PaneSky<'_> {
+        PaneSky {
+            view: self,
+            hosts_disc: self.disc.is_some_and(|d| d.hosted_by(x, w)),
+            glass_h,
+            clear_rows: crate::skyline::clear_sky_rows(glass_h),
+        }
     }
+}
 
-    /// The colour at sample point `p` of glass whose pane shows the disc
-    /// (`hosts_disc`), dithered on grid cell `g`: `share` of the way from
-    /// zenith to horizon, where `open_sky` says a star may shine.
-    pub(crate) fn colour(
-        &self,
-        p: (f32, f32),
-        g: (u16, u16),
-        share: f32,
-        open_sky: bool,
-        hosts_disc: bool,
-    ) -> Rgb {
+/// One pane's share of a [`SkyView`]: whether it shows the disc, and how far
+/// down its glass the open sky runs, where a star may shine.
+pub(crate) struct PaneSky<'a> {
+    view: &'a SkyView,
+    hosts_disc: bool,
+    glass_h: u16,
+    clear_rows: u16,
+}
+
+impl PaneSky<'_> {
+    /// The colour `glass_dy` rows down this pane's glass, at sample point `p`,
+    /// dithered on grid cell `g`.
+    pub(crate) fn colour(&self, p: (f32, f32), g: (u16, u16), glass_dy: f32) -> Rgb {
+        let v = self.view;
+        let share = crate::atmosphere::sky_share(glass_dy, self.glass_h);
         let band = crate::dither::nearest(share * (SKY_TONES - 1) as f32, g.0, g.1);
         let i = usize::from(band).min(SKY_TONES - 1);
-        if let Some(part) = self
+        match v
             .disc
-            .filter(|_| hosts_disc)
+            .filter(|_| self.hosts_disc)
             .and_then(|d| d.at(p.0, p.1))
         {
-            return match part {
-                DiscPart::Lit => self.lit[i],
-                DiscPart::Dark => self.dark[i],
-                DiscPart::Halo(f) => {
-                    match crate::dither::nearest(f * f32::from(FALLOFF_TONES), g.0, g.1) {
-                        0 => self.sky[i],
-                        k => self.halo[i][usize::from(k.min(FALLOFF_TONES)) - 1],
-                    }
+            Some(DiscPart::Lit) => return v.lit[i],
+            Some(DiscPart::Dark) => return v.dark[i],
+            Some(DiscPart::Halo(f)) => {
+                // Flat, not seamed: at a pixel a ring, a seam's specks would
+                // be all the ring there is.
+                let k = (f * f32::from(FALLOFF_TONES)).round() as u8;
+                if k > 0 {
+                    return v.halo[i][usize::from(k.min(FALLOFF_TONES)) - 1];
                 }
-            };
+            }
+            None => {}
         }
         let (sx, sy) = (p.0 as u16, p.1 as u16);
-        if self.stars && open_sky && star_exists(sx, sy) && star_twinkle(sx, sy, self.now) {
-            return self.star[i];
+        if v.stars
+            && glass_dy < f32::from(self.clear_rows)
+            && star_exists(sx, sy)
+            && star_twinkle(sx, sy, v.now)
+        {
+            return v.star[i];
         }
-        self.sky[i]
+        v.sky[i]
     }
 }
 
@@ -270,8 +281,6 @@ mod tests {
         SkyView::of(&moment, 160, 40, theme)
     }
 
-    /// Every pixel of glass is one of the frame's resolved tones: no pixel
-    /// blends its own colour.
     #[test]
     fn the_window_sky_paints_only_its_resolved_tones() {
         for hour in [6, 12, 19, 22] {
@@ -281,30 +290,30 @@ mod tests {
                 .flatten()
                 .chain(v.halo.into_iter().flatten())
                 .collect();
+            let pane = v.pane(0, 160, 30);
             for y in 0..30u16 {
                 for x in 0..160u16 {
-                    let share = f32::from(y) / 29.0;
-                    let c = v.colour((f32::from(x), f32::from(y)), (x, y), share, true, true);
+                    let c = pane.colour((f32::from(x), f32::from(y)), (x, y), f32::from(y));
                     assert!(palette.contains(&c), "{hour}h ({x},{y}): {c:?}");
                 }
             }
         }
     }
 
-    /// The zenith and the horizon are each one flat band; the tones between
-    /// meet at dithered seams.
     #[test]
     fn the_sky_is_flat_at_its_ends() {
         let v = view(12);
-        let tile = |share: f32| -> Vec<Rgb> {
+        let glass_h = 30;
+        let pane = v.pane(0, 0, glass_h);
+        let tile = |glass_dy: u16| -> Vec<Rgb> {
             (0..crate::dither::PERIOD)
                 .flat_map(|y| (0..crate::dither::PERIOD).map(move |x| (x, y)))
-                .map(|(x, y)| v.colour((0.0, 0.0), (x, y), share, false, false))
+                .map(|(x, y)| pane.colour((0.0, 0.0), (x, y), f32::from(glass_dy)))
                 .collect()
         };
-        assert!(tile(0.0).iter().all(|&c| c == v.sky[0]), "zenith");
+        assert!(tile(0).iter().all(|&c| c == v.sky[0]), "zenith");
         assert!(
-            tile(1.0).iter().all(|&c| c == v.sky[SKY_TONES - 1]),
+            tile(glass_h - 1).iter().all(|&c| c == v.sky[SKY_TONES - 1]),
             "horizon"
         );
     }

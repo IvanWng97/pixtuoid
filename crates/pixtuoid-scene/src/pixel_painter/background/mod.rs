@@ -321,7 +321,6 @@ struct GlassView<'a> {
     city: &'a CityStrip,
     /// The column the city strip's west end stands at.
     run_x0: u16,
-    /// The sky, its disc and stars.
     sky: &'a SkyView,
 }
 
@@ -345,11 +344,10 @@ fn paint_floor_to_ceiling_window(
     let GlassView {
         city,
         run_x0,
-        sky: view,
+        sky: sky_view,
     } = view;
-    let hosts_disc = view.disc().is_some_and(|d| d.hosted_by(x, w));
     let glass_h = glass_rows(h);
-    let clear_sky = crate::skyline::clear_sky_rows(glass_h);
+    let glass = sky_view.pane(x, w, glass_h);
     let building_at = |px: u16, glass_dy: u16| city.at(px.wrapping_sub(run_x0), glass_dy);
 
     for dy in 0..h {
@@ -367,13 +365,10 @@ fn paint_floor_to_ceiling_window(
             if let Some(building) = building_at(px, glass_dy) {
                 buf.put(px, py, building);
             } else {
-                let share = crate::atmosphere::sky_share(f32::from(glass_dy), glass_h);
-                let col = view.colour(
+                let col = glass.colour(
                     (f32::from(px), f32::from(py)),
                     (px, py),
-                    share,
-                    glass_dy < clear_sky,
-                    hosts_disc,
+                    f32::from(glass_dy),
                 );
                 buf.put(px, py, col);
             }
