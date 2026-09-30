@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
@@ -397,15 +397,64 @@ pub(crate) fn cells_to_rgba(
     rgba
 }
 
+/// Where an animation's frames go.
+pub(crate) enum FrameSink {
+    Gif(GifEncoder<std::fs::File>),
+    /// Lossless PNGs for a consumer that re-encodes (gen-media's clips and their
+    /// posters): the GIF encoder NeuQuant-quantises every frame past 256 colours
+    /// (`gif::Frame::from_rgba_speed`), and a re-encode of the GIF inherits that loss.
+    /// Named `f%04d.png` from 1 — ffmpeg's image2 default, which gen-media's
+    /// encodes and poster picks read.
+    Pngs {
+        dir: PathBuf,
+        written: usize,
+    },
+}
+
+impl FrameSink {
+    /// A PNG sequence into `frames_dir` when given, else a looping GIF at `gif_path`.
+    pub(crate) fn open(gif_path: &Path, frames_dir: Option<&Path>) -> Result<Self> {
+        if let Some(dir) = frames_dir {
+            return Self::pngs(dir);
+        }
+        let mut encoder = GifEncoder::new(std::fs::File::create(gif_path)?);
+        encoder.set_repeat(Repeat::Infinite)?;
+        Ok(Self::Gif(encoder))
+    }
+
+    pub(crate) fn pngs(dir: &Path) -> Result<Self> {
+        std::fs::create_dir_all(dir)?;
+        Ok(Self::Pngs {
+            dir: dir.to_path_buf(),
+            written: 0,
+        })
+    }
+
+    /// `frame_ms` is the GIF frame delay; a PNG sequence carries no timing.
+    pub(crate) fn push(&mut self, rgba: RgbaImage, frame_ms: u64) -> Result<()> {
+        match self {
+            Self::Gif(encoder) => {
+                let delay = Delay::from_numer_denom_ms(frame_ms as u32, 1);
+                encoder.encode_frame(GifFrame::from_parts(rgba, 0, 0, delay))?;
+            }
+            Self::Pngs { dir, written } => {
+                *written += 1;
+                rgba.save(dir.join(format!("f{written:04}.png")))?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Drive the real TuiRenderer (slide transition, footer floor chip, pet motion) frame by
 /// frame and encode its TestBackend cell buffer.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn save_renderer_gif(
+pub(crate) fn save_renderer_animation(
     term: Terminal<TestBackend>,
     scene: &SceneState,
     pack: &pixtuoid_core::sprite::format::Pack,
     start_now: SystemTime,
-    path: &PathBuf,
+    mut sink: FrameSink,
     cols: u16,
     rows: u16,
     fps: u64,
@@ -419,10 +468,6 @@ pub(crate) fn save_renderer_gif(
     let img_w = cols as u32 * CELL_W;
     let img_h = rows as u32 * CELL_H;
 
-    let file = std::fs::File::create(path)?;
-    let mut encoder = GifEncoder::new(file);
-    encoder.set_repeat(Repeat::Infinite)?;
-
     let mut r = pixtuoid::tui::tui_renderer::TuiRenderer::new(term, theme, pets);
     let mut fired = vec![false; navigations.len()];
     for i in 0..frame_count {
@@ -435,8 +480,7 @@ pub(crate) fn save_renderer_gif(
         }
         r.render(scene, pack, now)?;
         let rgba = cells_to_rgba(r.terminal.backend().buffer(), cols, rows, img_w, img_h);
-        let delay = Delay::from_numer_denom_ms(frame_ms as u32, 1);
-        encoder.encode_frame(GifFrame::from_parts(rgba, 0, 0, delay))?;
+        sink.push(rgba, frame_ms)?;
         let cap = i + 1;
         if cap.is_multiple_of(fps as usize) {
             eprint!("\r  encoding: {}/{}s", cap / fps as usize, duration_secs);
@@ -447,12 +491,12 @@ pub(crate) fn save_renderer_gif(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn save_as_gif(
+pub(crate) fn save_animation(
     term: &mut Terminal<TestBackend>,
     scene: &SceneState,
     pack: &pixtuoid_core::sprite::format::Pack,
     start_now: SystemTime,
-    path: &PathBuf,
+    mut sink: FrameSink,
     cols: u16,
     rows: u16,
     buf: &mut RgbBuffer,
@@ -472,10 +516,6 @@ pub(crate) fn save_as_gif(
     let skip_frames = (skip_ms / frame_ms.max(1)) as usize;
     let img_w = cols as u32 * CELL_W;
     let img_h = rows as u32 * CELL_H;
-
-    let file = std::fs::File::create(path)?;
-    let mut encoder = GifEncoder::new(file);
-    encoder.set_repeat(Repeat::Infinite)?;
 
     let mut chitchat_state = std::collections::HashMap::new();
     for i in 0..(skip_frames + frame_count) {
@@ -531,9 +571,7 @@ pub(crate) fn save_as_gif(
         }
 
         let rgba = cells_to_rgba(term.backend().buffer(), cols, rows, img_w, img_h);
-        let delay = Delay::from_numer_denom_ms(frame_ms as u32, 1);
-        let frame = GifFrame::from_parts(rgba, 0, 0, delay);
-        encoder.encode_frame(frame)?;
+        sink.push(rgba, frame_ms)?;
         let cap = i + 1 - skip_frames;
         if cap.is_multiple_of(fps as usize) {
             eprint!("\r  encoding: {}/{}s", cap / fps as usize, duration_secs);

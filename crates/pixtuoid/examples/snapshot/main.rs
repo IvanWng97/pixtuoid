@@ -19,8 +19,8 @@ use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
 use crate::encode::{
-    centered_crop, compute_crop_rect, debug_paint_walkable_overlay, save_as_gif,
-    save_backend_as_png, save_renderer_gif,
+    centered_crop, compute_crop_rect, debug_paint_walkable_overlay, save_animation,
+    save_backend_as_png, save_renderer_animation, FrameSink,
 };
 use crate::scenes::{
     anim_scene, capture_live_scene, dashboard_scene, inject_openclaw_presence, meeting_scene,
@@ -34,6 +34,7 @@ const CELL_H: u32 = 16;
 
 #[derive(Debug, Parser)]
 #[command(about = "Render the TUI off-screen to a PNG for verification")]
+#[command(group(clap::ArgGroup::new("animation").args(["gif", "anim", "proof"]).multiple(true)))]
 struct SnapshotArgs {
     /// Output PNG path.
     #[arg(default_value = "snapshot.png")]
@@ -269,8 +270,10 @@ struct SnapshotArgs {
           "crop_agent", "crop_furniture", "crop_mascot", "debug_walkable"])]
     proof: Option<std::path::PathBuf>,
 
-    /// Output directory for --proof frame sequences (wide/ + tall/ created inside).
-    #[arg(long, value_hint = clap::ValueHint::DirPath, requires = "proof")]
+    /// Output directory for an animation's lossless PNG frames (`f0001.png`, …):
+    /// --gif/--anim write them here INSTEAD of the GIF at OUT; --proof writes its
+    /// two sequences into wide/ + tall/ inside it.
+    #[arg(long, value_hint = clap::ValueHint::DirPath, requires = "animation")]
     frames_dir: Option<std::path::PathBuf>,
 
     /// --proof frame rate.
@@ -470,13 +473,14 @@ fn main() -> Result<()> {
              TuiRenderer derives per-floor seeds internally"
         );
     }
+    let anim_dest = args.frames_dir.as_deref().unwrap_or(&args.out);
     if !navigations.is_empty() || !pet_vec.is_empty() {
-        save_renderer_gif(
+        save_renderer_animation(
             term,
             &scene,
             &pack,
             now,
-            &args.out,
+            FrameSink::open(&args.out, args.frames_dir.as_deref())?,
             cols,
             rows,
             args.gif_fps,
@@ -485,17 +489,17 @@ fn main() -> Result<()> {
             &navigations,
             pet_vec,
         )?;
-        println!("wrote {}", args.out.display());
+        println!("wrote {}", anim_dest.display());
         return Ok(());
     }
 
     if args.gif || args.anim.is_some() {
-        save_as_gif(
+        save_animation(
             &mut term,
             &scene,
             &pack,
             now,
-            &args.out,
+            FrameSink::open(&args.out, args.frames_dir.as_deref())?,
             cols,
             rows,
             &mut buf,
@@ -507,7 +511,7 @@ fn main() -> Result<()> {
             skip_ms,
             args.debug_walkable,
         )?;
-        println!("wrote {}", args.out.display());
+        println!("wrote {}", anim_dest.display());
         return Ok(());
     }
 
@@ -971,6 +975,21 @@ mod tests {
             "sofa"
         ])
         .is_err());
+    }
+
+    #[test]
+    fn frames_dir_needs_an_animation() {
+        for ok in [
+            vec!["snapshot", "--gif", "--frames-dir", "d"],
+            vec!["snapshot", "--anim", "sofa", "--frames-dir", "d"],
+            vec!["snapshot", "--proof", "f.jsonl", "--frames-dir", "d"],
+        ] {
+            assert!(
+                SnapshotArgs::try_parse_from(ok.clone()).is_ok(),
+                "rejected {ok:?}"
+            );
+        }
+        assert!(SnapshotArgs::try_parse_from(["snapshot", "--frames-dir", "d"]).is_err());
     }
 
     #[test]

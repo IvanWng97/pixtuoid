@@ -62,7 +62,9 @@ def expand_ref(ref):
 
 
 def snap(out_path, *, cols, rows, hour, day=None, theme=None, weather=None,
-         extra=(), gif=None):
+         extra=(), gif=None, frames_dir=None):
+    """`frames_dir` (with `gif`) writes the animation as lossless `f%04d.png`
+    frames there instead of the GIF at `out_path`."""
     cmd = [str(SNAP), "--cols", str(cols), "--rows", str(rows), "--now-hour", str(hour)]
     if day is not None:
         cmd += ["--now-day", str(day)]
@@ -73,7 +75,7 @@ def snap(out_path, *, cols, rows, hour, day=None, theme=None, weather=None,
     if gif is not None:
         cmd += ["--gif", "--gif-duration", str(gif["duration"]), "--gif-fps", str(gif["fps"])]
     cmd += list(extra)
-    cmd += [str(out_path)]
+    cmd += ["--frames-dir", str(frames_dir)] if frames_dir is not None else [str(out_path)]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
 
 
@@ -182,8 +184,9 @@ def run_matrix(job, out_dirs, work, intermediates):
                  hour=job["hour"], **kwargs)
 
 
-# H.264 and VP9 both require even width/height.
-SCALE_EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+# H.264 and VP9 both require even width/height. `neighbor`: the pixel-art rule
+# (no smoothing), where swscale's default is bicubic.
+SCALE_EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=neighbor"
 # VP9 constant-quality knob (with `-b:v 0`, no target bitrate).
 VP9_CRF = "36"
 # Without it the muxers stamp every file with ffmpeg's version (MP4's `©too`
@@ -205,12 +208,21 @@ def encode_mp4_webm(frames_glob, fps, vf, out_stem):
            f"{out_stem}.webm")
 
 
+def poster_frame(frames_dir, job):
+    """The `f%04d.png` frame `job["poster"]` seconds in, else the first: a staged
+    clip whose opening seconds are pre-action posters on the money shot."""
+    return frames_dir / f"f{int(job.get('poster', 0) * job['fps']) + 1:04d}.png"
+
+
 def run_clip(job, out_dirs, work, intermediates):
-    gif = work / f"{job['id']}.gif"
-    snap(gif, cols=job["cols"], rows=job["rows"], hour=job["hour"],
-         extra=job.get("extra", ()), gif={"duration": job["duration"], "fps": job["fps"]})
     fps = job["fps"]
     cid = job["id"]
+    # The snapshot's own lossless frames, never its GIF: the GIF encoder quantises
+    # each frame to a 256-colour palette, and the clips + poster would inherit that.
+    frames = work / f"frames-{cid}"
+    snap(None, cols=job["cols"], rows=job["rows"], hour=job["hour"],
+         extra=job.get("extra", ()), gif={"duration": job["duration"], "fps": fps},
+         frames_dir=frames)
     # Optional `crop` (ffmpeg "W:H:X:Y", in the unscaled render's px space) frames
     # a close-up on a fixed region. NB: this singular clip-level `crop` is
     # unrelated to the separate kind:"crop" job (run_crop), which reads a plural
@@ -219,17 +231,8 @@ def run_clip(job, out_dirs, work, intermediates):
     vf = f"crop={crop},{SCALE_EVEN}" if crop else SCALE_EVEN
     poster_vf = ["-vf", f"crop={crop}"] if crop else []
     for d in out_dirs:
-        frames = work / f"frames-{cid}"
-        frames.mkdir(exist_ok=True)
-        # re-encode from frames so it's a true loop at `fps` (the GIF's own frame
-        # delays otherwise confuse ffmpeg into a fast clip).
-        ffmpeg("-i", str(gif), str(frames / "f%04d.png"))
         encode_mp4_webm(str(frames / "f%04d.png"), fps, vf, str(d / cid))
-        # `poster` (seconds into the clip) lets a staged clip whose opening
-        # seconds are pre-action poster on the money shot instead of frame 0.
-        poster_seek = ["-ss", str(job["poster"])] if "poster" in job else []
-        ffmpeg(*poster_seek, "-i", str(gif), *poster_vf, "-vframes", "1",
-               str(d / f"{cid}-poster.png"))
+        ffmpeg("-i", str(poster_frame(frames, job)), *poster_vf, str(d / f"{cid}-poster.png"))
 
 
 def run_wasm_still(job, out_dirs, work, intermediates):
@@ -271,7 +274,6 @@ def run_proof(job, out_dirs, work, intermediates):
     # same fixture-driven reducer replay; the poster is a designated frame COPY,
     # so it stays pixel-gated while the encodes stay presence-only.
     fps = job["fps"]
-    poster_idx = int(job["poster"] * fps) + 1
     # In --check only the poster frame matters: rendering a deterministic PREFIX
     # of the timeline (through the poster frame) yields the identical poster.
     secs = int(job["poster"]) + 2 if CHECK_MODE else job["duration"]
@@ -287,7 +289,7 @@ def run_proof(job, out_dirs, work, intermediates):
     for layout, suffix in (("wide", ""), ("tall", "-tall")):
         ldir = frames / layout
         for d in out_dirs:
-            shutil.copyfile(ldir / f"f{poster_idx:04d}.png",
+            shutil.copyfile(poster_frame(ldir, job),
                             d / f"{job['id']}{suffix}-poster.png")
             if CHECK_MODE:
                 continue
