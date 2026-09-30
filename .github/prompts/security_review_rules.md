@@ -17,7 +17,7 @@ no security-relevant changes.
 Otherwise review the exact diff and the surrounding trusted-base code for:
 
 1. Hook shim safety: it must always exit zero, never block the agent CLI, and
-   keep the 200 ms send bound.
+   keep the send bound (`pixtuoid-hook`'s `transport::WRITE_TIMEOUT`).
 2. Config writes: they must use the existing lock, atomic-write, permission, and
    symlink-resolution authority.
 3. Unix socket and Windows named-pipe handling: no path traversal, symlink
