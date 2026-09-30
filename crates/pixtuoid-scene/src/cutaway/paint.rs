@@ -827,57 +827,36 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
 
 /// Step the floor darker under `shadows`, toward each one's centre: its falloff
 /// at `strength`, rounded to whole ramp stops by
-/// [`nearest`](crate::dither::nearest) on the art grid. A shadow is the ground it falls on, darker, never a colour of its own, and where
-/// two overlap the deeper one wins rather than the two compounding.
+/// [`nearest`](crate::dither::nearest) on the art grid, over their
+/// [`Depths`](crate::ground::Depths). A shadow is the ground it falls on,
+/// darker, never a colour of its own.
 fn paint_ground_shadows(
     shadows: impl Iterator<Item = crate::ground::Contact> + Clone,
     strength: f32,
     pen: Pen,
     buf: &mut RgbBuffer,
 ) {
-    // One level per art pixel over the shadows' joint bounds, row-major.
-    let Some(((x0, y0), (x1, y1))) = shadows.clone().map(|c| c.bounds()).reduce(|a, b| {
-        (
-            (a.0.0.min(b.0.0), a.0.1.min(b.0.1)),
-            (a.1.0.max(b.1.0), a.1.1.max(b.1.1)),
-        )
-    }) else {
+    let Some(depths) = crate::ground::Depths::of(shadows, pen.art(1).0) else {
         return;
     };
-    let (ax0, ay0) = (pen.art(x0).0, pen.art(y0).0);
-    let w = usize::from(pen.art(x1).0 - ax0);
-    let h = usize::from(pen.art(y1).0 - ay0);
-    let mut depth = vec![0u8; w * h];
-    let d = f32::from(pen.art(1).0);
-    let at = |a: u16| (f32::from(a) + 0.5) / d;
-    for c in shadows {
-        let ((cx0, cy0), (cx1, cy1)) = c.bounds();
-        for ay in pen.art(cy0).0..pen.art(cy1).0 {
-            for ax in pen.art(cx0).0..pen.art(cx1).0 {
-                let Some(f) = c.falloff(at(ax), at(ay)) else {
-                    continue;
-                };
-                let stops = f * strength * SHADOW_STOPS_PER_STRENGTH;
-                let level = crate::dither::nearest(stops, ax, ay);
-                let slot = &mut depth[usize::from(ay - ay0) * w + usize::from(ax - ax0)];
-                *slot = (*slot).max(level);
-            }
-        }
-    }
     let mut stepped: Vec<crate::cutaway::pen::Stepped> = Vec::new();
-    for (i, &level) in depth.iter().enumerate().filter(|&(_, &l)| l > 0) {
-        while stepped.len() < level as usize {
+    for (ax, ay, depth) in depths.cells() {
+        let level = crate::dither::nearest(depth * strength * SHADOW_STOPS_PER_STRENGTH, ax, ay);
+        if level == 0 {
+            continue;
+        }
+        while stepped.len() < usize::from(level) {
             stepped.push(crate::cutaway::pen::Stepped::new(
                 -(stepped.len() as i8 + 1),
             ));
         }
         let r = ArtRect {
-            x: ArtPx(ax0 + (i % w) as u16),
-            y: ArtPx(ay0 + (i / w) as u16),
+            x: ArtPx(ax),
+            y: ArtPx(ay),
             w: ArtPx(1),
             h: ArtPx(1),
         };
-        let memo = &mut stepped[level as usize - 1];
+        let memo = &mut stepped[usize::from(level) - 1];
         pen.recolour(buf, r, |_, _, under| memo.of(under));
     }
 }
@@ -1522,7 +1501,17 @@ fn face_rows(pack: &Pack, art: &str, scale: RenderScale) -> u16 {
 /// The deepest a noon shadow steps the floor.
 #[cfg(test)]
 fn deepest_shadow_stop() -> i8 {
-    (crate::ground::shadow_strength(NOON_DARKNESS) * SHADOW_STOPS_PER_STRENGTH).round() as i8
+    let stops = crate::ground::shadow_strength(NOON_DARKNESS) * SHADOW_STOPS_PER_STRENGTH;
+    let phases = 0..crate::dither::PERIOD;
+    phases
+        .clone()
+        .flat_map(|y| {
+            phases
+                .clone()
+                .map(move |x| crate::dither::nearest(stops, x, y))
+        })
+        .max()
+        .map_or(0, |deepest| deepest as i8)
 }
 
 /// A clear noon's darkness, the hour the shadow tests pin.
@@ -3363,14 +3352,17 @@ mod tests {
         for n in 1..=1200u64 {
             let frame = session
                 .observe(
-                    &scene,
-                    &pack,
+                    crate::floor::FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now: now0 + Duration::from_millis(100 * n),
+                        floor: meta,
+                        pets: crate::floor::PetInputs::default(),
+                    },
                     crate::layout::Size {
                         w: LOGICAL.0,
                         h: LOGICAL.1,
                     },
-                    meta,
-                    now0 + Duration::from_millis(100 * n),
                 )
                 .expect("lays out")
                 .frame;
@@ -4462,11 +4454,14 @@ S B B B B B B S
         for (w, h) in [(240u16, 144u16), (100, 60)] {
             let observed = FloorSession::new()
                 .observe(
-                    &pixtuoid_core::SceneState::uniform(16),
-                    &pack,
+                    crate::floor::FloorInputs {
+                        scene: &pixtuoid_core::SceneState::uniform(16),
+                        pack: &pack,
+                        now: std::time::SystemTime::UNIX_EPOCH,
+                        floor: FloorMeta::ground(),
+                        pets: crate::floor::PetInputs::default(),
+                    },
                     crate::layout::Size { w, h },
-                    FloorMeta::ground(),
-                    std::time::SystemTime::UNIX_EPOCH,
                 )
                 .expect("lays out");
             check(&pack, &observed.frame, &observed.layout, false);
@@ -6337,6 +6332,31 @@ S B B B B B B S
         );
     }
 
+    /// The cutaway grounds exactly the fixtures the roster says stand
+    /// ([`Fixture::contact`](crate::layout::Fixture::contact)): the two
+    /// painters cast from one answer.
+    #[test]
+    fn the_cutaway_grounds_what_the_roster_says_stands() {
+        let pack = pack();
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        for layout in many_layouts() {
+            for fixture in layout.fixtures() {
+                let grounded = covering(fixture.kind).is_none()
+                    && queued(&layout, &pack, scale, &[], |k| k == fixture.kind)
+                        .iter()
+                        .any(|(span, kind)| ground_shadow(*span, kind, &pack).is_some());
+                assert_eq!(
+                    grounded,
+                    fixture.contact().is_some(),
+                    "{:?} on {}x{}",
+                    fixture.kind,
+                    layout.buf_w,
+                    layout.buf_h
+                );
+            }
+        }
+    }
+
     /// Layouts across the sizes and seeds that place every kind of piece this
     /// module draws: pods with booths and desks, meeting rooms, a pantry.
     fn many_layouts() -> impl Iterator<Item = Layout> {
@@ -6745,11 +6765,14 @@ S B B B B B B S
         let seated = frames.last().expect("a seated frame");
         let office = FloorSession::new()
             .observe(
-                &pixtuoid_core::SceneState::uniform(16),
-                &pack,
+                crate::floor::FloorInputs {
+                    scene: &pixtuoid_core::SceneState::uniform(16),
+                    pack: &pack,
+                    now: std::time::SystemTime::UNIX_EPOCH,
+                    floor: FloorMeta::ground(),
+                    pets: crate::floor::PetInputs::default(),
+                },
                 crate::layout::Size { w: 240, h: 144 },
-                FloorMeta::ground(),
-                std::time::SystemTime::UNIX_EPOCH,
             )
             .expect("lays out");
         assert!(

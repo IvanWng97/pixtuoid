@@ -165,8 +165,8 @@ impl LightView {
                 };
                 let stops = level * LIFT_STOPS_PER_LEVEL;
                 solid |= stops >= 1.0;
-                // Floored, not rounded: a lamp never lifts past its level, and
-                // the lift constants and the `solid` test are tuned in whole steps.
+                // Floored, not rounded: the lift constants and the `solid` test
+                // are tuned in whole steps.
                 crate::dither::step(stops, ax, ay).min(ambient.ceiling())
             })
             .collect();

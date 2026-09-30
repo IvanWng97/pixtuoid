@@ -385,6 +385,30 @@ fn a_tie_maps_to_a_layer_in_the_same_order() {
     }
 }
 
+/// A standing fixture's shadow is centred under its whole art box, on the row
+/// under it: a desk's side cabinets included, not just its surface (#906).
+#[test]
+fn a_standing_fixture_casts_its_shadow_under_its_whole_box() {
+    let mut desks = 0;
+    for l in offices() {
+        for f in l.fixtures() {
+            let Some(c) = f.contact() else {
+                continue;
+            };
+            assert_ne!(f.depth, Depth::Backdrop, "{:?} lies flat", f.kind);
+            let v = f.visual;
+            let ((x0, _), (x1, y1)) = c.bounds();
+            // Against the west wall, its west reach clips at column 0.
+            if v.x >= crate::ground::CONTACT_REACH {
+                assert_eq!(x1 - (v.x + v.width), v.x - x0, "{:?} is centred", f.kind);
+            }
+            assert!(y1 > v.y + v.height, "{:?} falls south", f.kind);
+            desks += usize::from(matches!(f.kind, FixtureKind::Desk(_)));
+        }
+    }
+    assert!(desks > 0, "the sweep saw a desk");
+}
+
 /// The sizes the north-wall census rendered, each at a few seeds.
 fn north_wall_census() -> impl Iterator<Item = SceneLayout> {
     [

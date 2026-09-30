@@ -16,7 +16,7 @@ pub(crate) use lighting::{
 };
 pub(super) use lighting::{
     NeonLook, RadialFalloff, paint_clock, paint_corridor_runner, paint_light, paint_neon_panel,
-    paint_radial_falloff, paint_shadow,
+    paint_radial_falloff, paint_shadows,
 };
 
 use pixtuoid_core::sprite::format::Pack;

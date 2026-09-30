@@ -302,6 +302,8 @@ pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 /// side cabinets included) and the overhang rides the aisle, so every band-EDGE
 /// clamp reads `DESK_GROUND_W`, not `DESK_W` (the #549 2px-overflow drift).
 pub const DESK_W: u16 = 10;
+/// Glass columns offset from the desk sprite's left edge.
+pub(crate) const SCREEN_GLASS_COLS: std::ops::RangeInclusive<u16> = 4..=9;
 /// Rows of desk SURFACE below `desk.y`; both desk sprites are cut to it.
 pub(crate) const DESK_SURFACE_ROWS: u16 = 5;
 pub(crate) const DESK_FRONT_ROWS: u16 = 1;
