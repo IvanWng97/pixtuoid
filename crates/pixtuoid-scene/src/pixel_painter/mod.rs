@@ -19,9 +19,7 @@ use crate::chitchat::{ActiveChitchat, ChitchatBubble};
 #[cfg(test)]
 use crate::floor::LightingState;
 use crate::frame_cache::FrameCache;
-use crate::layout::{
-    Anchor, Depth, Facing, FixtureKind, Layout, Point, Size, Station, WaypointKind, z_sort_row,
-};
+use crate::layout::{Anchor, Depth, Facing, FixtureKind, Layout, Point, Size, Station, z_sort_row};
 use crate::motion::MotionState;
 use crate::pet::PetFrame;
 
@@ -174,11 +172,9 @@ pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
 }
 
 use crate::atmosphere::Moment;
-use crate::ground::Ellipse;
 use crate::lighting::{DeskLights, LightInputs, Lights};
-use background::{paint_floor_and_walls, paint_floor_wash, paint_light, paint_shadow};
+use background::{paint_floor_and_walls, paint_floor_wash, paint_light, paint_shadows};
 use drawable::{Drawable, DrawableKind, Layer, paint_drawable};
-pub(crate) use effects::SCREEN_GLASS_COLS;
 use palette::{agent_overrides, outfit_seed_for};
 use seat::paint_character_at;
 use wall::enqueue_room_walls;
@@ -293,21 +289,14 @@ impl PaintCtx<'_> {
 /// Render `ctx`'s scene into its buffer — the shared world render; the paint
 /// half borrows only `PaintCtx`.
 pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
+    let door_anim_max_ms = ctx.store.door_anim_max_ms;
     let frame = sim_step(
-        &mut SimStores {
-            router: &mut ctx.store.router,
-            overlay: &mut ctx.store.overlay,
-            history: &mut ctx.store.history,
-            motion: &mut ctx.store.motion,
-            light: &mut ctx.store.light,
-            neon: &mut ctx.store.neon,
-            chitchat: &mut *ctx.chitchat_state,
-        },
+        &mut ctx.store.sim_stores(ctx.chitchat_state),
         SimInputs {
             world: ctx.world,
             layout: ctx.layout,
             coffee: ctx.coffee,
-            door_anim_max_ms: ctx.store.door_anim_max_ms,
+            door_anim_max_ms,
         },
     );
     let (pet_pos, mascots) = paint_frame(
@@ -333,148 +322,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         chitchat_bubbles: frame.chitchat_bubbles,
         new_coffee_carriers: frame.new_coffee_carriers,
         occupied_waypoints: frame.occupied_waypoints,
-    }
-}
-
-/// The floor shadow under one home desk. `cy` is the row the roster sorts
-/// the desk at, off the same furniture row, so a `DESK_H` retune moves the
-/// shadow WITH the sprite's south base. `half_h` is a taste literal.
-fn desk_shadow_ellipse(desk: Point) -> Ellipse {
-    // Every axis off the ONE furniture row, so the shadow cannot drift from the
-    // desk it falls under: `DESK_W` is the surface, not the piece — the side
-    // cabinets make the painted (and ground-contacting) width `visual.w`.
-    let v = crate::layout::desk_furniture_def().visual;
-    Ellipse {
-        cx: desk.x + v.w / 2,
-        cy: desk.y + v.h,
-        half_w: v.w / 2 - 1,
-        half_h: 3,
-    }
-}
-
-/// The classic painter's floor shadows, handed to `shadow` in roster
-/// order, which is their PAINT ORDER — the overlaps blend, so the order is
-/// load-bearing (a meeting sofa's seat shadows overlap each other). The
-/// per-piece `half_w`/`half_h` are owner-tuned taste literals.
-fn floor_shadow_ellipses(layout: &Layout, mut shadow: impl FnMut(Ellipse)) {
-    use crate::layout::{Furniture, furniture_def};
-
-    // Fit the ellipse to the sprite width — a flat 7 half-width doubles a
-    // narrow shelf's shadow; `.min(7)` caps a future wide piece.
-    let fitted = |pos: Point, kind: WaypointKind| {
-        let vis_w = furniture_def(kind.furniture()).visual.w;
-        let half_w = if vis_w > 0 {
-            (vis_w / 2 + crate::ground::CONTACT_REACH).min(7)
-        } else {
-            7
-        };
-        Ellipse {
-            cx: pos.x,
-            cy: pos.y + 2,
-            half_w,
-            half_h: 2,
-        }
-    };
-    for f in layout.fixtures() {
-        match f.kind {
-            FixtureKind::Desk(_) => shadow(desk_shadow_ellipse(Point {
-                x: f.visual.x,
-                y: f.visual.y,
-            })),
-            FixtureKind::Station { waypoint, station } => {
-                let wp = &layout.waypoints[waypoint];
-                shadow(match station {
-                    // It souths at +1, not the fitted +2.
-                    Station::Printer => Ellipse {
-                        cx: wp.pos.x,
-                        cy: wp.pos.y + 1,
-                        half_w: 5,
-                        half_h: 1,
-                    },
-                    Station::PantryCounter | Station::VendingMachine | Station::SnackShelf => {
-                        fitted(wp.pos, wp.kind)
-                    }
-                });
-            }
-            FixtureKind::Pod { kind, .. } => {
-                if let Some(wp) = kind.waypoint() {
-                    shadow(fitted(f.at, wp));
-                }
-            }
-            // One under each of its seats.
-            FixtureKind::MeetingSofa {
-                room, faces_away, ..
-            } => layout
-                .waypoints
-                .iter()
-                .filter(|w| {
-                    w.kind == WaypointKind::MeetingSofa
-                        && w.room_id == Some(room)
-                        && (w.facing == Facing::North) == faces_away
-                })
-                .for_each(|w| shadow(fitted(w.pos, w.kind))),
-            FixtureKind::MeetingChair { .. } => {
-                shadow(fitted(f.at, WaypointKind::MeetingChair));
-            }
-            // Under the body: its seats' stands are empty floor beside it.
-            FixtureKind::KitchenIsland => {
-                let vis = furniture_def(Furniture::KitchenIsland).visual;
-                shadow(Ellipse {
-                    cx: f.at.x,
-                    cy: z_sort_row(Anchor::Center, f.at, vis.h),
-                    half_w: vis.w / 2 + crate::ground::CONTACT_REACH,
-                    half_h: 2,
-                });
-            }
-            // One for the whole couch: a per-seat shadow would overlap-darken.
-            FixtureKind::LoungeCouch => shadow(Ellipse {
-                cx: f.at.x,
-                cy: f.at.y + 2,
-                half_w: 7,
-                half_h: 2,
-            }),
-            // Off the same height the z-anchor uses: a fixed +3 only suited the
-            // taller plants and floated the rest.
-            FixtureKind::Plant { kind, .. } => shadow(Ellipse {
-                cx: f.at.x,
-                cy: z_sort_row(
-                    Anchor::Center,
-                    f.at,
-                    furniture_def(kind.furniture()).visual.h,
-                ),
-                half_w: 3,
-                half_h: 1,
-            }),
-            FixtureKind::FloorLamp => {
-                if let Some(base) = layout.floor_lamp_base() {
-                    shadow(Ellipse {
-                        cx: base.x,
-                        cy: base.y,
-                        half_w: 2,
-                        half_h: 1,
-                    });
-                }
-            }
-            FixtureKind::FilingCabinet(_)
-            | FixtureKind::DeskChair(_)
-            | FixtureKind::Wall { .. }
-            | FixtureKind::MeetingRug { .. }
-            | FixtureKind::MeetingTable { .. }
-            | FixtureKind::CoatRack { .. }
-            | FixtureKind::Doormat { .. }
-            | FixtureKind::NoticeBoard { .. }
-            | FixtureKind::LoungeRug
-            | FixtureKind::SideTable
-            | FixtureKind::FishTank
-            | FixtureKind::PantryMat
-            | FixtureKind::IslandMat
-            | FixtureKind::WaterCooler
-            | FixtureKind::TrashBin
-            | FixtureKind::Door
-            | FixtureKind::Runner
-            | FixtureKind::NeonSign
-            | FixtureKind::Clock => {}
-        }
     }
 }
 
@@ -542,9 +389,10 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     wash_since(ctx.buf, &pre_floor_fixtures, look.object_wash);
 
     let shadow_strength = crate::ground::shadow_strength(look.darkness);
-    floor_shadow_ellipses(ctx.layout, |ell| {
-        paint_shadow(ctx.buf, ell, shadow_strength, ctx.theme);
-    });
+    let contacts: Vec<_> = ctx.layout.fixtures().filter_map(|f| f.contact()).collect();
+    if let Some(depths) = crate::ground::Depths::of(contacts.into_iter(), 1) {
+        paint_shadows(ctx.buf, &depths, shadow_strength, ctx.theme.office.shadow);
+    }
 
     ambient::paint_ambient(ctx, look, &lights.monitor_halos);
 
@@ -558,8 +406,8 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     drawable::sort_drawables(&mut drawables);
     // A per-pixel diff finds EXACTLY what the foreground wrote; a rectangular
     // band seamed the window glass and washed floor-between-pieces twice.
-    // AFTER `paint_shadow`/`paint_ambient`: both already take `look`, so folding
-    // them in here would apply the hour twice.
+    // AFTER `paint_shadows`/`paint_ambient`: both already carry the hour, so
+    // folding them in here would apply it twice.
     let pre_foreground = ctx.buf.clone();
     for d in &drawables {
         paint_drawable(&d.kind, &mut ctx.drawable_ctx());
