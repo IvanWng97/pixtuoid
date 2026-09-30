@@ -2,11 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use crate::AgentId;
 use crate::source::decoder::label_prefix_for;
 use crate::source::{AgentEvent, Transport};
-use crate::state::correlation::{elapsed_at_least, elapsed_past, Correlation, ToolEventKind};
-use crate::state::{fsm, scope, ActivityState, AgentSlot, SceneState, ToolKind};
-use crate::AgentId;
+use crate::state::correlation::{Correlation, ToolEventKind, elapsed_at_least, elapsed_past};
+use crate::state::{ActivityState, AgentSlot, SceneState, ToolKind, fsm, scope};
 
 #[doc(hidden)]
 pub use crate::state::correlation::{

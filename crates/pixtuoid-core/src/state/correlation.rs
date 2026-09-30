@@ -412,9 +412,10 @@ mod tests {
             .insert((young, "t2".into()), (t0() + step, ToolEventKind::End));
         corr.gc(t0() + HOOK_WINS_WINDOW);
         assert!(!corr.recent_hook_tool_uses.contains_key(&(old, "t1".into())));
-        assert!(corr
-            .recent_hook_tool_uses
-            .contains_key(&(young, "t2".into())));
+        assert!(
+            corr.recent_hook_tool_uses
+                .contains_key(&(young, "t2".into()))
+        );
 
         let mut corr = Correlation::default();
         corr.recent_hook_session_ends.insert(old, t0());

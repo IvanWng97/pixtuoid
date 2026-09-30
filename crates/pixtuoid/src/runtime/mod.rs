@@ -12,9 +12,9 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use pixtuoid_core::SceneState;
 use pixtuoid_core::source::manager::SourceDeath;
 use pixtuoid_core::state::{ActivityState, DaemonState, MAX_FLOORS};
-use pixtuoid_core::SceneState;
 use tokio::sync::watch;
 
 /// The reducer publishes a fresh `Arc<SceneState>` on every mutation through this watch
@@ -94,11 +94,7 @@ pub(crate) fn boot_capacities_for(cols: u16, rows: u16) -> [usize; MAX_FLOORS] {
         // (over-seeded atomics strand agents on unrendered desks).
         let seed = pixtuoid_scene::floor::floor_seed(i);
         let cap = capacity_for_terminal(cols, rows, seed);
-        if cap == 0 {
-            FALLBACK_DESKS
-        } else {
-            cap
-        }
+        if cap == 0 { FALLBACK_DESKS } else { cap }
     })
 }
 
@@ -355,11 +351,7 @@ mod tests {
         let caps = boot_capacities_for(192, 48);
         let expected: [usize; MAX_FLOORS] = std::array::from_fn(|i| {
             let c = capacity_for_terminal(192, 48, floor_seed(i));
-            if c == 0 {
-                FALLBACK_DESKS
-            } else {
-                c
-            }
+            if c == 0 { FALLBACK_DESKS } else { c }
         });
         assert_eq!(caps, expected);
     }
@@ -372,8 +364,8 @@ mod tests {
 
     #[test]
     fn summarize_reports_each_activity_state() {
-        use pixtuoid_core::source::AgentEvent;
         use pixtuoid_core::AgentId;
+        use pixtuoid_core::source::AgentEvent;
 
         let mut scene = SceneState::new([8; MAX_FLOORS]);
         let mut reducer = Reducer::new();
@@ -434,7 +426,7 @@ mod tests {
     #[test]
     fn summarize_reports_daemon_presence() {
         use pixtuoid_core::source::daemon::{
-            apply_presence, DaemonInstanceKey, DaemonPresenceUpdate,
+            DaemonInstanceKey, DaemonPresenceUpdate, apply_presence,
         };
         use pixtuoid_core::state::DaemonInstanceId;
 
@@ -502,8 +494,8 @@ mod tests {
 
     #[test]
     fn summarize_strips_terminal_escapes_from_untrusted_fields() {
-        use pixtuoid_core::source::AgentEvent;
         use pixtuoid_core::AgentId;
+        use pixtuoid_core::source::AgentEvent;
 
         let mut scene = SceneState::new([8; MAX_FLOORS]);
         let mut reducer = Reducer::new();
