@@ -43,10 +43,10 @@ pub const CHILD_END_LEDGER_TTL: Duration = Duration::from_secs(90);
 ///
 /// Deliberately LONGER than [`CHILD_END_LEDGER_TTL`]: the GATE is bounded by
 /// the watcher's poll backstop (`DEFAULT_POLL_INTERVAL`), while the MEMORY must span a TURN gap,
-/// which is unbounded. Sharing one clock meant a child idle >90s came back an
-/// ORPHAN, the exact phantom #246 exists to eliminate. Aligned with
-/// `jsonl::unclaim::CHILD_END_UNCLAIM_TTL`, the sibling half of this flow —
-/// the re-link cannot outlive the memory it depends on. The gate is
+/// which is unbounded. Sharing one clock meant a child idle past
+/// [`CHILD_END_LEDGER_TTL`] came back an ORPHAN, the exact phantom #246 exists
+/// to eliminate. `jsonl::unclaim`, the sibling half of this flow, reads it as
+/// its own TTL. The gate is
 /// unaffected: [`Correlation::child_recently_ended`] applies its OWN
 /// freshness check, so a retained-but-stale entry gates nothing.
 #[doc(hidden)]
@@ -159,8 +159,7 @@ pub(super) struct Correlation {
     /// so the per-Start membership probe borrows `&str` without allocating and
     /// a life's eviction is one `remove`; swept in [`Self::gc_slow`], never the
     /// per-event [`Self::gc`] — with the longest TTL of the maps it is the one
-    /// whose retain does real per-event work (CodSpeed showed -55% on the hook
-    /// path).
+    /// whose retain does real per-event work.
     pub(super) counted_calls: HashMap<AgentId, HashMap<String, SystemTime>>,
     /// When [`Self::gc_slow`] last swept, so its cost is once per
     /// [`COUNTED_SWEEP_INTERVAL`] no matter how often the caller runs — the

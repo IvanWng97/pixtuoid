@@ -13,8 +13,9 @@ use super::{SourceDecoders, WatchCtx};
 /// an id no watcher ever matches would otherwise accrue one entry per child end
 /// for the process lifetime. A TTL, not a size cap, because staleness — not
 /// volume — is the failure mode, and a cap could evict a fresh entry under a
-/// burst of foreign ones.
-const CHILD_END_UNCLAIM_TTL: Duration = Duration::from_secs(300);
+/// burst of foreign ones. The re-link's own memory window: the re-link cannot
+/// outlive the memory it depends on.
+const CHILD_END_UNCLAIM_TTL: Duration = crate::state::CHILD_END_RELINK_TTL;
 
 /// The child-end un-claim side-channel: child ids whose hook
 /// `SessionEnd { as_child: true }` (a decoded `SubagentStop`) was observed, and

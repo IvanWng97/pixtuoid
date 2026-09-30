@@ -156,7 +156,7 @@ actionlint-composites:
 [doc('Audit GitHub automation security with zizmor')]
 zizmor:
     @if [ -n "${GITHUB_ACTIONS:-}" ] && [ -z "${GH_TOKEN:-}" ]; then \
-        echo "error: zizmor would run offline in CI and skip its four online audits; give this step a GH_TOKEN" >&2; \
+        echo "error: zizmor would run offline in CI and skip its online audits; give this step a GH_TOKEN" >&2; \
         exit 1; \
     fi
     zizmor --strict-collection .
@@ -757,15 +757,16 @@ site-dev-bg:
     set -eu
     cd site
     node node_modules/astro/bin/astro.mjs dev --background
-    # 60 × 0.5s = 30s readiness budget
-    for _ in $(seq 1 60); do
+    polls=60
+    interval=0.5
+    for _ in $(seq 1 "$polls"); do
         if curl -fsS -m 2 http://localhost:4321/_astro/status >/dev/null 2>&1; then
             echo "ready → http://localhost:4321/  (logs: cd site && npx astro dev logs --follow)"
             exit 0
         fi
-        sleep 0.5
+        sleep "$interval"
     done
-    echo "site-dev-bg: daemon started but /_astro/status not ready after 30s" >&2
+    echo "site-dev-bg: daemon started but /_astro/status not ready after $polls polls ${interval}s apart" >&2
     exit 1
 
 [group('site')]
@@ -1274,8 +1275,7 @@ fixture-pii-selftest:
         jq -r '[.[].File | split("/") | last] | unique | join(",")' "$d/out.json"
     }
     fail=0
-    # The credential config does NOT own the identity class — its default global
-    # allowlist waives filesystem-shaped strings, which is why the pair is split.
+    # The credential config does NOT own the identity class (see `fixture-pii`).
     for spec in ".gitleaks.toml=cred-aws.txt,cred-disguised.txt" \
                 ".gitleaks-identity.toml=identity-bearer.txt,identity-dashed.txt,identity-email.txt,identity-gituser.txt,identity-home.txt,identity-mcp.txt,identity-prefix.txt,identity-users.txt,identity-win.txt"; do
         cfg=${spec%%=*}; want=${spec#*=}
@@ -1296,7 +1296,8 @@ fixture-pii-selftest:
 # Which recorded fixtures have drifted from the CLI that produced them — version
 # first (the sharp signal), age second. LOCAL and advisory: CI has none of these
 # CLIs to compare against, and a stale fixture is a re-capture candidate, not a
-# defect. Exit 3 = candidates found (the `corpus-all` convention).
+# defect. Exit 3 = candidates found — the advisory not-a-defect code
+# `corpus_check` also uses for an absent corpus.
 [group('rust')]
 [doc('Report recorded fixtures whose CLI has moved on (advisory, exit 3 = stale)')]
 fixture-age *args:

@@ -623,7 +623,7 @@ pub(super) fn compute_with_seed(
         debug_assert!(
             !severed(&walkable),
             "#566 connectivity guard: a pocket (or a coarse-unroutable home desk) survived \
-             dropping every scatter plant AND the free-standing whiteboard — a new NON-decor \
+             dropping every scatter plant AND every floor-standing wall decor — a new NON-decor \
              seal cause needs its own fix"
         );
     }
@@ -1181,8 +1181,8 @@ impl FloorVariant {
     /// THE roster: the floor derivations sweep it, `from_seed` indexes it, `COUNT` is
     /// its length. A variant missing here is unreachable — clippy's `dead_code` reds on
     /// the never-constructed arm, NOT `the_sweep_reaches_every_floor_variant`, which
-    /// catches the other direction. What NOTHING catches: `has_meeting` /
-    /// `has_pantry_base` are `matches!` lists, so a variant left out silently gets neither.
+    /// catches the other direction. `has_meeting` / `has_pantry_base` are `matches!`
+    /// lists; the `const` block below reds a variant left out of both.
     pub(super) const ALL: [Self; 5] = [
         FloorVariant::Standard,
         FloorVariant::OpenPlan,
@@ -1525,7 +1525,7 @@ fn compute_waypoints(
                 },
                 kind: WaypointKind::Couch,
                 // SEATED facing: the sitter looks NORTH at the window. The APPROACH side
-                // is decoupled (Furniture::Couch uses ApproachSides::ALL, decor.rs).
+                // is decoupled (Furniture::Couch uses `SEAT_APPROACH`, decor.rs).
                 facing: Facing::North,
                 room_id: None,
             })

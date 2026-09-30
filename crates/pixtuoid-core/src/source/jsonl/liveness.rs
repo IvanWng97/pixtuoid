@@ -192,8 +192,8 @@ pub(super) async fn emit_proof_of_life(
 /// previously vouched for that DISAPPEARS from a healthy snapshot is a
 /// high-confidence exit — the registry entry was removed / the rollout fd
 /// closed, signals only the OWNING process can produce — so the watcher can emit
-/// the `SessionEnd` the CLI never writes instead of waiting out the 10–30 min
-/// stale-sweep. Confirmation needs the id missing from two healthy observations
+/// the `SessionEnd` the CLI never writes instead of waiting out the reducer's
+/// `STALE_*` sweep. Confirmation needs the id missing from two healthy observations
 /// at least `min_span` apart; a probe FAILURE is never an observation.
 ///
 /// A pure failure detector: [`fold`](ProbeLadder::fold) RETURNS the effects to
@@ -206,7 +206,7 @@ pub(super) struct ProbeLadder {
     /// confirm it.
     prev_vouched: HashSet<String>,
     /// id → when a healthy snapshot FIRST came back without it. `Instant`
-    /// (monotonic): a wall-clock jump must not fake a 60s span.
+    /// (monotonic): a wall-clock jump must not fake a `min_span`.
     miss_since: HashMap<String, std::time::Instant>,
     /// pid → the session ids a healthy snapshot bound to it, ADDITIVE per
     /// snapshot: an id leaves via `pid_died` or a confirmed exit, never by
@@ -377,8 +377,8 @@ pub(super) async fn emit_session_exit(id: &str, decoders: SourceDecoders, ctx: &
     ctx.live.lock().await.remove(id);
 }
 
-/// ONE probe refresh (the imperative SHELL over `ProbeLadder::fold`), shared by
-/// the three sites that re-snapshot `live`. Returns true so the caller re-emits
+/// ONE probe refresh (the imperative SHELL over `ProbeLadder::fold`), the only
+/// place `live` is re-snapshotted. Returns true so the caller re-emits
 /// `ProofOfLife` after its scan. On a probe FAILURE (`None`) or no probe wired:
 /// change NOTHING — `ctx.live` keeps the previous ids, the miss windows neither
 /// advance nor confirm, no bindings move (the reducer's TTL absorbs the gap).
@@ -393,7 +393,8 @@ pub(super) async fn refresh_probe_snapshot(
         return false;
     };
     // `spawn_blocking`, not `block_in_place`: the probe is blocking std::fs and
-    // libproc, and this crate's tokio is current-thread, where the latter panics.
+    // libproc, and `block_in_place` panics on a current-thread runtime, which the
+    // watcher's `#[tokio::test]`s run on.
     let probe = Arc::clone(probe);
     let snap = match tokio::task::spawn_blocking(move || probe()).await {
         Ok(Some(snap)) => snap,
