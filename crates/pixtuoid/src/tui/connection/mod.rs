@@ -18,7 +18,7 @@ use crate::install::{InstallOutcome, InstallReport, UninstallOutcome, UninstallR
 // Re-exported so this module, the painter and the harness keep their
 // `connection::…` paths; the model itself lives in `crate::sources`.
 pub use crate::sources::{
-    build_rows, build_rows_from, ConnState, ConnectionRow, RowFacts, RowInput,
+    ConnState, ConnectionRow, RowFacts, RowInput, build_rows, build_rows_from,
 };
 
 /// WHAT is live for one row — a TYPED split, because the two source classes have

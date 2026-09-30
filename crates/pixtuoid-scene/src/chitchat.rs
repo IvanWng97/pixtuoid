@@ -439,9 +439,10 @@ mod tests {
     fn no_bubble_after_four_turns() {
         let start = base_time();
         let chat = ActiveChitchat::new(vk(0), vec![aid("/a"), aid("/b")], start);
-        assert!(chat
-            .current_bubble(start + Duration::from_millis(6_000))
-            .is_none());
+        assert!(
+            chat.current_bubble(start + Duration::from_millis(6_000))
+                .is_none()
+        );
     }
 
     #[test]

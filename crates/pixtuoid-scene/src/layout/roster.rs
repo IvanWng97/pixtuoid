@@ -4,10 +4,9 @@
 //! [`SceneLayout::fixtures`].
 
 use super::{
-    anchored_top_left, coat_rack_rect_at, furniture_def, z_sort_row, Anchor, Bounds, Facing,
-    Furniture, Lounge, MeetingRoom, MeetingTrio, PantryRoom, PlantItem, PlantKind, PodDecor,
-    PodDecorItem, Point, SceneLayout, Size, WallDecor, WallDecorItem, WaypointKind, ELEVATOR_H,
-    ELEVATOR_W,
+    Anchor, Bounds, ELEVATOR_H, ELEVATOR_W, Facing, Furniture, Lounge, MeetingRoom, MeetingTrio,
+    PantryRoom, PlantItem, PlantKind, PodDecor, PodDecorItem, Point, SceneLayout, Size, WallDecor,
+    WallDecorItem, WaypointKind, anchored_top_left, coat_rack_rect_at, furniture_def, z_sort_row,
 };
 use pixtuoid_core::state::FloorLocalDeskIndex;
 

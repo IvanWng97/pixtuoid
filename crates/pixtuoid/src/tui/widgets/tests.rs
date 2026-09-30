@@ -1,5 +1,5 @@
 use super::*;
-use footer::{build_status_spans, build_status_summary, FooterStats};
+use footer::{FooterStats, build_status_spans, build_status_summary};
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
 use std::path::PathBuf;

@@ -2,7 +2,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::{to_color, Overflow, Panel};
+use super::{Overflow, Panel, to_color};
 use pixtuoid_scene::theme::Theme;
 
 const SHORTCUTS: &[(&str, &str)] = &[
@@ -84,8 +84,8 @@ pub(crate) fn paint_help_overlay(f: &mut ratatui::Frame<'_>, bounds: Rect, theme
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     fn render_at(w: u16, h: u16) {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();

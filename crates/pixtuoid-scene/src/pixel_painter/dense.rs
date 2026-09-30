@@ -4,7 +4,7 @@
 
 use std::num::NonZeroU16;
 
-use pixtuoid_core::sprite::format::{density_variant_name_into, variant_redraws, Pack};
+use pixtuoid_core::sprite::format::{Pack, density_variant_name_into, variant_redraws};
 use pixtuoid_core::sprite::{Frame, RecolorableFrame};
 
 use crate::render_scale::RenderScale;

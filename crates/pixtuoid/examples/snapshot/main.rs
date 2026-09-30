@@ -11,12 +11,12 @@ use std::time::SystemTime;
 
 use anyhow::{Context as _, Result};
 use clap::Parser;
-use pixtuoid::tui::renderer::{draw_scene, DrawCtx};
-use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid::tui::renderer::{DrawCtx, draw_scene};
 use pixtuoid_core::SceneState;
-use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
-use ratatui::backend::TestBackend;
+use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 
 use crate::encode::{
     centered_crop, compute_crop_rect, debug_paint_walkable_overlay, save_as_gif,
@@ -895,9 +895,11 @@ mod tests {
         let scene = sample_scene(now, 12, 12);
         let history = pixtuoid_scene::pose::PoseHistory::new();
         let args = crop_args(&[]);
-        assert!(compute_crop_rect(&args, &scene, &history, 192, 64, now)
-            .unwrap()
-            .is_none());
+        assert!(
+            compute_crop_rect(&args, &scene, &history, 192, 64, now)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -918,14 +920,16 @@ mod tests {
     #[test]
     fn crop_flags_conflict_with_gif_and_anim() {
         assert!(SnapshotArgs::try_parse_from(["snapshot", "--gif", "--crop-agent", "x"]).is_err());
-        assert!(SnapshotArgs::try_parse_from([
-            "snapshot",
-            "--anim",
-            "couch",
-            "--crop-furniture",
-            "pantry"
-        ])
-        .is_err());
+        assert!(
+            SnapshotArgs::try_parse_from([
+                "snapshot",
+                "--anim",
+                "couch",
+                "--crop-furniture",
+                "pantry"
+            ])
+            .is_err()
+        );
     }
 
     #[test]
@@ -962,28 +966,26 @@ mod tests {
             SnapshotArgs::try_parse_from(["snapshot", "--gif", "--warmup-secs", "13.5"]).is_ok()
         );
         assert!(SnapshotArgs::try_parse_from(["snapshot", "--warmup-secs", "5"]).is_err());
-        assert!(SnapshotArgs::try_parse_from([
-            "snapshot",
-            "--gif",
-            "--warmup-secs",
-            "5",
-            "--anim",
-            "sofa"
-        ])
-        .is_err());
+        assert!(
+            SnapshotArgs::try_parse_from([
+                "snapshot",
+                "--gif",
+                "--warmup-secs",
+                "5",
+                "--anim",
+                "sofa"
+            ])
+            .is_err()
+        );
     }
 
     #[test]
     fn dashboard_flag_parses_and_conflicts_with_anim() {
         assert!(SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard"]).is_ok());
-        assert!(SnapshotArgs::try_parse_from([
-            "snapshot",
-            "out.png",
-            "--dashboard",
-            "--anim",
-            "desk"
-        ])
-        .is_err());
+        assert!(
+            SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard", "--anim", "desk"])
+                .is_err()
+        );
         assert!(
             SnapshotArgs::try_parse_from(["snapshot", "out.png", "--dashboard", "--gif"]).is_err()
         );

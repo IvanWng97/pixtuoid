@@ -6,7 +6,7 @@ use anyhow::Result;
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::state::{ActivityState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, Reducer, SceneState, Transport};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 pub(crate) async fn capture_live_scene(
     projects_root: &str,
@@ -36,8 +36,8 @@ pub(crate) async fn capture_live_scene(
     // real time. SocketBusy (a running pixtuoid owns it) degrades to
     // transcript-only, like the app.
     let hook_handle = {
-        use pixtuoid_core::source::hook::HookRouter;
         use pixtuoid_core::source::DynSource;
+        use pixtuoid_core::source::hook::HookRouter;
         let socket = pixtuoid_core::source::claude_code::ClaudeCodeSource::default_socket_path();
         let router: Box<dyn DynSource> = Box::new(HookRouter::new(socket));
         let tx = tx_hook;
@@ -510,7 +510,9 @@ pub(crate) fn meeting_scene(
     }
     // Fill the rest so the floor doesn't look dead around the meeting.
     fill_sample_agents(&mut s, now, n..n_agents);
-    eprintln!("MEETING staged {n} agents, warmup={warmup_ms}ms (min desk_dwell {min_dwell}ms − {MEETING_WARMUP_LEAD_MS}ms)");
+    eprintln!(
+        "MEETING staged {n} agents, warmup={warmup_ms}ms (min desk_dwell {min_dwell}ms − {MEETING_WARMUP_LEAD_MS}ms)"
+    );
     Ok((s, warmup_ms))
 }
 
@@ -647,7 +649,7 @@ pub(crate) fn anim_scene(
     floor_seed: u64,
     facing: Option<&str>,
 ) -> (SceneState, u64) {
-    use pixtuoid_scene::layout::{Facing, SceneLayout, CLASSIC_OFFICE_DESKS};
+    use pixtuoid_scene::layout::{CLASSIC_OFFICE_DESKS, Facing, SceneLayout};
     use pixtuoid_scene::pose::{
         is_aimless_cycle, seated_dwell_ms, takes_trip, waypoint_index_for_cycle,
     };

@@ -3,7 +3,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use super::{borderless_panel, to_color, truncate, PanelGeometry};
+use super::{PanelGeometry, borderless_panel, to_color, truncate};
 
 /// The project repository. `pub`, not `pub(crate)`: the BIN crate's crash
 /// reporter derives its issue-report URL from this same authority, and
@@ -268,8 +268,8 @@ mod tests {
 
     #[test]
     fn version_popup_skips_render_when_fully_dismissed() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
         let mut term = Terminal::new(TestBackend::new(80, 30)).unwrap();
         term.draw(|f| {
             paint_version_popup(

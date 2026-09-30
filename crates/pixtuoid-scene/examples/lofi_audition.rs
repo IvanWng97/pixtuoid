@@ -12,7 +12,7 @@ use std::io::{BufWriter, Write as _};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use pixtuoid_scene::audio::compose::{compose, Mood};
+use pixtuoid_scene::audio::compose::{Mood, compose};
 use pixtuoid_scene::audio::dsp::{NoiseStream, SAMPLE_RATE};
 use pixtuoid_scene::audio::synth::gen_beds;
 
@@ -73,7 +73,7 @@ fn run() -> std::io::Result<()> {
                         return Err(usage_error(format!(
                             "unknown --mood {v:?}; valid: {}",
                             MOODS.map(|(name, _)| name).join("|")
-                        )))
+                        )));
                     }
                 }
             }
@@ -96,14 +96,14 @@ fn run() -> std::io::Result<()> {
                         return Err(usage_error(format!(
                             "unknown --solo lane {v:?}; valid: {}",
                             SOLO_LANES.join("|")
-                        )))
+                        )));
                     }
                 }
             }
             other => {
                 return Err(usage_error(format!(
                     "unknown argument {other:?}; valid: --mood --seeds --start --out --solo"
-                )))
+                )));
             }
         }
     }

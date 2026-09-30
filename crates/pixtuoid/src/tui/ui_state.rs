@@ -12,7 +12,7 @@ use pixtuoid_core::source::manager::SourceDeath;
 use pixtuoid_core::state::SceneState;
 use pixtuoid_scene::theme;
 
-use super::{connection, dashboard, welcome, widgets, ModalState};
+use super::{ModalState, connection, dashboard, welcome, widgets};
 use connection::{ConnectionFrame, ConnectionRow, ConnectionUi};
 use dashboard::{DashboardFrame, DashboardUi};
 use welcome::{OnboardingFrame, WelcomeUi};

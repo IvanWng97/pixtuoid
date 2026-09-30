@@ -6,12 +6,12 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
 
-use pixtuoid_core::sprite::{format::Pack, Rgb, RgbBuffer};
-use pixtuoid_core::state::{SceneState, MAX_FLOORS};
+use pixtuoid_core::sprite::{Rgb, RgbBuffer, format::Pack};
+use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 
 use pixtuoid_scene::floor::{FloorMeta, FloorSession, FrameInputs};
 use pixtuoid_scene::footer::{
-    build_footer, footer_tone_rgb, footer_tool_tally, FooterInputs, FooterModel,
+    FooterInputs, FooterModel, build_footer, footer_tone_rgb, footer_tool_tally,
 };
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::Theme;

@@ -5,21 +5,21 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::Result;
-use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::sprite::RgbBuffer;
-use pixtuoid_core::state::SceneState;
 #[cfg(test)]
 use pixtuoid_core::AgentId;
+use pixtuoid_core::sprite::RgbBuffer;
+use pixtuoid_core::sprite::format::Pack;
+use pixtuoid_core::state::SceneState;
 
-use ratatui::backend::Backend;
 use ratatui::Terminal;
+use ratatui::backend::Backend;
 
 use ratatui::layout::Rect;
 
-use crate::tui::renderer::{draw_scene, flush_buffer_to_term_at_offset, DrawCtx, PetState};
+use crate::tui::renderer::{DrawCtx, PetState, draw_scene, flush_buffer_to_term_at_offset};
 use pixtuoid_scene::floor::{
-    num_floors, project_floor_scene, render_floor, FloorMeta, FloorTransition, FrameInputs,
-    PerFloor, PerOffice,
+    FloorMeta, FloorTransition, FrameInputs, PerFloor, PerOffice, num_floors, project_floor_scene,
+    render_floor,
 };
 use pixtuoid_scene::layout::{Layout, Size};
 use pixtuoid_scene::pathfind::Router;
@@ -272,7 +272,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     pub fn version_popup_scale(&self, now: SystemTime) -> f32 {
-        use pixtuoid_scene::anim::{eased_progress, Easing};
+        use pixtuoid_scene::anim::{Easing, eased_progress};
         const VERSION_POPUP_GROW_MS: u32 = 200;
         const VERSION_POPUP_SHRINK_MS: u32 = 120;
         match (self.popup.open, self.popup.started_at) {

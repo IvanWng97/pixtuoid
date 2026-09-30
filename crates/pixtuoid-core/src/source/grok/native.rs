@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use super::{decode_grok_line, grok_cwd_from_path, grok_home, grok_session_ended, SOURCE_NAME};
+use super::{SOURCE_NAME, decode_grok_line, grok_cwd_from_path, grok_home, grok_session_ended};
 use crate::source::jsonl::{ChildEndUnclaims, JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
 
