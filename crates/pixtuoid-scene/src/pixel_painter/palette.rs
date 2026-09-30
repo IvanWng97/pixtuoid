@@ -647,6 +647,7 @@ mod tests {
 
     /// A theme's fixtures take its colours.
     #[test]
+    #[cfg(feature = "density-art")]
     fn a_recolour_rethemes_the_fixture_art() {
         let pack = crate::embedded_pack::test_default_pack();
         let art = pack
