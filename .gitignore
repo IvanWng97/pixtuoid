@@ -22,3 +22,6 @@ mutants.out.old/
 # Recorder output awaiting a diff — promote it or delete it, never commit it.
 *.jsonl.new
 provenance.json.new
+
+# Any CLAUDE.md switches Claude Code to CLAUDE.md-only, hiding every AGENTS.md.
+CLAUDE.md

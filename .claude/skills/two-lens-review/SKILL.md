@@ -10,7 +10,7 @@ metadata:
 
 ONE protocol, two SCOPES over the SAME factors:
 
-- **Diff scope** — the repo's **mandatory** merge gate (workspace `CLAUDE.md`,
+- **Diff scope** — the repo's **mandatory** merge gate (workspace `AGENTS.md`,
   "Things NOT to do"). 2+ differentiated-lens agents on the diff, disposition in
   the PR thread.
 - **Whole-codebase scope** — the periodic / pre-release AUDIT. A diff review and
