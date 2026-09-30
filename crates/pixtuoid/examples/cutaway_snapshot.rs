@@ -155,12 +155,11 @@ fn main() -> Result<()> {
     }
     let now = match now_hour {
         Some(h) => {
-            use chrono::TimeZone;
-            chrono::Local
-                .with_ymd_and_hms(2026, 1, 1, h, 0, 0)
-                .single()
-                .ok_or_else(|| anyhow!("invalid --now-hour {h}"))?
-                .into()
+            anyhow::ensure!(
+                chrono::NaiveTime::from_hms_opt(h, 0, 0).is_some(),
+                "invalid --now-hour {h}"
+            );
+            pixtuoid_scene::localclock::at_hour(h)
         }
         None => SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
     };
