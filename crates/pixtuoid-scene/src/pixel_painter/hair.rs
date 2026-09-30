@@ -45,7 +45,7 @@ pub(crate) fn dress_for(
     head: Option<HeadMark>,
     density: NonZeroU16,
 ) -> Option<Dress> {
-    let head = head.filter(|_| density.get() > 1)?;
+    let head = head.filter(|_| cfg!(feature = "density-art") && density.get() > 1)?;
     let style = pick(pack, agent).and_then(|name| pack.hairstyle(name, density));
     Some(Dress::of(
         body,
