@@ -58,6 +58,8 @@ assert_reviewability() {
     output="$(<"$output_file")"
     [[ "$output" == *"head_sha=abc123"* ]] ||
         fail "$label resolver omitted the head its status goes on"
+    [[ "$output" == *"state=$(jq -r .state <<<"$fixture")"* ]] ||
+        fail "$label resolver omitted the PR state the absence report reads"
     if [[ "$expected" == true ]]; then
         [[ "$output" == *"reviewable=true"* ]] ||
             fail "$label resolver rejected an open default-branch PR inside its trust boundary"
@@ -93,8 +95,9 @@ assert_reviewability "$resolver_script" "$fork_closed_pr" false "$label approved
 REVIEW_RULES_FILE="${REVIEW_RULES_FILE:-REVIEW.md}"
 # shellcheck disable=SC2016 # A workflow expression, matched literally.
 yq -e '.jobs.analyze.steps[] | select(.name == "Run read-only Claude review") | .with.prompt
-    | contains("${{ inputs.lens }} lens")' "$CLAUDE_REVIEW_WORKFLOW_FILE" >/dev/null ||
-    fail "$CLAUDE_REVIEW_WORKFLOW_FILE's prompt does not name its lens input"
+    | select(contains("${{ inputs.lens }} lens")) | contains(".claude-review/prior-threads.json")' \
+    "$CLAUDE_REVIEW_WORKFLOW_FILE" >/dev/null ||
+    fail "$CLAUDE_REVIEW_WORKFLOW_FILE's prompt does not name its lens input and prior threads"
 review_lenses="$(awk '/^## /{on = ($0 == "## Lenses")} on && /^### /{print tolower(substr($0, 5))}' "$REVIEW_RULES_FILE" | sort)"
 [[ -n "$review_lenses" ]] || fail "$REVIEW_RULES_FILE has no \"### <lens>\" under \"## Lenses\""
 bot_lenses="$(
@@ -135,12 +138,13 @@ api)
     while (($#)); do
         case "$1" in
         --jq) jq_expr="$2" && shift 2 ;;
-        --method) shift 2 ;;
+        --method | -f | -F) shift 2 ;;
         -*) shift ;;
         *) path="$1" && shift ;;
         esac
     done
     case "$path" in
+    graphql) printf '%s\n' "$FAKE_THREAD_PAGES" ;;
     repos/owner/repo/pulls/42)
         sha=$FAKE_PR_HEAD
         [[ -z "$FAKE_HEAD_AFTER_FILES" || ! -e "$POSTED_THREADS.files-read" ]] || sha=$FAKE_HEAD_AFTER_FILES
@@ -397,6 +401,45 @@ if run_publisher '{"summary":' >/dev/null 2>&1; then
     fail "Claude publisher accepted malformed JSON"
 fi
 
+# The analyzer's prior threads are this lens's own bot threads, told apart by
+# the header the publisher itself writes.
+run_publisher "$in_diff_review" || fail "Claude publisher rejected findings inside the diff"
+own_body="$(jq -r -s '.[0].body' "$posted_threads")"
+other_body="${own_body//"$review_title"/${title_template//"$lens_expr"/$(sed -n 2p <<<"$bot_lenses")}}"
+hostile_thread_body="$own_body it's \"x\" \$(touch $test_dir/pwned) \`touch $test_dir/pwned\`"
+thread() {
+    jq -cn --arg body "$1" --arg type "$2" --arg login "$3" '{path: "src/a.rs", line: 2, isResolved: false,
+        isOutdated: true, comments: {nodes: [{author: {__typename: $type, login: $login}, body: $body}]}}'
+}
+page() { jq -cs '{data: {repository: {pullRequest: {reviewThreads: {nodes: .}}}}}'; }
+prior_step="Fetch this lens's prior threads"
+prior_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "$prior_step")"
+threads_query="$(STEP_NAME="$prior_step" yq -e -r '.jobs.analyze.steps[] | select(.name == strenv(STEP_NAME))
+    | .env.THREADS_QUERY' "$CLAUDE_REVIEW_WORKFLOW_FILE")" || fail "\"$prior_step\" has no THREADS_QUERY"
+prior_threads="$test_dir/.claude-review/prior-threads.json"
+run_prior_fetch() {
+    rm -rf "$test_dir/.claude-review" && mkdir "$test_dir/.claude-review"
+    (cd "$test_dir" && PATH="$fake_bin:$PATH" FAKE_THREAD_PAGES="$1" GH_TOKEN=test-token PR_NUMBER=42 \
+        REPOSITORY=owner/repo REVIEW_TITLE="$review_title" THREADS_QUERY="$threads_query" bash -c "$prior_script") ||
+        fail "the prior-threads fetch exited non-zero"
+}
+run_prior_fetch "$({
+    {
+        thread "$other_body" Bot github-actions
+        thread "$other_body"$'\n'" — **$review_title · issue (blocking)**" Bot github-actions
+        thread "$own_body" User alice
+        thread "$own_body" User github-actions
+    } | page
+    thread "$hostile_thread_body" Bot github-actions | page
+} | jq -cs .)"
+jq -e --arg b "$hostile_thread_body" \
+    '. == [{path: "src/a.rs", line: 2, isResolved: false, isOutdated: true, body: $b}]' \
+    "$prior_threads" >/dev/null && [[ ! -e "$test_dir/pwned" ]] ||
+    fail "the analyzer's prior threads are not this lens's bot threads, verbatim: $(<"$prior_threads")"
+run_prior_fetch "$(page </dev/null | jq -cs .)"
+jq -e '. == []' "$prior_threads" >/dev/null ||
+    fail "a PR without this lens's threads does not get an empty list, a full review: $(<"$prior_threads")"
+
 report_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Mark the review failed")"
 run_report() {
     rm -f "$posted_statuses"
@@ -404,6 +447,7 @@ run_report() {
         ANALYZE_RESULT="$1" \
         PUBLISH_RESULT="$2" \
         HEAD_SHA="$3" \
+        PR_STATE="${4:-open}" \
         POSTED_STATUSES="$posted_statuses" \
         REPOSITORY="owner/repo" \
         REVIEW_STATUS="$review_status" \
@@ -418,6 +462,19 @@ report="$(run_report success failure old-head)" ||
 assert_status '.state == "failure" and .sha == "old-head"' "an unpublished review fails its lens at the analyzed head"
 run_report failure skipped "" >/dev/null 2>&1 &&
     fail "the absence report marked no head"
+run_report success skipped declined-head >/dev/null ||
+    fail "the absence report exited non-zero on an open PR it declined"
+assert_status '.state == "failure" and .sha == "declined-head"' "an open PR declined for its base still fails its lens"
+# A late run on a merged PR would overwrite its head's published verdict.
+run_report success skipped merged-head closed >/dev/null ||
+    fail "the absence report exited non-zero on a closed PR"
+[[ ! -e "$posted_statuses" ]] ||
+    fail "the absence report set a closed PR's lens status: $(<"$posted_statuses")"
+# shellcheck disable=SC2016 # Workflow expressions, matched literally.
+yq -o=json '.' "$CLAUDE_REVIEW_WORKFLOW_FILE" | jq -e '
+    .jobs.analyze.outputs.state == "${{ steps.pr.outputs.state }}"
+    and ([.jobs.report_absence.steps[].env.PR_STATE // empty] == ["${{ needs.analyze.outputs.state }}"])' >/dev/null ||
+    fail "$CLAUDE_REVIEW_WORKFLOW_FILE does not hand the resolved PR state to the absence report"
 
 # claude-refuses-forks-before-the-action pins only that the fork refusal exists
 # and runs before the action; what it actually does is asserted here.

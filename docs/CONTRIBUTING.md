@@ -73,11 +73,11 @@ run. The jobs:
 - **zizmor** — workflow/action security: symbolic-or-SHA pins,
   credential-dropping checkouts, exact inline suppressions.
 - **One automatic Claude reviewer per [`REVIEW.md`](../REVIEW.md) lens**
-  rides `claude-readonly-review.yml`: a
-  read-only model job on the trusted default branch, the PR diff as inert
-  data, and a separate least-privilege publisher that opens a review thread
-  per finding and sets the lens's `claude-review/<lens>` status. `claude.yml`
-  refuses fork PR heads.
+  rides `claude-readonly-review.yml`: a read-only model job on the trusted
+  default branch, the PR diff and the lens's prior threads as inert data, and
+  a separate least-privilege publisher that opens a review thread per finding
+  and sets the lens's `claude-review/<lens>` status. `claude.yml` refuses fork
+  PR heads.
 - **CodeQL** stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).
