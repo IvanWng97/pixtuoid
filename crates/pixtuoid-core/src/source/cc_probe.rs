@@ -756,9 +756,11 @@ mod liveness_tests {
             std::process::id() as i64,
             "legacy-session",
         );
-        assert!(live_cc_session_ids(dir.path())
-            .expect("readable dir is a healthy probe")
-            .contains("legacy-session"));
+        assert!(
+            live_cc_session_ids(dir.path())
+                .expect("readable dir is a healthy probe")
+                .contains("legacy-session")
+        );
     }
 
     #[cfg(unix)]

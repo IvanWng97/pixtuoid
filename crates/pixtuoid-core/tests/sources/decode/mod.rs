@@ -1,8 +1,8 @@
+use pixtuoid_core::AgentId;
+use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::source::antigravity;
 use pixtuoid_core::source::claude_code::decode_cc_line;
 use pixtuoid_core::source::decoder::decode_hook_payload;
-use pixtuoid_core::source::AgentEvent;
-use pixtuoid_core::AgentId;
 use serde_json::json;
 
 fn load(name: &str) -> serde_json::Value {
@@ -1016,9 +1016,11 @@ fn ag_skips_non_object_tool_call_and_keys_run_command() {
 fn ag_planner_response_without_tool_calls_emits_nothing() {
     let transcript = "/Users/me/.gemini/antigravity-cli/brain/sess/transcript.jsonl";
     let v = json!({ "step_index": 2, "type": "PLANNER_RESPONSE" });
-    assert!(antigravity::decode_ag_line(transcript, "antigravity", v)
-        .unwrap()
-        .is_empty());
+    assert!(
+        antigravity::decode_ag_line(transcript, "antigravity", v)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -1063,9 +1065,9 @@ fn decode_hook_payload_missing_tool_name_still_succeeds() {
 
 #[tokio::test]
 async fn hook_and_watcher_keys_coalesce_for_one_file() {
-    use pixtuoid_core::source::claude_code::{cc_derive_label, cc_session_ended, decode_cc_line};
-    use pixtuoid_core::source::jsonl::{force_polling_backend_for_tests, JsonlWatcher};
     use pixtuoid_core::source::Transport;
+    use pixtuoid_core::source::claude_code::{cc_derive_label, cc_session_ended, decode_cc_line};
+    use pixtuoid_core::source::jsonl::{JsonlWatcher, force_polling_backend_for_tests};
     use std::time::Duration;
     use tempfile::TempDir;
     use tokio::io::AsyncWriteExt;

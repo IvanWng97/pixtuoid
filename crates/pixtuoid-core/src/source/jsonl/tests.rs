@@ -2,18 +2,18 @@ use std::io::Write;
 use std::time::Instant;
 
 use super::health::FailureLatch;
-use super::liveness::{emit_session_exit, revouch_gated_files, ProbeLadder, ProbeSnapshot};
+use super::liveness::{ProbeLadder, ProbeSnapshot, emit_session_exit, revouch_gated_files};
 use super::unclaim::drain_child_end_unclaims;
 use super::walk::{
-    detect_parent_id, extract_cwd, park_if_truncated_below_cursor, scan_root, walk_jsonl,
-    TASK_SCAN_BYTES,
+    TASK_SCAN_BYTES, detect_parent_id, extract_cwd, park_if_truncated_below_cursor, scan_root,
+    walk_jsonl,
 };
 use super::*;
+use crate::AgentId;
 use crate::source::claude_code::{cc_activity_recency, cc_session_ended, decode_cc_line};
 use crate::source::decoder::{accept_all_paths, default_id_from_path};
 use crate::source::registry::cwd_extractor_for;
 use crate::source::{AgentEvent, Transport};
-use crate::AgentId;
 
 fn snap(pairs: &[(&str, i32)]) -> ProbeSnapshot {
     ProbeSnapshot {
@@ -182,10 +182,12 @@ fn fold_returns_each_new_pid_once_for_the_exit_watch() {
         .newly_watched;
     watched.sort_unstable();
     assert_eq!(watched, vec![1, 2]);
-    assert!(ladder
-        .fold(&snap(&[("a", 1), ("c", 2)]), t)
-        .newly_watched
-        .is_empty());
+    assert!(
+        ladder
+            .fold(&snap(&[("a", 1), ("c", 2)]), t)
+            .newly_watched
+            .is_empty()
+    );
 }
 
 #[test]
@@ -1143,9 +1145,11 @@ async fn session_exit_drains_pending_bytes_so_a_straggler_walk_cannot_resurrect(
     let window = Duration::from_secs(3600);
 
     let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
-    assert!(events
-        .iter()
-        .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
+    );
 
     std::fs::OpenOptions::new()
         .append(true)
@@ -1324,9 +1328,11 @@ async fn child_end_unclaim_drains_stragglers_then_releases_without_session_end()
     let window = Duration::from_secs(3600);
 
     let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
-    assert!(events
-        .iter()
-        .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
+    );
 
     std::fs::OpenOptions::new()
         .append(true)
@@ -1408,9 +1414,11 @@ async fn released_claim_is_not_revouched_into_a_full_replay() {
     let file_len = std::fs::metadata(&path).unwrap().len();
 
     let events = walk_once(&path, Duration::from_secs(3600), t_ended, &cursors, &seen).await;
-    assert!(events
-        .iter()
-        .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
+    );
     let unclaims = ChildEndUnclaims::new();
     unclaims.push(agent_id);
 
@@ -2631,9 +2639,11 @@ async fn session_exit_parks_truncated_transcript_so_a_straggler_walk_cannot_resu
     let window = Duration::from_secs(3600);
 
     let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
-    assert!(events
-        .iter()
-        .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
+    );
 
     std::fs::write(&path, "{\"type\":\"assistant\"}\n").unwrap();
     let new_len = std::fs::metadata(&path).unwrap().len();
@@ -2715,9 +2725,11 @@ async fn child_end_unclaim_parks_truncated_transcript_before_release() {
     let window = Duration::from_secs(3600);
 
     let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
-    assert!(events
-        .iter()
-        .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
+    );
 
     std::fs::write(&path, "{\"type\":\"assistant\"}\n").unwrap();
     let new_len = std::fs::metadata(&path).unwrap().len();

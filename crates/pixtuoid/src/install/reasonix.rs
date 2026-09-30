@@ -16,13 +16,13 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, anyhow};
+use serde_json::{Value, json};
 
+use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::merge;
 use crate::install::target::MergeOutcome;
-use crate::install::SENTINEL_KEY;
 
 /// Events we register == events we decode, enforced by
 /// `every_registered_reasonix_event_decodes` below. PostToolUseFailure /

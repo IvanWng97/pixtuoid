@@ -4,7 +4,7 @@
 //! then mirror here. All functions are PURE sample-buffer generators (mono f32
 //! @ 44_100 Hz) run once at startup — playback never synthesizes.
 
-use super::dsp::{bandpass, lowpass, shaped_noise_loop, NoiseStream, SAMPLE_RATE};
+use super::dsp::{NoiseStream, SAMPLE_RATE, bandpass, lowpass, shaped_noise_loop};
 
 const SR: f32 = SAMPLE_RATE as f32;
 

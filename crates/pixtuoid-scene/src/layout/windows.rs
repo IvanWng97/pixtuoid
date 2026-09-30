@@ -4,7 +4,7 @@
 
 use std::ops::Range;
 
-use super::{SceneLayout, ELEVATOR_W};
+use super::{ELEVATOR_W, SceneLayout};
 
 /// A window's width, frame included — fixed, so the skyline detail reads the
 /// same on every terminal.

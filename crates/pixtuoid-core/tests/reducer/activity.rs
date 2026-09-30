@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
+use pixtuoid_core::AgentId;
 use pixtuoid_core::source::{AgentEvent, Transport};
 use pixtuoid_core::state::reducer::Reducer;
 use pixtuoid_core::state::{ActivityState, SceneState};
-use pixtuoid_core::AgentId;
 
 use crate::{act_end, act_start, start, waiting};
 
@@ -660,8 +660,7 @@ fn omp_ask_round_waits_then_answer_clears_through_the_reducer() {
     use pixtuoid_core::state::reducer::ACTIVE_GRACE_WINDOW;
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
-    let path =
-        "/h/.omp/agent/sessions/-p/2026-07-05T20-37-08-710Z_01000000-0000-7000-8000-000000000001.jsonl";
+    let path = "/h/.omp/agent/sessions/-p/2026-07-05T20-37-08-710Z_01000000-0000-7000-8000-000000000001.jsonl";
     let id = AgentId::from_parts(
         "omp",
         "2026-07-05T20-37-08-710Z_01000000-0000-7000-8000-000000000001",

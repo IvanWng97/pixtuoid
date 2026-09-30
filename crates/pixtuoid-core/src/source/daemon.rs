@@ -27,7 +27,7 @@ use crate::state::{DaemonInstanceId, DaemonLiveness, DaemonPresence, SceneState}
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
-pub use native::{spawn_presence_exit_watch, PresenceExitWatch, PresenceSender};
+pub use native::{PresenceExitWatch, PresenceSender, spawn_presence_exit_watch};
 
 /// One presence delta for a daemon mascot — the SHARED vocabulary every daemon
 /// emits, all consumed by [`apply_presence`]. Identity-agnostic ON PURPOSE: a

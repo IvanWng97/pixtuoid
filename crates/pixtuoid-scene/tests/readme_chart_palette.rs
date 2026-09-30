@@ -8,7 +8,7 @@
 //! published package (`Cargo.toml` `exclude`).
 
 use pixtuoid_core::sprite::Rgb;
-use pixtuoid_scene::theme::{theme_by_name, Theme};
+use pixtuoid_scene::theme::{Theme, theme_by_name};
 
 const PALETTE_PATH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),

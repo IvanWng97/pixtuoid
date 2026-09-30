@@ -185,8 +185,8 @@ mod tests {
 
     #[test]
     fn event_source_extracts_source_for_the_connection_gate() {
-        use pixtuoid_core::state::MAX_FLOORS;
         use pixtuoid_core::AgentId;
+        use pixtuoid_core::state::MAX_FLOORS;
         use std::path::PathBuf;
 
         use crate::runtime::FALLBACK_DESKS;

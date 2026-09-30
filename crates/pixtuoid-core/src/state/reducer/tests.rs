@@ -61,7 +61,7 @@ fn stale_timeout_constants_have_their_intended_durations() {
 // for caps combinations the registered rows don't happen to spell.
 #[test]
 fn delegating_slot_with_hook_silent_caps_gets_waiting_window() {
-    use super::{stale_threshold_with_caps, STALE_ACTIVE_TIMEOUT, STALE_WAITING_TIMEOUT};
+    use super::{STALE_ACTIVE_TIMEOUT, STALE_WAITING_TIMEOUT, stale_threshold_with_caps};
     use crate::source::registry::SourceCaps;
     use crate::source::{AgentEvent, ToolDetail, Transport};
     use crate::{AgentId, Reducer, SceneState};
@@ -130,7 +130,7 @@ fn delegating_slot_with_hook_silent_caps_gets_waiting_window() {
 
 #[test]
 fn generic_tool_displaying_delegating_keeps_the_active_window() {
-    use super::{stale_threshold_with_caps, STALE_ACTIVE_TIMEOUT};
+    use super::{STALE_ACTIVE_TIMEOUT, stale_threshold_with_caps};
     use crate::source::registry::SourceCaps;
     use crate::source::{AgentEvent, ToolDetail, Transport};
     use crate::{AgentId, Reducer, SceneState};
@@ -177,9 +177,9 @@ fn generic_tool_displaying_delegating_keeps_the_active_window() {
 
 #[test]
 fn gated_before_waiting_evicted_on_apply_path_sweep() {
+    use crate::AgentId;
     use crate::source::{AgentEvent, ToolDetail, Transport};
     use crate::state::SceneState;
-    use crate::AgentId;
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
 
@@ -261,9 +261,9 @@ fn gated_before_waiting_evicted_on_apply_path_sweep() {
 
 #[test]
 fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
+    use crate::AgentId;
     use crate::source::{AgentEvent, ToolDetail, Transport};
     use crate::state::SceneState;
-    use crate::AgentId;
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
 
@@ -389,9 +389,9 @@ fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
 /// TTL is what made a multi-turn child idle >90s come back an orphan.)
 #[test]
 fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
+    use crate::AgentId;
     use crate::source::{AgentEvent, Transport};
     use crate::state::SceneState;
-    use crate::AgentId;
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
 
@@ -477,9 +477,9 @@ fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
 /// healthy stream stays an order of magnitude under.
 #[test]
 fn correlation_maps_stay_bounded_across_a_long_stream() {
+    use crate::AgentId;
     use crate::source::{AgentEvent, ToolDetail, Transport};
     use crate::state::SceneState;
-    use crate::AgentId;
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
 

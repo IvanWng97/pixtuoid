@@ -2,9 +2,9 @@ use anyhow::Result;
 use serde_json::Value;
 use std::path::Path;
 
-use crate::source::decoder::{first_present_str, generic_tool_display};
-use crate::source::AgentEvent;
 use crate::AgentId;
+use crate::source::AgentEvent;
+use crate::source::decoder::{first_present_str, generic_tool_display};
 
 #[cfg(feature = "native")]
 mod native;

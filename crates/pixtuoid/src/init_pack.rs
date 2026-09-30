@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::path::Path;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 pub fn init_pack(dest: &Path, force: bool) -> Result<()> {
     if dest.exists() && !force {

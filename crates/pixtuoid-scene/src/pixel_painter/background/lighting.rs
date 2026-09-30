@@ -7,7 +7,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::ground::Ellipse;
 use crate::lighting::Emitter;
-use crate::pixel_painter::palette::{blend_rgb, BLACK, WHITE};
+use crate::pixel_painter::palette::{BLACK, WHITE, blend_rgb};
 use crate::theme::Theme;
 
 /// Float ellipse geometry for [`paint_radial_falloff`] — all `f32`, so a caller
@@ -323,7 +323,7 @@ mod tests {
     use super::*;
 
     use crate::floor::NeonLevels;
-    use crate::layout::{Point, NEON_PANEL_BORDER, NEON_PANEL_H, NEON_PANEL_W};
+    use crate::layout::{NEON_PANEL_BORDER, NEON_PANEL_H, NEON_PANEL_W, Point};
     use crate::lighting::{EmitterKind, Light, NEON_HALO_RADIUS};
 
     fn look(levels: NeonLevels) -> NeonLook {
