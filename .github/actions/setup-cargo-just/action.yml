@@ -14,6 +14,10 @@ inputs:
     description: 'Whether to enable Swatinem/rust-cache'
     required: false
     default: 'true'
+  shared-key:
+    description: 'Swatinem/rust-cache shared-key; empty keys the cache by job'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -29,5 +33,6 @@ runs:
       uses: Swatinem/rust-cache@v2
       with:
         prefix-key: v1-rust
+        shared-key: ${{ inputs.shared-key }}
 
     - uses: ./.github/actions/setup-just

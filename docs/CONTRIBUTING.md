@@ -56,9 +56,8 @@ run. The jobs:
   freshness, and the npm package generator + OpenClaw plugin contract.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
   full suite on a real Windows runner.
-- **wasm-check** — the wasm32 build plus the committed `site/public/wasm/`
-  pair's integrity and size cap (`just gen-wasm-check`); nothing checks the
-  pair is fresh, so a core/scene/web change runs `just gen-wasm` by hand.
+- **wasm-check** — builds the site's wasm (`just gen-wasm`) and caps its
+  gzipped size (`just gen-wasm-check`).
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
   `just test` can't see.
 - **hygiene** — the same `just lint` recipes preflight runs (its CI job exists
