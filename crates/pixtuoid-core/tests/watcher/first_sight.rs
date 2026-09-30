@@ -1,15 +1,15 @@
 use std::time::{Duration, SystemTime};
 
-use filetime::{set_file_mtime, FileTime};
+use filetime::{FileTime, set_file_mtime};
 use tempfile::TempDir;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 
-use pixtuoid_core::source::claude_code::{cc_derive_label, cc_session_ended, decode_cc_line};
-use pixtuoid_core::source::jsonl::JsonlWatcher;
+use pixtuoid_core::AgentId;
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::source::Transport;
-use pixtuoid_core::AgentId;
+use pixtuoid_core::source::claude_code::{cc_derive_label, cc_session_ended, decode_cc_line};
+use pixtuoid_core::source::jsonl::JsonlWatcher;
 
 use crate::{cc_watcher, fast_watch, vouch_snapshot, write_lines};
 

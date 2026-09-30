@@ -428,12 +428,16 @@ mod tests {
     fn color_status_row_only_speaks_when_color_is_not_plainly_available() {
         use ColorPreflight::*;
         assert_eq!(color_status_row(Proceed), None);
-        assert!(color_status_row(ForceColor)
-            .unwrap()
-            .contains("CLICOLOR_FORCE"));
-        assert!(color_status_row(RefuseNoColor)
-            .unwrap()
-            .contains("NO_COLOR"));
+        assert!(
+            color_status_row(ForceColor)
+                .unwrap()
+                .contains("CLICOLOR_FORCE")
+        );
+        assert!(
+            color_status_row(RefuseNoColor)
+                .unwrap()
+                .contains("NO_COLOR")
+        );
         assert!(color_status_row(RefuseDumbTerm).unwrap().contains("dumb"));
     }
 

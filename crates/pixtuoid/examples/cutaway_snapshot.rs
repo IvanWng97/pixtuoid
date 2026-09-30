@@ -15,12 +15,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use image::{Rgb as ImgRgb, RgbImage};
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::cutaway::paint::{render_cutaway, Office};
+use pixtuoid_scene::cutaway::paint::{Office, render_cutaway};
 use pixtuoid_scene::floor::{FloorMeta, FloorSession, ObservedFloor};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::render_scale::RenderScale;

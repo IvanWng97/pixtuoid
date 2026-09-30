@@ -1031,7 +1031,7 @@ mod tests {
     #[test]
     fn an_idle_gateway_that_is_killed_still_walks_out_instead_of_vanishing() {
         use pixtuoid_core::source::daemon::{
-            apply_presence, DaemonInstanceKey, DaemonPresenceUpdate,
+            DaemonInstanceKey, DaemonPresenceUpdate, apply_presence,
         };
         use pixtuoid_core::state::{DaemonInstanceId, SceneState};
 

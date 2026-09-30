@@ -1,5 +1,5 @@
 use super::*;
-use crate::pose::{is_aimless_cycle, waypoint_index_for_cycle, RouteRig};
+use crate::pose::{RouteRig, is_aimless_cycle, waypoint_index_for_cycle};
 use pixtuoid_core::{AgentId, GlobalDeskIndex};
 
 fn id() -> AgentId {
@@ -60,8 +60,8 @@ fn path_len_multi_segment_sums() {
 use crate::layout::Layout;
 use crate::pathfind::Router;
 use crate::pose::{
-    dwell_ms, est_wander_cycle_ms, seated_dwell_ms, stale_resume_gap_ms, takes_trip,
-    WANDER_DWELL_EST_MS,
+    WANDER_DWELL_EST_MS, dwell_ms, est_wander_cycle_ms, seated_dwell_ms, stale_resume_gap_ms,
+    takes_trip,
 };
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
@@ -477,7 +477,7 @@ fn dwell_time_independent_of_path_length() {
 
 #[test]
 fn far_waypoint_full_cycle_is_longer() {
-    use crate::physics::{walk_profile, WalkIntent};
+    use crate::physics::{WalkIntent, walk_profile};
 
     let trip_id = trip_agent("far");
     let seated_dur = seated_dwell_ms(trip_id);
@@ -528,7 +528,7 @@ fn settle_collapses_a_seat_pair_and_gives_it_back() {
 
 #[test]
 fn snapshot_leg_profile_measures_the_routed_leg_plus_settles() {
-    use crate::physics::{walk_profile, WalkIntent};
+    use crate::physics::{WalkIntent, walk_profile};
 
     let mask = WalkableMask::new_open(64, 64);
     let overlay = OccupancyOverlay::new();
@@ -580,7 +580,7 @@ fn snapshot_leg_profile_measures_the_routed_leg_plus_settles() {
 
 #[test]
 fn arrival_pause_holds_walking_out_phase() {
-    use crate::physics::{walk_arrived, walk_profile, WalkIntent};
+    use crate::physics::{WalkIntent, walk_arrived, walk_profile};
 
     let trip_id = trip_agent("pause");
     let now = t0();

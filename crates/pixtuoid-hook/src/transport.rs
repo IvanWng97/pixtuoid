@@ -168,7 +168,7 @@ mod peer {
 
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::Security::{
-        EqualSid, GetTokenInformation, TokenUser, PSID, TOKEN_QUERY, TOKEN_USER,
+        EqualSid, GetTokenInformation, PSID, TOKEN_QUERY, TOKEN_USER, TokenUser,
     };
     use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
     use windows_sys::Win32::System::Threading::{

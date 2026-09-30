@@ -17,12 +17,12 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use saphyr::{LoadableYamlNode, MappingOwned, ScalarOwned, Yaml, YamlEmitter, YamlOwned};
 
+use crate::install::SENTINEL_KEY;
 use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
-use crate::install::SENTINEL_KEY;
 
 /// Every event here decodes — `every_registered_hermes_event_decodes` enforces
 /// that direction, and only that one: an event the DECODER handles and this list
@@ -345,9 +345,10 @@ mod tests {
             unreachable!()
         };
         assert_eq!(seq.len(), 2);
-        assert!(seq
-            .iter()
-            .any(|e| managed_command(e).as_deref() == Some("my-guard.sh")));
+        assert!(
+            seq.iter()
+                .any(|e| managed_command(e).as_deref() == Some("my-guard.sh"))
+        );
         assert_eq!(seq.iter().filter(|e| is_managed(e)).count(), 1);
     }
 

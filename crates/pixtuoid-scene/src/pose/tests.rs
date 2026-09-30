@@ -232,12 +232,7 @@ fn seated_waypoint_snap_back_starts_from_the_seat_not_the_approach_cell() {
 
     let active = active_slot(now, now - Duration::from_secs(60));
     let then = now + Duration::from_millis(50);
-    match derive_with_routing(
-        &active,
-        then,
-        &l,
-        &mut rig.rctx(),
-    ) {
+    match derive_with_routing(&active, then, &l, &mut rig.rctx()) {
         Some(Pose::Walking { from, .. }) => assert_eq!(
             from, seat,
             "snap-back must start from the rendered seat {seat:?}, not the approach cell {approach:?}"
@@ -1053,15 +1048,15 @@ fn exit_far_completes_before_grace_window_no_vanish() {
         now - Duration::from_secs(60),
     );
     match derive_with_routing(&slot, now, &l, &mut rig.rctx()) {
-            // Walking at the end of the path, or already arrived (None, GC
-            // imminent) — either way NOT stuck mid-corridor.
-            Some(Pose::Walking { t_x1000, .. }) => assert!(
-                t_x1000 >= 950,
-                "far exit must reach the door by the grace window (no mid-corridor vanish), got t_x1000={t_x1000}"
-            ),
-            None => {}
-            other => panic!("expected Walking near the door or None (arrived), got {other:?}"),
-        }
+        // Walking at the end of the path, or already arrived (None, GC
+        // imminent) — either way NOT stuck mid-corridor.
+        Some(Pose::Walking { t_x1000, .. }) => assert!(
+            t_x1000 >= 950,
+            "far exit must reach the door by the grace window (no mid-corridor vanish), got t_x1000={t_x1000}"
+        ),
+        None => {}
+        other => panic!("expected Walking near the door or None (arrived), got {other:?}"),
+    }
     let dur = rig.motion[&slot.agent_id]
         .exit
         .as_ref()
@@ -1194,7 +1189,7 @@ fn entry_walk_coordinates_are_continuous() {
 /// the desk's stamped ground — it is not a property every chair has.
 #[test]
 fn desk_approach_cell_is_never_inside_the_blocked_desk() {
-    use crate::layout::{furniture_def, Facing, Furniture, OBSTACLE_PAD_PX};
+    use crate::layout::{Facing, Furniture, OBSTACLE_PAD_PX, furniture_def};
     let l = layout();
     // The ONE table `mask::stamp_ground` reads, so this can't drift when the sprite is resized.
     let def = furniture_def(Furniture::Desk);
@@ -1511,9 +1506,9 @@ fn wander_interrupted_by_active_does_not_teleport() {
         }
     }
     assert!(
-            max_step <= MAX_FRAME_STEP_PX,
-            "interrupted wander teleported back to desk: max frame jump {max_step}px (> {MAX_FRAME_STEP_PX})"
-        );
+        max_step <= MAX_FRAME_STEP_PX,
+        "interrupted wander teleported back to desk: max frame jump {max_step}px (> {MAX_FRAME_STEP_PX})"
+    );
 }
 
 #[test]
@@ -1627,9 +1622,9 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
         .abs()
         .max((first_exit.y as i32 - last.y as i32).abs());
     assert!(
-            jump <= MAX_FRAME_STEP_PX,
-            "exit-while-wandering teleported {jump}px from the waypoint ({last:?}) to the exit start ({first_exit:?})"
-        );
+        jump <= MAX_FRAME_STEP_PX,
+        "exit-while-wandering teleported {jump}px from the waypoint ({last:?}) to the exit start ({first_exit:?})"
+    );
 
     let mut prev = first_exit;
     let mut max_step = 0i32;
@@ -1683,9 +1678,9 @@ fn wander_continuous_across_layouts_and_agents() {
             // ~20 s ⇒ 2–3 full wander cycles per agent.
             let (max_step, _) = max_anchor_step(&slot, &l, now, 600, true);
             assert!(
-                    max_step <= MAX_FRAME_STEP_PX,
-                    "geometry {w}x{h} seed={seed} desk={k}: max frame jump {max_step}px (> {MAX_FRAME_STEP_PX})"
-                );
+                max_step <= MAX_FRAME_STEP_PX,
+                "geometry {w}x{h} seed={seed} desk={k}: max frame jump {max_step}px (> {MAX_FRAME_STEP_PX})"
+            );
         }
     }
 }
@@ -1781,9 +1776,9 @@ fn frozen_leg_anchor_continuous_across_router_shape_change() {
         }
     }
     assert!(
-            max_step <= 20,
-            "frozen leg must keep the anchor continuous despite a mid-leg router shape change (max jump {max_step}px)"
-        );
+        max_step <= 20,
+        "frozen leg must keep the anchor continuous despite a mid-leg router shape change (max jump {max_step}px)"
+    );
 }
 
 #[test]

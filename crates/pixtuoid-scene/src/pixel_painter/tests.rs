@@ -1,7 +1,7 @@
 use super::anchors::{
-    back_couch_anchor, seated_anchor_facing, walking_anchor, waypoint_anchor, CHARACTER_SPRITE_W,
+    CHARACTER_SPRITE_W, back_couch_anchor, seated_anchor_facing, walking_anchor, waypoint_anchor,
 };
-use super::seat::{settle_seat, Seat};
+use super::seat::{Seat, settle_seat};
 use super::*;
 use crate::pose;
 use pixtuoid_core::sprite::{Frame, Pixel};
@@ -622,7 +622,7 @@ fn the_embedded_pack_draws_every_key_an_agent_recolors() {
 #[cfg(feature = "density-art")]
 fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
     use pixtuoid_core::sprite::format::{
-        density_variant_name, OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS,
+        OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS, density_variant_name,
     };
     let pack = crate::embedded_pack::test_default_pack();
     let mut variants = 0;
@@ -770,7 +770,9 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
     let pack = |variant_top: Option<(char, char)>| {
         let (g0, g1) = variant_top.unwrap_or((HAIR_KEY, SKIN_KEY));
         let variant = if variant_top.is_some() {
-            format!("[animations.\"{anim}@{DENSITY}x\"]\nframes=[\"g0.sprite\", \"g1.sprite\"]\nframe_ms=100\n")
+            format!(
+                "[animations.\"{anim}@{DENSITY}x\"]\nframes=[\"g0.sprite\", \"g1.sprite\"]\nframe_ms=100\n"
+            )
         } else {
             String::new()
         };
@@ -1321,7 +1323,7 @@ fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
 
 #[test]
 fn waypoint_depth_baseline_is_center_pinned_sprite_south() {
-    use crate::layout::{furniture_def, WaypointKind};
+    use crate::layout::{WaypointKind, furniture_def};
     let south_off = |k: WaypointKind| {
         furniture_def(k.furniture())
             .footprint
@@ -1413,7 +1415,7 @@ fn desk_walk_anchor_settles_exactly_on_the_seat() {
 
 #[test]
 fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
-    use crate::layout::{seated_foot_cell, Furniture};
+    use crate::layout::{Furniture, seated_foot_cell};
     for pos in [
         Point { x: 40, y: 30 },
         Point { x: 100, y: 60 },
@@ -1449,7 +1451,7 @@ fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
 
 #[test]
 fn settle_view_matches_the_seated_view_for_every_seat() {
-    use crate::layout::{Facing, WaypointKind, TEST_DEFAULT_DESKS};
+    use crate::layout::{Facing, TEST_DEFAULT_DESKS, WaypointKind};
     let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let seats: Vec<_> = l
         .waypoints
@@ -1506,7 +1508,7 @@ fn settle_view_matches_the_seated_view_for_every_seat() {
 
 #[test]
 fn island_settle_z_stays_behind_the_countertop() {
-    use crate::layout::{Anchor, Furniture, WaypointKind, TEST_DEFAULT_DESKS};
+    use crate::layout::{Anchor, Furniture, TEST_DEFAULT_DESKS, WaypointKind};
     let mut exercised = false;
     for seed in 0..5u64 {
         let Some(l) = Layout::compute_with_seed(240, 160, Some(TEST_DEFAULT_DESKS), seed) else {
@@ -1548,7 +1550,7 @@ fn island_settle_z_stays_behind_the_countertop() {
 #[test]
 fn settle_seat_recognizes_the_home_desk() {
     use crate::layout::TEST_DEFAULT_DESKS;
-    use crate::layout::{desk_walk_anchor_facing, Furniture};
+    use crate::layout::{Furniture, desk_walk_anchor_facing};
     let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let desk = *l.home_desks.first().expect("at least one home desk");
     let chair = desk_walk_anchor_facing(desk, l.desk_facing_at(desk));
@@ -1582,7 +1584,7 @@ fn settle_seat_recognizes_the_home_desk() {
 
 #[test]
 fn desk_sitter_feet_row_is_its_sort_row_on_the_documented_side_of_the_desk() {
-    use crate::layout::{desk_furniture_def, Facing};
+    use crate::layout::{Facing, desk_furniture_def};
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
         for facing in [Facing::North, Facing::South] {
             for w in [CHARACTER_SPRITE_W, 10] {
@@ -1608,7 +1610,7 @@ fn desk_sitter_feet_row_is_its_sort_row_on_the_documented_side_of_the_desk() {
 #[test]
 fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
     use crate::layout::{
-        furniture_def, z_sort_row, Anchor, Facing, Furniture, WaypointKind, TEST_DEFAULT_DESKS,
+        Anchor, Facing, Furniture, TEST_DEFAULT_DESKS, WaypointKind, furniture_def, z_sort_row,
     };
     let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let mut saw_back = false;
@@ -1718,8 +1720,8 @@ fn desk_z_key_is_the_visual_south() {
 #[test]
 fn every_hover_size_is_its_painted_sprite_size() {
     use crate::layout::{
-        furniture_def, Furniture, PlantKind, PodDecor, Size, WallDecor, COMPACT_COUNTER,
-        ELEVATOR_H, ELEVATOR_W, LARGE_COUNTER,
+        COMPACT_COUNTER, ELEVATOR_H, ELEVATOR_W, Furniture, LARGE_COUNTER, PlantKind, PodDecor,
+        Size, WallDecor, furniture_def,
     };
     let def =
         |f: Furniture, sprite: &'static str| (format!("{f:?}"), furniture_def(f).visual, sprite);
@@ -2023,7 +2025,7 @@ fn the_roster_sorts_as_the_classic_painter_queues() {
 
 #[test]
 fn every_pod_occludes_via_overhang() {
-    use crate::layout::{furniture_def, PodDecor, Size};
+    use crate::layout::{PodDecor, Size, furniture_def};
     assert_eq!(
         PodDecor::ALL.len(),
         5,
@@ -2208,7 +2210,7 @@ fn waypoint_rank_offset_x_decollision_table() {
 #[test]
 fn no_exclusive_waypoint_kind_ever_steps_aside() {
     use super::anchors::waypoint_rank_offset_x;
-    use crate::layout::{furniture_def, WaypointKind};
+    use crate::layout::{WaypointKind, furniture_def};
     let mut exclusive = 0;
     let (mut saw_booth, mut saw_shareable_steps) = (false, false);
     for &kind in WaypointKind::ALL {
@@ -3428,12 +3430,15 @@ fn a_mascots_state_reaches_its_hover_and_its_sprite() {
             (busy, degraded),
             "{state:?} hover"
         );
-        let [Drawable {
-            kind: DrawableKind::GatewayMascot {
-                degraded: drawn, ..
+        let [
+            Drawable {
+                kind:
+                    DrawableKind::GatewayMascot {
+                        degraded: drawn, ..
+                    },
+                ..
             },
-            ..
-        }] = drawables.as_slice()
+        ] = drawables.as_slice()
         else {
             panic!("{state:?}: one mascot drawable");
         };
@@ -3443,7 +3448,7 @@ fn a_mascots_state_reaches_its_hover_and_its_sprite() {
 
 #[test]
 fn sim_step_walks_a_mascot_in_for_each_gateway_present() {
-    use pixtuoid_core::source::daemon::{apply_presence, DaemonInstanceKey, DaemonPresenceUpdate};
+    use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
     use pixtuoid_core::state::DaemonInstanceId;
     use std::time::Duration;
     let (mut scene, layout, _, now0, pack) = sim_rig();
@@ -3835,7 +3840,7 @@ fn pantry_mats_stay_inside_the_pantry_bounds() {
 
 #[test]
 fn fish_tank_paints_water_fish_and_cabinet_from_the_furniture_row() {
-    use crate::layout::{furniture_def, Furniture};
+    use crate::layout::{Furniture, furniture_def};
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let floor = Rgb {
         r: 150,
@@ -3968,7 +3973,7 @@ fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
 
 #[test]
 fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
-    use crate::layout::{Facing, Point, WaypointKind, SEAT_RENDER_Y_OFF};
+    use crate::layout::{Facing, Point, SEAT_RENDER_Y_OFF, WaypointKind};
     let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
         .expect("embedded pack");
     let pos = Point { x: 40, y: 30 };
@@ -4192,7 +4197,7 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
 
 #[test]
 fn no_two_agents_ever_occupy_the_same_exclusive_waypoint() {
-    use crate::layout::{furniture_def, TEST_DEFAULT_DESKS};
+    use crate::layout::{TEST_DEFAULT_DESKS, furniture_def};
     use crate::pose::Pose;
     use std::time::Duration;
 
@@ -4255,7 +4260,7 @@ fn no_two_agents_ever_occupy_the_same_exclusive_waypoint() {
 /// sitter flagged standing lays a shadow slab across the sofa's front.
 #[test]
 fn a_placement_is_seated_exactly_when_its_figure_sits_on_furniture() {
-    use crate::layout::{WaypointKind, TEST_DEFAULT_DESKS};
+    use crate::layout::{TEST_DEFAULT_DESKS, WaypointKind};
     use crate::pose::Pose;
     use std::time::Duration;
 
@@ -4320,7 +4325,7 @@ fn a_placement_is_seated_exactly_when_its_figure_sits_on_furniture() {
 
 #[test]
 fn an_active_agent_releases_the_seat_it_snapped_back_from() {
-    use crate::layout::{furniture_def, TEST_DEFAULT_DESKS};
+    use crate::layout::{TEST_DEFAULT_DESKS, furniture_def};
     use crate::motion::WanderKind;
     use crate::pose::Pose;
     use std::time::Duration;
@@ -4432,7 +4437,7 @@ fn precipitation_level_maps_audible_rain_and_honors_the_override() {
 
 #[test]
 fn one_meeting_sofa_still_seats_three_agents_at_once() {
-    use crate::layout::{furniture_def, WaypointKind, TEST_DEFAULT_DESKS};
+    use crate::layout::{TEST_DEFAULT_DESKS, WaypointKind, furniture_def};
     use crate::pose::Pose;
     use std::time::Duration;
 
@@ -4519,7 +4524,7 @@ fn one_meeting_sofa_still_seats_three_agents_at_once() {
 
 #[test]
 fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
-    use crate::layout::{stand_point, WaypointKind, TEST_DEFAULT_DESKS};
+    use crate::layout::{TEST_DEFAULT_DESKS, WaypointKind, stand_point};
     use crate::pose::Pose;
     use std::time::Duration;
 
@@ -4750,7 +4755,7 @@ fn character_render_names_resolve_in_the_animation_registry() {
 // so no single port/instant demonstrates it.
 #[test]
 fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
-    use pixtuoid_core::source::daemon::{apply_presence, DaemonInstanceKey, DaemonPresenceUpdate};
+    use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
     use pixtuoid_core::state::DaemonInstanceId;
     use std::time::Duration;
 

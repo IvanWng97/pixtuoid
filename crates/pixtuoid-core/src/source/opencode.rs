@@ -32,12 +32,12 @@
 //!   `server.instance.disposed` carries only a `directory` (no session ids), so
 //!   it is NOT decoded — the pid-watch covers instance teardown.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde_json::Value;
 
-use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
-use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
+use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
+use crate::source::{AgentEvent, ToolDetail};
 
 /// The opencode CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "opencode";
@@ -314,9 +314,11 @@ mod tests {
             let got = decode_oc_hook_payload(&payload(ev)).expect("a decoded event decodes");
             assert!(!got.is_empty(), "{ev} must reach a real arm");
         }
-        assert!(decode_oc_hook_payload(&payload("session.archived"))
-            .expect("an unhandled type is not an error")
-            .is_empty());
+        assert!(
+            decode_oc_hook_payload(&payload("session.archived"))
+                .expect("an unhandled type is not an error")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -338,12 +340,14 @@ mod tests {
             "properties": {"sessionID": "ses_n", "info": {"id": "ses_n", "directory": "/repo"}}
         });
         let evs = decode_oc_hook_payload(&v).unwrap();
-        assert!(evs
-            .iter()
-            .any(|e| matches!(e, AgentEvent::SessionStart { .. })));
-        assert!(!evs
-            .iter()
-            .any(|e| matches!(e, AgentEvent::ModelInfo { .. })));
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, AgentEvent::SessionStart { .. }))
+        );
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, AgentEvent::ModelInfo { .. }))
+        );
     }
     use crate::source::decoder::MAX_TOOL_TARGET_CHARS;
     use serde_json::json;
@@ -645,10 +649,10 @@ mod tests {
             decode_oc_hook_payload(&json!({"properties": {}})).is_err(),
             "missing type"
         );
-        assert!(decode_oc_hook_payload(
-            &json!({"type": "session.created", "properties": {"info": {}}})
-        )
-        .is_err());
+        assert!(
+            decode_oc_hook_payload(&json!({"type": "session.created", "properties": {"info": {}}}))
+                .is_err()
+        );
         assert!(
             decode_oc_hook_payload(&json!({"type": "session.created", "properties": {}})).is_err()
         );

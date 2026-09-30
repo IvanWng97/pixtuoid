@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use pixtuoid_core::sprite::format::{
-    load_pack, load_pack_from_strings, validate_pack_animations, DensityMismatch,
-    FrameCountMismatch, Pack, ValidationReport,
+    DensityMismatch, FrameCountMismatch, Pack, ValidationReport, load_pack, load_pack_from_strings,
+    validate_pack_animations,
 };
 
 /// Where a sprite pack's custom half comes from. The source decides what a

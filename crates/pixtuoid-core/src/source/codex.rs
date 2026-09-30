@@ -11,14 +11,14 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::{Map, Value};
 
-use crate::source::decoder::{ellipsize, make_tool_detail, MAX_DECODED_FIELD_CHARS};
-use crate::source::AgentEvent;
 use crate::AgentId;
+use crate::source::AgentEvent;
+use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize, make_tool_detail};
 
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
-pub use native::{live_codex_rollout_ids, CodexSource};
+pub use native::{CodexSource, live_codex_rollout_ids};
 
 /// The Codex CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "codex";
@@ -480,9 +480,11 @@ mod tests {
         let out = ev(json!({"type":"response_item","payload":{
             "type":"custom_tool_call","call_id":"call_x","name":"exec","input":"ls"}}));
         match out.as_slice() {
-            [AgentEvent::ActivityStart {
-                detail: Some(d), ..
-            }] => {
+            [
+                AgentEvent::ActivityStart {
+                    detail: Some(d), ..
+                },
+            ] => {
                 assert!(
                     format!("{d:?}").contains("exec"),
                     "tool name must reach the detail: {d:?}"
@@ -714,10 +716,12 @@ mod tests {
             "payload": { "type": "function_call", "arguments": r#"{"cmd":"ls"}"# }
         }));
         match out.as_slice() {
-            [AgentEvent::ActivityStart {
-                detail: Some(ToolDetail::Generic { display }),
-                ..
-            }] => assert_eq!(display, "tool"),
+            [
+                AgentEvent::ActivityStart {
+                    detail: Some(ToolDetail::Generic { display }),
+                    ..
+                },
+            ] => assert_eq!(display, "tool"),
             other => panic!("expected one Generic-detail ActivityStart, got {other:?}"),
         }
     }

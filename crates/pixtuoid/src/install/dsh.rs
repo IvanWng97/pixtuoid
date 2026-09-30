@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use saphyr::{LoadableYamlNode, MappingOwned, ScalarOwned, Yaml, YamlEmitter, YamlOwned};
 
 use crate::install::target::MergeOutcome;
@@ -538,10 +538,12 @@ mod tests {
         std::env::set_var("DSH_HOME", home.path());
         let one = merge_install("", "/unused").unwrap();
         let dup = format!("{}{}", one.content, one.content);
-        assert!(verify_schema(&dup)
-            .issues
-            .iter()
-            .any(|i| i.contains("reconnect dsh to collapse")));
+        assert!(
+            verify_schema(&dup)
+                .issues
+                .iter()
+                .any(|i| i.contains("reconnect dsh to collapse"))
+        );
         let collapsed = merge_install(&dup, "/unused").unwrap();
         assert!(collapsed.changed);
         assert!(verify_schema(&collapsed.content).issues.is_empty());
@@ -602,10 +604,11 @@ mod tests {
         std::env::set_var("DSH_HOME", home.path());
 
         let none = verify_schema("");
-        assert!(none
-            .issues
-            .iter()
-            .any(|i| i.contains("no pixtuoid mount entry")));
+        assert!(
+            none.issues
+                .iter()
+                .any(|i| i.contains("no pixtuoid mount entry"))
+        );
 
         // The plugin file does not exist on disk, yet the schema reads
         // clean: verify_schema is PURE over the content — a missing file is

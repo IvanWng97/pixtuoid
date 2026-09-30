@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use pixtuoid_core::source::{AgentEvent, Transport};
-use pixtuoid_core::state::reducer::Reducer;
-use pixtuoid_core::state::SceneState;
 use pixtuoid_core::AgentId;
+use pixtuoid_core::source::{AgentEvent, Transport};
+use pixtuoid_core::state::SceneState;
+use pixtuoid_core::state::reducer::Reducer;
 
 use crate::{act_end, act_start, delegating_pair, proof_of_life, sess_end, waiting};
 

@@ -11,13 +11,13 @@
 //! Time is a PARAMETER: `tick` takes `dt` and never reads a clock.
 
 use super::bank::{
-    track_stems_silent, OneShotPool, DROP_GAIN, DROP_POOL, KEYSTROKE_GAIN, KEYSTROKE_POOL,
-    ONE_SHOT_GAIN,
+    DROP_GAIN, DROP_POOL, KEYSTROKE_GAIN, KEYSTROKE_POOL, ONE_SHOT_GAIN, OneShotPool,
+    track_stems_silent,
 };
 use super::dsp::NoiseStream;
 use super::mixer::{DropScheduler, LoopStem, Mixer, TypingScheduler};
 use super::{
-    AudioFrame, OneShot, StemLevels, TrackId, TrackSwitch, DROP_SEED, PICK_SEED, TYPING_SEED,
+    AudioFrame, DROP_SEED, OneShot, PICK_SEED, StemLevels, TYPING_SEED, TrackId, TrackSwitch,
 };
 
 /// dt ceiling (s): a bigger inter-tick gap (a native track-build stall, a

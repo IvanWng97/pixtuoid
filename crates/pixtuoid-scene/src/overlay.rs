@@ -11,7 +11,7 @@ use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, SceneState};
 
-use crate::layout::{Layout, Point, DESK_W};
+use crate::layout::{DESK_W, Layout, Point};
 use crate::pixel_painter::character_anchor;
 use crate::pose::RouteCtx;
 use crate::theme::Theme;
@@ -179,13 +179,13 @@ pub fn disambig_suffix(session_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        badge_hue, build_overlay, disambig_suffix, truncate_label, LabelElement, LabelTone,
+        LabelElement, LabelTone, badge_hue, build_overlay, disambig_suffix, truncate_label,
     };
     use crate::layout::Layout;
     use crate::pathfind::AStarRouter;
     use crate::pose::RouteRig;
-    use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
     use pixtuoid_core::AgentId;
+    use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::{Duration, SystemTime};
