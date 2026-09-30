@@ -76,8 +76,8 @@ run. The jobs:
   rides `claude-readonly-review.yml`: a
   read-only model job on the trusted default branch, the PR diff as inert
   data, and a separate least-privilege publisher that opens a review thread
-  per finding and sets the lens's `claude-review/<lens>` status; a run that
-  does not publish sets it to failure. `claude.yml` refuses fork PR heads.
+  per finding and sets the lens's `claude-review/<lens>` status. `claude.yml`
+  refuses fork PR heads.
 - **CodeQL** stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).

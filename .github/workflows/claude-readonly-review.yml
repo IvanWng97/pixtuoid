@@ -358,7 +358,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          echo "::error title=$REVIEW_TITLE absent::analyze $ANALYZE_RESULT, publish $PUBLISH_RESULT. The action blames the JSON schema whatever the cause: a result object with total_cost_usd 0 never reached inference (a spent quota)."
+          echo "::error title=$REVIEW_TITLE absent::analyze $ANALYZE_RESULT, publish $PUBLISH_RESULT"
           [[ -n "$HEAD_SHA" ]] || exit 1
           jq -n --arg state failure --arg context "$REVIEW_STATUS" --arg target_url "$RUN_URL" \
             --arg description "No review published at this head: see the run" '$ARGS.named' |

@@ -268,10 +268,21 @@ for bad in "${bad_bounds[@]}"; do
         fail "Claude publisher posted with the bounds '$bad'"
 done
 
+REVIEW_SCHEMA_FILE="${REVIEW_SCHEMA_FILE:-.github/prompts/review-schema.json}"
+schema_accepts() {
+    printf '%s' "$1" >"$test_dir/instance.json"
+    check-jsonschema --schemafile "$REVIEW_SCHEMA_FILE" "$test_dir/instance.json" >/dev/null 2>&1
+}
+assert_schema_bound() {
+    schema_accepts "$2" || fail "$REVIEW_SCHEMA_FILE rejects a review at the bounds' $1"
+    ! schema_accepts "$3" || fail "$REVIEW_SCHEMA_FILE accepts a review past the bounds' $1"
+}
+
 findings_of() {
     jq -cn --argjson s "$severities" --argjson n "$1" \
         '{summary: "s", findings: [range($n) | {severity: $s[0], path: "src/a.rs", line: 2, body: "b"}]}'
 }
+assert_schema_bound max_findings "$(findings_of "$max_findings")" "$(findings_of $((max_findings + 1)))"
 run_publisher "$(findings_of "$max_findings")" ||
     fail "Claude publisher rejected the schema's maxItems findings"
 run_publisher "$(findings_of $((max_findings + 1)))" >/dev/null 2>&1 &&
@@ -280,23 +291,21 @@ run_publisher "$(findings_of $((max_findings + 1)))" >/dev/null 2>&1 &&
     fail "Claude publisher passed the status of a review it refused"
 FAKE_BOUNDS="$(with_bounds '.max_findings += 1')" run_publisher "$(findings_of $((max_findings + 1)))" ||
     fail "Claude publisher bounds the findings by its own number, not max_findings"
-for field in path summary body; do
-    long="$(printf 'a%.0s' $(seq "$(jq ".${field}_max + 1" <<<"$bounds")"))"
-    review="$(jq -cn --argjson s "$severities" --arg f "$field" --arg v "$long" '
+review_with() {
+    jq -cn --argjson s "$severities" --arg f "$1" --arg v "$(printf 'a%.0s' $(seq "$2"))" '
         {summary: "s", findings: [{severity: $s[0], path: "src/a.rs", line: 2, body: "b"}]}
-        | if $f == "summary" then .summary = $v else .findings[0][$f] = $v end')"
+        | if $f == "summary" then .summary = $v else .findings[0][$f] = $v end'
+}
+for field in path summary body; do
+    field_max="$(jq ".${field}_max" <<<"$bounds")"
+    review="$(review_with "$field" $((field_max + 1)))"
+    assert_schema_bound "${field}_max" "$(review_with "$field" "$field_max")" "$review"
     run_publisher "$review" >/dev/null 2>&1 &&
         fail "Claude publisher accepted a $field past the schema's maxLength"
     FAKE_BOUNDS="$(with_bounds ".${field}_max += 1")" run_publisher "$review" ||
         fail "Claude publisher bounds the $field by its own number, not ${field}_max"
 done
 
-REVIEW_SCHEMA_FILE="${REVIEW_SCHEMA_FILE:-.github/prompts/review-schema.json}"
-
-schema_accepts() {
-    printf '%s' "$1" >"$test_dir/instance.json"
-    check-jsonschema --schemafile "$REVIEW_SCHEMA_FILE" "$test_dir/instance.json" >/dev/null 2>&1
-}
 six_blocking="$(jq -cn --argjson s "$severities" '{summary: "s", findings: [
     "src/a.rs", "src/b.rs", "img.png", ".github/workflows/ci.yml", "a/.hidden/..x", "crates/c/desk@8x.sprite"
     | {severity: $s[0], path: ., line: 1, body: "b"}]}')"
