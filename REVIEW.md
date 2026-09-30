@@ -16,6 +16,10 @@ instructions.
   pre-flight, except for an [escalation](#escalation) row marked **local**: a
   bot reads the diff and the base tree, so it cannot build, render or run the
   head.
+- A fork PR is never reviewed on its own: a maintainer approves its CI run,
+  then comments `/claude-review` and `/security-review`, again after every
+  push. Its author can resolve their own threads, so before merging read each
+  thread's `resolvedBy` and its reply.
 
 ## What to check
 

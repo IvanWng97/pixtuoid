@@ -241,9 +241,9 @@ invariants"), which every contributor and agent reads first.
 
 ## Pull requests
 
-- Review rules, severity, dispositions and the recurring pitfalls:
-  [`REVIEW.md`](../REVIEW.md). Every finding's review thread is resolved by
-  its disposition.
+- Review rules, severity, dispositions, the recurring pitfalls and how an
+  outside contributor's PR gets reviewed: [`REVIEW.md`](../REVIEW.md). Every
+  finding's review thread is resolved by its disposition.
 - AI-authored PRs get the `needs-human-verify` label and a human visual check.
 
 ### Handy `gh` commands

@@ -39,10 +39,12 @@ assert_reviewability() {
     local fixture="$2"
     local expected="$3"
     local label="$4"
+    local allow_fork="${5:-false}"
     local output_file="$test_dir/pr-resolution-output"
     : >"$output_file"
 
     PATH="$fake_bin:$PATH" \
+        ALLOW_FORK="$allow_fork" \
         DEFAULT_BRANCH="main" \
         FAKE_PR_JSON="$fixture" \
         GH_TOKEN="test-token" \
@@ -56,7 +58,7 @@ assert_reviewability() {
     output="$(<"$output_file")"
     if [[ "$expected" == true ]]; then
         [[ "$output" == *"reviewable=true"* ]] ||
-            fail "$label resolver rejected an open internal default-branch PR"
+            fail "$label resolver rejected an open default-branch PR inside its trust boundary"
         [[ "$output" == *"number=42"* && "$output" == *"head_sha=abc123"* ]] ||
             fail "$label resolver omitted the immutable PR identity"
     elif [[ "$output" != "reviewable=false" ]]; then
@@ -66,14 +68,23 @@ assert_reviewability() {
 
 valid_pr='{"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"open"}'
 fork_pr='{"head":{"repo":{"full_name":"fork/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"open"}'
+deleted_fork_pr='{"head":{"repo":null,"sha":"abc123"},"base":{"ref":"main"},"state":"open"}'
 wrong_base_pr='{"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"release"},"state":"open"}'
 closed_pr='{"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"closed"}'
+fork_wrong_base_pr='{"head":{"repo":{"full_name":"fork/repo"},"sha":"abc123"},"base":{"ref":"release"},"state":"open"}'
+fork_closed_pr='{"head":{"repo":{"full_name":"fork/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"closed"}'
 resolver_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Resolve pull request")"
 label="$(basename "$CLAUDE_REVIEW_WORKFLOW_FILE")"
 assert_reviewability "$resolver_script" "$valid_pr" true "$label"
-assert_reviewability "$resolver_script" "$fork_pr" false "$label fork"
+assert_reviewability "$resolver_script" "$fork_pr" false "$label automatic fork"
+assert_reviewability "$resolver_script" "$deleted_fork_pr" false "$label automatic deleted fork"
 assert_reviewability "$resolver_script" "$wrong_base_pr" false "$label base"
 assert_reviewability "$resolver_script" "$closed_pr" false "$label state"
+assert_reviewability "$resolver_script" "$fork_pr" true "$label approved fork" true
+assert_reviewability "$resolver_script" "$deleted_fork_pr" true "$label approved deleted fork" true
+assert_reviewability "$resolver_script" "$valid_pr" true "$label approved same-repo" true
+assert_reviewability "$resolver_script" "$fork_wrong_base_pr" false "$label approved fork base" true
+assert_reviewability "$resolver_script" "$fork_closed_pr" false "$label approved fork state" true
 
 publisher_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Publish validated Claude review")"
 published_comment="$test_dir/published-comment"

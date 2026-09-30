@@ -35,6 +35,7 @@ jobs:
       review_title: Claude Review
       max_turns: 60
       max_budget_usd: 10
+      allow_fork: ${{ github.event_name == 'issue_comment' }}
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     concurrency:
