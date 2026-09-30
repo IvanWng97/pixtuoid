@@ -250,7 +250,7 @@ arch:
         # which would print the green line without having checked anything.
         deps="$(cargo tree -p "$crate" --edges normal --prefix none --target all --all-features)"
         if grep -qE '^(ratatui|crossterm|winit|softbuffer|rodio|cpal)' <<<"$deps"; then
-            echo "ARCH VIOLATION: $crate depends on a terminal/window/audio-device crate (CLAUDE.md invariant #1)"; exit 1
+            echo "ARCH VIOLATION: $crate depends on a terminal/window/audio-device crate (AGENTS.md invariant #1)"; exit 1
         fi
     done
     echo "arch: pixtuoid-core + pixtuoid-scene are terminal/window/audio-device-free"
@@ -927,7 +927,7 @@ gen-wasm: gen-wasm-tools wasm-build
 # stable, so local `just gen-wasm` + review is the freshness authority. Nothing
 # here reads a scene/core/web source, so a merge that skips `just gen-wasm`
 # ships a stale hero with every gate green; the compensating control is root
-# CLAUDE.md's "Build & test" gen-wasm note, not this recipe.
+# AGENTS.md's "Build & test" gen-wasm note, not this recipe.
 # No input-hash stamp: pixtuoid-core's `native` source runtime is code the wasm
 # never links, so a stamp would demand a wasm regen on changes that cannot alter
 # it. That reason does not cover scene or web, where any change can move the
