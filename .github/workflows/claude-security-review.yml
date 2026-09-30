@@ -30,7 +30,7 @@ jobs:
     uses: ./.github/workflows/claude-readonly-review.yml
     with:
       pr_number: ${{ github.event.issue.number || github.event.pull_request.number }}
-      prompt_path: .github/prompts/security_review_rules.md
+      prompt_path: REVIEW.md
       review_marker: claude-security-review
       review_title: Claude Security Review
       max_turns: 40

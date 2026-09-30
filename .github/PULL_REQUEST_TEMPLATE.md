@@ -49,7 +49,7 @@ pixel painter, attach a cropped snapshot and self-critique:
 - [ ] No `unwrap()` in non-test code; errors propagate via `anyhow`/`thiserror`.
 - [ ] No new `println!`/`eprintln!` on a production path (use `tracing`).
 - [ ] Docs updated in the same commit if I changed module structure, architecture, or public API (`AGENTS.md` / `README.md`).
-- [ ] Checked against the [recurring pitfalls](https://github.com/IvanWng97/pixtuoid/blob/main/docs/CONTRIBUTING.md#recurring-pitfalls-this-codebases-review-history-distilled): char-safe slicing · no parallel copies without a bridge test · sanitize at the decode boundary · negative branches pinned.
+- [ ] Checked against [`REVIEW.md`](https://github.com/IvanWng97/pixtuoid/blob/main/REVIEW.md#what-to-check), the rules the review bots apply.
 - [ ] CI is green.
 
 ## AI assistance

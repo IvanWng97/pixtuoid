@@ -70,7 +70,7 @@ run. The jobs:
   capture-tree rules ride `just test` instead.
 - **zizmor** — workflow/action security: symbolic-or-SHA pins,
   credential-dropping checkouts, exact inline suppressions.
-- **The two automatic Claude reviewers** ride `claude-readonly-review.yml`: a
+- **The two automatic Claude reviewers**, ruled by [`REVIEW.md`](../REVIEW.md), ride `claude-readonly-review.yml`: a
   read-only model job on the trusted default branch, the PR diff as inert
   data, a separate least-privilege publisher that opens a review thread per
   finding — and a third job that comments
@@ -189,14 +189,11 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    whole-file comment audit: every file the PR touches — even by one line —
    gets its entire comment population re-read against `AGENTS.md`'s comment
    rules, and the cleanup rides the same PR (population and dispositions:
-   [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md)'s
-   always-on comment row). Not the merge gate.
-8. **Merge gate (non-negotiable)** — the **two-lens review** (2+ differentiated
-   lenses on the diff) + green CI + every finding's review thread resolved by
-   its disposition, judged under the `two-lens-review` skill's **convergence
-   contract**: churn budget before review, a two-fix-round hard cap, only a
-   confirmed HIGH blocks, and a bot `Findings: 0` is evidence, not the gate. (Bot errored or
-   absent at HEAD → the skill's step 6 owns the fallback.) **A human merges.**
+   [`REVIEW.md`](../REVIEW.md#design)'s comment audit). Not the merge gate.
+8. **Merge gate (non-negotiable)** — [`REVIEW.md`](../REVIEW.md#convergence-contract)'s
+   gate: the review bots at the final head + green CI + every finding's review
+   thread resolved by its disposition, plus a local run of each matching
+   local-only escalation row. **A human merges.**
 9. **Wrap** — retro; durable lessons go to the agent's own memory layer, not
    new repo docs.
 
@@ -218,7 +215,7 @@ crate IS.
 | while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
 | once you need a PR number | open it as a draft: the light tier runs, and `ci-gate` stays red by design |
 | once the draft's light tier is green | mark it ready: the full tier and the billed review bots start together, so a failure only the full tier catches costs one extra review round until the bots are chained after CI |
-| before merge | the two-lens review |
+| before marking ready (optional), or when a REVIEW.md local row matches (mandatory) | the `two-lens-review` skill |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 
 One change spanning the Rust lib + the site + the Raycast extension:
@@ -244,30 +241,10 @@ invariants"), which every contributor and agent reads first.
 
 ## Pull requests
 
-- Every PR is reviewed by **2+ agents with differentiated lenses** before
-  merge — no exceptions. The mechanical teeth are the `claude-review` +
-  `claude-security-review` workflows plus your local two-lens pass.
+- Review rules, severity, dispositions and the recurring pitfalls:
+  [`REVIEW.md`](../REVIEW.md). Every finding's review thread is resolved by
+  its disposition.
 - AI-authored PRs get the `needs-human-verify` label and a human visual check.
-- **Every reviewer/bot finding reaches exactly one terminal state in the PR
-  thread** — FIXED · REFUTED · RE-SCOPED → #N · FOLLOW-UP → #N, defined ONCE
-  in [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md). Agents
-  never file issues, and "acknowledged, no action" is not a state.
-
-### Recurring pitfalls (this codebase's review history, distilled)
-
-1. **Byte-vs-char slicing** — user-visible text truncates on `char`/grapheme
-   boundaries, never bytes.
-2. **Parallel-implementation drift** — a value in two places (platform arms,
-   core+tui twins, manifest+enum) gets single-sourced or a bridge test; when
-   your diff guards one path, grep for its siblings (#159→#172).
-3. **Sanitize at the decode boundary** — untrusted input is cleaned where it
-   enters, not at each use site.
-4. **Negative-branch test gaps** — pin the REFUSAL path, both sides of any
-   window/threshold, with offsets derived from the constant under test.
-5. **Unwired additions** — every new field/parameter/asset needs a consumer
-   wired in the same diff (`_x` bindings and `pub` fields evade the lints; #61).
-6. **Denylist completeness** — diff any strip-set against the platform's
-   documented set; prefer an allowlist (#198/#201/#206).
 
 ### Handy `gh` commands
 
