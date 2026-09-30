@@ -1,7 +1,7 @@
 <!--
 Thanks for contributing to pixtuoid! Before you open this PR:
 - Read CLAUDE.md (root) — architecture invariants & conventions are load-bearing.
-- Push: the pre-push hook runs `just preflight` (lint + clippy); CI runs the tests. `just preflight full` reproduces the CI order locally.
+- Push: the pre-push hook runs `just preflight` (lint + clippy); CI runs the tests. `just preflight full` runs CI's Rust recipes locally.
 Delete sections that don't apply. Keep it short — the diff speaks for itself.
 -->
 
@@ -50,7 +50,7 @@ pixel painter, attach a cropped snapshot and self-critique:
 - [ ] No new `println!`/`eprintln!` on a production path (use `tracing`).
 - [ ] Docs updated in the same commit if I changed module structure, architecture, or public API (`CLAUDE.md` / `README.md`).
 - [ ] Checked against the [recurring pitfalls](https://github.com/IvanWng97/pixtuoid/blob/main/docs/CONTRIBUTING.md#recurring-pitfalls-this-codebases-review-history-distilled): char-safe slicing · no parallel copies without a bridge test · sanitize at the decode boundary · negative branches pinned.
-- [ ] `just preflight` passes locally (the pre-push hook runs it).
+- [ ] CI is green.
 
 ## AI assistance
 

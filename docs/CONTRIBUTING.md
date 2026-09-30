@@ -20,7 +20,7 @@ recipes.
 
 ```bash
 just              # list recipes
-just preflight    # pre-push gate: lint → clippy; `just preflight full` adds hack → test (the exact CI order)
+just preflight    # pre-push gate: lint → clippy; `just preflight full` adds hack → test (CI's Rust recipes)
 just fmt          # auto-format
 just test         # the whole suite (cargo-nextest if installed, else cargo test)
 cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
@@ -28,7 +28,7 @@ cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
 
 > **Don't chain `cargo clippy && cargo test`** — clippy and test use *separate*
 > build caches, so chaining recompiles the whole workspace twice. Run
-> `just preflight full` (the exact CI order), or one check at a time.
+> `just preflight full`, or one check at a time.
 
 Activate the git hooks once per clone: `git config core.hooksPath .githooks`
 (`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`, lint + clippy;
@@ -209,6 +209,7 @@ crate IS.
 | before code, if non-trivial (new seam / ≥3 files) | plan against [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) |
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` |
 | before push | nothing — the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
+| opening the PR | open it as a draft; mark it ready once CI is green — the billed review bots skip drafts, so a red push doesn't buy a review of a head that's about to be replaced |
 | before merge | the two-lens review |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 

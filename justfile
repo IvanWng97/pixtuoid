@@ -1009,11 +1009,11 @@ npm-check:
 
 # ── meta ──────────────────────────────────────────────────────────
 
-# The local gate `.githooks/pre-push` runs: lint + clippy, the fast checks that
-# catch most red pushes over warm incremental caches. Tests are CI's — run on
-# every push, each worktree re-ran the whole suite on one shared machine.
-# `full` adds the feature powerset and the tests in CI order (coverage and the
-# gen/smoke gates stay CI-only — heavy builds / venv+ffmpeg).
+# The local gate `.githooks/pre-push` runs: lint + clippy, fast over warm build
+# caches. Tests are CI's: in the hook, every worktree's push re-ran the whole
+# suite on one shared machine. `full` adds the feature powerset and the tests —
+# the Rust recipes CI's lint/clippy/hack/test jobs run; what it still can't see
+# is in CONTRIBUTING.md#ci-gates.
 [group('meta')]
 [doc('Local gate: lint → clippy; `full` = lint → clippy → hack → test')]
 preflight mode="":
