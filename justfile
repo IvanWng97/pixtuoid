@@ -450,24 +450,21 @@ _api-toolchain:
     rustup toolchain install {{API_NIGHTLY}} --profile minimal
 
 # Doc-rendering gate. Two things `cargo build`/`clippy`/`nextest` can't see:
-# (1) build the rendered docs with EVERY rustdoc warning as an error — the
-# broken/private intra-doc-link classes are already `deny` in
-# `[workspace.lints.rustdoc]`, and `-D warnings` also catches bare URLs, invalid
-# HTML, redundant links, and any future rustdoc lint, so `cargo doc` output stays
-# pristine (dead links render as broken anchors on docs.rs) — then AGAIN with
-# `--document-private-items`, because a doc on a private item is never rendered
-# by the first pass, so its links are never resolved and rot unseen (the first
-# pass still owns the public-links-to-private-item class, which the second
-# pass cannot see); (2) RUN the doctests
-# — `cargo nextest` does NOT execute doctests, so the crate-root examples would
-# otherwise go ungated. CI-only in practice (a doc build + a doctest run).
+# (1) build every item's docs, private ones included, with EVERY rustdoc
+# warning as an error — rustdoc resolves links only on the items it renders, so
+# a public-only build lets a private item's links rot unseen, while
+# `private_intra_doc_links` still fires on a public doc naming a private item
+# (the link docs.rs would render broken). The broken/private intra-doc-link
+# classes are already `deny` in `[workspace.lints.rustdoc]`; `-D warnings` adds
+# bare URLs, invalid HTML, redundant links, and any future rustdoc lint; (2) RUN
+# the doctests — `cargo nextest` does NOT execute doctests, so the crate-root
+# examples would otherwise go ungated. CI-only in practice (a doc build + a doctest run).
 [group('rust')]
-[doc('Doc gate: cargo doc with -D warnings + run the doctests nextest skips (CI-only)')]
+[doc('Doc gate: cargo doc (incl. private items) with -D warnings + run the doctests nextest skips (CI-only)')]
 doc-check:
     #!/usr/bin/env bash
     set -euo pipefail
-    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
-    RUSTDOCFLAGS="-D warnings --document-private-items" cargo doc --no-deps --workspace
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --document-private-items
     cargo test --doc --workspace
 
 # Coverage + JUnit XML in one run — the exact command ci-tests.yml's coverage job uses.
