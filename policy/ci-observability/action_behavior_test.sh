@@ -86,7 +86,6 @@ valid_pr='{"number":42,"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"}
 fork_pr='{"number":42,"head":{"repo":{"full_name":"fork/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"open"}'
 wrong_base_pr='{"number":42,"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"release"},"state":"open"}'
 closed_pr='{"number":42,"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"closed"}'
-moved_pr='{"number":42,"head":{"repo":{"full_name":"owner/repo"},"sha":"def456"},"base":{"ref":"main"},"state":"open"}'
 resolver_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Resolve pull request")"
 label="$(basename "$CLAUDE_REVIEW_WORKFLOW_FILE")"
 assert_reviewability "$resolver_script" "$valid_pr" true "$label"
@@ -94,17 +93,20 @@ assert_reviewability "$resolver_script" "$fork_pr" false "$label fork"
 assert_reviewability "$resolver_script" "$wrong_base_pr" false "$label base"
 assert_reviewability "$resolver_script" "$closed_pr" false "$label state"
 
-stacked_pr='{"number":43,"head":{"repo":{"full_name":"owner/repo"},"sha":"def456"},"base":{"ref":"feature"},"state":"open"}'
+moved_pr='{"number":42,"head":{"repo":{"full_name":"owner/repo"},"sha":"def456"},"base":{"ref":"main"},"state":"open"}'
+draft_pr='{"number":42,"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"main"},"state":"open","draft":true}'
+stacked_pr='{"number":43,"head":{"repo":{"full_name":"owner/repo"},"sha":"def456"},"base":{"ref":"main"},"state":"open"}'
+sibling_pr='{"number":44,"head":{"repo":{"full_name":"owner/repo"},"sha":"abc123"},"base":{"ref":"release"},"state":"open"}'
 assert_reviewability "$resolver_script" "$valid_pr" true "$label workflow_run, no PR number in the payload" \
     abc123 owner/repo "[$closed_pr,$stacked_pr,$valid_pr]"
-assert_reviewability "$resolver_script" "$fork_pr" skip "$label workflow_run fork" \
-    abc123 fork/repo "[$fork_pr]"
+assert_reviewability "$resolver_script" "$valid_pr" true "$label workflow_run, head also open against another base" \
+    abc123 owner/repo "[$sibling_pr,$valid_pr]"
+assert_reviewability "$resolver_script" "$draft_pr" skip "$label workflow_run draft" \
+    abc123 owner/repo "[$draft_pr]"
 assert_reviewability "$resolver_script" "$valid_pr" skip "$label workflow_run fork, same commit as a branch" \
     abc123 fork/repo "[$valid_pr]"
 assert_reviewability "$resolver_script" "$wrong_base_pr" skip "$label workflow_run base" \
     abc123 owner/repo "[$wrong_base_pr]"
-assert_reviewability "$resolver_script" "$moved_pr" skip "$label workflow_run moved head" \
-    abc123 owner/repo "[$moved_pr]"
 assert_reviewability "$resolver_script" "$moved_pr" skip "$label workflow_run head moved mid-resolve" \
     abc123 owner/repo "[$valid_pr]"
 assert_reviewability "$resolver_script" "$valid_pr" skip "$label workflow_run no PR" \

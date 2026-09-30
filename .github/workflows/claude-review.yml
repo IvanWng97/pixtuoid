@@ -1,4 +1,5 @@
 name: claude review
+run-name: claude review ${{ github.event.workflow_run.head_branch || github.event.issue.number }}
 
 on:
   # Chained after CI, so a head the full tier rejects never costs a review, and

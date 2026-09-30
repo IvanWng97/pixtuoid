@@ -73,11 +73,11 @@ run. The jobs:
 - **The two automatic Claude reviewers** ride `claude-readonly-review.yml`: a
   read-only model job on the trusted default branch, the PR diff as inert
   data, a separate least-privilege publisher — and a third job that comments
-  when the model job fails or declines, because absence otherwise renders as
-  a pass (#809). They start when `ci` passes on a PR, as a `workflow_run`
-  that is not one of the PR's checks, so their verdict is the comment;
-  `/claude-review` and `/security-review` re-run them. `claude.yml` refuses
-  fork PR heads.
+  when the model job fails, or declines a manual request, because absence
+  otherwise renders as a pass (#809). They start when `ci` passes on a PR, as
+  a `workflow_run` that is not one of the PR's checks, so their verdict is the
+  comment; `/claude-review` and `/security-review` re-run them. `claude.yml`
+  refuses fork PR heads.
 - **CodeQL** stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).

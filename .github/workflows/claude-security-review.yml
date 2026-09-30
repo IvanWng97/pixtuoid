@@ -1,9 +1,9 @@
 name: claude security review
+run-name: claude security review ${{ github.event.workflow_run.head_branch || github.event.issue.number }}
 
 on:
-  # Chained after CI, so a head the full tier rejects never costs a review, and
-  # a draft never reaches one: its ci-gate is red by design. The analysis loads
-  # from the default branch and receives the PR diff only as inert data.
+  # Triggered as claude-review.yml is. The analysis receives the PR diff only
+  # as inert data.
   workflow_run: # zizmor: ignore[dangerous-triggers] trusted-base caller; policy/ci-observability pins the read-only analyzer/publisher split
     workflows: [ci]
     types: [completed]

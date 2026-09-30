@@ -119,10 +119,11 @@ Hence:
 5. **Disposition sweep** (shared, below).
 6. **After a fix round**, re-run the gates and watch the NEW head's CI; before
    merging, read the online bot review's LATEST COMMENT verdict (`Findings: N`)
-   + `mergeStateStatus` — the review JOB passes even when it posts findings, so
-   the check table alone can't gate (#448). Judge the verdict against the
-   convergence contract above: dispositioned findings + zero open confirmed
-   HIGH, within the two-fix-round cap. If the bot ERRORED or left no
+   + `mergeStateStatus` — the bots run as `workflow_run` after `ci` is green at
+   HEAD and are not PR checks, so the comment is their only verdict; none
+   exists until then. Judge the verdict against the convergence contract
+   above: dispositioned findings + zero open confirmed HIGH, within the
+   two-fix-round cap. If the bot ERRORED or left no
    findings comment at HEAD (it can fail on a very large diff — `error_max_turns`
    with no comment — or on a spent quota, which the workflow states itself in
    an `<!-- absent-<marker>:<sha> -->` comment; do NOT read that as a review),

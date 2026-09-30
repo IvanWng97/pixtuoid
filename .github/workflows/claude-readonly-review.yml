@@ -81,8 +81,10 @@ jobs:
             # need not name the PR that ran, so the PR is found from the commit;
             # that lookup also returns merged PRs and ones that moved past it.
             gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/pulls" > "$RUNNER_TEMP/pull-requests.json"
-            PR_NUMBER="$(jq -r --arg sha "$HEAD_SHA" --arg repo "$HEAD_REPO" '
-              [.[] | select(.state == "open" and .head.sha == $sha and .head.repo.full_name == $repo) | .number]
+            # One head can be open in two PRs with different bases.
+            PR_NUMBER="$(jq -r --arg sha "$HEAD_SHA" --arg repo "$HEAD_REPO" --arg base "$DEFAULT_BRANCH" '
+              [.[] | select(.state == "open" and .head.sha == $sha and .head.repo.full_name == $repo
+                            and .base.ref == $base) | .number]
               | if length == 1 then .[0] else "" end
             ' "$RUNNER_TEMP/pull-requests.json")"
             if [[ -z "$PR_NUMBER" ]]; then
@@ -98,11 +100,13 @@ jobs:
           pr_head_sha="$(jq -r '.head.sha' "$RUNNER_TEMP/pull-request.json")"
           base_ref="$(jq -r '.base.ref // ""' "$RUNNER_TEMP/pull-request.json")"
           state="$(jq -r '.state // ""' "$RUNNER_TEMP/pull-request.json")"
+          draft="$(jq -r '.draft // false' "$RUNNER_TEMP/pull-request.json")"
 
           # A head CI did not pass would be reviewed only for the publisher to
-          # refuse it as stale.
+          # refuse it as stale. A draft's own ci-gate is red, but one converted
+          # while its full tier ran still ends green.
           if [[ "$pr_head_repo" != "$REPOSITORY" || "$base_ref" != "$DEFAULT_BRANCH" || "$state" != open ||
-                ( -n "$HEAD_SHA" && "$pr_head_sha" != "$HEAD_SHA" ) ]]; then
+                ( -n "$HEAD_SHA" && ( "$pr_head_sha" != "$HEAD_SHA" || "$draft" == true ) ) ]]; then
             echo "reviewable=$refusal" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -200,18 +204,16 @@ jobs:
             and (.findings | type == "array" and length <= 5)
           ' <<< "$REVIEW_JSON" > /dev/null
 
-  # Absence renders as a pass: publish skips, nothing comments, and `ci-gate`
-  # being the only required check leaves the PR merely UNSTABLE. The merge gate
-  # reads the bot verdict at HEAD as evidence, so an absent one must say so. Two
-  # shapes, and the quieter one is greener: analyze FAILS, or it DECLINES
-  # (`reviewable=false` exits 0, so that arm has no red job at all).
+  # Absence renders as a pass: the review is a `workflow_run`, not one of the
+  # PR's checks, so a failed or declined run leaves nothing on the PR. The merge
+  # gate reads the bot verdict at HEAD as evidence, so an absent one must say so.
   # `!cancelled()` is load-bearing: without a status function an implicit
-  # `success()` skips this job in exactly the situation it exists for. A
-  # workflow_run review is not a PR check, so this comment is the only place its
-  # failure shows; one that failed before resolving a PR has nowhere to post.
+  # `success()` skips this job in exactly the situation it exists for.
   report_absence:
     name: Report a missing review
     needs: analyze
+    # `number` is empty only when analyze failed before resolving a PR, which
+    # leaves nowhere to post.
     if: >
       !cancelled() && needs.analyze.outputs.number != '' &&
       (needs.analyze.result == 'failure' || needs.analyze.outputs.reviewable == 'false')
