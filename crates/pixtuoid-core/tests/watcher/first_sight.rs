@@ -1,15 +1,15 @@
 use std::time::{Duration, SystemTime};
 
-use filetime::{set_file_mtime, FileTime};
+use filetime::{FileTime, set_file_mtime};
 use tempfile::TempDir;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 
-use pixtuoid_core::source::claude_code::{cc_derive_label, cc_session_ended, decode_cc_line};
-use pixtuoid_core::source::jsonl::JsonlWatcher;
+use pixtuoid_core::AgentId;
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::source::Transport;
-use pixtuoid_core::AgentId;
+use pixtuoid_core::source::claude_code::{cc_derive_label, cc_session_ended, decode_cc_line};
+use pixtuoid_core::source::jsonl::JsonlWatcher;
 
 use crate::{cc_watcher, fast_watch, vouch_snapshot, write_lines};
 
@@ -741,11 +741,10 @@ async fn watcher_skips_oversized_pending_tail() {
     while tokio::time::Instant::now() < deadline {
         if let Ok(Some((_, AgentEvent::ActivityStart { tool_use_id, .. }))) =
             tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && tool_use_id.as_deref() == Some("tu_after_junk")
         {
-            if tool_use_id.as_deref() == Some("tu_after_junk") {
-                got_after = true;
-                break;
-            }
+            got_after = true;
+            break;
         }
     }
     assert!(

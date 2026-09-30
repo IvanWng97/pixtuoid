@@ -164,7 +164,10 @@ fn pack_source(
         return PackSource::Explicit(dir);
     }
     base.map(|b| b.join("pixtuoid").join("sprites"))
-        .filter(|dir| dir.join("pack.toml").is_file())
+        .filter(|dir| {
+            dir.join(pixtuoid_core::sprite::format::PACK_MANIFEST)
+                .is_file()
+        })
         .map_or(PackSource::Bundled, PackSource::Discovered)
 }
 
@@ -416,7 +419,7 @@ pub fn resolve_theme(
     cli_theme: Option<&str>,
     warnings: &mut Vec<String>,
 ) -> Result<&'static pixtuoid_scene::theme::Theme> {
-    use pixtuoid_scene::theme::{theme_by_name, ALL_THEMES, NORMAL};
+    use pixtuoid_scene::theme::{ALL_THEMES, NORMAL, theme_by_name};
 
     // Validate the config theme even when the CLI overrides it — the warn is the
     // only signal that a persisted theme has gone stale.

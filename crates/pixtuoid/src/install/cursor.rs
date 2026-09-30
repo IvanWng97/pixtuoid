@@ -10,13 +10,13 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
-use serde_json::{json, Map, Value};
+use anyhow::{Result, anyhow};
+use serde_json::{Map, Value, json};
 
+use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::merge;
 use crate::install::target::MergeOutcome;
-use crate::install::SENTINEL_KEY;
 
 /// Events we register == events we decode (`source/cursor.rs`), enforced by
 /// `every_registered_cursor_event_decodes` below. `subagentStart`/`subagentStop`
@@ -118,14 +118,14 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     let mut parse = crate::install::verify::flat_json_verify(content, CURSOR_EVENTS, SENTINEL_KEY);
     // Only reachable on parseable JSON — an unparseable file is already a HARD
     // "no longer parses" issue from `flat_json_verify`.
-    if let Ok(doc) = serde_json::from_str::<Value>(content) {
-        if !doc.get("version").is_some_and(|v| v.is_number()) {
-            parse.issues.push(
-                "hooks.json has no numeric top-level `version` key — Cursor requires it, \
+    if let Ok(doc) = serde_json::from_str::<Value>(content)
+        && !doc.get("version").is_some_and(|v| v.is_number())
+    {
+        parse.issues.push(
+            "hooks.json has no numeric top-level `version` key — Cursor requires it, \
                  so no hooks load (reconnect via the Sources panel)"
-                    .to_string(),
-            );
-        }
+                .to_string(),
+        );
     }
     parse
 }

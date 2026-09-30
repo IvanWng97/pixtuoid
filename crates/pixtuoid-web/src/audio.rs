@@ -8,12 +8,12 @@
 
 use std::sync::Arc;
 
-use pixtuoid_scene::audio::bank::{AssetBank, TrackBeds, DROP_POOL, KEYSTROKE_POOL, TRACK_STEMS};
+use pixtuoid_scene::audio::bank::{AssetBank, DROP_POOL, KEYSTROKE_POOL, TRACK_STEMS, TrackBeds};
 use pixtuoid_scene::audio::compose::GeneratedScore;
 use pixtuoid_scene::audio::dsp::NoiseStream;
 use pixtuoid_scene::audio::mixer::LoopStem;
 use pixtuoid_scene::audio::{
-    synth, AudioEngine, AudioFrame, OneShotPool, TickCommands, TrackId, BUILD_SEED, MAX_DT_S,
+    AudioEngine, AudioFrame, BUILD_SEED, MAX_DT_S, OneShotPool, TickCommands, TrackId, synth,
 };
 
 pub(crate) struct WebAudioDriver {
@@ -137,12 +137,12 @@ impl WebAudioDriver {
             Some(p) => p.build.step(&mut self.rng),
             None => None,
         };
-        if let Some(beds) = finished {
-            if let Some(p) = self.pending.take() {
-                self.beds = Some(TrackBeds::from_arcs(beds));
-                self.track = p.to;
-                cmds.swap = Some(p.to);
-            }
+        if let Some(beds) = finished
+            && let Some(p) = self.pending.take()
+        {
+            self.beds = Some(TrackBeds::from_arcs(beds));
+            self.track = p.to;
+            cmds.swap = Some(p.to);
         }
         cmds
     }
@@ -347,7 +347,7 @@ fn fmt_f32(v: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pixtuoid_scene::audio::{bank, PlayCmd};
+    use pixtuoid_scene::audio::{PlayCmd, bank};
 
     #[test]
     fn every_oneshot_pool_has_a_finite_end_the_js_discovery_loop_can_find() {

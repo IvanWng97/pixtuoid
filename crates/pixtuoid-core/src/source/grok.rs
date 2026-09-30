@@ -27,20 +27,20 @@
 //!   No open-FD probe is possible: every append opens and drops the file
 //!   handle, unlike Codex's for-lifetime rollout fd.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+use crate::AgentId;
 use crate::source::decoder::{
-    ellipsize, generic_tool_display, parsed_tail_lines, MAX_DECODED_FIELD_CHARS,
+    MAX_DECODED_FIELD_CHARS, ellipsize, generic_tool_display, parsed_tail_lines,
 };
 use crate::source::{AgentEvent, ToolDetail};
-use crate::AgentId;
 
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
-pub use native::{live_grok_session_ids, GrokSource};
+pub use native::{GrokSource, live_grok_session_ids};
 
 /// The Grok Build source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "grok";
@@ -1070,10 +1070,12 @@ mod tests {
     #[test]
     fn nothing_to_key_on_is_malformed() {
         assert!(decode_grok_hook_payload(&json!({"hookEventName": "stop"})).is_err());
-        assert!(decode_grok_hook_payload(
-            &json!({"hookEventName": "stop", "cwd": "", "workspaceRoot": ""})
-        )
-        .is_err());
+        assert!(
+            decode_grok_hook_payload(
+                &json!({"hookEventName": "stop", "cwd": "", "workspaceRoot": ""})
+            )
+            .is_err()
+        );
         assert!(decode_grok_hook_payload(&json!("just a string")).is_err());
         assert!(decode_grok_hook_payload(&json!({"sessionId": "s"})).is_err());
     }
@@ -1447,9 +1449,11 @@ mod tests {
             json!({"method": "session/update", "params": {"update": {"noTag": true}}}),
             json!({"method": "bogus/method", "params": {"update": {"sessionUpdate": "tool_call"}}}),
         ] {
-            assert!(decode_grok_line(TRANSCRIPT, SOURCE_NAME, v)
-                .unwrap()
-                .is_empty());
+            assert!(
+                decode_grok_line(TRANSCRIPT, SOURCE_NAME, v)
+                    .unwrap()
+                    .is_empty()
+            );
         }
     }
 

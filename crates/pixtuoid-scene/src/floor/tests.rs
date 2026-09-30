@@ -918,7 +918,7 @@ fn session_types_default_equals_new() {
 #[test]
 fn reset_frame_cache_clears_cached_sprites() {
     use crate::frame_cache::FrameKey;
-    use pixtuoid_core::{sprite::Frame, AgentId};
+    use pixtuoid_core::{AgentId, sprite::Frame};
 
     let mut s = FloorSession::new();
     // Prime the cache, so the assertion below distinguishes a real reset from a
@@ -1309,9 +1309,11 @@ fn neon_a_painter_slower_than_a_flash_never_shows_one() {
         assert_eq!(levels, NeonLevels::EMPTY, "{ms}ms at a {shortest:?} tick");
     }
     let just_faster = shortest - Duration::from_millis(1);
-    assert!(starved_cycle(just_faster)
-        .iter()
-        .any(|(_, levels)| *levels == NeonLevels::FLASH));
+    assert!(
+        starved_cycle(just_faster)
+            .iter()
+            .any(|(_, levels)| *levels == NeonLevels::FLASH)
+    );
     let in_a_flash = in_stutter_cycle(NeonState::STUTTER_FLASHES_MS[0].0);
     assert_eq!(
         NeonState::new().tick(neon_mood(0, 0, 0), ROOM_DIMMED, in_a_flash),
@@ -1339,4 +1341,46 @@ fn neon_never_flashes_while_lit_or_while_still_coasting_down() {
     }
     assert_ne!(last, NeonLevels::FLASH);
     assert!(last.power > NeonLevels::EMPTY.power, "{last:?}");
+}
+
+/// The classic looks out from its own floor.
+#[test]
+fn the_classic_sees_the_skyline_from_its_floors_altitude() {
+    let pack = crate::embedded_pack::test_default_pack();
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let scene = make_scene(1, 8);
+    let render = |floor_meta: FloorMeta| {
+        let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
+        render_floor(
+            &mut FloorCtx::new(),
+            &mut buf,
+            &mut CoffeeState::new(),
+            &mut HashMap::new(),
+            FrameInputs {
+                scene: &scene,
+                pack: &pack,
+                theme,
+                now,
+                size: Size { w: 192, h: 160 },
+                floor_meta,
+                active_pet: None,
+                floor_pet: None,
+                debug_walkable: false,
+            },
+        )
+        .expect("layout");
+        buf
+    };
+    let ground = render(FloorMeta::ground());
+    let top = render(FloorMeta {
+        altitude: 1.0,
+        ..FloorMeta::ground()
+    });
+    assert!(
+        (0..ground.height())
+            .flat_map(|y| (0..ground.width()).map(move |x| (x, y)))
+            .any(|(x, y)| ground.get(x, y) != top.get(x, y)),
+        "the top floor's windows show the ground floor's skyline"
+    );
 }

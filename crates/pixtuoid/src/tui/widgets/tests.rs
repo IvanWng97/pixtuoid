@@ -1,5 +1,5 @@
 use super::*;
-use footer::{build_status_spans, build_status_summary, FooterStats};
+use footer::{FooterStats, build_status_spans, build_status_summary};
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
 use std::path::PathBuf;
@@ -385,8 +385,10 @@ fn footer_line(
         gateway: None,
         audio_audible: false,
         volume_flash: None,
+        floor_info,
+        source_warning: warning,
     };
-    build_status_summary(scene, &stats, width, floor_info, warning)
+    build_status_summary(scene, &stats, width)
 }
 
 const QUIT_SUFFIX: &str = " [?]help [p]ause [t]heme [q]uit ";
@@ -626,8 +628,10 @@ fn footer_spans_text(
         gateway: None,
         audio_audible: false,
         volume_flash: None,
+        floor_info,
+        source_warning: None,
     };
-    build_status_spans(scene, &stats, width, floor_info, theme, None)
+    build_status_spans(scene, &stats, width, theme)
         .iter()
         .map(|sp| sp.content.as_ref().to_string())
         .collect()
@@ -670,8 +674,10 @@ fn status_spans_color_code_state_segments() {
         gateway: None,
         audio_audible: false,
         volume_flash: None,
+        floor_info: None,
+        source_warning: None,
     };
-    let spans = build_status_spans(&s, &stats, 120, None, theme, None);
+    let spans = build_status_spans(&s, &stats, 120, theme);
     let active = spans
         .iter()
         .find(|sp| sp.content.contains('\u{25cf}'))
@@ -723,8 +729,10 @@ fn footer_tool_hue_reads_kind_field() {
         gateway: None,
         audio_audible: false,
         volume_flash: None,
+        floor_info: None,
+        source_warning: None,
     };
-    let spans = build_status_spans(&s, &stats, 160, None, theme, None);
+    let spans = build_status_spans(&s, &stats, 160, theme);
     let tool = spans
         .iter()
         .find(|sp| sp.content.contains("Delegating"))
@@ -752,8 +760,10 @@ fn footer_gateway_chip_reflects_rollup_and_suppresses_when_absent() {
         gateway: Some(DaemonState::Degraded),
         audio_audible: false,
         volume_flash: None,
+        floor_info: None,
+        source_warning: None,
     };
-    let line = build_status_summary(&s, &with_gw, 160, None, None);
+    let line = build_status_summary(&s, &with_gw, 160);
     assert!(line.contains("\u{2b22}gw err"), "degraded chip: {line}");
     let no_gw = FooterStats {
         counts: scene_stats(&s),
@@ -761,8 +771,10 @@ fn footer_gateway_chip_reflects_rollup_and_suppresses_when_absent() {
         gateway: None,
         audio_audible: false,
         volume_flash: None,
+        floor_info: None,
+        source_warning: None,
     };
-    let line2 = build_status_summary(&s, &no_gw, 160, None, None);
+    let line2 = build_status_summary(&s, &no_gw, 160);
     assert!(
         !line2.contains("gw"),
         "chip suppressed when no daemon: {line2}"
@@ -783,8 +795,10 @@ fn footer_cross_floor_alarm_points_at_waiting_floor() {
         gateway: None,
         audio_audible: false,
         volume_flash: None,
+        floor_info: Some(fi(1, 3, 2)),
+        source_warning: None,
     };
-    let line = build_status_summary(&s, &stats, 160, Some(fi(1, 3, 2)), None);
+    let line = build_status_summary(&s, &stats, 160);
     assert!(
         line.contains("\u{25b2}F2"),
         "cross-floor waiting cue: {line}"

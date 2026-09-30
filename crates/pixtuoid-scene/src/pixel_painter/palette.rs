@@ -1,8 +1,8 @@
 //! Per-agent colors and the color math the painters share.
 
+use pixtuoid_core::AgentSlot;
 use pixtuoid_core::id::normalize_path_key;
 use pixtuoid_core::sprite::{Frame, Pixel, Rgb, RgbBuffer};
-use pixtuoid_core::AgentSlot;
 
 /// A complete shirt + pants combo, keyed by the agent's normalized working
 /// directory (same cwd → same outfit, so the office reads as a color-coded
@@ -301,8 +301,8 @@ const SKIN_PRESETS: &[Rgb] = &[
 ];
 
 /// Deterministic seed from a normalized cwd string: byte-fold, then the
-/// splitmix64 finalizer. NOT `DefaultHasher` — its per-process randomization
-/// would flicker colors across runs.
+/// splitmix64 finalizer. NOT `DefaultHasher`: its algorithm may change between
+/// Rust releases, which would re-dress every agent on a toolchain bump.
 fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
     let folded = cwd_norm
         .bytes()
@@ -345,6 +345,34 @@ pub(crate) const SCREEN_TEXT_KEY: char = 'J';
 
 /// The pack key of a desk lamp's bulb, which glows of its own at any hour.
 pub(crate) const DESK_BULB_KEY: char = '9';
+
+/// The pack key of the wall clock's face, inside its rim.
+pub(crate) const CLOCK_FACE_KEY: char = 'ц';
+
+/// The fixtures' [`appliance_overrides`].
+pub(crate) fn fixture_overrides(theme: &crate::theme::Theme) -> [(char, Pixel); 16] {
+    let (f, o) = (&theme.furniture, &theme.office);
+    let [c0, c1, c2] = theme.appliance.coats;
+    [
+        ('Д', Some(f.tank_water)),
+        ('З', Some(f.tank_water_line)),
+        ('И', Some(f.tank_fish)),
+        ('Л', Some(f.tank_fish_alt)),
+        ('Ь', Some(f.tank_plant)),
+        ('ж', Some(o.room_wall_trim_dark)),
+        ('б', Some(o.building_light)),
+        ('ы', Some(f.magazine)),
+        ('э', Some(f.magazine_trim)),
+        ('ч', Some(c0)),
+        ('ш', Some(c1)),
+        ('щ', Some(c2)),
+        ('ф', Some(o.clock_rim)),
+        (CLOCK_FACE_KEY, Some(o.clock_face)),
+        ('з', Some(o.clock_hand)),
+        // Un-themed: the classic draws the cooler's bottle in its own blue.
+        ('χ', Some(super::furniture::COOLER_WATER)),
+    ]
+}
 
 /// The pack keys a corridor appliance's art is drawn in, each with the
 /// [`ApplianceColors`](crate::theme::ApplianceColors) role it takes: the art
@@ -604,6 +632,38 @@ mod tests {
         for (key, pixel) in appliance_overrides(&normal.appliance) {
             assert_eq!(pack.palette().get(key), Some(pixel), "key {key:?}");
         }
+    }
+
+    /// The pack's own colours for [`fixture_overrides`]' keys are the normal
+    /// theme's.
+    #[test]
+    fn the_packs_fixture_keys_are_the_normal_themes_colours() {
+        let pack = crate::embedded_pack::test_default_pack();
+        let normal = crate::theme::theme_by_name("normal").expect("theme");
+        for (key, pixel) in fixture_overrides(normal) {
+            assert_eq!(pack.palette().get(key), Some(pixel), "key {key:?}");
+        }
+    }
+
+    /// A theme's fixtures take its colours.
+    #[test]
+    fn a_recolour_rethemes_the_fixture_art() {
+        let pack = crate::embedded_pack::test_default_pack();
+        let art = pack
+            .animation("fish_tank@4x")
+            .and_then(|a| a.recolorable(0))
+            .expect("the aquarium art");
+        let water = pack.palette().get('Д').flatten().expect("the water");
+        let plain = art.recolored(&[]);
+        let (x, y) = (0..plain.height())
+            .flat_map(|y| (0..plain.width()).map(move |x| (x, y)))
+            .find(|&(x, y)| plain.get(x, y) == Some(&Some(water)))
+            .expect("the art draws its water");
+        let [a, b] = ["normal", "cyberpunk"].map(|name| {
+            let theme = crate::theme::theme_by_name(name).expect("theme");
+            art.recolored(&fixture_overrides(theme))
+        });
+        assert_ne!(a.get(x, y), b.get(x, y), "the water kept the pack's colour");
     }
 
     /// A recolour re-derives the shading: one shaded cell of the vending art

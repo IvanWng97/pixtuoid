@@ -11,11 +11,11 @@
 
 use std::collections::HashMap;
 
-use pixtuoid_core::sprite::Rgb;
-use pixtuoid_core::state::{ActivityState, DaemonState, ToolKind, MAX_FLOORS};
 use pixtuoid_core::SceneState;
+use pixtuoid_core::sprite::Rgb;
+use pixtuoid_core::state::{ActivityState, DaemonState, MAX_FLOORS, ToolKind};
 
-use crate::board::{gateway_label, StateCounts, GATEWAY_GLYPH};
+use crate::board::{GATEWAY_GLYPH, StateCounts, gateway_label};
 use crate::theme::Theme;
 
 /// The four agent activity buckets as a shared vocabulary — each carries
@@ -178,14 +178,13 @@ pub struct ToolTally {
 pub fn footer_tool_tally(scene: &SceneState) -> Vec<ToolTally> {
     let mut tool_counts: HashMap<String, (ToolKind, usize)> = HashMap::new();
     for slot in scene.agents.values() {
-        if let ActivityState::Active { detail, kind, .. } = &slot.state {
-            if let Some(token) = detail
+        if let ActivityState::Active { detail, kind, .. } = &slot.state
+            && let Some(token) = detail
                 .as_deref()
                 .and_then(|d| d.split(|c: char| !c.is_alphanumeric()).next())
                 .filter(|t| !t.is_empty())
-            {
-                tool_counts.entry(token.to_string()).or_insert((*kind, 0)).1 += 1;
-            }
+        {
+            tool_counts.entry(token.to_string()).or_insert((*kind, 0)).1 += 1;
         }
     }
     let mut tools: Vec<ToolTally> = tool_counts

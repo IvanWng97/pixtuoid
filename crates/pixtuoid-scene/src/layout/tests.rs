@@ -568,7 +568,7 @@ fn every_home_desk_has_a_reachable_approach_on_its_own_far_side() {
     // A pod's back row faces the front row across the thin INTRA_POD_GAP_Y, whose
     // edge cell sits in a ReachSet-rejected coarse cell straddling the desk — only
     // the deeper reachable-aware scan finds it, and only a far-side probe prefers it.
-    use crate::layout::{approach_point, desk_walk_anchor_facing, Facing, Furniture};
+    use crate::layout::{Facing, Furniture, approach_point, desk_walk_anchor_facing};
     for (w, h) in [(192u16, 158u16), (160, 120), (240, 160)] {
         let l = SceneLayout::compute(w, h, Some(64)).expect("fits");
         // Without this the loop is vacuous: chair, probe and assertion agree under

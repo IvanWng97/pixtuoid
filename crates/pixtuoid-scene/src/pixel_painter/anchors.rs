@@ -4,7 +4,7 @@
 
 use std::time::SystemTime;
 
-use crate::layout::{Anchor, Size, SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
+use crate::layout::{Anchor, SEAT_RENDER_Y_OFF, Size, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
 use super::epoch_ms;
@@ -50,11 +50,7 @@ fn breath_offset_y(agent_id: pixtuoid_core::AgentId, now: SystemTime) -> u16 {
     const CYCLE_MS: u64 = 4500;
     let offset_ms = agent_id.raw() % CYCLE_MS;
     let phase = elapsed_ms.wrapping_add(offset_ms) % CYCLE_MS;
-    if phase < CYCLE_MS / 2 {
-        0
-    } else {
-        1
-    }
+    if phase < CYCLE_MS / 2 { 0 } else { 1 }
 }
 
 pub(super) fn with_breath(
@@ -233,24 +229,24 @@ pub(super) fn compute_door_frame_idx(
 
     let mut max_frame: usize = 0;
     for a in agents {
-        if a.exiting_at.is_none() {
-            if let Ok(d) = now.duration_since(a.created_at) {
-                let ms = d.as_millis() as u64;
-                if ms < entry_window_ms {
-                    max_frame = max_frame.max(frame_for_progress(ms, entry_window_ms));
-                }
+        if a.exiting_at.is_none()
+            && let Ok(d) = now.duration_since(a.created_at)
+        {
+            let ms = d.as_millis() as u64;
+            if ms < entry_window_ms {
+                max_frame = max_frame.max(frame_for_progress(ms, entry_window_ms));
             }
         }
-        if let Some(exit_at) = a.exiting_at {
-            if let Ok(d) = now.duration_since(exit_at) {
-                let ms = d.as_millis() as u64;
-                // The same window the reducer uses to GC exiting slots, so the
-                // door closes right as the agent's slot disappears.
-                let exit_window_ms =
-                    pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW.as_millis() as u64;
-                if ms < exit_window_ms {
-                    max_frame = max_frame.max(frame_for_progress(ms, exit_window_ms));
-                }
+        if let Some(exit_at) = a.exiting_at
+            && let Ok(d) = now.duration_since(exit_at)
+        {
+            let ms = d.as_millis() as u64;
+            // The same window the reducer uses to GC exiting slots, so the
+            // door closes right as the agent's slot disappears.
+            let exit_window_ms =
+                pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW.as_millis() as u64;
+            if ms < exit_window_ms {
+                max_frame = max_frame.max(frame_for_progress(ms, exit_window_ms));
             }
         }
     }

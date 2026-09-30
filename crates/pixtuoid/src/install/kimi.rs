@@ -21,7 +21,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use toml::value::Table;
 
 use crate::install::io;
@@ -180,7 +180,7 @@ fn toml_merge_uninstall(mut doc: toml::Value) -> toml::Value {
 /// `[[hooks]]` entry (detected by the command marker, not a sentinel), and the
 /// shim path extracted for `install::verify_target` to stat.
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
-    use crate::install::verify::{assemble, shell_shim_ref, SchemaParse, ShimRef};
+    use crate::install::verify::{SchemaParse, ShimRef, assemble, shell_shim_ref};
     let Ok(doc) = toml::from_str::<toml::Value>(content) else {
         return SchemaParse::broken("config.toml no longer parses as TOML");
     };
@@ -254,19 +254,23 @@ mod tests {
         // Unconditional (not `if let Ok`) so a mutation making default_config_path
         // always-Err is CAUGHT, not skipped.
         let custom = std::env::temp_dir().join("pixtuoid-kimi-home-cfg-test");
-        std::env::set_var("KIMI_CODE_HOME", &custom);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("KIMI_CODE_HOME", &custom) };
         assert_eq!(default_config_path().unwrap(), custom.join("config.toml"));
 
         // Assert only the filename when a home resolves — a stripped env
         // legitimately errs.
-        std::env::set_var("KIMI_CODE_HOME", "");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("KIMI_CODE_HOME", "") };
         if let Ok(p) = default_config_path() {
             assert_eq!(p.file_name().and_then(|n| n.to_str()), Some("config.toml"));
         }
 
         match saved {
-            Some(v) => std::env::set_var("KIMI_CODE_HOME", v),
-            None => std::env::remove_var("KIMI_CODE_HOME"),
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var("KIMI_CODE_HOME", v) },
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var("KIMI_CODE_HOME") },
         }
     }
 
@@ -280,7 +284,8 @@ mod tests {
 
         let root = std::env::temp_dir().join("pixtuoid-kimi-detect-test");
         let _ = std::fs::remove_dir_all(&root);
-        std::env::set_var("KIMI_CODE_HOME", &root);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("KIMI_CODE_HOME", &root) };
         assert!(!detect_installed(), "an absent data root must not detect");
 
         std::fs::create_dir_all(&root).unwrap();
@@ -290,8 +295,10 @@ mod tests {
         );
 
         match saved {
-            Some(v) => std::env::set_var("KIMI_CODE_HOME", v),
-            None => std::env::remove_var("KIMI_CODE_HOME"),
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var("KIMI_CODE_HOME", v) },
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var("KIMI_CODE_HOME") },
         }
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -441,10 +448,11 @@ command = "terminal-notifier -message done"
         use crate::install::verify::ShimRef;
         let res = verify_schema("not = = toml");
         assert_eq!(res.shim, ShimRef::Unknown);
-        assert!(res
-            .issues
-            .iter()
-            .any(|i| i.contains("no longer parses as TOML")));
+        assert!(
+            res.issues
+                .iter()
+                .any(|i| i.contains("no longer parses as TOML"))
+        );
     }
 
     #[cfg(unix)]

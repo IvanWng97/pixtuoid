@@ -520,6 +520,10 @@ fn assert_centered_hover_box(
 fn layout_with_lounge(lounge: pixtuoid_scene::layout::Lounge) -> Layout {
     let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
     layout.lounge = Some(lounge);
+    // The probes stand the pieces where the real office has its plants and its
+    // meeting room's band decor: either would be the topmost fixture there.
+    layout.plants.clear();
+    layout.meeting_rooms.clear();
     layout
 }
 
@@ -529,7 +533,7 @@ const PARK: pixtuoid_scene::layout::Point = pixtuoid_scene::layout::Point { x: 1
 
 #[test]
 fn the_lounge_sofa_hovers_on_its_painted_sprite() {
-    use pixtuoid_scene::layout::{furniture_def, Furniture};
+    use pixtuoid_scene::layout::{Furniture, furniture_def};
     let c = Point { x: 40, y: 50 };
     let layout = layout_with_lounge(pixtuoid_scene::layout::Lounge {
         couch_center: c,
@@ -547,7 +551,7 @@ fn the_lounge_sofa_hovers_on_its_painted_sprite() {
 
 #[test]
 fn the_side_table_hovers_on_its_painted_sprite() {
-    use pixtuoid_scene::layout::{furniture_def, Furniture};
+    use pixtuoid_scene::layout::{Furniture, furniture_def};
     let t = Point { x: 40, y: 50 };
     let layout = layout_with_lounge(pixtuoid_scene::layout::Lounge {
         couch_center: PARK,

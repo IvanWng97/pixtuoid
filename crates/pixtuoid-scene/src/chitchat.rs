@@ -287,13 +287,13 @@ pub fn update_and_collect(
             .or_insert_with(|| ActiveChitchat::new(*venue, present.clone(), now));
         chat.set_participants(present);
 
-        if let Some((speaker_id, text)) = chat.current_bubble(now) {
-            if let Some((_, anchor)) = agents.iter().find(|(id, _)| *id == speaker_id) {
-                bubbles.push(ChitchatBubble {
-                    text,
-                    anchor: *anchor,
-                });
-            }
+        if let Some((speaker_id, text)) = chat.current_bubble(now)
+            && let Some((_, anchor)) = agents.iter().find(|(id, _)| *id == speaker_id)
+        {
+            bubbles.push(ChitchatBubble {
+                text,
+                anchor: *anchor,
+            });
         }
     }
 
@@ -439,9 +439,10 @@ mod tests {
     fn no_bubble_after_four_turns() {
         let start = base_time();
         let chat = ActiveChitchat::new(vk(0), vec![aid("/a"), aid("/b")], start);
-        assert!(chat
-            .current_bubble(start + Duration::from_millis(6_000))
-            .is_none());
+        assert!(
+            chat.current_bubble(start + Duration::from_millis(6_000))
+                .is_none()
+        );
     }
 
     #[test]

@@ -33,11 +33,11 @@
 //!   falls to the stale-sweep — the walk resolves a pid there (#528), but no
 //!   `ExitWatch` backend exists to watch it.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use serde_json::Value;
 
-use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
+use crate::source::{AgentEvent, ToolDetail};
 
 /// The CodeWhale CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "codewhale";

@@ -7,7 +7,7 @@
 
 use std::collections::VecDeque;
 
-use super::{cell_walkable, snap, Point, COARSE_CELL_SIZE, NEIGHBORS_8};
+use super::{COARSE_CELL_SIZE, NEIGHBORS_8, Point, cell_walkable, snap};
 use pixtuoid_core::grid::Grid;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 

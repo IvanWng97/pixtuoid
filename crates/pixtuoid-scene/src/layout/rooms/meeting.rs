@@ -1,7 +1,7 @@
 //! The meeting room aggregate: bounds + the sofa/table trio.
 
 use crate::layout::{
-    anchored_top_left, furniture_def, pct, Anchor, Bounds, Furniture, Point, OBSTACLE_PAD_PX,
+    Anchor, Bounds, Furniture, OBSTACLE_PAD_PX, Point, anchored_top_left, furniture_def, pct,
 };
 
 /// One meeting room's furniture trio. The fixed-size array encodes the
@@ -160,23 +160,6 @@ impl MeetingRoom {
             y: b.y + b.height / 2 - 2,
             width: 4,
             height: 5,
-        })
-    }
-
-    /// The notice board's box, in the room's south-west corner — `None` on a
-    /// room too small to hang it.
-    pub(crate) fn notice_board_rect(&self) -> Option<Bounds> {
-        const BOARD: crate::layout::Size = crate::layout::Size { w: 8, h: 5 };
-        /// Columns from the room's west edge to the board.
-        const BOARD_DX: u16 = 4;
-        /// Rows from the room's south edge up to the board's top.
-        const BOARD_RISE: u16 = 8;
-        let b = self.bounds;
-        (b.height > 20 && b.width > 15).then(|| Bounds {
-            x: b.x + BOARD_DX,
-            y: b.y + b.height - BOARD_RISE,
-            width: BOARD.w,
-            height: BOARD.h,
         })
     }
 

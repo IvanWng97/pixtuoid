@@ -2,7 +2,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 
 /// The ONE empty-as-unset filter for env values: empty or whitespace-only reads
 /// as unset. Keep new env reads on this helper so the workspace has one semantics.
@@ -624,18 +624,23 @@ mod tests {
         const KEY: &str = "PIXTUOID_TEST_NONEMPTY_ABS_ENV";
         let saved = std::env::var_os(KEY);
         for unset in ["", "   ", "rel/x", "~/x"] {
-            std::env::set_var(KEY, unset);
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var(KEY, unset) };
             assert_eq!(nonempty_abs_env(KEY), None, "{unset:?} must read as unset");
         }
         // A leading-slash path is NOT absolute on Windows (no drive prefix).
         let abs = if cfg!(windows) { "C:/abs/x" } else { "/abs/x" };
-        std::env::set_var(KEY, abs);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var(KEY, abs) };
         assert_eq!(nonempty_abs_env(KEY), Some(PathBuf::from(abs)));
-        std::env::remove_var(KEY);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var(KEY) };
         assert_eq!(nonempty_abs_env(KEY), None, "a missing var is unset");
         match saved {
-            Some(v) => std::env::set_var(KEY, v),
-            None => std::env::remove_var(KEY),
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var(KEY, v) },
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var(KEY) },
         }
     }
 

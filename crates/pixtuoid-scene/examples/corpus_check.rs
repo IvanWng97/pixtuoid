@@ -22,7 +22,7 @@ use pixtuoid_core::harness::{Drive, LineFailure};
 use pixtuoid_core::source::decoder::TailActivity;
 use pixtuoid_core::source::registry;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
+use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
 use pixtuoid_scene::floor::{FloorMeta, FloorSession};
 
 /// The instant the whole census runs at — the drive's fold and the observe
@@ -150,7 +150,7 @@ fn newest_activity(source: &str, body: &[u8]) -> Option<u64> {
 /// index these columns POSITIONALLY, so inserting a column shifts every one of
 /// them at once and the degradation is quiet — `fixture-age`'s probe map empties
 /// and its report reads "nothing stale" from having compared nothing.
-/// `the_whole_roster_is_pinned_row_by_row` is the pin CLAUDE.md's magic-number
+/// `the_whole_roster_is_pinned_row_by_row` is the pin AGENTS.md's magic-number
 /// rule asks for at a cross-language boundary.
 fn roster_row(name: &str, d: &registry::SourceDescriptor, kind: &str) -> String {
     let probe = d

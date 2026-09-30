@@ -4,23 +4,21 @@
 //! AgentEvent stream through the real Reducer — the two sides structurally cannot
 //! desync. scripts/gen-media.py (kind:"proof") encodes the frames.
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
 use image::{Rgba, RgbaImage};
-use pixtuoid::tui::renderer::{draw_scene, DrawCtx};
-use pixtuoid_core::source::claude_code::{
-    cc_derive_label, cc_id_from_path, decode_cc_line, SOURCE_NAME,
-};
+use pixtuoid::tui::renderer::{DrawCtx, draw_scene};
 use pixtuoid_core::source::AgentEvent;
-use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid_core::source::claude_code::{
+    SOURCE_NAME, cc_derive_label, cc_id_from_path, decode_cc_line,
+};
 use pixtuoid_core::{AgentId, Reducer, SceneState, Transport};
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, SystemTime};
 
-use crate::encode::cells_to_rgba;
+use crate::encode::{Timeline, cells_to_rgba};
 use crate::{CELL_H, CELL_W};
 
 // Geometry (px); every canvas dim must stay even so yuv420p never crops.
@@ -308,35 +306,35 @@ pub(crate) fn build_script(fixture: &Path) -> Result<ProofScript> {
         last_ms = last_ms.max(rel);
         let ty = v.get("type").and_then(|s| s.as_str()).unwrap_or("");
         let content = v.get("message").and_then(|m| m.get("content"));
-        if ty == "user" {
-            if let Some(text) = content.and_then(|c| c.as_str()) {
-                lines.push(PanelLine {
-                    at_ms: rel,
-                    text: format!("> {text}"),
-                    prompt: true,
-                    annotation: None,
-                });
-                continue; // plain prompt: decode_cc_line emits nothing for it
-            }
+        if ty == "user"
+            && let Some(text) = content.and_then(|c| c.as_str())
+        {
+            lines.push(PanelLine {
+                at_ms: rel,
+                text: format!("> {text}"),
+                prompt: true,
+                annotation: None,
+            });
+            continue; // plain prompt: decode_cc_line emits nothing for it
         }
-        if ty == "assistant" {
-            if let Some(blocks) = content.and_then(|c| c.as_array()) {
-                for b in blocks {
-                    if b.get("type").and_then(|s| s.as_str()) == Some("tool_use") {
-                        let name = b.get("name").and_then(|s| s.as_str()).unwrap_or("?");
-                        let annotation = Some(match tool_idx {
-                            0 => "-- that's you",
-                            1 => "monitor flips",
-                            _ => "monitor flips again",
-                        });
-                        tool_idx += 1;
-                        lines.push(PanelLine {
-                            at_ms: rel,
-                            text: format!("[{name}] {}", tool_arg(b.get("input"))),
-                            prompt: false,
-                            annotation,
-                        });
-                    }
+        if ty == "assistant"
+            && let Some(blocks) = content.and_then(|c| c.as_array())
+        {
+            for b in blocks {
+                if b.get("type").and_then(|s| s.as_str()) == Some("tool_use") {
+                    let name = b.get("name").and_then(|s| s.as_str()).unwrap_or("?");
+                    let annotation = Some(match tool_idx {
+                        0 => "-- that's you",
+                        1 => "monitor flips",
+                        _ => "monitor flips again",
+                    });
+                    tool_idx += 1;
+                    lines.push(PanelLine {
+                        at_ms: rel,
+                        text: format!("[{name}] {}", tool_arg(b.get("input"))),
+                        prompt: false,
+                        annotation,
+                    });
                 }
             }
         }
@@ -515,48 +513,48 @@ pub(crate) fn compose_frame(
     }
 
     // Anchored to the ACTUAL working sprite's desk — no hand-placed coordinates.
-    if let Some(i) = active_annotation(&script.lines, elapsed_ms) {
-        if let Some(label) = script.lines[i].annotation {
-            let desk = (
-                (office_origin.0 + desk_px.0) as i32,
-                (office_origin.1 + desk_px.1) as i32,
-            );
-            // Clears the top edge of the ceiling halo `paint_ceiling_halos` burns
-            // over a lit monitor (up to 16px above desk.1 in PNG space) with an
-            // 8px margin, so the connector/dot never sits inside the glow.
-            const GLOW_CLEARANCE: i32 = 24;
-            let anchor_y = desk.1 - GLOW_CLEARANCE;
-            match layout {
-                ProofLayout::Wide => {
-                    let text_w = aa_text_width_at(label, ANNOT_FONT_PX);
-                    let label_x = (desk.0 - text_w - 16).max((PANEL_W + PAD) as i32);
-                    dashed_h(
-                        &mut img,
-                        (PANEL_W - PAD) as i32,
-                        desk.0 - 10,
-                        anchor_y,
-                        ANNOT,
-                    );
-                    text(
-                        &mut img,
-                        label,
-                        label_x,
-                        anchor_y - 22 + 1,
-                        Rgba([0, 0, 0, 255]),
-                    );
-                    text(&mut img, label, label_x, anchor_y - 22, ANNOT);
-                    dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
-                }
-                ProofLayout::Tall => {
-                    // No cross-panel connector line — the panel sits above, not
-                    // beside.
-                    let text_w = aa_text_width_at(label, ANNOT_FONT_PX);
-                    let label_x = (desk.0 - text_w - 16).max(PAD as i32);
-                    let label_y = anchor_y - 22;
-                    text(&mut img, label, label_x, label_y + 1, Rgba([0, 0, 0, 255]));
-                    text(&mut img, label, label_x, label_y, ANNOT);
-                    dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
-                }
+    if let Some(i) = active_annotation(&script.lines, elapsed_ms)
+        && let Some(label) = script.lines[i].annotation
+    {
+        let desk = (
+            (office_origin.0 + desk_px.0) as i32,
+            (office_origin.1 + desk_px.1) as i32,
+        );
+        // Clears the top edge of the ceiling halo `paint_ceiling_halos` burns
+        // over a lit monitor (up to 16px above desk.1 in PNG space) with an
+        // 8px margin, so the connector/dot never sits inside the glow.
+        const GLOW_CLEARANCE: i32 = 24;
+        let anchor_y = desk.1 - GLOW_CLEARANCE;
+        match layout {
+            ProofLayout::Wide => {
+                let text_w = aa_text_width_at(label, ANNOT_FONT_PX);
+                let label_x = (desk.0 - text_w - 16).max((PANEL_W + PAD) as i32);
+                dashed_h(
+                    &mut img,
+                    (PANEL_W - PAD) as i32,
+                    desk.0 - 10,
+                    anchor_y,
+                    ANNOT,
+                );
+                text(
+                    &mut img,
+                    label,
+                    label_x,
+                    anchor_y - 22 + 1,
+                    Rgba([0, 0, 0, 255]),
+                );
+                text(&mut img, label, label_x, anchor_y - 22, ANNOT);
+                dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
+            }
+            ProofLayout::Tall => {
+                // No cross-panel connector line — the panel sits above, not
+                // beside.
+                let text_w = aa_text_width_at(label, ANNOT_FONT_PX);
+                let label_x = (desk.0 - text_w - 16).max(PAD as i32);
+                let label_y = anchor_y - 22;
+                text(&mut img, label, label_x, label_y + 1, Rgba([0, 0, 0, 255]));
+                text(&mut img, label, label_x, label_y, ANNOT);
+                dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
             }
         }
     }
@@ -579,12 +577,10 @@ pub(crate) struct ProofJob<'a> {
     pub(crate) frames_dir: &'a Path,
     pub(crate) cols: u16,
     pub(crate) rows: u16,
-    pub(crate) fps: u64,
-    pub(crate) secs: u64,
+    pub(crate) timeline: Timeline,
     pub(crate) max_desks: usize,
     pub(crate) theme: &'static pixtuoid_scene::theme::Theme,
     pub(crate) pack: &'a pixtuoid_core::sprite::format::Pack,
-    pub(crate) start: SystemTime,
 }
 
 pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
@@ -614,8 +610,7 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
 
     let backend = TestBackend::new(job.cols, job.rows);
     let mut term = Terminal::new(backend)?;
-    let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
-    let mut store = pixtuoid_scene::floor::FloorCtx::new();
+    let mut floor = pixtuoid_scene::floor::PerFloor::new();
     let mut scene = SceneState::uniform(job.max_desks);
     let mut reducer = Reducer::new();
     let mut chitchat_state = std::collections::HashMap::new();
@@ -627,11 +622,11 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
 
     let office_w = job.cols as u32 * CELL_W;
     let office_h = job.rows as u32 * CELL_H;
-    let frames = (job.secs * job.fps) as usize;
+    let Timeline { fps, secs, .. } = job.timeline;
+    let frames = job.timeline.frame_count();
     for i in 0..frames {
-        // exact math, not accumulated frame_ms — same rationale as save_renderer_gif
-        let elapsed = i as u64 * 1000 / job.fps.max(1);
-        let now = job.start + Duration::from_millis(elapsed);
+        let elapsed = job.timeline.elapsed_ms(i);
+        let now = job.timeline.now(i);
         while pending.front().is_some_and(|(at, _)| *at <= elapsed) {
             if let Some((_, ev)) = pending.pop_front() {
                 reducer.apply(&mut scene, ev, now, Transport::Jsonl);
@@ -642,8 +637,8 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
         // Idle once the fixture's events are drained.
         reducer.tick(&mut scene, now);
         let mut draw_ctx = DrawCtx {
-            buf: &mut buf,
-            store: &mut store,
+            buf: &mut floor.buf,
+            store: &mut floor.ctx,
             mouse_pos: None,
             debug_walkable: false,
             theme: job.theme,
@@ -688,11 +683,11 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             compose_frame(&kind, &office, &script, elapsed, desk_px)
                 .save(dir.join(format!("f{:04}.png", i + 1)))?;
         }
-        if (i + 1).is_multiple_of(job.fps as usize) {
-            eprint!("\r  proof: {}/{}s", (i + 1) / job.fps as usize, job.secs);
+        if (i + 1).is_multiple_of(fps as usize) {
+            eprint!("\r  proof: {}/{secs}s", (i + 1) / fps as usize);
         }
     }
-    eprintln!("\r  proof: {frames} frames x2 layouts @ {}fps", job.fps);
+    eprintln!("\r  proof: {frames} frames x2 layouts @ {fps}fps");
     Ok(())
 }
 

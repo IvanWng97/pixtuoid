@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use pixtuoid_core::source::{AgentEvent, Transport};
-use pixtuoid_core::state::reducer::{Reducer, B1_CASCADE_GRACE};
-use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, SceneState};
 use pixtuoid_core::AgentId;
+use pixtuoid_core::source::{AgentEvent, Transport};
+use pixtuoid_core::state::reducer::{B1_CASCADE_GRACE, Reducer};
+use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, SceneState};
 
 use crate::{act_end, act_start, delegating_pair, sess_end, start, waiting};
 
@@ -783,8 +783,8 @@ fn hook_synthesized_slot_is_exempt_from_unknown_cwd_reap() {
 
 #[test]
 fn refused_hook_registration_does_not_poison_dedup_for_the_later_jsonl_copy() {
-    use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
     use pixtuoid_core::state::MAX_FLOORS;
+    use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
     let mut caps = [0usize; MAX_FLOORS];
     caps[0] = 1;
     let mut scene = SceneState::new(caps);

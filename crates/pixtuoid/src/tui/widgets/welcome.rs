@@ -6,7 +6,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::{badge_color_for, to_color, Overflow, Panel};
+use super::{Overflow, Panel, badge_color_for, to_color};
 use crate::tui::welcome::OnboardingFrame;
 use pixtuoid_scene::theme::Theme;
 

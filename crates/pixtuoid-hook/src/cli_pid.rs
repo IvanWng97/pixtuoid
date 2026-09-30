@@ -189,7 +189,7 @@ fn walk_now() -> Option<u32> {
 fn process_snapshot() -> std::collections::HashMap<u32, ProcRow> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
         TH32CS_SNAPPROCESS,
     };
 
@@ -234,7 +234,7 @@ mod tests {
     use super::*;
 
     /// A fake process table as the walk consumes one: pid → (parent, exe).
-    fn table(rows: &[(u32, u32, &str)]) -> impl Fn(u32) -> Option<ProcRow> {
+    fn table(rows: &[(u32, u32, &str)]) -> impl Fn(u32) -> Option<ProcRow> + use<> {
         let rows: std::collections::HashMap<u32, ProcRow> = rows
             .iter()
             .map(|&(pid, parent, exe)| {

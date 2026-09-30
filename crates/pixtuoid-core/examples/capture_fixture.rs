@@ -475,10 +475,10 @@ mod recorder {
     fn identity_needles(git: impl Fn(&str) -> Option<String>) -> BTreeSet<String> {
         let mut needles: BTreeSet<String> = BTreeSet::new();
         for var in ["HOME", "USER", "LOGNAME"] {
-            if let Ok(v) = std::env::var(var) {
-                if !v.is_empty() {
-                    needles.insert(v);
-                }
+            if let Ok(v) = std::env::var(var)
+                && !v.is_empty()
+            {
+                needles.insert(v);
             }
         }
         for key in ["user.name", "user.email"] {
@@ -801,17 +801,17 @@ mod recorder {
                 continue;
             }
             let blanked = strip_unread(&source, &files)?;
-            if let Some(obj) = record.as_object_mut() {
-                if blanked > 0 || !obj.contains_key("deidentified") {
-                    obj.insert(
-                        "deidentified".into(),
-                        serde_json::json!({ "method": "decoder-allowlist", "blanked": blanked }),
-                    );
-                    std::fs::write(
-                        &prov,
-                        format!("{}\n", serde_json::to_string_pretty(&record)?),
-                    )?;
-                }
+            if let Some(obj) = record.as_object_mut()
+                && (blanked > 0 || !obj.contains_key("deidentified"))
+            {
+                obj.insert(
+                    "deidentified".into(),
+                    serde_json::json!({ "method": "decoder-allowlist", "blanked": blanked }),
+                );
+                std::fs::write(
+                    &prov,
+                    format!("{}\n", serde_json::to_string_pretty(&record)?),
+                )?;
             }
             println!(
                 "{}: blanked {blanked}",
@@ -1261,9 +1261,11 @@ mod recorder {
             )
             .expect("json");
             assert_eq!(prov["deidentified"]["method"], "decoder-allowlist");
-            assert!(prov["deidentified"]["blanked"]
-                .as_u64()
-                .is_some_and(|n| n > 0));
+            assert!(
+                prov["deidentified"]["blanked"]
+                    .as_u64()
+                    .is_some_and(|n| n > 0)
+            );
             assert_eq!(prov["origin"], "recorded", "the rest of the record is kept");
 
             strip_corpus(d.path()).expect("strip corpus again");

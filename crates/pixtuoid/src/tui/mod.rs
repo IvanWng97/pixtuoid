@@ -8,7 +8,7 @@ mod ui_state;
 pub mod welcome;
 pub mod widgets;
 
-use std::io::{stdout, Stdout};
+use std::io::{Stdout, stdout};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -19,10 +19,10 @@ use crossterm::event::{
 };
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 
 use tui_renderer::TuiRenderer;
 
@@ -526,10 +526,10 @@ fn resolve_version_popup(config_path: &std::path::Path) -> bool {
     let current_ver = env!("CARGO_PKG_VERSION");
     let cfg = crate::config::load(config_path, &mut Vec::new());
     let decision = crate::version::boot_decision(current_ver, cfg.last_seen_version.as_deref());
-    if decision.should_persist {
-        if let Err(e) = crate::config::save_version(config_path, current_ver) {
-            tracing::warn!(error = %e, "failed to persist version");
-        }
+    if decision.should_persist
+        && let Err(e) = crate::config::save_version(config_path, current_ver)
+    {
+        tracing::warn!(error = %e, "failed to persist version");
     }
     decision.should_show_popup
 }
@@ -855,22 +855,20 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
                 anim,
                 kind,
             }) = renderer.cached_pet_pos()
+                && renderer.active_pet_ref().is_none_or(|p| !p.is_active(now))
+                && renderer::hit_test_pet(
+                    kind,
+                    pet_pos,
+                    anim,
+                    geometry::CellArea::half_block(m.column, m.row),
+                )
             {
-                if renderer.active_pet_ref().is_none_or(|p| !p.is_active(now))
-                    && renderer::hit_test_pet(
-                        kind,
-                        pet_pos,
-                        anim,
-                        geometry::CellArea::half_block(m.column, m.row),
-                    )
-                {
-                    renderer.set_active_pet(Some(renderer::PetState {
-                        petted_at: now,
-                        pet_pos,
-                        kind,
-                        floor_idx: renderer.current_floor(),
-                    }));
-                }
+                renderer.set_active_pet(Some(renderer::PetState {
+                    petted_at: now,
+                    pet_pos,
+                    kind,
+                    floor_idx: renderer.current_floor(),
+                }));
             }
         }
         _ => {}
@@ -1248,8 +1246,8 @@ mod runtime_model {
 #[cfg(test)]
 mod dispatch_tests {
     use super::{
-        connect_source, connection, disconnect_source, dispatch_key, FloorNav, KeyAction,
-        ModalState,
+        FloorNav, KeyAction, ModalState, connect_source, connection, disconnect_source,
+        dispatch_key,
     };
     use crossterm::event::{KeyCode, KeyModifiers};
 
@@ -1280,7 +1278,7 @@ mod dispatch_tests {
     #[test]
     fn toggle_intent_covers_the_four_arms() {
         use super::connection::ConnState;
-        use super::{toggle_intent, ToggleIntent};
+        use super::{ToggleIntent, toggle_intent};
         assert_eq!(
             toggle_intent(ConnState::Connected),
             ToggleIntent::ArmConfirm
@@ -2108,11 +2106,11 @@ mod dispatch_tests {
 /// inside `run_tui`, which needs a real terminal, so nothing could reach them.
 #[cfg(test)]
 mod apply_key_action_tests {
-    use super::{apply_key_action, KeyAction, KeyCtx};
+    use super::{KeyAction, KeyCtx, apply_key_action};
     use crate::tui::tui_renderer::TuiRenderer;
     use pixtuoid_scene::theme;
-    use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
     use std::collections::HashSet;
     use std::time::SystemTime;
 

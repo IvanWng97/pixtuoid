@@ -168,7 +168,7 @@ mod peer {
 
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::Security::{
-        EqualSid, GetTokenInformation, TokenUser, PSID, TOKEN_QUERY, TOKEN_USER,
+        EqualSid, GetTokenInformation, PSID, TOKEN_QUERY, TOKEN_USER, TokenUser,
     };
     use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
     use windows_sys::Win32::System::Threading::{
@@ -181,32 +181,36 @@ mod peer {
     ///
     /// SAFETY: `process` is a valid process handle for the call's duration.
     unsafe fn token_user_blob(process: HANDLE) -> Option<Vec<u64>> {
-        let mut token: HANDLE = std::ptr::null_mut();
-        if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
-            return None;
-        }
-        // Size probe (returns 0 + sets `len`), then the real read.
-        let mut len: u32 = 0;
-        GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut len);
-        let blob = if len == 0 {
-            None
-        } else {
-            let mut buf = vec![0u64; (len as usize).div_ceil(8)];
-            if GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), len, &mut len) == 0 {
+        unsafe {
+            let mut token: HANDLE = std::ptr::null_mut();
+            if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
+                return None;
+            }
+            // Size probe (returns 0 + sets `len`), then the real read.
+            let mut len: u32 = 0;
+            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut len);
+            let blob = if len == 0 {
                 None
             } else {
-                Some(buf)
-            }
-        };
-        CloseHandle(token);
-        blob
+                let mut buf = vec![0u64; (len as usize).div_ceil(8)];
+                if GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), len, &mut len)
+                    == 0
+                {
+                    None
+                } else {
+                    Some(buf)
+                }
+            };
+            CloseHandle(token);
+            blob
+        }
     }
 
     /// The `PSID` embedded in a `TOKEN_USER` blob. Valid only while `blob` lives.
     ///
     /// SAFETY: `blob` is a `TOKEN_USER` written by `GetTokenInformation`, u64-aligned.
     unsafe fn sid_of(blob: &[u64]) -> PSID {
-        (*(blob.as_ptr().cast::<TOKEN_USER>())).User.Sid
+        unsafe { (*(blob.as_ptr().cast::<TOKEN_USER>())).User.Sid }
     }
 
     /// True iff the pipe server behind `file` runs as our user. Fail-closed.

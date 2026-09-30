@@ -451,23 +451,23 @@ fn every_piece_stays_inside_the_buffer() {
         };
         for p in pieces(l) {
             for (what, rect) in [("ground", p.ground), ("visual", Some(p.visual))] {
-                if let Some((tl, sz)) = rect {
-                    if !rect_in_bounds(tl, sz, buffer) {
-                        v.push(format!(
-                            "{w}x{h} seed {seed}: {} {what} {tl:?}+{sz:?} leaves the buffer",
-                            p.label
-                        ));
-                    }
-                }
-            }
-            if let Some((pos, vis)) = p.center_fit {
-                if pos.x < vis.w / 2 || pos.y < vis.h / 2 {
+                if let Some((tl, sz)) = rect
+                    && !rect_in_bounds(tl, sz, buffer)
+                {
                     v.push(format!(
-                        "{w}x{h} seed {seed}: {} centered at {pos:?} spills its {vis:?} \
-                         visual west/north (silently clamped by saturating_sub)",
+                        "{w}x{h} seed {seed}: {} {what} {tl:?}+{sz:?} leaves the buffer",
                         p.label
                     ));
                 }
+            }
+            if let Some((pos, vis)) = p.center_fit
+                && (pos.x < vis.w / 2 || pos.y < vis.h / 2)
+            {
+                v.push(format!(
+                    "{w}x{h} seed {seed}: {} centered at {pos:?} spills its {vis:?} \
+                         visual west/north (silently clamped by saturating_sub)",
+                    p.label
+                ));
             }
         }
     });
@@ -488,13 +488,13 @@ fn every_piece_ground_stays_in_its_container() {
                 }
                 continue;
             };
-            if let Some((tl, sz)) = p.ground {
-                if !rect_in_bounds(tl, sz, b) {
-                    v.push(format!(
-                        "{w}x{h} seed {seed}: {} ground {tl:?}+{sz:?} leaves its {:?} {b:?}",
-                        p.label, p.container
-                    ));
-                }
+            if let Some((tl, sz)) = p.ground
+                && !rect_in_bounds(tl, sz, b)
+            {
+                v.push(format!(
+                    "{w}x{h} seed {seed}: {} ground {tl:?}+{sz:?} leaves its {:?} {b:?}",
+                    p.label, p.container
+                ));
             }
             if p.visual_in_container {
                 let (tl, sz) = p.visual;
@@ -532,7 +532,14 @@ fn every_piece_ground_is_blocked_in_the_mask() {
 fn every_rug_lies_whole_on_the_floor() {
     let mut v = Vec::new();
     sweep(|w, h, seed, l| {
-        for rug in l.rugs() {
+        let rugs = l.fixtures().filter_map(|f| {
+            matches!(
+                f.kind,
+                FixtureKind::MeetingRug { .. } | FixtureKind::LoungeRug
+            )
+            .then_some(f.visual)
+        });
+        for rug in rugs {
             let on_floor = rug.x > 0
                 && rug.y >= l.wall_band_h()
                 && rug.x + rug.width <= l.buf_w
@@ -752,7 +759,7 @@ fn assert_back_turned_desks_face_a_partner(w: u16, h: u16, seed: u64, l: &SceneL
         .home_desks
         .iter()
         .zip(&l.desk_facings)
-        .filter(|(_, &f)| f == Facing::South)
+        .filter(|&(_, &f)| f == Facing::South)
         .map(|(&d, _)| d)
         .collect();
     for (&d, &f) in l.home_desks.iter().zip(&l.desk_facings) {
@@ -994,13 +1001,12 @@ fn free_standing_whiteboard_survives_the_west_aisle_it_used_to_seal() {
 }
 
 /// The boundary scan can't catch an over-drop: dropping the couch only IMPROVES
-/// connectivity. 40x160 seed 1 is the KNIFE-EDGE — the couch clears the door by
-/// exactly 1 px, so it pins couch_east_ground on the seat pad
-/// (`WAYPOINT_STAMP_PAD_PX`), not `OBSTACLE_PAD_PX`. 48x160 seed 0 clears
-/// comfortably.
+/// connectivity. 57x160 seed 1 is the KNIFE-EDGE — the floor lamp flanking the
+/// couch east (`compute::LoungeFlanks`) meets the door threshold's column
+/// with its padded ground exactly; 62x160 seed 3 clears comfortably.
 #[test]
 fn couch_survives_a_narrow_band_that_clears_the_door() {
-    for &(w, h, seed) in &[(40u16, 160u16, 1u64), (48, 160, 0)] {
+    for &(w, h, seed) in &[(57u16, 160u16, 1u64), (62, 160, 3)] {
         let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("lays out");
         assert!(
             l.couch_sprite_center().is_some(),
@@ -1164,21 +1170,20 @@ fn the_sweep_reaches_every_floor_variant() {
 fn plant_obstacle_census_honors_repels_plants() {
     let p = |x: u16, y: u16| Point { x, y };
     let rects = super::compute::plant_obstacle_rects(
-        Some(p(10, 10)), // fish tank      -> repels -> in
-        Some(p(50, 50)), // floor lamp     -> NOT    -> out
-        Some(p(60, 60)), // side table     -> NOT    -> out
-        Some(p(80, 40)), // kitchen island -> repels -> in
+        Some(p(10, 10)), // fish tank
+        Some(p(50, 50)), // floor lamp
+        Some(p(60, 60)), // side table
+        Some(p(80, 40)), // kitchen island
         &[],             // no meeting rooms
     );
     assert_eq!(
         rects.len(),
-        2,
-        "fish tank + island repel; lamp + side table are the declared Ficus-hug exclusions"
+        4,
+        "every lounge and pantry singleton repels a plant"
     );
     assert!(
-        super::compute::plant_obstacle_rects(None, Some(p(1, 1)), Some(p(2, 2)), None, &[])
-            .is_empty(),
-        "only repels_plants singletons enter the census"
+        super::compute::plant_obstacle_rects(None, None, None, None, &[]).is_empty(),
+        "no singleton, no census"
     );
 }
 

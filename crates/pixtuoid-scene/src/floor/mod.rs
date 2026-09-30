@@ -4,17 +4,17 @@
 //! frame itself), the per-floor fade states ([`LightingState`], the neon
 //! sign's), and the per-office [`CoffeeState`] bookkeeping.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::physics::{walk_arrived, WalkProfile};
+use crate::physics::{WalkProfile, walk_arrived};
+use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{AgentSlot, FloorLocalDeskIndex, GlobalDeskIndex, SceneState};
 use pixtuoid_core::walkable::OccupancyOverlay;
-use pixtuoid_core::AgentId;
 
 use crate::audio::{AudioCueTracker, AudioFrame};
 use crate::chitchat::{ActiveChitchat, VenueKey};
@@ -24,7 +24,7 @@ use crate::motion::MotionState;
 use crate::pathfind::{AStarRouter, Router};
 use crate::pet::{Pet, PetState};
 use crate::pixel_painter::{
-    render_to_rgb_buffer, sim_step, PetInputs, PixelCtx, SimFrame, SimInputs, SimStores,
+    PetInputs, PixelCtx, SimFrame, SimInputs, SimStores, render_to_rgb_buffer, sim_step,
 };
 use crate::pose::PoseHistory;
 use crate::theme::Theme;
@@ -695,6 +695,7 @@ impl FloorSession {
         self.evict_missing(scene);
         let fctx = &mut self.floor.ctx;
         let layout = fctx.frame_layout(size.w, size.h, floor_meta.floor_seed)?;
+        let door_anim_max_ms = fctx.door_anim_max_ms;
         let frame = sim_step(
             &mut SimStores {
                 router: &mut fctx.router,
@@ -715,6 +716,7 @@ impl FloorSession {
                 pets: PetInputs::default(),
                 floor: floor_meta,
                 now,
+                door_anim_max_ms,
             },
         );
         frame_epilogue(
@@ -1034,10 +1036,10 @@ impl FloorTransition {
         // larger than the transition's own duration can't be render-loop jitter;
         // treat it as done. Smaller wobbles keep the saturate-to-0 convention
         // every other animation uses.
-        if let Ok(behind) = self.started_at.duration_since(now) {
-            if behind.as_millis() as u64 > self.duration_ms {
-                return true;
-            }
+        if let Ok(behind) = self.started_at.duration_since(now)
+            && behind.as_millis() as u64 > self.duration_ms
+        {
+            return true;
         }
         self.t(now) >= 1.0
     }
