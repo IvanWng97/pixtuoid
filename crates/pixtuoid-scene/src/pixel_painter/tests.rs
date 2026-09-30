@@ -543,6 +543,7 @@ fn agent_overrides_are_deterministic_per_id() {
 /// Every look of frame `i` of `anim` a viewer could see under `overrides`:
 /// recolored and, where the art marks its head, dressed in each of the pack's
 /// hairstyles.
+#[cfg(feature = "density-art")]
 fn looks(
     pack: &pixtuoid_core::sprite::format::Pack,
     anim: &pixtuoid_core::sprite::Sprite,
@@ -564,6 +565,7 @@ fn looks(
 }
 
 /// Whether recoloring `key` changes some pixel of every look of frame `i`.
+#[cfg(feature = "density-art")]
 fn recolors(
     pack: &pixtuoid_core::sprite::format::Pack,
     anim: &pixtuoid_core::sprite::Sprite,
