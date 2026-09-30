@@ -15,7 +15,7 @@ use crate::render_scale::RenderScale;
 const RAMP_LIT_LEVEL: i8 = 3;
 /// Shade counterpart of [`RAMP_LIT_LEVEL`], deliberately deeper — a surface
 /// turning away from the only light loses more than a facing one gains.
-const RAMP_SHADE_LEVEL: i8 = -4;
+pub(crate) const RAMP_SHADE_LEVEL: i8 = -4;
 
 /// A material's three tones under the cutaway's single key light.
 ///

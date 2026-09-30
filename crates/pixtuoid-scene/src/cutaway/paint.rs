@@ -1983,8 +1983,18 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, pen: Pen, buf:
         s,
         theme.surface.wall_trim,
     );
-    // The wall's own contact line with the floor.
-    fill(buf, 0, scale.to_buffer(band_h), w, s, contact_tone(theme));
+    // The wall's contact line: the floor under it, a shade step down.
+    let mut contact = crate::cutaway::pen::Stepped::new(crate::cutaway::shade::RAMP_SHADE_LEVEL);
+    pen.recolour(
+        buf,
+        ArtRect {
+            x: ArtPx(0),
+            y: pen.art(band_h),
+            w: pen.art(layout.buf_w),
+            h: pen.art(1),
+        },
+        |_, _, under| contact.of(under),
+    );
 }
 
 /// Queue each window's glass as a piece: what it looks out on — the one city
@@ -2693,12 +2703,6 @@ fn paint_prop_band(
         dense.blit_at,
         buf,
     );
-}
-
-/// The tone of the line where the wall meets the floor: the carpet's own shade
-/// under the key light, so contact reads as weight rather than as a colour.
-fn contact_tone(theme: &Theme) -> pixtuoid_core::sprite::Rgb {
-    Ramp::from_base(theme.surface.carpet_dark).shade
 }
 
 /// A task chair from the pack's art.
