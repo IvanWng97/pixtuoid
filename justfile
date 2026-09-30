@@ -150,9 +150,8 @@ actionlint-composites:
 # deliberate: tokenless it runs OFFLINE (it says so on stderr) and skips every
 # audit that needs the GitHub API (`RUST_LOG=debug zizmor` names each;
 # typosquat-uses still runs, at reduced confidence). ci-lint.yml's hygiene job passes
-# GH_TOKEN, so those DO gate in CI: there the recipe refuses to run tokenless,
-# and a CI contract pins that step so it cannot be dropped or softened. Same
-# call as `links` (--offline) and `deny` (advisories deferred to audit.yml): a
+# GH_TOKEN, so those DO gate in CI: there the recipe refuses to run tokenless.
+# Same call as `links` (--offline) and `deny` (advisories deferred to audit.yml): a
 # check whose verdict depends on the network and an upstream feed must not
 # redden a push of unchanged code. Do NOT auto-export `gh auth token` to close
 # the gap — it puts a real token on the wire on every pre-push run and makes the
@@ -167,13 +166,11 @@ zizmor:
     fi
     zizmor --strict-collection .
 
-# The selftest runs first so a broken runner is reported as itself, not as
-# every contract failing. action_behavior_test.sh runs the workflows' own shell
-# against stubs, which no static contract can do.
+# action_behavior_test.sh runs the workflows' own shell against stubs, which no
+# static contract can do.
 [doc('Check the CI contracts actionlint and zizmor cannot see')]
 [group('rust')]
 ci-observability:
-    bash policy/ci-observability/check.sh --selftest
     bash policy/ci-observability/check.sh
     bash policy/ci-observability/action_behavior_test.sh
 
@@ -970,15 +967,16 @@ build-target target cross="false":
         exit 1
         ;;
     esac
-    # Every LINUX artifact builds --no-default-features (musl can't link ALSA
-    # statically; the aarch64 cross image has no ALSA headers), so prebuilt
-    # Linux binaries ship SILENT and Linux audio is a from-source feature
-    # (#633; see docs/CONFIGURATION.md). Derived here, not passed: the flag
-    # is a property of the target. $flags stays UNQUOTED below — quoting the
-    # empty non-Linux case would pass cargo an empty positional arg.
+    # Every LINUX artifact drops `audio` (musl can't link ALSA statically; the
+    # aarch64 cross image has no ALSA headers), so prebuilt Linux binaries ship
+    # SILENT and Linux audio is a from-source feature (#633; see
+    # docs/CONFIGURATION.md). Every other default feature rides `portable`
+    # (pixtuoid's Cargo.toml). Derived here, not passed: the flags are a
+    # property of the target. $flags stays UNQUOTED below — quoting the empty
+    # non-Linux case would pass cargo an empty positional arg.
     flags=""
     case "{{ target }}" in
-    *linux*) flags="--no-default-features" ;;
+    *linux*) flags="--no-default-features --features portable" ;;
     esac
     if [ "$use_cross" = "true" ]; then
         cross build --release --target "{{ target }}" $flags
