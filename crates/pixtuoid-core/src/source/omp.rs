@@ -2419,14 +2419,16 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var_os("PI_CODING_AGENT_DIR");
 
-        std::env::set_var("PI_CODING_AGENT_DIR", "/custom/agent");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("PI_CODING_AGENT_DIR", "/custom/agent") };
         assert_eq!(
             omp_sessions_dir(),
             PathBuf::from("/custom/agent").join("sessions")
         );
 
         for blank in ["", "   "] {
-            std::env::set_var("PI_CODING_AGENT_DIR", blank);
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var("PI_CODING_AGENT_DIR", blank) };
             let dflt = omp_sessions_dir();
             assert!(
                 dflt.ends_with(Path::new(".omp/agent/sessions")),
@@ -2434,12 +2436,15 @@ mod tests {
             );
         }
 
-        std::env::remove_var("PI_CODING_AGENT_DIR");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("PI_CODING_AGENT_DIR") };
         assert!(omp_sessions_dir().ends_with(Path::new(".omp/agent/sessions")));
 
         match saved {
-            Some(v) => std::env::set_var("PI_CODING_AGENT_DIR", v),
-            None => std::env::remove_var("PI_CODING_AGENT_DIR"),
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var("PI_CODING_AGENT_DIR", v) },
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var("PI_CODING_AGENT_DIR") },
         }
     }
 

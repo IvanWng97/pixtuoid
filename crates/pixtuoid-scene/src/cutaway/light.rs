@@ -215,7 +215,7 @@ impl LightView {
         let top = self.lift.iter().copied().max().unwrap_or(0);
         let w = usize::from(self.w.max(1));
         let (mut n, mut sx, mut sy) = (0.0, 0.0, 0.0);
-        for (i, _) in self.lift.iter().enumerate().filter(|(_, &l)| l == top) {
+        for (i, _) in self.lift.iter().enumerate().filter(|&(_, &l)| l == top) {
             n += 1.0;
             sx += (i % w) as f32;
             sy += (i / w) as f32;

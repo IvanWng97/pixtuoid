@@ -759,7 +759,7 @@ fn assert_back_turned_desks_face_a_partner(w: u16, h: u16, seed: u64, l: &SceneL
         .home_desks
         .iter()
         .zip(&l.desk_facings)
-        .filter(|(_, &f)| f == Facing::South)
+        .filter(|&(_, &f)| f == Facing::South)
         .map(|(&d, _)| d)
         .collect();
     for (&d, &f) in l.home_desks.iter().zip(&l.desk_facings) {

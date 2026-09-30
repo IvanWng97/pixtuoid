@@ -241,19 +241,24 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var_os("HOME");
         let saved_up = std::env::var_os("USERPROFILE");
-        std::env::remove_var("USERPROFILE");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("USERPROFILE") };
 
         // 0xFF is never valid UTF-8, and is a legal byte in a Unix path.
         let bad = OsString::from_vec(b"/tmp/pixtuoid-caf\xFF".to_vec());
-        std::env::set_var("HOME", &bad);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("HOME", &bad) };
         let got = user_home_opt();
 
         match saved {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var("HOME", v) },
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var("HOME") },
         }
         if let Some(v) = saved_up {
-            std::env::set_var("USERPROFILE", v);
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var("USERPROFILE", v) };
         }
 
         assert_eq!(
@@ -274,14 +279,17 @@ mod tests {
         const K: &str = "PIXTUOID_PATH_ENV_TEST";
         let saved = std::env::var_os(K);
 
-        std::env::remove_var(K);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var(K) };
         assert_eq!(path_env(K), None, "unset");
         for blank in ["", "   ", "\t \n"] {
-            std::env::set_var(K, blank);
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var(K, blank) };
             assert_eq!(path_env(K), None, "{blank:?} counts as unset");
             assert_eq!(path_env_trimmed(K), None, "{blank:?} counts as unset");
         }
-        std::env::set_var(K, " /srv/hm ");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var(K, " /srv/hm ") };
         assert_eq!(
             path_env(K),
             Some(PathBuf::from(" /srv/hm ")),
@@ -294,8 +302,10 @@ mod tests {
         );
 
         match saved {
-            Some(v) => std::env::set_var(K, v),
-            None => std::env::remove_var(K),
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var(K, v) },
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var(K) },
         }
     }
 
@@ -315,7 +325,8 @@ mod tests {
         let saved = std::env::var_os(K);
 
         let bad = OsString::from_vec(b"/tmp/caf\xFF".to_vec());
-        std::env::set_var(K, &bad);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var(K, &bad) };
         assert!(
             std::env::var(K).is_err(),
             "precondition: env::var is what DROPS this value"
@@ -324,8 +335,10 @@ mod tests {
         assert_eq!(path_env_trimmed(K), Some(PathBuf::from(&bad)));
 
         match saved {
-            Some(v) => std::env::set_var(K, v),
-            None => std::env::remove_var(K),
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            Some(v) => unsafe { std::env::set_var(K, v) },
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var(K) },
         }
     }
 
