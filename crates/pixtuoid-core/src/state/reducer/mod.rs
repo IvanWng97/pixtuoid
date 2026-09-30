@@ -19,7 +19,7 @@ pub use crate::state::correlation::{
 pub const EXIT_GRACE_WINDOW: Duration = Duration::from_millis(4500);
 
 /// Defers a drained parent's b1 cascade (#151): one FSEvents coalescing hop,
-/// deliberately NOT the `scan_root` poll backstop (`DEFAULT_POLL_INTERVAL`).
+/// deliberately NOT the `DEFAULT_POLL_INTERVAL` backstop.
 #[doc(hidden)]
 pub const B1_CASCADE_GRACE: Duration = Duration::from_millis(2500);
 
@@ -40,10 +40,8 @@ pub const STALE_UNKNOWN_CWD_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 
 /// For `SourceCaps::short_idle_reap()`. Codex motivates it: its `SessionEnd`
 /// hook covers only graceful teardown, its payloads carry no PID, and
-/// `ShutdownComplete` never reaches the rollout — so where its open-fd liveness
-/// probe cannot run (a sessions root that is not first-party, or a proc table it
-/// cannot read) silence is the only exit signal. CC has a clean-exit hook, so it
-/// keeps `STALE_IDLE_TIMEOUT`; don't give it this.
+/// `ShutdownComplete` never reaches the rollout, and its open-fd probe does not
+/// run everywhere. CC has a clean-exit hook, so it keeps `STALE_IDLE_TIMEOUT`.
 #[doc(hidden)]
 pub const STALE_SHORT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 

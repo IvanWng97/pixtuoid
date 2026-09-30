@@ -377,8 +377,7 @@ pub(super) async fn emit_session_exit(id: &str, decoders: SourceDecoders, ctx: &
     ctx.live.lock().await.remove(id);
 }
 
-/// ONE probe refresh (the imperative SHELL over `ProbeLadder::fold`), the only
-/// place `live` is re-snapshotted. Returns true so the caller re-emits
+/// ONE probe refresh (the imperative SHELL over `ProbeLadder::fold`). Returns true so the caller re-emits
 /// `ProofOfLife` after its scan. On a probe FAILURE (`None`) or no probe wired:
 /// change NOTHING — `ctx.live` keeps the previous ids, the miss windows neither
 /// advance nor confirm, no bindings move (the reducer's TTL absorbs the gap).
@@ -393,8 +392,7 @@ pub(super) async fn refresh_probe_snapshot(
         return false;
     };
     // `spawn_blocking`, not `block_in_place`: the probe is blocking std::fs and
-    // libproc, and `block_in_place` panics on a current-thread runtime, which the
-    // watcher's `#[tokio::test]`s run on.
+    // libproc, and `block_in_place` panics on a current-thread runtime.
     let probe = Arc::clone(probe);
     let snap = match tokio::task::spawn_blocking(move || probe()).await {
         Ok(Some(snap)) => snap,

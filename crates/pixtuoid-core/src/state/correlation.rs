@@ -45,8 +45,7 @@ pub const CHILD_END_LEDGER_TTL: Duration = Duration::from_secs(90);
 /// the watcher's poll backstop (`DEFAULT_POLL_INTERVAL`), while the MEMORY must span a TURN gap,
 /// which is unbounded. Sharing one clock meant a child idle past
 /// [`CHILD_END_LEDGER_TTL`] came back an ORPHAN, the exact phantom #246 exists
-/// to eliminate. `jsonl::unclaim`, the sibling half of this flow, reads it as
-/// its own TTL. The gate is
+/// to eliminate. The gate is
 /// unaffected: [`Correlation::child_recently_ended`] applies its OWN
 /// freshness check, so a retained-but-stale entry gates nothing.
 #[doc(hidden)]
