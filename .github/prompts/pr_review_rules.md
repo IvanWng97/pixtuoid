@@ -108,7 +108,8 @@ No LOW findings. If it's not worth fixing, don't mention it.
   overall assessment. Each `findings` entry contains:
   - `severity`: `HIGH` or `MEDIUM`
   - `path`: repository-relative file path
-  - `line`: exact positive line number
+  - `line`: exact positive line number in the PR head; a line the diff shows
+    counts from its hunk's `+start`
   - `body`: verified finding and concrete failure scenario
 - Return an empty `findings` array when the review is clean.
 - Do not post comments or call GitHub APIs. A separate least-privilege publisher

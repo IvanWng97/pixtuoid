@@ -77,29 +77,50 @@ assert_reviewability "$resolver_script" "$closed_pr" false "$label state"
 
 publisher_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Publish validated Claude review")"
 published_comment="$test_dir/published-comment"
-# shellcheck disable=SC2016 # The generated gh stub expands these variables when it runs.
-printf '%s\n' \
-    '#!/usr/bin/env bash' \
-    'set -euo pipefail' \
-    'case "$1" in' \
-    'api)' \
-    '    printf "%s\n" "$FAKE_PR_HEAD"' \
-    '    ;;' \
-    'pr)' \
-    '    [[ "$2" == "comment" ]]' \
-    '    while (($#)); do' \
-    '        if [[ "$1" == "--body-file" ]]; then' \
-    '            command cp "$2" "$PUBLISHED_COMMENT"' \
-    '            exit 0' \
-    '        fi' \
-    '        shift' \
-    '    done' \
-    '    exit 1' \
-    '    ;;' \
-    '*) exit 1 ;;' \
-    'esac' \
-    >"$fake_bin/gh"
+posted_threads="$test_dir/posted-threads"
+cat >"$fake_bin/gh" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
+api)
+    shift
+    path="" jq_expr="."
+    while (($#)); do
+        case "$1" in
+        --jq) jq_expr="$2" && shift 2 ;;
+        --method) shift 2 ;;
+        -*) shift ;;
+        *) path="$1" && shift ;;
+        esac
+    done
+    case "$path" in
+    repos/owner/repo/pulls/42) jq -n -r --arg sha "$FAKE_PR_HEAD" "{head: {sha: \$sha}} | $jq_expr" ;;
+    repos/owner/repo/pulls/42/files) jq -r "$jq_expr" <<<"$FAKE_PR_FILES" ;;
+    repos/owner/repo/pulls/42/comments) jq -c . >>"$POSTED_THREADS" ;;
+    *) exit 1 ;;
+    esac
+    ;;
+pr)
+    [[ "$2" == "comment" ]]
+    while (($#)); do
+        if [[ "$1" == "--body-file" ]]; then
+            command cp "$2" "$PUBLISHED_COMMENT"
+            exit 0
+        fi
+        shift
+    done
+    exit 1
+    ;;
+*) exit 1 ;;
+esac
+STUB
 chmod +x "$fake_bin/gh"
+
+pr_files='[
+  {"filename": "src/a.rs", "patch": "@@ -1,2 +1,3 @@\n a\n+b\n c\n@@ -10,0 +20,2 @@\n+x\n+y"},
+  {"filename": "src/b.rs", "patch": "@@ -5 +5 @@\n-q\n+r"},
+  {"filename": "img.png"}
+]'
 
 # The head pair is parameterized for the one stale-review case; everything
 # else varies only the review body.
@@ -107,8 +128,11 @@ run_publisher() {
     local review_json="$1"
     local fake_head="${2:-abc123}"
     local expected_head="${3:-abc123}"
+    rm -f "$posted_threads"
     PATH="$fake_bin:$PATH" \
         FAKE_PR_HEAD="$fake_head" \
+        FAKE_PR_FILES="$pr_files" \
+        POSTED_THREADS="$posted_threads" \
         PUBLISHED_COMMENT="$published_comment" \
         EXPECTED_HEAD_SHA="$expected_head" \
         PR_NUMBER="42" \
@@ -129,6 +153,44 @@ published_content="$(<"$published_comment")"
     fail "Claude publisher omitted the exact-head marker"
 [[ "$published_content" == *"**Findings: 0**"* ]] ||
     fail "Claude publisher omitted the zero-finding count"
+[[ ! -e "$posted_threads" ]] ||
+    fail "Claude publisher posted a review thread for zero findings"
+
+# $1 is a jq predicate over the array of posted threads; $2 names what it checks.
+assert_threads() {
+    jq -e -s "$1" "$posted_threads" >/dev/null ||
+        fail "Claude publisher's review threads: $2: $(<"$posted_threads")"
+}
+
+in_diff_review='{"summary":"s","findings":[
+  {"severity":"HIGH","path":"src/a.rs","line":2,"body":"added line"},
+  {"severity":"MEDIUM","path":"src/a.rs","line":21,"body":"second hunk"},
+  {"severity":"MEDIUM","path":"src/b.rs","line":5,"body":"count-less hunk header"},
+  {"severity":"HIGH","path":"src/a.rs","line":10,"body":"between hunks"},
+  {"severity":"MEDIUM","path":"img.png","line":1,"body":"no patch"}]}'
+run_publisher "$in_diff_review" ||
+    fail "Claude publisher rejected findings inside the diff"
+assert_threads 'length == 5 and all(.[]; .commit_id == "abc123")' \
+    "one thread per finding, at the reviewed head"
+assert_threads '[.[:3][] | [.path, .line, .side]] == [["src/a.rs", 2, "RIGHT"], ["src/a.rs", 21, "RIGHT"], ["src/b.rs", 5, "RIGHT"]]' \
+    "a finding on a diff line is an inline comment on that line"
+assert_threads '[.[3:][] | [.path, .subject_type, has("line")]] == [["src/a.rs", "file", false], ["img.png", "file", false]]' \
+    "a finding off the diff's lines is file-level on its own file"
+assert_threads '.[3].body | contains("src/a.rs:10")' \
+    "a file-level comment names the finding's line"
+
+hostile_body="it's \"quoted\" \$(touch $test_dir/pwned) \`touch $test_dir/pwned\` \\n end"
+hostile_review="$(jq -cn --arg b "$hostile_body" \
+    '{summary: "s", findings: [{severity: "HIGH", path: "docs/other.md", line: 9, body: $b}]}')"
+run_publisher "$hostile_review" ||
+    fail "Claude publisher rejected a finding outside the diff"
+[[ ! -e "$test_dir/pwned" ]] ||
+    fail "Claude publisher executed finding text"
+assert_threads 'length == 1 and .[0].path == "src/a.rs" and .[0].subject_type == "file"' \
+    "a finding in a file outside the diff anchors to the first changed file"
+jq -e -s --arg b "$hostile_body" '.[0].body | contains("docs/other.md:9") and contains($b)' \
+    "$posted_threads" >/dev/null ||
+    fail "Claude publisher did not carry hostile finding text literally: $(<"$posted_threads")"
 
 # A finding against a density-variant sprite (`<base>@<N>x.sprite`) must publish.
 # The path allowlist is the FIRST thing the publisher runs, and it exits without
