@@ -193,7 +193,7 @@ pub(super) async fn emit_proof_of_life(
 /// high-confidence exit — the registry entry was removed / the rollout fd
 /// closed, signals only the OWNING process can produce — so the watcher can emit
 /// the `SessionEnd` the CLI never writes instead of waiting out the reducer's
-/// `STALE_*` sweep. Confirmation needs the id missing from two healthy observations
+/// stale sweep (`stale_threshold`). Confirmation needs the id missing from two healthy observations
 /// at least `min_span` apart; a probe FAILURE is never an observation.
 ///
 /// A pure failure detector: [`fold`](ProbeLadder::fold) RETURNS the effects to

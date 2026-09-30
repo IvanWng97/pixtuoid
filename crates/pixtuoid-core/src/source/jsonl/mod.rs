@@ -348,7 +348,7 @@ impl JsonlWatcher {
     }
 
     /// Consume the watcher and drive the watch loop — initial seed, a `RESCAN_DELAY`
-    /// rescan, the 60s poll backstop, and notify events — feeding each decoded
+    /// rescan, the `DEFAULT_POLL_INTERVAL` poll backstop, and notify events — feeding each decoded
     /// event to `tx`.
     pub async fn run(self, tx: TaggedSender) -> Result<()> {
         let cursors: Arc<Mutex<HashMap<PathBuf, u64>>> = Arc::new(Mutex::new(HashMap::new()));

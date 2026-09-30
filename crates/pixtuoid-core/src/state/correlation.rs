@@ -64,7 +64,7 @@ pub const DRAINED_TASK_TOMBSTONE_TTL: Duration = Duration::from_secs(90);
 
 /// How long an [`AgentEvent::ProofOfLife`](crate::AgentEvent::ProofOfLife) vouch exempts its slot from the
 /// staleness sweeps (#220). The probe is ground truth that the OWNING PROCESS
-/// is alive, while every `STALE_*` window only models event silence — so a
+/// is alive, while every `stale_threshold` window only models event silence — so a
 /// vouched slot must not be swept on silence alone. Sized 2.5× the watcher's
 /// poll cadence (`DEFAULT_POLL_INTERVAL`): two missed polls plus slack.
 #[doc(hidden)]
