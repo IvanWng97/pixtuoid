@@ -156,9 +156,7 @@
     - .jobs.publish.permissions.contents = "write"
 
 - id: reviewer-fork-head-needs-a-maintainer
-  file:
-    - .github/workflows/claude-review.yml
-    - .github/workflows/claude-security-review.yml
+  file: .github/workflows/claude-review.yml
   why: >-
     allow_fork hands a fork's diff to a billed model, and the only approval is
     the `if:` admitting an issue_comment from a maintainer alone; an `if:` has no
