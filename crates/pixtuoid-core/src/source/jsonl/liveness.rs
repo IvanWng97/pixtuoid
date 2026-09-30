@@ -145,8 +145,8 @@ pub type LivenessProbe = Arc<dyn Fn() -> Option<ProbeSnapshot> + Send + Sync>;
 
 /// Negative vouch (#223): a previously-vouched id must be MISSING from two
 /// healthy probe snapshots at least this far apart before its exit is
-/// confirmed. 60s makes the signal immune to Codex's brief drop-and-reopen fd
-/// gap on a write failure and to the initial-seed / 250ms-rescan adjacency.
+/// confirmed, immune to Codex's brief drop-and-reopen fd gap on a write failure
+/// and to the initial-seed / [`RESCAN_DELAY`](super::RESCAN_DELAY) adjacency.
 pub(super) const NEGATIVE_VOUCH_MIN_SPAN: Duration = Duration::from_secs(60);
 
 /// Whether the liveness probe vouches for this transcript. A vouched-for file is
@@ -377,8 +377,8 @@ pub(super) async fn emit_session_exit(id: &str, decoders: SourceDecoders, ctx: &
     ctx.live.lock().await.remove(id);
 }
 
-/// ONE probe refresh (the imperative SHELL over `ProbeLadder::fold`). Returns true so the caller re-emits
-/// `ProofOfLife` after its scan. On a probe FAILURE (`None`) or no probe wired:
+/// The imperative SHELL over [`ProbeLadder::fold`]: returns whether a healthy snapshot
+/// landed, so the caller re-emits `ProofOfLife` only then. On a probe FAILURE (`None`) or no probe wired:
 /// change NOTHING — `ctx.live` keeps the previous ids, the miss windows neither
 /// advance nor confirm, no bindings move (the reducer's TTL absorbs the gap).
 pub(super) async fn refresh_probe_snapshot(
@@ -408,14 +408,14 @@ pub(super) async fn refresh_probe_snapshot(
         }
     };
     *ctx.live.lock().await = snap.pid_of.keys().cloned().collect();
-    // A pid whose kernel registration fails (EPERM) is not retried — the slower
-    // rungs cover.
     let outcome = ladder.fold(&snap, std::time::Instant::now());
     for id in &outcome.exits {
         emit_session_exit(id, decoders, ctx).await;
     }
     for pid in outcome.newly_watched {
         if let Some(watch) = exit_watch {
+            // A pid whose kernel registration fails (EPERM) is not retried — the
+            // slower rungs cover.
             watch.watch(pid);
         }
     }

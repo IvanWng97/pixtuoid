@@ -141,7 +141,7 @@ actionlint-composites:
 # source location with a WHY.
 # The operating MODE is env-derived, not chosen here, and the asymmetry is
 # deliberate: tokenless it runs OFFLINE (it says so on stderr) and skips the
-# four audits that need the GitHub API — impostor-commit,
+# audits that need the GitHub API — impostor-commit,
 # known-vulnerable-actions, ref-confusion, stale-action-refs (typosquat-uses
 # still runs, at reduced confidence). ci-lint.yml's hygiene job passes
 # GH_TOKEN, so those DO gate in CI: there the recipe refuses to run tokenless,
@@ -1275,7 +1275,6 @@ fixture-pii-selftest:
         jq -r '[.[].File | split("/") | last] | unique | join(",")' "$d/out.json"
     }
     fail=0
-    # The credential config does NOT own the identity class (see `fixture-pii`).
     for spec in ".gitleaks.toml=cred-aws.txt,cred-disguised.txt" \
                 ".gitleaks-identity.toml=identity-bearer.txt,identity-dashed.txt,identity-email.txt,identity-gituser.txt,identity-home.txt,identity-mcp.txt,identity-prefix.txt,identity-users.txt,identity-win.txt"; do
         cfg=${spec%%=*}; want=${spec#*=}
@@ -1296,8 +1295,7 @@ fixture-pii-selftest:
 # Which recorded fixtures have drifted from the CLI that produced them — version
 # first (the sharp signal), age second. LOCAL and advisory: CI has none of these
 # CLIs to compare against, and a stale fixture is a re-capture candidate, not a
-# defect. Exit 3 = candidates found — the advisory not-a-defect code
-# `corpus_check` also uses for an absent corpus.
+# defect. Exit 3 = candidates found (`corpus_check`'s advisory code).
 [group('rust')]
 [doc('Report recorded fixtures whose CLI has moved on (advisory, exit 3 = stale)')]
 fixture-age *args:

@@ -14,6 +14,7 @@
 
 const SHIM_MAIN: &str = include_str!("../src/main.rs");
 const DAEMON_WINDOWS: &str = include_str!("../../pixtuoid-core/src/source/hook/windows.rs");
+const DAEMON_HOOK: &str = include_str!("../../pixtuoid-core/src/source/hook/mod.rs");
 
 #[test]
 fn shim_stdin_cap_and_daemon_pipe_quota_stay_in_lockstep() {
@@ -32,5 +33,10 @@ fn shim_stdin_cap_and_daemon_pipe_quota_stay_in_lockstep() {
         DAEMON_WINDOWS.contains("const IN_BUFFER_SIZE: u32 = 1 << 20;"),
         "daemon IN_BUFFER_SIZE definition changed/moved — re-check the shim's \
          STDIN_CAP + STAMP_HEADROOM still equals it, then update this pin"
+    );
+    assert!(
+        DAEMON_HOOK.contains("const MAX_CONN_BYTES: u64 = 2 * 1024 * 1024;"),
+        "daemon MAX_CONN_BYTES definition changed/moved — re-check it is still twice \
+         STDIN_CAP + STAMP_HEADROOM, then update this pin"
     );
 }

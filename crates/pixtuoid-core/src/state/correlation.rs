@@ -153,7 +153,7 @@ pub(super) struct Correlation {
     /// [`HOOK_WINS_WINDOW`]'s job: omp's transcript writes the call BEFORE the
     /// approval request goes out, so the two Starts are separated by HUMAN
     /// approval latency and no dedup window can span them. The backstop TTL is
-    /// the Waiting ceiling because that bounds how long they can straddle; past
+    /// [`STALE_WAITING_TIMEOUT`](crate::state::reducer::STALE_WAITING_TIMEOUT) because that bounds how long they can straddle; past
     /// it the cost is one HUD re-count. Nested (not `(AgentId, String)`-keyed)
     /// so the per-Start membership probe borrows `&str` without allocating and
     /// a life's eviction is one `remove`; swept in [`Self::gc_slow`], never the
@@ -237,10 +237,7 @@ impl Correlation {
 
     /// TTL-prune every correlation map.
     ///
-    /// [`Correlation::child_ledger`] is the odd retain: not-yet-ended entries
-    /// ride until an end/sweep stamps `ended_at`, and the TTL applied is the
-    /// RELINK budget, not the GATE's — dropping the entry at the gate's TTL
-    /// also dropped the `parent_id` the #246 revival reads.
+    /// [`Correlation::child_ledger`] retains by [`CHILD_END_RELINK_TTL`], not the gate's TTL.
     pub(super) fn gc(&mut self, now: SystemTime) {
         self.recent_hook_tool_uses
             .retain(|_, (ts, _)| is_fresh(now, *ts, HOOK_WINS_WINDOW));
@@ -257,7 +254,7 @@ impl Correlation {
     }
 
     /// The sweeps too costly for the per-event [`Self::gc`]: `counted_calls`
-    /// keeps entries for up to the Waiting ceiling, so its retain scans real
+    /// keeps entries for up to [`STALE_WAITING_TIMEOUT`](crate::state::reducer::STALE_WAITING_TIMEOUT), so its retain scans real
     /// state. Self-amortized to [`COUNTED_SWEEP_INTERVAL`] — callers may run
     /// this as often as they like.
     pub(super) fn gc_slow(&mut self, now: SystemTime) {

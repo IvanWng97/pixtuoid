@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use crate::id::AgentId;
 
 mod correlation;
-pub(crate) use correlation::CHILD_END_RELINK_TTL;
 mod fsm;
 /// The event coordinator: [`reducer::Reducer`] folds `AgentEvent`s into `SceneState`.
 pub mod reducer;
@@ -273,7 +272,7 @@ impl From<String> for SlotLabel {
 pub struct AgentSlot {
     /// This agent's stable identity — the `SceneState::agents` map key.
     pub agent_id: AgentId,
-    /// Registry name of the source that produced this agent (e.g. `cc`, `codex`).
+    /// Registry name of the source that produced this agent (e.g. `claude-code`, `codex`).
     #[serde(with = "arc_str_serde")]
     pub source: Arc<str>,
     /// Source-native session identifier this slot is keyed under.

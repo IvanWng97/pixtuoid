@@ -40,8 +40,8 @@ pub const STALE_UNKNOWN_CWD_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 
 /// For `SourceCaps::short_idle_reap()`. Codex motivates it: its `SessionEnd`
 /// hook covers only graceful teardown, its payloads carry no PID, and
-/// `ShutdownComplete` never reaches the rollout, and its open-fd probe does not
-/// run everywhere. CC has a clean-exit hook, so it keeps `STALE_IDLE_TIMEOUT`.
+/// `ShutdownComplete` never reaches the rollout, and its open-fd probe has no arm off
+/// macOS/Linux. CC has a clean-exit hook, so it keeps [`STALE_IDLE_TIMEOUT`].
 #[doc(hidden)]
 pub const STALE_SHORT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
@@ -1049,7 +1049,7 @@ impl Reducer {
     /// gains one Active("Delegating") so it doesn't look asleep while subagents
     /// work. b1 subagent-completion inference (CC writes no completion marker):
     /// a drained parent Task means the subtree returned — cascade EXIT to the
-    /// DESCENDANTS, not the parent, so they leave before the idle stale-sweep.
+    /// DESCENDANTS, not the parent, so they leave before [`STALE_IDLE_TIMEOUT`].
     fn track_active_tasks(
         &mut self,
         scene: &mut SceneState,
