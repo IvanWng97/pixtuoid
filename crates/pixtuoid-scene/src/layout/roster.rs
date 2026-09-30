@@ -314,6 +314,12 @@ pub(crate) const NEON_PANEL: Bounds = Bounds {
     height: NEON_PANEL_H,
 };
 
+const NOTICE_BOARD: Size = Size { w: 8, h: 5 };
+/// Rows from the board's foot up off the band's trim.
+const NOTICE_BOARD_SILL: u16 = 2;
+/// Clear columns the board keeps from its neighbours.
+const NOTICE_BOARD_GAP: u16 = 1;
+
 /// How far north of the couch centre the lounge rug sorts: under the couch,
 /// which then sits on it.
 const LOUNGE_RUG_Z_LEAD: u16 = 2;
@@ -443,14 +449,9 @@ impl SceneLayout {
         ]
         .into_iter()
         .chain(corridor.map(|b| backdrop(FixtureKind::Runner, b)))
-        .chain(rooms.clone().flat_map(move |(room, r, _)| {
-            r.notice_board_rect()
-                .map(|b| backdrop(FixtureKind::NoticeBoard { room }, b))
-                .into_iter()
-                .chain(
-                    r.doormat_rect()
-                        .map(|b| backdrop(FixtureKind::Doormat { room }, b)),
-                )
+        .chain(rooms.clone().filter_map(move |(room, r, _)| {
+            r.doormat_rect()
+                .map(|b| backdrop(FixtureKind::Doormat { room }, b))
         }))
         .chain(
             self.pantry_entry_mat()
@@ -649,6 +650,10 @@ impl SceneLayout {
                     }
                 }),
         )
+        .chain((0..meeting_rooms.len()).filter_map(move |room| {
+            self.notice_board_rect(room)
+                .map(|b| upright(FixtureKind::NoticeBoard { room }, top_left(b), b))
+        }))
         .chain(home_desks.iter().enumerate().filter_map(move |(i, &at)| {
             let local = FloorLocalDeskIndex(i);
             let facing = self.desk_facing(local);
@@ -680,6 +685,69 @@ impl SceneLayout {
             .filter(|(_, f)| overlaps(f.visual))
             .max_by_key(|&(i, f)| (f.depth, i))
             .map(|(_, f)| f.kind)
+    }
+
+    /// Where meeting room `room` hangs its notice board: on the band, its north
+    /// wall, centred in the widest stretch of its width nothing else stands
+    /// in — `None` for a room whose north wall is not the band, or with no
+    /// stretch wide enough.
+    pub(crate) fn notice_board_rect(&self, room: usize) -> Option<Bounds> {
+        let b = self.meeting_rooms.get(room)?.bounds;
+        if b.y > self.top_margin {
+            return None;
+        }
+        let y = self
+            .wall_band_h()
+            .checked_sub(NOTICE_BOARD_SILL + NOTICE_BOARD.h)?;
+        let rows = y..y + NOTICE_BOARD.h;
+        let meets_rows = |v: Bounds| v.y < rows.end && rows.start < v.y + v.height;
+        let door = self.door.map(|at| {
+            boxed(
+                at,
+                Size {
+                    w: ELEVATOR_W,
+                    h: ELEVATOR_H,
+                },
+            )
+        });
+        let mut taken: Vec<(u16, u16)> = self
+            .wall_decor
+            .iter()
+            .map(|d| boxed(d.pos, furniture_def(d.kind.furniture()).visual))
+            .chain(
+                self.plants
+                    .iter()
+                    .map(|p| centred(p.pos, furniture_def(p.kind.furniture()).visual)),
+            )
+            .chain(door)
+            .chain([NEON_PANEL, boxed(self.clock_pos(), CLOCK)])
+            .filter(|&v| meets_rows(v))
+            .map(|v| {
+                (
+                    v.x.saturating_sub(NOTICE_BOARD_GAP),
+                    v.x + v.width + NOTICE_BOARD_GAP,
+                )
+            })
+            .collect();
+        taken.sort_unstable();
+        let (lo, hi) = (b.x + 1, (b.x + b.width).saturating_sub(1));
+        let mut widest: Option<(u16, u16)> = None;
+        let mut from = lo;
+        for (x0, x1) in taken.into_iter().chain(std::iter::once((hi, hi))) {
+            let to = x0.clamp(from, hi);
+            if to - from >= NOTICE_BOARD.w && widest.is_none_or(|(a, z)| to - from > z - a) {
+                widest = Some((from, to));
+            }
+            from = from.max(x1.min(hi));
+        }
+        let (from, to) = widest?;
+        Some(boxed(
+            Point {
+                x: from + (to - from - NOTICE_BOARD.w) / 2,
+                y,
+            },
+            NOTICE_BOARD,
+        ))
     }
 
     /// Whether desk `i` stands a filing cabinet beside it.
@@ -719,13 +787,24 @@ impl SceneLayout {
             .doorways
             .iter()
             .find(|d| d.start.y == d.end.y && d.start.y == p.bounds.y)?;
-        Some(centred(
+        let mat = centred(
             Point {
                 x: (dw.start.x + dw.end.x) / 2,
                 y: dw.start.y + super::WALL_THICK_H + 1 + ENTRY_MAT.h / 2,
             },
             ENTRY_MAT,
-        ))
+        );
+        // Gives way to an island over it: half hidden, it reads as a stain.
+        let island = p
+            .kitchen_island
+            .map(|at| centred(at, furniture_def(Furniture::KitchenIsland).visual));
+        let clear = |b: Bounds| {
+            b.x + b.width <= mat.x
+                || mat.x + mat.width <= b.x
+                || b.y + b.height <= mat.y
+                || mat.y + mat.height <= b.y
+        };
+        island.is_none_or(clear).then_some(mat)
     }
 
     /// The thin bar mat under the kitchen island: the island covers most of
@@ -816,4 +895,4 @@ pub(crate) fn desk_chair_z_key(desk: Point, facing: Facing) -> u16 {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -23,6 +23,10 @@ pub(crate) struct FooterStats<'a> {
     pub audio_audible: bool,
     /// `Some(percent)` for ~1s after a volume nudge; renders as `♩ N%`.
     pub volume_flash: Option<u8>,
+    /// As [`DrawCtx::floor_info`](crate::tui::renderer::DrawCtx::floor_info).
+    pub floor_info: Option<crate::tui::renderer::FloorInfo>,
+    /// As [`DrawCtx::source_warning`](crate::tui::renderer::DrawCtx::source_warning).
+    pub source_warning: Option<&'a str>,
 }
 
 /// One-line footer warning for dead sources; `None` while healthy. `pub` because the
@@ -44,17 +48,12 @@ pub fn source_warning_message(
     }
 }
 
-fn footer_inputs<'a>(
-    stats: &FooterStats<'a>,
-    floor_info: Option<crate::tui::renderer::FloorInfo>,
-    source_warning: Option<&'a str>,
-    tools: &'a [ToolTally],
-) -> FooterInputs<'a> {
+fn footer_inputs<'a>(stats: &FooterStats<'a>, tools: &'a [ToolTally]) -> FooterInputs<'a> {
     FooterInputs {
         counts: stats.counts,
         per_floor: stats.per_floor,
         gateway: stats.gateway,
-        floor: floor_info.map(|fi| FooterFloor {
+        floor: stats.floor_info.map(|fi| FooterFloor {
             current: fi.current,
             total_floors: fi.total_floors,
             total_agents: fi.total_agents,
@@ -62,7 +61,7 @@ fn footer_inputs<'a>(
         tools,
         audio_audible: stats.audio_audible,
         volume_flash: stats.volume_flash,
-        source_warning,
+        source_warning: stats.source_warning,
         keys_stats: KEYS_STATS,
         keys_alert: KEYS_ALERT,
     }
@@ -74,18 +73,9 @@ pub(crate) fn paint_footer(
     stats: &FooterStats<'_>,
     full_rect: Rect,
     theme: &pixtuoid_scene::theme::Theme,
-    floor_info: Option<crate::tui::renderer::FloorInfo>,
-    source_warning: Option<&str>,
 ) {
     use ratatui::text::Line;
-    let spans = build_status_spans(
-        scene,
-        stats,
-        full_rect.width,
-        floor_info,
-        theme,
-        source_warning,
-    );
+    let spans = build_status_spans(scene, stats, full_rect.width, theme);
     // Base style on the whole row so cells past the rendered spans keep the muted
     // footer tone rather than the terminal default.
     let footer =
@@ -105,12 +95,10 @@ pub(crate) fn build_status_spans<'a>(
     scene: &SceneState,
     stats: &FooterStats<'_>,
     term_width: u16,
-    floor_info: Option<crate::tui::renderer::FloorInfo>,
     theme: &pixtuoid_scene::theme::Theme,
-    source_warning: Option<&str>,
 ) -> Vec<Span<'a>> {
     let tools = footer_tool_tally(scene);
-    let inputs = footer_inputs(stats, floor_info, source_warning, &tools);
+    let inputs = footer_inputs(stats, &tools);
     build_footer(&inputs, term_width)
         .segments
         .into_iter()
@@ -130,11 +118,9 @@ pub(crate) fn build_status_summary(
     scene: &SceneState,
     stats: &FooterStats<'_>,
     term_width: u16,
-    floor_info: Option<crate::tui::renderer::FloorInfo>,
-    source_warning: Option<&str>,
 ) -> String {
     let tools = footer_tool_tally(scene);
-    let inputs = footer_inputs(stats, floor_info, source_warning, &tools);
+    let inputs = footer_inputs(stats, &tools);
     build_footer(&inputs, term_width).text()
 }
 
@@ -188,8 +174,10 @@ mod tests {
             gateway: None,
             audio_audible: false,
             volume_flash: None,
+            floor_info: None,
+            source_warning: None,
         };
-        let spans = build_status_spans(&scene, &stats, 200, None, theme, None);
+        let spans = build_status_spans(&scene, &stats, 200, theme);
         let active_rgb = footer_tone_rgb(FooterTone::Rung(RungKind::Active), theme);
         let rung = spans
             .iter()

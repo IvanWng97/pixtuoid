@@ -88,12 +88,18 @@ pub use anchors::character_anchor;
 
 #[doc(hidden)]
 pub use anchors::seated_anchor_facing;
+pub(crate) use background::{
+    clock_reading, neon_look, octant_offset, ClockReading, RUNNER_LATTICE_STRIDE,
+};
 #[cfg(test)]
 pub(crate) use drawable::DESK_BEZEL_RAISE;
 pub(crate) use drawable::{
     desk_art_top, desk_sprite_name, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE,
 };
-pub(crate) use palette::{appliance_overrides, DESK_BULB_KEY, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
+pub(crate) use palette::{
+    appliance_overrides, fixture_overrides, CLOCK_FACE_KEY, DESK_BULB_KEY, SCREEN_GLASS_KEY,
+    SCREEN_TEXT_KEY,
+};
 
 // The ToolKind→glow-hue seam the binary's footer tints tool segments with. The
 // footer paints this hue RAW; the sprite's glow then takes the hour's wash, so
@@ -170,7 +176,6 @@ pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
 use crate::atmosphere::Moment;
 use crate::ground::Ellipse;
 use crate::lighting::{DeskLights, LightInputs, Lights};
-use anchors::compute_door_frame_idx;
 use background::{paint_floor_and_walls, paint_floor_wash, paint_light, paint_shadow};
 use drawable::{paint_drawable, Drawable, DrawableKind, Layer};
 pub(crate) use effects::SCREEN_GLASS_COLS;
@@ -279,7 +284,6 @@ struct PaintCtx<'a> {
     theme: &'a crate::theme::Theme,
     floor: crate::floor::FloorMeta,
     motion: &'a HashMap<pixtuoid_core::AgentId, MotionState>,
-    door_anim_max_ms: u64,
     debug_walkable: bool,
 }
 
@@ -320,6 +324,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             },
             floor: ctx.floor,
             now: ctx.now,
+            door_anim_max_ms: ctx.store.door_anim_max_ms,
         },
     );
     let (pet_pos, mascots) = paint_frame(
@@ -335,7 +340,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             theme: ctx.theme,
             floor: ctx.floor,
             motion: &ctx.store.motion,
-            door_anim_max_ms: ctx.store.door_anim_max_ms,
             debug_walkable: ctx.debug_walkable,
         },
         &frame,
@@ -670,6 +674,14 @@ pub(crate) fn appliance_frame(anim: &Sprite, busy: bool, now: std::time::SystemT
     1 + usize::try_from(step % loop_len as u64).unwrap_or(0)
 }
 
+/// The frame of a looping `anim` showing at `now`: one each of the art's own
+/// `frame_ms`, round and round.
+pub(crate) fn looping_frame(anim: &Sprite, now: std::time::SystemTime) -> usize {
+    let frames = anim.frames().len().max(1) as u64;
+    let step = crate::anim::epoch_ms(now) / u64::from(anim.frame_ms().max(1));
+    usize::try_from(step % frames).unwrap_or(0)
+}
+
 /// The glow of a desk's screen: its occupant's [`lit_screen`](crate::lighting::lit_screen),
 /// tinted by the tool. Both profiles light screens from this.
 pub(crate) fn desk_screen_glow(
@@ -928,7 +940,7 @@ fn queue_fixtures<'a>(
             FixtureKind::TrashBin => DrawableKind::TrashBin(f.visual),
             FixtureKind::Door => DrawableKind::Door {
                 pos: f.top_left(),
-                frame_idx: compute_door_frame_idx(&frame.agents, ctx.now, ctx.door_anim_max_ms),
+                frame_idx: frame.door_frame,
             },
             FixtureKind::Runner => DrawableKind::Runner(f.visual),
             FixtureKind::NeonSign => DrawableKind::NeonSign {
