@@ -499,7 +499,7 @@ pub struct RgbBuffer {
     writes: Option<Writes>,
 }
 
-/// A write epoch, only ever minted by [`RgbBuffer::begin_writes`].
+/// A write epoch of the one buffer whose [`RgbBuffer::begin_writes`] minted it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WriteEpoch(u32);
 
@@ -633,9 +633,6 @@ impl RgbBuffer {
             tracking: false,
         });
         w.tracking = true;
-        if w.at.len() != n {
-            w.at = vec![0; n];
-        }
         w.now = w.now.wrapping_add(1);
         if w.now == 0 {
             w.at.fill(0);
@@ -652,7 +649,7 @@ impl RgbBuffer {
         }
     }
 
-    /// Whether `(x, y)` was written in `epoch` ([`begin_writes`](Self::begin_writes)).
+    /// Whether `(x, y)` was last written in `epoch` ([`begin_writes`](Self::begin_writes)).
     pub fn written_in(&self, x: u16, y: u16, epoch: WriteEpoch) -> bool {
         x < self.pixels.width
             && y < self.pixels.height
