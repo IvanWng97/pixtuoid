@@ -136,9 +136,7 @@ fn every_wander_waypoint_is_routable_on_the_coarse_grid() {
             let Some(l) = Layout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed) else {
                 continue;
             };
-            let Some(origin) = l.door_threshold else {
-                continue;
-            };
+            let origin = l.door_threshold;
             for wp in &l.waypoints {
                 assert!(
                     find_path(&l.walkable, &overlay, None, origin, wp.pos).is_some(),
@@ -211,9 +209,7 @@ fn reachset_never_claims_an_unroutable_cell() {
             let Some(l) = Layout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed) else {
                 continue;
             };
-            let Some(door) = l.door_threshold else {
-                continue;
-            };
+            let door = l.door_threshold;
             let mut y = 0;
             while y < l.buf_h {
                 let mut x = 0;

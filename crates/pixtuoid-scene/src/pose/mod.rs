@@ -234,17 +234,7 @@ pub fn derive_with_routing(
     let desk = layout.home_desk(slot.desk_index.single_floor_local())?;
 
     if let Some(exit_time) = slot.exiting_at {
-        let Some(door_target) = layout.door_threshold else {
-            // No door in a very narrow terminal. `None` would VANISH the exiting
-            // agent on its first frame; hold and let the grace window GC the slot.
-            let raw = derive_state_only(slot, now, layout)?;
-            return match raw {
-                Pose::Walking { .. } => {
-                    route_walking_pose(slot, now, layout, rctx, raw, Settle::None)
-                }
-                other => Some(other),
-            };
-        };
+        let door_target = layout.door_threshold;
 
         let mstate = rctx
             .motion
@@ -337,72 +327,71 @@ pub fn derive_with_routing(
         .unwrap_or(Duration::ZERO)
         .as_millis() as u64;
 
-    if let Some(door) = layout.door_threshold {
-        let (approach, chair_settle) = desk_leg_endpoint(desk, layout);
-        let settle = chair_settle.map_or(Settle::None, Settle::End);
+    let door = layout.door_threshold;
+    let (approach, chair_settle) = desk_leg_endpoint(desk, layout);
+    let settle = chair_settle.map_or(Settle::None, Settle::End);
 
-        let mstate = rctx
-            .motion
-            .entry(slot.agent_id)
-            .or_insert_with(|| MotionState::new(slot.agent_id));
+    let mstate = rctx
+        .motion
+        .entry(slot.agent_id)
+        .or_insert_with(|| MotionState::new(slot.agent_id));
 
-        let entry_from = match re_enter {
-            Some(ReEnter::Live(p)) => p,
-            _ => door,
-        };
-        if mstate.entry.is_none() && (since_spawn < ENTRY_ANIMATION_MS || re_enter.is_some()) {
-            let profile = snapshot_leg_profile(
-                rctx.router,
-                &layout.walkable,
-                rctx.overlay,
-                slot.agent_id,
-                LegPlan {
-                    from: entry_from,
-                    to: approach,
-                    settle: chair_settle.map_or(Settle::None, Settle::End),
-                    intent: WalkIntent::Entry,
-                },
-            );
-            mstate.entry = Some(WalkLeg {
-                started_at: if re_enter.is_some() {
-                    now
-                } else {
-                    slot.created_at
-                },
-                profile,
+    let entry_from = match re_enter {
+        Some(ReEnter::Live(p)) => p,
+        _ => door,
+    };
+    if mstate.entry.is_none() && (since_spawn < ENTRY_ANIMATION_MS || re_enter.is_some()) {
+        let profile = snapshot_leg_profile(
+            rctx.router,
+            &layout.walkable,
+            rctx.overlay,
+            slot.agent_id,
+            LegPlan {
                 from: entry_from,
-            });
-        }
-
-        if let Some(WalkLeg {
-            started_at,
+                to: approach,
+                settle: chair_settle.map_or(Settle::None, Settle::End),
+                intent: WalkIntent::Entry,
+            },
+        );
+        mstate.entry = Some(WalkLeg {
+            started_at: if re_enter.is_some() {
+                now
+            } else {
+                slot.created_at
+            },
             profile,
-            from,
-        }) = mstate.entry
-        {
-            let elapsed_ms = crate::anim::elapsed_ms(now, started_at);
+            from: entry_from,
+        });
+    }
 
-            if !walk_arrived(&profile, elapsed_ms) {
-                let t_x1000 = walk_progress(&profile, elapsed_ms);
-                let frame = walking_frame(elapsed_ms);
-                return route_walking_pose(
-                    slot,
-                    now,
-                    layout,
-                    rctx,
-                    Pose::Walking {
-                        from,
-                        to: approach,
-                        t_x1000,
-                        frame,
-                        carrying_coffee: false,
-                    },
-                    settle,
-                );
-            }
-            // DO NOT call `derive()` here — it re-fires the linear entry override
-            // and causes a double-walk. Fall through to the state-driven pose.
+    if let Some(WalkLeg {
+        started_at,
+        profile,
+        from,
+    }) = mstate.entry
+    {
+        let elapsed_ms = crate::anim::elapsed_ms(now, started_at);
+
+        if !walk_arrived(&profile, elapsed_ms) {
+            let t_x1000 = walk_progress(&profile, elapsed_ms);
+            let frame = walking_frame(elapsed_ms);
+            return route_walking_pose(
+                slot,
+                now,
+                layout,
+                rctx,
+                Pose::Walking {
+                    from,
+                    to: approach,
+                    t_x1000,
+                    frame,
+                    carrying_coffee: false,
+                },
+                settle,
+            );
         }
+        // DO NOT call `derive()` here — it re-fires the linear entry override
+        // and causes a double-walk. Fall through to the state-driven pose.
     }
 
     // Gates on Idle, NOT `since_spawn >= ENTRY_ANIMATION_MS`: that fixed gate sat a

@@ -89,9 +89,8 @@ pub(crate) fn debug_paint_walkable_overlay(
             let r = is_reachable(&reach_mask, &layout, x, y);
             println!("  probe {name} ({x},{y}): walkable={wk} reachable={r}");
         };
-        if let Some(t) = layout.door_threshold {
-            probe(t.x, t.y, "threshold");
-        }
+        let t = layout.door_threshold;
+        probe(t.x, t.y, "threshold");
         probe(0, layout.top_margin, "MR top-left");
         // Probe the row y=66 (pantry's last row above baseboard).
         println!("row y=66 walkability:");
@@ -113,9 +112,7 @@ fn compute_reachable(layout: &pixtuoid_scene::layout::SceneLayout) -> Vec<bool> 
     let w = layout.buf_w as usize;
     let h = layout.buf_h as usize;
     let mut visited = vec![false; w * h];
-    let Some(start) = layout.door_threshold else {
-        return visited;
-    };
+    let start = layout.door_threshold;
     if !layout.is_walkable(start.x, start.y) {
         return visited;
     }

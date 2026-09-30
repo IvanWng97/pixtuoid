@@ -115,12 +115,8 @@ fn spread(wall: u16, n: u16) -> Vec<u16> {
 /// The windows a wall `buf_w` wide shows, left to right: the tiling less every
 /// window `door` overlaps, whose glass would otherwise show through the
 /// elevator's frame.
-pub(crate) fn window_bays(buf_w: u16, door: Option<Range<u16>>) -> impl Iterator<Item = WindowBay> {
-    window_slots(buf_w).filter(move |b| {
-        !door
-            .as_ref()
-            .is_some_and(|d| b.x < d.end && b.x + WINDOW_W > d.start)
-    })
+pub(crate) fn window_bays(buf_w: u16, door: Range<u16>) -> impl Iterator<Item = WindowBay> {
+    window_slots(buf_w).filter(move |b| !(b.x < door.end && b.x + WINDOW_W > door.start))
 }
 
 /// The columns from the first slot's left edge to the last one's right, the
@@ -141,12 +137,16 @@ pub(crate) fn window_posts(buf_w: u16) -> impl Iterator<Item = Range<u16>> {
 
 /// The elevator door's left column on a wall `buf_w` wide: centred in the
 /// door's slot, which stands even where no window run fits west of it.
-pub(crate) fn door_x(buf_w: u16) -> Option<u16> {
-    door_slot_x(buf_w).map(|x| x + DOOR_INSET)
+pub(crate) fn door_x(buf_w: u16) -> u16 {
+    buf_w.saturating_sub(WINDOW_EDGE_MARGIN + WINDOW_W) + DOOR_INSET
 }
 
+/// The narrowest wall a door's slot fits, so [`door_x`] never saturates on a
+/// laid-out office.
+pub(crate) const DOOR_SLOT_MIN_W: u16 = WINDOW_EDGE_MARGIN + WINDOW_W;
+
 /// The wall band's trim row, where the band meets the floor.
-pub(crate) fn wall_trim_row(band_h: u16) -> u16 {
+pub(crate) const fn wall_trim_row(band_h: u16) -> u16 {
     band_h.saturating_sub(1)
 }
 
@@ -181,17 +181,18 @@ impl SceneLayout {
     /// The windows this office's north wall shows, left to right: every slot
     /// but the door's.
     pub(crate) fn window_bays(&self) -> impl Iterator<Item = WindowBay> + use<> {
-        window_bays(self.buf_w, self.door_rect().map(|d| d.x..d.x + d.width))
+        let door = self.door_rect();
+        window_bays(self.buf_w, door.x..door.x + door.width)
     }
 
-    /// The box the elevator door's art covers, or `None` without a door.
-    pub(crate) fn door_rect(&self) -> Option<Bounds> {
-        self.door.map(|at| Bounds {
-            x: at.x,
-            y: at.y,
+    /// The box the elevator door's art covers.
+    pub(crate) fn door_rect(&self) -> Bounds {
+        Bounds {
+            x: self.door.x,
+            y: self.door.y,
             width: ELEVATOR_W,
             height: ELEVATOR_H,
-        })
+        }
     }
 }
 
@@ -241,16 +242,16 @@ mod tests {
                 "{buf_w}: another window fits"
             );
             assert_eq!(window_run(buf_w), slots[0].x..door.span().end);
-            assert_eq!(door_x(buf_w), Some(door.x + DOOR_INSET));
+            assert_eq!(door_x(buf_w), door.x + DOOR_INSET);
         }
         assert!(walls_with_a_window > 0);
     }
 
     #[test]
     fn a_door_takes_exactly_the_window_it_overlaps() {
-        let all: Vec<_> = window_bays(240, None).collect();
+        let all: Vec<_> = window_bays(240, 0..0).collect();
         let doomed = all[2];
-        let kept: Vec<_> = window_bays(240, Some(doomed.span())).collect();
+        let kept: Vec<_> = window_bays(240, doomed.span()).collect();
         assert_eq!(kept.len() + 1, all.len());
         assert!(kept.iter().all(|b| b.idx != doomed.idx));
     }
@@ -279,7 +280,7 @@ mod tests {
 
     #[test]
     fn a_wall_too_narrow_for_a_window_runs_the_first_window_alone() {
-        assert_eq!(window_bays(WINDOW_W, None).count(), 0);
+        assert_eq!(window_bays(WINDOW_W, 0..0).count(), 0);
         let first = NEON_EAST + MIN_POST_W;
         assert_eq!(window_run(WINDOW_W), first..first + WINDOW_W);
     }
@@ -308,7 +309,7 @@ mod tests {
     fn the_door_stands_on_the_wall_trim() {
         for (w, h) in [(192, 80), (140, 60), (250, 90)] {
             let layout = SceneLayout::compute(w, h, Some(4)).expect("layout fits");
-            let door = layout.door.expect("a door at this size");
+            let door = layout.door;
             assert_eq!(
                 door.y + super::super::ELEVATOR_H - 1,
                 wall_trim_row(layout.wall_band_h()),

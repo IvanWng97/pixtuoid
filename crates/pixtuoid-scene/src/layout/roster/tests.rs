@@ -447,7 +447,7 @@ fn is_exit_sign(k: &FixtureKind) -> bool {
 fn the_door_is_centred_in_the_last_window_slot() {
     for l in north_wall_census() {
         let at = format!("{}x{}", l.buf_w, l.buf_h);
-        let door = l.door_rect().expect("a door at every census size");
+        let door = l.door_rect();
         let roster = l.fixtures().find(|f| f.kind == FixtureKind::Door);
         assert_eq!(roster.map(|f| f.visual), Some(door), "{at}");
         let slots: Vec<_> = super::super::window_slots(l.buf_w).collect();
@@ -479,7 +479,7 @@ fn the_exit_sign_hangs_centred_over_the_door_indicator_below_the_window_head() {
             continue;
         };
         met += 1;
-        let (sign, door) = (sign.visual, l.door_rect().expect("a sign marks a door"));
+        let (sign, door) = (sign.visual, l.door_rect());
         let (west, east) = (
             sign.x - door.x,
             (door.x + door.width) - (sign.x + sign.width),

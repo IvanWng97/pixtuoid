@@ -611,9 +611,7 @@ fn no_furniture_ground_overlaps_a_wall() {
 /// FIRST: `unreachable_walkable_cells` returns empty on a BLOCKED seed, so
 /// without it a sealed threshold passes vacuously.
 fn assert_walkable_connected(w: u16, h: u16, seed: u64, l: &SceneLayout) {
-    let Some(start) = l.door_threshold else {
-        panic!("{w}x{h} seed {seed}: layout has no door threshold");
-    };
+    let start = l.door_threshold;
     assert!(
         l.walkable.is_walkable(start.x, start.y),
         "{w}x{h} seed {seed}: door threshold {start:?} is not walkable"
@@ -639,9 +637,7 @@ fn walkable_is_one_connected_region() {
 /// both SNAP a displaced seed back into the component, so every routing assert
 /// still passes with the spawn north of the floor line — only this one fails.
 fn assert_spawn_stands_on_open_floor(w: u16, h: u16, seed: u64, l: &SceneLayout) {
-    let Some(dt) = l.door_threshold else {
-        panic!("{w}x{h} seed {seed}: layout has no door threshold");
-    };
+    let dt = l.door_threshold;
     assert!(
         dt.y >= l.top_margin,
         "{w}x{h} seed {seed}: spawn {dt:?} sits on the wall apron (rows {}..{}) \
@@ -722,9 +718,7 @@ fn assert_home_desk_approaches_are_routable(w: u16, h: u16, seed: u64, l: &Scene
     // the production floor seeds, and the step-1 `NARROW_BAND` width scan.
     use crate::pathfind::find_path;
     let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
-    let Some(door) = l.door_threshold else {
-        panic!("{w}x{h} seed {seed}: layout has no door threshold");
-    };
+    let door = l.door_threshold;
     for (i, &desk) in l.home_desks.iter().enumerate() {
         let approach = crate::pose::desk_approach_cell(desk, l).unwrap_or_else(|| {
             panic!(
@@ -889,7 +883,7 @@ fn door_threshold_walkable_at_a_band_split_to_thirty() {
     // At a cubicle band exactly 30 px wide the lounge couch's east seat sealed
     // the spawn threshold's own column; 39x160 seed 1 is one such split.
     let l = SceneLayout::compute_with_seed(39, 160, None, 1).expect("39x160 lays out");
-    let dt = l.door_threshold.expect("has a door threshold");
+    let dt = l.door_threshold;
     assert!(
         l.walkable.is_walkable(dt.x, dt.y),
         "door threshold {dt:?} must be walkable — the couch may not seal the spawn column"
