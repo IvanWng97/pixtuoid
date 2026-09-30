@@ -561,7 +561,7 @@ fn resolve_characters(
                     let dx = waypoint_rank_offset_x(kind, rank);
                     let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
                     // The label twin in `anchors::character_anchor` rides this
-                    // SAME call — they diverge only at the canvas clamps below.
+                    // SAME call, without the step-aside and breath below.
                     let seat = Seat::at_waypoint(kind, stand, wp_obj.facing);
                     let anchor_base = seat.render_anchor(char_w);
                     let (anim_name, flip_x) = seat.sprite_in_pack("seated", pack);

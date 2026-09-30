@@ -34,6 +34,9 @@ pub struct PixelPassResult {
     /// One resolved frame per gateway mascot drawn this tick — a source can
     /// run ANY number of concurrent instances, each independently hoverable.
     pub mascots: Vec<MascotFrame>,
+    /// Every character drawn this tick, in paint order: the last one covering
+    /// a point is the one on top.
+    pub agents: Vec<AgentFrame>,
     /// Active speech bubbles this frame, for the caller's widget pass.
     pub chitchat_bubbles: Vec<ChitchatBubble>,
     /// Agent ids observed in `Walking { carrying_coffee: true }` this frame.
@@ -68,6 +71,15 @@ pub struct MascotFrame {
     pub degraded: bool,
     /// Number of sessions the gateway currently holds (tooltip detail).
     pub active_sessions: u32,
+}
+
+/// Where a character's sprite was drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentFrame {
+    /// Whose sprite it is.
+    pub agent_id: pixtuoid_core::AgentId,
+    /// The sprite's top-left screen position.
+    pub anchor: Point,
 }
 
 mod ambient;
@@ -312,7 +324,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             now: ctx.now,
         },
     );
-    let (pet_pos, mascots) = paint_frame(
+    let (pet_pos, mascots, agents) = paint_frame(
         &mut PaintCtx {
             scene: ctx.scene,
             layout: ctx.layout,
@@ -333,6 +345,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     PixelPassResult {
         pet_pos,
         mascots,
+        agents,
         chitchat_bubbles: frame.chitchat_bubbles,
         new_coffee_carriers: frame.new_coffee_carriers,
         occupied_waypoints: frame.occupied_waypoints,
@@ -452,7 +465,10 @@ fn floor_shadow_ellipses(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ 
 /// The PAINT half of the frame: blit the world the sim already advanced. Every
 /// positional/lifecycle decision was made in `sim_step` — this pass only
 /// resolves presentation (theme colors, sprite pixels) and composites.
-fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, Vec<MascotFrame>) {
+fn paint_frame(
+    ctx: &mut PaintCtx<'_>,
+    frame: &SimFrame,
+) -> (Option<PetFrame>, Vec<MascotFrame>, Vec<AgentFrame>) {
     let agents: &[AgentSlot] = &frame.agents;
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;
@@ -586,6 +602,16 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // decor first, characters last — and a character tied with a piece of
     // furniture paints BEFORE it.
     drawables.sort_by_key(|d| d.anchor_y);
+    let drawn_agents = drawables
+        .iter()
+        .filter_map(|d| match d.kind {
+            DrawableKind::Character { agent, anchor, .. } => Some(AgentFrame {
+                agent_id: agent.agent_id,
+                anchor,
+            }),
+            _ => None,
+        })
+        .collect();
     // A per-pixel diff finds EXACTLY what the foreground wrote; a rectangular
     // band seamed the window glass and washed floor-between-pieces twice.
     // AFTER `paint_shadow`/`paint_ambient`: both already take `look`, so folding
@@ -620,7 +646,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         debug_overlay::paint(ctx.buf, ctx.layout, ctx.scene, ctx.motion);
     }
 
-    (resolved_pet_pos, resolved_mascots)
+    (resolved_pet_pos, resolved_mascots, drawn_agents)
 }
 
 /// Map the sim's resolved [`sim::CharacterPlacement`]s 1:1 onto y-sorted

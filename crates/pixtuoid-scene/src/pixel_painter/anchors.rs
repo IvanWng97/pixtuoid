@@ -23,8 +23,7 @@ pub(super) use crate::layout::CHARACTER_SPRITE_W;
 // stay fixed.
 /// Where a desk's occupant RENDERS — the desk's seat cell put through the same
 /// `Seat` model every other seat uses, so the chair, its occupant and the walk
-/// that ends there cannot drift apart. Re-exported from `pixel_painter` so the
-/// binary's hit-test can't drift from the fn that places the sprite.
+/// that ends there cannot drift apart.
 pub fn seated_anchor_facing(desk: Point, sprite_w: u16, facing: crate::layout::Facing) -> Point {
     Seat::at_desk(desk, facing).render_anchor(sprite_w)
 }
@@ -139,8 +138,8 @@ pub(super) fn waypoint_rank_offset_x(kind: WaypointKind, rank: usize) -> i16 {
 /// jumping to the straight-line midpoint.
 ///
 /// Clamped so a DEFAULT-size frame lands inside `layout`'s buffer, keeping the
-/// badge and the tui hit box on pixels the sprite occupies — the twin of the
-/// sprite's own guard in `sim::resolve_characters` — clamped to the canvas TWICE.
+/// badge on pixels the sprite occupies — the twin of the sprite's own guard in
+/// `sim::resolve_characters` — clamped to the canvas TWICE.
 pub fn character_anchor(
     agent: &AgentSlot,
     layout: &crate::layout::Layout,

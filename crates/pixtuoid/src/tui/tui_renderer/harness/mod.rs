@@ -193,25 +193,19 @@ mod overlays;
 mod render_text;
 mod theme_lighting;
 
-/// Drive the PRODUCTION hover path programmatically: scan the rendered layout
-/// for a cell whose agent hit-test resolves to `id` and park the mouse there.
-/// Panics when the agent isn't hit-testable — a test wiring error, not a case.
+/// Drive the PRODUCTION hover path programmatically: scan the last rendered
+/// frame for a cell whose agent hit-test resolves to `id` and park the mouse
+/// there. Panics when the agent isn't hit-testable — a test wiring error, not a
+/// case.
 pub(super) fn hover_agent(
     r: &mut TuiRenderer<TestBackend>,
-    scene: &pixtuoid_core::SceneState,
     id: pixtuoid_core::AgentId,
     cols: u16,
     rows: u16,
 ) {
-    let layout = r.cached_layout().expect("rendered layout").clone();
     for my in 0..rows {
         for mx in 0..cols {
-            if crate::tui::hit_test::hit_test_from_tui(
-                scene,
-                &layout,
-                crate::tui::geometry::CellArea::half_block(mx, my),
-            ) == Some(id)
-            {
+            if r.hit_test_agent_at(mx, my) == Some(id) {
                 r.set_mouse_pos(Some((mx, my)));
                 return;
             }

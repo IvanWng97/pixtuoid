@@ -74,6 +74,8 @@ pub struct DrawCtx<'a> {
     pub last_pet_pos: Option<PetFrame>,
     /// Every gateway mascot's frame this render, for hover identity.
     pub last_mascots: Vec<MascotFrame>,
+    /// Every character's frame this render, in paint order, for hover and click.
+    pub last_agents: Vec<pixtuoid_scene::pixel_painter::AgentFrame>,
     /// `None` when no pets are configured or none maps to this floor seed.
     pub floor_pet: Option<&'a pixtuoid_scene::pet::Pet>,
     pub chitchat_state: &'a mut std::collections::HashMap<
@@ -366,20 +368,14 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     });
     ctx.last_pet_pos = pixel_result.pet_pos;
     ctx.last_mascots = pixel_result.mascots;
+    ctx.last_agents = pixel_result.agents;
     ctx.chitchat_bubbles = pixel_result.chitchat_bubbles;
     ctx.new_coffee_carriers = pixel_result.new_coffee_carriers;
     ctx.occupied_waypoints = pixel_result.occupied_waypoints;
 
     let mouse_pos = ctx.mouse_pos;
-    let hovered = mouse_pos.and_then(|(mx, my)| {
-        hit_test_agent(
-            scene,
-            &layout,
-            now,
-            &mut ctx.store.route_ctx(),
-            CellArea::half_block(mx, my),
-        )
-    });
+    let hovered = mouse_pos
+        .and_then(|(mx, my)| hit_test_agent(&ctx.last_agents, CellArea::half_block(mx, my)));
 
     // The dim is decoupled from `onboarding.open`, so the office keeps fading back
     // up for a beat AFTER the card is gone.
@@ -576,11 +572,8 @@ pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
     }
 }
 
-/// The mascot under the cursor that the user can actually SEE — the one painted on
-/// TOP, not merely the first in the roster. The painter y-sorts its drawables
-/// ascending, so among overlapping mascots the greatest `pos.y` is drawn LAST and
-/// occludes the others; picking the FIRST hit named whichever gateway sorted
-/// earliest in the roster, regardless of which lobster was visible.
+/// The mascot under the cursor painted on TOP: the painter y-sorts its drawables
+/// ascending, so among overlapping mascots the greatest `pos.y` is drawn last.
 fn topmost_mascot_at(
     mascots: &[pixtuoid_scene::pixel_painter::MascotFrame],
     cell: CellArea,

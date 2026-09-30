@@ -76,7 +76,7 @@ fn hovering_an_agent_marks_its_label() {
     let scene = scene_with(vec![s], 16);
     let mut r = build(140, 48, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    hover_agent(&mut r, &scene, id, 140, 48);
+    hover_agent(&mut r, id, 140, 48);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -86,7 +86,7 @@ fn hovering_an_agent_marks_its_label() {
 }
 
 #[test]
-fn click_hit_test_follows_a_walking_sprite_where_from_tui_misses_it() {
+fn click_hit_test_follows_a_walking_sprite() {
     let id = pixtuoid_core::AgentId::from_transcript_path("/w/0.jsonl");
     let mut s = idle("/w/0.jsonl", 0, t0() - Duration::from_secs(300));
     let scene = scene_with(vec![s.clone()], 16);
@@ -94,47 +94,19 @@ fn click_hit_test_follows_a_walking_sprite_where_from_tui_misses_it() {
     r.render(&scene, &pack(), t0()).unwrap();
     let desk = r.cached_layout().expect("layout").home_desks[0];
     let (dx, dy) = (desk.x + 2, desk.y.saturating_sub(4) / 2 + 1);
-    assert_eq!(r.hit_test_agent_at(&scene, t0(), dx, dy), Some(id));
-    let layout = r.cached_layout().unwrap();
-    assert_eq!(
-        crate::tui::hit_test::hit_test_from_tui(
-            &scene,
-            layout,
-            crate::tui::geometry::CellArea::half_block(dx, dy)
-        ),
-        Some(id)
-    );
+    assert_eq!(r.hit_test_agent_at(dx, dy), Some(id));
 
     s.exiting_at = Some(t0());
     let scene = scene_with(vec![s], 16);
     // Mid-exit-walk, inside EXIT_GRACE_WINDOW — off the desk box, not yet GC'd.
     let walk_now = t0() + Duration::from_millis(1500);
     r.render(&scene, &pack(), walk_now).unwrap();
-
-    let mut live = None;
-    'scan: for my in 0..80u16 {
-        for mx in 0..192u16 {
-            if r.hit_test_agent_at(&scene, walk_now, mx, my) == Some(id) {
-                live = Some((mx, my));
-                break 'scan;
-            }
-        }
-    }
-    let (lx, ly) = live.expect("hit_test_agent_at must find the walking sprite");
-    assert_ne!(
-        (lx, ly),
-        (dx, dy),
-        "the sprite moved off its desk during the exit walk"
-    );
-    let layout = r.cached_layout().unwrap();
+    let drawn = drawn_anchor(&r, &scene, id, walk_now);
+    assert_eq!(r.hit_test_agent_at(drawn.x, drawn.y / 2), Some(id));
     assert_eq!(
-        crate::tui::hit_test::hit_test_from_tui(
-            &scene,
-            layout,
-            crate::tui::geometry::CellArea::half_block(lx, ly)
-        ),
+        r.hit_test_agent_at(dx, dy),
         None,
-        "hit_test_from_tui (home-desk-only) misses the walked-off sprite — the FIND-22 gap"
+        "the sprite walked off its desk"
     );
 }
 
@@ -204,7 +176,7 @@ fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_anchor() {
         for col in seat.x.saturating_sub(2)..seat.x + 10 {
             let shows = cell_shows(drawn, col, row);
             assert_eq!(
-                r.hit_test_agent_at(&scene, now, col, row) == Some(id),
+                r.hit_test_agent_at(col, row) == Some(id),
                 shows,
                 "cell ({col},{row}) against the sprite drawn at {drawn:?}"
             );
@@ -280,7 +252,7 @@ fn overlapping_agents_hit_the_one_painted_on_top() {
         a.agent_id.min(b.agent_id),
         "premise: the agent on top is not the first by AgentId"
     );
-    assert_eq!(both.hit_test_agent_at(&scene, now, x, y / 2), Some(top));
+    assert_eq!(both.hit_test_agent_at(x, y / 2), Some(top));
     both.set_mouse_pos(Some((x, y / 2)));
     both.render(&scene, &pack(), now).unwrap();
     let hovered = scene.agents[&top].label.clone();

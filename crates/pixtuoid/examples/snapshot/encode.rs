@@ -545,6 +545,7 @@ pub(crate) fn save_as_gif(
                 active_pet: None,
                 last_pet_pos: None,
                 last_mascots: Vec::new(),
+                last_agents: Vec::new(),
                 floor_pet: None,
                 chitchat_state: &mut chitchat_state,
                 chitchat_bubbles: Vec::new(),

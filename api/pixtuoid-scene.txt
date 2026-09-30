@@ -1432,6 +1432,25 @@ impl core::marker::Unpin for pixtuoid_scene::pixel_painter::CharacterGlow
 impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::CharacterGlow
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::CharacterGlow
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::CharacterGlow
+pub struct pixtuoid_scene::pixel_painter::AgentFrame
+pub pixtuoid_scene::pixel_painter::AgentFrame::agent_id: pixtuoid_core::id::AgentId
+pub pixtuoid_scene::pixel_painter::AgentFrame::anchor: pixtuoid_scene::layout::Point
+impl core::clone::Clone for pixtuoid_scene::pixel_painter::AgentFrame
+pub fn pixtuoid_scene::pixel_painter::AgentFrame::clone(&self) -> pixtuoid_scene::pixel_painter::AgentFrame
+impl core::cmp::Eq for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::cmp::PartialEq for pixtuoid_scene::pixel_painter::AgentFrame
+pub fn pixtuoid_scene::pixel_painter::AgentFrame::eq(&self, &pixtuoid_scene::pixel_painter::AgentFrame) -> bool
+impl core::fmt::Debug for pixtuoid_scene::pixel_painter::AgentFrame
+pub fn pixtuoid_scene::pixel_painter::AgentFrame::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::marker::StructuralPartialEq for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::marker::Freeze for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::marker::Send for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::marker::Sync for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::marker::Unpin for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::AgentFrame
 pub struct pixtuoid_scene::pixel_painter::CharacterPlacement
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::agent_idx: usize
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::anchor: pixtuoid_scene::layout::Point
@@ -1497,6 +1516,7 @@ impl<'a> core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::PixelCtx<'
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::PixelCtx<'a>
 impl<'a> !core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::PixelCtx<'a>
 pub struct pixtuoid_scene::pixel_painter::PixelPassResult
+pub pixtuoid_scene::pixel_painter::PixelPassResult::agents: alloc::vec::Vec<pixtuoid_scene::pixel_painter::AgentFrame>
 pub pixtuoid_scene::pixel_painter::PixelPassResult::chitchat_bubbles: alloc::vec::Vec<pixtuoid_scene::chitchat::ChitchatBubble>
 pub pixtuoid_scene::pixel_painter::PixelPassResult::mascots: alloc::vec::Vec<pixtuoid_scene::pixel_painter::MascotFrame>
 pub pixtuoid_scene::pixel_painter::PixelPassResult::new_coffee_carriers: alloc::vec::Vec<pixtuoid_core::id::AgentId>

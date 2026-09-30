@@ -62,6 +62,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     cached_layout: Option<Arc<Layout>>,
     active_pet: Option<PetState>,
     last_pet_pos: Option<PetFrame>,
+    last_agents: Vec<pixtuoid_scene::pixel_painter::AgentFrame>,
     pets: Vec<pixtuoid_scene::pet::Pet>,
     /// Coffee + venue chitchat, ONE per office — shared across every floor so a
     /// cup survives floor navigation.
@@ -100,6 +101,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             cached_layout: None,
             active_pet: None,
             last_pet_pos: None,
+            last_agents: Vec::new(),
             pets,
             office: PerOffice::new(),
             popup: PopupState::default(),
@@ -185,26 +187,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.cached_layout.as_deref()
     }
 
-    /// The click twin of the hover hit-test: anchors on `character_anchor`, so it
-    /// follows a walking / wandering / entry / exit sprite. `floor_scene` must be
-    /// projected to the visible floor — its `desk_index.single_floor_local()` reads
-    /// need floor-local indices.
-    pub(crate) fn hit_test_agent_at(
-        &mut self,
-        floor_scene: &SceneState,
-        now: SystemTime,
-        col: u16,
-        row: u16,
-    ) -> Option<pixtuoid_core::AgentId> {
-        // Disjoint struct fields: this shared layout borrow coexists with the
-        // `&mut route_ctx` below.
-        let layout = self.cached_layout.as_deref()?;
-        let mut rctx = self.floors[self.current_floor].ctx.route_ctx();
+    /// The click twin of the hover hit-test, against the last frame drawn.
+    pub(crate) fn hit_test_agent_at(&self, col: u16, row: u16) -> Option<pixtuoid_core::AgentId> {
         crate::tui::hit_test::hit_test_agent(
-            floor_scene,
-            layout,
-            now,
-            &mut rctx,
+            &self.last_agents,
             crate::tui::geometry::CellArea::half_block(col, row),
         )
     }
@@ -372,6 +358,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             // layout / pet left over from a larger prior frame.
             self.cached_layout = None;
             self.last_pet_pos = None;
+            self.last_agents.clear();
             // Paint the SAME footer-only frame draw_scene's gate does, not
             // nothing — else the stale pre-shrink frame stays frozen on screen.
             // AND land the transition: this returns before ensure_size, so the
@@ -582,6 +569,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         // The pet has no single interactable position mid-slide; clear the stale
         // one so the mouse handler can't "pet" a ghost at last frame's location.
         self.last_pet_pos = None;
+        self.last_agents.clear();
         Ok(())
     }
 }
@@ -646,6 +634,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             active_pet: self.active_pet.as_ref(),
             last_pet_pos: None,
             last_mascots: Vec::new(),
+            last_agents: Vec::new(),
             floor_pet: pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets),
             chitchat_state: &mut self.office.chitchat,
             chitchat_bubbles: Vec::new(),
@@ -661,6 +650,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         };
         let result = draw_scene(&mut self.terminal, &floor_scene, pack, now, &mut draw_ctx);
         self.last_pet_pos = draw_ctx.last_pet_pos;
+        self.last_agents = std::mem::take(&mut draw_ctx.last_agents);
         // `take` avoids a partial move so the explicit `drop` below can follow.
         let new_coffee_carriers = std::mem::take(&mut draw_ctx.new_coffee_carriers);
         let occupied_waypoints = std::mem::take(&mut draw_ctx.occupied_waypoints);

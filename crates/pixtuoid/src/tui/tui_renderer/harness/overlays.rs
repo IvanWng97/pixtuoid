@@ -386,7 +386,7 @@ fn hovered_active_agent_tooltip_shows_state_and_detail() {
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
+    super::hover_agent(&mut r, id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Active"), "active state word: {text}");
@@ -422,14 +422,14 @@ fn hovered_burning_agent_tooltip_shows_model_and_fresh_effort() {
     let scene = scene_with(vec![a, plain], 16);
     let mut r = build(120, 44, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
+    super::hover_agent(&mut r, id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("\u{2605} claude-fable-5 \u{b7} ultra"),
         "model + fresh effort row: {text}"
     );
-    super::hover_agent(&mut r, &scene, plain_id, 120, 44);
+    super::hover_agent(&mut r, plain_id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     // (The wall board's own `★ Star` CTA is unrelated — assert the MODEL row.)
@@ -460,7 +460,7 @@ fn stale_effort_drops_off_the_dossier() {
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
+    super::hover_agent(&mut r, id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -490,7 +490,7 @@ fn the_exit_sentinel_never_renders_in_the_dossier() {
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
+    super::hover_agent(&mut r, id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -518,7 +518,7 @@ fn hovered_agent_tooltip_shows_source_badge() {
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
+    super::hover_agent(&mut r, id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("[cc]"), "source badge on the tooltip: {text}");
@@ -551,7 +551,7 @@ fn hovered_subagent_tooltip_shows_lineage() {
     let scene = scene_with(vec![parent, child], 16);
     let mut r = build(120, 44, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, child_id, 120, 44);
+    super::hover_agent(&mut r, child_id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -570,7 +570,7 @@ fn hovered_waiting_agent_tooltip_shows_reason() {
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
+    super::hover_agent(&mut r, id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Waiting"), "waiting state arm: {text}");
@@ -596,7 +596,7 @@ fn hovered_exiting_agent_tooltip_suppresses_meter() {
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
+    super::hover_agent(&mut r, id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Exiting"), "exiting state word: {text}");
@@ -617,7 +617,7 @@ fn hovered_exiting_agent_tooltip_suppresses_waiting_reason() {
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
+    super::hover_agent(&mut r, id, 120, 44);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Exiting"), "exiting state word: {text}");
@@ -651,7 +651,7 @@ fn hovered_then_removed_agent_is_a_safe_noop() {
     let scene = scene_with(vec![slot(id, 0, 0, t0())], 16);
     let mut r = build(120, 44, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
+    super::hover_agent(&mut r, id, 120, 44);
     let empty = SceneState::uniform(16);
     r.render(&empty, &pack(), t0() + Duration::from_millis(33))
         .expect("render must not panic when the hovered agent vanished");
