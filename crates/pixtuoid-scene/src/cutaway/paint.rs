@@ -450,7 +450,7 @@ fn lights(
 
 /// Paint `list` over the backdrop `buf` holds: every piece's shadow
 /// ([`ground_shadow`]) first, then the pieces back to front as by day, noting
-/// which pixels glow of their own ([`Glow`]), and last one pass
+/// which pixels glow of their own ([`Glow`](crate::cutaway::light::Glow)), and last one pass
 /// ([`net_pass`](crate::cutaway::light::net_pass)) takes every other pixel to
 /// the hour: darkened with the room and lifted by its lights at once, so no
 /// pixel is darkened twice or darkened and relit.
@@ -479,7 +479,7 @@ pub(crate) fn paint_list(
 }
 
 /// Paint every piece but the lights, back to front as by day, and return each
-/// pixel's [`Glow`]: set by the last piece that painted it, so a sitter in
+/// pixel's [`Glow`](crate::cutaway::light::Glow): set by the last piece that painted it, so a sitter in
 /// front of a screen takes the room's light over it.
 fn paint_pieces(
     list: &DrawList<'_>,
