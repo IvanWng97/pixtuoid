@@ -31,6 +31,7 @@ jobs:
       id-token: write
       issues: write
       pull-requests: write
+      statuses: write
     uses: ./.github/workflows/claude-readonly-review.yml
     with:
       pr_number: ${{ github.event.issue.number || github.event.pull_request.number }}
