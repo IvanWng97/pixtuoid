@@ -87,10 +87,10 @@ impl DashboardFolds {
 pub fn build_dashboard_rows(scene: &SceneState, folds: &DashboardFolds) -> Vec<DashboardRow> {
     let mut children: HashMap<AgentId, Vec<AgentId>> = HashMap::new();
     for (id, slot) in &scene.agents {
-        if let Some(parent) = slot.parent_id {
-            if scene.agents.contains_key(&parent) {
-                children.entry(parent).or_default().push(*id);
-            }
+        if let Some(parent) = slot.parent_id
+            && scene.agents.contains_key(&parent)
+        {
+            children.entry(parent).or_default().push(*id);
         }
     }
 

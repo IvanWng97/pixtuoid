@@ -645,7 +645,7 @@ impl DaemonRoster {
     pub(crate) fn instances_of_mut(
         &mut self,
         source: &str,
-    ) -> impl Iterator<Item = (&DaemonInstanceId, &mut DaemonPresence)> + '_ {
+    ) -> impl Iterator<Item = (&DaemonInstanceId, &mut DaemonPresence)> + '_ + use<'_> {
         self.0
             .get_mut(source)
             .into_iter()

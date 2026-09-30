@@ -1296,7 +1296,8 @@ mod tests {
             .map(|k| (*k, std::env::var_os(k)))
             .collect();
         for (k, _) in &saved_profiles {
-            std::env::remove_var(k);
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::remove_var(k) };
         }
 
         let declared: Vec<_> = REGISTRY
@@ -1317,13 +1318,16 @@ mod tests {
             let tmp = tempfile::tempdir().expect("tempdir");
             let root_env = tmp.path().to_path_buf();
             let saved = std::env::var_os(var);
-            std::env::set_var(var, &root_env);
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var(var, &root_env) };
 
             let resolved = crate::source::resolved_source_root(name);
 
             match saved {
-                Some(v) => std::env::set_var(var, v),
-                None => std::env::remove_var(var),
+                // FIXME: Audit that the environment access only happens in single-threaded code.
+                Some(v) => unsafe { std::env::set_var(var, v) },
+                // FIXME: Audit that the environment access only happens in single-threaded code.
+                None => unsafe { std::env::remove_var(var) },
             }
 
             match resolved {
@@ -1343,8 +1347,10 @@ mod tests {
 
         for (k, v) in &saved_profiles {
             match v {
-                Some(val) => std::env::set_var(k, val),
-                None => std::env::remove_var(k),
+                // FIXME: Audit that the environment access only happens in single-threaded code.
+                Some(val) => unsafe { std::env::set_var(k, val) },
+                // FIXME: Audit that the environment access only happens in single-threaded code.
+                None => unsafe { std::env::remove_var(k) },
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));

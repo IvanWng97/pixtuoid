@@ -111,7 +111,7 @@ pub(crate) fn window_frame(dx: u16, dy: u16, h: u16) -> bool {
 impl SceneLayout {
     /// The windows this office's north wall shows, left to right: the door
     /// and its exit sign take out any they cover.
-    pub(crate) fn window_bays(&self) -> impl Iterator<Item = WindowBay> {
+    pub(crate) fn window_bays(&self) -> impl Iterator<Item = WindowBay> + use<> {
         window_bays(
             self.buf_w,
             self.door.map(|d| super::exit_sign_x(d.x)..d.x + ELEVATOR_W),

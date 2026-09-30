@@ -255,7 +255,8 @@ fn config_path_xdg_home_and_relative_branches() {
     // Clear USERPROFILE for the whole test: on Windows it outranks HOME in
     // user_home(), so both the HOME arm and the relative-fallback arm need it
     // absent to reach their branches.
-    std::env::remove_var("USERPROFILE");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var("USERPROFILE") };
 
     // A leading-slash path is not absolute on Windows (no drive prefix).
     let abs_xdg = if cfg!(windows) {
@@ -263,15 +264,18 @@ fn config_path_xdg_home_and_relative_branches() {
     } else {
         "/xdg/base"
     };
-    std::env::set_var("XDG_CONFIG_HOME", abs_xdg);
-    std::env::set_var("HOME", "/home/u");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", abs_xdg) };
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("HOME", "/home/u") };
     assert_eq!(
         config_path(),
         PathBuf::from(abs_xdg).join("pixtuoid").join("config.toml")
     );
 
     for invalid in ["", "   ", "rel/xdg"] {
-        std::env::set_var("XDG_CONFIG_HOME", invalid);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", invalid) };
         assert_eq!(
             config_path(),
             PathBuf::from("/home/u/.config/pixtuoid/config.toml"),
@@ -279,26 +283,34 @@ fn config_path_xdg_home_and_relative_branches() {
         );
     }
 
-    std::env::remove_var("XDG_CONFIG_HOME");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
     assert_eq!(
         config_path(),
         PathBuf::from("/home/u/.config/pixtuoid/config.toml")
     );
 
-    std::env::remove_var("HOME");
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var("HOME") };
     assert_eq!(config_path(), PathBuf::from(".config/pixtuoid/config.toml"));
 
     match saved_xdg {
-        Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-        None => std::env::remove_var("XDG_CONFIG_HOME"),
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var("XDG_CONFIG_HOME", v) },
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
     }
     match saved_home {
-        Some(v) => std::env::set_var("HOME", v),
-        None => std::env::remove_var("HOME"),
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var("HOME", v) },
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var("HOME") },
     }
     match saved_userprofile {
-        Some(v) => std::env::set_var("USERPROFILE", v),
-        None => std::env::remove_var("USERPROFILE"),
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var("USERPROFILE", v) },
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var("USERPROFILE") },
     }
 }
 
@@ -568,11 +580,14 @@ fn resolve_pack_source_finds_the_users_pack_under_xdg_config_home() {
     let sprites = base.path().join("pixtuoid").join("sprites");
     std::fs::create_dir_all(&sprites).expect("mkdir sprites");
     std::fs::write(sprites.join("pack.toml"), b"").expect("write pack.toml");
-    std::env::set_var("XDG_CONFIG_HOME", base.path());
+    // FIXME: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", base.path()) };
     let found = resolve_pack_source(&AppConfig::default(), None);
     match saved_xdg {
-        Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-        None => std::env::remove_var("XDG_CONFIG_HOME"),
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var("XDG_CONFIG_HOME", v) },
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
     }
     assert_eq!(
         found,

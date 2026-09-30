@@ -208,10 +208,11 @@ impl TrackSwitch {
     /// Record a requested switch — ignored while unchanged or while a switch
     /// is already in flight (the settling latch). No-op before `init`.
     pub fn request(&mut self, track: TrackId) {
-        if let Some(cur) = self.current {
-            if track != cur && self.pending.is_none() {
-                self.pending = Some(track);
-            }
+        if let Some(cur) = self.current
+            && track != cur
+            && self.pending.is_none()
+        {
+            self.pending = Some(track);
         }
     }
 
@@ -223,12 +224,12 @@ impl TrackSwitch {
     /// Once the held track stems have reached silence, commit the pending
     /// switch and return `Some(to)` to build + swap in. `None` until then.
     pub fn try_swap(&mut self, track_silent: bool) -> Option<TrackId> {
-        if let Some(to) = self.pending {
-            if track_silent {
-                self.current = Some(to);
-                self.pending = None;
-                return Some(to);
-            }
+        if let Some(to) = self.pending
+            && track_silent
+        {
+            self.current = Some(to);
+            self.pending = None;
+            return Some(to);
         }
         None
     }
