@@ -592,18 +592,18 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.floors.push(PerFloor::new());
         }
 
-        if let Some(ref tr) = self.transition {
-            if tr.from_floor >= nf || tr.to_floor >= nf {
-                self.transition = None;
-                self.cached_layout = None;
-            }
+        if let Some(ref tr) = self.transition
+            && (tr.from_floor >= nf || tr.to_floor >= nf)
+        {
+            self.transition = None;
+            self.cached_layout = None;
         }
 
-        if let Some(ref tr) = self.transition {
-            if tr.is_done(now) {
-                self.current_floor = tr.to_floor;
-                self.transition = None;
-            }
+        if let Some(ref tr) = self.transition
+            && tr.is_done(now)
+        {
+            self.current_floor = tr.to_floor;
+            self.transition = None;
         }
 
         if self.current_floor >= nf {

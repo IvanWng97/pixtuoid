@@ -317,15 +317,15 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
                 // over from a relocated home would verify green while dsh
                 // imports a path that is gone.
                 Some(n) if Path::new(&n).is_absolute() => {
-                    if let Ok(expected) = plugin_path() {
-                        if Path::new(&n) != expected {
-                            parse.issues.push(format!(
-                                "the mount entry points at {}, not this home's \
+                    if let Ok(expected) = plugin_path()
+                        && Path::new(&n) != expected
+                    {
+                        parse.issues.push(format!(
+                            "the mount entry points at {}, not this home's \
                                  plugin ({}) — reconnect dsh to re-mount",
-                                crate::display_path(Path::new(&n)),
-                                crate::display_path(&expected)
-                            ));
-                        }
+                            crate::display_path(Path::new(&n)),
+                            crate::display_path(&expected)
+                        ));
                     }
                 }
                 Some(n) => parse.issues.push(format!(

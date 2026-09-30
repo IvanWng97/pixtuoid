@@ -38,10 +38,10 @@ impl ClaudeCodeSource {
         {
             // XDG spec: absolute-only. Empty → `/pixtuoid.sock` (fatal bind); relative →
             // shim/daemon cwd mis-rendezvous → treated as unset. Parity with paths.rs.
-            if let Some(dir) = crate::platform::path_env("XDG_RUNTIME_DIR") {
-                if dir.is_absolute() {
-                    return dir.join("pixtuoid.sock");
-                }
+            if let Some(dir) = crate::platform::path_env("XDG_RUNTIME_DIR")
+                && dir.is_absolute()
+            {
+                return dir.join("pixtuoid.sock");
             }
             // No XDG_RUNTIME_DIR (macOS, bare Linux): a per-user SUBDIR the bind
             // creates 0700-owned-by-us, NOT a flat predictable
