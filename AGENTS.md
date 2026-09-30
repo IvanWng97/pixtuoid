@@ -72,10 +72,9 @@ cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 
 Non-trivial work runs as an arc — pick → grill the design → design gate →
 spec → build (TDD) → self-review → merge gate → wrap. Per-step detail:
-[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-arc-loop). The merge gate is the
-`two-lens-review` skill: 2+ differentiated lenses + green CI + every bot
-finding dispositioned, under that skill's **convergence contract** (churn
-budget, two-fix-round cap, HIGH-only blocking). **A human merges.**
+[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-arc-loop). The merge gate is
+[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-merge-gate); the `two-lens-review`
+skill runs its local rows. **A human merges.**
 
 Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 `add-source`, `add-theme`, `procedural-lofi`.
@@ -91,7 +90,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 - **Shell**: match the surrounding shell; `shellcheck` + `shfmt` (`just shfmt-fix`) any `.sh` you touch. macOS-first (BSD CLI, brew).
 - **Docs current in the same commit** as any structure/API/workflow change.
 - **External-surface claims are fetched, not remembered** — cite the `path:line` you fetched THIS session or add a `check_upstream_drift.py` row; the population is the whole upstream repo (`gh api .../git/trees/<ref>?recursive=1`), not one plausible file (#938).
-- **A refuted review finding produces a MECHANISM, or nothing** — a test, a compile-time constraint, or a CI gate; refuting never produces prose, because prose has no failure mode. Only an EXTERNAL fact (another CLI's wire bytes, an OS semantic) earns a comment, on the narrowest thing it constrains. **A real finding this change introduced is fixed in-scope or forces a re-scope; a pre-existing one is a FOLLOW-UP → #N: it never grows the PR, but its fix PR exists (a draft is enough) before the PR merges (four terminal states, defined once in the `two-lens-review` skill's `briefs.md`). Agents never file issues.**
+- **A refuted review finding produces a MECHANISM, or nothing** — a test, a compile-time constraint, or a CI gate; refuting never produces prose, because prose has no failure mode. Only an EXTERNAL fact (another CLI's wire bytes, an OS semantic) earns a comment, on the narrowest thing it constrains. **A real finding this change introduced is fixed in-scope or forces a re-scope; a pre-existing one is a FOLLOW-UP → #N: it never grows the PR, but its fix PR exists (a draft is enough) before the PR merges (four terminal states, defined once in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#dispositions)). Agents never file issues.**
 - **Only the latest released version of each agent CLI is supported.** When upstream renames or reshapes a wire name, repoint the decoder, the plugin, and the drift-watcher anchor at the CURRENT declaration and DELETE the old one — no dual-listening beside a replacement, no legacy-format arm kept "just in case". Every superseded arm is a second copy of a wire contract that drifts silently and that the watcher then has to anchor twice (#981). Two things this does NOT govern: OUR OWN upgrade path (a `LEGACY_INSTANCE_ID` for a plugin file an older pixtuoid wrote is a compatibility arm for our artifact, not upstream's — #457), and mirroring a resolver upstream itself still branches on. Pre-dating arms exist (`opencode.rs`'s v1/v2 permission names, `codewhale.rs`'s `spawn_agent`); they are debt, not precedent.
 - **Path asserts compare `PathBuf` structurally**, never `to_string_lossy()` with a hardcoded separator — string asserts pass on Unix and fail only in `windows-test`. Resolution POLICY (HOME vs USERPROFILE, %APPDATA% vs `~/.config`) is per-CLI: mirror each CLI's own resolver (`platform::home_first_dir`).
 
@@ -126,7 +125,7 @@ taller-cell terminals; bundled base character sprites max at 8×12 px (their
 - Never relax the shim's always-exit-0 contract; never add `--no-verify`/hook-skipping flags.
 - No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks — the owner reviews every doc change directly, so propose the diff rather than adding a generator or a cap. No `git push` without explicit user confirmation.
 - No stale `Closes #N` on a re-scope (fires from commit body or PR text, even conditional).
-- No merging without the two-lens review (PR #23 merged unreviewed with a path traversal). Don't blindly accept reviewer findings — verify the premise against the comments on the item it names first.
+- No merging past the review gate (PR #23 merged unreviewed with a path traversal). Don't blindly accept reviewer findings — verify the premise against the comments on the item it names first.
 
 ## Where to look
 

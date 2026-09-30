@@ -19,7 +19,7 @@ use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
 
-use crate::encode::{Timeline, cells_to_rgba};
+use crate::encode::{FrameSink, Timeline, cells_to_rgba};
 use crate::{CELL_H, CELL_W};
 
 // Geometry (px); every canvas dim must stay even so yuv420p never crops.
@@ -616,10 +616,8 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
     let mut reducer = Reducer::new();
     let mut chitchat_state = std::collections::HashMap::new();
 
-    let wide_dir = job.frames_dir.join("wide");
-    let tall_dir = job.frames_dir.join("tall");
-    fs::create_dir_all(&wide_dir)?;
-    fs::create_dir_all(&tall_dir)?;
+    let mut wide = FrameSink::pngs(&job.frames_dir.join("wide"))?;
+    let mut tall = FrameSink::pngs(&job.frames_dir.join("tall"))?;
 
     let office_w = job.cols as u32 * CELL_W;
     let office_h = job.rows as u32 * CELL_H;
@@ -681,12 +679,11 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             office_w,
             office_h,
         );
-        for (kind, dir) in [
-            (ProofLayout::Wide, &wide_dir),
-            (ProofLayout::Tall, &tall_dir),
+        for (kind, sink) in [
+            (ProofLayout::Wide, &mut wide),
+            (ProofLayout::Tall, &mut tall),
         ] {
-            compose_frame(&kind, &office, &script, elapsed, desk_px)
-                .save(dir.join(format!("f{:04}.png", i + 1)))?;
+            sink.push(compose_frame(&kind, &office, &script, elapsed, desk_px))?;
         }
         if (i + 1).is_multiple_of(fps as usize) {
             eprint!("\r  proof: {}/{secs}s", (i + 1) / fps as usize);

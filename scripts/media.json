@@ -207,6 +207,7 @@
   "duration": 10,
   "fps": 15,
   "hour": 17,
+  "poster": 9,
   "extra": [
    "--max-desks",
    "16",
