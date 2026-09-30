@@ -214,7 +214,7 @@ pub(crate) fn borderless_panel(
     inner_rect(area, title.is_some())
 }
 
-/// How [`paint_panel`] treats the windowed `list` band.
+/// How [`Panel::paint`] treats the windowed `list` band.
 pub(crate) enum Overflow {
     /// Selection-follow window + cue. `cap` limits the visible list rows
     /// regardless of terminal height; `None` fills.
@@ -229,60 +229,73 @@ pub(crate) enum Overflow {
     None,
 }
 
-/// THE one painter for a centered borderless popup: it frames (backing, title),
-/// windows the `list` band into the space between the fixed `above`/`below`
-/// chrome, and appends the overflow cue. Auto-heights to the ACTUAL band lengths,
-/// so no caller-side row count can drift from the lines pushed. Callers hand
-/// PRE-STYLED lines — the module owns framing, windowing and cue.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn paint_panel(
-    f: &mut ratatui::Frame<'_>,
-    theme: &Theme,
-    title: Option<&str>,
-    bounds: Rect,
-    content_w: u16,
-    scale: f32,
-    above: Vec<Line<'static>>,
-    list: Vec<Line<'static>>,
-    below: Vec<Line<'static>>,
-    overflow: Overflow,
-) {
-    let cap = match &overflow {
-        Overflow::Follow { cap, .. } => *cap,
-        _ => None,
-    };
-    let list_size_rows = cap.map_or(list.len(), |c| list.len().min(c as usize));
-    let content_rows = (above.len() + list_size_rows + below.len()) as u16;
-    let geom = PanelGeometry::compute(bounds, content_w, content_rows, title, scale);
-    let Some(outer) = geom.outer() else {
-        return;
-    };
-    let inner = borderless_panel(f, outer, title, theme);
+/// One centered borderless popup's content: callers hand PRE-STYLED lines, and
+/// [`Panel::paint`] owns framing, windowing and cue. The three bands are named
+/// fields because they share one type, so a positional swap would compile.
+pub(crate) struct Panel<'a> {
+    pub(crate) title: Option<&'a str>,
+    /// Content width in cells, before padding.
+    pub(crate) content_w: u16,
+    /// Chrome pinned above the list.
+    pub(crate) above: Vec<Line<'static>>,
+    /// The band windowed into the space between `above` and `below`.
+    pub(crate) list: Vec<Line<'static>>,
+    /// Chrome pinned below the list.
+    pub(crate) below: Vec<Line<'static>>,
+    pub(crate) overflow: Overflow,
+}
 
-    let viewport = (inner.height as usize).saturating_sub(above.len() + below.len());
-    let win = match &overflow {
-        Overflow::None => ListWindow {
-            start: 0,
-            count: list.len().min(viewport),
-            cue: None,
-        },
-        Overflow::CueOnly => window_range(list.len(), Option::None, 0, viewport),
-        Overflow::Follow {
-            selected, scroll, ..
-        } => window_range(list.len(), *selected, *scroll, viewport),
-    };
+impl Panel<'_> {
+    /// THE one painter for a centered borderless popup: it frames (backing,
+    /// title), windows the `list` band, and appends the overflow cue.
+    /// Auto-heights to the ACTUAL band lengths, so no caller-side row count can
+    /// drift from the lines pushed.
+    pub(crate) fn paint(self, f: &mut ratatui::Frame<'_>, bounds: Rect, theme: &Theme) {
+        let Panel {
+            title,
+            content_w,
+            above,
+            list,
+            below,
+            overflow,
+        } = self;
+        let cap = match &overflow {
+            Overflow::Follow { cap, .. } => *cap,
+            Overflow::CueOnly | Overflow::None => None,
+        };
+        let list_size_rows = cap.map_or(list.len(), |c| list.len().min(c as usize));
+        let content_rows = (above.len() + list_size_rows + below.len()) as u16;
+        let geom = PanelGeometry::compute(bounds, content_w, content_rows, title, 1.0);
+        let Some(outer) = geom.outer() else {
+            return;
+        };
+        let inner = borderless_panel(f, outer, title, theme);
 
-    let mut lines: Vec<Line<'static>> = Vec::with_capacity(inner.height as usize);
-    lines.extend(above);
-    lines.extend(list.into_iter().skip(win.start).take(win.count));
-    if let Some(hidden) = win.cue {
-        lines.push(Line::from(Span::styled(
-            overflow_cue(hidden),
-            Style::default().fg(to_color(theme.ui.label_idle)),
-        )));
+        let viewport = (inner.height as usize).saturating_sub(above.len() + below.len());
+        let win = match &overflow {
+            Overflow::None => ListWindow {
+                start: 0,
+                count: list.len().min(viewport),
+                cue: None,
+            },
+            Overflow::CueOnly => window_range(list.len(), Option::None, 0, viewport),
+            Overflow::Follow {
+                selected, scroll, ..
+            } => window_range(list.len(), *selected, *scroll, viewport),
+        };
+
+        let mut lines: Vec<Line<'static>> = Vec::with_capacity(inner.height as usize);
+        lines.extend(above);
+        lines.extend(list.into_iter().skip(win.start).take(win.count));
+        if let Some(hidden) = win.cue {
+            lines.push(Line::from(Span::styled(
+                overflow_cue(hidden),
+                Style::default().fg(to_color(theme.ui.label_idle)),
+            )));
+        }
+        lines.extend(below);
+        f.render_widget(Paragraph::new(lines), inner);
     }
-    lines.extend(below);
-    f.render_widget(Paragraph::new(lines), inner);
 }
 
 #[cfg(test)]
@@ -613,7 +626,7 @@ mod tests {
     }
 
     #[test]
-    fn paint_panel_windows_a_long_list_and_pins_the_chrome() {
+    fn panel_windows_a_long_list_and_pins_the_chrome() {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
         let mut term = Terminal::new(TestBackend::new(40, 12)).unwrap();
@@ -622,22 +635,19 @@ mod tests {
             let below = vec![Line::from("FOOTERLINE")];
             let list: Vec<Line<'static>> =
                 (0..20).map(|i| Line::from(format!("row{i:02}"))).collect();
-            paint_panel(
-                f,
-                &pixtuoid_scene::theme::NORMAL,
-                Some("T"),
-                Rect::new(0, 0, 40, 12),
-                30,
-                1.0,
+            Panel {
+                title: Some("T"),
+                content_w: 30,
                 above,
                 list,
                 below,
-                Overflow::Follow {
+                overflow: Overflow::Follow {
                     selected: Some(0),
                     scroll: 0,
                     cap: None,
                 },
-            );
+            }
+            .paint(f, Rect::new(0, 0, 40, 12), &pixtuoid_scene::theme::NORMAL);
         })
         .unwrap();
         let buf = term.backend().buffer();
