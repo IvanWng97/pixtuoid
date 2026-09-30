@@ -15,7 +15,7 @@ comments on the lines it governs, before changing it.
 Requires a recent stable Rust toolchain and [`just`](https://github.com/casey/just)
 (`brew install just`). On Linux you also need `lld`, `pkg-config` and the ALSA
 headers (`apt install lld pkg-config libasound2-dev`). The git hooks and most
-CI jobs call `justfile` recipes; the site, Raycast and CodSpeed workflows don't.
+CI jobs call `justfile` recipes.
 
 ```bash
 just              # list recipes
@@ -25,8 +25,9 @@ just test         # the whole suite (cargo-nextest if installed, else cargo test
 cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
 ```
 
-> **Don't expect clippy to warm `test`'s build** — they share no artifacts,
-> deps included. Iterate with one.
+> **Don't expect clippy to warm `test`'s build** — its check-mode (rmeta)
+> builds carry over only build scripts and proc-macros, so iterate with one of
+> them.
 
 Activate the git hooks once per clone: `git config core.hooksPath .githooks`
 (`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`, lint + clippy;
@@ -278,9 +279,9 @@ gh run rerun --failed                        # rerun only failed CI jobs
 
 ## Adding a new agent CLI
 
-The registration steps (4–7, 9) and step 12 are test-forced — skipping one
-fails `just test`. Step 8 is forced only for hook-only sources; step 10 by the
-theme guards; steps 1–3 and 11 are on you.
+The registration steps (4–7, 9) and step 12's roster literals are test-forced —
+skipping one fails `just test`. Step 8 is forced only for hook-only sources;
+step 10 by the theme guards; steps 1–3, 11 and step 12's `#[test]` are on you.
 
 1. **Verify the wire format against the CLI's actual source/releases first** —
    transcript location, line shape, hooks, session identity; pin every fact

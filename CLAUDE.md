@@ -55,7 +55,7 @@ just preflight [full]                                # pre-push gate: lint → c
 cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 ```
 
-- clippy and test share no build artifacts, deps included — iterate with one. Never pipe preflight through `tail`/`head` (exit code eaten).
+- clippy doesn't warm test's build ([why](docs/CONTRIBUTING.md#build--test)) — iterate with one of them. Never pipe preflight through `tail`/`head` (exit code eaten).
 - Touched `--json` / `SourceStatus` / `OutcomeRow` / the source roster → `just gen-contract` (regenerates schemas + Raycast types).
 - Renamed a decoded/registered wire name → `just gen-drift-surface`, commit both `crates/*/drift-surface.json` — the crate's own test fails on a stale fragment; regenerate, don't hand-edit.
 - Look-changing PR → `just gen`, commit everything it rewrote; a core/scene/web change ALSO needs `just gen-wasm` + commit `site/public/wasm/` (`gen` deliberately excludes it, and nothing catches a skip).
