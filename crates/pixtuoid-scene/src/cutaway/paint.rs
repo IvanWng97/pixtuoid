@@ -417,21 +417,10 @@ fn lights(
     lights
         .spills
         .iter()
-        .chain(&lights.pools)
         .chain(&lights.floor_lamp)
         .chain(&lamps)
         .chain(&lights.monitor_halos)
         .chain(std::iter::once(&lights.neon))
-        .filter(|e| match e.kind {
-            // A pool over every desk reads as a second lamp: the night room is
-            // lit by its lamps and screens.
-            crate::lighting::EmitterKind::CeilingPool => false,
-            crate::lighting::EmitterKind::NeonGlow
-            | crate::lighting::EmitterKind::FloorLamp
-            | crate::lighting::EmitterKind::DeskLamp
-            | crate::lighting::EmitterKind::MonitorHalo(_)
-            | crate::lighting::EmitterKind::WindowSpill => true,
-        })
         .filter_map(|e| {
             crate::cutaway::light::LightView::of(
                 e,
@@ -4698,10 +4687,10 @@ S B B B B B B S
         assert!(lights > 0, "the night office has no lights");
     }
 
-    /// The cutaway hangs no ceiling pool at any hour: its night is lit by its
-    /// lamps, its screens and its sign, whose glow comes with the sign it draws.
+    /// The cutaway's sign glows only where the sign is drawn, and its lamps
+    /// light the night room.
     #[test]
-    fn the_cutaway_hangs_no_ceiling_pool() {
+    fn the_cutaway_glows_only_around_its_sign() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
@@ -4720,11 +4709,6 @@ S B B B B B B S
                 .filter(|p| matches!(p.kind, PieceKind::Neon { .. }))
                 .count();
             for light in list.lights() {
-                assert!(
-                    !light.view.is(crate::lighting::EmitterKind::CeilingPool),
-                    "{hour}:00 hangs a pool at {:?}",
-                    light.span
-                );
                 lamps += usize::from(light.view.is(crate::lighting::EmitterKind::DeskLamp));
                 let glow = light.view.is(crate::lighting::EmitterKind::NeonGlow);
                 assert!(!glow || signs == 1, "{hour}:00 glows with no sign");

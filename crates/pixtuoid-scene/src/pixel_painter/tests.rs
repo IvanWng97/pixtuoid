@@ -1377,12 +1377,6 @@ fn a_seeded_seat_moves_the_chair_the_sitter_and_the_walk_together() {
                         "{desk:?} {facing:?} w={w}: sprite must centre on the seat"
                     );
                 }
-                // and the ceiling pool — a THIRD consumer — lights the same x
-                assert_eq!(
-                    crate::layout::desk_ceiling_pool_center(desk, facing).x,
-                    centre.x,
-                    "{desk:?} {facing:?}: the desk's light must pool over the seat"
-                );
                 let base = desk.x + crate::layout::desk_furniture_def().visual.w / 2;
                 offsets.insert(i32::from(centre.x) - i32::from(base));
             }
@@ -5117,10 +5111,9 @@ fn a_lamp_casting_no_pool_is_not_drawn_lit() {
     );
 }
 
-/// Asserted on the DRAWABLE list, not on pixels: a chair's rect is lit by the
-/// desk's ceiling pool, which is facing-dependent, so contrasting
-/// a north desk's rect against a south one measures the pool as much as the
-/// chair — it passes with no chair drawn.
+/// Asserted on the DRAWABLE list, not on pixels: a chair's rect also carries
+/// the hour and the desk's lights, so contrasting a north desk's rect against a
+/// south one measures more than the chair and can pass with no chair drawn.
 #[test]
 fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
     for seed in 0..8u64 {
@@ -5193,7 +5186,7 @@ fn the_chair_still_enqueues_after_its_occupant_and_the_sort_is_stable() {
     );
 }
 
-/// The painter half of the chair, on a BLANK buffer: no floor, no ceiling pool,
+/// The painter half of the chair, on a BLANK buffer: no floor, no light,
 /// no hour — so the only thing that can move these pixels is the chair itself.
 #[test]
 fn paint_chair_back_writes_its_mask_and_nothing_outside_it() {

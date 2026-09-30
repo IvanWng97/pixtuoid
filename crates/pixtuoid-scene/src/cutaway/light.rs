@@ -19,9 +19,9 @@ use crate::theme::Theme;
 /// Ramp steps the room drops by at full dark.
 const AMBIENT_MAX_STEPS: u8 = 4;
 
-/// Ramp steps a light lifts per unit of its level: a fluorescent's pool at full
-/// dark then lifts its centre most of the way back to the room's daylight tone,
-/// so the night room reads as lit pools in the dark, not as day with stains.
+/// Ramp steps a light lifts per unit of its level: a desk lamp at full dark then
+/// lifts the desk under its bulb most of the way back to its daylight tone, so
+/// the night room reads as lamp-lit pools in the dark, not as day with stains.
 const LIFT_STOPS_PER_LEVEL: f32 = 7.0;
 
 /// The most a light lifts the daylit room: one step shows a lamp is on at noon,
@@ -255,11 +255,10 @@ impl LightView {
 fn rank_of(kind: EmitterKind) -> u8 {
     match kind {
         EmitterKind::WindowSpill => 0,
-        EmitterKind::CeilingPool => 1,
-        EmitterKind::FloorLamp => 2,
-        EmitterKind::DeskLamp => 3,
-        EmitterKind::MonitorHalo(_) => 4,
-        EmitterKind::NeonGlow => 5,
+        EmitterKind::FloorLamp => 1,
+        EmitterKind::DeskLamp => 2,
+        EmitterKind::MonitorHalo(_) => 3,
+        EmitterKind::NeonGlow => 4,
     }
 }
 
@@ -270,7 +269,6 @@ fn rank_of(kind: EmitterKind) -> u8 {
 pub(crate) fn tint_of(kind: EmitterKind, theme: &Theme) -> Option<Rgb> {
     let lighting = &theme.lighting;
     match kind {
-        EmitterKind::CeilingPool => Some(lighting.ceiling_pool),
         EmitterKind::FloorLamp => Some(lighting.floor_lamp_halo),
         EmitterKind::DeskLamp => Some(lighting.desk_lamp),
         EmitterKind::WindowSpill => Some(lighting.sun_spill),

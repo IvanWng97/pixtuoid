@@ -21,9 +21,9 @@ mod windows;
 pub(crate) use approach::{approach_point, first_reachable_on_side, stand_point};
 pub use compute::{min_layout_size, PANTRY_COUNTER_LARGE_W};
 pub use decor::{
-    desk_ceiling_pool_center, desk_furniture_def, desk_walk_anchor_facing, furniture_def,
-    seated_foot_cell, ApproachSides, DwellWindow, Facing, Furniture, FurnitureDef, PlantKind,
-    PodDecor, WallDecor, WaypointKind, DESK_APPROACH, SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
+    desk_furniture_def, desk_walk_anchor_facing, furniture_def, seated_foot_cell, ApproachSides,
+    DwellWindow, Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind,
+    DESK_APPROACH, SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
 };
 pub(crate) use decor::{repels_plants, seated_z_key};
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
