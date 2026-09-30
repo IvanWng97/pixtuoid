@@ -10,9 +10,9 @@
 //! under `samply record`. Numbers are LOCAL statistical evidence: shared-CI
 //! wall-clock is noise, so CI runs this advisory-only.
 //! A second group, `render_cutaway`, costs the 2.5D painter alone: the sim
-//! window is observed up front, so each iteration is paint only — the part the
-//! cutaway adds on top of the shared sim — at the scale and extent it ships at,
-//! once at noon and once at night (the night room lights its lamps).
+//! window is observed up front, so each iteration is paint only — what the
+//! cutaway adds on top of the shared sim — at the pack's densest art, once at
+//! noon and once at night, when the dark room recolours every pixel.
 //! Distinct instrument:
 //! `crates/pixtuoid/examples/render_bench.rs` measures buffer-size SCALING
 //! through the floating offscreen renderer for the 2.5D design gate.
@@ -32,6 +32,8 @@ use pixtuoid_scene::floor::{
     render_floor, CoffeeState, FloorCtx, FloorMeta, FloorSession, FrameInputs, ObservedFloor,
 };
 use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::localclock;
+use pixtuoid_scene::pixel_painter::hour_is_day;
 use pixtuoid_scene::render_scale::RenderScale;
 
 // Inside a weather slot (`sky::WEATHER_CYCLE_SECS`, crate-private) with room to
@@ -47,15 +49,14 @@ const FRAME_STEP_MS: u64 = 100;
 const FLOATING_DEFAULT: Size = Size { w: 360, h: 240 };
 /// Crowds above the 12 the size axis fixes — a busy pod-farm and a near-full floor.
 const OCCUPANCY: [usize; 2] = [32, 64];
-/// The cutaway's logical office and the density it paints it at.
+/// The extent the cutaway's own paint tests lay out. Nothing ships a cutaway
+/// extent yet — a painter will size it from its terminal or window.
 const CUTAWAY_LOGICAL: Size = Size { w: 240, h: 144 };
-const CUTAWAY_SCALE: u16 = 4;
-/// Observed sim frames each cutaway case cycles through — enough that walks
-/// and bubbles move under the painter, few enough to hold in memory at once.
-const CUTAWAY_FRAMES: u32 = 60;
-/// Local wall-clock hours: the sky and the room's lighting decode `now`
-/// through `chrono::Local`, so a fixed epoch would be a different hour in
-/// every `$TZ`.
+/// Observed sim frames each cutaway case cycles through, so walks and bubbles
+/// move under the painter.
+const CUTAWAY_FRAMES: usize = 60;
+/// One hour on each side of the sky's day/night boundary; `render_cutaway_frame`
+/// pins which side each is on.
 const NOON: u32 = 12;
 const NIGHT: u32 = 23;
 
@@ -201,23 +202,25 @@ fn render_frame(c: &mut Criterion) {
     group.finish();
 }
 
-/// Local `hour:00` on a fixed January day.
-fn local_hour(hour: u32) -> SystemTime {
-    use chrono::TimeZone;
-    chrono::Local
-        .with_ymd_and_hms(2026, 1, 1, hour, 0, 0)
-        .single()
-        .expect("a fixed January local time is unambiguous")
-        .into()
-}
-
 fn render_cutaway_frame(c: &mut Criterion) {
     let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
         pixtuoid_scene::embedded_pack::PackSource::Bundled,
     )
     .expect("embedded pack");
     let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
-    let scale = RenderScale::new(CUTAWAY_SCALE).expect("nonzero scale");
+    let scale = RenderScale::new(pack.max_density_variant()).expect("a nonzero density");
+    // The case names are claims about the sky model; hold it to them.
+    assert!(
+        hour_is_day(NOON as f32) && !hour_is_day(NIGHT as f32),
+        "NOON must be day and NIGHT night"
+    );
+    // Every agent must seat, else the case measures a smaller office than its name claims.
+    let seats = pixtuoid_scene::floor::floor_capacity(
+        CUTAWAY_LOGICAL.w,
+        CUTAWAY_LOGICAL.h,
+        pixtuoid_scene::floor::floor_seed(0),
+    );
+    assert!(seats >= 12, "{CUTAWAY_LOGICAL:?} seats {seats} < 12");
     // The sky otherwise picks its weather from the clock, so noon and night
     // would each also be a different weather.
     pixtuoid_scene::pixel_painter::force_weather(Some("clear")).expect("clear is a weather");
@@ -225,29 +228,33 @@ fn render_cutaway_frame(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("render_cutaway");
     for (label, hour) in [("noon", NOON), ("night", NIGHT)] {
-        let base = local_hour(hour);
+        let base = localclock::at_hour(hour);
         let scene = office_scene(12, 16, base, true);
         let mut session = FloorSession::new();
-        let observed: Vec<ObservedFloor> = (0..CUTAWAY_FRAMES)
+        let observed: Vec<(SystemTime, ObservedFloor)> = (0..CUTAWAY_FRAMES as u64)
             .map(|i| {
-                let now = base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS);
-                session
+                let now = base + Duration::from_millis(i * FRAME_STEP_MS);
+                let floor = session
                     .observe(&scene, &pack, CUTAWAY_LOGICAL, meta, now)
-                    .expect("the cutaway extent lays out")
+                    .expect("the cutaway extent lays out");
+                (now, floor)
             })
             .collect();
         let Size { w, h } = CUTAWAY_LOGICAL;
-        group.bench_function(format!("busy12_{w}x{h}_x{CUTAWAY_SCALE}_{label}"), |b| {
-            let mut buf = RgbBuffer::filled(
-                scale.to_buffer(w),
-                scale.to_buffer(h),
-                theme.surface.bg_fallback,
-            );
-            let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
-            let mut i = 0u32;
+        // Outside the bench closure, which criterion calls afresh per sample: a
+        // live painter's recolour cache stays warm and its frames keep advancing.
+        let mut buf = RgbBuffer::filled(
+            scale.to_buffer(w),
+            scale.to_buffer(h),
+            theme.surface.bg_fallback,
+        );
+        let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
+        let mut i = 0;
+        let name = format!("busy12_{w}x{h}_x{}_{label}", scale.get());
+        group.bench_function(name, |b| {
             b.iter(|| {
-                let ObservedFloor { layout, frame } = &observed[i as usize];
-                let now = base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS);
+                let (now, ObservedFloor { layout, frame }) = &observed[i];
+                let now = *now;
                 i = (i + 1) % CUTAWAY_FRAMES;
                 render_cutaway(
                     frame,
