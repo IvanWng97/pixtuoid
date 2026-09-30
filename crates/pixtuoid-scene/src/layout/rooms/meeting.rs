@@ -1,7 +1,7 @@
 //! The meeting room aggregate: bounds + the sofa/table trio.
 
 use crate::layout::{
-    anchored_top_left, furniture_def, pct, Anchor, Bounds, Furniture, Point, OBSTACLE_PAD_PX,
+    Anchor, Bounds, Furniture, OBSTACLE_PAD_PX, Point, anchored_top_left, furniture_def, pct,
 };
 
 /// One meeting room's furniture trio. The fixed-size array encodes the

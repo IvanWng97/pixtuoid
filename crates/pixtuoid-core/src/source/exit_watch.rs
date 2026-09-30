@@ -115,13 +115,13 @@ mod imp {
     use std::time::Duration;
 
     use rustix::event::kqueue::{
-        kevent, kqueue, Event, EventFilter, EventFlags, ProcessEvents, UserDefinedFlags, UserFlags,
+        Event, EventFilter, EventFlags, ProcessEvents, UserDefinedFlags, UserFlags, kevent, kqueue,
     };
     use rustix::io::Errno;
     use rustix::process::Pid;
     use tokio::sync::mpsc::UnboundedSender;
 
-    use super::{drain_pending, Shared};
+    use super::{Shared, drain_pending};
 
     /// Per-wait event budget. Overflow just takes another loop turn — kqueue
     /// events are queued state, never lost.
@@ -331,13 +331,13 @@ mod imp {
     use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
     use std::sync::atomic::Ordering;
 
-    use rustix::event::{poll, PollFd, PollFlags};
+    use rustix::event::{PollFd, PollFlags, poll};
     use rustix::io::Errno;
-    use rustix::pipe::{pipe_with, PipeFlags};
-    use rustix::process::{pidfd_open, Pid, PidfdFlags};
+    use rustix::pipe::{PipeFlags, pipe_with};
+    use rustix::process::{Pid, PidfdFlags, pidfd_open};
     use tokio::sync::mpsc::UnboundedSender;
 
-    use super::{drain_pending, Shared};
+    use super::{Shared, drain_pending};
 
     pub(super) struct Backend {
         /// Self-pipe: `wake()` writes a byte; the thread keeps the read end in

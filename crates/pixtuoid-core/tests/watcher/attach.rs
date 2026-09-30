@@ -6,9 +6,9 @@ use std::time::Duration;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 
+use pixtuoid_core::AgentId;
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::source::Transport;
-use pixtuoid_core::AgentId;
 
 use crate::{
     backdate, cc_session_start_line, cc_subagent_line, cc_tool_use_line, cc_watcher,

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use super::{decode_ag_line, SOURCE_NAME};
+use super::{SOURCE_NAME, decode_ag_line};
 use crate::source::jsonl::JsonlWatcher;
 use crate::source::{Source, TaggedSender};
 

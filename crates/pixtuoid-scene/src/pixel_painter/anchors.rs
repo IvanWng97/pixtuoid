@@ -4,7 +4,7 @@
 
 use std::time::SystemTime;
 
-use crate::layout::{Anchor, Size, SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
+use crate::layout::{Anchor, SEAT_RENDER_Y_OFF, Size, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
 use super::epoch_ms;
@@ -50,11 +50,7 @@ fn breath_offset_y(agent_id: pixtuoid_core::AgentId, now: SystemTime) -> u16 {
     const CYCLE_MS: u64 = 4500;
     let offset_ms = agent_id.raw() % CYCLE_MS;
     let phase = elapsed_ms.wrapping_add(offset_ms) % CYCLE_MS;
-    if phase < CYCLE_MS / 2 {
-        0
-    } else {
-        1
-    }
+    if phase < CYCLE_MS / 2 { 0 } else { 1 }
 }
 
 pub(super) fn with_breath(

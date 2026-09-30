@@ -7,9 +7,9 @@ mod unclaim;
 
 use std::time::{Duration, SystemTime};
 
-use filetime::{set_file_mtime, FileTime};
+use filetime::{FileTime, set_file_mtime};
 
-use pixtuoid_core::source::jsonl::{force_polling_backend_for_tests, JsonlWatcher, ProbeSnapshot};
+use pixtuoid_core::source::jsonl::{JsonlWatcher, ProbeSnapshot, force_polling_backend_for_tests};
 
 /// Run every watcher test on a fast `PollWatcher` backend instead of the native
 /// FSEvents/inotify watcher, whose stream setup/teardown dominated test time.

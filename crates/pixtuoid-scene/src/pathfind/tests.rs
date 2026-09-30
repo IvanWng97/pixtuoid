@@ -159,8 +159,8 @@ fn every_approach_point_is_routable_from_its_home_desk() {
     // furniture CENTER and so can pass while a specific desk's chosen approach
     // side is unroutable. When NO allowed+reachable side exists `approach_point`
     // returns the `wp.pos` sentinel, which isn't a destination — excluded below.
-    use crate::layout::approach_point;
     use crate::layout::TEST_DEFAULT_DESKS;
+    use crate::layout::approach_point;
     let overlay = OccupancyOverlay::new();
     for (w, h) in [
         (96u16, 70u16),
@@ -244,8 +244,8 @@ fn reachset_never_claims_an_unroutable_cell() {
 fn every_aimless_wander_destination_is_routable_from_its_home_desk() {
     use crate::floor::floor_seed;
     use crate::pose::{aimless_wander_seed, desk_leg_endpoint, pick_aimless_dest};
-    use pixtuoid_core::state::MAX_FLOORS;
     use pixtuoid_core::AgentId;
+    use pixtuoid_core::state::MAX_FLOORS;
 
     let overlay = OccupancyOverlay::new();
     for (w, h) in [

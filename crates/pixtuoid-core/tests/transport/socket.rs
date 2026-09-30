@@ -453,10 +453,10 @@ async fn hook_router_socket_busy_exits_clean_without_death() {
 // EVERY source (stamped codex here).
 #[tokio::test]
 async fn hook_router_tee_captures_child_ends_from_the_shared_socket() {
+    use pixtuoid_core::AgentId;
+    use pixtuoid_core::source::Source;
     use pixtuoid_core::source::hook::HookRouter;
     use pixtuoid_core::source::jsonl::ChildEndUnclaims;
-    use pixtuoid_core::source::Source;
-    use pixtuoid_core::AgentId;
 
     let dir = TempDir::new().unwrap();
     let sock = dir.path().join("pixtuoid.sock");
