@@ -1,5 +1,7 @@
-# Any depth: a bench run from a crate directory writes crates/<crate>/target/.
-target/
+/target/
+# criterion falls back to <package root>/target/criterion when it can't resolve
+# the workspace target dir. Anchored so a source dir named target isn't hidden.
+/crates/*/target/
 **/*.rs.bk
 Cargo.lock.bak
 .DS_Store
