@@ -1,12 +1,11 @@
-/// Binds `$name` to a `DrawCtx::headless` still of `$scene` on the ground floor
-/// in the NORMAL theme; override a field by assigning it. A macro so the stores
-/// the context borrows are bound in the caller's scope and outlive it.
+/// Binds `$name` to a `DrawCtx::offscreen` of `$scene`; a macro so the stores it
+/// borrows live in the caller's scope.
 #[macro_export]
 macro_rules! make_draw_ctx {
     ($name:ident, $scene:expr) => {
         let mut _floor = pixtuoid_scene::floor::PerFloor::new();
         let mut _chitchat_state = std::collections::HashMap::new();
-        let mut $name = pixtuoid::tui::renderer::DrawCtx::headless(
+        let mut $name = pixtuoid::tui::renderer::DrawCtx::offscreen(
             &mut _floor,
             &mut _chitchat_state,
             &pixtuoid_scene::theme::NORMAL,
@@ -14,6 +13,95 @@ macro_rules! make_draw_ctx {
             $scene,
         );
     };
+}
+
+#[allow(dead_code)]
+pub(crate) fn fixture_scene(now: std::time::SystemTime) -> pixtuoid_core::SceneState {
+    use pixtuoid_core::state::{ActivityState, ToolKind};
+    use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
+    use std::sync::Arc;
+
+    let mut s = pixtuoid_core::SceneState::uniform(12);
+    let age_offset = std::time::Duration::from_secs(60);
+    let cases: &[(&str, ActivityState)] = &[
+        (
+            "agent-a",
+            ActivityState::Active {
+                tool_use_id: Some("tu_a".into()),
+                detail: Some("Write".into()),
+                kind: ToolKind::Edit,
+            },
+        ),
+        ("agent-b", ActivityState::Idle),
+        (
+            "agent-c",
+            ActivityState::Waiting {
+                reason: "perm?".into(),
+            },
+        ),
+        ("agent-d", ActivityState::Idle),
+    ];
+    for (i, (key, state)) in cases.iter().enumerate() {
+        let id = AgentId::from_transcript_path(&format!("/demo/{key}.jsonl"));
+        let created_at = now - age_offset;
+        s.agents.insert(
+            id,
+            AgentSlot {
+                agent_id: id,
+                source: Arc::from("claude-code"),
+                session_id: Arc::from(format!("session-{i}").as_str()),
+                cwd: Arc::from(std::path::PathBuf::from("/demo").as_path()),
+                label: (*key).into(),
+                state: state.clone(),
+                state_started_at: now,
+                last_event_at: now,
+                created_at,
+                exiting_at: None,
+                pending_idle_at: None,
+
+                desk_index: GlobalDeskIndex(i),
+                floor_idx: 0,
+                tool_call_count: 0,
+                active_ms: 0,
+                unknown_cwd: false,
+                parent_id: None,
+                pid: None,
+                model: None,
+                effort: None,
+                tokens_used: 0,
+                last_usage: None,
+            },
+        );
+    }
+    s
+}
+
+#[allow(dead_code)]
+pub(crate) fn render_hash(
+    scene: &pixtuoid_core::SceneState,
+    now: std::time::SystemTime,
+    theme: &pixtuoid_scene::theme::Theme,
+    floor: pixtuoid_scene::floor::FloorMeta,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+
+    let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(96, 36)).unwrap();
+    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
+        pixtuoid_scene::embedded_pack::PackSource::Bundled,
+    )
+    .unwrap();
+    make_draw_ctx!(draw_ctx, scene);
+    draw_ctx.theme = theme;
+    draw_ctx.floor = floor;
+    pixtuoid::tui::renderer::draw_scene(&mut term, scene, &pack, now, &mut draw_ctx).unwrap();
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for px in draw_ctx.buf.as_slice() {
+        px.r.hash(&mut hasher);
+        px.g.hash(&mut hasher);
+        px.b.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 /// `pixtuoid args` with its env cleared to `home`, so nothing reads the

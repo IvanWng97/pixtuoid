@@ -23,19 +23,14 @@ use crate::{CELL_H, CELL_W, SnapshotArgs, due_navigations};
 /// `floor_seed` MUST be the one the frame beside it was rendered with: the layout variants
 /// have different obstacle placements, so a report computed for another
 /// variant is a tick about an office nobody looked at.
-pub(crate) fn debug_paint_walkable_overlay(
-    term: &mut Terminal<TestBackend>,
+pub(crate) fn print_walkability_report(
+    term: &Terminal<TestBackend>,
     floor_seed: u64,
 ) -> Result<()> {
     use pixtuoid_scene::layout::SceneLayout;
 
     let size = term.size()?;
-    let scene_w = size.width;
-    let scene_h = size
-        .height
-        .saturating_sub(pixtuoid::tui::renderer::FOOTER_ROWS);
-    let buf_w = scene_w;
-    let buf_h = scene_h * 2;
+    let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(size.width, size.height);
     // `None` = the SAME fill the renderer's draw_scene passes — the overlay
     // must mirror the real layout exactly (desks stamp the walkable mask).
     let Some(layout) = SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed) else {
@@ -43,7 +38,6 @@ pub(crate) fn debug_paint_walkable_overlay(
         return Ok(());
     };
 
-    // door_threshold is inside the corridor, walkable by construction.
     let reach_mask = compute_reachable(&layout);
     let w = layout.buf_w as usize;
     let h = layout.buf_h as usize;
@@ -84,10 +78,6 @@ pub(crate) fn debug_paint_walkable_overlay(
         }
         println!();
     }
-
-    // No cell-level redraw: the live `w` pixel overlay (painted into the RgbBuffer in
-    // draw_scene) already visualizes the mask at pixel resolution, and a crude
-    // full-cell wash here would just overwrite it.
     Ok(())
 }
 
@@ -157,10 +147,7 @@ pub(crate) fn compute_crop_rect(
         match history.recent(slot.agent_id, u64::MAX, now) {
             Some(p) => p,
             None => {
-                let buf_w = cols;
-                let buf_h = rows
-                    .saturating_sub(pixtuoid::tui::renderer::FOOTER_ROWS)
-                    .saturating_mul(2);
+                let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
                 // The agent's OWN floor: `desk_index` is global, and a scene with
                 // more agents than `--max-desks` puts them on floor 1+, whose
                 // geometry and seed both differ from floor 0's.
@@ -186,10 +173,7 @@ pub(crate) fn compute_crop_rect(
             }
         }
     } else if let Some(ref furniture_str) = args.crop_furniture {
-        let buf_w = cols;
-        let buf_h = rows
-            .saturating_sub(pixtuoid::tui::renderer::FOOTER_ROWS)
-            .saturating_mul(2);
+        let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
         let layout = pixtuoid_scene::layout::SceneLayout::compute_with_seed(
             buf_w,
             buf_h,
@@ -219,30 +203,23 @@ pub(crate) fn compute_crop_rect(
         return Ok(None);
     };
 
-    // Positions are in the LOGICAL half-block buffer (1 px per cell across, 2 px per
-    // cell down), NOT in PNG pixels: the `CELL_W`×`CELL_H` px-per-cell scaling
-    // happens later.
-    Ok(Some(centered_crop(
-        target_pixel.x,
-        target_pixel.y / 2,
-        cols,
-        rows,
-    )))
+    Ok(Some(centered_crop(target_pixel, cols, rows)))
 }
 
-/// The `--crop-*` window, in cells (cols, rows).
-pub(crate) const CROP_WINDOW: (u16, u16) = (40, 24);
+/// The `--crop-*` window, in cells.
+const CROP_WINDOW: ratatui::layout::Size = ratatui::layout::Size::new(40, 24);
 
-/// A [`CROP_WINDOW`] centered on (cell_x, cell_y), clamped to stay inside the cols x
-/// rows buffer (shrinks only when the terminal itself is smaller).
+/// A [`CROP_WINDOW`] centered on `target`, clamped to stay inside the cols x rows
+/// terminal (shrinks only when the terminal itself is smaller).
 pub(crate) fn centered_crop(
-    cell_x: u16,
-    cell_y: u16,
+    target: pixtuoid_scene::layout::Point,
     cols: u16,
     rows: u16,
 ) -> ratatui::layout::Rect {
-    let crop_w = CROP_WINDOW.0.min(cols);
-    let crop_h = CROP_WINDOW.1.min(rows);
+    // `target` is a half-block buffer pixel: one per cell across, two per cell down.
+    let (cell_x, cell_y) = (target.x, target.y / 2);
+    let crop_w = CROP_WINDOW.width.min(cols);
+    let crop_h = CROP_WINDOW.height.min(rows);
 
     let crop_x = cell_x
         .saturating_sub(crop_w / 2)
@@ -262,33 +239,18 @@ pub(crate) fn centered_crop(
 pub(crate) fn save_backend_as_png(
     term: &Terminal<TestBackend>,
     path: &PathBuf,
-    cols: u16,
-    rows: u16,
-    crop: Option<ratatui::layout::Rect>,
+    area: ratatui::layout::Rect,
 ) -> Result<()> {
-    let area = crop.unwrap_or(ratatui::layout::Rect::new(0, 0, cols, rows));
     let mut img = RgbImage::new(area.width as u32 * CELL_W, area.height as u32 * CELL_H);
     rasterize_cells(&mut img, term.backend().buffer(), area, |c| c);
     img.save(path)?;
     Ok(())
 }
 
-/// Rasterize a post-draw ratatui cell buffer to RGBA, for the gif and proof
-/// frames.
-pub(crate) fn cells_to_rgba(
-    term_buf: &ratatui::buffer::Buffer,
-    cols: u16,
-    rows: u16,
-    img_w: u32,
-    img_h: u32,
-) -> RgbaImage {
-    let mut rgba = RgbaImage::new(img_w, img_h);
-    rasterize_cells(
-        &mut rgba,
-        term_buf,
-        ratatui::layout::Rect::new(0, 0, cols, rows),
-        |c| Rgba([c[0], c[1], c[2], 255]),
-    );
+pub(crate) fn cells_to_rgba(term_buf: &ratatui::buffer::Buffer) -> RgbaImage {
+    let area = term_buf.area;
+    let mut rgba = RgbaImage::new(area.width as u32 * CELL_W, area.height as u32 * CELL_H);
+    rasterize_cells(&mut rgba, term_buf, area, |c| Rgba([c[0], c[1], c[2], 255]));
     rgba
 }
 
@@ -380,8 +342,6 @@ impl Timeline {
 /// render reads; [`GifJob::encode`] itself only clocks and encodes.
 pub(crate) struct GifJob<'a> {
     pub(crate) path: &'a Path,
-    pub(crate) cols: u16,
-    pub(crate) rows: u16,
     pub(crate) timeline: Timeline,
     pub(crate) scene: &'a SceneState,
     pub(crate) pack: &'a Pack,
@@ -402,8 +362,6 @@ impl GifJob<'_> {
         let frame_count = self.timeline.frame_count();
         let frame_ms = 1000 / fps.max(1);
         let skip_frames = (skip_ms / frame_ms.max(1)) as usize;
-        let img_w = self.cols as u32 * CELL_W;
-        let img_h = self.rows as u32 * CELL_H;
 
         let file = std::fs::File::create(self.path)?;
         let mut encoder = GifEncoder::new(file);
@@ -415,7 +373,7 @@ impl GifJob<'_> {
             if i < skip_frames {
                 continue;
             }
-            let rgba = cells_to_rgba(cells(state), self.cols, self.rows, img_w, img_h);
+            let rgba = cells_to_rgba(cells(state));
             let delay = Delay::from_numer_denom_ms(frame_ms as u32, 1);
             encoder.encode_frame(GifFrame::from_parts(rgba, 0, 0, delay))?;
             let cap = i + 1 - skip_frames;
@@ -472,7 +430,7 @@ pub(crate) fn save_as_gif(
         |term, now, _| {
             let mut draw_ctx = DrawCtx {
                 debug_walkable,
-                ..DrawCtx::headless(floor, &mut chitchat_state, job.theme, floor_meta, scene)
+                ..DrawCtx::offscreen(floor, &mut chitchat_state, job.theme, floor_meta, scene)
             };
             draw_scene(term, scene, job.pack, now, &mut draw_ctx).map(drop)
         },
@@ -481,7 +439,14 @@ pub(crate) fn save_as_gif(
 }
 
 /// Fill a rect, clipped to `img`.
-fn fill_rect<I: image::GenericImage>(img: &mut I, x: u32, y: u32, w: u32, h: u32, px: I::Pixel) {
+pub(crate) fn fill_rect<I: image::GenericImage>(
+    img: &mut I,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+    px: I::Pixel,
+) {
     let (img_w, img_h) = (img.width(), img.height());
     for j in 0..h {
         for i in 0..w {
@@ -497,10 +462,10 @@ fn fill_rect<I: image::GenericImage>(img: &mut I, x: u32, y: u32, w: u32, h: u32
 // advance is ≤ CELL_W.
 const CELL_FONT_PX: f32 = 14.7;
 
-/// Anti-aliased cell text at the terminal grid: one char per `CELL_W`×`CELL_H` cell, centered on the
-/// cell's advance and CLIPPED to the cell rect so a wide fallback glyph can't bleed into
-/// a neighbor. Per-cell origins (never a running cursor) keep the raster locked to the
-/// grid.
+/// Anti-aliased cell text at the terminal grid: one char per [`CELL_W`]×[`CELL_H`] cell,
+/// centered on the cell's advance and CLIPPED to the cell rect so a wide fallback glyph
+/// can't bleed into a neighbor. Per-cell origins (never a running cursor) keep the raster
+/// locked to the grid.
 fn draw_cell_text(ch: char, x0: u32, y0: u32, mut put: impl FnMut(u32, u32, f32)) {
     let s = ch.to_string();
     let adv = pixtuoid::aa_text::text_width(&s, CELL_FONT_PX);
@@ -554,6 +519,7 @@ fn color_to_rgb(c: Color, default: ImgRgb<u8>) -> ImgRgb<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pixtuoid_scene::layout::Point;
 
     #[test]
     fn draw_cell_text_stays_inside_its_cell_and_lights_ink() {
@@ -599,21 +565,21 @@ mod tests {
 
     #[test]
     fn centered_crop_centers_in_the_open() {
-        let r = centered_crop(96, 32, 192, 64);
+        let r = centered_crop(Point { x: 96, y: 64 }, 192, 64);
         assert_eq!((r.x, r.y, r.width, r.height), (76, 20, 40, 24));
     }
 
     #[test]
     fn centered_crop_clamps_at_origin_and_far_edge() {
-        let near_origin = centered_crop(2, 1, 192, 64);
+        let near_origin = centered_crop(Point { x: 2, y: 2 }, 192, 64);
         assert_eq!((near_origin.x, near_origin.y), (0, 0));
-        let near_edge = centered_crop(191, 63, 192, 64);
+        let near_edge = centered_crop(Point { x: 191, y: 126 }, 192, 64);
         assert_eq!((near_edge.x, near_edge.y), (152, 40));
     }
 
     #[test]
     fn centered_crop_shrinks_to_a_small_terminal() {
-        let r = centered_crop(10, 5, 30, 20);
+        let r = centered_crop(Point { x: 10, y: 10 }, 30, 20);
         assert_eq!((r.x, r.y, r.width, r.height), (0, 0, 30, 20));
     }
 }

@@ -126,10 +126,9 @@ pub(crate) fn resolve_boot_caps(
 }
 
 pub(crate) fn capacity_for_terminal(cols: u16, rows: u16, floor_seed: u64) -> usize {
-    // The INVERSE of `renderer::min_terminal_size`, so it reads the same footer
-    // reserve: a half-block ▀ cell is 2 pixels tall.
-    let buf_h = rows.saturating_sub(crate::tui::renderer::FOOTER_ROWS) * 2;
-    pixtuoid_scene::floor::floor_capacity(cols, buf_h, floor_seed)
+    // The INVERSE of `renderer::min_terminal_size`.
+    let (buf_w, buf_h) = crate::tui::renderer::scene_buf_size(cols, rows);
+    pixtuoid_scene::floor::floor_capacity(buf_w, buf_h, floor_seed)
 }
 
 // The headless stdout summary derives labels / tool detail / Notification reason
@@ -297,10 +296,11 @@ mod tests {
     fn capacity_matches_renderer_formula() {
         let cols: u16 = 160;
         let rows: u16 = 50;
-        let buf_h = rows.saturating_sub(crate::tui::renderer::FOOTER_ROWS) * 2;
-        let expected = pixtuoid_scene::layout::SceneLayout::compute_with_seed(cols, buf_h, None, 0)
-            .map(|l| l.home_desks.len())
-            .unwrap_or(0);
+        let (buf_w, buf_h) = crate::tui::renderer::scene_buf_size(cols, rows);
+        let expected =
+            pixtuoid_scene::layout::SceneLayout::compute_with_seed(buf_w, buf_h, None, 0)
+                .map(|l| l.home_desks.len())
+                .unwrap_or(0);
         assert_eq!(capacity_for_terminal(cols, rows, 0), expected);
     }
 

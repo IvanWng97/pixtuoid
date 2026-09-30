@@ -3,8 +3,9 @@
 //! overlay painters the live window uses, so the PNG is byte-faithful to what it blits.
 //!
 //! Usage:
-//!   cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N]
-//! e.g. `... -- /tmp/floating.png --agents 6` (the [`DEFAULT_SIZE`]), `... -- /tmp/f.png 360x240`.
+//!   `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N]`
+//! e.g. `... -- /tmp/f.png --agents 6` (`config::FLOATING_DEFAULT_{W,H}` × `RETINA_SCALE_FACTOR`),
+//! `... -- /tmp/f.png 360x240`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,9 +19,6 @@ use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
 use pixtuoid_scene::floor::{FloorMeta, FrameInputs};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::theme_by_name;
-
-/// The buffer size when no WxH is given: a Retina window (360x240 logical @2x).
-const DEFAULT_SIZE: (u16, u16) = (720, 480);
 
 /// The two `cc` labels are a DELIBERATE collision, so the snapshot exercises the
 /// `·<id4>` disambiguation as well as every label tone.
@@ -104,7 +102,11 @@ fn main() -> Result<()> {
         anyhow!("usage: floating_snapshot <out.png> [WxH] [--theme <name>] [--agents N]")
     })?;
 
-    let mut size = DEFAULT_SIZE;
+    const RETINA_SCALE_FACTOR: u32 = 2;
+    let mut size = (
+        u16::try_from(pixtuoid::config::FLOATING_DEFAULT_W * RETINA_SCALE_FACTOR)?,
+        u16::try_from(pixtuoid::config::FLOATING_DEFAULT_H * RETINA_SCALE_FACTOR)?,
+    );
     let mut theme_name = "normal".to_string();
     let mut n_agents = 0usize;
     let rest: Vec<String> = args.collect();
@@ -151,7 +153,7 @@ fn main() -> Result<()> {
     // Mirror floating::window: render at window / `office_scale`, then the same surface
     // upscale and overlays.
     let (win_w, win_h) = (size.0 as u32, size.1 as u32);
-    let scale = pixtuoid::floating::offscreen::office_scale(win_h); // shared with the live window
+    let scale = pixtuoid::floating::offscreen::office_scale(win_h);
     let ow = (win_w / scale).max(1).min(u16::MAX as u32) as u16;
     let oh = (win_h / scale).max(1).min(u16::MAX as u32) as u16;
     let buf = renderer.render(FrameInputs {

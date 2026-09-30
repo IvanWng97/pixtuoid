@@ -1,5 +1,5 @@
 //! Renders the TUI off-screen via ratatui's TestBackend and rasterizes every cell
-//! into a [`CELL_W`]×[`CELL_H`] px tile — of a PNG, an animated GIF (`--gif`) or
+//! into a `CELL_W`×`CELL_H` px tile — of a PNG, an animated GIF (`--gif`) or
 //! `--proof` frame sequences — so the visual output is verifiable without a real
 //! terminal.
 
@@ -19,7 +19,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 use crate::encode::{
-    GifJob, Timeline, centered_crop, compute_crop_rect, debug_paint_walkable_overlay, save_as_gif,
+    GifJob, Timeline, centered_crop, compute_crop_rect, print_walkability_report, save_as_gif,
     save_backend_as_png, save_renderer_gif,
 };
 use crate::scenes::{
@@ -99,7 +99,7 @@ struct SnapshotArgs {
 
     /// Schedule floor navigations inside a --gif capture: repeatable
     /// `--navigate-at <sec>:<floor>` (0-based floor). A navigation during another
-    /// one's slide is dropped (a slide in flight ignores navigate_floor).
+    /// one's slide is dropped.
     #[arg(
         long = "navigate-at",
         value_name = "SEC:FLOOR",
@@ -129,8 +129,8 @@ struct SnapshotArgs {
     #[arg(long)]
     now_hour: Option<u32>,
 
-    /// Override local day-of-January-2026 used by time-of-day.
-    #[arg(long, default_value_t = 1)]
+    /// Override the local day (1 = `pixtuoid_scene::localclock`'s base date) used by time-of-day.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     now_day: u32,
 
     /// Force a specific weather, bypassing the clock-based 10-minute cycle.
@@ -197,7 +197,7 @@ struct SnapshotArgs {
     /// walk-out (settle/sit follow); set a LARGER value to start the capture at
     /// a later phase — e.g. desk_dwell + walk + sit_dwell to capture the LEAVE
     /// (walk-back).
-    #[arg(long)]
+    #[arg(long, requires = "anim", conflicts_with_all = ["pets", "navigate_at"])]
     anim_skip_ms: Option<u64>,
 
     /// Stage N agents (2–3) converging on ONE meeting room in a `--gif`
@@ -254,11 +254,13 @@ struct SnapshotArgs {
     flame: Option<String>,
 
     /// Crop the generated PNG to the fixed crop window centered on the gateway
-    /// lobster mascot. Needs a visible mascot: pass --openclaw <state>.
-    /// Static-PNG path only.
-    // Enforced at runtime, not by clap: "visible" isn't expressible as a static
-    // flag dependency.
-    #[arg(long, conflicts_with_all = ["crop_agent", "crop_furniture", "gif", "anim"])]
+    /// lobster mascot `--openclaw` stages. Static-PNG path only.
+    // Visibility is still checked at runtime (the mascot may be off-canvas).
+    #[arg(
+        long,
+        requires = "openclaw",
+        conflicts_with_all = ["crop_agent", "crop_furniture", "gif", "anim"]
+    )]
     crop_mascot: bool,
 
     /// Render the §3 split-screen proof replay from a captured CC session
@@ -326,16 +328,8 @@ fn main() -> Result<()> {
     }
 
     let now = match args.now_hour {
-        Some(h) => {
-            use chrono::TimeZone;
-            chrono::Local
-                .with_ymd_and_hms(2026, 1, args.now_day, h, 0, 0)
-                .single()
-                .ok_or_else(|| {
-                    anyhow::anyhow!("invalid --now-day/--now-hour {}:{}", args.now_day, h)
-                })?
-                .into()
-        }
+        Some(h) => pixtuoid_scene::localclock::try_on_day(args.now_day - 1, h)
+            .with_context(|| format!("invalid --now-day/--now-hour {}:{h}", args.now_day))?,
         None => SystemTime::now(),
     };
     let cols = args.cols.unwrap_or(COLS);
@@ -475,8 +469,6 @@ fn main() -> Result<()> {
     }
     let gif_job = GifJob {
         path: &args.out,
-        cols,
-        rows,
         timeline: Timeline {
             fps: args.gif_fps,
             secs: args.gif_duration,
@@ -694,38 +686,35 @@ fn main() -> Result<()> {
         dashboard: &dashboard_frame,
         connection: &connection_frame,
         onboarding: &onboarding_frame,
-        ..DrawCtx::headless(&mut floor, &mut chitchat_state, theme, floor_meta, &scene)
+        ..DrawCtx::offscreen(&mut floor, &mut chitchat_state, theme, floor_meta, &scene)
     };
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
 
     if args.debug_walkable {
-        debug_paint_walkable_overlay(&mut term, args.floor_seed)?;
+        print_walkability_report(&term, args.floor_seed)?;
     }
 
     let crop_rect = if args.crop_mascot {
         // The mascot wanders to a time-derived cell, so we crop on the position
-        // the renderer actually resolved, not a precomputed layout point. `pos`
-        // is the logical half-block buffer (1px per cell across, 2px down).
-        let m = draw_ctx.last_mascots.first().ok_or_else(|| {
-            anyhow::anyhow!("--crop-mascot needs a visible mascot; pass --openclaw <state>")
-        })?;
-        Some(centered_crop(m.pos.x, m.pos.y / 2, cols, rows))
+        // the renderer actually resolved, not a precomputed layout point.
+        let m = draw_ctx
+            .last_mascots
+            .first()
+            .context("--crop-mascot needs a visible mascot")?;
+        Some(centered_crop(m.pos, cols, rows))
     } else {
         compute_crop_rect(&args, &scene, &floor.ctx.history, cols, rows, now)?
     };
+    let area = crop_rect.unwrap_or(ratatui::layout::Rect::new(0, 0, cols, rows));
 
-    save_backend_as_png(&term, &args.out, cols, rows, crop_rect)?;
+    save_backend_as_png(&term, &args.out, area)?;
     println!("wrote {}", args.out.display());
 
     println!("\n--- text preview (symbols only) ---");
     let buf = term.backend().buffer();
-    let (start_x, start_y, render_w, render_h) = match crop_rect {
-        Some(r) => (r.x, r.y, r.width, r.height),
-        None => (0, 0, cols, rows),
-    };
-    for y in 0..render_h {
-        for x in 0..render_w {
-            print!("{}", buf[(start_x + x, start_y + y)].symbol());
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            print!("{}", buf[(x, y)].symbol());
         }
         println!();
     }
@@ -901,6 +890,11 @@ mod tests {
     #[test]
     fn crop_flags_conflict_with_gif_and_anim() {
         assert!(SnapshotArgs::try_parse_from(["snapshot", "--gif", "--crop-agent", "x"]).is_err());
+        assert!(SnapshotArgs::try_parse_from(["snapshot", "--crop-mascot"]).is_err());
+        assert!(
+            SnapshotArgs::try_parse_from(["snapshot", "--crop-mascot", "--openclaw", "idle"])
+                .is_ok()
+        );
         assert!(
             SnapshotArgs::try_parse_from([
                 "snapshot",
@@ -960,12 +954,16 @@ mod tests {
         );
     }
 
-    /// The renderer path (`--pets` / `--navigate-at`) encodes from t=0, so every
-    /// pre-roll flag must be refused beside it rather than silently dropped.
+    /// The renderer path (`--pets` / `--navigate-at`) encodes from t=0, so clap
+    /// refuses each pre-roll flag beside it rather than dropping it.
     #[test]
     fn pre_roll_flags_conflict_with_the_renderer_path() {
         let gif = &["snapshot", "--gif"][..];
-        let pre_rolls = [&["--warmup-secs", "5"][..], &["--anim", "sofa"]];
+        let pre_rolls = [
+            &["--warmup-secs", "5"][..],
+            &["--anim", "sofa"],
+            &["--anim", "sofa", "--anim-skip-ms", "5"],
+        ];
         let renderers = [&["--pets", "cat"][..], &["--navigate-at", "3:1"]];
         for alone in pre_rolls.iter().chain(&renderers) {
             let argv = [gif, alone].concat();
@@ -974,7 +972,13 @@ mod tests {
                 "rejected {argv:?}"
             );
         }
-        for pre_roll in pre_rolls {
+        let skip_alone = &["--anim-skip-ms", "5"][..];
+        let argv = [gif, skip_alone].concat();
+        assert!(
+            SnapshotArgs::try_parse_from(&argv).is_err(),
+            "accepted {argv:?}"
+        );
+        for pre_roll in pre_rolls.into_iter().chain([skip_alone]) {
             for renderer in renderers {
                 let argv = [gif, pre_roll, renderer].concat();
                 assert!(

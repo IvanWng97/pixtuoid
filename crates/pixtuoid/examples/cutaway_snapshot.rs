@@ -63,10 +63,6 @@ fn populate(scene: &mut SceneState, now: SystemTime, n: usize) {
                 agent_id: id,
                 source: Arc::from("claude-code"),
                 session_id: Arc::from(format!("cut-{i:04x}").as_str()),
-                // VARIED cwds, like the classic `snapshot` example's fixture:
-                // the outfit is cwd-keyed (Team Palette), so one cwd for
-                // everyone renders the whole office in a single shirt and hides
-                // exactly the grouping the recolor exists to show.
                 cwd: Arc::from(PathBuf::from(REPOS[i % REPOS.len()]).as_path()),
                 label: "cc".into(),
                 state,
@@ -154,13 +150,8 @@ fn main() -> Result<()> {
         ));
     }
     let now = match now_hour {
-        Some(h) => {
-            anyhow::ensure!(
-                chrono::NaiveTime::from_hms_opt(h, 0, 0).is_some(),
-                "invalid --now-hour {h}"
-            );
-            pixtuoid_scene::localclock::at_hour(h)
-        }
+        Some(h) => pixtuoid_scene::localclock::try_on_day(0, h)
+            .with_context(|| format!("invalid --now-hour {h}"))?,
         None => SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
     };
     let meta = FloorMeta::for_floor(floor.0, floor.1);
@@ -176,9 +167,7 @@ fn main() -> Result<()> {
 
     let (bw, bh) = (scale.to_buffer(lw), scale.to_buffer(lh));
     let mut buf = RgbBuffer::filled(bw, bh, theme.surface.bg_fallback);
-    // The recolor cache the classic painter uses — the cutaway blits the SAME
-    // per-agent sprites, so it needs the same cache rather than recoloring
-    // twelve characters afresh every frame.
+    // `render_cutaway` needs the classic painter's recolor cache.
     let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
     let labels = render_cutaway(
         &frame,
@@ -205,9 +194,7 @@ fn main() -> Result<()> {
         };
         let text: &str = &agent.label.text();
         // The SHARED tone authority every other label painter uses, so the
-        // cutaway cannot invent its own state colours. `label_idle` alone was
-        // rgb(65,72,104) on a rgb(36,40,59) floor — technically drawn, visually
-        // absent, which is exactly the class of bug a dev tool should not have.
+        // cutaway cannot invent its own state colours.
         let tone = pixtuoid_scene::overlay::label_tone_rgb(
             if agent.exiting_at.is_some() {
                 pixtuoid_scene::overlay::LabelTone::Exiting

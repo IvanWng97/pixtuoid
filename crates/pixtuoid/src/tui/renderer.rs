@@ -99,13 +99,10 @@ pub struct DrawCtx<'a> {
 }
 
 impl<'a> DrawCtx<'a> {
-    /// A context for an off-terminal still of one floor: no input, overlays,
-    /// pets, coffee or audio, and every out-param empty. The snapshot example and
-    /// the integration tests build on it, overriding what they stage by struct
-    /// update; the live `TuiRenderer` does not, since nearly every field it sets
-    /// is runtime state. Public for MECHANISM, not contract, hence `doc(hidden)`.
+    /// An offscreen still of one floor, every input and overlay off. The live `TuiRenderer`
+    /// keeps its exhaustive literal, so a new field is a compile error there, not a silent default.
     #[doc(hidden)]
-    pub fn headless(
+    pub fn offscreen(
         floor: &'a mut pixtuoid_scene::floor::PerFloor,
         chitchat_state: &'a mut std::collections::HashMap<
             pixtuoid_scene::chitchat::VenueKey,
@@ -133,12 +130,7 @@ impl<'a> DrawCtx<'a> {
             theme,
             theme_picker: None,
             floor_info: None,
-            // A single-floor still: no cross-floor cue.
-            per_floor: Default::default(),
-            // DERIVED from the scene, as the runtime does: a hardcoded `None`
-            // renders an `--openclaw` lobster with its `⬢gw` chip off, and the
-            // snapshot example's gif clips are NOT pixel-gated by `gen-check`, so
-            // nothing would catch it.
+            per_floor: crate::tui::widgets::per_floor_counts(scene),
             gateway: crate::tui::widgets::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
             audio_audible: false,
             volume_flash: None,
@@ -206,6 +198,13 @@ pub(crate) fn scene_rect(full: Rect) -> Rect {
         width: full.width,
         height: full.height.saturating_sub(FOOTER_ROWS),
     }
+}
+
+/// The pixel buffer a `cols`×`rows` terminal's scene paints, two half-block pixels a row.
+#[doc(hidden)]
+pub fn scene_buf_size(cols: u16, rows: u16) -> (u16, u16) {
+    let scene = scene_rect(Rect::new(0, 0, cols, rows));
+    (scene.width, scene.height.saturating_mul(2))
 }
 
 pub(crate) struct OverlayFrame<'a> {
@@ -384,8 +383,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         return Ok(None);
     }
 
-    let buf_w = scene_rect.width;
-    let buf_h = scene_rect.height.saturating_mul(2);
+    let (buf_w, buf_h) = scene_buf_size(full_rect.width, full_rect.height);
     ctx.buf.resize_fill(buf_w, buf_h, theme.surface.bg_fallback);
     let Some(layout) = ctx.store.frame_layout(buf_w, buf_h, floor.floor_seed) else {
         draw_footer_only_frame(term, scene, &footer_stats, theme, &overlays, now)?;
