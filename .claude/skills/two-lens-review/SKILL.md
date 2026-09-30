@@ -10,7 +10,7 @@ metadata:
 
 ONE protocol, two SCOPES over the SAME factors:
 
-- **Diff scope** — the repo's **mandatory** merge gate (workspace `CLAUDE.md`,
+- **Diff scope** — the repo's **mandatory** merge gate (workspace `AGENTS.md`,
   "Things NOT to do"). 2+ differentiated-lens agents on the diff, disposition in
   the PR thread.
 - **Whole-codebase scope** — the periodic / pre-release AUDIT. A diff review and
@@ -75,7 +75,8 @@ Hence:
   CONFIRMED BY THE ORCHESTRATOR against the code — never by the finder's own
   severity label — blocks merge. A MEDIUM this change INTRODUCED is fixed in
   the fold or forces a re-scope; taste findings are optional by default —
-  drop them; a pre-existing find is SURFACED to the owner in one line. Nothing
+  drop them; a pre-existing find is a FOLLOW-UP → #N, its fix PR opened
+  before this one merges. Nothing
   spawns another round, and agents never file issues.
 - **No new gates in a fix round.** A fix may not introduce a new bespoke
   checker/lint/census — gate-shaped fixes routinely arrive fail-open and feed
@@ -137,7 +138,8 @@ Run the fan-out template in the "Whole-codebase scope — orchestration" section
 parallel `Agent` fan-out. Scale to the ask: "any bugs?" → a few finders, single-vote verify; "thoroughly
 audit / be comprehensive" → larger finder pool, multi-vote adversarial verify,
 synthesis. Do the involved/cross-crate refactors it surfaces IN-ARC (design-debt
-lens); anything bigger is SURFACED in the ranked report for the owner to pick.
+lens); anything bigger is ranked in the report, and each item the owner keeps
+becomes a FOLLOW-UP PR.
 
 ## Disposition sweep (both scopes)
 

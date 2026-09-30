@@ -1591,14 +1591,7 @@ fn compute_waypoints(
         }
     }
     for &PodDecorItem { kind, pos } in pod_decor {
-        // Exhaustive (no `_`): a NEW PodDecor must make a deliberate wander decision
-        // here — `None` = pure decor, `Some(kind)` = also a walkable destination.
-        let wp_kind = match kind {
-            PodDecor::PhoneBooth => Some(WaypointKind::PhoneBooth),
-            PodDecor::StandingDesk => Some(WaypointKind::StandingDesk),
-            PodDecor::PlantTall | PodDecor::Whiteboard | PodDecor::Tv => None,
-        };
-        if let Some(wp_kind) = wp_kind {
+        if let Some(wp_kind) = kind.waypoint() {
             waypoints.push(Waypoint {
                 pos,
                 kind: wp_kind,

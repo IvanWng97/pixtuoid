@@ -164,10 +164,10 @@ async fn watcher_does_not_consume_partial_trailing_line() {
     let mut got_tu_2 = false;
     while let Ok(Some((_t, ev))) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await
     {
-        if let AgentEvent::ActivityStart { tool_use_id, .. } = ev {
-            if tool_use_id.as_deref() == Some("tu_2") {
-                got_tu_2 = true;
-            }
+        if let AgentEvent::ActivityStart { tool_use_id, .. } = ev
+            && tool_use_id.as_deref() == Some("tu_2")
+        {
+            got_tu_2 = true;
         }
     }
     assert!(
@@ -217,11 +217,10 @@ async fn watcher_resets_cursor_on_truncation_below_cursor() {
     while tokio::time::Instant::now() < deadline {
         if let Ok(Some((_, AgentEvent::ActivityStart { tool_use_id, .. }))) =
             tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && tool_use_id.as_deref() == Some("tu_long")
         {
-            if tool_use_id.as_deref() == Some("tu_long") {
-                saw_long = true;
-                break;
-            }
+            saw_long = true;
+            break;
         }
     }
     assert!(saw_long, "expected the first long line to decode");
@@ -236,11 +235,10 @@ async fn watcher_resets_cursor_on_truncation_below_cursor() {
     while tokio::time::Instant::now() < deadline {
         if let Ok(Some((_, AgentEvent::ActivityStart { tool_use_id, .. }))) =
             tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && tool_use_id.as_deref() == Some("tu_fresh")
         {
-            if tool_use_id.as_deref() == Some("tu_fresh") {
-                saw_fresh = true;
-                break;
-            }
+            saw_fresh = true;
+            break;
         }
     }
     assert!(
@@ -292,11 +290,10 @@ async fn watcher_skips_non_utf8_line_and_keeps_going() {
     while tokio::time::Instant::now() < deadline {
         if let Ok(Some((_, AgentEvent::ActivityStart { tool_use_id, .. }))) =
             tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            && tool_use_id.as_deref() == Some("tu_valid")
         {
-            if tool_use_id.as_deref() == Some("tu_valid") {
-                got_valid = true;
-                break;
-            }
+            got_valid = true;
+            break;
         }
     }
     assert!(

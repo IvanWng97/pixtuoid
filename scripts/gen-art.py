@@ -117,7 +117,6 @@ DESK_ART_W = 14
 DESK_BEZEL_RAISE = 1
 # `layout`'s `DESK_SURFACE_ROWS`, `DESK_FRONT_ROWS`, `DESK_LEG_ROWS`.
 DESK_SURFACE_ROWS, DESK_FRONT_ROWS, DESK_LEG_ROWS = 5, 1, 2
-DESK_ART_H = DESK_BEZEL_RAISE + DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS
 # The back-turned desk's extra rows, all above, so the occupant (who y-sorts in
 # FRONT of the desk) leaves the upper screen row clear. Its lower screen row
 # sits inside the wood, flanked by it: the owner picked a monitor standing on
@@ -255,6 +254,15 @@ SEAT_Y, BELT_Y = 36, 38
 # Where a sleeve ends and a hanging hand begins.
 CUFF_Y = 34
 SKIN_KEYS = {SKIN, SKIN_SH}
+
+
+def grounded(frames):
+    """`frames` moved down together until their lowest drawn row is the canvas's
+    last: both painters ground and sort a piece on its box's bottom row."""
+    blank = min(
+        next((i for i, row in enumerate(reversed(g)) if any(c != T for c in row)), 0) for g in frames
+    )
+    return [[[T] * len(g[0])] * blank + g[: len(g) - blank] for g in frames]
 
 
 def union_outline(g, k=SILHOUETTE):
@@ -2925,22 +2933,26 @@ def orphans(pack, sprites):
     )
 
 
-def city_drift(pack):
-    """Why pack.toml's `[city]` names other keys than `CITY` draws in, or None."""
+def manifest_drift(pack):
+    """Why pack.toml names other keys than the ones drawn in, or None."""
     manifest = pack / "pack.toml"
     if not manifest.is_file():
         return None
-    named = tomllib.loads(manifest.read_text(encoding=ENCODING)).get("city")
+    toml = tomllib.loads(manifest.read_text(encoding=ENCODING))
+    named = toml.get("city")
     if named is not None and named != CITY:
         return f"gen-art --check: pack.toml [city] {named} is not the keys drawn in, {CITY}"
+    outline = toml.get("characters", {}).get("outline")
+    if outline != SILHOUETTE:
+        return f"gen-art --check: pack.toml [characters] outline {outline!r} is not the art's, {SILHOUETTE!r}"
     return None
 
 
 def check(pack, sprites):
     """Why the committed pack is not what `sprites` draws, or None when it is."""
-    city = city_drift(pack)
-    if city:
-        return city
+    drift = manifest_drift(pack)
+    if drift:
+        return drift
     stale = sorted(
         name
         for name, text in sprites.items()
@@ -2985,6 +2997,12 @@ def selftest(sprites):
         assert check(pack, sprites) is None, "a write must delete the orphan"
         (pack / "hand.sprite").write_text(f"# copied from {first}: {PROVENANCE}\n@frame 0\n.\n", encoding=ENCODING)
         assert check(pack, sprites) is None, "hand art quoting the provenance is not an orphan"
+        (pack / "pack.toml").write_text('[characters]\noutline = "n"\n', encoding=ENCODING)
+        assert check(pack, sprites) is not None, "an outline the art does not draw must fail"
+        (pack / "pack.toml").write_text("[pack]\n", encoding=ENCODING)
+        assert check(pack, sprites) is not None, "a pack naming no outline must fail"
+        (pack / "pack.toml").write_text(f'[characters]\noutline = "{SILHOUETTE}"\n', encoding=ENCODING)
+        assert check(pack, sprites) is None, "the art's own outline passes"
     print(f"gen-art --selftest: OK ({len(sprites)} sprites)")
 
 
@@ -3054,7 +3072,7 @@ def main():
         "meeting_chair": (meeting_chair_1x.__doc__, [meeting_chair_1x()]),
     }
     sprites = {
-        f"{base}@{S}x.sprite": render_sprite(header, frames)
+        f"{base}@{S}x.sprite": render_sprite(header, grounded(frames))
         for base, (header, frames) in pieces.items()
     }
     for pose, (*_, header) in POSES.items():
@@ -3069,7 +3087,9 @@ def main():
                         [lyr],
                         [(view, HEAD_MARK[0], HEAD_MARK[1] + o)],
                     )
-    sprites |= {f"{base}.sprite": render_sprite(header, frames) for base, (header, frames) in classic.items()}
+    sprites |= {
+        f"{base}.sprite": render_sprite(header, grounded(frames)) for base, (header, frames) in classic.items()
+    }
     for name, draw in BUILDINGS.items():
         art = draw()
         sprites[f"building_{name}@{S}x.sprite"] = render_sprite(draw.__doc__, [art])

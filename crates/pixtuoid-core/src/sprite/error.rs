@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use super::HeadView;
-use super::format::{DENSITY_VARIANT_SEP, Material};
+use super::format::{DENSITY_VARIANT_SEP, Material, PACK_MANIFEST};
 
 /// A sprite pack that could not be loaded.
 #[derive(Debug, thiserror::Error)]
@@ -21,6 +21,13 @@ pub enum PackError {
         /// The OS error.
         #[source]
         source: std::io::Error,
+    },
+    /// The pack directory holds no [`PACK_MANIFEST`], or does not exist.
+    #[error("{} holds no {PACK_MANIFEST}", dir.display())]
+    #[non_exhaustive]
+    NoManifest {
+        /// The directory.
+        dir: PathBuf,
     },
     /// The pack directory could not be canonicalized.
     #[error("canonicalizing {}", path.display())]
@@ -296,9 +303,8 @@ pub enum SpriteError {
     #[error("{kind} (line {line})")]
     #[non_exhaustive]
     Line {
-        /// The 1-based line. A frame's own shape is checked when its block
-        /// ends, so its errors name the line that ends it: the next `@frame`,
-        /// or the file's last non-blank line.
+        /// The 1-based line: for a frame's shape, the row or mark at fault, or
+        /// the `@frame` of a frame with no rows.
         line: usize,
         /// What is wrong on it.
         kind: LineError,
