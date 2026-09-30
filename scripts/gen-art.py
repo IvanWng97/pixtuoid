@@ -1505,20 +1505,47 @@ CORK, CORK_SH, STEEL, STEEL_SH = "Δ", "π", "K", "ξ"
 BOOKS = (RED, BLUE, GOLD, FABRIC, TAN, DARK_RED, VERMILION, GREEN)
 
 
+# `Furniture::FloorLamp`'s visual box.
+LAMP_W, LAMP_H = 4, 12
+
+
 def floor_lamp():
-    """A floor lamp: a weighted base, a slim pole, a drum shade lit from within,
-    the bulb glowing at its open foot."""
-    g = canvas(4 * S, 10 * S)
-    rect(g, 3, 36, 13, 39, LAMP)
-    rect(g, 3, 36, 13, 37, LAMP_HI)
-    rect(g, 7, 10, 9, 36, LAMP)
-    rect(g, 7, 10, 8, 36, LAMP_HI)
-    rect(g, 2, 2, 14, 10, OFFWHITE)
-    rect(g, 3, 1, 13, 2, OFFWHITE)
-    rect(g, 10, 1, 14, 10, OFFWHITE_SH)
-    rect(g, 2, 9, 14, 10, BULB)
-    rect(g, 5, 10, 11, 11, BULB)
+    """A floor lamp: a weighted base, a slim pole with its pull chain, a
+    tapered drum shade lit from within, dithered warmer toward the bulb glowing
+    at its open foot, the east side in shade."""
+    w, h = LAMP_W * S, LAMP_H * S
+    g = canvas(w, h)
+    rect(g, 3, h - 5, w - 3, h - 2, LAMP)
+    rect(g, 3, h - 5, w - 3, h - 4, LAMP_HI)
+    rect(g, 7, 12, 9, h - 5, LAMP)
+    rect(g, 7, 12, 8, h - 5, LAMP_HI)
+    rect(g, 4, 1, w - 4, 3, OFFWHITE)
+    rect(g, 3, 3, w - 3, 6, OFFWHITE)
+    rect(g, 2, 6, w - 2, 11, OFFWHITE)
+    for y in range(1, 11):  # the shade's east side, turned from the light
+        east = w - 4 if y < 3 else w - 3 if y < 6 else w - 2
+        rect(g, east - 3, y, east, y + 1, OFFWHITE_SH)
+    for y in (8, 9):  # warming toward the bulb
+        for x in range(2, w - 2):
+            if (x + y) % 2:
+                put(g, x, y, BULB)
+    rect(g, 2, 10, w - 2, 11, BULB)
+    rect(g, 5, 11, w - 5, 12, BULB)
+    rect(g, 11, 11, 12, 15, GREY)  # the pull chain
     union_outline(g)
+    return g
+
+
+def floor_lamp_1x():
+    """The floor lamp at 1x: a dark shade with the bulb's warm glow in it, the
+    slim pole, the chrome base."""
+    g = canvas(LAMP_W, LAMP_H)
+    rect(g, 1, 0, 3, 1, BEZEL)
+    rect(g, 0, 1, LAMP_W, 3, BEZEL)
+    rect(g, 1, 1, 3, 3, GOLD)
+    rect(g, 1, 3, 3, 4, BEZEL)
+    rect(g, 2, 4, 3, LAMP_H - 1, OUTLINE)
+    rect(g, 1, LAMP_H - 1, 3, LAMP_H, STEEL)
     return g
 
 
@@ -1819,25 +1846,60 @@ def tv_stand():
     return g
 
 
+# `Furniture::PhoneBooth`'s visual box.
+BOOTH_W, BOOTH_H = 7, 15
+
+
 def phone_booth():
     """A glass privacy pod: a dark frame round tinted glass with streaks of
-    reflection, a stool and a shelf inside, its occupied LED on the roof."""
-    g = canvas(6 * S, 12 * S)
-    rect(g, 1, 1, 23, 47, BEZEL)
-    rect(g, 1, 1, 23, 2, SLATE)
-    rect(g, 9, 2, 15, 4, BULB)
-    rect(g, 3, 6, 21, 40, CYAN)
-    for y in range(6, 40):
-        for x in range(3, 21):
-            if (x - y * 0.6) % 13 < 1.5:
+    reflection, a transom across it, a shelf and a stool inside, the door's
+    steel pull on its east edge, a wood kick panel, its occupied light on the
+    roof."""
+    w, h = BOOTH_W * S, BOOTH_H * S
+    mid = w // 2
+    g = canvas(w, h)
+    rect(g, 1, 1, w - 1, h - 1, BEZEL)
+    rect(g, 1, 1, w - 1, 2, SLATE)
+    rect(g, mid - 3, 2, mid + 3, 4, BULB)
+    gx0, gy0, gx1, gy1 = 3, 6, w - 3, 47
+    rect(g, gx0, gy0, gx1, gy1, CYAN)
+    rect(g, gx0 + 4, 31, gx1 - 4, 33, WOOD)  # the shelf inside
+    rect(g, gx0 + 4, 33, gx1 - 4, 34, WOOD_SH)
+    rect(g, mid - 3, 39, mid + 3, 41, SHADOW)  # a stool
+    rect(g, mid - 1, 41, mid + 1, gy1, SHADOW)
+    for y in range(gy0, gy1):
+        for x in range(gx0, gx1):
+            if (x - y * 0.6) % 15 < 1.5:
                 g[y][x] = WHITE
-    rect(g, 3, 20, 21, 22, BEZEL)  # the transom
-    rect(g, 7, 26, 17, 28, WOOD)  # the shelf inside
-    rect(g, 10, 33, 14, 40, SHADOW)  # a stool
-    rect(g, 3, 40, 21, 46, WOOD)
-    rect(g, 3, 40, 21, 41, WOOD_LT)
-    rect(g, 17, 42, 19, 44, STEEL)
+    rect(g, gx0, 24, gx1, 26, BEZEL)  # the transom
+    rect(g, gx1 - 3, 30, gx1 - 1, 38, STEEL)  # the door's pull
+    rect(g, gx0, gy1, gx1, h - 3, WOOD)
+    rect(g, gx0, gy1, gx1, gy1 + 1, WOOD_LT)
+    rect(g, gx0, h - 4, gx1, h - 3, WOOD_SH)
     union_outline(g)
+    return g
+
+
+def phone_booth_1x():
+    """The phone booth at 1x: the roof's occupied light, cyan glass walls with
+    a streak of reflection over the transom, the shelf and stool inside, the
+    door's pull, the wood kick panel, in a dark frame."""
+    w, h = BOOTH_W, BOOTH_H
+    mid = w // 2
+    g = canvas(w, h)
+    rect(g, 1, 0, w - 1, 1, OUTLINE)
+    rect(g, 0, 1, w, h - 1, OUTLINE)
+    rect(g, 1, h - 1, w - 1, h, OUTLINE)
+    rect(g, mid - 1, 1, mid + 2, 2, GOLD)
+    rect(g, 1, 2, w - 1, h - 3, CYAN)
+    put(g, 1, 3, WHITE)
+    put(g, 2, 4, WHITE)
+    rect(g, 1, 5, w - 1, 6, BEZEL)
+    rect(g, 2, 7, w - 2, 8, WOOD)
+    rect(g, mid - 1, 9, mid + 2, 10, SHADOW)
+    rect(g, mid, 10, mid + 1, h - 3, SHADOW)
+    rect(g, w - 2, 8, w - 1, 10, STEEL)
+    rect(g, 1, h - 3, w - 1, h - 1, WOOD)
     return g
 
 
@@ -1878,71 +1940,102 @@ VEND_STEPS = 6  # rest, falling, three in the tray, taken
 PRINT_STEPS = 8
 
 
+# `Furniture::VendingMachine`'s and `Furniture::Printer`'s visual boxes.
+VEND_W, VEND_H = 7, 13
+PRN_W, PRN_H = 7, 8
+
+
 def vend_can(g, x, y, drink):
-    """A can 2 wide, 3 tall, its lid catching the light."""
-    rect(g, x, y, x + 2, y + 3, drink)
+    """A can standing on its shelf, its lid catching the light."""
+    rect(g, x, y, x + VEND_CAN_W, y + VEND_CAN_H, drink)
     put(g, x, y, WHITE)
 
 
-# The vending machine's glass, in canvas coordinates: 3 columns x 3 shelves of
-# cans; drink `i` stands at column `i % 3`, shelf `i // 3` of the first four
-# slots, and the rest of the shelves repeat the rotation.
-VEND_GLASS = (2, 6, 11, 18)  # x0, y0, x1, y1
-VEND_CAN_COLS = (3, 6, 9)
-VEND_SHELVES = (7, 11, 15)
-VEND_TRAY = (3, 20, 10, 22)  # x0, y0, x1, y1: the pickup recess
-# The glass's glint: a short diagonal in the column and row no can stands in, so
-# it reads the same in every frame.
-VEND_GLINT = ((3, 6), (2, 7), (2, 8))
+def vend_can_lying(g, x, y, drink):
+    """A can on its side in the tray, its lid to the west."""
+    rect(g, x, y, x + VEND_CAN_H, y + VEND_CAN_W - 1, drink)
+    put(g, x, y, WHITE)
+
+
+# The vending machine's glass, in canvas coordinates: 4 columns x 4 shelves of
+# cans; the rows below the last shelf are where a vend drops.
+VEND_GLASS = (3, 11, 20, 38)  # x0, y0, x1, y1
+VEND_CAN_W, VEND_CAN_H = 3, 4
+VEND_CAN_COLS = (4, 8, 12, 16)
+VEND_SHELVES = (12, 18, 24, 30)  # each shelf's can tops; its lip runs under them
+VEND_TRAY = (4, 41, 19, 46)  # x0, y0, x1, y1: the pickup recess
+VEND_EAST = 25  # the shaded east side's first column
+# The glass's glint: a short diagonal down the column no can stands in.
+VEND_GLINT = ((3, 12), (3, 13), (3, 14), (19, 35), (19, 36))
+
+
+def vend_drink(shelf, col):
+    """The drink stocked at `shelf`, `col`: each shelf the last one's rotation."""
+    return VEND_DRINKS[(shelf * 3 + col) % len(VEND_DRINKS)]
+
+
+def vend_pick(drink):
+    """The (column, shelf) a vend of `drink` comes from: a different shelf each."""
+    col = next(c for c in range(len(VEND_CAN_COLS)) if vend_drink(drink, c) == VEND_DRINKS[drink])
+    return VEND_CAN_COLS[col], VEND_SHELVES[drink]
 
 
 def vending_body():
     """The machine at rest: a lit brand panel over a glass front of cans on
-    three shelves, a keypad and a coin plate on the shaded east side, the
-    pickup flap below."""
-    g = canvas(4 * S, 6 * S)
-    rect(g, 1, 1, 15, 23, VEND_BODY)
-    rect(g, 1, 1, 15, 2, VEND_BODY_LT)
-    rect(g, 12, 2, 15, 23, VEND_BODY_SH)
-    rect(g, 2, 2, 12, 5, VEND_PANEL)
-    rect(g, 2, 2, 12, 3, VEND_PANEL_LT)
+    four shelves, the selection display, keypad, coin plate and note slot in
+    the column beside it, the pickup flap and a vented plinth below, the east
+    side in shade."""
+    w, h = VEND_W * S, VEND_H * S
+    g = canvas(w, h)
+    rect(g, 1, 1, w - 1, h - 1, VEND_BODY)
+    rect(g, 1, 1, w - 1, 2, VEND_BODY_LT)
+    rect(g, VEND_EAST, 2, w - 1, h - 1, VEND_BODY_SH)
+    rect(g, 2, 2, VEND_EAST - 1, 9, VEND_PANEL)
+    rect(g, 2, 2, VEND_EAST - 1, 3, VEND_PANEL_LT)
+    rect(g, 5, 5, 19, 6, WHITE)  # the brand's wordmark
+    rect(g, 7, 6, 15, 7, VEND_PANEL_LT)
     x0, y0, x1, y1 = VEND_GLASS
     rect(g, x0, y0, x1, y1, VEND_DARK)
     for si, sy in enumerate(VEND_SHELVES):
         for ci, cx in enumerate(VEND_CAN_COLS):
-            vend_can(g, cx, sy, VEND_DRINKS[(si * 3 + ci) % len(VEND_DRINKS)])
-        rect(g, x0, sy + 3, x1, sy + 4, SLATE)  # the shelf under them
+            vend_can(g, cx, sy, vend_drink(si, ci))
+        rect(g, x0, sy + VEND_CAN_H, x1, sy + VEND_CAN_H + 1, SLATE)  # the shelf's lip
     for x, y in VEND_GLINT:
         put(g, x, y, VEND_BODY_LT)
-    for k in range(3):  # the keypad
-        put(g, 13, 7 + k * 2, KEYCAP)
-    rect(g, 12, 13, 15, 17, VEND_TRIM)  # the coin plate, a slit through it
-    rect(g, 13, 14, 14, 16, VEND_DARK)
+    rect(g, 21, 12, 24, 14, CYAN)  # the selection display
+    for ky in (16, 18, 20):  # the keypad
+        put(g, 21, ky, KEYCAP)
+        put(g, 23, ky, KEYCAP)
+    rect(g, 21, 24, 24, 30, VEND_TRIM)  # the coin plate, a slit through it
+    rect(g, 22, 25, 23, 28, VEND_DARK)
+    rect(g, 21, 32, 24, 33, VEND_DARK)  # the note slot
     tx0, ty0, tx1, ty1 = VEND_TRAY
     rect(g, tx0 - 1, ty0 - 1, tx1 + 1, ty0, VEND_BODY_SH)
     rect(g, tx0, ty0, tx1, ty1, VEND_DARK)
+    rect(g, 1, h - 5, w - 1, h - 1, VEND_BODY_SH)  # the plinth, vented
+    for x in range(3, VEND_EAST - 1, 2):
+        rect(g, x, h - 4, x + 1, h - 2, VEND_DARK)
     return g
 
 
 def vending_machine():
     """A vending machine: at rest, then a vend per drink, the panel flashing
-    as the pick's can leaves its shelf, falls in front of the shelf below and
-    lands in the tray."""
+    as the pick's can leaves its shelf, drops past the shelves below and lands
+    on its side in the tray."""
     rest = vending_body()
     frames = [rest]
     for drink in range(len(VEND_DRINKS)):
-        col, shelf = VEND_CAN_COLS[drink % 3], VEND_SHELVES[drink // 3]
+        col, shelf = vend_pick(drink)
         for step in range(VEND_STEPS):
             g = [row[:] for row in rest]
             if 1 <= step <= 4:  # its slot stands empty
-                rect(g, col, shelf, col + 2, shelf + 3, VEND_DARK)
-                rect(g, 2, 2, 12, 3, WHITE)  # the panel flashes while it vends
-            if step == 1:  # falling past the shelf edge below it, tipped off the cans' grid
-                vend_can(g, col - 1, shelf + 3, VEND_DRINKS[drink])
+                rect(g, col, shelf, col + VEND_CAN_W, shelf + VEND_CAN_H, VEND_DARK)
+                rect(g, 2, 2, VEND_EAST - 1, 3, WHITE)  # the panel flashes while it vends
+            if step == 1:  # dropping in front of the bottom shelf
+                vend_can(g, col, VEND_GLASS[3] - VEND_CAN_H, VEND_DRINKS[drink])
             if 2 <= step <= 4:
-                tx0, ty0, _, _ = VEND_TRAY
-                rect(g, tx0 + 2, ty0, tx0 + 5, ty0 + 2, VEND_DRINKS[drink])  # lying in the tray
-                put(g, tx0 + 2, ty0, WHITE)
+                tx0, _, _, ty1 = VEND_TRAY
+                vend_can_lying(g, tx0 + 2 + drink * 2, ty1 - VEND_CAN_W + 1, VEND_DRINKS[drink])
             frames.append(g)
     return [union_outlined(f) for f in frames]
 
@@ -1953,61 +2046,89 @@ def union_outlined(g):
 
 
 def vending_machine_1x():
-    """The vending machine at 1x: its lit panel over two shelves of drinks,
-    the coin plate, the dark pickup row; a vend darkens the pick's cell and
-    shows its can in the coin plate's cell."""
+    """The vending machine at 1x: its lit panel over three shelves of drinks,
+    the display, keypad and coin plate beside them, the pickup tray and the
+    plinth, the east side in shade; a vend darkens the pick's cell and shows
+    its can in the tray."""
+    shelves = (2, 4, 6)
+    tray_y = 10
+
     def body():
-        g = canvas(4, 6)
-        rect(g, 0, 0, 4, 6, VEND_BODY)
-        rect(g, 0, 0, 4, 1, VEND_PANEL)
-        for i, drink in enumerate(VEND_DRINKS):
-            put(g, 1 + i % 2, 1 + i // 2, drink)
-        rect(g, 3, 1, 4, 5, VEND_BODY_SH)
-        put(g, 2, 4, VEND_TRIM)
-        rect(g, 0, 5, 4, 6, VEND_DARK)
+        g = canvas(VEND_W, VEND_H)
+        rect(g, 0, 0, VEND_W, VEND_H, VEND_BODY)
+        rect(g, 0, 0, VEND_W - 2, 1, VEND_PANEL_LT)
+        rect(g, 0, 1, VEND_W - 2, 2, VEND_PANEL)
+        rect(g, 1, shelves[0], VEND_W - 2, shelves[-1] + 2, VEND_DARK)
+        for si, sy in enumerate(shelves):
+            for ci in range(VEND_W - 3):
+                put(g, 1 + ci, sy, vend_drink(si, ci))
+            rect(g, 1, sy + 1, VEND_W - 2, sy + 2, SLATE)
+        put(g, VEND_W - 2, 2, CYAN)
+        put(g, VEND_W - 2, 3, KEYCAP)
+        put(g, VEND_W - 2, 5, VEND_TRIM)
+        rect(g, 1, tray_y, VEND_W - 2, tray_y + 1, VEND_DARK)
+        rect(g, VEND_W - 1, 1, VEND_W, VEND_H, VEND_BODY_SH)
+        rect(g, 0, VEND_H - 1, VEND_W, VEND_H, VEND_BODY_SH)
         return g
     rest = body()
     frames = [rest]
     for drink in range(len(VEND_DRINKS)):
+        shelf = drink % len(shelves)
+        col = next(c for c in range(VEND_W - 3) if vend_drink(shelf, c) == VEND_DRINKS[drink])
         for step in range(VEND_STEPS):
             g = [row[:] for row in rest]
             if 1 <= step <= 4:
-                put(g, 1 + drink % 2, 1 + drink // 2, VEND_DARK)
+                put(g, 1 + col, shelves[shelf], VEND_DARK)
             if 2 <= step <= 4:
-                put(g, 2, 4, VEND_DRINKS[drink])
+                put(g, 2, tray_y, VEND_DRINKS[drink])
             frames.append(g)
     return frames
 
 
-PRN_GLASS_SPAN = (3, 14)  # the scanner glass's columns, half-open
-PRN_SLOT_Y = 9
-PRN_TRAY_Y = 12
+PRN_GLASS_SPAN = (4, 18)  # the scanner glass's columns, half-open
+PRN_LID_FRONT = 5  # the lid's front face, under its lit top
+PRN_BAY = (3, 8, 22, 14)  # x0, y0, x1, y1: the output bay under the scanner
+PRN_SLOT_Y = 8
+PRN_STACK_Y = 11
+PRN_EAST = 23  # the shaded east side's first column
+PRN_DRAWERS = (15, 21)  # each paper drawer's top row
+PRN_DRAWER_H = 6
 
 
 def printer_body(scan=None, led=False, page=0):
-    """The printer: a dark lid with its scanner glass and a status light, the
-    light chassis with its paper slot, the output tray and its stack. `scan`
-    lights the glass's column under the scan bar, `led` the status light,
-    `page` the rows of a page slid out of the slot."""
-    g = canvas(5 * S, 4 * S)
-    rect(g, 1, 1, 19, 15, PRN_BODY)
-    rect(g, 16, 6, 19, 15, PRN_BODY_SH)
-    rect(g, 1, 1, 19, 6, PRN_TOP)
-    rect(g, 1, 1, 19, 2, PRN_TOP_LT)
+    """The printer: a dark lid with its scanner glass, status light and keys,
+    the output bay under it with the printed stack, and the light chassis with
+    two paper drawers on casters. `scan` lights the glass's column under the
+    scan bar, `led` the status light, `page` the rows of a page slid out of the
+    slot at the back of the bay."""
+    w, h = PRN_W * S, PRN_H * S
+    g = canvas(w, h)
+    rect(g, 1, PRN_LID_FRONT, w - 1, h - 3, PRN_BODY)
+    rect(g, PRN_EAST, PRN_LID_FRONT, w - 1, h - 3, PRN_BODY_SH)
+    rect(g, 1, 1, w - 1, PRN_LID_FRONT, PRN_TOP)
+    rect(g, 1, 1, w - 1, 2, PRN_TOP_LT)
+    rect(g, 1, PRN_LID_FRONT, w - 1, PRN_LID_FRONT + 2, SHADOW)
     gx0, gx1 = PRN_GLASS_SPAN
-    rect(g, gx0, 3, gx1, 5, PRN_GLASS)
+    rect(g, gx0, 2, gx1, 4, PRN_GLASS)
     if scan is not None:
-        rect(g, scan, 3, scan + 1, 5, WHITE)
-    put(g, 16, 3, LED_ON if led else KEY_DK)
-    put(g, 17, 3, KEYCAP)
-    rect(g, 4, PRN_SLOT_Y, 15, PRN_SLOT_Y + 1, SHADOW)
-    rect(g, 1, PRN_TRAY_Y, 19, 15, PRN_TRAY)
-    rect(g, 5, PRN_TRAY_Y, 14, 14, PRN_PAPER)
-    rect(g, 5, 14, 14, 15, PRN_PAPER_SH)
+        rect(g, scan, 2, scan + 1, 4, WHITE)
+    put(g, 20, 3, LED_ON if led else KEY_DK)
+    rect(g, 22, 2, 25, 4, KEYCAP)
+    bx0, by0, bx1, by1 = PRN_BAY
+    rect(g, bx0, by0, bx1, by1, SHADOW)
+    rect(g, bx0, by1 - 1, bx1, by1 + 1, PRN_TRAY)
+    rect(g, bx0 + 3, PRN_STACK_Y, bx1 - 3, by1 - 1, PRN_PAPER)
+    rect(g, bx0 + 3, by1 - 2, bx1 - 3, by1 - 1, PRN_PAPER_SH)
     for r in range(page):
-        rect(g, 6, PRN_SLOT_Y + 1 + r, 13, PRN_SLOT_Y + 2 + r, PRN_PAPER)
+        rect(g, bx0 + 4, PRN_SLOT_Y + r, bx1 - 4, PRN_SLOT_Y + 1 + r, PRN_PAPER)
         if r % 2:
-            rect(g, 7, PRN_SLOT_Y + 1 + r, 11, PRN_SLOT_Y + 2 + r, PRINT)
+            rect(g, bx0 + 5, PRN_SLOT_Y + r, bx1 - 7, PRN_SLOT_Y + 1 + r, PRINT)
+    for dy in PRN_DRAWERS:
+        rect(g, 2, dy + PRN_DRAWER_H - 1, PRN_EAST, dy + PRN_DRAWER_H, SHADOW)  # its seam
+        rect(g, 8, dy + 2, 16, dy + 3, PRN_BODY_SH)  # its pull
+        rect(g, 8, dy + 3, 16, dy + 4, SHADOW)
+    for cx in (3, w - 7):
+        rect(g, cx, h - 3, cx + 4, h - 1, KEY_DK)  # the casters
     return g
 
 
@@ -2032,29 +2153,31 @@ def printer():
 
 def printer_1x():
     """The printer at 1x: a dark lid lit along its west end over its glass
-    strip, the light chassis shaded east between its tray-grey sides, the stack
-    in the tray; a print sweeps a light across the glass as a page feeds out
-    over the chassis, printed as it goes."""
-    def body(scan=None, page=0):
-        g = canvas(5, 4)
-        rect(g, 0, 0, 5, 1, PRN_TOP)
+    strip and status light, the output bay with its stack, the light chassis
+    shaded east with a drawer's pull, on a dark plinth; a print sweeps a light
+    across the glass as a page feeds out into the bay, printed as it goes."""
+    def body(scan=None, page=0, led=False):
+        g = canvas(PRN_W, PRN_H)
+        rect(g, 0, 0, PRN_W, 1, PRN_TOP)
         put(g, 0, 0, PRN_TOP_LT)
-        rect(g, 1, 0, 4, 1, PRN_GLASS)
-        rect(g, 0, 1, 5, 3, PRN_TRAY)
-        rect(g, 1, 1, 4, 3, PRN_BODY)
-        rect(g, 3, 1, 4, 3, PRN_BODY_SH)
-        rect(g, 0, 3, 5, 4, PRN_TRAY)
-        rect(g, 1, 3, 4, 4, PRN_PAPER)
+        rect(g, 0, 1, PRN_W, 2, PRN_TOP)
+        rect(g, 1, 1, 5, 2, PRN_GLASS)
+        put(g, 5, 1, LED_ON if led else KEY_DK)
+        rect(g, 0, 2, PRN_W, PRN_H - 1, PRN_BODY)
+        rect(g, PRN_W - 1, 2, PRN_W, PRN_H - 1, PRN_BODY_SH)
+        rect(g, 1, 2, 5, 3, PRN_TRAY)
+        rect(g, 1, 3, 5, 4, PRN_PAPER)
+        rect(g, 2, 5, 5, 6, PRN_TRAY)
+        rect(g, 0, PRN_H - 1, PRN_W, PRN_H, KEY_DK)
         if scan is not None:
-            put(g, scan, 0, WHITE)
+            put(g, scan, 1, WHITE)
         if page >= 1:  # the page's edge out of the slot
-            rect(g, 1, 2, 4, 3, PRN_PAPER)
-        if page >= 2:  # and the printed page above it
-            rect(g, 1, 1, 4, 2, PRN_PAPER)
-            put(g, 2, 1, PRINT)
+            rect(g, 1, 2, 5, 3, PRN_PAPER)
+        if page >= 2:  # printed as it goes
+            put(g, 2, 2, PRINT)
         return g
-    steps = [dict(scan=1), dict(scan=2, page=1), dict(scan=3, page=2), dict(page=2),
-             dict(page=2), dict(page=2), dict(page=1), dict()]
+    steps = [dict(scan=1, led=True), dict(scan=2, page=1), dict(scan=3, page=2, led=True), dict(scan=4, page=2),
+             dict(page=2, led=True), dict(page=2), dict(page=1, led=True), dict()]
     assert len(steps) == PRINT_STEPS
     return [body()] + [body(**f) for f in steps]
 
@@ -2236,56 +2359,69 @@ def side_table_1x():
     return g
 
 
-# `PantryRoom::water_cooler_rect`'s size.
-COOLER_W, COOLER_H = 3, 6
+# `layout::WATER_COOLER`: `PantryRoom::water_cooler_rect`'s size.
+COOLER_W, COOLER_H = 4, 9
 # The glug: a bubble climbs the bottle, then the water stills.
 GLUG_STEPS = 5
+COOLER_BOTTLE_Y1 = 14  # the bottle's rows end here, over the neck
+COOLER_CABINET_Y = 16
 
 
 def water_cooler():
-    """A water cooler: the upturned bottle lit down its west side over the
-    cabinet, its hot and cold taps over the drip tray; a bubble glugs up the
-    bottle, then the water stills."""
+    """A water cooler: the upturned bottle, ribbed, lit down its west side, its
+    neck in the cabinet's collar; the hot and cold taps over the drip tray in
+    the lit cabinet, a vent grille on its door, the east side in shade; a
+    bubble glugs up the bottle, then the water stills."""
     def body(bubble):
         w, h = COOLER_W * S, COOLER_H * S
         g = canvas(w, h)
-        rect(g, 2, 1, w - 2, 10, WATER)  # the bottle, upside down
-        put(g, 2, 1, T)
-        put(g, w - 3, 1, T)
-        rect(g, w - 4, 2, w - 2, 10, WATER_SH)
-        rect(g, 3, 3, 4, 8, CYAN)  # its glint
-        rect(g, 4, 10, w - 4, 12, WATER_SH)  # the neck, into the cabinet
-        rect(g, 1, 11, w - 1, h - 1, COOLER)
-        rect(g, 1, 11, w - 1, 12, COOLER_LT)
-        rect(g, w - 3, 12, w - 1, h - 1, COOLER_SH)
-        rect(g, 3, 14, w - 3, 19, SHADOW)  # the dispensing alcove
-        put(g, 4, 14, RED)
-        put(g, 4, 15, RED)
-        put(g, w - 5, 14, BLUE)
-        put(g, w - 5, 15, BLUE)
-        rect(g, 3, 18, w - 3, 19, GREY)  # the drip tray
+        rect(g, 2, 2, w - 2, COOLER_BOTTLE_Y1, WATER)  # the bottle, upside down
+        rect(g, 3, 1, w - 3, 2, WATER)
+        rect(g, w - 5, 2, w - 2, COOLER_BOTTLE_Y1, WATER_SH)
+        for ry in (6, 10):  # its ribs
+            rect(g, 2, ry, w - 2, ry + 1, WATER_SH)
+        rect(g, 4, 3, 5, 12, CYAN)  # its glint
+        put(g, 5, 2, CYAN)
+        rect(g, 5, COOLER_BOTTLE_Y1, w - 5, COOLER_CABINET_Y, WATER_SH)  # the neck
+        rect(g, 1, COOLER_CABINET_Y, w - 1, h - 1, COOLER)
+        rect(g, 1, COOLER_CABINET_Y, w - 1, COOLER_CABINET_Y + 1, COOLER_LT)
+        rect(g, w - 4, COOLER_CABINET_Y + 1, w - 1, h - 1, COOLER_SH)
+        rect(g, 3, 19, w - 4, 26, SHADOW)  # the dispensing alcove
+        rect(g, 4, 19, 6, 21, RED)
+        rect(g, w - 7, 19, w - 5, 21, BLUE)
+        rect(g, 3, 25, w - 4, 26, GREY)  # the drip tray
+        for vy in range(28, h - 2, 2):  # the door's vent grille
+            rect(g, 4, vy, w - 6, vy + 1, COOLER_SH)
         if bubble is not None:
             bx, by = bubble
             rect(g, bx, by, bx + 2, by + 2, TANK_LINE)
         union_outline(g)
         return g
-    rises = [(5, 7), (5, 3)]
+    rises = [(7, 11), (7, 4)]
     return [body(rises[i] if i < len(rises) else None) for i in range(GLUG_STEPS)]
 
 
 def water_cooler_1x():
     """The water cooler at 1x: the bottle, glinting west, over the cabinet shaded
-    east; a bubble glugs up the bottle, then the water stills."""
+    east, its hot and cold taps over the alcove; a bubble glugs up the bottle,
+    then the water stills."""
+    bottle = 3
+
     def body(bubble_y):
         g = canvas(COOLER_W, COOLER_H)
-        rect(g, 0, 0, COOLER_W, 2, WATER)
+        rect(g, 0, 0, COOLER_W, bottle, WATER)
+        rect(g, COOLER_W - 1, 0, COOLER_W, bottle, WATER_SH)
         put(g, 0, 0, CYAN)
-        rect(g, 0, 2, COOLER_W, COOLER_H, COOLER)
-        rect(g, COOLER_W - 1, 2, COOLER_W, COOLER_H, COOLER_SH)
+        rect(g, 0, bottle, COOLER_W, COOLER_H, COOLER)
+        rect(g, 0, bottle, COOLER_W, bottle + 1, COOLER_LT)
+        rect(g, COOLER_W - 1, bottle, COOLER_W, COOLER_H, COOLER_SH)
+        put(g, 1, bottle + 1, RED)
+        put(g, 2, bottle + 1, BLUE)
+        rect(g, 1, bottle + 2, 3, bottle + 3, SHADOW)
         if bubble_y is not None:
             put(g, 1, bubble_y, TANK_LINE)
         return g
-    rises = [1, 0]
+    rises = [2, 1]
     return [body(rises[i] if i < len(rises) else None) for i in range(GLUG_STEPS)]
 
 
@@ -2450,9 +2586,12 @@ def fish_tank_1x():
 
 # `coat_rack_rect_at`'s box around the pole, and where its coats hang: the
 # layout's `COAT_HOOK_DX`, `COAT_W`, `COAT_RACK_BASE_DY`.
-COAT_HOOK_DX, COAT_W, COAT_RACK_BASE_DY = 1, 2, 7
+COAT_HOOK_DX, COAT_W, COAT_RACK_BASE_DY = 1, 2, 11
 COAT_REACH = COAT_HOOK_DX + COAT_W - 1
 RACK_W, RACK_H = 2 * COAT_REACH + 1, COAT_RACK_BASE_DY + 1
+
+
+COAT_DROP = 3  # a coat's length at @Nx, in logical rows
 
 
 def coat_hooks():
@@ -2461,17 +2600,18 @@ def coat_hooks():
 
 
 def coat_rack():
-    """A coat rack: a turned wood pole with its knob and foot, three coats hung
-    on alternating pegs, each hanging from its shoulders and flaring to its hem,
-    its collar turned down, its front edge closed, the side away from the light
-    in shade."""
+    """A coat rack: a turned wood pole with a hat on its top and a foot, three
+    coats hung on alternating pegs, each sloping from its collar to square
+    shoulders and falling straight to a flared hem, a sleeve down its outer
+    side, its front edge closed, the side away from the light in shade."""
     w, h = RACK_W * S, RACK_H * S
     g = canvas(w, h)
     mid = COAT_REACH * S + S // 2
     rect(g, mid - 1, 3, mid + 1, h - 3, WOOD)  # the pole
     rect(g, mid - 1, 3, mid, h - 3, WOOD_LT)
-    rect(g, mid - 2, 1, mid + 2, 4, WOOD_LT)  # its knob
-    put(g, mid - 2, 1, WOOD_HI)
+    rect(g, mid - 2, 1, mid + 2, 3, BROWN)  # a hat on its top
+    put(g, mid - 2, 1, TAN)
+    rect(g, mid - 4, 3, mid + 4, 4, BROWN)
     rect(g, 3, h - 4, w - 3, h - 2, WOOD)  # its foot
     rect(g, 3, h - 4, w - 3, h - 3, WOOD_LT)
     for (lx, ly), coat, shade in zip(coat_hooks(), COATS, COATS_SH):
@@ -2479,18 +2619,20 @@ def coat_rack():
         x0, y0 = lx * S, ly * S
         peg = x0 + COAT_W * S - 1 if west else x0
         rect(g, min(peg, mid), y0, max(peg, mid) + 1, y0 + 1, WOOD_DK)  # the peg
-        # Hung from the peg's end: narrow at the shoulders, flaring to the hem.
-        top, hem = y0 + 1, y0 + 2 * S + 1
+        top, hem = y0 + 1, y0 + COAT_DROP * S + 1
         cx = peg - 1 if west else peg + 1
+        outer = -1 if west else 1
         for y in range(top, hem):
-            half = 1 + (y - top) * 3 // (hem - top)
+            t = y - top
+            half = min(t + 1, 3) + (t >= (hem - top) * 2 // 3)
             rect(g, cx - half, y, cx + half + 1, y + 1, coat)
-            put(g, cx + half if west else cx - half, y, shade)  # away from the light
+            put(g, cx + half, y, shade)  # the east side, turned from the light
+            if 2 <= t < (hem - top) * 2 // 3:
+                put(g, cx + outer * 2, y, shade)  # the sleeve's seam
         rect(g, cx - 1, top, cx + 2, top + 1, WHITE if coat != COATS[2] else OFFWHITE_SH)  # the collar
         for y in range(top + 1, hem - 1):
             put(g, cx, y, shade)  # the front edge
-        half = 1 + (hem - 1 - top) * 3 // (hem - top)
-        rect(g, cx - half, hem - 1, cx + half + 1, hem, shade)  # the hem
+        rect(g, cx - 4, hem - 1, cx + 5, hem, shade)  # the hem
     union_outline(g)
     return g
 
@@ -3059,6 +3201,8 @@ def main():
         "desk": (desk_south_1x.__doc__, [desk_south_1x()]),
         "desk_north": (desk_north_1x.__doc__, [desk_north_1x()]),
         "vending_machine": (vending_machine_1x.__doc__, vending_machine_1x()),
+        "floor_lamp": (floor_lamp_1x.__doc__, [floor_lamp_1x()]),
+        "phone_booth": (phone_booth_1x.__doc__, [phone_booth_1x()]),
         "printer": (printer_1x.__doc__, printer_1x()),
         "meeting_table": (meeting_table_1x.__doc__, [meeting_table_1x()]),
         "kitchen_island": (kitchen_island_1x.__doc__, [kitchen_island_1x()]),

@@ -272,9 +272,11 @@ pub enum Furniture {
     /// An aisle standing desk (alternate workstation). Ground contact is the
     /// legs/base; the desktop overhangs north and occludes a walker behind it.
     StandingDesk,
-    /// A corridor vending machine.
+    /// A corridor vending machine. Ground contact is its plinth; the cabinet
+    /// overhangs north (invariant #6), like [`Furniture::PhoneBooth`].
     VendingMachine,
-    /// A corridor printer.
+    /// A corridor floor-standing printer, grounded like
+    /// [`Furniture::VendingMachine`].
     Printer,
     /// A meeting-room sofa SEAT (its body is [`Furniture::MeetingSofaBody`]).
     MeetingSofa,
@@ -491,8 +493,8 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::Center,
         },
         Furniture::PhoneBooth => FurnitureDef {
-            footprint: Some(Size { w: 6, h: 3 }),
-            visual: Size { w: 6, h: 12 },
+            footprint: Some(Size { w: 7, h: 3 }),
+            visual: Size { w: 7, h: 15 },
             occupies_pos: false,
             exclusive: true,
             dwell: DwellWindow {
@@ -517,8 +519,8 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::End,
         },
         Furniture::VendingMachine => FurnitureDef {
-            footprint: Some(Size { w: 4, h: 6 }),
-            visual: Size { w: 4, h: 6 },
+            footprint: Some(Size { w: 7, h: 3 }),
+            visual: Size { w: 7, h: 13 },
             occupies_pos: false,
             exclusive: false,
             dwell: DwellWindow {
@@ -527,11 +529,11 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             },
             approach: ApproachSides::ALL,
             ground_x: GroundAlign::Center,
-            ground_y: GroundAlign::Center,
+            ground_y: GroundAlign::End,
         },
         Furniture::Printer => FurnitureDef {
-            footprint: Some(Size { w: 5, h: 4 }),
-            visual: Size { w: 5, h: 4 },
+            footprint: Some(Size { w: 7, h: 3 }),
+            visual: Size { w: 7, h: 8 },
             occupies_pos: false,
             exclusive: false,
             dwell: DwellWindow {
@@ -540,7 +542,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             },
             approach: ApproachSides::ALL,
             ground_x: GroundAlign::Center,
-            ground_y: GroundAlign::Center,
+            ground_y: GroundAlign::End,
         },
         Furniture::MeetingSofa => FurnitureDef {
             footprint: None,
@@ -667,8 +669,8 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::End,
         },
         Furniture::FloorLamp => FurnitureDef {
-            footprint: Some(Size { w: 2, h: 7 }),
-            visual: Size { w: 4, h: 10 },
+            footprint: Some(Size { w: 2, h: 9 }),
+            visual: Size { w: 4, h: 12 },
             ground_y: GroundAlign::Center,
             ..DECOR
         },
