@@ -30,11 +30,12 @@ jobs:
     uses: ./.github/workflows/claude-readonly-review.yml
     with:
       pr_number: ${{ github.event.issue.number || github.event.pull_request.number }}
-      prompt_path: .github/prompts/pr_review_rules.md
+      prompt_path: REVIEW.md
       review_marker: claude-auto-review
       review_title: Claude Review
       max_turns: 60
       max_budget_usd: 10
+      allow_fork: ${{ github.event_name == 'issue_comment' }}
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     concurrency:
