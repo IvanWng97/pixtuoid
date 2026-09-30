@@ -12,7 +12,6 @@ use std::time::SystemTime;
 use anyhow::{Context as _, Result};
 use clap::Parser;
 use pixtuoid::tui::renderer::{draw_scene, DrawCtx};
-use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::SceneState;
 use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
 use ratatui::backend::TestBackend;
@@ -20,7 +19,7 @@ use ratatui::Terminal;
 
 use crate::encode::{
     centered_crop, compute_crop_rect, debug_paint_walkable_overlay, save_as_gif,
-    save_backend_as_png, save_renderer_gif,
+    save_backend_as_png, save_renderer_gif, GifJob, Timeline,
 };
 use crate::scenes::{
     anim_scene, capture_live_scene, dashboard_scene, inject_openclaw_presence, meeting_scene,
@@ -405,13 +404,12 @@ fn main() -> Result<()> {
     }
     let backend = TestBackend::new(cols, rows);
     let mut term = Terminal::new(backend)?;
-    let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
     let pack = load_sprite_pack(
         args.pack_dir
             .clone()
             .map_or(PackSource::Bundled, PackSource::Explicit),
     )?;
-    let mut store = pixtuoid_scene::floor::FloorCtx::new();
+    let mut floor = pixtuoid_scene::floor::PerFloor::new();
     // A typo'd theme silently rendering NORMAL would put wrong-palette art into
     // the docs/site screenshot pipelines.
     let theme = pixtuoid_scene::theme::theme_by_name(&args.theme).ok_or_else(|| {
@@ -436,12 +434,14 @@ fn main() -> Result<()> {
             frames_dir,
             cols,
             rows,
-            fps: args.proof_fps,
-            secs: args.proof_secs,
+            timeline: Timeline {
+                fps: args.proof_fps,
+                secs: args.proof_secs,
+                start: now,
+            },
             max_desks: args.max_desks,
             theme,
             pack: &pack,
-            start: now,
         })?;
         println!("wrote proof frames → {}", frames_dir.display());
         return Ok(());
@@ -470,40 +470,33 @@ fn main() -> Result<()> {
              TuiRenderer derives per-floor seeds internally"
         );
     }
+    let gif_job = GifJob {
+        path: &args.out,
+        cols,
+        rows,
+        timeline: Timeline {
+            fps: args.gif_fps,
+            secs: args.gif_duration,
+            start: now,
+        },
+        scene: &scene,
+        pack: &pack,
+        theme,
+    };
     if !navigations.is_empty() || !pet_vec.is_empty() {
-        save_renderer_gif(
-            term,
-            &scene,
-            &pack,
-            now,
-            &args.out,
-            cols,
-            rows,
-            args.gif_fps,
-            args.gif_duration,
-            theme,
-            &navigations,
-            pet_vec,
-        )?;
+        save_renderer_gif(&gif_job, term, &navigations, pet_vec)?;
         println!("wrote {}", args.out.display());
         return Ok(());
     }
 
+    let mut floor_meta = pixtuoid_scene::floor::FloorMeta::ground();
+    floor_meta.floor_seed = args.floor_seed;
     if args.gif || args.anim.is_some() {
         save_as_gif(
+            &gif_job,
             &mut term,
-            &scene,
-            &pack,
-            now,
-            &args.out,
-            cols,
-            rows,
-            &mut buf,
-            &mut store,
-            args.gif_fps,
-            args.gif_duration,
-            theme,
-            args.floor_seed,
+            &mut floor,
+            floor_meta,
             skip_ms,
             args.debug_walkable,
         )?;
@@ -534,7 +527,7 @@ fn main() -> Result<()> {
     // Static snapshots have no time to animate the fade — snap straight
     // to the steady-state level for the chosen scene.
     if args.empty {
-        store.light.snap_to_empty();
+        floor.ctx.light.snap_to_empty();
     }
     let (dash_rows, dash_selected) = if args.dashboard {
         let folds = pixtuoid::tui::dashboard::DashboardFolds::default();
@@ -686,8 +679,8 @@ fn main() -> Result<()> {
         socket_line: connection_socket_line,
     };
     let mut draw_ctx = DrawCtx {
-        buf: &mut buf,
-        store: &mut store,
+        buf: &mut floor.buf,
+        store: &mut floor.ctx,
         mouse_pos: args.hover.as_deref().and_then(|s| {
             let (x, y) = s.split_once(',')?;
             Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
@@ -702,11 +695,7 @@ fn main() -> Result<()> {
             None,
             warning_text.as_deref(),
         ),
-        floor: {
-            let mut m = pixtuoid_scene::floor::FloorMeta::ground();
-            m.floor_seed = args.floor_seed;
-            m
-        },
+        floor: floor_meta,
         active_pet: None,
         last_pet_pos: None,
         last_mascots: Vec::new(),
@@ -737,7 +726,7 @@ fn main() -> Result<()> {
         })?;
         Some(centered_crop(m.pos.x, m.pos.y / 2, cols, rows))
     } else {
-        compute_crop_rect(&args, &scene, &store.history, cols, rows, now)?
+        compute_crop_rect(&args, &scene, &floor.ctx.history, cols, rows, now)?
     };
 
     save_backend_as_png(&term, &args.out, cols, rows, crop_rect)?;
@@ -805,14 +794,23 @@ mod tests {
         }
     }
 
+    /// The committed multi-floor clip's clock: 10s at 15fps.
+    fn clip_timeline() -> Timeline {
+        Timeline {
+            fps: 15,
+            secs: 10,
+            start: std::time::UNIX_EPOCH,
+        }
+    }
+
     #[test]
     fn due_navigations_fires_each_exactly_once_in_schedule_order() {
         let navs = vec![(7000u64, 0usize), (3000, 1)];
         let mut fired = vec![false; navs.len()];
-        let mut hits: Vec<(u64, usize)> = Vec::new();
-        for i in 0..150u64 {
-            let elapsed_ms = i * 1000 / 15;
-            for floor in due_navigations(&navs, &mut fired, elapsed_ms) {
+        let mut hits: Vec<(usize, usize)> = Vec::new();
+        let timeline = clip_timeline();
+        for i in 0..timeline.frame_count() {
+            for floor in due_navigations(&navs, &mut fired, timeline.elapsed_ms(i)) {
                 hits.push((i, floor));
             }
         }
@@ -826,9 +824,9 @@ mod tests {
         let navs = vec![(9900u64, 1usize)];
         let mut fired = vec![false; 1];
         let mut hit = None;
-        for i in 0..150u64 {
-            let elapsed_ms = i * 1000 / 15;
-            if !due_navigations(&navs, &mut fired, elapsed_ms).is_empty() {
+        let timeline = clip_timeline();
+        for i in 0..timeline.frame_count() {
+            if !due_navigations(&navs, &mut fired, timeline.elapsed_ms(i)).is_empty() {
                 hit = Some(i);
             }
         }

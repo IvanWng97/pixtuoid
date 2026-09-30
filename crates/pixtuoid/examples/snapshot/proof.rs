@@ -11,16 +11,14 @@ use pixtuoid_core::source::claude_code::{
     cc_derive_label, cc_id_from_path, decode_cc_line, SOURCE_NAME,
 };
 use pixtuoid_core::source::AgentEvent;
-use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentId, Reducer, SceneState, Transport};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, SystemTime};
 
-use crate::encode::cells_to_rgba;
+use crate::encode::{cells_to_rgba, Timeline};
 use crate::{CELL_H, CELL_W};
 
 // Geometry (px); every canvas dim must stay even so yuv420p never crops.
@@ -579,12 +577,10 @@ pub(crate) struct ProofJob<'a> {
     pub(crate) frames_dir: &'a Path,
     pub(crate) cols: u16,
     pub(crate) rows: u16,
-    pub(crate) fps: u64,
-    pub(crate) secs: u64,
+    pub(crate) timeline: Timeline,
     pub(crate) max_desks: usize,
     pub(crate) theme: &'static pixtuoid_scene::theme::Theme,
     pub(crate) pack: &'a pixtuoid_core::sprite::format::Pack,
-    pub(crate) start: SystemTime,
 }
 
 pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
@@ -614,8 +610,7 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
 
     let backend = TestBackend::new(job.cols, job.rows);
     let mut term = Terminal::new(backend)?;
-    let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
-    let mut store = pixtuoid_scene::floor::FloorCtx::new();
+    let mut floor = pixtuoid_scene::floor::PerFloor::new();
     let mut scene = SceneState::uniform(job.max_desks);
     let mut reducer = Reducer::new();
     let mut chitchat_state = std::collections::HashMap::new();
@@ -627,11 +622,11 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
 
     let office_w = job.cols as u32 * CELL_W;
     let office_h = job.rows as u32 * CELL_H;
-    let frames = (job.secs * job.fps) as usize;
+    let Timeline { fps, secs, .. } = job.timeline;
+    let frames = job.timeline.frame_count();
     for i in 0..frames {
-        // exact math, not accumulated frame_ms — same rationale as save_renderer_gif
-        let elapsed = i as u64 * 1000 / job.fps.max(1);
-        let now = job.start + Duration::from_millis(elapsed);
+        let elapsed = job.timeline.elapsed_ms(i);
+        let now = job.timeline.now(i);
         while pending.front().is_some_and(|(at, _)| *at <= elapsed) {
             if let Some((_, ev)) = pending.pop_front() {
                 reducer.apply(&mut scene, ev, now, Transport::Jsonl);
@@ -642,8 +637,8 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
         // Idle once the fixture's events are drained.
         reducer.tick(&mut scene, now);
         let mut draw_ctx = DrawCtx {
-            buf: &mut buf,
-            store: &mut store,
+            buf: &mut floor.buf,
+            store: &mut floor.ctx,
             mouse_pos: None,
             debug_walkable: false,
             theme: job.theme,
@@ -680,11 +675,11 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             compose_frame(&kind, &office, &script, elapsed, desk_px)
                 .save(dir.join(format!("f{:04}.png", i + 1)))?;
         }
-        if (i + 1).is_multiple_of(job.fps as usize) {
-            eprint!("\r  proof: {}/{}s", (i + 1) / job.fps as usize, job.secs);
+        if (i + 1).is_multiple_of(fps as usize) {
+            eprint!("\r  proof: {}/{secs}s", (i + 1) / fps as usize);
         }
     }
-    eprintln!("\r  proof: {frames} frames x2 layouts @ {}fps", job.fps);
+    eprintln!("\r  proof: {frames} frames x2 layouts @ {fps}fps");
     Ok(())
 }
 

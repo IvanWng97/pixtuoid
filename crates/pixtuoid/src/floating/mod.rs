@@ -85,8 +85,7 @@ pub fn run(cfg: RunConfig) -> Result<()> {
             proxy,
             rt: rt.handle().clone(),
         },
-        audio.muted,
-        audio.volume,
+        audio,
     );
     event_loop
         .run_app(&mut app)

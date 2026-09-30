@@ -54,7 +54,7 @@ fn stale_threshold(slot: &AgentSlot) -> Duration {
 
 /// Policy half of [`stale_threshold`], split from the registry lookup so caps
 /// combinations no registered source has YET are unit-testable with a synthetic
-/// [`SourceCaps`].
+/// [`SourceCaps`](crate::source::registry::SourceCaps).
 fn stale_threshold_with_caps(
     slot: &AgentSlot,
     caps: Option<crate::source::registry::SourceCaps>,
@@ -83,7 +83,7 @@ fn stale_threshold_with_caps(
 }
 
 /// Exactly the registry prefix (a `LabelDeriver`'s empty-cwd fallback) is a
-/// [`LabelProvenance::PrefixFallback`] the back-fill may still upgrade;
+/// [`LabelProvenance::PrefixFallback`](crate::state::LabelProvenance::PrefixFallback) the back-fill may still upgrade;
 /// anything else is a real display name. Judged at the mint, not at back-fill
 /// time — a bare-prefix Rename always lands on a slot whose source is already
 /// set, so the slot's prefix is the right yardstick.
@@ -154,13 +154,10 @@ enum Preprocessed {
 }
 
 struct TaskTracking {
-    /// An `ActivityEnd` drained a tracked Task: the general ActivityEnd arm
-    /// must be skipped, or it would re-apply a transition the drain already
-    /// made — restarting Delegating, and with it `state_started_at`, whenever
-    /// parallel Tasks remain.
+    /// An `ActivityEnd` drained a tracked Task, applying its transition.
     handled_by_task_tracking: bool,
-    /// An `ActivityStart` dispatched a Task (already applied as
-    /// Active(Delegating) by the pre-pass): the general arm must be skipped.
+    /// An `ActivityStart` was a Task dispatch, which the tracker owns — replays
+    /// included.
     handled_by_task_start: bool,
 }
 
@@ -263,30 +260,22 @@ impl Reducer {
                 parent_id,
                 now,
             ),
+            // The tracker owns every Task-dispatch Start, replays included.
+            AgentEvent::ActivityStart { .. } if tracking.handled_by_task_start => {}
             AgentEvent::ActivityStart {
                 agent_id,
                 tool_use_id,
                 detail,
-            } => self.apply_activity_start(
-                scene,
-                agent_id,
-                tool_use_id,
-                detail,
-                tracking.handled_by_task_start,
-                from,
-                now,
-            ),
+            } => self.apply_activity_start(scene, agent_id, tool_use_id, detail, from, now),
+            // The pre-pass tracker already drained a tracked Task with this End:
+            // the drain applied the transition itself, so re-running it would
+            // restart Delegating — resetting `state_started_at` — whenever
+            // parallel Tasks remain.
+            AgentEvent::ActivityEnd { .. } if tracking.handled_by_task_tracking => {}
             AgentEvent::ActivityEnd {
                 agent_id,
                 tool_use_id,
-            } => self.apply_activity_end(
-                scene,
-                agent_id,
-                tool_use_id.as_deref(),
-                tracking.handled_by_task_tracking,
-                from,
-                now,
-            ),
+            } => self.apply_activity_end(scene, agent_id, tool_use_id.as_deref(), from, now),
             AgentEvent::Waiting {
                 agent_id,
                 reason,
@@ -418,8 +407,7 @@ impl Reducer {
         Preprocessed::Dispatch(tracking)
     }
 
-    /// The `ActivityStart` arm. Skipped entirely when the pre-pass tracker
-    /// already applied this event as a Task dispatch.
+    /// The `ActivityStart` arm, for a Start the pre-pass tracker left to it.
     ///
     /// A Start whose id is a GATED member is the same call re-observed across
     /// an approval round (#951): on Jsonl it is the transcript's Start landing
@@ -433,20 +421,15 @@ impl Reducer {
     /// (a parallel auto-approved tool must not strip a pending approval) or for
     /// an already-counted id — a late transcript twin whose approval round may
     /// have queued siblings.
-    #[allow(clippy::too_many_arguments)]
     fn apply_activity_start(
         &mut self,
         scene: &mut SceneState,
         agent_id: AgentId,
         tool_use_id: Option<String>,
         detail: Option<crate::source::ToolDetail>,
-        handled_by_task_start: bool,
         from: Transport,
         now: SystemTime,
     ) {
-        if handled_by_task_start {
-            return;
-        }
         let gated = tool_use_id
             .as_deref()
             .is_some_and(|t| self.corr.gate_matches(&agent_id, t));
@@ -541,22 +524,15 @@ impl Reducer {
             }
     }
 
-    /// The `ActivityEnd` arm. Skipped entirely when the pre-pass tracker
-    /// already drained a tracked Task with this event: the drain applied the
-    /// transition itself, so re-running here would restart Delegating —
-    /// resetting `state_started_at` — whenever parallel Tasks remain.
+    /// The `ActivityEnd` arm, for an End the pre-pass tracker left to it.
     fn apply_activity_end(
         &mut self,
         scene: &mut SceneState,
         agent_id: AgentId,
         tool_use_id: Option<&str>,
-        handled_by_task_tracking: bool,
         from: Transport,
         now: SystemTime,
     ) {
-        if handled_by_task_tracking {
-            return;
-        }
         let resolves_wait = self.wait_resolved_by(scene, agent_id, tool_use_id, from);
         if let Some(t) = tool_use_id {
             // A call's End retires ITS gate whether or not it resolved a wait

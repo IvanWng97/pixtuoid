@@ -973,8 +973,10 @@ fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
             &spill(window_x, look.spill_slant),
             theme.lighting.sun_spill,
         );
-        let top = lit_x(&buf, 0..1).expect("the spill's first row");
-        let bottom = lit_x(&buf, SPILL_DEPTH - 1..SPILL_DEPTH).expect("the spill's last row");
+        // Halves, not single rows: the dither leaves a faint row with no lit cell.
+        let half = SPILL_DEPTH / 2;
+        let top = lit_x(&buf, 0..half).expect("the spill's upper half");
+        let bottom = lit_x(&buf, half..SPILL_DEPTH).expect("the spill's lower half");
         assert_eq!(
             (bottom - top).signum(),
             -disc_side,
@@ -1006,7 +1008,16 @@ fn a_spill_leaning_off_the_left_edge_is_clipped() {
         let want: Vec<u16> = (0..buf_w)
             .filter(|&x| (left..right).contains(&i32::from(x)))
             .collect();
-        assert_eq!(lit, want, "row {dy}");
+        // The sill row is at the spill's peak, so every cell of it lights; the
+        // rows below dither out, but never past the clipped span.
+        if dy == 0 {
+            assert_eq!(lit, want, "row {dy}");
+        } else {
+            assert!(
+                lit.iter().all(|x| want.contains(x)),
+                "row {dy}: {lit:?} ⊄ {want:?}"
+            );
+        }
     }
 }
 

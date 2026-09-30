@@ -63,7 +63,7 @@ pub const CHILD_END_RELINK_TTL: Duration = Duration::from_secs(300);
 #[doc(hidden)]
 pub const DRAINED_TASK_TOMBSTONE_TTL: Duration = Duration::from_secs(90);
 
-/// How long an [`AgentEvent::ProofOfLife`] vouch exempts its slot from the
+/// How long an [`AgentEvent::ProofOfLife`](crate::AgentEvent::ProofOfLife) vouch exempts its slot from the
 /// staleness sweeps (#220). The probe is ground truth that the OWNING PROCESS
 /// is alive, while every `STALE_*` window only models event silence — so a
 /// vouched slot must not be swept on silence alone. Sized 2.5× the watcher's
@@ -134,7 +134,7 @@ pub(super) struct Correlation {
     /// `ended_at` gates a PARENTED re-registration (the dead child's late
     /// echo), while a PARENTLESS start ADOPTS the remembered parent.
     pub(super) child_ledger: HashMap<AgentId, ChildLedgerEntry>,
-    /// Sweep-exemption timestamps from [`AgentEvent::ProofOfLife`] (#220):
+    /// Sweep-exemption timestamps from [`AgentEvent::ProofOfLife`](crate::AgentEvent::ProofOfLife) (#220):
     /// a slot vouched for within [`PROOF_OF_LIFE_TTL`] is skipped by
     /// `sweep_stale`'s candidate collection.
     pub(super) recent_proof_of_life: HashMap<AgentId, SystemTime>,
