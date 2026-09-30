@@ -3,7 +3,7 @@
 //! overlay painters the live window uses, so the PNG is byte-faithful to what it blits.
 //!
 //! Usage:
-//!   cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N]
+//! `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N]`
 //! e.g. `... -- /tmp/floating.png 720x480 --agents 6` (Retina default), `... -- /tmp/f.png 360x240`.
 
 use std::path::PathBuf;
