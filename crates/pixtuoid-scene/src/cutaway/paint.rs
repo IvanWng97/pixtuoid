@@ -413,9 +413,11 @@ fn lights(
             }
         })
         .collect();
+    let wall_spot = crate::lighting::wall_spot(layout, &moment.look);
     lights
         .spills
         .iter()
+        .chain(&wall_spot)
         .chain(&lights.floor_lamp)
         .chain(&lamps)
         .chain(&lights.monitor_halos)
@@ -423,7 +425,7 @@ fn lights(
         .filter_map(|e| {
             crate::cutaway::light::LightView::of(
                 e,
-                crate::cutaway::light::tint_of(e.kind, theme, frame.neon),
+                crate::cutaway::light::tint_of(e.kind, theme, frame.neon, &moment.look),
                 ambient,
                 pen,
                 (layout.buf_w, layout.buf_h),
@@ -4618,6 +4620,38 @@ S B B B B B B S
     }
 
     /// `frame`'s list at local `hour`, under a clear sky.
+    /// The sun's wall spot is one of the cutaway's lights: a clear morning's
+    /// list holds exactly one more than the same moment with no spot.
+    #[test]
+    fn the_cutaway_lights_the_suns_wall_spot() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        let frame = frames.last().expect("a seated frame");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale: RenderScale::new(pack.max_density_variant()).expect("nonzero"),
+        };
+        let now = crate::localclock::at_hour(7);
+        let lit = Moment::resolve(
+            crate::sky::Sky::at_with(now, crate::sky::Weather::Clear),
+            theme,
+            0.0,
+            now,
+        );
+        assert!(
+            crate::lighting::wall_spot(&layout, &lit.look).is_some(),
+            "a clear morning puts the sun on a side wall"
+        );
+        let mut unlit = Moment::resolve(lit.sky, theme, 0.0, now);
+        unlit.look.sun_spot = None;
+        assert_eq!(
+            build_list(frame, office, &lit, 0).lights().len(),
+            build_list(frame, office, &unlit, 0).lights().len() + 1
+        );
+    }
+
     fn list_at<'a>(frame: &SimFrame, office: Office<'a>, hour: u32) -> DrawList<'a> {
         let now = crate::localclock::at_hour(hour);
         let sky = crate::sky::Sky::at_with(now, crate::sky::Weather::Clear);
