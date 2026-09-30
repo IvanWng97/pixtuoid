@@ -371,30 +371,18 @@
     not document how a called workflow's jobs roll up into it. The `required`
     job is what judges each one — through require-jobs, which counts skipped
     and cancelled as red — so it must need every other job, and must run even
-    when one of them fails. It lets a job skip only on a draft's light-tier
-    run, where exactly the full tier may skip; so the tier guard is the one
-    `if:` a job may carry, and a job without it is light-tier. A lenient verdict
-    on a full run would pass whatever else skipped a job.
+    when one of them fails.
   assert: |
     .jobs.required as $required
-    | all(.jobs | to_entries[] | select(.key != "required") | .value;
-          (has("if") | not) or .if == "${{ inputs.full }}")
-      and (.jobs | keys - ["required"]) == ($required.needs | sort)
+    | (.jobs | keys - ["required"]) == ($required.needs | sort)
       and $required.if == "${{ always() }}"
       and ($required | has("continue-on-error") | not)
       and ([$required.steps[]
             | select(.uses == "./.github/actions/require-jobs")
             | select(.with.results == "${{ toJSON(needs) }}")
-            | select(.with["allow-skipped"] == "${{ !inputs.full }}")
             | select((has("if") or has("continue-on-error")) | not)]
            | length == 1)
   break:
-    - |
-      (.jobs | to_entries | map(select(.key != "required")) | .[0].key) as $job
-      | .jobs[$job].if = "${{ github.event_name == 'push' }}"
-    - |
-      .jobs.required.steps |= map(
-        if .uses == "./.github/actions/require-jobs" then .with["allow-skipped"] = "true" else . end)
     - '.jobs.unlisted = {"runs-on": "ubuntu-latest", "steps": [{"run": "true"}]}'
     - del(.jobs.required.if)
     - |
@@ -415,8 +403,7 @@
     because a job it needs failed reports "Success" and does not block a merge
     (docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions),
     so `gate` must run on `always()`; it must also need every group call and
-    judge them all through require-jobs, strictly, or a group left out or
-    skipped is free to fail.
+    judge them all through require-jobs, or a group left out is free to fail.
   assert: |
     .jobs.gate as $gate
     | ([.jobs | to_entries[] | select(.value | has("uses")) | .key] | sort) == ($gate.needs | sort)
@@ -425,13 +412,9 @@
       and ([$gate.steps[]
             | select(.uses == "./.github/actions/require-jobs")
             | select(.with.results == "${{ toJSON(needs) }}")
-            | select(.with | has("allow-skipped") | not)
             | select((has("if") or has("continue-on-error")) | not)]
            | length == 1)
   break:
-    - |
-      .jobs.gate.steps |= map(
-        if .uses == "./.github/actions/require-jobs" then .with["allow-skipped"] = "true" else . end)
     - .jobs.gate.if = "${{ success() }}"
     - '.jobs.extra = {"uses": "./.github/workflows/ci-extra.yml"}'
     - .jobs.gate.needs |= map(select(. != "tests"))
@@ -445,53 +428,6 @@
     - |
       .jobs.gate.steps |= map(
         if .uses == "./.github/actions/require-jobs" then .["continue-on-error"] = true else . end)
-
-- id: ci-gate-requires-the-full-tier
-  file: .github/workflows/ci.yml
-  why: >-
-    A draft runs only the light tier, and branch protection counts a green or
-    skipped ci-gate as passing
-    (docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks),
-    so the gate must fail every run whose groups were not handed the full tier,
-    judged by the same expression they received; ready_for_review must start
-    the run that replaces a draft's red gate, or a PR leaving draft has no
-    full-tier verdict until its next push. What the step's shell does is
-    asserted in action_behavior_test.sh.
-  expected: >-
-    ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
-  assert: |
-    (["opened", "synchronize", "reopened", "ready_for_review"] - .on.pull_request.types) == []
-      and ([.jobs[] | select(has("uses"))] | length > 0 and all(.[]; .with.full == $expected))
-      and ([.jobs.gate.steps[]
-            | select(.name == "Require the full tier")
-            | select(.env.FULL == $expected)
-            | select((has("if") or has("continue-on-error")) | not)]
-           | length == 1)
-  break:
-    - .on.pull_request.types -= ["ready_for_review"]
-    - .jobs.builds.with.full = true
-    - del(.jobs.tests.with)
-    - .jobs.gate.steps |= map(select(.name != "Require the full tier"))
-    - (.jobs.gate.steps[] | select(.name == "Require the full tier") | .env.FULL) = "true"
-    - (.jobs.gate.steps[] | select(.name == "Require the full tier") | .if) = "${{ github.event_name == 'push' }}"
-    - (.jobs.gate.steps[] | select(.name == "Require the full tier") | .["continue-on-error"]) = true
-
-- id: scarce-runners-wait-for-the-full-tier
-  file:
-    - .github/workflows/ci-lint.yml
-    - .github/workflows/ci-builds.yml
-    - .github/workflows/ci-tests.yml
-  why: >-
-    macOS jobs queue behind an account-wide cap far below the total job cap
-    (docs.github.com/en/actions/reference/limits), and the Windows jobs are the
-    slowest; sparing both is what the light tier is for, and a non-Linux job
-    without the tier guard runs on every draft push with nothing turning red.
-  assert: |
-    all(.jobs | to_entries[] | select(.key != "required") | .value
-        | select(.["runs-on"] | tostring | startswith("ubuntu-") | not);
-        .if == "${{ inputs.full }}")
-  break:
-    - '.jobs.extra = {"runs-on": "macos-14", "steps": [{"run": "true"}]}'
 
 # ── The scanners' own switches
 

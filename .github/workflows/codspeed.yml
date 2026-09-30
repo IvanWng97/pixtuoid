@@ -42,7 +42,7 @@ permissions:
 jobs:
   codspeed:
     name: benchmarks (codspeed simulation + memory, advisory)
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

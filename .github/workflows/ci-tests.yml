@@ -268,6 +268,3 @@ jobs:
         with:
           results: ${{ toJSON(needs) }}
           label: "Required test job failed"
-          # The tier guard is the only `if:` a job here may carry, so a light
-          # run lets exactly the full-tier jobs skip.
-          allow-skipped: ${{ !inputs.full }}

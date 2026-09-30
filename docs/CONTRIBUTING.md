@@ -41,13 +41,12 @@ runs those locally), it runs the jobs below; all but **hygiene** and zizmor's
 offline audits are invisible to preflight, so a green preflight does not mean a
 green PR.
 
-A draft PR runs only the **light tier**: the jobs in `ci-lint.yml`,
-`ci-tests.yml` and `ci-builds.yml` that carry no `if: inputs.full`, which is
-about what preflight covers plus the Linux test suite. A ready PR, a push to
-`main` and a manual dispatch run the **full tier**, and CodeQL and CodSpeed
-skip drafts too. `ci-gate` fails every light-tier run by design, so a green
-`ci-gate` always means the full tier passed on that head; marking the PR ready
-starts the run that replaces it. The jobs:
+A draft PR runs only the **light tier**, every job without
+`if: inputs.full`; a ready PR, a push to `main` and a manual dispatch run
+both tiers, and CodeQL and CodSpeed skip drafts. The skipped jobs make a draft's `ci-gate` red by design,
+so read its light-tier verdict from the individual job checks. If a ready PR's
+`ci-gate` reports only a draft run, re-run the cancelled `ready_for_review`
+run. The jobs:
 
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
@@ -56,8 +55,8 @@ starts the run that replaces it. The jobs:
 - **smoke (`just gen-check`) · readme drift (`just gen-readme-check`) · npm
   package generator (`just npm-check`)** — committed media and icons, README
   freshness, and the npm package generator + OpenClaw plugin contract.
-- **windows-check / windows-test** — msvc cross-lint on the Linux runner, and
-  the full suite on a real Windows runner.
+- **windows-check / windows-test** — msvc cross-lint on every PR, and the
+  full suite on a real Windows runner.
 - **wasm-check** — the wasm32 build plus the committed `site/public/wasm/`
   pair's integrity and size cap (`just gen-wasm-check`); nothing checks the
   pair is fresh, so a core/scene/web change runs `just gen-wasm` by hand.
@@ -219,7 +218,7 @@ crate IS.
 | before push | nothing — the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
 | while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
 | once you need a PR number | open it as a draft: the light tier runs, and `ci-gate` stays red by design |
-| once it is done locally | mark it ready: the full tier and the billed review bots run on that head, so a draft push never buys a review of a head that's about to be replaced |
+| once the draft's light tier is green | mark it ready: the full tier and the billed review bots start together, so a failure only the full tier catches costs one extra review round until the bots are chained after CI |
 | before merge | the two-lens review |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 

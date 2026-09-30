@@ -491,9 +491,7 @@ assert_required() {
     local results="$1"
     local expect="$2"
     local label="$3"
-    local allow_skipped="${4:-false}"
-    if RESULTS="$results" LABEL=selftest ALLOW_SKIPPED="$allow_skipped" \
-        bash -eo pipefail -c "$require_script" >/dev/null 2>&1; then
+    if RESULTS="$results" LABEL=selftest bash -eo pipefail -c "$require_script" >/dev/null 2>&1; then
         [[ "$expect" == pass ]] || fail "require-jobs passed $label"
     else
         [[ "$expect" == fail ]] || fail "require-jobs failed $label"
@@ -506,34 +504,3 @@ assert_required '{"a":{"result":"success"},"b":{"result":"skipped"}}' fail "a sk
 assert_required '{"a":{"result":"success"},"b":{"result":"cancelled"}}' fail "a cancelled job"
 assert_required '{}' fail "an empty needs map"
 assert_required '' fail "no results at all"
-# A light-tier run lets its full-tier jobs skip and nothing else.
-assert_required '{"a":{"result":"success"},"b":{"result":"skipped"}}' pass "a light-tier skip" true
-assert_required '{"a":{"result":"skipped"},"b":{"result":"skipped"}}' pass "a group with no light-tier job" true
-assert_required '{"a":{"result":"skipped"},"b":{"result":"failure"}}' fail "a failed light-tier job" true
-assert_required '{"a":{"result":"skipped"},"b":{"result":"cancelled"}}' fail "a cancelled light-tier job" true
-assert_required '{"a":{"result":"success"},"b":{"result":"skipped"}}' fail "a skip under a non-boolean allow" TRUE
-assert_required '{}' fail "an empty needs map on a light-tier run" true
-
-# ── ci-gate: a run without the full tier never goes green ────────────────────
-# ci-gate-requires-the-full-tier pins that this step exists, runs
-# unconditionally and reads the groups' own tier expression; its verdict is
-# asserted here.
-CI_WORKFLOW_FILE="${CI_WORKFLOW_FILE:-.github/workflows/ci.yml}"
-tier_script="$(workflow_step_script "$CI_WORKFLOW_FILE" "Require the full tier")"
-
-assert_tier() {
-    local full="$1"
-    local expect="$2"
-    local output
-    if output="$(FULL="$full" bash -eo pipefail -c "$tier_script" 2>&1)"; then
-        [[ "$expect" == pass ]] || fail "ci-gate passed a run with FULL='$full'"
-    else
-        [[ "$expect" == fail ]] || fail "ci-gate failed a full-tier run"
-        [[ "$output" == *"::error"*"draft PR"*"ready for review"* ]] ||
-            fail "ci-gate refused FULL='$full' without saying how to run the full tier"
-    fi
-}
-
-assert_tier true pass
-assert_tier false fail
-assert_tier '' fail

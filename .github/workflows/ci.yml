@@ -19,21 +19,20 @@ concurrency:
 permissions:
   contents: read
 
-# `full` is false only on a draft PR, where each group runs just its jobs that
-# lack `if: inputs.full`: a draft push is feedback, and the full tier's macOS
-# and Windows jobs are what parallel sessions queue on.
+# `full` is false only on a draft PR (off pull_request the flag dereferences to
+# an empty string, which `!` makes true); a draft skips the `if: inputs.full`
+# jobs to spare the macOS and Windows queue, and require-jobs counts those skips
+# red, so its ci-gate is red by construction.
 jobs:
   lint:
     name: Lint & Hygiene
     uses: ./.github/workflows/ci-lint.yml
-    with:
-      full: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
 
   builds:
     name: Builds & Packaging
     uses: ./.github/workflows/ci-builds.yml
     with:
-      full: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+      full: ${{ !github.event.pull_request.draft }}
 
   tests:
     name: Test Suite & Coverage
@@ -42,7 +41,7 @@ jobs:
       id-token: write
     uses: ./.github/workflows/ci-tests.yml
     with:
-      full: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+      full: ${{ !github.event.pull_request.draft }}
 
   gate:
     name: ci-gate
@@ -60,14 +59,3 @@ jobs:
         with:
           results: ${{ toJSON(needs) }}
           label: "CI group failed"
-      # Branch protection counts a green or a skipped ci-gate as passing, so a
-      # light-tier run must end red here: a green ci-gate then always means the
-      # full tier passed on this head.
-      - name: Require the full tier
-        env:
-          FULL: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
-        run: |
-          if [[ "$FULL" != true ]]; then
-            echo "::error title=Full tier not run::draft PR: only the light tier ran on this head; mark the PR ready for review to run the full tier"
-            exit 1
-          fi

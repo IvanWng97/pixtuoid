@@ -26,7 +26,7 @@ jobs:
     name: Analyze (${{ matrix.language }})
     # Not a required check, so a skip on a draft blocks nothing; ci.yml's
     # light tier is the draft's feedback.
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:

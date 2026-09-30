@@ -8,7 +8,7 @@
 #   site     — the Astro landing page under site/ (npm, its own CI)
 #   gen      — regenerate + check committed artifacts
 #   release  — npm-check, the Node gate release.yml runs before npm publish (and
-#              ci-lint on every ready PR)
+#              ci-lint.yml's `npm-gen` job)
 #   meta     — tooling setup, the local gate (preflight), the fixture
 #              gates, and the gates' selftests
 
@@ -836,7 +836,7 @@ gen-contract:
     npm --prefix integrations/raycast run gen:contract
 
 # Fail if the committed README drifted from site/src/{features,sources,install}.json.
-# Pure node:builtins — no npm ci. ci-lint.yml runs this on every ready PR (the `readme` job),
+# Pure node:builtins — no npm ci. ci-lint.yml's `readme` job runs this,
 # and gen-check composes it.
 [group('gen')]
 [doc('Fail if the committed README drifted from site data (features/sources/install.json)')]
@@ -996,7 +996,7 @@ gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check 
 # The repo's NODE-side gate (no cargo): the npm package generator AND the bundled
 # OpenClaw plugin contract.
 #   - npm/generate.test.mjs — the ONLY validation of npm/generate.mjs. release.yml
-#     runs it as a hard gate right before `npm publish`, and ci-lint.yml on every ready PR
+#     runs it as a hard gate right before `npm publish`, and ci-lint.yml's `npm-gen` job
 #     so a generator regression is caught at review time, not at the tag-push.
 #   - scripts/openclaw-plugin.test.mjs — drives the RENDERED openclaw_plugin.js the
 #     way OpenClaw's loader does. The Rust side can only grep that template as a

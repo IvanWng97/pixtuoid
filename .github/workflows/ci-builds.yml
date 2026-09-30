@@ -18,7 +18,6 @@ jobs:
   # not byte-compare wasm output — latest-stable builds drift.
   wasm-check:
     name: wasm-check
-    if: ${{ inputs.full }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -35,7 +34,6 @@ jobs:
 
   hack:
     name: feature combinations
-    if: ${{ inputs.full }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -49,7 +47,6 @@ jobs:
 
   windows-check:
     name: windows-check
-    if: ${{ inputs.full }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -106,6 +103,3 @@ jobs:
         with:
           results: ${{ toJSON(needs) }}
           label: "Required build job failed"
-          # The tier guard is the only `if:` a job here may carry, so a light
-          # run lets exactly the full-tier jobs skip.
-          allow-skipped: ${{ !inputs.full }}
