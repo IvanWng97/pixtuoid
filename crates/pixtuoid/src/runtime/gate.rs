@@ -40,10 +40,10 @@ pub(crate) fn apply_gated_event(
     gate_logged: &mut HashSet<&'static str>,
 ) -> bool {
     if let Some(src) = event_source(scene, &ev).filter(|s| !connected.is_connected(s)) {
-        if let Some(known) = registry::descriptor_for(src) {
-            if gate_logged.insert(known.name) {
-                tracing::debug!(source = known.name, "dropping events: source not connected");
-            }
+        if let Some(known) = registry::descriptor_for(src)
+            && gate_logged.insert(known.name)
+        {
+            tracing::debug!(source = known.name, "dropping events: source not connected");
         }
         return false;
     }

@@ -113,10 +113,9 @@ fn task_call_ids(raw: &[String], dispatch: &str) -> std::collections::BTreeSet<S
                 if names
                     .iter()
                     .any(|k| o.get(*k).and_then(|n| n.as_str()) == Some(dispatch))
+                    && let Some(id) = ids.iter().find_map(|k| o.get(*k).and_then(|i| i.as_str()))
                 {
-                    if let Some(id) = ids.iter().find_map(|k| o.get(*k).and_then(|i| i.as_str())) {
-                        out.insert(id.to_string());
-                    }
+                    out.insert(id.to_string());
                 }
                 o.values().for_each(|c| walk(c, dispatch, out));
             }
