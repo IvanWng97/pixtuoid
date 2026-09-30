@@ -14,6 +14,7 @@ use clap::Parser;
 use pixtuoid::tui::renderer::{DrawCtx, draw_scene};
 use pixtuoid_core::SceneState;
 use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
+use pixtuoid_scene::floor::{FloorInputs, PetInputs};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -684,6 +685,13 @@ fn main() -> Result<()> {
         socket_line: connection_socket_line,
     };
     let mut draw_ctx = DrawCtx {
+        world: FloorInputs {
+            scene: &scene,
+            pack: &pack,
+            now,
+            floor: floor_meta,
+            pets: PetInputs::default(),
+        },
         buf: &mut floor.buf,
         store: &mut floor.ctx,
         mouse_pos: args.hover.as_deref().and_then(|s| {
@@ -701,11 +709,8 @@ fn main() -> Result<()> {
         gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
         audio_audible: false,
         volume_flash: None,
-        floor: floor_meta,
-        active_pet: None,
         last_pet_pos: None,
         last_mascots: Vec::new(),
-        floor_pet: None,
         chitchat_state: &mut chitchat_state,
         chitchat_bubbles: Vec::new(),
         coffee: &std::collections::HashMap::new(),
@@ -718,7 +723,7 @@ fn main() -> Result<()> {
         connection: &connection_frame,
         onboarding: &onboarding_frame,
     };
-    draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
+    draw_scene(&mut term, &mut draw_ctx)?;
 
     if args.debug_walkable {
         debug_paint_walkable_overlay(&mut term, args.floor_seed)?;

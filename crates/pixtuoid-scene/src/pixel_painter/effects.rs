@@ -8,7 +8,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::epoch_ms;
 use super::palette::{WHITE, blend_pixel};
-use crate::layout::Point;
+use crate::layout::{Point, SCREEN_GLASS_COLS};
 use crate::theme::Theme;
 
 /// Standby tint on a BACK-TURNED desk's glass — a grid of black rectangles reads as "everyone went home".
@@ -28,9 +28,6 @@ pub(super) fn paint_screen_idle(
         }
     }
 }
-
-/// Glass columns offset from the desk sprite's left edge — shared so idle and glow can't diverge.
-pub(crate) const SCREEN_GLASS_COLS: std::ops::RangeInclusive<u16> = 4..=9;
 
 /// Casing rows offset from the sprite TOP; lighting only the lower one leaves a black bar capping the glow.
 const SCREEN_CASING_ROWS: std::ops::RangeInclusive<u16> = 0..=1;
