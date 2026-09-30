@@ -1080,7 +1080,8 @@ impl Pack {
         densities.into_iter().rev().collect()
     }
 
-    /// Merge [`OPTIONAL_FURNITURE_ANIMATIONS`] — and their density variants —
+    /// Merge [`OPTIONAL_FURNITURE_ANIMATIONS`] and [`OPTIONAL_CREATURE_ANIMATIONS`]
+    /// — and their density variants —
     /// from `base` into self: the keys `RegisteredKey::is_inherited` passes;
     /// and `base`'s whole city, its buildings and `[city]`, when self has no
     /// buildings.
@@ -1626,20 +1627,21 @@ pub(crate) fn split_density_variant(name: &str) -> Option<(&str, u16)> {
     (2..=MAX_DENSITY_VARIANT).contains(&n).then_some((base, n))
 }
 
-/// Every registered animation: the required and optional character poses and
-/// the optional furniture.
+/// Every registered animation: the required and optional character poses, the
+/// optional furniture and the optional creatures.
 fn registered_animation_names() -> impl Iterator<Item = &'static str> {
     REQUIRED_CHARACTER_ANIMATIONS
         .iter()
         .chain(OPTIONAL_CHARACTER_ANIMATIONS)
         .chain(OPTIONAL_FURNITURE_ANIMATIONS)
+        .chain(OPTIONAL_CREATURE_ANIMATIONS)
         .copied()
 }
 
 /// A pack key that names a registered animation: the animation itself, or a
 /// density variant of it (`desk@4x`). Any registered animation takes variants,
-/// since a character is redrawn at density like furniture; only furniture is
-/// inherited ([`RegisteredKey::is_inherited`]).
+/// since a character is redrawn at density like furniture; only furniture and
+/// creatures are inherited ([`RegisteredKey::is_inherited`]).
 ///
 /// Variants are legal BY DERIVATION rather than by their own registry rows, so
 /// authoring one needs no registry row. A second list would have to be kept in
@@ -1665,10 +1667,14 @@ impl RegisteredKey {
             .map(|base| Self { base, density })
     }
 
-    /// Whether [`Pack::merge_from`] inherits this key: furniture and its
-    /// variants only, because a robot pack must not fall back to human sprites.
+    /// Whether [`Pack::merge_from`] inherits this key: furniture, creatures and
+    /// their variants only, because a robot pack must not fall back to human
+    /// sprites.
     fn is_inherited(self) -> bool {
-        OPTIONAL_FURNITURE_ANIMATIONS.contains(&self.base)
+        OPTIONAL_FURNITURE_ANIMATIONS
+            .iter()
+            .chain(OPTIONAL_CREATURE_ANIMATIONS)
+            .any(|&n| n == self.base)
     }
 }
 
@@ -1684,14 +1690,6 @@ pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "plant_succulent",
     "floor_lamp",
     "door",
-    "cat_walk",
-    "cat_sit",
-    "cat_sleep",
-    "dog_walk",
-    "dog_sit",
-    "dog_sleep",
-    "lobster_walk",
-    "lobster_rest",
     "meeting_sofa",
     "meeting_sofa_north",
     "meeting_screen",
@@ -1718,6 +1716,20 @@ pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "notice_board",
     "wall_clock",
     "meeting_chair",
+];
+
+/// The pets' and the gateway mascots' animation names a pack MAY provide, which
+/// [`Pack::merge_from`] inherits like the furniture: they stand on their feet
+/// wherever their frame ends, so they are kept apart from it.
+pub const OPTIONAL_CREATURE_ANIMATIONS: &[&str] = &[
+    "cat_walk",
+    "cat_sit",
+    "cat_sleep",
+    "dog_walk",
+    "dog_sit",
+    "dog_sleep",
+    "lobster_walk",
+    "lobster_rest",
 ];
 
 const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[

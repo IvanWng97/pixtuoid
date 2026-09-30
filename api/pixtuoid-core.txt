@@ -1260,6 +1260,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::ValidationReport
 pub const pixtuoid_core::sprite::format::MAX_RAMP_LEVEL: i8
 pub const pixtuoid_core::sprite::format::OPTIONAL_CHARACTER_ANIMATIONS: &[&str]
+pub const pixtuoid_core::sprite::format::OPTIONAL_CREATURE_ANIMATIONS: &[&str]
 pub const pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS: &[&str]
 pub const pixtuoid_core::sprite::format::PACK_MANIFEST: &str
 pub const pixtuoid_core::sprite::format::REQUIRED_CHARACTER_ANIMATIONS: &[&str]
