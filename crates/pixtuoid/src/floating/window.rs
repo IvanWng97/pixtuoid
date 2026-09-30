@@ -229,6 +229,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 config::FLOATING_MIN_W as f64,
                 config::FLOATING_MIN_H as f64,
             ));
+        // A spot on a since-disconnected monitor would open the frameless window unreachably.
         if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y)
             && position_on_a_monitor(event_loop, x, y, self.cfg.width, self.cfg.height)
         {
