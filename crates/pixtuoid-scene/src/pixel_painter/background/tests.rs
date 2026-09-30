@@ -3,6 +3,7 @@ use crate::atmosphere::Look;
 use crate::layout::{window_bays, window_run};
 use crate::lighting::SPILL_DEPTH;
 use crate::sky::{hour_is_day, set_weather_override, ForcedWeather};
+use std::time::SystemTime;
 
 #[test]
 fn lightning_flash_storm_only_and_mid_strike_only() {
@@ -44,28 +45,32 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
         let sky = Sky::at_with(now, Weather::Storm).with_flash(flash);
         let look = Look::resolve(&sky, theme);
         let sky_row = sky_rows(30, &look);
+        let moment = &Moment::resolve(sky, theme, 0.0, now);
         let city = CityStrip::draw(
             &pack(),
             (WINDOW_W, 28),
-            0.0,
-            (&look, theme, now),
+            moment,
+            theme,
             std::num::NonZeroU16::MIN,
         );
         let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 8, g: 8, b: 10 });
         paint_floor_to_ceiling_window(
             &mut buf,
-            0,
-            0,
-            WINDOW_W,
-            30,
+            Bounds {
+                x: 0,
+                y: 0,
+                width: WINDOW_W,
+                height: 30,
+            },
             theme.surface.window_frame,
             0,
-            now,
-            &sky,
-            (&city, 0),
-            &sky_row,
-            None,
-            &look,
+            moment,
+            GlassView {
+                city: &city,
+                run_x0: 0,
+                sky_row: &sky_row,
+                disc: None,
+            },
         );
         let mut sum = 0u64;
         for y in 1..29u16 {
@@ -94,21 +99,15 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     let buf_h = top_wall_h + 2;
     let buf_w = 60u16;
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(12 * 3600);
-    let look = Look::resolve(&Sky::at(now), theme);
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
     paint_floor_and_walls(
         &mut BaseFillCache::new(),
         &mut buf,
-        buf_w,
-        buf_h,
-        now,
-        &Sky::at(now),
-        &look,
         top_wall_h,
         window_bays(buf_w, None),
+        &Moment::resolve(Sky::at(now), theme, 0.0, now),
         &pack(),
         theme,
-        0.0,
     );
     let spill = crate::lighting::Emitter {
         light: crate::lighting::Light::Spill {
@@ -160,22 +159,16 @@ fn render_office_themed(
 ) -> RgbBuffer {
     let _weather = ForcedWeather::new(weather);
     let now = crate::localclock::on_day(day, hour);
-    let look = Look::resolve(&Sky::at(now), theme);
     let buf_h = top_wall_h + 4;
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 4, g: 4, b: 6 });
     paint_floor_and_walls(
         &mut BaseFillCache::new(),
         &mut buf,
-        buf_w,
-        buf_h,
-        now,
-        &Sky::at(now),
-        &look,
         top_wall_h,
         window_bays(buf_w, None),
+        &Moment::resolve(Sky::at(now), theme, 0.0, now),
         &pack(),
         theme,
-        0.0,
     );
     buf
 }
@@ -781,21 +774,15 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
     let now = crate::localclock::on_day(1, 12);
     let (buf_w, buf_h, top_wall_h) = (96u16, 64u16, 14u16);
     let paint = |base_fill: &mut BaseFillCache, theme: &'static crate::theme::Theme| {
-        let look = Look::resolve(&Sky::at(now), theme);
         let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 9, g: 9, b: 9 });
         paint_floor_and_walls(
             base_fill,
             &mut buf,
-            buf_w,
-            buf_h,
-            now,
-            &Sky::at(now),
-            &look,
             top_wall_h,
             window_bays(buf_w, None),
+            &Moment::resolve(Sky::at(now), theme, 0.0, now),
             &pack(),
             theme,
-            0.0,
         );
         buf
     };
@@ -845,21 +832,15 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
     let now = crate::localclock::on_day(1, 12);
     let paint_at = |base_fill: &mut BaseFillCache, w: u16, h: u16| {
-        let look = Look::resolve(&Sky::at(now), theme);
         let mut buf = RgbBuffer::filled(w, h, Rgb { r: 9, g: 9, b: 9 });
         paint_floor_and_walls(
             base_fill,
             &mut buf,
-            w,
-            h,
-            now,
-            &Sky::at(now),
-            &look,
             14,
             window_bays(w, None),
+            &Moment::resolve(Sky::at(now), theme, 0.0, now),
             &pack(),
             theme,
-            0.0,
         );
         buf
     };
