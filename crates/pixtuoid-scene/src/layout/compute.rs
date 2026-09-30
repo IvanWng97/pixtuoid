@@ -420,7 +420,12 @@ pub(super) fn compute_with_seed(
         )
     });
 
-    let mut waypoints = compute_waypoints(&plan, &pod_decor, lounge.map(|l| l.couch_center));
+    let mut waypoints = compute_waypoints(
+        &plan,
+        &pod_decor,
+        lounge.map(|l| l.couch_center),
+        &home_desks,
+    );
 
     // NOT the pantry (a plant + pad blocks the only bridge to the cubicle area), NOT the
     // cubicle top strip (a 7-px wall-to-couch gap), NOT a meeting interior (seals the door).
@@ -1507,12 +1512,35 @@ pub(super) fn compute_pod_decor(grid: PodGrid, floor_seed: u64) -> Vec<PodDecorI
     pod_decor
 }
 
+/// Whether a corridor appliance centred at `pos` keeps its art off every home
+/// desk's sitter: a south-row sitter hangs into the aisle, over the art's top.
+/// Both facings, since a narrow band demotes a back-turned desk after this runs.
+fn clears_the_seats(kind: Furniture, pos: Point, home_desks: &[Point]) -> bool {
+    let art = furniture_def(kind).visual;
+    let art = (anchored_top_left(Anchor::Center, pos, art.w, art.h), art);
+    let sitter = Size {
+        w: CHARACTER_SPRITE_W,
+        h: CHARACTER_SPRITE_H,
+    };
+    home_desks.iter().all(|&desk| {
+        [Facing::North, Facing::South].into_iter().all(|facing| {
+            let foot = desk_walk_anchor_facing(desk, facing);
+            let top_left = Point {
+                x: foot.x.saturating_sub(sitter.w / 2),
+                y: foot.y.saturating_sub(WALKING_Y_OFF),
+            };
+            !super::placement::rects_overlap(art, (top_left, sitter))
+        })
+    })
+}
+
 /// Waypoints: couch, pantry, pod-decor-promoted (PhoneBooth/StandingDesk), corridor
 /// appliances (VendingMachine/Printer).
 fn compute_waypoints(
     plan: &FloorPlan,
     pod_decor: &[PodDecorItem],
     couch: Option<Point>,
+    home_desks: &[Point],
 ) -> Vec<Waypoint> {
     let FloorPlan {
         pantry: pantry_room,
@@ -1586,25 +1614,35 @@ fn compute_waypoints(
         let base = (cubicle_aisle.y + cubicle_aisle.height).saturating_sub(2);
         super::placement::centre_y_standing_on(base, furniture_def(kind).visual.h)
     };
-    if cubicle_aisle.height >= VENDING_MIN_AISLE_H && cubicle_aisle.width > VENDING_MIN_AISLE_W {
+    let vending = Point {
+        x: right_x + VENDING_WEST_GAP + furniture_def(Furniture::VendingMachine).visual.w / 2,
+        y: appliance_y(Furniture::VendingMachine),
+    };
+    if cubicle_aisle.height >= VENDING_MIN_AISLE_H
+        && cubicle_aisle.width > VENDING_MIN_AISLE_W
+        && clears_the_seats(Furniture::VendingMachine, vending, home_desks)
+    {
         waypoints.push(Waypoint {
-            pos: Point {
-                x: right_x
-                    + VENDING_WEST_GAP
-                    + furniture_def(Furniture::VendingMachine).visual.w / 2,
-                y: appliance_y(Furniture::VendingMachine),
-            },
+            pos: vending,
             kind: WaypointKind::VendingMachine,
             facing: Facing::South,
             room_id: None,
         });
     }
-    if cubicle_aisle.height >= PRINTER_MIN_AISLE_H && cubicle_aisle.width > PRINTER_MIN_AISLE_W {
+    // Slid west from its corner, a pod's stride at most, into the gap between
+    // two pods' seats when a south-row sitter stands over it.
+    let printer = (0..=pod_grid.stride_x)
+        .map(|dx| Point {
+            x: (right_x + right_w).saturating_sub(10 + dx),
+            y: appliance_y(Furniture::Printer),
+        })
+        .find(|&p| clears_the_seats(Furniture::Printer, p, home_desks));
+    if let Some(printer) = printer
+        && cubicle_aisle.height >= PRINTER_MIN_AISLE_H
+        && cubicle_aisle.width > PRINTER_MIN_AISLE_W
+    {
         waypoints.push(Waypoint {
-            pos: Point {
-                x: right_x + right_w.saturating_sub(10),
-                y: appliance_y(Furniture::Printer),
-            },
+            pos: printer,
             kind: WaypointKind::Printer,
             facing: Facing::South,
             room_id: None,
