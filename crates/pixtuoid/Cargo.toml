@@ -89,7 +89,12 @@ clap_mangen = "0.3.0"
 rodio = { version = "0.22.2", default-features = false, features = ["playback", "tracing"], optional = true }
 
 [features]
-default = ["audio", "graphics"]
+default = ["audio", "portable"]
+# Every default feature that links on EVERY release target — all of them but
+# `audio`. The Linux release builds `--no-default-features --features portable`
+# (justfile `build-target`), so a new default feature goes HERE unless it too
+# can't link there, or prebuilt Linux binaries silently lose it.
+portable = ["graphics"]
 # Ambient sound (config-OFF at runtime regardless; this gates the DEPENDENCY).
 audio = ["dep:rodio"]
 # Terminal image-protocol detection. Gates the DEPENDENCY, not a runtime switch:
