@@ -250,7 +250,7 @@ invariants"), which every contributor and agent reads first.
   `claude-security-review` workflows plus your local two-lens pass.
 - AI-authored PRs get the `needs-human-verify` label and a human visual check.
 - **Every reviewer/bot finding reaches exactly one terminal state in the PR
-  thread** — FIXED · REFUTED-with-trace · RE-SCOPED · SURFACED, defined ONCE
+  thread** — FIXED · REFUTED · RE-SCOPED → #N · FOLLOW-UP → #N, defined ONCE
   in [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md). Agents
   never file issues, and "acknowledged, no action" is not a state.
 

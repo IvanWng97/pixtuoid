@@ -35,8 +35,8 @@ where the rule would otherwise look arbitrary enough to get "fixed" away.
   STAYS.
 - Version adjudication: does THIS diff move the public surface or ship a
   feature, and is the 0.x bump right (patch=fix, minor=feature/breaking)?
-- Comments follow CLAUDE.md's comment rules verbatim (WHY-only, semantic,
-  no length cap for an earned WHY).
+- Comments follow CLAUDE.md's comment rules verbatim (WHY-only; the default
+  is fewer).
 
 ## Sweeps that must LEAVE the diff (a diff read can't see these)
 
@@ -119,7 +119,7 @@ quality lever is the change-specific `<...>` checklist, never the lens name.
 | Generated art / clips | Extract frames and READ them; census the money shot. |
 | Reducer / liveness / motion state machine | Trace the downstream interaction graph (rebind, sweeps, TTLs, polarity) + provenance of every newly-keyed signal. |
 | Public-facing rendered artifact | DRIVE the built page and MEASURE: WCAG in every interactive state, mobile pan, no-JS (#455: state-sweep, not spot-check). |
-| Every diff (this row always fires) | The whole-file comment audit: for EVERY file the diff touches — a one-line change included — read the file's ENTIRE comment population against the CODE and CLAUDE.md's comment rules (accuracy/value/rot/vestigial/self-repetition; one home per story — echoes become references); report N items each WITH a disposition, never "passed". The population is FILES touched, never hunks: a diff-scoped read is how a constant quietly accretes ten comment lines (owner rule, PR #964). |
+| Every diff (this row always fires) | The whole-file comment audit: for EVERY file the diff touches — a one-line change included — read the file's ENTIRE comment population against the CODE and CLAUDE.md's comment rules (accuracy/value/rot/vestigial/self-repetition; one home per story — echoes become references); report N items each WITH a disposition, never "passed"; report the diff's net added comment lines, and list every sentence that could be deleted with nothing lost. The population is FILES touched, never hunks: a diff-scoped read is how a constant quietly accretes ten comment lines (owner rule, PR #964). |
 | Interactive TUI flow | WALK each user path end-to-end: first run, failure branches, the no-CLI user (#359). |
 | `pixtuoid-hook` (the shim) | Audit the WHOLE shim for the never-panic contract: `args_os()`, bounded reads, every error path exit(0) (#198). |
 | Motion / pose / walk-leg | Render and WATCH before the verdict (#61: five regressions shipped past code-only review). |
@@ -132,15 +132,20 @@ quality lever is the change-specific `<...>` checklist, never the lens name.
 ## Orchestrator notes (diff scope)
 
 Every finding reaches exactly one terminal state in the PR thread (this list is CANONICAL —
-other docs point here): FIXED · REFUTED-with-trace (cite the MECHANISM that
-refutes it — a test, a compile-time constraint, a CI gate; ADD one where none
-exists, never prose) · RE-SCOPED (real and INTRODUCED — or first made reachable — by this
-change, and bigger than the PR: the PR is wrong-sized, split or redesign it
-until the finding is IN scope) · SURFACED (real and PRE-EXISTING — one line
-to the owner, who decides, whether or not this change touched its file; a
-pre-existing defect never grows the PR). Agents never file issues;
-"acknowledged" is not a state. Sweep at the FINAL merge head; check WHICH commit a bot
-re-flag was raised against before re-litigating. Orchestration (dispatch,
+other docs point here): FIXED · REFUTED (cite the MECHANISM that refutes it —
+a test, a compile-time constraint, a CI gate; ADD one where none exists,
+never prose) · RE-SCOPED → #N (real and INTRODUCED — or first made reachable
+— by this change, and bigger than the PR: split it off into #N; a redesign
+that brings the finding into scope ends FIXED) · FOLLOW-UP → #N (real and
+PRE-EXISTING, whether or not this change touched its file: it never grows
+the PR, and is fixed in #N; a defect in another session's tree cites that
+session's PR). A disposition is one line that STARTS with its state, after
+an optional list marker or `**`: `FIXED: …` · `REFUTED: … — <mechanism>` ·
+`RE-SCOPED → #N: …` · `FOLLOW-UP → #N: …`, where #N is an open or merged PR
+other than this one. One finding per line; the state word anywhere else is
+prose. Agents never file issues; "acknowledged" and "surfaced" are not states.
+Sweep at the FINAL merge head; check WHICH commit a bot re-flag was raised
+against before re-litigating. Orchestration (dispatch,
 premise verify, the fold, the bot-verdict gate), round caps, blocking bar and
 churn budget: the `two-lens-review` skill.
 
