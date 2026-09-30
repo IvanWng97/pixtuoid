@@ -156,7 +156,7 @@ pub(crate) use furniture::{COOLER_WATER, paint_area_rug};
 // `floor::FloorSession::observe` is the public entry to the sim tick; the step
 // itself and its per-call borrow-set stay crate-internal.
 pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
-pub(crate) use sim::{PetInputs, SimInputs, SimStores, desk_occupant, sim_step};
+pub(crate) use sim::{SimInputs, SimStores, desk_occupant, sim_step};
 pub(crate) use wall::paint_wall;
 
 /// The pantry counter sprites, compact then large.
@@ -238,22 +238,12 @@ pub struct PixelCtx<'a> {
     /// The RGB pixel buffer this pass paints into. Its pixels ARE `layout`'s
     /// logical units — this pass has no scale of its own.
     pub buf: &'a mut RgbBuffer,
-    /// The live scene state to render.
-    pub scene: &'a SceneState,
+    /// The floor this pass renders.
+    pub world: crate::floor::FloorInputs<'a>,
     /// The computed office geometry for this frame.
     pub layout: &'a Layout,
-    /// The character/furniture sprite pack.
-    pub pack: &'a Pack,
-    /// The current time (the engine never reads the clock itself — it's a parameter).
-    pub now: SystemTime,
     /// The active color theme.
     pub theme: &'a crate::theme::Theme,
-    /// Which floor of the office this pass renders.
-    pub floor: crate::floor::FloorMeta,
-    /// The pet-interaction (heart-anim) state, if a pet is being petted.
-    pub active_pet: Option<&'a crate::pet::PetState>,
-    /// The pet on this floor (kind drives the sprite).
-    pub floor_pet: Option<&'a crate::pet::Pet>,
     /// Carrier → fetch-time view of [`crate::floor::CoffeeState`]: key present
     /// = has a desk cup, value = steam-window anchor.
     pub coffee: &'a HashMap<pixtuoid_core::AgentId, SystemTime>,
@@ -314,31 +304,24 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             chitchat: &mut *ctx.chitchat_state,
         },
         SimInputs {
-            scene: ctx.scene,
+            world: ctx.world,
             layout: ctx.layout,
-            pack: ctx.pack,
             coffee: ctx.coffee,
-            pets: PetInputs {
-                pet: ctx.floor_pet,
-                petting: ctx.active_pet,
-            },
-            floor: ctx.floor,
-            now: ctx.now,
             door_anim_max_ms: ctx.store.door_anim_max_ms,
         },
     );
     let (pet_pos, mascots) = paint_frame(
         &mut PaintCtx {
-            scene: ctx.scene,
+            scene: ctx.world.scene,
             layout: ctx.layout,
-            pack: ctx.pack,
-            now: ctx.now,
-            sky: crate::sky::Sky::at(ctx.now),
+            pack: ctx.world.pack,
+            now: ctx.world.now,
+            sky: crate::sky::Sky::at(ctx.world.now),
             buf: &mut *ctx.buf,
             cache: &mut ctx.store.cache,
             base_fill: &mut ctx.store.base_fill,
             theme: ctx.theme,
-            floor: ctx.floor,
+            floor: ctx.world.floor,
             motion: &ctx.store.motion,
             debug_walkable: ctx.debug_walkable,
         },
@@ -699,26 +682,8 @@ fn enqueue_pet<'a>(
     pet: sim::PetPlacement,
     drawables: &mut Vec<Drawable<'a>>,
 ) -> PetFrame {
-    /// Fallback when a custom pack lacks the resolved pet anim: the bundled
-    /// cat's size, so the z-sort row and the canvas clamp stay sane — the blit
-    /// itself no-ops, `paint_drawable` bails.
-    const PET_FALLBACK: Size = Size { w: 8, h: 6 };
-    let (pet_w, pet_h) = ctx
-        .pack
-        .animation(pet.anim_name)
-        .and_then(|a| a.frames().first())
-        .map_or((PET_FALLBACK.w, PET_FALLBACK.h), |f| {
-            (f.width(), f.height())
-        });
-    let pos = anchors::keep_sprite_on_canvas(
-        Anchor::Center,
-        pet.pos,
-        Size { w: pet_w, h: pet_h },
-        Size {
-            w: ctx.layout.buf_w,
-            h: ctx.layout.buf_h,
-        },
-    );
+    let pos = pet.pos;
+    let pet_h = sim::frame_size(ctx.pack, pet.anim_name, pet.frame_idx, sim::PET_FALLBACK).h;
     drawables.push(Drawable {
         anchor_y: z_sort_row(Anchor::Center, pos, pet_h),
         layer: Layer::Figure,
@@ -738,7 +703,7 @@ fn enqueue_pet<'a>(
     }
 }
 
-/// Enqueue the gateway mascots, each fitted to the canvas.
+/// Enqueue the gateway mascots.
 fn enqueue_gateway_mascots<'a>(
     ctx: &PaintCtx<'_>,
     mascots: &[sim::MascotPlacement],
@@ -747,29 +712,11 @@ fn enqueue_gateway_mascots<'a>(
     mascots
         .iter()
         .map(|m| {
-            /// Fallback when a custom pack lacks the mascot anim: the bundled
-            /// lobster's size, so the z-sort row and the canvas clamp stay sane —
-            /// the blit itself no-ops.
-            const MASCOT_FALLBACK: Size = Size { w: 14, h: 12 };
-            let (mascot_w, mascot_h) = ctx
-                .pack
-                .animation(m.anim_name)
-                .and_then(|a| a.frames().first())
-                .map_or((MASCOT_FALLBACK.w, MASCOT_FALLBACK.h), |f| {
-                    (f.width(), f.height())
-                });
-            let pos = anchors::keep_sprite_on_canvas(
-                Anchor::Center,
-                m.pos,
-                Size {
-                    w: mascot_w,
-                    h: mascot_h,
-                },
-                Size {
-                    w: ctx.layout.buf_w,
-                    h: ctx.layout.buf_h,
-                },
-            );
+            let pos = m.pos;
+            let Size {
+                w: mascot_w,
+                h: mascot_h,
+            } = sim::frame_size(ctx.pack, m.anim_name, m.frame_idx, sim::MASCOT_FALLBACK);
             drawables.push(Drawable {
                 anchor_y: z_sort_row(Anchor::Center, pos, mascot_h),
                 layer: Layer::Figure,
