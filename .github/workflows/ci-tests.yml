@@ -113,7 +113,6 @@ jobs:
           out=$(echo '{}' | ./target/release/pixtuoid-hook 2>&1)
           test -z "$out"
           echo "hook shim exited 0 silently (expected no-op with no socket)"
-      # gen-check needs Node and Pillow.
       - uses: actions/setup-node@v7
         with:
           node-version: 22

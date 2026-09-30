@@ -433,27 +433,28 @@ impl Timeline {
 
 /// Where an animation's frames go.
 pub(crate) enum FrameSink {
-    Gif(GifEncoder<std::fs::File>),
+    Gif {
+        encoder: GifEncoder<std::fs::File>,
+        delay: Delay,
+    },
     /// Lossless PNGs for a consumer that re-encodes (gen-media's clips and their
     /// posters): the GIF encoder NeuQuant-quantises every frame past 256 colours
     /// (`gif::Frame::from_rgba_speed`), and a re-encode of the GIF inherits that loss.
-    /// Named `f%04d.png` from 1 — ffmpeg's image2 default, which gen-media's
-    /// encodes and poster picks read.
-    Pngs {
-        dir: PathBuf,
-        written: usize,
-    },
+    /// Named `f%04d.png` from 1, as gen-media.py's `poster_frame` reads.
+    Pngs { dir: PathBuf, written: usize },
 }
 
 impl FrameSink {
-    /// A PNG sequence into `frames_dir` when given, else a looping GIF at `gif_path`.
-    pub(crate) fn open(gif_path: &Path, frames_dir: Option<&Path>) -> Result<Self> {
+    pub(crate) fn open(gif_path: &Path, frames_dir: Option<&Path>, frame_ms: u64) -> Result<Self> {
         if let Some(dir) = frames_dir {
             return Self::pngs(dir);
         }
         let mut encoder = GifEncoder::new(std::fs::File::create(gif_path)?);
         encoder.set_repeat(Repeat::Infinite)?;
-        Ok(Self::Gif(encoder))
+        Ok(Self::Gif {
+            encoder,
+            delay: Delay::from_numer_denom_ms(frame_ms as u32, 1),
+        })
     }
 
     pub(crate) fn pngs(dir: &Path) -> Result<Self> {
@@ -464,12 +465,10 @@ impl FrameSink {
         })
     }
 
-    /// `frame_ms` is the GIF frame delay; a PNG sequence carries no timing.
-    pub(crate) fn push(&mut self, rgba: RgbaImage, frame_ms: u64) -> Result<()> {
+    pub(crate) fn push(&mut self, rgba: RgbaImage) -> Result<()> {
         match self {
-            Self::Gif(encoder) => {
-                let delay = Delay::from_numer_denom_ms(frame_ms as u32, 1);
-                encoder.encode_frame(GifFrame::from_parts(rgba, 0, 0, delay))?;
+            Self::Gif { encoder, delay } => {
+                encoder.encode_frame(GifFrame::from_parts(rgba, 0, 0, *delay))?;
             }
             Self::Pngs { dir, written } => {
                 *written += 1;
@@ -510,7 +509,7 @@ impl AnimJob<'_> {
         let img_w = self.cols as u32 * CELL_W;
         let img_h = self.rows as u32 * CELL_H;
 
-        let mut sink = FrameSink::open(self.path, self.frames_dir)?;
+        let mut sink = FrameSink::open(self.path, self.frames_dir, frame_ms)?;
         for i in 0..(skip_frames + frame_count) {
             let elapsed_ms = self.timeline.elapsed_ms(i);
             render(state, self.timeline.now(i), elapsed_ms)?;
@@ -518,7 +517,7 @@ impl AnimJob<'_> {
                 continue;
             }
             let rgba = cells_to_rgba(cells(state), self.cols, self.rows, img_w, img_h);
-            sink.push(rgba, frame_ms)?;
+            sink.push(rgba)?;
             let cap = i + 1 - skip_frames;
             if cap.is_multiple_of(fps as usize) {
                 eprint!("\r  encoding: {}/{secs}s", cap / fps as usize);

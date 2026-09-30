@@ -678,7 +678,7 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             (ProofLayout::Wide, &mut wide),
             (ProofLayout::Tall, &mut tall),
         ] {
-            sink.push(compose_frame(&kind, &office, &script, elapsed, desk_px), 0)?;
+            sink.push(compose_frame(&kind, &office, &script, elapsed, desk_px))?;
         }
         if (i + 1).is_multiple_of(fps as usize) {
             eprint!("\r  proof: {}/{secs}s", (i + 1) / fps as usize);

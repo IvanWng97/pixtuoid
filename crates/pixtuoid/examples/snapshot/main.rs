@@ -994,7 +994,12 @@ mod tests {
                 "rejected {ok:?}"
             );
         }
-        assert!(SnapshotArgs::try_parse_from(["snapshot", "--frames-dir", "d"]).is_err());
+        assert_eq!(
+            SnapshotArgs::try_parse_from(["snapshot", "--frames-dir", "d"])
+                .unwrap_err()
+                .kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
     }
 
     #[test]
