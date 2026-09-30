@@ -47,15 +47,18 @@
     secret such as the CLI's own environment and publish it. `--tools` leaves
     only the built-in read tools, and dontAsk denies a read outside the working
     directory unless an allow rule pre-approves it, which a bare `Read` rule
-    does for every path (code.claude.com/docs/en/agent-sdk/permissions). Any
-    flag or action input can add one, so the arguments and the step's inputs
-    are pinned exactly; `--json-schema` keeps the answer structured for the
+    does for every path (code.claude.com/docs/en/agent-sdk/permissions);
+    `blockReadsOutsideWorkingDirectories` refuses such a read even then
+    (code.claude.com/docs/en/settings-reference). Any flag or action input can
+    add a rule or drop the setting, so the arguments and the step's inputs are
+    pinned exactly; `--json-schema` keeps the answer structured for the
     publisher to validate.
   expected: >-
     --max-turns ${{ inputs.max_turns }}
     --max-budget-usd ${{ inputs.max_budget_usd }}
     --permission-mode dontAsk
     --tools Read,Glob,Grep
+    --settings '{"permissions":{"blockReadsOutsideWorkingDirectories":true}}'
     --json-schema ${{ steps.schema.outputs.json }}
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
@@ -82,6 +85,9 @@
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub(" --json-schema [^ ]+"; "")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub(" --settings '[^']+'"; "")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with)
       += {"settings": "{}"}

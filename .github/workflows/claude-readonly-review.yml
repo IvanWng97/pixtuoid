@@ -158,6 +158,7 @@ jobs:
             --max-budget-usd ${{ inputs.max_budget_usd }}
             --permission-mode dontAsk
             --tools Read,Glob,Grep
+            --settings '{"permissions":{"blockReadsOutsideWorkingDirectories":true}}'
             --json-schema ${{ steps.schema.outputs.json }}
 
       - name: Require a valid structured review

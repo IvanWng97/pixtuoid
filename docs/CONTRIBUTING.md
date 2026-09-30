@@ -257,7 +257,8 @@ owner merges, recorded in a PR comment.
 The bots never review a fork PR on their own: a maintainer approves its CI
 run, then comments `/claude-review` and `/security-review`, again after every
 push. Its author can resolve their own threads, so before merging read each
-thread's `resolvedBy` and its reply. The bots skip Dependabot as an actor, so
+thread's `resolvedBy` and its reply. Its bot verdict is advisory, since the
+author can steer it through the diff, so the maintainer reads the diff too. The bots skip Dependabot as an actor, so
 a maintainer comments both commands on its PRs too.
 
 ### Dispositions
