@@ -23,7 +23,7 @@
 
 use std::sync::LazyLock;
 
-use ab_glyph_rasterizer::{point, Point, Rasterizer};
+use ab_glyph_rasterizer::{Point, Rasterizer, point};
 use skrifa::charmap::Charmap;
 use skrifa::instance::{LocationRef, Size};
 use skrifa::metrics::GlyphMetrics;

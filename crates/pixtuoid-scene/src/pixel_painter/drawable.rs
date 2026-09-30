@@ -11,7 +11,7 @@ use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 
-use super::palette::{blend_rgb, BLACK, WHITE};
+use super::palette::{BLACK, WHITE, blend_rgb};
 use super::sim::{Cup, DeskProps};
 use pixtuoid_core::AgentSlot;
 

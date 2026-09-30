@@ -10,11 +10,11 @@
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+use pixtuoid_core::AgentId;
 use pixtuoid_core::source::decoder::decode_hook_payload;
 use pixtuoid_core::source::{AgentEvent, Transport};
-use pixtuoid_core::state::reducer::Reducer;
 use pixtuoid_core::state::SceneState;
-use pixtuoid_core::AgentId;
+use pixtuoid_core::state::reducer::Reducer;
 
 const PARENT: &str = "01000000-0000-7000-8000-000000000001";
 const CHILD: &str = "01000000-0000-7000-8000-000000000002";

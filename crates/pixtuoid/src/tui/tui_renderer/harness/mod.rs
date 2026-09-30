@@ -1,11 +1,11 @@
 //! End-to-end headless harness: drives the real `TuiRenderer` (via ratatui
 //! `TestBackend`) through the production render path.
 use super::*;
-use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
 use pixtuoid_core::AgentId;
+use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
 use pixtuoid_scene::pet::PetKind;
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -152,11 +152,7 @@ pub(super) fn avg_lum(buf: &RgbBuffer, x0: u16, y0: u16, w: u16, h: u16) -> f32 
             n += 1;
         }
     }
-    if n == 0 {
-        0.0
-    } else {
-        sum / n as f32
-    }
+    if n == 0 { 0.0 } else { sum / n as f32 }
 }
 pub(super) fn region_diff(a: &RgbBuffer, b: &RgbBuffer, x0: u16, y0: u16, w: u16, h: u16) -> u64 {
     let mut d = 0u64;

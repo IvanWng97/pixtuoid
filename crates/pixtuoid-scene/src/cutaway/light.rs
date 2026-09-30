@@ -12,7 +12,7 @@
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::cutaway::order::Span;
-use crate::cutaway::pen::{dithered, ArtPx, ArtRect, Pen};
+use crate::cutaway::pen::{ArtPx, ArtRect, Pen, dithered};
 use crate::lighting::{Emitter, EmitterKind};
 use crate::theme::Theme;
 
@@ -73,11 +73,7 @@ impl Ambient {
     /// The most a light may lift a pixel in a room this dark: back to its
     /// daylight tone and never past it, or [`DAYLIGHT_LIFT`] by day.
     fn ceiling(self) -> u8 {
-        if self.0 == 0 {
-            DAYLIGHT_LIFT
-        } else {
-            self.0
-        }
+        if self.0 == 0 { DAYLIGHT_LIFT } else { self.0 }
     }
 }
 
@@ -303,11 +299,7 @@ pub(crate) fn net_pass(
             // The first of the brightest, in rank order.
             let (lift, tint) = lights.iter().fold((0u8, None), |best, l| {
                 let lift = l.lift_at(ax, ay);
-                if lift > best.0 {
-                    (lift, l.tint)
-                } else {
-                    best
-                }
+                if lift > best.0 { (lift, l.tint) } else { best }
             });
             if lift == 0 && ambient.0 == 0 {
                 continue;

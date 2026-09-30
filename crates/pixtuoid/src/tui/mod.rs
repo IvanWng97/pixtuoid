@@ -8,7 +8,7 @@ mod ui_state;
 pub mod welcome;
 pub mod widgets;
 
-use std::io::{stdout, Stdout};
+use std::io::{Stdout, stdout};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -19,10 +19,10 @@ use crossterm::event::{
 };
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 
 use tui_renderer::TuiRenderer;
 
@@ -1244,8 +1244,8 @@ mod runtime_model {
 #[cfg(test)]
 mod dispatch_tests {
     use super::{
-        connect_source, connection, disconnect_source, dispatch_key, FloorNav, KeyAction,
-        ModalState,
+        FloorNav, KeyAction, ModalState, connect_source, connection, disconnect_source,
+        dispatch_key,
     };
     use crossterm::event::{KeyCode, KeyModifiers};
 
@@ -1276,7 +1276,7 @@ mod dispatch_tests {
     #[test]
     fn toggle_intent_covers_the_four_arms() {
         use super::connection::ConnState;
-        use super::{toggle_intent, ToggleIntent};
+        use super::{ToggleIntent, toggle_intent};
         assert_eq!(
             toggle_intent(ConnState::Connected),
             ToggleIntent::ArmConfirm
@@ -2104,11 +2104,11 @@ mod dispatch_tests {
 /// inside `run_tui`, which needs a real terminal, so nothing could reach them.
 #[cfg(test)]
 mod apply_key_action_tests {
-    use super::{apply_key_action, KeyAction, KeyCtx};
+    use super::{KeyAction, KeyCtx, apply_key_action};
     use crate::tui::tui_renderer::TuiRenderer;
     use pixtuoid_scene::theme;
-    use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
     use std::collections::HashSet;
     use std::time::SystemTime;
 

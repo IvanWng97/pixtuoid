@@ -417,8 +417,8 @@ pub(crate) fn hero_script() -> Vec<Beat> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pixtuoid_core::state::reducer::Reducer;
     use pixtuoid_core::state::SceneState;
+    use pixtuoid_core::state::reducer::Reducer;
     use std::time::{Duration, SystemTime};
 
     fn run_script_through_reducer(loops: u32) -> SceneState {
@@ -472,8 +472,10 @@ mod tests {
         for a in scene.agents.values() {
             let prefix = a.label.split('·').next().unwrap();
             assert!(
-                ["cc", "cx", "ag", "cw", "oc", "cp", "cu", "hm", "gk", "rx", "om"]
-                    .contains(&prefix),
+                [
+                    "cc", "cx", "ag", "cw", "oc", "cp", "cu", "hm", "gk", "rx", "om"
+                ]
+                .contains(&prefix),
                 "label {:?} must carry a registered source prefix",
                 a.label
             );
