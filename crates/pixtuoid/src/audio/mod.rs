@@ -151,10 +151,10 @@ impl AudioController {
         respawn: impl FnOnce(&AudioHandle, f32),
     ) {
         let persist = apply_audio_action(&mut self.ui, action, paused, respawn);
-        if persist.muted {
-            if let Err(e) = crate::config::save_audio_muted(&self.config_path, self.ui.muted) {
-                tracing::warn!(error = %e, "failed to persist audio mute");
-            }
+        if persist.muted
+            && let Err(e) = crate::config::save_audio_muted(&self.config_path, self.ui.muted)
+        {
+            tracing::warn!(error = %e, "failed to persist audio mute");
         }
         if persist.volume_nudged {
             self.volume_dirty = true;
@@ -976,7 +976,7 @@ mod tests {
 /// The LISTEN gate: renders each busy-ness tier through the REAL
 /// mixer/schedulers/synth into wav files for the owner's audition.
 /// `#[ignore]` — run explicitly:
-/// `cargo test -p pixtuoid --lib audio::listen_gate -- --ignored --nocapture`
+/// `just test -p pixtuoid --lib audio::listen_gate --run-ignored only --no-capture`
 #[cfg(all(test, feature = "audio"))]
 mod listen_gate {
     use super::*;

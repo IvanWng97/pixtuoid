@@ -1017,6 +1017,16 @@ impl PodDecor {
         }
     }
 
+    /// The waypoint this decor also is, or `None` for pure decor. Exhaustive (no
+    /// `_`): a new `PodDecor` makes a deliberate wander decision here.
+    pub(crate) const fn waypoint(self) -> Option<WaypointKind> {
+        match self {
+            PodDecor::PhoneBooth => Some(WaypointKind::PhoneBooth),
+            PodDecor::StandingDesk => Some(WaypointKind::StandingDesk),
+            PodDecor::PlantTall | PodDecor::Whiteboard | PodDecor::Tv => None,
+        }
+    }
+
     /// Pack-animation key for this pod-decor's sprite (blit in `drawable.rs`).
     pub const fn sprite_name(self) -> &'static str {
         match self {

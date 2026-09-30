@@ -475,10 +475,10 @@ mod recorder {
     fn identity_needles(git: impl Fn(&str) -> Option<String>) -> BTreeSet<String> {
         let mut needles: BTreeSet<String> = BTreeSet::new();
         for var in ["HOME", "USER", "LOGNAME"] {
-            if let Some(v) = pixtuoid_core::platform::text_env(var) {
-                if !v.is_empty() {
-                    needles.insert(v);
-                }
+            if let Some(v) = pixtuoid_core::platform::text_env(var)
+                && !v.is_empty()
+            {
+                needles.insert(v);
             }
         }
         for key in ["user.name", "user.email"] {
@@ -801,17 +801,17 @@ mod recorder {
                 continue;
             }
             let blanked = strip_unread(&source, &files)?;
-            if let Some(obj) = record.as_object_mut() {
-                if blanked > 0 || !obj.contains_key("deidentified") {
-                    obj.insert(
-                        "deidentified".into(),
-                        serde_json::json!({ "method": "decoder-allowlist", "blanked": blanked }),
-                    );
-                    std::fs::write(
-                        &prov,
-                        format!("{}\n", serde_json::to_string_pretty(&record)?),
-                    )?;
-                }
+            if let Some(obj) = record.as_object_mut()
+                && (blanked > 0 || !obj.contains_key("deidentified"))
+            {
+                obj.insert(
+                    "deidentified".into(),
+                    serde_json::json!({ "method": "decoder-allowlist", "blanked": blanked }),
+                );
+                std::fs::write(
+                    &prov,
+                    format!("{}\n", serde_json::to_string_pretty(&record)?),
+                )?;
             }
             println!(
                 "{}: blanked {blanked}",

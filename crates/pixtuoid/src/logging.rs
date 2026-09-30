@@ -191,12 +191,6 @@ fn log_open_failure(path: &Path, e: &std::io::Error) -> String {
     )
 }
 
-/// Serializes the bin crate's env-mutating tests: `crash.rs` and `logging.rs` both
-/// drive `XDG_STATE_HOME`/`HOME`, and the bin's unit-test target runs in ONE
-/// process under plain `cargo test`.
-#[cfg(test)]
-pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,36 +257,29 @@ mod tests {
     fn log_file_path_rejects_a_relative_xdg_state_home() {
         // Pins the CALL SITE, not just the primitive: a revert to plain
         // `path_env` here would leak a relative log path.
-        let _env = super::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let saved_log = std::env::var_os("PIXTUOID_LOG");
-        let saved_xdg = std::env::var_os("XDG_STATE_HOME");
-        std::env::remove_var("PIXTUOID_LOG");
-        let home = pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
-        let cache = home.join(".cache").join("pixtuoid").join("log");
-        for rel in ["", "   ", "rel/state", "~/state"] {
-            std::env::set_var("XDG_STATE_HOME", rel);
-            assert_eq!(
-                log_file_path(),
-                cache,
-                "relative XDG_STATE_HOME {rel:?} must fall back to ~/.cache"
-            );
-        }
-        // A leading slash is not absolute on Windows, so pick per-platform. The
-        // literal's `/` is fine: `PathBuf` equality compares components.
-        let abs = if cfg!(windows) { "C:/state" } else { "/state" };
-        std::env::set_var("XDG_STATE_HOME", abs);
-        assert_eq!(
-            log_file_path(),
-            PathBuf::from(format!("{abs}/pixtuoid/log"))
-        );
-        match saved_log {
-            Some(v) => std::env::set_var("PIXTUOID_LOG", v),
-            None => std::env::remove_var("PIXTUOID_LOG"),
-        }
-        match saved_xdg {
-            Some(v) => std::env::set_var("XDG_STATE_HOME", v),
-            None => std::env::remove_var("XDG_STATE_HOME"),
-        }
+        temp_env::with_var_unset("PIXTUOID_LOG", || {
+            let home =
+                pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
+            let cache = home.join(".cache").join("pixtuoid").join("log");
+            for rel in ["", "   ", "rel/state", "~/state"] {
+                temp_env::with_var("XDG_STATE_HOME", Some(rel), || {
+                    assert_eq!(
+                        log_file_path(),
+                        cache,
+                        "relative XDG_STATE_HOME {rel:?} must fall back to ~/.cache"
+                    );
+                });
+            }
+            // A leading slash is not absolute on Windows, so pick per-platform. The
+            // literal's `/` is fine: `PathBuf` equality compares components.
+            let abs = if cfg!(windows) { "C:/state" } else { "/state" };
+            temp_env::with_var("XDG_STATE_HOME", Some(abs), || {
+                assert_eq!(
+                    log_file_path(),
+                    PathBuf::from(format!("{abs}/pixtuoid/log"))
+                );
+            });
+        });
     }
 
     #[test]

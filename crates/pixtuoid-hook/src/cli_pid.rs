@@ -234,7 +234,7 @@ mod tests {
     use super::*;
 
     /// A fake process table as the walk consumes one: pid → (parent, exe).
-    fn table(rows: &[(u32, u32, &str)]) -> impl Fn(u32) -> Option<ProcRow> {
+    fn table(rows: &[(u32, u32, &str)]) -> impl Fn(u32) -> Option<ProcRow> + use<> {
         let rows: std::collections::HashMap<u32, ProcRow> = rows
             .iter()
             .map(|&(pid, parent, exe)| {

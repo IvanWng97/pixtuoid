@@ -120,7 +120,7 @@ fn main() -> Result<()> {
 /// mutating process-global env. No `_pid`: `enrich_payload` is the one stamper.
 #[expect(
     clippy::disallowed_methods,
-    reason = "known debt: DEEPSEEK_WORKSPACE is a path, read here as text"
+    reason = "CodeWhale exports DEEPSEEK_WORKSPACE as UTF-8 text (`ws.display().to_string()` in its hooks/executor.rs)"
 )]
 fn env_payload(event: &str) -> serde_json::Map<String, Value> {
     // CodeWhale runs the hook with current_dir = its working dir (= the
@@ -229,17 +229,17 @@ fn enrich_payload(
 ) {
     map.remove("_pixtuoid_source");
     map.insert("_shim_ts_ms".into(), Value::from(ts_ms));
-    if let Some(src) = source {
-        if !src.is_empty() {
-            map.insert("_pixtuoid_source".into(), Value::from(src));
-        }
+    if let Some(src) = source
+        && !src.is_empty()
+    {
+        map.insert("_pixtuoid_source".into(), Value::from(src));
     }
     // The opencode/OpenClaw plugins stamp `process.pid` from inside the CLI —
     // keep theirs, and stay LAZY so they never pay for the Windows snapshot.
-    if !map.contains_key("_pid") {
-        if let Some(pid) = resolve_pid() {
-            map.insert("_pid".into(), Value::from(pid));
-        }
+    if !map.contains_key("_pid")
+        && let Some(pid) = resolve_pid()
+    {
+        map.insert("_pid".into(), Value::from(pid));
     }
 }
 

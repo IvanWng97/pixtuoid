@@ -46,7 +46,7 @@ test('the docs sidebar is an elevator panel: current-doc LED + a building bank f
 });
 
 test('markdown callouts render as terminal windows (note + warning)', async ({ page }) => {
-  // CONTRIBUTING.md carries a "**Don't chain …**" blockquote → warning;
+  // CONTRIBUTING.md carries a "**Don't …**" blockquote → warning;
   // ARCHITECTURE.md a plain editorial one → note.
   await page.goto('./contributing');
   const warn = page.locator('.callout--warn').first();

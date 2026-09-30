@@ -7,7 +7,7 @@ use std::ops::Range;
 
 use pixtuoid_core::sprite::RgbBuffer;
 
-use super::drawable::{Drawable, DrawableKind};
+use super::drawable::{Drawable, DrawableKind, Layer};
 use crate::cutaway::pen::{ArtRect, Pen};
 use crate::glass::Glass;
 use crate::layout::{Layout, WallPiece};
@@ -47,13 +47,15 @@ pub(crate) fn paint_wall(
     }
 }
 
-/// Queue every room wall's bands into the y-sort, emitted LAST so a character
-/// tied with a band's row still paints behind the glass.
+/// Queue every room wall's bands into the y-sort, emitted after the fixtures so
+/// the glass also covers a chair tied with a band's row.
 pub(super) fn enqueue_room_walls<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
     for &piece in &layout.wall_pieces {
         for (rows, depth) in piece.sort_bands() {
             drawables.push(Drawable {
                 anchor_y: depth,
+                // A character tied with a band's row still paints behind the glass.
+                layer: Layer::Over,
                 kind: DrawableKind::RoomWall { piece, rows },
             });
         }
