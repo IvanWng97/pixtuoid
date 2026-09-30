@@ -21,6 +21,9 @@ on:
   push:
     branches: [main]
   pull_request:
+    # ready_for_review: the job skips drafts, so a PR's first trend point
+    # lands when it leaves draft.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "crates/**"
       - "Cargo.toml"
@@ -39,6 +42,7 @@ permissions:
 jobs:
   codspeed:
     name: benchmarks (codspeed simulation + memory, advisory)
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

@@ -1,5 +1,5 @@
 name: 'Require Jobs'
-description: 'Fails unless every needed job succeeded — skipped and cancelled red too'
+description: 'Fails unless every needed job succeeded — skipped (unless allowed) and cancelled red too'
 
 inputs:
   results:
@@ -8,6 +8,10 @@ inputs:
   label:
     description: 'Failure-message prefix naming the group'
     required: true
+  allow-skipped:
+    description: "'true' lets a skipped job pass: only a light-tier run, whose full-tier jobs skip by design, may pass it"
+    required: false
+    default: 'false'
 
 runs:
   using: 'composite'
@@ -16,6 +20,7 @@ runs:
       env:
         RESULTS: ${{ inputs.results }}
         LABEL: ${{ inputs.label }}
+        ALLOW_SKIPPED: ${{ inputs.allow-skipped }}
       run: |
         # `required: true` on an input is advisory — a caller that omits it
         # hands us an empty string, and an empty needs-map would pass vacuously.
@@ -23,7 +28,12 @@ runs:
           echo "::error::${LABEL:-require-jobs}: no job results — the caller must pass results: toJSON(needs)"
           exit 1
         fi
-        failures="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"' <<< "$RESULTS")"
+        # Any spelling but exactly `true` stays strict.
+        failures="$(jq -r --arg allow_skipped "$ALLOW_SKIPPED" '
+          to_entries[]
+          | select(.value.result != "success")
+          | select($allow_skipped != "true" or .value.result != "skipped")
+          | "\(.key)=\(.value.result)"' <<< "$RESULTS")"
         if [[ -n "$failures" ]]; then
           echo "::error::${LABEL}: ${failures//$'\n'/, }"
           exit 1

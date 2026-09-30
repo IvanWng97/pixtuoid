@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+    # ready_for_review re-runs a head that a draft judged only at the light
+    # tier. converted_to_draft is left out: a draft cannot merge, so re-judging
+    # an unchanged head at the light tier would buy nothing.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 concurrency:
@@ -15,14 +19,21 @@ concurrency:
 permissions:
   contents: read
 
+# `full` is false only on a draft PR, where each group runs just its jobs that
+# lack `if: inputs.full`: a draft push is feedback, and the full tier's macOS
+# and Windows jobs are what parallel sessions queue on.
 jobs:
   lint:
     name: Lint & Hygiene
     uses: ./.github/workflows/ci-lint.yml
+    with:
+      full: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
 
   builds:
     name: Builds & Packaging
     uses: ./.github/workflows/ci-builds.yml
+    with:
+      full: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
 
   tests:
     name: Test Suite & Coverage
@@ -30,6 +41,8 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/ci-tests.yml
+    with:
+      full: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
 
   gate:
     name: ci-gate
@@ -47,3 +60,14 @@ jobs:
         with:
           results: ${{ toJSON(needs) }}
           label: "CI group failed"
+      # Branch protection counts a green or a skipped ci-gate as passing, so a
+      # light-tier run must end red here: a green ci-gate then always means the
+      # full tier passed on this head.
+      - name: Require the full tier
+        env:
+          FULL: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+        run: |
+          if [[ "$FULL" != true ]]; then
+            echo "::error title=Full tier not run::draft PR: only the light tier ran on this head; mark the PR ready for review to run the full tier"
+            exit 1
+          fi

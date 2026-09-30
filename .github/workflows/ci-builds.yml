@@ -2,6 +2,11 @@ name: ci-builds
 
 on:
   workflow_call:
+    inputs:
+      full:
+        description: 'False on a draft PR: only the jobs without `if: inputs.full` run'
+        type: boolean
+        required: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,6 +18,7 @@ jobs:
   # not byte-compare wasm output — latest-stable builds drift.
   wasm-check:
     name: wasm-check
+    if: ${{ inputs.full }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -29,6 +35,7 @@ jobs:
 
   hack:
     name: feature combinations
+    if: ${{ inputs.full }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -42,6 +49,7 @@ jobs:
 
   windows-check:
     name: windows-check
+    if: ${{ inputs.full }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -55,6 +63,7 @@ jobs:
 
   packaging-linux:
     name: packaging-build (ubuntu-latest)
+    if: ${{ inputs.full }}
     # The only clean `cargo install --locked`, default-features build on both
     # Homebrew bottle platforms: it catches stale lockfiles and new system
     # dependencies before an external autobump does.
@@ -72,6 +81,7 @@ jobs:
 
   packaging-macos:
     name: packaging-build (macos-14)
+    if: ${{ inputs.full }}
     runs-on: macos-14
     timeout-minutes: 45
     steps:
@@ -96,3 +106,6 @@ jobs:
         with:
           results: ${{ toJSON(needs) }}
           label: "Required build job failed"
+          # The tier guard is the only `if:` a job here may carry, so a light
+          # run lets exactly the full-tier jobs skip.
+          allow-skipped: ${{ !inputs.full }}
