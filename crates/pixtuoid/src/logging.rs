@@ -14,7 +14,7 @@ use tracing_subscriber::EnvFilter;
 /// runtime error can surface — at a `warn` floor unless $RUST_LOG, $PIXTUOID_LOG or
 /// --log-level raises it. Every other mode goes to stderr.
 pub(crate) fn init(tui_active: bool, log_level: &'static str) {
-    let rust_log = std::env::var("RUST_LOG").ok();
+    let rust_log = pixtuoid_core::platform::text_env("RUST_LOG");
     let make_filter = || {
         EnvFilter::try_new(filter_directives(rust_log.as_deref(), log_level))
             .unwrap_or_else(|_| EnvFilter::new(log_level))
@@ -257,15 +257,6 @@ mod tests {
             filter_directives(Some("info,pixtuoid=debug"), "warn"),
             "info,pixtuoid=debug"
         );
-    }
-
-    #[test]
-    fn nonempty_treats_empty_and_whitespace_as_unset() {
-        use pixtuoid::install::nonempty;
-        assert_eq!(nonempty(None), None);
-        assert_eq!(nonempty(Some(String::new())), None);
-        assert_eq!(nonempty(Some("   ".into())), None);
-        assert_eq!(nonempty(Some("/state".into())), Some("/state".to_string()));
     }
 
     #[test]

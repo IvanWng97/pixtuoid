@@ -113,8 +113,7 @@ fn user_config_dir() -> Option<PathBuf> {
 }
 
 /// Pure core for [`user_config_dir`]: `None` when the arm the OS/env select would
-/// fall back to a home join and no home resolves. `io::nonempty` mirrors the core
-/// fn's own empty-as-unset filter so the two can't disagree on when that fires.
+/// fall back to a home join and no home resolves.
 fn user_config_dir_checked(
     os: &str,
     appdata: Option<PathBuf>,

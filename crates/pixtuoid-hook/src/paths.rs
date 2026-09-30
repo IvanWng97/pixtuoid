@@ -58,8 +58,9 @@ pub(crate) fn default_socket_path() -> PathBuf {
 /// `PIXTUOID_SOCKET` pipe stays the user's trust decision.
 #[cfg(windows)]
 pub(crate) fn default_windows_pipe_name() -> String {
-    let user = std::env::var("USERNAME")
-        .unwrap_or_else(|_| "default".into())
+    let user = std::env::var_os("USERNAME")
+        .and_then(|u| u.into_string().ok())
+        .unwrap_or_else(|| "default".into())
         .replace('\\', "-");
     format!(r"\\.\pipe\pixtuoid-{user}")
 }

@@ -425,7 +425,7 @@ mod recorder {
     }
 
     fn nonempty_env(key: &str) -> Option<String> {
-        std::env::var(key).ok().filter(|s| !s.trim().is_empty())
+        pixtuoid_core::platform::text_env(key).filter(|s| !s.trim().is_empty())
     }
 
     fn today() -> String {
@@ -475,7 +475,7 @@ mod recorder {
     fn identity_needles(git: impl Fn(&str) -> Option<String>) -> BTreeSet<String> {
         let mut needles: BTreeSet<String> = BTreeSet::new();
         for var in ["HOME", "USER", "LOGNAME"] {
-            if let Ok(v) = std::env::var(var) {
+            if let Some(v) = pixtuoid_core::platform::text_env(var) {
                 if !v.is_empty() {
                     needles.insert(v);
                 }

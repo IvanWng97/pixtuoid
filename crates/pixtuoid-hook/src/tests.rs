@@ -323,8 +323,8 @@ fn env_payload_falls_back_to_cwd_when_workspace_unset() {
 #[cfg(unix)]
 #[test]
 fn default_socket_path_branches() {
-    let prior_socket = std::env::var("PIXTUOID_SOCKET").ok();
-    let prior_xdg = std::env::var("XDG_RUNTIME_DIR").ok();
+    let prior_socket = std::env::var_os("PIXTUOID_SOCKET");
+    let prior_xdg = std::env::var_os("XDG_RUNTIME_DIR");
 
     std::env::set_var("PIXTUOID_SOCKET", "/explicit/path.sock");
     std::env::set_var("XDG_RUNTIME_DIR", "/run/user/0");
@@ -416,8 +416,8 @@ fn owned_tmp_socket_dir_matches_only_the_tmp_fallback() {
 #[cfg(windows)]
 #[test]
 fn default_socket_path_branches_windows() {
-    let prior_socket = std::env::var("PIXTUOID_SOCKET").ok();
-    let prior_user = std::env::var("USERNAME").ok();
+    let prior_socket = std::env::var_os("PIXTUOID_SOCKET");
+    let prior_user = std::env::var_os("USERNAME");
 
     std::env::set_var("PIXTUOID_SOCKET", r"\\.\pipe\explicit");
     assert_eq!(

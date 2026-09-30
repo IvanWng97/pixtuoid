@@ -213,15 +213,6 @@ machete:
 deny:
     cargo deny check bans licenses sources
 
-# A PATH-valued env var read with `env::var` DROPS a non-UTF-8 value — a legal
-# path — and falls back to a different directory, silently. `--selftest` proves
-# the checker can FAIL.
-[group('rust')]
-[doc('Gate: PATH-valued env vars must be read as bytes, never via env::var')]
-env-paths:
-    python3 scripts/check-env-paths.py --selftest
-    python3 scripts/check-env-paths.py
-
 # Architecture invariant #1, mechanized: pixtuoid-core + pixtuoid-scene stay
 # terminal/window/audio-device-free.
 [group('rust')]
@@ -272,7 +263,6 @@ lint:
     run() { local n="$1"; shift; if "$@" >"$tmp/$n.log" 2>&1; then printf '  \033[32m✓ %s\033[0m\n' "$n"; else printf '  \033[31m✗ %s\033[0m\n' "$n"; cat "$tmp/$n.log"; return 1; fi; }
     pids=(); fail=0
     run fmt     cargo fmt --all --check & pids+=($!)
-    run env-paths just env-paths        & pids+=($!)
     run genart  just gen-art-check       & pids+=($!)
     run machete cargo machete           & pids+=($!)
     run deny    just deny                & pids+=($!)

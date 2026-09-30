@@ -17,6 +17,12 @@
 //! dir, every dir a registered source — so a bench-shaped fixture there would be
 //! mis-scanned and panic.
 
+// Crate-wide: rustc ignores a lint attribute on the `criterion_group!` call itself.
+#![expect(
+    clippy::disallowed_methods,
+    reason = "codspeed's `criterion_group!` expansion reads its workspace root with `env::var`"
+)]
+
 use criterion::{criterion_group, criterion_main, Criterion};
 use pixtuoid_core::harness::Drive;
 

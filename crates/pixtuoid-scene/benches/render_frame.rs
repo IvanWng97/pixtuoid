@@ -17,6 +17,12 @@
 //! `crates/pixtuoid/examples/render_bench.rs` measures buffer-size SCALING
 //! through the floating offscreen renderer for the 2.5D design gate.
 
+// Crate-wide: rustc ignores a lint attribute on the `criterion_group!` call itself.
+#![expect(
+    clippy::disallowed_methods,
+    reason = "codspeed's `criterion_group!` expansion reads its workspace root with `env::var`"
+)]
+
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
