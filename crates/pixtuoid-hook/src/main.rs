@@ -102,7 +102,8 @@ fn main() -> Result<()> {
         // form) wins over the `PIXTUOID_SOURCE` env var (the Unix env-prefix
         // form; grok delivers the same var via its handler `env` map, so this arm
         // serves both). `--event` is orthogonal and never implies a source.
-        let source = source_from_argv(&args).or_else(|| std::env::var("PIXTUOID_SOURCE").ok());
+        let source = source_from_argv(&args)
+            .or_else(|| std::env::var_os("PIXTUOID_SOURCE").and_then(|v| v.into_string().ok()));
         enrich_payload(map, source, now_ms(), cli_pid);
     }
 
@@ -117,6 +118,10 @@ fn main() -> Result<()> {
 /// CodeWhale env-mode: synthesize the hook envelope from `DEEPSEEK_*` env vars.
 /// The `std::env` reads live here so `env_payload_from` stays testable without
 /// mutating process-global env. No `_pid`: `enrich_payload` is the one stamper.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "CodeWhale exports DEEPSEEK_WORKSPACE as UTF-8 text (`ws.display().to_string()` in its hooks/executor.rs)"
+)]
 fn env_payload(event: &str) -> serde_json::Map<String, Value> {
     // CodeWhale runs the hook with current_dir = its working dir (= the
     // workspace), so the shim's own cwd is the reliable fallback.

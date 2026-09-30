@@ -472,7 +472,7 @@ mod tests {
         let night = Ambient(AMBIENT_MAX_STEPS);
         let lamp = view(&lamp(0.6, Point { x: 10, y: 8 }), Some(WARM), night);
         let buf = lit_floor(&[&lamp], night);
-        let luma = |c: Rgb| u32::from(c.r) + u32::from(c.g) + u32::from(c.b);
+        let luma = Rgb::lightness;
         assert!(luma(buf.get(10 * 4 + 1, 8 * 4 + 1)) > luma(night.on(FLOOR)));
         assert_eq!(buf.get(0, 0), night.on(FLOOR));
     }

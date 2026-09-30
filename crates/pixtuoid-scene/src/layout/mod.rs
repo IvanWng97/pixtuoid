@@ -34,7 +34,7 @@ pub(crate) use rooms::walls::WallPiece;
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 pub(crate) use roster::{
-    CLOCK, Depth, Fixture, Layer, NEON_PANEL, NEON_PANEL_BORDER, desk_chair_top_left,
+    CLOCK, Depth, Fixture, Layer, NEON_PANEL, NEON_PANEL_BORDER, Tie, desk_chair_top_left,
     desk_chair_z_key,
 };
 pub use roster::{
@@ -42,7 +42,7 @@ pub use roster::{
     NEON_PANEL_W, Station,
 };
 #[cfg(test)]
-pub(crate) use roster::{NEON_PANEL_H, Tie, coffee_machine_cols};
+pub(crate) use roster::{NEON_PANEL_H, coffee_machine_cols};
 // Painter tests tile walls no `SceneLayout` has.
 #[cfg(test)]
 pub(crate) use windows::window_bays;
