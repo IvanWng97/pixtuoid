@@ -132,17 +132,18 @@ quality lever is the change-specific `<...>` checklist, never the lens name.
 ## Orchestrator notes (diff scope)
 
 Every finding reaches exactly one terminal state in the PR thread (this list is CANONICAL —
-other docs point here): FIXED · REFUTED-with-trace (cite the MECHANISM that
-refutes it — a test, a compile-time constraint, a CI gate; ADD one where none
-exists, never prose) · RE-SCOPED (real and INTRODUCED — or first made reachable — by this
-change, and bigger than the PR: the PR is wrong-sized, split or redesign it
-until the finding is IN scope; the split-off half is cited as `→ #N`) ·
-FOLLOW-UP → #N (real and PRE-EXISTING, whether or not this change touched
-its file: a pre-existing defect never grows the PR, but it is FIXED, in PR
-#N, which exists — a draft, or already merged — before this PR merges; a
-defect in another session's tree gets that session's PR number). A
-disposition line that names no live `#N` is not terminal. Agents never
-file issues; "acknowledged" and "surfaced to the owner" are not states.
+other docs point here): FIXED · REFUTED (cite the MECHANISM that refutes it —
+a test, a compile-time constraint, a CI gate; ADD one where none exists,
+never prose) · RE-SCOPED → #N (real and INTRODUCED — or first made reachable
+— by this change, and bigger than the PR: split it off into #N; a redesign
+that brings the finding into scope ends FIXED) · FOLLOW-UP → #N (real and
+PRE-EXISTING, whether or not this change touched its file: it never grows
+the PR, and is fixed in #N; a defect in another session's tree cites that
+session's PR). A disposition is one line that STARTS with its state, after
+an optional list marker or `**`: `FIXED: …` · `REFUTED: … — <mechanism>` ·
+`RE-SCOPED → #N: …` · `FOLLOW-UP → #N: …`, where #N is an open or merged PR
+other than this one. One finding per line; the state word anywhere else is
+prose. Agents never file issues; "acknowledged" and "surfaced" are not states.
 Sweep at the FINAL merge head; check WHICH commit a bot re-flag was raised
 against before re-litigating. Orchestration (dispatch,
 premise verify, the fold, the bot-verdict gate), round caps, blocking bar and
