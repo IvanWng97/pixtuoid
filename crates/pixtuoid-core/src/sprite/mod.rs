@@ -592,6 +592,19 @@ mod tests {
     }
 
     #[test]
+    fn every_srgb_color_survives_an_oklab_round_trip() {
+        let levels = (0..=255u8).step_by(15);
+        for r in levels.clone() {
+            for g in levels.clone() {
+                for b in levels.clone() {
+                    let c = rgb(r, g, b);
+                    assert_eq!(Rgb::from_oklab_in_gamut(c.to_oklab()), c);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn a_mix_runs_from_one_color_to_the_other_evenly_in_lightness() {
         let (navy, amber) = (rgb(18, 26, 52), rgb(252, 215, 110));
         assert_eq!(navy.mix(amber, 0.0), navy);
