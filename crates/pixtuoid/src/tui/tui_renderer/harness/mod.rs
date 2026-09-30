@@ -59,11 +59,15 @@ pub(super) fn render_until_settled<B: Backend<Error: Send + Sync + 'static>>(
     panic!("floor transition to {target_floor} did not settle");
 }
 
-pub(super) fn pack() -> Pack {
-    pixtuoid_scene::embedded_pack::load_sprite_pack(
-        pixtuoid_scene::embedded_pack::PackSource::Bundled,
-    )
-    .expect("embedded pack")
+/// Parsed once per test process: parsing the pack costs far more than a frame.
+pub(super) fn pack() -> &'static Pack {
+    static PACK: std::sync::OnceLock<Pack> = std::sync::OnceLock::new();
+    PACK.get_or_init(|| {
+        pixtuoid_scene::embedded_pack::load_sprite_pack(
+            pixtuoid_scene::embedded_pack::PackSource::Bundled,
+        )
+        .expect("embedded pack")
+    })
 }
 pub(super) fn t0() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000)

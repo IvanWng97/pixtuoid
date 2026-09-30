@@ -4,7 +4,7 @@ use super::*;
 fn furniture_hit_test_resolves_against_rendered_layout() {
     let scene = scene_with(vec![idle("/hit/0.jsonl", 0, t0())], 16);
     let mut r = build(120, 44, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout");
     let desk = layout.home_desks[0];
     let hit = crate::tui::hit_test::hit_test_furniture(
@@ -23,7 +23,7 @@ fn coffee_machine_hit_test_resolves_on_pantry() {
     use pixtuoid_scene::layout::WaypointKind;
     let scene = scene_with(vec![idle("/cm/0.jsonl", 0, t0())], 16);
     let mut r = build(140, 48, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout");
     let pantry = layout
         .waypoints
@@ -55,7 +55,7 @@ fn coffee_machine_hit_test_resolves_on_pantry() {
 fn pet_hit_test_resolves_at_pet_position() {
     let scene = scene_with(vec![active("/ph/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(120, 44, vec![PetKind::Cat]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let PetFrame { pos, anim, kind } = r.cached_pet_pos().expect("pet placed");
     assert!(
         crate::tui::hit_test::hit_test_pet(
@@ -75,9 +75,9 @@ fn hovering_an_agent_marks_its_label() {
     let id = s.agent_id;
     let scene = scene_with(vec![s], 16);
     let mut r = build(140, 48, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     hover_agent(&mut r, &scene, id, 140, 48);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("\u{25b8}HOVERME") || text.contains("\u{25b8}"),
@@ -91,7 +91,7 @@ fn click_hit_test_follows_a_walking_sprite_where_from_tui_misses_it() {
     let mut s = idle("/w/0.jsonl", 0, t0() - Duration::from_secs(300));
     let scene = scene_with(vec![s.clone()], 16);
     let mut r = build(192, 80, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let desk = r.cached_layout().expect("layout").home_desks[0];
     let (dx, dy) = (desk.x + 2, desk.y.saturating_sub(4) / 2 + 1);
     assert_eq!(r.hit_test_agent_at(&scene, t0(), dx, dy), Some(id));
@@ -109,7 +109,7 @@ fn click_hit_test_follows_a_walking_sprite_where_from_tui_misses_it() {
     let scene = scene_with(vec![s], 16);
     // Mid-exit-walk, inside EXIT_GRACE_WINDOW — off the desk box, not yet GC'd.
     let walk_now = t0() + Duration::from_millis(1500);
-    r.render(&scene, &pack(), walk_now).unwrap();
+    r.render(&scene, pack(), walk_now).unwrap();
 
     let mut live = None;
     'scan: for my in 0..80u16 {
