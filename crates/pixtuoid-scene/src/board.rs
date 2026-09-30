@@ -787,8 +787,8 @@ mod tests {
 
     #[test]
     fn uptime_is_the_oldest_in_scene_agent_in_whole_seconds() {
-        use pixtuoid_core::state::{ActivityState, GlobalDeskIndex};
         use pixtuoid_core::AgentId;
+        use pixtuoid_core::state::{ActivityState, GlobalDeskIndex};
         use std::path::PathBuf;
         use std::sync::Arc;
         use std::time::Duration;

@@ -5,7 +5,7 @@
 //! shape-shared machinery lives here.
 
 use crate::install::target::MergeOutcome;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 /// Parse JSON config content, treating empty/whitespace-only as the empty
 /// document (`{}`) — the shared rule every JSON target's merge relies on.

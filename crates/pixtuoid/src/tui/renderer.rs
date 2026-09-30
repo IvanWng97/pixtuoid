@@ -4,32 +4,32 @@
 use std::time::SystemTime;
 
 use anyhow::Result;
-use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::SceneState;
+use pixtuoid_core::sprite::RgbBuffer;
+use pixtuoid_core::sprite::format::Pack;
+use ratatui::Terminal;
 use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
-use ratatui::Terminal;
 
 use std::sync::Arc;
 
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
 use pixtuoid_scene::layout::Layout;
 use pixtuoid_scene::pet::PetFrame;
-use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, MascotFrame, PixelCtx};
+use pixtuoid_scene::pixel_painter::{MascotFrame, PixelCtx, render_to_rgb_buffer};
 
 use crate::tui::geometry::CellArea;
 pub(crate) use crate::tui::hit_test::{
     hit_test_agent, hit_test_coffee_machine, hit_test_furniture, hit_test_mascot, hit_test_pet,
 };
+pub(crate) use crate::tui::widgets::{TooltipAt, paint_hover_tooltip};
 pub(super) use crate::tui::widgets::{
     paint_chitchat_bubbles, paint_coffee_tooltip, paint_connection_panel, paint_dashboard,
     paint_elevator_indicator, paint_footer, paint_furniture_tooltip, paint_help_overlay,
     paint_label_widgets, paint_mascot_tooltip, paint_pet_tooltip, paint_theme_picker,
     paint_version_popup, paint_wall_display, paint_welcome,
 };
-pub(crate) use crate::tui::widgets::{paint_hover_tooltip, TooltipAt};
 
 pub use pixtuoid_scene::pet::PetState;
 

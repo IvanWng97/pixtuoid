@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use pixtuoid_core::source::{AgentEvent, Transport};
-use pixtuoid_core::state::reducer::Reducer;
-use pixtuoid_core::state::SceneState;
 use pixtuoid_core::AgentId;
+use pixtuoid_core::source::{AgentEvent, Transport};
+use pixtuoid_core::state::SceneState;
+use pixtuoid_core::state::reducer::Reducer;
 
 use crate::{act_start, sess_end, start};
 
@@ -140,8 +140,8 @@ fn ghost_label_counter_is_contiguous_after_named_sessions() {
 
 #[test]
 fn capacity_dropped_unknown_cwd_session_consumes_no_ghost_ordinal() {
-    use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
     use pixtuoid_core::state::MAX_FLOORS;
+    use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
     let mut caps = [0usize; MAX_FLOORS];
     caps[0] = 1;
     let mut scene = SceneState::new(caps);

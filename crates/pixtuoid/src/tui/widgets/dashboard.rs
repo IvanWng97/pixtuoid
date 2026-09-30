@@ -9,8 +9,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::{marquee_or_truncate, source_badge_span, to_color, Overflow, Panel};
-use crate::tui::dashboard::{DashboardFrame, DashboardRow, RowState, DASHBOARD_VIEWPORT_ROWS};
+use super::{Overflow, Panel, marquee_or_truncate, source_badge_span, to_color};
+use crate::tui::dashboard::{DASHBOARD_VIEWPORT_ROWS, DashboardFrame, DashboardRow, RowState};
 use pixtuoid_scene::theme::Theme;
 
 const LABEL_W: usize = 32;

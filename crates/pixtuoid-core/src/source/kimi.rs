@@ -31,11 +31,11 @@
 
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde_json::{Map, Value};
 
-use crate::source::{registry, AgentEvent};
 use crate::AgentId;
+use crate::source::{AgentEvent, registry};
 
 /// The Kimi CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "kimi";

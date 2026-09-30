@@ -1261,9 +1261,11 @@ mod recorder {
             )
             .expect("json");
             assert_eq!(prov["deidentified"]["method"], "decoder-allowlist");
-            assert!(prov["deidentified"]["blanked"]
-                .as_u64()
-                .is_some_and(|n| n > 0));
+            assert!(
+                prov["deidentified"]["blanked"]
+                    .as_u64()
+                    .is_some_and(|n| n > 0)
+            );
             assert_eq!(prov["origin"], "recorded", "the rest of the record is kept");
 
             strip_corpus(d.path()).expect("strip corpus again");

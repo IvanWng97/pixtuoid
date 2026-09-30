@@ -1,6 +1,6 @@
 use pixtuoid_core::SceneState;
 use pixtuoid_scene::footer::{
-    build_footer, footer_tone_rgb, FooterContext, FooterFloor, FooterInputs,
+    FooterContext, FooterFloor, FooterInputs, build_footer, footer_tone_rgb,
 };
 use ratatui::layout::Rect;
 use ratatui::style::Style;

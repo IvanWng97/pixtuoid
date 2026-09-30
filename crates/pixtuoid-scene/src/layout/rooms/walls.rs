@@ -17,7 +17,7 @@
 use crate::layout::decor::GroundAlign;
 use crate::layout::mask::ground_rect;
 use crate::layout::{
-    pct, Anchor, Bounds, MeetingRoom, Point, Size, WallSegment, WALL_BAND_TO_TOP_MARGIN,
+    Anchor, Bounds, MeetingRoom, Point, Size, WALL_BAND_TO_TOP_MARGIN, WallSegment, pct,
 };
 use std::ops::Range;
 

@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::tui::connection::ConnectionFrame;
-use crate::tui::dashboard::{build_dashboard_rows, DashboardFolds, DashboardFrame};
+use crate::tui::dashboard::{DashboardFolds, DashboardFrame, build_dashboard_rows};
 
 #[test]
 fn dashboard_popup_renders_labels_states_and_live_tool() {

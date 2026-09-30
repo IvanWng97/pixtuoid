@@ -1,8 +1,8 @@
 //! Per-agent colors and the color math the painters share.
 
+use pixtuoid_core::AgentSlot;
 use pixtuoid_core::id::normalize_path_key;
 use pixtuoid_core::sprite::{Frame, Pixel, Rgb, RgbBuffer};
-use pixtuoid_core::AgentSlot;
 
 /// A complete shirt + pants combo, keyed by the agent's normalized working
 /// directory (same cwd → same outfit, so the office reads as a color-coded

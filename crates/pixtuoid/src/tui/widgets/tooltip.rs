@@ -8,12 +8,12 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Padding, Paragraph};
 
-use super::{compact_hms, display_width, source_badge_span, state_color, to_color, StateKind};
+use super::{StateKind, compact_hms, display_width, source_badge_span, state_color, to_color};
 use crate::tui::renderer::clip_widget_rect;
 use pixtuoid_scene::layout::DESK_W;
-use pixtuoid_scene::overlay::{disambig_suffix, LabelElement};
+use pixtuoid_scene::overlay::{LabelElement, disambig_suffix};
 use pixtuoid_scene::pet::PetKind;
-use pixtuoid_scene::pixel_painter::{tool_glow_for_kind, MascotFrame};
+use pixtuoid_scene::pixel_painter::{MascotFrame, tool_glow_for_kind};
 
 /// Borderless tooltip frame shared by every hover/click tooltip: just the padded
 /// text. The caller must paint `super::paint_card_backing` UNDER it (the `Clear` +
@@ -447,11 +447,11 @@ pub fn paint_chitchat_bubbles(
 
 #[cfg(test)]
 mod tests {
-    use super::{mascot_tooltip_text, MascotFrame, TooltipAt};
+    use super::{MascotFrame, TooltipAt, mascot_tooltip_text};
     use pixtuoid_scene::theme;
+    use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
-    use ratatui::Terminal;
 
     /// Join the whole buffer into one newline-free string, so a `.contains` probe
     /// finds text regardless of which cell the box landed in.

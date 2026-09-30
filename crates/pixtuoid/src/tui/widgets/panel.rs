@@ -307,8 +307,8 @@ impl Panel<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     fn render_to_string(w: u16, h: u16, title: Option<&str>) -> String {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
@@ -633,8 +633,8 @@ mod tests {
 
     #[test]
     fn panel_windows_a_long_list_and_pins_the_chrome() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
         let mut term = Terminal::new(TestBackend::new(40, 12)).unwrap();
         term.draw(|f| {
             let above = vec![Line::from("HEADERLINE")];
