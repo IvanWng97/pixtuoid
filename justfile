@@ -869,7 +869,7 @@ gen-wasm-check:
 # ci-tests.yml's smoke job; runnable locally
 # before pushing a visual change. A red check after an INTENTIONAL office change
 # means: run `just gen` and commit everything it rewrote in the same change.
-# Requires the .venv + ffmpeg + node; it builds the examples it renders with.
+# Requires the .venv + node; it builds the examples it renders with.
 [doc('Fail if anything `just gen` writes has drifted')]
 [group('gen')]
 gen-check: compare-selftest gen-readme-check gen-art-check
