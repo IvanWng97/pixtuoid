@@ -123,7 +123,7 @@ fn env_payload(event: &str) -> serde_json::Map<String, Value> {
     let cwd_fallback = std::env::current_dir()
         .ok()
         .map(|p| p.to_string_lossy().into_owned());
-    env_payload_from(event, cwd_fallback, |k| std::env::var(k).ok())
+    env_payload_from(event, cwd_fallback, |k| std::env::var_os(k))
 }
 
 /// Per-field byte cap on env-mode values. The stdin arm enforces `STDIN_CAP`
@@ -132,10 +132,8 @@ fn env_payload(event: &str) -> serde_json::Map<String, Value> {
 /// daemon's pipe quota instead of building one the watchdog would drop.
 const ENV_FIELD_CAP: usize = 128 * 1024;
 
-/// Byte-bounded, char-SAFE truncation (never split a UTF-8 scalar). The cap is a
-/// hard ceiling: a scalar STRADDLING the boundary is dropped, never kept —
-/// bounding the char's START would let the result exceed the cap by up to 3
-/// bytes.
+/// Byte-bounded, char-safe truncation: a scalar straddling the cap is dropped, so
+/// the cap is a hard ceiling.
 fn cap_env_field(mut val: String) -> String {
     if val.len() > ENV_FIELD_CAP {
         let end = val
@@ -151,8 +149,9 @@ fn cap_env_field(mut val: String) -> String {
 fn env_payload_from(
     event: &str,
     cwd_fallback: Option<String>,
-    get: impl Fn(&str) -> Option<String>,
+    get: impl Fn(&str) -> Option<std::ffi::OsString>,
 ) -> serde_json::Map<String, Value> {
+    let get = |k: &str| get(k).map(|v| v.to_string_lossy().into_owned());
     let mut map = serde_json::Map::new();
     map.insert("event".into(), Value::from(event));
     // cwd is the AgentId KEY (the decoder drops a cwd-less event), and

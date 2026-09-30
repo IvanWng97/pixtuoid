@@ -185,7 +185,7 @@ fn env_payload_folds_codewhale_env_into_the_envelope() {
     .into_iter()
     .collect();
     let map = env_payload_from("tool_call_before", None, |k| {
-        env.get(k).map(|s| s.to_string())
+        env.get(k).map(std::ffi::OsString::from)
     });
     assert_eq!(map["event"], json!("tool_call_before"));
     assert_eq!(map["cwd"], json!("/repo"));
@@ -211,7 +211,9 @@ fn env_payload_omits_missing_and_empty_env() {
         [("DEEPSEEK_WORKSPACE", "/repo"), ("DEEPSEEK_TOOL_NAME", "")]
             .into_iter()
             .collect();
-    let map = env_payload_from("session_start", None, |k| env.get(k).map(|s| s.to_string()));
+    let map = env_payload_from("session_start", None, |k| {
+        env.get(k).map(std::ffi::OsString::from)
+    });
     assert_eq!(map["cwd"], json!("/repo"));
     assert!(
         !map.contains_key("tool"),
@@ -238,7 +240,9 @@ fn env_payload_caps_oversized_fields_at_a_char_boundary() {
     ]
     .into_iter()
     .collect();
-    let map = env_payload_from("tool_call_before", None, |k| env.get(k).cloned());
+    let map = env_payload_from("tool_call_before", None, |k| {
+        env.get(k).map(std::ffi::OsString::from)
+    });
     let args = map["tool_args"].as_str().unwrap();
     assert!(
         args.len() <= ENV_FIELD_CAP,
@@ -290,7 +294,7 @@ fn env_payload_falls_back_to_cwd_when_workspace_unset() {
             .into_iter()
             .collect();
     let map = env_payload_from("session_start", Some("/proj/here".to_string()), |k| {
-        no_ws.get(k).cloned()
+        no_ws.get(k).map(std::ffi::OsString::from)
     });
     assert_eq!(
         map["cwd"],
@@ -302,7 +306,7 @@ fn env_payload_falls_back_to_cwd_when_workspace_unset() {
         .into_iter()
         .collect();
     let map = env_payload_from("session_start", Some("/proj/here".to_string()), |k| {
-        ws.get(k).cloned()
+        ws.get(k).map(std::ffi::OsString::from)
     });
     assert_eq!(
         map["cwd"],
@@ -492,4 +496,15 @@ fn default_socket_path_branches_windows() {
         // FIXME: Audit that the environment access only happens in single-threaded code.
         None => unsafe { std::env::remove_var("USERNAME") },
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_non_utf8_workspace_keys_the_session_not_the_fallback() {
+    use std::os::unix::ffi::OsStrExt;
+    let ws = std::ffi::OsStr::from_bytes(b"/ws/\xff").to_os_string();
+    let map = env_payload_from("session_start", Some("/proj/here".to_string()), |k| {
+        (k == "DEEPSEEK_WORKSPACE").then(|| ws.clone())
+    });
+    assert_eq!(map["cwd"], json!("/ws/\u{FFFD}"));
 }
