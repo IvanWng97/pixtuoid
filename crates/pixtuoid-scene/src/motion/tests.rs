@@ -175,15 +175,6 @@ fn trip_agent(prefix: &str) -> AgentId {
         .expect("should find a trip agent quickly")
 }
 
-/// The dwell the machine will apply at the agent's current wander destination.
-/// Only valid once a destination is picked (WalkingOut onward).
-fn current_dwell_dur(motion: &HashMap<AgentId, MotionState>, id: AgentId) -> u64 {
-    match motion.get(&id).map(|ms| ms.wander.target.kind) {
-        Some(WanderKind::Named { kind, .. }) => dwell_ms(kind, id),
-        _ => WANDER_DWELL_EST_MS,
-    }
-}
-
 /// The variant KIND of a `WanderPhase`. The walk variants carry a non-`Eq`
 /// `WalkProfile`, so this is the phase's identity for "has the agent left this
 /// phase?" — the transition tests never key on which profile got frozen.
@@ -204,54 +195,98 @@ fn phase_kind(phase: WanderPhase) -> PhaseKind {
     }
 }
 
-/// Poll `advance_wander` until the agent's phase KIND is no longer `from_phase`,
-/// returning the new `now`. The ~1 s step stays well under the
-/// `stale_resume_gap_ms` trigger, so a long seated/dwell beat is crossed exactly
-/// as real per-frame rendering would, never looking like an off-screen gap.
-#[allow(clippy::too_many_arguments)]
-fn advance_until_leaves(
-    slot: &AgentSlot,
-    l: &Layout,
-    router: &mut dyn Router,
-    overlay: &OccupancyOverlay,
-    motion: &mut HashMap<AgentId, MotionState>,
-    mut now: SystemTime,
-    from_phase: PhaseKind,
-    timeout_ms: u64,
-) -> SystemTime {
-    const STEP_MS: u64 = 1_000;
-    let start = now;
-    while motion
-        .get(&slot.agent_id)
-        .map(|m| phase_kind(m.wander.phase))
-        == Some(from_phase)
-    {
-        let elapsed = now
-            .duration_since(start)
-            .unwrap_or(Duration::ZERO)
-            .as_millis() as u64;
-        assert!(
-            elapsed <= timeout_ms,
-            "phase {from_phase:?} did not transition within {timeout_ms}ms"
-        );
-        now += Duration::from_millis(STEP_MS);
-        advance_wander(slot, now, l, router, overlay, motion);
+/// [`WanderRig::advance_until_leaves`]'s poll step.
+const POLL_STEP_MS: u64 = 1_000;
+
+/// One agent's wander machine over the standard layout: the slot plus every
+/// store `advance_wander` threads, so a test drives it by `now` alone.
+struct WanderRig<R: Router> {
+    slot: AgentSlot,
+    layout: Layout,
+    router: R,
+    overlay: OccupancyOverlay,
+    motion: HashMap<AgentId, MotionState>,
+}
+
+impl<R: Router> WanderRig<R> {
+    fn new(slot: AgentSlot, router: R) -> Self {
+        Self {
+            slot,
+            layout: layout(),
+            router,
+            overlay: OccupancyOverlay::new(),
+            motion: HashMap::new(),
+        }
     }
-    now
+
+    fn advance(&mut self, now: SystemTime) {
+        advance_wander(
+            &self.slot,
+            now,
+            &self.layout,
+            &mut self.router,
+            &self.overlay,
+            &mut self.motion,
+        );
+    }
+
+    fn state(&self) -> &MotionState {
+        self.motion
+            .get(&self.slot.agent_id)
+            .expect("state inserted")
+    }
+
+    /// The dwell the machine will apply at the agent's current wander
+    /// destination. Only valid once a destination is picked (WalkingOut onward).
+    fn current_dwell_dur(&self) -> u64 {
+        match self.state().wander.target.kind {
+            WanderKind::Named { kind, .. } => dwell_ms(kind, self.slot.agent_id),
+            WanderKind::Aimless => WANDER_DWELL_EST_MS,
+        }
+    }
+
+    /// Poll [`WanderRig::advance`] until the agent's phase KIND is no longer
+    /// `from_phase`, returning the new `now`. [`POLL_STEP_MS`] stays well under the
+    /// `stale_resume_gap_ms` trigger, so a long seated/dwell beat is crossed
+    /// exactly as real per-frame rendering would, never looking like an
+    /// off-screen gap.
+    fn advance_until_leaves(
+        &mut self,
+        mut now: SystemTime,
+        from_phase: PhaseKind,
+        timeout_ms: u64,
+    ) -> SystemTime {
+        let start = now;
+        while self
+            .motion
+            .get(&self.slot.agent_id)
+            .map(|m| phase_kind(m.wander.phase))
+            == Some(from_phase)
+        {
+            let elapsed = now
+                .duration_since(start)
+                .unwrap_or(Duration::ZERO)
+                .as_millis() as u64;
+            assert!(
+                elapsed <= timeout_ms,
+                "phase {from_phase:?} did not transition within {timeout_ms}ms"
+            );
+            now += Duration::from_millis(POLL_STEP_MS);
+            self.advance(now);
+        }
+        now
+    }
 }
 
 #[test]
 fn fresh_idle_inits_to_seated_phase() {
     let now = t0();
     let slot = idle_slot("/p/a.jsonl", now);
-    let l = layout();
-    let overlay = OccupancyOverlay::new();
-    let mut router = Straight;
-    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+    let mut rig = WanderRig::new(slot, Straight);
 
-    advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
+    rig.advance(now);
 
-    let ms = motion.get(&slot.agent_id).expect("state inserted");
+    let ms = rig.state();
     assert!(
         matches!(ms.wander.phase, WanderPhase::Seated),
         "fresh idle should init to Seated, got {:?}",
@@ -269,24 +304,12 @@ fn seated_transitions_to_walking_out_on_trip_cycle() {
         ..idle_slot("/dummy", now)
     };
 
-    let l = layout();
-    let overlay = OccupancyOverlay::new();
-    let mut router = Straight;
-    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+    let mut rig = WanderRig::new(slot, Straight);
 
-    advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
-    advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        now,
-        PhaseKind::Seated,
-        60_000,
-    );
+    rig.advance(now);
+    rig.advance_until_leaves(now, PhaseKind::Seated, 60_000);
 
-    let ms = motion.get(&trip_id).expect("state present");
+    let ms = rig.state();
     assert!(
         matches!(ms.wander.phase, WanderPhase::WalkingOut(_)),
         "after seated dwell on trip cycle, expected WalkingOut, got {:?}",
@@ -307,22 +330,16 @@ fn non_trip_cycle_stays_seated() {
         ..idle_slot("/dummy", now)
     };
 
-    let l = layout();
-    let overlay = OccupancyOverlay::new();
-    let mut router = Straight;
-    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+    let mut rig = WanderRig::new(slot, Straight);
 
-    advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
+    rig.advance(now);
     // Poll well past the longest seated dwell (30 s).
     let mut t = now;
     for _ in 0..40 {
         t += Duration::from_millis(1_000);
-        advance_wander(&slot, t, &l, &mut router, &overlay, &mut motion);
+        rig.advance(t);
         assert!(
-            matches!(
-                motion.get(&stay_id).unwrap().wander.phase,
-                WanderPhase::Seated
-            ),
+            matches!(rig.state().wander.phase, WanderPhase::Seated),
             "non-trip cycle must stay Seated"
         );
     }
@@ -338,40 +355,22 @@ fn walking_out_transitions_to_at_waypoint_on_arrival() {
     };
 
     let short_len: u32 = 200;
-    let l = layout();
-    let overlay = OccupancyOverlay::new();
-    let mut router = FixedLen {
-        octile_len: short_len,
-    };
-    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
-
-    advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
-    let t1 = advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        now,
-        PhaseKind::Seated,
-        60_000,
+    let mut rig = WanderRig::new(
+        slot,
+        FixedLen {
+            octile_len: short_len,
+        },
     );
+
+    rig.advance(now);
+    let t1 = rig.advance_until_leaves(now, PhaseKind::Seated, 60_000);
     assert!(matches!(
-        motion.get(&trip_id).unwrap().wander.phase,
+        rig.state().wander.phase,
         WanderPhase::WalkingOut(_)
     ));
-    advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        t1,
-        PhaseKind::WalkingOut,
-        20_000,
-    );
+    rig.advance_until_leaves(t1, PhaseKind::WalkingOut, 20_000);
 
-    let ms = motion.get(&trip_id).expect("state");
+    let ms = rig.state();
     assert!(
         matches!(ms.wander.phase, WanderPhase::AtWaypoint(_)),
         "expected AtWaypoint after walk-out arrival, got {:?}",
@@ -389,50 +388,23 @@ fn at_waypoint_transitions_to_walking_back_after_dwell() {
     };
 
     let short_len: u32 = 200;
-    let l = layout();
-    let overlay = OccupancyOverlay::new();
-    let mut router = FixedLen {
-        octile_len: short_len,
-    };
-    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+    let mut rig = WanderRig::new(
+        slot,
+        FixedLen {
+            octile_len: short_len,
+        },
+    );
 
-    advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
-    let t1 = advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        now,
-        PhaseKind::Seated,
-        60_000,
-    );
-    let t2 = advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        t1,
-        PhaseKind::WalkingOut,
-        20_000,
-    );
+    rig.advance(now);
+    let t1 = rig.advance_until_leaves(now, PhaseKind::Seated, 60_000);
+    let t2 = rig.advance_until_leaves(t1, PhaseKind::WalkingOut, 20_000);
     assert!(matches!(
-        motion.get(&trip_id).unwrap().wander.phase,
+        rig.state().wander.phase,
         WanderPhase::AtWaypoint(_)
     ));
-    advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        t2,
-        PhaseKind::AtWaypoint,
-        60_000,
-    );
+    rig.advance_until_leaves(t2, PhaseKind::AtWaypoint, 60_000);
 
-    let ms = motion.get(&trip_id).expect("state");
+    let ms = rig.state();
     assert!(
         matches!(ms.wander.phase, WanderPhase::WalkingBack(_)),
         "expected WalkingBack after dwell, got {:?}",
@@ -450,56 +422,20 @@ fn walking_back_arrival_increments_cycle_n_and_resets_to_seated() {
     };
 
     let short_len: u32 = 200;
-    let l = layout();
-    let overlay = OccupancyOverlay::new();
-    let mut router = FixedLen {
-        octile_len: short_len,
-    };
-    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
-
-    advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
-    let t = advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        now,
-        PhaseKind::Seated,
-        60_000,
-    );
-    let t = advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        t,
-        PhaseKind::WalkingOut,
-        20_000,
-    );
-    let t = advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        t,
-        PhaseKind::AtWaypoint,
-        60_000,
-    );
-    advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        t,
-        PhaseKind::WalkingBack,
-        20_000,
+    let mut rig = WanderRig::new(
+        slot,
+        FixedLen {
+            octile_len: short_len,
+        },
     );
 
-    let ms = motion.get(&trip_id).expect("state");
+    rig.advance(now);
+    let t = rig.advance_until_leaves(now, PhaseKind::Seated, 60_000);
+    let t = rig.advance_until_leaves(t, PhaseKind::WalkingOut, 20_000);
+    let t = rig.advance_until_leaves(t, PhaseKind::AtWaypoint, 60_000);
+    rig.advance_until_leaves(t, PhaseKind::WalkingBack, 20_000);
+
+    let ms = rig.state();
     assert!(
         matches!(ms.wander.phase, WanderPhase::Seated),
         "completed cycle must reset to Seated, got {:?}",
@@ -515,48 +451,20 @@ fn dwell_time_independent_of_path_length() {
         agent_id: trip_id,
         ..idle_slot("/dummy", t0())
     };
-    let l = layout();
-    let overlay = OccupancyOverlay::new();
-
     let mut measured: Vec<u64> = Vec::new();
     for short_len in [150u32, 800u32] {
         let now = t0();
-        let mut router = FixedLen {
-            octile_len: short_len,
-        };
-        let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+        let mut rig = WanderRig::new(
+            slot.clone(),
+            FixedLen {
+                octile_len: short_len,
+            },
+        );
 
-        advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
-        let t1 = advance_until_leaves(
-            &slot,
-            &l,
-            &mut router,
-            &overlay,
-            &mut motion,
-            now,
-            PhaseKind::Seated,
-            60_000,
-        );
-        let at_wp_enter = advance_until_leaves(
-            &slot,
-            &l,
-            &mut router,
-            &overlay,
-            &mut motion,
-            t1,
-            PhaseKind::WalkingOut,
-            20_000,
-        );
-        let walk_back_enter = advance_until_leaves(
-            &slot,
-            &l,
-            &mut router,
-            &overlay,
-            &mut motion,
-            at_wp_enter,
-            PhaseKind::AtWaypoint,
-            60_000,
-        );
+        rig.advance(now);
+        let t1 = rig.advance_until_leaves(now, PhaseKind::Seated, 60_000);
+        let at_wp_enter = rig.advance_until_leaves(t1, PhaseKind::WalkingOut, 20_000);
+        let walk_back_enter = rig.advance_until_leaves(at_wp_enter, PhaseKind::AtWaypoint, 60_000);
         let dwell = walk_back_enter
             .duration_since(at_wp_enter)
             .unwrap()
@@ -564,10 +472,10 @@ fn dwell_time_independent_of_path_length() {
         measured.push(dwell);
     }
 
-    // The slack is one 1 s poll step.
+    // The slack is one poll step.
     let diff = measured[0].abs_diff(measured[1]);
     assert!(
-        diff <= 1_000,
+        diff <= POLL_STEP_MS,
         "dwell must be path-length-independent: {measured:?}"
     );
 }
@@ -607,6 +515,23 @@ fn far_waypoint_full_cycle_is_longer() {
 }
 
 #[test]
+fn settle_collapses_a_seat_pair_and_gives_it_back() {
+    let p = Point { x: 1, y: 1 };
+    let q = Point { x: 2, y: 2 };
+    let cases = [
+        (None, None, Settle::None),
+        (Some(p), None, Settle::Start(p)),
+        (None, Some(q), Settle::End(q)),
+        (Some(p), Some(q), Settle::Both { start: p, end: q }),
+    ];
+    for (start, end, want) in cases {
+        let got = Settle::from_pair(start, end);
+        assert_eq!(got, want, "({start:?}, {end:?})");
+        assert_eq!((got.start(), got.end()), (start, end), "{got:?}");
+    }
+}
+
+#[test]
 fn snapshot_leg_profile_measures_the_routed_leg_plus_settles() {
     use crate::physics::{walk_profile, WalkIntent};
 
@@ -624,15 +549,16 @@ fn snapshot_leg_profile_measures_the_routed_leg_plus_settles() {
         &mask,
         &overlay,
         id,
-        from,
-        to,
-        None,
-        Some(seat),
-        WalkIntent::WanderOut,
+        LegPlan {
+            from,
+            to,
+            settle: Settle::End(seat),
+            intent: WalkIntent::WanderOut,
+        },
     );
     let path = route_jittered(&mut Straight, &mask, &overlay, id, from, to);
     let expect = walk_profile(
-        measured_leg_len(&path, None, Some(seat)),
+        measured_leg_len(&path, Settle::End(seat)),
         WalkIntent::WanderOut,
         id,
     );
@@ -644,11 +570,12 @@ fn snapshot_leg_profile_measures_the_routed_leg_plus_settles() {
         &mask,
         &overlay,
         id,
-        from,
-        to,
-        None,
-        None,
-        WalkIntent::WanderOut,
+        LegPlan {
+            from,
+            to,
+            settle: Settle::None,
+            intent: WalkIntent::WanderOut,
+        },
     );
     assert!(
         got.path_len_octile > no_settle.path_len_octile,
@@ -675,26 +602,17 @@ fn arrival_pause_holds_walking_out_phase() {
         "walk_arrived must be false mid-pause"
     );
 
-    let l = layout();
-    let overlay = OccupancyOverlay::new();
-    let mut router = FixedLen {
-        octile_len: short_len,
-    };
-    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
-
-    advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
-    let t1 = advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        now,
-        PhaseKind::Seated,
-        60_000,
+    let mut rig = WanderRig::new(
+        slot,
+        FixedLen {
+            octile_len: short_len,
+        },
     );
-    let out_started = motion.get(&trip_id).unwrap().wander.phase_started_at;
-    let actual_profile = match motion.get(&trip_id).unwrap().wander.phase {
+
+    rig.advance(now);
+    let t1 = rig.advance_until_leaves(now, PhaseKind::Seated, 60_000);
+    let out_started = rig.state().wander.phase_started_at;
+    let actual_profile = match rig.state().wander.phase {
         WanderPhase::WalkingOut(p) => p,
         other => panic!("expected WalkingOut, got {other:?}"),
     };
@@ -703,12 +621,9 @@ fn arrival_pause_holds_walking_out_phase() {
     // This sample is within ~1 s of t1, far below the stale trigger.
     let _ = t1;
     let mid = out_started + Duration::from_millis(actual_mid_elapsed);
-    advance_wander(&slot, mid, &l, &mut router, &overlay, &mut motion);
+    rig.advance(mid);
     assert!(
-        matches!(
-            motion.get(&trip_id).unwrap().wander.phase,
-            WanderPhase::WalkingOut(_)
-        ),
+        matches!(rig.state().wander.phase, WanderPhase::WalkingOut(_)),
         "must stay WalkingOut during arrival pause"
     );
 }
@@ -722,31 +637,19 @@ fn idempotent_same_now_does_not_mutate_state() {
         ..idle_slot("/dummy", now)
     };
 
-    let l = layout();
-    let overlay = OccupancyOverlay::new();
-    let mut router = Straight;
-    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+    let mut rig = WanderRig::new(slot, Straight);
 
-    advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
-    let t1 = advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        now,
-        PhaseKind::Seated,
-        60_000,
-    );
+    rig.advance(now);
+    let t1 = rig.advance_until_leaves(now, PhaseKind::Seated, 60_000);
 
     let (phase_before, cycle_before) = {
-        let ms = motion.get(&trip_id).unwrap();
+        let ms = rig.state();
         (ms.wander.phase, ms.wander.cycle_n)
     };
 
-    advance_wander(&slot, t1, &l, &mut router, &overlay, &mut motion);
+    rig.advance(t1);
 
-    let ms = motion.get(&trip_id).unwrap();
+    let ms = rig.state();
     assert_eq!(
         ms.wander.phase, phase_before,
         "2nd call with same now must not change phase"
@@ -767,14 +670,11 @@ fn bootstrap_fast_forwards_cycle_n() {
         .expect("time arithmetic ok");
     let slot = idle_slot("/p/bootstrap.jsonl", state_started);
 
-    let l = layout();
-    let overlay = OccupancyOverlay::new();
-    let mut router = Straight;
-    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+    let mut rig = WanderRig::new(slot, Straight);
 
-    advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
+    rig.advance(now);
 
-    let ms = motion.get(&id).expect("state present");
+    let ms = rig.state();
     assert_eq!(
         ms.wander.cycle_n, 10,
         "bootstrap: elapsed = 10*est_cycle => cycle_n must equal exactly 10"
@@ -792,27 +692,12 @@ fn stale_resume_resyncs_without_replay() {
         ..idle_slot("/dummy", now)
     };
 
-    let l = layout();
-    let overlay = OccupancyOverlay::new();
-    let mut router = Straight;
-    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+    let mut rig = WanderRig::new(slot, Straight);
 
-    advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
-    let t1 = advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        now,
-        PhaseKind::Seated,
-        60_000,
-    );
+    rig.advance(now);
+    let t1 = rig.advance_until_leaves(now, PhaseKind::Seated, 60_000);
     assert!(
-        matches!(
-            motion.get(&trip_id).unwrap().wander.phase,
-            WanderPhase::WalkingOut(_)
-        ),
+        matches!(rig.state().wander.phase, WanderPhase::WalkingOut(_)),
         "precondition: agent should be WalkingOut before the gap"
     );
 
@@ -820,9 +705,9 @@ fn stale_resume_resyncs_without_replay() {
     // SINGLE call on return must resync.
     assert!(20 * est_cycle > stale_resume_gap_ms(trip_id));
     let resume = t1 + Duration::from_millis(20 * est_cycle);
-    advance_wander(&slot, resume, &l, &mut router, &overlay, &mut motion);
+    rig.advance(resume);
 
-    let ms = motion.get(&trip_id).unwrap();
+    let ms = rig.state();
     assert!(
         matches!(ms.wander.phase, WanderPhase::Seated),
         "stale resume must resync to Seated (no per-frame replay), got {:?}",
@@ -845,62 +730,38 @@ fn long_dwell_never_trips_stale_resume_on_screen() {
     };
 
     let short_len: u32 = 200;
-    let l = layout();
-    let overlay = OccupancyOverlay::new();
-    let mut router = FixedLen {
-        octile_len: short_len,
-    };
-    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+    let mut rig = WanderRig::new(
+        slot,
+        FixedLen {
+            octile_len: short_len,
+        },
+    );
 
-    advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
-    let t1 = advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        now,
-        PhaseKind::Seated,
-        60_000,
-    );
-    let t2 = advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        t1,
-        PhaseKind::WalkingOut,
-        20_000,
-    );
+    rig.advance(now);
+    let t1 = rig.advance_until_leaves(now, PhaseKind::Seated, 60_000);
+    let t2 = rig.advance_until_leaves(t1, PhaseKind::WalkingOut, 20_000);
     assert!(matches!(
-        motion.get(&trip_id).unwrap().wander.phase,
+        rig.state().wander.phase,
         WanderPhase::AtWaypoint(_)
     ));
 
     // Base the window on the ACTUAL AtWaypoint phase start — the poll-observed
-    // `t2` can lag the real transition by up to one 1 s step — and leave a 2 s
+    // `t2` can lag the real transition by up to one poll step — and leave a 2 s
     // margin so the loop stops before the dwell genuinely ends.
-    let at_wp_start = motion.get(&trip_id).unwrap().wander.phase_started_at;
-    let dwell_dur = current_dwell_dur(&motion, trip_id);
+    let at_wp_start = rig.state().wander.phase_started_at;
+    let dwell_dur = rig.current_dwell_dur();
     let mut t = t2;
     let end = at_wp_start + Duration::from_millis(dwell_dur.saturating_sub(2_000));
     while t < end {
         t += Duration::from_millis(33);
-        advance_wander(&slot, t, &l, &mut router, &overlay, &mut motion);
+        rig.advance(t);
         assert!(
-            !matches!(
-                motion.get(&trip_id).unwrap().wander.phase,
-                WanderPhase::Seated
-            ),
+            !matches!(rig.state().wander.phase, WanderPhase::Seated),
             "long on-screen dwell wrongly tripped stale-resume (snapped to Seated mid-dwell)"
         );
     }
     assert!(
-        matches!(
-            motion.get(&trip_id).unwrap().wander.phase,
-            WanderPhase::AtWaypoint(_)
-        ),
+        matches!(rig.state().wander.phase, WanderPhase::AtWaypoint(_)),
         "agent should still be AtWaypoint just before the dwell ends"
     );
 }
@@ -925,26 +786,14 @@ fn wander_out_profile_routes_to_the_jittered_goal_the_render_uses() {
         agent_id: trip_id,
         ..idle_slot("/dummy", now)
     };
-    let l = layout();
-    let overlay = OccupancyOverlay::new();
-    let mut router = Recording { calls: Vec::new() };
-    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+    let mut rig = WanderRig::new(slot, Recording { calls: Vec::new() });
 
-    advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
-    advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        now,
-        PhaseKind::Seated,
-        60_000,
-    );
+    rig.advance(now);
+    rig.advance_until_leaves(now, PhaseKind::Seated, 60_000);
 
-    let ms = motion.get(&trip_id).expect("state");
+    let ms = rig.state();
     assert!(matches!(ms.wander.phase, WanderPhase::WalkingOut(_)));
-    let (_, routed_to) = *router.calls.last().expect("the trip snapshot routed");
+    let (_, routed_to) = *rig.router.calls.last().expect("the trip snapshot routed");
     assert_eq!(
         routed_to,
         jitter_dest(trip_id, ms.wander.target.dest),
@@ -996,24 +845,15 @@ fn wander_dest_for_pantry_is_the_home_desk_stand_point() {
         .expect("an agent lands at the pantry on cycle 0");
 
     let now = t0();
-    let slot = idle_slot(&path, now); // desk_index 0
-    let overlay = OccupancyOverlay::new();
-    let mut router = Straight;
-    let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
-    advance_wander(&slot, now, &l, &mut router, &overlay, &mut motion);
-    let now = advance_until_leaves(
-        &slot,
-        &l,
-        &mut router,
-        &overlay,
-        &mut motion,
-        now,
-        PhaseKind::Seated,
-        120_000,
-    );
-    let _ = now;
+    let mut rig = WanderRig {
+        layout: l,
+        ..WanderRig::new(idle_slot(&path, now), Straight) // desk_index 0
+    };
+    rig.advance(now);
+    rig.advance_until_leaves(now, PhaseKind::Seated, 120_000);
 
-    let ms = motion.get(&slot.agent_id).expect("state");
+    let l = &rig.layout;
+    let ms = rig.state();
     assert!(matches!(
         ms.wander.target.kind,
         WanderKind::Named {
