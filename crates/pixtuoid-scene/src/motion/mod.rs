@@ -588,7 +588,6 @@ pub(crate) fn walking_position(from: Point, to: Point, t_x1000: u16) -> Point {
 
 /// Every pixel [`walking_position`] lands on along `from → to`, in walk order,
 /// each once: the progress values where either axis's truncated offset steps.
-#[cfg(test)]
 pub(crate) fn leg_pixels(from: Point, to: Point) -> impl Iterator<Item = Point> {
     let scale = u32::from(crate::physics::PROGRESS_SCALE);
     let steps = |a: u16, b: u16| {

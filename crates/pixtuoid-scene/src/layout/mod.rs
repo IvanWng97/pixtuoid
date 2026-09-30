@@ -50,7 +50,9 @@ pub(crate) use windows::{
     WINDOW_W, WindowBay, glass_rows, wall_trim_row, window_frame, window_rows, window_run,
 };
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
-pub(crate) use coarse::{COARSE_CELL_SIZE, NEIGHBORS_8, cell_walkable, snap};
+pub(crate) use coarse::{
+    COARSE_CELL_SIZE, cell_anchor, cell_center, cell_walkable, snap, walkable_neighbors,
+};
 
 use pixtuoid_core::state::FloorLocalDeskIndex;
 use pixtuoid_core::walkable::WalkableMask;

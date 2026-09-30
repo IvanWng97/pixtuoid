@@ -1,9 +1,10 @@
 //! Shared coarse routing-grid primitives — the ONE definition of the cell
 //! coarsening the A\* router (`crate::pathfind`) and the reachability BFS
 //! (`super::reach`) both ride. Sharing the cell size, walkability threshold,
-//! 8-neighbour set and snap is what makes "reachable here" (`ReachSet`) agree
+//! neighbour rule and snap is what makes "reachable here" (`ReachSet`) agree
 //! with "routable here" (A\*).
 
+use super::Point;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 /// Coarse-cell edge in px. Smaller = more accurate paths, more work per query.
@@ -16,17 +17,27 @@ pub(crate) const COARSE_CELL_SIZE: u16 = 4;
 /// unreachable, looser grazed furniture edges.
 const COARSE_CELL_WALKABLE_MIN: u16 = 8;
 
-/// The 8-connected neighbour offsets shared by the A\* expansion and the reach BFS.
-pub(crate) const NEIGHBORS_8: [(i32, i32); 8] = [
-    (1, 0),
-    (-1, 0),
-    (0, 1),
-    (0, -1),
-    (1, 1),
-    (1, -1),
-    (-1, 1),
-    (-1, -1),
-];
+/// The centre pixel of coarse cell `(cx, cy)`.
+pub(crate) fn cell_center(cx: u16, cy: u16) -> Point {
+    Point {
+        x: cx * COARSE_CELL_SIZE + COARSE_CELL_SIZE / 2,
+        y: cy * COARSE_CELL_SIZE + COARSE_CELL_SIZE / 2,
+    }
+}
+
+/// The pixel a route turns on in coarse cell `(cx, cy)`: its centre, or the
+/// open pixel nearest it when the centre is blocked. A cell counts as walkable
+/// at half open, so the half holding its centre can be a wall's, and a walker
+/// turning on the centre would stand in it.
+pub(crate) fn cell_anchor(mask: &WalkableMask, cx: u16, cy: u16) -> Point {
+    let centre = cell_center(cx, cy);
+    let (x0, y0) = (cx * COARSE_CELL_SIZE, cy * COARSE_CELL_SIZE);
+    (y0..y0 + COARSE_CELL_SIZE)
+        .flat_map(|y| (x0..x0 + COARSE_CELL_SIZE).map(move |x| Point { x, y }))
+        .filter(|p| mask.is_walkable(p.x, p.y))
+        .min_by_key(|p| (p.x.abs_diff(centre.x) + p.y.abs_diff(centre.y), p.y, p.x))
+        .unwrap_or(centre)
+}
 
 /// Is coarse cell `(cx, cy)` walkable — ≥ `COARSE_CELL_WALKABLE_MIN` of its
 /// pixels open on the static `mask` AND clear of the per-frame `overlay`? The
@@ -51,6 +62,75 @@ pub(crate) fn cell_walkable(
         }
     }
     walk_count >= COARSE_CELL_WALKABLE_MIN
+}
+
+/// Can a walker cross from coarse cell `a` into the orthogonally adjacent `b`
+/// — does some pixel on `a`'s side of their shared edge face an open pixel on
+/// `b`'s? Both cells can be half open with the open halves on opposite sides,
+/// meeting only at a pixel corner a straight leg between them cuts.
+fn crossable(
+    mask: &WalkableMask,
+    overlay: &OccupancyOverlay,
+    a: (u16, u16),
+    b: (u16, u16),
+) -> bool {
+    let open = |x: u16, y: u16| mask.is_walkable(x, y) && !overlay.blocks(x, y);
+    let edge = |from: u16, to: u16| {
+        let near = from * COARSE_CELL_SIZE;
+        if to > from {
+            (near + COARSE_CELL_SIZE - 1, near + COARSE_CELL_SIZE)
+        } else {
+            (near, near - 1)
+        }
+    };
+    if a.1 == b.1 {
+        let (xa, xb) = edge(a.0, b.0);
+        let y0 = a.1 * COARSE_CELL_SIZE;
+        (0..COARSE_CELL_SIZE).any(|d| open(xa, y0 + d) && open(xb, y0 + d))
+    } else {
+        let (ya, yb) = edge(a.1, b.1);
+        let x0 = a.0 * COARSE_CELL_SIZE;
+        (0..COARSE_CELL_SIZE).any(|d| open(x0 + d, ya) && open(x0 + d, yb))
+    }
+}
+
+/// The 8-neighbours of `cell` on the `cell_w × cell_h` grid a walker can step
+/// to, each flagged `true` when the step is diagonal. An orthogonal step needs
+/// the neighbour walkable and `crossable`. A diagonal step needs BOTH
+/// orthogonal cells it squeezes between steppable on the way: a walker's
+/// straight leg between two diagonal cells crosses their shared corner, so a
+/// blocked orthogonal cell puts that corner inside a wall.
+pub(crate) fn walkable_neighbors(
+    mask: &WalkableMask,
+    overlay: &OccupancyOverlay,
+    cell: (u16, u16),
+    cell_w: u16,
+    cell_h: u16,
+) -> impl Iterator<Item = ((u16, u16), bool)> {
+    let at = |dx: i32, dy: i32| {
+        let nx = u16::try_from(i32::from(cell.0) + dx).ok()?;
+        let ny = u16::try_from(i32::from(cell.1) + dy).ok()?;
+        (nx < cell_w && ny < cell_h && cell_walkable(mask, overlay, nx, ny)).then_some((nx, ny))
+    };
+    let step = |from: (u16, u16), to: (u16, u16)| crossable(mask, overlay, from, to);
+    let [e, w, s, n] =
+        [(1, 0), (-1, 0), (0, 1), (0, -1)].map(|(dx, dy)| at(dx, dy).filter(|&o| step(cell, o)));
+    let diagonal = |a: Option<(u16, u16)>, b: Option<(u16, u16)>, dx, dy| {
+        let (a, b) = (a?, b?);
+        at(dx, dy).filter(|&d| step(a, d) && step(b, d))
+    };
+    [
+        (e, false),
+        (w, false),
+        (s, false),
+        (n, false),
+        (diagonal(e, s, 1, 1), true),
+        (diagonal(e, n, 1, -1), true),
+        (diagonal(w, s, -1, 1), true),
+        (diagonal(w, n, -1, -1), true),
+    ]
+    .into_iter()
+    .filter_map(|(c, diag)| c.map(|c| (c, diag)))
 }
 
 /// Snap coarse `cell` to the nearest walkable coarse cell within `max_radius`
@@ -90,4 +170,52 @@ pub(crate) fn snap(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn neighbours(mask: &WalkableMask, cell: (u16, u16)) -> Vec<(u16, u16)> {
+        let (w, h) = (
+            mask.width() / COARSE_CELL_SIZE,
+            mask.height() / COARSE_CELL_SIZE,
+        );
+        walkable_neighbors(mask, &OccupancyOverlay::new(), cell, w, h)
+            .map(|(c, _)| c)
+            .collect()
+    }
+
+    #[test]
+    fn a_diagonal_step_past_a_blocked_orthogonal_cell_is_refused() {
+        let mut m = WalkableMask::new_open(32, 32);
+        // Cell (2, 1) blocked: the step (1, 1) -> (2, 2) would cut its corner.
+        m.mark_blocked(
+            2 * COARSE_CELL_SIZE,
+            COARSE_CELL_SIZE,
+            COARSE_CELL_SIZE,
+            COARSE_CELL_SIZE,
+            0,
+        );
+        let n = neighbours(&m, (1, 1));
+        assert!(!n.contains(&(2, 2)) && !n.contains(&(2, 0)));
+        assert!(
+            n.contains(&(0, 2)) && n.contains(&(1, 2)),
+            "the open side still steps"
+        );
+    }
+
+    #[test]
+    fn half_open_cells_meeting_at_a_pixel_corner_are_not_crossable() {
+        let mut m = WalkableMask::new_open(32, 32);
+        let s = COARSE_CELL_SIZE;
+        // Cell (1, 1) open only in its north half, cell (2, 1) only in its south
+        // half: both walkable, their open halves touching at one pixel corner.
+        m.mark_blocked(s, s + s / 2, s, s / 2, 0);
+        m.mark_blocked(2 * s, s, s, s / 2, 0);
+        assert!(cell_walkable(&m, &OccupancyOverlay::new(), 1, 1));
+        assert!(cell_walkable(&m, &OccupancyOverlay::new(), 2, 1));
+        assert!(!neighbours(&m, (1, 1)).contains(&(2, 1)));
+        assert!(!neighbours(&m, (2, 1)).contains(&(1, 1)));
+    }
 }
