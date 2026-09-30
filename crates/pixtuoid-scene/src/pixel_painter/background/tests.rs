@@ -43,8 +43,6 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let render_lum = |flash: f32| -> u64 {
         let sky = Sky::at_with(now, Weather::Storm).with_flash(flash);
-        let look = Look::resolve(&sky, theme);
-        let sky_row = sky_rows(30, &look);
         let moment = &Moment::resolve(sky, theme, 0.0, now);
         let city = CityStrip::draw(
             &pack(),
@@ -68,8 +66,7 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
             GlassView {
                 city: &city,
                 run_x0: 0,
-                sky_row: &sky_row,
-                disc: None,
+                sky: &crate::celestial::SkyView::of(moment, 40, 40, theme),
             },
         );
         let mut sum = 0u64;
@@ -266,7 +263,7 @@ fn rain_hides_the_disc_like_overcast() {
 
 #[test]
 fn thick_cloud_hides_the_disc_uniformly() {
-    let min_disc_vis = celestial::MIN_DISC_VIS;
+    let min_disc_vis = crate::celestial::MIN_DISC_VIS;
     let overcast = crate::sky::atmo(Weather::Overcast).disc;
     let rain = crate::sky::atmo(Weather::Rain).disc;
     let storm = crate::sky::atmo(Weather::Storm).disc;
@@ -453,15 +450,13 @@ fn crescent_moon_leaves_the_dark_limb_unlit() {
     // 21:00 Clear puts the disc in-glass at FULL atmo visibility, so every
     // disc-interior pixel is EXACTLY `moon_core` or EXACTLY `MOON_SHADOW` — no
     // partial blend to muddy the count. (cx, cy, r) depend only on the hour, not
-    // the date, so one `compute_disc` call gives the bounding box for every day.
+    // the date, so one `Disc::of` call gives the bounding box for every day.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
-    let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let geom = compute_disc(
+    let geom = crate::celestial::Disc::of(
         &Sky::at_with(crate::localclock::at_hour(21), Weather::Clear),
         buf_w,
         top_wall_h,
-        theme,
     )
     .expect("moon disc visible at 21:00 under Clear");
 
@@ -489,7 +484,7 @@ fn crescent_moon_leaves_the_dark_limb_unlit() {
                     continue; // outside the disc proper
                 }
                 let p = buf.get(px as u16, py as u16);
-                if p == MOON_SHADOW {
+                if p == crate::celestial::MOON_SHADOW {
                     dark += 1;
                 } else if p.b > 200 && p.b > p.r.saturating_add(10) {
                     bright += 1;
@@ -534,11 +529,10 @@ fn a_waning_moon_lights_its_left_limb() {
     let buf_w = 96u16;
     let top_wall_h = 40u16;
     let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let geom = compute_disc(
+    let geom = crate::celestial::Disc::of(
         &Sky::at_with(crate::localclock::at_hour(21), Weather::Clear),
         buf_w,
         top_wall_h,
-        theme,
     )
     .expect("moon disc visible at 21:00 under Clear");
     // Lit disc pixels left and right of the disc's centre column.
@@ -953,7 +947,7 @@ fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
     for hour in [6, 19] {
         let sky = Sky::at_with(crate::localclock::at_hour(hour), Weather::Clear);
         let look = Look::resolve(&sky, theme);
-        let disc = compute_disc(&sky, BUF_W, TOP_WALL_H, theme).expect("a clear low sun");
+        let disc = crate::celestial::Disc::of(&sky, BUF_W, TOP_WALL_H).expect("a clear low sun");
         let disc_side = (disc.cx - mid).signum();
 
         let mut buf = RgbBuffer::filled(BUF_W, BUF_H, FILL);
@@ -1045,12 +1039,15 @@ fn pack() -> Pack {
 /// end.
 #[test]
 fn a_window_shows_the_city_strip_from_its_own_column() {
-    // Noon: the night's stars are keyed to the screen column, not the city's.
+    // Overcast noon: no stars and no disc, which key on the screen column, not
+    // the city's; the sky's dither does too, so the far pane sits a whole
+    // number of its periods east.
     let now = crate::localclock::on_day(15, 12);
     let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let moment = &Moment::resolve(Sky::at_with(now, Weather::Clear), theme, 0.0, now);
-    let sky_row = sky_rows(30, &moment.look);
+    let moment = &Moment::resolve(Sky::at_with(now, Weather::Overcast), theme, 0.0, now);
+    let sky = crate::celestial::SkyView::of(moment, WINDOW_W * 3, 40, theme);
     let dx = 7;
+    let far = (WINDOW_W + dx).next_multiple_of(crate::dither::PERIOD);
     let city = CityStrip::draw(
         &pack(),
         (WINDOW_W * 2, 28),
@@ -1074,8 +1071,7 @@ fn a_window_shows_the_city_strip_from_its_own_column() {
             GlassView {
                 city: &city,
                 run_x0,
-                sky_row: &sky_row,
-                disc: None,
+                sky: &sky,
             },
         );
         (0..30u16)
@@ -1083,7 +1079,7 @@ fn a_window_shows_the_city_strip_from_its_own_column() {
             .map(|(c, y)| buf.get(x + c, y))
             .collect::<Vec<_>>()
     };
-    let (west, east) = (pane(0, 0), pane(WINDOW_W + dx, WINDOW_W + dx));
+    let (west, east) = (pane(0, 0), pane(far, far));
     assert_eq!(west, east, "a pane shows the strip from the run's west end");
     assert_ne!(
         pane(dx, 0),
