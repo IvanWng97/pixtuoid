@@ -137,7 +137,7 @@ jobs:
       - run: just star-history-selftest
       # The capture-tree provenance rules are NOT here: they are Rust tests
       # (`tests/sources/captures.rs`, #929) riding `just test` in windows-test,
-      # macos-test and coverage — three platforms instead of this job's one, and
+      # macos-test and linux-test — three platforms instead of this job's one, and
       # no toolchain in a lint job.
       - run: just fixture-pii
       - run: just fixture-pii-selftest

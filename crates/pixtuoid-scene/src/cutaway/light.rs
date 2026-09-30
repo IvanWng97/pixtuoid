@@ -110,6 +110,7 @@ impl Emission {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn get(&self, x: u16, y: u16) -> Glow {
         if x >= self.w {
             return Glow::Lit;
@@ -277,6 +278,7 @@ pub(crate) fn net_pass(
     ambient: Ambient,
     emission: &Emission,
     pen: Pen,
+    memo: &mut NetMemo,
     buf: &mut RgbBuffer,
 ) {
     let mut lights: Vec<&LightView> = lights
@@ -285,39 +287,105 @@ pub(crate) fn net_pass(
         .filter(|l| overlaps(l.rect(), rect))
         .collect();
     lights.sort_by_key(|l| l.rank);
-    let mut memo: std::collections::HashMap<(Rgb, Glow, u8, Option<Rgb>), Rgb> =
-        std::collections::HashMap::new();
-    for ay in rect.y.0..rect.y.0.saturating_add(rect.h.0) {
-        for ax in rect.x.0..rect.x.0.saturating_add(rect.w.0) {
-            // The first of the brightest, in rank order.
-            let (lift, tint) = lights.iter().fold((0u8, None), |best, l| {
-                let lift = l.lift_at(ax, ay);
-                if lift > best.0 {
-                    (lift, l.tint)
-                } else {
-                    best
+    let (w, h) = (usize::from(rect.w.0), usize::from(rect.h.0));
+    // The first of the brightest, in rank order.
+    let mut lift = vec![0u8; w * h];
+    let mut tint: Vec<Option<Rgb>> = vec![None; w * h];
+    for l in &lights {
+        let r = l.rect();
+        let (x0, x1) = (
+            r.x.0.max(rect.x.0),
+            r.x.0
+                .saturating_add(r.w.0)
+                .min(rect.x.0.saturating_add(rect.w.0)),
+        );
+        let (y0, y1) = (
+            r.y.0.max(rect.y.0),
+            r.y.0
+                .saturating_add(r.h.0)
+                .min(rect.y.0.saturating_add(rect.h.0)),
+        );
+        for ay in y0..y1 {
+            for ax in x0..x1 {
+                let i = usize::from(ay - rect.y.0) * w + usize::from(ax - rect.x.0);
+                let here = l.lift_at(ax, ay);
+                if here > lift[i] {
+                    lift[i] = here;
+                    tint[i] = l.tint;
                 }
-            });
+            }
+        }
+    }
+    let k = pen.buffer(ArtPx(1));
+    let (bx0, by0) = (pen.buffer(rect.x), pen.buffer(rect.y));
+    let bx1 = bx0.saturating_add(pen.buffer(rect.w)).min(buf.width());
+    let by1 = by0.saturating_add(pen.buffer(rect.h)).min(buf.height());
+    let bw = usize::from(buf.width());
+    let pixels = buf.as_mut_slice();
+    debug_assert_eq!(emission.glow.len(), pixels.len(), "one class per pixel");
+    for by in by0..by1 {
+        let art_row = usize::from(by / k - rect.y.0) * w;
+        for bx in bx0..bx1 {
+            let a = art_row + usize::from(bx / k - rect.x.0);
+            let (lift, tint) = (lift[a], tint[a]);
             if lift == 0 && ambient.0 == 0 {
                 continue;
             }
-            let cell = ArtRect {
-                x: ArtPx(ax),
-                y: ArtPx(ay),
-                w: ArtPx(1),
-                h: ArtPx(1),
-            };
-            pen.recolour_px(buf, cell, |x, y, under| {
-                let glow = emission.get(x, y);
-                *memo
-                    .entry((under, glow, lift, tint))
-                    .or_insert_with(|| match glow {
-                        Glow::Lit => net_colour(under, lift, ambient, tint),
-                        Glow::Emissive => under,
-                        Glow::Shaded => ambient.on(under),
-                        Glow::Pane => net_colour(under, lift, Ambient::default(), tint),
-                    })
-            });
+            let i = usize::from(by) * bw + usize::from(bx);
+            let glow = emission.glow.get(i).copied().unwrap_or(Glow::Lit);
+            pixels[i] = memo.of(pixels[i], glow, lift, tint, ambient);
+        }
+    }
+}
+
+/// [`net_pass`]'s colours, kept across frames: OKLab maths a room asks again
+/// every frame.
+#[derive(Default)]
+pub(crate) struct NetMemo {
+    colours: std::collections::HashMap<NetKey, Rgb, std::hash::BuildHasherDefault<SplitMix>>,
+    /// Neighbouring pixels mostly ask the last question again.
+    last: Option<(NetKey, Rgb)>,
+}
+
+/// Everything [`net_colour`] reads for one pixel.
+type NetKey = (Rgb, Glow, u8, Option<Rgb>, Ambient);
+
+/// Bounds the memo in a room whose colours never settle.
+const NET_MEMO_CAP: usize = 1 << 16;
+
+impl NetMemo {
+    fn of(&mut self, under: Rgb, glow: Glow, lift: u8, tint: Option<Rgb>, ambient: Ambient) -> Rgb {
+        let key = (under, glow, lift, tint, ambient);
+        if let Some((k, c)) = self.last {
+            if k == key {
+                return c;
+            }
+        }
+        if self.colours.len() >= NET_MEMO_CAP {
+            self.colours.clear();
+        }
+        let c = *self.colours.entry(key).or_insert_with(|| match glow {
+            Glow::Lit => net_colour(under, lift, ambient, tint),
+            Glow::Emissive => under,
+            Glow::Shaded => ambient.on(under),
+            Glow::Pane => net_colour(under, lift, Ambient::default(), tint),
+        });
+        self.last = Some((key, c));
+        c
+    }
+}
+
+/// A small fixed key needs mixing, not SipHash.
+#[derive(Default)]
+pub(crate) struct SplitMix(u64);
+
+impl std::hash::Hasher for SplitMix {
+    fn finish(&self) -> u64 {
+        pixtuoid_core::id::splitmix64(self.0)
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = self.0.rotate_left(8) ^ u64::from(b);
         }
     }
 }
@@ -398,6 +466,7 @@ mod tests {
             ambient,
             &Emission::new(160, 64),
             pen(),
+            &mut NetMemo::default(),
             &mut buf,
         );
         buf
@@ -517,6 +586,7 @@ mod tests {
             night,
             &Emission::new(160, 64),
             pen(),
+            &mut NetMemo::default(),
             &mut part,
         );
         for y in rect.y.0..rect.y.0 + rect.h.0 {
@@ -536,7 +606,15 @@ mod tests {
         emission.set(41, 33, Glow::Emissive);
         emission.set(42, 33, Glow::Shaded);
         let mut buf = RgbBuffer::filled(160, 64, FLOOR);
-        net_pass(whole(40, 16), &[&lamp], night, &emission, pen(), &mut buf);
+        net_pass(
+            whole(40, 16),
+            &[&lamp],
+            night,
+            &emission,
+            pen(),
+            &mut NetMemo::default(),
+            &mut buf,
+        );
         assert_eq!(buf.get(41, 33), FLOOR);
         assert_eq!(buf.get(42, 33), night.on(FLOOR));
         assert_ne!(

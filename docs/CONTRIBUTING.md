@@ -4,8 +4,8 @@ Thanks for your interest! PRs are welcome — especially **new themes**, sprite 
 decoration polish, and **`Source` adapters** for agent CLIs we don't support yet
 (the agent CLIs plus the OpenClaw gateway already wired up are listed in the README).
 
-Before you start, read [`CLAUDE.md`](../CLAUDE.md) at the repo root (and the
-nested `crates/*/CLAUDE.md` for the crate you touch). It holds the load-bearing
+Before you start, read [`AGENTS.md`](../AGENTS.md) at the repo root (and the
+nested `crates/*/AGENTS.md` for the crate you touch). It holds the load-bearing
 architecture invariants and conventions. Many things that look like bugs are
 documented, intentional design: read the whole item, its doc comment and the
 comments on the lines it governs, before changing it.
@@ -14,9 +14,8 @@ comments on the lines it governs, before changing it.
 
 Requires a recent stable Rust toolchain and [`just`](https://github.com/casey/just)
 (`brew install just`). On Linux you also need `lld`, `pkg-config` and the ALSA
-headers (`apt install lld pkg-config libasound2-dev`). The `justfile` is the
-single source of truth for every check — CI and the git hooks call the same
-recipes.
+headers (`apt install lld pkg-config libasound2-dev`). The git hooks and most
+CI jobs call `justfile` recipes.
 
 ```bash
 just              # list recipes
@@ -26,9 +25,9 @@ just test         # the whole suite (cargo-nextest if installed, else cargo test
 cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
 ```
 
-> **Don't chain `cargo clippy && cargo test`** — clippy and test use *separate*
-> build caches, so chaining recompiles the whole workspace twice. Run
-> `just preflight full`, or one check at a time.
+> **Don't expect clippy to warm `test`'s build** — its check-mode (rmeta)
+> builds carry over only build scripts and proc-macros, so iterate with one of
+> them.
 
 Activate the git hooks once per clone: `git config core.hooksPath .githooks`
 (`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`, lint + clippy;
@@ -153,8 +152,7 @@ our release never builds. Two consequences:
 
 - **A from-source build break lands in Homebrew's CI, not ours.** Anything
   adding a system-library dependency needs a matching `depends_on` in the core
-  formula, in the same bump PR. Outstanding now: the default-on `audio`
-  feature needs `depends_on "alsa-lib"` — [#731](https://github.com/IvanWng97/pixtuoid/issues/731).
+  formula, in the same bump PR.
 - **Their `test do` block is a public contract** — see the "homebrew-core
   contract" comments at `crates/pixtuoid/src/validate.rs`,
   `crates/pixtuoid/src/sources_cli.rs`,
@@ -188,7 +186,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
 6. **Build** — TDD: failing test → minimal impl → commit.
 7. **Self-review** — a standards+spec pass before pushing, INCLUDING the
    whole-file comment audit: every file the PR touches — even by one line —
-   gets its entire comment population re-read against `CLAUDE.md`'s comment
+   gets its entire comment population re-read against `AGENTS.md`'s comment
    rules, and the cleanup rides the same PR (population and dispositions:
    [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md)'s
    always-on comment row). Not the merge gate.
@@ -206,7 +204,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
 On a fresh machine or a non-Claude tool, `git clone` gives you the repo skills
 and every `just` gate; this section IS the loop for tools without skills. Do
 not scaffold a `CONTEXT.md`/`docs/adr/` convention here — a declaration's own
-doc comment is the design record, and the nested `CLAUDE.md` says only what its
+doc comment is the design record, and the nested `AGENTS.md` says only what its
 crate IS.
 
 ### The running order
@@ -240,7 +238,7 @@ Advisory backstops that surface risk but never gate:
 
 ## Conventions and architecture invariants
 
-Both live in [`CLAUDE.md`](../CLAUDE.md) ("Conventions", "Architecture
+Both live in [`AGENTS.md`](../AGENTS.md) ("Conventions", "Architecture
 invariants"), which every contributor and agent reads first.
 
 ## Pull requests
@@ -281,9 +279,9 @@ gh run rerun --failed                        # rerun only failed CI jobs
 
 ## Adding a new agent CLI
 
-The registration steps (4–7, 9) are test-forced — skipping one fails
-`just test`. Step 8 is forced only for hook-only sources; step 10 by the theme
-guards; steps 1–3, 11 and 12 are on you.
+The registration steps (4–7, 9) and step 12's roster literals are test-forced —
+skipping one fails `just test`. Step 8 is forced only for hook-only sources;
+step 10 by the theme guards; steps 1–3, 11 and step 12's `#[test]` are on you.
 
 1. **Verify the wire format against the CLI's actual source/releases first** —
    transcript location, line shape, hooks, session identity; pin every fact
@@ -313,7 +311,7 @@ guards; steps 1–3, 11 and 12 are on you.
    `sources --json` golden (`crates/pixtuoid/tests/snapshots/cli/sources.json`)
    must list it: `SNAPSHOTS=overwrite cargo test -p pixtuoid --test cli_json`.
 6. **Record the fixture** — the test steps in
-   [`crates/pixtuoid-core/tests/CLAUDE.md`](../crates/pixtuoid-core/tests/CLAUDE.md)
+   [`crates/pixtuoid-core/tests/AGENTS.md`](../crates/pixtuoid-core/tests/AGENTS.md)
    (a RECORDED SessionStart scenario via `just capture-fixture`), then
    `cargo insta review`.
 7. **Wire it into `runtime/driver.rs::build_source_set`** (the one
@@ -333,9 +331,9 @@ guards; steps 1–3, 11 and 12 are on you.
     const, the `insert` in that crate's `src/drift_surface.rs`,
     `just gen-drift-surface` (commit both fragments), and the `SURFACE_ROWS`
     row plus its selftest case (the case census fails without it).
-12. **Three roster literals no failure message spells out**: the row-by-row
-    byte pin in `corpus_check.rs`; `TOOL_ID_KEY_UNPROVEN` in
-    `tests/sources/captures.rs`; a case row + `#[test]` in
+12. **Three roster literals in three test binaries** (a scoped run misses
+    them): the row-by-row byte pin in `corpus_check.rs`; `TOOL_ID_KEY_UNPROVEN`
+    in `tests/sources/captures.rs`; a case row + `#[test]` in
     `crates/pixtuoid/tests/wire_to_pixels.rs`.
 
 ## License
