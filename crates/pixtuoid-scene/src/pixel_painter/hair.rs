@@ -195,17 +195,21 @@ mod tests {
     use super::*;
     use pixtuoid_core::sprite::format::load_pack_from_strings;
 
+    #[cfg(feature = "density-art")]
     const H: Rgb = Rgb {
         r: 200,
         g: 100,
         b: 50,
     };
+    #[cfg(feature = "density-art")]
     const S: Rgb = Rgb {
         r: 240,
         g: 192,
         b: 160,
     };
+    #[cfg(feature = "density-art")]
     const LINE: Rgb = Rgb { r: 1, g: 1, b: 1 };
+    #[cfg(feature = "density-art")]
     const TWO: NonZeroU16 = NonZeroU16::MIN.saturating_add(1);
 
     /// A pack of `body` marked `head` (the `head.front` mark's column and row),
