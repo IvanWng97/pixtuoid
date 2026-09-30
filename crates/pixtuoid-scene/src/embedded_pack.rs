@@ -380,8 +380,7 @@ mod tests {
         );
         let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
         assert!(
-            pack.buildings()
-                .all(|b| b.art(d(1)).is_some() && b.art(d(4)).is_none()),
+            pack.buildings().all(|b| b.variant(d(4)).is_none()),
             "at their base alone"
         );
         let report = validate_pack(&pack);
@@ -412,17 +411,12 @@ mod tests {
         );
         let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
         for b in pack.buildings() {
-            assert!(
-                b.art(d(1)).is_some() && b.art(d(4)).is_some(),
-                "{}",
-                b.name()
-            );
+            assert!(b.variant(d(4)).is_some(), "{}", b.name());
         }
     }
 
-    /// Every bundled furniture frame, at every density, ends on a row it
-    /// draws: the painters ground and sort a piece on its art's bottom row, so
-    /// a transparent one lifts it a row off the floor it stands on.
+    /// A transparent last row lifts a piece off the floor both painters ground
+    /// it on.
     #[test]
     fn every_bundled_furniture_frame_draws_its_bottom_row() {
         let pack = test_default_pack();

@@ -13,11 +13,9 @@ use crate::sprite::{
 
 type Result<T, E = PackError> = std::result::Result<T, E>;
 
-/// One `@frame` block as parsed, each row and mark with the 0-based line it
-/// came from, so a shape error names the line at fault.
 struct Block {
     header: usize,
-    rows: Vec<(Vec<PaletteIndex>, usize)>,
+    rows: Vec<Vec<PaletteIndex>>,
     marks: Vec<(Mark, usize)>,
 }
 
@@ -36,16 +34,7 @@ fn parse_indexed(
         }
     };
     let finish = |block: Block| -> Result<(IndexedFrame, Vec<Mark>), SpriteError> {
-        let (rows, row_lines): (Vec<_>, Vec<_>) = block.rows.into_iter().unzip();
-        let frame = rows_to_frame(rows).map_err(|kind| {
-            let lineno = match kind {
-                LineError::NoRows => block.header,
-                LineError::TooManyRows { .. } => row_lines[usize::from(u16::MAX)],
-                LineError::Ragged { row, .. } => row_lines[row],
-                _ => row_lines[0],
-            };
-            at(lineno)(kind)
-        })?;
+        let frame = rows_to_frame(block.rows).map_err(at(block.header))?;
         let grid = &frame.0;
         if let Some((m, lineno)) = block
             .marks
@@ -103,7 +92,7 @@ fn parse_indexed(
         }
 
         let row = parse_row(line, palette).map_err(at(lineno))?;
-        rows.push((row, lineno));
+        push_row(rows, row).map_err(at(lineno))?;
     }
 
     if let Some(block) = current.take() {
@@ -217,19 +206,19 @@ mod tests {
         assert!(tower.stands_in(CityPlane::Mid) && tower.stands_in(CityPlane::Near));
         let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
         let base = tower.base();
-        assert!(std::ptr::eq(tower.art(d(1)).expect("1x is the base"), base));
+        assert!(tower.variant(d(1)).is_none(), "the base is no variant");
         assert_eq!(
             base.windows(),
             [vec![(0, 1), (1, 1)]],
             "one run of glass, one window"
         );
-        let dense = tower.art(d(2)).expect("the 2x variant");
+        let dense = tower.variant(d(2)).expect("the 2x variant");
         assert_eq!(
             dense.windows().len(),
             2,
             "each density finds its own windows: the mullion splits this one"
         );
-        assert!(tower.art(d(4)).is_none());
+        assert!(tower.variant(d(4)).is_none());
         let materials = pack.city_materials().expect("[city]");
         assert_eq!(materials.key(Material::Glass), 'W');
     }
@@ -667,31 +656,38 @@ fn parse_row(line: &str, palette: &Palette) -> Result<Vec<PaletteIndex>, LineErr
     Ok(out)
 }
 
-fn rows_to_frame(rows: Vec<Vec<PaletteIndex>>) -> Result<IndexedFrame, LineError> {
-    if rows.is_empty() {
-        return Err(LineError::NoRows);
+/// Append `row` to a frame's `rows`, rejected where it breaks the frame's
+/// shape, so the error names the row's own line.
+fn push_row(rows: &mut Vec<Vec<PaletteIndex>>, row: Vec<PaletteIndex>) -> Result<(), LineError> {
+    // Grid dims are u16: past them a frame's `data` would outgrow its grid.
+    if u16::try_from(rows.len() + 1).is_err() {
+        return Err(LineError::TooManyRows {
+            rows: rows.len() + 1,
+        });
     }
-    // Grid dims are u16: an `as u16` truncation would wrap them while `data`
-    // keeps its full length, and `Grid::from_vec`'s length assert would panic
-    // on pack input instead of rejecting it.
-    if rows.len() > u16::MAX as usize {
-        return Err(LineError::TooManyRows { rows: rows.len() });
-    }
-    let w = rows[0].len();
-    if w > u16::MAX as usize {
-        return Err(LineError::TooWide { width: w });
-    }
-    for (i, r) in rows.iter().enumerate() {
-        if r.len() != w {
+    match rows.first() {
+        None if u16::try_from(row.len()).is_err() => {
+            return Err(LineError::TooWide { width: row.len() });
+        }
+        Some(first) if row.len() != first.len() => {
             return Err(LineError::Ragged {
-                row: i,
-                expected: w,
-                got: r.len(),
+                row: rows.len(),
+                expected: first.len(),
+                got: row.len(),
             });
         }
+        _ => {}
     }
-    let height = rows.len() as u16;
-    let width = w as u16;
+    rows.push(row);
+    Ok(())
+}
+
+fn rows_to_frame(rows: Vec<Vec<PaletteIndex>>) -> Result<IndexedFrame, LineError> {
+    let height =
+        u16::try_from(rows.len()).map_err(|_| LineError::TooManyRows { rows: rows.len() })?;
+    let first = rows.first().ok_or(LineError::NoRows)?;
+    let width =
+        u16::try_from(first.len()).map_err(|_| LineError::TooWide { width: first.len() })?;
     let data = rows.into_iter().flatten().collect();
     Ok(IndexedFrame(Grid::from_vec(width, height, data)))
 }
@@ -917,12 +913,9 @@ impl Building {
         &self.base
     }
 
-    /// Its art at `density`, where it is drawn at that density.
-    pub fn art(&self, density: std::num::NonZeroU16) -> Option<&BuildingArt> {
-        match density.get() {
-            1 => Some(&self.base),
-            n => self.variants.get(&n),
-        }
+    /// Its variant drawn at `density`, above its [`base`](Self::base).
+    pub fn variant(&self, density: std::num::NonZeroU16) -> Option<&BuildingArt> {
+        self.variants.get(&density.get())
     }
 }
 
@@ -1424,13 +1417,24 @@ fn runs_of(grid: &Grid<PaletteIndex>, index: PaletteIndex) -> Vec<Vec<(u16, u16)
     runs
 }
 
-/// Load a `Pack` from `dir/pack.toml` and its on-disk frame files, guarding
-/// each frame path against directory traversal outside `dir`.
+/// The file a pack directory's manifest is read from.
+pub const PACK_MANIFEST: &str = "pack.toml";
+
+/// Load a `Pack` from `dir`'s [`PACK_MANIFEST`] and its on-disk frame files,
+/// guarding each frame path against directory traversal outside `dir`.
 pub fn load_pack(dir: &Path) -> Result<Pack> {
-    let toml_path = dir.join("pack.toml");
-    let toml_src = std::fs::read_to_string(&toml_path).map_err(|source| PackError::Read {
-        path: toml_path.clone(),
-        source,
+    let toml_path = dir.join(PACK_MANIFEST);
+    let toml_src = std::fs::read_to_string(&toml_path).map_err(|source| {
+        if source.kind() == std::io::ErrorKind::NotFound {
+            PackError::NoManifest {
+                dir: dir.to_owned(),
+            }
+        } else {
+            PackError::Read {
+                path: toml_path.clone(),
+                source,
+            }
+        }
     })?;
     let parsed: PackToml = toml::from_str(&toml_src).map_err(|source| PackError::Manifest {
         path: Some(toml_path.clone()),

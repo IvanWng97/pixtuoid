@@ -420,7 +420,7 @@ impl CityStrip {
                         continue;
                     };
                     let (art, grow) = building
-                        .art(density)
+                        .variant(density)
                         .map_or((building.base(), d), |a| (a, 1));
                     let frame = match recoloured
                         .iter()

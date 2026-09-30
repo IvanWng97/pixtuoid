@@ -45,9 +45,6 @@ fn a_bad_pixel_is_matchable_and_its_chain_prints_each_step_once() {
     );
 }
 
-/// A frame's shape error names the line at fault: the ragged row, the mark
-/// outside the frame, or the `@frame` of an empty one, not the line where the
-/// frame's block happens to end.
 #[test]
 fn a_shape_error_names_the_line_at_fault() {
     let line_of = |sprite: &str| match load_pack_from_strings(

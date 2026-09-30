@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::format::{Material, DENSITY_VARIANT_SEP};
+use super::format::{Material, DENSITY_VARIANT_SEP, PACK_MANIFEST};
 use super::HeadView;
 
 /// A sprite pack that could not be loaded.
@@ -21,6 +21,13 @@ pub enum PackError {
         /// The OS error.
         #[source]
         source: std::io::Error,
+    },
+    /// The pack directory holds no [`PACK_MANIFEST`], or does not exist.
+    #[error("{} holds no {PACK_MANIFEST}", dir.display())]
+    #[non_exhaustive]
+    NoManifest {
+        /// The directory.
+        dir: PathBuf,
     },
     /// The pack directory could not be canonicalized.
     #[error("canonicalizing {}", path.display())]

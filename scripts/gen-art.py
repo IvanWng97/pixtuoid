@@ -258,10 +258,10 @@ SKIN_KEYS = {SKIN, SKIN_SH}
 
 
 def grounded(frames):
-    """`frames` moved down together until the lowest drawn row is each canvas's
+    """`frames` moved down together until their lowest drawn row is the canvas's
     last: both painters ground and sort a piece on its box's bottom row."""
     blank = min(
-        next(i for i, row in enumerate(reversed(g)) if any(c != T for c in row)) for g in frames
+        next((i for i, row in enumerate(reversed(g)) if any(c != T for c in row)), 0) for g in frames
     )
     return [[[T] * len(g[0])] * blank + g[: len(g) - blank] for g in frames]
 

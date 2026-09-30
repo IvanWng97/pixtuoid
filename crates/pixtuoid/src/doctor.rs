@@ -608,28 +608,22 @@ struct RootStatus {
 }
 
 /// The density variants of the pack `source` loads, or why that pack fails to
-/// load: `run` refuses to start on it, so doctor says so. A directory with no
-/// `pack.toml` is named as the config mistake it is.
+/// load: `run` refuses to start on it, so doctor says so.
 fn pack_densities(source: pixtuoid_scene::embedded_pack::PackSource) -> Result<Vec<u16>, String> {
     use pixtuoid_core::sprite::error::PackError;
     pixtuoid_scene::embedded_pack::load_sprite_pack(source)
         .map(|pack| pack.density_variants())
         .map_err(|e| {
-            let no_manifest = e.chain().find_map(|c| match c.downcast_ref::<PackError>() {
-                Some(PackError::Read { path, source, .. })
-                    if source.kind() == std::io::ErrorKind::NotFound
-                        && path.file_name() == Some(std::ffi::OsStr::new("pack.toml")) =>
-                {
-                    path.parent()
-                }
-                _ => None,
+            let no_manifest = e.chain().any(|c| {
+                matches!(
+                    c.downcast_ref::<PackError>(),
+                    Some(PackError::NoManifest { .. })
+                )
             });
-            match no_manifest {
-                Some(dir) => format!(
-                    "pack-dir {} holds no pack.toml: point it at a sprite pack, or drop it for the bundled art",
-                    ShownPath::new(dir)
-                ),
-                None => format!("{e:#}"),
+            if no_manifest {
+                format!("{e:#}: point pack-dir at a sprite pack, or drop it for the bundled art")
+            } else {
+                format!("{e:#}")
             }
         })
 }
@@ -1527,15 +1521,16 @@ mod tests {
         }
     }
 
-    /// A pack-dir with no `pack.toml`, missing or empty, is named the config
-    /// mistake it is; the bundled pack loads.
     #[test]
     fn a_pack_dir_without_a_manifest_is_named_a_config_mistake() {
         use pixtuoid_scene::embedded_pack::PackSource;
         let base = tempfile::TempDir::new().expect("tempdir");
         for dir in [base.path().join("gone"), base.path().to_path_buf()] {
             let reason = pack_densities(PackSource::Explicit(dir)).expect_err("no manifest");
-            assert!(reason.contains("holds no pack.toml"), "{reason}");
+            assert!(
+                reason.contains("holds no pack.toml") && reason.contains("pack-dir"),
+                "{reason}"
+            );
         }
         assert!(pack_densities(PackSource::Bundled).is_ok());
     }
