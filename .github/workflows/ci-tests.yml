@@ -13,12 +13,16 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # The platform jobs' coverage sees code the Linux job compiles out: Windows
+  # pipes and atomic-write retries, plus macOS paths and launchd. Their one
+  # instrumented run is also the platform's test gate.
   windows-test:
     name: windows-test
     if: ${{ inputs.full }}
     # Track windows-latest deliberately: this gate catches hosted-image changes.
     runs-on: windows-latest
-    timeout-minutes: 30
+    # nextest owns per-test hang limits.
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
@@ -27,11 +31,20 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-cargo-just
+        with:
+          components: llvm-tools-preview
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
-      - run: just test
-        env:
-          NEXTEST_PROFILE: ci
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate coverage + JUnit XML (single instrumented test run)
+        run: just coverage
+      - name: Upload coverage to Codecov
+        uses: ./.github/actions/upload-codecov
+        with:
+          file: lcov.info
+          flag: windows
+          report_type: coverage
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
         uses: ./.github/actions/upload-codecov
@@ -46,7 +59,7 @@ jobs:
     # macos-14 exercises the Apple Silicon build; macOS diverges on BSD CLI,
     # launchd, and config paths.
     runs-on: macos-14
-    timeout-minutes: 30
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
@@ -55,11 +68,20 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-cargo-just
+        with:
+          components: llvm-tools-preview
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
-      - run: just test
-        env:
-          NEXTEST_PROFILE: ci
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate coverage + JUnit XML (single instrumented test run)
+        run: just coverage
+      - name: Upload coverage to Codecov
+        uses: ./.github/actions/upload-codecov
+        with:
+          file: lcov.info
+          flag: macos
+          report_type: coverage
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
         uses: ./.github/actions/upload-codecov
@@ -103,68 +125,6 @@ jobs:
           file: target/nextest/ci/junit.xml
           flag: unit
           report_type: test_results
-
-  # Platform coverage compiles code the Linux job cannot see: Windows pipes and
-  # atomic-write retries, plus macOS paths and launchd.
-  coverage-windows:
-    name: coverage-windows
-    if: ${{ inputs.full }}
-    runs-on: windows-latest
-    # nextest owns per-test hang limits.
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-cargo-just
-        with:
-          components: llvm-tools-preview
-      # rust-cache separates this from windows-test by job ID and RUSTFLAGS.
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@cargo-nextest
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Generate coverage + JUnit XML (single instrumented test run)
-        run: just coverage
-      # lcov only: windows-test already uploads this platform's JUnit report.
-      - name: Upload coverage to Codecov
-        uses: ./.github/actions/upload-codecov
-        with:
-          file: lcov.info
-          flag: windows
-          report_type: coverage
-
-  coverage-macos:
-    name: coverage-macos
-    if: ${{ inputs.full }}
-    runs-on: macos-14
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-cargo-just
-        with:
-          components: llvm-tools-preview
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@cargo-nextest
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Generate coverage + JUnit XML (single instrumented test run)
-        run: just coverage
-      # lcov only: macos-test already uploads this platform's JUnit report.
-      - name: Upload coverage to Codecov
-        uses: ./.github/actions/upload-codecov
-        with:
-          file: lcov.info
-          flag: macos
-          report_type: coverage
 
   snapshots:
     name: snapshot hygiene
@@ -257,7 +217,7 @@ jobs:
     # single protected ci-gate silently lose coverage.
     if: ${{ always() }}
     needs:
-      [windows-test, macos-test, coverage, coverage-windows, coverage-macos, snapshots, smoke]
+      [windows-test, macos-test, coverage, snapshots, smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

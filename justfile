@@ -464,7 +464,8 @@ doc-check:
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --document-private-items
     cargo test --doc --workspace
 
-# Coverage + JUnit XML in one run — the exact command ci-tests.yml's coverage job uses.
+# Coverage + JUnit XML in one run — CI's only test run, on every platform
+# (ci-tests.yml's coverage, windows-test and macos-test).
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
 # profile. Writes lcov.info + target/nextest/ci/junit.xml.
 [group('rust')]
@@ -1181,8 +1182,8 @@ star-history-selftest:
 #
 # They stay Rust: a Python rule would need its own copy of the capture walk kept
 # in step with `harness::captures`, and GitHub's Windows images ship `python.exe`
-# with no `python3` while no test job installs Python, so windows-test and
-# coverage-windows would red.
+# with no `python3` while no test job installs Python, so windows-test would
+# red.
 [group('meta')]
 [doc("Assert every capture declares its provenance and its claims are falsifiable")]
 fixture-metadata:
