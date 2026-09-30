@@ -21,13 +21,13 @@
 //!    hook listener log-and-continue on malformed input; a panic takes the
 //!    whole watcher down. Every line therefore runs under `catch_unwind`.
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use serde_json::Value;
 
-use crate::source::decoder::{decode_hook_payload, display_safe, LineDecoder};
+use crate::source::decoder::{LineDecoder, decode_hook_payload, display_safe};
 use crate::source::registry;
 use crate::state::{ActivityState, SceneState, ToolKind};
 use crate::{AgentEvent, AgentId, Reducer, Transport};

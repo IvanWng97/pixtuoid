@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use toml::value::Table;
 
-use crate::install::target::MergeOutcome;
 use crate::install::SENTINEL_KEY;
+use crate::install::target::MergeOutcome;
 
 pub(crate) const CODEX_EVENTS: &[&str] = &[
     "SessionStart",
@@ -62,7 +62,7 @@ fn prune_managed_handlers(group: &mut toml::Value) {
 /// Install-schema verification: every `CODEX_EVENTS` group still holds a
 /// sentinel-tagged handler, and the shim command is read back for the on-disk check.
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
-    use crate::install::verify::{assemble, shell_shim_ref, SchemaParse, ShimRef};
+    use crate::install::verify::{SchemaParse, ShimRef, assemble, shell_shim_ref};
     let Ok(doc) = toml::from_str::<toml::Value>(content) else {
         return SchemaParse::broken("config.toml no longer parses as TOML");
     };
@@ -337,11 +337,13 @@ command = "/hand/written/pixtuoid-hook"
     #[test]
     #[cfg(windows)]
     fn hook_command_rejects_cmd_unsafe_path_on_windows() {
-        assert!(hook_command(
-            std::path::Path::new(r"C:\Program Files\pixtuoid-hook.exe"),
-            false
-        )
-        .is_err());
+        assert!(
+            hook_command(
+                std::path::Path::new(r"C:\Program Files\pixtuoid-hook.exe"),
+                false
+            )
+            .is_err()
+        );
         let err = hook_command(
             std::path::Path::new(r"C:\Users\a&b\pixtuoid-hook.exe"),
             false,

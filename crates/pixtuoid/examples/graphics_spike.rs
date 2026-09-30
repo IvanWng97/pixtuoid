@@ -13,9 +13,9 @@
 //! Run: cargo run --release --example graphics_spike
 
 use image::{DynamicImage, Rgb, RgbImage};
+use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::{Rect, Size};
-use ratatui::Terminal;
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::{Image, Resize};
 

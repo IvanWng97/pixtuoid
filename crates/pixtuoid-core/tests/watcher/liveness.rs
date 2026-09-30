@@ -1,14 +1,14 @@
 use std::time::{Duration, SystemTime};
 
-use filetime::{set_file_mtime, FileTime};
+use filetime::{FileTime, set_file_mtime};
 use tempfile::TempDir;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 
-use pixtuoid_core::source::jsonl::ProbeSnapshot;
+use pixtuoid_core::AgentId;
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::source::Transport;
-use pixtuoid_core::AgentId;
+use pixtuoid_core::source::jsonl::ProbeSnapshot;
 
 use crate::{
     backdate, cc_session_start_line, cc_tool_use_line, cc_watcher, vouch_snapshot, write_lines,

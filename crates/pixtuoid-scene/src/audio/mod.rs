@@ -27,7 +27,7 @@ pub mod synth;
 // The shared per-tick engine surface — both audio painters build on these, so
 // they can't drift.
 pub use bank::OneShotPool;
-pub use engine::{AudioEngine, PlayCmd, TickCommands, MAX_DT_S};
+pub use engine::{AudioEngine, MAX_DT_S, PlayCmd, TickCommands};
 
 use crate::board::StateCounts;
 

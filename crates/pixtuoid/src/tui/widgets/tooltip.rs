@@ -8,9 +8,9 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Padding, Paragraph};
 
-use super::{compact_hms, display_width, source_badge_span, state_color, to_color, StateKind};
+use super::{StateKind, compact_hms, display_width, source_badge_span, state_color, to_color};
 use crate::tui::renderer::clip_widget_rect;
-use pixtuoid_scene::layout::{Layout, DESK_W};
+use pixtuoid_scene::layout::{DESK_W, Layout};
 use pixtuoid_scene::overlay::disambig_suffix;
 use pixtuoid_scene::pet::PetKind;
 use pixtuoid_scene::pixel_painter::tool_glow_for_kind;
@@ -462,9 +462,9 @@ pub fn paint_chitchat_bubbles(
 mod tests {
     use super::mascot_tooltip_text;
     use pixtuoid_scene::theme;
+    use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
-    use ratatui::Terminal;
 
     /// Join the whole buffer into one newline-free string, so a `.contains` probe
     /// finds text regardless of which cell the box landed in.

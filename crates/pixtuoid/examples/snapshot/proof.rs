@@ -4,23 +4,23 @@
 //! AgentEvent stream through the real Reducer — the two sides structurally cannot
 //! desync. scripts/gen-media.py (kind:"proof") encodes the frames.
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
 use image::{Rgba, RgbaImage};
-use pixtuoid::tui::renderer::{draw_scene, DrawCtx};
-use pixtuoid_core::source::claude_code::{
-    cc_derive_label, cc_id_from_path, decode_cc_line, SOURCE_NAME,
-};
+use pixtuoid::tui::renderer::{DrawCtx, draw_scene};
 use pixtuoid_core::source::AgentEvent;
+use pixtuoid_core::source::claude_code::{
+    SOURCE_NAME, cc_derive_label, cc_id_from_path, decode_cc_line,
+};
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentId, Reducer, SceneState, Transport};
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use crate::encode::{cells_to_rgba, FrameSink};
+use crate::encode::{FrameSink, cells_to_rgba};
 use crate::{CELL_H, CELL_W};
 
 // Geometry (px); every canvas dim must stay even so yuv420p never crops.

@@ -4,14 +4,14 @@ use std::time::{Duration, SystemTime};
 use anyhow::Result;
 use image::codecs::gif::{GifEncoder, Repeat};
 use image::{Delay, Frame as GifFrame, Rgb as ImgRgb, RgbImage, Rgba, RgbaImage};
-use pixtuoid::tui::renderer::{draw_scene, DrawCtx};
-use pixtuoid_core::sprite::RgbBuffer;
+use pixtuoid::tui::renderer::{DrawCtx, draw_scene};
 use pixtuoid_core::SceneState;
+use pixtuoid_core::sprite::RgbBuffer;
+use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
-use ratatui::Terminal;
 
-use crate::{due_navigations, SnapshotArgs, CELL_H, CELL_W};
+use crate::{CELL_H, CELL_W, SnapshotArgs, due_navigations};
 
 /// Print a connectedness report for the walkable mask: a BFS from the door threshold,
 /// reachable vs total walkable pixels. If the two differ, the mask has an isolated

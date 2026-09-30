@@ -11,7 +11,7 @@
 //! stay in lockstep with the render anchor (all three call this with the same
 //! `origin = home desk`).
 
-use super::decor::{furniture_def, Facing, Furniture, WaypointKind};
+use super::decor::{Facing, Furniture, WaypointKind, furniture_def};
 use super::reach::ReachSet;
 use super::{Point, Size};
 use pixtuoid_core::walkable::WalkableMask;
@@ -373,7 +373,7 @@ mod tests {
         // `stand_point ≡ approach_point` is true BY CONSTRUCTION (stand_point
         // delegates), so an equality assert would be a tautology — pin the
         // obstacle branch's real invariants instead.
-        use crate::layout::{furniture_def, SceneLayout};
+        use crate::layout::{SceneLayout, furniture_def};
         let obstacle = |k| {
             !matches!(
                 k,
@@ -581,7 +581,7 @@ mod tests {
 
     #[test]
     fn seat_approach_is_never_behind_the_backrest_on_real_layouts() {
-        use crate::layout::{furniture_def, SceneLayout};
+        use crate::layout::{SceneLayout, furniture_def};
         for (w, h) in [(120u16, 96u16), (160, 120), (192, 160), (240, 160)] {
             for seed in 0..4u64 {
                 let Some(l) = SceneLayout::compute_with_seed(w, h, Some(4), seed) else {
