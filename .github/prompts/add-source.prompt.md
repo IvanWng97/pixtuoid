@@ -6,8 +6,8 @@ description: "Add a new agent-CLI Source adapter to pixtuoid"
 # Add a new agent-CLI Source
 
 Wire up a new agent CLI (`${input:name}`) as a pixtuoid `Source`. This is **not**
-a single-file change — read `crates/pixtuoid-core/CLAUDE.md` ("multi-source
-decoding" / "Adding a new agent CLI") first, then:
+a single-file change — read `docs/CONTRIBUTING.md` ("Adding a new agent CLI")
+first, then:
 
 1. Implement the `Source` trait (hook-only CLI? skip it + the runtime wiring —
    set `transcript: None` and ship a `hook.custom` decoder + install target

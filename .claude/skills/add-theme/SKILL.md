@@ -20,8 +20,7 @@ provides its own set.
 
 ## The checklist
 
-Full current steps: **[`.github/prompts/add-theme.prompt.md`](../../../.github/prompts/add-theme.prompt.md)**
-+ the theme notes in [`crates/pixtuoid/src/tui/CLAUDE.md`](../../../crates/pixtuoid/src/tui/CLAUDE.md).
+Full current steps: **[`.github/prompts/add-theme.prompt.md`](../../../.github/prompts/add-theme.prompt.md)**.
 Read an existing theme (e.g. `crates/pixtuoid-scene/src/theme/dracula.rs`) for the
 full field set, then:
 
@@ -47,8 +46,8 @@ full field set, then:
   theme drifts them, so regenerate and commit them or the smoke `gen-check` reds
   the PR (the same error the bridge test's message points at).
 
-(Full step list + field details: `add-theme.prompt.md` + the tui `CLAUDE.md` theme
-notes — this skill headlines the two teeth steps agents miss.)
+(Full step list + field details: `add-theme.prompt.md` — this skill headlines the
+two teeth steps agents miss.)
 
 ## Finish
 

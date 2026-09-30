@@ -33,14 +33,14 @@ A repo-specific iteration loop for visually redesigning a decoration in `pixtuoi
    ↓
 5. Read the cropped PNG → self-critique → back to step 1
    ↓
-6. When happy, send to user with SendUserFile and short caption
+6. When the checklist below passes, send the crop to the user with a short caption
    ↓
 7. cargo build --release --workspace    ← rebuild the LIVE binary too
    ↓
 8. Commit with iteration history (which designs were tried, why rejected)
 ```
 
-The user is the final judge of "does it look like a fridge / coffee machine / etc." — but you should self-critique before sending. Three iterations of self-critique before bothering the user.
+The user is the final judge of "does it look like a fridge / coffee machine / etc." — send only once your own critique against the checklist below passes.
 
 **Step 7 is mandatory.** `cargo build --release --example snapshot` does NOT rebuild the main binary. Users testing with `./target/release/pixtuoid run` won't see sprite changes until the workspace is rebuilt. Forgetting this step is how "I changed the sprite but nothing happened in the live TUI" bugs get filed.
 
@@ -95,9 +95,9 @@ When a sprite **changes size**:
 5. Register both `foo.sprite` and `foo_small.sprite` in `crates/pixtuoid-scene/sprites/default/pack.toml` if you added a variant (an unregistered sprite fails `every_embedded_sprite_is_a_frame_the_pack_loads`).
 6. If the piece has a density variant (`foo@Nx.sprite`, drawn by `scripts/gen-art.py`), resize it there too, with its 1x where the generator owns that; a variant not exactly N× its base reds `validate-pack`.
 
-## Self-critique checklist — MANDATORY before every SendUserFile
+## Self-critique checklist — before sending a render to the user
 
-You **must** run this checklist explicitly before each `SendUserFile` in a beautify loop. State the result of each row in the message (✅/⚠️/❌). Fix any ❌ before sending; if you ship a ⚠️, call it out so the user knows the trade-off.
+Run this checklist before each render you send in a beautify loop, and state each row's result (✅/⚠️/❌) in the message. Fix any ❌ first; call out any ⚠️ you ship so the user sees the trade-off.
 
 | Check | What it means |
 |---|---|
@@ -107,8 +107,6 @@ You **must** run this checklist explicitly before each `SendUserFile` in a beaut
 | Color distinctness | New elements use colors distinct from immediate neighbours. |
 | `cargo test` | Connectivity test passes (`cargo test --workspace`, or `just test`). |
 | `--debug-walkable` | Rendered the overlay and visually checked no narrow / isolated walkable pockets near the new element. |
-
-Skipping this checklist defeats the point of the skill — the whole reason it exists is that past sessions shipped invisible / unverified changes.
 
 ## Workflow when adding a NEW decoration
 
@@ -121,15 +119,3 @@ Skipping this checklist defeats the point of the skill — the whole reason it e
 7. Add a `DrawableKind::Foo` variant + `paint_drawable` arm if z-sorting matters.
 8. Run `cargo test -p pixtuoid-scene` — the layout/walkable-connectivity and painter tests this checklist relies on live there.
 9. Snapshot + iterate.
-
-## Recap of the pantry session (case study)
-
-What we did: replaced the 20×8 pantry counter with a 32×10 design through 8 iterations:
-
-- **v1–v3**: Too crowded, 6 zones × 3 cells each = unreadable.
-- **v4**: Simplified to 3 zones (fridge / coffee / microwave-snacks) at 8/10/10 cells.
-- **v5–v6**: Tried adding detail (handle pairs, dividers). User said "no difference between v5/v6" — too subtle to read at scale.
-- **v7**: Discovered `cargo build --workspace` was not rebuilding the snapshot example, so v6 was never actually rendered. Fixed by rebuilding the example explicitly (step 2).
-- **v8**: Color-coded for identity — solid WHITE fridge vs. dark coffee + dark microwave. Strong silhouette differentiation. (Honest self-critique: still looks washing-machine-y due to H-frame.)
-
-Lessons: **silhouette + color over detail**, **always rebuild the example explicitly**, **keep the default snapshot size for the large variant**.

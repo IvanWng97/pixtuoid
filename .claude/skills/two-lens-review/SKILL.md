@@ -166,11 +166,11 @@ compile-time constraint, a CI gate; ADD one where none exists, never prose) ·
 RE-SCOPED · SURFACED — the four states are defined ONCE in
 `pr-review.prompt.md`'s orchestrator notes; fill from there, never a
 paraphrase here. Agents never file issues. "Acknowledged, no action" is NOT
-a state — #40's ignored finding became a 0.4.1 blocker (#46). Diff scope: in the PR
-thread. Whole-codebase scope: in the ranked report. Sweep at the FINAL merge
-head — a finding that lands after the local lenses ran is the #283/#383 drop
-class; and check WHICH commit a bot re-flag was raised against before
-re-litigating (#316's were stale).
+a state — an acknowledged finding resurfaces later as a release blocker. Diff
+scope: in the PR thread. Whole-codebase scope: in the ranked report. Sweep at
+the FINAL merge head, so a finding that lands after the local lenses ran isn't
+dropped; and check WHICH commit a bot re-flag was raised against before
+re-litigating (it may already be fixed).
 
 ## Red flags (you're about to skip the gate / short the audit)
 

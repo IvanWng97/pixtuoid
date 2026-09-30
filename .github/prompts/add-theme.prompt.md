@@ -35,5 +35,4 @@ Add a new color theme named `${input:name}` to pixtuoid.
 7. Visually verify: build and render the `snapshot` example, then eyeball the new
    theme's office (see `.claude/skills/beautify-decoration/SKILL.md`).
 
-Follow `.github/instructions/rust.instructions.md` and the theme notes in
-`crates/pixtuoid/src/tui/CLAUDE.md`.
+Follow `.github/instructions/rust.instructions.md`.

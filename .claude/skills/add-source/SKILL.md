@@ -21,9 +21,10 @@ suites — so an agent that stops at "it compiles" ships a red PR.
 
 ## The authoritative checklist
 
-The complete, current step list lives in **[`crates/pixtuoid-core/CLAUDE.md`](../../../crates/pixtuoid-core/CLAUDE.md)**
-("multi-source decoding" / "Adding a new agent CLI") — read it first; it is the
-source of truth and stays current. The Copilot-format summary is
+The complete, current step list lives in **[`docs/CONTRIBUTING.md`](../../../docs/CONTRIBUTING.md#adding-a-new-agent-cli)**
+("Adding a new agent CLI"), its test steps in
+[`crates/pixtuoid-core/tests/CLAUDE.md`](../../../crates/pixtuoid-core/tests/CLAUDE.md)
+— read both first; they are the source of truth. The Copilot-format summary is
 [`.github/prompts/add-source.prompt.md`](../../../.github/prompts/add-source.prompt.md).
 Before you start, decide **transcript-bearing vs hook-only** (invariant #3): a
 hook-only CLI (Reasonix/CodeWhale/opencode/Cursor) sets `transcript: None`, skips
@@ -63,8 +64,8 @@ multi-lens review BOTH passed while these two were red, caught only by the pre-p
 `just preflight`. Run `cargo nextest run --workspace` / `just test` (NOT just
 `--lib`) before declaring green — a targeted `--lib` run is not the full suite.
 
-(The exact test names + full step list are in `crates/pixtuoid-core/CLAUDE.md`
-"Adding a new agent CLI" and `add-source.prompt.md` — this skill headlines the
+(The exact test names + full step list are in `docs/CONTRIBUTING.md` and
+`crates/pixtuoid-core/tests/CLAUDE.md` "Adding a new agent CLI" — this skill headlines the
 teeth, those own the specifics.)
 
 ## Finish
