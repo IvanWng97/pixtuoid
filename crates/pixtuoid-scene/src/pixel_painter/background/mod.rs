@@ -28,8 +28,8 @@ use super::palette::{RgbLut, WHITE, blend_pixel, blend_rgb};
 
 use crate::atmosphere::Moment;
 use crate::layout::{
-    Bounds, Layout, WINDOW_W, WindowBay, glass_rows, wall_trim_row, window_frame, window_rows,
-    window_run,
+    Bounds, Layout, WINDOW_W, WindowBay, glass_rows, wall_trim_row, window_frame, window_posts,
+    window_rows, window_run,
 };
 use crate::sky::{Sky, Weather};
 use crate::skyline::CityStrip;
@@ -191,6 +191,13 @@ pub(super) fn paint_floor_and_walls(
             moment,
             view,
         );
+    }
+    for post in window_posts(buf_w) {
+        for x in post {
+            for y in rows.clone() {
+                buf.put_checked(x, y, window_frame);
+            }
+        }
     }
 
     let trim_y = wall_trim_row(top_wall_h);
