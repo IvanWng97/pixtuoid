@@ -24,7 +24,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use toml::value::Table;
 
-use crate::install::io;
 use crate::install::target::MergeOutcome;
 use pixtuoid_core::source::kimi::SOURCE_NAME;
 
@@ -54,7 +53,7 @@ const KIMI_HOOK_TIMEOUT_SECS: i64 = 5;
 /// value is already shell-expanded/absolute.
 fn kimi_config_dir() -> Option<PathBuf> {
     resolve_config_dir(
-        io::nonempty_env("KIMI_CODE_HOME"),
+        pixtuoid_core::platform::path_env("KIMI_CODE_HOME"),
         pixtuoid_core::platform::user_home_opt(),
     )
 }
@@ -245,61 +244,36 @@ mod tests {
 
     #[test]
     fn default_config_path_honors_kimi_code_home_env() {
-        // std::env is process-global; serialize against other env-mutating tests.
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var_os("KIMI_CODE_HOME");
-
         // Unconditional (not `if let Ok`) so a mutation making default_config_path
         // always-Err is CAUGHT, not skipped.
         let custom = std::env::temp_dir().join("pixtuoid-kimi-home-cfg-test");
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("KIMI_CODE_HOME", &custom) };
-        assert_eq!(default_config_path().unwrap(), custom.join("config.toml"));
+        temp_env::with_var("KIMI_CODE_HOME", Some(&custom), || {
+            assert_eq!(default_config_path().unwrap(), custom.join("config.toml"));
+        });
 
         // Assert only the filename when a home resolves — a stripped env
         // legitimately errs.
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("KIMI_CODE_HOME", "") };
-        if let Ok(p) = default_config_path() {
-            assert_eq!(p.file_name().and_then(|n| n.to_str()), Some("config.toml"));
-        }
-
-        match saved {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var("KIMI_CODE_HOME", v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var("KIMI_CODE_HOME") },
-        }
+        temp_env::with_var("KIMI_CODE_HOME", Some(""), || {
+            if let Ok(p) = default_config_path() {
+                assert_eq!(p.file_name().and_then(|n| n.to_str()), Some("config.toml"));
+            }
+        });
     }
 
     #[test]
     fn detect_installed_probes_the_data_root_not_the_config_file() {
-        // std::env is process-global; serialize against other env-mutating tests.
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var_os("KIMI_CODE_HOME");
-
         let root = std::env::temp_dir().join("pixtuoid-kimi-detect-test");
         let _ = std::fs::remove_dir_all(&root);
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("KIMI_CODE_HOME", &root) };
-        assert!(!detect_installed(), "an absent data root must not detect");
+        temp_env::with_var("KIMI_CODE_HOME", Some(&root), || {
+            assert!(!detect_installed(), "an absent data root must not detect");
 
-        std::fs::create_dir_all(&root).unwrap();
-        assert!(
-            detect_installed(),
-            "an existing data root must detect even with no config.toml"
-        );
+            std::fs::create_dir_all(&root).unwrap();
+            assert!(
+                detect_installed(),
+                "an existing data root must detect even with no config.toml"
+            );
+        });
 
-        match saved {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var("KIMI_CODE_HOME", v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var("KIMI_CODE_HOME") },
-        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

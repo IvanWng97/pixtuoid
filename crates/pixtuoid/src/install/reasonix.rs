@@ -63,7 +63,7 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
 /// → Windows `%APPDATA%\reasonix` → else `<home>/.reasonix`.
 fn reasonix_home() -> Option<PathBuf> {
     resolve_reasonix_home(
-        io::nonempty_env("REASONIX_HOME").map(|v| io::expand_tilde(&v, None)),
+        pixtuoid_core::platform::path_env("REASONIX_HOME").map(|v| io::expand_tilde(&v, None)),
         cfg!(windows),
         user_config_dir(),
         pixtuoid_core::platform::user_home_opt(),
@@ -113,8 +113,7 @@ fn user_config_dir() -> Option<PathBuf> {
 }
 
 /// Pure core for [`user_config_dir`]: `None` when the arm the OS/env select would
-/// fall back to a home join and no home resolves. `io::nonempty` mirrors the core
-/// fn's own empty-as-unset filter so the two can't disagree on when that fires.
+/// fall back to a home join and no home resolves.
 fn user_config_dir_checked(
     os: &str,
     appdata: Option<PathBuf>,
@@ -399,22 +398,12 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn user_config_dir_uses_appdata_on_windows() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var_os("APPDATA");
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("APPDATA", r"C:\Users\ada\AppData\Roaming") };
-        assert_eq!(
-            user_config_dir(),
-            Some(PathBuf::from(r"C:\Users\ada\AppData\Roaming"))
-        );
-        match saved {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var("APPDATA", v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var("APPDATA") },
-        }
+        temp_env::with_var("APPDATA", Some(r"C:\Users\ada\AppData\Roaming"), || {
+            assert_eq!(
+                user_config_dir(),
+                Some(PathBuf::from(r"C:\Users\ada\AppData\Roaming"))
+            );
+        });
     }
 
     #[test]

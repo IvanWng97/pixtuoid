@@ -1,11 +1,5 @@
-//! The cutaway profile's shading vocabulary.
-//!
-//! Ratified visually before it was written. The first mock pass was flat fills
-//! and read as a diagram; adding exactly two things — a three-tone ramp per
-//! material under one key light from the north windows, and an ordered dither
-//! for the floor falloff ([`Pen::dither_band`](crate::cutaway::pen::Pen::dither_band))
-//! — is what made it read as a room. The ramp and the fills it paints with are
-//! this module.
+//! The cutaway profile's shading vocabulary: a three-tone ramp per material
+//! under one key light from the north windows, and the fills it paints with.
 //!
 //! Nothing blends: "lit" is a color of its own and a gradient is a dither — the
 //! pixel-art convention the room is drawn in.
@@ -21,7 +15,7 @@ use crate::render_scale::RenderScale;
 const RAMP_LIT_LEVEL: i8 = 3;
 /// Shade counterpart of [`RAMP_LIT_LEVEL`], deliberately deeper — a surface
 /// turning away from the only light loses more than a facing one gains.
-const RAMP_SHADE_LEVEL: i8 = -4;
+pub(crate) const RAMP_SHADE_LEVEL: i8 = -4;
 
 /// A material's three tones under the cutaway's single key light.
 ///

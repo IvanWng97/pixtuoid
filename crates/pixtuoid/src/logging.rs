@@ -14,7 +14,7 @@ use tracing_subscriber::EnvFilter;
 /// runtime error can surface — at a `warn` floor unless $RUST_LOG, $PIXTUOID_LOG or
 /// --log-level raises it. Every other mode goes to stderr.
 pub(crate) fn init(tui_active: bool, log_level: &'static str) {
-    let rust_log = std::env::var("RUST_LOG").ok();
+    let rust_log = pixtuoid_core::platform::text_env("RUST_LOG");
     let make_filter = || {
         EnvFilter::try_new(filter_directives(rust_log.as_deref(), log_level))
             .unwrap_or_else(|_| EnvFilter::new(log_level))
@@ -22,8 +22,8 @@ pub(crate) fn init(tui_active: bool, log_level: &'static str) {
 
     let wants_verbose = matches!(log_level, "debug" | "trace");
     // The env var's VALUE is the log file path, so an empty one would "enable" file
-    // mode with an unopenable path — `nonempty_env` treats it as unset.
-    let explicit_log_file = pixtuoid::install::nonempty_env("PIXTUOID_LOG").is_some();
+    // mode with an unopenable path — `path_env` treats it as unset.
+    let explicit_log_file = pixtuoid_core::platform::path_env("PIXTUOID_LOG").is_some();
 
     if tui_active {
         let rust_log_set = rust_log.as_deref().is_some_and(|v| !v.is_empty());
@@ -88,7 +88,7 @@ fn filter_directives<'a>(rust_log: Option<&'a str>, log_level: &'a str) -> &'a s
 pub(crate) fn log_file_path() -> PathBuf {
     // Kept in lockstep with init()'s `explicit_log_file` read, so "file mode
     // enabled" and "which file" cannot disagree on a whitespace value.
-    if let Some(p) = pixtuoid::install::nonempty_env("PIXTUOID_LOG") {
+    if let Some(p) = pixtuoid_core::platform::path_env("PIXTUOID_LOG") {
         return p;
     }
     if let Some(state) = pixtuoid::install::nonempty_abs_env("XDG_STATE_HOME") {
@@ -191,12 +191,6 @@ fn log_open_failure(path: &Path, e: &std::io::Error) -> String {
     )
 }
 
-/// Serializes the bin crate's env-mutating tests: `crash.rs` and `logging.rs` both
-/// drive `XDG_STATE_HOME`/`HOME`, and the bin's unit-test target runs in ONE
-/// process under plain `cargo test`.
-#[cfg(test)]
-pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,55 +254,32 @@ mod tests {
     }
 
     #[test]
-    fn nonempty_treats_empty_and_whitespace_as_unset() {
-        use pixtuoid::install::nonempty;
-        assert_eq!(nonempty(None), None);
-        assert_eq!(nonempty(Some(String::new())), None);
-        assert_eq!(nonempty(Some("   ".into())), None);
-        assert_eq!(nonempty(Some("/state".into())), Some("/state".to_string()));
-    }
-
-    #[test]
     fn log_file_path_rejects_a_relative_xdg_state_home() {
         // Pins the CALL SITE, not just the primitive: a revert to plain
-        // `nonempty_env` here would leak a relative log path.
-        let _env = super::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let saved_log = std::env::var_os("PIXTUOID_LOG");
-        let saved_xdg = std::env::var_os("XDG_STATE_HOME");
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("PIXTUOID_LOG") };
-        let home = pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
-        let cache = home.join(".cache").join("pixtuoid").join("log");
-        for rel in ["", "   ", "rel/state", "~/state"] {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            unsafe { std::env::set_var("XDG_STATE_HOME", rel) };
-            assert_eq!(
-                log_file_path(),
-                cache,
-                "relative XDG_STATE_HOME {rel:?} must fall back to ~/.cache"
-            );
-        }
-        // A leading slash is not absolute on Windows, so pick per-platform. The
-        // literal's `/` is fine: `PathBuf` equality compares components.
-        let abs = if cfg!(windows) { "C:/state" } else { "/state" };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("XDG_STATE_HOME", abs) };
-        assert_eq!(
-            log_file_path(),
-            PathBuf::from(format!("{abs}/pixtuoid/log"))
-        );
-        match saved_log {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var("PIXTUOID_LOG", v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var("PIXTUOID_LOG") },
-        }
-        match saved_xdg {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var("XDG_STATE_HOME", v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var("XDG_STATE_HOME") },
-        }
+        // `path_env` here would leak a relative log path.
+        temp_env::with_var_unset("PIXTUOID_LOG", || {
+            let home =
+                pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
+            let cache = home.join(".cache").join("pixtuoid").join("log");
+            for rel in ["", "   ", "rel/state", "~/state"] {
+                temp_env::with_var("XDG_STATE_HOME", Some(rel), || {
+                    assert_eq!(
+                        log_file_path(),
+                        cache,
+                        "relative XDG_STATE_HOME {rel:?} must fall back to ~/.cache"
+                    );
+                });
+            }
+            // A leading slash is not absolute on Windows, so pick per-platform. The
+            // literal's `/` is fine: `PathBuf` equality compares components.
+            let abs = if cfg!(windows) { "C:/state" } else { "/state" };
+            temp_env::with_var("XDG_STATE_HOME", Some(abs), || {
+                assert_eq!(
+                    log_file_path(),
+                    PathBuf::from(format!("{abs}/pixtuoid/log"))
+                );
+            });
+        });
     }
 
     #[test]

@@ -97,7 +97,7 @@ struct OmpEnv {
 
 impl OmpEnv {
     fn from_process() -> Self {
-        let var = |k: &str| std::env::var(k).ok();
+        let var = crate::platform::text_env;
         Self {
             home: crate::platform::user_home_opt(),
             config_dir_name: var("PI_CONFIG_DIR"),
@@ -2414,38 +2414,24 @@ mod tests {
     /// values.
     #[test]
     fn omp_sessions_dir_honors_non_empty_env_override() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var_os("PI_CODING_AGENT_DIR");
-
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("PI_CODING_AGENT_DIR", "/custom/agent") };
-        assert_eq!(
-            omp_sessions_dir(),
-            PathBuf::from("/custom/agent").join("sessions")
-        );
+        temp_env::with_var("PI_CODING_AGENT_DIR", Some("/custom/agent"), || {
+            assert_eq!(
+                omp_sessions_dir(),
+                PathBuf::from("/custom/agent").join("sessions")
+            );
+        });
 
         for blank in ["", "   "] {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            unsafe { std::env::set_var("PI_CODING_AGENT_DIR", blank) };
-            let dflt = omp_sessions_dir();
+            let dflt = temp_env::with_var("PI_CODING_AGENT_DIR", Some(blank), omp_sessions_dir);
             assert!(
                 dflt.ends_with(Path::new(".omp/agent/sessions")),
                 "blank override {blank:?} → ~/.omp/agent fallback, got {dflt:?}"
             );
         }
 
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var("PI_CODING_AGENT_DIR") };
-        assert!(omp_sessions_dir().ends_with(Path::new(".omp/agent/sessions")));
-
-        match saved {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var("PI_CODING_AGENT_DIR", v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var("PI_CODING_AGENT_DIR") },
-        }
+        temp_env::with_var_unset("PI_CODING_AGENT_DIR", || {
+            assert!(omp_sessions_dir().ends_with(Path::new(".omp/agent/sessions")));
+        });
     }
 
     // -- extension-bridge hook payloads (#951) ------------------------------
