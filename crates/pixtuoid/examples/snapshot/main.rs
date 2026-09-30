@@ -98,8 +98,8 @@ struct SnapshotArgs {
     floor_seed: u64,
 
     /// Schedule floor navigations inside a --gif capture: repeatable
-    /// `--navigate-at <sec>:<floor>` (0-based floor). Navigations less than
-    /// ~1s apart are dropped (a slide in flight ignores navigate_floor).
+    /// `--navigate-at <sec>:<floor>` (0-based floor). A navigation during another
+    /// one's slide is dropped (a slide in flight ignores navigate_floor).
     #[arg(
         long = "navigate-at",
         value_name = "SEC:FLOOR",
