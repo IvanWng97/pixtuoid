@@ -305,17 +305,16 @@ lint:
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
-# Extra args are forwarded: `just test reducer::` filters.
-[doc('Run the workspace tests (nextest if installed); forwards a filter')]
+# The one test runner; the regen recipes call it too. No plain `cargo test`
+# fallback: its shared process and nextest's per-test processes pass different
+# suites (#1104's omp hang showed under only one), so a fallback runs a suite CI
+# never ran. No `--workspace`: it overrides a `-p`, and the virtual root already
+# selects every member.
+[doc('Run the tests under cargo-nextest; forwards args (e.g. -p <crate> <filter>)')]
 [group('rust')]
 test *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if command -v cargo-nextest &>/dev/null; then
-        cargo nextest run --workspace "$@"
-    else
-        cargo test --workspace "$@"
-    fi
+    @cargo nextest --version &>/dev/null || { echo 'error: cargo-nextest is not installed — run `just setup-tools`' >&2; exit 1; }
+    cargo nextest run "$@"
 
 # The filter forwards to both targets, and one matching nothing in a target is
 # not an error: `just bench 360` runs every 360x240 case, `just bench hook` only
@@ -474,7 +473,7 @@ coverage:
 
 # Runs the suite under nextest and FAILS on a
 # pending (un-accepted `.snap.new`) OR unreferenced (orphan `.snap` — e.g. a
-# deleted test's leftover) snapshot. This is the gap plain `cargo test` misses:
+# deleted test's leftover) snapshot. This is the gap `just test` misses:
 # a CHANGED snapshot already fails its own assertion, but an ORPHAN one rots
 # silently. CI-only in practice (a second full test run, like coverage) —
 # NOT in preflight; run it after adding/removing an insta-snapshot test. Needs
@@ -777,19 +776,20 @@ gen-readme:
 [doc('Regenerate the --json contract: the SourceStatus + OutcomeRow JSON Schemas (Rust) + the Raycast TS types')]
 [group('gen')]
 gen-contract:
-    UPDATE_CONTRACT_SCHEMA=1 cargo test -p pixtuoid --lib schema_matches_the_committed_contract
+    UPDATE_CONTRACT_SCHEMA=1 just test -p pixtuoid --lib schema_matches_the_committed_contract
     npm --prefix integrations/raycast run gen:contract
 
 # Regenerate the committed drift-surface fragments — what each crate declares it
 # READS (pixtuoid-core) and REGISTERS (pixtuoid). `check_upstream_drift.py` reads
 # these instead of parsing our Rust, so a rename must be re-emitted or the watch
 # narrows. The gate is the crates' own tests, which fail on a stale file; this is
-# just the writer.
+# just the writer. The filter runs the writing test alone: a sibling that reads
+# the stale file would fail and, under nextest's fail-fast, cancel the write.
 [doc('Regenerate crates/*/drift-surface.json after changing a decoded/registered name')]
 [group('gen')]
 gen-drift-surface:
-    UPDATE_DRIFT_SURFACE=1 cargo test -p pixtuoid-core --lib drift_surface
-    UPDATE_DRIFT_SURFACE=1 cargo test -p pixtuoid --lib drift_surface
+    UPDATE_DRIFT_SURFACE=1 just test -p pixtuoid-core --lib drift_surface::tests::the_committed_fragment_matches
+    UPDATE_DRIFT_SURFACE=1 just test -p pixtuoid --lib drift_surface::tests::the_committed_fragment_matches
 
 # Pure node:builtins — no npm ci.
 [doc('Fail if the committed README drifted from site data (features/sources/install.json)')]

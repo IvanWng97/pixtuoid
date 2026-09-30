@@ -80,7 +80,7 @@ pub(crate) mod test_capture;
 
 /// Test-only mutex serializing tests that mutate process-global environment
 /// variables: the crate's unit tests share one binary under plain `cargo test`
-/// (the justfile's fallback when nextest is absent), so they would race. Lock
-/// it for the whole test.
+/// (nextest isolates per-process), so they would race. Lock it for the whole
+/// test.
 #[cfg(test)]
 pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
