@@ -464,8 +464,7 @@ doc-check:
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --document-private-items
     cargo test --doc --workspace
 
-# Coverage + JUnit XML in one run — CI's only test run, on every platform
-# (ci-tests.yml's coverage, windows-test and macos-test).
+# Coverage + JUnit XML in one run — the exact command ci-tests.yml's test jobs use.
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
 # profile. Writes lcov.info + target/nextest/ci/junit.xml.
 [group('rust')]

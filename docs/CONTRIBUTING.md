@@ -56,9 +56,7 @@ run. The jobs:
   package generator (`just npm-check`)** — committed media and icons, README
   freshness, and the npm package generator + OpenClaw plugin contract.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
-  full suite on a real Windows runner. Every test job (`coverage`,
-  `windows-test`, `macos-test`) runs the suite once, instrumented, as both the
-  gate and that platform's Codecov upload.
+  full suite on a real Windows runner.
 - **wasm-check** — the wasm32 build plus the committed `site/public/wasm/`
   pair's integrity and size cap (`just gen-wasm-check`); nothing checks the
   pair is fresh, so a core/scene/web change runs `just gen-wasm` by hand.

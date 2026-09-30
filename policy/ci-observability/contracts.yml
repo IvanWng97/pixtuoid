@@ -254,7 +254,7 @@
   break:
     - del(.jobs.snapshots.permissions)
     - .jobs.smoke.permissions["id-token"] = "write"
-    - .jobs.coverage.steps |= map(select(.uses != "./.github/actions/upload-codecov"))
+    - .jobs.test.steps |= map(select(.uses != "./.github/actions/upload-codecov"))
 
 # ── The merge gate
 
