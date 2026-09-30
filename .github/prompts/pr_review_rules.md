@@ -2,7 +2,7 @@
 
 ## Setup
 
-Read `CLAUDE.md` at the repo root first. It contains architecture invariants, known sharp
+Read `AGENTS.md` at the repo root first. It contains architecture invariants, known sharp
 edges, and conventions that are load-bearing. Your review must be grounded in that context.
 
 Then read `.claude-review/review-context.md` and `.claude-review/pr.diff` to understand
@@ -16,7 +16,7 @@ by reading actual code — no guessing, no "this might be an issue."
 
 ### Must check
 
-1. **Architecture invariant violations** (CLAUDE.md's "Architecture invariants"), and
+1. **Architecture invariant violations** (AGENTS.md's "Architecture invariants"), and
    the "Things NOT to do" list there.
 
 2. **Real bugs**: logic errors, off-by-one, race conditions, missing error propagation.
@@ -28,7 +28,7 @@ by reading actual code — no guessing, no "this might be an issue."
 5. **Scope creep**: features or speculative abstractions beyond what the PR states it does.
 
 6. **Stale docs**: if the PR changes module structure, architecture, or public API without
-   updating CLAUDE.md/README.md.
+   updating AGENTS.md/README.md.
 
 7. **Duplication / DRY**: for each new fn, type, helper, or const the diff adds, search the
    tree (`grep -rn` / `rg`) for a pre-existing implementation of the same behavior — a

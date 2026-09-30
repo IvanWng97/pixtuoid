@@ -4,8 +4,8 @@ Thanks for your interest! PRs are welcome — especially **new themes**, sprite 
 decoration polish, and **`Source` adapters** for agent CLIs we don't support yet
 (the agent CLIs plus the OpenClaw gateway already wired up are listed in the README).
 
-Before you start, read [`CLAUDE.md`](../CLAUDE.md) at the repo root (and the
-nested `crates/*/CLAUDE.md` for the crate you touch). It holds the load-bearing
+Before you start, read [`AGENTS.md`](../AGENTS.md) at the repo root (and the
+nested `crates/*/AGENTS.md` for the crate you touch). It holds the load-bearing
 architecture invariants and conventions. Many things that look like bugs are
 documented, intentional design: read the whole item, its doc comment and the
 comments on the lines it governs, before changing it.
@@ -186,7 +186,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
 6. **Build** — TDD: failing test → minimal impl → commit.
 7. **Self-review** — a standards+spec pass before pushing, INCLUDING the
    whole-file comment audit: every file the PR touches — even by one line —
-   gets its entire comment population re-read against `CLAUDE.md`'s comment
+   gets its entire comment population re-read against `AGENTS.md`'s comment
    rules, and the cleanup rides the same PR (population and dispositions:
    [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md)'s
    always-on comment row). Not the merge gate.
@@ -204,7 +204,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
 On a fresh machine or a non-Claude tool, `git clone` gives you the repo skills
 and every `just` gate; this section IS the loop for tools without skills. Do
 not scaffold a `CONTEXT.md`/`docs/adr/` convention here — a declaration's own
-doc comment is the design record, and the nested `CLAUDE.md` says only what its
+doc comment is the design record, and the nested `AGENTS.md` says only what its
 crate IS.
 
 ### The running order
@@ -238,7 +238,7 @@ Advisory backstops that surface risk but never gate:
 
 ## Conventions and architecture invariants
 
-Both live in [`CLAUDE.md`](../CLAUDE.md) ("Conventions", "Architecture
+Both live in [`AGENTS.md`](../AGENTS.md) ("Conventions", "Architecture
 invariants"), which every contributor and agent reads first.
 
 ## Pull requests
@@ -311,7 +311,7 @@ step 10 by the theme guards; steps 1–3, 11 and step 12's `#[test]` are on you.
    `sources --json` golden (`crates/pixtuoid/tests/snapshots/cli/sources.json`)
    must list it: `SNAPSHOTS=overwrite cargo test -p pixtuoid --test cli_json`.
 6. **Record the fixture** — the test steps in
-   [`crates/pixtuoid-core/tests/CLAUDE.md`](../crates/pixtuoid-core/tests/CLAUDE.md)
+   [`crates/pixtuoid-core/tests/AGENTS.md`](../crates/pixtuoid-core/tests/AGENTS.md)
    (a RECORDED SessionStart scenario via `just capture-fixture`), then
    `cargo insta review`.
 7. **Wire it into `runtime/driver.rs::build_source_set`** (the one

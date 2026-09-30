@@ -5,7 +5,7 @@ How a running coding-agent session becomes a moving sprite in the office.
 > This file is the **single source** for pixtuoid's architecture overview. It
 > renders on the website at [`/architecture`](https://pixtuoid.dev/architecture)
 > and on GitHub (the diagram below is native Mermaid). Contributor-level
-> detail lives in `CLAUDE.md` and the code's own doc comments.
+> detail lives in `AGENTS.md` and the code's own doc comments.
 
 ## The shape of it
 
@@ -118,7 +118,7 @@ gateway route to distinct mascots; a daemon has no per-session pid, so
 
 ## Seams & invariants
 
-Load-bearing — see `CLAUDE.md` and the nested crate guides before changing:
+Load-bearing — see `AGENTS.md` and the nested crate guides before changing:
 
 - The **`Source` trait** is the only seam for a transcript-bearing agent CLI;
   per-source format knowledge lives in that source's own decoders. Hook-only
@@ -138,5 +138,5 @@ Load-bearing — see `CLAUDE.md` and the nested crate guides before changing:
 - **Configure it:** [`docs/CONFIGURATION.md`](CONFIGURATION.md) ·
   [live `/config`](https://pixtuoid.dev/config)
 - **Contribute:** [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- **Agent/contributor detail:** the workspace `CLAUDE.md` + the nested
-  per-crate `CLAUDE.md` files.
+- **Agent/contributor detail:** the workspace `AGENTS.md` + the nested
+  per-crate `AGENTS.md` files.

@@ -2,7 +2,7 @@
   {
     "q": "will it slow my agent down?",
     "a": "never — the hook exits 0 in under 200ms, by contract.",
-    "cite": "the hook-shim contract (CLAUDE.md, architecture invariant 5)"
+    "cite": "the hook-shim contract (AGENTS.md, architecture invariant 5)"
   },
   {
     "q": "is anything uploaded?",
