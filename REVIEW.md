@@ -171,12 +171,16 @@ taste are never posted. Dispositions:
 - `issue (non-blocking)` — any other real defect this PR introduced.
 - `issue (pre-existing)` — real, not introduced here.
 
+The labels are [`review-schema.json`](.github/prompts/review-schema.json)'s
+`severity` enum.
+
 ## Re-review
 
-When `.claude-review/prior-threads.json`, this lens's own threads on the PR,
-is non-empty, post only new `issue (blocking)` findings and never re-flag one
-that already has a thread, resolved or not
-([re-review convergence](https://code.claude.com/docs/en/code-review#what-you-can-tune)).
+Never re-flag a finding that already has a thread in
+`.claude-review/prior-threads.json` (this lens's own threads on the PR),
+resolved or not
+([re-review convergence](https://code.claude.com/docs/en/code-review#what-you-can-tune));
+new findings follow [Severity](#severity).
 
 ## Output
 
