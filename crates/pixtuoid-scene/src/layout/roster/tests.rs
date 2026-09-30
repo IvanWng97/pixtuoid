@@ -279,3 +279,21 @@ fn a_notice_board_hangs_only_in_a_room_that_fits_it() {
         })
     );
 }
+
+/// Hover orders fixtures on [`Tie`], and a painter on the [`Layer`] it maps
+/// to: the two orders must agree, with a figure between the two ties.
+#[test]
+fn a_tie_maps_to_a_layer_in_the_same_order() {
+    const TIES: [Tie; 2] = [Tie::FigureOver, Tie::FixtureOver];
+    // A new tie fails to compile here until `TIES` lists it.
+    let _ = |t: Tie| match t {
+        Tie::FigureOver | Tie::FixtureOver => (),
+    };
+    assert!(Layer::from(Tie::FigureOver) < Layer::Figure);
+    assert!(Layer::Figure < Layer::from(Tie::FixtureOver));
+    for a in TIES {
+        for b in TIES {
+            assert_eq!(a < b, Layer::from(a) < Layer::from(b), "{a:?} vs {b:?}");
+        }
+    }
+}

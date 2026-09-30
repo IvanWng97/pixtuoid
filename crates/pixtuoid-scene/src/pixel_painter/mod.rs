@@ -367,8 +367,8 @@ fn desk_shadow_ellipse(desk: Point) -> Ellipse {
 
 /// The classic painter's soft floor shadows, handed to `shadow` in roster
 /// order, which is their PAINT ORDER — the overlaps blend, so the order is
-/// load-bearing. The per-piece `half_w`/`half_h` are owner-tuned taste
-/// literals.
+/// load-bearing (a meeting sofa's seat shadows overlap each other). The
+/// per-piece `half_w`/`half_h` are owner-tuned taste literals.
 fn floor_shadow_ellipses(layout: &Layout, mut shadow: impl FnMut(Ellipse)) {
     use crate::layout::{furniture_def, Furniture};
 
@@ -409,9 +409,9 @@ fn floor_shadow_ellipses(layout: &Layout, mut shadow: impl FnMut(Ellipse)) {
                     }
                 });
             }
-            FixtureKind::Pod { item, kind } => {
+            FixtureKind::Pod { kind, .. } => {
                 if let Some(wp) = kind.waypoint() {
-                    shadow(fitted(layout.pod_decor[item].pos, wp));
+                    shadow(fitted(f.at, wp));
                 }
             }
             // One under each of its seats.
@@ -426,48 +426,38 @@ fn floor_shadow_ellipses(layout: &Layout, mut shadow: impl FnMut(Ellipse)) {
                         && (w.facing == Facing::North) == faces_away
                 })
                 .for_each(|w| shadow(fitted(w.pos, w.kind))),
-            FixtureKind::MeetingChair { waypoint, .. } => {
-                let wp = &layout.waypoints[waypoint];
-                shadow(fitted(wp.pos, wp.kind));
+            FixtureKind::MeetingChair { .. } => {
+                shadow(fitted(f.at, WaypointKind::MeetingChair));
             }
             // Under the body: its seats' stands are empty floor beside it.
             FixtureKind::KitchenIsland => {
-                if let Some(island) = layout.pantry.and_then(|p| p.kitchen_island) {
-                    let vis = furniture_def(Furniture::KitchenIsland).visual;
-                    shadow(Ellipse {
-                        cx: island.x,
-                        cy: z_sort_row(Anchor::Center, island, vis.h),
-                        half_w: vis.w / 2 + crate::ground::CONTACT_REACH,
-                        half_h: 2,
-                    });
-                }
-            }
-            // One for the whole couch: a per-seat shadow would overlap-darken.
-            FixtureKind::LoungeCouch => {
-                if let Some(center) = layout.couch_sprite_center() {
-                    shadow(Ellipse {
-                        cx: center.x,
-                        cy: center.y + 2,
-                        half_w: 7,
-                        half_h: 2,
-                    });
-                }
-            }
-            // Off the same height the z-anchor uses: a fixed +3 only suited the
-            // taller plants and floated the rest.
-            FixtureKind::Plant { item, kind } => {
-                let pos = layout.plants[item].pos;
+                let vis = furniture_def(Furniture::KitchenIsland).visual;
                 shadow(Ellipse {
-                    cx: pos.x,
-                    cy: z_sort_row(
-                        Anchor::Center,
-                        pos,
-                        furniture_def(kind.furniture()).visual.h,
-                    ),
-                    half_w: 3,
-                    half_h: 1,
+                    cx: f.at.x,
+                    cy: z_sort_row(Anchor::Center, f.at, vis.h),
+                    half_w: vis.w / 2 + crate::ground::CONTACT_REACH,
+                    half_h: 2,
                 });
             }
+            // One for the whole couch: a per-seat shadow would overlap-darken.
+            FixtureKind::LoungeCouch => shadow(Ellipse {
+                cx: f.at.x,
+                cy: f.at.y + 2,
+                half_w: 7,
+                half_h: 2,
+            }),
+            // Off the same height the z-anchor uses: a fixed +3 only suited the
+            // taller plants and floated the rest.
+            FixtureKind::Plant { kind, .. } => shadow(Ellipse {
+                cx: f.at.x,
+                cy: z_sort_row(
+                    Anchor::Center,
+                    f.at,
+                    furniture_def(kind.furniture()).visual.h,
+                ),
+                half_w: 3,
+                half_h: 1,
+            }),
             FixtureKind::FloorLamp => {
                 if let Some(base) = layout.floor_lamp_base() {
                     shadow(Ellipse {
@@ -649,12 +639,17 @@ pub(super) fn frame_index(anim: &Sprite, idx: usize) -> usize {
     }
 }
 
+/// The vending machine's pack animation.
+const VENDING_MACHINE_SPRITE: &str = "vending_machine";
+/// The printer's pack animation.
+const PRINTER_SPRITE: &str = "printer";
+
 /// The pack art a corridor appliance at a `kind` waypoint is drawn from.
 pub(crate) fn appliance_art(kind: crate::layout::WaypointKind) -> Option<&'static str> {
     use crate::layout::WaypointKind as K;
     match kind {
-        K::VendingMachine => Some("vending_machine"),
-        K::Printer => Some("printer"),
+        K::VendingMachine => Some(VENDING_MACHINE_SPRITE),
+        K::Printer => Some(PRINTER_SPRITE),
         K::Couch
         | K::Pantry
         | K::PhoneBooth
@@ -860,127 +855,91 @@ fn queue_fixtures<'a>(
         layout.home_desks.len(),
         "desk lights are index-parallel to the home desks"
     );
-    let trio = |room: usize| layout.meeting_rooms.get(room).and_then(|r| r.trio);
     let mut out = Furnishings {
         backdrop: Vec::new(),
         sorted: Vec::new(),
     };
     for f in layout.fixtures() {
-        let top_left = Point {
-            x: f.visual.x,
-            y: f.visual.y,
-        };
         let kind = match f.kind {
             FixtureKind::Desk(i) => {
                 let facing = layout.desk_facing(i);
-                desk_lights
-                    .get(i.0)
-                    .map(|&lights| DrawableKind::DeskCubicle {
-                        desk: top_left,
+                DrawableKind::DeskCubicle {
+                    desk: f.top_left(),
+                    facing,
+                    screen_glow: desk_screen_glow(
+                        desk_occupant(&frame.agents, i),
                         facing,
-                        screen_glow: desk_screen_glow(
-                            desk_occupant(&frame.agents, i),
-                            facing,
-                            frame.seated_agents.get(&i).copied().unwrap_or(false),
-                            ctx.theme,
-                        ),
-                        lights,
-                        props: frame.desk(i),
-                    })
-            }
-            FixtureKind::FilingCabinet(_) => Some(DrawableKind::FilingCabinet { pos: top_left }),
-            FixtureKind::DeskChair(_) => Some(DrawableKind::DeskChair { pos: top_left }),
-            FixtureKind::Station { waypoint, station } => {
-                let wp = &layout.waypoints[waypoint];
-                match appliance_art(wp.kind) {
-                    Some(sprite) => Some(DrawableKind::Appliance {
-                        pos: wp.pos,
-                        sprite,
-                        busy: frame.occupied_waypoints.contains(&waypoint),
-                    }),
-                    None => match station {
-                        Station::PantryCounter => Some(DrawableKind::WaypointPantry {
-                            pos: wp.pos,
-                            anim: pantry_counter_anim(layout.pantry_counter_size().w),
-                        }),
-                        Station::SnackShelf => Some(DrawableKind::SnackShelf { pos: wp.pos }),
-                        // `appliance_art` names their art.
-                        Station::VendingMachine | Station::Printer => None,
-                    },
+                        frame.seated_agents.get(&i).copied().unwrap_or(false),
+                        ctx.theme,
+                    ),
+                    lights: desk_lights[i.0],
+                    props: frame.desk(i),
                 }
             }
-            FixtureKind::Plant { item, kind } => Some(DrawableKind::Plant {
+            FixtureKind::FilingCabinet(_) => DrawableKind::FilingCabinet { pos: f.top_left() },
+            FixtureKind::DeskChair(_) => DrawableKind::DeskChair { pos: f.top_left() },
+            FixtureKind::Station { waypoint, station } => {
+                let appliance = |sprite| DrawableKind::Appliance {
+                    pos: f.at,
+                    sprite,
+                    busy: frame.occupied_waypoints.contains(&waypoint),
+                };
+                match station {
+                    Station::PantryCounter => DrawableKind::WaypointPantry {
+                        pos: f.at,
+                        anim: pantry_counter_anim(layout.pantry_counter_size().w),
+                    },
+                    Station::VendingMachine => appliance(VENDING_MACHINE_SPRITE),
+                    Station::Printer => appliance(PRINTER_SPRITE),
+                    Station::SnackShelf => DrawableKind::SnackShelf { pos: f.at },
+                }
+            }
+            FixtureKind::Plant { kind, .. } => DrawableKind::Plant { kind, pos: f.at },
+            FixtureKind::Pod { kind, .. } => DrawableKind::PodDecorItem { kind, pos: f.at },
+            FixtureKind::Wall { kind, .. } => DrawableKind::WallDecor {
                 kind,
-                pos: layout.plants[item].pos,
-            }),
-            FixtureKind::Pod { item, kind } => Some(DrawableKind::PodDecorItem {
-                kind,
-                pos: layout.pod_decor[item].pos,
-            }),
-            FixtureKind::Wall { kind, .. } => Some(DrawableKind::WallDecor {
-                kind,
-                pos: top_left,
-            }),
+                pos: f.top_left(),
+            },
             FixtureKind::MeetingRug { .. }
             | FixtureKind::LoungeRug
             | FixtureKind::PantryMat
-            | FixtureKind::IslandMat => Some(DrawableKind::AreaRug(f.visual)),
-            FixtureKind::MeetingSofa {
-                room,
-                seat,
-                faces_away,
-            } => trio(room).map(|t| DrawableKind::MeetingSofa {
-                pos: t.sofas[seat],
+            | FixtureKind::IslandMat => DrawableKind::AreaRug(f.visual),
+            FixtureKind::MeetingSofa { faces_away, .. } => DrawableKind::MeetingSofa {
+                pos: f.at,
                 mirrored: faces_away,
-            }),
-            FixtureKind::MeetingTable { room } => {
-                trio(room).map(|t| DrawableKind::MeetingTable { pos: t.table })
-            }
-            FixtureKind::MeetingChair { waypoint, facing } => Some(DrawableKind::MeetingChair {
-                pos: layout.waypoints[waypoint].pos,
+            },
+            FixtureKind::MeetingTable { .. } => DrawableKind::MeetingTable { pos: f.at },
+            FixtureKind::MeetingChair { facing, .. } => DrawableKind::MeetingChair {
+                pos: f.at,
                 // The backrest rides the side AWAY from the table: a chair
                 // FACING East sits west of the table, bar on its west.
                 back_west: facing == Facing::East,
-            }),
-            FixtureKind::CoatRack { room } => layout.meeting_rooms[room]
-                .coat_rack_pos()
-                .map(|pos| DrawableKind::CoatRack { pos }),
-            FixtureKind::Doormat { .. } => Some(DrawableKind::Doormat(f.visual)),
-            FixtureKind::NoticeBoard { .. } => Some(DrawableKind::NoticeBoard(f.visual)),
+            },
+            FixtureKind::CoatRack { .. } => DrawableKind::CoatRack { pos: f.at },
+            FixtureKind::Doormat { .. } => DrawableKind::Doormat(f.visual),
+            FixtureKind::NoticeBoard { .. } => DrawableKind::NoticeBoard(f.visual),
             // The lounge couch IS the meeting sofa's sprite, mirrored.
-            FixtureKind::LoungeCouch => {
-                layout
-                    .couch_sprite_center()
-                    .map(|pos| DrawableKind::MeetingSofa {
-                        pos,
-                        mirrored: true,
-                    })
-            }
-            FixtureKind::SideTable => layout
-                .lounge_side_table()
-                .map(|pos| DrawableKind::LoungeSideTable { pos }),
-            FixtureKind::FloorLamp => layout
-                .floor_lamp()
-                .map(|pos| DrawableKind::FloorLamp { pos }),
-            FixtureKind::FishTank => layout.fish_tank().map(|pos| DrawableKind::FishTank { pos }),
-            FixtureKind::KitchenIsland => layout
-                .pantry
-                .and_then(|p| p.kitchen_island)
-                .map(|pos| DrawableKind::KitchenIsland { pos }),
-            FixtureKind::WaterCooler => Some(DrawableKind::WaterCooler(f.visual)),
-            FixtureKind::TrashBin => Some(DrawableKind::TrashBin(f.visual)),
-            FixtureKind::Door => Some(DrawableKind::Door {
-                pos: top_left,
+            FixtureKind::LoungeCouch => DrawableKind::MeetingSofa {
+                pos: f.at,
+                mirrored: true,
+            },
+            FixtureKind::SideTable => DrawableKind::LoungeSideTable { pos: f.at },
+            FixtureKind::FloorLamp => DrawableKind::FloorLamp { pos: f.at },
+            FixtureKind::FishTank => DrawableKind::FishTank { pos: f.at },
+            FixtureKind::KitchenIsland => DrawableKind::KitchenIsland { pos: f.at },
+            FixtureKind::WaterCooler => DrawableKind::WaterCooler(f.visual),
+            FixtureKind::TrashBin => DrawableKind::TrashBin(f.visual),
+            FixtureKind::Door => DrawableKind::Door {
+                pos: f.top_left(),
                 frame_idx: compute_door_frame_idx(&frame.agents, ctx.now, ctx.door_anim_max_ms),
-            }),
-            FixtureKind::Runner => Some(DrawableKind::Runner(f.visual)),
-            FixtureKind::NeonSign => Some(DrawableKind::NeonSign {
+            },
+            FixtureKind::Runner => DrawableKind::Runner(f.visual),
+            FixtureKind::NeonSign => DrawableKind::NeonSign {
                 panel: f.visual,
                 look: neon,
-            }),
-            FixtureKind::Clock => Some(DrawableKind::Clock { pos: top_left }),
+            },
+            FixtureKind::Clock => DrawableKind::Clock { pos: f.top_left() },
         };
-        let Some(kind) = kind else { continue };
         match f.depth {
             Depth::Backdrop => out.backdrop.push((wash_of(f.kind), kind)),
             Depth::Sorted { row, tie } => out.sorted.push(Drawable {

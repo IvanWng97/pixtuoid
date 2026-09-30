@@ -29,6 +29,7 @@ use super::furniture::{
 };
 use super::paint_character_at;
 use crate::frame_cache::FrameCache;
+pub(super) use crate::layout::Layer;
 use crate::layout::Point;
 use crate::pet::PetKind;
 
@@ -52,28 +53,6 @@ pub(super) struct Drawable<'a> {
     pub(super) anchor_y: u16,
     pub(super) layer: Layer,
     pub(super) kind: DrawableKind<'a>,
-}
-
-/// Which of the drawables sorted at one row paints on top. The derived order
-/// is the paint order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum Layer {
-    /// A fixture a figure at its row sits on or stands in front of.
-    Under,
-    /// A character, a pet or a mascot.
-    Figure,
-    /// A fixture that hides a figure at its row, and a glass wall band, which
-    /// composites over whoever stands behind it.
-    Over,
-}
-
-impl From<crate::layout::Tie> for Layer {
-    fn from(tie: crate::layout::Tie) -> Self {
-        match tie {
-            crate::layout::Tie::FigureOver => Layer::Under,
-            crate::layout::Tie::FixtureOver => Layer::Over,
-        }
-    }
 }
 
 /// Sorts `drawables` into paint order. Stable, so drawables tied on row and
@@ -105,7 +84,8 @@ pub(super) enum DrawableKind<'a> {
     FilingCabinet {
         pos: Point,
     },
-    /// Office chair, keyed to TIE with its seat's occupant so it paints over them.
+    /// Office chair, sorted at its occupant's row in [`Layer::Over`], so it
+    /// paints over them.
     DeskChair {
         pos: Point,
     },
@@ -126,8 +106,7 @@ pub(super) enum DrawableKind<'a> {
     MeetingTable {
         pos: Point,
     },
-    /// Area rug, painted BEFORE the furniture in z-order (`anchor_y` at the top
-    /// of the rug) so chairs / couches sit on top.
+    /// A rug or mat filling its box, under the furniture that stands on it.
     AreaRug(crate::layout::Bounds),
     /// Lounge side table (wood + magazine), centred at `pos`.
     LoungeSideTable {
@@ -206,8 +185,8 @@ pub(super) enum DrawableKind<'a> {
     FishTank {
         pos: Point,
     },
-    /// Head-of-table meeting chair, keyed one row before its sitter's z-key so
-    /// the sitter paints over it.
+    /// Head-of-table meeting chair, sorted at its sitter's row in
+    /// [`Layer::Under`], so the sitter paints over it.
     MeetingChair {
         pos: Point,
         back_west: bool,

@@ -3,7 +3,8 @@
 //! floor shadows, and weather effects.
 //!
 //! Everything here paints BEFORE the y-sorted entity pass, in the order the
-//! orchestrator (`pixel_painter/mod.rs`) calls it.
+//! orchestrator (`pixel_painter/mod.rs`) calls it; the backdrop fixtures
+//! among it (clock, runner, mats) in roster order.
 
 mod celestial;
 mod floor_wash;

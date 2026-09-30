@@ -4,7 +4,6 @@ use super::anchors::{
 use super::background::paint_corridor_runner;
 use super::seat::{settle_seat, Seat};
 use super::*;
-use crate::layout::PlantItem;
 use crate::pose;
 use pixtuoid_core::sprite::{Frame, Pixel};
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
@@ -1317,6 +1316,22 @@ fn a_tied_row_paints_by_layer_whatever_the_queue_order() {
     assert_eq!(layers, [Layer::Under, Layer::Figure, Layer::Over]);
 }
 
+/// The layer only breaks a tie: a row north still paints first.
+#[test]
+fn a_row_north_paints_first_whatever_its_layer() {
+    let at = |anchor_y, layer, x| Drawable {
+        anchor_y,
+        layer,
+        kind: DrawableKind::MeetingTable {
+            pos: Point { x, y: 0 },
+        },
+    };
+    let mut v = [at(10, Layer::Under, 2), at(5, Layer::Over, 1)];
+    drawable::sort_drawables(&mut v);
+    let rows: Vec<u16> = v.iter().map(|d| d.anchor_y).collect();
+    assert_eq!(rows, [5, 10]);
+}
+
 #[test]
 fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
     let pack = crate::embedded_pack::test_default_pack();
@@ -1961,7 +1976,7 @@ fn drawn_as(kind: &DrawableKind<'_>) -> &'static str {
 /// fails here.
 #[test]
 fn the_classic_queues_every_fixture_the_roster_yields() {
-    use crate::layout::Depth;
+    use crate::layout::{Depth, Tie};
     for layout in swept_offices() {
         let q = queued(&layout, &empty_frame(&layout));
         let got: Vec<(Option<(u16, Layer)>, &str)> = q
@@ -1979,12 +1994,53 @@ fn the_classic_queues_every_fixture_the_roster_yields() {
             .map(|f| {
                 let depth = match f.depth {
                     Depth::Backdrop => None,
-                    Depth::Sorted { row, tie } => Some((row, tie.into())),
+                    Depth::Sorted {
+                        row,
+                        tie: Tie::FigureOver,
+                    } => Some((row, Layer::Under)),
+                    Depth::Sorted {
+                        row,
+                        tie: Tie::FixtureOver,
+                    } => Some((row, Layer::Over)),
                 };
                 (depth, paints_as(f.kind))
             })
             .collect();
         assert_eq!(got, want, "{}x{}", layout.buf_w, layout.buf_h);
+    }
+}
+
+/// The self-lit wall fixtures are the only ones spared the hour's wash; the
+/// runner, which once stayed daylight-tan in a dimmed office, is washed.
+#[test]
+fn only_the_neon_sign_and_the_clock_are_spared_the_wash() {
+    use crate::layout::FixtureKind;
+    for layout in swept_offices() {
+        for f in layout.fixtures() {
+            let spared = matches!(f.kind, FixtureKind::NeonSign | FixtureKind::Clock);
+            assert_eq!(wash_of(f.kind) == Wash::Spared, spared, "{:?}", f.kind);
+        }
+    }
+    assert_eq!(wash_of(FixtureKind::Runner), Wash::Washed);
+}
+
+/// The background pass paints every spared fixture before every washed one,
+/// so the roster must list them that way or the pass paints out of its order.
+#[test]
+fn the_roster_lists_spared_backdrop_before_washed() {
+    use crate::layout::Depth;
+    for layout in swept_offices() {
+        let washes: Vec<Wash> = layout
+            .fixtures()
+            .filter(|f| f.depth == Depth::Backdrop)
+            .map(|f| wash_of(f.kind))
+            .collect();
+        assert!(
+            washes
+                .windows(2)
+                .all(|w| !(w[0] == Wash::Washed && w[1] == Wash::Spared)),
+            "{washes:?}"
+        );
     }
 }
 
@@ -2007,12 +2063,12 @@ fn only_a_backdrop_fixture_is_spared_the_wash() {
 }
 
 /// A seat sorts at its sitter's own row, so its roster tie alone decides which
-/// paints on top: the sitter on a front sofa, and a desk chair or a sofa we
-/// see the back of over its sitter.
+/// paints on top: the sitter on a front sofa or a meeting chair, and a desk
+/// chair or a sofa we see the back of over its sitter.
 #[test]
 fn a_seat_ties_its_sitter_and_hides_them_only_from_behind() {
     use crate::layout::{Depth, Facing, FixtureKind, Tie, WaypointKind};
-    let (mut fronts, mut backs, mut chairs) = (0, 0, 0);
+    let (mut fronts, mut backs, mut chairs, mut meeting_chairs) = (0, 0, 0, 0);
     for layout in swept_offices() {
         let fixtures: Vec<_> = layout.fixtures().collect();
         for w in layout
@@ -2038,6 +2094,26 @@ fn a_seat_ties_its_sitter_and_hides_them_only_from_behind() {
             let row = Seat::at_waypoint(w.kind, w.pos, w.facing).z_key();
             assert_eq!(sofa.depth, Depth::Sorted { row, tie }, "{w:?}");
         }
+        for w in layout
+            .waypoints
+            .iter()
+            .filter(|w| w.kind == WaypointKind::MeetingChair)
+        {
+            let chair = fixtures
+                .iter()
+                .find(|f| f.at == w.pos && matches!(f.kind, FixtureKind::MeetingChair { .. }))
+                .expect("its chair");
+            meeting_chairs += 1;
+            let row = Seat::at_waypoint(w.kind, w.pos, w.facing).z_key();
+            assert_eq!(
+                chair.depth,
+                Depth::Sorted {
+                    row,
+                    tie: Tie::FigureOver
+                },
+                "{w:?}"
+            );
+        }
         for f in &fixtures {
             if let FixtureKind::DeskChair(i) = f.kind {
                 chairs += 1;
@@ -2053,7 +2129,7 @@ fn a_seat_ties_its_sitter_and_hides_them_only_from_behind() {
         }
     }
     assert!(
-        fronts > 0 && backs > 0 && chairs > 0,
+        fronts > 0 && backs > 0 && chairs > 0 && meeting_chairs > 0,
         "the sweep seats every case"
     );
 }
@@ -4697,61 +4773,81 @@ fn desk_shadow_tracks_the_desk_zsort_row_not_a_hardcoded_offset() {
     assert_eq!(e.cx, desk.x + v.w / 2);
 }
 
+/// One fitted shadow per piece that casts one, emitted in roster order: the
+/// order they blend in where they overlap.
 #[test]
-fn floor_shadow_ellipses_fit_each_family_member_once() {
-    use crate::layout::WaypointKind;
+fn floor_shadow_ellipses_fit_each_caster_in_roster_order() {
+    use crate::layout::{furniture_def, Facing, FixtureKind, Furniture, Station, WaypointKind};
     let l =
         Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("192x160 fits");
-    let e = |el: &Ellipse| (el.cx, el.cy, el.half_w, el.half_h);
-
-    let mut expected: Vec<(u16, u16, u16, u16)> = Vec::new();
-    for &desk in &l.home_desks {
-        expected.push(e(&desk_shadow_ellipse(desk)));
-    }
-    for wp in l.waypoints.iter().filter(|w| {
-        !matches!(
-            w.kind,
-            WaypointKind::Couch | WaypointKind::Printer | WaypointKind::Island
-        )
-    }) {
-        let vis_w = crate::layout::furniture_def(wp.kind.furniture()).visual.w;
+    let fitted = |pos: Point, kind: WaypointKind| {
+        let vis_w = furniture_def(kind.furniture()).visual.w;
         let half_w = if vis_w > 0 { (vis_w / 2 + 1).min(7) } else { 7 };
-        expected.push((wp.pos.x, wp.pos.y + 2, half_w, 2));
+        (pos.x, pos.y + 2, half_w, 2)
+    };
+    let mut expected: Vec<(u16, u16, u16, u16)> = Vec::new();
+    for f in l.fixtures() {
+        match f.kind {
+            FixtureKind::Desk(i) => {
+                let e = desk_shadow_ellipse(l.home_desks[i.0]);
+                expected.push((e.cx, e.cy, e.half_w, e.half_h));
+            }
+            FixtureKind::Station { waypoint, station } => {
+                let wp = &l.waypoints[waypoint];
+                expected.push(match station {
+                    Station::Printer => (wp.pos.x, wp.pos.y + 1, 5, 1),
+                    _ => fitted(wp.pos, wp.kind),
+                });
+            }
+            FixtureKind::Pod { item, kind } => {
+                if let Some(wp) = kind.waypoint() {
+                    expected.push(fitted(l.pod_decor[item].pos, wp));
+                }
+            }
+            FixtureKind::MeetingSofa {
+                room, faces_away, ..
+            } => {
+                for w in l.waypoints.iter().filter(|w| {
+                    w.kind == WaypointKind::MeetingSofa
+                        && w.room_id == Some(room)
+                        && (w.facing == Facing::North) == faces_away
+                }) {
+                    expected.push(fitted(w.pos, w.kind));
+                }
+            }
+            FixtureKind::MeetingChair { waypoint, .. } => {
+                let wp = &l.waypoints[waypoint];
+                expected.push(fitted(wp.pos, wp.kind));
+            }
+            FixtureKind::KitchenIsland => {
+                let island = l.pantry.and_then(|p| p.kitchen_island).expect("an island");
+                let vis = furniture_def(Furniture::KitchenIsland).visual;
+                expected.push((island.x, island.y + (vis.h - 1) / 2, vis.w / 2 + 1, 2));
+            }
+            FixtureKind::LoungeCouch => {
+                let c = l.couch_sprite_center().expect("a couch");
+                expected.push((c.x, c.y + 2, 7, 2));
+            }
+            FixtureKind::Plant { item, kind } => {
+                let pos = l.plants[item].pos;
+                let h = furniture_def(kind.furniture()).visual.h;
+                expected.push((pos.x, pos.y + (h - 1) / 2, 3, 1));
+            }
+            FixtureKind::FloorLamp => {
+                let lamp = l.floor_lamp().expect("a lamp");
+                let h = furniture_def(Furniture::FloorLamp).visual.h;
+                expected.push((lamp.x, lamp.y + (h - 1) / 2, 2, 1));
+            }
+            _ => {}
+        }
     }
-    if let Some(island) = l.pantry.and_then(|p| p.kitchen_island) {
-        let vis = crate::layout::furniture_def(crate::layout::Furniture::KitchenIsland).visual;
-        expected.push((island.x, island.y + (vis.h - 1) / 2, vis.w / 2 + 1, 2));
-    }
-    for wp in l
-        .waypoints
-        .iter()
-        .filter(|w| w.kind == WaypointKind::Printer)
-    {
-        expected.push((wp.pos.x, wp.pos.y + 1, 5, 1));
-    }
-    if let Some(c) = l.couch_sprite_center() {
-        expected.push((c.x, c.y + 2, 7, 2));
-    }
-    for &PlantItem { kind, pos } in &l.plants {
-        expected.push((
-            pos.x,
-            pos.y + (crate::layout::furniture_def(kind.furniture()).visual.h - 1) / 2,
-            3,
-            1,
-        ));
-    }
-    if let Some(lamp) = l.floor_lamp() {
-        let h = crate::layout::furniture_def(crate::layout::Furniture::FloorLamp)
-            .visual
-            .h;
-        expected.push((lamp.x, lamp.y + (h - 1) / 2, 2, 1));
-    }
-
     let mut got = Vec::new();
-    floor_shadow_ellipses(&l, |el| got.push(e(&el)));
-    got.sort_unstable();
-    expected.sort_unstable();
-    assert_eq!(got, expected, "one fitted shadow per family member");
+    floor_shadow_ellipses(&l, |el| got.push((el.cx, el.cy, el.half_w, el.half_h)));
+    assert!(
+        expected.len() > l.home_desks.len(),
+        "more than the desks cast"
+    );
+    assert_eq!(got, expected);
 }
 
 #[test]

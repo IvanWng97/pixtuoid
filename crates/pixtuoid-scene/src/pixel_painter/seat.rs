@@ -293,7 +293,7 @@ pub(super) struct Seat {
 }
 
 /// The depth the sitters of a meeting sofa at `sofa` sort at: their seat's own
-/// [`z_key`](Seat::z_key). Both profiles key the sofa by it, so a front sofa,
+/// [`z_key`](Seat::z_key). The cutaway keys the sofa by it, so a front sofa,
 /// queued before its sitters, ties them and they sit on it.
 pub(crate) fn sofa_sitter_z_key(sofa: Point) -> u16 {
     Seat::at_waypoint(
