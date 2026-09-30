@@ -51,7 +51,7 @@ pub enum PackError {
         source: std::io::Error,
     },
     /// `pack.toml` is not valid TOML, or does not match the manifest schema.
-    #[error("parsing {}", path.as_deref().map_or(Path::new("pack.toml"), |p| p).display())]
+    #[error("parsing {}", path.as_deref().map_or(Path::new(PACK_MANIFEST), |p| p).display())]
     #[non_exhaustive]
     Manifest {
         /// The manifest's path; `None` for an in-memory pack.
