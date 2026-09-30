@@ -97,7 +97,7 @@ struct OmpEnv {
 
 impl OmpEnv {
     fn from_process() -> Self {
-        let var = |k: &str| std::env::var(k).ok();
+        let var = crate::platform::text_env;
         Self {
             home: crate::platform::user_home_opt(),
             config_dir_name: var("PI_CONFIG_DIR"),

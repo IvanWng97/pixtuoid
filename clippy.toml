@@ -1,0 +1,4 @@
+disallowed-methods = [
+    { path = "std::env::var", reason = "it drops a non-UTF-8 value, a legal path, and the resolver silently falls back elsewhere; read a location with `platform::path_env`, text with `platform::text_env` (the hook, which cannot depend on core: its `paths::path_env` twin, or `std::env::var_os`)" },
+    { path = "std::env::vars", reason = "it panics on a non-UTF-8 entry; use `std::env::vars_os`" },
+]
