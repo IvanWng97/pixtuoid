@@ -1,61 +1,29 @@
 ---
 name: add-theme
-version: 1.0.0
-description: "Add a new color theme to pixtuoid (a full ~90-role palette across 9 groups, rendered into the office). Use when the user says 'add a <name> theme', 'new color scheme', or 'port <palette> to pixtuoid'. Orchestrates the Rust registration PLUS the two steps agents miss — the site manifest bridge test and the committed-media regen."
+version: 2.0.0
+description: "Add a new color theme to pixtuoid (a full `Theme` palette, rendered into the office). Use when the user says 'add a <name> theme', 'new color scheme', or 'port <palette> to pixtuoid'. Orchestrates the Rust registration PLUS the two steps agents miss — the site manifest bridge test and the committed-media regen."
 metadata:
   scope: "pixtuoid repo only"
 ---
 
-# add-theme (v1)
+# add-theme
 
-A theme is a `pub static Theme` with ~90 color roles across **9** groups
-(surface, office, lighting, furniture, effects, ui, tool_glow, `ApplianceColors`
-for corridor appliances, and `SourceColors` for per-CLI dashboard badge hues).
-Every field must be supplied — corridor appliances render wrong until each theme
-provides its own set.
-
-## When to use
-
-- "Add a `<name>` theme" / "new color scheme" / "port `<palette>`".
-
-## The checklist
-
-Full current steps: **[`.github/prompts/add-theme.prompt.md`](../../../.github/prompts/add-theme.prompt.md)**
-+ the theme notes in [`crates/pixtuoid/src/tui/CLAUDE.md`](../../../crates/pixtuoid/src/tui/CLAUDE.md).
-Read an existing theme (e.g. `crates/pixtuoid-scene/src/theme/dracula.rs`) for the
-full field set, then:
-
-1. Create `crates/pixtuoid-scene/src/theme/<name>.rs` — fill EVERY field; never
-   fall back to the normal palette.
-2. Register: `mod` in `theme/mod.rs`, append `&<NAME>` to `ALL_THEMES`,
-   `theme_by_name()` resolves the kebab-case name.
-3. **Theme roles MAY share an RGB** (every bundled theme does). What binds a
-   theme author are the per-theme legibility guards in `theme/mod.rs`:
-   `appliance_palette_is_legible_for_every_theme`,
-   `source_badges_legible_for_every_theme`,
-   `token_paper_is_legible_on_the_desk_for_every_theme`, and
-   `sun_and_moon_read_warm_and_cool_for_every_theme`.
-
-## The two steps agents miss (both have teeth)
-
-- **`site/src/themes.json` row** (`id` = the kebab-case name) —
-  `theme_gallery_manifest_matches_all_themes` (`theme/mod.rs`) asserts the
-  manifest ids == `ALL_THEMES` names, so the theme **fails `just test`** until the
-  row exists. The site never runs the binary, so this bridge test is the only
-  guard that the switcher stays in sync.
-- **`just gen-media`** — `themes.json` drives the committed theme stills; a new
-  theme drifts them, so regenerate and commit them or the smoke `gen-check` reds
-  the PR (the same error the bridge test's message points at).
-
-(Full step list + field details: `add-theme.prompt.md` + the tui `CLAUDE.md` theme
-notes — this skill headlines the two teeth steps agents miss.)
-
-## Finish
-
-- `just test` — `appliance_palette_is_legible_for_every_theme` + the snapshot
-  tests must pass; update insta snapshots if the theme list changed.
-- **Visually verify** — render the `snapshot` example and eyeball the office (see
-  the `beautify-decoration` skill); a palette that passes the legibility guard can
-  still read badly.
-- `just preflight`, then the **two-lens-review** skill (a theme is public-facing —
-  add the editorial/film-critic lens for the rendered stills).
+1. Read the `Theme` struct in `crates/pixtuoid-scene/src/theme/mod.rs` and an
+   existing theme (e.g. `theme/dracula.rs`) for the full field set.
+2. Create `crates/pixtuoid-scene/src/theme/<name>.rs` defining
+   `pub static <NAME>: Theme = Theme { ... }`.
+3. Register it: add the `mod` in `theme/mod.rs` and append `&<NAME>` to the
+   `ALL_THEMES` slice; its `name` field is the kebab-case `--theme` id.
+4. Add a row to `site/src/themes.json` (`id` = the kebab-case `name`, plus its
+   presentation fields). `theme_gallery_manifest_matches_all_themes` asserts the
+   manifest ids == `ALL_THEMES` names — the site never runs the binary, so this
+   bridge test is the only guard that its theme switcher stays in sync. Then run
+   `just gen-media` to regenerate the committed theme stills (else the smoke
+   `gen-check` reds the PR).
+5. Theme roles **may share an RGB** (every bundled theme does). What binds you
+   are the `*_for_every_theme` legibility guards in `theme/mod.rs`.
+6. Run `just test`; update insta snapshots if the theme list changed.
+7. Visually verify with the **beautify-decoration** skill's snapshot loop — a
+   palette that passes the legibility guards can still read badly.
+8. `just preflight full`, then the **two-lens-review** skill — the regenerated
+   stills fire its "Generated art / clips" escalation row.

@@ -64,8 +64,9 @@ CSP; regressions surface in `just site-e2e`'s console watchdog.
 
 `just site-dev-bg` daemonizes (`astro dev --background`, polls the dev-only
 `/_astro/status` endpoint); `just site-dev-stop` frees the port. Two edges:
-the status endpoint + daemon subcommands are dev-server only (`astro preview`
-has neither — verified vs 7.0.5), and dev/preview share port 4321 — stop the
+the status endpoint is dev-server only (astro 7.3.2's `core/create-vite.js` registers it
+under `command === "dev"`; `astro preview` daemonizes too but has nothing to
+poll), and dev/preview share port 4321 — stop the
 daemon before `just site-e2e` (its webServer fails loud on a squatted port).
 `npm run lighthouse` needs 4321 AND `collect.previewPort` free: its preview
 moves there so the gzip proxy can take the audited port.
@@ -82,8 +83,8 @@ watchdog) that tsc/knip/build are blind to. CI: `site.yml` / `pages.yml`.
   `config/lighthouse-runner.mjs`, lighthouse 13 programmatic API, median of
   three serial runs; runner-semantics pinned by its test — a renamed audit
   FAILS instead of passing vacuously). **A category score is a budget, not a
-  contract**: `color-contrast` is 7/195 of the a11y category, so a total
-  contrast failure still scored 0.93 — anything that must never regress gets
+  contract**: `color-contrast` is a small weight in the a11y category, so a total
+  contrast failure still clears the category budget — anything that must never regress gets
   its own per-audit assertion with `aggregationMethod: pessimistic` (median
   greens a binary audit that failed one run). Collect URLs pin `?theme=day`
   (otherwise the wall clock picks the palette — half of CI runs would audit
