@@ -1041,8 +1041,8 @@ fn pack() -> Pack {
         .expect("the embedded pack loads")
 }
 
-/// Every pane shows its own stretch of the one city: a window standing `dx`
-/// east of the run's west end shows the strip from column `dx` on.
+/// Every pane shows its own stretch of the one city, read from the run's west
+/// end.
 #[test]
 fn a_window_shows_the_city_strip_from_its_own_column() {
     // Noon: the night's stars are keyed to the screen column, not the city's.

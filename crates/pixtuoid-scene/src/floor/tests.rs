@@ -1341,13 +1341,12 @@ fn neon_never_flashes_while_lit_or_while_still_coasting_down() {
     assert!(last.power > NeonLevels::EMPTY.power, "{last:?}");
 }
 
-/// The classic looks out from its own floor: a floor that differs from the
-/// ground floor only in altitude sees a different skyline.
+/// The classic looks out from its own floor.
 #[test]
 fn the_classic_sees_the_skyline_from_its_floors_altitude() {
     let pack = crate::embedded_pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
-    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = make_scene(1, 8);
     let render = |floor_meta: FloorMeta| {
         let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
