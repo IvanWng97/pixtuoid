@@ -321,11 +321,8 @@ pub(crate) fn net_pass(
     let bx1 = bx0.saturating_add(pen.buffer(rect.w)).min(buf.width());
     let by1 = by0.saturating_add(pen.buffer(rect.h)).min(buf.height());
     let bw = usize::from(buf.width());
-    debug_assert_eq!(
-        emission.glow.len(),
-        bw * usize::from(buf.height()),
-        "one class per pixel"
-    );
+    let pixels = buf.as_mut_slice();
+    debug_assert_eq!(emission.glow.len(), pixels.len(), "one class per pixel");
     for by in by0..by1 {
         let art_row = usize::from(by / k - rect.y.0) * w;
         for bx in bx0..bx1 {
@@ -336,7 +333,7 @@ pub(crate) fn net_pass(
             }
             let i = usize::from(by) * bw + usize::from(bx);
             let glow = emission.glow.get(i).copied().unwrap_or(Glow::Lit);
-            buf.put(bx, by, memo.of(buf.get(bx, by), glow, lift, tint, ambient));
+            pixels[i] = memo.of(pixels[i], glow, lift, tint, ambient);
         }
     }
 }

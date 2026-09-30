@@ -499,7 +499,7 @@ pub struct RgbBuffer {
     writes: Option<Writes>,
 }
 
-/// Each pixel's epoch of its last [`put`](RgbBuffer::put).
+/// Each pixel's epoch of its last noted write.
 #[derive(Debug, Clone)]
 struct Writes {
     at: Vec<u32>,
@@ -622,7 +622,7 @@ impl RgbBuffer {
         let w = self.writes.get_or_insert_with(|| Writes {
             at: vec![0; n],
             now: 0,
-            tracking: true,
+            tracking: false,
         });
         w.tracking = true;
         if w.at.len() != n {
