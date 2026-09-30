@@ -695,6 +695,7 @@ impl FloorSession {
         self.evict_missing(scene);
         let fctx = &mut self.floor.ctx;
         let layout = fctx.frame_layout(size.w, size.h, floor_meta.floor_seed)?;
+        let door_anim_max_ms = fctx.door_anim_max_ms;
         let frame = sim_step(
             &mut SimStores {
                 router: &mut fctx.router,
@@ -715,6 +716,7 @@ impl FloorSession {
                 pets: PetInputs::default(),
                 floor: floor_meta,
                 now,
+                door_anim_max_ms,
             },
         );
         frame_epilogue(
@@ -1034,10 +1036,10 @@ impl FloorTransition {
         // larger than the transition's own duration can't be render-loop jitter;
         // treat it as done. Smaller wobbles keep the saturate-to-0 convention
         // every other animation uses.
-        if let Ok(behind) = self.started_at.duration_since(now) {
-            if behind.as_millis() as u64 > self.duration_ms {
-                return true;
-            }
+        if let Ok(behind) = self.started_at.duration_since(now)
+            && behind.as_millis() as u64 > self.duration_ms
+        {
+            return true;
         }
         self.t(now) >= 1.0
     }

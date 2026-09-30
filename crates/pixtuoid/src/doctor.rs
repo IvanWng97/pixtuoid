@@ -222,10 +222,10 @@ impl SourceDiagnostics {
     /// The single worst issue as a one-line, glyph-prefixed summary. Priority:
     /// install-broken (hooks can't fire) > decode-drift.
     pub(crate) fn summary(&self) -> Option<String> {
-        if let Some(i) = &self.install {
-            if !i.is_sound() {
-                return Some(format!("⚠ install broken: {}", i.issues.join("; ")));
-            }
+        if let Some(i) = &self.install
+            && !i.is_sound()
+        {
+            return Some(format!("⚠ install broken: {}", i.issues.join("; ")));
         }
         let n = self.drift.total();
         if n > 0 {
@@ -610,9 +610,22 @@ struct RootStatus {
 /// The density variants of the pack `source` loads, or why that pack fails to
 /// load: `run` refuses to start on it, so doctor says so.
 fn pack_densities(source: pixtuoid_scene::embedded_pack::PackSource) -> Result<Vec<u16>, String> {
+    use pixtuoid_core::sprite::error::PackError;
     pixtuoid_scene::embedded_pack::load_sprite_pack(source)
         .map(|pack| pack.density_variants())
-        .map_err(|e| format!("{e:#}"))
+        .map_err(|e| {
+            let no_manifest = e.chain().any(|c| {
+                matches!(
+                    c.downcast_ref::<PackError>(),
+                    Some(PackError::NoManifest { .. })
+                )
+            });
+            if no_manifest {
+                format!("{e:#}: point pack-dir at a sprite pack, or drop it for the bundled art")
+            } else {
+                format!("{e:#}")
+            }
+        })
 }
 
 /// Everything `doctor` probed, separated from rendering, so `render` is
@@ -1501,14 +1514,16 @@ mod tests {
     }
 
     #[test]
-    fn a_pack_that_fails_to_load_is_reported_not_hidden() {
+    fn a_pack_dir_without_a_manifest_is_named_a_config_mistake() {
         use pixtuoid_scene::embedded_pack::PackSource;
-        let missing = tempfile::TempDir::new()
-            .expect("tempdir")
-            .path()
-            .join("gone");
-        let reason = pack_densities(PackSource::Explicit(missing)).expect_err("gone");
-        assert!(reason.contains("failed to load sprite pack"), "{reason}");
+        let base = tempfile::TempDir::new().expect("tempdir");
+        for dir in [base.path().join("gone"), base.path().to_path_buf()] {
+            let reason = pack_densities(PackSource::Explicit(dir)).expect_err("no manifest");
+            assert!(
+                reason.contains("holds no pack.toml") && reason.contains("pack-dir"),
+                "{reason}"
+            );
+        }
         assert!(pack_densities(PackSource::Bundled).is_ok());
     }
 
@@ -1542,17 +1557,22 @@ mod tests {
                 .iter()
                 .map(|k| (*k, std::env::var_os(k)))
                 .collect();
-        std::env::set_var("XDG_CONFIG_HOME", base.path());
-        std::env::remove_var("CLICOLOR_FORCE");
-        std::env::remove_var("NO_COLOR");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", base.path()) };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("CLICOLOR_FORCE") };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("NO_COLOR") };
         let out = run(
             std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
             crate::GraphicsMode::Auto,
         );
         for (k, v) in saved {
             match v {
-                Some(v) => std::env::set_var(k, v),
-                None => std::env::remove_var(k),
+                // FIXME: Audit that the environment access only happens in single-threaded code.
+                Some(v) => unsafe { std::env::set_var(k, v) },
+                // FIXME: Audit that the environment access only happens in single-threaded code.
+                None => unsafe { std::env::remove_var(k) },
             }
         }
         let out = out.expect("doctor runs");
@@ -1571,16 +1591,20 @@ mod tests {
             .iter()
             .map(|k| (*k, std::env::var_os(k)))
             .collect();
-        std::env::remove_var("CLICOLOR_FORCE");
-        std::env::remove_var("NO_COLOR");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("CLICOLOR_FORCE") };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("NO_COLOR") };
         let out = run(
             std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
             crate::GraphicsMode::Auto,
         );
         for (k, v) in saved {
             match v {
-                Some(v) => std::env::set_var(k, v),
-                None => std::env::remove_var(k),
+                // FIXME: Audit that the environment access only happens in single-threaded code.
+                Some(v) => unsafe { std::env::set_var(k, v) },
+                // FIXME: Audit that the environment access only happens in single-threaded code.
+                None => unsafe { std::env::remove_var(k) },
             }
         }
         let out = out.unwrap();
@@ -2060,10 +2084,14 @@ mod tests {
                 .iter()
                 .map(|k| (*k, std::env::var_os(k)))
                 .collect();
-        std::env::set_var("HOME", &home);
-        std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
-        std::env::remove_var("OPENCODE_CONFIG_DIR");
-        std::env::set_var("PATH", &bin);
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("HOME", &home) };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", home.join(".config")) };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("OPENCODE_CONFIG_DIR") };
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("PATH", &bin) };
         let out = run(
             std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
             crate::GraphicsMode::Auto,
@@ -2071,8 +2099,10 @@ mod tests {
         let spawned = marker.exists();
         for (k, v) in saved {
             match v {
-                Some(v) => std::env::set_var(k, v),
-                None => std::env::remove_var(k),
+                // FIXME: Audit that the environment access only happens in single-threaded code.
+                Some(v) => unsafe { std::env::set_var(k, v) },
+                // FIXME: Audit that the environment access only happens in single-threaded code.
+                None => unsafe { std::env::remove_var(k) },
             }
         }
 

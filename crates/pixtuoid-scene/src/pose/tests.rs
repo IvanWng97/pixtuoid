@@ -1319,10 +1319,10 @@ fn wander_legs_approach_the_desk_via_an_allowed_side_not_through_the_front() {
         let Some(snap) = rig.motion.get(&trip_id).and_then(|m| m.walk_path.as_ref()) else {
             continue;
         };
-        if let (Some(&f), Some(&la)) = (snap.path.first(), snap.path.last()) {
-            if !seen_ends.contains(&(f, la)) {
-                seen_ends.push((f, la));
-            }
+        if let (Some(&f), Some(&la)) = (snap.path.first(), snap.path.last())
+            && !seen_ends.contains(&(f, la))
+        {
+            seen_ends.push((f, la));
         }
         if snap.path.first() == Some(&chair) {
             saw_out = true;
@@ -1814,11 +1814,11 @@ fn multiple_agents_share_overlay_without_teleport() {
         // that re-routes the other walkers.
         rig.overlay.clear();
         for s in &slots {
-            if let Some(Pose::AtWaypoint { wp, .. }) = derive(s, t, &l) {
-                if let Some(w) = l.waypoints.get(wp) {
-                    rig.overlay
-                        .add(w.pos.x.saturating_sub(4), w.pos.y.saturating_sub(6), 8, 12);
-                }
+            if let Some(Pose::AtWaypoint { wp, .. }) = derive(s, t, &l)
+                && let Some(w) = l.waypoints.get(wp)
+            {
+                rig.overlay
+                    .add(w.pos.x.saturating_sub(4), w.pos.y.saturating_sub(6), 8, 12);
             }
         }
         for s in &slots {

@@ -42,7 +42,7 @@ change a reviewable PR diff (`gen-check`). Per-area gates verify
 independently — `just preflight full` + the
 [CI-only gates](CONTRIBUTING.md#ci-gates) (Rust),
 `just site-check` (site), `tsc` + `eslint` (Raycast) — and each area's house
-rules live in its own `CLAUDE.md`.
+rules live in its own `AGENTS.md`.
 
 ## The pitfalls that bite
 
