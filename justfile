@@ -17,6 +17,11 @@
 # (ci-tests.yml's windows jobs call recipes, never inline commands).
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
+# Recipe arguments reach the shell as "$1".."$@", never as `{{ param }}`: an
+# interpolated value is re-parsed as shell code, so a quote or `$(...)` in it
+# runs.
+set positional-arguments
+
 # ── variables ─────────────────────────────────────────────────────
 # just evaluates these globally regardless of position; kept at the top (the
 # idiom) so the file's config lives in one place.
@@ -307,9 +312,9 @@ test *args:
     #!/usr/bin/env bash
     set -euo pipefail
     if command -v cargo-nextest &>/dev/null; then
-        cargo nextest run --workspace {{ args }}
+        cargo nextest run --workspace "$@"
     else
-        cargo test --workspace {{ args }}
+        cargo test --workspace "$@"
     fi
 
 # The filter forwards to both targets, and one matching nothing in a target is
@@ -318,8 +323,8 @@ test *args:
 [doc('Render-path + wire-path criterion benchmarks; forwards a filter')]
 [group('rust')]
 bench *args:
-    cargo bench -p pixtuoid-scene --bench render_frame -- {{ args }}
-    cargo bench -p pixtuoid-core --bench decode_reduce -- {{ args }}
+    cargo bench -p pixtuoid-scene --bench render_frame -- "$@"
+    cargo bench -p pixtuoid-core --bench decode_reduce -- "$@"
 
 # Catches code that silently only builds with `native` on (the wasm core builds
 # without it).
@@ -393,7 +398,8 @@ semver:
 api-surface mode="": _api-toolchain
     #!/usr/bin/env bash
     set -euo pipefail
-    case "{{ mode }}" in
+    mode="$1"
+    case "$mode" in
     "") out=api ;;
     check) out=$(mktemp -d); trap 'rm -rf "$out"' EXIT ;;
     *) echo "usage: just api-surface [check]" >&2; exit 2 ;;
@@ -521,21 +527,19 @@ mutants *args:
         echo "  Run from a branch touching mutable production Rust, or set MUTANTS_BASE." >&2
         exit 1
     fi
-    cargo mutants --in-diff target/mutants.diff {{ args }}
+    cargo mutants --in-diff target/mutants.diff "$@"
 
 # Record a conformance fixture from bytes a real CLI actually sent. Hook-only
 # sources have no persistent corpus — hook events are transient — so their
 # fixtures are the ONLY wire evidence they have, and the ones this tree has not
 # re-recorded yet were composed by hand. One BILLED model turn per run.
-# `{prompt}` expands to the shared scenario prompt; a custom one has to go
-# through the script directly, since just joins variadic args and loses quoting.
+# `{prompt}` expands to the shared scenario prompt; a custom one is a quoted arg.
 #   just capture-fixture cursor tool-run cursor-agent -p --trust '{prompt}'
 #   just capture-fixture kimi permission-flow "$SHELL"   # drive the TUI yourself
 [doc('Record a conformance fixture from a real CLI run (BILLED — one model turn)')]
 [group('rust')]
 capture-fixture source scenario *cmd:
-    cargo run --release -q -p pixtuoid-core --example capture_fixture -- \
-        {{ source }} {{ scenario }} {{ cmd }}
+    cargo run --release -q -p pixtuoid-core --example capture_fixture -- "$@"
 
 [doc('Strip every committed fixture of what no decoder reads, in place (local, unbilled)')]
 [group('rust')]
@@ -603,8 +607,8 @@ corpus-all:
 fuzz source dir:
     #!/usr/bin/env bash
     set -euo pipefail
-    source="{{ source }}"
-    dir="{{ dir }}"
+    source="$1"
+    dir="$2"
     [ -d "$dir" ] || { echo "error: corpus dir '$dir' does not exist" >&2; exit 1; }
     # Guard the corpus BEFORE fuzzing: a dir with no .jsonl feeds the fuzzer
     # zero lines, and it exits 0 — reporting the never-panic contract verified
@@ -616,7 +620,7 @@ fuzz source dir:
 [doc('Report recorded fixtures whose CLI has moved on (advisory, exit 3 = stale)')]
 [group('rust')]
 fixture-age *args:
-    python3 scripts/fixture-age.py {{ args }}
+    python3 scripts/fixture-age.py "$@"
 
 # Hermetic OpenClaw daemon live-e2e: drives the REAL shim with crafted gateway
 # envelopes on an isolated socket and asserts the lobster's
@@ -637,7 +641,7 @@ openclaw-e2e:
 [doc('Multi-gateway live-e2e against the REAL openclaw CLI (needs `just build --release`)')]
 [group('rust')]
 openclaw-multi-e2e *ports:
-    scripts/lib/tier-openclaw-multi.sh {{ ports }}
+    scripts/lib/tier-openclaw-multi.sh "$@"
 
 # The EXPENSIVE one: a real `openclaw gateway run` PLUS one real model turn on
 # the claude-cli backend, proving the gateway's lobster and its backend's `cc·`
@@ -656,14 +660,14 @@ openclaw-backend-e2e:
 [doc('Live multi-source e2e — every installed agent CLI, one BILLED turn each')]
 [group('rust')]
 live-sources *ids:
-    scripts/lib/tier-live-sources.sh {{ ids }}
+    scripts/lib/tier-live-sources.sh "$@"
 
 # Replays a captured rollout through the FULL headless path — real watcher, real
 # socket, only the input is fixed.
 [doc('Replay a captured rollout fixture through a hermetic headless run')]
 [group('rust')]
 replay fixture delay="3":
-    scripts/lib/tier-replay.sh {{ fixture }} {{ delay }}
+    scripts/lib/tier-replay.sh "$@"
 
 # Compile the workspace; extra args are forwarded:
 #   just build                                # debug
@@ -672,7 +676,7 @@ replay fixture delay="3":
 [doc('Compile the workspace; forwards args (e.g. --release --bins --examples)')]
 [group('rust')]
 build *args:
-    cargo build --workspace {{ args }}
+    cargo build --workspace "$@"
 
 # ── site ──────────────────────────────────────────────────────────
 # The Astro landing page — a self-contained Node project under site/ with its
@@ -799,7 +803,7 @@ gen-readme-check:
 [doc('Regenerate docs/images/ + site/public/demos/ from scripts/media.json')]
 [group('gen')]
 gen-media *args:
-    .venv/bin/python3 scripts/gen-media.py {{ args }}
+    .venv/bin/python3 scripts/gen-media.py "$@"
 
 [doc('Regenerate site/src/assets/pix-icons/ from the embedded sprite-pack palette')]
 [group('gen')]
@@ -953,7 +957,8 @@ workspace-version:
 build-target target cross="false":
     #!/usr/bin/env bash
     set -euo pipefail
-    use_cross="{{ cross }}"
+    target="$1"
+    use_cross="$2"
     # Anything but the two legal words means the caller's positional args
     # shifted, so fail loudly rather than infer "not true, so cargo".
     case "$use_cross" in
@@ -971,13 +976,13 @@ build-target target cross="false":
     # property of the target. $flags stays UNQUOTED below — quoting the empty
     # non-Linux case would pass cargo an empty positional arg.
     flags=""
-    case "{{ target }}" in
+    case "$target" in
     *linux*) flags="--no-default-features --features portable" ;;
     esac
     if [ "$use_cross" = "true" ]; then
-        cross build --release --target "{{ target }}" $flags
+        cross build --release --target "$target" $flags
     else
-        cargo build --release --target "{{ target }}" $flags
+        cargo build --release --target "$target" $flags
     fi
 
 # `--no-build`: the target is already built by `build-target`. Needs cargo-deb
@@ -985,8 +990,8 @@ build-target target cross="false":
 [doc('Package the .deb for ONE already-built target (release.yml deb job)')]
 [group('release')]
 deb target:
-    cargo deb -p pixtuoid --no-build --no-strip --target {{ target }}
-    cargo deb -p pixtuoid-hook --no-build --no-strip --target {{ target }}
+    cargo deb -p pixtuoid --no-build --no-strip --target "$1"
+    cargo deb -p pixtuoid-hook --no-build --no-strip --target "$1"
 
 # The repo's NODE-side gate (no cargo): the npm package generator AND the bundled
 # OpenClaw plugin contract.
@@ -1016,7 +1021,8 @@ npm-check:
 preflight mode="":
     #!/usr/bin/env bash
     set -euo pipefail
-    case "{{ mode }}" in
+    mode="$1"
+    case "$mode" in
     "") just lint && just clippy ;;
     full) just lint && just clippy && just hack && just test ;;
     *) echo "usage: just preflight [full]" >&2; exit 2 ;;
