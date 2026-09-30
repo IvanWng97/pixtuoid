@@ -416,7 +416,7 @@ pub fn resolve_theme(
     cli_theme: Option<&str>,
     warnings: &mut Vec<String>,
 ) -> Result<&'static pixtuoid_scene::theme::Theme> {
-    use pixtuoid_scene::theme::{theme_by_name, ALL_THEMES, NORMAL};
+    use pixtuoid_scene::theme::{ALL_THEMES, NORMAL, theme_by_name};
 
     // Validate the config theme even when the CLI overrides it — the warn is the
     // only signal that a persisted theme has gone stale.

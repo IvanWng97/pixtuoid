@@ -6,8 +6,8 @@
 //! [`FrameCache::note_outfit_seed`] detects. With that one invalidation, caching
 //! is safe.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use pixtuoid_core::sprite::{Frame, Rgb};
 use pixtuoid_core::{AgentId, SceneState};

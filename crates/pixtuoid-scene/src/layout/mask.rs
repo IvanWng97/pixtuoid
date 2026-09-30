@@ -3,9 +3,9 @@
 
 use super::decor::{FurnitureDef, GroundAlign};
 use super::{
-    anchored_top_left, furniture_def, Anchor, Furniture, MeetingRoom, PlantItem, PodDecorItem,
-    Point, Size, WallDecorItem, Waypoint, WaypointKind, OBSTACLE_PAD_PX, PANTRY_FOOTPRINT_DEPTH,
-    WALL_BAND_TO_TOP_MARGIN, WAYPOINT_STAMP_PAD_PX,
+    Anchor, Furniture, MeetingRoom, OBSTACLE_PAD_PX, PANTRY_FOOTPRINT_DEPTH, PlantItem,
+    PodDecorItem, Point, Size, WALL_BAND_TO_TOP_MARGIN, WAYPOINT_STAMP_PAD_PX, WallDecorItem,
+    Waypoint, WaypointKind, anchored_top_left, furniture_def,
 };
 use pixtuoid_core::walkable::WalkableMask;
 
@@ -247,7 +247,7 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::{z_sort_row, WALL_THICK_V};
+    use crate::layout::{WALL_THICK_V, z_sort_row};
 
     #[test]
     fn vertical_wall_blocks_its_whole_visual_width_in_the_mask() {

@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use pixtuoid_core::AgentId;
 use pixtuoid_core::source::manager::SourceDeath;
 use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex};
-use pixtuoid_core::AgentId;
 
 use crate::install::target::Target;
 

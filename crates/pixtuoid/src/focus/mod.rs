@@ -177,11 +177,11 @@ pub(crate) fn focus_agent(
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) use linux::{activate_os, OsProcessTable};
+pub(crate) use linux::{OsProcessTable, activate_os};
 #[cfg(target_os = "macos")]
-pub(crate) use macos::{activate_os, OsProcessTable};
+pub(crate) use macos::{OsProcessTable, activate_os};
 #[cfg(windows)]
-pub(crate) use windows::{activate_os, OsProcessTable};
+pub(crate) use windows::{OsProcessTable, activate_os};
 
 #[cfg(test)]
 mod tests {
