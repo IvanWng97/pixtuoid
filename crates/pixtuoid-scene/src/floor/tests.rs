@@ -1340,3 +1340,46 @@ fn neon_never_flashes_while_lit_or_while_still_coasting_down() {
     assert_ne!(last, NeonLevels::FLASH);
     assert!(last.power > NeonLevels::EMPTY.power, "{last:?}");
 }
+
+/// The classic looks out from its own floor: a floor that differs from the
+/// ground floor only in altitude sees a different skyline.
+#[test]
+fn the_classic_sees_the_skyline_from_its_floors_altitude() {
+    let pack = crate::embedded_pack::test_default_pack();
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    let scene = make_scene(1, 8);
+    let render = |floor_meta: FloorMeta| {
+        let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
+        render_floor(
+            &mut FloorCtx::new(),
+            &mut buf,
+            &mut CoffeeState::new(),
+            &mut HashMap::new(),
+            FrameInputs {
+                scene: &scene,
+                pack: &pack,
+                theme,
+                now,
+                size: Size { w: 192, h: 160 },
+                floor_meta,
+                active_pet: None,
+                floor_pet: None,
+                debug_walkable: false,
+            },
+        )
+        .expect("layout");
+        buf
+    };
+    let ground = render(FloorMeta::ground());
+    let top = render(FloorMeta {
+        altitude: 1.0,
+        ..FloorMeta::ground()
+    });
+    assert!(
+        (0..ground.height())
+            .flat_map(|y| (0..ground.width()).map(move |x| (x, y)))
+            .any(|(x, y)| ground.get(x, y) != top.get(x, y)),
+        "the top floor's windows show the ground floor's skyline"
+    );
+}
