@@ -103,20 +103,20 @@ enum KeyAction {
 }
 
 fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
-    renderer: &mut TuiRenderer<B>,
+    renderer: &TuiRenderer<B>,
     scene_rx: &SceneRx,
     focus_roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
     col: u16,
     row: u16,
 ) -> bool {
-    let snap = scene_rx.borrow().clone();
-    let hit = renderer.hit_test_agent_at(col, row);
-    if let Some(slot) = hit.and_then(|id| snap.agents.get(&id)) {
-        crate::focus::focus_slot(slot, focus_roots);
-        true
-    } else {
-        false
-    }
+    let Some(id) = renderer.hit_test_agent_at(col, row) else {
+        return false;
+    };
+    let Some(slot) = scene_rx.borrow().agents.get(&id).cloned() else {
+        return false;
+    };
+    crate::focus::focus_slot(&slot, focus_roots);
+    true
 }
 
 /// The core persists the flag FIRST and rolls it back if the install fails, so on `Err`

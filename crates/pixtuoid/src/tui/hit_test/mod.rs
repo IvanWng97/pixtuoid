@@ -9,19 +9,13 @@ use pixtuoid_scene::pixel_painter::AgentFrame;
 
 use crate::tui::geometry::CellArea;
 
-/// Hover and click box: the default sprite, not a custom pack's frame.
-const AGENT_BOX: Size = Size {
-    w: pixtuoid_scene::layout::CHARACTER_SPRITE_W,
-    h: pixtuoid_scene::layout::CHARACTER_SPRITE_H,
-};
-
 /// The agent whose sprite shows at `cell`: `agents` is in paint order, so the
 /// last hit is the one on top.
 pub(crate) fn hit_test_agent(agents: &[AgentFrame], cell: CellArea) -> Option<AgentId> {
     agents
         .iter()
         .rev()
-        .find(|a| box_hit(Anchor::TopLeft, a.anchor, AGENT_BOX, cell))
+        .find(|a| box_hit(Anchor::TopLeft, a.anchor, Size { w: a.w, h: a.h }, cell))
         .map(|a| a.agent_id)
 }
 

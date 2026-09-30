@@ -529,8 +529,8 @@ fn resolve_characters(
             let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
             CharacterPlacement {
                 agent_idx,
-                // Breath-independent z-key: the ±1px breath must not flip sort
-                // order against nearby desk decor frame-to-frame.
+                // Breath-independent z-key: the breath's 1 px rise must not flip
+                // sort order against nearby desk decor frame-to-frame.
                 anchor_y: seat.z_key(),
                 anim_name,
                 frame_idx,
@@ -576,8 +576,8 @@ fn resolve_characters(
                     wp_rank.insert(wp, rank + 1);
                     let dx = waypoint_rank_offset_x(kind, rank);
                     let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
-                    // The label twin in `anchors::character_anchor` rides this
-                    // SAME call, without the step-aside and breath below.
+                    // `anchors::character_anchor` places the label off this same
+                    // `Seat::at_waypoint`.
                     let seat = Seat::at_waypoint(kind, stand, wp_obj.facing);
                     let anchor_base = seat.render_anchor(char_w);
                     let (anim_name, flip_x) = seat.sprite_in_pack("seated", pack);

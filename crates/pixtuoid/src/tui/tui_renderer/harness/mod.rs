@@ -76,7 +76,7 @@ pub(super) fn dark_theme() -> &'static pixtuoid_scene::theme::Theme {
 }
 /// A terminal one row under the office minimum — the footer-only path, DERIVED
 /// so a floor move can't leave these tests asserting against a size that has
-/// since become perfectly renderable (it did: 80x24 used to be too small).
+/// since become perfectly renderable.
 pub(super) fn too_small_terminal() -> (u16, u16) {
     let (cols, rows) = crate::tui::renderer::min_terminal_size();
     (cols, rows - 1)
@@ -193,19 +193,12 @@ mod theme_lighting;
 /// frame for a cell whose agent hit-test resolves to `id` and park the mouse
 /// there. Panics when the agent isn't hit-testable — a test wiring error, not a
 /// case.
-pub(super) fn hover_agent(
-    r: &mut TuiRenderer<TestBackend>,
-    id: pixtuoid_core::AgentId,
-    cols: u16,
-    rows: u16,
-) {
-    for my in 0..rows {
-        for mx in 0..cols {
-            if r.hit_test_agent_at(mx, my) == Some(id) {
-                r.set_mouse_pos(Some((mx, my)));
-                return;
-            }
-        }
-    }
-    panic!("agent {id:?} is not hit-testable in this layout");
+pub(super) fn hover_agent(r: &mut TuiRenderer<TestBackend>, id: pixtuoid_core::AgentId) {
+    let cell = r
+        .frame_buffer()
+        .area()
+        .positions()
+        .find(|p| r.hit_test_agent_at(p.x, p.y) == Some(id))
+        .unwrap_or_else(|| panic!("agent {id:?} is not hit-testable in this layout"));
+    r.set_mouse_pos(Some((cell.x, cell.y)));
 }

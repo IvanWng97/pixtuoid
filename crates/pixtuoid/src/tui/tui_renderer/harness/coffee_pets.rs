@@ -399,7 +399,7 @@ fn agent_tooltip_flips_up_near_bottom_edge() {
     );
     r.render(&scene, &pack(), t0()).unwrap();
     let id = AgentId::from_transcript_path("/flup/0.jsonl");
-    super::hover_agent(&mut r, id, 120, 44);
+    super::hover_agent(&mut r, id);
     r.render(&scene, &pack(), t0())
         .expect("bottom-edge hover must not panic");
 }

@@ -35,7 +35,7 @@ fn hovered_agent_renders_stats_tooltip() {
     r.render(&scene, &pack(), t0()).unwrap();
     let before = frame_text(r.frame_buffer());
     assert!(!before.contains("calls"));
-    super::hover_agent(&mut r, a, 120, 44);
+    super::hover_agent(&mut r, a);
     r.render(&scene, &pack(), t0()).unwrap();
     let after = frame_text(r.frame_buffer());
     assert!(
@@ -51,7 +51,7 @@ fn hovered_dossier_shows_token_usage_only_when_nonzero() {
     let scene = scene_with(vec![s.clone()], 16);
     let mut r = build(120, 44, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, a, 120, 44);
+    super::hover_agent(&mut r, a);
     r.render(&scene, &pack(), t0()).unwrap();
     let without = frame_text(r.frame_buffer());
     assert!(
@@ -60,7 +60,7 @@ fn hovered_dossier_shows_token_usage_only_when_nonzero() {
     );
     s.tokens_used = 2_400_000;
     let scene = scene_with(vec![s], 16);
-    super::hover_agent(&mut r, a, 120, 44);
+    super::hover_agent(&mut r, a);
     r.render(&scene, &pack(), t0()).unwrap();
     let with = frame_text(r.frame_buffer());
     assert!(

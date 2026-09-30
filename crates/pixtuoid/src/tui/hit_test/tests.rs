@@ -164,10 +164,9 @@ fn furniture_hit_test_respects_floor_seed() {
 #[test]
 fn cat_hit_test_inside_sit_sprite() {
     use pixtuoid_scene::layout::Point;
-    // cat_sit's `PetKind::hitbox` centred at (50,80) spans x[47..53), y[77..83):
-    // cell 39 shows rows 78–79, and cell 38 shows row 77 in its lower half.
     let pos = Point { x: 50, y: 80 };
-    for row in [38, 39] {
+    let (top, bottom) = pet_rows(pos, "cat_sit");
+    for row in [top / 2, bottom / 2] {
         assert!(
             hit_test_pet(
                 PetKind::Cat,
@@ -212,23 +211,27 @@ fn mascot_hit_test_inside_and_outside() {
     ));
 }
 
-// A sprite on an odd row shows in its last cell's upper half only.
 #[test]
 fn an_agent_is_hit_from_exactly_the_cells_that_show_it() {
     let id = AgentId::from_transcript_path("/hit/0.jsonl");
+    // An odd top row shows the sprite in its first cell's lower half and its
+    // last cell's upper half only.
     for y in [30, 31] {
-        let tl = Point { x: 40, y };
-        let agents = [AgentFrame {
+        let agent = AgentFrame {
             agent_id: id,
-            anchor: tl,
-        }];
+            anchor: Point { x: 40, y },
+            w: 10,
+            h: 14,
+        };
+        let tl = agent.anchor;
+        let agents = [agent];
         let hits = |col, row| {
             hit_test_agent(
                 &agents,
                 crate::tui::geometry::CellArea::half_block(col, row),
             )
         };
-        let (cols, rows) = covering_cells(tl);
+        let (cols, rows) = covering_cells(agent);
         for row in rows.clone() {
             for col in cols.clone() {
                 assert_eq!(hits(col, row), Some(id), "cell ({col},{row}) shows {tl:?}");
@@ -251,6 +254,8 @@ fn overlapping_agents_hit_the_last_painted() {
     let at = |agent_id, x| AgentFrame {
         agent_id,
         anchor: Point { x, y: 30 },
+        w: 8,
+        h: 12,
     };
     let cell = crate::tui::geometry::CellArea::half_block(44, 16);
     for (first, last) in [(under, over), (over, under)] {
@@ -261,14 +266,14 @@ fn overlapping_agents_hit_the_last_painted() {
     }
 }
 
-/// The terminal cells that show some pixel of a sprite whose top-left is `tl`:
-/// its columns, and every half-block row from the one holding its top pixel to
-/// the one holding its bottom pixel.
-fn covering_cells(tl: Point) -> (std::ops::Range<u16>, std::ops::RangeInclusive<u16>) {
-    (
-        tl.x..tl.x + AGENT_BOX.w,
-        tl.y / 2..=(tl.y + AGENT_BOX.h - 1) / 2,
-    )
+/// The terminal cells that show some pixel of `agent`'s sprite: its columns,
+/// and every half-block row from the one holding its top pixel to the one
+/// holding its bottom pixel.
+fn covering_cells(agent: AgentFrame) -> (std::ops::Range<u16>, std::ops::RangeInclusive<u16>) {
+    let AgentFrame {
+        anchor: tl, w, h, ..
+    } = agent;
+    (tl.x..tl.x + w, tl.y / 2..=(tl.y + h - 1) / 2)
 }
 
 // BulletinBoard is never emitted by compute_with_seed and Ficus only appears on
@@ -318,21 +323,34 @@ fn furniture_hit_test_bulletin_board_via_synthetic_wall_decor() {
 #[test]
 fn cat_hit_test_sleep_smaller_box() {
     use pixtuoid_scene::layout::Point;
-    // cat_sleep's hitbox centred at (50,80) spans y[78..82): cell 41 shows rows
-    // 82–83 (out), cell 40 rows 80–81 (in).
     let pos = Point { x: 50, y: 80 };
+    let (sit_last, sleep_last) = (
+        pet_rows(pos, "cat_sit").1 / 2,
+        pet_rows(pos, "cat_sleep").1 / 2,
+    );
+    assert!(
+        sleep_last < sit_last,
+        "premise: the sleeping cat is shorter"
+    );
     assert!(!hit_test_pet(
         PetKind::Cat,
         pos,
         "cat_sleep",
-        crate::tui::geometry::CellArea::half_block(50, 41)
+        crate::tui::geometry::CellArea::half_block(pos.x, sit_last)
     ));
     assert!(hit_test_pet(
         PetKind::Cat,
         pos,
         "cat_sleep",
-        crate::tui::geometry::CellArea::half_block(50, 40)
+        crate::tui::geometry::CellArea::half_block(pos.x, sleep_last)
     ));
+}
+
+/// The top and bottom pixel rows of the cat's `anim` hitbox centred on `pos`.
+fn pet_rows(pos: Point, anim: &str) -> (u16, u16) {
+    let hitbox = PetKind::Cat.hitbox(anim);
+    let top = anchored_top_left(Anchor::Center, pos, hitbox.w, hitbox.h).y;
+    (top, top + hitbox.h - 1)
 }
 
 // Probing coords that DO hit while the waypoint is present is what proves the

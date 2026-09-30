@@ -3821,6 +3821,135 @@ fn a_waiting_agent_stays_seated_and_gets_its_bubble_whichever_way_the_desk_faces
     );
 }
 
+/// An agent off the layout's desks draws nothing, so hover never names it; the
+/// rest are listed in paint order.
+#[test]
+fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
+    use std::time::Duration;
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    scene.agents.clear();
+    let slot = |path: &str, desk: usize, created: SystemTime| {
+        let mut s = make_slot(
+            pixtuoid_core::AgentId::from_transcript_path(path),
+            ActivityState::Idle,
+        );
+        s.desk_index = GlobalDeskIndex(desk);
+        (s.created_at, s.state_started_at, s.last_event_at) = (created, created, created);
+        s
+    };
+    let off = slot("/hover/off.jsonl", layout.home_desks.len(), now0);
+    let lead = slot("/hover/lead.jsonl", 0, now0);
+    let trail = slot("/hover/trail.jsonl", 1, now0 + Duration::from_millis(150));
+    for s in [&off, &lead, &trail] {
+        scene.agents.insert(s.agent_id, s.clone());
+    }
+    let now = now0 + Duration::from_millis(400);
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+    let hover = paint_frame(
+        &mut PaintCtx {
+            scene: &scene,
+            layout: &layout,
+            pack: &pack,
+            now,
+            sky: crate::sky::Sky::at(now),
+            buf: &mut buf,
+            cache: &mut FrameCache::new(),
+            base_fill: &mut BaseFillCache::new(),
+            theme: crate::theme::theme_by_name("normal").expect("normal theme"),
+            floor: crate::floor::FloorMeta::ground(),
+            motion: &owned.route.motion,
+            debug_walkable: false,
+        },
+        &frame,
+    );
+
+    let queued: Vec<_> = frame
+        .characters
+        .iter()
+        .map(|c| (c.anchor_y, frame.agents[c.agent_idx].agent_id))
+        .collect();
+    let mut sorted = queued.clone();
+    // Every character is a `Layer::Figure`, so `sort_drawables` orders them by row alone.
+    sorted.sort_by_key(|&(row, _)| row);
+    assert_ne!(sorted, queued, "premise: paint order is not the queue's");
+    let listed: Vec<_> = hover.agents.iter().map(|a| a.agent_id).collect();
+    assert_eq!(listed, sorted.iter().map(|&(_, id)| id).collect::<Vec<_>>());
+    assert!(!listed.contains(&off.agent_id));
+    let [a, b] = [lead.agent_id, trail.agent_id].map(|id| {
+        *hover
+            .agents
+            .iter()
+            .find(|f| f.agent_id == id)
+            .expect("drawn")
+    });
+    assert!(
+        a.anchor.x < b.anchor.x + b.w
+            && b.anchor.x < a.anchor.x + a.w
+            && a.anchor.y < b.anchor.y + b.h
+            && b.anchor.y < a.anchor.y + a.h,
+        "premise: the two arrivals overlap: {a:?} {b:?}"
+    );
+}
+
+/// A character whose anim the pack lacks paints nothing, so it lists nothing to hover.
+#[test]
+fn a_character_whose_anim_is_missing_is_not_hoverable() {
+    let pack = crate::embedded_pack::test_default_pack();
+    let slot = make_slot(
+        pixtuoid_core::AgentId::from_transcript_path("/c.jsonl"),
+        ActivityState::Idle,
+    );
+    let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 0, g: 0, b: 0 });
+    let mut cache = FrameCache::new();
+    let mut paint = |anim_name| {
+        paint_drawable(
+            &DrawableKind::Character {
+                agent: &slot,
+                pose: seat::SpritePose {
+                    anim_name,
+                    frame_idx: 0,
+                    flip_x: false,
+                    glow_tint: None,
+                },
+                anchor: Point { x: 20, y: 20 },
+                sleep_z_seed: None,
+                waiting_bubble: false,
+                walking_dust_frame: None,
+            },
+            &mut drawable::DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now: SystemTime::UNIX_EPOCH,
+                theme: crate::theme::theme_by_name("normal").expect("normal theme"),
+            },
+        )
+    };
+    assert_eq!(paint("does_not_exist"), None);
+    let seated = pack
+        .animation("seated")
+        .and_then(|a| a.frames().first())
+        .expect("seated art");
+    let drawn = paint("seated").expect("a drawn character is hoverable");
+    assert_eq!((drawn.w, drawn.h), (seated.width(), seated.height()));
+}
+
 #[test]
 fn paint_frame_is_pure_and_byte_identical() {
     use std::time::Duration;

@@ -1,4 +1,5 @@
 use super::*;
+use pixtuoid_scene::pixel_painter::AgentFrame;
 
 #[test]
 fn furniture_hit_test_resolves_against_rendered_layout() {
@@ -76,7 +77,7 @@ fn hovering_an_agent_marks_its_label() {
     let scene = scene_with(vec![s], 16);
     let mut r = build(140, 48, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    hover_agent(&mut r, id, 140, 48);
+    hover_agent(&mut r, id);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -92,8 +93,16 @@ fn click_hit_test_follows_a_walking_sprite() {
     let scene = scene_with(vec![s.clone()], 16);
     let mut r = build(192, 80, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    let desk = r.cached_layout().expect("layout").home_desks[0];
-    let (dx, dy) = (desk.x + 2, desk.y.saturating_sub(4) / 2 + 1);
+    let layout = r.cached_layout().expect("layout");
+    let seat = pixtuoid_scene::pixel_painter::seated_anchor_facing(
+        layout.home_desks[0],
+        pixtuoid_scene::layout::CHARACTER_SPRITE_W,
+        layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(0)),
+    );
+    let (dx, dy) = (
+        seat.x + pixtuoid_scene::layout::CHARACTER_SPRITE_W / 2,
+        (seat.y + pixtuoid_scene::layout::CHARACTER_SPRITE_H / 2) / 2,
+    );
     assert_eq!(r.hit_test_agent_at(dx, dy), Some(id));
 
     s.exiting_at = Some(t0());
@@ -101,7 +110,7 @@ fn click_hit_test_follows_a_walking_sprite() {
     // Mid-exit-walk, inside EXIT_GRACE_WINDOW — off the desk box, not yet GC'd.
     let walk_now = t0() + Duration::from_millis(1500);
     r.render(&scene, &pack(), walk_now).unwrap();
-    let drawn = drawn_anchor(&r, &scene, id, walk_now);
+    let drawn = drawn(&r, &scene, id, walk_now).anchor;
     assert_eq!(r.hit_test_agent_at(drawn.x, drawn.y / 2), Some(id));
     assert_eq!(
         r.hit_test_agent_at(dx, dy),
@@ -110,13 +119,13 @@ fn click_hit_test_follows_a_walking_sprite() {
     );
 }
 
-/// The sim's placement of `id` at `now` — where the painter blits its sprite.
-fn drawn_anchor(
+/// Where the painter blits `id`'s sprite at `now`, sized by the pack's frame.
+fn drawn(
     r: &TuiRenderer<TestBackend>,
     scene: &SceneState,
     id: AgentId,
     now: SystemTime,
-) -> pixtuoid_scene::layout::Point {
+) -> AgentFrame {
     let layout = r.cached_layout().expect("rendered layout");
     let observed = pixtuoid_scene::floor::FloorSession::new()
         .observe(
@@ -134,23 +143,37 @@ fn drawn_anchor(
         )
         .expect("observable floor");
     let frame = &observed.frame;
-    frame
+    let c = frame
         .characters
         .iter()
         .find(|c| frame.agents[c.agent_idx].agent_id == id)
-        .expect("the agent is drawn")
-        .anchor
+        .expect("the agent is drawn");
+    let art = pack()
+        .animation(c.anim_name)
+        .and_then(|a| a.frames().get(c.frame_idx))
+        .map(|f| (f.width(), f.height()))
+        .expect("the pack draws the placement");
+    AgentFrame {
+        agent_id: id,
+        anchor: c.anchor,
+        w: art.0,
+        h: art.1,
+    }
 }
 
-/// Whether the half-block cell `(col, row)` shows a pixel of the default-size
-/// sprite whose top-left is `tl`.
-fn cell_shows(tl: pixtuoid_scene::layout::Point, col: u16, row: u16) -> bool {
-    let (w, h) = (
-        pixtuoid_scene::layout::CHARACTER_SPRITE_W,
-        pixtuoid_scene::layout::CHARACTER_SPRITE_H,
-    );
-    (tl.x..tl.x + w).contains(&col) && 2 * row + 1 >= tl.y && 2 * row < tl.y + h
+/// Whether the half-block cell `(col, row)` shows a pixel of `sprite`.
+fn cell_shows(sprite: AgentFrame, col: u16, row: u16) -> bool {
+    crate::tui::geometry::CellArea::half_block(col, row).overlaps(sprite.anchor, sprite.w, sprite.h)
 }
+
+/// Cells swept past each edge of the sprite, so the sweep sees its misses too.
+const SWEEP_MARGIN: u16 = 2;
+
+/// Probe offsets across `breath_offset_y`'s `CYCLE_MS` cycle, spaced under its
+/// half, so one lands in the bobbed half whatever the agent's phase.
+const BREATH_PROBES_MS: [u64; 10] = [
+    0, 500, 1_000, 1_500, 2_000, 2_500, 3_000, 3_500, 4_000, 4_500,
+];
 
 #[test]
 fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_anchor() {
@@ -167,23 +190,28 @@ fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_anchor() {
         pixtuoid_scene::layout::CHARACTER_SPRITE_W,
         layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(0)),
     );
-    let (now, drawn) = (0..10u64)
-        .map(|k| t0() + Duration::from_millis(500 * k))
-        .map(|now| (now, drawn_anchor(&r, &scene, id, now)))
-        .find(|&(_, drawn)| drawn != seat)
+    let (now, drawn) = BREATH_PROBES_MS
+        .into_iter()
+        .map(|ms| t0() + Duration::from_millis(ms))
+        .map(|now| (now, drawn(&r, &scene, id, now)))
+        .find(|&(_, drawn)| drawn.anchor != seat)
         .expect("within one breath cycle the sitter bobs off its seat anchor");
     r.render(&scene, &pack(), now).unwrap();
+    let seated = AgentFrame {
+        anchor: seat,
+        ..drawn
+    };
 
     let mut moved = None;
-    for row in (seat.y / 2).saturating_sub(2)..=(seat.y + 14) / 2 {
-        for col in seat.x.saturating_sub(2)..seat.x + 10 {
+    for row in (seat.y / 2).saturating_sub(SWEEP_MARGIN)..=(seat.y + drawn.h) / 2 + SWEEP_MARGIN {
+        for col in seat.x.saturating_sub(SWEEP_MARGIN)..seat.x + drawn.w + SWEEP_MARGIN {
             let shows = cell_shows(drawn, col, row);
             assert_eq!(
                 r.hit_test_agent_at(col, row) == Some(id),
                 shows,
                 "cell ({col},{row}) against the sprite drawn at {drawn:?}"
             );
-            if shows != cell_shows(seat, col, row) {
+            if shows != cell_shows(seated, col, row) {
                 moved = Some(((col, row), shows));
             }
         }
@@ -221,18 +249,17 @@ fn overlapping_agents_hit_the_one_painted_on_top() {
     let (solo_b, _) = render(vec![b.clone()]);
     let px = |r: &TuiRenderer<TestBackend>, x, y| r.floor_buf(0).expect("floor buf").get(x, y);
     let (drawn_a, drawn_b) = (
-        drawn_anchor(&both, &scene, a.agent_id, now),
-        drawn_anchor(&both, &scene, b.agent_id, now),
-    );
-    let (w, h) = (
-        pixtuoid_scene::layout::CHARACTER_SPRITE_W,
-        pixtuoid_scene::layout::CHARACTER_SPRITE_H,
+        drawn(&both, &scene, a.agent_id, now),
+        drawn(&both, &scene, b.agent_id, now),
     );
     // Where the two sprites cover each other the frame shows only the top one.
-    let (x0, y0) = (drawn_a.x.max(drawn_b.x), drawn_a.y.max(drawn_b.y));
+    let (x0, y0) = (
+        drawn_a.anchor.x.max(drawn_b.anchor.x),
+        drawn_a.anchor.y.max(drawn_b.anchor.y),
+    );
     let (x1, y1) = (
-        (drawn_a.x + w).min(drawn_b.x + w),
-        (drawn_a.y + h).min(drawn_b.y + h),
+        (drawn_a.anchor.x + drawn_a.w).min(drawn_b.anchor.x + drawn_b.w),
+        (drawn_a.anchor.y + drawn_a.h).min(drawn_b.anchor.y + drawn_b.h),
     );
     let (x, y, top) = (y0..y1)
         .flat_map(|y| (x0..x1).map(move |x| (x, y)))

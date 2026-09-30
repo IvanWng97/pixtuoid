@@ -80,7 +80,8 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     onboarding: crate::tui::welcome::OnboardingFrame,
     /// Ambient-audio gateway; inert unless installed.
     audio: crate::audio::AudioHandle,
-    /// Transient +/- volume readout (percent); `None` outside the ~1s flash window.
+    /// Transient +/- volume readout (percent); `None` outside the
+    /// [`VOLUME_FLASH_MS`](crate::audio::VOLUME_FLASH_MS) window.
     volume_flash: Option<u8>,
 }
 
@@ -187,7 +188,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.cached_layout.as_deref()
     }
 
-    /// The click twin of the hover hit-test, against the last frame drawn.
+    /// [`hit_test_agent`](crate::tui::hit_test::hit_test_agent) against the last
+    /// frame drawn.
     pub(crate) fn hit_test_agent_at(&self, col: u16, row: u16) -> Option<pixtuoid_core::AgentId> {
         crate::tui::hit_test::hit_test_agent(
             &self.last_agents,
@@ -355,7 +357,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         {
             // Too small to render this frame: clear the interaction state the
             // mouse handler reads, so a click doesn't hit-test against a stale
-            // layout / pet left over from a larger prior frame.
+            // layout / pet / agents left over from a larger prior frame.
             self.cached_layout = None;
             self.last_pet_pos = None;
             self.last_agents.clear();
@@ -364,7 +366,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             // AND land the transition: this returns before ensure_size, so the
             // floor buffer's size signature never changes and the event loop's
             // resize detector can't fire cancel_transition — the slide would
-            // otherwise stay live for its whole ~400 ms timer.
+            // otherwise stay live for its whole timer.
             let floor_info = floor_info_for(to_floor, nf, scene.agents.len());
             let theme = self.theme;
             let source_warning = self.source_warning.clone();
@@ -568,8 +570,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
         self.popup.last_scale = popup_scale;
         self.cached_layout = None;
-        // The pet has no single interactable position mid-slide; clear the stale
-        // one so the mouse handler can't "pet" a ghost at last frame's location.
+        // Nothing holds still mid-slide; clear the pet and agents so a click
+        // can't land on a ghost at last frame's location.
         self.last_pet_pos = None;
         self.last_agents.clear();
         Ok(())
