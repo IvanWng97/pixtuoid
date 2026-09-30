@@ -68,11 +68,11 @@ enum KeyAction {
     /// Already validated: in range, and no transition in flight.
     NavigateFloor(usize),
     ToggleAudioMute,
-    /// `true` = up. Volume-up from muted also unmutes.
+    /// `true` = up.
     AdjustVolume(bool),
     /// The `w` dispatch arm is `#[cfg(debug_assertions)]`-gated, so in release this
-    /// variant is never constructed; the `run_tui` match arm stays unconditional for
-    /// exhaustiveness.
+    /// variant is never constructed; the `apply_key_action` match arm stays unconditional
+    /// for exhaustiveness.
     #[cfg_attr(not(debug_assertions), allow(dead_code))]
     ToggleWalkableDebug,
     ToggleDashboard,
@@ -123,8 +123,8 @@ fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static
     }
 }
 
-/// The core persists the flag FIRST and rolls it back if the install fails, so on `Err`
-/// the live gate was never opened — no shown-but-broken source survives a restart.
+/// Opens the live gate only on `Ok`, matching [`crate::sources::connect`]'s flag rollback
+/// — no shown-but-broken source survives a restart.
 fn connect_source(
     config_path: &std::path::Path,
     connected: &crate::runtime::ConnectedSources,
@@ -207,8 +207,9 @@ fn reflect_onboarding_outcomes(
         match oc {
             ChangeOutcome::Connected => connected.set(id, true),
             ChangeOutcome::Disconnected => connected.set(id, false),
-            // "Already in the DESIRED state — nothing written", so a NoOp on a CHECKED row
-            // must leave the gate OPEN, else its live agents vanish on confirmation.
+            // Unreachable from `apply_choices`, which only connects or disconnects. A no-op
+            // leaves the source as wanted, so a CHECKED row's gate stays OPEN — else its live
+            // agents would vanish on confirmation.
             ChangeOutcome::NoOp => connected.set(id, *want),
             ChangeOutcome::Failed(e) => {
                 connected.set(id, false);
@@ -241,9 +242,7 @@ fn reflect_onboarding_outcomes(
 }
 
 /// Open the Sources panel ON the first failed row and seed its result line, so the `t`
-/// retry is one keystroke away on the right source. The explicit selection is
-/// load-bearing: `open_connection` alone keeps the PREVIOUS index — 0 on a fresh
-/// `UiState` — so the offered `t` would act on whatever sorts first.
+/// retry is one keystroke away on the right source.
 fn surface_onboarding_failures(
     ui: &mut ui_state::UiState,
     connected: &crate::runtime::ConnectedSources,
@@ -552,7 +551,7 @@ pub(crate) struct TuiSession {
     /// The warn-floor log, throttle-scanned for decode-drift breadcrumbs to drive the
     /// footer nudge. `None` = no surfacing.
     pub log_path: Option<std::path::PathBuf>,
-    /// `muted` seeds the m-toggle; `volume` the boot and the lazy spawn.
+    /// The persisted mute/volume, handed whole to `AudioController::new`.
     pub audio_cfg: crate::config::AudioConfig,
     /// Focus-jump pid point-query roots: (CC projects root, Codex sessions root).
     pub focus_roots: (Option<std::path::PathBuf>, Option<std::path::PathBuf>),
@@ -582,7 +581,7 @@ fn version_popup_url_clicked(col: u16, row: u16, scale: f32, term: (u16, u16)) -
 
 /// Everything an applied [`KeyAction`] may touch: three `&mut` surfaces plus
 /// the read-only context. A parameter object, not an abstraction — it exists so
-/// the arm list takes one argument instead of nine.
+/// the arm list takes one argument.
 struct KeyCtx<'a, B: ratatui::backend::Backend<Error: Send + Sync + 'static>> {
     ui: &'a mut ui_state::UiState,
     renderer: &'a mut TuiRenderer<B>,
@@ -592,9 +591,8 @@ struct KeyCtx<'a, B: ratatui::backend::Backend<Error: Send + Sync + 'static>> {
     snapshot: &'a pixtuoid_core::state::SceneState,
     focus_roots: &'a (Option<std::path::PathBuf>, Option<std::path::PathBuf>),
     now: SystemTime,
-    /// Injected for the same reason `AudioController::apply` takes it: the real
-    /// one opens an output device, so a test firing an audio arm would grab the
-    /// machine's sound hardware.
+    /// Injected because the real `crate::audio::respawn` opens an output device, so a
+    /// test firing an audio arm would grab the machine's sound hardware.
     respawn: fn(&crate::audio::AudioHandle, f32),
 }
 
@@ -796,7 +794,7 @@ fn apply_onboarding_skip<B: ratatui::backend::Backend<Error: Send + Sync + 'stat
 /// scene behind them, where a coffee-machine or branding hit launches a browser — then the
 /// version popup's URL, then the scene. Help is tested before the popup guard so it wins even
 /// mid popup-dismiss animation. The picker/dashboard/connection overlays are inert BY DESIGN:
-/// they have explicit close keys (Tab / s / t / Esc), so a click never dismisses them.
+/// they have explicit close keys (Tab / s / Enter / Esc), so a click never dismisses them.
 fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     m: crossterm::event::MouseEvent,
     ui: &mut ui_state::UiState,
@@ -816,8 +814,7 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
         return;
     }
     if renderer.last_popup_scale() > 0.0 {
-        // Only the URL link is clickable while the popup is animating or visible, at the
-        // painter's own frame-scale so the geometry matches what was actually painted.
+        // While the popup is up, only its URL is clickable.
         if left_down
             && crossterm::terminal::size().is_ok_and(|t| {
                 version_popup_url_clicked(m.column, m.row, renderer.last_popup_scale(), t)
@@ -1081,7 +1078,7 @@ mod capacity_sweep_tests {
         let published: Vec<usize> = caps.iter().map(|c| c.load(Ordering::Relaxed)).collect();
         assert!(
             !sweep.publish(W, H, None, &caps),
-            "an unchanged frame must skip the whole 10-floor layout sweep"
+            "an unchanged frame must skip the whole MAX_FLOORS layout sweep"
         );
         let after: Vec<usize> = caps.iter().map(|c| c.load(Ordering::Relaxed)).collect();
         assert_eq!(
@@ -1216,8 +1213,8 @@ mod teardown_tests {
 
 #[cfg(test)]
 mod runtime_model {
-    // Pins why the `block_in_place` wraps were removed: the loop runs as the
-    // `block_on` ROOT future, where `block_in_place` is inert rather than a yield.
+    // Pins why the loop takes no `block_in_place`: it runs as the `block_on` ROOT
+    // future, where `block_in_place` is inert rather than a yield.
     #[test]
     fn block_in_place_is_inert_on_the_block_on_thread() {
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -2103,9 +2100,7 @@ mod dispatch_tests {
     }
 }
 
-/// Tests for the APPLIER half of the key path. `dispatch_key` (the decoder) is
-/// covered by `dispatch_tests` above; before the #830 split these arms lived
-/// inside `run_tui`, which needs a real terminal, so nothing could reach them.
+/// Tests for the APPLIER half of the key path; `dispatch_tests` covers the decoder.
 #[cfg(test)]
 mod apply_key_action_tests {
     use super::{apply_key_action, KeyAction, KeyCtx};
@@ -2275,11 +2270,9 @@ mod apply_key_action_tests {
         assert_eq!(h.renderer.debug_walkable(), before, "w must flip back");
     }
 
-    /// The click predicates were made pure so they COULD be tested — both were previously
-    /// unreachable, calling `crossterm::terminal::size()` internally, which under `cargo test`
-    /// has no tty and returned `Err` -> `false` unconditionally. Deliberately NOT asserted:
-    /// the scene-rect-vs-full-bounds asymmetry — `star_hit_rect` puts the star at `scene.y +
-    /// 1` height 1 and `scene_rect` shrinks only HEIGHT, so both framings agree above 2 rows.
+    /// Deliberately NOT asserted: the scene-rect-vs-full-bounds asymmetry — `star_hit_rect`
+    /// puts the star at `scene.y + 1` height 1 and `scene_rect` shrinks only HEIGHT, so both
+    /// framings agree above 2 rows.
     #[test]
     fn star_clicked_hits_only_the_star_span() {
         use crate::tui::widgets::star_hit_rect;

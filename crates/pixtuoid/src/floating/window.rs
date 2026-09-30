@@ -80,9 +80,6 @@ impl FloatingApp {
         boot: super::PipelineBoot,
         audio: config::AudioConfig,
     ) -> Self {
-        // Built here, AFTER floating::run's fallible boot steps, so a boot
-        // failure means no device thread ever existed and every later exit drops
-        // `app` → the join runs. See `AudioController`.
         let audio_ctl = crate::audio::AudioController::new(audio, config_path.clone());
         let mut renderer = OfficeRenderer::new();
         renderer.set_audio(audio_ctl.handle().clone());
@@ -148,19 +145,18 @@ impl FloatingApp {
         self.audio_ctl.tick(audio_now);
         let audio_audible = self.audio_ctl.handle().is_audible();
         let volume_flash = self.audio_ctl.volume_flash(audio_now);
-        // The ONE projection helper, shared with the boot seed so the two can't drift.
         let (scale, buf_w, buf_h) = super::offscreen::window_buffer_geometry(size);
-        // Keep the reducer's desk capacity in lockstep with the office actually rendered at
-        // this BUFFER size.
         super::offscreen::sync_floor_caps(&mut self.last_caps_size, &floor_caps, buf_w, buf_h);
         let floor_meta = FloorMeta::ground();
         let floor_pet =
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
+        // ONE clock read, so the overlays below annotate the frame actually rendered.
+        let now = SystemTime::now();
         let office = self.renderer.render(FrameInputs {
             scene: &scene,
             pack: &self.pack,
             theme: self.theme,
-            now: SystemTime::now(),
+            now,
             size: Size { w: buf_w, h: buf_h },
             floor_meta,
             // Click-to-pet needs window pointer hit-testing (deferred).
@@ -187,9 +183,9 @@ impl FloatingApp {
         surf.fill_upscaled(office, scale);
         // Name badges, the neon wall board and the footer, drawn POST-upscale at
         // native surface res so the text stays crisply anti-aliased.
-        let labels = self.renderer.labels(&scene, SystemTime::now());
+        let labels = self.renderer.labels(&scene, now);
         super::offscreen::paint_labels_into_surface(&mut surf, &labels, scale as i32, self.theme);
-        let board = self.renderer.board(&scene, SystemTime::now());
+        let board = self.renderer.board(&scene, now);
         super::offscreen::paint_wall_board_into_surface(
             &mut surf,
             &board,
@@ -206,7 +202,8 @@ impl FloatingApp {
     }
 }
 
-/// Does the saved window rect `(x, y, w, h)` overlap ANY currently-connected monitor?
+/// [`window_visible_on_monitors`](super::geometry::window_visible_on_monitors) over the
+/// live monitor set.
 fn position_on_a_monitor(event_loop: &ActiveEventLoop, x: i32, y: i32, w: u32, h: u32) -> bool {
     super::geometry::window_visible_on_monitors(
         (x, y, w, h),
@@ -235,10 +232,6 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 config::FLOATING_MIN_W as f64,
                 config::FLOATING_MIN_H as f64,
             ));
-        // Restore the saved position ONLY if it still lands on a connected monitor;
-        // else let the OS place it. A window last closed on a now-disconnected
-        // monitor would otherwise restore fully off-screen and be unrecoverable
-        // (frameless + no taskbar + always-on-top → no way to drag it back).
         if let (Some(x), Some(y)) = (self.cfg.x, self.cfg.y) {
             if position_on_a_monitor(event_loop, x, y, self.cfg.width, self.cfg.height) {
                 attrs = attrs.with_position(PhysicalPosition::new(x, y));

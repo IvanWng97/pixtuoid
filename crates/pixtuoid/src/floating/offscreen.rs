@@ -54,10 +54,8 @@ impl OfficeRenderer {
         self.session.render(inputs);
         // Compose EVERY frame, even muted, so the observer's cue edges stay warm —
         // re-enabling then fires no volley; only DELIVERY is gated.
-        let audio_frame = self.session.audio_frame(scene, floor_idx, now);
-        if self.audio.is_enabled() {
-            self.audio.frame(audio_frame);
-        }
+        self.audio
+            .frame(self.session.audio_frame(scene, floor_idx, now));
         self.session.buf()
     }
 
@@ -111,10 +109,11 @@ impl Default for OfficeRenderer {
     }
 }
 
-/// Integer upscale factor: render the office at `win_h / SCALE` so the buffer stays around
-/// `OFFICE_TARGET_H` px tall, keeping pixel-art sprites chunky + legible (a native 1:1 blit
-/// renders 8×12 sprites at 8×12 px — unreadably tiny). Min 1 (never downscale-and-blur).
-pub fn office_scale(win_h: u32) -> u32 {
+/// Integer upscale factor: the office renders at `win_h` divided by the returned factor, so
+/// the buffer stays around `OFFICE_TARGET_H` px tall and pixel-art sprites stay chunky +
+/// legible (a native 1:1 blit draws each sprite pixel as one screen pixel — unreadably
+/// tiny). Min 1 (never downscale-and-blur).
+pub(crate) fn office_scale(win_h: u32) -> u32 {
     const OFFICE_TARGET_H: u32 = 180;
     (win_h as f64 / OFFICE_TARGET_H as f64).round().max(1.0) as u32
 }
@@ -127,7 +126,7 @@ pub fn office_scale(win_h: u32) -> u32 {
 /// Takes winit's `PhysicalSize` rather than two bare `u32`s so the UNIT is carried by
 /// the type: the `[floating]` config size is LOGICAL, and handing it here is a compile
 /// error instead of a silent HiDPI over-seed (#803).
-pub(crate) fn window_buffer_geometry(size: PhysicalSize<u32>) -> (u32, u16, u16) {
+pub fn window_buffer_geometry(size: PhysicalSize<u32>) -> (u32, u16, u16) {
     let scale = office_scale(size.height);
     let buf_w = (size.width / scale).clamp(1, u16::MAX as u32) as u16;
     let buf_h = (size.height / scale).clamp(1, u16::MAX as u32) as u16;
@@ -189,19 +188,19 @@ pub(crate) fn sync_floor_caps(
 }
 
 /// The bundled character sprite width (px). Labels only center ±half a glyph, so the
-/// default width (not a custom pack's real `frame.width`) is fine here — ±1px on a
-/// non-8-wide pack is cosmetically irrelevant.
+/// default width (not a custom pack's real `frame.width`) is fine here — the ±1px a pack
+/// whose width differs from [`CHARACTER_SPRITE_W`](pixtuoid_scene::layout::CHARACTER_SPRITE_W)
+/// costs is cosmetically irrelevant.
 const FLOATING_SPRITE_W: i32 = pixtuoid_scene::layout::CHARACTER_SPRITE_W as i32;
 
 /// Name-badge AA font size (px), drawn at NATIVE surface res (not upscaled by the office
 /// `scale`) so a badge stays a crisp fixed-height caption over the chunky sprites. Tuned
 /// by eye against `examples/floating_snapshot`.
 const LABEL_FONT_PX: f32 = 12.0;
-/// Near-black badge drop-shadow — the AA text draws straight over the office (no TUI
+/// Black badge drop-shadow — the AA text draws straight over the office (no TUI
 /// cell background), so a 1px offset shadow keeps it legible over bright windows/plants.
 const BADGE_SHADOW: u32 = 0x0000_0000;
-/// The near-white AA ink for foreground captions with no theme cell behind them —
-/// shared by the hovered name badge and the volume-flash readout.
+/// The hovered name badge's near-white AA ink — no theme cell sits behind the caption.
 const HOVER_INK: Rgb = Rgb {
     r: 240,
     g: 240,

@@ -679,9 +679,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.current_floor,
             now,
         );
-        if self.audio.is_enabled() {
-            self.audio.frame(audio_frame);
-        }
+        self.audio.frame(audio_frame);
         pixtuoid_scene::floor::frame_epilogue(
             &mut self.floors[self.current_floor].ctx,
             &mut self.office.coffee,
