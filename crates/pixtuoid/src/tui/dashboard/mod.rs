@@ -5,8 +5,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use pixtuoid_core::state::{ActivityState, AgentSlot, SceneState};
 use pixtuoid_core::AgentId;
+use pixtuoid_core::state::{ActivityState, AgentSlot, SceneState};
 
 /// Roots with more than this many direct subagents render collapsed by default,
 /// so a large workflow doesn't flood the board.

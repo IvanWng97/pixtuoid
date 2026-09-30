@@ -13,8 +13,8 @@
 use std::collections::{BTreeMap, HashSet};
 use std::time::SystemTime;
 
-use crate::state::{fsm, ActivityState, AgentSlot, SceneState};
 use crate::AgentId;
+use crate::state::{ActivityState, AgentSlot, SceneState, fsm};
 
 /// Whether [`cascade_exit`] also marks the `root` seed itself exiting — EXPLICIT
 /// at each call site, replacing the old implicit "did the caller stamp

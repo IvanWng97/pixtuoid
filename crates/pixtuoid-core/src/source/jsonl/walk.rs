@@ -7,10 +7,10 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
+use crate::AgentId;
 use crate::source::decoder::{CwdExtractor, SUBAGENTS_DIR};
 use crate::source::registry::cwd_extractor_for;
 use crate::source::{AgentEvent, TaggedSender, Transport};
-use crate::AgentId;
 
 use super::health::FailureLatch;
 use super::liveness::{probe_admits, revouch_gated_files};
@@ -160,7 +160,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
             return;
         }
     };
-    use crate::source::admit::{classify, Entry};
+    use crate::source::admit::{Entry, classify};
     // Shared with the offline drivers, so a fixture can never be recorded from a
     // file production would not read (#931).
     let entry = classify(&meta, path, &|p| (decoders.path_filter)(p));
