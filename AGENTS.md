@@ -1,8 +1,9 @@
 # AGENTS.md
 
-Instructions for Claude Code (or any AI coding agent) in this repo.
-(Each `CLAUDE.md` is an `@AGENTS.md` import, since Windows checks symlinks out as plain text.) This is the workspace map; per-crate detail lives
-in nested guides, auto-loaded when you touch their tree:
+Instructions for any AI coding agent in this repo. Every agent, Claude Code
+included, reads these `AGENTS.md` files natively; there is deliberately no
+`CLAUDE.md`, because one would switch Claude Code to CLAUDE.md-only. This is
+the workspace map; per-crate detail lives in the nested guides:
 
 - [`crates/pixtuoid-core/AGENTS.md`](crates/pixtuoid-core/AGENTS.md) — headless lib: sources/decoders, reducer/state, sprites, grid/walkable. (+ [`tests/AGENTS.md`](crates/pixtuoid-core/tests/AGENTS.md): the test-binary layout, add-a-CLI test steps.)
 - [`crates/pixtuoid-scene/AGENTS.md`](crates/pixtuoid-scene/AGENTS.md) — backend-agnostic render+sim engine: pixel painter, layout, walk/pose/pathfind, theme model, weather, pets, chitchat.

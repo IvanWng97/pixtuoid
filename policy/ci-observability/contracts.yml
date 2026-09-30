@@ -156,7 +156,7 @@
   why: >-
     The job checks out without a ref, and on these two events that ref is the
     PR's merge ref, so an arm without the same-repo check stages a fork's files —
-    its CLAUDE.md among them — as the agent's own instructions.
+    its AGENTS.md files among them — as the agent's own instructions.
   assert: |
     . as $workflow
     | [.jobs[] | select(any(.steps[]?; (.uses // "") | startswith("anthropics/claude-code-action@")))] as $jobs

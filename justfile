@@ -184,7 +184,7 @@ json-schemas:
     echo "${#schemas[@]} JSON Schemas validated"
 
 # Offline link + anchor check (lychee) over the repo's OWN markdown: every
-# relative cross-link between the nested CLAUDE.md/AGENTS.md guides + docs/ must
+# relative cross-link between the nested AGENTS.md guides + docs/ must
 # resolve, and `#anchor` fragments must exist. Directory-walk mode respects
 # .gitignore (vendored node_modules etc. auto-skipped); `--offline` = no network,
 # so it's deterministic + flake-free. External-URL decay is deliberately NOT
