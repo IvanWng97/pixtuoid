@@ -408,3 +408,44 @@ fn a_standing_fixture_casts_its_shadow_under_its_whole_box() {
     }
     assert!(desks > 0, "the sweep saw a desk");
 }
+
+#[test]
+fn the_exit_sign_hangs_clear_of_the_elevator_door() {
+    let mut met = 0;
+    for l in offices() {
+        let visual =
+            |want: fn(&FixtureKind) -> bool| l.fixtures().find(|f| want(&f.kind)).map(|f| f.visual);
+        let (Some(sign), Some(door)) = (
+            visual(|k| {
+                matches!(
+                    k,
+                    FixtureKind::Wall {
+                        kind: WallDecor::ExitSign,
+                        ..
+                    }
+                )
+            }),
+            visual(|k| matches!(k, FixtureKind::Door)),
+        ) else {
+            continue;
+        };
+        met += 1;
+        let apart = sign.x + sign.width <= door.x
+            || door.x + door.width <= sign.x
+            || sign.y + sign.height <= door.y
+            || door.y + door.height <= sign.y;
+        assert!(
+            apart,
+            "{}x{}: sign {sign:?} under door {door:?}",
+            l.buf_w, l.buf_h
+        );
+        assert!(
+            l.window_bays()
+                .all(|b| b.span().end <= sign.x || sign.x + sign.width <= b.span().start),
+            "{}x{}: sign {sign:?} over a window",
+            l.buf_w,
+            l.buf_h
+        );
+    }
+    assert!(met > 0, "the sweep met a sign beside a door");
+}
