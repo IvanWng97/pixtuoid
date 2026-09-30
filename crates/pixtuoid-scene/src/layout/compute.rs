@@ -866,13 +866,12 @@ fn place_lounge(couch: Point, buf_w: u16, door: Option<Point>) -> Lounge {
         y: couch.y + 2,
     };
     let fish_tank = {
-        let lamp = floor_lamp;
         let def = furniture_def(Furniture::FishTank);
         let half_w = def.visual.w / 2;
         // One clear floor column of breathing room past the lamp shade's east edge; a
         // center-pinned east edge is (w-1)/2 past the anchor.
         const LAMP_TANK_GAP: u16 = 2;
-        let lamp_east = lamp.x + (furniture_def(Furniture::FloorLamp).visual.w - 1) / 2;
+        let lamp_east = floor_lamp.x + (furniture_def(Furniture::FloorLamp).visual.w - 1) / 2;
         let cx = lamp_east + LAMP_TANK_GAP + half_w;
         let east_limit = door.map_or(buf_w.saturating_sub(2), |d| d.x);
         (cx + half_w + FISH_TANK_ELEVATOR_CLEARANCE <= east_limit).then_some(Point {
