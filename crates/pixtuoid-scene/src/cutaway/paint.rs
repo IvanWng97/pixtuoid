@@ -925,8 +925,8 @@ fn fingerprint(kind: &PieceKind) -> u64 {
     h.finish()
 }
 
-/// Every piece of the office, each with its [`Span`]. The push order breaks
-/// depth ties, so it is part of the result.
+/// Every piece of the office, each with its [`Span`]. At one depth and layer,
+/// push order breaks the tie, so it is part of the result.
 fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<(Span, PieceKind)> {
     let layout = office.layout;
     let build = Build {
@@ -951,18 +951,47 @@ struct Build<'a, 'f> {
     moment: &'f Moment,
 }
 
-/// The row the cutaway sorts a fixture on: a backdrop one at the very back.
-/// How `fixture` ties a figure at its row here: the roster's tie, but the
-/// lounge couch, which the cutaway shows from behind facing the window where
-/// the classic draws its front, stands over its sitters.
+/// How `fixture` ties a figure at its row here: the roster's tie, but for
+/// the lounge couch.
 fn tie_of(fixture: Fixture) -> Option<Tie> {
-    match (fixture.kind, fixture.depth) {
-        (FixtureKind::LoungeCouch, Depth::Sorted { .. }) => Some(Tie::FixtureOver),
-        (_, Depth::Sorted { tie, .. }) => Some(tie),
-        (_, Depth::Backdrop) => None,
-    }
+    use FixtureKind as K;
+    let Depth::Sorted { tie, .. } = fixture.depth else {
+        return None;
+    };
+    Some(match fixture.kind {
+        // Seen from behind, facing the window, where the classic draws its front.
+        K::LoungeCouch => Tie::FixtureOver,
+        K::Desk(_)
+        | K::FilingCabinet(_)
+        | K::DeskChair(_)
+        | K::Station { .. }
+        | K::Plant { .. }
+        | K::Pod { .. }
+        | K::Wall { .. }
+        | K::MeetingRug { .. }
+        | K::MeetingSofa { .. }
+        | K::MeetingTable { .. }
+        | K::MeetingChair { .. }
+        | K::CoatRack { .. }
+        | K::Doormat { .. }
+        | K::NoticeBoard { .. }
+        | K::LoungeRug
+        | K::SideTable
+        | K::FloorLamp
+        | K::FishTank
+        | K::KitchenIsland
+        | K::PantryMat
+        | K::IslandMat
+        | K::WaterCooler
+        | K::TrashBin
+        | K::Door
+        | K::Runner
+        | K::NeonSign
+        | K::Clock => tie,
+    })
 }
 
+/// The row the cutaway sorts a fixture on: a backdrop one at the very back.
 fn sort_row(depth: Depth) -> u16 {
     match depth {
         Depth::Backdrop => 0,
@@ -1141,20 +1170,24 @@ fn push_fixture(
         K::NoticeBoard { .. } => push_hung(order, pack, top_left, "notice_board", depth),
         // A back-view sofa splits into bands its sitter sorts between
         // ([`push_sofa`]), so it lays its own layers.
-        K::MeetingSofa { room, seat, .. } => {
+        K::MeetingSofa {
+            room,
+            seat,
+            faces_away,
+        } => {
             let sofa = layout
                 .meeting_rooms
                 .get(room)
                 .and_then(|r| r.trio)
                 .and_then(|t| t.sofas.get(seat).copied());
             if let (Some(at), Some(tie)) = (sofa, tie_of(fixture)) {
-                push_sofa(order, pack, at, tie);
+                push_sofa(order, pack, at, faces_away, tie);
             }
             return;
         }
         K::LoungeCouch => {
             if let Some(tie) = tie_of(fixture) {
-                push_sofa(order, pack, centre, tie);
+                push_sofa(order, pack, centre, true, tie);
             }
             return;
         }
@@ -1704,16 +1737,21 @@ const MEETING_SOFA_NORTH: &str = "meeting_sofa_north";
 /// `SOFA_SEAT_ROWS` draws to it (`the_north_sofas_backrest_starts_on_its_lit_ridge`).
 const NORTH_SOFA_SEAT_ROWS: u16 = 3;
 
-/// Queue one sofa body: the front view, or the `back_view`. A pack that draws
-/// [`MEETING_SOFA_NORTH`] gets it as two bands, the seat sorted with its sitter
-/// and the backrest over their lap ([`NORTH_SOFA_SEAT_ROWS`]); one that draws
-/// only its own `meeting_sofa` gets that flipped top-to-bottom, as the classic
-/// painter draws it.
+/// Queue one sofa body, sorted with its sitters at `tie`: the front view, or
+/// the `back_view`. A pack that draws [`MEETING_SOFA_NORTH`] gets it as two
+/// bands, the seat under its sitter and the backrest over their lap
+/// ([`NORTH_SOFA_SEAT_ROWS`]); one that draws only its own `meeting_sofa` gets
+/// that flipped top-to-bottom, as the classic painter draws it.
 ///
 /// NOT `back_couch`: the pack documents that as a character seen from behind, so
 /// it would draw a headless torso where the couch belongs.
-fn push_sofa(order: &mut Vec<(Span, PieceKind)>, pack: &Pack, at: crate::layout::Point, tie: Tie) {
-    let back_view = tie == Tie::FixtureOver;
+fn push_sofa(
+    order: &mut Vec<(Span, PieceKind)>,
+    pack: &Pack,
+    at: crate::layout::Point,
+    back_view: bool,
+    tie: Tie,
+) {
     let sitters = crate::pixel_painter::seat::sofa_sitter_z_key(at);
     if let Some((w, h)) = art_size(pack, MEETING_SOFA_NORTH).filter(|_| back_view) {
         let tl = crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
@@ -1723,9 +1761,8 @@ fn push_sofa(order: &mut Vec<(Span, PieceKind)>, pack: &Pack, at: crate::layout:
             sprite: MEETING_SOFA_NORTH,
             rows,
         };
-        // The seat sorts WITH its sitter, who lands on it; its own south edge
-        // lies rows north of where the sofa stands, where a table in a short
-        // room ties it and paints over it.
+        // Its own south edge lies rows north of where the sofa stands, where a
+        // table in a short room would tie it and paint over it.
         let seat = Span::new(tl.x, tl.y, w, split, 0).with_depth(sitters);
         order.push((seat, band((0, split))));
         order.push((
@@ -1735,8 +1772,6 @@ fn push_sofa(order: &mut Vec<(Span, PieceKind)>, pack: &Pack, at: crate::layout:
         return;
     }
     if let Some((w, h)) = art_size(pack, "meeting_sofa") {
-        // It sorts WITH its sitters, at `tie`: on its own south edge a front
-        // view's backrest would paint over their bodies.
         let span = piece_span(crate::layout::Anchor::Center, at, w, h, 0)
             .with_depth(sitters)
             .with_layer(Layer::from(tie));
@@ -2950,6 +2985,7 @@ mod tests {
             &mut order,
             &own,
             crate::layout::Point { x: 10, y: 10 },
+            true,
             Tie::FixtureOver,
         );
         assert!(
@@ -3981,9 +4017,7 @@ mod tests {
         assert!(standing && sitting, "the walk in and the sit");
     }
 
-    /// A pack drawing no back view of its own gets the front view flipped,
-    /// sorted with its sitters and over them: it stands in front of those it
-    /// faces away from.
+    /// A pack with no back-view art flips its front view, over the sitters.
     #[test]
     fn a_flipped_sofa_sorts_in_front_of_its_sitters() {
         let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
@@ -3994,7 +4028,7 @@ mod tests {
         .expect("a pack of one sofa loads");
         let at = crate::layout::Point { x: 40, y: 30 };
         let mut order = Vec::new();
-        push_sofa(&mut order, &pack, at, Tie::FixtureOver);
+        push_sofa(&mut order, &pack, at, true, Tie::FixtureOver);
         let [(
             span,
             PieceKind::Prop {
@@ -4299,8 +4333,7 @@ mod tests {
                         None,
                         "{kind:?} at scale {s} wrote a logical pixel outside {span:?}"
                     );
-                    // A piece on the floor is grounded under its span's south row,
-                    // at the densities the cutaway is drawn at.
+                    // At the densities the cutaway draws at.
                     if s % pack.max_density_variant() == 0
                         && ground_shadow(span, &kind, pack).is_some()
                     {
@@ -5467,6 +5500,35 @@ S B B B B B B S
     }
 
     #[test]
+    fn the_walls_contact_row_is_the_floor_a_shade_down() {
+        let pack = pack();
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let pen = Pen::for_pack(scale, &pack);
+        let layout = Layout::compute_with_seed(240, 144, None, 0).expect("lays out");
+        let blank = || {
+            RgbBuffer::filled(
+                scale.to_buffer(layout.buf_w),
+                scale.to_buffer(layout.buf_h),
+                UNDER[0],
+            )
+        };
+        let (mut floor, mut laid) = (blank(), blank());
+        paint_floor(&layout, theme, pen, &mut floor);
+        paint_backdrop(&layout, theme, scale, pen, &mut laid);
+        let row = scale.to_buffer(layout.wall_band_h());
+        for x in 0..floor.width() {
+            assert_eq!(
+                laid.get(x, row),
+                floor
+                    .get(x, row)
+                    .ramp(crate::cutaway::shade::RAMP_SHADE_LEVEL),
+                "column {x}"
+            );
+        }
+    }
+
+    #[test]
     fn a_rug_is_mirrored_about_its_centre_column() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = pack();
@@ -5583,7 +5645,7 @@ S B B B B B B S
         let pack = pack();
         let sofa = crate::layout::Point { x: 40, y: 30 };
         let mut order = Vec::new();
-        push_sofa(&mut order, &pack, sofa, Tie::FixtureOver);
+        push_sofa(&mut order, &pack, sofa, true, Tie::FixtureOver);
         let [(seat, PieceKind::PropBand { rows: under, .. }), (back, PieceKind::PropBand { rows: over, .. })] =
             order.as_slice()
         else {
@@ -6020,34 +6082,92 @@ S B B B B B B S
         }
     }
 
-    /// Every fixture the roster yields is drawn: queued as a piece of the list,
-    /// or laid by the backdrop as a covering, over the floor. Every kind the
-    /// roster has is met on some office.
-    /// The cutaway orders a fixture against a figure at its row by its tie
-    /// ([`tie_of`]); only a back-view sofa's seat, which its sitter sits on,
-    /// lies under them.
+    /// A figure at a fixture piece's row paints over it, but for a desk chair
+    /// and a sofa seen from behind, which hide their sitters; a back-view
+    /// sofa's seat, which its sitter sits on, stays under.
     #[test]
     fn a_fixture_ties_a_figure_as_the_roster_says() {
         let pack = pack();
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
-        let mut over = 0;
+        let mut over = std::collections::BTreeSet::new();
         for layout in many_layouts() {
             for fixture in layout.fixtures() {
-                let Some(tie) = tie_of(fixture) else {
+                let Depth::Sorted { tie, .. } = fixture.depth else {
                     continue;
                 };
-                let pieces = queued(&layout, &pack, scale, &[], |k| k == fixture.kind);
-                for (span, kind) in &pieces {
+                let hides_its_sitter = match fixture.kind {
+                    FixtureKind::LoungeCouch => true,
+                    FixtureKind::MeetingSofa { faces_away, .. } => faces_away,
+                    _ => tie == Tie::FixtureOver,
+                };
+                for (span, kind) in queued(&layout, &pack, scale, &[], |k| k == fixture.kind) {
                     let seat = matches!(kind, PieceKind::PropBand { rows: (0, _), .. });
-                    let want = if seat { Layer::Under } else { Layer::from(tie) };
-                    assert_eq!(span.layer, want, "{:?}: {kind:?}", fixture.kind);
-                    over += usize::from(span.layer == Layer::Over);
+                    let body = Span::new(span.x0, span.y0, 1, 1, 0);
+                    let figure = occupant_span(body, span.depth, None);
+                    // The figure queued first, so push order alone would draw it under.
+                    let drawn = crate::cutaway::order::depth_sort(vec![
+                        (figure, "figure"),
+                        (span, "fixture"),
+                    ]);
+                    let want = if hides_its_sitter && !seat {
+                        over.insert(crate::layout::roster::tests::kind_key(fixture.kind));
+                        ["figure", "fixture"]
+                    } else {
+                        ["fixture", "figure"]
+                    };
+                    assert_eq!(drawn, want, "{:?}: {kind:?}", fixture.kind);
                 }
             }
         }
-        assert!(over > 0, "no fixture paints over its sitter");
+        assert_eq!(
+            over.len(),
+            3,
+            "the chair and both sofas hide a sitter: {over:?}"
+        );
     }
 
+    /// A glass wall band composites over whoever stands behind it at its row.
+    #[test]
+    fn a_wall_band_draws_over_a_figure_at_its_row() {
+        let mut walls = 0;
+        for layout in many_layouts() {
+            let mut order = Vec::new();
+            wall_segments(&layout, &mut order);
+            for (span, _) in order {
+                let figure = occupant_span(Span::new(span.x0, span.y0, 1, 1, 0), span.depth, None);
+                let drawn =
+                    crate::cutaway::order::depth_sort(vec![(span, "wall"), (figure, "figure")]);
+                assert_eq!(drawn, ["figure", "wall"], "{span:?}");
+                walls += 1;
+            }
+        }
+        assert!(walls > 0, "no office had a wall");
+    }
+
+    /// The lounge couch faces the window, so the cutaway draws its back.
+    #[test]
+    fn the_lounge_couch_is_drawn_from_behind() {
+        let pack = pack();
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let layout = many_layouts()
+            .find(|l| l.lounge.is_some())
+            .expect("an office with a lounge");
+        let pieces = queued(&layout, &pack, scale, &[], |k| {
+            k == FixtureKind::LoungeCouch
+        });
+        assert!(
+            !pieces.is_empty()
+                && pieces.iter().all(|(_, k)| matches!(
+                    k,
+                    PieceKind::PropBand { sprite, .. } if *sprite == MEETING_SOFA_NORTH
+                )),
+            "{pieces:?}"
+        );
+    }
+
+    /// Every fixture the roster yields is drawn: queued as a piece of the list,
+    /// or laid by the backdrop as a covering, over the floor. Every kind the
+    /// roster has is met on some office.
     #[test]
     fn the_cutaway_draws_every_fixture_the_roster_yields() {
         let pack = pack();
@@ -6119,7 +6239,7 @@ S B B B B B B S
         let pack = pack();
         let sofa = crate::layout::Point { x: 40, y: 30 };
         let mut order = Vec::new();
-        push_sofa(&mut order, &pack, sofa, Tie::FigureOver);
+        push_sofa(&mut order, &pack, sofa, false, Tie::FigureOver);
         let [(
             span,
             PieceKind::Prop {

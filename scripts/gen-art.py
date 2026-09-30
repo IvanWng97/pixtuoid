@@ -2934,7 +2934,7 @@ def manifest_drift(pack):
     if named is not None and named != CITY:
         return f"gen-art --check: pack.toml [city] {named} is not the keys drawn in, {CITY}"
     outline = toml.get("characters", {}).get("outline")
-    if outline is not None and outline != SILHOUETTE:
+    if outline != SILHOUETTE:
         return f"gen-art --check: pack.toml [characters] outline {outline!r} is not the art's, {SILHOUETTE!r}"
     return None
 
@@ -2990,6 +2990,8 @@ def selftest(sprites):
         assert check(pack, sprites) is None, "hand art quoting the provenance is not an orphan"
         (pack / "pack.toml").write_text('[characters]\noutline = "n"\n', encoding=ENCODING)
         assert check(pack, sprites) is not None, "an outline the art does not draw must fail"
+        (pack / "pack.toml").write_text("[pack]\n", encoding=ENCODING)
+        assert check(pack, sprites) is not None, "a pack naming no outline must fail"
         (pack / "pack.toml").write_text(f'[characters]\noutline = "{SILHOUETTE}"\n', encoding=ENCODING)
         assert check(pack, sprites) is None, "the art's own outline passes"
     print(f"gen-art --selftest: OK ({len(sprites)} sprites)")

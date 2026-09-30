@@ -30,7 +30,7 @@ impl MeetingTrio {
             .saturating_sub(north.y)
             .saturating_add(MEETING_RUG_OVERHANG)
             // A trio by the south edge shortens its rug, still centred on the
-            // table, rather than run it off the floor.
+            // table.
             .min(
                 buf_h
                     .saturating_sub(self.table.y)
@@ -219,6 +219,12 @@ mod tests {
             trio.rug(200).height,
             90 - 50 + MEETING_RUG_OVERHANG,
             "sofa to sofa where the office allows"
+        );
+        let edge = trio.table.y + MEETING_RUG_OVERHANG / 2;
+        assert_eq!(
+            trio.rug(edge).height,
+            edge - trio.table.y + MEETING_RUG_OVERHANG,
+            "nearer the edge than the overhang"
         );
     }
 }

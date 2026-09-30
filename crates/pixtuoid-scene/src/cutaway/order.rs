@@ -8,9 +8,9 @@
 //!
 //! ## Why not just sort by the base row
 //!
-//! Today it WOULD be equivalent. [`Span::behind`] derives its edges from the base row,
-//! which is a total order, so the graph is acyclic by construction and a plain
-//! sort produces the same list. The graph earns its place two other ways:
+//! Today it WOULD be equivalent. [`Span::behind`] derives its edges from the
+//! base row and then the layer, a total order, so the graph is acyclic by
+//! construction and a plain sort produces the same list. The graph earns its place two other ways:
 //!
 //! - `check_order` (test-only) turns every pairwise fact into an assertion. While
 //!   [`Span::behind`] is acyclic it guards the sort itself; it becomes the
@@ -103,13 +103,13 @@ impl Span {
 /// Order `items` back to front.
 ///
 /// Kahn's algorithm over the [`Span::behind`] graph, with the ready set kept in
-/// base-row order so the result is deterministic (a topological order is not
+/// (base row, layer) order so the result is deterministic (a topological order is not
 /// unique, and a render that reshuffles equal-depth pieces between frames
 /// flickers).
 ///
 /// A cycle cannot arise from the current predicate, so the recovery arm is a
 /// backstop rather than a live path: the pieces still in the graph are emitted
-/// in base-row order. That degrades to a plain base-row sort instead of
+/// in (base row, layer) order. That degrades to a plain sort instead of
 /// dropping them, which is the one outcome a renderer must never have.
 pub(crate) fn depth_sort<T>(items: Vec<(Span, T)>) -> Vec<T> {
     let n = items.len();
@@ -129,10 +129,9 @@ pub(crate) fn depth_sort<T>(items: Vec<(Span, T)>) -> Vec<T> {
         }
     }
 
-    // A min-heap on (base row, index): among pieces that are mutually
+    // A min-heap on (base row, layer, index): among pieces that are mutually
     // unconstrained the shallower one wins, so the result matches the plain
-    // base-row order the office produces today; the index is the fn doc's
-    // determinism.
+    // sort the office produces today; the index is the fn doc's determinism.
     use std::cmp::Reverse;
     use std::collections::BinaryHeap;
     let mut ready: BinaryHeap<Reverse<((u16, Layer), usize)>> = (0..n)
