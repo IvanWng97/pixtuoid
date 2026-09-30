@@ -305,16 +305,16 @@ lint:
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
-# The one test runner; the regen recipes call it too. No plain `cargo test`
-# fallback: its shared process and nextest's per-test processes pass different
-# suites (#1104's omp hang showed under only one), so a fallback runs a suite CI
-# never ran. No `--workspace`: it overrides a `-p`, and the virtual root already
-# selects every member.
+# The regen recipes call it too. No plain `cargo test` fallback: its shared
+# process and nextest's per-test processes pass different suites (#1104's omp
+# hang showed under only one), so a fallback runs a suite CI never ran. No
+# `--workspace`: it overrides a `-p`, and the virtual root already selects every
+# member.
 [doc('Run the tests under cargo-nextest; forwards args (e.g. -p <crate> <filter>)')]
 [group('rust')]
 test *args:
     @cargo nextest --version &>/dev/null || { echo 'error: cargo-nextest is not installed — run `just setup-tools`' >&2; exit 1; }
-    cargo nextest run "$@"
+    @cargo nextest run "$@"
 
 # The filter forwards to both targets, and one matching nothing in a target is
 # not an error: `just bench 360` runs every 360x240 case, `just bench hook` only
@@ -784,7 +784,7 @@ gen-contract:
 # these instead of parsing our Rust, so a rename must be re-emitted or the watch
 # narrows. The gate is the crates' own tests, which fail on a stale file; this is
 # just the writer. The filter runs the writing test alone: a sibling that reads
-# the stale file would fail and, under nextest's fail-fast, cancel the write.
+# the stale file fails and, under nextest's fail-fast, can cancel the write.
 [doc('Regenerate crates/*/drift-surface.json after changing a decoded/registered name')]
 [group('gen')]
 gen-drift-surface:
