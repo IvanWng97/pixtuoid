@@ -4,23 +4,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 
-/// The ONE empty-as-unset filter for env values: empty or whitespace-only reads
-/// as unset. Keep new env reads on this helper so the workspace has one semantics.
-pub fn nonempty(value: Option<String>) -> Option<String> {
-    value.filter(|v| !v.trim().is_empty())
-}
-
-pub fn nonempty_env(name: &str) -> Option<PathBuf> {
-    pixtuoid_core::platform::path_env(name)
-}
-
-/// [`nonempty_env`] that ALSO requires an ABSOLUTE path — for XDG base-dir reads
+/// [`pixtuoid_core::platform::path_env`] that ALSO requires an ABSOLUTE path — for XDG base-dir reads
 /// (`XDG_CONFIG_HOME`/`XDG_STATE_HOME`): the XDG spec says a relative value is
 /// invalid and must be ignored (else config/log/pack land CWD-relative, silently
 /// bypassing `~/.config`). NOT for user-chosen paths like `PIXTUOID_LOG`, which
 /// may legitimately be relative.
 pub fn nonempty_abs_env(name: &str) -> Option<PathBuf> {
-    nonempty_env(name).filter(|v| v.is_absolute())
+    pixtuoid_core::platform::path_env(name).filter(|v| v.is_absolute())
 }
 
 /// Normalize a config-location env override: TRIM it, and — when `home` is

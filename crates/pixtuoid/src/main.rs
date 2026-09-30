@@ -48,9 +48,9 @@ fn run() -> Result<()> {
     if is_run_tui {
         use pixtuoid::term::ColorPreflight;
         match pixtuoid::term::color_preflight(
-            std::env::var("NO_COLOR").ok().as_deref(),
-            std::env::var("CLICOLOR_FORCE").ok().as_deref(),
-            std::env::var("TERM").ok().as_deref(),
+            pixtuoid_core::platform::text_env("NO_COLOR").as_deref(),
+            pixtuoid_core::platform::text_env("CLICOLOR_FORCE").as_deref(),
+            pixtuoid_core::platform::text_env("TERM").as_deref(),
         ) {
             ColorPreflight::Proceed => {}
             ColorPreflight::ForceColor => crossterm::style::force_color_output(true),
@@ -88,8 +88,8 @@ fn run() -> Result<()> {
     if pixtuoid::term::warn_zone(
         is_run_tui,
         std::io::IsTerminal::is_terminal(&std::io::stderr()),
-        std::env::var("COLORTERM").ok().as_deref(),
-        std::env::var("PIXTUOID_NO_TRUECOLOR_WARN").ok().as_deref(),
+        pixtuoid_core::platform::text_env("COLORTERM").as_deref(),
+        pixtuoid_core::platform::text_env("PIXTUOID_NO_TRUECOLOR_WARN").as_deref(),
     ) && pixtuoid::term::query_truecolor(pixtuoid::term::TRUECOLOR_PROBE_TIMEOUT) != Some(true)
     {
         let _ = writeln!(

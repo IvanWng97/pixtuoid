@@ -72,7 +72,7 @@ pub(crate) enum Tie {
 /// Which of everything sorted at one row paints on top: a painter's tie key,
 /// ordered as [`Tie`] orders the fixtures in it. The derived order is the
 /// paint order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Layer {
     /// A fixture a figure at its row sits on or stands in front of.
     Under,
@@ -855,8 +855,8 @@ impl SceneLayout {
     }
 }
 
-/// The coffee machine's columns `[start, end)` within the large pantry
-/// counter's sprite — the steam and the click target both sit inside them.
+/// The coffee machine's logical columns `[start, end)` in the large counter:
+/// where the steam and the click target sit.
 const PANTRY_COFFEE_COLS_LARGE: (u16, u16) = (11, 18);
 /// The coffee machine's columns within the compact `pantry_small` sprite.
 const PANTRY_COFFEE_COLS_SMALL: (u16, u16) = (9, 12);

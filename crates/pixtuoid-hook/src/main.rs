@@ -98,7 +98,8 @@ fn main() -> Result<()> {
         // form) wins over the `PIXTUOID_SOURCE` env var (the Unix env-prefix
         // form; grok delivers the same var via its handler `env` map, so this arm
         // serves both). `--event` is orthogonal and never implies a source.
-        let source = source_from_argv(&args).or_else(|| std::env::var("PIXTUOID_SOURCE").ok());
+        let source = source_from_argv(&args)
+            .or_else(|| std::env::var_os("PIXTUOID_SOURCE").and_then(|v| v.into_string().ok()));
         enrich_payload(map, source, now_ms(), cli_pid);
     }
 
