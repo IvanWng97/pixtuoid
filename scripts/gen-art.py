@@ -117,7 +117,6 @@ DESK_ART_W = 14
 DESK_BEZEL_RAISE = 1
 # `layout`'s `DESK_SURFACE_ROWS`, `DESK_FRONT_ROWS`, `DESK_LEG_ROWS`.
 DESK_SURFACE_ROWS, DESK_FRONT_ROWS, DESK_LEG_ROWS = 5, 1, 2
-DESK_ART_H = DESK_BEZEL_RAISE + DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS
 # The back-turned desk's extra rows, all above, so the occupant (who y-sorts in
 # FRONT of the desk) leaves the upper screen row clear. Its lower screen row
 # sits inside the wood, flanked by it: the owner picked a monitor standing on

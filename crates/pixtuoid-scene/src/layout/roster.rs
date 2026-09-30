@@ -770,8 +770,9 @@ impl SceneLayout {
     }
 }
 
-/// The coffee machine's columns `[start, end)` within the large pantry
-/// counter's sprite — the steam and the click target both sit inside them.
+/// The coffee machine's logical columns `[start, end)` within the large pantry
+/// counter's sprite, at any density: the steam and the click target sit inside
+/// them.
 const PANTRY_COFFEE_COLS_LARGE: (u16, u16) = (11, 18);
 /// The coffee machine's columns within the compact `pantry_small` sprite.
 const PANTRY_COFFEE_COLS_SMALL: (u16, u16) = (9, 12);

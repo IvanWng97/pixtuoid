@@ -4164,9 +4164,8 @@ mod tests {
         assert!(glass > 0 && buildings > 0, "windows, and a city in them");
     }
 
-    /// The whole draw list of a REAL office, checked against every pairwise
-    /// "must be behind" fact its own geometry states — what a sort key cannot
-    /// give you.
+    /// A REAL office's draw list, checked against every pairwise "must be
+    /// behind" fact its own geometry states — what a sort key cannot give you.
     #[test]
     fn a_real_offices_draw_list_satisfies_every_ordering_constraint() {
         let pack = pack();
@@ -4377,8 +4376,8 @@ S B B B B B B S
     /// fingerprint paint the same pixels, so one may stand in for the other.
     /// Walked over every tick of a walk to a desk and a sit, where the figure's
     /// and the desk's fingerprints both change (asserted below). Every piece is
-    /// compared at scale 1; at the densest scale only figures, whose art the
-    /// scale picks (the glass's is walked in
+    /// compared at scale 1; at the densest scale only figures, the kind that
+    /// changes tick to tick (the glass is walked in
     /// `a_window_s_fingerprint_moves_with_the_moment_it_shows`).
     #[test]
     fn one_span_and_fingerprint_always_paint_the_same_pixels() {
