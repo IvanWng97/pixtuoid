@@ -1,6 +1,7 @@
-//! The cutaway profile's paint pass — the second reader of `SimFrame`, and
-//! deliberately partial: EFFECTS (weather, steam, the pet) stay with the classic
-//! pass, and of the glow it draws only the desks' and a lit sitter's tint. It
+//! The cutaway profile's paint pass — the second reader of `SimFrame`: every
+//! fixture the roster yields (`push_fixture`), the people, the walls and the
+//! windows, lit for the hour by the room's own lights (`lights`, then one
+//! `net_pass`). EFFECTS (weather, steam, the pet) stay with the classic pass. It
 //! never advances the sim; a mover here would desync the profiles.
 
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
@@ -445,10 +446,10 @@ fn lights(
 
 /// Paint `list` over the backdrop `buf` holds: every piece's shadow
 /// ([`ground_shadow`]) first, then the pieces back to front as by day, noting
-/// which pixels glow of their own ([`Glow`]), and last one pass
-/// ([`net_pass`](crate::cutaway::light::net_pass)) takes every other pixel to
-/// the hour: darkened with the room and lifted by its lights at once, so no
-/// pixel is darkened twice or darkened and relit.
+/// which pixels glow of their own ([`Glow`](crate::cutaway::light::Glow)), and
+/// last one pass ([`net_pass`](crate::cutaway::light::net_pass)) takes every
+/// other pixel to the hour: darkened with the room and lifted by its lights at
+/// once, so no pixel is darkened twice or darkened and relit.
 pub(crate) fn paint_list(
     list: &DrawList<'_>,
     cache: &mut crate::frame_cache::FrameCache,
@@ -473,9 +474,8 @@ pub(crate) fn paint_list(
     crate::cutaway::light::net_pass(whole, &lights, list.ambient, &emission, pen, buf);
 }
 
-/// Paint every piece but the lights, back to front as by day, and return each
-/// pixel's [`Glow`]: set by the last piece that painted it, so a sitter in
-/// front of a screen takes the room's light over it.
+/// Paint every piece but the lights, back to front as by day, and return the
+/// [`Emission`](crate::cutaway::light::Emission) they leave.
 fn paint_pieces(
     list: &DrawList<'_>,
     cache: &mut crate::frame_cache::FrameCache,
@@ -2303,9 +2303,10 @@ fn relight_screen(
 
 /// The most common opaque colour in `row` of `frame` — how the cutaway learns a
 /// sprite's material without hardcoding it. The front face a top-down sprite
-/// never had has to be SOME colour, and the desk's lives in the PACK
-/// (palette key `D`), not the theme, where `furniture.wood_top` reads nearly like
-/// the carpet; sampling also earns a custom pack's desk a match for free.
+/// never had has to be SOME colour, and the desk's lives in the PACK (the
+/// shaded wood, palette key `d`), not the theme, where `furniture.wood_top`
+/// reads nearly like the carpet; sampling also earns a custom pack's desk a
+/// match for free.
 fn dominant_opaque_row(
     frame: &pixtuoid_core::sprite::Frame,
     row: u16,

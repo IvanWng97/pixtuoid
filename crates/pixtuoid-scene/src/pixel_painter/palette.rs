@@ -377,7 +377,7 @@ pub(crate) fn fixture_overrides(theme: &crate::theme::Theme) -> [(char, Pixel); 
 
 /// The pack keys a corridor appliance's art is drawn in, each with the
 /// [`ApplianceColors`](crate::theme::ApplianceColors) role it takes: the art
-/// owns the form, the theme the palette. The pack's [ramps] of these keys are
+/// owns the form, the theme the palette. The pack's `[ramps]` of these keys are
 /// the shading, re-derived by the recolour.
 pub(crate) fn appliance_overrides(a: &crate::theme::ApplianceColors) -> [(char, Pixel); 13] {
     let [d0, d1, d2, d3] = a.vending_drinks;

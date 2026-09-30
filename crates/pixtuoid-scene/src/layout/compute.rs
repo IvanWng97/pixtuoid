@@ -489,15 +489,16 @@ pub(super) fn compute_with_seed(
             });
         }
         if lounge_fits {
-            // Hugs the side table's west side, a column apart; its ground is
-            // centred on `pos`, so its west edge must keep east of the divider.
+            // West of the side table, the clearance a plant keeps from what it
+            // stands beside; its ground is centred on `pos`, so its west edge
+            // must keep east of the divider.
             let ficus = furniture_def(PlantKind::Ficus.furniture());
             let ficus_half_w = ficus.footprint.map_or(0, |f| f.w) / 2;
             // Only where it fits west of the table: pushed back east, it would
             // stand in the table.
             let x = flanks
                 .west()
-                .saturating_sub(LOUNGE_FLANK_GAP + ficus.visual.w - ficus.visual.w / 2);
+                .saturating_sub(PLANT_OBSTACLE_CLEARANCE_PX + ficus.visual.w - ficus.visual.w / 2);
             if x >= plan.lounge_west_clear + ficus_half_w {
                 plant_candidates.push(PlantItem {
                     kind: PlantKind::Ficus,
