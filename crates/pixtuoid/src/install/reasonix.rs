@@ -63,7 +63,7 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
 /// → Windows `%APPDATA%\reasonix` → else `<home>/.reasonix`.
 fn reasonix_home() -> Option<PathBuf> {
     resolve_reasonix_home(
-        io::nonempty_env("REASONIX_HOME").map(|v| io::expand_tilde(&v, None)),
+        pixtuoid_core::platform::path_env("REASONIX_HOME").map(|v| io::expand_tilde(&v, None)),
         cfg!(windows),
         user_config_dir(),
         pixtuoid_core::platform::user_home_opt(),

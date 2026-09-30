@@ -120,7 +120,7 @@ fn main() -> Result<()> {
 /// mutating process-global env. No `_pid`: `enrich_payload` is the one stamper.
 #[expect(
     clippy::disallowed_methods,
-    reason = "known debt: DEEPSEEK_WORKSPACE is a PATH read as text; its fix removes this read, which unfulfills this expect"
+    reason = "known debt: DEEPSEEK_WORKSPACE is a path, read here as text"
 )]
 fn env_payload(event: &str) -> serde_json::Map<String, Value> {
     // CodeWhale runs the hook with current_dir = its working dir (= the

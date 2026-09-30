@@ -50,8 +50,8 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
 
 fn cursor_config_dir() -> Option<PathBuf> {
     resolve_config_dir(
-        io::nonempty_env("CURSOR_CONFIG_DIR"),
-        io::nonempty_env("XDG_CONFIG_HOME"),
+        pixtuoid_core::platform::path_env("CURSOR_CONFIG_DIR"),
+        pixtuoid_core::platform::path_env("XDG_CONFIG_HOME"),
         cfg!(all(unix, not(target_os = "macos"))),
         pixtuoid_core::platform::user_home_opt(),
     )

@@ -23,7 +23,7 @@ where the rule would otherwise look arbitrary enough to get "fixed" away.
 - Config writes: atomic AND never destructive on ANY error/skip/default arm —
   existing-but-unparseable is never rewritten, a skip never strips
   pre-existing hooks.
-- A SET-but-EMPTY env var reads as unset (`io::nonempty_env`).
+- A SET-but-EMPTY env var reads as unset (`platform::path_env`).
 - Terminal egress strips Cc controls AND Cf bidi overrides (Trojan-Source).
 - IPC endpoints: owner-only at creation (create-restricted-then-rename,
   never a process-global umask); treat a pre-existing endpoint as hostile.

@@ -355,7 +355,7 @@ mod recorder {
         if let Some(dir) = sock.parent() {
             c.env("TUIDRIVE_LOG", dir.join("tuidrive.log"));
         }
-        for k in agent_env_names(std::env::vars().map(|(k, _)| k)) {
+        for k in agent_env_names(std::env::vars_os().filter_map(|(k, _)| k.into_string().ok())) {
             c.env_remove(k);
         }
         c.status()

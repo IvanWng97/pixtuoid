@@ -78,8 +78,10 @@ fn openclaw_state_dir() -> Result<PathBuf> {
     // the path logic.
     let home = pixtuoid_core::platform::home_first_dir();
     resolve_openclaw_state_dir(
-        io::nonempty_env("OPENCLAW_STATE_DIR").map(|v| io::expand_tilde(&v, home.as_deref())),
-        io::nonempty_env("OPENCLAW_HOME").map(|v| io::expand_tilde(&v, home.as_deref())),
+        pixtuoid_core::platform::path_env("OPENCLAW_STATE_DIR")
+            .map(|v| io::expand_tilde(&v, home.as_deref())),
+        pixtuoid_core::platform::path_env("OPENCLAW_HOME")
+            .map(|v| io::expand_tilde(&v, home.as_deref())),
         home,
         |p| p.exists(),
     )
@@ -123,17 +125,18 @@ fn state_dir_candidates(home: &Path) -> Vec<PathBuf> {
 /// config the gateway still reads.
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     let home = pixtuoid_core::platform::home_first_dir();
-    let state_env = io::nonempty_env("OPENCLAW_STATE_DIR");
+    let state_env = pixtuoid_core::platform::path_env("OPENCLAW_STATE_DIR");
     // An explicit OPENCLAW_STATE_DIR points AT the dir and bypasses home resolution,
     // so it gets NO legacy sibling search — the operator named the scope.
     let legacy_home = match state_env {
         Some(_) => None,
-        None => io::nonempty_env("OPENCLAW_HOME")
+        None => pixtuoid_core::platform::path_env("OPENCLAW_HOME")
             .map(|v| io::expand_tilde(&v, home.as_deref()))
             .or_else(|| home.clone()),
     };
     Ok(resolve_openclaw_config_path(
-        io::nonempty_env("OPENCLAW_CONFIG_PATH").map(|v| io::expand_tilde(&v, home.as_deref())),
+        pixtuoid_core::platform::path_env("OPENCLAW_CONFIG_PATH")
+            .map(|v| io::expand_tilde(&v, home.as_deref())),
         openclaw_state_dir()?,
         legacy_home,
         |p| p.exists(),
@@ -189,8 +192,10 @@ pub(crate) fn detect_installed() -> bool {
     // literal `~/…`, so the panel never offers the OpenClaw it just wrote to.
     let home = pixtuoid_core::platform::home_first_dir();
     resolve_openclaw_detect(
-        io::nonempty_env("OPENCLAW_STATE_DIR").map(|v| io::expand_tilde(&v, home.as_deref())),
-        io::nonempty_env("OPENCLAW_HOME").map(|v| io::expand_tilde(&v, home.as_deref())),
+        pixtuoid_core::platform::path_env("OPENCLAW_STATE_DIR")
+            .map(|v| io::expand_tilde(&v, home.as_deref())),
+        pixtuoid_core::platform::path_env("OPENCLAW_HOME")
+            .map(|v| io::expand_tilde(&v, home.as_deref())),
         home,
         |p| p.exists(),
     )

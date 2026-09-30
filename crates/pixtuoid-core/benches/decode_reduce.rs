@@ -17,13 +17,7 @@
 //! dir, every dir a registered source — so a bench-shaped fixture there would be
 //! mis-scanned and panic.
 
-// Crate-wide: rustc ignores a lint attribute on the `criterion_group!` call itself.
-#![expect(
-    clippy::disallowed_methods,
-    reason = "codspeed's `criterion_group!` expansion reads its workspace root with `env::var`"
-)]
-
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_main, Criterion};
 use pixtuoid_core::harness::Drive;
 
 const SESSION: &str = "01000000-0000-7000-8000-0000000000cc";
@@ -91,5 +85,13 @@ fn decode_reduce(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, decode_reduce);
-criterion_main!(benches);
+// A module, because rustc ignores a lint attribute on the macro call itself.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "codspeed's `criterion_group!` reads CODSPEED_ENV and CODSPEED_CARGO_WORKSPACE_ROOT with `env::var`"
+)]
+mod group {
+    use super::decode_reduce;
+    criterion::criterion_group!(benches, decode_reduce);
+}
+criterion_main!(group::benches);

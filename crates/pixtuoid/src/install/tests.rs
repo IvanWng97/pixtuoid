@@ -241,18 +241,18 @@ fn resolve_hook_binary_no_overrides_uses_locate() {
 
 #[test]
 fn empty_env_override_counts_as_unset_at_the_live_read() {
-    // io::nonempty_env is the live seam install_target reads PIXTUOID_HOOK
+    // path_env is the live seam install_target reads PIXTUOID_HOOK
     // through: empty/whitespace must read as unset, or "" becomes the command.
     let _env = crate::TEST_ENV_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let saved = std::env::var_os("PIXTUOID_HOOK");
     std::env::set_var("PIXTUOID_HOOK", "");
-    let empty = io::nonempty_env("PIXTUOID_HOOK");
+    let empty = pixtuoid_core::platform::path_env("PIXTUOID_HOOK");
     std::env::set_var("PIXTUOID_HOOK", "   ");
-    let blank = io::nonempty_env("PIXTUOID_HOOK");
+    let blank = pixtuoid_core::platform::path_env("PIXTUOID_HOOK");
     std::env::set_var("PIXTUOID_HOOK", "/real/hook");
-    let real = io::nonempty_env("PIXTUOID_HOOK");
+    let real = pixtuoid_core::platform::path_env("PIXTUOID_HOOK");
     match saved {
         Some(v) => std::env::set_var("PIXTUOID_HOOK", v),
         None => std::env::remove_var("PIXTUOID_HOOK"),

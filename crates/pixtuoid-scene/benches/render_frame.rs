@@ -17,18 +17,12 @@
 //! `crates/pixtuoid/examples/render_bench.rs` measures buffer-size SCALING
 //! through the floating offscreen renderer for the 2.5D design gate.
 
-// Crate-wide: rustc ignores a lint attribute on the `criterion_group!` call itself.
-#![expect(
-    clippy::disallowed_methods,
-    reason = "codspeed's `criterion_group!` expansion reads its workspace root with `env::var`"
-)]
-
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_main, Criterion};
 use pixtuoid_core::id::AgentId;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
@@ -282,5 +276,13 @@ fn render_cutaway_frame(c: &mut Criterion) {
     pixtuoid_scene::pixel_painter::force_weather(None).expect("None always resets");
 }
 
-criterion_group!(benches, render_frame, render_cutaway_frame);
-criterion_main!(benches);
+// A module, because rustc ignores a lint attribute on the macro call itself.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "codspeed's `criterion_group!` reads CODSPEED_ENV and CODSPEED_CARGO_WORKSPACE_ROOT with `env::var`"
+)]
+mod group {
+    use super::{render_cutaway_frame, render_frame};
+    criterion::criterion_group!(benches, render_frame, render_cutaway_frame);
+}
+criterion_main!(group::benches);

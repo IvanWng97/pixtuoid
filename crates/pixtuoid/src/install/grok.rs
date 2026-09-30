@@ -64,7 +64,7 @@ pub(crate) const GROK_EVENTS: &[&str] = &[
 /// `grok_home()`'s degenerate fallback would land hooks grok never reads.
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     if !home_resolvable(
-        crate::install::io::nonempty_env("GROK_HOME").as_deref(),
+        pixtuoid_core::platform::path_env("GROK_HOME").as_deref(),
         pixtuoid_core::platform::user_home_opt().as_deref(),
     ) {
         anyhow::bail!(

@@ -520,11 +520,10 @@ fn activation_backend() -> (&'static str, bool) {
 /// UNSET, NOT bare presence: a leftover `WAYLAND_DISPLAY=`/`SWAYSOCK=` (systemd user units
 /// and non-forwarded ssh sessions leave them routinely) would otherwise print a confidently
 /// wrong verdict at a user whose X11 EWMH channel works fine. `focus::linux::detect_channel`
-/// keys the live channel through the SAME reader, so a non-UTF-8 `SWAYSOCK` path is set for
-/// both rather than sway to focus and absent to the doctor.
+/// keys the live channel through the SAME reader.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn marker_set(name: &str) -> bool {
-    crate::install::io::nonempty_env(name).is_some()
+    pixtuoid_core::platform::path_env(name).is_some()
 }
 
 /// Mirrors `focus/linux.rs`'s ONE-channel-per-env order (sway IPC → hyprland IPC → X11
