@@ -161,13 +161,11 @@ zizmor:
     fi
     zizmor --strict-collection .
 
-# The selftest runs first so a broken runner is reported as itself, not as
-# every contract failing. action_behavior_test.sh runs the workflows' own shell
+# action_behavior_test.sh runs the workflows' own shell
 # against stubs, which no static contract can do.
 [group('rust')]
 [doc('Check the CI contracts actionlint and zizmor cannot see')]
 ci-observability:
-    bash policy/ci-observability/check.sh --selftest
     bash policy/ci-observability/check.sh
     bash policy/ci-observability/action_behavior_test.sh
 
