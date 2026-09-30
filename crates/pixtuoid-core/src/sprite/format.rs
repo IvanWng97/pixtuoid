@@ -13,8 +13,13 @@ use crate::sprite::{
 
 type Result<T, E = PackError> = std::result::Result<T, E>;
 
-/// A frame's rows as parsed, and its marks.
-type MarkedRows = (Vec<Vec<PaletteIndex>>, Vec<Mark>);
+/// One `@frame` block as parsed, each row and mark with the 0-based line it
+/// came from, so a shape error names the line at fault.
+struct Block {
+    header: usize,
+    rows: Vec<(Vec<PaletteIndex>, usize)>,
+    marks: Vec<(Mark, usize)>,
+}
 
 /// Parse a `.sprite` text file: one indexed frame per `@frame N` block, each
 /// with the `@mark <name> <x> <y>` lines its block carries.
@@ -23,24 +28,31 @@ fn parse_indexed(
     palette: &Palette,
 ) -> Result<Vec<(IndexedFrame, Vec<Mark>)>, SpriteError> {
     let mut frames = Vec::new();
-    let mut current: Option<MarkedRows> = None;
-    let mut last_lineno = 0;
+    let mut current: Option<Block> = None;
     let at = |lineno: usize| {
         move |kind| SpriteError::Line {
             line: lineno + 1,
             kind,
         }
     };
-    let finish = |(rows, marks): MarkedRows,
-                  lineno: usize|
-     -> Result<(IndexedFrame, Vec<Mark>), SpriteError> {
-        let frame = rows_to_frame(rows).map_err(at(lineno))?;
+    let finish = |block: Block| -> Result<(IndexedFrame, Vec<Mark>), SpriteError> {
+        let (rows, row_lines): (Vec<_>, Vec<_>) = block.rows.into_iter().unzip();
+        let frame = rows_to_frame(rows).map_err(|kind| {
+            let lineno = match kind {
+                LineError::NoRows => block.header,
+                LineError::TooManyRows { .. } => row_lines[usize::from(u16::MAX)],
+                LineError::Ragged { row, .. } => row_lines[row],
+                _ => row_lines[0],
+            };
+            at(lineno)(kind)
+        })?;
         let grid = &frame.0;
-        if let Some(m) = marks
+        if let Some((m, lineno)) = block
+            .marks
             .iter()
-            .find(|m| m.x() >= grid.width() || m.y() >= grid.height())
+            .find(|(m, _)| m.x() >= grid.width() || m.y() >= grid.height())
         {
-            return Err(at(lineno)(LineError::MarkOutside {
+            return Err(at(*lineno)(LineError::MarkOutside {
                 name: m.name().to_owned(),
                 x: m.x(),
                 y: m.y(),
@@ -48,7 +60,7 @@ fn parse_indexed(
                 height: grid.height(),
             }));
         }
-        Ok((frame, marks))
+        Ok((frame, block.marks.into_iter().map(|(m, _)| m).collect()))
     };
 
     for (lineno, raw) in src.lines().enumerate() {
@@ -56,21 +68,24 @@ fn parse_indexed(
         if line.is_empty() {
             continue;
         }
-        last_lineno = lineno;
 
         if let Some(rest) = line.strip_prefix("@frame") {
             if let Some(block) = current.take() {
-                frames.push(finish(block, lineno)?);
+                frames.push(finish(block)?);
             }
             let _ = rest
                 .trim()
                 .parse::<u32>()
                 .map_err(|_| at(lineno)(LineError::FrameNumber))?;
-            current = Some((Vec::new(), Vec::new()));
+            current = Some(Block {
+                header: lineno,
+                rows: Vec::new(),
+                marks: Vec::new(),
+            });
             continue;
         }
 
-        let (rows, marks) = current
+        let Block { rows, marks, .. } = current
             .as_mut()
             .ok_or_else(|| at(lineno)(LineError::DataBeforeFrame))?;
 
@@ -79,20 +94,20 @@ fn parse_indexed(
             let head = |m: &Mark| m.name().starts_with(HEAD_MARK);
             if marks
                 .iter()
-                .any(|m| m.name() == mark.name() || (head(m) && head(&mark)))
+                .any(|(m, _)| m.name() == mark.name() || (head(m) && head(&mark)))
             {
                 return Err(at(lineno)(LineError::DuplicateMark));
             }
-            marks.push(mark);
+            marks.push((mark, lineno));
             continue;
         }
 
         let row = parse_row(line, palette).map_err(at(lineno))?;
-        rows.push(row);
+        rows.push((row, lineno));
     }
 
     if let Some(block) = current.take() {
-        frames.push(finish(block, last_lineno)?);
+        frames.push(finish(block)?);
     }
 
     if frames.is_empty() {
@@ -201,7 +216,8 @@ mod tests {
         assert_eq!((tower.name(), tower.size()), ("tower", (2, 3)));
         assert!(tower.stands_in(CityPlane::Mid) && tower.stands_in(CityPlane::Near));
         let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
-        let base = tower.art(d(1)).expect("every building has its base");
+        let base = tower.base();
+        assert!(std::ptr::eq(tower.art(d(1)).expect("1x is the base"), base));
         assert_eq!(
             base.windows(),
             [vec![(0, 1), (1, 1)]],
@@ -872,7 +888,8 @@ impl CityPlane {
 pub struct Building {
     name: String,
     planes: Vec<CityPlane>,
-    art: BTreeMap<u16, BuildingArt>,
+    base: BuildingArt,
+    variants: BTreeMap<u16, BuildingArt>,
 }
 
 impl Building {
@@ -888,16 +905,24 @@ impl Building {
 
     /// Its size in logical units: its base art's.
     pub fn size(&self) -> (u16, u16) {
-        self.art
-            .get(&1)
-            .and_then(|a| a.sprite.frames().first())
+        self.base
+            .sprite
+            .frames()
+            .first()
             .map_or((0, 0), |f| (f.width(), f.height()))
     }
 
-    /// Its art at `density`, where it is drawn at that density; `1` is the
-    /// base, which every building has.
+    /// Its base art, at 1x.
+    pub fn base(&self) -> &BuildingArt {
+        &self.base
+    }
+
+    /// Its art at `density`, where it is drawn at that density.
     pub fn art(&self, density: std::num::NonZeroU16) -> Option<&BuildingArt> {
-        self.art.get(&density.get())
+        match density.get() {
+            1 => Some(&self.base),
+            n => self.variants.get(&n),
+        }
     }
 }
 
@@ -1203,7 +1228,8 @@ fn build_pack(
                     Building {
                         name: key.clone(),
                         planes,
-                        art: BTreeMap::from([(1, art)]),
+                        base: art,
+                        variants: BTreeMap::new(),
                     },
                 );
             }
@@ -1217,10 +1243,7 @@ fn build_pack(
                 let Some(base) = buildings.get_mut(name) else {
                     return Err(no_base(key.clone()));
                 };
-                let Some(base_art) = base.art.get(&1) else {
-                    return Err(no_base(key.clone()));
-                };
-                if !variant_redraws(&base_art.sprite, density, &art.sprite) {
+                if !variant_redraws(&base.base.sprite, density, &art.sprite) {
                     let (base_w, base_h) = base.size();
                     return Err(PackError::VariantSize {
                         key,
@@ -1229,7 +1252,7 @@ fn build_pack(
                         base_h,
                     });
                 }
-                base.art.insert(density, art);
+                base.variants.insert(density, art);
             }
         }
     }

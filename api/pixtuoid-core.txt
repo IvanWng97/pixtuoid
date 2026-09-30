@@ -1034,6 +1034,7 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Sta
 pub struct pixtuoid_core::sprite::format::Building
 impl pixtuoid_core::sprite::format::Building
 pub fn pixtuoid_core::sprite::format::Building::art(&self, core::num::nonzero::NonZeroU16) -> core::option::Option<&pixtuoid_core::sprite::format::BuildingArt>
+pub fn pixtuoid_core::sprite::format::Building::base(&self) -> &pixtuoid_core::sprite::format::BuildingArt
 pub fn pixtuoid_core::sprite::format::Building::name(&self) -> &str
 pub fn pixtuoid_core::sprite::format::Building::size(&self) -> (u16, u16)
 pub fn pixtuoid_core::sprite::format::Building::stands_in(&self, pixtuoid_core::sprite::format::CityPlane) -> bool

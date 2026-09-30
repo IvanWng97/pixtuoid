@@ -2,6 +2,7 @@
 # r/b/y = book spine colors (red/blue/yellow). D = wood. Bottom row is
 # a closed storage drawer.
 @frame 0
+. . . . . . . .
 n n n n n n n n
 n D D D D D D n
 n r b y r b y n
@@ -13,4 +14,3 @@ n D D D D D D n
 n D D d d D D n
 n D D D D D D n
 n n n n n n n n
-. . . . . . . .

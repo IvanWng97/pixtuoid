@@ -420,6 +420,44 @@ mod tests {
         }
     }
 
+    /// Every bundled furniture frame, at every density, ends on a row it
+    /// draws: the painters ground and sort a piece on its art's bottom row, so
+    /// a transparent one lifts it a row off the floor it stands on.
+    #[test]
+    fn every_bundled_furniture_frame_draws_its_bottom_row() {
+        let pack = test_default_pack();
+        // Pets and mascots stand on their feet, wherever their frame ends.
+        let figures: std::collections::HashSet<&str> = crate::pet::PetKind::ALL
+            .iter()
+            .flat_map(|k| [k.walk_anim(), k.sit_anim(), k.sleep_anim()])
+            .chain(
+                pixtuoid_core::source::registry::registered_source_names()
+                    .filter_map(crate::creatures::gateway_mascot_def)
+                    .flat_map(|m| [m.walk, m.rest]),
+            )
+            .collect();
+        let floating: Vec<String> = pack
+            .animation_names()
+            .into_iter()
+            .filter(|name| {
+                let base = name.split('@').next().unwrap_or(name);
+                pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS.contains(&base)
+                    && !figures.contains(base)
+            })
+            .filter(|name| {
+                pack.animation(name).is_some_and(|s| {
+                    s.frames().iter().any(|f| {
+                        let w = usize::from(f.width());
+                        f.as_slice()[f.as_slice().len() - w..]
+                            .iter()
+                            .all(Option::is_none)
+                    })
+                })
+            })
+            .collect();
+        assert!(floating.is_empty(), "{floating:?}");
+    }
+
     #[test]
     fn embedded_default_pack_animations_are_all_in_the_registry() {
         // An animation the EMBEDDED pack ships but the registry doesn't know is

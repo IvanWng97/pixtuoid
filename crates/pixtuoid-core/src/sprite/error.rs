@@ -294,9 +294,8 @@ pub enum SpriteError {
     #[error("{kind} (line {line})")]
     #[non_exhaustive]
     Line {
-        /// The 1-based line. A frame's own shape is checked when its block
-        /// ends, so its errors name the line that ends it: the next `@frame`,
-        /// or the file's last non-blank line.
+        /// The 1-based line: for a frame's shape, the row or mark at fault, or
+        /// the `@frame` of a frame with no rows.
         line: usize,
         /// What is wrong on it.
         kind: LineError,

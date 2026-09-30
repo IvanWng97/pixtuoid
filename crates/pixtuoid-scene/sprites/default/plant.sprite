@@ -1,9 +1,9 @@
 # 6x7 top-down potted plant. `l` = leaf, `L` = leaf shadow, `g` = pot.
 @frame 0
+. . . . . .
 . l l l l .
 l L l L l l
 l l L l l l
 . l L l l .
 . . g g . .
 . . g g . .
-. . . . . .
