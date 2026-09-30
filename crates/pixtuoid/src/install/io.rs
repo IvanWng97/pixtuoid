@@ -616,32 +616,20 @@ mod tests {
 
     #[test]
     fn nonempty_abs_env_requires_an_absolute_path() {
-        // A private key (not a real XDG var) avoids colliding with other env
-        // tests; TEST_ENV_LOCK serializes the mutation.
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
         const KEY: &str = "PIXTUOID_TEST_NONEMPTY_ABS_ENV";
-        let saved = std::env::var_os(KEY);
         for unset in ["", "   ", "rel/x", "~/x"] {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            unsafe { std::env::set_var(KEY, unset) };
-            assert_eq!(nonempty_abs_env(KEY), None, "{unset:?} must read as unset");
+            temp_env::with_var(KEY, Some(unset), || {
+                assert_eq!(nonempty_abs_env(KEY), None, "{unset:?} must read as unset");
+            });
         }
         // A leading-slash path is NOT absolute on Windows (no drive prefix).
         let abs = if cfg!(windows) { "C:/abs/x" } else { "/abs/x" };
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var(KEY, abs) };
-        assert_eq!(nonempty_abs_env(KEY), Some(PathBuf::from(abs)));
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::remove_var(KEY) };
-        assert_eq!(nonempty_abs_env(KEY), None, "a missing var is unset");
-        match saved {
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            Some(v) => unsafe { std::env::set_var(KEY, v) },
-            // FIXME: Audit that the environment access only happens in single-threaded code.
-            None => unsafe { std::env::remove_var(KEY) },
-        }
+        temp_env::with_var(KEY, Some(abs), || {
+            assert_eq!(nonempty_abs_env(KEY), Some(PathBuf::from(abs)));
+        });
+        temp_env::with_var_unset(KEY, || {
+            assert_eq!(nonempty_abs_env(KEY), None, "a missing var is unset");
+        });
     }
 
     #[test]

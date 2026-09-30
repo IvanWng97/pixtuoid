@@ -117,7 +117,6 @@ DESK_ART_W = 14
 DESK_BEZEL_RAISE = 1
 # `layout`'s `DESK_SURFACE_ROWS`, `DESK_FRONT_ROWS`, `DESK_LEG_ROWS`.
 DESK_SURFACE_ROWS, DESK_FRONT_ROWS, DESK_LEG_ROWS = 5, 1, 2
-DESK_ART_H = DESK_BEZEL_RAISE + DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS
 # The back-turned desk's extra rows, all above, so the occupant (who y-sorts in
 # FRONT of the desk) leaves the upper screen row clear. Its lower screen row
 # sits inside the wood, flanked by it: the owner picked a monitor standing on
@@ -2934,22 +2933,26 @@ def orphans(pack, sprites):
     )
 
 
-def city_drift(pack):
-    """Why pack.toml's `[city]` names other keys than `CITY` draws in, or None."""
+def manifest_drift(pack):
+    """Why pack.toml names other keys than the ones drawn in, or None."""
     manifest = pack / "pack.toml"
     if not manifest.is_file():
         return None
-    named = tomllib.loads(manifest.read_text(encoding=ENCODING)).get("city")
+    toml = tomllib.loads(manifest.read_text(encoding=ENCODING))
+    named = toml.get("city")
     if named is not None and named != CITY:
         return f"gen-art --check: pack.toml [city] {named} is not the keys drawn in, {CITY}"
+    outline = toml.get("characters", {}).get("outline")
+    if outline != SILHOUETTE:
+        return f"gen-art --check: pack.toml [characters] outline {outline!r} is not the art's, {SILHOUETTE!r}"
     return None
 
 
 def check(pack, sprites):
     """Why the committed pack is not what `sprites` draws, or None when it is."""
-    city = city_drift(pack)
-    if city:
-        return city
+    drift = manifest_drift(pack)
+    if drift:
+        return drift
     stale = sorted(
         name
         for name, text in sprites.items()
@@ -2994,6 +2997,12 @@ def selftest(sprites):
         assert check(pack, sprites) is None, "a write must delete the orphan"
         (pack / "hand.sprite").write_text(f"# copied from {first}: {PROVENANCE}\n@frame 0\n.\n", encoding=ENCODING)
         assert check(pack, sprites) is None, "hand art quoting the provenance is not an orphan"
+        (pack / "pack.toml").write_text('[characters]\noutline = "n"\n', encoding=ENCODING)
+        assert check(pack, sprites) is not None, "an outline the art does not draw must fail"
+        (pack / "pack.toml").write_text("[pack]\n", encoding=ENCODING)
+        assert check(pack, sprites) is not None, "a pack naming no outline must fail"
+        (pack / "pack.toml").write_text(f'[characters]\noutline = "{SILHOUETTE}"\n', encoding=ENCODING)
+        assert check(pack, sprites) is None, "the art's own outline passes"
     print(f"gen-art --selftest: OK ({len(sprites)} sprites)")
 
 
