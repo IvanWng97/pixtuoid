@@ -1023,7 +1023,8 @@ npm-check:
 preflight mode="":
     #!/usr/bin/env bash
     set -euo pipefail
-    case "$1" in
+    mode="$1"
+    case "$mode" in
     "") just lint && just clippy ;;
     full) just lint && just clippy && just hack && just test ;;
     *) echo "usage: just preflight [full]" >&2; exit 2 ;;
