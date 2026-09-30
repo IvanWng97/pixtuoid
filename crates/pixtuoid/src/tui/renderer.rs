@@ -97,6 +97,70 @@ pub struct DrawCtx<'a> {
     pub onboarding: &'a crate::tui::welcome::OnboardingFrame,
 }
 
+impl<'a> DrawCtx<'a> {
+    /// A context for an off-terminal still of one floor: no input, overlays,
+    /// pets, coffee or audio, and every out-param empty. The snapshot example and
+    /// the integration tests build on it, overriding what they stage by struct
+    /// update; the live `TuiRenderer` does not, since nearly every field it sets
+    /// is runtime state. Public for MECHANISM, not contract, hence `doc(hidden)`.
+    #[doc(hidden)]
+    pub fn headless(
+        floor: &'a mut pixtuoid_scene::floor::PerFloor,
+        chitchat_state: &'a mut std::collections::HashMap<
+            pixtuoid_scene::chitchat::VenueKey,
+            pixtuoid_scene::chitchat::ActiveChitchat,
+        >,
+        theme: &'a pixtuoid_scene::theme::Theme,
+        meta: pixtuoid_scene::floor::FloorMeta,
+        scene: &SceneState,
+    ) -> Self {
+        use std::sync::LazyLock;
+        static NO_COFFEE: LazyLock<
+            std::collections::HashMap<pixtuoid_core::AgentId, std::time::SystemTime>,
+        > = LazyLock::new(Default::default);
+        static CLOSED_DASHBOARD: LazyLock<crate::tui::dashboard::DashboardFrame> =
+            LazyLock::new(Default::default);
+        static CLOSED_CONNECTION: LazyLock<crate::tui::connection::ConnectionFrame> =
+            LazyLock::new(Default::default);
+        static CLOSED_ONBOARDING: LazyLock<crate::tui::welcome::OnboardingFrame> =
+            LazyLock::new(Default::default);
+        Self {
+            buf: &mut floor.buf,
+            store: &mut floor.ctx,
+            mouse_pos: None,
+            debug_walkable: false,
+            theme,
+            theme_picker: None,
+            floor_info: None,
+            // A single-floor still: no cross-floor cue.
+            per_floor: Default::default(),
+            // DERIVED from the scene, as the runtime does: a hardcoded `None`
+            // renders an `--openclaw` lobster with its `⬢gw` chip off, and the
+            // snapshot example's gif clips are NOT pixel-gated by `gen-check`, so
+            // nothing would catch it.
+            gateway: crate::tui::widgets::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
+            audio_audible: false,
+            volume_flash: None,
+            floor: meta,
+            active_pet: None,
+            last_pet_pos: None,
+            last_mascots: Vec::new(),
+            floor_pet: None,
+            chitchat_state,
+            chitchat_bubbles: Vec::new(),
+            coffee: &NO_COFFEE,
+            new_coffee_carriers: Vec::new(),
+            occupied_waypoints: Default::default(),
+            popup_scale: 0.0,
+            help_open: false,
+            source_warning: None,
+            dashboard: &CLOSED_DASHBOARD,
+            connection: &CLOSED_CONNECTION,
+            onboarding: &CLOSED_ONBOARDING,
+        }
+    }
+}
+
 /// Clip a widget rect to fit inside `bounds`; `None` when nothing survives.
 /// Prevents ratatui's "index outside of buffer" panic when label/notice widgets
 /// land near the right or bottom edge.

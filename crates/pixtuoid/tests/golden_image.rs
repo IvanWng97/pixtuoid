@@ -85,7 +85,9 @@ fn render_hash(scene: &SceneState, now: SystemTime, t: &theme::Theme, floor_seed
     let backend = TestBackend::new(96, 36);
     let mut term = Terminal::new(backend).unwrap();
     let pack = load_sprite_pack(PackSource::Bundled).unwrap();
-    make_draw_ctx!(draw_ctx, theme: t, floor_seed: floor_seed);
+    make_draw_ctx!(draw_ctx, scene);
+    draw_ctx.theme = t;
+    draw_ctx.floor.floor_seed = floor_seed;
     draw_scene(&mut term, scene, &pack, now, &mut draw_ctx).unwrap();
 
     let mut hasher = DefaultHasher::new();

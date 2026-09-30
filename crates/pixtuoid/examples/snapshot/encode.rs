@@ -20,8 +20,8 @@ use crate::{due_navigations, SnapshotArgs, CELL_H, CELL_W};
 /// region and A* falls back to a straight line when crossing into it — the root cause
 /// of any character teleport the user sees.
 ///
-/// `floor_seed` MUST be the one the frame beside it was rendered with: the five layout
-/// variants have different obstacle placements, so a report computed for another
+/// `floor_seed` MUST be the one the frame beside it was rendered with: the layout variants
+/// have different obstacle placements, so a report computed for another
 /// variant is a tick about an office nobody looked at.
 pub(crate) fn debug_paint_walkable_overlay(
     term: &mut Terminal<TestBackend>,
@@ -83,23 +83,6 @@ pub(crate) fn debug_paint_walkable_overlay(
             print!("({x},{y})");
         }
         println!();
-        // Probe the chain step by step to spot which one is actually blocked.
-        let probe = |x: u16, y: u16, name: &str| {
-            let wk = layout.is_walkable(x, y);
-            let r = is_reachable(&reach_mask, &layout, x, y);
-            println!("  probe {name} ({x},{y}): walkable={wk} reachable={r}");
-        };
-        if let Some(t) = layout.door_threshold {
-            probe(t.x, t.y, "threshold");
-        }
-        probe(0, layout.top_margin, "MR top-left");
-        // Probe the row y=66 (pantry's last row above baseboard).
-        println!("row y=66 walkability:");
-        for x in 0..30u16 {
-            let w = layout.is_walkable(x, 66);
-            let r = is_reachable(&reach_mask, &layout, x, 66);
-            println!("  x={x}: walk={w} reach={r}");
-        }
     }
 
     // No cell-level redraw: the live `w` pixel overlay (painted into the RgbBuffer in
@@ -144,21 +127,6 @@ fn compute_reachable(layout: &pixtuoid_scene::layout::SceneLayout) -> Vec<bool> 
     visited
 }
 
-fn is_reachable(
-    mask: &[bool],
-    layout: &pixtuoid_scene::layout::SceneLayout,
-    x: u16,
-    y: u16,
-) -> bool {
-    let w = layout.buf_w as usize;
-    let h = layout.buf_h as usize;
-    let (xi, yi) = (x as usize, y as usize);
-    if xi >= w || yi >= h {
-        return false;
-    }
-    mask[yi * w + xi]
-}
-
 pub(crate) fn compute_crop_rect(
     args: &SnapshotArgs,
     scene: &SceneState,
@@ -167,8 +135,8 @@ pub(crate) fn compute_crop_rect(
     rows: u16,
     now: SystemTime,
 ) -> Result<Option<ratatui::layout::Rect>> {
-    // Fail loudly like --theme/--weather above — a typo'd crop target silently
-    // writing the full uncropped PNG defeats the point of the flag.
+    // Fail loudly, as an unknown --theme/--weather does: a typo'd crop target
+    // silently writing the full uncropped PNG defeats the point of the flag.
     let target_pixel: pixtuoid_scene::layout::Point = if let Some(ref agent_label) = args.crop_agent
     {
         let slot = scene
@@ -252,7 +220,8 @@ pub(crate) fn compute_crop_rect(
     };
 
     // Positions are in the LOGICAL half-block buffer (1 px per cell across, 2 px per
-    // cell down), NOT in PNG pixels: the 8x16 px-per-cell scaling happens later.
+    // cell down), NOT in PNG pixels: the `CELL_W`×`CELL_H` px-per-cell scaling
+    // happens later.
     Ok(Some(centered_crop(
         target_pixel.x,
         target_pixel.y / 2,
@@ -261,7 +230,10 @@ pub(crate) fn compute_crop_rect(
     )))
 }
 
-/// 40x24-cell window centered on (cell_x, cell_y), clamped to stay inside the cols x
+/// The `--crop-*` window, in cells (cols, rows).
+pub(crate) const CROP_WINDOW: (u16, u16) = (40, 24);
+
+/// A [`CROP_WINDOW`] centered on (cell_x, cell_y), clamped to stay inside the cols x
 /// rows buffer (shrinks only when the terminal itself is smaller).
 pub(crate) fn centered_crop(
     cell_x: u16,
@@ -269,8 +241,8 @@ pub(crate) fn centered_crop(
     cols: u16,
     rows: u16,
 ) -> ratatui::layout::Rect {
-    let crop_w = 40u16.min(cols);
-    let crop_h = 24u16.min(rows);
+    let crop_w = CROP_WINDOW.0.min(cols);
+    let crop_h = CROP_WINDOW.1.min(rows);
 
     let crop_x = cell_x
         .saturating_sub(crop_w / 2)
@@ -294,63 +266,15 @@ pub(crate) fn save_backend_as_png(
     rows: u16,
     crop: Option<ratatui::layout::Rect>,
 ) -> Result<()> {
-    let buf = term.backend().buffer();
-    let (start_x, start_y, render_w, render_h) = match crop {
-        Some(r) => (r.x, r.y, r.width, r.height),
-        None => (0, 0, cols, rows),
-    };
-    let img_w = render_w as u32 * CELL_W;
-    let img_h = render_h as u32 * CELL_H;
-    let mut img = RgbImage::new(img_w, img_h);
-
-    for y in 0..render_h {
-        for x in 0..render_w {
-            let cell = &buf[(start_x + x, start_y + y)];
-            let symbol = cell.symbol();
-            let fg = color_to_rgb(cell.fg, ImgRgb([220, 220, 220]));
-            let bg = color_to_rgb(cell.bg, ImgRgb([20, 22, 28]));
-
-            // The half-block "▀" splits the cell: top half = fg, bottom half = bg.
-            let x0 = x as u32 * CELL_W;
-            let y0 = y as u32 * CELL_H;
-
-            let ch = symbol.chars().next().unwrap_or(' ');
-            if symbol == "▀" {
-                fill_rect(&mut img, x0, y0, CELL_W, CELL_H / 2, fg);
-                fill_rect(&mut img, x0, y0 + CELL_H / 2, CELL_W, CELL_H / 2, bg);
-            } else if symbol.trim().is_empty() {
-                fill_rect(&mut img, x0, y0, CELL_W, CELL_H, bg);
-            } else if pixtuoid::aa_text::has_glyph(ch) {
-                fill_rect(&mut img, x0, y0, CELL_W, CELL_H, bg);
-                draw_cell_text(ch, x0, y0, |px, py, cov| {
-                    if px < img_w && py < img_h {
-                        img.put_pixel(px, py, mix_rgb(bg, fg, cov));
-                    }
-                });
-            } else {
-                // No glyph in any face (a decorative symbol): a centered block still
-                // reads in the cell's fg color.
-                fill_rect(&mut img, x0, y0, CELL_W, CELL_H, bg);
-                let pad_x = 1;
-                let pad_y = 3;
-                fill_rect(
-                    &mut img,
-                    x0 + pad_x,
-                    y0 + pad_y,
-                    CELL_W - pad_x * 2,
-                    CELL_H - pad_y * 2,
-                    fg,
-                );
-            }
-        }
-    }
-
+    let area = crop.unwrap_or(ratatui::layout::Rect::new(0, 0, cols, rows));
+    let mut img = RgbImage::new(area.width as u32 * CELL_W, area.height as u32 * CELL_H);
+    rasterize_cells(&mut img, term.backend().buffer(), area, |c| c);
     img.save(path)?;
     Ok(())
 }
 
-/// Rasterize a post-draw ratatui cell buffer to RGBA — the same path as the PNG
-/// rasterizer above.
+/// Rasterize a post-draw ratatui cell buffer to RGBA, for the gif and proof
+/// frames.
 pub(crate) fn cells_to_rgba(
     term_buf: &ratatui::buffer::Buffer,
     cols: u16,
@@ -359,44 +283,65 @@ pub(crate) fn cells_to_rgba(
     img_h: u32,
 ) -> RgbaImage {
     let mut rgba = RgbaImage::new(img_w, img_h);
-    for y in 0..rows {
-        for x in 0..cols {
-            let cell = &term_buf[(x, y)];
+    rasterize_cells(
+        &mut rgba,
+        term_buf,
+        ratatui::layout::Rect::new(0, 0, cols, rows),
+        |c| Rgba([c[0], c[1], c[2], 255]),
+    );
+    rgba
+}
+
+/// Paint `area`'s cells of `term_buf` onto `img` from its origin, one
+/// [`CELL_W`]×[`CELL_H`] tile per cell: the ONE rasterizer behind the PNG and
+/// RGBA outputs, which differ only in the pixel `px` makes of a color.
+fn rasterize_cells<I: image::GenericImage>(
+    img: &mut I,
+    term_buf: &ratatui::buffer::Buffer,
+    area: ratatui::layout::Rect,
+    px: impl Fn(ImgRgb<u8>) -> I::Pixel,
+) {
+    let (img_w, img_h) = (img.width(), img.height());
+    for y in 0..area.height {
+        for x in 0..area.width {
+            let cell = &term_buf[(area.x + x, area.y + y)];
             let symbol = cell.symbol();
             let fg = color_to_rgb(cell.fg, ImgRgb([220, 220, 220]));
             let bg = color_to_rgb(cell.bg, ImgRgb([20, 22, 28]));
             let x0 = x as u32 * CELL_W;
             let y0 = y as u32 * CELL_H;
+
             let ch = symbol.chars().next().unwrap_or(' ');
             if symbol == "▀" {
-                fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H / 2, fg);
-                fill_rgba_rect(&mut rgba, x0, y0 + CELL_H / 2, CELL_W, CELL_H / 2, bg);
+                // The half-block splits the cell: top half = fg, bottom half = bg.
+                fill_rect(img, x0, y0, CELL_W, CELL_H / 2, px(fg));
+                fill_rect(img, x0, y0 + CELL_H / 2, CELL_W, CELL_H / 2, px(bg));
             } else if symbol.trim().is_empty() {
-                fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H, bg);
+                fill_rect(img, x0, y0, CELL_W, CELL_H, px(bg));
             } else if pixtuoid::aa_text::has_glyph(ch) {
-                fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H, bg);
-                draw_cell_text(ch, x0, y0, |px, py, cov| {
-                    if px < img_w && py < img_h {
-                        let m = mix_rgb(bg, fg, cov);
-                        rgba.put_pixel(px, py, Rgba([m[0], m[1], m[2], 255]));
+                fill_rect(img, x0, y0, CELL_W, CELL_H, px(bg));
+                draw_cell_text(ch, x0, y0, |tx, ty, cov| {
+                    if tx < img_w && ty < img_h {
+                        img.put_pixel(tx, ty, px(mix_rgb(bg, fg, cov)));
                     }
                 });
             } else {
-                fill_rgba_rect(&mut rgba, x0, y0, CELL_W, CELL_H, bg);
+                // No glyph in any face (a decorative symbol): a centered block still
+                // reads in the cell's fg color.
+                fill_rect(img, x0, y0, CELL_W, CELL_H, px(bg));
                 let pad_x = 1;
                 let pad_y = 3;
-                fill_rgba_rect(
-                    &mut rgba,
+                fill_rect(
+                    img,
                     x0 + pad_x,
                     y0 + pad_y,
                     CELL_W - pad_x * 2,
                     CELL_H - pad_y * 2,
-                    fg,
+                    px(fg),
                 );
             }
         }
     }
-    rgba
 }
 
 /// A capture's frame clock — `secs` of frames at `fps` from `start` — shared by
@@ -526,37 +471,8 @@ pub(crate) fn save_as_gif(
         term,
         |term, now, _| {
             let mut draw_ctx = DrawCtx {
-                buf: &mut floor.buf,
-                store: &mut floor.ctx,
-                mouse_pos: None,
                 debug_walkable,
-                theme: job.theme,
-                theme_picker: None,
-                floor_info: None,
-                per_floor: Default::default(),
-                // DERIVED from the scene, as the runtime does — all THREE DrawCtx sites in
-                // this example must agree. A hardcoded `None` keeps the `⬢gw` chip off the
-                // very clip whose job is demoing the gateway, and clips are NOT pixel-gated
-                // by `gen-check`, so nothing would catch it.
-                gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-                audio_audible: false,
-                volume_flash: None,
-                floor: floor_meta,
-                active_pet: None,
-                last_pet_pos: None,
-                last_mascots: Vec::new(),
-                floor_pet: None,
-                chitchat_state: &mut chitchat_state,
-                chitchat_bubbles: Vec::new(),
-                coffee: &std::collections::HashMap::new(),
-                new_coffee_carriers: Vec::new(),
-                occupied_waypoints: Default::default(),
-                popup_scale: 0.0,
-                help_open: false,
-                source_warning: None,
-                dashboard: &pixtuoid::tui::dashboard::DashboardFrame::default(),
-                connection: &pixtuoid::tui::connection::ConnectionFrame::default(),
-                onboarding: &pixtuoid::tui::welcome::OnboardingFrame::default(),
+                ..DrawCtx::headless(floor, &mut chitchat_state, job.theme, floor_meta, scene)
             };
             draw_scene(term, scene, job.pack, now, &mut draw_ctx).map(drop)
         },
@@ -564,9 +480,8 @@ pub(crate) fn save_as_gif(
     )
 }
 
-/// Bounded rect fill shared by the RGB + RGBA paths — generic over
-/// `image::GenericImage` so it can't drift between the two wrappers below.
-fn fill_rect_px<I: image::GenericImage>(img: &mut I, x: u32, y: u32, w: u32, h: u32, px: I::Pixel) {
+/// Fill a rect, clipped to `img`.
+fn fill_rect<I: image::GenericImage>(img: &mut I, x: u32, y: u32, w: u32, h: u32, px: I::Pixel) {
     let (img_w, img_h) = (img.width(), img.height());
     for j in 0..h {
         for i in 0..w {
@@ -578,19 +493,11 @@ fn fill_rect_px<I: image::GenericImage>(img: &mut I, x: u32, y: u32, w: u32, h: 
     }
 }
 
-fn fill_rgba_rect(img: &mut RgbaImage, x: u32, y: u32, w: u32, h: u32, color: ImgRgb<u8>) {
-    fill_rect_px(img, x, y, w, h, Rgba([color[0], color[1], color[2], 255]));
-}
-
-fn fill_rect(img: &mut RgbImage, x: u32, y: u32, w: u32, h: u32, color: ImgRgb<u8>) {
-    fill_rect_px(img, x, y, w, h, color);
-}
-
 // Chosen so the face fits the cell: its line height rounds to CELL_H and the Monaspace
 // advance is ≤ CELL_W.
 const CELL_FONT_PX: f32 = 14.7;
 
-/// Anti-aliased cell text at the terminal grid: one char per 8×16 cell, centered on the
+/// Anti-aliased cell text at the terminal grid: one char per `CELL_W`×`CELL_H` cell, centered on the
 /// cell's advance and CLIPPED to the cell rect so a wide fallback glyph can't bleed into
 /// a neighbor. Per-cell origins (never a running cursor) keep the raster locked to the
 /// grid.

@@ -4,7 +4,7 @@
 //!
 //! Usage:
 //!   cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N]
-//! e.g. `... -- /tmp/floating.png 720x480 --agents 6` (Retina default), `... -- /tmp/f.png 360x240`.
+//! e.g. `... -- /tmp/floating.png --agents 6` (the [`DEFAULT_SIZE`]), `... -- /tmp/f.png 360x240`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,6 +17,9 @@ use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
 use pixtuoid_scene::floor::FloorMeta;
 use pixtuoid_scene::theme::theme_by_name;
+
+/// The buffer size when no WxH is given: a Retina window (360x240 logical @2x).
+const DEFAULT_SIZE: (u16, u16) = (720, 480);
 
 /// The two `cc` labels are a DELIBERATE collision, so the snapshot exercises the
 /// `·<id4>` disambiguation as well as every label tone.
@@ -100,7 +103,7 @@ fn main() -> Result<()> {
         anyhow!("usage: floating_snapshot <out.png> [WxH] [--theme <name>] [--agents N]")
     })?;
 
-    let mut size = (720u16, 480u16); // Retina default (360x240 logical @2x)
+    let mut size = DEFAULT_SIZE;
     let mut theme_name = "normal".to_string();
     let mut n_agents = 0usize;
     let rest: Vec<String> = args.collect();

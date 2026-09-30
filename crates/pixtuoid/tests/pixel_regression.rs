@@ -76,7 +76,8 @@ fn render_hash(scene: &SceneState, now: SystemTime, theme: &Theme, floor: FloorM
     let backend = TestBackend::new(96, 36);
     let mut term = Terminal::new(backend).unwrap();
     let pack = load_sprite_pack(PackSource::Bundled).unwrap();
-    make_draw_ctx!(draw_ctx, theme: theme);
+    make_draw_ctx!(draw_ctx, scene);
+    draw_ctx.theme = theme;
     draw_ctx.floor = floor;
     draw_scene(&mut term, scene, &pack, now, &mut draw_ctx).unwrap();
 

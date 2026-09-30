@@ -636,38 +636,13 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
         // incoming event, so without this nothing would ever settle Active ->
         // Idle once the fixture's events are drained.
         reducer.tick(&mut scene, now);
-        let mut draw_ctx = DrawCtx {
-            buf: &mut floor.buf,
-            store: &mut floor.ctx,
-            mouse_pos: None,
-            debug_walkable: false,
-            theme: job.theme,
-            theme_picker: None,
-            floor_info: None,
-            per_floor: Default::default(),
-            // DERIVED from the scene, as the runtime does — a hardcoded `None`
-            // here keeps the `⬢gw` chip off the very clip demoing the gateway,
-            // and clips are NOT pixel-gated by `gen-check`, so nothing catches it.
-            gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-            audio_audible: false,
-            volume_flash: None,
-            floor: pixtuoid_scene::floor::FloorMeta::ground(),
-            active_pet: None,
-            last_pet_pos: None,
-            last_mascots: Vec::new(),
-            floor_pet: None,
-            chitchat_state: &mut chitchat_state,
-            chitchat_bubbles: Vec::new(),
-            coffee: &std::collections::HashMap::new(),
-            new_coffee_carriers: Vec::new(),
-            occupied_waypoints: Default::default(),
-            popup_scale: 0.0,
-            help_open: false,
-            source_warning: None,
-            dashboard: &pixtuoid::tui::dashboard::DashboardFrame::default(),
-            connection: &pixtuoid::tui::connection::ConnectionFrame::default(),
-            onboarding: &pixtuoid::tui::welcome::OnboardingFrame::default(),
-        };
+        let mut draw_ctx = DrawCtx::headless(
+            &mut floor,
+            &mut chitchat_state,
+            job.theme,
+            pixtuoid_scene::floor::FloorMeta::ground(),
+            &scene,
+        );
         draw_scene(&mut term, &scene, job.pack, now, &mut draw_ctx)?;
         let office = cells_to_rgba(
             term.backend().buffer(),

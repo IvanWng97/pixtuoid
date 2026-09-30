@@ -1,6 +1,7 @@
-//! Renders the TUI off-screen via ratatui's TestBackend, then converts every
-//! cell into an 8x16-px tile in a PNG so we can verify the visual output
-//! without needing a real terminal.
+//! Renders the TUI off-screen via ratatui's TestBackend and rasterizes every cell
+//! into a [`CELL_W`]×[`CELL_H`] px tile — of a PNG, an animated GIF (`--gif`) or
+//! `--proof` frame sequences — so the visual output is verifiable without a real
+//! terminal.
 
 mod encode;
 mod proof;
@@ -32,7 +33,7 @@ const CELL_W: u32 = 8;
 const CELL_H: u32 = 16;
 
 #[derive(Debug, Parser)]
-#[command(about = "Render the TUI off-screen to a PNG for verification")]
+#[command(about = "Render the TUI off-screen to a PNG, GIF or proof frames for verification")]
 struct SnapshotArgs {
     /// Output PNG path.
     #[arg(default_value = "snapshot.png")]
@@ -80,11 +81,11 @@ struct SnapshotArgs {
     #[arg(long)]
     gif: bool,
 
-    /// GIF duration in seconds (only with --gif).
+    /// GIF duration in seconds (only with --gif, which --anim implies).
     #[arg(long, default_value_t = 5)]
     gif_duration: u64,
 
-    /// GIF frame rate (only with --gif).
+    /// GIF frame rate (only with --gif, which --anim implies).
     #[arg(long, default_value_t = 10)]
     gif_fps: u64,
 
@@ -92,7 +93,7 @@ struct SnapshotArgs {
     #[arg(long, default_value = "normal")]
     theme: String,
 
-    /// Floor seed — selects floor layout variant (0–4).
+    /// Floor seed — hashed to one of the floor layout variants.
     #[arg(long, default_value_t = 0)]
     floor_seed: u64,
 
@@ -117,8 +118,9 @@ struct SnapshotArgs {
     openclaw: Option<String>,
 
     /// Gateway PORTS to stage for `--openclaw`, comma-separated (default: one, the
-    /// upstream default port). The multi-instance render is the one thing no gate
-    /// can check, so N gateways must be renderable to a PNG a human can look at.
+    /// upstream default port).
+    // The multi-instance render is the one thing no gate can check, so N gateways
+    // must be renderable to a PNG a human can look at.
     #[arg(long, value_delimiter = ',')]
     openclaw_ports: Vec<String>,
 
@@ -232,14 +234,14 @@ struct SnapshotArgs {
     #[arg(long)]
     anim_facing: Option<String>,
 
-    /// Crop the generated PNG (and text preview) to a 40x24-cell window
-    /// centered on the agent with this label. Static-PNG path only: the
-    /// --gif/--anim paths return before the crop is computed, so clap
-    /// rejects the combination instead of silently ignoring the flag.
+    /// Crop the generated PNG (and text preview) to the fixed crop window
+    /// centered on the agent with this label. Static-PNG path only.
+    // The --gif/--anim paths return before the crop is computed, so clap rejects
+    // the combination instead of silently ignoring the flag.
     #[arg(long, conflicts_with_all = ["crop_furniture", "gif", "anim"])]
     crop_agent: Option<String>,
 
-    /// Crop the generated PNG (and text preview) to a 40x24-cell window
+    /// Crop the generated PNG (and text preview) to the fixed crop window
     /// centered on a furniture piece. Static-PNG path only.
     /// One of: pantry | couch | vending | printer | meeting | sofa | chair |
     /// island | snackshelf | desk.
@@ -251,10 +253,11 @@ struct SnapshotArgs {
     #[arg(long)]
     flame: Option<String>,
 
-    /// Crop the generated PNG to a window centered on the gateway lobster mascot.
-    /// Needs a VISIBLE mascot: pass --openclaw <state> — enforced at runtime, not
-    /// by clap, since "visible" isn't expressible as a static flag dependency.
+    /// Crop the generated PNG to the fixed crop window centered on the gateway
+    /// lobster mascot. Needs a visible mascot: pass --openclaw <state>.
     /// Static-PNG path only.
+    // Enforced at runtime, not by clap: "visible" isn't expressible as a static
+    // flag dependency.
     #[arg(long, conflicts_with_all = ["crop_agent", "crop_furniture", "gif", "anim"])]
     crop_mascot: bool,
 
@@ -679,39 +682,19 @@ fn main() -> Result<()> {
         socket_line: connection_socket_line,
     };
     let mut draw_ctx = DrawCtx {
-        buf: &mut floor.buf,
-        store: &mut floor.ctx,
         mouse_pos: args.hover.as_deref().and_then(|s| {
             let (x, y) = s.split_once(',')?;
             Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
         }),
         debug_walkable: args.debug_walkable,
-        theme,
         theme_picker: args.theme_picker,
-        floor_info: None,
-        // Single-floor still: empty office-wide tallies (no cross-floor cue).
-        per_floor: Default::default(),
-        // DERIVED from the scene, exactly as the runtime does — a hardcoded `None`
-        // here renders the `--openclaw` lobster with its `⬢gw` chip off.
-        gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-        audio_audible: false,
-        volume_flash: None,
-        floor: floor_meta,
-        active_pet: None,
-        last_pet_pos: None,
-        last_mascots: Vec::new(),
-        floor_pet: None,
-        chitchat_state: &mut chitchat_state,
-        chitchat_bubbles: Vec::new(),
-        coffee: &std::collections::HashMap::new(),
-        new_coffee_carriers: Vec::new(),
-        occupied_waypoints: Default::default(),
         popup_scale: if args.popup { 1.0 } else { 0.0 },
         help_open: args.help_open,
         source_warning: warning_text.as_deref(),
         dashboard: &dashboard_frame,
         connection: &connection_frame,
         onboarding: &onboarding_frame,
+        ..DrawCtx::headless(&mut floor, &mut chitchat_state, theme, floor_meta, &scene)
     };
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
 
@@ -969,6 +952,31 @@ mod tests {
             "sofa"
         ])
         .is_err());
+    }
+
+    /// The renderer path (`--pets` / `--navigate-at`) encodes from t=0, so every
+    /// pre-roll flag must be refused beside it rather than silently dropped.
+    #[test]
+    fn pre_roll_flags_conflict_with_the_renderer_path() {
+        let gif = &["snapshot", "--gif"][..];
+        let pre_rolls = [&["--warmup-secs", "5"][..], &["--anim", "sofa"]];
+        let renderers = [&["--pets", "cat"][..], &["--navigate-at", "3:1"]];
+        for alone in pre_rolls.iter().chain(&renderers) {
+            let argv = [gif, alone].concat();
+            assert!(
+                SnapshotArgs::try_parse_from(&argv).is_ok(),
+                "rejected {argv:?}"
+            );
+        }
+        for pre_roll in pre_rolls {
+            for renderer in renderers {
+                let argv = [gif, pre_roll, renderer].concat();
+                assert!(
+                    SnapshotArgs::try_parse_from(&argv).is_err(),
+                    "accepted {argv:?}"
+                );
+            }
+        }
     }
 
     #[test]

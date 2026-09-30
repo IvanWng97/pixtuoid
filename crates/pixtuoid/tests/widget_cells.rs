@@ -87,7 +87,8 @@ fn render_and_get_buffer(
     let backend = TestBackend::new(w, h);
     let mut term = Terminal::new(backend).unwrap();
     let pack = load_sprite_pack(PackSource::Bundled).unwrap();
-    make_draw_ctx!(draw_ctx, floor_info: floor_info);
+    make_draw_ctx!(draw_ctx, &scene);
+    draw_ctx.floor_info = floor_info;
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx).unwrap();
     let buffer = term.backend().buffer().clone();
     (buffer, w, h)

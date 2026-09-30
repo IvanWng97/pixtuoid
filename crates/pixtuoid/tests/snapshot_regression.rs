@@ -79,7 +79,7 @@ fn render_pixel_hash(now: SystemTime) -> u64 {
     let backend = TestBackend::new(96, 36);
     let mut term = Terminal::new(backend).expect("terminal");
     let pack = load_sprite_pack(PackSource::Bundled).expect("pack");
-    make_draw_ctx!(draw_ctx);
+    make_draw_ctx!(draw_ctx, &scene);
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx).expect("render");
 
     let mut hasher = DefaultHasher::new();
@@ -121,7 +121,7 @@ fn render_produces_distinct_wall_band_and_floor_regions() {
     let backend = TestBackend::new(96, 36);
     let mut term = Terminal::new(backend).expect("terminal");
     let pack = load_sprite_pack(PackSource::Bundled).expect("pack");
-    make_draw_ctx!(draw_ctx);
+    make_draw_ctx!(draw_ctx, &scene);
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx).expect("render");
     let buf = &*draw_ctx.buf;
 
@@ -180,7 +180,7 @@ fn render_changes_when_an_agent_state_changes() {
     let backend = TestBackend::new(96, 36);
     let mut term = Terminal::new(backend).expect("terminal");
     let pack = load_sprite_pack(PackSource::Bundled).expect("pack");
-    make_draw_ctx!(draw_ctx);
+    make_draw_ctx!(draw_ctx, &scene_idle);
     draw_scene(&mut term, &scene_idle, &pack, now, &mut draw_ctx).expect("render");
     let mut hasher = DefaultHasher::new();
     for px in draw_ctx.buf.as_slice() {
