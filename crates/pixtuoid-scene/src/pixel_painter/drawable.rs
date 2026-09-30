@@ -2,8 +2,9 @@
 //!
 //! Every mid-ground entity carries an `anchor_y` = the y-pixel row where it
 //! touches the floor (front-facing bottom edge for items with thickness).
-//! Drawables sort ascending by `anchor_y`, so larger `anchor_y` = closer to
-//! camera = paints last.
+//! Drawables sort ascending by `anchor_y` and then [`Layer`], so larger
+//! `anchor_y` = closer to camera = paints last. A backdrop fixture is a
+//! [`DrawableKind`] the background pass paints flat instead.
 
 use std::time::SystemTime;
 
@@ -15,6 +16,7 @@ use super::palette::{blend_rgb, BLACK, WHITE};
 use super::sim::{Cup, DeskProps};
 use pixtuoid_core::AgentSlot;
 
+use super::background::{paint_clock, paint_corridor_runner, paint_neon_panel};
 use super::effects::{
     paint_coffee_steam, paint_pet_hearts, paint_screen_glow, paint_screen_idle, paint_sleep_z,
     paint_waiting_bubble, paint_walking_dust,
@@ -22,11 +24,12 @@ use super::effects::{
 use super::epoch_ms;
 use super::frame_at;
 use super::furniture::{
-    paint_area_rug, paint_coat_rack, paint_fish_tank, paint_kitchen_island, paint_meeting_chair,
-    paint_side_table,
+    paint_area_rug, paint_coat_rack, paint_doormat, paint_fish_tank, paint_kitchen_island,
+    paint_meeting_chair, paint_notice_board, paint_side_table, paint_trash_bin, paint_water_cooler,
 };
 use super::paint_character_at;
 use crate::frame_cache::FrameCache;
+pub(super) use crate::layout::Layer;
 use crate::layout::Point;
 use crate::pet::PetKind;
 
@@ -48,7 +51,14 @@ fn pantry_steam_dx(anim: &str) -> i16 {
 
 pub(super) struct Drawable<'a> {
     pub(super) anchor_y: u16,
+    pub(super) layer: Layer,
     pub(super) kind: DrawableKind<'a>,
+}
+
+/// Sorts `drawables` into paint order. Stable, so drawables tied on row and
+/// layer keep their queue order: the roster's among fixtures.
+pub(super) fn sort_drawables(drawables: &mut [Drawable<'_>]) {
+    drawables.sort_by_key(|d| (d.anchor_y, d.layer));
 }
 
 pub(super) enum DrawableKind<'a> {
@@ -58,8 +68,6 @@ pub(super) enum DrawableKind<'a> {
         desk: Point,
         /// Which way this desk seats its occupant; picks the art (`desk_sprite_name`).
         facing: crate::layout::Facing,
-        /// Where its filing cabinet stands, if it has one.
-        cabinet: Option<Point>,
         screen_glow: Option<Rgb>,
         lights: crate::lighting::DeskLights,
         props: DeskProps,
@@ -72,7 +80,11 @@ pub(super) enum DrawableKind<'a> {
         waiting_bubble: bool,
         walking_dust_frame: Option<usize>,
     },
-    /// Office chair, keyed to TIE with its seat's occupant so it paints over them.
+    FilingCabinet {
+        pos: Point,
+    },
+    /// Office chair, sorted at its occupant's row in [`Layer::Over`], so it
+    /// paints over them.
     DeskChair {
         pos: Point,
     },
@@ -93,8 +105,7 @@ pub(super) enum DrawableKind<'a> {
     MeetingTable {
         pos: Point,
     },
-    /// Area rug, painted BEFORE the furniture in z-order (`anchor_y` at the top
-    /// of the rug) so chairs / couches sit on top.
+    /// A rug or mat filling its box, under the furniture that stands on it.
     AreaRug(crate::layout::Bounds),
     /// Lounge side table (wood + magazine), centred at `pos`.
     LoungeSideTable {
@@ -163,11 +174,6 @@ pub(super) enum DrawableKind<'a> {
         piece: crate::layout::WallPiece,
         rows: std::ops::Range<u16>,
     },
-    /// A meeting room's notice board, hung on the band at
-    /// [`notice_board_rect`](crate::layout::SceneLayout::notice_board_rect).
-    NoticeBoard {
-        board: crate::layout::Bounds,
-    },
     /// Meeting-room coat rack, y-sorted at its base row (the bottom of
     /// `coat_rack_rect_at` its pole top). `pos` is the pole top.
     CoatRack {
@@ -178,11 +184,24 @@ pub(super) enum DrawableKind<'a> {
     FishTank {
         pos: Point,
     },
-    /// Head-of-table meeting chair, keyed one row before its sitter's z-key so
-    /// the sitter paints over it.
+    /// Head-of-table meeting chair, sorted at its sitter's row in
+    /// [`Layer::Under`], so the sitter paints over it.
     MeetingChair {
         pos: Point,
         back_west: bool,
+    },
+    WaterCooler(crate::layout::Bounds),
+    TrashBin(crate::layout::Bounds),
+    Doormat(crate::layout::Bounds),
+    NoticeBoard(crate::layout::Bounds),
+    Runner(crate::layout::Bounds),
+    /// The neon sign's panel in this frame's colours.
+    NeonSign {
+        panel: crate::layout::Bounds,
+        look: super::background::NeonLook,
+    },
+    Clock {
+        pos: Point,
     },
 }
 
@@ -267,25 +286,18 @@ pub(crate) fn desk_sprite_name(facing: crate::layout::Facing) -> &'static str {
 
 /// Dispatch one Drawable's paint; character-attached effects paint inline so
 /// they ride along with the character in z-order.
-pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
+pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
     let buf = &mut *c.buf;
     let cache = &mut *c.cache;
     let (pack, now, theme) = (c.pack, c.now, c.theme);
-    match &d.kind {
+    match kind {
         DrawableKind::DeskCubicle {
             desk,
             facing,
-            cabinet,
             screen_glow,
             lights,
             props,
         } => {
-            if let Some((at, cab)) = cabinet.zip(
-                pack.animation("filing_cabinet")
-                    .and_then(|a| a.frames().first()),
-            ) {
-                blit_frame(cab, at.x, at.y, buf);
-            }
             let art = pack
                 .animation_or_source(desk_sprite_name(*facing))
                 .and_then(|a| a.frames().first());
@@ -327,6 +339,14 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             }
             if *waiting_bubble {
                 paint_waiting_bubble(buf, *anchor, theme);
+            }
+        }
+        DrawableKind::FilingCabinet { pos } => {
+            if let Some(cab) = pack
+                .animation("filing_cabinet")
+                .and_then(|a| a.frames().first())
+            {
+                blit_frame(cab, pos.x, pos.y, buf);
             }
         }
         DrawableKind::DeskChair { pos } => paint_chair_back(buf, *pos, pack),
@@ -475,9 +495,15 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
         DrawableKind::CoatRack { pos } => {
             paint_coat_rack(buf, *pos, theme);
         }
-        DrawableKind::NoticeBoard { board } => {
-            super::furniture::paint_notice_board(buf, *board, theme);
+        DrawableKind::WaterCooler(cooler) => paint_water_cooler(buf, *cooler, now, theme),
+        DrawableKind::TrashBin(bin) => paint_trash_bin(buf, *bin),
+        DrawableKind::Doormat(mat) => paint_doormat(buf, *mat, theme),
+        DrawableKind::NoticeBoard(board) => paint_notice_board(buf, *board, theme),
+        DrawableKind::Runner(runner) => paint_corridor_runner(buf, *runner, theme),
+        DrawableKind::NeonSign { panel, look } => {
+            paint_neon_panel(buf, panel.x, panel.y, panel.width, panel.height, look);
         }
+        DrawableKind::Clock { pos } => paint_clock(buf, pos.x, pos.y, now, theme),
     }
 }
 
@@ -644,10 +670,10 @@ mod tests {
                 + crate::layout::furniture_def(crate::layout::Furniture::Desk)
                     .visual
                     .h,
+            layer: Layer::Under,
             kind: DrawableKind::DeskCubicle {
                 desk,
                 facing: crate::layout::Facing::South,
-                cabinet: None,
                 screen_glow: None,
                 lights: crate::lighting::DeskLights::new(desk, 0.0, 0.0),
                 props: DeskProps {
@@ -705,7 +731,7 @@ mod tests {
         let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(Point { x: 40, y: 30 }, 0, None);
         paint_drawable(
-            &d,
+            &d.kind,
             &mut DrawableCtx {
                 buf: &mut buf,
                 pack: &pack,
@@ -721,7 +747,7 @@ mod tests {
         let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(Point { x: 40, y: 30 }, 0, Some(2));
         paint_drawable(
-            &d,
+            &d.kind,
             &mut DrawableCtx {
                 buf: &mut buf,
                 pack: &pack,
@@ -745,7 +771,7 @@ mod tests {
             let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
             let d = desk_cubicle_drawable(desk, tier, None);
             paint_drawable(
-                &d,
+                &d.kind,
                 &mut DrawableCtx {
                     buf: &mut buf,
                     pack: &pack,
@@ -774,7 +800,7 @@ mod tests {
         let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(desk, 3, None);
         paint_drawable(
-            &d,
+            &d.kind,
             &mut DrawableCtx {
                 buf: &mut buf,
                 pack: &pack,
@@ -802,7 +828,7 @@ mod tests {
         let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(desk, 1, Some(2));
         paint_drawable(
-            &d,
+            &d.kind,
             &mut DrawableCtx {
                 buf: &mut buf,
                 pack: &pack,
@@ -817,7 +843,7 @@ mod tests {
         let mut buf2 = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(desk, 1, Some(crate::token_meter::SHEET_FALL_PX));
         paint_drawable(
-            &d,
+            &d.kind,
             &mut DrawableCtx {
                 buf: &mut buf2,
                 pack: &pack,
@@ -842,7 +868,7 @@ mod tests {
     }
 
     #[test]
-    fn desk_cubicle_blits_cabinet_but_no_per_desk_bin() {
+    fn a_desk_and_its_cabinet_paint_but_no_per_desk_bin() {
         let pack = test_pack();
         // Pin the ASSET removal, not just its pixels: with no `trash_bin` in
         // the pack, a re-added blit would be dead code.
@@ -861,30 +887,27 @@ mod tests {
             .expect("filing_cabinet anim");
         let bg = Rgb { r: 1, g: 2, b: 3 };
         let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, bg);
-        let d = Drawable {
-            anchor_y: desk.y
-                + crate::layout::furniture_def(crate::layout::Furniture::Desk)
-                    .visual
-                    .h,
-            kind: DrawableKind::DeskCubicle {
+        for kind in [
+            DrawableKind::FilingCabinet { pos: cabinet },
+            DrawableKind::DeskCubicle {
                 desk,
                 facing: crate::layout::Facing::South,
-                cabinet: Some(cabinet),
                 screen_glow: None,
                 lights: crate::lighting::DeskLights::new(desk, 0.0, 0.0),
                 props: DeskProps::default(),
             },
-        };
-        paint_drawable(
-            &d,
-            &mut DrawableCtx {
-                buf: &mut buf,
-                pack: &pack,
-                cache: &mut cache,
-                now,
-                theme: theme(),
-            },
-        );
+        ] {
+            paint_drawable(
+                &kind,
+                &mut DrawableCtx {
+                    buf: &mut buf,
+                    pack: &pack,
+                    cache: &mut cache,
+                    now,
+                    theme: theme(),
+                },
+            );
+        }
         let mut cab_painted = false;
         for dy in 0..cab.height() {
             for dx in 0..cab.width() {
@@ -922,10 +945,11 @@ mod tests {
             let mut buf = RgbBuffer::filled(80, 80, Rgb { r: 0, g: 0, b: 0 });
             let d = Drawable {
                 anchor_y: pos.y,
+                layer: Layer::Under,
                 kind: DrawableKind::MeetingSofa { pos, mirrored },
             };
             paint_drawable(
-                &d,
+                &d.kind,
                 &mut DrawableCtx {
                     buf: &mut buf,
                     pack: &pack,
@@ -958,6 +982,7 @@ mod tests {
         let mut buf = RgbBuffer::filled(60, 60, bg);
         let d = Drawable {
             anchor_y: 30,
+            layer: Layer::Figure,
             kind: DrawableKind::Pet {
                 kind: PetKind::Cat,
                 pos: Point { x: 30, y: 30 },
@@ -968,7 +993,7 @@ mod tests {
             },
         };
         paint_drawable(
-            &d,
+            &d.kind,
             &mut DrawableCtx {
                 buf: &mut buf,
                 pack: &pack,
@@ -994,6 +1019,7 @@ mod tests {
             let mut buf = RgbBuffer::filled(60, 60, Rgb { r: 0, g: 0, b: 0 });
             let d = Drawable {
                 anchor_y: pos.y,
+                layer: Layer::Figure,
                 kind: DrawableKind::Pet {
                     kind: PetKind::Cat,
                     pos,
@@ -1004,7 +1030,7 @@ mod tests {
                 },
             };
             paint_drawable(
-                &d,
+                &d.kind,
                 &mut DrawableCtx {
                     buf: &mut buf,
                     pack: &pack,
@@ -1041,6 +1067,7 @@ mod tests {
         let mut buf = RgbBuffer::filled(80, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = Drawable {
             anchor_y: pos.y,
+            layer: Layer::Under,
             kind: DrawableKind::Appliance {
                 pos,
                 sprite,
@@ -1048,7 +1075,7 @@ mod tests {
             },
         };
         paint_drawable(
-            &d,
+            &d.kind,
             &mut DrawableCtx {
                 buf: &mut buf,
                 pack: &pack,
@@ -1129,6 +1156,7 @@ mod tests {
         let mut buf = RgbBuffer::filled(60, 60, bg);
         let d = Drawable {
             anchor_y: 30,
+            layer: Layer::Figure,
             kind: DrawableKind::GatewayMascot {
                 pos: Point { x: 30, y: 30 },
                 anim_name: "nonexistent_anim",
@@ -1138,7 +1166,7 @@ mod tests {
             },
         };
         paint_drawable(
-            &d,
+            &d.kind,
             &mut DrawableCtx {
                 buf: &mut buf,
                 pack: &pack,
@@ -1168,6 +1196,7 @@ mod tests {
             let mut buf = RgbBuffer::filled(80, 80, black);
             let d = Drawable {
                 anchor_y: pos.y,
+                layer: Layer::Figure,
                 kind: DrawableKind::GatewayMascot {
                     pos,
                     anim_name: def.rest,
@@ -1177,7 +1206,7 @@ mod tests {
                 },
             };
             paint_drawable(
-                &d,
+                &d.kind,
                 &mut DrawableCtx {
                     buf: &mut buf,
                     pack: &pack,
