@@ -25,7 +25,9 @@ use crate::script::{
 
 use pixtuoid_scene::audio::OneShotPool;
 use pixtuoid_scene::embedded_pack::load_bundled_pack;
-use pixtuoid_scene::floor::{FloorMeta, FloorSession, FrameInputs, floor_capacity};
+use pixtuoid_scene::floor::{
+    FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs, floor_capacity,
+};
 use pixtuoid_scene::layout::{CHARACTER_SPRITE_W, Size};
 use pixtuoid_scene::theme::{ALL_THEMES, Theme};
 
@@ -607,14 +609,15 @@ impl Office {
             ..FloorMeta::for_floor(0, 1)
         };
         self.session.render(FrameInputs {
-            scene: &self.scene,
-            pack: &self.pack,
+            world: FloorInputs {
+                scene: &self.scene,
+                pack: &self.pack,
+                now,
+                floor: floor_meta,
+                pets: PetInputs::default(),
+            },
             theme: self.theme,
-            now,
             size: Size { w: buf_w, h: buf_h },
-            floor_meta,
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         });
     }

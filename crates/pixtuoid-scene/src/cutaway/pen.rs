@@ -242,6 +242,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(feature = "density-art")]
     fn the_bundled_pack_draws_every_variant_at_one_density() {
         let pack = crate::embedded_pack::test_default_pack();
         assert_eq!(

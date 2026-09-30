@@ -511,23 +511,36 @@ pub struct RgbBuffer {
     writes: Option<Writes>,
 }
 
-/// Each pixel's epoch of its last [`put`](RgbBuffer::put).
+/// A write epoch of the one buffer whose [`RgbBuffer::begin_writes`] minted it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WriteEpoch(u32);
+
+/// Each pixel's epoch of its last noted write.
 #[derive(Debug, Clone)]
 struct Writes {
     at: Vec<u32>,
     now: u32,
+    tracking: bool,
+}
+
+impl Writes {
+    fn note(&mut self, i: usize) {
+        if self.tracking {
+            self.at[i] = self.now;
+        }
+    }
+
+    fn note_all(&mut self) {
+        if self.tracking {
+            self.at.fill(self.now);
+        }
+    }
 }
 
 impl std::ops::Deref for RgbBuffer {
     type Target = Grid<Rgb>;
     fn deref(&self) -> &Grid<Rgb> {
         &self.pixels
-    }
-}
-
-impl std::ops::DerefMut for RgbBuffer {
-    fn deref_mut(&mut self) -> &mut Grid<Rgb> {
-        &mut self.pixels
     }
 }
 
@@ -591,41 +604,71 @@ impl RgbBuffer {
         }
     }
 
+    /// Every pixel, row-major, to write in bulk. While
+    /// [`begin_writes`](Self::begin_writes) tracks, the whole buffer counts as
+    /// written this epoch, since a bulk write may touch any of it.
+    pub fn as_mut_slice(&mut self) -> &mut [Rgb] {
+        if let Some(w) = &mut self.writes {
+            w.note_all();
+        }
+        self.pixels.as_mut_slice()
+    }
+
+    /// Resize to `width × height` with every pixel `fill`, which counts as
+    /// writing every pixel.
+    pub fn resize_fill(&mut self, width: u16, height: u16, fill: Rgb) {
+        let reshaped = (width, height) != (self.pixels.width, self.pixels.height);
+        self.pixels.resize_fill(width, height, fill);
+        if let Some(w) = &mut self.writes {
+            if reshaped {
+                w.at.clear();
+                w.at.resize(self.pixels.as_slice().len(), 0);
+            }
+            w.note_all();
+        }
+    }
+
     fn write(&mut self, i: usize, rgb: Rgb) {
         self.pixels.as_mut_slice()[i] = rgb;
         if let Some(w) = &mut self.writes {
-            w.at[i] = w.now;
+            w.note(i);
         }
     }
 
     /// Start a write epoch and return it, for [`written_in`](Self::written_in):
     /// unlike a diff, it sees a pixel written in the colour already there.
-    /// Writes through the derefed [`Grid`] go unnoted.
-    pub fn begin_writes(&mut self) -> u32 {
+    pub fn begin_writes(&mut self) -> WriteEpoch {
         let n = self.pixels.as_slice().len();
         let w = self.writes.get_or_insert_with(|| Writes {
             at: vec![0; n],
             now: 0,
+            tracking: false,
         });
-        if w.at.len() != n {
-            w.at = vec![0; n];
-        }
+        w.tracking = true;
         w.now = w.now.wrapping_add(1);
         if w.now == 0 {
             w.at.fill(0);
             w.now = 1;
         }
-        w.now
+        WriteEpoch(w.now)
     }
 
-    /// Whether `(x, y)` was written in `epoch` ([`begin_writes`](Self::begin_writes)).
-    pub fn written_in(&self, x: u16, y: u16, epoch: u32) -> bool {
+    /// Stop noting writes until the next [`begin_writes`](Self::begin_writes);
+    /// epochs already noted still answer [`written_in`](Self::written_in).
+    pub fn end_writes(&mut self) {
+        if let Some(w) = &mut self.writes {
+            w.tracking = false;
+        }
+    }
+
+    /// Whether `(x, y)` was last written in `epoch` ([`begin_writes`](Self::begin_writes)).
+    pub fn written_in(&self, x: u16, y: u16, epoch: WriteEpoch) -> bool {
         x < self.pixels.width
             && y < self.pixels.height
             && self
                 .writes
                 .as_ref()
-                .is_some_and(|w| w.at.get(self.raw_index(x, y)) == Some(&epoch))
+                .is_some_and(|w| w.at.get(self.raw_index(x, y)) == Some(&epoch.0))
     }
 }
 
@@ -636,6 +679,55 @@ mod tests {
 
     const fn rgb(r: u8, g: u8, b: u8) -> Rgb {
         Rgb { r, g, b }
+    }
+
+    #[test]
+    fn a_bulk_write_counts_as_writing_every_pixel() {
+        let mut buf = RgbBuffer::filled(3, 2, rgb(0, 0, 0));
+        let epoch = buf.begin_writes();
+        assert!(!buf.written_in(1, 1, epoch));
+        buf.as_mut_slice()[0] = rgb(9, 9, 9);
+        assert!((0..2).all(|y| (0..3).all(|x| buf.written_in(x, y, epoch))));
+        let epoch = buf.begin_writes();
+        buf.resize_fill(4, 4, rgb(1, 1, 1));
+        assert!(buf.written_in(3, 3, epoch), "a resize writes every pixel");
+    }
+
+    #[test]
+    fn a_write_after_end_writes_leaves_the_last_epoch_standing() {
+        let mut buf = RgbBuffer::filled(2, 1, rgb(0, 0, 0));
+        let epoch = buf.begin_writes();
+        buf.put(0, 0, rgb(9, 9, 9));
+        buf.end_writes();
+        buf.put(1, 0, rgb(9, 9, 9));
+        assert!(buf.written_in(0, 0, epoch));
+        assert!(
+            !buf.written_in(1, 0, epoch),
+            "a write after end_writes is not noted"
+        );
+    }
+
+    #[test]
+    fn a_reshape_forgets_epochs_noted_in_the_old_layout() {
+        let mut buf = RgbBuffer::filled(4, 2, rgb(0, 0, 0));
+        let epoch = buf.begin_writes();
+        buf.put(0, 1, rgb(9, 9, 9));
+        buf.end_writes();
+        buf.resize_fill(2, 4, rgb(0, 0, 0));
+        assert!(!(0..4).any(|y| (0..2).any(|x| buf.written_in(x, y, epoch))));
+    }
+
+    #[test]
+    fn an_epoch_past_the_last_never_reads_an_unwritten_pixel_as_written() {
+        let mut buf = RgbBuffer::filled(2, 1, rgb(0, 0, 0));
+        buf.begin_writes();
+        buf.put(0, 0, rgb(9, 9, 9));
+        if let Some(w) = &mut buf.writes {
+            w.now = u32::MAX;
+        }
+        let epoch = buf.begin_writes();
+        assert!(!buf.written_in(0, 0, epoch));
+        assert!(!buf.written_in(1, 0, epoch));
     }
 
     /// Mid grey, dark hair, skin, and red, blue and yellow, which a lit step

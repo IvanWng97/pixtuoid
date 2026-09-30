@@ -25,7 +25,7 @@ use winit::window::{ResizeDirection, Window, WindowId, WindowLevel};
 
 use super::offscreen::OfficeRenderer;
 use crate::config::{self, FloatingConfig};
-use pixtuoid_scene::floor::{FloorMeta, FrameInputs};
+use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FrameInputs, PetInputs};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::Theme;
 
@@ -157,15 +157,19 @@ impl FloatingApp {
         let floor_pet =
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
         let office = self.renderer.render(FrameInputs {
-            scene: &scene,
-            pack: &self.pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &self.pack,
+                now: SystemTime::now(),
+                floor: floor_meta,
+                pets: PetInputs {
+                    pet: floor_pet,
+                    // Click-to-pet needs window pointer hit-testing (deferred).
+                    petting: None,
+                },
+            },
             theme: self.theme,
-            now: SystemTime::now(),
             size: Size { w: buf_w, h: buf_h },
-            floor_meta,
-            // Click-to-pet needs window pointer hit-testing (deferred).
-            active_pet: None,
-            floor_pet,
             debug_walkable: false,
         });
         let Some(surface) = self.surface.as_mut() else {

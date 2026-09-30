@@ -10,7 +10,7 @@ pub(crate) mod kimi;
 // cross-crate reachable — only its env filters and owner-only file-mode
 // helpers (below) are re-exported.
 pub(crate) mod io;
-pub use io::{nonempty, nonempty_abs_env, nonempty_env, owner_only_create, tighten_to_owner_only};
+pub use io::{nonempty_abs_env, owner_only_create, tighten_to_owner_only};
 pub(crate) mod dsh;
 pub(crate) mod merge;
 pub(crate) mod omp;
@@ -356,7 +356,7 @@ pub(crate) fn install_target(
     let path = config
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
-    let env_hook = io::nonempty_env(io::HOOK_OVERRIDE_ENV);
+    let env_hook = pixtuoid_core::platform::path_env(io::HOOK_OVERRIDE_ENV);
     let (binary, explicit_hook) =
         resolve_hook_binary_from(t, hook_path, env_hook, io::default_hook_binary)?;
     let hook_cmd = (t.hook_command)(&binary, explicit_hook)?;

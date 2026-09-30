@@ -39,7 +39,7 @@ fn walkable_target(layout: &Layout, seed: u64, n: u64) -> Point {
     if w == 0 || h == 0 {
         return Point { x: 0, y: 0 };
     }
-    let mut z = seed ^ n.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    let mut z = seed ^ n.wrapping_mul(crate::GOLDEN_GAMMA);
     let mut last = Point { x: 0, y: 0 };
     for _ in 0..TARGET_TRIES {
         z = pixtuoid_core::id::splitmix64(z);

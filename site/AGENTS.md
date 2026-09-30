@@ -14,7 +14,7 @@ docs, demo media all flow in from outside `site/`. Parent guide: the workspace
 
 `astro build` reads **these files from OUTSIDE `site/`** (workspace
 `Cargo.toml` + the `docs/` pages below); a rename/move of any FAILS the
-build, and every one sits in the `site.yml` / `pages.yml` path filters:
+build:
 
 - workspace `Cargo.toml` → displayed-version FALLBACK only; the primary source
   is the latest release tag (`config/released-version.mjs`, unit-tested — main
@@ -27,8 +27,10 @@ build, and every one sits in the `site.yml` / `pages.yml` path filters:
   pattern, `src/pages/*.astro`, the `DOCS` entry in `consts.ts` (`Nav.astro`
   and `Docs.astro`'s sidebar/pager derive from it; `assert-docs-rendered` is
   generic by design — it globs every rendered `article.prose` — and needs no
-  edit), both workflow path filters, `lighthouserc.json`, and the smoke
-  viewport table.
+  edit), `lighthouserc.json`, and the smoke viewport table.
+
+`public/wasm/` is gitignored `just gen-wasm` output; without it the office
+silently stays on its poster.
 
 **The architecture diagram renders at build**, in process
 (`config/rehype-beautiful-mermaid.mjs` — no browser); Playwright's Chromium is

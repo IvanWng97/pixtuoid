@@ -9,7 +9,7 @@
     },
     "findings": {
       "type": "array",
-      "maxItems": 5,
+      "maxItems": 10,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -17,14 +17,16 @@
           "severity": {
             "type": "string",
             "enum": [
-              "HIGH",
-              "MEDIUM"
+              "blocking",
+              "non-blocking",
+              "pre-existing"
             ]
           },
           "path": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 512
+            "maxLength": 512,
+            "pattern": "^([A-Za-z0-9_@-][A-Za-z0-9._@-]*|\\.([A-Za-z0-9_@-][A-Za-z0-9._@-]*|\\.[A-Za-z0-9._@-]+)?)(/([A-Za-z0-9_@-][A-Za-z0-9._@-]*|\\.([A-Za-z0-9_@-][A-Za-z0-9._@-]*|\\.[A-Za-z0-9._@-]+)?))*$"
           },
           "line": {
             "type": "integer",
