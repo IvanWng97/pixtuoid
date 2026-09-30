@@ -56,9 +56,11 @@ run. The jobs:
   freshness, and the npm package generator + OpenClaw plugin contract.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
   full suite on a real Windows runner.
-- **wasm-check** — the wasm32 build plus the committed `site/public/wasm/`
-  pair's integrity and size cap (`just gen-wasm-check`); nothing checks the
-  pair is fresh, so a core/scene/web change runs `just gen-wasm` by hand.
+- **wasm-check** — builds the site's wasm (`just gen-wasm`) and caps its
+  gzipped size (`just gen-wasm-check`).
+- **site** — `site.yml`: the site's static checks, then e2e and
+  Lighthouse on a build with freshly built wasm, so a Rust change that breaks
+  a wasm export the page calls fails before it deploys.
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
   `just test` can't see.
 - **hygiene** — the same `just lint` recipes preflight runs (its CI job exists
@@ -72,7 +74,8 @@ run. The jobs:
   credential-dropping checkouts, exact inline suppressions.
 - **The two automatic Claude reviewers** ride `claude-readonly-review.yml`: a
   read-only model job on the trusted default branch, the PR diff as inert
-  data, a separate least-privilege publisher — and a third job that comments
+  data, a separate least-privilege publisher that opens a review thread per
+  finding — and a third job that comments
   when the model job fails or declines, because absence otherwise renders as
   a pass (#809). `claude.yml` refuses fork PR heads.
 - **CodeQL** stays the advanced workflow (`codeql.yml`): explicit languages,
@@ -191,10 +194,10 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md)'s
    always-on comment row). Not the merge gate.
 8. **Merge gate (non-negotiable)** — the **two-lens review** (2+ differentiated
-   lenses on the diff) + green CI + every online-bot finding dispositioned,
-   judged under the `two-lens-review` skill's **convergence contract**: churn
-   budget before review, a two-fix-round hard cap, only a confirmed HIGH
-   blocks, and a bot `Findings: 0` is evidence, not the gate. (Bot errored or
+   lenses on the diff) + green CI + every finding's review thread resolved by
+   its disposition, judged under the `two-lens-review` skill's **convergence
+   contract**: churn budget before review, a two-fix-round hard cap, only a
+   confirmed HIGH blocks, and a bot `Findings: 0` is evidence, not the gate. (Bot errored or
    absent at HEAD → the skill's step 6 owns the fallback.) **A human merges.**
 9. **Wrap** — retro; durable lessons go to the agent's own memory layer, not
    new repo docs.

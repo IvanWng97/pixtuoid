@@ -42,7 +42,7 @@ codegen-units = 1
 strip         = "debuginfo"
 panic         = "abort"
 
-# The browser engine (`just wasm-build`). `release` is tuned for the native
+# The browser engine (`just gen-wasm`). `release` is tuned for the native
 # binary's speed; the wasm is a DOWNLOAD every visitor pays for before the hero
 # goes live, its frame step is a rounding error against a frame budget and its
 # synth runs in a worker — so it trades the other way. `z` vs `s` is empirical,
