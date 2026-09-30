@@ -687,6 +687,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.current_floor,
             now,
         );
+        // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
         self.audio.frame(audio_frame);
         pixtuoid_scene::floor::frame_epilogue(
             &mut self.floors[self.current_floor].ctx,
