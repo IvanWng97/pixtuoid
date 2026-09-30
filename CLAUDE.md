@@ -51,21 +51,21 @@ site/     Astro landing page; integrations/raycast/  Raycast extension
 ```
 just build [--release] · just test (nextest)         # scope to one crate while iterating
 cargo test -p <crate> --lib <filter>                 # fast loop
-just preflight                                       # pre-push gate: lint → clippy → hack → test (CI order)
+just preflight [full]                                # pre-push gate: lint → clippy; `full` adds hack → test (CI's Rust recipes)
 cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 ```
 
-- Don't chain `cargo clippy && cargo test` (two build caches) — `just preflight` or one at a time. Never pipe preflight through `tail`/`head` (exit code eaten).
+- Don't chain `cargo clippy && cargo test` (two build caches) — `just preflight full` or one at a time. Never pipe preflight through `tail`/`head` (exit code eaten).
 - Touched `--json` / `SourceStatus` / `OutcomeRow` / the source roster → `just gen-contract` (regenerates schemas + Raycast types).
 - Renamed a decoded/registered wire name → `just gen-drift-surface`, commit both `crates/*/drift-surface.json` — the crate's own test fails on a stale fragment; regenerate, don't hand-edit.
 - Look-changing PR → `just gen`, commit everything it rewrote; a core/scene/web change ALSO needs `just gen-wasm` + commit `site/public/wasm/` (`gen` deliberately excludes it, and nothing catches a skip).
-- Real wire bytes ride ONE pipeline: `pixtuoid_core::harness::Drive` (dev-only `harness` feature). A driver keyed off anything but the source's registry row registers NOTHING.
+- Real wire bytes ride ONE pipeline, `pixtuoid_core::harness::Drive` — rules in [`tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md#the-one-pipeline).
 - Fixtures are RECORDED, never composed (`just capture-fixture` — BILLED), and the recorder blanks every subtree no decoder reads (derived by probe, never listed); every scenario declares `provenance.json`. Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md). `just restrip-fixtures` re-strips the committed corpus offline; `just corpus-all` censuses local corpora; `just fixture-age` is advisory/local.
 - Visual verification for sprite work: snapshot example → `scripts/crop-snapshot.py` → READ the PNG; loop in `.claude/skills/beautify-decoration/SKILL.md`.
 - CI gates, and which of them preflight can't see (a green preflight is NOT a green PR): [`CONTRIBUTING.md#ci-gates`](docs/CONTRIBUTING.md#ci-gates) lists them and what each catches.
 - On-demand advisory (never gates): `just mutants`, `just bench`, CodSpeed.
 - Hooks: `git config core.hooksPath .githooks` once per clone; `just setup-tools` installs cargo tools (incl. rust-analyzer — without it the agent LSP degrades to grep).
-- Release: dispatch `release-plz.yml` → merge its PR (no `just gen` — no committed frame carries the version); that merge IS the publish (the `release` job does crates.io + the tag + a draft release; the tag fires release.yml: binaries + npm + homebrew autobump) and stays a human step. [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
+- Release is a human step: [`CONTRIBUTING.md#releasing`](docs/CONTRIBUTING.md#releasing).
 
 ## Workflow
 
@@ -90,7 +90,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 - **Shell**: match the surrounding shell; `shellcheck` + `shfmt` (`just shfmt-fix`) any `.sh` you touch. macOS-first (BSD CLI, brew).
 - **Docs current in the same commit** as any structure/API/workflow change.
 - **External-surface claims are fetched, not remembered** — cite the `path:line` you fetched THIS session or add a `check_upstream_drift.py` row; the population is the whole upstream repo (`gh api .../git/trees/<ref>?recursive=1`), not one plausible file (#938).
-- **A refuted review finding produces a MECHANISM, or nothing** — a test, a compile-time constraint, or a CI gate; refuting never produces prose, because prose has no failure mode. Only an EXTERNAL fact (another CLI's wire bytes, an OS semantic) earns a comment, on the narrowest thing it constrains. **A real finding this change introduced is fixed in-scope or forces a re-scope; a pre-existing one is SURFACED to the owner in one line (four terminal states, defined once in `pr-review.prompt.md`). Agents never file issues.**
+- **A refuted review finding produces a MECHANISM, or nothing** — a test, a compile-time constraint, or a CI gate; refuting never produces prose, because prose has no failure mode. Only an EXTERNAL fact (another CLI's wire bytes, an OS semantic) earns a comment, on the narrowest thing it constrains. **A real finding this change introduced is fixed in-scope or forces a re-scope; a pre-existing one is SURFACED to the owner in one line (four terminal states, defined once in the `two-lens-review` skill's `briefs.md`). Agents never file issues.**
 - **Only the latest released version of each agent CLI is supported.** When upstream renames or reshapes a wire name, repoint the decoder, the plugin, and the drift-watcher anchor at the CURRENT declaration and DELETE the old one — no dual-listening beside a replacement, no legacy-format arm kept "just in case". Every superseded arm is a second copy of a wire contract that drifts silently and that the watcher then has to anchor twice (#981). Two things this does NOT govern: OUR OWN upgrade path (a `LEGACY_INSTANCE_ID` for a plugin file an older pixtuoid wrote is a compatibility arm for our artifact, not upstream's — #457), and mirroring a resolver upstream itself still branches on. Pre-dating arms exist (`opencode.rs`'s v1/v2 permission names, `codewhale.rs`'s `spawn_agent`); they are debt, not precedent.
 - **Path asserts compare `PathBuf` structurally**, never `to_string_lossy()` with a hardcoded separator — string asserts pass on Unix and fail only in `windows-test`. Resolution POLICY (HOME vs USERPROFILE, %APPDATA% vs `~/.config`) is per-CLI: mirror each CLI's own resolver (`platform::home_first_dir`).
 
@@ -98,7 +98,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 
 1. **`pixtuoid-core` and `pixtuoid-scene` have no terminal/window/audio-device deps** (compiler-enforced by crate boundary; `just arch`). New render targets are thin painters over `pixtuoid_scene::floor::render_floor` / `pixel_painter::render_to_rgb_buffer`.
 2. **Agent events flow through ONE channel** `mpsc::Sender<(Transport, AgentEvent)>`; the `Transport` tag drives hook-wins dedup — producers tag their own events. Daemon presence rides a separate `AgentId`-free channel (`PresenceMsg { key: DaemonInstanceKey, delta }`) and never enters `Reducer::apply`.
-3. **`Source` trait is the only seam** for a transcript-bearing CLI; per-source format knowledge lives in that source's decoder. Exceptions: hook-only CLIs (Reasonix) and the shared ACP wire standard (`source/acp.rs`, reused by grok) — see core's guide.
+3. **`Source` trait is the only seam** for a transcript-bearing CLI; per-source format knowledge lives in that source's decoder. Exceptions: hook-only CLIs (Reasonix) and the shared ACP wire standard (`source/acp.rs`, reused by grok) — [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#adding-a-new-agent-cli) step 3 and `source/acp.rs`'s header.
 4. **Hook install writes through symlinks** (`resolve_symlink` in `install/io.rs`) — critical for stow-managed configs; Windows keeps the bounded rename-retry.
 5. **The hook shim never blocks CC** — always exit 0 silently; the send bound (pixtuoid-hook's `transport::WRITE_TIMEOUT`) is watchdog-enforced on both platforms. Shim coverage is child-process level only.
 6. **Walkable mask = ground footprint only**; sprite size never moves a sim position — fitting the frame is the painter's job (`keep_sprite_on_canvas`), not the sim's (#912).
