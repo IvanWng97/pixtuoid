@@ -1,6 +1,8 @@
 # Review rules
 
 Read [`AGENTS.md`](AGENTS.md) first; these rules add to generic defect hunting.
+Nested `AGENTS.md` files (crates/*, tests/, site/, integrations/raycast/) add
+rules for their trees.
 
 ## Scope
 
