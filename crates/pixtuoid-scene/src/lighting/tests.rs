@@ -232,3 +232,69 @@ fn an_emptied_floor_takes_both_desk_emitters_down_with_the_level() {
         );
     }
 }
+
+/// One of every shape, lit.
+fn every_shape() -> [Emitter; 4] {
+    let lit = |kind, light| Emitter {
+        kind,
+        light,
+        strength: 0.8,
+    };
+    [
+        lit(
+            EmitterKind::DeskLamp,
+            Light::Halo {
+                centre: Point { x: 30, y: 20 },
+                radius: 5,
+                share: 0.4,
+            },
+        ),
+        lit(
+            EmitterKind::NeonGlow,
+            Light::Glow {
+                at: Point { x: 25, y: 15 },
+                w: 8,
+                h: 4,
+                reach: 6,
+            },
+        ),
+        lit(
+            EmitterKind::WindowSpill,
+            Light::Spill {
+                x: 26,
+                w: WINDOW_W,
+                top: 12,
+                slant: 0.4,
+            },
+        ),
+        lit(
+            EmitterKind::MonitorHalo(ToolKind::Read),
+            Light::Patch {
+                centre: Point { x: 30, y: 20 },
+            },
+        ),
+    ]
+}
+
+#[test]
+fn a_light_sampled_between_cells_stays_inside_its_bounds() {
+    for e in every_shape() {
+        let ((x0, y0), (x1, y1)) = e.bounds();
+        for y in 0..(48 * 4) {
+            for x in 0..(64 * 4) {
+                let (fx, fy) = ((x as f32 + 0.5) / 4.0, (y as f32 + 0.5) / 4.0);
+                if e.level_at_f(fx, fy).is_some() {
+                    assert!(
+                        fx >= f32::from(x0)
+                            && fx < f32::from(x1)
+                            && fy >= f32::from(y0)
+                            && fy < f32::from(y1),
+                        "{:?} lights ({fx}, {fy}) outside {:?}",
+                        e.kind,
+                        e.bounds()
+                    );
+                }
+            }
+        }
+    }
+}

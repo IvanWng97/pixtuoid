@@ -9,6 +9,7 @@
 //! Usage:
 //!   cargo run --release --example cutaway_snapshot -- <out.png> [--scale N]
 //!       [--agents N] [--theme T] [--logical WxH] [--now-hour H] [--floor I/N]
+//!       [--weather W]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -98,6 +99,7 @@ fn main() -> Result<()> {
 
     let (mut scale_n, mut agents, mut theme_name) = (None, 10usize, "tokyo-night".to_string());
     let (mut now_hour, mut floor) = (None::<u32>, (0usize, 1usize));
+    let mut weather = None::<String>;
     let (mut lw, mut lh) = DEFAULT_LOGICAL;
     let rest: Vec<String> = args.collect();
     let mut i = 0;
@@ -120,6 +122,7 @@ fn main() -> Result<()> {
                 lh = h.parse().context("bad --logical height")?;
             }
             "--now-hour" => now_hour = Some(val("--now-hour")?.parse().context("bad --now-hour")?),
+            "--weather" => weather = Some(val("--weather")?),
             "--floor" => {
                 let v = val("--floor")?;
                 let (f, n) = v
@@ -142,6 +145,14 @@ fn main() -> Result<()> {
     // Defaults to the pack's densest art, the density it was drawn for.
     let scale_n = scale_n.unwrap_or_else(|| pack.max_density_variant());
     let scale = RenderScale::new(scale_n).ok_or_else(|| anyhow!("--scale must be nonzero"))?;
+    // The sky otherwise cycles its weather with the clock, so an hour alone
+    // does not say what the room looks like.
+    if let Err(valid) = pixtuoid_scene::pixel_painter::force_weather(weather.as_deref()) {
+        return Err(anyhow!(
+            "unknown --weather {weather:?}; valid: {}",
+            valid.join(" | ")
+        ));
+    }
     let now = match now_hour {
         Some(h) => {
             use chrono::TimeZone;
@@ -178,7 +189,7 @@ fn main() -> Result<()> {
             theme,
             scale,
         },
-        meta.altitude,
+        meta,
         now,
         &mut cache,
         &mut buf,
