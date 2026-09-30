@@ -4,8 +4,8 @@ Thanks for your interest! PRs are welcome — especially **new themes**, sprite 
 decoration polish, and **`Source` adapters** for agent CLIs we don't support yet
 (the agent CLIs plus the OpenClaw gateway already wired up are listed in the README).
 
-Before you start, read [`CLAUDE.md`](../CLAUDE.md) at the repo root (and the
-nested `crates/*/CLAUDE.md` for the crate you touch). It holds the load-bearing
+Before you start, read [`AGENTS.md`](../AGENTS.md) at the repo root (and the
+nested `crates/*/AGENTS.md` for the crate you touch). It holds the load-bearing
 architecture invariants and conventions. Many things that look like bugs are
 documented, intentional design: read the whole item, its doc comment and the
 comments on the lines it governs, before changing it.
@@ -39,7 +39,14 @@ the tests are CI's).
 CI is the gate. Beyond the tests and the feature powerset (`just preflight full`
 runs those locally), it runs the jobs below; all but **hygiene** and zizmor's
 offline audits are invisible to preflight, so a green preflight does not mean a
-green PR:
+green PR.
+
+A draft PR runs only the **light tier**, every job without
+`if: inputs.full`; a ready PR, a push to `main` and a manual dispatch run
+both tiers, and CodeQL and CodSpeed skip drafts. The skipped jobs make a draft's `ci-gate` red by design,
+so read its light-tier verdict from the individual job checks. If a ready PR's
+`ci-gate` reports only a draft run, re-run the cancelled `ready_for_review`
+run. The jobs:
 
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
@@ -181,7 +188,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
 6. **Build** — TDD: failing test → minimal impl → commit.
 7. **Self-review** — a standards+spec pass before pushing, INCLUDING the
    whole-file comment audit: every file the PR touches — even by one line —
-   gets its entire comment population re-read against `CLAUDE.md`'s comment
+   gets its entire comment population re-read against `AGENTS.md`'s comment
    rules, and the cleanup rides the same PR (population and dispositions:
    [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md)'s
    always-on comment row). Not the merge gate.
@@ -199,7 +206,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
 On a fresh machine or a non-Claude tool, `git clone` gives you the repo skills
 and every `just` gate; this section IS the loop for tools without skills. Do
 not scaffold a `CONTEXT.md`/`docs/adr/` convention here — a declaration's own
-doc comment is the design record, and the nested `CLAUDE.md` says only what its
+doc comment is the design record, and the nested `AGENTS.md` says only what its
 crate IS.
 
 ### The running order
@@ -209,7 +216,9 @@ crate IS.
 | before code, if non-trivial (new seam / ≥3 files) | plan against [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) |
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` |
 | before push | nothing — the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
-| opening the PR | open it as a draft; mark it ready once CI is green — the billed review bots skip drafts, so a red push doesn't buy a review of a head that's about to be replaced |
+| while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
+| once you need a PR number | open it as a draft: the light tier runs, and `ci-gate` stays red by design |
+| once the draft's light tier is green | mark it ready: the full tier and the billed review bots start together, so a failure only the full tier catches costs one extra review round until the bots are chained after CI |
 | before merge | the two-lens review |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 
@@ -231,7 +240,7 @@ Advisory backstops that surface risk but never gate:
 
 ## Conventions and architecture invariants
 
-Both live in [`CLAUDE.md`](../CLAUDE.md) ("Conventions", "Architecture
+Both live in [`AGENTS.md`](../AGENTS.md) ("Conventions", "Architecture
 invariants"), which every contributor and agent reads first.
 
 ## Pull requests
@@ -241,7 +250,7 @@ invariants"), which every contributor and agent reads first.
   `claude-security-review` workflows plus your local two-lens pass.
 - AI-authored PRs get the `needs-human-verify` label and a human visual check.
 - **Every reviewer/bot finding reaches exactly one terminal state in the PR
-  thread** — FIXED · REFUTED-with-trace · RE-SCOPED · SURFACED, defined ONCE
+  thread** — FIXED · REFUTED · RE-SCOPED → #N · FOLLOW-UP → #N, defined ONCE
   in [`two-lens-review/briefs.md`](../.claude/skills/two-lens-review/briefs.md). Agents
   never file issues, and "acknowledged, no action" is not a state.
 
@@ -304,7 +313,7 @@ guards; steps 1–3, 11 and 12 are on you.
    `sources --json` golden (`crates/pixtuoid/tests/snapshots/cli/sources.json`)
    must list it: `SNAPSHOTS=overwrite cargo test -p pixtuoid --test cli_json`.
 6. **Record the fixture** — the test steps in
-   [`crates/pixtuoid-core/tests/CLAUDE.md`](../crates/pixtuoid-core/tests/CLAUDE.md)
+   [`crates/pixtuoid-core/tests/AGENTS.md`](../crates/pixtuoid-core/tests/AGENTS.md)
    (a RECORDED SessionStart scenario via `just capture-fixture`), then
    `cargo insta review`.
 7. **Wire it into `runtime/driver.rs::build_source_set`** (the one

@@ -414,10 +414,9 @@ pub(crate) const fn repels_plants(kind: Furniture) -> bool {
         Furniture::FishTank
         | Furniture::MeetingSofaBody
         | Furniture::MeetingTable
-        | Furniture::KitchenIsland => true,
-        // Non-waypoint singletons too, but the owner-ratified mock has the lounge
-        // Ficus hug them (1px) — deliberately NOT repelled.
-        Furniture::FloorLamp | Furniture::LoungeSideTable => false,
+        | Furniture::KitchenIsland
+        | Furniture::FloorLamp
+        | Furniture::LoungeSideTable => true,
         // Never a non-waypoint singleton in the plant census — waypoint furniture
         // is repelled via `first_blocking_waypoint` instead.
         Furniture::Couch
@@ -1018,6 +1017,16 @@ impl PodDecor {
         }
     }
 
+    /// The waypoint this decor also is, or `None` for pure decor. Exhaustive (no
+    /// `_`): a new `PodDecor` makes a deliberate wander decision here.
+    pub(crate) const fn waypoint(self) -> Option<WaypointKind> {
+        match self {
+            PodDecor::PhoneBooth => Some(WaypointKind::PhoneBooth),
+            PodDecor::StandingDesk => Some(WaypointKind::StandingDesk),
+            PodDecor::PlantTall | PodDecor::Whiteboard | PodDecor::Tv => None,
+        }
+    }
+
     /// Pack-animation key for this pod-decor's sprite (blit in `drawable.rs`).
     pub const fn sprite_name(self) -> &'static str {
         match self {
@@ -1046,24 +1055,18 @@ mod tests {
             Furniture::MeetingSofaBody,
             Furniture::MeetingTable,
             Furniture::KitchenIsland,
+            Furniture::FloorLamp,
+            Furniture::LoungeSideTable,
         ] {
             assert!(
                 repels_plants(k),
                 "{k:?} is a solid body — must repel plants"
             );
         }
-        assert!(
-            !repels_plants(Furniture::FloorLamp),
-            "lamp keeps the Ficus hug"
-        );
-        assert!(
-            !repels_plants(Furniture::LoungeSideTable),
-            "side table keeps the Ficus hug"
-        );
         assert_eq!(
             Furniture::ALL.iter().filter(|&&k| repels_plants(k)).count(),
-            4,
-            "exactly four kinds repel — a new `true` must be deliberate"
+            6,
+            "exactly six kinds repel — a new `true` must be deliberate"
         );
     }
 
