@@ -1,8 +1,7 @@
 //! The cutaway's time of day: the room darkens with the sky, and its own lights
 //! ([`crate::lighting`]) lift what they fall on, in whole [`Rgb::ramp`] steps
-//! on the art grid. A light's bands are solid, dithered into the next only at
-//! their seam, and its colour is a tint at fixed stops, so the room stays a
-//! palette: nothing blends continuously, the rule the rest of the cutaway is
+//! on the art grid ([`crate::dither::step`]), and its colour is a tint at
+//! fixed stops, so the room stays a palette: nothing blends continuously, the rule the rest of the cutaway is
 //! drawn by.
 //!
 //! The pieces are painted as by day; one pass ([`net_pass`]) then takes each
@@ -12,7 +11,7 @@
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::cutaway::order::Span;
-use crate::cutaway::pen::{dithered, ArtPx, ArtRect, Pen};
+use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::lighting::{Emitter, EmitterKind};
 use crate::theme::Theme;
 
@@ -28,24 +27,12 @@ const LIFT_STOPS_PER_LEVEL: f32 = 7.0;
 /// and a second would bleach the floor under it.
 const DAYLIGHT_LIFT: u8 = 1;
 
-/// The share at the top of each step over which a light dithers into the next;
-/// below it the band is solid, since a whole band of dither reads as grain.
-const SEAM: f32 = 0.3;
-
 /// The share of the way to its light's colour a pixel is tinted per step of
 /// lift: the brightest cells take the most colour, as they would.
 const TINT_PER_STEP: f32 = 0.08;
 /// The deepest tint, in steps of [`TINT_PER_STEP`]: past it a lit pixel reads
 /// as painted in the light's colour rather than lit by it.
 const TINT_MAX_STEPS: u8 = 3;
-
-/// The whole steps a light `stops` strong lifts the art pixel at `(x, y)`:
-/// solid through each band, dithered into the next only across its [`SEAM`].
-fn step_at(stops: f32, x: ArtPx, y: ArtPx) -> u8 {
-    let whole = stops.max(0.0).floor();
-    let into_seam = (stops - whole - (1.0 - SEAM)) / SEAM;
-    whole as u8 + u8::from(into_seam > 0.0 && dithered(x, y, into_seam))
-}
 
 /// How dark the room is: the sky's darkness in whole steps, so a frame's tone
 /// changes a handful of times a day rather than every frame.
@@ -183,7 +170,9 @@ impl LightView {
                 };
                 let stops = level * LIFT_STOPS_PER_LEVEL;
                 solid |= stops >= 1.0;
-                step_at(stops, ArtPx(ax), ArtPx(ay)).min(ambient.ceiling())
+                // Floored, not rounded: a lamp never lifts past its level, and
+                // the lift constants and the `solid` test are tuned in whole steps.
+                crate::dither::step(stops, ax, ay).min(ambient.ceiling())
             })
             .collect();
         solid.then(|| {
@@ -332,11 +321,8 @@ pub(crate) fn net_pass(
     let bx1 = bx0.saturating_add(pen.buffer(rect.w)).min(buf.width());
     let by1 = by0.saturating_add(pen.buffer(rect.h)).min(buf.height());
     let bw = usize::from(buf.width());
-    debug_assert_eq!(
-        emission.glow.len(),
-        bw * usize::from(buf.height()),
-        "one class per pixel"
-    );
+    let pixels = buf.as_mut_slice();
+    debug_assert_eq!(emission.glow.len(), pixels.len(), "one class per pixel");
     for by in by0..by1 {
         let art_row = usize::from(by / k - rect.y.0) * w;
         for bx in bx0..bx1 {
@@ -347,7 +333,7 @@ pub(crate) fn net_pass(
             }
             let i = usize::from(by) * bw + usize::from(bx);
             let glow = emission.glow.get(i).copied().unwrap_or(Glow::Lit);
-            buf.put(bx, by, memo.of(buf.get(bx, by), glow, lift, tint, ambient));
+            pixels[i] = memo.of(pixels[i], glow, lift, tint, ambient);
         }
     }
 }
@@ -532,32 +518,6 @@ mod tests {
             "off-stop colours: {:?}",
             seen.difference(&allowed)
         );
-    }
-
-    /// A band is one step through its middle; only the seam at its top mixes
-    /// in the next.
-    #[test]
-    fn a_light_band_is_solid_but_for_its_seam() {
-        for band in 0..4u8 {
-            for tenth in 0..10 {
-                let stops = f32::from(band) + tenth as f32 / 10.0;
-                let steps: std::collections::BTreeSet<u8> = (0..8)
-                    .flat_map(|y| (0..8).map(move |x| step_at(stops, ArtPx(x), ArtPx(y))))
-                    .collect();
-                if (tenth as f32 / 10.0) < 1.0 - SEAM {
-                    assert_eq!(
-                        steps,
-                        [band].into(),
-                        "{stops} stops is dithered off its seam"
-                    );
-                } else {
-                    assert!(
-                        steps.is_subset(&[band, band + 1].into()),
-                        "{stops}: {steps:?}"
-                    );
-                }
-            }
-        }
     }
 
     /// A light takes the night room back to its daylight tone at most, and the
