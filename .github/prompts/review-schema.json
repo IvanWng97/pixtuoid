@@ -28,8 +28,7 @@
           },
           "line": {
             "type": "integer",
-            "minimum": 1,
-            "description": "The line in the PR head, counted from the +start of its hunk."
+            "minimum": 1
           },
           "body": {
             "type": "string",
