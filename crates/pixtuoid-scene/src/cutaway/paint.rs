@@ -4229,6 +4229,17 @@ mod tests {
                         None,
                         "{kind:?} at scale {s} wrote a logical pixel outside {span:?}"
                     );
+                    // A piece on the floor is grounded under its span's south row,
+                    // at the densities the cutaway is drawn at.
+                    if s % pack.max_density_variant() == 0
+                        && ground_shadow(span, &kind, pack).is_some()
+                    {
+                        assert_eq!(
+                            lowest_painted_row(&kind, layout, pack, theme, scale),
+                            Some(span.y1),
+                            "{kind:?} at scale {s} is grounded on a row it doesn't reach: {span:?}"
+                        );
+                    }
                 }
             }
         };
@@ -5342,6 +5353,30 @@ S B B B B B B S
                 (scale.logical(x as u16), scale.logical(y as u16))
             })
             .find(|&(x, y)| !((span.x0..=span.x1).contains(&x) && (span.y0..=span.y1).contains(&y)))
+    }
+
+    fn lowest_painted_row(
+        kind: &PieceKind,
+        layout: &Layout,
+        pack: &Pack,
+        theme: &Theme,
+        scale: RenderScale,
+    ) -> Option<u16> {
+        let w = usize::from(scale.to_buffer(layout.buf_w));
+        let [a, b] = painted_over_two_fills(kind, layout, pack, theme, scale);
+        a.as_slice()
+            .iter()
+            .zip(b.as_slice())
+            .enumerate()
+            .filter(|(_, (pa, pb))| {
+                if kind.reads_under() {
+                    [**pa, **pb] != UNDER
+                } else {
+                    pa == pb
+                }
+            })
+            .map(|(i, _)| scale.logical((i / w) as u16))
+            .max()
     }
 
     /// Splitting is what makes the office above orderable, so pin it directly:
