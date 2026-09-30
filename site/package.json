@@ -49,7 +49,7 @@
     "lighthouse": "^13.5.0",
     "playwright": "^1.62.1",
     "prettier": "^3.9.9",
-    "prettier-plugin-astro": "^1.0.1",
+    "prettier-plugin-astro": "^1.1.0",
     "prismjs": "1.30.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.70.1",

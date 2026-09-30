@@ -74,31 +74,31 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
 
     <div class="studio reveal" id="studio">
       <div class="studio__stages">
-        {live.map((c) => <ChannelStage channel={c} active={c.id === def.id} />)}
+        {live.map((c) => (
+          <ChannelStage channel={c} active={c.id === def.id} />
+        ))}
       </div>
       <div class="studio__panel">
         <div class="dial" role="group" aria-label="Demos">
-          {
-            channels.map((c) =>
-              c.status === 'live' ? (
-                <button
-                  class="mon dial__ch"
-                  data-ch={c.id}
-                  data-desc={c.featureDesc}
-                  aria-pressed={c.id === def.id ? 'true' : 'false'}
-                  aria-expanded={c.id === def.id ? 'true' : 'false'}
-                  aria-controls="dial-desc"
-                >
-                  <span class="dial__num">{c.ch}</span> {c.label}
-                  {c.kind === 'live' && <small class="dial__live">live</small>}
-                </button>
-              ) : (
-                <span class="dial__ch dial__ch--soon">
-                  <span class="dial__num">{c.ch}</span> {c.label} <small>soon</small>
-                </span>
-              )
+          {channels.map((c) =>
+            c.status === 'live' ? (
+              <button
+                class="mon dial__ch"
+                data-ch={c.id}
+                data-desc={c.featureDesc}
+                aria-pressed={c.id === def.id ? 'true' : 'false'}
+                aria-expanded={c.id === def.id ? 'true' : 'false'}
+                aria-controls="dial-desc"
+              >
+                <span class="dial__num">{c.ch}</span> {c.label}
+                {c.kind === 'live' && <small class="dial__live">live</small>}
+              </button>
+            ) : (
+              <span class="dial__ch dial__ch--soon">
+                <span class="dial__num">{c.ch}</span> {c.label} <small>soon</small>
+              </span>
             )
-          }
+          )}
         </div>
         <p class="dial__desc" id="dial-desc" aria-live="polite">
           {def.featureDesc}
@@ -108,17 +108,13 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
 
     <span id="features" aria-hidden="true"></span>
     <ul class="roster reveal" aria-label="Feature highlights">
-      {
-        roster.map((r) => (
-          <li class="roster__row">
-            <span class="roster__icon" aria-hidden="true">
-              {r.pix ? <PixIcon name={r.pix} scale={2} /> : r.icon}
-            </span>
-            <span class="roster__name">{r.title}</span>
-            <span class="roster__body">{r.body}</span>
-          </li>
-        ))
-      }
+      {roster.map((r) => <li class="roster__row">
+        <span class="roster__icon" aria-hidden="true">
+          {r.pix ? <PixIcon name={r.pix} scale={2} /> : r.icon}
+        </span>
+        <span class="roster__name">{r.title}</span>
+        <span class="roster__body">{r.body}</span>
+      </li>)}
     </ul>
   </div>
 </section>
