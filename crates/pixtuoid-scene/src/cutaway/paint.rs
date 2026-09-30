@@ -1,7 +1,6 @@
-//! The cutaway profile's paint pass — the second reader of `SimFrame`, and
-//! deliberately partial: EFFECTS (weather, steam, the pet) stay with the classic
-//! pass, and of the glow it draws only the desks' and a lit sitter's tint. It
-//! never advances the sim; a mover here would desync the profiles.
+//! The cutaway profile's paint pass — the second reader of `SimFrame`. EFFECTS
+//! (weather, steam, the pet) stay with the classic pass. It never advances the
+//! sim; a mover here would desync the profiles.
 
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
 use pixtuoid_core::sprite::format::Pack;
@@ -11,7 +10,7 @@ use crate::atmosphere::Moment;
 use crate::cutaway::order::{depth_sort, Span};
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::cutaway::shade::{fill, slab, Ramp};
-use crate::layout::{Layout, DESK_H};
+use crate::layout::{Bounds, Depth, Fixture, FixtureKind, Layout, Point, Station, DESK_H};
 use crate::pixel_painter::SimFrame;
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
@@ -172,9 +171,8 @@ pub fn render_cutaway(
     list.labels().collect()
 }
 
-/// Everything under the list's pieces: floor, its rugs, and the north wall band
-/// with its window frames. None of it moves within a layout, theme, pack and
-/// scale.
+/// Everything under the list's pieces, none of which moves within a layout,
+/// theme, pack and scale.
 fn paint_backdrop(
     layout: &Layout,
     theme: &Theme,
@@ -183,9 +181,12 @@ fn paint_backdrop(
     buf: &mut RgbBuffer,
 ) {
     paint_floor(layout, theme, pen, buf);
-    // Rugs lie flat on the floor, under everything that stands on it.
-    for rug in layout.rugs() {
-        paint_rug(rug, theme, pen, buf);
+    for fixture in layout.fixtures() {
+        match covering(fixture.kind) {
+            Some(Covering::Rug) => paint_rug(fixture.visual, theme, pen, buf),
+            Some(Covering::Runner) => paint_runner(fixture.visual, theme, pen, buf),
+            None => {}
+        }
     }
     paint_wall(layout, theme, scale, pen, buf);
 }
@@ -417,15 +418,6 @@ fn lights(
         .chain(&lamps)
         .chain(&lights.monitor_halos)
         .chain(std::iter::once(&lights.neon))
-        .filter(|e| match e.kind {
-            // The glow waits for its sign, which the cutaway does not draw yet:
-            // a glow with no tube in it reads as a stain on the wall.
-            crate::lighting::EmitterKind::NeonGlow => false,
-            crate::lighting::EmitterKind::FloorLamp
-            | crate::lighting::EmitterKind::DeskLamp
-            | crate::lighting::EmitterKind::MonitorHalo(_)
-            | crate::lighting::EmitterKind::WindowSpill => true,
-        })
         .filter_map(|e| {
             crate::cutaway::light::LightView::of(
                 e,
@@ -450,10 +442,10 @@ fn lights(
 
 /// Paint `list` over the backdrop `buf` holds: every piece's shadow
 /// ([`ground_shadow`]) first, then the pieces back to front as by day, noting
-/// which pixels glow of their own ([`Glow`](crate::cutaway::light::Glow)), and last one pass
-/// ([`net_pass`](crate::cutaway::light::net_pass)) takes every other pixel to
-/// the hour: darkened with the room and lifted by its lights at once, so no
-/// pixel is darkened twice or darkened and relit.
+/// which pixels glow of their own ([`Glow`](crate::cutaway::light::Glow)), and
+/// last one pass ([`net_pass`](crate::cutaway::light::net_pass)) takes every
+/// other pixel to the hour: darkened with the room and lifted by its lights at
+/// once, so no pixel is darkened twice or darkened and relit.
 pub(crate) fn paint_list(
     list: &DrawList<'_>,
     cache: &mut crate::frame_cache::FrameCache,
@@ -478,9 +470,8 @@ pub(crate) fn paint_list(
     crate::cutaway::light::net_pass(whole, &lights, list.ambient, &emission, pen, buf);
 }
 
-/// Paint every piece but the lights, back to front as by day, and return each
-/// pixel's [`Glow`](crate::cutaway::light::Glow): set by the last piece that painted it, so a sitter in
-/// front of a screen takes the room's light over it.
+/// Paint every piece but the lights, back to front as by day, and return the
+/// [`Emission`](crate::cutaway::light::Emission) they leave.
 fn paint_pieces(
     list: &DrawList<'_>,
     cache: &mut crate::frame_cache::FrameCache,
@@ -506,7 +497,35 @@ fn paint_pieces(
             PieceKind::Desk { at, art, screen } => {
                 mark_glow(at, art, screen, list.pack, list.scale, &mut marks)
             }
-            _ => false,
+            PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => {
+                mark_bulbs(Placed::Centred(at), art, list.pack, list.scale, &mut marks)
+            }
+            PieceKind::Hung { at, sprite } => mark_bulbs(
+                Placed::TopLeft(at),
+                Art::still(sprite),
+                list.pack,
+                list.scale,
+                &mut marks,
+            ),
+            PieceKind::Door { at, frame } => mark_bulbs(
+                Placed::TopLeft(at),
+                Art {
+                    sprite: DOOR_SPRITE,
+                    frame,
+                    flip: Flip::None,
+                },
+                list.pack,
+                list.scale,
+                &mut marks,
+            ),
+            PieceKind::Glass { .. }
+            | PieceKind::WallSeg { .. }
+            | PieceKind::Chair { .. }
+            | PieceKind::PropBand { .. }
+            | PieceKind::Table { .. }
+            | PieceKind::Character { .. }
+            | PieceKind::Neon { .. }
+            | PieceKind::Clock { .. } => false,
         };
         let mut old = before.iter();
         for y in y0..y1 {
@@ -514,15 +533,34 @@ fn paint_pieces(
                 if old.next() == Some(&buf.get(x, y)) {
                     continue;
                 }
-                let glow = match piece.kind {
-                    // The glass is the sky, which the look already resolved.
-                    PieceKind::Glass { .. } => Glow::Emissive,
-                    _ if glowing => match marks.get(x, y) {
-                        EMISSIVE_MARK => Glow::Emissive,
-                        SHADED_MARK => Glow::Shaded,
-                        _ => Glow::Lit,
-                    },
+                let marked = || match marks.get(x, y) {
+                    EMISSIVE_MARK => Glow::Emissive,
+                    SHADED_MARK => Glow::Shaded,
                     _ => Glow::Lit,
+                };
+                let glow = match piece.kind {
+                    PieceKind::Glass { .. } => Glow::Pane,
+                    PieceKind::Neon { .. } => Glow::Emissive,
+                    PieceKind::Desk { .. }
+                    | PieceKind::Prop { .. }
+                    | PieceKind::Animated { .. }
+                    | PieceKind::Hung { .. }
+                    | PieceKind::Door { .. }
+                        if glowing =>
+                    {
+                        marked()
+                    }
+                    PieceKind::Desk { .. }
+                    | PieceKind::Prop { .. }
+                    | PieceKind::Animated { .. }
+                    | PieceKind::Hung { .. }
+                    | PieceKind::Door { .. }
+                    | PieceKind::WallSeg { .. }
+                    | PieceKind::Chair { .. }
+                    | PieceKind::PropBand { .. }
+                    | PieceKind::Table { .. }
+                    | PieceKind::Character { .. }
+                    | PieceKind::Clock { .. } => Glow::Lit,
                 };
                 emission.set(x, y, glow);
             }
@@ -591,6 +629,51 @@ fn mark_glow(
     any
 }
 
+/// Where a piece's art lands: centred on a layout point, or from its top-left.
+#[derive(Clone, Copy)]
+enum Placed {
+    Centred(Point),
+    TopLeft(Point),
+}
+
+/// Mark emissive where `art` draws a bulb
+/// ([`DESK_BULB_KEY`](crate::pixel_painter::DESK_BULB_KEY)); whether it marked
+/// any.
+fn mark_bulbs(
+    placed: Placed,
+    art: Art,
+    pack: &Pack,
+    scale: RenderScale,
+    marks: &mut RgbBuffer,
+) -> bool {
+    let Some(dense) = crate::pixel_painter::densest_frame(pack, art.sprite, art.frame, scale)
+    else {
+        return false;
+    };
+    let bulbs = drawn_in(&dense, &[crate::pixel_painter::DESK_BULB_KEY]);
+    if !bulbs.iter().any(|&b| b) {
+        return false;
+    }
+    let only = pixtuoid_core::sprite::Frame::from_pixels(
+        dense.frame.width(),
+        dense.frame.height(),
+        bulbs.iter().map(|&b| b.then_some(EMISSIVE_MARK)).collect(),
+    );
+    let (x, y) = placed.top_left(dense.logical, scale);
+    blit_frame_scaled(&art.flip.turn(only), x, y, dense.blit_at, marks);
+    true
+}
+
+impl Placed {
+    /// The buffer top-left of `logical`-sized art placed so.
+    fn top_left(self, logical: (u16, u16), scale: RenderScale) -> (u16, u16) {
+        match self {
+            Self::Centred(at) => centred_top_left(at, logical, scale),
+            Self::TopLeft(at) => (scale.to_buffer(at.x), scale.to_buffer(at.y)),
+        }
+    }
+}
+
 /// Which of `art`'s pixels, row by row, it draws in one of `keys`: those that
 /// go transparent when the keys are painted so.
 fn drawn_in(art: &crate::pixel_painter::DenseFrame<'_>, keys: &[char]) -> Vec<bool> {
@@ -648,7 +731,8 @@ const SHADOW_STOPS_PER_STRENGTH: f32 = 6.0;
 /// Where a piece meets the floor, as the shadow it casts there: on the row under
 /// its south edge, a standing figure's under its feet. A sitter is grounded by
 /// what they sit on, which casts its own: a desk chair a sitter carries, under
-/// the chair. Walls, window glass and hung decor meet no floor.
+/// the chair. Walls, window glass, the elevator and what hangs on a wall meet
+/// no floor.
 fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::ground::Contact> {
     let under = |s: Span| {
         Some(crate::ground::Contact::under(
@@ -658,7 +742,12 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
         ))
     };
     match *kind {
-        PieceKind::WallSeg { .. } | PieceKind::Glass { .. } | PieceKind::Hung { .. } => None,
+        PieceKind::WallSeg { .. }
+        | PieceKind::Glass { .. }
+        | PieceKind::Hung { .. }
+        | PieceKind::Door { .. }
+        | PieceKind::Neon { .. }
+        | PieceKind::Clock { .. } => None,
         PieceKind::Character {
             ref figure,
             body,
@@ -759,14 +848,17 @@ fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::WallSeg { piece, rows } => (piece, rows).hash(&mut h),
         PieceKind::Desk { at, art, screen } => (at, art, screen).hash(&mut h),
         PieceKind::Chair { at } => at.hash(&mut h),
-        PieceKind::Prop {
-            at,
-            sprite,
-            mirrored,
-        } => (at, sprite, mirrored).hash(&mut h),
+        PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => (at, art).hash(&mut h),
         PieceKind::PropBand { at, sprite, rows } => (at, sprite, rows).hash(&mut h),
         PieceKind::Table { at } => at.hash(&mut h),
-        PieceKind::Appliance { at, sprite, frame } => (at, sprite, frame).hash(&mut h),
+        PieceKind::Door { at, frame } => (at, frame).hash(&mut h),
+        PieceKind::Neon {
+            at,
+            tube,
+            hue,
+            interior,
+        } => (at, tube, hue, interior).hash(&mut h),
+        PieceKind::Clock { at, reading } => (at, reading).hash(&mut h),
         // The label is the caller's, and the body follows from `at` and `key`.
         PieceKind::Character {
             figure:
@@ -785,24 +877,423 @@ fn fingerprint(kind: &PieceKind) -> u64 {
     h.finish()
 }
 
-/// Every piece of the office, each with its [`Span`]. The push
-/// order breaks depth ties, so it is part of the result: a chair pushed after
-/// the people keeps it over a sitter who shares its depth.
+/// Every piece of the office, each with its [`Span`]. The push order breaks
+/// depth ties, so it is part of the result.
 fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<(Span, PieceKind)> {
-    let Office { layout, pack, .. } = office;
-    let mut order: Vec<(Span, PieceKind)> =
-        Vec::with_capacity(layout.home_desks.len() + frame.characters.len());
+    let layout = office.layout;
+    let build = Build {
+        frame,
+        office,
+        moment,
+    };
+    let mut order: Vec<(Span, PieceKind)> = Vec::new();
     push_windows(office, moment, &mut order);
-    push_hung_decor(layout, pack, &mut order);
-    push_desks(frame, office, moment.look.darkness, &mut order);
-    push_props(layout, pack, &mut order);
-    push_appliances(layout, frame, pack, moment.now, &mut order);
-    push_meeting_trios(layout, pack, office.scale, &mut order);
-    let carried = push_characters(frame, office, moment.now, &mut order);
-    push_chairs(layout, pack, &carried, &mut order);
+    let mut carried = None;
+    for fixture in layout.fixtures() {
+        if carried.is_none() && paints_over_its_sitter(fixture.kind) {
+            carried = Some(push_characters(frame, office, moment.now, &mut order));
+        }
+        push_fixture(
+            fixture,
+            build,
+            carried.as_deref().unwrap_or_default(),
+            &mut order,
+        );
+    }
+    if carried.is_none() {
+        push_characters(frame, office, moment.now, &mut order);
+    }
     wall_segments(layout, &mut order);
-    push_pantry_counter(layout, pack, &mut order);
     order
+}
+
+#[derive(Clone, Copy)]
+struct Build<'a, 'f> {
+    frame: &'f SimFrame,
+    office: Office<'a>,
+    moment: &'f Moment,
+}
+
+/// Whether a fixture paints over its sitter on a tie, so it queues after the
+/// people: a desk chair's backrest crosses its sitter's lap.
+fn paints_over_its_sitter(kind: FixtureKind) -> bool {
+    matches!(kind, FixtureKind::DeskChair(_))
+}
+
+/// The row the cutaway sorts a fixture on: a backdrop one at the very back.
+fn sort_row(depth: Depth) -> u16 {
+    match depth {
+        Depth::Backdrop => 0,
+        Depth::Sorted(row) => row,
+    }
+}
+
+/// Where to centre art of `b`'s size so it lands on `b`.
+fn centre_of(b: Bounds) -> Point {
+    Point {
+        x: b.x + b.width / 2,
+        y: b.y + b.height / 2,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Covering {
+    Rug,
+    Runner,
+}
+
+/// Whether `kind` is a floor covering the backdrop lays ([`paint_backdrop`]):
+/// flat on the floor, so it lies under the shadows cast on it, and never moves.
+fn covering(kind: FixtureKind) -> Option<Covering> {
+    use FixtureKind as K;
+    match kind {
+        K::MeetingRug { .. } | K::LoungeRug | K::Doormat { .. } | K::PantryMat | K::IslandMat => {
+            Some(Covering::Rug)
+        }
+        K::Runner => Some(Covering::Runner),
+        K::Desk(_)
+        | K::FilingCabinet(_)
+        | K::DeskChair(_)
+        | K::Station { .. }
+        | K::Plant { .. }
+        | K::Pod { .. }
+        | K::Wall { .. }
+        | K::MeetingSofa { .. }
+        | K::MeetingTable { .. }
+        | K::MeetingChair { .. }
+        | K::CoatRack { .. }
+        | K::NoticeBoard { .. }
+        | K::LoungeCouch
+        | K::SideTable
+        | K::FloorLamp
+        | K::FishTank
+        | K::KitchenIsland
+        | K::WaterCooler
+        | K::TrashBin
+        | K::Door
+        | K::NeonSign
+        | K::Clock => None,
+    }
+}
+
+/// The elevator's art.
+const DOOR_SPRITE: &str = "door";
+
+/// Queue one of the roster's fixtures, sorted on its depth ([`sort_row`]). A
+/// desk chair whose desk is in `carried` rides its sitter's piece instead.
+fn push_fixture(
+    fixture: Fixture,
+    build: Build<'_, '_>,
+    carried: &[Point],
+    order: &mut Vec<(Span, PieceKind)>,
+) {
+    use FixtureKind as K;
+    let Build {
+        frame,
+        office,
+        moment,
+    } = build;
+    let Office {
+        layout,
+        pack,
+        theme,
+        ..
+    } = office;
+    let depth = sort_row(fixture.depth);
+    let centre = centre_of(fixture.visual);
+    let top_left = Point {
+        x: fixture.visual.x,
+        y: fixture.visual.y,
+    };
+    match fixture.kind {
+        K::Desk(i) => push_desk(i, build, depth, order),
+        K::FilingCabinet(_) => push_art(
+            order,
+            pack,
+            centre,
+            Art::still("filing_cabinet"),
+            depth,
+            Motion::Still,
+        ),
+        K::DeskChair(i) => {
+            let Some(&desk) = layout.home_desks.get(i.0) else {
+                return;
+            };
+            if carried.contains(&desk) {
+                return;
+            }
+            if let Some((span, at)) = chair_span(pack, layout.desk_facing(i), desk) {
+                order.push((span.with_depth(depth), PieceKind::Chair { at }));
+            }
+        }
+        K::Station { waypoint, station } => {
+            let Some(wp) = layout.waypoints.get(waypoint) else {
+                return;
+            };
+            match station {
+                Station::PantryCounter => {
+                    if let Some(pantry) = &layout.pantry {
+                        let sprite =
+                            crate::pixel_painter::pantry_counter_anim(pantry.counter_size.w);
+                        push_art(
+                            order,
+                            pack,
+                            wp.pos,
+                            Art::still(sprite),
+                            depth,
+                            Motion::Still,
+                        );
+                    }
+                }
+                Station::SnackShelf => push_art(
+                    order,
+                    pack,
+                    wp.pos,
+                    Art::still("snack_shelf"),
+                    depth,
+                    Motion::Still,
+                ),
+                Station::VendingMachine | Station::Printer => {
+                    let Some(sprite) = crate::pixel_painter::appliance_art(wp.kind) else {
+                        return;
+                    };
+                    let Some(anim) = pack.animation(sprite) else {
+                        return;
+                    };
+                    let busy = frame.occupied_waypoints.contains(&waypoint);
+                    let art = Art {
+                        sprite,
+                        frame: crate::pixel_painter::appliance_frame(anim, busy, moment.now),
+                        flip: Flip::None,
+                    };
+                    push_art(order, pack, wp.pos, art, depth, Motion::Playing);
+                }
+            }
+        }
+        K::Plant { kind, .. } => push_art(
+            order,
+            pack,
+            centre,
+            Art::still(kind.sprite_name()),
+            depth,
+            Motion::Still,
+        ),
+        K::Pod { kind, .. } => push_art(
+            order,
+            pack,
+            centre,
+            Art::still(kind.sprite_name()),
+            depth,
+            Motion::Still,
+        ),
+        K::Wall { kind, .. } if kind.stands_on_floor() => push_art(
+            order,
+            pack,
+            centre,
+            Art::still(kind.sprite_name()),
+            depth,
+            Motion::Still,
+        ),
+        K::Wall { kind, .. } => push_hung(order, pack, top_left, kind.sprite_name(), depth),
+        K::NoticeBoard { .. } => push_hung(order, pack, top_left, "notice_board", depth),
+        // Not on the roster's depth: a back-view sofa splits into bands its
+        // sitter sorts between, a front one ties them ([`push_sofa`]).
+        K::MeetingSofa {
+            room,
+            seat,
+            faces_away,
+        } => {
+            let sofa = layout
+                .meeting_rooms
+                .get(room)
+                .and_then(|r| r.trio)
+                .and_then(|t| t.sofas.get(seat).copied());
+            if let Some(at) = sofa {
+                push_sofa(order, pack, at, faces_away);
+            }
+        }
+        // Seen from behind: it faces the window.
+        K::LoungeCouch => push_sofa(order, pack, centre, true),
+        K::MeetingTable { .. } => {
+            let table = crate::layout::furniture_def(crate::layout::Furniture::MeetingTable).visual;
+            let face = face_rows(
+                pack,
+                crate::pixel_painter::MEETING_TABLE_SPRITE,
+                office.scale,
+            );
+            order.push((
+                piece_span(
+                    crate::layout::Anchor::Center,
+                    centre,
+                    table.w,
+                    table.h,
+                    face,
+                )
+                .with_depth(depth),
+                PieceKind::Table { at: centre },
+            ));
+        }
+        // The art's back is west, for a sitter facing east.
+        K::MeetingChair { facing, .. } => {
+            let flip = if facing == crate::layout::Facing::East {
+                Flip::None
+            } else {
+                Flip::Horizontal
+            };
+            let art = Art {
+                sprite: "meeting_chair",
+                frame: 0,
+                flip,
+            };
+            push_art(order, pack, centre, art, depth, Motion::Still);
+        }
+        K::CoatRack { .. } => push_art(
+            order,
+            pack,
+            centre,
+            Art::still("coat_rack"),
+            depth,
+            Motion::Still,
+        ),
+        K::SideTable => push_art(
+            order,
+            pack,
+            centre,
+            Art::still("side_table"),
+            depth,
+            Motion::Still,
+        ),
+        K::FloorLamp => push_art(
+            order,
+            pack,
+            centre,
+            Art::still("floor_lamp"),
+            depth,
+            Motion::Still,
+        ),
+        K::KitchenIsland => push_art(
+            order,
+            pack,
+            centre,
+            Art::still("kitchen_island"),
+            depth,
+            Motion::Still,
+        ),
+        K::TrashBin => push_art(
+            order,
+            pack,
+            centre,
+            Art::still("pantry_bin"),
+            depth,
+            Motion::Still,
+        ),
+        K::FishTank => push_looping(order, pack, centre, "fish_tank", moment.now, depth),
+        K::WaterCooler => push_looping(order, pack, centre, "water_cooler", moment.now, depth),
+        K::Door => {
+            let Some((w, h)) = art_size(pack, DOOR_SPRITE) else {
+                return;
+            };
+            order.push((
+                piece_span(crate::layout::Anchor::TopLeft, top_left, w, h, 0).with_depth(depth),
+                PieceKind::Door {
+                    at: top_left,
+                    frame: frame.door_frame,
+                },
+            ));
+        }
+        K::NeonSign => {
+            let look = crate::pixel_painter::neon_look(frame.neon, theme);
+            let b = fixture.visual;
+            order.push((
+                Span::new(b.x, b.y, b.width, b.height, 0).with_depth(depth),
+                PieceKind::Neon {
+                    at: b,
+                    tube: look.tube,
+                    hue: look.halo,
+                    interior: look.interior,
+                },
+            ));
+        }
+        K::Clock => {
+            let b = fixture.visual;
+            order.push((
+                Span::new(b.x, b.y, b.width, b.height, 0).with_depth(depth),
+                PieceKind::Clock {
+                    at: top_left,
+                    reading: crate::pixel_painter::clock_reading(moment.now),
+                },
+            ));
+        }
+        // The backdrop lays them ([`covering`]).
+        K::MeetingRug { .. }
+        | K::LoungeRug
+        | K::Doormat { .. }
+        | K::PantryMat
+        | K::IslandMat
+        | K::Runner => {}
+    }
+}
+
+/// Whether an art piece's frame moves between builds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Motion {
+    Still,
+    Playing,
+}
+
+fn push_art(
+    order: &mut Vec<(Span, PieceKind)>,
+    pack: &Pack,
+    at: Point,
+    art: Art,
+    depth: u16,
+    motion: Motion,
+) {
+    let Some((w, h)) = art_size(pack, art.sprite) else {
+        return;
+    };
+    let kind = match motion {
+        Motion::Still => PieceKind::Prop { at, art },
+        Motion::Playing => PieceKind::Animated { at, art },
+    };
+    order.push((
+        piece_span(crate::layout::Anchor::Center, at, w, h, 0).with_depth(depth),
+        kind,
+    ));
+}
+
+fn push_looping(
+    order: &mut Vec<(Span, PieceKind)>,
+    pack: &Pack,
+    at: Point,
+    sprite: &'static str,
+    now: std::time::SystemTime,
+    depth: u16,
+) {
+    let Some(anim) = pack.animation(sprite) else {
+        return;
+    };
+    let art = Art {
+        sprite,
+        frame: crate::pixel_painter::looping_frame(anim, now),
+        flip: Flip::None,
+    };
+    push_art(order, pack, at, art, depth, Motion::Playing);
+}
+
+fn push_hung(
+    order: &mut Vec<(Span, PieceKind)>,
+    pack: &Pack,
+    at: Point,
+    sprite: &'static str,
+    depth: u16,
+) {
+    if let Some((w, h)) = art_size(pack, sprite) {
+        order.push((
+            piece_span(crate::layout::Anchor::TopLeft, at, w, h, 0).with_depth(depth),
+            PieceKind::Hung { at, sprite },
+        ));
+    }
 }
 
 /// Paint one piece of the draw list.
@@ -827,18 +1318,21 @@ fn paint_piece(
                 paint_chair(at, pack, scale, buf);
             }
         }
-        PieceKind::Prop {
-            at,
-            sprite,
-            mirrored,
-        } => paint_prop(at, sprite, mirrored, pack, scale, buf),
+        PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => {
+            paint_art(at, art, pack, theme, scale, buf)
+        }
         PieceKind::PropBand { at, sprite, rows } => {
             paint_prop_band(at, sprite, rows, pack, scale, buf);
         }
         PieceKind::Table { at } => paint_table(at, pack, scale, buf),
-        PieceKind::Appliance { at, sprite, frame } => {
-            paint_appliance(at, sprite, frame, pack, theme, scale, buf);
-        }
+        PieceKind::Door { at, frame } => paint_door(at, frame, pack, scale, buf),
+        PieceKind::Neon {
+            at,
+            tube,
+            hue,
+            interior,
+        } => paint_neon(at, [tube, hue, interior], Pen::for_pack(scale, pack), buf),
+        PieceKind::Clock { at, reading } => paint_clock(at, reading, pack, theme, scale, buf),
         PieceKind::WallSeg {
             piece,
             rows: (y0, y1),
@@ -850,47 +1344,49 @@ fn paint_piece(
     }
 }
 
-/// Each desk in its facing's art, its screen lit by the classic painter's own
+/// Desk `i` in its facing's art, its screen lit by the classic painter's own
 /// rule ([`desk_screen_glow`](crate::pixel_painter::desk_screen_glow)) from the
-/// sim's observation, so the profiles never disagree about WHICH screens are lit.
-fn push_desks(
-    frame: &SimFrame,
-    office: Office<'_>,
-    darkness: f32,
+/// sim's observation, so the profiles never disagree about WHICH screens are
+/// lit; sorted on `depth`.
+fn push_desk(
+    i: pixtuoid_core::state::FloorLocalDeskIndex,
+    build: Build<'_, '_>,
+    depth: u16,
     order: &mut Vec<(Span, PieceKind)>,
 ) {
+    let Build {
+        frame,
+        office,
+        moment,
+    } = build;
     let Office {
         layout,
         pack,
         theme,
         scale,
     } = office;
-    for (i, d) in layout.home_desks.iter().enumerate() {
-        let local = pixtuoid_core::state::FloorLocalDeskIndex(i);
-        let facing = layout.desk_facing(local);
-        let Some(art) = desk_art(pack, facing) else {
-            continue;
-        };
-        let screen = Screen::of(
-            crate::pixel_painter::desk_screen_glow(
-                crate::pixel_painter::desk_occupant(&frame.agents, local),
-                facing,
-                frame.seated_agents.get(&local).copied().unwrap_or(false),
-                theme,
-            ),
-            crate::lighting::screen_idle(facing, darkness, frame.indoor_scale),
+    let Some(&d) = layout.home_desks.get(i.0) else {
+        return;
+    };
+    let facing = layout.desk_facing(i);
+    let Some(art) = desk_art(pack, facing) else {
+        return;
+    };
+    let screen = Screen::of(
+        crate::pixel_painter::desk_screen_glow(
+            crate::pixel_painter::desk_occupant(&frame.agents, i),
+            facing,
+            frame.seated_agents.get(&i).copied().unwrap_or(false),
             theme,
-        );
-        if let Some(span) = desk_span(pack, art, *d, scale) {
-            order.push((
-                span,
-                PieceKind::Desk {
-                    at: *d,
-                    art,
-                    screen,
-                },
-            ));
-        }
+        ),
+        crate::lighting::screen_idle(facing, moment.look.darkness, frame.indoor_scale),
+        theme,
+    );
+    if let Some(span) = desk_span(pack, art, d, scale) {
+        order.push((
+            span.with_depth(depth),
+            PieceKind::Desk { at: d, art, screen },
+        ));
     }
 }
 
@@ -1039,26 +1535,6 @@ pub(crate) fn assert_variant_desk_foot(
     }
 }
 
-/// The task chair at each back-turned home desk nobody sits at. The desks in
-/// `carried` are skipped: their chairs ride their sitters' pieces
-/// (`push_characters`, which returns them).
-fn push_chairs(
-    layout: &Layout,
-    pack: &Pack,
-    carried: &[crate::layout::Point],
-    order: &mut Vec<(Span, PieceKind)>,
-) {
-    for (i, d) in layout.home_desks.iter().enumerate() {
-        if carried.contains(d) {
-            continue;
-        }
-        let facing = layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i));
-        if let Some((span, at)) = chair_span(pack, facing, *d) {
-            order.push((span, PieceKind::Chair { at }));
-        }
-    }
-}
-
 /// The chair's box and top-left at a desk facing `facing`, placed and keyed by
 /// the layout's rules
 /// ([`desk_chair_top_left`](crate::layout::desk_chair_top_left),
@@ -1076,114 +1552,8 @@ fn chair_span(
     Some((span, at))
 }
 
-/// The layout's plants, waypoint props, pod decor, floor-standing wall decor and
-/// lounge couch.
-fn push_props(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) {
-    let push_prop =
-        |order: &mut Vec<(Span, PieceKind)>, at: crate::layout::Point, sprite: &'static str| {
-            if let Some((w, h)) = art_size(pack, sprite) {
-                order.push((
-                    piece_span(crate::layout::Anchor::Center, at, w, h, 0),
-                    PieceKind::Prop {
-                        at,
-                        sprite,
-                        mirrored: false,
-                    },
-                ));
-            }
-        };
-    for pl in &layout.plants {
-        push_prop(order, pl.pos, pl.kind.sprite_name());
-    }
-    for wp in &layout.waypoints {
-        if let Some(sprite) = waypoint_sprite(wp.kind) {
-            push_prop(order, wp.pos, sprite);
-        }
-    }
-    for d in &layout.pod_decor {
-        push_prop(order, d.pos, d.kind.sprite_name());
-    }
-    // Wall decor that stands on the floor (a whiteboard between pods, a
-    // bookshelf) sorts like any other floor piece. The layout places it by its
-    // top-left; a prop takes its centre.
-    for item in layout
-        .wall_decor
-        .iter()
-        .filter(|i| i.kind.stands_on_floor())
-    {
-        let sprite = item.kind.sprite_name();
-        if let Some((w, h)) = art_size(pack, sprite) {
-            let at = crate::layout::Point {
-                x: item.pos.x + w / 2,
-                y: item.pos.y + h / 2,
-            };
-            push_prop(order, at, sprite);
-        }
-    }
-    // The lounge couch is a meeting sofa seen from behind, facing the window.
-    if let Some(at) = layout.couch_sprite_center() {
-        push_sofa(order, pack, at, true);
-    }
-}
-
-/// Queue the corridor appliances ([`paint_appliance`]), each on the frame it
-/// shows at `now`: its busy loop while someone stands at it.
-fn push_appliances(
-    layout: &Layout,
-    frame: &SimFrame,
-    pack: &Pack,
-    now: std::time::SystemTime,
-    order: &mut Vec<(Span, PieceKind)>,
-) {
-    for (i, wp) in layout.waypoints.iter().enumerate() {
-        let Some(sprite) = crate::pixel_painter::appliance_art(wp.kind) else {
-            continue;
-        };
-        let (Some(anim), Some((w, h))) = (pack.animation(sprite), art_size(pack, sprite)) else {
-            continue;
-        };
-        let busy = frame.occupied_waypoints.contains(&i);
-        order.push((
-            piece_span(crate::layout::Anchor::Center, wp.pos, w, h, 0),
-            PieceKind::Appliance {
-                at: wp.pos,
-                sprite,
-                frame: crate::pixel_painter::appliance_frame(anim, busy, now),
-            },
-        ));
-    }
-}
-
-/// Two sofa bodies plus the table between them. Only
-/// [`MeetingTrio::sofas`](crate::layout::MeetingTrio::sofas)' south sofa is
-/// seen from behind: that is what makes the pair FACE each other across the
-/// table.
-fn push_meeting_trios(
-    layout: &Layout,
-    pack: &Pack,
-    scale: RenderScale,
-    order: &mut Vec<(Span, PieceKind)>,
-) {
-    let table = crate::layout::furniture_def(crate::layout::Furniture::MeetingTable).visual;
-    for t in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
-        for (i, sofa) in t.sofas.iter().enumerate() {
-            push_sofa(order, pack, *sofa, i % 2 != 0);
-        }
-        order.push((
-            piece_span(
-                crate::layout::Anchor::Center,
-                t.table,
-                table.w,
-                table.h,
-                face_rows(pack, crate::pixel_painter::MEETING_TABLE_SPRITE, scale),
-            ),
-            PieceKind::Table { at: t.table },
-        ));
-    }
-}
-
 /// Queue every character, and return the desks whose chairs they carry, so
-/// [`push_chairs`] stands none of those again.
+/// [`push_fixture`] stands none of those again.
 fn push_characters(
     frame: &SimFrame,
     office: Office<'_>,
@@ -1329,8 +1699,15 @@ fn push_sofa(
             span,
             PieceKind::Prop {
                 at,
-                sprite: "meeting_sofa",
-                mirrored: back_view,
+                art: Art {
+                    sprite: "meeting_sofa",
+                    frame: 0,
+                    flip: if back_view {
+                        Flip::Vertical
+                    } else {
+                        Flip::None
+                    },
+                },
             },
         ));
     }
@@ -1380,8 +1757,11 @@ impl PieceKind {
             | PieceKind::Prop { .. }
             | PieceKind::PropBand { .. }
             | PieceKind::Table { .. } => true,
-            // Its frame plays while it is busy.
-            PieceKind::Appliance { .. }
+            // Frames that play, the elevator opening, the sign's levels, the time.
+            PieceKind::Animated { .. }
+            | PieceKind::Door { .. }
+            | PieceKind::Neon { .. }
+            | PieceKind::Clock { .. }
             | PieceKind::Glass { .. }
             | PieceKind::Desk { .. }
             | PieceKind::Character { .. } => false,
@@ -1424,12 +1804,15 @@ pub(crate) enum PieceKind {
     Chair {
         at: crate::layout::Point,
     },
+    /// Art centred on `at` that holds still.
     Prop {
         at: crate::layout::Point,
-        sprite: &'static str,
-        /// Flip rows top-to-bottom, as the classic painter's `MeetingSofa`
-        /// does.
-        mirrored: bool,
+        art: Art,
+    },
+    /// Art centred on `at`, on the frame it shows now.
+    Animated {
+        at: crate::layout::Point,
+        art: Art,
     },
     /// Rows `rows` of a centred prop, top inclusive, bottom exclusive, in
     /// logical rows from the art's top: one band of a piece its sitter sits
@@ -1442,12 +1825,22 @@ pub(crate) enum PieceKind {
     Table {
         at: crate::layout::Point,
     },
-    /// A corridor appliance's art ([`crate::pixel_painter::appliance_art`]) on
-    /// `frame`, in the theme's appliance colours.
-    Appliance {
+    /// The elevator from its top-left `at`, as open as `frame` shows.
+    Door {
         at: crate::layout::Point,
-        sprite: &'static str,
         frame: usize,
+    },
+    /// The neon sign over `at`, in this frame's colours.
+    Neon {
+        at: Bounds,
+        tube: pixtuoid_core::sprite::Rgb,
+        hue: pixtuoid_core::sprite::Rgb,
+        interior: pixtuoid_core::sprite::Rgb,
+    },
+    /// The wall clock's dial from its top-left `at`, its hands at `reading`.
+    Clock {
+        at: crate::layout::Point,
+        reading: crate::pixel_painter::ClockReading,
     },
     Character {
         figure: Figure,
@@ -1459,6 +1852,44 @@ pub(crate) enum PieceKind {
         /// figure's shadow falls under it.
         body: Span,
     },
+}
+
+/// Which art a prop draws: a sprite's frame, turned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Art {
+    sprite: &'static str,
+    frame: usize,
+    flip: Flip,
+}
+
+impl Art {
+    /// `sprite`'s first frame, as drawn.
+    fn still(sprite: &'static str) -> Self {
+        Self {
+            sprite,
+            frame: 0,
+            flip: Flip::None,
+        }
+    }
+}
+
+/// How a prop's art is turned: the back-view sofa top to bottom, the far
+/// meeting chair side to side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Flip {
+    None,
+    Vertical,
+    Horizontal,
+}
+
+impl Flip {
+    fn turn(self, frame: pixtuoid_core::sprite::Frame) -> pixtuoid_core::sprite::Frame {
+        match self {
+            Self::None => frame,
+            Self::Vertical => frame.mirror_vertical(),
+            Self::Horizontal => frame.mirror_horizontal(),
+        }
+    }
 }
 
 /// Everything [`paint_figure`] draws one figure from, resolved when the list is
@@ -1650,63 +2081,6 @@ fn paint_glass(view: &WindowView, pen: Pen, buf: &mut RgbBuffer) {
             pen.fill(buf, cell, c);
         }
     }
-}
-
-/// Queue the decor that only hangs on the north band, after the glass it may
-/// cover; what stands on the floor sorts among the floor's pieces
-/// ([`push_props`]).
-fn push_hung_decor(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) {
-    for item in layout
-        .wall_decor
-        .iter()
-        .filter(|i| !i.kind.stands_on_floor())
-    {
-        let sprite = item.kind.sprite_name();
-        let Some((w, h)) = art_size(pack, sprite) else {
-            continue;
-        };
-        order.push((
-            piece_span(crate::layout::Anchor::TopLeft, item.pos, w, h, 0),
-            PieceKind::Hung {
-                at: item.pos,
-                sprite,
-            },
-        ));
-    }
-}
-
-/// Queue the pantry counter — a fixture the layout already sized, without which
-/// the pantry reads as bare floor. A sorted piece rather than a backdrop
-/// blit: it stands ON the floor, so an agent at the counter resolves against it
-/// like any other solid, and it earns a contact shadow like the other
-/// floor-standing pieces.
-fn push_pantry_counter(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) {
-    let Some(pantry) = &layout.pantry else {
-        return;
-    };
-    let sprite = crate::pixel_painter::pantry_counter_anim(pantry.counter_size.w);
-    let Some((w, h)) = art_size(pack, sprite) else {
-        return;
-    };
-    // Centred on the Pantry waypoint, where the layout stands it: the walkable
-    // mask, the classic painter and the hover box all read that point, so a
-    // visitor at the counter stands at the counter.
-    let Some(at) = layout
-        .waypoints
-        .iter()
-        .find(|wp| wp.kind == crate::layout::WaypointKind::Pantry)
-        .map(|wp| wp.pos)
-    else {
-        return;
-    };
-    order.push((
-        piece_span(crate::layout::Anchor::Center, at, w, h, 0),
-        PieceKind::Prop {
-            at,
-            sprite,
-            mirrored: false,
-        },
-    ));
 }
 
 /// The carpet, lit near the windows, falling off south and laid in tiles, on
@@ -1905,9 +2279,10 @@ fn relight_screen(
 
 /// The most common opaque colour in `row` of `frame` — how the cutaway learns a
 /// sprite's material without hardcoding it. The front face a top-down sprite
-/// never had has to be SOME colour, and the desk's lives in the PACK
-/// (palette key `D`), not the theme, where `furniture.wood_top` reads nearly like
-/// the carpet; sampling also earns a custom pack's desk a match for free.
+/// never had has to be SOME colour, and the desk's lives in the PACK (the
+/// shaded wood, palette key `d`), not the theme, where `furniture.wood_top`
+/// reads nearly like the carpet; sampling also earns a custom pack's desk a
+/// match for free.
 fn dominant_opaque_row(
     frame: &pixtuoid_core::sprite::Frame,
     row: u16,
@@ -1928,7 +2303,7 @@ fn dominant_opaque_row(
     best.map(|(c, _)| c)
 }
 
-/// Wall-hung decor, blitted at its own `pos`: [`paint_prop`] would centre it, but
+/// Wall-hung decor, blitted at its own `pos`: [`paint_art`] would centre it, but
 /// `WallDecorItem.pos` is TOP-LEFT, like the classic painter's `Anchor::TopLeft`
 /// z-sort rather than the centre-pinned furniture, so centring would hang every
 /// board up and west of where it belongs.
@@ -2026,29 +2401,6 @@ fn label_anchor(
     }
 }
 
-/// The pack sprite for a waypoint kind, when it has one. `None` covers a seat
-/// slot and a fixture drawn elsewhere: the PhoneBooth and StandingDesk as pod
-/// decor, the Pantry by its room, the Couch as a meeting sofa seen from behind,
-/// and the corridor appliances (VendingMachine/Printer), which
-/// [`paint_appliance`] draws.
-fn waypoint_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
-    use crate::layout::WaypointKind as K;
-    match kind {
-        K::SnackShelf => Some("snack_shelf"),
-        K::PhoneBooth
-        | K::StandingDesk
-        | K::Couch
-        | K::Pantry
-        | K::VendingMachine
-        | K::Printer
-        // A seat slot: a meeting sofa's body is the trio's; this profile draws
-        // no meeting-chair or kitchen-island body.
-        | K::MeetingSofa
-        | K::MeetingChair
-        | K::Island => None,
-    }
-}
-
 /// The meeting table's art, centred on its layout point, over the front face
 /// [`face_rows`] derives under a base-density drawing.
 fn paint_table(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &mut RgbBuffer) {
@@ -2071,27 +2423,231 @@ fn paint_table(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &
     );
 }
 
-/// A corridor appliance's `frame`, centred on its layout point and recoloured
-/// in the theme's appliance colours
-/// ([`appliance_overrides`](crate::pixel_painter::appliance_overrides)); its
-/// shadow is [`ground_shadow`]'s.
-fn paint_appliance(
-    at: crate::layout::Point,
-    sprite: &str,
-    frame: usize,
+/// Blit `art` centred on `at`, in the theme's colours ([`theme_overrides`]).
+fn paint_art(
+    at: Point,
+    art: Art,
     pack: &Pack,
     theme: &Theme,
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    let Some(art) = crate::pixel_painter::densest_frame(pack, sprite, frame, scale) else {
+    let Some(dense) = crate::pixel_painter::densest_frame(pack, art.sprite, art.frame, scale)
+    else {
         return;
     };
-    let themed = art
-        .recolorable
-        .recolored(&crate::pixel_painter::appliance_overrides(&theme.appliance));
-    let (x, y) = centred_top_left(at, art.logical, scale);
-    blit_frame_scaled(&themed, x, y, art.blit_at, buf);
+    let themed = dense.recolorable.recolored(&theme_overrides(theme));
+    let (x, y) = centred_top_left(at, dense.logical, scale);
+    blit_frame_scaled(&art.flip.turn(themed), x, y, dense.blit_at, buf);
+}
+
+/// The pack keys art takes from the theme.
+fn theme_overrides(theme: &Theme) -> Vec<(char, pixtuoid_core::sprite::Pixel)> {
+    crate::pixel_painter::appliance_overrides(&theme.appliance)
+        .into_iter()
+        .chain(crate::pixel_painter::fixture_overrides(theme))
+        .collect()
+}
+
+fn paint_door(at: Point, frame: usize, pack: &Pack, scale: RenderScale, buf: &mut RgbBuffer) {
+    let Some(art) = crate::pixel_painter::densest_frame(pack, DOOR_SPRITE, frame, scale) else {
+        return;
+    };
+    blit_frame_scaled(
+        art.frame,
+        scale.to_buffer(at.x),
+        scale.to_buffer(at.y),
+        art.blit_at,
+        buf,
+    );
+}
+
+/// The neon sign over `at`. At base density its border is the tube, as the
+/// classic draws it; denser, the tube is a one-pixel lit core between two
+/// pixels of its hue.
+fn paint_neon(
+    at: Bounds,
+    [tube, hue, interior]: [pixtuoid_core::sprite::Rgb; 3],
+    pen: Pen,
+    buf: &mut RgbBuffer,
+) {
+    let (x, y, w, h) = (
+        pen.art(at.x).0,
+        pen.art(at.y).0,
+        pen.art(at.width).0,
+        pen.art(at.height).0,
+    );
+    let rect = |x: u16, y: u16, w: u16, h: u16| ArtRect {
+        x: ArtPx(x),
+        y: ArtPx(y),
+        w: ArtPx(w),
+        h: ArtPx(h),
+    };
+    pen.fill(buf, rect(x, y, w, h), interior);
+    let border = pen.art(crate::layout::NEON_PANEL_BORDER).0;
+    let ring = |buf: &mut RgbBuffer, i: u16, c| {
+        let (x, y, w, h) = (x + i, y + i, w - 2 * i, h - 2 * i);
+        for edge in [
+            rect(x, y, w, 1),
+            rect(x, y + h - 1, w, 1),
+            rect(x, y, 1, h),
+            rect(x + w - 1, y, 1, h),
+        ] {
+            pen.fill(buf, edge, c);
+        }
+    };
+    if border == 1 {
+        ring(buf, 0, tube);
+        return;
+    }
+    let core = border / 2;
+    ring(buf, core - 1, hue);
+    ring(buf, core, tube);
+    if core + 1 < border {
+        ring(buf, core + 1, hue);
+    }
+}
+
+/// The wall clock's dial from its top-left `at`, its hands at `reading` on the
+/// art grid: the classic's octant hands at base density, a line from the
+/// centre pin denser.
+fn paint_clock(
+    at: Point,
+    reading: crate::pixel_painter::ClockReading,
+    pack: &Pack,
+    theme: &Theme,
+    scale: RenderScale,
+    buf: &mut RgbBuffer,
+) {
+    let Some(dial) = crate::pixel_painter::densest_frame(pack, CLOCK_SPRITE, 0, scale) else {
+        return;
+    };
+    let themed = dial.recolorable.recolored(&theme_overrides(theme));
+    let (bx, by) = (scale.to_buffer(at.x), scale.to_buffer(at.y));
+    blit_frame_scaled(&themed, bx, by, dial.blit_at, buf);
+    let pen = Pen::for_pack(scale, pack);
+    let (ax, ay) = (pen.art(at.x).0, pen.art(at.y).0);
+    let hand = theme.office.clock_hand;
+    let dot = |buf: &mut RgbBuffer, x: i32, y: i32| {
+        if let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) {
+            pen.fill(
+                buf,
+                ArtRect {
+                    x: ArtPx(x),
+                    y: ArtPx(y),
+                    w: ArtPx(1),
+                    h: ArtPx(1),
+                },
+                hand,
+            );
+        }
+    };
+    let (hour, minute) = reading.turns();
+    let d = pen.art(1).0;
+    let side = pen.art(crate::layout::CLOCK.w).0;
+    if d == 1 {
+        // The classic's [`CLOCK`](crate::layout::CLOCK) face: the centre pin, the
+        // hour a step out, the minute two, but one on a diagonal, where two
+        // would cut the rim.
+        let (cx, cy) = (i32::from(ax + side / 2), i32::from(ay + side / 2));
+        dot(buf, cx, cy);
+        let (hx, hy) = crate::pixel_painter::octant_offset(hour);
+        dot(buf, cx + hx, cy + hy);
+        let (mx, my) = crate::pixel_painter::octant_offset(minute);
+        let reach = if mx != 0 && my != 0 { 1 } else { 2 };
+        for step in 1..=reach {
+            dot(buf, cx + mx * step, cy + my * step);
+        }
+        return;
+    }
+    let centre = (
+        f32::from(ax) + f32::from(side) / 2.0,
+        f32::from(ay) + f32::from(side) / 2.0,
+    );
+    let Some(face) = face_radius(&dial, d) else {
+        return;
+    };
+    for (turn, share) in [
+        (hour, CLOCK_HOUR_HAND_SHARE),
+        (minute, CLOCK_MINUTE_HAND_SHARE),
+    ] {
+        let (sin, cos) = (turn * std::f32::consts::TAU).sin_cos();
+        for step in 1..=(face * share) as i32 {
+            let t = step as f32;
+            dot(
+                buf,
+                (centre.0 + t * sin).floor() as i32,
+                (centre.1 - t * cos).floor() as i32,
+            );
+        }
+    }
+}
+
+/// The dial's art.
+const CLOCK_SPRITE: &str = "wall_clock";
+
+/// How far the `dial` art's face ([`CLOCK_FACE_KEY`](crate::pixel_painter::CLOCK_FACE_KEY))
+/// reaches from its centre along its middle row, in art pixels at density
+/// `d`: the hands stay inside the rim the art draws.
+fn face_radius(dial: &crate::pixel_painter::DenseFrame<'_>, d: u16) -> Option<f32> {
+    let face = drawn_in(dial, &[crate::pixel_painter::CLOCK_FACE_KEY]);
+    let (w, h) = (
+        usize::from(dial.frame.width()),
+        usize::from(dial.frame.height()),
+    );
+    let row = &face[h / 2 * w..(h / 2 + 1) * w];
+    let first = row.iter().position(|&f| f)?;
+    let per_px = f32::from(d) / f32::from(dial.density.get());
+    Some((w as f32 / 2.0 - first as f32) * per_px)
+}
+/// How far across the face each hand reaches.
+const CLOCK_HOUR_HAND_SHARE: f32 = 0.5;
+const CLOCK_MINUTE_HAND_SHARE: f32 = 0.85;
+
+/// The classic's corridor runner on the art grid, its lines one art pixel wide.
+fn paint_runner(b: Bounds, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
+    let o = &theme.office;
+    let (x0, y0, w, h) = (
+        pen.art(b.x).0,
+        pen.art(b.y).0,
+        pen.art(b.width).0,
+        pen.art(b.height).0,
+    );
+    let pitch = i32::from(pen.art(1).0) * crate::pixel_painter::RUNNER_LATTICE_STRIDE;
+    let px = |buf: &mut RgbBuffer, x: u16, y: u16, c| {
+        pen.fill(
+            buf,
+            ArtRect {
+                x: ArtPx(x),
+                y: ArtPx(y),
+                w: ArtPx(1),
+                h: ArtPx(1),
+            },
+            c,
+        );
+    };
+    pen.fill(
+        buf,
+        ArtRect {
+            x: ArtPx(x0),
+            y: ArtPx(y0),
+            w: ArtPx(w),
+            h: ArtPx(h),
+        },
+        o.runner_base,
+    );
+    for dy in 1..h.saturating_sub(1) {
+        for dx in 0..w {
+            let (i, j) = (i32::from(dx), i32::from(dy));
+            if (i + j) % pitch == 0 || (i - j).rem_euclid(pitch) == 0 {
+                px(buf, x0 + dx, y0 + dy, o.runner_stripe);
+            }
+        }
+    }
+    for dx in 0..w {
+        px(buf, x0 + dx, y0, o.runner_edge);
+        px(buf, x0 + dx, y0 + h - 1, o.runner_edge);
+    }
 }
 
 /// The buffer top-left of a `logical`-sized piece centred on `at`, for
@@ -2105,30 +2661,6 @@ fn centred_top_left(
     let crate::layout::Point { x, y } =
         crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, logical.0, logical.1);
     (scale.to_buffer(x), scale.to_buffer(y))
-}
-
-/// Blit a floor-standing prop from the pack, centred on its layout point; its
-/// shadow is [`ground_shadow`]'s.
-fn paint_prop(
-    at: crate::layout::Point,
-    sprite: &str,
-    mirrored: bool,
-    pack: &Pack,
-    scale: RenderScale,
-    buf: &mut RgbBuffer,
-) {
-    let Some(dense) = crate::pixel_painter::densest_frame(pack, sprite, 0, scale) else {
-        return;
-    };
-    let mirrored_art;
-    let art = if mirrored {
-        mirrored_art = dense.frame.mirror_vertical();
-        &mirrored_art
-    } else {
-        dense.frame
-    };
-    let (x, y) = centred_top_left(at, dense.logical, scale);
-    blit_frame_scaled(art, x, y, dense.blit_at, buf);
 }
 
 /// Blit rows `rows` of a centred prop ([`PieceKind::PropBand`]).
@@ -2376,8 +2908,11 @@ mod tests {
                 [(
                     _,
                     PieceKind::Prop {
-                        sprite: "meeting_sofa",
-                        mirrored: true,
+                        art: Art {
+                            sprite: "meeting_sofa",
+                            flip: Flip::Vertical,
+                            ..
+                        },
                         ..
                     }
                 )]
@@ -2418,8 +2953,9 @@ mod tests {
             .collect();
         assert!(!north.is_empty(), "the office has back-turned desks");
 
-        let mut chairs = Vec::new();
-        push_chairs(&layout, &pack, &north[..1], &mut chairs);
+        let chairs = queued(&layout, &pack, RenderScale::ONE, &north[..1], |k| {
+            matches!(k, FixtureKind::DeskChair(_))
+        });
         assert_eq!(
             chairs.len(),
             north.len() - 1,
@@ -2844,7 +3380,13 @@ mod tests {
             &mut order,
         );
         assert!(carried.is_empty() && order.is_empty(), "no character art");
-        push_chairs(&layout, &chair_only, &carried, &mut order);
+        order.extend(queued(
+            &layout,
+            &chair_only,
+            RenderScale::ONE,
+            &carried,
+            |k| matches!(k, FixtureKind::DeskChair(_)),
+        ));
         assert!(
             order
                 .iter()
@@ -3140,7 +3682,14 @@ mod tests {
                     pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
                 );
                 paint_backdrop(&layout, theme, scale, Pen::for_pack(scale, &pack), &mut buf);
-                for rug in layout.rugs() {
+                let rugs = layout.fixtures().filter_map(|f| {
+                    matches!(
+                        f.kind,
+                        FixtureKind::MeetingRug { .. } | FixtureKind::LoungeRug
+                    )
+                    .then_some(f.visual)
+                });
+                for rug in rugs {
                     let c = buf.get(
                         scale.to_buffer(rug.x + rug.width / 2),
                         scale.to_buffer(rug.y + rug.height / 2),
@@ -3381,7 +3930,18 @@ mod tests {
         let at = crate::layout::Point { x: 40, y: 30 };
         let mut order = Vec::new();
         push_sofa(&mut order, &pack, at, true);
-        let [(span, PieceKind::Prop { mirrored: true, .. })] = order.as_slice() else {
+        let [(
+            span,
+            PieceKind::Prop {
+                art:
+                    Art {
+                        flip: Flip::Vertical,
+                        ..
+                    },
+                ..
+            },
+        )] = order.as_slice()
+        else {
             panic!("a flipped sofa is one mirrored prop: {order:?}");
         };
         assert!(span.depth > crate::pixel_painter::seat::sofa_sitter_z_key(at));
@@ -3444,6 +4004,56 @@ mod tests {
             }
         }
         assert!(cast > 0, "the office casts shadows");
+    }
+
+    /// A frame of an office nobody is in, its room lights full and its sign
+    /// calm.
+    fn empty_frame(layout: &Layout) -> SimFrame {
+        SimFrame {
+            agents: Vec::new(),
+            poses: std::collections::HashMap::new(),
+            seated_agents: std::collections::HashMap::new(),
+            characters: Vec::new(),
+            indoor_scale: 1.0,
+            neon: crate::floor::NeonLevels::CALM,
+            chitchat_bubbles: Vec::new(),
+            new_coffee_carriers: Vec::new(),
+            occupied_waypoints: Default::default(),
+            pet: None,
+            mascots: Vec::new(),
+            desks: vec![Default::default(); layout.home_desks.len()],
+            door_frame: 0,
+        }
+    }
+
+    /// The pieces the fixtures `keep` picks queue ([`push_fixture`]) in an
+    /// empty office.
+    fn queued(
+        layout: &Layout,
+        pack: &Pack,
+        scale: RenderScale,
+        carried: &[crate::layout::Point],
+        keep: impl Fn(FixtureKind) -> bool,
+    ) -> Vec<(Span, PieceKind)> {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let frame = empty_frame(layout);
+        let now = std::time::UNIX_EPOCH;
+        let moment = Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now);
+        let build = Build {
+            frame: &frame,
+            office: Office {
+                layout,
+                pack,
+                theme,
+                scale,
+            },
+            moment: &moment,
+        };
+        let mut order = Vec::new();
+        for f in layout.fixtures().filter(|f| keep(f.kind)) {
+            push_fixture(f, build, carried, &mut order);
+        }
+        order
     }
 
     /// The bundled pack.
@@ -3562,35 +4172,8 @@ mod tests {
         let pack = pack();
         for (w, h) in [(160u16, 96u16), (240, 144), (100, 60)] {
             let layout = Layout::compute_with_seed(w, h, None, 0).expect("lays out");
-            let mut order: Vec<(Span, PieceKind)> = Vec::new();
+            let mut order = queued(&layout, &pack, RenderScale::ONE, &[], |_| true);
             wall_segments(&layout, &mut order);
-            push_pantry_counter(&layout, &pack, &mut order);
-            for pl in &layout.plants {
-                if let Some((pw, ph)) = art_size(&pack, pl.kind.sprite_name()) {
-                    order.push((
-                        piece_span(crate::layout::Anchor::Center, pl.pos, pw, ph, 0),
-                        PieceKind::Prop {
-                            at: pl.pos,
-                            sprite: pl.kind.sprite_name(),
-                            mirrored: false,
-                        },
-                    ));
-                }
-            }
-            for (i, d) in layout.home_desks.iter().enumerate() {
-                let facing = layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i));
-                let art = desk_art(&pack, facing).expect("the bundled pack has the desk art");
-                order.push((
-                    desk_span(&pack, art, *d, RenderScale::ONE)
-                        .expect("the bundled pack has the desk art"),
-                    PieceKind::Desk {
-                        at: *d,
-                        art,
-                        screen: Screen::Off,
-                    },
-                ));
-            }
-            push_chairs(&layout, &pack, &[], &mut order);
             assert!(order.len() > 10, "{w}x{h} produced a trivial list");
 
             let spans: Vec<Span> = order.iter().map(|(s, _)| *s).collect();
@@ -3638,8 +4221,8 @@ mod tests {
                         continue;
                     }
                     kinds.insert(kind_name(&kind));
-                    if let PieceKind::Prop { sprite, .. } = kind {
-                        props.insert(sprite);
+                    if let PieceKind::Prop { art, .. } | PieceKind::Animated { art, .. } = kind {
+                        props.insert(art.sprite);
                     }
                     assert_eq!(
                         stray_pixel(&kind, span, layout, pack, theme, scale),
@@ -3736,12 +4319,15 @@ S B B B B B B S
         assert_eq!(
             kinds.into_iter().collect::<Vec<_>>(),
             [
-                "appliance",
+                "animated",
                 "chair",
                 "character",
+                "clock",
                 "desk",
+                "door",
                 "glass",
                 "hung decor",
+                "neon",
                 "prop",
                 "prop band",
                 "table",
@@ -3749,11 +4335,25 @@ S B B B B B B S
             ],
             "a piece kind went untested"
         );
-        // Every builder that pushes a "prop" must have been reached: the pantry
-        // counter at both sizes, a sofa, a plant.
+        // Every fixture drawn from art must have been reached, the pantry
+        // counter at both its sizes.
         for sprite in crate::pixel_painter::PANTRY_COUNTER_ANIMS
             .into_iter()
-            .chain(["meeting_sofa", "plant"])
+            .chain([
+                "meeting_sofa",
+                "plant",
+                "filing_cabinet",
+                "meeting_chair",
+                "coat_rack",
+                "side_table",
+                "floor_lamp",
+                "kitchen_island",
+                "pantry_bin",
+                "fish_tank",
+                "water_cooler",
+                "vending_machine",
+                "printer",
+            ])
         {
             assert!(
                 props.contains(sprite),
@@ -4055,10 +4655,10 @@ S B B B B B B S
         assert!(lights > 0, "the night office has no lights");
     }
 
-    /// The cutaway hangs no neon glow at any hour, while its lamps light the
-    /// night room.
+    /// The cutaway's sign glows only where the sign is drawn, and its lamps
+    /// light the night room.
     #[test]
-    fn the_cutaway_hangs_no_neon_glow() {
+    fn the_cutaway_glows_only_around_its_sign() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
@@ -4068,17 +4668,22 @@ S B B B B B B S
             theme,
             scale: RenderScale::new(pack.max_density_variant()).expect("nonzero"),
         };
-        let mut lamps = 0;
+        let (mut lamps, mut glows) = (0, 0);
         for hour in [12, 18, 23] {
-            for light in list_at(frame, office, hour).lights() {
-                assert!(
-                    !light.view.is(crate::lighting::EmitterKind::NeonGlow),
-                    "{hour}:00 hangs a neon glow at {:?}",
-                    light.span
-                );
+            let list = list_at(frame, office, hour);
+            let signs = list
+                .pieces()
+                .iter()
+                .filter(|p| matches!(p.kind, PieceKind::Neon { .. }))
+                .count();
+            for light in list.lights() {
                 lamps += usize::from(light.view.is(crate::lighting::EmitterKind::DeskLamp));
+                let glow = light.view.is(crate::lighting::EmitterKind::NeonGlow);
+                assert!(!glow || signs == 1, "{hour}:00 glows with no sign");
+                glows += usize::from(glow);
             }
         }
+        assert!(glows > 0, "the sign never glows");
         assert!(
             lamps > 0,
             "nothing lights the night room, so this pins nothing"
@@ -4107,6 +4712,7 @@ S B B B B B B S
             pet: None,
             mascots: Vec::new(),
             desks: vec![Default::default(); layout.home_desks.len()],
+            door_frame: 0,
         };
         let list = list_at(
             &frame,
@@ -4363,6 +4969,7 @@ S B B B B B B S
             pet: None,
             mascots: Vec::new(),
             desks: vec![Default::default(); layout.home_desks.len()],
+            door_frame: 0,
         };
         let mut busy = idle.clone();
         busy.occupied_waypoints = (0..layout.waypoints.len()).collect();
@@ -4384,7 +4991,8 @@ S B B B B B B S
                                 p.span,
                                 p.fingerprint,
                                 p.kind.is_static(),
-                                matches!(p.kind, PieceKind::Appliance { .. }),
+                                matches!(p.kind, PieceKind::Animated { art, .. }
+                                    if ["vending_machine", "printer"].contains(&art.sprite)),
                             )
                         })
                         .collect()
@@ -4686,7 +5294,10 @@ S B B B B B B S
             PieceKind::Prop { .. } => "prop",
             PieceKind::PropBand { .. } => "prop band",
             PieceKind::Table { .. } => "table",
-            PieceKind::Appliance { .. } => "appliance",
+            PieceKind::Animated { .. } => "animated",
+            PieceKind::Door { .. } => "door",
+            PieceKind::Neon { .. } => "neon",
+            PieceKind::Clock { .. } => "clock",
             PieceKind::Character { .. } => "character",
             PieceKind::Glass { .. } => "glass",
             PieceKind::Hung { .. } => "hung decor",
@@ -4830,8 +5441,12 @@ S B B B B B B S
                 let Some(layout) = Layout::compute_with_seed(w, h, None, seed) else {
                     continue;
                 };
-                let mut order = Vec::new();
-                push_meeting_trios(&layout, &pack, RenderScale::ONE, &mut order);
+                let order = queued(&layout, &pack, RenderScale::ONE, &[], |k| {
+                    matches!(
+                        k,
+                        FixtureKind::MeetingSofa { .. } | FixtureKind::MeetingTable { .. }
+                    )
+                });
                 let seats = order.iter().filter_map(|(s, k)| match k {
                     PieceKind::PropBand { rows: (0, _), .. } => Some(s.depth),
                     _ => None,
@@ -4860,8 +5475,9 @@ S B B B B B B S
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
         for s in [1, pack.max_density_variant()] {
             let scale = RenderScale::new(s).expect("nonzero");
-            let mut order = Vec::new();
-            push_meeting_trios(&layout, &pack, scale, &mut order);
+            let order = queued(&layout, &pack, scale, &[], |k| {
+                matches!(k, FixtureKind::MeetingTable { .. })
+            });
             let (span, kind) = order
                 .iter()
                 .find(|(_, k)| matches!(k, PieceKind::Table { .. }))
@@ -4879,6 +5495,405 @@ S B B B B B B S
                 "scale {s}: the span's south row is not the table's painted bottom"
             );
         }
+    }
+
+    /// An office with every moving fixture: an aquarium and a cooler that
+    /// loop, an elevator, the sign and the clock.
+    fn lively_office() -> Layout {
+        many_layouts()
+            .find(|l| {
+                let kinds: Vec<FixtureKind> = l.fixtures().map(|f| f.kind).collect();
+                [
+                    FixtureKind::FishTank,
+                    FixtureKind::WaterCooler,
+                    FixtureKind::Door,
+                ]
+                .iter()
+                .all(|k| kinds.contains(k))
+            })
+            .expect("an office has a lounge aquarium, a pantry cooler and an elevator")
+    }
+
+    /// `frame`'s list at `now`, under a clear sky.
+    fn list_now<'a>(
+        frame: &SimFrame,
+        office: Office<'a>,
+        now: std::time::SystemTime,
+    ) -> DrawList<'a> {
+        let sky = crate::sky::Sky::at_with(now, crate::sky::Weather::Clear);
+        build_list(
+            frame,
+            office,
+            &Moment::resolve(sky, office.theme, 0.0, now),
+            0,
+        )
+    }
+
+    /// What the canvas relies on for what moves: a moving piece that keeps its
+    /// span and fingerprint paints what it painted, across the clock, the
+    /// elevator and the sign; and each shows more than one fingerprint over
+    /// them, so a kind that stopped hashing what moves it fails here.
+    #[test]
+    fn a_moving_pieces_fingerprint_moves_with_what_it_shows() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = pack();
+        let layout = lively_office();
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale: RenderScale::new(pack.max_density_variant()).expect("nonzero"),
+        };
+        let moving = |p: &Piece| {
+            matches!(
+                p.kind,
+                PieceKind::Animated { .. }
+                    | PieceKind::Door { .. }
+                    | PieceKind::Neon { .. }
+                    | PieceKind::Clock { .. }
+            )
+        };
+        let mut painted = std::collections::HashMap::new();
+        let mut seen: std::collections::HashMap<&str, std::collections::HashSet<u64>> =
+            std::collections::HashMap::new();
+        let base = crate::localclock::at_hour_min(12, 0);
+        let moments = [
+            base,
+            base + std::time::Duration::from_millis(450),
+            base + std::time::Duration::from_millis(900),
+            crate::localclock::at_hour_min(12, 15),
+            crate::localclock::at_hour_min(3, 40),
+        ];
+        let levels = [
+            crate::floor::NeonLevels::CALM,
+            crate::floor::NeonLevels::ALERT,
+            crate::floor::NeonLevels::EMPTY,
+        ];
+        for now in moments {
+            for door_frame in 0..3 {
+                for neon in levels {
+                    let frame = SimFrame {
+                        door_frame,
+                        neon,
+                        ..empty_frame(&layout)
+                    };
+                    let list = list_now(&frame, office, now);
+                    same_fingerprint_same_pixels(&mut painted, &list, &layout, moving);
+                    for p in list.pieces().iter().filter(|p| moving(p)) {
+                        assert!(!p.kind.is_static(), "{} holds still", kind_name(&p.kind));
+                        seen.entry(kind_name(&p.kind))
+                            .or_default()
+                            .insert(p.fingerprint);
+                    }
+                }
+            }
+        }
+        for kind in ["animated", "door", "neon", "clock"] {
+            let n = seen.get(kind).map_or(0, |s| s.len());
+            assert!(
+                n > 1,
+                "the {kind} showed one fingerprint across what moves it"
+            );
+        }
+    }
+
+    /// A light of its own keeps its colour through the night: the sign's tube,
+    /// a floor lamp's bulb, and the ceiling of an open elevator's car, while
+    /// the room around them darkens.
+    #[test]
+    fn what_glows_of_its_own_keeps_its_colour_at_night() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = pack();
+        let layout = lively_office();
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale,
+        };
+        let frame = SimFrame {
+            door_frame: 2,
+            neon: crate::floor::NeonLevels::ALERT,
+            ..empty_frame(&layout)
+        };
+        let list = list_at(&frame, office, 23);
+        let pen = Pen::for_pack(scale, &pack);
+        let blank = || {
+            RgbBuffer::filled(
+                scale.to_buffer(layout.buf_w),
+                scale.to_buffer(layout.buf_h),
+                pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
+            )
+        };
+        let (mut night, mut raw) = (blank(), blank());
+        let mut cache = crate::frame_cache::FrameCache::new();
+        paint_backdrop(&layout, theme, scale, pen, &mut night);
+        paint_list(&list, &mut cache, &mut night);
+        paint_backdrop(&layout, theme, scale, pen, &mut raw);
+        for p in list.pieces() {
+            paint_piece(&p.kind, &pack, theme, scale, &mut cache, &mut raw);
+        }
+        assert_ne!(
+            night.as_slice(),
+            raw.as_slice(),
+            "the night room kept its daylight"
+        );
+        // Every buffer pixel of each bulb-key art pixel `art` draws placed so.
+        let bulbs = |placed: Placed, art: Art| -> Vec<(u16, u16)> {
+            let dense = crate::pixel_painter::densest_frame(&pack, art.sprite, art.frame, scale)
+                .expect("the art");
+            let lit = drawn_in(&dense, &[crate::pixel_painter::DESK_BULB_KEY]);
+            let (x0, y0) = placed.top_left(dense.logical, scale);
+            let w = usize::from(dense.frame.width());
+            let k = dense.blit_at.get();
+            lit.iter()
+                .enumerate()
+                .filter(|(_, &b)| b)
+                .map(|(i, _)| (x0 + (i % w) as u16 * k, y0 + (i / w) as u16 * k))
+                .collect()
+        };
+        let (mut signs, mut lamps, mut cars) = (0, 0, 0);
+        for p in list.pieces() {
+            let cells = match p.kind {
+                PieceKind::Neon { at, .. } => {
+                    signs += 1;
+                    let (x0, y0) = (scale.to_buffer(at.x), scale.to_buffer(at.y));
+                    let (x1, y1) = (
+                        scale.to_buffer(at.x + at.width),
+                        scale.to_buffer(at.y + at.height),
+                    );
+                    (y0..y1)
+                        .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+                        .collect()
+                }
+                PieceKind::Prop { at, art } if art.sprite == "floor_lamp" => {
+                    let cells = bulbs(Placed::Centred(at), art);
+                    lamps += cells.len();
+                    cells
+                }
+                PieceKind::Door { at, frame } => {
+                    let art = Art {
+                        sprite: DOOR_SPRITE,
+                        frame,
+                        flip: Flip::None,
+                    };
+                    let cells = bulbs(Placed::TopLeft(at), art);
+                    cars += cells.len();
+                    cells
+                }
+                _ => Vec::new(),
+            };
+            for (x, y) in cells {
+                assert_eq!(
+                    night.get(x, y),
+                    raw.get(x, y),
+                    "{} dimmed at ({x}, {y})",
+                    kind_name(&p.kind)
+                );
+            }
+        }
+        assert!(
+            signs == 1 && lamps > 0 && cars > 0,
+            "sign {signs}, lamp {lamps}, car {cars}"
+        );
+    }
+
+    /// At night a window's sky keeps its own light, never darkened with the
+    /// room, while the sign's glow still lifts the glass beside it.
+    #[test]
+    fn a_window_pane_keeps_its_sky_and_takes_the_signs_glow() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = pack();
+        let layout = lively_office();
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale,
+        };
+        let frame = SimFrame {
+            neon: crate::floor::NeonLevels::ALERT,
+            ..empty_frame(&layout)
+        };
+        let list = list_at(&frame, office, 23);
+        let pen = Pen::for_pack(scale, &pack);
+        let blank = || {
+            RgbBuffer::filled(
+                scale.to_buffer(layout.buf_w),
+                scale.to_buffer(layout.buf_h),
+                pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
+            )
+        };
+        let mut cache = crate::frame_cache::FrameCache::new();
+        let painted = |keep: &dyn Fn(&PieceKind) -> bool, cache: &mut _| {
+            let mut buf = blank();
+            paint_backdrop(&layout, theme, scale, pen, &mut buf);
+            for p in list.pieces().iter().filter(|p| keep(&p.kind)) {
+                paint_piece(&p.kind, &pack, theme, scale, cache, &mut buf);
+            }
+            buf
+        };
+        let backdrop = painted(&|_| false, &mut cache);
+        let glass = painted(&|k| matches!(k, PieceKind::Glass { .. }), &mut cache);
+        let all = painted(&|_| true, &mut cache);
+        let mut night = blank();
+        paint_backdrop(&layout, theme, scale, pen, &mut night);
+        paint_list(&list, &mut cache, &mut night);
+        let luma = |c: pixtuoid_core::sprite::Rgb| u32::from(c.r) + u32::from(c.g) + u32::from(c.b);
+        let (mut kept, mut lifted) = (0, 0);
+        for y in 0..night.height() {
+            for x in 0..night.width() {
+                let pane =
+                    glass.get(x, y) != backdrop.get(x, y) && all.get(x, y) == glass.get(x, y);
+                if !pane {
+                    continue;
+                }
+                let (lit, sky) = (night.get(x, y), all.get(x, y));
+                assert!(
+                    luma(lit) >= luma(sky),
+                    "the night darkened a pane at ({x}, {y})"
+                );
+                kept += usize::from(lit == sky);
+                lifted += usize::from(luma(lit) > luma(sky));
+            }
+        }
+        assert!(kept > 0 && lifted > 0, "panes kept {kept}, lifted {lifted}");
+    }
+
+    /// The clock's hands stay inside the face its dial art draws, at every
+    /// reading of the day.
+    #[test]
+    fn the_clocks_hands_stay_on_its_face() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = pack();
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let at = Point { x: 2, y: 2 };
+        let dial =
+            crate::pixel_painter::densest_frame(&pack, CLOCK_SPRITE, 0, scale).expect("the dial");
+        let face = drawn_in(&dial, &[crate::pixel_painter::CLOCK_FACE_KEY]);
+        let (w, k) = (usize::from(dial.frame.width()), dial.blit_at.get());
+        let on_face = |x: u16, y: u16| {
+            let (ax, ay) = (
+                usize::from((x - scale.to_buffer(at.x)) / k),
+                usize::from((y - scale.to_buffer(at.y)) / k),
+            );
+            face.get(ay * w + ax).copied().unwrap_or(false)
+        };
+        let blank = || {
+            RgbBuffer::filled(
+                scale.to_buffer(12),
+                scale.to_buffer(12),
+                pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
+            )
+        };
+        let mut bare = blank();
+        blit_frame_scaled(
+            &dial.recolorable.recolored(&theme_overrides(theme)),
+            scale.to_buffer(at.x),
+            scale.to_buffer(at.y),
+            dial.blit_at,
+            &mut bare,
+        );
+        let mut hands = 0;
+        for minutes in (0..12 * 60).step_by(7) {
+            let reading = crate::pixel_painter::ClockReading {
+                hour: minutes / 60,
+                minute: minutes % 60,
+            };
+            let mut buf = blank();
+            paint_clock(at, reading, &pack, theme, scale, &mut buf);
+            for y in 0..buf.height() {
+                for x in 0..buf.width() {
+                    if buf.get(x, y) != bare.get(x, y) {
+                        hands += 1;
+                        assert!(
+                            on_face(x, y),
+                            "{reading:?}: a hand leaves the face at ({x}, {y})"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(hands > 0, "no hand was drawn");
+    }
+
+    /// A desk sorts on the roster's row, the classic painter's: a figure one row
+    /// south of it draws over it, one row north draws under it.
+    #[test]
+    fn a_walker_just_south_of_a_desk_front_draws_over_it() {
+        let pack = pack();
+        let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let desk = layout
+            .fixtures()
+            .find(|f| matches!(f.kind, FixtureKind::Desk(_)))
+            .expect("a desk");
+        let Depth::Sorted(row) = desk.depth else {
+            panic!("a desk sorts: {desk:?}");
+        };
+        let [(span, PieceKind::Desk { .. })] =
+            queued(&layout, &pack, RenderScale::ONE, &[], |k| k == desk.kind)[..]
+        else {
+            panic!("one desk piece");
+        };
+        assert_eq!(span.depth, row, "the desk sorts on the roster's row");
+        let walker = |depth| Span::new(span.x0, span.y0, 4, 8, 0).with_depth(depth);
+        for (depth, over) in [(row + 1, true), (row - 1, false)] {
+            let drawn = depth_sort(vec![(span, "desk"), (walker(depth), "walker")]);
+            assert_eq!(
+                drawn[1] == "walker",
+                over,
+                "a walker sorted on {depth}, the desk on {row}"
+            );
+        }
+    }
+
+    /// Every fixture the roster yields is drawn: queued as a piece of the list,
+    /// or laid by the backdrop as a covering, over the floor. Every kind the
+    /// roster has is met on some office.
+    #[test]
+    fn the_cutaway_draws_every_fixture_the_roster_yields() {
+        let pack = pack();
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let pen = Pen::for_pack(scale, &pack);
+        let mut met = std::collections::BTreeSet::new();
+        for layout in many_layouts() {
+            let blank = || {
+                RgbBuffer::filled(
+                    scale.to_buffer(layout.buf_w),
+                    scale.to_buffer(layout.buf_h),
+                    pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
+                )
+            };
+            let (mut bare, mut laid) = (blank(), blank());
+            paint_floor(&layout, theme, pen, &mut bare);
+            paint_backdrop(&layout, theme, scale, pen, &mut laid);
+            for fixture in layout.fixtures() {
+                met.insert(crate::layout::roster::tests::kind_key(fixture.kind));
+                if covering(fixture.kind).is_some() {
+                    let b = fixture.visual;
+                    let (x0, y0) = (scale.to_buffer(b.x), scale.to_buffer(b.y));
+                    let (x1, y1) = (
+                        scale.to_buffer(b.x + b.width),
+                        scale.to_buffer(b.y + b.height),
+                    );
+                    let covered = (y0..y1.min(bare.height()))
+                        .flat_map(|y| (x0..x1.min(bare.width())).map(move |x| (x, y)))
+                        .any(|(x, y)| bare.get(x, y) != laid.get(x, y));
+                    assert!(covered, "{:?} lays nothing at {b:?}", fixture.kind);
+                } else {
+                    let pieces = queued(&layout, &pack, scale, &[], |k| k == fixture.kind);
+                    assert!(!pieces.is_empty(), "{:?} queues no piece", fixture.kind);
+                }
+            }
+        }
+        assert_eq!(
+            met,
+            crate::layout::roster::tests::every_kind_key(),
+            "a fixture kind was never met"
+        );
     }
 
     /// Layouts across the sizes and seeds that place every kind of piece this
@@ -4912,7 +5927,10 @@ S B B B B B B S
         let [(
             span,
             PieceKind::Prop {
-                mirrored: false, ..
+                art: Art {
+                    flip: Flip::None, ..
+                },
+                ..
             },
         )] = order.as_slice()
         else {
@@ -5010,8 +6028,15 @@ S B B B B B B S
             else {
                 continue;
             };
-            let mut order = Vec::new();
-            push_pantry_counter(&layout, &pack, &mut order);
+            let order = queued(&layout, &pack, RenderScale::ONE, &[], |k| {
+                matches!(
+                    k,
+                    FixtureKind::Station {
+                        station: Station::PantryCounter,
+                        ..
+                    }
+                )
+            });
             let [(_, PieceKind::Prop { at, .. })] = order.as_slice() else {
                 panic!("one counter: {order:?}");
             };
@@ -5029,8 +6054,7 @@ S B B B B B B S
         let pack = pack();
         let mut booths = 0;
         for layout in many_layouts() {
-            let mut order = Vec::new();
-            push_props(&layout, &pack, &mut order);
+            let order = queued(&layout, &pack, RenderScale::ONE, &[], |_| true);
             let mut seen = std::collections::HashSet::new();
             for (span, kind) in &order {
                 assert!(
@@ -5043,8 +6067,8 @@ S B B B B B B S
                 let queued = order
                     .iter()
                     .filter(|(_, k)| {
-                        matches!(k, PieceKind::Prop { at, sprite, .. }
-                            if *at == d.pos && *sprite == d.kind.sprite_name())
+                        matches!(k, PieceKind::Prop { at, art }
+                            if *at == d.pos && art.sprite == d.kind.sprite_name())
                     })
                     .count();
                 assert_eq!(queued, 1, "{:?} at {:?}", d.kind, d.pos);
@@ -5062,11 +6086,12 @@ S B B B B B B S
         let pack = pack();
         let mut standing = 0;
         for layout in many_layouts() {
-            let mut order = Vec::new();
-            push_props(&layout, &pack, &mut order);
+            let order = queued(&layout, &pack, RenderScale::ONE, &[], |k| {
+                matches!(k, FixtureKind::Wall { .. })
+            });
             for item in &layout.wall_decor {
                 let queued = order.iter().any(|(_, k)| {
-                    matches!(k, PieceKind::Prop { sprite, .. } if *sprite == item.kind.sprite_name())
+                    matches!(k, PieceKind::Prop { art, .. } if art.sprite == item.kind.sprite_name())
                 });
                 assert_eq!(queued, item.kind.stands_on_floor(), "{:?}", item.kind);
                 standing += usize::from(queued);
@@ -5088,7 +6113,14 @@ S B B B B B B S
             let blank =
                 || RgbBuffer::filled(scale.to_buffer(w + 40), scale.to_buffer(h + 20), floor);
             let (mut whole, mut split) = (blank(), blank());
-            paint_prop(sofa, MEETING_SOFA_NORTH, false, &pack, scale, &mut whole);
+            paint_art(
+                sofa,
+                Art::still(MEETING_SOFA_NORTH),
+                &pack,
+                &crate::theme::NORMAL,
+                scale,
+                &mut whole,
+            );
             let top = NORTH_SOFA_SEAT_ROWS;
             for rows in [(0, top), (top, h)] {
                 paint_prop_band(sofa, MEETING_SOFA_NORTH, rows, &pack, scale, &mut split);
@@ -5196,10 +6228,15 @@ S B B B B B B S
         let drawn = |buf: &RgbBuffer| buf.get(scale.to_buffer(at.x), scale.to_buffer(at.y));
 
         let mut buf = blank();
-        paint_prop(at, "plant", false, &pack, scale, &mut buf);
+        let theme = &crate::theme::NORMAL;
+        paint_art(at, Art::still("plant"), &pack, theme, scale, &mut buf);
         assert_eq!(drawn(&buf), variant, "prop");
         let mut buf = blank();
-        paint_prop(at, "plant", true, &pack, scale, &mut buf);
+        let flipped = Art {
+            flip: Flip::Vertical,
+            ..Art::still("plant")
+        };
+        paint_art(at, flipped, &pack, theme, scale, &mut buf);
         assert_eq!(drawn(&buf), variant, "mirrored prop");
         let mut buf = blank();
         paint_wall_decor(at, "whiteboard", &pack, scale, &mut buf);

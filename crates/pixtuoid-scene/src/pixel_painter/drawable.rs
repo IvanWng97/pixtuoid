@@ -163,6 +163,11 @@ pub(super) enum DrawableKind<'a> {
         piece: crate::layout::WallPiece,
         rows: std::ops::Range<u16>,
     },
+    /// A meeting room's notice board, hung on the band at
+    /// [`notice_board_rect`](crate::layout::SceneLayout::notice_board_rect).
+    NoticeBoard {
+        board: crate::layout::Bounds,
+    },
     /// Meeting-room coat rack, y-sorted at its base row (the bottom of
     /// `coat_rack_rect_at` its pole top). `pos` is the pole top.
     CoatRack {
@@ -469,6 +474,9 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
         }
         DrawableKind::CoatRack { pos } => {
             paint_coat_rack(buf, *pos, theme);
+        }
+        DrawableKind::NoticeBoard { board } => {
+            super::furniture::paint_notice_board(buf, *board, theme);
         }
     }
 }
