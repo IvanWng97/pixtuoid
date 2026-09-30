@@ -419,13 +419,9 @@ impl CityStrip {
                     let Some(materials) = pack.city_materials() else {
                         continue;
                     };
-                    let (art, grow) = match building.art(density) {
-                        Some(art) => (art, 1),
-                        None => match building.art(NonZeroU16::MIN) {
-                            Some(base) => (base, d),
-                            None => continue,
-                        },
-                    };
+                    let (art, grow) = building
+                        .variant(density)
+                        .map_or((building.base(), d), |a| (a, 1));
                     let frame = match recoloured
                         .iter()
                         .position(|(n, p, _)| *n == building.name() && *p == plane)

@@ -610,9 +610,22 @@ struct RootStatus {
 /// The density variants of the pack `source` loads, or why that pack fails to
 /// load: `run` refuses to start on it, so doctor says so.
 fn pack_densities(source: pixtuoid_scene::embedded_pack::PackSource) -> Result<Vec<u16>, String> {
+    use pixtuoid_core::sprite::error::PackError;
     pixtuoid_scene::embedded_pack::load_sprite_pack(source)
         .map(|pack| pack.density_variants())
-        .map_err(|e| format!("{e:#}"))
+        .map_err(|e| {
+            let no_manifest = e.chain().any(|c| {
+                matches!(
+                    c.downcast_ref::<PackError>(),
+                    Some(PackError::NoManifest { .. })
+                )
+            });
+            if no_manifest {
+                format!("{e:#}: point pack-dir at a sprite pack, or drop it for the bundled art")
+            } else {
+                format!("{e:#}")
+            }
+        })
 }
 
 /// Everything `doctor` probed, separated from rendering, so `render` is
@@ -1509,14 +1522,16 @@ mod tests {
     }
 
     #[test]
-    fn a_pack_that_fails_to_load_is_reported_not_hidden() {
+    fn a_pack_dir_without_a_manifest_is_named_a_config_mistake() {
         use pixtuoid_scene::embedded_pack::PackSource;
-        let missing = tempfile::TempDir::new()
-            .expect("tempdir")
-            .path()
-            .join("gone");
-        let reason = pack_densities(PackSource::Explicit(missing)).expect_err("gone");
-        assert!(reason.contains("failed to load sprite pack"), "{reason}");
+        let base = tempfile::TempDir::new().expect("tempdir");
+        for dir in [base.path().join("gone"), base.path().to_path_buf()] {
+            let reason = pack_densities(PackSource::Explicit(dir)).expect_err("no manifest");
+            assert!(
+                reason.contains("holds no pack.toml") && reason.contains("pack-dir"),
+                "{reason}"
+            );
+        }
         assert!(pack_densities(PackSource::Bundled).is_ok());
     }
 

@@ -7,7 +7,7 @@ use crate::layout::WALKING_Y_OFF;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::epoch_ms;
-use super::palette::{blend_pixel, blend_rgb, WHITE};
+use super::palette::{blend_pixel, WHITE};
 use crate::layout::{Point, SCREEN_GLASS_COLS};
 use crate::theme::Theme;
 
@@ -39,7 +39,7 @@ const SCANLINE_STEP_MS: u64 = 120;
 
 /// The scanline's color over a screen glowing `tint`.
 fn scanline_color(tint: Rgb) -> Rgb {
-    blend_rgb(tint, WHITE, 0.7)
+    tint.mix(WHITE, 0.7)
 }
 
 /// `sprite_top` is the monitor's first frame row, NOT `desk.y` — a raised monitor sits rows higher.
@@ -53,9 +53,9 @@ pub(super) fn paint_screen_glow(
 ) {
     // Untinted, the theme's cool `monitor_frame_lit` read as a metal plate capping the glow.
     const CASING_TINT: f32 = 0.35;
-    let frame_lit = blend_rgb(theme.effects.monitor_frame_lit, tint, CASING_TINT);
+    let frame_lit = theme.effects.monitor_frame_lit.mix(tint, CASING_TINT);
     let glow = tint;
-    let glow_bright = blend_rgb(tint, WHITE, 0.4);
+    let glow_bright = tint.mix(WHITE, 0.4);
     let scanline = scanline_color(tint);
     let put = |buf: &mut RgbBuffer, dx: u16, dy: u16, c: Rgb| {
         buf.put_checked(desk_x + dx, sprite_top + dy, c);
@@ -374,10 +374,6 @@ mod tests {
         buf
     }
 
-    fn lum(c: Rgb) -> u32 {
-        c.r as u32 + c.g as u32 + c.b as u32
-    }
-
     fn top_lit(buf: &RgbBuffer, head: Point, bg: Rgb) -> Option<(u16, Rgb)> {
         let zx = head.x + 5;
         (0..head.y).find_map(|y| {
@@ -394,13 +390,13 @@ mod tests {
 
         let low = render(head, 200);
         let low_px = low.get(zx, head.y - 3);
-        assert!(lum(low_px) > 0, "z near the head is visible");
+        assert!(low_px.lightness() > 0.0, "z near the head is visible");
 
         let high = render(head, 1600);
         let (top_y, top_px) = top_lit(&high, head, bg).expect("risen z still visible");
         assert!(top_y < head.y - 3, "z rose above its spawn row");
         assert!(
-            lum(top_px) < lum(low_px),
+            top_px.lightness() < low_px.lightness(),
             "a higher z must be dimmer than one at the head"
         );
 
