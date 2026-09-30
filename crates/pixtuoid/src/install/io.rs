@@ -616,18 +616,20 @@ mod tests {
 
     #[test]
     fn nonempty_abs_env_requires_an_absolute_path() {
-        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         const KEY: &str = "PIXTUOID_TEST_NONEMPTY_ABS_ENV";
         for unset in ["", "   ", "rel/x", "~/x"] {
-            env.set(KEY, unset);
-            assert_eq!(nonempty_abs_env(KEY), None, "{unset:?} must read as unset");
+            temp_env::with_var(KEY, Some(unset), || {
+                assert_eq!(nonempty_abs_env(KEY), None, "{unset:?} must read as unset");
+            });
         }
         // A leading-slash path is NOT absolute on Windows (no drive prefix).
         let abs = if cfg!(windows) { "C:/abs/x" } else { "/abs/x" };
-        env.set(KEY, abs);
-        assert_eq!(nonempty_abs_env(KEY), Some(PathBuf::from(abs)));
-        env.remove(KEY);
-        assert_eq!(nonempty_abs_env(KEY), None, "a missing var is unset");
+        temp_env::with_var(KEY, Some(abs), || {
+            assert_eq!(nonempty_abs_env(KEY), Some(PathBuf::from(abs)));
+        });
+        temp_env::with_var_unset(KEY, || {
+            assert_eq!(nonempty_abs_env(KEY), None, "a missing var is unset");
+        });
     }
 
     #[test]

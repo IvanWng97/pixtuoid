@@ -399,12 +399,12 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn user_config_dir_uses_appdata_on_windows() {
-        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
-        env.set("APPDATA", r"C:\Users\ada\AppData\Roaming");
-        assert_eq!(
-            user_config_dir(),
-            Some(PathBuf::from(r"C:\Users\ada\AppData\Roaming"))
-        );
+        temp_env::with_var("APPDATA", Some(r"C:\Users\ada\AppData\Roaming"), || {
+            assert_eq!(
+                user_config_dir(),
+                Some(PathBuf::from(r"C:\Users\ada\AppData\Roaming"))
+            );
+        });
     }
 
     #[test]

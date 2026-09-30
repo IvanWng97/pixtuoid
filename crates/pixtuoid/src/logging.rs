@@ -266,26 +266,29 @@ mod tests {
     fn log_file_path_rejects_a_relative_xdg_state_home() {
         // Pins the CALL SITE, not just the primitive: a revert to plain
         // `nonempty_env` here would leak a relative log path.
-        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
-        env.remove("PIXTUOID_LOG");
-        let home = pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
-        let cache = home.join(".cache").join("pixtuoid").join("log");
-        for rel in ["", "   ", "rel/state", "~/state"] {
-            env.set("XDG_STATE_HOME", rel);
-            assert_eq!(
-                log_file_path(),
-                cache,
-                "relative XDG_STATE_HOME {rel:?} must fall back to ~/.cache"
-            );
-        }
-        // A leading slash is not absolute on Windows, so pick per-platform. The
-        // literal's `/` is fine: `PathBuf` equality compares components.
-        let abs = if cfg!(windows) { "C:/state" } else { "/state" };
-        env.set("XDG_STATE_HOME", abs);
-        assert_eq!(
-            log_file_path(),
-            PathBuf::from(format!("{abs}/pixtuoid/log"))
-        );
+        temp_env::with_var_unset("PIXTUOID_LOG", || {
+            let home =
+                pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
+            let cache = home.join(".cache").join("pixtuoid").join("log");
+            for rel in ["", "   ", "rel/state", "~/state"] {
+                temp_env::with_var("XDG_STATE_HOME", Some(rel), || {
+                    assert_eq!(
+                        log_file_path(),
+                        cache,
+                        "relative XDG_STATE_HOME {rel:?} must fall back to ~/.cache"
+                    );
+                });
+            }
+            // A leading slash is not absolute on Windows, so pick per-platform. The
+            // literal's `/` is fine: `PathBuf` equality compares components.
+            let abs = if cfg!(windows) { "C:/state" } else { "/state" };
+            temp_env::with_var("XDG_STATE_HOME", Some(abs), || {
+                assert_eq!(
+                    log_file_path(),
+                    PathBuf::from(format!("{abs}/pixtuoid/log"))
+                );
+            });
+        });
     }
 
     #[test]

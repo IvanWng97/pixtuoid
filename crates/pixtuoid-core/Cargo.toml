@@ -37,10 +37,9 @@ workspace = true
 # builds against.
 #
 # `harness` (NON-default) adds the offline decode→reduce driver the
-# fixture/corpus/fuzz/render call sites ride, and the `test_env` guard every
-# env-mutating test in this crate and the binary holds. Dev scaffolding:
-# keeping it out of a default build keeps it out of `cargo public-api` +
-# `cargo semver-checks`, so it never becomes a semver commitment.
+# fixture/corpus/fuzz/render call sites ride. Dev scaffolding: keeping it out of
+# a default build keeps it out of `cargo public-api` + `cargo semver-checks`, so
+# it never becomes a semver commitment.
 [features]
 default = ["native"]
 native  = ["dep:tokio", "dep:notify"]
@@ -86,6 +85,7 @@ pixtuoid-core = { path = ".", features = ["harness"] }
 tokio = { workspace = true, features = ["sync", "rt", "macros", "fs", "net", "time", "io-util", "rt-multi-thread"] }
 proptest = "1"
 tempfile = "3"
+temp-env = { workspace = true }
 filetime = "0.2"
 insta = { version = "1", features = ["yaml"] }
 tracing-subscriber = { workspace = true }

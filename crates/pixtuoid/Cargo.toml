@@ -146,6 +146,7 @@ windows-sys = { version = "0.61", features = [
 # `pixtuoid_core::harness` pipeline, which is behind core's dev-only feature.
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", features = ["harness"] }
 tempfile = "3"
+temp-env = { workspace = true }
 # End-to-end CLI golden for `sources --json`, the Raycast contract (tests/cli_json.rs).
 # Goldens update with SNAPSHOTS=overwrite.
 snapbox  = { version = "1", features = ["json"] }

@@ -320,51 +320,51 @@ fn env_payload_falls_back_to_cwd_when_workspace_unset() {
 #[cfg(unix)]
 #[test]
 fn default_socket_path_branches() {
-    let mut env = crate::test_env::EnvGuard::lock();
+    temp_env::with_var("XDG_RUNTIME_DIR", Some("/run/user/0"), || {
+        temp_env::with_var("PIXTUOID_SOCKET", Some("/explicit/path.sock"), || {
+            assert_eq!(
+                default_socket_path(),
+                std::path::Path::new("/explicit/path.sock")
+            );
+        });
 
-    env.set("PIXTUOID_SOCKET", "/explicit/path.sock");
-    env.set("XDG_RUNTIME_DIR", "/run/user/0");
-    assert_eq!(
-        default_socket_path(),
-        std::path::Path::new("/explicit/path.sock")
-    );
+        // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy).
+        for blank in ["", "   "] {
+            temp_env::with_var("PIXTUOID_SOCKET", Some(blank), || {
+                assert_eq!(
+                    default_socket_path(),
+                    std::path::Path::new("/run/user/0/pixtuoid.sock")
+                );
+            });
+        }
+    });
 
-    // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy).
-    env.set("PIXTUOID_SOCKET", "");
-    env.set("XDG_RUNTIME_DIR", "/run/user/0");
-    assert_eq!(
-        default_socket_path(),
-        std::path::Path::new("/run/user/0/pixtuoid.sock")
-    );
-    env.set("PIXTUOID_SOCKET", "   ");
-    assert_eq!(
-        default_socket_path(),
-        std::path::Path::new("/run/user/0/pixtuoid.sock")
-    );
+    temp_env::with_var_unset("PIXTUOID_SOCKET", || {
+        temp_env::with_var("XDG_RUNTIME_DIR", Some("/run/user/1000"), || {
+            assert_eq!(
+                default_socket_path(),
+                std::path::Path::new("/run/user/1000/pixtuoid.sock")
+            );
+        });
 
-    env.remove("PIXTUOID_SOCKET");
-    env.set("XDG_RUNTIME_DIR", "/run/user/1000");
-    assert_eq!(
-        default_socket_path(),
-        std::path::Path::new("/run/user/1000/pixtuoid.sock")
-    );
+        // A relative XDG_RUNTIME_DIR counts as unset per the XDG absolute-only spec.
+        // Safety: getuid is always safe on Unix.
+        let uid = unsafe { libc::getuid() };
+        let tmp_fallback = format!("/tmp/pixtuoid-{uid}/pixtuoid.sock");
+        for invalid in ["", "   ", "relative/run"] {
+            temp_env::with_var("XDG_RUNTIME_DIR", Some(invalid), || {
+                assert_eq!(default_socket_path(), tmp_fallback);
+            });
+        }
 
-    // A relative XDG_RUNTIME_DIR counts as unset per the XDG absolute-only spec.
-    // Safety: getuid is always safe on Unix.
-    let uid = unsafe { libc::getuid() };
-    let tmp_fallback = format!("/tmp/pixtuoid-{uid}/pixtuoid.sock");
-    for invalid in ["", "   ", "relative/run"] {
-        env.set("XDG_RUNTIME_DIR", invalid);
-        assert_eq!(default_socket_path(), tmp_fallback);
-    }
-
-    // #485: the per-user 0700 SUBDIR, not a flat squattable name.
-    env.remove("PIXTUOID_SOCKET");
-    env.remove("XDG_RUNTIME_DIR");
-    assert_eq!(
-        default_socket_path(),
-        format!("/tmp/pixtuoid-{uid}/pixtuoid.sock")
-    );
+        // #485: the per-user 0700 SUBDIR, not a flat squattable name.
+        temp_env::with_var_unset("XDG_RUNTIME_DIR", || {
+            assert_eq!(
+                default_socket_path(),
+                format!("/tmp/pixtuoid-{uid}/pixtuoid.sock")
+            );
+        });
+    });
 }
 
 #[cfg(unix)]
@@ -403,44 +403,46 @@ fn owned_tmp_socket_dir_matches_only_the_tmp_fallback() {
 #[cfg(windows)]
 #[test]
 fn default_socket_path_branches_windows() {
-    let mut env = crate::test_env::EnvGuard::lock();
+    temp_env::with_var("PIXTUOID_SOCKET", Some(r"\\.\pipe\explicit"), || {
+        assert_eq!(
+            default_socket_path(),
+            std::path::Path::new(r"\\.\pipe\explicit")
+        );
+    });
 
-    env.set("PIXTUOID_SOCKET", r"\\.\pipe\explicit");
-    assert_eq!(
-        default_socket_path(),
-        std::path::Path::new(r"\\.\pipe\explicit")
-    );
+    temp_env::with_var("USERNAME", Some("ada"), || {
+        // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy).
+        for blank in ["", "   "] {
+            temp_env::with_var("PIXTUOID_SOCKET", Some(blank), || {
+                assert_eq!(
+                    default_socket_path(),
+                    std::path::Path::new(r"\\.\pipe\pixtuoid-ada")
+                );
+            });
+        }
+    });
 
-    // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy).
-    env.set("PIXTUOID_SOCKET", "");
-    env.set("USERNAME", "ada");
-    assert_eq!(
-        default_socket_path(),
-        std::path::Path::new(r"\\.\pipe\pixtuoid-ada")
-    );
-    env.set("PIXTUOID_SOCKET", "   ");
-    assert_eq!(
-        default_socket_path(),
-        std::path::Path::new(r"\\.\pipe\pixtuoid-ada")
-    );
+    temp_env::with_var_unset("PIXTUOID_SOCKET", || {
+        temp_env::with_var("USERNAME", Some("ada"), || {
+            assert_eq!(
+                default_socket_path(),
+                std::path::Path::new(r"\\.\pipe\pixtuoid-ada")
+            );
+        });
 
-    env.remove("PIXTUOID_SOCKET");
-    env.set("USERNAME", "ada");
-    assert_eq!(
-        default_socket_path(),
-        std::path::Path::new(r"\\.\pipe\pixtuoid-ada")
-    );
+        // DOMAIN\user form is sanitized (backslashes are illegal in pipe names).
+        temp_env::with_var("USERNAME", Some(r"CORP\alice"), || {
+            assert_eq!(
+                default_socket_path(),
+                std::path::Path::new(r"\\.\pipe\pixtuoid-CORP-alice")
+            );
+        });
 
-    // DOMAIN\user form is sanitized (backslashes are illegal in pipe names).
-    env.set("USERNAME", r"CORP\alice");
-    assert_eq!(
-        default_socket_path(),
-        std::path::Path::new(r"\\.\pipe\pixtuoid-CORP-alice")
-    );
-
-    env.remove("USERNAME");
-    assert_eq!(
-        default_socket_path(),
-        std::path::Path::new(r"\\.\pipe\pixtuoid-default")
-    );
+        temp_env::with_var_unset("USERNAME", || {
+            assert_eq!(
+                default_socket_path(),
+                std::path::Path::new(r"\\.\pipe\pixtuoid-default")
+            );
+        });
+    });
 }

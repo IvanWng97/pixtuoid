@@ -114,77 +114,80 @@ impl Source for ClaudeCodeSource {
 mod tests {
     use super::*;
 
-    // Every socket branch is checked in ONE test because the env vars are
-    // process-global — splitting would race under the multi-thread runner.
     #[cfg(unix)]
     #[test]
     fn default_socket_path_env_precedence_and_default_paths() {
-        let mut env = crate::test_env::EnvGuard::lock();
+        temp_env::with_var("XDG_RUNTIME_DIR", Some("/run/user/1000"), || {
+            temp_env::with_var("PIXTUOID_SOCKET", Some("/tmp/explicit.sock"), || {
+                assert_eq!(
+                    ClaudeCodeSource::default_socket_path(),
+                    PathBuf::from("/tmp/explicit.sock")
+                );
+            });
 
-        env.set("PIXTUOID_SOCKET", "/tmp/explicit.sock");
-        env.set("XDG_RUNTIME_DIR", "/run/user/1000");
-        assert_eq!(
-            ClaudeCodeSource::default_socket_path(),
-            PathBuf::from("/tmp/explicit.sock")
-        );
+            for blank in ["", "   "] {
+                temp_env::with_var("PIXTUOID_SOCKET", Some(blank), || {
+                    assert_eq!(
+                        ClaudeCodeSource::default_socket_path(),
+                        PathBuf::from("/run/user/1000/pixtuoid.sock")
+                    );
+                });
+            }
 
-        env.set("PIXTUOID_SOCKET", "");
-        assert_eq!(
-            ClaudeCodeSource::default_socket_path(),
-            PathBuf::from("/run/user/1000/pixtuoid.sock")
-        );
-        env.set("PIXTUOID_SOCKET", "   ");
-        assert_eq!(
-            ClaudeCodeSource::default_socket_path(),
-            PathBuf::from("/run/user/1000/pixtuoid.sock")
-        );
-
-        env.remove("PIXTUOID_SOCKET");
-        assert_eq!(
-            ClaudeCodeSource::default_socket_path(),
-            PathBuf::from("/run/user/1000/pixtuoid.sock")
-        );
+            temp_env::with_var_unset("PIXTUOID_SOCKET", || {
+                assert_eq!(
+                    ClaudeCodeSource::default_socket_path(),
+                    PathBuf::from("/run/user/1000/pixtuoid.sock")
+                );
+            });
+        });
 
         let uid = rustix::process::getuid().as_raw();
         let tmp_fallback = PathBuf::from(format!("/tmp/pixtuoid-{uid}/pixtuoid.sock"));
-        for invalid in ["", "   ", "relative/run"] {
-            env.set("XDG_RUNTIME_DIR", invalid);
-            assert_eq!(ClaudeCodeSource::default_socket_path(), tmp_fallback);
-        }
+        temp_env::with_var_unset("PIXTUOID_SOCKET", || {
+            for invalid in ["", "   ", "relative/run"] {
+                temp_env::with_var("XDG_RUNTIME_DIR", Some(invalid), || {
+                    assert_eq!(ClaudeCodeSource::default_socket_path(), tmp_fallback);
+                });
+            }
 
-        env.remove("XDG_RUNTIME_DIR");
-        assert_eq!(
-            ClaudeCodeSource::default_socket_path(),
-            PathBuf::from(format!("/tmp/pixtuoid-{uid}/pixtuoid.sock"))
-        );
+            temp_env::with_var_unset("XDG_RUNTIME_DIR", || {
+                assert_eq!(
+                    ClaudeCodeSource::default_socket_path(),
+                    PathBuf::from(format!("/tmp/pixtuoid-{uid}/pixtuoid.sock"))
+                );
+            });
+        });
     }
 
     #[test]
     fn default_paths_projects_root_honors_claude_config_dir() {
-        let mut env = crate::test_env::EnvGuard::lock();
         let fallback_suffix = PathBuf::from(".claude").join("projects");
 
-        env.remove("CLAUDE_CONFIG_DIR");
-        let unset_paths = ClaudeCodeSource::default_paths();
-        assert!(
-            unset_paths.projects_root.ends_with(&fallback_suffix),
-            "projects_root must end with .claude/projects, got {:?}",
-            unset_paths.projects_root
-        );
+        temp_env::with_var_unset("CLAUDE_CONFIG_DIR", || {
+            let unset_paths = ClaudeCodeSource::default_paths();
+            assert!(
+                unset_paths.projects_root.ends_with(&fallback_suffix),
+                "projects_root must end with .claude/projects, got {:?}",
+                unset_paths.projects_root
+            );
+        });
 
         let custom_dir = std::env::temp_dir().join("pixtuoid-claude-config-dir");
-        env.set("CLAUDE_CONFIG_DIR", &custom_dir);
-        assert_eq!(
-            ClaudeCodeSource::default_paths().projects_root,
-            custom_dir.join("projects")
-        );
+        temp_env::with_var("CLAUDE_CONFIG_DIR", Some(&custom_dir), || {
+            assert_eq!(
+                ClaudeCodeSource::default_paths().projects_root,
+                custom_dir.join("projects")
+            );
+        });
 
-        env.set("CLAUDE_CONFIG_DIR", "");
-        let empty_paths = ClaudeCodeSource::default_paths();
-        assert!(
-            empty_paths.projects_root.ends_with(&fallback_suffix),
-            "empty CLAUDE_CONFIG_DIR must fall back to .claude/projects, got {:?}",
-            empty_paths.projects_root
-        );
+        temp_env::with_var("CLAUDE_CONFIG_DIR", Some(""), || {
+            let empty_paths = ClaudeCodeSource::default_paths();
+            assert!(
+                empty_paths.projects_root.ends_with(&fallback_suffix),
+                "empty CLAUDE_CONFIG_DIR must fall back to .claude/projects, got {:?}",
+                empty_paths.projects_root
+            );
+        });
     }
 }

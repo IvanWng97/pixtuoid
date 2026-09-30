@@ -175,29 +175,31 @@ mod tests {
 
     #[test]
     fn default_config_path_honors_claude_config_dir() {
-        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         let fallback_suffix = PathBuf::from(".claude").join("settings.json");
 
-        env.remove("CLAUDE_CONFIG_DIR");
-        let unset_path = default_config_path().unwrap();
-        assert!(
-            unset_path.ends_with(&fallback_suffix),
-            "default config path must end with .claude/settings.json, got {unset_path:?}"
-        );
+        temp_env::with_var_unset("CLAUDE_CONFIG_DIR", || {
+            let unset_path = default_config_path().unwrap();
+            assert!(
+                unset_path.ends_with(&fallback_suffix),
+                "default config path must end with .claude/settings.json, got {unset_path:?}"
+            );
+        });
 
         let custom_dir = std::env::temp_dir().join("pixtuoid-claude-config-dir");
-        env.set("CLAUDE_CONFIG_DIR", &custom_dir);
-        assert_eq!(
-            default_config_path().unwrap(),
-            custom_dir.join("settings.json")
-        );
+        temp_env::with_var("CLAUDE_CONFIG_DIR", Some(&custom_dir), || {
+            assert_eq!(
+                default_config_path().unwrap(),
+                custom_dir.join("settings.json")
+            );
+        });
 
-        env.set("CLAUDE_CONFIG_DIR", "");
-        let empty_path = default_config_path().unwrap();
-        assert!(
-            empty_path.ends_with(&fallback_suffix),
-            "empty CLAUDE_CONFIG_DIR must fall back to .claude/settings.json, got {empty_path:?}"
-        );
+        temp_env::with_var("CLAUDE_CONFIG_DIR", Some(""), || {
+            let empty_path = default_config_path().unwrap();
+            assert!(
+                empty_path.ends_with(&fallback_suffix),
+                "empty CLAUDE_CONFIG_DIR must fall back to .claude/settings.json, got {empty_path:?}"
+            );
+        });
     }
 
     #[test]

@@ -2414,25 +2414,24 @@ mod tests {
     /// values.
     #[test]
     fn omp_sessions_dir_honors_non_empty_env_override() {
-        let mut env = crate::test_env::EnvGuard::lock();
-
-        env.set("PI_CODING_AGENT_DIR", "/custom/agent");
-        assert_eq!(
-            omp_sessions_dir(),
-            PathBuf::from("/custom/agent").join("sessions")
-        );
+        temp_env::with_var("PI_CODING_AGENT_DIR", Some("/custom/agent"), || {
+            assert_eq!(
+                omp_sessions_dir(),
+                PathBuf::from("/custom/agent").join("sessions")
+            );
+        });
 
         for blank in ["", "   "] {
-            env.set("PI_CODING_AGENT_DIR", blank);
-            let dflt = omp_sessions_dir();
+            let dflt = temp_env::with_var("PI_CODING_AGENT_DIR", Some(blank), omp_sessions_dir);
             assert!(
                 dflt.ends_with(Path::new(".omp/agent/sessions")),
                 "blank override {blank:?} → ~/.omp/agent fallback, got {dflt:?}"
             );
         }
 
-        env.remove("PI_CODING_AGENT_DIR");
-        assert!(omp_sessions_dir().ends_with(Path::new(".omp/agent/sessions")));
+        temp_env::with_var_unset("PI_CODING_AGENT_DIR", || {
+            assert!(omp_sessions_dir().ends_with(Path::new(".omp/agent/sessions")));
+        });
     }
 
     // -- extension-bridge hook payloads (#951) ------------------------------

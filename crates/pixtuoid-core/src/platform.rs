@@ -236,13 +236,12 @@ mod tests {
         use std::ffi::OsString;
         use std::os::unix::ffi::OsStringExt;
 
-        let mut env = crate::test_env::EnvGuard::lock();
-        env.remove("USERPROFILE");
-
         // 0xFF is never valid UTF-8, and is a legal byte in a Unix path.
         let bad = OsString::from_vec(b"/tmp/pixtuoid-caf\xFF".to_vec());
-        env.set("HOME", &bad);
-        let got = user_home_opt();
+        let got = temp_env::with_vars(
+            [("USERPROFILE", None), ("HOME", Some(bad.as_os_str()))],
+            user_home_opt,
+        );
 
         assert_eq!(
             got,
@@ -256,27 +255,27 @@ mod tests {
     /// that already went through here.
     #[test]
     fn path_env_filters_blanks_and_the_trimmed_twin_strips() {
-        let mut env = crate::test_env::EnvGuard::lock();
         const K: &str = "PIXTUOID_PATH_ENV_TEST";
 
-        env.remove(K);
-        assert_eq!(path_env(K), None, "unset");
+        temp_env::with_var_unset(K, || assert_eq!(path_env(K), None, "unset"));
         for blank in ["", "   ", "\t \n"] {
-            env.set(K, blank);
-            assert_eq!(path_env(K), None, "{blank:?} counts as unset");
-            assert_eq!(path_env_trimmed(K), None, "{blank:?} counts as unset");
+            temp_env::with_var(K, Some(blank), || {
+                assert_eq!(path_env(K), None, "{blank:?} counts as unset");
+                assert_eq!(path_env_trimmed(K), None, "{blank:?} counts as unset");
+            });
         }
-        env.set(K, " /srv/hm ");
-        assert_eq!(
-            path_env(K),
-            Some(PathBuf::from(" /srv/hm ")),
-            "the plain read TESTS the padding, it does not strip it"
-        );
-        assert_eq!(
-            path_env_trimmed(K),
-            Some(PathBuf::from("/srv/hm")),
-            "the trimming twin mirrors hermes's `os.environ.get(K, '').strip()`"
-        );
+        temp_env::with_var(K, Some(" /srv/hm "), || {
+            assert_eq!(
+                path_env(K),
+                Some(PathBuf::from(" /srv/hm ")),
+                "the plain read TESTS the padding, it does not strip it"
+            );
+            assert_eq!(
+                path_env_trimmed(K),
+                Some(PathBuf::from("/srv/hm")),
+                "the trimming twin mirrors hermes's `os.environ.get(K, '').strip()`"
+            );
+        });
     }
 
     /// The whole point of reading as bytes: an ill-formed value survives BOTH
@@ -288,17 +287,17 @@ mod tests {
         use std::ffi::OsString;
         use std::os::unix::ffi::OsStringExt;
 
-        let mut env = crate::test_env::EnvGuard::lock();
         const K: &str = "PIXTUOID_PATH_ENV_BYTES_TEST";
 
         let bad = OsString::from_vec(b"/tmp/caf\xFF".to_vec());
-        env.set(K, &bad);
-        assert!(
-            std::env::var(K).is_err(),
-            "precondition: env::var is what DROPS this value"
-        );
-        assert_eq!(path_env(K), Some(PathBuf::from(&bad)));
-        assert_eq!(path_env_trimmed(K), Some(PathBuf::from(&bad)));
+        temp_env::with_var(K, Some(&bad), || {
+            assert!(
+                std::env::var(K).is_err(),
+                "precondition: env::var is what DROPS this value"
+            );
+            assert_eq!(path_env(K), Some(PathBuf::from(&bad)));
+            assert_eq!(path_env_trimmed(K), Some(PathBuf::from(&bad)));
+        });
     }
 
     #[test]

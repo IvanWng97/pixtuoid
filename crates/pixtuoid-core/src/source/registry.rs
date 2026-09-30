@@ -1284,14 +1284,6 @@ mod tests {
     #[cfg(feature = "native")]
     #[test]
     fn every_declared_home_env_actually_moves_that_sources_root() {
-        let mut env = crate::test_env::EnvGuard::lock();
-
-        // A named profile derives its own agent dir and IGNORES the override
-        // (`dirs.ts`), so an exported OMP_PROFILE/PI_PROFILE reds this gate blaming
-        // the resolver. Scrub them.
-        env.remove("OMP_PROFILE");
-        env.remove("PI_PROFILE");
-
         let declared: Vec<_> = REGISTRY
             .iter()
             .filter_map(|d| d.home_env.map(|v| (d.name, v)))
@@ -1301,32 +1293,38 @@ mod tests {
             "a floor, so an emptied column can't make this pass vacuously: {declared:?}"
         );
 
-        // Collect rather than assert in-loop, so one run names every source
-        // that fails.
-        let mut failures: Vec<String> = Vec::new();
-        for (name, var) in declared {
-            // A REAL dir: upstream `find_codex_home` gates `CODEX_HOME` on the path
-            // existing, so a bare string silently falls back.
-            let tmp = tempfile::tempdir().expect("tempdir");
-            let root_env = tmp.path().to_path_buf();
-            env.set(var, &root_env);
+        // A named profile derives its own agent dir and IGNORES the override
+        // (`dirs.ts`), so an exported OMP_PROFILE/PI_PROFILE reds this gate blaming
+        // the resolver. Scrub them.
+        let failures = temp_env::with_vars_unset(["OMP_PROFILE", "PI_PROFILE"], || {
+            // Collect rather than assert in-loop, so one run names every source
+            // that fails.
+            let mut failures: Vec<String> = Vec::new();
+            for (name, var) in declared {
+                // A REAL dir: upstream `find_codex_home` gates `CODEX_HOME` on the path
+                // existing, so a bare string silently falls back.
+                let tmp = tempfile::tempdir().expect("tempdir");
+                let root_env = tmp.path().to_path_buf();
+                let resolved = temp_env::with_var(var, Some(&root_env), || {
+                    crate::source::resolved_source_root(name)
+                });
 
-            let resolved = crate::source::resolved_source_root(name);
-
-            match resolved {
-                None => failures.push(format!(
-                    "{name} declares home_env={var} but `resolved_source_root` has no arm \
+                match resolved {
+                    None => failures.push(format!(
+                        "{name} declares home_env={var} but `resolved_source_root` has no arm \
                      for it — add one, or the declaration is unproven"
-                )),
-                Some(r) if !r.starts_with(&root_env) => failures.push(format!(
-                    "{name}: ${var}={} did not reach the resolved root {} — the override is \
+                    )),
+                    Some(r) if !r.starts_with(&root_env) => failures.push(format!(
+                        "{name}: ${var}={} did not reach the resolved root {} — the override is \
                      declared but does not actually relocate anything",
-                    root_env.display(),
-                    r.display(),
-                )),
-                Some(_) => {}
+                        root_env.display(),
+                        r.display(),
+                    )),
+                    Some(_) => {}
+                }
             }
-        }
+            failures
+        });
 
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
@@ -1336,24 +1334,24 @@ mod tests {
     #[cfg(feature = "native")]
     #[test]
     fn a_source_root_does_not_wander_into_an_unset_overrides_directory() {
-        let _env = crate::test_env::EnvGuard::lock();
-
-        let tmp = tempfile::tempdir().expect("tempdir");
-        for (name, root) in [
-            (
-                "claude-code",
-                crate::source::resolved_source_root("claude-code").unwrap(),
-            ),
-            (
-                "copilot",
-                crate::source::resolved_source_root("copilot").unwrap(),
-            ),
-        ] {
-            assert!(
-                !root.starts_with(tmp.path()),
-                "{name}: resolved {} under a directory nothing pointed at",
-                root.display()
-            );
-        }
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            for (name, root) in [
+                (
+                    "claude-code",
+                    crate::source::resolved_source_root("claude-code").unwrap(),
+                ),
+                (
+                    "copilot",
+                    crate::source::resolved_source_root("copilot").unwrap(),
+                ),
+            ] {
+                assert!(
+                    !root.starts_with(tmp.path()),
+                    "{name}: resolved {} under a directory nothing pointed at",
+                    root.display()
+                );
+            }
+        });
     }
 }

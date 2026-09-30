@@ -433,32 +433,35 @@ command = "/hand/written/pixtuoid-hook"
 
     #[test]
     fn default_config_path_honors_codex_home_env() {
-        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         let fallback_suffix = PathBuf::from(".codex").join("config.toml");
 
-        env.remove("CODEX_HOME");
-        assert!(
-            default_config_path().unwrap().ends_with(&fallback_suffix),
-            "unset CODEX_HOME must end with .codex/config.toml, got {:?}",
-            default_config_path().unwrap()
-        );
+        temp_env::with_var_unset("CODEX_HOME", || {
+            assert!(
+                default_config_path().unwrap().ends_with(&fallback_suffix),
+                "unset CODEX_HOME must end with .codex/config.toml, got {:?}",
+                default_config_path().unwrap()
+            );
+        });
 
         let custom = std::env::temp_dir().join("pixtuoid-codex-home-cfg-test");
         std::fs::create_dir_all(&custom).unwrap();
-        env.set("CODEX_HOME", &custom);
-        assert_eq!(default_config_path().unwrap(), custom.join("config.toml"));
+        temp_env::with_var("CODEX_HOME", Some(&custom), || {
+            assert_eq!(default_config_path().unwrap(), custom.join("config.toml"));
+        });
 
         // A non-existent dir falls back, matching upstream codex's own gate.
         let missing = std::env::temp_dir().join("pixtuoid-codex-home-cfg-missing");
         let _ = std::fs::remove_dir_all(&missing);
-        env.set("CODEX_HOME", &missing);
-        assert!(
-            default_config_path().unwrap().ends_with(&fallback_suffix),
-            "non-existent CODEX_HOME must fall back to .codex/config.toml"
-        );
+        temp_env::with_var("CODEX_HOME", Some(&missing), || {
+            assert!(
+                default_config_path().unwrap().ends_with(&fallback_suffix),
+                "non-existent CODEX_HOME must fall back to .codex/config.toml"
+            );
+        });
 
-        env.set("CODEX_HOME", "");
-        assert!(default_config_path().unwrap().ends_with(&fallback_suffix));
+        temp_env::with_var("CODEX_HOME", Some(""), || {
+            assert!(default_config_path().unwrap().ends_with(&fallback_suffix));
+        });
 
         let _ = std::fs::remove_dir_all(&custom);
     }

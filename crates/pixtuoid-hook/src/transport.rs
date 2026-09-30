@@ -182,7 +182,7 @@ mod peer {
     /// SAFETY: `process` is a valid process handle for the call's duration.
     unsafe fn token_user_blob(process: HANDLE) -> Option<Vec<u64>> {
         let mut token: HANDLE = std::ptr::null_mut();
-        // SAFETY: `process` is valid per this fn's contract; `token` is a live out-param.
+        // SAFETY: `process` is forwarded from this fn's contract; `token` is a live out-param.
         if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
             return None;
         }
@@ -210,7 +210,7 @@ mod peer {
     /// SAFETY: `blob` is a `TOKEN_USER` written by `GetTokenInformation`, u64-aligned.
     unsafe fn sid_of(blob: &[u64]) -> PSID {
         let user = blob.as_ptr().cast::<TOKEN_USER>();
-        // SAFETY: this fn's contract — `user` points at an aligned, initialized `TOKEN_USER`.
+        // SAFETY: forwarded from this fn's contract.
         unsafe { (*user).User.Sid }
     }
 

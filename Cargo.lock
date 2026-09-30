@@ -2690,6 +2690,7 @@ dependencies = [
  "skrifa",
  "snapbox",
  "softbuffer",
+ "temp-env",
  "tempfile",
  "tokio",
  "toml",
@@ -2719,6 +2720,7 @@ dependencies = [
  "rustix 1.1.4",
  "serde",
  "serde_json",
+ "temp-env",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
@@ -2735,6 +2737,7 @@ dependencies = [
  "anyhow",
  "libc",
  "serde_json",
+ "temp-env",
  "tempfile",
  "tokio",
  "windows-sys 0.61.2",
@@ -3792,6 +3795,15 @@ name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+[[package]]
+name = "temp-env"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96374855068f47402c3121c6eed88d29cb1de8f3ab27090e273e420bdabcf050"
+dependencies = [
+ "parking_lot",
+]
 
 [[package]]
 name = "tempfile"

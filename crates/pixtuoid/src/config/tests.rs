@@ -242,43 +242,53 @@ fn resolve_pets_collects_unknown_kind_warnings() {
 
 #[test]
 fn config_path_xdg_home_and_relative_branches() {
-    let mut env = pixtuoid_core::test_env::EnvGuard::lock();
-
-    // Clear USERPROFILE for the whole test: on Windows it outranks HOME in
-    // user_home(), so both the HOME arm and the relative-fallback arm need it
-    // absent to reach their branches.
-    env.remove("USERPROFILE");
-
     // A leading-slash path is not absolute on Windows (no drive prefix).
     let abs_xdg = if cfg!(windows) {
         "C:/xdg/base"
     } else {
         "/xdg/base"
     };
-    env.set("XDG_CONFIG_HOME", abs_xdg);
-    env.set("HOME", "/home/u");
-    assert_eq!(
-        config_path(),
-        PathBuf::from(abs_xdg).join("pixtuoid").join("config.toml")
-    );
 
-    for invalid in ["", "   ", "rel/xdg"] {
-        env.set("XDG_CONFIG_HOME", invalid);
-        assert_eq!(
-            config_path(),
-            PathBuf::from("/home/u/.config/pixtuoid/config.toml"),
-            "invalid XDG_CONFIG_HOME {invalid:?} must fall to $HOME/.config"
+    // Clear USERPROFILE for the whole test: on Windows it outranks HOME in
+    // user_home(), so both the HOME arm and the relative-fallback arm need it
+    // absent to reach their branches.
+    temp_env::with_var_unset("USERPROFILE", || {
+        temp_env::with_vars(
+            [
+                ("XDG_CONFIG_HOME", Some(abs_xdg)),
+                ("HOME", Some("/home/u")),
+            ],
+            || {
+                assert_eq!(
+                    config_path(),
+                    PathBuf::from(abs_xdg).join("pixtuoid").join("config.toml")
+                );
+            },
         );
-    }
 
-    env.remove("XDG_CONFIG_HOME");
-    assert_eq!(
-        config_path(),
-        PathBuf::from("/home/u/.config/pixtuoid/config.toml")
-    );
+        temp_env::with_var("HOME", Some("/home/u"), || {
+            for invalid in ["", "   ", "rel/xdg"] {
+                temp_env::with_var("XDG_CONFIG_HOME", Some(invalid), || {
+                    assert_eq!(
+                        config_path(),
+                        PathBuf::from("/home/u/.config/pixtuoid/config.toml"),
+                        "invalid XDG_CONFIG_HOME {invalid:?} must fall to $HOME/.config"
+                    );
+                });
+            }
 
-    env.remove("HOME");
-    assert_eq!(config_path(), PathBuf::from(".config/pixtuoid/config.toml"));
+            temp_env::with_var_unset("XDG_CONFIG_HOME", || {
+                assert_eq!(
+                    config_path(),
+                    PathBuf::from("/home/u/.config/pixtuoid/config.toml")
+                );
+            });
+        });
+
+        temp_env::with_vars_unset(["XDG_CONFIG_HOME", "HOME"], || {
+            assert_eq!(config_path(), PathBuf::from(".config/pixtuoid/config.toml"));
+        });
+    });
 }
 
 #[test]
@@ -537,13 +547,13 @@ fn a_named_pack_outranks_the_users_own_which_outranks_the_bundled_one() {
 
 #[test]
 fn resolve_pack_source_finds_the_users_pack_under_xdg_config_home() {
-    let mut env = pixtuoid_core::test_env::EnvGuard::lock();
     let base = tempfile::TempDir::new().expect("tempdir");
     let sprites = base.path().join("pixtuoid").join("sprites");
     std::fs::create_dir_all(&sprites).expect("mkdir sprites");
     std::fs::write(sprites.join("pack.toml"), b"").expect("write pack.toml");
-    env.set("XDG_CONFIG_HOME", base.path());
-    let found = resolve_pack_source(&AppConfig::default(), None);
+    let found = temp_env::with_var("XDG_CONFIG_HOME", Some(base.path()), || {
+        resolve_pack_source(&AppConfig::default(), None)
+    });
     assert_eq!(
         found,
         pixtuoid_scene::embedded_pack::PackSource::Discovered(sprites)

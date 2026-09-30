@@ -701,30 +701,30 @@ mod tests {
 
     #[test]
     fn install_renders_plugin_with_baked_shim_path_and_sentinel() {
-        // Serialize against config.rs's env-mutating tests, which null HOME and
-        // USERPROFILE in a window that makes `home_first_dir()` return None under
-        // plain `cargo test` — nextest's per-process isolation masks it.
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        let arts = plugin_artifacts(Path::new("/opt/bin/pixtuoid-hook")).unwrap();
-        assert_eq!(arts.len(), 3, "manifest + package.json + index.js");
-        let index = &arts
-            .iter()
-            .find(|(p, _)| p.ends_with("index.js"))
-            .unwrap()
-            .1;
-        assert!(
-            index.contains(SENTINEL),
-            "entry module carries the sentinel"
-        );
-        assert!(
-            index.contains("\"/opt/bin/pixtuoid-hook\""),
-            "shim path baked JSON-escaped"
-        );
-        assert!(!index.contains(HOOK_PLACEHOLDER), "placeholder replaced");
-        assert!(
-            index.contains("--source"),
-            "spawns the shim with --source openclaw"
-        );
+        // Serialized with the tests that unset HOME and USERPROFILE, under which
+        // `home_first_dir()` returns None.
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let arts = plugin_artifacts(Path::new("/opt/bin/pixtuoid-hook")).unwrap();
+            assert_eq!(arts.len(), 3, "manifest + package.json + index.js");
+            let index = &arts
+                .iter()
+                .find(|(p, _)| p.ends_with("index.js"))
+                .unwrap()
+                .1;
+            assert!(
+                index.contains(SENTINEL),
+                "entry module carries the sentinel"
+            );
+            assert!(
+                index.contains("\"/opt/bin/pixtuoid-hook\""),
+                "shim path baked JSON-escaped"
+            );
+            assert!(!index.contains(HOOK_PLACEHOLDER), "placeholder replaced");
+            assert!(
+                index.contains("--source"),
+                "spawns the shim with --source openclaw"
+            );
+        });
     }
 
     #[test]
@@ -751,27 +751,28 @@ mod tests {
 
     #[test]
     fn merge_install_adds_load_path_enabled_and_the_grant() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        let out = merge_install("{}", "/opt/bin/pixtuoid-hook").unwrap();
-        assert!(out.changed);
-        let v: Value = serde_json::from_str(&out.content).unwrap();
-        let entry = &v["plugins"]["entries"]["pixtuoid"];
-        assert_eq!(entry["enabled"], json!(true));
-        assert_eq!(
-            entry["hooks"]["allowConversationAccess"],
-            json!(true),
-            "the busy-tell grant"
-        );
-        let paths = v["plugins"]["load"]["paths"].as_array().unwrap();
-        assert!(
-            paths.iter().any(|p| {
-                p.as_str()
-                    .unwrap()
-                    .replace('\\', "/")
-                    .ends_with("plugins/pixtuoid")
-            }),
-            "load.paths points at the plugin dir"
-        );
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let out = merge_install("{}", "/opt/bin/pixtuoid-hook").unwrap();
+            assert!(out.changed);
+            let v: Value = serde_json::from_str(&out.content).unwrap();
+            let entry = &v["plugins"]["entries"]["pixtuoid"];
+            assert_eq!(entry["enabled"], json!(true));
+            assert_eq!(
+                entry["hooks"]["allowConversationAccess"],
+                json!(true),
+                "the busy-tell grant"
+            );
+            let paths = v["plugins"]["load"]["paths"].as_array().unwrap();
+            assert!(
+                paths.iter().any(|p| {
+                    p.as_str()
+                        .unwrap()
+                        .replace('\\', "/")
+                        .ends_with("plugins/pixtuoid")
+                }),
+                "load.paths points at the plugin dir"
+            );
+        });
     }
 
     /// Drives the env-wiring WRAPPER, not the pure core the cases above inject
@@ -780,513 +781,530 @@ mod tests {
     /// openclaw e2e scripts.
     #[test]
     fn default_config_path_is_always_a_real_openclaw_config_file() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        let p = default_config_path().expect("a dev machine resolves a home");
-        assert!(
-            !p.as_os_str().is_empty(),
-            "an empty path would be merged into, and created, at the filesystem root"
-        );
-        let name = p
-            .file_name()
-            .and_then(|n| n.to_str())
-            .expect("a config FILE, not a directory");
-        assert!(
-            CONFIG_FILES.contains(&name),
-            "must be one of OpenClaw's own config filenames {CONFIG_FILES:?} — got {name}"
-        );
-        let parent = p.parent().expect("the config sits inside a state dir");
-        let dir = parent
-            .file_name()
-            .and_then(|n| n.to_str())
-            .expect("a named state dir");
-        assert!(
-            STATE_DIRS.contains(&dir),
-            "must sit in one of OpenClaw's own state dirs {STATE_DIRS:?} — got {dir}"
-        );
-        assert!(
-            p.is_absolute(),
-            "a relative path would resolve against the CLI's cwd at merge time"
-        );
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let p = default_config_path().expect("a dev machine resolves a home");
+            assert!(
+                !p.as_os_str().is_empty(),
+                "an empty path would be merged into, and created, at the filesystem root"
+            );
+            let name = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .expect("a config FILE, not a directory");
+            assert!(
+                CONFIG_FILES.contains(&name),
+                "must be one of OpenClaw's own config filenames {CONFIG_FILES:?} — got {name}"
+            );
+            let parent = p.parent().expect("the config sits inside a state dir");
+            let dir = parent
+                .file_name()
+                .and_then(|n| n.to_str())
+                .expect("a named state dir");
+            assert!(
+                STATE_DIRS.contains(&dir),
+                "must sit in one of OpenClaw's own state dirs {STATE_DIRS:?} — got {dir}"
+            );
+            assert!(
+                p.is_absolute(),
+                "a relative path would resolve against the CLI's cwd at merge time"
+            );
+        });
     }
 
     #[test]
     fn merge_install_is_idempotent() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        let a = merge_install("{}", "/x").unwrap();
-        let b = merge_install(&a.content, "/x").unwrap();
-        assert!(!b.changed, "re-install of the same state is a no-op");
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let a = merge_install("{}", "/x").unwrap();
+            let b = merge_install(&a.content, "/x").unwrap();
+            assert!(!b.changed, "re-install of the same state is a no-op");
+        });
     }
 
     #[test]
     fn merge_install_preserves_foreign_config() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        let foreign = r#"{"gateway":{"mode":"local"},"plugins":{"entries":{"anthropic":{"enabled":true}},"load":{"paths":["/some/other/plugin"]}}}"#;
-        let out = merge_install(foreign, "/x").unwrap();
-        let v: Value = serde_json::from_str(&out.content).unwrap();
-        assert_eq!(v["gateway"]["mode"], json!("local"), "foreign keys survive");
-        assert_eq!(v["plugins"]["entries"]["anthropic"]["enabled"], json!(true));
-        let paths = v["plugins"]["load"]["paths"].as_array().unwrap();
-        assert!(
-            paths
-                .iter()
-                .any(|p| p.as_str() == Some("/some/other/plugin")),
-            "foreign path kept"
-        );
-        assert_eq!(paths.len(), 2, "ours appended, foreign kept");
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let foreign = r#"{"gateway":{"mode":"local"},"plugins":{"entries":{"anthropic":{"enabled":true}},"load":{"paths":["/some/other/plugin"]}}}"#;
+            let out = merge_install(foreign, "/x").unwrap();
+            let v: Value = serde_json::from_str(&out.content).unwrap();
+            assert_eq!(v["gateway"]["mode"], json!("local"), "foreign keys survive");
+            assert_eq!(v["plugins"]["entries"]["anthropic"]["enabled"], json!(true));
+            let paths = v["plugins"]["load"]["paths"].as_array().unwrap();
+            assert!(
+                paths
+                    .iter()
+                    .any(|p| p.as_str() == Some("/some/other/plugin")),
+                "foreign path kept"
+            );
+            assert_eq!(paths.len(), 2, "ours appended, foreign kept");
+        });
     }
 
     #[test]
     fn include_is_detected_at_any_depth_and_only_when_present() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-
-        for clean in [
-            json!({}),
-            json!({"gateway": {"port": 18789}}),
-            json!({"plugins": {"entries": {"pixtuoid": {"enabled": true}},
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            for clean in [
+                json!({}),
+                json!({"gateway": {"port": 18789}}),
+                json!({"plugins": {"entries": {"pixtuoid": {"enabled": true}},
                                "load": {"paths": ["/o/plugins/pixtuoid"]}}}),
-            json!({"notes": "$included by hand", "x": {"include": "y"}}),
-        ] {
-            assert!(
-                !contains_include(&clean),
-                "no {INCLUDE_KEY} here — must not be flagged: {clean}"
-            );
-        }
+                json!({"notes": "$included by hand", "x": {"include": "y"}}),
+            ] {
+                assert!(
+                    !contains_include(&clean),
+                    "no {INCLUDE_KEY} here — must not be flagged: {clean}"
+                );
+            }
 
-        for dirty in [
-            json!({INCLUDE_KEY: "./base.json"}),
-            json!({"plugins": {INCLUDE_KEY: "./plugins.json"}}),
-            json!({"plugins": {"load": {"paths": [{INCLUDE_KEY: "./p.json"}]}}}),
-            json!({"a": [[{"deep": {INCLUDE_KEY: "./d.json"}}]]}),
-        ] {
-            assert!(
-                contains_include(&dirty),
-                "an {INCLUDE_KEY} anywhere means our verdict may not describe what the \
+            for dirty in [
+                json!({INCLUDE_KEY: "./base.json"}),
+                json!({"plugins": {INCLUDE_KEY: "./plugins.json"}}),
+                json!({"plugins": {"load": {"paths": [{INCLUDE_KEY: "./p.json"}]}}}),
+                json!({"a": [[{"deep": {INCLUDE_KEY: "./d.json"}}]]}),
+            ] {
+                assert!(
+                    contains_include(&dirty),
+                    "an {INCLUDE_KEY} anywhere means our verdict may not describe what the \
                  gateway loads: {dirty}"
-            );
-        }
+                );
+            }
 
-        let sound = merge_install("{}", "").unwrap().content;
-        assert!(
-            !verify_schema(&sound)
-                .notes
-                .iter()
-                .any(|n| n.contains(INCLUDE_KEY)),
-            "a config we just wrote has no {INCLUDE_KEY} to report"
-        );
-        let mut with_include: Value = serde_json::from_str(&sound).unwrap();
-        with_include["plugins"][INCLUDE_KEY] = json!("./more.json");
-        let v = verify_schema(&with_include.to_string());
-        assert!(
-            v.notes.iter().any(|n| n.contains(INCLUDE_KEY)),
-            "the note must surface — got {:?}",
-            v.notes
-        );
-        assert!(
-            v.issues.is_empty(),
-            "…but an include is not itself broken, so never a HARD issue — got {:?}",
-            v.issues
-        );
+            let sound = merge_install("{}", "").unwrap().content;
+            assert!(
+                !verify_schema(&sound)
+                    .notes
+                    .iter()
+                    .any(|n| n.contains(INCLUDE_KEY)),
+                "a config we just wrote has no {INCLUDE_KEY} to report"
+            );
+            let mut with_include: Value = serde_json::from_str(&sound).unwrap();
+            with_include["plugins"][INCLUDE_KEY] = json!("./more.json");
+            let v = verify_schema(&with_include.to_string());
+            assert!(
+                v.notes.iter().any(|n| n.contains(INCLUDE_KEY)),
+                "the note must surface — got {:?}",
+                v.notes
+            );
+            assert!(
+                v.issues.is_empty(),
+                "…but an include is not itself broken, so never a HARD issue — got {:?}",
+                v.issues
+            );
+        });
     }
 
     #[test]
     fn removing_only_our_load_path_still_counts_as_ours() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        // A full install, then hand-drop the entry so ONLY the path identifies us.
-        let installed = merge_install(r#"{"plugins":{"allow":["anthropic"]}}"#, "").unwrap();
-        let mut v: Value = serde_json::from_str(&installed.content).unwrap();
-        v["plugins"]["entries"]
-            .as_object_mut()
-            .expect("install wrote an entries map")
-            .remove(PLUGIN_ID);
-        assert!(
-            v["plugins"]["load"]["paths"]
-                .as_array()
-                .expect("install wrote a paths array")
-                .iter()
-                .any(|p| p.as_str() == plugin_dir().unwrap().to_str()),
-            "precondition: our path is what is left identifying us"
-        );
-
-        let out = merge_uninstall(&v.to_string()).unwrap();
-        assert!(out.changed, "our path was removed — that IS a change");
-        let after: Value = serde_json::from_str(&out.content).unwrap();
-        assert!(
-            !after["plugins"]["load"]["paths"]
-                .as_array()
-                .map(|a| a
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            // A full install, then hand-drop the entry so ONLY the path identifies us.
+            let installed = merge_install(r#"{"plugins":{"allow":["anthropic"]}}"#, "").unwrap();
+            let mut v: Value = serde_json::from_str(&installed.content).unwrap();
+            v["plugins"]["entries"]
+                .as_object_mut()
+                .expect("install wrote an entries map")
+                .remove(PLUGIN_ID);
+            assert!(
+                v["plugins"]["load"]["paths"]
+                    .as_array()
+                    .expect("install wrote a paths array")
                     .iter()
-                    .any(|p| p.as_str() == plugin_dir().unwrap().to_str()))
-                .unwrap_or(false),
-            "our path is gone: {after}"
-        );
-        assert_eq!(
-            after["plugins"]["allow"],
-            json!(["anthropic"]),
-            "and the allow JOIN is undone symmetrically, leaving the user's own id"
-        );
+                    .any(|p| p.as_str() == plugin_dir().unwrap().to_str()),
+                "precondition: our path is what is left identifying us"
+            );
+
+            let out = merge_uninstall(&v.to_string()).unwrap();
+            assert!(out.changed, "our path was removed — that IS a change");
+            let after: Value = serde_json::from_str(&out.content).unwrap();
+            assert!(
+                !after["plugins"]["load"]["paths"]
+                    .as_array()
+                    .map(|a| a
+                        .iter()
+                        .any(|p| p.as_str() == plugin_dir().unwrap().to_str()))
+                    .unwrap_or(false),
+                "our path is gone: {after}"
+            );
+            assert_eq!(
+                after["plugins"]["allow"],
+                json!(["anthropic"]),
+                "and the allow JOIN is undone symmetrically, leaving the user's own id"
+            );
+        });
     }
 
     #[test]
     fn install_joins_a_curated_allowlist_but_never_an_empty_one() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        let curated = merge_install(r#"{"plugins":{"allow":["anthropic"]}}"#, "").unwrap();
-        let v: Value = serde_json::from_str(&curated.content).unwrap();
-        let allow = v["plugins"]["allow"].as_array().unwrap();
-        assert!(
-            allow.iter().any(|x| x == "pixtuoid") && allow.iter().any(|x| x == "anthropic"),
-            "join the allowlist without evicting the user's own ids: {allow:?}"
-        );
-        let again = merge_install(&curated.content, "").unwrap();
-        assert!(!again.changed, "a re-install is a semantic no-op");
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let curated = merge_install(r#"{"plugins":{"allow":["anthropic"]}}"#, "").unwrap();
+            let v: Value = serde_json::from_str(&curated.content).unwrap();
+            let allow = v["plugins"]["allow"].as_array().unwrap();
+            assert!(
+                allow.iter().any(|x| x == "pixtuoid") && allow.iter().any(|x| x == "anthropic"),
+                "join the allowlist without evicting the user's own ids: {allow:?}"
+            );
+            let again = merge_install(&curated.content, "").unwrap();
+            assert!(!again.changed, "a re-install is a semantic no-op");
 
-        let cased = merge_install(r#"{"plugins":{"allow":["Pixtuoid"]}}"#, "").unwrap();
-        let v: Value = serde_json::from_str(&cased.content).unwrap();
-        assert_eq!(
-            v["plugins"]["allow"],
-            json!(["Pixtuoid", "pixtuoid"]),
-            "a case-variant does not admit us — our exact id must be joined"
-        );
-        assert!(
-            verify_schema(&cased.content).issues.is_empty(),
-            "…and the joined list is then sound"
-        );
-        // Whitespace IS trimmed upstream, so a padded entry is already us.
-        let padded = merge_install(r#"{"plugins":{"allow":[" pixtuoid "]}}"#, "").unwrap();
-        assert_eq!(
-            serde_json::from_str::<Value>(&padded.content).unwrap()["plugins"]["allow"],
-            json!([" pixtuoid "]),
-            "a padded form of our id is already us — no duplicate"
-        );
+            let cased = merge_install(r#"{"plugins":{"allow":["Pixtuoid"]}}"#, "").unwrap();
+            let v: Value = serde_json::from_str(&cased.content).unwrap();
+            assert_eq!(
+                v["plugins"]["allow"],
+                json!(["Pixtuoid", "pixtuoid"]),
+                "a case-variant does not admit us — our exact id must be joined"
+            );
+            assert!(
+                verify_schema(&cased.content).issues.is_empty(),
+                "…and the joined list is then sound"
+            );
+            // Whitespace IS trimmed upstream, so a padded entry is already us.
+            let padded = merge_install(r#"{"plugins":{"allow":[" pixtuoid "]}}"#, "").unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&padded.content).unwrap()["plugins"]["allow"],
+                json!([" pixtuoid "]),
+                "a padded form of our id is already us — no duplicate"
+            );
 
-        let empty = merge_install(r#"{"plugins":{"allow":[]}}"#, "").unwrap();
-        let v: Value = serde_json::from_str(&empty.content).unwrap();
-        assert_eq!(
-            v["plugins"]["allow"].as_array().map(Vec::len),
-            Some(0),
-            "an empty allowlist must not be written into"
-        );
-        let verdict = verify_schema(&empty.content);
-        assert!(
-            verdict.issues.is_empty(),
-            "an empty allowlist permits every plugin — not a break: {:?}",
-            verdict.issues
-        );
-        assert!(
-            !verdict.notes.iter().any(|n| n.contains("`plugins.allow`")),
-            "…and not worth a note either: {:?}",
-            verdict.notes
-        );
+            let empty = merge_install(r#"{"plugins":{"allow":[]}}"#, "").unwrap();
+            let v: Value = serde_json::from_str(&empty.content).unwrap();
+            assert_eq!(
+                v["plugins"]["allow"].as_array().map(Vec::len),
+                Some(0),
+                "an empty allowlist must not be written into"
+            );
+            let verdict = verify_schema(&empty.content);
+            assert!(
+                verdict.issues.is_empty(),
+                "an empty allowlist permits every plugin — not a break: {:?}",
+                verdict.issues
+            );
+            assert!(
+                !verdict.notes.iter().any(|n| n.contains("`plugins.allow`")),
+                "…and not worth a note either: {:?}",
+                verdict.notes
+            );
+        });
     }
 
     #[test]
     fn verify_flags_every_fail_closed_switch_that_silently_stops_the_plugin() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        let installed = merge_install("{}", "").unwrap();
-        let with = |mutate: &dyn Fn(&mut Value)| {
-            let mut v: Value = serde_json::from_str(&installed.content).unwrap();
-            mutate(&mut v);
-            verify_schema(&v.to_string())
-        };
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let installed = merge_install("{}", "").unwrap();
+            let with = |mutate: &dyn Fn(&mut Value)| {
+                let mut v: Value = serde_json::from_str(&installed.content).unwrap();
+                mutate(&mut v);
+                verify_schema(&v.to_string())
+            };
 
-        let verdict = with(&|v| v["plugins"]["deny"] = json!(["pixtuoid"]));
-        assert!(
-            verdict
-                .issues
-                .iter()
-                .any(|i| i.contains("`plugins.deny` lists pixtuoid")),
-            "a denylist naming us is a HARD break: {:?}",
-            verdict.issues
-        );
-        let verdict = with(&|v| v["plugins"]["deny"] = json!(["Pixtuoid"]));
-        assert!(
-            verdict.issues.is_empty(),
-            "a case-variant in deny is NOT us — must not report a break: {:?}",
-            verdict.issues
-        );
-
-        let verdict = with(&|v| v["plugins"]["entries"]["pixtuoid"]["hooks"] = json!({}));
-        assert!(
-            verdict
-                .issues
-                .iter()
-                .any(|i| i.contains("allowConversationAccess")),
-            "the grant we write must be verified: {:?}",
-            verdict.issues
-        );
-
-        let verdict = with(&|v| v["plugins"]["enabled"] = json!(false));
-        assert!(
-            verdict.issues.is_empty(),
-            "the user's global switch is not OUR break: {:?}",
-            verdict.issues
-        );
-        assert!(
-            verdict
-                .notes
-                .iter()
-                .any(|n| n.contains("`plugins.enabled = false`")),
-            "…but it IS why nothing loads: {:?}",
-            verdict.notes
-        );
-        assert!(
-            !verify_schema(&installed.content)
-                .notes
-                .iter()
-                .any(|n| n.contains("plugins.enabled")),
-            "an absent key is the enabled default — never reported"
-        );
-
-        let verdict = with(&|v| v["gateway"] = json!({ "$include": "./gw.json" }));
-        assert!(
-            verdict.notes.iter().any(|n| n.contains("$include")),
-            "an include under any key must be surfaced: {:?}",
-            verdict.notes
-        );
-    }
-
-    #[test]
-    fn verify_flags_an_allowlist_that_omits_us_and_notes_json5_and_include() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        let installed = merge_install("{}", "").unwrap();
-        assert!(verify_schema(&installed.content).issues.is_empty());
-
-        let mut v: Value = serde_json::from_str(&installed.content).unwrap();
-        v["plugins"]["allow"] = json!(["anthropic"]);
-        let verdict = verify_schema(&v.to_string());
-        assert!(
-            verdict
-                .issues
-                .iter()
-                .any(|i| i.contains("`plugins.allow` does not list pixtuoid")),
-            "a fail-closed allowlist must be a HARD issue: {:?}",
-            verdict.issues
-        );
-
-        let json5 = "{\n  // the user's note\n  \"plugins\": {},\n}\n";
-        let verdict = verify_schema(json5);
-        assert!(
-            verdict.issues.is_empty(),
-            "a JSON5 config is legal upstream — never a hard break: {:?}",
-            verdict.issues
-        );
-        assert!(
-            verdict.notes.iter().any(|n| n.contains("JSON5")),
-            "…but it must say why it could not be verified: {:?}",
-            verdict.notes
-        );
-
-        let mut v: Value = serde_json::from_str(&installed.content).unwrap();
-        v["$include"] = json!("./extra.json");
-        let verdict = verify_schema(&v.to_string());
-        assert!(
-            verdict.notes.iter().any(|n| n.contains("$include")),
-            "an include must be surfaced: {:?}",
-            verdict.notes
-        );
-    }
-
-    #[test]
-    fn a_reload_mode_that_never_applies_our_write_is_noted_but_not_a_break() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        let installed = merge_install("{}", "").unwrap();
-        let with_mode = |mode: &str| {
-            let mut v: Value = serde_json::from_str(&installed.content).unwrap();
-            v["gateway"] = json!({ "reload": { "mode": mode } });
-            verify_schema(&v.to_string())
-        };
-        for mode in ["off", "hot"] {
-            let verdict = with_mode(mode);
+            let verdict = with(&|v| v["plugins"]["deny"] = json!(["pixtuoid"]));
+            assert!(
+                verdict
+                    .issues
+                    .iter()
+                    .any(|i| i.contains("`plugins.deny` lists pixtuoid")),
+                "a denylist naming us is a HARD break: {:?}",
+                verdict.issues
+            );
+            let verdict = with(&|v| v["plugins"]["deny"] = json!(["Pixtuoid"]));
             assert!(
                 verdict.issues.is_empty(),
-                "{mode}: the user's own reload switch is not OUR break: {:?}",
+                "a case-variant in deny is NOT us — must not report a break: {:?}",
+                verdict.issues
+            );
+
+            let verdict = with(&|v| v["plugins"]["entries"]["pixtuoid"]["hooks"] = json!({}));
+            assert!(
+                verdict
+                    .issues
+                    .iter()
+                    .any(|i| i.contains("allowConversationAccess")),
+                "the grant we write must be verified: {:?}",
+                verdict.issues
+            );
+
+            let verdict = with(&|v| v["plugins"]["enabled"] = json!(false));
+            assert!(
+                verdict.issues.is_empty(),
+                "the user's global switch is not OUR break: {:?}",
                 verdict.issues
             );
             assert!(
                 verdict
                     .notes
                     .iter()
-                    .any(|n| n.contains("gateway.reload.mode") && n.contains(mode)),
-                "{mode}: must be surfaced as the reason nothing loaded yet: {:?}",
+                    .any(|n| n.contains("`plugins.enabled = false`")),
+                "…but it IS why nothing loads: {:?}",
                 verdict.notes
             );
-        }
-        for mode in ["restart", "hybrid"] {
             assert!(
-                !with_mode(mode)
+                !verify_schema(&installed.content)
+                    .notes
+                    .iter()
+                    .any(|n| n.contains("plugins.enabled")),
+                "an absent key is the enabled default — never reported"
+            );
+
+            let verdict = with(&|v| v["gateway"] = json!({ "$include": "./gw.json" }));
+            assert!(
+                verdict.notes.iter().any(|n| n.contains("$include")),
+                "an include under any key must be surfaced: {:?}",
+                verdict.notes
+            );
+        });
+    }
+
+    #[test]
+    fn verify_flags_an_allowlist_that_omits_us_and_notes_json5_and_include() {
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let installed = merge_install("{}", "").unwrap();
+            assert!(verify_schema(&installed.content).issues.is_empty());
+
+            let mut v: Value = serde_json::from_str(&installed.content).unwrap();
+            v["plugins"]["allow"] = json!(["anthropic"]);
+            let verdict = verify_schema(&v.to_string());
+            assert!(
+                verdict
+                    .issues
+                    .iter()
+                    .any(|i| i.contains("`plugins.allow` does not list pixtuoid")),
+                "a fail-closed allowlist must be a HARD issue: {:?}",
+                verdict.issues
+            );
+
+            let json5 = "{\n  // the user's note\n  \"plugins\": {},\n}\n";
+            let verdict = verify_schema(json5);
+            assert!(
+                verdict.issues.is_empty(),
+                "a JSON5 config is legal upstream — never a hard break: {:?}",
+                verdict.issues
+            );
+            assert!(
+                verdict.notes.iter().any(|n| n.contains("JSON5")),
+                "…but it must say why it could not be verified: {:?}",
+                verdict.notes
+            );
+
+            let mut v: Value = serde_json::from_str(&installed.content).unwrap();
+            v["$include"] = json!("./extra.json");
+            let verdict = verify_schema(&v.to_string());
+            assert!(
+                verdict.notes.iter().any(|n| n.contains("$include")),
+                "an include must be surfaced: {:?}",
+                verdict.notes
+            );
+        });
+    }
+
+    #[test]
+    fn a_reload_mode_that_never_applies_our_write_is_noted_but_not_a_break() {
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let installed = merge_install("{}", "").unwrap();
+            let with_mode = |mode: &str| {
+                let mut v: Value = serde_json::from_str(&installed.content).unwrap();
+                v["gateway"] = json!({ "reload": { "mode": mode } });
+                verify_schema(&v.to_string())
+            };
+            for mode in ["off", "hot"] {
+                let verdict = with_mode(mode);
+                assert!(
+                    verdict.issues.is_empty(),
+                    "{mode}: the user's own reload switch is not OUR break: {:?}",
+                    verdict.issues
+                );
+                assert!(
+                    verdict
+                        .notes
+                        .iter()
+                        .any(|n| n.contains("gateway.reload.mode") && n.contains(mode)),
+                    "{mode}: must be surfaced as the reason nothing loaded yet: {:?}",
+                    verdict.notes
+                );
+            }
+            for mode in ["restart", "hybrid"] {
+                assert!(
+                    !with_mode(mode)
+                        .notes
+                        .iter()
+                        .any(|n| n.contains("gateway.reload.mode")),
+                    "{mode} applies our write on its own — it must stay silent"
+                );
+            }
+            assert!(
+                !verify_schema(&installed.content)
                     .notes
                     .iter()
                     .any(|n| n.contains("gateway.reload.mode")),
-                "{mode} applies our write on its own — it must stay silent"
+                "an absent reload mode is the hybrid default — never reported"
             );
-        }
-        assert!(
-            !verify_schema(&installed.content)
-                .notes
-                .iter()
-                .any(|n| n.contains("gateway.reload.mode")),
-            "an absent reload mode is the hybrid default — never reported"
-        );
+        });
     }
 
     #[test]
     fn uninstall_prunes_its_own_husk_but_keeps_anything_foreign() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        let installed = merge_install("{}", "").unwrap();
-        let removed = merge_uninstall(&installed.content).unwrap();
-        assert!(removed.changed);
-        let v: Value = serde_json::from_str(&removed.content).unwrap();
-        assert_eq!(v, json!({}), "no husk left behind, got {v}");
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let installed = merge_install("{}", "").unwrap();
+            let removed = merge_uninstall(&installed.content).unwrap();
+            assert!(removed.changed);
+            let v: Value = serde_json::from_str(&removed.content).unwrap();
+            assert_eq!(v, json!({}), "no husk left behind, got {v}");
 
-        let shared = merge_install(
-            r#"{"plugins":{"entries":{"anthropic":{"enabled":true}}}}"#,
-            "",
-        )
-        .unwrap();
-        let removed = merge_uninstall(&shared.content).unwrap();
-        let v: Value = serde_json::from_str(&removed.content).unwrap();
-        assert_eq!(v["plugins"]["entries"]["anthropic"]["enabled"], json!(true));
-        assert!(v["plugins"]["entries"].get("pixtuoid").is_none());
+            let shared = merge_install(
+                r#"{"plugins":{"entries":{"anthropic":{"enabled":true}}}}"#,
+                "",
+            )
+            .unwrap();
+            let removed = merge_uninstall(&shared.content).unwrap();
+            let v: Value = serde_json::from_str(&removed.content).unwrap();
+            assert_eq!(v["plugins"]["entries"]["anthropic"]["enabled"], json!(true));
+            assert!(v["plugins"]["entries"].get("pixtuoid").is_none());
+        });
     }
 
     #[test]
     fn uninstall_revokes_the_grant_but_keeps_foreign_entries() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        let installed = merge_install(
-            r#"{"plugins":{"entries":{"anthropic":{"enabled":true}}}}"#,
-            "/x",
-        )
-        .unwrap();
-        let removed = merge_uninstall(&installed.content).unwrap();
-        assert!(removed.changed);
-        let v: Value = serde_json::from_str(&removed.content).unwrap();
-        assert!(
-            v["plugins"]["entries"].get("pixtuoid").is_none(),
-            "our entry (incl. the conversation-access grant) is revoked"
-        );
-        assert_eq!(
-            v["plugins"]["entries"]["anthropic"]["enabled"],
-            json!(true),
-            "a foreign plugin's grant survives"
-        );
-        // `load.paths` held ONLY ours, so the uninstall prunes the emptied array
-        // (and its `load` container) — either shape satisfies "our path removed".
-        let paths = v["plugins"]["load"]["paths"].as_array();
-        assert!(
-            paths.is_none_or(|ps| !ps
-                .iter()
-                .any(|p| p.as_str().is_some_and(|s| s.ends_with("plugins/pixtuoid")))),
-            "our load.path removed, got {paths:?}"
-        );
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let installed = merge_install(
+                r#"{"plugins":{"entries":{"anthropic":{"enabled":true}}}}"#,
+                "/x",
+            )
+            .unwrap();
+            let removed = merge_uninstall(&installed.content).unwrap();
+            assert!(removed.changed);
+            let v: Value = serde_json::from_str(&removed.content).unwrap();
+            assert!(
+                v["plugins"]["entries"].get("pixtuoid").is_none(),
+                "our entry (incl. the conversation-access grant) is revoked"
+            );
+            assert_eq!(
+                v["plugins"]["entries"]["anthropic"]["enabled"],
+                json!(true),
+                "a foreign plugin's grant survives"
+            );
+            // `load.paths` held ONLY ours, so the uninstall prunes the emptied array
+            // (and its `load` container) — either shape satisfies "our path removed".
+            let paths = v["plugins"]["load"]["paths"].as_array();
+            assert!(
+                paths.is_none_or(|ps| !ps
+                    .iter()
+                    .any(|p| p.as_str().is_some_and(|s| s.ends_with("plugins/pixtuoid")))),
+                "our load.path removed, got {paths:?}"
+            );
+        });
     }
 
     #[test]
     fn uninstall_of_unmanaged_config_is_a_no_op() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        // `changed` IS the `has_hooks` signal, so any shape we did not write must
-        // report false — including the empty containers our own prune produces.
-        for unmanaged in [
-            "{}",
-            "",
-            r#"{"gateway":{"mode":"local"}}"#,
-            r#"{"plugins":{}}"#,
-            r#"{"plugins":{"entries":{}}}"#,
-            r#"{"plugins":{"load":{"paths":[]}}}"#,
-            r#"{"plugins":{"allow":[]}}"#,
-            r#"{"plugins":{"entries":{"anthropic":{"enabled":true}}}}"#,
-        ] {
-            assert!(
-                !merge_uninstall(unmanaged).unwrap().changed,
-                "uninstall must be a no-op on a config we never wrote: {unmanaged}"
-            );
-        }
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            // `changed` IS the `has_hooks` signal, so any shape we did not write must
+            // report false — including the empty containers our own prune produces.
+            for unmanaged in [
+                "{}",
+                "",
+                r#"{"gateway":{"mode":"local"}}"#,
+                r#"{"plugins":{}}"#,
+                r#"{"plugins":{"entries":{}}}"#,
+                r#"{"plugins":{"load":{"paths":[]}}}"#,
+                r#"{"plugins":{"allow":[]}}"#,
+                r#"{"plugins":{"entries":{"anthropic":{"enabled":true}}}}"#,
+            ] {
+                assert!(
+                    !merge_uninstall(unmanaged).unwrap().changed,
+                    "uninstall must be a no-op on a config we never wrote: {unmanaged}"
+                );
+            }
+        });
     }
 
     #[test]
     fn uninstall_undoes_the_allowlist_join_without_ever_emptying_it() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        let joined = merge_install(r#"{"plugins":{"allow":["anthropic"]}}"#, "").unwrap();
-        let v: Value = serde_json::from_str(&merge_uninstall(&joined.content).unwrap().content)
-            .expect("valid json");
-        assert_eq!(
-            v["plugins"]["allow"],
-            json!(["anthropic"]),
-            "the user's own allowlist must come back exactly as we found it, got {v}"
-        );
-        assert!(v["plugins"]["entries"].get("pixtuoid").is_none());
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let joined = merge_install(r#"{"plugins":{"allow":["anthropic"]}}"#, "").unwrap();
+            let v: Value = serde_json::from_str(&merge_uninstall(&joined.content).unwrap().content)
+                .expect("valid json");
+            assert_eq!(
+                v["plugins"]["allow"],
+                json!(["anthropic"]),
+                "the user's own allowlist must come back exactly as we found it, got {v}"
+            );
+            assert!(v["plugins"]["entries"].get("pixtuoid").is_none());
 
-        let lone = merge_install(r#"{"plugins":{"allow":["pixtuoid"]}}"#, "").unwrap();
-        let v: Value = serde_json::from_str(&merge_uninstall(&lone.content).unwrap().content)
-            .expect("valid json");
-        assert_eq!(
-            v["plugins"]["allow"],
-            json!(["pixtuoid"]),
-            "the last member must survive — emptying it widens the allowlist, got {v}"
-        );
+            let lone = merge_install(r#"{"plugins":{"allow":["pixtuoid"]}}"#, "").unwrap();
+            let v: Value = serde_json::from_str(&merge_uninstall(&lone.content).unwrap().content)
+                .expect("valid json");
+            assert_eq!(
+                v["plugins"]["allow"],
+                json!(["pixtuoid"]),
+                "the last member must survive — emptying it widens the allowlist, got {v}"
+            );
 
-        let cased = merge_install(r#"{"plugins":{"allow":["anthropic","Pixtuoid"]}}"#, "").unwrap();
-        let v: Value = serde_json::from_str(&merge_uninstall(&cased.content).unwrap().content)
-            .expect("valid json");
-        assert_eq!(
-            v["plugins"]["allow"],
-            json!(["anthropic", "Pixtuoid"]),
-            "only OUR exact id is un-joined; the user's own entries survive, got {v}"
-        );
+            let cased =
+                merge_install(r#"{"plugins":{"allow":["anthropic","Pixtuoid"]}}"#, "").unwrap();
+            let v: Value = serde_json::from_str(&merge_uninstall(&cased.content).unwrap().content)
+                .expect("valid json");
+            assert_eq!(
+                v["plugins"]["allow"],
+                json!(["anthropic", "Pixtuoid"]),
+                "only OUR exact id is un-joined; the user's own entries survive, got {v}"
+            );
+        });
     }
 
     #[test]
     fn uninstall_never_empties_the_allowlist_even_when_every_entry_is_ours() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        // Upstream trims, so a padded copy is the SAME id — the first two inputs are
-        // lists whose every entry is ours.
-        for input in [
-            r#"{"plugins":{"allow":["pixtuoid"," pixtuoid "]}}"#,
-            r#"{"plugins":{"allow":["pixtuoid","pixtuoid"]}}"#,
-            r#"{"plugins":{"allow":["pixtuoid"]}}"#,
-        ] {
-            let installed = merge_install(input, "").unwrap();
-            let out = merge_uninstall(&installed.content).unwrap();
-            let v: Value = serde_json::from_str(&out.content).unwrap();
-            let allow = v["plugins"]["allow"].as_array();
-            assert!(
-                allow.is_none_or(|a| !a.is_empty()),
-                "uninstall emptied a curated allowlist (fail-OPEN) for {input}: {v}"
-            );
-        }
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            // Upstream trims, so a padded copy is the SAME id — the first two inputs are
+            // lists whose every entry is ours.
+            for input in [
+                r#"{"plugins":{"allow":["pixtuoid"," pixtuoid "]}}"#,
+                r#"{"plugins":{"allow":["pixtuoid","pixtuoid"]}}"#,
+                r#"{"plugins":{"allow":["pixtuoid"]}}"#,
+            ] {
+                let installed = merge_install(input, "").unwrap();
+                let out = merge_uninstall(&installed.content).unwrap();
+                let v: Value = serde_json::from_str(&out.content).unwrap();
+                let allow = v["plugins"]["allow"].as_array();
+                assert!(
+                    allow.is_none_or(|a| !a.is_empty()),
+                    "uninstall emptied a curated allowlist (fail-OPEN) for {input}: {v}"
+                );
+            }
+        });
     }
 
     #[test]
     fn merge_refuses_a_json5_document_instead_of_dropping_its_comments() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        // VALID JSON5 that serde_json cannot represent: a comment plus a trailing
-        // comma.
-        let json5 = "{\n  // my gateway notes — DO NOT LOSE\n  \"gateway\": { \"port\": 19789 },\n  \"plugins\": {},\n}\n";
-        for err in [
-            merge_install(json5, "/x").unwrap_err(),
-            merge_uninstall(json5).unwrap_err(),
-        ] {
-            let msg = err.to_string();
-            assert!(
-                msg.contains("not strict JSON") && msg.contains("openclaw plugins install"),
-                "the refusal must name the reason AND the owner CLI: {msg}"
-            );
-        }
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            // VALID JSON5 that serde_json cannot represent: a comment plus a trailing
+            // comma.
+            let json5 = "{\n  // my gateway notes — DO NOT LOSE\n  \"gateway\": { \"port\": 19789 },\n  \"plugins\": {},\n}\n";
+            for err in [
+                merge_install(json5, "/x").unwrap_err(),
+                merge_uninstall(json5).unwrap_err(),
+            ] {
+                let msg = err.to_string();
+                assert!(
+                    msg.contains("not strict JSON") && msg.contains("openclaw plugins install"),
+                    "the refusal must name the reason AND the owner CLI: {msg}"
+                );
+            }
+        });
     }
 
     #[test]
     fn install_then_uninstall_round_trips() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        let installed = merge_install("{}", "/x").unwrap();
-        let removed = merge_uninstall(&installed.content).unwrap();
-        let v: Value = serde_json::from_str(&removed.content).unwrap();
-        assert!(v["plugins"]["entries"].get("pixtuoid").is_none());
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let installed = merge_install("{}", "/x").unwrap();
+            let removed = merge_uninstall(&installed.content).unwrap();
+            let v: Value = serde_json::from_str(&removed.content).unwrap();
+            assert!(v["plugins"]["entries"].get("pixtuoid").is_none());
+        });
     }
 
     #[test]
     fn empty_content_is_treated_as_empty_document() {
-        let _env = pixtuoid_core::test_env::EnvGuard::lock();
-        let out = merge_install("", "/x").unwrap();
-        assert!(out.changed);
-        assert!(serde_json::from_str::<Value>(&out.content).is_ok());
+        temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
+            let out = merge_install("", "/x").unwrap();
+            assert!(out.changed);
+            assert!(serde_json::from_str::<Value>(&out.content).is_ok());
+        });
     }
 
     #[test]

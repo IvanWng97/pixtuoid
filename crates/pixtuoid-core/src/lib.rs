@@ -54,10 +54,6 @@ pub mod sprite;
 /// The reducer and `SceneState` — the event coordinator turning `AgentEvent`s
 /// into per-agent slot state.
 pub mod state;
-/// The scoped environment guard every test that sets or removes a variable
-/// holds, in this crate's tests and in its dependents'.
-#[cfg(feature = "harness")]
-pub mod test_env;
 // `WalkableMask` is an ALIAS for `Grid<bool>` whose obstacle ops are an
 // inherent `impl Grid<bool>`, and the orphan rule pins that impl to the crate
 // owning `Grid` — so the mask vocabulary stays here even though its producers

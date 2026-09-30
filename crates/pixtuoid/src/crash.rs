@@ -337,22 +337,23 @@ mod tests {
 
     #[test]
     fn crash_log_path_rejects_a_relative_xdg_state_home() {
-        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
-        let home = pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
-        let cache = home.join(".cache").join("pixtuoid").join("crash.log");
         for rel in ["", "   ", "rel/state", "~/state"] {
-            env.set("XDG_STATE_HOME", rel);
-            assert_eq!(
-                crash_log_path(),
-                cache,
-                "relative XDG_STATE_HOME {rel:?} must fall back to ~/.cache"
-            );
+            temp_env::with_var("XDG_STATE_HOME", Some(rel), || {
+                let home =
+                    pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
+                assert_eq!(
+                    crash_log_path(),
+                    home.join(".cache").join("pixtuoid").join("crash.log"),
+                    "relative XDG_STATE_HOME {rel:?} must fall back to ~/.cache"
+                );
+            });
         }
         let abs = if cfg!(windows) { "C:/state" } else { "/state" };
-        env.set("XDG_STATE_HOME", abs);
-        assert_eq!(
-            crash_log_path(),
-            PathBuf::from(format!("{abs}/pixtuoid/crash.log"))
-        );
+        temp_env::with_var("XDG_STATE_HOME", Some(abs), || {
+            assert_eq!(
+                crash_log_path(),
+                PathBuf::from(format!("{abs}/pixtuoid/crash.log"))
+            );
+        });
     }
 }

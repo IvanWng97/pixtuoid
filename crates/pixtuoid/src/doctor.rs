@@ -1514,7 +1514,6 @@ mod tests {
 
     #[test]
     fn a_config_pack_dir_that_fails_to_load_shows_in_the_report() {
-        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         let base = tempfile::TempDir::new().expect("tempdir");
         let config_dir = base.path().join("pixtuoid");
         std::fs::create_dir_all(&config_dir).expect("mkdir config");
@@ -1533,12 +1532,18 @@ mod tests {
             format!("pack-dir = {:?}\n", pack.to_string_lossy()),
         )
         .expect("write config.toml");
-        env.set("XDG_CONFIG_HOME", base.path());
-        env.remove("CLICOLOR_FORCE");
-        env.remove("NO_COLOR");
-        let out = run(
-            std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
-            crate::GraphicsMode::Auto,
+        let out = temp_env::with_vars(
+            [
+                ("XDG_CONFIG_HOME", Some(base.path().as_os_str())),
+                ("CLICOLOR_FORCE", None),
+                ("NO_COLOR", None),
+            ],
+            || {
+                run(
+                    std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+                    crate::GraphicsMode::Auto,
+                )
+            },
         );
         let out = out.expect("doctor runs");
         assert!(out.contains("failed to load sprite pack"), "{out}");
@@ -1549,13 +1554,12 @@ mod tests {
     fn run_renders_the_category_report() {
         // A dev shell exporting CLICOLOR_FORCE would force escapes even under
         // captured stdout — pin the env so the plain-text asserts hold anywhere.
-        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
-        env.remove("CLICOLOR_FORCE");
-        env.remove("NO_COLOR");
-        let out = run(
-            std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
-            crate::GraphicsMode::Auto,
-        );
+        let out = temp_env::with_vars_unset(["CLICOLOR_FORCE", "NO_COLOR"], || {
+            run(
+                std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+                crate::GraphicsMode::Auto,
+            )
+        });
         let out = out.unwrap();
         assert!(out.starts_with("pixtuoid doctor\n"), "{out}");
         assert!(out.contains("log    "), "{out}");
@@ -2011,7 +2015,6 @@ mod tests {
     #[test]
     fn run_never_spawns_a_version_probe_for_a_cli_it_has_no_evidence_of() {
         use std::os::unix::fs::PermissionsExt;
-        let mut env = pixtuoid_core::test_env::EnvGuard::lock();
         let dir = tempfile::tempdir().unwrap();
         let (home, bin) = (dir.path().join("home"), dir.path().join("bin"));
         std::fs::create_dir_all(&home).unwrap();
@@ -2026,13 +2029,20 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        env.set("HOME", &home);
-        env.set("XDG_CONFIG_HOME", home.join(".config"));
-        env.remove("OPENCODE_CONFIG_DIR");
-        env.set("PATH", &bin);
-        let out = run(
-            std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
-            crate::GraphicsMode::Auto,
+        let xdg_config = home.join(".config");
+        let out = temp_env::with_vars(
+            [
+                ("HOME", Some(home.as_path())),
+                ("XDG_CONFIG_HOME", Some(xdg_config.as_path())),
+                ("OPENCODE_CONFIG_DIR", None),
+                ("PATH", Some(bin.as_path())),
+            ],
+            || {
+                run(
+                    std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+                    crate::GraphicsMode::Auto,
+                )
+            },
         );
         let spawned = marker.exists();
 

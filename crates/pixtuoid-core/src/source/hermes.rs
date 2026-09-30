@@ -501,29 +501,33 @@ mod tests {
     /// sends the reader chasing a var they never set (#881 review).
     #[test]
     fn an_unset_hermes_home_is_never_named_as_the_cause_of_a_relative_default() {
-        let mut env = crate::test_env::EnvGuard::lock();
-
         // A relative HOME makes the DERIVED default relative, with no override set.
-        env.remove("HERMES_HOME");
-        env.set("HOME", "relative-home");
-        env.set("USERPROFILE", "relative-home");
-        let quiet = crate::test_capture::capture_logs(|| {
-            let _ = hermes_home();
-        });
-        assert!(
-            !quiet.contains("HERMES_HOME"),
-            "an unset HERMES_HOME must not be named as the cause:\n{quiet}"
-        );
+        let relative_home = [
+            ("HOME", Some("relative-home")),
+            ("USERPROFILE", Some("relative-home")),
+        ];
+        temp_env::with_vars(relative_home, || {
+            let quiet = temp_env::with_var_unset("HERMES_HOME", || {
+                crate::test_capture::capture_logs(|| {
+                    let _ = hermes_home();
+                })
+            });
+            assert!(
+                !quiet.contains("HERMES_HOME"),
+                "an unset HERMES_HOME must not be named as the cause:\n{quiet}"
+            );
 
-        // Positive control: the ENV branch still warns, or the gate is inert.
-        env.set("HERMES_HOME", "rel/hm");
-        let loud = crate::test_capture::capture_logs(|| {
-            let _ = hermes_home();
+            // Positive control: the ENV branch still warns, or the gate is inert.
+            let loud = temp_env::with_var("HERMES_HOME", Some("rel/hm"), || {
+                crate::test_capture::capture_logs(|| {
+                    let _ = hermes_home();
+                })
+            });
+            assert!(
+                loud.contains("HERMES_HOME"),
+                "a RELATIVE HERMES_HOME must still warn:\n{loud}"
+            );
         });
-        assert!(
-            loud.contains("HERMES_HOME"),
-            "a RELATIVE HERMES_HOME must still warn:\n{loud}"
-        );
     }
 
     /// Pinned against a live probe of hermes 2026.8.3, the STRIP included.
@@ -533,10 +537,7 @@ mod tests {
     /// `path_env` in `hermes_home()` and every other test still passes.
     #[test]
     fn hermes_home_strips_a_padded_env_override_like_upstream() {
-        let mut env = crate::test_env::EnvGuard::lock();
-
-        env.set("HERMES_HOME", "  /custom/hm  ");
-        let got = hermes_home();
+        let got = temp_env::with_var("HERMES_HOME", Some("  /custom/hm  "), hermes_home);
 
         assert_eq!(got, Some(PathBuf::from("/custom/hm")));
     }

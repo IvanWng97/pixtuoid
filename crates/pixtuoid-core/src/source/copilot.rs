@@ -1020,32 +1020,34 @@ mod tests {
 
     #[test]
     fn copilot_home_honors_non_empty_env_override() {
-        let mut env = crate::test_env::EnvGuard::lock();
+        temp_env::with_var("COPILOT_HOME", Some("/custom/cp"), || {
+            assert_eq!(
+                copilot_home(),
+                PathBuf::from("/custom/cp"),
+                "a non-empty COPILOT_HOME is used verbatim"
+            );
+        });
 
-        env.set("COPILOT_HOME", "/custom/cp");
-        assert_eq!(
-            copilot_home(),
-            PathBuf::from("/custom/cp"),
-            "a non-empty COPILOT_HOME is used verbatim"
-        );
+        temp_env::with_var("COPILOT_HOME", Some(""), || {
+            assert!(
+                copilot_home().ends_with(".copilot"),
+                "empty COPILOT_HOME → ~/.copilot fallback"
+            );
+        });
 
-        env.set("COPILOT_HOME", "");
-        assert!(
-            copilot_home().ends_with(".copilot"),
-            "empty COPILOT_HOME → ~/.copilot fallback"
-        );
+        temp_env::with_var("COPILOT_HOME", Some("   "), || {
+            assert!(
+                copilot_home().ends_with(".copilot"),
+                "whitespace-only COPILOT_HOME → ~/.copilot fallback"
+            );
+        });
 
-        env.set("COPILOT_HOME", "   ");
-        assert!(
-            copilot_home().ends_with(".copilot"),
-            "whitespace-only COPILOT_HOME → ~/.copilot fallback"
-        );
-
-        env.remove("COPILOT_HOME");
-        assert!(
-            copilot_home().ends_with(".copilot"),
-            "unset COPILOT_HOME → ~/.copilot fallback"
-        );
+        temp_env::with_var_unset("COPILOT_HOME", || {
+            assert!(
+                copilot_home().ends_with(".copilot"),
+                "unset COPILOT_HOME → ~/.copilot fallback"
+            );
+        });
     }
 
     /// Every field the decoder reads by a LITERAL key is declared here — reads
