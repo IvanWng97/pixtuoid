@@ -189,9 +189,10 @@ pub(crate) enum Body {
     Moon,
 }
 
-/// The physical sky emitter — sun by day, moon by night. Luminance + warmth
-/// follow altitude (low body = longer air path = dimmer + warmer). The ONE
-/// source the interior light, the disc and the spill derive from.
+/// The physical sky emitter — sun by day, moon by night (at its rim, lighting
+/// nothing, while it is below the horizon). Luminance + warmth follow altitude
+/// (low body = longer air path = dimmer + warmer). The ONE source the interior
+/// light, the disc and the spill derive from.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Emitter {
     pub(crate) body: Body,
@@ -270,8 +271,8 @@ fn moon_arc(h: f32, age: f32) -> Option<f32> {
     (t <= 1.0).then_some(t)
 }
 
-fn emitter_at(now: SystemTime, moon_phase: f32, moon_age: f32) -> Emitter {
-    let h = local_hour_frac(now);
+/// The body the sky shows at local hour `h`, `nightfall` into the night.
+fn emitter_at(h: f32, nightfall: f32, moon_phase: f32, moon_age: f32) -> Emitter {
     if hour_is_day(h) {
         let t = arc_progress(h, SUN_RISE_H, SUN_SET_H);
         let altitude = (std::f32::consts::PI * t).sin();
@@ -283,7 +284,6 @@ fn emitter_at(now: SystemTime, moon_phase: f32, moon_age: f32) -> Emitter {
             emitter_lum: altitude,
         };
     }
-    // A moon below the horizon stands at its rim, lighting nothing.
     let t = moon_arc(h, moon_age).unwrap_or(0.0);
     let altitude = (std::f32::consts::PI * t).sin();
     Emitter {
@@ -291,7 +291,7 @@ fn emitter_at(now: SystemTime, moon_phase: f32, moon_age: f32) -> Emitter {
         altitude,
         azimuth: t,
         warmth: (1.0 - altitude).clamp(0.0, 1.0),
-        emitter_lum: MOON_PEAK_LUM * altitude * moon_phase * nightfall(h),
+        emitter_lum: MOON_PEAK_LUM * altitude * moon_phase * nightfall,
     }
 }
 
@@ -380,12 +380,14 @@ pub(crate) struct Sky {
 impl Sky {
     pub(crate) fn at(now: SystemTime) -> Self {
         let (moon_phase, moon_age) = (moon_phase_at(now), moon_age_at(now));
+        let h = local_hour_frac(now);
+        let nightfall = nightfall(h);
         Self {
             weather: weather_at(now),
-            emitter: emitter_at(now, moon_phase, moon_age),
+            emitter: emitter_at(h, nightfall, moon_phase, moon_age),
             moon_phase,
             moon_waxing: moon_age < SYNODIC_DAYS / 2.0,
-            nightfall: nightfall(local_hour_frac(now)),
+            nightfall,
             flash: flash_level_at(now),
         }
     }
