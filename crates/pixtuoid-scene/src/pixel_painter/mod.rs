@@ -175,7 +175,7 @@ pub(crate) use background::BaseFillCache;
 pub(crate) use dense::{DenseFrame, densest_frame};
 #[cfg(test)]
 pub(crate) use furniture::{COOLER_WATER, paint_area_rug};
-// `floor::FloorSession::observe` is the public entry to the sim tick; the step
+// `floor::FloorSession::step` is the public entry to the sim tick; the step
 // itself and its per-call borrow-set stay crate-internal.
 pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 pub(crate) use sim::{SimInputs, SimStores, desk_occupant, sim_step};

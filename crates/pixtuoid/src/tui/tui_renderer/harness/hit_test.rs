@@ -127,8 +127,8 @@ fn drawn(
     now: SystemTime,
 ) -> AgentFrame {
     let layout = r.cached_layout().expect("rendered layout");
-    let observed = pixtuoid_scene::floor::FloorSession::new()
-        .observe(
+    let stepped = pixtuoid_scene::floor::FloorSession::new()
+        .step(
             pixtuoid_scene::floor::FloorInputs {
                 scene,
                 pack: pack(),
@@ -141,8 +141,8 @@ fn drawn(
                 h: layout.buf_h,
             },
         )
-        .expect("observable floor");
-    let frame = &observed.frame;
+        .expect("steppable floor");
+    let frame = &stepped.frame;
     let c = frame
         .characters
         .iter()

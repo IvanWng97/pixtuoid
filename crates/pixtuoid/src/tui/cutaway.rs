@@ -20,7 +20,7 @@ use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_scene::cutaway::canvas::{CanvasFrame, CutawayCanvas, Dirty};
-use pixtuoid_scene::floor::{FloorMeta, ObservedFloor};
+use pixtuoid_scene::floor::{FloorMeta, SteppedFloor};
 use pixtuoid_scene::frame_cache::FrameCache;
 use pixtuoid_scene::layout::{Bounds, Size};
 use pixtuoid_scene::theme::Theme;
@@ -36,8 +36,8 @@ use crate::tui::renderer::set_half_block;
 /// A floor slide's two floors, each with its meta, at progress `t` of a
 /// [`FloorTransition`](pixtuoid_scene::floor::FloorTransition).
 pub(crate) struct Slide<'a> {
-    pub(crate) leaving: (&'a ObservedFloor, FloorMeta),
-    pub(crate) arriving: (&'a ObservedFloor, FloorMeta),
+    pub(crate) leaving: (&'a SteppedFloor, FloorMeta),
+    pub(crate) arriving: (&'a SteppedFloor, FloorMeta),
     pub(crate) t: f32,
     pub(crate) going_down: bool,
 }
@@ -126,19 +126,19 @@ impl TileCutaway {
         self.fit.logical()
     }
 
-    /// Paint `observed`, its top-left cell at `origin`, and queue the tiles
+    /// Paint `stepped`, its top-left cell at `origin`, and queue the tiles
     /// it changed once the protocol's cadence allows; until then they stay
     /// owed.
     pub(crate) fn paint(
         &mut self,
-        observed: &ObservedFloor,
+        stepped: &SteppedFloor,
         theme: &'static Theme,
         floor: FloorMeta,
         now: SystemTime,
         origin: Position,
     ) {
         let CanvasFrame { buf, dirty } = self.canvas.frame(
-            observed,
+            stepped,
             theme,
             self.fit.render_scale(),
             floor,

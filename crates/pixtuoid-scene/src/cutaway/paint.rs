@@ -3453,7 +3453,7 @@ pub(crate) mod tests {
         let mut seated_at = None;
         for n in 1..=1200u64 {
             let frame = session
-                .observe(
+                .step(
                     crate::floor::FloorInputs {
                         scene: &scene,
                         pack: &pack,
@@ -4635,8 +4635,8 @@ S B B B B B B S
         // ...and offices whose sizes gate in the pieces 160x96 lacks, empty.
         let pack = test_default_pack();
         for (w, h) in [(240u16, 144u16), (100, 60)] {
-            let observed = FloorSession::new()
-                .observe(
+            let stepped = FloorSession::new()
+                .step(
                     crate::floor::FloorInputs {
                         scene: &pixtuoid_core::SceneState::uniform(16),
                         pack: &pack,
@@ -4647,7 +4647,7 @@ S B B B B B B S
                     crate::layout::Size { w, h },
                 )
                 .expect("lays out");
-            check(&pack, &observed.frame, &observed.layout, false);
+            check(&pack, &stepped.frame, &stepped.layout, false);
         }
         assert_eq!(
             kinds.into_iter().collect::<Vec<_>>(),
@@ -7005,7 +7005,7 @@ S B B B B B B S
         let walking = &frames[frames.len() / 2];
         let seated = frames.last().expect("a seated frame");
         let office = FloorSession::new()
-            .observe(
+            .step(
                 crate::floor::FloorInputs {
                     scene: &pixtuoid_core::SceneState::uniform(16),
                     pack: &pack,

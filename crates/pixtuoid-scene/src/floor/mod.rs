@@ -1,6 +1,6 @@
 //! Multi-floor office partitioning: the floor arithmetic, the per-floor
 //! rendering context ([`FloorCtx`]), the shared headless frame seams
-//! ([`render_floor`], and [`FloorSession::observe`] for a painter that draws the
+//! ([`render_floor`], and [`FloorSession::step`] for a painter that draws the
 //! frame itself), the per-floor fade states ([`LightingState`], the neon
 //! sign's), and the per-office [`CoffeeState`] bookkeeping.
 
@@ -300,7 +300,7 @@ impl CoffeeState {
 
 /// The shared per-frame EPILOGUE: stamp this frame's new coffee carriers and
 /// refresh the door-cosmetic clamp. `pub` so the TUI's `draw_scene` — which
-/// can't call [`render_floor`]/[`FloorSession::observe`] — runs THIS seam instead of
+/// can't call [`render_floor`]/[`FloorSession::step`] — runs THIS seam instead of
 /// re-inlining the pair.
 pub fn frame_epilogue(
     fctx: &mut FloorCtx,
@@ -406,11 +406,11 @@ pub fn render_floor(
     })
 }
 
-/// One floor, one tick, observed rather than painted: the world advanced, and the
+/// One floor, one tick, stepped rather than painted: the world advanced, and the
 /// layout it advanced on. A second profile paints THIS layout — laying the office
 /// out again beside the sim is how a painter ends up drawing one office while the
 /// sim walked another.
-pub struct ObservedFloor {
+pub struct SteppedFloor {
     /// The layout the sim stepped on.
     pub layout: Arc<crate::layout::Layout>,
     /// The world, advanced one tick.
@@ -691,9 +691,9 @@ impl FloorSession {
     /// [`render_floor`]'s layout prologue, sim tick and epilogue,
     /// minus its paint pass. `size` is the layout's logical extent, whatever scale a painter
     /// draws it at. `None` when the size can't lay out.
-    pub fn observe(&mut self, world: FloorInputs<'_>, size: Size) -> Option<ObservedFloor> {
+    pub fn step(&mut self, world: FloorInputs<'_>, size: Size) -> Option<SteppedFloor> {
         self.evict_missing(world.scene);
-        observe_floor(
+        step_floor(
             &mut self.floor.ctx,
             &mut self.office.coffee,
             &mut self.office.chitchat,
@@ -703,14 +703,14 @@ impl FloorSession {
     }
 }
 
-/// [`FloorSession::observe`] minus eviction, which a projected `world.scene` would turn on other floors.
-pub fn observe_floor(
+/// [`FloorSession::step`] minus eviction, which a projected `world.scene` would turn on other floors.
+pub fn step_floor(
     fctx: &mut FloorCtx,
     coffee: &mut CoffeeState,
     chitchat: &mut HashMap<VenueKey, ActiveChitchat>,
     world: FloorInputs<'_>,
     size: Size,
-) -> Option<ObservedFloor> {
+) -> Option<SteppedFloor> {
     let layout = fctx.frame_layout(size.w, size.h, world.floor.floor_seed)?;
     let door_anim_max_ms = fctx.door_anim_max_ms;
     let frame = sim_step(
@@ -728,7 +728,7 @@ pub fn observe_floor(
         frame.new_coffee_carriers.iter().copied(),
         world.now,
     );
-    Some(ObservedFloor { layout, frame })
+    Some(SteppedFloor { layout, frame })
 }
 
 impl Default for FloorSession {
