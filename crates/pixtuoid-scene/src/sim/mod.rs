@@ -889,8 +889,8 @@ fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
 
 /// The outfit-determining seed for `agent`. Extracted so
 /// `FrameCache::note_outfit_seed` watches the mid-lifetime cwd backfill through
-/// the EXACT unknown-cwd fallback the palette's `agent_overrides` uses; a second copy would
-/// drift.
+/// the EXACT unknown-cwd fallback [`agent_overrides`](crate::character::agent_overrides)
+/// uses; a second copy would drift.
 pub(crate) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
     if agent.unknown_cwd || agent.cwd.as_os_str().is_empty() {
         agent.agent_id.raw()
