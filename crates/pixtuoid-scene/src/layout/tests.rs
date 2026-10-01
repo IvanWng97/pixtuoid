@@ -867,7 +867,7 @@ fn fish_tank_sits_east_of_the_lounge_lamp_clear_of_the_elevator() {
         lamp_east + 2,
         "tank west edge sits exactly the pinned gap past the lamp's east edge"
     );
-    let door_west = l.door.expect("elevator fits at this size").x;
+    let door_west = l.door.x;
     assert!(
         tank.x + half_w + super::compute::FISH_TANK_ELEVATOR_CLEARANCE <= door_west,
         "tank + clearance stays west of the elevator door column"
@@ -1033,7 +1033,7 @@ fn ficus_greets_at_the_elevator_and_fills_the_lounge_west_flank() {
         .filter(|p| p.kind == PlantKind::Ficus)
         .collect();
     assert_eq!(ficus.len(), 2, "both ratified Ficus spots place at 192x160");
-    let door = l.door.expect("elevator");
+    let door = l.door;
     assert!(
         ficus
             .iter()

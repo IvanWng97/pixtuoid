@@ -75,7 +75,7 @@ impl Router for ChangingRouter {
 fn walk_leg_freezes_path_against_midleg_reroute() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
-    let door = l.door_threshold.expect("door");
+    let door = l.door_threshold;
     let desk = l.home_desks[0];
     let desk_target = Point {
         x: desk.x + 6,
@@ -586,7 +586,7 @@ fn multi_segment_path_maps_t_to_segment_via_octile_distance() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
     let slot = entry_slot(now - Duration::from_millis(400));
-    let door = l.door_threshold.expect("door");
+    let door = l.door_threshold;
     let desk = l.home_desks[0];
     let mid = Point {
         x: (door.x + desk.x) / 2,
@@ -853,7 +853,7 @@ fn exiting_slot(exiting_at: SystemTime, created_at: SystemTime) -> AgentSlot {
 
 /// `(near, far)` desk indices by octile distance from the door.
 fn near_far_desk_indices(l: &Layout) -> (usize, usize) {
-    let door = l.door_threshold.expect("layout must have door_threshold");
+    let door = l.door_threshold;
     let dists: Vec<u32> = l
         .home_desks
         .iter()
@@ -1025,7 +1025,7 @@ fn exit_profile_snapshotted_once_not_on_subsequent_calls() {
 fn exit_far_completes_before_grace_window_no_vanish() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
-    let door = l.door_threshold.expect("door");
+    let door = l.door_threshold;
     let desk = l.home_desks[0];
     let from = Point {
         x: desk.x + 6,
@@ -1092,28 +1092,6 @@ fn exit_uses_commute_speed_faster_than_wander() {
         profile.v_cruise >= min_commute * 0.99, // small f32 tolerance
         "exit v_cruise {:.4} must be in commute range (>= {min_commute:.4})",
         profile.v_cruise
-    );
-}
-
-#[test]
-fn exit_with_no_door_does_not_vanish() {
-    // `None` is the GC signal, so returning it here would vanish the agent.
-    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let mut l = layout();
-    l.door_threshold = None;
-    let slot = exiting_slot(now, now - Duration::from_secs(60));
-    let mut rig = RouteRig::new(StubRouter::straight());
-
-    let p = derive_with_routing(&slot, now, &l, &mut rig.rctx());
-    assert!(
-        p.is_some(),
-        "exiting agent on a no-door layout must not vanish (got None)"
-    );
-    assert!(
-        rig.motion
-            .get(&slot.agent_id)
-            .is_none_or(|ms| ms.exit.is_none()),
-        "no exit profile should be snapshotted when there is no door"
     );
 }
 
@@ -1247,7 +1225,7 @@ fn desk_approach_cell_is_never_inside_the_blocked_desk() {
 fn desk_entry_routes_around_the_desk_then_settles_onto_the_chair() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
-    let door = l.door_threshold.expect("door");
+    let door = l.door_threshold;
 
     let desk_index = (0..l.home_desks.len())
         .find(|&i| desk_approach_cell(l.home_desks[i], &l).is_some())
@@ -1713,7 +1691,7 @@ fn frozen_leg_anchor_continuous_across_router_shape_change() {
     // The freeze-specific guard: it fails when the freeze is reverted.
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
-    let door = l.door_threshold.expect("door");
+    let door = l.door_threshold;
     let desk = l.home_desks[0];
     let desk_t = Point {
         x: desk.x + 6,
@@ -1836,54 +1814,6 @@ fn multiple_agents_share_overlay_without_teleport() {
     assert!(
         max_step <= MAX_FRAME_STEP_PX,
         "agents sharing a churning overlay must not teleport (max frame jump {max_step}px)"
-    );
-}
-
-#[test]
-fn no_door_exiting_walking_pose_routes_via_settle_none() {
-    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let mut l = layout();
-    l.door_threshold = None;
-
-    // A cycle-0 trip agent, so idle_pose yields a Walking pose in the walk-out band.
-    let trip_id = (0u64..2000)
-        .map(|i| AgentId::from_transcript_path(&format!("/nodoor/{i}.jsonl")))
-        .find(|id| takes_trip(*id, 0))
-        .expect("find a trip agent");
-
-    // Place state_started_at so elapsed lands in the walk-out band:
-    // [seated_dwell, seated_dwell + WANDER_WALK_EST_MS). Idle, was_active=false
-    // (last_event_at == created_at) so derive_state_only routes through idle_pose,
-    // not SeatedThinking.
-    let seated = seated_dwell_ms(trip_id);
-    let into_walk = WANDER_WALK_EST_MS / 2;
-    let created = now - Duration::from_secs(300);
-    let mut slot = entry_slot(created);
-    slot.agent_id = trip_id;
-    slot.last_event_at = created;
-    slot.state_started_at = now - Duration::from_millis(seated + into_walk);
-    slot.exiting_at = Some(now);
-
-    assert!(
-        matches!(
-            derive_state_only(&slot, now, &l),
-            Some(Pose::Walking { .. })
-        ),
-        "test setup: the exiting agent must be mid walk-out for the no-door arm"
-    );
-
-    let mut rig = RouteRig::new(StubRouter::straight());
-
-    let p = derive_with_routing(&slot, now, &l, &mut rig.rctx());
-    assert!(
-        matches!(p, Some(Pose::Walking { .. })),
-        "no-door exiting Walking pose must route to a Walking pose (not vanish), got {p:?}"
-    );
-    assert!(
-        rig.motion
-            .get(&slot.agent_id)
-            .is_none_or(|ms| ms.exit.is_none()),
-        "the no-door arm must not snapshot a physics exit profile"
     );
 }
 
@@ -2109,7 +2039,7 @@ fn route_walking_pose_t_overshoot_snaps_to_final_segment() {
 #[test]
 fn a_resurrect_after_the_walkout_arrived_re_enters_through_the_door() {
     let l = layout();
-    let door = l.door_threshold.expect("layout has a door");
+    let door = l.door_threshold;
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     // Born long before the spawn window, so only a re-arm can produce an entry.
     let created = t0 - Duration::from_secs(3600);
@@ -2188,8 +2118,7 @@ fn a_resurrect_mid_walkout_re_enters_from_the_live_position() {
         "it re-enters from the sprite's real position, not the door"
     );
     assert_ne!(
-        leg.from,
-        l.door_threshold.expect("layout has a door"),
+        leg.from, l.door_threshold,
         "starting at the door would jump the walker backwards"
     );
     assert!(
@@ -2273,8 +2202,7 @@ fn the_resurrect_check_reads_the_same_compressed_clock_as_the_exit_render() {
         "the re-armed leg runs on a fresh clock, not the un-restamped birth"
     );
     assert_eq!(
-        leg.from,
-        l.door_threshold.expect("layout has a door"),
+        leg.from, l.door_threshold,
         "past the COMPRESSED arrival the sprite is gone — the door is the only \
          honest origin, and raw elapsed would resume it mid-corridor"
     );

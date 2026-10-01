@@ -94,6 +94,13 @@ const MIN_CUBICLE_AISLE_H: u16 = 8;
 /// the neon.
 pub(super) const MIN_LAYOUT_W: u16 = min_layout_w();
 const _: () = assert!(MIN_LAYOUT_W >= super::NEON_DOOR_WALL_W);
+// The shortest wall band's windows stand as tall as the door, so every office
+// that lays out has one.
+const _: () = assert!(
+    super::wall_trim_row(super::MIN_TOP_MARGIN - super::WALL_BAND_TO_TOP_MARGIN)
+        - super::WINDOW_TOP
+        >= super::ELEVATOR_H
+);
 pub(super) const MIN_LAYOUT_H: u16 = min_layout_h();
 
 /// The widest left column any variant takes — the band gets the rest, so this
@@ -375,27 +382,23 @@ pub(super) fn compute_with_seed(
         super::rooms::walls::derive_room_walls(&plan.meeting_rooms, plan.pantry);
 
     // Elevator door — in the window wall's last slot; above the lounge gate so
-    // that gate can check couch↔door clearance. It needs windows at least as
-    // tall as itself.
+    // that gate can check couch↔door clearance.
     let top_wall_h = plan
         .top_margin
         .saturating_sub(super::WALL_BAND_TO_TOP_MARGIN);
-    let windows_h = super::window_rows(top_wall_h).len();
-    let door = super::door_x(buf_w)
-        .filter(|_| windows_h >= usize::from(ELEVATOR_H))
-        .map(|x| Point {
-            x,
-            // Its bottom row is the band's trim row, so it stands on the floor
-            // line instead of floating mid-wall.
-            y: super::wall_trim_row(top_wall_h) + 1 - ELEVATOR_H,
-        });
+    let door = Point {
+        x: super::door_x(buf_w),
+        // Its bottom row is the band's trim row, so it stands on the floor
+        // line instead of floating mid-wall.
+        y: super::wall_trim_row(top_wall_h) + 1 - ELEVATOR_H,
+    };
     /// How far SOUTH of the floor line the elevator spawn sits, so a character entering
     /// stands on open floor, not on the wall apron the straddling wall decor stamps into.
     const DOOR_THRESHOLD_CLEARANCE_PX: u16 = 4;
-    let door_threshold = door.map(|d| Point {
-        x: d.x + ELEVATOR_W / 2,
+    let door_threshold = Point {
+        x: door.x + ELEVATOR_W / 2,
         y: plan.top_margin + DOOR_THRESHOLD_CLEARANCE_PX,
-    });
+    };
 
     let Point {
         x: couch_x,
@@ -411,8 +414,7 @@ pub(super) fn compute_with_seed(
         + furniture_def(Furniture::Couch).footprint.map_or(0, |f| f.w) / 2
         + WAYPOINT_STAMP_PAD_PX;
     let flanks = LoungeFlanks::of(couch_x);
-    let couch_clears_door =
-        door_threshold.is_none_or(|dt| couch_east_ground.max(flanks.east_ground()) <= dt.x);
+    let couch_clears_door = couch_east_ground.max(flanks.east_ground()) <= door_threshold.x;
     let lounge_fits = plan.pod_grid.band.width >= LOUNGE_MIN_BAND_W && couch_clears_door;
     let lounge = lounge_fits.then(|| {
         place_lounge(
@@ -420,7 +422,6 @@ pub(super) fn compute_with_seed(
                 x: couch_x,
                 y: couch_y,
             },
-            buf_w,
             door,
         )
     });
@@ -490,15 +491,13 @@ pub(super) fn compute_with_seed(
     // Two Ficus spots — greeting plant west of the elevator, and the lounge's west flank.
     // On a narrower band each seals a top-strip pocket, hence the ROOMY gate.
     if plan.pod_grid.band.width >= ROOMY_BAND_MIN_W {
-        if let Some(d) = door {
-            plant_candidates.push(PlantItem {
-                kind: PlantKind::Ficus,
-                pos: Point {
-                    x: d.x.saturating_sub(5),
-                    y: plan.top_margin + 5,
-                },
-            });
-        }
+        plant_candidates.push(PlantItem {
+            kind: PlantKind::Ficus,
+            pos: Point {
+                x: door.x.saturating_sub(5),
+                y: plan.top_margin + 5,
+            },
+        });
         if lounge.is_some() {
             // A plant's clearance west of the side table, and its ground east
             // of the divider, or no Ficus.
@@ -584,12 +583,7 @@ pub(super) fn compute_with_seed(
         })
     };
     // The door, where agents enter, so always in the main component.
-    let conn_seed = door_threshold
-        .or_else(|| home_desks.first().copied())
-        .unwrap_or(Point {
-            x: buf_w / 2,
-            y: buf_h / 2,
-        });
+    let conn_seed = door_threshold;
 
     // ROUTER granularity, not just the pixel flood's — a ≤3 px channel is
     // pixel-connected and coarse-IMPASSABLE (#566).
@@ -706,7 +700,7 @@ pub(super) fn compute_with_seed(
 /// clamped slot would pierce the divider/elevator drops, reopening the lane.
 fn place_wall_decor(
     plan: &FloorPlan,
-    door: Option<Point>,
+    door: Point,
     desk_art: &[(Point, Size)],
     pod_decor: &[PodDecorItem],
 ) -> Vec<WallDecorItem> {
@@ -731,7 +725,7 @@ fn place_wall_decor(
     // onto the wall's top segment, where it pierces the glass. Dropping reopens the apron.
     let bookshelf_east_limit = meeting_room
         .map_or(u16::MAX, |mr| mr.bounds.x + mr.bounds.width)
-        .min(door.map_or(buf_w, |d| d.x));
+        .min(door.x);
     let mut wall_decor = Vec::new();
     if bookshelf_x + bookshelf_w < bookshelf_east_limit {
         wall_decor.push(WallDecorItem {
@@ -742,13 +736,10 @@ fn place_wall_decor(
             },
         });
     }
-    wall_decor.extend(
-        door.and_then(super::exit_sign_pos)
-            .map(|pos| WallDecorItem {
-                kind: WallDecor::ExitSign,
-                pos,
-            }),
-    );
+    wall_decor.extend(super::exit_sign_pos(door).map(|pos| WallDecorItem {
+        kind: WallDecor::ExitSign,
+        pos,
+    }));
     // `usable_h / 3` is a hint, not a slot: unsnapped it drops the board on a desk row
     // or in the intra-pod gap, where the wheel strip plugs the pod's own west lane.
     let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
@@ -914,7 +905,7 @@ impl LoungeFlanks {
 /// takes the OPPOSITE (west) flank ([`LoungeFlanks`]). The
 /// aquarium carries an EXTRA gate the other two don't: it must stay clear of the
 /// elevator `door` column so the spawn threshold never routes around it.
-fn place_lounge(couch: Point, buf_w: u16, door: Option<Point>) -> Lounge {
+fn place_lounge(couch: Point, door: Point) -> Lounge {
     /// Rows from the couch's centre down to the lamp's base: the art grows
     /// north from it (invariant #6), clear of the desks to the south.
     const LAMP_BASE_DY: u16 = 6;
@@ -938,8 +929,7 @@ fn place_lounge(couch: Point, buf_w: u16, door: Option<Point>) -> Lounge {
         const LAMP_TANK_GAP: u16 = 2;
         let lamp_east = floor_lamp.x + (furniture_def(Furniture::FloorLamp).visual.w - 1) / 2;
         let cx = lamp_east + LAMP_TANK_GAP + half_w;
-        let east_limit = door.map_or(buf_w.saturating_sub(2), |d| d.x);
-        (cx + half_w + FISH_TANK_ELEVATOR_CLEARANCE <= east_limit).then_some(Point {
+        (cx + half_w + FISH_TANK_ELEVATOR_CLEARANCE <= door.x).then_some(Point {
             x: cx,
             y: couch.y.saturating_sub(4),
         })
