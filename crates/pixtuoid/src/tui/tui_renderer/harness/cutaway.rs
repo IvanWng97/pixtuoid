@@ -327,24 +327,46 @@ fn a_grid_image_arms_the_unwinds_erase() {
     assert!(erases(in_grid));
 }
 
-/// While a modal stays open, the tiles under it are withheld, and never
-/// encoded only to be thrown away: every tile encoded is sent.
+/// While a modal stays open, the tile under its title is never sent, tick
+/// after tick, though every tile is owed.
 #[test]
-fn a_covered_tile_is_never_encoded() {
+fn a_covered_tile_is_never_sent() {
     let (mut r, wire) = painter(120, 40, ImageProtocol::Sixel);
     let scene = office();
     let cadence = ImageProtocol::Sixel.cadence();
-    let encoded = |r: &TuiRenderer<TestBackend>| r.cutaway.as_ref().expect("a cutaway").encoded();
     r.render(&scene, pack(), t0()).expect("render");
     wire.take();
     r.set_help_open(true);
     r.redraw().expect("redraw");
+    let shape = ImageProtocol::Sixel.tile();
+    let mut under = None;
     for tick in 1..4 {
-        let before = encoded(&r);
         r.render(&scene, pack(), t0() + cadence * tick)
             .expect("render");
-        let sent = wire.take().matches(SIXEL).count();
-        assert_eq!(encoded(&r) - before, sent, "tick {tick}");
+        let at = *under.get_or_insert_with(|| {
+            let text = frame_text(r.frame_buffer());
+            let (y, line) = text
+                .lines()
+                .enumerate()
+                .find(|(_, l)| l.contains("? Keyboard"))
+                .expect("the modal's title");
+            let x = line[..line.find("? Keyboard").expect("title")]
+                .chars()
+                .count();
+            (
+                x as u16 / shape.cols * shape.cols,
+                y as u16 / shape.rows * shape.rows,
+            )
+        });
+        let sent = wire.take();
+        if tick == 1 {
+            assert!(
+                sent.contains(SIXEL),
+                "the tiles the modal leaves free are sent"
+            );
+        }
+        let to = format!("\x1b[{};{}H{SIXEL}", at.1 + 1, at.0 + 1);
+        assert!(!sent.contains(&to), "tick {tick}");
     }
 }
 
