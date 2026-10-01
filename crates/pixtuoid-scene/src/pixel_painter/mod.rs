@@ -158,13 +158,11 @@ fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
         }
     })
 }
+use crate::sim::{CharacterGlow, SimFrame, SimInputs, desk_occupant, sim_step};
 pub(crate) use background::BaseFillCache;
 pub(crate) use dense::{DenseFrame, densest_frame};
 #[cfg(test)]
 pub(crate) use furniture::{COOLER_WATER, paint_area_rug};
-// `floor::FloorSession::observe` is the public entry to the sim tick; the step
-// itself and its per-call borrow-set stay crate-internal.
-use crate::sim::{CharacterGlow, SimFrame, SimInputs, desk_occupant, sim_step};
 pub(crate) use wall::paint_wall;
 
 use crate::atmosphere::Moment;
