@@ -20,7 +20,7 @@ fn now() -> SystemTime {
 
 fn render_and_get_buffer(
     now: SystemTime,
-    floor_info: Option<pixtuoid::tui::renderer::FloorInfo>,
+    floor_info: Option<pixtuoid_scene::footer::FooterFloor>,
 ) -> (Buffer, u16, u16) {
     let w = 96u16;
     let h = 48u16;
@@ -29,7 +29,7 @@ fn render_and_get_buffer(
     let mut term = Terminal::new(backend).unwrap();
     let pack = load_bundled_pack().unwrap();
     make_draw_ctx!(draw_ctx, &scene, &pack, now);
-    draw_ctx.floor_info = floor_info;
+    draw_ctx.footer.floor = floor_info;
     draw_scene(&mut term, &mut draw_ctx).unwrap();
     let buffer = term.backend().buffer().clone();
     (buffer, w, h)
@@ -64,7 +64,7 @@ fn footer_shows_agent_count() {
 fn elevator_indicator_visible() {
     let (buf, w, h) = render_and_get_buffer(
         now(),
-        Some(pixtuoid::tui::renderer::FloorInfo {
+        Some(pixtuoid_scene::footer::FooterFloor {
             current: 2,
             total_floors: 2,
             total_agents: 0,
