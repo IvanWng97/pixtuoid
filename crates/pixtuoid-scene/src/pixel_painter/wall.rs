@@ -10,7 +10,7 @@ use pixtuoid_core::sprite::RgbBuffer;
 use super::drawable::{Drawable, DrawableKind, Layer};
 use crate::cutaway::pen::{ArtRect, Pen};
 use crate::glass::Glass;
-use crate::layout::{Layout, WallPiece};
+use crate::layout::{SceneLayout, WallPiece};
 use crate::theme::Theme;
 
 /// Paint the logical `rows` of one room wall: its glass over what is already
@@ -49,7 +49,7 @@ pub(crate) fn paint_wall(
 
 /// Queue every room wall's bands into the y-sort, emitted after the fixtures so
 /// the glass also covers a chair tied with a band's row.
-pub(super) fn enqueue_room_walls<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
+pub(super) fn enqueue_room_walls<'a>(layout: &'a SceneLayout, drawables: &mut Vec<Drawable<'a>>) {
     for &piece in &layout.wall_pieces {
         for (rows, depth) in piece.sort_bands() {
             drawables.push(Drawable {

@@ -28,7 +28,7 @@ use super::palette::{RgbLut, WHITE, blend_pixel, blend_rgb};
 use crate::atmosphere::Moment;
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
-    Bounds, Layout, Size, WindowBay, glass_rows, wall_trim_row, window_frame, window_posts,
+    Bounds, SceneLayout, Size, WindowBay, glass_rows, wall_trim_row, window_frame, window_posts,
     window_rows, window_run,
 };
 use crate::sky::{Sky, Weather};
@@ -54,7 +54,7 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, sky: &Sky) {
 /// Returns one `SunbeamColumn` per painted window, centred on the pane and
 /// starting at the floor row, so the motes drift through the window's
 /// [`Light::Spill`](crate::lighting::Light::Spill).
-pub(in crate::pixel_painter) fn window_spill_columns(layout: &Layout) -> Vec<SunbeamColumn> {
+pub(in crate::pixel_painter) fn window_spill_columns(layout: &SceneLayout) -> Vec<SunbeamColumn> {
     let top_wall_h = layout.wall_band_h();
     layout
         .window_bays()

@@ -12,7 +12,7 @@ use pixtuoid_core::{AgentSlot, ToolKind};
 use crate::anim::epoch_ms;
 use crate::atmosphere::Look;
 use crate::floor::NeonLevels;
-use crate::layout::{Facing, Layout, Point};
+use crate::layout::{Facing, Point, SceneLayout};
 
 /// The floor lamp's level at full dark, before the room's own level.
 const FLOOR_LAMP_GAIN: f32 = 0.55;
@@ -301,7 +301,7 @@ pub(crate) struct LightInputs<'a> {
 
 impl Lights {
     /// The lights `layout` shows under `look`.
-    pub(crate) fn of(layout: &Layout, look: &Look, inputs: &LightInputs<'_>) -> Self {
+    pub(crate) fn of(layout: &SceneLayout, look: &Look, inputs: &LightInputs<'_>) -> Self {
         let (darkness, indoor) = (look.darkness, inputs.indoor_scale);
         Self {
             floor_lamp: layout.floor_lamp_base().map(|centre| Emitter {
@@ -433,7 +433,7 @@ pub(crate) fn lit_screen(agent: &AgentSlot, facing: Facing, seated: bool) -> Opt
 
 /// One halo over each [`lit_screen`], on the row above its desk, clear of the
 /// monitor.
-fn monitor_halos(layout: &Layout, inputs: &LightInputs<'_>) -> Vec<Emitter> {
+fn monitor_halos(layout: &SceneLayout, inputs: &LightInputs<'_>) -> Vec<Emitter> {
     inputs
         .agents
         .iter()

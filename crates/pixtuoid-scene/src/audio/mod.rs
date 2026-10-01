@@ -252,7 +252,7 @@ impl AudioCueTracker {
 
     /// Feed one frame's observations; returns the events that fired on this
     /// frame's edges. `waypoint_kind` resolves an occupied-waypoint index to its
-    /// kind so the tracker never holds a `Layout` borrow and tests need no
+    /// kind so the tracker never holds a `SceneLayout` borrow and tests need no
     /// layout at all. Purely EDGE-triggered — it takes no clock, so a caller
     /// can't read it as time-dependent.
     pub fn observe<'a>(

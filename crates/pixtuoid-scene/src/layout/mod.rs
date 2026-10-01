@@ -188,9 +188,6 @@ pub struct Waypoint {
     pub room_id: Option<usize>,
 }
 
-/// Backwards-compat alias for [`SceneLayout`].
-pub type Layout = SceneLayout;
-
 /// The lounge vignette placed as one unit. Couch + floor lamp + side table
 /// share one fit gate (hence non-optional here); the aquarium
 /// carries an EXTRA east-clearance gate against the elevator door, so it

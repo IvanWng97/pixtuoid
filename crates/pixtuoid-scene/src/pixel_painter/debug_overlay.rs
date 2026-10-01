@@ -12,7 +12,7 @@ use pixtuoid_core::{AgentId, SceneState};
 
 use super::palette::blend_pixel;
 use crate::layout::{
-    Furniture, Layout, Point, Size, WaypointKind, desk_walk_anchor_facing, furniture_def,
+    Furniture, Point, SceneLayout, Size, WaypointKind, desk_walk_anchor_facing, furniture_def,
 };
 use crate::motion::MotionState;
 use pixtuoid_core::state::FloorLocalDeskIndex;
@@ -43,7 +43,7 @@ const DIRS: [(i32, i32); 4] = [(0, -1), (0, 1), (1, 0), (-1, 0)];
 
 pub(super) fn paint(
     buf: &mut RgbBuffer,
-    layout: &Layout,
+    layout: &SceneLayout,
     scene: &SceneState,
     motion: &HashMap<AgentId, MotionState>,
 ) {
@@ -71,7 +71,7 @@ fn blob(buf: &mut RgbBuffer, cx: i32, cy: i32, c: Rgb, t: f32) {
     }
 }
 
-fn paint_mask(buf: &mut RgbBuffer, layout: &Layout) {
+fn paint_mask(buf: &mut RgbBuffer, layout: &SceneLayout) {
     for y in 0..layout.buf_h {
         for x in 0..layout.buf_w {
             if !layout.is_walkable(x, y) {
@@ -84,11 +84,11 @@ fn paint_mask(buf: &mut RgbBuffer, layout: &Layout) {
 /// The seat-approach scan, borrowed from the sim's own authority rather than
 /// mirrored here: a second copy of the ladder (or of its scan bound) could make
 /// the green dots disagree with where agents actually route.
-fn first_reachable_on_side(layout: &Layout, origin: Point, dx: i32, dy: i32) -> Option<Point> {
+fn first_reachable_on_side(layout: &SceneLayout, origin: Point, dx: i32, dy: i32) -> Option<Point> {
     crate::layout::first_reachable_on_side(&layout.walkable, &layout.reachable, origin, dx, dy)
 }
 
-fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
+fn paint_approach(buf: &mut RgbBuffer, layout: &SceneLayout) {
     for wp in &layout.waypoints {
         let def = furniture_def(wp.kind.furniture());
         if def.occupies_pos {

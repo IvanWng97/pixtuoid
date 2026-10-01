@@ -861,7 +861,7 @@ mod tests {
         assert!(pack.animation("trash_bin").is_none());
         let mut cache = FrameCache::new();
         let now = SystemTime::UNIX_EPOCH;
-        let layout = crate::layout::Layout::compute(160, 120, None).expect("fits");
+        let layout = crate::layout::SceneLayout::compute(160, 120, None).expect("fits");
         let first = pixtuoid_core::state::FloorLocalDeskIndex(0);
         let desk = layout.home_desks[first.0];
         let cabinet = layout

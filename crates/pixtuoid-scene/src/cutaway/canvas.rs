@@ -14,7 +14,7 @@ use crate::cutaway::light::Ambient;
 use crate::cutaway::order::Span;
 use crate::cutaway::paint::{Office, frame_list, paint};
 use crate::floor::ObservedFloor;
-use crate::layout::{Bounds, Layout};
+use crate::layout::{Bounds, SceneLayout};
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
@@ -50,7 +50,7 @@ pub enum Dirty {
 /// the canvas's pack.
 struct Epoch {
     // Held, so a later layout cannot reuse its address.
-    layout: Arc<Layout>,
+    layout: Arc<SceneLayout>,
     // A static, so its address is its identity.
     theme: &'static Theme,
     scale: RenderScale,
@@ -144,7 +144,7 @@ impl CutawayCanvas {
     }
 
     /// The agent the last frame shows topmost over `area`, in LOGICAL units
-    /// as [`Layout`], not [`Dirty::Rects`]' buffer pixels; `None` where a
+    /// as [`SceneLayout`], not [`Dirty::Rects`]' buffer pixels; `None` where a
     /// piece that is no agent lies over it, or none does.
     pub fn hover_at(&self, area: Bounds) -> Option<AgentId> {
         let shown = self.shown.as_ref()?;
@@ -215,7 +215,7 @@ mod tests {
 
     /// `layout`'s full render of `frame` at `now`, under the normal theme.
     fn full_render(
-        layout: &Layout,
+        layout: &SceneLayout,
         pack: &Pack,
         scale: RenderScale,
         frame: &SimFrame,
@@ -249,7 +249,7 @@ mod tests {
     /// pack's densest scale: every frame it shows, painted or skipped, is the
     /// full render, and every pixel two full renders in a row differ in lies in
     /// what it reported.
-    fn run(layout: Layout, pack: Pack, steps: &[(SimFrame, SystemTime)]) -> Run {
+    fn run(layout: SceneLayout, pack: Pack, steps: &[(SimFrame, SystemTime)]) -> Run {
         let (layout, pack) = (Arc::new(layout), Arc::new(pack));
         let theme = normal();
         let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
@@ -447,7 +447,7 @@ mod tests {
 
     /// A walk to a north-facing desk, shown at scale 2.
     struct Hovering {
-        layout: Arc<Layout>,
+        layout: Arc<SceneLayout>,
         pack: Arc<Pack>,
         frames: Vec<SimFrame>,
         scale: RenderScale,
@@ -735,7 +735,7 @@ mod tests {
         let mut cache = crate::cutaway::paint::CutawayCache::default();
         let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
         let observe = |seed| {
-            let layout = Layout::compute_with_seed(160, 96, None, seed).expect("lays out");
+            let layout = SceneLayout::compute_with_seed(160, 96, None, seed).expect("lays out");
             ObservedFloor {
                 frame: empty_frame(&layout),
                 layout: Arc::new(layout),

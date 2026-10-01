@@ -476,7 +476,7 @@ impl Seat {
 ///
 /// Covers the home desk too: `layout.home_desks` are NOT waypoints, but the
 /// chair is a settle target once the desk's arrival glides onto it.
-pub(super) fn settle_seat(cell: Point, layout: &Layout) -> Option<Seat> {
+pub(super) fn settle_seat(cell: Point, layout: &SceneLayout) -> Option<Seat> {
     use crate::layout::seated_foot_cell;
     layout
         .waypoints

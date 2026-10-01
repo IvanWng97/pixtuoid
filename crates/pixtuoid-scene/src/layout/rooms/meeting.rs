@@ -208,7 +208,7 @@ mod tests {
             (320, 180),
         ] {
             for seed in 0..8 {
-                let Some(layout) = crate::layout::Layout::compute_with_seed(w, h, None, seed)
+                let Some(layout) = crate::layout::SceneLayout::compute_with_seed(w, h, None, seed)
                 else {
                     continue;
                 };

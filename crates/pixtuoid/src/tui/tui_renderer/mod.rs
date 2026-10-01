@@ -21,7 +21,7 @@ use pixtuoid_scene::floor::{
     FloorInputs, FloorMeta, FloorTransition, FrameInputs, PerFloor, PerOffice, PetInputs,
     num_floors, project_floor_scene, render_floor,
 };
-use pixtuoid_scene::layout::{Layout, Size};
+use pixtuoid_scene::layout::{SceneLayout, Size};
 use pixtuoid_scene::pathfind::Router;
 use pixtuoid_scene::pet::PetFrame;
 
@@ -68,7 +68,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     current_floor: usize,
     transition: Option<FloorTransition>,
     mouse_pos: Option<(u16, u16)>,
-    cached_layout: Option<Arc<Layout>>,
+    cached_layout: Option<Arc<SceneLayout>>,
     last_pet_pos: Option<PetFrame>,
     last_agents: Vec<pixtuoid_scene::pixel_painter::AgentFrame>,
     last_geometry: Option<crate::tui::geometry::SceneGeometry>,
@@ -337,7 +337,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.office.coffee.insert(id, fetched_at);
     }
 
-    pub fn cached_layout(&self) -> Option<&Layout> {
+    pub fn cached_layout(&self) -> Option<&SceneLayout> {
         self.cached_layout.as_deref()
     }
 
