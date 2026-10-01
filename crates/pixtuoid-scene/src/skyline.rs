@@ -144,6 +144,44 @@ const BLINK_CYCLE_MS: RangeInclusive<u64> = 6_000..=14_000;
 /// One lit window in this many goes dark on a given turn.
 const BLINK_OFF_IN: u32 = 12;
 
+/// An aviation obstruction light's red, the same under every theme.
+const BEACON: Rgb = Rgb {
+    r: 255,
+    g: 36,
+    b: 28,
+};
+/// One of the tallest towers in this many carries a light.
+const BEACON_IN: u32 = 2;
+/// How long a light holds on, then off.
+const BEACON_HALF_MS: u64 = 1_200;
+/// Tells the lights' hashes apart from the planes'.
+const BEACON_SALT: u32 = 0xB1EC;
+
+/// Whether `stand` carries a light: a near building the pack draws as tall
+/// as its `tallest`, a few of them. The band crops every near tower to one
+/// line, so only the art's own height tells the tallest apart.
+fn carries_beacon(plane: Plane, stand: &Stand<'_>, tallest: u16) -> bool {
+    plane == Plane::Near
+        && matches!(stand, Stand::Kit { building, .. } if building.size().1 >= tallest)
+        && hash(stand.hash() ^ BEACON_SALT).is_multiple_of(BEACON_IN)
+}
+
+/// The tallest building `pack` stands in the near plane.
+fn tallest_near(pack: &Pack) -> u16 {
+    pack.buildings()
+        .filter(|b| b.stands_in(CityPlane::Near))
+        .map(|b| b.size().1)
+        .max()
+        .unwrap_or(u16::MAX)
+}
+
+/// Whether the light on a stand hashed `hash` shines at `now`: on and off a
+/// [`BEACON_HALF_MS`] each, out of step with its neighbours'.
+fn beacon_on(hash: u32, now: SystemTime) -> bool {
+    (crate::anim::epoch_ms(now) / BEACON_HALF_MS + u64::from(self::hash(hash ^ BEACON_SALT)))
+        .is_multiple_of(2)
+}
+
 /// The rows at the top of glass `glass_h` tall that no building reaches: the
 /// sky the sun, the moon and the stars always have.
 pub(crate) fn clear_sky_rows(glass_h: u16) -> u16 {
@@ -302,6 +340,8 @@ pub(crate) struct PlaneColours {
     detail: Rgb,
     sign: Rgb,
     lit: [Rgb; 3],
+    /// A tower's aviation light, glowing as its lit windows do.
+    beacon: Rgb,
 }
 
 impl PlaneColours {
@@ -326,6 +366,7 @@ impl PlaneColours {
             detail: haze(tone.ramp(-1)),
             sign: haze(tone.mix(theme.lighting.twilight_a, look.darkness)),
             lit: o.city_lit_windows.map(|c| haze(glass.mix(c, glow))),
+            beacon: haze(glass.mix(BEACON, glow)),
         }
     }
 
@@ -393,9 +434,14 @@ impl CityStrip {
         };
         let colours = Plane::ALL.map(|p| PlaneColours::of(p, look, theme));
         let mut recoloured: Vec<(&str, Plane, Frame)> = Vec::new();
+        let tallest = tallest_near(pack);
+        // Each light's tower tip and size: drawn once every tower
+        // stands, so none stands over one.
+        let mut beacons: Vec<((i32, i32), u16)> = Vec::new();
         for (plane, stand) in Skyline::of(pack, run_w, glass_h, altitude).stands() {
             let c = &colours[plane.index()];
             let window = |i: usize| c.window(lit(plane, stand.hash(), i, look.darkness, now));
+            let beacon = carries_beacon(plane, &stand, tallest) && beacon_on(stand.hash(), now);
             match stand {
                 Stand::Block { x, w, top, .. } => {
                     let (x0, y0) = (x * i32::from(d), top * i32::from(d));
@@ -458,10 +504,37 @@ impl CityStrip {
                             strip.fill(cell(wx, wy), grow, colour);
                         }
                     }
+                    // Its topmost pixel nearest its middle: a spire's tip.
+                    let tip = (0..frame.height()).find_map(|fy| {
+                        (0..frame.width())
+                            .filter(|&fx| frame.get(fx, fy).copied().flatten().is_some())
+                            .min_by_key(|&fx| fx.abs_diff(frame.width() / 2))
+                            .map(|fx| cell(fx, fy))
+                    });
+                    // A cell of the art it stands in, so a base grown to the
+                    // density grows its light with it; on finer art, half a
+                    // unit across.
+                    let side = if grow > 1 { grow } else { (d / 2).max(1) };
+                    beacons.extend(tip.filter(|_| beacon).map(|tip| (tip, side)));
+                }
+            }
+        }
+        // Over the tower only: on a mast thinner than the light it runs down
+        // the mast, never out into the sky.
+        let beacon = colours[Plane::Near.index()].beacon;
+        for ((x, y), side) in beacons {
+            for (dx, dy) in (0..side).flat_map(|dy| (0..side).map(move |dx| (dx, dy))) {
+                if strip.at_i(x + i32::from(dx), y + i32::from(dy)).is_some() {
+                    strip.put(x + i32::from(dx), y + i32::from(dy), beacon);
                 }
             }
         }
         strip
+    }
+
+    fn at_i(&self, x: i32, y: i32) -> Option<Rgb> {
+        let (x, y) = (u16::try_from(x).ok()?, u16::try_from(y).ok()?);
+        self.at(x, y)
     }
 
     fn put(&mut self, x: i32, y: i32, colour: Rgb) {
@@ -711,6 +784,92 @@ mod tests {
             near_matches * 10 >= usize::from(one.w) * 9,
             "the same city stands in the same columns at either density"
         );
+    }
+
+    /// A light burns only on a tallest near tower that carries one, in its
+    /// top rows, over pixels the tower already covers; half a turn later each
+    /// has flipped, and the city stands where it stood.
+    #[test]
+    fn aviation_lights_sit_only_on_rooftops_and_blink() {
+        let pack = pack();
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (run_w, glass_h) = (400, 24);
+        let night = crate::localclock::at_hour(23);
+        for d in [1, 4] {
+            let side = (d / 2).max(1);
+            let strip = |now| {
+                let moment = Moment::resolve(
+                    crate::sky::Sky::at_with(now, crate::sky::Weather::Clear),
+                    theme,
+                    0.0,
+                    now,
+                );
+                let near = PlaneColours::of(Plane::Near, &moment.look, theme);
+                let s = CityStrip::draw(
+                    &pack,
+                    (run_w, glass_h),
+                    &moment,
+                    theme,
+                    Density::new(d).expect("nonzero"),
+                );
+                (s, near)
+            };
+            let half = std::time::Duration::from_millis(BEACON_HALF_MS);
+            let ((a, near), (b, _)) = (strip(night), strip(night + half));
+            let beacon = near.beacon;
+            let lights = |s: &CityStrip| -> Vec<(u16, u16)> {
+                (0..s.h)
+                    .flat_map(|y| (0..s.w).map(move |x| (x, y)))
+                    .filter(|&(x, y)| s.at(x, y) == Some(beacon))
+                    .collect()
+            };
+            let (on_a, on_b) = (lights(&a), lights(&b));
+            assert!(
+                !on_a.is_empty() || !on_b.is_empty(),
+                "{d}: the towers blink"
+            );
+            assert!(on_a.iter().all(|p| !on_b.contains(p)), "{d}: in turn");
+            let shown = |s: &CityStrip| -> Vec<bool> { s.px.iter().map(Option::is_some).collect() };
+            assert_eq!(shown(&a), shown(&b), "{d}: no light in the sky");
+            let city = Skyline::of(&pack, run_w, glass_h, 0.0);
+            let tallest = tallest_near(&pack);
+            let materials = pack.city_materials().expect("a city");
+            for &(x, y) in on_a.iter().chain(&on_b) {
+                let (x, y) = (i32::from(x), i32::from(y));
+                let on_a_roof = city.stands().any(|(plane, s)| {
+                    let Stand::Kit {
+                        building,
+                        x: sx,
+                        top,
+                        ..
+                    } = s
+                    else {
+                        return false;
+                    };
+                    let (art, grow) = building
+                        .variant(Density::new(d).expect("nonzero"))
+                        .map_or((building.base(), d), |a| (a, 1));
+                    let frame = art
+                        .sprite()
+                        .recolorable(0)
+                        .expect("a frame")
+                        .recolored(&near.overrides(materials));
+                    // Its art's first drawn row: its roof, or its spire's tip.
+                    let first = (0..frame.height())
+                        .find(|&fy| {
+                            (0..frame.width())
+                                .any(|fx| frame.get(fx, fy).copied().flatten().is_some())
+                        })
+                        .expect("drawn");
+                    let d = i32::from(d);
+                    let roof = top * d + i32::from(first * grow);
+                    carries_beacon(plane, &s, tallest)
+                        && (sx * d..(sx + i32::from(building.size().0)) * d).contains(&x)
+                        && (roof..roof + i32::from(side.max(grow))).contains(&y)
+                });
+                assert!(on_a_roof, "{d}: a light at ({x}, {y}) off any rooftop");
+            }
+        }
     }
 
     #[test]
