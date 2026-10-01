@@ -83,6 +83,10 @@ pub(crate) fn pet_position(
 ) -> Option<(Point, bool, &'static str, usize)> {
     pack.animation(kind.walk_anim())?;
     layout.corridor?;
+    let frame_at = |anim: &str| {
+        pack.animation(anim)
+            .map_or(0, |a| crate::embedded_pack::looping_frame_index(a, now))
+    };
 
     let elapsed_ms = epoch_ms(now);
 
@@ -98,16 +102,13 @@ pub(crate) fn pet_position(
         })
     });
 
-    const PET_ANIM_FRAME_MS: u64 = 220;
-    let frame_idx = (elapsed_ms / PET_ANIM_FRAME_MS) as usize % 2;
-
     if frac < 0.35 {
         let t = (frac / 0.35).clamp(0.0, 1.0);
         // Facing follows the raw destination intent, not where the snapped anchors land.
         let flip = dest.x < prev.x;
         let pos = walk_between(layout, prev, dest, t);
         let anim = kind.walk_anim();
-        return Some((pos, flip, anim, frame_idx));
+        return Some((pos, flip, anim, frame_at(anim)));
     }
 
     // Snap so the sit/sleep pose isn't on furniture — the same anchor as the leg
@@ -118,7 +119,7 @@ pub(crate) fn pet_position(
     } else {
         kind.sit_anim()
     };
-    Some((rest_pos, false, anim, 0))
+    Some((rest_pos, false, anim, frame_at(anim)))
 }
 
 /// Sample a polyline at arc-length fraction `t ∈ [0, 1]`, using octile segment
@@ -278,8 +279,8 @@ fn mascot_wander(layout: &Layout, we_ms: u64, seed: u64, cycle_ms: u64) -> (Poin
     }
 }
 
-/// Resolve the mascot's frame this tick: `(pos, anim_name, frame_idx)`, or
-/// `None` when it should not be drawn (gateway gone after the walk-out).
+/// Resolve the mascot this tick: `(pos, anim_name)`, or `None` when it should
+/// not be drawn (gateway gone after the walk-out).
 pub(crate) fn mascot_position(
     layout: &Layout,
     presence: &DaemonPresence,
@@ -287,11 +288,8 @@ pub(crate) fn mascot_position(
     rest_anim: &'static str,
     now: SystemTime,
     seed: u64,
-) -> Option<(Point, &'static str, usize)> {
+) -> Option<(Point, &'static str)> {
     let elevator = mascot_elevator(layout)?;
-    let anchor = |pos: Point, anim: &'static str, frame_idx: usize| (pos, anim, frame_idx);
-    const MASCOT_ANIM_FRAME_MS: u64 = 200;
-    let frame = ((epoch_ms(now) / MASCOT_ANIM_FRAME_MS) % 2) as usize;
     // Every clock below is measured from the END of this instance's stagger, so the
     // walk-out's reconstructed origin stays on the same wander phase as the walk-in.
     let enter_delay = mascot_enter_delay(seed);
@@ -315,11 +313,7 @@ pub(crate) fn mascot_position(
             .saturating_sub(MASCOT_ENTER_MS + enter_delay);
         let (from, _) = mascot_wander(layout, down_we, seed, MASCOT_IDLE_CYCLE_MS);
         let t = down_age as f32 / MASCOT_LEAVE_MS as f32;
-        return Some(anchor(
-            walk_between(layout, from, elevator, t),
-            walk_anim,
-            frame,
-        ));
+        return Some((walk_between(layout, from, elevator, t), walk_anim));
     }
 
     let age = now.duration_since(presence.entered_at).ok()?.as_millis() as u64;
@@ -331,10 +325,9 @@ pub(crate) fn mascot_position(
     let entered = age - enter_delay;
     if entered < MASCOT_ENTER_MS {
         let t = entered as f32 / MASCOT_ENTER_MS as f32;
-        return Some(anchor(
+        return Some((
             walk_between(layout, elevator, walkable_target(layout, seed, 0), t),
             walk_anim,
-            frame,
         ));
     }
 
@@ -344,11 +337,7 @@ pub(crate) fn mascot_position(
         _ => MASCOT_IDLE_CYCLE_MS,
     };
     let (pos, walking) = mascot_wander(layout, entered - MASCOT_ENTER_MS, seed, cycle_ms);
-    if walking {
-        Some(anchor(pos, walk_anim, frame))
-    } else {
-        Some(anchor(pos, rest_anim, 0))
-    }
+    Some((pos, if walking { walk_anim } else { rest_anim }))
 }
 
 #[cfg(test)]
@@ -716,7 +705,7 @@ mod tests {
             for step_ms in (0..MASCOT_IDLE_CYCLE_MS * 4).step_by(120) {
                 let now = t0 + std::time::Duration::from_millis(MASCOT_ENTER_MS * 2 + step_ms);
                 let presence = idle_presence(now, MASCOT_ENTER_MS * 2 + step_ms);
-                let Some((pos, anim, _)) = mascot_position(
+                let Some((pos, anim)) = mascot_position(
                     &layout,
                     &presence,
                     "lobster_walk",
@@ -821,7 +810,7 @@ mod tests {
                 .iter()
                 .filter_map(|&sd| {
                     mascot_position(&layout, &p, "lobster_walk", "lobster_rest", now, sd)
-                        .map(|(pos, _, _)| pos)
+                        .map(|(pos, _)| pos)
                 })
                 .collect();
             if pts.len() < 2 {
@@ -915,7 +904,7 @@ mod tests {
         let seed = 0u64;
 
         let p0 = idle_presence(now, 0);
-        let (pos0, anim0, _) =
+        let (pos0, anim0) =
             mascot_position(&layout, &p0, "lobster_walk", "lobster_rest", now, seed)
                 .expect("walk-in position");
         assert_eq!(anim0, "lobster_walk", "enter window → walk anim");
@@ -927,7 +916,7 @@ mod tests {
 
         let age = 1_100u64;
         let p_mid = idle_presence(now, age);
-        let (pos_mid, anim_mid, _) =
+        let (pos_mid, anim_mid) =
             mascot_position(&layout, &p_mid, "lobster_walk", "lobster_rest", now, seed)
                 .expect("walk-in mid position");
         assert_eq!(anim_mid, "lobster_walk");
@@ -979,10 +968,10 @@ mod tests {
 
         let idle = mk(false, now);
         let degraded = mk(true, now);
-        let (_, idle_anim, _) =
+        let (_, idle_anim) =
             mascot_position(&layout, &idle, "lobster_walk", "lobster_rest", now, seed)
                 .expect("idle pos");
-        let (_, deg_anim, _) = mascot_position(
+        let (_, deg_anim) = mascot_position(
             &layout,
             &degraded,
             "lobster_walk",
@@ -1069,9 +1058,9 @@ mod tests {
                 ..alive.clone()
             };
 
-            let (was, _, _) = mascot_position(&layout, &alive, "w", "r", died_at, seed)
+            let (was, _) = mascot_position(&layout, &alive, "w", "r", died_at, seed)
                 .expect("a live gateway renders a mascot");
-            let (leaving_from, _, _) = mascot_position(&layout, &down, "w", "r", died_at, seed)
+            let (leaving_from, _) = mascot_position(&layout, &down, "w", "r", died_at, seed)
                 .expect("a just-died gateway is still walking out");
             // NOT byte-equality: the exit lerp routes its origin through
             // `walk_between`'s A*+snap, which shifts it a pixel or two off the raw

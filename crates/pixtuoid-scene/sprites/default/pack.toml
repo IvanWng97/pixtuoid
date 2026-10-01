@@ -365,7 +365,7 @@ frame_ms = 600
 
 [animations.cat_walk]
 frames   = ["cat_walk_0.sprite", "cat_walk_1.sprite"]
-frame_ms = 220
+frame_ms = 250
 
 [animations.cat_sit]
 frames   = ["cat_sit.sprite"]
@@ -377,7 +377,7 @@ frame_ms = 600
 
 [animations.dog_walk]
 frames   = ["dog_walk_0.sprite", "dog_walk_1.sprite"]
-frame_ms = 220
+frame_ms = 250
 
 [animations.dog_sit]
 frames   = ["dog_sit.sprite"]
@@ -389,7 +389,7 @@ frame_ms = 600
 
 [animations.lobster_walk]
 frames   = ["lobster_walk_0.sprite", "lobster_walk_1.sprite"]
-frame_ms = 200
+frame_ms = 250
 
 [animations.lobster_rest]
 frames   = ["lobster_rest.sprite"]
@@ -479,11 +479,11 @@ frame_ms = 500
 # As the vending machine: frame 0 at rest, then its busy loop.
 [animations.printer]
 frames   = ["printer.sprite"]
-frame_ms = 300
+frame_ms = 250
 
 [animations."printer@4x"]
 frames   = ["printer@4x.sprite"]
-frame_ms = 300
+frame_ms = 250
 
 [animations.meeting_table]
 frames   = ["meeting_table.sprite"]
@@ -513,11 +513,11 @@ frame_ms = 600
 # The glug: a bubble climbs the bottle, then the water stills.
 [animations.water_cooler]
 frames   = ["water_cooler.sprite"]
-frame_ms = 400
+frame_ms = 375
 
 [animations."water_cooler@4x"]
 frames   = ["water_cooler@4x.sprite"]
-frame_ms = 400
+frame_ms = 375
 
 [animations.pantry_bin]
 frames   = ["pantry_bin.sprite"]
@@ -529,11 +529,11 @@ frame_ms = 600
 
 [animations.fish_tank]
 frames   = ["fish_tank.sprite"]
-frame_ms = 450
+frame_ms = 500
 
 [animations."fish_tank@4x"]
 frames   = ["fish_tank@4x.sprite"]
-frame_ms = 450
+frame_ms = 500
 
 [animations.coat_rack]
 frames   = ["coat_rack.sprite"]
