@@ -102,6 +102,7 @@ struct Chrome {
     /// Transient +/- volume readout (percent); `None` past [`crate::audio::VOLUME_FLASH_MS`].
     volume_flash: Option<u8>,
     weather: pixtuoid_scene::pixel_painter::WeatherPolicy,
+    motion: pixtuoid_scene::anim::Motion,
 }
 
 /// One floor frame's inputs, the same under either painter.
@@ -134,9 +135,11 @@ impl PopupState {
 }
 
 impl Chrome {
-    /// Floor `floor` of `nf`, under this office's weather.
+    /// Floor `floor` of `nf`, under this office's weather, moving as it does.
     fn floor_meta(&self, floor: usize, nf: usize) -> FloorMeta {
-        FloorMeta::for_floor(floor, nf).with_weather(self.weather)
+        FloorMeta::for_floor(floor, nf)
+            .with_weather(self.weather)
+            .with_motion(self.motion)
     }
 
     /// Floor `floor` of `nf` in `scene`, whose projection is `floor_scene`.
@@ -242,6 +245,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 audio: crate::audio::AudioHandle::disabled(),
                 volume_flash: None,
                 weather: pixtuoid_scene::pixel_painter::WeatherPolicy::Clock,
+                motion: pixtuoid_scene::anim::Motion::Full,
             },
             #[cfg(feature = "graphics")]
             cutaway: None,
@@ -426,6 +430,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// Which weather every floor shows from the next frame on.
     pub fn set_weather(&mut self, weather: pixtuoid_scene::pixel_painter::WeatherPolicy) {
         self.chrome.weather = weather;
+    }
+
+    /// How every floor moves from the next frame on.
+    pub fn set_motion(&mut self, motion: pixtuoid_scene::anim::Motion) {
+        self.chrome.motion = motion;
     }
 
     pub fn set_theme_picker(&mut self, picker: Option<usize>) {
@@ -839,13 +848,17 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             return drawn;
         };
         // Each floor shows its own board; only the footer is the destination's.
-        let boards = [(&from_scene, from_floor), (&to_scene, to_floor)].map(|(floor_scene, i)| {
+        let boards = [
+            (&from_scene, from_floor, from_world),
+            (&to_scene, to_floor, to_world),
+        ]
+        .map(|(floor_scene, i, world)| {
             let ctx = self
                 .chrome
                 .frame(scene, floor_scene, pack, now, i, nf)
                 .footer;
             let footer = pixtuoid_scene::footer::FooterInputs::new(floor_scene, ctx);
-            crate::tui::renderer::wall_board(&footer, floor_scene, now)
+            crate::tui::renderer::wall_board(&footer, floor_scene, world.floor.motion, now)
         });
         let showing = |floor, board| pixtuoid_scene::cutaway::paint::Showing { floor, now, board };
         cutaway.paint_slide(
@@ -923,7 +936,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.sim_epilogue(Vec::new(), now);
             return drawn;
         };
-        let board = crate::tui::renderer::wall_board(&footer, &floor_scene, now);
+        let board =
+            crate::tui::renderer::wall_board(&footer, &floor_scene, world.floor.motion, now);
         let showing = pixtuoid_scene::cutaway::paint::Showing {
             floor: world.floor,
             now,

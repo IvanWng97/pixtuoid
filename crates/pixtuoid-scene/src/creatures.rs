@@ -283,6 +283,13 @@ fn mascot_wander(layout: &SceneLayout, we_ms: u64, seed: u64, cycle_ms: u64) -> 
     }
 }
 
+/// Where a mascot stands at rest: its wander is ambient, so it stays where its
+/// walk-in ended.
+fn mascot_rest_cell(layout: &SceneLayout, seed: u64) -> Point {
+    let home = walkable_target(layout, seed, 0);
+    snap_point_to_walkable(&layout.walkable, home).unwrap_or(home)
+}
+
 /// Resolve the mascot this tick: `(pos, anim_name)`, or `None` when it should
 /// not be drawn (gateway gone after the walk-out).
 pub(crate) fn mascot_position(
@@ -305,18 +312,22 @@ pub(crate) fn mascot_position(
         if down_age >= MASCOT_LEAVE_MS {
             return None;
         }
-        // Reconstructed at the IDLE CADENCE even if the gateway was Busy at the
-        // instant of death: the mascot is STATELESS and `DaemonState` carries no
-        // prev-state, so Idle is the only reconstructable clock. Every state draws
-        // from the same whole-floor rule, so only the CYCLE LENGTH differs.
-        let down_we = presence
-            .last_seen
-            .duration_since(presence.entered_at)
-            .ok()
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0)
-            .saturating_sub(MASCOT_ENTER_MS + enter_delay);
-        let (from, _) = mascot_wander(layout, down_we, seed, MASCOT_IDLE_CYCLE_MS);
+        let from = if clock.beat.is_rest() {
+            mascot_rest_cell(layout, seed)
+        } else {
+            // Reconstructed at the IDLE CADENCE even if the gateway was Busy at the
+            // instant of death: the mascot is STATELESS and `DaemonState` carries no
+            // prev-state, so Idle is the only reconstructable clock. Every state draws
+            // from the same whole-floor rule, so only the CYCLE LENGTH differs.
+            let down_we = presence
+                .last_seen
+                .duration_since(presence.entered_at)
+                .ok()
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+                .saturating_sub(MASCOT_ENTER_MS + enter_delay);
+            mascot_wander(layout, down_we, seed, MASCOT_IDLE_CYCLE_MS).0
+        };
         let t = down_age as f32 / MASCOT_LEAVE_MS as f32;
         return Some((walk_between(layout, from, elevator, t), walk_anim));
     }
@@ -336,11 +347,8 @@ pub(crate) fn mascot_position(
         ));
     }
 
-    // Its wander is ambient: at rest it stays where its walk-in ended.
     if clock.beat.is_rest() {
-        let home = walkable_target(layout, seed, 0);
-        let home = snap_point_to_walkable(&layout.walkable, home).unwrap_or(home);
-        return Some((home, rest_anim));
+        return Some((mascot_rest_cell(layout, seed), rest_anim));
     }
     let cycle_ms = match presence.display_state() {
         DaemonState::Busy => MASCOT_BUSY_CYCLE_MS,
@@ -1187,6 +1195,47 @@ mod tests {
              vanished instantly instead, which is what the exit-watch rung exists \
              to avoid"
         );
+    }
+
+    /// At rest a mascot stands where its walk-in ended, so a gateway that dies
+    /// then walks out from there, not from where its wander would have taken
+    /// it.
+    #[test]
+    fn at_rest_the_walk_out_starts_from_the_rest_cell() {
+        use pixtuoid_core::state::DaemonInstanceId;
+        let layout = crate::layout::SceneLayout::compute(200, 120, Some(4)).expect("layout fits");
+        let entered_at = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let died_at = entered_at + std::time::Duration::from_millis(30_000);
+        for port in ["18901", "18902", "18903", "18904"] {
+            let id = DaemonInstanceId::new(port).expect("non-empty");
+            let seed = mascot_seed("openclaw", &id);
+            let alive = DaemonPresence {
+                liveness: DaemonLiveness::Up { degraded: false },
+                active_sessions: 0,
+                last_seen: died_at,
+                entered_at,
+                in_flight_runs: Default::default(),
+                current_pid: Some(1),
+            };
+            let down = DaemonPresence {
+                liveness: DaemonLiveness::Down,
+                ..alive.clone()
+            };
+            let still = Motion::Still.clock(died_at);
+            let (resting, ..) = mascot_position(&layout, &alive, "w", "r", still, seed)
+                .expect("a live gateway renders a mascot");
+            let (leaving_from, ..) = mascot_position(&layout, &down, "w", "r", still, seed)
+                .expect("a just-died gateway is still walking out");
+            // As above: the exit lerp's A*+snap shifts its origin a pixel or two.
+            const MAX_SNAP_DRIFT_PX: i32 = 4;
+            let drift = (i32::from(leaving_from.x) - i32::from(resting.x))
+                .abs()
+                .max((i32::from(leaving_from.y) - i32::from(resting.y)).abs());
+            assert!(
+                drift <= MAX_SNAP_DRIFT_PX,
+                "gateway {port}: rested at {resting:?}, walks out from {leaving_from:?}"
+            );
+        }
     }
 
     #[test]

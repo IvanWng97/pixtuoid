@@ -191,11 +191,11 @@ frame_ms = 600
 
 [animations.typing]
 frames   = ["typing_0.sprite", "typing_1.sprite"]
-frame_ms = 140
+frame_ms = 125
 
 [animations."typing@4x"]
 frames   = ["typing_0@4x.sprite", "typing_1@4x.sprite"]
-frame_ms = 140
+frame_ms = 125
 
 [animations.standing]
 frames   = ["standing.sprite"]

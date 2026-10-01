@@ -66,10 +66,15 @@ impl OfficeRenderer {
         self.session.overlay(scene, None)
     }
 
-    /// The neon wall-board model for the current scene.
-    pub fn board(&self, scene: &SceneState, now: SystemTime) -> pixtuoid_scene::board::BoardModel {
-        self.session
-            .board(scene, pixtuoid_scene::anim::Motion::Full, now)
+    /// The neon wall-board model for the current scene, its flap moving as
+    /// `motion` says.
+    pub fn board(
+        &self,
+        scene: &SceneState,
+        motion: pixtuoid_scene::anim::Motion,
+        now: SystemTime,
+    ) -> pixtuoid_scene::board::BoardModel {
+        self.session.board(scene, motion, now)
     }
 
     /// The status-footer model for the current scene — single-floor, so `floor = None`

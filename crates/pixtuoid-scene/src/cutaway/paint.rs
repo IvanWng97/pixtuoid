@@ -1603,8 +1603,22 @@ fn push_fixture(
             depth,
             Playback::Held,
         ),
-        K::FishTank => push_looping(order, pack, centre, "fish_tank", moment.beat, depth),
-        K::WaterCooler => push_looping(order, pack, centre, "water_cooler", moment.beat, depth),
+        K::FishTank => push_looping(
+            order,
+            pack,
+            centre,
+            crate::pack::FISH_TANK_SPRITE,
+            moment.beat,
+            depth,
+        ),
+        K::WaterCooler => push_looping(
+            order,
+            pack,
+            centre,
+            crate::pack::WATER_COOLER_SPRITE,
+            moment.beat,
+            depth,
+        ),
         K::Door => {
             let Some((w, h)) = art_size(pack, DOOR_SPRITE) else {
                 return;
