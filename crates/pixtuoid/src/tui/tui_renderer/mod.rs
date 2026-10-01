@@ -652,8 +652,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.last_geometry = None;
     }
 
-    /// What a floor frame leaves behind, whichever painter drew it: what the
-    /// mouse hit-tests, the floor's audio, and the sim's epilogue.
     /// The sim's per-frame epilogue for a frame the classic painter stepped;
     /// [`pixtuoid_scene::floor::observe_floor`] runs its own.
     fn sim_epilogue(&mut self, carriers: Vec<pixtuoid_core::AgentId>, now: SystemTime) {
@@ -665,6 +663,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         );
     }
 
+    /// What a floor frame leaves behind, whichever painter drew it: what the
+    /// mouse hit-tests and the floor's audio.
     fn record_drawn(
         &mut self,
         scene: &SceneState,
