@@ -329,7 +329,9 @@ fn a_floor_switch_slides_the_cutaway_then_settles() {
     r.navigate_floor(1, now);
     let half = Duration::from_millis(r.transition().expect("sliding").duration_ms / 2);
     r.render(&scene, pack(), now + half).expect("render");
-    let mid = tile(&wire.take()).expect("mid-slide, the middle tile is sent");
+    // What the terminal shows for the tile: its last transmit, or the one
+    // before when none came.
+    let mid = tile(&wire.take()).unwrap_or_else(|| before.clone());
     assert!(r.transition().is_some());
     assert!(r.cached_layout().is_none());
     let area = r.frame_buffer().area;
@@ -340,7 +342,7 @@ fn a_floor_switch_slides_the_cutaway_then_settles() {
 
     now += half;
     render_until_settled(&mut r, &scene, pack(), &mut now, 1);
-    let after = tile(&wire.take()).expect("settling sends the middle tile");
+    let after = tile(&wire.take()).unwrap_or_else(|| mid.clone());
     assert!(mid != before && mid != after);
     assert_eq!(r.current_floor(), 1);
     hover_agent(&mut r, AgentId::from_transcript_path("/n/1.jsonl"));
