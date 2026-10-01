@@ -39,14 +39,7 @@ pub(crate) use probe::probe;
 pub(crate) const GRAPHICS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// A graphics protocol the terminal speaks and the cutaway can be handed over.
-///
-/// Built only by the `graphics`-feature [`probe()`]; a build without it still
-/// names every protocol, so the plan is one type in both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(
-    all(not(feature = "graphics"), not(test)),
-    expect(dead_code, reason = "only the graphics probe builds one")
-)]
 pub(crate) enum ImageProtocol {
     /// kitty's graphics protocol.
     Kitty,
@@ -76,17 +69,35 @@ pub(crate) struct CellSize {
     pub(crate) h: u16,
 }
 
-/// What the user asked for on the command line.
+/// What the user asked for: `--graphics`, else the `graphics` config key.
 ///
 /// The one `pub` item here, re-exported from the crate root: it is a field of
 /// the `pub` [`crate::cli::Cmd`] and `main.rs` is a separate crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum GraphicsMode {
     /// Use terminal graphics when the terminal supports them.
-    #[default]
     Auto,
     /// Never use terminal graphics, however capable the terminal is.
+    #[default]
     Off,
+    /// kitty's graphics protocol, whatever the terminal answers.
+    Kitty,
+    /// SIXEL, whatever the terminal answers.
+    Sixel,
+    /// iTerm2's inline images, whatever the terminal answers.
+    Iterm2,
+}
+
+impl GraphicsMode {
+    /// The protocol the user named, which replaces the terminal's answer.
+    fn forced(self) -> Option<ImageProtocol> {
+        match self {
+            Self::Auto | Self::Off => None,
+            Self::Kitty => Some(ImageProtocol::Kitty),
+            Self::Sixel => Some(ImageProtocol::Sixel),
+            Self::Iterm2 => Some(ImageProtocol::Iterm2),
+        }
+    }
 }
 
 /// Why a run is painting classic — the honest answer to "why is it not the
@@ -188,10 +199,6 @@ pub(crate) enum Probe {
     Answered(Detected),
     /// The terminal was never asked: the caller said not to, or no controlling
     /// terminal took the query.
-    #[cfg_attr(
-        all(not(feature = "graphics"), not(test)),
-        expect(dead_code, reason = "only the graphics probe returns it")
-    )]
     NotQueried,
     /// The terminal was asked, its reply never completed, and the environment
     /// names no protocol to fall back on. Only the Unix probe can tell (see
@@ -207,10 +214,14 @@ pub(crate) enum Probe {
         expect(dead_code, reason = "only the Unix graphics probe returns it")
     )]
     TmuxPassthroughOff,
-    /// This build cannot ask.
+    /// This build cannot ask: it has no `graphics` feature, or, for `run`, no
+    /// cancellable probe (see [`run_probe`]).
     #[cfg_attr(
-        all(feature = "graphics", not(test)),
-        expect(dead_code, reason = "only the graphics-less probe returns it")
+        all(feature = "graphics", unix, not(test)),
+        expect(
+            dead_code,
+            reason = "only the graphics-less or non-Unix probe returns it"
+        )
     )]
     Unsupported,
 }
@@ -309,7 +320,7 @@ pub(crate) fn resolve(
         Probe::TmuxPassthroughOff => return classic(ClassicReason::TmuxPassthroughOff),
         Probe::Unsupported => return classic(ClassicReason::Unsupported),
     };
-    let Some(protocol) = d.protocol else {
+    let Some(protocol) = mode.forced().or(d.protocol) else {
         return classic(ClassicReason::NoProtocol);
     };
     let Some(cell) = d.cell else {
@@ -376,42 +387,93 @@ impl ClassicReason {
     }
 }
 
-/// The `graphics:` line for `doctor` — the profile this terminal is CAPABLE of,
-/// and why it falls back when it is not.
-///
-/// Capability, not a prediction: `run` paints classic unconditionally today, so
-/// a row phrased as "what a run would paint" promised a cutaway the binary
-/// never delivers. This row says what the profile WILL pick up once it is wired
-/// to a painter.
-///
-/// Pure, so the wording is unit-tested; `doctor` supplies the probe result and
-/// the terminal's size the same way it does the truecolor row's probe beside it.
-pub(crate) fn graphics_diagnostic_row(
+/// The plan for the terminal this process runs in: the one call `run` and
+/// `doctor` both make, so `doctor` prints the plan `run` carries. `ask` is the
+/// caller's probe; the area and the size read are shared.
+pub(crate) fn plan_this_terminal(
     mode: GraphicsMode,
-    probe: Probe,
     max_density: Density,
-    area: TermSize,
-) -> String {
-    match resolve(mode, probe, max_density, area) {
-        Plan::Cutaway {
-            fit,
-            protocol,
-            cell,
-            ..
-        } => format!(
-            "graphics: {} ({}x{} cell) — the cutaway profile would render at {}x \
-             ({}x art upscaled {}x), a {}x{} office (not yet wired to `run`)",
-            protocol.name(),
-            cell.w,
-            cell.h,
-            fit.scale().get(),
-            fit.density(),
-            fit.upscale(),
-            fit.logical().w,
-            fit.logical().h,
-        ),
-        Plan::Classic { reason } => {
-            format!("graphics: classic half-blocks — {}", reason.describe())
+    ask: impl FnOnce() -> Probe,
+) -> Plan {
+    detect(mode, max_density, terminal_cells(), ask)
+}
+
+/// The plan for a terminal `term` cells big. `ask` is the terminal query,
+/// called only when `mode` can use its answer, so `--graphics off` never
+/// touches the terminal.
+fn detect(
+    mode: GraphicsMode,
+    max_density: Density,
+    term: TermSize,
+    ask: impl FnOnce() -> Probe,
+) -> Plan {
+    let probe = if mode == GraphicsMode::Off {
+        Probe::NotQueried
+    } else {
+        ask()
+    };
+    resolve(mode, probe, max_density, image_area(term))
+}
+
+/// The cells the image covers: the scene, never the footer, since text and
+/// image never share a cell.
+fn image_area(term: TermSize) -> TermSize {
+    let scene =
+        crate::tui::renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.width, term.height));
+    TermSize {
+        width: scene.width,
+        height: scene.height,
+    }
+}
+
+/// The terminal's size in cells; empty when there is none to measure, where the
+/// graphics probe is not asked either.
+fn terminal_cells() -> TermSize {
+    crossterm::terminal::size()
+        .map(|(width, height)| TermSize { width, height })
+        .unwrap_or_default()
+}
+
+/// `run`'s probe: [`probe()`], the cancellable one, on Unix.
+#[cfg(all(feature = "graphics", unix))]
+pub(crate) fn run_probe() -> Probe {
+    probe(true)
+}
+
+/// Without the `graphics` feature there is no probe, and off Unix the only one
+/// is upstream's, whose reader outlives its timeout and would steal the TUI's
+/// keys (see [`probe()`]), so `run` does not ask.
+#[cfg(not(all(feature = "graphics", unix)))]
+pub(crate) fn run_probe() -> Probe {
+    Probe::Unsupported
+}
+
+impl Plan {
+    /// The plan as `doctor`'s `graphics:` line: the profile this terminal is
+    /// CAPABLE of — "would render", since `run` still paints classic — and why
+    /// it falls back when it is not.
+    pub(crate) fn diagnostic_row(self) -> String {
+        match self {
+            Plan::Cutaway {
+                fit,
+                protocol,
+                cell,
+                ..
+            } => format!(
+                "graphics: {} ({}x{} cell) — the cutaway profile would render at {}x \
+             ({}x art upscaled {}x), a {}x{} office",
+                protocol.name(),
+                cell.w,
+                cell.h,
+                fit.scale().get(),
+                fit.density(),
+                fit.upscale(),
+                fit.logical().w,
+                fit.logical().h,
+            ),
+            Plan::Classic { reason } => {
+                format!("graphics: classic half-blocks — {}", reason.describe())
+            }
         }
     }
 }
@@ -470,6 +532,10 @@ mod tests {
 
     fn plan(probe: Probe, max_density: Density) -> Plan {
         resolve(GraphicsMode::Auto, probe, max_density, AREA)
+    }
+
+    fn row(mode: GraphicsMode, probe: Probe, max_density: Density) -> String {
+        detect(mode, max_density, AREA, || probe).diagnostic_row()
     }
 
     fn too_small(cell: CellSize, max_density: Density) -> Plan {
@@ -649,6 +715,108 @@ mod tests {
         }
     }
 
+    /// A named protocol replaces the terminal's answer, whatever it was; every
+    /// other fact — the cell, tmux, a terminal that never answered — still
+    /// decides.
+    #[test]
+    fn a_named_protocol_overrides_the_answer_and_nothing_else() {
+        for (mode, want) in [
+            (GraphicsMode::Kitty, ImageProtocol::Kitty),
+            (GraphicsMode::Sixel, ImageProtocol::Sixel),
+            (GraphicsMode::Iterm2, ImageProtocol::Iterm2),
+        ] {
+            for answered_with in [None, Some(ImageProtocol::Kitty)] {
+                let got = resolve(
+                    mode,
+                    answered(answered_with, CELL_8X16, false),
+                    BUNDLED,
+                    AREA,
+                );
+                assert!(
+                    matches!(got, Plan::Cutaway { protocol, .. } if protocol == want),
+                    "{mode:?} over {answered_with:?}: {got:?}"
+                );
+            }
+            let tiny = cell(2, 4);
+            assert_eq!(
+                resolve(mode, capable(tiny), BUNDLED, AREA),
+                too_small(tiny, BUNDLED)
+            );
+            assert_eq!(
+                resolve(mode, Probe::NoAnswer, BUNDLED, AREA),
+                Plan::Classic {
+                    reason: ClassicReason::NoAnswer
+                }
+            );
+        }
+        assert_eq!(
+            resolve(
+                GraphicsMode::Sixel,
+                answered(Some(ImageProtocol::Kitty), CELL_8X16, true),
+                BUNDLED,
+                AREA
+            ),
+            Plan::Classic {
+                reason: ClassicReason::TmuxNeedsKitty(ImageProtocol::Sixel)
+            }
+        );
+    }
+
+    /// Off never reaches the terminal: the probe is the seam that would, and it
+    /// panics if called.
+    #[test]
+    fn off_plans_without_asking_the_terminal() {
+        assert_eq!(
+            detect(GraphicsMode::Off, BUNDLED, AREA, || panic!(
+                "Off must not query the terminal"
+            )),
+            Plan::Classic {
+                reason: ClassicReason::Disabled
+            }
+        );
+    }
+
+    /// Every other mode asks exactly once and plans from the answer.
+    #[test]
+    fn every_other_mode_asks_once_and_plans_from_the_answer() {
+        for mode in [
+            GraphicsMode::Auto,
+            GraphicsMode::Kitty,
+            GraphicsMode::Sixel,
+            GraphicsMode::Iterm2,
+        ] {
+            let mut asked = 0;
+            let got = detect(mode, BUNDLED, AREA, || {
+                asked += 1;
+                capable(CELL_8X16)
+            });
+            assert_eq!(asked, 1, "{mode:?}");
+            assert_eq!(
+                got,
+                resolve(mode, capable(CELL_8X16), BUNDLED, image_area(AREA))
+            );
+        }
+    }
+
+    /// The image covers the scene and never the footer: text and image never
+    /// share a cell.
+    #[test]
+    fn the_image_area_leaves_the_footer_to_text() {
+        let area = image_area(AREA);
+        assert_eq!(area.width, AREA.width);
+        assert_eq!(
+            area.height,
+            crate::tui::renderer::scene_rect(ratatui::layout::Rect::new(
+                0,
+                0,
+                AREA.width,
+                AREA.height
+            ))
+            .height
+        );
+        assert!(area.height < AREA.height);
+    }
+
     /// A tmux user on SIXEL with a cell too small for the art hears about the
     /// cell, not about a switch to kitty that would not help.
     #[test]
@@ -718,19 +886,15 @@ mod tests {
 
     #[test]
     fn the_doctor_row_names_the_protocol_and_the_fit() {
-        let row = graphics_diagnostic_row(
+        let row = row(
             GraphicsMode::Auto,
             answered(Some(ImageProtocol::Sixel), cell(17, 41), false),
             BUNDLED,
-            AREA,
         );
-        // The row reports a CAPABILITY. Until the profile reaches a painter it
-        // must not read as a prediction about `run`, which paints classic
-        // whatever this says.
         assert_eq!(
             row,
             "graphics: sixel (17x41 cell) — the cutaway profile would render at 16x \
-             (4x art upscaled 4x), a 127x102 office (not yet wired to `run`)"
+             (4x art upscaled 4x), a 127x99 office"
         );
     }
 
@@ -836,7 +1000,7 @@ mod tests {
                 ClassicReason::TmuxNeedsKitty(_) => 7,
                 ClassicReason::CellTooSmall { .. } => 8,
             });
-            let row = graphics_diagnostic_row(mode, probe, max_density, AREA);
+            let row = row(mode, probe, max_density);
             assert_eq!(row, format!("graphics: classic half-blocks — {want}"));
             rows.insert(row);
         }

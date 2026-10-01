@@ -27,7 +27,7 @@ use ratatui::backend::CrosstermBackend;
 use tui_renderer::TuiRenderer;
 
 use crate::runtime::SceneRx;
-use pixtuoid_scene::{embedded_pack, pet, theme};
+use pixtuoid_scene::{pet, theme};
 
 /// Which overlay (if any) currently owns input, plus the one count the picker needs.
 /// An open overlay swallows keys and the normal-scene bindings are suspended; the
@@ -527,7 +527,7 @@ fn resolve_version_popup(config_path: &std::path::Path) -> bool {
 
 pub(crate) struct TuiSession {
     pub scene_rx: SceneRx,
-    pub pack: embedded_pack::PackSource,
+    pub pack: pixtuoid_core::sprite::format::Pack,
     pub floor_caps: Arc<[std::sync::atomic::AtomicUsize; pixtuoid_core::state::MAX_FLOORS]>,
     pub theme: &'static theme::Theme,
     pub config_path: std::path::PathBuf,
@@ -912,7 +912,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         first_run,
         audio_cfg,
     } = session;
-    let pack = embedded_pack::load_sprite_pack(pack)?;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
     // A LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins
