@@ -2410,15 +2410,8 @@ fn kind_derivation_reproduces_the_string_parse_tint_for_representative_displays(
 }
 
 #[test]
-fn tool_glow_is_the_shared_kind_to_hue_map() {
-    use pixtuoid_core::state::ToolKind;
+fn tool_glow_tint_is_none_unless_active() {
     let glow = &crate::theme::NORMAL.tool_glow;
-    assert_eq!(glow.for_kind(ToolKind::Edit), glow.edit);
-    assert_eq!(glow.for_kind(ToolKind::Read), glow.read);
-    assert_eq!(glow.for_kind(ToolKind::Bash), glow.bash);
-    assert_eq!(glow.for_kind(ToolKind::Task), glow.agent);
-    assert_eq!(glow.for_kind(ToolKind::Search), glow.grep);
-    assert_eq!(glow.for_kind(ToolKind::Other), glow.default);
     let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
     let edit = make_slot(
         id,

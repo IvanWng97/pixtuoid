@@ -212,9 +212,8 @@ pub struct ToolGlowColors {
 }
 
 impl ToolGlowColors {
-    /// The exhaustive `ToolKind → hue` map. Read by the office monitor glow AND
-    /// by the binary's footer tool-segment tint, so the two share one hue per
-    /// tool.
+    /// The exhaustive `ToolKind → hue` map, shared by the monitor glow, the
+    /// footer tint and the tooltip so each tool has one hue.
     pub fn for_kind(&self, kind: pixtuoid_core::state::ToolKind) -> Rgb {
         use pixtuoid_core::state::ToolKind;
         match kind {
@@ -694,5 +693,17 @@ mod tests {
                 d.label_prefix
             );
         }
+    }
+
+    #[test]
+    fn tool_glow_is_the_shared_kind_to_hue_map() {
+        use pixtuoid_core::state::ToolKind;
+        let glow = &NORMAL.tool_glow;
+        assert_eq!(glow.for_kind(ToolKind::Edit), glow.edit);
+        assert_eq!(glow.for_kind(ToolKind::Read), glow.read);
+        assert_eq!(glow.for_kind(ToolKind::Bash), glow.bash);
+        assert_eq!(glow.for_kind(ToolKind::Task), glow.agent);
+        assert_eq!(glow.for_kind(ToolKind::Search), glow.grep);
+        assert_eq!(glow.for_kind(ToolKind::Other), glow.default);
     }
 }
