@@ -40,8 +40,8 @@ impl Router for StubRouter {
     fn invalidate(&mut self) {}
 }
 
-fn layout() -> Layout {
-    Layout::compute(120, 96, Some(4)).expect("fits")
+fn layout() -> SceneLayout {
+    SceneLayout::compute(120, 96, Some(4)).expect("fits")
 }
 
 /// Returns a stable polyline (`first`) for its first few calls then a DIFFERENT
@@ -852,7 +852,7 @@ fn exiting_slot(exiting_at: SystemTime, created_at: SystemTime) -> AgentSlot {
 }
 
 /// `(near, far)` desk indices by octile distance from the door.
-fn near_far_desk_indices(l: &Layout) -> (usize, usize) {
+fn near_far_desk_indices(l: &SceneLayout) -> (usize, usize) {
     let door = l.door_threshold;
     let dists: Vec<u32> = l
         .home_desks
@@ -1105,7 +1105,7 @@ const MAX_FRAME_STEP_PX: i32 = 20;
 /// toggles an interior obstacle every other frame to force A* cache invalidation.
 fn max_anchor_step(
     slot: &AgentSlot,
-    l: &Layout,
+    l: &SceneLayout,
     start: SystemTime,
     frames: u64,
     churn: bool,
@@ -1545,7 +1545,7 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
     // A real-sized floor, not the tiny 120×96 `layout()`: in the tiny room the
     // meeting sofas are boxed in to their backrest, so a trip agent skips them and
     // never wanders far — and this test needs the agent to genuinely walk out.
-    let l = Layout::compute(160, 120, Some(4)).expect("fits");
+    let l = SceneLayout::compute(160, 120, Some(4)).expect("fits");
     let trip_id = (0u64..1000)
         .map(|i| AgentId::from_transcript_path(&format!("/exitw/{i}.jsonl")))
         .find(|id| takes_trip(*id, 0))
@@ -1639,7 +1639,7 @@ fn wander_continuous_across_layouts_and_agents() {
     ];
 
     for (w, h, seed) in geometries {
-        let Some(l) = Layout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed) else {
+        let Some(l) = SceneLayout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed) else {
             continue;
         };
         if l.home_desks.is_empty() || l.waypoints.is_empty() {

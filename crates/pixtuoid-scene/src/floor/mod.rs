@@ -135,10 +135,10 @@ pub struct FloorCtx {
     /// floor (ms) — drives the door-open cosmetic without a hardcoded window.
     pub door_anim_max_ms: u64,
     /// Memo of the last per-frame layout, keyed by the ONLY inputs
-    /// `Layout::compute_with_seed` reads on the frame path. Rebuilding it every
+    /// `SceneLayout::compute_with_seed` reads on the frame path. Rebuilding it every
     /// frame re-allocs + re-stamps the walkable mask and re-runs the coarse BFS
     /// — the dominant fixed per-frame CPU, quadratic in buffer area.
-    layout_memo: Option<((u16, u16, u64), Arc<crate::layout::Layout>)>,
+    layout_memo: Option<((u16, u16, u64), Arc<crate::layout::SceneLayout>)>,
 }
 
 impl Default for FloorCtx {
@@ -184,19 +184,19 @@ impl FloorCtx {
     /// The per-frame layout — memoized `compute_with_seed(w, h, None, seed)` +
     /// the router corridor re-point, the ONE frame prologue every painter rides.
     /// Returns a cheap `Arc` handle so callers can hold it across later
-    /// `&mut self` uses without re-cloning the whole `Layout` every frame. A
+    /// `&mut self` uses without re-cloning the whole `SceneLayout` every frame. A
     /// too-small buffer returns `None` without poisoning the memo.
     pub fn frame_layout(
         &mut self,
         buf_w: u16,
         buf_h: u16,
         floor_seed: u64,
-    ) -> Option<Arc<crate::layout::Layout>> {
+    ) -> Option<Arc<crate::layout::SceneLayout>> {
         let key = (buf_w, buf_h, floor_seed);
         let layout = match &self.layout_memo {
             Some((k, l)) if *k == key => Arc::clone(l),
             _ => {
-                let l = Arc::new(crate::layout::Layout::compute_with_seed(
+                let l = Arc::new(crate::layout::SceneLayout::compute_with_seed(
                     buf_w, buf_h, None, floor_seed,
                 )?);
                 self.layout_memo = Some((key, Arc::clone(&l)));
@@ -368,7 +368,7 @@ pub struct FrameInputs<'a> {
 /// layout plus the sim's occupancy observation.
 pub struct FloorFrame {
     /// The frame's computed layout (callers cache it for overlays / hit-testing).
-    pub layout: Arc<crate::layout::Layout>,
+    pub layout: Arc<crate::layout::SceneLayout>,
     /// The occupied-waypoint indices this frame — the appliance audio-cue feed.
     pub occupied_waypoints: std::collections::HashSet<usize>,
     /// Every character drawn this frame, in paint order.
@@ -420,7 +420,7 @@ pub fn render_floor(
 /// sim walked another.
 pub struct SteppedFloor {
     /// The layout the sim stepped on.
-    pub layout: Arc<crate::layout::Layout>,
+    pub layout: Arc<crate::layout::SceneLayout>,
     /// The world, advanced one tick.
     pub frame: SimFrame,
 }
@@ -459,7 +459,7 @@ impl Default for PerFloor {
 /// Resolve an occupied-waypoint index to its [`WaypointKind`](crate::layout::WaypointKind)
 /// against `layout` — the ONE authored form of the audio cue tracker's kind lookup.
 pub fn waypoint_kind_of(
-    layout: Option<&crate::layout::Layout>,
+    layout: Option<&crate::layout::SceneLayout>,
     idx: usize,
 ) -> Option<crate::layout::WaypointKind> {
     layout.and_then(|l| l.waypoints.get(idx)).map(|w| w.kind)
@@ -578,7 +578,7 @@ pub struct FloorSession {
     pub office: PerOffice,
     /// The layout the last `render` laid out, so a painter can't pass a layout
     /// that disagrees with the sprite pass.
-    last_layout: Option<Arc<crate::layout::Layout>>,
+    last_layout: Option<Arc<crate::layout::SceneLayout>>,
     /// The occupancy the last `render` observed, so a painter reads the SAME
     /// frame's occupancy it just painted.
     last_occupied: std::collections::HashSet<usize>,
@@ -611,7 +611,7 @@ impl FloorSession {
     /// seam. Returns the computed layout ([`FloorSession::buf`] holds the
     /// pixels), or `None` when the size can't lay out. `scene` MUST be the full
     /// live scene — the session evicts against it.
-    pub fn render(&mut self, inputs: FrameInputs) -> Option<Arc<crate::layout::Layout>> {
+    pub fn render(&mut self, inputs: FrameInputs) -> Option<Arc<crate::layout::SceneLayout>> {
         self.evict_missing(inputs.world.scene);
         let frame = render_floor(
             &mut self.floor.ctx,

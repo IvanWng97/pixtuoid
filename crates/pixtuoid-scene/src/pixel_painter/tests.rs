@@ -129,7 +129,7 @@ fn h_door_jambs_sit_flush_on_both_cut_ends() {
 #[test]
 fn h_wall_jamb_flags_join_on_the_doorway_cut_ends() {
     use crate::layout::TEST_DEFAULT_DESKS;
-    let l = Layout::compute(215, 98, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let l = SceneLayout::compute(215, 98, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let dw = l
         .doorways
         .iter()
@@ -175,7 +175,7 @@ fn h_wall_jamb_flags_join_on_the_doorway_cut_ends() {
 #[test]
 fn v_wall_jamb_flags_and_south_anchor_on_the_doorway_cut_ends() {
     use crate::layout::TEST_DEFAULT_DESKS;
-    let l = Layout::compute(215, 98, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let l = SceneLayout::compute(215, 98, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let dw = l
         .doorways
         .iter()
@@ -1375,7 +1375,7 @@ fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
 #[test]
 fn settle_view_matches_the_seated_view_for_every_seat() {
     use crate::layout::{Facing, TEST_DEFAULT_DESKS, WaypointKind};
-    let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let l = SceneLayout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let seats: Vec<_> = l
         .waypoints
         .iter()
@@ -1434,7 +1434,8 @@ fn island_settle_z_stays_behind_the_countertop() {
     use crate::layout::{Anchor, Furniture, TEST_DEFAULT_DESKS, WaypointKind};
     let mut exercised = false;
     for seed in 0..5u64 {
-        let Some(l) = Layout::compute_with_seed(240, 160, Some(TEST_DEFAULT_DESKS), seed) else {
+        let Some(l) = SceneLayout::compute_with_seed(240, 160, Some(TEST_DEFAULT_DESKS), seed)
+        else {
             continue;
         };
         let Some(island) = l.pantry.and_then(|p| p.kitchen_island) else {
@@ -1474,7 +1475,7 @@ fn island_settle_z_stays_behind_the_countertop() {
 fn settle_seat_recognizes_the_home_desk() {
     use crate::layout::TEST_DEFAULT_DESKS;
     use crate::layout::{Furniture, desk_walk_anchor_facing};
-    let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let l = SceneLayout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let desk = *l.home_desks.first().expect("at least one home desk");
     let chair = desk_walk_anchor_facing(desk, l.desk_facing_at(desk));
     // Pinning `Front` unconditionally would assert the pre-facing world.
@@ -1535,7 +1536,7 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
     use crate::layout::{
         Anchor, Facing, Furniture, TEST_DEFAULT_DESKS, WaypointKind, furniture_def, z_sort_row,
     };
-    let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let l = SceneLayout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let mut saw_back = false;
     for w in l
         .waypoints
@@ -1708,7 +1709,7 @@ fn every_hover_size_is_its_painted_sprite_size() {
 }
 
 /// A frame with nobody in it, for `layout`.
-fn empty_frame(layout: &Layout) -> SimFrame {
+fn empty_frame(layout: &SceneLayout) -> SimFrame {
     SimFrame {
         agents: Vec::new(),
         poses: HashMap::new(),
@@ -1727,7 +1728,7 @@ fn empty_frame(layout: &Layout) -> SimFrame {
 }
 
 /// The classic's queue of `layout`'s fixtures on `frame`.
-fn queued(layout: &Layout, frame: &SimFrame) -> Furnishings<'static> {
+fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
     let pack = crate::pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let (scene, motion) = (SceneState::uniform(16), HashMap::new());
@@ -1770,7 +1771,7 @@ fn queued(layout: &Layout, frame: &SimFrame) -> Furnishings<'static> {
 }
 
 /// The offices the classic's roster tests sweep.
-fn swept_offices() -> impl Iterator<Item = Layout> {
+fn swept_offices() -> impl Iterator<Item = SceneLayout> {
     [
         (96u16, 60u16),
         (160, 120),
@@ -1779,7 +1780,9 @@ fn swept_offices() -> impl Iterator<Item = Layout> {
         (320, 180),
     ]
     .into_iter()
-    .flat_map(|(w, h)| (0..12).filter_map(move |seed| Layout::compute_with_seed(w, h, None, seed)))
+    .flat_map(|(w, h)| {
+        (0..12).filter_map(move |seed| SceneLayout::compute_with_seed(w, h, None, seed))
+    })
 }
 
 fn paints_as(kind: crate::layout::FixtureKind) -> &'static str {
@@ -2863,9 +2866,15 @@ impl OwnedSimStores {
     }
 }
 
-fn sim_rig() -> (SceneState, Layout, pixtuoid_core::AgentId, SystemTime, Pack) {
+fn sim_rig() -> (
+    SceneState,
+    SceneLayout,
+    pixtuoid_core::AgentId,
+    SystemTime,
+    Pack,
+) {
     let pack = crate::pack::test_default_pack();
-    let layout = Layout::compute_with_seed(160, 96, None, 0).expect("160x96 lays out");
+    let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("160x96 lays out");
     let now0 = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     let id = pixtuoid_core::AgentId::from_transcript_path("/p/sim-seam.jsonl");
     let mut slot = make_slot(id, ActivityState::Idle);
@@ -2960,8 +2969,8 @@ fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
         CHARACTER_SPRITE_W,
     );
 
-    let layout =
-        Layout::compute_with_seed(240, 160, Some(TEST_DEFAULT_DESKS), 0).expect("240x160 lays out");
+    let layout = SceneLayout::compute_with_seed(240, 160, Some(TEST_DEFAULT_DESKS), 0)
+        .expect("240x160 lays out");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let (bw, bh) = (layout.walkable.width(), layout.walkable.height());
 
@@ -3272,7 +3281,8 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
 
 #[test]
 fn every_other_desk_stands_a_cabinet_starting_with_the_first() {
-    let layout = Layout::compute(192, 128, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
+    let layout =
+        SceneLayout::compute(192, 128, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
     let cabinets: Vec<bool> = (0..layout.home_desks.len())
         .map(|i| crate::layout::desk_has_cabinet(FloorLocalDeskIndex(i)))
         .collect();
@@ -3890,7 +3900,7 @@ fn pantry_doorway_gets_a_centered_entry_mat() {
     // Taste pin: an entry mat centered under the pantry's north doorway, one
     // clear row off the wall face.
     use crate::layout::{TEST_DEFAULT_DESKS, WALL_THICK_H};
-    let l = Layout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let l = SceneLayout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let p = l.pantry.expect("pantry");
     let dw = l
         .doorways
@@ -3924,7 +3934,7 @@ fn kitchen_island_sits_on_a_bar_mat() {
     // Taste pin: a thin bordered mat under the island whose south sliver peeks
     // out in front of the bar.
     use crate::layout::TEST_DEFAULT_DESKS;
-    let l = Layout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
+    let l = SceneLayout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let isl = l
         .pantry
         .and_then(|p| p.kitchen_island)
@@ -3967,7 +3977,7 @@ fn pantry_mats_stay_inside_the_pantry_bounds() {
     // 120x160 is the narrow-pantry case where the entry mat box reaches the
     // water-cooler column (the paint-order catch).
     for (w, h) in [(192u16, 160u16), (240, 160), (160, 120), (120, 160)] {
-        let Some(l) = Layout::compute(w, h, Some(TEST_DEFAULT_DESKS)) else {
+        let Some(l) = SceneLayout::compute(w, h, Some(TEST_DEFAULT_DESKS)) else {
             continue;
         };
         let Some(p) = l.pantry else { continue };
@@ -4333,7 +4343,8 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
         pinned,
         "the idle agent never reached a waypoint in 20 min of sim"
     );
-    let layout = Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
+    let layout =
+        SceneLayout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
     let printer_idx = layout
         .waypoints
         .iter()
@@ -4368,7 +4379,8 @@ fn no_two_agents_ever_occupy_the_same_exclusive_waypoint() {
     use std::time::Duration;
 
     let pack = crate::pack::test_default_pack();
-    let layout = Layout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
+    let layout =
+        SceneLayout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let mut scene = SceneState::uniform(64);
     for i in 0..TEST_DEFAULT_DESKS {
@@ -4434,7 +4446,8 @@ fn a_placement_is_seated_exactly_when_its_figure_sits_on_furniture() {
     use std::time::Duration;
 
     let pack = crate::pack::test_default_pack();
-    let layout = Layout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
+    let layout =
+        SceneLayout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let mut scene = SceneState::uniform(64);
     for i in 0..TEST_DEFAULT_DESKS {
@@ -4503,7 +4516,8 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     use std::time::Duration;
 
     let pack = crate::pack::test_default_pack();
-    let layout = Layout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
+    let layout =
+        SceneLayout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let id = pixtuoid_core::AgentId::from_transcript_path("/p/claim-release.jsonl");
     let mut slot = make_slot(id, ActivityState::Idle);
@@ -4615,7 +4629,8 @@ fn one_meeting_sofa_still_seats_three_agents_at_once() {
     use std::time::Duration;
 
     let pack = crate::pack::test_default_pack();
-    let layout = Layout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
+    let layout =
+        SceneLayout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
     let sofa: Vec<usize> = {
         let mut out: Vec<usize> = vec![];
         for (i, w) in layout.waypoints.iter().enumerate() {
@@ -4705,7 +4720,8 @@ fn a_meeting_chair_sitter_is_drawn_on_the_seat_not_5px_high() {
     use std::time::Duration;
 
     let pack = crate::pack::test_default_pack();
-    let layout = Layout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
+    let layout =
+        SceneLayout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let mut scene = SceneState::uniform(64);
     for i in 0..TEST_DEFAULT_DESKS {
@@ -4873,7 +4889,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     use std::time::Duration;
 
     let pack = crate::pack::test_default_pack();
-    let layout = Layout::compute_with_seed(192, 128, None, 0).expect("layout");
+    let layout = SceneLayout::compute_with_seed(192, 128, None, 0).expect("layout");
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
     let boot = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let motion = HashMap::new();
@@ -5014,7 +5030,7 @@ fn keep_sprite_on_canvas_bounds_differ_by_anchor_convention() {
 /// only the survivors are worth an A* run — but a cold routing store answers
 /// `Walking`, so a caller must still drive its agent second by second up to the
 /// returned target.
-fn east_rim_targets(layout: &Layout, now0: SystemTime) -> Vec<(u32, u64)> {
+fn east_rim_targets(layout: &SceneLayout, now0: SystemTime) -> Vec<(u32, u64)> {
     use crate::pose::Pose;
     use std::time::Duration;
     let w = CHARACTER_SPRITE_W;
@@ -5053,7 +5069,7 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
     use std::time::Duration;
 
     let pack = crate::pack::test_default_pack();
-    let layout = Layout::compute_with_seed(112, 100, None, 0).expect("112x100 lays out");
+    let layout = SceneLayout::compute_with_seed(112, 100, None, 0).expect("112x100 lays out");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let coffee = HashMap::new();
     let w = CHARACTER_SPRITE_W;
@@ -5119,7 +5135,7 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
 fn sim_and_paint(
     owned: &mut OwnedSimStores,
     scene: &SceneState,
-    layout: &Layout,
+    layout: &SceneLayout,
     pack: &Pack,
     now: SystemTime,
 ) -> (SimFrame, Vec<AgentFrame>) {
@@ -5145,7 +5161,7 @@ fn sim_and_paint(
 fn paint_drawn(
     owned: &OwnedSimStores,
     scene: &SceneState,
-    layout: &Layout,
+    layout: &SceneLayout,
     pack: &Pack,
     now: SystemTime,
     frame: &SimFrame,
@@ -5177,7 +5193,7 @@ fn paint_drawn(
 fn assert_badges_top_their_frames(
     frame: &SimFrame,
     drawn: &[AgentFrame],
-    layout: &Layout,
+    layout: &SceneLayout,
     pack: &Pack,
 ) {
     // A breath lifts the drawn top by one pixel, never the badge.
@@ -5207,7 +5223,7 @@ fn assert_badges_top_their_frames(
 }
 
 /// A waiting agent at every desk, both facings, past the entry walk.
-fn seated_at_every_desk() -> (SceneState, Layout, SystemTime, Pack) {
+fn seated_at_every_desk() -> (SceneState, SceneLayout, SystemTime, Pack) {
     let (mut scene, layout, _, now0, pack) = sim_rig();
     scene.agents.clear();
     for i in 0..layout.home_desks.len() {
@@ -5374,7 +5390,7 @@ fn a_badge_follows_its_sprite_fitted_to_the_canvas_rim() {
     use std::time::Duration;
 
     let pack = crate::pack::test_default_pack();
-    let layout = Layout::compute_with_seed(112, 100, None, 0).expect("112x100 lays out");
+    let layout = SceneLayout::compute_with_seed(112, 100, None, 0).expect("112x100 lays out");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let coffee = HashMap::new();
     let w = CHARACTER_SPRITE_W;
@@ -5456,7 +5472,7 @@ fn a_back_turned_seat_puts_the_occupant_past_the_desk_body() {
 fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
     for seed in 0..8u64 {
         let layout =
-            Layout::compute_with_seed(240, 160, Some(crate::layout::TEST_DEFAULT_DESKS), seed)
+            SceneLayout::compute_with_seed(240, 160, Some(crate::layout::TEST_DEFAULT_DESKS), seed)
                 .expect("240x160 lays out");
         let pack = crate::pack::test_default_pack();
         let chair_w = super::drawable::desk_chair_frame(&pack)
@@ -5888,10 +5904,10 @@ fn corridor_appliance_art_never_lands_on_a_workstation() {
     const MID_WIDTH: u16 = 208;
     let rows_meet = |a: Bounds, b: Bounds| a.y < b.y + b.height && b.y < a.y + a.height;
     let lay_out = |w, h, seed| {
-        Layout::compute_with_seed(w, h, None, seed)
+        SceneLayout::compute_with_seed(w, h, None, seed)
             .unwrap_or_else(|| panic!("{w}x{h} seed {seed} lays out"))
     };
-    let pieces = |l: &Layout| {
+    let pieces = |l: &SceneLayout| {
         let fixtures: Vec<_> = l.fixtures().collect();
         let art: Vec<(Station, Bounds)> = fixtures
             .iter()
@@ -5922,7 +5938,7 @@ fn corridor_appliance_art_never_lands_on_a_workstation() {
         }));
         (art, workstations)
     };
-    let rows = |l: &Layout| {
+    let rows = |l: &SceneLayout| {
         let (art, workstations) = pieces(l);
         (
             (l.cubicle_aisle.y, l.cubicle_aisle.height),
@@ -5937,7 +5953,7 @@ fn corridor_appliance_art_never_lands_on_a_workstation() {
     };
     let mut placed = 0;
     let mut violations = Vec::new();
-    let mut check = |l: &Layout, w: u16, h: u16, seed: u64| {
+    let mut check = |l: &SceneLayout, w: u16, h: u16, seed: u64| {
         let (art, workstations) = pieces(l);
         placed += art.len();
         for (station, a) in art {
