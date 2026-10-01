@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn bounds_overlap_is_half_open_and_a_zero_sized_box_overlaps_nothing() {
+    let b = |x, y, width, height| Bounds {
+        x,
+        y,
+        width,
+        height,
+    };
+    let a = b(10, 10, 4, 4);
+    assert!(a.overlaps(b(13, 13, 4, 4)), "one shared pixel");
+    assert!(!a.overlaps(b(14, 10, 4, 4)), "touching edges share none");
+    assert!(!a.overlaps(b(11, 11, 0, 2)), "zero width, inside");
+    assert!(!b(11, 11, 2, 0).overlaps(a), "zero height, inside");
+}
+
+#[test]
+fn widening_against_column_0_keeps_the_east_edge() {
+    let b = |x, width| Bounds {
+        x,
+        y: 5,
+        width,
+        height: 3,
+    };
+    assert_eq!(b(4, 6).widened(2), b(2, 10));
+    assert_eq!(b(0, 6).widened(2), b(0, 8), "the east edge stays at 6 + 2");
+    assert_eq!(b(1, 6).widened(2), b(0, 9));
+}
+
+#[test]
 fn kitchen_island_places_on_roomy_pantries_and_refuses_small() {
     let l = SceneLayout::compute_with_seed(240, 160, None, 2).expect("fits");
     let island = l

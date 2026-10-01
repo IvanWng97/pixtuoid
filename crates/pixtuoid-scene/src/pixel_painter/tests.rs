@@ -6097,8 +6097,6 @@ fn corridor_appliance_art_never_lands_on_a_workstation() {
     const WIDEST: u16 = 320;
     const MID_WIDTH: u16 = 208;
     let rows_meet = |a: Bounds, b: Bounds| a.y < b.y + b.height && b.y < a.y + a.height;
-    let overlaps =
-        |a: Bounds, b: Bounds| rows_meet(a, b) && a.x < b.x + b.width && b.x < a.x + a.width;
     let lay_out = |w, h, seed| {
         Layout::compute_with_seed(w, h, None, seed)
             .unwrap_or_else(|| panic!("{w}x{h} seed {seed} lays out"))
@@ -6153,17 +6151,12 @@ fn corridor_appliance_art_never_lands_on_a_workstation() {
         let (art, workstations) = pieces(l);
         placed += art.len();
         for (station, a) in art {
-            violations.extend(
-                workstations
-                    .iter()
-                    .filter(|&&ws| overlaps(a, ws))
-                    .map(|ws| {
-                        format!(
-                            "{w}x{h} seed {seed} aisle {:?}: {station:?} art {a:?} on {ws:?}",
-                            l.cubicle_aisle
-                        )
-                    }),
-            );
+            violations.extend(workstations.iter().filter(|&&ws| a.overlaps(ws)).map(|ws| {
+                format!(
+                    "{w}x{h} seed {seed} aisle {:?}: {station:?} art {a:?} on {ws:?}",
+                    l.cubicle_aisle
+                )
+            }));
         }
     };
     for (w, h) in [
