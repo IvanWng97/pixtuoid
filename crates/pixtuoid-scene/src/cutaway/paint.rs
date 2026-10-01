@@ -1,6 +1,6 @@
 //! The cutaway profile's paint pass — the second reader of `SimFrame`. Of the
-//! sim's effects it draws those riding on people (`cutaway::effects`); steam
-//! and the pet stay with the classic pass.
+//! sim's effects it draws those riding on people and creatures
+//! (`cutaway::effects`); steam stays with the classic pass.
 //! It never advances the sim; a mover here would desync the profiles.
 
 use pixtuoid_core::sprite::RgbBuffer;
@@ -402,6 +402,8 @@ pub(crate) struct DrawList<'a> {
     ambient: crate::cutaway::light::Ambient,
     /// The carpet the backdrop lays: a change repaints the whole frame too.
     ground: Dithered<Ground>,
+    /// How far lightning lifts the room: a change repaints the whole frame.
+    flash: crate::cutaway::light::Flash,
     // What it was built with, so painting it cannot use anything else: a
     // figure's key names its density, which only the build's scale picks.
     pack: &'a Pack,
@@ -509,6 +511,10 @@ impl<'a> DrawList<'a> {
         self.ground
     }
 
+    pub(crate) fn flash(&self) -> crate::cutaway::light::Flash {
+        self.flash
+    }
+
     /// Each drawn agent's badge, in draw order.
     #[cfg(test)]
     pub(crate) fn badges(&self) -> impl Iterator<Item = &Badge> + '_ {
@@ -573,9 +579,66 @@ pub(crate) fn build_list<'a>(
         lights: lights(frame, office, moment, floor.floor_idx, ambient),
         ambient,
         ground: Ground::of(theme, moment.look.ground_tint),
+        flash: crate::cutaway::light::Flash::of(&moment.sky),
         pack,
         theme,
         scale,
+    }
+}
+
+/// The pet and the gateway mascots, each a figure sorted on its feet's row
+/// as the classic sorts it, with what rides on it straight after.
+fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, PieceKind)>) {
+    let Office {
+        pack, theme, scale, ..
+    } = office;
+    let pet = frame.pet.iter().map(|p| {
+        let flip = if p.flip { Flip::Horizontal } else { Flip::None };
+        (p.pos, p.anim_name, p.frame_idx, flip, false, &p.effects)
+    });
+    let mascots = frame.mascots.iter().map(|m| {
+        let degraded = m.state == pixtuoid_core::state::DaemonState::Degraded;
+        (
+            m.pos,
+            m.anim_name,
+            m.frame_idx,
+            Flip::None,
+            degraded,
+            &m.effects,
+        )
+    });
+    for (at, sprite, frame_idx, flip, degraded, effects) in pet.chain(mascots) {
+        let Some(dense) =
+            crate::embedded_pack::densest_frame(pack, sprite, frame_idx, RenderScale::ONE)
+        else {
+            continue;
+        };
+        let (w, h) = dense.logical;
+        let depth = crate::layout::z_sort_row(crate::layout::Anchor::Center, at, h);
+        let span = piece_span(crate::layout::Anchor::Center, at, w, h, 0)
+            .with_depth(depth)
+            .with_layer(Layer::Figure);
+        let art = Art {
+            sprite,
+            frame: frame_idx,
+            flip,
+        };
+        order.push((span, PieceKind::Creature { at, art, degraded }));
+        let Some(pen) = crate::embedded_pack::densest_frame(pack, sprite, frame_idx, scale)
+            .and_then(|d| Pen::new(scale, d.density.get()))
+        else {
+            continue;
+        };
+        for &effect in effects {
+            let riding = crate::cutaway::effects::Riding {
+                effect,
+                head: None,
+                pen,
+            };
+            if let Some(s) = riding.span(theme, depth) {
+                order.push((s, PieceKind::Effect(riding)));
+            }
+        }
     }
 }
 
@@ -711,7 +774,7 @@ pub(crate) fn paint_list(list: &DrawList<'_>, cache: &mut CutawayCache, buf: &mu
     crate::cutaway::light::net_pass(
         whole,
         &lights,
-        list.ambient,
+        (list.ambient, list.flash),
         &emission,
         pen,
         &mut cache.net_colours,
@@ -782,6 +845,7 @@ fn paint_pieces(
                     | PieceKind::Chair { .. }
                     | PieceKind::DeskProp(_)
                     | PieceKind::Mote { .. }
+                    | PieceKind::Creature { .. }
                     | PieceKind::PropBand { .. }
                     | PieceKind::Table { .. }
                     | PieceKind::Character { .. }
@@ -844,6 +908,7 @@ fn mark(
         | PieceKind::Chair { .. }
         | PieceKind::DeskProp(_)
         | PieceKind::Mote { .. }
+        | PieceKind::Creature { .. }
         | PieceKind::PropBand { .. }
         | PieceKind::Table { .. }
         | PieceKind::Character { .. }
@@ -1155,6 +1220,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::Chair { at } => at.hash(&mut h),
         PieceKind::DeskProp(prop) => prop.hash(&mut h),
         PieceKind::Mote { at } => at.hash(&mut h),
+        PieceKind::Creature { at, art, degraded } => (at, art, degraded).hash(&mut h),
         PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => (at, art).hash(&mut h),
         PieceKind::PropBand { at, sprite, rows } => (at, sprite, rows).hash(&mut h),
         PieceKind::Table { at } => at.hash(&mut h),
@@ -1222,6 +1288,7 @@ fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<
     let mut order: Vec<(Span, PieceKind)> = Vec::new();
     push_windows(office, moment, &GlassWeather::of(moment), &mut order);
     let carried = push_characters(frame, office, moment.now, &mut order);
+    push_creatures(frame, office, &mut order);
     for fixture in layout.fixtures() {
         push_fixture(fixture, build, &carried, &mut order);
     }
@@ -1678,6 +1745,9 @@ fn paint_piece(
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
         PieceKind::DeskProp(prop) => paint_desk_prop(prop, pack, theme, scale, buf),
         PieceKind::Mote { at } => paint_mote(at, theme, Pen::for_pack(scale, pack), buf),
+        PieceKind::Creature { at, art, degraded } => {
+            paint_creature(at, art, degraded, pack, scale, buf);
+        }
         PieceKind::Effect(ref riding) => riding.paint(theme, buf),
         PieceKind::Character {
             ref figure, chair, ..
@@ -2280,6 +2350,7 @@ impl PieceKind {
             | PieceKind::Desk { .. }
             | PieceKind::DeskProp(_)
             | PieceKind::Mote { .. }
+            | PieceKind::Creature { .. }
             | PieceKind::Character { .. }
             | PieceKind::Effect(_)
             | PieceKind::Badge { .. }
@@ -2364,6 +2435,13 @@ pub(crate) enum PieceKind {
     },
     /// A prop the model stands on a desk ([`push_desk_props`]).
     DeskProp(StoodProp),
+    /// The pet or a gateway mascot, its art centred on `at`; a degraded
+    /// gateway's greyed ([`push_creatures`]).
+    Creature {
+        at: crate::layout::Point,
+        art: Art,
+        degraded: bool,
+    },
     /// A dust mote in a sunbeam, on cell `at` ([`motes`]).
     Mote {
         at: crate::layout::Point,
@@ -2597,6 +2675,9 @@ fn push_windows(
     );
     let d = density.get();
     let sky = crate::celestial::SkyView::of(moment, layout.buf_w, layout.wall_band_h(), theme);
+    // The bolt lights the glass and all it shows, over the weather on it.
+    let bolt = crate::cutaway::light::bolt_steps(&moment.sky);
+    let mut bolt_lift = crate::dither::Stepped::new(bolt as i8);
     for bay in layout.window_bays() {
         let size = Size {
             w: bay.w,
@@ -2639,6 +2720,11 @@ fn push_windows(
             let (ax, ay) = (m.x + d, m.y + d);
             if let Some(Some(c)) = px.get_mut(usize::from(ay) * usize::from(w) + usize::from(ax)) {
                 *c = m.over(*c, (x0 + ax, y0 + ay));
+            }
+        }
+        if bolt > 0 {
+            for c in px.iter_mut().flatten() {
+                *c = bolt_lift.of(*c);
             }
         }
         order.push((
@@ -2912,7 +2998,7 @@ fn scanline(
     let cols = crate::layout::SCREEN_GLASS_COLS;
     let band = ((x1 - x0 + 1) / (cols.end() - cols.start() + 1)).max(1);
     let line = (x0 + scan * band)..(x0 + (scan + 1) * band);
-    let color = crate::pixel_painter::effects::scanline_color(glow);
+    let color = crate::effects::look::scanline_color(glow);
     let pixels = (0..h)
         .flat_map(|y| (0..w).map(move |x| (x, y)))
         .map(|(x, y)| {
@@ -3083,6 +3169,30 @@ fn paint_art(
     let themed = dense.recolorable.recolored(&theme_overrides(theme));
     let (x, y) = centred_top_left(at, dense.logical, scale);
     blit_frame_scaled(&art.flip.turn(themed), x, y, dense.blit_at, buf);
+}
+
+/// A creature's art centred on `at`, in the pack's own colours as the classic
+/// draws it, greyed when `degraded`.
+fn paint_creature(
+    at: Point,
+    art: Art,
+    degraded: bool,
+    pack: &Pack,
+    scale: RenderScale,
+    buf: &mut RgbBuffer,
+) {
+    let Some(dense) = crate::embedded_pack::densest_frame(pack, art.sprite, art.frame, scale)
+    else {
+        return;
+    };
+    let turned = art.flip.turn(dense.frame.clone());
+    let shown = if degraded {
+        crate::pixel_painter::palette::degraded_frame(&turned)
+    } else {
+        turned
+    };
+    let (x, y) = centred_top_left(at, dense.logical, scale);
+    blit_frame_scaled(&shown, x, y, dense.blit_at, buf);
 }
 
 /// A mote: the middle art pixel of its cell, lit in the sun's spill.
@@ -3853,7 +3963,7 @@ pub(crate) mod tests {
             g: 180,
             b: 220,
         };
-        let line = crate::pixel_painter::effects::scanline_color(glow);
+        let line = crate::effects::look::scanline_color(glow);
         let cols = crate::layout::SCREEN_GLASS_COLS;
         let n = cols.end() - cols.start() + 1;
         for s in [1, pack.max_density_variant().get()] {
@@ -5370,14 +5480,9 @@ pub(crate) mod tests {
             let dense = crate::embedded_pack::densest_frame(&pack, "walking", 0, scale)
                 .expect("the walk's art");
             let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/style/{i}.jsonl"));
-            let style = crate::pixel_painter::hair::dress_for(
-                &pack,
-                id,
-                dense.frame,
-                dense.head,
-                dense.density,
-            )
-            .and_then(|d| d.style);
+            let style =
+                crate::character::dress_for(&pack, id, dense.frame, dense.head, dense.density)
+                    .and_then(|d| d.style);
             let Some(style) = style.filter(|s| !worn.contains(s)) else {
                 continue;
             };
@@ -5565,12 +5670,177 @@ S B B B B B B S
             last = Some(s);
         }
         let (dust, span) = rider(K::WalkingDust);
-        let foot =
-            crate::pixel_painter::effects::walking_dust_foot(dust.effect.at, dust.effect.phase);
+        let foot = crate::effects::look::walking_dust_foot(dust.effect.at, dust.effect.phase);
         assert!(
             (span.x0..=span.x1).contains(&foot.x) && (span.y0..=span.y1).contains(&foot.y),
             "the dust {span:?} is off the foot {foot:?}"
         );
+    }
+
+    /// A storm's strike lifts the whole frame by whole ramp steps, what glows
+    /// of its own too, and its window glass further, the bolt's. That only a
+    /// storm strikes is the model's: `a_strike_flashes_at_its_bucket_offset_and_ends_with_the_flash`.
+    #[test]
+    fn a_strike_lifts_the_room_and_its_glass_most() {
+        use crate::sky::{Sky, Weather};
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = test_default_pack();
+        let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let frame = empty_frame(&layout);
+        let now = crate::localclock::at_hour(23);
+        let lift = crate::cutaway::light::FLASH_MAX_STEPS as i8;
+        for s in [1, pack.max_density_variant().get()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            let office = Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale,
+            };
+            let drawn = |weather, flash| {
+                let sky = Sky::at_with(now, weather).with_flash(flash);
+                let list = build_list(
+                    &frame,
+                    office,
+                    &Moment::resolve(sky, theme, 0.0, now),
+                    crate::floor::FloorMeta::ground(),
+                    quiet_board(),
+                );
+                let mut buf = RgbBuffer::filled(
+                    scale.to_buffer(layout.buf_w),
+                    scale.to_buffer(layout.buf_h),
+                    theme.surface.bg_fallback,
+                );
+                paint(&layout, &list, &mut CutawayCache::default(), &mut buf);
+                let glass: Vec<Span> = list
+                    .pieces()
+                    .iter()
+                    .filter(|p| matches!(p.kind, PieceKind::Glass { .. }))
+                    .map(|p| p.span)
+                    .collect();
+                (buf, glass)
+            };
+            let (calm, glass) = drawn(Weather::Storm, 0.0);
+            let (strike, _) = drawn(Weather::Storm, 1.0);
+            let in_glass = |x: u16, y: u16| {
+                let (lx, ly) = (x / s, y / s);
+                glass
+                    .iter()
+                    .any(|g| (g.x0..=g.x1).contains(&lx) && (g.y0..=g.y1).contains(&ly))
+            };
+            let mut bolted = 0;
+            for y in 0..calm.height() {
+                for x in 0..calm.width() {
+                    let (c, f) = (calm.get(x, y), strike.get(x, y));
+                    if in_glass(x, y) {
+                        bolted += usize::from(f.lightness() > c.ramp(lift).lightness());
+                    } else {
+                        assert_eq!(f, c.ramp(lift), "at scale {s}, ({x}, {y}) took no strike");
+                    }
+                }
+            }
+            assert!(
+                bolted > 0,
+                "at scale {s} the bolt lit no glass past the room"
+            );
+        }
+    }
+
+    /// The pet and a gateway mascot stand as figures: each paints only inside
+    /// its span at every density, sorts on its feet's row as the classic sorts
+    /// it, and has what rides on it straight after it; a degraded gateway's
+    /// art is greyed.
+    #[test]
+    fn creatures_stand_as_figures_with_their_riders_after_them() {
+        use crate::layout::{Anchor, z_sort_row};
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = test_default_pack();
+        let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let mut frame = empty_frame(&layout);
+        let (cat, lobster) = (Point { x: 40, y: 70 }, Point { x: 110, y: 70 });
+        frame.pet = Some(crate::sim::PetPlacement {
+            kind: crate::pet::PetKind::Cat,
+            pos: cat,
+            flip: true,
+            anim_name: "cat_walk",
+            frame_idx: 1,
+            effects: crate::effects::pet_hearts(cat, 300).collect(),
+        });
+        frame.mascots = vec![crate::sim::MascotPlacement {
+            pos: lobster,
+            size: crate::layout::Size { w: 14, h: 12 },
+            anim_name: "lobster_walk",
+            frame_idx: 0,
+            name: "OpenClaw",
+            instance: None,
+            state: pixtuoid_core::state::DaemonState::Busy,
+            effects: crate::effects::mascot_bubbles(lobster, 12, 2, std::time::UNIX_EPOCH)
+                .collect(),
+            active_sessions: 1,
+        }];
+        let riders = [
+            frame.pet.as_ref().map_or(0, |p| p.effects.len()),
+            frame.mascots[0].effects.len(),
+        ];
+        for s in [1, pack.max_density_variant().get()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            let office = Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale,
+            };
+            let list = list_at(&frame, office, 12);
+            let pieces = list.pieces();
+            let creatures: Vec<usize> = pieces
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| matches!(p.kind, PieceKind::Creature { .. }))
+                .map(|(i, _)| i)
+                .collect();
+            assert_eq!(creatures.len(), 2, "at scale {s}, the pet and the mascot");
+            // The pet faces west; the mascot never turns.
+            let facing = [Flip::Horizontal, Flip::None];
+            for ((&i, ridden), flip) in creatures.iter().zip(riders).zip(facing) {
+                let p = &pieces[i];
+                let PieceKind::Creature { at, art, .. } = p.kind else {
+                    unreachable!("filtered to creatures");
+                };
+                assert_eq!(art.flip, flip, "at scale {s} {} faces wrong", art.sprite);
+                let h = crate::embedded_pack::densest_frame(
+                    &pack,
+                    art.sprite,
+                    art.frame,
+                    RenderScale::ONE,
+                )
+                .expect("the art")
+                .logical
+                .1;
+                assert_eq!(p.span.depth, z_sort_row(Anchor::Center, at, h));
+                assert_eq!(
+                    stray_pixel(&p.kind, p.span, &layout, &pack, theme, scale),
+                    None,
+                    "at scale {s} {:?} painted outside {:?}",
+                    p.kind,
+                    p.span
+                );
+                let after = pieces[i + 1..]
+                    .iter()
+                    .take_while(|q| matches!(q.kind, PieceKind::Effect(_)))
+                    .count();
+                assert_eq!(after, ridden, "at scale {s} {} lost its riders", art.sprite);
+            }
+            let lobster_kind = |degraded| PieceKind::Creature {
+                at: lobster,
+                art: Art::still("lobster_rest"),
+                degraded,
+            };
+            assert_ne!(
+                painted_alone(&lobster_kind(true), &layout, &pack, theme, scale),
+                painted_alone(&lobster_kind(false), &layout, &pack, theme, scale),
+                "at scale {s} a degraded gateway looks as a healthy one"
+            );
+        }
     }
 
     /// A clear noon's sunbeams carry motes, each a speck painted on its own
@@ -5913,7 +6183,7 @@ S B B B B B B S
                 h: pen.art(rect.y1 - rect.y0 + 1),
             },
             &lights,
-            list.ambient,
+            (list.ambient, list.flash),
             &crate::cutaway::light::Emission::new(w, h),
             pen,
             &mut crate::cutaway::light::NetMemo::default(),
@@ -6031,7 +6301,7 @@ S B B B B B B S
                 net_pass(
                     whole,
                     &[&light.view],
-                    Ambient::default(),
+                    (Ambient::default(), crate::cutaway::light::Flash::default()),
                     &Emission::new(w, h),
                     pen,
                     &mut NetMemo::default(),
@@ -6848,6 +7118,7 @@ S B B B B B B S
             PieceKind::Badge { .. } => "badge",
             PieceKind::DeskProp(_) => "desk prop",
             PieceKind::Mote { .. } => "mote",
+            PieceKind::Creature { .. } => "creature",
             PieceKind::Board { .. } => "board",
             PieceKind::Indicator { .. } => "indicator",
         }
