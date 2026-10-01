@@ -42,7 +42,7 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::chitchat::ActiveChitchat
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::chitchat::ActiveChitchat
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::chitchat::ActiveChitchat
 pub struct pixtuoid_scene::chitchat::ChitchatBubble
-pub pixtuoid_scene::chitchat::ChitchatBubble::anchor: pixtuoid_scene::layout::Point
+pub pixtuoid_scene::chitchat::ChitchatBubble::speaker: pixtuoid_core::id::AgentId
 pub pixtuoid_scene::chitchat::ChitchatBubble::text: &'static str
 impl core::clone::Clone for pixtuoid_scene::chitchat::ChitchatBubble
 pub fn pixtuoid_scene::chitchat::ChitchatBubble::clone(&self) -> pixtuoid_scene::chitchat::ChitchatBubble
@@ -58,7 +58,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::chitchat::Chitc
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::chitchat::ChitchatBubble
 pub struct pixtuoid_scene::chitchat::Visitor
 pub pixtuoid_scene::chitchat::Visitor::agent_id: pixtuoid_core::id::AgentId
-pub pixtuoid_scene::chitchat::Visitor::anchor: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::chitchat::Visitor::room_id: core::option::Option<usize>
 pub pixtuoid_scene::chitchat::Visitor::wp_idx: usize
 impl core::clone::Clone for pixtuoid_scene::chitchat::Visitor
