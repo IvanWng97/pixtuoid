@@ -139,6 +139,17 @@ invariant-breaking sequence against:
    failure impossible (#1142); a check outside [its own
    layer](docs/CONTRIBUTING.md#convergence-contract). Documented load-bearing
    defense (shim exit-0, config-never-wipe, liveness ladders) stays.
+6. **Naming**: every new or renamed name, `pub(crate)` and modules included,
+   is faithful, clear and concise. Each finding cites what the name breaks;
+   severity per [Severity](#severity), non-blocking by default.
+   - **Faithful**: it says what the item is or does at head; a behavior change
+     renames it.
+   - **Clear**: a reader without this PR's context reads it right. One concept,
+     one name across crates and painters (`rg` before coining), and no name
+     for two concepts; compass words are [screen-space](crates/pixtuoid-scene/AGENTS.md).
+   - **Concise**: the shortest name that stays clear, in the domain's existing
+     word and Rust's [naming guidelines](https://rust-lang.github.io/api-guidelines/naming.html);
+     never a placeholder.
 
 ## Escalation
 
