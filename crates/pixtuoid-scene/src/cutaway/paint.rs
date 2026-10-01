@@ -2681,7 +2681,7 @@ fn push_windows(
     let d = density.get();
     let sky = crate::celestial::SkyView::of(moment, layout.buf_w, layout.wall_band_h(), theme);
     // The bolt lights the glass and all it shows, over the weather on it.
-    let bolt = crate::cutaway::light::Flash::bolt(&moment.sky);
+    let bolt = crate::cutaway::light::bolt_steps(&moment.sky);
     let mut bolt_lift = crate::dither::Stepped::new(bolt as i8);
     for bay in layout.window_bays() {
         let size = Size {
