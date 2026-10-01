@@ -28,15 +28,12 @@ use crate::layout::{
     Bounds, Layout, Size, WindowBay, glass_rows, wall_trim_row, window_frame, window_posts,
     window_rows, window_run,
 };
-use crate::sky::{Sky, Weather};
+use crate::sky::Sky;
 use crate::skyline::CityStrip;
 use crate::theme::Theme;
 
-/// Room-wide ambient bounce from a Storm lightning strike, at [`Sky::flash`].
+/// Room-wide ambient bounce from a lightning strike, at [`Sky::flash`].
 pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, sky: &Sky) {
-    if sky.weather() != Weather::Storm {
-        return;
-    }
     let level = sky.flash();
     if level <= 0.0 {
         return;
@@ -298,11 +295,9 @@ fn paint_floor_to_ceiling_window(
 
     // The bright on-glass bolt — the strike's source. Rides the shared flash
     // level so it fires in lockstep with `paint_lightning_flash`.
-    if sky.weather() == Weather::Storm {
-        let level = sky.flash();
-        if level > 0.0 {
-            wash_glass(buf, pane, WHITE, 0.6 * level);
-        }
+    let level = sky.flash();
+    if level > 0.0 {
+        wash_glass(buf, pane, WHITE, 0.6 * level);
     }
 
     if let Some(blaze) = sky_view.blaze() {

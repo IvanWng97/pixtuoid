@@ -127,7 +127,7 @@ pub(super) fn paint_dust_motes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sky::{Sky, Weather};
+    use crate::sky::{Sky, Weather, WeatherMix};
     use pixtuoid_core::sprite::Rgb;
     use std::time::Duration;
 
@@ -242,7 +242,7 @@ mod tests {
         // 07:00 Clear morning → sun up + full beam.
         let now = (1..=60u32)
             .map(|day| crate::localclock::on_day(day, 7))
-            .find(|t| Sky::clock(*t).weather() == Weather::Clear)
+            .find(|t| Sky::clock(*t).weather() == WeatherMix::pure(Weather::Clear))
             .expect("a clear morning");
         // No assertion: the test is that the clamped, out-of-bounds puts on a
         // buffer far smaller than the layout's spill columns don't panic.
