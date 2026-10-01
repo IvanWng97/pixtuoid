@@ -50,19 +50,27 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     rt.block_on(async move { run_async(cfg, tui).await })
 }
 
+/// The TUI's pack, and the plan for painting it.
+type Boot = (
+    Arc<pixtuoid_core::sprite::format::Pack>,
+    crate::graphics::Plan,
+);
+
 /// Load the pack, whose densest art the plan fits, and plan.
-fn boot_tui(cfg: &RunConfig) -> Result<pixtuoid_core::sprite::format::Pack> {
-    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(cfg.pack.clone())?;
+fn boot_tui(cfg: &RunConfig) -> Result<Boot> {
+    let pack = Arc::new(pixtuoid_scene::embedded_pack::load_sprite_pack(
+        cfg.pack.clone(),
+    )?);
     let plan = crate::graphics::plan_this_terminal(
         cfg.graphics,
         pack.max_density_variant(),
         crate::graphics::run_probe,
     );
     tracing::info!(mode = ?cfg.graphics, plan = ?plan, "graphics plan");
-    Ok(pack)
+    Ok((pack, plan))
 }
 
-async fn run_async(cfg: RunConfig, tui: Option<pixtuoid_core::sprite::format::Pack>) -> Result<()> {
+async fn run_async(cfg: RunConfig, tui: Option<Boot>) -> Result<()> {
     let RunConfig {
         socket,
         projects_root,
@@ -106,10 +114,11 @@ async fn run_async(cfg: RunConfig, tui: Option<pixtuoid_core::sprite::format::Pa
 
     match tui {
         None => headless_loop(scene_rx, health_rx).await,
-        Some(pack) => {
+        Some((pack, plan)) => {
             crate::tui::run_tui(crate::tui::TuiSession {
                 scene_rx,
                 pack,
+                plan,
                 floor_caps,
                 theme,
                 config_path,

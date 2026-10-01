@@ -396,30 +396,35 @@ fn moon_disc_shows_at_night() {
 
 #[test]
 fn stars_appear_on_a_clear_night_and_vanish_under_overcast() {
-    // A moonless small hour: the only bright thing in the upper sky band is a star.
+    // A moonless small hour, and one under a moon high enough to clip above the
+    // glass: either way the bright things in the upper sky band are stars.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
-    let day = (1..=31u32)
-        .find(|&d| {
-            Sky::at_with(crate::localclock::on_day(d, 2), Weather::Clear)
-                .emitter()
-                .altitude
-                <= 0.0
-        })
-        .expect("a moonless 02:00 some January night");
-    let clear = render_office_on(day, 2, Weather::Clear, buf_w, top_wall_h);
-    let overcast = render_office_on(day, 2, Weather::Overcast, buf_w, top_wall_h);
-    let clear_n = count_faint_white(&clear, top_wall_h);
-    let overcast_n = count_faint_white(&overcast, top_wall_h);
-    assert!(
-        clear_n >= 3,
-        "a clear night should show some stars in the upper sky, got {clear_n}"
-    );
-    assert!(
-        clear_n > overcast_n,
-        "overcast should hide the stars a clear sky shows: \
-         clear={clear_n} overcast={overcast_n}"
-    );
+    let night = |want: fn(f32) -> bool| {
+        (1..=31u32)
+            .flat_map(|d| [0, 1, 2, 3, 22, 23].map(|h| (d, h)))
+            .find(|&(d, h)| {
+                let sky = Sky::at_with(crate::localclock::on_day(d, h), Weather::Clear);
+                sky.nightfall() >= 1.0 && want(sky.emitter().altitude)
+            })
+    };
+    let moonless = night(|alt| alt <= 0.0).expect("a moonless deep-night hour in January");
+    let high_moon = night(|alt| alt > 0.95).expect("a high-moon deep-night hour in January");
+    for (day, hour) in [moonless, high_moon] {
+        let clear = render_office_on(day, hour, Weather::Clear, buf_w, top_wall_h);
+        let overcast = render_office_on(day, hour, Weather::Overcast, buf_w, top_wall_h);
+        let clear_n = count_faint_white(&clear, top_wall_h);
+        let overcast_n = count_faint_white(&overcast, top_wall_h);
+        assert!(
+            clear_n >= 3,
+            "day {day} {hour}:00: a clear night should show some stars, got {clear_n}"
+        );
+        assert!(
+            clear_n > overcast_n,
+            "day {day} {hour}:00: overcast should hide the stars a clear sky shows: \
+             clear={clear_n} overcast={overcast_n}"
+        );
+    }
 }
 
 #[test]

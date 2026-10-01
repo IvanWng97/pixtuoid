@@ -926,6 +926,35 @@ fn observe_hands_back_the_layout_the_sim_stepped_on() {
     assert!(Arc::ptr_eq(&observed.layout, &stepped));
 }
 
+/// A painter observes one floor through its projected scene, which holds no
+/// other floor's agents: their coffee must outlive it.
+#[test]
+fn observing_a_projected_floor_keeps_other_floors_coffee() {
+    let pack = crate::embedded_pack::test_default_pack();
+    let scene = make_scene(17, 16);
+    let downstairs = AgentId::from_transcript_path("/p/0.jsonl");
+    assert_eq!(scene.agents[&downstairs].floor_idx, 0);
+    let mut office = PerOffice::new();
+    office.coffee.insert(downstairs, t0());
+    let mut upstairs = PerFloor::new();
+    let projected = project_floor_scene(&scene, 1);
+    let observed = observe_floor(
+        &mut upstairs.ctx,
+        &mut office.coffee,
+        &mut office.chitchat,
+        crate::floor::FloorInputs {
+            scene: &projected,
+            pack: &pack,
+            now: t0(),
+            floor: FloorMeta::for_floor(1, num_floors(&scene)),
+            pets: crate::floor::PetInputs::default(),
+        },
+        Size { w: 160, h: 96 },
+    );
+    assert!(observed.is_some());
+    assert!(office.coffee.map().contains_key(&downstairs));
+}
+
 #[test]
 fn session_types_default_equals_new() {
     assert_eq!(PerFloor::default().ctx.door_anim_max_ms, 0);
