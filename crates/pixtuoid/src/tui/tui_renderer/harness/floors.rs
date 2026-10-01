@@ -76,7 +76,7 @@ fn floor_transition_completes_and_lands() {
     let scene = two_floor_scene();
     let mut r = build(100, 40, vec![]);
     let mut now = t0();
-    r.render(&scene, &p, now).unwrap();
+    r.render(&scene, p, now).unwrap();
     assert_eq!(r.current_floor(), 0);
 
     r.navigate_floor(1, now);
@@ -86,7 +86,7 @@ fn floor_transition_completes_and_lands() {
     );
 
     now += Duration::from_millis(450);
-    r.render(&scene, &p, now).unwrap();
+    r.render(&scene, p, now).unwrap();
     assert!(r.transition().is_some(), "still transitioning mid-slide");
     assert!(
         r.cached_layout().is_none(),
@@ -94,7 +94,7 @@ fn floor_transition_completes_and_lands() {
     );
 
     now += Duration::from_millis(600); // past `FloorTransition::duration_ms`
-    r.render(&scene, &p, now).unwrap();
+    r.render(&scene, p, now).unwrap();
     assert!(r.transition().is_none(), "transition complete");
     assert_eq!(r.current_floor(), 1, "landed on the target floor");
     assert!(
@@ -121,7 +121,7 @@ fn navigation_blocked_during_active_transition() {
     );
     let mut r = build(100, 40, vec![]);
     let now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     r.navigate_floor(1, now);
     r.navigate_floor(2, now); // must be ignored — a transition is in flight
     assert_eq!(
@@ -138,13 +138,13 @@ fn transition_cancelled_when_target_floor_disappears() {
     let mut scene = scene_with(vec![idle("/c/0.jsonl", 0, t0()), f1.clone()], cap);
     let mut r = build(100, 40, vec![]);
     let mut now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     r.navigate_floor(1, now);
     assert!(r.transition().is_some());
 
     scene.agents.remove(&f1.agent_id);
     now += Duration::from_millis(100);
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     assert!(
         r.transition().is_none(),
         "transition to a vanished floor must cancel (no infinite slide)"
@@ -158,7 +158,7 @@ fn floor_buffers_grow_on_overflow() {
     let mut r = build(100, 40, vec![]);
     let now = t0();
     let one = scene_with(vec![idle("/g/0.jsonl", 0, t0())], cap);
-    r.render(&one, &pack(), now).unwrap();
+    r.render(&one, pack(), now).unwrap();
     assert!(r.floor_buf(1).is_none(), "only one floor allocated");
 
     let two = scene_with(
@@ -168,7 +168,7 @@ fn floor_buffers_grow_on_overflow() {
         ],
         cap,
     );
-    r.render(&two, &pack(), now).unwrap();
+    r.render(&two, pack(), now).unwrap();
     assert!(
         r.floor_buf(1).is_some(),
         "floor-1 buffer allocated after overflow"
@@ -180,10 +180,10 @@ fn per_floor_layout_seeds_differ() {
     let scene = two_floor_scene();
     let mut r = build(100, 40, vec![]);
     let mut now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     let seed0 = r.current_floor_seed();
     r.navigate_floor(1, now);
-    render_until_settled(&mut r, &scene, &pack(), &mut now, 1);
+    render_until_settled(&mut r, &scene, pack(), &mut now, 1);
     assert_ne!(
         seed0,
         r.current_floor_seed(),
@@ -211,7 +211,7 @@ fn invalidate_routes_clears_every_floor_router_cache() {
     let mut r = build(120, 60, vec![]);
     let mut now = t0();
     for _ in 0..120 {
-        r.render(&scene, &pack(), now).expect("render");
+        r.render(&scene, pack(), now).expect("render");
         if !r.floors[0].ctx.router.is_empty() {
             break;
         }
@@ -258,11 +258,11 @@ fn transition_at_narrow_terminal_paints_no_agents_no_panic() {
         vec![],
     );
     let mut now = t0();
-    r.render(&scene, &pack(), now).expect("render at 30 cols");
+    r.render(&scene, pack(), now).expect("render at 30 cols");
     r.navigate_floor(1, now);
     assert!(r.transition().is_some(), "navigation begins a transition");
     now += Duration::from_millis(33);
-    r.render(&scene, &pack(), now)
+    r.render(&scene, pack(), now)
         .expect("transition render at a narrow terminal must not panic");
     assert!(
         r.transition().is_some(),
@@ -292,7 +292,7 @@ fn footer_shows_source_death_warning() {
     r.set_source_warning(Some(
         "claude-code source died — its agents are frozen; restart pixtuoid (see log)".into(),
     ));
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("source died") && text.contains("restart pixtuoid"),
@@ -300,7 +300,7 @@ fn footer_shows_source_death_warning() {
         text.lines().last().unwrap_or("")
     );
     r.set_source_warning(None);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         !text.contains("source died"),
@@ -313,13 +313,13 @@ fn source_death_warning_survives_floor_transition() {
     let scene = two_floor_scene();
     let mut r = build(120, 44, vec![]);
     let mut now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     r.set_source_warning(Some(
         "claude-code source died — its agents are frozen; restart pixtuoid (see log)".into(),
     ));
     r.navigate_floor(1, now);
     now += Duration::from_millis(200); // mid-transition
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     assert!(r.transition().is_some(), "still mid-transition");
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -333,11 +333,11 @@ fn version_popup_active_during_floor_transition() {
     let scene = two_floor_scene();
     let mut r = build(120, 44, vec![]);
     let mut now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     r.set_version_popup(true, now);
     r.navigate_floor(1, now);
     now += Duration::from_millis(200); // mid-transition
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     assert!(r.transition().is_some(), "still mid-transition");
     assert!(
         r.last_popup_scale() > 0.0,
@@ -350,11 +350,11 @@ fn help_overlay_renders_during_floor_transition() {
     let scene = two_floor_scene();
     let mut r = build(120, 44, vec![]);
     let mut now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     r.set_help_open(true);
     r.navigate_floor(1, now);
     now += Duration::from_millis(200);
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     assert!(r.transition().is_some());
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -374,9 +374,9 @@ fn a_too_small_slide_footers_the_destination_floor() {
         cap,
     );
     let mut r = build(120, crate::tui::renderer::MIN_SCENE_HEIGHT, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     r.navigate_floor(1, t0());
-    r.render(&scene, &pack(), t0() + Duration::from_millis(100))
+    r.render(&scene, pack(), t0() + Duration::from_millis(100))
         .unwrap();
     let text = frame_text(r.frame_buffer());
     let footer = text.lines().last().expect("a footer row");
@@ -396,9 +396,9 @@ fn transition_on_too_small_terminal_clears_state_and_lands() {
     let scene = two_floor_scene();
     let mut r = build(18, 10, vec![PetKind::Cat]);
     let now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     r.navigate_floor(1, now);
-    r.render(&scene, &pack(), now + Duration::from_millis(100))
+    r.render(&scene, pack(), now + Duration::from_millis(100))
         .expect("transition render on a tiny terminal must not panic");
     assert!(r.cached_layout().is_none());
     assert!(r.cached_pet_pos().is_none());
@@ -430,7 +430,7 @@ fn already_expired_active_pet_clears_on_render() {
         kind: PetKind::Cat,
         floor_idx: 0,
     }));
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     assert!(
         r.active_pet_ref().is_none(),
         "an already-expired pet state must be cleared on render"
@@ -443,12 +443,12 @@ fn current_floor_clamps_when_floor_count_drops() {
     let two = two_floor_scene();
     let mut r = build(100, 40, vec![]);
     let mut now = t0();
-    r.render(&two, &pack(), now).unwrap();
+    r.render(&two, pack(), now).unwrap();
     r.navigate_floor(1, now);
-    render_until_settled(&mut r, &two, &pack(), &mut now, 1);
+    render_until_settled(&mut r, &two, pack(), &mut now, 1);
     assert_eq!(r.current_floor(), 1);
     let one = scene_with(vec![idle("/clamp/0.jsonl", 0, t0())], cap);
-    r.render(&one, &pack(), now).unwrap();
+    r.render(&one, pack(), now).unwrap();
     assert_eq!(
         r.current_floor(),
         0,
@@ -461,11 +461,11 @@ fn theme_picker_renders_during_floor_transition() {
     let scene = two_floor_scene();
     let mut r = build(140, 48, vec![]);
     let mut now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     r.set_theme_picker(Some(0));
     r.navigate_floor(1, now);
     now += Duration::from_millis(200);
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     assert!(r.transition().is_some(), "still mid-transition");
     let text = frame_text(r.frame_buffer());
     assert!(
