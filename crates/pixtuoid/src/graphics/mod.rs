@@ -14,7 +14,9 @@
 //! module with no tests at all.
 
 use pixtuoid_core::sprite::format::Density;
+use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::render_scale::RenderScale;
+use ratatui::layout::Size as TermSize;
 
 #[cfg(feature = "graphics")]
 mod probe;
@@ -123,15 +125,14 @@ pub(crate) enum ClassicReason {
     TmuxNeedsKitty(ImageProtocol),
     /// The terminal has a protocol, but its cell is too small for any scale the
     /// pack's art lands on: a cell whose natural scale lies further than
-    /// [`RenderScale::fit`]'s bound from every multiple of the pack's least
-    /// density, or a 1-px cell, where one pixel per logical unit IS the classic
+    /// [`RenderScale::fit`]'s bound from every multiple of the pack's densest
+    /// art, or a 1-px cell, where one pixel per logical unit IS the classic
     /// density.
     CellTooSmall {
         /// The cell the terminal reported.
         cell: CellSize,
-        /// The least dense of the pack's density variants — the one the cell
-        /// came nearest to landing — or 1 when it ships none.
-        density: Density,
+        /// The pack's [`max_density_variant`](pixtuoid_core::sprite::format::Pack::max_density_variant).
+        max_density: Density,
     },
 }
 
@@ -143,11 +144,10 @@ pub(crate) enum ClassicReason {
 /// hold both contradictory shapes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Plan {
-    /// The orthographic cutaway, drawn at `scale` real pixels per logical unit
-    /// and handed to the terminal as an image.
+    /// The orthographic cutaway, handed to the terminal as an image.
     Cutaway {
-        /// Real pixels per logical office unit.
-        scale: RenderScale,
+        /// Its geometry on this terminal.
+        fit: Fit,
         /// How the image reaches the terminal.
         protocol: ImageProtocol,
         /// The cell the scale was fitted to.
@@ -178,14 +178,14 @@ pub(crate) struct Detected {
 /// The outcome of asking the terminal — [`resolve`]'s input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Probe {
-    /// What the terminal's answer and the environment established — the
-    /// environment alone where the terminal never answered but names a
-    /// protocol, as upstream falls back (see [`probe()`]).
+    /// What the terminal's reply and the environment established — the
+    /// environment alone where the reply never completed but the environment
+    /// names a protocol, as upstream falls back (see [`probe()`]).
     #[cfg_attr(
         all(not(feature = "graphics"), not(test)),
         expect(dead_code, reason = "only the graphics probe returns it")
     )]
-    Detected(Detected),
+    Answered(Detected),
     /// The terminal was never asked: the caller said not to, or no controlling
     /// terminal took the query.
     #[cfg_attr(
@@ -228,35 +228,82 @@ fn raw_scale_for_cell(cell: CellSize) -> u16 {
     cell.w.min(cell.h / 2)
 }
 
-/// The terminal's half of [`RenderScale::fit`]: the natural scale its cell
-/// gives, fitted to the densest of `densities` (the pack's
-/// [`Pack::density_variants`](pixtuoid_core::sprite::format::Pack::density_variants))
-/// that lands.
+/// The cutaway's geometry on one terminal: the office renders at the pack's
+/// densest art, and the image is that render upscaled a whole number of times —
+/// pixel-identical to a render at [`Fit::scale`] (pinned in `pixtuoid-scene` by
+/// `the_cutaway_paints_whole_art_pixels`).
 ///
-/// The densest that lands, not the densest alone: one outlier `@16x` sprite
-/// must not switch the cutaway off on a terminal the rest of its art lands on. A pack
-/// with no variants lands its base art at the natural scale.
-pub(crate) fn render_scale_for_cell(cell: CellSize, densities: &[Density]) -> Option<RenderScale> {
-    let natural = raw_scale_for_cell(cell);
-    if densities.is_empty() {
-        return RenderScale::fit(natural, Density::ONE);
-    }
-    densities
-        .iter()
-        .filter_map(|&d| Some((d, RenderScale::fit(natural, d)?)))
-        .max_by_key(|&(d, _)| d)
-        .map(|(_, scale)| scale)
+/// The densest art, not whichever density the cell lands nearest: the one
+/// render draws every piece at one density, and a scale only a coarser density
+/// divides would draw the densest art from coarser stand-ins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Fit {
+    scale: RenderScale,
+    density: Density,
+    logical: Size,
 }
 
-/// Decide what to paint. Pure — [`probe()`] supplies the probe, and `densities`
-/// are the pack's [`Pack::density_variants`](pixtuoid_core::sprite::format::Pack::density_variants).
-pub(crate) fn resolve(mode: GraphicsMode, probe: Probe, densities: &[Density]) -> Plan {
+impl Fit {
+    /// The terminal's half of [`RenderScale::fit`]: `cell`'s natural scale,
+    /// fitted to `max_density` (the pack's
+    /// [`max_density_variant`](pixtuoid_core::sprite::format::Pack::max_density_variant)),
+    /// over an image `area` cells big. `None` when no multiple of it lies within
+    /// the fit's bound.
+    pub(crate) fn new(cell: CellSize, area: TermSize, max_density: Density) -> Option<Self> {
+        let scale = RenderScale::fit(raw_scale_for_cell(cell), max_density)?;
+        // The image anchors on cells, so its pixels are the cells', never a
+        // window size that counts the terminal's padding; past what a buffer
+        // can address, the office stops growing.
+        let px = |cells: u16, cell_px: u16| {
+            u16::try_from(u32::from(cells) * u32::from(cell_px)).unwrap_or(u16::MAX)
+        };
+        Some(Self {
+            scale,
+            density: max_density,
+            logical: Size {
+                w: scale.logical(px(area.width, cell.w)),
+                h: scale.logical(px(area.height, cell.h)),
+            },
+        })
+    }
+
+    /// Real pixels per logical office unit.
+    pub(crate) fn scale(self) -> RenderScale {
+        self.scale
+    }
+
+    /// The density the office renders at before the upscale.
+    pub(crate) fn density(self) -> Density {
+        self.density
+    }
+
+    /// The whole factor the density render is upscaled by.
+    pub(crate) fn upscale(self) -> u16 {
+        self.scale.get() / self.density.get()
+    }
+
+    /// The office's extent in logical units: as many as the area's pixels hold
+    /// on each axis, so the office takes the terminal's shape — no letterbox.
+    pub(crate) fn logical(self) -> Size {
+        self.logical
+    }
+}
+
+/// Decide what to paint. Pure — [`probe()`] supplies the probe, `max_density`
+/// is the pack's [`max_density_variant`](pixtuoid_core::sprite::format::Pack::max_density_variant),
+/// and `area` is the image's extent in cells.
+pub(crate) fn resolve(
+    mode: GraphicsMode,
+    probe: Probe,
+    max_density: Density,
+    area: TermSize,
+) -> Plan {
     let classic = |reason| Plan::Classic { reason };
     if mode == GraphicsMode::Off {
         return classic(ClassicReason::Disabled);
     }
     let d = match probe {
-        Probe::Detected(d) => d,
+        Probe::Answered(d) => d,
         Probe::NotQueried => return classic(ClassicReason::NotQueried),
         Probe::NoAnswer => return classic(ClassicReason::NoAnswer),
         Probe::TmuxPassthroughOff => return classic(ClassicReason::TmuxPassthroughOff),
@@ -270,22 +317,17 @@ pub(crate) fn resolve(mode: GraphicsMode, probe: Probe, densities: &[Density]) -
     };
     // The cell before tmux: a user told to switch to kitty should not then
     // find the cell was too small all along.
-    let scale = match render_scale_for_cell(cell, densities) {
+    let fit = match Fit::new(cell, area, max_density) {
         // Scale 1 IS the classic density: an encode per frame that draws the
         // identical picture.
-        Some(scale) if scale.get() > 1 => scale,
-        _ => {
-            return classic(ClassicReason::CellTooSmall {
-                cell,
-                density: densities.iter().copied().min().unwrap_or(Density::ONE),
-            });
-        }
+        Some(fit) if fit.scale().get() > 1 => fit,
+        _ => return classic(ClassicReason::CellTooSmall { cell, max_density }),
     };
     if d.tmux && protocol != ImageProtocol::Kitty {
         return classic(ClassicReason::TmuxNeedsKitty(protocol));
     }
     Plan::Cutaway {
-        scale,
+        fit,
         protocol,
         cell,
         tmux: d.tmux,
@@ -318,11 +360,11 @@ impl ClassicReason {
                  speaks {}",
                 p.name()
             ),
-            Self::CellTooSmall { cell, density }
-                if density > Density::ONE && raw_scale_for_cell(cell) > 1 =>
+            Self::CellTooSmall { cell, max_density }
+                if max_density > Density::ONE && raw_scale_for_cell(cell) > 1 =>
             {
                 format!(
-                    "terminal reports a {}x{} cell — too small for the pack's {density}x art",
+                    "terminal reports a {}x{} cell — too small for the pack's {max_density}x art",
                     cell.w, cell.h
                 )
             }
@@ -342,26 +384,31 @@ impl ClassicReason {
 /// never delivers. This row says what the profile WILL pick up once it is wired
 /// to a painter.
 ///
-/// Pure, so the wording is unit-tested; `doctor` supplies the probe result the
-/// same way it does for the truecolor row beside it.
+/// Pure, so the wording is unit-tested; `doctor` supplies the probe result and
+/// the terminal's size the same way it does the truecolor row's probe beside it.
 pub(crate) fn graphics_diagnostic_row(
     mode: GraphicsMode,
     probe: Probe,
-    densities: &[Density],
+    max_density: Density,
+    area: TermSize,
 ) -> String {
-    match resolve(mode, probe, densities) {
+    match resolve(mode, probe, max_density, area) {
         Plan::Cutaway {
-            scale,
+            fit,
             protocol,
             cell,
             ..
         } => format!(
             "graphics: {} ({}x{} cell) — the cutaway profile would render at {}x \
-             (not yet wired to `run`)",
+             ({}x art upscaled {}x), a {}x{} office (not yet wired to `run`)",
             protocol.name(),
             cell.w,
             cell.h,
-            scale.get()
+            fit.scale().get(),
+            fit.density(),
+            fit.upscale(),
+            fit.logical().w,
+            fit.logical().h,
         ),
         Plan::Classic { reason } => {
             format!("graphics: classic half-blocks — {}", reason.describe())
@@ -382,19 +429,23 @@ mod tests {
 
     const CELL_8X16: CellSize = CellSize { w: 8, h: 16 };
     /// A pack with no density variants.
-    const BASE_ONLY: &[Density] = &[];
-    /// The bundled pack's densities (`bundled_is_the_embedded_packs_densities`).
-    const BUNDLED: &[Density] = &[Density::new(4).expect("nonzero")];
+    const BASE_ONLY: Density = Density::ONE;
+    /// The bundled pack's densest art (`bundled_is_the_embedded_packs_max_density`).
+    const BUNDLED: Density = Density::new(4).expect("nonzero");
+    const AREA: TermSize = TermSize {
+        width: 120,
+        height: 40,
+    };
 
     #[test]
-    fn bundled_is_the_embedded_packs_densities() {
+    fn bundled_is_the_embedded_packs_max_density() {
         let pack =
             pixtuoid_scene::embedded_pack::load_bundled_pack().expect("the embedded pack loads");
-        assert_eq!(pack.density_variants(), BUNDLED);
+        assert_eq!(pack.max_density_variant(), BUNDLED);
     }
 
     fn answered(protocol: Option<ImageProtocol>, cell: CellSize, tmux: bool) -> Probe {
-        Probe::Detected(Detected {
+        Probe::Answered(Detected {
             protocol,
             cell: Some(cell),
             tmux,
@@ -409,8 +460,22 @@ mod tests {
         Density::new(n).expect("nonzero")
     }
 
-    fn scale(cell: CellSize, densities: &[Density]) -> Option<u16> {
-        render_scale_for_cell(cell, densities).map(RenderScale::get)
+    fn cell(w: u16, h: u16) -> CellSize {
+        CellSize { w, h }
+    }
+
+    fn scale(cell: CellSize, max_density: Density) -> Option<u16> {
+        Fit::new(cell, AREA, max_density).map(|f| f.scale().get())
+    }
+
+    fn plan(probe: Probe, max_density: Density) -> Plan {
+        resolve(GraphicsMode::Auto, probe, max_density, AREA)
+    }
+
+    fn too_small(cell: CellSize, max_density: Density) -> Plan {
+        Plan::Classic {
+            reason: ClassicReason::CellTooSmall { cell, max_density },
+        }
     }
 
     /// The ~1:2 cell the whole half-block technique assumes: 8 wide, 16
@@ -419,48 +484,111 @@ mod tests {
     #[test]
     fn a_standard_cell_yields_its_width_as_the_scale() {
         assert_eq!(scale(CELL_8X16, BASE_ONLY), Some(8));
-        assert_eq!(scale(CellSize { w: 10, h: 20 }, BASE_ONLY), Some(10));
+        assert_eq!(scale(cell(10, 20), BASE_ONLY), Some(10));
     }
 
     #[test]
     fn a_non_standard_cell_never_stretches_a_logical_unit() {
         // Taller than 1:2 — the width is the binding constraint.
-        assert_eq!(scale(CellSize { w: 8, h: 24 }, BASE_ONLY), Some(8));
+        assert_eq!(scale(cell(8, 24), BASE_ONLY), Some(8));
         // WIDER than 1:2 — height binds.
-        assert_eq!(scale(CellSize { w: 12, h: 16 }, BASE_ONLY), Some(8));
+        assert_eq!(scale(cell(12, 16), BASE_ONLY), Some(8));
     }
 
     /// `RenderScale` cannot be zero, so the Option is the honest return rather
     /// than a clamp to 1.
     #[test]
     fn a_degenerate_cell_has_no_scale_at_all() {
-        assert_eq!(scale(CellSize { w: 0, h: 0 }, BASE_ONLY), None);
-        assert_eq!(scale(CellSize { w: 8, h: 1 }, BASE_ONLY), None);
-        assert_eq!(scale(CellSize { w: 0, h: 16 }, BASE_ONLY), None);
+        assert_eq!(scale(cell(0, 0), BASE_ONLY), None);
+        assert_eq!(scale(cell(8, 1), BASE_ONLY), None);
+        assert_eq!(scale(cell(0, 16), BASE_ONLY), None);
     }
 
-    /// One outlier density must not switch the cutaway off where the pack's
-    /// other art lands: the densest that lands wins, whatever order the
-    /// densities come in.
+    /// A cell whose natural scale IS a multiple of the densest art renders at
+    /// it, upscaling the density render by exactly that multiple.
     #[test]
-    fn the_densest_density_that_lands_wins_not_the_densest_alone() {
+    fn a_cell_on_an_exact_multiple_renders_at_it() {
+        let d = BUNDLED.get();
+        for k in 1..=8 {
+            let fit = Fit::new(cell(d * k, 2 * d * k), AREA, BUNDLED).expect("lands");
+            assert_eq!(fit.scale().get(), d * k, "k={k}");
+            assert_eq!(fit.density(), BUNDLED, "k={k}");
+            assert_eq!(fit.upscale(), k, "k={k}");
+        }
+    }
+
+    /// Only multiples of the densest art are candidates: a cell a coarser
+    /// density would land on is still too small for the pack.
+    #[test]
+    fn only_multiples_of_the_densest_art_are_candidates() {
+        assert_eq!(scale(CELL_8X16, d(16)), None, "8 is no multiple of 16");
+        assert_eq!(scale(cell(16, 32), d(16)), Some(16));
+        assert_eq!(scale(cell(20, 40), d(16)), Some(16));
+        assert_eq!(scale(cell(17, 41), BUNDLED), Some(16));
         assert_eq!(
-            scale(CELL_8X16, &[d(16), d(8)]),
+            scale(cell(6, 12), BUNDLED),
             Some(8),
-            "16x cannot land at 8"
+            "6 lands nearer 8 by ratio"
         );
-        assert_eq!(scale(CELL_8X16, &[d(8), d(16)]), Some(8));
-        assert_eq!(scale(CellSize { w: 16, h: 32 }, &[d(8), d(16)]), Some(16));
-        assert_eq!(
-            scale(CellSize { w: 20, h: 40 }, &[d(8), d(16)]),
-            Some(16),
-            "the densest wins"
-        );
-        assert_eq!(
-            scale(CellSize { w: 5, h: 10 }, &[d(16), d(8)]),
-            None,
-            "nothing lands"
-        );
+    }
+
+    /// Below the densest art its own value is the one candidate, taken while the
+    /// natural scale lies within √2 of it. The pair either side of the bound,
+    /// derived from each density: no integer pair sits ON √2, which is
+    /// irrational, so these two are the boundary.
+    #[test]
+    fn the_densest_art_is_reached_within_root_two_and_not_past_it() {
+        for max in [BUNDLED, d(8), d(16), d(64)] {
+            let dd = u32::from(max.get());
+            let first = (1..=max.get())
+                .find(|&n| 2 * u32::from(n) * u32::from(n) >= dd * dd)
+                .expect("the density itself is within the bound");
+            assert_ne!(2 * u32::from(first).pow(2), dd * dd, "√2 is never hit");
+            let inside = cell(first, 2 * first);
+            let outside = cell(first - 1, 2 * (first - 1));
+            assert_eq!(scale(inside, max), Some(max.get()), "{max}x at {first}");
+            assert_eq!(scale(outside, max), None, "{max}x at {}", first - 1);
+            assert!(matches!(plan(capable(inside), max), Plan::Cutaway { .. }));
+            assert_eq!(plan(capable(outside), max), too_small(outside, max));
+        }
+    }
+
+    /// The office is sized from the area's pixels on each axis: as many
+    /// logical units as fit, never a fixed aspect framed by bars.
+    #[test]
+    fn the_office_fills_the_terminal_without_a_letterbox() {
+        let c = cell(17, 41);
+        for (cols, rows) in [(120, 40), (80, 24), (240, 30), (40, 60)] {
+            let fit = Fit::new(
+                c,
+                TermSize {
+                    width: cols,
+                    height: rows,
+                },
+                BUNDLED,
+            )
+            .expect("lands");
+            let s = u32::from(fit.scale().get());
+            for (logical, px) in [
+                (fit.logical().w, u32::from(cols) * u32::from(c.w)),
+                (fit.logical().h, u32::from(rows) * u32::from(c.h)),
+            ] {
+                let covered = u32::from(logical) * s;
+                assert!(covered <= px && px < covered + s, "{cols}x{rows}: {fit:?}");
+            }
+        }
+    }
+
+    /// Past what a buffer can address the office stops growing rather than
+    /// wrapping to a sliver.
+    #[test]
+    fn a_terminal_wider_than_a_buffer_gets_the_widest_office_a_buffer_holds() {
+        let huge = TermSize {
+            width: u16::MAX,
+            height: 1,
+        };
+        let fit = Fit::new(cell(17, 41), huge, BUNDLED).expect("lands");
+        assert_eq!(fit.logical().w, fit.scale().logical(u16::MAX));
     }
 
     #[test]
@@ -468,7 +596,7 @@ mod tests {
         // The flag is the user's, not a hint — a capable terminal must not
         // override it.
         assert_eq!(
-            resolve(GraphicsMode::Off, capable(CELL_8X16), BUNDLED),
+            resolve(GraphicsMode::Off, capable(CELL_8X16), BUNDLED, AREA),
             Plan::Classic {
                 reason: ClassicReason::Disabled
             }
@@ -483,19 +611,18 @@ mod tests {
             ImageProtocol::Sixel,
             ImageProtocol::Iterm2,
         ] {
-            assert_eq!(
-                resolve(
-                    GraphicsMode::Auto,
-                    answered(Some(protocol), CELL_8X16, false),
-                    BUNDLED
-                ),
-                Plan::Cutaway {
-                    scale: RenderScale::new(8).expect("nonzero"),
-                    protocol,
-                    cell: CELL_8X16,
-                    tmux: false,
-                }
-            );
+            let got = plan(answered(Some(protocol), CELL_8X16, false), BUNDLED);
+            let Plan::Cutaway {
+                fit,
+                protocol: p,
+                cell,
+                tmux,
+            } = got
+            else {
+                panic!("{protocol:?}: {got:?}");
+            };
+            assert_eq!((p, cell, tmux), (protocol, CELL_8X16, false));
+            assert_eq!((fit.scale().get(), fit.upscale()), (8, 2));
         }
     }
 
@@ -503,13 +630,7 @@ mod tests {
     /// the encoder; the rest fall back, naming the protocol that was refused.
     #[test]
     fn inside_tmux_only_kitty_takes_the_cutaway() {
-        let plan = |p| {
-            resolve(
-                GraphicsMode::Auto,
-                answered(Some(p), CELL_8X16, true),
-                BUNDLED,
-            )
-        };
+        let plan = |p| plan(answered(Some(p), CELL_8X16, true), BUNDLED);
         assert!(matches!(
             plan(ImageProtocol::Kitty),
             Plan::Cutaway {
@@ -532,19 +653,10 @@ mod tests {
     /// cell, not about a switch to kitty that would not help.
     #[test]
     fn a_cell_too_small_is_reported_before_tmux() {
-        let tiny = CellSize { w: 2, h: 4 };
+        let tiny = cell(2, 4);
         assert_eq!(
-            resolve(
-                GraphicsMode::Auto,
-                answered(Some(ImageProtocol::Sixel), tiny, true),
-                BUNDLED
-            ),
-            Plan::Classic {
-                reason: ClassicReason::CellTooSmall {
-                    cell: tiny,
-                    density: d(4)
-                }
-            }
+            plan(answered(Some(ImageProtocol::Sixel), tiny, true), BUNDLED),
+            too_small(tiny, BUNDLED)
         );
     }
 
@@ -553,10 +665,7 @@ mod tests {
     /// one" gets an answer in every shape.
     #[test]
     fn every_way_of_lacking_graphics_falls_back_with_a_reason() {
-        let too_small = |cell, density| ClassicReason::CellTooSmall {
-            cell,
-            density: d(density),
-        };
+        let small = |cell, max_density| ClassicReason::CellTooSmall { cell, max_density };
         let cases = [
             (Probe::NotQueried, BASE_ONLY, ClassicReason::NotQueried),
             (Probe::NoAnswer, BASE_ONLY, ClassicReason::NoAnswer),
@@ -567,7 +676,7 @@ mod tests {
             ),
             (Probe::Unsupported, BASE_ONLY, ClassicReason::Unsupported),
             (
-                Probe::Detected(Detected {
+                Probe::Answered(Detected {
                     protocol: Some(ImageProtocol::Kitty),
                     cell: None,
                     tmux: false,
@@ -580,26 +689,13 @@ mod tests {
                 BASE_ONLY,
                 ClassicReason::NoProtocol,
             ),
-            (
-                capable(CellSize { w: 0, h: 0 }),
-                BASE_ONLY,
-                too_small(CellSize { w: 0, h: 0 }, 1),
-            ),
-            (
-                capable(CellSize { w: 1, h: 2 }),
-                BASE_ONLY,
-                too_small(CellSize { w: 1, h: 2 }, 1),
-            ),
-            // 2 cannot reach 4x art within the fit's bound.
-            (
-                capable(CellSize { w: 2, h: 4 }),
-                BUNDLED,
-                too_small(CellSize { w: 2, h: 4 }, 4),
-            ),
+            (capable(cell(0, 0)), BASE_ONLY, small(cell(0, 0), BASE_ONLY)),
+            (capable(cell(1, 2)), BASE_ONLY, small(cell(1, 2), BASE_ONLY)),
+            (capable(cell(2, 4)), BUNDLED, small(cell(2, 4), BUNDLED)),
         ];
-        for (probe, densities, want) in cases {
+        for (probe, max_density, want) in cases {
             assert_eq!(
-                resolve(GraphicsMode::Auto, probe, densities),
+                plan(probe, max_density),
                 Plan::Classic { reason: want },
                 "for {probe:?}"
             );
@@ -612,32 +708,30 @@ mod tests {
     /// terminal that reports its pixels.
     #[test]
     fn a_cell_too_small_names_the_art_it_is_too_small_for() {
-        let reason = |cell, density| {
-            ClassicReason::CellTooSmall {
-                cell,
-                density: d(density),
-            }
-            .describe()
-        };
-        let small_font = reason(CellSize { w: 2, h: 4 }, 4);
+        let reason =
+            |cell, max_density| ClassicReason::CellTooSmall { cell, max_density }.describe();
+        let small_font = reason(cell(2, 4), BUNDLED);
         assert!(small_font.contains("the pack's 4x art"), "{small_font}");
-        let no_pixels = reason(CellSize { w: 1, h: 2 }, 4);
+        let no_pixels = reason(cell(1, 2), BUNDLED);
         assert!(no_pixels.ends_with("too small to subdivide"), "{no_pixels}");
     }
 
     #[test]
-    fn the_doctor_row_names_the_protocol_and_never_leaves_a_fallback_unexplained() {
+    fn the_doctor_row_names_the_protocol_the_fit_and_never_leaves_a_fallback_unexplained() {
         let row = graphics_diagnostic_row(
             GraphicsMode::Auto,
-            answered(Some(ImageProtocol::Sixel), CellSize { w: 17, h: 41 }, false),
+            answered(Some(ImageProtocol::Sixel), cell(17, 41), false),
             BUNDLED,
+            AREA,
         );
-        assert!(row.starts_with("graphics: sixel (17x41 cell)"), "{row}");
-        assert!(row.contains("would render at 16x"), "{row}");
         // The row reports a CAPABILITY. Until the profile reaches a painter it
         // must not read as a prediction about `run`, which paints classic
         // whatever this says.
-        assert!(row.contains("not yet wired to `run`"), "{row}");
+        assert_eq!(
+            row,
+            "graphics: sixel (17x41 cell) — the cutaway profile would render at 16x \
+             (4x art upscaled 4x), a 127x102 office (not yet wired to `run`)"
+        );
 
         // Every classic row must carry its reason — a bare "classic" reads as
         // a verdict on the office.
@@ -647,9 +741,9 @@ mod tests {
             (GraphicsMode::Auto, Probe::NoAnswer),
             (GraphicsMode::Auto, Probe::TmuxPassthroughOff),
             (GraphicsMode::Auto, Probe::Unsupported),
-            (GraphicsMode::Auto, capable(CellSize { w: 0, h: 0 })),
+            (GraphicsMode::Auto, capable(cell(0, 0))),
         ] {
-            let row = graphics_diagnostic_row(mode, probe, BASE_ONLY);
+            let row = graphics_diagnostic_row(mode, probe, BASE_ONLY, AREA);
             assert!(row.starts_with("graphics: classic half-blocks — "), "{row}");
             assert!(
                 row.len() > "graphics: classic half-blocks — ".len(),
@@ -662,8 +756,8 @@ mod tests {
     /// allows, and the pack's 4x art moves it to the nearest multiple.
     #[test]
     fn the_cell_gives_the_natural_scale_and_the_pack_fits_it() {
-        assert_eq!(raw_scale_for_cell(CellSize { w: 17, h: 41 }), 17);
-        assert_eq!(scale(CellSize { w: 17, h: 41 }, BUNDLED), Some(16));
+        assert_eq!(raw_scale_for_cell(cell(17, 41)), 17);
+        assert_eq!(scale(cell(17, 41), BUNDLED), Some(16));
     }
 
     /// 2 is the first scale that buys anything over the classic density, and
@@ -672,23 +766,14 @@ mod tests {
     #[test]
     fn the_cutoff_is_where_the_image_path_starts_buying_something() {
         assert_eq!(
-            resolve(
-                GraphicsMode::Auto,
-                capable(CellSize { w: 1, h: 2 }),
-                BASE_ONLY
-            ),
-            Plan::Classic {
-                reason: ClassicReason::CellTooSmall {
-                    cell: CellSize { w: 1, h: 2 },
-                    density: Density::ONE,
-                }
-            },
+            plan(capable(cell(1, 2)), BASE_ONLY),
+            too_small(cell(1, 2), BASE_ONLY),
             "1px per unit buys nothing"
         );
         assert!(
             matches!(
-                resolve(GraphicsMode::Auto, capable(CellSize { w: 2, h: 4 }), BASE_ONLY),
-                Plan::Cutaway { scale, .. } if scale.get() == 2
+                plan(capable(cell(2, 4)), BASE_ONLY),
+                Plan::Cutaway { fit, .. } if fit.scale().get() == 2
             ),
             "2px per unit is the first density worth an encode"
         );
