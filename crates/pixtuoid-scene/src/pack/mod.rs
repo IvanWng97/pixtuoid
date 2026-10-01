@@ -12,7 +12,7 @@ pub(crate) use density::{DenseFrame, densest_frame};
 pub(crate) use lookup::DESK_BEZEL_RAISE;
 pub(crate) use lookup::{
     CLOCK_FACE_KEY, COOLER_WATER, DESK_BULB_KEY, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE,
-    PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, VENDING_MACHINE_SPRITE,
+    PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, VENDING_MACHINE_SPRITE, animation_frame_at,
     appliance_frame_index, appliance_overrides, appliance_sprite, desk_art, desk_art_top,
     desk_sprite_name, fixture_overrides, frame_at, looping_frame_index,
 };

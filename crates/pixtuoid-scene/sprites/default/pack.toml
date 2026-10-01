@@ -155,6 +155,10 @@ version = "1"
 "ё" = { of = "б", level = -2 }   # the water cooler's cabinet, shaded east side
 "α" = { of = "ч", level = -2 }   # the first coat, turned from the pole
 "β" = { of = "ш", level = -2 }   # the second
+"ţ" = { of = "t", level = -2 }   # the cat's fur, shaded
+"Ţ" = { of = "t", level = 2 }    # the cat's fur, lit
+"ƭ" = { of = "x", level = -2 }   # the dog's coat, shaded
+"Ƭ" = { of = "x", level = 2 }    # the dog's coat, lit
 "γ" = { of = "щ", level = -2 }   # the third
 "η" = { of = "ф", level = 2 }    # the clock's rim, lit upper west
 "ε" = { of = "ц", level = -2 }   # the clock's face, shaded lower east
@@ -365,7 +369,11 @@ frame_ms = 600
 
 [animations.cat_walk]
 frames   = ["cat_walk_0.sprite", "cat_walk_1.sprite"]
-frame_ms = 220
+frame_ms = 250
+
+[animations."cat_walk@4x"]
+frames   = ["cat_walk_0@4x.sprite", "cat_walk_1@4x.sprite"]
+frame_ms = 250
 
 [animations.cat_sit]
 frames   = ["cat_sit.sprite"]
@@ -377,7 +385,11 @@ frame_ms = 600
 
 [animations.dog_walk]
 frames   = ["dog_walk_0.sprite", "dog_walk_1.sprite"]
-frame_ms = 220
+frame_ms = 250
+
+[animations."dog_walk@4x"]
+frames   = ["dog_walk_0@4x.sprite", "dog_walk_1@4x.sprite"]
+frame_ms = 250
 
 [animations.dog_sit]
 frames   = ["dog_sit.sprite"]
@@ -389,7 +401,7 @@ frame_ms = 600
 
 [animations.lobster_walk]
 frames   = ["lobster_walk_0.sprite", "lobster_walk_1.sprite"]
-frame_ms = 200
+frame_ms = 250
 
 [animations.lobster_rest]
 frames   = ["lobster_rest.sprite"]
@@ -479,11 +491,11 @@ frame_ms = 500
 # As the vending machine: frame 0 at rest, then its busy loop.
 [animations.printer]
 frames   = ["printer.sprite"]
-frame_ms = 300
+frame_ms = 250
 
 [animations."printer@4x"]
 frames   = ["printer@4x.sprite"]
-frame_ms = 300
+frame_ms = 250
 
 [animations.meeting_table]
 frames   = ["meeting_table.sprite"]
@@ -513,11 +525,11 @@ frame_ms = 600
 # The glug: a bubble climbs the bottle, then the water stills.
 [animations.water_cooler]
 frames   = ["water_cooler.sprite"]
-frame_ms = 400
+frame_ms = 375
 
 [animations."water_cooler@4x"]
 frames   = ["water_cooler@4x.sprite"]
-frame_ms = 400
+frame_ms = 375
 
 [animations.pantry_bin]
 frames   = ["pantry_bin.sprite"]
@@ -529,11 +541,11 @@ frame_ms = 600
 
 [animations.fish_tank]
 frames   = ["fish_tank.sprite"]
-frame_ms = 450
+frame_ms = 500
 
 [animations."fish_tank@4x"]
 frames   = ["fish_tank@4x.sprite"]
-frame_ms = 450
+frame_ms = 500
 
 [animations.coat_rack]
 frames   = ["coat_rack.sprite"]
