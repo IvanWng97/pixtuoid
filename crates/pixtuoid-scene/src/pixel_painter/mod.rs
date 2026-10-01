@@ -443,7 +443,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
 
 /// Map the sim's resolved [`crate::sim::CharacterPlacement`]s 1:1 onto y-sorted
 /// drawables. The ONLY paint-side work is presentation — resolving the
-/// theme-free [`CharacterGlow`] to a `Theme` color.
+/// theme-free [`CharacterGlow`](crate::sim::CharacterGlow) to a `Theme` color.
 fn enqueue_characters<'a>(
     ctx: &PaintCtx<'_>,
     frame: &'a SimFrame,

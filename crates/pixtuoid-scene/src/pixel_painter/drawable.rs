@@ -38,7 +38,7 @@ use crate::layout::{Layout, Point, Size};
 const PANTRY_STEAM_DX_LARGE: i16 = -2;
 const PANTRY_STEAM_DX_SMALL: i16 = 1;
 
-/// The steam offset for `anim`, a [`super::pantry_counter_anim`] pick.
+/// The steam offset for `anim`, a [`crate::art::pantry_counter_anim`] pick.
 fn pantry_steam_dx(anim: &str) -> i16 {
     let [_, large] = crate::art::PANTRY_COUNTER_ANIMS;
     if anim == large {
@@ -96,7 +96,7 @@ pub(super) enum DrawableKind<'a> {
         pos: Point,
     },
     /// Pantry counter, with coffee steam attached so the steam rides above it
-    /// in z-order. `anim` is [`super::pantry_counter_anim`]'s pick.
+    /// in z-order. `anim` is [`crate::art::pantry_counter_anim`]'s pick.
     WaypointPantry {
         pos: Point,
         anim: &'static str,
@@ -149,7 +149,7 @@ pub(super) enum DrawableKind<'a> {
         kind: crate::layout::WallDecor,
         pos: Point,
     },
-    /// A corridor appliance: its pack art ([`super::appliance_art`]), centred at
+    /// A corridor appliance: its pack art ([`crate::art::appliance_art`]), centred at
     /// `pos`.
     Appliance {
         pos: Point,

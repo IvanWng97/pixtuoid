@@ -54,9 +54,9 @@ impl SpritePose {
 /// The per-agent RECOLORED sprite for one character, and where the art marks a
 /// head, DRESSED, from the cache.
 ///
-/// Split out of [`paint_character_at`] so a second profile gets the identical
+/// Split out of [`paint_character_at`](crate::pixel_painter::drawable::paint_character_at) so a second profile gets the identical
 /// palette without a second copy of the rule. The ART and the BLIT differ
-/// between profiles — the art is [`densest_frame`]'s at
+/// between profiles — the art is [`densest_frame`](super::densest_frame)'s at
 /// `scale`, so the classic pass (at `RenderScale::ONE`) draws the base sprite
 /// 1:1 and the cutaway the densest variant its scale lands — and a per-agent
 /// palette is exactly the thing that must NOT differ: hair, skin and the
@@ -195,7 +195,7 @@ fn character_key_at(
 }
 
 /// A recolored character frame and how to draw it at the scale it was picked
-/// for; `blit_at` as in [`DenseFrame`].
+/// for; `blit_at` as in [`DenseFrame`](super::DenseFrame).
 pub(crate) struct CharacterFrame<'c> {
     pub(crate) frame: &'c Frame,
     pub(crate) blit_at: std::num::NonZeroU16,
