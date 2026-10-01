@@ -11,7 +11,7 @@
 
 use pixtuoid_core::sprite::Rgb;
 
-use crate::cutaway::pen::Stepped;
+use crate::dither::Stepped;
 use crate::layout::WallPiece;
 use crate::theme::Theme;
 

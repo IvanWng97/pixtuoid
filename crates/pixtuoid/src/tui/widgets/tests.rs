@@ -701,10 +701,11 @@ fn footer_tool_hue_reads_kind_field() {
         .iter()
         .find(|sp| sp.content.contains("Delegating"))
         .expect("tool segment present");
-    let expected = to_color(pixtuoid_scene::pixel_painter::tool_glow_for_kind(
-        pixtuoid_core::state::ToolKind::Task,
-        &theme.tool_glow,
-    ));
+    let expected = to_color(
+        theme
+            .tool_glow
+            .for_kind(pixtuoid_core::state::ToolKind::Task),
+    );
     assert_eq!(tool.style.fg, Some(expected), "hue from the typed kind");
     assert_eq!(
         expected,

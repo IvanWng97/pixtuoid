@@ -1626,7 +1626,6 @@ pub fn pixtuoid_scene::pixel_painter::hour_is_day(f32) -> bool
 pub fn pixtuoid_scene::pixel_painter::is_day_at(std::time::SystemTime) -> bool
 pub fn pixtuoid_scene::pixel_painter::precipitation_level(std::time::SystemTime, pixtuoid_scene::pixel_painter::WeatherPolicy) -> f32
 pub fn pixtuoid_scene::pixel_painter::render_to_rgb_buffer(&mut pixtuoid_scene::pixel_painter::PixelCtx<'_>) -> pixtuoid_scene::pixel_painter::PixelPassResult
-pub fn pixtuoid_scene::pixel_painter::tool_glow_for_kind(pixtuoid_core::state::ToolKind, &pixtuoid_scene::theme::ToolGlowColors) -> pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_scene::pixel_painter::weather_names() -> alloc::vec::Vec<&'static str>
 pub mod pixtuoid_scene::pose
 pub enum pixtuoid_scene::pose::Pose
@@ -1984,6 +1983,8 @@ pub pixtuoid_scene::theme::ToolGlowColors::default: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::ToolGlowColors::edit: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::ToolGlowColors::grep: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::ToolGlowColors::read: pixtuoid_core::sprite::Rgb
+impl pixtuoid_scene::theme::ToolGlowColors
+pub fn pixtuoid_scene::theme::ToolGlowColors::for_kind(&self, pixtuoid_core::state::ToolKind) -> pixtuoid_core::sprite::Rgb
 impl core::clone::Clone for pixtuoid_scene::theme::ToolGlowColors
 pub fn pixtuoid_scene::theme::ToolGlowColors::clone(&self) -> pixtuoid_scene::theme::ToolGlowColors
 impl core::fmt::Debug for pixtuoid_scene::theme::ToolGlowColors

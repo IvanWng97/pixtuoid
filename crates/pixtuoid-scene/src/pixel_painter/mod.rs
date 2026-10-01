@@ -125,10 +125,6 @@ pub(crate) use palette::{
     fixture_overrides,
 };
 
-// Only the hue matches the sprite's glow, which also takes the hour's wash and
-// shows only on a NORTH-facing desk.
-pub use palette::tool_glow_for_kind;
-
 /// Applies the hour's object terms to every pixel painted since `since`.
 ///
 /// The branch-free XOR-OR reduction replaces a hard-to-predict per-pixel
@@ -180,20 +176,6 @@ pub(crate) use furniture::{COOLER_WATER, paint_area_rug};
 pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 pub(crate) use sim::{SimInputs, SimStores, desk_occupant, sim_step};
 pub(crate) use wall::paint_wall;
-
-/// The pantry counter sprites, compact then large.
-pub(crate) const PANTRY_COUNTER_ANIMS: [&str; 2] = ["pantry_small", "pantry"];
-
-/// The pantry counter sprite for a counter `counter_w` px wide: the large
-/// kitchen run when the room fits it, else the compact one.
-pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
-    let [compact, large] = PANTRY_COUNTER_ANIMS;
-    if counter_w >= crate::layout::PANTRY_COUNTER_LARGE_W {
-        large
-    } else {
-        compact
-    }
-}
 
 use crate::atmosphere::Moment;
 use crate::lighting::{DeskLights, LightInputs, Lights};
@@ -549,7 +531,7 @@ pub(crate) fn desk_screen_glow(
 ) -> Option<pixtuoid_core::sprite::Rgb> {
     occupant
         .and_then(|a| crate::lighting::lit_screen(a, facing, seated))
-        .map(|tool| palette::tool_glow_for_kind(tool, &theme.tool_glow))
+        .map(|tool| theme.tool_glow.for_kind(tool))
 }
 
 /// The office pet, y-sorted at its anim's south row, since the anims differ in
@@ -711,7 +693,8 @@ fn queue_fixtures<'a>(
                 };
                 match station {
                     Station::PantryCounter => {
-                        let anim = pantry_counter_anim(layout.pantry_counter_size().w);
+                        let anim =
+                            crate::layout::pantry_counter_anim(layout.pantry_counter_size().w);
                         DrawableKind::WaypointPantry {
                             pos: f.at,
                             anim,

@@ -210,7 +210,7 @@ pub fn render_cutaway(
     office: Office<'_>,
     floor: crate::floor::FloorMeta,
     now: std::time::SystemTime,
-    cache: &mut crate::frame_cache::FrameCache,
+    cache: &mut CutawayCache,
     buf: &mut RgbBuffer,
 ) {
     let list = frame_list(frame, office, floor, now);
@@ -237,7 +237,7 @@ pub(crate) fn frame_list<'a>(
 pub(crate) fn paint(
     layout: &Layout,
     list: &DrawList<'_>,
-    cache: &mut crate::frame_cache::FrameCache,
+    cache: &mut CutawayCache,
     buf: &mut RgbBuffer,
 ) {
     let pen = Pen::for_pack(list.scale, list.pack);
@@ -503,11 +503,7 @@ fn lights(
 /// last one pass ([`net_pass`](crate::cutaway::light::net_pass)) takes every
 /// other pixel to the hour: darkened with the room and lifted by its lights at
 /// once, so no pixel is darkened twice or darkened and relit.
-pub(crate) fn paint_list(
-    list: &DrawList<'_>,
-    cache: &mut crate::frame_cache::FrameCache,
-    buf: &mut RgbBuffer,
-) {
+pub(crate) fn paint_list(list: &DrawList<'_>, cache: &mut CutawayCache, buf: &mut RgbBuffer) {
     let pen = Pen::for_pack(list.scale, list.pack);
     paint_ground_shadows(
         list.pieces.iter().filter_map(|p| p.shadow),
@@ -539,7 +535,7 @@ pub(crate) fn paint_list(
 /// [`Emission`](crate::cutaway::light::Emission) they leave.
 fn paint_pieces(
     list: &DrawList<'_>,
-    cache: &mut crate::frame_cache::FrameCache,
+    cache: &mut CutawayCache,
     buf: &mut RgbBuffer,
 ) -> crate::cutaway::light::Emission {
     use crate::cutaway::light::{Emission, Glow};
@@ -557,7 +553,7 @@ fn paint_pieces(
         let glowing = mark(
             &piece.kind,
             (list.pack, list.scale),
-            &mut cache.cutaway_art,
+            &mut cache.art,
             &mut marks,
         );
         for y in y0..y1 {
@@ -756,6 +752,14 @@ impl Placed {
     }
 }
 
+/// What the cutaway keeps across frames, for one pack.
+#[derive(Default)]
+pub struct CutawayCache {
+    figures: crate::frame_cache::FrameCache,
+    art: ArtCache,
+    net_colours: crate::cutaway::light::NetMemo,
+}
+
 /// Art found by recolouring, kept across frames; keyed by sprite name, so one
 /// cache serves one pack.
 #[derive(Default)]
@@ -909,16 +913,14 @@ fn paint_ground_shadows(
     let Some(depths) = crate::ground::Depths::of(shadows, pen.art(1).0) else {
         return;
     };
-    let mut stepped: Vec<crate::cutaway::pen::Stepped> = Vec::new();
+    let mut stepped: Vec<crate::dither::Stepped> = Vec::new();
     for (ax, ay, depth) in depths.cells() {
         let level = crate::dither::nearest(depth * strength * SHADOW_STOPS_PER_STRENGTH, ax, ay);
         if level == 0 {
             continue;
         }
         while stepped.len() < usize::from(level) {
-            stepped.push(crate::cutaway::pen::Stepped::new(
-                -(stepped.len() as i8 + 1),
-            ));
+            stepped.push(crate::dither::Stepped::new(-(stepped.len() as i8 + 1)));
         }
         let r = ArtRect {
             x: ArtPx(ax),
@@ -1155,8 +1157,7 @@ fn push_fixture(
             match station {
                 Station::PantryCounter => {
                     if let Some(pantry) = &layout.pantry {
-                        let sprite =
-                            crate::pixel_painter::pantry_counter_anim(pantry.counter_size.w);
+                        let sprite = crate::layout::pantry_counter_anim(pantry.counter_size.w);
                         push_art(
                             order,
                             pack,
@@ -1434,18 +1435,18 @@ fn paint_piece(
     pack: &Pack,
     theme: &Theme,
     scale: RenderScale,
-    cache: &mut crate::frame_cache::FrameCache,
+    cache: &mut CutawayCache,
     buf: &mut RgbBuffer,
 ) {
     match *kind {
         PieceKind::Desk { at, art, screen } => {
-            paint_desk(at, art, screen, (pack, scale), &mut cache.cutaway_art, buf);
+            paint_desk(at, art, screen, (pack, scale), &mut cache.art, buf);
         }
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
         PieceKind::Character {
             ref figure, chair, ..
         } => {
-            paint_figure(figure, pack, scale, cache, buf);
+            paint_figure(figure, pack, scale, &mut cache.figures, buf);
             // The sitter's own chair, straight after them: one piece, so
             // nothing can sort between a person and the chair they sit in.
             if let Some(at) = chair {
@@ -2151,7 +2152,7 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, pen: Pen, buf:
         theme.surface.wall_trim,
     );
     // The wall's contact line: the floor under it, a shade step down.
-    let mut contact = crate::cutaway::pen::Stepped::new(crate::cutaway::shade::RAMP_SHADE_LEVEL);
+    let mut contact = crate::dither::Stepped::new(crate::cutaway::shade::RAMP_SHADE_LEVEL);
     pen.recolour(
         buf,
         ArtRect {
@@ -4676,24 +4677,21 @@ S B B B B B B S
         );
         // Every fixture drawn from art must have been reached, the pantry
         // counter at both its sizes.
-        for sprite in crate::pixel_painter::PANTRY_COUNTER_ANIMS
-            .into_iter()
-            .chain([
-                "meeting_sofa",
-                "plant",
-                "filing_cabinet",
-                "meeting_chair",
-                "coat_rack",
-                "side_table",
-                "floor_lamp",
-                "kitchen_island",
-                "pantry_bin",
-                "fish_tank",
-                "water_cooler",
-                "vending_machine",
-                "printer",
-            ])
-        {
+        for sprite in crate::layout::PANTRY_COUNTER_ANIMS.into_iter().chain([
+            "meeting_sofa",
+            "plant",
+            "filing_cabinet",
+            "meeting_chair",
+            "coat_rack",
+            "side_table",
+            "floor_lamp",
+            "kitchen_island",
+            "pantry_bin",
+            "fish_tank",
+            "water_cooler",
+            "vending_machine",
+            "printer",
+        ]) {
             assert!(
                 props.contains(sprite),
                 "no {sprite} prop was painted: {props:?}"
@@ -5249,7 +5247,7 @@ S B B B B B B S
             pen,
             &mut buf,
         );
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = CutawayCache::default();
         let emission = paint_pieces(list, &mut cache, &mut buf);
         (buf, emission)
     }
@@ -5274,7 +5272,7 @@ S B B B B B B S
         let list = list_at(frame, office, 23);
         assert!(list.ambient.darkness() > 0.0, "23:00 is dark");
         let (day, emission) = by_day(&list, &layout);
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = CutawayCache::default();
         let mut night = RgbBuffer::filled(day.width(), day.height(), theme.surface.bg_fallback);
         paint_backdrop(
             &layout,
@@ -5426,7 +5424,7 @@ S B B B B B B S
                 scale.to_buffer(layout.buf_h),
                 theme.surface.bg_fallback,
             );
-            let mut cache = crate::frame_cache::FrameCache::new();
+            let mut cache = CutawayCache::default();
             render_cutaway(
                 frame,
                 office,
@@ -5646,7 +5644,7 @@ S B B B B B B S
                 pack,
                 theme,
                 scale,
-                &mut crate::frame_cache::FrameCache::new(),
+                &mut CutawayCache::default(),
                 &mut buf,
             );
             buf
@@ -6200,7 +6198,7 @@ S B B B B B B S
             )
         };
         let (mut night, mut raw) = (blank(), blank());
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = CutawayCache::default();
         paint_backdrop(&layout, theme, scale, pen, &mut night);
         paint_list(&list, &mut cache, &mut night);
         paint_backdrop(&layout, theme, scale, pen, &mut raw);
@@ -6299,7 +6297,7 @@ S B B B B B B S
                 pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
             )
         };
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = CutawayCache::default();
         let painted = |keep: &dyn Fn(&PieceKind) -> bool, cache: &mut _| {
             let mut buf = blank();
             paint_backdrop(&layout, theme, scale, pen, &mut buf);
@@ -6976,7 +6974,7 @@ S B B B B B B S
             scale.to_buffer(layout.buf_h),
             theme.surface.bg_fallback,
         );
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = CutawayCache::default();
         render_cutaway(
             frame,
             Office {
