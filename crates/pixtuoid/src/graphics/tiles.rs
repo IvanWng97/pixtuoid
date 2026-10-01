@@ -4,9 +4,11 @@ use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
 
+use crossterm::{Command, cursor::MoveTo};
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_scene::cutaway::canvas::Dirty;
 use pixtuoid_scene::layout::Bounds;
+use ratatui::layout::Position;
 
 use super::{CellSize, Fit, ImageProtocol};
 
@@ -32,6 +34,21 @@ pub(crate) struct Tile {
     pub(crate) cols: u16,
     /// Cells down: fewer than the shape's in the bottom row.
     pub(crate) rows: u16,
+}
+
+impl Tile {
+    /// The escape that moves the cursor to this tile's top-left cell, the
+    /// image's own being `origin`: where a SIXEL or iTerm2 image is drawn.
+    pub(crate) fn cursor_to(self, origin: Position) -> String {
+        let mut out = String::new();
+        // Writing to a `String` cannot fail.
+        let _ = MoveTo(
+            origin.x.saturating_add(self.col),
+            origin.y.saturating_add(self.row),
+        )
+        .write_ansi(&mut out);
+        out
+    }
 }
 
 /// A tile's pixels as the terminal shows them: upscaled, in whole cells.

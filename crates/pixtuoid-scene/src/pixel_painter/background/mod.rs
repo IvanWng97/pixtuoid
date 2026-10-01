@@ -23,10 +23,10 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::ambient::SunbeamColumn;
-use super::epoch_ms;
 use super::palette::{RgbLut, WHITE, blend_pixel, blend_rgb};
 
 use crate::atmosphere::Moment;
+use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, Layout, Size, WindowBay, glass_rows, wall_trim_row, window_frame, window_posts,
     window_rows, window_run,
@@ -176,6 +176,7 @@ pub(super) fn paint_floor_and_walls(
         city: &city,
         run_x0: run.start,
         sky: &SkyView::of(moment, buf_w, top_wall_h, theme),
+        weather: GlassWeather::of(moment),
     };
     for w in bays {
         paint_floor_to_ceiling_window(
@@ -208,111 +209,8 @@ pub(super) fn paint_floor_and_walls(
     }
 }
 
-/// One weather's falling particle on the glass. Rain/Storm/Windy are `Streak`s;
-/// Snow is a `Flake`.
-#[derive(Clone, Copy)]
-enum Particle {
-    /// A vertical streak `len_base + seed % len_mod` px long, alpha stepping down
-    /// from `alpha_base` by `alpha_falloff` over its length, blended over the glass;
-    /// `drift` slants it +x by `dy/2` per row (the wind lean).
-    Streak {
-        len_base: u16,
-        len_mod: u64,
-        alpha_base: f32,
-        alpha_falloff: f32,
-        drift: bool,
-    },
-    /// A single opaque pixel with a 0/1 horizontal wiggle (snow — no falloff,
-    /// no length, written flat rather than blended).
-    Flake,
-}
-
-/// Per-weather constants for the shared particle loop.
-struct StreakSpec {
-    count: u64,
-    seed_mult: u64,
-    sx_mult: u64,
-    speed_base: u64,
-    speed_span: u64,
-    color: Rgb,
-    particle: Particle,
-}
-
-/// The drawable glass interior of a window — the frame inset by 1px on each
-/// side (`x0 = x+1`, `w = window_w - 2`).
-#[derive(Clone, Copy)]
-struct GlassRect {
-    x0: u16,
-    y0: u16,
-    w: u16,
-    h: u16,
-}
-
-/// Paint one weather's falling particles onto the glass interior. The seed→
-/// position math is shared across weathers; `spec` supplies the per-weather
-/// constants.
-fn paint_streaks(
-    buf: &mut RgbBuffer,
-    spec: &StreakSpec,
-    window_idx: u16,
-    glass: GlassRect,
-    elapsed_ms: u64,
-) {
-    let GlassRect {
-        x0: glass_x0,
-        y0: glass_y0,
-        w: gw,
-        h: gh,
-    } = glass;
-    for i in 0..spec.count {
-        let seed = window_idx as u64 * spec.seed_mult + i;
-        let sx = (seed.wrapping_mul(spec.sx_mult) % gw as u64) as u16;
-        let speed = spec.speed_base + (seed.wrapping_mul(0x4f6c_dd1d) % spec.speed_span);
-        let offset = seed.wrapping_mul(u64::from(crate::MURMUR3_FMIX32_M1)) % (gh as u64).max(1);
-        let phase = (elapsed_ms / speed + offset) % gh as u64;
-        match spec.particle {
-            Particle::Streak {
-                len_base,
-                len_mod,
-                alpha_base,
-                alpha_falloff,
-                drift,
-            } => {
-                let len = len_base + (seed % len_mod) as u16;
-                for dy in 0..len {
-                    let dx = if drift { dy / 2 } else { 0 };
-                    let px = glass_x0 + (sx + dx) % gw;
-                    let py = glass_y0 + ((phase as u16 + dy) % gh);
-                    let fade = alpha_base - (dy as f32 / len as f32) * alpha_falloff;
-                    let alpha = crate::dither::stepped(
-                        fade,
-                        alpha_base,
-                        crate::dither::FALLOFF_TONES,
-                        px,
-                        py,
-                    );
-                    blend_pixel(buf, px, py, spec.color, alpha);
-                }
-            }
-            Particle::Flake => {
-                let wiggle = if (elapsed_ms / 400 + seed).is_multiple_of(2) {
-                    0
-                } else {
-                    1
-                };
-                let px = glass_x0 + (sx + wiggle) % gw;
-                let py = glass_y0 + phase as u16;
-                if px < buf.width() && py < buf.height() {
-                    buf.put(px, py, spec.color);
-                }
-            }
-        }
-    }
-}
-
 /// Wash a flat translucent color over `pane`'s glass INTERIOR, one pixel in
-/// from each edge. This is NOT the streaks' `x+1/y+1` inset: it takes the raw
-/// window rect and does its own offset math.
+/// from each edge: it takes the raw window rect and does its own offset math.
 fn wash_glass(buf: &mut RgbBuffer, pane: Bounds, color: Rgb, alpha: f32) {
     for dy in 1..pane.height.saturating_sub(1) {
         for dx in 1..pane.width.saturating_sub(1) {
@@ -329,6 +227,7 @@ struct GlassView<'a> {
     /// The column the city strip's west end stands at.
     run_x0: u16,
     sky: &'a SkyView,
+    weather: GlassWeather,
 }
 
 /// Floor-to-ceiling window `pane`, framed in `frame` and seeded by its tiling
@@ -347,11 +246,12 @@ fn paint_floor_to_ceiling_window(
         width: w,
         height: h,
     } = pane;
-    let (sky, look, now) = (&moment.sky, &moment.look, moment.now);
+    let sky = &moment.sky;
     let GlassView {
         city,
         run_x0,
         sky: sky_view,
+        weather: glass_weather,
     } = view;
     let glass_h = glass_rows(h);
     let glass = sky_view.pane(x, w, glass_h);
@@ -382,129 +282,35 @@ fn paint_floor_to_ceiling_window(
         }
     }
 
-    let weather = sky.weather();
-
-    // The veil goes on BEFORE the streaks and the bolt, so rain and lightning
+    // The veil goes on BEFORE the marks and the bolt, so rain and lightning
     // still read on top of the murk.
-    if let Some((color, alpha)) = look.glass_veil {
+    if let Some((color, alpha)) = glass_weather.veil {
         wash_glass(buf, pane, color, alpha);
     }
 
-    let elapsed_ms = epoch_ms(now);
-
-    // The streak arms (Rain/Storm/Snow/Windy) all paint into the same glass-
-    // interior inset; build it ONCE so the four rects can't drift apart.
-    let glass = GlassRect {
-        x0: x + 1,
-        y0: y + 1,
-        w: w.saturating_sub(2),
-        h: glass_h,
-    };
-
-    match weather {
-        Weather::Rain => paint_streaks(
-            buf,
-            &StreakSpec {
-                count: 4,
-                seed_mult: 7,
-                sx_mult: u64::from(crate::GOLDEN_GAMMA_32),
-                speed_base: 60,
-                speed_span: 50,
-                color: Rgb {
-                    r: 210,
-                    g: 220,
-                    b: 240,
-                },
-                particle: Particle::Streak {
-                    len_base: 3,
-                    len_mod: 2,
-                    alpha_base: 0.35,
-                    alpha_falloff: 0.15,
-                    drift: false,
-                },
-            },
-            window_idx,
-            glass,
-            elapsed_ms,
-        ),
-        Weather::Storm => {
-            paint_streaks(
-                buf,
-                &StreakSpec {
-                    count: 6,
-                    seed_mult: 7,
-                    sx_mult: u64::from(crate::GOLDEN_GAMMA_32),
-                    speed_base: 40,
-                    speed_span: 40,
-                    color: Rgb {
-                        r: 210,
-                        g: 220,
-                        b: 245,
-                    },
-                    particle: Particle::Streak {
-                        len_base: 4,
-                        len_mod: 3,
-                        alpha_base: 0.6,
-                        alpha_falloff: 0.3,
-                        drift: false,
-                    },
-                },
-                window_idx,
-                glass,
-                elapsed_ms,
-            );
-            // The bright on-glass bolt — the strike's source. Rides the shared
-            // flash level so it fires in lockstep with `paint_lightning_flash`.
-            let level = sky.flash();
-            if level > 0.0 {
-                wash_glass(buf, pane, WHITE, 0.6 * level);
-            }
+    // Unclipped by the mullion and transom, which the classic's marks run over.
+    let marks = glass_weather.marks(
+        window_idx,
+        Size {
+            w: w.saturating_sub(2),
+            h: glass_h,
+        },
+        1,
+    );
+    for m in marks {
+        let (px, py) = (x + 1 + m.x, y + 1 + m.y);
+        if px < buf.width() && py < buf.height() {
+            buf.put(px, py, m.over(buf.get(px, py), (px, py)));
         }
-        Weather::Snow => paint_streaks(
-            buf,
-            &StreakSpec {
-                count: 3,
-                seed_mult: 11,
-                sx_mult: 0x517c_c1b7,
-                speed_base: 150,
-                speed_span: 100,
-                color: Rgb {
-                    r: 240,
-                    g: 240,
-                    b: 250,
-                },
-                particle: Particle::Flake,
-            },
-            window_idx,
-            glass,
-            elapsed_ms,
-        ),
-        Weather::Windy => paint_streaks(
-            buf,
-            &StreakSpec {
-                count: 5,
-                seed_mult: 7,
-                sx_mult: u64::from(crate::GOLDEN_GAMMA_32),
-                speed_base: 50,
-                speed_span: 40,
-                color: Rgb {
-                    r: 210,
-                    g: 220,
-                    b: 240,
-                },
-                particle: Particle::Streak {
-                    len_base: 3,
-                    len_mod: 2,
-                    alpha_base: 0.35,
-                    alpha_falloff: 0.15,
-                    drift: true,
-                },
-            },
-            window_idx,
-            glass,
-            elapsed_ms,
-        ),
-        Weather::Fog | Weather::Overcast | Weather::Smog | Weather::Clear => {}
+    }
+
+    // The bright on-glass bolt — the strike's source. Rides the shared flash
+    // level so it fires in lockstep with `paint_lightning_flash`.
+    if sky.weather() == Weather::Storm {
+        let level = sky.flash();
+        if level > 0.0 {
+            wash_glass(buf, pane, WHITE, 0.6 * level);
+        }
     }
 
     if let Some(blaze) = sky_view.blaze() {

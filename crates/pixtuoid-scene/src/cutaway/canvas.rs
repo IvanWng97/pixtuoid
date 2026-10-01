@@ -393,6 +393,8 @@ mod tests {
     /// rest.
     #[test]
     fn an_idle_office_skips_the_ticks_that_change_nothing() {
+        // Rain or snow on the glass moves every tick.
+        let _clear = crate::sky::ForcedWeather::new(crate::sky::Weather::Clear);
         let layout = lively_office();
         let quiet = empty_frame(&layout);
         let steps: Vec<_> = ticks(crate::localclock::at_hour(12), 30)

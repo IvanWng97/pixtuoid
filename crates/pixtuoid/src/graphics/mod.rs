@@ -19,9 +19,13 @@ use pixtuoid_scene::render_scale::RenderScale;
 use ratatui::layout::Size as TermSize;
 
 #[cfg(feature = "graphics")]
+mod iterm2;
+#[cfg(feature = "graphics")]
 pub(crate) mod kitty;
 #[cfg(feature = "graphics")]
 mod probe;
+#[cfg(feature = "graphics")]
+mod sixel;
 #[cfg(feature = "graphics")]
 pub(crate) mod tiles;
 
