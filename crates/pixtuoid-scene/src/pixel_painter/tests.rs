@@ -1615,8 +1615,8 @@ fn desk_occupant_always_sorts_behind_its_desk() {
     }
 }
 
-/// The geometry table's desk height must match the ART's, or the sort row sorts on
-/// a south row the sprite does not reach. The `- 1`: `desk` blits at `desk.y - 1`
+/// The geometry table's desk height must match the ART's, or the desk's sort row
+/// lands on a south row the sprite does not reach. The `- 1`: `desk` blits at `desk.y - 1`
 /// (top row is the north-overhanging bezel), so it covers `height - 1` from `desk.y`.
 #[test]
 fn desk_sort_row_is_the_visual_south() {

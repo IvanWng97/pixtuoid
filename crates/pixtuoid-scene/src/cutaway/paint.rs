@@ -3527,7 +3527,7 @@ pub(crate) mod tests {
     }
 
     /// The desk sorts on its face's south edge and a back-turned sitter on their
-    /// seat's sort row; that key lands south of the face, so the "head
+    /// seat's sort row; that row lands south of the face, so the "head
     /// over the surface" reading needs no special case.
     #[test]
     fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
@@ -4407,11 +4407,11 @@ pub(crate) mod tests {
     fn a_chair_keeps_its_order_to_its_sitter_through_the_settle() {
         use crate::layout::Facing;
         let (layout, pack, frames, desk) = sit_down(Facing::North, 0);
-        let seat_key = crate::layout::desk_chair_sort_row(desk, Facing::North);
+        let seat_row = crate::layout::desk_chair_sort_row(desk, Facing::North);
         let orders: Vec<(usize, bool)> = frames
             .iter()
             .enumerate()
-            .filter(|(_, f)| f.characters.first().is_some_and(|c| c.sort_row == seat_key))
+            .filter(|(_, f)| f.characters.first().is_some_and(|c| c.sort_row == seat_row))
             .filter_map(|(n, f)| chair_over_person(f, &layout, &pack, desk).map(|o| (n, o)))
             .collect();
         assert!(
