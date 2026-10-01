@@ -973,12 +973,6 @@ impl TuiRenderer<ratatui::backend::TestBackend> {
     pub fn frame_buffer(&self) -> &ratatui::buffer::Buffer {
         self.terminal.backend().buffer()
     }
-
-    /// The image the cutaway's tiles were last cut from.
-    #[cfg(feature = "graphics")]
-    pub(crate) fn cutaway_image(&self) -> Option<&RgbBuffer> {
-        self.cutaway.as_ref().map(|c| c.image())
-    }
 }
 
 #[cfg(test)]

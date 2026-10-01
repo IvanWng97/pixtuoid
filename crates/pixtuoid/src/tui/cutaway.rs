@@ -297,11 +297,6 @@ impl TileCutaway {
         self
     }
 
-    #[cfg(test)]
-    pub(crate) fn image(&self) -> &RgbBuffer {
-        &self.image
-    }
-
     /// Show every tile in `scene`'s cells of `buf`, before the frame's text
     /// is drawn: kitty's placeholders, or for SIXEL and iTerm2 a
     /// [`SENTINEL`] ratatui's diff skips, so the flush never blanks the

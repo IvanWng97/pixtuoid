@@ -279,25 +279,57 @@ fn the_protocols_cadence_gates_its_transmits() {
     assert!(wire.take().contains(SIXEL));
 }
 
+/// Each kitty image the wire carried, in order: its id and its pixels,
+/// inflated.
+fn kitty_images(wire: &str) -> Vec<(u32, Vec<u8>)> {
+    let mut images = Vec::new();
+    let mut open: Option<(u32, String)> = None;
+    for escape in wire
+        .split("\x1b\\")
+        .filter_map(|e| e.split_once("\x1b_G").map(|(_, e)| e))
+    {
+        let (keys, payload) = escape.split_once(';').expect("a payload");
+        if let Some(id) = keys.split(',').find_map(|k| k.strip_prefix("i=")) {
+            open = Some((id.parse().expect("an id"), String::new()));
+        }
+        let (_, data) = open.as_mut().expect("an image under way");
+        data.push_str(payload);
+        if keys.contains("m=0") {
+            let (id, data) = open.take().expect("an image under way");
+            let zlib = base64_simd::STANDARD
+                .decode_to_vec(data.as_bytes())
+                .expect("base64");
+            let rgb = miniz_oxide::inflate::decompress_to_vec_zlib(&zlib).expect("zlib");
+            images.push((id, rgb));
+        }
+    }
+    images
+}
+
 /// A floor switch slides the cutaway the way classic slides its half-blocks:
-/// mid-slide, the image is neither floor and nothing is hit-tested; then it
-/// settles on the destination.
+/// mid-slide, the middle tile shows neither floor and nothing is
+/// hit-tested; then it settles on the destination.
 #[test]
 fn a_floor_switch_slides_the_cutaway_then_settles() {
     let (mut r, wire) = kitty(120, 40);
     let scene = two_floor_scene();
     let mut now = t0();
     r.render(&scene, pack(), now).expect("render");
-    let image =
-        |r: &TuiRenderer<TestBackend>| r.cutaway_image().expect("a cutaway").as_slice().to_vec();
-    let before = image(&r);
-    wire.take();
+    let across = 120u32.div_ceil(u32::from(ImageProtocol::Kitty.tile().cols));
+    let middle = crate::graphics::kitty::process_base() + across * 10 + across / 2;
+    let tile = |sent: &str| {
+        kitty_images(sent)
+            .into_iter()
+            .rev()
+            .find(|(id, _)| *id == middle)
+            .map(|(_, rgb)| rgb)
+    };
+    let before = tile(&wire.take()).expect("the first frame sends every tile");
 
     r.navigate_floor(1, now);
     let half = Duration::from_millis(r.transition().expect("sliding").duration_ms / 2);
     r.render(&scene, pack(), now + half).expect("render");
-    let mid = image(&r);
-    assert!(wire.take().contains(TRANSMIT), "mid-slide frames are sent");
+    let mid = tile(&wire.take()).expect("mid-slide, the middle tile is sent");
     assert!(r.transition().is_some());
     assert!(r.cached_layout().is_none());
     let area = r.frame_buffer().area;
@@ -308,7 +340,7 @@ fn a_floor_switch_slides_the_cutaway_then_settles() {
 
     now += half;
     render_until_settled(&mut r, &scene, pack(), &mut now, 1);
-    let after = image(&r);
+    let after = tile(&wire.take()).expect("settling sends the middle tile");
     assert!(mid != before && mid != after);
     assert_eq!(r.current_floor(), 1);
     hover_agent(&mut r, AgentId::from_transcript_path("/n/1.jsonl"));
