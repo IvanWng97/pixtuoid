@@ -20,7 +20,7 @@ const LOOK_DENSITY: u16 = 4;
 /// A point on the art grid, which a look may hang past the buffer's top or
 /// west edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ArtAt {
+pub(crate) struct ArtPoint {
     pub(crate) x: i32,
     pub(crate) y: i32,
 }
@@ -31,7 +31,7 @@ pub(crate) struct Riding {
     pub(crate) effect: Effect,
     /// The figure's head on the art grid: the top of its hair over the head
     /// mark's column. `None` where its frame has no head to stand a look on.
-    pub(crate) head: Option<ArtAt>,
+    pub(crate) head: Option<ArtPoint>,
     /// The figure's own grid.
     pub(crate) pen: Pen,
 }
@@ -89,7 +89,7 @@ impl Riding {
 
     /// Its look, as squares of art pixels: each top-left, side, colour and the
     /// share of it covered.
-    fn look(&self, theme: &Theme, emit: &mut impl FnMut(ArtAt, i32, Rgb, f32)) {
+    fn look(&self, theme: &Theme, emit: &mut impl FnMut(ArtPoint, i32, Rgb, f32)) {
         let e = self.effect;
         let d = self.pen.art(1).0;
         if let Some(head) = self.head.filter(|_| d == LOOK_DENSITY) {
@@ -98,7 +98,7 @@ impl Riding {
         }
         let d = i32::from(d);
         plot_effect(&e, theme, &mut |x, y, c, alpha| {
-            let at = ArtAt {
+            let at = ArtPoint {
                 x: i32::from(x) * d,
                 y: i32::from(y) * d,
             };
@@ -176,7 +176,12 @@ const DUST: &[&str] = &[
 ];
 
 /// `e`'s look at [`LOOK_DENSITY`], from its rider's `head`.
-fn dense_look(e: Effect, head: ArtAt, theme: &Theme, emit: &mut impl FnMut(ArtAt, i32, Rgb, f32)) {
+fn dense_look(
+    e: Effect,
+    head: ArtPoint,
+    theme: &Theme,
+    emit: &mut impl FnMut(ArtPoint, i32, Rgb, f32),
+) {
     let d = i32::from(LOOK_DENSITY);
     let centred = |glyph: &[&str]| head.x - glyph_w(glyph) / 2;
     match e.kind {
@@ -237,7 +242,7 @@ fn stamp(
     glyph: &[&str],
     x: i32,
     y: i32,
-    emit: &mut impl FnMut(ArtAt, i32, Rgb, f32),
+    emit: &mut impl FnMut(ArtPoint, i32, Rgb, f32),
     ink: impl Fn(char) -> Option<(Rgb, f32)>,
 ) {
     for (dy, row) in glyph.iter().enumerate() {
@@ -246,7 +251,7 @@ fn stamp(
                 continue;
             }
             if let Some((c, coverage)) = ink(ch) {
-                let at = ArtAt {
+                let at = ArtPoint {
                     x: x + dx as i32,
                     y: y + dy as i32,
                 };

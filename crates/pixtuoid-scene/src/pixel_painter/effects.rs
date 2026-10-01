@@ -142,7 +142,7 @@ pub(crate) fn sleep_z_fade(phase_ms: u64) -> Option<(f32, f32)> {
 
 fn plot_sleep_z(
     plot: &mut impl FnMut(u16, u16, Rgb, f32),
-    head_anchor: Point,
+    at: Point,
     phase_ms: u64,
     theme: &Theme,
 ) {
@@ -151,8 +151,8 @@ fn plot_sleep_z(
         return;
     };
     let rise = (t * SLEEP_Z_MAX_RISE as f32) as u16;
-    let z_x = head_anchor.x + 5;
-    let z_y = head_anchor.y.saturating_sub(rise + 3);
+    let z_x = at.x + 5;
+    let z_y = at.y.saturating_sub(rise + 3);
     const GLYPH: &[(u16, u16)] = &[(0, 0), (1, 0), (1, 1), (0, 2), (1, 2)];
     for (dx, dy) in GLYPH {
         plot(z_x + dx, z_y + dy, z_color, alpha);

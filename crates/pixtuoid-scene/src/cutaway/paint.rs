@@ -1,6 +1,6 @@
 //! The cutaway profile's paint pass — the second reader of `SimFrame`. Of the
-//! [effects](crate::effects) it draws those riding on people
-//! ([`crate::cutaway::effects`]); steam and the pet stay with the classic pass.
+//! sim's effects it draws those riding on people (`cutaway::effects`); steam
+//! and the pet stay with the classic pass.
 //! It never advances the sim; a mover here would desync the profiles.
 
 use pixtuoid_core::sprite::RgbBuffer;
@@ -1809,7 +1809,7 @@ fn riders(
     let head = key.dress.as_ref().map(|dress| {
         let (d, frame_w) = (i32::from(d), i32::from(w) * i32::from(d));
         let x = i32::from(dress.head.x);
-        crate::cutaway::effects::ArtAt {
+        crate::cutaway::effects::ArtPoint {
             x: i32::from(at.x) * d + if key.frame.flip_x { frame_w - 1 - x } else { x },
             y: i32::from(at.y) * d + dress.crest,
         }
@@ -4759,6 +4759,79 @@ S B B B B B B S
                 "no {sprite} prop was painted: {props:?}"
             );
         }
+    }
+
+    /// At the art's density the waiting mark and a z float clear of their
+    /// figure's badge however far the z has risen, the z only climbs and drifts
+    /// away, and the dust lies along the stepping foot's row.
+    #[test]
+    fn the_dense_looks_keep_their_places() {
+        use crate::effects::EffectKind as K;
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale,
+        };
+        let mut frame = frames.last().expect("a seated frame").clone();
+        for c in &mut frame.characters {
+            c.effects = every_effect(c.anchor);
+        }
+        let list = list_at(&frame, office, 12);
+        let badge = list
+            .pieces()
+            .iter()
+            .find(|p| matches!(p.kind, PieceKind::Badge { .. }))
+            .expect("the badge")
+            .span;
+        let rider = |kind| {
+            list.pieces()
+                .iter()
+                .find_map(|p| match p.kind {
+                    PieceKind::Effect(r) if r.effect.kind == kind => Some((r, p.span)),
+                    _ => None,
+                })
+                .expect("the rider")
+        };
+        let clear =
+            |s: Span| s.x1 < badge.x0 || badge.x1 < s.x0 || s.y1 < badge.y0 || badge.y1 < s.y0;
+        let (_, mark) = rider(K::WaitingMark);
+        assert!(
+            clear(mark),
+            "the mark {mark:?} lands on the badge {badge:?}"
+        );
+        let (z, _) = rider(K::SleepZ);
+        let mut last: Option<Span> = None;
+        for phase in (0..crate::effects::SLEEP_Z_RISE_MS).step_by(100) {
+            let r = crate::cutaway::effects::Riding {
+                effect: crate::effects::Effect { phase, ..z.effect },
+                ..z
+            };
+            let Some(s) = r.span(theme, 0) else {
+                continue;
+            };
+            assert!(
+                clear(s),
+                "the z at {phase} ms {s:?} lands on the badge {badge:?}"
+            );
+            if let Some(l) = last {
+                assert!(
+                    s.y0 <= l.y0 && s.x0 >= l.x0,
+                    "the z sank or drifted back at {phase} ms"
+                );
+            }
+            last = Some(s);
+        }
+        let (dust, span) = rider(K::WalkingDust);
+        let foot =
+            crate::pixel_painter::effects::walking_dust_foot(dust.effect.at, dust.effect.phase);
+        assert!(
+            (span.x0..=span.x1).contains(&foot.x) && (span.y0..=span.y1).contains(&foot.y),
+            "the dust {span:?} is off the foot {foot:?}"
+        );
     }
 
     /// A figure's dust paints straight before them and their other riders
