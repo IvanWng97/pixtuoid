@@ -10,6 +10,7 @@ use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::effects::{Effect, EffectKind};
 use crate::pixel_painter::effects::{
     FLAME_CORE, FLAME_DEEP, FLAME_MID, FLAME_TIP, SLEEP_Z_MAX_RISE, plot_effect, sleep_z_fade,
+    walking_dust_foot,
 };
 use crate::theme::Theme;
 
@@ -211,11 +212,9 @@ fn dense_look(e: Effect, head: ArtAt, theme: &Theme, emit: &mut impl FnMut(ArtAt
             });
         }
         EffectKind::WalkingDust => {
-            // The classic's foot columns, on the layout grid the walker's
-            // anchor shares with it.
-            let foot = if e.phase == 0 { 6 } else { 1 };
-            let x = (i32::from(e.at.x) + foot) * d + d / 2 - glyph_w(DUST) / 2;
-            let y = (i32::from(e.at.y) + i32::from(crate::layout::WALKING_Y_OFF)) * d - 1;
+            let foot = walking_dust_foot(e.at, e.phase);
+            let x = i32::from(foot.x) * d + d / 2 - glyph_w(DUST) / 2;
+            let y = i32::from(foot.y) * d - 1;
             stamp(DUST, x, y, emit, |_| {
                 Some((theme.effects.walking_dust, 1.0))
             });

@@ -1755,7 +1755,7 @@ fn push_characters(
         let hair = key
             .dress
             .as_ref()
-            .map_or(0, |d| d.rise.div_ceil(key.frame.density.get()));
+            .map_or(0, |d| d.rise().div_ceil(key.frame.density.get()));
         let top = crate::layout::Point {
             x: at.x,
             y: at.y.saturating_sub(hair),

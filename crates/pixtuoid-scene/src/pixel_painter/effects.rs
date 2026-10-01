@@ -185,16 +185,23 @@ fn plot_steam_puff(
     plot(px, py, theme.effects.coffee_steam, alpha * 0.55);
 }
 
+/// The cell under the foot a walker anchored at `walker_anchor` steps on with
+/// stride frame `stride`, where its dust rises.
+pub(crate) fn walking_dust_foot(walker_anchor: Point, stride: u64) -> Point {
+    Point {
+        x: walker_anchor.x + if stride == 0 { 6 } else { 1 },
+        y: walker_anchor.y + WALKING_Y_OFF,
+    }
+}
+
 fn plot_walking_dust(
     plot: &mut impl FnMut(u16, u16, Rgb, f32),
     walker_anchor: Point,
     stride: u64,
     theme: &Theme,
 ) {
-    let dust = theme.effects.walking_dust;
-    let foot_y = walker_anchor.y + WALKING_Y_OFF;
-    let foot_x = walker_anchor.x + if stride == 0 { 6 } else { 1 };
-    plot(foot_x, foot_y, dust, 0.45);
+    let foot = walking_dust_foot(walker_anchor, stride);
+    plot(foot.x, foot.y, theme.effects.walking_dust, 0.45);
 }
 
 /// One floating heart for the "pet the cat" interaction.
