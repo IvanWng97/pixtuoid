@@ -5778,18 +5778,21 @@ S B B B B B B S
             };
             let list = list_at(&frame, office, 12);
             let pieces = list.pieces();
-            let at_of: Vec<usize> = pieces
+            let creatures: Vec<usize> = pieces
                 .iter()
                 .enumerate()
                 .filter(|(_, p)| matches!(p.kind, PieceKind::Creature { .. }))
                 .map(|(i, _)| i)
                 .collect();
-            assert_eq!(at_of.len(), 2, "at scale {s}, the pet and the mascot");
-            for (&i, ridden) in at_of.iter().zip(riders) {
+            assert_eq!(creatures.len(), 2, "at scale {s}, the pet and the mascot");
+            // The pet faces west; the mascot never turns.
+            let facing = [Flip::Horizontal, Flip::None];
+            for ((&i, ridden), flip) in creatures.iter().zip(riders).zip(facing) {
                 let p = &pieces[i];
                 let PieceKind::Creature { at, art, .. } = p.kind else {
                     unreachable!("filtered to creatures");
                 };
+                assert_eq!(art.flip, flip, "at scale {s} {} faces wrong", art.sprite);
                 let h = crate::embedded_pack::densest_frame(
                     &pack,
                     art.sprite,
