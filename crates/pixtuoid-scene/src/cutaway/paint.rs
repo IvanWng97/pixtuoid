@@ -1928,7 +1928,7 @@ pub(crate) fn assert_variant_desk_foot(
     // The room darkens every pixel by the hour's steps; its lights must be off.
     let tones = crate::atmosphere::SkyTones::resolve(&crate::sky::Sky::clock(now), theme);
     let ambient = crate::cutaway::light::Ambient::of(&tones);
-    let mut floor = RgbBuffer::filled(
+    let mut ground = RgbBuffer::filled(
         scale.to_buffer(layout.buf_w),
         scale.to_buffer(layout.buf_h),
         theme.surface.bg_fallback,
@@ -1937,7 +1937,7 @@ pub(crate) fn assert_variant_desk_foot(
         layout,
         Ground::of(theme, tones.ground_tint),
         Pen::for_pack(scale, base_pack),
-        &mut floor,
+        &mut ground,
     );
     let buf_w = usize::from(scale.to_buffer(layout.buf_w));
     let face = desk_front_h();
@@ -1993,12 +1993,12 @@ pub(crate) fn assert_variant_desk_foot(
         let x = x0 + 1;
         for y in below..=below + face {
             assert!(
-                ground_or_its_shadow(at(variant, x, y), at(floor.as_slice(), x, y)),
+                ground_or_its_shadow(at(variant, x, y), at(ground.as_slice(), x, y)),
                 "a variant draws its own front: under its art lies floor or its shadow"
             );
         }
         assert!(
-            !ground_or_its_shadow(at(base, x, below), at(floor.as_slice(), x, below)),
+            !ground_or_its_shadow(at(base, x, below), at(ground.as_slice(), x, below)),
             "the base gets a derived face under its art"
         );
     }
@@ -4503,7 +4503,7 @@ pub(crate) mod tests {
 
     /// The layout leaves walkable rows between the wall band and `top_margin`.
     #[test]
-    fn the_wall_band_stops_where_the_layout_says_the_floor_begins() {
+    fn the_wall_band_stops_where_the_layout_says_the_ground_begins() {
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let band_h = layout.wall_band_h();
         assert!(band_h > 0, "a laid-out office has a wall band");
@@ -4518,7 +4518,7 @@ pub(crate) mod tests {
     /// The floor is tiled on its own grid, from the wall's foot: a seam sits
     /// under the tile beside it, on the lit floor and the dark alike.
     #[test]
-    fn the_floor_is_tiled_from_the_wall_foot() {
+    fn the_ground_is_tiled_from_the_wall_foot() {
         let layout = Layout::compute_with_seed(160, 110, None, 0).expect("lays out");
         assert_ne!(
             layout.wall_band_h() % GROUND_TILE,
@@ -4526,7 +4526,7 @@ pub(crate) mod tests {
             "a wall foot off the buffer's own grid, or one anchored at row 0 passes too"
         );
         let s = 8;
-        let (pen, buf) = floor(&layout, s, 4);
+        let (pen, buf) = ground(&layout, s, 4);
         let luma = |x: u16, y: u16| buf.get(x, y).lightness();
         let k = s / 4;
         let tile = pen.art(GROUND_TILE).0 * k;
@@ -4548,9 +4548,9 @@ pub(crate) mod tests {
     /// At 1x a seam every tile would be a quarter of the ground, so there are
     /// none: the lit zone is one flat tone.
     #[test]
-    fn a_1x_floor_has_no_seams() {
+    fn a_1x_ground_has_no_seams() {
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
-        let (_, buf) = floor(&layout, 1, 1);
+        let (_, buf) = ground(&layout, 1, 1);
         let y = layout.wall_band_h() + 1;
         assert!(
             (0..buf.width()).all(|x| buf.get(x, y) == crate::theme::NORMAL.surface.carpet_light),
@@ -4560,7 +4560,7 @@ pub(crate) mod tests {
 
     /// The floor alone at scale `s`, drawn from art at density `d`, in the
     /// normal theme.
-    fn floor(layout: &Layout, s: u16, d: u16) -> (Pen, RgbBuffer) {
+    fn ground(layout: &Layout, s: u16, d: u16) -> (Pen, RgbBuffer) {
         let scale = RenderScale::new(s).expect("nonzero");
         let pen = Pen::new(scale, d).expect("d divides s");
         let mut buf = RgbBuffer::filled(
@@ -4574,7 +4574,7 @@ pub(crate) mod tests {
 
     /// Every rug in the office lies on the ground, the lounge's among them.
     #[test]
-    fn every_rug_lies_on_the_floor() {
+    fn every_rug_lies_on_the_ground() {
         let pack = test_default_pack();
         let theme = &crate::theme::NORMAL;
         let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
@@ -4690,7 +4690,7 @@ pub(crate) mod tests {
     /// A shadow short of one whole stop still darkens the ground: the falloff
     /// rounds to its nearest stop, where flooring would drop it.
     #[test]
-    fn a_shadow_short_of_one_stop_still_darkens_the_floor() {
+    fn a_shadow_short_of_one_stop_still_darkens_the_ground() {
         let pen = Pen::new(RenderScale::ONE, 1).expect("d divides s");
         let mut buf = RgbBuffer::filled(12, 12, WEST);
         paint_ground_shadows(
@@ -4705,7 +4705,7 @@ pub(crate) mod tests {
     /// A shadow is the ground it falls on, darker toward its centre: whole ramp
     /// stops of that floor's own colour, never a colour of its own.
     #[test]
-    fn a_shadow_steps_the_floor_it_falls_on_darker_toward_its_centre() {
+    fn a_shadow_steps_the_ground_it_falls_on_darker_toward_its_centre() {
         let buf = shadowed(8, 4, &[seam_shadow()]);
         let deepest = deepest_shadow_stop();
         let (cx, cy) = (6 * 8, 6 * 8);
@@ -4720,9 +4720,9 @@ pub(crate) mod tests {
             |c, floor: pixtuoid_core::sprite::Rgb| (0..=deepest).any(|k| c == floor.ramp(-k));
         for y in 0..buf.height() {
             for x in 0..buf.width() {
-                let floor = if x < buf.width() / 2 { WEST } else { EAST };
+                let ground = if x < buf.width() / 2 { WEST } else { EAST };
                 assert!(
-                    stepped(buf.get(x, y), floor),
+                    stepped(buf.get(x, y), ground),
                     "({x}, {y}) is its floor, stepped"
                 );
             }
@@ -4768,7 +4768,7 @@ pub(crate) mod tests {
     /// A solid casts its shadow under its south edge; a prop's upper band does
     /// not.
     #[test]
-    fn what_meets_the_floor_casts_a_shadow() {
+    fn what_meets_the_ground_casts_a_shadow() {
         let pack = test_default_pack();
         let span = Span::new(10, 10, 8, 12, 0);
         let chair = PieceKind::Chair {
@@ -4895,7 +4895,7 @@ pub(crate) mod tests {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
         let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
-        let floor = pixtuoid_core::sprite::Rgb {
+        let ground = pixtuoid_core::sprite::Rgb {
             r: 150,
             g: 110,
             b: 72,
@@ -4924,7 +4924,7 @@ pub(crate) mod tests {
             let mut buf = RgbBuffer::filled(
                 scale.to_buffer(layout.buf_w),
                 scale.to_buffer(layout.buf_h),
-                floor,
+                ground,
             );
             paint_ground_shadows(
                 std::iter::once(shadow),
@@ -4934,7 +4934,7 @@ pub(crate) mod tests {
             );
             let reach = piece.reach();
             for (i, &c) in buf.as_slice().iter().enumerate() {
-                if c != floor {
+                if c != ground {
                     let w = usize::from(buf.width());
                     let (x, y) = (scale.logical((i % w) as u16), scale.logical((i / w) as u16));
                     assert!(
@@ -6883,7 +6883,7 @@ S B B B B B B S
     }
 
     #[test]
-    fn the_walls_contact_row_is_the_floor_a_shade_down() {
+    fn the_walls_contact_row_is_the_ground_a_shade_down() {
         let pack = test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
@@ -7835,7 +7835,7 @@ S B B B B B B S
     /// figure north of a whiteboard between pods goes behind it; decor that
     /// only hangs on the band is left to the backdrop.
     #[test]
-    fn floor_standing_wall_decor_sorts_with_the_floor() {
+    fn ground_standing_wall_decor_sorts_with_the_ground() {
         let pack = test_default_pack();
         let mut standing = 0;
         for layout in many_layouts() {
@@ -7862,9 +7862,9 @@ S B B B B B B S
         let (w, h) = base_size(&pack, MEETING_SOFA_NORTH);
         for s in [1, pack.max_density_variant().get()] {
             let scale = RenderScale::new(s).expect("nonzero");
-            let floor = pixtuoid_core::sprite::Rgb { r: 1, g: 2, b: 3 };
+            let ground = pixtuoid_core::sprite::Rgb { r: 1, g: 2, b: 3 };
             let blank =
-                || RgbBuffer::filled(scale.to_buffer(w + 40), scale.to_buffer(h + 20), floor);
+                || RgbBuffer::filled(scale.to_buffer(w + 40), scale.to_buffer(h + 20), ground);
             let (mut whole, mut split) = (blank(), blank());
             paint_art(
                 sofa,
@@ -7923,7 +7923,7 @@ S B B B B B B S
     #[cfg(feature = "density-art")]
     fn only_the_top_down_base_desk_gets_a_derived_front_face() {
         let pack = test_default_pack();
-        let floor = pixtuoid_core::sprite::Rgb { r: 1, g: 2, b: 3 };
+        let ground = pixtuoid_core::sprite::Rgb { r: 1, g: 2, b: 3 };
         let at = crate::layout::Point { x: 1, y: 1 };
         let (bw, bh) = base_size(&pack, "desk");
         let span = desk_span(&pack, "desk", at, RenderScale::ONE).expect("desk is in the pack");
@@ -7932,7 +7932,7 @@ S B B B B B B S
             let mut buf = RgbBuffer::filled(
                 scale.to_buffer(bw + 2 * at.x),
                 scale.to_buffer(span.y0 + bh + desk_front_h() + 1),
-                floor,
+                ground,
             );
             paint_desk(
                 at,
@@ -7947,7 +7947,7 @@ S B B B B B B S
                 scale.to_buffer(span.y0 + bh),
             );
             assert_eq!(
-                buf.get(x, below) != floor,
+                buf.get(x, below) != ground,
                 face,
                 "scale {s}: the row under the art is {}",
                 if face {

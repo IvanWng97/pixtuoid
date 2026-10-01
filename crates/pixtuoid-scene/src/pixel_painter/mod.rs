@@ -330,8 +330,8 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
         paint_light(ctx.buf, spill, ctx.theme.lighting.sun_spill);
     }
 
-    // An empty floor reads dark because its artificial lights go out with
-    // `indoor_scale`, not because the FLOOR takes a second darkening of its own.
+    // An empty ground reads dark because its artificial lights go out with
+    // `indoor_scale`, not because the GROUND takes a second darkening of its own.
     paint_ground_wash(ctx.buf, top_wall_h, buf_h, look.ground_wash);
     if let Some(lamp) = &lights.floor_lamp {
         paint_light(ctx.buf, lamp, ctx.theme.lighting.floor_lamp_halo);

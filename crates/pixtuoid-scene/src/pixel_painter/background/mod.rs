@@ -103,7 +103,7 @@ impl BaseFillCache {
     }
 }
 
-/// The floor and the north wall band `top_wall_h` tall with the windows `bays`,
+/// The ground and the north wall band `top_wall_h` tall with the windows `bays`,
 /// over the whole of `buf`, at `moment`.
 pub(super) fn paint_ground_and_walls(
     base_fill: &mut BaseFillCache,
