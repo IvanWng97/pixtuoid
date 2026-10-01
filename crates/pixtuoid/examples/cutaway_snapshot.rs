@@ -135,9 +135,7 @@ fn main() -> Result<()> {
     }
     let theme =
         theme_by_name(&theme_name).ok_or_else(|| anyhow!("unknown theme {theme_name:?}"))?;
-    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-        pixtuoid_scene::embedded_pack::PackSource::Bundled,
-    )?;
+    let pack = pixtuoid_scene::embedded_pack::load_bundled_pack()?;
     // Defaults to the pack's densest art, the density it was drawn for.
     let scale_n = scale_n.unwrap_or_else(|| pack.max_density_variant());
     let scale = RenderScale::new(scale_n).ok_or_else(|| anyhow!("--scale must be nonzero"))?;
