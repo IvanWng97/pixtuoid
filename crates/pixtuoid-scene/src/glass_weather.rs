@@ -23,6 +23,7 @@ pub(crate) struct GlassWeather {
 }
 
 /// One weather's falling particles.
+#[derive(PartialEq)]
 struct Fall {
     count: u64,
     seed_mult: u64,
@@ -33,7 +34,7 @@ struct Fall {
     particle: Particle,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum Particle {
     /// A vertical streak `len_base + seed % len_mod` units long, its alpha
     /// falling from `alpha_base` by `alpha_falloff` over its length; `drift`
@@ -332,7 +333,7 @@ mod tests {
                     .falls
                     .iter()
                     .flatten()
-                    .find(|(fall, _)| std::ptr::eq(*fall, of))
+                    .find(|(fall, _)| *fall == of)
                     .map_or(0, |&(_, n)| n)
             };
             (count(&RAIN), count(&STORM))
