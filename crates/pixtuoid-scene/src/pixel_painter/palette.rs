@@ -407,24 +407,6 @@ pub(super) fn agent_overrides(
     ]
 }
 
-/// The exhaustive `ToolKind → hue` map. Read by the office monitor glow AND, via
-/// re-export, by the binary's footer tool-segment tint, so the two share one hue
-/// per tool.
-pub fn tool_glow_for_kind(
-    kind: pixtuoid_core::state::ToolKind,
-    glow: &crate::theme::ToolGlowColors,
-) -> Rgb {
-    use pixtuoid_core::state::ToolKind;
-    match kind {
-        ToolKind::Edit => glow.edit,
-        ToolKind::Read => glow.read,
-        ToolKind::Bash => glow.bash,
-        ToolKind::Task => glow.agent,
-        ToolKind::Search => glow.grep,
-        ToolKind::Other => glow.default,
-    }
-}
-
 /// The monitor glow color for an agent's active tool, or `None` when the agent
 /// is not Active.
 pub(super) fn tool_glow_tint(
@@ -433,7 +415,7 @@ pub(super) fn tool_glow_tint(
 ) -> Option<Rgb> {
     use pixtuoid_core::state::ActivityState;
     match &agent.state {
-        ActivityState::Active { kind, .. } => Some(tool_glow_for_kind(*kind, glow)),
+        ActivityState::Active { kind, .. } => Some(glow.for_kind(*kind)),
         _ => None,
     }
 }

@@ -822,7 +822,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             scale.to_buffer(layout.buf_h),
             theme.surface.bg_fallback,
         );
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         let office = crate::cutaway::paint::Office {
             layout: &layout,
             pack,
@@ -971,7 +971,7 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
             scale.to_buffer(layout.buf_h),
             theme.surface.bg_fallback,
         );
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         crate::cutaway::paint::render_cutaway(
             &unlit_room(&frame),
             crate::cutaway::paint::Office {
@@ -1124,7 +1124,7 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
             scale.to_buffer(layout.buf_h),
             theme.surface.bg_fallback,
         );
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         crate::cutaway::paint::render_cutaway(
             &unlit_room(frame),
             crate::cutaway::paint::Office {
@@ -1791,12 +1791,12 @@ fn every_hover_size_is_its_painted_sprite_size() {
         (
             "LARGE_COUNTER".into(),
             LARGE_COUNTER,
-            super::pantry_counter_anim(LARGE_COUNTER.w),
+            crate::layout::pantry_counter_anim(LARGE_COUNTER.w),
         ),
         (
             "COMPACT_COUNTER".into(),
             COMPACT_COUNTER,
-            super::pantry_counter_anim(COMPACT_COUNTER.w),
+            crate::layout::pantry_counter_anim(COMPACT_COUNTER.w),
         ),
     ];
     pieces.extend(
@@ -2408,24 +2408,8 @@ fn kind_derivation_reproduces_the_string_parse_tint_for_representative_displays(
 }
 
 #[test]
-fn tool_glow_for_kind_is_the_shared_kind_to_hue_map() {
-    use pixtuoid_core::state::ToolKind;
+fn tool_glow_tint_is_none_unless_active() {
     let glow = &crate::theme::NORMAL.tool_glow;
-    assert_eq!(palette::tool_glow_for_kind(ToolKind::Edit, glow), glow.edit);
-    assert_eq!(palette::tool_glow_for_kind(ToolKind::Read, glow), glow.read);
-    assert_eq!(palette::tool_glow_for_kind(ToolKind::Bash, glow), glow.bash);
-    assert_eq!(
-        palette::tool_glow_for_kind(ToolKind::Task, glow),
-        glow.agent
-    );
-    assert_eq!(
-        palette::tool_glow_for_kind(ToolKind::Search, glow),
-        glow.grep
-    );
-    assert_eq!(
-        palette::tool_glow_for_kind(ToolKind::Other, glow),
-        glow.default
-    );
     let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
     let edit = make_slot(
         id,

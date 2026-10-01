@@ -34,8 +34,6 @@ pub struct FrameCache {
     entries: HashMap<FrameKey, Frame>,
     /// Last-seen outfit-determining seed per agent.
     outfit_seeds: HashMap<AgentId, u64>,
-    pub(crate) net_colours: crate::cutaway::light::NetMemo,
-    pub(crate) cutaway_art: crate::cutaway::paint::ArtCache,
 }
 
 impl FrameCache {

@@ -90,7 +90,7 @@ pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[E
     }
     for halo in halos {
         if let EmitterKind::MonitorHalo(tool) = halo.kind {
-            let color = crate::pixel_painter::palette::tool_glow_for_kind(tool, &theme.tool_glow);
+            let color = theme.tool_glow.for_kind(tool);
             paint_light(buf, halo, color);
         }
     }
