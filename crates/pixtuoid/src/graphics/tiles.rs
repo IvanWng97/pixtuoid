@@ -5,7 +5,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
 
 use crossterm::{Command, cursor::MoveTo};
-use pixtuoid_core::sprite::RgbBuffer;
+use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_scene::cutaway::canvas::Dirty;
 use pixtuoid_scene::layout::Bounds;
 use ratatui::layout::Position;
@@ -167,9 +167,7 @@ impl Tiles {
     pub(crate) fn image(&self, buf: &RgbBuffer, tile: Tile) -> TileImage {
         let (cw, ch) = (u32::from(self.cell.w), u32::from(self.cell.h));
         let (width, height) = (u32::from(tile.cols) * cw, u32::from(tile.rows) * ch);
-        let src = |px: u32, edge: u16| {
-            u16::try_from(px / self.upscale).map_or(edge - 1, |b| b.min(edge - 1))
-        };
+        let src = |px, edge| self.source_px(px, edge);
         let mut rgb = Vec::with_capacity((width * height * 3) as usize);
         for y in 0..height {
             let by = src(u32::from(tile.row) * ch + y, buf.height());
@@ -184,6 +182,30 @@ impl Tiles {
             height,
             rgb,
         }
+    }
+
+    /// The image as the classic flush shows it, one buffer column and two rows
+    /// a cell: each the buffer pixel at the middle of that half of the cell.
+    pub(crate) fn half_blocks(&self, buf: &RgbBuffer) -> RgbBuffer {
+        let (cw, ch) = (u32::from(self.cell.w), u32::from(self.cell.h));
+        let (iw, ih) = self.image_px();
+        let (cols, rows) = (iw.div_ceil(cw), ih.div_ceil(ch));
+        let side = |n: u32| u16::try_from(n).unwrap_or(u16::MAX);
+        let mut out = RgbBuffer::filled(side(cols), side(rows * 2), Rgb { r: 0, g: 0, b: 0 });
+        for y in 0..out.height() {
+            let by = self.source_px(u32::from(y) * ch / 2 + ch / 4, buf.height());
+            for x in 0..out.width() {
+                let bx = self.source_px(u32::from(x) * cw + cw / 2, buf.width());
+                out.put(x, y, buf.get(bx, by));
+            }
+        }
+        out
+    }
+
+    /// The buffer pixel image pixel `px` upscales, clamped to a buffer `edge`
+    /// pixels long.
+    fn source_px(&self, px: u32, edge: u16) -> u16 {
+        u16::try_from(px / self.upscale).map_or(edge - 1, |b| b.min(edge - 1))
     }
 
     /// One tile's extent in image pixels on each axis.

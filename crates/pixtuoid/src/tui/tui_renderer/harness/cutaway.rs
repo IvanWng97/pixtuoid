@@ -263,3 +263,69 @@ fn the_protocols_cadence_gates_its_transmits() {
     r.render(&scene, pack(), t0() + cadence).expect("render");
     assert!(wire.take().contains(SIXEL));
 }
+
+/// The image's cells, by tile, as `(tile col, tile row)` → the symbols there.
+fn image_tiles(
+    r: &TuiRenderer<TestBackend>,
+    rows: u16,
+) -> std::collections::BTreeMap<(u16, u16), Vec<String>> {
+    let shape = ImageProtocol::Sixel.tile();
+    let buf = r.frame_buffer();
+    let mut tiles = std::collections::BTreeMap::<_, Vec<String>>::new();
+    for y in 0..rows - 1 {
+        for x in 0..buf.area.width {
+            let at = (x / shape.cols, y / shape.rows);
+            tiles
+                .entry(at)
+                .or_default()
+                .push(buf[(x, y)].symbol().to_string());
+        }
+    }
+    tiles
+}
+
+/// A withheld tile's cells the modal leaves free show the frame as
+/// half-blocks, and only those: a tile no modal reaches would be half-blocks
+/// throughout. Once the modal closes, each such tile is drawn again.
+#[test]
+fn a_withheld_tiles_free_cells_show_half_blocks_until_it_returns() {
+    const HALF_BLOCK: &str = "\u{2580}";
+    let (cols, rows) = (120, 40);
+    let (mut r, wire) = painter(cols, rows, ImageProtocol::Sixel);
+    let scene = office();
+    let cadence = ImageProtocol::Sixel.cadence();
+    r.render(&scene, pack(), t0()).expect("render");
+    wire.take();
+    r.set_help_open(true);
+    r.render(&scene, pack(), t0() + cadence).expect("render");
+    let filled: Vec<(u16, u16)> = image_tiles(&r, rows)
+        .into_iter()
+        .filter(|(_, cells)| cells.iter().any(|s| s == HALF_BLOCK))
+        .inspect(|(at, cells)| {
+            assert!(
+                cells.iter().any(|s| s != HALF_BLOCK),
+                "tile {at:?} is all half-blocks: no modal reaches it"
+            );
+        })
+        .map(|(at, _)| at)
+        .collect();
+    assert!(!filled.is_empty());
+
+    r.set_help_open(false);
+    r.render(&scene, pack(), t0() + cadence * 2)
+        .expect("render");
+    let sent = wire.take();
+    let shape = ImageProtocol::Sixel.tile();
+    for (tx, ty) in &filled {
+        let to = format!(
+            "\x1b[{};{}H{SIXEL}",
+            ty * shape.rows + 1,
+            tx * shape.cols + 1
+        );
+        assert!(sent.contains(&to), "tile ({tx}, {ty}) drawn again");
+    }
+    r.redraw().expect("redraw");
+    r.render(&scene, pack(), t0() + cadence * 3)
+        .expect("render");
+    assert!(!frame_text(r.frame_buffer()).contains(HALF_BLOCK));
+}

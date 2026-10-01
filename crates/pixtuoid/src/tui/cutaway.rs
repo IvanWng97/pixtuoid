@@ -8,7 +8,8 @@
 //!   "Unicode placeholders").
 //! - SIXEL and iTerm2 draw pixels at the cursor. Their cells are left out of
 //!   ratatui's diff, and a tile under any text cell is withheld: text and
-//!   image never share a cell.
+//!   image never share a cell. The withheld tile's other cells show the
+//!   frame as half-blocks meanwhile.
 
 use std::io::Write;
 use std::sync::Arc;
@@ -16,7 +17,8 @@ use std::time::SystemTime;
 
 use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_scene::cutaway::canvas::CutawayCanvas;
+use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid_scene::cutaway::canvas::{CutawayCanvas, Dirty};
 use pixtuoid_scene::floor::{FloorMeta, ObservedFloor};
 use pixtuoid_scene::frame_cache::FrameCache;
 use pixtuoid_scene::layout::{Bounds, Size};
@@ -27,6 +29,7 @@ use ratatui::layout::{Position, Rect};
 use crate::graphics::tiles::{Changed, Tile, Tiles};
 use crate::graphics::{CellSize, Fit, ImageProtocol, iterm2, kitty, sixel};
 use crate::tui::geometry::SceneGeometry;
+use crate::tui::renderer::set_half_block;
 
 /// Where the transmits go: the terminal ratatui's backend also writes to.
 pub(crate) type Sink = Box<dyn Write + Send>;
@@ -51,6 +54,8 @@ pub(crate) struct TileCutaway {
     out: Sink,
     /// This frame's encoded tiles, written by [`Self::emit`].
     pending: Vec<(Changed, Vec<u8>)>,
+    /// The last frame painted, as [`Tiles::half_blocks`].
+    halves: RgbBuffer,
     /// When the last transmits were written, for the protocol's cadence.
     sent_at: Option<SystemTime>,
     /// A write failed, perhaps mid-escape: the next one opens with
@@ -80,6 +85,7 @@ impl TileCutaway {
             tiles: Tiles::new(protocol, cell, fit),
             out,
             pending: Vec::new(),
+            halves: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
             sent_at: None,
             torn: false,
         }
@@ -117,6 +123,9 @@ impl TileCutaway {
             &mut self.cache,
         );
         let changed = self.tiles.changed(frame.buf, &frame.dirty);
+        if self.protocol != ImageProtocol::Kitty && frame.dirty != Dirty::Rects(Vec::new()) {
+            self.halves = self.tiles.half_blocks(frame.buf);
+        }
         let due = self.sent_at.is_none_or(|at| {
             now.duration_since(at)
                 .map_or(true, |since| since >= self.protocol.cadence())
@@ -166,8 +175,9 @@ impl TileCutaway {
         }
     }
 
-    /// The tiles under text drawn since [`Self::place`], whose cells it
-    /// hands back to ratatui's diff. Kitty's text needs no room made.
+    /// The tiles under text drawn since [`Self::place`], all of whose cells
+    /// it hands back to ratatui's diff: the text, and the rest as
+    /// half-blocks. Kitty's text needs no room made.
     pub(crate) fn cover(&self, buf: &mut Buffer, scene: Rect) -> Vec<u32> {
         if self.protocol == ImageProtocol::Kitty {
             return Vec::new();
@@ -175,17 +185,27 @@ impl TileCutaway {
         let sentinel = sentinel();
         let mut covered = Vec::new();
         for tile in self.tiles.all() {
-            let mut under_text = false;
-            for (col, row) in cells(tile) {
-                if let Some(cell) = image_cell(buf, scene, col, row)
-                    && *cell != sentinel
-                {
-                    cell.set_diff_option(CellDiffOption::None);
-                    under_text = true;
-                }
+            let under_text = cells(tile).any(|(col, row)| {
+                image_cell(buf, scene, col, row).is_some_and(|cell| *cell != sentinel)
+            });
+            if !under_text {
+                continue;
             }
-            if under_text {
-                covered.push(tile.index);
+            covered.push(tile.index);
+            for (col, row) in cells(tile) {
+                let Some(cell) = image_cell(buf, scene, col, row) else {
+                    continue;
+                };
+                if *cell == sentinel {
+                    let (top, bottom) = (row * 2, row * 2 + 1);
+                    if col < self.halves.width() && bottom < self.halves.height() {
+                        cell.reset();
+                        let half = |y| self.halves.get(col, y);
+                        set_half_block(cell, half(top), half(bottom));
+                    }
+                } else {
+                    cell.set_diff_option(CellDiffOption::None);
+                }
             }
         }
         covered
