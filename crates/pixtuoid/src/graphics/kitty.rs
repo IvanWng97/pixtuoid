@@ -50,28 +50,33 @@ pub(crate) fn image_id(tile: Tile) -> Option<u32> {
 ///
 /// `q=2` on every chunk: a reply would arrive as input mid-frame.
 pub(crate) fn transmit(id: u32, image: &TileImage, tmux: bool) -> Vec<u8> {
-    let (start, esc, end) = Parser::tmux_start_escape_end(tmux);
     let zlib = compress_to_vec_zlib(&image.rgb, CompressionLevel::BestSpeed as u8);
-    let data = base64_simd::STANDARD.encode_to_string(zlib);
-    let chunks = data.as_bytes().chunks(CHUNK);
+    let TileImage {
+        tile,
+        width,
+        height,
+        ..
+    } = image;
+    let keys = format!(
+        "a=T,U=1,i={id},f=24,o=z,s={width},v={height},c={},r={},",
+        tile.cols, tile.rows
+    );
+    chunked(
+        &keys,
+        base64_simd::STANDARD.encode_to_string(zlib).as_bytes(),
+        tmux,
+    )
+}
+
+fn chunked(keys: &str, payload: &[u8], tmux: bool) -> Vec<u8> {
+    let (start, esc, end) = Parser::tmux_start_escape_end(tmux);
+    let chunks = payload.chunks(CHUNK);
     let last = chunks.len().saturating_sub(1);
-    let mut out = Vec::with_capacity(data.len() + 128);
+    let mut out = Vec::with_capacity(payload.len() + 128);
     for (i, chunk) in chunks.enumerate() {
         out.extend_from_slice(format!("{start}{esc}_G").as_bytes());
         if i == 0 {
-            let TileImage {
-                tile,
-                width,
-                height,
-                ..
-            } = image;
-            out.extend_from_slice(
-                format!(
-                    "a=T,U=1,i={id},f=24,o=z,s={width},v={height},c={},r={},",
-                    tile.cols, tile.rows
-                )
-                .as_bytes(),
-            );
+            out.extend_from_slice(keys.as_bytes());
         }
         out.extend_from_slice(format!("q=2,m={};", u8::from(i < last)).as_bytes());
         out.extend_from_slice(chunk);
@@ -199,6 +204,19 @@ mod tests {
         }
         assert!(last.contains("m=0;"));
         assert!((1..=CHUNK).contains(&chunks.last().expect("chunk").len()));
+    }
+
+    #[test]
+    fn the_last_chunk_says_none_follow() {
+        let flags = |len: usize| -> Vec<bool> {
+            escapes(&chunked("", &vec![b'A'; len], false))
+                .iter()
+                .map(|e| e.contains("m=1;"))
+                .collect()
+        };
+        assert_eq!(flags(CHUNK), [false]);
+        assert_eq!(flags(CHUNK + 1), [true, false]);
+        assert_eq!(flags(2 * CHUNK), [true, false]);
     }
 
     #[test]
