@@ -156,6 +156,10 @@ const BEACON_IN: u32 = 2;
 const BEACON_HALF_MS: u64 = 1_200;
 /// Tells the lights' hashes apart from the planes'.
 const BEACON_SALT: u32 = 0xB1EC;
+/// Tells a light's phase apart from its choice: on [`BEACON_SALT`]'s hash,
+/// which a carrier needs a multiple of [`BEACON_IN`], every light would
+/// blink in unison.
+const BEACON_PHASE_SALT: u32 = 0x9A5E;
 
 /// Whether `stand` carries a light: a near building the pack draws as tall
 /// as its `tallest`, a few of them. The band crops every near tower to one
@@ -178,7 +182,7 @@ fn tallest_near(pack: &Pack) -> u16 {
 /// Whether the light on a stand hashed `hash` shines at `now`: on and off a
 /// [`BEACON_HALF_MS`] each, out of step with its neighbours'.
 fn beacon_on(hash: u32, now: SystemTime) -> bool {
-    (crate::anim::epoch_ms(now) / BEACON_HALF_MS + u64::from(self::hash(hash ^ BEACON_SALT)))
+    (crate::anim::epoch_ms(now) / BEACON_HALF_MS + u64::from(self::hash(hash ^ BEACON_PHASE_SALT)))
         .is_multiple_of(2)
 }
 
@@ -870,6 +874,27 @@ mod tests {
                 assert!(on_a_roof, "{d}: a light at ({x}, {y}) off any rooftop");
             }
         }
+    }
+
+    /// The towers' lights blink out of step: at one instant some carriers
+    /// are lit and others dark.
+    #[test]
+    fn aviation_lights_blink_out_of_step() {
+        let pack = pack();
+        let tallest = tallest_near(&pack);
+        let carriers: Vec<u32> = Skyline::of(&pack, 1200, 24, 0.0)
+            .stands()
+            .filter(|(plane, s)| carries_beacon(*plane, s, tallest))
+            .map(|(_, s)| s.hash())
+            .collect();
+        assert!(carriers.len() >= 2, "{} carriers", carriers.len());
+        let now = crate::localclock::at_hour(23);
+        let lit = carriers.iter().filter(|&&h| beacon_on(h, now)).count();
+        assert!(
+            0 < lit && lit < carriers.len(),
+            "{lit} of {} lit at once",
+            carriers.len()
+        );
     }
 
     #[test]
