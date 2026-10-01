@@ -5,7 +5,7 @@
 use pixtuoid_core::sprite::Rgb;
 
 use crate::dither::Dithered;
-use crate::sky::{BodyKind, Parameter, Sky, SkyBody, Transmission, Weather, WeatherMix};
+use crate::sky::{BodyKind, Element, Sky, SkyBody, Transmission, Weather, WeatherMix};
 use crate::theme::Theme;
 
 /// One frame's sky, resolved against the theme: [`SkyTones::resolve`] once per
@@ -156,10 +156,10 @@ impl SkyTones {
             ground_wash,
             object_wash,
             ground_tint: (
-                dithered(weather, Parameter::Cloud, weather_ground_tint),
+                dithered(weather, Element::Cloud, weather_ground_tint),
                 GROUND_TINT_SHARE,
             ),
-            glass_veil: dithered(weather, Parameter::Cloud, |w| {
+            glass_veil: dithered(weather, Element::Cloud, |w| {
                 glass_veil(w).map(|(color, alpha)| (lit(color, veil), alpha))
             }),
             golden_hour: golden_hour_blaze(body, &sky.transmission()),
@@ -169,15 +169,15 @@ impl SkyTones {
     }
 }
 
-/// `preset` under `weather`: the incoming weather's on `param`'s share of the
+/// `preset` under `weather`: the incoming weather's on `element`'s share of the
 /// pixels.
 fn dithered<T: Copy>(
     weather: WeatherMix,
-    param: Parameter,
+    element: Element,
     preset: impl Fn(Weather) -> T,
 ) -> Dithered<T> {
     let [from, to] = weather.ends();
-    Dithered::new(preset(from), preset(to), weather.eased(param))
+    Dithered::new(preset(from), preset(to), weather.eased(element))
 }
 
 /// `color` at `lum` of its own brightness, its hue kept.
@@ -522,7 +522,7 @@ mod tests {
             assert_eq!(veiled + clear, tile().count(), "sample {k}");
             assert_eq!(tinted + untinted, tile().count(), "sample {k}");
             assert_eq!(veiled, tinted, "sample {k}: one cloud share");
-            let share = mix.eased(Parameter::Cloud);
+            let share = mix.eased(Element::Cloud);
             assert!(
                 (veiled as f32 / pixels - share).abs() <= 1.0 / pixels,
                 "sample {k}: {veiled} of {pixels} at {share}"

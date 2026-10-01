@@ -588,10 +588,6 @@ fn at_secs(secs: u64) -> SystemTime {
     std::time::UNIX_EPOCH + Duration::from_secs(secs)
 }
 
-fn at_ms(ms: u64) -> SystemTime {
-    std::time::UNIX_EPOCH + Duration::from_millis(ms)
-}
-
 const SLOT_MS: u64 = WEATHER_CYCLE_SECS * 1000;
 const HOLD_MS: u64 = SLOT_MS - TRANSITION_MS;
 
@@ -609,10 +605,10 @@ fn progress() -> impl Iterator<Item = f32> {
     (0..SAMPLES).map(|k| k as f32 / SAMPLES as f32)
 }
 
-/// `param`'s `(start, end)` window for `from → to`, read off the eased share:
-/// where it first leaves 0 and first reaches 1.
-fn observed_window(from: Weather, to: Weather, param: Parameter) -> (f32, f32) {
-    let eased = |p| WeatherMix::toward(from, to, p).eased(param);
+/// `element`'s `(start, end)` stage for `from → to`, read off the eased
+/// share: where it first leaves 0 and first reaches 1.
+fn observed_stage(from: Weather, to: Weather, element: Element) -> (f32, f32) {
+    let eased = |p| WeatherMix::toward(from, to, p).eased(element);
     let start = progress()
         .take_while(|&p| eased(p) == 0.0)
         .last()
@@ -650,7 +646,7 @@ fn a_slot_holds_then_runs_into_the_next_slots_weather() {
     for slot in 0..SLOTS {
         let (here, next) = (slot_weather(slot), slot_weather(slot + 1));
         for into in (0..SLOT_MS).step_by(STRIDE_MS) {
-            let mix = clock_weather(at_ms(slot * SLOT_MS + into));
+            let mix = WeatherPolicy::Clock.weather_at_ms(slot * SLOT_MS + into);
             let want = match into.checked_sub(HOLD_MS) {
                 None => WeatherMix::pure(here),
                 Some(since) => WeatherMix::toward(here, next, since as f32 / TRANSITION_MS as f32),
@@ -662,46 +658,46 @@ fn a_slot_holds_then_runs_into_the_next_slots_weather() {
     assert!(changed > 0, "no slot changed weather in {SLOTS}");
 }
 
-/// Every parameter's share of the incoming weather starts at 0, never falls,
+/// Every element's share of the incoming weather starts at 0, never falls,
 /// and reaches 1 by the transition's end, for every change.
 #[test]
 fn every_share_rises_from_nothing_to_whole() {
     for (from, to) in changes() {
-        for param in Parameter::ALL {
-            let eased = |p| WeatherMix::toward(from, to, p).eased(param);
-            assert_eq!(eased(0.0), 0.0, "{from:?} -> {to:?} {param:?}");
+        for element in Element::ALL {
+            let eased = |p| WeatherMix::toward(from, to, p).eased(element);
+            assert_eq!(eased(0.0), 0.0, "{from:?} -> {to:?} {element:?}");
             assert!(
                 eased(1.0) == 1.0 && eased(1.0 - 1e-6) > 1.0 - 1e-3,
-                "{from:?} -> {to:?} {param:?}"
+                "{from:?} -> {to:?} {element:?}"
             );
             let mut prev = 0.0;
             for p in progress() {
                 let now = eased(p);
-                assert!(now >= prev, "{from:?} -> {to:?} {param:?} fell at {p}");
+                assert!(now >= prev, "{from:?} -> {to:?} {element:?} fell at {p}");
                 prev = now;
             }
         }
     }
 }
 
-/// Each parameter moves only inside its [`WINDOWS`] window, mirrored when the
-/// course runs backward: still before it, whole after it.
+/// Each element moves only inside its [`Course::stages`] stage, mirrored when
+/// the course runs backward: still before it, whole after it.
 #[test]
-fn each_parameter_moves_only_inside_its_window() {
+fn each_element_moves_only_inside_its_stage() {
     const EDGE: f32 = 2e-3;
     for (from, to) in changes() {
         let (course, backward) = Course::of(from, to);
-        for param in Parameter::ALL {
-            let (start, end) = WINDOWS[course as usize].of(param);
+        for element in Element::ALL {
+            let (start, end) = course.stages().of(element);
             let (start, end) = if backward {
                 (1.0 - end, 1.0 - start)
             } else {
                 (start, end)
             };
-            let (seen_start, seen_end) = observed_window(from, to, param);
+            let (seen_start, seen_end) = observed_stage(from, to, element);
             assert!(
                 (seen_start - start).abs() <= EDGE && (seen_end - end).abs() <= EDGE,
-                "{from:?} -> {to:?} {param:?}: moved over {seen_start}..{seen_end}, \
+                "{from:?} -> {to:?} {element:?}: moved over {seen_start}..{seen_end}, \
                  not {start}..{end}"
             );
         }
@@ -712,24 +708,24 @@ fn each_parameter_moves_only_inside_its_window() {
 /// rain heavies before its lightning and its lightning stops before its rain
 /// eases.
 #[test]
-fn the_parameters_move_in_their_weathers_order() {
-    let window = |from, to, param| observed_window(from, to, param);
+fn the_elements_move_in_their_weathers_order() {
+    let stage = |from, to, element| observed_stage(from, to, element);
     let before = |from, to, first, then| {
-        let (_, first_end) = window(from, to, first);
-        let (then_start, _) = window(from, to, then);
+        let (_, first_end) = stage(from, to, first);
+        let (then_start, _) = stage(from, to, then);
         assert!(
             first_end <= then_start,
             "{from:?} -> {to:?}: {first:?} ends at {first_end}, {then:?} starts at {then_start}"
         );
     };
-    use Parameter::{Cloud, Lightning, Precipitation};
+    use Element::{Cloud, Lightning, Precipitation};
     use Weather::{Clear, Rain, Storm};
     before(Clear, Rain, Cloud, Precipitation);
     before(Rain, Clear, Precipitation, Cloud);
     before(Rain, Storm, Precipitation, Lightning);
     before(Storm, Rain, Lightning, Precipitation);
-    let (rain_start, _) = window(Clear, Storm, Precipitation);
-    let (lightning_start, _) = window(Clear, Storm, Lightning);
+    let (rain_start, _) = stage(Clear, Storm, Precipitation);
+    let (lightning_start, _) = stage(Clear, Storm, Lightning);
     assert!(
         rain_start < lightning_start,
         "a storm's lightning comes last"
@@ -741,7 +737,7 @@ fn the_parameters_move_in_their_weathers_order() {
 #[test]
 fn precipitation_settles_clear_of_the_slot_boundary() {
     for (from, to) in changes() {
-        let (start, end) = observed_window(from, to, Parameter::Precipitation);
+        let (start, end) = observed_stage(from, to, Element::Precipitation);
         assert!(
             start >= FALL_SETTLE - 1e-3 && end <= 1.0 - FALL_SETTLE + 1e-3,
             "{from:?} -> {to:?}: {start}..{end}"
@@ -750,41 +746,41 @@ fn precipitation_settles_clear_of_the_slot_boundary() {
 }
 
 /// Mid-change, each parameter the sky hands on is its two presets' lerp by
-/// its parameter's share, and at either end exactly one preset's.
+/// its element's share, and at either end exactly one preset's.
 #[test]
 fn a_change_lerps_the_skys_parameters_between_the_presets() {
     type Handed = fn(&Sky) -> f32;
     type Preset = fn(Weather) -> f32;
     const SAMPLES: u64 = 24;
-    let params: [(&str, Parameter, Handed, Preset); 5] = [
+    let params: [(&str, Element, Handed, Preset); 5] = [
         (
             "direct",
-            Parameter::Cloud,
+            Element::Cloud,
             |s| s.transmission().direct,
             |w| transmission(w).direct,
         ),
         (
             "diffuse",
-            Parameter::Cloud,
+            Element::Cloud,
             |s| s.transmission().diffuse,
             |w| transmission(w).diffuse,
         ),
         (
             "disc",
-            Parameter::Cloud,
+            Element::Cloud,
             |s| s.transmission().disc,
             |w| transmission(w).disc,
         ),
         (
             "rain",
-            Parameter::Precipitation,
+            Element::Precipitation,
             Sky::precipitation,
             rain_level,
         ),
         (
             "city bounce",
-            Parameter::Cloud,
-            |s| s.weather().lerp(Parameter::Cloud, city_bounce),
+            Element::Cloud,
+            |s| s.weather().lerp(Element::Cloud, city_bounce),
             city_bounce,
         ),
     ];
@@ -792,8 +788,8 @@ fn a_change_lerps_the_skys_parameters_between_the_presets() {
         .find(|&s| slot_weather(s) == Weather::Clear && slot_weather(s + 1) == Weather::Storm)
         .expect("a slot a storm comes in on");
     let (here, next) = (Weather::Clear, Weather::Storm);
-    let sky = |ms| Sky::clock(at_ms(slot * SLOT_MS + ms));
-    for (name, param, of, preset) in params {
+    let sky = |ms| Sky::clock(std::time::UNIX_EPOCH + Duration::from_millis(slot * SLOT_MS + ms));
+    for (name, element, of, preset) in params {
         assert_eq!(of(&sky(0)), preset(here), "{name} opens on {here:?}'s");
         assert_eq!(
             of(&sky(SLOT_MS)),
@@ -802,7 +798,7 @@ fn a_change_lerps_the_skys_parameters_between_the_presets() {
         );
         for k in 0..SAMPLES {
             let s = sky(HOLD_MS + k * TRANSITION_MS / SAMPLES);
-            let p = s.weather().share(param, next);
+            let p = s.weather().share(element, next);
             let want = preset(here) + (preset(next) - preset(here)) * p;
             assert!(
                 (of(&s) - want).abs() < 1e-6,
@@ -845,7 +841,7 @@ fn a_changing_storm_fires_whole_strikes_by_its_share() {
     let (mut partial_fired, mut partial_skipped) = (0, 0);
     for bucket in 0..200_000u64 {
         let start = bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket);
-        let at = |ms: u64| at_ms(start + ms);
+        let at = |ms: u64| std::time::UNIX_EPOCH + Duration::from_millis(start + ms);
         let phases: Vec<f32> = (0..LIGHTNING_FLASH_MS)
             .step_by(SAMPLE_MS)
             .map(|ms| flash_level_at(at(ms), WeatherPolicy::Clock))
@@ -855,7 +851,9 @@ fn a_changing_storm_fires_whole_strikes_by_its_share() {
             fired || phases.iter().all(|&l| l == 0.0),
             "bucket {bucket} cut short: {phases:?}"
         );
-        let storm = clock_weather(at(0)).share(Parameter::Lightning, Weather::Storm);
+        let storm = WeatherPolicy::Clock
+            .weather_at_ms(start)
+            .share(Element::Lightning, Weather::Storm);
         if 0.0 < storm && storm < 1.0 {
             if fired {
                 partial_fired += 1;

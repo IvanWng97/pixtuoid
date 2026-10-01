@@ -5,12 +5,10 @@
 
 use pixtuoid_core::sprite::Rgb;
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use crate::atmosphere::Moment;
 use crate::dither::Dithered;
 use crate::layout::Size;
-use crate::sky::{Parameter, Weather, WeatherPolicy};
+use crate::sky::{Element, Weather, WeatherPolicy};
 
 /// One frame's weather on every window: [`GlassWeather::of`] once per frame.
 /// Its policy and `tick` are its whole key: two equal keys place equal marks.
@@ -209,10 +207,6 @@ fn threshold(i: u64, count: u64) -> f32 {
     (i as f32 + 0.5) / count as f32
 }
 
-fn at_ms(ms: u64) -> SystemTime {
-    UNIX_EPOCH + Duration::from_millis(ms)
-}
-
 impl GlassWeather {
     pub(crate) fn of(moment: &Moment) -> Self {
         Self {
@@ -226,8 +220,8 @@ impl GlassWeather {
     /// fall began, so it never appears or vanishes partway down.
     fn shows(&self, w: Weather, i: u64, count: u64, descent: &Descent) -> bool {
         self.policy
-            .weather_at(at_ms(descent.began))
-            .share(Parameter::Precipitation, w)
+            .weather_at_ms(descent.began)
+            .share(Element::Precipitation, w)
             >= threshold(i, count)
     }
 
@@ -244,7 +238,7 @@ impl GlassWeather {
         let mut weathers = Vec::new();
         for w in [self.tick, self.tick.saturating_sub(slowest)]
             .into_iter()
-            .flat_map(|ms| self.policy.weather_at(at_ms(ms)).ends())
+            .flat_map(|ms| self.policy.weather_at_ms(ms).ends())
         {
             if !weathers.contains(&w) {
                 weathers.push(w);
@@ -423,7 +417,7 @@ mod tests {
         let slot_ms = crate::sky::WEATHER_CYCLE_SECS * 1000;
         (0..).filter_map(move |slot: u64| {
             let start = (slot + 1) * slot_ms - crate::sky::TRANSITION_MS;
-            let [here, next] = WeatherPolicy::Clock.weather_at(at_ms(start + 1)).ends();
+            let [here, next] = WeatherPolicy::Clock.weather_at_ms(start + 1).ends();
             (here != next && (here.falls() || next.falls())).then_some((start, here, next))
         })
     }

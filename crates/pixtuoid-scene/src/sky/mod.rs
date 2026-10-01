@@ -107,6 +107,10 @@ impl WeatherPolicy {
             Self::Forced(w) => WeatherMix::pure(w),
         }
     }
+    /// [`weather_at`](Self::weather_at) `ms` after the Unix epoch.
+    pub(crate) fn weather_at_ms(self, ms: u64) -> WeatherMix {
+        self.weather_at(SystemTime::UNIX_EPOCH + Duration::from_millis(ms))
+    }
 }
 
 /// How long one weather holds before the next slot picks again.
@@ -116,9 +120,9 @@ pub(crate) const WEATHER_CYCLE_SECS: u64 = 600;
 pub(crate) const TRANSITION_MS: u64 = 120_000;
 const _: () = assert!(TRANSITION_MS < WEATHER_CYCLE_SECS * 1000);
 
-/// What a transition moves, each across its own window of it ([`WINDOWS`]).
+/// What a transition moves, each across its own [`Stage`] of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Parameter {
+pub(crate) enum Element {
     /// The cloud: the light it lets in, the night's glow, the ground's cast
     /// and the veil over the glass.
     Cloud,
@@ -128,24 +132,21 @@ pub(crate) enum Parameter {
     Lightning,
 }
 
-impl Parameter {
+impl Element {
     #[cfg(test)]
-    pub(crate) const ALL: [Parameter; 3] = [
-        Parameter::Cloud,
-        Parameter::Precipitation,
-        Parameter::Lightning,
-    ];
+    pub(crate) const ALL: [Element; 3] =
+        [Element::Cloud, Element::Precipitation, Element::Lightning];
 }
 
-/// How a transition changes what falls, which orders its parameters.
+/// How a transition changes what falls, which orders its elements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Course {
     /// From a dry sky into precipitation.
-    Wetting = 0,
+    Wetting,
     /// From other precipitation into a storm.
-    Storming = 1,
+    Storming,
     /// Neither: dry to dry, or one precipitation to another.
-    Shifting = 2,
+    Shifting,
 }
 
 impl Course {
@@ -160,6 +161,16 @@ impl Course {
             _ => (Course::Shifting, false),
         }
     }
+
+    /// Its [`Stages`], run forward. Run backward, a stage mirrors, so rain
+    /// stops before the sky clears and lightning before the rain eases.
+    fn stages(self) -> &'static Stages {
+        match self {
+            Course::Wetting => &WETTING,
+            Course::Storming => &STORMING,
+            Course::Shifting => &SHIFTING,
+        }
+    }
 }
 
 /// How far from either end of a transition precipitation settles, as a share
@@ -169,59 +180,56 @@ const FALL_SETTLE: f32 = 0.1;
 const SETTLED: f32 = 1.0 - FALL_SETTLE;
 
 /// A `(start, end)` span of a transition, as shares of it.
-type Window = (f32, f32);
+type Stage = (f32, f32);
 
-/// One [`Course`]'s window per [`Parameter`], run forward.
-struct Windows {
-    cloud: Window,
-    precipitation: Window,
-    lightning: Window,
+/// One [`Course`]'s [`Stage`] per [`Element`].
+struct Stages {
+    cloud: Stage,
+    precipitation: Stage,
+    lightning: Stage,
 }
 
-impl Windows {
-    fn of(&self, param: Parameter) -> Window {
-        match param {
-            Parameter::Cloud => self.cloud,
-            Parameter::Precipitation => self.precipitation,
-            Parameter::Lightning => self.lightning,
+impl Stages {
+    fn of(&self, element: Element) -> Stage {
+        match element {
+            Element::Cloud => self.cloud,
+            Element::Precipitation => self.precipitation,
+            Element::Lightning => self.lightning,
         }
     }
 }
 
-/// Each [`Course`]'s [`Windows`], at its discriminant. Run backward, a window
-/// mirrors, so rain stops before the sky clears and lightning before the rain
-/// eases.
-const WINDOWS: [Windows; 3] = [
-    // Wetting: the cloud gathers, then the rain falls, a storm's lightning last.
-    Windows {
-        cloud: (0.0, 0.5),
-        precipitation: (0.5, SETTLED),
-        lightning: (0.7, SETTLED),
-    },
-    // Storming: the rain heavies, then the lightning starts.
-    Windows {
-        cloud: (0.0, 1.0),
-        precipitation: (FALL_SETTLE, 0.5),
-        lightning: (0.5, SETTLED),
-    },
-    // Shifting: everything together.
-    Windows {
-        cloud: (0.0, 1.0),
-        precipitation: (FALL_SETTLE, SETTLED),
-        lightning: (FALL_SETTLE, SETTLED),
-    },
-];
+/// The cloud gathers, then the rain falls, a storm's lightning last.
+const WETTING: Stages = Stages {
+    cloud: (0.0, 0.5),
+    precipitation: (0.5, SETTLED),
+    lightning: (0.7, SETTLED),
+};
+
+/// The rain heavies, then the lightning starts.
+const STORMING: Stages = Stages {
+    cloud: (0.0, 1.0),
+    precipitation: (FALL_SETTLE, 0.5),
+    lightning: (0.5, SETTLED),
+};
+
+/// Everything together.
+const SHIFTING: Stages = Stages {
+    cloud: (0.0, 1.0),
+    precipitation: (FALL_SETTLE, SETTLED),
+    lightning: (FALL_SETTLE, SETTLED),
+};
 
 /// `x`'s smooth Hermite ease from 0 at `edge0` to 1 at `edge1`: GLSL's
 /// `smoothstep` (<https://registry.khronos.org/OpenGL-Refpages/gl4/html/smoothstep.xhtml>),
-/// flat at both edges, so a parameter leaves and lands without a jolt.
+/// flat at both edges, so an element leaves and lands without a jolt.
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
 
 /// The weather a frame shows: one weather, or, mid-transition, the next
-/// slot's coming in over it, each [`Parameter`] eased across its own window.
+/// slot's coming in over it, each [`Element`] eased across its own [`Stage`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct WeatherMix {
     from: Weather,
@@ -253,13 +261,13 @@ impl WeatherMix {
         [self.from, self.to]
     }
 
-    /// How far `param` has gone over to the incoming weather, `0..=1`.
-    pub(crate) fn eased(self, param: Parameter) -> f32 {
+    /// How far `element` has gone over to the incoming weather, `0..=1`.
+    pub(crate) fn eased(self, element: Element) -> f32 {
         if self.from == self.to {
             return 0.0;
         }
         let (course, backward) = Course::of(self.from, self.to);
-        let (start, end) = WINDOWS[course as usize].of(param);
+        let (start, end) = course.stages().of(element);
         let (start, end) = if backward {
             (1.0 - end, 1.0 - start)
         } else {
@@ -268,27 +276,29 @@ impl WeatherMix {
         smoothstep(start, end, self.progress)
     }
 
-    /// Each weather the frame shows in `param`, with its share; the shares sum
-    /// to 1.
-    pub(crate) fn parts(self, param: Parameter) -> impl Iterator<Item = (Weather, f32)> {
-        let eased = self.eased(param);
+    /// Each weather the frame shows in `element`, with its share; the shares
+    /// sum to 1.
+    pub(crate) fn parts(self, element: Element) -> impl Iterator<Item = (Weather, f32)> {
+        let eased = self.eased(element);
         [(self.from, 1.0 - eased), (self.to, eased)]
             .into_iter()
             .filter(|&(_, share)| share > 0.0)
     }
 
-    /// How much of `param` is `w`'s, `0..=1`.
-    pub(crate) fn share(self, param: Parameter, w: Weather) -> f32 {
-        self.parts(param)
+    /// How much of `element` is `w`'s, `0..=1`.
+    pub(crate) fn share(self, element: Element, w: Weather) -> f32 {
+        self.parts(element)
             .filter(|&(part, _)| part == w)
             .map(|(_, share)| share)
             .sum()
     }
 
-    /// A per-weather preset value, lerped by `param`'s shares: a pure
+    /// A per-weather preset value, lerped by `element`'s shares: a pure
     /// weather's exactly.
-    pub(crate) fn lerp(self, param: Parameter, preset: impl Fn(Weather) -> f32) -> f32 {
-        self.parts(param).map(|(w, share)| preset(w) * share).sum()
+    pub(crate) fn lerp(self, element: Element, preset: impl Fn(Weather) -> f32) -> f32 {
+        self.parts(element)
+            .map(|(w, share)| preset(w) * share)
+            .sum()
     }
 }
 
@@ -633,12 +643,11 @@ fn flash_level_at(now: SystemTime, policy: WeatherPolicy) -> f32 {
     else {
         return 0.0;
     };
-    // The storm's share at the strike's start: a ramp step mid-strike would
-    // otherwise cut its phases short of `MIN_FLASH_PHASE_MS`.
-    let at_strike = std::time::UNIX_EPOCH + Duration::from_millis(strike_ms);
+    // The storm's share at the strike's start: the share moving mid-strike
+    // would otherwise cut its phases short of `MIN_FLASH_PHASE_MS`.
     let storm = policy
-        .weather_at(at_strike)
-        .share(Parameter::Lightning, Weather::Storm);
+        .weather_at_ms(strike_ms)
+        .share(Element::Lightning, Weather::Storm);
     if strikes(bucket, storm) {
         lightning_envelope(since)
     } else {
@@ -725,7 +734,7 @@ impl Sky {
 
     pub(crate) fn transmission(&self) -> Transmission {
         let channel = |of: fn(Transmission) -> f32| {
-            self.weather.lerp(Parameter::Cloud, |w| of(transmission(w)))
+            self.weather.lerp(Element::Cloud, |w| of(transmission(w)))
         };
         Transmission {
             direct: channel(|t| t.direct),
@@ -768,7 +777,7 @@ impl Sky {
 
     /// [`rain_level`] under this sky's weather.
     pub(crate) fn precipitation(&self) -> f32 {
-        self.weather.lerp(Parameter::Precipitation, rain_level)
+        self.weather.lerp(Element::Precipitation, rain_level)
     }
 
     pub(crate) fn light(&self) -> InteriorLight {
@@ -782,7 +791,7 @@ impl Sky {
             BodyKind::Moon => 0.0,
         };
         let interior = (body.lum * (direct * K_BEAM + through.diffuse * K_FILL)).clamp(0.0, 1.0);
-        let night_min = self.weather.lerp(Parameter::Cloud, city_bounce) * self.nightfall;
+        let night_min = self.weather.lerp(Element::Cloud, city_bounce) * self.nightfall;
         InteriorLight {
             interior,
             exterior: (interior + night_min).min(1.0),
