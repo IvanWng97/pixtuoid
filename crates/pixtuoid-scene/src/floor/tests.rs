@@ -1012,8 +1012,8 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     let scene = make_scene(4, 16);
     let occupied = std::collections::HashSet::new();
     let mut obs = AudioObserver::new();
-    let frame = obs.frame(&scene, &occupied, |_| None, 0, now);
-    let precip = crate::pixel_painter::precipitation_level(now);
+    let frame = obs.frame(&scene, &occupied, |_| None, FloorMeta::ground(), now);
+    let precip = crate::pixel_painter::precipitation_level(now, crate::sky::WeatherPolicy::Clock);
     assert_eq!(
         frame.stems,
         crate::audio::stem_levels(&crate::board::per_floor_counts(&scene)[0], precip),
@@ -1037,13 +1037,19 @@ fn audio_observer_reprimes_on_floor_switch_so_the_new_floor_is_silent() {
     let printer = |i: usize| (i == 0 || i == 1).then_some(crate::layout::WaypointKind::Printer);
     let mut obs = AudioObserver::new();
 
-    let _ = obs.frame(&scene, &std::collections::HashSet::new(), printer, 0, now);
+    let _ = obs.frame(
+        &scene,
+        &std::collections::HashSet::new(),
+        printer,
+        FloorMeta::ground(),
+        now,
+    );
     assert_eq!(obs.primed_floor(), Some(0));
 
     // Switch to floor 1 with an appliance ALREADY occupied — this would fire
     // PrinterWhir without the reprime.
     let occ0: std::collections::HashSet<usize> = [0usize].into_iter().collect();
-    let switch = obs.frame(&scene, &occ0, printer, 1, now);
+    let switch = obs.frame(&scene, &occ0, printer, FloorMeta::for_floor(1, 2), now);
     assert_eq!(obs.primed_floor(), Some(1));
     assert!(
         switch.events.is_empty(),
@@ -1051,7 +1057,7 @@ fn audio_observer_reprimes_on_floor_switch_so_the_new_floor_is_silent() {
     );
 
     let occ01: std::collections::HashSet<usize> = [0usize, 1usize].into_iter().collect();
-    let next = obs.frame(&scene, &occ01, printer, 1, now);
+    let next = obs.frame(&scene, &occ01, printer, FloorMeta::for_floor(1, 2), now);
     assert!(
         next.events.contains(&crate::audio::OneShot::PrinterWhir),
         "after the reprime, a newly occupied printer still fires"
@@ -1068,13 +1074,13 @@ fn audio_observer_keeps_cue_edges_warm_so_delivery_resume_fires_no_volley() {
     let occ = std::collections::HashSet::new();
     let mut obs = AudioObserver::new();
 
-    let _ = obs.frame(&empty, &occ, |_| None, 0, now);
-    let arrival = obs.frame(&one, &occ, |_| None, 0, now);
+    let _ = obs.frame(&empty, &occ, |_| None, FloorMeta::ground(), now);
+    let arrival = obs.frame(&one, &occ, |_| None, FloorMeta::ground(), now);
     assert!(
         arrival.events.contains(&crate::audio::OneShot::DoorChime),
         "an arrival chimes on the frame it happens"
     );
-    let resumed = obs.frame(&one, &occ, |_| None, 0, now);
+    let resumed = obs.frame(&one, &occ, |_| None, FloorMeta::ground(), now);
     assert!(
         !resumed.events.contains(&crate::audio::OneShot::DoorChime),
         "no volley on resume — the observer saw the agent while muted"
@@ -1095,7 +1101,7 @@ fn the_foreground_layer_is_lit_by_the_clock() {
     // The weather is picked per UTC slot, so the same two local hours land on
     // different weathers in different zones: pinned, the pair differs by the
     // clock alone.
-    let _weather = crate::sky::ForcedWeather::new(crate::sky::Weather::Clear);
+    let clear = crate::sky::WeatherPolicy::Forced(crate::sky::Weather::Clear);
     let render = |now: SystemTime| {
         let pack = crate::embedded_pack::test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("normal theme");
@@ -1114,7 +1120,7 @@ fn the_foreground_layer_is_lit_by_the_clock() {
                     scene: &scene,
                     pack: &pack,
                     now,
-                    floor: FloorMeta::ground(),
+                    floor: FloorMeta::ground().with_weather(clear),
                     pets: PetInputs::default(),
                 },
                 theme,

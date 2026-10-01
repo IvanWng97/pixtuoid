@@ -569,6 +569,7 @@ pub(crate) struct ProofJob<'a> {
     pub(crate) max_desks: usize,
     pub(crate) theme: &'static pixtuoid_scene::theme::Theme,
     pub(crate) pack: &'a pixtuoid_core::sprite::format::Pack,
+    pub(crate) weather: pixtuoid_scene::pixel_painter::WeatherPolicy,
 }
 
 pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
@@ -623,7 +624,7 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             &scene,
             job.pack,
             now,
-            pixtuoid_scene::floor::FloorMeta::ground(),
+            pixtuoid_scene::floor::FloorMeta::ground().with_weather(job.weather),
         );
         draw_scene(&mut term, &mut draw_ctx)?;
         let office = cells_to_rgba(term.backend().buffer());

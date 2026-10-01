@@ -90,6 +90,7 @@ struct Chrome {
     audio: crate::audio::AudioHandle,
     /// Transient +/- volume readout (percent); `None` past [`crate::audio::VOLUME_FLASH_MS`].
     volume_flash: Option<u8>,
+    weather: pixtuoid_scene::pixel_painter::WeatherPolicy,
 }
 
 /// One floor frame's inputs, the same under either painter.
@@ -122,6 +123,11 @@ impl PopupState {
 }
 
 impl Chrome {
+    /// Floor `floor` of `nf`, under this office's weather.
+    fn floor_meta(&self, floor: usize, nf: usize) -> FloorMeta {
+        FloorMeta::for_floor(floor, nf).with_weather(self.weather)
+    }
+
     /// Floor `floor` of `nf` in `scene`, whose projection is `floor_scene`.
     fn frame<'a>(
         &'a self,
@@ -132,7 +138,7 @@ impl Chrome {
         floor: usize,
         nf: usize,
     ) -> Frame<'a> {
-        let meta = FloorMeta::for_floor(floor, nf);
+        let meta = self.floor_meta(floor, nf);
         Frame {
             world: FloorInputs {
                 scene: floor_scene,
@@ -198,6 +204,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 onboarding: crate::tui::welcome::OnboardingFrame::default(),
                 audio: crate::audio::AudioHandle::disabled(),
                 volume_flash: None,
+                weather: pixtuoid_scene::pixel_painter::WeatherPolicy::Clock,
             },
             #[cfg(feature = "graphics")]
             kitty: None,
@@ -379,6 +386,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         }
     }
 
+    /// Which weather every floor shows from the next frame on.
+    pub fn set_weather(&mut self, weather: pixtuoid_scene::pixel_painter::WeatherPolicy) {
+        self.chrome.weather = weather;
+    }
+
     pub fn set_theme_picker(&mut self, picker: Option<usize>) {
         self.chrome.theme_picker = picker;
     }
@@ -537,8 +549,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             buf: to_buf,
         } = to_floor_half;
 
-        let from_meta = FloorMeta::for_floor(from_floor, nf);
-        let to_meta = FloorMeta::for_floor(to_floor, nf);
+        let from_meta = self.chrome.floor_meta(from_floor, nf);
+        let to_meta = self.chrome.floor_meta(to_floor, nf);
 
         // Transitions hide *text* overlays (tooltips, bubbles, labels) but keep
         // every pixel-level visual, so the slide reads as a continuous scene.
@@ -683,7 +695,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             scene,
             &out.occupied_waypoints,
             |idx| pixtuoid_scene::floor::waypoint_kind_of(out.layout.as_deref(), idx),
-            self.current_floor,
+            self.chrome.floor_meta(
+                self.current_floor,
+                num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS),
+            ),
             now,
         );
         // Composed even when disabled or muted: `AudioObserver::frame`'s contract.

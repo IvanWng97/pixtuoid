@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 
 use common::{fixture_scene, render_hash};
 use pixtuoid_scene::floor::FloorMeta;
-use pixtuoid_scene::pixel_painter::force_weather;
+use pixtuoid_scene::pixel_painter::{Weather, WeatherPolicy};
 use pixtuoid_scene::theme;
 
 #[test]
@@ -29,13 +29,9 @@ fn weather_cycle_affects_render() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
     let scene = fixture_scene(now);
 
-    force_weather(Some("clear")).expect("`clear` is a valid weather name");
-    let hash_clear = render_hash(&scene, now, &theme::NORMAL, FloorMeta::ground());
-    force_weather(Some("storm")).expect("`storm` is a valid weather name");
-    let hash_storm = render_hash(&scene, now, &theme::NORMAL, FloorMeta::ground());
-    // `force_weather` is a thread-local override; reset it BEFORE the assert so a
-    // failing assert can't leak the override into a reused harness thread.
-    force_weather(None).expect("clearing the override never fails");
+    let under = |w| FloorMeta::ground().with_weather(WeatherPolicy::Forced(w));
+    let hash_clear = render_hash(&scene, now, &theme::NORMAL, under(Weather::Clear));
+    let hash_storm = render_hash(&scene, now, &theme::NORMAL, under(Weather::Storm));
 
     assert_ne!(
         hash_clear, hash_storm,

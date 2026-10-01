@@ -29,6 +29,7 @@ use pixtuoid_scene::floor::{
     FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs, floor_capacity,
 };
 use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::pixel_painter::WeatherPolicy;
 use pixtuoid_scene::theme::{ALL_THEMES, Theme};
 
 /// A visitor hire's one-shot event, queued OUTSIDE the loop machinery so a
@@ -132,7 +133,7 @@ pub struct Office {
     /// The buffer size `floor_capacities` was last synced for — lets
     /// `sync_capacity` skip the layout recompute on every other frame.
     caps_size: Option<(u16, u16)>,
-    weather_override: Option<String>,
+    weather: WeatherPolicy,
     /// The WebAudio engine — `None` until the visitor clicks ♩ (browser autoplay
     /// policy: no sound without a gesture).
     audio: Option<audio::WebAudioDriver>,
@@ -167,7 +168,7 @@ impl Office {
             hires: VisitorHires::default(),
             last_now: None,
             caps_size: None,
-            weather_override: None,
+            weather: WeatherPolicy::Clock,
             audio: None,
             adopting: None,
         })
@@ -185,13 +186,6 @@ impl Office {
         self.last_now = Some(now);
         let buf_w = w.clamp(1, u16::MAX as u32) as u16;
         let buf_h = h.clamp(1, u16::MAX as u32) as u16;
-        // `force_weather` is a thread-local shared by every Office in the module, so
-        // each office must set its own value right before rendering. An unknown name
-        // leaves that thread-local UNTOUCHED, which would silently render whatever
-        // the last writer forced — hence the Err path clearing it.
-        if pixtuoid_scene::pixel_painter::force_weather(self.weather_override.as_deref()).is_err() {
-            let _ = pixtuoid_scene::pixel_painter::force_weather(None);
-        }
         // Capacity BEFORE the script advances: the SessionStarts due this
         // frame must allocate desks against the canvas this frame renders.
         self.sync_capacity(buf_w, buf_h);
@@ -240,7 +234,7 @@ impl Office {
     /// Force one of the [`weather_names`](pixtuoid_scene::pixel_painter::weather_names),
     /// or `None` (or an unrecognized name) to follow the clock-based cycle.
     pub fn set_weather(&mut self, name: Option<String>) {
-        self.weather_override = name;
+        self.weather = WeatherPolicy::from_name(name.as_deref()).unwrap_or_default();
     }
 
     /// Recolor the whole office to one of the [`ALL_THEMES`] by name. Unknown
@@ -382,7 +376,9 @@ impl Office {
         }
         // The shared observer composes the whole AudioFrame, single-sourced with
         // the desktop painters. Single-floor hero → floor 0.
-        let frame = self.session.audio_frame(&self.scene, 0, now);
+        let frame = self
+            .session
+            .audio_frame(&self.scene, self.floor_meta(), now);
         let cmd = self
             .audio
             .as_mut()
@@ -462,7 +458,7 @@ impl SynthTake {
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
         // `floor::track_for` is the ONE track-pick authority; its TrackId payload
         // IS the track epoch, so the adopt wire's (night, epoch) recovers from it.
-        let track = pixtuoid_scene::floor::track_for(now);
+        let track = pixtuoid_scene::floor::track_for(now, WeatherPolicy::Clock);
         let (night, epoch) = match track {
             pixtuoid_scene::audio::TrackId::GenNight(e) => (true, e),
             pixtuoid_scene::audio::TrackId::GenDay(e) => (false, e),
@@ -514,7 +510,7 @@ impl SynthTake {
 impl Office {
     fn current_track(&self) -> pixtuoid_scene::audio::TrackId {
         match self.last_now {
-            Some(now) => pixtuoid_scene::floor::track_for(now),
+            Some(now) => pixtuoid_scene::floor::track_for(now, self.weather),
             None => pixtuoid_scene::audio::TrackId::GenDay(0),
         }
     }
@@ -601,14 +597,19 @@ impl Office {
             .drain_due(now, &mut self.reducer, &mut self.scene);
     }
 
-    fn render(&mut self, now: SystemTime, buf_w: u16, buf_h: u16) {
-        // The layout seed is the hero's variant seed (NOT floor-derived), so build
-        // the meta then override the seed. Too-small layouts leave the cleared
-        // buffer; never panics.
-        let floor_meta = FloorMeta {
+    /// The hero's one floor: its layout seed is the hero's variant seed, not
+    /// floor-derived, under this office's own weather.
+    fn floor_meta(&self) -> FloorMeta {
+        FloorMeta {
             floor_seed: self.seed,
             ..FloorMeta::for_floor(0, 1)
-        };
+        }
+        .with_weather(self.weather)
+    }
+
+    fn render(&mut self, now: SystemTime, buf_w: u16, buf_h: u16) {
+        // Too-small layouts leave the cleared buffer; never panics.
+        let floor_meta = self.floor_meta();
         self.session.render(FrameInputs {
             world: FloorInputs {
                 scene: &self.scene,
@@ -1262,8 +1263,6 @@ mod tests {
             "storm office must keep its own weather after another office stepped"
         );
 
-        // `force_weather` leaves the override UNTOUCHED on Err, so a swallowed Err
-        // would render the PREVIOUS office's weather — here, storm.
         let mut typo = Office::new(1).unwrap();
         typo.set_weather(Some("stormy".into()));
         typo.step(T0_MS, 160, 96);
@@ -1281,6 +1280,31 @@ mod tests {
         assert!(
             typo_frame != storm_frame,
             "…and specifically must NOT inherit the sibling office's storm"
+        );
+    }
+
+    /// An office's rain sounds follow its own weather, whatever another
+    /// office stepped since.
+    #[test]
+    fn an_offices_rain_follows_its_own_weather_after_another_steps() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(T0_MS as u64);
+        let rain = |o: &mut Office| {
+            let floor = o.floor_meta();
+            o.session.audio_frame(&o.scene, floor, now).stems
+        };
+        let mut storm = Office::new(1).unwrap();
+        storm.set_weather(Some("storm".into()));
+        storm.step(T0_MS, 160, 96);
+        let alone = rain(&mut storm);
+
+        let mut clear = Office::new(1).unwrap();
+        clear.set_weather(Some("clear".into()));
+        clear.step(T0_MS, 160, 96);
+        assert_ne!(rain(&mut clear), alone, "storm vs clear must sound apart");
+        assert_eq!(
+            rain(&mut storm),
+            alone,
+            "the storm office keeps its own rain after the clear one stepped"
         );
     }
 

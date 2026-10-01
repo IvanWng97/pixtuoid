@@ -5,21 +5,29 @@
 //! disagree about the hour, the weather or whether lightning is striking.
 //! Nothing here knows a theme or a pixel.
 
-use std::cell::Cell;
 use std::time::SystemTime;
 
 #[cfg(test)]
 mod tests;
 
+/// The weather outside the office's windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum Weather {
+pub enum Weather {
+    /// A clear sky.
     Clear,
+    /// Rain.
     Rain,
+    /// Rain with lightning.
     Storm,
+    /// Snow.
     Snow,
+    /// Fog.
     Fog,
+    /// Cloud cover.
     Overcast,
+    /// Wind-driven rain.
     Windy,
+    /// Smog.
     Smog,
 }
 
@@ -59,46 +67,44 @@ impl Weather {
     }
 }
 
-thread_local! {
-    /// [`force_weather`](crate::pixel_painter::force_weather)'s override: when
-    /// `Some`, every [`Sky`] sampled on this thread shows it instead of the
-    /// clock's pick.
-    static WEATHER_OVERRIDE: Cell<Option<Weather>> = const { Cell::new(None) };
+/// Which weather a frame shows: an input of every frame, so two offices
+/// rendered side by side each show their own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WeatherPolicy {
+    /// The clock's pick, one per `WEATHER_CYCLE_SECS` slot.
+    #[default]
+    Clock,
+    /// This weather, whatever the clock.
+    Forced(Weather),
 }
 
-pub(crate) fn set_weather_override(w: Option<Weather>) {
-    WEATHER_OVERRIDE.with(|c| c.set(w));
-}
-
-/// A forced weather that clears itself when dropped, so a test cannot leak it
-/// into a sibling sharing its thread (plain `cargo test` reuses threads), even
-/// when an assert panics first.
-#[cfg(test)]
-pub(crate) struct ForcedWeather;
-
-#[cfg(test)]
-impl ForcedWeather {
-    pub(crate) fn new(w: Weather) -> Self {
-        set_weather_override(Some(w));
-        Self
+impl WeatherPolicy {
+    /// The policy a CLI or page names: one of
+    /// [`weather_names`](crate::pixel_painter::weather_names), case-insensitive,
+    /// or `None` for the clock. `Err` carries the valid names.
+    pub fn from_name(name: Option<&str>) -> Result<Self, Vec<&'static str>> {
+        match name {
+            None => Ok(Self::Clock),
+            Some(s) => Weather::from_name(s)
+                .map(Self::Forced)
+                .ok_or_else(crate::pixel_painter::weather_names),
+        }
     }
-}
 
-#[cfg(test)]
-impl Drop for ForcedWeather {
-    fn drop(&mut self) {
-        set_weather_override(None);
+    /// The weather at `now` under this policy.
+    fn weather_at(self, now: SystemTime) -> Weather {
+        match self {
+            Self::Clock => clock_weather(now),
+            Self::Forced(w) => w,
+        }
     }
 }
 
 /// How long one weather holds before the next slot picks again.
 const WEATHER_CYCLE_SECS: u64 = 600;
 
-/// The weather at `now`: one hashed pick per [`WEATHER_CYCLE_SECS`] slot.
-fn weather_at(now: SystemTime) -> Weather {
-    if let Some(forced) = WEATHER_OVERRIDE.with(Cell::get) {
-        return forced;
-    }
+/// The clock's weather at `now`: one hashed pick per [`WEATHER_CYCLE_SECS`] slot.
+fn clock_weather(now: SystemTime) -> Weather {
     let secs = now
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -378,12 +384,12 @@ pub(crate) struct Sky {
 }
 
 impl Sky {
-    pub(crate) fn at(now: SystemTime) -> Self {
+    pub(crate) fn at(now: SystemTime, weather: WeatherPolicy) -> Self {
         let (moon_phase, moon_age) = (moon_phase_at(now), moon_age_at(now));
         let h = local_hour_frac(now);
         let nightfall = nightfall(h);
         Self {
-            weather: weather_at(now),
+            weather: weather.weather_at(now),
             emitter: emitter_at(h, nightfall, moon_phase, moon_age),
             moon_phase,
             moon_waxing: moon_age < SYNODIC_DAYS / 2.0,
@@ -392,14 +398,16 @@ impl Sky {
         }
     }
 
-    /// The sky at `now` under `weather`, whatever the clock picks — a test's
-    /// fixed weather without the thread-local override.
+    /// The sky at `now` under `weather`, whatever the clock picks.
     #[cfg(test)]
     pub(crate) fn at_with(now: SystemTime, weather: Weather) -> Self {
-        Self {
-            weather,
-            ..Self::at(now)
-        }
+        Self::at(now, WeatherPolicy::Forced(weather))
+    }
+
+    /// The sky at `now` under the clock's weather.
+    #[cfg(test)]
+    pub(crate) fn clock(now: SystemTime) -> Self {
+        Self::at(now, WeatherPolicy::Clock)
     }
 
     /// This sky with the lightning envelope at `flash` — a painter test's
