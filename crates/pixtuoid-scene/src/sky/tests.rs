@@ -472,3 +472,36 @@ fn the_moon_waxes_to_full_and_wanes_after() {
         );
     }
 }
+
+/// A full moon is up from dusk to dawn, a first quarter sets before midnight,
+/// and a new moon is down all night.
+#[test]
+fn the_moon_keeps_its_phases_hours() {
+    let up = |h: f32, age: f32| moon_arc(h, age).is_some();
+    let full = SYNODIC_DAYS / 2.0;
+    for h in [20.5, 23.0, 2.0, 4.5] {
+        assert!(up(h, full), "a full moon is up at {h}");
+    }
+    let first_quarter = SYNODIC_DAYS / 4.0;
+    assert!(
+        up(22.5, first_quarter),
+        "a first quarter is still up late evening"
+    );
+    assert!(
+        !up(23.5, first_quarter),
+        "a first quarter has set by midnight"
+    );
+    for h in [20.5, 23.0, 2.0, 4.5] {
+        assert!(!up(h, 0.0), "a new moon is down at {h}");
+    }
+}
+
+/// Night comes in over [`NIGHTFALL_H`] after dusk and goes over it before dawn.
+#[test]
+fn nightfall_ramps_across_dusk_and_dawn() {
+    assert_eq!(nightfall(12.0), 0.0);
+    assert_eq!(nightfall(SUN_SET_H), 0.0);
+    assert!((0.0..1.0).contains(&nightfall(SUN_SET_H + NIGHTFALL_H / 2.0)));
+    assert_eq!(nightfall(0.0), 1.0);
+    assert!((0.0..1.0).contains(&nightfall(SUN_RISE_H - NIGHTFALL_H / 2.0)));
+}

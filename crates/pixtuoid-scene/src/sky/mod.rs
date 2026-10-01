@@ -191,7 +191,7 @@ pub(crate) enum Body {
 
 /// The physical sky emitter — sun by day, moon by night. Luminance + warmth
 /// follow altitude (low body = longer air path = dimmer + warmer). The ONE
-/// source the interior light, the disc, the wall spot and the spill derive from.
+/// source the interior light, the disc and the spill derive from.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Emitter {
     pub(crate) body: Body,
@@ -205,9 +205,17 @@ pub(crate) struct Emitter {
     pub(crate) emitter_lum: f32,
 }
 
-// Sun rides the arc over its up-span; the moon owns the complementary night span.
+// The sun rides the arc over its up-span; the moon's span moves with its age
+// (`moon_arc`), and a full moon's is the night.
 const SUN_RISE_H: f32 = 5.0;
 const SUN_SET_H: f32 = 20.0;
+/// How long a moon stays up: the night's length, so a full moon rises at dusk
+/// and sets at dawn.
+const MOON_UP_H: f32 = SUN_RISE_H + 24.0 - SUN_SET_H;
+/// How long, after dusk and before dawn, the night takes to come in and to go:
+/// the moon's light, the city's glow and the stars ride [`nightfall`] up and
+/// down across it rather than switching with the body.
+const NIGHTFALL_H: f32 = 0.75;
 /// Moon luminance at a full phase — low enough that a full-moon midnight (plus
 /// the `city_bounce` floor) still stays dimmer than a stormy solar noon; see
 /// `solar_noon_outshines_the_brightest_night`.
@@ -242,34 +250,48 @@ pub(crate) fn local_hour_frac(now: SystemTime) -> f32 {
     local.hour() as f32 + local.minute() as f32 / 60.0
 }
 
-fn emitter_at(now: SystemTime, moon_phase: f32) -> Emitter {
+/// How far into the night hour `h` is, 0..=1: zero by day, rising over
+/// [`NIGHTFALL_H`] after dusk and falling over it before dawn.
+fn nightfall(h: f32) -> f32 {
+    if hour_is_day(h) {
+        return 0.0;
+    }
+    let since_dusk = (h - SUN_SET_H).rem_euclid(24.0);
+    let until_dawn = (SUN_RISE_H - h).rem_euclid(24.0);
+    (since_dusk.min(until_dawn) / NIGHTFALL_H).min(1.0)
+}
+
+/// The moon's progress along its arc at hour `h`, 0 as it rises .. 1 as it
+/// sets, or `None` while it is down. A full moon rises at dusk; each day of
+/// its `age` puts the rise a synodic share of the day later.
+fn moon_arc(h: f32, age: f32) -> Option<f32> {
+    let rise = SUN_SET_H + 24.0 * (age / SYNODIC_DAYS - 0.5);
+    let t = (h - rise).rem_euclid(24.0) / MOON_UP_H;
+    (t <= 1.0).then_some(t)
+}
+
+fn emitter_at(now: SystemTime, moon_phase: f32, moon_age: f32) -> Emitter {
     let h = local_hour_frac(now);
-    let is_day = hour_is_day(h);
-    let (rise, set) = if is_day {
-        (SUN_RISE_H, SUN_SET_H)
-    } else {
-        // The night span wraps midnight: dusk to the next dawn.
-        (SUN_SET_H, SUN_RISE_H + 24.0)
-    };
-    let h_lin = if is_day || h >= SUN_SET_H {
-        h
-    } else {
-        h + 24.0
-    };
-    let t = arc_progress(h_lin, rise, set);
+    if hour_is_day(h) {
+        let t = arc_progress(h, SUN_RISE_H, SUN_SET_H);
+        let altitude = (std::f32::consts::PI * t).sin();
+        return Emitter {
+            body: Body::Sun,
+            altitude,
+            azimuth: t,
+            warmth: (1.0 - altitude).clamp(0.0, 1.0),
+            emitter_lum: altitude,
+        };
+    }
+    // A moon below the horizon stands at its rim, lighting nothing.
+    let t = moon_arc(h, moon_age).unwrap_or(0.0);
     let altitude = (std::f32::consts::PI * t).sin();
-    let warmth = (1.0 - altitude).clamp(0.0, 1.0);
-    let (body, emitter_lum) = if is_day {
-        (Body::Sun, altitude)
-    } else {
-        (Body::Moon, MOON_PEAK_LUM * altitude * moon_phase)
-    };
     Emitter {
-        body,
+        body: Body::Moon,
         altitude,
         azimuth: t,
-        warmth,
-        emitter_lum,
+        warmth: (1.0 - altitude).clamp(0.0, 1.0),
+        emitter_lum: MOON_PEAK_LUM * altitude * moon_phase * nightfall(h),
     }
 }
 
@@ -342,17 +364,19 @@ pub(crate) struct Sky {
     emitter: Emitter,
     moon_phase: f32,
     moon_waxing: bool,
+    nightfall: f32,
     flash: f32,
 }
 
 impl Sky {
     pub(crate) fn at(now: SystemTime) -> Self {
-        let moon_phase = moon_phase_at(now);
+        let (moon_phase, moon_age) = (moon_phase_at(now), moon_age_at(now));
         Self {
             weather: weather_at(now),
-            emitter: emitter_at(now, moon_phase),
+            emitter: emitter_at(now, moon_phase, moon_age),
             moon_phase,
-            moon_waxing: moon_age_at(now) < SYNODIC_DAYS / 2.0,
+            moon_waxing: moon_age < SYNODIC_DAYS / 2.0,
+            nightfall: nightfall(local_hour_frac(now)),
             flash: flash_level_at(now),
         }
     }
@@ -397,6 +421,11 @@ impl Sky {
         self.moon_waxing
     }
 
+    /// [`nightfall`] at this instant.
+    pub(crate) fn nightfall(&self) -> f32 {
+        self.nightfall
+    }
+
     /// [`flash_level_at`] at this instant.
     pub(crate) fn flash(&self) -> f32 {
         self.flash
@@ -435,10 +464,7 @@ impl Sky {
             Body::Moon => 0.0,
         };
         let interior = (e.emitter_lum * (direct_eff * K_BEAM + a.diffuse * K_FILL)).clamp(0.0, 1.0);
-        let night_floor = match e.body {
-            Body::Moon => city_bounce(self.weather),
-            Body::Sun => 0.0,
-        };
+        let night_floor = city_bounce(self.weather) * self.nightfall;
         InteriorLight {
             interior,
             exterior: (interior + night_floor).min(1.0),

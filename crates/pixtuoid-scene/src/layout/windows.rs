@@ -161,6 +161,17 @@ impl SceneLayout {
             height: ELEVATOR_H,
         }
     }
+
+    /// Whether cell `(x, y)` is a window's glass, where the outside shows
+    /// rather than the room: inside a bay and off its [`window_frame`].
+    pub(crate) fn glass_at(&self, x: u16, y: u16) -> bool {
+        let rows = window_rows(self.wall_band_h());
+        let h = rows.end - rows.start;
+        rows.contains(&y)
+            && self.window_bays().any(|b| {
+                b.span().contains(&x) && !window_frame(x - b.x, y - rows.start, Size { w: b.w, h })
+            })
+    }
 }
 
 #[cfg(test)]
@@ -287,6 +298,38 @@ mod tests {
                 door.y + super::super::ELEVATOR_H - 1,
                 wall_trim_row(layout.wall_band_h()),
                 "{w}x{h}"
+            );
+        }
+    }
+
+    #[test]
+    fn glass_is_a_bays_cells_off_its_frame() {
+        let layout =
+            crate::layout::Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS))
+                .expect("192x160 fits");
+        let rows = window_rows(layout.wall_band_h());
+        let h = rows.end - rows.start;
+        for bay in layout.window_bays() {
+            let size = Size { w: bay.w, h };
+            for dy in 0..h {
+                for dx in 0..bay.w {
+                    assert_eq!(
+                        layout.glass_at(bay.x + dx, rows.start + dy),
+                        !window_frame(dx, dy, size),
+                        "({dx}, {dy}) of bay {}",
+                        bay.idx
+                    );
+                }
+            }
+            assert!(
+                !layout.glass_at(bay.x + bay.w, rows.start + 2),
+                "the post past bay {}",
+                bay.idx
+            );
+            assert!(
+                !layout.glass_at(bay.x + 2, rows.end),
+                "the trim below bay {}",
+                bay.idx
             );
         }
     }
