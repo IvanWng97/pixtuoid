@@ -935,6 +935,7 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             protocol,
             cell,
             tmux,
+            ..
         } => renderer.set_cutaway(cutaway::TileCutaway::new(
             Arc::clone(pack),
             fit,

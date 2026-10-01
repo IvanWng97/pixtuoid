@@ -31,8 +31,15 @@ pub(crate) mod tiles;
 
 #[cfg(feature = "graphics")]
 pub(crate) use probe::probe;
-#[cfg(feature = "graphics")]
-use tiles::TileShape;
+
+/// A tile's extent in cells; [`ImageProtocol::tile`] is the authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TileShape {
+    /// Cells across.
+    pub(crate) cols: u16,
+    /// Cells down.
+    pub(crate) rows: u16,
+}
 
 /// How long each wait of the capability probe may take: on Unix, the query start
 /// to finish, where [`probe()`] reads the reply itself, and, inside tmux, the
@@ -72,7 +79,6 @@ impl ImageProtocol {
 
     /// The least time between two frames' transmits: kitty's is the event
     /// loop's tick, and SIXEL and iTerm2 encode heavier images less often.
-    #[cfg(feature = "graphics")]
     pub(crate) fn cadence(self) -> std::time::Duration {
         std::time::Duration::from_millis(match self {
             Self::Kitty => 0,
@@ -82,7 +88,6 @@ impl ImageProtocol {
     }
 
     /// The cells one re-sent piece of the image covers.
-    #[cfg(feature = "graphics")]
     pub(crate) fn tile(self) -> TileShape {
         match self {
             Self::Kitty => TileShape { cols: 4, rows: 2 },
@@ -196,6 +201,8 @@ pub(crate) enum Plan {
         cell: CellSize,
         /// Inside tmux: the encoder wraps the image in passthrough.
         tmux: bool,
+        /// `--graphics` named the protocol, rather than the terminal.
+        forced: bool,
     },
     /// The half-block office: one buffer pixel per half-block.
     Classic {
@@ -390,6 +397,7 @@ pub(crate) fn resolve(
         protocol,
         cell,
         tmux: d.tmux,
+        forced: mode.forced().is_some(),
     }
 }
 
@@ -497,28 +505,47 @@ pub(crate) fn run_probe() -> Probe {
 }
 
 impl Plan {
-    /// The plan as `doctor`'s `graphics:` line: the profile this terminal is
-    /// CAPABLE of — "would render", since only `run --graphics` paints it —
-    /// and why it falls back when it is not.
+    /// The plan as `doctor`'s `graphics:` line: for a cutaway, everything a
+    /// tester reports back from a terminal; for classic, why it fell back.
     pub(crate) fn diagnostic_row(self) -> String {
         match self {
             Plan::Cutaway {
                 fit,
                 protocol,
                 cell,
-                ..
-            } => format!(
-                "graphics: {} ({}x{} cell) — the cutaway profile would render at {}x \
-             ({}x art upscaled {}x), a {}x{} office",
-                protocol.name(),
-                cell.w,
-                cell.h,
-                fit.scale().get(),
-                fit.density(),
-                fit.upscale(),
-                fit.logical().w,
-                fit.logical().h,
-            ),
+                tmux,
+                forced,
+            } => {
+                let shape = protocol.tile();
+                let cadence = match protocol.cadence().as_millis() {
+                    0 => "every frame".to_string(),
+                    ms => format!("at most every {ms} ms"),
+                };
+                format!(
+                    "graphics: {} ({}) on a {}x{} cell, {} — the cutaway at {}x \
+                     ({}x art upscaled {}x), a {}x{} office, sent as {}x{}-cell tiles {cadence}",
+                    protocol.name(),
+                    if forced {
+                        "forced by --graphics"
+                    } else {
+                        "the terminal's answer"
+                    },
+                    cell.w,
+                    cell.h,
+                    if tmux {
+                        "through tmux passthrough"
+                    } else {
+                        "direct"
+                    },
+                    fit.scale().get(),
+                    fit.density(),
+                    fit.upscale(),
+                    fit.logical().w,
+                    fit.logical().h,
+                    shape.cols,
+                    shape.rows,
+                )
+            }
             Plan::Classic { reason } => {
                 format!("graphics: classic half-blocks — {}", reason.describe())
             }
@@ -772,11 +799,12 @@ mod tests {
                 protocol: p,
                 cell,
                 tmux,
+                forced,
             } = got
             else {
                 panic!("{protocol:?}: {got:?}");
             };
-            assert_eq!((p, cell, tmux), (protocol, CELL_8X16, false));
+            assert_eq!((p, cell, tmux, forced), (protocol, CELL_8X16, false, false));
             assert_eq!((fit.scale().get(), fit.upscale()), (8, 2));
         }
     }
@@ -822,7 +850,7 @@ mod tests {
                     AREA,
                 );
                 assert!(
-                    matches!(got, Plan::Cutaway { protocol, .. } if protocol == want),
+                    matches!(got, Plan::Cutaway { protocol, forced: true, .. } if protocol == want),
                     "{mode:?} over {answered_with:?}: {got:?}"
                 );
             }
@@ -973,18 +1001,44 @@ mod tests {
         assert!(no_pixels.ends_with("too small to subdivide"), "{no_pixels}");
     }
 
+    /// A cutaway row is a tester's evidence line: the protocol and who
+    /// chose it, the cell, tmux, the fit, and the tiles and cadence it is
+    /// sent in. Each protocol is pinned whole, and no two rows match.
     #[test]
-    fn the_doctor_row_names_the_protocol_and_the_fit() {
-        let row = row(
-            GraphicsMode::Auto,
-            answered(Some(ImageProtocol::Sixel), cell(17, 41), false),
-            BUNDLED,
-        );
-        assert_eq!(
-            row,
-            "graphics: sixel (17x41 cell) — the cutaway profile would render at 16x \
-             (4x art upscaled 4x), a 127x99 office"
-        );
+    fn every_protocol_prints_its_own_cutaway_row() {
+        let cases = [
+            (
+                GraphicsMode::Auto,
+                answered(Some(ImageProtocol::Kitty), cell(17, 41), true),
+                "graphics: kitty (the terminal's answer) on a 17x41 cell, through tmux \
+                 passthrough — the cutaway at 16x (4x art upscaled 4x), a 127x99 office, sent \
+                 as 4x2-cell tiles every frame",
+            ),
+            (
+                GraphicsMode::Auto,
+                answered(Some(ImageProtocol::Sixel), cell(17, 41), false),
+                "graphics: sixel (the terminal's answer) on a 17x41 cell, direct — the cutaway \
+                 at 16x (4x art upscaled 4x), a 127x99 office, sent as 8x4-cell tiles at most \
+                 every 66 ms",
+            ),
+            (
+                GraphicsMode::Iterm2,
+                answered(None, cell(8, 16), false),
+                "graphics: iterm2 (forced by --graphics) on a 8x16 cell, direct — the cutaway \
+                 at 8x (4x art upscaled 2x), a 120x78 office, sent as 8x4-cell tiles at most \
+                 every 100 ms",
+            ),
+        ];
+        let rows: Vec<String> = cases
+            .iter()
+            .map(|&(mode, probe, want)| {
+                let got = row(mode, probe, BUNDLED);
+                assert_eq!(got, want, "{mode:?}");
+                got
+            })
+            .collect();
+        let distinct: std::collections::HashSet<_> = rows.iter().collect();
+        assert_eq!(distinct.len(), rows.len());
     }
 
     /// A reason keeps its variant only by printing its own row, a remedy the

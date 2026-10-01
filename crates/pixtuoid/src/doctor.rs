@@ -1791,13 +1791,11 @@ mod tests {
             protocol: ImageProtocol::Kitty,
             cell,
             tmux: false,
+            forced: false,
         };
         assert_eq!(
             terminal_category(&r).details[0],
-            format!(
-                "{DETAIL_INDENT}graphics: kitty (17x41 cell) — the cutaway profile would \
-                 render at 16x (4x art upscaled 4x), a 212x125 office"
-            )
+            format!("{DETAIL_INDENT}{}", r.graphics_plan.diagnostic_row())
         );
 
         r.graphics_plan = Plan::Classic {
