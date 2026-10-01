@@ -1742,7 +1742,7 @@ fn push_desk_props(
         let s = scale.get();
         let cells = |at: u16, len: u16| (at / s, (at + len - 1) / s - at / s + 1);
         let ((cx, cw), (cy, ch)) = (cells(x, w), cells(y, h));
-        let prop = DeskProp {
+        let prop = StoodProp {
             sprite,
             frame,
             at: (x, y),
@@ -2290,7 +2290,7 @@ pub(crate) enum PieceKind {
         reading: crate::sky::ClockReading,
     },
     /// A prop the model stands on a desk ([`push_desk_props`]).
-    DeskProp(DeskProp),
+    DeskProp(StoodProp),
     Character {
         figure: Figure,
         /// A back-turned sitter's chair, painted straight after them.
@@ -2318,7 +2318,7 @@ pub(crate) enum PieceKind {
 /// One desk prop: frame `frame` of `sprite`, its art's top-left at buffer pixel
 /// `at`, where the desk art's mark for it stands it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct DeskProp {
+pub(crate) struct StoodProp {
     sprite: &'static str,
     frame: usize,
     at: (u16, u16),
@@ -2997,7 +2997,7 @@ fn paint_art(
 
 /// A desk prop in the theme's cup and paper.
 fn paint_desk_prop(
-    prop: DeskProp,
+    prop: StoodProp,
     pack: &Pack,
     theme: &Theme,
     scale: RenderScale,
@@ -3010,15 +3010,21 @@ fn paint_desk_prop(
     blit_frame_scaled(&f_themed, prop.at.0, prop.at.1, f.blit_at, buf);
 }
 
-/// The pack keys the desk props take from the theme: the cup's body and
-/// shadow, the paper and its shade.
+/// The pack keys the desk props draw their cup's body and shadow in.
+const CUP_KEY: char = 'V';
+const CUP_SHADE_KEY: char = '%';
+/// The pack keys the token tower and its sheet draw their paper in.
+const PAPER_KEY: char = '¤';
+const PAPER_SHADE_KEY: char = '!';
+
+/// The pack keys the desk props take from the theme.
 fn desk_prop_overrides(theme: &Theme) -> [(char, pixtuoid_core::sprite::Pixel); 4] {
     let f = &theme.furniture;
     [
-        ('V', Some(f.coffee_cup)),
-        ('%', Some(f.coffee_cup_shadow)),
-        ('¤', Some(f.paper)),
-        ('!', Some(f.paper_shade)),
+        (CUP_KEY, Some(f.coffee_cup)),
+        (CUP_SHADE_KEY, Some(f.coffee_cup_shadow)),
+        (PAPER_KEY, Some(f.paper)),
+        (PAPER_SHADE_KEY, Some(f.paper_shade)),
     ]
 }
 
@@ -3734,12 +3740,12 @@ pub(crate) mod tests {
     }
 
     /// A lit screen's scanline lights its glass on the column the model names
-    /// and nowhere else: at the base art, the classic's own glass column.
+    /// and nowhere else, at every density the desk art is drawn at: the glass's
+    /// columns split evenly among the classic's glass columns.
     #[test]
     fn a_lit_screens_scanline_is_on_the_models_column() {
         let pack = test_default_pack();
         let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
-        let anim = pack.animation(art).expect("the base art");
         let glow = pixtuoid_core::sprite::Rgb {
             r: 40,
             g: 180,
@@ -3747,20 +3753,65 @@ pub(crate) mod tests {
         };
         let line = crate::pixel_painter::effects::scanline_color(glow);
         let cols = crate::layout::SCREEN_GLASS_COLS;
-        for scan in 0..=cols.end() - cols.start() {
-            let lit = Screen::Lit { glow, scan }
-                .on(anim.recolorable(0).expect("frame 0"))
-                .expect("a lit screen");
-            let lined: std::collections::BTreeSet<u16> = (0..lit.height())
-                .flat_map(|y| (0..lit.width()).map(move |x| (x, y)))
-                .filter(|&(x, y)| lit.get(x, y).copied().flatten() == Some(line))
-                .map(|(x, _)| x)
-                .collect();
-            assert_eq!(
-                lined,
-                [cols.start() + scan].into(),
-                "scan {scan} lit other columns"
-            );
+        let n = cols.end() - cols.start() + 1;
+        for s in [1, pack.max_density_variant().get()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            let desk = crate::pixel_painter::densest_frame(&pack, art, 0, scale).expect("the art");
+            let w = usize::from(desk.frame.width());
+            let glass: Vec<u16> = drawn_in(
+                &desk,
+                &[
+                    crate::pixel_painter::SCREEN_GLASS_KEY,
+                    crate::pixel_painter::SCREEN_TEXT_KEY,
+                ],
+            )
+            .iter()
+            .enumerate()
+            .filter(|&(_, &g)| g)
+            .map(|(i, _)| (i % w) as u16)
+            .collect();
+            let x0 = *glass.iter().min().expect("the art draws glass");
+            let band = (glass.iter().max().expect("glass") - x0 + 1) / n;
+            for scan in 0..n {
+                let lit = Screen::Lit { glow, scan }
+                    .on(desk.recolorable)
+                    .expect("a lit screen");
+                let lined: std::collections::BTreeSet<u16> = (0..lit.height())
+                    .flat_map(|y| (0..lit.width()).map(move |x| (x, y)))
+                    .filter(|&(x, y)| lit.get(x, y).copied().flatten() == Some(line))
+                    .map(|(x, _)| x)
+                    .collect();
+                assert_eq!(
+                    lined,
+                    (x0 + scan * band..x0 + (scan + 1) * band).collect(),
+                    "at scale {s}, scan {scan} lit other columns"
+                );
+            }
+        }
+    }
+
+    /// Every key the desk props take a theme colour in is one their art draws,
+    /// at every density: a key renamed in the pack would stop the theme
+    /// reaching the prop.
+    #[test]
+    fn the_desk_props_draw_the_keys_the_theme_recolours() {
+        let pack = test_default_pack();
+        for s in [1, pack.max_density_variant().get()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            for (sprite, frame, keys) in [
+                (DESK_CUP_SPRITE, 0, &[CUP_KEY, CUP_SHADE_KEY][..]),
+                (TOKEN_TOWER_SPRITE, 0, &[PAPER_KEY, PAPER_SHADE_KEY]),
+                (TOKEN_SHEET_SPRITE, 0, &[PAPER_KEY]),
+            ] {
+                let art = crate::pixel_painter::densest_frame(&pack, sprite, frame, scale)
+                    .expect("the bundled pack draws the prop");
+                for &key in keys {
+                    assert!(
+                        drawn_in(&art, &[key]).contains(&true),
+                        "{sprite} at scale {s} draws no {key:?}"
+                    );
+                }
+            }
         }
     }
 
