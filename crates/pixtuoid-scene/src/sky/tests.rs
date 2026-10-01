@@ -745,3 +745,20 @@ fn a_changing_storm_fires_whole_strikes_by_its_share() {
          {partial_fired} fired, {partial_skipped} skipped"
     );
 }
+
+/// No strike runs across a change of weather, a transition's step or a slot's
+/// start: the weather at its last instant is the weather it started in, so a
+/// storm's strike never lights the sky that follows.
+#[test]
+fn no_strike_runs_across_a_change_of_weather() {
+    for bucket in 0..200_000u64 {
+        let start = bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket);
+        let last = start + LIGHTNING_FLASH_MS - 1;
+        let at = |ms| std::time::UNIX_EPOCH + Duration::from_millis(ms);
+        assert_eq!(
+            clock_weather(at(start)),
+            clock_weather(at(last)),
+            "bucket {bucket}'s strike crosses a change"
+        );
+    }
+}

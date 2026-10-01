@@ -464,6 +464,11 @@ fn moon_phase_at(now: SystemTime) -> f32 {
 /// Lightning cadence: one strike per bucket this long, at a hashed offset
 /// ([`strike_offset`]) — a much faster cadence reads as a hyperactive storm.
 const LIGHTNING_PERIOD_MS: u64 = 15000;
+// Every change of weather, a transition's step or a slot's start, falls on a
+// bucket's start, which no strike runs across: a strike lights under the
+// weather it started in.
+const _: () =
+    assert!((TRANSITION_SECS / TRANSITION_STEPS * 1000).is_multiple_of(LIGHTNING_PERIOD_MS));
 /// The shortest a flash's phase may last: each of [`LIGHTNING_PHASES`] holds
 /// this long, the photosensitive-safe bound.
 const MIN_FLASH_PHASE_MS: u64 = 100;
