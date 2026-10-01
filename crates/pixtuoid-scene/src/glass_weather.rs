@@ -348,6 +348,21 @@ mod tests {
         }
     }
 
+    /// No two weathers fall alike, so finding a fall by value names one
+    /// weather's: `&CONST` addresses are not unique, so identity can't.
+    #[test]
+    fn every_falling_weather_has_its_own_fall() {
+        let falls: Vec<(Weather, &Fall)> = Weather::ALL
+            .into_iter()
+            .filter_map(|w| fall(w).map(|f| (w, f)))
+            .collect();
+        for (i, (a, fa)) in falls.iter().enumerate() {
+            for (b, fb) in &falls[i + 1..] {
+                assert!(fa != fb, "{a:?} and {b:?} share one fall");
+            }
+        }
+    }
+
     #[test]
     fn a_streak_steps_down_through_the_falloff_tones() {
         let Particle::Streak { alpha_base, .. } = STORM.particle else {
