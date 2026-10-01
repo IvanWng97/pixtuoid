@@ -84,8 +84,7 @@ enum KeyAction {
     DashboardJump,
     DashboardFocus,
     DashboardClose,
-    /// Open/close the Sources panel — the variant and module keep the historical
-    /// `Connection` name.
+    /// Open/close the Sources panel.
     ToggleConnection,
     ConnectionUp,
     ConnectionDown,
@@ -551,16 +550,16 @@ pub(crate) struct TuiSession {
 /// Whether a left-click at `(col, row)` landed on the wall's star/repo link, given the
 /// terminal's `(cols, rows)`. Callers MUST gate this on `renderer.cached_layout().is_some()`
 /// — the wall display only paints with a layout, so an ungated hit phantom-launches a
-/// browser on a too-small frame or mid floor-slide. Note the asymmetry with
-/// [`version_popup_url_clicked`]: this hit-tests the SCENE rect, that one the full bounds.
+/// browser on a too-small frame or mid floor-slide.
 fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
     let scene = renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
     widgets::star_hit_rect(scene)
         .is_some_and(|s| s.contains(ratatui::layout::Position { x: col, y: row }))
 }
 
-/// Whether a left-click at `(col, row)` landed on the version popup's URL, given the
-/// terminal's `(cols, rows)`. `scale` is the popup's last painted scale.
+/// Whether a left-click at `(col, row)` landed on the version popup's URL, hit-tested
+/// against the full terminal bounds, not [`star_clicked`]'s scene rect. `scale` is
+/// the popup's last painted scale.
 fn version_popup_url_clicked(col: u16, row: u16, scale: f32, term: (u16, u16)) -> bool {
     let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
     widgets::version_popup_url_rect(bounds, scale)
@@ -918,8 +917,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
     // A LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins
-    // the device thread it owns; built after the pack-load `?`, so a pack that
-    // fails to load can't strand it.
+    // the device thread it owns.
     let mut audio_ctl = crate::audio::AudioController::new(audio_cfg, config_path.clone());
     renderer.set_audio(audio_ctl.handle().clone());
     // With no agent CLIs detected there is nothing to connect: the overlay stays closed.
@@ -930,8 +928,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     };
     let onboarding_ui = welcome::WelcomeUi::from_detected(&detected_clis);
 
-    // Yields to onboarding but still STAMPS `last_seen_version`. Gating on the overlay
-    // SHOWING, not on `first_run` — true forever for a no-CLI user — is what unmutes it.
+    // Yields to onboarding but still STAMPS `last_seen_version`. Gated on the overlay
+    // SHOWING, not on `first_run`, which a no-CLI user carries forever.
     let version_popup = if !onboarding_ui.is_empty() {
         let _ = resolve_version_popup(&config_path);
         false
@@ -1031,7 +1029,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 },
                 _ = &mut terminate => break,
             }
-            tokio::task::yield_now().await;
         }
         Ok(())
     })
@@ -2263,20 +2260,14 @@ mod apply_key_action_tests {
         );
     }
 
-    /// The popup URL is clickable only while the popup is actually painted —
-    /// `version_popup_url_rect` returns `None` below the clickable scale, and a
-    /// predicate that ignored `scale` would launch a browser on a click landing
-    /// where the popup merely USED to be.
+    /// Ignoring `scale` would launch a browser where the popup is still animating.
     #[test]
     fn version_popup_url_clicked_respects_the_rect_and_the_scale() {
         use crate::tui::widgets::version_popup_url_rect;
         let term = (120u16, 44u16);
         let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
-        let Some(rect) = version_popup_url_rect(bounds, 1.0) else {
-            // The popup must produce a link rect at full scale; if this ever
-            // changes the assertions below would pass vacuously.
-            panic!("the version popup must yield a URL rect at scale 1.0");
-        };
+        let rect = version_popup_url_rect(bounds, 1.0)
+            .expect("a URL rect at scale 1.0, or the misses below pass vacuously");
 
         assert!(
             super::version_popup_url_clicked(rect.x, rect.y, 1.0, term),

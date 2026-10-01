@@ -14,6 +14,8 @@
 
 use std::num::NonZeroU16;
 
+use pixtuoid_core::sprite::format::Density;
+
 /// How many buffer pixels one layout unit paints as.
 ///
 /// `ONE` is the classic path: layout units ARE buffer pixels, byte-identical to
@@ -53,9 +55,9 @@ impl RenderScale {
     ///
     /// A density of 1 — a pack with no variants — makes every scale a
     /// multiple, so this is exactly [`RenderScale::new`] there.
-    pub fn fit(natural: u16, density: u16) -> Option<Self> {
+    pub fn fit(natural: u16, density: Density) -> Option<Self> {
         // u64: a square of a u16-range value times the bound overflows u32.
-        let d = u64::from(density.max(1));
+        let d = u64::from(density.get());
         let n = u64::from(natural);
         let below = n / d * d;
         // A multiple past `u16::MAX` is no scale at all, so it is no candidate.
@@ -126,7 +128,7 @@ mod tests {
     use crate::floor::{floor_capacity, floor_capacity_scaled, floor_seed};
 
     fn fit(natural: u16, density: u16) -> Option<u16> {
-        RenderScale::fit(natural, density).map(RenderScale::get)
+        RenderScale::fit(natural, Density::new(density).expect("nonzero")).map(RenderScale::get)
     }
 
     /// At a density of 8, natural scale by natural scale: every pick is a

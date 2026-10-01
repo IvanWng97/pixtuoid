@@ -91,12 +91,20 @@ pub(crate) fn sample_scene(now: SystemTime, max_desks: usize, n_agents: usize) -
     s
 }
 
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub(crate) enum GatewayState {
+    Idle,
+    Busy,
+    Degraded,
+    Down,
+}
+
 /// Stage one OpenClaw gateway presence (the wandering lobster mascot) per entry
 /// in `ports` — empty ⇒ the single upstream default port, so every existing
 /// caller and every gen-media baseline is unchanged.
 pub(crate) fn inject_openclaw_presence(
     s: &mut SceneState,
-    state: &str,
+    state: GatewayState,
     now: SystemTime,
     ports: &[String],
 ) -> Result<()> {
@@ -104,19 +112,16 @@ pub(crate) fn inject_openclaw_presence(
     // Busy is DERIVED from the run set: "busy" = UP + in-flight runs, never a
     // stored state.
     let (liveness, active_sessions, runs) = match state {
-        "idle" => (DaemonLiveness::UP, 1, Vec::new()),
-        "busy" => (
+        GatewayState::Idle => (DaemonLiveness::UP, 1, Vec::new()),
+        GatewayState::Busy => (
             DaemonLiveness::UP,
             1,
             vec!["run-a".to_string(), "run-b".to_string()],
         ),
         // Up, but the model backend fails every run — no in-flight runs, because
         // the last one FAILED out of the set.
-        "degraded" => (DaemonLiveness::Up { degraded: true }, 1, Vec::new()),
-        "down" => (DaemonLiveness::Down, 0, Vec::new()),
-        other => {
-            anyhow::bail!("unknown --openclaw {other:?}; valid: idle | busy | degraded | down")
-        }
+        GatewayState::Degraded => (DaemonLiveness::Up { degraded: true }, 1, Vec::new()),
+        GatewayState::Down => (DaemonLiveness::Down, 0, Vec::new()),
     };
     // `entered_at` ~20s in the past lands past the enter animation, so a static
     // snapshot captures the steady wander rather than the walk-in.
