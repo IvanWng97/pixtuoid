@@ -364,7 +364,7 @@ pub const CHARACTER_SPRITE_H: u16 = 12;
 /// window cut-out and the hover box; `every_hover_size_is_its_painted_sprite_size`
 /// pins it to the door sprite.
 pub const ELEVATOR_W: u16 = 16;
-/// Elevator-door sprite height in buffer px — the door's z-sort anchor row.
+/// Elevator-door sprite height in buffer px — which sets the door's sort row.
 pub const ELEVATOR_H: u16 = 14;
 
 /// The buffer rows a half-block terminal cell shows.

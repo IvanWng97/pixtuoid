@@ -1634,7 +1634,7 @@ fn desk_sort_row_is_the_visual_south() {
     );
 }
 
-/// The painter centres a pack sprite by the ART's size, while its z-sort row,
+/// The painter centres a pack sprite by the ART's size, while its sort row,
 /// ground strip and the binary's hover box place it by the size the layout
 /// reads — a def's `.visual`, the elevator's, a counter's — so the two must
 /// agree for the bundled pack. The desk is the exception: its box starts under

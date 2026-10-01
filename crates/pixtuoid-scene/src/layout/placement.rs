@@ -106,7 +106,7 @@ mod tests {
                 assert_eq!(
                     sort_row_at(p, pos, h),
                     tl.y + h - 1,
-                    "{p:?} h={h}: z-sort row must equal the box south row"
+                    "{p:?} h={h}: sort row must equal the box south row"
                 );
             }
         }
