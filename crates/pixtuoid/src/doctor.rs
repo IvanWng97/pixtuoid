@@ -622,10 +622,10 @@ struct RootStatus {
 /// The densest art of the pack `source` loads, or why that pack fails to
 /// load: `run` refuses to start on it, so doctor says so.
 fn pack_max_density(
-    source: pixtuoid_scene::embedded_pack::PackSource,
+    source: pixtuoid_scene::pack::PackSource,
 ) -> Result<pixtuoid_core::sprite::format::Density, String> {
     use pixtuoid_core::sprite::error::PackError;
-    pixtuoid_scene::embedded_pack::load_sprite_pack(source)
+    pixtuoid_scene::pack::load_sprite_pack(source)
         .map(|pack| pack.max_density_variant())
         .map_err(|e| {
             let no_manifest = e.chain().any(|c| {
@@ -1536,7 +1536,7 @@ mod tests {
 
     #[test]
     fn a_pack_dir_without_a_manifest_is_named_a_config_mistake() {
-        use pixtuoid_scene::embedded_pack::PackSource;
+        use pixtuoid_scene::pack::PackSource;
         let base = tempfile::TempDir::new().expect("tempdir");
         for dir in [base.path().join("gone"), base.path().to_path_buf()] {
             let reason = pack_max_density(PackSource::Explicit(dir)).expect_err("no manifest");

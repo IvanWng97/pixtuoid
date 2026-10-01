@@ -88,7 +88,7 @@ pub(crate) fn pet_position(
     layout.corridor?;
     let frame_at = |anim: &str| {
         pack.animation(anim)
-            .map_or(0, |a| crate::embedded_pack::looping_frame_index(a, now))
+            .map_or(0, |a| crate::pack::looping_frame_index(a, now))
     };
 
     let elapsed_ms = epoch_ms(now);
@@ -420,7 +420,7 @@ mod tests {
     }
 
     fn test_pack() -> Pack {
-        crate::embedded_pack::test_default_pack()
+        crate::pack::test_default_pack()
     }
 
     /// The 1x cells a creature's base may differ from its master read at 1x:
@@ -620,7 +620,7 @@ mod tests {
     /// answers with a coarse CELL CENTRE, so a clear destination is not enough.
     #[test]
     fn no_resting_creature_settles_under_a_sprite_that_paints_over_it() {
-        let pack = crate::embedded_pack::test_default_pack();
+        let pack = crate::pack::test_default_pack();
         let mut rests = 0u32;
         let min = crate::layout::min_layout_size();
         for &(w, h) in &[

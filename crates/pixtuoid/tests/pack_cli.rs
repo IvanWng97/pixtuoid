@@ -71,7 +71,7 @@ fn init_pack_force_rewrites_populated_dir() {
     assert_eq!(
         fs::read_to_string(&pack_toml).unwrap(),
         include_str!("../sprites/skeleton/pack.toml"),
-        "force=true overwrites the user-modified file with the embedded skeleton"
+        "force=true overwrites the user-modified file with the bundled skeleton"
     );
 }
 
