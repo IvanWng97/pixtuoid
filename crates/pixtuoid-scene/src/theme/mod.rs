@@ -211,6 +211,22 @@ pub struct ToolGlowColors {
     pub default: Rgb,
 }
 
+impl ToolGlowColors {
+    /// The exhaustive `ToolKind → hue` map, shared by the monitor glow, the
+    /// footer tint and the tooltip so each tool has one hue.
+    pub fn for_kind(&self, kind: pixtuoid_core::state::ToolKind) -> Rgb {
+        use pixtuoid_core::state::ToolKind;
+        match kind {
+            ToolKind::Edit => self.edit,
+            ToolKind::Read => self.read,
+            ToolKind::Bash => self.bash,
+            ToolKind::Task => self.agent,
+            ToolKind::Search => self.grep,
+            ToolKind::Other => self.default,
+        }
+    }
+}
+
 /// Name-badge, tooltip, and neon-brand UI colors.
 #[derive(Debug, Clone)]
 pub struct UiColors {
@@ -677,5 +693,17 @@ mod tests {
                 d.label_prefix
             );
         }
+    }
+
+    #[test]
+    fn tool_glow_is_the_shared_kind_to_hue_map() {
+        use pixtuoid_core::state::ToolKind;
+        let glow = &NORMAL.tool_glow;
+        assert_eq!(glow.for_kind(ToolKind::Edit), glow.edit);
+        assert_eq!(glow.for_kind(ToolKind::Read), glow.read);
+        assert_eq!(glow.for_kind(ToolKind::Bash), glow.bash);
+        assert_eq!(glow.for_kind(ToolKind::Task), glow.agent);
+        assert_eq!(glow.for_kind(ToolKind::Search), glow.grep);
+        assert_eq!(glow.for_kind(ToolKind::Other), glow.default);
     }
 }

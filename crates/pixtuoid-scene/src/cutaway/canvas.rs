@@ -92,7 +92,7 @@ impl CutawayCanvas {
         theme: &'static Theme,
         scale: RenderScale,
         showing: Showing<'_>,
-        cache: &mut crate::frame_cache::FrameCache,
+        cache: &mut crate::cutaway::paint::CutawayCache,
     ) -> CanvasFrame<'_> {
         let layout = &observed.layout;
         let office = Office {
@@ -232,7 +232,7 @@ mod tests {
             theme,
             scale,
         };
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         render_cutaway(
             frame,
             office,
@@ -266,7 +266,7 @@ mod tests {
                 .any(|r| (r.x..r.x + r.width).contains(&x) && (r.y..r.y + r.height).contains(&y))
         };
         let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         let mut tally = Run::default();
         let mut last: Option<(RgbBuffer, Vec<(Span, u64)>)> = None;
         for (k, (frame, now)) in steps.iter().enumerate() {
@@ -423,7 +423,7 @@ mod tests {
             layout,
         };
         let now = crate::localclock::at_hour(12);
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         let mut canvas = CutawayCanvas::new(Arc::new(test_default_pack()));
         let other = crate::theme::ALL_THEMES
             .iter()
@@ -508,7 +508,7 @@ mod tests {
                 layout: Arc::clone(&self.layout),
                 frame: frame.clone(),
             };
-            let mut cache = crate::frame_cache::FrameCache::new();
+            let mut cache = crate::cutaway::paint::CutawayCache::default();
             canvas.frame(
                 &observed,
                 normal(),
@@ -713,7 +713,7 @@ mod tests {
             layout: Arc::clone(&h.layout),
             frame: renamed.clone(),
         };
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         let size = (
             h.scale.to_buffer(h.layout.buf_w),
             h.scale.to_buffer(h.layout.buf_h),
@@ -779,7 +779,7 @@ mod tests {
             layout: Arc::clone(&h.layout),
             frame: seated.clone(),
         };
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         let dirty = canvas
             .frame(&observed, normal(), h.scale, busy, &mut cache)
             .dirty;
@@ -801,7 +801,7 @@ mod tests {
         let pack = Arc::new(test_default_pack());
         let scale = RenderScale::new(2).expect("nonzero");
         let now = crate::localclock::at_hour(12);
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
         let observe = |seed| {
             let layout = Layout::compute_with_seed(160, 96, None, seed).expect("lays out");
