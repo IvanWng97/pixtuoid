@@ -343,14 +343,19 @@ fn solar_noon_outshines_the_brightest_night() {
                 .expect("moon_phase is never NaN")
         })
         .expect("January has days");
-    // Near the night arc's apex, so close to that night's brightest instant.
-    let full_moon_midnight = on_day(full_moon_day, 0);
+    // The night's brightest ten-minute mark, since the moon's apex moves with
+    // its age.
+    let night = (0..9 * 6u64)
+        .map(|m| on_day(full_moon_day, 20) + std::time::Duration::from_secs(m * 10 * 60));
 
     let storm_noon = Sky::at_with(at_hour_min(12, 0), Weather::Storm)
         .light()
         .exterior;
     for w in Weather::ALL {
-        let full_moon = Sky::at_with(full_moon_midnight, w).light().exterior;
+        let full_moon = night
+            .clone()
+            .map(|t| Sky::at_with(t, w).light().exterior)
+            .fold(0.0_f32, f32::max);
         assert!(
             storm_noon > full_moon,
             "a stormy solar noon must outshine a {w:?} full-moon midnight: \
@@ -504,4 +509,28 @@ fn nightfall_ramps_across_dusk_and_dawn() {
     assert!((0.0..1.0).contains(&nightfall(SUN_SET_H + NIGHTFALL_H / 2.0)));
     assert_eq!(nightfall(0.0), 1.0);
     assert!((0.0..1.0).contains(&nightfall(SUN_RISE_H - NIGHTFALL_H / 2.0)));
+}
+
+/// The moon's light and the sky's other night terms ride one `nightfall`: a
+/// night whose moon is already up through the dusk ramp.
+#[test]
+fn the_moons_light_rides_the_skys_nightfall() {
+    let ramp_lit = |m: u64| {
+        let s = Sky::at_with(
+            on_day(1, 20) + std::time::Duration::from_secs(m * 60),
+            Weather::Clear,
+        );
+        s.emitter().altitude > 0.0 && s.nightfall() < 1.0
+    };
+    assert!((0..45).any(ramp_lit), "the moon is up while night comes in");
+    for m in 0..9 * 60u64 {
+        let t = on_day(1, 20) + std::time::Duration::from_secs(m * 60);
+        let s = Sky::at_with(t, Weather::Clear);
+        let e = s.emitter();
+        assert_eq!(
+            e.emitter_lum,
+            MOON_PEAK_LUM * e.altitude * s.moon_phase() * s.nightfall(),
+            "minute {m}"
+        );
+    }
 }
