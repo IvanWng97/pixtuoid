@@ -247,8 +247,7 @@ fn board_runs(
             ArtPx(pen.art(NEON_PANEL_INNER_Y + line * CELL_ROWS).0 + pad),
         )
     };
-    let cols =
-        |s: &crate::board::BoardSegment| u16::try_from(s.text.chars().count()).unwrap_or(u16::MAX);
+    let cols = |s: &crate::board::BoardSegment| crate::cutaway::text::cells(&s.text);
     let mut runs = vec![
         (at(0, 0), &board.brand),
         (

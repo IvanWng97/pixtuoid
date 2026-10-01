@@ -145,9 +145,14 @@ pub(crate) fn columns(n: u16) -> ArtPx {
     ArtPx(n.saturating_mul(ADVANCE))
 }
 
+/// The cells `text` takes, one per character.
+pub(crate) fn cells(text: &str) -> u16 {
+    u16::try_from(text.chars().count()).unwrap_or(u16::MAX)
+}
+
 /// [`columns`] past all of `text`: where the run after it starts.
 pub(crate) fn advance(text: &str) -> ArtPx {
-    columns(u16::try_from(text.chars().count()).unwrap_or(u16::MAX))
+    columns(cells(text))
 }
 
 /// Paint `text` in `ink` from its top-left `(x, y)`, clipped to the buffer.
