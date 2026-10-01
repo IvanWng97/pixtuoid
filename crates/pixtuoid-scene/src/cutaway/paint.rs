@@ -401,6 +401,8 @@ pub(crate) struct DrawList<'a> {
     ambient: crate::cutaway::light::Ambient,
     /// The carpet the backdrop lays: a change repaints the whole frame too.
     ground: Ground,
+    /// How far lightning lifts the room: a change repaints the whole frame.
+    flash: crate::cutaway::light::Flash,
     // What it was built with, so painting it cannot use anything else: a
     // figure's key names its density, which only the build's scale picks.
     pack: &'a Pack,
@@ -505,6 +507,10 @@ impl<'a> DrawList<'a> {
         self.ground
     }
 
+    pub(crate) fn flash(&self) -> crate::cutaway::light::Flash {
+        self.flash
+    }
+
     /// Each drawn agent's badge, in draw order.
     #[cfg(test)]
     pub(crate) fn badges(&self) -> impl Iterator<Item = &Badge> + '_ {
@@ -569,6 +575,7 @@ pub(crate) fn build_list<'a>(
         lights: lights(frame, office, moment, floor.floor_idx, ambient),
         ambient,
         ground: Ground::of(theme, moment.look.ground_tint),
+        flash: crate::cutaway::light::Flash::of(&moment.sky),
         pack,
         theme,
         scale,
@@ -707,7 +714,7 @@ pub(crate) fn paint_list(list: &DrawList<'_>, cache: &mut CutawayCache, buf: &mu
     crate::cutaway::light::net_pass(
         whole,
         &lights,
-        list.ambient,
+        (list.ambient, list.flash),
         &emission,
         pen,
         &mut cache.net_colours,
@@ -2593,6 +2600,9 @@ fn push_windows(
     );
     let d = density.get();
     let sky = crate::celestial::SkyView::of(moment, layout.buf_w, layout.wall_band_h(), theme);
+    // The bolt lights the glass and all it shows, over the weather on it.
+    let bolt = crate::cutaway::light::bolt_steps(&moment.sky);
+    let mut bolt_lift = crate::dither::Stepped::new(bolt as i8);
     for bay in layout.window_bays() {
         let size = Size {
             w: bay.w,
@@ -2632,6 +2642,11 @@ fn push_windows(
             let (ax, ay) = (m.x + d, m.y + d);
             if let Some(Some(c)) = px.get_mut(usize::from(ay) * usize::from(w) + usize::from(ax)) {
                 *c = m.over(*c, (x0 + ax, y0 + ay));
+            }
+        }
+        if bolt > 0 {
+            for c in px.iter_mut().flatten() {
+                *c = bolt_lift.of(*c);
             }
         }
         order.push((
@@ -2892,7 +2907,7 @@ fn scanline(
     let cols = crate::layout::SCREEN_GLASS_COLS;
     let band = ((x1 - x0 + 1) / (cols.end() - cols.start() + 1)).max(1);
     let line = (x0 + scan * band)..(x0 + (scan + 1) * band);
-    let color = crate::pixel_painter::effects::scanline_color(glow);
+    let color = crate::effects::look::scanline_color(glow);
     let pixels = (0..h)
         .flat_map(|y| (0..w).map(move |x| (x, y)))
         .map(|(x, y)| {
@@ -3833,7 +3848,7 @@ pub(crate) mod tests {
             g: 180,
             b: 220,
         };
-        let line = crate::pixel_painter::effects::scanline_color(glow);
+        let line = crate::effects::look::scanline_color(glow);
         let cols = crate::layout::SCREEN_GLASS_COLS;
         let n = cols.end() - cols.start() + 1;
         for s in [1, pack.max_density_variant().get()] {
@@ -5350,14 +5365,9 @@ pub(crate) mod tests {
             let dense = crate::embedded_pack::densest_frame(&pack, "walking", 0, scale)
                 .expect("the walk's art");
             let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/style/{i}.jsonl"));
-            let style = crate::pixel_painter::hair::dress_for(
-                &pack,
-                id,
-                dense.frame,
-                dense.head,
-                dense.density,
-            )
-            .and_then(|d| d.style);
+            let style =
+                crate::character::dress_for(&pack, id, dense.frame, dense.head, dense.density)
+                    .and_then(|d| d.style);
             let Some(style) = style.filter(|s| !worn.contains(s)) else {
                 continue;
             };
@@ -5545,12 +5555,86 @@ S B B B B B B S
             last = Some(s);
         }
         let (dust, span) = rider(K::WalkingDust);
-        let foot =
-            crate::pixel_painter::effects::walking_dust_foot(dust.effect.at, dust.effect.phase);
+        let foot = crate::effects::look::walking_dust_foot(dust.effect.at, dust.effect.phase);
         assert!(
             (span.x0..=span.x1).contains(&foot.x) && (span.y0..=span.y1).contains(&foot.y),
             "the dust {span:?} is off the foot {foot:?}"
         );
+    }
+
+    /// A storm's strike lifts the whole frame by whole ramp steps, what glows
+    /// of its own too, and its window glass further, the bolt's; outside a
+    /// storm the same flash lifts nothing.
+    #[test]
+    fn a_strike_lifts_the_room_and_its_glass_most() {
+        use crate::sky::{Sky, Weather};
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = test_default_pack();
+        let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let frame = empty_frame(&layout);
+        let now = crate::localclock::at_hour(23);
+        let lift = crate::cutaway::light::FLASH_MAX_STEPS as i8;
+        for s in [1, pack.max_density_variant().get()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            let office = Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale,
+            };
+            let drawn = |weather, flash| {
+                let sky = Sky::at_with(now, weather).with_flash(flash);
+                let list = build_list(
+                    &frame,
+                    office,
+                    &Moment::resolve(sky, theme, 0.0, now),
+                    crate::floor::FloorMeta::ground(),
+                    quiet_board(),
+                );
+                let mut buf = RgbBuffer::filled(
+                    scale.to_buffer(layout.buf_w),
+                    scale.to_buffer(layout.buf_h),
+                    theme.surface.bg_fallback,
+                );
+                paint(&layout, &list, &mut CutawayCache::default(), &mut buf);
+                let glass: Vec<Span> = list
+                    .pieces()
+                    .iter()
+                    .filter(|p| matches!(p.kind, PieceKind::Glass { .. }))
+                    .map(|p| p.span)
+                    .collect();
+                (buf, glass)
+            };
+            let (calm, glass) = drawn(Weather::Storm, 0.0);
+            let (strike, _) = drawn(Weather::Storm, 1.0);
+            let in_glass = |x: u16, y: u16| {
+                let (lx, ly) = (x / s, y / s);
+                glass
+                    .iter()
+                    .any(|g| (g.x0..=g.x1).contains(&lx) && (g.y0..=g.y1).contains(&ly))
+            };
+            let mut bolted = 0;
+            for y in 0..calm.height() {
+                for x in 0..calm.width() {
+                    let (c, f) = (calm.get(x, y), strike.get(x, y));
+                    if in_glass(x, y) {
+                        bolted += usize::from(f.lightness() > c.ramp(lift).lightness());
+                    } else {
+                        assert_eq!(f, c.ramp(lift), "at scale {s}, ({x}, {y}) took no strike");
+                    }
+                }
+            }
+            assert!(
+                bolted > 0,
+                "at scale {s} the bolt lit no glass past the room"
+            );
+            let (clear, _) = drawn(Weather::Clear, 0.0);
+            let (clear_flash, _) = drawn(Weather::Clear, 1.0);
+            assert!(
+                clear.as_slice() == clear_flash.as_slice(),
+                "a flash outside a storm lit the room"
+            );
+        }
     }
 
     /// A clear noon's sunbeams carry motes, each a speck painted on its own
@@ -5889,7 +5973,7 @@ S B B B B B B S
                 h: pen.art(rect.y1 - rect.y0 + 1),
             },
             &lights,
-            list.ambient,
+            (list.ambient, list.flash),
             &crate::cutaway::light::Emission::new(w, h),
             pen,
             &mut crate::cutaway::light::NetMemo::default(),
@@ -6007,7 +6091,7 @@ S B B B B B B S
                 net_pass(
                     whole,
                     &[&light.view],
-                    Ambient::default(),
+                    (Ambient::default(), crate::cutaway::light::Flash::default()),
                     &Emission::new(w, h),
                     pen,
                     &mut NetMemo::default(),

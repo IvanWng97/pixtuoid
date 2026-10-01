@@ -98,7 +98,6 @@ mod debug_overlay;
 pub(crate) mod drawable;
 pub(crate) mod effects;
 mod furniture;
-pub(crate) mod hair;
 pub(crate) mod palette;
 
 /// Applies the hour's object terms to every pixel painted since `since`.
