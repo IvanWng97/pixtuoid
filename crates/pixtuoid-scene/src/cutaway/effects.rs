@@ -256,3 +256,29 @@ fn stamp(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A look is centred and stacked by its first row's width and its row
+    /// count, so a ragged row would sit it off its mark.
+    #[test]
+    fn every_look_is_a_rectangle() {
+        for glyph in [SLEEP_Z, WAITING_MARK, DUST, FLAME_CROWN[0], FLAME_CROWN[1]] {
+            assert!(
+                glyph.iter().all(|row| row.len() == glyph[0].len()),
+                "{glyph:?}"
+            );
+        }
+        for frame in FLAME_CROWN {
+            assert!(
+                frame
+                    .iter()
+                    .flat_map(|row| row.chars())
+                    .all(|c| ".DMTC".contains(c)),
+                "{frame:?} inks a colour the crown has no name for"
+            );
+        }
+    }
+}
