@@ -9,33 +9,31 @@ const badges = sources.filter((s) => s.status === 'supported');
 ---
 
 <section id={floor.id} class="hero" data-floor={floor.fl} data-floor-label={floor.label}>
-  {
-    /* The engine places the meeting rooms in the layout's left column — this
-      bottom-left title card deliberately sits UNDER them, not over. */
-  }
+  {/* The engine places the meeting rooms in the layout's left column — this
+      bottom-left title card deliberately sits UNDER them, not over. */}
   <canvas id="dust" class="dust" aria-hidden="true"></canvas>
   <div class="container hero__frame">
     <div class="hero__copy" data-lit="fade" data-lit-max="0.74">
       <p class="eyebrow">{floor.fl} · {floorName(floor)} — terminal-native, open&nbsp;source</p>
       <h1 class="statement">
-        Your agents<br />
-        <span class="hl">work here</span><span class="cursor" aria-hidden="true"></span>
+        Your agents<br /> <span class="hl">work here</span
+        ><span class="cursor" aria-hidden="true"></span>
       </h1>
       <p class="statement-sub lead">
         Every session walks in, sits down, and gets to work — in a pixel office that lives in your
         terminal.
       </p>
       <ul class="hero__badges" aria-label={`Works with ${badges.length} coding CLIs`}>
-        {
-          badges.map((s) => (
-            <li class="hero__badge" style={`--badge:${s.badge_color}`} aria-label={s.name}>
-              <span class="hero__badge-code">{s.badge.replace('·', '')}</span>
-              <span class="hero__badge-name" aria-hidden="true">
-                <span>{s.name}</span>
-              </span>
-            </li>
-          ))
-        }
+        {badges.map((s) => <li
+          class="hero__badge"
+          style={`--badge:${s.badge_color}`}
+          aria-label={s.name}
+        >
+          <span class="hero__badge-code">{s.badge.replace('·', '')}</span>
+          <span class="hero__badge-name" aria-hidden="true">
+            <span>{s.name}</span>
+          </span>
+        </li>)}
         <li class="hero__badge hero__badge--more">
           <a href="#tools">{badges.length} CLIs <span aria-hidden="true">→</span></a>
         </li>

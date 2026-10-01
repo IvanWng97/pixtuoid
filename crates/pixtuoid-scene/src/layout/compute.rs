@@ -12,8 +12,8 @@ pub const PANTRY_COUNTER_LARGE_W: u16 = 32;
 /// anchor — shared by the lounge couch and the meeting sofas.
 const SEAT_DX: [i16; 3] = [-6, 0, 6];
 
-/// A band this wide has room for flanking greenery (the lounge pot's west edge
-/// needs 58 by derivation; +2 breathing).
+/// A band this wide has room for flanking greenery: the lounge pot's west edge,
+/// plus breathing room.
 pub(super) const ROOMY_BAND_MIN_W: u16 = 60;
 
 /// Air kept between a scatter plant's sprite box and any obstacle waypoint's
@@ -89,10 +89,7 @@ const fn cubicle_aisle_h(usable_h: u16) -> u16 {
 const MIN_CUBICLE_AISLE_H: u16 = 8;
 
 /// The smallest buffer `compute_with_seed` lays out; below either it returns `None`
-/// ("terminal too small"). BOTH axes are SOLVED against the band, not the buffer — the
-/// two hand-written floors erred in OPPOSITE directions: W advertised a size that lays
-/// out an office with no desk to seat anyone, and H was never re-derived and refused 15
-/// buffer px of sizes that render.
+/// ("terminal too small"). BOTH axes are SOLVED against the band, not the buffer.
 pub(super) const MIN_LAYOUT_W: u16 = min_layout_w();
 pub(super) const MIN_LAYOUT_H: u16 = min_layout_h();
 
@@ -623,7 +620,7 @@ pub(super) fn compute_with_seed(
         debug_assert!(
             !severed(&walkable),
             "#566 connectivity guard: a pocket (or a coarse-unroutable home desk) survived \
-             dropping every scatter plant AND the free-standing whiteboard — a new NON-decor \
+             dropping every scatter plant AND every floor-standing wall decor — a new NON-decor \
              seal cause needs its own fix"
         );
     }
@@ -687,8 +684,8 @@ pub(super) fn compute_with_seed(
     })
 }
 
-/// The four wall-band decorations, each TOP-LEFT-anchored so its bottom row lands on
-/// the last wall-band row however tall the band grows. The screen hugs room 0's WEST
+/// The wall-band decorations, each TOP-LEFT-anchored so its bottom row lands on the last
+/// wall-band row however tall the band grows; the whiteboard stands on the floor instead. The screen hugs room 0's WEST
 /// corner and the bookshelf spreads EAST — LOAD-BEARING, not taste: the carpet apron
 /// between the two grounds must drain south AROUND the tucked sofa. Any item whose
 /// clamped slot would pierce the divider/elevator drops, reopening the lane.
@@ -1064,9 +1061,7 @@ fn plant_spot_clear(
     first_blocking_waypoint(kind, pos, waypoints).is_none()
 }
 
-/// Does `r` (a blocked ground rect) overlap ANY home desk's ground? THE one
-/// desk-collision scan — the whiteboard-yield and the scatter-plant-yield both
-/// read it, so a future pad/anchor tweak can't land on one copy.
+/// Does `r` (a blocked ground rect) overlap ANY home desk's ground?
 fn overlaps_a_desk_ground(r: (Point, Size), home_desks: &[Point]) -> bool {
     let desk = super::decor::desk_furniture_def();
     home_desks.iter().any(|&d| {
@@ -1127,7 +1122,7 @@ fn plant_ground_in_bounds(p: &PlantItem, b: &Bounds) -> bool {
     )
 }
 
-/// The 2×2-pod lattice over the cubicle band.
+/// The [`POD_SIDE`]-square pod lattice over the cubicle band.
 #[derive(Clone, Copy)]
 pub(super) struct PodGrid {
     band: Bounds,
@@ -1178,8 +1173,8 @@ impl PodGrid {
     }
 }
 
-/// The five hand-authored floor geometries. `floor_seed` selects one via
-/// Fibonacci hashing; floors past the fifth cycle through the same looks.
+/// The hand-authored floor geometries. `floor_seed` selects one via Fibonacci
+/// hashing, so floors past [`FloorVariant::ALL`]'s length cycle through the same looks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum FloorVariant {
     /// Meeting + pantry, vertical wall between them and the cubicle area,
@@ -1199,10 +1194,10 @@ pub(super) enum FloorVariant {
 
 impl FloorVariant {
     /// THE roster: the floor derivations sweep it, `from_seed` indexes it, `COUNT` is
-    /// its length. A variant missing here is unreachable — clippy's `dead_code` reds on
+    /// its length. A variant missing here is unreachable — rustc's `dead_code` reds on
     /// the never-constructed arm, NOT `the_sweep_reaches_every_floor_variant`, which
-    /// catches the other direction. What NOTHING catches: `has_meeting` /
-    /// `has_pantry_base` are `matches!` lists, so a variant left out silently gets neither.
+    /// catches the other direction. `has_meeting` / `has_pantry_base` are `matches!`
+    /// lists; the `const _` above `compute_with_seed` reds a variant in neither.
     pub(super) const ALL: [Self; 5] = [
         FloorVariant::Standard,
         FloorVariant::OpenPlan,
@@ -1452,7 +1447,7 @@ pub(super) fn decor_for_slot(floor_seed: u64, slot_idx: usize) -> PodDecor {
 /// on, so a taller piece grows north (invariant #6) rather than out of its aisle.
 const POD_DECOR_BASE_DY: u16 = 4;
 
-/// Decor items placed in aisles between 2x2 desk pods.
+/// Decor items placed in aisles between desk pods.
 pub(super) fn compute_pod_decor(grid: PodGrid, floor_seed: u64) -> Vec<PodDecorItem> {
     let cubicle_band = &grid.band;
     let PodGrid {
@@ -1559,8 +1554,7 @@ fn compute_waypoints(
                     y: couch.y,
                 },
                 kind: WaypointKind::Couch,
-                // SEATED facing: the sitter looks NORTH at the window. The APPROACH side
-                // is decoupled (Furniture::Couch uses ApproachSides::ALL, decor.rs).
+                // SEATED facing: the sitter looks NORTH at the window.
                 facing: Facing::North,
                 room_id: None,
             })
@@ -1668,7 +1662,7 @@ fn compute_waypoints(
                 });
             }
         }
-        // The offsets must MIRROR: the table blocks x ∈ [t.x−7, t.x+7], and an asymmetric
+        // The offsets must MIRROR: the table blocks a span symmetric about t.x, and an asymmetric
         // pair puts one chair closer to the wood, swallowing the rug border its twin shows.
         let chair_dx = super::rooms::meeting::MEETING_CHAIR_TABLE_DX as i16;
         for (dx, facing) in [(-chair_dx, Facing::East), (chair_dx, Facing::West)] {

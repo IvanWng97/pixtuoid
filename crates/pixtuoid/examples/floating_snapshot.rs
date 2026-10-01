@@ -13,7 +13,9 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
 use image::{Rgb as ImgRgb, RgbImage};
-use pixtuoid::floating::offscreen::{OfficeRenderer, XrgbSurface, paint_labels_into_surface};
+use pixtuoid::floating::offscreen::{
+    OfficeRenderer, XrgbSurface, paint_labels_into_surface, window_buffer_geometry,
+};
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
 use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FrameInputs, PetInputs};
@@ -150,12 +152,8 @@ fn main() -> Result<()> {
     let mut scene = SceneState::uniform(64);
     populate_demo_agents(&mut scene, now, n_agents);
     let mut renderer = OfficeRenderer::new();
-    // Mirror floating::window: render at window / `office_scale`, then the same surface
-    // upscale and overlays.
     let (win_w, win_h) = (size.0 as u32, size.1 as u32);
-    let scale = pixtuoid::floating::offscreen::office_scale(win_h);
-    let ow = (win_w / scale).max(1).min(u16::MAX as u32) as u16;
-    let oh = (win_h / scale).max(1).min(u16::MAX as u32) as u16;
+    let (scale, ow, oh) = window_buffer_geometry(winit::dpi::PhysicalSize::new(win_w, win_h));
     let buf = renderer.render(FrameInputs {
         world: FloorInputs {
             scene: &scene,

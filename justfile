@@ -1198,8 +1198,6 @@ fixture-pii-selftest:
         jq -r '[.[].File | split("/") | last] | unique | join(",")' "$d/out.json"
     }
     fail=0
-    # The credential config does NOT own the identity class — its default global
-    # allowlist waives filesystem-shaped strings, which is why the pair is split.
     for spec in ".gitleaks.toml=cred-aws.txt,cred-disguised.txt" \
                 ".gitleaks-identity.toml=identity-bearer.txt,identity-dashed.txt,identity-email.txt,identity-gituser.txt,identity-home.txt,identity-mcp.txt,identity-prefix.txt,identity-users.txt,identity-win.txt"; do
         cfg=${spec%%=*}; want=${spec#*=}
