@@ -1,7 +1,9 @@
 use super::background::paint_corridor_runner;
 use super::drawable::paint_character_at;
 use super::*;
-use crate::character::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, agent_overrides, tool_glow_tint};
+use crate::character::{
+    HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, color_of, make_slot, make_slot_cwd, tool_glow_tint,
+};
 use crate::embedded_pack::{desk_art_top, frame_at};
 use crate::floor::{FloorInputs, PetInputs};
 use crate::layout::CHARACTER_SPRITE_W;
@@ -14,10 +16,9 @@ use crate::sim::anchors::{
 use crate::sim::seat::{Seat, settle_seat};
 use crate::sim::{CharacterGlow, CharacterPlacement, SimStores};
 use crate::wall::paint_wall;
-use pixtuoid_core::sprite::{Frame, Pixel};
+use pixtuoid_core::sprite::Frame;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Paint all of `piece` in one call, which the classic's bands add up to.
@@ -484,71 +485,6 @@ fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
         .sprite_in_pack("seated", &old_pack),
         ("seated", false),
         "a pack WITHOUT it degrades to the front pose"
-    );
-}
-
-pub(crate) fn make_slot(id: pixtuoid_core::AgentId, state: ActivityState) -> AgentSlot {
-    let now = SystemTime::UNIX_EPOCH;
-    AgentSlot {
-        agent_id: id,
-        source: Arc::from("claude-code"),
-        session_id: Arc::from("s"),
-        cwd: Arc::from(PathBuf::from("/x").as_path()),
-        label: "x".into(),
-        state,
-        state_started_at: now,
-        created_at: now,
-        last_event_at: now,
-        exiting_at: None,
-        pending_idle_at: None,
-
-        desk_index: GlobalDeskIndex(0),
-        floor_idx: 0,
-        tool_call_count: 0,
-        active_ms: 0,
-        unknown_cwd: false,
-        parent_id: None,
-        pid: None,
-        model: None,
-        effort: None,
-        tokens_used: 0,
-        last_usage: None,
-    }
-}
-
-#[cfg(test)]
-fn make_slot_cwd(id_path: &str, cwd: &str, unknown_cwd: bool) -> AgentSlot {
-    let id = pixtuoid_core::AgentId::from_transcript_path(id_path);
-    let mut s = make_slot(id, ActivityState::Idle);
-    s.cwd = std::sync::Arc::from(std::path::Path::new(cwd));
-    s.unknown_cwd = unknown_cwd;
-    s
-}
-
-/// `key`'s color for `slot`, unlit and unburnt.
-fn color_of(slot: &AgentSlot, key: char) -> Pixel {
-    override_of(
-        &agent_overrides(slot, None, crate::burn::BurnTier::Normal),
-        key,
-    )
-}
-
-/// `key`'s color in an agent's overrides.
-fn override_of(overrides: &[(char, Pixel)], key: char) -> Pixel {
-    overrides
-        .iter()
-        .find(|(k, _)| *k == key)
-        .unwrap_or_else(|| panic!("no override for {key:?}"))
-        .1
-}
-
-#[test]
-fn agent_overrides_are_deterministic_per_id() {
-    let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
-    let slot = make_slot(id, ActivityState::Idle);
-    assert_eq!(
-        agent_overrides(&slot, None, crate::burn::BurnTier::Normal),
-        agent_overrides(&slot, None, crate::burn::BurnTier::Normal)
     );
 }
 
@@ -1173,46 +1109,6 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
     );
 }
 
-#[test]
-fn agent_overrides_glow_tint_shifts_skin_toward_given_color() {
-    let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
-    let slot = make_slot(id, ActivityState::Idle);
-    let normal = crate::burn::BurnTier::Normal;
-    let unlit = agent_overrides(&slot, None, normal);
-    let green_glow = agent_overrides(
-        &slot,
-        Some(Rgb {
-            r: 140,
-            g: 240,
-            b: 170,
-        }),
-        normal,
-    );
-    let blue_glow = agent_overrides(
-        &slot,
-        Some(Rgb {
-            r: 100,
-            g: 160,
-            b: 255,
-        }),
-        normal,
-    );
-    for key in [SHIRT_KEY, HAIR_KEY, PANTS_KEY] {
-        assert_eq!(override_of(&unlit, key), override_of(&green_glow, key));
-    }
-    let skin = |o: &[(char, Pixel)]| override_of(o, SKIN_KEY).expect("opaque skin");
-    let (ug, gg) = (skin(&unlit).g, skin(&green_glow).g);
-    assert!(
-        gg > ug,
-        "green glow should push skin green (lit={gg}, unlit={ug})"
-    );
-    let (ub, bb) = (skin(&unlit).b, skin(&blue_glow).b);
-    assert!(
-        bb > ub,
-        "blue glow should push skin blue (lit={bb}, unlit={ub})"
-    );
-}
-
 /// Pins [`crate::lighting::desk_screen_glow`], the one screen rule both profiles light
 /// by: a seated occupant's tool, on a north-facing desk only.
 #[test]
@@ -1247,36 +1143,6 @@ fn a_desk_screen_glows_only_for_a_seated_tool_user_facing_north() {
     );
     assert_eq!(glow(Some(&idle), Facing::North, true), None, "no tool");
     assert_eq!(glow(None, Facing::North, true), None, "nobody");
-}
-
-#[test]
-fn tool_glow_tint_maps_known_tools() {
-    let id = pixtuoid_core::AgentId::from_transcript_path("/t.jsonl");
-    let edit_slot = make_slot(
-        id,
-        ActivityState::Active {
-            tool_use_id: None,
-            detail: Some(Arc::from("Edit src/main.rs")),
-            kind: ToolKind::Edit,
-        },
-    );
-    let bash_slot = make_slot(
-        id,
-        ActivityState::Active {
-            tool_use_id: None,
-            detail: Some(Arc::from("Bash: ls")),
-            kind: ToolKind::Bash,
-        },
-    );
-    let idle_slot = make_slot(id, ActivityState::Idle);
-    let glow = &crate::theme::NORMAL.tool_glow;
-    let edit_tint = tool_glow_tint(&edit_slot, glow);
-    let bash_tint = tool_glow_tint(&bash_slot, glow);
-    let idle_tint = tool_glow_tint(&idle_slot, glow);
-    assert!(edit_tint.is_some(), "Edit should produce glow");
-    assert!(bash_tint.is_some(), "Bash should produce glow");
-    assert_eq!(idle_tint, None, "Idle should produce no glow");
-    assert_ne!(edit_tint, bash_tint, "Edit and Bash should differ");
 }
 
 fn drawable(anchor_y: u16) -> Drawable<'static> {
@@ -2381,72 +2247,6 @@ fn no_exclusive_waypoint_kind_ever_steps_aside() {
 }
 
 #[test]
-fn kind_derivation_reproduces_the_string_parse_tint_for_representative_displays() {
-    use pixtuoid_core::ToolDetail;
-    let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
-    let glow = &crate::theme::NORMAL.tool_glow;
-    let active = |detail: Option<&ToolDetail>| {
-        make_slot(
-            id,
-            ActivityState::Active {
-                tool_use_id: None,
-                detail: detail.map(|d| Arc::from(d.display())),
-                kind: detail.map_or(ToolKind::Other, ToolKind::from_detail),
-            },
-        )
-    };
-    let generic = |display: &str| ToolDetail::Generic {
-        display: display.into(),
-    };
-    let table: &[(Option<ToolDetail>, Rgb)] = &[
-        (Some(ToolDetail::Task), glow.agent),
-        (Some(generic("Edit src/main.rs")), glow.edit),
-        (Some(generic("Write: src/foo.rs")), glow.edit),
-        (Some(generic("MultiEdit lib.rs")), glow.edit),
-        (Some(generic("Read: README.md")), glow.read),
-        (Some(generic("Bash: cargo test")), glow.bash),
-        (Some(generic("Grep: TODO")), glow.grep),
-        (Some(generic("Glob **/*.rs")), glow.grep),
-        (Some(generic("WebFetch https://x")), glow.default),
-        (None, glow.default),
-    ];
-    for (detail, expected) in table {
-        assert_eq!(
-            tool_glow_tint(&active(detail.as_ref()), glow),
-            Some(*expected),
-            "display {:?} must keep its pre-ToolKind tint",
-            detail.as_ref().map(ToolDetail::display),
-        );
-    }
-    // A Generic tool that merely SPELLS a delegation word is NOT kind Task —
-    // impossible from production decoders, which type every dispatch as
-    // ToolDetail::Task upstream.
-    assert_eq!(
-        tool_glow_tint(&active(Some(&generic("Delegating imposter"))), glow),
-        Some(glow.default)
-    );
-}
-
-#[test]
-fn tool_glow_tint_is_none_unless_active() {
-    let glow = &crate::theme::NORMAL.tool_glow;
-    let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
-    let edit = make_slot(
-        id,
-        ActivityState::Active {
-            tool_use_id: None,
-            detail: None,
-            kind: ToolKind::Edit,
-        },
-    );
-    assert_eq!(tool_glow_tint(&edit, glow), Some(glow.edit));
-    assert_eq!(
-        tool_glow_tint(&make_slot(id, ActivityState::Idle), glow),
-        None
-    );
-}
-
-#[test]
 fn degraded_pixel_desaturates_reddens_and_dims() {
     // Expected value hand-traced through the three blend stages: desaturate,
     // red tint, dim.
@@ -2970,41 +2770,6 @@ fn weather_gallery_manifest_matches_the_weather_enum() {
 }
 
 #[test]
-fn agent_overrides_outfit_is_keyed_by_cwd_not_id() {
-    let a = make_slot_cwd("/demo/api/aaaa.jsonl", "/demo/api", false);
-    let b = make_slot_cwd("/demo/api/bbbb.jsonl", "/demo/api", false);
-    assert_eq!(
-        color_of(&a, SHIRT_KEY),
-        color_of(&b, SHIRT_KEY),
-        "same cwd should share shirt"
-    );
-    assert_eq!(
-        color_of(&a, PANTS_KEY),
-        color_of(&b, PANTS_KEY),
-        "same cwd should share pants"
-    );
-    assert_ne!(
-        (color_of(&a, HAIR_KEY), color_of(&a, SKIN_KEY)),
-        (color_of(&b, HAIR_KEY), color_of(&b, SKIN_KEY)),
-        "different agents in the same repo must differ in hair/skin"
-    );
-}
-
-#[test]
-fn agent_overrides_unknown_cwd_falls_back_to_id_outfit() {
-    let unknown = make_slot_cwd("/x/aaaa.jsonl", "/whatever", true);
-    let empty = make_slot_cwd("/x/aaaa.jsonl", "", false);
-    assert_eq!(color_of(&unknown, SHIRT_KEY), color_of(&empty, SHIRT_KEY));
-    assert_eq!(color_of(&unknown, PANTS_KEY), color_of(&empty, PANTS_KEY));
-    let other = make_slot_cwd("/x/zzzz.jsonl", "", false);
-    assert_ne!(
-        color_of(&other, SHIRT_KEY),
-        color_of(&empty, SHIRT_KEY),
-        "cwd-less agents keep distinct per-id outfits"
-    );
-}
-
-#[test]
 fn cwd_backfill_invalidates_cached_outfit_frames() {
     let pack = crate::embedded_pack::test_default_pack();
     let unknown = make_slot_cwd("/p/heal.jsonl", "", true);
@@ -3076,19 +2841,6 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
         fresh.as_slice(),
         "the healed repaint must match a fresh render, not the stale cached outfit"
     );
-}
-
-#[test]
-fn agent_overrides_same_id_different_cwd_changes_outfit() {
-    let a = make_slot_cwd("/p/aaaa.jsonl", "/demo/api", false);
-    let b = make_slot_cwd("/p/aaaa.jsonl", "/demo/infra", false);
-    assert_ne!(
-        color_of(&a, SHIRT_KEY),
-        color_of(&b, SHIRT_KEY),
-        "different cwds should pick different outfits"
-    );
-    assert_eq!(color_of(&a, HAIR_KEY), color_of(&b, HAIR_KEY));
-    assert_eq!(color_of(&a, SKIN_KEY), color_of(&b, SKIN_KEY));
 }
 
 struct OwnedSimStores {

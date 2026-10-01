@@ -364,6 +364,203 @@ pub(crate) fn tool_glow_tint(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::character::{color_of, make_slot, make_slot_cwd, override_of};
+    use pixtuoid_core::state::{ActivityState, ToolKind};
+    use std::sync::Arc;
+
+    #[test]
+    fn agent_overrides_are_deterministic_per_id() {
+        let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
+        let slot = make_slot(id, ActivityState::Idle);
+        assert_eq!(
+            agent_overrides(&slot, None, crate::burn::BurnTier::Normal),
+            agent_overrides(&slot, None, crate::burn::BurnTier::Normal)
+        );
+    }
+
+    #[test]
+    fn agent_overrides_glow_tint_shifts_skin_toward_given_color() {
+        let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
+        let slot = make_slot(id, ActivityState::Idle);
+        let normal = crate::burn::BurnTier::Normal;
+        let unlit = agent_overrides(&slot, None, normal);
+        let green_glow = agent_overrides(
+            &slot,
+            Some(Rgb {
+                r: 140,
+                g: 240,
+                b: 170,
+            }),
+            normal,
+        );
+        let blue_glow = agent_overrides(
+            &slot,
+            Some(Rgb {
+                r: 100,
+                g: 160,
+                b: 255,
+            }),
+            normal,
+        );
+        for key in [SHIRT_KEY, HAIR_KEY, PANTS_KEY] {
+            assert_eq!(override_of(&unlit, key), override_of(&green_glow, key));
+        }
+        let skin = |o: &[(char, Pixel)]| override_of(o, SKIN_KEY).expect("opaque skin");
+        let (ug, gg) = (skin(&unlit).g, skin(&green_glow).g);
+        assert!(
+            gg > ug,
+            "green glow should push skin green (lit={gg}, unlit={ug})"
+        );
+        let (ub, bb) = (skin(&unlit).b, skin(&blue_glow).b);
+        assert!(
+            bb > ub,
+            "blue glow should push skin blue (lit={bb}, unlit={ub})"
+        );
+    }
+
+    #[test]
+    fn tool_glow_tint_maps_known_tools() {
+        let id = pixtuoid_core::AgentId::from_transcript_path("/t.jsonl");
+        let edit_slot = make_slot(
+            id,
+            ActivityState::Active {
+                tool_use_id: None,
+                detail: Some(Arc::from("Edit src/main.rs")),
+                kind: ToolKind::Edit,
+            },
+        );
+        let bash_slot = make_slot(
+            id,
+            ActivityState::Active {
+                tool_use_id: None,
+                detail: Some(Arc::from("Bash: ls")),
+                kind: ToolKind::Bash,
+            },
+        );
+        let idle_slot = make_slot(id, ActivityState::Idle);
+        let glow = &crate::theme::NORMAL.tool_glow;
+        let edit_tint = tool_glow_tint(&edit_slot, glow);
+        let bash_tint = tool_glow_tint(&bash_slot, glow);
+        let idle_tint = tool_glow_tint(&idle_slot, glow);
+        assert!(edit_tint.is_some(), "Edit should produce glow");
+        assert!(bash_tint.is_some(), "Bash should produce glow");
+        assert_eq!(idle_tint, None, "Idle should produce no glow");
+        assert_ne!(edit_tint, bash_tint, "Edit and Bash should differ");
+    }
+
+    #[test]
+    fn kind_derivation_reproduces_the_string_parse_tint_for_representative_displays() {
+        use pixtuoid_core::ToolDetail;
+        let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
+        let glow = &crate::theme::NORMAL.tool_glow;
+        let active = |detail: Option<&ToolDetail>| {
+            make_slot(
+                id,
+                ActivityState::Active {
+                    tool_use_id: None,
+                    detail: detail.map(|d| Arc::from(d.display())),
+                    kind: detail.map_or(ToolKind::Other, ToolKind::from_detail),
+                },
+            )
+        };
+        let generic = |display: &str| ToolDetail::Generic {
+            display: display.into(),
+        };
+        let table: &[(Option<ToolDetail>, Rgb)] = &[
+            (Some(ToolDetail::Task), glow.agent),
+            (Some(generic("Edit src/main.rs")), glow.edit),
+            (Some(generic("Write: src/foo.rs")), glow.edit),
+            (Some(generic("MultiEdit lib.rs")), glow.edit),
+            (Some(generic("Read: README.md")), glow.read),
+            (Some(generic("Bash: cargo test")), glow.bash),
+            (Some(generic("Grep: TODO")), glow.grep),
+            (Some(generic("Glob **/*.rs")), glow.grep),
+            (Some(generic("WebFetch https://x")), glow.default),
+            (None, glow.default),
+        ];
+        for (detail, expected) in table {
+            assert_eq!(
+                tool_glow_tint(&active(detail.as_ref()), glow),
+                Some(*expected),
+                "display {:?} must keep its pre-ToolKind tint",
+                detail.as_ref().map(ToolDetail::display),
+            );
+        }
+        // A Generic tool that merely SPELLS a delegation word is NOT kind Task —
+        // impossible from production decoders, which type every dispatch as
+        // ToolDetail::Task upstream.
+        assert_eq!(
+            tool_glow_tint(&active(Some(&generic("Delegating imposter"))), glow),
+            Some(glow.default)
+        );
+    }
+
+    #[test]
+    fn tool_glow_tint_is_none_unless_active() {
+        let glow = &crate::theme::NORMAL.tool_glow;
+        let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
+        let edit = make_slot(
+            id,
+            ActivityState::Active {
+                tool_use_id: None,
+                detail: None,
+                kind: ToolKind::Edit,
+            },
+        );
+        assert_eq!(tool_glow_tint(&edit, glow), Some(glow.edit));
+        assert_eq!(
+            tool_glow_tint(&make_slot(id, ActivityState::Idle), glow),
+            None
+        );
+    }
+
+    #[test]
+    fn agent_overrides_outfit_is_keyed_by_cwd_not_id() {
+        let a = make_slot_cwd("/demo/api/aaaa.jsonl", "/demo/api", false);
+        let b = make_slot_cwd("/demo/api/bbbb.jsonl", "/demo/api", false);
+        assert_eq!(
+            color_of(&a, SHIRT_KEY),
+            color_of(&b, SHIRT_KEY),
+            "same cwd should share shirt"
+        );
+        assert_eq!(
+            color_of(&a, PANTS_KEY),
+            color_of(&b, PANTS_KEY),
+            "same cwd should share pants"
+        );
+        assert_ne!(
+            (color_of(&a, HAIR_KEY), color_of(&a, SKIN_KEY)),
+            (color_of(&b, HAIR_KEY), color_of(&b, SKIN_KEY)),
+            "different agents in the same repo must differ in hair/skin"
+        );
+    }
+
+    #[test]
+    fn agent_overrides_unknown_cwd_falls_back_to_id_outfit() {
+        let unknown = make_slot_cwd("/x/aaaa.jsonl", "/whatever", true);
+        let empty = make_slot_cwd("/x/aaaa.jsonl", "", false);
+        assert_eq!(color_of(&unknown, SHIRT_KEY), color_of(&empty, SHIRT_KEY));
+        assert_eq!(color_of(&unknown, PANTS_KEY), color_of(&empty, PANTS_KEY));
+        let other = make_slot_cwd("/x/zzzz.jsonl", "", false);
+        assert_ne!(
+            color_of(&other, SHIRT_KEY),
+            color_of(&empty, SHIRT_KEY),
+            "cwd-less agents keep distinct per-id outfits"
+        );
+    }
+
+    #[test]
+    fn agent_overrides_same_id_different_cwd_changes_outfit() {
+        let a = make_slot_cwd("/p/aaaa.jsonl", "/demo/api", false);
+        let b = make_slot_cwd("/p/aaaa.jsonl", "/demo/infra", false);
+        assert_ne!(
+            color_of(&a, SHIRT_KEY),
+            color_of(&b, SHIRT_KEY),
+            "different cwds should pick different outfits"
+        );
+        assert_eq!(color_of(&a, HAIR_KEY), color_of(&b, HAIR_KEY));
+        assert_eq!(color_of(&a, SKIN_KEY), color_of(&b, SKIN_KEY));
+    }
 
     /// Pins `MAX_RAMP_LEVEL` against the colors a recolor feeds a ramp: every
     /// agent color keeps a shade of its own at every level a pack may declare.
