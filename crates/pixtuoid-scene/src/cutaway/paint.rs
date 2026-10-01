@@ -184,7 +184,7 @@ fn paint_plate(
             text,
             ink,
         );
-        x += crate::cutaway::text::width(text).0 + 1;
+        x += crate::cutaway::text::advance(text).0;
     }
 }
 
@@ -241,7 +241,7 @@ fn board_runs(
         / 2;
     let at = |col: u16, line: u16| {
         (
-            ArtPx(pen.art(NEON_PANEL_INNER_X).0 + col * crate::cutaway::text::ADVANCE),
+            ArtPx(pen.art(NEON_PANEL_INNER_X).0 + crate::cutaway::text::columns(col).0),
             ArtPx(pen.art(NEON_PANEL_INNER_Y + line * CELL_ROWS).0 + pad),
         )
     };
@@ -3936,6 +3936,52 @@ pub(crate) mod tests {
         let anchor = label_anchor(at, 8, None);
         assert_eq!(anchor.x, at.x + 4, "centred on the sprite");
         assert_eq!(at.y - anchor.y, LABEL_GAP, "clear of the head");
+    }
+
+    /// A plate's runs and the board's segments step on one grid: the run after
+    /// `n` characters starts [`columns`](crate::cutaway::text::columns)`(n)` on.
+    #[test]
+    fn plate_runs_and_board_columns_share_one_grid() {
+        use crate::board::{BoardSegment, BoardTone};
+        use crate::cutaway::text::columns;
+        use pixtuoid_core::sprite::Rgb;
+        let pen = Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4");
+        let (first, second) = ("Iab", "I");
+        let mut board = quiet_board().clone();
+        board.mood = [first, second]
+            .map(|text| BoardSegment {
+                text: text.into(),
+                tone: BoardTone::Idle,
+            })
+            .to_vec();
+        // Brand, star, then the mood line's segments.
+        let runs = board_runs(&board, pen);
+        let ((x0, _), _) = runs[2];
+        let ((x1, _), _) = runs[3];
+        assert_eq!(x1.0 - x0.0, columns(3).0, "the board");
+        let (a, b) = (Rgb { r: 255, g: 0, b: 0 }, Rgb { r: 0, g: 255, b: 0 });
+        let mut buf = RgbBuffer::filled(64, 16, Rgb { r: 0, g: 0, b: 0 });
+        let plate = ArtRect {
+            x: ArtPx(0),
+            y: ArtPx(0),
+            w: ArtPx(40),
+            h: ArtPx(PLATE_H),
+        };
+        paint_plate(
+            pen,
+            &mut buf,
+            plate,
+            Rgb { r: 1, g: 1, b: 1 },
+            &[(first, a), (second, b)],
+        );
+        // An `I`'s top bar spans its whole cell, so its first ink is its run's start.
+        let left =
+            |ink| (0..buf.width()).find(|&x| (0..buf.height()).any(|y| buf.get(x, y) == ink));
+        let (la, lb) = (
+            left(a).expect("the first run"),
+            left(b).expect("the second run"),
+        );
+        assert_eq!(lb - la, columns(3).0, "the plate");
     }
 
     /// At the pack's 4x art the board writes inside the neon sign's dark

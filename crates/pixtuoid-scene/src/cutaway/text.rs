@@ -13,7 +13,7 @@ use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 /// A glyph's width in art pixels.
 const GLYPH_W: u16 = 3;
 /// Art pixels from one glyph's left edge to the next's.
-pub(crate) const ADVANCE: u16 = GLYPH_W + 1;
+const ADVANCE: u16 = GLYPH_W + 1;
 /// A line's height in art pixels: five rows for capitals, ascenders and
 /// digits, and a sixth for descenders.
 pub(crate) const LINE_H: u16 = 6;
@@ -137,15 +137,24 @@ const TOFU: &str = "### ### ### ### ###";
 
 /// `text`'s width in art pixels, from its first ink column to its last.
 pub(crate) fn width(text: &str) -> ArtPx {
-    let n = u16::try_from(text.chars().count()).unwrap_or(u16::MAX);
-    ArtPx(n.saturating_mul(ADVANCE).saturating_sub(1))
+    ArtPx(advance(text).0.saturating_sub(1))
+}
+
+/// Art pixels from a run's left edge to where a run `n` characters on starts.
+pub(crate) fn columns(n: u16) -> ArtPx {
+    ArtPx(n.saturating_mul(ADVANCE))
+}
+
+/// [`columns`] past all of `text`: where the run after it starts.
+pub(crate) fn advance(text: &str) -> ArtPx {
+    columns(u16::try_from(text.chars().count()).unwrap_or(u16::MAX))
 }
 
 /// Paint `text` in `ink` from its top-left `(x, y)`, clipped to the buffer.
 pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text: &str, ink: Rgb) {
     for (i, c) in text.chars().enumerate() {
         let left =
-            x.0.saturating_add(u16::try_from(i).unwrap_or(u16::MAX).saturating_mul(ADVANCE));
+            x.0.saturating_add(columns(u16::try_from(i).unwrap_or(u16::MAX)).0);
         for (dy, row) in (0u16..).zip(rows(c).split(' ')) {
             for (dx, cell) in (0u16..).zip(row.bytes()) {
                 if cell == b'#' {
@@ -300,6 +309,15 @@ mod tests {
     #[test]
     fn the_font_draws_the_badge_marker() {
         assert_ne!(rows(crate::overlay::BADGE_MARKER), TOFU);
+    }
+
+    /// A lowercase `w` closes its foot where `H` stands on open legs: the
+    /// board's "wait" read "Hait" with an open one.
+    #[test]
+    fn a_lowercase_w_closes_its_foot_unlike_an_h() {
+        let foot = |c| rows(c).split(' ').nth(4).expect("five rows");
+        assert_eq!(foot('w'), "###");
+        assert_ne!(foot('H'), "###");
     }
 
     #[test]
