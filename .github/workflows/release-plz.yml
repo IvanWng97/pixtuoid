@@ -4,8 +4,9 @@ name: release-plz
 # release-plz refreshes an open release PR on every main push, and a PR that
 # carries non-bot commits is closed and re-opened fresh, so a bump a human
 # raised on it would be orphaned by the next dependabot merge, and every
-# refresh re-runs the full CI matrix. `release` runs on every push to main
-# and acts only on a merged release PR (release-plz.toml `release_always`).
+# refresh re-runs the full CI matrix. `release` runs on every push to main,
+# after that commit's ci-gate passes, and acts only on a merged release PR
+# (release-plz.toml `release_always`).
 #
 # RENAMING THIS FILE BREAKS PUBLISHING: each crate's crates.io Trusted Publisher
 # record is keyed on the workflow filename, so the OIDC claim stops matching
@@ -78,8 +79,53 @@ jobs:
           fi
           echo "::notice::release PR: $(jq -r .html_url <<<"$PR")"
 
+  # A push trigger, not workflow_run, so the OIDC claim and GITHUB_SHA stay the
+  # merge push's own; release-plz's documented gate is a check before
+  # `release` in the publishing workflow (release-plz.dev/docs/github/advanced).
+  ci-passed:
+    name: ci-gate passed at this commit
+    if: github.event_name == 'push' && github.repository == 'IvanWng97/pixtuoid'
+    runs-on: ubuntu-latest
+    # Outlasts ci.yml's slowest job and its runner queue; a timeout skips the
+    # publish like a failure does.
+    timeout-minutes: 90
+    permissions:
+      checks: read
+    steps:
+      - name: Wait for ci-gate on this commit
+        env:
+          CHECK_NAME: ci-gate
+          GH_TOKEN: ${{ github.token }}
+          POLL_SECONDS: 30
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          while :; do
+            # Actions' run alone, as branch protection requires: another app
+            # can post a check by the same name.
+            if ! verdict="$(gh api "repos/$REPOSITORY/commits/$SHA/check-runs?check_name=$CHECK_NAME&filter=latest" \
+              --jq '[.check_runs[] | select(.app.slug == "github-actions")] | max_by(.started_at)
+                | if . == null then "absent" elif .status != "completed" then "pending" else .conclusion end')"; then
+              echo "::warning::could not read $CHECK_NAME at ${SHA::7}; retrying"
+              verdict=pending
+            fi
+            case "$verdict" in
+            success)
+              echo "$CHECK_NAME passed at ${SHA::7}"
+              exit 0
+              ;;
+            absent | pending) sleep "$POLL_SECONDS" ;;
+            *)
+              echo "::error::$CHECK_NAME concluded $verdict at ${SHA::7}, so nothing is published. Re-run this workflow once a ci.yml re-run passes"
+              exit 1
+              ;;
+            esac
+          done
+
   release:
     name: publish and tag a merged release PR
+    needs: ci-passed
     if: github.event_name == 'push' && github.repository == 'IvanWng97/pixtuoid'
     runs-on: ubuntu-latest
     timeout-minutes: 30

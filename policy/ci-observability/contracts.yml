@@ -383,6 +383,34 @@
 
 # ── Publishing
 
+- id: release-publishes-after-ci-gate
+  file: .github/workflows/release-plz.yml
+  why: >-
+    The publish runs on the merge push, and the merge queue can land other PRs
+    while a release PR is open, so only a wait on that commit's own ci-gate
+    proves the published tree passed CI. A job whose need failed or timed out
+    is skipped unless its `if:` calls a status function
+    (docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idneeds),
+    so the publish must need the wait and call none.
+  assert: |
+    .jobs as $jobs
+    | [$jobs[] | select(any(.steps[]?; ((.uses // "") | startswith("release-plz/action@"))
+                                       and .with.command == "release"))] as $publishers
+    | ($publishers | length == 1)
+      and (($publishers[0].if // "") | test("always\\(|failure\\(|cancelled\\(") | not)
+      and ([$publishers[0].needs] | flatten | any(.[]; . as $need | $jobs[$need]
+            | (has("continue-on-error") | not)
+              and any(.steps[]; .env.CHECK_NAME == "ci-gate" and .env.SHA == "${{ github.sha }}"
+                                and ((has("if") or has("continue-on-error")) | not))))
+  break:
+    - del(.jobs.release.needs)
+    - .jobs.release.if += " || always()"
+    - .jobs["ci-passed"]["continue-on-error"] = true
+    - .jobs["ci-passed"].steps[0].env.SHA = "${{ github.event.before }}"
+    - .jobs["ci-passed"].steps[0].env.CHECK_NAME = "lint"
+    - .jobs["ci-passed"].steps[0]["continue-on-error"] = true
+    - .jobs["ci-passed"].steps[0].if = "${{ false }}"
+
 - id: release-plz-publishes-only-release-prs
   file: release-plz.toml
   why: >-

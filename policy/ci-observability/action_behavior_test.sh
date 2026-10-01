@@ -600,3 +600,61 @@ release_prefix="$(yq -p toml -oy -e -r '.workspace.pr_branch_prefix' release-plz
 yq -o=json '.' .mergify.yml | jq -e --arg c "-head ~= ^$release_prefix" \
     '(.queue_rules | length > 0) and all(.queue_rules[]; any(.queue_conditions[]; . == $c))' >/dev/null ||
     fail ".mergify.yml has a queue that admits release-plz's ${release_prefix}* PRs"
+
+# ── release-plz.yml: the publish waits for its own commit's ci-gate ──
+release_workflow=.github/workflows/release-plz.yml
+wait_step="Wait for ci-gate on this commit"
+wait_script="$(workflow_step_script "$release_workflow" "$wait_step")"
+wait_check="$(STEP_NAME="$wait_step" yq -e -r '.jobs[].steps[] | select(.name == strenv(STEP_NAME)) | .env.CHECK_NAME' "$release_workflow")" ||
+    fail "\"$wait_step\" has no CHECK_NAME"
+[[ "$wait_check" == "$(yq -e -r '.jobs.gate.name' .github/workflows/ci.yml)" ]] ||
+    fail "\"$wait_step\" waits for $wait_check, not ci.yml's gate"
+
+# Each call answers the next of FAKE_CHECK_PAGES, the last one repeating.
+cat >"$fake_bin/gh" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" == api ]]
+jq_expr="."
+while (($#)); do
+    [[ "$1" == --jq ]] && jq_expr="$2"
+    shift
+done
+calls=$(($(cat "$CHECK_CALLS" 2>/dev/null || echo 0) + 1))
+echo "$calls" >"$CHECK_CALLS"
+page="$(sed -n "${calls}p" <<<"$FAKE_CHECK_PAGES")"
+[[ -n "$page" ]] || page="$(tail -n 1 <<<"$FAKE_CHECK_PAGES")"
+[[ "$page" != error ]] || exit 1
+jq -r "$jq_expr" <<<"$page"
+STUB
+# A wait that never ends is cut off by its job timeout; here, by the fifth sleep.
+cat >"$fake_bin/sleep" <<'STUB'
+#!/usr/bin/env bash
+n=$(($(cat "$CHECK_CALLS.sleeps" 2>/dev/null || echo 0) + 1))
+echo "$n" >"$CHECK_CALLS.sleeps"
+((n < 5))
+STUB
+chmod +x "$fake_bin/gh" "$fake_bin/sleep"
+
+check_page() {
+    jq -cn --arg app "$1" --arg status "$2" --arg conclusion "$3" \
+        '{check_runs: [{app: {slug: $app}, status: $status, conclusion: (if $conclusion == "" then null else $conclusion end), started_at: "2026-10-01T00:00:00Z"}]}'
+}
+no_runs='{"check_runs":[]}'
+assert_wait() {
+    local expect="$1" label="$2" pages="$3"
+    rm -f "$test_dir/check-calls" "$test_dir/check-calls.sleeps"
+    if PATH="$fake_bin:$PATH" CHECK_CALLS="$test_dir/check-calls" CHECK_NAME="$wait_check" \
+        FAKE_CHECK_PAGES="$pages" GH_TOKEN=test-token POLL_SECONDS=0 REPOSITORY=owner/repo SHA=abc1234 \
+        bash -c "$wait_script" >/dev/null 2>&1; then
+        [[ "$expect" == pass ]] || fail "the release wait passed $label"
+    else
+        [[ "$expect" == fail ]] || fail "the release wait failed $label"
+    fi
+}
+assert_wait pass "a ci-gate that passes after running" \
+    "$no_runs"$'\n'"$(check_page github-actions in_progress "")"$'\n'error$'\n'"$(check_page github-actions completed success)"
+assert_wait fail "a failed ci-gate" "$(check_page github-actions completed failure)"
+assert_wait fail "a cancelled ci-gate" "$(check_page github-actions completed cancelled)"
+assert_wait fail "a skipped ci-gate" "$(check_page github-actions completed skipped)"
+assert_wait fail "another app's passing check of that name" "$(check_page impostor completed success)"

@@ -110,13 +110,11 @@ a lint to dodge the bump.
    rewritten. The bump level comes from the conventional-commit log — nobody
    picks it — and the PR body carries the `cargo-semver-checks` verdict.
 2. **Review it like any PR, but merge it by hand**: the merge queue refuses it,
-   since its update would merge `main` in. `main` requires branches to be up to
-   date, because the tag lands on the squash commit and release-plz publishes to
-   crates.io from it before `ci-gate` finishes. If `main` moved, **re-dispatch —
-   never "Update branch"**: only a dispatch recomputes `CHANGELOG.md` for the new commits, and
-   the merge commit "Update branch" adds counts as a human's, so the next
-   dispatch closes this PR and opens a new number. release-plz has already raised
-   the bump for any break `cargo-semver-checks` detects; raise it further with
+   since its update would merge `main` in. If `main` moved, **re-dispatch —
+   never "Update branch"**: only a dispatch recomputes `CHANGELOG.md` for the
+   new commits, and the merge commit "Update branch" adds counts as a human's,
+   so the next dispatch closes this PR and opens a new number. release-plz has
+   already raised the bump for any break `cargo-semver-checks` detects; raise it further with
    `cargo set-version --workspace X.Y.Z` (cargo-edit) and push only for a break
    its lints cannot see. A user-facing change that touched no packaged file
    (`npm/`, `release.yml` packaging) is not in the generated notes — add its line
@@ -128,10 +126,11 @@ a lint to dodge the bump.
    publishes the draft, and publishes the npm packages. The tag also starts a
    homebrew-core autobump.
 
-The crates.io upload happens in the `release` job, which runs on the merge push
-with no `needs` — `ci.yml` is still running at that moment. What makes that safe
-is the branch-protection setting above: a release PR cannot merge unless its
-tree is `main`'s tree, and that tree is the one its own CI already passed.
+The crates.io upload happens in the `release` job on the merge push, which
+first waits for that commit's own `ci-gate`: a failure or timeout publishes
+nothing, and re-running the workflow after a passing `ci.yml` re-run resumes it.
+The wait is in the workflow because the queue can land other PRs while a
+release PR is open, so no merge-time check proves the tree it publishes.
 
 `cargo-semver-checks` runs inside release-plz on the release PR, not as a CI
 job; `just semver` reproduces its verdict locally.
