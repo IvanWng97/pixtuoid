@@ -352,6 +352,20 @@ check-windows:
         || { echo "needs the target: rustup target add x86_64-pc-windows-msvc" >&2; exit 1; }
     cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings
 
+# The other-unix arms compile on none of the OSes release.yml ships, so only this
+# builds them. `portable` instead of the defaults: `audio`'s `alsa-sys` build
+# script can't probe a cross target.
+[doc('Cross-lint the workspace for x86_64-unknown-freebsd, the stand-in for every other unix (no linking)')]
+[group('rust')]
+check-other-unix:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # rustup's proxy cargo, so `--target` finds the std added below (see `check-windows`).
+    export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+    target=x86_64-unknown-freebsd
+    rustup target list --installed | grep -qx "$target" || rustup target add "$target"
+    cargo clippy --workspace --all-targets --target "$target" --no-default-features --features pixtuoid/portable -- -D warnings
+
 # Catches a dep bump (or newer stdlib use) that silently raises the floor past
 # the version we advertise to crates.io consumers of pixtuoid-core. CI-only in
 # practice (installs a pinned toolchain + a full check), NOT in preflight.
