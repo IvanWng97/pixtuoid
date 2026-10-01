@@ -2194,14 +2194,23 @@ fn riders(
     let Some(pen) = Pen::new(scale, d) else {
         return Vec::new();
     };
-    let head = key.dress.as_ref().map(|dress| {
-        let (d, frame_w) = (i32::from(d), i32::from(w) * i32::from(d));
-        let x = i32::from(dress.head.x);
-        crate::cutaway::effects::ArtPoint {
-            x: i32::from(at.x) * d + if key.frame.flip_x { frame_w - 1 - x } else { x },
-            y: i32::from(at.y) * d + dress.crest,
+    // A dressed frame's head is its mark's column on its crest; the base
+    // art's, the classic's crown point: its frame's top, centred.
+    let head = match key.dress.as_ref() {
+        Some(dress) => {
+            let (d, frame_w) = (i32::from(d), i32::from(w) * i32::from(d));
+            let x = i32::from(dress.head.x);
+            Some(crate::cutaway::effects::ArtPoint {
+                x: i32::from(at.x) * d + if key.frame.flip_x { frame_w - 1 - x } else { x },
+                y: i32::from(at.y) * d + dress.crest,
+            })
         }
-    });
+        None if d == 1 => Some(crate::cutaway::effects::ArtPoint {
+            x: i32::from(at.x + w / 2),
+            y: i32::from(at.y),
+        }),
+        None => None,
+    };
     c.effects
         .iter()
         .map(|&effect| crate::cutaway::effects::Riding { effect, head, pen })
@@ -5595,10 +5604,21 @@ S B B B B B B S
     #[test]
     #[cfg(feature = "density-art")]
     fn the_dense_looks_keep_their_places() {
+        looks_keep_their_places(test_default_pack().max_density_variant().get());
+    }
+
+    /// [`the_dense_looks_keep_their_places`] on the base art, which draws its own
+    /// z and mark beside the head.
+    #[test]
+    fn the_base_looks_keep_their_places() {
+        looks_keep_their_places(1);
+    }
+
+    fn looks_keep_their_places(s: u16) {
         use crate::effects::EffectKind as K;
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::new(s).expect("nonzero");
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -5630,7 +5650,7 @@ S B B B B B B S
         let (_, mark) = rider(K::WaitingMark);
         assert!(
             clear(mark),
-            "the mark {mark:?} lands on the badge {badge:?}"
+            "at scale {s} the mark {mark:?} lands on the badge {badge:?}"
         );
         let (z, _) = rider(K::SleepZ);
         let mut last: Option<Span> = None;
@@ -5644,7 +5664,8 @@ S B B B B B B S
             };
             assert!(
                 clear(s),
-                "the z at {phase} ms {s:?} lands on the badge {badge:?}"
+                "at scale {} the z at {phase} ms lands on the badge {badge:?}",
+                scale.get()
             );
             if let Some(l) = last {
                 assert!(

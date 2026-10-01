@@ -1,7 +1,9 @@
 //! The [effects](crate::effects) riding on the cutaway's figures, drawn on the
 //! figure's own art grid: a look authored at [`LOOK_DENSITY`] where the figure
-//! is drawn there with a head to stand it on, else the classic's look, a
-//! layout cell per art cell block. A fade is an ordered dither, never a blend.
+//! is drawn there with a head to stand it on, the base art's z and waiting
+//! mark beside its head, else the classic's look, a layout cell per art cell
+//! block. A fade is an ordered dither, never a blend, and a look stays whole
+//! down to [`LOOK_SOLID`].
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
@@ -92,9 +94,10 @@ impl Riding {
     fn look(&self, theme: &Theme, emit: &mut impl FnMut(ArtPoint, i32, Rgb, f32)) {
         let e = self.effect;
         let d = self.pen.art(1).0;
-        if let Some(head) = self.head.filter(|_| d == LOOK_DENSITY) {
-            dense_look(e, head, theme, emit);
-            return;
+        match self.head {
+            Some(head) if d == LOOK_DENSITY => return dense_look(e, head, theme, emit),
+            Some(head) if d == 1 && base_look(e, head, theme, emit) => return,
+            _ => {}
         }
         let d = i32::from(d);
         plot_effect(&e, theme, &mut |x, y, c, alpha| {
@@ -102,7 +105,7 @@ impl Riding {
                 x: i32::from(x) * d,
                 y: i32::from(y) * d,
             };
-            emit(at, d, c, alpha);
+            emit(at, d, c, (alpha / LOOK_SOLID).min(1.0));
         });
     }
 }
@@ -135,9 +138,9 @@ const WAITING_MARK: &[&str] = &[
 const BESIDE_DX: i32 = 9;
 /// Art rows from the hair's top down to the bottom of what floats beside it.
 const BESIDE_DY: i32 = 5;
-/// The opacity down to which a z stays whole: a dither through a stroke two
-/// pixels wide breaks the glyph, so it dissolves only on its way out.
-const SLEEP_Z_SOLID: f32 = 0.3;
+/// The opacity down to which a look stays whole: a dither through a glyph a
+/// stroke or two wide breaks it, so it dissolves only on its way out.
+const LOOK_SOLID: f32 = 0.3;
 /// Art rows a rising z drifts one column away from the head.
 const SLEEP_Z_DRIFT: i32 = 4;
 
@@ -175,6 +178,56 @@ const DUST: &[&str] = &[
     "#.#.#.#", //
 ];
 
+/// The base art's sleep z: the classic's glyph.
+const SLEEP_Z_1X: &[&str] = &[
+    "##", //
+    ".#", //
+    "##", //
+];
+/// The base art's waiting mark: the classic's glyph.
+const WAITING_MARK_1X: &[&str] = &[
+    "###", //
+    "..#", //
+    ".#.", //
+    ".#.", //
+];
+/// Columns from the base art's head to the west edge of what floats beside it:
+/// past the head, and the badge centred over it.
+const BESIDE_DX_1X: i32 = 5;
+/// Rows from the head's top down to the bottom of what floats beside it.
+const BESIDE_DY_1X: i32 = 1;
+
+/// `e`'s look on the base art, from its rider's `head`, where the base art
+/// has a look of its own: whether it drew one.
+fn base_look(
+    e: Effect,
+    head: ArtPoint,
+    theme: &Theme,
+    emit: &mut impl FnMut(ArtPoint, i32, Rgb, f32),
+) -> bool {
+    match e.kind {
+        EffectKind::SleepZ => {
+            if let Some((alpha, t)) = sleep_z_fade(e.phase) {
+                let rise = (t * f32::from(SLEEP_Z_MAX_RISE)) as i32;
+                let top = head.y + BESIDE_DY_1X - glyph_h(SLEEP_Z_1X) - rise;
+                let coverage = (alpha / LOOK_SOLID).min(1.0);
+                stamp(SLEEP_Z_1X, head.x + BESIDE_DX_1X, top, emit, |_| {
+                    Some((theme.effects.sleep_z, coverage))
+                });
+            }
+            true
+        }
+        EffectKind::WaitingMark => {
+            let top = head.y + BESIDE_DY_1X - glyph_h(WAITING_MARK_1X);
+            stamp(WAITING_MARK_1X, head.x + BESIDE_DX_1X, top, emit, |_| {
+                Some((theme.effects.waiting_bubble, 1.0))
+            });
+            true
+        }
+        _ => false,
+    }
+}
+
 /// `e`'s look at [`LOOK_DENSITY`], from its rider's `head`.
 fn dense_look(
     e: Effect,
@@ -192,7 +245,7 @@ fn dense_look(
             let rise = (t * f32::from(SLEEP_Z_MAX_RISE) * d as f32) as i32;
             let x = head.x + BESIDE_DX + rise / SLEEP_Z_DRIFT;
             let top = head.y + BESIDE_DY - glyph_h(SLEEP_Z) - rise;
-            let coverage = (alpha / SLEEP_Z_SOLID).min(1.0);
+            let coverage = (alpha / LOOK_SOLID).min(1.0);
             stamp(SLEEP_Z, x, top, emit, |_| {
                 Some((theme.effects.sleep_z, coverage))
             });
@@ -264,6 +317,39 @@ fn stamp(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A look stays whole while it shows at least [`LOOK_SOLID`] and only then
+    /// dithers out: a fresh heart paints all its cells, a fading one fewer, a
+    /// spent one none.
+    #[test]
+    fn a_fading_look_stays_whole_then_dissolves() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pen = Pen::new(crate::render_scale::RenderScale::ONE, 1).expect("1 divides 1");
+        let bg = Rgb { r: 0, g: 0, b: 0 };
+        let drawn = |phase| {
+            let heart = Riding {
+                effect: Effect {
+                    kind: EffectKind::PetHeart,
+                    at: crate::layout::Point { x: 10, y: 20 },
+                    phase,
+                },
+                head: None,
+                pen,
+            };
+            let mut buf = RgbBuffer::filled(32, 32, bg);
+            heart.paint(theme, &mut buf);
+            buf.as_slice().iter().filter(|&&c| c != bg).count()
+        };
+        let life = crate::effects::HEART_LIFE_MS;
+        let fresh = drawn(0);
+        assert_eq!(fresh, 4, "a fresh heart is whole");
+        let fading = drawn(life * 4 / 5);
+        assert!(
+            0 < fading && fading < fresh,
+            "a fading heart dissolves: {fading}"
+        );
+        assert_eq!(drawn(life - 1), 0, "a spent heart is gone");
+    }
 
     /// A look is centred and stacked by its first row's width and its row
     /// count, so a ragged row would sit it off its mark.
