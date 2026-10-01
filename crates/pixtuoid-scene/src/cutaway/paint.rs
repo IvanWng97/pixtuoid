@@ -4765,6 +4765,7 @@ S B B B B B B S
     /// figure's badge however far the z has risen, the z only climbs and drifts
     /// away, and the dust lies along the stepping foot's row.
     #[test]
+    #[cfg(feature = "density-art")]
     fn the_dense_looks_keep_their_places() {
         use crate::effects::EffectKind as K;
         let theme = crate::theme::theme_by_name("normal").expect("theme");
