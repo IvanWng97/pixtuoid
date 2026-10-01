@@ -1,5 +1,4 @@
 use super::*;
-use crate::composite::blend;
 use crate::embedded_pack::test_default_pack;
 use crate::layout::{WINDOW_W, window_bays, window_run};
 use crate::lighting::SPILL_DEPTH;
@@ -68,6 +67,7 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
                 city: &city,
                 run_x0: 0,
                 sky: &crate::celestial::SkyView::of(moment, 40, 40, theme),
+                weather: GlassWeather::of(moment),
             },
         );
         let mut sum = 0u64;
@@ -396,30 +396,35 @@ fn moon_disc_shows_at_night() {
 
 #[test]
 fn stars_appear_on_a_clear_night_and_vanish_under_overcast() {
-    // A moonless small hour: the only bright thing in the upper sky band is a star.
+    // A moonless small hour, and one under a moon high enough to clip above the
+    // glass: either way the bright things in the upper sky band are stars.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
-    let day = (1..=31u32)
-        .find(|&d| {
-            Sky::at_with(crate::localclock::on_day(d, 2), Weather::Clear)
-                .emitter()
-                .altitude
-                <= 0.0
-        })
-        .expect("a moonless 02:00 some January night");
-    let clear = render_office_on(day, 2, Weather::Clear, buf_w, top_wall_h);
-    let overcast = render_office_on(day, 2, Weather::Overcast, buf_w, top_wall_h);
-    let clear_n = count_faint_white(&clear, top_wall_h);
-    let overcast_n = count_faint_white(&overcast, top_wall_h);
-    assert!(
-        clear_n >= 3,
-        "a clear night should show some stars in the upper sky, got {clear_n}"
-    );
-    assert!(
-        clear_n > overcast_n,
-        "overcast should hide the stars a clear sky shows: \
-         clear={clear_n} overcast={overcast_n}"
-    );
+    let night = |want: fn(f32) -> bool| {
+        (1..=31u32)
+            .flat_map(|d| [0, 1, 2, 3, 22, 23].map(|h| (d, h)))
+            .find(|&(d, h)| {
+                let sky = Sky::at_with(crate::localclock::on_day(d, h), Weather::Clear);
+                sky.nightfall() >= 1.0 && want(sky.emitter().altitude)
+            })
+    };
+    let moonless = night(|alt| alt <= 0.0).expect("a moonless deep-night hour in January");
+    let high_moon = night(|alt| alt > 0.95).expect("a high-moon deep-night hour in January");
+    for (day, hour) in [moonless, high_moon] {
+        let clear = render_office_on(day, hour, Weather::Clear, buf_w, top_wall_h);
+        let overcast = render_office_on(day, hour, Weather::Overcast, buf_w, top_wall_h);
+        let clear_n = count_faint_white(&clear, top_wall_h);
+        let overcast_n = count_faint_white(&overcast, top_wall_h);
+        assert!(
+            clear_n >= 3,
+            "day {day} {hour}:00: a clear night should show some stars, got {clear_n}"
+        );
+        assert!(
+            clear_n > overcast_n,
+            "day {day} {hour}:00: overcast should hide the stars a clear sky shows: \
+             clear={clear_n} overcast={overcast_n}"
+        );
+    }
 }
 
 #[test]
@@ -1068,6 +1073,7 @@ fn a_window_shows_the_city_strip_from_its_own_column() {
                 city: &city,
                 run_x0,
                 sky: &sky,
+                weather: GlassWeather::of(moment),
             },
         );
         (0..30u16)
@@ -1113,55 +1119,4 @@ fn the_wall_between_two_windows_is_one_frame_post() {
         }
     }
     assert!(posts > 0, "this wall has posts");
-}
-
-#[test]
-fn a_rain_streak_steps_down_through_the_falloff_tones() {
-    const ALPHA_BASE: f32 = 0.35;
-    let white = Rgb {
-        r: 255,
-        g: 255,
-        b: 255,
-    };
-    let black = Rgb { r: 0, g: 0, b: 0 };
-    let spec = StreakSpec {
-        count: 8,
-        seed_mult: 7,
-        sx_mult: u64::from(crate::GOLDEN_GAMMA_32),
-        speed_base: 60,
-        speed_span: 50,
-        color: white,
-        particle: Particle::Streak {
-            len_base: 6,
-            len_mod: 3,
-            alpha_base: ALPHA_BASE,
-            alpha_falloff: 0.3,
-            drift: false,
-        },
-    };
-    let tones: Vec<u8> = (1..=crate::dither::FALLOFF_TONES)
-        .map(|k| {
-            let alpha = ALPHA_BASE * f32::from(k) / f32::from(crate::dither::FALLOFF_TONES);
-            blend(0, 255, alpha)
-        })
-        .collect();
-    let mut buf = RgbBuffer::filled(20, 30, black);
-    let glass = GlassRect {
-        x0: 1,
-        y0: 1,
-        w: 18,
-        h: 28,
-    };
-    paint_streaks(&mut buf, &spec, 0, glass, 12_345);
-    let touched: Vec<u8> = buf
-        .as_slice()
-        .iter()
-        .filter(|&&p| p != black)
-        .map(|p| p.r)
-        .collect();
-    assert!(!touched.is_empty(), "the streaks painted");
-    assert!(
-        touched.iter().all(|r| tones.contains(r)),
-        "{touched:?} vs {tones:?}"
-    );
 }

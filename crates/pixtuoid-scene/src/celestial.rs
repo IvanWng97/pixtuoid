@@ -60,6 +60,9 @@ const ARC_RISE_FRAC: f32 = 0.80;
 /// Below this [`Transmission::disc`](crate::sky::Transmission::disc), thick cloud
 /// swallows the disc entirely.
 pub(crate) const MIN_DISC_VIS: f32 = 0.08;
+/// The altitude a rising moon's disc takes to fade in, and a setting one's to
+/// fade out.
+const MOON_HORIZON_FADE: f32 = 0.1;
 
 impl Disc {
     /// This frame's disc over a wall band `top_wall_h` tall, or `None` under
@@ -68,9 +71,14 @@ impl Disc {
         let e = sky.emitter();
         let vis = match e.body {
             Body::Sun => sky.transmission().disc,
-            // A moon below the horizon shows no disc; one up fades in with the night.
+            // A moon below the horizon shows no disc; one up fades in with the
+            // night, and with its altitude as it rises and sets.
             Body::Moon if e.altitude <= 0.0 => return None,
-            Body::Moon => sky.transmission().disc * sky.nightfall(),
+            Body::Moon => {
+                sky.transmission().disc
+                    * sky.nightfall()
+                    * (e.altitude / MOON_HORIZON_FADE).min(1.0)
+            }
         };
         if vis < MIN_DISC_VIS {
             return None;
@@ -319,6 +327,37 @@ impl PaneSky<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The moon's disc fades in as it rises and out as it sets, never popping
+    /// a whole step between two minutes.
+    #[test]
+    fn the_moons_disc_never_pops_minute_by_minute() {
+        use crate::sky::Weather;
+        const MAX_STEP: f32 = 0.25;
+        for day in 0..30u32 {
+            let start = crate::localclock::on_day(day, 0);
+            let vis = |m: u64| {
+                let s = crate::sky::Sky::at_with(
+                    start + std::time::Duration::from_secs(m * 60),
+                    Weather::Clear,
+                );
+                Disc::of(&s, 96, 40)
+                    .filter(|d| d.body == Body::Moon)
+                    .map_or(0.0, |d| d.vis)
+            };
+            let mut prev = vis(0);
+            for m in 1..24 * 60 {
+                let next = vis(m);
+                assert!(
+                    (next - prev).abs() <= MAX_STEP,
+                    "day {day} {:02}:{:02}: {prev} -> {next}",
+                    m / 60,
+                    m % 60
+                );
+                prev = next;
+            }
+        }
+    }
 
     /// A moon below the horizon shows no disc, and one up fades in with the
     /// night rather than switching on at dusk.

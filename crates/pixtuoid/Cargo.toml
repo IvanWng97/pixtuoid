@@ -39,6 +39,8 @@ ratatui            = { workspace = true }
 ratatui-image      = { version = "11", default-features = false, features = ["crossterm"], optional = true }
 # The kitty encoder's base64: ratatui-image's own, so no second crate.
 base64-simd        = { version = "0.8", optional = true }
+# The iTerm2 encoder's PNG: the one ratatui-image's `image` already builds.
+png                = { version = "0.18", optional = true }
 crossterm          = { workspace = true }
 unicode-width      = { workspace = true }
 clap               = { workspace = true }
@@ -105,7 +107,7 @@ audio = ["dep:rodio"]
 # transitive crates reaches `cargo install` and homebrew-core's from-source
 # build. Off is a build whose `doctor` says it cannot ask
 # (`ClassicReason::Unsupported`) and whose runs paint classic.
-graphics = ["dep:ratatui-image", "dep:base64-simd"]
+graphics = ["dep:ratatui-image", "dep:base64-simd", "dep:png"]
 
 # termios/select for `term::query_tty` (the truecolor and graphics probes),
 # O_NOFOLLOW in install/io.rs, the stderr dup in audio/sink.rs. Same 0.2 as
@@ -158,6 +160,8 @@ schemars = "1"
 # test-util: paused-clock signal-arm tests in runtime/driver.rs (headless_loop).
 tokio    = { workspace = true, features = ["test-util"] }
 image    = { version = "0.25", default-features = false, features = ["png", "gif"] }
+# A decoder our SIXEL encoder's tests did not write: ratatui-image's own.
+icy_sixel = "0.5"
 insta    = "1"
 # Integration tests parse the `--json` CLI output back (cli_json.rs).
 serde_json = { workspace = true }
