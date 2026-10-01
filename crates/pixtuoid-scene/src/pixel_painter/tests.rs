@@ -3520,31 +3520,8 @@ fn every_other_desk_stands_a_cabinet_starting_with_the_first() {
 #[test]
 fn a_mascots_state_reaches_its_hover_and_its_sprite() {
     use pixtuoid_core::state::DaemonState;
-    let pack = crate::embedded_pack::test_default_pack();
-    let layout = Layout::compute(192, 128, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
     let def = crate::creatures::gateway_mascot_def(pixtuoid_core::source::openclaw::SOURCE_NAME)
         .expect("openclaw has a mascot");
-    let scene = SceneState::uniform(16);
-    let now = SystemTime::UNIX_EPOCH;
-    let motion = HashMap::new();
-    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
-    let mut cache = FrameCache::new();
-    let mut base_fill = BaseFillCache::new();
-    let ctx = PaintCtx {
-        scene: &scene,
-        layout: &layout,
-        pack: &pack,
-        now,
-        sky: crate::sky::Sky::at(now),
-        buf: &mut buf,
-        cache: &mut cache,
-        base_fill: &mut base_fill,
-        shadows: &mut crate::ground::DepthsCache::default(),
-        theme: crate::theme::theme_by_name("normal").expect("theme"),
-        floor: crate::floor::FloorMeta::ground(),
-        motion: &motion,
-        debug_walkable: false,
-    };
     for (state, busy, degraded) in [
         (DaemonState::Idle, false, false),
         (DaemonState::Busy, true, false),
@@ -3553,6 +3530,7 @@ fn a_mascots_state_reaches_its_hover_and_its_sprite() {
     ] {
         let mascot = sim::MascotPlacement {
             pos: Point { x: 60, y: 60 },
+            size: Size { w: 14, h: 12 },
             anim_name: def.walk,
             frame_idx: 0,
             name: def.display_name,
@@ -3562,9 +3540,10 @@ fn a_mascots_state_reaches_its_hover_and_its_sprite() {
             active_sessions: 0,
         };
         let mut drawables = Vec::new();
-        let frames = enqueue_gateway_mascots(&ctx, &[mascot], &mut drawables);
+        enqueue_gateway_mascots(std::slice::from_ref(&mascot), &mut drawables);
+        let hover = MascotFrame::of(&mascot, 0, 0);
         assert_eq!(
-            (frames[0].busy, frames[0].degraded),
+            (hover.busy, hover.degraded),
             (busy, degraded),
             "{state:?} hover"
         );
@@ -3624,6 +3603,81 @@ fn sim_step_walks_a_mascot_in_for_each_gateway_present() {
     assert_eq!(mascot.instance, None, "a lone instance needs no port");
 }
 
+/// A mascot whose anim the pack lacks paints nothing, so it lists nothing to
+/// hover; a drawn one is sized by the frame it blitted.
+#[test]
+fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
+    use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
+    use pixtuoid_core::state::DaemonInstanceId;
+    use std::time::Duration;
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    let key = DaemonInstanceKey::new(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        DaemonInstanceId::new("18789".to_string()).expect("id"),
+    );
+    apply_presence(
+        &mut scene,
+        &key,
+        DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+        now0,
+    );
+    let now = now0 + Duration::from_secs(6);
+    let mut owned = OwnedSimStores::new();
+    let mut frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    let [drawn] = frame.mascots.as_slice() else {
+        panic!("one gateway, one mascot: {:?}", frame.mascots);
+    };
+    let art = pack
+        .animation(drawn.anim_name)
+        .and_then(|a| frame_at(a, drawn.frame_idx))
+        .map(|f| (f.width(), f.height()))
+        .expect("the bundled pack draws the mascot");
+    let mut ghost = drawn.clone();
+    ghost.anim_name = "does_not_exist";
+    ghost.instance = Some("ghost".into());
+    frame.mascots.push(ghost);
+
+    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+    let hover = paint_frame(
+        &mut PaintCtx {
+            scene: &scene,
+            layout: &layout,
+            pack: &pack,
+            now,
+            sky: crate::sky::Sky::at(now),
+            buf: &mut buf,
+            cache: &mut FrameCache::new(),
+            base_fill: &mut BaseFillCache::new(),
+            shadows: &mut crate::ground::DepthsCache::default(),
+            theme: crate::theme::theme_by_name("normal").expect("normal theme"),
+            floor: crate::floor::FloorMeta::ground(),
+            motion: &owned.route.motion,
+            debug_walkable: false,
+        },
+        &frame,
+    );
+    let listed: Vec<_> = hover
+        .mascots
+        .iter()
+        .map(|m| (m.instance.clone(), (m.w, m.h)))
+        .collect();
+    assert_eq!(listed, vec![(None, art)]);
+}
+
 #[test]
 fn sim_step_fits_every_mascot_frame_on_the_canvas() {
     use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
@@ -3662,7 +3716,7 @@ fn sim_step_fits_every_mascot_frame_on_the_canvas() {
             },
         );
         for m in &frame.mascots {
-            let size = sim::frame_size(&pack, m.anim_name, m.frame_idx, sim::MASCOT_FALLBACK);
+            let size = m.size;
             let (Some(x0), Some(y0)) = (
                 m.pos.x.checked_sub(size.w / 2),
                 m.pos.y.checked_sub(size.h / 2),
@@ -3934,7 +3988,9 @@ fn a_character_whose_anim_is_missing_is_not_hoverable() {
         .animation("seated")
         .and_then(|a| a.frames().first())
         .expect("seated art");
-    let drawn = paint("seated").expect("a drawn character is hoverable");
+    let Some(drawable::Drawn::Agent(drawn)) = paint("seated") else {
+        panic!("a drawn character is hoverable");
+    };
     assert_eq!((drawn.w, drawn.h), (seated.width(), seated.height()));
 }
 
@@ -5119,8 +5175,8 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
             };
             let mut drawables = Vec::new();
             let pet_frame = frame.pet.map(|p| enqueue_pet(&ctx, p, &mut drawables));
-            for m in enqueue_gateway_mascots(&ctx, &frame.mascots, &mut drawables) {
-                let (w, h) = (m.w, m.h);
+            for m in &frame.mascots {
+                let Size { w, h } = m.size;
                 if m.pos.x < w / 2
                     || m.pos.x + w.div_ceil(2) > layout.buf_w
                     || m.pos.y < h / 2

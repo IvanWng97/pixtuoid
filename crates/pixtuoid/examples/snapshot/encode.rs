@@ -515,9 +515,9 @@ pub(crate) fn fill_rect<I: image::GenericImage>(
 const CELL_FONT_PX: f32 = 14.7;
 
 /// Anti-aliased cell text at the terminal grid: one char per [`CELL_W`]×[`CELL_H`] cell,
-/// centered on the cell's advance and CLIPPED to the cell rect so a wide fallback glyph
-/// can't bleed into a neighbor. Per-cell origins (never a running cursor) keep the raster
-/// locked to the grid.
+/// centered on the cell's advance and CLIPPED to the cell rect so ink wider than the
+/// advance (★) can't bleed into a neighbor. Per-cell origins (never a running cursor)
+/// keep the raster locked to the grid.
 fn draw_cell_text(ch: char, x0: u32, y0: u32, mut put: impl FnMut(u32, u32, f32)) {
     let s = ch.to_string();
     let adv = pixtuoid::aa_text::text_width(&s, CELL_FONT_PX);
