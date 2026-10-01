@@ -2668,6 +2668,7 @@ version = "0.19.0"
 dependencies = [
  "ab_glyph_rasterizer",
  "anyhow",
+ "base64-simd",
  "chrono",
  "clap",
  "clap_complete",

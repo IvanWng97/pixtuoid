@@ -37,6 +37,8 @@ ratatui            = { workspace = true }
 # Linux prebuilds exactly the way ALSA already does (see the `audio` feature).
 # Its sixel backend is `icy_sixel`, pure Rust, so the trimmed set has no C dep.
 ratatui-image      = { version = "11", default-features = false, features = ["crossterm"], optional = true }
+# The kitty encoder's base64: ratatui-image's own, so no second crate.
+base64-simd        = { version = "0.8", optional = true }
 crossterm          = { workspace = true }
 unicode-width      = { workspace = true }
 clap               = { workspace = true }
@@ -103,7 +105,7 @@ audio = ["dep:rodio"]
 # transitive crates reaches `cargo install` and homebrew-core's from-source
 # build. Off is a build whose `doctor` says it cannot ask
 # (`ClassicReason::Unsupported`) and whose runs paint classic.
-graphics = ["dep:ratatui-image"]
+graphics = ["dep:ratatui-image", "dep:base64-simd"]
 
 # termios/select for `term::query_tty` (the truecolor and graphics probes),
 # O_NOFOLLOW in install/io.rs, the stderr dup in audio/sink.rs. Same 0.2 as

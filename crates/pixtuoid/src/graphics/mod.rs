@@ -19,9 +19,14 @@ use pixtuoid_scene::render_scale::RenderScale;
 use ratatui::layout::Size as TermSize;
 
 #[cfg(feature = "graphics")]
+mod kitty;
+#[cfg(feature = "graphics")]
 mod probe;
+mod tiles;
+
 #[cfg(feature = "graphics")]
 pub(crate) use probe::probe;
+use tiles::TileShape;
 
 /// How long each wait of the capability probe may take: on Unix, the query start
 /// to finish, where [`probe()`] reads the reply itself, and, inside tmux, the
@@ -56,6 +61,18 @@ impl ImageProtocol {
             Self::Kitty => "kitty",
             Self::Sixel => "sixel",
             Self::Iterm2 => "iterm2",
+        }
+    }
+
+    /// The cells one re-sent piece of the image covers.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the compositor wires the tiles")
+    )]
+    pub(crate) fn tile(self) -> TileShape {
+        match self {
+            Self::Kitty => TileShape { cols: 4, rows: 2 },
+            Self::Sixel | Self::Iterm2 => TileShape { cols: 8, rows: 4 },
         }
     }
 }
