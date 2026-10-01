@@ -155,6 +155,14 @@ version = "1"
 "ё" = { of = "б", level = -2 }   # the water cooler's cabinet, shaded east side
 "α" = { of = "ч", level = -2 }   # the first coat, turned from the pole
 "β" = { of = "ш", level = -2 }   # the second
+"ţ" = { of = "t", level = -2 }   # the cat's fur, at the foot of each run
+"Ţ" = { of = "t", level = 2 }    # the cat's fur, catching the light
+"ƭ" = { of = "x", level = -2 }   # the dog's coat, shaded
+"Ƭ" = { of = "x", level = 2 }    # the dog's coat, lit
+"ȼ" = { of = "o", level = -2 }   # the lobster's shell, shaded
+"Ȼ" = { of = "o", level = 2 }    # the lobster's shell, lit
+"ǩ" = { of = "A", level = -2 }   # the lobster's claw, shaded
+"Ǩ" = { of = "A", level = 2 }    # the lobster's claw, lit
 "γ" = { of = "щ", level = -2 }   # the third
 "η" = { of = "ф", level = 2 }    # the clock's rim, lit upper west
 "ε" = { of = "ц", level = -2 }   # the clock's face, shaded lower east
@@ -367,32 +375,64 @@ frame_ms = 600
 frames   = ["cat_walk_0.sprite", "cat_walk_1.sprite"]
 frame_ms = 220
 
+[animations."cat_walk@4x"]
+frames   = ["cat_walk_0@4x.sprite", "cat_walk_1@4x.sprite"]
+frame_ms = 220
+
 [animations.cat_sit]
 frames   = ["cat_sit.sprite"]
+frame_ms = 600
+
+[animations."cat_sit@4x"]
+frames   = ["cat_sit@4x.sprite"]
 frame_ms = 600
 
 [animations.cat_sleep]
 frames   = ["cat_sleep.sprite"]
 frame_ms = 600
 
+[animations."cat_sleep@4x"]
+frames   = ["cat_sleep@4x.sprite"]
+frame_ms = 600
+
 [animations.dog_walk]
 frames   = ["dog_walk_0.sprite", "dog_walk_1.sprite"]
+frame_ms = 220
+
+[animations."dog_walk@4x"]
+frames   = ["dog_walk_0@4x.sprite", "dog_walk_1@4x.sprite"]
 frame_ms = 220
 
 [animations.dog_sit]
 frames   = ["dog_sit.sprite"]
 frame_ms = 600
 
+[animations."dog_sit@4x"]
+frames   = ["dog_sit@4x.sprite"]
+frame_ms = 600
+
 [animations.dog_sleep]
 frames   = ["dog_sleep.sprite"]
+frame_ms = 600
+
+[animations."dog_sleep@4x"]
+frames   = ["dog_sleep@4x.sprite"]
 frame_ms = 600
 
 [animations.lobster_walk]
 frames   = ["lobster_walk_0.sprite", "lobster_walk_1.sprite"]
 frame_ms = 200
 
+[animations."lobster_walk@4x"]
+frames   = ["lobster_walk_0@4x.sprite", "lobster_walk_1@4x.sprite"]
+frame_ms = 200
+
 [animations.lobster_rest]
 frames   = ["lobster_rest.sprite"]
+frame_ms = 600
+
+[animations."lobster_rest@4x"]
+frames   = ["lobster_rest@4x.sprite"]
 frame_ms = 600
 
 [animations.meeting_sofa]
