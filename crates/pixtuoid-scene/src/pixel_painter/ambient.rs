@@ -55,7 +55,7 @@ pub(super) fn paint_dust_motes(
     let warm = theme.lighting.sun_spill;
     for col in window_spill_columns(layout) {
         for DustMote { x, y, alpha } in dust_mote_positions(floor_seed, moment.now, &col) {
-            let strength = alpha * 0.7 * visibility;
+            let strength = alpha * crate::motes::MOTE_PEAK * visibility;
             blend_pixel(buf, x, y, warm, strength);
         }
     }

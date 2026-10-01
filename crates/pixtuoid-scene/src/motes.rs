@@ -21,6 +21,9 @@ pub(crate) struct DustMote {
 
 const MOTES_PER_COLUMN: usize = 3;
 
+/// How much of a mote shows in a full beam, at the height of its fall.
+pub(crate) const MOTE_PEAK: f32 = 0.7;
+
 /// Deterministic per `(floor_seed, particle_id, now)`: sine drift in x, slow
 /// fall in y, alpha fading in the top/bottom 15% bands so motes don't pop
 /// on/off at the spill boundary.

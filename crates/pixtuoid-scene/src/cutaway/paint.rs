@@ -349,7 +349,7 @@ pub(crate) fn frame_list<'a>(
         floor.altitude,
         now,
     );
-    build_list(frame, office, &moment, floor.floor_idx, board)
+    build_list(frame, office, &moment, floor, board)
 }
 
 /// Paint `list` whole: `layout`'s backdrop, then the list over it.
@@ -360,20 +360,21 @@ pub(crate) fn paint(
     buf: &mut RgbBuffer,
 ) {
     let pen = Pen::for_pack(list.scale, list.pack);
-    paint_backdrop(layout, list.theme, list.scale, pen, buf);
+    paint_backdrop(layout, list.theme, list.ground, list.scale, pen, buf);
     paint_list(list, cache, buf);
 }
 
 /// Everything under the list's pieces, none of which moves within a layout,
-/// theme, pack and scale.
+/// theme, ground, pack and scale.
 fn paint_backdrop(
     layout: &Layout,
     theme: &Theme,
+    ground: Ground,
     scale: RenderScale,
     pen: Pen,
     buf: &mut RgbBuffer,
 ) {
-    paint_ground(layout, theme, pen, buf);
+    paint_ground(layout, ground, pen, buf);
     for fixture in layout.fixtures() {
         match covering(fixture.kind) {
             Some(Covering::Rug) => paint_rug(fixture.visual, theme, pen, buf),
@@ -398,11 +399,45 @@ pub(crate) struct DrawList<'a> {
     /// How dark the room is: every non-emissive pixel is painted under it, so a
     /// change repaints the whole frame.
     ambient: crate::cutaway::light::Ambient,
+    /// The carpet the backdrop lays: a change repaints the whole frame too.
+    ground: Ground,
     // What it was built with, so painting it cannot use anything else: a
     // figure's key names its density, which only the build's scale picks.
     pack: &'a Pack,
     theme: &'a Theme,
     scale: RenderScale,
+}
+
+/// The carpet's three tones this frame: the theme's, drawn toward the
+/// weather's [`ground_tint`](crate::atmosphere::SkyTones::ground_tint).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Ground {
+    lit: pixtuoid_core::sprite::Rgb,
+    base: pixtuoid_core::sprite::Rgb,
+    dark: pixtuoid_core::sprite::Rgb,
+}
+
+impl Ground {
+    /// `theme`'s carpet drawn `share` of the way to `tint`.
+    fn of(theme: &Theme, (tint, share): (pixtuoid_core::sprite::Rgb, f32)) -> Self {
+        let s = &theme.surface;
+        Self {
+            lit: s.carpet_light.mix(tint, share),
+            base: s.carpet_base.mix(tint, share),
+            dark: s.carpet_dark.mix(tint, share),
+        }
+    }
+
+    /// `theme`'s carpet as it is.
+    #[cfg(test)]
+    fn plain(theme: &Theme) -> Self {
+        let s = &theme.surface;
+        Self {
+            lit: s.carpet_light,
+            base: s.carpet_base,
+            dark: s.carpet_dark,
+        }
+    }
 }
 
 /// One entry of a [`DrawList`].
@@ -466,6 +501,10 @@ impl<'a> DrawList<'a> {
         self.ambient
     }
 
+    pub(crate) fn ground(&self) -> Ground {
+        self.ground
+    }
+
     /// Each drawn agent's badge, in draw order.
     #[cfg(test)]
     pub(crate) fn badges(&self) -> impl Iterator<Item = &Badge> + '_ {
@@ -493,14 +532,14 @@ impl<'a> DrawList<'a> {
     }
 }
 
-/// Build `frame`'s [`DrawList`] at `moment`, on floor `floor_idx`. Every
+/// Build `frame`'s [`DrawList`] at `moment`, on `floor`. Every
 /// figure, window view and light is resolved here, so painting the list reads
 /// neither `frame` nor the moment again.
 pub(crate) fn build_list<'a>(
     frame: &SimFrame,
     office: Office<'a>,
     moment: &Moment,
-    floor_idx: usize,
+    floor: crate::floor::FloorMeta,
     board: &crate::board::BoardModel,
 ) -> DrawList<'a> {
     let Office {
@@ -508,7 +547,8 @@ pub(crate) fn build_list<'a>(
     } = office;
     let ambient = crate::cutaway::light::Ambient::of(&moment.look);
     let mut collected = collect_pieces(frame, office, moment);
-    collected.extend(signs(office, floor_idx, board));
+    collected.extend(signs(office, floor.floor_idx, board));
+    collected.extend(motes(office, moment, floor.floor_seed));
     let sorted = depth_sort(
         collected
             .into_iter()
@@ -526,12 +566,36 @@ pub(crate) fn build_list<'a>(
         .collect();
     DrawList {
         pieces,
-        lights: lights(frame, office, moment, floor_idx, ambient),
+        lights: lights(frame, office, moment, floor.floor_idx, ambient),
         ambient,
+        ground: Ground::of(theme, moment.look.ground_tint),
         pack,
         theme,
         scale,
     }
+}
+
+/// The dust motes in the windows' sunbeams this moment ([`crate::motes`]),
+/// each on its cell where the ordered dither lets as much of it through as
+/// the beam shows: a speck the sun catches, never a blend.
+fn motes(office: Office<'_>, moment: &Moment, seed: u64) -> Vec<(Span, PieceKind)> {
+    let look = &moment.look;
+    let shows = look.sunlight * look.beam;
+    if look.beam <= 0.0 || shows <= 0.0 {
+        return Vec::new();
+    }
+    crate::motes::window_spill_columns(office.layout)
+        .iter()
+        .flat_map(|col| crate::motes::dust_mote_positions(seed, moment.now, col))
+        .filter(|m| crate::dither::takes_next(m.x, m.y, m.alpha * crate::motes::MOTE_PEAK * shows))
+        .map(|m| {
+            let at = crate::layout::Point { x: m.x, y: m.y };
+            let span = Span::new(m.x, m.y, 1, 1, 0)
+                .with_depth(m.y)
+                .with_layer(Layer::Over);
+            (span, PieceKind::Mote { at })
+        })
+        .collect()
 }
 
 /// The room's own lights (`crate::lighting`) this frame that the cutaway paints.
@@ -714,6 +778,7 @@ fn paint_pieces(
                     | PieceKind::WallSeg { .. }
                     | PieceKind::Chair { .. }
                     | PieceKind::DeskProp(_)
+                    | PieceKind::Mote { .. }
                     | PieceKind::PropBand { .. }
                     | PieceKind::Table { .. }
                     | PieceKind::Character { .. }
@@ -775,6 +840,7 @@ fn mark(
         | PieceKind::WallSeg { .. }
         | PieceKind::Chair { .. }
         | PieceKind::DeskProp(_)
+        | PieceKind::Mote { .. }
         | PieceKind::PropBand { .. }
         | PieceKind::Table { .. }
         | PieceKind::Character { .. }
@@ -1085,6 +1151,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::Desk { at, art, screen } => (at, art, screen).hash(&mut h),
         PieceKind::Chair { at } => at.hash(&mut h),
         PieceKind::DeskProp(prop) => prop.hash(&mut h),
+        PieceKind::Mote { at } => at.hash(&mut h),
         PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => (at, art).hash(&mut h),
         PieceKind::PropBand { at, sprite, rows } => (at, sprite, rows).hash(&mut h),
         PieceKind::Table { at } => at.hash(&mut h),
@@ -1607,6 +1674,7 @@ fn paint_piece(
         }
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
         PieceKind::DeskProp(prop) => paint_desk_prop(prop, pack, theme, scale, buf),
+        PieceKind::Mote { at } => paint_mote(at, theme, Pen::for_pack(scale, pack), buf),
         PieceKind::Effect(ref riding) => riding.paint(theme, buf),
         PieceKind::Character {
             ref figure, chair, ..
@@ -1858,16 +1926,19 @@ pub(crate) fn assert_variant_desk_foot(
     now: std::time::SystemTime,
 ) {
     // The room darkens every pixel by the hour's steps; its lights must be off.
-    let ambient = crate::cutaway::light::Ambient::of(&crate::atmosphere::SkyTones::resolve(
-        &crate::sky::Sky::clock(now),
-        theme,
-    ));
+    let tones = crate::atmosphere::SkyTones::resolve(&crate::sky::Sky::clock(now), theme);
+    let ambient = crate::cutaway::light::Ambient::of(&tones);
     let mut floor = RgbBuffer::filled(
         scale.to_buffer(layout.buf_w),
         scale.to_buffer(layout.buf_h),
         theme.surface.bg_fallback,
     );
-    paint_ground(layout, theme, Pen::for_pack(scale, base_pack), &mut floor);
+    paint_ground(
+        layout,
+        Ground::of(theme, tones.ground_tint),
+        Pen::for_pack(scale, base_pack),
+        &mut floor,
+    );
     let buf_w = usize::from(scale.to_buffer(layout.buf_w));
     let face = desk_front_h();
     // Each desk's columns and the first row below its art, in logical units.
@@ -2205,6 +2276,7 @@ impl PieceKind {
             | PieceKind::Glass { .. }
             | PieceKind::Desk { .. }
             | PieceKind::DeskProp(_)
+            | PieceKind::Mote { .. }
             | PieceKind::Character { .. }
             | PieceKind::Effect(_)
             | PieceKind::Badge { .. }
@@ -2289,6 +2361,10 @@ pub(crate) enum PieceKind {
     },
     /// A prop the model stands on a desk ([`push_desk_props`]).
     DeskProp(StoodProp),
+    /// A dust mote in a sunbeam, on cell `at` ([`motes`]).
+    Mote {
+        at: crate::layout::Point,
+    },
     Character {
         figure: Figure,
         /// A back-turned sitter's chair, painted straight after them.
@@ -2603,10 +2679,8 @@ fn paint_glass(view: &WindowView, pen: Pen, buf: &mut RgbBuffer) {
 /// The carpet, lit near the windows, falling off south and laid in tiles, on
 /// the art grid: every edge, dither step and seam lands on an art pixel,
 /// whatever the scale.
-fn paint_ground(layout: &Layout, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
-    let lit = theme.surface.carpet_light;
-    let base = theme.surface.carpet_base;
-    let dark = theme.surface.carpet_dark;
+fn paint_ground(layout: &Layout, ground: Ground, pen: Pen, buf: &mut RgbBuffer) {
+    let Ground { lit, base, dark } = ground;
 
     let h = pen.art(layout.buf_h);
     let w = pen.art(layout.buf_w);
@@ -2990,6 +3064,18 @@ fn paint_art(
     let themed = dense.recolorable.recolored(&theme_overrides(theme));
     let (x, y) = centred_top_left(at, dense.logical, scale);
     blit_frame_scaled(&art.flip.turn(themed), x, y, dense.blit_at, buf);
+}
+
+/// A mote: the middle art pixel of its cell, lit in the sun's spill.
+fn paint_mote(at: crate::layout::Point, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
+    let d = pen.art(1).0;
+    let speck = ArtRect {
+        x: ArtPx(pen.art(at.x).0 + d / 2),
+        y: ArtPx(pen.art(at.y).0 + d / 2),
+        w: ArtPx(1),
+        h: ArtPx(1),
+    };
+    pen.fill(buf, speck, theme.lighting.sun_spill);
 }
 
 /// A desk prop in the theme's cup and paper.
@@ -4482,7 +4568,7 @@ pub(crate) mod tests {
             scale.to_buffer(layout.buf_h),
             pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
         );
-        paint_ground(layout, &crate::theme::NORMAL, pen, &mut buf);
+        paint_ground(layout, Ground::plain(&crate::theme::NORMAL), pen, &mut buf);
         (pen, buf)
     }
 
@@ -4508,7 +4594,14 @@ pub(crate) mod tests {
                     scale.to_buffer(layout.buf_h),
                     pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
                 );
-                paint_backdrop(&layout, theme, scale, Pen::for_pack(scale, &pack), &mut buf);
+                paint_backdrop(
+                    &layout,
+                    theme,
+                    Ground::plain(theme),
+                    scale,
+                    Pen::for_pack(scale, &pack),
+                    &mut buf,
+                );
                 let rugs = layout.fixtures().filter_map(|f| {
                     matches!(
                         f.kind,
@@ -4821,7 +4914,7 @@ pub(crate) mod tests {
                 0.0,
                 std::time::UNIX_EPOCH,
             ),
-            0,
+            crate::floor::FloorMeta::ground(),
             quiet_board(),
         );
         let mut cast = 0;
@@ -4953,7 +5046,7 @@ pub(crate) mod tests {
                 scale.to_buffer(layout.buf_h),
                 theme.surface.bg_fallback,
             );
-            paint_backdrop(&layout, theme, scale, pen, &mut buf);
+            paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut buf);
             let mut order = Vec::new();
             push_windows(office, &moment, &GlassWeather::of(&moment), &mut order);
             let mut again = Vec::new();
@@ -5125,7 +5218,7 @@ pub(crate) mod tests {
             scale.to_buffer(layout.buf_h),
             theme.surface.bg_fallback,
         );
-        paint_backdrop(&layout, theme, scale, pen, &mut buf);
+        paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut buf);
         let k = scale.get() / pen.art(1).0;
         let rows = crate::layout::window_rows(layout.wall_band_h());
         let mut posts = 0;
@@ -5461,6 +5554,76 @@ S B B B B B B S
         );
     }
 
+    /// A clear noon's sunbeams carry motes, each a speck painted on its own
+    /// cell, at every density; a night's carry none.
+    #[test]
+    fn motes_drift_in_a_clear_noons_beams_and_not_at_night() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = test_default_pack();
+        let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let frame = empty_frame(&layout);
+        let is_mote = |p: &&Piece| matches!(p.kind, PieceKind::Mote { .. });
+        for s in [1, pack.max_density_variant().get()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            let office = Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale,
+            };
+            let noon = list_at(&frame, office, 12);
+            let motes: Vec<&Piece> = noon.pieces().iter().filter(is_mote).collect();
+            assert!(!motes.is_empty(), "at scale {s} a clear noon has no motes");
+            for p in motes {
+                assert_eq!(
+                    stray_pixel(&p.kind, p.span, &layout, &pack, theme, scale),
+                    None,
+                    "at scale {s} {:?} painted outside {:?}",
+                    p.kind,
+                    p.span
+                );
+            }
+            let night = list_at(&frame, office, 0);
+            assert!(
+                night.pieces().iter().find(is_mote).is_none(),
+                "motes at night"
+            );
+        }
+    }
+
+    /// The carpet takes the weather's tint: the list a rainy hour builds lays
+    /// the theme's carpet drawn toward the rain's tint, which no clear hour's
+    /// ground matches.
+    #[test]
+    fn the_ground_takes_the_weathers_tint() {
+        use crate::sky::{Sky, Weather};
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = test_default_pack();
+        let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let frame = empty_frame(&layout);
+        let now = crate::localclock::at_hour(12);
+        let ground_in = |w: Weather| {
+            let sky = Sky::at_with(now, w);
+            let tint = crate::atmosphere::SkyTones::resolve(&sky, theme).ground_tint;
+            let list = build_list(
+                &frame,
+                Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme,
+                    scale: RenderScale::ONE,
+                },
+                &Moment::resolve(sky, theme, 0.0, now),
+                crate::floor::FloorMeta::ground(),
+                quiet_board(),
+            );
+            (list.ground(), tint)
+        };
+        let (rain, (tint, share)) = ground_in(Weather::Rain);
+        assert_eq!(rain.base, theme.surface.carpet_base.mix(tint, share));
+        assert_ne!(rain, ground_in(Weather::Clear).0);
+    }
+
     /// A figure's dust paints straight before them and their other riders
     /// straight after, so nothing sorts between a person and what rides on
     /// them.
@@ -5586,7 +5749,7 @@ S B B B B B B S
                             scale,
                         },
                         &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
-                        0,
+                        crate::floor::FloorMeta::ground(),
                         quiet_board(),
                     );
                     repeats += same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
@@ -5635,7 +5798,7 @@ S B B B B B B S
                     scale,
                 },
                 &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
-                0,
+                crate::floor::FloorMeta::ground(),
                 quiet_board(),
             );
             let is_glass = |p: &Piece| matches!(p.kind, PieceKind::Glass { .. });
@@ -5671,7 +5834,7 @@ S B B B B B B S
             frame,
             office,
             &Moment::resolve(sky, office.theme, 0.0, now),
-            0,
+            crate::floor::FloorMeta::ground(),
             quiet_board(),
         )
     }
@@ -6103,7 +6266,7 @@ S B B B B B B S
             list.theme.surface.bg_fallback,
         );
         let pen = Pen::for_pack(list.scale, list.pack);
-        paint_backdrop(layout, list.theme, list.scale, pen, &mut buf);
+        paint_backdrop(layout, list.theme, list.ground, list.scale, pen, &mut buf);
         paint_ground_shadows(
             list.pieces.iter().filter_map(|p| p.shadow),
             crate::ground::shadow_strength(list.ambient.darkness()),
@@ -6140,6 +6303,7 @@ S B B B B B B S
         paint_backdrop(
             &layout,
             theme,
+            list.ground(),
             scale,
             Pen::for_pack(scale, &pack),
             &mut night,
@@ -6447,7 +6611,7 @@ S B B B B B B S
                             scale,
                         },
                         &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
-                        0,
+                        crate::floor::FloorMeta::ground(),
                         quiet_board(),
                     );
                     same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
@@ -6556,7 +6720,7 @@ S B B B B B B S
                     scale: RenderScale::ONE
                 },
                 &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
-                0,
+                crate::floor::FloorMeta::ground(),
                 quiet_board()
             )),
             summary(&build_list(
@@ -6568,7 +6732,7 @@ S B B B B B B S
                     scale: RenderScale::ONE
                 },
                 &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
-                0,
+                crate::floor::FloorMeta::ground(),
                 quiet_board()
             )),
         );
@@ -6595,7 +6759,7 @@ S B B B B B B S
                     0.0,
                     std::time::SystemTime::UNIX_EPOCH,
                 ),
-                0,
+                crate::floor::FloorMeta::ground(),
                 quiet_board(),
             );
             let pieces: Vec<&Piece> = list
@@ -6660,6 +6824,7 @@ S B B B B B B S
             PieceKind::Effect(_) => "effect",
             PieceKind::Badge { .. } => "badge",
             PieceKind::DeskProp(_) => "desk prop",
+            PieceKind::Mote { .. } => "mote",
             PieceKind::Board { .. } => "board",
             PieceKind::Indicator { .. } => "indicator",
         }
@@ -6732,8 +6897,8 @@ S B B B B B B S
             )
         };
         let (mut floor, mut laid) = (blank(), blank());
-        paint_ground(&layout, theme, pen, &mut floor);
-        paint_backdrop(&layout, theme, scale, pen, &mut laid);
+        paint_ground(&layout, Ground::plain(theme), pen, &mut floor);
+        paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut laid);
         let row = scale.to_buffer(layout.wall_band_h());
         for x in 0..floor.width() {
             assert_eq!(
@@ -6979,7 +7144,7 @@ S B B B B B B S
             frame,
             office,
             &Moment::resolve(sky, office.theme, 0.0, now),
-            0,
+            crate::floor::FloorMeta::ground(),
             quiet_board(),
         )
     }
@@ -7084,9 +7249,9 @@ S B B B B B B S
         };
         let (mut night, mut raw) = (blank(), blank());
         let mut cache = CutawayCache::default();
-        paint_backdrop(&layout, theme, scale, pen, &mut night);
+        paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut night);
         paint_list(&list, &mut cache, &mut night);
-        paint_backdrop(&layout, theme, scale, pen, &mut raw);
+        paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut raw);
         for p in list.pieces() {
             paint_piece(&p.kind, &pack, theme, scale, &mut cache, &mut raw);
         }
@@ -7185,7 +7350,7 @@ S B B B B B B S
         let mut cache = CutawayCache::default();
         let painted = |keep: &dyn Fn(&PieceKind) -> bool, cache: &mut _| {
             let mut buf = blank();
-            paint_backdrop(&layout, theme, scale, pen, &mut buf);
+            paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut buf);
             for p in list.pieces().iter().filter(|p| keep(&p.kind)) {
                 paint_piece(&p.kind, &pack, theme, scale, cache, &mut buf);
             }
@@ -7195,7 +7360,7 @@ S B B B B B B S
         let glass = painted(&|k| matches!(k, PieceKind::Glass { .. }), &mut cache);
         let all = painted(&|_| true, &mut cache);
         let mut night = blank();
-        paint_backdrop(&layout, theme, scale, pen, &mut night);
+        paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut night);
         paint_list(&list, &mut cache, &mut night);
         let luma = pixtuoid_core::sprite::Rgb::lightness;
         let (mut kept, mut lifted) = (0, 0);
@@ -7432,8 +7597,8 @@ S B B B B B B S
                 )
             };
             let (mut bare, mut laid) = (blank(), blank());
-            paint_ground(&layout, theme, pen, &mut bare);
-            paint_backdrop(&layout, theme, scale, pen, &mut laid);
+            paint_ground(&layout, Ground::plain(theme), pen, &mut bare);
+            paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut laid);
             for fixture in layout.fixtures() {
                 met.insert(crate::layout::roster::tests::kind_key(fixture.kind));
                 if covering(fixture.kind).is_some() {
