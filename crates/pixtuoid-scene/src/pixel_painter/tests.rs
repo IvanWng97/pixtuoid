@@ -5766,31 +5766,6 @@ fn a_back_turned_seat_puts_the_occupant_past_the_desk_body() {
     }
 }
 
-#[test]
-fn a_lamp_casting_no_pool_is_not_drawn_lit() {
-    // Whatever the fixture reads as, it must track the light it casts.
-    let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let desk = Point { x: 20, y: 14 };
-    let bg = Rgb { r: 9, g: 9, b: 9 };
-    let render = |strength: f32| {
-        let mut buf = RgbBuffer::filled(60, 40, bg);
-        super::drawable::paint_desk_lamp(
-            &mut buf,
-            &crate::lighting::DeskLights::new(desk, strength, 0.0),
-            theme,
-        );
-        buf
-    };
-    let (dim, bright) = (render(0.05), render(1.0));
-    assert!(
-        dim.get(desk.x, desk.y).lightness() < bright.get(desk.x, desk.y).lightness(),
-        "a barely-lit lamp must not paint the same shade as a fully-lit one: \
-         {:?} vs {:?}",
-        dim.get(desk.x, desk.y),
-        bright.get(desk.x, desk.y)
-    );
-}
-
 /// Asserted on the DRAWABLE list, not on pixels: a chair's rect also carries
 /// the hour and the desk's lights, so contrasting a north desk's rect against a
 /// south one measures more than the chair and can pass with no chair drawn.

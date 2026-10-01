@@ -303,7 +303,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
                 sprite_top = desk_art_top(pack, desk.y, frame.height());
                 blit_frame(frame, desk.x, sprite_top, buf);
             }
-            paint_desk_lamp(buf, lights, theme);
+            paint_desk_lamp_pool(buf, lights, theme);
             paint_screen_idle(
                 buf,
                 desk.x,
@@ -534,7 +534,7 @@ pub(super) fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, pack: &Pack
 }
 
 /// The task lamp's warm pool; the desk art draws the lamp itself.
-pub(super) fn paint_desk_lamp(
+pub(super) fn paint_desk_lamp_pool(
     buf: &mut RgbBuffer,
     lights: &crate::lighting::DeskLights,
     theme: &crate::theme::Theme,
