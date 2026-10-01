@@ -27,10 +27,10 @@ use super::furniture::{
     paint_area_rug, paint_coat_rack, paint_doormat, paint_fish_tank, paint_kitchen_island,
     paint_meeting_chair, paint_notice_board, paint_side_table, paint_trash_bin, paint_water_cooler,
 };
-use super::paint_character_at;
+use super::{AgentFrame, paint_character_at};
 use crate::frame_cache::FrameCache;
 pub(super) use crate::layout::Layer;
-use crate::layout::Point;
+use crate::layout::{Point, Size};
 use crate::pet::PetKind;
 
 /// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
@@ -161,6 +161,8 @@ pub(super) enum DrawableKind<'a> {
     /// agent (lives in `daemons`, not `scene.agents`); y-sorted at its south row
     /// like a pet.
     GatewayMascot {
+        /// Its index in [`SimFrame::mascots`](super::SimFrame::mascots).
+        mascot_idx: usize,
         pos: Point,
         anim_name: &'static str,
         frame_idx: usize,
@@ -285,8 +287,12 @@ pub(crate) fn desk_sprite_name(facing: crate::layout::Facing) -> &'static str {
 }
 
 /// Dispatch one Drawable's paint; character-attached effects paint inline so
-/// they ride along with the character in z-order.
-pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
+/// they ride along with the character in z-order. Returns the character it
+/// drew, for hover.
+pub(super) fn paint_drawable(
+    kind: &DrawableKind<'_>,
+    c: &mut DrawableCtx<'_>,
+) -> Option<AgentFrame> {
     let buf = &mut *c.buf;
     let cache = &mut *c.cache;
     let (pack, now, theme) = (c.pack, c.now, c.theme);
@@ -333,13 +339,19 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
             if let Some(dust_frame) = walking_dust_frame {
                 paint_walking_dust(buf, *anchor, *dust_frame, theme);
             }
-            paint_character_at(buf, *pose, *anchor, agent, pack, cache, now);
+            let drawn = paint_character_at(buf, *pose, *anchor, agent, pack, cache, now);
             if let Some(seed) = sleep_z_seed {
                 paint_sleep_z(buf, *anchor, now, *seed, theme);
             }
             if *waiting_bubble {
                 paint_waiting_bubble(buf, *anchor, theme);
             }
+            return drawn.map(|Size { w, h }| AgentFrame {
+                agent_id: agent.agent_id,
+                anchor: *anchor,
+                w,
+                h,
+            });
         }
         DrawableKind::FilingCabinet { pos } => {
             if let Some(cab) = pack
@@ -432,12 +444,8 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
             frame_idx,
             pet_elapsed_ms,
         } => {
-            let Some(anim) = pack.animation(anim_name) else {
-                return;
-            };
-            let Some(frame) = frame_at(anim, *frame_idx) else {
-                return;
-            };
+            let anim = pack.animation(anim_name)?;
+            let frame = frame_at(anim, *frame_idx)?;
             // Declared out here so the flipped path's temporary outlives the `if`.
             let mirrored;
             let final_frame = if *flip {
@@ -454,18 +462,15 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
             }
         }
         DrawableKind::GatewayMascot {
+            mascot_idx: _,
             pos,
             anim_name,
             frame_idx,
             run_count,
             degraded,
         } => {
-            let Some(anim) = pack.animation(anim_name) else {
-                return;
-            };
-            let Some(frame) = frame_at(anim, *frame_idx) else {
-                return;
-            };
+            let anim = pack.animation(anim_name)?;
+            let frame = frame_at(anim, *frame_idx)?;
             if *degraded {
                 blit_centered(&super::palette::degraded_frame(frame), *pos, buf);
             } else {
@@ -505,6 +510,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
         }
         DrawableKind::Clock { pos } => paint_clock(buf, pos.x, pos.y, now, theme),
     }
+    None
 }
 
 fn paint_desk_coffee(
@@ -1160,6 +1166,7 @@ mod tests {
             anchor_y: 30,
             layer: Layer::Figure,
             kind: DrawableKind::GatewayMascot {
+                mascot_idx: 0,
                 pos: Point { x: 30, y: 30 },
                 anim_name: "nonexistent_anim",
                 frame_idx: 0,
@@ -1200,6 +1207,7 @@ mod tests {
                 anchor_y: pos.y,
                 layer: Layer::Figure,
                 kind: DrawableKind::GatewayMascot {
+                    mascot_idx: 0,
                     pos,
                     anim_name: def.rest,
                     frame_idx: 0,

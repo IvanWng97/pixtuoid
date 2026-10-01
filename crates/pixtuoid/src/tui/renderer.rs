@@ -49,6 +49,8 @@ pub struct DrawCtx<'a> {
     pub last_pet_pos: Option<PetFrame>,
     /// Every gateway mascot's frame this render, for hover identity.
     pub last_mascots: Vec<MascotFrame>,
+    /// For hover and click.
+    pub last_agents: Vec<pixtuoid_scene::pixel_painter::AgentFrame>,
     pub chitchat_state: &'a mut std::collections::HashMap<
         pixtuoid_scene::chitchat::VenueKey,
         pixtuoid_scene::chitchat::ActiveChitchat,
@@ -112,6 +114,7 @@ impl<'a> DrawCtx<'a> {
             footer: crate::tui::widgets::footer_context(scene, None, false, None, None),
             last_pet_pos: None,
             last_mascots: Vec::new(),
+            last_agents: Vec::new(),
             chitchat_state,
             chitchat_bubbles: Vec::new(),
             coffee: &NO_COFFEE,
@@ -355,20 +358,14 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     });
     ctx.last_pet_pos = pixel_result.pet_pos;
     ctx.last_mascots = pixel_result.mascots;
+    ctx.last_agents = pixel_result.agents;
     ctx.chitchat_bubbles = pixel_result.chitchat_bubbles;
     ctx.new_coffee_carriers = pixel_result.new_coffee_carriers;
     ctx.occupied_waypoints = pixel_result.occupied_waypoints;
 
     let mouse_pos = ctx.mouse_pos;
-    let hovered = mouse_pos.and_then(|(mx, my)| {
-        hit_test_agent(
-            scene,
-            &layout,
-            now,
-            &mut ctx.store.route_ctx(),
-            CellArea::half_block(mx, my),
-        )
-    });
+    let hovered = mouse_pos
+        .and_then(|(mx, my)| hit_test_agent(&ctx.last_agents, CellArea::half_block(mx, my)));
 
     // The dim is decoupled from `onboarding.open`, so the office keeps fading back
     // up for a beat AFTER the card is gone.
@@ -539,17 +536,16 @@ pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
     }
 }
 
-/// The mascot under the cursor that the user can actually SEE — the one painted on
-/// TOP. The painter y-sorts its drawables ascending, so among overlapping mascots
-/// the greatest `pos.y` is drawn LAST and occludes the others.
+/// The mascot under the cursor painted on TOP: `mascots` is in
+/// `sort_drawables`' paint order, so the last hit.
 fn topmost_mascot_at(
     mascots: &[pixtuoid_scene::pixel_painter::MascotFrame],
     cell: CellArea,
 ) -> Option<&pixtuoid_scene::pixel_painter::MascotFrame> {
     mascots
         .iter()
-        .filter(|m| hit_test_mascot(m.pos, m.w, m.h, cell))
-        .max_by_key(|m| m.pos.y)
+        .rev()
+        .find(|m| hit_test_mascot(m.pos, m.w, m.h, cell))
 }
 
 #[cfg(test)]
@@ -602,41 +598,28 @@ mod tests {
     }
 
     #[test]
-    fn hovering_overlapping_mascots_names_the_one_painted_on_top() {
+    fn hovering_overlapping_mascots_names_the_last_painted() {
         use pixtuoid_scene::layout::Point;
         use pixtuoid_scene::pixel_painter::MascotFrame;
-        let frame = |instance: &str, x: u16, y: u16| MascotFrame {
-            pos: Point { x, y },
+        let frame = |instance: &str, y: u16, h: u16| MascotFrame {
+            pos: Point { x: 40, y },
             w: 14,
-            h: 12,
+            h,
             name: "OpenClaw",
             instance: Some(instance.to_string()),
             busy: false,
             degraded: false,
             active_sessions: 0,
         };
-        // `hit_test_mascot` centres the 14x12 box on `pos`: 18789 covers x[33,47) my[22,28) and
-        // 19789 x[37,51) my[25,31) — overlapping at x[37,47) my[25,28), with 19789
-        // lower and so painted last.
-        let mascots = vec![frame("18789", 40, 50), frame("19789", 44, 56)];
-        let hit = |mx, my| {
-            topmost_mascot_at(&mascots, CellArea::half_block(mx, my))
-                .and_then(|m| m.instance.clone())
-                .unwrap_or_else(|| "none".into())
+        // The tall one's centre is north of the short one's, yet its feet are
+        // south of them, so it sorts after it.
+        let (tall, short) = (frame("tall", 50, 30), frame("short", 56, 6));
+        let cell = CellArea::half_block(40, short.pos.y / 2);
+        let hit = |paint_order: &[MascotFrame]| {
+            topmost_mascot_at(paint_order, cell).and_then(|m| m.instance.clone())
         };
-
-        assert_eq!(hit(40, 26), "19789", "the visible lobster must be named");
-        assert_eq!(hit(34, 23), "18789");
-        assert_eq!(hit(49, 29), "19789");
-        assert_eq!(hit(5, 5), "none");
-        let reversed = vec![frame("19789", 44, 56), frame("18789", 40, 50)];
-        assert_eq!(
-            topmost_mascot_at(&reversed, CellArea::half_block(40, 26))
-                .and_then(|m| m.instance.clone())
-                .as_deref(),
-            Some("19789"),
-            "the pick must be by paint order, not slice position"
-        );
+        assert_eq!(hit(&[short.clone(), tall.clone()]).as_deref(), Some("tall"));
+        assert_eq!(hit(&[tall, short]).as_deref(), Some("short"));
     }
 
     #[test]
