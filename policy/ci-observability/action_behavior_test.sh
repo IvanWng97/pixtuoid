@@ -658,3 +658,33 @@ assert_wait fail "a failed ci-gate" "$(check_page github-actions completed failu
 assert_wait fail "a cancelled ci-gate" "$(check_page github-actions completed cancelled)"
 assert_wait fail "a skipped ci-gate" "$(check_page github-actions completed skipped)"
 assert_wait fail "another app's passing check of that name" "$(check_page impostor completed success)"
+
+# ── release-plz.yml: only a merged release PR waits for CI and publishes ──
+detect_step="Detect a merged release PR"
+detect_script="$(workflow_step_script "$release_workflow" "$detect_step")"
+detect_prefix="$(STEP_NAME="$detect_step" yq -e -r '.jobs[].steps[] | select(.name == strenv(STEP_NAME)) | .env.PR_BRANCH_PREFIX' "$release_workflow")" ||
+    fail "\"$detect_step\" has no PR_BRANCH_PREFIX"
+[[ "$detect_prefix" == "$release_prefix" ]] ||
+    fail "\"$detect_step\" looks for $detect_prefix*, not release-plz.toml's $release_prefix*"
+assert_detect() {
+    local expect="$1" label="$2" pages="$3" output_file="$test_dir/detect-output"
+    : >"$output_file"
+    rm -f "$test_dir/check-calls"
+    if ! PATH="$fake_bin:$PATH" CHECK_CALLS="$test_dir/check-calls" FAKE_CHECK_PAGES="$pages" GH_TOKEN=test-token \
+        GITHUB_OUTPUT="$output_file" PR_BRANCH_PREFIX="$detect_prefix" REPOSITORY=owner/repo SHA=abc1234 \
+        bash -c "$detect_script" >/dev/null 2>&1; then
+        [[ "$expect" == error ]] || fail "the release detection exited non-zero on $label"
+        grep -q '^release=true$' "$output_file" && fail "the release detection failed open on $label"
+        return 0
+    fi
+    [[ "$expect" != error ]] || fail "the release detection exited zero on $label"
+    grep -qx "release=$expect" "$output_file" ||
+        fail "the release detection did not answer release=$expect for $label: $(<"$output_file")"
+}
+pr_heads() { jq -cn '[$ARGS.positional[] | {head: {ref: .}}]' --args "$@"; }
+assert_detect true "a merged release PR" "$(pr_heads "${detect_prefix}v1.2.3")"
+assert_detect true "a release PR among others" "$(pr_heads feat/x "${detect_prefix}v1.2.3")"
+assert_detect false "an ordinary PR" "$(pr_heads feat/x)"
+assert_detect false "a branch merely naming the prefix" "$(pr_heads "feat/${detect_prefix}x")"
+assert_detect false "a direct push with no PR" "$(pr_heads)"
+assert_detect error "an API failure" error

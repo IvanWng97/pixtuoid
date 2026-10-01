@@ -24,15 +24,14 @@ git_release_enable = false
 # package looks up its own last release by it, and the per-package default
 # (`pixtuoid-core-v0.18.0`) names a tag that does not exist.
 git_tag_name = "v{{ version }}"
-# The `release` job runs on every push to main; only a merged PR whose head branch
-# carries `pr_branch_prefix` (the release PR, or a hand-made branch for a
-# bot-less release) may tag. A hand-made branch with ONE commit squashes to
+# Only a merged PR whose head branch carries `pr_branch_prefix` (the release
+# PR, or a hand-made branch for a bot-less release) may tag. A hand-made branch with ONE commit squashes to
 # that commit's title, so title it like `pr_name` below or the changelog lists it.
 # The release-plz-publishes-only-release-prs CI contract pins this key.
 release_always = false
-# release-plz's own default, declared because three mechanisms key on it: the
-# tag gate above, the recovery path in CONTRIBUTING.md#releasing, and the merge
-# queue's exclusion in .mergify.yml.
+# release-plz's own default, declared because four mechanisms key on it: the
+# tag gate above, the recovery path in CONTRIBUTING.md#releasing, the merge
+# queue's exclusion in .mergify.yml, and release-plz.yml's release-merge job.
 pr_branch_prefix = "release-plz-"
 # The squash-merge title is the PR title, and the `^chore\(release\)` skip parser
 # below keeps it out of the changelog it is announcing. Never `{{ package }}`:

@@ -141,9 +141,8 @@ the records are updated — the record is keyed on the filename.
 
 Both jobs authenticate with `RELEASE_PLZ_TOKEN`, a fine-grained PAT scoped to
 this repository with Contents and Pull requests read/write; `release-plz.yml`'s
-header says why it cannot be the automatic token. **The secret has to exist
-before `release-plz.yml` reaches main, not before the first dispatch**: the
-`release` job runs on every push, and the action refuses an empty token.
+header says why it cannot be the automatic token, and the action refuses an
+empty one.
 
 A release PR that release-plz closes and re-opens (it does that when the branch
 carries non-bot commits) leaves a commit you pushed to it — a raised bump —
