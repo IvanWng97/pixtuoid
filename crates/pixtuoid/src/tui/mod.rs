@@ -1162,7 +1162,7 @@ mod capacity_sweep_tests {
 
 #[cfg(test)]
 mod teardown_tests {
-    use super::unwind_terminal_modes;
+    use super::unwind_after;
     use std::cell::Cell;
 
     struct FailingWriter;
@@ -1178,7 +1178,7 @@ mod teardown_tests {
     #[test]
     fn raw_mode_is_disabled_even_when_the_escape_write_fails() {
         let disabled = Cell::new(false);
-        let err = unwind_terminal_modes(&mut FailingWriter, || {
+        let err = unwind_after(&[], &mut FailingWriter, || {
             disabled.set(true);
             Ok(())
         })
@@ -1199,7 +1199,7 @@ mod teardown_tests {
     #[test]
     fn the_unwind_writes_the_leave_sequence_into_the_writer_it_is_given() {
         let mut buf: Vec<u8> = Vec::new();
-        unwind_terminal_modes(&mut buf, || Ok(())).unwrap();
+        unwind_after(&[], &mut buf, || Ok(())).unwrap();
         let s = String::from_utf8(buf).unwrap();
         assert!(
             s.contains(LEAVE_ALT_SCREEN),
@@ -1224,7 +1224,7 @@ mod teardown_tests {
 
         let wrote = Cell::new(false);
         let raw_saw_write = Cell::new(false);
-        unwind_terminal_modes(&mut Recorder(&wrote), || {
+        unwind_after(&[], &mut Recorder(&wrote), || {
             raw_saw_write.set(wrote.get());
             Ok(())
         })
@@ -1235,25 +1235,23 @@ mod teardown_tests {
         );
     }
 
-    /// Through the one unwind every exit takes, the panic hook's included.
     #[cfg(all(unix, feature = "graphics"))]
     #[test]
     fn our_images_go_before_the_alt_screen_that_holds_them() {
-        crate::graphics::kitty::on_screen(false);
+        let prelude = crate::graphics::kitty::unwind_for(65536..=65541, false);
         let mut buf: Vec<u8> = Vec::new();
-        unwind_terminal_modes(&mut buf, || Ok(())).unwrap();
+        unwind_after(&prelude, &mut buf, || Ok(())).unwrap();
         let s = String::from_utf8(buf).unwrap();
-        let delete = s.find("\x1b_Ga=d,").expect("the images are deleted");
+        let leave = s.find(LEAVE_ALT_SCREEN).expect("leaves");
         assert!(
-            s.starts_with("\x1b\\"),
-            "an ST first ends a torn escape: {s:?}"
+            s.as_bytes().starts_with(&prelude) && prelude.len() <= leave,
+            "{s:?}"
         );
-        assert!(delete < s.find(LEAVE_ALT_SCREEN).expect("leaves"), "{s:?}");
     }
 
     #[test]
     fn the_escape_write_error_outranks_a_later_raw_mode_error() {
-        let err = unwind_terminal_modes(&mut FailingWriter, || {
+        let err = unwind_after(&[], &mut FailingWriter, || {
             Err(std::io::Error::other("raw mode gone"))
         })
         .expect_err("both steps failed");

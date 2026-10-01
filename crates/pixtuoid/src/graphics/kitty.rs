@@ -1,7 +1,10 @@
 //! A tile as a kitty image, shown through Unicode placeholders: the image is
 //! then ordinary text in cells, which a host like tmux stores and redraws
 //! (<https://sw.kovidgoyal.net/kitty/graphics-protocol/>, "Unicode placeholders").
+use std::hash::BuildHasher;
+use std::ops::RangeInclusive;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use ratatui::style::Color;
 use ratatui_image::picker::cap_parser::Parser;
@@ -17,6 +20,9 @@ const DIACRITICS: [char; 4] = ['\u{305}', '\u{30D}', '\u{30E}', '\u{310}'];
 /// One past the largest id a placeholder carries without the most-significant
 /// byte's diacritic: the foreground colour's 24 bits.
 const ID_LIMIT: u32 = 1 << 24;
+
+/// The ids one process holds: a grid of more tiles shows only these.
+const SPAN: u32 = 1 << 16;
 
 /// Base64 bytes per escape ("Remote client").
 const CHUNK: usize = 4096;
@@ -34,10 +40,28 @@ pub(crate) struct Placeholder {
     pub(crate) fg: Color,
 }
 
-/// `tile`'s image id, the same every frame so a re-send replaces it in place;
-/// `None` past what a placeholder can carry. 0 is no id.
-pub(crate) fn image_id(tile: Tile) -> Option<u32> {
-    tile.index.checked_add(1).filter(|&id| id < ID_LIMIT)
+/// `tile`'s image id in the block from `base`, the same every frame so a
+/// re-send replaces it in place ("Display images on screen": re-sent data
+/// replaces the id's image); `None` past the block.
+pub(crate) fn image_id(base: u32, tile: Tile) -> Option<u32> {
+    (tile.index < SPAN).then(|| base + tile.index)
+}
+
+/// This process's id block, picked at random: a fixed one would replace and
+/// delete the images of another kitty client in the same window.
+pub(crate) fn process_base() -> u32 {
+    static BASE: OnceLock<u32> = OnceLock::new();
+    *BASE.get_or_init(|| {
+        let seed = (std::process::id(), std::time::SystemTime::now());
+        base_for(std::collections::hash_map::RandomState::new().hash_one(seed))
+    })
+}
+
+/// A whole [`SPAN`] under [`ID_LIMIT`], above the first, where other
+/// clients' small ids live.
+fn base_for(seed: u64) -> u32 {
+    let blocks = u64::from(ID_LIMIT / SPAN - 1);
+    (1 + (seed % blocks) as u32) * SPAN
 }
 
 /// The escapes that (re)transmit `image` as image `id` and make its virtual
@@ -75,34 +99,43 @@ pub(crate) fn transmit(id: u32, image: &TileImage, tmux: bool) -> Vec<u8> {
     out
 }
 
-/// Whether this process has put kitty images on the terminal, and inside
-/// tmux: read by an unwind that may run from the panic hook.
+/// Whether this process has put kitty images on the terminal, inside tmux,
+/// and the highest id among them: read by an unwind that may run from the
+/// panic hook.
 static ON_SCREEN: OnceLock<bool> = OnceLock::new();
+static LAST_SENT: AtomicU32 = AtomicU32::new(0);
 
-/// Record that images are about to reach the terminal, before the first
-/// transmit is written.
-pub(crate) fn on_screen(tmux: bool) {
+/// Record that ids up to `last` are about to reach the terminal, before
+/// their transmits are written.
+pub(crate) fn on_screen(tmux: bool, last: u32) {
     let _ = ON_SCREEN.set(tmux);
+    LAST_SENT.fetch_max(last, Ordering::Relaxed);
 }
 
 /// What the terminal unwind writes first: nothing until [`on_screen`], then
-/// an ST that ends an escape a failed write cut short, and [`delete_all`].
+/// [`unwind_for`] this process's ids.
 pub(crate) fn unwind() -> Vec<u8> {
-    ON_SCREEN
-        .get()
-        .map_or_else(Vec::new, |&tmux| [ST, &delete_all(tmux)].concat())
+    ON_SCREEN.get().map_or_else(Vec::new, |&tmux| {
+        unwind_for(process_base()..=LAST_SENT.load(Ordering::Relaxed), tmux)
+    })
+}
+
+/// An ST that ends an escape a failed write cut short, then [`delete`].
+pub(crate) fn unwind_for(ids: RangeInclusive<u32>, tmux: bool) -> Vec<u8> {
+    [ST, &delete(ids, tmux)].concat()
 }
 
 /// String Terminator: ends any APC or DCS left open.
 pub(crate) const ST: &[u8] = b"\x1b\\";
 
-/// Deletes every image an [`image_id`] can name and frees its data
-/// ("Deleting images": `d=R` is an id range).
-pub(crate) fn delete_all(tmux: bool) -> Vec<u8> {
+/// Deletes the images `ids` names and frees their data ("Deleting images":
+/// `d=R` takes ids from `x` to `y`, both included).
+fn delete(ids: RangeInclusive<u32>, tmux: bool) -> Vec<u8> {
     let (start, esc, end) = Parser::tmux_start_escape_end(tmux);
     format!(
-        "{start}{esc}_Ga=d,d=R,x=1,y={},q=2{esc}\\{end}",
-        ID_LIMIT - 1
+        "{start}{esc}_Ga=d,d=R,x={},y={},q=2{esc}\\{end}",
+        ids.start(),
+        ids.end()
     )
     .into_bytes()
 }
@@ -208,9 +241,7 @@ mod tests {
             row: 2,
             ..tile(41, 2, 2)
         };
-        let id = image_id(at).expect("in range");
-        assert_eq!(id, 42);
-        let cells: Vec<_> = placeholders(id, at)
+        let cells: Vec<_> = placeholders(42, at)
             .expect("a kitty tile")
             .map(|p| (p.col, p.row, p.symbol, p.fg))
             .collect();
@@ -235,11 +266,14 @@ mod tests {
     }
 
     #[test]
-    fn the_delete_frees_every_id_a_placeholder_can_name() {
-        assert_eq!(delete_all(false), b"\x1b_Ga=d,d=R,x=1,y=16777215,q=2\x1b\\");
+    fn the_unwind_deletes_exactly_the_ids_sent() {
         assert_eq!(
-            delete_all(true),
-            b"\x1bPtmux;\x1b\x1b_Ga=d,d=R,x=1,y=16777215,q=2\x1b\x1b\\\x1b\\"
+            unwind_for(65536..=65541, false),
+            b"\x1b\\\x1b_Ga=d,d=R,x=65536,y=65541,q=2\x1b\\"
+        );
+        assert_eq!(
+            delete(65536..=65541, true),
+            b"\x1bPtmux;\x1b\x1b_Ga=d,d=R,x=65536,y=65541,q=2\x1b\x1b\\\x1b\\"
         );
     }
 
@@ -250,10 +284,28 @@ mod tests {
     }
 
     #[test]
-    fn ids_stop_where_the_foreground_colour_does() {
-        assert_eq!(image_id(tile(ID_LIMIT - 2, 1, 1)), Some(ID_LIMIT - 1));
-        assert_eq!(image_id(tile(ID_LIMIT - 1, 1, 1)), None);
-        assert_eq!(image_id(tile(u32::MAX, 1, 1)), None);
+    fn ids_live_in_the_block_from_the_base() {
+        let base = base_for(7);
+        assert_eq!(image_id(base, tile(0, 1, 1)), Some(base));
+        assert_eq!(image_id(base, tile(SPAN - 1, 1, 1)), Some(base + SPAN - 1));
+        assert_eq!(image_id(base, tile(SPAN, 1, 1)), None);
+        assert_eq!(image_id(base, tile(u32::MAX, 1, 1)), None);
+    }
+
+    /// Every seed lands on a whole block between the first and [`ID_LIMIT`],
+    /// so two different bases never share an id.
+    #[test]
+    fn every_base_is_a_block_of_its_own() {
+        let blocks = ID_LIMIT / SPAN - 1;
+        let mut seen = std::collections::BTreeSet::new();
+        for seed in 0..u64::from(2 * blocks) {
+            let base = base_for(seed);
+            assert!(base.is_multiple_of(SPAN), "seed {seed}");
+            assert!(base >= SPAN && base + SPAN <= ID_LIMIT, "seed {seed}");
+            seen.insert(base);
+        }
+        assert_eq!(seen.len(), blocks as usize);
+        assert!(process_base().is_multiple_of(SPAN) && process_base() >= SPAN);
     }
 
     /// An idle office sends the terminal nothing.
@@ -272,7 +324,7 @@ mod tests {
             let bytes = changed
                 .iter()
                 .map(|c| {
-                    let id = image_id(c.tile).expect("id");
+                    let id = image_id(SPAN, c.tile).expect("id");
                     transmit(id, &tiles.image(&buf, c.tile), false).len()
                 })
                 .sum();

@@ -31,6 +31,8 @@ pub(crate) struct KittyCutaway {
     cache: FrameCache,
     cell: CellSize,
     tmux: bool,
+    /// [`kitty::process_base`].
+    base: u32,
     fit: Fit,
     tiles: Tiles,
     out: Sink,
@@ -47,6 +49,7 @@ impl KittyCutaway {
             cache: FrameCache::new(),
             cell,
             tmux,
+            base: kitty::process_base(),
             fit,
             tiles: Tiles::new(ImageProtocol::Kitty, cell, fit),
             out,
@@ -83,7 +86,13 @@ impl KittyCutaway {
         if changed.is_empty() {
             return;
         }
-        kitty::on_screen(self.tmux);
+        if let Some(last) = changed
+            .iter()
+            .filter_map(|c| kitty::image_id(self.base, c.tile))
+            .max()
+        {
+            kitty::on_screen(self.tmux, last);
+        }
         let mut wrote = if self.torn {
             self.out.write_all(kitty::ST)
         } else {
@@ -93,7 +102,7 @@ impl KittyCutaway {
             if wrote.is_err() {
                 break;
             }
-            if let Some(id) = kitty::image_id(c.tile) {
+            if let Some(id) = kitty::image_id(self.base, c.tile) {
                 let image = self.tiles.image(frame.buf, c.tile);
                 wrote = self.out.write_all(&kitty::transmit(id, &image, self.tmux));
             }
@@ -115,7 +124,7 @@ impl KittyCutaway {
         let tiles = self
             .tiles
             .all()
-            .filter_map(|tile| kitty::placeholders(kitty::image_id(tile)?, tile));
+            .filter_map(|tile| kitty::placeholders(kitty::image_id(self.base, tile)?, tile));
         for p in tiles.flatten() {
             let at = Position {
                 x: scene.x.saturating_add(p.col),
