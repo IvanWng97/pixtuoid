@@ -121,8 +121,8 @@ impl Screen {
 ///
 /// The engine cannot draw text — the font lives in the binary — so the profile
 /// reports anchors and lets the painter render. These are the CUTAWAY's anchors:
-/// `overlay::build_overlay` derives its own from the classic projection, so a
-/// badge placed with those would float where the classic painter drew the body.
+/// `overlay::build_overlay`'s hang off the classic-drawn sprite, so a badge
+/// placed with those would float where the classic painter drew the body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CutawayLabel {
     /// Index into [`SimFrame::agents`].
@@ -3635,7 +3635,7 @@ mod tests {
     }
 
     /// The badge follows the CUTAWAY's body, not the classic one:
-    /// `overlay::build_overlay` anchors off the classic projection, which for a
+    /// `overlay::build_overlay` hangs off the classic-drawn sprite, which for a
     /// seated agent is not where the cutaway draws them.
     #[test]
     fn a_label_anchor_sits_above_the_head_and_centred_on_the_sprite() {
