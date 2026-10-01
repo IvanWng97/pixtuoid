@@ -602,27 +602,11 @@ mod tests {
     /// where a badge is no hover target.
     #[test]
     fn hovering_a_sitter_under_a_neighbours_badge_names_the_sitter() {
+        const NEIGHBOUR: &str = "cc\u{b7}neighbour";
         let h = Hovering::new();
         let seated = h.frames.last().expect("a seated frame");
         let a = seated.characters[0];
         let a_id = seated.agents[a.agent_idx].agent_id;
-        let badge_of = |frame: &SimFrame, id: AgentId| {
-            let office = Office {
-                layout: &h.layout,
-                pack: &h.pack,
-                theme: normal(),
-                scale: h.scale,
-            };
-            frame_list(
-                frame,
-                office,
-                crate::cutaway::paint::tests::showing(FloorMeta::ground(), Hovering::now()),
-            )
-            .badges()
-            .find(|&(agent, _)| agent == id)
-            .map(|(_, b)| b.clone())
-            .expect("a badge")
-        };
         let body = h
             .boxes(seated)
             .into_iter()
@@ -633,7 +617,7 @@ mod tests {
             let mut both = seated.clone();
             let mut b = both.agents[a.agent_idx].clone();
             b.agent_id = AgentId::from_transcript_path("/neighbour.jsonl");
-            b.label = "cc\u{b7}neighbour".into();
+            b.label = NEIGHBOUR.into();
             both.agents.push(b.clone());
             both.characters
                 .push(crate::pixel_painter::CharacterPlacement {
@@ -659,10 +643,10 @@ mod tests {
                     office,
                     crate::cutaway::paint::tests::showing(FloorMeta::ground(), Hovering::now()),
                 );
-                let badge = badge_of(&both, b.agent_id);
-                list.pieces()
-                    .iter()
-                    .find(|p| matches!(&p.kind, crate::cutaway::paint::PieceKind::Badge { badge: x, .. } if *x == badge))
+                // Known by its text: the sitter's badge reads otherwise.
+                list.pieces().iter().find(|p| {
+                    matches!(&p.kind, crate::cutaway::paint::PieceKind::Badge { badge } if badge.text == NEIGHBOUR)
+                })
                     .map(|p| p.span)
                     .expect("the neighbour's plate")
             };

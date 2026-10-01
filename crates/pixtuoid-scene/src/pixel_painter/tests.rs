@@ -840,7 +840,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             office,
             crate::cutaway::paint::tests::showing(ground, now0),
         );
-        let anchors: Vec<_> = list.badges().map(|(_, b)| b.at).collect();
+        let anchors: Vec<_> = list.badges().map(|b| b.at).collect();
         (buf.as_slice().to_vec(), anchors)
     };
 

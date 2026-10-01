@@ -461,8 +461,9 @@ mod tests {
     /// AA's 4.5:1 (<https://www.w3.org/TR/WCAG22/#contrast-minimum>) on its
     /// plate; its marker is a graphic, held to 3:1
     /// (<https://www.w3.org/TR/WCAG22/#non-text-contrast>). Over every source's
-    /// label and a bare one, in every tone: the ink every painter reads. #873
-    /// measured an idle badge at 2.05:1 straight on the floor.
+    /// label and a bare one, in every tone. The guarantee holds on the plate,
+    /// which the cutaway paints: the painter #873 measured an idle badge in at
+    /// 2.05:1, straight on the floor.
     #[test]
     fn every_badge_ink_reads_on_its_plate_in_every_theme() {
         use super::{badge_ink, badge_plate};

@@ -457,9 +457,9 @@ impl<'a> DrawList<'a> {
 
     /// Each drawn agent's badge, in draw order.
     #[cfg(test)]
-    pub(crate) fn badges(&self) -> impl Iterator<Item = (pixtuoid_core::AgentId, &Badge)> + '_ {
+    pub(crate) fn badges(&self) -> impl Iterator<Item = &Badge> + '_ {
         self.pieces.iter().filter_map(|p| match &p.kind {
-            PieceKind::Badge { agent, badge } => Some((*agent, badge)),
+            PieceKind::Badge { badge } => Some(badge),
             _ => None,
         })
     }
@@ -1085,11 +1085,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
             chair,
             body: _,
         } => (at, shadow, key, chair).hash(&mut h),
-        // Whose it is paints nothing.
-        PieceKind::Badge {
-            agent: _,
-            ref badge,
-        } => badge.hash(&mut h),
+        PieceKind::Badge { ref badge } => badge.hash(&mut h),
         PieceKind::Board { ref board } => board.hash(&mut h),
         PieceKind::Indicator { door, floor } => (door, floor).hash(&mut h),
         PieceKind::Glass { ref view } => view.hash(&mut h),
@@ -1932,13 +1928,7 @@ fn push_characters(
             text: namesakes.text(agent),
             tone: crate::overlay::tone_of(agent),
         };
-        order.push((
-            over_all(badge.plate(pen), pen),
-            PieceKind::Badge {
-                agent: agent.agent_id,
-                badge,
-            },
-        ));
+        order.push((over_all(badge.plate(pen), pen), PieceKind::Badge { badge }));
     }
     carried
 }
@@ -2169,14 +2159,6 @@ pub(crate) enum PieceKind {
         body: Span,
     },
     Badge {
-        #[cfg_attr(
-            not(test),
-            expect(
-                dead_code,
-                reason = "a badge is no hover target; tests ask whose it is"
-            )
-        )]
-        agent: pixtuoid_core::AgentId,
         badge: Badge,
     },
     /// The wall board's text, over the neon sign's interior.
@@ -6022,8 +6004,14 @@ S B B B B B B S
                     "hover box {body:?} belongs to a piece that paints nothing"
                 );
             }
-            let mut badged: Vec<_> = list.badges().map(|(agent, _)| agent).collect();
-            let mut drawn: Vec<_> = hovers.iter().map(|&(agent, _)| agent).collect();
+            // Each drawn agent's badge, known by its text.
+            let namesakes = crate::overlay::Namesakes::of(&frame.agents);
+            let mut badged: Vec<_> = list.badges().map(|b| b.text.clone()).collect();
+            let mut drawn: Vec<_> = hovers
+                .iter()
+                .filter_map(|&(id, _)| frame.agents.iter().find(|a| a.agent_id == id))
+                .map(|a| namesakes.text(a))
+                .collect();
             badged.sort();
             drawn.sort();
             assert_eq!(badged, drawn);
