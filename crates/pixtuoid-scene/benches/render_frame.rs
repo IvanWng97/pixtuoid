@@ -275,7 +275,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
             scale.to_buffer(h),
             theme.surface.bg_fallback,
         );
-        let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
+        let mut cache = pixtuoid_scene::cutaway::paint::CutawayCache::default();
         let mut i = 0;
         group.bench_function(&name, |b| {
             b.iter(|| {
@@ -290,7 +290,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
         // The same frames through the canvas, which paints only those that
         // change what the office shows.
         let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
-        let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
+        let mut cache = pixtuoid_scene::cutaway::paint::CutawayCache::default();
         let mut i = 0;
         group.bench_function(format!("{name}_canvas"), |b| {
             b.iter(|| {
