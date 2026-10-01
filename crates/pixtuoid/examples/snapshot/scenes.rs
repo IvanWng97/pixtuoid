@@ -352,14 +352,9 @@ pub(crate) fn meeting_scene(
         waypoint_index_for_cycle,
     };
 
-    // Match the renderer's layout EXACTLY (terminal minus 1-row footer,
-    // half-block doubling), `None` being the same desk fill `draw_scene` passes
-    // — otherwise the waypoint indices shift and the staging silently misses.
-    let (buf_w, buf_h) = (
-        cols,
-        rows.saturating_sub(pixtuoid::tui::renderer::FOOTER_ROWS)
-            .saturating_mul(2),
-    );
+    // The renderer's own buffer and `None` desk fill: any other layout shifts the
+    // waypoint indices and the staging silently misses.
+    let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
     let l = SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed)
         .ok_or_else(|| anyhow::anyhow!("--meeting: scene too small to compute a layout"))?;
     let nw = l.waypoints.len();
@@ -654,14 +649,9 @@ pub(crate) fn anim_scene(
         is_aimless_cycle, seated_dwell_ms, takes_trip, waypoint_index_for_cycle,
     };
 
-    // Match the renderer EXACTLY: scene_rect = terminal minus the 1-row footer,
-    // buf_h = scene_rect.height*2 (half-block). A 2px mismatch shifts the
-    // waypoint set and the agent targets the wrong furniture.
-    let (buf_w, buf_h) = (
-        cols,
-        rows.saturating_sub(pixtuoid::tui::renderer::FOOTER_ROWS)
-            .saturating_mul(2),
-    );
+    // The renderer's own buffer: a 2px mismatch shifts the waypoint set and the
+    // agent targets the wrong furniture.
+    let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
     let l = SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed)
         .expect("anim layout computes");
     let n = l.waypoints.len();
@@ -821,13 +811,8 @@ mod tests {
         let (scene, warmup_ms) = meeting_scene(now, 3, cols, rows, 0, max_desks, 12).unwrap();
         assert_eq!(scene.agents.len(), 12, "staged 3 + 9 archetype fillers");
 
-        let layout = SceneLayout::compute_with_seed(
-            cols,
-            (rows - pixtuoid::tui::renderer::FOOTER_ROWS) * 2,
-            Some(max_desks),
-            0,
-        )
-        .unwrap();
+        let (buf_w, buf_h) = pixtuoid::tui::renderer::scene_buf_size(cols, rows);
+        let layout = SceneLayout::compute_with_seed(buf_w, buf_h, Some(max_desks), 0).unwrap();
         let staged: Vec<_> = scene
             .agents
             .values()

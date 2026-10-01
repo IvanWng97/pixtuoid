@@ -60,8 +60,8 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
       <p class="eyebrow">{floor.fl} · {floorName(floor)} — the resident CLIs</p>
       <h2 class="statement statement--md">Whichever CLI<br />they run.</h2>
       <p class="lead">
-        Each coding agent shows up as a coworker. Support is per-tool <em>and</em> per-OS — the same matrix
-        as the Sources panel inside the app. New CLIs land via one
+        Each coding agent shows up as a coworker. Support is per-tool <em>and</em> per-OS — the same
+        matrix as the Sources panel inside the app. New CLIs land via one
         <a href={asset('contributing')}>Source adapter</a>.
       </p>
     </div>
@@ -69,7 +69,9 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
     <div class="tools__lobby">
       <div class="tools__matrix tools__board hw-panel reveal">
         <table>
-          <caption class="sr-only">Supported coding agents by operating system</caption>
+          <caption class="sr-only">
+            Supported coding agents by operating system
+          </caption>
           <thead>
             <tr>
               <th scope="col">Tool</th>
@@ -78,78 +80,56 @@ const legendStates = (['yes', 'experimental', 'planned', 'no'] as OsState[]).fil
             </tr>
           </thead>
           <tbody>
-            {
-              supported.map((s) => (
-                <tr>
-                  <th scope="row">
-                    {s.badge && (
-                      <span
-                        class="tools__badge"
-                        style={s.badge_color ? `--badge:${s.badge_color}` : undefined}
-                        aria-hidden="true"
-                      >
-                        {s.badge}
-                      </span>
-                    )}
-                    <a href={s.url} target="_blank" rel="noreferrer">
-                      {s.name}
-                    </a>
-                  </th>
-                  {OSES.map((o) => (
-                    <td class="tools__cell" data-state={s.platforms[o.key]}>
-                      <span class="sr-only">{stateLabel(s.platforms[o.key])}</span>
-                      <Fragment set:html={MARK(s.platforms[o.key])} />
-                    </td>
-                  ))}
-                  <td class="tools__how">{s.transport}</td>
-                </tr>
-              ))
-            }
+            {supported.map((s) => <tr>
+              <th scope="row">
+                {s.badge && <span
+                  class="tools__badge"
+                  style={s.badge_color ? `--badge:${s.badge_color}` : undefined}
+                  aria-hidden="true"
+                >
+                  {s.badge}
+                </span>}
+                <a href={s.url} target="_blank" rel="noreferrer">
+                  {s.name}
+                </a>
+              </th>
+              {OSES.map((o) => <td class="tools__cell" data-state={s.platforms[o.key]}>
+                <span class="sr-only">{stateLabel(s.platforms[o.key])}</span>
+                <Fragment set:html={MARK(s.platforms[o.key])} />
+              </td>)}
+              <td class="tools__how">{s.transport}</td>
+            </tr>)}
           </tbody>
-          {
-            planned.length > 0 && (
-              <tbody class="tools__planned">
-                <tr class="tools__group">
-                  <td colspan={OSES.length + 2}>Planned</td>
-                </tr>
-                {planned.map((s) => (
-                  <tr>
-                    <th scope="row">
-                      <a href={s.url} target="_blank" rel="noreferrer">
-                        {s.name}
-                      </a>
-                    </th>
-                    {OSES.map(() => (
-                      <td class="tools__cell" data-state="planned">
-                        <span class="sr-only">planned</span>
-                        <Fragment set:html={MARK('planned')} />
-                      </td>
-                    ))}
-                    <td class="tools__how">{s.transport}</td>
-                  </tr>
-                ))}
-              </tbody>
-            )
-          }
+          {planned.length > 0 && <tbody class="tools__planned">
+            <tr class="tools__group">
+              <td colspan={OSES.length + 2}>Planned</td>
+            </tr>
+            {planned.map((s) => <tr>
+              <th scope="row">
+                <a href={s.url} target="_blank" rel="noreferrer">
+                  {s.name}
+                </a>
+              </th>
+              {OSES.map(() => <td class="tools__cell" data-state="planned">
+                <span class="sr-only">planned</span>
+                <Fragment set:html={MARK('planned')} />
+              </td>)}
+              <td class="tools__how">{s.transport}</td>
+            </tr>)}
+          </tbody>}
         </table>
         <p class="tools__legend">
-          {
-            legendStates.map((s) => (
-              <span class="tools__legend-item">
-                <Fragment set:html={MARK(s)} /> {LEGEND_LABEL[s]}
-              </span>
-            ))
-          }
+          {legendStates.map((s) => <span class="tools__legend-item">
+            <Fragment set:html={MARK(s)} /> {LEGEND_LABEL[s]}
+          </span>)}
         </p>
       </div>
       <aside class="tools__plaque hw-panel reveal" aria-label="GitHub stars">
         <p class="tools__plaque-stars">
           {starText(stars)}<span class="sr-only">GitHub stars</span>
         </p>
-        {
-          /* the engraving: the same sourced claim showcase.json already ships
-             on the AGENTS channel caption — one sentence, two mounts */
-        }
+        {/* the engraving: the same sourced claim showcase.json already ships
+             on the AGENTS channel caption — one sentence, two mounts */}
         <p class="tools__plaque-engraving">
           fleets of 100+ agents have run this repo through this very office.
         </p>

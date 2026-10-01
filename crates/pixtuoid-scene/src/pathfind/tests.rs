@@ -32,7 +32,7 @@ fn simplify_collapses_collinear() {
         Point { x: 12, y: 0 },
         Point { x: 12, y: 4 },
     ];
-    let s = simplify_polyline(pts);
+    let s = simplify_polyline(&WalkableMask::new_open(64, 64), pts);
     assert_eq!(s.len(), 3);
 }
 
@@ -46,7 +46,10 @@ fn simplify_collapses_diagonal_collinear() {
         Point { x: 3, y: 3 },
         Point { x: 5, y: 5 },
     ];
-    assert_eq!(simplify_polyline(pts).len(), 2);
+    assert_eq!(
+        simplify_polyline(&WalkableMask::new_open(64, 64), pts).len(),
+        2
+    );
 }
 
 #[test]
@@ -56,7 +59,10 @@ fn simplify_keeps_genuine_corner() {
         Point { x: 2, y: 0 },
         Point { x: 2, y: 2 },
     ];
-    assert_eq!(simplify_polyline(pts).len(), 3);
+    assert_eq!(
+        simplify_polyline(&WalkableMask::new_open(64, 64), pts).len(),
+        3
+    );
 }
 
 #[test]
@@ -864,5 +870,34 @@ fn snap_lands_on_an_open_pixel_when_the_cell_centre_itself_is_blocked() {
         mask.is_walkable(snapped.x, snapped.y),
         "snap must return a point that passes the predicate its name promises: \
          {snapped:?}"
+    );
+}
+
+#[test]
+fn a_route_turns_on_the_open_pixel_nearest_a_blocked_centre() {
+    let mut mask = pixtuoid_core::walkable::WalkableMask::new_open(64, 64);
+    let cell = (4u16, 4u16);
+    let centre = cell_center(cell.0, cell.1);
+    // The cell's south half: still walkable to the coarse grid, centre inside.
+    mask.mark_blocked(centre.x - 2, centre.y, 4, 2, 0);
+    assert!(cell_walkable(
+        &mask,
+        &OccupancyOverlay::new(),
+        cell.0,
+        cell.1
+    ));
+    assert_eq!(
+        cell_anchor(&mask, cell.0, cell.1),
+        Point {
+            x: centre.x,
+            y: centre.y - 1
+        },
+        "one step north of the centre is the nearest open pixel"
+    );
+    mask.mark_walkable(centre.x, centre.y, 1, 1);
+    assert_eq!(
+        cell_anchor(&mask, cell.0, cell.1),
+        centre,
+        "an open centre is kept"
     );
 }

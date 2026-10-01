@@ -409,10 +409,16 @@ fn a_standing_fixture_casts_its_shadow_under_its_whole_box() {
     assert!(desks > 0, "the sweep saw a desk");
 }
 
-/// The sizes the north-wall census rendered, each at a few seeds.
+/// The sizes the north-wall census rendered, the narrowest sweep walls and
+/// the committed heroes' buffers (`scripts/media.json`), each at a few seeds.
 fn north_wall_census() -> impl Iterator<Item = SceneLayout> {
     [
-        (96u16, 60u16),
+        (
+            super::super::compute::MIN_LAYOUT_W,
+            super::super::compute::MIN_LAYOUT_H,
+        ),
+        (super::super::compute::MIN_LAYOUT_W, 80),
+        (96, 60),
         (120, 72),
         (140, 80),
         (160, 96),
@@ -420,6 +426,9 @@ fn north_wall_census() -> impl Iterator<Item = SceneLayout> {
         (240, 135),
         (320, 180),
         (160, 192),
+        (176, 99),
+        (208, 176),
+        (231, 130),
     ]
     .into_iter()
     .flat_map(|(w, h)| {
@@ -451,7 +460,10 @@ fn the_door_is_centred_in_the_last_window_slot() {
         let roster = l.fixtures().find(|f| f.kind == FixtureKind::Door);
         assert_eq!(roster.map(|f| f.visual), Some(door), "{at}");
         let slots: Vec<_> = super::super::window_slots(l.buf_w).collect();
-        let slot = *slots.last().expect("a door stands in a slot");
+        let Some(&slot) = slots.last() else {
+            assert_eq!(door.x, super::super::door_x(l.buf_w), "{at}");
+            continue;
+        };
         assert!(
             slot.x < door.x && door.x + door.width < slot.span().end,
             "{at}"
@@ -501,7 +513,7 @@ fn the_exit_sign_hangs_centred_over_the_door_indicator_below_the_window_head() {
 }
 
 #[test]
-fn a_notice_board_hangs_within_one_pane_or_under_the_neon() {
+fn a_notice_board_hangs_within_one_pane_or_west_of_the_windows() {
     let mut met = 0;
     for l in north_wall_census().chain(offices()) {
         for f in l.fixtures() {
@@ -510,11 +522,11 @@ fn a_notice_board_hangs_within_one_pane_or_under_the_neon() {
             };
             met += 1;
             let b = f.visual;
-            let neon = NEON_PANEL.x..NEON_PANEL.x + NEON_PANEL.width;
+            let plain = NEON_PANEL.x..super::super::window_run(l.buf_w).start;
             assert!(
                 l.window_bays()
                     .flat_map(|bay| bay.panes())
-                    .chain([neon])
+                    .chain([plain])
                     .any(|p| p.start <= b.x && b.x + b.width <= p.end),
                 "{}x{}: {b:?} straddles a frame",
                 l.buf_w,
@@ -560,10 +572,16 @@ fn the_clock_hangs_centred_on_a_window_post() {
 }
 
 #[test]
-fn the_clock_covers_no_window() {
+fn a_clock_covering_no_window_hangs_wherever_two_windows_fit() {
     let mut met = 0;
     for l in north_wall_census() {
         let Some(clock) = l.fixtures().find(|f| f.kind == FixtureKind::Clock) else {
+            assert!(
+                l.buf_w < super::super::TWO_WINDOW_WALL_W,
+                "{}x{}: no clock",
+                l.buf_w,
+                l.buf_h
+            );
             continue;
         };
         met += 1;
@@ -582,7 +600,9 @@ fn the_clock_covers_no_window() {
 #[test]
 fn the_neon_sign_hangs_a_post_west_of_the_first_window() {
     for l in north_wall_census() {
-        let first = super::super::window_slots(l.buf_w).next().expect("a slot");
+        let Some(first) = super::super::window_slots(l.buf_w).next() else {
+            continue;
+        };
         let gap = first.x - (NEON_PANEL.x + NEON_PANEL.width);
         let clock = l.fixtures().find(|f| f.kind == FixtureKind::Clock);
         let holds_clock = |p: &std::ops::Range<u16>| {
@@ -629,4 +649,51 @@ fn no_two_north_wall_fixtures_overlap() {
             }
         }
     }
+}
+
+#[test]
+fn no_meeting_furniture_or_plant_blocks_a_doorway() {
+    use super::super::rooms::walls::WALL_H;
+    let mut met = 0;
+    for l in offices().chain(north_wall_census()) {
+        for d in &l.doorways {
+            met += 1;
+            // The cut ends are the jambs' own cells, so the opening lies between.
+            let opening = if d.start.y == d.end.y {
+                Bounds {
+                    x: d.start.x + 1,
+                    y: d.start.y - WALL_H.cap,
+                    width: d.end.x - d.start.x - 1,
+                    height: WALL_H.cap + WALL_H.thickness,
+                }
+            } else {
+                Bounds {
+                    x: d.start.x,
+                    y: d.start.y + 1,
+                    width: super::super::WALL_THICK_V,
+                    height: d.end.y - d.start.y - 1,
+                }
+            };
+            for f in l.fixtures().filter(|f| {
+                matches!(
+                    f.kind,
+                    FixtureKind::MeetingRug { .. }
+                        | FixtureKind::MeetingSofa { .. }
+                        | FixtureKind::MeetingTable { .. }
+                        | FixtureKind::MeetingChair { .. }
+                        | FixtureKind::Plant { .. }
+                )
+            }) {
+                assert!(
+                    !overlaps(f.visual, opening),
+                    "{}x{}: {:?} {:?} in the doorway {opening:?}",
+                    l.buf_w,
+                    l.buf_h,
+                    f.kind,
+                    f.visual
+                );
+            }
+        }
+    }
+    assert!(met > 0, "the sweep met a doorway");
 }

@@ -26,24 +26,18 @@ import { asset } from '../consts';
       />
     </figure>
     <ol class="pantry__chat" data-pantry-chat>
-      {
-        faq.map((f, i) => (
-          <li class="pantry__turn">
-            <p class="pantry__bubble pantry__bubble--q" style={`--turn:${i * 2}`}>
-              {f.q}
-            </p>
-            <p class="pantry__bubble pantry__bubble--a" style={`--turn:${i * 2 + 1}`}>
-              {f.a}
-            </p>
-            {/* same --turn as the answer above, so the citation pops WITH it: an
+      {faq.map((f, i) => <li class="pantry__turn">
+        <p class="pantry__bubble pantry__bubble--q" style={`--turn:${i * 2}`}>
+          {f.q}
+        </p>
+        <p class="pantry__bubble pantry__bubble--a" style={`--turn:${i * 2 + 1}`}>
+          {f.a}
+        </p>
+        {/* same --turn as the answer above, so the citation pops WITH it: an
               unset var() in calc() computes to 0s, so an un-turned cite would
               appear from frame one */}
-            <p class="pantry__cite" style={`--turn:${i * 2 + 1}`}>
-              — {f.cite}
-            </p>
-          </li>
-        ))
-      }
+        <p class="pantry__cite" style={`--turn:${i * 2 + 1}`}>— {f.cite}</p>
+      </li>)}
     </ol>
   </div>
 </div>

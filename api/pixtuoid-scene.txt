@@ -98,6 +98,7 @@ impl core::marker::Unpin for pixtuoid_scene::embedded_pack::PackSource
 impl core::marker::UnsafeUnpin for pixtuoid_scene::embedded_pack::PackSource
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::embedded_pack::PackSource
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::embedded_pack::PackSource
+pub fn pixtuoid_scene::embedded_pack::load_bundled_pack() -> anyhow::Result<pixtuoid_core::sprite::format::Pack, pixtuoid_core::sprite::error::PackError>
 pub fn pixtuoid_scene::embedded_pack::load_sprite_pack(pixtuoid_scene::embedded_pack::PackSource) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
 pub fn pixtuoid_scene::embedded_pack::validate_pack(&pixtuoid_core::sprite::format::Pack) -> pixtuoid_core::sprite::format::ValidationReport
 pub mod pixtuoid_scene::floor

@@ -26,42 +26,32 @@ import tabs from '../install.json';
 
     <div class="install__box reveal">
       <div class="install__tabs" role="group" aria-label="Install method">
-        {
-          tabs.map((t, i) => (
-            <button
-              class:list={['install__tab', { 'is-active': i === 0 }]}
-              data-tab={t.id}
-              aria-pressed={i === 0 ? 'true' : 'false'}
-              aria-controls={`install-panel-${t.id}`}
-            >
-              {t.label}
-            </button>
-          ))
-        }
+        {tabs.map((t, i) => <button
+          class:list={['install__tab', { 'is-active': i === 0 }]}
+          data-tab={t.id}
+          aria-pressed={i === 0 ? 'true' : 'false'}
+          aria-controls={`install-panel-${t.id}`}
+        >
+          {t.label}
+        </button>)}
       </div>
 
-      {
-        tabs.map((t, i) => (
-          <div
-            id={`install-panel-${t.id}`}
-            class:list={['install__panel', { 'is-active': i === 0 }]}
-            data-panel={t.id}
-          >
-            <Code code={t.cmds.join('\n')} lang="bash" theme="vesper" />
-            {/* no aria-label: the visible "Copy" text IS the accessible name, so
+      {tabs.map((t, i) => <div
+        id={`install-panel-${t.id}`}
+        class:list={['install__panel', { 'is-active': i === 0 }]}
+        data-panel={t.id}
+      >
+        <Code code={t.cmds.join('\n')} lang="bash" theme="vesper" />
+        {/* no aria-label: the visible "Copy" text IS the accessible name, so
               the textContent swap stays exposed. A name change alone isn't
               announced, hence the role=status sibling — WCAG 4.1.3. */}
-            <button class="install__copy" data-copy={t.cmds.join('\n')}>
-              Copy
-            </button>
-            <span class="sr-only" role="status" data-copy-status />
-          </div>
-        ))
-      }
+        <button class="install__copy" data-copy={t.cmds.join('\n')}>Copy</button>
+        <span class="sr-only" role="status" data-copy-status />
+      </div>)}
 
       <p class="install__note text-scrim">
-        Also on <a href={CRATES} target="_blank" rel="noreferrer">crates.io</a> · prebuilt binaries on
-        <a href={`${REPO}/releases`} target="_blank" rel="noreferrer">Releases</a>.
+        Also on <a href={CRATES} target="_blank" rel="noreferrer">crates.io</a> · prebuilt binaries
+        on <a href={`${REPO}/releases`} target="_blank" rel="noreferrer">Releases</a>.
       </p>
     </div>
   </div>

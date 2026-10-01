@@ -94,6 +94,69 @@ pub struct DrawCtx<'a> {
     pub onboarding: &'a crate::tui::welcome::OnboardingFrame,
 }
 
+impl<'a> DrawCtx<'a> {
+    /// An offscreen still of one floor, every input and overlay off; the office-wide
+    /// tallies and gateway come from `scene`, as the live renderer's do. The live `TuiRenderer`
+    /// keeps its exhaustive literal, so a new field is a compile error there, not a silent default.
+    #[doc(hidden)]
+    pub fn offscreen(
+        floor: &'a mut pixtuoid_scene::floor::PerFloor,
+        chitchat_state: &'a mut std::collections::HashMap<
+            pixtuoid_scene::chitchat::VenueKey,
+            pixtuoid_scene::chitchat::ActiveChitchat,
+        >,
+        theme: &'a pixtuoid_scene::theme::Theme,
+        scene: &'a SceneState,
+        pack: &'a pixtuoid_core::sprite::format::Pack,
+        now: SystemTime,
+        meta: pixtuoid_scene::floor::FloorMeta,
+    ) -> Self {
+        use std::sync::LazyLock;
+        static NO_COFFEE: LazyLock<
+            std::collections::HashMap<pixtuoid_core::AgentId, std::time::SystemTime>,
+        > = LazyLock::new(Default::default);
+        static CLOSED_DASHBOARD: LazyLock<crate::tui::dashboard::DashboardFrame> =
+            LazyLock::new(Default::default);
+        static CLOSED_CONNECTION: LazyLock<crate::tui::connection::ConnectionFrame> =
+            LazyLock::new(Default::default);
+        static CLOSED_ONBOARDING: LazyLock<crate::tui::welcome::OnboardingFrame> =
+            LazyLock::new(Default::default);
+        Self {
+            world: FloorInputs {
+                scene,
+                pack,
+                now,
+                floor: meta,
+                pets: Default::default(),
+            },
+            buf: &mut floor.buf,
+            store: &mut floor.ctx,
+            mouse_pos: None,
+            debug_walkable: false,
+            theme,
+            theme_picker: None,
+            floor_info: None,
+            per_floor: crate::tui::widgets::per_floor_counts(scene),
+            gateway: crate::tui::widgets::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
+            audio_audible: false,
+            volume_flash: None,
+            last_pet_pos: None,
+            last_mascots: Vec::new(),
+            chitchat_state,
+            chitchat_bubbles: Vec::new(),
+            coffee: &NO_COFFEE,
+            new_coffee_carriers: Vec::new(),
+            occupied_waypoints: Default::default(),
+            popup_scale: 0.0,
+            help_open: false,
+            source_warning: None,
+            dashboard: &CLOSED_DASHBOARD,
+            connection: &CLOSED_CONNECTION,
+            onboarding: &CLOSED_ONBOARDING,
+        }
+    }
+}
+
 /// Clip a widget rect to fit inside `bounds`; `None` when nothing survives.
 /// Prevents ratatui's "index outside of buffer" panic when label/notice widgets
 /// land near the right or bottom edge.
@@ -124,12 +187,8 @@ pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
 pub(crate) const MIN_SCENE_WIDTH: u16 = 20;
 pub(crate) const MIN_SCENE_HEIGHT: u16 = 12;
 
-/// How many rows at the bottom of the terminal the status footer owns — THE
-/// authority for that count. `pub` so `examples/snapshot`, which mirrors the
-/// renderer's buffer arithmetic to build the committed media, reads it too — public
-/// for MECHANISM, not contract, hence `doc(hidden)`.
-#[doc(hidden)]
-pub const FOOTER_ROWS: u16 = 1;
+/// How many rows at the bottom of the terminal the status footer owns.
+pub(crate) const FOOTER_ROWS: u16 = 1;
 
 pub(crate) fn scene_rect(full: Rect) -> Rect {
     Rect {
@@ -138,6 +197,13 @@ pub(crate) fn scene_rect(full: Rect) -> Rect {
         width: full.width,
         height: full.height.saturating_sub(FOOTER_ROWS),
     }
+}
+
+/// The pixel buffer a `cols`×`rows` terminal's scene paints, two half-block pixels a row.
+#[doc(hidden)]
+pub fn scene_buf_size(cols: u16, rows: u16) -> (u16, u16) {
+    let scene = scene_rect(Rect::new(0, 0, cols, rows));
+    (scene.width, scene.height.saturating_mul(2))
 }
 
 pub(crate) struct OverlayFrame<'a> {
@@ -314,8 +380,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         return Ok(None);
     }
 
-    let buf_w = scene_rect.width;
-    let buf_h = scene_rect.height.saturating_mul(2);
+    let (buf_w, buf_h) = scene_buf_size(full_rect.width, full_rect.height);
     ctx.buf.resize_fill(buf_w, buf_h, theme.surface.bg_fallback);
     let Some(layout) = ctx.store.frame_layout(buf_w, buf_h, world.floor.floor_seed) else {
         draw_footer_only_frame(term, scene, &footer_stats, theme, &overlays, now)?;
@@ -536,6 +601,37 @@ fn topmost_mascot_at(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_offscreen_still_shows_its_scenes_gateway() {
+        let t0 = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let mut scene = SceneState::uniform(16);
+        scene.insert_daemon(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty"),
+            pixtuoid_core::state::DaemonPresence {
+                liveness: pixtuoid_core::state::DaemonLiveness::UP,
+                active_sessions: 0,
+                last_seen: t0,
+                entered_at: t0,
+                in_flight_runs: Default::default(),
+                current_pid: Some(1),
+            },
+        );
+        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("pack");
+        let mut floor = pixtuoid_scene::floor::PerFloor::new();
+        let mut chitchat = std::collections::HashMap::new();
+        let ctx = DrawCtx::offscreen(
+            &mut floor,
+            &mut chitchat,
+            &pixtuoid_scene::theme::NORMAL,
+            &scene,
+            &pack,
+            t0,
+            pixtuoid_scene::floor::FloorMeta::ground(),
+        );
+        assert!(ctx.gateway.is_some());
+    }
 
     #[test]
     fn hovering_overlapping_mascots_names_the_one_painted_on_top() {

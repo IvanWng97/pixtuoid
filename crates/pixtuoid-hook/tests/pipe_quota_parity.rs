@@ -5,7 +5,7 @@
 //!
 //! The daemon's source can't be `#[path]`-included here — windows.rs needs
 //! tokio/windows-sys and the shim must stay dependency-free — so this pins the
-//! three DEFINITION LINES textually instead. Deliberately fail-loud on a
+//! DEFINITION LINES textually instead. Deliberately fail-loud on a
 //! rename/move too: a drift guard that silently stops guarding is worse than
 //! one that asks to be re-pointed.
 //!
@@ -14,6 +14,7 @@
 
 const SHIM_MAIN: &str = include_str!("../src/main.rs");
 const DAEMON_WINDOWS: &str = include_str!("../../pixtuoid-core/src/source/hook/windows.rs");
+const DAEMON_HOOK: &str = include_str!("../../pixtuoid-core/src/source/hook/mod.rs");
 
 #[test]
 fn shim_stdin_cap_and_daemon_pipe_quota_stay_in_lockstep() {
@@ -33,4 +34,22 @@ fn shim_stdin_cap_and_daemon_pipe_quota_stay_in_lockstep() {
         "daemon IN_BUFFER_SIZE definition changed/moved — re-check the shim's \
          STDIN_CAP + STAMP_HEADROOM still equals it, then update this pin"
     );
+    assert_eq!(
+        const_product(DAEMON_HOOK, "const MAX_CONN_BYTES: u64 = "),
+        2 << 20,
+        "daemon MAX_CONN_BYTES must stay twice STDIN_CAP + STAMP_HEADROOM"
+    );
+}
+
+/// The value of a `<prefix> a * b * …;` definition line whose factors are
+/// integer literals.
+fn const_product(src: &str, prefix: &str) -> u64 {
+    let line = src
+        .lines()
+        .find_map(|l| l.trim().strip_prefix(prefix))
+        .unwrap_or_else(|| panic!("`{prefix}` definition changed/moved — re-point this pin"));
+    line.trim_end_matches(';')
+        .split('*')
+        .map(|f| f.trim().parse::<u64>().expect("an integer-literal factor"))
+        .product()
 }
