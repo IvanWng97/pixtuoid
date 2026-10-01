@@ -2818,7 +2818,7 @@ fn scanline(
     let cols = crate::layout::SCREEN_GLASS_COLS;
     let band = ((x1 - x0 + 1) / (cols.end() - cols.start() + 1)).max(1);
     let line = (x0 + scan * band)..(x0 + (scan + 1) * band);
-    let color = crate::pixel_painter::effects::scanline_color(glow);
+    let color = crate::effects::look::scanline_color(glow);
     let pixels = (0..h)
         .flat_map(|y| (0..w).map(move |x| (x, y)))
         .map(|(x, y)| {
@@ -3747,7 +3747,7 @@ pub(crate) mod tests {
             g: 180,
             b: 220,
         };
-        let line = crate::pixel_painter::effects::scanline_color(glow);
+        let line = crate::effects::look::scanline_color(glow);
         let cols = crate::layout::SCREEN_GLASS_COLS;
         let n = cols.end() - cols.start() + 1;
         for s in [1, pack.max_density_variant().get()] {
@@ -5257,14 +5257,9 @@ pub(crate) mod tests {
             let dense = crate::embedded_pack::densest_frame(&pack, "walking", 0, scale)
                 .expect("the walk's art");
             let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/style/{i}.jsonl"));
-            let style = crate::pixel_painter::hair::dress_for(
-                &pack,
-                id,
-                dense.frame,
-                dense.head,
-                dense.density,
-            )
-            .and_then(|d| d.style);
+            let style =
+                crate::character::dress_for(&pack, id, dense.frame, dense.head, dense.density)
+                    .and_then(|d| d.style);
             let Some(style) = style.filter(|s| !worn.contains(s)) else {
                 continue;
             };
@@ -5452,8 +5447,7 @@ S B B B B B B S
             last = Some(s);
         }
         let (dust, span) = rider(K::WalkingDust);
-        let foot =
-            crate::pixel_painter::effects::walking_dust_foot(dust.effect.at, dust.effect.phase);
+        let foot = crate::effects::look::walking_dust_foot(dust.effect.at, dust.effect.phase);
         assert!(
             (span.x0..=span.x1).contains(&foot.x) && (span.y0..=span.y1).contains(&foot.y),
             "the dust {span:?} is off the foot {foot:?}"

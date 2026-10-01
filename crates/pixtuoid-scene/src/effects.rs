@@ -7,6 +7,8 @@ use std::time::SystemTime;
 use crate::anim::epoch_ms;
 use crate::layout::Point;
 
+pub(crate) mod look;
+
 /// What an effect is, for the painter choosing its look. Each says what its
 /// [`Effect::phase`] counts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

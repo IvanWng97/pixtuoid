@@ -1,7 +1,7 @@
 use super::background::paint_corridor_runner;
 use super::drawable::paint_character_at;
-use super::palette::agent_overrides;
 use super::*;
+use crate::character::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, agent_overrides, tool_glow_tint};
 use crate::embedded_pack::{desk_art_top, frame_at};
 use crate::floor::{FloorInputs, PetInputs};
 use crate::layout::CHARACTER_SPRITE_W;
@@ -569,8 +569,8 @@ fn looks(
         Some(head) => pack
             .hairstyles()
             .map(|s| {
-                let dress = super::hair::Dress::of(&bare, head, Some(s), line.is_some());
-                super::hair::dress(&bare, &dress, Some(s), overrides, line)
+                let dress = crate::character::Dress::of(&bare, head, Some(s), line.is_some());
+                crate::character::dress(&bare, &dress, Some(s), overrides, line)
             })
             .collect(),
     }
@@ -609,12 +609,7 @@ fn the_embedded_pack_draws_every_key_an_agent_recolors() {
         let Some(standing) = pack.animation(&name) else {
             continue;
         };
-        for key in [
-            palette::SHIRT_KEY,
-            palette::HAIR_KEY,
-            palette::SKIN_KEY,
-            palette::PANTS_KEY,
-        ] {
+        for key in [SHIRT_KEY, HAIR_KEY, SKIN_KEY, PANTS_KEY] {
             assert!(
                 recolors(&pack, standing, 0, key),
                 "no {name} pixel is drawn in {key:?}"
@@ -657,7 +652,7 @@ fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
             };
             variants += usize::from(density.is_some());
             for i in 0..anim.frames().len() {
-                for key in [palette::HAIR_KEY, palette::SHIRT_KEY] {
+                for key in [HAIR_KEY, SHIRT_KEY] {
                     assert!(
                         recolors(&pack, anim, i, key),
                         "{name} frame {i} draws nothing the {key:?} recolor reaches"
@@ -674,7 +669,6 @@ fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
 /// dense shirt is the classic profile's shirt colour.
 #[test]
 fn character_frame_takes_a_density_variant_recolored_like_the_base() {
-    use super::palette::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY};
     let one = format!("@frame 0\n{SHIRT_KEY}");
     let two = format!("@frame 0\n{SHIRT_KEY} {SHIRT_KEY}\n{SHIRT_KEY} {SHIRT_KEY}");
     let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
@@ -745,7 +739,6 @@ fn character_frame_takes_a_density_variant_recolored_like_the_base() {
 /// blitted at the scale, and one drawn differently renders differently.
 #[test]
 fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
-    use super::palette::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY};
     use crate::layout::{CHARACTER_SPRITE_H, CHARACTER_SPRITE_W};
     use crate::render_scale::RenderScale;
     const DENSITY: u16 = 2;
@@ -1204,10 +1197,10 @@ fn agent_overrides_glow_tint_shifts_skin_toward_given_color() {
         }),
         normal,
     );
-    for key in [palette::SHIRT_KEY, palette::HAIR_KEY, palette::PANTS_KEY] {
+    for key in [SHIRT_KEY, HAIR_KEY, PANTS_KEY] {
         assert_eq!(override_of(&unlit, key), override_of(&green_glow, key));
     }
-    let skin = |o: &[(char, Pixel)]| override_of(o, palette::SKIN_KEY).expect("opaque skin");
+    let skin = |o: &[(char, Pixel)]| override_of(o, SKIN_KEY).expect("opaque skin");
     let (ug, gg) = (skin(&unlit).g, skin(&green_glow).g);
     assert!(
         gg > ug,
@@ -1236,7 +1229,7 @@ fn a_desk_screen_glows_only_for_a_seated_tool_user_facing_north() {
     );
     let idle = make_slot(id, ActivityState::Idle);
     let theme = &crate::theme::NORMAL;
-    let tool = palette::tool_glow_tint(&editing, &theme.tool_glow);
+    let tool = tool_glow_tint(&editing, &theme.tool_glow);
     assert!(tool.is_some(), "the fixture's occupant is using a tool");
     let glow = |occupant, facing, seated| {
         crate::lighting::desk_screen_glow(occupant, facing, seated, theme)
@@ -1277,9 +1270,9 @@ fn tool_glow_tint_maps_known_tools() {
     );
     let idle_slot = make_slot(id, ActivityState::Idle);
     let glow = &crate::theme::NORMAL.tool_glow;
-    let edit_tint = palette::tool_glow_tint(&edit_slot, glow);
-    let bash_tint = palette::tool_glow_tint(&bash_slot, glow);
-    let idle_tint = palette::tool_glow_tint(&idle_slot, glow);
+    let edit_tint = tool_glow_tint(&edit_slot, glow);
+    let bash_tint = tool_glow_tint(&bash_slot, glow);
+    let idle_tint = tool_glow_tint(&idle_slot, glow);
     assert!(edit_tint.is_some(), "Edit should produce glow");
     assert!(bash_tint.is_some(), "Bash should produce glow");
     assert_eq!(idle_tint, None, "Idle should produce no glow");
@@ -2419,7 +2412,7 @@ fn kind_derivation_reproduces_the_string_parse_tint_for_representative_displays(
     ];
     for (detail, expected) in table {
         assert_eq!(
-            palette::tool_glow_tint(&active(detail.as_ref()), glow),
+            tool_glow_tint(&active(detail.as_ref()), glow),
             Some(*expected),
             "display {:?} must keep its pre-ToolKind tint",
             detail.as_ref().map(ToolDetail::display),
@@ -2429,7 +2422,7 @@ fn kind_derivation_reproduces_the_string_parse_tint_for_representative_displays(
     // impossible from production decoders, which type every dispatch as
     // ToolDetail::Task upstream.
     assert_eq!(
-        palette::tool_glow_tint(&active(Some(&generic("Delegating imposter"))), glow),
+        tool_glow_tint(&active(Some(&generic("Delegating imposter"))), glow),
         Some(glow.default)
     );
 }
@@ -2446,9 +2439,9 @@ fn tool_glow_tint_is_none_unless_active() {
             kind: ToolKind::Edit,
         },
     );
-    assert_eq!(palette::tool_glow_tint(&edit, glow), Some(glow.edit));
+    assert_eq!(tool_glow_tint(&edit, glow), Some(glow.edit));
     assert_eq!(
-        palette::tool_glow_tint(&make_slot(id, ActivityState::Idle), glow),
+        tool_glow_tint(&make_slot(id, ActivityState::Idle), glow),
         None
     );
 }
@@ -2594,8 +2587,8 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
     let has = |buf: &RgbBuffer, c: Rgb| {
         (0..buf.height()).any(|y| (0..buf.width()).any(|x| buf.get(x, y) == c))
     };
-    const EMBER: Rgb = super::effects::FLAME_DEEP;
-    const TIP: Rgb = super::effects::FLAME_TIP;
+    const EMBER: Rgb = crate::effects::look::FLAME_DEEP;
+    const TIP: Rgb = crate::effects::look::FLAME_TIP;
 
     let plain = render(&slot);
     assert!(
@@ -2981,24 +2974,18 @@ fn agent_overrides_outfit_is_keyed_by_cwd_not_id() {
     let a = make_slot_cwd("/demo/api/aaaa.jsonl", "/demo/api", false);
     let b = make_slot_cwd("/demo/api/bbbb.jsonl", "/demo/api", false);
     assert_eq!(
-        color_of(&a, palette::SHIRT_KEY),
-        color_of(&b, palette::SHIRT_KEY),
+        color_of(&a, SHIRT_KEY),
+        color_of(&b, SHIRT_KEY),
         "same cwd should share shirt"
     );
     assert_eq!(
-        color_of(&a, palette::PANTS_KEY),
-        color_of(&b, palette::PANTS_KEY),
+        color_of(&a, PANTS_KEY),
+        color_of(&b, PANTS_KEY),
         "same cwd should share pants"
     );
     assert_ne!(
-        (
-            color_of(&a, palette::HAIR_KEY),
-            color_of(&a, palette::SKIN_KEY)
-        ),
-        (
-            color_of(&b, palette::HAIR_KEY),
-            color_of(&b, palette::SKIN_KEY)
-        ),
+        (color_of(&a, HAIR_KEY), color_of(&a, SKIN_KEY)),
+        (color_of(&b, HAIR_KEY), color_of(&b, SKIN_KEY)),
         "different agents in the same repo must differ in hair/skin"
     );
 }
@@ -3007,18 +2994,12 @@ fn agent_overrides_outfit_is_keyed_by_cwd_not_id() {
 fn agent_overrides_unknown_cwd_falls_back_to_id_outfit() {
     let unknown = make_slot_cwd("/x/aaaa.jsonl", "/whatever", true);
     let empty = make_slot_cwd("/x/aaaa.jsonl", "", false);
-    assert_eq!(
-        color_of(&unknown, palette::SHIRT_KEY),
-        color_of(&empty, palette::SHIRT_KEY)
-    );
-    assert_eq!(
-        color_of(&unknown, palette::PANTS_KEY),
-        color_of(&empty, palette::PANTS_KEY)
-    );
+    assert_eq!(color_of(&unknown, SHIRT_KEY), color_of(&empty, SHIRT_KEY));
+    assert_eq!(color_of(&unknown, PANTS_KEY), color_of(&empty, PANTS_KEY));
     let other = make_slot_cwd("/x/zzzz.jsonl", "", false);
     assert_ne!(
-        color_of(&other, palette::SHIRT_KEY),
-        color_of(&empty, palette::SHIRT_KEY),
+        color_of(&other, SHIRT_KEY),
+        color_of(&empty, SHIRT_KEY),
         "cwd-less agents keep distinct per-id outfits"
     );
 }
@@ -3031,7 +3012,7 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     // or the assertion has no teeth.
     let healed = (0..64)
         .map(|i| make_slot_cwd("/p/heal.jsonl", &format!("/repo/team{i}"), false))
-        .find(|h| color_of(h, palette::SHIRT_KEY) != color_of(&unknown, palette::SHIRT_KEY))
+        .find(|h| color_of(h, SHIRT_KEY) != color_of(&unknown, SHIRT_KEY))
         .expect("some cwd lands on a different outfit than the fallback");
 
     let anchor = Point { x: 2, y: 2 };
@@ -3102,18 +3083,12 @@ fn agent_overrides_same_id_different_cwd_changes_outfit() {
     let a = make_slot_cwd("/p/aaaa.jsonl", "/demo/api", false);
     let b = make_slot_cwd("/p/aaaa.jsonl", "/demo/infra", false);
     assert_ne!(
-        color_of(&a, palette::SHIRT_KEY),
-        color_of(&b, palette::SHIRT_KEY),
+        color_of(&a, SHIRT_KEY),
+        color_of(&b, SHIRT_KEY),
         "different cwds should pick different outfits"
     );
-    assert_eq!(
-        color_of(&a, palette::HAIR_KEY),
-        color_of(&b, palette::HAIR_KEY)
-    );
-    assert_eq!(
-        color_of(&a, palette::SKIN_KEY),
-        color_of(&b, palette::SKIN_KEY)
-    );
+    assert_eq!(color_of(&a, HAIR_KEY), color_of(&b, HAIR_KEY));
+    assert_eq!(color_of(&a, SKIN_KEY), color_of(&b, SKIN_KEY));
 }
 
 struct OwnedSimStores {
@@ -6065,10 +6040,7 @@ fn a_pose_is_its_placements_frame_facing_and_glow() {
         (pose.anim_name, pose.frame_idx, pose.flip_x),
         ("typing", 3, true)
     );
-    assert_eq!(
-        pose.glow_tint,
-        palette::tool_glow_tint(&typing, &theme.tool_glow)
-    );
+    assert_eq!(pose.glow_tint, tool_glow_tint(&typing, &theme.tool_glow));
     let thinking =
         crate::character::SpritePose::of(&placement(CharacterGlow::Thinking), &typing, theme);
     assert_eq!(thinking.glow_tint, Some(theme.tool_glow.default));
