@@ -5674,10 +5674,10 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
 /// A corridor appliance's art overhangs north of its aisle (invariant #6), but
 /// never onto a desk, its chair or its sitter. Art can only overlap a
 /// workstation it shares a row with, and the height alone fixes every row
-/// (asserted at every width, at seed 0 and the far corner's seed). So a
-/// tall-aisle height whose rows never meet is checked once per width; every
-/// other tall height sweeps all widths × seeds. The census sizes are always
-/// swept in full.
+/// (asserted at every width at seed 0, plus seeds 1 and 2 at one width each).
+/// So a tall-aisle height whose rows never meet is checked once per width;
+/// every other tall height sweeps all widths × seeds. The census sizes are
+/// always swept in full.
 #[test]
 fn corridor_appliance_art_never_lands_on_a_workstation() {
     use crate::layout::{Bounds, CHARACTER_SPRITE_H, CHARACTER_SPRITE_W, FixtureKind, Station};
@@ -5687,6 +5687,7 @@ fn corridor_appliance_art_never_lands_on_a_workstation() {
     const SEEDS: std::ops::Range<u64> = 0..3;
     const NARROWEST: u16 = 96;
     const WIDEST: u16 = 320;
+    const MID_WIDTH: u16 = 208;
     let rows_meet = |a: Bounds, b: Bounds| a.y < b.y + b.height && b.y < a.y + a.height;
     let overlaps =
         |a: Bounds, b: Bounds| rows_meet(a, b) && a.x < b.x + b.width && b.x < a.x + a.width;
@@ -5795,16 +5796,17 @@ fn corridor_appliance_art_never_lands_on_a_workstation() {
         if apart {
             assert_eq!(probe_rows, far_rows, "{h}: rows are the height's alone");
         }
-        let seeds = if apart {
-            SEEDS.start..SEEDS.start + 1
-        } else {
-            SEEDS
-        };
+        let sampled =
+            |w, seed| !apart || seed == SEEDS.start || (w, seed) == (MID_WIDTH, SEEDS.start + 1);
         for w in (NARROWEST..=WIDEST).step_by(8) {
-            for seed in seeds.clone().filter(|&seed| !corners.contains(&(w, seed))) {
+            for seed in SEEDS.filter(|&seed| !corners.contains(&(w, seed)) && sampled(w, seed)) {
                 let l = lay_out(w, h, seed);
                 if apart {
-                    assert_eq!(rows(&l), probe_rows, "{w}x{h}: rows are the height's alone");
+                    assert_eq!(
+                        rows(&l),
+                        probe_rows,
+                        "{w}x{h} seed {seed}: rows are the height's alone"
+                    );
                 }
                 check(&l, w, h, seed);
             }
