@@ -5,7 +5,7 @@
 use pixtuoid_core::sprite::RgbBuffer;
 
 use crate::atmosphere::Moment;
-use crate::layout::Layout;
+use crate::layout::SceneLayout;
 use crate::lighting::{Emitter, EmitterKind};
 use crate::motes::{DustMote, dust_mote_positions, window_spill_columns};
 use crate::pixel_painter::PaintCtx;
@@ -37,7 +37,7 @@ pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[E
 pub(super) fn paint_dust_motes(
     buf: &mut RgbBuffer,
     theme: &Theme,
-    layout: &Layout,
+    layout: &SceneLayout,
     floor_seed: u64,
     moment: &Moment,
 ) {
@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn dust_motes_clamp_to_a_tiny_buffer() {
         let theme = &crate::theme::NORMAL;
-        let layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
+        let layout = crate::layout::SceneLayout::compute(192, 80, Some(4)).expect("layout fits");
         // 07:00 Clear morning → sun up + full beam.
         let now = (1..=60u32)
             .map(|day| crate::localclock::on_day(day, 7))

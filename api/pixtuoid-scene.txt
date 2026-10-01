@@ -77,29 +77,6 @@ pub const pixtuoid_scene::chitchat::CHITCHAT_TOTAL_MS: u64
 pub fn pixtuoid_scene::chitchat::supports_chitchat(pixtuoid_scene::layout::WaypointKind) -> bool
 pub fn pixtuoid_scene::chitchat::update_and_collect(&mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, usize, &[pixtuoid_scene::chitchat::Visitor], std::time::SystemTime) -> alloc::vec::Vec<pixtuoid_scene::chitchat::ChitchatBubble>
 pub fn pixtuoid_scene::chitchat::venue_wp_idx(pixtuoid_scene::layout::WaypointKind, usize, &[pixtuoid_scene::layout::Waypoint]) -> usize
-pub mod pixtuoid_scene::embedded_pack
-pub enum pixtuoid_scene::embedded_pack::PackSource
-pub pixtuoid_scene::embedded_pack::PackSource::Bundled
-pub pixtuoid_scene::embedded_pack::PackSource::Discovered(std::path::PathBuf)
-pub pixtuoid_scene::embedded_pack::PackSource::Explicit(std::path::PathBuf)
-impl core::clone::Clone for pixtuoid_scene::embedded_pack::PackSource
-pub fn pixtuoid_scene::embedded_pack::PackSource::clone(&self) -> pixtuoid_scene::embedded_pack::PackSource
-impl core::cmp::Eq for pixtuoid_scene::embedded_pack::PackSource
-impl core::cmp::PartialEq for pixtuoid_scene::embedded_pack::PackSource
-pub fn pixtuoid_scene::embedded_pack::PackSource::eq(&self, &pixtuoid_scene::embedded_pack::PackSource) -> bool
-impl core::fmt::Debug for pixtuoid_scene::embedded_pack::PackSource
-pub fn pixtuoid_scene::embedded_pack::PackSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for pixtuoid_scene::embedded_pack::PackSource
-impl core::marker::Freeze for pixtuoid_scene::embedded_pack::PackSource
-impl core::marker::Send for pixtuoid_scene::embedded_pack::PackSource
-impl core::marker::Sync for pixtuoid_scene::embedded_pack::PackSource
-impl core::marker::Unpin for pixtuoid_scene::embedded_pack::PackSource
-impl core::marker::UnsafeUnpin for pixtuoid_scene::embedded_pack::PackSource
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::embedded_pack::PackSource
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::embedded_pack::PackSource
-pub fn pixtuoid_scene::embedded_pack::load_bundled_pack() -> anyhow::Result<pixtuoid_core::sprite::format::Pack, pixtuoid_core::sprite::error::PackError>
-pub fn pixtuoid_scene::embedded_pack::load_sprite_pack(pixtuoid_scene::embedded_pack::PackSource) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
-pub fn pixtuoid_scene::embedded_pack::validate_pack(&pixtuoid_core::sprite::format::Pack) -> pixtuoid_core::sprite::format::ValidationReport
 pub mod pixtuoid_scene::floor
 pub use pixtuoid_scene::floor::MAX_FLOORS
 pub struct pixtuoid_scene::floor::AudioObserver
@@ -146,7 +123,7 @@ pub pixtuoid_scene::floor::FloorCtx::router: pixtuoid_scene::pathfind::AStarRout
 pub pixtuoid_scene::floor::FloorCtx::vacancy_dim: pixtuoid_scene::floor::VacancyDim
 impl pixtuoid_scene::floor::FloorCtx
 pub fn pixtuoid_scene::floor::FloorCtx::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
-pub fn pixtuoid_scene::floor::FloorCtx::frame_layout(&mut self, u16, u16, u64) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::Layout>>
+pub fn pixtuoid_scene::floor::FloorCtx::frame_layout(&mut self, u16, u16, u64) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>>
 pub fn pixtuoid_scene::floor::FloorCtx::new() -> Self
 pub fn pixtuoid_scene::floor::FloorCtx::recompute_door_anim_max_ms(&mut self, std::time::SystemTime)
 impl core::default::Default for pixtuoid_scene::floor::FloorCtx
@@ -160,7 +137,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::FloorCtx
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::FloorCtx
 pub struct pixtuoid_scene::floor::FloorFrame
 pub pixtuoid_scene::floor::FloorFrame::agents: alloc::vec::Vec<pixtuoid_scene::pixel_painter::AgentFrame>
-pub pixtuoid_scene::floor::FloorFrame::layout: alloc::sync::Arc<pixtuoid_scene::layout::Layout>
+pub pixtuoid_scene::floor::FloorFrame::layout: alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>
 pub pixtuoid_scene::floor::FloorFrame::occupied_waypoints: std::collections::hash::set::HashSet<usize>
 impl core::marker::Freeze for pixtuoid_scene::floor::FloorFrame
 impl core::marker::Send for pixtuoid_scene::floor::FloorFrame
@@ -216,7 +193,7 @@ pub fn pixtuoid_scene::floor::FloorSession::buf(&self) -> &pixtuoid_core::sprite
 pub fn pixtuoid_scene::floor::FloorSession::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::FloorSession::new() -> Self
 pub fn pixtuoid_scene::floor::FloorSession::overlay(&self, &pixtuoid_core::state::SceneState, core::option::Option<pixtuoid_core::id::AgentId>) -> alloc::vec::Vec<crate::overlay::LabelElement>
-pub fn pixtuoid_scene::floor::FloorSession::render(&mut self, pixtuoid_scene::floor::FrameInputs<'_>) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::Layout>>
+pub fn pixtuoid_scene::floor::FloorSession::render(&mut self, pixtuoid_scene::floor::FrameInputs<'_>) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>>
 pub fn pixtuoid_scene::floor::FloorSession::reset_frame_cache(&mut self)
 pub fn pixtuoid_scene::floor::FloorSession::step(&mut self, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::SteppedFloor>
 impl core::default::Default for pixtuoid_scene::floor::FloorSession
@@ -314,7 +291,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::Projecte
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::ProjectedSlot
 pub struct pixtuoid_scene::floor::SteppedFloor
 pub pixtuoid_scene::floor::SteppedFloor::frame: pixtuoid_scene::sim::SimFrame
-pub pixtuoid_scene::floor::SteppedFloor::layout: alloc::sync::Arc<pixtuoid_scene::layout::Layout>
+pub pixtuoid_scene::floor::SteppedFloor::layout: alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>
 impl core::marker::Freeze for pixtuoid_scene::floor::SteppedFloor
 impl core::marker::Send for pixtuoid_scene::floor::SteppedFloor
 impl core::marker::Sync for pixtuoid_scene::floor::SteppedFloor
@@ -349,7 +326,7 @@ pub fn pixtuoid_scene::floor::project_floor_scene(&pixtuoid_core::state::SceneSt
 pub fn pixtuoid_scene::floor::render_floor(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_core::sprite::RgbBuffer, &mut pixtuoid_scene::floor::CoffeeState, &mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, pixtuoid_scene::floor::FrameInputs<'_>) -> core::option::Option<pixtuoid_scene::floor::FloorFrame>
 pub fn pixtuoid_scene::floor::step_floor(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_scene::floor::CoffeeState, &mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::SteppedFloor>
 pub fn pixtuoid_scene::floor::track_for(std::time::SystemTime, pixtuoid_scene::pixel_painter::WeatherPolicy) -> crate::audio::TrackId
-pub fn pixtuoid_scene::floor::waypoint_kind_of(core::option::Option<&pixtuoid_scene::layout::Layout>, usize) -> core::option::Option<pixtuoid_scene::layout::WaypointKind>
+pub fn pixtuoid_scene::floor::waypoint_kind_of(core::option::Option<&pixtuoid_scene::layout::SceneLayout>, usize) -> core::option::Option<pixtuoid_scene::layout::WaypointKind>
 pub mod pixtuoid_scene::layout
 pub enum pixtuoid_scene::layout::Anchor
 pub pixtuoid_scene::layout::Anchor::Center
@@ -1111,7 +1088,6 @@ pub const fn pixtuoid_scene::layout::furniture_def(pixtuoid_scene::layout::Furni
 pub fn pixtuoid_scene::layout::min_layout_size() -> pixtuoid_scene::layout::Size
 pub fn pixtuoid_scene::layout::seated_foot_cell(pixtuoid_scene::layout::Furniture, pixtuoid_scene::layout::Point) -> core::option::Option<pixtuoid_scene::layout::Point>
 pub fn pixtuoid_scene::layout::z_sort_row(pixtuoid_scene::layout::Anchor, pixtuoid_scene::layout::Point, u16) -> u16
-pub type pixtuoid_scene::layout::Layout = pixtuoid_scene::layout::SceneLayout
 pub mod pixtuoid_scene::motion
 pub enum pixtuoid_scene::motion::WanderKind
 pub pixtuoid_scene::motion::WanderKind::Aimless
@@ -1263,8 +1239,31 @@ impl core::marker::Unpin for pixtuoid_scene::motion::WanderTarget
 impl core::marker::UnsafeUnpin for pixtuoid_scene::motion::WanderTarget
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::motion::WanderTarget
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::motion::WanderTarget
-pub fn pixtuoid_scene::motion::advance_wander(&pixtuoid_core::state::AgentSlot, std::time::SystemTime, &pixtuoid_scene::layout::Layout, &mut dyn pixtuoid_scene::pathfind::Router, &pixtuoid_core::walkable::OccupancyOverlay, &mut std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, pixtuoid_scene::motion::MotionState>) -> pixtuoid_scene::motion::WanderFrame
+pub fn pixtuoid_scene::motion::advance_wander(&pixtuoid_core::state::AgentSlot, std::time::SystemTime, &pixtuoid_scene::layout::SceneLayout, &mut dyn pixtuoid_scene::pathfind::Router, &pixtuoid_core::walkable::OccupancyOverlay, &mut std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, pixtuoid_scene::motion::MotionState>) -> pixtuoid_scene::motion::WanderFrame
 pub fn pixtuoid_scene::motion::octile_path_len(&[pixtuoid_scene::layout::Point]) -> u32
+pub mod pixtuoid_scene::pack
+pub enum pixtuoid_scene::pack::PackSource
+pub pixtuoid_scene::pack::PackSource::Bundled
+pub pixtuoid_scene::pack::PackSource::Discovered(std::path::PathBuf)
+pub pixtuoid_scene::pack::PackSource::Explicit(std::path::PathBuf)
+impl core::clone::Clone for pixtuoid_scene::pack::PackSource
+pub fn pixtuoid_scene::pack::PackSource::clone(&self) -> pixtuoid_scene::pack::PackSource
+impl core::cmp::Eq for pixtuoid_scene::pack::PackSource
+impl core::cmp::PartialEq for pixtuoid_scene::pack::PackSource
+pub fn pixtuoid_scene::pack::PackSource::eq(&self, &pixtuoid_scene::pack::PackSource) -> bool
+impl core::fmt::Debug for pixtuoid_scene::pack::PackSource
+pub fn pixtuoid_scene::pack::PackSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_scene::pack::PackSource
+impl core::marker::Freeze for pixtuoid_scene::pack::PackSource
+impl core::marker::Send for pixtuoid_scene::pack::PackSource
+impl core::marker::Sync for pixtuoid_scene::pack::PackSource
+impl core::marker::Unpin for pixtuoid_scene::pack::PackSource
+impl core::marker::UnsafeUnpin for pixtuoid_scene::pack::PackSource
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pack::PackSource
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pack::PackSource
+pub fn pixtuoid_scene::pack::load_bundled_pack() -> anyhow::Result<pixtuoid_core::sprite::format::Pack, pixtuoid_core::sprite::error::PackError>
+pub fn pixtuoid_scene::pack::load_sprite_pack(pixtuoid_scene::pack::PackSource) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
+pub fn pixtuoid_scene::pack::validate_pack(&pixtuoid_core::sprite::format::Pack) -> pixtuoid_core::sprite::format::ValidationReport
 pub mod pixtuoid_scene::pathfind
 pub struct pixtuoid_scene::pathfind::AStarRouter
 impl pixtuoid_scene::pathfind::AStarRouter
@@ -1537,7 +1536,7 @@ pub pixtuoid_scene::pixel_painter::PixelCtx::buf: &'a mut pixtuoid_core::sprite:
 pub pixtuoid_scene::pixel_painter::PixelCtx::chitchat_state: &'a mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>
 pub pixtuoid_scene::pixel_painter::PixelCtx::coffee: &'a std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, std::time::SystemTime>
 pub pixtuoid_scene::pixel_painter::PixelCtx::debug_walkable: bool
-pub pixtuoid_scene::pixel_painter::PixelCtx::layout: &'a pixtuoid_scene::layout::Layout
+pub pixtuoid_scene::pixel_painter::PixelCtx::layout: &'a pixtuoid_scene::layout::SceneLayout
 pub pixtuoid_scene::pixel_painter::PixelCtx::store: &'a mut pixtuoid_scene::floor::FloorCtx
 pub pixtuoid_scene::pixel_painter::PixelCtx::theme: &'a pixtuoid_scene::theme::Theme
 pub pixtuoid_scene::pixel_painter::PixelCtx::world: pixtuoid_scene::floor::FloorInputs<'a>
@@ -1664,7 +1663,7 @@ pub const pixtuoid_scene::pose::WANDER_WALK_EST_MS: u64
 pub fn pixtuoid_scene::pose::aimless_wander_seed(pixtuoid_core::id::AgentId, u64) -> u64
 pub fn pixtuoid_scene::pose::derive(&pixtuoid_core::state::AgentSlot, std::time::SystemTime, &pixtuoid_scene::layout::SceneLayout) -> core::option::Option<pixtuoid_scene::pose::Pose>
 pub fn pixtuoid_scene::pose::derive_state_only(&pixtuoid_core::state::AgentSlot, std::time::SystemTime, &pixtuoid_scene::layout::SceneLayout) -> core::option::Option<pixtuoid_scene::pose::Pose>
-pub fn pixtuoid_scene::pose::derive_with_routing(&pixtuoid_core::state::AgentSlot, std::time::SystemTime, &pixtuoid_scene::layout::Layout, &mut pixtuoid_scene::pose::RouteCtx<'_>) -> core::option::Option<pixtuoid_scene::pose::Pose>
+pub fn pixtuoid_scene::pose::derive_with_routing(&pixtuoid_core::state::AgentSlot, std::time::SystemTime, &pixtuoid_scene::layout::SceneLayout, &mut pixtuoid_scene::pose::RouteCtx<'_>) -> core::option::Option<pixtuoid_scene::pose::Pose>
 pub fn pixtuoid_scene::pose::dwell_ms(pixtuoid_scene::layout::WaypointKind, pixtuoid_core::id::AgentId) -> u64
 pub fn pixtuoid_scene::pose::est_wander_cycle_ms(pixtuoid_core::id::AgentId) -> u64
 pub fn pixtuoid_scene::pose::is_aimless_cycle(pixtuoid_core::id::AgentId, u64) -> bool

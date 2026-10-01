@@ -3,7 +3,7 @@ use pixtuoid_scene::layout::Point;
 
 #[test]
 fn offscreen_floor_freezes_and_resyncs_on_return() {
-    let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack");
+    let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack");
     let theme = pixtuoid_scene::theme::ALL_THEMES[0];
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
@@ -479,7 +479,7 @@ fn theme_picker_renders_during_floor_transition() {
 /// on floor 0, so a board built from it would drop the `⬢gw` chip upstairs.
 #[test]
 fn the_wall_board_upstairs_shows_the_breadcrumb_and_the_office_gateway() {
-    let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack");
+    let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack");
     let theme = pixtuoid_scene::theme::ALL_THEMES[0];
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let cap = 16;

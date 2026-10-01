@@ -8,7 +8,7 @@ use pixtuoid_core::AgentId;
 use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
-use crate::layout::{Layout, Point, WaypointKind};
+use crate::layout::{Point, SceneLayout, WaypointKind};
 use crate::pathfind::Router;
 use crate::pose::{
     SpotClaims, WANDER_DWELL_EST_MS, dwell_ms, est_wander_cycle_ms, seated_dwell_ms,
@@ -217,7 +217,7 @@ impl MotionState {
 pub fn advance_wander(
     slot: &AgentSlot,
     now: SystemTime,
-    layout: &Layout,
+    layout: &SceneLayout,
     router: &mut dyn Router,
     overlay: &OccupancyOverlay,
     motion: &mut HashMap<AgentId, MotionState>,
@@ -421,7 +421,7 @@ fn advance_phase_clock(ms: &mut MotionState, walk_total: u64, now: SystemTime) {
 fn pick_wander_dest(
     id: AgentId,
     cycle_n: u64,
-    layout: &Layout,
+    layout: &SceneLayout,
     origin: Point,
     claimed: &SpotClaims,
 ) -> WanderTarget {
@@ -525,7 +525,7 @@ pub(crate) fn snapshot_leg_profile(
 fn snapshot_back_profile(
     slot: &AgentSlot,
     ms: &MotionState,
-    layout: &Layout,
+    layout: &SceneLayout,
     router: &mut dyn Router,
     overlay: &OccupancyOverlay,
 ) -> WalkProfile {
