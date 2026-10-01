@@ -10,7 +10,7 @@ use pixtuoid_core::AgentSlot;
 use super::epoch_ms;
 use super::seat::Seat;
 use crate::layout::{Point, WaypointKind};
-pub(crate) use crate::motion::walking_position;
+pub(crate) use crate::physics::walking_position;
 use crate::pose::{self, Pose};
 
 /// The ONE cross-crate sprite-width authority, re-exported so `pixel_painter`
