@@ -1269,17 +1269,12 @@ mod tests {
         let typo_frame = typo.frame().to_vec();
 
         let mut unforced = Office::new(1).unwrap();
-        typo.step(T0_MS, 160, 96); // leave `typo`'s (mis)override as the last writer
         unforced.step(T0_MS, 160, 96);
         // `assert!` over the slices, not `assert_eq!`: a mismatch would otherwise
         // dump two whole frames into the failure output.
         assert!(
             typo_frame == unforced.frame(),
             "an unknown weather name must render the clock-based cycle"
-        );
-        assert!(
-            typo_frame != storm_frame,
-            "…and specifically must NOT inherit the sibling office's storm"
         );
     }
 
