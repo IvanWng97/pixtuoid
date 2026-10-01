@@ -569,10 +569,6 @@ const OVERLAP_DEFECTS: &[(&str, &str)] = &[
     // The lounge crowds a short floor's desks.
     ("Desk", "FloorLamp"),
     ("Desk", "LoungeRug"),
-    // The pantry uprights' fixed offsets meet the counter and the mat.
-    ("Station", "TrashBin"),
-    ("Station", "WaterCooler"),
-    ("PantryMat", "WaterCooler"),
 ];
 
 /// Two fixtures' art overlaps only as a listed pair, and each listed pair still

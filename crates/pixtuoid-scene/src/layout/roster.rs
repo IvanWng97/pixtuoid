@@ -820,28 +820,35 @@ impl SceneLayout {
             .doorways
             .iter()
             .find(|d| d.start.y == d.end.y && d.start.y == p.bounds.y)?;
-        let mat = centred(
+        let mut mat = centred(
             Point {
                 x: (dw.start.x + dw.end.x) / 2,
                 y: dw.start.y + super::WALL_THICK_H + 1 + ENTRY_MAT.h / 2,
             },
             ENTRY_MAT,
         );
+        let apart = |a: Bounds, b: Bounds| {
+            a.x + a.width <= b.x
+                || b.x + b.width <= a.x
+                || a.y + a.height <= b.y
+                || b.y + b.height <= a.y
+        };
+        // Shifted west off the cooler standing against the east wall.
+        if let Some(cooler) = p.water_cooler_rect().filter(|&c| !apart(c, mat)) {
+            mat.x = cooler
+                .x
+                .checked_sub(mat.width)
+                .filter(|&x| x >= p.bounds.x)?;
+        }
         // Gives way to the island, the counter or the runner over it: half
         // hidden, it reads as a stain.
         let island = p
             .kitchen_island
             .map(|at| centred(at, furniture_def(Furniture::KitchenIsland).visual));
-        let clear = |b: Bounds| {
-            b.x + b.width <= mat.x
-                || mat.x + mat.width <= b.x
-                || b.y + b.height <= mat.y
-                || mat.y + mat.height <= b.y
-        };
         [island, self.pantry_counter(), self.corridor]
             .into_iter()
             .flatten()
-            .all(clear)
+            .all(|b| apart(b, mat))
             .then_some(mat)
     }
 
