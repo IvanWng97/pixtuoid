@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use pixtuoid_scene::embedded_pack::PackSource;
+use pixtuoid_scene::pack::PackSource;
 
 /// One `[[pets]]` stanza. `kind` is an OPTIONAL raw `String` (NOT a serde-derived
 /// `PetKind`) on purpose: an unknown or typo'd value is warn-skipped in

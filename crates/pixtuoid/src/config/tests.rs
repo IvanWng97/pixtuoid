@@ -513,7 +513,7 @@ fn save_preserves_max_desks() {
 
 #[test]
 fn a_named_pack_outranks_the_users_own_which_outranks_the_bundled_one() {
-    use pixtuoid_scene::embedded_pack::PackSource;
+    use pixtuoid_scene::pack::PackSource;
     let base = tempfile::TempDir::new().expect("tempdir");
     let sprites = base.path().join("pixtuoid").join("sprites");
     std::fs::create_dir_all(&sprites).expect("mkdir sprites");
@@ -554,10 +554,7 @@ fn resolve_pack_source_finds_the_users_pack_under_xdg_config_home() {
     let found = temp_env::with_var("XDG_CONFIG_HOME", Some(base.path()), || {
         resolve_pack_source(&AppConfig::default(), None)
     });
-    assert_eq!(
-        found,
-        pixtuoid_scene::embedded_pack::PackSource::Discovered(sprites)
-    );
+    assert_eq!(found, pixtuoid_scene::pack::PackSource::Discovered(sprites));
 }
 
 #[test]

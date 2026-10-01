@@ -591,10 +591,9 @@ fn hash(n: u32) -> u32 {
 mod tests {
     use super::*;
     use crate::anim::{Beat, Motion};
-    use std::time::SystemTime;
 
     fn pack() -> Pack {
-        crate::embedded_pack::test_default_pack()
+        crate::pack::test_default_pack()
     }
 
     /// Where each stand stands, for comparing two cities.
@@ -739,12 +738,12 @@ mod tests {
     fn a_denser_strip_draws_the_denser_art_on_the_same_city() {
         let pack = pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let sky = crate::sky::Sky::clock(SystemTime::UNIX_EPOCH);
+        let sky = crate::sky::Sky::clock(std::time::UNIX_EPOCH);
         let strip = |d| {
             CityStrip::draw(
                 &pack,
                 (60, 20),
-                &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(SystemTime::UNIX_EPOCH)),
+                &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(std::time::UNIX_EPOCH)),
                 theme,
                 Density::new(d).expect("nonzero"),
             )
@@ -894,7 +893,7 @@ mod tests {
         let near = PlaneColours::of(
             Plane::Near,
             &SkyTones::resolve(
-                &crate::sky::Sky::at_with(SystemTime::UNIX_EPOCH, crate::sky::Weather::Clear),
+                &crate::sky::Sky::at_with(std::time::UNIX_EPOCH, crate::sky::Weather::Clear),
                 theme,
             ),
             theme,

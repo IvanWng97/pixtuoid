@@ -18,7 +18,7 @@ use crate::chitchat::{ActiveChitchat, ChitchatBubble};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
-use crate::layout::{Anchor, Depth, Facing, FixtureKind, Layout, Point, Station, z_sort_row};
+use crate::layout::{Depth, Facing, FixtureKind, Pivot, Point, SceneLayout, Station, z_sort_row};
 use crate::motion::MotionState;
 use crate::pet::PetFrame;
 
@@ -191,7 +191,7 @@ pub struct PixelCtx<'a> {
     /// The floor this pass renders.
     pub world: crate::floor::FloorInputs<'a>,
     /// The computed office geometry for this frame.
-    pub layout: &'a Layout,
+    pub layout: &'a SceneLayout,
     /// The active color theme.
     pub theme: &'a crate::theme::Theme,
     /// Carrier → fetch-time view of [`crate::floor::CoffeeState`]: key present
@@ -211,7 +211,7 @@ pub struct PixelCtx<'a> {
 /// the world.
 struct PaintCtx<'a> {
     scene: &'a SceneState,
-    layout: &'a Layout,
+    layout: &'a SceneLayout,
     pack: &'a Pack,
     /// Event ages and the wall clock, and the beat every ambient loop reads —
     /// every sky fact reads [`Self::sky`].
@@ -451,7 +451,7 @@ fn enqueue_pet<'a>(
     )
     .h;
     drawables.push(Drawable {
-        anchor_y: z_sort_row(Anchor::Center, pos, pet_h),
+        anchor_y: z_sort_row(Pivot::Center, pos, pet_h),
         layer: Layer::Figure,
         kind: DrawableKind::Pet {
             pos,
@@ -475,7 +475,7 @@ fn enqueue_gateway_mascots<'a>(
 ) {
     for (mascot_idx, m) in mascots.iter().enumerate() {
         drawables.push(Drawable {
-            anchor_y: z_sort_row(Anchor::Center, m.pos, m.size.h),
+            anchor_y: z_sort_row(Pivot::Center, m.pos, m.size.h),
             layer: Layer::Figure,
             kind: DrawableKind::GatewayMascot {
                 mascot_idx,
@@ -612,10 +612,8 @@ fn queue_fixtures<'a>(
                             ),
                         }
                     }
-                    Station::VendingMachine => {
-                        appliance(crate::embedded_pack::VENDING_MACHINE_SPRITE)
-                    }
-                    Station::Printer => appliance(crate::embedded_pack::PRINTER_SPRITE),
+                    Station::VendingMachine => appliance(crate::pack::VENDING_MACHINE_SPRITE),
+                    Station::Printer => appliance(crate::pack::PRINTER_SPRITE),
                     Station::SnackShelf => DrawableKind::SnackShelf { pos: f.at },
                 }
             }

@@ -2,8 +2,8 @@
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::embedded_pack::COOLER_WATER;
 use crate::layout::{Bounds, COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W};
+use crate::pack::COOLER_WATER;
 
 /// Bordered area rug filling `rug` — the meeting and lounge rugs and both
 /// pantry mats.

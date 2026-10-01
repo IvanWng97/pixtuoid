@@ -144,7 +144,7 @@ fn main() -> Result<()> {
 
     let theme =
         theme_by_name(&theme_name).ok_or_else(|| anyhow!("unknown --theme {theme_name:?}"))?;
-    let pack = pixtuoid_scene::embedded_pack::load_bundled_pack()?;
+    let pack = pixtuoid_scene::pack::load_bundled_pack()?;
     let now = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
     let mut scene = SceneState::uniform(64);
@@ -171,7 +171,11 @@ fn main() -> Result<()> {
     let (bw, bh) = (buf.width(), buf.height());
     let labels = renderer.labels(&scene);
     paint_labels_into_surface(&mut surf, &labels, scale as i32, theme);
-    let board = renderer.board(&scene, pixtuoid_scene::anim::Motion::Full, now);
+    let board = renderer.board(
+        &scene,
+        pixtuoid_scene::floor::FloorMeta::ground().motion,
+        now,
+    );
     pixtuoid::floating::offscreen::paint_wall_board_into_surface(
         &mut surf,
         &board,

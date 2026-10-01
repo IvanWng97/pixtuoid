@@ -32,7 +32,7 @@ pub struct RunConfig {
     pub socket: Option<PathBuf>,
     pub projects_root: Option<PathBuf>,
     pub codex_sessions_root: Option<PathBuf>,
-    pub pack: pixtuoid_scene::embedded_pack::PackSource,
+    pub pack: pixtuoid_scene::pack::PackSource,
     pub desk_cap: Option<usize>,
     pub headless: bool,
     pub config_path: PathBuf,

@@ -108,12 +108,12 @@ def outline(g, inside, out):
 # density, so the `@Nx` art cannot drift from the 1x it redraws.
 #
 # Rust owns these facts; the copies here are pinned against the generated art
-# by `embedded_pack`'s `a_desks_rows_follow_the_layout` and `effects`'s
+# by `pack`'s `a_desks_rows_follow_the_layout` and `effects`'s
 # `the_glow_lands_on_the_desk_arts_monitor`.
 #
 # The desk `FurnitureDef`'s visual width (`desk_sprite_width_tracks_the_footprint_overhang`).
 DESK_ART_W = 14
-# `embedded_pack`'s `DESK_BEZEL_RAISE`: the monitor's row above the wood.
+# `pack`'s `DESK_BEZEL_RAISE`: the monitor's row above the wood.
 DESK_BEZEL_RAISE = 1
 # `layout`'s `DESK_SURFACE_ROWS`, `DESK_FRONT_ROWS`, `DESK_LEG_ROWS`.
 DESK_SURFACE_ROWS, DESK_FRONT_ROWS, DESK_LEG_ROWS = 5, 1, 2
@@ -2015,7 +2015,7 @@ def standing_desk():
 
 
 # ---- the corridor appliances and the meeting table ---------------------------------
-# Drawn in the theme's appliance keys (embedded_pack::appliance_overrides).
+# Drawn in the theme's appliance keys (pack::appliance_overrides).
 VEND_BODY, VEND_BODY_LT, VEND_BODY_SH = "Б", "Ъ", "ъ"
 VEND_PANEL, VEND_PANEL_LT = "П", "п"
 VEND_DRINKS = ("Ч", "Ш", "Щ", "Э")
@@ -2332,7 +2332,7 @@ def meeting_table_1x():
 
 
 # ---- the fixtures: the pantry's island and corner, the lounge, the meeting room, the wall -
-# Recoloured from the theme (embedded_pack::fixture_overrides).
+# Recoloured from the theme (pack::fixture_overrides).
 TANK_WATER, TANK_WATER_DP, TANK_LINE = "Д", "д", "З"
 TANK_FISH, TANK_FISH_SH, TANK_FISH_ALT, TANK_FISH_ALT_SH = "И", "и", "Л", "л"
 TANK_PLANT, TANK_PLANT_SH = "Ь", "ь"
@@ -3095,31 +3095,43 @@ def building_slab():
     return g
 
 
-def city_base(g):
-    """A building drawn at `S`, read at 1x, `S`x`S` block by block: a thin part
-    running through a block (a sign, then plant or a mast, then a roof line) wins it; a block
-    less than half drawn is sky; one holding glass on an odd row and column is glass,
-    the lit-dot grid a 1x city is read by (the scene's `skyline::block_window`);
-    any other takes whichever of facade and shade it holds more of."""
+def block_read(g, pick):
+    """`g`, drawn at `S`, read at 1x: each `S`x`S` block's cells, with the
+    block's column and row, to `pick`, which names the 1x cell's key or leaves
+    it empty with `None`."""
     h, w = len(g) // S, len(g[0]) // S
     out = canvas(w, h)
     for by in range(h):
         for bx in range(w):
-            cells = [g[by * S + y][bx * S + x] for y in range(S) for x in range(S)]
-            thin = next((k for k in (CITY_SIGN, CITY_DETAIL, CITY_ROOF) if cells.count(k) >= S), None)
-            if thin:
-                out[by][bx] = thin
-            elif (S * S - cells.count(T)) * 2 < S * S:
-                continue
-            elif CITY_GLASS in cells and bx % 2 == 1 and by % 2 == 1:
-                out[by][bx] = CITY_GLASS
-            else:
-                out[by][bx] = max((CITY_FACADE, CITY_SHADE), key=cells.count)
+            k = pick([g[by * S + y][bx * S + x] for y in range(S) for x in range(S)], bx, by)
+            if k is not None:
+                out[by][bx] = k
     return out
 
 
+def city_cell(cells, bx, by):
+    """A building's block at 1x: a thin part running through it (a sign, then
+    plant or a mast, then a roof line) wins it; a block less than half drawn is
+    sky; one holding glass on an odd row and column is glass, the lit-dot grid a
+    1x city is read by (the scene's `skyline::block_window`); any other takes
+    whichever of facade and shade it holds more of."""
+    thin = next((k for k in (CITY_SIGN, CITY_DETAIL, CITY_ROOF) if cells.count(k) >= S), None)
+    if thin:
+        return thin
+    if (len(cells) - cells.count(T)) * 2 < len(cells):
+        return None
+    if CITY_GLASS in cells and bx % 2 == 1 and by % 2 == 1:
+        return CITY_GLASS
+    return max((CITY_FACADE, CITY_SHADE), key=cells.count)
+
+
+def city_base(g):
+    """A building drawn at `S`, read at 1x."""
+    return block_read(g, city_cell)
+
+
 # Each building, registered in pack.toml's `[buildings]` by hand with the planes it
-# stands in (`every_embedded_sprite_is_a_frame_the_pack_loads` fails on one left out).
+# stands in (`every_bundled_sprite_is_a_frame_the_pack_loads` fails on one left out).
 BUILDINGS = {
     "setback": building_setback,
     "curtain": building_curtain,
@@ -3130,6 +3142,191 @@ BUILDINGS = {
     "dome": building_dome,
     "sign": building_sign,
     "low": building_low,
+}
+
+
+# ---- the creatures: each species' master placed by hand at `S`, its 1x read from it
+# Every frame faces east: `pet_position` flips a walk heading west. A master is
+# the art itself, key by key; the 1x frame is that master read block by block
+# (`creature_cell`), with `CREATURE_FIXES` setting the cells the reading gets
+# wrong, so the classic and the cutaway draw one animal.
+CAT_FUR, CAT_FUR_SH, CAT_FUR_LT, CAT_DARK, CAT_PALE = "t", "ţ", "Ţ", "u", "w"
+DOG_COAT_SH, DOG_COAT_LT, DOG_TONGUE = "ƭ", "Ƭ", "R"
+CAT_WALK = [
+    """
+    ................................
+    ........κκ......................
+    .......κuuκ.........κ.....κ.....
+    ......κţtκ.........κuκ...κuκ....
+    .....κţtκ.........κu^κκκκ^uκ....
+    .....κţtκ.........κŢŢŢuŢŢŢŢŢκ...
+    .....κţtκ.......κtttuttuttttκ...
+    ......κţtκ......κţttttttwetttκ..
+    .......κţtκ.....κţttettteetttκ..
+    ........κţtκκκκκţttetttteetttκ..
+    ........κttŢŢŢŢŢtţttttt^ttww^κ..
+    .......κtttttttttţtttttttwwuwκ..
+    .......κţtttttttttţţtttttwwwκ...
+    ......κţţtttttttttttttttwwwκ....
+    ......κţţtttttttttttttttwwκ.....
+    .......κţţţttttttttttttttwκ.....
+    ........κţţţţţţţţţţţţţţţţκ......
+    .........κttţţκκκκκκţţκttκ......
+    .........κttţţκ....κţţκttκ......
+    ........κttκţţκ....κţţκκttκ.....
+    ........κttκţţκ....κţţκκttκ.....
+    .......κwwκκţţκ....κwwκ.κwwκ....
+    ........κκ..κκ......κκ...κκ.....
+    ................................
+    """,
+    """
+    ................................
+    .......κκ.......................
+    ......κuuκ..........κ.....κ.....
+    .....κţtκ..........κuκ...κuκ....
+    ....κţtκ..........κu^κκκκ^uκ....
+    ....κţtκ..........κŢŢŢuŢŢŢŢŢκ...
+    .....κţtκ.......κtttuttuttttκ...
+    ......κţtκ......κţttttttwetttκ..
+    .......κţtκ.....κţttettteetttκ..
+    ........κţtκκκκκţttetttteetttκ..
+    ........κttŢŢŢŢŢtţttttt^ttww^κ..
+    .......κtttttttttţtttttttwwuwκ..
+    .......κţtttttttttţţtttttwwwκ...
+    ......κţţtttttttttttttttwwwκ....
+    ......κţţtttttttttttttttwwκ.....
+    .......κţţţttttttttttttttwκ.....
+    ........κţţţţţţţţţţţţţţţţκ......
+    .........κttκţţκκκκκκţţttκ......
+    .........κttκţţκ....κţţttκ......
+    .........κttκţţκ....κţţttκ......
+    .........κttκţţκ....κţţttκ......
+    .........κwwκţţκ....κwwwwκ......
+    ..........κκ.κκ......κκκκ.......
+    ................................
+    """,
+]
+DOG_WALK = [
+    """
+    ................................
+    ................................
+    ....................κκκκκ.......
+    ..................κκƬƬƬƬƬκκ.....
+    .................κƬƬƬƬƬƬƬƬƬκ....
+    ................κƬƬƬƬƬƬƬƬƬƬƬκ...
+    ...............κzzzzxxxxxwexxκκ.
+    .....κκ........κzzzzzxxxxeexƬƬuκ
+    ....κƬxκ.......κzzzzzxxxxeexƬƬuκ
+    ....κƬxκ..κκκκκκκzzzzxx^xxxƬƬƬκ.
+    .....κƬxκκƬƬƬƬƬƬƬƬzzzxxxxxxxRκ..
+    ......κκƬƬxxxxxxxxƬƬƭƭƭƭƭƭƭκκ...
+    ......κxxxxxxxxxxxxxxκκκκκκ.....
+    .....κxxxxxxxxxxxxxxxxκ.........
+    .....κxxxxxxxxxxxxxxxxκ.........
+    ......κƭxxxxxxxxxxxxƭκ..........
+    .......κƭƭxxxƭƭƭƭƭƭxxxκ.........
+    .......κƭƭxxxκκκκƭƭxxxκ.........
+    ......κƭƭƭxxxκ..κƭƭƭxxxκ........
+    ......κƭƭƭxxxκ..κƭƭƭxxxκ........
+    .....κƭƭƭκxxxκ..κƭƭƭκxxxκ.......
+    .....κƭƭƭκƬƬƬκ..κƭƭƭκƬƬƬκ.......
+    ......κκκ.κκκ....κκκ.κκκ........
+    ................................
+    """,
+    """
+    ................................
+    ....................κκκκκ.......
+    ..................κκƬƬƬƬƬκκ.....
+    .................κƬƬƬƬƬƬƬƬƬκ....
+    ................κƬƬƬƬƬƬƬƬƬƬƬκ...
+    ...............κzzzzxxxxxwexxκκ.
+    .......κκ......κzzzzzxxxxeexƬƬuκ
+    ......κƬxκ.....κzzzzzxxxxeexƬƬuκ
+    .....κƬxκ.κκκκκκκzzzzxx^xxxƬƬƬκ.
+    .....κƬxκκƬƬƬƬƬƬƬƬzzzxxxxxxxRκ..
+    ......κκƬƬxxxxxxxxƬƬƭƭƭƭƭƭƭκκ...
+    ......κxxxxxxxxxxxxxxκκκκκκ.....
+    .....κxxxxxxxxxxxxxxxxκ.........
+    .....κxxxxxxxxxxxxxxxxκ.........
+    ......κƭxxxxxxxxxxxxƭκ..........
+    .......κƭƭxxxƭƭƭƭƭƭxxxκ.........
+    ........κƭxxxκκκκƭƭƭxxxκ........
+    .......κƭƭxxxκ..κƭƭƭxxxκ........
+    .......κƭxxxκ..κƭƭƭƬƬƬκ.........
+    ........κxxxκ..κƭƭƭκκκ..........
+    ........κxxxκ..κƭƭƭκ............
+    ........κƬƬƬκ..κƭƭƭκ............
+    .........κκκ....κκκ.............
+    ................................
+    """,
+]
+
+
+# The share of a block, outline counted, that makes it a 1x cell: under half,
+# so a slim leg or tail still stands.
+CREATURE_COVER = (3, 8)
+# The features a 1x cell keeps from fewer of its block's pixels than the rest:
+# each key's least count. A creature's eye is its face.
+CREATURE_FEATURES = {EYE: 3}
+# Each ramp read as its base: at 1x a shade is a speck, not a form.
+CREATURE_RAMPS = {CAT_FUR_SH: CAT_FUR, CAT_FUR_LT: CAT_FUR, DOG_COAT_SH: TAN, DOG_COAT_LT: TAN}
+
+
+def creature_cell(cells, _bx, _by):
+    """A creature's block at 1x: drawn to `CREATURE_COVER`, so the silhouette
+    holds; then a feature it shows, else its commonest material inside the
+    outline."""
+    need, of = CREATURE_COVER
+    if (len(cells) - cells.count(T)) * of < len(cells) * need:
+        return None
+    inside = [CREATURE_RAMPS.get(k, k) for k in cells if k not in (T, SILHOUETTE)]
+    if not inside:
+        return None
+    feature = next((k for k, least in CREATURE_FEATURES.items() if cells.count(k) >= least), None)
+    return feature or max(dict.fromkeys(inside), key=inside.count)
+
+
+# Per frame, the master rows its bob lifts it: a 1x cell is `S` rows, so the
+# 1x reads the frame settled back, or the bob would jump it a whole cell.
+CREATURE_BOB = {"dog_walk_1": 1}
+# Per frame, the 1x cells set by hand where the reading misses: `(x, y, key)`.
+CREATURE_FIXES = {
+    # the ears and the tail's dark tip, too slim to read
+    "cat_walk_0": [(4, 0, CAT_DARK), (6, 0, CAT_DARK), (1, 1, CAT_DARK)],
+    # the same, and the legs passing under the body, which read as frame 0's
+    "cat_walk_1": [(4, 0, CAT_DARK), (6, 0, CAT_DARK), (1, 1, CAT_DARK), (2, 5, T), (6, 5, T)],
+    # the crown and the ear, too slim to read; the legs apart. The nose stays
+    # tan: at 1x it would join the eye in one dark bar.
+    "dog_walk_0": [(5, 0, TAN), (6, 0, TAN), (4, 1, BROWN), (2, 5, T), (4, 5, T)],
+    "dog_walk_1": [(5, 0, TAN), (6, 0, TAN), (4, 1, BROWN)],
+}
+
+
+# The most cells a frame's fixes may draw or clear: past it, the 1x is no
+# longer its master read, and the master should change instead.
+CREATURE_FIX_MOST = 4
+
+
+def creature_base(name, g):
+    """Frame `name`'s 1x: its master `g`, settled from its bob, read at 1x,
+    then its fixes."""
+    bob = CREATURE_BOB.get(name, 0)
+    out = block_read([[T] * len(g[0])] * bob + g[: len(g) - bob], creature_cell)
+    reshaped = 0
+    for x, y, k in CREATURE_FIXES.get(name, ()):
+        reshaped += (out[y][x] == T) != (k == T)
+        out[y][x] = k
+    assert reshaped <= CREATURE_FIX_MOST, f"{name}: {reshaped} cells fixed past its master's silhouette"
+    return out
+
+
+def master(text):
+    return [list(row) for row in inspect.cleandoc(text).split("\n")]
+
+
+CREATURES = {
+    "cat_walk": ("The cat walking, east.", CAT_WALK),
+    "dog_walk": ("The dog walking, east.", DOG_WALK),
 }
 
 
@@ -3337,6 +3534,12 @@ def main():
         f"{base}.sprite": render_sprite(header, grounded(frames), marks=classic_marks.get(base, ()))
         for base, (header, frames) in classic.items()
     }
+    for anim, (header, texts) in CREATURES.items():
+        for i, g in enumerate(grounded([master(t) for t in texts])):
+            sprites[f"{anim}_{i}@{S}x.sprite"] = render_sprite(header, [g])
+            sprites[f"{anim}_{i}.sprite"] = render_sprite(
+                header + "\n\nIts base: the master read at 1x.", [creature_base(f"{anim}_{i}", g)]
+            )
     for name, draw in BUILDINGS.items():
         art = draw()
         sprites[f"building_{name}@{S}x.sprite"] = render_sprite(draw.__doc__, [art])

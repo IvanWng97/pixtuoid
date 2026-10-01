@@ -300,7 +300,7 @@ fn toggle_intent(state: connection::ConnState) -> ToggleIntent {
 
 /// The per-floor desk-capacity sweep, memoized on its own inputs.
 ///
-/// `floor_capacity` runs a FULL `Layout::compute_with_seed` — walkable-mask stamp plus
+/// `floor_capacity` runs a FULL `SceneLayout::compute_with_seed` — walkable-mask stamp plus
 /// coarse BFS, quadratic in buffer area — once per floor, and keeps only
 /// `home_desks.len()`. It is a pure function of `(buf_w, buf_h, desk_cap)` and the
 /// publish is a monotone `fetch_max`, so a repeat with identical inputs could only

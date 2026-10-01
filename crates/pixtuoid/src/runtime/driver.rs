@@ -60,9 +60,7 @@ type Boot = (
 /// Load the pack, whose densest art the plan fits, plan, and pick the motion
 /// the plan affords unless the config names one.
 fn boot_tui(cfg: &RunConfig) -> Result<Boot> {
-    let pack = Arc::new(pixtuoid_scene::embedded_pack::load_sprite_pack(
-        cfg.pack.clone(),
-    )?);
+    let pack = Arc::new(pixtuoid_scene::pack::load_sprite_pack(cfg.pack.clone())?);
     let plan = crate::graphics::plan_this_terminal(
         cfg.graphics,
         pack.max_density_variant(),

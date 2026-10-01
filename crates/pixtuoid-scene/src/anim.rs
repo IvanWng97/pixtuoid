@@ -81,9 +81,15 @@ impl Motion {
     pub(crate) fn beat(self, now: SystemTime) -> Beat {
         let ms = epoch_ms(now);
         match self {
-            Self::Full => Beat(Some(ms / FULL_TICK_MS * FULL_TICK_MS)),
-            Self::Calm => Beat(Some(ms / CALM_TICK_MS * FULL_TICK_MS)),
-            Self::Still => Beat(None),
+            Self::Full => Beat::looping(ms / FULL_TICK_MS * FULL_TICK_MS, 1),
+            Self::Calm => Beat::looping(
+                ms / CALM_TICK_MS * FULL_TICK_MS,
+                CALM_TICK_MS / FULL_TICK_MS,
+            ),
+            Self::Still => Beat {
+                loop_ms: None,
+                pace: 1,
+            },
         }
     }
 
@@ -106,25 +112,43 @@ pub(crate) struct Clock {
 /// The clock every ambient loop reads instead of the wall clock, so two
 /// instants on one beat paint the same frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct Beat(Option<u64>);
+pub(crate) struct Beat {
+    /// Loop time, in ms; `None` at rest.
+    loop_ms: Option<u64>,
+    /// Wall-clock ms per ms of loop time.
+    pace: u64,
+}
 
 impl Beat {
-    /// Milliseconds since the Unix epoch on the beat; 0 at rest, where every
-    /// loop holds its first frame.
+    fn looping(loop_ms: u64, pace: u64) -> Self {
+        Self {
+            loop_ms: Some(loop_ms),
+            pace,
+        }
+    }
+
+    /// Milliseconds of loop time on the beat; 0 at rest, where every loop
+    /// holds its first frame.
     pub(crate) fn ms(self) -> u64 {
-        self.0.unwrap_or(0)
+        self.loop_ms.unwrap_or(0)
     }
 
     /// Whether nothing moves: a source with no frame to hold, a flash, shows
     /// none.
     pub(crate) fn is_rest(self) -> bool {
-        self.0.is_none()
+        self.loop_ms.is_none()
+    }
+
+    /// The wall-clock ms loop time `loop_ms` plays at, where what keeps real
+    /// time — the weather — is read.
+    pub(crate) fn wall_ms(self, loop_ms: u64) -> u64 {
+        loop_ms.saturating_mul(self.pace)
     }
 
     /// A beat at exactly `ms`, off any tier's tick.
     #[cfg(test)]
     pub(crate) fn at_ms(ms: u64) -> Self {
-        Self(Some(ms))
+        Self::looping(ms, 1)
     }
 }
 

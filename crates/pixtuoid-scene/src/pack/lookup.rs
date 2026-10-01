@@ -126,6 +126,10 @@ pub(super) fn frame_index(anim: &Sprite, idx: usize) -> usize {
 
 pub(crate) const VENDING_MACHINE_SPRITE: &str = "vending_machine";
 pub(crate) const PRINTER_SPRITE: &str = "printer";
+/// The fixtures whose art loops on the beat whoever is near.
+pub(crate) const FISH_TANK_SPRITE: &str = "fish_tank";
+/// See [`FISH_TANK_SPRITE`].
+pub(crate) const WATER_COOLER_SPRITE: &str = "water_cooler";
 
 /// The pack art a corridor appliance at a `kind` waypoint is drawn from.
 pub(crate) fn appliance_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
@@ -162,4 +166,11 @@ pub(crate) fn looping_frame_index(anim: &Sprite, beat: crate::anim::Beat) -> usi
     let frames = anim.frames().len().max(1) as u64;
     let step = beat.ms() / u64::from(anim.frame_ms().max(1));
     usize::try_from(step % frames).unwrap_or(0)
+}
+
+/// The frame of `pack`'s looping animation `name` showing on `beat`; 0 for one
+/// the pack lacks.
+pub(crate) fn animation_frame_at(pack: &Pack, name: &str, beat: crate::anim::Beat) -> usize {
+    pack.animation(name)
+        .map_or(0, |anim| looping_frame_index(anim, beat))
 }

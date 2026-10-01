@@ -110,7 +110,7 @@ fn main() -> ExitCode {
     let mut office = match Office::new(seed) {
         Ok(o) => o,
         Err(_) => {
-            eprintln!("embedded sprite pack failed to parse (build bug)");
+            eprintln!("bundled sprite pack failed to parse (build bug)");
             return ExitCode::FAILURE;
         }
     };

@@ -21,7 +21,7 @@ use pixtuoid_scene::floor::{
     FloorInputs, FloorMeta, FloorTransition, FrameInputs, PerFloor, PerOffice, PetInputs,
     num_floors, project_floor_scene, render_floor,
 };
-use pixtuoid_scene::layout::{Layout, Size};
+use pixtuoid_scene::layout::{SceneLayout, Size};
 use pixtuoid_scene::pathfind::Router;
 use pixtuoid_scene::pet::PetFrame;
 
@@ -68,7 +68,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     current_floor: usize,
     transition: Option<FloorTransition>,
     mouse_pos: Option<(u16, u16)>,
-    cached_layout: Option<Arc<Layout>>,
+    cached_layout: Option<Arc<SceneLayout>>,
     last_pet_pos: Option<PetFrame>,
     last_agents: Vec<pixtuoid_scene::pixel_painter::AgentFrame>,
     last_geometry: Option<crate::tui::geometry::SceneGeometry>,
@@ -348,7 +348,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.office.coffee.insert(id, fetched_at);
     }
 
-    pub fn cached_layout(&self) -> Option<&Layout> {
+    pub fn cached_layout(&self) -> Option<&SceneLayout> {
         self.cached_layout.as_deref()
     }
 
@@ -848,13 +848,17 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             return drawn;
         };
         // Each floor shows its own board; only the footer is the destination's.
-        let boards = [(&from_scene, from_floor), (&to_scene, to_floor)].map(|(floor_scene, i)| {
+        let boards = [
+            (&from_scene, from_floor, from_world),
+            (&to_scene, to_floor, to_world),
+        ]
+        .map(|(floor_scene, i, world)| {
             let ctx = self
                 .chrome
                 .frame(scene, floor_scene, pack, now, i, nf)
                 .footer;
             let footer = pixtuoid_scene::footer::FooterInputs::new(floor_scene, ctx);
-            crate::tui::renderer::wall_board(&footer, floor_scene, self.chrome.motion, now)
+            crate::tui::renderer::wall_board(&footer, floor_scene, world.floor.motion, now)
         });
         let showing = |floor, board| pixtuoid_scene::cutaway::paint::Showing { floor, now, board };
         cutaway.paint_slide(
