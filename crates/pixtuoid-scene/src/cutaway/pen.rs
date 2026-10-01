@@ -28,9 +28,8 @@ pub(crate) struct ArtRect {
     pub(crate) h: ArtPx,
 }
 
-/// Colours already stepped `level` stops: a shade crosses a handful of tones
-/// and [`Rgb::ramp`] walks one OKLab step per level, so each is stepped once,
-/// not once per pixel.
+/// Colours already stepped `level` stops: a shade crosses a handful of tones,
+/// and scanning them per pixel is cheaper than [`Rgb::ramp`]'s hashed memo.
 pub(crate) struct Stepped {
     level: i8,
     seen: Vec<(Rgb, Rgb)>,
