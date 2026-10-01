@@ -13,7 +13,7 @@ use crate::tui::renderer::clip_widget_rect;
 use pixtuoid_scene::layout::DESK_W;
 use pixtuoid_scene::overlay::{LabelElement, disambig_suffix};
 use pixtuoid_scene::pet::PetKind;
-use pixtuoid_scene::pixel_painter::{MascotFrame, tool_glow_for_kind};
+use pixtuoid_scene::pixel_painter::{AgentFrame, MascotFrame, tool_glow_for_kind};
 
 /// Borderless tooltip frame shared by every hover/click tooltip: just the padded
 /// text. The caller must paint `super::paint_card_backing` UNDER it (the `Clear` +
@@ -402,10 +402,19 @@ fn mascot_tooltip_text(mascot: &MascotFrame) -> String {
 pub fn paint_chitchat_bubbles(
     f: &mut ratatui::Frame<'_>,
     bubbles: &[pixtuoid_scene::chitchat::ChitchatBubble],
+    agents: &[AgentFrame],
     scene_rect: Rect,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
     for bubble in bubbles {
+        // The speaker's badge anchor, so bubble and badge share one centre.
+        let Some(at) = agents
+            .iter()
+            .find(|a| a.agent_id == bubble.speaker)
+            .map(|a| a.label_anchor)
+        else {
+            continue;
+        };
         let text = format!(" {} ", bubble.text);
         // Size by DISPLAY width, not byte length: a wide-glyph quip would otherwise
         // over-size and mis-center the bubble.
@@ -413,8 +422,8 @@ pub fn paint_chitchat_bubbles(
         let tip_w = line.width() as u16;
         let tip_h = 1u16;
 
-        let cell_x = scene_rect.x + bubble.anchor.x;
-        let cell_y = scene_rect.y + bubble.anchor.y / 2;
+        let cell_x = scene_rect.x + at.x;
+        let cell_y = scene_rect.y + at.y / 2;
 
         let bx = cell_x.saturating_sub(tip_w / 2);
         let by = cell_y.saturating_sub(3);
@@ -570,6 +579,66 @@ mod tests {
                 assert_eq!(fg("r"), Some(super::to_color(ink.name)), "{at}");
             }
         }
+    }
+
+    #[test]
+    fn a_chitchat_bubble_centres_over_its_speakers_badge() {
+        use pixtuoid_scene::chitchat::ChitchatBubble;
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::{LabelElement, LabelTone};
+        use pixtuoid_scene::pixel_painter::AgentFrame;
+        let mut term = Terminal::new(TestBackend::new(40, 12)).unwrap();
+        let scene_rect = Rect {
+            x: 3,
+            y: 1,
+            width: 36,
+            height: 10,
+        };
+        let speaker = AgentFrame {
+            agent_id: pixtuoid_core::AgentId::from_transcript_path("/chat/0.jsonl"),
+            anchor: Point { x: 16, y: 14 },
+            w: 8,
+            h: 12,
+            label_anchor: Point { x: 20, y: 14 },
+        };
+        let (name, quip) = ("abcdefgh", "LGTM!");
+        term.draw(|f| {
+            super::paint_label_widgets(
+                f,
+                &[LabelElement {
+                    anchor_px: speaker.label_anchor,
+                    text: name.into(),
+                    tone: LabelTone::Idle,
+                    hovered: false,
+                }],
+                scene_rect,
+                &theme::NORMAL,
+            );
+            super::paint_chitchat_bubbles(
+                f,
+                &[ChitchatBubble {
+                    text: quip,
+                    speaker: speaker.agent_id,
+                }],
+                &[speaker],
+                scene_rect,
+                &theme::NORMAL,
+            );
+        })
+        .unwrap();
+        let buf = term.backend().buffer();
+        let centre = |needle: &str| {
+            let row = row_of(&term, needle).expect("painted");
+            let cells: Vec<u16> = (0..buf.area.width)
+                .filter(|&x| {
+                    buf[(x, row)].symbol() != " "
+                        || buf[(x, row)].bg != ratatui::style::Color::Reset
+                })
+                .collect();
+            let (l, r) = (cells[0], cells[cells.len() - 1]);
+            (l + r) / 2
+        };
+        assert_eq!(centre(quip), centre(name));
     }
 
     #[test]
