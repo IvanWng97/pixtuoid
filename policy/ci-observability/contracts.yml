@@ -411,6 +411,26 @@
     - .jobs["ci-passed"].steps[0]["continue-on-error"] = true
     - .jobs["ci-passed"].steps[0].if = "${{ false }}"
 
+- id: every-main-push-gets-its-ci-gate
+  file: .github/workflows/ci.yml
+  why: >-
+    The release waits for ci-gate on its own merge commit, and a concurrency
+    group's newer run replaces its pending one unless the group queues
+    (docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency),
+    so a release commit whose run was replaced never gets one and the publish
+    times out. A main push therefore owns its group or queues in it, and a run
+    already in progress is never cancelled.
+  assert: |
+    .concurrency as $c
+    | (($c.group | test("github\\.sha"))
+        or ($c.queue == "max" and ($c["cancel-in-progress"] // false | tostring) == "false"))
+      and (($c["cancel-in-progress"] // false | tostring) as $cancel
+           | $cancel == "false" or $cancel == "${{ github.event_name == 'pull_request' }}")
+  break:
+    - .concurrency.group = "ci-${{ github.ref }}"
+    - .concurrency["cancel-in-progress"] = true
+    - .concurrency["cancel-in-progress"] = "${{ github.event_name != 'workflow_dispatch' }}"
+
 - id: release-wait-only-for-a-release-merge
   file: .github/workflows/release-plz.yml
   why: >-
