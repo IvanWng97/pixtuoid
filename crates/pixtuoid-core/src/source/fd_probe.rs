@@ -38,7 +38,6 @@ mod imp {
     const PROC_PIDFDVNODEPATHINFO: libc::c_int = 2;
 
     #[repr(C)]
-    #[allow(non_camel_case_types)]
     struct proc_fileinfo {
         fi_openflags: u32,
         fi_status: u32,
@@ -48,7 +47,6 @@ mod imp {
     }
 
     #[repr(C)]
-    #[allow(non_camel_case_types)]
     struct vnode_fdinfowithpath {
         pfi: proc_fileinfo,
         pvip: libc::vnode_info_path,

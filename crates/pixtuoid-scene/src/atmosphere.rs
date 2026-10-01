@@ -36,8 +36,6 @@ pub(crate) struct Look {
     /// How brightly the star field shows, 0..=1; zero wherever it would be too
     /// faint to read.
     pub(crate) star_strength: f32,
-    /// Where the sun lands on the office walls, while it is up.
-    pub(crate) sun_spot: Option<SunSpot>,
     /// The sun's direct beam through the weather ([`Sky::beam`]), 0..=1.
     pub(crate) beam: f32,
 }
@@ -94,7 +92,7 @@ const OBJECT_WASH_SHARE: f32 = 0.55;
 const FLOOR_TINT_SHARE: f32 = 0.15;
 
 /// Below this strength the star field is too faint to read, so none shows —
-/// by day and under thick cloud or fog.
+/// by day and under thick cloud or fog; above it the stars ramp in from nothing.
 const STAR_MIN: f32 = 0.15;
 
 impl Look {
@@ -115,7 +113,7 @@ impl Look {
         let glass_b = night_b.mix(day_b, exterior).mix(twilight_b, warm * 0.5);
 
         // Leans away from the disc, which the painters place off this same
-        // azimuth; `the_wall_spot_and_the_spill_fall_away_from_the_disc` pins the
+        // azimuth; `the_spill_leans_away_from_the_disc` pins the
         // sign.
         let (sunlight, spill_slant) = match e.body {
             Body::Sun => (interior, (0.5 - e.azimuth) * 2.0 * SPILL_SLANT_MAX),
@@ -154,12 +152,7 @@ impl Look {
             floor_tint: (weather_floor_tint(weather), FLOOR_TINT_SHARE),
             glass_veil: glass_veil(weather).map(|(color, alpha)| (lit(color, veil), alpha)),
             golden_hour: golden_hour_blaze(e, &sky.transmission()),
-            star_strength: if star_strength > STAR_MIN {
-                star_strength
-            } else {
-                0.0
-            },
-            sun_spot: sun_on_wall(sky),
+            star_strength: ((star_strength - STAR_MIN) / (1.0 - STAR_MIN)).max(0.0),
             beam: sky.beam(),
         }
     }
@@ -173,55 +166,6 @@ fn lit(color: Rgb, lum: f32) -> Rgb {
         g: scale(color.g),
         b: scale(color.b),
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WallSide {
-    East,
-    North,
-    West,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct SunSpot {
-    pub(crate) wall: WallSide,
-    /// 0.0..=1.0 along the wall (left→right for North, top→bottom for East/West).
-    pub(crate) along: f32,
-    /// 0.0=dim, 1.0=brightest, at the sun's apex.
-    pub(crate) intensity: f32,
-    /// 0.0=neutral white (apex), 1.0=very warm gold (sunrise/sunset).
-    pub(crate) warmth: f32,
-}
-
-/// The azimuths where [`sun_on_wall`]'s spot hands off east wall → window
-/// wall → west wall.
-const AZ_EAST_MAX: f32 = 0.30;
-const AZ_WEST_MIN: f32 = 0.70;
-
-fn sun_on_wall(sky: &Sky) -> Option<SunSpot> {
-    let e = sky.emitter();
-    if !matches!(e.body, Body::Sun) {
-        return None;
-    }
-    // The SAME azimuth that places the disc and leans the floor spill;
-    // `the_wall_spot_and_the_spill_fall_away_from_the_disc` pins their sides.
-    let az = e.azimuth;
-    let (wall, along) = if az < AZ_EAST_MAX {
-        (WallSide::East, az / AZ_EAST_MAX)
-    } else if az < AZ_WEST_MIN {
-        (
-            WallSide::North,
-            (az - AZ_EAST_MAX) / (AZ_WEST_MIN - AZ_EAST_MAX),
-        )
-    } else {
-        (WallSide::West, (az - AZ_WEST_MIN) / (1.0 - AZ_WEST_MIN))
-    };
-    Some(SunSpot {
-        wall,
-        along,
-        intensity: e.altitude,
-        warmth: e.warmth,
-    })
 }
 
 /// The cast the current weather lends the floor.
@@ -344,14 +288,10 @@ fn golden_hour_blaze(e: &Emitter, a: &Transmission) -> f32 {
 }
 
 /// How brightly the star field would show this frame, before [`STAR_MIN`]'s
-/// gate. Stars only appear once the emitter is the MOON: dawn/dusk twilight has
-/// a high `darkness` yet the brightening sky washes stars out, so gating on
-/// `darkness` alone paints a full starfield at ~7am.
+/// ramp. Stars ride [`Sky::nightfall`], not `darkness` alone: the dawn and dusk
+/// sky is dark enough to pass a darkness gate, yet washes stars out.
 fn night_star_strength(sky: &Sky, darkness: f32) -> f32 {
-    match sky.emitter().body {
-        Body::Moon => (darkness * sky.transmission().disc).clamp(0.0, 1.0),
-        Body::Sun => 0.0,
-    }
+    (darkness * sky.transmission().disc * sky.nightfall()).clamp(0.0, 1.0)
 }
 
 /// How far down the glass, as a share of it, the sky reaches its horizon
@@ -399,6 +339,68 @@ mod tests {
             golden_hour_blaze(&sun, &full) > 0.9,
             "a maximal sun should blaze near-full"
         );
+    }
+
+    /// Every value the sky hands the painters moves by at most a step a minute,
+    /// through every hour, weather and moon age: none flips at dusk or dawn.
+    #[test]
+    fn the_look_moves_without_a_step_minute_by_minute() {
+        const MAX_STEP: f32 = 0.04;
+        const MAX_CHANNEL_STEP: i16 = 4;
+        let scalars = |l: &Look| {
+            [
+                ("darkness", l.darkness),
+                ("sunlight", l.sunlight),
+                ("floor dim", l.floor_wash[0].1),
+                ("floor lift", l.floor_wash[1].1),
+                ("object dim", l.object_wash[0].1),
+                ("object lift", l.object_wash[1].1),
+                ("golden hour", l.golden_hour),
+                ("stars", l.star_strength),
+                ("beam", l.beam),
+            ]
+        };
+        let channels = |l: &Look| {
+            let veil = l.glass_veil.map_or(Rgb { r: 0, g: 0, b: 0 }, |v| v.0);
+            [
+                ("glass a", l.glass_a),
+                ("glass b", l.glass_b),
+                ("veil", veil),
+            ]
+        };
+        let weathers = [Weather::Clear, Weather::Fog, Weather::Snow, Weather::Storm];
+        for day in [0, 4, 8, 11, 15, 19, 23, 26] {
+            let midnight = crate::localclock::on_day(day, 0);
+            for w in weathers {
+                let look = |m: u64| {
+                    let now = midnight + std::time::Duration::from_secs(60 * m);
+                    Look::resolve(&Sky::at_with(now, w), &crate::theme::NORMAL)
+                };
+                let mut prev = look(0);
+                for m in 1..24 * 60 {
+                    let next = look(m);
+                    let at = format!("day {day} {w:?} {:02}:{:02}", m / 60, m % 60);
+                    for ((name, a), (_, b)) in scalars(&prev).into_iter().zip(scalars(&next)) {
+                        assert!(
+                            (b - a).abs() <= MAX_STEP,
+                            "{name} stepped {a} -> {b} at {at}"
+                        );
+                    }
+                    for ((name, a), (_, b)) in channels(&prev).into_iter().zip(channels(&next)) {
+                        let step = [(a.r, b.r), (a.g, b.g), (a.b, b.b)]
+                            .map(|(x, y)| (i16::from(y) - i16::from(x)).abs())
+                            .into_iter()
+                            .max()
+                            .unwrap_or(0);
+                        assert!(
+                            step <= MAX_CHANNEL_STEP,
+                            "{name} stepped {a:?} -> {b:?} at {at}"
+                        );
+                    }
+                    prev = next;
+                }
+            }
+        }
     }
 
     #[test]
@@ -522,35 +524,5 @@ mod tests {
             lum(midnight) >= lum(unlit) * NIGHT_VEIL_FLOOR - 1.5,
             "{midnight:?} fell below the night floor of {unlit:?}"
         );
-    }
-
-    #[test]
-    fn sun_on_wall_east_at_morning() {
-        let s = sun_on_wall(&Sky::at(at_hour_min(7, 0))).expect("sun should be up at 07:00");
-        assert_eq!(s.wall, WallSide::East);
-        assert!(s.warmth > 0.5, "morning sun should be warm: {}", s.warmth);
-    }
-
-    #[test]
-    fn sun_on_wall_overhead_at_noon() {
-        let s = sun_on_wall(&Sky::at(at_hour_min(12, 0))).expect("sun should be up at 12:00");
-        assert_eq!(s.wall, WallSide::North);
-        assert!(
-            s.intensity > 0.85,
-            "noon sun should be intense: {}",
-            s.intensity
-        );
-    }
-
-    #[test]
-    fn sun_on_wall_west_at_evening() {
-        let s = sun_on_wall(&Sky::at(at_hour_min(18, 0))).expect("sun should be up at 18:00");
-        assert_eq!(s.wall, WallSide::West);
-        assert!(s.warmth > 0.55, "evening sun should be warm: {}", s.warmth);
-    }
-
-    #[test]
-    fn sun_on_wall_none_at_midnight() {
-        assert!(sun_on_wall(&Sky::at(at_hour_min(0, 0))).is_none());
     }
 }

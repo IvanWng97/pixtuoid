@@ -169,7 +169,7 @@ fn main() -> Result<()> {
     let mut surf = XrgbSurface::new(&mut sb, ww, wh).expect("sized to the window");
     surf.fill_upscaled(buf, scale as usize);
     let (bw, bh) = (buf.width(), buf.height());
-    let labels = renderer.labels(&scene, now);
+    let labels = renderer.labels(&scene);
     paint_labels_into_surface(&mut surf, &labels, scale as i32, theme);
     let board = renderer.board(&scene, now);
     pixtuoid::floating::offscreen::paint_wall_board_into_surface(

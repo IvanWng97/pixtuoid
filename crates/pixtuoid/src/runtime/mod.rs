@@ -50,6 +50,8 @@ pub struct RunConfig {
     /// Resolved `[audio]` settings — muted defaults TRUE (the lazy spawn waits for the
     /// first `m`), volume pre-clamped by `config::resolve_audio`. Headless ignores it.
     pub audio: crate::config::AudioConfig,
+    /// Resolved by `config::resolve_graphics`. Headless and `floating` ignore it.
+    pub graphics: crate::GraphicsMode,
 }
 
 /// A live, shared set of connected source ids — the runtime mirror of the persisted

@@ -63,6 +63,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     active_pet: Option<PetState>,
     last_pet_pos: Option<PetFrame>,
     last_agents: Vec<pixtuoid_scene::pixel_painter::AgentFrame>,
+    last_geometry: Option<crate::tui::geometry::SceneGeometry>,
     pets: Vec<pixtuoid_scene::pet::Pet>,
     /// Coffee + venue chitchat, ONE per office — shared across every floor so a
     /// cup survives floor navigation.
@@ -102,6 +103,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             active_pet: None,
             last_pet_pos: None,
             last_agents: Vec::new(),
+            last_geometry: None,
             pets,
             office: PerOffice::new(),
             popup: PopupState::default(),
@@ -187,13 +189,19 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.cached_layout.as_deref()
     }
 
+    /// The pixels cell `(col, row)` showed in the last frame drawn.
+    pub(crate) fn scene_area_at(
+        &self,
+        col: u16,
+        row: u16,
+    ) -> Option<crate::tui::geometry::CellArea> {
+        self.last_geometry?.area_at(col, row)
+    }
+
     /// [`hit_test_agent`](crate::tui::hit_test::hit_test_agent) against the last
     /// frame drawn.
     pub(crate) fn hit_test_agent_at(&self, col: u16, row: u16) -> Option<pixtuoid_core::AgentId> {
-        crate::tui::hit_test::hit_test_agent(
-            &self.last_agents,
-            crate::tui::geometry::CellArea::half_block(col, row),
-        )
+        crate::tui::hit_test::hit_test_agent(&self.last_agents, self.scene_area_at(col, row)?)
     }
 
     pub fn current_floor_seed(&self) -> u64 {
@@ -337,6 +345,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         }) else {
             return Ok(());
         };
+        self.forget_drawn();
         let from_scene = project_floor_scene(scene, from_floor);
         let to_scene = project_floor_scene(scene, to_floor);
         // The destination floor's footer for the whole slide, so its count matches
@@ -364,20 +373,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         if scene_rect.width < crate::tui::renderer::MIN_SCENE_WIDTH
             || scene_rect.height < crate::tui::renderer::MIN_SCENE_HEIGHT
         {
-            // Too small to render this frame: clear the interaction state the
-            // mouse handler reads, so a click doesn't hit-test against a stale
-            // layout / pet / agents left over from a larger prior frame.
-            self.cached_layout = None;
-            self.last_pet_pos = None;
-            self.last_agents.clear();
-            // Paint the SAME footer-only frame draw_scene's gate does, not
-            // nothing — else the stale pre-shrink frame stays frozen on screen.
-            // AND land the transition: this returns before ensure_size, so the
-            // floor buffer's size signature never changes and the event loop's
-            // resize detector can't fire cancel_transition — the slide would
-            // otherwise stay live for its whole `FloorTransition::duration_ms`.
-            // The modals survive the slide (`Tab`/`s` aren't transition-gated), so
-            // they paint here too — their key handlers stay live at every size.
             let popup_scale = self.version_popup_scale(now);
             self.popup.last_scale = popup_scale;
             let overlays = crate::tui::renderer::OverlayFrame {
@@ -395,6 +390,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 &overlays,
                 now,
             )?;
+            // This returns before ensure_size, so the floor buffer's size
+            // signature never changes and the event loop's resize detector can't
+            // fire cancel_transition: the slide would stay live for its whole
+            // `FloorTransition::duration_ms`.
             self.cancel_transition();
             return Ok(());
         }
@@ -534,12 +533,16 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         })?;
 
         self.popup.last_scale = popup_scale;
+        Ok(())
+    }
+
+    /// What the mouse handler hit-tests is gone from the screen, so a click
+    /// must not land on its ghost.
+    fn forget_drawn(&mut self) {
         self.cached_layout = None;
-        // Nothing holds still mid-slide; clear the pet and agents so a click
-        // can't land on a ghost at last frame's location.
         self.last_pet_pos = None;
         self.last_agents.clear();
-        Ok(())
+        self.last_geometry = None;
     }
 }
 
@@ -621,6 +624,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let out = draw_scene(&mut self.terminal, &mut draw_ctx)?;
         self.last_pet_pos = out.pet_pos;
         self.last_agents = out.agents;
+        self.last_geometry = out.geometry;
         // Ambient audio: one AudioFrame per rendered frame, floor-scoped (you hear
         // the floor you're LOOKING AT; rain stays global). The kind-map resolves against
         // THIS frame's layout (`out.layout`, not `self.cached_layout`, which is

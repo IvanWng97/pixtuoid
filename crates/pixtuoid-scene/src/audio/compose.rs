@@ -104,7 +104,10 @@ struct Progression {
     scale_pcs: [u8; 7],
     /// Carries ONE deliberate out-of-scale color move — exempt from the
     /// diatonic pin, which instead asserts the color tone EXISTS.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "only the diatonic pin reads it")
+    )]
     chromatic: bool,
 }
 

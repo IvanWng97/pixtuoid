@@ -27,7 +27,7 @@ use ratatui::backend::CrosstermBackend;
 use tui_renderer::TuiRenderer;
 
 use crate::runtime::SceneRx;
-use pixtuoid_scene::{embedded_pack, pet, theme};
+use pixtuoid_scene::{pet, theme};
 
 /// Which overlay (if any) currently owns input, plus the one count the picker needs.
 /// An open overlay swallows keys and the normal-scene bindings are suspended; the
@@ -70,10 +70,13 @@ enum KeyAction {
     ToggleAudioMute,
     /// `true` = up.
     AdjustVolume(bool),
-    /// The `w` dispatch arm is `#[cfg(debug_assertions)]`-gated, so in release this
-    /// variant is never constructed; the `apply_key_action` match arm stays unconditional
-    /// for exhaustiveness.
-    #[cfg_attr(not(debug_assertions), allow(dead_code))]
+    #[cfg_attr(
+        all(not(debug_assertions), not(test)),
+        expect(
+            dead_code,
+            reason = "only the debug-build `w` dispatch arm builds it; the apply arm stays unconditional for exhaustiveness"
+        )
+    )]
     ToggleWalkableDebug,
     ToggleDashboard,
     DashboardUp,
@@ -524,7 +527,7 @@ fn resolve_version_popup(config_path: &std::path::Path) -> bool {
 
 pub(crate) struct TuiSession {
     pub scene_rx: SceneRx,
-    pub pack: embedded_pack::PackSource,
+    pub pack: pixtuoid_core::sprite::format::Pack,
     pub floor_caps: Arc<[std::sync::atomic::AtomicUsize; pixtuoid_core::state::MAX_FLOORS]>,
     pub theme: &'static theme::Theme,
     pub config_path: std::path::PathBuf,
@@ -826,12 +829,11 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
             } else if focus_clicked_agent(renderer, scene_rx, focus_roots, m.column, m.row) {
                 // Empty on purpose: the click was consumed. The coffee-before-pet order below
                 // is the half no mechanism holds — keep it in step with `renderer::draw_scene`.
-            } else if renderer.cached_layout().is_some_and(|layout| {
-                renderer::hit_test_coffee_machine(
-                    layout,
-                    geometry::CellArea::half_block(m.column, m.row),
-                )
-            }) {
+            } else if let Some(at) = renderer.scene_area_at(m.column, m.row)
+                && renderer
+                    .cached_layout()
+                    .is_some_and(|layout| renderer::hit_test_coffee_machine(layout, at))
+            {
                 let _ = open::that("https://buymeacoffee.com/IvanWng97");
             } else if let Some(pixtuoid_scene::pet::PetFrame {
                 pos: pet_pos,
@@ -839,12 +841,9 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
                 kind,
             }) = renderer.cached_pet_pos()
                 && renderer.active_pet_ref().is_none_or(|p| !p.is_active(now))
-                && renderer::hit_test_pet(
-                    kind,
-                    pet_pos,
-                    anim,
-                    geometry::CellArea::half_block(m.column, m.row),
-                )
+                && renderer
+                    .scene_area_at(m.column, m.row)
+                    .is_some_and(|at| renderer::hit_test_pet(kind, pet_pos, anim, at))
             {
                 renderer.set_active_pet(Some(renderer::PetState {
                     petted_at: now,
@@ -913,7 +912,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         first_run,
         audio_cfg,
     } = session;
-    let pack = embedded_pack::load_sprite_pack(pack)?;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
     // A LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins

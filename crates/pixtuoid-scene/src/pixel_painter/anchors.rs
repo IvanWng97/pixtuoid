@@ -10,8 +10,7 @@ use pixtuoid_core::AgentSlot;
 use super::epoch_ms;
 use super::seat::Seat;
 use crate::layout::{Point, WaypointKind};
-pub(crate) use crate::physics::walking_position;
-use crate::pose::{self, Pose};
+use crate::pose;
 
 /// The ONE cross-crate sprite-width authority, re-exported so `pixel_painter`
 /// siblings keep importing it via `super::`.
@@ -132,14 +131,18 @@ pub(super) fn waypoint_rank_offset_x(kind: WaypointKind, rank: usize) -> i16 {
     }
 }
 
-/// Top-left anchor of an agent's character sprite, derived from pose so labels
-/// follow the character rather than staying anchored at the desk. Uses
-/// `derive_with_routing` so labels track agents along their A* path instead of
-/// jumping to the straight-line midpoint.
-///
-/// Clamped so a DEFAULT-size frame lands inside `layout`'s buffer, keeping the
-/// badge on pixels the sprite occupies — the twin of the sprite's own guard in
-/// `sim::resolve_characters`.
+/// Where a figure of `size` drawn at `top_left` hangs its name badge: over its
+/// top-centre, and no lower than `ceiling`.
+pub(super) fn badge_anchor(top_left: Point, size: Size, ceiling: Option<u16>) -> Point {
+    Point {
+        x: top_left.x + size.w / 2,
+        y: ceiling.map_or(top_left.y, |row| top_left.y.min(row)),
+    }
+}
+
+/// A test oracle: the sprite's default-size top-left, re-derived from the pose
+/// alone.
+#[cfg(test)]
 pub(crate) fn character_anchor(
     agent: &AgentSlot,
     layout: &crate::layout::Layout,
@@ -147,10 +150,8 @@ pub(crate) fn character_anchor(
     rctx: &mut pose::RouteCtx<'_>,
 ) -> Option<Point> {
     let desk = layout.home_desk(agent.desk_index.single_floor_local())?;
+    use crate::pose::Pose;
     let pose = pose::derive_with_routing(agent, now, layout, rctx)?;
-    // Labels use the DEFAULT width — a custom pack's true width isn't threaded
-    // here and the half-width difference doesn't matter; blit sites pass the
-    // real `frame.width`.
     let w = CHARACTER_SPRITE_W;
     let anchor = match pose {
         Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. } => {
@@ -162,8 +163,6 @@ pub(crate) fn character_anchor(
         }
         Pose::AtWaypoint { wp, kind } => {
             let wp_obj = layout.waypoints.get(wp)?;
-            // Anchor off the resolved stand cell so the label tracks where the
-            // agent actually stands, not the blocked furniture center.
             let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
             // Via [`Seat::render_anchor`], the sprite blit's authority.
             Seat::at_waypoint(kind, stand, wp_obj.facing).render_anchor(w)
@@ -171,7 +170,7 @@ pub(crate) fn character_anchor(
         Pose::AimlessAt { dest } => waypoint_anchor(dest, w),
         Pose::Walking {
             from, to, t_x1000, ..
-        } => walking_anchor(walking_position(from, to, t_x1000), w),
+        } => walking_anchor(crate::physics::walking_position(from, to, t_x1000), w),
     };
     Some(on_canvas(
         layout,

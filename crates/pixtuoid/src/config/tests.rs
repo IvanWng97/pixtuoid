@@ -1235,3 +1235,58 @@ fn load_status_is_clean_for_a_missing_file() {
         load_with_status(Path::new("/nonexistent/x/config.toml"), &mut Vec::new());
     assert!(!degraded, "a missing file is not a degraded load");
 }
+
+#[test]
+fn graphics_precedence_is_cli_then_config_then_off() {
+    use crate::GraphicsMode;
+    let cfg = |v: Option<&str>| AppConfig {
+        graphics: v.map(String::from),
+        ..AppConfig::default()
+    };
+    let resolve = |c: &AppConfig, cli| resolve_graphics(c, cli, &mut Vec::new());
+    assert_eq!(resolve(&cfg(None), None), GraphicsMode::Off);
+    assert_eq!(resolve(&cfg(Some("auto")), None), GraphicsMode::Auto);
+    assert_eq!(resolve(&cfg(Some("sixel")), None), GraphicsMode::Sixel);
+    assert_eq!(
+        resolve(&cfg(Some("auto")), Some(GraphicsMode::Off)),
+        GraphicsMode::Off
+    );
+    assert_eq!(
+        resolve(&cfg(None), Some(GraphicsMode::Iterm2)),
+        GraphicsMode::Iterm2
+    );
+}
+
+/// The key round-trips through the file under its documented name.
+#[test]
+fn graphics_parses_from_the_file() {
+    let cfg: AppConfig = toml::from_str("graphics = \"kitty\"\n").expect("parses");
+    assert_eq!(
+        resolve_graphics(&cfg, None, &mut Vec::new()),
+        crate::GraphicsMode::Kitty
+    );
+}
+
+/// A typo'd value warns and falls back rather than failing the whole load, and
+/// warns even when the flag wins — the warning is the only sign the file is
+/// stale.
+#[test]
+fn an_unknown_graphics_value_warns_and_falls_back_to_off() {
+    let cfg = AppConfig {
+        graphics: Some("kity".into()),
+        ..AppConfig::default()
+    };
+    let mut w = Vec::new();
+    assert_eq!(
+        resolve_graphics(&cfg, None, &mut w),
+        crate::GraphicsMode::Off
+    );
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(w[0].contains("unknown graphics \"kity\""), "{w:?}");
+    let mut w = Vec::new();
+    assert_eq!(
+        resolve_graphics(&cfg, Some(crate::GraphicsMode::Auto), &mut w),
+        crate::GraphicsMode::Auto
+    );
+    assert_eq!(w.len(), 1, "{w:?}");
+}

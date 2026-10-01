@@ -8,7 +8,7 @@ use pixtuoid_core::sprite::Rgb;
 
 use crate::anim::epoch_ms;
 use crate::atmosphere::Moment;
-use crate::composite::{WHITE, blend, blend_rgb};
+use crate::composite::{blend, blend_rgb};
 use crate::dither::FALLOFF_TONES;
 use crate::layout::window_run;
 use crate::sky::{Body, Sky};
@@ -66,7 +66,12 @@ impl Disc {
     /// thick cloud.
     pub(crate) fn of(sky: &Sky, buf_w: u16, top_wall_h: u16) -> Option<Self> {
         let e = sky.emitter();
-        let vis = sky.transmission().disc;
+        let vis = match e.body {
+            Body::Sun => sky.transmission().disc,
+            // A moon below the horizon shows no disc; one up fades in with the night.
+            Body::Moon if e.altitude <= 0.0 => return None,
+            Body::Moon => sky.transmission().disc * sky.nightfall(),
+        };
         if vis < MIN_DISC_VIS {
             return None;
         }
@@ -206,20 +211,6 @@ impl Blaze {
     }
 }
 
-/// How far a sun at its apex pales the wall spot from the theme's warm spill
-/// toward white.
-const WALL_SPOT_PALE: f32 = 0.6;
-
-/// The sun's spot on a side wall at `warmth`: the theme's warm spill, paling
-/// toward white as the sun climbs.
-pub(crate) fn wall_spot_colour(warmth: f32, theme: &Theme) -> Rgb {
-    blend_rgb(
-        theme.lighting.sun_spill,
-        WHITE,
-        (1.0 - warmth) * WALL_SPOT_PALE,
-    )
-}
-
 /// The window sky one frame shows: its disc and stars, and every tone they
 /// paint in, resolved once so a pixel only picks among them.
 pub(crate) struct SkyView {
@@ -328,6 +319,39 @@ impl PaneSky<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A moon below the horizon shows no disc, and one up fades in with the
+    /// night rather than switching on at dusk.
+    #[test]
+    fn a_moon_shows_only_when_up_and_fades_in_after_dusk() {
+        use crate::sky::Weather;
+        let sky = |d, h| crate::sky::Sky::at_with(crate::localclock::on_day(d, h), Weather::Clear);
+        let disc = |s: &crate::sky::Sky| Disc::of(s, 96, 40);
+        let new_moon = (1..=31u32)
+            .find(|&d| sky(d, 23).moon_phase() < 0.05)
+            .expect("a new moon in January");
+        assert!(
+            disc(&sky(new_moon, 23)).is_none(),
+            "a new moon is down at 23:00"
+        );
+        let full = (1..=31u32)
+            .find(|&d| sky(d, 23).moon_phase() > 0.95)
+            .expect("a full moon in January");
+        let dusk = crate::sky::Sky::at_with(
+            crate::localclock::on_day(full, 20) + std::time::Duration::from_secs(20 * 60),
+            Weather::Clear,
+        );
+        let (dusk, late) = (
+            disc(&dusk).expect("a full moon is up just after dusk"),
+            disc(&sky(full, 23)).expect("and late in the night"),
+        );
+        assert!(
+            dusk.vis < late.vis,
+            "{} at dusk vs {} at 23:00",
+            dusk.vis,
+            late.vis
+        );
+    }
     use crate::sky::Weather;
 
     fn view(hour: u32) -> SkyView {

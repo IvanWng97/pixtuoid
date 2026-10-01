@@ -1,6 +1,6 @@
 //! Ambient pass — non-character, non-furniture effects painted between
-//! the background and the y-sorted drawables: sun spot on wall, dust
-//! motes in window spill, ceiling halos above active monitors.
+//! the background and the y-sorted drawables: dust motes in window spill,
+//! ceiling halos above active monitors.
 
 use std::time::SystemTime;
 
@@ -77,7 +77,6 @@ pub(super) fn dust_mote_positions(
 }
 
 pub(super) fn paint_ambient(ctx: &mut PaintCtx<'_>, moment: &Moment, monitor_halos: &[Emitter]) {
-    paint_sun_spot(ctx.buf, ctx.theme, ctx.layout, moment);
     paint_dust_motes(ctx.buf, ctx.theme, ctx.layout, ctx.floor.floor_seed, moment);
     paint_ceiling_halos(ctx.buf, ctx.theme, monitor_halos);
 }
@@ -106,9 +105,6 @@ pub(super) fn paint_dust_motes(
     moment: &Moment,
 ) {
     let look = &moment.look;
-    if look.sun_spot.is_none() {
-        return;
-    }
     // Motes scatter the DIRECT beam, so density rides [`Look::beam`](crate::atmosphere::Look::beam) (full
     // under clear sky, faint through haze/snow-glare, zero under thick
     // overcast/rain); `look.sunlight` adds the daylight ramp.
@@ -125,18 +121,6 @@ pub(super) fn paint_dust_motes(
             let strength = alpha * 0.7 * visibility;
             blend_pixel(buf, x, y, warm, strength);
         }
-    }
-}
-
-/// The sun's spot on a side wall, in the colour its warmth gives it.
-pub(super) fn paint_sun_spot(buf: &mut RgbBuffer, theme: &Theme, layout: &Layout, moment: &Moment) {
-    let look = &moment.look;
-    if let (Some(spot), Some(sun)) = (crate::lighting::wall_spot(layout, look), look.sun_spot) {
-        paint_light(
-            buf,
-            &spot,
-            crate::celestial::wall_spot_colour(sun.warmth, theme),
-        );
     }
 }
 
@@ -244,95 +228,6 @@ mod tests {
     }
 
     #[test]
-    fn sun_spot_scales_with_the_beam() {
-        let theme = &crate::theme::NORMAL;
-        let layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
-        // 07:00 → East-wall spot; weather varies by day, so search days for each.
-        let morning = |day: u32| crate::localclock::on_day(day, 7);
-        let find = |want: Weather| {
-            (0..60u32)
-                .map(morning)
-                .find(|t| Sky::at(*t).weather() == want)
-        };
-        let clear_t = find(Weather::Clear).expect("a clear morning");
-        let snow_t = find(Weather::Snow).expect("a snow morning");
-        let rain_t = find(Weather::Rain).expect("a rain morning");
-
-        let brightness = |now: SystemTime| -> u64 {
-            let mut buf = RgbBuffer::filled(
-                192,
-                80,
-                Rgb {
-                    r: 20,
-                    g: 20,
-                    b: 24,
-                },
-            );
-            paint_sun_spot(
-                &mut buf,
-                theme,
-                &layout,
-                &Moment::resolve(Sky::at(now), theme, 0.0, now),
-            );
-            let mut sum = 0u64;
-            for y in 0..buf.height() {
-                for x in 0..buf.width() {
-                    let p = buf.get(x, y);
-                    sum += p.r as u64 + p.g as u64 + p.b as u64;
-                }
-            }
-            sum
-        };
-        let base = 192u64 * 80 * (20 + 20 + 24);
-        let clear = brightness(clear_t);
-        let snow = brightness(snow_t);
-        let rain = brightness(rain_t);
-
-        assert!(
-            clear > snow,
-            "clear beam brighter than snow ({clear} vs {snow})"
-        );
-        assert!(
-            snow > base,
-            "snow still throws a faint spot ({snow} vs {base})"
-        );
-        assert_eq!(rain, base, "rain has no direct beam → no sun spot");
-    }
-
-    // At the exact sunrise instant BOTH `spot.intensity` and `Sky::beam`
-    // are exactly zero (`sin(pi * 0.0) == 0.0`, no precision fuzz), so the
-    // no-op must hold whichever early-return catches it.
-    #[test]
-    fn sun_spot_paints_nothing_at_the_exact_sunrise_instant() {
-        let theme = &crate::theme::NORMAL;
-        let layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
-        let sunrise = crate::localclock::at_hour(5);
-        let moment = Moment::resolve(Sky::at(sunrise), theme, 0.0, sunrise);
-        let spot = moment
-            .look
-            .sun_spot
-            .expect("sun is up (just risen) at 05:00");
-        assert_eq!(spot.intensity, 0.0, "altitude is exactly zero at sunrise");
-
-        let fill = Rgb {
-            r: 20,
-            g: 20,
-            b: 24,
-        };
-        let mut buf = RgbBuffer::filled(192, 80, fill);
-        paint_sun_spot(&mut buf, theme, &layout, &moment);
-        for y in 0..buf.height() {
-            for x in 0..buf.width() {
-                assert_eq!(
-                    buf.get(x, y),
-                    fill,
-                    "zero-intensity sun spot must paint nothing"
-                );
-            }
-        }
-    }
-
-    #[test]
     fn ceiling_halo_near_edge_does_not_panic() {
         let mut buf = RgbBuffer::filled(6, 4, Rgb { r: 0, g: 0, b: 0 });
         let theme = &crate::theme::CYBERPUNK; // Dark theme so halos paint.
@@ -360,32 +255,5 @@ mod tests {
             7,
             &Moment::resolve(Sky::at(now), theme, 0.0, now),
         );
-    }
-
-    #[test]
-    fn sun_spot_zero_wall_band_returns_early() {
-        let theme = &crate::theme::NORMAL;
-        // top_margin == WALL_BAND_TO_TOP_MARGIN → wall_band_h saturating_sub to 0.
-        let mut layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
-        layout.top_margin = crate::layout::WALL_BAND_TO_TOP_MARGIN;
-        // A real beam under Clear, so execution reaches the wall_band_h == 0
-        // guard rather than an earlier return.
-        let clear_morning = (1..=60u32)
-            .map(|day| crate::localclock::on_day(day, 7))
-            .find(|t| Sky::at(*t).weather() == Weather::Clear)
-            .expect("a clear morning");
-        let fill = Rgb {
-            r: 20,
-            g: 20,
-            b: 24,
-        };
-        let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, fill);
-        let moment = Moment::resolve(Sky::at(clear_morning), theme, 0.0, clear_morning);
-        paint_sun_spot(&mut buf, theme, &layout, &moment);
-        for y in 0..buf.height() {
-            for x in 0..buf.width() {
-                assert_eq!(buf.get(x, y), fill, "zero wall band → no sun spot");
-            }
-        }
     }
 }

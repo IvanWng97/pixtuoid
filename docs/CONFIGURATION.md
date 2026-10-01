@@ -30,6 +30,7 @@ kind = "dog"        # name omitted → "Office Dog"
 | `theme` | `"normal"` | Color theme — `normal`, `cyberpunk`, `dracula`, `tokyo-night`, `catppuccin`, `gruvbox`. |
 | `max-desks` | auto | Cap desks per floor (≥ 1; `0` is ignored with a warning). If unset, auto-computed from terminal size. Excess agents overflow to additional floors. Applies to the `run` TUI; `pixtuoid floating` sizes its floors from the window. |
 | `pack-dir` | — | Custom sprite pack directory. Supports `~` expansion. Without it, a pack in `${XDG_CONFIG_HOME:-~/.config}/pixtuoid/sprites/` is used when present, and the bundled one if that fails to load. See [Custom sprite packs](#custom-sprite-packs). |
+| `graphics` | `"off"` | Terminal graphics (kitty/iTerm2/SIXEL) for the cutaway office: `auto` uses them when the terminal supports them; `kitty`, `sixel` or `iterm2` uses that protocol whatever the terminal answers. `off` never queries the terminal. `run --graphics <value>` overrides it; an unknown value is ignored with a warning. `pixtuoid doctor` shows what your terminal supports. |
 | `[[pets]]` | all kinds, default names | One stanza per pet. `kind` (`"cat"`/`"dog"`) is required; `name` is optional (the hover-tooltip label, default `Office Cat`/`Office Dog`). Omit the section for all pets; `pets = []` for none; an unknown `kind` is skipped without affecting other settings. Keep it last (it's a table section). |
 
 ## System-managed (don't edit — pixtuoid writes these for you)

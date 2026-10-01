@@ -36,20 +36,40 @@ use super::{
 };
 
 pub fn run(cfg: RunConfig) -> Result<()> {
+    // Before tokio and the boot caps: the query reads the terminal while no
+    // other thread does, and once the cutaway paints, the boot seed is the
+    // plan's geometry.
+    let tui = if cfg.headless {
+        None
+    } else {
+        Some(boot_tui(&cfg)?)
+    };
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    rt.block_on(async move { run_async(cfg).await })
+    rt.block_on(async move { run_async(cfg, tui).await })
 }
 
-async fn run_async(cfg: RunConfig) -> Result<()> {
+/// Load the pack, whose densest art the plan fits, and plan.
+fn boot_tui(cfg: &RunConfig) -> Result<pixtuoid_core::sprite::format::Pack> {
+    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(cfg.pack.clone())?;
+    let plan = crate::graphics::plan_this_terminal(
+        cfg.graphics,
+        pack.max_density_variant(),
+        crate::graphics::run_probe,
+    );
+    tracing::info!(mode = ?cfg.graphics, plan = ?plan, "graphics plan");
+    Ok(pack)
+}
+
+async fn run_async(cfg: RunConfig, tui: Option<pixtuoid_core::sprite::format::Pack>) -> Result<()> {
     let RunConfig {
         socket,
         projects_root,
         codex_sessions_root,
-        pack,
+        pack: _,
         desk_cap,
-        headless,
+        headless: _,
         config_path,
         theme,
         pets,
@@ -57,6 +77,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         log_path,
         first_run,
         audio,
+        graphics: _,
     } = cfg;
     // Audio owns no state here: `run_tui` builds the AudioController, which owns
     // the device thread and tears it down on Drop at any exit.
@@ -67,7 +88,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     let socket_path = socket.unwrap_or_else(ClaudeCodeSource::default_socket_path);
     // The terminal-size query stays here in the shell (the injected `measure`);
     // the policy is the covered + mutation-tested `resolve_boot_caps`.
-    let boot_caps = resolve_boot_caps(desk_cap, headless, compute_boot_capacities);
+    let boot_caps = resolve_boot_caps(desk_cap, tui.is_none(), compute_boot_capacities);
     // The shared spine — ONE authority with `floating::run`. The tasks live on
     // this fn's runtime; `_source_handles` is an inert anchor (see Pipeline's doc).
     let super::pipeline::Pipeline {
@@ -83,26 +104,27 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         boot_caps,
     );
 
-    if headless {
-        headless_loop(scene_rx, health_rx).await
-    } else {
-        crate::tui::run_tui(crate::tui::TuiSession {
-            scene_rx,
-            pack,
-            floor_caps,
-            theme,
-            config_path,
-            desk_cap,
-            pets,
-            source_health: health_rx,
-            socket_path,
-            connected,
-            log_path,
-            first_run,
-            focus_roots,
-            audio_cfg: audio,
-        })
-        .await
+    match tui {
+        None => headless_loop(scene_rx, health_rx).await,
+        Some(pack) => {
+            crate::tui::run_tui(crate::tui::TuiSession {
+                scene_rx,
+                pack,
+                floor_caps,
+                theme,
+                config_path,
+                desk_cap,
+                pets,
+                source_health: health_rx,
+                socket_path,
+                connected,
+                log_path,
+                first_run,
+                focus_roots,
+                audio_cfg: audio,
+            })
+            .await
+        }
     }
 }
 
