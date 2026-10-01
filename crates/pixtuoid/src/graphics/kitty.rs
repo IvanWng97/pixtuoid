@@ -78,11 +78,16 @@ pub(crate) fn transmit(id: u32, image: &TileImage, tmux: bool) -> Vec<u8> {
     out
 }
 
-/// The cells that show image `id` over `tile`. Every cell names its row and
-/// column, so none leans on the cell to its left being there.
-pub(crate) fn placeholders(id: u32, tile: Tile) -> impl Iterator<Item = Placeholder> {
+/// The cells that show image `id` over `tile`; `None` for a tile wider or
+/// taller than [`DIACRITICS`] can number. Every cell names its row and column,
+/// so none leans on the cell to its left being there.
+pub(crate) fn placeholders(id: u32, tile: Tile) -> Option<impl Iterator<Item = Placeholder>> {
+    let numbered = |n: u16| usize::from(n) <= DIACRITICS.len();
+    if !(numbered(tile.cols) && numbered(tile.rows)) {
+        return None;
+    }
     let [_, r, g, b] = id.to_be_bytes();
-    (0..tile.rows).flat_map(move |y| {
+    Some((0..tile.rows).flat_map(move |y| {
         (0..tile.cols).map(move |x| Placeholder {
             col: tile.col + x,
             row: tile.row + y,
@@ -95,7 +100,7 @@ pub(crate) fn placeholders(id: u32, tile: Tile) -> impl Iterator<Item = Placehol
             .collect(),
             fg: Color::Rgb(r, g, b),
         })
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -177,6 +182,7 @@ mod tests {
         let id = image_id(at).expect("in range");
         assert_eq!(id, 42);
         let cells: Vec<_> = placeholders(id, at)
+            .expect("a kitty tile")
             .map(|p| (p.col, p.row, p.symbol, p.fg))
             .collect();
         let fg = Color::Rgb(0, 0, 42);
@@ -197,6 +203,12 @@ mod tests {
         assert_eq!(DIACRITICS, ['\u{0305}', '\u{030D}', '\u{030E}', '\u{0310}']);
         let shape = ImageProtocol::Kitty.tile();
         assert!(usize::from(shape.cols.max(shape.rows)) <= DIACRITICS.len());
+    }
+
+    #[test]
+    fn a_tile_past_the_diacritics_has_no_placeholders() {
+        let shape = ImageProtocol::Sixel.tile();
+        assert!(placeholders(1, tile(0, shape.cols, shape.rows)).is_none());
     }
 
     #[test]

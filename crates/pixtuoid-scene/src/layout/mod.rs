@@ -45,11 +45,11 @@ pub use roster::{
 pub(crate) use roster::{NEON_PANEL_H, coffee_machine_cols, desk_has_cabinet};
 // Painter tests tile walls no `SceneLayout` has.
 pub(crate) use windows::{
-    NEON_DOOR_WALL_W, WINDOW_TOP, WINDOW_W, WindowBay, door_x, glass_rows, wall_trim_row,
-    window_frame, window_posts, window_rows, window_run,
+    NEON_DOOR_WALL_W, WINDOW_TOP, WindowBay, door_x, glass_rows, wall_trim_row, window_frame,
+    window_posts, window_rows, window_run,
 };
 #[cfg(test)]
-pub(crate) use windows::{TWO_WINDOW_WALL_W, window_bays, window_slots};
+pub(crate) use windows::{WINDOW_W, window_bays, window_slots};
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
 pub(crate) use coarse::{
     COARSE_CELL_SIZE, CoarseGrid, cell_anchor, cell_center, cell_walkable, snap,

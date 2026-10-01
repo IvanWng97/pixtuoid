@@ -27,7 +27,7 @@ use super::palette::{RgbLut, WHITE, blend_pixel, blend_rgb};
 
 use crate::atmosphere::Moment;
 use crate::layout::{
-    Bounds, Layout, WINDOW_W, WindowBay, glass_rows, wall_trim_row, window_frame, window_posts,
+    Bounds, Layout, Size, WindowBay, glass_rows, wall_trim_row, window_frame, window_posts,
     window_rows, window_run,
 };
 use crate::sky::{Sky, Weather};
@@ -182,7 +182,7 @@ pub(super) fn paint_floor_and_walls(
             Bounds {
                 x: w.x,
                 y: window_y,
-                width: WINDOW_W,
+                width: w.w,
                 height: window_h,
             },
             window_frame,
@@ -363,7 +363,7 @@ fn paint_floor_to_ceiling_window(
             if px >= buf.width() || py >= buf.height() {
                 continue;
             }
-            if window_frame(dx, dy, h) {
+            if window_frame(dx, dy, Size { w, h }) {
                 buf.put(px, py, frame);
                 continue;
             }

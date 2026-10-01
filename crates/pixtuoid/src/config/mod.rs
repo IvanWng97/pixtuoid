@@ -27,6 +27,10 @@ pub struct AppConfig {
     /// Supports `~` expansion.
     #[serde(rename = "pack-dir")]
     pub pack_dir: Option<String>,
+    /// A [`GraphicsMode`](crate::GraphicsMode) name, raw so a typo warns in
+    /// [`resolve_graphics`] instead of failing the whole load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graphics: Option<String>,
     #[serde(
         rename = "last-seen-version",
         default,
@@ -440,6 +444,30 @@ pub fn resolve_theme(
         });
     }
     Ok(config_theme.unwrap_or(&NORMAL))
+}
+
+/// Resolve CLI + config into the run's [`GraphicsMode`](crate::GraphicsMode)
+/// (CLI > config > default). The config value is checked even when the flag
+/// wins, as in [`resolve_theme`], and by clap's own parser, so the file and the
+/// flag accept the same names.
+pub fn resolve_graphics(
+    config: &AppConfig,
+    cli: Option<crate::GraphicsMode>,
+    warnings: &mut Vec<String>,
+) -> crate::GraphicsMode {
+    let configured = config.graphics.as_deref().and_then(|v| {
+        let mode = <crate::GraphicsMode as clap::ValueEnum>::from_str(v, false).ok();
+        if mode.is_none() {
+            warn_user(
+                warnings,
+                format!(
+                    "unknown graphics {v:?} in config — ignoring (falling back to the default)"
+                ),
+            );
+        }
+        mode
+    });
+    cli.or(configured).unwrap_or_default()
 }
 
 /// Resolve config into the office's `Pet`s. An unknown `kind` is warn-skipped —

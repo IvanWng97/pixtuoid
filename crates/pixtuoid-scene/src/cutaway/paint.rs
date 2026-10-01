@@ -11,7 +11,7 @@ use crate::cutaway::order::{Span, depth_sort};
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::cutaway::shade::{Ramp, fill, slab};
 use crate::layout::{
-    Bounds, DESK_H, Depth, Fixture, FixtureKind, Layer, Layout, Point, Station, Tie,
+    Bounds, DESK_H, Depth, Fixture, FixtureKind, Layer, Layout, Point, Size, Station, Tie,
 };
 use crate::pixel_painter::SimFrame;
 use crate::render_scale::RenderScale;
@@ -298,16 +298,14 @@ impl<'a> DrawList<'a> {
         })
     }
 
-    /// Each drawn agent's `body` as `(agent index, box)`, in draw order: the
-    /// topmost body at a point is the last one containing it.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the cutaway's hit tests read them")
-    )]
-    pub(crate) fn hover_spans(&self) -> impl Iterator<Item = (usize, Span)> + '_ {
-        self.pieces.iter().filter_map(|p| match p.kind {
-            PieceKind::Character { label, body, .. } => Some((label.agent_idx, body)),
-            _ => None,
+    /// Each piece's hover box and the agent it shows, in draw order: a
+    /// character's `body`, every other piece's span showing none.
+    pub(crate) fn hover_spans(
+        &self,
+    ) -> impl Iterator<Item = (Span, Option<pixtuoid_core::AgentId>)> + '_ {
+        self.pieces.iter().map(|p| match &p.kind {
+            PieceKind::Character { figure, body, .. } => (*body, Some(figure.key.frame.agent_id)),
+            _ => (p.span, None),
         })
     }
 }
@@ -2039,8 +2037,15 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, pen: Pen, buf:
     let window_h = rows.end - rows.start;
     for bay in layout.window_bays() {
         for dy in 0..window_h {
-            for dx in 0..crate::layout::WINDOW_W {
-                if crate::layout::window_frame(dx, dy, window_h) {
+            for dx in 0..bay.w {
+                if crate::layout::window_frame(
+                    dx,
+                    dy,
+                    Size {
+                        w: bay.w,
+                        h: window_h,
+                    },
+                ) {
                     let cell = ArtRect {
                         x: pen.art(bay.x + dx),
                         y: pen.art(rows.start + dy),
@@ -2114,13 +2119,17 @@ fn push_windows(office: Office<'_>, moment: &Moment, order: &mut Vec<(Span, Piec
         density,
     );
     let d = density.get();
-    let (w, h) = (crate::layout::WINDOW_W * d, window_h * d);
     for bay in layout.window_bays() {
+        let size = Size {
+            w: bay.w,
+            h: window_h,
+        };
+        let (w, h) = (bay.w * d, window_h * d);
         let (x0, y0) = (pen.art(bay.x).0, pen.art(rows.start).0);
         let px = (0..h)
             .flat_map(|ay| (0..w).map(move |ax| (ax, ay)))
             .map(|(ax, ay)| {
-                if crate::layout::window_frame(ax / d, ay / d, window_h) {
+                if crate::layout::window_frame(ax / d, ay / d, size) {
                     return None;
                 }
                 // The strip's art pixel: x from the run's west end, so one city
@@ -2139,7 +2148,7 @@ fn push_windows(office: Office<'_>, moment: &Moment, order: &mut Vec<(Span, Piec
             })
             .collect();
         order.push((
-            Span::new(bay.x, rows.start, crate::layout::WINDOW_W, window_h, 0).with_depth(0),
+            Span::new(bay.x, rows.start, bay.w, window_h, 0).with_depth(0),
             PieceKind::Glass {
                 view: WindowView {
                     x: x0,
@@ -4243,9 +4252,16 @@ pub(crate) mod tests {
         let (mut glass, mut buildings) = (0, 0);
         for bay in layout.window_bays() {
             for dy in 0..window_h {
-                for dx in 0..crate::layout::WINDOW_W {
+                for dx in 0..bay.w {
                     let (ax, ay) = (pen.art(bay.x + dx).0, pen.art(rows.start + dy).0);
-                    if crate::layout::window_frame(dx, dy, window_h) {
+                    if crate::layout::window_frame(
+                        dx,
+                        dy,
+                        Size {
+                            w: bay.w,
+                            h: window_h,
+                        },
+                    ) {
                         assert_eq!(
                             at(ax, ay),
                             theme.surface.window_frame,
@@ -5551,7 +5567,10 @@ S B B B B B B S
                 .iter()
                 .filter(|p| matches!(p.kind, PieceKind::Character { .. }))
                 .collect();
-            let hovers: Vec<(usize, Span)> = list.hover_spans().collect();
+            let hovers: Vec<(pixtuoid_core::AgentId, Span)> = list
+                .hover_spans()
+                .filter_map(|(body, agent)| Some((agent?, body)))
+                .collect();
             assert_eq!(hovers.len(), pieces.len());
             assert_eq!(hovers.len(), frame.characters.len());
             for ((_, body), piece) in hovers.iter().zip(&pieces) {
@@ -5574,7 +5593,9 @@ S B B B B B B S
                 );
             }
             assert_eq!(
-                list.labels().map(|l| l.agent_idx).collect::<Vec<_>>(),
+                list.labels()
+                    .map(|l| frame.agents[l.agent_idx].agent_id)
+                    .collect::<Vec<_>>(),
                 hovers.iter().map(|&(agent, _)| agent).collect::<Vec<_>>(),
             );
         }
@@ -6093,25 +6114,8 @@ S B B B B B B S
             neon: crate::floor::NeonLevels::ALERT,
             ..empty_frame(&layout)
         };
-        let mut list = list_at(&frame, office, 23);
+        let list = list_at(&frame, office, 23);
         let pen = Pen::for_pack(scale, &pack);
-        // The neon hangs on plain wall, so a pane is hung in its halo.
-        let neon = crate::layout::NEON_PANEL;
-        let (x, w) = (neon.x + neon.width, 2);
-        let (aw, ah) = (pen.art(w).0, pen.art(neon.height).0);
-        list.pieces.push(Piece {
-            span: Span::new(x, neon.y, w, neon.height, 0),
-            kind: PieceKind::Glass {
-                view: WindowView {
-                    x: pen.art(x).0,
-                    y: pen.art(neon.y).0,
-                    w: aw,
-                    px: vec![Some(theme.surface.window_frame); usize::from(aw * ah)],
-                },
-            },
-            shadow: None,
-            fingerprint: 0,
-        });
         let blank = || {
             RgbBuffer::filled(
                 scale.to_buffer(layout.buf_w),

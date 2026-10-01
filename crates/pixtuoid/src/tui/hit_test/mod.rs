@@ -5,7 +5,7 @@ use pixtuoid_core::AgentId;
 
 use pixtuoid_scene::layout::{Anchor, Bounds, Layout, Point, Size, anchored_top_left};
 use pixtuoid_scene::pet::PetKind;
-use pixtuoid_scene::pixel_painter::AgentFrame;
+use pixtuoid_scene::pixel_painter::{AgentFrame, MascotFrame};
 
 use crate::tui::geometry::CellArea;
 
@@ -43,9 +43,7 @@ fn on_rect(b: Bounds, cell: CellArea) -> bool {
     )
 }
 
-/// Whether `cell` shows the office pet's sprite. `pet_pos` is its center
-/// anchor in pixel coordinates; `anim_name` selects the bounding-box size via
-/// `PetKind::hitbox`.
+/// Whether `cell` shows the office pet's sprite.
 pub(crate) fn hit_test_pet(kind: PetKind, pet_pos: Point, anim_name: &str, cell: CellArea) -> bool {
     box_hit(Anchor::Center, pet_pos, kind.hitbox(anim_name), cell)
 }
@@ -66,6 +64,15 @@ fn box_hit(anchor: Anchor, pos: Point, size: Size, cell: CellArea) -> bool {
 /// custom-pack mascot keeps its click box aligned with what's drawn.
 pub(crate) fn hit_test_mascot(pos: Point, w: u16, h: u16, cell: CellArea) -> bool {
     box_hit(Anchor::Center, pos, Size { w, h }, cell)
+}
+
+/// The mascot under `cell` painted on TOP: `mascots` is in `sort_drawables`'
+/// paint order, so the last hit.
+pub(crate) fn topmost_mascot_at(mascots: &[MascotFrame], cell: CellArea) -> Option<&MascotFrame> {
+    mascots
+        .iter()
+        .rev()
+        .find(|m| hit_test_mascot(m.pos, m.w, m.h, cell))
 }
 
 #[cfg(test)]
