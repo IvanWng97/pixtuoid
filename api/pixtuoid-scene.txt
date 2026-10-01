@@ -140,10 +140,10 @@ pub struct pixtuoid_scene::floor::FloorCtx
 pub pixtuoid_scene::floor::FloorCtx::cache: crate::frame_cache::FrameCache
 pub pixtuoid_scene::floor::FloorCtx::door_anim_max_ms: u64
 pub pixtuoid_scene::floor::FloorCtx::history: pixtuoid_scene::pose::PoseHistory
-pub pixtuoid_scene::floor::FloorCtx::light: pixtuoid_scene::floor::LightingState
 pub pixtuoid_scene::floor::FloorCtx::motion: std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, pixtuoid_scene::motion::MotionState>
 pub pixtuoid_scene::floor::FloorCtx::overlay: pixtuoid_core::walkable::OccupancyOverlay
 pub pixtuoid_scene::floor::FloorCtx::router: pixtuoid_scene::pathfind::AStarRouter
+pub pixtuoid_scene::floor::FloorCtx::vacancy_dim: pixtuoid_scene::floor::VacancyDim
 impl pixtuoid_scene::floor::FloorCtx
 pub fn pixtuoid_scene::floor::FloorCtx::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::FloorCtx::frame_layout(&mut self, u16, u16, u64) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::Layout>>
@@ -256,24 +256,6 @@ impl<'a> core::marker::Unpin for pixtuoid_scene::floor::FrameInputs<'a>
 impl<'a> core::marker::UnsafeUnpin for pixtuoid_scene::floor::FrameInputs<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::FrameInputs<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::FrameInputs<'a>
-pub struct pixtuoid_scene::floor::LightingState
-impl pixtuoid_scene::floor::LightingState
-pub const pixtuoid_scene::floor::LightingState::EMPTY_DEBOUNCE_MS: u64
-pub const pixtuoid_scene::floor::LightingState::FADE_TAU_MS: u64
-pub const pixtuoid_scene::floor::LightingState::MIN_LEVEL: f32
-pub fn pixtuoid_scene::floor::LightingState::level(&self) -> f32
-pub fn pixtuoid_scene::floor::LightingState::new() -> Self
-pub fn pixtuoid_scene::floor::LightingState::snap_to_empty(&mut self)
-pub fn pixtuoid_scene::floor::LightingState::tick(&mut self, bool, std::time::SystemTime) -> f32
-impl core::default::Default for pixtuoid_scene::floor::LightingState
-pub fn pixtuoid_scene::floor::LightingState::default() -> Self
-impl core::marker::Freeze for pixtuoid_scene::floor::LightingState
-impl core::marker::Send for pixtuoid_scene::floor::LightingState
-impl core::marker::Sync for pixtuoid_scene::floor::LightingState
-impl core::marker::Unpin for pixtuoid_scene::floor::LightingState
-impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::LightingState
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::LightingState
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::LightingState
 pub struct pixtuoid_scene::floor::PerFloor
 pub pixtuoid_scene::floor::PerFloor::buf: pixtuoid_core::sprite::RgbBuffer
 pub pixtuoid_scene::floor::PerFloor::ctx: pixtuoid_scene::floor::FloorCtx
@@ -340,6 +322,24 @@ impl core::marker::Unpin for pixtuoid_scene::floor::SteppedFloor
 impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::SteppedFloor
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::SteppedFloor
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::SteppedFloor
+pub struct pixtuoid_scene::floor::VacancyDim
+impl pixtuoid_scene::floor::VacancyDim
+pub const pixtuoid_scene::floor::VacancyDim::EMPTY_DEBOUNCE_MS: u64
+pub const pixtuoid_scene::floor::VacancyDim::FADE_TAU_MS: u64
+pub const pixtuoid_scene::floor::VacancyDim::MIN_LEVEL: f32
+pub fn pixtuoid_scene::floor::VacancyDim::level(&self) -> f32
+pub fn pixtuoid_scene::floor::VacancyDim::new() -> Self
+pub fn pixtuoid_scene::floor::VacancyDim::snap_to_empty(&mut self)
+pub fn pixtuoid_scene::floor::VacancyDim::tick(&mut self, bool, std::time::SystemTime) -> f32
+impl core::default::Default for pixtuoid_scene::floor::VacancyDim
+pub fn pixtuoid_scene::floor::VacancyDim::default() -> Self
+impl core::marker::Freeze for pixtuoid_scene::floor::VacancyDim
+impl core::marker::Send for pixtuoid_scene::floor::VacancyDim
+impl core::marker::Sync for pixtuoid_scene::floor::VacancyDim
+impl core::marker::Unpin for pixtuoid_scene::floor::VacancyDim
+impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::VacancyDim
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::VacancyDim
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::VacancyDim
 pub fn pixtuoid_scene::floor::build_floor_scene(&pixtuoid_core::state::SceneState, usize) -> alloc::vec::Vec<pixtuoid_scene::floor::ProjectedSlot>
 pub fn pixtuoid_scene::floor::floor_capacity(u16, u16, u64) -> usize
 pub fn pixtuoid_scene::floor::floor_seed(usize) -> u64
