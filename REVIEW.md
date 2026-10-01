@@ -141,7 +141,7 @@ invariant-breaking sequence against:
    defense (shim exit-0, config-never-wipe, liveness ladders) stays.
 6. **Naming**: every new or renamed name, `pub(crate)` and modules included,
    is faithful, clear and concise. Each finding cites what the name breaks;
-   `issue (non-blocking)` unless it misleads about behavior or safety.
+   severity per [Severity](#severity), non-blocking by default.
    - **Faithful**: it says what the item is or does at head; a behavior change
      renames it.
    - **Clear**: a reader without this PR's context reads it right. One concept,
