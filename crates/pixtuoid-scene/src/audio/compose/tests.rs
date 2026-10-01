@@ -420,8 +420,7 @@ fn night_hats_articulate_above_the_v1_floor() {
 /// order its noise is drawn in moves this.
 #[test]
 fn a_seeded_groove_lays_every_hit_where_it_did() {
-    let fold = |h: u64, v: u32| (h ^ u64::from(v)).wrapping_mul(0x0000_0100_0000_01b3);
-    let mut h = 0xcbf2_9ce4_8422_2325_u64;
+    let mut words = Vec::new();
     let beat_s = 60.0 / 74.0;
     let lanes = DAY_GROOVES
         .iter()
@@ -432,12 +431,11 @@ fn a_seeded_groove_lays_every_hit_where_it_did() {
         )));
     for (hits, kicks) in lanes {
         for (at, kind, gain) in hits {
-            h = fold(fold(fold(h, at.to_bits()), kind as u32), gain.to_bits());
+            words.extend([at.to_bits(), kind as u32, gain.to_bits()]);
         }
-        for at in kicks {
-            h = fold(h, at.to_bits());
-        }
+        words.extend(kicks.into_iter().map(f32::to_bits));
     }
+    let h = pixtuoid_core::id::fnv1a(words.into_iter().map(u64::from));
     assert_eq!(h, GOLDEN, "{h:#018x}");
 }
 
