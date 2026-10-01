@@ -650,19 +650,13 @@ impl FloorSession {
         crate::overlay::build_overlay(scene, layout, now, &mut rctx, hovered)
     }
 
-    /// The neon wall-board model for `scene`. `floor` is `(current, total)`, or
-    /// `None` for a single-floor office (no cross-floor breadcrumb).
-    pub fn board(
-        &self,
-        scene: &SceneState,
-        now: SystemTime,
-        floor: Option<(usize, usize)>,
-    ) -> crate::board::BoardModel {
+    /// The neon wall-board model for `scene`, with no cross-floor breadcrumb.
+    pub fn board(&self, scene: &SceneState, now: SystemTime) -> crate::board::BoardModel {
         crate::board::build_board(
             crate::board::scene_stats(scene),
             crate::board::scene_uptime_secs(scene, now),
-            floor,
-            crate::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
+            None,
+            crate::board::office_gateway(scene),
             now,
         )
     }

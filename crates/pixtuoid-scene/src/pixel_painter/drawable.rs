@@ -879,8 +879,10 @@ mod tests {
         let first = pixtuoid_core::state::FloorLocalDeskIndex(0);
         let desk = layout.home_desks[first.0];
         let cabinet = layout
-            .filing_cabinet_top_left(first)
-            .expect("desk 0 stands a cabinet");
+            .fixtures()
+            .find(|f| f.kind == crate::layout::FixtureKind::FilingCabinet(first))
+            .expect("desk 0 stands a cabinet")
+            .at;
         let cab = pack
             .animation("filing_cabinet")
             .and_then(|a| a.frames().first())
