@@ -4,7 +4,7 @@
 //! [`SceneLayout::fixtures`].
 
 use super::{
-    Anchor, Bounds, Facing, Furniture, Lounge, MeetingRoom, MeetingTrio, PantryRoom, PlantItem,
+    Bounds, Facing, Furniture, Lounge, MeetingRoom, MeetingTrio, PantryRoom, Pivot, PlantItem,
     PlantKind, PodDecor, PodDecorItem, Point, SceneLayout, Size, WallDecor, WallDecorItem,
     WaypointKind, WindowBay, anchored_top_left, coat_rack_rect_at, furniture_def, z_sort_row,
 };
@@ -367,7 +367,7 @@ const LOUNGE_RUG_Z_LEAD: u16 = 2;
 
 /// A centre-pinned `size` box at `pos`.
 fn centred(pos: Point, size: Size) -> Bounds {
-    boxed(anchored_top_left(Anchor::Center, pos, size.w, size.h), size)
+    boxed(anchored_top_left(Pivot::Center, pos, size.w, size.h), size)
 }
 
 fn top_left(b: Bounds) -> Point {
@@ -447,7 +447,7 @@ fn centred_row(kind: FixtureKind, pos: Point, row: Furniture) -> Fixture {
         kind,
         at: pos,
         visual: centred(pos, size),
-        depth: Depth::sorted(z_sort_row(Anchor::Center, pos, size.h)),
+        depth: Depth::sorted(z_sort_row(Pivot::Center, pos, size.h)),
     }
 }
 
@@ -662,11 +662,7 @@ impl SceneLayout {
                                     kind,
                                     at: wp.pos,
                                     visual: centred(wp.pos, size),
-                                    depth: Depth::sorted(z_sort_row(
-                                        Anchor::Center,
-                                        wp.pos,
-                                        size.h,
-                                    )),
+                                    depth: Depth::sorted(z_sort_row(Pivot::Center, wp.pos, size.h)),
                                 }
                             }
                             Station::VendingMachine | Station::Printer | Station::SnackShelf => {
@@ -726,7 +722,7 @@ impl SceneLayout {
                             kind: FixtureKind::Wall { item, kind },
                             at: pos,
                             visual: boxed(pos, size),
-                            depth: Depth::sorted(z_sort_row(Anchor::TopLeft, pos, size.h)),
+                            depth: Depth::sorted(z_sort_row(Pivot::TopLeft, pos, size.h)),
                         }
                     }),
             )
@@ -866,7 +862,7 @@ impl SceneLayout {
         Some(Point {
             x: lamp.x,
             y: z_sort_row(
-                Anchor::Center,
+                Pivot::Center,
                 lamp,
                 furniture_def(Furniture::FloorLamp).visual.h,
             ),

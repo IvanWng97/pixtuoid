@@ -18,7 +18,7 @@ use crate::chitchat::{ActiveChitchat, ChitchatBubble};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
-use crate::layout::{Anchor, Depth, Facing, FixtureKind, Point, SceneLayout, Station, z_sort_row};
+use crate::layout::{Depth, Facing, FixtureKind, Pivot, Point, SceneLayout, Station, z_sort_row};
 use crate::motion::MotionState;
 use crate::pet::PetFrame;
 
@@ -451,7 +451,7 @@ fn enqueue_pet<'a>(
     )
     .h;
     drawables.push(Drawable {
-        anchor_y: z_sort_row(Anchor::Center, pos, pet_h),
+        anchor_y: z_sort_row(Pivot::Center, pos, pet_h),
         layer: Layer::Figure,
         kind: DrawableKind::Pet {
             pos,
@@ -475,7 +475,7 @@ fn enqueue_gateway_mascots<'a>(
 ) {
     for (mascot_idx, m) in mascots.iter().enumerate() {
         drawables.push(Drawable {
-            anchor_y: z_sort_row(Anchor::Center, m.pos, m.size.h),
+            anchor_y: z_sort_row(Pivot::Center, m.pos, m.size.h),
             layer: Layer::Figure,
             kind: DrawableKind::GatewayMascot {
                 mascot_idx,

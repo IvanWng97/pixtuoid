@@ -26,7 +26,7 @@ pub use decor::{
     desk_walk_anchor_facing, furniture_def, seated_foot_cell,
 };
 pub(crate) use decor::{repels_plants, seated_z_key};
-pub use placement::{Anchor, anchored_top_left, z_sort_row};
+pub use placement::{Pivot, anchored_top_left, z_sort_row};
 pub use reach::ReachSet;
 pub(crate) use rooms::meeting::{COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W, coat_rack_rect_at};
 pub(crate) use rooms::pantry::{
@@ -220,7 +220,7 @@ impl Lounge {
             x: self.couch_center.x,
             y: self.couch_center.y + LOUNGE_RUG_DY,
         };
-        let tl = anchored_top_left(Anchor::Center, centre, LOUNGE_RUG.w, LOUNGE_RUG.h);
+        let tl = anchored_top_left(Pivot::Center, centre, LOUNGE_RUG.w, LOUNGE_RUG.h);
         Bounds {
             x: tl.x,
             y: tl.y.min(ground_end.saturating_sub(LOUNGE_RUG.h)),

@@ -1246,9 +1246,9 @@ fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
     };
     for &kind in crate::pet::PetKind::ALL {
         let sleep_h = anim_h(kind.sleep_anim());
-        let sleep = z_sort_row(Anchor::Center, pos, sleep_h);
-        let walk = z_sort_row(Anchor::Center, pos, anim_h(kind.walk_anim()));
-        let sit = z_sort_row(Anchor::Center, pos, anim_h(kind.sit_anim()));
+        let sleep = z_sort_row(Pivot::Center, pos, sleep_h);
+        let walk = z_sort_row(Pivot::Center, pos, anim_h(kind.walk_anim()));
+        let sit = z_sort_row(Pivot::Center, pos, anim_h(kind.sit_anim()));
         assert!(
             sleep <= walk && sleep <= sit,
             "{kind:?}: shorter sleep sprite must not sort south of walk/sit \
@@ -1432,7 +1432,7 @@ fn settle_view_matches_the_seated_view_for_every_seat() {
 
 #[test]
 fn island_settle_z_stays_behind_the_countertop() {
-    use crate::layout::{Anchor, Furniture, TEST_DEFAULT_DESKS, WaypointKind};
+    use crate::layout::{Furniture, Pivot, TEST_DEFAULT_DESKS, WaypointKind};
     let mut exercised = false;
     for seed in 0..5u64 {
         let Some(l) = SceneLayout::compute_with_seed(240, 160, Some(TEST_DEFAULT_DESKS), seed)
@@ -1444,7 +1444,7 @@ fn island_settle_z_stays_behind_the_countertop() {
         };
         exercised = true;
         let island_z = crate::layout::z_sort_row(
-            Anchor::Center,
+            Pivot::Center,
             island,
             crate::layout::furniture_def(Furniture::KitchenIsland)
                 .visual
@@ -1535,7 +1535,7 @@ fn desk_sitter_feet_row_is_its_sort_row_on_the_documented_side_of_the_desk() {
 #[test]
 fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
     use crate::layout::{
-        Anchor, Facing, Furniture, TEST_DEFAULT_DESKS, WaypointKind, furniture_def, z_sort_row,
+        Facing, Furniture, Pivot, TEST_DEFAULT_DESKS, WaypointKind, furniture_def, z_sort_row,
     };
     let l = SceneLayout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let mut saw_back = false;
@@ -1566,7 +1566,7 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
         match w.kind {
             WaypointKind::Couch => {
                 let couch_z = z_sort_row(
-                    Anchor::Center,
+                    Pivot::Center,
                     w.pos,
                     furniture_def(Furniture::Couch).visual.h,
                 );
@@ -5003,29 +5003,29 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
 }
 
 #[test]
-fn keep_sprite_on_canvas_bounds_differ_by_anchor_convention() {
-    use crate::layout::{Anchor, Size};
+fn keep_sprite_on_canvas_bounds_differ_by_pivot() {
+    use crate::layout::{Pivot, Size};
     use crate::sim::anchors::keep_sprite_on_canvas;
     let buf = Size { w: 100, h: 80 };
     let size = Size { w: 8, h: 12 };
-    let at = |a, x, y| keep_sprite_on_canvas(a, Point { x, y }, size, buf);
+    let at = |p, x, y| keep_sprite_on_canvas(p, Point { x, y }, size, buf);
 
     // Centre-anchored: `pos` is the middle, so BOTH bounds inset by half.
-    assert_eq!(at(Anchor::Center, 0, 0), Point { x: 4, y: 6 });
-    assert_eq!(at(Anchor::Center, 99, 79), Point { x: 96, y: 74 });
+    assert_eq!(at(Pivot::Center, 0, 0), Point { x: 4, y: 6 });
+    assert_eq!(at(Pivot::Center, 99, 79), Point { x: 96, y: 74 });
     // Top-left-anchored: `u16` already floors the near edge, only the far one binds.
-    assert_eq!(at(Anchor::TopLeft, 0, 0), Point { x: 0, y: 0 });
-    assert_eq!(at(Anchor::TopLeft, 99, 79), Point { x: 92, y: 68 });
+    assert_eq!(at(Pivot::TopLeft, 0, 0), Point { x: 0, y: 0 });
+    assert_eq!(at(Pivot::TopLeft, 99, 79), Point { x: 92, y: 68 });
 
     // A canvas smaller than the sprite: `Center` falls back to its lower bound
     // rather than `clamp`'s inverted-range panic; `TopLeft` just floors at 0.
     let tiny = Size { w: 4, h: 4 };
     assert_eq!(
-        keep_sprite_on_canvas(Anchor::Center, Point { x: 2, y: 2 }, size, tiny),
+        keep_sprite_on_canvas(Pivot::Center, Point { x: 2, y: 2 }, size, tiny),
         Point { x: 4, y: 6 }
     );
     assert_eq!(
-        keep_sprite_on_canvas(Anchor::TopLeft, Point { x: 2, y: 2 }, size, tiny),
+        keep_sprite_on_canvas(Pivot::TopLeft, Point { x: 2, y: 2 }, size, tiny),
         Point { x: 0, y: 0 }
     );
 }
