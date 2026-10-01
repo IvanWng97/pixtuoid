@@ -209,18 +209,6 @@ impl FloorCtx {
         self.motion.retain(|id, _| scene.agents.contains_key(id));
     }
 
-    /// Borrow this floor's routing state as a [`crate::pose::RouteCtx`] — the
-    /// disjoint `&mut router / &overlay / &mut history / &mut motion` bundle the
-    /// pose router + label overlay need.
-    pub fn route_ctx(&mut self) -> crate::pose::RouteCtx<'_> {
-        crate::pose::RouteCtx {
-            router: &mut self.router,
-            overlay: &self.overlay,
-            history: &mut self.history,
-            motion: &mut self.motion,
-        }
-    }
-
     /// Recompute `door_anim_max_ms`: the max `duration_ms + pause_ms` over the
     /// **in-flight** entry/exit profiles only. An ARRIVED profile is excluded
     /// because `MotionState` keeps an agent's `entry` profile for its whole
@@ -375,6 +363,8 @@ pub struct FloorFrame {
     pub layout: Arc<crate::layout::Layout>,
     /// The occupied-waypoint indices this frame — the appliance audio-cue feed.
     pub occupied_waypoints: std::collections::HashSet<usize>,
+    /// Every character drawn this frame, in paint order.
+    pub agents: Vec<crate::pixel_painter::AgentFrame>,
 }
 
 /// THE shared headless frame seam: scene → `RgbBuffer`, one floor, one frame.
@@ -408,11 +398,11 @@ pub fn render_floor(
         chitchat_state: chitchat,
         debug_walkable,
     });
-    let occupied_waypoints = result.occupied_waypoints;
     frame_epilogue(fctx, coffee, result.new_coffee_carriers, world.now);
     Some(FloorFrame {
         layout,
-        occupied_waypoints,
+        occupied_waypoints: result.occupied_waypoints,
+        agents: result.agents,
     })
 }
 
@@ -574,13 +564,15 @@ pub struct FloorSession {
     pub floor: PerFloor,
     /// The office-wide cross-frame state (coffee, chitchat, audio) shared across floors.
     pub office: PerOffice,
-    /// The layout the last `render` laid out — [`FloorSession::overlay`] builds
-    /// labels against IT (not a caller-supplied one), so a painter can't pass a
-    /// layout that disagrees with the sprite pass.
+    /// The layout the last `render` laid out, so a painter can't pass a layout
+    /// that disagrees with the sprite pass.
     last_layout: Option<Arc<crate::layout::Layout>>,
     /// The occupancy the last `render` observed, so a painter reads the SAME
     /// frame's occupancy it just painted.
     last_occupied: std::collections::HashSet<usize>,
+    /// The sprites the last `render` drew, which [`FloorSession::overlay`]
+    /// labels.
+    last_agents: Vec<crate::pixel_painter::AgentFrame>,
 }
 
 impl FloorSession {
@@ -591,6 +583,7 @@ impl FloorSession {
             office: PerOffice::default(),
             last_layout: None,
             last_occupied: std::collections::HashSet::new(),
+            last_agents: Vec::new(),
         }
     }
 
@@ -619,35 +612,32 @@ impl FloorSession {
             Some(FloorFrame {
                 layout,
                 occupied_waypoints,
+                agents,
             }) => {
                 self.last_layout = Some(Arc::clone(&layout));
                 // REPLACE, never extend: the cue tracker fires on edges, so an
                 // accumulating set would re-report stale waypoints forever.
                 self.last_occupied = occupied_waypoints;
+                self.last_agents = agents;
                 Some(layout)
             }
             None => {
                 self.last_layout = None;
                 self.last_occupied.clear();
+                self.last_agents.clear();
                 None
             }
         }
     }
 
-    /// Agent labels for the LAST rendered frame, built against THIS session's
-    /// layout + route state — a painter can't hand a mismatched layout/route_ctx
-    /// pair. Empty before the first `render`.
+    /// Agent labels for the LAST rendered frame's sprites. Empty before the
+    /// first `render`.
     pub fn overlay(
-        &mut self,
+        &self,
         scene: &SceneState,
-        now: SystemTime,
         hovered: Option<AgentId>,
     ) -> Vec<crate::overlay::LabelElement> {
-        let Some(layout) = self.last_layout.as_deref() else {
-            return Vec::new();
-        };
-        let mut rctx = self.floor.ctx.route_ctx();
-        crate::overlay::build_overlay(scene, layout, now, &mut rctx, hovered)
+        crate::overlay::build_overlay(scene, &self.last_agents, hovered)
     }
 
     /// The neon wall-board model for `scene`, with no cross-floor breadcrumb.

@@ -153,6 +153,11 @@ export function startPagesLikeProxy({ upstreamPort, port }) {
         pipeline(up, createGzip({ level: 9 }), res, () => {});
       }
     );
+    // Chrome aborts requests mid-flight; an answer arriving after would reach
+    // `pipeline` with `res` closed, which THROWS rather than calling back.
+    res.on('close', () => {
+      if (!res.writableFinished) upstream.destroy();
+    });
     upstream.on('error', () => {
       if (res.headersSent) {
         res.destroy();

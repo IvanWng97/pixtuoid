@@ -5,15 +5,13 @@
 //! activity-derived `LabelTone` and each painter maps it to its own color type.
 
 use std::collections::HashMap;
-use std::time::SystemTime;
 
 use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, SceneState};
 
-use crate::layout::{DESK_W, Layout, Point};
-use crate::pixel_painter::character_anchor;
-use crate::pose::RouteCtx;
+use crate::layout::{DESK_W, Point};
+use crate::pixel_painter::AgentFrame;
 use crate::theme::Theme;
 
 /// The separator between a label's source prefix and its cwd/disambiguation
@@ -24,11 +22,6 @@ use crate::theme::Theme;
 /// boundary keeps this const out of reach of all three, so it must MATCH that
 /// char.
 const LABEL_SEP: char = '\u{b7}';
-
-/// At least `desk_north.sprite`'s extra height, with headroom — not a copy of
-/// it. Keep EVEN: a half-block painter halves it, and an odd lift rounds onto
-/// the screen.
-const RAISED_MONITOR_LABEL_LIFT: u16 = 4;
 
 /// Activity-derived label tone — backend-agnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,49 +52,22 @@ pub fn badge_hue(text: &str, theme: &Theme) -> Option<Rgb> {
         .and_then(|(prefix, _)| theme.source.by_prefix(prefix))
 }
 
-/// One agent name-badge to paint above its sprite. `anchor_px` is in SCENE-buffer
-/// pixel space; `text` is already disambiguated + truncated and carries NO ●/▸
-/// marker (each painter adds its own).
+/// One agent name-badge to paint above its sprite. `text` is already
+/// disambiguated + truncated and carries NO ●/▸ marker (each painter adds its own).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LabelElement {
+    /// The drawn sprite's [`AgentFrame::label_anchor`], in SCENE-buffer pixels.
     pub anchor_px: Point,
     pub text: String,
     pub tone: LabelTone,
     pub hovered: bool,
 }
 
-/// Gated on the anchor MATCHING the desk's seated anchor, not on the pose: an agent walking past
-/// their own desk still reads `Facing::North`, and lifting their badge mid-corridor detaches it.
-fn lift_over_raised_monitor(
-    anchor: Point,
-    agent: &pixtuoid_core::AgentSlot,
-    layout: &Layout,
-) -> Point {
-    let Some(desk) = layout.home_desk(agent.desk_index.single_floor_local()) else {
-        return anchor;
-    };
-    let facing = layout.desk_facing(agent.desk_index.single_floor_local());
-    if facing != crate::layout::Facing::North {
-        return anchor;
-    }
-    let seated =
-        crate::pixel_painter::seated_anchor_facing(desk, crate::layout::CHARACTER_SPRITE_W, facing);
-    if anchor != seated {
-        return anchor;
-    }
-    Point {
-        x: anchor.x,
-        y: anchor.y.saturating_sub(RAISED_MONITOR_LABEL_LIFT),
-    }
-}
-
-/// Build one `LabelElement` per VISIBLE agent — off-floor agents get no
-/// `character_anchor` and are skipped, so labels align 1:1 with the sprites.
+/// One `LabelElement` per sprite in `drawn`, in its paint order: an agent the
+/// painter did not draw gets no badge.
 pub fn build_overlay(
     scene: &SceneState,
-    layout: &Layout,
-    now: SystemTime,
-    rctx: &mut RouteCtx<'_>,
+    drawn: &[AgentFrame],
     hovered: Option<AgentId>,
 ) -> Vec<LabelElement> {
     let mut label_counts: HashMap<&str, usize> = HashMap::new();
@@ -109,11 +75,10 @@ pub fn build_overlay(
         *label_counts.entry(&*agent.label).or_insert(0) += 1;
     }
     let mut out = Vec::new();
-    for agent in scene.agents.values() {
-        let Some(anchor) = character_anchor(agent, layout, now, rctx) else {
+    for frame in drawn {
+        let Some(agent) = scene.agents.get(&frame.agent_id) else {
             continue;
         };
-        let anchor = lift_over_raised_monitor(anchor, agent, layout);
         let needs_disambig = label_counts.get(&*agent.label).copied().unwrap_or(0) > 1
             && agent.session_id.chars().count() >= 4;
         let raw: std::borrow::Cow<'_, str> = if needs_disambig {
@@ -134,7 +99,7 @@ pub fn build_overlay(
             }
         };
         out.push(LabelElement {
-            anchor_px: anchor,
+            anchor_px: frame.label_anchor,
             text,
             tone,
             hovered: hovered == Some(agent.agent_id),
@@ -181,9 +146,8 @@ mod tests {
     use super::{
         LabelElement, LabelTone, badge_hue, build_overlay, disambig_suffix, truncate_label,
     };
-    use crate::layout::Layout;
-    use crate::pathfind::AStarRouter;
-    use crate::pose::RouteRig;
+    use crate::layout::Point;
+    use crate::pixel_painter::AgentFrame;
     use pixtuoid_core::AgentId;
     use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
     use std::path::PathBuf;
@@ -192,10 +156,6 @@ mod tests {
 
     fn now() -> SystemTime {
         SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000)
-    }
-
-    fn layout() -> Layout {
-        Layout::compute(120, 96, Some(4)).expect("fits")
     }
 
     fn slot(label: &str, session_id: &str, desk: usize, state: ActivityState) -> AgentSlot {
@@ -241,14 +201,66 @@ mod tests {
         s
     }
 
+    /// `slot`'s sprite as drawn, its badge hung at `at`.
+    fn drawn(slot: &AgentSlot, at: Point) -> AgentFrame {
+        AgentFrame {
+            agent_id: slot.agent_id,
+            anchor: at,
+            w: 8,
+            h: 12,
+            label_anchor: at,
+        }
+    }
+
+    /// Every agent in `scene` drawn, the order immaterial to the test.
     fn overlay_of(scene: &SceneState, hovered: Option<AgentId>) -> Vec<LabelElement> {
-        build_overlay(
-            scene,
-            &layout(),
-            now(),
-            &mut RouteRig::new(AStarRouter::new()).rctx(),
-            hovered,
-        )
+        let frames: Vec<_> = scene
+            .agents
+            .values()
+            .map(|a| drawn(a, Point { x: 0, y: 0 }))
+            .collect();
+        build_overlay(scene, &frames, hovered)
+    }
+
+    #[test]
+    fn badges_follow_the_drawn_frames_in_paint_order() {
+        let a = slot("aa", "sess-aaaa", 0, active());
+        let b = slot("bb", "sess-bbbb", 1, active());
+        let (at_a, at_b) = (Point { x: 30, y: 9 }, Point { x: 12, y: 40 });
+        let frames = [drawn(&b, at_b), drawn(&a, at_a)];
+        let s = scene_of(vec![a, b]);
+        let els = build_overlay(&s, &frames, None);
+        let got: Vec<_> = els.iter().map(|e| (e.text.as_str(), e.anchor_px)).collect();
+        assert_eq!(got, [("bb", at_b), ("aa", at_a)]);
+    }
+
+    /// The missing-anim case: the painter skips a sprite it has no art for, and its
+    /// badge goes with it.
+    #[test]
+    fn an_agent_the_painter_did_not_draw_gets_no_badge() {
+        let a = slot("aa", "sess-aaaa", 0, active());
+        let b = slot("bb", "sess-bbbb", 1, active());
+        let frames = [drawn(&a, Point { x: 4, y: 4 })];
+        let s = scene_of(vec![a, b]);
+        let texts: Vec<_> = build_overlay(&s, &frames, None)
+            .into_iter()
+            .map(|e| e.text)
+            .collect();
+        assert_eq!(texts, ["aa"]);
+    }
+
+    /// Disambiguation is over the scene, not the sprites: an undrawn namesake still
+    /// makes the drawn one's badge carry its id.
+    #[test]
+    fn an_undrawn_namesake_still_disambiguates_the_drawn_badge() {
+        let a = slot("cc", "session-aaaa", 0, active());
+        let b = slot("cc", "session-bbbb", 1, active());
+        let frames = [drawn(&a, Point { x: 4, y: 4 })];
+        let want = format!("cc\u{00b7}{}", disambig_suffix(&a.session_id));
+        let s = scene_of(vec![a, b]);
+        let els = build_overlay(&s, &frames, None);
+        assert_eq!(els.len(), 1);
+        assert_eq!(els[0].text, want);
     }
 
     #[test]
@@ -382,30 +394,5 @@ mod tests {
         let a = disambig_suffix("/naïveté/app");
         assert_eq!(a, disambig_suffix("/naïveté/app"));
         assert_eq!(a.len(), 4);
-    }
-
-    /// Pins the lift against the art it cannot read: clearance, and evenness.
-    #[test]
-    fn desk_north_art_fits_under_the_label_lift() {
-        let pack = crate::embedded_pack::test_default_pack();
-        let h = |name: &str| {
-            pack.animation(name)
-                .and_then(|a| a.frames().first())
-                .unwrap_or_else(|| panic!("the embedded pack ships {name}"))
-                .height()
-        };
-        let extra = h("desk_north") - h("desk");
-        let lift = super::RAISED_MONITOR_LABEL_LIFT;
-        assert!(
-            lift >= extra,
-            "desk_north rises {extra} rows above desk, but the badge lifts only \
-             {lift} — it would paint over the screen"
-        );
-        assert_eq!(
-            lift % 2,
-            0,
-            "an odd lift can round back onto the monitor once a half-block \
-             painter halves the anchor into a terminal cell"
-        );
     }
 }

@@ -3977,6 +3977,7 @@ fn a_character_whose_anim_is_missing_is_not_hoverable() {
                     glow_tint: None,
                 },
                 anchor: Point { x: 20, y: 20 },
+                label_anchor: Point { x: 20, y: 20 },
                 sleep_z_seed: None,
                 waiting_bubble: false,
                 walking_dust_frame: None,
@@ -4942,7 +4943,7 @@ fn one_meeting_sofa_still_seats_three_agents_at_once() {
 }
 
 #[test]
-fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
+fn a_meeting_chair_sitter_is_drawn_on_the_seat_not_5px_high() {
     use crate::layout::{TEST_DEFAULT_DESKS, WaypointKind, stand_point};
     use crate::pose::Pose;
     use std::time::Duration;
@@ -5006,23 +5007,23 @@ fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
             w.facing,
             &layout.reachable,
         );
-        // Idempotent re-derive at the same `now` (sim_step already stamped
-        // last_advanced_at, so no wander transition fires here).
-        let label = {
-            let mut rctx = owned.route.rctx();
-            character_anchor(agent, &layout, now, &mut rctx).expect("chair sitter is visible")
-        };
+        let drawn = frame
+            .characters
+            .iter()
+            .find(|c| frame.agents[c.agent_idx].agent_id == id)
+            .map(|c| c.anchor)
+            .expect("chair sitter is placed");
         let seat = back_couch_anchor(stand, CHARACTER_SPRITE_W);
         let walk = waypoint_anchor(stand, CHARACTER_SPRITE_W);
         assert!(
-            (label.y as i32 - seat.y as i32).abs() <= 1,
-            "meeting-chair label y {} must track the seat sprite anchor {} (±breath), not float above",
-            label.y,
+            (drawn.y as i32 - seat.y as i32).abs() <= 1,
+            "meeting-chair sitter y {} must track the seat anchor {} (±breath)",
+            drawn.y,
             seat.y
         );
         assert!(
-            (label.y as i32 - walk.y as i32).abs() >= 4,
-            "meeting-chair label must NOT sit on the 5px-high waypoint_anchor {} (the bug)",
+            (drawn.y as i32 - walk.y as i32).abs() >= 4,
+            "meeting-chair sitter must NOT sit on the 5px-high waypoint_anchor {} (the bug)",
             walk.y
         );
         checked = true;
@@ -5355,16 +5356,270 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
     );
 }
 
-/// The badge/hit-box twin of the sprite guard above, and NOT covered by it:
-/// `character_anchor` is a second, independent derivation, so a clamp too loose
-/// to bind leaves every `sim_step`-driven test green while the badge floats
-/// off-screen.
+/// One tick, simulated then painted: the frame and the sprites paint drew.
+fn sim_and_paint(
+    owned: &mut OwnedSimStores,
+    scene: &SceneState,
+    layout: &Layout,
+    pack: &Pack,
+    now: SystemTime,
+) -> (SimFrame, Vec<AgentFrame>) {
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene,
+                pack,
+                now,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    let drawn = paint_drawn(owned, scene, layout, pack, now, &frame);
+    (frame, drawn)
+}
+
+fn paint_drawn(
+    owned: &OwnedSimStores,
+    scene: &SceneState,
+    layout: &Layout,
+    pack: &Pack,
+    now: SystemTime,
+    frame: &SimFrame,
+) -> Vec<AgentFrame> {
+    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+    paint_frame(
+        &mut PaintCtx {
+            scene,
+            layout,
+            pack,
+            now,
+            sky: crate::sky::Sky::at(now),
+            buf: &mut buf,
+            cache: &mut FrameCache::new(),
+            base_fill: &mut BaseFillCache::new(),
+            shadows: &mut crate::ground::DepthsCache::default(),
+            theme: crate::theme::theme_by_name("normal").expect("normal theme"),
+            floor: crate::floor::FloorMeta::ground(),
+            motion: &owned.route.motion,
+            debug_walkable: false,
+        },
+        frame,
+    )
+    .agents
+}
+
+/// Every drawn sprite's badge sits over its frame's top-centre: level with the
+/// breath-free top, or higher only as far as the art of the desk it sits at.
+fn assert_badges_top_their_frames(
+    frame: &SimFrame,
+    drawn: &[AgentFrame],
+    layout: &Layout,
+    pack: &Pack,
+) {
+    // A breath lifts the drawn top by one pixel, never the badge.
+    const BREATH: u16 = 1;
+    assert!(!drawn.is_empty(), "premise: something is drawn");
+    for f in drawn {
+        let at = f.label_anchor;
+        assert_eq!(at.x, f.anchor.x + f.w / 2, "{f:?}: off its frame's centre");
+        assert!(at.y <= f.anchor.y + BREATH, "{f:?}: under its frame's top");
+        let c = frame
+            .characters
+            .iter()
+            .find(|c| frame.agents[c.agent_idx].agent_id == f.agent_id)
+            .expect("every drawn sprite has a placement");
+        let desk_top = c.seat_desk.and_then(|d| {
+            drawable::desk_art(pack, layout.desk_facing_at(d))
+                .map(|art| desk_art_top(pack, d.y, art.height()))
+        });
+        match desk_top {
+            Some(row) => assert!(
+                at.y <= row && (at.y == row || at.y >= f.anchor.y),
+                "{f:?}: a sitter's badge rises to its desk art's top {row} and no higher"
+            ),
+            None => assert!(at.y >= f.anchor.y, "{f:?}: floats above its frame"),
+        }
+    }
+}
+
+/// A waiting agent at every desk, both facings, past the entry walk.
+fn seated_at_every_desk() -> (SceneState, Layout, SystemTime, Pack) {
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    scene.agents.clear();
+    for i in 0..layout.home_desks.len() {
+        let mut s = make_slot(
+            pixtuoid_core::AgentId::from_transcript_path(&format!("/badge/{i}.jsonl")),
+            ActivityState::Waiting {
+                reason: "perm".into(),
+            },
+        );
+        s.desk_index = GlobalDeskIndex(i);
+        (s.created_at, s.state_started_at, s.last_event_at) = (now0, now0, now0);
+        scene.agents.insert(s.agent_id, s);
+    }
+    let now = now0 + std::time::Duration::from_millis(crate::pose::ENTRY_ANIMATION_MS + 5_000);
+    (scene, layout, now, pack)
+}
+
 #[test]
-fn a_character_badge_is_never_anchored_off_the_canvas() {
+fn every_seated_badge_tops_its_frame_and_clears_a_raised_monitor() {
+    let (scene, layout, now, pack) = seated_at_every_desk();
+    let (frame, drawn) = sim_and_paint(&mut OwnedSimStores::new(), &scene, &layout, &pack, now);
+    assert_eq!(
+        drawn.len(),
+        scene.agents.len(),
+        "premise: everyone is drawn"
+    );
+    assert_badges_top_their_frames(&frame, &drawn, &layout, &pack);
+    assert!(
+        drawn.iter().any(|f| f.label_anchor.y < f.anchor.y),
+        "premise: some back-turned sitter's monitor rises over their head"
+    );
+}
+
+/// The breath bobs the sprite, not its badge.
+#[test]
+fn a_breathing_sitter_s_badge_holds_still() {
+    use std::time::Duration;
+    let (mut scene, layout, now, pack) = seated_at_every_desk();
+    let keep = *scene.agents.keys().next().expect("an agent");
+    scene.agents.retain(|id, _| *id == keep);
+    let mut owned = OwnedSimStores::new();
+    let (mut tops, mut badges) = (
+        std::collections::BTreeSet::new(),
+        std::collections::BTreeSet::new(),
+    );
+    // Long enough for a whole breath cycle.
+    for step in 0..24u64 {
+        let (_, drawn) = sim_and_paint(
+            &mut owned,
+            &scene,
+            &layout,
+            &pack,
+            now + Duration::from_millis(250 * step),
+        );
+        let [f] = drawn[..] else {
+            panic!("one agent, one sprite: {drawn:?}")
+        };
+        tops.insert(f.anchor.y);
+        badges.insert((f.label_anchor.x, f.label_anchor.y));
+    }
+    assert_eq!(tops.len(), 2, "premise: the sprite breathes");
+    assert_eq!(badges.len(), 1, "the badge bobbed with it: {badges:?}");
+}
+
+/// Breath rides `breathes` alone: at a breathing instant a walker's sprite stays
+/// on its fit while a figure at rest rises off it.
+#[test]
+fn only_a_placement_that_breathes_takes_the_breath() {
+    use crate::pose::Pose;
+    let (scene, layout, id, now0, pack) = sim_rig();
+    let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
+    let now = (0..u64::from(u16::MAX))
+        .map(|ms| now0 + std::time::Duration::from_millis(ms))
+        .find(|&t| super::anchors::with_breath(Point { x: 0, y: 1 }, id, t).y == 0)
+        .expect("the breath rises within a cycle");
+    let mid = Point {
+        x: layout.buf_w / 2,
+        y: layout.buf_h / 2,
+    };
+    let place = |pose| {
+        let poses = HashMap::from([(id, Some(pose))]);
+        let (placements, ..) = sim::resolve_characters(
+            &agents,
+            &poses,
+            &layout,
+            &pack,
+            CHARACTER_SPRITE_W,
+            &HashMap::new(),
+            now,
+        );
+        let [p] = placements[..] else {
+            panic!("one agent, one placement")
+        };
+        p
+    };
+    let walker = place(Pose::Walking {
+        from: mid,
+        to: mid,
+        t_x1000: 0,
+        frame: 0,
+        carrying_coffee: false,
+    });
+    let idler = place(Pose::AimlessAt { dest: mid });
+    let sitter = place(Pose::SeatedThinking);
+    assert!(!walker.breathes && idler.breathes && sitter.breathes);
+    // Neither stands at a desk, so the badge row IS the fitted top.
+    assert_eq!(
+        walker.anchor.y, walker.label_anchor.y,
+        "the walker breathed"
+    );
+    assert_eq!(
+        idler.anchor.y + 1,
+        idler.label_anchor.y,
+        "the idler held its breath"
+    );
+}
+
+/// Co-located visitors step aside, and each one's badge goes with them.
+#[test]
+fn co_located_visitors_badges_step_aside_with_their_sprites() {
+    use super::anchors::waypoint_rank_offset_x;
+    let (mut scene, layout, _, now, pack) = sim_rig();
+    scene.agents.clear();
+    let (wp, kind) = layout
+        .waypoints
+        .iter()
+        .enumerate()
+        .find(|(_, w)| waypoint_rank_offset_x(w.kind, 1) != 0)
+        .map(|(i, w)| (i, w.kind))
+        .expect("the layout has a shareable spot");
+    for i in 0..3 {
+        let mut s = make_slot(
+            pixtuoid_core::AgentId::from_transcript_path(&format!("/queue/{i}.jsonl")),
+            ActivityState::Idle,
+        );
+        s.desk_index = GlobalDeskIndex(i);
+        scene.agents.insert(s.agent_id, s);
+    }
+    let mut owned = OwnedSimStores::new();
+    let (mut frame, _) = sim_and_paint(&mut owned, &scene, &layout, &pack, now);
+    let poses = scene
+        .agents
+        .keys()
+        .map(|&id| (id, Some(crate::pose::Pose::AtWaypoint { wp, kind })))
+        .collect();
+    (frame.characters, ..) = sim::resolve_characters(
+        &frame.agents,
+        &poses,
+        &layout,
+        &pack,
+        CHARACTER_SPRITE_W,
+        &HashMap::new(),
+        now,
+    );
+    let drawn = paint_drawn(&owned, &scene, &layout, &pack, now, &frame);
+    assert_eq!(drawn.len(), 3, "premise: all three are drawn");
+    assert_badges_top_their_frames(&frame, &drawn, &layout, &pack);
+    let xs: std::collections::BTreeSet<_> = drawn.iter().map(|f| f.label_anchor.x).collect();
+    assert_eq!(xs.len(), 3, "the badges stacked: {drawn:?}");
+}
+
+/// At the canvas rim the fit moves the sprite, and the badge moves with it.
+#[test]
+fn a_badge_follows_its_sprite_fitted_to_the_canvas_rim() {
+    use crate::pose::Pose;
     use std::time::Duration;
 
+    let pack = crate::embedded_pack::test_default_pack();
     let layout = Layout::compute_with_seed(112, 100, None, 0).expect("112x100 lays out");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let coffee = HashMap::new();
     let w = CHARACTER_SPRITE_W;
 
     let mut at_the_rim = 0usize;
@@ -5374,32 +5629,43 @@ fn a_character_badge_is_never_anchored_off_the_canvas() {
         slot.created_at = now0;
         slot.state_started_at = now0;
         slot.last_event_at = now0;
+        let mut scene = SceneState::uniform(16);
+        scene.agents.insert(id, slot);
         let mut owned = OwnedSimStores::new();
 
         for secs in 1..=target {
-            let Some(anchor) = character_anchor(
-                &slot,
-                &layout,
-                now0 + Duration::from_secs(secs),
-                &mut owned.route.rctx(),
-            ) else {
+            let now = now0 + Duration::from_secs(secs);
+            let frame = sim_step(
+                &mut owned.stores(),
+                SimInputs {
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: crate::floor::FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
+                    layout: &layout,
+                    coffee: &coffee,
+                    door_anim_max_ms: 0,
+                },
+            );
+            let Some(Some(Pose::AimlessAt { dest })) = frame.poses.get(&id) else {
                 continue;
             };
-            assert!(
-                anchor.x + w <= layout.buf_w,
-                "agent {aid} at {secs}s badges at {anchor:?}, running {} px past the {} px canvas",
-                anchor.x + w - layout.buf_w,
-                layout.buf_w
-            );
-            if anchor.x + w == layout.buf_w {
-                at_the_rim += 1;
+            if waypoint_anchor(*dest, w).x + w <= layout.buf_w {
+                continue;
             }
+            let drawn = paint_drawn(&owned, &scene, &layout, &pack, now, &frame);
+            assert_badges_top_their_frames(&frame, &drawn, &layout, &pack);
+            at_the_rim += drawn
+                .iter()
+                .filter(|f| f.anchor.x + f.w == layout.buf_w)
+                .count();
+            break;
         }
     }
-    assert!(
-        at_the_rim > 0,
-        "no badge ever reached the east rim — the clamp went untested"
-    );
+    assert!(at_the_rim > 0, "no sprite was fitted to the east rim");
 }
 
 #[test]
@@ -5763,11 +6029,13 @@ fn a_pose_is_its_placements_frame_facing_and_glow() {
         anim_name: "typing",
         frame_idx: 3,
         anchor: Point { x: 0, y: 0 },
+        label_anchor: Point { x: 0, y: 0 },
         flip_x: true,
         glow,
         sleep_z_seed: None,
         waiting_bubble: false,
         walking_dust_frame: None,
+        breathes: true,
         seat_desk: None,
         seated: true,
     };
