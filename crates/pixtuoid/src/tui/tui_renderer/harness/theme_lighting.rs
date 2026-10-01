@@ -36,16 +36,16 @@ fn set_theme_with_same_theme_is_a_noop() {
 /// artificial lights, under 1% of the frame mean.
 #[test]
 fn occupied_floor_stays_lit() {
-    use pixtuoid_scene::floor::LightingState;
+    use pixtuoid_scene::floor::VacancyDim;
     let scene = scene_with(vec![active("/lit/0.jsonl", 0, "Edit x", t0())], 16);
     let mut r = build(100, 40, vec![]);
     for now in [
         t0(),
-        t0() + Duration::from_millis(LightingState::EMPTY_DEBOUNCE_MS),
+        t0() + Duration::from_millis(VacancyDim::EMPTY_DEBOUNCE_MS),
     ] {
         r.render(&scene, pack(), now).unwrap();
     }
-    assert_eq!(r.floors[0].ctx.light.level(), 1.0);
+    assert_eq!(r.floors[0].ctx.vacancy_dim.level(), 1.0);
 }
 
 #[test]
