@@ -467,7 +467,7 @@ fn low_moon(day: u32, buf_w: u16, top_wall_h: u16) -> Option<(u32, crate::celest
     (0..24u32).find_map(|h| {
         let sky = Sky::at_with(crate::localclock::on_day(day, h), Weather::Clear);
         let e = sky.emitter();
-        let low = e.body == crate::sky::Body::Moon && (0.2..0.5).contains(&e.altitude);
+        let low = e.body == crate::sky::BodyKind::Moon && (0.2..0.5).contains(&e.altitude);
         if !low || sky.nightfall() < 1.0 {
             return None;
         }

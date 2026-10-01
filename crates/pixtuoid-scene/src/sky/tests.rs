@@ -34,11 +34,11 @@ fn emitter_is_sun_by_day_moon_by_night_never_both() {
         let s = at_hour_min(h, m);
         let e = *Sky::clock(s).emitter();
         match e.body {
-            Body::Sun => assert!(
+            BodyKind::Sun => assert!(
                 (5.0..20.0).contains(&(h as f32 + m as f32 / 60.0)),
                 "sun only during the daylight ramp, got {h}:{m:02}"
             ),
-            Body::Moon => assert!(
+            BodyKind::Moon => assert!(
                 !(5.0..20.0).contains(&(h as f32 + m as f32 / 60.0)),
                 "moon only when the sun is down, got {h}:{m:02}"
             ),

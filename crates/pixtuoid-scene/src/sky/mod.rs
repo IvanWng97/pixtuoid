@@ -190,7 +190,7 @@ pub(crate) fn transmission(w: Weather) -> Transmission {
 
 /// Which body the sky shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Body {
+pub(crate) enum BodyKind {
     Sun,
     Moon,
 }
@@ -200,8 +200,8 @@ pub(crate) enum Body {
 /// (low body = longer air path = dimmer + warmer). The ONE source the interior
 /// light, the disc and the spill derive from.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Emitter {
-    pub(crate) body: Body,
+pub(crate) struct SkyBody {
+    pub(crate) body: BodyKind,
     /// 0 horizon .. 1 apex.
     pub(crate) altitude: f32,
     /// Progress along this body's arc: 0 as it rises .. 1 as it sets.
@@ -327,12 +327,12 @@ fn moon_arc(h: f32, age: f32) -> Option<f32> {
 }
 
 /// The body the sky shows at local hour `h`, `nightfall` into the night.
-fn emitter_at(h: f32, nightfall: f32, moon_phase: f32, moon_age: f32) -> Emitter {
+fn emitter_at(h: f32, nightfall: f32, moon_phase: f32, moon_age: f32) -> SkyBody {
     if hour_is_day(h) {
         let t = arc_progress(h, SUN_RISE_H, SUN_SET_H);
         let altitude = (std::f32::consts::PI * t).sin();
-        return Emitter {
-            body: Body::Sun,
+        return SkyBody {
+            body: BodyKind::Sun,
             altitude,
             azimuth: t,
             warmth: (1.0 - altitude).clamp(0.0, 1.0),
@@ -341,8 +341,8 @@ fn emitter_at(h: f32, nightfall: f32, moon_phase: f32, moon_age: f32) -> Emitter
     }
     let t = moon_arc(h, moon_age).unwrap_or(0.0);
     let altitude = (std::f32::consts::PI * t).sin();
-    Emitter {
-        body: Body::Moon,
+    SkyBody {
+        body: BodyKind::Moon,
         altitude,
         azimuth: t,
         warmth: (1.0 - altitude).clamp(0.0, 1.0),
@@ -415,7 +415,7 @@ fn flash_level_at(now: SystemTime) -> f32 {
 /// the window glass shows outside.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct InteriorLight {
-    /// Emitter light reaching the interior through the atmosphere, 0..=1.
+    /// The sun's or moon's light reaching the interior through the atmosphere, 0..=1.
     pub(crate) interior: f32,
     /// The glass's daylight: the interior plus the night's city-light floor, 0..=1.
     pub(crate) exterior: f32,
@@ -425,7 +425,7 @@ pub(crate) struct InteriorLight {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Sky {
     weather: Weather,
-    emitter: Emitter,
+    emitter: SkyBody,
     moon_phase: f32,
     moon_waxing: bool,
     nightfall: f32,
@@ -470,7 +470,7 @@ impl Sky {
         self.weather
     }
 
-    pub(crate) fn emitter(&self) -> &Emitter {
+    pub(crate) fn emitter(&self) -> &SkyBody {
         &self.emitter
     }
 
@@ -504,8 +504,8 @@ impl Sky {
     /// beam) and under thick cloud.
     pub(crate) fn beam(&self) -> f32 {
         match self.emitter.body {
-            Body::Sun => self.emitter.emitter_lum * self.transmission().direct,
-            Body::Moon => 0.0,
+            BodyKind::Sun => self.emitter.emitter_lum * self.transmission().direct,
+            BodyKind::Moon => 0.0,
         }
     }
 
@@ -528,8 +528,8 @@ impl Sky {
         // moonlit night must never out-light a cloudy solar noon, so the moon's
         // illuminance is diffuse-fill only.
         let direct_eff = match e.body {
-            Body::Sun => a.direct,
-            Body::Moon => 0.0,
+            BodyKind::Sun => a.direct,
+            BodyKind::Moon => 0.0,
         };
         let interior = (e.emitter_lum * (direct_eff * K_BEAM + a.diffuse * K_FILL)).clamp(0.0, 1.0);
         let night_floor = city_bounce(self.weather) * self.nightfall;

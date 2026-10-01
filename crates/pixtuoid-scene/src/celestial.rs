@@ -11,7 +11,7 @@ use crate::atmosphere::Moment;
 use crate::composite::{blend, blend_rgb};
 use crate::dither::FALLOFF_TONES;
 use crate::layout::window_run;
-use crate::sky::{Body, Sky};
+use crate::sky::{BodyKind, Sky};
 use crate::theme::Theme;
 
 /// One frame's disc (sun by day, moon by night), arcing across the window
@@ -29,7 +29,7 @@ pub(crate) struct Disc {
     /// The lit limb is on the right, as a northern-hemisphere sky shows a waxing
     /// moon; `false` puts it on the left ([`Sky::moon_waxing`]).
     lit_right: bool,
-    body: Body,
+    body: BodyKind,
 }
 
 /// What of the disc lands at a point of glass.
@@ -70,11 +70,11 @@ impl Disc {
     pub(crate) fn of(sky: &Sky, buf_w: u16, top_wall_h: u16) -> Option<Self> {
         let e = sky.emitter();
         let vis = match e.body {
-            Body::Sun => sky.transmission().disc,
+            BodyKind::Sun => sky.transmission().disc,
             // A moon below the horizon shows no disc; one up fades in with the
             // night, and with its altitude as it rises and sets.
-            Body::Moon if e.altitude <= 0.0 => return None,
-            Body::Moon => {
+            BodyKind::Moon if e.altitude <= 0.0 => return None,
+            BodyKind::Moon => {
                 sky.transmission().disc
                     * sky.nightfall()
                     * (e.altitude / MOON_HORIZON_FADE).min(1.0)
@@ -95,8 +95,8 @@ impl Disc {
         let horizon_y = top_wall_h as f32 * HORIZON_FRAC;
         let cy = horizon_y - e.altitude * (top_wall_h as f32 * ARC_RISE_FRAC);
         let (lit_frac, lit_right) = match e.body {
-            Body::Sun => (1.0, true),
-            Body::Moon => (sky.moon_phase(), sky.moon_waxing()),
+            BodyKind::Sun => (1.0, true),
+            BodyKind::Moon => (sky.moon_phase(), sky.moon_waxing()),
         };
         Some(Self {
             cx,
@@ -242,9 +242,9 @@ impl SkyView {
                 .mix(look.glass_horizon, k as f32 / (SKY_TONES - 1) as f32)
         });
         let disc = Disc::of(&moment.sky, buf_w, top_wall_h);
-        let core = match disc.map_or(Body::Sun, |d| d.body) {
-            Body::Sun => theme.lighting.sun_core,
-            Body::Moon => theme.lighting.moon_core,
+        let core = match disc.map_or(BodyKind::Sun, |d| d.body) {
+            BodyKind::Sun => theme.lighting.sun_core,
+            BodyKind::Moon => theme.lighting.moon_core,
         };
         let (vis, peak) = disc.map_or((0.0, 0.0), |d| (d.vis, d.halo_peak()));
         let over = |c: Rgb, alpha: f32| sky.map(|s| blend_rgb(s, c, alpha));
@@ -351,7 +351,7 @@ mod tests {
                     Weather::Clear,
                 );
                 Disc::of(&s, 96, 40)
-                    .filter(|d| d.body == Body::Moon)
+                    .filter(|d| d.body == BodyKind::Moon)
                     .map_or(0.0, |d| d.vis)
             };
             let mut prev = vis(0);

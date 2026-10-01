@@ -4,7 +4,7 @@
 
 use pixtuoid_core::sprite::Rgb;
 
-use crate::sky::{Body, Emitter, Sky, Transmission, Weather};
+use crate::sky::{BodyKind, Sky, SkyBody, Transmission, Weather};
 use crate::theme::Theme;
 
 /// One frame's sky, resolved against the theme: [`SkyTones::resolve`] once per
@@ -116,8 +116,8 @@ impl SkyTones {
         // azimuth; `the_spill_leans_away_from_the_disc` pins the
         // sign.
         let (sunlight, spill_slant) = match e.body {
-            Body::Sun => (interior, (0.5 - e.azimuth) * 2.0 * SPILL_SLANT_MAX),
-            Body::Moon => (0.0, 0.0),
+            BodyKind::Sun => (interior, (0.5 - e.azimuth) * 2.0 * SPILL_SLANT_MAX),
+            BodyKind::Moon => (0.0, 0.0),
         };
 
         let darkness = 1.0 - exterior;
@@ -276,17 +276,17 @@ const NIGHT_VEIL_MIN: f32 = 0.35;
 /// The day term is the emitter's OWN luminance, deliberately NOT
 /// [`Sky::transmission`] or [`SkyTones::darkness`]: those already carry the weather (the veil
 /// colour does too), and folding them in would darken a stormy noon twice.
-fn veil_lum(e: &Emitter) -> f32 {
+fn veil_lum(e: &SkyBody) -> f32 {
     NIGHT_VEIL_MIN + (1.0 - NIGHT_VEIL_MIN) * e.emitter_lum.clamp(0.0, 1.0)
 }
 
 /// Golden-hour blaze strength in the sky around the city — SUN-only: a low moon
 /// must never paint an orange cast, however warm/lit it computes, so the gate
 /// is absolute rather than incidental.
-fn golden_hour_blaze(e: &Emitter, a: &Transmission) -> f32 {
+fn golden_hour_blaze(e: &SkyBody, a: &Transmission) -> f32 {
     match e.body {
-        Body::Sun => (e.warmth * e.emitter_lum * a.disc).clamp(0.0, 1.0),
-        Body::Moon => 0.0,
+        BodyKind::Sun => (e.warmth * e.emitter_lum * a.disc).clamp(0.0, 1.0),
+        BodyKind::Moon => 0.0,
     }
 }
 
@@ -312,7 +312,7 @@ mod tests {
     use super::*;
     use crate::localclock::at_hour_min;
 
-    // Hand-built Emitter/Transmission values, not real clock times: a real moon's low
+    // Hand-built SkyBody/Transmission values, not real clock times: a real moon's low
     // altitude/luminance could never produce these, so a maximally warm/lit MOON
     // proves the gate is absolute rather than merely well-behaved in practice.
     #[test]
@@ -322,8 +322,8 @@ mod tests {
             diffuse: 1.0,
             disc: 1.0,
         };
-        let moon = Emitter {
-            body: Body::Moon,
+        let moon = SkyBody {
+            body: BodyKind::Moon,
             altitude: 1.0,
             azimuth: 0.5,
             warmth: 1.0,
@@ -334,8 +334,8 @@ mod tests {
             0.0,
             "a moon must never blaze, even at maximal warmth/luminance"
         );
-        let sun = Emitter {
-            body: Body::Sun,
+        let sun = SkyBody {
+            body: BodyKind::Sun,
             ..moon
         };
         assert!(
