@@ -25,6 +25,17 @@ use pixtuoid_scene::layout::{Layout, Size};
 use pixtuoid_scene::pathfind::Router;
 use pixtuoid_scene::pet::PetFrame;
 
+/// Floors `a` and `b`, which differ, borrowed together.
+fn floor_pair(floors: &mut [PerFloor], a: usize, b: usize) -> (&mut PerFloor, &mut PerFloor) {
+    if a < b {
+        let (lo, hi) = floors.split_at_mut(b);
+        (&mut lo[a], &mut hi[0])
+    } else {
+        let (lo, hi) = floors.split_at_mut(a);
+        (&mut hi[0], &mut lo[b])
+    }
+}
+
 fn floor_info_for(
     current_idx: usize,
     nf: usize,
@@ -152,6 +163,32 @@ impl Chrome {
                 self.source_warning.as_deref(),
             ),
             overlays: self.overlays(self.popup.scale(now)),
+        }
+    }
+
+    /// Floor `floor` of `nf` while it slides, whose projection is
+    /// `floor_scene`: its pet is petted only if the petting is there and live.
+    fn slide_world<'a>(
+        &'a self,
+        floor_scene: &'a SceneState,
+        pack: &'a Pack,
+        now: SystemTime,
+        floor: usize,
+        nf: usize,
+    ) -> FloorInputs<'a> {
+        let meta = FloorMeta::for_floor(floor, nf);
+        FloorInputs {
+            scene: floor_scene,
+            pack,
+            now,
+            floor: meta,
+            pets: PetInputs {
+                pet: pixtuoid_scene::pet::select_pet_for_floor(meta.floor_seed, &self.pets),
+                petting: self
+                    .active_pet
+                    .as_ref()
+                    .filter(|p| p.floor_idx == floor && p.is_active(now)),
+            },
         }
     }
 
@@ -514,50 +551,20 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let popup_scale = self.version_popup_scale(now);
         let onboarding_dim = self.chrome.onboarding.dim;
 
-        let (lo, hi) = if from_floor < to_floor {
-            (from_floor, to_floor)
-        } else {
-            (to_floor, from_floor)
-        };
-
-        let (floors_lo, floors_hi) = self.floors.split_at_mut(hi);
-        let lo_floor = &mut floors_lo[lo];
-        let hi_floor = &mut floors_hi[0];
-        let (from_floor_half, to_floor_half) = if from_floor < to_floor {
-            (lo_floor, hi_floor)
-        } else {
-            (hi_floor, lo_floor)
-        };
-        let PerFloor {
-            ctx: from_ctx,
-            buf: from_buf,
-        } = from_floor_half;
-        let PerFloor {
-            ctx: to_ctx,
-            buf: to_buf,
-        } = to_floor_half;
-
-        let from_meta = FloorMeta::for_floor(from_floor, nf);
-        let to_meta = FloorMeta::for_floor(to_floor, nf);
+        let (
+            PerFloor {
+                ctx: from_ctx,
+                buf: from_buf,
+            },
+            PerFloor {
+                ctx: to_ctx,
+                buf: to_buf,
+            },
+        ) = floor_pair(&mut self.floors, from_floor, to_floor);
 
         // Transitions hide *text* overlays (tooltips, bubbles, labels) but keep
         // every pixel-level visual, so the slide reads as a continuous scene.
         let mut transition_chitchat = std::collections::HashMap::new();
-
-        let from_active_pet = self
-            .chrome
-            .active_pet
-            .as_ref()
-            .filter(|p| p.floor_idx == from_floor && p.is_active(now));
-        let to_active_pet = self
-            .chrome
-            .active_pet
-            .as_ref()
-            .filter(|p| p.floor_idx == to_floor && p.is_active(now));
-        let from_pet =
-            pixtuoid_scene::pet::select_pet_for_floor(from_meta.floor_seed, &self.chrome.pets);
-        let to_pet =
-            pixtuoid_scene::pet::select_pet_for_floor(to_meta.floor_seed, &self.chrome.pets);
 
         // Recording the from-floor's carriers before the to-floor render can't
         // change the to-floor's pixels: an agent lives on exactly ONE floor, and
@@ -568,16 +575,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             &mut self.office.coffee,
             &mut transition_chitchat,
             FrameInputs {
-                world: FloorInputs {
-                    scene: &from_scene,
-                    pack,
-                    now,
-                    floor: from_meta,
-                    pets: PetInputs {
-                        pet: from_pet,
-                        petting: from_active_pet,
-                    },
-                },
+                world: self
+                    .chrome
+                    .slide_world(&from_scene, pack, now, from_floor, nf),
                 theme: self.chrome.theme,
                 size: Size { w: buf_w, h: buf_h },
                 debug_walkable: self.debug_walkable,
@@ -589,16 +589,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             &mut self.office.coffee,
             &mut transition_chitchat,
             FrameInputs {
-                world: FloorInputs {
-                    scene: &to_scene,
-                    pack,
-                    now,
-                    floor: to_meta,
-                    pets: PetInputs {
-                        pet: to_pet,
-                        petting: to_active_pet,
-                    },
-                },
+                world: self.chrome.slide_world(&to_scene, pack, now, to_floor, nf),
                 theme: self.chrome.theme,
                 size: Size { w: buf_w, h: buf_h },
                 debug_walkable: self.debug_walkable,
@@ -610,23 +601,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         crate::tui::renderer::apply_dim(from_buf, onboarding_dim);
         crate::tui::renderer::apply_dim(to_buf, onboarding_dim);
 
-        // `t` applies to the total travel (screen height + divider gap) so the
-        // easing covers the full distance including the gap.
-        const FLOOR_SLIDE_DIVIDER_FRACTION: f32 = 5.0;
-        let h = scene_rect.height as f32;
-        let divider_h = (scene_rect.height as f32) / FLOOR_SLIDE_DIVIDER_FRACTION;
-        let total = h + divider_h;
-        let (from_offset, to_offset) = if going_down {
-            // Higher floor: current slides DOWN, new enters from TOP
-            let from_y = (t * total) as i32;
-            let to_y = -(total - t * total) as i32;
-            (from_y, to_y)
-        } else {
-            // Lower floor: current slides UP, new enters from BOTTOM
-            let from_y = -(t * total) as i32;
-            let to_y = (total - t * total) as i32;
-            (from_y, to_y)
-        };
+        let (from_offset, to_offset) =
+            crate::tui::geometry::slide_offsets(t, going_down, f32::from(scene_rect.height));
 
         let overlays = self.chrome.overlays(popup_scale);
         let theme = self.chrome.theme;
@@ -734,9 +710,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
         #[cfg(feature = "graphics")]
         if let Some(mut cutaway) = self.cutaway.take() {
-            // No slide yet: the floor changes at once.
-            self.cancel_transition();
-            let drawn = self.render_cutaway(&mut cutaway, scene, pack, now, nf);
+            let drawn = if self.transition.is_some() {
+                self.render_cutaway_slide(&mut cutaway, scene, pack, now, nf)
+            } else {
+                self.render_cutaway(&mut cutaway, scene, pack, now, nf)
+            };
             self.cutaway = Some(cutaway);
             return drawn;
         }
@@ -782,6 +760,95 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
 #[cfg(feature = "graphics")]
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
+    /// [`Self::render_transition`] under the cutaway: both floors' frames
+    /// composed into one image that slides as classic's half-blocks do.
+    fn render_cutaway_slide(
+        &mut self,
+        cutaway: &mut crate::tui::cutaway::TileCutaway,
+        scene: &SceneState,
+        pack: &Pack,
+        now: SystemTime,
+        nf: usize,
+    ) -> Result<()> {
+        use crate::tui::renderer::{
+            draw_footer_only_frame, paint_footer, paint_overlays, scene_rect,
+        };
+        let Some((from_floor, to_floor, t, going_down)) = self.transition.as_ref().map(|tr| {
+            (
+                tr.from_floor,
+                tr.to_floor,
+                tr.t(now),
+                tr.to_floor > tr.from_floor,
+            )
+        }) else {
+            return Ok(());
+        };
+        self.forget_drawn();
+        let size = self.terminal.size()?;
+        let scene_area = scene_rect(Rect::new(0, 0, size.width, size.height));
+        let from_scene = project_floor_scene(scene, from_floor);
+        let to_scene = project_floor_scene(scene, to_floor);
+        // The destination floor's footer for the whole slide, as classic's.
+        let Frame {
+            footer, overlays, ..
+        } = self.chrome.frame(scene, &to_scene, pack, now, to_floor, nf);
+        let popup_scale = overlays.popup_scale;
+        let footer = pixtuoid_scene::footer::FooterInputs::new(&to_scene, footer);
+        let theme = self.chrome.theme;
+        let too_small = scene_area.width < crate::tui::renderer::MIN_SCENE_WIDTH
+            || scene_area.height < crate::tui::renderer::MIN_SCENE_HEIGHT;
+        let size = cutaway.fit_to(scene_area);
+        let (leaving, arriving) = floor_pair(&mut self.floors, from_floor, to_floor);
+        let mut transition_chitchat = std::collections::HashMap::new();
+        let mut observe = |pf: &mut PerFloor, world| {
+            pixtuoid_scene::floor::observe_floor(
+                &mut pf.ctx,
+                &mut self.office.coffee,
+                &mut transition_chitchat,
+                world,
+                size,
+            )
+        };
+        let from_world = self
+            .chrome
+            .slide_world(&from_scene, pack, now, from_floor, nf);
+        let to_world = self.chrome.slide_world(&to_scene, pack, now, to_floor, nf);
+        let observed = (!too_small)
+            .then(|| Some((observe(leaving, from_world)?, observe(arriving, to_world)?)))
+            .flatten();
+        let Some((from_observed, to_observed)) = observed else {
+            let drawn = draw_footer_only_frame(&mut self.terminal, &footer, theme, &overlays, now);
+            self.chrome.popup.last_scale = popup_scale;
+            // As classic's: a slide nothing shows would otherwise run its course.
+            self.cancel_transition();
+            return drawn;
+        };
+        cutaway.paint_slide(
+            crate::tui::cutaway::Slide {
+                leaving: (&from_observed, from_world.floor),
+                arriving: (&to_observed, to_world.floor),
+                t,
+                going_down,
+            },
+            theme,
+            now,
+            scene_area.as_position(),
+        );
+        cutaway.before_flush(now);
+        let mut covered = Vec::new();
+        self.terminal.draw(|f| {
+            let full = f.area();
+            let scene_area = scene_rect(full);
+            paint_footer(f, &footer, full, theme);
+            cutaway.place(f.buffer_mut(), scene_area);
+            paint_overlays(f, &overlays, now, full, theme);
+            covered = cutaway.cover(f.buffer_mut(), scene_area);
+        })?;
+        cutaway.after_flush(&covered, now);
+        self.chrome.popup.last_scale = popup_scale;
+        Ok(())
+    }
+
     /// [`Self::render`] under the cutaway: the image in place of the
     /// half-blocks, and the text a later PR does not move onto the canvas.
     fn render_cutaway(
