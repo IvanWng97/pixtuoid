@@ -1,10 +1,5 @@
 //! The cutaway image cut into a grid of cell-aligned tiles, and which of them a
 //! frame changed: an encoder re-sends only those.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the compositor wires the tiles")
-)]
-
 use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
@@ -128,6 +123,17 @@ impl Tiles {
             self.sent[c.tile.index as usize] = Some(c.hash);
             self.owed.remove(&c.tile.index);
         }
+    }
+
+    /// Every tile of the grid [`changed`](Self::changed) last cut.
+    pub(crate) fn all(&self) -> impl Iterator<Item = Tile> + '_ {
+        (0..self.sent.len() as u32).map(|index| self.tile(index))
+    }
+
+    /// Owe every tile, as if the terminal had dropped them all.
+    pub(crate) fn forget(&mut self) {
+        self.sent.fill(None);
+        self.owed.extend(0..self.sent.len() as u32);
     }
 
     /// `tile`'s pixels from `buf`, upscaled. A cell the image only partly

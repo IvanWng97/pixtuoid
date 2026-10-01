@@ -1,4 +1,6 @@
 pub mod connection;
+#[cfg(feature = "graphics")]
+pub(crate) mod cutaway;
 pub mod dashboard;
 pub(crate) mod geometry;
 pub(crate) mod hit_test;
@@ -102,6 +104,8 @@ enum KeyAction {
     OnboardingToggle,
     OnboardingConfirm,
     OnboardingSkip,
+    /// Ctrl-L: repaint the whole screen, images included.
+    Redraw,
 }
 
 fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
@@ -346,6 +350,10 @@ fn dispatch_key(
     modal: ModalState,
     floor: FloorNav,
 ) -> KeyAction {
+    // Above every modal: a garbled screen is no less garbled under one.
+    if (code, mods) == (KeyCode::Char('l'), KeyModifiers::CONTROL) {
+        return KeyAction::Redraw;
+    }
     if modal.onboarding_open {
         return match (code, mods) {
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
@@ -494,8 +502,20 @@ pub fn unwind_terminal_modes<W: std::io::Write>(
     out: &mut W,
     disable_raw: impl FnOnce() -> std::io::Result<()>,
 ) -> Result<()> {
+    unwind_after(&crate::graphics::unwind_prelude(), out, disable_raw)
+}
+
+/// [`unwind_terminal_modes`] with the graphics' own unwind as `prelude`: the
+/// images go while the alt screen that holds them is still up.
+fn unwind_after<W: std::io::Write>(
+    prelude: &[u8],
+    out: &mut W,
+    disable_raw: impl FnOnce() -> std::io::Result<()>,
+) -> Result<()> {
+    let images = out.write_all(prelude);
     let seq = execute!(out, DisableMouseCapture, LeaveAlternateScreen);
     let raw = disable_raw();
+    images?;
     seq?;
     raw?;
     Ok(())
@@ -527,7 +547,9 @@ fn resolve_version_popup(config_path: &std::path::Path) -> bool {
 
 pub(crate) struct TuiSession {
     pub scene_rx: SceneRx,
-    pub pack: pixtuoid_core::sprite::format::Pack,
+    pub pack: Arc<pixtuoid_core::sprite::format::Pack>,
+    /// What `boot_tui` planned to paint.
+    pub plan: crate::graphics::Plan,
     pub floor_caps: Arc<[std::sync::atomic::AtomicUsize; pixtuoid_core::state::MAX_FLOORS]>,
     pub theme: &'static theme::Theme,
     pub config_path: std::path::PathBuf,
@@ -551,9 +573,8 @@ pub(crate) struct TuiSession {
 }
 
 /// Whether a left-click at `(col, row)` landed on the wall's star/repo link, given the
-/// terminal's `(cols, rows)`. Callers MUST gate this on `renderer.cached_layout().is_some()`
-/// — the wall display only paints with a layout, so an ungated hit phantom-launches a
-/// browser on a too-small frame or mid floor-slide.
+/// terminal's `(cols, rows)`. Callers MUST gate this on `renderer.shows_wall_display()`, or
+/// a hit phantom-launches a browser where none is painted.
 fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
     let scene = renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
     widgets::star_hit_rect(scene)
@@ -750,6 +771,11 @@ fn apply_key_action<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             surface_onboarding_failures(cx.ui, cx.connected, failed);
         }
         KeyAction::OnboardingSkip => apply_onboarding_skip(cx),
+        KeyAction::Redraw => {
+            if let Err(e) = cx.renderer.redraw() {
+                tracing::warn!(error = %e, "redraw failed");
+            }
+        }
     }
     false
 }
@@ -822,7 +848,7 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
         }
         MouseEventKind::Down(MouseButton::Left) => {
             renderer.set_mouse_pos(Some((m.column, m.row)));
-            let on_star = renderer.cached_layout().is_some()
+            let on_star = renderer.shows_wall_display()
                 && crossterm::terminal::size().is_ok_and(|t| star_clicked(m.column, m.row, t));
             if on_star {
                 let _ = open::that(widgets::REPO_URL);
@@ -892,6 +918,35 @@ fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
     }
 }
 
+/// Hand `renderer` the painter `plan` names: the cutaway over kitty, and
+/// classic for any other plan.
+#[cfg_attr(
+    not(feature = "graphics"),
+    expect(unused_variables, reason = "only kitty paints anything but classic")
+)]
+fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
+    renderer: &mut TuiRenderer<B>,
+    plan: crate::graphics::Plan,
+    pack: &Arc<pixtuoid_core::sprite::format::Pack>,
+) {
+    match plan {
+        #[cfg(feature = "graphics")]
+        crate::graphics::Plan::Cutaway {
+            fit,
+            protocol: crate::graphics::ImageProtocol::Kitty,
+            cell,
+            tmux,
+        } => renderer.set_kitty(cutaway::KittyCutaway::new(
+            Arc::clone(pack),
+            fit,
+            cell,
+            tmux,
+            Box::new(stdout()),
+        )),
+        _ => tracing::info!(plan = ?plan, "painting classic"),
+    }
+}
+
 /// The event loop, running as the `block_on` ROOT future rather than on a tokio worker — so
 /// `tokio::task::block_in_place` here is inert, not a yield point, and does not panic either
 /// (that is `current_thread`-only). Pinned by `block_in_place_is_inert_on_the_block_on_thread`.
@@ -899,6 +954,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let TuiSession {
         mut scene_rx,
         pack,
+        plan,
         floor_caps,
         theme,
         config_path,
@@ -914,6 +970,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     } = session;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
+    paint_plan(&mut renderer, plan, &pack);
     // A LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins
     // the device thread it owns.
     let mut audio_ctl = crate::audio::AudioController::new(audio_cfg, config_path.clone());
@@ -951,7 +1008,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             let now = ui.now();
             let snapshot = scene_rx.borrow_and_update().clone();
             renderer.evict_missing(&snapshot);
-            let sig = (renderer.buf().width(), renderer.buf().height());
+            let sig = renderer.scene_extent();
             if last_layout_sig != Some(sig) {
                 renderer.invalidate_routes();
                 renderer.cancel_transition();
@@ -1176,6 +1233,22 @@ mod teardown_tests {
             raw_saw_write.get(),
             "DisableMouseCapture must reach the terminal while raw mode is still ON"
         );
+    }
+
+    /// Through the one unwind every exit takes, the panic hook's included.
+    #[cfg(all(unix, feature = "graphics"))]
+    #[test]
+    fn our_images_go_before_the_alt_screen_that_holds_them() {
+        crate::graphics::kitty::on_screen(false);
+        let mut buf: Vec<u8> = Vec::new();
+        unwind_terminal_modes(&mut buf, || Ok(())).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        let delete = s.find("\x1b_Ga=d,").expect("the images are deleted");
+        assert!(
+            s.starts_with("\x1b\\"),
+            "an ST first ends a torn escape: {s:?}"
+        );
+        assert!(delete < s.find(LEAVE_ALT_SCREEN).expect("leaves"), "{s:?}");
     }
 
     #[test]
@@ -1562,6 +1635,28 @@ mod dispatch_tests {
         assert_eq!(
             dispatch_key(KeyCode::Down, NONE, hi, nav()),
             KeyAction::ThemePreview(5)
+        );
+    }
+
+    #[test]
+    fn ctrl_l_redraws_under_any_modal() {
+        let dashboard = ModalState {
+            dashboard_open: true,
+            ..modal()
+        };
+        let onboarding = ModalState {
+            onboarding_open: true,
+            ..modal()
+        };
+        for m in [modal(), dashboard, onboarding] {
+            assert_eq!(
+                dispatch_key(KeyCode::Char('l'), CTRL, m, nav()),
+                KeyAction::Redraw
+            );
+        }
+        assert_eq!(
+            dispatch_key(KeyCode::Char('l'), NONE, dashboard, nav()),
+            KeyAction::DashboardFoldRight
         );
     }
 

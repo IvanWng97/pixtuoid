@@ -19,13 +19,15 @@ use pixtuoid_scene::render_scale::RenderScale;
 use ratatui::layout::Size as TermSize;
 
 #[cfg(feature = "graphics")]
-mod kitty;
+pub(crate) mod kitty;
 #[cfg(feature = "graphics")]
 mod probe;
-mod tiles;
+#[cfg(feature = "graphics")]
+pub(crate) mod tiles;
 
 #[cfg(feature = "graphics")]
 pub(crate) use probe::probe;
+#[cfg(feature = "graphics")]
 use tiles::TileShape;
 
 /// How long each wait of the capability probe may take: on Unix, the query start
@@ -65,10 +67,7 @@ impl ImageProtocol {
     }
 
     /// The cells one re-sent piece of the image covers.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the compositor wires the tiles")
-    )]
+    #[cfg(feature = "graphics")]
     pub(crate) fn tile(self) -> TileShape {
         match self {
             Self::Kitty => TileShape { cols: 4, rows: 2 },
@@ -268,6 +267,7 @@ fn raw_scale_for_cell(cell: CellSize) -> u16 {
 pub(crate) struct Fit {
     scale: RenderScale,
     density: Density,
+    render: RenderScale,
     logical: Size,
 }
 
@@ -278,21 +278,31 @@ impl Fit {
     /// over an image `area` cells big. `None` when no multiple of it lies within
     /// the fit's bound.
     pub(crate) fn new(cell: CellSize, area: TermSize, max_density: Density) -> Option<Self> {
-        let scale = RenderScale::fit(raw_scale_for_cell(cell), max_density)?;
+        let fit = Self {
+            scale: RenderScale::fit(raw_scale_for_cell(cell), max_density)?,
+            density: max_density,
+            render: RenderScale::new(max_density.get())?,
+            logical: Size { w: 0, h: 0 },
+        };
+        Some(fit.over(cell, area))
+    }
+
+    /// This fit over an image `area` cells big: the scale stays, and the office
+    /// takes the area's shape.
+    pub(crate) fn over(self, cell: CellSize, area: TermSize) -> Self {
         // The image anchors on cells, so its pixels are the cells', never a
         // window size that counts the terminal's padding; past what a buffer
         // can address, the office stops growing.
         let px = |cells: u16, cell_px: u16| {
             u16::try_from(u32::from(cells) * u32::from(cell_px)).unwrap_or(u16::MAX)
         };
-        Some(Self {
-            scale,
-            density: max_density,
+        Self {
             logical: Size {
-                w: scale.logical(px(area.width, cell.w)),
-                h: scale.logical(px(area.height, cell.h)),
+                w: self.scale.logical(px(area.width, cell.w)),
+                h: self.scale.logical(px(area.height, cell.h)),
             },
-        })
+            ..self
+        }
     }
 
     /// Real pixels per logical office unit.
@@ -303,6 +313,12 @@ impl Fit {
     /// The density the office renders at before the upscale.
     pub(crate) fn density(self) -> Density {
         self.density
+    }
+
+    /// [`Fit::density`] as the scale the office renders at.
+    #[cfg(feature = "graphics")]
+    pub(crate) fn render_scale(self) -> RenderScale {
+        self.render
     }
 
     /// The whole factor the density render is upscaled by.
@@ -467,8 +483,8 @@ pub(crate) fn run_probe() -> Probe {
 
 impl Plan {
     /// The plan as `doctor`'s `graphics:` line: the profile this terminal is
-    /// CAPABLE of — "would render", since `run` still paints classic — and why
-    /// it falls back when it is not.
+    /// CAPABLE of — "would render", since only `run --graphics` paints it —
+    /// and why it falls back when it is not.
     pub(crate) fn diagnostic_row(self) -> String {
         match self {
             Plan::Cutaway {
@@ -493,6 +509,15 @@ impl Plan {
             }
         }
     }
+}
+
+/// What the terminal unwind writes before it leaves the alt screen: our
+/// images' delete, once any reached the terminal.
+pub(crate) fn unwind_prelude() -> Vec<u8> {
+    #[cfg(feature = "graphics")]
+    return kitty::unwind();
+    #[cfg(not(feature = "graphics"))]
+    Vec::new()
 }
 
 /// Built without the `graphics` feature: there is no query to run, whatever

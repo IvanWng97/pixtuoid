@@ -83,6 +83,9 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     audio: crate::audio::AudioHandle,
     /// Transient +/- volume readout (percent); `None` past [`crate::audio::VOLUME_FLASH_MS`].
     volume_flash: Option<u8>,
+    /// The cutaway, painted over kitty's protocol in place of the half-blocks.
+    #[cfg(feature = "graphics")]
+    kitty: Option<crate::tui::cutaway::KittyCutaway>,
 }
 
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
@@ -115,7 +118,38 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             onboarding: crate::tui::welcome::OnboardingFrame::default(),
             audio: crate::audio::AudioHandle::disabled(),
             volume_flash: None,
+            #[cfg(feature = "graphics")]
+            kitty: None,
         }
+    }
+
+    /// Paint the cutaway through `kitty` from the next frame on.
+    #[cfg(feature = "graphics")]
+    pub(crate) fn set_kitty(&mut self, kitty: crate::tui::cutaway::KittyCutaway) {
+        self.kitty = Some(kitty);
+    }
+
+    /// Clear the terminal and repaint every cell and every image.
+    pub(crate) fn redraw(&mut self) -> Result<()> {
+        #[cfg(feature = "graphics")]
+        if let Some(kitty) = &mut self.kitty {
+            kitty.forget();
+        }
+        self.terminal.clear()?;
+        Ok(())
+    }
+
+    /// The logical extent the current floor last laid out on: what a resize
+    /// changes.
+    pub(crate) fn scene_extent(&self) -> (u16, u16) {
+        #[cfg(feature = "graphics")]
+        if self.kitty.is_some() {
+            return self
+                .cached_layout
+                .as_deref()
+                .map_or((0, 0), |l| (l.buf_w, l.buf_h));
+        }
+        (self.buf().width(), self.buf().height())
     }
 
     pub(crate) fn set_audio(&mut self, audio: crate::audio::AudioHandle) {
@@ -189,6 +223,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.cached_layout.as_deref()
     }
 
+    /// Whether the last frame drew the wall display's text: only a half-block
+    /// frame does, and not a too-small one or a floor slide.
+    pub(crate) fn shows_wall_display(&self) -> bool {
+        matches!(
+            self.last_geometry,
+            Some(crate::tui::geometry::SceneGeometry::HalfBlock { .. })
+        )
+    }
+
     /// The pixels cell `(col, row)` showed in the last frame drawn.
     pub(crate) fn scene_area_at(
         &self,
@@ -201,7 +244,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// [`hit_test_agent`](crate::tui::hit_test::hit_test_agent) against the last
     /// frame drawn.
     pub(crate) fn hit_test_agent_at(&self, col: u16, row: u16) -> Option<pixtuoid_core::AgentId> {
-        crate::tui::hit_test::hit_test_agent(&self.last_agents, self.scene_area_at(col, row)?)
+        let area = self.scene_area_at(col, row)?;
+        #[cfg(feature = "graphics")]
+        if let Some(kitty) = &self.kitty {
+            return kitty.hover_at(area.bounds());
+        }
+        crate::tui::hit_test::hit_test_agent(&self.last_agents, area)
     }
 
     pub fn current_floor_seed(&self) -> u64 {
@@ -242,6 +290,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.theme = theme;
             for pf in &mut self.floors {
                 pf.ctx.cache = pixtuoid_scene::frame_cache::FrameCache::new();
+            }
+            #[cfg(feature = "graphics")]
+            if let Some(kitty) = &mut self.kitty {
+                kitty.reset_cache();
             }
         }
     }
@@ -576,6 +628,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.current_floor = nf.saturating_sub(1);
         }
 
+        #[cfg(feature = "graphics")]
+        if let Some(mut kitty) = self.kitty.take() {
+            // No slide yet: the floor changes at once.
+            self.cancel_transition();
+            let drawn = self.render_kitty(&mut kitty, scene, pack, now, nf);
+            self.kitty = Some(kitty);
+            return drawn;
+        }
+
         if self.transition.is_some() {
             return self.render_transition(scene, pack, now, nf);
         }
@@ -649,6 +710,123 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         // office layout — so the painted scale IS the clickable one on both
         // draw paths.
         self.popup.last_scale = popup_scale;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "graphics")]
+impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
+    /// [`Self::render`] under the kitty cutaway: the image in place of the
+    /// half-blocks, and the text a later PR does not move onto the canvas.
+    fn render_kitty(
+        &mut self,
+        kitty: &mut crate::tui::cutaway::KittyCutaway,
+        scene: &SceneState,
+        pack: &Pack,
+        now: SystemTime,
+        nf: usize,
+    ) -> Result<()> {
+        use crate::tui::renderer::{
+            OverlayFrame, TooltipAt, draw_footer_only_frame, hit_test_coffee_machine,
+            hit_test_furniture, paint_coffee_tooltip, paint_footer, paint_furniture_tooltip,
+            paint_hover_tooltip, paint_overlays, scene_rect,
+        };
+        let size = self.terminal.size()?;
+        let scene_area = scene_rect(Rect::new(0, 0, size.width, size.height));
+        let floor_scene = project_floor_scene(scene, self.current_floor);
+        let floor_meta = FloorMeta::for_floor(self.current_floor, nf);
+        let popup_scale = self.version_popup_scale(now);
+        self.popup.last_scale = popup_scale;
+        let footer = pixtuoid_scene::footer::FooterInputs::new(
+            &floor_scene,
+            crate::tui::widgets::footer_context(
+                scene,
+                floor_info_for(self.current_floor, nf, scene.agents.len()),
+                self.audio.is_audible(),
+                self.volume_flash,
+                self.source_warning.as_deref(),
+            ),
+        );
+        let overlays = OverlayFrame {
+            theme_picker: self.theme_picker,
+            dashboard: &self.dashboard,
+            connection: &self.connection,
+            popup_scale,
+            help_open: self.help_open,
+            onboarding: &self.onboarding,
+        };
+        let theme = self.theme;
+        let world = FloorInputs {
+            scene: &floor_scene,
+            pack,
+            now,
+            floor: floor_meta,
+            pets: PetInputs {
+                pet: pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets),
+                petting: self.active_pet.as_ref(),
+            },
+        };
+        let pf = &mut self.floors[self.current_floor];
+        let too_small = scene_area.width < crate::tui::renderer::MIN_SCENE_WIDTH
+            || scene_area.height < crate::tui::renderer::MIN_SCENE_HEIGHT;
+        let observed = (!too_small)
+            .then(|| {
+                pixtuoid_scene::floor::observe_floor(
+                    &mut pf.ctx,
+                    &mut self.office.coffee,
+                    &mut self.office.chitchat,
+                    world,
+                    kitty.fit_to(scene_area),
+                )
+            })
+            .flatten();
+        let Some(observed) = observed else {
+            let drawn = draw_footer_only_frame(&mut self.terminal, &footer, theme, &overlays, now);
+            self.forget_drawn();
+            return drawn;
+        };
+        kitty.paint(&observed, theme, floor_meta, now);
+        let geometry = kitty.geometry(scene_area);
+        let layout = &observed.layout;
+        let mouse = self
+            .mouse_pos
+            .and_then(|(mx, my)| Some((mx, my, geometry.area_at(mx, my)?)));
+        let hovered = mouse.and_then(|(.., cell)| kitty.hover_at(cell.bounds()));
+        let kitty = &*kitty;
+        self.terminal.draw(|f| {
+            let full = f.area();
+            let scene_area = scene_rect(full);
+            paint_footer(f, &footer, full, theme);
+            kitty.place(f.buffer_mut(), scene_area);
+            if let Some((mx, my, cell)) = mouse {
+                let at = TooltipAt {
+                    mx,
+                    my,
+                    scene_rect: scene_area,
+                };
+                // The agent first, then the classic's fall-through, less the
+                // pet and mascots the cutaway does not report.
+                if let Some(id) = hovered {
+                    paint_hover_tooltip(f, &floor_scene, id, at, now, theme);
+                } else if hit_test_coffee_machine(layout, cell) {
+                    paint_coffee_tooltip(f, at, theme);
+                } else if let Some(label) = hit_test_furniture(layout, cell) {
+                    paint_furniture_tooltip(f, label, at, theme);
+                }
+            }
+            paint_overlays(f, &overlays, now, full, theme);
+        })?;
+        let audio_frame = self.office.audio.frame(
+            scene,
+            &observed.frame.occupied_waypoints,
+            |idx| pixtuoid_scene::floor::waypoint_kind_of(Some(layout), idx),
+            self.current_floor,
+            now,
+        );
+        self.audio.frame(audio_frame);
+        self.forget_drawn();
+        self.last_geometry = Some(geometry);
+        self.cached_layout = Some(observed.layout);
         Ok(())
     }
 }

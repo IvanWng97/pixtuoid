@@ -1,10 +1,7 @@
 //! A tile as a kitty image, shown through Unicode placeholders: the image is
 //! then ordinary text in cells, which a host like tmux stores and redraws
 //! (<https://sw.kovidgoyal.net/kitty/graphics-protocol/>, "Unicode placeholders").
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the compositor wires the tiles")
-)]
+use std::sync::OnceLock;
 
 use ratatui::style::Color;
 use ratatui_image::picker::cap_parser::Parser;
@@ -76,6 +73,38 @@ pub(crate) fn transmit(id: u32, image: &TileImage, tmux: bool) -> Vec<u8> {
         out.extend_from_slice(format!("{esc}\\{end}").as_bytes());
     }
     out
+}
+
+/// Whether this process has put kitty images on the terminal, and inside
+/// tmux: read by an unwind that may run from the panic hook.
+static ON_SCREEN: OnceLock<bool> = OnceLock::new();
+
+/// Record that images are about to reach the terminal, before the first
+/// transmit is written.
+pub(crate) fn on_screen(tmux: bool) {
+    let _ = ON_SCREEN.set(tmux);
+}
+
+/// What the terminal unwind writes first: nothing until [`on_screen`], then
+/// an ST that ends an escape a failed write cut short, and [`delete_all`].
+pub(crate) fn unwind() -> Vec<u8> {
+    ON_SCREEN
+        .get()
+        .map_or_else(Vec::new, |&tmux| [ST, &delete_all(tmux)].concat())
+}
+
+/// String Terminator: ends any APC or DCS left open.
+pub(crate) const ST: &[u8] = b"\x1b\\";
+
+/// Deletes every image an [`image_id`] can name and frees its data
+/// ("Deleting images": `d=R` is an id range).
+pub(crate) fn delete_all(tmux: bool) -> Vec<u8> {
+    let (start, esc, end) = Parser::tmux_start_escape_end(tmux);
+    format!(
+        "{start}{esc}_Ga=d,d=R,x=1,y={},q=2{esc}\\{end}",
+        ID_LIMIT - 1
+    )
+    .into_bytes()
 }
 
 /// The cells that show image `id` over `tile`; `None` for a tile wider or
@@ -203,6 +232,15 @@ mod tests {
         assert_eq!(DIACRITICS, ['\u{0305}', '\u{030D}', '\u{030E}', '\u{0310}']);
         let shape = ImageProtocol::Kitty.tile();
         assert!(usize::from(shape.cols.max(shape.rows)) <= DIACRITICS.len());
+    }
+
+    #[test]
+    fn the_delete_frees_every_id_a_placeholder_can_name() {
+        assert_eq!(delete_all(false), b"\x1b_Ga=d,d=R,x=1,y=16777215,q=2\x1b\\");
+        assert_eq!(
+            delete_all(true),
+            b"\x1bPtmux;\x1b\x1b_Ga=d,d=R,x=1,y=16777215,q=2\x1b\x1b\\\x1b\\"
+        );
     }
 
     #[test]
