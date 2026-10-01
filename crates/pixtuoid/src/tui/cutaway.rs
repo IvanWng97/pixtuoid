@@ -29,7 +29,7 @@ use ratatui::layout::{Position, Rect};
 use crate::graphics::tiles::{Changed, Tile, Tiles};
 use crate::graphics::{CellSize, Fit, ImageProtocol, iterm2, kitty, sixel};
 use crate::tui::geometry::SceneGeometry;
-use crate::tui::tui_renderer::slide_offsets;
+use crate::tui::geometry::slide_offsets;
 
 /// A floor slide's two floors, each with its meta, at progress `t` of a
 /// [`FloorTransition`](pixtuoid_scene::floor::FloorTransition).

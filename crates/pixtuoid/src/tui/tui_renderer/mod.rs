@@ -25,27 +25,6 @@ use pixtuoid_scene::layout::{Layout, Size};
 use pixtuoid_scene::pathfind::Router;
 use pixtuoid_scene::pet::PetFrame;
 
-/// How far down the floor being left and the one arriving sit, `t` through a
-/// slide over a scene `h` units tall.
-pub(crate) fn slide_offsets(t: f32, going_down: bool, h: f32) -> (i32, i32) {
-    // `t` applies to the total travel (screen height + divider gap) so the
-    // easing covers the full distance including the gap.
-    const FLOOR_SLIDE_DIVIDER_FRACTION: f32 = 5.0;
-    let divider_h = h / FLOOR_SLIDE_DIVIDER_FRACTION;
-    let total = h + divider_h;
-    if going_down {
-        // Higher floor: current slides DOWN, new enters from TOP
-        let from_y = (t * total) as i32;
-        let to_y = -(total - t * total) as i32;
-        (from_y, to_y)
-    } else {
-        // Lower floor: current slides UP, new enters from BOTTOM
-        let from_y = -(t * total) as i32;
-        let to_y = (total - t * total) as i32;
-        (from_y, to_y)
-    }
-}
-
 /// Floors `a` and `b`, which differ, borrowed together.
 fn floor_pair(floors: &mut [PerFloor], a: usize, b: usize) -> (&mut PerFloor, &mut PerFloor) {
     if a < b {
@@ -622,7 +601,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         crate::tui::renderer::apply_dim(from_buf, onboarding_dim);
         crate::tui::renderer::apply_dim(to_buf, onboarding_dim);
 
-        let (from_offset, to_offset) = slide_offsets(t, going_down, f32::from(scene_rect.height));
+        let (from_offset, to_offset) =
+            crate::tui::geometry::slide_offsets(t, going_down, f32::from(scene_rect.height));
 
         let overlays = self.chrome.overlays(popup_scale);
         let theme = self.chrome.theme;

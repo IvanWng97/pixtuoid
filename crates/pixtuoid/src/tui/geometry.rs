@@ -104,6 +104,27 @@ impl CellArea {
     }
 }
 
+/// How far down the floor being left and the one arriving sit, `t` through a
+/// slide over a scene `h` units tall.
+pub(crate) fn slide_offsets(t: f32, going_down: bool, h: f32) -> (i32, i32) {
+    // `t` applies to the total travel (screen height + divider gap) so the
+    // easing covers the full distance including the gap.
+    const FLOOR_SLIDE_DIVIDER_FRACTION: f32 = 5.0;
+    let divider_h = h / FLOOR_SLIDE_DIVIDER_FRACTION;
+    let total = h + divider_h;
+    if going_down {
+        // Higher floor: current slides DOWN, new enters from TOP
+        let from_y = (t * total) as i32;
+        let to_y = -(total - t * total) as i32;
+        (from_y, to_y)
+    } else {
+        // Lower floor: current slides UP, new enters from BOTTOM
+        let from_y = -(t * total) as i32;
+        let to_y = (total - t * total) as i32;
+        (from_y, to_y)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

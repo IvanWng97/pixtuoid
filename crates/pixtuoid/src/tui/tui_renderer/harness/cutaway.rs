@@ -155,6 +155,25 @@ fn shrinking_under_the_minimum_refuses_the_cutaway_frame() {
     assert!(r.cached_pet_pos().is_none());
 }
 
+/// A slide the terminal shrinks under mid-way is cancelled, as classic's is:
+/// it lands on the destination floor, with nothing left to hit-test.
+#[test]
+fn shrinking_mid_slide_lands_on_the_destination() {
+    let (cols, rows) = (120, 40);
+    let (mut r, _wire) = kitty(cols, rows);
+    let scene = two_floor_scene();
+    r.render(&scene, pack(), t0()).expect("render");
+    r.navigate_floor(1, t0());
+    let (small_cols, small_rows) = too_small_terminal();
+    r.terminal.backend_mut().resize(small_cols, small_rows);
+    r.render(&scene, pack(), t0() + Duration::from_millis(100))
+        .expect("render");
+    assert!(r.transition().is_none());
+    assert_eq!(r.current_floor(), 1);
+    assert!(r.cached_layout().is_none());
+    assert_eq!(r.scene_area_at(small_cols / 2, small_rows / 2), None);
+}
+
 #[test]
 fn a_modal_over_the_image_shows_its_text() {
     let (mut r, _wire) = kitty(120, 40);
