@@ -387,9 +387,7 @@ mod tests {
     /// Pins the lift against the art it cannot read: clearance, and evenness.
     #[test]
     fn desk_north_art_fits_under_the_label_lift() {
-        let pack =
-            crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-                .expect("embedded pack loads");
+        let pack = crate::embedded_pack::test_default_pack();
         let h = |name: &str| {
             pack.animation(name)
                 .and_then(|a| a.frames().first())

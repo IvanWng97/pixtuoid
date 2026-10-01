@@ -43,10 +43,16 @@ jobs:
     with:
       full: ${{ !github.event.pull_request.draft }}
 
+  site:
+    name: Site
+    uses: ./.github/workflows/site.yml
+    with:
+      full: ${{ !github.event.pull_request.draft }}
+
   gate:
     name: ci-gate
     if: ${{ always() }}
-    needs: [lint, builds, tests]
+    needs: [lint, builds, tests, site]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

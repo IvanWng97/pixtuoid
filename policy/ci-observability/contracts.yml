@@ -47,15 +47,18 @@
     secret such as the CLI's own environment and publish it. `--tools` leaves
     only the built-in read tools, and dontAsk denies a read outside the working
     directory unless an allow rule pre-approves it, which a bare `Read` rule
-    does for every path (code.claude.com/docs/en/agent-sdk/permissions). Any
-    flag or action input can add one, so the arguments and the step's inputs
-    are pinned exactly; `--json-schema` keeps the answer structured for the
+    does for every path (code.claude.com/docs/en/agent-sdk/permissions);
+    `blockReadsOutsideWorkingDirectories` refuses such a read even then
+    (code.claude.com/docs/en/settings-reference). Any flag or action input can
+    add a rule or drop the setting, so the arguments and the step's inputs are
+    pinned exactly; `--json-schema` keeps the answer structured for the
     publisher to validate.
   expected: >-
     --max-turns ${{ inputs.max_turns }}
     --max-budget-usd ${{ inputs.max_budget_usd }}
     --permission-mode dontAsk
     --tools Read,Glob,Grep
+    --settings '{"permissions":{"blockReadsOutsideWorkingDirectories":true}}'
     --json-schema ${{ steps.schema.outputs.json }}
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
@@ -82,6 +85,9 @@
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub(" --json-schema [^ ]+"; "")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub(" --settings '[^']+'"; "")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with)
       += {"settings": "{}"}
@@ -136,18 +142,42 @@
     - '.jobs.analyze.steps += [{"uses": "anthropics/claude-code-action@v1", "with": {"show_full_output": true}}]'
     - .jobs.analyze.steps |= map(select((.uses // "") | startswith("anthropics/claude-code-action@") | not))
 
-- id: reviewer-publisher-only-comments
+- id: reviewer-writers-only-comment-and-status
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    publish can comment on the PR, and any action there, a checkout included,
-    runs with that scope: an action reads `github.token` without being passed it
+    publish comments and sets the lens's status, report_absence only sets it,
+    and any action in either, a checkout included, runs with that scope: an
+    action reads `github.token` without being passed it
     (docs.github.com/en/actions/tutorials/authenticate-with-github_token).
   assert: |
-    .jobs.publish.permissions == {"issues": "write", "pull-requests": "write"}
-      and ([.jobs.publish.steps[] | select(has("uses"))] | length == 0)
+    .jobs.publish.permissions == {"issues": "write", "pull-requests": "write", "statuses": "write"}
+      and .jobs.report_absence.permissions == {"statuses": "write"}
+      and ([.jobs.publish.steps[], .jobs.report_absence.steps[] | select(has("uses"))] | length == 0)
   break:
     - '.jobs.publish.steps += [{"uses": "actions/checkout@v7"}]'
+    - '.jobs.report_absence.steps += [{"uses": "actions/checkout@v7"}]'
     - .jobs.publish.permissions.contents = "write"
+    - .jobs.report_absence.permissions["pull-requests"] = "write"
+
+- id: reviewer-fork-head-needs-a-maintainer
+  file: .github/workflows/claude-review.yml
+  why: >-
+    allow_fork hands a fork's diff to a billed model, and the only approval is
+    the `if:` admitting an issue_comment from a maintainer alone; an `if:` has no
+    shell for action_behavior_test.sh to run.
+  assert: |
+    [.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml")] as $jobs
+    | ($jobs | length == 1)
+      and $jobs[0].with.allow_fork == "${{ github.event_name == 'issue_comment' }}"
+      and ([($jobs[0].if // "") | gsub("\r?\n[ \t]*"; " ") | split(" || ")[]
+            | select(contains("github.event_name == 'issue_comment'"))] as $arms
+           | ($arms | length > 0)
+             and all($arms[]; contains("contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), github.event.comment.author_association)")))
+  break:
+    - (.jobs[] | select(has("uses")) | .with.allow_fork) = true
+    - (.jobs[] | select(has("uses")) | .if) |= sub("github.event.comment.author_association"; "github.event.comment.user.login")
+    - (.jobs[] | select(has("uses")) | .if) += " || (github.event_name == 'issue_comment' && github.event.issue.pull_request)"
+    - .jobs.second = (.jobs[] | select(has("uses")))
 
 # ── claude.yml: the only Claude job with contents:write
 
@@ -263,6 +293,7 @@
     - .github/workflows/ci-lint.yml
     - .github/workflows/ci-builds.yml
     - .github/workflows/ci-tests.yml
+    - .github/workflows/site.yml
   why: >-
     ci.yml's gate sees a group only through the call's result, and GitHub does
     not document how a called workflow's jobs roll up into it. The `required`

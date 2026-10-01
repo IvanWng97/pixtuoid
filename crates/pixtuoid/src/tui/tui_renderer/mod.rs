@@ -18,8 +18,8 @@ use ratatui::layout::Rect;
 
 use crate::tui::renderer::{DrawCtx, PetState, draw_scene, flush_buffer_to_term_at_offset};
 use pixtuoid_scene::floor::{
-    FloorMeta, FloorTransition, FrameInputs, PerFloor, PerOffice, num_floors, project_floor_scene,
-    render_floor,
+    FloorInputs, FloorMeta, FloorTransition, FrameInputs, PerFloor, PerOffice, PetInputs,
+    num_floors, project_floor_scene, render_floor,
 };
 use pixtuoid_scene::layout::{Layout, Size};
 use pixtuoid_scene::pathfind::Router;
@@ -79,8 +79,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     onboarding: crate::tui::welcome::OnboardingFrame,
     /// Ambient-audio gateway; inert unless installed.
     audio: crate::audio::AudioHandle,
-    /// Transient +/- volume readout (percent); `None` outside the
-    /// [`VOLUME_FLASH_MS`](crate::audio::VOLUME_FLASH_MS) window.
+    /// Transient +/- volume readout (percent); `None` past [`crate::audio::VOLUME_FLASH_MS`].
     volume_flash: Option<u8>,
 }
 
@@ -292,9 +291,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         }
     }
 
-    /// The scale computed during the most recent `render()`. Prefer this over
-    /// `version_popup_scale(SystemTime::now())` in the mouse handler so click
-    /// geometry matches what was painted.
+    /// The scale computed during the most recent `render()`.
     pub fn last_popup_scale(&self) -> f32 {
         self.popup.last_scale
     }
@@ -414,8 +411,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             return Ok(());
         }
 
-        let buf_w = scene_rect.width;
-        let buf_h = scene_rect.height.saturating_mul(2);
+        let (buf_w, buf_h) =
+            crate::tui::renderer::scene_buf_size(full_rect.width, full_rect.height);
         // Compute popup scale before the split_at_mut borrows.
         let popup_scale = self.version_popup_scale(now);
         let onboarding_dim = self.onboarding.dim;
@@ -470,14 +467,18 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             &mut self.office.coffee,
             &mut transition_chitchat,
             FrameInputs {
-                scene: &from_scene,
-                pack,
+                world: FloorInputs {
+                    scene: &from_scene,
+                    pack,
+                    now,
+                    floor: from_meta,
+                    pets: PetInputs {
+                        pet: from_pet,
+                        petting: from_active_pet,
+                    },
+                },
                 theme: self.theme,
-                now,
                 size: Size { w: buf_w, h: buf_h },
-                floor_meta: from_meta,
-                active_pet: from_active_pet,
-                floor_pet: from_pet,
                 debug_walkable: self.debug_walkable,
             },
         );
@@ -487,14 +488,18 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             &mut self.office.coffee,
             &mut transition_chitchat,
             FrameInputs {
-                scene: &to_scene,
-                pack,
+                world: FloorInputs {
+                    scene: &to_scene,
+                    pack,
+                    now,
+                    floor: to_meta,
+                    pets: PetInputs {
+                        pet: to_pet,
+                        petting: to_active_pet,
+                    },
+                },
                 theme: self.theme,
-                now,
                 size: Size { w: buf_w, h: buf_h },
-                floor_meta: to_meta,
-                active_pet: to_active_pet,
-                floor_pet: to_pet,
                 debug_walkable: self.debug_walkable,
             },
         );
@@ -590,6 +595,19 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let popup_scale = self.version_popup_scale(now);
         let pf = &mut self.floors[self.current_floor];
         let mut draw_ctx = DrawCtx {
+            world: FloorInputs {
+                scene: &floor_scene,
+                pack,
+                now,
+                floor: floor_meta,
+                pets: PetInputs {
+                    pet: pixtuoid_scene::pet::select_pet_for_floor(
+                        floor_meta.floor_seed,
+                        &self.pets,
+                    ),
+                    petting: self.active_pet.as_ref(),
+                },
+            },
             buf: &mut pf.buf,
             store: &mut pf.ctx,
             mouse_pos: self.mouse_pos,
@@ -603,11 +621,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 self.volume_flash,
                 self.source_warning.as_deref(),
             ),
-            floor: floor_meta,
-            active_pet: self.active_pet.as_ref(),
             last_pet_pos: None,
             last_mascots: Vec::new(),
-            floor_pet: pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets),
             chitchat_state: &mut self.office.chitchat,
             chitchat_bubbles: Vec::new(),
             coffee: self.office.coffee.map(),
@@ -619,18 +634,16 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             connection: &self.connection,
             onboarding: &self.onboarding,
         };
-        let result = draw_scene(&mut self.terminal, &floor_scene, pack, now, &mut draw_ctx);
+        let result = draw_scene(&mut self.terminal, &mut draw_ctx);
         self.last_pet_pos = draw_ctx.last_pet_pos;
         // `take` avoids a partial move so the explicit `drop` below can follow.
         let new_coffee_carriers = std::mem::take(&mut draw_ctx.new_coffee_carriers);
         let occupied_waypoints = std::mem::take(&mut draw_ctx.occupied_waypoints);
         drop(draw_ctx);
         // Ambient audio: one AudioFrame per rendered frame, floor-scoped (you hear
-        // the floor you're LOOKING AT; rain stays global). The observer runs EVERY
-        // frame, even muted, so its cue edges stay warm — re-enabling audio fires
-        // no volley for what arrived while silent; only DELIVERY is gated. The
-        // kind-map resolves against THIS frame's layout (the `result` handle, not
-        // `self.cached_layout`, which is still last frame's until set below).
+        // the floor you're LOOKING AT; rain stays global). The kind-map resolves against
+        // THIS frame's layout (the `result` handle, not `self.cached_layout`, which is
+        // still last frame's until set below).
         let frame_layout = result.as_ref().ok().and_then(|o| o.as_deref());
         let audio_frame = self.office.audio.frame(
             scene,
@@ -639,9 +652,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.current_floor,
             now,
         );
-        if self.audio.is_enabled() {
-            self.audio.frame(audio_frame);
-        }
+        // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
+        self.audio.frame(audio_frame);
         pixtuoid_scene::floor::frame_epilogue(
             &mut self.floors[self.current_floor].ctx,
             &mut self.office.coffee,

@@ -36,7 +36,9 @@ pub mod audio;
 pub mod board;
 #[doc(hidden)]
 pub mod burn;
+pub(crate) mod celestial;
 pub mod chitchat;
+pub(crate) mod composite;
 pub(crate) mod creatures;
 #[doc(hidden)]
 pub mod cutaway;
@@ -51,9 +53,6 @@ pub(crate) mod glass;
 pub(crate) mod ground;
 pub mod layout;
 pub(crate) mod lighting;
-// Local wall-clock instants, so an hour-dependent assertion or bench case names
-// the hour instead of inheriting the runner's $TZ. `pub` for the benches —
-// MECHANISM, not a contract.
 #[doc(hidden)]
 pub mod localclock;
 pub mod motion;
