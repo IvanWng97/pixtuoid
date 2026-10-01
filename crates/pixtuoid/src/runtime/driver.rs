@@ -69,7 +69,7 @@ async fn run_async(cfg: RunConfig, tui: Option<pixtuoid_core::sprite::format::Pa
         codex_sessions_root,
         pack: _,
         desk_cap,
-        headless,
+        headless: _,
         config_path,
         theme,
         pets,
@@ -88,7 +88,7 @@ async fn run_async(cfg: RunConfig, tui: Option<pixtuoid_core::sprite::format::Pa
     let socket_path = socket.unwrap_or_else(ClaudeCodeSource::default_socket_path);
     // The terminal-size query stays here in the shell (the injected `measure`);
     // the policy is the covered + mutation-tested `resolve_boot_caps`.
-    let boot_caps = resolve_boot_caps(desk_cap, headless, compute_boot_capacities);
+    let boot_caps = resolve_boot_caps(desk_cap, tui.is_none(), compute_boot_capacities);
     // The shared spine — ONE authority with `floating::run`. The tasks live on
     // this fn's runtime; `_source_handles` is an inert anchor (see Pipeline's doc).
     let super::pipeline::Pipeline {
