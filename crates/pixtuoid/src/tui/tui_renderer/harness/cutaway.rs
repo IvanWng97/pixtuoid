@@ -1,8 +1,8 @@
-//! The kitty cutaway through the production render path: what reaches the
+//! The cutaway through the production render path: what reaches the
 //! terminal as escapes, and what the cells show.
 use super::*;
-use crate::graphics::{CellSize, Fit};
-use crate::tui::cutaway::KittyCutaway;
+use crate::graphics::{CellSize, Fit, ImageProtocol};
+use crate::tui::cutaway::TileCutaway;
 use pixtuoid_core::sprite::format::Density;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,6 +13,8 @@ use std::sync::{Mutex, OnceLock};
 const CELL: CellSize = CellSize { w: 4, h: 8 };
 const PLACEHOLDER: char = '\u{10EEEE}';
 const TRANSMIT: &str = "\x1b_Ga=T,";
+const SIXEL: &str = "\x1bP9;1q";
+const ITERM2: &str = "\x1b]1337;File=";
 
 /// The terminal's side of the transmits; set `fail` to make it refuse them.
 #[derive(Clone, Default)]
@@ -56,18 +58,24 @@ fn fit(cols: u16, rows: u16) -> Fit {
     fit
 }
 
-/// A renderer painting the kitty cutaway into a `cols`×`rows` terminal.
-fn kitty(cols: u16, rows: u16) -> (TuiRenderer<TestBackend>, Wire) {
+/// A renderer painting the cutaway over `protocol` into a `cols`×`rows`
+/// terminal.
+fn painter(cols: u16, rows: u16, protocol: ImageProtocol) -> (TuiRenderer<TestBackend>, Wire) {
     let mut r = build(cols, rows, vec![]);
     let wire = Wire::default();
-    r.set_kitty(KittyCutaway::new(
+    r.set_cutaway(TileCutaway::new(
         arc_pack(),
         fit(cols, rows),
         CELL,
+        protocol,
         false,
         Box::new(wire.clone()),
     ));
     (r, wire)
+}
+
+fn kitty(cols: u16, rows: u16) -> (TuiRenderer<TestBackend>, Wire) {
+    painter(cols, rows, ImageProtocol::Kitty)
 }
 
 fn office() -> SceneState {
@@ -163,16 +171,78 @@ fn an_agent_under_the_cutaway_is_hit_tested_on_the_canvas() {
 }
 
 #[test]
-fn a_cutaway_plan_over_another_protocol_paints_classic() {
-    let mut r = build(120, 40, vec![]);
-    let plan = crate::graphics::Plan::Cutaway {
-        fit: fit(120, 40),
-        protocol: crate::graphics::ImageProtocol::Sixel,
-        cell: CELL,
-        tmux: false,
-    };
-    crate::tui::paint_plan(&mut r, plan, &arc_pack());
+fn sixel_and_iterm2_draw_changed_tiles_and_nothing_on_an_identical_frame() {
+    for (protocol, intro) in [
+        (ImageProtocol::Sixel, SIXEL),
+        (ImageProtocol::Iterm2, ITERM2),
+    ] {
+        let (mut r, wire) = painter(120, 40, protocol);
+        let scene = office();
+        r.render(&scene, pack(), t0()).expect("render");
+        assert!(wire.take().contains(intro), "{protocol:?}");
+        r.render(&scene, pack(), t0()).expect("render");
+        assert_eq!(wire.take(), "", "{protocol:?}");
+    }
+}
+
+/// The tiles go out after ratatui's flush, once the frame's text is known: a
+/// modal that opens on the frame every tile is owed in withholds its tiles
+/// there and then, and they follow once it closes. Meanwhile ratatui never
+/// writes the image's cells, so the modal's text stays until its tiles
+/// replace it.
+#[test]
+fn a_modal_withholds_the_tiles_under_it_until_it_closes() {
+    let (mut r, wire) = painter(120, 40, ImageProtocol::Sixel);
+    let scene = office();
+    let cadence = ImageProtocol::Sixel.cadence();
+    r.render(&scene, pack(), t0()).expect("render");
+    let all = wire.take().matches(SIXEL).count();
+    r.set_help_open(true);
+    r.redraw().expect("redraw");
+    r.render(&scene, pack(), t0() + cadence).expect("render");
+    assert!(frame_text(r.frame_buffer()).contains("? Keyboard"));
+    let open = wire.take().matches(SIXEL).count();
+    assert!(0 < open && open < all, "{open} of {all}");
+    r.set_help_open(false);
+    r.render(&scene, pack(), t0() + cadence * 2)
+        .expect("render");
+    let closed = wire.take().matches(SIXEL).count();
+    assert!(closed >= all - open, "{closed} after {open} of {all}");
+    assert!(
+        frame_text(r.frame_buffer()).contains("? Keyboard"),
+        "ratatui left the image's cells alone"
+    );
+}
+
+#[test]
+fn the_image_cells_are_never_written_by_ratatui() {
+    let (cols, rows) = (120, 40);
+    let (mut r, _wire) = painter(cols, rows, ImageProtocol::Sixel);
     r.render(&office(), pack(), t0()).expect("render");
-    assert_eq!(placeholders_in_row(&r, 0), 0);
-    assert!(frame_text(r.frame_buffer()).contains('\u{2580}'));
+    let text = frame_text(r.frame_buffer());
+    let lines: Vec<&str> = text.lines().collect();
+    let scene = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows));
+    for line in &lines[..usize::from(scene.height)] {
+        assert_eq!(line.trim(), "");
+    }
+    assert_ne!(
+        lines[usize::from(rows - 1)].trim(),
+        "",
+        "the footer is text"
+    );
+}
+
+#[test]
+fn the_protocols_cadence_gates_its_transmits() {
+    let (mut r, wire) = painter(120, 40, ImageProtocol::Sixel);
+    let scene = office();
+    r.render(&scene, pack(), t0()).expect("render");
+    wire.take();
+    r.redraw().expect("redraw");
+    let cadence = ImageProtocol::Sixel.cadence();
+    r.render(&scene, pack(), t0() + cadence / 2)
+        .expect("render");
+    assert_eq!(wire.take(), "", "inside the cadence, the tiles stay owed");
+    r.render(&scene, pack(), t0() + cadence).expect("render");
+    assert!(wire.take().contains(SIXEL));
 }

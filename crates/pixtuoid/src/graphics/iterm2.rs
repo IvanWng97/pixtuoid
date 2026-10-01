@@ -1,9 +1,5 @@
 //! A tile as an iTerm2 inline image, one PNG each
 //! (<https://iterm2.com/documentation-images.html>).
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the compositor wires the tiles")
-)]
 
 use ratatui::layout::Position;
 

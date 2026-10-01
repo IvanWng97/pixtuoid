@@ -67,9 +67,9 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// Live walkable/approach/route debug layer toggle (`w`); not persisted.
     debug_walkable: bool,
     chrome: Chrome,
-    /// The cutaway, painted over kitty's protocol in place of the half-blocks.
+    /// The cutaway, painted as terminal images in place of the half-blocks.
     #[cfg(feature = "graphics")]
-    kitty: Option<crate::tui::cutaway::KittyCutaway>,
+    cutaway: Option<crate::tui::cutaway::TileCutaway>,
 }
 
 /// Everything a frame shows besides the floor: kept apart from `floors` and
@@ -200,21 +200,21 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 volume_flash: None,
             },
             #[cfg(feature = "graphics")]
-            kitty: None,
+            cutaway: None,
         }
     }
 
-    /// Paint the cutaway through `kitty` from the next frame on.
+    /// Paint `cutaway` from the next frame on.
     #[cfg(feature = "graphics")]
-    pub(crate) fn set_kitty(&mut self, kitty: crate::tui::cutaway::KittyCutaway) {
-        self.kitty = Some(kitty);
+    pub(crate) fn set_cutaway(&mut self, cutaway: crate::tui::cutaway::TileCutaway) {
+        self.cutaway = Some(cutaway);
     }
 
     /// Clear the terminal and repaint every cell and every image.
     pub(crate) fn redraw(&mut self) -> Result<()> {
         #[cfg(feature = "graphics")]
-        if let Some(kitty) = &mut self.kitty {
-            kitty.forget();
+        if let Some(cutaway) = &mut self.cutaway {
+            cutaway.forget();
         }
         self.terminal.clear()?;
         Ok(())
@@ -224,7 +224,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// changes.
     pub(crate) fn scene_extent(&self) -> (u16, u16) {
         #[cfg(feature = "graphics")]
-        if self.kitty.is_some() {
+        if self.cutaway.is_some() {
             return self
                 .cached_layout
                 .as_deref()
@@ -327,8 +327,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     pub(crate) fn hit_test_agent_at(&self, col: u16, row: u16) -> Option<pixtuoid_core::AgentId> {
         let area = self.scene_area_at(col, row)?;
         #[cfg(feature = "graphics")]
-        if let Some(kitty) = &self.kitty {
-            return kitty.hover_at(area.bounds());
+        if let Some(cutaway) = &self.cutaway {
+            return cutaway.hover_at(area.bounds());
         }
         crate::tui::hit_test::hit_test_agent(&self.last_agents, area)
     }
@@ -373,8 +373,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 pf.ctx.cache = pixtuoid_scene::frame_cache::FrameCache::new();
             }
             #[cfg(feature = "graphics")]
-            if let Some(kitty) = &mut self.kitty {
-                kitty.reset_cache();
+            if let Some(cutaway) = &mut self.cutaway {
+                cutaway.reset_cache();
             }
         }
     }
@@ -727,11 +727,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         }
 
         #[cfg(feature = "graphics")]
-        if let Some(mut kitty) = self.kitty.take() {
+        if let Some(mut cutaway) = self.cutaway.take() {
             // No slide yet: the floor changes at once.
             self.cancel_transition();
-            let drawn = self.render_kitty(&mut kitty, scene, pack, now, nf);
-            self.kitty = Some(kitty);
+            let drawn = self.render_cutaway(&mut cutaway, scene, pack, now, nf);
+            self.cutaway = Some(cutaway);
             return drawn;
         }
 
@@ -774,11 +774,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
 #[cfg(feature = "graphics")]
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
-    /// [`Self::render`] under the kitty cutaway: the image in place of the
+    /// [`Self::render`] under the cutaway: the image in place of the
     /// half-blocks, and the text a later PR does not move onto the canvas.
-    fn render_kitty(
+    fn render_cutaway(
         &mut self,
-        kitty: &mut crate::tui::cutaway::KittyCutaway,
+        cutaway: &mut crate::tui::cutaway::TileCutaway,
         scene: &SceneState,
         pack: &Pack,
         now: SystemTime,
@@ -812,7 +812,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                     &mut self.office.coffee,
                     &mut self.office.chitchat,
                     world,
-                    kitty.fit_to(scene_area),
+                    cutaway.fit_to(scene_area),
                 )
             })
             .flatten();
@@ -821,19 +821,19 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.record_drawn(scene, DrawOut::default(), popup_scale, now);
             return drawn;
         };
-        kitty.paint(&observed, theme, world.floor, now);
-        let geometry = kitty.geometry(scene_area);
+        cutaway.paint(&observed, theme, world.floor, now, scene_area.as_position());
+        let geometry = cutaway.geometry(scene_area);
         let layout = &observed.layout;
         let mouse = self
             .mouse_pos
             .and_then(|(mx, my)| Some((mx, my, geometry.area_at(mx, my)?)));
-        let hovered = mouse.and_then(|(.., cell)| kitty.hover_at(cell.bounds()));
-        let kitty = &*kitty;
+        let hovered = mouse.and_then(|(.., cell)| cutaway.hover_at(cell.bounds()));
+        let mut covered = Vec::new();
         self.terminal.draw(|f| {
             let full = f.area();
             let scene_area = scene_rect(full);
             paint_footer(f, &footer, full, theme);
-            kitty.place(f.buffer_mut(), scene_area);
+            cutaway.place(f.buffer_mut(), scene_area);
             if let Some((mx, my, cell)) = mouse {
                 let at = TooltipAt {
                     mx,
@@ -851,7 +851,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 }
             }
             paint_overlays(f, &overlays, now, full, theme);
+            covered = cutaway.cover(f.buffer_mut(), scene_area);
         })?;
+        cutaway.emit(&covered, now);
         self.record_drawn(
             scene,
             DrawOut {

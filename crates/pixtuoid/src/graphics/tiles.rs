@@ -153,6 +153,14 @@ impl Tiles {
         self.owed.extend(0..self.sent.len() as u32);
     }
 
+    /// Owe tile `index` again, whatever was sent for it.
+    pub(crate) fn forget_tile(&mut self, index: u32) {
+        if let Some(sent) = self.sent.get_mut(index as usize) {
+            *sent = None;
+            self.owed.insert(index);
+        }
+    }
+
     /// `tile`'s pixels from `buf`, upscaled. A cell the image only partly
     /// covers is filled out with the image's edge pixels, so every tile is
     /// whole cells and no terminal resamples it.

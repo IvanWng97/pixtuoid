@@ -918,11 +918,10 @@ fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
     }
 }
 
-/// Hand `renderer` the painter `plan` names: the cutaway over kitty, and
-/// classic for any other plan.
+/// Hand `renderer` the painter `plan` names.
 #[cfg_attr(
     not(feature = "graphics"),
-    expect(unused_variables, reason = "only kitty paints anything but classic")
+    expect(unused_variables, reason = "only a graphics build paints the cutaway")
 )]
 fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     renderer: &mut TuiRenderer<B>,
@@ -933,13 +932,14 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
         #[cfg(feature = "graphics")]
         crate::graphics::Plan::Cutaway {
             fit,
-            protocol: crate::graphics::ImageProtocol::Kitty,
+            protocol,
             cell,
             tmux,
-        } => renderer.set_kitty(cutaway::KittyCutaway::new(
+        } => renderer.set_cutaway(cutaway::TileCutaway::new(
             Arc::clone(pack),
             fit,
             cell,
+            protocol,
             tmux,
             Box::new(stdout()),
         )),

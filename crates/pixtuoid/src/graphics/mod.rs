@@ -19,13 +19,13 @@ use pixtuoid_scene::render_scale::RenderScale;
 use ratatui::layout::Size as TermSize;
 
 #[cfg(feature = "graphics")]
-mod iterm2;
+pub(crate) mod iterm2;
 #[cfg(feature = "graphics")]
 pub(crate) mod kitty;
 #[cfg(feature = "graphics")]
 mod probe;
 #[cfg(feature = "graphics")]
-mod sixel;
+pub(crate) mod sixel;
 #[cfg(feature = "graphics")]
 pub(crate) mod tiles;
 
@@ -68,6 +68,17 @@ impl ImageProtocol {
             Self::Sixel => "sixel",
             Self::Iterm2 => "iterm2",
         }
+    }
+
+    /// The least time between two frames' transmits: kitty's is the event
+    /// loop's tick, and SIXEL and iTerm2 encode heavier images less often.
+    #[cfg(feature = "graphics")]
+    pub(crate) fn cadence(self) -> std::time::Duration {
+        std::time::Duration::from_millis(match self {
+            Self::Kitty => 0,
+            Self::Sixel => 66,
+            Self::Iterm2 => 100,
+        })
     }
 
     /// The cells one re-sent piece of the image covers.
@@ -519,9 +530,39 @@ impl Plan {
 /// images' delete, once any reached the terminal.
 pub(crate) fn unwind_prelude() -> Vec<u8> {
     #[cfg(feature = "graphics")]
-    return kitty::unwind();
+    return [kitty::unwind(), grid_unwind()].concat();
     #[cfg(not(feature = "graphics"))]
     Vec::new()
+}
+
+/// Whether this process has drawn SIXEL or iTerm2 pixels, which sit in the
+/// text grid rather than in an image store kitty-style deletes reach.
+#[cfg(feature = "graphics")]
+static IN_GRID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Record that SIXEL or iTerm2 pixels are about to reach the terminal.
+#[cfg(feature = "graphics")]
+pub(crate) fn drawing_in_grid() {
+    IN_GRID.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Nothing until [`drawing_in_grid`]; then [`grid_clear`].
+#[cfg(feature = "graphics")]
+fn grid_unwind() -> Vec<u8> {
+    if IN_GRID.load(std::sync::atomic::Ordering::Relaxed) {
+        grid_clear()
+    } else {
+        Vec::new()
+    }
+}
+
+/// An ST that ends an image a failed write cut short, then ED 2: 1049 clears
+/// the alternate screen on the way IN (ctlseqs, "Use Alternate Screen
+/// Buffer ... clearing it first"), so nothing promises its pixels go on the
+/// way out.
+#[cfg(feature = "graphics")]
+fn grid_clear() -> Vec<u8> {
+    [kitty::ST, b"\x1b[2J"].concat()
 }
 
 /// Built without the `graphics` feature: there is no query to run, whatever
@@ -534,6 +575,12 @@ pub(crate) fn probe(_ask: bool) -> Probe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "graphics")]
+    #[test]
+    fn the_grid_unwind_ends_any_image_then_erases_the_display() {
+        assert_eq!(grid_clear(), b"\x1b\\\x1b[2J");
+    }
 
     const CELL_8X16: CellSize = CellSize { w: 8, h: 16 };
     /// A pack with no density variants.
