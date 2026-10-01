@@ -283,7 +283,7 @@ impl AudioCueTracker {
         self.seen_agents = ids;
 
         // A waypoint BECOMING occupied is the moment the matching feedback
-        // animation starts — `sim.rs` keys its anims on this same set.
+        // animation starts — `sim::resolve_characters` keys its anims on this same set.
         for &idx in occupied_waypoints.difference(&self.occupied) {
             match waypoint_kind(idx) {
                 Some(WaypointKind::Printer) => events.push(OneShot::PrinterWhir),

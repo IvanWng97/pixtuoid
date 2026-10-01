@@ -69,6 +69,7 @@ pub mod physics;
 pub mod pixel_painter;
 pub mod pose;
 pub mod render_scale;
+pub mod sim;
 pub(crate) mod sky;
 pub(crate) mod skyline;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
