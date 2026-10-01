@@ -557,7 +557,9 @@ fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
         .is_some_and(|s| s.contains(ratatui::layout::Position { x: col, y: row }))
 }
 
-/// `scale` is the popup's last painted scale.
+/// Whether a left-click at `(col, row)` landed on the version popup's URL, hit-tested
+/// against the full terminal bounds, not [`star_clicked`]'s scene rect. `scale` is
+/// the popup's last painted scale.
 fn version_popup_url_clicked(col: u16, row: u16, scale: f32, term: (u16, u16)) -> bool {
     let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
     widgets::version_popup_url_rect(bounds, scale)

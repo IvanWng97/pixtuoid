@@ -110,7 +110,9 @@ fn shrinking_under_the_minimum_drops_the_last_frames_hit_targets() {
     let id = AgentId::from_transcript_path("/sm/0.jsonl");
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
     let (cols, rows) = (192, 80);
-    for (small_cols, small_rows) in [too_small_terminal(), (15, 8)] {
+    // The scene-size refusal, then the layout-compute refusal (clears the scene
+    // minimum, under `MIN_LAYOUT_W`).
+    for (small_cols, small_rows) in [too_small_terminal(), (28, 40)] {
         let mut r = build(cols, rows, vec![PetKind::Cat]);
         r.render(&scene, pack(), t0()).expect("render");
         let cell = (0..cols)
