@@ -1,6 +1,6 @@
 //! Ambient office audio — the only owner of any audio-device dependency, over the pure
-//! synthesis in `pixtuoid_scene::audio`; every buffer is pre-rendered at startup and
-//! ALL-PROCEDURAL. Playback rides its own thread behind a bounded `try_send` channel.
+//! synthesis in `pixtuoid_scene::audio`; every buffer is ALL-PROCEDURAL, synthesized on
+//! the playback thread, which sits behind a bounded `try_send` channel.
 
 #[cfg(feature = "audio")]
 pub(crate) mod sink;
@@ -24,8 +24,7 @@ use sink::AudioSink;
 #[cfg(feature = "audio")]
 use pixtuoid_scene::audio::bank::{AssetBank, TRACK_STEMS, TrackBeds};
 
-/// The +/- keys' volume increment — one definition for BOTH painters, which are
-/// siblings that must not import from each other.
+/// The +/- keys' volume increment.
 pub(crate) const VOLUME_STEP: f32 = 0.05;
 /// How long the transient volume readout stays up after a nudge — also the
 /// volume-persist debounce window on both painters.
@@ -52,8 +51,8 @@ pub(crate) struct AudioUi {
 pub(crate) struct Persist {
     /// The mute flag CHANGED — persist now.
     pub(crate) muted: bool,
-    /// The volume changed — flash the readout and persist DEBOUNCED (the +/-
-    /// keys autorepeat).
+    /// A volume key was pressed, even one clamped at a rail — flash the readout
+    /// and persist DEBOUNCED (the +/- keys autorepeat).
     pub(crate) volume_nudged: bool,
 }
 
@@ -197,8 +196,6 @@ impl AudioController {
         self.ui.handle.set_muted(paused || self.ui.muted);
     }
 
-    /// The live audio handle — stable across a lazy respawn (the sender is
-    /// swapped in place), so a consumer's cached clone never goes stale.
     pub(crate) fn handle(&self) -> &AudioHandle {
         &self.ui.handle
     }
@@ -207,8 +204,8 @@ impl AudioController {
 /// RAII teardown — the ONE exit verb for BOTH halves of the audio protocol:
 /// PERSIST a pending debounced volume, THEN stop the device thread. Both run
 /// unconditionally, so a Ctrl-C / terminate / error can't lose a nudge that
-/// landed inside the debounce window. Both halves are panic-free (save + join
-/// log, never unwrap), so this is safe to run during unwind.
+/// landed inside the debounce window. Both halves are panic-free, so this is safe to run
+/// during unwind.
 impl Drop for AudioController {
     fn drop(&mut self) {
         self.flush_on_exit();
@@ -233,10 +230,7 @@ mod controller_tests {
 
     #[test]
     fn new_boot_spawns_only_when_unmuted_and_drop_joins_the_device_thread() {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        // A MEASURABLE teardown is what makes the join assert a deterministic red: without
-        // the join, Drop returns while the fake device thread still sleeps → `done` is false.
-        const TEARDOWN_MS: u64 = 300;
+        use std::sync::atomic::Ordering;
 
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
@@ -255,7 +249,7 @@ mod controller_tests {
         assert!(!c.handle().is_enabled());
         drop(c);
 
-        let done = std::sync::Arc::new(AtomicBool::new(false));
+        let done = std::cell::OnceCell::new();
         let got_vol = std::cell::Cell::new(0.0f32);
         let c = AudioController::new_with(
             AudioConfig {
@@ -265,14 +259,7 @@ mod controller_tests {
             path,
             |h, v| {
                 got_vol.set(v);
-                let rx = h.install_test_channel();
-                let flag = std::sync::Arc::clone(&done);
-                let thread = std::thread::spawn(move || {
-                    while rx.recv().is_ok() {}
-                    std::thread::sleep(std::time::Duration::from_millis(TEARDOWN_MS));
-                    flag.store(true, Ordering::SeqCst);
-                });
-                *h.join.lock().unwrap() = Some(thread);
+                let _ = done.set(install_slow_fake_device(h));
             },
         );
         assert_eq!(
@@ -284,7 +271,7 @@ mod controller_tests {
 
         drop(c);
         assert!(
-            done.load(Ordering::SeqCst),
+            done.get().unwrap().load(Ordering::SeqCst),
             "dropping the controller must JOIN the boot-spawned device thread so \
              its teardown completes — the RAII teardown-on-quit guarantee"
         );
@@ -378,22 +365,10 @@ mod controls_tests {
 
     #[test]
     fn shutdown_joins_the_device_thread_so_its_teardown_runs_before_return() {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        // A fake device thread mirroring run_loop (block on the channel, exit on disconnect)
-        // but MEASURABLY slow: a zero-cost teardown lets an un-joined thread pass by luck.
-        const TEARDOWN_MS: u64 = 300;
+        use std::sync::atomic::Ordering;
 
         let handle = AudioHandle::disabled();
-        let rx = handle.install_test_channel();
-        let done = std::sync::Arc::new(AtomicBool::new(false));
-
-        let flag = std::sync::Arc::clone(&done);
-        let thread = std::thread::spawn(move || {
-            while rx.recv().is_ok() {}
-            std::thread::sleep(std::time::Duration::from_millis(TEARDOWN_MS));
-            flag.store(true, Ordering::SeqCst);
-        });
-        *handle.join.lock().unwrap() = Some(thread);
+        let done = install_slow_fake_device(&handle);
 
         let t0 = std::time::Instant::now();
         handle.shutdown();
@@ -405,7 +380,7 @@ mod controls_tests {
              the join it returns mid-teardown and the OS output is stranded"
         );
         assert!(
-            t0.elapsed() >= std::time::Duration::from_millis(TEARDOWN_MS),
+            t0.elapsed() >= std::time::Duration::from_millis(FAKE_TEARDOWN_MS),
             "shutdown() returned before the thread's teardown could finish — it did \
              not actually wait"
         );
@@ -534,6 +509,15 @@ mod controls_tests {
     }
 
     #[test]
+    fn frame_on_a_disabled_handle_does_not_panic_and_an_enabled_one_delivers() {
+        let handle = AudioHandle::disabled();
+        handle.frame(AudioFrame::default());
+        let rx = handle.install_test_channel();
+        handle.frame(AudioFrame::default());
+        assert_eq!(drain_frames(&rx).len(), 1, "an enabled handle delivers");
+    }
+
+    #[test]
     fn a_consumer_clone_survives_a_lazy_respawn_in_place() {
         let handle = AudioHandle::disabled();
         let cached = handle.clone(); // what a renderer caches once, at init
@@ -552,8 +536,7 @@ mod controls_tests {
     }
 }
 
-/// The painters' handle — clone-cheap, non-blocking. A disabled handle
-/// (audio off in config, or no device) swallows everything.
+/// The painters' handle — clone-cheap, non-blocking.
 #[derive(Clone)]
 pub(crate) struct AudioHandle {
     /// The live device sender, swappable IN PLACE behind a shared cell: every
@@ -569,9 +552,8 @@ pub(crate) struct AudioHandle {
     volume: std::sync::Arc<std::sync::atomic::AtomicU32>,
     /// The device thread's join handle, so [`shutdown`](Self::shutdown) can WAIT
     /// for `run_loop` to drop its `RodioSink` (the OS device close) before the
-    /// process exits. Without it the thread is detached and its teardown races
-    /// exit — on macOS CoreAudio the loser strands the output (audio keeps
-    /// playing; `sudo killall coreaudiod` to recover).
+    /// process exits: detached, its teardown races exit, and on macOS CoreAudio a
+    /// half-closed output strands playback (`sudo killall coreaudiod`).
     join: std::sync::Arc<std::sync::Mutex<Option<std::thread::JoinHandle<()>>>>,
 }
 
@@ -591,7 +573,8 @@ impl AudioHandle {
     }
 
     /// Push one frame of audio intent. `try_send` — a saturated audio thread
-    /// drops frames rather than ever stalling the render loop.
+    /// drops frames rather than ever stalling the render loop. A disabled handle drops
+    /// it, so callers need no `is_enabled` guard.
     pub(crate) fn frame(&self, frame: AudioFrame) {
         if let Some(tx) = self.tx.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             let _ = tx.try_send(frame);
@@ -664,9 +647,8 @@ impl AudioHandle {
 
     /// Stop the device thread SYNCHRONOUSLY: dropping the sole sender makes `run_loop` return
     /// and drop its `RodioSink` (the OS device close); the JOIN makes that Drop finish before
-    /// the process exits. Detached it races teardown, and on macOS CoreAudio a half-closed
-    /// output strands playback (music keeps going; `sudo killall coreaudiod`). INVARIANT: only
-    /// from `AudioController::drop`, after the painter's loop ended — nothing races `tx`/`join`.
+    /// the process exits (see `join`). INVARIANT: only from `AudioController::drop`, after the
+    /// painter's loop ended — nothing races `tx`/`join`.
     pub(crate) fn shutdown(&self) {
         *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let handle = self.join.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -675,8 +657,8 @@ impl AudioHandle {
         }
     }
 
-    /// Test seam: a live handle whose receiver the test drains — the one way to
-    /// see what the render path feeds the audio thread.
+    /// Test seam: a live handle whose receiver the test drains, to see what the
+    /// render path feeds the audio thread.
     #[cfg(test)]
     pub(crate) fn test_pair() -> (Self, mpsc::Receiver<AudioFrame>) {
         let (tx, rx) = mpsc::sync_channel(256);
@@ -698,6 +680,26 @@ impl AudioHandle {
         *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
         rx
     }
+}
+
+#[cfg(test)]
+const FAKE_TEARDOWN_MS: u64 = 300;
+
+/// Install a fake device thread on `handle` that mirrors `run_loop` (block on the channel,
+/// exit on disconnect) but tears down MEASURABLY slowly: a zero-cost teardown lets an
+/// un-joined thread pass a join assert by luck. The returned flag flips once teardown ends.
+#[cfg(test)]
+fn install_slow_fake_device(handle: &AudioHandle) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+    let rx = handle.install_test_channel();
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = std::sync::Arc::clone(&done);
+    let thread = std::thread::spawn(move || {
+        while rx.recv().is_ok() {}
+        std::thread::sleep(std::time::Duration::from_millis(FAKE_TEARDOWN_MS));
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+    *handle.join.lock().unwrap() = Some(thread);
+    done
 }
 
 #[cfg(test)]
@@ -724,7 +726,7 @@ const SHUTDOWN_JOIN_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 /// Join `handle`, but give up after `timeout` so a hung device-close (or a
 /// still-in-flight synth build, see [`SHUTDOWN_JOIN_TIMEOUT`]) can't block the
 /// exit forever. On timeout the helper thread is left detached, still blocked on
-/// the real join — no worse than the always-detached behaviour this replaces.
+/// the real join.
 /// std has no timed `JoinHandle::join`, hence the channel dance.
 fn join_with_timeout(handle: std::thread::JoinHandle<()>, timeout: std::time::Duration) {
     let (done_tx, done_rx) = mpsc::channel();
@@ -739,8 +741,7 @@ fn join_with_timeout(handle: std::thread::JoinHandle<()>, timeout: std::time::Du
     }
 }
 
-/// The production lazy-respawn injected into [`apply_audio_action`] /
-/// [`AudioController::apply`] — a named fn so the two callers can't drift.
+/// The production spawn every caller injects — a named fn so they can't drift.
 pub(crate) fn respawn(handle: &AudioHandle, volume: f32) {
     handle.respawn_in_place(volume);
 }
@@ -779,8 +780,6 @@ fn run_loop(
 ) {
     use std::sync::atomic::Ordering::Relaxed;
 
-    // The synthesis window: frames try_sent meanwhile drop harmlessly (levels re-send every
-    // render frame), and mute rides the atomic so a keypress landing here is never lost.
     let built_at = Instant::now();
     let mut rng = dsp::NoiseStream::new(BUILD_SEED);
     let bank = AssetBank::build(&mut rng);
@@ -850,17 +849,6 @@ fn run_loop(
 mod tests {
     use super::*;
     use pixtuoid_scene::audio::StemLevels;
-
-    #[test]
-    fn disabled_handle_swallows_everything() {
-        let h = AudioHandle::disabled();
-        assert!(!h.is_enabled());
-        h.frame(AudioFrame {
-            events: vec![OneShot::DoorChime],
-            ..Default::default()
-        });
-        h.set_muted(true);
-    }
 
     #[test]
     fn run_loop_registers_beds_plays_events_and_exits_on_disconnect() {
@@ -974,7 +962,8 @@ mod tests {
 }
 
 /// The LISTEN gate: renders each busy-ness tier through the REAL
-/// mixer/schedulers/synth into wav files for the owner's audition.
+/// mixer/schedulers/synth into wav files for the owner's audition. No track gets bus-glue
+/// compression (rodio has no insert), so every mix is verified by ear.
 /// `#[ignore]` — run explicitly:
 /// `just test -p pixtuoid --lib audio::listen_gate --run-ignored only --no-capture`
 #[cfg(all(test, feature = "audio"))]
@@ -1151,12 +1140,10 @@ mod listen_gate {
             let buf = render_tier(&bank, &beds, &rain, TrackId::GenDay(0), stems, events, 60.0);
             assert!(
                 buf.iter().any(|&s| s.abs() > 0.01),
-                "{name}: every tier is audible in Phase 2"
+                "{name}: every tier is audible"
             );
             write_wav(&out.join(format!("{name}.wav")), &buf);
         }
-        // The NIGHT track carries no bus glue — rodio has no insert, so the
-        // owner re-verifies it by ear.
         for (name, stems) in [("night_moderate", moderate), ("night_rainy", rainy)] {
             let buf = render_tier(&bank, &night, &rain, TrackId::GenNight(0), stems, &[], 60.0);
             assert!(
