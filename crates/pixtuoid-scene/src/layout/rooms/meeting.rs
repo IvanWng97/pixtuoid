@@ -208,7 +208,7 @@ mod tests {
             (320, 180),
         ] {
             for seed in 0..8 {
-                let Some(layout) = crate::layout::Layout::compute_with_seed(w, h, None, seed)
+                let Some(layout) = crate::layout::SceneLayout::compute_with_seed(w, h, None, seed)
                 else {
                     continue;
                 };
@@ -241,7 +241,7 @@ mod tests {
         assert_eq!(
             trio.rug(ground_end).height,
             ground_end - trio.table.y + MEETING_RUG_OVERHANG,
-            "held to the table's distance from the floor's end"
+            "held to the table's distance from the ground's end"
         );
         assert_eq!(
             trio.rug(200).height,

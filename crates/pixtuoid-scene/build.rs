@@ -1,8 +1,8 @@
-//! Embed the default pack: the sprite list is generated from `sprites/default/`
-//! itself, so a sprite committed there is embedded by construction, less,
+//! Bundle the default pack: the sprite list is generated from `sprites/default/`
+//! itself, so a sprite committed there is bundled by construction, less,
 //! without the `density-art` feature, what
-//! [`density_art::embedded_without_density_art`] drops from both the manifest
-//! and the list. Every embedded file goes in without its comments
+//! [`density_art::bundled_without_density_art`] drops from both the manifest
+//! and the list. Every bundled file goes in without its comments
 //! ([`comments::strip_comments`]).
 
 #[path = "build_support/comments.rs"]
@@ -32,10 +32,9 @@ fn main() {
     let (pack_toml, dropped) = if std::env::var_os("CARGO_FEATURE_DENSITY_ART").is_some() {
         (comments::strip_comments(&pack_toml), BTreeSet::new())
     } else {
-        density_art::embedded_without_density_art(&pack_toml)
+        density_art::bundled_without_density_art(&pack_toml)
     };
-    std::fs::write(out_dir.join("embedded_pack.toml"), pack_toml)
-        .expect("write embedded_pack.toml");
+    std::fs::write(out_dir.join("bundled_pack.toml"), pack_toml).expect("write bundled_pack.toml");
     let stripped = out_dir.join("sprites");
     std::fs::create_dir_all(&stripped).expect("create the stripped sprite dir");
 
@@ -65,17 +64,17 @@ fn main() {
             continue;
         }
         let src = std::fs::read_to_string(path).expect("read a sprite");
-        let embedded = stripped.join(name);
-        std::fs::write(&embedded, comments::strip_comments(&src)).expect("write a stripped sprite");
+        let bundled = stripped.join(name);
+        std::fs::write(&bundled, comments::strip_comments(&src)).expect("write a stripped sprite");
         // `{:?}` escapes the path for a Rust string literal, backslashes
         // included.
         writeln!(
             list,
             "    ({name:?}, include_str!({:?})),",
-            embedded.display().to_string()
+            bundled.display().to_string()
         )
         .expect("writing to a String");
     }
     list.push_str("]\n");
-    std::fs::write(out_dir.join("embedded_sprites.rs"), list).expect("write embedded_sprites.rs");
+    std::fs::write(out_dir.join("bundled_sprites.rs"), list).expect("write bundled_sprites.rs");
 }

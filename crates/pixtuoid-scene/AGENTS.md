@@ -2,7 +2,7 @@
 
 The **backend-agnostic render + simulation engine**: layout geometry,
 pose/motion/pathfinding, the pixel pass (`render_to_rgb_buffer` — the shared
-world render), the color-theme MODEL, pets, chitchat, frame cache, embedded
+world render), the color-theme MODEL, pets, chitchat, frame cache, bundled
 sprite pack. The three painters (`tui`, `floating`, `pixtuoid-web`) sit on top.
 Module map: `ls src/` — each file's `//!` header is its annotation.
 Cross-cutting rules: workspace [`AGENTS.md`](../../AGENTS.md).

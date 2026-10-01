@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn glass_is_a_bays_cells_off_its_frame() {
         let layout =
-            crate::layout::Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS))
+            crate::layout::SceneLayout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS))
                 .expect("192x160 fits");
         let rows = window_rows(layout.wall_band_h());
         let h = rows.end - rows.start;

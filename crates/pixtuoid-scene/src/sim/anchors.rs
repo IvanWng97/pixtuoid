@@ -4,7 +4,7 @@
 
 use std::time::SystemTime;
 
-use crate::layout::{Layout, Pivot, SEAT_RENDER_Y_OFF, Size, WALKING_Y_OFF};
+use crate::layout::{Pivot, SEAT_RENDER_Y_OFF, SceneLayout, Size, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
 use crate::anim::epoch_ms;
@@ -95,7 +95,7 @@ pub(crate) fn keep_sprite_on_canvas(pivot: Pivot, pos: Point, size: Size, buf: S
 
 /// `pos`, in `pivot` space, moved so a `size` frame lands on `layout`'s canvas:
 /// the one fit every figure's placement takes.
-pub(crate) fn on_canvas(layout: &Layout, pivot: Pivot, pos: Point, size: Size) -> Point {
+pub(crate) fn on_canvas(layout: &SceneLayout, pivot: Pivot, pos: Point, size: Size) -> Point {
     let canvas = Size {
         w: layout.buf_w,
         h: layout.buf_h,
@@ -143,7 +143,7 @@ pub(crate) fn badge_anchor(top_left: Point, size: Size, ceiling: Option<u16>) ->
 #[cfg(test)]
 pub(crate) fn character_anchor(
     agent: &AgentSlot,
-    layout: &crate::layout::Layout,
+    layout: &crate::layout::SceneLayout,
     now: SystemTime,
     rctx: &mut pose::RouteCtx<'_>,
 ) -> Option<Point> {

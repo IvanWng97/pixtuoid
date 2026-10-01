@@ -226,8 +226,8 @@ mod tests {
         let mut met = 0;
         for (w, h) in [(120, 72), (160, 96), (192, 108), (240, 135), (320, 180)] {
             for seed in 0..12 {
-                let l =
-                    crate::layout::Layout::compute_with_seed(w, h, None, seed).expect("lays out");
+                let l = crate::layout::SceneLayout::compute_with_seed(w, h, None, seed)
+                    .expect("lays out");
                 for &piece in &l.wall_pieces {
                     let run = piece.clear_run();
                     for &post in &Glass::of(&crate::theme::NORMAL, piece, 1).posts {

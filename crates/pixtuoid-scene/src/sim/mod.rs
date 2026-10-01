@@ -20,15 +20,15 @@ use crate::chitchat::{self, ActiveChitchat, ChitchatBubble, VenueKey};
 use crate::creatures::{gateway_mascot_def, mascot_position, mascot_seed, pet_position};
 use crate::effects::{self, Effect};
 use crate::floor::{CoffeeState, FloorInputs, FloorMeta, PetInputs, VacancyDim};
-use crate::layout::{Layout, Pivot, Point, Size, WALKING_Y_OFF};
+use crate::layout::{Pivot, Point, SceneLayout, Size, WALKING_Y_OFF};
 use crate::motion::MotionState;
 use crate::pathfind::Router;
 use crate::pet::PetKind;
 use crate::physics::walking_position;
 use crate::pose::{self, Pose, PoseHistory};
 
-use crate::embedded_pack::{desk_art, desk_art_top};
 use crate::layout::CHARACTER_SPRITE_W;
+use crate::pack::{desk_art, desk_art_top};
 use anchors::{
     badge_anchor, on_canvas, walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath,
 };
@@ -237,7 +237,7 @@ impl SimFrame {
 /// What one `sim_step` reads, besides the stores it advances.
 pub(crate) struct SimInputs<'a> {
     pub(crate) world: FloorInputs<'a>,
-    pub(crate) layout: &'a Layout,
+    pub(crate) layout: &'a SceneLayout,
     /// Carrier → fetch time of each desk cup.
     pub(crate) coffee: &'a HashMap<AgentId, SystemTime>,
     /// [`FloorCtx::door_anim_max_ms`](crate::floor::FloorCtx::door_anim_max_ms).
@@ -387,7 +387,7 @@ pub(crate) fn frame_size(pack: &Pack, anim: &str, frame_idx: usize, fallback: Si
 /// The size of `anim`'s frame `frame_idx`, or `None` where the pack lacks it.
 pub(crate) fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Option<Size> {
     pack.animation(anim)
-        .and_then(|a| crate::embedded_pack::frame_at(a, frame_idx))
+        .and_then(|a| crate::pack::frame_at(a, frame_idx))
         .map(|f| Size {
             w: f.width(),
             h: f.height(),
@@ -403,7 +403,7 @@ const MASCOT_FALLBACK: Size = Size { w: 14, h: 12 };
 /// clicked; otherwise `pet_position` roams it around the idle desks.
 fn pet_placement(
     agents: &[AgentSlot],
-    layout: &Layout,
+    layout: &SceneLayout,
     pack: &Pack,
     pets: PetInputs<'_>,
     floor: FloorMeta,
@@ -492,7 +492,7 @@ pub(crate) fn pet_effects(
 /// "a hook arrived"; only the ground floor carries it, so each mascot shows once.
 fn mascot_placements(
     scene: &SceneState,
-    layout: &Layout,
+    layout: &SceneLayout,
     pack: &Pack,
     now: SystemTime,
 ) -> Vec<MascotPlacement> {
@@ -535,7 +535,7 @@ fn mascot_placements(
 /// tokens it has spent.
 fn desk_props(
     agents: &[AgentSlot],
-    layout: &Layout,
+    layout: &SceneLayout,
     coffee: &HashMap<AgentId, SystemTime>,
     now: SystemTime,
 ) -> Vec<DeskProps> {
@@ -613,7 +613,7 @@ pub(crate) fn character_effects(
 pub(crate) fn resolve_characters(
     agents: &[AgentSlot],
     poses: &HashMap<AgentId, Option<Pose>>,
-    layout: &Layout,
+    layout: &SceneLayout,
     pack: &Pack,
     char_w: u16,
     coffee: &HashMap<AgentId, SystemTime>,
@@ -889,8 +889,8 @@ fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
 
 /// The outfit-determining seed for `agent`. Extracted so
 /// `FrameCache::note_outfit_seed` watches the mid-lifetime cwd backfill through
-/// the EXACT unknown-cwd fallback the palette's `agent_overrides` uses; a second copy would
-/// drift.
+/// the EXACT unknown-cwd fallback [`agent_overrides`](crate::character::agent_overrides)
+/// uses; a second copy would drift.
 pub(crate) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
     if agent.unknown_cwd || agent.cwd.as_os_str().is_empty() {
         agent.agent_id.raw()

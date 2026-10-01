@@ -18,7 +18,7 @@ use crate::chitchat::{ActiveChitchat, ChitchatBubble};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
-use crate::layout::{Depth, Facing, FixtureKind, Layout, Pivot, Point, Station, z_sort_row};
+use crate::layout::{Depth, Facing, FixtureKind, Pivot, Point, SceneLayout, Station, z_sort_row};
 use crate::motion::MotionState;
 use crate::pet::PetFrame;
 
@@ -98,7 +98,6 @@ mod debug_overlay;
 pub(crate) mod drawable;
 pub(crate) mod effects;
 mod furniture;
-pub(crate) mod hair;
 pub(crate) mod palette;
 
 /// Applies the hour's object terms to every pixel painted since `since`.
@@ -194,7 +193,7 @@ pub struct PixelCtx<'a> {
     /// The floor this pass renders.
     pub world: crate::floor::FloorInputs<'a>,
     /// The computed office geometry for this frame.
-    pub layout: &'a Layout,
+    pub layout: &'a SceneLayout,
     /// The active color theme.
     pub theme: &'a crate::theme::Theme,
     /// Carrier → fetch-time view of [`crate::floor::CoffeeState`]: key present
@@ -214,7 +213,7 @@ pub struct PixelCtx<'a> {
 /// the world.
 struct PaintCtx<'a> {
     scene: &'a SceneState,
-    layout: &'a Layout,
+    layout: &'a SceneLayout,
     pack: &'a Pack,
     /// Animation phase, event ages and the wall clock — every sky fact reads
     /// [`Self::sky`].
@@ -330,8 +329,8 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
         paint_light(ctx.buf, spill, ctx.theme.lighting.sun_spill);
     }
 
-    // An empty floor reads dark because its artificial lights go out with
-    // `indoor_scale`, not because the FLOOR takes a second darkening of its own.
+    // An empty ground reads dark because its artificial lights go out with
+    // `indoor_scale`, not because the GROUND takes a second darkening of its own.
     paint_ground_wash(ctx.buf, top_wall_h, buf_h, look.ground_wash);
     if let Some(lamp) = &lights.floor_lamp {
         paint_light(ctx.buf, lamp, ctx.theme.lighting.floor_lamp_halo);
@@ -614,10 +613,8 @@ fn queue_fixtures<'a>(
                             ),
                         }
                     }
-                    Station::VendingMachine => {
-                        appliance(crate::embedded_pack::VENDING_MACHINE_SPRITE)
-                    }
-                    Station::Printer => appliance(crate::embedded_pack::PRINTER_SPRITE),
+                    Station::VendingMachine => appliance(crate::pack::VENDING_MACHINE_SPRITE),
+                    Station::Printer => appliance(crate::pack::PRINTER_SPRITE),
                     Station::SnackShelf => DrawableKind::SnackShelf { pos: f.at },
                 }
             }

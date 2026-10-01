@@ -12,7 +12,7 @@ use pixtuoid_core::{AgentSlot, ToolKind};
 use crate::anim::epoch_ms;
 use crate::atmosphere::SkyTones;
 use crate::floor::NeonLevels;
-use crate::layout::{Facing, Layout, Point};
+use crate::layout::{Facing, Point, SceneLayout};
 
 /// The floor lamp's level at full dark, before the room's own level.
 const FLOOR_LAMP_GAIN: f32 = 0.55;
@@ -59,7 +59,7 @@ const NEON_BREATH_FLOOR: f32 = 0.85;
 const NEON_ALERT_BREATH_MS: u64 = 3_000;
 const NEON_ALERT_BREATH_FLOOR: f32 = 0.62;
 /// Daylight washes a neon out: the halo keeps this share at noon, all of it at night.
-const NEON_DAYLIGHT_FLOOR: f32 = 0.5;
+const NEON_DAYLIGHT_MIN: f32 = 0.5;
 
 /// How far below its window the sun's spill reaches, in rows.
 pub(crate) const SPILL_DEPTH: u16 = 12;
@@ -298,7 +298,7 @@ pub(crate) struct LightInputs<'a> {
 
 impl Lights {
     /// The lights `layout` shows under `look`.
-    pub(crate) fn of(layout: &Layout, look: &SkyTones, inputs: &LightInputs<'_>) -> Self {
+    pub(crate) fn of(layout: &SceneLayout, look: &SkyTones, inputs: &LightInputs<'_>) -> Self {
         let (darkness, indoor) = (look.darkness, inputs.indoor_scale);
         Self {
             floor_lamp: layout.floor_lamp_base().map(|centre| Emitter {
@@ -433,7 +433,7 @@ pub(crate) fn desk_screen_glow(
 
 /// One halo over each [`lit_screen`], on the row above its desk, clear of the
 /// monitor.
-fn monitor_halos(layout: &Layout, inputs: &LightInputs<'_>) -> Vec<Emitter> {
+fn monitor_halos(layout: &SceneLayout, inputs: &LightInputs<'_>) -> Vec<Emitter> {
     inputs
         .agents
         .iter()
@@ -471,7 +471,7 @@ fn neon_halo_strength(levels: NeonLevels, now: SystemTime, darkness: f32) -> f32
     let ms = epoch_ms(now);
     let brand = NEON_HALO_BRAND * neon_breath(ms, NEON_BREATH_MS, NEON_BREATH_FLOOR);
     let alert = NEON_HALO_ALERT * neon_breath(ms, NEON_ALERT_BREATH_MS, NEON_ALERT_BREATH_FLOOR);
-    let daylight = NEON_DAYLIGHT_FLOOR + (1.0 - NEON_DAYLIGHT_FLOOR) * darkness.clamp(0.0, 1.0);
+    let daylight = NEON_DAYLIGHT_MIN + (1.0 - NEON_DAYLIGHT_MIN) * darkness.clamp(0.0, 1.0);
     // A tube only throws light ABOVE its starved level — one darker than the wall
     // it hangs on has none to give.
     let starved = NeonLevels::EMPTY.power;
