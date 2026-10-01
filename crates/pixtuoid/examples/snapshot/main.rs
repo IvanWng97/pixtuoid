@@ -536,7 +536,7 @@ fn main() -> Result<()> {
     // Static snapshots have no time to animate the fade — snap straight
     // to the steady-state level for the chosen scene.
     if args.empty {
-        floor.ctx.light.snap_to_empty();
+        floor.ctx.vacancy_dim.snap_to_empty();
     }
     let (dash_rows, dash_selected) = if args.dashboard {
         let folds = pixtuoid::tui::dashboard::DashboardFolds::default();

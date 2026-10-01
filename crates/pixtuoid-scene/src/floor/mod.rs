@@ -1,7 +1,7 @@
 //! Multi-floor office partitioning: the floor arithmetic, the per-floor
 //! rendering context ([`FloorCtx`]), the shared headless frame seams
 //! ([`render_floor`], and [`FloorSession::step`] for a painter that draws the
-//! frame itself), the per-floor fade states ([`LightingState`], the neon
+//! frame itself), the per-floor fade states ([`VacancyDim`], the neon
 //! sign's), and the per-office [`CoffeeState`] bookkeeping.
 
 use std::collections::HashMap;
@@ -126,7 +126,7 @@ pub struct FloorCtx {
     /// The classic's floor shadows, kept per layout.
     pub(crate) shadows: crate::ground::DepthsCache,
     /// This floor's indoor-lighting fade state.
-    pub light: LightingState,
+    pub vacancy_dim: VacancyDim,
     /// This floor's neon-sign fade state.
     pub(crate) neon: NeonState,
     /// Per-agent walk-timing state (physics profiles for entry/exit/wander).
@@ -157,7 +157,7 @@ impl FloorCtx {
             cache: FrameCache::new(),
             base_fill: crate::pixel_painter::BaseFillCache::new(),
             shadows: crate::ground::DepthsCache::default(),
-            light: LightingState::new(),
+            vacancy_dim: VacancyDim::new(),
             neon: NeonState::new(),
             motion: HashMap::new(),
             door_anim_max_ms: 0,
@@ -175,7 +175,7 @@ impl FloorCtx {
             overlay: &mut self.overlay,
             history: &mut self.history,
             motion: &mut self.motion,
-            light: &mut self.light,
+            vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat,
         }
@@ -753,20 +753,20 @@ impl Default for FloorSession {
 /// `EMPTY_DEBOUNCE_MS` (so agents briefly disappearing between transcripts don't
 /// flicker it) then eases toward `MIN_LEVEL`; repopulating snaps the target
 /// straight back to 1.0.
-pub struct LightingState {
+pub struct VacancyDim {
     level: f32,
     empty_since: Option<SystemTime>,
     last_update: Option<SystemTime>,
     dimmed: bool,
 }
 
-impl Default for LightingState {
+impl Default for VacancyDim {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LightingState {
+impl VacancyDim {
     /// Floor of the smoothed lit level — an empty floor dims to here, never to black.
     pub const MIN_LEVEL: f32 = 0.10;
     /// How long an emptied floor holds full light before it starts fading (ms).
@@ -980,7 +980,7 @@ impl NeonState {
     /// inside one mood is not a change, and a reversal mid-fade restarts from the
     /// light it interrupted.
     ///
-    /// `room_dimmed` is [`LightingState::dimmed`]: the sign only starves once the
+    /// `room_dimmed` is [`VacancyDim::dimmed`]: the sign only starves once the
     /// ROOM is judged empty, so that debounce is the one "is the office really
     /// empty" clock — a gap between transcripts, or the last agent still walking
     /// out of a lit room, can't drop the sign.

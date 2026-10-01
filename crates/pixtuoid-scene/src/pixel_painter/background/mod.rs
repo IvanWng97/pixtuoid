@@ -19,14 +19,13 @@ pub(super) use lighting::{
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use super::ambient::SunbeamColumn;
 use super::palette::{RgbLut, WHITE, blend_pixel, blend_rgb};
 
 use crate::atmosphere::Moment;
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
-    Bounds, Layout, Size, WindowBay, glass_rows, wall_trim_row, window_frame, window_posts,
-    window_rows, window_run,
+    Bounds, Size, WindowBay, glass_rows, wall_trim_row, window_frame, window_posts, window_rows,
+    window_run,
 };
 use crate::sky::Sky;
 use crate::skyline::CityStrip;
@@ -43,21 +42,6 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, sky: &Sky) {
     for px in buf.as_mut_slice() {
         *px = lut.apply(*px);
     }
-}
-
-/// Returns one `SunbeamColumn` per painted window, centred on the pane and
-/// starting at the floor row, so the motes drift through the window's
-/// [`Light::Spill`](crate::lighting::Light::Spill).
-pub(in crate::pixel_painter) fn window_spill_columns(layout: &Layout) -> Vec<SunbeamColumn> {
-    let top_wall_h = layout.wall_band_h();
-    layout
-        .window_bays()
-        .map(|w| SunbeamColumn {
-            x: w.center_x(),
-            top_y: top_wall_h,
-            depth: crate::lighting::SPILL_DEPTH,
-        })
-        .collect()
 }
 
 /// The base fill's complete input set. Every value the fill loops read is a
@@ -116,7 +100,7 @@ impl BaseFillCache {
     }
 }
 
-/// The floor and the north wall band `top_wall_h` tall with the windows `bays`,
+/// The ground and the north wall band `top_wall_h` tall with the windows `bays`,
 /// over the whole of `buf`, at `moment`.
 pub(super) fn paint_ground_and_walls(
     base_fill: &mut BaseFillCache,

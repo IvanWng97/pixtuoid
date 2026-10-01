@@ -56,7 +56,7 @@ fn neon_halo_drops_to_its_daylight_floor_and_a_calm_sign_glows_less_than_a_busy_
     let night = neon_at(NeonLevels::BUSY, 1.0);
     let day = neon_at(NeonLevels::BUSY, 0.0);
     assert!(
-        (day - night * NEON_DAYLIGHT_FLOOR).abs() < 1e-6,
+        (day - night * NEON_DAYLIGHT_MIN).abs() < 1e-6,
         "{day} vs {night}"
     );
     let calm = neon_at(NeonLevels::CALM, 1.0);
@@ -239,7 +239,7 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
 #[test]
 fn an_emptied_floor_takes_both_desk_emitters_down_with_the_level() {
     use crate::layout::Facing;
-    let min = crate::floor::LightingState::MIN_LEVEL;
+    let min = crate::floor::VacancyDim::MIN_LEVEL;
     let lit = desk_lights(DESK, Facing::North, 1.0, 1.0);
     let empty = desk_lights(DESK, Facing::North, 1.0, min);
     for (what, lit, empty) in [

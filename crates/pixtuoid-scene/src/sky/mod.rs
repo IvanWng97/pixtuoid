@@ -530,7 +530,7 @@ fn flash_level_at(now: SystemTime, policy: WeatherPolicy) -> f32 {
 pub(crate) struct InteriorLight {
     /// The sun's or moon's light reaching the interior through the atmosphere, 0..=1.
     pub(crate) interior: f32,
-    /// The glass's daylight: the interior plus the night's city-light floor, 0..=1.
+    /// The glass's daylight: the interior plus the night's city-light minimum, 0..=1.
     pub(crate) exterior: f32,
 }
 
