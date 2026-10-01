@@ -101,7 +101,7 @@ pub(crate) mod drawable;
 mod effects;
 mod furniture;
 pub(crate) mod hair;
-pub(crate) mod palette;
+mod palette;
 pub(crate) mod seat;
 mod wall;
 
