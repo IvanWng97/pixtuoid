@@ -26,7 +26,7 @@ use crate::character::{CharacterFrame, SpritePose, character_frame};
 use crate::effects::{Effect, STEAM_PUFFS};
 use crate::frame_cache::FrameCache;
 pub(super) use crate::layout::Layer;
-use crate::layout::{Layout, Point, Size};
+use crate::layout::{Point, SceneLayout, Size};
 use crate::pack::{DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, desk_art, desk_art_top, frame_at};
 
 /// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
@@ -590,7 +590,7 @@ pub(crate) fn paint_character_at(
 
 /// Queue every room wall's bands into the y-sort, emitted after the fixtures so
 /// the glass also covers a chair tied with a band's row.
-pub(super) fn enqueue_room_walls<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
+pub(super) fn enqueue_room_walls<'a>(layout: &'a SceneLayout, drawables: &mut Vec<Drawable<'a>>) {
     for &piece in &layout.wall_pieces {
         for (rows, depth) in piece.sort_bands() {
             drawables.push(Drawable {
@@ -919,7 +919,7 @@ mod tests {
         assert!(pack.animation("trash_bin").is_none());
         let mut cache = FrameCache::new();
         let now = SystemTime::UNIX_EPOCH;
-        let layout = crate::layout::Layout::compute(160, 120, None).expect("fits");
+        let layout = crate::layout::SceneLayout::compute(160, 120, None).expect("fits");
         let first = pixtuoid_core::state::FloorLocalDeskIndex(0);
         let desk = layout.home_desks[first.0];
         let cabinet = layout

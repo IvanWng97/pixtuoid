@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use pixtuoid_scene::floor::FloorInputs;
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
-use pixtuoid_scene::layout::Layout;
+use pixtuoid_scene::layout::SceneLayout;
 use pixtuoid_scene::pet::PetFrame;
 use pixtuoid_scene::pixel_painter::{
     AgentFrame, MascotFrame, PixelCtx, PixelPassResult, render_to_rgb_buffer,
@@ -122,7 +122,7 @@ impl<'a> DrawCtx<'a> {
 #[derive(Default)]
 pub struct DrawOut {
     /// `None` when the frame was refused.
-    pub layout: Option<Arc<Layout>>,
+    pub layout: Option<Arc<SceneLayout>>,
     pub pet_pos: Option<PetFrame>,
     pub mascots: Vec<MascotFrame>,
     pub agents: Vec<AgentFrame>,

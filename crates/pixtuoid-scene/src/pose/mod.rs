@@ -30,7 +30,7 @@ pub use pure::{
 // visibility.
 pub(crate) use pure::{SpotClaims, resolve_wander_target, typing_frame};
 
-use crate::layout::{Layout, Point, desk_walk_anchor_facing};
+use crate::layout::{Point, SceneLayout, desk_walk_anchor_facing};
 use crate::pathfind::Router;
 
 /// The per-frame routing engine state threaded through pose derivation,
@@ -140,7 +140,7 @@ const EXIT_BUDGET_MARGIN_MS: u64 = 300;
 /// anchored top-left, so a corner scan is lopsided and can't clear the body to
 /// the EAST — the east side would read as walled-off. `None` only in a
 /// degenerate layout where every allowed side is walled off.
-pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> {
+pub(crate) fn desk_approach_cell(desk: Point, layout: &SceneLayout) -> Option<Point> {
     use crate::layout::{Furniture, desk_walk_anchor_facing};
     // The desk's OWN facing, not a constant: `ApproachSides` is canonical (facing-South) and
     // rotated by it, so a back-turned desk is approached from its south front, not walled off there.
@@ -161,7 +161,7 @@ pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> 
 /// A\*, plus `Some(chair)` to prepend/append via [`Settle`] (the short glide
 /// on/off the seat the router never plans), or `None` in the degenerate boxed-in
 /// layout where the leg reverts to the direct chair target.
-pub(crate) fn desk_leg_endpoint(desk: Point, layout: &Layout) -> (Point, Option<Point>) {
+pub(crate) fn desk_leg_endpoint(desk: Point, layout: &SceneLayout) -> (Point, Option<Point>) {
     let chair = crate::layout::desk_walk_anchor_facing(desk, layout.desk_facing_at(desk));
     match desk_approach_cell(desk, layout) {
         Some(approach) => (approach, Some(chair)),
@@ -232,7 +232,7 @@ fn exit_elapsed_ms(profile: &WalkProfile, elapsed_ms: u64) -> u64 {
 pub fn derive_with_routing(
     slot: &AgentSlot,
     now: SystemTime,
-    layout: &Layout,
+    layout: &SceneLayout,
     rctx: &mut RouteCtx<'_>,
 ) -> Option<Pose> {
     let desk = layout.home_desk(slot.desk_index.single_floor_local())?;
@@ -590,7 +590,7 @@ pub fn derive_with_routing(
 fn route_walking_pose(
     slot: &AgentSlot,
     now: SystemTime,
-    layout: &Layout,
+    layout: &SceneLayout,
     rctx: &mut RouteCtx<'_>,
     pose: Pose,
     settle: Settle,

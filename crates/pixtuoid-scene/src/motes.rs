@@ -1,7 +1,7 @@
 //! The dust motes drifting through each window's sunbeam, pixel-free: where
 //! each one is and how much of it shows. A painter draws each its own way.
 
-use crate::layout::Layout;
+use crate::layout::SceneLayout;
 
 /// One window's sunbeam, the column its motes drift down.
 pub(crate) struct SunbeamColumn {
@@ -79,7 +79,7 @@ pub(crate) fn dust_mote_positions(
 /// Returns one `SunbeamColumn` per painted window, centred on the pane and
 /// starting at the ground's first row, so the motes drift through the window's
 /// [`Light::Spill`](crate::lighting::Light::Spill).
-pub(crate) fn window_spill_columns(layout: &Layout) -> Vec<SunbeamColumn> {
+pub(crate) fn window_spill_columns(layout: &SceneLayout) -> Vec<SunbeamColumn> {
     let top_wall_h = layout.wall_band_h();
     layout
         .window_bays()

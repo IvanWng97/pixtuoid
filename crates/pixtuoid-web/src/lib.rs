@@ -1103,7 +1103,7 @@ mod tests {
 
     #[test]
     fn capacity_tracks_the_canvas_layout_so_no_agent_is_stranded_unpainted() {
-        use pixtuoid_scene::layout::Layout;
+        use pixtuoid_scene::layout::SceneLayout;
         // The site renders BUF_H=130; this width seats the full cast plus at
         // least one spare. The free-desk count is DERIVED, not a size literal —
         // the density pass re-tunes desks-per-buffer out from under a literal.
@@ -1127,7 +1127,7 @@ mod tests {
             "the click past exhaustion is refused outright: {admitted:?}"
         );
         o.step(T0_MS + 32_000.0, w, h);
-        let layout = Layout::compute_with_seed(w as u16, h as u16, None, o.seed)
+        let layout = SceneLayout::compute_with_seed(w as u16, h as u16, None, o.seed)
             .expect("the portrait buffer lays out");
         assert_eq!(
             o.scene.total_capacity(),

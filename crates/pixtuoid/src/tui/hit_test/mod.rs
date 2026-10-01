@@ -3,7 +3,7 @@
 
 use pixtuoid_core::AgentId;
 
-use pixtuoid_scene::layout::{Anchor, Bounds, Layout, Point, Size, anchored_top_left};
+use pixtuoid_scene::layout::{Anchor, Bounds, Point, SceneLayout, Size, anchored_top_left};
 use pixtuoid_scene::pet::PetKind;
 use pixtuoid_scene::pixel_painter::{AgentFrame, MascotFrame};
 
@@ -21,13 +21,13 @@ pub(crate) fn hit_test_agent(agents: &[AgentFrame], cell: CellArea) -> Option<Ag
 
 /// Whether `cell` shows the coffee-machine section of the pantry counter
 /// sprite.
-pub(crate) fn hit_test_coffee_machine(layout: &Layout, cell: CellArea) -> bool {
+pub(crate) fn hit_test_coffee_machine(layout: &SceneLayout, cell: CellArea) -> bool {
     layout.coffee_machine().is_some_and(|b| on_rect(b, cell))
 }
 
 /// The label of the fixture hovering `cell` points at, if it carries one. The
 /// coffee machine is handled separately for its click-to-open behavior.
-pub(crate) fn hit_test_furniture(layout: &Layout, cell: CellArea) -> Option<&'static str> {
+pub(crate) fn hit_test_furniture(layout: &SceneLayout, cell: CellArea) -> Option<&'static str> {
     layout.fixture_at(cell.bounds())?.hover_label()
 }
 

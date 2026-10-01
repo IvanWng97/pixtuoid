@@ -9,7 +9,7 @@ use std::time::Duration;
 #[test]
 fn frame_layout_memo_matches_fresh_compute_across_hits_resizes_and_none() {
     let mut ctx = FloorCtx::new();
-    let fresh = crate::layout::Layout::compute_with_seed(192, 156, None, 0).unwrap();
+    let fresh = crate::layout::SceneLayout::compute_with_seed(192, 156, None, 0).unwrap();
     let a = ctx.frame_layout(192, 156, 0).unwrap();
     let b = ctx.frame_layout(192, 156, 0).unwrap();
     // Pointer identity first: the value-equality below would still pass a reverted
@@ -24,7 +24,7 @@ fn frame_layout_memo_matches_fresh_compute_across_hits_resizes_and_none() {
         assert_eq!(l.home_desks.len(), fresh.home_desks.len());
     }
     let resized = ctx.frame_layout(120, 100, 0).unwrap();
-    let fresh_resized = crate::layout::Layout::compute_with_seed(120, 100, None, 0).unwrap();
+    let fresh_resized = crate::layout::SceneLayout::compute_with_seed(120, 100, None, 0).unwrap();
     assert_eq!(resized.walkable, fresh_resized.walkable);
     // A too-small buffer is None and must not poison the memo.
     assert!(ctx.frame_layout(3, 3, 0).is_none());
