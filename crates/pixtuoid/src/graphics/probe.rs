@@ -137,7 +137,7 @@ fn detected(responses: &[Response], env: &EnvHints, window_cell: Option<CellSize
 fn unanswered(env: &EnvHints, window_cell: Option<CellSize>) -> Probe {
     let d = detected(&[], env, window_cell);
     if d.protocol.is_some() {
-        Probe::Detected(d)
+        Probe::Answered(d)
     } else {
         Probe::NoAnswer
     }
@@ -201,7 +201,7 @@ pub(crate) fn probe(ask: bool) -> Probe {
     ) {
         None => Probe::NotQueried,
         Some(false) => unanswered(&env, window_cell()),
-        Some(true) => Probe::Detected(detected(&responses, &env, window_cell())),
+        Some(true) => Probe::Answered(detected(&responses, &env, window_cell())),
     }
 }
 
@@ -248,7 +248,8 @@ fn window_cell() -> Option<CellSize> {
 /// timeout with its fallback picker (ratatui-image 11.0.8 `picker.rs:147-157`),
 /// which without a window size — never one on Windows (`picker.rs:453-456`) —
 /// is halfblocks whatever the environment names, so a terminal that never
-/// answers arrives as [`Probe::Detected`] with no protocol.
+/// answers arrives as upstream's answer for it, [`Probe::Answered`] with no
+/// protocol.
 #[cfg(not(unix))]
 pub(crate) fn probe(ask: bool) -> Probe {
     use ratatui_image::picker::Picker;
@@ -264,7 +265,7 @@ pub(crate) fn probe(ask: bool) -> Probe {
         return Probe::NotQueried;
     };
     let font = picker.font_size();
-    Probe::Detected(Detected {
+    Probe::Answered(Detected {
         protocol: match picker.protocol_type() {
             ProtocolType::Kitty => Some(ImageProtocol::Kitty),
             ProtocolType::Sixel => Some(ImageProtocol::Sixel),
@@ -373,7 +374,7 @@ mod tests {
         let window = Some(CellSize { w: 9, h: 18 });
         assert_eq!(
             unanswered(&env("xterm-256color", "iTerm.app"), window),
-            Probe::Detected(Detected {
+            Probe::Answered(Detected {
                 protocol: Some(ImageProtocol::Iterm2),
                 cell: window,
                 tmux: false,
