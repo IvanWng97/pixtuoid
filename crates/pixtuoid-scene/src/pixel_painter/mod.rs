@@ -16,7 +16,7 @@ use pixtuoid_core::{AgentSlot, SceneState};
 
 use crate::chitchat::{ActiveChitchat, ChitchatBubble};
 #[cfg(test)]
-use crate::floor::LightingState;
+use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
 use crate::layout::{Anchor, Depth, Facing, FixtureKind, Layout, Point, Station, z_sort_row};
 use crate::motion::MotionState;
