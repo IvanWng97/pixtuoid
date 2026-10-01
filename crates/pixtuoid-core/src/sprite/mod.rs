@@ -65,7 +65,7 @@ impl Rgb {
     ///
     /// Stepped in OKLab, where equal lightness steps look equal whatever the
     /// hue. A level covers a share of the distance left to white or black, at
-    /// least a [`GAMUT_JND`] where that fits: a fixed step would merge a dark
+    /// least a `GAMUT_JND` where that fits: a fixed step would merge a dark
     /// base's deeper shadows into one black. A step past the gamut gives up
     /// chroma before that lightness, so a highlight pales.
     ///
