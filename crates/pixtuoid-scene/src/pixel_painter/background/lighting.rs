@@ -5,6 +5,7 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
+use crate::art::{RUNNER_LATTICE_STRIDE, octant_offset};
 use crate::dither::FALLOFF_TONES;
 use crate::floor::NeonLook;
 use crate::lighting::Emitter;
@@ -172,30 +173,6 @@ pub(in crate::pixel_painter) fn paint_clock(
         put(buf, mdx * step, mdy * step, hand_min);
     }
 }
-
-/// Quantize a fractional turn (0.0..1.0, 0.0 = north) to one of 8 octant
-/// (dx, dy) unit offsets.
-pub(crate) fn octant_offset(turn: f32) -> (i32, i32) {
-    // rem_euclid(8) maps every i32 (incl. a NaN turn's 0 cast) into 0..=7, so
-    // the table is total — a match would need a dead wildcard arm.
-    const OCTANTS: [(i32, i32); 8] = [
-        (0, -1),
-        (1, -1),
-        (1, 0),
-        (1, 1),
-        (0, 1),
-        (-1, 1),
-        (-1, 0),
-        (-1, -1),
-    ];
-    let oct = ((turn * 8.0).round() as i32).rem_euclid(8);
-    OCTANTS[oct as usize]
-}
-
-/// The corridor runner's diamond lattice pitch, in logical px. Taste pin: a
-/// tighter stride read as bathroom tiling rather than a woven runner at
-/// half-block scale.
-pub(crate) const RUNNER_LATTICE_STRIDE: i32 = 10;
 
 /// Office corridor runner, painted along the cubicle_aisle band so the eye
 /// traces a path connecting the door, meeting room, pantry, cubicles and lounge.

@@ -9,9 +9,8 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer, Sprite};
+use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::DaemonState;
 use pixtuoid_core::{AgentSlot, SceneState};
 
@@ -19,7 +18,7 @@ use crate::chitchat::{ActiveChitchat, ChitchatBubble};
 #[cfg(test)]
 use crate::floor::LightingState;
 use crate::frame_cache::FrameCache;
-use crate::layout::{Anchor, Depth, Facing, FixtureKind, Layout, Point, Size, Station, z_sort_row};
+use crate::layout::{Anchor, Depth, Facing, FixtureKind, Layout, Point, Station, z_sort_row};
 use crate::motion::MotionState;
 use crate::pet::PetFrame;
 
@@ -96,25 +95,11 @@ struct Hoverables {
 mod ambient;
 mod background;
 mod debug_overlay;
-mod dense;
 pub(crate) mod drawable;
 mod effects;
 mod furniture;
 pub(crate) mod hair;
 pub(crate) mod palette;
-pub(crate) mod seat;
-mod wall;
-
-pub(crate) use background::{RUNNER_LATTICE_STRIDE, octant_offset};
-#[cfg(test)]
-pub(crate) use drawable::DESK_BEZEL_RAISE;
-pub(crate) use drawable::{
-    DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, desk_art_top, desk_sprite_name,
-};
-pub(crate) use palette::{
-    CLOCK_FACE_KEY, DESK_BULB_KEY, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, appliance_overrides,
-    fixture_overrides,
-};
 
 // Only the hue matches the sprite's glow, which also takes the hour's wash and
 // shows only on a NORTH-facing desk.
@@ -162,39 +147,22 @@ fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
         }
     })
 }
-pub(crate) use background::BaseFillCache;
-pub(crate) use dense::{DenseFrame, densest_frame};
 #[cfg(test)]
-pub(crate) use furniture::{COOLER_WATER, paint_area_rug};
+pub(crate) use crate::art::{SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
+pub(crate) use background::BaseFillCache;
+pub(crate) use furniture::COOLER_WATER;
+#[cfg(test)]
+pub(crate) use furniture::paint_area_rug;
 // `floor::FloorSession::observe` is the public entry to the sim tick; the step
 // itself and its per-call borrow-set stay crate-internal.
-use crate::sim::{CharacterGlow, SimFrame, SimInputs, desk_occupant, sim_step};
-pub(crate) use wall::paint_wall;
-
-/// The pantry counter sprites, compact then large.
-pub(crate) const PANTRY_COUNTER_ANIMS: [&str; 2] = ["pantry_small", "pantry"];
-
-/// The pantry counter sprite for a counter `counter_w` px wide: the large
-/// kitchen run when the room fits it, else the compact one.
-pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
-    let [compact, large] = PANTRY_COUNTER_ANIMS;
-    if counter_w >= crate::layout::PANTRY_COUNTER_LARGE_W {
-        large
-    } else {
-        compact
-    }
-}
+use crate::sim::{SimFrame, SimInputs, desk_occupant, sim_step};
 
 use crate::atmosphere::Moment;
 use crate::lighting::{DeskLights, LightInputs, Lights};
-use crate::sim::outfit_seed_for;
 use background::{
     paint_floor_and_walls, paint_floor_wash, paint_light, paint_neon_halo, paint_shadows,
 };
-use drawable::{Drawable, DrawableKind, Drawn, Layer, paint_drawable};
-use palette::agent_overrides;
-use seat::paint_character_at;
-use wall::enqueue_room_walls;
+use drawable::{Drawable, DrawableKind, Drawn, Layer, enqueue_room_walls, paint_drawable};
 
 /// The weather names accepted by [`force_weather`], canonical order.
 pub fn weather_names() -> Vec<&'static str> {
@@ -488,65 +456,13 @@ fn enqueue_characters<'a>(
             layer: Layer::Figure,
             kind: DrawableKind::Character {
                 agent,
-                pose: seat::SpritePose::of(p, agent, ctx.theme),
+                pose: crate::art::SpritePose::of(p, agent, ctx.theme),
                 anchor: p.anchor,
                 label_anchor: p.label_anchor,
                 effects: &p.effects,
             },
         });
     }
-}
-
-/// The frame to paint for `idx`, via [`frame_index`]. `None` only for a
-/// genuinely empty animation.
-pub(crate) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
-    anim.frames().get(frame_index(anim, idx))
-}
-
-/// `idx`, or `0` once it runs past the animation: a custom pack's animation
-/// with fewer frames than the shared cycle's `frame_idx` would
-/// otherwise vanish the sprite.
-pub(super) fn frame_index(anim: &Sprite, idx: usize) -> usize {
-    if idx < anim.frames().len() { idx } else { 0 }
-}
-
-const VENDING_MACHINE_SPRITE: &str = "vending_machine";
-const PRINTER_SPRITE: &str = "printer";
-
-/// The pack art a corridor appliance at a `kind` waypoint is drawn from.
-pub(crate) fn appliance_art(kind: crate::layout::WaypointKind) -> Option<&'static str> {
-    use crate::layout::WaypointKind as K;
-    match kind {
-        K::VendingMachine => Some(VENDING_MACHINE_SPRITE),
-        K::Printer => Some(PRINTER_SPRITE),
-        K::Couch
-        | K::Pantry
-        | K::PhoneBooth
-        | K::StandingDesk
-        | K::MeetingSofa
-        | K::MeetingChair
-        | K::Island
-        | K::SnackShelf => None,
-    }
-}
-
-/// The frame of an appliance's `anim` showing at `now`: frame 0 at rest, else
-/// its busy loop — the frames after 0, one each of the art's own `frame_ms`.
-pub(crate) fn appliance_frame(anim: &Sprite, busy: bool, now: std::time::SystemTime) -> usize {
-    let loop_len = anim.frames().len().saturating_sub(1);
-    if !busy || loop_len == 0 {
-        return 0;
-    }
-    let step = crate::anim::epoch_ms(now) / u64::from(anim.frame_ms().max(1));
-    1 + usize::try_from(step % loop_len as u64).unwrap_or(0)
-}
-
-/// The frame of a looping `anim` showing at `now`: one each of the art's own
-/// `frame_ms`, round and round.
-pub(crate) fn looping_frame(anim: &Sprite, now: std::time::SystemTime) -> usize {
-    let frames = anim.frames().len().max(1) as u64;
-    let step = crate::anim::epoch_ms(now) / u64::from(anim.frame_ms().max(1));
-    usize::try_from(step % frames).unwrap_or(0)
 }
 
 /// The glow of a desk's screen: its occupant's [`lit_screen`](crate::lighting::lit_screen),
@@ -727,7 +643,7 @@ fn queue_fixtures<'a>(
                 };
                 match station {
                     Station::PantryCounter => {
-                        let anim = pantry_counter_anim(layout.pantry_counter_size().w);
+                        let anim = crate::art::pantry_counter_anim(layout.pantry_counter_size().w);
                         DrawableKind::WaypointPantry {
                             pos: f.at,
                             anim,
@@ -738,8 +654,8 @@ fn queue_fixtures<'a>(
                             ),
                         }
                     }
-                    Station::VendingMachine => appliance(VENDING_MACHINE_SPRITE),
-                    Station::Printer => appliance(PRINTER_SPRITE),
+                    Station::VendingMachine => appliance(crate::art::VENDING_MACHINE_SPRITE),
+                    Station::Printer => appliance(crate::art::PRINTER_SPRITE),
                     Station::SnackShelf => DrawableKind::SnackShelf { pos: f.at },
                 }
             }

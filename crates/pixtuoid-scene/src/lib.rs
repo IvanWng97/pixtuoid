@@ -29,6 +29,7 @@
 
 #[doc(hidden)]
 pub mod anim;
+pub(crate) mod art;
 pub(crate) mod atmosphere;
 #[doc(hidden)]
 pub mod audio;
@@ -75,6 +76,7 @@ pub(crate) mod skyline;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;
 pub mod token_meter;
+pub(crate) mod wall;
 
 /// ⌊2⁶⁴/φ⌋, φ the golden ratio: the Fibonacci-hashing multiplier and splitmix64's increment.
 pub(crate) const GOLDEN_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;

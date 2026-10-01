@@ -27,14 +27,16 @@ use crate::pet::PetKind;
 use crate::physics::walking_position;
 use crate::pose::{self, Pose, PoseHistory};
 
+use crate::art::{desk_art, desk_art_top};
 use crate::layout::CHARACTER_SPRITE_W;
-use crate::pixel_painter::drawable::{desk_art, desk_art_top, desk_cup_at};
-use crate::pixel_painter::seat::{Seat, settle_seat};
+use crate::pixel_painter::drawable::desk_cup_at;
 use anchors::{
     badge_anchor, on_canvas, walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath,
 };
+use seat::{Seat, settle_seat};
 
 pub(crate) mod anchors;
+pub(crate) mod seat;
 
 #[doc(hidden)]
 pub use anchors::seated_anchor_facing;
@@ -370,7 +372,7 @@ pub(super) fn frame_size(pack: &Pack, anim: &str, frame_idx: usize, fallback: Si
 /// The size of `anim`'s frame `frame_idx`, or `None` where the pack lacks it.
 pub(super) fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Option<Size> {
     pack.animation(anim)
-        .and_then(|a| crate::pixel_painter::frame_at(a, frame_idx))
+        .and_then(|a| crate::art::frame_at(a, frame_idx))
         .map(|f| Size {
             w: f.width(),
             h: f.height(),

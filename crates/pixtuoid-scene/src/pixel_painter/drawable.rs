@@ -16,18 +16,21 @@ use super::palette::{BLACK, WHITE, blend_rgb};
 use crate::sim::{Cup, DeskProps};
 use pixtuoid_core::AgentSlot;
 
+use super::AgentFrame;
 use super::background::{paint_clock, paint_corridor_runner, paint_neon_panel};
 use super::effects::{paint_effects, paint_screen_glow, paint_screen_idle};
-use super::frame_at;
 use super::furniture::{
     paint_area_rug, paint_coat_rack, paint_doormat, paint_fish_tank, paint_kitchen_island,
     paint_meeting_chair, paint_notice_board, paint_side_table, paint_trash_bin, paint_water_cooler,
 };
-use super::{AgentFrame, paint_character_at};
+use crate::art::{
+    CharacterFrame, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, SpritePose, character_frame, desk_art,
+    desk_art_top, frame_at,
+};
 use crate::effects::{Effect, STEAM_PUFFS};
 use crate::frame_cache::FrameCache;
 pub(super) use crate::layout::Layer;
-use crate::layout::{Point, Size};
+use crate::layout::{Layout, Point, Size};
 
 /// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
 /// size — hand-tuned to the sprite art so the steam sits within the coffee
@@ -37,7 +40,7 @@ const PANTRY_STEAM_DX_SMALL: i16 = 1;
 
 /// The steam offset for `anim`, a [`super::pantry_counter_anim`] pick.
 fn pantry_steam_dx(anim: &str) -> i16 {
-    let [_, large] = super::PANTRY_COUNTER_ANIMS;
+    let [_, large] = crate::art::PANTRY_COUNTER_ANIMS;
     if anim == large {
         PANTRY_STEAM_DX_LARGE
     } else {
@@ -79,7 +82,7 @@ pub(super) enum DrawableKind<'a> {
     },
     Character {
         agent: &'a AgentSlot,
-        pose: super::seat::SpritePose,
+        pose: SpritePose,
         anchor: Point,
         label_anchor: Point,
         effects: &'a [Effect],
@@ -241,40 +244,6 @@ pub(super) struct DrawableCtx<'a> {
     pub theme: &'a crate::theme::Theme,
 }
 
-/// The monitor bezel standing proud of the desk back, above `desk.y`.
-pub(crate) const DESK_BEZEL_RAISE: u16 = 1;
-
-/// The base desk's pack animation, whose bottom row every desk's art keeps.
-pub(crate) const DESK_SPRITE: &str = "desk";
-
-/// The row a desk's art `art_h` tall blits from at `desk_y`: the bezel raise,
-/// plus whatever a taller art adds ABOVE `desk.y`, so it keeps the base
-/// [`DESK_SPRITE`]'s bottom row. Both profiles blit desks from this.
-pub(crate) fn desk_art_top(pack: &Pack, desk_y: u16, art_h: u16) -> u16 {
-    let base_h = pack
-        .animation(DESK_SPRITE)
-        .and_then(|a| a.frames().first())
-        .map_or(0, |f| f.height());
-    desk_y.saturating_sub(DESK_BEZEL_RAISE + art_h.saturating_sub(base_h))
-}
-
-/// The desk art for a seat facing `facing`. Only a back-turned seat needs its
-/// own — its occupant y-sorts in FRONT and covers the screen.
-pub(crate) fn desk_sprite_name(facing: crate::layout::Facing) -> &'static str {
-    match facing {
-        crate::layout::Facing::North => "desk_north",
-        crate::layout::Facing::South
-        | crate::layout::Facing::East
-        | crate::layout::Facing::West => DESK_SPRITE,
-    }
-}
-
-/// The art a desk seating its occupant toward `facing` draws.
-pub(crate) fn desk_art(pack: &Pack, facing: crate::layout::Facing) -> Option<&Frame> {
-    pack.animation_or_source(desk_sprite_name(facing))
-        .and_then(|a| a.frames().first())
-}
-
 /// A hoverable [`paint_drawable`] drew, sized by the frame it blitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Drawn {
@@ -405,9 +374,9 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
         DrawableKind::Appliance { pos, sprite, busy } => {
             let art = pack
                 .animation(sprite)
-                .and_then(|anim| anim.recolorable(super::appliance_frame(anim, *busy, now)));
+                .and_then(|anim| anim.recolorable(crate::art::appliance_frame(anim, *busy, now)));
             if let Some(art) = art {
-                let themed = art.recolored(&super::palette::appliance_overrides(&theme.appliance));
+                let themed = art.recolored(&crate::art::appliance_overrides(&theme.appliance));
                 blit_centered(&themed, *pos, buf);
             }
         }
@@ -454,7 +423,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             });
         }
         DrawableKind::RoomWall { piece, rows } => {
-            super::paint_wall(
+            crate::wall::paint_wall(
                 buf,
                 theme,
                 *piece,
@@ -513,12 +482,6 @@ fn paint_desk_coffee(
     put(buf, cx + 1, cy + 1, theme.furniture.coffee_cup_shadow);
     paint_effects(buf, steam, theme);
 }
-
-/// The desk task chair's pack animation.
-pub(crate) const DESK_CHAIR_SPRITE: &str = "desk_chair";
-
-/// The meeting table's pack animation.
-pub(crate) const MEETING_TABLE_SPRITE: &str = "meeting_table";
 
 /// The desk task chair's art — the ONE authority for its size, so the enqueue
 /// site centres on what is actually drawn even under a custom pack.
@@ -616,6 +579,52 @@ const STACK_BASE_DY: u16 = 3;
 /// Rows per ream: one row of vertical detail is sub-legible at half-block scale.
 const STACK_PX_PER_TIER: u16 = 2;
 
+/// Paint a character at an arbitrary anchor with per-agent recolor, returning
+/// the size of the frame it drew.
+pub(crate) fn paint_character_at(
+    buf: &mut RgbBuffer,
+    pose: SpritePose,
+    anchor: Point,
+    agent: &AgentSlot,
+    pack: &Pack,
+    cache: &mut FrameCache,
+    now: SystemTime,
+) -> Option<Size> {
+    let CharacterFrame {
+        frame: cached,
+        blit_at: _,
+        rise: _,
+    } = character_frame(
+        pose,
+        agent,
+        pack,
+        crate::render_scale::RenderScale::ONE,
+        cache,
+        now,
+    )?;
+    let size = Size {
+        w: cached.width(),
+        h: cached.height(),
+    };
+    blit_frame(cached, anchor.x, anchor.y, buf);
+    Some(size)
+}
+
+/// Queue every room wall's bands into the y-sort, emitted after the fixtures so
+/// the glass also covers a chair tied with a band's row.
+pub(super) fn enqueue_room_walls<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
+    for &piece in &layout.wall_pieces {
+        for (rows, depth) in piece.sort_bands() {
+            drawables.push(Drawable {
+                anchor_y: depth,
+                // A character tied with a band's row still paints behind the glass.
+                layer: Layer::Over,
+                kind: DrawableKind::RoomWall { piece, rows },
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -631,7 +640,7 @@ mod tests {
         let large_w = crate::layout::PANTRY_COUNTER_LARGE_W;
         for counter_w in [large_w, large_w - 1] {
             let (lo, hi) = crate::layout::coffee_machine_cols(counter_w);
-            let anim = crate::pixel_painter::pantry_counter_anim(counter_w);
+            let anim = crate::art::pantry_counter_anim(counter_w);
             let steam_col = pantry_steam_dx(anim) + width(anim) / 2;
             assert!(
                 steam_col >= lo as i16 && steam_col < hi as i16,

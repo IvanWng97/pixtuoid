@@ -37,7 +37,7 @@ pub enum PackSource {
 /// (`pixel_painter::pantry_counter_anim` picks one by room width), a pet kind's
 /// poses, or a gateway mascot's poses.
 fn art_sets() -> Vec<Vec<&'static str>> {
-    let mut sets = vec![crate::pixel_painter::PANTRY_COUNTER_ANIMS.to_vec()];
+    let mut sets = vec![crate::art::PANTRY_COUNTER_ANIMS.to_vec()];
     sets.extend(
         crate::pet::PetKind::ALL
             .iter()
@@ -665,7 +665,7 @@ mod tests {
             .height()
             .checked_sub(base.height())
             .expect("the raised variant is the taller one");
-        let raise = crate::pixel_painter::DESK_BEZEL_RAISE;
+        let raise = crate::art::DESK_BEZEL_RAISE;
         let edges = [0, 1, base.width() - 2, base.width() - 1];
         for x in edges {
             for dy in 0..(base.height() - raise) {
@@ -721,7 +721,7 @@ mod tests {
     fn a_desks_rows_follow_the_layout() {
         use crate::layout::{DESK_FRONT_ROWS, DESK_LEG_ROWS, DESK_SURFACE_ROWS};
         let pack = test_default_pack();
-        let raise = crate::pixel_painter::DESK_BEZEL_RAISE;
+        let raise = crate::art::DESK_BEZEL_RAISE;
         let base_h = raise + DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS;
         for name in ["desk", "desk_north"] {
             let f = pack

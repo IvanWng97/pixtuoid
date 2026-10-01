@@ -317,70 +317,10 @@ pub(super) const SKIN_KEY: char = 'S';
 /// See [`SHIRT_KEY`].
 pub(super) const PANTS_KEY: char = 'P';
 
-/// The pack key of a monitor's glass.
-pub(crate) const SCREEN_GLASS_KEY: char = 'j';
-
-/// The pack key of the dim content an idle screen shows on its glass.
-pub(crate) const SCREEN_TEXT_KEY: char = 'J';
-
-/// The pack key of a desk lamp's bulb, which glows of its own at any hour.
-pub(crate) const DESK_BULB_KEY: char = '9';
-
-/// The pack key of the wall clock's face, inside its rim.
-pub(crate) const CLOCK_FACE_KEY: char = 'ц';
-
-/// The fixtures' [`appliance_overrides`].
-pub(crate) fn fixture_overrides(theme: &crate::theme::Theme) -> [(char, Pixel); 16] {
-    let (f, o) = (&theme.furniture, &theme.office);
-    let [c0, c1, c2] = theme.appliance.coats;
-    [
-        ('Д', Some(f.tank_water)),
-        ('З', Some(f.tank_water_line)),
-        ('И', Some(f.tank_fish)),
-        ('Л', Some(f.tank_fish_alt)),
-        ('Ь', Some(f.tank_plant)),
-        ('ж', Some(o.room_wall_trim_dark)),
-        ('б', Some(o.building_light)),
-        ('ы', Some(f.magazine)),
-        ('э', Some(f.magazine_trim)),
-        ('ч', Some(c0)),
-        ('ш', Some(c1)),
-        ('щ', Some(c2)),
-        ('ф', Some(o.clock_rim)),
-        (CLOCK_FACE_KEY, Some(o.clock_face)),
-        ('з', Some(o.clock_hand)),
-        // Un-themed: the classic draws the cooler's bottle in its own blue.
-        ('χ', Some(super::furniture::COOLER_WATER)),
-    ]
-}
-
-/// The pack keys a corridor appliance's art is drawn in, each with the
-/// [`ApplianceColors`](crate::theme::ApplianceColors) role it takes: the art
-/// owns the form, the theme the palette. The pack's `[ramps]` of these keys are
-/// the shading, re-derived by the recolour.
-pub(crate) fn appliance_overrides(a: &crate::theme::ApplianceColors) -> [(char, Pixel); 13] {
-    let [d0, d1, d2, d3] = a.vending_drinks;
-    [
-        ('Б', Some(a.vending_body)),
-        ('П', Some(a.vending_panel)),
-        ('Ч', Some(d0)),
-        ('Ш', Some(d1)),
-        ('Щ', Some(d2)),
-        ('Э', Some(d3)),
-        ('Ф', Some(a.vending_trim)),
-        ('Ы', Some(a.vending_dark)),
-        ('Ю', Some(a.printer_body)),
-        ('Я', Some(a.printer_top)),
-        ('Ё', Some(a.printer_glass)),
-        ('Й', Some(a.printer_paper)),
-        ('Ц', Some(a.printer_tray)),
-    ]
-}
-
 /// One agent's colors, as the palette overrides a character frame is
 /// recolored with. `Some(glow_tint)` blends the skin toward the monitor glow so
 /// a seated agent reads as lit by their screen.
-pub(super) fn agent_overrides(
+pub(crate) fn agent_overrides(
     agent: &AgentSlot,
     glow_tint: Option<Rgb>,
     burn: crate::burn::BurnTier,
@@ -427,7 +367,7 @@ pub fn tool_glow_for_kind(
 
 /// The monitor glow color for an agent's active tool, or `None` when the agent
 /// is not Active.
-pub(super) fn tool_glow_tint(
+pub(crate) fn tool_glow_tint(
     agent: &AgentSlot,
     glow: &crate::theme::ToolGlowColors,
 ) -> Option<Rgb> {
@@ -530,6 +470,7 @@ pub(super) fn blend_pixel(buf: &mut RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::art::{appliance_overrides, fixture_overrides};
 
     /// Pins `MAX_RAMP_LEVEL` against the colors a recolor feeds a ramp: every
     /// agent color keeps a shade of its own at every level a pack may declare.

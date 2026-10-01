@@ -84,7 +84,7 @@ impl Pen {
     }
 
     /// The pen for `pack` at `scale`: the densest of its variant densities that
-    /// divides `scale`, else the base art's. [`densest_frame`](crate::pixel_painter::densest_frame)
+    /// divides `scale`, else the base art's. [`densest_frame`](crate::art::densest_frame)
     /// applies the same rule per piece, so the room shares every piece's grid
     /// only while the pack draws its variants at one density
     /// (`the_bundled_pack_draws_every_variant_at_one_density`).
