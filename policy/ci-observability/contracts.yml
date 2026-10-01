@@ -47,26 +47,38 @@
     secret. dontAsk denies what no allow rule approves, `--tools` leaves only
     read tools, and `blockReadsOutsideWorkingDirectories` refuses a read outside
     the checkout even when a rule allows it
-    (code.claude.com/docs/en/settings-reference). An allow rule, a second
-    `--settings`, or the action's `settings`, `plugins` or
-    `plugin_marketplaces` input can each widen that
-    (github.com/anthropics/claude-code-action/blob/v1/action.yml).
+    (code.claude.com/docs/en/settings-reference). Any other flag or action
+    input can add a rule, a tool or a directory, so flag names and input keys
+    are allowlists; their values stay free but for those three.
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length == 1
-      and ([.[0].with | keys[] | select(IN("settings", "plugins", "plugin_marketplaces"))] == [])
+      and ((.[0].with | keys) - [
+            "anthropic_federation_rule_id", "anthropic_organization_id",
+            "anthropic_service_account_id", "classify_inline_comments", "claude_args",
+            "claude_code_oauth_token", "display_report", "github_token",
+            "include_fix_links", "prompt", "show_full_output", "track_progress"] == [])
       and (.[0].with.claude_args as $args
-           | [$args | scan("--permission-mode[ =](\\S+)")] == [["dontAsk"]]
+           | ([$args | scan("(?<![\\w-])-{1,2}[A-Za-z][\\w-]*")] - [
+                "--max-turns", "--max-budget-usd", "--permission-mode",
+                "--tools", "--settings", "--json-schema"] == [])
+             and [$args | scan("--permission-mode[ =](\\S+)")] == [["dontAsk"]]
              and ([$args | scan("--tools[ =](.*?)(?= --|$)")]
                   | length == 1 and ([.[0][0] | splits("[ ,]+")] - ["Read", "Glob", "Grep"] == []))
              and ([$args | scan("--settings")] | length == 1)
              and ([$args | scan("--settings[ =]'([^']*)'")][0][0]
                   | fromjson | .permissions.blockReadsOutsideWorkingDirectories == true)
-             and ($args | test("bypassPermissions|dangerously-skip-permissions|--allowed-?[Tt]ools") | not))
+             and ($args | test("bypassPermissions") | not))
   break:
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       += " --allowedTools Read"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      += " --add-dir /"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      += " --mcp-config x"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       += " \"--settings\" {\"permissions\":{\"allow\":[\"Read\"]}}"
@@ -84,7 +96,7 @@
       |= sub(" --settings '[^']+'"; "")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with)
-      += {"settings": "{}"}
+      += {"additional_permissions": "actions: write"}
     - '.jobs.analyze.steps += [{"uses": "anthropics/claude-code-action@v1", "with": {"claude_args": "--tools Bash"}}]'
 
 - id: reviewer-model-auth-is-scoped
@@ -117,6 +129,24 @@
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.anthropic_organization_id)
       = "${{ secrets.ORGANIZATION_ID }}"
     - '.jobs.analyze.steps += [(.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")))]'
+
+- id: reviewer-output-stays-private
+  file: .github/workflows/claude-readonly-review.yml
+  why: >-
+    show_full_output prints every Claude message, tool results included, to an
+    Actions log anyone can read, which the input's own description warns can
+    expose secrets
+    (github.com/anthropics/claude-code-action/blob/v1/action.yml), and this job
+    runs on untrusted PR text with the base branch's credentials.
+  assert: |
+    [.jobs[].steps[]? | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
+    | length >= 1 and all(.[]; (.with.show_full_output // false | tostring) == "false")
+  break:
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.show_full_output)
+      = true
+    - '.jobs.analyze.steps += [{"uses": "anthropics/claude-code-action@v1", "with": {"show_full_output": true}}]'
+    - .jobs.analyze.steps |= map(select((.uses // "") | startswith("anthropics/claude-code-action@") | not))
 
 - id: reviewer-writers-only-comment-and-status
   file: .github/workflows/claude-readonly-review.yml
