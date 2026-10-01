@@ -1,6 +1,7 @@
 //! A tile as a DEC SIXEL image (VT330/VT340 Programmer Reference, ch. 14:
-//! <https://vt100.net/docs/vt3xx-gp/chapter14.html>), every pixel its own
-//! colour: no error diffusion, so a still office never shimmers.
+//! <https://vt100.net/docs/vt3xx-gp/chapter14.html>): every pixel its own
+//! colour up to [`REGISTERS`] distinct colours, a fixed cube beyond, and no
+//! error diffusion, so a still office never shimmers.
 #![cfg_attr(
     not(test),
     expect(dead_code, reason = "the compositor wires the tiles")
@@ -38,9 +39,9 @@ const MIN_REPEAT: usize = 4;
 /// there, the image's own top-left cell being `origin`.
 ///
 /// `P1=9` and the raster attributes' `1;1` are square pixels. `P2=1` leaves
-/// an unset pixel as it was; `0` would paint it background,
-/// and a tile whose height is not a multiple of [`BAND`] has unset rows at
-/// the foot of its last band, over the next tile's top.
+/// an unset pixel as it was, where `0` would paint it background: a tile
+/// whose height is not a multiple of [`BAND`] has unset rows at the foot of
+/// its last band, over the next tile's top.
 pub(crate) fn transmit(image: &TileImage, origin: Position) -> Vec<u8> {
     let percent: Vec<[u8; 3]> = image
         .rgb
