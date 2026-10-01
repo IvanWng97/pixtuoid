@@ -4563,7 +4563,7 @@ pub(crate) mod tests {
     #[cfg(feature = "density-art")]
     fn the_floor_indicator_stays_in_its_cell() {
         use crate::cutaway::text::LINE_H;
-        let pack = crate::embedded_pack::test_default_pack();
+        let pack = crate::pack::test_default_pack();
         let door = Layout::compute_with_seed(160, 96, None, 0)
             .expect("lays out")
             .door;
