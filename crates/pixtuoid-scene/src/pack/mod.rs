@@ -182,7 +182,7 @@ pub fn load_sprite_pack(source: PackSource) -> Result<Pack> {
                 tracing::warn!(
                     path = ?dir,
                     error = ?chain,
-                    "user sprite pack failed to load; falling back to embedded default"
+                    "user sprite pack failed to load; falling back to bundled default"
                 );
                 Ok(base)
             }
@@ -214,19 +214,19 @@ pub(crate) fn test_default_pack() -> Pack {
 }
 
 /// The default pack's manifest, as `build.rs` embeds it.
-const EMBEDDED_PACK_TOML: &str = include_str!(concat!(env!("OUT_DIR"), "/embedded_pack.toml"));
+const BUNDLED_PACK_TOML: &str = include_str!(concat!(env!("OUT_DIR"), "/bundled_pack.toml"));
 
 /// The compiled-in default pack alone: all a build without `native` can load.
 pub fn load_bundled_pack() -> Result<Pack, PackError> {
-    load_pack_from_strings(EMBEDDED_PACK_TOML, &embedded_sprite_srcs())
+    load_pack_from_strings(BUNDLED_PACK_TOML, &bundled_sprite_srcs())
 }
 
 /// Every default sprite as `(filename, source)`: every `.sprite` in
 /// `sprites/default/`, listed by `build.rs` (less, without `density-art`, the
 /// frames only a density variant draws), so a sprite committed there cannot be
 /// left out by omission. `test_pack_with` swaps files within this EXACT set.
-fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
-    const SPRITES: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/embedded_sprites.rs"));
+fn bundled_sprite_srcs() -> Vec<(&'static str, &'static str)> {
+    const SPRITES: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/bundled_sprites.rs"));
     SPRITES.to_vec()
 }
 
@@ -264,7 +264,7 @@ pub(crate) fn test_wide_pack() -> Pack {
 /// draws the swapped base.
 #[cfg(test)]
 pub(crate) fn test_pack_with(overrides: &[(&str, &'static str)]) -> Pack {
-    let mut srcs = embedded_sprite_srcs();
+    let mut srcs = bundled_sprite_srcs();
     for &(file, source) in overrides {
         let entry = srcs
             .iter_mut()
@@ -272,7 +272,7 @@ pub(crate) fn test_pack_with(overrides: &[(&str, &'static str)]) -> Pack {
             .expect("an override names a bundled sprite");
         entry.1 = source;
     }
-    load_pack_from_strings(EMBEDDED_PACK_TOML, &srcs).expect("the test pack loads")
+    load_pack_from_strings(BUNDLED_PACK_TOML, &srcs).expect("the test pack loads")
 }
 
 #[cfg(test)]
@@ -330,7 +330,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "native")]
-    fn load_sprite_pack_from_custom_dir_merges_with_embedded() {
+    fn load_sprite_pack_from_custom_dir_merges_with_bundled() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let pack_dir = tmp.path().join("custom");
         copy_skeleton_pack(&pack_dir);
@@ -342,7 +342,7 @@ mod tests {
         );
         assert!(
             pack.animation("desk").is_some(),
-            "furniture merged from the embedded default"
+            "furniture merged from the bundled default"
         );
     }
 
@@ -369,7 +369,7 @@ mod tests {
     /// The bundled pack is the one no user validates: a mis-sized `@Nx` variant
     /// in it silently falls back to the upscaled base.
     #[test]
-    fn the_embedded_pack_passes_its_own_validation() {
+    fn the_bundled_pack_passes_its_own_validation() {
         let pack = test_default_pack();
         let report = validate_pack(&pack);
         assert!(!report.has_errors(), "{report:?}");
@@ -383,8 +383,8 @@ mod tests {
     /// entry was never written — ships as dead bytes and draws nothing. A sprite
     /// the pack still loads without is exactly that.
     #[test]
-    fn every_embedded_sprite_is_a_frame_the_pack_loads() {
-        let unregistered = undrawn(EMBEDDED_PACK_TOML, &embedded_sprite_srcs());
+    fn every_bundled_sprite_is_a_frame_the_pack_loads() {
+        let unregistered = undrawn(BUNDLED_PACK_TOML, &bundled_sprite_srcs());
         assert!(
             unregistered.is_empty(),
             "sprites pack.toml never registers: {unregistered:?}"
@@ -409,11 +409,11 @@ mod tests {
     /// (`just hack` only checks), so this is the one place it is loaded.
     #[test]
     fn the_pack_without_density_art_loads_whole() {
-        let (toml, dropped) = density_art::embedded_without_density_art(include_str!(
+        let (toml, dropped) = density_art::bundled_without_density_art(include_str!(
             "../../sprites/default/pack.toml"
         ));
         assert!(!dropped.is_empty(), "the bundled pack ships density art");
-        let srcs: Vec<_> = embedded_sprite_srcs()
+        let srcs: Vec<_> = bundled_sprite_srcs()
             .into_iter()
             .filter(|(name, _)| !dropped.contains(*name))
             .collect();
@@ -508,14 +508,14 @@ mod tests {
     }
 
     #[test]
-    fn embedded_default_pack_animations_are_all_in_the_registry() {
-        // An animation the EMBEDDED pack ships but the registry doesn't know is
+    fn bundled_default_pack_animations_are_all_in_the_registry() {
+        // An animation the BUNDLED pack ships but the registry doesn't know is
         // falsely reported "unused by renderer" by validate-pack.
         let pack = test_default_pack();
         let report = validate_pack(&pack);
         assert!(
             report.unknown.is_empty(),
-            "embedded animation missing from the registry: {:?}",
+            "bundled animation missing from the registry: {:?}",
             report.unknown
         );
     }
@@ -545,7 +545,7 @@ mod tests {
         assert!(
             pack.animation("back_couch").is_none(),
             "the stripped pose is really absent (never inherited: character \
-             animations don't merge from the embedded default)"
+             animations don't merge from the bundled default)"
         );
         assert!(
             warns.load(std::sync::atomic::Ordering::SeqCst) >= 1,
@@ -572,7 +572,7 @@ mod tests {
     #[cfg(feature = "native")]
     fn a_discovered_pack_loads_over_the_default_and_a_broken_one_falls_back() {
         let seated = |p: &Pack| p.animation("seated").expect("seated").frames()[0].clone();
-        let embedded = seated(&test_default_pack());
+        let bundled = seated(&test_default_pack());
 
         let good = tempfile::TempDir::new().expect("tempdir");
         copy_skeleton_pack(good.path());
@@ -580,7 +580,7 @@ mod tests {
             load_sprite_pack(PackSource::Discovered(good.path().into())).expect("user pack loads");
         assert_ne!(
             seated(&pack).as_slice(),
-            embedded.as_slice(),
+            bundled.as_slice(),
             "the user's own art"
         );
         assert!(
@@ -593,7 +593,7 @@ mod tests {
             .expect("write malformed pack.toml");
         let fallback = load_sprite_pack(PackSource::Discovered(bad.path().into()))
             .expect("a broken discovered pack never errors");
-        assert_eq!(seated(&fallback).as_slice(), embedded.as_slice());
+        assert_eq!(seated(&fallback).as_slice(), bundled.as_slice());
         assert!(
             load_sprite_pack(PackSource::Explicit(bad.path().into())).is_err(),
             "the same pack, named, is an error"
@@ -639,24 +639,24 @@ mod tests {
     }
 
     #[test]
-    fn character_sprite_size_matches_the_embedded_pack() {
+    fn character_sprite_size_matches_the_bundled_pack() {
         let pack = test_default_pack();
         let frame = pack
             .animation("standing")
             .and_then(|a| a.frames().first())
-            .expect("embedded pack carries a standing pose");
+            .expect("bundled pack carries a standing pose");
         let (w, h) = (frame.width(), frame.height());
         assert_eq!(
             w,
             crate::layout::CHARACTER_SPRITE_W,
-            "embedded 'standing' sprite is {w}px wide but CHARACTER_SPRITE_W is {} — \
+            "bundled 'standing' sprite is {w}px wide but CHARACTER_SPRITE_W is {} — \
              update the const so hit-test/decor/label geometry tracks the pack",
             crate::layout::CHARACTER_SPRITE_W
         );
         assert_eq!(
             h,
             crate::layout::CHARACTER_SPRITE_H,
-            "embedded 'standing' sprite is {h}px tall but CHARACTER_SPRITE_H is {} — \
+            "bundled 'standing' sprite is {h}px tall but CHARACTER_SPRITE_H is {} — \
              update the const so the hit-test box and the painter's fallback track the pack",
             crate::layout::CHARACTER_SPRITE_H
         );
@@ -670,7 +670,7 @@ mod tests {
         let frame = |n: &str| {
             pack.animation(n)
                 .and_then(|a| a.frames().first())
-                .unwrap_or_else(|| panic!("the embedded pack ships {n}"))
+                .unwrap_or_else(|| panic!("the bundled pack ships {n}"))
         };
         let (base, north) = (frame("desk"), frame("desk_north"));
         assert_eq!(base.width(), north.width(), "a facing never changes width");
@@ -679,7 +679,7 @@ mod tests {
             .height()
             .checked_sub(base.height())
             .expect("the raised variant is the taller one");
-        let raise = crate::embedded_pack::DESK_BEZEL_RAISE;
+        let raise = crate::pack::DESK_BEZEL_RAISE;
         let edges = [0, 1, base.width() - 2, base.width() - 1];
         for x in edges {
             for dy in 0..(base.height() - raise) {
@@ -735,13 +735,13 @@ mod tests {
     fn a_desks_rows_follow_the_layout() {
         use crate::layout::{DESK_FRONT_ROWS, DESK_LEG_ROWS, DESK_SURFACE_ROWS};
         let pack = test_default_pack();
-        let raise = crate::embedded_pack::DESK_BEZEL_RAISE;
+        let raise = crate::pack::DESK_BEZEL_RAISE;
         let base_h = raise + DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS;
         for name in ["desk", "desk_north"] {
             let f = pack
                 .animation(name)
                 .and_then(|a| a.frames().first())
-                .unwrap_or_else(|| panic!("the embedded pack ships {name}"));
+                .unwrap_or_else(|| panic!("the bundled pack ships {name}"));
             let (w, h) = (f.width(), f.height());
             let opaque = |x: u16, y: u16| f.get(x, y).copied().flatten().is_some();
             let lift = h
@@ -788,19 +788,19 @@ mod tests {
         let w = pack
             .animation("desk")
             .and_then(|a| a.frames().first())
-            .expect("embedded pack carries a desk sprite")
+            .expect("bundled pack carries a desk sprite")
             .width();
         assert_eq!(
             w,
             crate::layout::desk_furniture_def().visual.w,
-            "embedded 'desk' sprite is {w}px wide but visual.w is {} — \
+            "bundled 'desk' sprite is {w}px wide but visual.w is {} — \
              a DESK_W edit moved visual.w but not scripts/gen-art.py's DESK_ART_W; render/mask/z-sort will drift",
             crate::layout::desk_furniture_def().visual.w
         );
     }
 
     #[test]
-    fn pet_hitboxes_track_the_embedded_pack() {
+    fn pet_hitboxes_track_the_bundled_pack() {
         use crate::pet::PetKind;
         let pack = test_default_pack();
         for &kind in PetKind::ALL {
@@ -808,7 +808,7 @@ mod tests {
                 let frame = pack
                     .animation(anim)
                     .and_then(|a| a.frames().first())
-                    .unwrap_or_else(|| panic!("embedded pack carries a '{anim}' sprite"));
+                    .unwrap_or_else(|| panic!("bundled pack carries a '{anim}' sprite"));
                 let hb = kind.hitbox(anim);
                 assert_eq!(
                     (hb.w, hb.h),
