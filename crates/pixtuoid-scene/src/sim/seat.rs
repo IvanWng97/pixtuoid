@@ -1,6 +1,6 @@
 //! The seat model. [`Seat`] (kind × cell × facing) is the single source of
 //! truth for an occupant of ANY seat — waypoint couch, sofa, meeting chair,
-//! island stool, or a home desk: sprite + flip, render anchor, z-key and
+//! island stool, or a home desk: sprite + flip, render anchor, sort row and
 //! sit-down glide all derive from it. [`SeatView`] is the LOOK it resolves to,
 //! not the authority.
 
@@ -45,7 +45,7 @@ enum SeatKind {
 }
 
 /// A seat: WHAT you sit on, WHERE, and which way you LOOK. Everything a sitter
-/// needs — sprite, flip, render anchor, z-key, sit-down glide — derives from
+/// needs — sprite, flip, render anchor, sort row, sit-down glide — derives from
 /// these three, so a couch, a meeting chair and a home desk are one thing.
 ///
 /// Extend [`view`](Self::view) and [`sprite_for`](Self::sprite_for) to add a
@@ -53,8 +53,8 @@ enum SeatKind {
 /// `WaypointKind` is a compile error there. The GEOMETRY pair reads
 /// [`seated_furniture`](Self::seated_furniture) instead, which defaults a
 /// newcomer to the upright anchor and feet-row key without complaint. The net
-/// for THAT is `sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture`,
-/// a per-kind z-key oracle that stops on a kind it does not name — and it sees
+/// for THAT is `sit_arc_sort_row_is_stable_and_on_the_right_side_of_its_furniture`,
+/// a per-kind sort row oracle that stops on a kind it does not name — and it sees
 /// a newcomer only if the furniture is `occupies_pos` and the ONE layout it
 /// renders places it, not the whole sweep.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -63,22 +63,22 @@ pub(crate) struct Seat {
     /// The cell the SPRITE renders on — a waypoint's resolved stand cell, a
     /// desk's walk anchor. NOT the settle foot-cell `settle_seat` matches on,
     /// which for a couch/sofa/chair is `WALKING_Y_OFF - SEAT_RENDER_Y_OFF`
-    /// further south; constructing a `Seat` from that shifts anchor and z-key.
+    /// further south; constructing a `Seat` from that shifts anchor and sort row.
     pos: Point,
     /// Which way the SITTER looks, decoupled from the side they approached from.
     facing: crate::layout::Facing,
 }
 
 /// The depth the sitters of a meeting sofa at `sofa` sort at: their seat's own
-/// [`z_key`](Seat::z_key). The cutaway keys the sofa by it, so a front sofa,
+/// [`sort_row`](Seat::sort_row). The cutaway keys the sofa by it, so a front sofa,
 /// queued before its sitters, ties them and they sit on it.
-pub(crate) fn sofa_sitter_z_key(sofa: Point) -> u16 {
+pub(crate) fn sofa_sitter_sort_row(sofa: Point) -> u16 {
     Seat::at_waypoint(
         crate::layout::WaypointKind::MeetingSofa,
         sofa,
         crate::layout::Facing::South,
     )
-    .z_key()
+    .sort_row()
 }
 
 impl Seat {
@@ -106,7 +106,7 @@ impl Seat {
 
     /// Whether this seat's occupant sits at SEAT height. Read by both geometry
     /// arms so they cannot disagree — a seat-height anchor paired with a
-    /// feet-row z-key sorts a sitter through their own furniture. The meeting
+    /// feet sort row sorts a sitter through their own furniture. The meeting
     /// chair qualifies because its profile sprite shares the front `seated`
     /// sprite's bottom-row geometry.
     pub(crate) fn seated_furniture(self) -> bool {
@@ -225,12 +225,12 @@ impl Seat {
 
     /// The y-sort key for this seat's occupant — used BOTH for the settled
     /// `AtWaypoint` render AND for the sit-down / stand-up WALK glide. Letting
-    /// the glide keep its natural foot z-key instead makes it cross the
+    /// the glide keep its natural foot sort row instead makes it cross the
     /// furniture's own key on the way down: the agent pops in front of the sofa
     /// mid-glide, then jumps behind it.
-    pub(crate) fn z_key(self) -> u16 {
+    pub(crate) fn sort_row(self) -> u16 {
         if self.seated_furniture() {
-            return crate::layout::seated_z_key(self.pos);
+            return crate::layout::seated_sort_row(self.pos);
         }
         // The plain feet row, which for the bartender sits INSIDE the island
         // body — so the whole arc stays behind the counter.
@@ -253,7 +253,7 @@ impl Seat {
 /// The [`Seat`] whose settle foot-cell is `cell`, or `None` if `cell` is not
 /// one. The caller passes the glide's `to` (settling ONTO a seat) and/or `from`
 /// (rising OFF it) — either endpoint on a foot-cell means the agent is on the
-/// sit arc and must render in the seat's view and z-key, not the
+/// sit arc and must render in the seat's view and sort row, not the
 /// travel-direction / foot-position values.
 ///
 /// Covers the home desk too: `layout.home_desks` are NOT waypoints, but the

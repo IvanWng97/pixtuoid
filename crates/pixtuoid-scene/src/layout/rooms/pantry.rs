@@ -207,7 +207,7 @@ pub(crate) fn place_kitchen_island(
     // the sprites can't overlap each other. A BLOCKED pos is fine for an
     // `occupies_pos` slot (the couch-seat pattern): approach_point finds the lane
     // BEHIND the island, the settle glide bridges in, and the island's south-row
-    // z-key occludes the standers' legs.
+    // sort row occludes the standers' legs.
     let bar_dx = (vis.w / 4) as i16;
     for (dx, facing) in [
         (-(stand_dx as i16), Facing::East),
