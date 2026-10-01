@@ -263,3 +263,38 @@ fn the_protocols_cadence_gates_its_transmits() {
     r.render(&scene, pack(), t0() + cadence).expect("render");
     assert!(wire.take().contains(SIXEL));
 }
+
+/// A floor switch slides the cutaway the way classic slides its half-blocks:
+/// mid-slide, the image is neither floor and nothing is hit-tested; then it
+/// settles on the destination.
+#[test]
+fn a_floor_switch_slides_the_cutaway_then_settles() {
+    let (mut r, wire) = kitty(120, 40);
+    let scene = two_floor_scene();
+    let mut now = t0();
+    r.render(&scene, pack(), now).expect("render");
+    let image =
+        |r: &TuiRenderer<TestBackend>| r.cutaway_image().expect("a cutaway").as_slice().to_vec();
+    let before = image(&r);
+    wire.take();
+
+    r.navigate_floor(1, now);
+    let half = Duration::from_millis(r.transition().expect("sliding").duration_ms / 2);
+    r.render(&scene, pack(), now + half).expect("render");
+    let mid = image(&r);
+    assert!(wire.take().contains(TRANSMIT), "mid-slide frames are sent");
+    assert!(r.transition().is_some());
+    assert!(r.cached_layout().is_none());
+    let area = r.frame_buffer().area;
+    assert!(
+        area.positions()
+            .all(|p| r.hit_test_agent_at(p.x, p.y).is_none())
+    );
+
+    now += half;
+    render_until_settled(&mut r, &scene, pack(), &mut now, 1);
+    let after = image(&r);
+    assert!(mid != before && mid != after);
+    assert_eq!(r.current_floor(), 1);
+    hover_agent(&mut r, AgentId::from_transcript_path("/n/1.jsonl"));
+}
