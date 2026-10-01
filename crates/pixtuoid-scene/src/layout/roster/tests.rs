@@ -357,10 +357,6 @@ fn north_wall_census() -> impl Iterator<Item = SceneLayout> {
     })
 }
 
-fn overlaps(a: Bounds, b: Bounds) -> bool {
-    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
-}
-
 fn is_exit_sign(k: &FixtureKind) -> bool {
     matches!(
         k,
@@ -544,29 +540,23 @@ const OVERLAP_BY_DESIGN: &[(&str, &str)] = &[
     ("Desk", "DeskChair"),
     // `SceneLayout::island_bar_mat` shows only a sliver past the island.
     ("IslandMat", "KitchenIsland"),
+    // A short floor's first desk row hides the foot of the lamp behind it,
+    // whose ground already starts at the band's top.
+    ("Desk", "FloorLamp"),
     // A rug under what stands on it.
     ("LoungeCouch", "LoungeRug"),
     ("MeetingChair", "MeetingRug"),
     ("MeetingRug", "MeetingSofa"),
     ("MeetingRug", "MeetingTable"),
+    // One composed meeting set: in a compact room each piece's art overlaps the
+    // edge of the one behind it.
+    ("MeetingChair", "MeetingSofa"),
+    ("MeetingSofa", "MeetingTable"),
 ];
 
 /// The [`kind_key`] pairs still overlapping where they should not, each in key
 /// order: a fix deletes its entry.
-const OVERLAP_DEFECTS: &[(&str, &str)] = &[
-    // The lounge crowds a short floor's desks.
-    ("Desk", "FloorLamp"),
-    ("Desk", "LoungeRug"),
-    // A compact meeting room's trio and head chairs.
-    ("MeetingChair", "MeetingSofa"),
-    ("MeetingSofa", "MeetingTable"),
-    // The pantry uprights' fixed offsets meet the counter and the mat.
-    ("Station", "TrashBin"),
-    ("Station", "WaterCooler"),
-    ("PantryMat", "WaterCooler"),
-    // A south meeting room's rug reaches the runner.
-    ("MeetingRug", "Runner"),
-];
+const OVERLAP_DEFECTS: &[(&str, &str)] = &[];
 
 /// Two fixtures' art overlaps only as a listed pair, and each listed pair still
 /// occurs.
@@ -586,7 +576,7 @@ fn no_two_fixtures_overlap_but_by_design() {
         for (i, a) in fixtures.iter().enumerate() {
             for b in fixtures[i + 1..]
                 .iter()
-                .filter(|b| overlaps(a.visual, b.visual))
+                .filter(|b| a.visual.overlaps(b.visual))
             {
                 if on_runner(a, b) || on_runner(b, a) {
                     continue;
@@ -646,7 +636,7 @@ fn no_meeting_furniture_or_plant_blocks_a_doorway() {
                 )
             }) {
                 assert!(
-                    !overlaps(f.visual, opening),
+                    !f.visual.overlaps(opening),
                     "{}x{}: {:?} {:?} in the doorway {opening:?}",
                     l.buf_w,
                     l.buf_h,

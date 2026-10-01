@@ -1,8 +1,8 @@
 //! The pantry aggregate: bounds + the counter size + the island.
 
 use crate::layout::{
-    Bounds, Facing, Furniture, OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W, Point, Size, WALL_THICK_H,
-    Waypoint, WaypointKind, furniture_def, pct,
+    Anchor, Bounds, Facing, Furniture, OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W, Point, Size,
+    WALL_THICK_H, Waypoint, WaypointKind, anchored_top_left, furniture_def, pct,
 };
 
 /// The compact counter — the fallback for a pantry too narrow for
@@ -63,6 +63,49 @@ impl PantryRoom {
         Self::counter_center_y(bounds, counter).saturating_sub(counter.h / 2 + OBSTACLE_PAD_PX)
     }
 
+    /// The counter's centre in a room of `bounds`, or `None` for a room
+    /// narrower than the counter: refuse rather than force.
+    pub(crate) fn counter_center(bounds: Bounds, counter: Size) -> Option<Point> {
+        let half_cw = counter.w / 2;
+        let max_cx = bounds.x + bounds.width.saturating_sub(half_cw + 1);
+        let min_cx = bounds.x + half_cw;
+        (min_cx <= max_cx).then(|| Point {
+            x: if counter.w >= PANTRY_COUNTER_LARGE_W {
+                (bounds.x + bounds.width / 2).clamp(min_cx, max_cx)
+            } else {
+                (bounds.x + pct(bounds.width, 60)).clamp(min_cx, max_cx)
+            },
+            // Single-sourced with the island clamp; only x is size-shaped.
+            y: Self::counter_center_y(bounds, counter),
+        })
+    }
+
+    /// `r`, or `r` slid out past the counter's nearer end when the counter's
+    /// art would cover it — `None` when that leaves the room.
+    fn off_the_counter(&self, r: Bounds) -> Option<Bounds> {
+        let Some(c) = Self::counter_center(self.bounds, self.counter_size) else {
+            return Some(r);
+        };
+        let (cw, ch) = (self.counter_size.w, self.counter_size.h);
+        let at = anchored_top_left(Anchor::Center, c, cw, ch);
+        let counter = Bounds {
+            x: at.x,
+            y: at.y,
+            width: cw,
+            height: ch,
+        };
+        if !r.overlaps(counter) {
+            return Some(r);
+        }
+        let x = if r.x + r.width / 2 < c.x {
+            counter.x.checked_sub(r.width)?
+        } else {
+            counter.x + cw
+        };
+        let b = self.bounds;
+        (x >= b.x && x + r.width <= b.x + b.width).then_some(Bounds { x, ..r })
+    }
+
     /// The room height at which the pantry can actually HOST its content — the
     /// inverse of the island's y-clamps, where `div_ceil` is the exact inverse of
     /// the truncating `pct()`. An associated fn, not a method: the split
@@ -75,19 +118,21 @@ impl PantryRoom {
         (u32::from(island_need) * 100).div_ceil(u32::from(pantry_counter_y_pct(counter.w))) as u16
     }
 
-    /// The water cooler's sprite box against the pantry's east side, or
-    /// `None` when the room can't fit it. THE one authority `paint_water_cooler`
-    /// AND the binary's hover hit-test both read, so the drawn sprite and its
-    /// hover box can't drift across the crate boundary.
+    /// The water cooler's sprite box against the pantry's east side, clear of
+    /// the counter, or `None` when the room can't fit it. THE one authority
+    /// `paint_water_cooler` AND the binary's hover hit-test both read, so the
+    /// drawn sprite and its hover box can't drift across the crate boundary.
     pub fn water_cooler_rect(&self) -> Option<Bounds> {
         /// Columns between the cooler's east edge and the room's.
         const EAST_GAP: u16 = 3;
         /// Rows from the room's top to just past the cooler's base.
         const BASE_DY: u16 = 15;
         let b = self.bounds;
-        // Lazy `.then` (not `.then_some`): the `b.width - …` must not run for a
-        // sub-gate room (it would `u16`-underflow).
-        (b.height > 25 && b.width > 12).then(|| Bounds {
+        // Gated first: the `b.width - …` would `u16`-underflow in a sub-gate room.
+        if b.height <= 25 || b.width <= 12 {
+            return None;
+        }
+        self.off_the_counter(Bounds {
             x: b.x + b.width - EAST_GAP - WATER_COOLER.w,
             y: b.y + BASE_DY - WATER_COOLER.h,
             width: WATER_COOLER.w,
@@ -95,13 +140,16 @@ impl PantryRoom {
         })
     }
 
-    /// The trash bin's sprite box near the pantry's west counter, or `None`
-    /// when the room is too short. Shared placement authority for
+    /// The trash bin's sprite box near the pantry's west counter, clear of it,
+    /// or `None` when the room can't fit it. Shared placement authority for
     /// `paint_trash_bin` and the hover hit-test — see [`Self::water_cooler_rect`].
     pub fn trash_bin_rect(&self) -> Option<Bounds> {
         let b = self.bounds;
-        // Lazy `.then`: `b.height - 14` must not run below the gate.
-        (b.height > 20).then(|| Bounds {
+        // Gated first: `b.height - 14` must not run below the gate.
+        if b.height <= 20 {
+            return None;
+        }
+        self.off_the_counter(Bounds {
             x: b.x + 3,
             y: b.y + b.height - 14,
             width: 4,
