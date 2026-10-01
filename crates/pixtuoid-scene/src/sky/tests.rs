@@ -651,7 +651,9 @@ fn a_slot_steps_into_the_next_slots_weather_over_its_last_minutes() {
 fn a_change_lerps_the_skys_parameters_between_the_presets() {
     let hold = WEATHER_CYCLE_SECS - TRANSITION_SECS;
     let step_secs = TRANSITION_SECS / TRANSITION_STEPS;
-    let params: [(&str, fn(&Sky) -> f32, fn(Weather) -> f32); 4] = [
+    type Handed = fn(&Sky) -> f32;
+    type Preset = fn(Weather) -> f32;
+    let params: [(&str, Handed, Preset); 4] = [
         (
             "direct",
             |s| s.transmission().direct,
