@@ -164,10 +164,9 @@ fn furniture_hit_test_respects_floor_seed() {
 #[test]
 fn cat_hit_test_inside_sit_sprite() {
     use pixtuoid_scene::layout::Point;
-    // cat_sit's `PetKind::hitbox` centred at (50,80) spans x[47..53), y[77..83):
-    // cell 39 shows rows 78–79, and cell 38 shows row 77 in its lower half.
     let pos = Point { x: 50, y: 80 };
-    for row in [38, 39] {
+    let (top, bottom) = pet_rows(pos, "cat_sit");
+    for row in [top / 2, bottom / 2] {
         assert!(
             hit_test_pet(
                 PetKind::Cat,
@@ -212,188 +211,69 @@ fn mascot_hit_test_inside_and_outside() {
     ));
 }
 
-fn scene_with_agent_at_desk(desk_index: usize) -> (SceneState, AgentId) {
-    use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex};
-    use std::path::Path;
-    use std::sync::Arc;
-    let id = AgentId::from_transcript_path("/pin/0.jsonl");
-    let slot = AgentSlot {
-        agent_id: id,
-        source: Arc::from("cc"),
-        session_id: Arc::from("s"),
-        cwd: Arc::from(Path::new("/repo")),
-        label: "a".into(),
-        state: ActivityState::Idle,
-        state_started_at: SystemTime::UNIX_EPOCH,
-        created_at: SystemTime::UNIX_EPOCH,
-        last_event_at: SystemTime::UNIX_EPOCH,
-        exiting_at: None,
-        pending_idle_at: None,
-        desk_index: GlobalDeskIndex(desk_index),
-        floor_idx: 0,
-        tool_call_count: 0,
-        active_ms: 0,
-        unknown_cwd: false,
-        parent_id: None,
-        pid: None,
-        model: None,
-        effort: None,
-        tokens_used: 0,
-        last_usage: None,
-    };
-    let mut scene = SceneState::uniform(16);
-    scene.agents.insert(id, slot);
-    (scene, id)
-}
-
-// Hover (`hit_test_agent`) and the harness's seated locator (`hit_test_from_tui`)
-// must hit EXACTLY the cells that show the sprite `character_anchor` places.
-// 160x200 seats its sitters on even rows; 120x90 on odd ones, where the
-// sprite's last cell shows it only in its upper half.
 #[test]
 fn an_agent_is_hit_from_exactly_the_cells_that_show_it() {
-    let even = seated_anchor_hits_its_covering_cells(160, 200, Some(4));
-    assert_eq!(even.y % 2, 0, "160x200 must keep an even seated anchor");
-    let odd = seated_anchor_hits_its_covering_cells(120, 90, None);
-    assert_eq!(odd.y % 2, 1, "120x90 must keep an odd seated anchor");
-}
-
-/// Assert both agent hit tests hit every cell that shows desk 0's seated
-/// sprite at `w`×`h`, and none beside it; returns the anchor.
-fn seated_anchor_hits_its_covering_cells(
-    w: u16,
-    h: u16,
-    max_desks: Option<usize>,
-) -> pixtuoid_scene::layout::Point {
-    let layout = Layout::compute(w, h, max_desks).expect("layout");
-    let (mut scene, id) = scene_with_agent_at_desk(0);
-    // A recent last_event_at keeps the wander machine in its Seated phase;
-    // the pose derives as seated either way for an Idle agent at bootstrap.
-    let now = SystemTime::now();
-    scene.agents.get_mut(&id).expect("slot").last_event_at = now;
-
-    let mut router = pixtuoid_scene::pathfind::AStarRouter::new();
-    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
-    let mut history = pose::PoseHistory::default();
-    let mut motion = std::collections::HashMap::new();
-    let mut rctx = pose::RouteCtx {
-        router: &mut router,
-        overlay: &overlay,
-        history: &mut history,
-        motion: &mut motion,
-    };
-    let agent = scene.agents.get(&id).expect("slot");
-    let anchor = character_anchor(agent, &layout, now, &mut rctx)
-        .expect("a seated agent has a painted anchor");
-
-    let (cols, rows) = covering_cells(anchor);
-    let mut hits = |col, row| {
-        let cell = crate::tui::geometry::CellArea::half_block(col, row);
-        let hover = hit_test_agent(&scene, &layout, now, &mut rctx, cell);
-        let pin = hit_test_from_tui(&scene, &layout, cell);
-        assert_eq!(
-            hover, pin,
-            "hover and the locator disagree at ({col},{row})"
-        );
-        pin
-    };
-    for row in rows.clone() {
-        for col in cols.clone() {
-            assert_eq!(
-                hits(col, row),
-                Some(id),
-                "{w}x{h}: cell ({col},{row}) shows the sprite"
-            );
+    let id = AgentId::from_transcript_path("/hit/0.jsonl");
+    // An odd top row shows the sprite in its first cell's lower half and its
+    // last cell's upper half only.
+    for y in [30, 31] {
+        let agent = AgentFrame {
+            agent_id: id,
+            anchor: Point { x: 40, y },
+            w: 10,
+            h: 14,
+        };
+        let tl = agent.anchor;
+        let agents = [agent];
+        let hits = |col, row| {
+            hit_test_agent(
+                &agents,
+                crate::tui::geometry::CellArea::half_block(col, row),
+            )
+        };
+        let (cols, rows) = covering_cells(agent);
+        for row in rows.clone() {
+            for col in cols.clone() {
+                assert_eq!(hits(col, row), Some(id), "cell ({col},{row}) shows {tl:?}");
+            }
         }
+        let (row, col) = (*rows.start(), cols.start);
+        assert_eq!(hits(cols.start - 1, row), None, "west of the sprite");
+        assert_eq!(hits(cols.end, row), None, "east of the sprite");
+        assert_eq!(hits(col, rows.start() - 1), None, "north of the sprite");
+        assert_eq!(hits(col, rows.end() + 1), None, "south of the sprite");
     }
-    let (row, col) = (*rows.start(), cols.start);
-    assert_eq!(
-        hits(cols.start.wrapping_sub(1), row),
-        None,
-        "west of the sprite"
-    );
-    assert_eq!(hits(cols.end, row), None, "east of the sprite");
-    assert_eq!(
-        hits(col, rows.start().wrapping_sub(1)),
-        None,
-        "north of the sprite"
-    );
-    assert_eq!(hits(col, rows.end() + 1), None, "south of the sprite");
-    anchor
 }
 
-/// The terminal cells that show some pixel of a seated sprite whose top-left
-/// is `tl`: its columns, and every half-block row from the one holding its top
-/// pixel to the one holding its bottom pixel.
-fn covering_cells(
-    tl: pixtuoid_scene::layout::Point,
-) -> (std::ops::Range<u16>, std::ops::RangeInclusive<u16>) {
-    let (w, h) = (
-        pixtuoid_scene::layout::CHARACTER_SPRITE_W,
-        pixtuoid_scene::layout::CHARACTER_SPRITE_H,
+#[test]
+fn overlapping_agents_hit_the_last_painted() {
+    let (under, over) = (
+        AgentId::from_transcript_path("/hit/under.jsonl"),
+        AgentId::from_transcript_path("/hit/over.jsonl"),
     );
+    let at = |agent_id, x| AgentFrame {
+        agent_id,
+        anchor: Point { x, y: 30 },
+        w: 8,
+        h: 12,
+    };
+    let cell = crate::tui::geometry::CellArea::half_block(44, 16);
+    for (first, last) in [(under, over), (over, under)] {
+        assert_eq!(
+            hit_test_agent(&[at(first, 40), at(last, 42)], cell),
+            Some(last)
+        );
+    }
+}
+
+/// The terminal cells that show some pixel of `agent`'s sprite: its columns,
+/// and every half-block row from the one holding its top pixel to the one
+/// holding its bottom pixel.
+fn covering_cells(agent: AgentFrame) -> (std::ops::Range<u16>, std::ops::RangeInclusive<u16>) {
+    let AgentFrame {
+        anchor: tl, w, h, ..
+    } = agent;
     (tl.x..tl.x + w, tl.y / 2..=(tl.y + h - 1) / 2)
-}
-
-#[test]
-fn from_tui_misses_empty_space() {
-    let layout = Layout::compute(160, 200, Some(4)).expect("layout");
-    let (scene, _id) = scene_with_agent_at_desk(0);
-    assert_eq!(
-        hit_test_from_tui(
-            &scene,
-            &layout,
-            crate::tui::geometry::CellArea::half_block(0, 0)
-        ),
-        None
-    );
-}
-
-#[test]
-fn from_tui_skips_agent_with_out_of_range_desk() {
-    let layout = Layout::compute(160, 200, Some(4)).expect("layout");
-    let (scene, _id) = scene_with_agent_at_desk(layout.home_desks.len() + 100);
-    for &(mx, my) in &[(0u16, 0u16), (40, 20), (80, 40)] {
-        assert_eq!(
-            hit_test_from_tui(
-                &scene,
-                &layout,
-                crate::tui::geometry::CellArea::half_block(mx, my)
-            ),
-            None
-        );
-    }
-}
-
-// With the ARITHMETIC bridge (`scene.floor_local_desk`) an OOB desk equal to the
-// uniform scene's cap wrapped onto a synthetic floor 1 and landed back at local
-// 0 — hit-testable at desk 0 while the renderer skipped it. Hence `cap` below.
-#[test]
-fn from_tui_oob_desk_at_capacity_boundary_does_not_wrap_to_desk_zero() {
-    use pixtuoid_core::state::GlobalDeskIndex;
-    let layout = Layout::compute(160, 200, Some(4)).expect("layout");
-    let (mut scene, id) = scene_with_agent_at_desk(0);
-    let cap = scene.floor_capacities[0];
-    scene.agents.get_mut(&id).expect("slot").desk_index = GlobalDeskIndex(cap);
-    let a = pixtuoid_scene::pixel_painter::seated_anchor_facing(
-        layout.home_desks[0],
-        pixtuoid_scene::layout::CHARACTER_SPRITE_W,
-        layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(0)),
-    );
-    let (cols, rows) = covering_cells(a);
-    for row in rows {
-        for col in cols.clone() {
-            assert_eq!(
-                hit_test_from_tui(
-                    &scene,
-                    &layout,
-                    crate::tui::geometry::CellArea::half_block(col, row)
-                ),
-                None,
-                "an OOB desk at the capacity boundary must never hit-test"
-            );
-        }
-    }
 }
 
 // BulletinBoard is never emitted by compute_with_seed and Ficus only appears on
@@ -443,21 +323,34 @@ fn furniture_hit_test_bulletin_board_via_synthetic_wall_decor() {
 #[test]
 fn cat_hit_test_sleep_smaller_box() {
     use pixtuoid_scene::layout::Point;
-    // cat_sleep's hitbox centred at (50,80) spans y[78..82): cell 41 shows rows
-    // 82–83 (out), cell 40 rows 80–81 (in).
     let pos = Point { x: 50, y: 80 };
+    let (sit_last, sleep_last) = (
+        pet_rows(pos, "cat_sit").1 / 2,
+        pet_rows(pos, "cat_sleep").1 / 2,
+    );
+    assert!(
+        sleep_last < sit_last,
+        "premise: the sleeping cat is shorter"
+    );
     assert!(!hit_test_pet(
         PetKind::Cat,
         pos,
         "cat_sleep",
-        crate::tui::geometry::CellArea::half_block(50, 41)
+        crate::tui::geometry::CellArea::half_block(pos.x, sit_last)
     ));
     assert!(hit_test_pet(
         PetKind::Cat,
         pos,
         "cat_sleep",
-        crate::tui::geometry::CellArea::half_block(50, 40)
+        crate::tui::geometry::CellArea::half_block(pos.x, sleep_last)
     ));
+}
+
+/// The top and bottom pixel rows of the cat's `anim` hitbox centred on `pos`.
+fn pet_rows(pos: Point, anim: &str) -> (u16, u16) {
+    let hitbox = PetKind::Cat.hitbox(anim);
+    let top = anchored_top_left(Anchor::Center, pos, hitbox.w, hitbox.h).y;
+    (top, top + hitbox.h - 1)
 }
 
 // Probing coords that DO hit while the waypoint is present is what proves the

@@ -14,9 +14,9 @@ use pixtuoid_core::state::AgentSlot;
 
 use crate::motion::{
     LegPlan, MotionState, Settle, WalkLeg, WalkPathSnapshot, WanderKind, WanderPhase,
-    advance_wander, snapshot_leg_profile, walking_position,
+    advance_wander, snapshot_leg_profile,
 };
-use crate::physics::{WalkIntent, WalkProfile, walk_arrived, walk_progress};
+use crate::physics::{WalkIntent, WalkProfile, walk_arrived, walk_progress, walking_position};
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 pub use pure::{

@@ -57,11 +57,11 @@ fn blend_tone(buf: &mut RgbBuffer, x: u16, y: u16, color: Rgb, level: f32, peak:
 /// pixel) in `color`, `strength` deep at a shadow's centre.
 pub(in crate::pixel_painter) fn paint_shadows(
     buf: &mut RgbBuffer,
-    depths: &crate::ground::Depths,
+    cells: &[(u16, u16, f32)],
     strength: f32,
     color: Rgb,
 ) {
-    for (x, y, d) in depths.cells() {
+    for &(x, y, d) in cells {
         if x < buf.width() && y < buf.height() {
             blend_tone(buf, x, y, color, d * strength, strength);
         }
@@ -440,16 +440,18 @@ mod tests {
             g: 30,
             b: 30,
         };
-        let depths =
+        let cells: Vec<_> =
             crate::ground::Depths::of(std::iter::once(crate::ground::Contact::under(5, 10, 10)), 1)
-                .expect("one contact");
+                .expect("one contact")
+                .cells()
+                .collect();
         let mut buf = RgbBuffer::filled(20, 20, fill);
-        paint_shadows(&mut buf, &depths, 0.0, shadow);
+        paint_shadows(&mut buf, &cells, 0.0, shadow);
         assert!(
             buf.as_slice().iter().all(|&p| p == fill),
             "none at no strength"
         );
-        paint_shadows(&mut buf, &depths, 0.9, shadow);
+        paint_shadows(&mut buf, &cells, 0.9, shadow);
         assert_ne!(buf.get(10, 10), fill, "under the solid's middle");
     }
 

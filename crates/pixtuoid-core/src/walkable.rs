@@ -18,12 +18,14 @@ pub type WalkableMask = Grid<bool>;
 // an extension trait would cost an import at every call site.
 impl Grid<bool> {
     /// Create a fully-open mask. Caller fills obstacles via `mark_blocked`.
+    #[inline]
     pub fn new_open(width: u16, height: u16) -> Self {
         Grid::filled(width, height, true)
     }
 
     /// Mark a rect (with `pad` extra pixels on each side) as blocked.
     /// Out-of-bounds pixels are clipped — caller doesn't need to bounds-check.
+    #[inline]
     pub fn mark_blocked(&mut self, x: u16, y: u16, w: u16, h: u16, pad: u16) {
         let min_x = x.saturating_sub(pad);
         let max_x = x.saturating_add(w).saturating_add(pad).min(self.width);
@@ -49,6 +51,7 @@ impl Grid<bool> {
 
     /// O(1) walkability lookup. Out-of-bounds queries return `false` so
     /// routers can probe near the edges without bounds checks.
+    #[inline]
     pub fn is_walkable(&self, x: u16, y: u16) -> bool {
         self.get_or(x, y, false)
     }
@@ -84,12 +87,14 @@ impl OccupancyOverlay {
     }
 
     /// True when no rect is blocked.
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.rects.is_empty()
     }
 
     /// True if (`x`, `y`) falls inside any current occupancy rect.
     /// Linear scan — fine while N stays in the low tens.
+    #[inline]
     pub fn blocks(&self, x: u16, y: u16) -> bool {
         self.rects.iter().any(|&(rx, ry, rw, rh)| {
             x >= rx && x < rx.saturating_add(rw) && y >= ry && y < ry.saturating_add(rh)

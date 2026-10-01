@@ -5,7 +5,7 @@ fn walkable_debug_toggle_tints_blocked_pixels_and_is_reversible() {
     let scene = scene_with(vec![idle("/t/0.jsonl", 0, t0())], 16);
     let mut r = build(120, 60, vec![]);
     let now = t0();
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     let before = r.buf().clone();
 
     // A known-blocked pixel from the live mask, below the busy top wall band.
@@ -16,7 +16,7 @@ fn walkable_debug_toggle_tints_blocked_pixels_and_is_reversible() {
         .expect("some blocked cell below the wall band");
 
     r.set_debug_walkable(true);
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     let on = r.buf().clone();
     // A warm cell's red channel barely rises while green/blue drop, so measure
     // DISTANCE to the blocked tint (220,60,60) rather than the red channel.
@@ -36,7 +36,7 @@ fn walkable_debug_toggle_tints_blocked_pixels_and_is_reversible() {
     );
 
     r.set_debug_walkable(false);
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     let off_diff = region_diff(&before, r.buf(), 0, 0, before.width(), before.height());
     assert!(
         off_diff < 200,
@@ -89,7 +89,7 @@ fn the_version_popup_renders_whole_on_a_classic_terminal() {
     r.set_version_popup(true, t0());
     // Past the 200ms entrance ease, so the panel is at full scale.
     let now = t0() + Duration::from_millis(250);
-    r.render(&scene_with(vec![], 16), &pack(), now).unwrap();
+    r.render(&scene_with(vec![], 16), pack(), now).unwrap();
     let text = frame_text(r.frame_buffer());
 
     assert!(
@@ -114,7 +114,7 @@ fn the_popup_body_reaches_the_frame_at_every_office_width() {
         let mut r = build(cols, rows, vec![]);
         r.set_version_popup(true, t0());
         let now = t0() + Duration::from_millis(250);
-        r.render(&scene_with(vec![], 16), &pack(), now).unwrap();
+        r.render(&scene_with(vec![], 16), pack(), now).unwrap();
         let text = frame_text(r.frame_buffer());
         assert!(
             text.contains("github.com/IvanWng97/pixtuoid"),
@@ -135,7 +135,7 @@ fn help_overlay_renders_shortcuts() {
     let scene = scene_with(vec![idle("/help/0.jsonl", 0, t0())], 16);
     let mut r = build(100, 40, vec![]);
     r.set_help_open(true);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     assert!(r.help_open());
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -170,7 +170,7 @@ fn onboarding_overlay_renders_roster_and_hint() {
         elapsed_ms: 100_000,
         dim: 0.4,
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("Welcome to pixtuoid"),
@@ -197,7 +197,7 @@ fn onboarding_dims_the_office_buffer() {
     let scene = scene_with(vec![idle("/dim/0.jsonl", 0, t0())], 16);
 
     let mut base = build(100, 40, vec![]);
-    base.render(&scene, &pack(), t0()).unwrap();
+    base.render(&scene, pack(), t0()).unwrap();
     let bright = avg_lum(base.buf(), 0, 0, base.buf().width(), base.buf().height());
 
     // The card paints on the cell layer, not the buffer, so this measures the
@@ -215,7 +215,7 @@ fn onboarding_dims_the_office_buffer() {
         elapsed_ms: 100_000,
         dim: 0.4,
     });
-    dimmed.render(&scene, &pack(), t0()).unwrap();
+    dimmed.render(&scene, pack(), t0()).unwrap();
     let dim = avg_lum(
         dimmed.buf(),
         0,
@@ -239,15 +239,15 @@ fn onboarding_dims_both_sliding_buffers_on_the_transition_path() {
     let mid = now + Duration::from_millis(200);
 
     let mut bright_r = build(100, 40, vec![]);
-    bright_r.render(&scene, &p, now).unwrap();
+    bright_r.render(&scene, p, now).unwrap();
     bright_r.navigate_floor(1, now);
-    bright_r.render(&scene, &p, mid).unwrap();
+    bright_r.render(&scene, p, mid).unwrap();
     assert!(bright_r.transition().is_some(), "baseline still mid-slide");
     let bb = bright_r.floor_buf(0).expect("from-floor buffer exists");
     let bright = avg_lum(bb, 0, 0, bb.width(), bb.height());
 
     let mut dim_r = build(100, 40, vec![]);
-    dim_r.render(&scene, &p, now).unwrap();
+    dim_r.render(&scene, p, now).unwrap();
     dim_r.navigate_floor(1, now);
     dim_r.set_onboarding_frame(OnboardingFrame {
         open: true,
@@ -261,7 +261,7 @@ fn onboarding_dims_both_sliding_buffers_on_the_transition_path() {
         elapsed_ms: 100_000,
         dim: 0.4,
     });
-    dim_r.render(&scene, &p, mid).unwrap();
+    dim_r.render(&scene, p, mid).unwrap();
     assert!(dim_r.transition().is_some(), "dimmed still mid-slide");
     let db = dim_r.floor_buf(0).expect("from-floor buffer exists");
     let dim = avg_lum(db, 0, 0, db.width(), db.height());
@@ -276,7 +276,7 @@ fn onboarding_dims_both_sliding_buffers_on_the_transition_path() {
 fn coffee_machine_tooltip_on_hover() {
     let scene = scene_with(vec![idle("/tt/c.jsonl", 0, t0())], 16);
     let mut r = build(140, 48, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout");
     let mut hover = None;
     'scan: for my in 0..48u16 {
@@ -292,7 +292,7 @@ fn coffee_machine_tooltip_on_hover() {
     }
     let hover = hover.expect("coffee machine should be hit-testable");
     r.set_mouse_pos(Some(hover));
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     assert!(
         frame_text(r.frame_buffer()).contains("Ivan"),
         "hovering the coffee machine shows the Buy-Ivan-a-coffee tooltip"
@@ -304,14 +304,14 @@ fn furniture_tooltip_on_hover_over_empty_desk() {
     // Agent on desk 0; hover an EMPTY desk so furniture (not agent) tooltip wins.
     let scene = scene_with(vec![idle("/tt/f.jsonl", 0, t0())], 16);
     let mut r = build(140, 48, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout");
     if layout.home_desks.len() < 2 {
         return;
     }
     let d1 = layout.home_desks[1];
     r.set_mouse_pos(Some((d1.x + 4, d1.y / 2 + 1)));
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     assert!(
         frame_text(r.frame_buffer()).contains("Desk"),
         "hovering an empty desk shows the Desk furniture tooltip"
@@ -322,10 +322,10 @@ fn furniture_tooltip_on_hover_over_empty_desk() {
 fn pet_tooltip_on_hover() {
     let scene = scene_with(vec![active("/tt/p.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(140, 48, vec![PetKind::Cat]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let PetFrame { pos, .. } = r.cached_pet_pos().expect("cat placed");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("Cat") || text.contains("purr"),
@@ -341,10 +341,10 @@ fn pet_tooltip_shows_custom_name() {
         name: "Luna".to_string(),
     };
     let mut r = build_pets(140, 48, vec![cat]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let PetFrame { pos, .. } = r.cached_pet_pos().expect("cat placed");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("Luna"),
@@ -360,10 +360,10 @@ fn pet_tooltip_shows_custom_name() {
 fn pet_tooltip_falls_back_to_default_name_when_not_configured() {
     let scene = scene_with(vec![active("/tt/fb.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(140, 48, vec![PetKind::Cat]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let PetFrame { pos, .. } = r.cached_pet_pos().expect("cat placed");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("Office Cat"),
@@ -385,9 +385,9 @@ fn hovered_active_agent_tooltip_shows_state_and_detail() {
     let id = a.agent_id;
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
+    super::hover_agent(&mut r, id);
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Active"), "active state word: {text}");
     assert!(text.contains("Edit"), "tool name on the state line: {text}");
@@ -421,16 +421,16 @@ fn hovered_burning_agent_tooltip_shows_model_and_fresh_effort() {
     let plain_id = plain.agent_id;
     let scene = scene_with(vec![a, plain], 16);
     let mut r = build(120, 44, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
+    super::hover_agent(&mut r, id);
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("\u{2605} claude-fable-5 \u{b7} ultra"),
         "model + fresh effort row: {text}"
     );
-    super::hover_agent(&mut r, &scene, plain_id, 120, 44);
-    r.render(&scene, &pack(), t0()).unwrap();
+    super::hover_agent(&mut r, plain_id);
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     // (The wall board's own `★ Star` CTA is unrelated — assert the MODEL row.)
     assert!(
@@ -459,9 +459,9 @@ fn stale_effort_drops_off_the_dossier() {
     let id = a.agent_id;
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
+    super::hover_agent(&mut r, id);
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("\u{2605} claude-fable-5"),
@@ -489,9 +489,9 @@ fn the_exit_sentinel_never_renders_in_the_dossier() {
     let id = a.agent_id;
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
+    super::hover_agent(&mut r, id);
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("\u{2605} claude-fable-5"),
@@ -517,9 +517,9 @@ fn hovered_agent_tooltip_shows_source_badge() {
     let id = a.agent_id;
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
+    super::hover_agent(&mut r, id);
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("[cc]"), "source badge on the tooltip: {text}");
     // The fixtures' session_id is "s"; `disambig_suffix` is deterministic.
@@ -550,9 +550,9 @@ fn hovered_subagent_tooltip_shows_lineage() {
     let child_id = child.agent_id;
     let scene = scene_with(vec![parent, child], 16);
     let mut r = build(120, 44, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, child_id, 120, 44);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
+    super::hover_agent(&mut r, child_id);
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("\u{21b3} under"),
@@ -569,9 +569,9 @@ fn hovered_waiting_agent_tooltip_shows_reason() {
     let id = a.agent_id;
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
+    super::hover_agent(&mut r, id);
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Waiting"), "waiting state arm: {text}");
     assert!(
@@ -595,9 +595,9 @@ fn hovered_exiting_agent_tooltip_suppresses_meter() {
     let id = a.agent_id;
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
+    super::hover_agent(&mut r, id);
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Exiting"), "exiting state word: {text}");
     assert!(
@@ -616,9 +616,9 @@ fn hovered_exiting_agent_tooltip_suppresses_waiting_reason() {
     let id = a.agent_id;
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
+    super::hover_agent(&mut r, id);
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Exiting"), "exiting state word: {text}");
     assert!(
@@ -639,7 +639,7 @@ fn exiting_agent_label_uses_exiting_color() {
     a.exiting_at = Some(t0());
     let scene = scene_with(vec![a], 16);
     let mut r = build(120, 44, vec![]);
-    r.render(&scene, &pack(), t0() + Duration::from_millis(100))
+    r.render(&scene, pack(), t0() + Duration::from_millis(100))
         .unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("LEAVING"), "exiting agent label: {text}");
@@ -650,9 +650,9 @@ fn hovered_then_removed_agent_is_a_safe_noop() {
     let id = AgentId::from_transcript_path("/ttGone/0.jsonl");
     let scene = scene_with(vec![slot(id, 0, 0, t0())], 16);
     let mut r = build(120, 44, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
-    super::hover_agent(&mut r, &scene, id, 120, 44);
+    r.render(&scene, pack(), t0()).unwrap();
+    super::hover_agent(&mut r, id);
     let empty = SceneState::uniform(16);
-    r.render(&empty, &pack(), t0() + Duration::from_millis(33))
+    r.render(&empty, pack(), t0() + Duration::from_millis(33))
         .expect("render must not panic when the hovered agent vanished");
 }
