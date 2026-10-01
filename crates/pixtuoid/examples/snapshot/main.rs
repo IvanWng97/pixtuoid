@@ -23,8 +23,8 @@ use crate::encode::{
     save_backend_as_png, save_renderer_animation,
 };
 use crate::scenes::{
-    anim_scene, capture_live_scene, dashboard_scene, inject_openclaw_presence, meeting_scene,
-    sample_scene,
+    GatewayState, anim_scene, capture_live_scene, dashboard_scene, inject_openclaw_presence,
+    meeting_scene, sample_scene,
 };
 
 const COLS: u16 = 192;
@@ -114,9 +114,9 @@ struct SnapshotArgs {
     empty: bool,
 
     /// Inject an OpenClaw gateway presence (the wandering lobster mascot) in the
-    /// given state (idle | busy | down).
-    #[arg(long)]
-    openclaw: Option<String>,
+    /// given state.
+    #[arg(long, value_enum)]
+    openclaw: Option<GatewayState>,
 
     /// Gateway PORTS to stage for `--openclaw`, comma-separated (default: one, the
     /// upstream default port).
@@ -399,7 +399,7 @@ fn main() -> Result<()> {
             }
         }
     }
-    if let Some(state) = args.openclaw.as_deref() {
+    if let Some(state) = args.openclaw {
         inject_openclaw_presence(&mut scene, state, now, &args.openclaw_ports)?;
     }
     let backend = TestBackend::new(cols, rows);
@@ -685,9 +685,15 @@ fn main() -> Result<()> {
         }),
         debug_walkable: args.debug_walkable,
         theme_picker: args.theme_picker,
+        footer: pixtuoid::tui::widgets::footer_context(
+            &scene,
+            None,
+            false,
+            None,
+            warning_text.as_deref(),
+        ),
         popup_scale: if args.popup { 1.0 } else { 0.0 },
         help_open: args.help_open,
-        source_warning: warning_text.as_deref(),
         dashboard: &dashboard_frame,
         connection: &connection_frame,
         onboarding: &onboarding_frame,
@@ -701,7 +707,7 @@ fn main() -> Result<()> {
             floor_meta,
         )
     };
-    draw_scene(&mut term, &mut draw_ctx)?;
+    let drawn = draw_scene(&mut term, &mut draw_ctx)?;
 
     if args.debug_walkable {
         print_walkability_report(&term, args.floor_seed)?;
@@ -710,8 +716,8 @@ fn main() -> Result<()> {
     let crop_rect = if args.crop_mascot {
         // The mascot wanders to a time-derived cell, so we crop on the position
         // the renderer actually resolved, not a precomputed layout point.
-        let m = draw_ctx
-            .last_mascots
+        let m = drawn
+            .mascots
             .first()
             .context("--crop-mascot needs a visible mascot")?;
         Some(centered_crop(m.pos, cols, rows))

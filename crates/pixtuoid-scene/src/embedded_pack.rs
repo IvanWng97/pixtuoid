@@ -273,13 +273,14 @@ mod comments;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pixtuoid_core::sprite::format::Density;
     #[cfg(feature = "native")]
     use std::fs;
     #[cfg(feature = "native")]
     use std::path::Path;
 
     #[test]
-    fn every_art_set_member_is_registered_furniture_in_one_set_only() {
+    fn every_art_set_member_is_registered_inherited_art_in_one_set_only() {
         let sets = art_sets();
         assert!(!sets.is_empty());
         let mut seen = std::collections::HashSet::new();
@@ -287,7 +288,10 @@ mod tests {
             assert!(set.len() >= 2, "a one-piece set can't be partial: {set:?}");
             for &name in set {
                 assert!(
-                    pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS.contains(&name),
+                    pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS
+                        .iter()
+                        .chain(pixtuoid_core::sprite::format::OPTIONAL_CREATURE_ANIMATIONS)
+                        .any(|&n| n == name),
                     "{name}"
                 );
                 assert!(seen.insert(name), "{name} is in two sets");
@@ -400,12 +404,12 @@ mod tests {
             .filter(|(name, _)| !dropped.contains(*name))
             .collect();
         let pack = load_pack_from_strings(&toml, &srcs).expect("loads without density art");
-        assert_eq!(pack.max_density_variant(), 1);
+        assert_eq!(pack.max_density_variant(), Density::ONE);
         assert!(
             pack.buildings().next().is_some(),
             "the city keeps its buildings"
         );
-        let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
+        let d = |n| Density::new(n).expect("nonzero");
         assert!(
             pack.buildings().all(|b| b.variant(d(4)).is_none()),
             "at their base alone"
@@ -422,7 +426,7 @@ mod tests {
     #[test]
     #[cfg(feature = "density-art")]
     fn the_bundled_pack_is_drawn_at_most_at_4x() {
-        assert_eq!(test_default_pack().max_density_variant(), 4);
+        assert_eq!(test_default_pack().max_density_variant().get(), 4);
     }
 
     /// Each bundled building ships a variant at the bundled art's density,
@@ -436,19 +440,17 @@ mod tests {
             pack.buildings().next().is_some(),
             "the bundled pack draws a city"
         );
-        let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
+        let d = |n| Density::new(n).expect("nonzero");
         for b in pack.buildings() {
             assert!(b.variant(d(4)).is_some(), "{}", b.name());
         }
     }
 
-    /// A transparent last row lifts a piece off the floor both painters ground
-    /// it on.
+    /// Core's creature list is exactly the animations the pets and the gateway
+    /// mascots draw, so neither can gain a creature the other misses.
     #[test]
-    fn every_bundled_furniture_frame_draws_its_bottom_row() {
-        let pack = test_default_pack();
-        // Pets and mascots stand on their feet, wherever their frame ends.
-        let figures: std::collections::HashSet<&str> = crate::pet::PetKind::ALL
+    fn the_creature_animations_are_the_pets_and_mascots() {
+        let drawn: std::collections::BTreeSet<&str> = crate::pet::PetKind::ALL
             .iter()
             .flat_map(|k| [k.walk_anim(), k.sit_anim(), k.sleep_anim()])
             .chain(
@@ -457,13 +459,25 @@ mod tests {
                     .flat_map(|m| [m.walk, m.rest]),
             )
             .collect();
+        let listed: std::collections::BTreeSet<&str> =
+            pixtuoid_core::sprite::format::OPTIONAL_CREATURE_ANIMATIONS
+                .iter()
+                .copied()
+                .collect();
+        assert_eq!(drawn, listed);
+    }
+
+    /// A transparent last row lifts a piece off the floor both painters ground
+    /// it on.
+    #[test]
+    fn every_bundled_furniture_frame_draws_its_bottom_row() {
+        let pack = test_default_pack();
         let floating: Vec<String> = pack
             .animation_names()
             .into_iter()
             .filter(|name| {
                 let base = name.split('@').next().unwrap_or(name);
                 pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS.contains(&base)
-                    && !figures.contains(base)
             })
             .filter(|name| {
                 pack.animation(name).is_some_and(|s| {

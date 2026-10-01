@@ -50,7 +50,7 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
             (WINDOW_W, 28),
             moment,
             theme,
-            std::num::NonZeroU16::MIN,
+            pixtuoid_core::sprite::format::Density::ONE,
         );
         let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 8, g: 8, b: 10 });
         paint_floor_to_ceiling_window(
@@ -1048,7 +1048,7 @@ fn a_window_shows_the_city_strip_from_its_own_column() {
         (WINDOW_W * 2, 28),
         moment,
         theme,
-        std::num::NonZeroU16::MIN,
+        pixtuoid_core::sprite::format::Density::ONE,
     );
     let pane = |x: u16, run_x0: u16| {
         let mut buf = RgbBuffer::filled(WINDOW_W * 3, 30, Rgb { r: 8, g: 8, b: 10 });
@@ -1126,7 +1126,7 @@ fn a_rain_streak_steps_down_through_the_falloff_tones() {
     let spec = StreakSpec {
         count: 8,
         seed_mult: 7,
-        sx_mult: 0x9e37_79b9,
+        sx_mult: u64::from(crate::GOLDEN_GAMMA_32),
         speed_base: 60,
         speed_span: 50,
         color: white,

@@ -237,15 +237,14 @@ impl Office {
         self.hires.try_hire(base, &self.scene)
     }
 
-    /// Force the office's weather (`"clear"|"rain"|"storm"|"snow"|"fog"|
-    /// "overcast"|"windy"|"smog"`), or `None` to follow the clock-based cycle.
-    /// An unrecognized name renders as the clock-based cycle.
+    /// Force one of the [`weather_names`](pixtuoid_scene::pixel_painter::weather_names),
+    /// or `None` (or an unrecognized name) to follow the clock-based cycle.
     pub fn set_weather(&mut self, name: Option<String>) {
         self.weather_override = name;
     }
 
-    /// Recolor the whole office to a theme by name (`"normal"|"cyberpunk"|
-    /// "dracula"|"tokyo-night"|"catppuccin"|"gruvbox"`). Unknown name = no-op.
+    /// Recolor the whole office to one of the [`ALL_THEMES`] by name. Unknown
+    /// name = no-op.
     pub fn set_theme(&mut self, name: &str) {
         if let Some(t) = pixtuoid_scene::theme::theme_by_name(name) {
             self.theme = t;
@@ -280,7 +279,7 @@ impl Office {
         let theme = self.theme;
 
         let labels = self.session.overlay(&self.scene, now, None);
-        let board = self.session.board(&self.scene, now, None);
+        let board = self.session.board(&self.scene, now);
 
         let mut out = String::from("{\"labels\":[");
         for (i, el) in labels.iter().enumerate() {

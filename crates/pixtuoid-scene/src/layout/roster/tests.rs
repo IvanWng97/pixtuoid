@@ -262,10 +262,9 @@ fn the_coffee_machine_follows_the_counter_size() {
 }
 
 /// A meeting room's notice board hangs on the band, the north wall the viewer
-/// sees: inside its room's columns, under the band's last row, and clear of
-/// every other fixture, the sign and the clock on the band among them.
+/// sees: inside its room's columns, under the band's last row.
 #[test]
-fn a_notice_board_hangs_on_the_band_clear_of_its_neighbours() {
+fn a_notice_board_hangs_on_the_band_inside_its_room() {
     let mut hung = 0;
     for l in offices() {
         for room in 0..l.meeting_rooms.len() {
@@ -282,89 +281,9 @@ fn a_notice_board_hangs_on_the_band_clear_of_its_neighbours() {
                 board.y + board.height <= l.wall_band_h(),
                 "{board:?} leaves the band"
             );
-            let apart = |v: Bounds| {
-                v.x + v.width <= board.x
-                    || board.x + board.width <= v.x
-                    || v.y + v.height <= board.y
-                    || board.y + board.height <= v.y
-            };
-            for f in l
-                .fixtures()
-                .filter(|f| f.kind != FixtureKind::NoticeBoard { room })
-            {
-                assert!(
-                    apart(f.visual),
-                    "{board:?} hangs over {:?} at {:?}",
-                    f.kind,
-                    f.visual
-                );
-            }
         }
     }
     assert!(hung > 0, "no office hangs a notice board");
-}
-
-/// The pieces that stand together keep apart: the lounge's couch, lamp, side
-/// table and aquarium, and the kitchen island clear of every mat.
-#[test]
-fn the_lounge_and_the_island_keep_clear_of_their_neighbours() {
-    let apart = |a: Bounds, b: Bounds| {
-        a.x + a.width <= b.x
-            || b.x + b.width <= a.x
-            || a.y + a.height <= b.y
-            || b.y + b.height <= a.y
-    };
-    let mut checked = 0;
-    for l in offices().chain(
-        [(200u16, 120u16), (240, 144), (320, 180)]
-            .into_iter()
-            .flat_map(|(w, h)| {
-                (0..4).filter_map(move |s| SceneLayout::compute_with_seed(w, h, None, s))
-            }),
-    ) {
-        let lounge: Vec<Fixture> = l
-            .fixtures()
-            .filter(|f| {
-                matches!(
-                    f.kind,
-                    FixtureKind::LoungeCouch
-                        | FixtureKind::FloorLamp
-                        | FixtureKind::SideTable
-                        | FixtureKind::FishTank
-                )
-            })
-            .collect();
-        for (i, a) in lounge.iter().enumerate() {
-            for b in &lounge[i + 1..] {
-                assert!(
-                    apart(a.visual, b.visual),
-                    "{}x{}: {:?} over {:?}",
-                    l.buf_w,
-                    l.buf_h,
-                    a,
-                    b
-                );
-                checked += 1;
-            }
-        }
-        let island = l.fixtures().find(|f| f.kind == FixtureKind::KitchenIsland);
-        for mat in l
-            .fixtures()
-            .filter(|f| matches!(f.kind, FixtureKind::Doormat { .. } | FixtureKind::PantryMat))
-        {
-            if let Some(island) = island {
-                assert!(
-                    apart(island.visual, mat.visual),
-                    "{}x{}: island over {:?}",
-                    l.buf_w,
-                    l.buf_h,
-                    mat
-                );
-                checked += 1;
-            }
-        }
-    }
-    assert!(checked > 0, "no office sets a lounge or an island");
 }
 
 /// Hover orders fixtures on [`Tie`], and a painter on the [`Layer`] it maps
@@ -619,36 +538,86 @@ fn the_neon_sign_hangs_a_post_west_of_the_first_window() {
     }
 }
 
+/// The [`kind_key`] pairs whose art overlaps by design, each in key order.
+const OVERLAP_BY_DESIGN: &[(&str, &str)] = &[
+    // `desk_chair_top_left`'s backrest crosses its desk.
+    ("Desk", "DeskChair"),
+    // `SceneLayout::island_bar_mat` shows only a sliver past the island.
+    ("IslandMat", "KitchenIsland"),
+    // A rug under what stands on it.
+    ("LoungeCouch", "LoungeRug"),
+    ("MeetingChair", "MeetingRug"),
+    ("MeetingRug", "MeetingSofa"),
+    ("MeetingRug", "MeetingTable"),
+];
+
+/// The [`kind_key`] pairs still overlapping where they should not, each in key
+/// order: a fix deletes its entry.
+const OVERLAP_DEFECTS: &[(&str, &str)] = &[
+    // Aisle decor wider than its aisle.
+    ("Desk", "Pod"),
+    ("DeskChair", "Pod"),
+    ("FilingCabinet", "Pod"),
+    // A plant settled against a desk.
+    ("Desk", "Plant"),
+    ("DeskChair", "Plant"),
+    ("FilingCabinet", "Plant"),
+    // The lounge crowds a short floor's desks.
+    ("Desk", "FloorLamp"),
+    ("Desk", "LoungeRug"),
+    // A compact meeting room's trio and head chairs.
+    ("MeetingChair", "MeetingSofa"),
+    ("MeetingSofa", "MeetingTable"),
+    // The pantry uprights' fixed offsets meet the counter and the mat.
+    ("Station", "TrashBin"),
+    ("Station", "WaterCooler"),
+    ("PantryMat", "WaterCooler"),
+    // A south meeting room's rug reaches the runner.
+    ("MeetingRug", "Runner"),
+];
+
+/// Two fixtures' art overlaps only as a listed pair, and each listed pair still
+/// occurs.
 #[test]
-fn no_two_north_wall_fixtures_overlap() {
+fn no_two_fixtures_overlap_but_by_design() {
+    let listed: BTreeSet<(&str, &str)> = OVERLAP_BY_DESIGN
+        .iter()
+        .chain(OVERLAP_DEFECTS)
+        .copied()
+        .collect();
+    // The corridor's floor: whatever stands in the corridor stands on it.
+    let on_runner =
+        |f: &Fixture, g: &Fixture| f.kind == FixtureKind::Runner && g.contact().is_some();
+    let (mut met, mut stray) = (BTreeSet::new(), Vec::new());
     for l in north_wall_census().chain(offices()) {
-        let wall: Vec<_> = l
-            .fixtures()
-            .filter(|f| {
-                matches!(
-                    f.kind,
-                    FixtureKind::NeonSign
-                        | FixtureKind::Clock
-                        | FixtureKind::Door
-                        | FixtureKind::NoticeBoard { .. }
-                ) || is_exit_sign(&f.kind)
-            })
-            .collect();
-        for (i, a) in wall.iter().enumerate() {
-            for b in &wall[i + 1..] {
-                assert!(
-                    !overlaps(a.visual, b.visual),
-                    "{}x{}: {:?} {:?} over {:?} {:?}",
-                    l.buf_w,
-                    l.buf_h,
-                    a.kind,
-                    a.visual,
-                    b.kind,
-                    b.visual
-                );
+        let fixtures: Vec<Fixture> = l.fixtures().collect();
+        for (i, a) in fixtures.iter().enumerate() {
+            for b in fixtures[i + 1..]
+                .iter()
+                .filter(|b| overlaps(a.visual, b.visual))
+            {
+                if on_runner(a, b) || on_runner(b, a) {
+                    continue;
+                }
+                let (x, y) = (kind_key(a.kind), kind_key(b.kind));
+                let pair = (x.min(y), x.max(y));
+                if listed.contains(&pair) {
+                    met.insert(pair);
+                } else {
+                    stray.push(format!(
+                        "{}x{}: {:?} {:?} over {:?} {:?}",
+                        l.buf_w, l.buf_h, a.kind, a.visual, b.kind, b.visual
+                    ));
+                }
             }
         }
     }
+    assert_eq!(stray, Vec::<String>::new());
+    assert_eq!(
+        listed.difference(&met).collect::<Vec<_>>(),
+        Vec::<&(&str, &str)>::new(),
+        "listed but never met: delete the entry"
+    );
 }
 
 #[test]

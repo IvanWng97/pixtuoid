@@ -10,11 +10,10 @@
 //! stands is a share of the glass, plane by plane, so a short window crops its
 //! towers and a tall one shows them whole over more sky.
 
-use std::num::NonZeroU16;
 use std::ops::RangeInclusive;
 use std::time::SystemTime;
 
-use pixtuoid_core::sprite::format::{Building, CityMaterials, CityPlane, Material, Pack};
+use pixtuoid_core::sprite::format::{Building, CityMaterials, CityPlane, Density, Material, Pack};
 use pixtuoid_core::sprite::{Frame, Pixel, Rgb};
 
 use crate::atmosphere::{Look, Moment};
@@ -380,7 +379,7 @@ impl CityStrip {
         (run_w, glass_h): (u16, u16),
         moment: &Moment,
         theme: &Theme,
-        density: NonZeroU16,
+        density: Density,
     ) -> Self {
         let (look, altitude, now) = (&moment.look, moment.altitude, moment.now);
         let d = density.get();
@@ -503,7 +502,7 @@ fn pick_in(range: &RangeInclusive<u16>, n: u32) -> u16 {
 fn hash(n: u32) -> u32 {
     let mut v = n.wrapping_mul(crate::GOLDEN_GAMMA_32);
     v ^= v >> 15;
-    v = v.wrapping_mul(0x85EB_CA6B);
+    v = v.wrapping_mul(crate::MURMUR3_FMIX32_M1);
     v ^ (v >> 13)
 }
 
@@ -664,7 +663,7 @@ mod tests {
                 (60, 20),
                 &Moment::resolve(sky, theme, 0.0, SystemTime::UNIX_EPOCH),
                 theme,
-                NonZeroU16::new(d).expect("nonzero"),
+                Density::new(d).expect("nonzero"),
             )
         };
         let (one, three, four) = (strip(1), strip(3), strip(4));

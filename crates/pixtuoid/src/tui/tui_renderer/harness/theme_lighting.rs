@@ -32,28 +32,20 @@ fn set_theme_with_same_theme_is_a_noop() {
     );
 }
 
-// The *visible* empty-floor darkening is gated on `look.darkness` (time-of-day
-// via `chrono::Local`), so it only manifests at night and is timezone-dependent
-// — not robustly assertable headlessly. This guards only the time-independent
-// half; the fade math itself is covered by the `LightingState` unit tests.
+/// Asserts the lit state, not the frame: the level dims only the room's
+/// artificial lights, under 1% of the frame mean.
 #[test]
 fn occupied_floor_stays_lit() {
+    use pixtuoid_scene::floor::LightingState;
     let scene = scene_with(vec![active("/lit/0.jsonl", 0, "Edit x", t0())], 16);
     let mut r = build(100, 40, vec![]);
-    let mut now = t0();
-    r.render(&scene, pack(), now).unwrap();
-    now += Duration::from_millis(2000);
-    r.render(&scene, pack(), now).unwrap();
-    let early = avg_lum(r.buf(), 0, 0, r.buf().width(), r.buf().height());
-    for _ in 0..700 {
-        now += Duration::from_millis(33);
+    for now in [
+        t0(),
+        t0() + Duration::from_millis(LightingState::EMPTY_DEBOUNCE_MS),
+    ] {
         r.render(&scene, pack(), now).unwrap();
     }
-    let late = avg_lum(r.buf(), 0, 0, r.buf().width(), r.buf().height());
-    assert!(
-        late > early * 0.9,
-        "occupied floor must stay lit (early={early:.1}, late={late:.1})"
-    );
+    assert_eq!(r.floors[0].ctx.light.level(), 1.0);
 }
 
 #[test]

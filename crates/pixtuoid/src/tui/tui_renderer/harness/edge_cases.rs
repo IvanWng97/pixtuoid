@@ -5,7 +5,7 @@ use crate::tui::connection::ConnectionFrame;
 #[test]
 fn too_small_terminal_returns_no_layout_no_panic() {
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
-    let mut r = build(15, 8, vec![]); // below the 20×12 scene minimum
+    let mut r = build(15, 8, vec![]); // under the `MIN_SCENE_*` gate
     r.render(&scene, pack(), t0())
         .expect("render must not panic");
     assert!(
@@ -103,6 +103,35 @@ fn the_size_the_too_small_notice_names_is_one_that_seats_someone() {
     }
 }
 
+/// A refused frame drew nothing, so the click handler must not hit-test the
+/// last drawn frame's sprites; both refusal arms.
+#[test]
+fn shrinking_under_the_minimum_drops_the_last_frames_hit_targets() {
+    let id = AgentId::from_transcript_path("/sm/0.jsonl");
+    let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
+    let (cols, rows) = (192, 80);
+    // The scene-size refusal, then the layout-compute refusal (clears the scene
+    // minimum, under `MIN_LAYOUT_W`).
+    for (small_cols, small_rows) in [too_small_terminal(), (28, 40)] {
+        let mut r = build(cols, rows, vec![PetKind::Cat]);
+        r.render(&scene, pack(), t0()).expect("render");
+        let cell = (0..cols)
+            .flat_map(|c| (0..rows).map(move |row| (c, row)))
+            .find(|&(c, row)| r.hit_test_agent_at(c, row) == Some(id))
+            .expect("the drawn agent is hit-testable");
+        assert!(r.cached_pet_pos().is_some(), "the pet is drawn");
+
+        r.terminal.backend_mut().resize(small_cols, small_rows);
+        r.render(&scene, pack(), t0()).expect("render");
+        assert_eq!(
+            r.hit_test_agent_at(cell.0, cell.1),
+            None,
+            "{small_cols}x{small_rows}"
+        );
+        assert!(r.cached_pet_pos().is_none(), "{small_cols}x{small_rows}");
+    }
+}
+
 /// The other direction: a terminal that CAN lay out must never show the notice.
 #[test]
 fn a_terminal_that_fits_shows_no_too_small_notice() {
@@ -137,7 +166,7 @@ fn colliding_labels_with_multibyte_session_ids_do_not_panic() {
 
 #[test]
 fn no_layout_frame_paints_the_popup_at_its_clickable_scale() {
-    // 100x16 → scene_rect 100x15 passes render()'s 20x12 gate, but buf_h=30 is
+    // 100x16 → scene_rect 100x15 passes render()'s `MIN_SCENE_*` gate, but buf_h=30 is
     // below compute_with_seed's office minimum → draw_scene returns Ok(None).
     let scene = scene_with(vec![idle("/nl/0.jsonl", 0, t0())], 16);
     let mut r = build(100, 16, vec![]);
@@ -217,8 +246,12 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
 #[test]
 fn modal_overlays_still_paint_during_a_slide_on_a_too_small_terminal() {
     let scene = two_floor_scene();
-    // 19 cols ⇒ scene_rect 19x11, under the 20x12 gate on BOTH axes.
-    let mut r = build(19, 12, vec![]);
+    // Under the gate on BOTH axes.
+    let mut r = build(
+        crate::tui::renderer::MIN_SCENE_WIDTH - 1,
+        crate::tui::renderer::MIN_SCENE_HEIGHT - 1 + crate::tui::renderer::FOOTER_ROWS,
+        vec![],
+    );
     let now = t0();
     r.render(&scene, pack(), now).expect("render");
     r.set_help_open(true);
@@ -375,8 +408,7 @@ fn floor_transition_clears_stale_pet_position() {
 #[test]
 fn layout_compute_none_bails_to_footer_only() {
     let scene = scene_with(vec![idle("/lc/0.jsonl", 0, t0())], 16);
-    // scene_rect 28×39: width 28 ≥ 20 (passes gate), buf_w 28 < MIN_W → compute
-    // returns None, hitting the second bail arm.
+    // Clears `MIN_SCENE_WIDTH` but not the layout's `MIN_LAYOUT_W`: the second bail arm.
     let mut r = build(28, 40, vec![]);
     r.render(&scene, pack(), t0())
         .expect("render must not error on the compute-None bail");

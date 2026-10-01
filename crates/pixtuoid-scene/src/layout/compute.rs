@@ -806,6 +806,20 @@ fn place_wall_decor(
             },
         });
     }
+    // A band too short to hang a piece under the neon sign drops it.
+    let neon = (
+        Point {
+            x: NEON_PANEL.x,
+            y: NEON_PANEL.y,
+        },
+        Size {
+            w: NEON_PANEL.width,
+            h: NEON_PANEL.height,
+        },
+    );
+    wall_decor.retain(|d| {
+        !super::placement::rects_overlap((d.pos, furniture_def(d.kind.furniture()).visual), neon)
+    });
     wall_decor
 }
 
@@ -1217,8 +1231,8 @@ impl PodGrid {
     }
 }
 
-/// The hand-authored floor geometries. `floor_seed` selects one via Fibonacci
-/// hashing, so floors past [`FloorVariant::ALL`]'s length cycle through the same looks.
+/// The hand-authored floor geometries. `floor_seed` selects one via
+/// [`Self::from_seed`]; floors past [`Self::COUNT`] repeat the same looks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum FloorVariant {
     /// Meeting + pantry, vertical wall between them and the cubicle area,
@@ -1250,11 +1264,10 @@ impl FloorVariant {
         FloorVariant::Lounge,
     ];
     const COUNT: u64 = Self::ALL.len() as u64;
-    /// Fibonacci-hash multiplier, chosen so the standard floor seeds each map to
-    /// a distinct variant.
-    const HASH_MULT: u64 = 0x4737819096da1dad;
+    /// Searched, not Fibonacci-derived: it maps floors `0..COUNT` to distinct
+    /// variants, which `floor_variant_hash_gives_unique_layouts_per_floor` pins.
+    const HASH_MULT: u64 = 0x4737_8190_96da_1dad;
 
-    /// Select the variant for a floor seed (Fibonacci hashing).
     fn from_seed(floor_seed: u64) -> Self {
         Self::ALL[(floor_seed.wrapping_mul(Self::HASH_MULT) % Self::COUNT) as usize]
     }

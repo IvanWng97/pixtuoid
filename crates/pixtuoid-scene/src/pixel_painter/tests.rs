@@ -590,10 +590,13 @@ fn recolors(
 #[test]
 #[cfg(feature = "density-art")]
 fn the_embedded_pack_draws_every_key_an_agent_recolors() {
-    use pixtuoid_core::sprite::format::density_variant_name;
+    use pixtuoid_core::sprite::format::{Density, density_variant_name};
     let pack = crate::embedded_pack::test_default_pack();
-    let names = std::iter::once("standing".to_string())
-        .chain((2..=pack.max_density_variant()).map(|d| density_variant_name("standing", d)));
+    let names = std::iter::once("standing".to_string()).chain(
+        (2..=pack.max_density_variant().get())
+            .filter_map(Density::new)
+            .map(|d| density_variant_name("standing", d)),
+    );
     let mut drawn = 0;
     for name in names {
         let Some(standing) = pack.animation(&name) else {
@@ -627,7 +630,7 @@ fn the_embedded_pack_draws_every_key_an_agent_recolors() {
 #[cfg(feature = "density-art")]
 fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
     use pixtuoid_core::sprite::format::{
-        OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS, density_variant_name,
+        Density, OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS, density_variant_name,
     };
     let pack = crate::embedded_pack::test_default_pack();
     let mut variants = 0;
@@ -635,7 +638,11 @@ fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
         .iter()
         .chain(OPTIONAL_CHARACTER_ANIMATIONS)
     {
-        let densities = std::iter::once(None).chain((2..=pack.max_density_variant()).map(Some));
+        let densities = std::iter::once(None).chain(
+            (2..=pack.max_density_variant().get())
+                .filter_map(Density::new)
+                .map(Some),
+        );
         for density in densities {
             let name = density.map_or_else(|| base.to_string(), |d| density_variant_name(base, d));
             let Some(anim) = pack.animation(&name) else {
@@ -3520,31 +3527,8 @@ fn every_other_desk_stands_a_cabinet_starting_with_the_first() {
 #[test]
 fn a_mascots_state_reaches_its_hover_and_its_sprite() {
     use pixtuoid_core::state::DaemonState;
-    let pack = crate::embedded_pack::test_default_pack();
-    let layout = Layout::compute(192, 128, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
     let def = crate::creatures::gateway_mascot_def(pixtuoid_core::source::openclaw::SOURCE_NAME)
         .expect("openclaw has a mascot");
-    let scene = SceneState::uniform(16);
-    let now = SystemTime::UNIX_EPOCH;
-    let motion = HashMap::new();
-    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
-    let mut cache = FrameCache::new();
-    let mut base_fill = BaseFillCache::new();
-    let ctx = PaintCtx {
-        scene: &scene,
-        layout: &layout,
-        pack: &pack,
-        now,
-        sky: crate::sky::Sky::at(now),
-        buf: &mut buf,
-        cache: &mut cache,
-        base_fill: &mut base_fill,
-        shadows: &mut crate::ground::DepthsCache::default(),
-        theme: crate::theme::theme_by_name("normal").expect("theme"),
-        floor: crate::floor::FloorMeta::ground(),
-        motion: &motion,
-        debug_walkable: false,
-    };
     for (state, busy, degraded) in [
         (DaemonState::Idle, false, false),
         (DaemonState::Busy, true, false),
@@ -3553,6 +3537,7 @@ fn a_mascots_state_reaches_its_hover_and_its_sprite() {
     ] {
         let mascot = sim::MascotPlacement {
             pos: Point { x: 60, y: 60 },
+            size: Size { w: 14, h: 12 },
             anim_name: def.walk,
             frame_idx: 0,
             name: def.display_name,
@@ -3562,9 +3547,10 @@ fn a_mascots_state_reaches_its_hover_and_its_sprite() {
             active_sessions: 0,
         };
         let mut drawables = Vec::new();
-        let frames = enqueue_gateway_mascots(&ctx, &[mascot], &mut drawables);
+        enqueue_gateway_mascots(std::slice::from_ref(&mascot), &mut drawables);
+        let hover = MascotFrame::of(&mascot, 0, 0);
         assert_eq!(
-            (frames[0].busy, frames[0].degraded),
+            (hover.busy, hover.degraded),
             (busy, degraded),
             "{state:?} hover"
         );
@@ -3624,6 +3610,81 @@ fn sim_step_walks_a_mascot_in_for_each_gateway_present() {
     assert_eq!(mascot.instance, None, "a lone instance needs no port");
 }
 
+/// A mascot whose anim the pack lacks paints nothing, so it lists nothing to
+/// hover; a drawn one is sized by the frame it blitted.
+#[test]
+fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
+    use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
+    use pixtuoid_core::state::DaemonInstanceId;
+    use std::time::Duration;
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    let key = DaemonInstanceKey::new(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        DaemonInstanceId::new("18789".to_string()).expect("id"),
+    );
+    apply_presence(
+        &mut scene,
+        &key,
+        DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+        now0,
+    );
+    let now = now0 + Duration::from_secs(6);
+    let mut owned = OwnedSimStores::new();
+    let mut frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    let [drawn] = frame.mascots.as_slice() else {
+        panic!("one gateway, one mascot: {:?}", frame.mascots);
+    };
+    let art = pack
+        .animation(drawn.anim_name)
+        .and_then(|a| frame_at(a, drawn.frame_idx))
+        .map(|f| (f.width(), f.height()))
+        .expect("the bundled pack draws the mascot");
+    let mut ghost = drawn.clone();
+    ghost.anim_name = "does_not_exist";
+    ghost.instance = Some("ghost".into());
+    frame.mascots.push(ghost);
+
+    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+    let hover = paint_frame(
+        &mut PaintCtx {
+            scene: &scene,
+            layout: &layout,
+            pack: &pack,
+            now,
+            sky: crate::sky::Sky::at(now),
+            buf: &mut buf,
+            cache: &mut FrameCache::new(),
+            base_fill: &mut BaseFillCache::new(),
+            shadows: &mut crate::ground::DepthsCache::default(),
+            theme: crate::theme::theme_by_name("normal").expect("normal theme"),
+            floor: crate::floor::FloorMeta::ground(),
+            motion: &owned.route.motion,
+            debug_walkable: false,
+        },
+        &frame,
+    );
+    let listed: Vec<_> = hover
+        .mascots
+        .iter()
+        .map(|m| (m.instance.clone(), (m.w, m.h)))
+        .collect();
+    assert_eq!(listed, vec![(None, art)]);
+}
+
 #[test]
 fn sim_step_fits_every_mascot_frame_on_the_canvas() {
     use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
@@ -3662,7 +3723,7 @@ fn sim_step_fits_every_mascot_frame_on_the_canvas() {
             },
         );
         for m in &frame.mascots {
-            let size = sim::frame_size(&pack, m.anim_name, m.frame_idx, sim::MASCOT_FALLBACK);
+            let size = m.size;
             let (Some(x0), Some(y0)) = (
                 m.pos.x.checked_sub(size.w / 2),
                 m.pos.y.checked_sub(size.h / 2),
@@ -3806,6 +3867,138 @@ fn a_waiting_agent_stays_seated_and_gets_its_bubble_whichever_way_the_desk_faces
         2,
         "the sweep must cover BOTH facings, saw {seen:?}"
     );
+}
+
+/// An agent off the layout's desks draws nothing, so hover never names it; the
+/// rest are listed in paint order.
+#[test]
+fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
+    use std::time::Duration;
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    scene.agents.clear();
+    let slot = |path: &str, desk: usize, created: SystemTime| {
+        let mut s = make_slot(
+            pixtuoid_core::AgentId::from_transcript_path(path),
+            ActivityState::Idle,
+        );
+        s.desk_index = GlobalDeskIndex(desk);
+        (s.created_at, s.state_started_at, s.last_event_at) = (created, created, created);
+        s
+    };
+    let off = slot("/hover/off.jsonl", layout.home_desks.len(), now0);
+    let lead = slot("/hover/lead.jsonl", 0, now0);
+    let trail = slot("/hover/trail.jsonl", 1, now0 + Duration::from_millis(150));
+    for s in [&off, &lead, &trail] {
+        scene.agents.insert(s.agent_id, s.clone());
+    }
+    let now = now0 + Duration::from_millis(400);
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+    let hover = paint_frame(
+        &mut PaintCtx {
+            scene: &scene,
+            layout: &layout,
+            pack: &pack,
+            now,
+            sky: crate::sky::Sky::at(now),
+            buf: &mut buf,
+            cache: &mut FrameCache::new(),
+            base_fill: &mut BaseFillCache::new(),
+            shadows: &mut crate::ground::DepthsCache::default(),
+            theme: crate::theme::theme_by_name("normal").expect("normal theme"),
+            floor: crate::floor::FloorMeta::ground(),
+            motion: &owned.route.motion,
+            debug_walkable: false,
+        },
+        &frame,
+    );
+
+    let queued: Vec<_> = frame
+        .characters
+        .iter()
+        .map(|c| (c.anchor_y, frame.agents[c.agent_idx].agent_id))
+        .collect();
+    let mut sorted = queued.clone();
+    // Every character is a `Layer::Figure`, so `sort_drawables` orders them by row alone.
+    sorted.sort_by_key(|&(row, _)| row);
+    assert_ne!(sorted, queued, "premise: paint order is not the queue's");
+    let listed: Vec<_> = hover.agents.iter().map(|a| a.agent_id).collect();
+    assert_eq!(listed, sorted.iter().map(|&(_, id)| id).collect::<Vec<_>>());
+    assert!(!listed.contains(&off.agent_id));
+    let [a, b] = [lead.agent_id, trail.agent_id].map(|id| {
+        *hover
+            .agents
+            .iter()
+            .find(|f| f.agent_id == id)
+            .expect("drawn")
+    });
+    assert!(
+        a.anchor.x < b.anchor.x + b.w
+            && b.anchor.x < a.anchor.x + a.w
+            && a.anchor.y < b.anchor.y + b.h
+            && b.anchor.y < a.anchor.y + a.h,
+        "premise: the two arrivals overlap: {a:?} {b:?}"
+    );
+}
+
+/// A character whose anim the pack lacks paints nothing, so it lists nothing to hover.
+#[test]
+fn a_character_whose_anim_is_missing_is_not_hoverable() {
+    let pack = crate::embedded_pack::test_default_pack();
+    let slot = make_slot(
+        pixtuoid_core::AgentId::from_transcript_path("/c.jsonl"),
+        ActivityState::Idle,
+    );
+    let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 0, g: 0, b: 0 });
+    let mut cache = FrameCache::new();
+    let mut paint = |anim_name| {
+        paint_drawable(
+            &DrawableKind::Character {
+                agent: &slot,
+                pose: seat::SpritePose {
+                    anim_name,
+                    frame_idx: 0,
+                    flip_x: false,
+                    glow_tint: None,
+                },
+                anchor: Point { x: 20, y: 20 },
+                sleep_z_seed: None,
+                waiting_bubble: false,
+                walking_dust_frame: None,
+            },
+            &mut drawable::DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now: SystemTime::UNIX_EPOCH,
+                theme: crate::theme::theme_by_name("normal").expect("normal theme"),
+            },
+        )
+    };
+    assert_eq!(paint("does_not_exist"), None);
+    let seated = pack
+        .animation("seated")
+        .and_then(|a| a.frames().first())
+        .expect("seated art");
+    let Some(drawable::Drawn::Agent(drawn)) = paint("seated") else {
+        panic!("a drawn character is hoverable");
+    };
+    assert_eq!((drawn.w, drawn.h), (seated.width(), seated.height()));
 }
 
 #[test]
@@ -4989,8 +5182,8 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
             };
             let mut drawables = Vec::new();
             let pet_frame = frame.pet.map(|p| enqueue_pet(&ctx, p, &mut drawables));
-            for m in enqueue_gateway_mascots(&ctx, &frame.mascots, &mut drawables) {
-                let (w, h) = (m.w, m.h);
+            for m in &frame.mascots {
+                let Size { w, h } = m.size;
                 if m.pos.x < w / 2
                     || m.pos.x + w.div_ceil(2) > layout.buf_w
                     || m.pos.y < h / 2
@@ -5638,7 +5831,8 @@ fn an_unflipped_character_faces_the_way_its_art_does() {
 #[cfg(feature = "density-art")]
 fn a_facing_flip_mirrors_the_dressed_frame() {
     let pack = crate::embedded_pack::test_default_pack();
-    let scale = crate::render_scale::RenderScale::new(pack.max_density_variant()).expect("nonzero");
+    let scale =
+        crate::render_scale::RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
     let mut cache = crate::frame_cache::FrameCache::new();
     let now = SystemTime::UNIX_EPOCH;
     let mut asymmetric = 0;
@@ -5672,16 +5866,93 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
 }
 
 /// A corridor appliance's art overhangs north of its aisle (invariant #6), but
-/// never onto a desk, its chair or its sitter: swept over the census sizes plus
-/// every size whose aisle is 10–14 rows, where the overhang reaches the band.
+/// never onto a desk, its chair or its sitter. Art can only overlap a
+/// workstation it shares a row with, and the height alone fixes every row
+/// (asserted at every width at seed 0, plus seeds 1 and 2 at one width each).
+/// So a tall-aisle height whose rows never meet is checked once per width;
+/// every other tall height sweeps all widths × seeds. The census sizes are
+/// always swept in full.
 #[test]
 fn corridor_appliance_art_never_lands_on_a_workstation() {
-    use crate::layout::{CHARACTER_SPRITE_H, CHARACTER_SPRITE_W, FixtureKind, Station};
+    use crate::layout::{Bounds, CHARACTER_SPRITE_H, CHARACTER_SPRITE_W, FixtureKind, Station};
+    use std::collections::BTreeSet;
     const TALL_AISLES: std::ops::RangeInclusive<u16> = 10..=14;
-    let overlaps = |a: crate::layout::Bounds, b: crate::layout::Bounds| {
-        a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+    const APPLIANCES: [Station; 2] = [Station::VendingMachine, Station::Printer];
+    const SEEDS: std::ops::Range<u64> = 0..3;
+    const NARROWEST: u16 = 96;
+    const WIDEST: u16 = 320;
+    const MID_WIDTH: u16 = 208;
+    let rows_meet = |a: Bounds, b: Bounds| a.y < b.y + b.height && b.y < a.y + a.height;
+    let overlaps =
+        |a: Bounds, b: Bounds| rows_meet(a, b) && a.x < b.x + b.width && b.x < a.x + a.width;
+    let lay_out = |w, h, seed| {
+        Layout::compute_with_seed(w, h, None, seed)
+            .unwrap_or_else(|| panic!("{w}x{h} seed {seed} lays out"))
     };
-    let mut sizes = vec![
+    let pieces = |l: &Layout| {
+        let fixtures: Vec<_> = l.fixtures().collect();
+        let art: Vec<(Station, Bounds)> = fixtures
+            .iter()
+            .filter_map(|f| match f.kind {
+                FixtureKind::Station { station, .. } if APPLIANCES.contains(&station) => {
+                    Some((station, f.visual))
+                }
+                _ => None,
+            })
+            .collect();
+        let mut workstations: Vec<Bounds> = fixtures
+            .iter()
+            .filter(|f| matches!(f.kind, FixtureKind::Desk(_) | FixtureKind::DeskChair(_)))
+            .map(|f| f.visual)
+            .collect();
+        workstations.extend(l.home_desks.iter().enumerate().map(|(i, &desk)| {
+            let at = seated_anchor_facing(
+                desk,
+                CHARACTER_SPRITE_W,
+                l.desk_facing(FloorLocalDeskIndex(i)),
+            );
+            Bounds {
+                x: at.x,
+                y: at.y,
+                width: CHARACTER_SPRITE_W,
+                height: CHARACTER_SPRITE_H,
+            }
+        }));
+        (art, workstations)
+    };
+    let rows = |l: &Layout| {
+        let (art, workstations) = pieces(l);
+        (
+            (l.cubicle_aisle.y, l.cubicle_aisle.height),
+            art.iter()
+                .map(|&(station, a)| (station, a.y, a.height))
+                .collect::<Vec<_>>(),
+            workstations
+                .iter()
+                .map(|ws| (ws.y, ws.height))
+                .collect::<BTreeSet<_>>(),
+        )
+    };
+    let mut placed = 0;
+    let mut violations = Vec::new();
+    let mut check = |l: &Layout, w: u16, h: u16, seed: u64| {
+        let (art, workstations) = pieces(l);
+        placed += art.len();
+        for (station, a) in art {
+            violations.extend(
+                workstations
+                    .iter()
+                    .filter(|&&ws| overlaps(a, ws))
+                    .map(|ws| {
+                        format!(
+                            "{w}x{h} seed {seed} aisle {:?}: {station:?} art {a:?} on {ws:?}",
+                            l.cubicle_aisle
+                        )
+                    }),
+            );
+        }
+    };
+    for (w, h) in [
         (96, 60),
         (120, 72),
         (140, 80),
@@ -5690,72 +5961,58 @@ fn corridor_appliance_art_never_lands_on_a_workstation() {
         (240, 135),
         (320, 180),
         (160, 192),
-    ];
-    let mut tall_seen = std::collections::BTreeSet::new();
-    for w in (96u16..=320).step_by(8) {
-        for h in 90u16..=240 {
-            let Some(l) = Layout::compute_with_seed(w, h, None, 0) else {
-                continue;
-            };
-            if TALL_AISLES.contains(&l.cubicle_aisle.height) {
-                tall_seen.insert(l.cubicle_aisle.height);
-                sizes.push((w, h));
+    ] {
+        for seed in SEEDS {
+            check(&lay_out(w, h, seed), w, h, seed);
+        }
+    }
+    let corners = [(NARROWEST, SEEDS.start), (WIDEST, SEEDS.end - 1)];
+    let mut tall_seen = BTreeSet::new();
+    for h in 90u16..=240 {
+        let [probe, far] = corners.map(|(w, seed)| lay_out(w, h, seed));
+        let (probe_rows, far_rows) = (rows(&probe), rows(&far));
+        assert_eq!(
+            probe_rows.0, far_rows.0,
+            "{h}: the aisle is the height's alone"
+        );
+        if !TALL_AISLES.contains(&probe.cubicle_aisle.height) {
+            continue;
+        }
+        tall_seen.insert(probe.cubicle_aisle.height);
+        let (art, workstations) = pieces(&probe);
+        // An appliance the probe didn't place has rows it can't vouch for.
+        let apart = APPLIANCES
+            .iter()
+            .all(|kind| art.iter().any(|(station, _)| station == kind))
+            && art
+                .iter()
+                .all(|&(_, a)| workstations.iter().all(|&ws| !rows_meet(a, ws)));
+        if apart {
+            assert_eq!(probe_rows, far_rows, "{h}: rows are the height's alone");
+        }
+        let sampled =
+            |w, seed| !apart || seed == SEEDS.start || (w, seed) == (MID_WIDTH, SEEDS.start + 1);
+        for w in (NARROWEST..=WIDEST).step_by(8) {
+            for seed in SEEDS.filter(|&seed| !corners.contains(&(w, seed)) && sampled(w, seed)) {
+                let l = lay_out(w, h, seed);
+                if apart {
+                    assert_eq!(
+                        rows(&l),
+                        probe_rows,
+                        "{w}x{h} seed {seed}: rows are the height's alone"
+                    );
+                }
+                check(&l, w, h, seed);
             }
+        }
+        for (l, (w, seed)) in [probe, far].iter().zip(corners) {
+            check(l, w, h, seed);
         }
     }
     assert!(
         TALL_AISLES.clone().all(|h| tall_seen.contains(&h)),
         "the sweep must reach every tall aisle, saw {tall_seen:?}"
     );
-    let mut placed = 0;
-    let mut violations = Vec::new();
-    for (w, h) in sizes {
-        for seed in 0..3u64 {
-            let Some(l) = Layout::compute_with_seed(w, h, None, seed) else {
-                continue;
-            };
-            let fixtures: Vec<_> = l.fixtures().collect();
-            let mut workstations: Vec<crate::layout::Bounds> = fixtures
-                .iter()
-                .filter(|f| matches!(f.kind, FixtureKind::Desk(_) | FixtureKind::DeskChair(_)))
-                .map(|f| f.visual)
-                .collect();
-            workstations.extend(l.home_desks.iter().enumerate().map(|(i, &desk)| {
-                let at = seated_anchor_facing(
-                    desk,
-                    CHARACTER_SPRITE_W,
-                    l.desk_facing(FloorLocalDeskIndex(i)),
-                );
-                crate::layout::Bounds {
-                    x: at.x,
-                    y: at.y,
-                    width: CHARACTER_SPRITE_W,
-                    height: CHARACTER_SPRITE_H,
-                }
-            }));
-            for f in &fixtures {
-                let FixtureKind::Station {
-                    station: station @ (Station::VendingMachine | Station::Printer),
-                    ..
-                } = f.kind
-                else {
-                    continue;
-                };
-                placed += 1;
-                violations.extend(
-                    workstations
-                        .iter()
-                        .filter(|&&ws| overlaps(f.visual, ws))
-                        .map(|ws| {
-                            format!(
-                                "{w}x{h} seed {seed} aisle {:?}: {station:?} art {:?} on {ws:?}",
-                                l.cubicle_aisle, f.visual
-                            )
-                        }),
-                );
-            }
-        }
-    }
     assert!(placed > 0, "no appliance was placed, so this pins nothing");
     assert!(violations.is_empty(), "{}", violations.join("\n"));
 }

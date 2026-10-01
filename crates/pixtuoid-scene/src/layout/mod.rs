@@ -326,13 +326,13 @@ const _: () = assert!(
 /// (invariant #6). Distinct from `DESK_H`, which prices the slot.
 pub(crate) const DESK_FOOT_H: u16 = 2;
 /// Default character sprite width (px) — the ONE authority every
-/// out-of-pixel_painter consumer centers/hit-tests on. Sprite BLIT sites still
+/// out-of-pixel_painter consumer centers on. Sprite BLIT sites still
 /// pass the pack's REAL `frame.width`; this is the width-unknown fallback.
 /// Lives in `layout` so `layout::decor` can read it without a module cycle.
 pub const CHARACTER_SPRITE_W: u16 = 8;
 /// Default character sprite height (px) — [`CHARACTER_SPRITE_W`]'s twin: the
-/// height `character_anchor` clamps by and hit tests size by, and the fallback
-/// where a custom pack's real frame isn't threaded. The pose offsets are a
+/// height `character_anchor` clamps by, and the fallback where a custom pack's
+/// real frame isn't threaded. The pose offsets are a
 /// SEPARATE vertical-anchor concern.
 pub const CHARACTER_SPRITE_H: u16 = 12;
 /// Elevator-door sprite width in buffer px, read by the layout, the wall's

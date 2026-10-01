@@ -27,7 +27,7 @@ use ratatui::backend::CrosstermBackend;
 use tui_renderer::TuiRenderer;
 
 use crate::runtime::SceneRx;
-use pixtuoid_scene::{embedded_pack, floor, pet, theme};
+use pixtuoid_scene::{embedded_pack, pet, theme};
 
 /// Which overlay (if any) currently owns input, plus the one count the picker needs.
 /// An open overlay swallows keys and the normal-scene bindings are suspended; the
@@ -84,8 +84,7 @@ enum KeyAction {
     DashboardJump,
     DashboardFocus,
     DashboardClose,
-    /// Open/close the Sources panel — the variant and module keep the historical
-    /// `Connection` name.
+    /// Open/close the Sources panel.
     ToggleConnection,
     ConnectionUp,
     ConnectionDown,
@@ -103,24 +102,20 @@ enum KeyAction {
 }
 
 fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
-    renderer: &mut TuiRenderer<B>,
+    renderer: &TuiRenderer<B>,
     scene_rx: &SceneRx,
     focus_roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
     col: u16,
     row: u16,
-    now: SystemTime,
 ) -> bool {
-    let snap = scene_rx.borrow().clone();
-    // Project to the VISIBLE floor first: hit_test_agent_at → character_anchor reads
-    // floor-local desk indices.
-    let floor_scene = floor::project_floor_scene(&snap, renderer.current_floor());
-    let hit = renderer.hit_test_agent_at(&floor_scene, now, col, row);
-    if let Some(slot) = hit.and_then(|id| snap.agents.get(&id)) {
-        crate::focus::focus_slot(slot, focus_roots);
-        true
-    } else {
-        false
-    }
+    let Some(id) = renderer.hit_test_agent_at(col, row) else {
+        return false;
+    };
+    let Some(slot) = scene_rx.borrow().agents.get(&id).cloned() else {
+        return false;
+    };
+    crate::focus::focus_slot(&slot, focus_roots);
+    true
 }
 
 /// Opens the live gate only on `Ok`, matching [`crate::sources::connect`]'s flag rollback
@@ -555,16 +550,16 @@ pub(crate) struct TuiSession {
 /// Whether a left-click at `(col, row)` landed on the wall's star/repo link, given the
 /// terminal's `(cols, rows)`. Callers MUST gate this on `renderer.cached_layout().is_some()`
 /// — the wall display only paints with a layout, so an ungated hit phantom-launches a
-/// browser on a too-small frame or mid floor-slide. Note the asymmetry with
-/// [`version_popup_url_clicked`]: this hit-tests the SCENE rect, that one the full bounds.
+/// browser on a too-small frame or mid floor-slide.
 fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
     let scene = renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
     widgets::star_hit_rect(scene)
         .is_some_and(|s| s.contains(ratatui::layout::Position { x: col, y: row }))
 }
 
-/// Whether a left-click at `(col, row)` landed on the version popup's URL, given the
-/// terminal's `(cols, rows)`. `scale` is the popup's last painted scale.
+/// Whether a left-click at `(col, row)` landed on the version popup's URL, hit-tested
+/// against the full terminal bounds, not [`star_clicked`]'s scene rect. `scale` is
+/// the popup's last painted scale.
 fn version_popup_url_clicked(col: u16, row: u16, scale: f32, term: (u16, u16)) -> bool {
     let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
     widgets::version_popup_url_rect(bounds, scale)
@@ -828,7 +823,7 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
                 && crossterm::terminal::size().is_ok_and(|t| star_clicked(m.column, m.row, t));
             if on_star {
                 let _ = open::that(widgets::REPO_URL);
-            } else if focus_clicked_agent(renderer, scene_rx, focus_roots, m.column, m.row, now) {
+            } else if focus_clicked_agent(renderer, scene_rx, focus_roots, m.column, m.row) {
                 // Empty on purpose: the click was consumed. The coffee-before-pet order below
                 // is the half no mechanism holds — keep it in step with `renderer::draw_scene`.
             } else if renderer.cached_layout().is_some_and(|layout| {
@@ -922,8 +917,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
     // A LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins
-    // the device thread it owns; built after the pack-load `?`, so a pack that
-    // fails to load can't strand it.
+    // the device thread it owns.
     let mut audio_ctl = crate::audio::AudioController::new(audio_cfg, config_path.clone());
     renderer.set_audio(audio_ctl.handle().clone());
     // With no agent CLIs detected there is nothing to connect: the overlay stays closed.
@@ -934,8 +928,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     };
     let onboarding_ui = welcome::WelcomeUi::from_detected(&detected_clis);
 
-    // Yields to onboarding but still STAMPS `last_seen_version`. Gating on the overlay
-    // SHOWING, not on `first_run` — true forever for a no-CLI user — is what unmutes it.
+    // Yields to onboarding but still STAMPS `last_seen_version`. Gated on the overlay
+    // SHOWING, not on `first_run`, which a no-CLI user carries forever.
     let version_popup = if !onboarding_ui.is_empty() {
         let _ = resolve_version_popup(&config_path);
         false
@@ -1035,7 +1029,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 },
                 _ = &mut terminate => break,
             }
-            tokio::task::yield_now().await;
         }
         Ok(())
     })
@@ -2267,20 +2260,14 @@ mod apply_key_action_tests {
         );
     }
 
-    /// The popup URL is clickable only while the popup is actually painted —
-    /// `version_popup_url_rect` returns `None` below the clickable scale, and a
-    /// predicate that ignored `scale` would launch a browser on a click landing
-    /// where the popup merely USED to be.
+    /// Ignoring `scale` would launch a browser where the popup is still animating.
     #[test]
     fn version_popup_url_clicked_respects_the_rect_and_the_scale() {
         use crate::tui::widgets::version_popup_url_rect;
         let term = (120u16, 44u16);
         let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
-        let Some(rect) = version_popup_url_rect(bounds, 1.0) else {
-            // The popup must produce a link rect at full scale; if this ever
-            // changes the assertions below would pass vacuously.
-            panic!("the version popup must yield a URL rect at scale 1.0");
-        };
+        let rect = version_popup_url_rect(bounds, 1.0)
+            .expect("a URL rect at scale 1.0, or the misses below pass vacuously");
 
         assert!(
             super::version_popup_url_clicked(rect.x, rect.y, 1.0, term),

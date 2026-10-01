@@ -825,7 +825,8 @@ impl SceneLayout {
             },
             ENTRY_MAT,
         );
-        // Gives way to an island over it: half hidden, it reads as a stain.
+        // Gives way to the island, the counter or the runner over it: half
+        // hidden, it reads as a stain.
         let island = p
             .kitchen_island
             .map(|at| centred(at, furniture_def(Furniture::KitchenIsland).visual));
@@ -835,7 +836,11 @@ impl SceneLayout {
                 || b.y + b.height <= mat.y
                 || mat.y + mat.height <= b.y
         };
-        island.is_none_or(clear).then_some(mat)
+        [island, self.pantry_counter(), self.corridor]
+            .into_iter()
+            .flatten()
+            .all(clear)
+            .then_some(mat)
     }
 
     /// The thin bar mat under the kitchen island: the island covers most of
@@ -869,20 +874,24 @@ impl SceneLayout {
         })
     }
 
-    /// The coffee machine's box on the pantry counter, or `None` without one.
-    pub fn coffee_machine(&self) -> Option<Bounds> {
+    /// The pantry counter's box, or `None` without one.
+    fn pantry_counter(&self) -> Option<Bounds> {
         let wp = self
             .waypoints
             .iter()
             .find(|w| w.kind == WaypointKind::Pantry)?;
-        let size = self.pantry_counter_size();
-        let counter = centred(wp.pos, size);
-        let (x0, x1) = coffee_machine_cols(size.w);
+        Some(centred(wp.pos, self.pantry_counter_size()))
+    }
+
+    /// The coffee machine's box on the pantry counter, or `None` without one.
+    pub fn coffee_machine(&self) -> Option<Bounds> {
+        let counter = self.pantry_counter()?;
+        let (x0, x1) = coffee_machine_cols(counter.width);
         Some(Bounds {
             x: counter.x + x0,
             y: counter.y,
             width: x1 - x0,
-            height: size.h,
+            height: counter.height,
         })
     }
 }

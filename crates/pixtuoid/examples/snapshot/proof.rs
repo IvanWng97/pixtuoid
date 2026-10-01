@@ -310,7 +310,6 @@ pub(crate) fn build_script(fixture: &Path) -> Result<ProofScript> {
                 prompt: true,
                 annotation: None,
             });
-            continue; // plain prompt: decode_cc_line emits nothing for it
         }
         if ty == "assistant"
             && let Some(blocks) = content.and_then(|c| c.as_array())
@@ -384,7 +383,8 @@ const DOT_RED: Rgba<u8> = Rgba([255, 95, 86, 255]);
 const DOT_YELLOW: Rgba<u8> = Rgba([255, 189, 46, 255]);
 const DOT_GREEN: Rgba<u8> = Rgba([39, 201, 63, 255]);
 const CHROME_DOT_PX: f32 = 8.0;
-const DOT_PITCH: i32 = CHROME_DOT_PX as i32 + 1; // dot advance + a 1px gap
+// Centre to centre, off the font size: the ● glyph's advance is narrower.
+const DOT_PITCH: i32 = CHROME_DOT_PX as i32 + 1;
 const DOT_GAP_AFTER: i32 = 6;
 
 /// `is_panel` gates the traffic-light dots + the title size — only the left panel
@@ -509,9 +509,8 @@ pub(crate) fn compose_frame(
             (office_origin.0 + desk_px.0) as i32,
             (office_origin.1 + desk_px.1) as i32,
         );
-        // Clears the top edge of the ceiling halo `paint_ceiling_halos` burns
-        // over a lit monitor (up to 16px above desk.1 in PNG space) with an
-        // 8px margin, so the connector/dot never sits inside the glow.
+        // Clears the halo `paint_ceiling_halos` burns over a lit monitor, with a
+        // margin, so the connector/dot never sits inside the glow.
         const GLOW_CLEARANCE: i32 = 24;
         let anchor_y = desk.1 - GLOW_CLEARANCE;
         match layout {

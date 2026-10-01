@@ -879,8 +879,8 @@ pub pixtuoid_core::sprite::error::PackError::HairLayerHead::view: pixtuoid_core:
 #[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::HairstyleDensity
 pub pixtuoid_core::sprite::error::PackError::HairstyleDensity::key: alloc::string::String
 #[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::HairstylesDiffer
-pub pixtuoid_core::sprite::error::PackError::HairstylesDiffer::first: u16
-pub pixtuoid_core::sprite::error::PackError::HairstylesDiffer::other: u16
+pub pixtuoid_core::sprite::error::PackError::HairstylesDiffer::first: pixtuoid_core::sprite::format::Density
+pub pixtuoid_core::sprite::error::PackError::HairstylesDiffer::other: pixtuoid_core::sprite::format::Density
 #[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::Manifest
 pub pixtuoid_core::sprite::error::PackError::Manifest::path: core::option::Option<std::path::PathBuf>
 pub pixtuoid_core::sprite::error::PackError::Manifest::source: toml::de::error::Error
@@ -915,7 +915,7 @@ pub pixtuoid_core::sprite::error::PackError::VariantPlanes::key: alloc::string::
 #[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::VariantSize
 pub pixtuoid_core::sprite::error::PackError::VariantSize::base_h: u16
 pub pixtuoid_core::sprite::error::PackError::VariantSize::base_w: u16
-pub pixtuoid_core::sprite::error::PackError::VariantSize::density: u16
+pub pixtuoid_core::sprite::error::PackError::VariantSize::density: pixtuoid_core::sprite::format::Density
 pub pixtuoid_core::sprite::error::PackError::VariantSize::key: alloc::string::String
 #[non_exhaustive] pub pixtuoid_core::sprite::error::PackError::VariantWithoutBase
 pub pixtuoid_core::sprite::error::PackError::VariantWithoutBase::base: alloc::string::String
@@ -1040,7 +1040,7 @@ pub fn pixtuoid_core::sprite::format::Building::base(&self) -> &pixtuoid_core::s
 pub fn pixtuoid_core::sprite::format::Building::name(&self) -> &str
 pub fn pixtuoid_core::sprite::format::Building::size(&self) -> (u16, u16)
 pub fn pixtuoid_core::sprite::format::Building::stands_in(&self, pixtuoid_core::sprite::format::CityPlane) -> bool
-pub fn pixtuoid_core::sprite::format::Building::variant(&self, core::num::nonzero::NonZeroU16) -> core::option::Option<&pixtuoid_core::sprite::format::BuildingArt>
+pub fn pixtuoid_core::sprite::format::Building::variant(&self, pixtuoid_core::sprite::format::Density) -> core::option::Option<&pixtuoid_core::sprite::format::BuildingArt>
 impl core::clone::Clone for pixtuoid_core::sprite::format::Building
 pub fn pixtuoid_core::sprite::format::Building::clone(&self) -> pixtuoid_core::sprite::format::Building
 impl core::fmt::Debug for pixtuoid_core::sprite::format::Building
@@ -1081,6 +1081,35 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::CityMaterials
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::CityMaterials
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::CityMaterials
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::CityMaterials
+pub struct pixtuoid_core::sprite::format::Density(_)
+impl pixtuoid_core::sprite::format::Density
+pub const pixtuoid_core::sprite::format::Density::ONE: Self
+pub const fn pixtuoid_core::sprite::format::Density::get(self) -> u16
+pub const fn pixtuoid_core::sprite::format::Density::new(u16) -> core::option::Option<Self>
+impl core::clone::Clone for pixtuoid_core::sprite::format::Density
+pub fn pixtuoid_core::sprite::format::Density::clone(&self) -> pixtuoid_core::sprite::format::Density
+impl core::cmp::Eq for pixtuoid_core::sprite::format::Density
+impl core::cmp::Ord for pixtuoid_core::sprite::format::Density
+pub fn pixtuoid_core::sprite::format::Density::cmp(&self, &pixtuoid_core::sprite::format::Density) -> core::cmp::Ordering
+impl core::cmp::PartialEq for pixtuoid_core::sprite::format::Density
+pub fn pixtuoid_core::sprite::format::Density::eq(&self, &pixtuoid_core::sprite::format::Density) -> bool
+impl core::cmp::PartialOrd for pixtuoid_core::sprite::format::Density
+pub fn pixtuoid_core::sprite::format::Density::partial_cmp(&self, &pixtuoid_core::sprite::format::Density) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for pixtuoid_core::sprite::format::Density
+pub fn pixtuoid_core::sprite::format::Density::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for pixtuoid_core::sprite::format::Density
+pub fn pixtuoid_core::sprite::format::Density::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for pixtuoid_core::sprite::format::Density
+pub fn pixtuoid_core::sprite::format::Density::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for pixtuoid_core::sprite::format::Density
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::format::Density
+impl core::marker::Freeze for pixtuoid_core::sprite::format::Density
+impl core::marker::Send for pixtuoid_core::sprite::format::Density
+impl core::marker::Sync for pixtuoid_core::sprite::format::Density
+impl core::marker::Unpin for pixtuoid_core::sprite::format::Density
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::Density
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::Density
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Density
 pub struct pixtuoid_core::sprite::format::DensityMismatch
 pub pixtuoid_core::sprite::format::DensityMismatch::claimed: (u32, u32)
 pub pixtuoid_core::sprite::format::DensityMismatch::found: (u16, u16)
@@ -1157,7 +1186,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::HairOverhang
 pub struct pixtuoid_core::sprite::format::Hairstyle
 impl pixtuoid_core::sprite::format::Hairstyle
-pub fn pixtuoid_core::sprite::format::Hairstyle::density(&self) -> core::num::nonzero::NonZeroU16
+pub fn pixtuoid_core::sprite::format::Hairstyle::density(&self) -> pixtuoid_core::sprite::format::Density
 pub fn pixtuoid_core::sprite::format::Hairstyle::layers(&self, pixtuoid_core::sprite::HeadView) -> core::option::Option<&pixtuoid_core::sprite::format::HairLayers>
 pub fn pixtuoid_core::sprite::format::Hairstyle::name(&self) -> &str
 impl core::clone::Clone for pixtuoid_core::sprite::format::Hairstyle
@@ -1236,10 +1265,10 @@ pub fn pixtuoid_core::sprite::format::Pack::animation_or_source(&self, &str) -> 
 pub fn pixtuoid_core::sprite::format::Pack::buildings(&self) -> impl core::iter::traits::iterator::Iterator<Item = &pixtuoid_core::sprite::format::Building>
 pub fn pixtuoid_core::sprite::format::Pack::character_outline(&self) -> core::option::Option<pixtuoid_core::sprite::Rgb>
 pub fn pixtuoid_core::sprite::format::Pack::city_materials(&self) -> core::option::Option<&pixtuoid_core::sprite::format::CityMaterials>
-pub fn pixtuoid_core::sprite::format::Pack::density_variants(&self) -> alloc::vec::Vec<u16>
-pub fn pixtuoid_core::sprite::format::Pack::hairstyle(&self, &str, core::num::nonzero::NonZeroU16) -> core::option::Option<&pixtuoid_core::sprite::format::Hairstyle>
+pub fn pixtuoid_core::sprite::format::Pack::density_variants(&self) -> alloc::vec::Vec<pixtuoid_core::sprite::format::Density>
+pub fn pixtuoid_core::sprite::format::Pack::hairstyle(&self, &str, pixtuoid_core::sprite::format::Density) -> core::option::Option<&pixtuoid_core::sprite::format::Hairstyle>
 pub fn pixtuoid_core::sprite::format::Pack::hairstyles(&self) -> impl core::iter::traits::iterator::Iterator<Item = &pixtuoid_core::sprite::format::Hairstyle>
-pub fn pixtuoid_core::sprite::format::Pack::max_density_variant(&self) -> u16
+pub fn pixtuoid_core::sprite::format::Pack::max_density_variant(&self) -> pixtuoid_core::sprite::format::Density
 pub fn pixtuoid_core::sprite::format::Pack::merge_from(&mut self, &pixtuoid_core::sprite::format::Pack)
 pub fn pixtuoid_core::sprite::format::Pack::palette(&self) -> &pixtuoid_core::sprite::Palette
 pub fn pixtuoid_core::sprite::format::Pack::piece_or_source<'k>(&self, &'k str) -> core::option::Option<&'k str>
@@ -1321,17 +1350,18 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::ValidationReport
 pub const pixtuoid_core::sprite::format::MAX_RAMP_LEVEL: i8
 pub const pixtuoid_core::sprite::format::OPTIONAL_CHARACTER_ANIMATIONS: &[&str]
+pub const pixtuoid_core::sprite::format::OPTIONAL_CREATURE_ANIMATIONS: &[&str]
 pub const pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS: &[&str]
 pub const pixtuoid_core::sprite::format::PACK_MANIFEST: &str
 pub const pixtuoid_core::sprite::format::REQUIRED_CHARACTER_ANIMATIONS: &[&str]
-pub fn pixtuoid_core::sprite::format::claimed_variant_size(&pixtuoid_core::sprite::Frame, u16) -> (u32, u32)
-pub fn pixtuoid_core::sprite::format::density_variant_name(&str, u16) -> alloc::string::String
-pub fn pixtuoid_core::sprite::format::density_variant_name_into(&mut alloc::string::String, &str, u16)
+pub fn pixtuoid_core::sprite::format::claimed_variant_size(&pixtuoid_core::sprite::Frame, pixtuoid_core::sprite::format::Density) -> (u32, u32)
+pub fn pixtuoid_core::sprite::format::density_variant_name(&str, pixtuoid_core::sprite::format::Density) -> alloc::string::String
+pub fn pixtuoid_core::sprite::format::density_variant_name_into(&mut alloc::string::String, &str, pixtuoid_core::sprite::format::Density)
 pub fn pixtuoid_core::sprite::format::load_pack(&std::path::Path) -> core::result::Result<pixtuoid_core::sprite::format::Pack, pixtuoid_core::sprite::error::PackError>
 pub fn pixtuoid_core::sprite::format::load_pack_from_strings(&str, &[(&str, &str)]) -> core::result::Result<pixtuoid_core::sprite::format::Pack, pixtuoid_core::sprite::error::PackError>
 pub fn pixtuoid_core::sprite::format::validate_pack_animations(&pixtuoid_core::sprite::format::Pack, &[alloc::vec::Vec<&'static str>]) -> pixtuoid_core::sprite::format::ValidationReport
-pub fn pixtuoid_core::sprite::format::variant_fits(&pixtuoid_core::sprite::Frame, u16, &pixtuoid_core::sprite::Frame) -> bool
-pub fn pixtuoid_core::sprite::format::variant_redraws(&pixtuoid_core::sprite::Sprite, u16, &pixtuoid_core::sprite::Sprite) -> bool
+pub fn pixtuoid_core::sprite::format::variant_fits(&pixtuoid_core::sprite::Frame, pixtuoid_core::sprite::format::Density, &pixtuoid_core::sprite::Frame) -> bool
+pub fn pixtuoid_core::sprite::format::variant_redraws(&pixtuoid_core::sprite::Sprite, pixtuoid_core::sprite::format::Density, &pixtuoid_core::sprite::Sprite) -> bool
 #[non_exhaustive] pub enum pixtuoid_core::sprite::HeadView
 pub pixtuoid_core::sprite::HeadView::Back
 pub pixtuoid_core::sprite::HeadView::Crown
