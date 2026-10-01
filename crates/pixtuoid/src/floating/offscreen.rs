@@ -1133,7 +1133,7 @@ mod tests {
             Transport::Jsonl,
         );
 
-        // No frame rendered yet → no cached layout → the guard returns empty.
+        // No frame rendered yet → no drawn sprites → no badges.
         assert!(renderer.labels(&scene).is_empty());
         renderer.render(FrameInputs {
             world: FloorInputs {
