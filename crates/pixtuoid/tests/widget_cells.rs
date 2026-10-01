@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use common::fixture_scene;
 use pixtuoid::tui::renderer::draw_scene;
-use pixtuoid_scene::embedded_pack::load_bundled_pack;
+use pixtuoid_scene::pack::load_bundled_pack;
 use pixtuoid_scene::theme;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;

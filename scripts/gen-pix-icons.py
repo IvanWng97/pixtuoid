@@ -2,7 +2,7 @@
 """Generate the site's pixel-icon PNGs (site/src/assets/pix-icons/) plus the
 root README's pre-scaled variants (docs/images/pix-icons/).
 
-Single color source: the embedded sprite pack's palette
+Single color source: the bundled sprite pack's palette
 (crates/pixtuoid-scene/sprites/default/pack.toml) — an icon grid may only use
 keys defined there, so the icons can never drift off the office's own colors.
 An icon is either extracted verbatim from a pack sprite ("sprite") or authored

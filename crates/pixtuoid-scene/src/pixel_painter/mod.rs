@@ -98,7 +98,6 @@ mod debug_overlay;
 pub(crate) mod drawable;
 pub(crate) mod effects;
 mod furniture;
-pub(crate) mod hair;
 pub(crate) mod palette;
 
 /// Applies the hour's object terms to every pixel painted since `since`.
@@ -614,10 +613,8 @@ fn queue_fixtures<'a>(
                             ),
                         }
                     }
-                    Station::VendingMachine => {
-                        appliance(crate::embedded_pack::VENDING_MACHINE_SPRITE)
-                    }
-                    Station::Printer => appliance(crate::embedded_pack::PRINTER_SPRITE),
+                    Station::VendingMachine => appliance(crate::pack::VENDING_MACHINE_SPRITE),
+                    Station::Printer => appliance(crate::pack::PRINTER_SPRITE),
                     Station::SnackShelf => DrawableKind::SnackShelf { pos: f.at },
                 }
             }

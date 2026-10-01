@@ -1,11 +1,12 @@
 use super::background::paint_corridor_runner;
 use super::drawable::paint_character_at;
-use super::palette::agent_overrides;
 use super::*;
-use crate::embedded_pack::{desk_art_top, frame_at};
+use crate::character::test_support::{color_of, make_slot, make_slot_cwd};
+use crate::character::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, tool_glow_tint};
 use crate::floor::{FloorInputs, PetInputs};
 use crate::layout::CHARACTER_SPRITE_W;
 use crate::layout::Size;
+use crate::pack::{desk_art_top, frame_at};
 use crate::pose;
 use crate::sim::anchors::{
     back_couch_anchor, compute_door_frame_idx, seated_anchor_facing, walking_anchor,
@@ -14,10 +15,9 @@ use crate::sim::anchors::{
 use crate::sim::seat::{Seat, settle_seat};
 use crate::sim::{CharacterGlow, CharacterPlacement, SimStores};
 use crate::wall::paint_wall;
-use pixtuoid_core::sprite::{Frame, Pixel};
+use pixtuoid_core::sprite::Frame;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Paint all of `piece` in one call, which the classic's bands add up to.
@@ -361,7 +361,7 @@ fn seat_view_maps_facing_to_sprite_and_flip() {
 #[cfg(feature = "native")]
 fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
     use crate::layout::{Facing, Point};
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let desk = Point { x: 40, y: 30 };
     let back = Seat::at_desk(desk, Facing::North);
     let front = Seat::at_desk(desk, Facing::South);
@@ -384,9 +384,8 @@ fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
         );
     }
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
-    let old_pack =
-        crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Explicit(fixture))
-            .expect("fixture pack");
+    let old_pack = crate::pack::load_sprite_pack(crate::pack::PackSource::Explicit(fixture))
+        .expect("fixture pack");
     assert!(
         old_pack.animation("seated_back").is_none(),
         "fixture must lack every back view to bite"
@@ -400,7 +399,7 @@ fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
 
 /// The skeleton fixture pack with the `[animations.X]` sections named in
 /// `without` removed and `extra` appended — the only way to reach `sprite_in_pack`'s
-/// degradation rungs, since the embedded pack has every animation.
+/// degradation rungs, since the bundled pack has every animation.
 #[cfg(feature = "native")]
 fn fixture_pack(without: &[&str], extra: &str, tmp: &std::path::Path) -> Pack {
     let dir = tmp.join("pack");
@@ -424,8 +423,7 @@ fn fixture_pack(without: &[&str], extra: &str, tmp: &std::path::Path) -> Pack {
         })
         .collect();
     std::fs::write(dir.join("pack.toml"), format!("{kept}{extra}")).expect("write manifest");
-    crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Explicit(dir))
-        .expect("fixture pack")
+    crate::pack::load_sprite_pack(crate::pack::PackSource::Explicit(dir)).expect("fixture pack")
 }
 
 /// The middle rung of `sprite_in_pack`: a pack carrying the STILL back view but
@@ -456,7 +454,7 @@ fn a_pose_whose_own_back_view_is_missing_falls_back_to_the_still_one() {
 #[cfg(feature = "native")]
 fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
     use crate::layout::{Facing, WaypointKind};
-    let full = crate::embedded_pack::test_default_pack();
+    let full = crate::pack::test_default_pack();
     assert_eq!(
         Seat::at_waypoint(
             WaypointKind::MeetingChair,
@@ -468,9 +466,8 @@ fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
         "a pack WITH the profile sprite uses it"
     );
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
-    let old_pack =
-        crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Explicit(fixture))
-            .expect("fixture pack");
+    let old_pack = crate::pack::load_sprite_pack(crate::pack::PackSource::Explicit(fixture))
+        .expect("fixture pack");
     assert!(
         old_pack.animation("side_seated").is_none(),
         "fixture must lack the profile sprite for this test to bite"
@@ -484,71 +481,6 @@ fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
         .sprite_in_pack("seated", &old_pack),
         ("seated", false),
         "a pack WITHOUT it degrades to the front pose"
-    );
-}
-
-pub(crate) fn make_slot(id: pixtuoid_core::AgentId, state: ActivityState) -> AgentSlot {
-    let now = SystemTime::UNIX_EPOCH;
-    AgentSlot {
-        agent_id: id,
-        source: Arc::from("claude-code"),
-        session_id: Arc::from("s"),
-        cwd: Arc::from(PathBuf::from("/x").as_path()),
-        label: "x".into(),
-        state,
-        state_started_at: now,
-        created_at: now,
-        last_event_at: now,
-        exiting_at: None,
-        pending_idle_at: None,
-
-        desk_index: GlobalDeskIndex(0),
-        floor_idx: 0,
-        tool_call_count: 0,
-        active_ms: 0,
-        unknown_cwd: false,
-        parent_id: None,
-        pid: None,
-        model: None,
-        effort: None,
-        tokens_used: 0,
-        last_usage: None,
-    }
-}
-
-#[cfg(test)]
-fn make_slot_cwd(id_path: &str, cwd: &str, unknown_cwd: bool) -> AgentSlot {
-    let id = pixtuoid_core::AgentId::from_transcript_path(id_path);
-    let mut s = make_slot(id, ActivityState::Idle);
-    s.cwd = std::sync::Arc::from(std::path::Path::new(cwd));
-    s.unknown_cwd = unknown_cwd;
-    s
-}
-
-/// `key`'s color for `slot`, unlit and unburnt.
-fn color_of(slot: &AgentSlot, key: char) -> Pixel {
-    override_of(
-        &agent_overrides(slot, None, crate::burn::BurnTier::Normal),
-        key,
-    )
-}
-
-/// `key`'s color in an agent's overrides.
-fn override_of(overrides: &[(char, Pixel)], key: char) -> Pixel {
-    overrides
-        .iter()
-        .find(|(k, _)| *k == key)
-        .unwrap_or_else(|| panic!("no override for {key:?}"))
-        .1
-}
-
-#[test]
-fn agent_overrides_are_deterministic_per_id() {
-    let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
-    let slot = make_slot(id, ActivityState::Idle);
-    assert_eq!(
-        agent_overrides(&slot, None, crate::burn::BurnTier::Normal),
-        agent_overrides(&slot, None, crate::burn::BurnTier::Normal)
     );
 }
 
@@ -569,8 +501,8 @@ fn looks(
         Some(head) => pack
             .hairstyles()
             .map(|s| {
-                let dress = super::hair::Dress::of(&bare, head, Some(s), line.is_some());
-                super::hair::dress(&bare, &dress, Some(s), overrides, line)
+                let dress = crate::character::Dress::of(&bare, head, Some(s), line.is_some());
+                crate::character::dress(&bare, &dress, Some(s), overrides, line)
             })
             .collect(),
     }
@@ -596,9 +528,9 @@ fn recolors(
 /// dressed in whichever hairstyle.
 #[test]
 #[cfg(feature = "density-art")]
-fn the_embedded_pack_draws_every_key_an_agent_recolors() {
+fn the_bundled_pack_draws_every_key_an_agent_recolors() {
     use pixtuoid_core::sprite::format::{Density, density_variant_name};
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let names = std::iter::once("standing".to_string()).chain(
         (2..=pack.max_density_variant().get())
             .filter_map(Density::new)
@@ -609,12 +541,7 @@ fn the_embedded_pack_draws_every_key_an_agent_recolors() {
         let Some(standing) = pack.animation(&name) else {
             continue;
         };
-        for key in [
-            palette::SHIRT_KEY,
-            palette::HAIR_KEY,
-            palette::SKIN_KEY,
-            palette::PANTS_KEY,
-        ] {
+        for key in [SHIRT_KEY, HAIR_KEY, SKIN_KEY, PANTS_KEY] {
             assert!(
                 recolors(&pack, standing, 0, key),
                 "no {name} pixel is drawn in {key:?}"
@@ -639,7 +566,7 @@ fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
     use pixtuoid_core::sprite::format::{
         Density, OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS, density_variant_name,
     };
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let mut variants = 0;
     for &base in REQUIRED_CHARACTER_ANIMATIONS
         .iter()
@@ -657,7 +584,7 @@ fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
             };
             variants += usize::from(density.is_some());
             for i in 0..anim.frames().len() {
-                for key in [palette::HAIR_KEY, palette::SHIRT_KEY] {
+                for key in [HAIR_KEY, SHIRT_KEY] {
                     assert!(
                         recolors(&pack, anim, i, key),
                         "{name} frame {i} draws nothing the {key:?} recolor reaches"
@@ -674,7 +601,6 @@ fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
 /// dense shirt is the classic profile's shirt colour.
 #[test]
 fn character_frame_takes_a_density_variant_recolored_like_the_base() {
-    use super::palette::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY};
     let one = format!("@frame 0\n{SHIRT_KEY}");
     let two = format!("@frame 0\n{SHIRT_KEY} {SHIRT_KEY}\n{SHIRT_KEY} {SHIRT_KEY}");
     let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
@@ -745,7 +671,6 @@ fn character_frame_takes_a_density_variant_recolored_like_the_base() {
 /// blitted at the scale, and one drawn differently renders differently.
 #[test]
 fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
-    use super::palette::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY};
     use crate::layout::{CHARACTER_SPRITE_H, CHARACTER_SPRITE_W};
     use crate::render_scale::RenderScale;
     const DENSITY: u16 = 2;
@@ -1088,7 +1013,7 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
 
     // A desk top, its screen glass, and a darker front row, whole-pixel so an
     // upscale by `DENSITY` is the variant exactly.
-    let glass_key = crate::embedded_pack::SCREEN_GLASS_KEY;
+    let glass_key = crate::pack::SCREEN_GLASS_KEY;
     let rows = |w: u16, h: u16, glass: char| -> String {
         (0..h)
             .map(|y| {
@@ -1180,46 +1105,6 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
     );
 }
 
-#[test]
-fn agent_overrides_glow_tint_shifts_skin_toward_given_color() {
-    let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
-    let slot = make_slot(id, ActivityState::Idle);
-    let normal = crate::burn::BurnTier::Normal;
-    let unlit = agent_overrides(&slot, None, normal);
-    let green_glow = agent_overrides(
-        &slot,
-        Some(Rgb {
-            r: 140,
-            g: 240,
-            b: 170,
-        }),
-        normal,
-    );
-    let blue_glow = agent_overrides(
-        &slot,
-        Some(Rgb {
-            r: 100,
-            g: 160,
-            b: 255,
-        }),
-        normal,
-    );
-    for key in [palette::SHIRT_KEY, palette::HAIR_KEY, palette::PANTS_KEY] {
-        assert_eq!(override_of(&unlit, key), override_of(&green_glow, key));
-    }
-    let skin = |o: &[(char, Pixel)]| override_of(o, palette::SKIN_KEY).expect("opaque skin");
-    let (ug, gg) = (skin(&unlit).g, skin(&green_glow).g);
-    assert!(
-        gg > ug,
-        "green glow should push skin green (lit={gg}, unlit={ug})"
-    );
-    let (ub, bb) = (skin(&unlit).b, skin(&blue_glow).b);
-    assert!(
-        bb > ub,
-        "blue glow should push skin blue (lit={bb}, unlit={ub})"
-    );
-}
-
 /// Pins [`crate::lighting::desk_screen_glow`], the one screen rule both profiles light
 /// by: a seated occupant's tool, on a north-facing desk only.
 #[test]
@@ -1236,7 +1121,7 @@ fn a_desk_screen_glows_only_for_a_seated_tool_user_facing_north() {
     );
     let idle = make_slot(id, ActivityState::Idle);
     let theme = &crate::theme::NORMAL;
-    let tool = palette::tool_glow_tint(&editing, &theme.tool_glow);
+    let tool = tool_glow_tint(&editing, &theme.tool_glow);
     assert!(tool.is_some(), "the fixture's occupant is using a tool");
     let glow = |occupant, facing, seated| {
         crate::lighting::desk_screen_glow(occupant, facing, seated, theme)
@@ -1254,36 +1139,6 @@ fn a_desk_screen_glows_only_for_a_seated_tool_user_facing_north() {
     );
     assert_eq!(glow(Some(&idle), Facing::North, true), None, "no tool");
     assert_eq!(glow(None, Facing::North, true), None, "nobody");
-}
-
-#[test]
-fn tool_glow_tint_maps_known_tools() {
-    let id = pixtuoid_core::AgentId::from_transcript_path("/t.jsonl");
-    let edit_slot = make_slot(
-        id,
-        ActivityState::Active {
-            tool_use_id: None,
-            detail: Some(Arc::from("Edit src/main.rs")),
-            kind: ToolKind::Edit,
-        },
-    );
-    let bash_slot = make_slot(
-        id,
-        ActivityState::Active {
-            tool_use_id: None,
-            detail: Some(Arc::from("Bash: ls")),
-            kind: ToolKind::Bash,
-        },
-    );
-    let idle_slot = make_slot(id, ActivityState::Idle);
-    let glow = &crate::theme::NORMAL.tool_glow;
-    let edit_tint = palette::tool_glow_tint(&edit_slot, glow);
-    let bash_tint = palette::tool_glow_tint(&bash_slot, glow);
-    let idle_tint = palette::tool_glow_tint(&idle_slot, glow);
-    assert!(edit_tint.is_some(), "Edit should produce glow");
-    assert!(bash_tint.is_some(), "Bash should produce glow");
-    assert_eq!(idle_tint, None, "Idle should produce no glow");
-    assert_ne!(edit_tint, bash_tint, "Edit and Bash should differ");
 }
 
 fn drawable(anchor_y: u16) -> Drawable<'static> {
@@ -1380,7 +1235,7 @@ fn a_row_north_paints_first_whatever_its_layer() {
 
 #[test]
 fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let pos = Point { x: 40, y: 30 };
     let anim_h = |name: &str| {
         pack.animation(name)
@@ -1765,11 +1620,11 @@ fn desk_occupant_always_sorts_behind_its_desk() {
 /// (top row is the north-overhanging bezel), so it covers `height - 1` from `desk.y`.
 #[test]
 fn desk_z_key_is_the_visual_south() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let art = pack
         .animation("desk")
         .and_then(|a| a.frames().first())
-        .expect("the embedded pack ships a desk");
+        .expect("the bundled pack ships a desk");
     assert_eq!(
         crate::layout::desk_furniture_def().visual.h,
         art.height() - 1,
@@ -1799,14 +1654,8 @@ fn every_hover_size_is_its_painted_sprite_size() {
         def(Furniture::FloorLamp, "floor_lamp"),
         def(Furniture::VendingMachine, "vending_machine"),
         def(Furniture::Printer, "printer"),
-        def(
-            Furniture::MeetingTable,
-            crate::embedded_pack::MEETING_TABLE_SPRITE,
-        ),
-        def(
-            Furniture::DeskChair,
-            crate::embedded_pack::DESK_CHAIR_SPRITE,
-        ),
+        def(Furniture::MeetingTable, crate::pack::MEETING_TABLE_SPRITE),
+        def(Furniture::DeskChair, crate::pack::DESK_CHAIR_SPRITE),
         def(Furniture::FilingCabinet, "filing_cabinet"),
         (
             "ELEVATOR".into(),
@@ -1843,7 +1692,7 @@ fn every_hover_size_is_its_painted_sprite_size() {
             .map(|k| def(k.furniture(), k.sprite_name())),
     );
 
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     for (name, size, sprite) in pieces {
         let frames = pack
             .animation(sprite)
@@ -1880,7 +1729,7 @@ fn empty_frame(layout: &SceneLayout) -> SimFrame {
 
 /// The classic's queue of `layout`'s fixtures on `frame`.
 fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let (scene, motion) = (SceneState::uniform(16), HashMap::new());
     let now = SystemTime::UNIX_EPOCH;
@@ -2391,72 +2240,6 @@ fn no_exclusive_waypoint_kind_ever_steps_aside() {
 }
 
 #[test]
-fn kind_derivation_reproduces_the_string_parse_tint_for_representative_displays() {
-    use pixtuoid_core::ToolDetail;
-    let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
-    let glow = &crate::theme::NORMAL.tool_glow;
-    let active = |detail: Option<&ToolDetail>| {
-        make_slot(
-            id,
-            ActivityState::Active {
-                tool_use_id: None,
-                detail: detail.map(|d| Arc::from(d.display())),
-                kind: detail.map_or(ToolKind::Other, ToolKind::from_detail),
-            },
-        )
-    };
-    let generic = |display: &str| ToolDetail::Generic {
-        display: display.into(),
-    };
-    let table: &[(Option<ToolDetail>, Rgb)] = &[
-        (Some(ToolDetail::Task), glow.agent),
-        (Some(generic("Edit src/main.rs")), glow.edit),
-        (Some(generic("Write: src/foo.rs")), glow.edit),
-        (Some(generic("MultiEdit lib.rs")), glow.edit),
-        (Some(generic("Read: README.md")), glow.read),
-        (Some(generic("Bash: cargo test")), glow.bash),
-        (Some(generic("Grep: TODO")), glow.grep),
-        (Some(generic("Glob **/*.rs")), glow.grep),
-        (Some(generic("WebFetch https://x")), glow.default),
-        (None, glow.default),
-    ];
-    for (detail, expected) in table {
-        assert_eq!(
-            palette::tool_glow_tint(&active(detail.as_ref()), glow),
-            Some(*expected),
-            "display {:?} must keep its pre-ToolKind tint",
-            detail.as_ref().map(ToolDetail::display),
-        );
-    }
-    // A Generic tool that merely SPELLS a delegation word is NOT kind Task —
-    // impossible from production decoders, which type every dispatch as
-    // ToolDetail::Task upstream.
-    assert_eq!(
-        palette::tool_glow_tint(&active(Some(&generic("Delegating imposter"))), glow),
-        Some(glow.default)
-    );
-}
-
-#[test]
-fn tool_glow_tint_is_none_unless_active() {
-    let glow = &crate::theme::NORMAL.tool_glow;
-    let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
-    let edit = make_slot(
-        id,
-        ActivityState::Active {
-            tool_use_id: None,
-            detail: None,
-            kind: ToolKind::Edit,
-        },
-    );
-    assert_eq!(palette::tool_glow_tint(&edit, glow), Some(glow.edit));
-    assert_eq!(
-        palette::tool_glow_tint(&make_slot(id, ActivityState::Idle), glow),
-        None
-    );
-}
-
-#[test]
 fn degraded_pixel_desaturates_reddens_and_dims() {
     // Expected value hand-traced through the three blend stages: desaturate,
     // red tint, dim.
@@ -2555,7 +2338,7 @@ fn obstacle_kinds_render_upright_and_unflipped() {
 fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
     use pixtuoid_core::state::EffortObservation;
     use std::time::Duration;
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let black = Rgb { r: 0, g: 0, b: 0 };
     let anchor = Point { x: 8, y: 8 };
@@ -2597,8 +2380,8 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
     let has = |buf: &RgbBuffer, c: Rgb| {
         (0..buf.height()).any(|y| (0..buf.width()).any(|x| buf.get(x, y) == c))
     };
-    const EMBER: Rgb = super::effects::FLAME_DEEP;
-    const TIP: Rgb = super::effects::FLAME_TIP;
+    const EMBER: Rgb = crate::effects::look::FLAME_DEEP;
+    const TIP: Rgb = crate::effects::look::FLAME_TIP;
 
     let plain = render(&slot);
     assert!(
@@ -2682,7 +2465,7 @@ fn a_top_burning_placement_carries_its_crown_on_its_anchor() {
 
 #[test]
 fn paint_character_at_missing_anim_is_a_noop() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let mut cache = FrameCache::new();
     let id = pixtuoid_core::AgentId::from_transcript_path("/c.jsonl");
     let slot = make_slot(id, ActivityState::Idle);
@@ -2980,61 +2763,14 @@ fn weather_gallery_manifest_matches_the_weather_enum() {
 }
 
 #[test]
-fn agent_overrides_outfit_is_keyed_by_cwd_not_id() {
-    let a = make_slot_cwd("/demo/api/aaaa.jsonl", "/demo/api", false);
-    let b = make_slot_cwd("/demo/api/bbbb.jsonl", "/demo/api", false);
-    assert_eq!(
-        color_of(&a, palette::SHIRT_KEY),
-        color_of(&b, palette::SHIRT_KEY),
-        "same cwd should share shirt"
-    );
-    assert_eq!(
-        color_of(&a, palette::PANTS_KEY),
-        color_of(&b, palette::PANTS_KEY),
-        "same cwd should share pants"
-    );
-    assert_ne!(
-        (
-            color_of(&a, palette::HAIR_KEY),
-            color_of(&a, palette::SKIN_KEY)
-        ),
-        (
-            color_of(&b, palette::HAIR_KEY),
-            color_of(&b, palette::SKIN_KEY)
-        ),
-        "different agents in the same repo must differ in hair/skin"
-    );
-}
-
-#[test]
-fn agent_overrides_unknown_cwd_falls_back_to_id_outfit() {
-    let unknown = make_slot_cwd("/x/aaaa.jsonl", "/whatever", true);
-    let empty = make_slot_cwd("/x/aaaa.jsonl", "", false);
-    assert_eq!(
-        color_of(&unknown, palette::SHIRT_KEY),
-        color_of(&empty, palette::SHIRT_KEY)
-    );
-    assert_eq!(
-        color_of(&unknown, palette::PANTS_KEY),
-        color_of(&empty, palette::PANTS_KEY)
-    );
-    let other = make_slot_cwd("/x/zzzz.jsonl", "", false);
-    assert_ne!(
-        color_of(&other, palette::SHIRT_KEY),
-        color_of(&empty, palette::SHIRT_KEY),
-        "cwd-less agents keep distinct per-id outfits"
-    );
-}
-
-#[test]
 fn cwd_backfill_invalidates_cached_outfit_frames() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let unknown = make_slot_cwd("/p/heal.jsonl", "", true);
     // Pick a cwd whose Team-Palette outfit differs from the id-seeded fallback,
     // or the assertion has no teeth.
     let healed = (0..64)
         .map(|i| make_slot_cwd("/p/heal.jsonl", &format!("/repo/team{i}"), false))
-        .find(|h| color_of(h, palette::SHIRT_KEY) != color_of(&unknown, palette::SHIRT_KEY))
+        .find(|h| color_of(h, SHIRT_KEY) != color_of(&unknown, SHIRT_KEY))
         .expect("some cwd lands on a different outfit than the fallback");
 
     let anchor = Point { x: 2, y: 2 };
@@ -3100,25 +2836,6 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     );
 }
 
-#[test]
-fn agent_overrides_same_id_different_cwd_changes_outfit() {
-    let a = make_slot_cwd("/p/aaaa.jsonl", "/demo/api", false);
-    let b = make_slot_cwd("/p/aaaa.jsonl", "/demo/infra", false);
-    assert_ne!(
-        color_of(&a, palette::SHIRT_KEY),
-        color_of(&b, palette::SHIRT_KEY),
-        "different cwds should pick different outfits"
-    );
-    assert_eq!(
-        color_of(&a, palette::HAIR_KEY),
-        color_of(&b, palette::HAIR_KEY)
-    );
-    assert_eq!(
-        color_of(&a, palette::SKIN_KEY),
-        color_of(&b, palette::SKIN_KEY)
-    );
-}
-
 struct OwnedSimStores {
     route: pose::RouteRig<crate::pathfind::AStarRouter>,
     vacancy_dim: VacancyDim,
@@ -3156,7 +2873,7 @@ fn sim_rig() -> (
     SystemTime,
     Pack,
 ) {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("160x96 lays out");
     let now0 = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     let id = pixtuoid_core::AgentId::from_transcript_path("/p/sim-seam.jsonl");
@@ -3240,8 +2957,8 @@ fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
     use crate::pose::Pose;
     use std::time::Duration;
 
-    let wide = crate::embedded_pack::test_wide_pack();
-    let default = crate::embedded_pack::test_default_pack();
+    let wide = crate::pack::test_wide_pack();
+    let default = crate::pack::test_default_pack();
     assert_eq!(
         wide.animation("standing").expect("standing").frames()[0].width(),
         10,
@@ -4015,7 +3732,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
 /// A character whose anim the pack lacks paints nothing, so it lists nothing to hover.
 #[test]
 fn a_character_whose_anim_is_missing_is_not_hoverable() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let slot = make_slot(
         pixtuoid_core::AgentId::from_transcript_path("/c.jsonl"),
         ActivityState::Idle,
@@ -4410,7 +4127,7 @@ fn a_coat_rack_fills_exactly_its_bounds() {
 
 #[test]
 fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let c = pack.palette().get('C').flatten().expect("couch fabric key");
     let g = pack
         .palette()
@@ -4428,7 +4145,7 @@ fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
 #[test]
 fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
     use crate::layout::{Facing, Point, SEAT_RENDER_Y_OFF, WaypointKind};
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let pos = Point { x: 40, y: 30 };
     let seat = Seat::at_waypoint(WaypointKind::MeetingChair, pos, Facing::West);
     let (anim, _) = seat.sprite_for("seated");
@@ -4450,7 +4167,7 @@ fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
 
 /// Paint the appliance `sprite` at `ms` past the epoch, `busy` or not.
 fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let mut cache = FrameCache::new();
     let mut buf = RgbBuffer::filled(60, 40, Rgb { r: 1, g: 2, b: 3 });
     let d = Drawable {
@@ -4480,7 +4197,7 @@ fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
 #[test]
 #[cfg(feature = "density-art")]
 fn a_busy_loop_spends_most_of_its_frames_away_from_rest() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     for name in [
         "vending_machine",
         "printer",
@@ -4661,7 +4378,7 @@ fn no_two_agents_ever_occupy_the_same_exclusive_waypoint() {
     use crate::pose::Pose;
     use std::time::Duration;
 
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let layout =
         SceneLayout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
@@ -4728,7 +4445,7 @@ fn a_placement_is_seated_exactly_when_its_figure_sits_on_furniture() {
     use crate::pose::Pose;
     use std::time::Duration;
 
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let layout =
         SceneLayout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
@@ -4798,7 +4515,7 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     use crate::pose::Pose;
     use std::time::Duration;
 
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let layout =
         SceneLayout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
@@ -4911,7 +4628,7 @@ fn one_meeting_sofa_still_seats_three_agents_at_once() {
     use crate::pose::Pose;
     use std::time::Duration;
 
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let layout =
         SceneLayout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
     let sofa: Vec<usize> = {
@@ -5002,7 +4719,7 @@ fn a_meeting_chair_sitter_is_drawn_on_the_seat_not_5px_high() {
     use crate::pose::Pose;
     use std::time::Duration;
 
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let layout =
         SceneLayout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
@@ -5171,7 +4888,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     use pixtuoid_core::state::DaemonInstanceId;
     use std::time::Duration;
 
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let layout = SceneLayout::compute_with_seed(192, 128, None, 0).expect("layout");
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
     let boot = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
@@ -5351,7 +5068,7 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
     use crate::pose::Pose;
     use std::time::Duration;
 
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let layout = SceneLayout::compute_with_seed(112, 100, None, 0).expect("112x100 lays out");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let coffee = HashMap::new();
@@ -5492,7 +5209,7 @@ fn assert_badges_top_their_frames(
             .find(|c| frame.agents[c.agent_idx].agent_id == f.agent_id)
             .expect("every drawn sprite has a placement");
         let desk_top = c.seat_desk.and_then(|d| {
-            crate::embedded_pack::desk_art(pack, layout.desk_facing_at(d))
+            crate::pack::desk_art(pack, layout.desk_facing_at(d))
                 .map(|art| desk_art_top(pack, d.y, art.height()))
         });
         match desk_top {
@@ -5672,7 +5389,7 @@ fn a_badge_follows_its_sprite_fitted_to_the_canvas_rim() {
     use crate::pose::Pose;
     use std::time::Duration;
 
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let layout = SceneLayout::compute_with_seed(112, 100, None, 0).expect("112x100 lays out");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let coffee = HashMap::new();
@@ -5757,9 +5474,9 @@ fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
         let layout =
             SceneLayout::compute_with_seed(240, 160, Some(crate::layout::TEST_DEFAULT_DESKS), seed)
                 .expect("240x160 lays out");
-        let pack = crate::embedded_pack::test_default_pack();
+        let pack = crate::pack::test_default_pack();
         let chair_w = super::drawable::desk_chair_frame(&pack)
-            .expect("desk_chair is in the embedded pack")
+            .expect("desk_chair is in the bundled pack")
             .width();
         // Keyed on the FULL position: desks in one pod column share an x, so an
         // x-only key silently folds a wrongly-chaired south desk onto its
@@ -5807,7 +5524,7 @@ fn paint_chair_back_writes_its_mask_and_nothing_outside_it() {
     const BG: Rgb = Rgb { r: 1, g: 2, b: 3 };
     let mut buf = RgbBuffer::filled(64, 32, BG);
     let at = Point { x: 20, y: 10 };
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     super::drawable::paint_chair_back(&mut buf, at, &pack);
     let painted: Vec<(u16, u16)> = (0..buf.height())
         .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
@@ -5823,7 +5540,7 @@ fn paint_chair_back_writes_its_mask_and_nothing_outside_it() {
         painted.iter().map(|p| p.1).max().unwrap(),
     );
     let w = super::drawable::desk_chair_frame(&pack)
-        .expect("desk_chair is in the embedded pack")
+        .expect("desk_chair is in the bundled pack")
         .width();
     assert!(
         y0 == at.y && x0 >= at.x && x1 < at.x + w && y1 < at.y + 8,
@@ -6081,10 +5798,7 @@ fn a_pose_is_its_placements_frame_facing_and_glow() {
         (pose.anim_name, pose.frame_idx, pose.flip_x),
         ("typing", 3, true)
     );
-    assert_eq!(
-        pose.glow_tint,
-        palette::tool_glow_tint(&typing, &theme.tool_glow)
-    );
+    assert_eq!(pose.glow_tint, tool_glow_tint(&typing, &theme.tool_glow));
     let thinking =
         crate::character::SpritePose::of(&placement(CharacterGlow::Thinking), &typing, theme);
     assert_eq!(thinking.glow_tint, Some(theme.tool_glow.default));
@@ -6095,7 +5809,7 @@ fn a_pose_is_its_placements_frame_facing_and_glow() {
 /// Unflipped, a character is drawn as its art faces; `flip_x` alone mirrors it.
 #[test]
 fn an_unflipped_character_faces_the_way_its_art_does() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let slot = make_slot(
         pixtuoid_core::AgentId::from_transcript_path("/face.jsonl"),
         ActivityState::Idle,
@@ -6136,7 +5850,7 @@ fn an_unflipped_character_faces_the_way_its_art_does() {
 #[test]
 #[cfg(feature = "density-art")]
 fn a_facing_flip_mirrors_the_dressed_frame() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let scale =
         crate::render_scale::RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
     let mut cache = crate::frame_cache::FrameCache::new();

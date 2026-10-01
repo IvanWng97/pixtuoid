@@ -193,7 +193,7 @@ impl Seat {
     }
 
     /// [`sprite_for`](Self::sprite_for) resolved against a PACK. Character
-    /// animations are never inherited from the embedded default (`merge_from` is
+    /// animations are never inherited from the bundled default (`merge_from` is
     /// furniture-only), so a pre-`side_seated` custom pack degrades to the front
     /// pose — a missing animation must never mean an invisible sitter. An
     /// UPRIGHT kind goes through it too, so missing art degrades instead of

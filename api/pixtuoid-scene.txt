@@ -77,29 +77,6 @@ pub const pixtuoid_scene::chitchat::CHITCHAT_TOTAL_MS: u64
 pub fn pixtuoid_scene::chitchat::supports_chitchat(pixtuoid_scene::layout::WaypointKind) -> bool
 pub fn pixtuoid_scene::chitchat::update_and_collect(&mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, usize, &[pixtuoid_scene::chitchat::Visitor], std::time::SystemTime) -> alloc::vec::Vec<pixtuoid_scene::chitchat::ChitchatBubble>
 pub fn pixtuoid_scene::chitchat::venue_wp_idx(pixtuoid_scene::layout::WaypointKind, usize, &[pixtuoid_scene::layout::Waypoint]) -> usize
-pub mod pixtuoid_scene::embedded_pack
-pub enum pixtuoid_scene::embedded_pack::PackSource
-pub pixtuoid_scene::embedded_pack::PackSource::Bundled
-pub pixtuoid_scene::embedded_pack::PackSource::Discovered(std::path::PathBuf)
-pub pixtuoid_scene::embedded_pack::PackSource::Explicit(std::path::PathBuf)
-impl core::clone::Clone for pixtuoid_scene::embedded_pack::PackSource
-pub fn pixtuoid_scene::embedded_pack::PackSource::clone(&self) -> pixtuoid_scene::embedded_pack::PackSource
-impl core::cmp::Eq for pixtuoid_scene::embedded_pack::PackSource
-impl core::cmp::PartialEq for pixtuoid_scene::embedded_pack::PackSource
-pub fn pixtuoid_scene::embedded_pack::PackSource::eq(&self, &pixtuoid_scene::embedded_pack::PackSource) -> bool
-impl core::fmt::Debug for pixtuoid_scene::embedded_pack::PackSource
-pub fn pixtuoid_scene::embedded_pack::PackSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for pixtuoid_scene::embedded_pack::PackSource
-impl core::marker::Freeze for pixtuoid_scene::embedded_pack::PackSource
-impl core::marker::Send for pixtuoid_scene::embedded_pack::PackSource
-impl core::marker::Sync for pixtuoid_scene::embedded_pack::PackSource
-impl core::marker::Unpin for pixtuoid_scene::embedded_pack::PackSource
-impl core::marker::UnsafeUnpin for pixtuoid_scene::embedded_pack::PackSource
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::embedded_pack::PackSource
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::embedded_pack::PackSource
-pub fn pixtuoid_scene::embedded_pack::load_bundled_pack() -> anyhow::Result<pixtuoid_core::sprite::format::Pack, pixtuoid_core::sprite::error::PackError>
-pub fn pixtuoid_scene::embedded_pack::load_sprite_pack(pixtuoid_scene::embedded_pack::PackSource) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
-pub fn pixtuoid_scene::embedded_pack::validate_pack(&pixtuoid_core::sprite::format::Pack) -> pixtuoid_core::sprite::format::ValidationReport
 pub mod pixtuoid_scene::floor
 pub use pixtuoid_scene::floor::MAX_FLOORS
 pub struct pixtuoid_scene::floor::AudioObserver
@@ -1264,6 +1241,29 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::motion::WanderT
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::motion::WanderTarget
 pub fn pixtuoid_scene::motion::advance_wander(&pixtuoid_core::state::AgentSlot, std::time::SystemTime, &pixtuoid_scene::layout::SceneLayout, &mut dyn pixtuoid_scene::pathfind::Router, &pixtuoid_core::walkable::OccupancyOverlay, &mut std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, pixtuoid_scene::motion::MotionState>) -> pixtuoid_scene::motion::WanderFrame
 pub fn pixtuoid_scene::motion::octile_path_len(&[pixtuoid_scene::layout::Point]) -> u32
+pub mod pixtuoid_scene::pack
+pub enum pixtuoid_scene::pack::PackSource
+pub pixtuoid_scene::pack::PackSource::Bundled
+pub pixtuoid_scene::pack::PackSource::Discovered(std::path::PathBuf)
+pub pixtuoid_scene::pack::PackSource::Explicit(std::path::PathBuf)
+impl core::clone::Clone for pixtuoid_scene::pack::PackSource
+pub fn pixtuoid_scene::pack::PackSource::clone(&self) -> pixtuoid_scene::pack::PackSource
+impl core::cmp::Eq for pixtuoid_scene::pack::PackSource
+impl core::cmp::PartialEq for pixtuoid_scene::pack::PackSource
+pub fn pixtuoid_scene::pack::PackSource::eq(&self, &pixtuoid_scene::pack::PackSource) -> bool
+impl core::fmt::Debug for pixtuoid_scene::pack::PackSource
+pub fn pixtuoid_scene::pack::PackSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_scene::pack::PackSource
+impl core::marker::Freeze for pixtuoid_scene::pack::PackSource
+impl core::marker::Send for pixtuoid_scene::pack::PackSource
+impl core::marker::Sync for pixtuoid_scene::pack::PackSource
+impl core::marker::Unpin for pixtuoid_scene::pack::PackSource
+impl core::marker::UnsafeUnpin for pixtuoid_scene::pack::PackSource
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pack::PackSource
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pack::PackSource
+pub fn pixtuoid_scene::pack::load_bundled_pack() -> anyhow::Result<pixtuoid_core::sprite::format::Pack, pixtuoid_core::sprite::error::PackError>
+pub fn pixtuoid_scene::pack::load_sprite_pack(pixtuoid_scene::pack::PackSource) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
+pub fn pixtuoid_scene::pack::validate_pack(&pixtuoid_core::sprite::format::Pack) -> pixtuoid_core::sprite::format::ValidationReport
 pub mod pixtuoid_scene::pathfind
 pub struct pixtuoid_scene::pathfind::AStarRouter
 impl pixtuoid_scene::pathfind::AStarRouter

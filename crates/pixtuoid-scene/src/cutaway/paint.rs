@@ -1,6 +1,6 @@
 //! The cutaway profile's paint pass — the second reader of `SimFrame`. Of the
-//! sim's effects it draws those riding on people (`cutaway::effects`); steam
-//! and the pet stay with the classic pass.
+//! sim's effects it draws those riding on people and creatures
+//! (`cutaway::effects`); steam stays with the classic pass.
 //! It never advances the sim; a mover here would desync the profiles.
 
 use pixtuoid_core::sprite::RgbBuffer;
@@ -118,7 +118,7 @@ impl Screen {
         match self {
             Self::Off => None,
             Self::Standby(glass) => {
-                Some(art.recolored(&[(crate::embedded_pack::SCREEN_GLASS_KEY, Some(glass))]))
+                Some(art.recolored(&[(crate::pack::SCREEN_GLASS_KEY, Some(glass))]))
             }
             Self::Lit { glow, scan } => Some(scanline(relight_screen(art, glow), art, glow, scan)),
         }
@@ -582,6 +582,61 @@ pub(crate) fn build_list<'a>(
     }
 }
 
+/// The pet and the gateway mascots, each a figure sorted on its feet's row
+/// as the classic sorts it, with what rides on it straight after.
+fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, PieceKind)>) {
+    let Office {
+        pack, theme, scale, ..
+    } = office;
+    let pet = frame.pet.iter().map(|p| {
+        let flip = if p.flip { Flip::Horizontal } else { Flip::None };
+        (p.pos, p.anim_name, p.frame_idx, flip, false, &p.effects)
+    });
+    let mascots = frame.mascots.iter().map(|m| {
+        let degraded = m.state == pixtuoid_core::state::DaemonState::Degraded;
+        (
+            m.pos,
+            m.anim_name,
+            m.frame_idx,
+            Flip::None,
+            degraded,
+            &m.effects,
+        )
+    });
+    for (at, sprite, frame_idx, flip, degraded, effects) in pet.chain(mascots) {
+        let Some(dense) = crate::pack::densest_frame(pack, sprite, frame_idx, RenderScale::ONE)
+        else {
+            continue;
+        };
+        let (w, h) = dense.logical;
+        let depth = crate::layout::z_sort_row(crate::layout::Anchor::Center, at, h);
+        let span = piece_span(crate::layout::Anchor::Center, at, w, h, 0)
+            .with_depth(depth)
+            .with_layer(Layer::Figure);
+        let art = Art {
+            sprite,
+            frame: frame_idx,
+            flip,
+        };
+        order.push((span, PieceKind::Creature { at, art, degraded }));
+        let Some(pen) = crate::pack::densest_frame(pack, sprite, frame_idx, scale)
+            .and_then(|d| Pen::new(scale, d.density.get()))
+        else {
+            continue;
+        };
+        for &effect in effects {
+            let riding = crate::cutaway::effects::Riding {
+                effect,
+                head: None,
+                pen,
+            };
+            if let Some(s) = riding.span(theme, depth) {
+                order.push((s, PieceKind::Effect(riding)));
+            }
+        }
+    }
+}
+
 /// The dust motes in the windows' sunbeams this moment ([`crate::motes`]),
 /// each on its cell where the ordered dither lets as much of it through as
 /// the beam shows: a speck the sun catches, never a blend.
@@ -785,6 +840,7 @@ fn paint_pieces(
                     | PieceKind::Chair { .. }
                     | PieceKind::DeskProp(_)
                     | PieceKind::Mote { .. }
+                    | PieceKind::Creature { .. }
                     | PieceKind::PropBand { .. }
                     | PieceKind::Table { .. }
                     | PieceKind::Character { .. }
@@ -847,6 +903,7 @@ fn mark(
         | PieceKind::Chair { .. }
         | PieceKind::DeskProp(_)
         | PieceKind::Mote { .. }
+        | PieceKind::Creature { .. }
         | PieceKind::PropBand { .. }
         | PieceKind::Table { .. }
         | PieceKind::Character { .. }
@@ -871,10 +928,10 @@ fn mark_glow(
     art: &mut ArtCache,
     marks: &mut RgbBuffer,
 ) -> bool {
-    use crate::embedded_pack::{DESK_BULB_KEY, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
+    use crate::pack::{DESK_BULB_KEY, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
     let (Some(span), Some(desk)) = (
         desk_span(pack, art_name, at, scale),
-        crate::embedded_pack::densest_frame(pack, art_name, 0, scale),
+        crate::pack::densest_frame(pack, art_name, 0, scale),
     ) else {
         return false;
     };
@@ -915,7 +972,7 @@ enum Placed {
 }
 
 /// Mark emissive where `art` draws a bulb
-/// ([`DESK_BULB_KEY`](crate::embedded_pack::DESK_BULB_KEY)); whether it marked
+/// ([`DESK_BULB_KEY`](crate::pack::DESK_BULB_KEY)); whether it marked
 /// any.
 fn mark_bulbs(
     placed: Placed,
@@ -924,16 +981,10 @@ fn mark_bulbs(
     cache: &mut ArtCache,
     marks: &mut RgbBuffer,
 ) -> bool {
-    let Some(dense) = crate::embedded_pack::densest_frame(pack, art.sprite, art.frame, scale)
-    else {
+    let Some(dense) = crate::pack::densest_frame(pack, art.sprite, art.frame, scale) else {
         return false;
     };
-    let bulbs = cache.cells(
-        art.sprite,
-        art.frame,
-        &dense,
-        &[crate::embedded_pack::DESK_BULB_KEY],
-    );
+    let bulbs = cache.cells(art.sprite, art.frame, &dense, &[crate::pack::DESK_BULB_KEY]);
     if !bulbs.iter().any(|&b| b) {
         return false;
     }
@@ -978,7 +1029,7 @@ impl ArtCache {
         &mut self,
         sprite: &'static str,
         frame: usize,
-        dense: &crate::embedded_pack::DenseFrame<'_>,
+        dense: &crate::pack::DenseFrame<'_>,
         keys: &'static [char],
     ) -> &[bool] {
         self.cells
@@ -989,7 +1040,7 @@ impl ArtCache {
     fn desk(
         &mut self,
         art: &'static str,
-        desk: &crate::embedded_pack::DenseFrame<'_>,
+        desk: &crate::pack::DenseFrame<'_>,
         screen: Screen,
     ) -> Option<&pixtuoid_core::sprite::Frame> {
         match screen {
@@ -1009,7 +1060,7 @@ impl ArtCache {
 
 /// Which of `art`'s pixels, row by row, it draws in one of `keys`: those that
 /// go transparent when the keys are painted so.
-fn drawn_in(art: &crate::embedded_pack::DenseFrame<'_>, keys: &[char]) -> Vec<bool> {
+fn drawn_in(art: &crate::pack::DenseFrame<'_>, keys: &[char]) -> Vec<bool> {
     let without = art
         .recolorable
         .recolored(&keys.iter().map(|&k| (k, None)).collect::<Vec<_>>());
@@ -1022,7 +1073,7 @@ fn drawn_in(art: &crate::embedded_pack::DenseFrame<'_>, keys: &[char]) -> Vec<bo
 }
 
 /// The layout cell of the desk lamp's bulb the desk `art_name` at `at` draws at
-/// `scale`: the middle of its [`DESK_BULB_KEY`](crate::embedded_pack::DESK_BULB_KEY)
+/// `scale`: the middle of its [`DESK_BULB_KEY`](crate::pack::DESK_BULB_KEY)
 /// pixels, or `None` for art that draws no bulb.
 fn desk_bulb(
     at: crate::layout::Point,
@@ -1031,10 +1082,10 @@ fn desk_bulb(
     scale: RenderScale,
 ) -> Option<crate::layout::Point> {
     let span = desk_span(pack, art_name, at, scale)?;
-    let desk = crate::embedded_pack::densest_frame(pack, art_name, 0, scale)?;
+    let desk = crate::pack::densest_frame(pack, art_name, 0, scale)?;
     let w = usize::from(desk.frame.width());
     let (mut n, mut sx, mut sy) = (0u32, 0u32, 0u32);
-    for (i, _) in drawn_in(&desk, &[crate::embedded_pack::DESK_BULB_KEY])
+    for (i, _) in drawn_in(&desk, &[crate::pack::DESK_BULB_KEY])
         .iter()
         .enumerate()
         .filter(|&(_, &b)| b)
@@ -1084,7 +1135,9 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
         | PieceKind::Effect(_)
         | PieceKind::Badge { .. }
         | PieceKind::Board { .. }
-        | PieceKind::Indicator { .. } => None,
+        | PieceKind::Indicator { .. }
+        // a speck adrift in a sunbeam, off the ground
+        | PieceKind::Mote { .. } => None,
         PieceKind::Character {
             ref figure,
             body,
@@ -1095,7 +1148,7 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
                 under(body)
             } else {
                 let at = chair?;
-                let (w, h) = art_size(pack, crate::embedded_pack::DESK_CHAIR_SPRITE)?;
+                let (w, h) = art_size(pack, crate::pack::DESK_CHAIR_SPRITE)?;
                 under(Span::new(at.x, at.y, w, h, 0))
             }
         }
@@ -1103,7 +1156,13 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
         PieceKind::PropBand { sprite, rows, .. } => art_size(pack, sprite)
             .filter(|&(_, h)| rows.1 == h)
             .and_then(|_| under(span)),
-        _ => under(span),
+        PieceKind::Desk { .. }
+        | PieceKind::DeskProp(_)
+        | PieceKind::Chair { .. }
+        | PieceKind::Table { .. }
+        | PieceKind::Prop { .. }
+        | PieceKind::Animated { .. }
+        | PieceKind::Creature { .. } => under(span),
     }
 }
 
@@ -1158,6 +1217,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::Chair { at } => at.hash(&mut h),
         PieceKind::DeskProp(prop) => prop.hash(&mut h),
         PieceKind::Mote { at } => at.hash(&mut h),
+        PieceKind::Creature { at, art, degraded } => (at, art, degraded).hash(&mut h),
         PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => (at, art).hash(&mut h),
         PieceKind::PropBand { at, sprite, rows } => (at, sprite, rows).hash(&mut h),
         PieceKind::Table { at } => at.hash(&mut h),
@@ -1225,6 +1285,7 @@ fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<
     let mut order: Vec<(Span, PieceKind)> = Vec::new();
     push_windows(office, moment, &GlassWeather::of(moment), &mut order);
     let carried = push_characters(frame, office, moment.now, &mut order);
+    push_creatures(frame, office, &mut order);
     for fixture in layout.fixtures() {
         push_fixture(fixture, build, &carried, &mut order);
     }
@@ -1413,7 +1474,7 @@ fn push_fixture(
                     Motion::Still,
                 ),
                 Station::VendingMachine | Station::Printer => {
-                    let Some(sprite) = crate::embedded_pack::appliance_sprite(wp.kind) else {
+                    let Some(sprite) = crate::pack::appliance_sprite(wp.kind) else {
                         return;
                     };
                     let Some(anim) = pack.animation(sprite) else {
@@ -1422,7 +1483,7 @@ fn push_fixture(
                     let busy = frame.occupied_waypoints.contains(&waypoint);
                     let art = Art {
                         sprite,
-                        frame: crate::embedded_pack::appliance_frame_index(anim, busy, moment.now),
+                        frame: crate::pack::appliance_frame_index(anim, busy, moment.now),
                         flip: Flip::None,
                     };
                     push_art(order, pack, wp.pos, art, depth, Motion::Playing);
@@ -1480,11 +1541,7 @@ fn push_fixture(
         }
         K::MeetingTable { .. } => {
             let table = crate::layout::furniture_def(crate::layout::Furniture::MeetingTable).visual;
-            let face = face_rows(
-                pack,
-                crate::embedded_pack::MEETING_TABLE_SPRITE,
-                office.scale,
-            );
+            let face = face_rows(pack, crate::pack::MEETING_TABLE_SPRITE, office.scale);
             order.push((
                 piece_span(
                     crate::layout::Anchor::Center,
@@ -1644,7 +1701,7 @@ fn push_looping(
     };
     let art = Art {
         sprite,
-        frame: crate::embedded_pack::looping_frame_index(anim, now),
+        frame: crate::pack::looping_frame_index(anim, now),
         flip: Flip::None,
     };
     push_art(order, pack, at, art, depth, Motion::Playing);
@@ -1681,6 +1738,9 @@ fn paint_piece(
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
         PieceKind::DeskProp(prop) => paint_desk_prop(prop, pack, theme, scale, buf),
         PieceKind::Mote { at } => paint_mote(at, theme, Pen::for_pack(scale, pack), buf),
+        PieceKind::Creature { at, art, degraded } => {
+            paint_creature(at, art, degraded, pack, scale, buf);
+        }
         PieceKind::Effect(ref riding) => riding.paint(theme, buf),
         PieceKind::Character {
             ref figure, chair, ..
@@ -1795,7 +1855,7 @@ fn push_desk_props(
     order: &mut Vec<(Span, PieceKind)>,
 ) {
     let Office { pack, scale, .. } = office;
-    let Some(desk) = crate::embedded_pack::densest_frame(pack, art, 0, scale) else {
+    let Some(desk) = crate::pack::densest_frame(pack, art, 0, scale) else {
         return;
     };
     let k = desk.blit_at.get();
@@ -1807,7 +1867,7 @@ fn push_desk_props(
     };
     // Stand frame `frame` of `sprite` on `(x, foot)`; where its top lands.
     let mut stand = |sprite: &'static str, frame: usize, (x, foot): (u16, u16)| {
-        let f = crate::embedded_pack::densest_frame(pack, sprite, frame, scale)?;
+        let f = crate::pack::densest_frame(pack, sprite, frame, scale)?;
         let b = f.blit_at.get();
         let (w, h) = (f.frame.width() * b, f.frame.height() * b);
         let y = foot.checked_sub(h)?;
@@ -1854,13 +1914,13 @@ fn push_desk_props(
 /// The pack's desk art for a seat facing `facing`: the facing's own when the
 /// pack ships it, else what [`Pack::piece_or_source`] draws in its place.
 fn desk_art(pack: &Pack, facing: crate::layout::Facing) -> Option<&'static str> {
-    pack.piece_or_source(crate::embedded_pack::desk_sprite_name(facing))
+    pack.piece_or_source(crate::pack::desk_sprite_name(facing))
 }
 
 /// The box a desk drawn with `art` at `desk` occupies at `scale`: the art and
 /// the face rows [`face_rows`] derives under it, sorted on the last of
 /// those. A taller art grows upward from the same bottom row
-/// ([`desk_art_top`](crate::embedded_pack::desk_art_top)), so its depth never moves.
+/// ([`desk_art_top`](crate::pack::desk_art_top)), so its depth never moves.
 fn desk_span(
     pack: &Pack,
     art: &str,
@@ -1872,7 +1932,7 @@ fn desk_span(
         crate::layout::Anchor::TopLeft,
         crate::layout::Point {
             x: desk.x,
-            y: crate::embedded_pack::desk_art_top(pack, desk.y, h),
+            y: crate::pack::desk_art_top(pack, desk.y, h),
         },
         w,
         h,
@@ -1889,7 +1949,7 @@ fn desk_span(
 /// profile with its whole front; a derived face under it would read as a plank
 /// on the ground.
 fn face_rows(pack: &Pack, art: &str, scale: RenderScale) -> u16 {
-    match crate::embedded_pack::densest_frame(pack, art, 0, scale) {
+    match crate::pack::densest_frame(pack, art, 0, scale) {
         Some(d) if d.density.get() > 1 => 0,
         _ => desk_front_h(),
     }
@@ -1959,7 +2019,7 @@ pub(crate) fn assert_variant_desk_foot(
             Some((
                 d.x,
                 d.x + w - 1,
-                crate::embedded_pack::desk_art_top(base_pack, d.y, h) + h,
+                crate::pack::desk_art_top(base_pack, d.y, h) + h,
             ))
         })
         .collect();
@@ -2021,7 +2081,7 @@ fn chair_span(
     desk: crate::layout::Point,
 ) -> Option<(Span, crate::layout::Point)> {
     let at = crate::layout::desk_chair_top_left(desk, facing)?;
-    let (w, h) = art_size(pack, crate::embedded_pack::DESK_CHAIR_SPRITE)?;
+    let (w, h) = art_size(pack, crate::pack::DESK_CHAIR_SPRITE)?;
     let span = piece_span(crate::layout::Anchor::TopLeft, at, w, h, 0)
         .with_depth(crate::layout::desk_chair_z_key(desk, facing));
     Some((span, at))
@@ -2051,13 +2111,10 @@ fn push_characters(
         let pose = crate::character::SpritePose::of(c, agent, theme);
         // The frame `paint_figure` draws: an animation's frames need not
         // share a size.
-        let Some((w, h)) = crate::embedded_pack::densest_frame(
-            pack,
-            pose.anim_name,
-            pose.frame_idx,
-            RenderScale::ONE,
-        )
-        .map(|d| d.logical) else {
+        let Some((w, h)) =
+            crate::pack::densest_frame(pack, pose.anim_name, pose.frame_idx, RenderScale::ONE)
+                .map(|d| d.logical)
+        else {
             continue;
         };
         let Some(key) = crate::character::character_key(pose, agent, pack, scale, now) else {
@@ -2131,14 +2188,23 @@ fn riders(
     let Some(pen) = Pen::new(scale, d) else {
         return Vec::new();
     };
-    let head = key.dress.as_ref().map(|dress| {
-        let (d, frame_w) = (i32::from(d), i32::from(w) * i32::from(d));
-        let x = i32::from(dress.head.x);
-        crate::cutaway::effects::ArtPoint {
-            x: i32::from(at.x) * d + if key.frame.flip_x { frame_w - 1 - x } else { x },
-            y: i32::from(at.y) * d + dress.crest,
+    // A dressed frame's head is its mark's column on its crest; the base
+    // art's, the classic's crown point: its frame's top, centred.
+    let head = match key.dress.as_ref() {
+        Some(dress) => {
+            let (d, frame_w) = (i32::from(d), i32::from(w) * i32::from(d));
+            let x = i32::from(dress.head.x);
+            Some(crate::cutaway::effects::ArtPoint {
+                x: i32::from(at.x) * d + if key.frame.flip_x { frame_w - 1 - x } else { x },
+                y: i32::from(at.y) * d + dress.crest,
+            })
         }
-    });
+        None if d == 1 => Some(crate::cutaway::effects::ArtPoint {
+            x: i32::from(at.x + w / 2),
+            y: i32::from(at.y),
+        }),
+        None => None,
+    };
     c.effects
         .iter()
         .map(|&effect| crate::cutaway::effects::Riding { effect, head, pen })
@@ -2283,6 +2349,7 @@ impl PieceKind {
             | PieceKind::Desk { .. }
             | PieceKind::DeskProp(_)
             | PieceKind::Mote { .. }
+            | PieceKind::Creature { .. }
             | PieceKind::Character { .. }
             | PieceKind::Effect(_)
             | PieceKind::Badge { .. }
@@ -2367,6 +2434,13 @@ pub(crate) enum PieceKind {
     },
     /// A prop the model stands on a desk ([`push_desk_props`]).
     DeskProp(StoodProp),
+    /// The pet or a gateway mascot, its art centred on `at`; a degraded
+    /// gateway's greyed ([`push_creatures`]).
+    Creature {
+        at: crate::layout::Point,
+        art: Art,
+        degraded: bool,
+    },
     /// A dust mote in a sunbeam, on cell `at` ([`motes`]).
     Mote {
         at: crate::layout::Point,
@@ -2484,7 +2558,7 @@ fn piece_span(
 /// whichever density it is drawn from. An animated figure sizes from the frame
 /// it draws (`push_characters`).
 fn art_size(pack: &Pack, sprite: &str) -> Option<(u16, u16)> {
-    crate::embedded_pack::densest_frame(pack, sprite, 0, RenderScale::ONE).map(|d| d.logical)
+    crate::pack::densest_frame(pack, sprite, 0, RenderScale::ONE).map(|d| d.logical)
 }
 
 /// Rows of front face derived under a top-down desk: its thickness.
@@ -2809,7 +2883,7 @@ fn paint_desk(
 ) {
     let (Some(span), Some(desk)) = (
         desk_span(pack, art_name, at, scale),
-        crate::embedded_pack::densest_frame(pack, art_name, 0, scale),
+        crate::pack::densest_frame(pack, art_name, 0, scale),
     ) else {
         return;
     };
@@ -2833,7 +2907,7 @@ fn paint_desk(
 /// `rows` of front face under `art` drawn at `top_left`, in the material of its
 /// bottom row ([`dominant_opaque_row`]).
 fn paint_derived_face(
-    art: &crate::embedded_pack::DenseFrame<'_>,
+    art: &crate::pack::DenseFrame<'_>,
     top_left: (u16, u16),
     rows: u16,
     scale: RenderScale,
@@ -2866,8 +2940,8 @@ fn paint_derived_face(
 
 /// The desk art with its screen lit in `glow`: the glass takes a dark step of
 /// the glow and its dim content turns to bright text. Recoloring the pack's own
-/// screen KEYS ([`SCREEN_GLASS_KEY`](crate::embedded_pack::SCREEN_GLASS_KEY),
-/// [`SCREEN_TEXT_KEY`](crate::embedded_pack::SCREEN_TEXT_KEY)), rather than
+/// screen KEYS ([`SCREEN_GLASS_KEY`](crate::pack::SCREEN_GLASS_KEY),
+/// [`SCREEN_TEXT_KEY`](crate::pack::SCREEN_TEXT_KEY)), rather than
 /// painting a band over the desk or matching a colour, lights exactly the screen
 /// the art drew — at whatever density it was drawn — and no other pixel, even
 /// one the same colour as the glass.
@@ -2877,11 +2951,11 @@ fn relight_screen(
 ) -> pixtuoid_core::sprite::Frame {
     art.recolored(&[
         (
-            crate::embedded_pack::SCREEN_GLASS_KEY,
+            crate::pack::SCREEN_GLASS_KEY,
             Some(glow.ramp(SCREEN_GLASS_LEVEL)),
         ),
         (
-            crate::embedded_pack::SCREEN_TEXT_KEY,
+            crate::pack::SCREEN_TEXT_KEY,
             Some(glow.ramp(SCREEN_TEXT_LEVEL)),
         ),
     ])
@@ -2896,7 +2970,7 @@ fn scanline(
     glow: pixtuoid_core::sprite::Rgb,
     scan: u16,
 ) -> pixtuoid_core::sprite::Frame {
-    use crate::embedded_pack::{SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
+    use crate::pack::{SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
     // The glass is wherever the screen keys draw: what clearing them uncovers.
     let bare = art.recolored(&[(SCREEN_GLASS_KEY, None), (SCREEN_TEXT_KEY, None)]);
     let (w, h) = (lit.width(), lit.height());
@@ -2913,7 +2987,7 @@ fn scanline(
     let cols = crate::layout::SCREEN_GLASS_COLS;
     let band = ((x1 - x0 + 1) / (cols.end() - cols.start() + 1)).max(1);
     let line = (x0 + scan * band)..(x0 + (scan + 1) * band);
-    let color = crate::pixel_painter::effects::scanline_color(glow);
+    let color = crate::effects::look::scanline_color(glow);
     let pixels = (0..h)
         .flat_map(|y| (0..w).map(move |x| (x, y)))
         .map(|(x, y)| {
@@ -2964,7 +3038,7 @@ fn paint_wall_decor(
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    let Some(art) = crate::embedded_pack::densest_frame(pack, sprite, 0, scale) else {
+    let Some(art) = crate::pack::densest_frame(pack, sprite, 0, scale) else {
         return;
     };
     blit_frame_scaled(
@@ -3049,12 +3123,8 @@ fn label_anchor(
 /// The meeting table's art, centred on its layout point, over the front face
 /// [`face_rows`] derives under a base-density drawing.
 fn paint_table(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &mut RgbBuffer) {
-    let Some(table) = crate::embedded_pack::densest_frame(
-        pack,
-        crate::embedded_pack::MEETING_TABLE_SPRITE,
-        0,
-        scale,
-    ) else {
+    let Some(table) = crate::pack::densest_frame(pack, crate::pack::MEETING_TABLE_SPRITE, 0, scale)
+    else {
         return;
     };
     let (x, y) = centred_top_left(at, table.logical, scale);
@@ -3062,7 +3132,7 @@ fn paint_table(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &
     paint_derived_face(
         &table,
         (x, y),
-        face_rows(pack, crate::embedded_pack::MEETING_TABLE_SPRITE, scale),
+        face_rows(pack, crate::pack::MEETING_TABLE_SPRITE, scale),
         scale,
         buf,
     );
@@ -3077,13 +3147,35 @@ fn paint_art(
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    let Some(dense) = crate::embedded_pack::densest_frame(pack, art.sprite, art.frame, scale)
-    else {
+    let Some(dense) = crate::pack::densest_frame(pack, art.sprite, art.frame, scale) else {
         return;
     };
     let themed = dense.recolorable.recolored(&theme_overrides(theme));
     let (x, y) = centred_top_left(at, dense.logical, scale);
     blit_frame_scaled(&art.flip.turn(themed), x, y, dense.blit_at, buf);
+}
+
+/// A creature's art centred on `at`, in the pack's own colours as the classic
+/// draws it, greyed when `degraded`.
+fn paint_creature(
+    at: Point,
+    art: Art,
+    degraded: bool,
+    pack: &Pack,
+    scale: RenderScale,
+    buf: &mut RgbBuffer,
+) {
+    let Some(dense) = crate::pack::densest_frame(pack, art.sprite, art.frame, scale) else {
+        return;
+    };
+    let turned = art.flip.turn(dense.frame.clone());
+    let shown = if degraded {
+        crate::pixel_painter::palette::degraded_frame(&turned)
+    } else {
+        turned
+    };
+    let (x, y) = centred_top_left(at, dense.logical, scale);
+    blit_frame_scaled(&shown, x, y, dense.blit_at, buf);
 }
 
 /// A mote: the middle art pixel of its cell, lit in the sun's spill.
@@ -3106,7 +3198,7 @@ fn paint_desk_prop(
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    let Some(f) = crate::embedded_pack::densest_frame(pack, prop.sprite, prop.frame, scale) else {
+    let Some(f) = crate::pack::densest_frame(pack, prop.sprite, prop.frame, scale) else {
         return;
     };
     let f_themed = f.recolorable.recolored(&desk_prop_overrides(theme));
@@ -3133,14 +3225,14 @@ fn desk_prop_overrides(theme: &Theme) -> [(char, pixtuoid_core::sprite::Pixel); 
 
 /// The pack keys art takes from the theme.
 fn theme_overrides(theme: &Theme) -> Vec<(char, pixtuoid_core::sprite::Pixel)> {
-    crate::embedded_pack::appliance_overrides(&theme.appliance)
+    crate::pack::appliance_overrides(&theme.appliance)
         .into_iter()
-        .chain(crate::embedded_pack::fixture_overrides(theme))
+        .chain(crate::pack::fixture_overrides(theme))
         .collect()
 }
 
 fn paint_door(at: Point, frame: usize, pack: &Pack, scale: RenderScale, buf: &mut RgbBuffer) {
-    let Some(art) = crate::embedded_pack::densest_frame(pack, DOOR_SPRITE, frame, scale) else {
+    let Some(art) = crate::pack::densest_frame(pack, DOOR_SPRITE, frame, scale) else {
         return;
     };
     blit_frame_scaled(
@@ -3209,7 +3301,7 @@ fn paint_clock(
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    let Some(dial) = crate::embedded_pack::densest_frame(pack, CLOCK_SPRITE, 0, scale) else {
+    let Some(dial) = crate::pack::densest_frame(pack, CLOCK_SPRITE, 0, scale) else {
         return;
     };
     let themed = dial.recolorable.recolored(&theme_overrides(theme));
@@ -3276,11 +3368,11 @@ fn paint_clock(
 /// The dial's art.
 const CLOCK_SPRITE: &str = "wall_clock";
 
-/// How far the `dial` art's face ([`CLOCK_FACE_KEY`](crate::embedded_pack::CLOCK_FACE_KEY))
+/// How far the `dial` art's face ([`CLOCK_FACE_KEY`](crate::pack::CLOCK_FACE_KEY))
 /// reaches from its centre along its middle row, in art pixels at density
 /// `d`: the hands stay inside the rim the art draws.
-fn face_radius(dial: &crate::embedded_pack::DenseFrame<'_>, d: u16) -> Option<f32> {
-    let face = drawn_in(dial, &[crate::embedded_pack::CLOCK_FACE_KEY]);
+fn face_radius(dial: &crate::pack::DenseFrame<'_>, d: u16) -> Option<f32> {
+    let face = drawn_in(dial, &[crate::pack::CLOCK_FACE_KEY]);
     let (w, h) = (
         usize::from(dial.frame.width()),
         usize::from(dial.frame.height()),
@@ -3362,7 +3454,7 @@ fn paint_prop_band(
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    let Some(dense) = crate::embedded_pack::densest_frame(pack, sprite, 0, scale) else {
+    let Some(dense) = crate::pack::densest_frame(pack, sprite, 0, scale) else {
         return;
     };
     let (w, h) = dense.logical;
@@ -3387,12 +3479,8 @@ fn paint_prop_band(
 
 /// A task chair from the pack's art.
 fn paint_chair(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &mut RgbBuffer) {
-    let Some(art) = crate::embedded_pack::densest_frame(
-        pack,
-        crate::embedded_pack::DESK_CHAIR_SPRITE,
-        0,
-        scale,
-    ) else {
+    let Some(art) = crate::pack::densest_frame(pack, crate::pack::DESK_CHAIR_SPRITE, 0, scale)
+    else {
         return;
     };
     blit_frame_scaled(
@@ -3407,7 +3495,7 @@ fn paint_chair(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::embedded_pack::test_default_pack;
+    use crate::pack::test_default_pack;
 
     /// The wall board of an empty office, which no clock moves: for frames
     /// whose board a test does not read.
@@ -3480,7 +3568,7 @@ pub(crate) mod tests {
         let desk_box = desk_span(&pack, art, desk, scale).expect("desk");
         let (_, art_h) = art_size(&pack, art).expect("desk");
         // The first row south of the ART, measured from its placement.
-        let feet = crate::embedded_pack::desk_art_top(&pack, desk.y, art_h) + art_h;
+        let feet = crate::pack::desk_art_top(&pack, desk.y, art_h) + art_h;
         let (w, h) = base_size(&pack, "standing");
         let person = piece_span(
             crate::layout::Anchor::TopLeft,
@@ -3805,8 +3893,8 @@ pub(crate) mod tests {
     /// screen the art drew, at whatever density.
     #[test]
     fn a_lit_screen_relights_only_the_screen_keys() {
-        let glass = crate::embedded_pack::SCREEN_GLASS_KEY;
-        let text = crate::embedded_pack::SCREEN_TEXT_KEY;
+        let glass = crate::pack::SCREEN_GLASS_KEY;
+        let text = crate::pack::SCREEN_TEXT_KEY;
         let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
             &format!(
                 "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\
@@ -3854,19 +3942,16 @@ pub(crate) mod tests {
             g: 180,
             b: 220,
         };
-        let line = crate::pixel_painter::effects::scanline_color(glow);
+        let line = crate::effects::look::scanline_color(glow);
         let cols = crate::layout::SCREEN_GLASS_COLS;
         let n = cols.end() - cols.start() + 1;
         for s in [1, pack.max_density_variant().get()] {
             let scale = RenderScale::new(s).expect("nonzero");
-            let desk = crate::embedded_pack::densest_frame(&pack, art, 0, scale).expect("the art");
+            let desk = crate::pack::densest_frame(&pack, art, 0, scale).expect("the art");
             let w = usize::from(desk.frame.width());
             let glass: Vec<u16> = drawn_in(
                 &desk,
-                &[
-                    crate::embedded_pack::SCREEN_GLASS_KEY,
-                    crate::embedded_pack::SCREEN_TEXT_KEY,
-                ],
+                &[crate::pack::SCREEN_GLASS_KEY, crate::pack::SCREEN_TEXT_KEY],
             )
             .iter()
             .enumerate()
@@ -3921,7 +4006,7 @@ pub(crate) mod tests {
                 let PieceKind::Desk { at, art, .. } = p.kind else {
                     continue;
                 };
-                let desk = crate::embedded_pack::densest_frame(&pack, art, 0, scale).expect("art");
+                let desk = crate::pack::densest_frame(&pack, art, 0, scale).expect("art");
                 let k = desk.blit_at.get();
                 let mark = |name: &str| {
                     let m = desk
@@ -3946,9 +4031,8 @@ pub(crate) mod tests {
                     panic!("desk at {at:?} stood {props:?}");
                 };
                 let foot = |prop: StoodProp| {
-                    let f =
-                        crate::embedded_pack::densest_frame(&pack, prop.sprite, prop.frame, scale)
-                            .expect("prop art");
+                    let f = crate::pack::densest_frame(&pack, prop.sprite, prop.frame, scale)
+                        .expect("prop art");
                     let b = f.blit_at.get();
                     (prop.at.0, prop.at.1 + (f.frame.height() - 1) * b, b)
                 };
@@ -3993,7 +4077,7 @@ pub(crate) mod tests {
                 (TOKEN_TOWER_SPRITE, 0, &[PAPER_KEY, PAPER_SHADE_KEY]),
                 (TOKEN_SHEET_SPRITE, 0, &[PAPER_KEY]),
             ] {
-                let art = crate::embedded_pack::densest_frame(&pack, sprite, frame, scale)
+                let art = crate::pack::densest_frame(&pack, sprite, frame, scale)
                     .expect("the bundled pack draws the prop");
                 for &key in keys {
                     assert!(
@@ -4005,8 +4089,8 @@ pub(crate) mod tests {
         }
     }
 
-    /// Pins the screen keys ([`SCREEN_GLASS_KEY`](crate::embedded_pack::SCREEN_GLASS_KEY),
-    /// [`SCREEN_TEXT_KEY`](crate::embedded_pack::SCREEN_TEXT_KEY)) to the bundled
+    /// Pins the screen keys ([`SCREEN_GLASS_KEY`](crate::pack::SCREEN_GLASS_KEY),
+    /// [`SCREEN_TEXT_KEY`](crate::pack::SCREEN_TEXT_KEY)) to the bundled
     /// art: the raised desk a back-turned sitter works at must light its glass
     /// and its text at every density the pack draws it, or a key names nothing
     /// and that screen never lights.
@@ -4236,7 +4320,7 @@ pub(crate) mod tests {
             &format!(
                 "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
                  [animations.{}]\nframes=[\"one.sprite\"]\nframe_ms=100\n",
-                crate::embedded_pack::DESK_CHAIR_SPRITE
+                crate::pack::DESK_CHAIR_SPRITE
             ),
             &[("one.sprite", "@frame 0\nA")],
         )
@@ -4857,8 +4941,8 @@ pub(crate) mod tests {
                 } else {
                     sitting = true;
                     let at = chair.expect("a desk sitter carries their chair");
-                    let (w, h) = art_size(&pack, crate::embedded_pack::DESK_CHAIR_SPRITE)
-                        .expect("chair art");
+                    let (w, h) =
+                        art_size(&pack, crate::pack::DESK_CHAIR_SPRITE).expect("chair art");
                     let empty = piece_span(crate::layout::Anchor::TopLeft, at, w, h, 0);
                     assert_eq!(
                         Some(cast),
@@ -5372,17 +5456,12 @@ pub(crate) mod tests {
         for i in 0..1000 {
             let pack = test_default_pack();
             let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
-            let dense = crate::embedded_pack::densest_frame(&pack, "walking", 0, scale)
-                .expect("the walk's art");
+            let dense =
+                crate::pack::densest_frame(&pack, "walking", 0, scale).expect("the walk's art");
             let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/style/{i}.jsonl"));
-            let style = crate::pixel_painter::hair::dress_for(
-                &pack,
-                id,
-                dense.frame,
-                dense.head,
-                dense.density,
-            )
-            .and_then(|d| d.style);
+            let style =
+                crate::character::dress_for(&pack, id, dense.frame, dense.head, dense.density)
+                    .and_then(|d| d.style);
             let Some(style) = style.filter(|s| !worn.contains(s)) else {
                 continue;
             };
@@ -5434,7 +5513,7 @@ S B B B B B B S
 . P . . . . P P
 . P . . . . . P
 ";
-        let uneven = crate::embedded_pack::test_pack_with(&[("walking_1.sprite", LONG_STRIDE)]);
+        let uneven = crate::pack::test_pack_with(&[("walking_1.sprite", LONG_STRIDE)]);
         let (layout, uneven, frames, _) = sit_down_in(uneven, crate::layout::Facing::South, 0);
         for frame in &frames {
             check(&uneven, frame, &layout, true);
@@ -5510,10 +5589,21 @@ S B B B B B B S
     #[test]
     #[cfg(feature = "density-art")]
     fn the_dense_looks_keep_their_places() {
+        looks_keep_their_places(test_default_pack().max_density_variant().get());
+    }
+
+    /// [`the_dense_looks_keep_their_places`] on the base art, which draws its own
+    /// z and mark beside the head.
+    #[test]
+    fn the_base_looks_keep_their_places() {
+        looks_keep_their_places(1);
+    }
+
+    fn looks_keep_their_places(s: u16) {
         use crate::effects::EffectKind as K;
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let scale = RenderScale::new(s).expect("nonzero");
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -5545,7 +5635,7 @@ S B B B B B B S
         let (_, mark) = rider(K::WaitingMark);
         assert!(
             clear(mark),
-            "the mark {mark:?} lands on the badge {badge:?}"
+            "at scale {s} the mark {mark:?} lands on the badge {badge:?}"
         );
         let (z, _) = rider(K::SleepZ);
         let mut last: Option<Span> = None;
@@ -5559,7 +5649,8 @@ S B B B B B B S
             };
             assert!(
                 clear(s),
-                "the z at {phase} ms {s:?} lands on the badge {badge:?}"
+                "at scale {} the z at {phase} ms lands on the badge {badge:?}",
+                scale.get()
             );
             if let Some(l) = last {
                 assert!(
@@ -5570,8 +5661,7 @@ S B B B B B B S
             last = Some(s);
         }
         let (dust, span) = rider(K::WalkingDust);
-        let foot =
-            crate::pixel_painter::effects::walking_dust_foot(dust.effect.at, dust.effect.phase);
+        let foot = crate::effects::look::walking_dust_foot(dust.effect.at, dust.effect.phase);
         assert!(
             (span.x0..=span.x1).contains(&foot.x) && (span.y0..=span.y1).contains(&foot.y),
             "the dust {span:?} is off the foot {foot:?}"
@@ -5653,6 +5743,118 @@ S B B B B B B S
         }
     }
 
+    /// The pet and the gateway mascots stand as figures: each paints only
+    /// inside its span at every density, sorts on its feet's row as the
+    /// classic sorts it, faces as the sim turns it, grounds its shadow, and has
+    /// what rides on it straight after it; a degraded gateway's art is greyed.
+    #[test]
+    fn creatures_stand_as_figures_with_their_riders_after_them() {
+        use crate::layout::{Anchor, z_sort_row};
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = test_default_pack();
+        let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let mut frame = empty_frame(&layout);
+        let (cat, lobster) = (Point { x: 40, y: 70 }, Point { x: 110, y: 70 });
+        frame.pet = Some(crate::sim::PetPlacement {
+            kind: crate::pet::PetKind::Cat,
+            pos: cat,
+            flip: true,
+            anim_name: "cat_walk",
+            frame_idx: 1,
+            effects: crate::effects::pet_hearts(cat, 300).collect(),
+        });
+        frame.mascots = vec![crate::sim::MascotPlacement {
+            pos: lobster,
+            size: crate::layout::Size { w: 14, h: 12 },
+            anim_name: "lobster_walk",
+            frame_idx: 0,
+            name: "OpenClaw",
+            instance: None,
+            state: pixtuoid_core::state::DaemonState::Busy,
+            effects: crate::effects::mascot_bubbles(lobster, 12, 2, std::time::UNIX_EPOCH)
+                .collect(),
+            active_sessions: 1,
+        }];
+        // a second gateway, degraded, nearer the viewer so it sorts last
+        let sick = Point { x: 110, y: 84 };
+        frame.mascots.push(crate::sim::MascotPlacement {
+            pos: sick,
+            state: pixtuoid_core::state::DaemonState::Degraded,
+            effects: Vec::new(),
+            ..frame.mascots[0].clone()
+        });
+        let riders = [
+            frame.pet.as_ref().map_or(0, |p| p.effects.len()),
+            frame.mascots[0].effects.len(),
+            0,
+        ];
+        for s in [1, pack.max_density_variant().get()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            let office = Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale,
+            };
+            let list = list_at(&frame, office, 12);
+            let pieces = list.pieces();
+            let creatures: Vec<usize> = pieces
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| matches!(p.kind, PieceKind::Creature { .. }))
+                .map(|(i, _)| i)
+                .collect();
+            assert_eq!(creatures.len(), 3, "at scale {s}, the pet and the mascots");
+            // The pet faces west; a mascot never turns.
+            let facing = [Flip::Horizontal, Flip::None, Flip::None];
+            let sickly = [false, false, true];
+            for (((&i, ridden), flip), sick) in creatures.iter().zip(riders).zip(facing).zip(sickly)
+            {
+                let p = &pieces[i];
+                let PieceKind::Creature { at, art, degraded } = p.kind else {
+                    unreachable!("filtered to creatures");
+                };
+                assert_eq!(art.flip, flip, "at scale {s} {} faces wrong", art.sprite);
+                assert_eq!(
+                    degraded, sick,
+                    "at scale {s} the gateway at {at:?} misreads its state"
+                );
+                assert!(
+                    p.shadow.is_some(),
+                    "at scale {s} {} casts no shadow",
+                    art.sprite
+                );
+                let h = crate::pack::densest_frame(&pack, art.sprite, art.frame, RenderScale::ONE)
+                    .expect("the art")
+                    .logical
+                    .1;
+                assert_eq!(p.span.depth, z_sort_row(Anchor::Center, at, h));
+                assert_eq!(
+                    stray_pixel(&p.kind, p.span, &layout, &pack, theme, scale),
+                    None,
+                    "at scale {s} {:?} painted outside {:?}",
+                    p.kind,
+                    p.span
+                );
+                let after = pieces[i + 1..]
+                    .iter()
+                    .take_while(|q| matches!(q.kind, PieceKind::Effect(_)))
+                    .count();
+                assert_eq!(after, ridden, "at scale {s} {} lost its riders", art.sprite);
+            }
+            let lobster_kind = |degraded| PieceKind::Creature {
+                at: lobster,
+                art: Art::still("lobster_rest"),
+                degraded,
+            };
+            assert_ne!(
+                painted_alone(&lobster_kind(true), &layout, &pack, theme, scale),
+                painted_alone(&lobster_kind(false), &layout, &pack, theme, scale),
+                "at scale {s} a degraded gateway looks as a healthy one"
+            );
+        }
+    }
+
     /// A clear noon's sunbeams carry motes, each a speck painted on its own
     /// cell, at every density; a night's carry none.
     #[test]
@@ -5680,6 +5882,10 @@ S B B B B B B S
                     "at scale {s} {:?} painted outside {:?}",
                     p.kind,
                     p.span
+                );
+                assert_eq!(
+                    p.shadow, None,
+                    "at scale {s} a mote adrift shades the ground"
                 );
             }
             let night = list_at(&frame, office, 0);
@@ -6311,8 +6517,8 @@ S B B B B B B S
                         layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)),
                     )?;
                     let span = desk_span(&pack, art, at, scale)?;
-                    let desk = crate::embedded_pack::densest_frame(&pack, art, 0, scale)?;
-                    let cells = drawn_in(&desk, &[crate::embedded_pack::DESK_BULB_KEY]);
+                    let desk = crate::pack::densest_frame(&pack, art, 0, scale)?;
+                    let cells = drawn_in(&desk, &[crate::pack::DESK_BULB_KEY]);
                     let w = usize::from(desk.frame.width());
                     let hits: Vec<(f32, f32)> = cells
                         .iter()
@@ -6924,6 +7130,7 @@ S B B B B B B S
             PieceKind::Badge { .. } => "badge",
             PieceKind::DeskProp(_) => "desk prop",
             PieceKind::Mote { .. } => "mote",
+            PieceKind::Creature { .. } => "creature",
             PieceKind::Board { .. } => "board",
             PieceKind::Indicator { .. } => "indicator",
         }
@@ -7101,8 +7308,8 @@ S B B B B B B S
         let (bw, bh) = base_size(&pack, "desk");
         for s in 1..=12u16 {
             let scale = RenderScale::new(s).expect("nonzero");
-            let d = crate::embedded_pack::densest_frame(&pack, "desk", 0, scale)
-                .expect("desk is in the pack");
+            let d =
+                crate::pack::densest_frame(&pack, "desk", 0, scale).expect("desk is in the pack");
             let drawn = (
                 d.frame.width() * d.blit_at.get(),
                 d.frame.height() * d.blit_at.get(),
@@ -7361,9 +7568,9 @@ S B B B B B B S
         );
         // Every buffer pixel of each bulb-key art pixel `art` draws placed so.
         let bulbs = |placed: Placed, art: Art| -> Vec<(u16, u16)> {
-            let dense = crate::embedded_pack::densest_frame(&pack, art.sprite, art.frame, scale)
-                .expect("the art");
-            let lit = drawn_in(&dense, &[crate::embedded_pack::DESK_BULB_KEY]);
+            let dense =
+                crate::pack::densest_frame(&pack, art.sprite, art.frame, scale).expect("the art");
+            let lit = drawn_in(&dense, &[crate::pack::DESK_BULB_KEY]);
             let (x0, y0) = placed.top_left(dense.logical, scale);
             let w = usize::from(dense.frame.width());
             let k = dense.blit_at.get();
@@ -7490,9 +7697,8 @@ S B B B B B B S
         let pack = test_default_pack();
         let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let at = Point { x: 2, y: 2 };
-        let dial =
-            crate::embedded_pack::densest_frame(&pack, CLOCK_SPRITE, 0, scale).expect("the dial");
-        let face = drawn_in(&dial, &[crate::embedded_pack::CLOCK_FACE_KEY]);
+        let dial = crate::pack::densest_frame(&pack, CLOCK_SPRITE, 0, scale).expect("the dial");
+        let face = drawn_in(&dial, &[crate::pack::CLOCK_FACE_KEY]);
         let (w, k) = (usize::from(dial.frame.width()), dial.blit_at.get());
         let on_face = |x: u16, y: u16| {
             let (ax, ay) = (

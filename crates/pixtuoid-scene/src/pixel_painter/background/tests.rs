@@ -1,7 +1,7 @@
 use super::*;
-use crate::embedded_pack::test_default_pack;
 use crate::layout::{WINDOW_W, window_bays, window_run};
 use crate::lighting::SPILL_DEPTH;
+use crate::pack::test_default_pack;
 use crate::sky::hour_is_day;
 use std::time::SystemTime;
 
