@@ -56,7 +56,7 @@ fn neon_halo_drops_to_its_daylight_floor_and_a_calm_sign_glows_less_than_a_busy_
     let night = neon_at(NeonLevels::BUSY, 1.0);
     let day = neon_at(NeonLevels::BUSY, 0.0);
     assert!(
-        (day - night * NEON_DAYLIGHT_FLOOR).abs() < 1e-6,
+        (day - night * NEON_DAYLIGHT_MIN).abs() < 1e-6,
         "{day} vs {night}"
     );
     let calm = neon_at(NeonLevels::CALM, 1.0);
