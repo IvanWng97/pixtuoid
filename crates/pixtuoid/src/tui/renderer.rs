@@ -392,7 +392,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         paint_footer(f, &footer, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
         paint_label_widgets(f, &labels, actual_scene, theme);
-        paint_chitchat_bubbles(f, &chitchat_bubbles, actual_scene, theme);
+        paint_chitchat_bubbles(f, &chitchat_bubbles, &agents, actual_scene, theme);
         paint_wall_display(f, &board, actual_scene, theme);
         let door = layout.door;
         let current = floor_info.map(|fi| fi.current).unwrap_or(1);
