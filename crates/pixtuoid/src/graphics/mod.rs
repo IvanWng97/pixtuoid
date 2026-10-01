@@ -19,20 +19,27 @@ use pixtuoid_scene::render_scale::RenderScale;
 use ratatui::layout::Size as TermSize;
 
 #[cfg(feature = "graphics")]
-mod iterm2;
+pub(crate) mod iterm2;
 #[cfg(feature = "graphics")]
 pub(crate) mod kitty;
 #[cfg(feature = "graphics")]
 mod probe;
 #[cfg(feature = "graphics")]
-mod sixel;
+pub(crate) mod sixel;
 #[cfg(feature = "graphics")]
 pub(crate) mod tiles;
 
 #[cfg(feature = "graphics")]
 pub(crate) use probe::probe;
-#[cfg(feature = "graphics")]
-use tiles::TileShape;
+
+/// A tile's extent in cells; [`ImageProtocol::tile`] is the authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TileShape {
+    /// Cells across.
+    pub(crate) cols: u16,
+    /// Cells down.
+    pub(crate) rows: u16,
+}
 
 /// How long each wait of the capability probe may take: on Unix, the query start
 /// to finish, where [`probe()`] reads the reply itself, and, inside tmux, the
@@ -70,8 +77,17 @@ impl ImageProtocol {
         }
     }
 
+    /// The least time between two frames' transmits: kitty's is the event
+    /// loop's tick, and SIXEL and iTerm2 encode heavier images less often.
+    pub(crate) fn cadence(self) -> std::time::Duration {
+        std::time::Duration::from_millis(match self {
+            Self::Kitty => 0,
+            Self::Sixel => 66,
+            Self::Iterm2 => 100,
+        })
+    }
+
     /// The cells one re-sent piece of the image covers.
-    #[cfg(feature = "graphics")]
     pub(crate) fn tile(self) -> TileShape {
         match self {
             Self::Kitty => TileShape { cols: 4, rows: 2 },
@@ -106,6 +122,16 @@ pub enum GraphicsMode {
     Sixel,
     /// iTerm2's inline images, whatever the terminal answers.
     Iterm2,
+}
+
+impl From<ImageProtocol> for GraphicsMode {
+    fn from(protocol: ImageProtocol) -> Self {
+        match protocol {
+            ImageProtocol::Kitty => Self::Kitty,
+            ImageProtocol::Sixel => Self::Sixel,
+            ImageProtocol::Iterm2 => Self::Iterm2,
+        }
+    }
 }
 
 impl GraphicsMode {
@@ -185,6 +211,8 @@ pub(crate) enum Plan {
         cell: CellSize,
         /// Inside tmux: the encoder wraps the image in passthrough.
         tmux: bool,
+        /// `--graphics` named the protocol, rather than the terminal.
+        forced: bool,
     },
     /// The half-block office: one buffer pixel per half-block.
     Classic {
@@ -379,6 +407,7 @@ pub(crate) fn resolve(
         protocol,
         cell,
         tmux: d.tmux,
+        forced: mode.forced().is_some(),
     }
 }
 
@@ -486,28 +515,65 @@ pub(crate) fn run_probe() -> Probe {
 }
 
 impl Plan {
-    /// The plan as `doctor`'s `graphics:` line: the profile this terminal is
-    /// CAPABLE of — "would render", since only `run --graphics` paints it —
-    /// and why it falls back when it is not.
-    pub(crate) fn diagnostic_row(self) -> String {
+    /// The plan as `doctor`'s `graphics:` line: for a cutaway, everything a
+    /// tester reports back from a terminal, and how to get it when `run`'s
+    /// own setting is `off`; for classic, why it fell back.
+    pub(crate) fn diagnostic_row(self, run: GraphicsMode) -> String {
         match self {
             Plan::Cutaway {
                 fit,
                 protocol,
                 cell,
-                ..
-            } => format!(
-                "graphics: {} ({}x{} cell) — the cutaway profile would render at {}x \
-             ({}x art upscaled {}x), a {}x{} office",
-                protocol.name(),
-                cell.w,
-                cell.h,
-                fit.scale().get(),
-                fit.density(),
-                fit.upscale(),
-                fit.logical().w,
-                fit.logical().h,
-            ),
+                tmux,
+                forced,
+            } => {
+                let shape = protocol.tile();
+                let cadence = match protocol.cadence().as_millis() {
+                    0 => "every frame".to_string(),
+                    ms => format!("at most every {ms} ms"),
+                };
+                // A forced plan names its protocol: `auto` may pick another.
+                let mode = if forced {
+                    GraphicsMode::from(protocol)
+                } else {
+                    GraphicsMode::Auto
+                };
+                let how = match (run, clap::ValueEnum::to_possible_value(&mode)) {
+                    (GraphicsMode::Off, Some(value)) => {
+                        let mode = value.get_name();
+                        format!(
+                            " — off: `run --graphics {mode}` (or `graphics = \"{mode}\"` in \
+                             config) paints it"
+                        )
+                    }
+                    _ => String::new(),
+                };
+                format!(
+                    "graphics: {} ({}) on a {}x{} cell, {} — the cutaway at {}x \
+                     ({}x art upscaled {}x), a {}x{} office, sent as {}x{}-cell tiles \
+                     {cadence}{how}",
+                    protocol.name(),
+                    if forced {
+                        "forced by --graphics"
+                    } else {
+                        "the terminal's answer"
+                    },
+                    cell.w,
+                    cell.h,
+                    if tmux {
+                        "through tmux passthrough"
+                    } else {
+                        "direct"
+                    },
+                    fit.scale().get(),
+                    fit.density(),
+                    fit.upscale(),
+                    fit.logical().w,
+                    fit.logical().h,
+                    shape.cols,
+                    shape.rows,
+                )
+            }
             Plan::Classic { reason } => {
                 format!("graphics: classic half-blocks — {}", reason.describe())
             }
@@ -519,9 +585,34 @@ impl Plan {
 /// images' delete, once any reached the terminal.
 pub(crate) fn unwind_prelude() -> Vec<u8> {
     #[cfg(feature = "graphics")]
-    return kitty::unwind();
+    return [
+        kitty::unwind(),
+        grid_unwind(IN_GRID.load(std::sync::atomic::Ordering::Relaxed)),
+    ]
+    .concat();
     #[cfg(not(feature = "graphics"))]
     Vec::new()
+}
+
+/// Whether this process has drawn SIXEL or iTerm2 pixels, which sit in the
+/// text grid rather than in an image store kitty-style deletes reach: read by
+/// an unwind that may run from the panic hook.
+#[cfg(feature = "graphics")]
+pub(crate) static IN_GRID: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// The unwind's part for pixels in the grid: nothing unless this process
+/// `drew` some; then an ST that ends an image a failed write cut short, and
+/// ED 2. 1049 clears the alternate screen on the way IN (ctlseqs, "Use
+/// Alternate Screen Buffer ... clearing it first"), so nothing promises its
+/// pixels go on the way out.
+#[cfg(feature = "graphics")]
+pub(crate) fn grid_unwind(drew: bool) -> Vec<u8> {
+    if drew {
+        [kitty::ST, b"\x1b[2J"].concat()
+    } else {
+        Vec::new()
+    }
 }
 
 /// Built without the `graphics` feature: there is no query to run, whatever
@@ -534,6 +625,13 @@ pub(crate) fn probe(_ask: bool) -> Probe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "graphics")]
+    #[test]
+    fn the_grid_unwind_ends_any_image_then_erases_the_display() {
+        assert_eq!(grid_unwind(false), b"");
+        assert_eq!(grid_unwind(true), b"\x1b\\\x1b[2J");
+    }
 
     const CELL_8X16: CellSize = CellSize { w: 8, h: 16 };
     /// A pack with no density variants.
@@ -581,7 +679,7 @@ mod tests {
     }
 
     fn row(mode: GraphicsMode, probe: Probe, max_density: Density) -> String {
-        detect(mode, max_density, AREA, || probe).diagnostic_row()
+        detect(mode, max_density, AREA, || probe).diagnostic_row(GraphicsMode::Auto)
     }
 
     fn too_small(cell: CellSize, max_density: Density) -> Plan {
@@ -729,11 +827,12 @@ mod tests {
                 protocol: p,
                 cell,
                 tmux,
+                forced,
             } = got
             else {
                 panic!("{protocol:?}: {got:?}");
             };
-            assert_eq!((p, cell, tmux), (protocol, CELL_8X16, false));
+            assert_eq!((p, cell, tmux, forced), (protocol, CELL_8X16, false, false));
             assert_eq!((fit.scale().get(), fit.upscale()), (8, 2));
         }
     }
@@ -779,7 +878,7 @@ mod tests {
                     AREA,
                 );
                 assert!(
-                    matches!(got, Plan::Cutaway { protocol, .. } if protocol == want),
+                    matches!(got, Plan::Cutaway { protocol, forced: true, .. } if protocol == want),
                     "{mode:?} over {answered_with:?}: {got:?}"
                 );
             }
@@ -930,18 +1029,87 @@ mod tests {
         assert!(no_pixels.ends_with("too small to subdivide"), "{no_pixels}");
     }
 
+    /// A cutaway row is a tester's evidence line: the protocol and who
+    /// chose it, the cell, tmux, the fit, and the tiles and cadence it is
+    /// sent in. Each protocol is pinned whole, and no two rows match.
     #[test]
-    fn the_doctor_row_names_the_protocol_and_the_fit() {
-        let row = row(
-            GraphicsMode::Auto,
-            answered(Some(ImageProtocol::Sixel), cell(17, 41), false),
-            BUNDLED,
-        );
+    fn every_protocol_prints_its_own_cutaway_row() {
+        let cases = [
+            (
+                GraphicsMode::Auto,
+                answered(Some(ImageProtocol::Kitty), cell(17, 41), true),
+                "graphics: kitty (the terminal's answer) on a 17x41 cell, through tmux \
+                 passthrough — the cutaway at 16x (4x art upscaled 4x), a 127x99 office, sent \
+                 as 4x2-cell tiles every frame",
+            ),
+            (
+                GraphicsMode::Auto,
+                answered(Some(ImageProtocol::Sixel), cell(17, 41), false),
+                "graphics: sixel (the terminal's answer) on a 17x41 cell, direct — the cutaway \
+                 at 16x (4x art upscaled 4x), a 127x99 office, sent as 8x4-cell tiles at most \
+                 every 66 ms",
+            ),
+            (
+                GraphicsMode::Iterm2,
+                answered(None, cell(8, 16), false),
+                "graphics: iterm2 (forced by --graphics) on a 8x16 cell, direct — the cutaway \
+                 at 8x (4x art upscaled 2x), a 120x78 office, sent as 8x4-cell tiles at most \
+                 every 100 ms",
+            ),
+        ];
+        let rows: Vec<String> = cases
+            .iter()
+            .map(|&(mode, probe, want)| {
+                let got = row(mode, probe, BUNDLED);
+                assert_eq!(got, want, "{mode:?}");
+                got
+            })
+            .collect();
+        let distinct: std::collections::HashSet<_> = rows.iter().collect();
+        assert_eq!(distinct.len(), rows.len());
+    }
+
+    /// A doctor that prints a cutaway while `run` is set `off` says how to
+    /// get it, or a bare `run` would show classic unexplained; a setting that
+    /// paints it, and every classic row, add nothing.
+    #[test]
+    fn a_cutaway_row_says_how_to_get_it_when_run_is_off() {
+        const HOW: &str =
+            " — off: `run --graphics auto` (or `graphics = \"auto\"` in config) paints it";
+        let cutaway = plan(capable(CELL_8X16), BUNDLED);
+        let painted = cutaway.diagnostic_row(GraphicsMode::Auto);
+        assert!(!painted.contains(HOW), "{painted}");
         assert_eq!(
-            row,
-            "graphics: sixel (17x41 cell) — the cutaway profile would render at 16x \
-             (4x art upscaled 4x), a 127x99 office"
+            cutaway.diagnostic_row(GraphicsMode::Off),
+            format!("{painted}{HOW}")
         );
+        assert_eq!(cutaway.diagnostic_row(GraphicsMode::Sixel), painted);
+        let classic = plan(Probe::NoAnswer, BUNDLED);
+        assert_eq!(
+            classic.diagnostic_row(GraphicsMode::Off),
+            classic.diagnostic_row(GraphicsMode::Auto)
+        );
+
+        // Forced, the hint names the protocol, as a value `--graphics` takes.
+        for mode in [
+            GraphicsMode::Kitty,
+            GraphicsMode::Sixel,
+            GraphicsMode::Iterm2,
+        ] {
+            let forced = resolve(mode, capable(CELL_8X16), BUNDLED, AREA);
+            let name = <GraphicsMode as clap::ValueEnum>::to_possible_value(&mode)
+                .expect("a value")
+                .get_name()
+                .to_string();
+            assert_eq!(
+                forced.diagnostic_row(GraphicsMode::Off),
+                format!(
+                    "{} — off: `run --graphics {name}` (or `graphics = \"{name}\"` in config) \
+                     paints it",
+                    forced.diagnostic_row(GraphicsMode::Auto)
+                )
+            );
+        }
     }
 
     /// A reason keeps its variant only by printing its own row, a remedy the

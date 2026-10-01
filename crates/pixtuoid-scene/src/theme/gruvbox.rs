@@ -362,9 +362,9 @@ pub static GRUVBOX: Theme = Theme {
             b: 132,
         },
         label_exiting: Rgb {
-            r: 102,
-            g: 92,
-            b: 84,
+            r: 150,
+            g: 135,
+            b: 120,
         },
         tooltip_bg: Rgb {
             r: 29,

@@ -471,6 +471,7 @@ mod tests {
             let list = frame_list(frame, office, clear_ground(), Self::now());
             list.pieces()
                 .iter()
+                .filter(|p| !matches!(p.kind, crate::cutaway::paint::PieceKind::Badge { .. }))
                 .zip(list.hover_spans())
                 .map(|(p, (span, agent))| {
                     (
@@ -576,6 +577,144 @@ mod tests {
         assert_eq!(canvas.hover_at(area), Some(id));
         h.show(&mut canvas, last);
         assert_ne!(canvas.hover_at(area), Some(id));
+    }
+
+    /// A neighbour sitting just south has their badge plate over the sitter's
+    /// body; hovering the body there still names the sitter, as in the classic,
+    /// where a badge is no hover target.
+    #[test]
+    fn hovering_a_sitter_under_a_neighbours_badge_names_the_sitter() {
+        const NEIGHBOUR: &str = "cc\u{b7}neighbour";
+        let h = Hovering::new();
+        let seated = h.frames.last().expect("a seated frame");
+        let a = seated.characters[0].clone();
+        let a_id = seated.agents[a.agent_idx].agent_id;
+        let body = h
+            .boxes(seated)
+            .into_iter()
+            .find_map(|(_, s, agent)| (agent == Some(a_id)).then_some(s))
+            .expect("the sitter's body");
+        let mut tried = 0;
+        for dy in 1..body.y1 - body.y0 + 16 {
+            let mut both = seated.clone();
+            let mut b = both.agents[a.agent_idx].clone();
+            b.agent_id = AgentId::from_transcript_path("/neighbour.jsonl");
+            b.label = NEIGHBOUR.into();
+            both.agents.push(b.clone());
+            both.characters
+                .push(crate::pixel_painter::CharacterPlacement {
+                    agent_idx: both.agents.len() - 1,
+                    anchor: crate::layout::Point {
+                        x: a.anchor.x + 2,
+                        y: a.anchor.y + dy,
+                    },
+                    anchor_y: a.anchor_y + dy,
+                    seat_desk: None,
+                    seated: false,
+                    ..a.clone()
+                });
+            let plate = {
+                let office = Office {
+                    layout: &h.layout,
+                    pack: &h.pack,
+                    theme: normal(),
+                    scale: h.scale,
+                };
+                let list = frame_list(&both, office, FloorMeta::ground(), Hovering::now());
+                // Known by its text: the sitter's badge reads otherwise.
+                list.pieces().iter().find(|p| {
+                    matches!(&p.kind, crate::cutaway::paint::PieceKind::Badge { badge } if badge.text == NEIGHBOUR)
+                })
+                    .map(|p| p.span)
+                    .expect("the neighbour's plate")
+            };
+            let b_body = h
+                .boxes(&both)
+                .into_iter()
+                .find_map(|(_, s, agent)| (agent == Some(b.agent_id)).then_some(s))
+                .expect("the neighbour's body");
+            let Some(at) = (body.y0..=body.y1)
+                .flat_map(|y| (body.x0..=body.x1).map(move |x| cell((x, y))))
+                .find(|&c| plate.meets(c) && !b_body.meets(c))
+            else {
+                continue;
+            };
+            let mut alone = CutawayCanvas::new(Arc::clone(&h.pack));
+            h.show(&mut alone, seated);
+            if alone.hover_at(at) != Some(a_id) {
+                continue;
+            }
+            tried += 1;
+            let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+            h.show(&mut canvas, &both);
+            assert_eq!(
+                canvas.hover_at(at),
+                Some(a_id),
+                "at {at:?}, {dy} rows south"
+            );
+        }
+        assert!(
+            tried > 0,
+            "no neighbour's plate ever lay over the sitter's body"
+        );
+    }
+
+    /// A badge is a piece of its own: a sitter whose name or state changes
+    /// repaints their badge, and a renamed one nothing else.
+    #[test]
+    fn a_changed_badge_repaints_only_itself() {
+        let h = Hovering::new();
+        let seated = h.frames.last().expect("a seated frame");
+        let plate = |frame: &SimFrame| {
+            let office = Office {
+                layout: &h.layout,
+                pack: &h.pack,
+                theme: normal(),
+                scale: h.scale,
+            };
+            let list = frame_list(frame, office, FloorMeta::ground(), Hovering::now());
+            list.pieces()
+                .iter()
+                .find(|p| matches!(p.kind, crate::cutaway::paint::PieceKind::Badge { .. }))
+                .map(|p| (p.span, p.fingerprint))
+                .expect("a badge")
+        };
+        let mut renamed = seated.clone();
+        renamed.agents[0].label = "cc\u{b7}renamed".into();
+        let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+        h.show(&mut canvas, seated);
+        let observed = ObservedFloor {
+            layout: Arc::clone(&h.layout),
+            frame: renamed.clone(),
+        };
+        let mut cache = crate::frame_cache::FrameCache::new();
+        let size = (
+            h.scale.to_buffer(h.layout.buf_w),
+            h.scale.to_buffer(h.layout.buf_h),
+        );
+        let dirty = canvas
+            .frame(
+                &observed,
+                normal(),
+                h.scale,
+                FloorMeta::ground(),
+                Hovering::now(),
+                &mut cache,
+            )
+            .dirty;
+        let spans = [plate(seated).0, plate(&renamed).0];
+        let want: Vec<Bounds> = spans
+            .iter()
+            .filter_map(|&s| on_buffer(s, h.scale, size))
+            .collect();
+        assert_eq!(dirty, Dirty::Rects(want));
+        let mut waiting = seated.clone();
+        waiting.agents[0].state = pixtuoid_core::state::ActivityState::Waiting {
+            reason: "permission?".into(),
+        };
+        let (was, now) = (plate(seated), plate(&waiting));
+        assert_eq!(was.0, now.0, "the plate stays put");
+        assert_ne!(was.1, now.1, "its tone is in its fingerprint");
     }
 
     /// A new layout of the same size repaints everything, even one built after

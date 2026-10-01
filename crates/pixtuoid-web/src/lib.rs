@@ -284,14 +284,17 @@ impl Office {
                 "{{\"x\":{},\"y\":{},\"text\":",
                 el.anchor_px.x, el.anchor_px.y
             ));
-            push_json_string(&mut out, &format!("\u{25cf}{}", el.text));
-            out.push_str(&format!(",\"color\":\"{}\"", label_hex(theme, el.tone)));
-            // The registry prefix before the first '·' resolves to the source's
-            // badge hue: the site paints the WHOLE name in it while the ● marker
-            // stays the activity tone. An unregistered prefix emits no badge.
-            if let Some(rgb) = pixtuoid_scene::overlay::badge_hue(&el.text, theme) {
-                out.push_str(&format!(",\"badge\":\"{}\"", hex(rgb)));
-            }
+            push_json_string(
+                &mut out,
+                &format!("{}{}", pixtuoid_scene::overlay::BADGE_MARKER, el.text),
+            );
+            // The site paints the ● in `color` and the name in `badge`.
+            let ink = pixtuoid_scene::overlay::badge_ink(&el.text, el.tone, theme);
+            out.push_str(&format!(
+                ",\"color\":\"{}\",\"badge\":\"{}\"",
+                hex(ink.marker),
+                hex(ink.name)
+            ));
             out.push('}');
         }
         out.push_str(&format!(
@@ -642,10 +645,6 @@ fn hex(c: pixtuoid_core::sprite::Rgb) -> String {
     format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
 }
 
-fn label_hex(theme: &Theme, tone: pixtuoid_scene::overlay::LabelTone) -> String {
-    hex(pixtuoid_scene::overlay::label_tone_rgb(tone, theme))
-}
-
 fn board_hex(theme: &Theme, tone: pixtuoid_scene::board::BoardTone) -> String {
     hex(pixtuoid_scene::board::tone_rgb(tone, theme))
 }
@@ -799,10 +798,10 @@ mod tests {
         o.step(T0_MS + 10_000.0, 320, 180);
         let json = o.overlay_json();
         let cc = pixtuoid_scene::theme::ALL_THEMES[0].source.claude_code;
-        let expect = format!("\"badge\":\"#{:02x}{:02x}{:02x}\"", cc.r, cc.g, cc.b);
+        let expect = format!("\"color\":\"#{:02x}{:02x}{:02x}\"", cc.r, cc.g, cc.b);
         assert!(
             json.contains(&expect),
-            "labels carry the cc badge hue: {json}"
+            "the markers carry the cc badge hue: {json}"
         );
         // Scope the count to the labels array: board segments also emit "text".
         let labels_json = json.split("],\"board\"").next().unwrap();
