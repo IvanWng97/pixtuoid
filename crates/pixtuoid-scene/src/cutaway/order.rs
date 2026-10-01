@@ -30,7 +30,7 @@
 //! `no_wall_segment_is_taller_than_the_cast` pins that no segment is tall
 //! enough to straddle a figure.
 
-use crate::layout::Layer;
+use crate::layout::{Bounds, Layer};
 
 /// A piece's painted bounds in LOGICAL units, inclusive on both ends, and the
 /// row it sorts on.
@@ -80,6 +80,19 @@ impl Span {
     /// The same bounds, in `layer` at its depth.
     pub(crate) fn with_layer(self, layer: Layer) -> Self {
         Self { layer, ..self }
+    }
+
+    /// Whether it shares a cell with `area`, in the same logical units. An
+    /// empty area shares none.
+    pub(crate) fn meets(self, area: Bounds) -> bool {
+        // u32: an area's exclusive end can lie one past `u16::MAX`.
+        let end = |at: u16, len: u16| u32::from(at) + u32::from(len);
+        area.width > 0
+            && area.height > 0
+            && area.x <= self.x1
+            && u32::from(self.x0) < end(area.x, area.width)
+            && area.y <= self.y1
+            && u32::from(self.y0) < end(area.y, area.height)
     }
 
     fn key(self) -> (u16, Layer) {
