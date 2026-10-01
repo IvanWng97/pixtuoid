@@ -158,6 +158,7 @@ fn drawn(
         anchor: c.anchor,
         w: art.0,
         h: art.1,
+        label_anchor: c.label_anchor,
     }
 }
 

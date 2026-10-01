@@ -76,6 +76,7 @@ pub(super) enum DrawableKind<'a> {
         agent: &'a AgentSlot,
         pose: super::seat::SpritePose,
         anchor: Point,
+        label_anchor: Point,
         sleep_z_seed: Option<u64>,
         waiting_bubble: bool,
         walking_dust_frame: Option<usize>,
@@ -286,6 +287,12 @@ pub(crate) fn desk_sprite_name(facing: crate::layout::Facing) -> &'static str {
     }
 }
 
+/// The art a desk seating its occupant toward `facing` draws.
+pub(crate) fn desk_art(pack: &Pack, facing: crate::layout::Facing) -> Option<&Frame> {
+    pack.animation_or_source(desk_sprite_name(facing))
+        .and_then(|a| a.frames().first())
+}
+
 /// A hoverable [`paint_drawable`] drew, sized by the frame it blitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Drawn {
@@ -307,9 +314,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             lights,
             props,
         } => {
-            let art = pack
-                .animation_or_source(desk_sprite_name(*facing))
-                .and_then(|a| a.frames().first());
+            let art = desk_art(pack, *facing);
             // The effects address the monitor by the sprite's OWN row numbering, so this is
             // the blit origin; passing `sprite_top + DESK_BEZEL_RAISE` caps every glow with a bar.
             let mut sprite_top = desk.y;
@@ -335,6 +340,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             agent,
             pose,
             anchor,
+            label_anchor,
             sleep_z_seed,
             waiting_bubble,
             walking_dust_frame,
@@ -355,6 +361,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
                     anchor: *anchor,
                     w,
                     h,
+                    label_anchor: *label_anchor,
                 })
             });
         }

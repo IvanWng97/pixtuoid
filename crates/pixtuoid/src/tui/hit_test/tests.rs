@@ -77,7 +77,7 @@ fn furniture_hit_test_finds_desk() {
 #[test]
 fn furniture_hit_test_finds_elevator() {
     let layout = Layout::compute(160, 200, Some(4)).expect("layout");
-    let door = layout.door.expect("door");
+    let door = layout.door;
     let cell_y = (door.y + pixtuoid_scene::layout::ELEVATOR_H / 2) / 2;
     assert_eq!(
         hit_test_furniture(
@@ -222,6 +222,7 @@ fn an_agent_is_hit_from_exactly_the_cells_that_show_it() {
             anchor: Point { x: 40, y },
             w: 10,
             h: 14,
+            label_anchor: Point { x: 45, y },
         };
         let tl = agent.anchor;
         let agents = [agent];
@@ -256,6 +257,7 @@ fn overlapping_agents_hit_the_last_painted() {
         anchor: Point { x, y: 30 },
         w: 8,
         h: 12,
+        label_anchor: Point { x: x + 4, y: 30 },
     };
     let cell = crate::tui::geometry::CellArea::half_block(44, 16);
     for (first, last) in [(under, over), (over, under)] {

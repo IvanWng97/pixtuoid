@@ -121,8 +121,8 @@ impl Screen {
 ///
 /// The engine cannot draw text — the font lives in the binary — so the profile
 /// reports anchors and lets the painter render. These are the CUTAWAY's anchors:
-/// `overlay::build_overlay` derives its own from the classic projection, so a
-/// badge placed with those would float where the classic painter drew the body.
+/// `overlay::build_overlay`'s hang off the classic-drawn sprite, so a badge
+/// placed with those would float where the classic painter drew the body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CutawayLabel {
     /// Index into [`SimFrame::agents`].
@@ -160,17 +160,32 @@ pub fn render_cutaway(
     cache: &mut crate::frame_cache::FrameCache,
     buf: &mut RgbBuffer,
 ) -> Vec<CutawayLabel> {
-    let Office {
-        layout,
-        pack,
-        theme,
-        scale,
-    } = office;
-    paint_backdrop(layout, theme, scale, Pen::for_pack(scale, pack), buf);
-    let moment = Moment::resolve(crate::sky::Sky::at(now), theme, floor.altitude, now);
-    let list = build_list(frame, office, &moment, floor.floor_idx);
-    paint_list(&list, cache, buf);
+    let list = frame_list(frame, office, floor, now);
+    paint(office.layout, &list, cache, buf);
     list.labels().collect()
+}
+
+/// `frame`'s [`DrawList`] as `floor` looks at `now`.
+pub(crate) fn frame_list<'a>(
+    frame: &SimFrame,
+    office: Office<'a>,
+    floor: crate::floor::FloorMeta,
+    now: std::time::SystemTime,
+) -> DrawList<'a> {
+    let moment = Moment::resolve(crate::sky::Sky::at(now), office.theme, floor.altitude, now);
+    build_list(frame, office, &moment, floor.floor_idx)
+}
+
+/// Paint `list` whole: `layout`'s backdrop, then the list over it.
+pub(crate) fn paint(
+    layout: &Layout,
+    list: &DrawList<'_>,
+    cache: &mut crate::frame_cache::FrameCache,
+    buf: &mut RgbBuffer,
+) {
+    let pen = Pen::for_pack(list.scale, list.pack);
+    paint_backdrop(layout, list.theme, list.scale, pen, buf);
+    paint_list(list, cache, buf);
 }
 
 /// Everything under the list's pieces, none of which moves within a layout,
@@ -215,13 +230,6 @@ pub(crate) struct DrawList<'a> {
 }
 
 /// One entry of a [`DrawList`].
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the incremental canvas diffs frames by span and fingerprint"
-    )
-)]
 pub(crate) struct Piece {
     pub(crate) span: Span,
     pub(crate) kind: PieceKind,
@@ -242,13 +250,6 @@ pub(crate) struct Piece {
 /// One of the room's lights: what it lifts, over which cells. A change repaints
 /// its span from every light that meets it, which alone light a rect as the
 /// frame does ([`net_pass`](crate::cutaway::light::net_pass)).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the incremental canvas diffs lights by span and fingerprint"
-    )
-)]
 pub(crate) struct LightPiece {
     pub(crate) span: Span,
     pub(crate) view: crate::cutaway::light::LightView,
@@ -259,10 +260,6 @@ impl Piece {
     /// Every logical cell painting it touches: its span, and the floor its
     /// shadow falls on. A repaint of a damaged rect is complete only over the
     /// pieces whose reach meets it.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the incremental canvas damages by reach")
-    )]
     pub(crate) fn reach(&self) -> Span {
         let Some(((x0, y0), (x1, y1))) = self.shadow.map(|c| c.bounds()) else {
             return self.span;
@@ -279,22 +276,18 @@ impl Piece {
 
 impl<'a> DrawList<'a> {
     /// The pieces, back to front.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the incremental canvas walks them")
-    )]
     pub(crate) fn pieces(&self) -> &[Piece] {
         &self.pieces
     }
 
     /// The room's lights, in no order that matters: a pixel's light is the
     /// brightest's, ties to the lowest rank.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the incremental canvas walks them")
-    )]
     pub(crate) fn lights(&self) -> &[LightPiece] {
         &self.lights
+    }
+
+    pub(crate) fn ambient(&self) -> crate::cutaway::light::Ambient {
+        self.ambient
     }
 
     /// Where each drawn agent's badge belongs, in draw order.
@@ -499,42 +492,12 @@ fn paint_pieces(
         let y1 = list.scale.to_buffer(piece.span.y1 + 1).min(buf.height());
         let epoch = buf.begin_writes();
         paint_piece(&piece.kind, list.pack, list.theme, list.scale, cache, buf);
-        let drawn = (list.pack, list.scale);
-        let art_cache = &mut cache.cutaway_art;
-        let glowing = match piece.kind {
-            PieceKind::Desk { at, art, screen } => {
-                mark_glow(at, art, screen, drawn, art_cache, &mut marks)
-            }
-            PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => {
-                mark_bulbs(Placed::Centred(at), art, drawn, art_cache, &mut marks)
-            }
-            PieceKind::Hung { at, sprite } => mark_bulbs(
-                Placed::TopLeft(at),
-                Art::still(sprite),
-                drawn,
-                art_cache,
-                &mut marks,
-            ),
-            PieceKind::Door { at, frame } => mark_bulbs(
-                Placed::TopLeft(at),
-                Art {
-                    sprite: DOOR_SPRITE,
-                    frame,
-                    flip: Flip::None,
-                },
-                drawn,
-                art_cache,
-                &mut marks,
-            ),
-            PieceKind::Glass { .. }
-            | PieceKind::WallSeg { .. }
-            | PieceKind::Chair { .. }
-            | PieceKind::PropBand { .. }
-            | PieceKind::Table { .. }
-            | PieceKind::Character { .. }
-            | PieceKind::Neon { .. }
-            | PieceKind::Clock { .. } => false,
-        };
+        let glowing = mark(
+            &piece.kind,
+            (list.pack, list.scale),
+            &mut cache.cutaway_art,
+            &mut marks,
+        );
         for y in y0..y1 {
             for x in x0..x1 {
                 if !buf.written_in(x, y, epoch) {
@@ -588,6 +551,48 @@ fn paint_pieces(
 const NO_MARK: pixtuoid_core::sprite::Rgb = pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 };
 const EMISSIVE_MARK: pixtuoid_core::sprite::Rgb = pixtuoid_core::sprite::Rgb { r: 1, g: 0, b: 0 };
 const SHADED_MARK: pixtuoid_core::sprite::Rgb = pixtuoid_core::sprite::Rgb { r: 2, g: 0, b: 0 };
+
+/// Mark into `marks` where `kind` glows of its own, never outside its span,
+/// the most [`paint_pieces`] clears; whether it marked any.
+fn mark(
+    kind: &PieceKind,
+    drawn: (&Pack, RenderScale),
+    art_cache: &mut ArtCache,
+    marks: &mut RgbBuffer,
+) -> bool {
+    match *kind {
+        PieceKind::Desk { at, art, screen } => mark_glow(at, art, screen, drawn, art_cache, marks),
+        PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => {
+            mark_bulbs(Placed::Centred(at), art, drawn, art_cache, marks)
+        }
+        PieceKind::Hung { at, sprite } => mark_bulbs(
+            Placed::TopLeft(at),
+            Art::still(sprite),
+            drawn,
+            art_cache,
+            marks,
+        ),
+        PieceKind::Door { at, frame } => mark_bulbs(
+            Placed::TopLeft(at),
+            Art {
+                sprite: DOOR_SPRITE,
+                frame,
+                flip: Flip::None,
+            },
+            drawn,
+            art_cache,
+            marks,
+        ),
+        PieceKind::Glass { .. }
+        | PieceKind::WallSeg { .. }
+        | PieceKind::Chair { .. }
+        | PieceKind::PropBand { .. }
+        | PieceKind::Table { .. }
+        | PieceKind::Character { .. }
+        | PieceKind::Neon { .. }
+        | PieceKind::Clock { .. } => false,
+    }
+}
 
 /// Mark into `marks` where the desk [`paint_desk`] drew at `at` glows of its own:
 /// its screen, emissive when on and shaded when off, and its lamp's bulb. Each
@@ -2816,7 +2821,7 @@ fn paint_chair(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::embedded_pack::test_default_pack;
 
@@ -3292,7 +3297,7 @@ mod tests {
     /// `facing`, observed through the real sim every tick of their walk there:
     /// the frames up to the first where they sit, then `seated_ticks` more, and
     /// that desk.
-    fn sit_down(
+    pub(crate) fn sit_down(
         facing: crate::layout::Facing,
         seated_ticks: usize,
     ) -> (Layout, Pack, Vec<SimFrame>, crate::layout::Point) {
@@ -3646,7 +3651,7 @@ mod tests {
     }
 
     /// The badge follows the CUTAWAY's body, not the classic one:
-    /// `overlay::build_overlay` anchors off the classic projection, which for a
+    /// `overlay::build_overlay` hangs off the classic-drawn sprite, which for a
     /// seated agent is not where the cutaway draws them.
     #[test]
     fn a_label_anchor_sits_above_the_head_and_centred_on_the_sprite() {
@@ -4127,7 +4132,7 @@ mod tests {
 
     /// A frame of an office nobody is in, its room lights full and its sign
     /// calm.
-    fn empty_frame(layout: &Layout) -> SimFrame {
+    pub(crate) fn empty_frame(layout: &Layout) -> SimFrame {
         SimFrame {
             agents: Vec::new(),
             poses: std::collections::HashMap::new(),
@@ -4781,14 +4786,16 @@ S B B B B B B S
         );
     }
 
-    /// A light's span relit by the frame's own pass writes nothing outside it,
-    /// at every scale.
+    /// A light alone, through the frame's own pass over the whole room under a
+    /// sky that darkens nothing, changes no pixel outside its span, at every
+    /// scale.
     #[test]
     fn a_light_paints_only_inside_its_span() {
+        use crate::cutaway::light::{Ambient, Emission, NetMemo, net_pass};
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
-        let mut lights = 0;
+        let (mut lights, mut lit) = (0, 0);
         for s in [1, 3, pack.max_density_variant().get()] {
             let scale = RenderScale::new(s).expect("nonzero");
             let office = Office {
@@ -4798,10 +4805,31 @@ S B B B B B B S
                 scale,
             };
             let list = list_at(frame, office, 23);
+            let pen = Pen::for_pack(scale, &pack);
+            let (w, h) = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
+            let whole = ArtRect {
+                x: ArtPx(0),
+                y: ArtPx(0),
+                w: pen.art(layout.buf_w),
+                h: pen.art(layout.buf_h),
+            };
             for light in list.lights() {
                 lights += 1;
-                let buf = lights_over(&list, &layout, light.span);
-                let w = buf.width();
+                let mut buf = RgbBuffer::filled(w, h, theme.surface.bg_fallback);
+                net_pass(
+                    whole,
+                    &[&light.view],
+                    Ambient::default(),
+                    &Emission::new(w, h),
+                    pen,
+                    &mut NetMemo::default(),
+                    &mut buf,
+                );
+                lit += buf
+                    .as_slice()
+                    .iter()
+                    .filter(|&&c| c != theme.surface.bg_fallback)
+                    .count();
                 let stray = buf.as_slice().iter().enumerate().find(|&(i, &c)| {
                     let (x, y) = (
                         scale.logical((i % usize::from(w)) as u16),
@@ -4820,6 +4848,73 @@ S B B B B B B S
             }
         }
         assert!(lights > 0, "the night office has no lights");
+        assert!(lit > 0, "no light lifted a pixel, so this pins nothing");
+    }
+
+    /// [`mark`] writes nothing outside the piece's span, at every scale: a lit
+    /// and a dark screen, a desk lamp's bulb, the wall decor's, a floor lamp's
+    /// and an open elevator's.
+    #[test]
+    fn a_piece_marks_its_glow_only_inside_its_span() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (seated, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        let lively = lively_office();
+        let open = SimFrame {
+            door_frame: 2,
+            ..empty_frame(&lively)
+        };
+        let mut marked = std::collections::BTreeSet::new();
+        for (layout, frame) in [
+            (&seated, frames.last().expect("a seated frame")),
+            (&seated, &frames[0]),
+            (&lively, &open),
+        ] {
+            for s in [1, 3, pack.max_density_variant().get()] {
+                let scale = RenderScale::new(s).expect("nonzero");
+                let office = Office {
+                    layout,
+                    pack: &pack,
+                    theme,
+                    scale,
+                };
+                let list = list_at(frame, office, 23);
+                let (w, h) = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
+                let mut art = ArtCache::default();
+                for p in list.pieces() {
+                    let mut marks = RgbBuffer::filled(w, h, NO_MARK);
+                    if mark(&p.kind, (&pack, scale), &mut art, &mut marks) {
+                        marked.insert(kind_name(&p.kind));
+                    }
+                    let stray = marks.as_slice().iter().enumerate().find(|&(i, &c)| {
+                        let (x, y) = (
+                            scale.logical((i % usize::from(w)) as u16),
+                            scale.logical((i / usize::from(w)) as u16),
+                        );
+                        c != NO_MARK
+                            && !((p.span.x0..=p.span.x1).contains(&x)
+                                && (p.span.y0..=p.span.y1).contains(&y))
+                    });
+                    assert_eq!(
+                        stray.map(|(i, _)| i),
+                        None,
+                        "{} at scale {s} marked outside {:?}",
+                        kind_name(&p.kind),
+                        p.span
+                    );
+                }
+            }
+        }
+        // Only the density art draws bulbs.
+        let want: &[&str] = if cfg!(feature = "density-art") {
+            &["desk", "door", "hung decor", "prop"]
+        } else {
+            &["desk"]
+        };
+        assert_eq!(
+            marked.into_iter().collect::<Vec<_>>(),
+            want,
+            "a kind that marks went unchecked"
+        );
     }
 
     /// The cutaway's sign glows only where the sign is drawn, and its lamps
@@ -5796,7 +5891,7 @@ S B B B B B B S
 
     /// An office with every moving fixture: an aquarium and a cooler that
     /// loop, an elevator, the sign and the clock.
-    fn lively_office() -> Layout {
+    pub(crate) fn lively_office() -> Layout {
         many_layouts()
             .find(|l| {
                 let kinds: Vec<FixtureKind> = l.fixtures().map(|f| f.kind).collect();

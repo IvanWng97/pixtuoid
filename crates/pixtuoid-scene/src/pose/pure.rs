@@ -190,7 +190,8 @@ pub fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option
 
     // The target is `door_threshold` (the on-floor point below the door), not
     // the door itself, so the character doesn't paint through the wall trim.
-    if let (Some(exit_time), Some(target)) = (slot.exiting_at, layout.door_threshold) {
+    if let Some(exit_time) = slot.exiting_at {
+        let target = layout.door_threshold;
         let since_exit = now
             .duration_since(exit_time)
             .unwrap_or(Duration::ZERO)
@@ -208,18 +209,17 @@ pub fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option
     // The entry walk ends at the seated anchor, not inside the desk obstacle:
     // otherwise the A* router detours around the desk and always approaches
     // from one side.
-    if let Some(from) = layout.door_threshold {
-        let since_spawn = now
-            .duration_since(slot.created_at)
-            .unwrap_or(Duration::ZERO)
-            .as_millis() as u64;
-        if since_spawn < ENTRY_ANIMATION_MS {
-            return Some(linear_walk_pose(
-                since_spawn,
-                from,
-                desk_walk_anchor_facing(desk, layout.desk_facing_at(desk)),
-            ));
-        }
+    let from = layout.door_threshold;
+    let since_spawn = now
+        .duration_since(slot.created_at)
+        .unwrap_or(Duration::ZERO)
+        .as_millis() as u64;
+    if since_spawn < ENTRY_ANIMATION_MS {
+        return Some(linear_walk_pose(
+            since_spawn,
+            from,
+            desk_walk_anchor_facing(desk, layout.desk_facing_at(desk)),
+        ));
     }
 
     state_driven_pose(slot, desk, layout, now)

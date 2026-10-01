@@ -209,8 +209,7 @@ impl MotionState {
 ///
 /// Transitions run ONLY when `now > wander.last_advanced_at`; otherwise the pose
 /// is computed from the existing phase WITHOUT mutating any wander field, so
-/// this is safe to call 2+ times per frame (seated-overlay pass, character loop,
-/// `character_anchor`).
+/// this is safe to call 2+ times per frame (seated-overlay pass, character loop).
 ///
 /// On the first call for a fresh Idle slot, `cycle_n` is fast-forwarded so
 /// destination selection agrees with what core's stateless `idle_pose` would

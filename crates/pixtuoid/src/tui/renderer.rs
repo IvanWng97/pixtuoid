@@ -371,13 +371,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     // up for a beat AFTER the card is gone.
     apply_dim(ctx.buf, ctx.onboarding.dim);
 
-    let labels = pixtuoid_scene::overlay::build_overlay(
-        scene,
-        &layout,
-        now,
-        &mut ctx.store.route_ctx(),
-        hovered,
-    );
+    let labels = pixtuoid_scene::overlay::build_overlay(scene, &agents, hovered);
     let board = pixtuoid_scene::board::build_board(
         footer.counts(),
         pixtuoid_scene::board::scene_uptime_secs(scene, now),
@@ -396,10 +390,9 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         paint_label_widgets(f, &labels, actual_scene, theme);
         paint_chitchat_bubbles(f, &chitchat_bubbles, actual_scene, theme);
         paint_wall_display(f, &board, actual_scene, theme);
-        if let Some(door) = layout.door {
-            let current = floor_info.map(|fi| fi.current).unwrap_or(1);
-            paint_elevator_indicator(f, door, current, actual_scene, theme);
-        }
+        let door = layout.door;
+        let current = floor_info.map(|fi| fi.current).unwrap_or(1);
+        paint_elevator_indicator(f, door, current, actual_scene, theme);
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,
             my,

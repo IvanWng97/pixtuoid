@@ -10,8 +10,11 @@
 //! Only the row READ is per-OS, hand-rolled rather than `sysinfo` because this
 //! runs on every tool call of every agent inside the shim's send bound.
 #![cfg_attr(
-    not(any(windows, target_os = "macos", target_os = "linux")),
-    allow(dead_code)
+    all(not(any(windows, target_os = "macos", target_os = "linux")), not(test)),
+    expect(
+        dead_code,
+        reason = "without a row reader the parent pid is stamped as-is, so the walk is unused"
+    )
 )]
 
 #[derive(Clone)]
