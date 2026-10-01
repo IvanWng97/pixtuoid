@@ -70,8 +70,8 @@ pub enum CharacterGlow {
 pub struct CharacterPlacement {
     /// Index into [`SimFrame::agents`] for this character.
     pub agent_idx: usize,
-    /// Y-sort key (breath-independent).
-    pub anchor_y: u16,
+    /// The row it sorts on (breath-independent).
+    pub sort_row: u16,
     /// The sprite animation to blit (e.g. `"seated"`, `"walking"`).
     pub anim_name: &'static str,
     /// The frame within `anim_name` to draw this tick.
@@ -645,9 +645,9 @@ pub(crate) fn resolve_characters(
                 let (anim_name, flip_x) = seat.sprite_in_pack(base, pack);
                 let placement = CharacterPlacement {
                     agent_idx,
-                    // Breath-independent z-key: the breath's 1 px rise must not flip
+                    // Breath-independent sort row: the breath's 1 px rise must not flip
                     // sort order against nearby desk decor frame-to-frame.
-                    anchor_y: seat.z_key(),
+                    sort_row: seat.sort_row(),
                     anim_name,
                     frame_idx,
                     anchor,
@@ -720,7 +720,7 @@ pub(crate) fn resolve_characters(
                             agent_idx,
                             // The glide's own key, so nothing pops at the
                             // walk→seat seam.
-                            anchor_y: seat.z_key(),
+                            sort_row: seat.sort_row(),
                             anim_name,
                             frame_idx: 0,
                             anchor: anchor_no_breath,
@@ -741,7 +741,7 @@ pub(crate) fn resolve_characters(
                 placements.push((
                     CharacterPlacement {
                         agent_idx,
-                        anchor_y: anchor.y + WALKING_Y_OFF,
+                        sort_row: anchor.y + WALKING_Y_OFF,
                         anim_name: "standing",
                         frame_idx: 0,
                         anchor,
@@ -777,10 +777,10 @@ pub(crate) fn resolve_characters(
                 let dy = to.y as i32 - from.y as i32;
                 // A glide on/off a seat (`to` is a foot-cell sitting down,
                 // `from` rising) renders in the SEAT's view and at the SEAT's
-                // z-key, NOT the travel direction's. Without it a window-facing
+                // sort row, NOT the travel direction's. Without it a window-facing
                 // seat renders a FRONT walk and the agent sits facing the
                 // camera until it snaps at AtWaypoint. Ordinary travel segments
-                // keep the travel-direction facing and foot-position z-key.
+                // keep the travel-direction facing and foot-position sort row.
                 let settle = settle_seat(to, layout).or_else(|| settle_seat(from, layout));
                 let (going_back, flip) = match settle {
                     Some(seat) => seat.settle_walk(),
@@ -800,8 +800,8 @@ pub(crate) fn resolve_characters(
                 placements.push((
                     CharacterPlacement {
                         agent_idx,
-                        anchor_y: match settle {
-                            Some(seat) => seat.z_key(),
+                        sort_row: match settle {
+                            Some(seat) => seat.sort_row(),
                             None => walker_anchor.y + WALKING_Y_OFF,
                         },
                         anim_name,
@@ -824,7 +824,7 @@ pub(crate) fn resolve_characters(
         }
     }
     // ONE fit for every pose arm, on the frame each placement will blit, read by
-    // both the sprite and its badge. The z-key keeps pre-fit geometry.
+    // both the sprite and its badge. The sort row keeps pre-fit geometry.
     let fallback = Size {
         w: char_w,
         h: crate::layout::CHARACTER_SPRITE_H,
