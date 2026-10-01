@@ -155,6 +155,10 @@ version = "1"
 "ё" = { of = "б", level = -2 }   # the water cooler's cabinet, shaded east side
 "α" = { of = "ч", level = -2 }   # the first coat, turned from the pole
 "β" = { of = "ш", level = -2 }   # the second
+"ţ" = { of = "t", level = -2 }   # the cat's fur, shaded
+"Ţ" = { of = "t", level = 2 }    # the cat's fur, lit
+"ƭ" = { of = "x", level = -2 }   # the dog's coat, shaded
+"Ƭ" = { of = "x", level = 2 }    # the dog's coat, lit
 "γ" = { of = "щ", level = -2 }   # the third
 "η" = { of = "ф", level = 2 }    # the clock's rim, lit upper west
 "ε" = { of = "ц", level = -2 }   # the clock's face, shaded lower east
@@ -367,6 +371,10 @@ frame_ms = 600
 frames   = ["cat_walk_0.sprite", "cat_walk_1.sprite"]
 frame_ms = 250
 
+[animations."cat_walk@4x"]
+frames   = ["cat_walk_0@4x.sprite", "cat_walk_1@4x.sprite"]
+frame_ms = 250
+
 [animations.cat_sit]
 frames   = ["cat_sit.sprite"]
 frame_ms = 600
@@ -377,6 +385,10 @@ frame_ms = 600
 
 [animations.dog_walk]
 frames   = ["dog_walk_0.sprite", "dog_walk_1.sprite"]
+frame_ms = 250
+
+[animations."dog_walk@4x"]
+frames   = ["dog_walk_0@4x.sprite", "dog_walk_1@4x.sprite"]
 frame_ms = 250
 
 [animations.dog_sit]
