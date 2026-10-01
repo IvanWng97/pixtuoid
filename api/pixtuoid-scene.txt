@@ -192,10 +192,10 @@ pub fn pixtuoid_scene::floor::FloorSession::board(&self, &pixtuoid_core::state::
 pub fn pixtuoid_scene::floor::FloorSession::buf(&self) -> &pixtuoid_core::sprite::RgbBuffer
 pub fn pixtuoid_scene::floor::FloorSession::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::FloorSession::new() -> Self
-pub fn pixtuoid_scene::floor::FloorSession::observe(&mut self, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::ObservedFloor>
 pub fn pixtuoid_scene::floor::FloorSession::overlay(&self, &pixtuoid_core::state::SceneState, core::option::Option<pixtuoid_core::id::AgentId>) -> alloc::vec::Vec<crate::overlay::LabelElement>
 pub fn pixtuoid_scene::floor::FloorSession::render(&mut self, pixtuoid_scene::floor::FrameInputs<'_>) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::Layout>>
 pub fn pixtuoid_scene::floor::FloorSession::reset_frame_cache(&mut self)
+pub fn pixtuoid_scene::floor::FloorSession::step(&mut self, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::SteppedFloor>
 impl core::default::Default for pixtuoid_scene::floor::FloorSession
 pub fn pixtuoid_scene::floor::FloorSession::default() -> Self
 impl core::marker::Freeze for pixtuoid_scene::floor::FloorSession
@@ -251,16 +251,6 @@ impl core::marker::Unpin for pixtuoid_scene::floor::LightingState
 impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::LightingState
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::LightingState
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::LightingState
-pub struct pixtuoid_scene::floor::ObservedFloor
-pub pixtuoid_scene::floor::ObservedFloor::frame: pixtuoid_scene::sim::SimFrame
-pub pixtuoid_scene::floor::ObservedFloor::layout: alloc::sync::Arc<pixtuoid_scene::layout::Layout>
-impl core::marker::Freeze for pixtuoid_scene::floor::ObservedFloor
-impl core::marker::Send for pixtuoid_scene::floor::ObservedFloor
-impl core::marker::Sync for pixtuoid_scene::floor::ObservedFloor
-impl core::marker::Unpin for pixtuoid_scene::floor::ObservedFloor
-impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::ObservedFloor
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::ObservedFloor
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::ObservedFloor
 pub struct pixtuoid_scene::floor::PerFloor
 pub pixtuoid_scene::floor::PerFloor::buf: pixtuoid_core::sprite::RgbBuffer
 pub pixtuoid_scene::floor::PerFloor::ctx: pixtuoid_scene::floor::FloorCtx
@@ -317,14 +307,24 @@ impl core::marker::Unpin for pixtuoid_scene::floor::ProjectedSlot
 impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::ProjectedSlot
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::ProjectedSlot
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::ProjectedSlot
+pub struct pixtuoid_scene::floor::SteppedFloor
+pub pixtuoid_scene::floor::SteppedFloor::frame: pixtuoid_scene::sim::SimFrame
+pub pixtuoid_scene::floor::SteppedFloor::layout: alloc::sync::Arc<pixtuoid_scene::layout::Layout>
+impl core::marker::Freeze for pixtuoid_scene::floor::SteppedFloor
+impl core::marker::Send for pixtuoid_scene::floor::SteppedFloor
+impl core::marker::Sync for pixtuoid_scene::floor::SteppedFloor
+impl core::marker::Unpin for pixtuoid_scene::floor::SteppedFloor
+impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::SteppedFloor
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::SteppedFloor
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::SteppedFloor
 pub fn pixtuoid_scene::floor::build_floor_scene(&pixtuoid_core::state::SceneState, usize) -> alloc::vec::Vec<pixtuoid_scene::floor::ProjectedSlot>
 pub fn pixtuoid_scene::floor::floor_capacity(u16, u16, u64) -> usize
 pub fn pixtuoid_scene::floor::floor_seed(usize) -> u64
 pub fn pixtuoid_scene::floor::frame_epilogue(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_scene::floor::CoffeeState, impl core::iter::traits::collect::IntoIterator<Item = pixtuoid_core::id::AgentId>, std::time::SystemTime)
 pub fn pixtuoid_scene::floor::num_floors(&pixtuoid_core::state::SceneState) -> usize
-pub fn pixtuoid_scene::floor::observe_floor(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_scene::floor::CoffeeState, &mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::ObservedFloor>
 pub fn pixtuoid_scene::floor::project_floor_scene(&pixtuoid_core::state::SceneState, usize) -> pixtuoid_core::state::SceneState
 pub fn pixtuoid_scene::floor::render_floor(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_core::sprite::RgbBuffer, &mut pixtuoid_scene::floor::CoffeeState, &mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, pixtuoid_scene::floor::FrameInputs<'_>) -> core::option::Option<pixtuoid_scene::floor::FloorFrame>
+pub fn pixtuoid_scene::floor::step_floor(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_scene::floor::CoffeeState, &mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::SteppedFloor>
 pub fn pixtuoid_scene::floor::track_for(std::time::SystemTime, pixtuoid_scene::pixel_painter::WeatherPolicy) -> crate::audio::TrackId
 pub fn pixtuoid_scene::floor::waypoint_kind_of(core::option::Option<&pixtuoid_scene::layout::Layout>, usize) -> core::option::Option<pixtuoid_scene::layout::WaypointKind>
 pub mod pixtuoid_scene::layout

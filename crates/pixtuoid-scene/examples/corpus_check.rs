@@ -1,7 +1,7 @@
 //! Corpus check — real transcripts in, "did we parse it AND would the UI show
 //! it" out, for the whole corpus on the machine. The ONE shell that closes the
 //! loop to the render layer: `harness::Drive` (decode → reduce) →
-//! `FloorSession::observe`, whose frame's `characters` are the fully resolved
+//! `FloorSession::step`, whose frame's `characters` are the fully resolved
 //! sprites the painter would draw. The first half is the shared pipeline every
 //! other driver runs, so a difference here is a difference in the BYTES.
 //!
@@ -25,7 +25,7 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_scene::floor::{FloorMeta, FloorSession};
 use pixtuoid_scene::pack::load_bundled_pack;
 
-/// The instant the whole census runs at — the drive's fold and the observe
+/// The instant the whole census runs at — the drive's fold and the step
 /// below MUST share it, or every sprite is judged mid-entry-walk.
 fn now() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000)
@@ -118,7 +118,7 @@ fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
     // verdict.
     let mut session = FloorSession::new();
     v.drawn = session
-        .observe(
+        .step(
             pixtuoid_scene::floor::FloorInputs {
                 scene: &driven.scene,
                 pack,
@@ -128,7 +128,7 @@ fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
             },
             pixtuoid_scene::layout::Size { w: 192, h: 80 },
         )
-        .map_or(0, |observed| observed.frame.characters.len());
+        .map_or(0, |stepped| stepped.frame.characters.len());
     v
 }
 
