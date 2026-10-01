@@ -378,7 +378,7 @@ fn snap_back_derive_is_idempotent_within_a_frame() {
         if arrived_frame.is_none()
             && matches!(
                 p0,
-                Some(Pose::SeatedTyping { .. } | Pose::SeatedIdle | Pose::SeatedThinking)
+                Some(Pose::SeatedTyping | Pose::SeatedIdle | Pose::SeatedThinking)
             )
         {
             arrived_frame = Some(i);
@@ -455,7 +455,7 @@ fn snap_back_long_distance_renders_past_window_by_physics() {
         match derive_with_routing(&slot, t, &l, &mut rig.rctx()) {
             Some(Pose::Walking { .. }) if i * 33 > SNAP_BACK_MS => walking_after_window = true,
             Some(Pose::Walking { .. }) => {}
-            Some(Pose::SeatedTyping { .. } | Pose::SeatedIdle | Pose::SeatedThinking)
+            Some(Pose::SeatedTyping | Pose::SeatedIdle | Pose::SeatedThinking)
                 if walking_after_window =>
             {
                 arrived = true;
@@ -539,7 +539,7 @@ fn snap_back_skipped_when_prev_within_min_distance() {
         .record(slot.agent_id, close, now - Duration::from_millis(50));
     let p = derive_with_routing(&slot, now, &l, &mut rig.rctx());
     assert!(
-        matches!(p, Some(Pose::SeatedTyping { .. })),
+        matches!(p, Some(Pose::SeatedTyping)),
         "close prev should NOT trigger snap-back, got {p:?}"
     );
 }
@@ -563,7 +563,7 @@ fn snap_back_skipped_after_900ms_window() {
         .record(slot.agent_id, prev, now - Duration::from_millis(50));
     let p = derive_with_routing(&slot, now, &l, &mut rig.rctx());
     assert!(
-        matches!(p, Some(Pose::SeatedTyping { .. })),
+        matches!(p, Some(Pose::SeatedTyping)),
         "snap-back window should be expired at 1.5s, got {p:?}"
     );
 }
@@ -576,7 +576,7 @@ fn snap_back_skipped_without_recent_history() {
     let mut rig = RouteRig::new(StubRouter::straight());
     let p = derive_with_routing(&slot, now, &l, &mut rig.rctx());
     assert!(
-        matches!(p, Some(Pose::SeatedTyping { .. })),
+        matches!(p, Some(Pose::SeatedTyping)),
         "no prev history → raw pose, got {p:?}"
     );
 }

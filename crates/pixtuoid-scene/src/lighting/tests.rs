@@ -1,5 +1,5 @@
+use crate::anim::Beat;
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
 
 use super::*;
 use crate::layout::WINDOW_W;
@@ -13,11 +13,7 @@ const DESK: Point = Point { x: 40, y: 30 };
 const WALL_CLOCK_MS: u64 = 1_767_000_000_000;
 
 fn neon_at(levels: NeonLevels, darkness: f32) -> f32 {
-    neon_halo_strength(
-        levels,
-        SystemTime::UNIX_EPOCH + Duration::from_millis(WALL_CLOCK_MS),
-        darkness,
-    )
+    neon_halo_strength(levels, Beat::at_ms(WALL_CLOCK_MS), darkness)
 }
 
 /// The lights of a `w`×`h` office with nobody in it, at `hour` under a clear sky.
@@ -34,7 +30,7 @@ fn lights_at(w: u16, h: u16, hour: u32) -> (Layout, Lights) {
             floor_idx: 0,
             indoor_scale: 1.0,
             neon: NeonLevels::BUSY,
-            now: SystemTime::UNIX_EPOCH,
+            beat: Beat::at_ms(0),
         },
     );
     (layout, lights)
@@ -74,7 +70,7 @@ fn the_neon_halo_throws_the_signs_own_levels() {
     let layout = Layout::compute(192, 80, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
     let sky = Sky::at_with(crate::localclock::at_hour(0), Weather::Clear);
     let look = SkyTones::resolve(&sky, &crate::theme::NORMAL);
-    let now = SystemTime::UNIX_EPOCH + Duration::from_millis(WALL_CLOCK_MS);
+    let beat = Beat::at_ms(WALL_CLOCK_MS);
     for levels in [NeonLevels::CALM, NeonLevels::ALERT, NeonLevels::EMPTY] {
         let lights = Lights::of(
             &layout,
@@ -85,12 +81,12 @@ fn the_neon_halo_throws_the_signs_own_levels() {
                 floor_idx: 0,
                 indoor_scale: 1.0,
                 neon: levels,
-                now,
+                beat,
             },
         );
         assert_eq!(
             lights.neon.strength,
-            neon_halo_strength(levels, now, look.darkness),
+            neon_halo_strength(levels, beat, look.darkness),
             "{levels:?}"
         );
     }
@@ -187,7 +183,7 @@ fn a_monitor_halo_hangs_over_each_lit_screen_only() {
             floor_idx: 0,
             indoor_scale: 1.0,
             neon: NeonLevels::BUSY,
-            now: SystemTime::UNIX_EPOCH,
+            beat: Beat::at_ms(0),
         },
     );
     let kinds: Vec<_> = lights.monitor_halos.iter().map(|h| h.kind).collect();

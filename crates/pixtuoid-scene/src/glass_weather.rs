@@ -172,7 +172,7 @@ impl GlassWeather {
         Self {
             veil: moment.look.glass_veil,
             fall: fall(moment.sky.weather()),
-            tick: crate::anim::epoch_ms(moment.now),
+            tick: moment.beat.ms(),
         }
     }
 
@@ -244,7 +244,7 @@ mod tests {
             Sky::at_with(now, w),
             &crate::theme::NORMAL,
             0.0,
-            now,
+            crate::anim::Motion::Full.clock(now),
         ))
     }
 

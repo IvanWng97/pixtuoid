@@ -68,7 +68,8 @@ impl OfficeRenderer {
 
     /// The neon wall-board model for the current scene.
     pub fn board(&self, scene: &SceneState, now: SystemTime) -> pixtuoid_scene::board::BoardModel {
-        self.session.board(scene, now)
+        self.session
+            .board(scene, pixtuoid_scene::anim::Motion::Full, now)
     }
 
     /// The status-footer model for the current scene — single-floor, so `floor = None`
@@ -823,6 +824,7 @@ mod tests {
             90,
             None,
             None,
+            pixtuoid_scene::anim::Motion::Full,
             std::time::SystemTime::UNIX_EPOCH,
         );
         let scale = 8i32;

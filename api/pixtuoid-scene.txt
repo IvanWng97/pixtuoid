@@ -189,10 +189,12 @@ pub struct pixtuoid_scene::floor::FloorMeta
 pub pixtuoid_scene::floor::FloorMeta::altitude: f32
 pub pixtuoid_scene::floor::FloorMeta::floor_idx: usize
 pub pixtuoid_scene::floor::FloorMeta::floor_seed: u64
+pub pixtuoid_scene::floor::FloorMeta::motion: crate::anim::Motion
 pub pixtuoid_scene::floor::FloorMeta::weather: pixtuoid_scene::pixel_painter::WeatherPolicy
 impl pixtuoid_scene::floor::FloorMeta
 pub fn pixtuoid_scene::floor::FloorMeta::for_floor(usize, usize) -> Self
 pub fn pixtuoid_scene::floor::FloorMeta::ground() -> Self
+pub fn pixtuoid_scene::floor::FloorMeta::with_motion(self, crate::anim::Motion) -> Self
 pub fn pixtuoid_scene::floor::FloorMeta::with_weather(self, pixtuoid_scene::pixel_painter::WeatherPolicy) -> Self
 impl core::clone::Clone for pixtuoid_scene::floor::FloorMeta
 pub fn pixtuoid_scene::floor::FloorMeta::clone(&self) -> pixtuoid_scene::floor::FloorMeta
@@ -211,7 +213,7 @@ pub pixtuoid_scene::floor::FloorSession::floor: pixtuoid_scene::floor::PerFloor
 pub pixtuoid_scene::floor::FloorSession::office: pixtuoid_scene::floor::PerOffice
 impl pixtuoid_scene::floor::FloorSession
 pub fn pixtuoid_scene::floor::FloorSession::audio_frame(&mut self, &pixtuoid_core::state::SceneState, pixtuoid_scene::floor::FloorMeta, std::time::SystemTime) -> AudioFrame
-pub fn pixtuoid_scene::floor::FloorSession::board(&self, &pixtuoid_core::state::SceneState, std::time::SystemTime) -> crate::board::BoardModel
+pub fn pixtuoid_scene::floor::FloorSession::board(&self, &pixtuoid_core::state::SceneState, crate::anim::Motion, std::time::SystemTime) -> crate::board::BoardModel
 pub fn pixtuoid_scene::floor::FloorSession::buf(&self) -> &pixtuoid_core::sprite::RgbBuffer
 pub fn pixtuoid_scene::floor::FloorSession::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::FloorSession::new() -> Self
@@ -1577,7 +1579,6 @@ pub pixtuoid_scene::pose::Pose::AtWaypoint::wp: usize
 pub pixtuoid_scene::pose::Pose::SeatedIdle
 pub pixtuoid_scene::pose::Pose::SeatedThinking
 pub pixtuoid_scene::pose::Pose::SeatedTyping
-pub pixtuoid_scene::pose::Pose::SeatedTyping::frame: usize
 pub pixtuoid_scene::pose::Pose::Walking
 pub pixtuoid_scene::pose::Pose::Walking::carrying_coffee: bool
 pub pixtuoid_scene::pose::Pose::Walking::frame: usize
@@ -1644,6 +1645,7 @@ pub pixtuoid_scene::pose::RouteCtx::history: &'a mut pixtuoid_scene::pose::PoseH
 pub pixtuoid_scene::pose::RouteCtx::motion: &'a mut std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, pixtuoid_scene::motion::MotionState>
 pub pixtuoid_scene::pose::RouteCtx::overlay: &'a pixtuoid_core::walkable::OccupancyOverlay
 pub pixtuoid_scene::pose::RouteCtx::router: &'a mut dyn pixtuoid_scene::pathfind::Router
+pub pixtuoid_scene::pose::RouteCtx::wanders: bool
 impl<'a> core::marker::Freeze for pixtuoid_scene::pose::RouteCtx<'a>
 impl<'a> !core::marker::Send for pixtuoid_scene::pose::RouteCtx<'a>
 impl<'a> !core::marker::Sync for pixtuoid_scene::pose::RouteCtx<'a>

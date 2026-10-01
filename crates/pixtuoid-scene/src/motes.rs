@@ -1,8 +1,6 @@
 //! The dust motes drifting through each window's sunbeam, pixel-free: where
 //! each one is and how much of it shows. A painter draws each its own way.
 
-use std::time::SystemTime;
-
 use crate::layout::Layout;
 
 /// One window's sunbeam, the column its motes drift down.
@@ -31,15 +29,15 @@ pub(crate) fn visibility(look: &crate::atmosphere::SkyTones) -> f32 {
     (look.sunlight * look.beam).max(0.0)
 }
 
-/// Deterministic per `(floor_seed, particle_id, now)`: sine drift in x, slow
+/// Deterministic per `(floor_seed, particle_id, beat)`: sine drift in x, slow
 /// fall in y, alpha fading in the top/bottom 15% bands so motes don't pop
 /// on/off at the spill boundary.
 pub(crate) fn dust_mote_positions(
     floor_seed: u64,
-    now: SystemTime,
+    beat: crate::anim::Beat,
     col: &SunbeamColumn,
 ) -> Vec<DustMote> {
-    let t_ms = crate::anim::epoch_ms(now);
+    let t_ms = beat.ms();
     let mut out = Vec::with_capacity(MOTES_PER_COLUMN);
     for i in 0..MOTES_PER_COLUMN {
         // Mix floor_seed, column x, and particle id so every (column, mote) pair
@@ -96,11 +94,11 @@ pub(crate) fn window_spill_columns(layout: &Layout) -> Vec<SunbeamColumn> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
+    use crate::anim::Beat;
 
     #[test]
     fn dust_mote_positions_deterministic_per_seed() {
-        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(12 * 3600 + 5);
+        let now = Beat::at_ms((12 * 3600 + 5) * 1000);
         let col = SunbeamColumn {
             x: 100,
             top_y: 12,
@@ -114,8 +112,8 @@ mod tests {
 
     #[test]
     fn dust_motes_drift_over_time() {
-        let now1 = SystemTime::UNIX_EPOCH + Duration::from_secs(12 * 3600);
-        let now2 = now1 + Duration::from_millis(500);
+        let now1 = Beat::at_ms(12 * 3600 * 1000);
+        let now2 = Beat::at_ms(12 * 3600 * 1000 + 500);
         let col = SunbeamColumn {
             x: 100,
             top_y: 12,
@@ -128,8 +126,8 @@ mod tests {
 
     #[test]
     fn dust_motes_drift_at_wall_clock_scale() {
-        let now1 = SystemTime::UNIX_EPOCH + Duration::from_millis(1_752_000_000_000);
-        let now2 = now1 + Duration::from_millis(500);
+        let now1 = Beat::at_ms(1_752_000_000_000);
+        let now2 = Beat::at_ms(1_752_000_000_500);
         let col = SunbeamColumn {
             x: 100,
             top_y: 12,
@@ -149,7 +147,7 @@ mod tests {
         };
         let mut saw_partial = false;
         'outer: for ms in 0..5000u64 {
-            let now = SystemTime::UNIX_EPOCH + Duration::from_millis(ms * 50);
+            let now = Beat::at_ms(ms * 50);
             for DustMote { alpha, .. } in dust_mote_positions(123, now, &col) {
                 if alpha < 0.5 {
                     saw_partial = true;

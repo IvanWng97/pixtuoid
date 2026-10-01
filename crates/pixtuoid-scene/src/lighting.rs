@@ -4,12 +4,10 @@
 //! or how bright it is.
 
 use std::collections::HashMap;
-use std::time::SystemTime;
 
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::{AgentSlot, ToolKind};
 
-use crate::anim::epoch_ms;
 use crate::atmosphere::SkyTones;
 use crate::floor::NeonLevels;
 use crate::layout::{Facing, Layout, Point};
@@ -293,7 +291,8 @@ pub(crate) struct LightInputs<'a> {
     /// The room's artificial-light level, which an emptied floor turns down.
     pub(crate) indoor_scale: f32,
     pub(crate) neon: NeonLevels,
-    pub(crate) now: SystemTime,
+    /// The neon halo's breath steps on it.
+    pub(crate) beat: crate::anim::Beat,
 }
 
 impl Lights {
@@ -335,7 +334,7 @@ impl Lights {
                     h: crate::layout::NEON_PANEL.height,
                     reach: NEON_HALO_RADIUS,
                 },
-                strength: neon_halo_strength(inputs.neon, inputs.now, darkness),
+                strength: neon_halo_strength(inputs.neon, inputs.beat, darkness),
             },
             // `sunlight` already carries the weather, so heavy cloud dims the
             // spill with it.
@@ -467,8 +466,8 @@ fn neon_breath(elapsed_ms: u64, period_ms: u64, floor: f32) -> f32 {
 
 /// The neon halo's strength at the tube: breathing, dimmed by daylight, and
 /// none from a tube driven no harder than it is starved.
-fn neon_halo_strength(levels: NeonLevels, now: SystemTime, darkness: f32) -> f32 {
-    let ms = epoch_ms(now);
+fn neon_halo_strength(levels: NeonLevels, beat: crate::anim::Beat, darkness: f32) -> f32 {
+    let ms = beat.ms();
     let brand = NEON_HALO_BRAND * neon_breath(ms, NEON_BREATH_MS, NEON_BREATH_FLOOR);
     let alert = NEON_HALO_ALERT * neon_breath(ms, NEON_ALERT_BREATH_MS, NEON_ALERT_BREATH_FLOOR);
     let daylight = NEON_DAYLIGHT_MIN + (1.0 - NEON_DAYLIGHT_MIN) * darkness.clamp(0.0, 1.0);

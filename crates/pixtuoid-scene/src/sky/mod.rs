@@ -8,6 +8,9 @@
 use std::time::SystemTime;
 
 #[cfg(test)]
+use crate::anim::Motion;
+
+#[cfg(test)]
 mod tests;
 
 /// The weather outside the office's windows.
@@ -369,8 +372,9 @@ fn moon_phase_at(now: SystemTime) -> f32 {
 /// ([`strike_offset`]) — a much faster cadence reads as a hyperactive storm.
 const LIGHTNING_PERIOD_MS: u64 = 15000;
 /// The shortest a flash's phase may last: each of [`LIGHTNING_PHASES`] holds
-/// this long, the photosensitive-safe bound.
-const MIN_FLASH_PHASE_MS: u64 = 100;
+/// this long, the photosensitive-safe bound, and a whole Full beat so none is
+/// skipped.
+const MIN_FLASH_PHASE_MS: u64 = crate::anim::FULL_TICK_MS;
 /// A strike's levels in order, each held [`MIN_FLASH_PHASE_MS`]: the primary
 /// strike, a brief dim, an after-flash, so it reads as a flicker rather than a
 /// single blink.
@@ -393,16 +397,21 @@ fn lightning_envelope(since_strike_ms: u64) -> f32 {
 /// Per-bucket strike offset (ms into the bucket) so strikes don't fire on a
 /// fixed metronome. Each `LIGHTNING_PERIOD_MS`-long bucket hashes to its own
 /// offset, leaving the flash and [`FLASH_SEPARATION_MS`] after it inside the
-/// bucket, so the next bucket's strike is never too close.
+/// bucket, so the next bucket's strike is never too close. It lands on a
+/// phase boundary, so each phase holds whole beats.
 fn strike_offset(bucket: u64) -> u64 {
-    crate::splitmix_draw(bucket, 1)
-        % (LIGHTNING_PERIOD_MS - LIGHTNING_FLASH_MS - FLASH_SEPARATION_MS)
+    let off = crate::splitmix_draw(bucket, 1)
+        % (LIGHTNING_PERIOD_MS - LIGHTNING_FLASH_MS - FLASH_SEPARATION_MS);
+    off / MIN_FLASH_PHASE_MS * MIN_FLASH_PHASE_MS
 }
 
-/// [`lightning_envelope`] for the clock at `now`, or 0 when not mid-strike —
+/// [`lightning_envelope`] on `beat`, or 0 when not mid-strike or at rest —
 /// whatever the weather; a painter only shows it under a storm.
-fn flash_level_at(now: SystemTime) -> f32 {
-    let elapsed_ms = crate::anim::epoch_ms(now);
+fn flash_level_at(beat: crate::anim::Beat) -> f32 {
+    if beat.is_rest() {
+        return 0.0;
+    }
+    let elapsed_ms = beat.ms();
     let bucket = elapsed_ms / LIGHTNING_PERIOD_MS;
     let phase = elapsed_ms % LIGHTNING_PERIOD_MS;
     match phase.checked_sub(strike_offset(bucket)) {
@@ -433,7 +442,8 @@ pub(crate) struct Sky {
 }
 
 impl Sky {
-    pub(crate) fn at(now: SystemTime, weather: WeatherPolicy) -> Self {
+    pub(crate) fn at(clock: crate::anim::Clock, weather: WeatherPolicy) -> Self {
+        let now = clock.now;
         let (moon_phase, moon_age) = (moon_phase_at(now), moon_age_at(now));
         let h = local_hour_frac(now);
         let nightfall = nightfall(h);
@@ -443,20 +453,20 @@ impl Sky {
             moon_phase,
             moon_waxing: moon_age < SYNODIC_DAYS / 2.0,
             nightfall,
-            flash: flash_level_at(now),
+            flash: flash_level_at(clock.beat),
         }
     }
 
     /// The sky at `now` under `weather`, whatever the clock picks.
     #[cfg(test)]
     pub(crate) fn at_with(now: SystemTime, weather: Weather) -> Self {
-        Self::at(now, WeatherPolicy::Forced(weather))
+        Self::at(Motion::Full.clock(now), WeatherPolicy::Forced(weather))
     }
 
     /// The sky at `now` under the clock's weather.
     #[cfg(test)]
     pub(crate) fn clock(now: SystemTime) -> Self {
-        Self::at(now, WeatherPolicy::Clock)
+        Self::at(Motion::Full.clock(now), WeatherPolicy::Clock)
     }
 
     /// This sky with the lightning envelope at `flash` — a painter test's

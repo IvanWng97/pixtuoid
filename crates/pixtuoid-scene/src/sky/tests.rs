@@ -115,12 +115,19 @@ fn a_policy_picks_the_clock_or_holds_its_weather() {
     for slot in 0..40 {
         let now = t + Duration::from_secs(slot * WEATHER_CYCLE_SECS / 2);
         assert_eq!(
-            Sky::at(now, WeatherPolicy::Clock).weather(),
+            Sky::at(crate::anim::Motion::Full.clock(now), WeatherPolicy::Clock).weather(),
             clock_weather(now),
             "{slot}"
         );
         for w in Weather::ALL {
-            assert_eq!(Sky::at(now, WeatherPolicy::Forced(w)).weather(), w);
+            assert_eq!(
+                Sky::at(
+                    crate::anim::Motion::Full.clock(now),
+                    WeatherPolicy::Forced(w)
+                )
+                .weather(),
+                w
+            );
         }
     }
     assert_eq!(WeatherPolicy::default(), WeatherPolicy::Clock);
@@ -324,6 +331,22 @@ fn the_weather_is_deterministic_and_changes_across_slots() {
     let unique: std::collections::HashSet<_> =
         (0..20).map(|slot| clock_weather(at(slot))).collect();
     assert!(unique.len() >= 2, "weather should vary across slots");
+}
+
+/// At rest no strike flashes, for the photosensitive.
+#[test]
+fn no_strike_flashes_at_rest() {
+    for bucket in 0..24u64 {
+        let strike = std::time::UNIX_EPOCH
+            + std::time::Duration::from_millis(
+                bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket),
+            );
+        let sky = Sky::at(
+            crate::anim::Motion::Still.clock(strike),
+            WeatherPolicy::Forced(Weather::Storm),
+        );
+        assert_eq!(sky.flash(), 0.0, "bucket {bucket}");
+    }
 }
 
 /// The one pin on the clock-to-flash path through [`Sky::at`]; painter tests

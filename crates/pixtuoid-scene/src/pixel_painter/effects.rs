@@ -148,7 +148,11 @@ mod tests {
     fn render(head: Point, phase_ms: u64) -> RgbBuffer {
         let mut buf = RgbBuffer::filled(64, 64, Rgb { r: 0, g: 0, b: 0 });
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(phase_ms);
-        paint_effects(&mut buf, &crate::effects::sleep_z(head, 0, now), theme());
+        paint_effects(
+            &mut buf,
+            &crate::effects::sleep_z(head, 0, crate::anim::Motion::Full.beat(now)),
+            theme(),
+        );
         buf
     }
 

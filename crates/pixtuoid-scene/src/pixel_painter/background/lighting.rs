@@ -210,6 +210,7 @@ pub(in crate::pixel_painter) fn paint_corridor_runner(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::anim::Beat;
 
     use crate::floor::{NeonLevels, neon_look};
     use crate::layout::{NEON_PANEL_BORDER, NEON_PANEL_H, NEON_PANEL_W, Point};
@@ -384,7 +385,7 @@ mod tests {
                 floor_idx: 0,
                 indoor_scale: 1.0,
                 neon: NeonLevels::FLASH,
-                now: SystemTime::UNIX_EPOCH,
+                beat: Beat::at_ms(0),
             },
         );
         let patch = Emitter {
@@ -463,7 +464,7 @@ mod tests {
                 floor_idx: 0,
                 indoor_scale: 1.0,
                 neon: NeonLevels::FLASH,
-                now: SystemTime::UNIX_EPOCH,
+                beat: Beat::at_ms(0),
             },
         );
         let fill = Rgb {

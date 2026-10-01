@@ -79,6 +79,8 @@ pub struct FloorMeta {
     pub floor_seed: u64,
     /// Which weather its windows show, and its rain sounds.
     pub weather: crate::sky::WeatherPolicy,
+    /// How much of its ambient life moves.
+    pub motion: crate::anim::Motion,
 }
 
 impl FloorMeta {
@@ -96,12 +98,18 @@ impl FloorMeta {
             altitude,
             floor_seed: floor_seed(floor_idx),
             weather: crate::sky::WeatherPolicy::Clock,
+            motion: crate::anim::Motion::Full,
         }
     }
 
     /// This floor under `weather`.
     pub fn with_weather(self, weather: crate::sky::WeatherPolicy) -> Self {
         Self { weather, ..self }
+    }
+
+    /// This floor moving as `motion` says.
+    pub fn with_motion(self, motion: crate::anim::Motion) -> Self {
+        Self { motion, ..self }
     }
 
     /// The lone floor of a single-floor office (index 0, altitude 0.0).
@@ -652,13 +660,20 @@ impl FloorSession {
         crate::overlay::build_overlay(scene, &self.last_agents, hovered)
     }
 
-    /// The neon wall-board model for `scene`, with no cross-floor breadcrumb.
-    pub fn board(&self, scene: &SceneState, now: SystemTime) -> crate::board::BoardModel {
+    /// The neon wall-board model for `scene`, with no cross-floor breadcrumb,
+    /// its flap moving as `motion` says.
+    pub fn board(
+        &self,
+        scene: &SceneState,
+        motion: crate::anim::Motion,
+        now: SystemTime,
+    ) -> crate::board::BoardModel {
         crate::board::build_board(
             crate::board::scene_stats(scene),
             crate::board::scene_uptime_secs(scene, now),
             None,
             crate::board::office_gateway(scene),
+            motion,
             now,
         )
     }
@@ -944,12 +959,13 @@ impl NeonState {
     pub(crate) const FADE_MS: u32 = 1_600;
     /// A starved tube's stutter cycle (ms).
     const STUTTER_MS: u64 = 5_000;
-    /// The flash windows inside one cycle, `[start, end)` ms.
+    /// The flash windows inside one cycle, `[start, end)` ms: each a whole
+    /// Full beat, so the beat neither skips nor stretches one.
     const STUTTER_FLASHES_MS: [(u64, u64); 4] = [
-        (1_900, 1_980),
-        (2_060, 2_130),
-        (2_280, 2_400),
-        (4_100, 4_170),
+        (1_875, 2_000),
+        (2_125, 2_250),
+        (2_375, 2_500),
+        (4_125, 4_250),
     ];
 
     /// A sign that has not been lit yet.
@@ -957,8 +973,11 @@ impl NeonState {
         Self::default()
     }
 
-    fn stutter_flash(now: SystemTime) -> bool {
-        let t = crate::anim::epoch_ms(now) % Self::STUTTER_MS;
+    fn stutter_flash(beat: crate::anim::Beat) -> bool {
+        if beat.is_rest() {
+            return false;
+        }
+        let t = beat.ms() % Self::STUTTER_MS;
         Self::STUTTER_FLASHES_MS
             .iter()
             .any(|&(start, end)| (start..end).contains(&t))
@@ -976,7 +995,7 @@ impl NeonState {
             .unwrap_or(0)
     }
 
-    /// Advance to `mood` at `now`; returns this frame's light. A count change
+    /// Advance to `mood` on `clock`; returns this frame's light. A count change
     /// inside one mood is not a change, and a reversal mid-fade restarts from the
     /// light it interrupted.
     ///
@@ -988,9 +1007,10 @@ impl NeonState {
         &mut self,
         mood: crate::board::OfficeMood,
         room_dimmed: bool,
-        now: SystemTime,
+        clock: crate::anim::Clock,
     ) -> NeonLevels {
         use crate::board::OfficeMood;
+        let now = clock.now;
         let to = match mood {
             OfficeMood::Alert { .. } => NeonLevels::ALERT,
             OfficeMood::Busy { .. } => NeonLevels::BUSY,
@@ -1024,7 +1044,7 @@ impl NeonState {
         };
         // Only a tube that has LANDED on starved stutters, not one coasting down.
         let drawable = gap_ms.is_some_and(|gap| gap < Self::shortest_flash_ms());
-        if current == NeonLevels::EMPTY && drawable && Self::stutter_flash(now) {
+        if current == NeonLevels::EMPTY && drawable && Self::stutter_flash(clock.beat) {
             NeonLevels::FLASH
         } else {
             current

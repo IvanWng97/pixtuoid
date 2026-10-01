@@ -22,8 +22,6 @@ use crate::layout::{Anchor, Depth, Facing, FixtureKind, Layout, Point, Station, 
 use crate::motion::MotionState;
 use crate::pet::PetFrame;
 
-pub(super) use crate::anim::epoch_ms;
-
 /// Everything the pure-pixel pass observed that the caller still needs.
 pub struct PixelPassResult {
     /// The office pet's resolved frame this tick (for hit-testing), if present.
@@ -164,7 +162,7 @@ pub fn weather_names() -> Vec<&'static str> {
 /// How hard it is raining at `now` under `weather` (0.0 dry … 1.0 storm; snow
 /// and fog are 0.0) — the audio model's weather feed.
 pub fn precipitation_level(now: std::time::SystemTime, weather: WeatherPolicy) -> f32 {
-    crate::sky::Sky::at(now, weather).precipitation()
+    crate::sky::Sky::at(crate::anim::Motion::Full.clock(now), weather).precipitation()
 }
 
 /// Whether the office's sky shows the SUN at hour-of-day `hour` (0..24).
@@ -215,10 +213,10 @@ struct PaintCtx<'a> {
     scene: &'a SceneState,
     layout: &'a Layout,
     pack: &'a Pack,
-    /// Animation phase, event ages and the wall clock — every sky fact reads
-    /// [`Self::sky`].
-    now: SystemTime,
-    /// The sky at `now`, sampled once for the whole pass.
+    /// Event ages and the wall clock, and the beat every ambient loop reads —
+    /// every sky fact reads [`Self::sky`].
+    clock: crate::anim::Clock,
+    /// The sky on `clock`, sampled once for the whole pass.
     sky: crate::sky::Sky,
     buf: &'a mut RgbBuffer,
     cache: &'a mut FrameCache,
@@ -237,7 +235,7 @@ impl PaintCtx<'_> {
             buf: &mut *self.buf,
             pack: self.pack,
             cache: &mut *self.cache,
-            now: self.now,
+            clock: self.clock,
             theme: self.theme,
         }
     }
@@ -256,6 +254,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             door_anim_max_ms,
         },
     );
+    let clock = ctx.world.floor.motion.clock(ctx.world.now);
     let Hoverables {
         pet_pos,
         mascots,
@@ -265,8 +264,8 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             scene: ctx.world.scene,
             layout: ctx.layout,
             pack: ctx.world.pack,
-            now: ctx.world.now,
-            sky: crate::sky::Sky::at(ctx.world.now, ctx.world.floor.weather),
+            clock,
+            sky: crate::sky::Sky::at(clock, ctx.world.floor.weather),
             buf: &mut *ctx.buf,
             cache: &mut ctx.store.cache,
             base_fill: &mut ctx.store.base_fill,
@@ -296,7 +295,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;
 
-    let moment = Moment::resolve(ctx.sky, ctx.theme, ctx.floor.altitude, ctx.now);
+    let moment = Moment::resolve(ctx.sky, ctx.theme, ctx.floor.altitude, ctx.clock);
     let look = &moment.look;
     let lights = Lights::of(
         ctx.layout,
@@ -307,7 +306,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
             floor_idx: ctx.floor.floor_idx,
             indoor_scale: frame.indoor_scale,
             neon: frame.neon,
-            now: ctx.now,
+            beat: ctx.clock.beat,
         },
     );
     let top_wall_h = ctx.layout.wall_band_h();
@@ -609,7 +608,7 @@ fn queue_fixtures<'a>(
                             // A fixture, which always steams: nothing for the sim to decide.
                             steam: crate::effects::steam(
                                 drawable::pantry_steam_at(f.at, anim),
-                                ctx.now,
+                                ctx.clock.beat,
                             ),
                         }
                     }

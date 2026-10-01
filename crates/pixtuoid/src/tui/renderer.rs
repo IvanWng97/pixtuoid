@@ -323,6 +323,7 @@ pub(crate) fn wall_board(
         pixtuoid_scene::board::scene_uptime_secs(scene, now),
         footer.context.floor.map(|fi| (fi.current, fi.total_floors)),
         footer.context.gateway,
+        pixtuoid_scene::anim::Motion::Full,
         now,
     )
 }

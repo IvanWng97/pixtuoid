@@ -53,6 +53,81 @@ pub(crate) fn epoch_ms(now: SystemTime) -> u64 {
     elapsed_ms(now, SystemTime::UNIX_EPOCH)
 }
 
+/// How much of the office's ambient life moves: the loops that only make it
+/// look alive — a flicker, a twinkle, an idle wander — never what an agent is
+/// doing. Each tier steps those loops on its own clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Motion {
+    /// Every loop, stepped each [`FULL_TICK_MS`].
+    #[default]
+    Full,
+    /// Every loop at a quarter of Full's pace: each [`CALM_TICK_MS`] it steps
+    /// one Full tick, so a loop plays Full's very sequence, slower, and none
+    /// aliases on the slower repaint.
+    Calm,
+    /// No loop moves and no lightning flashes: each holds its first frame.
+    Still,
+}
+
+/// How often a [`Motion::Full`] loop steps.
+pub const FULL_TICK_MS: u64 = 125;
+/// How often a [`Motion::Calm`] loop steps.
+pub const CALM_TICK_MS: u64 = 500;
+
+impl Motion {
+    /// The ambient clock at `now`, a function of `now` alone so a frame is
+    /// too: Full's is the instant floored to its tick, Calm's that many
+    /// repaints of Full ticks.
+    pub(crate) fn beat(self, now: SystemTime) -> Beat {
+        let ms = epoch_ms(now);
+        match self {
+            Self::Full => Beat(Some(ms / FULL_TICK_MS * FULL_TICK_MS)),
+            Self::Calm => Beat(Some(ms / CALM_TICK_MS * FULL_TICK_MS)),
+            Self::Still => Beat(None),
+        }
+    }
+
+    /// `now` and its [`beat`](Self::beat).
+    pub(crate) fn clock(self, now: SystemTime) -> Clock {
+        Clock {
+            now,
+            beat: self.beat(now),
+        }
+    }
+}
+
+/// An instant, and the [`Beat`] its ambient loops read at it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Clock {
+    pub(crate) now: SystemTime,
+    pub(crate) beat: Beat,
+}
+
+/// The clock every ambient loop reads instead of the wall clock, so two
+/// instants on one beat paint the same frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Beat(Option<u64>);
+
+impl Beat {
+    /// Milliseconds since the Unix epoch on the beat; 0 at rest, where every
+    /// loop holds its first frame.
+    pub(crate) fn ms(self) -> u64 {
+        self.0.unwrap_or(0)
+    }
+
+    /// Whether nothing moves: a source with no frame to hold, a flash, shows
+    /// none.
+    pub(crate) fn is_rest(self) -> bool {
+        self.0.is_none()
+    }
+
+    /// A beat at exactly `ms`, off any tier's tick.
+    #[cfg(test)]
+    pub(crate) fn at_ms(ms: u64) -> Self {
+        Self(Some(ms))
+    }
+}
+
 /// Compute the eased progress of an animation `[0.0, 1.0]` given its
 /// `started_at` wall-clock time, total `duration_ms`, and `easing` curve.
 pub fn eased_progress(
@@ -77,6 +152,46 @@ mod tests {
 
     fn approx_eq(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-4
+    }
+
+    fn at(ms: u64) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
+    }
+
+    #[test]
+    fn each_moving_tier_steps_its_loops_once_a_tick() {
+        const T0: u64 = 1_700_000_000_000;
+        for (motion, tick) in [(Motion::Full, FULL_TICK_MS), (Motion::Calm, CALM_TICK_MS)] {
+            let beat = |ms| motion.beat(at(T0 + ms));
+            assert_eq!(beat(0), beat(tick - 1), "{motion:?} moved inside a tick");
+            assert_ne!(beat(tick - 1), beat(tick), "{motion:?} held past its tick");
+        }
+    }
+
+    /// Calm's repaint advances its loops by exactly one Full tick, so a loop
+    /// whose frames hold whole Full ticks visits each in turn: a two-frame loop
+    /// of any whole-tick period flips within that many repaints, where a plain
+    /// 500 ms sample of a 250 ms loop would land on one frame forever.
+    #[test]
+    fn calm_plays_every_whole_tick_loop_without_aliasing() {
+        const T0: u64 = 1_700_000_000_000;
+        for ticks in 1..=10 {
+            let period = ticks * FULL_TICK_MS;
+            let frames: std::collections::HashSet<u64> = (0..=ticks)
+                .map(|repaint| Motion::Calm.beat(at(T0 + repaint * CALM_TICK_MS)).ms() / period % 2)
+                .collect();
+            assert_eq!(frames.len(), 2, "a {period} ms two-frame loop aliased");
+        }
+        let step = |n: u64| Motion::Calm.beat(at(T0 + n * CALM_TICK_MS)).ms();
+        assert_eq!(step(1) - step(0), FULL_TICK_MS, "one Full tick a repaint");
+    }
+
+    #[test]
+    fn still_rests_at_every_instant() {
+        let beat = |ms| Motion::Still.beat(at(ms));
+        assert!(beat(0).is_rest());
+        assert_eq!(beat(1_700_000_000_000), beat(1_700_003_600_000));
+        assert_eq!(beat(0).ms(), 0, "a loop at rest holds its first frame");
     }
 
     #[test]

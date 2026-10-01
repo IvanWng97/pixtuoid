@@ -6,13 +6,11 @@
 //! `walk_between`, rest. Daemon state reads from the CADENCE (`MASCOT_*_CYCLE_MS`)
 //! and the sprite tint, never from the destination.
 
-use std::time::SystemTime;
-
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{DaemonLiveness, DaemonPresence, DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
 
-use crate::anim::epoch_ms;
+use crate::anim::{Clock, epoch_ms};
 use crate::layout::{Layout, Point};
 use crate::pathfind::{find_path, snap_point_to_walkable};
 use crate::pet::PetKind;
@@ -76,7 +74,7 @@ pub(crate) fn pet_position(
     kind: PetKind,
     layout: &Layout,
     pack: &Pack,
-    now: SystemTime,
+    clock: Clock,
     idle_desk_indices: &[FloorLocalDeskIndex],
     all_idle: bool,
     pet_seed: u64,
@@ -84,7 +82,13 @@ pub(crate) fn pet_position(
     pack.animation(kind.walk_anim())?;
     layout.corridor?;
 
-    let elapsed_ms = epoch_ms(now);
+    // Its roam is ambient: at rest it holds the middle of its first cycle,
+    // resting at that cycle's spot.
+    let elapsed_ms = if clock.beat.is_rest() {
+        PET_CYCLE_MS / 2
+    } else {
+        epoch_ms(clock.now)
+    };
 
     let cycle_n = (elapsed_ms / PET_CYCLE_MS).wrapping_add(pet_seed);
     let frac = (elapsed_ms % PET_CYCLE_MS) as f32 / PET_CYCLE_MS as f32;
@@ -285,9 +289,10 @@ pub(crate) fn mascot_position(
     presence: &DaemonPresence,
     walk_anim: &'static str,
     rest_anim: &'static str,
-    now: SystemTime,
+    clock: Clock,
     seed: u64,
 ) -> Option<(Point, &'static str, usize)> {
+    let now = clock.now;
     let elevator = mascot_elevator(layout)?;
     let anchor = |pos: Point, anim: &'static str, frame_idx: usize| (pos, anim, frame_idx);
     const MASCOT_ANIM_FRAME_MS: u64 = 200;
@@ -338,6 +343,12 @@ pub(crate) fn mascot_position(
         ));
     }
 
+    // Its wander is ambient: at rest it stays where its walk-in ended.
+    if clock.beat.is_rest() {
+        let home = walkable_target(layout, seed, 0);
+        let home = snap_point_to_walkable(&layout.walkable, home).unwrap_or(home);
+        return Some(anchor(home, rest_anim, 0));
+    }
     let cycle_ms = match presence.display_state() {
         DaemonState::Busy => MASCOT_BUSY_CYCLE_MS,
         DaemonState::Degraded => MASCOT_DEGRADED_CYCLE_MS,
@@ -369,6 +380,8 @@ mod tests {
     }
 
     use super::*;
+    use crate::anim::Motion;
+    use std::time::SystemTime;
 
     fn p(x: u16, y: u16) -> Point {
         Point { x, y }
@@ -437,8 +450,16 @@ mod tests {
         let pack = test_pack();
         // frac = 0.5: the rest phase.
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(PET_CYCLE_MS / 2);
-        let (_, _, anim, frame) =
-            pet_position(PetKind::Cat, &layout, &pack, now, &[], true, 0).expect("a pet position");
+        let (_, _, anim, frame) = pet_position(
+            PetKind::Cat,
+            &layout,
+            &pack,
+            Motion::Full.clock(now),
+            &[],
+            true,
+            0,
+        )
+        .expect("a pet position");
         assert_eq!(anim, PetKind::Cat.sleep_anim(), "all_idle → sleep anim");
         assert_eq!(frame, 0, "rest pose uses frame 0");
     }
@@ -502,8 +523,16 @@ mod tests {
             y: lerp(src_anchor.y, dst_anchor.y),
         };
 
-        let (pos, _, anim, _) =
-            pet_position(PetKind::Cat, &layout, &pack, now, &[], false, seed).expect("walk pos");
+        let (pos, _, anim, _) = pet_position(
+            PetKind::Cat,
+            &layout,
+            &pack,
+            Motion::Full.clock(now),
+            &[],
+            false,
+            seed,
+        )
+        .expect("walk pos");
         assert_eq!(anim, PetKind::Cat.walk_anim(), "walk phase");
         assert_eq!(
             pos, expected,
@@ -562,9 +591,15 @@ mod tests {
                 for cycle in 0..6u64 {
                     let now = SystemTime::UNIX_EPOCH
                         + std::time::Duration::from_millis(cycle * PET_CYCLE_MS + 34_000);
-                    if let Some((p, _, anim, _)) =
-                        pet_position(PetKind::Cat, &l, &pack, now, &[], false, seed)
-                        && !anim.contains("walk")
+                    if let Some((p, _, anim, _)) = pet_position(
+                        PetKind::Cat,
+                        &l,
+                        &pack,
+                        Motion::Full.clock(now),
+                        &[],
+                        false,
+                        seed,
+                    ) && !anim.contains("walk")
                     {
                         assert!(
                             l.is_visually_clear(p),
@@ -658,7 +693,7 @@ mod tests {
                         &idle_presence(now, 30_000),
                         "lobster_walk",
                         "lobster_rest",
-                        now,
+                        Motion::Full.clock(now),
                         7,
                     )
                     .is_some(),
@@ -721,7 +756,7 @@ mod tests {
                     &presence,
                     "lobster_walk",
                     "lobster_rest",
-                    now,
+                    Motion::Full.clock(now),
                     seed,
                 ) else {
                     continue;
@@ -820,8 +855,15 @@ mod tests {
             let pts: Vec<Point> = seeds
                 .iter()
                 .filter_map(|&sd| {
-                    mascot_position(&layout, &p, "lobster_walk", "lobster_rest", now, sd)
-                        .map(|(pos, _, _)| pos)
+                    mascot_position(
+                        &layout,
+                        &p,
+                        "lobster_walk",
+                        "lobster_rest",
+                        Motion::Full.clock(now),
+                        sd,
+                    )
+                    .map(|(pos, _, _)| pos)
                 })
                 .collect();
             if pts.len() < 2 {
@@ -865,9 +907,16 @@ mod tests {
         let pos_at = |seed: u64, age_ms: u64| {
             let now = entered + std::time::Duration::from_millis(age_ms);
             let p = idle_presence(now, age_ms);
-            mascot_position(&layout, &p, "lobster_walk", "lobster_rest", now, seed)
-                .expect("inside the enter window")
-                .0
+            mascot_position(
+                &layout,
+                &p,
+                "lobster_walk",
+                "lobster_rest",
+                Motion::Full.clock(now),
+                seed,
+            )
+            .expect("inside the enter window")
+            .0
         };
         // The window where the claim holds: from when the LATER instance leaves the
         // door to before the EARLIER one joins its wander. Outside it, two lobsters
@@ -889,7 +938,15 @@ mod tests {
         let drawn = |seed: u64, age_ms: u64| {
             let now = entered + std::time::Duration::from_millis(age_ms);
             let p = idle_presence(now, age_ms);
-            mascot_position(&layout, &p, "lobster_walk", "lobster_rest", now, seed).is_some()
+            mascot_position(
+                &layout,
+                &p,
+                "lobster_walk",
+                "lobster_rest",
+                Motion::Full.clock(now),
+                seed,
+            )
+            .is_some()
         };
         let (first, second) = (da.min(db), da.max(db));
         for age in 0..first {
@@ -915,9 +972,15 @@ mod tests {
         let seed = 0u64;
 
         let p0 = idle_presence(now, 0);
-        let (pos0, anim0, _) =
-            mascot_position(&layout, &p0, "lobster_walk", "lobster_rest", now, seed)
-                .expect("walk-in position");
+        let (pos0, anim0, _) = mascot_position(
+            &layout,
+            &p0,
+            "lobster_walk",
+            "lobster_rest",
+            Motion::Full.clock(now),
+            seed,
+        )
+        .expect("walk-in position");
         assert_eq!(anim0, "lobster_walk", "enter window → walk anim");
         assert_eq!(
             pos0,
@@ -927,9 +990,15 @@ mod tests {
 
         let age = 1_100u64;
         let p_mid = idle_presence(now, age);
-        let (pos_mid, anim_mid, _) =
-            mascot_position(&layout, &p_mid, "lobster_walk", "lobster_rest", now, seed)
-                .expect("walk-in mid position");
+        let (pos_mid, anim_mid, _) = mascot_position(
+            &layout,
+            &p_mid,
+            "lobster_walk",
+            "lobster_rest",
+            Motion::Full.clock(now),
+            seed,
+        )
+        .expect("walk-in mid position");
         assert_eq!(anim_mid, "lobster_walk");
         let t = age as f32 / MASCOT_ENTER_MS as f32;
         assert_eq!(
@@ -979,15 +1048,21 @@ mod tests {
 
         let idle = mk(false, now);
         let degraded = mk(true, now);
-        let (_, idle_anim, _) =
-            mascot_position(&layout, &idle, "lobster_walk", "lobster_rest", now, seed)
-                .expect("idle pos");
+        let (_, idle_anim, _) = mascot_position(
+            &layout,
+            &idle,
+            "lobster_walk",
+            "lobster_rest",
+            Motion::Full.clock(now),
+            seed,
+        )
+        .expect("idle pos");
         let (_, deg_anim, _) = mascot_position(
             &layout,
             &degraded,
             "lobster_walk",
             "lobster_rest",
-            now,
+            Motion::Full.clock(now),
             seed,
         )
         .expect("degraded pos");
@@ -1038,7 +1113,15 @@ mod tests {
         assert_eq!(presence.liveness, DaemonLiveness::Down);
         let seed = mascot_seed(src, &id);
         assert!(
-            mascot_position(&layout, presence, "w", "r", killed_at, seed).is_some(),
+            mascot_position(
+                &layout,
+                presence,
+                "w",
+                "r",
+                Motion::Full.clock(killed_at),
+                seed
+            )
+            .is_some(),
             "a gateway killed after idling must play its elevator walk-out; it \
              vanished instantly instead, which is what the exit-watch rung exists \
              to avoid"
@@ -1069,10 +1152,12 @@ mod tests {
                 ..alive.clone()
             };
 
-            let (was, _, _) = mascot_position(&layout, &alive, "w", "r", died_at, seed)
-                .expect("a live gateway renders a mascot");
-            let (leaving_from, _, _) = mascot_position(&layout, &down, "w", "r", died_at, seed)
-                .expect("a just-died gateway is still walking out");
+            let (was, _, _) =
+                mascot_position(&layout, &alive, "w", "r", Motion::Full.clock(died_at), seed)
+                    .expect("a live gateway renders a mascot");
+            let (leaving_from, _, _) =
+                mascot_position(&layout, &down, "w", "r", Motion::Full.clock(died_at), seed)
+                    .expect("a just-died gateway is still walking out");
             // NOT byte-equality: the exit lerp routes its origin through
             // `walk_between`'s A*+snap, which shifts it a pixel or two off the raw
             // wander point.
@@ -1096,7 +1181,8 @@ mod tests {
                     ..alive.clone()
                 };
                 assert!(
-                    mascot_position(&layout, &held, "w", "r", at, seed).is_none(),
+                    mascot_position(&layout, &held, "w", "r", Motion::Full.clock(at), seed)
+                        .is_none(),
                     "gateway {port} at age {early_ms}ms (< {delay}ms stagger) must not be \
                      drawn yet"
                 );
@@ -1107,7 +1193,15 @@ mod tests {
                 ..alive.clone()
             };
             assert!(
-                mascot_position(&layout, &at_arrival, "w", "r", arrived, seed).is_some(),
+                mascot_position(
+                    &layout,
+                    &at_arrival,
+                    "w",
+                    "r",
+                    Motion::Full.clock(arrived),
+                    seed
+                )
+                .is_some(),
                 "gateway {port} must appear once its {delay}ms stagger elapses"
             );
         }
