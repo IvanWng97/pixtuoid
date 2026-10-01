@@ -7,13 +7,13 @@ use pixtuoid_core::sprite::Rgb;
 use crate::sky::{Body, Emitter, Sky, Transmission, Weather};
 use crate::theme::Theme;
 
-/// One frame's sky, resolved against the theme: [`Look::resolve`] once per
+/// One frame's sky, resolved against the theme: [`SkyTones::resolve`] once per
 /// frame, every field a frame-wide answer.
-pub(crate) struct Look {
+pub(crate) struct SkyTones {
     /// The window sky near the horizon.
-    pub(crate) glass_a: Rgb,
+    pub(crate) glass_horizon: Rgb,
     /// The window sky near the top of the pane.
-    pub(crate) glass_b: Rgb,
+    pub(crate) glass_zenith: Rgb,
     /// `1 - exterior`: the darkness the artificial lights fight.
     pub(crate) darkness: f32,
     /// The sun's light reaching the interior, 0..=1; none under the moon.
@@ -41,11 +41,11 @@ pub(crate) struct Look {
 }
 
 /// The moment a frame shows, to either painter: the sky at `now` and its
-/// [`Look`], seen from `altitude` ([`FloorMeta::altitude`](crate::floor::FloorMeta::altitude)).
+/// [`SkyTones`], seen from `altitude` ([`FloorMeta::altitude`](crate::floor::FloorMeta::altitude)).
 pub(crate) struct Moment {
     pub(crate) sky: Sky,
     /// Always `sky`'s, resolved against the frame's theme.
-    pub(crate) look: Look,
+    pub(crate) look: SkyTones,
     pub(crate) altitude: f32,
     pub(crate) now: std::time::SystemTime,
 }
@@ -60,7 +60,7 @@ impl Moment {
         now: std::time::SystemTime,
     ) -> Self {
         Self {
-            look: Look::resolve(&sky, theme),
+            look: SkyTones::resolve(&sky, theme),
             sky,
             altitude,
             now,
@@ -95,8 +95,8 @@ const GROUND_TINT_SHARE: f32 = 0.15;
 /// by day and under thick cloud or fog; above it the stars ramp in from nothing.
 const STAR_MIN: f32 = 0.15;
 
-impl Look {
-    pub(crate) fn resolve(sky: &Sky, theme: &Theme) -> Look {
+impl SkyTones {
+    pub(crate) fn resolve(sky: &Sky, theme: &Theme) -> SkyTones {
         let light = sky.light();
         let (interior, exterior) = (light.interior, light.exterior);
         let e = sky.emitter();
@@ -109,8 +109,8 @@ impl Look {
         let twilight_b = theme.lighting.twilight_b;
 
         let warm = (e.warmth * interior).clamp(0.0, 1.0);
-        let glass_a = night_a.mix(day_a, exterior).mix(twilight_a, warm * 0.5);
-        let glass_b = night_b.mix(day_b, exterior).mix(twilight_b, warm * 0.5);
+        let glass_horizon = night_a.mix(day_a, exterior).mix(twilight_a, warm * 0.5);
+        let glass_zenith = night_b.mix(day_b, exterior).mix(twilight_b, warm * 0.5);
 
         // Leans away from the disc, which the painters place off this same
         // azimuth; `the_spill_leans_away_from_the_disc` pins the
@@ -144,9 +144,9 @@ impl Look {
         let veil = veil_lum(e);
         let star_strength = night_star_strength(sky, darkness);
 
-        Look {
-            glass_a,
-            glass_b,
+        SkyTones {
+            glass_horizon,
+            glass_zenith,
             darkness,
             sunlight,
             spill_slant,
@@ -274,7 +274,7 @@ const NIGHT_VEIL_MIN: f32 = 0.35;
 /// How much of a weather VEIL's own colour the frame's sky brings up (0..1).
 ///
 /// The day term is the emitter's OWN luminance, deliberately NOT
-/// [`Sky::transmission`] or [`Look::darkness`]: those already carry the weather (the veil
+/// [`Sky::transmission`] or [`SkyTones::darkness`]: those already carry the weather (the veil
 /// colour does too), and folding them in would darken a stormy noon twice.
 fn veil_lum(e: &Emitter) -> f32 {
     NIGHT_VEIL_MIN + (1.0 - NIGHT_VEIL_MIN) * e.emitter_lum.clamp(0.0, 1.0)
@@ -298,7 +298,7 @@ fn night_star_strength(sky: &Sky, darkness: f32) -> f32 {
 }
 
 /// How far down the glass, as a share of it, the sky reaches its horizon
-/// colour ([`Look::glass_a`]) from its zenith's ([`Look::glass_b`]).
+/// colour ([`SkyTones::glass_horizon`]) from its zenith's ([`SkyTones::glass_zenith`]).
 const HORIZON_AT: f32 = 0.7;
 
 /// How far from its zenith colour toward its horizon's the sky is `gy` rows
@@ -350,7 +350,7 @@ mod tests {
     fn the_look_moves_without_a_step_minute_by_minute() {
         const MAX_STEP: f32 = 0.04;
         const MAX_CHANNEL_STEP: i16 = 4;
-        let scalars = |l: &Look| {
+        let scalars = |l: &SkyTones| {
             [
                 ("darkness", l.darkness),
                 ("sunlight", l.sunlight),
@@ -363,11 +363,11 @@ mod tests {
                 ("beam", l.beam),
             ]
         };
-        let channels = |l: &Look| {
+        let channels = |l: &SkyTones| {
             let veil = l.glass_veil.map_or(Rgb { r: 0, g: 0, b: 0 }, |v| v.0);
             [
-                ("glass a", l.glass_a),
-                ("glass b", l.glass_b),
+                ("glass horizon", l.glass_horizon),
+                ("glass zenith", l.glass_zenith),
                 ("veil", veil),
             ]
         };
@@ -377,7 +377,7 @@ mod tests {
             for w in weathers {
                 let look = |m: u64| {
                     let now = midnight + std::time::Duration::from_secs(60 * m);
-                    Look::resolve(&Sky::at_with(now, w), &crate::theme::NORMAL)
+                    SkyTones::resolve(&Sky::at_with(now, w), &crate::theme::NORMAL)
                 };
                 let mut prev = look(0);
                 for m in 1..24 * 60 {
@@ -463,7 +463,8 @@ mod tests {
             0.0,
             "no stars at 7am while the sun is up"
         );
-        let stars = |w| Look::resolve(&Sky::at_with(at(2), w), &crate::theme::NORMAL).star_strength;
+        let stars =
+            |w| SkyTones::resolve(&Sky::at_with(at(2), w), &crate::theme::NORMAL).star_strength;
         assert!(
             stars(Weather::Clear) > STAR_MIN,
             "a clear night should light the stars"
@@ -479,7 +480,8 @@ mod tests {
     fn the_floor_is_dimmed_by_the_dark_and_lifted_by_the_sun() {
         let at = crate::localclock::at_hour;
         let wash = |h| {
-            Look::resolve(&Sky::at_with(at(h), Weather::Clear), &crate::theme::NORMAL).ground_wash
+            SkyTones::resolve(&Sky::at_with(at(h), Weather::Clear), &crate::theme::NORMAL)
+                .ground_wash
         };
         let [(_, noon_dim), (tint, noon_lift)] = wash(12);
         let [(dim_tint, night_dim), (_, night_lift)] = wash(0);
@@ -497,7 +499,7 @@ mod tests {
     #[test]
     fn a_lit_object_takes_the_floors_daylight_at_its_share() {
         for (h, m) in [(0, 0), (3, 0), (7, 0), (12, 30), (19, 30), (22, 0)] {
-            let look = Look::resolve(
+            let look = SkyTones::resolve(
                 &Sky::at_with(at_hour_min(h, m), Weather::Clear),
                 &crate::theme::NORMAL,
             );
@@ -513,7 +515,7 @@ mod tests {
     fn a_veil_dims_after_dark_but_keeps_its_floor() {
         let at = crate::localclock::at_hour;
         let veil = |h| {
-            Look::resolve(&Sky::at_with(at(h), Weather::Fog), &crate::theme::NORMAL)
+            SkyTones::resolve(&Sky::at_with(at(h), Weather::Fog), &crate::theme::NORMAL)
                 .glass_veil
                 .expect("fog veils the glass")
                 .0

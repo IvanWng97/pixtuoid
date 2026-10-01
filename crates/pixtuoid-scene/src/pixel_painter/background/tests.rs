@@ -632,7 +632,7 @@ fn moon_glow_dims_at_new_moon() {
 
 /// Mean channel value over every PAINTED window pane's glass interior. The
 /// day-over-night invariant is asserted on THIS, not on
-/// [`Look::darkness`]: the weather veils are painted onto the glass
+/// [`SkyTones::darkness`]: the weather veils are painted onto the glass
 /// AFTER the light model resolved the sky, so a `darkness`-only assertion is
 /// structurally blind to them.
 fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {

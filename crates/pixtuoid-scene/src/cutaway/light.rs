@@ -41,7 +41,7 @@ pub(crate) struct Ambient(u8);
 
 impl Ambient {
     /// The room under `look`.
-    pub(crate) fn of(look: &crate::atmosphere::Look) -> Self {
+    pub(crate) fn of(look: &crate::atmosphere::SkyTones) -> Self {
         let steps = (look.darkness.clamp(0.0, 1.0) * f32::from(AMBIENT_MAX_STEPS)).round();
         Self(steps as u8)
     }

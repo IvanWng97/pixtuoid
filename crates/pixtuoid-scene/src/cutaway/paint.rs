@@ -1858,7 +1858,7 @@ pub(crate) fn assert_variant_desk_foot(
     now: std::time::SystemTime,
 ) {
     // The room darkens every pixel by the hour's steps; its lights must be off.
-    let ambient = crate::cutaway::light::Ambient::of(&crate::atmosphere::Look::resolve(
+    let ambient = crate::cutaway::light::Ambient::of(&crate::atmosphere::SkyTones::resolve(
         &crate::sky::Sky::clock(now),
         theme,
     ));

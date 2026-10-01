@@ -185,7 +185,7 @@ const SKY_TONES: usize = 4;
 /// A colour for each band of the sky, zenith first.
 type Tones = [Rgb; SKY_TONES];
 
-/// Below this [`Look::golden_hour`](crate::atmosphere::Look::golden_hour) the
+/// Below this [`SkyTones::golden_hour`](crate::atmosphere::SkyTones::golden_hour) the
 /// blaze is too faint to paint.
 const BLAZE_MIN: f32 = 0.05;
 /// How far a full golden hour pulls open sky toward [`BLAZE`].
@@ -238,8 +238,8 @@ impl SkyView {
     pub(crate) fn of(moment: &Moment, buf_w: u16, top_wall_h: u16, theme: &Theme) -> Self {
         let look = &moment.look;
         let sky: Tones = std::array::from_fn(|k| {
-            look.glass_b
-                .mix(look.glass_a, k as f32 / (SKY_TONES - 1) as f32)
+            look.glass_zenith
+                .mix(look.glass_horizon, k as f32 / (SKY_TONES - 1) as f32)
         });
         let disc = Disc::of(&moment.sky, buf_w, top_wall_h);
         let core = match disc.map_or(Body::Sun, |d| d.body) {

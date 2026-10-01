@@ -1,10 +1,10 @@
-//! The classic's floor wash: [`Look::ground_wash`]'s blends laid over the floor
+//! The classic's floor wash: [`SkyTones::ground_wash`]'s blends laid over the floor
 //! band.
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 #[cfg(doc)]
-use crate::atmosphere::Look;
+use crate::atmosphere::SkyTones;
 use crate::pixel_painter::palette::{RgbLut, blend_rgb};
 
 /// Lay each of `wash`'s `(tint, strength)` blends over the floor band
