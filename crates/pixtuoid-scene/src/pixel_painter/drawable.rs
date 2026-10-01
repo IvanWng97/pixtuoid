@@ -38,9 +38,9 @@ use crate::layout::{Layout, Point, Size};
 const PANTRY_STEAM_DX_LARGE: i16 = -2;
 const PANTRY_STEAM_DX_SMALL: i16 = 1;
 
-/// The steam offset for `anim`, a [`crate::embedded_pack::pantry_counter_anim`] pick.
+/// The steam offset for `anim`, a [`pantry_counter_anim`](crate::layout::pantry_counter_anim) pick.
 fn pantry_steam_dx(anim: &str) -> i16 {
-    let [_, large] = crate::embedded_pack::PANTRY_COUNTER_ANIMS;
+    let [_, large] = crate::layout::PANTRY_COUNTER_ANIMS;
     if anim == large {
         PANTRY_STEAM_DX_LARGE
     } else {
@@ -96,7 +96,7 @@ pub(super) enum DrawableKind<'a> {
         pos: Point,
     },
     /// Pantry counter, with coffee steam attached so the steam rides above it
-    /// in z-order. `anim` is [`crate::embedded_pack::pantry_counter_anim`]'s pick.
+    /// in z-order. `anim` is [`pantry_counter_anim`](crate::layout::pantry_counter_anim)'s pick.
     WaypointPantry {
         pos: Point,
         anim: &'static str,
@@ -635,7 +635,7 @@ mod tests {
         let large_w = crate::layout::PANTRY_COUNTER_LARGE_W;
         for counter_w in [large_w, large_w - 1] {
             let (lo, hi) = crate::layout::coffee_machine_cols(counter_w);
-            let anim = crate::embedded_pack::pantry_counter_anim(counter_w);
+            let anim = crate::layout::pantry_counter_anim(counter_w);
             let steam_col = pantry_steam_dx(anim) + width(anim) / 2;
             assert!(
                 steam_col >= lo as i16 && steam_col < hi as i16,

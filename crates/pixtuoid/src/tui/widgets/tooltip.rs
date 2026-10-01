@@ -13,7 +13,7 @@ use crate::tui::renderer::clip_widget_rect;
 use pixtuoid_scene::layout::DESK_W;
 use pixtuoid_scene::overlay::{LabelElement, disambig_suffix};
 use pixtuoid_scene::pet::PetKind;
-use pixtuoid_scene::pixel_painter::{AgentFrame, MascotFrame, tool_glow_for_kind};
+use pixtuoid_scene::pixel_painter::{AgentFrame, MascotFrame};
 
 /// Borderless tooltip frame shared by every hover/click tooltip: just the padded
 /// text. The caller must paint `super::paint_card_backing` UNDER it (the `Clear` +
@@ -159,7 +159,7 @@ pub(crate) fn paint_hover_tooltip(
                     state_spans.push(Span::raw(" \u{b7} "));
                     state_spans.push(Span::styled(
                         tool.to_string(),
-                        Style::default().fg(to_color(tool_glow_for_kind(*tk, &theme.tool_glow))),
+                        Style::default().fg(to_color(theme.tool_glow.for_kind(*tk))),
                     ));
                 }
                 if !rest.is_empty() {

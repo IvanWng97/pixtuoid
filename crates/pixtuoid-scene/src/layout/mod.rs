@@ -29,7 +29,9 @@ pub(crate) use decor::{repels_plants, seated_z_key};
 pub use placement::{Anchor, anchored_top_left, z_sort_row};
 pub use reach::ReachSet;
 pub(crate) use rooms::meeting::{COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W, coat_rack_rect_at};
-pub(crate) use rooms::pantry::{COMPACT_COUNTER, LARGE_COUNTER};
+pub(crate) use rooms::pantry::{
+    COMPACT_COUNTER, LARGE_COUNTER, PANTRY_COUNTER_ANIMS, pantry_counter_anim,
+};
 pub(crate) use rooms::walls::WallPiece;
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};

@@ -101,10 +101,6 @@ mod furniture;
 pub(crate) mod hair;
 pub(crate) mod palette;
 
-// Only the hue matches the sprite's glow, which also takes the hour's wash and
-// shows only on a NORTH-facing desk.
-pub use palette::tool_glow_for_kind;
-
 /// Applies the hour's object terms to every pixel painted since `since`.
 ///
 /// The branch-free XOR-OR reduction replaces a hard-to-predict per-pixel
@@ -465,19 +461,6 @@ fn enqueue_characters<'a>(
     }
 }
 
-/// The glow of a desk's screen: its occupant's [`lit_screen`](crate::lighting::lit_screen),
-/// tinted by the tool. Both profiles light screens from this.
-pub(crate) fn desk_screen_glow(
-    occupant: Option<&AgentSlot>,
-    facing: crate::layout::Facing,
-    seated: bool,
-    theme: &crate::theme::Theme,
-) -> Option<pixtuoid_core::sprite::Rgb> {
-    occupant
-        .and_then(|a| crate::lighting::lit_screen(a, facing, seated))
-        .map(|tool| palette::tool_glow_for_kind(tool, &theme.tool_glow))
-}
-
 /// The office pet, y-sorted at its anim's south row, since the anims differ in
 /// height.
 fn enqueue_pet<'a>(
@@ -623,7 +606,7 @@ fn queue_fixtures<'a>(
                 DrawableKind::DeskCubicle {
                     desk: f.top_left(),
                     facing,
-                    screen_glow: desk_screen_glow(
+                    screen_glow: crate::lighting::desk_screen_glow(
                         desk_occupant(&frame.agents, i),
                         facing,
                         frame.seated_agents.get(&i).copied().unwrap_or(false),
@@ -643,9 +626,8 @@ fn queue_fixtures<'a>(
                 };
                 match station {
                     Station::PantryCounter => {
-                        let anim = crate::embedded_pack::pantry_counter_anim(
-                            layout.pantry_counter_size().w,
-                        );
+                        let anim =
+                            crate::layout::pantry_counter_anim(layout.pantry_counter_size().w);
                         DrawableKind::WaypointPantry {
                             pos: f.at,
                             anim,

@@ -15,10 +15,10 @@ pub(crate) use density::{DenseFrame, densest_frame};
 #[cfg(test)]
 pub(crate) use lookup::DESK_BEZEL_RAISE;
 pub(crate) use lookup::{
-    CLOCK_FACE_KEY, DESK_BULB_KEY, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, PANTRY_COUNTER_ANIMS,
-    PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, VENDING_MACHINE_SPRITE,
-    appliance_frame_index, appliance_overrides, appliance_sprite, desk_art, desk_art_top,
-    desk_sprite_name, fixture_overrides, frame_at, looping_frame_index, pantry_counter_anim,
+    CLOCK_FACE_KEY, DESK_BULB_KEY, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, PRINTER_SPRITE,
+    SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, VENDING_MACHINE_SPRITE, appliance_frame_index,
+    appliance_overrides, appliance_sprite, desk_art, desk_art_top, desk_sprite_name,
+    fixture_overrides, frame_at, looping_frame_index,
 };
 
 #[cfg(feature = "native")]
@@ -51,10 +51,10 @@ pub enum PackSource {
 
 /// The sets of pieces a pack should ship whole, each read from the authority its
 /// painter picks by: each row is the pantry counters
-/// (`pantry_counter_anim` picks one by room width), a pet kind's
+/// (`layout::pantry_counter_anim` picks one by room width), a pet kind's
 /// poses, or a gateway mascot's poses.
 fn art_sets() -> Vec<Vec<&'static str>> {
-    let mut sets = vec![crate::embedded_pack::PANTRY_COUNTER_ANIMS.to_vec()];
+    let mut sets = vec![crate::layout::PANTRY_COUNTER_ANIMS.to_vec()];
     sets.extend(
         crate::pet::PetKind::ALL
             .iter()

@@ -266,8 +266,9 @@ pub(crate) fn tint_of(
         EmitterKind::NeonGlow => Some(crate::floor::neon_look(neon, theme).halo),
         // Dark themes only, as in the classic's
         // `pixel_painter::ambient::paint_ceiling_halos`: on a light one it reads as grime.
-        EmitterKind::MonitorHalo(tool) => (theme.kind == crate::theme::ThemeKind::Dark)
-            .then(|| crate::pixel_painter::tool_glow_for_kind(tool, &theme.tool_glow)),
+        EmitterKind::MonitorHalo(tool) => {
+            (theme.kind == crate::theme::ThemeKind::Dark).then(|| theme.tool_glow.for_kind(tool))
+        }
     }
 }
 

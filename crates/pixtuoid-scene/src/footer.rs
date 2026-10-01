@@ -111,7 +111,7 @@ pub fn footer_tone_rgb(tone: FooterTone, theme: &Theme) -> Rgb {
         FooterTone::Rung(RungKind::Waiting) => theme.ui.label_waiting,
         FooterTone::Rung(RungKind::Idle) => theme.ui.label_idle,
         FooterTone::Rung(RungKind::Exiting) => theme.ui.label_exiting,
-        FooterTone::Tool(kind) => crate::pixel_painter::tool_glow_for_kind(kind, &theme.tool_glow),
+        FooterTone::Tool(kind) => theme.tool_glow.for_kind(kind),
         FooterTone::Gateway(DaemonState::Idle) => theme.ui.label_idle,
         FooterTone::Gateway(DaemonState::Busy) => theme.ui.label_active,
         FooterTone::Gateway(DaemonState::Degraded | DaemonState::Down) => theme.ui.label_waiting,

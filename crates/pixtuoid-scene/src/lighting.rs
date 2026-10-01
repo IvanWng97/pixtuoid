@@ -431,6 +431,19 @@ pub(crate) fn lit_screen(agent: &AgentSlot, facing: Facing, seated: bool) -> Opt
     }
 }
 
+/// The glow of a desk's screen: its occupant's [`lit_screen`](crate::lighting::lit_screen),
+/// tinted by the tool. Both profiles light screens from this.
+pub(crate) fn desk_screen_glow(
+    occupant: Option<&AgentSlot>,
+    facing: crate::layout::Facing,
+    seated: bool,
+    theme: &crate::theme::Theme,
+) -> Option<pixtuoid_core::sprite::Rgb> {
+    occupant
+        .and_then(|a| crate::lighting::lit_screen(a, facing, seated))
+        .map(|tool| theme.tool_glow.for_kind(tool))
+}
+
 /// One halo over each [`lit_screen`], on the row above its desk, clear of the
 /// monitor.
 fn monitor_halos(layout: &Layout, inputs: &LightInputs<'_>) -> Vec<Emitter> {

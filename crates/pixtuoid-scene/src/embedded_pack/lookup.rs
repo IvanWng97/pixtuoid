@@ -104,20 +104,6 @@ pub(crate) const DESK_CHAIR_SPRITE: &str = "desk_chair";
 /// The meeting table's pack animation.
 pub(crate) const MEETING_TABLE_SPRITE: &str = "meeting_table";
 
-/// The pantry counter sprites, compact then large.
-pub(crate) const PANTRY_COUNTER_ANIMS: [&str; 2] = ["pantry_small", "pantry"];
-
-/// The pantry counter sprite for a counter `counter_w` px wide: the large
-/// kitchen run when the room fits it, else the compact one.
-pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
-    let [compact, large] = PANTRY_COUNTER_ANIMS;
-    if counter_w >= crate::layout::PANTRY_COUNTER_LARGE_W {
-        large
-    } else {
-        compact
-    }
-}
-
 /// The frame to paint for `idx`, via [`frame_index`]. `None` only for a
 /// genuinely empty animation.
 pub(crate) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
