@@ -25,13 +25,15 @@ fn pick(pack: &Pack, agent: AgentId) -> Option<&str> {
 }
 
 /// How a character frame is dressed: its head, the style its agent wears at
-/// its density where the pack draws that style there, and how many art rows
-/// the dressed frame rises over the frame as drawn.
+/// its density where the pack draws that style there, and where the dressed
+/// figure's top lands.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Dress {
     pub(crate) head: HeadMark,
     pub(crate) style: Option<String>,
-    pub(crate) rise: u16,
+    /// The dressed figure's topmost drawn row, counted from the frame's top:
+    /// negative where it rises over it.
+    pub(crate) crest: i32,
 }
 
 /// The [`Dress`] of `body`, frame `head`'s art at `density`, for `agent`:
@@ -65,8 +67,13 @@ impl Dress {
         Dress {
             head,
             style: style.map(|s| s.name().to_owned()),
-            rise: rise(body, head, style, outlined),
+            crest: crest(body, head, style, outlined),
         }
+    }
+
+    /// How many art rows the dressed frame rises over the frame as drawn.
+    pub(crate) fn rise(&self) -> u16 {
+        u16::try_from((-self.crest).max(0)).unwrap_or(0)
     }
 }
 
@@ -75,9 +82,9 @@ fn opaque_top(f: &Frame) -> Option<u16> {
     (0..f.height()).find(|&y| (0..f.width()).any(|x| f.get(x, y).copied().flatten().is_some()))
 }
 
-/// How many art rows `body` dressed in `style` rises over its frame: the hair
-/// that reaches above the frame's top, and the outline's row above that.
-fn rise(body: &Frame, head: HeadMark, style: Option<&Hairstyle>, outlined: bool) -> u16 {
+/// [`Dress::crest`] of `body` dressed in `style`: its hair's top or its own,
+/// and the outline's row above that.
+fn crest(body: &Frame, head: HeadMark, style: Option<&Hairstyle>, outlined: bool) -> i32 {
     let hair = style
         .and_then(|s| s.layers(head.view))
         .into_iter()
@@ -89,9 +96,7 @@ fn rise(body: &Frame, head: HeadMark, style: Option<&Hairstyle>, outlined: bool)
                 .filter_map(|(f, _, dy)| Some(dy + i32::from(opaque_top(f)?)))
         });
     let top = hair.chain(opaque_top(body).map(i32::from)).min();
-    top.map_or(0, |top| {
-        u16::try_from((i32::from(outlined) - top).max(0)).unwrap_or(0)
-    })
+    top.map_or(0, |top| top - i32::from(outlined))
 }
 
 /// `body` dressed as `dress` says: `style`'s behind layer for its head's view,
@@ -107,7 +112,7 @@ pub(crate) fn dress(
     overrides: &[(char, Pixel)],
     outline: Option<Rgb>,
 ) -> Frame {
-    let (head, up) = (dress.head, dress.rise);
+    let (head, up) = (dress.head, dress.rise());
     let layers = style.and_then(|s| s.layers(head.view));
     let (w, h) = (body.width(), body.height().saturating_add(up));
     let mut px: Vec<Pixel> = vec![None; usize::from(w) * usize::from(h)];
@@ -285,7 +290,7 @@ mod tests {
         let (dress, f) = dressed(&pack, AgentId::from_parts("x", "y"));
         // The layer's pixel sits a row above its mark, so above the body's top:
         // the frame rises a row for the hair and one more for its outline.
-        assert_eq!(dress.rise, 2);
+        assert_eq!(dress.rise(), 2);
         assert_eq!((f.width(), f.height()), (3, 6));
         let at = |x, y| f.get(x, y).copied().flatten();
         assert_eq!(
@@ -309,7 +314,7 @@ mod tests {
         let pack = pack_of(". S .\n. . .\n", (1, 0), &[]);
         let (dress, f) = dressed(&pack, AgentId::from_parts("x", "y"));
         assert_eq!(
-            (dress.style, dress.rise),
+            (dress.style.clone(), dress.rise()),
             (None, 1),
             "a row for the line alone"
         );
@@ -333,7 +338,7 @@ mod tests {
         );
         let (dress, f) = dressed(&pack, AgentId::from_parts("x", "y"));
         assert_eq!(
-            f.get(2, 2 + dress.rise).copied().flatten(),
+            f.get(2, 2 + dress.rise()).copied().flatten(),
             Some(LINE),
             "the centre, walled in"
         );

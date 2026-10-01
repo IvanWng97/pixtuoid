@@ -98,7 +98,7 @@ mod background;
 mod debug_overlay;
 mod dense;
 pub(crate) mod drawable;
-mod effects;
+pub(crate) mod effects;
 mod furniture;
 pub(crate) mod hair;
 mod palette;
