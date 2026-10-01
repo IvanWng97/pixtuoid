@@ -216,9 +216,9 @@ const LOUNGE_RUG: Size = Size { w: 22, h: 7 };
 const LOUNGE_RUG_DY: u16 = 3;
 
 impl Lounge {
-    /// The rug the couch stands on, ending by `floor_end`, the row the desks
+    /// The rug the couch stands on, ending by `ground_end`, the row the desks
     /// south of it start at.
-    pub(crate) fn rug(&self, floor_end: u16) -> Bounds {
+    pub(crate) fn rug(&self, ground_end: u16) -> Bounds {
         let centre = Point {
             x: self.couch_center.x,
             y: self.couch_center.y + LOUNGE_RUG_DY,
@@ -226,7 +226,7 @@ impl Lounge {
         let tl = anchored_top_left(Anchor::Center, centre, LOUNGE_RUG.w, LOUNGE_RUG.h);
         Bounds {
             x: tl.x,
-            y: tl.y.min(floor_end.saturating_sub(LOUNGE_RUG.h)),
+            y: tl.y.min(ground_end.saturating_sub(LOUNGE_RUG.h)),
             width: LOUNGE_RUG.w,
             height: LOUNGE_RUG.h,
         }
