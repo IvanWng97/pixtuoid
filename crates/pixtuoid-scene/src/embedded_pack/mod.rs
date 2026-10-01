@@ -51,7 +51,7 @@ pub enum PackSource {
 
 /// The sets of pieces a pack should ship whole, each read from the authority its
 /// painter picks by: each row is the pantry counters
-/// (`pixel_painter::pantry_counter_anim` picks one by room width), a pet kind's
+/// (`pantry_counter_anim` picks one by room width), a pet kind's
 /// poses, or a gateway mascot's poses.
 fn art_sets() -> Vec<Vec<&'static str>> {
     let mut sets = vec![crate::embedded_pack::PANTRY_COUNTER_ANIMS.to_vec()];
