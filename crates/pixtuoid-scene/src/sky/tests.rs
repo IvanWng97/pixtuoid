@@ -28,17 +28,17 @@ fn weather_name_round_trips_for_every_variant() {
 }
 
 #[test]
-fn emitter_is_sun_by_day_moon_by_night_never_both() {
+fn body_is_sun_by_day_moon_by_night_never_both() {
     for slot in 0..48u32 {
         let (h, m) = (slot / 2, (slot % 2) * 30);
         let s = at_hour_min(h, m);
-        let e = *Sky::clock(s).emitter();
-        match e.body {
-            Body::Sun => assert!(
+        let e = *Sky::clock(s).body();
+        match e.kind {
+            BodyKind::Sun => assert!(
                 (5.0..20.0).contains(&(h as f32 + m as f32 / 60.0)),
                 "sun only during the daylight ramp, got {h}:{m:02}"
             ),
-            Body::Moon => assert!(
+            BodyKind::Moon => assert!(
                 !(5.0..20.0).contains(&(h as f32 + m as f32 / 60.0)),
                 "moon only when the sun is down, got {h}:{m:02}"
             ),
@@ -48,9 +48,9 @@ fn emitter_is_sun_by_day_moon_by_night_never_both() {
 
 #[test]
 fn sun_altitude_peaks_near_midday_and_bottoms_at_the_horizon() {
-    let noon = Sky::clock(at_hour_min(12, 30)).emitter().altitude;
-    let dawn = Sky::clock(at_hour_min(6, 30)).emitter().altitude;
-    let dusk = Sky::clock(at_hour_min(18, 0)).emitter().altitude;
+    let noon = Sky::clock(at_hour_min(12, 30)).body().altitude;
+    let dawn = Sky::clock(at_hour_min(6, 30)).body().altitude;
+    let dusk = Sky::clock(at_hour_min(18, 0)).body().altitude;
     assert!(noon > 0.8, "midday sun rides high: {noon}");
     // The two thresholds differ because 06:30 and 18:00 sit unequally far from
     // [`SUN_RISE_H`] and [`SUN_SET_H`].
@@ -63,20 +63,20 @@ fn sun_altitude_peaks_near_midday_and_bottoms_at_the_horizon() {
 #[test]
 fn warmth_is_high_low_on_the_horizon_and_neutral_at_apex() {
     assert!(
-        Sky::clock(at_hour_min(6, 30)).emitter().warmth > 0.6,
+        Sky::clock(at_hour_min(6, 30)).body().warmth > 0.6,
         "low sun is warm/red"
     );
     assert!(
-        Sky::clock(at_hour_min(12, 30)).emitter().warmth < 0.3,
+        Sky::clock(at_hour_min(12, 30)).body().warmth < 0.3,
         "apex sun is neutral"
     );
 }
 
 #[test]
 fn azimuth_advances_from_dawn_to_dusk() {
-    let a = Sky::clock(at_hour_min(7, 0)).emitter().azimuth;
-    let b = Sky::clock(at_hour_min(12, 0)).emitter().azimuth;
-    let c = Sky::clock(at_hour_min(18, 0)).emitter().azimuth;
+    let a = Sky::clock(at_hour_min(7, 0)).body().azimuth;
+    let b = Sky::clock(at_hour_min(12, 0)).body().azimuth;
+    let c = Sky::clock(at_hour_min(18, 0)).body().azimuth;
     assert!(
         a < b && b < c,
         "azimuth grows through the day: {a} < {b} < {c}"
@@ -90,7 +90,7 @@ fn moon_luminance_tracks_phase() {
     for day in 1..=30u32 {
         let s = on_day(day, 2);
         let frac = moon_phase_at(s);
-        let lum = Sky::clock(s).emitter().emitter_lum;
+        let lum = Sky::clock(s).body().lum;
         if frac < lo {
             lo = frac;
             lo_lum = lum;
@@ -571,15 +571,15 @@ fn the_moons_light_rides_the_skys_nightfall() {
             on_day(1, 20) + std::time::Duration::from_secs(m * 60),
             Weather::Clear,
         );
-        s.emitter().altitude > 0.0 && s.nightfall() < 1.0
+        s.body().altitude > 0.0 && s.nightfall() < 1.0
     };
     assert!((0..45).any(ramp_lit), "the moon is up while night comes in");
     for m in 0..9 * 60u64 {
         let t = on_day(1, 20) + std::time::Duration::from_secs(m * 60);
         let s = Sky::at_with(t, Weather::Clear);
-        let e = s.emitter();
+        let e = s.body();
         assert_eq!(
-            e.emitter_lum,
+            e.lum,
             MOON_PEAK_LUM * e.altitude * s.moon_phase() * s.nightfall(),
             "minute {m}"
         );

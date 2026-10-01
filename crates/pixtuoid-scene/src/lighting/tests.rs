@@ -24,7 +24,7 @@ fn neon_at(levels: NeonLevels, darkness: f32) -> f32 {
 fn lights_at(w: u16, h: u16, hour: u32) -> (Layout, Lights) {
     let layout = Layout::compute(w, h, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
     let sky = Sky::at_with(crate::localclock::at_hour(hour), Weather::Clear);
-    let look = Look::resolve(&sky, &crate::theme::NORMAL);
+    let look = SkyTones::resolve(&sky, &crate::theme::NORMAL);
     let lights = Lights::of(
         &layout,
         &look,
@@ -73,7 +73,7 @@ fn a_starved_tube_throws_no_halo_and_a_flash_does() {
 fn the_neon_halo_throws_the_signs_own_levels() {
     let layout = Layout::compute(192, 80, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
     let sky = Sky::at_with(crate::localclock::at_hour(0), Weather::Clear);
-    let look = Look::resolve(&sky, &crate::theme::NORMAL);
+    let look = SkyTones::resolve(&sky, &crate::theme::NORMAL);
     let now = SystemTime::UNIX_EPOCH + Duration::from_millis(WALL_CLOCK_MS);
     for levels in [NeonLevels::CALM, NeonLevels::ALERT, NeonLevels::EMPTY] {
         let lights = Lights::of(
@@ -180,7 +180,7 @@ fn a_monitor_halo_hangs_over_each_lit_screen_only() {
     let sky = Sky::at_with(crate::localclock::at_hour(0), Weather::Clear);
     let lights = Lights::of(
         &layout,
-        &Look::resolve(&sky, &crate::theme::NORMAL),
+        &SkyTones::resolve(&sky, &crate::theme::NORMAL),
         &LightInputs {
             agents: &agents,
             seated: &seated,
