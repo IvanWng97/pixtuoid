@@ -272,23 +272,16 @@ pub fn paint_labels_into_surface(
 ) {
     for el in labels {
         debug_assert!(!el.hovered, "floating paints no hover state");
-        let color = pack_xrgb(pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme));
+        let ink = pixtuoid_scene::overlay::badge_ink(&el.text, el.tone, theme);
         let marker = "\u{25cf}";
         let text = format!("{marker}{}", el.text);
         let tw = crate::aa_text::text_width(&text, LABEL_FONT_PX);
         const BADGE_LIFT_PX: i32 = 12;
         let cx = el.anchor_px.x as i32 * scale - tw / 2;
         let cy = el.anchor_px.y as i32 * scale - BADGE_LIFT_PX;
-        // The CLI-identity split: the ● dot keeps the activity tone (status), the name
-        // paints in the source's badge hue (identity).
-        match pixtuoid_scene::overlay::badge_hue(&el.text, theme) {
-            Some(hue) => {
-                let mw = crate::aa_text::text_width(marker, LABEL_FONT_PX);
-                sb.draw_shadowed_text(marker, cx, cy, LABEL_FONT_PX, color);
-                sb.draw_shadowed_text(&el.text, cx + mw, cy, LABEL_FONT_PX, pack_xrgb(hue));
-            }
-            None => sb.draw_shadowed_text(&text, cx, cy, LABEL_FONT_PX, color),
-        }
+        let mw = crate::aa_text::text_width(marker, LABEL_FONT_PX);
+        sb.draw_shadowed_text(marker, cx, cy, LABEL_FONT_PX, pack_xrgb(ink.marker));
+        sb.draw_shadowed_text(&el.text, cx + mw, cy, LABEL_FONT_PX, pack_xrgb(ink.name));
     }
 }
 

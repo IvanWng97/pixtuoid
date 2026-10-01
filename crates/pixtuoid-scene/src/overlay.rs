@@ -63,6 +63,27 @@ pub struct LabelElement {
     pub hovered: bool,
 }
 
+/// The colours of a badge's two parts, the one decision every painter reads:
+/// the name in the activity tone, which every theme holds at text contrast,
+/// and the source's identity on the marker, a graphic, since a brand hue as
+/// text can fall below that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BadgeInk {
+    /// The leading `●`: the source's badge hue, else the tone.
+    pub marker: Rgb,
+    /// The label text: the tone.
+    pub name: Rgb,
+}
+
+/// The [`BadgeInk`] of a badge reading `text` in `tone`.
+pub fn badge_ink(text: &str, tone: LabelTone, theme: &Theme) -> BadgeInk {
+    let name = label_tone_rgb(tone, theme);
+    BadgeInk {
+        marker: badge_hue(text, theme).unwrap_or(name),
+        name,
+    }
+}
+
 /// One `LabelElement` per sprite in `drawn`, in its paint order: an agent the
 /// painter did not draw gets no badge.
 pub fn build_overlay(
@@ -127,7 +148,7 @@ pub(crate) fn tone_of(agent: &AgentSlot) -> LabelTone {
 
 /// The plate a badge drawn in pixels sits on, so its text keeps one contrast
 /// whatever the room behind it
-/// (`every_badge_tone_reads_on_its_plate_in_every_theme`).
+/// (`every_badge_ink_reads_on_its_plate_in_every_theme`).
 pub(crate) fn badge_plate(theme: &Theme) -> Rgb {
     theme.ui.tooltip_bg
 }
@@ -433,14 +454,20 @@ mod tests {
         (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
     }
 
-    /// A badge's text is small, never large-scale, so it holds WCAG 2.2 AA's
-    /// 4.5:1 (<https://www.w3.org/TR/WCAG22/#contrast-minimum>) on its plate;
-    /// its source dot is a graphic, held to 3:1
-    /// (<https://www.w3.org/TR/WCAG22/#non-text-contrast>). #873 measured an
-    /// idle badge at 2.05:1 straight on the floor.
+    /// A badge's name is small text, never large-scale, so it holds WCAG 2.2
+    /// AA's 4.5:1 (<https://www.w3.org/TR/WCAG22/#contrast-minimum>) on its
+    /// plate; its marker is a graphic, held to 3:1
+    /// (<https://www.w3.org/TR/WCAG22/#non-text-contrast>). Over every source's
+    /// label and a bare one, in every tone: the ink every painter reads. #873
+    /// measured an idle badge at 2.05:1 straight on the floor.
     #[test]
-    fn every_badge_tone_reads_on_its_plate_in_every_theme() {
-        use super::{badge_plate, label_tone_rgb};
+    fn every_badge_ink_reads_on_its_plate_in_every_theme() {
+        use super::{badge_ink, badge_plate};
+        let labels: Vec<String> = pixtuoid_core::source::registry::REGISTRY
+            .iter()
+            .map(|s| format!("{}\u{b7}repo", s.label_prefix))
+            .chain(["bare".to_owned()])
+            .collect();
         for theme in crate::theme::ALL_THEMES {
             let plate = badge_plate(theme);
             for tone in [
@@ -449,16 +476,14 @@ mod tests {
                 LabelTone::Idle,
                 LabelTone::Exiting,
             ] {
-                let ratio = contrast(label_tone_rgb(tone, theme), plate);
-                assert!(ratio >= 4.5, "{} {tone:?}: {ratio:.2}:1", theme.name);
-            }
-            for source in pixtuoid_core::source::registry::REGISTRY {
-                let hue = theme
-                    .source
-                    .by_prefix(source.label_prefix)
-                    .expect("every source has a hue");
-                let ratio = contrast(hue, plate);
-                assert!(ratio >= 3.0, "{} {}: {ratio:.2}:1", theme.name, source.name);
+                for label in &labels {
+                    let ink = badge_ink(label, tone, theme);
+                    let name = contrast(ink.name, plate);
+                    let marker = contrast(ink.marker, plate);
+                    let at = format!("{} {tone:?} {label}", theme.name);
+                    assert!(name >= 4.5, "{at}: name {name:.2}:1");
+                    assert!(marker >= 3.0, "{at}: marker {marker:.2}:1");
+                }
             }
         }
     }

@@ -119,9 +119,9 @@ impl Screen {
 }
 
 /// One agent's name badge, painted in the canvas so no terminal text shares a
-/// cell with the image: `overlay`'s text and tone on its
-/// [`badge_plate`](crate::overlay::badge_plate), behind a dot in the source's
-/// hue. Hung from the CUTAWAY's body: `overlay::build_overlay`'s anchors hang off
+/// cell with the image: `overlay`'s text and
+/// [`BadgeInk`](crate::overlay::BadgeInk) on its
+/// [`badge_plate`](crate::overlay::badge_plate). Hung from the CUTAWAY's body: `overlay::build_overlay`'s anchors hang off
 /// the classic-drawn sprite, which for a sitter is elsewhere.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Badge {
@@ -135,7 +135,7 @@ pub(crate) struct Badge {
 /// Art pixels between a badge's plate edge and its text.
 const BADGE_PAD: u16 = 1;
 
-/// The status marker the classic badge leads with, here in the source's hue.
+/// The marker every painter's badge leads with.
 const BADGE_MARKER: char = '\u{25cf}';
 
 impl Badge {
@@ -172,8 +172,10 @@ fn paint_badge(badge: &Badge, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
     use crate::cutaway::text::{ADVANCE, paint};
     let plate = badge.plate(pen);
     pen.fill(buf, plate, crate::overlay::badge_plate(theme));
-    let ink = crate::overlay::label_tone_rgb(badge.tone, theme);
-    let dot = crate::overlay::badge_hue(&badge.text, theme).unwrap_or(ink);
+    let crate::overlay::BadgeInk {
+        marker: dot,
+        name: ink,
+    } = crate::overlay::badge_ink(&badge.text, badge.tone, theme);
     let (x, y) = (plate.x.0 + BADGE_PAD, ArtPx(plate.y.0 + BADGE_PAD));
     paint(pen, buf, (ArtPx(x), y), &BADGE_MARKER.to_string(), dot);
     paint(pen, buf, (ArtPx(x + ADVANCE), y), &badge.text, ink);
