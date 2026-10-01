@@ -1,19 +1,19 @@
 //! The [effects](crate::effects) riding on the cutaway's figures, drawn on the
 //! figure's own art grid: a look authored at [`LOOK_DENSITY`] where the figure
 //! is drawn there with a head to stand it on, the base art's z and waiting
-//! mark beside its head, else the classic's look, a layout cell per art cell
-//! block. A fade is an ordered dither, never a blend, and a look stays whole
-//! down to [`LOOK_SOLID`].
+//! mark beside its head, else its [shared look](crate::effects::look), a
+//! layout cell per art cell block. A fade is an ordered dither, never a blend,
+//! and a look stays whole down to [`LOOK_SOLID`].
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::cutaway::order::Span;
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
-use crate::effects::{Effect, EffectKind};
-use crate::pixel_painter::effects::{
+use crate::effects::look::{
     FLAME_CORE, FLAME_DEEP, FLAME_MID, FLAME_TIP, SLEEP_Z_MAX_RISE, plot_effect, sleep_z_fade,
     walking_dust_foot,
 };
+use crate::effects::{Effect, EffectKind};
 use crate::theme::Theme;
 
 /// The density this module's own looks are drawn at.
