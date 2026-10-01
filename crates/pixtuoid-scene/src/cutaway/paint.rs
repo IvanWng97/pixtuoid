@@ -1,6 +1,6 @@
 //! The cutaway profile's paint pass — the second reader of `SimFrame`. Of the
-//! sim's effects it draws those riding on people (`cutaway::effects`); steam
-//! and the pet stay with the classic pass.
+//! sim's effects it draws those riding on people and creatures
+//! (`cutaway::effects`); steam stays with the classic pass.
 //! It never advances the sim; a mover here would desync the profiles.
 
 use pixtuoid_core::sprite::RgbBuffer;
