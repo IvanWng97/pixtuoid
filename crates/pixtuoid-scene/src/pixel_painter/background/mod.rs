@@ -254,7 +254,7 @@ fn paint_floor_to_ceiling_window(
         weather: glass_weather,
     } = view;
     let glass_h = glass_rows(h);
-    let glass = sky_view.pane(x, w, glass_h);
+    let glass = sky_view.pane(x, w, glass_h, 1);
     let building_at = |px: u16, glass_dy: u16| city.at(px.wrapping_sub(run_x0), glass_dy);
 
     for dy in 0..h {
@@ -272,12 +272,7 @@ fn paint_floor_to_ceiling_window(
             if let Some(building) = building_at(px, glass_dy) {
                 buf.put(px, py, building);
             } else {
-                let col = glass.colour(
-                    (f32::from(px), f32::from(py)),
-                    (px, py),
-                    f32::from(glass_dy),
-                );
-                buf.put(px, py, col);
+                buf.put(px, py, glass.colour((px, py), glass_dy));
             }
         }
     }
