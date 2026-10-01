@@ -177,6 +177,8 @@ test = true
 section = "utils"
 assets = [
     ["target/release/pixtuoid", "usr/bin/", "755"],
+    # The embedded fonts' notices, globbed as `just stage-notices` does.
+    ["../*/fonts/**/*.txt", "usr/share/doc/pixtuoid/licenses/", "644"],
 ]
 extended-description = "Terminal-native, multi-agent pixel-art visualizer for AI coding agents. Each running Claude Code session appears as an animated sprite in a top-down ASCII office."
 

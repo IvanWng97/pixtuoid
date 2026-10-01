@@ -971,6 +971,21 @@ build-target target cross="false":
         cargo build --release --target "$target" $flags
     fi
 
+# Globbed, not listed, so a font embedded later ships its notice too: a font's
+# notice is any .txt under the `fonts/` beside it. The tree mirrors the repo's
+# (licenses/<crate>/fonts/…), as pixtuoid's .deb assets do with the same glob.
+[doc("Copy LICENSE + every embedded font's notice (licenses/) into a release archive's DIR")]
+[group('release')]
+stage-notices dir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cp LICENSE "$1/"
+    find crates/*/fonts -name '*.txt' | while IFS= read -r notice; do
+        dest="$1/licenses/${notice#crates/}"
+        mkdir -p "$(dirname "$dest")"
+        cp "$notice" "$dest"
+    done
+
 # `--no-build`: the target is already built by `build-target`. Needs cargo-deb
 # (CI installs it via taiki-e/install-action@cargo-deb).
 [doc('Package the .deb for ONE already-built target (release.yml deb job)')]

@@ -381,3 +381,35 @@
   break:
     - del(.workspace.release_always)
     - .workspace.release_always = true
+
+- id: release-archives-stage-every-notice
+  file: .github/workflows/release.yml
+  why: >-
+    The binary embeds OFL-1.1 fonts, whose license must travel with every copy
+    (crates/*/fonts/), and the archives ship only what these steps stage; npm
+    repackages them. A missing notice fails nothing, and `just stage-notices`
+    globs every embedded font's, so each packaging step must call it.
+  assert: |
+    [.jobs.build.steps[] | select((.name // "") | startswith("Package"))]
+    | length == 2 and all(.run | contains("just stage-notices \"$DIR\""))
+  break:
+    - |
+      (.jobs.build.steps[] | select(.name == "Package (Windows)") | .run)
+      |= sub("just stage-notices \"\\$DIR\""; "cp LICENSE \"$DIR/\"")
+    - .jobs.build.steps |= map(select(.name != "Package (Unix)"))
+
+- id: deb-ships-every-font-notice
+  file: crates/pixtuoid/Cargo.toml
+  why: >-
+    The .deb is another copy of the binary, so it carries the embedded fonts'
+    notices by the same glob `just stage-notices` uses; a narrower one drops a
+    font silently.
+  assert: |
+    [.package.metadata.deb.assets[]
+     | select(.[0] == "../*/fonts/**/*.txt" and .[1] == "usr/share/doc/pixtuoid/licenses/")]
+    | length == 1
+  break:
+    - .package.metadata.deb.assets |= map(select(.[0] | startswith("target/")))
+    - |
+      (.package.metadata.deb.assets[] | select(.[0] | contains("fonts")) | .[0])
+      = "../pixtuoid/fonts/*.txt"

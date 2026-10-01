@@ -25,7 +25,9 @@
     "pixtuoid-hook": "bin/pixtuoid-hook"
   },
   "files": [
-    "bin/"
+    "bin/",
+    "LICENSE",
+    "licenses/"
   ],
   "optionalDependencies": {
     "@pixtuoid/cli-darwin-arm64": "0.0.0",
