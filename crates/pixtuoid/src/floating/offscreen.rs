@@ -273,7 +273,7 @@ pub fn paint_labels_into_surface(
     for el in labels {
         debug_assert!(!el.hovered, "floating paints no hover state");
         let ink = pixtuoid_scene::overlay::badge_ink(&el.text, el.tone, theme);
-        let marker = "\u{25cf}";
+        let marker = &pixtuoid_scene::overlay::BADGE_MARKER.to_string();
         let text = format!("{marker}{}", el.text);
         let tw = crate::aa_text::text_width(&text, LABEL_FONT_PX);
         const BADGE_LIFT_PX: i32 = 12;

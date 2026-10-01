@@ -121,9 +121,12 @@ fn rows(c: char) -> &'static str {
         '~' => "... ##. .##",
         '\u{b7}' => "... ... .#.",
         '\u{25cf}' => "... ### ### ###",
-        _ => "### ### ### ### ###",
+        _ => TOFU,
     }
 }
+
+/// What a character the font lacks draws as.
+const TOFU: &str = "### ### ### ### ###";
 
 /// `text`'s width in art pixels, from its first ink column to its last.
 pub(crate) fn width(text: &str) -> ArtPx {
@@ -160,7 +163,7 @@ mod tests {
     /// [`LINE_H`], and nothing but ink or blank in it.
     #[test]
     fn every_glyph_fits_its_cell() {
-        let chars = (' '..='~').chain(['\u{b7}', '\u{25cf}', '\u{2603}']);
+        let chars = (' '..='~').chain(['\u{b7}', crate::overlay::BADGE_MARKER, '\u{2603}']);
         for c in chars {
             let rows: Vec<&str> = rows(c).split(' ').collect();
             assert!(rows.len() <= usize::from(LINE_H), "{c:?}: {rows:?}");
@@ -214,6 +217,13 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Every painter's badge marker has a glyph: changing it can't leave the
+    /// cutaway's badges leading with a tofu box.
+    #[test]
+    fn the_font_draws_the_badge_marker() {
+        assert_ne!(rows(crate::overlay::BADGE_MARKER), TOFU);
     }
 
     #[test]

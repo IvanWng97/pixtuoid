@@ -136,14 +136,12 @@ pub(crate) struct Badge {
 /// Art pixels between a badge's plate edge and its text.
 const BADGE_PAD: u16 = 1;
 
-/// The marker every painter's badge leads with.
-const BADGE_MARKER: char = '\u{25cf}';
-
 impl Badge {
     /// Its plate on the art grid: at the pack's 4x art, one logical column a
     /// character and two rows tall, the classic badge's terminal cells.
     fn plate(&self, pen: Pen) -> ArtRect {
-        let ink = crate::cutaway::text::width(&format!("{BADGE_MARKER}{}", self.text));
+        let ink =
+            crate::cutaway::text::width(&format!("{}{}", crate::overlay::BADGE_MARKER, self.text));
         let w = ink.0.saturating_add(2 * BADGE_PAD);
         let h = crate::cutaway::text::LINE_H + 2 * BADGE_PAD;
         ArtRect {
@@ -178,7 +176,13 @@ fn paint_badge(badge: &Badge, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
         name: ink,
     } = crate::overlay::badge_ink(&badge.text, badge.tone, theme);
     let (x, y) = (plate.x.0 + BADGE_PAD, ArtPx(plate.y.0 + BADGE_PAD));
-    paint(pen, buf, (ArtPx(x), y), &BADGE_MARKER.to_string(), dot);
+    paint(
+        pen,
+        buf,
+        (ArtPx(x), y),
+        &crate::overlay::BADGE_MARKER.to_string(),
+        dot,
+    );
     paint(pen, buf, (ArtPx(x + ADVANCE), y), &badge.text, ink);
 }
 
@@ -348,15 +352,19 @@ impl<'a> DrawList<'a> {
     }
 
     /// Each piece's hover box and the agent it shows, in draw order: a
-    /// character's `body`, a badge's span showing its agent, every other
-    /// piece's span showing none.
+    /// character's `body`, every other piece's span showing none. A badge is
+    /// no hover target, as in the classic: neighbours' plates overlap, so one
+    /// would claim the body under another's
+    /// (`hovering_a_sitter_under_a_neighbours_badge_names_the_sitter`).
     pub(crate) fn hover_spans(
         &self,
     ) -> impl Iterator<Item = (Span, Option<pixtuoid_core::AgentId>)> + '_ {
-        self.pieces.iter().map(|p| match &p.kind {
-            PieceKind::Character { figure, body, .. } => (*body, Some(figure.key.frame.agent_id)),
-            PieceKind::Badge { agent, .. } => (p.span, Some(*agent)),
-            _ => (p.span, None),
+        self.pieces.iter().filter_map(|p| match &p.kind {
+            PieceKind::Character { figure, body, .. } => {
+                Some((*body, Some(figure.key.frame.agent_id)))
+            }
+            PieceKind::Badge { .. } => None,
+            _ => Some((p.span, None)),
         })
     }
 }
@@ -1998,6 +2006,13 @@ pub(crate) enum PieceKind {
         body: Span,
     },
     Badge {
+        #[cfg_attr(
+            not(test),
+            expect(
+                dead_code,
+                reason = "a badge is no hover target; tests ask whose it is"
+            )
+        )]
         agent: pixtuoid_core::AgentId,
         badge: Badge,
     },
@@ -5730,13 +5745,15 @@ S B B B B B B S
                 ),
                 0,
             );
-            let (pieces, hovers): (Vec<&Piece>, Vec<(pixtuoid_core::AgentId, Span)>) = list
+            let pieces: Vec<&Piece> = list
                 .pieces()
                 .iter()
-                .zip(list.hover_spans())
-                .filter(|(p, _)| matches!(p.kind, PieceKind::Character { .. }))
-                .filter_map(|(p, (body, agent))| Some((p, (agent?, body))))
-                .unzip();
+                .filter(|p| matches!(p.kind, PieceKind::Character { .. }))
+                .collect();
+            let hovers: Vec<(pixtuoid_core::AgentId, Span)> = list
+                .hover_spans()
+                .filter_map(|(body, agent)| Some((agent?, body)))
+                .collect();
             assert_eq!(hovers.len(), pieces.len());
             assert_eq!(hovers.len(), frame.characters.len());
             for ((_, body), piece) in hovers.iter().zip(&pieces) {

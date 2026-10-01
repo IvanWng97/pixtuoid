@@ -59,7 +59,10 @@ pub(crate) fn paint_label_widgets(
         } else {
             let ink = pixtuoid_scene::overlay::badge_ink(&el.text, el.tone, theme);
             vec![
-                Span::styled("●", Style::default().fg(to_color(ink.marker))),
+                Span::styled(
+                    pixtuoid_scene::overlay::BADGE_MARKER.to_string(),
+                    Style::default().fg(to_color(ink.marker)),
+                ),
                 Span::styled(el.text.clone(), Style::default().fg(to_color(ink.name))),
             ]
         };
@@ -575,7 +578,8 @@ mod tests {
                 };
                 let ink = badge_ink(text, tone, theme);
                 let at = format!("{} {tone:?}", theme.name);
-                assert_eq!(fg("\u{25cf}"), Some(super::to_color(ink.marker)), "{at}");
+                let marker = pixtuoid_scene::overlay::BADGE_MARKER.to_string();
+                assert_eq!(fg(&marker), Some(super::to_color(ink.marker)), "{at}");
                 assert_eq!(fg("r"), Some(super::to_color(ink.name)), "{at}");
             }
         }

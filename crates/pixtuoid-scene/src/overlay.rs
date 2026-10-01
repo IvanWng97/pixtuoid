@@ -75,6 +75,9 @@ pub struct BadgeInk {
     pub name: Rgb,
 }
 
+/// The glyph every painter's badge leads with, in [`BadgeInk::marker`].
+pub const BADGE_MARKER: char = '\u{25cf}';
+
 /// The [`BadgeInk`] of a badge reading `text` in `tone`.
 pub fn badge_ink(text: &str, tone: LabelTone, theme: &Theme) -> BadgeInk {
     let name = label_tone_rgb(tone, theme);
