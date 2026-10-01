@@ -1234,7 +1234,7 @@ fn a_row_north_paints_first_whatever_its_layer() {
 }
 
 #[test]
-fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
+fn pet_sort_row_tracks_the_selected_anim_sprite_height() {
     let pack = crate::pack::test_default_pack();
     let pos = Point { x: 40, y: 30 };
     let anim_h = |name: &str| {
