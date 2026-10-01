@@ -823,14 +823,22 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.cancel_transition();
             return drawn;
         };
-        let board = crate::tui::renderer::wall_board(&footer, &to_scene, now);
+        // Each floor shows its own board; only the footer is the destination's.
+        let boards = [(&from_scene, from_floor), (&to_scene, to_floor)].map(|(floor_scene, i)| {
+            let ctx = self
+                .chrome
+                .frame(scene, floor_scene, pack, now, i, nf)
+                .footer;
+            let footer = pixtuoid_scene::footer::FooterInputs::new(floor_scene, ctx);
+            crate::tui::renderer::wall_board(&footer, floor_scene, now)
+        });
+        let showing = |floor, board| pixtuoid_scene::cutaway::paint::Showing { floor, now, board };
         cutaway.paint_slide(
             crate::tui::cutaway::Slide {
-                leaving: (&from_observed, from_world.floor),
-                arriving: (&to_observed, to_world.floor),
+                leaving: (&from_observed, showing(from_world.floor, &boards[0])),
+                arriving: (&to_observed, showing(to_world.floor, &boards[1])),
                 t,
                 going_down,
-                board: &board,
             },
             theme,
             now,

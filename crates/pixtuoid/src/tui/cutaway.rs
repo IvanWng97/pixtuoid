@@ -19,10 +19,9 @@ use std::time::SystemTime;
 use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
-use pixtuoid_scene::board::BoardModel;
 use pixtuoid_scene::cutaway::canvas::{CanvasFrame, CutawayCanvas, Dirty};
 use pixtuoid_scene::cutaway::paint::Showing;
-use pixtuoid_scene::floor::{FloorMeta, ObservedFloor};
+use pixtuoid_scene::floor::ObservedFloor;
 use pixtuoid_scene::frame_cache::FrameCache;
 use pixtuoid_scene::layout::{Bounds, Size};
 use pixtuoid_scene::theme::Theme;
@@ -35,16 +34,13 @@ use crate::tui::geometry::SceneGeometry;
 use crate::tui::geometry::slide_offsets;
 use crate::tui::renderer::set_half_block;
 
-/// A floor slide's two floors, each with its meta, at progress `t` of a
-/// [`FloorTransition`](pixtuoid_scene::floor::FloorTransition).
+/// A floor slide's two floors, each as it shows with its own wall board, at
+/// progress `t` of a [`FloorTransition`](pixtuoid_scene::floor::FloorTransition).
 pub(crate) struct Slide<'a> {
-    pub(crate) leaving: (&'a ObservedFloor, FloorMeta),
-    pub(crate) arriving: (&'a ObservedFloor, FloorMeta),
+    pub(crate) leaving: (&'a ObservedFloor, Showing<'a>),
+    pub(crate) arriving: (&'a ObservedFloor, Showing<'a>),
     pub(crate) t: f32,
     pub(crate) going_down: bool,
-    /// The destination's wall board, on both floors: the slide shows the
-    /// destination's footer throughout.
-    pub(crate) board: &'a BoardModel,
 }
 
 /// Where the transmits go: the terminal ratatui's backend also writes to.
@@ -165,23 +161,18 @@ impl TileCutaway {
         origin: Position,
     ) {
         let scale = self.fit.render_scale();
-        let showing = |floor| Showing {
-            floor,
-            now,
-            board: slide.board,
-        };
         let leaving = self.canvas.frame(
             slide.leaving.0,
             theme,
             scale,
-            showing(slide.leaving.1),
+            slide.leaving.1,
             &mut self.cache,
         );
         let arriving = self.arriving.frame(
             slide.arriving.0,
             theme,
             scale,
-            showing(slide.arriving.1),
+            slide.arriving.1,
             &mut self.cache,
         );
         let (w, h) = (leaving.buf.width(), leaving.buf.height());
