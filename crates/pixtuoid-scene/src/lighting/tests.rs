@@ -153,7 +153,7 @@ fn a_monitor_halo_hangs_over_each_lit_screen_only() {
         kind: pixtuoid_core::state::ToolKind::Edit,
     };
     let at_desk = |path: &str, desk: usize, state: pixtuoid_core::state::ActivityState| {
-        let mut a = crate::character::make_slot(id(path), state);
+        let mut a = crate::character::test_support::make_slot(id(path), state);
         a.desk_index = pixtuoid_core::state::GlobalDeskIndex(desk);
         a
     };

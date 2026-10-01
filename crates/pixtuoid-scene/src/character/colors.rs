@@ -364,7 +364,7 @@ pub(crate) fn tool_glow_tint(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::character::{color_of, make_slot, make_slot_cwd, override_of};
+    use crate::character::test_support::{color_of, make_slot, make_slot_cwd, override_of};
     use pixtuoid_core::state::{ActivityState, ToolKind};
     use std::sync::Arc;
 

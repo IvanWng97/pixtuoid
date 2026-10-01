@@ -591,7 +591,7 @@ mod tests {
                 current_pid: Some(1),
             },
         );
-        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("pack");
+        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("pack");
         let mut floor = pixtuoid_scene::floor::PerFloor::new();
         let mut chitchat = std::collections::HashMap::new();
         let ctx = DrawCtx::offscreen(

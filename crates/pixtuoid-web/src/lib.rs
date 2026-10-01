@@ -24,11 +24,11 @@ use crate::script::{
 };
 
 use pixtuoid_scene::audio::OneShotPool;
-use pixtuoid_scene::embedded_pack::load_bundled_pack;
 use pixtuoid_scene::floor::{
     FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs, floor_capacity,
 };
 use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::pack::load_bundled_pack;
 use pixtuoid_scene::pixel_painter::WeatherPolicy;
 use pixtuoid_scene::theme::{ALL_THEMES, Theme};
 
@@ -145,7 +145,7 @@ pub struct Office {
 #[wasm_bindgen]
 impl Office {
     /// Build an office seeded with `seed` (drives the layout variant). Errors
-    /// only if the compile-time-embedded sprite pack fails to parse.
+    /// only if the bundled sprite pack fails to parse.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
         let pack = load_bundled_pack().map_err(|e| JsError::new(&format!("{e:#}")))?;
@@ -707,7 +707,7 @@ mod tests {
     fn office() -> Office {
         match Office::new(1) {
             Ok(o) => o,
-            Err(_) => panic!("embedded pack must parse"),
+            Err(_) => panic!("bundled pack must parse"),
         }
     }
 

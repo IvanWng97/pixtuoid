@@ -14,7 +14,7 @@ use pixtuoid_core::SceneState;
 use pixtuoid_core::harness::{DRIVEN_DESKS, Drive, Reach};
 use pixtuoid_core::source::daemon::apply_presence;
 use pixtuoid_core::source::registry;
-use pixtuoid_scene::embedded_pack::load_bundled_pack;
+use pixtuoid_scene::pack::load_bundled_pack;
 use pixtuoid_scene::theme::NORMAL;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;

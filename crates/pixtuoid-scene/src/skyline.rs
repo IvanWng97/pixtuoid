@@ -593,7 +593,7 @@ mod tests {
     use crate::anim::{Beat, Motion};
 
     fn pack() -> Pack {
-        crate::embedded_pack::test_default_pack()
+        crate::pack::test_default_pack()
     }
 
     /// Where each stand stands, for comparing two cities.
