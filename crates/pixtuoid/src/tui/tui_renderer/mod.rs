@@ -610,36 +610,25 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 self.volume_flash,
                 self.source_warning.as_deref(),
             ),
-            last_pet_pos: None,
-            last_mascots: Vec::new(),
-            last_agents: Vec::new(),
             chitchat_state: &mut self.office.chitchat,
-            chitchat_bubbles: Vec::new(),
             coffee: self.office.coffee.map(),
-            new_coffee_carriers: Vec::new(),
-            occupied_waypoints: Default::default(),
             popup_scale,
             help_open: self.help_open,
             dashboard: &self.dashboard,
             connection: &self.connection,
             onboarding: &self.onboarding,
         };
-        let result = draw_scene(&mut self.terminal, &mut draw_ctx);
-        self.last_pet_pos = draw_ctx.last_pet_pos;
-        self.last_agents = std::mem::take(&mut draw_ctx.last_agents);
-        // `take` avoids a partial move so the explicit `drop` below can follow.
-        let new_coffee_carriers = std::mem::take(&mut draw_ctx.new_coffee_carriers);
-        let occupied_waypoints = std::mem::take(&mut draw_ctx.occupied_waypoints);
-        drop(draw_ctx);
+        let out = draw_scene(&mut self.terminal, &mut draw_ctx)?;
+        self.last_pet_pos = out.pet_pos;
+        self.last_agents = out.agents;
         // Ambient audio: one AudioFrame per rendered frame, floor-scoped (you hear
         // the floor you're LOOKING AT; rain stays global). The kind-map resolves against
-        // THIS frame's layout (the `result` handle, not `self.cached_layout`, which is
+        // THIS frame's layout (`out.layout`, not `self.cached_layout`, which is
         // still last frame's until set below).
-        let frame_layout = result.as_ref().ok().and_then(|o| o.as_deref());
         let audio_frame = self.office.audio.frame(
             scene,
-            &occupied_waypoints,
-            |idx| pixtuoid_scene::floor::waypoint_kind_of(frame_layout, idx),
+            &out.occupied_waypoints,
+            |idx| pixtuoid_scene::floor::waypoint_kind_of(out.layout.as_deref(), idx),
             self.current_floor,
             now,
         );
@@ -648,19 +637,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         pixtuoid_scene::floor::frame_epilogue(
             &mut self.floors[self.current_floor].ctx,
             &mut self.office.coffee,
-            new_coffee_carriers,
+            out.new_coffee_carriers,
             now,
         );
-        if let Ok(ref layout_opt) = result {
-            self.cached_layout = layout_opt.clone();
-            // The popup's click rect derives from the terminal bounds — NOT the
-            // office layout — so the painted scale IS the clickable one on both
-            // draw paths.
-            self.popup.last_scale = popup_scale;
-        } else {
-            self.popup.last_scale = 0.0;
-        }
-        result.map(|_| ())
+        self.cached_layout = out.layout;
+        // The popup's click rect derives from the terminal bounds — NOT the
+        // office layout — so the painted scale IS the clickable one on both
+        // draw paths.
+        self.popup.last_scale = popup_scale;
+        Ok(())
     }
 }
 

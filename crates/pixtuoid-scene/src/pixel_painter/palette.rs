@@ -1,6 +1,6 @@
 //! Per-agent colors and the color math the painters share.
 
-pub(super) use crate::composite::{blend, blend_rgb};
+pub(super) use crate::composite::{BLACK, WHITE, blend_rgb};
 use pixtuoid_core::AgentSlot;
 use pixtuoid_core::id::normalize_path_key;
 use pixtuoid_core::sprite::{Frame, Pixel, Rgb, RgbBuffer};
@@ -493,19 +493,9 @@ pub(super) fn degraded_frame(frame: &Frame) -> Frame {
     Frame::from_pixels(frame.width(), frame.height(), pixels)
 }
 
-/// The blend anchors: a lit fixture is its tint pushed toward [`WHITE`], an unlit
-/// one toward [`BLACK`] — one pair, so the lamps, the screens and the neon tube
-/// cannot disagree on what "white" is.
-pub(super) const WHITE: Rgb = Rgb {
-    r: 255,
-    g: 255,
-    b: 255,
-};
-pub(super) const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
-
 /// A pixel transform tabulated over the diagonal greys — byte-identical to
 /// calling `f` per pixel, but three L1 loads instead of the f32 chain, ONLY
-/// for channel-separable `f` (every constant-tint [`blend`] chain is; a
+/// for channel-separable `f` (every constant-tint [`blend`](crate::composite::blend) chain is; a
 /// transform where one output channel reads another input channel tabulates
 /// wrong). Amortizes when a pass touches ≫256 pixels.
 pub(super) struct RgbLut {

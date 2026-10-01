@@ -1,5 +1,5 @@
 use super::*;
-use crate::atmosphere::Look;
+use crate::composite::blend;
 use crate::embedded_pack::test_default_pack;
 use crate::layout::{window_bays, window_run};
 use crate::lighting::SPILL_DEPTH;
@@ -50,7 +50,7 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
             (WINDOW_W, 28),
             moment,
             theme,
-            std::num::NonZeroU16::MIN,
+            pixtuoid_core::sprite::format::Density::ONE,
         );
         let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 8, g: 8, b: 10 });
         paint_floor_to_ceiling_window(
@@ -265,9 +265,9 @@ fn rain_hides_the_disc_like_overcast() {
 #[test]
 fn thick_cloud_hides_the_disc_uniformly() {
     let min_disc_vis = crate::celestial::MIN_DISC_VIS;
-    let overcast = crate::sky::atmo(Weather::Overcast).disc;
-    let rain = crate::sky::atmo(Weather::Rain).disc;
-    let storm = crate::sky::atmo(Weather::Storm).disc;
+    let overcast = crate::sky::transmission(Weather::Overcast).disc;
+    let rain = crate::sky::transmission(Weather::Rain).disc;
+    let storm = crate::sky::transmission(Weather::Storm).disc;
     assert!(
         overcast >= rain && rain >= storm,
         "disc visibility must not increase as cloud thickens: \
@@ -946,13 +946,15 @@ fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
         (!xs.is_empty()).then(|| xs.iter().sum::<f32>() / xs.len() as f32)
     };
     for hour in [6, 19] {
-        let sky = Sky::at_with(crate::localclock::at_hour(hour), Weather::Clear);
-        let look = Look::resolve(&sky, theme);
-        let disc = crate::celestial::Disc::of(&sky, BUF_W, TOP_WALL_H).expect("a clear low sun");
+        let at = crate::localclock::at_hour(hour);
+        let moment =
+            crate::atmosphere::Moment::resolve(Sky::at_with(at, Weather::Clear), theme, 0.0, at);
+        let (sky, look) = (&moment.sky, &moment.look);
+        let disc = crate::celestial::Disc::of(sky, BUF_W, TOP_WALL_H).expect("a clear low sun");
         let disc_side = (disc.cx - mid).signum();
 
         let mut buf = RgbBuffer::filled(BUF_W, BUF_H, FILL);
-        crate::pixel_painter::ambient::paint_sun_spot(&mut buf, theme, &layout, &sky, &look);
+        crate::pixel_painter::ambient::paint_sun_spot(&mut buf, theme, &layout, &moment);
         let spot_x = lit_x(&buf, 0..BUF_H).expect("a low sun paints a wall spot");
         assert_eq!(
             (spot_x - mid).signum(),
@@ -1048,7 +1050,7 @@ fn a_window_shows_the_city_strip_from_its_own_column() {
         (WINDOW_W * 2, 28),
         moment,
         theme,
-        std::num::NonZeroU16::MIN,
+        pixtuoid_core::sprite::format::Density::ONE,
     );
     let pane = |x: u16, run_x0: u16| {
         let mut buf = RgbBuffer::filled(WINDOW_W * 3, 30, Rgb { r: 8, g: 8, b: 10 });

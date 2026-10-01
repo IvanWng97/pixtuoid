@@ -26,6 +26,8 @@ fn main() {
     // script, which rewrites everything it embeds.
     println!("cargo:rerun-if-changed={}", asset_dir.display());
 
+    // Core's `PACK_MANIFEST`, which a build script cannot import: a rename fails
+    // this read, and so the build.
     let pack_toml = std::fs::read_to_string(asset_dir.join("pack.toml")).expect("read pack.toml");
     let (pack_toml, dropped) = if std::env::var_os("CARGO_FEATURE_DENSITY_ART").is_some() {
         (comments::strip_comments(&pack_toml), BTreeSet::new())

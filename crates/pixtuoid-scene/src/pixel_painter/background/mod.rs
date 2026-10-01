@@ -15,8 +15,7 @@ pub(crate) use lighting::{
     ClockReading, RUNNER_LATTICE_STRIDE, clock_reading, neon_look, octant_offset,
 };
 pub(super) use lighting::{
-    NeonLook, RadialFalloff, paint_clock, paint_corridor_runner, paint_light, paint_neon_panel,
-    paint_radial_falloff, paint_shadows,
+    NeonLook, paint_clock, paint_corridor_runner, paint_light, paint_neon_panel, paint_shadows,
 };
 
 use pixtuoid_core::sprite::format::Pack;
@@ -24,7 +23,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::ambient::SunbeamColumn;
 use super::epoch_ms;
-use super::palette::{RgbLut, WHITE, blend, blend_pixel, blend_rgb};
+use super::palette::{RgbLut, WHITE, blend_pixel, blend_rgb};
 
 use crate::atmosphere::Moment;
 use crate::layout::{
@@ -170,7 +169,7 @@ pub(super) fn paint_floor_and_walls(
         (run.end - run.start, glass_rows(window_h)),
         moment,
         theme,
-        std::num::NonZeroU16::MIN,
+        pixtuoid_core::sprite::format::Density::ONE,
     );
     let view = GlassView {
         city: &city,
@@ -507,25 +506,14 @@ fn paint_floor_to_ceiling_window(
         Weather::Fog | Weather::Overcast | Weather::Smog | Weather::Clear => {}
     }
 
-    let sunset = look.golden_hour;
-    if sunset > 0.05 {
+    if let Some(blaze) = sky_view.blaze() {
         for dy in 1..h.saturating_sub(1) {
             let glass_dy = dy.saturating_sub(1);
             for dx in 1..w.saturating_sub(1) {
                 let px = x + dx;
                 let py = y + dy;
                 if px < buf.width() && py < buf.height() && building_at(px, glass_dy).is_none() {
-                    let cur = buf.get(px, py);
-                    let s = sunset * 0.35;
-                    buf.put(
-                        px,
-                        py,
-                        Rgb {
-                            r: blend(cur.r, 255, s * 0.4),
-                            g: blend(cur.g, 160, s * 0.25),
-                            b: blend(cur.b, 60, s * 0.1),
-                        },
-                    );
+                    buf.put(px, py, blaze.over(buf.get(px, py)));
                 }
             }
         }
