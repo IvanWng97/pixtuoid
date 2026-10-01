@@ -4893,9 +4893,15 @@ S B B B B B B S
                 }
             }
         }
+        // Only the density art draws bulbs.
+        let want: &[&str] = if cfg!(feature = "density-art") {
+            &["desk", "door", "hung decor", "prop"]
+        } else {
+            &["desk"]
+        };
         assert_eq!(
             marked.into_iter().collect::<Vec<_>>(),
-            ["desk", "door", "hung decor", "prop"],
+            want,
             "a kind that marks went unchecked"
         );
     }
