@@ -387,30 +387,21 @@ impl ClassicReason {
     }
 }
 
-/// The `graphics:` line for `doctor` — the profile this terminal is CAPABLE of,
-/// and why it falls back when it is not.
-///
-/// Capability, not a prediction: `run` paints classic unconditionally today, so
-/// a row phrased as "what a run would paint" promised a cutaway the binary
-/// never delivers. This row says what the profile WILL pick up once it is wired
-/// to a painter.
-///
-/// Pure, so the wording is unit-tested; `doctor` supplies the probe result and
-/// the terminal's size the same way it does the truecolor row's probe beside it,
-/// and plans through [`detect`] as `run` does.
-pub(crate) fn graphics_diagnostic_row(
+/// The plan for the terminal this process runs in: the one call `run` and
+/// `doctor` both make, so `doctor` prints the plan `run` carries. `ask` is the
+/// caller's probe; the area and the size read are shared.
+pub(crate) fn plan_this_terminal(
     mode: GraphicsMode,
-    probe: Probe,
     max_density: Density,
-    term: TermSize,
-) -> String {
-    detect(mode, max_density, term, || probe).diagnostic_row()
+    ask: impl FnOnce() -> Probe,
+) -> Plan {
+    detect(mode, max_density, terminal_cells(), ask)
 }
 
-/// The plan for a terminal `term` cells big: what `run` carries and `doctor`
-/// describes. `ask` is the terminal query, called only when `mode` can use its
-/// answer, so `--graphics off` never touches the terminal.
-pub(crate) fn detect(
+/// The plan for a terminal `term` cells big. `ask` is the terminal query,
+/// called only when `mode` can use its answer, so `--graphics off` never
+/// touches the terminal.
+fn detect(
     mode: GraphicsMode,
     max_density: Density,
     term: TermSize,
@@ -437,7 +428,7 @@ fn image_area(term: TermSize) -> TermSize {
 
 /// The terminal's size in cells; empty when there is none to measure, where the
 /// graphics probe is not asked either.
-pub(crate) fn terminal_cells() -> TermSize {
+fn terminal_cells() -> TermSize {
     crossterm::terminal::size()
         .map(|(width, height)| TermSize { width, height })
         .unwrap_or_default()
@@ -458,7 +449,9 @@ pub(crate) fn run_probe() -> Probe {
 }
 
 impl Plan {
-    /// The plan as `doctor`'s `graphics:` line.
+    /// The plan as `doctor`'s `graphics:` line: the profile this terminal is
+    /// CAPABLE of — "would render", since `run` still paints classic — and why
+    /// it falls back when it is not.
     pub(crate) fn diagnostic_row(self) -> String {
         match self {
             Plan::Cutaway {
@@ -468,7 +461,7 @@ impl Plan {
                 ..
             } => format!(
                 "graphics: {} ({}x{} cell) — the cutaway profile would render at {}x \
-             ({}x art upscaled {}x), a {}x{} office (`run` does not paint it yet)",
+             ({}x art upscaled {}x), a {}x{} office",
                 protocol.name(),
                 cell.w,
                 cell.h,
@@ -539,6 +532,10 @@ mod tests {
 
     fn plan(probe: Probe, max_density: Density) -> Plan {
         resolve(GraphicsMode::Auto, probe, max_density, AREA)
+    }
+
+    fn row(mode: GraphicsMode, probe: Probe, max_density: Density) -> String {
+        detect(mode, max_density, AREA, || probe).diagnostic_row()
     }
 
     fn too_small(cell: CellSize, max_density: Density) -> Plan {
@@ -889,19 +886,15 @@ mod tests {
 
     #[test]
     fn the_doctor_row_names_the_protocol_and_the_fit() {
-        let row = graphics_diagnostic_row(
+        let row = row(
             GraphicsMode::Auto,
             answered(Some(ImageProtocol::Sixel), cell(17, 41), false),
             BUNDLED,
-            AREA,
         );
-        // The row reports a CAPABILITY. Until the profile reaches a painter it
-        // must not read as a prediction about `run`, which paints classic
-        // whatever this says.
         assert_eq!(
             row,
             "graphics: sixel (17x41 cell) — the cutaway profile would render at 16x \
-             (4x art upscaled 4x), a 127x99 office (`run` does not paint it yet)"
+             (4x art upscaled 4x), a 127x99 office"
         );
     }
 
@@ -1007,7 +1000,7 @@ mod tests {
                 ClassicReason::TmuxNeedsKitty(_) => 7,
                 ClassicReason::CellTooSmall { .. } => 8,
             });
-            let row = graphics_diagnostic_row(mode, probe, max_density, AREA);
+            let row = row(mode, probe, max_density);
             assert_eq!(row, format!("graphics: classic half-blocks — {want}"));
             rows.insert(row);
         }

@@ -84,18 +84,6 @@ impl ConnectedSources {
     }
 }
 
-/// The graphics plan a TUI run carries, through the [`crate::graphics::detect`]
-/// call `doctor`'s row makes, so the two agree (`doctor_describes_the_plan_run_carries`).
-/// `ask` queries the terminal, and only a mode other than Off calls it.
-pub(crate) fn tui_graphics_plan(
-    mode: crate::GraphicsMode,
-    pack: &pixtuoid_core::sprite::format::Pack,
-    term: ratatui::layout::Size,
-    ask: impl FnOnce() -> crate::graphics::Probe,
-) -> crate::graphics::Plan {
-    crate::graphics::detect(mode, pack.max_density_variant(), term, ask)
-}
-
 /// Per-floor boot capacities derived from the real terminal size, each floor with its
 /// own seed. When a floor's layout rejects the terminal (e.g. too small), fall back to
 /// `FALLBACK_DESKS` for that floor so the reducer can still seat agents — they may
@@ -572,55 +560,5 @@ mod tests {
         cs.set("claude-code", false);
         assert!(!cs.is_connected("claude-code"));
         assert_eq!(cs.snapshot(), HashSet::from(["codex".to_string()]));
-    }
-
-    /// `doctor`'s row and `run`'s plan are one decision: for the same mode,
-    /// answer, pack and terminal, the row describes exactly the plan `run`
-    /// carries — each reached through its own call site's inputs.
-    #[test]
-    fn doctor_describes_the_plan_run_carries() {
-        use crate::GraphicsMode;
-        use crate::graphics::{CellSize, Detected, ImageProtocol, Probe};
-        let pack =
-            pixtuoid_scene::embedded_pack::load_bundled_pack().expect("the embedded pack loads");
-        let answered = |protocol, tmux| {
-            Probe::Answered(Detected {
-                protocol,
-                cell: Some(CellSize { w: 17, h: 41 }),
-                tmux,
-            })
-        };
-        let probes = [
-            answered(Some(ImageProtocol::Kitty), false),
-            answered(Some(ImageProtocol::Sixel), true),
-            answered(None, false),
-            Probe::NotQueried,
-            Probe::NoAnswer,
-        ];
-        let modes = [
-            GraphicsMode::Off,
-            GraphicsMode::Auto,
-            GraphicsMode::Kitty,
-            GraphicsMode::Sixel,
-            GraphicsMode::Iterm2,
-        ];
-        for (width, height) in [(200, 50), (80, 24)] {
-            let term = ratatui::layout::Size { width, height };
-            for mode in modes {
-                for probe in probes {
-                    let run = tui_graphics_plan(mode, &pack, term, || probe);
-                    assert_eq!(
-                        crate::graphics::graphics_diagnostic_row(
-                            mode,
-                            probe,
-                            pack.max_density_variant(),
-                            term
-                        ),
-                        run.diagnostic_row(),
-                        "{mode:?} {probe:?} {term:?}"
-                    );
-                }
-            }
-        }
     }
 }

@@ -528,7 +528,6 @@ fn resolve_version_popup(config_path: &std::path::Path) -> bool {
 pub(crate) struct TuiSession {
     pub scene_rx: SceneRx,
     pub pack: pixtuoid_core::sprite::format::Pack,
-    pub graphics: crate::graphics::Plan,
     pub floor_caps: Arc<[std::sync::atomic::AtomicUsize; pixtuoid_core::state::MAX_FLOORS]>,
     pub theme: &'static theme::Theme,
     pub config_path: std::path::PathBuf,
@@ -904,7 +903,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let TuiSession {
         mut scene_rx,
         pack,
-        graphics,
         floor_caps,
         theme,
         config_path,
@@ -920,7 +918,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     } = session;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
-    renderer.set_graphics(graphics);
     // A LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins
     // the device thread it owns.
     let mut audio_ctl = crate::audio::AudioController::new(audio_cfg, config_path.clone());

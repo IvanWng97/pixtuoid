@@ -34,7 +34,6 @@ use super::{
     ConnectedSources, FALLBACK_DESKS, RunConfig, SceneRx, boot_capacities_for, resolve_boot_caps,
     summarize,
 };
-use crate::graphics::Plan;
 
 pub fn run(cfg: RunConfig) -> Result<()> {
     // Before tokio and the boot caps: the query reads the terminal while no
@@ -51,24 +50,19 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     rt.block_on(async move { run_async(cfg, tui).await })
 }
 
-/// What the TUI needs before anything starts: the pack, whose densest art the
-/// plan fits, and the plan.
-fn boot_tui(cfg: &RunConfig) -> Result<(pixtuoid_core::sprite::format::Pack, Plan)> {
+/// Load the pack, whose densest art the plan fits, and plan.
+fn boot_tui(cfg: &RunConfig) -> Result<pixtuoid_core::sprite::format::Pack> {
     let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(cfg.pack.clone())?;
-    let plan = super::tui_graphics_plan(
+    let plan = crate::graphics::plan_this_terminal(
         cfg.graphics,
-        &pack,
-        crate::graphics::terminal_cells(),
+        pack.max_density_variant(),
         crate::graphics::run_probe,
     );
     tracing::info!(mode = ?cfg.graphics, plan = ?plan, "graphics plan");
-    Ok((pack, plan))
+    Ok(pack)
 }
 
-async fn run_async(
-    cfg: RunConfig,
-    tui: Option<(pixtuoid_core::sprite::format::Pack, Plan)>,
-) -> Result<()> {
+async fn run_async(cfg: RunConfig, tui: Option<pixtuoid_core::sprite::format::Pack>) -> Result<()> {
     let RunConfig {
         socket,
         projects_root,
@@ -112,11 +106,10 @@ async fn run_async(
 
     match tui {
         None => headless_loop(scene_rx, health_rx).await,
-        Some((pack, graphics)) => {
+        Some(pack) => {
             crate::tui::run_tui(crate::tui::TuiSession {
                 scene_rx,
                 pack,
-                graphics,
                 floor_caps,
                 theme,
                 config_path,

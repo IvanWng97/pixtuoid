@@ -82,9 +82,6 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     audio: crate::audio::AudioHandle,
     /// Transient +/- volume readout (percent); `None` past [`crate::audio::VOLUME_FLASH_MS`].
     volume_flash: Option<u8>,
-    /// What this terminal can paint, set by `run_tui` (classic elsewhere). Not
-    /// read yet: every plan paints classic until the cutaway tiles land.
-    graphics: crate::graphics::Plan,
 }
 
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
@@ -116,15 +113,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             onboarding: crate::tui::welcome::OnboardingFrame::default(),
             audio: crate::audio::AudioHandle::disabled(),
             volume_flash: None,
-            graphics: crate::graphics::Plan::Classic {
-                reason: crate::graphics::ClassicReason::Disabled,
-            },
         }
-    }
-
-    /// Carry the run's graphics plan.
-    pub(crate) fn set_graphics(&mut self, plan: crate::graphics::Plan) {
-        self.graphics = plan;
     }
 
     pub(crate) fn set_audio(&mut self, audio: crate::audio::AudioHandle) {

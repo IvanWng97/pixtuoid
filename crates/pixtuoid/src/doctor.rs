@@ -656,11 +656,7 @@ struct DoctorReport {
     colorterm_env: Option<String>,
     truecolor_probe: Option<bool>,
     color_pf: crate::term::ColorPreflight,
-    graphics: crate::GraphicsMode,
-    graphics_probe: crate::graphics::Probe,
-    max_density: pixtuoid_core::sprite::format::Density,
-    /// The terminal's size in cells, which the graphics row plans for.
-    term_size: ratatui::layout::Size,
+    graphics_plan: crate::graphics::Plan,
     rows: Vec<DoctorSourceRow>,
     roots: Vec<RootStatus>,
     backend: &'static str,
@@ -734,20 +730,21 @@ impl Ink {
 /// DECRQSS only on a real tty and a non-dumb `$TERM` (`probe_ok`): the same
 /// `color_preflight` gate the launcher acts on, so the row matches `run`. Off Unix it also
 /// keeps the graphics probe, which is upstream's and writes its query to stdout, out of a
-/// piped `doctor > file`. `--graphics off` skips
-/// the graphics ask for a second reason — a terminal that stays silent spends
-/// `graphics::GRAPHICS_PROBE_TIMEOUT` on a fact the flag says not to use.
+/// piped `doctor > file`.
 fn probe_terminal_caps(
     probe_ok: bool,
     graphics: crate::GraphicsMode,
-) -> (Option<bool>, crate::graphics::Probe) {
+    max_density: pixtuoid_core::sprite::format::Density,
+) -> (Option<bool>, crate::graphics::Plan) {
     let truecolor_probe = if probe_ok {
         crate::term::query_truecolor(crate::term::TRUECOLOR_PROBE_TIMEOUT)
     } else {
         None
     };
-    let graphics_probe = crate::graphics::probe(probe_ok && graphics != crate::GraphicsMode::Off);
-    (truecolor_probe, graphics_probe)
+    let graphics_plan = crate::graphics::plan_this_terminal(graphics, max_density, || {
+        crate::graphics::probe(probe_ok)
+    });
+    (truecolor_probe, graphics_plan)
 }
 
 /// A wrong root has no symptom but an empty office, so state it outright (#880). Goes
@@ -837,7 +834,6 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         // than rely on the Display path happening not to check today.
         crossterm::style::force_color_output(true);
     }
-    let (truecolor_probe, graphics_probe) = probe_terminal_caps(probe_ok, graphics);
     // The pack `run` draws, not the bundled art alone, which understates a user
     // pack shipping density variants.
     let max_density = pack_max_density(crate::config::resolve_pack_source(&cfg, None))
@@ -845,7 +841,7 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
             config_warnings.push(reason);
             pixtuoid_core::sprite::format::Density::ONE
         });
-    let term_size = crate::graphics::terminal_cells();
+    let (truecolor_probe, graphics_plan) = probe_terminal_caps(probe_ok, graphics, max_density);
 
     let rows: Vec<DoctorSourceRow> = registry::registered_source_names()
         .map(|src| {
@@ -904,10 +900,7 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         colorterm_env,
         truecolor_probe,
         color_pf,
-        graphics,
-        graphics_probe,
-        max_density,
-        term_size,
+        graphics_plan,
         rows,
         roots,
         backend,
@@ -957,12 +950,7 @@ fn terminal_category(r: &DoctorReport) -> Category {
     // classic, and a fallback must never go unexplained.
     let mut details = vec![format!(
         "{DETAIL_INDENT}{}",
-        crate::graphics::graphics_diagnostic_row(
-            r.graphics,
-            r.graphics_probe,
-            r.max_density,
-            r.term_size
-        )
+        r.graphics_plan.diagnostic_row()
     )];
     // Whenever it has something to say — incl. the ForceColor note, so a
     // NO_COLOR+CLICOLOR_FORCE report still states that color is being forced.
@@ -1647,10 +1635,9 @@ mod tests {
             colorterm_env: None,
             truecolor_probe: None,
             color_pf: crate::term::ColorPreflight::Proceed,
-            graphics: crate::GraphicsMode::Auto,
-            graphics_probe: crate::graphics::Probe::NotQueried,
-            max_density: pixtuoid_core::sprite::format::Density::ONE,
-            term_size: ratatui::layout::Size::default(),
+            graphics_plan: crate::graphics::Plan::Classic {
+                reason: crate::graphics::ClassicReason::NotQueried,
+            },
             rows,
             roots: vec![],
             backend: "NSRunningApplication (macOS)",
@@ -1791,31 +1778,31 @@ mod tests {
     /// under the category line.
     #[test]
     fn terminal_category_leads_with_the_graphics_plan() {
-        use crate::graphics::{CellSize, Detected, ImageProtocol, Probe};
+        use crate::graphics::{CellSize, ClassicReason, Fit, ImageProtocol, Plan};
         let mut r = summary_report(vec![]);
-        r.graphics_probe = Probe::Answered(Detected {
-            protocol: Some(ImageProtocol::Kitty),
-            cell: Some(CellSize { w: 17, h: 41 }),
-            tmux: false,
-        });
-        r.max_density = pixtuoid_core::sprite::format::Density::new(4).expect("nonzero");
-        r.term_size = ratatui::layout::Size {
+        let cell = CellSize { w: 17, h: 41 };
+        let area = ratatui::layout::Size {
             width: 200,
-            height: 50,
+            height: 49,
+        };
+        let density = pixtuoid_core::sprite::format::Density::new(4).expect("nonzero");
+        r.graphics_plan = Plan::Cutaway {
+            fit: Fit::new(cell, area, density).expect("fits"),
+            protocol: ImageProtocol::Kitty,
+            cell,
+            tmux: false,
         };
         assert_eq!(
             terminal_category(&r).details[0],
             format!(
                 "{DETAIL_INDENT}graphics: kitty (17x41 cell) — the cutaway profile would \
-                 render at 16x (4x art upscaled 4x), a 212x125 office (`run` does not paint it yet)"
+                 render at 16x (4x art upscaled 4x), a 212x125 office"
             )
         );
 
-        r.graphics_probe = Probe::Answered(Detected {
-            protocol: Some(ImageProtocol::Sixel),
-            cell: Some(CellSize { w: 17, h: 41 }),
-            tmux: true,
-        });
+        r.graphics_plan = Plan::Classic {
+            reason: ClassicReason::TmuxNeedsKitty(ImageProtocol::Sixel),
+        };
         assert_eq!(
             terminal_category(&r).details[0],
             format!(
