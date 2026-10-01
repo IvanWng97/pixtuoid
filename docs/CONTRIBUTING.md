@@ -57,6 +57,8 @@ run. The jobs:
   freshness, and the npm package generator + OpenClaw plugin contract.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
   full suite on a real Windows runner.
+- **other-unix-check** (`just check-other-unix`) — FreeBSD cross-lint for
+  the other-unix arms.
 - **wasm-check** — builds the site's wasm (`just gen-wasm`) and caps its
   gzipped size (`just gen-wasm-check`).
 - **site** — `site.yml`: the site's static checks, then e2e and

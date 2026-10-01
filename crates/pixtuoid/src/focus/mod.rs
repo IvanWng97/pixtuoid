@@ -183,6 +183,27 @@ pub(crate) use macos::{OsProcessTable, activate_os};
 #[cfg(windows)]
 pub(crate) use windows::{OsProcessTable, activate_os};
 
+/// No focus glue on this OS: nothing is focusable, so every click is the
+/// module's silent no-op.
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+pub(crate) struct OsProcessTable;
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+impl ProcessTable for OsProcessTable {
+    fn ppid(&self, _pid: i32) -> Option<i32> {
+        None
+    }
+
+    fn focusable(&self, _pid: i32) -> bool {
+        false
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+pub(crate) fn activate_os(_pid: i32) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

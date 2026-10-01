@@ -111,6 +111,8 @@ pub(crate) struct PetPlacement {
 pub(crate) struct MascotPlacement {
     /// Its centre, in layout units, fitted so its frame lands on the canvas.
     pub(crate) pos: Point,
+    /// The frame `pos` was fitted for.
+    pub(crate) size: Size,
     /// The sprite animation to draw.
     pub(crate) anim_name: &'static str,
     /// The frame within `anim_name`.
@@ -361,7 +363,7 @@ pub(super) fn frame_size(pack: &Pack, anim: &str, frame_idx: usize, fallback: Si
 /// The bundled cat's size, for a pack that lacks the pet's anim.
 pub(super) const PET_FALLBACK: Size = Size { w: 8, h: 6 };
 /// The bundled lobster's size, for a pack that lacks the mascot's anim.
-pub(super) const MASCOT_FALLBACK: Size = Size { w: 14, h: 12 };
+const MASCOT_FALLBACK: Size = Size { w: 14, h: 12 };
 
 /// The floor's pet this tick. A pet being petted holds still where it was
 /// clicked; otherwise `pet_position` roams it around the idle desks.
@@ -447,6 +449,7 @@ fn mascot_placements(
             let size = frame_size(pack, anim_name, frame_idx, MASCOT_FALLBACK);
             Some(MascotPlacement {
                 pos: on_canvas(layout, Anchor::Center, pos, size),
+                size,
                 anim_name,
                 frame_idx,
                 name: def.display_name,

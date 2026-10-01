@@ -13,6 +13,7 @@
 //! detection module whose decisions are only exercised through that query is a
 //! module with no tests at all.
 
+use pixtuoid_core::sprite::format::Density;
 use pixtuoid_scene::render_scale::RenderScale;
 
 #[cfg(feature = "graphics")]
@@ -127,7 +128,7 @@ pub(crate) enum ClassicReason {
         cell: CellSize,
         /// The least dense of the pack's density variants — the one the cell
         /// came nearest to landing — or 1 when it ships none.
-        density: u16,
+        density: Density,
     },
 }
 
@@ -217,10 +218,10 @@ fn raw_scale_for_cell(cell: CellSize) -> u16 {
 /// The densest that lands, not the densest alone: one outlier `@16x` sprite
 /// must not switch the cutaway off on a terminal the rest of its art lands on. A pack
 /// with no variants lands its base art at the natural scale.
-pub(crate) fn render_scale_for_cell(cell: CellSize, densities: &[u16]) -> Option<RenderScale> {
+pub(crate) fn render_scale_for_cell(cell: CellSize, densities: &[Density]) -> Option<RenderScale> {
     let natural = raw_scale_for_cell(cell);
     if densities.is_empty() {
-        return RenderScale::fit(natural, 1);
+        return RenderScale::fit(natural, Density::ONE);
     }
     densities
         .iter()
@@ -231,7 +232,7 @@ pub(crate) fn render_scale_for_cell(cell: CellSize, densities: &[u16]) -> Option
 
 /// Decide what to paint. Pure — [`probe()`] supplies the probe, and `densities`
 /// are the pack's [`Pack::density_variants`](pixtuoid_core::sprite::format::Pack::density_variants).
-pub(crate) fn resolve(mode: GraphicsMode, probe: Probe, densities: &[u16]) -> Plan {
+pub(crate) fn resolve(mode: GraphicsMode, probe: Probe, densities: &[Density]) -> Plan {
     let classic = |reason| Plan::Classic { reason };
     if mode == GraphicsMode::Off {
         return classic(ClassicReason::Disabled);
@@ -258,7 +259,7 @@ pub(crate) fn resolve(mode: GraphicsMode, probe: Probe, densities: &[u16]) -> Pl
         _ => {
             return classic(ClassicReason::CellTooSmall {
                 cell,
-                density: densities.iter().copied().min().unwrap_or(1),
+                density: densities.iter().copied().min().unwrap_or(Density::ONE),
             });
         }
     };
@@ -299,7 +300,9 @@ impl ClassicReason {
                  speaks {}",
                 p.name()
             ),
-            Self::CellTooSmall { cell, density } if density > 1 && raw_scale_for_cell(cell) > 1 => {
+            Self::CellTooSmall { cell, density }
+                if density > Density::ONE && raw_scale_for_cell(cell) > 1 =>
+            {
                 format!(
                     "terminal reports a {}x{} cell — too small for the pack's {density}x art",
                     cell.w, cell.h
@@ -326,7 +329,7 @@ impl ClassicReason {
 pub(crate) fn graphics_diagnostic_row(
     mode: GraphicsMode,
     probe: Probe,
-    densities: &[u16],
+    densities: &[Density],
 ) -> String {
     match resolve(mode, probe, densities) {
         Plan::Cutaway {
@@ -361,9 +364,9 @@ mod tests {
 
     const CELL_8X16: CellSize = CellSize { w: 8, h: 16 };
     /// A pack with no density variants.
-    const BASE_ONLY: &[u16] = &[];
+    const BASE_ONLY: &[Density] = &[];
     /// The bundled pack's densities (`bundled_is_the_embedded_packs_densities`).
-    const BUNDLED: &[u16] = &[4];
+    const BUNDLED: &[Density] = &[Density::new(4).expect("nonzero")];
 
     #[test]
     fn bundled_is_the_embedded_packs_densities() {
@@ -384,7 +387,11 @@ mod tests {
         answered(Some(ImageProtocol::Kitty), cell, false)
     }
 
-    fn scale(cell: CellSize, densities: &[u16]) -> Option<u16> {
+    fn d(n: u16) -> Density {
+        Density::new(n).expect("nonzero")
+    }
+
+    fn scale(cell: CellSize, densities: &[Density]) -> Option<u16> {
         render_scale_for_cell(cell, densities).map(RenderScale::get)
     }
 
@@ -419,16 +426,20 @@ mod tests {
     /// densities come in.
     #[test]
     fn the_densest_density_that_lands_wins_not_the_densest_alone() {
-        assert_eq!(scale(CELL_8X16, &[16, 8]), Some(8), "16x cannot land at 8");
-        assert_eq!(scale(CELL_8X16, &[8, 16]), Some(8));
-        assert_eq!(scale(CellSize { w: 16, h: 32 }, &[8, 16]), Some(16));
         assert_eq!(
-            scale(CellSize { w: 20, h: 40 }, &[8, 16]),
+            scale(CELL_8X16, &[d(16), d(8)]),
+            Some(8),
+            "16x cannot land at 8"
+        );
+        assert_eq!(scale(CELL_8X16, &[d(8), d(16)]), Some(8));
+        assert_eq!(scale(CellSize { w: 16, h: 32 }, &[d(8), d(16)]), Some(16));
+        assert_eq!(
+            scale(CellSize { w: 20, h: 40 }, &[d(8), d(16)]),
             Some(16),
             "the densest wins"
         );
         assert_eq!(
-            scale(CellSize { w: 5, h: 10 }, &[16, 8]),
+            scale(CellSize { w: 5, h: 10 }, &[d(16), d(8)]),
             None,
             "nothing lands"
         );
@@ -513,7 +524,7 @@ mod tests {
             Plan::Classic {
                 reason: ClassicReason::CellTooSmall {
                     cell: tiny,
-                    density: 4
+                    density: d(4)
                 }
             }
         );
@@ -524,7 +535,10 @@ mod tests {
     /// one" gets an answer in every shape.
     #[test]
     fn every_way_of_lacking_graphics_falls_back_with_a_reason() {
-        let too_small = |cell, density| ClassicReason::CellTooSmall { cell, density };
+        let too_small = |cell, density| ClassicReason::CellTooSmall {
+            cell,
+            density: d(density),
+        };
         let cases = [
             (Probe::NotQueried, BASE_ONLY, ClassicReason::NotQueried),
             (Probe::NoAnswer, BASE_ONLY, ClassicReason::NoAnswer),
@@ -580,7 +594,13 @@ mod tests {
     /// terminal that reports its pixels.
     #[test]
     fn a_cell_too_small_names_the_art_it_is_too_small_for() {
-        let reason = |cell, density| ClassicReason::CellTooSmall { cell, density }.describe();
+        let reason = |cell, density| {
+            ClassicReason::CellTooSmall {
+                cell,
+                density: d(density),
+            }
+            .describe()
+        };
         let small_font = reason(CellSize { w: 2, h: 4 }, 4);
         assert!(small_font.contains("the pack's 4x art"), "{small_font}");
         let no_pixels = reason(CellSize { w: 1, h: 2 }, 4);
@@ -642,7 +662,7 @@ mod tests {
             Plan::Classic {
                 reason: ClassicReason::CellTooSmall {
                     cell: CellSize { w: 1, h: 2 },
-                    density: 1,
+                    density: Density::ONE,
                 }
             },
             "1px per unit buys nothing"
