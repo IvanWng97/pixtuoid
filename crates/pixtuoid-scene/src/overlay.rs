@@ -78,6 +78,12 @@ pub struct BadgeInk {
 /// The glyph every painter's badge leads with, in [`BadgeInk::marker`].
 pub const BADGE_MARKER: char = '\u{25cf}';
 
+/// A badge's width in terminal cells, its marker included: the classic
+/// painter clips its badge to it, and a label is truncated to what is left.
+pub const BADGE_CELLS: u16 = DESK_W + BADGE_OVERHANG;
+/// The cells a badge may run past its desk's width.
+const BADGE_OVERHANG: u16 = 4;
+
 /// The [`BadgeInk`] of a badge reading `text` in `tone`.
 pub fn badge_ink(text: &str, tone: LabelTone, theme: &Theme) -> BadgeInk {
     let name = label_tone_rgb(tone, theme);
@@ -132,8 +138,8 @@ impl<'a> Namesakes<'a> {
         } else {
             std::borrow::Cow::Borrowed(&*agent.label)
         };
-        const LABEL_BUDGET_PAD: u16 = 4;
-        truncate_label(&raw, DESK_W + LABEL_BUDGET_PAD).into_owned()
+        let marker = crate::cutaway::text::char_cells(BADGE_MARKER);
+        truncate_label(&raw, BADGE_CELLS.saturating_sub(marker)).into_owned()
     }
 }
 
@@ -425,6 +431,28 @@ mod tests {
         let out = truncate_label("x\u{00b7}abcdefgh", 4);
         assert_eq!(out.chars().count(), 4);
         assert_eq!(out, "x\u{00b7}ab");
+    }
+
+    /// A long name's badge, marker and all, fills [`BADGE_CELLS`] and no
+    /// more, short only by the half a wide character would split.
+    ///
+    /// [`BADGE_CELLS`]: super::BADGE_CELLS
+    #[test]
+    fn a_long_names_badge_fills_its_cells_marker_included() {
+        use crate::cutaway::text::cells;
+        for label in [
+            "cc\u{b7}a-very-long-project-name",
+            "cc\u{b7}日本語プロジェクト管理ツール",
+            "cc\u{b7}a日本語プロジェクト管理",
+        ] {
+            let s = scene_of(vec![slot(label, "sess-abcd", 0, active())]);
+            let badge = format!("{}{}", super::BADGE_MARKER, overlay_of(&s, None)[0].text);
+            let n = cells(&badge);
+            assert!(
+                (super::BADGE_CELLS - 1..=super::BADGE_CELLS).contains(&n),
+                "{badge:?} takes {n} cells"
+            );
+        }
     }
 
     /// The budget is in cells, which a CJK character takes two of: a wide name
