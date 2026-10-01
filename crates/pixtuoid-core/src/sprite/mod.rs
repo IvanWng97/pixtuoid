@@ -28,8 +28,7 @@ pub struct Rgb {
 /// small, so a material picks its ramp's contrast by how many levels it spans.
 const RAMP_LIGHTNESS_STEP: f32 = 0.1;
 
-/// How far one ramp level pulls a color toward the warm or cool hue, in OKLab
-/// chroma.
+/// How far one ramp level pulls a color toward the warm or cool hue, in OKLab chroma.
 const RAMP_HUE_PULL: f32 = 0.006;
 
 /// The OKLCH hue highlights pull toward: amber, a warm key light.
@@ -44,6 +43,14 @@ const GAMUT_JND: f32 = 0.02;
 
 /// Where that search stops, in chroma and in ΔE-OK short of [`GAMUT_JND`].
 const GAMUT_EPSILON: f32 = 0.0001;
+
+/// Bounds [`RAMP_MEMO`] for a process that ramps ever new colours.
+const RAMP_MEMO_CAP: usize = 1 << 12;
+
+thread_local! {
+    /// Ramp levels already walked: a painter re-resolves palette ramps per frame.
+    static RAMP_MEMO: std::cell::RefCell<HashMap<(Rgb, i8), Rgb>> = Default::default();
+}
 
 impl Rgb {
     const WHITE: Rgb = Rgb {
@@ -63,14 +70,23 @@ impl Rgb {
     /// chroma before that lightness, so a highlight pales.
     ///
     /// The warm and cool shift is a pull in OKLab's a/b plane toward a fixed
-    /// hue, not a hue rotation. A rotation "toward yellow" flips direction at
-    /// the hue opposite yellow and has nothing to rotate on a grey; the pull is
-    /// continuous for every base, and gives a grey warm lights and cool shadows.
+    /// hue: a hue rotation flips direction at the hue opposite its target and
+    /// has nothing to rotate on a grey, where the pull warms its lights.
     pub fn ramp(self, level: i8) -> Rgb {
-        self.ramp_run(level > 0)
-            .take(usize::from(level.unsigned_abs()))
-            .last()
-            .unwrap_or(self)
+        if level == 0 {
+            return self;
+        }
+        RAMP_MEMO.with_borrow_mut(|memo| {
+            if memo.len() >= RAMP_MEMO_CAP {
+                memo.clear();
+            }
+            *memo.entry((self, level)).or_insert_with(|| {
+                self.ramp_run(level > 0)
+                    .take(usize::from(level.unsigned_abs()))
+                    .last()
+                    .unwrap_or(self)
+            })
+        })
     }
 
     fn ramp_run(self, lit: bool) -> impl Iterator<Item = Rgb> {
@@ -827,6 +843,17 @@ mod tests {
         shades.push(base);
         shades.extend(base.ramp_run(true).take(max));
         shades
+    }
+
+    #[test]
+    fn a_ramp_level_is_that_step_of_its_walk() {
+        let max = format::MAX_RAMP_LEVEL;
+        for base in RAMP_BASES {
+            let shades = shades(base);
+            for (n, &shade) in (-max..=max).zip(&shades) {
+                assert_eq!(base.ramp(n), shade, "{base:?} level {n}");
+            }
+        }
     }
 
     /// Also catches a clipped out-of-gamut step ([`Rgb::from_oklab_in_gamut`]).
