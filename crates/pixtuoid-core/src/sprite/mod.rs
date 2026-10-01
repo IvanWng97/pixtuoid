@@ -557,6 +557,7 @@ impl std::ops::Deref for RgbBuffer {
 
 impl RgbBuffer {
     /// A `width × height` buffer with every pixel set to `fill`.
+    #[inline]
     pub fn filled(width: u16, height: u16, fill: Rgb) -> Self {
         RgbBuffer {
             pixels: Grid::filled(width, height, fill),
@@ -593,12 +594,14 @@ impl RgbBuffer {
 
     /// Read the `Rgb` at `(x, y)`. Debug-asserts the point is in bounds;
     /// unchecked in release (the hot blit path clips first).
+    #[inline]
     pub fn get(&self, x: u16, y: u16) -> Rgb {
         self.pixels.as_slice()[self.checked_index(x, y)]
     }
 
     /// Write `rgb` at `(x, y)`. Debug-asserts the point is in bounds; use
     /// [`put_checked`](Self::put_checked) when `(x, y)` may fall outside.
+    #[inline]
     pub fn put(&mut self, x: u16, y: u16, rgb: Rgb) {
         let i = self.checked_index(x, y);
         self.write(i, rgb);
@@ -608,6 +611,7 @@ impl RgbBuffer {
     /// THE clip primitive for per-pixel scatter (glyphs, particles) that can't
     /// pre-clip; the hot blit path clips its loop bounds once and keeps the
     /// unchecked [`put`](Self::put).
+    #[inline]
     pub fn put_checked(&mut self, x: u16, y: u16, rgb: Rgb) {
         if x < self.pixels.width && y < self.pixels.height {
             let i = self.raw_index(x, y);
@@ -639,6 +643,7 @@ impl RgbBuffer {
         }
     }
 
+    #[inline]
     fn write(&mut self, i: usize, rgb: Rgb) {
         self.pixels.as_mut_slice()[i] = rgb;
         if let Some(w) = &mut self.writes {
