@@ -44,7 +44,6 @@ pub(crate) fn fixture_overrides(theme: &crate::theme::Theme) -> [(char, Pixel); 
         ('ф', Some(o.clock_rim)),
         (CLOCK_FACE_KEY, Some(o.clock_face)),
         ('з', Some(o.clock_hand)),
-        // Un-themed: the classic draws the cooler's bottle in its own blue.
         ('χ', Some(COOLER_WATER)),
     ]
 }
