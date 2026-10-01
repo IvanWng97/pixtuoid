@@ -1947,4 +1947,64 @@ mod tests {
             }
         }
     }
+
+    /// A slot slides its piece to the nearest spot clear of `desk_art`, and an aisle
+    /// narrower than the piece drops the slot without skipping the next slot's kind.
+    #[test]
+    fn a_pod_slot_slides_clear_of_the_desk_art_or_drops() {
+        use super::{
+            Bounds, DESK_H, DESK_W, INTER_POD_AISLE_X, INTER_POD_AISLE_Y, INTRA_POD_GAP_X,
+            INTRA_POD_GAP_Y, POD_SIDE, PodGrid, Point, Size, compute_pod_decor, furniture_def,
+        };
+        let stride_x = POD_SIDE * DESK_W + (POD_SIDE - 1) * INTRA_POD_GAP_X + INTER_POD_AISLE_X;
+        let stride_y = POD_SIDE * DESK_H + (POD_SIDE - 1) * INTRA_POD_GAP_Y + INTER_POD_AISLE_Y;
+        let grid = |cols: u16| PodGrid {
+            band: Bounds {
+                x: 0,
+                y: 0,
+                width: cols * stride_x,
+                height: stride_y,
+            },
+            cols,
+            rows: 1,
+            stride_x,
+            stride_y,
+            couch_to_desk_extra: 0,
+        };
+        let wall = |x: u16, east: u16| {
+            (
+                Point { x, y: 0 },
+                Size {
+                    w: east - x,
+                    h: stride_y,
+                },
+            )
+        };
+        let reach = INTER_POD_AISLE_X / 2;
+
+        // Art covering the centred piece's west `n` columns: it lands exactly `n` east.
+        let free = compute_pod_decor(grid(2), 0, &[]);
+        let w = furniture_def(free[0].kind.furniture()).visual.w;
+        let n = reach / 2;
+        let art_west = free[0].pos.x - w / 2;
+        let slid = compute_pod_decor(grid(2), 0, &[wall(0, art_west + n)]);
+        assert_eq!(
+            slid[0].pos,
+            Point {
+                x: free[0].pos.x + n,
+                ..free[0].pos
+            }
+        );
+
+        // A gap one column narrower than slot 0's piece over its whole reach: slot 0
+        // drops, and slot 1 still deals its own kind.
+        let free = compute_pod_decor(grid(3), 0, &[]);
+        let w = furniture_def(free[0].kind.furniture()).visual.w;
+        let art_west = free[0].pos.x - w / 2;
+        let narrow = [
+            wall(0, art_west),
+            wall(art_west + w - 1, free[0].pos.x + reach + w),
+        ];
+        assert_eq!(compute_pod_decor(grid(3), 0, &narrow), free[1..]);
+    }
 }
