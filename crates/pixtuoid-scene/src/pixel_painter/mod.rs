@@ -424,9 +424,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // LATE, so the light lands ON the shelf and the clock instead of hiding
     // behind them; after the wash, since the sign is an emitter and its light
     // isn't dimmed with the room it falls on.
-    if let Some(emitter) = &lights.neon {
-        paint_light(ctx.buf, emitter, neon.halo);
-    }
+    paint_light(ctx.buf, &lights.neon, neon.halo);
 
     // LAST, so a Storm strike briefly flares the whole interior (floor, walls,
     // furniture, characters), not just the window strip.

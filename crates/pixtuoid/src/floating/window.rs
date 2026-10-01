@@ -184,14 +184,13 @@ impl FloatingApp {
         surf.fill_upscaled(office, scale);
         let labels = self.renderer.labels(&scene, now);
         super::offscreen::paint_labels_into_surface(&mut surf, &labels, scale as i32, self.theme);
-        if let Some(board) = self.renderer.board(&scene, now) {
-            super::offscreen::paint_wall_board_into_surface(
-                &mut surf,
-                &board,
-                scale as i32,
-                self.theme,
-            );
-        }
+        let board = self.renderer.board(&scene, now);
+        super::offscreen::paint_wall_board_into_surface(
+            &mut surf,
+            &board,
+            scale as i32,
+            self.theme,
+        );
         let budget = super::offscreen::footer_budget(win_w);
         let footer = self
             .renderer

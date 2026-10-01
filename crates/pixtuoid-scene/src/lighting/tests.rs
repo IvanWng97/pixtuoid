@@ -88,7 +88,7 @@ fn the_neon_halo_throws_the_signs_own_levels() {
             },
         );
         assert_eq!(
-            lights.neon.expect("a neon at this size").strength,
+            lights.neon.strength,
             neon_halo_strength(levels, now, look.darkness),
             "{levels:?}"
         );

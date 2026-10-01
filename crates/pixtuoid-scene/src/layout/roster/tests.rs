@@ -413,8 +413,11 @@ fn a_standing_fixture_casts_its_shadow_under_its_whole_box() {
 /// the committed heroes' buffers (`scripts/media.json`), each at a few seeds.
 fn north_wall_census() -> impl Iterator<Item = SceneLayout> {
     [
-        (48u16, 46u16),
-        (50, 80),
+        (
+            super::super::compute::MIN_LAYOUT_W,
+            super::super::compute::MIN_LAYOUT_H,
+        ),
+        (super::super::compute::MIN_LAYOUT_W, 80),
         (96, 60),
         (120, 72),
         (140, 80),

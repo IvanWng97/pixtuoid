@@ -89,8 +89,11 @@ const fn cubicle_aisle_h(usable_h: u16) -> u16 {
 const MIN_CUBICLE_AISLE_H: u16 = 8;
 
 /// The smallest buffer `compute_with_seed` lays out; below either it returns `None`
-/// ("terminal too small"). BOTH axes are SOLVED against the band, not the buffer.
+/// ("terminal too small"). BOTH axes are SOLVED against the band, not the buffer, and
+/// the width against the north wall too: no narrower wall hangs the door clear of
+/// the neon.
 pub(super) const MIN_LAYOUT_W: u16 = min_layout_w();
+const _: () = assert!(MIN_LAYOUT_W >= super::NEON_DOOR_WALL_W);
 pub(super) const MIN_LAYOUT_H: u16 = min_layout_h();
 
 /// The widest left column any variant takes — the band gets the rest, so this
@@ -109,7 +112,11 @@ const fn widest_mid_x_pct() -> u16 {
 }
 
 const fn min_layout_w() -> u16 {
-    let mut w = DESK_BAND_MIN_W;
+    let mut w = if DESK_BAND_MIN_W > super::NEON_DOOR_WALL_W {
+        DESK_BAND_MIN_W
+    } else {
+        super::NEON_DOOR_WALL_W
+    };
     while band_w(w, widest_mid_x_pct()) < DESK_BAND_MIN_W {
         w += 1;
     }
@@ -746,35 +753,23 @@ fn place_wall_decor(
         x: plan.lounge_west_clear,
         y: top_margin + usable_h / 3,
     };
-    let visual = |f| furniture_def(f).visual;
-    let pod_pieces: Vec<(Point, Size)> = home_desks
-        .iter()
-        .zip(desk_facings)
-        .enumerate()
-        .flat_map(|(i, (&desk, &facing))| {
-            let i = FloorLocalDeskIndex(i);
-            [
-                Some((desk, visual(Furniture::Desk))),
-                filing_cabinet_top_left(desk, i, plan.buf_h)
-                    .map(|tl| (tl, visual(Furniture::FilingCabinet))),
-                desk_chair_top_left(desk, facing).map(|tl| (tl, visual(Furniture::DeskChair))),
-            ]
-        })
-        .flatten()
-        .chain(pod_decor.iter().map(|d| {
-            let v = visual(d.kind.furniture());
-            (anchored_top_left(Anchor::Center, d.pos, v.w, v.h), v)
-        }))
+    let pod_pieces: Vec<Fixture> = desk_fixtures(home_desks, plan.buf_h)
+        .chain(desk_chair_fixtures(home_desks, |i| desk_facings[i.0]))
+        .chain(pod_decor_fixtures(pod_decor))
         .collect();
     // A pod's own whiteboard in the same columns would read as the board's twin.
-    let twin_columns: Vec<(u16, u16)> = pod_decor
+    let twin_columns: Vec<(u16, u16)> = pod_pieces
         .iter()
-        .filter(|d| d.kind == PodDecor::Whiteboard)
-        .map(|d| {
-            let v = visual(d.kind.furniture());
-            let x = anchored_top_left(Anchor::Center, d.pos, v.w, v.h).x;
-            (x, x + v.w)
+        .filter(|f| {
+            matches!(
+                f.kind,
+                FixtureKind::Pod {
+                    kind: PodDecor::Whiteboard,
+                    ..
+                }
+            )
         })
+        .map(|f| (f.visual.x, f.visual.x + f.visual.width))
         .collect();
     let band_east = pod_grid.band.x + pod_grid.band.width;
     // The westmost spot in the aisle east of the divider that hides no desk, chair,
@@ -790,9 +785,19 @@ fn place_wall_decor(
                 .find(|&at| {
                     let east = at.x + wb_def.visual.w;
                     twin_columns.iter().all(|&(w, e)| e <= at.x || east <= w)
-                        && pod_pieces
-                            .iter()
-                            .all(|&p| !super::placement::rects_overlap((at, wb_def.visual), p))
+                        && pod_pieces.iter().all(|f| {
+                            let v = f.visual;
+                            !super::placement::rects_overlap(
+                                (at, wb_def.visual),
+                                (
+                                    Point { x: v.x, y: v.y },
+                                    Size {
+                                        w: v.width,
+                                        h: v.height,
+                                    },
+                                ),
+                            )
+                        })
                 })
         });
     if let Some(pos) = snapped {
@@ -1575,41 +1580,6 @@ fn clears_the_seats(kind: Furniture, pos: Point, home_desks: &[Point]) -> bool {
     })
 }
 
-/// Which way a corridor appliance slides from its corner.
-#[derive(Clone, Copy)]
-enum Slide {
-    East,
-    West,
-}
-
-/// Where corridor appliance `kind` stands: at `corner`, or slid `toward` the
-/// aisle's middle by up to `reach` columns, into the gap between two pods'
-/// seats, when a south-row sitter stands over it, its art kept within the
-/// columns `within` — `None` with no clear spot.
-fn slid_clear_of_the_seats(
-    kind: Furniture,
-    corner: Point,
-    toward: Slide,
-    reach: u16,
-    within: std::ops::Range<u16>,
-    home_desks: &[Point],
-) -> Option<Point> {
-    let art = furniture_def(kind).visual;
-    (0..=reach)
-        .map(|d| Point {
-            x: match toward {
-                Slide::East => corner.x + d,
-                Slide::West => corner.x.saturating_sub(d),
-            },
-            ..corner
-        })
-        .filter(|&p| {
-            let west = anchored_top_left(Anchor::Center, p, art.w, art.h).x;
-            within.start <= west && west + art.w <= within.end
-        })
-        .find(|&p| clears_the_seats(kind, p, home_desks))
-}
-
 pub(super) const VENDING_MIN_AISLE_H: u16 = 10;
 pub(super) const VENDING_MIN_AISLE_W: u16 = 30;
 pub(super) const PRINTER_MIN_AISLE_H: u16 = 9;
@@ -1690,26 +1660,14 @@ fn compute_waypoints(
         let base = (cubicle_aisle.y + cubicle_aisle.height).saturating_sub(2);
         super::placement::centre_y_standing_on(base, furniture_def(kind).visual.h)
     };
-    let aisle_cols = cubicle_aisle.x..cubicle_aisle.x + cubicle_aisle.width;
-    let vending = (cubicle_aisle.height >= VENDING_MIN_AISLE_H
-        && cubicle_aisle.width > VENDING_MIN_AISLE_W)
-        .then(|| {
-            slid_clear_of_the_seats(
-                Furniture::VendingMachine,
-                Point {
-                    x: right_x
-                        + VENDING_WEST_GAP
-                        + furniture_def(Furniture::VendingMachine).visual.w / 2,
-                    y: appliance_y(Furniture::VendingMachine),
-                },
-                Slide::East,
-                pod_grid.stride_x,
-                aisle_cols.clone(),
-                home_desks,
-            )
-        })
-        .flatten();
-    if let Some(vending) = vending {
+    let vending = Point {
+        x: right_x + VENDING_WEST_GAP + furniture_def(Furniture::VendingMachine).visual.w / 2,
+        y: appliance_y(Furniture::VendingMachine),
+    };
+    if cubicle_aisle.height >= VENDING_MIN_AISLE_H
+        && cubicle_aisle.width > VENDING_MIN_AISLE_W
+        && clears_the_seats(Furniture::VendingMachine, vending, home_desks)
+    {
         waypoints.push(Waypoint {
             pos: vending,
             kind: WaypointKind::VendingMachine,
@@ -1717,22 +1675,14 @@ fn compute_waypoints(
             room_id: None,
         });
     }
-    // East of the vending machine's art, so the two never share a column.
-    let printer_cols = vending.map_or(aisle_cols.start, |v| {
-        let art = furniture_def(Furniture::VendingMachine).visual;
-        anchored_top_left(Anchor::Center, v, art.w, art.h).x + art.w
-    })..aisle_cols.end;
-    let printer = slid_clear_of_the_seats(
-        Furniture::Printer,
-        Point {
-            x: (right_x + right_w).saturating_sub(10),
+    // Slid west from its corner, a pod's stride at most, into the gap between
+    // two pods' seats when a south-row sitter stands over it.
+    let printer = (0..=pod_grid.stride_x)
+        .map(|dx| Point {
+            x: (right_x + right_w).saturating_sub(10 + dx),
             y: appliance_y(Furniture::Printer),
-        },
-        Slide::West,
-        pod_grid.stride_x,
-        printer_cols,
-        home_desks,
-    );
+        })
+        .find(|&p| clears_the_seats(Furniture::Printer, p, home_desks));
     if let Some(printer) = printer
         && cubicle_aisle.height >= PRINTER_MIN_AISLE_H
         && cubicle_aisle.width > PRINTER_MIN_AISLE_W
@@ -1840,17 +1790,16 @@ mod tests {
     }
 
     /// Neither floor carries a SAFETY MARGIN — one-directional on purpose. It catches a
-    /// floor set too HIGH, which on the width axis nothing else can: `pct` floors, so
-    /// `band_w(37,35) == band_w(38,35)` and `layout::tests`' `narrowest_band ==` assert
-    /// is blind to +1. Too LOW is `every_floor_variant_seats_a_desk…`'s job. Tautological
+    /// floor set too HIGH, which on the width axis nothing else can. Too LOW is
+    /// `every_floor_variant_seats_a_desk…`'s job. Tautological
     /// against today's `while` loops — that IS the point: it fires when a number replaces it.
     #[test]
     fn neither_floor_carries_a_safety_margin() {
+        let under = super::MIN_LAYOUT_W - 1;
         assert!(
-            super::band_w(super::MIN_LAYOUT_W - 1, super::widest_mid_x_pct())
-                < super::DESK_BAND_MIN_W,
-            "the width floor is not tight: {} px still clears the band",
-            super::MIN_LAYOUT_W - 1
+            super::band_w(under, super::widest_mid_x_pct()) < super::DESK_BAND_MIN_W
+                || under < super::super::NEON_DOOR_WALL_W,
+            "the width floor is not tight: {under} px still clears the band and the neon"
         );
         assert!(
             super::band_h(super::MIN_LAYOUT_H - 1) < super::DESK_BAND_MIN_H,
@@ -1956,28 +1905,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn a_slid_appliance_stays_within_its_columns() {
-        use super::{
-            Furniture, Point, Slide, clears_the_seats, furniture_def, slid_clear_of_the_seats,
-        };
-        let kind = Furniture::VendingMachine;
-        let art = furniture_def(kind).visual;
-        let corner = Point { x: 40, y: 60 };
-        // A desk whose sitter stands over the corner, so the machine must slide.
-        let desk = (0..80)
-            .flat_map(|x| (0..80).map(move |y| Point { x, y }))
-            .find(|&d| !clears_the_seats(kind, corner, &[d]))
-            .expect("some desk's sitter covers the corner");
-        let anywhere = slid_clear_of_the_seats(kind, corner, Slide::East, 40, 0..u16::MAX, &[desk])
-            .expect("slides clear somewhere");
-        let tight = 0..anywhere.x + art.w / 2;
-        assert_eq!(
-            slid_clear_of_the_seats(kind, corner, Slide::East, 40, tight.clone(), &[desk]),
-            None,
-            "the clear spot at {anywhere:?} puts its art past {tight:?}"
-        );
     }
 }

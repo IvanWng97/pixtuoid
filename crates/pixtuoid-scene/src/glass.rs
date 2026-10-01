@@ -223,62 +223,34 @@ mod tests {
     #[test]
     fn a_mullion_keeps_two_units_clear_of_every_jamb_and_joint() {
         const CLEAR: u16 = 2;
-        let other = Rgb {
-            r: 10,
-            g: 200,
-            b: 90,
-        };
         let mut met = 0;
         for (w, h) in [(120, 72), (160, 96), (192, 108), (240, 135), (320, 180)] {
             for seed in 0..12 {
                 let l =
                     crate::layout::Layout::compute_with_seed(w, h, None, seed).expect("lays out");
                 for &piece in &l.wall_pieces {
-                    let (at, size) = piece.visual();
-                    let mut glass = Glass::of(&crate::theme::NORMAL, piece, 1);
-                    // Across, a line clear of the rim, the sill and every glint.
-                    let (run, across) = match piece {
-                        WallPiece::Horizontal { .. } => (size.w, size.h - 2),
-                        WallPiece::Vertical { .. } => (size.h, size.w / 2),
-                    };
-                    for along in 0..run {
-                        let (dx, dy, near) = match piece {
-                            WallPiece::Horizontal { .. } => (
-                                along,
-                                across,
-                                (at.x + along).saturating_sub(CLEAR)..at.x + along + CLEAR + 1,
-                            ),
-                            WallPiece::Vertical { .. } => (
-                                across,
-                                along,
-                                (at.y + along).saturating_sub(CLEAR)..at.y + along + CLEAR + 1,
-                            ),
-                        };
-                        if glass.over(BEHIND, dx, dy) != glass.over(other, dx, dy) {
-                            continue;
-                        }
+                    let run = piece.clear_run();
+                    for &post in &Glass::of(&crate::theme::NORMAL, piece, 1).posts {
                         met += 1;
-                        let (cross_at, cross_len) = match piece {
-                            WallPiece::Horizontal { .. } => (at.y, size.h),
-                            WallPiece::Vertical { .. } => (at.x, size.w),
-                        };
-                        let clear = |(p, s): (crate::layout::Point, crate::layout::Size)| {
-                            let (lo, len, c, c_len) = match piece {
-                                WallPiece::Horizontal { .. } => (p.x, s.w, p.y, s.h),
-                                WallPiece::Vertical { .. } => (p.y, s.h, p.x, s.w),
-                            };
-                            lo + len <= near.start
-                                || near.end <= lo
-                                || c + c_len <= cross_at
-                                || cross_at + cross_len <= c
-                        };
                         assert!(
-                            piece.jambs().all(clear)
-                                && l.wall_pieces
-                                    .iter()
-                                    .filter(|&&p| p != piece)
-                                    .all(|p| clear(p.visual())),
-                            "{w}x{h} seed {seed}: {piece:?}'s post {along} units along"
+                            run.start + CLEAR <= post && post + CLEAR < run.end,
+                            "{w}x{h} seed {seed}: {piece:?}'s post {post} in {run:?}"
+                        );
+                    }
+                    // An E-W run's joints are its end units; a N-S run's stitched
+                    // end runs into the crossing wall's box, which its clear run stops short of.
+                    let WallPiece::Vertical { x, y_top, .. } = piece else {
+                        continue;
+                    };
+                    let rows = y_top + run.start..y_top + run.end;
+                    for other in l.wall_pieces.iter().filter(|&&p| p != piece) {
+                        let (at, size) = other.visual();
+                        assert!(
+                            at.x + size.w <= x
+                                || x + crate::layout::WALL_THICK_V <= at.x
+                                || at.y + size.h <= rows.start
+                                || rows.end <= at.y,
+                            "{w}x{h} seed {seed}: {piece:?}'s clear rows {rows:?} meet {other:?}"
                         );
                     }
                 }

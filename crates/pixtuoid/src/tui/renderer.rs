@@ -382,9 +382,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         flush_buffer_to_term(f, buf, actual_scene);
         paint_label_widgets(f, &labels, actual_scene, theme);
         paint_chitchat_bubbles(f, chitchat_bubbles, actual_scene, theme);
-        if layout.neon_panel().is_some() {
-            paint_wall_display(f, &board, actual_scene, theme);
-        }
+        paint_wall_display(f, &board, actual_scene, theme);
         if let Some(door) = layout.door {
             let current = floor_info.map(|fi| fi.current).unwrap_or(1);
             paint_elevator_indicator(f, door, current, actual_scene, theme);

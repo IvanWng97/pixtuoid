@@ -170,14 +170,13 @@ fn main() -> Result<()> {
     let (bw, bh) = (buf.width(), buf.height());
     let labels = renderer.labels(&scene, now);
     paint_labels_into_surface(&mut surf, &labels, scale as i32, theme);
-    if let Some(board) = renderer.board(&scene, now) {
-        pixtuoid::floating::offscreen::paint_wall_board_into_surface(
-            &mut surf,
-            &board,
-            scale as i32,
-            theme,
-        );
-    }
+    let board = renderer.board(&scene, now);
+    pixtuoid::floating::offscreen::paint_wall_board_into_surface(
+        &mut surf,
+        &board,
+        scale as i32,
+        theme,
+    );
     // Audible so the ♩ suffix shows; no transient flash in a static snapshot.
     let budget = pixtuoid::floating::offscreen::footer_budget(ww);
     let footer = renderer.footer(&scene, budget, true, None);

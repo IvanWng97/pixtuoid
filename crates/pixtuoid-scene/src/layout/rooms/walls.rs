@@ -914,7 +914,10 @@ mod tests {
     fn a_walls_sort_bands_tile_its_glass_none_sorting_south_of_its_raw_end() {
         let mut met = 0;
         for (w, h) in [
-            (48, 46),
+            (
+                crate::layout::compute::MIN_LAYOUT_W,
+                crate::layout::compute::MIN_LAYOUT_H,
+            ),
             (96, 60),
             (160, 96),
             (240, 135),

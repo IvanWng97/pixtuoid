@@ -552,25 +552,11 @@ pub(crate) struct TuiSession {
     pub first_run: bool,
 }
 
-/// [`star_clicked`], only where `renderer`'s cached layout hangs a neon: the wall display
-/// paints only on one, so an ungated hit phantom-launches a browser on a too-small frame,
-/// mid floor-slide or on a wall too narrow for the sign.
-fn star_link_clicked<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
-    renderer: &TuiRenderer<B>,
-    col: u16,
-    row: u16,
-    term: (u16, u16),
-) -> bool {
-    renderer
-        .cached_layout()
-        .is_some_and(|l| l.neon_panel().is_some())
-        && star_clicked(col, row, term)
-}
-
 /// Whether a left-click at `(col, row)` landed on the wall's star/repo link, given the
-/// terminal's `(cols, rows)` — ungated; callers go through [`star_link_clicked`]. Note the
-/// asymmetry with [`version_popup_url_clicked`]: this hit-tests the SCENE rect, that one
-/// the full bounds.
+/// terminal's `(cols, rows)`. Callers MUST gate this on `renderer.cached_layout().is_some()`
+/// — the wall display only paints with a layout, so an ungated hit phantom-launches a
+/// browser on a too-small frame or mid floor-slide. Note the asymmetry with
+/// [`version_popup_url_clicked`]: this hit-tests the SCENE rect, that one the full bounds.
 fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
     let scene = renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
     widgets::star_hit_rect(scene)
@@ -838,8 +824,8 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
         }
         MouseEventKind::Down(MouseButton::Left) => {
             renderer.set_mouse_pos(Some((m.column, m.row)));
-            let on_star = crossterm::terminal::size()
-                .is_ok_and(|t| star_link_clicked(renderer, m.column, m.row, t));
+            let on_star = renderer.cached_layout().is_some()
+                && crossterm::terminal::size().is_ok_and(|t| star_clicked(m.column, m.row, t));
             if on_star {
                 let _ = open::that(widgets::REPO_URL);
             } else if focus_clicked_agent(renderer, scene_rx, focus_roots, m.column, m.row, now) {

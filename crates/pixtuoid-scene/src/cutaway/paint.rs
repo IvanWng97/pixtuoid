@@ -419,7 +419,7 @@ fn lights(
         .chain(&lights.floor_lamp)
         .chain(&lamps)
         .chain(&lights.monitor_halos)
-        .chain(&lights.neon)
+        .chain(std::iter::once(&lights.neon))
         .filter_map(|e| {
             crate::cutaway::light::LightView::of(
                 e,

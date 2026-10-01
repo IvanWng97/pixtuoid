@@ -19,7 +19,6 @@ const SWEEP_SIZES: &[(u16, u16)] = &[
     (super::compute::MIN_LAYOUT_W, 60),
     (super::compute::MIN_LAYOUT_W + 2, 100),
     (super::compute::MIN_LAYOUT_W, 120),
-    (48, 46),
     (64, 48),
     (80, 46),
     (96, 52),
@@ -30,8 +29,6 @@ const SWEEP_SIZES: &[(u16, u16)] = &[
     (super::compute::MIN_LAYOUT_W + 1, 120),
     (super::compute::MIN_LAYOUT_W + 3, 70),
     (super::compute::MIN_LAYOUT_W + 4, 160),
-    (48, 60),
-    (50, 80),
     // The only size here reaching the #566 guard: one layout whose decor it degraded.
     (59, 148),
     (64, 130),
@@ -839,7 +836,7 @@ const NARROW_BAND: std::ops::RangeInclusive<u16> = super::compute::MIN_LAYOUT_W.
 #[test]
 fn short_band_connectivity_boundary_scan() {
     for h in super::compute::MIN_LAYOUT_H..60 {
-        for &w in &[super::compute::MIN_LAYOUT_W, 48u16, 80, 120, 200] {
+        for &w in &[super::compute::MIN_LAYOUT_W, 80, 120, 200] {
             for seed in SWEEP_SEEDS {
                 let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) else {
                     panic!("{w}x{h} seed {seed}: refused above the floor");
@@ -883,18 +880,6 @@ fn narrow_band_connectivity_boundary_scan() {
             }
         }
     }
-}
-
-#[test]
-fn door_threshold_walkable_at_a_band_split_to_thirty() {
-    // At a cubicle band exactly 30 px wide the lounge couch's east seat sealed
-    // the spawn threshold's own column; 39x160 seed 1 is one such split.
-    let l = SceneLayout::compute_with_seed(39, 160, None, 1).expect("39x160 lays out");
-    let dt = l.door_threshold.expect("has a door threshold");
-    assert!(
-        l.walkable.is_walkable(dt.x, dt.y),
-        "door threshold {dt:?} must be walkable — the couch may not seal the spawn column"
-    );
 }
 
 /// At 59x160 seed 3 the band fits ONE pod column, so the only aisle drain is the
@@ -954,55 +939,17 @@ fn free_standing_furniture_never_stands_inside_a_pod() {
     sweep_production_floors(assert_no_free_standing_piece_inside_a_pod);
 }
 
-/// The band's widest stretch of columns no desk, cabinet, chair or pod decor stands
-/// in, east of any wall: where a lone pod column leaves the board room beside it.
-fn widest_free_stretch(l: &SceneLayout) -> u16 {
-    let band = l.cubicle_band;
-    let west = l
-        .wall_pieces
-        .iter()
-        .map(|p| {
-            let (at, size) = p.visual();
-            at.x + size.w
-        })
-        .filter(|&east| east < band.x + band.width)
-        .fold(band.x, u16::max);
-    let mut taken: Vec<(u16, u16)> = l
-        .fixtures()
-        .filter(|f| {
-            matches!(
-                f.kind,
-                FixtureKind::Desk(_)
-                    | FixtureKind::DeskChair(_)
-                    | FixtureKind::FilingCabinet(_)
-                    | FixtureKind::Pod { .. }
-            )
-        })
-        .map(|f| (f.visual.x, f.visual.x + f.visual.width))
-        .collect();
-    taken.sort_unstable();
-    let (mut widest, mut from) = (0, west);
-    for (start, end) in taken {
-        widest = widest.max(start.saturating_sub(from));
-        from = from.max(end);
-    }
-    widest.max((band.x + band.width).saturating_sub(from))
-}
-
 /// `snap_inter_pod_ground_y` answers `None` by design and the caller drops the board
-/// with no trace, so a broken snap surfaces only as one fewer whiteboard. Only a lone
-/// pod column with no free stretch as wide as the board beside it has no spot.
+/// with no trace, so a broken snap surfaces only as one fewer whiteboard. A lone pod
+/// column is exempt, having no spot that hides nothing: see
+/// `the_width_floor_stays_connected_without_its_whiteboard`.
 fn assert_the_whiteboard_lands_when_an_aisle_exists(w: u16, h: u16, seed: u64, l: &SceneLayout) {
     let has_side_rooms = !l.meeting_rooms.is_empty() || l.pantry.is_some();
     let mut desk_columns: Vec<u16> = l.home_desks.iter().map(|d| d.x).collect();
     desk_columns.sort_unstable();
     desk_columns.dedup();
     let lone_pod_column = desk_columns.len() <= usize::from(POD_SIDE);
-    let board_w = furniture_def(super::WallDecor::Whiteboard.furniture())
-        .visual
-        .w;
-    let boxed_in = lone_pod_column && widest_free_stretch(l) < board_w;
-    if !has_side_rooms || pod_y_extents(l).len() < 2 || boxed_in {
+    if !has_side_rooms || pod_y_extents(l).len() < 2 || lone_pod_column {
         return;
     }
     assert!(
@@ -1112,7 +1059,7 @@ fn the_width_floor_stays_connected_without_its_whiteboard() {
 
 /// A machine is placed only where it clears every sitter, so a corner whose
 /// seat check fails is dropped with no trace: every aisle that clears a
-/// machine's gates must hold one, slid clear of the seats.
+/// machine's gates must hold one.
 fn assert_each_appliance_lands_where_its_aisle_fits(w: u16, h: u16, seed: u64, l: &SceneLayout) {
     use super::compute::{
         PRINTER_MIN_AISLE_H, PRINTER_MIN_AISLE_W, VENDING_MIN_AISLE_H, VENDING_MIN_AISLE_W,

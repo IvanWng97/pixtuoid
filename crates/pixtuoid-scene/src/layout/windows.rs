@@ -17,6 +17,8 @@ const NEON_EAST: u16 = NEON_PANEL.x + NEON_PANEL.width;
 const DOOR_INSET: u16 = (WINDOW_W - ELEVATOR_W) / 2;
 /// The wall east of the door's slot.
 const WINDOW_EDGE_MARGIN: u16 = 2;
+/// The narrowest wall whose door's slot stands clear of the neon.
+pub(crate) const NEON_DOOR_WALL_W: u16 = NEON_EAST + WINDOW_W + WINDOW_EDGE_MARGIN;
 /// The narrowest wall two windows fit on beside the door's slot.
 #[cfg(test)]
 pub(crate) const TWO_WINDOW_WALL_W: u16 =

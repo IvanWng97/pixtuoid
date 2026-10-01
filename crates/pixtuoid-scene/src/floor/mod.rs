@@ -653,23 +653,21 @@ impl FloorSession {
         crate::overlay::build_overlay(scene, layout, now, &mut rctx, hovered)
     }
 
-    /// The neon wall-board model for `scene`, or `None` where the LAST
-    /// rendered frame hung no neon to light it. `floor` is `(current, total)`,
-    /// or `None` for a single-floor office (no cross-floor breadcrumb).
+    /// The neon wall-board model for `scene`. `floor` is `(current, total)`, or
+    /// `None` for a single-floor office (no cross-floor breadcrumb).
     pub fn board(
         &self,
         scene: &SceneState,
         now: SystemTime,
         floor: Option<(usize, usize)>,
-    ) -> Option<crate::board::BoardModel> {
-        self.last_layout.as_deref()?.neon_panel()?;
-        Some(crate::board::build_board(
+    ) -> crate::board::BoardModel {
+        crate::board::build_board(
             crate::board::scene_stats(scene),
             crate::board::scene_uptime_secs(scene, now),
             floor,
             crate::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
             now,
-        ))
+        )
     }
 
     /// The rendered pixel buffer (a borrow of the reused allocation).

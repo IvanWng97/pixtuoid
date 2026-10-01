@@ -488,7 +488,7 @@ mod tests {
             .floor_lamp
             .iter()
             .chain(lights.desks.iter().map(|d| &d.lamp))
-            .chain(&lights.neon)
+            .chain(std::iter::once(&lights.neon))
             .chain(&lights.spills)
             .chain(std::iter::once(&patch))
             .copied()

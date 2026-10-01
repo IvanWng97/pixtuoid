@@ -378,6 +378,63 @@ fn boxed(tl: Point, size: Size) -> Bounds {
     }
 }
 
+/// Each home desk's filing cabinet, then the desk: the fixture authority the
+/// floor whiteboard also clears, before the layout that rosters them exists.
+pub(crate) fn desk_fixtures(
+    home_desks: &[Point],
+    buf_h: u16,
+) -> impl Iterator<Item = Fixture> + '_ {
+    let desk = furniture_def(Furniture::Desk).visual;
+    home_desks.iter().enumerate().flat_map(move |(i, &at)| {
+        let local = FloorLocalDeskIndex(i);
+        let depth = Depth::sorted(at.y + desk.h);
+        filing_cabinet_top_left(at, local, buf_h)
+            .map(|tl| Fixture {
+                kind: FixtureKind::FilingCabinet(local),
+                at: tl,
+                visual: boxed(tl, furniture_def(Furniture::FilingCabinet).visual),
+                depth,
+            })
+            .into_iter()
+            .chain(std::iter::once(Fixture {
+                kind: FixtureKind::Desk(local),
+                at,
+                visual: boxed(at, desk),
+                depth,
+            }))
+    })
+}
+
+/// Each home desk's task chair, where `facing` turns its desk north.
+pub(crate) fn desk_chair_fixtures(
+    home_desks: &[Point],
+    facing: impl Fn(FloorLocalDeskIndex) -> Facing,
+) -> impl Iterator<Item = Fixture> {
+    home_desks.iter().enumerate().filter_map(move |(i, &at)| {
+        let local = FloorLocalDeskIndex(i);
+        let facing = facing(local);
+        desk_chair_top_left(at, facing).map(|tl| Fixture {
+            kind: FixtureKind::DeskChair(local),
+            at: tl,
+            visual: boxed(tl, furniture_def(Furniture::DeskChair).visual),
+            depth: Depth::Sorted {
+                row: desk_chair_z_key(at, facing),
+                tie: Tie::FixtureOver,
+            },
+        })
+    })
+}
+
+/// Each pod decor item.
+pub(crate) fn pod_decor_fixtures(pod_decor: &[PodDecorItem]) -> impl Iterator<Item = Fixture> + '_ {
+    pod_decor
+        .iter()
+        .enumerate()
+        .map(|(item, &PodDecorItem { kind, pos })| {
+            centred_row(FixtureKind::Pod { item, kind }, pos, kind.furniture())
+        })
+}
+
 /// A centre-pinned furniture row at `pos`, sorting at its south row.
 fn centred_row(kind: FixtureKind, pos: Point, row: Furniture) -> Fixture {
     let size = furniture_def(row).visual;
@@ -478,11 +535,7 @@ impl SceneLayout {
             visual,
             depth: Depth::sorted(visual.y + visual.height - 1),
         };
-        let desk = furniture_def(Furniture::Desk).visual;
-
-        self.neon_panel()
-            .map(|b| backdrop(FixtureKind::NeonSign, b))
-            .into_iter()
+        std::iter::once(backdrop(FixtureKind::NeonSign, NEON_PANEL))
             .chain(
                 self.clock_pos()
                     .map(|at| backdrop(FixtureKind::Clock, boxed(at, CLOCK))),
@@ -500,24 +553,7 @@ impl SceneLayout {
                 self.island_bar_mat()
                     .map(|b| backdrop(FixtureKind::IslandMat, b)),
             )
-            .chain(home_desks.iter().enumerate().flat_map(move |(i, &at)| {
-                let local = FloorLocalDeskIndex(i);
-                let depth = Depth::sorted(at.y + desk.h);
-                self.filing_cabinet_top_left(local)
-                    .map(|tl| Fixture {
-                        kind: FixtureKind::FilingCabinet(local),
-                        at: tl,
-                        visual: boxed(tl, furniture_def(Furniture::FilingCabinet).visual),
-                        depth,
-                    })
-                    .into_iter()
-                    .chain(std::iter::once(Fixture {
-                        kind: FixtureKind::Desk(local),
-                        at,
-                        visual: boxed(at, desk),
-                        depth,
-                    }))
-            }))
+            .chain(desk_fixtures(home_desks, *buf_h))
             .chain(rooms.clone().filter_map(move |(room, _, trio)| {
                 let rug = trio?.0.rug(*buf_h);
                 Some(Fixture {
@@ -629,14 +665,7 @@ impl SceneLayout {
                         })
                     }),
             )
-            .chain(
-                pod_decor
-                    .iter()
-                    .enumerate()
-                    .map(|(item, &PodDecorItem { kind, pos })| {
-                        centred_row(FixtureKind::Pod { item, kind }, pos, kind.furniture())
-                    }),
-            )
+            .chain(pod_decor_fixtures(pod_decor))
             .chain(
                 plants
                     .iter()
@@ -695,19 +724,7 @@ impl SceneLayout {
                 self.notice_board_rect(room)
                     .map(|b| upright(FixtureKind::NoticeBoard { room }, top_left(b), b))
             }))
-            .chain(home_desks.iter().enumerate().filter_map(move |(i, &at)| {
-                let local = FloorLocalDeskIndex(i);
-                let facing = self.desk_facing(local);
-                desk_chair_top_left(at, facing).map(|tl| Fixture {
-                    kind: FixtureKind::DeskChair(local),
-                    at: tl,
-                    visual: boxed(tl, furniture_def(Furniture::DeskChair).visual),
-                    depth: Depth::Sorted {
-                        row: desk_chair_z_key(at, facing),
-                        tie: Tie::FixtureOver,
-                    },
-                })
-            }))
+            .chain(desk_chair_fixtures(home_desks, |i| self.desk_facing(i)))
     }
 
     /// The fixture hovering `cell` points at: the topmost whose art covers any
@@ -751,7 +768,7 @@ impl SceneLayout {
                     .map(|p| centred(p.pos, furniture_def(p.kind.furniture()).visual)),
             )
             .chain(self.door_rect())
-            .chain(self.neon_panel())
+            .chain(std::iter::once(NEON_PANEL))
             .chain(self.clock_pos().map(|at| boxed(at, CLOCK)))
             .collect();
         let clear = |board: Bounds| {
@@ -777,20 +794,6 @@ impl SceneLayout {
                     .min_by_key(|board| board.x.abs_diff(centred))
             })
             .min_by_key(|board| (board.x + board.width / 2).abs_diff(middle))
-    }
-
-    /// Where desk `i`'s filing cabinet stands ([`filing_cabinet_top_left`]).
-    pub(crate) fn filing_cabinet_top_left(&self, i: FloorLocalDeskIndex) -> Option<Point> {
-        filing_cabinet_top_left(*self.home_desks.get(i.0)?, i, self.buf_h)
-    }
-
-    /// The neon sign's box, or `None` on a wall too narrow to hang it west of
-    /// the door.
-    pub fn neon_panel(&self) -> Option<Bounds> {
-        let east = NEON_PANEL.x + NEON_PANEL.width;
-        self.door_rect()
-            .is_none_or(|d| d.x >= east)
-            .then_some(NEON_PANEL)
     }
 
     /// The wall clock's top-left: centred on the window post as wide as it
@@ -908,11 +911,7 @@ pub(crate) fn desk_has_cabinet(i: FloorLocalDeskIndex) -> bool {
 /// Where desk `i`, at `desk`, stands its filing cabinet — one clear column west
 /// of the desk — or `None` for a desk without one, or whose cabinet would run
 /// off a `buf_h`-tall office's south edge.
-pub(crate) fn filing_cabinet_top_left(
-    desk: Point,
-    i: FloorLocalDeskIndex,
-    buf_h: u16,
-) -> Option<Point> {
+fn filing_cabinet_top_left(desk: Point, i: FloorLocalDeskIndex, buf_h: u16) -> Option<Point> {
     let cab = furniture_def(Furniture::FilingCabinet).visual;
     (desk_has_cabinet(i) && desk.y + cab.h <= buf_h).then(|| Point {
         x: desk.x.saturating_sub(cab.w + 1),
