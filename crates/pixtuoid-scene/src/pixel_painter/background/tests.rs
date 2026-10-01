@@ -2,7 +2,7 @@ use super::*;
 use crate::embedded_pack::test_default_pack;
 use crate::layout::{WINDOW_W, window_bays, window_run};
 use crate::lighting::SPILL_DEPTH;
-use crate::sky::{ForcedWeather, hour_is_day, set_weather_override};
+use crate::sky::hour_is_day;
 use std::time::SystemTime;
 
 #[test]
@@ -103,7 +103,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
         &mut buf,
         top_wall_h,
         window_bays(buf_w, 0..0),
-        &Moment::resolve(Sky::at(now), theme, 0.0, now),
+        &Moment::resolve(Sky::clock(now), theme, 0.0, now),
         &test_default_pack(),
         theme,
     );
@@ -155,7 +155,6 @@ fn render_office_themed(
     buf_w: u16,
     top_wall_h: u16,
 ) -> RgbBuffer {
-    let _weather = ForcedWeather::new(weather);
     let now = crate::localclock::on_day(day, hour);
     let buf_h = top_wall_h + 4;
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 4, g: 4, b: 6 });
@@ -164,7 +163,7 @@ fn render_office_themed(
         &mut buf,
         top_wall_h,
         window_bays(buf_w, 0..0),
-        &Moment::resolve(Sky::at(now), theme, 0.0, now),
+        &Moment::resolve(Sky::at_with(now, weather), theme, 0.0, now),
         &test_default_pack(),
         theme,
     );
@@ -376,7 +375,7 @@ fn moon_disc_shows_at_night() {
     let buf_w = 96u16;
     let top_wall_h = 40u16;
     let (day, hour) = (1..=31u32)
-        .filter(|&d| Sky::at(crate::localclock::on_day(d, 0)).moon_phase() > 0.9)
+        .filter(|&d| Sky::clock(crate::localclock::on_day(d, 0)).moon_phase() > 0.9)
         .find_map(|d| low_moon(d, buf_w, top_wall_h).map(|(h, _)| (d, h)))
         .expect("a near-full moon shows low some January night");
     let clear = render_office_on(day, hour, Weather::Clear, buf_w, top_wall_h);
@@ -482,7 +481,7 @@ fn crescent_moon_leaves_the_dark_limb_unlit() {
     let top_wall_h = 40u16;
     let shown = |pick: fn(f32) -> bool| {
         (1..=31u32)
-            .filter(|&d| pick(Sky::at(crate::localclock::on_day(d, 0)).moon_phase()))
+            .filter(|&d| pick(Sky::clock(crate::localclock::on_day(d, 0)).moon_phase()))
             .find_map(|d| low_moon(d, buf_w, top_wall_h).map(|(h, geom)| (d, h, geom)))
     };
     let crescent = shown(|p| p < 0.35).expect("a crescent shows low some January night");
@@ -596,7 +595,7 @@ fn moon_glow_dims_at_new_moon() {
     let (mut new_moon_day, mut new_moon_frac) = (1u32, f32::MAX);
     let (mut full_moon_day, mut full_moon_frac) = (1u32, f32::MIN);
     for day in 1..=31u32 {
-        let frac = Sky::at(crate::localclock::on_day(day, 21)).moon_phase();
+        let frac = Sky::clock(crate::localclock::on_day(day, 21)).moon_phase();
         if frac < new_moon_frac {
             new_moon_frac = frac;
             new_moon_day = day;
@@ -659,7 +658,7 @@ fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {
 fn fullest_moon_day() -> u32 {
     (1..=31u32)
         .max_by(|&a, &b| {
-            let phase = |d: u32| Sky::at(crate::localclock::on_day(d, 0)).moon_phase();
+            let phase = |d: u32| Sky::clock(crate::localclock::on_day(d, 0)).moon_phase();
             phase(a)
                 .partial_cmp(&phase(b))
                 .expect("moon_phase is never NaN")
@@ -784,35 +783,35 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
         .expect("a theme with a different carpet/wall exists");
     let now = crate::localclock::on_day(1, 12);
     let (buf_w, buf_h, top_wall_h) = (96u16, 64u16, 14u16);
-    let paint = |base_fill: &mut BaseFillCache, theme: &'static crate::theme::Theme| {
+    let paint = |base_fill: &mut BaseFillCache, theme: &'static crate::theme::Theme, weather| {
         let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 9, g: 9, b: 9 });
         paint_floor_and_walls(
             base_fill,
             &mut buf,
             top_wall_h,
             window_bays(buf_w, 0..0),
-            &Moment::resolve(Sky::at(now), theme, 0.0, now),
+            &Moment::resolve(Sky::at_with(now, weather), theme, 0.0, now),
             &test_default_pack(),
             theme,
         );
         buf
     };
     let mut shared = BaseFillCache::new();
-    let first = paint(&mut shared, normal);
-    let hit = paint(&mut shared, normal);
+    let first = paint(&mut shared, normal, Weather::Clear);
+    let hit = paint(&mut shared, normal, Weather::Clear);
     assert_eq!(
         first.as_slice(),
         hit.as_slice(),
         "a cache HIT must be byte-identical to the fill it memoized"
     );
-    let switched = paint(&mut shared, other);
-    let fresh = paint(&mut BaseFillCache::new(), other);
+    let switched = paint(&mut shared, other, Weather::Clear);
+    let fresh = paint(&mut BaseFillCache::new(), other, Weather::Clear);
     assert_eq!(
         switched.as_slice(),
         fresh.as_slice(),
         "a theme swap on a warm cache must repaint, not serve the stale fill"
     );
-    let back = paint(&mut shared, normal);
+    let back = paint(&mut shared, normal, Weather::Clear);
     assert_eq!(
         first.as_slice(),
         back.as_slice(),
@@ -821,11 +820,9 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
 
     // Weather leg: the tint changes the CARPET colours while the wall stays
     // put — the one key component nothing else covers.
-    let _weather = ForcedWeather::new(Weather::Clear);
-    let clear = paint(&mut shared, normal);
-    set_weather_override(Some(Weather::Rain));
-    let rain_shared = paint(&mut shared, normal);
-    let rain_fresh = paint(&mut BaseFillCache::new(), normal);
+    let clear = paint(&mut shared, normal, Weather::Clear);
+    let rain_shared = paint(&mut shared, normal, Weather::Rain);
+    let rain_fresh = paint(&mut BaseFillCache::new(), normal, Weather::Rain);
     assert_eq!(
         rain_shared.as_slice(),
         rain_fresh.as_slice(),
@@ -849,7 +846,7 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
             &mut buf,
             14,
             window_bays(w, 0..0),
-            &Moment::resolve(Sky::at(now), theme, 0.0, now),
+            &Moment::resolve(Sky::clock(now), theme, 0.0, now),
             &test_default_pack(),
             theme,
         );
@@ -1101,7 +1098,7 @@ fn the_wall_between_two_windows_is_one_frame_post() {
         &mut buf,
         top_wall_h,
         window_bays(buf_w, 0..0),
-        &Moment::resolve(Sky::at(now), theme, 0.0, now),
+        &Moment::resolve(Sky::clock(now), theme, 0.0, now),
         &test_default_pack(),
         theme,
     );

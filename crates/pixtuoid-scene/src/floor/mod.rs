@@ -1,6 +1,6 @@
 //! Multi-floor office partitioning: the floor arithmetic, the per-floor
 //! rendering context ([`FloorCtx`]), the shared headless frame seams
-//! ([`render_floor`], and [`FloorSession::observe`] for a painter that draws the
+//! ([`render_floor`], and [`FloorSession::step`] for a painter that draws the
 //! frame itself), the per-floor fade states ([`LightingState`], the neon
 //! sign's), and the per-office [`CoffeeState`] bookkeeping.
 
@@ -18,15 +18,15 @@ use pixtuoid_core::walkable::OccupancyOverlay;
 
 use crate::audio::{AudioCueTracker, AudioFrame};
 use crate::chitchat::{ActiveChitchat, VenueKey};
+use crate::composite::{BLACK, WHITE, blend_rgb};
 use crate::frame_cache::FrameCache;
 use crate::layout::Size;
 use crate::motion::MotionState;
 use crate::pathfind::{AStarRouter, Router};
 use crate::pet::{Pet, PetState};
-use crate::pixel_painter::{
-    PixelCtx, SimFrame, SimInputs, SimStores, render_to_rgb_buffer, sim_step,
-};
+use crate::pixel_painter::{PixelCtx, render_to_rgb_buffer};
 use crate::pose::PoseHistory;
+use crate::sim::{SimFrame, SimInputs, SimStores, sim_step};
 use crate::theme::Theme;
 
 pub use pixtuoid_core::state::MAX_FLOORS;
@@ -77,6 +77,8 @@ pub struct FloorMeta {
     pub altitude: f32,
     /// This floor's layout seed (`floor_seed(floor_idx)`).
     pub floor_seed: u64,
+    /// Which weather its windows show, and its rain sounds.
+    pub weather: crate::sky::WeatherPolicy,
 }
 
 impl FloorMeta {
@@ -93,7 +95,13 @@ impl FloorMeta {
             floor_idx,
             altitude,
             floor_seed: floor_seed(floor_idx),
+            weather: crate::sky::WeatherPolicy::Clock,
         }
+    }
+
+    /// This floor under `weather`.
+    pub fn with_weather(self, weather: crate::sky::WeatherPolicy) -> Self {
+        Self { weather, ..self }
     }
 
     /// The lone floor of a single-floor office (index 0, altitude 0.0).
@@ -300,7 +308,7 @@ impl CoffeeState {
 
 /// The shared per-frame EPILOGUE: stamp this frame's new coffee carriers and
 /// refresh the door-cosmetic clamp. `pub` so the TUI's `draw_scene` — which
-/// can't call [`render_floor`]/[`FloorSession::observe`] — runs THIS seam instead of
+/// can't call [`render_floor`]/[`FloorSession::step`] — runs THIS seam instead of
 /// re-inlining the pair.
 pub fn frame_epilogue(
     fctx: &mut FloorCtx,
@@ -406,11 +414,11 @@ pub fn render_floor(
     })
 }
 
-/// One floor, one tick, observed rather than painted: the world advanced, and the
+/// One floor, one tick, stepped rather than painted: the world advanced, and the
 /// layout it advanced on. A second profile paints THIS layout — laying the office
 /// out again beside the sim is how a painter ends up drawing one office while the
 /// sim walked another.
-pub struct ObservedFloor {
+pub struct SteppedFloor {
     /// The layout the sim stepped on.
     pub layout: Arc<crate::layout::SceneLayout>,
     /// The world, advanced one tick.
@@ -457,14 +465,17 @@ pub fn waypoint_kind_of(
     layout.and_then(|l| l.waypoints.get(idx)).map(|w| w.kind)
 }
 
-/// The mood [`TrackId`](crate::audio::TrackId) for `now` — the ONE place the
-/// day/precip/epoch input wiring lives. Lives here (not `audio`) because it
-/// reaches the lighting layer's `is_day_at`/`precipitation_level`, which `audio`
-/// must not depend on.
-pub fn track_for(now: std::time::SystemTime) -> crate::audio::TrackId {
+/// The mood [`TrackId`](crate::audio::TrackId) for `now` under `weather` — the
+/// ONE place the day/precip/epoch input wiring lives. Lives here (not `audio`)
+/// because it reaches the lighting layer's `is_day_at`/`precipitation_level`,
+/// which `audio` must not depend on.
+pub fn track_for(
+    now: std::time::SystemTime,
+    weather: crate::sky::WeatherPolicy,
+) -> crate::audio::TrackId {
     crate::audio::select_track(
         crate::pixel_painter::is_day_at(now),
-        crate::pixel_painter::precipitation_level(now),
+        crate::pixel_painter::precipitation_level(now, weather),
         crate::audio::track_epoch(now),
     )
 }
@@ -484,7 +495,7 @@ impl AudioObserver {
         Self::default()
     }
 
-    /// Compose one frame of audio intent for the floor being VIEWED, advancing
+    /// Compose one frame of audio intent for the `floor` being VIEWED, advancing
     /// the cross-frame cue edges. Call it EVERY world-frame regardless of mute
     /// (the painter gates only DELIVERY): a muted stretch keeps
     /// `seen_agents`/`occupied` warm, so re-enabling never fires a
@@ -494,9 +505,10 @@ impl AudioObserver {
         scene: &SceneState,
         occupied: &std::collections::HashSet<usize>,
         waypoint_kind: impl Fn(usize) -> Option<crate::layout::WaypointKind>,
-        floor_idx: usize,
+        floor: FloorMeta,
         now: SystemTime,
     ) -> AudioFrame {
+        let floor_idx = floor.floor_idx;
         // Reprime on floor switch: a fresh tracker primes silently next observe,
         // so riding to a new floor never fires a cue volley for agents /
         // appliances already there.
@@ -507,7 +519,7 @@ impl AudioObserver {
         // You hear the floor you're LOOKING AT — but rain stays global, since
         // it's weather, not agent activity.
         let counts = crate::board::per_floor_counts(scene)[floor_idx.min(MAX_FLOORS - 1)];
-        let precipitation = crate::pixel_painter::precipitation_level(now);
+        let precipitation = crate::pixel_painter::precipitation_level(now, floor.weather);
         let floor_ids = scene
             .agents
             .iter()
@@ -517,7 +529,7 @@ impl AudioObserver {
         AudioFrame {
             stems: crate::audio::stem_levels(&counts, precipitation),
             events,
-            track: track_for(now),
+            track: track_for(now, floor.weather),
         }
     }
 
@@ -663,7 +675,7 @@ impl FloorSession {
     pub fn audio_frame(
         &mut self,
         scene: &SceneState,
-        floor_idx: usize,
+        floor: FloorMeta,
         now: SystemTime,
     ) -> AudioFrame {
         // Bind the two shared fields to LOCALS first so the closure captures the
@@ -675,7 +687,7 @@ impl FloorSession {
             scene,
             occupied,
             |idx| waypoint_kind_of(layout, idx),
-            floor_idx,
+            floor,
             now,
         )
     }
@@ -691,9 +703,9 @@ impl FloorSession {
     /// [`render_floor`]'s layout prologue, sim tick and epilogue,
     /// minus its paint pass. `size` is the layout's logical extent, whatever scale a painter
     /// draws it at. `None` when the size can't lay out.
-    pub fn observe(&mut self, world: FloorInputs<'_>, size: Size) -> Option<ObservedFloor> {
+    pub fn step(&mut self, world: FloorInputs<'_>, size: Size) -> Option<SteppedFloor> {
         self.evict_missing(world.scene);
-        observe_floor(
+        step_floor(
             &mut self.floor.ctx,
             &mut self.office.coffee,
             &mut self.office.chitchat,
@@ -703,14 +715,14 @@ impl FloorSession {
     }
 }
 
-/// [`FloorSession::observe`] minus eviction, which a projected `world.scene` would turn on other floors.
-pub fn observe_floor(
+/// [`FloorSession::step`] minus eviction, which a projected `world.scene` would turn on other floors.
+pub fn step_floor(
     fctx: &mut FloorCtx,
     coffee: &mut CoffeeState,
     chitchat: &mut HashMap<VenueKey, ActiveChitchat>,
     world: FloorInputs<'_>,
     size: Size,
-) -> Option<ObservedFloor> {
+) -> Option<SteppedFloor> {
     let layout = fctx.frame_layout(size.w, size.h, world.floor.floor_seed)?;
     let door_anim_max_ms = fctx.door_anim_max_ms;
     let frame = sim_step(
@@ -728,7 +740,7 @@ pub fn observe_floor(
         frame.new_coffee_carriers.iter().copied(),
         world.now,
     );
-    Some(ObservedFloor { layout, frame })
+    Some(SteppedFloor { layout, frame })
 }
 
 impl Default for FloorSession {
@@ -823,7 +835,7 @@ impl LightingState {
 }
 
 /// The neon sign's light for one frame — theme-free, like
-/// [`crate::pixel_painter::CharacterGlow`]: the sim decides HOW LIT and how ALARMED
+/// [`crate::sim::CharacterGlow`]: the sim decides HOW LIT and how ALARMED
 /// the sign is, paint maps that to colors.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct NeonLevels {
@@ -865,6 +877,32 @@ impl NeonLevels {
             alert: self.alert + (to.alert - self.alert) * t,
             power: self.power + (to.power - self.power) * t,
         }
+    }
+}
+
+/// The neon sign's colors for one frame: a bright TUBE, a colored HALO that
+/// spills onto the wall and whatever hangs there, and a faintly tinted interior.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct NeonLook {
+    pub tube: Rgb,
+    pub interior: Rgb,
+    pub halo: Rgb,
+}
+
+/// A lit tube is its hue pushed this far toward white — the core of a real neon
+/// reads near-white, the COLOR lives in the halo.
+const NEON_TUBE_WHITEN: f32 = 0.38;
+/// How much of the hue the dark interior picks up at full power.
+const NEON_INTERIOR_TINT: f32 = 0.07;
+/// Map the sim's theme-free `levels` to this frame's colors; how strongly the
+/// halo throws them is the [`Lights`](crate::lighting::Lights)' call.
+pub(crate) fn neon_look(levels: NeonLevels, theme: &Theme) -> NeonLook {
+    let power = levels.power;
+    let hue = theme.ui.neon_brand.mix(theme.ui.neon_alert, levels.alert);
+    NeonLook {
+        tube: blend_rgb(BLACK, blend_rgb(hue, WHITE, NEON_TUBE_WHITEN), power),
+        interior: blend_rgb(theme.office.neon_panel_bg, hue, NEON_INTERIOR_TINT * power),
+        halo: hue,
     }
 }
 

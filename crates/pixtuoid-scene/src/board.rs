@@ -118,7 +118,7 @@ pub fn compact_hms(secs: u64) -> String {
 /// The board text's tone — backend-agnostic. Deliberately NOT
 /// `overlay::LabelTone`: the variant sets are disjoint (labels never show
 /// Brand/Star/Dim; the board never shows a per-agent Exiting).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BoardTone {
     /// L1 brand — `neon_brand`.
     Brand,
@@ -149,7 +149,7 @@ pub fn tone_rgb(tone: BoardTone, theme: &Theme) -> Rgb {
 
 /// One tone-tagged text run of the board. The model bakes in the inter-segment
 /// separators so no painter re-derives them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BoardSegment {
     pub text: String,
     pub tone: BoardTone,
@@ -167,7 +167,7 @@ impl BoardSegment {
 /// The whole board, as tone-tagged segments — L1 `brand` + `star`, L2 `mood`,
 /// L3 `context`. No baked padding between brand/star (each painter right-flushes
 /// in its own coordinate space); the mood + context separators ARE baked.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BoardModel {
     pub brand: BoardSegment,
     pub star: BoardSegment,

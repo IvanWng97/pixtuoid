@@ -113,7 +113,7 @@ def outline(g, inside, out):
 #
 # The desk `FurnitureDef`'s visual width (`desk_sprite_width_tracks_the_footprint_overhang`).
 DESK_ART_W = 14
-# `pixel_painter::drawable`'s `DESK_BEZEL_RAISE`: the monitor's row above the wood.
+# `embedded_pack`'s `DESK_BEZEL_RAISE`: the monitor's row above the wood.
 DESK_BEZEL_RAISE = 1
 # `layout`'s `DESK_SURFACE_ROWS`, `DESK_FRONT_ROWS`, `DESK_LEG_ROWS`.
 DESK_SURFACE_ROWS, DESK_FRONT_ROWS, DESK_LEG_ROWS = 5, 1, 2
@@ -142,9 +142,9 @@ def desk_rows(lift):
 def desk_1x(lift):
     """The classic desk's wood: a lit back edge, a bright front lip, and legs
     dark on their inner side, with open floor between them so the carpet and
-    anyone walking behind the desk show through. The props (lamp, mug, paper
-    tower) are the classic painter's live overlays, so the art draws none of
-    them."""
+    anyone walking behind the desk show through, and the task lamp on its west
+    wing: a two-cell shade over its bulb. The cup and the paper tower are
+    pieces of their own, stood at the art's marks."""
     top, lip, legs, h = desk_rows(lift)
     g = canvas(DESK_ART_W, h)
     rect(g, 0, top, DESK_ART_W, lip, WOOD)
@@ -153,6 +153,9 @@ def desk_1x(lift):
     for x0, inner in ((0, DESK_LEG_W - 1), (DESK_ART_W - DESK_LEG_W, DESK_ART_W - DESK_LEG_W)):
         rect(g, x0, legs, x0 + DESK_LEG_W, h, WOOD_SH)
         rect(g, inner, legs, inner + 1, h, WOOD_DK)
+    # `lighting`'s `DESK_LAMP_BULB`: the bulb a cell east and south of the shade.
+    rect(g, 0, top, 2, top + 1, LAMP_HI)
+    put(g, 1, top + 1, BULB)
     return g
 
 
@@ -193,6 +196,49 @@ def desk_north_1x():
     for x in (x0 + 1, x1 - 2):
         put(g, x, keys, KEY_DK)
     return g
+
+
+# The desk props the cutaway stands on a desk's art at its marks, each mark the
+# cell the prop's bottom-left lands on: the cup at `pixel_painter::drawable`'s
+# `desk_cup_at`, the token tower at its `STACK_X_OFF`/`STACK_BASE_DY`, both
+# from the desk's point, one row under the art's top (`DESK_BEZEL_RAISE`).
+DESK_CUP_1X = (2, 2 + 1)
+DESK_TOWER_1X = (11, 3)
+# `token_meter`'s `MAX_TIER`: the tower's frames, one per tier.
+TOKEN_MAX_TIER = 3
+# `pixel_painter::drawable`'s `STACK_W` and `STACK_PX_PER_TIER`.
+TOKEN_W_1X, TOKEN_ROWS_PER_TIER_1X = 3, 2
+
+
+def desk_marks_1x(lift):
+    """A 1x desk's prop marks, `lift` rows taller above."""
+    (cx, cy), (tx, ty) = DESK_CUP_1X, DESK_TOWER_1X
+    return [("cup", cx, cy + 1 + lift), ("tower", tx, ty + 1 + lift)]
+
+
+def desk_cup_1x():
+    """The desk's coffee cup at 1x: its rim over its shadowed body."""
+    return [[MUG, MUG], [MUG_SH, MUG_SH]]
+
+
+def token_tower_1x():
+    """The token meter's paper tower at 1x, a frame per tier: reams stacked
+    two rows each, sheet over shade, the full tower's top sheet teetering a
+    column east."""
+    frames = []
+    for tier in range(1, TOKEN_MAX_TIER + 1):
+        h = tier * TOKEN_ROWS_PER_TIER_1X
+        g = canvas(TOKEN_W_1X + 1, h)
+        for i in range(h):
+            dx = 1 if tier == TOKEN_MAX_TIER and i == h - 1 else 0
+            rect(g, dx, h - 1 - i, dx + TOKEN_W_1X, h - i, OFFWHITE_SH if i % 2 else OFFWHITE)
+        frames.append(g)
+    return frames
+
+
+def token_sheet_1x():
+    """The sheet falling onto the token tower at 1x."""
+    return [[OFFWHITE] * TOKEN_W_1X]
 
 
 # ---- the meeting sofas: one layout for both views and densities, in logical rows ----
@@ -1243,11 +1289,61 @@ def desk_lamp(g, bx, by, facing):
     return sx, ey
 
 
-def paper_stack(g, x, y):
-    rect(g, x + 1, y + 1, x + 9, y + 9, OFFWHITE_SH)
-    rect(g, x, y, x + 8, y + 8, OFFWHITE)
-    for i in range(3):
-        rect(g, x + 1, y + 2 + i * 2, x + 6 - (i % 2) * 2, y + 3 + i * 2, PRINT)
+# The props' marks on the `@Nx` desks, each the art pixel the prop's outlined
+# bottom-left lands on: the cup and tower east of a viewer-facing monitor, west
+# of a back-turned one, clear of the lamp either way.
+DESK_MARKS = {
+    "desk": [("cup", 45, (DESK_BEZEL_RAISE * S) + 18), ("tower", 43, (DESK_BEZEL_RAISE * S) + 12)],
+    "desk_north": [
+        ("cup", 3, (DESK_BEZEL_RAISE + DESK_NORTH_LIFT) * S + 19),
+        ("tower", 2, (DESK_BEZEL_RAISE + DESK_NORTH_LIFT) * S + 13),
+    ],
+}
+# The `@Nx` tower's reams fill its frame, `S` times the 1x tier's rows: the
+# bottom ream gives up the outline's two rows.
+TOKEN_REAM_ROWS = TOKEN_ROWS_PER_TIER_1X * S
+TOKEN_W = TOKEN_W_1X * S - 2
+# How far the full tower's top ream teeters east.
+TOKEN_TEETER = 2
+
+
+def desk_cup():
+    """The desk's coffee cup: a mug with coffee showing, its handle east."""
+    g = canvas(2 * S, 2 * S)
+    desk_mug(g, 1, 2)
+    union_outline(g)
+    return g
+
+
+def token_tower():
+    """The token meter's paper tower, a frame per tier: reams stacked, each a
+    lit top sheet over its page edges, the full tower's top ream teetering
+    east."""
+    frames = []
+    for tier in range(1, TOKEN_MAX_TIER + 1):
+        h = tier * TOKEN_REAM_ROWS
+        g = canvas((TOKEN_W_1X + 1) * S, h)
+        foot = h - 1
+        for r in range(tier):
+            top = foot - (TOKEN_REAM_ROWS - (2 if r == 0 else 0))
+            x0 = 1 + (TOKEN_TEETER if tier == TOKEN_MAX_TIER and r == tier - 1 else 0)
+            for y in range(top, foot):
+                rect(g, x0, y, x0 + TOKEN_W, y + 1, OFFWHITE if (foot - y) % 2 else OFFWHITE_SH)
+            rect(g, x0, top, x0 + TOKEN_W, top + 1, OFFWHITE)
+            rect(g, x0, foot - 1, x0 + TOKEN_W, foot, OFFWHITE_SH)
+            foot = top
+        union_outline(g)
+        frames.append(g)
+    return frames
+
+
+def token_sheet():
+    """The sheet falling onto the token tower."""
+    g = canvas(TOKEN_W + 2, 4)
+    rect(g, 1, 1, TOKEN_W + 1, 2, OFFWHITE)
+    rect(g, 1, 2, TOKEN_W + 1, 3, OFFWHITE_SH)
+    union_outline(g)
+    return g
 
 
 def desk_mug(g, x, y):
@@ -1281,8 +1377,6 @@ def desk_south():
     rect(g, mid - 2, 9, mid + 2, 11, SLATE)
     monitor_stand(g, mid, chin - 1)
     desk_lamp(g, 5, ty + 10, 1)
-    paper_stack(g, 44, ty + 3)
-    desk_mug(g, 46, ty + 14)
     union_outline(g)
     return g
 
@@ -1306,8 +1400,6 @@ def desk_north():
     rect(g, mx0 + 4, ky + 1, mx1 - 6, ky + 2, KEYCAP)
     rect(g, mx1 - 2, ky, mx1 + 1, ky + 3, KEYCAP)
     desk_lamp(g, 49, ty + 12, -1)
-    paper_stack(g, 3, ty + 4)
-    desk_mug(g, 4, ty + 15)
     union_outline(g)
     return g
 
@@ -1923,7 +2015,7 @@ def standing_desk():
 
 
 # ---- the corridor appliances and the meeting table ---------------------------------
-# Drawn in the theme's appliance keys (pixel_painter::palette::appliance_overrides).
+# Drawn in the theme's appliance keys (embedded_pack::appliance_overrides).
 VEND_BODY, VEND_BODY_LT, VEND_BODY_SH = "Б", "Ъ", "ъ"
 VEND_PANEL, VEND_PANEL_LT = "П", "п"
 VEND_DRINKS = ("Ч", "Ш", "Щ", "Э")
@@ -2240,7 +2332,7 @@ def meeting_table_1x():
 
 
 # ---- the fixtures: the pantry's island and corner, the lounge, the meeting room, the wall -
-# Recoloured from the theme (pixel_painter::palette::fixture_overrides).
+# Recoloured from the theme (embedded_pack::fixture_overrides).
 TANK_WATER, TANK_WATER_DP, TANK_LINE = "Д", "д", "З"
 TANK_FISH, TANK_FISH_SH, TANK_FISH_ALT, TANK_FISH_ALT_SH = "И", "и", "Л", "л"
 TANK_PLANT, TANK_PLANT_SH = "Ь", "ь"
@@ -3046,9 +3138,10 @@ PROVENANCE = "Generated by scripts/gen-art.py: edit the generator, not this file
 ENCODING = "utf-8"  # the keys include σ/ψ/Θ, and the locale's encoding need not be the file's
 
 
-def render_sprite(header, frames, heads=()):
+def render_sprite(header, frames, heads=(), marks=()):
     """A .sprite file: the header as comments, then each frame, marked with its
-    `heads` entry `(view, x, y)` where it has one."""
+    `heads` entry `(view, x, y)` where it has one; the first frame also carries
+    `marks`, each `(name, x, y)`."""
     text = inspect.cleandoc(header) + "\n" + PROVENANCE
     lines = [f"# {l}" if l else "#" for l in text.split("\n")]
     body = []
@@ -3057,6 +3150,8 @@ def render_sprite(header, frames, heads=()):
         if i < len(heads) and heads[i] is not None:
             view, x, y = heads[i]
             body.append(f"@mark head.{view} {x} {y}")
+        if i == 0:
+            body.extend(f"@mark {name} {x} {y}" for name, x, y in marks)
         body.extend(" ".join(r) for r in g)
     return "\n".join(lines + body) + "\n"
 
@@ -3178,6 +3273,9 @@ def main():
         "phone_booth": (phone_booth.__doc__, [phone_booth()]),
         "standing_desk": (standing_desk.__doc__, [standing_desk()]),
         "desk_chair": (desk_chair.__doc__, [desk_chair()]),
+        "desk_cup": (desk_cup.__doc__, [desk_cup()]),
+        "token_tower": (token_tower.__doc__, token_tower()),
+        "token_sheet": (token_sheet.__doc__, [token_sheet()]),
         "desk": (desk_south.__doc__, [desk_south()]),
         "desk_north": (desk_north.__doc__, [desk_north()]),
         "meeting_sofa": (meeting_sofa.__doc__, [meeting_sofa()]),
@@ -3200,6 +3298,9 @@ def main():
         "meeting_sofa_north": (meeting_sofa_north_1x.__doc__, [meeting_sofa_north_1x()]),
         "desk": (desk_south_1x.__doc__, [desk_south_1x()]),
         "desk_north": (desk_north_1x.__doc__, [desk_north_1x()]),
+        "desk_cup": (desk_cup_1x.__doc__, [desk_cup_1x()]),
+        "token_tower": (token_tower_1x.__doc__, token_tower_1x()),
+        "token_sheet": (token_sheet_1x.__doc__, [token_sheet_1x()]),
         "vending_machine": (vending_machine_1x.__doc__, vending_machine_1x()),
         "floor_lamp": (floor_lamp_1x.__doc__, [floor_lamp_1x()]),
         "phone_booth": (phone_booth_1x.__doc__, [phone_booth_1x()]),
@@ -3216,7 +3317,7 @@ def main():
         "meeting_chair": (meeting_chair_1x.__doc__, [meeting_chair_1x()]),
     }
     sprites = {
-        f"{base}@{S}x.sprite": render_sprite(header, grounded(frames))
+        f"{base}@{S}x.sprite": render_sprite(header, grounded(frames), marks=DESK_MARKS.get(base, ()))
         for base, (header, frames) in pieces.items()
     }
     for pose, (*_, header) in POSES.items():
@@ -3231,8 +3332,10 @@ def main():
                         [lyr],
                         [(view, HEAD_MARK[0], HEAD_MARK[1] + o)],
                     )
+    classic_marks = {"desk": desk_marks_1x(0), "desk_north": desk_marks_1x(DESK_NORTH_LIFT)}
     sprites |= {
-        f"{base}.sprite": render_sprite(header, grounded(frames)) for base, (header, frames) in classic.items()
+        f"{base}.sprite": render_sprite(header, grounded(frames), marks=classic_marks.get(base, ()))
+        for base, (header, frames) in classic.items()
     }
     for name, draw in BUILDINGS.items():
         art = draw()

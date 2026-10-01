@@ -92,7 +92,7 @@ version = "1"
 "Ξ" = "#1c2a36"   # j's colour on a key the cutaway never relights: a TV's, a slide's glass
 "Ж" = "#34424e"   # J's colour: a sheen on dark glass (a display, a microwave's window)
 # The corridor appliances' keys, each recoloured from the theme's ApplianceColors
-# (pixel_painter::palette::appliance_overrides); the values are theme::normal's.
+# (embedded_pack::appliance_overrides); the values are theme::normal's.
 "Б" = "#323741"   # vending machine body
 "П" = "#b43c3c"   # vending machine brand panel
 "Ч" = "#dc3232"   # a vending machine's first drink
@@ -106,7 +106,7 @@ version = "1"
 "Ё" = "#82b4c8"   # printer scanner glass
 "Й" = "#f5f5f0"   # printer paper
 "Ц" = "#b4b4b9"   # printer output tray
-# The fixtures' keys, recoloured from the theme (pixel_painter::palette::fixture_overrides);
+# The fixtures' keys, recoloured from the theme (embedded_pack::fixture_overrides);
 # the values are theme::normal's.
 "Д" = "#2e6f86"   # aquarium water
 "З" = "#9adbe8"   # pale aqua
@@ -123,7 +123,7 @@ version = "1"
 "ф" = "#c8c8d2"   # the wall clock's rim
 "ц" = "#f0f0f0"   # its face
 "з" = "#141419"   # its hands, ticks and centre pin
-# Un-themed, as the classic draws it (pixel_painter::furniture::COOLER_WATER).
+# Un-themed, as the classic draws it (embedded_pack::COOLER_WATER).
 "χ" = "#64b4e6"   # the water cooler's bottle
 
 # Shades of a recolor key, derived from it: `level` steps along the key's ramp
@@ -327,6 +327,34 @@ frame_ms = 600
 frames   = ["desk_chair@4x.sprite"]
 frame_ms = 600
 
+# A desk's coffee cup, stood at the desk art's `cup` mark while its sitter has one.
+[animations.desk_cup]
+frames   = ["desk_cup.sprite"]
+frame_ms = 600
+
+[animations."desk_cup@4x"]
+frames   = ["desk_cup@4x.sprite"]
+frame_ms = 600
+
+# The token meter's paper tower at the desk art's `tower` mark: a frame per
+# tier, picked by the tier, never played.
+[animations.token_tower]
+frames   = ["token_tower.sprite"]
+frame_ms = 600
+
+[animations."token_tower@4x"]
+frames   = ["token_tower@4x.sprite"]
+frame_ms = 600
+
+# The sheet falling onto the token tower.
+[animations.token_sheet]
+frames   = ["token_sheet.sprite"]
+frame_ms = 600
+
+[animations."token_sheet@4x"]
+frames   = ["token_sheet@4x.sprite"]
+frame_ms = 600
+
 [animations.filing_cabinet]
 frames   = ["filing_cabinet.sprite"]
 frame_ms = 600
@@ -439,7 +467,7 @@ frames   = ["snack_shelf@4x.sprite"]
 frame_ms = 600
 
 # Frame 0 is the appliance at rest; the rest are its busy loop, one frame each
-# `frame_ms` (`pixel_painter::appliance_frame`).
+# `frame_ms` (`embedded_pack::appliance_frame_index`).
 [animations.vending_machine]
 frames   = ["vending_machine.sprite"]
 frame_ms = 500
