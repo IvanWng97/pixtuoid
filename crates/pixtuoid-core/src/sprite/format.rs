@@ -1658,13 +1658,21 @@ pub(crate) fn split_density_variant(name: &str) -> Option<(&str, Density)> {
     Some((base, density))
 }
 
-/// Every registered animation: the required and optional character poses, the
-/// optional furniture and the optional creatures.
+/// Every registered animation: the required and optional character poses, then
+/// the [`inherited_animation_names`].
 fn registered_animation_names() -> impl Iterator<Item = &'static str> {
     REQUIRED_CHARACTER_ANIMATIONS
         .iter()
         .chain(OPTIONAL_CHARACTER_ANIMATIONS)
-        .chain(OPTIONAL_FURNITURE_ANIMATIONS)
+        .copied()
+        .chain(inherited_animation_names())
+}
+
+/// The animations [`Pack::merge_from`] inherits: the optional furniture and
+/// the optional creatures.
+fn inherited_animation_names() -> impl Iterator<Item = &'static str> {
+    OPTIONAL_FURNITURE_ANIMATIONS
+        .iter()
         .chain(OPTIONAL_CREATURE_ANIMATIONS)
         .copied()
 }
@@ -1701,10 +1709,7 @@ impl RegisteredKey {
     /// their variants only, because a robot pack must not fall back to human
     /// sprites.
     fn is_inherited(self) -> bool {
-        OPTIONAL_FURNITURE_ANIMATIONS
-            .iter()
-            .chain(OPTIONAL_CREATURE_ANIMATIONS)
-            .any(|&n| n == self.base)
+        inherited_animation_names().any(|n| n == self.base)
     }
 }
 
@@ -2058,7 +2063,7 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
     let missing_optional: Vec<MissingOptional> = OPTIONAL_CHARACTER_ANIMATIONS
         .iter()
         .map(|&name| (name, StandIn::OwnPose))
-        .chain(OPTIONAL_FURNITURE_ANIMATIONS.iter().map(|&name| {
+        .chain(inherited_animation_names().map(|name| {
             let stand_in = pack
                 .own_redrawn_piece(name)
                 .map_or(StandIn::DefaultPack, StandIn::OwnPiece);
@@ -2699,6 +2704,7 @@ mod validation_floor_tests {
             StandIn::OwnPiece("meeting_sofa")
         );
         assert_eq!(stand_in("plant"), StandIn::DefaultPack);
+        assert_eq!(stand_in("cat_walk"), StandIn::DefaultPack);
         assert_eq!(stand_in("walking_coffee"), StandIn::OwnPose);
 
         let mut merged = pack_with(&format!(
