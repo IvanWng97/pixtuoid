@@ -530,39 +530,34 @@ impl Plan {
 /// images' delete, once any reached the terminal.
 pub(crate) fn unwind_prelude() -> Vec<u8> {
     #[cfg(feature = "graphics")]
-    return [kitty::unwind(), grid_unwind()].concat();
+    return [
+        kitty::unwind(),
+        grid_unwind(IN_GRID.load(std::sync::atomic::Ordering::Relaxed)),
+    ]
+    .concat();
     #[cfg(not(feature = "graphics"))]
     Vec::new()
 }
 
 /// Whether this process has drawn SIXEL or iTerm2 pixels, which sit in the
-/// text grid rather than in an image store kitty-style deletes reach.
+/// text grid rather than in an image store kitty-style deletes reach: read by
+/// an unwind that may run from the panic hook.
 #[cfg(feature = "graphics")]
-static IN_GRID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub(crate) static IN_GRID: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
-/// Record that SIXEL or iTerm2 pixels are about to reach the terminal.
+/// The unwind's part for pixels in the grid: nothing unless this process
+/// `drew` some; then an ST that ends an image a failed write cut short, and
+/// ED 2. 1049 clears the alternate screen on the way IN (ctlseqs, "Use
+/// Alternate Screen Buffer ... clearing it first"), so nothing promises its
+/// pixels go on the way out.
 #[cfg(feature = "graphics")]
-pub(crate) fn drawing_in_grid() {
-    IN_GRID.store(true, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// Nothing until [`drawing_in_grid`]; then [`grid_clear`].
-#[cfg(feature = "graphics")]
-fn grid_unwind() -> Vec<u8> {
-    if IN_GRID.load(std::sync::atomic::Ordering::Relaxed) {
-        grid_clear()
+pub(crate) fn grid_unwind(drew: bool) -> Vec<u8> {
+    if drew {
+        [kitty::ST, b"\x1b[2J"].concat()
     } else {
         Vec::new()
     }
-}
-
-/// An ST that ends an image a failed write cut short, then ED 2: 1049 clears
-/// the alternate screen on the way IN (ctlseqs, "Use Alternate Screen
-/// Buffer ... clearing it first"), so nothing promises its pixels go on the
-/// way out.
-#[cfg(feature = "graphics")]
-fn grid_clear() -> Vec<u8> {
-    [kitty::ST, b"\x1b[2J"].concat()
 }
 
 /// Built without the `graphics` feature: there is no query to run, whatever
@@ -579,7 +574,8 @@ mod tests {
     #[cfg(feature = "graphics")]
     #[test]
     fn the_grid_unwind_ends_any_image_then_erases_the_display() {
-        assert_eq!(grid_clear(), b"\x1b\\\x1b[2J");
+        assert_eq!(grid_unwind(false), b"");
+        assert_eq!(grid_unwind(true), b"\x1b\\\x1b[2J");
     }
 
     const CELL_8X16: CellSize = CellSize { w: 8, h: 16 };

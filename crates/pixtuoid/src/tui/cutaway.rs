@@ -13,12 +13,13 @@
 
 use std::io::Write;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
-use pixtuoid_scene::cutaway::canvas::{CutawayCanvas, Dirty};
+use pixtuoid_scene::cutaway::canvas::{CanvasFrame, CutawayCanvas, Dirty};
 use pixtuoid_scene::floor::{FloorMeta, ObservedFloor};
 use pixtuoid_scene::frame_cache::FrameCache;
 use pixtuoid_scene::layout::{Bounds, Size};
@@ -51,11 +52,19 @@ pub(crate) struct TileCutaway {
     /// The scene `fit` was last fitted to.
     scene: Rect,
     tiles: Tiles,
+    /// The canvas's last frame, which the tiles are cut from when sent.
+    image: RgbBuffer,
+    /// The image's top-left cell.
+    origin: Position,
     out: Sink,
-    /// This frame's encoded tiles, written by [`Self::emit`].
-    pending: Vec<(Changed, Vec<u8>)>,
-    /// The last frame painted, as [`Tiles::half_blocks`].
-    halves: RgbBuffer,
+    /// This frame's changed tiles, once the cadence allows; encoded only if
+    /// no text covers them.
+    pending: Vec<Changed>,
+    /// Set once SIXEL or iTerm2 pixels are written, for the unwind
+    /// ([`crate::graphics::grid_unwind`]).
+    in_grid: &'static AtomicBool,
+    #[cfg(test)]
+    encoded: usize,
     /// When the last transmits were written, for the protocol's cadence.
     sent_at: Option<SystemTime>,
     /// A write failed, perhaps mid-escape: the next one opens with
@@ -83,9 +92,13 @@ impl TileCutaway {
             fit,
             scene: Rect::default(),
             tiles: Tiles::new(protocol, cell, fit),
+            image: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
+            origin: Position::ORIGIN,
             out,
             pending: Vec::new(),
-            halves: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
+            in_grid: &crate::graphics::IN_GRID,
+            #[cfg(test)]
+            encoded: 0,
             sent_at: None,
             torn: false,
         }
@@ -103,7 +116,7 @@ impl TileCutaway {
         self.fit.logical()
     }
 
-    /// Paint `observed`, its top-left cell at `origin`, and encode the tiles
+    /// Paint `observed`, its top-left cell at `origin`, and queue the tiles
     /// it changed once the protocol's cadence allows; until then they stay
     /// owed.
     pub(crate) fn paint(
@@ -114,7 +127,7 @@ impl TileCutaway {
         now: SystemTime,
         origin: Position,
     ) {
-        let frame = self.canvas.frame(
+        let CanvasFrame { buf, dirty } = self.canvas.frame(
             observed,
             theme,
             self.fit.render_scale(),
@@ -122,30 +135,118 @@ impl TileCutaway {
             now,
             &mut self.cache,
         );
-        let changed = self.tiles.changed(frame.buf, &frame.dirty);
-        if self.protocol != ImageProtocol::Kitty && frame.dirty != Dirty::Rects(Vec::new()) {
-            self.halves = self.tiles.half_blocks(frame.buf);
+        if dirty != Dirty::Rects(Vec::new()) {
+            self.image.clone_from(buf);
         }
+        self.origin = origin;
+        let changed = self.tiles.changed(&self.image, &dirty);
         let due = self.sent_at.is_none_or(|at| {
             now.duration_since(at)
                 .map_or(true, |since| since >= self.protocol.cadence())
         });
-        self.pending.clear();
-        if !due {
+        self.pending = if due { changed } else { Vec::new() };
+    }
+
+    /// Send kitty's tiles before ratatui's flush, so the placeholders it
+    /// writes find their images there.
+    pub(crate) fn before_flush(&mut self, now: SystemTime) {
+        if self.protocol == ImageProtocol::Kitty {
+            self.send(&[], now);
+        }
+    }
+
+    /// Send SIXEL's or iTerm2's tiles but the `covered` ones after ratatui's
+    /// flush: only then are the text cells they must avoid known. A covered
+    /// tile is owed again, so it is re-sent once uncovered.
+    pub(crate) fn after_flush(&mut self, covered: &[u32], now: SystemTime) {
+        if self.protocol == ImageProtocol::Kitty {
             return;
         }
-        for c in changed {
-            let image = self.tiles.image(frame.buf, c.tile);
-            let bytes = match self.protocol {
-                ImageProtocol::Kitty => kitty::image_id(self.base, c.tile)
-                    .map(|id| kitty::transmit(id, &image, self.tmux)),
-                ImageProtocol::Sixel => Some(sixel::transmit(&image, origin)),
-                ImageProtocol::Iterm2 => iterm2::transmit(&image, origin)
-                    .inspect_err(|e| tracing::warn!(error = %e, "iterm2 encode failed"))
-                    .ok(),
-            };
-            self.pending.extend(bytes.map(|b| (c, b)));
+        for &index in covered {
+            self.tiles.forget_tile(index);
         }
+        self.send(covered, now);
+    }
+
+    /// Encode and write the queued tiles but the `covered` ones. A failed
+    /// write is logged and leaves its tiles owed.
+    fn send(&mut self, covered: &[u32], now: SystemTime) {
+        let mut send = std::mem::take(&mut self.pending);
+        send.retain(|c| !covered.contains(&c.tile.index));
+        if send.is_empty() {
+            return;
+        }
+        match self.protocol {
+            ImageProtocol::Kitty => {
+                if let Some(last) = send
+                    .iter()
+                    .filter_map(|c| kitty::image_id(self.base, c.tile))
+                    .max()
+                {
+                    kitty::on_screen(self.tmux, last);
+                }
+            }
+            ImageProtocol::Sixel | ImageProtocol::Iterm2 => {
+                self.in_grid.store(true, Ordering::Relaxed)
+            }
+        }
+        let mut wrote = if self.torn {
+            self.out.write_all(kitty::ST)
+        } else {
+            Ok(())
+        };
+        let mut sent = Vec::with_capacity(send.len());
+        for c in send {
+            if wrote.is_err() {
+                break;
+            }
+            if let Some(bytes) = self.encode(c) {
+                wrote = self.out.write_all(&bytes);
+                sent.push(c);
+            }
+        }
+        match wrote.and_then(|()| self.out.flush()) {
+            Ok(()) => {
+                self.torn = false;
+                self.sent_at = Some(now);
+                self.tiles.sent(&sent);
+            }
+            Err(e) => {
+                self.torn = true;
+                tracing::warn!(error = %e, "image transmit failed");
+            }
+        }
+    }
+
+    /// `c`'s tile in the protocol's escape; `None` where it has none.
+    fn encode(&mut self, c: Changed) -> Option<Vec<u8>> {
+        #[cfg(test)]
+        {
+            self.encoded += 1;
+        }
+        let image = self.tiles.image(&self.image, c.tile);
+        match self.protocol {
+            ImageProtocol::Kitty => {
+                kitty::image_id(self.base, c.tile).map(|id| kitty::transmit(id, &image, self.tmux))
+            }
+            ImageProtocol::Sixel => Some(sixel::transmit(&image, self.origin)),
+            ImageProtocol::Iterm2 => iterm2::transmit(&image, self.origin)
+                .inspect_err(|e| tracing::warn!(error = %e, "iterm2 encode failed"))
+                .ok(),
+        }
+    }
+
+    /// Set `in_grid` where the unwind would read the process's own.
+    #[cfg(test)]
+    pub(crate) fn arming(mut self, in_grid: &'static AtomicBool) -> Self {
+        self.in_grid = in_grid;
+        self
+    }
+
+    /// How many tiles were encoded.
+    #[cfg(test)]
+    pub(crate) fn encoded(&self) -> usize {
+        self.encoded
     }
 
     /// Show every tile in `scene`'s cells of `buf`, before the frame's text
@@ -184,6 +285,7 @@ impl TileCutaway {
         }
         let sentinel = sentinel();
         let mut covered = Vec::new();
+        let mut halves = None;
         for tile in self.tiles.all() {
             let under_text = cells(tile).any(|(col, row)| {
                 image_cell(buf, scene, col, row).is_some_and(|cell| *cell != sentinel)
@@ -192,15 +294,17 @@ impl TileCutaway {
                 continue;
             }
             covered.push(tile.index);
+            let halves: &RgbBuffer =
+                halves.get_or_insert_with(|| self.tiles.half_blocks(&self.image));
             for (col, row) in cells(tile) {
                 let Some(cell) = image_cell(buf, scene, col, row) else {
                     continue;
                 };
                 if *cell == sentinel {
                     let (top, bottom) = (row * 2, row * 2 + 1);
-                    if col < self.halves.width() && bottom < self.halves.height() {
+                    if col < halves.width() && bottom < halves.height() {
                         cell.reset();
-                        let half = |y| self.halves.get(col, y);
+                        let half = |y| halves.get(col, y);
                         set_half_block(cell, half(top), half(bottom));
                     }
                 } else {
@@ -209,56 +313,6 @@ impl TileCutaway {
             }
         }
         covered
-    }
-
-    /// Write this frame's tiles but the `covered` ones, after ratatui's
-    /// flush: only then are the text cells the tiles must avoid known. A
-    /// covered tile is owed again, so it is re-sent once uncovered. A failed
-    /// write is logged and leaves its tiles owed.
-    pub(crate) fn emit(&mut self, covered: &[u32], now: SystemTime) {
-        for &index in covered {
-            self.tiles.forget_tile(index);
-        }
-        let mut send = std::mem::take(&mut self.pending);
-        send.retain(|(c, _)| !covered.contains(&c.tile.index));
-        if send.is_empty() {
-            return;
-        }
-        match self.protocol {
-            ImageProtocol::Kitty => {
-                if let Some(last) = send
-                    .iter()
-                    .filter_map(|(c, _)| kitty::image_id(self.base, c.tile))
-                    .max()
-                {
-                    kitty::on_screen(self.tmux, last);
-                }
-            }
-            ImageProtocol::Sixel | ImageProtocol::Iterm2 => crate::graphics::drawing_in_grid(),
-        }
-        let mut wrote = if self.torn {
-            self.out.write_all(kitty::ST)
-        } else {
-            Ok(())
-        };
-        for (_, bytes) in &send {
-            if wrote.is_err() {
-                break;
-            }
-            wrote = self.out.write_all(bytes);
-        }
-        match wrote.and_then(|()| self.out.flush()) {
-            Ok(()) => {
-                self.torn = false;
-                self.sent_at = Some(now);
-                let sent: Vec<Changed> = send.into_iter().map(|(c, _)| c).collect();
-                self.tiles.sent(&sent);
-            }
-            Err(e) => {
-                self.torn = true;
-                tracing::warn!(error = %e, "image transmit failed");
-            }
-        }
     }
 
     /// [`CutawayCanvas::hover_at`] on the last frame painted.
