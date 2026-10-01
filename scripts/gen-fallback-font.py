@@ -126,6 +126,8 @@ def wanted(cp):
     # KS X 1001's 2,350 syllables: EUC-KR's two-byte set, the repertoire a
     # Korean bitmap font ships; the other 8,822 would quadruple the Hangul.
     if 0xAC00 <= cp <= 0xD7A3:
+        # CPython's euc_kr spells any other syllable as an 8-byte KS X 1001
+        # Annex 3 make-up sequence instead of raising.
         return len(chr(cp).encode("euc_kr")) == 2
     return True
 
