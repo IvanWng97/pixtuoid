@@ -8,7 +8,8 @@
 //!   "Unicode placeholders").
 //! - SIXEL and iTerm2 draw pixels at the cursor. Their cells are left out of
 //!   ratatui's diff, and a tile under any text cell is withheld: text and
-//!   image never share a cell.
+//!   image never share a cell. The withheld tile's other cells show the
+//!   frame as half-blocks meanwhile.
 
 use std::io::Write;
 use std::sync::Arc;
@@ -30,6 +31,7 @@ use crate::graphics::tiles::{Changed, Tile, Tiles};
 use crate::graphics::{CellSize, Fit, ImageProtocol, iterm2, kitty, sixel};
 use crate::tui::geometry::SceneGeometry;
 use crate::tui::geometry::slide_offsets;
+use crate::tui::renderer::set_half_block;
 
 /// A floor slide's two floors, each with its meta, at progress `t` of a
 /// [`FloorTransition`](pixtuoid_scene::floor::FloorTransition).
@@ -324,26 +326,40 @@ impl TileCutaway {
         }
     }
 
-    /// The tiles under text drawn since [`Self::place`], whose cells it
-    /// hands back to ratatui's diff. Kitty's text needs no room made.
+    /// The tiles under text drawn since [`Self::place`], all of whose cells
+    /// it hands back to ratatui's diff: the text, and the rest as
+    /// half-blocks. Kitty's text needs no room made.
     pub(crate) fn cover(&self, buf: &mut Buffer, scene: Rect) -> Vec<u32> {
         if self.protocol == ImageProtocol::Kitty {
             return Vec::new();
         }
         let sentinel = sentinel();
         let mut covered = Vec::new();
+        let mut halves = None;
         for tile in self.tiles.all() {
-            let mut under_text = false;
-            for (col, row) in cells(tile) {
-                if let Some(cell) = image_cell(buf, scene, col, row)
-                    && *cell != sentinel
-                {
-                    cell.set_diff_option(CellDiffOption::None);
-                    under_text = true;
-                }
+            let under_text = cells(tile).any(|(col, row)| {
+                image_cell(buf, scene, col, row).is_some_and(|cell| *cell != sentinel)
+            });
+            if !under_text {
+                continue;
             }
-            if under_text {
-                covered.push(tile.index);
+            covered.push(tile.index);
+            let halves: &RgbBuffer =
+                halves.get_or_insert_with(|| self.tiles.half_blocks(&self.image));
+            for (col, row) in cells(tile) {
+                let Some(cell) = image_cell(buf, scene, col, row) else {
+                    continue;
+                };
+                if *cell == sentinel {
+                    let (top, bottom) = (row * 2, row * 2 + 1);
+                    if col < halves.width() && bottom < halves.height() {
+                        cell.reset();
+                        let half = |y| halves.get(col, y);
+                        set_half_block(cell, half(top), half(bottom));
+                    }
+                } else {
+                    cell.set_diff_option(CellDiffOption::None);
+                }
             }
         }
         covered

@@ -91,7 +91,7 @@ fn recolor<'c>(
     pack: &Pack,
     cache: &'c mut FrameCache,
 ) -> CharacterFrame<'c> {
-    let (burn, flip_x) = (key.frame.burn, key.frame.flip_x);
+    let flip_x = key.frame.flip_x;
     // A cwd backfill re-keys the outfit (Team Palette) mid-lifetime — flag the
     // change so the cache drops the agent's stale recolors before the lookup.
     cache.note_outfit_seed(key.frame.agent_id, key.outfit);
@@ -122,7 +122,6 @@ fn recolor<'c>(
     let rise = key.dress.as_ref().map_or(0, |d| d.rise);
     CharacterFrame {
         frame,
-        burn,
         blit_at: dense.blit_at,
         rise,
     }
@@ -191,8 +190,6 @@ fn character_key_at(
 /// for; `blit_at` as in [`DenseFrame`].
 pub(crate) struct CharacterFrame<'c> {
     pub(crate) frame: &'c Frame,
-    /// The caller owns the flame crown, painted at its own coordinates.
-    pub(crate) burn: crate::burn::BurnTier,
     pub(crate) blit_at: std::num::NonZeroU16,
     /// Art rows the frame reaches above its logical top: its
     /// [`Dress::rise`](super::hair::Dress::rise).
@@ -212,7 +209,6 @@ pub(crate) fn paint_character_at(
 ) -> Option<Size> {
     let CharacterFrame {
         frame: cached,
-        burn,
         blit_at: _,
         rise: _,
     } = character_frame(
@@ -228,9 +224,6 @@ pub(crate) fn paint_character_at(
         h: cached.height(),
     };
     blit_frame(cached, anchor.x, anchor.y, buf);
-    if burn == crate::burn::BurnTier::Top {
-        super::effects::paint_flame_crown(buf, anchor, size.w, now);
-    }
     Some(size)
 }
 
