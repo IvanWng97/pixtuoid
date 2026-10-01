@@ -717,7 +717,7 @@ mod tests {
     }
 
     #[test]
-    fn the_doctor_row_names_the_protocol_the_fit_and_never_leaves_a_fallback_unexplained() {
+    fn the_doctor_row_names_the_protocol_and_the_fit() {
         let row = graphics_diagnostic_row(
             GraphicsMode::Auto,
             answered(Some(ImageProtocol::Sixel), cell(17, 41), false),
@@ -732,24 +732,116 @@ mod tests {
             "graphics: sixel (17x41 cell) — the cutaway profile would render at 16x \
              (4x art upscaled 4x), a 127x102 office (not yet wired to `run`)"
         );
+    }
 
-        // Every classic row must carry its reason — a bare "classic" reads as
-        // a verdict on the office.
-        for (mode, probe) in [
-            (GraphicsMode::Off, capable(CELL_8X16)),
-            (GraphicsMode::Auto, Probe::NotQueried),
-            (GraphicsMode::Auto, Probe::NoAnswer),
-            (GraphicsMode::Auto, Probe::TmuxPassthroughOff),
-            (GraphicsMode::Auto, Probe::Unsupported),
-            (GraphicsMode::Auto, capable(cell(0, 0))),
-        ] {
-            let row = graphics_diagnostic_row(mode, probe, BASE_ONLY, AREA);
-            assert!(row.starts_with("graphics: classic half-blocks — "), "{row}");
-            assert!(
-                row.len() > "graphics: classic half-blocks — ".len(),
-                "the reason must not be empty: {row}"
-            );
+    /// A reason keeps its variant only by printing its own row, a remedy the
+    /// user can act on: each is pinned whole, reached through [`resolve`], and
+    /// no two may match. The exhaustive `match` fails to compile on a new reason
+    /// until it gets a row here.
+    #[test]
+    fn every_classic_reason_prints_its_own_row() {
+        let no_protocol = if cfg!(unix) {
+            "terminal reports no graphics protocol (kitty/iterm2/sixel)"
+        } else {
+            "terminal reports no graphics protocol (kitty/iterm2/sixel), or did not answer \
+             the capability query"
+        };
+        let cases = [
+            (
+                GraphicsMode::Off,
+                capable(CELL_8X16),
+                BUNDLED,
+                "disabled by --graphics off",
+            ),
+            (
+                GraphicsMode::Auto,
+                Probe::Unsupported,
+                BUNDLED,
+                "this build has no terminal-graphics support",
+            ),
+            (
+                GraphicsMode::Auto,
+                Probe::NotQueried,
+                BUNDLED,
+                "the terminal was not asked (stdout is not a terminal, there is no controlling \
+                 terminal, or $TERM is dumb) — run in an interactive terminal to see what it \
+                 supports",
+            ),
+            (
+                GraphicsMode::Auto,
+                Probe::NoAnswer,
+                BUNDLED,
+                "the terminal did not answer the capability query",
+            ),
+            (
+                GraphicsMode::Auto,
+                answered(None, CELL_8X16, false),
+                BUNDLED,
+                no_protocol,
+            ),
+            (
+                GraphicsMode::Auto,
+                Probe::TmuxPassthroughOff,
+                BUNDLED,
+                "inside tmux with allow-passthrough off — `set -g allow-passthrough on` lets \
+                 kitty graphics through",
+            ),
+            (
+                GraphicsMode::Auto,
+                Probe::Answered(Detected {
+                    protocol: Some(ImageProtocol::Kitty),
+                    cell: None,
+                    tmux: false,
+                }),
+                BUNDLED,
+                "terminal reports no cell size in pixels",
+            ),
+            (
+                GraphicsMode::Auto,
+                answered(Some(ImageProtocol::Iterm2), CELL_8X16, true),
+                BUNDLED,
+                "inside tmux only kitty graphics survive a pane switch here, and this terminal \
+                 speaks iterm2",
+            ),
+            (
+                GraphicsMode::Auto,
+                capable(cell(2, 4)),
+                BUNDLED,
+                "terminal reports a 2x4 cell — too small for the pack's 4x art",
+            ),
+            (
+                GraphicsMode::Auto,
+                capable(cell(1, 2)),
+                BUNDLED,
+                "terminal reports a 1x2 cell — too small to subdivide",
+            ),
+        ];
+        let n = cases.len();
+        let (mut seen, mut rows) = (
+            std::collections::BTreeSet::new(),
+            std::collections::BTreeSet::new(),
+        );
+        for (mode, probe, max_density, want) in cases {
+            let Plan::Classic { reason } = resolve(mode, probe, max_density, AREA) else {
+                panic!("{probe:?} must fall back");
+            };
+            seen.insert(match reason {
+                ClassicReason::Disabled => 0,
+                ClassicReason::Unsupported => 1,
+                ClassicReason::NotQueried => 2,
+                ClassicReason::NoAnswer => 3,
+                ClassicReason::NoProtocol => 4,
+                ClassicReason::TmuxPassthroughOff => 5,
+                ClassicReason::NoCellSize => 6,
+                ClassicReason::TmuxNeedsKitty(_) => 7,
+                ClassicReason::CellTooSmall { .. } => 8,
+            });
+            let row = graphics_diagnostic_row(mode, probe, max_density, AREA);
+            assert_eq!(row, format!("graphics: classic half-blocks — {want}"));
+            rows.insert(row);
         }
+        assert_eq!(seen.len(), 9, "every reason has a pinned row");
+        assert_eq!(rows.len(), n, "no two reasons print the same row");
     }
 
     /// A real Retina Ghostty reports a 17x41 cell: 17 is what the cell alone
