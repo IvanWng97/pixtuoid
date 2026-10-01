@@ -80,9 +80,8 @@ Notes no gate carries:
   `nowMs` as the render. **iOS silent-switch bypass is DELIBERATE (#664)**:
   `navigator.audioSession.type = 'playback'` before the context, else the
   Ring/Silent switch mutes a deliberate ♩ tap.
-- **The VIBING channel is a SECOND live `Office` (#468)**: `force_weather` is
-  a thread-local shared by both offices (each `step` re-applies its own —
-  Rust-side invariant), and both consumers MUST share ONE `init()` via
+- **The VIBING channel is a SECOND live `Office` (#468)**: each office keeps
+  its own weather, and both consumers MUST share ONE `init()` via
   `public/office-driver.js` (`sharedWasm` / `officeFrameView`, pinned by
   `config/wasm-init-consts.test.mjs`) — independent `mod.default()` calls
   racing instantiate two wasm instances that stomp the module-global. The

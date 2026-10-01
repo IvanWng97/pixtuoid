@@ -5,7 +5,7 @@
 //! Usage:
 //!   cargo run --release --example cutaway_snapshot -- <out.png> [--scale N]
 //!       [--agents N] [--theme T] [--logical WxH] [--now-hour H] [--floor I/N]
-//!       [--weather W] [--now-day D]
+//!       [--weather W] [--now-day D] [--flame I]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -91,6 +91,7 @@ fn main() -> Result<()> {
     // 1 = the clock's base date, as the classic snapshot's `--now-day`.
     let mut now_day = 1u32;
     let mut weather = None::<String>;
+    let mut flame = None::<usize>;
     let (mut lw, mut lh) = DEFAULT_LOGICAL;
     let rest: Vec<String> = args.collect();
     let mut i = 0;
@@ -115,6 +116,8 @@ fn main() -> Result<()> {
             "--now-hour" => now_hour = Some(val("--now-hour")?.parse().context("bad --now-hour")?),
             "--now-day" => now_day = val("--now-day")?.parse().context("bad --now-day")?,
             "--weather" => weather = Some(val("--weather")?),
+            // The `I`th agent burns at the Top tier, crowned in flame.
+            "--flame" => flame = Some(val("--flame")?.parse().context("bad --flame")?),
             "--floor" => {
                 let v = val("--floor")?;
                 let (f, n) = v
@@ -137,21 +140,34 @@ fn main() -> Result<()> {
     let scale = RenderScale::new(scale_n).ok_or_else(|| anyhow!("--scale must be nonzero"))?;
     // The sky otherwise cycles its weather with the clock, so an hour alone
     // does not say what the room looks like.
-    if let Err(valid) = pixtuoid_scene::pixel_painter::force_weather(weather.as_deref()) {
-        return Err(anyhow!(
-            "unknown --weather {weather:?}; valid: {}",
-            valid.join(" | ")
-        ));
-    }
+    let policy = pixtuoid_scene::pixel_painter::WeatherPolicy::from_name(weather.as_deref())
+        .map_err(|valid| {
+            anyhow!(
+                "unknown --weather {weather:?}; valid: {}",
+                valid.join(" | ")
+            )
+        })?;
     let now = match now_hour {
         Some(h) => pixtuoid_scene::localclock::try_on_day(now_day.saturating_sub(1), h)
             .with_context(|| format!("invalid --now-day/--now-hour {now_day}:{h}"))?,
         None => SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
     };
-    let meta = FloorMeta::for_floor(floor.0, floor.1);
+    let meta = FloorMeta::for_floor(floor.0, floor.1).with_weather(policy);
 
     let mut scene = SceneState::uniform(64);
     populate(&mut scene, now, agents);
+    if let Some(i) = flame {
+        let id = AgentId::from_transcript_path(&format!("/cutaway/a{i}.jsonl"));
+        let a = scene
+            .agents
+            .get_mut(&id)
+            .ok_or_else(|| anyhow!("--flame {i}: only {agents} agents"))?;
+        a.model = Some("claude-fable-5".into());
+        a.effort = Some(pixtuoid_core::state::EffortObservation::new(
+            "ultra".into(),
+            now,
+        ));
+    }
 
     // The real sim, at LOGICAL size — the cutaway is its second reader.
     let mut session = FloorSession::new();

@@ -739,7 +739,7 @@ mod tests {
     fn a_denser_strip_draws_the_denser_art_on_the_same_city() {
         let pack = pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let sky = crate::sky::Sky::at(SystemTime::UNIX_EPOCH);
+        let sky = crate::sky::Sky::clock(SystemTime::UNIX_EPOCH);
         let strip = |d| {
             CityStrip::draw(
                 &pack,

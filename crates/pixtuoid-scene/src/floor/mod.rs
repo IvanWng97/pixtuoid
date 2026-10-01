@@ -77,6 +77,8 @@ pub struct FloorMeta {
     pub altitude: f32,
     /// This floor's layout seed (`floor_seed(floor_idx)`).
     pub floor_seed: u64,
+    /// Which weather its windows show, and its rain sounds.
+    pub weather: crate::sky::WeatherPolicy,
 }
 
 impl FloorMeta {
@@ -93,7 +95,13 @@ impl FloorMeta {
             floor_idx,
             altitude,
             floor_seed: floor_seed(floor_idx),
+            weather: crate::sky::WeatherPolicy::Clock,
         }
+    }
+
+    /// This floor under `weather`.
+    pub fn with_weather(self, weather: crate::sky::WeatherPolicy) -> Self {
+        Self { weather, ..self }
     }
 
     /// The lone floor of a single-floor office (index 0, altitude 0.0).
@@ -457,14 +465,17 @@ pub fn waypoint_kind_of(
     layout.and_then(|l| l.waypoints.get(idx)).map(|w| w.kind)
 }
 
-/// The mood [`TrackId`](crate::audio::TrackId) for `now` — the ONE place the
-/// day/precip/epoch input wiring lives. Lives here (not `audio`) because it
-/// reaches the lighting layer's `is_day_at`/`precipitation_level`, which `audio`
-/// must not depend on.
-pub fn track_for(now: std::time::SystemTime) -> crate::audio::TrackId {
+/// The mood [`TrackId`](crate::audio::TrackId) for `now` under `weather` — the
+/// ONE place the day/precip/epoch input wiring lives. Lives here (not `audio`)
+/// because it reaches the lighting layer's `is_day_at`/`precipitation_level`,
+/// which `audio` must not depend on.
+pub fn track_for(
+    now: std::time::SystemTime,
+    weather: crate::sky::WeatherPolicy,
+) -> crate::audio::TrackId {
     crate::audio::select_track(
         crate::pixel_painter::is_day_at(now),
-        crate::pixel_painter::precipitation_level(now),
+        crate::pixel_painter::precipitation_level(now, weather),
         crate::audio::track_epoch(now),
     )
 }
@@ -484,7 +495,7 @@ impl AudioObserver {
         Self::default()
     }
 
-    /// Compose one frame of audio intent for the floor being VIEWED, advancing
+    /// Compose one frame of audio intent for the `floor` being VIEWED, advancing
     /// the cross-frame cue edges. Call it EVERY world-frame regardless of mute
     /// (the painter gates only DELIVERY): a muted stretch keeps
     /// `seen_agents`/`occupied` warm, so re-enabling never fires a
@@ -494,9 +505,10 @@ impl AudioObserver {
         scene: &SceneState,
         occupied: &std::collections::HashSet<usize>,
         waypoint_kind: impl Fn(usize) -> Option<crate::layout::WaypointKind>,
-        floor_idx: usize,
+        floor: FloorMeta,
         now: SystemTime,
     ) -> AudioFrame {
+        let floor_idx = floor.floor_idx;
         // Reprime on floor switch: a fresh tracker primes silently next observe,
         // so riding to a new floor never fires a cue volley for agents /
         // appliances already there.
@@ -507,7 +519,7 @@ impl AudioObserver {
         // You hear the floor you're LOOKING AT — but rain stays global, since
         // it's weather, not agent activity.
         let counts = crate::board::per_floor_counts(scene)[floor_idx.min(MAX_FLOORS - 1)];
-        let precipitation = crate::pixel_painter::precipitation_level(now);
+        let precipitation = crate::pixel_painter::precipitation_level(now, floor.weather);
         let floor_ids = scene
             .agents
             .iter()
@@ -517,7 +529,7 @@ impl AudioObserver {
         AudioFrame {
             stems: crate::audio::stem_levels(&counts, precipitation),
             events,
-            track: track_for(now),
+            track: track_for(now, floor.weather),
         }
     }
 
@@ -663,7 +675,7 @@ impl FloorSession {
     pub fn audio_frame(
         &mut self,
         scene: &SceneState,
-        floor_idx: usize,
+        floor: FloorMeta,
         now: SystemTime,
     ) -> AudioFrame {
         // Bind the two shared fields to LOCALS first so the closure captures the
@@ -675,7 +687,7 @@ impl FloorSession {
             scene,
             occupied,
             |idx| waypoint_kind_of(layout, idx),
-            floor_idx,
+            floor,
             now,
         )
     }
@@ -884,7 +896,7 @@ const NEON_TUBE_WHITEN: f32 = 0.38;
 const NEON_INTERIOR_TINT: f32 = 0.07;
 /// Map the sim's theme-free `levels` to this frame's colors; how strongly the
 /// halo throws them is the [`Lights`](crate::lighting::Lights)' call.
-pub(crate) fn neon_look(levels: crate::floor::NeonLevels, theme: &Theme) -> NeonLook {
+pub(crate) fn neon_look(levels: NeonLevels, theme: &Theme) -> NeonLook {
     let power = levels.power;
     let hue = theme.ui.neon_brand.mix(theme.ui.neon_alert, levels.alert);
     NeonLook {
