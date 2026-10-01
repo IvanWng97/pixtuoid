@@ -28,8 +28,9 @@ use pixtuoid_core::id::AgentId;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::{AgentSlot, SceneState};
+use pixtuoid_scene::board::BoardModel;
 use pixtuoid_scene::cutaway::canvas::CutawayCanvas;
-use pixtuoid_scene::cutaway::paint::{Office, render_cutaway};
+use pixtuoid_scene::cutaway::paint::{Office, Showing, render_cutaway};
 use pixtuoid_scene::floor::{
     CoffeeState, FloorCtx, FloorInputs, FloorMeta, FloorSession, FrameInputs, ObservedFloor,
     PetInputs, render_floor,
@@ -242,7 +243,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
         let base = localclock::at_hour(hour);
         let scene = office_scene(12, 16, base, busy);
         let mut session = FloorSession::new();
-        let observed: Vec<(SystemTime, ObservedFloor)> = (0..CUTAWAY_FRAMES as u64)
+        let observed: Vec<(SystemTime, ObservedFloor, BoardModel)> = (0..CUTAWAY_FRAMES as u64)
             .map(|i| {
                 let now = base + Duration::from_millis(i * FRAME_STEP_MS);
                 let floor = session
@@ -257,7 +258,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
                         CUTAWAY_LOGICAL,
                     )
                     .expect("the cutaway extent lays out");
-                (now, floor)
+                (now, floor, session.board(&scene, now))
             })
             .collect();
         let office = |layout| Office {
@@ -279,9 +280,14 @@ fn render_cutaway_frame(c: &mut Criterion) {
         let mut i = 0;
         group.bench_function(&name, |b| {
             b.iter(|| {
-                let (now, ObservedFloor { layout, frame }) = &observed[i];
+                let (now, ObservedFloor { layout, frame }, board) = &observed[i];
                 i = (i + 1) % CUTAWAY_FRAMES;
-                render_cutaway(frame, office(layout), meta, *now, &mut cache, &mut buf)
+                let showing = Showing {
+                    floor: meta,
+                    now: *now,
+                    board,
+                };
+                render_cutaway(frame, office(layout), showing, &mut cache, &mut buf)
             });
         });
         if busy {
@@ -294,11 +300,14 @@ fn render_cutaway_frame(c: &mut Criterion) {
         let mut i = 0;
         group.bench_function(format!("{name}_canvas"), |b| {
             b.iter(|| {
-                let (now, floor) = &observed[i];
+                let (now, floor, board) = &observed[i];
                 i = (i + 1) % CUTAWAY_FRAMES;
-                canvas
-                    .frame(floor, theme, scale, meta, *now, &mut cache)
-                    .dirty
+                let showing = Showing {
+                    floor: meta,
+                    now: *now,
+                    board,
+                };
+                canvas.frame(floor, theme, scale, showing, &mut cache).dirty
             });
         });
     }

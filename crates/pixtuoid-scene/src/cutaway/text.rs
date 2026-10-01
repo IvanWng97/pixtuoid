@@ -72,7 +72,7 @@ fn rows(c: char) -> &'static str {
         't' => ".#. ### .#. .#. .##",
         'u' => "... #.# #.# #.# .##",
         'v' => "... #.# #.# #.# .#.",
-        'w' => "... #.# #.# ### #.#",
+        'w' => "... #.# #.# ### ###",
         'x' => "... #.# .#. #.# #.#",
         'y' => "... #.# #.# .## ..# ##.",
         'z' => "... ### .#. #.. ###",
@@ -121,9 +121,19 @@ fn rows(c: char) -> &'static str {
         '~' => "... ##. .##",
         '\u{b7}' => "... ... .#.",
         '\u{25cf}' => "... ### ### ###",
-        _ => "### ### ### ### ###",
+        '\u{25cb}' => "... ### #.# ###",
+        '\u{25b2}' => "... .#. ### ###",
+        '\u{25bc}' => "... ### ### .#.",
+        '\u{2605}' => ".#. ### .#. #.#",
+        '\u{2191}' => ".#. #.# .#. .#. .#.",
+        '\u{2014}' => "... ... ###",
+        '\u{2b22}' => "... .#. ### ### .#.",
+        _ => TOFU,
     }
 }
+
+/// What a character the font lacks draws as.
+const TOFU: &str = "### ### ### ### ###";
 
 /// `text`'s width in art pixels, from its first ink column to its last.
 pub(crate) fn width(text: &str) -> ArtPx {
@@ -156,11 +166,79 @@ pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text:
 mod tests {
     use super::*;
 
+    /// Every character the wall board and the floor indicator write: each
+    /// mood over two flap cycles, each gateway state, many floors.
+    fn signs() -> std::collections::BTreeSet<char> {
+        use crate::board::{StateCounts, build_board};
+        use pixtuoid_core::state::DaemonState;
+        let mut text = crate::layout::floor_indicator_text(12);
+        let moods = [
+            StateCounts::default(),
+            StateCounts {
+                idle: 2,
+                total: 2,
+                ..StateCounts::default()
+            },
+            StateCounts {
+                active: 1,
+                total: 1,
+                ..StateCounts::default()
+            },
+            StateCounts {
+                active: 3,
+                total: 3,
+                ..StateCounts::default()
+            },
+            StateCounts {
+                waiting: 1,
+                total: 1,
+                ..StateCounts::default()
+            },
+            StateCounts {
+                waiting: 2,
+                active: 3,
+                idle: 4,
+                total: 9,
+                ..StateCounts::default()
+            },
+        ];
+        let gateways = [
+            None,
+            Some(DaemonState::Idle),
+            Some(DaemonState::Busy),
+            Some(DaemonState::Degraded),
+            Some(DaemonState::Down),
+        ];
+        for (counts, gateway) in moods.into_iter().zip(gateways.into_iter().cycle()) {
+            for ms in (0..32_000).step_by(20) {
+                let now = std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms);
+                let board = build_board(counts, 3_700, Some((2, 3)), gateway, now);
+                for seg in [&board.brand, &board.star]
+                    .into_iter()
+                    .chain(&board.mood)
+                    .chain(&board.context)
+                {
+                    text.push_str(&seg.text);
+                }
+            }
+        }
+        text.chars().collect()
+    }
+
+    /// The font draws everything the signs write: no sign shows a tofu box.
+    #[test]
+    fn the_font_draws_every_character_the_signs_write() {
+        let missing: Vec<char> = signs().into_iter().filter(|&c| rows(c) == TOFU).collect();
+        assert_eq!(missing, []);
+    }
+
     /// Every glyph fits its cell: no row wider than [`GLYPH_W`], none below
     /// [`LINE_H`], and nothing but ink or blank in it.
     #[test]
     fn every_glyph_fits_its_cell() {
-        let chars = (' '..='~').chain(['\u{b7}', '\u{25cf}', '\u{2603}']);
+        let chars = (' '..='~')
+            .chain(signs())
+            .chain(['\u{b7}', '\u{25cf}', '\u{2603}']);
         for c in chars {
             let rows: Vec<&str> = rows(c).split(' ').collect();
             assert!(rows.len() <= usize::from(LINE_H), "{c:?}: {rows:?}");

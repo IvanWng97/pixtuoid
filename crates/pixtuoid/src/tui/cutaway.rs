@@ -6,12 +6,12 @@
 
 use std::io::Write;
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_scene::cutaway::canvas::CutawayCanvas;
-use pixtuoid_scene::floor::{FloorMeta, ObservedFloor};
+use pixtuoid_scene::cutaway::paint::Showing;
+use pixtuoid_scene::floor::ObservedFloor;
 use pixtuoid_scene::frame_cache::FrameCache;
 use pixtuoid_scene::layout::{Bounds, Size};
 use pixtuoid_scene::theme::Theme;
@@ -71,15 +71,13 @@ impl KittyCutaway {
         &mut self,
         observed: &ObservedFloor,
         theme: &'static Theme,
-        floor: FloorMeta,
-        now: SystemTime,
+        showing: Showing<'_>,
     ) {
         let frame = self.canvas.frame(
             observed,
             theme,
             self.fit.render_scale(),
-            floor,
-            now,
+            showing,
             &mut self.cache,
         );
         let changed = self.tiles.changed(frame.buf, &frame.dirty);

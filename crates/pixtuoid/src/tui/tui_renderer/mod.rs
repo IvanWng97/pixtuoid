@@ -717,7 +717,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 #[cfg(feature = "graphics")]
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// [`Self::render`] under the kitty cutaway: the image in place of the
-    /// half-blocks, and the text a later PR does not move onto the canvas.
+    /// half-blocks, its badges, wall board and floor indicator painted in it,
+    /// and only the footer, tooltips and modals as terminal text.
     fn render_kitty(
         &mut self,
         kitty: &mut crate::tui::cutaway::KittyCutaway,
@@ -785,7 +786,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.forget_drawn();
             return drawn;
         };
-        kitty.paint(&observed, theme, floor_meta, now);
+        let board = crate::tui::renderer::wall_board(&footer, &floor_scene, now);
+        let showing = pixtuoid_scene::cutaway::paint::Showing {
+            floor: floor_meta,
+            now,
+            board: &board,
+        };
+        kitty.paint(&observed, theme, showing);
         let geometry = kitty.geometry(scene_area);
         let layout = &observed.layout;
         let mouse = self
