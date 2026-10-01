@@ -179,12 +179,12 @@ pub(super) fn two_floor_scene() -> SceneState {
 
 mod audio;
 mod coffee_pets;
+#[cfg(feature = "graphics")]
+mod cutaway;
 mod dashboard;
 mod edge_cases;
 mod floors;
 mod hit_test;
-#[cfg(feature = "graphics")]
-mod kitty;
 mod mascot;
 mod overlays;
 mod render_text;
