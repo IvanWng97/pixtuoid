@@ -47,9 +47,9 @@
     secret. dontAsk denies what no allow rule approves, `--tools` leaves only
     read tools, and `blockReadsOutsideWorkingDirectories` refuses a read outside
     the checkout even when a rule allows it
-    (code.claude.com/docs/en/settings-reference). Any other flag or action
-    input can add a rule, a tool or a directory, so flag names and input keys
-    are allowlists; their values stay free but for those three.
+    (code.claude.com/docs/en/settings-reference). Any other flag, action input
+    or settings key can add a rule, a tool, a hook or a directory, so all three
+    are allowlists; other values stay free.
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length == 1
@@ -67,8 +67,7 @@
                   | length == 1 and ([.[0][0] | splits("[ ,]+")] - ["Read", "Glob", "Grep"] == []))
              and ([$args | scan("--settings")] | length == 1)
              and ([$args | scan("--settings[ =]'([^']*)'")][0][0]
-                  | fromjson | .permissions.blockReadsOutsideWorkingDirectories == true)
-             and ($args | test("bypassPermissions") | not))
+                  | fromjson == {"permissions": {"blockReadsOutsideWorkingDirectories": true}}))
   break:
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
@@ -87,7 +86,13 @@
       |= sub(" --permission-mode dontAsk"; "")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      |= sub("\"permissions\":\\{"; "\"permissions\":{\"defaultMode\":\"bypassPermissions\",")
+      |= sub("\"permissions\":\\{"; "\"permissions\":{\"defaultMode\":\"acceptEdits\",")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("\"permissions\":\\{"; "\"permissions\":{\"additionalDirectories\":[\"/\"],")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("\\{\"permissions\""; "{\"hooks\":{},\"permissions\"")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub("--tools Read,Glob,Grep"; "--tools Read,Glob,Grep,Bash")
