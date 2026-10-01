@@ -1,4 +1,4 @@
-//! The classic's floor wash: [`SkyTones::ground_wash`]'s blends laid over the floor
+//! The classic's ground wash: [`SkyTones::ground_wash`]'s blends laid over the ground
 //! band.
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
@@ -7,7 +7,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use crate::atmosphere::SkyTones;
 use crate::pixel_painter::palette::{RgbLut, blend_rgb};
 
-/// Lay each of `wash`'s `(tint, strength)` blends over the floor band
+/// Lay each of `wash`'s `(tint, strength)` blends over the ground band
 /// `top_y..bottom_y`, in order.
 pub(in crate::pixel_painter) fn paint_ground_wash(
     buf: &mut RgbBuffer,
@@ -20,7 +20,7 @@ pub(in crate::pixel_painter) fn paint_ground_wash(
     }
 }
 
-/// Blend `tint` over every floor pixel in the band `top_y..bottom_y` at
+/// Blend `tint` over every ground pixel in the band `top_y..bottom_y` at
 /// strength `s`. `s <= 0.0` early-returns, skipping the whole pass every clear
 /// frame. Tint and strength are constant across the band, so the blend runs
 /// through an [`RgbLut`] — byte-identical to per-pixel [`blend_rgb`] (#900).
@@ -46,7 +46,7 @@ mod tests {
     use crate::pixel_painter::palette::{BLACK, WHITE};
 
     #[test]
-    fn blend_floor_band_tints_only_the_band_and_noops_at_zero() {
+    fn blend_ground_band_tints_only_the_band_and_noops_at_zero() {
         let base = Rgb {
             r: 100,
             g: 100,
@@ -71,7 +71,7 @@ mod tests {
     }
 
     #[test]
-    fn blend_floor_band_matches_the_per_pixel_blend_reference() {
+    fn blend_ground_band_matches_the_per_pixel_blend_reference() {
         let mut lcg = 0x9E3779B9u32;
         let mut next = || {
             lcg = lcg.wrapping_mul(1664525).wrapping_add(1013904223);
@@ -124,7 +124,7 @@ mod tests {
     }
 
     #[test]
-    fn blend_floor_band_clamps_degenerate_bounds() {
+    fn blend_ground_band_clamps_degenerate_bounds() {
         let tint = Rgb {
             r: 200,
             g: 180,
@@ -167,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn a_floor_wash_lays_its_blends_in_order() {
+    fn a_ground_wash_lays_its_blends_in_order() {
         let base = Rgb {
             r: 100,
             g: 100,

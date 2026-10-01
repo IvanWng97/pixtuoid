@@ -152,7 +152,7 @@ fn city_bounce(w: Weather) -> f32 {
     v
 }
 
-/// How much of the emitter's light the weather lets through to the interior:
+/// How much of the sky body's light the weather lets through to the interior:
 /// a hard directional beam, a flat diffuse fill, and the disc's own visibility.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Transmission {
@@ -195,13 +195,13 @@ pub(crate) enum BodyKind {
     Moon,
 }
 
-/// The physical sky emitter — sun by day, moon by night (at its rim, lighting
+/// The sky body — sun by day, moon by night (at its rim, lighting
 /// nothing, while it is below the horizon). Luminance + warmth follow altitude
 /// (low body = longer air path = dimmer + warmer). The ONE source the interior
 /// light, the disc and the spill derive from.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SkyBody {
-    pub(crate) body: BodyKind,
+    pub(crate) kind: BodyKind,
     /// 0 horizon .. 1 apex.
     pub(crate) altitude: f32,
     /// Progress along this body's arc: 0 as it rises .. 1 as it sets.
@@ -209,7 +209,7 @@ pub(crate) struct SkyBody {
     /// 0 neutral (apex) .. 1 warm/red (horizon).
     pub(crate) warmth: f32,
     /// 0..1 luminance reaching the atmosphere.
-    pub(crate) emitter_lum: f32,
+    pub(crate) lum: f32,
 }
 
 // The sun rides the arc over its up-span; the moon's span moves with its age
@@ -240,7 +240,7 @@ fn arc_progress(h: f32, rise: f32, set: f32) -> f32 {
 }
 
 /// Whether the sky shows the SUN (not the moon) at hour-of-day `h` (0..24) — the
-/// ONE definition of the day/night boundary, so the emitter and any external
+/// ONE definition of the day/night boundary, so the sky body and any external
 /// consumer can't drift from a second hardcoded copy.
 pub(crate) fn hour_is_day(h: f32) -> bool {
     (SUN_RISE_H..SUN_SET_H).contains(&h)
@@ -327,26 +327,26 @@ fn moon_arc(h: f32, age: f32) -> Option<f32> {
 }
 
 /// The body the sky shows at local hour `h`, `nightfall` into the night.
-fn emitter_at(h: f32, nightfall: f32, moon_phase: f32, moon_age: f32) -> SkyBody {
+fn body_at(h: f32, nightfall: f32, moon_phase: f32, moon_age: f32) -> SkyBody {
     if hour_is_day(h) {
         let t = arc_progress(h, SUN_RISE_H, SUN_SET_H);
         let altitude = (std::f32::consts::PI * t).sin();
         return SkyBody {
-            body: BodyKind::Sun,
+            kind: BodyKind::Sun,
             altitude,
             azimuth: t,
             warmth: (1.0 - altitude).clamp(0.0, 1.0),
-            emitter_lum: altitude,
+            lum: altitude,
         };
     }
     let t = moon_arc(h, moon_age).unwrap_or(0.0);
     let altitude = (std::f32::consts::PI * t).sin();
     SkyBody {
-        body: BodyKind::Moon,
+        kind: BodyKind::Moon,
         altitude,
         azimuth: t,
         warmth: (1.0 - altitude).clamp(0.0, 1.0),
-        emitter_lum: MOON_PEAK_LUM * altitude * moon_phase * nightfall,
+        lum: MOON_PEAK_LUM * altitude * moon_phase * nightfall,
     }
 }
 
@@ -425,7 +425,7 @@ pub(crate) struct InteriorLight {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Sky {
     weather: Weather,
-    emitter: SkyBody,
+    body: SkyBody,
     moon_phase: f32,
     moon_waxing: bool,
     nightfall: f32,
@@ -439,7 +439,7 @@ impl Sky {
         let nightfall = nightfall(h);
         Self {
             weather: weather.weather_at(now),
-            emitter: emitter_at(h, nightfall, moon_phase, moon_age),
+            body: body_at(h, nightfall, moon_phase, moon_age),
             moon_phase,
             moon_waxing: moon_age < SYNODIC_DAYS / 2.0,
             nightfall,
@@ -470,8 +470,8 @@ impl Sky {
         self.weather
     }
 
-    pub(crate) fn emitter(&self) -> &SkyBody {
-        &self.emitter
+    pub(crate) fn body(&self) -> &SkyBody {
+        &self.body
     }
 
     pub(crate) fn transmission(&self) -> Transmission {
@@ -499,12 +499,12 @@ impl Sky {
         self.flash
     }
 
-    /// Direct-beam strength reaching the interior = emitter luminance carried by
+    /// Direct-beam strength reaching the interior = the sky body's luminance carried by
     /// the weather's DIRECT transmission. Zero at night (the moon casts no usable
     /// beam) and under thick cloud.
     pub(crate) fn beam(&self) -> f32 {
-        match self.emitter.body {
-            BodyKind::Sun => self.emitter.emitter_lum * self.transmission().direct,
+        match self.body.kind {
+            BodyKind::Sun => self.body.lum * self.transmission().direct,
             BodyKind::Moon => 0.0,
         }
     }
@@ -522,16 +522,16 @@ impl Sky {
     }
 
     pub(crate) fn light(&self) -> InteriorLight {
-        let e = &self.emitter;
+        let e = &self.body;
         let a = self.transmission();
         // The moon casts no USABLE direct beam (mirrors `beam`'s gate) — a
         // moonlit night must never out-light a cloudy solar noon, so the moon's
         // illuminance is diffuse-fill only.
-        let direct_eff = match e.body {
+        let direct_eff = match e.kind {
             BodyKind::Sun => a.direct,
             BodyKind::Moon => 0.0,
         };
-        let interior = (e.emitter_lum * (direct_eff * K_BEAM + a.diffuse * K_FILL)).clamp(0.0, 1.0);
+        let interior = (e.lum * (direct_eff * K_BEAM + a.diffuse * K_FILL)).clamp(0.0, 1.0);
         let night_floor = city_bounce(self.weather) * self.nightfall;
         InteriorLight {
             interior,
