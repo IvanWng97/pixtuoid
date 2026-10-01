@@ -36,47 +36,45 @@ Read [`AGENTS.md`](AGENTS.md) first; these rules add to generic defect hunting.
   prefer an allowlist.
 - **IPC endpoints** — owner-only at creation (create-restricted-then-rename,
   never a process-global umask); a pre-existing endpoint is hostile.
-- **Dead fallback** — an arm whose trigger cannot fire, or that duplicates an
-  authority, is debt; documented load-bearing defense (shim exit-0,
-  config-never-wipe, liveness ladders) stays.
-- **Version** — does this diff move the public surface or ship a feature, and
-  is the 0.x bump right (patch = fix, minor = feature/breaking)?
 
 ### Always check
 
 - A breach of AGENTS.md (invariants, conventions, "Things NOT to do").
-- New behavior without a test; scope beyond what the PR states; docs a
-  structure, API or workflow change left stale.
-- A fix round adds no new gate: a wanted check is its own PR. Prefer a failure
-  made impossible (derived from the one source of truth) over one detected; a
-  check asserts facts in its own layer (a Rust fact from Rust, never a Python
-  regex over `.rs`).
+- New behavior without a test; scope beyond what the PR body states.
 
 ### Sweeps that leave the diff
 
 - **Siblings** — a guard/cap/validation added to some of a sibling set
-  (per-source decoders, install targets, platform arms, twin call sites): `rg`
-  the full set and verify each.
+  (per-source decoders, install targets, platform arms, twin call sites) or to
+  one caller of a shared fn: `rg` the full set and every call site, and verify
+  each.
 - **DRY** — every new fn/type/helper/const gets a whole-tree search for an
-  existing implementation, weighted by divergence risk; a wrapper whose name
-  hides its cost is the same finding.
-- **Drift** — docs naming a moved file/fn/flag/count: `rg --hidden` (bare `rg`
-  skips `.github/` and `.claude/`).
-- **Wire format** — a decoder or drift-watch row vs the real upstream shape;
-  whether a source owes a row is `source/drift.rs`'s header.
+  existing implementation, weighted by divergence risk; every value a new line
+  reads is the authority its consumer uses, not a sibling's (#1042, #1155).
+  Test fixtures stay inline.
+- **Drift** — docs naming a moved file/fn/flag/count, searched including
+  `.github/` and `.claude/`.
+- **Wire format** — a decoder or drift-watch row vs the recorded upstream
+  shape; whether a source owes a row is `source/drift.rs`'s header.
 - **Unwired additions** — every new field/flag/parameter/asset/gate has a live
   consumer in the same diff (`_x` bindings and `pub` fields evade the lints).
 - **Manifest bridge** — `site/src/*.json` and generated schemas vs their Rust
   source of truth.
-- **Test teeth** — mentally mutate each fix: would its test fail? Refusal
-  paths are pinned on both sides of every window, offsets derived from the
-  constant under test; a new gate fires on the violation, stays silent on the
-  legitimate case, and names the real requirement.
+- **Population** — a gate, build flag or config key that selects a set
+  (crates, features, targets, jobs, a gate's own tests): name the set before
+  and after; a silent shrink is a defect (#1012, #1101, #1103, #1123).
+- **Test teeth** — every new or changed test, and every test asserting an
+  effect the diff removes or reroutes, fails when the code it names is wrong
+  (#889 left `occupied_floor_stays_lit` unable to). Refusal paths are pinned on
+  both sides of every window, offsets derived from the constant under test; a
+  new gate fires on the violation, stays silent on the legitimate case, and
+  names the real requirement. No test reads ambient state: the local time
+  zone, `HOME`, the developer's config, a fixed temp path (#1023, #1048).
 
 ### Do not flag
 
 - Anything a [CI gate](docs/CONTRIBUTING.md#ci-gates) or clippy/rustfmt
-  enforces; pure style.
+  enforces, compiling included; pure style.
 - Behavior documented where it is constrained: read the item's doc comment and
   the comments on the lines it governs first.
 - Speculative defense in depth where a primary defense holds. Every layer a
@@ -85,21 +83,20 @@ Read [`AGENTS.md`](AGENTS.md) first; these rules add to generic defect hunting.
 - Risks needing unlikely or unreachable preconditions; performance unless
   measurable (the TUI ticks at `FRAME_TICK_MS`).
 - A missing comment ([comment audit](#design) owns the rest).
-- A claim about an external artifact (action tag, crate release, tap) from
-  memory: verify it in-session (`gh api`, the registry) or write "unverified"
-  (#112).
 
 ## Lenses
 
 Every finding states its evidence before its claim, cites a `file:line` from a
 file actually read, and survives a sharp-edge check: the same seam is not the
-same claim. Locally, it also carries an integer confidence 0–100.
+same claim. A claim about an external artifact (action tag, crate release,
+upstream shape) not fetched this session says "unverified" (#112).
 
 ### Correctness
 
-Locally, run the applicable gates and report each exit code as observed, never
-through a pipe; name any CI-only gate the diff can turn red (`--lib` builds
-neither bin modules nor examples).
+Hold the diff to each claim the PR body's
+[plan answers](.github/prompts/impl-plan.prompt.md#the-contract-with-review)
+make. Name any CI-only gate the diff can turn red (`--lib` builds neither bin
+modules nor examples).
 
 #### Security
 
@@ -109,17 +106,15 @@ handling; transcript, hook, JSONL, pack or asset ingestion. When the diff
 touches none, the summary says so. Otherwise report only a concrete attack or
 invariant-breaking sequence against:
 
-1. The shim: always exits 0, never blocks the agent CLI, keeps
-   `pixtuoid-hook`'s `transport::WRITE_TIMEOUT` bound.
-2. Config writes: through `install/io.rs`'s lock, atomic-write, permission and
-   symlink-resolution authority.
-3. Socket / named pipe: no path traversal, symlink attack, unbounded read or
+1. The shim and config writes: AGENTS.md invariants 4–5 and `install/io.rs`'s
+   lock, atomic-write and permission authority.
+2. Socket / named pipe: no path traversal, symlink attack, unbounded read or
    unsafe ownership assumption.
-4. Untrusted input (hook payloads, transcripts, JSONL, paths, pack data):
+3. Untrusted input (hook payloads, transcripts, JSONL, paths, pack data):
    bounded, validated, skipped without panicking.
-5. Credentials and subprocesses: no secret in a command or log, no untrusted
-   code in a secret-bearing process.
-6. `unwrap()` on a production path.
+4. Credentials and subprocesses: no secret in a command or log, no untrusted
+   code in a secret-bearing process, no argument spliced into a shell as code
+   (justfile, script, workflow step: #1126).
 
 ### Design
 
@@ -128,32 +123,28 @@ invariant-breaking sequence against:
 2. New data shapes: name the identity/key-space; consolidate shared identity,
    not shared topic; verify join keys against real production constants,
    never test fixtures.
-3. Layering: mechanism calls route through the designated orchestrator; a
-   `pub` whose only callers are in-crate is `pub(crate)`.
+3. Layering: mechanism calls route through the designated orchestrator.
 4. **Comment audit**, every diff: for EVERY file the diff touches, a one-line
    change included, read its entire comment population against the code and
    AGENTS.md's comment rules (accuracy, value, rot, vestigial,
-   self-repetition; one home per story). Locally, report N items each with a
-   disposition, never "passed", plus the diff's net added comment lines and
-   every sentence deletable with nothing lost.
-5. Cost of the shape. Flag each with the cheaper or more direct alternative;
-   `issue (non-blocking)` unless it breaches AGENTS.md:
-   - **Over-engineering** (AGENTS.md's YAGNI): a new branch, helper,
-     parameter, type, API change or test machinery that names no concrete,
-     reachable case it serves.
-   - **Low ROI**: added code, API change or coupling out of proportion to its
-     payoff (an API made `Option` across three painters for a width almost
-     never hit).
-   - **Hard to maintain**: needless indirection or layers, special-case
-     branches, one change smeared across many files, an implicit contract no
-     type or test holds, clever code that reads hard.
+   self-repetition); a story told twice keeps the copy on the narrowest thing
+   it constrains.
+5. **Proportion** (AGENTS.md's YAGNI), each with the cheaper alternative,
+   `issue (non-blocking)` unless it breaches AGENTS.md: a new branch, helper,
+   parameter, type, fallback arm or test machinery serving no concrete,
+   reachable case; code, API change or coupling out of proportion to its
+   payoff (an API made `Option` across three painters for a width almost
+   never hit); an invariant held by prose where a type or the one source of
+   truth could make the failure impossible (#1142); a check asserting a fact
+   outside its own layer (a Python regex over `.rs`). Documented load-bearing
+   defense (shim exit-0, config-never-wipe, liveness ladders) stays.
 
 ## Escalation
 
 Two lenses are the floor; each matching row adds one focused lens. The first
 column decides; Paths are where it usually fires. A **local** row needs the
-head built or run, or an upstream fetched, so its local run is mandatory,
-recorded as a PR comment starting `<!-- local-row:<row>:<head sha> -->`.
+head built or run, or an upstream fetched, so its local run is mandatory
+([recorded](docs/CONTRIBUTING.md#the-merge-gate)).
 
 | Diff touches… | Paths | Local | The added lens must… |
 |---|---|---|---|
@@ -168,12 +159,13 @@ recorded as a PR comment starting `<!-- local-row:<row>:<head sha> -->`.
 | Another CLI's config | `crates/pixtuoid/src/install/` | local | Enumerate every resolution axis and re-verify each against that CLI's upstream in-session; write ⊆ verify (#338). |
 | A new source / hook integration | `crates/pixtuoid-core/src/source/registry.rs` | local | LIVE run or hermetic replay without capture-rig convenience flags; event shapes from canonical upstream docs, never a fork. |
 | A dedup / "behavior-preserving" refactor | | | Adversarial toward revert, per consolidation: one reason-to-change per call site; name the conversions that moved semantics — a batch hides exactly one (#461). |
-| A physical/domain feature, or an arc's last PR | | | Enumerate the domain invariants and re-derive each across the parameter space (#471). |
+| Geometry, sky, lighting or other domain math, or an arc's last PR | `crates/pixtuoid-scene/src/` `sky/`, `celestial.rs`, `lighting/`, `layout/` | | Enumerate the domain invariants and re-derive each across the parameter space, edges included (#471, #1049, #1053). |
 
 ## Severity
 
-[Conventional Comments](https://conventionalcomments.org/) labels; nits and
-taste are never posted. Dispositions:
+[Conventional Comments](https://conventionalcomments.org/) labels, the
+[`review-schema.json`](.github/prompts/review-schema.json) `severity` enum;
+nits and taste are never posted. Dispositions:
 [CONTRIBUTING](docs/CONTRIBUTING.md#pull-requests).
 
 - `issue (blocking)` — correctness, security or invariant. It blocks only once
@@ -181,9 +173,6 @@ taste are never posted. Dispositions:
   label alone never blocks.
 - `issue (non-blocking)` — any other real defect this PR introduced.
 - `issue (pre-existing)` — real, not introduced here.
-
-The labels are [`review-schema.json`](.github/prompts/review-schema.json)'s
-`severity` enum.
 
 ## Re-review
 
@@ -196,8 +185,7 @@ new findings follow [Severity](#severity).
 ## Output
 
 Bots return only the structured result
-[`review-schema.json`](.github/prompts/review-schema.json) defines, and never
-post or call GitHub APIs:
+[`review-schema.json`](.github/prompts/review-schema.json) defines:
 
 - `summary`: one sentence.
 - `severity`: the [label](#severity)'s decoration.
