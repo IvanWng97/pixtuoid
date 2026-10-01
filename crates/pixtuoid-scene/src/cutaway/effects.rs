@@ -64,11 +64,17 @@ impl Riding {
     pub(crate) fn paint(&self, theme: &Theme, buf: &mut RgbBuffer) {
         let pen = self.pen;
         self.look(theme, &mut |at, size, c, coverage| {
-            let (Ok(x), Ok(y)) = (u16::try_from(at.x), u16::try_from(at.y)) else {
+            let (Ok(x), Ok(y), Ok(side)) = (
+                u16::try_from(at.x),
+                u16::try_from(at.y),
+                u16::try_from(size),
+            ) else {
                 return;
             };
-            if coverage >= 1.0 || crate::dither::takes_next(x, y, coverage) {
-                let size = ArtPx(u16::try_from(size).unwrap_or(1));
+            // Dithered on the look's own grid, so a look drawn in blocks
+            // matches itself at every density.
+            if coverage >= 1.0 || crate::dither::takes_next(x / side, y / side, coverage) {
+                let size = ArtPx(side);
                 let r = ArtRect {
                     x: ArtPx(x),
                     y: ArtPx(y),
