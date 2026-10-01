@@ -100,13 +100,13 @@ mod tests {
     #[test]
     fn sort_row_at_is_the_sprite_south_row_for_every_pivot() {
         let pos = Point { x: 50, y: 40 };
-        for &a in &[Pivot::Center, Pivot::TopLeft] {
+        for &p in &[Pivot::Center, Pivot::TopLeft] {
             for h in 1u16..24 {
-                let tl = anchored_top_left(a, pos, 8, h);
+                let tl = anchored_top_left(p, pos, 8, h);
                 assert_eq!(
-                    sort_row_at(a, pos, h),
+                    sort_row_at(p, pos, h),
                     tl.y + h - 1,
-                    "{a:?} h={h}: z-sort row must equal the box south row"
+                    "{p:?} h={h}: z-sort row must equal the box south row"
                 );
             }
         }
