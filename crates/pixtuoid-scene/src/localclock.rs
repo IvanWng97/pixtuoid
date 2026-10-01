@@ -1,4 +1,4 @@
-//! Local wall-clock instants for tests and benches.
+//! Local wall-clock instants for tests, benches and the snapshot examples.
 //!
 //! The sky model decodes `now` back through `chrono::Local`, so a test building
 //! its instants as epoch offsets is really asking for whatever local hours the
@@ -21,14 +21,15 @@ const BASE: (i32, u32, u32) = (2026, 1, 1);
 /// day-of-month: a search that walks days to find a weather or moon phase runs
 /// past 31, and `with_ymd_and_hms(.., 1, 40, ..)` is an invalid date that panics
 /// in exactly the zones whose day-hash sequence needs the extra days.
+fn try_local(day: u32, h: u32, m: u32) -> Option<SystemTime> {
+    let date = chrono::NaiveDate::from_ymd_opt(BASE.0, BASE.1, BASE.2)?
+        .checked_add_days(chrono::Days::new(u64::from(day)))?;
+    let local = chrono::Local.from_local_datetime(&date.and_hms_opt(h, m, 0)?);
+    local.single().map(Into::into)
+}
+
 fn local(day: u32, h: u32, m: u32) -> SystemTime {
-    let date = chrono::NaiveDate::from_ymd_opt(BASE.0, BASE.1, BASE.2).expect("valid base date")
-        + chrono::Days::new(u64::from(day));
-    chrono::Local
-        .from_local_datetime(&date.and_hms_opt(h, m, 0).expect("valid wall-clock time"))
-        .single()
-        .expect("a fixed January local time is unambiguous in every zone")
-        .into()
+    try_local(day, h, m).expect("a fixed January local time is valid and unambiguous in every zone")
 }
 
 /// Local `h:00` on the reference day.
@@ -46,6 +47,12 @@ pub fn at_hour_min(h: u32, m: u32) -> SystemTime {
 /// `day` is valid, including past the end of the month.
 pub fn on_day(day: u32, h: u32) -> SystemTime {
     local(day, h, 0)
+}
+
+/// [`on_day`], or `None` where the date is past chrono's calendar, `h` is no hour, or that
+/// local time is skipped or ambiguous.
+pub fn try_on_day(day: u32, h: u32) -> Option<SystemTime> {
+    try_local(day, h, 0)
 }
 
 #[cfg(test)]
@@ -72,6 +79,13 @@ mod tests {
         // Past the end of January: the form this replaced panicked here.
         let t: chrono::DateTime<chrono::Local> = on_day(45, 7).into();
         assert_eq!((t.month(), t.day(), t.hour()), (2, 15, 7));
+    }
+
+    #[test]
+    fn the_fallible_form_refuses_a_non_hour_or_day_and_agrees_otherwise() {
+        assert_eq!(try_on_day(0, 24), None);
+        assert_eq!(try_on_day(u32::MAX, 0), None);
+        assert_eq!(try_on_day(45, 7), Some(on_day(45, 7)));
     }
 
     /// Twelve hours apart must stay twelve hours apart — the property the
@@ -185,9 +199,8 @@ mod sweep {
             vec!["planted.rs:2".to_string()],
             "the scan must reach a nested file and report its line"
         );
-        // rustfmt breaks a chain before the `.` once it exceeds width, which is how
-        // `crates/pixtuoid/examples/snapshot/main.rs` already formats this call — a
-        // single-line scan would not see it.
+        // rustfmt breaks a chain before the `.` once it exceeds width, which a
+        // single-line scan would not see.
         std::fs::write(
             dir.path().join("deep/planted.rs"),
             "fn f() {\n    chrono::Local\n        .timestamp_opt(0, 0);\n}\n",

@@ -6,89 +6,19 @@
 
 mod common;
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
+use common::{fixture_scene, render_hash};
 use pixtuoid::tui::renderer::draw_scene;
-use pixtuoid_core::state::{ActivityState, ToolKind};
-use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
+use pixtuoid_core::state::ActivityState;
 use pixtuoid_scene::embedded_pack::load_bundled_pack;
+use pixtuoid_scene::floor::FloorMeta;
+use pixtuoid_scene::theme::NORMAL;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
-fn fixture_scene(now: SystemTime) -> SceneState {
-    let mut s = SceneState::uniform(12);
-    let age_offset = Duration::from_secs(60);
-    let cases = [
-        (
-            "agent-a",
-            ActivityState::Active {
-                tool_use_id: Some("tu_a".into()),
-                detail: Some("Write".into()),
-                kind: ToolKind::Edit,
-            },
-        ),
-        ("agent-b", ActivityState::Idle),
-        (
-            "agent-c",
-            ActivityState::Waiting {
-                reason: "perm?".into(),
-            },
-        ),
-        ("agent-d", ActivityState::Idle),
-    ];
-    for (i, (key, state)) in cases.iter().enumerate() {
-        let id = AgentId::from_transcript_path(&format!("/demo/{key}.jsonl"));
-        let created_at = now - age_offset;
-        s.agents.insert(
-            id,
-            AgentSlot {
-                agent_id: id,
-                source: std::sync::Arc::from("claude-code"),
-                session_id: std::sync::Arc::from(format!("session-{i}").as_str()),
-                cwd: std::sync::Arc::from(PathBuf::from("/demo").as_path()),
-                label: (*key).into(),
-                state: state.clone(),
-                state_started_at: now,
-                last_event_at: now,
-                created_at,
-                exiting_at: None,
-                pending_idle_at: None,
-
-                desk_index: GlobalDeskIndex(i),
-                floor_idx: 0,
-                tool_call_count: 0,
-                active_ms: 0,
-                unknown_cwd: false,
-                parent_id: None,
-                pid: None,
-                model: None,
-                effort: None,
-                tokens_used: 0,
-                last_usage: None,
-            },
-        );
-    }
-    s
-}
-
 fn render_pixel_hash(now: SystemTime) -> u64 {
-    let scene = fixture_scene(now);
-    let backend = TestBackend::new(96, 36);
-    let mut term = Terminal::new(backend).expect("terminal");
-    let pack = load_bundled_pack().expect("pack");
-    make_draw_ctx!(draw_ctx, &scene, &pack, now);
-    draw_scene(&mut term, &mut draw_ctx).expect("render");
-
-    let mut hasher = DefaultHasher::new();
-    for px in draw_ctx.buf.as_slice() {
-        px.r.hash(&mut hasher);
-        px.g.hash(&mut hasher);
-        px.b.hash(&mut hasher);
-    }
-    hasher.finish()
+    render_hash(&fixture_scene(now), now, &NORMAL, FloorMeta::ground())
 }
 
 #[test]
@@ -177,18 +107,7 @@ fn render_changes_when_an_agent_state_changes() {
     for slot in scene_idle.agents.values_mut() {
         slot.state = ActivityState::Idle;
     }
-    let backend = TestBackend::new(96, 36);
-    let mut term = Terminal::new(backend).expect("terminal");
-    let pack = load_bundled_pack().expect("pack");
-    make_draw_ctx!(draw_ctx, &scene_idle, &pack, now);
-    draw_scene(&mut term, &mut draw_ctx).expect("render");
-    let mut hasher = DefaultHasher::new();
-    for px in draw_ctx.buf.as_slice() {
-        px.r.hash(&mut hasher);
-        px.g.hash(&mut hasher);
-        px.b.hash(&mut hasher);
-    }
-    let idle_hash = hasher.finish();
+    let idle_hash = render_hash(&scene_idle, now, &NORMAL, FloorMeta::ground());
 
     let active_hash = render_pixel_hash(now);
     assert_ne!(

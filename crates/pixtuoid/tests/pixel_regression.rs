@@ -1,93 +1,11 @@
 mod common;
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use pixtuoid::tui::renderer::draw_scene;
-use pixtuoid_core::state::{ActivityState, ToolKind};
-use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
-use pixtuoid_scene::embedded_pack::load_bundled_pack;
+use common::{fixture_scene, render_hash};
 use pixtuoid_scene::floor::FloorMeta;
 use pixtuoid_scene::pixel_painter::force_weather;
-use pixtuoid_scene::theme::{self, Theme};
-use ratatui::Terminal;
-use ratatui::backend::TestBackend;
-
-fn fixture_scene(now: SystemTime) -> SceneState {
-    let mut s = SceneState::uniform(12);
-    let age_offset = Duration::from_secs(60);
-    let cases: &[(&str, ActivityState)] = &[
-        (
-            "agent-a",
-            ActivityState::Active {
-                tool_use_id: Some("tu_a".into()),
-                detail: Some("Write".into()),
-                kind: ToolKind::Edit,
-            },
-        ),
-        ("agent-b", ActivityState::Idle),
-        (
-            "agent-c",
-            ActivityState::Waiting {
-                reason: "perm?".into(),
-            },
-        ),
-        ("agent-d", ActivityState::Idle),
-    ];
-    for (i, (key, state)) in cases.iter().enumerate() {
-        let id = AgentId::from_transcript_path(&format!("/demo/{key}.jsonl"));
-        let created_at = now - age_offset;
-        s.agents.insert(
-            id,
-            AgentSlot {
-                agent_id: id,
-                source: Arc::from("claude-code"),
-                session_id: Arc::from(format!("session-{i}").as_str()),
-                cwd: Arc::from(PathBuf::from("/demo").as_path()),
-                label: (*key).into(),
-                state: state.clone(),
-                state_started_at: now,
-                last_event_at: now,
-                created_at,
-                exiting_at: None,
-                pending_idle_at: None,
-
-                desk_index: GlobalDeskIndex(i),
-                floor_idx: 0,
-                tool_call_count: 0,
-                active_ms: 0,
-                unknown_cwd: false,
-                parent_id: None,
-                pid: None,
-                model: None,
-                effort: None,
-                tokens_used: 0,
-                last_usage: None,
-            },
-        );
-    }
-    s
-}
-
-fn render_hash(scene: &SceneState, now: SystemTime, theme: &Theme, floor: FloorMeta) -> u64 {
-    let backend = TestBackend::new(96, 36);
-    let mut term = Terminal::new(backend).unwrap();
-    let pack = load_bundled_pack().unwrap();
-    make_draw_ctx!(draw_ctx, scene, &pack, now, theme: theme);
-    draw_ctx.world.floor = floor;
-    draw_scene(&mut term, &mut draw_ctx).unwrap();
-
-    let mut hasher = DefaultHasher::new();
-    for px in draw_ctx.buf.as_slice() {
-        px.r.hash(&mut hasher);
-        px.g.hash(&mut hasher);
-        px.b.hash(&mut hasher);
-    }
-    hasher.finish()
-}
+use pixtuoid_scene::theme;
 
 #[test]
 fn floor_seed_affects_render() {
@@ -108,8 +26,6 @@ fn floor_seed_affects_render() {
 
 #[test]
 fn weather_cycle_affects_render() {
-    // `force_weather` is a thread-local override; reset it BEFORE the assert so a
-    // failing assert can't leak the override into a reused harness thread.
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
     let scene = fixture_scene(now);
 
@@ -117,6 +33,8 @@ fn weather_cycle_affects_render() {
     let hash_clear = render_hash(&scene, now, &theme::NORMAL, FloorMeta::ground());
     force_weather(Some("storm")).expect("`storm` is a valid weather name");
     let hash_storm = render_hash(&scene, now, &theme::NORMAL, FloorMeta::ground());
+    // `force_weather` is a thread-local override; reset it BEFORE the assert so a
+    // failing assert can't leak the override into a reused harness thread.
     force_weather(None).expect("clearing the override never fails");
 
     assert_ne!(

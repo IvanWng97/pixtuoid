@@ -51,7 +51,9 @@ pub(crate) use windows::{
 #[cfg(test)]
 pub(crate) use windows::{TWO_WINDOW_WALL_W, window_bays, window_slots};
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
-pub(crate) use coarse::{COARSE_CELL_SIZE, NEIGHBORS_8, cell_walkable, snap};
+pub(crate) use coarse::{
+    COARSE_CELL_SIZE, CoarseGrid, cell_anchor, cell_center, cell_walkable, snap,
+};
 
 use pixtuoid_core::state::FloorLocalDeskIndex;
 use pixtuoid_core::walkable::WalkableMask;
