@@ -59,7 +59,7 @@ pub(super) fn render_until_settled<B: Backend<Error: Send + Sync + 'static>>(
     panic!("floor transition to {target_floor} did not settle");
 }
 
-/// Parsed once per test process: parsing the pack costs far more than a frame.
+/// Parsed once per test process and shared by every harness test.
 pub(super) fn pack() -> &'static Pack {
     static PACK: std::sync::OnceLock<Pack> = std::sync::OnceLock::new();
     PACK.get_or_init(|| {
