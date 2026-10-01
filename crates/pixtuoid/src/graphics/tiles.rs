@@ -1,6 +1,11 @@
 //! The cutaway image cut into a grid of cell-aligned tiles, and which of them a
 //! frame changed: an encoder re-sends only those.
+#![cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the compositor wires the tiles")
+)]
 
+use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
 
@@ -21,10 +26,6 @@ pub(crate) struct TileShape {
 
 /// One tile, in cells from the image's top-left cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the compositor wires the tiles")
-)]
 pub(crate) struct Tile {
     /// Row-major, stable while the buffer keeps its size.
     pub(crate) index: u32,
@@ -40,10 +41,6 @@ pub(crate) struct Tile {
 
 /// A tile's pixels as the terminal shows them: upscaled, in whole cells.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the compositor wires the tiles")
-)]
 pub(crate) struct TileImage {
     /// The tile it is.
     pub(crate) tile: Tile,
@@ -55,25 +52,30 @@ pub(crate) struct TileImage {
     pub(crate) rgb: Vec<u8>,
 }
 
-/// The tile grid over one image and the hash each tile was last emitted with.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the compositor wires the tiles")
-)]
+/// A tile whose pixels differ from what it was last [`sent`](Tiles::sent) with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Changed {
+    /// The tile.
+    pub(crate) tile: Tile,
+    hash: u64,
+    /// The buffer size the tile was cut from.
+    size: (u16, u16),
+}
+
+/// The tile grid over one image and the hash each tile was last sent with.
 pub(crate) struct Tiles {
     shape: TileShape,
     cell: CellSize,
     upscale: u32,
     /// The buffer size `sent` describes.
     size: (u16, u16),
-    /// Per tile, its pixels' hash as last emitted; `None` until then.
+    /// Per tile, its pixels' hash as last sent; `None` until then.
     sent: Vec<Option<u64>>,
+    /// The tiles a frame reached that may still differ from what was sent: a
+    /// frame whose bytes never reached the terminal leaves its tiles here.
+    owed: BTreeSet<u32>,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the compositor wires the tiles")
-)]
 impl Tiles {
     /// The grid `protocol` re-sends in, over an image `fit` lays on `cell`.
     pub(crate) fn new(protocol: ImageProtocol, cell: CellSize, fit: Fit) -> Self {
@@ -83,38 +85,49 @@ impl Tiles {
             upscale: u32::from(fit.upscale()),
             size: (0, 0),
             sent: Vec::new(),
+            owed: BTreeSet::new(),
         }
     }
 
-    /// The tiles whose pixels differ from what was last emitted for them,
-    /// among those `dirty` reaches, each now counted as emitted.
-    pub(crate) fn changed(&mut self, buf: &RgbBuffer, dirty: &Dirty) -> Vec<Tile> {
+    /// The tiles whose pixels differ from what was last [`sent`](Self::sent)
+    /// for them, among those `dirty` and every frame since reached.
+    pub(crate) fn changed(&mut self, buf: &RgbBuffer, dirty: &Dirty) -> Vec<Changed> {
         let size = (buf.width(), buf.height());
-        let regrid = size != self.size;
-        if regrid {
+        if size != self.size {
             self.size = size;
             let (across, down) = self.across_down();
             self.sent = vec![None; (across * down) as usize];
+            self.owed = (0..self.sent.len() as u32).collect();
         }
-        let candidates: Vec<u32> = match dirty {
-            Dirty::Rects(rects) if !regrid => {
-                let mut v: Vec<u32> = rects.iter().flat_map(|&r| self.reached(r)).collect();
-                v.sort_unstable();
-                v.dedup();
-                v
+        match dirty {
+            Dirty::All => self.owed.extend(0..self.sent.len() as u32),
+            Dirty::Rects(rects) => {
+                for &r in rects {
+                    self.owed.extend(self.reached(r));
+                }
             }
-            _ => (0..self.sent.len() as u32).collect(),
-        };
+        }
+        let mut owed = std::mem::take(&mut self.owed);
         let mut changed = Vec::new();
-        for index in candidates {
+        owed.retain(|&index| {
             let tile = self.tile(index);
-            let hash = Some(self.hash(buf, tile));
-            if self.sent[index as usize] != hash {
-                self.sent[index as usize] = hash;
-                changed.push(tile);
+            let hash = self.hash(buf, tile);
+            let differs = self.sent[index as usize] != Some(hash);
+            if differs {
+                changed.push(Changed { tile, hash, size });
             }
-        }
+            differs
+        });
+        self.owed = owed;
         changed
+    }
+
+    /// Record `tiles` as on the terminal, once their bytes are written.
+    pub(crate) fn sent(&mut self, tiles: &[Changed]) {
+        for c in tiles.iter().filter(|c| c.size == self.size) {
+            self.sent[c.tile.index as usize] = Some(c.hash);
+            self.owed.remove(&c.tile.index);
+        }
     }
 
     /// `tile`'s pixels from `buf`, upscaled. A cell the image only partly
@@ -271,6 +284,13 @@ mod tests {
         buf.put(x, y, Rgb { r: !p.r, ..p });
     }
 
+    /// A frame whose bytes all reach the terminal.
+    fn emit(t: &mut Tiles, buf: &RgbBuffer, dirty: &Dirty) -> Vec<Tile> {
+        let changed = t.changed(buf, dirty);
+        t.sent(&changed);
+        changed.iter().map(|c| c.tile).collect()
+    }
+
     fn indices(tiles: &[Tile]) -> Vec<u32> {
         tiles.iter().map(|t| t.index).collect()
     }
@@ -280,7 +300,7 @@ mod tests {
     #[test]
     fn the_grid_covers_the_image_in_whole_cells_with_short_edge_tiles() {
         let mut t = misaligned();
-        let all = t.changed(&buffer(13, 7), &Dirty::All);
+        let all = emit(&mut t, &buffer(13, 7), &Dirty::All);
         let shape = |t: &Tile| (t.index, t.col, t.row, t.cols, t.rows);
         assert_eq!(
             all.iter().map(shape).collect::<Vec<_>>(),
@@ -292,7 +312,7 @@ mod tests {
             ]
         );
         let mut t = misaligned();
-        let all = t.changed(&buffer(14, 7), &Dirty::All);
+        let all = emit(&mut t, &buffer(14, 7), &Dirty::All);
         assert_eq!(
             all.iter().map(shape).collect::<Vec<_>>()[2],
             (2, 8, 0, 1, 2),
@@ -315,11 +335,11 @@ mod tests {
     fn an_unchanged_frame_emits_no_tile() {
         let mut t = misaligned();
         let mut buf = buffer(13, 7);
-        assert_eq!(t.changed(&buf, &Dirty::All).len(), 4);
-        assert_eq!(t.changed(&buf, &Dirty::All), []);
-        assert_eq!(t.changed(&buf, &rect(0, 0, 13, 7)), []);
+        assert_eq!(emit(&mut t, &buf, &Dirty::All).len(), 4);
+        assert_eq!(emit(&mut t, &buf, &Dirty::All), []);
+        assert_eq!(emit(&mut t, &buf, &rect(0, 0, 13, 7)), []);
         poke(&mut buf, 0, 0);
-        assert_eq!(t.changed(&buf, &Dirty::Rects(vec![])), []);
+        assert_eq!(emit(&mut t, &buf, &Dirty::Rects(vec![])), []);
     }
 
     /// A rect re-sends the tiles it overlaps once their pixels changed, and
@@ -329,22 +349,40 @@ mod tests {
     fn a_dirty_rect_reaches_exactly_the_tiles_it_overlaps() {
         let mut t = misaligned();
         let mut buf = buffer(13, 7);
-        t.changed(&buf, &Dirty::All);
+        emit(&mut t, &buf, &Dirty::All);
         poke(&mut buf, 6, 0);
         poke(&mut buf, 12, 6);
-        assert_eq!(indices(&t.changed(&buf, &rect(6, 0, 1, 1))), [0, 1]);
-        assert_eq!(indices(&t.changed(&buf, &rect(0, 0, 6, 7))), [0u32; 0]);
-        assert_eq!(indices(&t.changed(&buf, &rect(12, 6, 0, 0))), [0u32; 0]);
-        assert_eq!(indices(&t.changed(&buf, &rect(12, 6, 1, 1))), [3]);
+        assert_eq!(indices(&emit(&mut t, &buf, &rect(6, 0, 1, 1))), [0, 1]);
+        assert_eq!(indices(&emit(&mut t, &buf, &rect(0, 0, 6, 7))), [0u32; 0]);
+        assert_eq!(indices(&emit(&mut t, &buf, &rect(12, 6, 0, 0))), [0u32; 0]);
+        assert_eq!(indices(&emit(&mut t, &buf, &rect(12, 6, 1, 1))), [3]);
+    }
+
+    /// A tile stays changed until its bytes are written, through idle frames
+    /// that reach nothing.
+    #[test]
+    fn a_tile_stays_changed_until_it_is_sent() {
+        let mut t = misaligned();
+        let mut buf = buffer(13, 7);
+        emit(&mut t, &buf, &Dirty::All);
+        poke(&mut buf, 0, 0);
+        let unsent = t.changed(&buf, &rect(0, 0, 1, 1));
+        assert_eq!(unsent.len(), 1);
+        assert_eq!(t.changed(&buf, &Dirty::Rects(vec![])), unsent);
+        t.sent(&unsent);
+        assert_eq!(t.changed(&buf, &Dirty::Rects(vec![])), []);
     }
 
     /// A buffer of a new size is a new grid: every tile is re-sent, even when
-    /// the frame names only a rect.
+    /// the frame names only a rect, and the old grid's tiles no longer count.
     #[test]
     fn a_new_buffer_size_re_sends_every_tile() {
         let mut t = misaligned();
-        t.changed(&buffer(13, 7), &Dirty::All);
-        assert_eq!(t.changed(&buffer(14, 7), &rect(0, 0, 1, 1)).len(), 6);
+        let old = t.changed(&buffer(13, 7), &Dirty::All);
+        let new = t.changed(&buffer(14, 7), &rect(0, 0, 1, 1));
+        assert_eq!(new.len(), 6);
+        t.sent(&old);
+        assert_eq!(t.changed(&buffer(14, 7), &Dirty::Rects(vec![])), new);
     }
 
     /// The hash reads art pixels, before the upscale, which is k² fewer: it is
@@ -355,8 +393,7 @@ mod tests {
         let base = buffer(13, 7);
         for (x, y) in (0..13).flat_map(|x| (0..7).map(move |y| (x, y))) {
             let (mut t, mut buf) = (misaligned(), base.clone());
-            let before: Vec<TileImage> = t
-                .changed(&buf, &Dirty::All)
+            let before: Vec<TileImage> = emit(&mut t, &buf, &Dirty::All)
                 .into_iter()
                 .map(|tile| t.image(&buf, tile))
                 .collect();
@@ -367,7 +404,7 @@ mod tests {
                 .map(|was| was.tile.index)
                 .collect();
             assert_eq!(
-                indices(&t.changed(&buf, &Dirty::All)),
+                indices(&emit(&mut t, &buf, &Dirty::All)),
                 on_screen,
                 "({x},{y})"
             );
@@ -379,7 +416,7 @@ mod tests {
     #[test]
     fn a_tile_image_is_whole_cells_of_upscaled_art() {
         let (mut t, buf) = (misaligned(), buffer(13, 7));
-        let corner = t.changed(&buf, &Dirty::All)[3];
+        let corner = emit(&mut t, &buf, &Dirty::All)[3];
         let img = t.image(&buf, corner);
         assert_eq!((img.width, img.height), (20, 10));
         assert_eq!(img.rgb.len(), 20 * 10 * 3);

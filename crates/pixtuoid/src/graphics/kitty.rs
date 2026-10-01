@@ -1,6 +1,10 @@
 //! A tile as a kitty image, shown through Unicode placeholders: the image is
 //! then ordinary text in cells, which a host like tmux stores and redraws
 //! (<https://sw.kovidgoyal.net/kitty/graphics-protocol/>, "Unicode placeholders").
+#![cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the compositor wires the tiles")
+)]
 
 use ratatui::style::Color;
 use ratatui_image::picker::cap_parser::Parser;
@@ -22,10 +26,6 @@ const CHUNK: usize = 4096;
 
 /// A placeholder cell, in cells from the image's top-left.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the compositor wires the tiles")
-)]
 pub(crate) struct Placeholder {
     /// Its column.
     pub(crate) col: u16,
@@ -39,10 +39,6 @@ pub(crate) struct Placeholder {
 
 /// `tile`'s image id, the same every frame so a re-send replaces it in place;
 /// `None` past what a placeholder can carry. 0 is no id.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the compositor wires the tiles")
-)]
 pub(crate) fn image_id(tile: Tile) -> Option<u32> {
     tile.index.checked_add(1).filter(|&id| id < ID_LIMIT)
 }
@@ -52,10 +48,6 @@ pub(crate) fn image_id(tile: Tile) -> Option<u32> {
 /// (tmux(1), `allow-passthrough`) when `tmux`.
 ///
 /// `q=2` on every chunk: a reply would arrive as input mid-frame.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the compositor wires the tiles")
-)]
 pub(crate) fn transmit(id: u32, image: &TileImage, tmux: bool) -> Vec<u8> {
     let (start, esc, end) = Parser::tmux_start_escape_end(tmux);
     let data = base64_simd::STANDARD.encode_to_string(&image.rgb);
@@ -88,10 +80,6 @@ pub(crate) fn transmit(id: u32, image: &TileImage, tmux: bool) -> Vec<u8> {
 
 /// The cells that show image `id` over `tile`. Every cell names its row and
 /// column, so none leans on the cell to its left being there.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the compositor wires the tiles")
-)]
 pub(crate) fn placeholders(id: u32, tile: Tile) -> impl Iterator<Item = Placeholder> {
     let [_, r, g, b] = id.to_be_bytes();
     (0..tile.rows).flat_map(move |y| {
@@ -230,11 +218,16 @@ mod tests {
         let mut tiles = Tiles::new(ImageProtocol::Kitty, cell, fit);
         let buf = RgbBuffer::filled(64, 40, Rgb { r: 1, g: 2, b: 3 });
         let mut sent = |dirty: &Dirty| -> usize {
-            tiles
-                .changed(&buf, dirty)
-                .into_iter()
-                .map(|t| transmit(image_id(t).expect("id"), &tiles.image(&buf, t), false).len())
-                .sum()
+            let changed = tiles.changed(&buf, dirty);
+            let bytes = changed
+                .iter()
+                .map(|c| {
+                    let id = image_id(c.tile).expect("id");
+                    transmit(id, &tiles.image(&buf, c.tile), false).len()
+                })
+                .sum();
+            tiles.sent(&changed);
+            bytes
         };
         assert!(sent(&Dirty::All) > 0);
         assert_eq!(sent(&Dirty::Rects(vec![])), 0);
