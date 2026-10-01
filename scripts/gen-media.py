@@ -296,7 +296,8 @@ def run_proof(job, out_dirs, work, intermediates):
          "--frames-dir", str(frames),
          "--proof-fps", str(fps), "--proof-secs", str(secs),
          "--cols", str(job["cols"]), "--rows", str(job["rows"]),
-         "--now-hour", str(job["hour"]), "--theme", job["theme"], "--weather", "clear"],
+         "--now-hour", str(job["hour"]), "--theme", job["theme"], "--weather", "clear",
+         *(["--now-day", str(job["day"])] if "day" in job else [])],
         check=True, stdout=subprocess.DEVNULL,
     )
     for layout, suffix in (("wide", ""), ("tall", "-tall")):

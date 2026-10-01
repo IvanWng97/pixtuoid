@@ -275,6 +275,7 @@
  {
   "id": "proof",
   "kind": "proof",
+  "day": 2,
   "targets": [
    "site"
   ],
