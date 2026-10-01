@@ -807,18 +807,14 @@ fn place_wall_decor(
         });
     }
     // A band too short to hang a piece under the neon sign drops it.
-    let neon = (
-        Point {
-            x: NEON_PANEL.x,
-            y: NEON_PANEL.y,
-        },
-        Size {
-            w: NEON_PANEL.width,
-            h: NEON_PANEL.height,
-        },
-    );
     wall_decor.retain(|d| {
-        !super::placement::rects_overlap((d.pos, furniture_def(d.kind.furniture()).visual), neon)
+        let v = furniture_def(d.kind.furniture()).visual;
+        !NEON_PANEL.overlaps(Bounds {
+            x: d.pos.x,
+            y: d.pos.y,
+            width: v.w,
+            height: v.h,
+        })
     });
     wall_decor
 }
@@ -915,7 +911,7 @@ impl LoungeFlanks {
 /// elevator `door` column so the spawn threshold never routes around it.
 fn place_lounge(couch: Point, door: Point) -> Lounge {
     /// Rows from the couch's centre down to the lamp's base: the art grows
-    /// north from it (invariant #6), clear of the desks to the south.
+    /// north from it (invariant #6).
     const LAMP_BASE_DY: u16 = 6;
     let flanks = LoungeFlanks::of(couch.x);
     let floor_lamp = Point {
@@ -1656,26 +1652,15 @@ fn compute_waypoints(
             })
         })
         .collect();
-    if let Some(pr) = pantry_room {
-        let half_cw = pantry_counter_size.w / 2;
-        let max_cx = pr.x + pr.width.saturating_sub(half_cw + 1);
-        // A room narrower than the counter has no valid centre — refuse rather than force.
-        let min_cx = pr.x + half_cw;
-        if min_cx <= max_cx {
-            // y is single-sourced with the island clamp; only x is size-shaped.
-            let wy = PantryRoom::counter_center_y(pr, pantry_counter_size);
-            let wx = if pantry_counter_size.w >= PANTRY_COUNTER_LARGE_W {
-                (pr.x + pr.width / 2).clamp(min_cx, max_cx)
-            } else {
-                (pr.x + pct(pr.width, 60)).clamp(min_cx, max_cx)
-            };
-            waypoints.push(Waypoint {
-                pos: Point { x: wx, y: wy },
-                kind: WaypointKind::Pantry,
-                facing: Facing::South,
-                room_id: None,
-            });
-        }
+    if let Some(pos) =
+        pantry_room.and_then(|pr| PantryRoom::counter_center(pr, pantry_counter_size))
+    {
+        waypoints.push(Waypoint {
+            pos,
+            kind: WaypointKind::Pantry,
+            facing: Facing::South,
+            room_id: None,
+        });
     }
     for &PodDecorItem { kind, pos } in pod_decor {
         if let Some(wp_kind) = kind.waypoint() {

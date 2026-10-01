@@ -9,7 +9,7 @@
 //! `TopLeft` as a wall-hung board. One geometry row, two placement conventions —
 //! a single per-furniture anchor field could not represent both.
 
-use super::{Point, Size};
+use super::{Bounds, Point, Size};
 
 /// How a `(w, h)` box is positioned relative to its `pos`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,19 +35,15 @@ pub fn anchored_top_left(anchor: Anchor, pos: Point, w: u16, h: u16) -> Point {
     }
 }
 
-/// Half-open AABB intersection of two `(top_left, size)` rects. Zero-sized rects
-/// overlap nothing.
+/// [`Bounds::overlaps`] for two `(top_left, size)` rects.
 pub(super) fn rects_overlap(a: (Point, Size), b: (Point, Size)) -> bool {
-    let (at, asz) = a;
-    let (bt, bsz) = b;
-    asz.w > 0
-        && asz.h > 0
-        && bsz.w > 0
-        && bsz.h > 0
-        && at.x < bt.x + bsz.w
-        && bt.x < at.x + asz.w
-        && at.y < bt.y + bsz.h
-        && bt.y < at.y + asz.h
+    let bounds = |(at, sz): (Point, Size)| Bounds {
+        x: at.x,
+        y: at.y,
+        width: sz.w,
+        height: sz.h,
+    };
+    bounds(a).overlaps(bounds(b))
 }
 
 /// Does `probe` overlap `obstacle` grown by `clearance` px on every side? Callers
