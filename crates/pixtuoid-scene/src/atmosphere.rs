@@ -20,13 +20,13 @@ pub(crate) struct SkyTones {
     pub(crate) sunlight: f32,
     /// The window spill's lean going down, as a slope: columns per row.
     pub(crate) spill_slant: f32,
-    /// The floor's night dim then its daylight lift, as `(tint, strength)`
+    /// The ground's night dim then its daylight lift, as `(tint, strength)`
     /// blends applied in order.
     pub(crate) ground_wash: [(Rgb, f32); 2],
     /// The cast this sky puts on a LIT OBJECT: the cool night term then the
-    /// warm day one, applied in order like the floor's two washes.
+    /// warm day one, applied in order like the ground's two washes.
     pub(crate) object_wash: [(Rgb, f32); 2],
-    /// The weather's cast on the floor, as `(tint, strength)`.
+    /// The weather's cast on the ground, as `(tint, strength)`.
     pub(crate) ground_tint: (Rgb, f32),
     /// The weather's veil over the window glass, lit for this frame, as
     /// `(color, alpha)`, or `None` where the city shows crisp.
@@ -84,11 +84,11 @@ const SUN_TINT: Rgb = Rgb {
     b: 224,
 };
 
-/// Below the floor's own share: a sprite carries art contrast a full-strength
+/// Below the ground's own share: a sprite carries art contrast a full-strength
 /// wash would swallow.
 const OBJECT_WASH_SHARE: f32 = 0.55;
 
-/// How far the weather's cast pulls the floor toward its tint.
+/// How far the weather's cast pulls the ground toward its tint.
 const GROUND_TINT_SHARE: f32 = 0.15;
 
 /// Below this strength the star field is too faint to read, so none shows —
@@ -99,7 +99,7 @@ impl SkyTones {
     pub(crate) fn resolve(sky: &Sky, theme: &Theme) -> SkyTones {
         let light = sky.light();
         let (interior, exterior) = (light.interior, light.exterior);
-        let e = sky.emitter();
+        let e = sky.body();
 
         let day_a = theme.lighting.day_sky_a;
         let day_b = theme.lighting.day_sky_b;
@@ -115,7 +115,7 @@ impl SkyTones {
         // Leans away from the disc, which the painters place off this same
         // azimuth; `the_spill_leans_away_from_the_disc` pins the
         // sign.
-        let (sunlight, spill_slant) = match e.body {
+        let (sunlight, spill_slant) = match e.kind {
             BodyKind::Sun => (interior, (0.5 - e.azimuth) * 2.0 * SPILL_SLANT_MAX),
             BodyKind::Moon => (0.0, 0.0),
         };
@@ -125,9 +125,9 @@ impl SkyTones {
             (theme.lighting.night_tint, darkness * NIGHT_GROUND_DIM),
             (SUN_TINT, sunlight * DAYLIGHT_GROUND_LIFT),
         ];
-        // SUPERPOSED, never chosen between: the floor runs both washes every
+        // SUPERPOSED, never chosen between: the ground runs both washes every
         // frame, so switching arms on `interior >= darkness` would step every
-        // object in the frame that crossed it while the floor slid smoothly under
+        // object in the frame that crossed it while the ground slid smoothly under
         // them.
         let object_wash = [
             (
@@ -171,7 +171,7 @@ fn lit(color: Rgb, lum: f32) -> Rgb {
     }
 }
 
-/// The cast the current weather lends the floor.
+/// The cast the current weather lends the ground.
 fn weather_ground_tint(w: Weather) -> Rgb {
     match w {
         Weather::Clear => Rgb {
@@ -194,7 +194,7 @@ fn weather_ground_tint(w: Weather) -> Rgb {
             g: 230,
             b: 250,
         },
-        // Fog is a luminous white-out — its floor tint must be brighter than
+        // Fog is a luminous white-out — its ground tint must be brighter than
         // overcast's, not darker, or it reads as dark mist.
         Weather::Fog => Rgb {
             r: 228,
@@ -273,19 +273,19 @@ const NIGHT_VEIL_MIN: f32 = 0.35;
 
 /// How much of a weather VEIL's own colour the frame's sky brings up (0..1).
 ///
-/// The day term is the emitter's OWN luminance, deliberately NOT
+/// The day term is the sky body's OWN luminance, deliberately NOT
 /// [`Sky::transmission`] or [`SkyTones::darkness`]: those already carry the weather (the veil
 /// colour does too), and folding them in would darken a stormy noon twice.
 fn veil_lum(e: &SkyBody) -> f32 {
-    NIGHT_VEIL_MIN + (1.0 - NIGHT_VEIL_MIN) * e.emitter_lum.clamp(0.0, 1.0)
+    NIGHT_VEIL_MIN + (1.0 - NIGHT_VEIL_MIN) * e.lum.clamp(0.0, 1.0)
 }
 
 /// Golden-hour blaze strength in the sky around the city — SUN-only: a low moon
 /// must never paint an orange cast, however warm/lit it computes, so the gate
 /// is absolute rather than incidental.
 fn golden_hour_blaze(e: &SkyBody, a: &Transmission) -> f32 {
-    match e.body {
-        BodyKind::Sun => (e.warmth * e.emitter_lum * a.disc).clamp(0.0, 1.0),
+    match e.kind {
+        BodyKind::Sun => (e.warmth * e.lum * a.disc).clamp(0.0, 1.0),
         BodyKind::Moon => 0.0,
     }
 }
@@ -323,11 +323,11 @@ mod tests {
             disc: 1.0,
         };
         let moon = SkyBody {
-            body: BodyKind::Moon,
+            kind: BodyKind::Moon,
             altitude: 1.0,
             azimuth: 0.5,
             warmth: 1.0,
-            emitter_lum: 1.0,
+            lum: 1.0,
         };
         assert_eq!(
             golden_hour_blaze(&moon, &full),
@@ -335,7 +335,7 @@ mod tests {
             "a moon must never blaze, even at maximal warmth/luminance"
         );
         let sun = SkyBody {
-            body: BodyKind::Sun,
+            kind: BodyKind::Sun,
             ..moon
         };
         assert!(
@@ -354,8 +354,8 @@ mod tests {
             [
                 ("darkness", l.darkness),
                 ("sunlight", l.sunlight),
-                ("floor dim", l.ground_wash[0].1),
-                ("floor lift", l.ground_wash[1].1),
+                ("ground dim", l.ground_wash[0].1),
+                ("ground lift", l.ground_wash[1].1),
                 ("object dim", l.object_wash[0].1),
                 ("object lift", l.object_wash[1].1),
                 ("golden hour", l.golden_hour),
@@ -407,11 +407,11 @@ mod tests {
     }
 
     #[test]
-    fn weather_floor_tint_differs_by_variant() {
+    fn weather_ground_tint_differs_by_variant() {
         let clear = weather_ground_tint(Weather::Clear);
         let rain = weather_ground_tint(Weather::Rain);
         let fog = weather_ground_tint(Weather::Fog);
-        assert_ne!(clear, rain, "rain biases floor cooler");
+        assert_ne!(clear, rain, "rain biases the ground cooler");
         assert_ne!(clear, fog, "fog desaturates");
         assert!(
             rain.b >= rain.r,
@@ -421,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    fn weather_floor_tint_clear_is_near_neutral() {
+    fn weather_ground_tint_clear_is_near_neutral() {
         let clear = weather_ground_tint(Weather::Clear);
         assert!(
             clear.r > 200 && clear.g > 200 && clear.b > 200,
@@ -431,7 +431,7 @@ mod tests {
     }
 
     #[test]
-    fn fog_floor_tint_is_brighter_than_overcast() {
+    fn fog_ground_tint_is_brighter_than_overcast() {
         let fog = weather_ground_tint(Weather::Fog);
         let oc = weather_ground_tint(Weather::Overcast);
         let lum = |c: Rgb| c.r as u16 + c.g as u16 + c.b as u16;
@@ -477,7 +477,7 @@ mod tests {
     }
 
     #[test]
-    fn the_floor_is_dimmed_by_the_dark_and_lifted_by_the_sun() {
+    fn the_ground_is_dimmed_by_the_dark_and_lifted_by_the_sun() {
         let at = crate::localclock::at_hour;
         let wash = |h| {
             SkyTones::resolve(&Sky::at_with(at(h), Weather::Clear), &crate::theme::NORMAL)
@@ -487,9 +487,9 @@ mod tests {
         let [(dim_tint, night_dim), (_, night_lift)] = wash(0);
         assert_eq!(dim_tint, crate::theme::NORMAL.lighting.night_tint);
         assert_eq!(tint, SUN_TINT);
-        assert!(noon_lift > 0.0, "a clear noon lifts the floor");
+        assert!(noon_lift > 0.0, "a clear noon lifts the ground");
         assert_eq!(night_lift, 0.0, "the moon lifts nothing");
-        assert!(night_dim > noon_dim, "midnight dims the floor past noon");
+        assert!(night_dim > noon_dim, "midnight dims the ground past noon");
         assert!(
             night_dim < NIGHT_GROUND_DIM,
             "the dim rides the darkness, which the city's glow keeps short of full"
@@ -497,22 +497,26 @@ mod tests {
     }
 
     #[test]
-    fn a_lit_object_takes_the_floors_daylight_at_its_share() {
+    fn a_lit_object_takes_the_grounds_daylight_at_its_share() {
         for (h, m) in [(0, 0), (3, 0), (7, 0), (12, 30), (19, 30), (22, 0)] {
             let look = SkyTones::resolve(
                 &Sky::at_with(at_hour_min(h, m), Weather::Clear),
                 &crate::theme::NORMAL,
             );
-            let [_, (_, floor_lift)] = look.ground_wash;
+            let [_, (_, ground_lift)] = look.ground_wash;
             let [_, (_, object_lift)] = look.object_wash;
-            assert_eq!(object_lift, floor_lift * OBJECT_WASH_SHARE, "{h:02}:{m:02}");
+            assert_eq!(
+                object_lift,
+                ground_lift * OBJECT_WASH_SHARE,
+                "{h:02}:{m:02}"
+            );
         }
     }
 
     /// The veil keeps the weather reading after dark: dimmer than by day, but
     /// never below [`NIGHT_VEIL_MIN`] of its own colour.
     #[test]
-    fn a_veil_dims_after_dark_but_keeps_its_floor() {
+    fn a_veil_dims_after_dark_but_keeps_its_minimum() {
         let at = crate::localclock::at_hour;
         let veil = |h| {
             SkyTones::resolve(&Sky::at_with(at(h), Weather::Fog), &crate::theme::NORMAL)
@@ -527,7 +531,7 @@ mod tests {
         // Each channel rounds by at most half a level.
         assert!(
             lum(midnight) >= lum(unlit) * NIGHT_VEIL_MIN - 1.5,
-            "{midnight:?} fell below the night floor of {unlit:?}"
+            "{midnight:?} fell below the night minimum of {unlit:?}"
         );
     }
 }

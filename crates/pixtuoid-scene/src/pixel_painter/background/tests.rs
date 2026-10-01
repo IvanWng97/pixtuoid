@@ -404,7 +404,7 @@ fn stars_appear_on_a_clear_night_and_vanish_under_overcast() {
             .flat_map(|d| [0, 1, 2, 3, 22, 23].map(|h| (d, h)))
             .find(|&(d, h)| {
                 let sky = Sky::at_with(crate::localclock::on_day(d, h), Weather::Clear);
-                sky.nightfall() >= 1.0 && want(sky.emitter().altitude)
+                sky.nightfall() >= 1.0 && want(sky.body().altitude)
             })
     };
     let moonless = night(|alt| alt <= 0.0).expect("a moonless deep-night hour in January");
@@ -466,8 +466,8 @@ fn disc_never_bleeds_across_a_window_pillar() {
 fn low_moon(day: u32, buf_w: u16, top_wall_h: u16) -> Option<(u32, crate::celestial::Disc)> {
     (0..24u32).find_map(|h| {
         let sky = Sky::at_with(crate::localclock::on_day(day, h), Weather::Clear);
-        let e = sky.emitter();
-        let low = e.body == crate::sky::BodyKind::Moon && (0.2..0.5).contains(&e.altitude);
+        let e = sky.body();
+        let low = e.kind == crate::sky::BodyKind::Moon && (0.2..0.5).contains(&e.altitude);
         if !low || sky.nightfall() < 1.0 {
             return None;
         }

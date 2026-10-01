@@ -68,8 +68,8 @@ impl Disc {
     /// This frame's disc over a wall band `top_wall_h` tall, or `None` under
     /// thick cloud.
     pub(crate) fn of(sky: &Sky, buf_w: u16, top_wall_h: u16) -> Option<Self> {
-        let e = sky.emitter();
-        let vis = match e.body {
+        let e = sky.body();
+        let vis = match e.kind {
             BodyKind::Sun => sky.transmission().disc,
             // A moon below the horizon shows no disc; one up fades in with the
             // night, and with its altitude as it rises and sets.
@@ -94,7 +94,7 @@ impl Disc {
         let cx = span_left + e.azimuth * (span_right - span_left);
         let horizon_y = top_wall_h as f32 * HORIZON_FRAC;
         let cy = horizon_y - e.altitude * (top_wall_h as f32 * ARC_RISE_FRAC);
-        let (lit_frac, lit_right) = match e.body {
+        let (lit_frac, lit_right) = match e.kind {
             BodyKind::Sun => (1.0, true),
             BodyKind::Moon => (sky.moon_phase(), sky.moon_waxing()),
         };
@@ -105,7 +105,7 @@ impl Disc {
             vis,
             lit_frac,
             lit_right,
-            body: e.body,
+            body: e.kind,
         })
     }
 
@@ -180,10 +180,10 @@ fn star_twinkle(px: u16, py: u16, now: SystemTime) -> bool {
 }
 
 /// The flat bands the window sky steps through from zenith to horizon.
-const SKY_TONES: usize = 4;
+const SKY_BANDS: usize = 4;
 
 /// A colour for each band of the sky, zenith first.
-type Tones = [Rgb; SKY_TONES];
+type Bands = [Rgb; SKY_BANDS];
 
 /// Below this [`SkyTones::golden_hour`](crate::atmosphere::SkyTones::golden_hour) the
 /// blaze is too faint to paint.
@@ -225,11 +225,11 @@ pub(crate) struct SkyView {
     disc: Option<Disc>,
     stars: bool,
     now: SystemTime,
-    sky: Tones,
-    star: Tones,
-    lit: Tones,
-    dark: Tones,
-    halo: [[Rgb; FALLOFF_TONES as usize]; SKY_TONES],
+    sky: Bands,
+    star: Bands,
+    lit: Bands,
+    dark: Bands,
+    halo: [[Rgb; FALLOFF_TONES as usize]; SKY_BANDS],
     blaze: Option<Blaze>,
 }
 
@@ -237,9 +237,9 @@ impl SkyView {
     /// `moment`'s sky behind a wall band `top_wall_h` tall, in `theme`.
     pub(crate) fn of(moment: &Moment, buf_w: u16, top_wall_h: u16, theme: &Theme) -> Self {
         let look = &moment.look;
-        let sky: Tones = std::array::from_fn(|k| {
+        let sky: Bands = std::array::from_fn(|k| {
             look.glass_zenith
-                .mix(look.glass_horizon, k as f32 / (SKY_TONES - 1) as f32)
+                .mix(look.glass_horizon, k as f32 / (SKY_BANDS - 1) as f32)
         });
         let disc = Disc::of(&moment.sky, buf_w, top_wall_h);
         let core = match disc.map_or(BodyKind::Sun, |d| d.body) {
@@ -301,8 +301,8 @@ impl PaneSky<'_> {
         let unit = |c: u16| (f32::from(c) + 0.5) / f32::from(d) - 0.5;
         let (p, glass_dy) = ((unit(g.0), unit(g.1)), unit(glass_dy));
         let share = crate::atmosphere::sky_share(glass_dy, self.glass_h);
-        let band = crate::dither::nearest(share * (SKY_TONES - 1) as f32, g.0, g.1);
-        let i = usize::from(band).min(SKY_TONES - 1);
+        let band = crate::dither::nearest(share * (SKY_BANDS - 1) as f32, g.0, g.1);
+        let i = usize::from(band).min(SKY_BANDS - 1);
         match v
             .disc
             .filter(|_| self.hosts_disc)
@@ -467,7 +467,7 @@ mod tests {
         };
         assert!(tile(0).iter().all(|&c| c == v.sky[0]), "zenith");
         assert!(
-            tile(glass_h - 1).iter().all(|&c| c == v.sky[SKY_TONES - 1]),
+            tile(glass_h - 1).iter().all(|&c| c == v.sky[SKY_BANDS - 1]),
             "horizon"
         );
     }
