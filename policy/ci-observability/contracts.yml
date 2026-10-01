@@ -398,6 +398,24 @@
       |= sub("just stage-notices \"\\$DIR\""; "cp LICENSE \"$DIR/\"")
     - .jobs.build.steps |= map(select(.name != "Package (Unix)"))
 
+- id: debs-ship-the-license
+  file:
+    - crates/pixtuoid/Cargo.toml
+    - crates/pixtuoid-hook/Cargo.toml
+  why: >-
+    cargo-deb's generated copyright file names the license without its text,
+    which MIT requires in every copy; without this row a .deb ships none.
+  assert: |
+    .package.name as $name
+    | [.package.metadata.deb.assets[]
+       | select(.[0] == "../../LICENSE" and .[1] == "usr/share/doc/\($name)/")]
+    | length == 1
+  break:
+    - .package.metadata.deb.assets |= map(select(.[0] != "../../LICENSE"))
+    - |
+      (.package.metadata.deb.assets[] | select(.[0] == "../../LICENSE") | .[1])
+      = "usr/share/doc/"
+
 - id: deb-ships-every-font-notice
   file: crates/pixtuoid/Cargo.toml
   why: >-
