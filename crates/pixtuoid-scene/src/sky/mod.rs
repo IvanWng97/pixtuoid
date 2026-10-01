@@ -190,9 +190,9 @@ pub(crate) enum Body {
 }
 
 /// The physical sky emitter — sun by day, moon by night (at its rim, lighting
-/// nothing, while it is below the horizon). Luminance + warmth
-/// follow altitude (low body = longer air path = dimmer + warmer). The ONE
-/// source the interior light, the disc and the spill derive from.
+/// nothing, while it is below the horizon). Luminance + warmth follow altitude
+/// (low body = longer air path = dimmer + warmer). The ONE source the interior
+/// light, the disc and the spill derive from.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Emitter {
     pub(crate) body: Body,
@@ -284,7 +284,6 @@ fn emitter_at(h: f32, nightfall: f32, moon_phase: f32, moon_age: f32) -> Emitter
             emitter_lum: altitude,
         };
     }
-    // A moon below the horizon stands at its rim, lighting nothing.
     let t = moon_arc(h, moon_age).unwrap_or(0.0);
     let altitude = (std::f32::consts::PI * t).sin();
     Emitter {
