@@ -86,10 +86,7 @@ pub(crate) fn pet_position(
 ) -> Option<(Point, bool, &'static str, usize)> {
     pack.animation(kind.walk_anim())?;
     layout.corridor?;
-    let frame_at = |anim: &str| {
-        pack.animation(anim)
-            .map_or(0, |a| crate::pack::looping_frame_index(a, now))
-    };
+    let frame_at = |anim: &str| crate::pack::animation_frame_at(pack, anim, now);
 
     let elapsed_ms = epoch_ms(now);
 
