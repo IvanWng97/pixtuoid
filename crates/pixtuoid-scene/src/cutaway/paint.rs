@@ -413,11 +413,9 @@ fn lights(
             }
         })
         .collect();
-    let wall_spot = crate::lighting::wall_spot(layout, &moment.look);
     lights
         .spills
         .iter()
-        .chain(&wall_spot)
         .chain(&lights.floor_lamp)
         .chain(&lamps)
         .chain(&lights.monitor_halos)
@@ -425,7 +423,7 @@ fn lights(
         .filter_map(|e| {
             crate::cutaway::light::LightView::of(
                 e,
-                crate::cutaway::light::tint_of(e.kind, theme, frame.neon, &moment.look),
+                crate::cutaway::light::tint_of(e.kind, theme, frame.neon),
                 ambient,
                 pen,
                 (layout.buf_w, layout.buf_h),
@@ -4617,10 +4615,10 @@ S B B B B B B S
         assert_eq!(glass(noon, &mut painted), b, "one moment, one fingerprint");
     }
 
-    /// The sun's wall spot is one of the cutaway's lights: a clear morning's
-    /// list holds exactly one more than the same moment with no spot.
+    /// The cutaway takes no wall spot: a clear morning's lights are the same
+    /// with the sun on a side wall as without.
     #[test]
-    fn the_cutaway_lights_the_suns_wall_spot() {
+    fn the_cutaway_lights_no_wall_spot() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
@@ -4643,10 +4641,14 @@ S B B B B B B S
         );
         let mut unlit = Moment::resolve(lit.sky, theme, 0.0, now);
         unlit.look.sun_spot = None;
-        assert_eq!(
-            build_list(frame, office, &lit, 0).lights().len(),
-            build_list(frame, office, &unlit, 0).lights().len() + 1
-        );
+        let lights = |m: &Moment| {
+            build_list(frame, office, m, 0)
+                .lights()
+                .iter()
+                .map(|l| (l.span, l.fingerprint))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(lights(&lit), lights(&unlit));
     }
 
     /// `frame`'s list at local `hour`, under a clear sky.

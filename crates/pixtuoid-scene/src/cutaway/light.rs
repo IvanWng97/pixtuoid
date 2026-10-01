@@ -243,31 +243,28 @@ impl LightView {
 /// An emitter kind's place in the light order ([`LightView::rank`]).
 fn rank_of(kind: EmitterKind) -> u8 {
     match kind {
-        EmitterKind::WindowSpill => 0,
+        EmitterKind::WindowSpill | EmitterKind::WallSpot => 0,
         EmitterKind::FloorLamp => 1,
         EmitterKind::DeskLamp => 2,
         EmitterKind::MonitorHalo(_) => 3,
         EmitterKind::NeonGlow => 4,
-        EmitterKind::WallSpot => 5,
     }
 }
 
-/// The colour a light of `kind` tints toward under `look`, or `None` for one
-/// the cutaway leaves untinted.
+/// The colour a light of `kind` tints toward, or `None` for one the cutaway
+/// leaves untinted.
 pub(crate) fn tint_of(
     kind: EmitterKind,
     theme: &Theme,
     neon: crate::floor::NeonLevels,
-    look: &crate::atmosphere::Look,
 ) -> Option<Rgb> {
     let lighting = &theme.lighting;
     match kind {
         EmitterKind::FloorLamp => Some(lighting.floor_lamp_halo),
         EmitterKind::DeskLamp => Some(lighting.desk_lamp),
         EmitterKind::WindowSpill => Some(lighting.sun_spill),
-        EmitterKind::WallSpot => look
-            .sun_spot
-            .map(|s| crate::celestial::wall_spot_colour(s.warmth, theme)),
+        // The cutaway has no side wall for the sun's spot to land on.
+        EmitterKind::WallSpot => None,
         EmitterKind::NeonGlow => Some(crate::pixel_painter::neon_look(neon, theme).halo),
         // Dark themes only, as in the classic's
         // `pixel_painter::ambient::paint_ceiling_halos`: on a light one it reads as grime.
