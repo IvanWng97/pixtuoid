@@ -32,13 +32,13 @@ const DESK_FRONT_DENOM: u16 = 5;
 ///
 /// The windows are the north wall, so the falloff runs north to south; these
 /// bound the dithered transition between the lit and base floor tones.
-const FLOOR_LIT_NUMER: u16 = 1;
-/// Denominator of [`FLOOR_LIT_NUMER`].
-const FLOOR_LIT_DENOM: u16 = 3;
+const GROUND_LIT_NUMER: u16 = 1;
+/// Denominator of [`GROUND_LIT_NUMER`].
+const GROUND_LIT_DENOM: u16 = 3;
 
 /// A carpet tile's side, in logical units: seams on this grid are what turn a
 /// flat tone into a floor you could walk on.
-const FLOOR_TILE: u16 = 4;
+const GROUND_TILE: u16 = 4;
 /// How many ramp stops a seam sits under the floor it crosses.
 const SEAM_LEVEL: i8 = -1;
 /// The smallest tile, in art pixels, that its seams leave reading as floor;
@@ -373,7 +373,7 @@ fn paint_backdrop(
     pen: Pen,
     buf: &mut RgbBuffer,
 ) {
-    paint_floor(layout, theme, pen, buf);
+    paint_ground(layout, theme, pen, buf);
     for fixture in layout.fixtures() {
         match covering(fixture.kind) {
             Some(Covering::Rug) => paint_rug(fixture.visual, theme, pen, buf),
@@ -1867,7 +1867,7 @@ pub(crate) fn assert_variant_desk_foot(
         scale.to_buffer(layout.buf_h),
         theme.surface.bg_fallback,
     );
-    paint_floor(layout, theme, Pen::for_pack(scale, base_pack), &mut floor);
+    paint_ground(layout, theme, Pen::for_pack(scale, base_pack), &mut floor);
     let buf_w = usize::from(scale.to_buffer(layout.buf_w));
     let face = desk_front_h();
     // Each desk's columns and the first row below its art, in logical units.
@@ -1913,7 +1913,8 @@ pub(crate) fn assert_variant_desk_foot(
         px[usize::from(scale.to_buffer(y)) * buf_w + usize::from(scale.to_buffer(x))]
     };
     let deepest = deepest_shadow_stop();
-    let floor_or_its_shadow = |c: pixtuoid_core::sprite::Rgb, floor: pixtuoid_core::sprite::Rgb| {
+    let ground_or_its_shadow = |c: pixtuoid_core::sprite::Rgb,
+                                floor: pixtuoid_core::sprite::Rgb| {
         (0..=deepest).any(|k| c == ambient.on(floor.ramp(-k)))
     };
     // The desk's own edge column: a sitter and their chair stand centred on it.
@@ -1921,12 +1922,12 @@ pub(crate) fn assert_variant_desk_foot(
         let x = x0 + 1;
         for y in below..=below + face {
             assert!(
-                floor_or_its_shadow(at(variant, x, y), at(floor.as_slice(), x, y)),
+                ground_or_its_shadow(at(variant, x, y), at(floor.as_slice(), x, y)),
                 "a variant draws its own front: under its art lies floor or its shadow"
             );
         }
         assert!(
-            !floor_or_its_shadow(at(base, x, below), at(floor.as_slice(), x, below)),
+            !ground_or_its_shadow(at(base, x, below), at(floor.as_slice(), x, below)),
             "the base gets a derived face under its art"
         );
     }
@@ -2602,7 +2603,7 @@ fn paint_glass(view: &WindowView, pen: Pen, buf: &mut RgbBuffer) {
 /// The carpet, lit near the windows, falling off south and laid in tiles, on
 /// the art grid: every edge, dither step and seam lands on an art pixel,
 /// whatever the scale.
-fn paint_floor(layout: &Layout, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
+fn paint_ground(layout: &Layout, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
     let lit = theme.surface.carpet_light;
     let base = theme.surface.carpet_base;
     let dark = theme.surface.carpet_dark;
@@ -2620,25 +2621,25 @@ fn paint_floor(layout: &Layout, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
     // Anchored at the wall's foot, where the floor begins, not buffer row 0: the
     // wall band paints over the top of the buffer, so a lit zone anchored there
     // would start behind it.
-    let floor_top = pen.art(layout.wall_band_h()).0;
-    let floor_h = h.0.saturating_sub(floor_top);
+    let ground_top = pen.art(layout.wall_band_h()).0;
+    let ground_h = h.0.saturating_sub(ground_top);
 
     // The lit share of the floor: its first half solid, dithering to base by its
     // end, then a final fall to dark at the south edge.
-    let lit_h = floor_h * FLOOR_LIT_NUMER / FLOOR_LIT_DENOM;
-    pen.fill(buf, band(floor_top, lit_h / 2), lit);
+    let lit_h = ground_h * GROUND_LIT_NUMER / GROUND_LIT_DENOM;
+    pen.fill(buf, band(ground_top, lit_h / 2), lit);
     pen.dither_band(
         buf,
-        ArtPx(floor_top + lit_h / 2),
-        ArtPx(floor_top + lit_h),
+        ArtPx(ground_top + lit_h / 2),
+        ArtPx(ground_top + lit_h),
         base,
         lit,
     );
     pen.dither_band(buf, ArtPx(h.0.saturating_sub(lit_h / 2)), h, dark, base);
 
-    let tile = pen.art(FLOOR_TILE);
+    let tile = pen.art(GROUND_TILE);
     if tile.0 >= MIN_SEAMED_TILE {
-        pen.shade_grid(buf, band(floor_top, floor_h), tile, SEAM_LEVEL);
+        pen.shade_grid(buf, band(ground_top, ground_h), tile, SEAM_LEVEL);
     }
 }
 
@@ -4434,7 +4435,7 @@ pub(crate) mod tests {
     fn the_floor_is_tiled_from_the_wall_foot() {
         let layout = Layout::compute_with_seed(160, 110, None, 0).expect("lays out");
         assert_ne!(
-            layout.wall_band_h() % FLOOR_TILE,
+            layout.wall_band_h() % GROUND_TILE,
             0,
             "a wall foot off the buffer's own grid, or one anchored at row 0 passes too"
         );
@@ -4442,15 +4443,15 @@ pub(crate) mod tests {
         let (pen, buf) = floor(&layout, s, 4);
         let luma = |x: u16, y: u16| buf.get(x, y).lightness();
         let k = s / 4;
-        let tile = pen.art(FLOOR_TILE).0 * k;
-        let floor_top = layout.wall_band_h() * s;
+        let tile = pen.art(GROUND_TILE).0 * k;
+        let ground_top = layout.wall_band_h() * s;
         let seam = tile * 3;
         let mid = seam + tile / 2;
         assert!(
-            luma(mid, floor_top) < luma(mid, floor_top + k),
+            luma(mid, ground_top) < luma(mid, ground_top + k),
             "the first seam runs along the wall's foot, one art pixel deep"
         );
-        for y in [floor_top + tile + tile / 2, buf.height() - tile / 2] {
+        for y in [ground_top + tile + tile / 2, buf.height() - tile / 2] {
             assert!(
                 luma(seam, y) < luma(seam + tile / 2, y),
                 "row {y}: the seam at column {seam} must sit under its tile"
@@ -4481,7 +4482,7 @@ pub(crate) mod tests {
             scale.to_buffer(layout.buf_h),
             pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
         );
-        paint_floor(layout, &crate::theme::NORMAL, pen, &mut buf);
+        paint_ground(layout, &crate::theme::NORMAL, pen, &mut buf);
         (pen, buf)
     }
 
@@ -6731,7 +6732,7 @@ S B B B B B B S
             )
         };
         let (mut floor, mut laid) = (blank(), blank());
-        paint_floor(&layout, theme, pen, &mut floor);
+        paint_ground(&layout, theme, pen, &mut floor);
         paint_backdrop(&layout, theme, scale, pen, &mut laid);
         let row = scale.to_buffer(layout.wall_band_h());
         for x in 0..floor.width() {
@@ -7431,7 +7432,7 @@ S B B B B B B S
                 )
             };
             let (mut bare, mut laid) = (blank(), blank());
-            paint_floor(&layout, theme, pen, &mut bare);
+            paint_ground(&layout, theme, pen, &mut bare);
             paint_backdrop(&layout, theme, scale, pen, &mut laid);
             for fixture in layout.fixtures() {
                 met.insert(crate::layout::roster::tests::kind_key(fixture.kind));

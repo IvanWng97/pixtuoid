@@ -22,9 +22,9 @@ const MEETING_RUG_OVERHANG: u16 = 8;
 
 impl MeetingTrio {
     /// The rug under this trio's table, reaching from sofa to sofa but no
-    /// further than the table's distance to `floor_end`, the row its floor ends
+    /// further than the table's distance to `ground_end`, the row its floor ends
     /// at (plus the same overhang).
-    pub(crate) fn rug(&self, floor_end: u16) -> Bounds {
+    pub(crate) fn rug(&self, ground_end: u16) -> Bounds {
         let [north, south] = self.sofas;
         let h = south
             .y
@@ -33,7 +33,7 @@ impl MeetingTrio {
             // A trio by the south edge shortens its rug, still centred on the
             // table.
             .min(
-                floor_end
+                ground_end
                     .saturating_sub(self.table.y)
                     .saturating_add(MEETING_RUG_OVERHANG),
             );
@@ -212,17 +212,17 @@ mod tests {
                 else {
                     continue;
                 };
-                let floor_end = layout.corridor.map_or(layout.buf_h, |c| c.y);
+                let ground_end = layout.corridor.map_or(layout.buf_h, |c| c.y);
                 for f in layout.fixtures() {
                     let crate::layout::FixtureKind::MeetingRug { room } = f.kind else {
                         continue;
                     };
                     let room = layout.meeting_rooms[room].bounds;
-                    south_rooms += usize::from(room.y + room.height > floor_end);
+                    south_rooms += usize::from(room.y + room.height > ground_end);
                     let rug = f.visual;
                     assert!(
-                        rug.y + rug.height <= floor_end,
-                        "{w}x{h} seed {seed}: {rug:?} past {floor_end}"
+                        rug.y + rug.height <= ground_end,
+                        "{w}x{h} seed {seed}: {rug:?} past {ground_end}"
                     );
                 }
             }
@@ -237,10 +237,10 @@ mod tests {
             sofas: [Point { x, y: 50 }, Point { x, y: 90 }],
             table: Point { x, y: 70 },
         };
-        let floor_end = 96;
+        let ground_end = 96;
         assert_eq!(
-            trio.rug(floor_end).height,
-            floor_end - trio.table.y + MEETING_RUG_OVERHANG,
+            trio.rug(ground_end).height,
+            ground_end - trio.table.y + MEETING_RUG_OVERHANG,
             "held to the table's distance from the floor's end"
         );
         assert_eq!(

@@ -22,12 +22,12 @@ pub(crate) struct Look {
     pub(crate) spill_slant: f32,
     /// The floor's night dim then its daylight lift, as `(tint, strength)`
     /// blends applied in order.
-    pub(crate) floor_wash: [(Rgb, f32); 2],
+    pub(crate) ground_wash: [(Rgb, f32); 2],
     /// The cast this sky puts on a LIT OBJECT: the cool night term then the
     /// warm day one, applied in order like the floor's two washes.
     pub(crate) object_wash: [(Rgb, f32); 2],
     /// The weather's cast on the floor, as `(tint, strength)`.
-    pub(crate) floor_tint: (Rgb, f32),
+    pub(crate) ground_tint: (Rgb, f32),
     /// The weather's veil over the window glass, lit for this frame, as
     /// `(color, alpha)`, or `None` where the city shows crisp.
     pub(crate) glass_veil: Option<(Rgb, f32)>,
@@ -72,10 +72,10 @@ impl Moment {
 const SPILL_SLANT_MAX: f32 = 0.7;
 
 /// How far a fully dark hour dims the interior.
-const NIGHT_FLOOR_DIM: f32 = 0.45;
+const NIGHT_GROUND_DIM: f32 = 0.45;
 
 /// How far a fully lit hour lifts the interior.
-const DAYLIGHT_FLOOR_LIFT: f32 = 0.22;
+const DAYLIGHT_GROUND_LIFT: f32 = 0.22;
 
 /// Pale warm midday sunlight, the same under every theme.
 const SUN_TINT: Rgb = Rgb {
@@ -89,7 +89,7 @@ const SUN_TINT: Rgb = Rgb {
 const OBJECT_WASH_SHARE: f32 = 0.55;
 
 /// How far the weather's cast pulls the floor toward its tint.
-const FLOOR_TINT_SHARE: f32 = 0.15;
+const GROUND_TINT_SHARE: f32 = 0.15;
 
 /// Below this strength the star field is too faint to read, so none shows —
 /// by day and under thick cloud or fog; above it the stars ramp in from nothing.
@@ -121,9 +121,9 @@ impl Look {
         };
 
         let darkness = 1.0 - exterior;
-        let floor_wash = [
-            (theme.lighting.night_tint, darkness * NIGHT_FLOOR_DIM),
-            (SUN_TINT, sunlight * DAYLIGHT_FLOOR_LIFT),
+        let ground_wash = [
+            (theme.lighting.night_tint, darkness * NIGHT_GROUND_DIM),
+            (SUN_TINT, sunlight * DAYLIGHT_GROUND_LIFT),
         ];
         // SUPERPOSED, never chosen between: the floor runs both washes every
         // frame, so switching arms on `interior >= darkness` would step every
@@ -132,9 +132,12 @@ impl Look {
         let object_wash = [
             (
                 theme.lighting.night_tint,
-                darkness * NIGHT_FLOOR_DIM * OBJECT_WASH_SHARE,
+                darkness * NIGHT_GROUND_DIM * OBJECT_WASH_SHARE,
             ),
-            (SUN_TINT, sunlight * DAYLIGHT_FLOOR_LIFT * OBJECT_WASH_SHARE),
+            (
+                SUN_TINT,
+                sunlight * DAYLIGHT_GROUND_LIFT * OBJECT_WASH_SHARE,
+            ),
         ];
 
         let weather = sky.weather();
@@ -147,9 +150,9 @@ impl Look {
             darkness,
             sunlight,
             spill_slant,
-            floor_wash,
+            ground_wash,
             object_wash,
-            floor_tint: (weather_floor_tint(weather), FLOOR_TINT_SHARE),
+            ground_tint: (weather_ground_tint(weather), GROUND_TINT_SHARE),
             glass_veil: glass_veil(weather).map(|(color, alpha)| (lit(color, veil), alpha)),
             golden_hour: golden_hour_blaze(e, &sky.transmission()),
             star_strength: ((star_strength - STAR_MIN) / (1.0 - STAR_MIN)).max(0.0),
@@ -169,7 +172,7 @@ fn lit(color: Rgb, lum: f32) -> Rgb {
 }
 
 /// The cast the current weather lends the floor.
-fn weather_floor_tint(w: Weather) -> Rgb {
+fn weather_ground_tint(w: Weather) -> Rgb {
     match w {
         Weather::Clear => Rgb {
             r: 255,
@@ -266,7 +269,7 @@ fn glass_veil(w: Weather) -> Option<(Rgb, f32)> {
 
 /// The least of a veil's own colour [`veil_lum`] brings up: the city-light
 /// scatter that keeps fog reading as fog after dark.
-const NIGHT_VEIL_FLOOR: f32 = 0.35;
+const NIGHT_VEIL_MIN: f32 = 0.35;
 
 /// How much of a weather VEIL's own colour the frame's sky brings up (0..1).
 ///
@@ -274,7 +277,7 @@ const NIGHT_VEIL_FLOOR: f32 = 0.35;
 /// [`Sky::transmission`] or [`Look::darkness`]: those already carry the weather (the veil
 /// colour does too), and folding them in would darken a stormy noon twice.
 fn veil_lum(e: &Emitter) -> f32 {
-    NIGHT_VEIL_FLOOR + (1.0 - NIGHT_VEIL_FLOOR) * e.emitter_lum.clamp(0.0, 1.0)
+    NIGHT_VEIL_MIN + (1.0 - NIGHT_VEIL_MIN) * e.emitter_lum.clamp(0.0, 1.0)
 }
 
 /// Golden-hour blaze strength in the sky around the city — SUN-only: a low moon
@@ -351,8 +354,8 @@ mod tests {
             [
                 ("darkness", l.darkness),
                 ("sunlight", l.sunlight),
-                ("floor dim", l.floor_wash[0].1),
-                ("floor lift", l.floor_wash[1].1),
+                ("floor dim", l.ground_wash[0].1),
+                ("floor lift", l.ground_wash[1].1),
                 ("object dim", l.object_wash[0].1),
                 ("object lift", l.object_wash[1].1),
                 ("golden hour", l.golden_hour),
@@ -405,9 +408,9 @@ mod tests {
 
     #[test]
     fn weather_floor_tint_differs_by_variant() {
-        let clear = weather_floor_tint(Weather::Clear);
-        let rain = weather_floor_tint(Weather::Rain);
-        let fog = weather_floor_tint(Weather::Fog);
+        let clear = weather_ground_tint(Weather::Clear);
+        let rain = weather_ground_tint(Weather::Rain);
+        let fog = weather_ground_tint(Weather::Fog);
         assert_ne!(clear, rain, "rain biases floor cooler");
         assert_ne!(clear, fog, "fog desaturates");
         assert!(
@@ -419,7 +422,7 @@ mod tests {
 
     #[test]
     fn weather_floor_tint_clear_is_near_neutral() {
-        let clear = weather_floor_tint(Weather::Clear);
+        let clear = weather_ground_tint(Weather::Clear);
         assert!(
             clear.r > 200 && clear.g > 200 && clear.b > 200,
             "clear should be a near-white slight-warm tint, got {:?}",
@@ -429,8 +432,8 @@ mod tests {
 
     #[test]
     fn fog_floor_tint_is_brighter_than_overcast() {
-        let fog = weather_floor_tint(Weather::Fog);
-        let oc = weather_floor_tint(Weather::Overcast);
+        let fog = weather_ground_tint(Weather::Fog);
+        let oc = weather_ground_tint(Weather::Overcast);
         let lum = |c: Rgb| c.r as u16 + c.g as u16 + c.b as u16;
         assert!(
             lum(fog) > lum(oc),
@@ -476,7 +479,7 @@ mod tests {
     fn the_floor_is_dimmed_by_the_dark_and_lifted_by_the_sun() {
         let at = crate::localclock::at_hour;
         let wash = |h| {
-            Look::resolve(&Sky::at_with(at(h), Weather::Clear), &crate::theme::NORMAL).floor_wash
+            Look::resolve(&Sky::at_with(at(h), Weather::Clear), &crate::theme::NORMAL).ground_wash
         };
         let [(_, noon_dim), (tint, noon_lift)] = wash(12);
         let [(dim_tint, night_dim), (_, night_lift)] = wash(0);
@@ -486,7 +489,7 @@ mod tests {
         assert_eq!(night_lift, 0.0, "the moon lifts nothing");
         assert!(night_dim > noon_dim, "midnight dims the floor past noon");
         assert!(
-            night_dim < NIGHT_FLOOR_DIM,
+            night_dim < NIGHT_GROUND_DIM,
             "the dim rides the darkness, which the city's glow keeps short of full"
         );
     }
@@ -498,14 +501,14 @@ mod tests {
                 &Sky::at_with(at_hour_min(h, m), Weather::Clear),
                 &crate::theme::NORMAL,
             );
-            let [_, (_, floor_lift)] = look.floor_wash;
+            let [_, (_, floor_lift)] = look.ground_wash;
             let [_, (_, object_lift)] = look.object_wash;
             assert_eq!(object_lift, floor_lift * OBJECT_WASH_SHARE, "{h:02}:{m:02}");
         }
     }
 
     /// The veil keeps the weather reading after dark: dimmer than by day, but
-    /// never below [`NIGHT_VEIL_FLOOR`] of its own colour.
+    /// never below [`NIGHT_VEIL_MIN`] of its own colour.
     #[test]
     fn a_veil_dims_after_dark_but_keeps_its_floor() {
         let at = crate::localclock::at_hour;
@@ -521,7 +524,7 @@ mod tests {
         assert!(lum(midnight) < lum(noon), "{midnight:?} vs {noon:?}");
         // Each channel rounds by at most half a level.
         assert!(
-            lum(midnight) >= lum(unlit) * NIGHT_VEIL_FLOOR - 1.5,
+            lum(midnight) >= lum(unlit) * NIGHT_VEIL_MIN - 1.5,
             "{midnight:?} fell below the night floor of {unlit:?}"
         );
     }

@@ -98,7 +98,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     let buf_w = 60u16;
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(12 * 3600);
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
-    paint_floor_and_walls(
+    paint_ground_and_walls(
         &mut BaseFillCache::new(),
         &mut buf,
         top_wall_h,
@@ -131,7 +131,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     );
 }
 
-/// Render a full office wall through the real `paint_floor_and_walls` path at a
+/// Render a full office wall through the real `paint_ground_and_walls` path at a
 /// forced January `day` + local `hour` + weather.
 fn render_office_on(
     day: u32,
@@ -158,7 +158,7 @@ fn render_office_themed(
     let now = crate::localclock::on_day(day, hour);
     let buf_h = top_wall_h + 4;
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 4, g: 4, b: 6 });
-    paint_floor_and_walls(
+    paint_ground_and_walls(
         &mut BaseFillCache::new(),
         &mut buf,
         top_wall_h,
@@ -785,7 +785,7 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
     let (buf_w, buf_h, top_wall_h) = (96u16, 64u16, 14u16);
     let paint = |base_fill: &mut BaseFillCache, theme: &'static crate::theme::Theme, weather| {
         let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 9, g: 9, b: 9 });
-        paint_floor_and_walls(
+        paint_ground_and_walls(
             base_fill,
             &mut buf,
             top_wall_h,
@@ -841,7 +841,7 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
     let now = crate::localclock::on_day(1, 12);
     let paint_at = |base_fill: &mut BaseFillCache, w: u16, h: u16| {
         let mut buf = RgbBuffer::filled(w, h, Rgb { r: 9, g: 9, b: 9 });
-        paint_floor_and_walls(
+        paint_ground_and_walls(
             base_fill,
             &mut buf,
             14,
@@ -1093,7 +1093,7 @@ fn the_wall_between_two_windows_is_one_frame_post() {
     let now = crate::localclock::on_day(1, 12);
     let (buf_w, buf_h, top_wall_h) = (160u16, 96u16, 24u16);
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 9, g: 9, b: 9 });
-    paint_floor_and_walls(
+    paint_ground_and_walls(
         &mut BaseFillCache::new(),
         &mut buf,
         top_wall_h,
