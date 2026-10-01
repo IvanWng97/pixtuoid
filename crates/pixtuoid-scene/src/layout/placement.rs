@@ -79,9 +79,27 @@ pub fn z_sort_row(anchor: Anchor, pos: Point, h: u16) -> u16 {
         .saturating_add(h.saturating_sub(1))
 }
 
+/// The centre `y` an [`Anchor::Center`] sprite `h` tall takes to stand on row
+/// `base`: [`z_sort_row`]'s inverse.
+pub(super) fn centre_y_standing_on(base: u16, h: u16) -> u16 {
+    (base + 1).saturating_sub(h - h / 2)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sprite_centred_to_stand_on_a_row_sorts_on_it() {
+        for h in 1u16..24 {
+            let base = 40;
+            let pos = Point {
+                x: 50,
+                y: centre_y_standing_on(base, h),
+            };
+            assert_eq!(z_sort_row(Anchor::Center, pos, h), base, "h={h}");
+        }
+    }
 
     #[test]
     fn z_sort_row_is_the_sprite_south_row_for_every_anchor() {

@@ -70,11 +70,6 @@ impl Dress {
     }
 }
 
-/// A layer's one frame and the head mark it is laid by.
-fn marked(layer: &Sprite) -> Option<(&Frame, HeadMark)> {
-    Some((layer.frames().first()?, layer.head(0)?))
-}
-
 /// The first row of `f` holding an opaque pixel.
 fn opaque_top(f: &Frame) -> Option<u16> {
     (0..f.height()).find(|&y| (0..f.width()).any(|x| f.get(x, y).copied().flatten().is_some()))
@@ -90,10 +85,8 @@ fn rise(body: &Frame, head: HeadMark, style: Option<&Hairstyle>, outlined: bool)
             [layers.behind(), layers.over()]
                 .into_iter()
                 .flatten()
-                .filter_map(marked)
-                .filter_map(|(f, mark)| {
-                    Some(i32::from(head.y) - i32::from(mark.y) + i32::from(opaque_top(f)?))
-                })
+                .filter_map(|layer| layer.laid_on(head))
+                .filter_map(|(f, _, dy)| Some(dy + i32::from(opaque_top(f)?)))
         });
     let top = hair.chain(opaque_top(body).map(i32::from)).min();
     top.map_or(0, |top| {
@@ -136,13 +129,8 @@ pub(crate) fn dress(
     };
     let dressed = |layer: Option<&Sprite>| {
         let sprite = layer?;
-        let mark = sprite.head(0)?;
-        let frame = sprite.recolorable(0)?.recolored(overrides);
-        Some((
-            frame,
-            i32::from(head.x) - i32::from(mark.x),
-            i32::from(head.y) - i32::from(mark.y),
-        ))
+        let (_, dx, dy) = sprite.laid_on(head)?;
+        Some((sprite.recolorable(0)?.recolored(overrides), dx, dy))
     };
     if let Some((f, dx, dy)) = dressed(layers.and_then(|l| l.behind())) {
         lay(&f, dx, dy);
@@ -194,7 +182,6 @@ mod tests {
     use super::*;
     use pixtuoid_core::sprite::format::load_pack_from_strings;
 
-    #[cfg(feature = "density-art")]
     const H: Rgb = Rgb {
         r: 200,
         g: 100,
@@ -352,6 +339,65 @@ mod tests {
         );
     }
 
+    #[test]
+    fn dress_drops_hair_past_a_side_as_validation_flags_and_past_the_bottom_unflagged() {
+        let (side, mark) = (4u16, 1u16);
+        let reach = 2 * side + 1;
+        let rows = |n: u16, key: &dyn Fn(u16, u16) -> &'static str| -> String {
+            (0..n)
+                .map(|y| (0..n).map(|x| key(x, y)).collect::<Vec<_>>().join(" ") + "\n")
+                .collect()
+        };
+        let body = format!(
+            "@frame 0\n@mark head.front {mark} {mark}\n{}",
+            rows(side, &|_, _| "S")
+        );
+        let toml = "[pack]\nname=\"t\"\nversion=\"1\"\n\
+                    [palette]\n\".\"=\"transparent\"\n\"H\"=\"#c86432\"\n\"S\"=\"#f0c0a0\"\n\
+                    [animations.seated]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
+                    [animations.\"seated@2x\"]\nframes=[\"b.sprite\"]\nframe_ms=100\n\
+                    [hairstyles.\"mop@2x\"]\nfront={ over=\"o.sprite\" }\n";
+        let (mut flagged_seen, mut bottom_seen) = (false, false);
+        for hy in 0..reach {
+            for hx in 0..reach {
+                let pixel = |x, y| if (x, y) == (hx, hy) { "H" } else { "." };
+                let hair = format!(
+                    "@frame 0\n@mark head.front {side} {side}\n{}",
+                    rows(reach, &pixel)
+                );
+                let pack = load_pack_from_strings(
+                    toml,
+                    &[
+                        ("one.sprite", "@frame 0\nS S\nS S"),
+                        ("b.sprite", &body),
+                        ("o.sprite", &hair),
+                    ],
+                )
+                .expect("the test pack loads");
+                let sprite = pack.animation("seated@2x").expect("the body");
+                let (frame, head) = (&sprite.frames()[0], sprite.head(0).expect("marked"));
+                let style = pack.hairstyles().next();
+                let f = dress(
+                    frame,
+                    &Dress::of(frame, head, style, false),
+                    style,
+                    &[],
+                    None,
+                );
+                let dropped = !(0..f.height())
+                    .any(|y| (0..f.width()).any(|x| f.get(x, y).copied().flatten() == Some(H)));
+                let flagged = !crate::embedded_pack::validate_pack(&pack)
+                    .overhanging_hair
+                    .is_empty();
+                let below = hy + mark >= side + side;
+                flagged_seen |= flagged;
+                bottom_seen |= below && !flagged;
+                assert_eq!(dropped, flagged || below, "hair at ({hx}, {hy})");
+            }
+        }
+        assert!(flagged_seen && bottom_seen);
+    }
+
     /// Every bundled character frame, bare and dressed in every bundled style,
     /// keeps its one outline whole: nothing but the line on a side edge, where
     /// the line has no column left to run in, and no pinhole inside it. A
@@ -360,9 +406,7 @@ mod tests {
     #[test]
     #[cfg(feature = "density-art")]
     fn every_bundled_character_dressed_in_every_style_keeps_its_outline_whole() {
-        let pack =
-            crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-                .expect("the embedded pack loads");
+        let pack = crate::embedded_pack::test_default_pack();
         let line = pack.character_outline();
         assert!(line.is_some(), "the bundled pack outlines its characters");
         let (mut dressed, mut flaws) = (0, Vec::new());

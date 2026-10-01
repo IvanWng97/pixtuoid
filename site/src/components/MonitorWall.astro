@@ -18,42 +18,34 @@ const thumb = (c: EnrichedShowcaseChannel) =>
 ---
 
 <div class="wall" role="group" aria-label="Demos">
-  {
-    channels.map((c: EnrichedShowcaseChannel) =>
-      c.status === 'live' ? (
-        <button class="mon" data-ch={c.id} aria-pressed={c.id === activeId ? 'true' : 'false'}>
-          <span class="mon__screen">
-            <img
-              class="px"
-              src={asset(thumb(c))}
-              alt=""
-              loading="lazy"
-              width={c.w ?? 1600}
-              height={c.h ?? 1440}
-            />
-            {c.duration && (
-              <span class="mon__badge">
-                <span aria-hidden="true">▶ </span>
-                {c.duration}
-              </span>
-            )}
-          </span>
-          <span class="mon__label">
-            CH {c.ch} · {c.label}
-          </span>
-        </button>
-      ) : (
-        <div class="mon mon--soon">
-          <span class="mon__screen mon__screen--static">
-            <span class="mon__badge mon__badge--soon">soon</span>
-          </span>
-          <span class="mon__label">
-            CH {c.ch} · {c.label}
-          </span>
-        </div>
-      )
+  {channels.map((c: EnrichedShowcaseChannel) =>
+    c.status === 'live' ? (
+      <button class="mon" data-ch={c.id} aria-pressed={c.id === activeId ? 'true' : 'false'}>
+        <span class="mon__screen">
+          <img
+            class="px"
+            src={asset(thumb(c))}
+            alt=""
+            loading="lazy"
+            width={c.w ?? 1600}
+            height={c.h ?? 1440}
+          />
+          {c.duration && <span class="mon__badge">
+            <span aria-hidden="true">▶ </span>
+            {c.duration}
+          </span>}
+        </span>
+        <span class="mon__label"> CH {c.ch} · {c.label} </span>
+      </button>
+    ) : (
+      <div class="mon mon--soon">
+        <span class="mon__screen mon__screen--static">
+          <span class="mon__badge mon__badge--soon">soon</span>
+        </span>
+        <span class="mon__label"> CH {c.ch} · {c.label} </span>
+      </div>
     )
-  }
+  )}
 </div>
 
 <style>

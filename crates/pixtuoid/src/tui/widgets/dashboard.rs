@@ -113,8 +113,6 @@ fn dashboard_line(
         Style::default()
     };
 
-    // Badge uses the source color but is NEVER reversed — a low-luminance hue
-    // inverted becomes invisible against the highlight background.
     let badge_tag = descriptor_for(row.source.as_ref()).map_or("??", |d| d.label_prefix);
 
     Line::from(vec![
@@ -279,7 +277,7 @@ mod tests {
             assert_ne!(
                 line.spans[0].style.fg,
                 Some(fallback),
-                "source {:?} (prefix {:?}) renders the idle FALLBACK badge color — add its arm to the match in dashboard_line",
+                "source {:?} (prefix {:?}) renders the idle FALLBACK badge color — add its arm to `SourceColors::by_prefix`",
                 d.name,
                 d.label_prefix,
             );

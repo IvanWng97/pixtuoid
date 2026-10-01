@@ -145,8 +145,8 @@ pub type LivenessProbe = Arc<dyn Fn() -> Option<ProbeSnapshot> + Send + Sync>;
 
 /// Negative vouch (#223): a previously-vouched id must be MISSING from two
 /// healthy probe snapshots at least this far apart before its exit is
-/// confirmed. 60s makes the signal immune to Codex's brief drop-and-reopen fd
-/// gap on a write failure and to the initial-seed / 250ms-rescan adjacency.
+/// confirmed, immune to Codex's brief drop-and-reopen fd gap on a write failure
+/// and to the initial-seed / [`RESCAN_DELAY`](super::RESCAN_DELAY) adjacency.
 pub(super) const NEGATIVE_VOUCH_MIN_SPAN: Duration = Duration::from_secs(60);
 
 /// Whether the liveness probe vouches for this transcript. A vouched-for file is
@@ -192,8 +192,8 @@ pub(super) async fn emit_proof_of_life(
 /// previously vouched for that DISAPPEARS from a healthy snapshot is a
 /// high-confidence exit — the registry entry was removed / the rollout fd
 /// closed, signals only the OWNING process can produce — so the watcher can emit
-/// the `SessionEnd` the CLI never writes instead of waiting out the 10–30 min
-/// stale-sweep. Confirmation needs the id missing from two healthy observations
+/// the `SessionEnd` the CLI never writes instead of waiting out the reducer's
+/// stale sweep (`stale_threshold`). Confirmation needs the id missing from two healthy observations
 /// at least `min_span` apart; a probe FAILURE is never an observation.
 ///
 /// A pure failure detector: [`fold`](ProbeLadder::fold) RETURNS the effects to
@@ -206,7 +206,7 @@ pub(super) struct ProbeLadder {
     /// confirm it.
     prev_vouched: HashSet<String>,
     /// id → when a healthy snapshot FIRST came back without it. `Instant`
-    /// (monotonic): a wall-clock jump must not fake a 60s span.
+    /// (monotonic): a wall-clock jump must not fake a `min_span`.
     miss_since: HashMap<String, std::time::Instant>,
     /// pid → the session ids a healthy snapshot bound to it, ADDITIVE per
     /// snapshot: an id leaves via `pid_died` or a confirmed exit, never by
@@ -377,9 +377,8 @@ pub(super) async fn emit_session_exit(id: &str, decoders: SourceDecoders, ctx: &
     ctx.live.lock().await.remove(id);
 }
 
-/// ONE probe refresh (the imperative SHELL over `ProbeLadder::fold`), shared by
-/// the three sites that re-snapshot `live`. Returns true so the caller re-emits
-/// `ProofOfLife` after its scan. On a probe FAILURE (`None`) or no probe wired:
+/// The imperative SHELL over [`ProbeLadder::fold`]: returns whether a healthy snapshot
+/// landed, so the caller re-emits `ProofOfLife` only then. On a probe FAILURE (`None`) or no probe wired:
 /// change NOTHING — `ctx.live` keeps the previous ids, the miss windows neither
 /// advance nor confirm, no bindings move (the reducer's TTL absorbs the gap).
 pub(super) async fn refresh_probe_snapshot(
@@ -393,7 +392,7 @@ pub(super) async fn refresh_probe_snapshot(
         return false;
     };
     // `spawn_blocking`, not `block_in_place`: the probe is blocking std::fs and
-    // libproc, and this crate's tokio is current-thread, where the latter panics.
+    // libproc, and `block_in_place` panics on a current-thread runtime.
     let probe = Arc::clone(probe);
     let snap = match tokio::task::spawn_blocking(move || probe()).await {
         Ok(Some(snap)) => snap,
@@ -409,14 +408,14 @@ pub(super) async fn refresh_probe_snapshot(
         }
     };
     *ctx.live.lock().await = snap.pid_of.keys().cloned().collect();
-    // A pid whose kernel registration fails (EPERM) is not retried — the slower
-    // rungs cover.
     let outcome = ladder.fold(&snap, std::time::Instant::now());
     for id in &outcome.exits {
         emit_session_exit(id, decoders, ctx).await;
     }
     for pid in outcome.newly_watched {
         if let Some(watch) = exit_watch {
+            // A pid whose kernel registration fails (EPERM) is not retried — the
+            // slower rungs cover.
             watch.watch(pid);
         }
     }

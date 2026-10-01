@@ -43,10 +43,9 @@ pub const CHILD_END_LEDGER_TTL: Duration = Duration::from_secs(90);
 ///
 /// Deliberately LONGER than [`CHILD_END_LEDGER_TTL`]: the GATE is bounded by
 /// the watcher's poll backstop (`DEFAULT_POLL_INTERVAL`), while the MEMORY must span a TURN gap,
-/// which is unbounded. Sharing one clock meant a child idle >90s came back an
-/// ORPHAN, the exact phantom #246 exists to eliminate. Aligned with
-/// `jsonl::unclaim::CHILD_END_UNCLAIM_TTL`, the sibling half of this flow —
-/// the re-link cannot outlive the memory it depends on. The gate is
+/// which is unbounded. Sharing one clock meant a child idle past
+/// [`CHILD_END_LEDGER_TTL`] came back an ORPHAN, the exact phantom #246 exists
+/// to eliminate. The gate is
 /// unaffected: [`Correlation::child_recently_ended`] applies its OWN
 /// freshness check, so a retained-but-stale entry gates nothing.
 #[doc(hidden)]
@@ -65,7 +64,7 @@ pub const DRAINED_TASK_TOMBSTONE_TTL: Duration = Duration::from_secs(90);
 
 /// How long an [`AgentEvent::ProofOfLife`](crate::AgentEvent::ProofOfLife) vouch exempts its slot from the
 /// staleness sweeps (#220). The probe is ground truth that the OWNING PROCESS
-/// is alive, while every `STALE_*` window only models event silence — so a
+/// is alive, while every `stale_threshold` window only models event silence — so a
 /// vouched slot must not be swept on silence alone. Sized 2.5× the watcher's
 /// poll cadence (`DEFAULT_POLL_INTERVAL`): two missed polls plus slack.
 #[doc(hidden)]
@@ -154,13 +153,12 @@ pub(super) struct Correlation {
     /// [`HOOK_WINS_WINDOW`]'s job: omp's transcript writes the call BEFORE the
     /// approval request goes out, so the two Starts are separated by HUMAN
     /// approval latency and no dedup window can span them. The backstop TTL is
-    /// the Waiting ceiling because that bounds how long they can straddle; past
+    /// [`STALE_WAITING_TIMEOUT`](crate::state::reducer::STALE_WAITING_TIMEOUT) because that bounds how long they can straddle; past
     /// it the cost is one HUD re-count. Nested (not `(AgentId, String)`-keyed)
     /// so the per-Start membership probe borrows `&str` without allocating and
     /// a life's eviction is one `remove`; swept in [`Self::gc_slow`], never the
     /// per-event [`Self::gc`] — with the longest TTL of the maps it is the one
-    /// whose retain does real per-event work (CodSpeed showed -55% on the hook
-    /// path).
+    /// whose retain does real per-event work.
     pub(super) counted_calls: HashMap<AgentId, HashMap<String, SystemTime>>,
     /// When [`Self::gc_slow`] last swept, so its cost is once per
     /// [`COUNTED_SWEEP_INTERVAL`] no matter how often the caller runs — the
@@ -239,10 +237,7 @@ impl Correlation {
 
     /// TTL-prune every correlation map.
     ///
-    /// [`Correlation::child_ledger`] is the odd retain: not-yet-ended entries
-    /// ride until an end/sweep stamps `ended_at`, and the TTL applied is the
-    /// RELINK budget, not the GATE's — dropping the entry at the gate's TTL
-    /// also dropped the `parent_id` the #246 revival reads.
+    /// [`Correlation::child_ledger`] retains by [`CHILD_END_RELINK_TTL`], not the gate's TTL.
     pub(super) fn gc(&mut self, now: SystemTime) {
         self.recent_hook_tool_uses
             .retain(|_, (ts, _)| is_fresh(now, *ts, HOOK_WINS_WINDOW));
@@ -259,7 +254,7 @@ impl Correlation {
     }
 
     /// The sweeps too costly for the per-event [`Self::gc`]: `counted_calls`
-    /// keeps entries for up to the Waiting ceiling, so its retain scans real
+    /// keeps entries for up to [`STALE_WAITING_TIMEOUT`](crate::state::reducer::STALE_WAITING_TIMEOUT), so its retain scans real
     /// state. Self-amortized to [`COUNTED_SWEEP_INTERVAL`] — callers may run
     /// this as often as they like.
     pub(super) fn gc_slow(&mut self, now: SystemTime) {

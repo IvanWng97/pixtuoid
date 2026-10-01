@@ -4,7 +4,7 @@
 //! A hook-only source has no tailable transcript and therefore none of the JSONL
 //! watcher's liveness ladder; its ONLY exit signal is the best-effort
 //! `session_end` hook on a CLEAN quit, so an abrupt exit ghosts the sprite until
-//! the 10–30 min stale-sweep. When the shim can stamp the CLI's pid (`_pid`, an
+//! the reducer's stale sweep (`stale_threshold`). When the shim can stamp the CLI's pid (`_pid`, an
 //! ancestor walk past the runner's interposed shell where the OS allows one),
 //! [`ExitWatch`] emits a
 //! `SessionEnd` the moment that pid dies. Fed ONLY from the hook decode path,

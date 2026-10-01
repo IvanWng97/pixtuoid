@@ -20,7 +20,7 @@ fn dashboard_popup_renders_labels_states_and_live_tool() {
         selected: Some(first),
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
 
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Agents ("), "header missing:\n{text}");
@@ -81,7 +81,7 @@ fn connection_panel_renders_both_facets_borderless() {
         socket_line: "socket  /tmp/p.sock".into(),
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
 
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Sources"), "title missing:\n{text}");
@@ -127,7 +127,7 @@ fn connection_panel_health_flag_and_detail_preempt_the_install_path() {
         socket_line: "socket  /tmp/p.sock".into(),
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains('\u{26a0}'),
@@ -164,7 +164,7 @@ fn connection_panel_armed_shows_confirm_prompt() {
         confirm: Some(0),
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("(y/n)"),
@@ -194,7 +194,7 @@ fn connection_panel_disconnected_selected_shows_connect_hint() {
         socket_line: "socket  /tmp/p.sock".into(),
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("press t to connect"),
@@ -227,7 +227,7 @@ fn connection_panel_no_cli_selected_shows_not_detected_hint() {
         socket_line: "socket  /tmp/p.sock".into(),
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("not detected on this machine"),
@@ -260,7 +260,7 @@ fn connection_panel_connected_without_config_path_shows_connected() {
         socket_line: "socket  /tmp/p.sock".into(),
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("connected"),
@@ -294,7 +294,7 @@ fn connection_panel_last_result_overrides_per_state_detail() {
         socket_line: "socket  /tmp/p.sock".into(),
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("X-RESULT-SENTINEL"),
@@ -315,7 +315,7 @@ fn connection_panel_empty_rows_renders_panel_with_blank_detail() {
         socket_line: "socket  /tmp/p.sock".into(),
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("Sources"), "title missing:\n{text}");
     assert!(text.contains("j/k move"), "footer missing:\n{text}");
@@ -340,8 +340,9 @@ fn dashboard_collapsed_big_tree_shows_badge_and_hides_children() {
     let mut root = slot(root_id, 0, 0, t0());
     root.label = "cc\u{b7}root".into();
     let mut agents = vec![root];
-    // 6 > AUTO_COLLAPSE_THRESHOLD (5) → the root auto-collapses on open.
-    for i in 0..6 {
+    // Past the threshold → the root auto-collapses on open.
+    let children = crate::tui::dashboard::AUTO_COLLAPSE_THRESHOLD + 1;
+    for i in 0..children {
         let cid = AgentId::from_transcript_path(&format!("/h/root/subagents/agent-{i}.jsonl"));
         let mut c = slot(cid, 0, 1 + i, t0());
         c.label = format!("explorer{i}").into();
@@ -357,12 +358,12 @@ fn dashboard_collapsed_big_tree_shows_badge_and_hides_children() {
         selected: Some(root_id),
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
 
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("cc\u{b7}root"), "root row missing:\n{text}");
     assert!(
-        text.contains("(6)"),
+        text.contains(&format!("({children})")),
         "collapsed hidden-count badge missing:\n{text}"
     );
     // The popup's own count proves only the root is listed: a global
@@ -385,7 +386,7 @@ fn dashboard_closed_paints_no_popup() {
         rows,
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
 
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -445,7 +446,7 @@ fn dashboard_renders_waiting_reason_and_active_without_detail() {
         rows,
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
 
     let popup = dash_popup(r.frame_buffer());
     assert!(
@@ -479,7 +480,7 @@ fn dashboard_scrolls_to_keep_a_deep_selection_visible() {
         selected: Some(row18),
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
 
     let buf = r.frame_buffer();
     let text = frame_text(buf);
@@ -503,7 +504,7 @@ fn dashboard_empty_scene_shows_placeholder() {
         open: true,
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     assert!(
         frame_text(r.frame_buffer()).contains("No active agents"),
         "empty dashboard must show the placeholder"
@@ -536,7 +537,7 @@ fn a_short_terminal_windows_the_dashboard_below_its_row_cap() {
             selected: Some(deep),
             ..Default::default()
         });
-        r.render(&scene, &pack(), t0()).unwrap();
+        r.render(&scene, pack(), t0()).unwrap();
         // `dash_popup`, NOT `frame_text`: at a roomy height the OFFICE also renders
         // and paints agent name badges, which a whole-frame scan counts as rows.
         let text = dash_popup(r.frame_buffer());
@@ -583,7 +584,7 @@ fn dashboard_badge_text_present_for_cc_and_cx() {
         rows,
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
 
     let popup = dash_popup(r.frame_buffer());
     assert!(popup.contains("[cc]"), "cc badge missing:\n{popup}");
@@ -608,7 +609,7 @@ fn dashboard_overflow_cue_appears_below_when_more_than_viewport() {
         rows,
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
 
     let popup = dash_popup(r.frame_buffer());
     assert!(
@@ -634,7 +635,7 @@ fn dashboard_overflow_cue_absent_when_all_visible() {
         rows,
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
 
     let popup = dash_popup(r.frame_buffer());
     assert!(
@@ -663,7 +664,7 @@ fn dashboard_overflow_cue_keeps_a_bottom_navigated_selection_visible() {
         selected: Some(row20),
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let popup = dash_popup(r.frame_buffer());
     assert!(
         popup.contains("row20"),
@@ -696,7 +697,7 @@ fn dashboard_overflow_no_blank_line_when_selection_is_last_row() {
         selected: Some(last),
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let popup = dash_popup(r.frame_buffer());
     assert!(
         popup.contains("row16"),

@@ -4,6 +4,7 @@
 //! All kinematics are f32; screen is ≤ ~4096 px → ≤ ~57k octile, well
 //! within f32's 24-bit mantissa.
 
+use crate::layout::Point;
 use pixtuoid_core::AgentId;
 
 /// Why is this walk happening? Determines which cruise speed is used.
@@ -166,6 +167,48 @@ pub fn walk_profile(path_len_octile: u32, intent: WalkIntent, agent_id: AgentId)
 /// (progress scaled by this, so integer math carries three fractional digits).
 pub const PROGRESS_SCALE: u16 = 1000;
 
+/// Pure linear interpolation along the walk segment `from → to` at
+/// `t_x1000` (0..=[`PROGRESS_SCALE`]).
+pub(crate) fn walking_position(from: Point, to: Point, t_x1000: u16) -> Point {
+    let (t, scale) = (i32::from(t_x1000), i32::from(PROGRESS_SCALE));
+    let dx = to.x as i32 - from.x as i32;
+    let dy = to.y as i32 - from.y as i32;
+    // Left-walking agents cross through negative x if the interpolation
+    // overshoots, and a bare `as u16` wraps to ~65k — blitting off-screen.
+    Point {
+        x: (from.x as i32 + dx * t / scale).clamp(0, u16::MAX as i32) as u16,
+        y: (from.y as i32 + dy * t / scale).clamp(0, u16::MAX as i32) as u16,
+    }
+}
+
+/// Every pixel [`walking_position`] lands on along `from → to`, in walk order,
+/// each once: the progress values where either axis's truncated offset steps.
+pub(crate) fn leg_pixels(from: Point, to: Point) -> impl Iterator<Item = Point> {
+    let scale = u32::from(PROGRESS_SCALE);
+    let steps = |a: u16, b: u16| {
+        let d = u32::from(a.abs_diff(b));
+        (1..=d).map(move |k| (k * scale).div_ceil(d)).peekable()
+    };
+    let (mut xs, mut ys) = (steps(from.x, to.x), steps(from.y, to.y));
+    let mut next = Some(0);
+    std::iter::from_fn(move || {
+        let t = next?;
+        while xs.next_if(|&s| s <= t).is_some() {}
+        while ys.next_if(|&s| s <= t).is_some() {}
+        next = xs
+            .peek()
+            .copied()
+            .into_iter()
+            .chain(ys.peek().copied())
+            .min();
+        Some(walking_position(
+            from,
+            to,
+            u16::try_from(t).unwrap_or(PROGRESS_SCALE),
+        ))
+    })
+}
+
 /// Render progress as `t_x1000 = round(SCALE · s(elapsed_ms) / L)`,
 /// `SCALE` being [`PROGRESS_SCALE`].
 ///
@@ -220,6 +263,23 @@ pub fn walk_arrived(p: &WalkProfile, elapsed_ms: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn leg_pixels_are_every_position_a_walk_lands_on() {
+        let legs = [
+            (Point { x: 3, y: 5 }, Point { x: 6, y: 7 }),
+            (Point { x: 20, y: 4 }, Point { x: 13, y: 15 }),
+            (Point { x: 8, y: 8 }, Point { x: 8, y: 1 }),
+            (Point { x: 2, y: 2 }, Point { x: 2, y: 2 }),
+        ];
+        for (a, b) in legs {
+            let mut walked: Vec<Point> = (0..=PROGRESS_SCALE)
+                .map(|t| walking_position(a, b, t))
+                .collect();
+            walked.dedup();
+            assert_eq!(leg_pixels(a, b).collect::<Vec<_>>(), walked, "{a:?}->{b:?}");
+        }
+    }
 
     fn id(n: u8) -> AgentId {
         AgentId::from_parts("test", &format!("agent-{n}"))

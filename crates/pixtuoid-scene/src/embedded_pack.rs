@@ -1,19 +1,24 @@
 //! Sprite packs: the compiled-in default (`include_str!`, so the binary ships
 //! standalone), with at most one custom pack merged over it. A custom pack is a
 //! directory holding `pack.toml` + each `.sprite` file it references
-//! (`sprites/default/` is the canonical example); [`PackSource`] names where it
+//! (`sprites/default/` is the canonical example); `PackSource` names where it
 //! comes from, and deciding that is the caller's job.
 
+#[cfg(feature = "native")]
 use std::path::{Path, PathBuf};
 
+#[cfg(feature = "native")]
 use anyhow::{Context, Result};
+use pixtuoid_core::sprite::error::PackError;
+#[cfg(feature = "native")]
+use pixtuoid_core::sprite::format::{DensityMismatch, FrameCountMismatch, load_pack};
 use pixtuoid_core::sprite::format::{
-    DensityMismatch, FrameCountMismatch, Pack, ValidationReport, load_pack, load_pack_from_strings,
-    validate_pack_animations,
+    Pack, ValidationReport, load_pack_from_strings, validate_pack_animations,
 };
 
 /// Where a sprite pack's custom half comes from. The source decides what a
 /// custom pack that fails to load means.
+#[cfg(feature = "native")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackSource {
     /// The compiled-in default alone.
@@ -55,6 +60,7 @@ pub fn validate_pack(pack: &Pack) -> ValidationReport {
 /// required pose LOADS fine and then renders it as NOTHING, so without this the
 /// only signal is agents silently vanishing. Warn, don't fail — a
 /// partially-authored pack still renders every pose it does carry.
+#[cfg(feature = "native")]
 fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
     let report = validate_pack(pack);
     // Destructured without `..`: a field added to the report does not compile
@@ -68,9 +74,13 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         mismatched_density,
         orphan_variants,
         mismatched_frame_counts,
-        // A mixed look still renders every piece: `validate-pack` reports it.
+        // These still render: `validate-pack` reports them.
         partial_sets: _,
         orphan_derived: _,
+        unmarked_heads: _,
+        missing_hair_views: _,
+        overhanging_hair: _,
+        orphan_hairstyles,
     } = &report;
     for name in missing_required {
         tracing::warn!(
@@ -131,14 +141,23 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
              renderers skip it for the densest art that fits"
         );
     }
+    for style in orphan_hairstyles {
+        tracing::warn!(
+            origin,
+            hairstyle = ?style,
+            "custom sprite pack ships a hairstyle at a density it draws no character at — \
+             nobody wears it"
+        );
+    }
     report
 }
 
 /// Load the compiled-in default pack, with `source`'s custom pack merged over
 /// it. Reads nothing but the path `source` names, so a test, a benchmark or a
 /// committed snapshot draws the same art on every machine.
+#[cfg(feature = "native")]
 pub fn load_sprite_pack(source: PackSource) -> Result<Pack> {
-    let base = load_embedded_pack()?;
+    let base = load_bundled_pack()?;
     match source {
         PackSource::Bundled => Ok(base),
         PackSource::Explicit(dir) => load_custom_over(&base, &dir, "explicit")
@@ -160,6 +179,7 @@ pub fn load_sprite_pack(source: PackSource) -> Result<Pack> {
 
 /// The custom pack in `dir`, with the furniture it leaves out, and the city if
 /// it draws none, inherited from `base`.
+#[cfg(feature = "native")]
 fn load_custom_over(base: &Pack, dir: &Path, origin: &str) -> Result<Pack> {
     let mut custom = load_pack(dir)?;
     tracing::info!(origin, path = ?dir, "loaded custom sprite pack");
@@ -171,16 +191,20 @@ fn load_custom_over(base: &Pack, dir: &Path, origin: &str) -> Result<Pack> {
     Ok(custom)
 }
 
-/// The bundled pack, for unit tests.
+/// The bundled pack, for unit tests: parsed once per process, since the parse
+/// dominates a test that loads it per frame; each caller gets its own copy.
 #[cfg(test)]
 pub(crate) fn test_default_pack() -> Pack {
-    load_sprite_pack(PackSource::Bundled).expect("default pack loads")
+    static PACK: std::sync::OnceLock<Pack> = std::sync::OnceLock::new();
+    PACK.get_or_init(|| load_bundled_pack().expect("default pack loads"))
+        .clone()
 }
 
 /// The default pack's manifest, as `build.rs` embeds it.
 const EMBEDDED_PACK_TOML: &str = include_str!(concat!(env!("OUT_DIR"), "/embedded_pack.toml"));
 
-fn load_embedded_pack() -> Result<Pack, pixtuoid_core::sprite::error::PackError> {
+/// The compiled-in default pack alone: all a build without `native` can load.
+pub fn load_bundled_pack() -> Result<Pack, PackError> {
     load_pack_from_strings(EMBEDDED_PACK_TOML, &embedded_sprite_srcs())
 }
 
@@ -250,7 +274,9 @@ mod comments;
 mod tests {
     use super::*;
     use pixtuoid_core::sprite::format::Density;
+    #[cfg(feature = "native")]
     use std::fs;
+    #[cfg(feature = "native")]
     use std::path::Path;
 
     #[test]
@@ -273,11 +299,9 @@ mod tests {
         }
     }
 
-    /// Copy this crate's char-only pack fixture into `dst`. It carries NO
-    /// furniture, so the merge-from-embedded-default assertion isn't
-    /// tautological, and it lives INSIDE pixtuoid-scene so `cargo test` passes
-    /// from an extracted .crate — it must NOT reach into the sibling `pixtuoid`
-    /// binary crate's skeleton.
+    /// Copy this crate's char-only fixture into `dst`: no furniture, so the merge
+    /// assertion bites; in-crate, so `cargo test` passes from an extracted .crate.
+    #[cfg(feature = "native")]
     fn copy_skeleton_pack(dst: &Path) {
         fs::create_dir_all(dst).expect("mkdir pack dir");
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
@@ -292,6 +316,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "native")]
     fn load_sprite_pack_from_custom_dir_merges_with_embedded() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let pack_dir = tmp.path().join("custom");
@@ -308,8 +333,10 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "native")]
     #[derive(Clone)]
     struct WarnCounter(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    #[cfg(feature = "native")]
     impl tracing::Subscriber for WarnCounter {
         fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
             metadata.level() == &tracing::Level::WARN
@@ -330,7 +357,7 @@ mod tests {
     /// in it silently falls back to the upscaled base.
     #[test]
     fn the_embedded_pack_passes_its_own_validation() {
-        let pack = load_embedded_pack().expect("embedded pack");
+        let pack = test_default_pack();
         let report = validate_pack(&pack);
         assert!(!report.has_errors(), "{report:?}");
         // `StandIn::DefaultPack` promises the default draws what a custom pack
@@ -470,7 +497,7 @@ mod tests {
     fn embedded_default_pack_animations_are_all_in_the_registry() {
         // An animation the EMBEDDED pack ships but the registry doesn't know is
         // falsely reported "unused by renderer" by validate-pack.
-        let pack = load_sprite_pack(PackSource::Bundled).expect("embedded pack");
+        let pack = test_default_pack();
         let report = validate_pack(&pack);
         assert!(
             report.unknown.is_empty(),
@@ -480,6 +507,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "native")]
     fn custom_pack_missing_required_pose_loads_with_a_load_time_warning() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let pack_dir = tmp.path().join("gappy");
@@ -516,6 +544,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "native")]
     fn load_sprite_pack_from_missing_custom_dir_errors() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let missing = tmp.path().join("does-not-exist");
@@ -526,6 +555,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "native")]
     fn a_discovered_pack_loads_over_the_default_and_a_broken_one_falls_back() {
         let seated = |p: &Pack| p.animation("seated").expect("seated").frames()[0].clone();
         let embedded = seated(&test_default_pack());
@@ -561,6 +591,7 @@ mod tests {
     /// of the default's desk, so a check after the merge finds nothing to warn
     /// about.
     #[test]
+    #[cfg(feature = "native")]
     fn a_custom_variant_without_its_base_warns_at_load() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         copy_skeleton_pack(tmp.path());

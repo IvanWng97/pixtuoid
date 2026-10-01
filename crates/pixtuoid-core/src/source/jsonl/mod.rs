@@ -182,6 +182,8 @@ const DEFAULT_INITIAL_WINDOW: Duration = Duration::from_secs(3600);
 /// The watcher's poll backstop — also the cadence profile rescans ride, so
 /// "how often we look at the filesystem" has one authority.
 pub(crate) const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
+/// How long after the initial seed the watcher rescans.
+pub(super) const RESCAN_DELAY: Duration = Duration::from_millis(250);
 
 /// Test-only seam: forces every `JsonlWatcher` in this process onto a polling
 /// backend (`notify::PollWatcher`) at `interval`, instead of the native
@@ -316,7 +318,7 @@ impl JsonlWatcher {
         self
     }
 
-    /// The initial seed, the 250ms rescan and the 60s poll all run this SAME
+    /// The initial seed, the `RESCAN_DELAY` rescan and the `DEFAULT_POLL_INTERVAL` poll all run this SAME
     /// sequence; only the seed skips the un-claim drain (`drain = false` —
     /// nothing has been pushed at startup).
     async fn run_scan_pass(
@@ -345,8 +347,8 @@ impl JsonlWatcher {
         }
     }
 
-    /// Consume the watcher and drive the watch loop — initial seed, a 250ms
-    /// rescan, the 60s poll backstop, and notify events — feeding each decoded
+    /// Consume the watcher and drive the watch loop — initial seed, a `RESCAN_DELAY`
+    /// rescan, the `DEFAULT_POLL_INTERVAL` poll backstop, and notify events — feeding each decoded
     /// event to `tx`.
     pub async fn run(self, tx: TaggedSender) -> Result<()> {
         let cursors: Arc<Mutex<HashMap<PathBuf, u64>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -469,7 +471,7 @@ impl JsonlWatcher {
         // the initial seed walk (metadata propagation race). walk_jsonl is
         // idempotent (cursor == file_len → no-op).
         let mut rescan_done = false;
-        let rescan_delay = tokio::time::sleep(Duration::from_millis(250));
+        let rescan_delay = tokio::time::sleep(RESCAN_DELAY);
         tokio::pin!(rescan_delay);
 
         // An INTERVAL hoisted outside the loop, not a per-iteration sleep: a sleep
