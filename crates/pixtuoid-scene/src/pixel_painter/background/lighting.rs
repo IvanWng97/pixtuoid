@@ -69,7 +69,7 @@ pub(in crate::pixel_painter) fn paint_light(buf: &mut RgbBuffer, emitter: &Emitt
 /// outside rather than the wall the sign hangs on.
 pub(in crate::pixel_painter) fn paint_neon_halo(
     buf: &mut RgbBuffer,
-    layout: &crate::layout::Layout,
+    layout: &crate::layout::SceneLayout,
     neon: &Emitter,
     color: Rgb,
 ) {
@@ -370,7 +370,7 @@ mod tests {
     #[test]
     fn every_light_paints_only_inside_its_bounds() {
         let layout =
-            crate::layout::Layout::compute(192, 80, Some(crate::layout::TEST_DEFAULT_DESKS))
+            crate::layout::SceneLayout::compute(192, 80, Some(crate::layout::TEST_DEFAULT_DESKS))
                 .expect("fits");
         // 07:00 lights the lamps AND leans the sun through the windows.
         let sky =
@@ -450,7 +450,7 @@ mod tests {
     #[test]
     fn the_neon_halo_leaves_the_window_glass_alone() {
         let layout =
-            crate::layout::Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS))
+            crate::layout::SceneLayout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS))
                 .expect("192x160 fits");
         let sky =
             crate::sky::Sky::at_with(crate::localclock::at_hour(23), crate::sky::Weather::Clear);

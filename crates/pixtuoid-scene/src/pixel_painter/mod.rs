@@ -18,7 +18,7 @@ use crate::chitchat::{ActiveChitchat, ChitchatBubble};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
-use crate::layout::{Anchor, Depth, Facing, FixtureKind, Layout, Point, Station, z_sort_row};
+use crate::layout::{Anchor, Depth, Facing, FixtureKind, Point, SceneLayout, Station, z_sort_row};
 use crate::motion::MotionState;
 use crate::pet::PetFrame;
 
@@ -193,7 +193,7 @@ pub struct PixelCtx<'a> {
     /// The floor this pass renders.
     pub world: crate::floor::FloorInputs<'a>,
     /// The computed office geometry for this frame.
-    pub layout: &'a Layout,
+    pub layout: &'a SceneLayout,
     /// The active color theme.
     pub theme: &'a crate::theme::Theme,
     /// Carrier → fetch-time view of [`crate::floor::CoffeeState`]: key present
@@ -213,7 +213,7 @@ pub struct PixelCtx<'a> {
 /// the world.
 struct PaintCtx<'a> {
     scene: &'a SceneState,
-    layout: &'a Layout,
+    layout: &'a SceneLayout,
     pack: &'a Pack,
     /// Animation phase, event ages and the wall clock — every sky fact reads
     /// [`Self::sky`].
