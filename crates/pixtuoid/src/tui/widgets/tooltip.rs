@@ -50,7 +50,6 @@ pub(crate) fn paint_label_widgets(
     theme: &pixtuoid_scene::theme::Theme,
 ) {
     for el in labels {
-        let lx = scene_rect.x + el.anchor_px.x.saturating_sub(2);
         let ly = scene_rect.y + (el.anchor_px.y / 2).saturating_sub(1);
         let label_color = if el.hovered {
             Color::White
@@ -75,7 +74,10 @@ pub(crate) fn paint_label_widgets(
             ],
             None => vec![Span::styled(format!("{marker}{}", el.text), style)],
         };
-        let para = Paragraph::new(ratatui::text::Line::from(spans));
+        let line = ratatui::text::Line::from(spans);
+        let half_w = u16::try_from(line.width() / 2).unwrap_or(u16::MAX);
+        let lx = scene_rect.x + el.anchor_px.x.saturating_sub(half_w);
+        let para = Paragraph::new(line);
         if let Some(r) = clip_widget_rect(
             Rect {
                 x: lx,
@@ -496,6 +498,44 @@ mod tests {
             degraded,
             active_sessions,
         }
+    }
+
+    /// A badge's text centres on its anchor, the sprite's top-centre.
+    #[test]
+    fn a_badge_centres_its_text_on_the_anchor() {
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::{LabelElement, LabelTone};
+        let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        let scene_rect = Rect {
+            x: 3,
+            y: 1,
+            width: 36,
+            height: 8,
+        };
+        let anchor = Point { x: 20, y: 8 };
+        let text = "abcdefgh";
+        term.draw(|f| {
+            super::paint_label_widgets(
+                f,
+                &[LabelElement {
+                    anchor_px: anchor,
+                    text: text.into(),
+                    tone: LabelTone::Idle,
+                    hovered: false,
+                }],
+                scene_rect,
+                &theme::NORMAL,
+            )
+        })
+        .unwrap();
+        let row = row_of(&term, text).expect("the badge painted");
+        let buf = term.backend().buffer();
+        let left = (0..buf.area.width)
+            .find(|&x| buf[(x, row)].symbol() != " ")
+            .expect("a painted cell");
+        // The ● marker plus the name.
+        let width = 1 + text.chars().count() as u16;
+        assert_eq!(left, scene_rect.x + anchor.x - width / 2);
     }
 
     #[test]
