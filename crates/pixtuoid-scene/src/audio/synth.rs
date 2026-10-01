@@ -960,7 +960,7 @@ pub fn gen_beds(score: &GeneratedScore, rng: &mut NoiseStream) -> [Vec<f32>; 6] 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::audio::dsp::{Spectrum, band_energy_share, centroid_hz};
+    use crate::audio::dsp::{band_energy_share, centroid_hz};
 
     #[test]
     fn lane_recipe_is_the_ratified_shipping_params() {
@@ -1254,9 +1254,8 @@ mod tests {
                 (c - ref_centroid).abs() <= ref_centroid * 0.20,
                 "{name}: centroid {c:.1} vs ratified {ref_centroid}"
             );
-            let spectrum = Spectrum::of(&buf);
             for &(lo, hi, ref_share) in bands {
-                let s = spectrum.band_share(lo, hi);
+                let s = band_energy_share(&buf, lo, hi);
                 assert!(
                     (s - ref_share).abs() <= tol,
                     "{name} band {lo}-{hi}: {s:.3} vs ratified {ref_share}"
@@ -1265,7 +1264,7 @@ mod tests {
             // the full-kit signatures night deliberately lacks: the snare body
             // and the open-hat ring both put audible energy in 3.5-6.5k
             if name.ends_with("drums") {
-                let hats = spectrum.band_share(3500.0, 6500.0);
+                let hats = band_energy_share(&buf, 3500.0, 6500.0);
                 assert!(
                     hats > 0.0015,
                     "{name} hats/snare must be audible in 3.5-6.5k: {hats:.5}"
@@ -1320,17 +1319,15 @@ mod tests {
                     Mood::Day => assert_eq!(beds[4].len(), BED_LOOP_SAMPLES),
                     Mood::Night => assert_eq!(beds[4].len(), n),
                 }
-                let drums = Spectrum::of(&beds[3]);
-                let low = drums.band_share(62.5, 125.0);
-                let mid = drums.band_share(125.0, 250.0);
+                let low = band_energy_share(&beds[3], 62.5, 125.0);
+                let mid = band_energy_share(&beds[3], 125.0, 250.0);
                 assert!(
                     low > 0.2 && low > mid * 0.8,
                     "{mood:?} seed {seed}: drums lost the kick floor ({low:.3}/{mid:.3})"
                 );
-                let bass = Spectrum::of(&beds[5]);
-                let sub = bass.band_share(31.0, 125.0);
+                let sub = band_energy_share(&beds[5], 31.0, 125.0);
                 assert!(
-                    sub > 0.35 && sub > bass.band_share(250.0, 1000.0),
+                    sub > 0.35 && sub > band_energy_share(&beds[5], 250.0, 1000.0),
                     "{mood:?} seed {seed}: the bass lane must own the sub ({sub:.3})"
                 );
             }

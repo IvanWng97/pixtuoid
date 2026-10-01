@@ -244,44 +244,17 @@ pub fn centroid_hz(buf: &[f32]) -> f32 {
 /// Fraction of spectral power inside `[lo_hz, hi_hz)`.
 #[cfg(test)]
 pub fn band_energy_share(buf: &[f32], lo_hz: f32, hi_hz: f32) -> f32 {
-    Spectrum::of(buf).band_share(lo_hz, hi_hz)
-}
-
-/// One buffer's positive-frequency power, so several bands read one FFT.
-#[cfg(test)]
-pub struct Spectrum {
-    /// Bins `1..=n/2`; DC is outside every band.
-    power: Vec<f64>,
-    total: f64,
-    hz_per_bin: f32,
-}
-
-#[cfg(test)]
-impl Spectrum {
-    pub fn of(buf: &[f32]) -> Self {
-        let (re, im, n, hz_per_bin) = forward_spectrum(buf);
-        let power: Vec<f64> = (1..=n / 2)
-            .map(|k| (re[k] * re[k] + im[k] * im[k]) as f64)
-            .collect();
-        let total = power.iter().sum();
-        Self {
-            power,
-            total,
-            hz_per_bin,
+    let (re, im, n, hz_per_bin) = forward_spectrum(buf);
+    let (mut band, mut total) = (0.0f64, 0.0f64);
+    for k in 1..=n / 2 {
+        let p = (re[k] * re[k] + im[k] * im[k]) as f64;
+        let f = k as f32 * hz_per_bin;
+        total += p;
+        if f >= lo_hz && f < hi_hz {
+            band += p;
         }
     }
-
-    /// [`band_energy_share`] of the buffer this was taken from.
-    pub fn band_share(&self, lo_hz: f32, hi_hz: f32) -> f32 {
-        let mut band = 0.0f64;
-        for (k, &p) in (1usize..).zip(&self.power) {
-            let f = k as f32 * self.hz_per_bin;
-            if f >= lo_hz && f < hi_hz {
-                band += p;
-            }
-        }
-        (band / self.total.max(1e-12)) as f32
-    }
+    (band / total.max(1e-12)) as f32
 }
 
 #[cfg(test)]
