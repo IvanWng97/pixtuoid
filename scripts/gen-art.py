@@ -3301,13 +3301,21 @@ CREATURE_FIXES = {
 }
 
 
+# The most cells a frame's fixes may draw or clear: past it, the 1x is no
+# longer its master read, and the master should change instead.
+CREATURE_FIX_MOST = 4
+
+
 def creature_base(name, g):
     """Frame `name`'s 1x: its master `g`, settled from its bob, read at 1x,
     then its fixes."""
     bob = CREATURE_BOB.get(name, 0)
     out = block_read([[T] * len(g[0])] * bob + g[: len(g) - bob], creature_cell)
+    reshaped = 0
     for x, y, k in CREATURE_FIXES.get(name, ()):
+        reshaped += (out[y][x] == T) != (k == T)
         out[y][x] = k
+    assert reshaped <= CREATURE_FIX_MOST, f"{name}: {reshaped} cells fixed past its master's silhouette"
     return out
 
 

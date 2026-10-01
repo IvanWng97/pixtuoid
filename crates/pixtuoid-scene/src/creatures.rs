@@ -423,64 +423,41 @@ mod tests {
         crate::pack::test_default_pack()
     }
 
-    /// The 1x cells a creature's base may differ from its master read at 1x:
-    /// the few `gen-art`'s `CREATURE_FIXES` set by hand.
-    const CREATURE_FIX_SLACK: usize = 4;
-    /// `gen-art`'s `CREATURE_COVER`, in eighths of a block: the share, outline
-    /// counted, that makes a block a 1x cell.
-    const CREATURE_COVER_EIGHTHS: usize = 3;
-    /// The most master rows a frame's bob lifts it, which `gen-art` settles
-    /// before reading (`CREATURE_BOB`).
-    const CREATURE_BOB_MAX: u16 = 1;
+    /// Whether `f`'s eye (the bundled pack's `e`) sits east of its middle.
+    fn faces_east(pack: &Pack, f: &pixtuoid_core::sprite::Frame) -> bool {
+        let eye = pack.palette().get('e').flatten();
+        let xs: Vec<u32> = (0..f.height())
+            .flat_map(|y| (0..f.width()).map(move |x| (x, y)))
+            .filter(|&(x, y)| f.get(x, y).copied().flatten() == eye)
+            .map(|(x, _)| u32::from(x))
+            .collect();
+        !xs.is_empty() && xs.iter().sum::<u32>() * 2 > xs.len() as u32 * u32::from(f.width())
+    }
 
-    /// Each creature's base is its master read at 1x as `gen-art` reads it, bar
-    /// a hand fix or so, so the classic and the cutaway draw one animal; and
-    /// every walk, at every density, faces east, the way `pet_position` flips it
-    /// west.
+    /// Every pet's walk faces east, the way `pet_position` flips it west. (Its
+    /// 1x is its master read at 1x: `gen-art --check` holds that.)
     #[test]
-    fn each_creatures_base_is_its_master_read_at_1x() {
+    fn every_pet_walk_faces_east() {
         let pack = test_pack();
-        let eye = pack.palette().get('e').flatten().expect("the eye key");
-        let outline = pack.character_outline().expect("the outline key");
+        for kind in PetKind::ALL {
+            let walk = pack.animation(kind.walk_anim()).expect("the walk");
+            for (i, f) in walk.frames().iter().enumerate() {
+                assert!(faces_east(&pack, f), "{} {i} faces west", kind.walk_anim());
+            }
+        }
+    }
+
+    /// Every pet's walk master faces east too, so both densities face one way.
+    #[cfg(feature = "density-art")]
+    #[test]
+    fn every_pet_walk_master_faces_east() {
+        let pack = test_pack();
         let n = pack.max_density_variant().get();
-        let faces_east = |f: &pixtuoid_core::sprite::Frame| {
-            let xs: Vec<u32> = (0..f.height())
-                .flat_map(|y| (0..f.width()).map(move |x| (x, y)))
-                .filter(|&(x, y)| f.get(x, y).copied().flatten() == Some(eye))
-                .map(|(x, _)| u32::from(x))
-                .collect();
-            !xs.is_empty() && xs.iter().sum::<u32>() * 2 > xs.len() as u32 * u32::from(f.width())
-        };
-        for anim in [PetKind::Cat.walk_anim(), PetKind::Dog.walk_anim()] {
-            let base = pack.animation(anim).expect("the base");
-            let master = pack.animation(&format!("{anim}@{n}x")).expect("its master");
-            for (i, (b, m)) in base.frames().iter().zip(master.frames()).enumerate() {
-                // cells off the master read with the frame settled `bob` rows
-                let off = |bob: u16| {
-                    let mut off = 0;
-                    for y in 0..b.height() {
-                        for x in 0..b.width() {
-                            let block: Vec<_> = (0..n)
-                                .flat_map(|j| (0..n).map(move |k| (x * n + k, y * n + j)))
-                                .filter_map(|(mx, my)| {
-                                    let my = my.checked_sub(bob)?;
-                                    m.get(mx, my).copied().flatten()
-                                })
-                                .collect();
-                            let read = block.len() * 8
-                                >= usize::from(n * n) * CREATURE_COVER_EIGHTHS
-                                && block.iter().any(|&c| c != outline);
-                            off += usize::from(read != b.get(x, y).copied().flatten().is_some());
-                        }
-                    }
-                    off
-                };
-                let off = (0..=CREATURE_BOB_MAX).map(off).min().unwrap_or(usize::MAX);
-                assert!(
-                    off <= CREATURE_FIX_SLACK,
-                    "{anim} {i}: {off} cells off its master"
-                );
-                assert!(faces_east(b) && faces_east(m), "{anim} {i} faces west");
+        for kind in PetKind::ALL {
+            let name = format!("{}@{n}x", kind.walk_anim());
+            let master = pack.animation(&name).expect("the master");
+            for (i, f) in master.frames().iter().enumerate() {
+                assert!(faces_east(&pack, f), "{name} {i} faces west");
             }
         }
     }
