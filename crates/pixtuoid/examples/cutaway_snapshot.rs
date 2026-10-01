@@ -17,7 +17,7 @@ use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
 use pixtuoid_scene::cutaway::paint::{Office, Showing, render_cutaway};
-use pixtuoid_scene::floor::{FloorMeta, FloorSession, ObservedFloor};
+use pixtuoid_scene::floor::{FloorMeta, FloorSession, SteppedFloor};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::render_scale::RenderScale;
 use pixtuoid_scene::theme::theme_by_name;
@@ -173,8 +173,8 @@ fn main() -> Result<()> {
 
     // The real sim, at LOGICAL size — the cutaway is its second reader.
     let mut session = FloorSession::new();
-    let ObservedFloor { layout, frame } = session
-        .observe(
+    let SteppedFloor { layout, frame } = session
+        .step(
             pixtuoid_scene::floor::FloorInputs {
                 scene: &scene,
                 pack: &pack,
