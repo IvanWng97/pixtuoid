@@ -36,7 +36,7 @@ five crates. Overview: [`README.md`](README.md).
 ```
 crates/   DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}  (+ standalone pixtuoid-hook)
 ├── pixtuoid-core/   headless lib — no terminal deps; `native` feature gates the async
-│                    source runtime (no-default-features = wasm32-clean decode/reduce)
+│                    source runtime and disk pack reads (off = wasm32-clean decode/reduce)
 ├── pixtuoid-scene/  render+sim engine — terminal- AND window-free BY CRATE BOUNDARY
 ├── pixtuoid/        binary — two thin painters over pixtuoid-scene: `tui/`, `floating/`
 ├── pixtuoid-web/    third painter — wasm canvas, publish=false; a SITE BUILD INPUT

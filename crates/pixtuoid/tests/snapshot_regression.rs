@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime};
 use pixtuoid::tui::renderer::draw_scene;
 use pixtuoid_core::state::{ActivityState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
-use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
+use pixtuoid_scene::embedded_pack::load_bundled_pack;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -78,7 +78,7 @@ fn render_pixel_hash(now: SystemTime) -> u64 {
     let scene = fixture_scene(now);
     let backend = TestBackend::new(96, 36);
     let mut term = Terminal::new(backend).expect("terminal");
-    let pack = load_sprite_pack(PackSource::Bundled).expect("pack");
+    let pack = load_bundled_pack().expect("pack");
     make_draw_ctx!(draw_ctx, &scene, &pack, now);
     draw_scene(&mut term, &mut draw_ctx).expect("render");
 
@@ -120,7 +120,7 @@ fn render_produces_distinct_wall_band_and_floor_regions() {
     let scene = fixture_scene(now);
     let backend = TestBackend::new(96, 36);
     let mut term = Terminal::new(backend).expect("terminal");
-    let pack = load_sprite_pack(PackSource::Bundled).expect("pack");
+    let pack = load_bundled_pack().expect("pack");
     make_draw_ctx!(draw_ctx, &scene, &pack, now);
     draw_scene(&mut term, &mut draw_ctx).expect("render");
     let buf = &*draw_ctx.buf;
@@ -179,7 +179,7 @@ fn render_changes_when_an_agent_state_changes() {
     }
     let backend = TestBackend::new(96, 36);
     let mut term = Terminal::new(backend).expect("terminal");
-    let pack = load_sprite_pack(PackSource::Bundled).expect("pack");
+    let pack = load_bundled_pack().expect("pack");
     make_draw_ctx!(draw_ctx, &scene_idle, &pack, now);
     draw_scene(&mut term, &mut draw_ctx).expect("render");
     let mut hasher = DefaultHasher::new();

@@ -60,10 +60,7 @@ pub(super) fn render_until_settled<B: Backend<Error: Send + Sync + 'static>>(
 }
 
 pub(super) fn pack() -> Pack {
-    pixtuoid_scene::embedded_pack::load_sprite_pack(
-        pixtuoid_scene::embedded_pack::PackSource::Bundled,
-    )
-    .expect("embedded pack")
+    pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack")
 }
 pub(super) fn t0() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000)
