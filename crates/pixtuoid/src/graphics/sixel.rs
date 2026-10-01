@@ -1,6 +1,10 @@
 //! A tile as a DEC SIXEL image (VT330/VT340 Programmer Reference, ch. 14:
 //! <https://vt100.net/docs/vt3xx-gp/chapter14.html>), every pixel its own
 //! colour: no error diffusion, so a still office never shimmers.
+#![cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the compositor wires the tiles")
+)]
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -37,10 +41,6 @@ const MIN_REPEAT: usize = 4;
 /// an unset pixel as it was; `0` would paint it background,
 /// and a tile whose height is not a multiple of [`BAND`] has unset rows at
 /// the foot of its last band, over the next tile's top.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the compositor wires the tiles")
-)]
 pub(crate) fn transmit(image: &TileImage, origin: Position) -> Vec<u8> {
     let percent: Vec<[u8; 3]> = image
         .rgb

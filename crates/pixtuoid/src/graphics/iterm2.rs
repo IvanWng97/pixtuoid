@@ -1,5 +1,9 @@
 //! A tile as an iTerm2 inline image, one PNG each
 //! (<https://iterm2.com/documentation-images.html>).
+#![cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the compositor wires the tiles")
+)]
 
 use ratatui::layout::Position;
 
@@ -10,10 +14,6 @@ use super::tiles::TileImage;
 ///
 /// Sized in cells with the aspect ratio unkept, so iTerm2 fits the image to
 /// exactly the tile's cells, which it already spans pixel for pixel.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the compositor wires the tiles")
-)]
 pub(crate) fn transmit(image: &TileImage, origin: Position) -> Result<Vec<u8>, png::EncodingError> {
     let mut png = Vec::new();
     let mut encoder = png::Encoder::new(&mut png, image.width, image.height);
