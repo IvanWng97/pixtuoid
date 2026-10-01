@@ -4763,14 +4763,16 @@ S B B B B B B S
         );
     }
 
-    /// A light's span relit by the frame's own pass writes nothing outside it,
-    /// at every scale.
+    /// A light alone, through the frame's own pass over the whole room under a
+    /// sky that darkens nothing, changes no pixel outside its span, at every
+    /// scale.
     #[test]
     fn a_light_paints_only_inside_its_span() {
+        use crate::cutaway::light::{Ambient, Emission, NetMemo, net_pass};
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
-        let mut lights = 0;
+        let (mut lights, mut lit) = (0, 0);
         for s in [1, 3, pack.max_density_variant().get()] {
             let scale = RenderScale::new(s).expect("nonzero");
             let office = Office {
@@ -4780,10 +4782,31 @@ S B B B B B B S
                 scale,
             };
             let list = list_at(frame, office, 23);
+            let pen = Pen::for_pack(scale, &pack);
+            let (w, h) = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
+            let whole = ArtRect {
+                x: ArtPx(0),
+                y: ArtPx(0),
+                w: pen.art(layout.buf_w),
+                h: pen.art(layout.buf_h),
+            };
             for light in list.lights() {
                 lights += 1;
-                let buf = lights_over(&list, &layout, light.span);
-                let w = buf.width();
+                let mut buf = RgbBuffer::filled(w, h, theme.surface.bg_fallback);
+                net_pass(
+                    whole,
+                    &[&light.view],
+                    Ambient::default(),
+                    &Emission::new(w, h),
+                    pen,
+                    &mut NetMemo::default(),
+                    &mut buf,
+                );
+                lit += buf
+                    .as_slice()
+                    .iter()
+                    .filter(|&&c| c != theme.surface.bg_fallback)
+                    .count();
                 let stray = buf.as_slice().iter().enumerate().find(|&(i, &c)| {
                     let (x, y) = (
                         scale.logical((i % usize::from(w)) as u16),
@@ -4802,6 +4825,7 @@ S B B B B B B S
             }
         }
         assert!(lights > 0, "the night office has no lights");
+        assert!(lit > 0, "no light lifted a pixel, so this pins nothing");
     }
 
     /// The cutaway's sign glows only where the sign is drawn, and its lamps
