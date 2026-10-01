@@ -17,8 +17,10 @@ const NEON_EAST: u16 = NEON_PANEL.x + NEON_PANEL.width;
 const DOOR_INSET: u16 = (WINDOW_W - ELEVATOR_W) / 2;
 /// The wall east of the door's slot.
 const WINDOW_EDGE_MARGIN: u16 = 2;
+/// How far west of the wall's east end the door's slot starts.
+const DOOR_SLOT_EAST: u16 = WINDOW_W + WINDOW_EDGE_MARGIN;
 /// The narrowest wall whose door's slot stands clear of the neon.
-pub(crate) const NEON_DOOR_WALL_W: u16 = NEON_EAST + WINDOW_W + WINDOW_EDGE_MARGIN;
+pub(crate) const NEON_DOOR_WALL_W: u16 = NEON_EAST + DOOR_SLOT_EAST;
 /// The narrowest wall two windows fit on beside the door's slot.
 #[cfg(test)]
 pub(crate) const TWO_WINDOW_WALL_W: u16 =
@@ -57,7 +59,7 @@ impl WindowBay {
 /// The door's slot's left edge on a wall `buf_w` wide: flush with the east
 /// margin.
 fn door_slot_x(buf_w: u16) -> Option<u16> {
-    buf_w.checked_sub(WINDOW_EDGE_MARGIN + WINDOW_W)
+    buf_w.checked_sub(DOOR_SLOT_EAST)
 }
 
 /// Every window slot a wall `buf_w` wide fits, left to right, ending in the
@@ -151,7 +153,7 @@ pub(crate) fn window_posts(buf_w: u16) -> impl Iterator<Item = Range<u16>> {
 /// The elevator door's left column on a wall `buf_w` wide: centred in the
 /// door's slot, which stands even where no window run fits west of it.
 pub(crate) fn door_x(buf_w: u16) -> u16 {
-    buf_w.saturating_sub(WINDOW_EDGE_MARGIN + WINDOW_W) + DOOR_INSET
+    door_slot_x(buf_w).unwrap_or(0) + DOOR_INSET
 }
 
 /// The wall band's trim row, where the band meets the floor.
