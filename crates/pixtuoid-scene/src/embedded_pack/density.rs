@@ -52,7 +52,7 @@ pub(crate) fn densest_frame<'a>(
     scale: RenderScale,
 ) -> Option<DenseFrame<'a>> {
     let base_anim = pack.animation(name)?;
-    let idx = super::frame_index(base_anim, frame_idx);
+    let idx = super::lookup::frame_index(base_anim, frame_idx);
     let base = base_anim.frames().get(idx)?;
     let logical = (base.width(), base.height());
     let s = scale.get();
