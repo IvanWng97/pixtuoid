@@ -33,24 +33,26 @@ pub const WANDER_WALK_EST_MS: u64 = 3_500;
 /// Companion estimate: the at-waypoint dwell beat (paired with `WANDER_WALK_EST_MS`).
 pub const WANDER_DWELL_EST_MS: u64 = 18_000;
 
-/// How long the typing loop holds each frame: one Full beat, so a typist
-/// keys on every beat rather than skipping one.
-pub const TYPING_FRAME_MS: u64 = crate::anim::FULL_TICK_MS;
 /// Per-frame duration of the walking animation.
 pub const WALKING_FRAME_MS: u64 = 220;
-/// Frame count of the typing animation loop.
-pub const TYPING_FRAMES: usize = 2;
 /// Frame count of the walking animation loop.
 pub const WALKING_FRAMES: usize = 2;
 
-/// The typing loop's frame for `slot` on `beat`, phased by when it began
-/// typing so neighbours key out of step; the first frame at rest.
-pub(crate) fn typing_frame(slot: &AgentSlot, beat: crate::anim::Beat) -> usize {
+/// The frame of typing loop `anim` for `slot` on `beat`, one each of the
+/// art's own `frame_ms`, phased by when it began typing so neighbours key out
+/// of step; the first frame at rest.
+pub(crate) fn typing_frame(
+    slot: &AgentSlot,
+    beat: crate::anim::Beat,
+    anim: &pixtuoid_core::sprite::Sprite,
+) -> usize {
     if beat.is_rest() {
         return 0;
     }
-    let phase = crate::anim::epoch_ms(slot.state_started_at) / TYPING_FRAME_MS;
-    (beat.ms() / TYPING_FRAME_MS).wrapping_add(phase) as usize % TYPING_FRAMES
+    let ms = u64::from(anim.frame_ms().max(1));
+    let phase = crate::anim::epoch_ms(slot.state_started_at) / ms;
+    let frames = anim.frames().len().max(1) as u64;
+    ((beat.ms() / ms).wrapping_add(phase) % frames) as usize
 }
 
 /// The walking sprite's frame index at `elapsed_ms` into the walk — the one

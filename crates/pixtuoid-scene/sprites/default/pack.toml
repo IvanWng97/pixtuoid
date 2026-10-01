@@ -233,11 +233,11 @@ frame_ms = 220
 # still `seated_back`.
 [animations.typing_back]
 frames   = ["typing_back_0.sprite", "typing_back_1.sprite"]
-frame_ms = 220
+frame_ms = 125
 
 [animations."typing_back@4x"]
 frames   = ["typing_back_0@4x.sprite", "typing_back_1@4x.sprite"]
-frame_ms = 220
+frame_ms = 125
 
 [animations.desk]
 frames   = ["desk.sprite"]

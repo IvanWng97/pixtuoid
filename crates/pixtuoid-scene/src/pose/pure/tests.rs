@@ -73,11 +73,14 @@ fn active_state_is_seated_typing_with_cycling_frame() {
     let (s, now) = slot(typing(), 0);
     let l = layout();
     assert_eq!(derive(&s, now, &l), Some(Pose::SeatedTyping));
-    let frame = |ms| typing_frame(&s, crate::anim::Beat::at_ms(ms));
-    assert_ne!(frame(0), frame(TYPING_FRAME_MS), "it keys every frame");
-    assert_eq!(frame(0), frame(TYPING_FRAME_MS * 2));
+    let pack = crate::pack::test_default_pack();
+    let anim = pack.animation("typing").expect("the typing loop");
+    let ms = u64::from(anim.frame_ms());
+    let frame = |at| typing_frame(&s, crate::anim::Beat::at_ms(at), anim);
+    assert_ne!(frame(0), frame(ms), "it keys every frame");
+    assert_eq!(frame(0), frame(ms * anim.frames().len() as u64));
     assert_eq!(
-        typing_frame(&s, crate::anim::Motion::Still.beat(now)),
+        typing_frame(&s, crate::anim::Motion::Still.beat(now), anim),
         0,
         "at rest a typist holds the first frame"
     );
@@ -821,14 +824,12 @@ fn aimless_fallback_on_a_fully_blocked_mask_returns_the_desk_anchor() {
     }
 }
 
-/// Each figure loop's `frame_ms` in the bundled pack is the time the sim keys
-/// it by, at every density it draws.
+/// Each walking loop's `frame_ms` in the bundled pack is the time the sim
+/// keys it by, at every density it draws. (A typist reads its art's own.)
 #[test]
-fn each_figure_loop_holds_the_time_the_sim_keys_it_by() {
+fn each_walking_loop_holds_the_time_the_sim_keys_it_by() {
     let pack = crate::pack::test_default_pack();
     let keyed = [
-        ("typing", TYPING_FRAME_MS),
-        ("typing_back", TYPING_FRAME_MS),
         ("walking", WALKING_FRAME_MS),
         ("walking_back", WALKING_FRAME_MS),
         ("walking_coffee", WALKING_FRAME_MS),

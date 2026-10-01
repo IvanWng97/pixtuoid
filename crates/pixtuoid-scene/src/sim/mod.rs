@@ -649,41 +649,46 @@ pub(crate) fn resolve_characters(
             continue;
         };
         let is_waiting = matches!(agent.state, ActivityState::Waiting { .. });
-        let seated =
-            |base: &'static str, frame_idx: usize, glow: CharacterGlow, sleep_seed: Option<u64>| {
-                let facing = layout.desk_facing(agent.desk_index.single_floor_local());
-                let seat = Seat::at_desk(desk, facing);
-                let anchor = seat.render_anchor(char_w);
-                let (anim_name, flip_x) = seat.sprite_in_pack(base, pack);
-                let placement = CharacterPlacement {
-                    agent_idx,
-                    // Breath-independent z-key: the breath's 1 px rise must not flip
-                    // sort order against nearby desk decor frame-to-frame.
-                    anchor_y: seat.z_key(),
-                    anim_name,
-                    frame_idx,
-                    anchor,
-                    label_anchor: anchor,
-                    flip_x,
-                    glow,
-                    effects: Vec::new(),
-                    // The one arm that IS seated at a desk — see the field's doc.
-                    seat_desk: Some(desk),
-                    seated: true,
-                    breathes: true,
-                };
-                let cues = Cues {
-                    sleep_seed,
-                    waiting: is_waiting,
-                    stride: None,
-                };
-                (placement, cues)
+        // `frame_of` picks the frame from the art the seat resolves to, which
+        // may be another view's (`typing_back`) with its own timing.
+        let seated = |base: &'static str,
+                      frame_of: &dyn Fn(&'static str) -> usize,
+                      glow: CharacterGlow,
+                      sleep_seed: Option<u64>| {
+            let facing = layout.desk_facing(agent.desk_index.single_floor_local());
+            let seat = Seat::at_desk(desk, facing);
+            let anchor = seat.render_anchor(char_w);
+            let (anim_name, flip_x) = seat.sprite_in_pack(base, pack);
+            let frame_idx = frame_of(anim_name);
+            let placement = CharacterPlacement {
+                agent_idx,
+                // Breath-independent z-key: the breath's 1 px rise must not flip
+                // sort order against nearby desk decor frame-to-frame.
+                anchor_y: seat.z_key(),
+                anim_name,
+                frame_idx,
+                anchor,
+                label_anchor: anchor,
+                flip_x,
+                glow,
+                effects: Vec::new(),
+                // The one arm that IS seated at a desk — see the field's doc.
+                seat_desk: Some(desk),
+                seated: true,
+                breathes: true,
             };
+            let cues = Cues {
+                sleep_seed,
+                waiting: is_waiting,
+                stride: None,
+            };
+            (placement, cues)
+        };
         match p {
             Pose::SeatedIdle if is_waiting => {
                 // Waiting is the one state that WANTS the human — the `N wait`
                 // counter's twin. Asleep-with-zzz reads as the opposite.
-                placements.push(seated("seated", 0, CharacterGlow::None, None));
+                placements.push(seated("seated", &|_| 0, CharacterGlow::None, None));
             }
             Pose::SeatedIdle => {
                 let sleep_variant = if agent.agent_id.raw() % 2 == 0 {
@@ -693,17 +698,20 @@ pub(crate) fn resolve_characters(
                 };
                 placements.push(seated(
                     sleep_variant,
-                    0,
+                    &|_| 0,
                     CharacterGlow::None,
                     Some(agent.agent_id.raw()),
                 ));
             }
             Pose::SeatedThinking => {
-                placements.push(seated("seated", 0, CharacterGlow::Thinking, None));
+                placements.push(seated("seated", &|_| 0, CharacterGlow::Thinking, None));
             }
             Pose::SeatedTyping => {
-                let frame = pose::typing_frame(agent, beat);
-                placements.push(seated("typing", frame, CharacterGlow::Tool, None));
+                let frame_of = |name: &'static str| {
+                    pack.animation(name)
+                        .map_or(0, |anim| pose::typing_frame(agent, beat, anim))
+                };
+                placements.push(seated("typing", &frame_of, CharacterGlow::Tool, None));
             }
             Pose::AtWaypoint { wp, kind } => {
                 if let Some(wp_obj) = layout.waypoints.get(wp) {

@@ -21,10 +21,10 @@ use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 pub use pure::{
     ENTRY_ANIMATION_MS, Personality, Pose, STALE_RESUME_GAP_BASE_MS, STALE_RESUME_GAP_RANGE_MS,
-    THINKING_WINDOW_SECS, TYPING_FRAME_MS, TYPING_FRAMES, WALKING_FRAME_MS, WALKING_FRAMES,
-    WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS, aimless_wander_seed, derive, derive_state_only,
-    dwell_ms, est_wander_cycle_ms, is_aimless_cycle, personality_for, pick_aimless_dest,
-    seated_dwell_ms, stale_resume_gap_ms, takes_trip, walking_frame, waypoint_index_for_cycle,
+    THINKING_WINDOW_SECS, WALKING_FRAME_MS, WALKING_FRAMES, WANDER_DWELL_EST_MS,
+    WANDER_WALK_EST_MS, aimless_wander_seed, derive, derive_state_only, dwell_ms,
+    est_wander_cycle_ms, is_aimless_cycle, personality_for, pick_aimless_dest, seated_dwell_ms,
+    stale_resume_gap_ms, takes_trip, walking_frame, waypoint_index_for_cycle,
 };
 // These stay crate-internal: a `pub use` would try to widen their `pub(crate)`
 // visibility.

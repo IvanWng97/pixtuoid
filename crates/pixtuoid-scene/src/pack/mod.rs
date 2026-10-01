@@ -313,7 +313,13 @@ mod tests {
             VENDING_MACHINE_SPRITE,
             PRINTER_SPRITE,
         ];
-        let looped = fixtures.into_iter().chain(pets).chain(mascots);
+        // a typist keys on the art's own time (`pose::typing_frame`)
+        let typists = ["typing", "typing_back"];
+        let looped = fixtures
+            .into_iter()
+            .chain(typists)
+            .chain(pets)
+            .chain(mascots);
         for base in looped {
             let names = std::iter::once(base.to_string()).chain(
                 pack.density_variants()
@@ -331,11 +337,6 @@ mod tests {
                 );
             }
         }
-        assert_eq!(
-            pack.animation("typing").map(|a| u64::from(a.frame_ms())),
-            Some(crate::pose::TYPING_FRAME_MS),
-            "the pack's typing loop says what the sim keys it by"
-        );
     }
 
     #[test]
