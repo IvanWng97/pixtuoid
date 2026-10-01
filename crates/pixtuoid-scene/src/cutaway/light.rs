@@ -78,7 +78,7 @@ const BOLT_MAX_STEPS: u8 = 4;
 impl Flash {
     /// The room's lift under `sky`.
     pub(crate) fn of(sky: &crate::sky::Sky) -> Self {
-        Self(storm_steps(sky, FLASH_MAX_STEPS))
+        Self(flash_steps(sky, FLASH_MAX_STEPS))
     }
 
     /// `c` lifted by it.
@@ -91,14 +91,12 @@ impl Flash {
 /// [`Flash`] lifts it with everything else: up to [`BOLT_MAX_STEPS`] +
 /// [`FLASH_MAX_STEPS`] at a strike's peak.
 pub(crate) fn bolt_steps(sky: &crate::sky::Sky) -> u8 {
-    storm_steps(sky, BOLT_MAX_STEPS)
+    flash_steps(sky, BOLT_MAX_STEPS)
 }
 
-/// `sky`'s flash level in whole steps up to `max`, in a storm.
-fn storm_steps(sky: &crate::sky::Sky, max: u8) -> u8 {
-    if sky.weather() != crate::sky::Weather::Storm {
-        return 0;
-    }
+/// `sky`'s flash level in whole steps up to `max`: zero except in a storm, by
+/// [`Sky::flash`](crate::sky::Sky::flash).
+fn flash_steps(sky: &crate::sky::Sky, max: u8) -> u8 {
     (sky.flash().clamp(0.0, 1.0) * f32::from(max)).round() as u8
 }
 
