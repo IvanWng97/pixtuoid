@@ -139,15 +139,17 @@ invariant-breaking sequence against:
    failure impossible (#1142); a check outside [its own
    layer](docs/CONTRIBUTING.md#convergence-contract). Documented load-bearing
    defense (shim exit-0, config-never-wipe, liveness ladders) stays.
-6. **Naming**, each finding citing the code, prior word or guideline the name
-   breaks, `issue (non-blocking)` unless it misleads about behavior or
-   safety: every new or renamed name, `pub(crate)` and modules included, says
-   what its item is or does at head (behavior changed, so does the name); one
-   concept, one name across crates and painters, `rg`'d before coining (never
-   `art` for both sprite pack and person, nor a module named after a session);
-   compass words are [screen-space](crates/pixtuoid-scene/AGENTS.md);
-   [C-CONV, C-GETTER, C-ITER, C-WORD-ORDER](https://rust-lang.github.io/api-guidelines/naming.html);
-   a PR body or commit names the item, never a placeholder.
+6. **Naming**: every new or renamed name, `pub(crate)` and modules included,
+   is faithful, clear and concise. Each finding cites what the name breaks;
+   `issue (non-blocking)` unless it misleads about behavior or safety.
+   - **Faithful**: it says what the item is or does at head; a behavior change
+     renames it.
+   - **Clear**: a reader without this PR's context reads it right. One concept,
+     one name across crates and painters (`rg` before coining), and no name
+     for two concepts; compass words are [screen-space](crates/pixtuoid-scene/AGENTS.md).
+   - **Concise**: the shortest name that stays clear, in the domain's existing
+     word and Rust's [naming guidelines](https://rust-lang.github.io/api-guidelines/naming.html);
+     never a placeholder.
 
 ## Escalation
 
