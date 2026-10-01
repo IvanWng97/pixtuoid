@@ -46,8 +46,7 @@ Read [`AGENTS.md`](AGENTS.md) first; these rules add to generic defect hunting.
 
 - **Siblings** — a guard/cap/validation added to some of a sibling set
   (per-source decoders, install targets, platform arms, twin call sites) or to
-  one caller of a shared fn: `rg` the full set and every call site, and verify
-  each.
+  one caller of a shared fn: `rg` and verify the full set and every call site.
 - **DRY** — every new fn/type/helper/const gets a whole-tree search for an
   existing implementation, weighted by divergence risk; every value a new line
   reads is the authority its consumer uses, not a sibling's (#1042, #1155).
@@ -129,14 +128,16 @@ invariant-breaking sequence against:
    AGENTS.md's comment rules (accuracy, value, rot, vestigial,
    self-repetition); a story told twice keeps the copy on the narrowest thing
    it constrains.
-5. **Proportion** (AGENTS.md's YAGNI), each with the cheaper alternative,
-   `issue (non-blocking)` unless it breaches AGENTS.md: a new branch, helper,
-   parameter, type, fallback arm or test machinery serving no concrete,
-   reachable case; code, API change or coupling out of proportion to its
-   payoff (an API made `Option` across three painters for a width almost
-   never hit); an invariant held by prose where a type or the one source of
-   truth could make the failure impossible (#1142); a check asserting a fact
-   outside its own layer (a Python regex over `.rs`). Documented load-bearing
+5. **Proportion**, each with the cheaper alternative, `issue (non-blocking)`
+   unless it breaches AGENTS.md: **over-engineering** (YAGNI), a branch,
+   helper, parameter, type, fallback arm or test machinery serving no
+   reachable case; **low ROI**, code, API change or coupling out of proportion
+   to its payoff (an API made `Option` across three painters for a width
+   almost never hit); **hard to maintain**, needless indirection or layers,
+   special-case branches, one change smeared across many files; an invariant
+   held by prose where a type or the one source of truth could make the
+   failure impossible (#1142); a check outside [its own
+   layer](docs/CONTRIBUTING.md#convergence-contract). Documented load-bearing
    defense (shim exit-0, config-never-wipe, liveness ladders) stays.
 
 ## Escalation

@@ -299,7 +299,9 @@ before re-litigating.
 - **Round 2's fold** is the last behavior change and is verified, not
   re-reviewed: each fix is a revert, a deletion, or a change shipping a test
   that fails without it. Anything else reverts the fold.
-- **A fix round adds no new gate** — a wanted check is its own PR.
+- **A fix round adds no new gate** — a wanted check is its own PR, asserting
+  facts in its own layer (a Rust fact from Rust, never a Python regex over
+  `.rs`).
 
 ### Handy `gh` commands
 
