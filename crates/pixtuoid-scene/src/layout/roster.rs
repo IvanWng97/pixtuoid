@@ -743,9 +743,9 @@ impl SceneLayout {
     }
 
     /// Where meeting room `room` hangs its notice board: on the band, its north
-    /// wall, within one window pane, in the free spot nearest its centre, on
-    /// whichever pane is nearest the room's middle — `None` for a room whose north wall is not the band, or with
-    /// none free.
+    /// wall, within the window pane nearest the room's middle, at the free spot
+    /// nearest the pane's centre — `None` for a room whose north wall is not
+    /// the band, or with none free.
     pub(crate) fn notice_board_rect(&self, room: usize) -> Option<Bounds> {
         let b = self.meeting_rooms.get(room)?.bounds;
         if b.y > self.top_margin {
