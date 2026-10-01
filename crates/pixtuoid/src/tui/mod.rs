@@ -70,10 +70,13 @@ enum KeyAction {
     ToggleAudioMute,
     /// `true` = up.
     AdjustVolume(bool),
-    /// The `w` dispatch arm is `#[cfg(debug_assertions)]`-gated, so in release this
-    /// variant is never constructed; the `apply_key_action` match arm stays unconditional
-    /// for exhaustiveness.
-    #[cfg_attr(not(debug_assertions), allow(dead_code))]
+    #[cfg_attr(
+        all(not(debug_assertions), not(test)),
+        expect(
+            dead_code,
+            reason = "only the debug-build `w` dispatch arm builds it; the apply arm stays unconditional for exhaustiveness"
+        )
+    )]
     ToggleWalkableDebug,
     ToggleDashboard,
     DashboardUp,

@@ -41,7 +41,10 @@ pub(crate) const GRAPHICS_PROBE_TIMEOUT: std::time::Duration = std::time::Durati
 /// Built only by the `graphics`-feature [`probe()`]; a build without it still
 /// names every protocol, so the plan is one type in both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(not(feature = "graphics"), allow(dead_code))]
+#[cfg_attr(
+    all(not(feature = "graphics"), not(test)),
+    expect(dead_code, reason = "only the graphics probe builds one")
+)]
 pub(crate) enum ImageProtocol {
     /// kitty's graphics protocol.
     Kitty,
@@ -178,22 +181,37 @@ pub(crate) enum Probe {
     /// What the terminal's answer and the environment established — the
     /// environment alone where the terminal never answered but names a
     /// protocol, as upstream falls back (see [`probe()`]).
-    #[cfg_attr(not(feature = "graphics"), allow(dead_code))]
+    #[cfg_attr(
+        all(not(feature = "graphics"), not(test)),
+        expect(dead_code, reason = "only the graphics probe returns it")
+    )]
     Detected(Detected),
     /// The terminal was never asked: the caller said not to, or no controlling
     /// terminal took the query.
-    #[cfg_attr(not(feature = "graphics"), allow(dead_code))]
+    #[cfg_attr(
+        all(not(feature = "graphics"), not(test)),
+        expect(dead_code, reason = "only the graphics probe returns it")
+    )]
     NotQueried,
     /// The terminal was asked, its reply never completed, and the environment
     /// names no protocol to fall back on. Only the Unix probe can tell (see
     /// [`probe()`]).
-    #[cfg_attr(not(all(feature = "graphics", unix)), allow(dead_code))]
+    #[cfg_attr(
+        all(not(all(feature = "graphics", unix)), not(test)),
+        expect(dead_code, reason = "only the Unix graphics probe returns it")
+    )]
     NoAnswer,
     /// Inside tmux with `allow-passthrough` off, so nothing was asked.
-    #[cfg_attr(not(all(feature = "graphics", unix)), allow(dead_code))]
+    #[cfg_attr(
+        all(not(all(feature = "graphics", unix)), not(test)),
+        expect(dead_code, reason = "only the Unix graphics probe returns it")
+    )]
     TmuxPassthroughOff,
     /// This build cannot ask.
-    #[cfg_attr(feature = "graphics", allow(dead_code))]
+    #[cfg_attr(
+        all(feature = "graphics", not(test)),
+        expect(dead_code, reason = "only the graphics-less probe returns it")
+    )]
     Unsupported,
 }
 

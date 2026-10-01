@@ -521,7 +521,13 @@ fn activation_backend() -> (&'static str, bool) {
 /// and non-forwarded ssh sessions leave them routinely) would otherwise print a confidently
 /// wrong verdict at a user whose X11 EWMH channel works fine. `focus::linux::detect_channel`
 /// keys the live channel through the SAME reader.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(
+    all(not(target_os = "linux"), not(test)),
+    expect(
+        dead_code,
+        reason = "only the Linux activation backend reads it off test"
+    )
+)]
 fn marker_set(name: &str) -> bool {
     pixtuoid_core::platform::path_env(name).is_some()
 }
@@ -531,7 +537,13 @@ fn marker_set(name: &str) -> bool {
 /// be reported as "X11 EWMH ✓": XWayland sets $DISPLAY, but a native-Wayland terminal never
 /// appears in XWayland's client list and mutter/kwin block focus-steal anyway, so the ✓
 /// would mislead exactly the users focus fails for.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(
+    all(not(target_os = "linux"), not(test)),
+    expect(
+        dead_code,
+        reason = "only the Linux activation backend reads it off test"
+    )
+)]
 fn linux_activation_backend(
     sway: bool,
     hyprland: bool,
