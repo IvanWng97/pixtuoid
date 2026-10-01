@@ -311,11 +311,12 @@ fn paint_too_small_notice(
     }
 }
 
-/// The wall board `footer` tallies off `scene` at `now`, whichever profile
-/// paints it.
+/// The wall board `footer` tallies off `scene` at `now`, its flap moving as
+/// `motion` says, whichever profile paints it.
 pub(crate) fn wall_board(
     footer: &FooterInputs<'_>,
     scene: &SceneState,
+    motion: pixtuoid_scene::anim::Motion,
     now: SystemTime,
 ) -> pixtuoid_scene::board::BoardModel {
     pixtuoid_scene::board::build_board(
@@ -323,7 +324,7 @@ pub(crate) fn wall_board(
         pixtuoid_scene::board::scene_uptime_secs(scene, now),
         footer.context.floor.map(|fi| (fi.current, fi.total_floors)),
         footer.context.gateway,
-        pixtuoid_scene::anim::Motion::Full,
+        motion,
         now,
     )
 }
@@ -393,7 +394,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     apply_dim(ctx.buf, ctx.onboarding.dim);
 
     let labels = pixtuoid_scene::overlay::build_overlay(scene, &agents, hovered);
-    let board = wall_board(&footer, scene, now);
+    let board = wall_board(&footer, scene, ctx.world.floor.motion, now);
     let buf = &ctx.buf;
     term.draw(|f| {
         // Re-derive rects from the actual frame buffer to guard against

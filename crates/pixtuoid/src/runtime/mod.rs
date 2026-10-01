@@ -52,6 +52,9 @@ pub struct RunConfig {
     pub audio: crate::config::AudioConfig,
     /// Resolved by `config::resolve_graphics`. Headless and `floating` ignore it.
     pub graphics: crate::GraphicsMode,
+    /// Resolved by `config::resolve_motion`; `auto` is what the TUI's graphics
+    /// plan affords, and Full in the floating window.
+    pub motion: crate::config::MotionMode,
 }
 
 /// A live, shared set of connected source ids — the runtime mirror of the persisted

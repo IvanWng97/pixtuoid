@@ -221,6 +221,57 @@ pub(crate) enum Plan {
     },
 }
 
+/// Inside tmux: `TERM` starting `tmux`, or `TERM_PROGRAM` = `tmux` — the test
+/// upstream applies before wrapping every image in passthrough (ratatui-image
+/// 11.0.8 `picker.rs:320-326`), on every platform.
+fn in_tmux(term: Option<&str>, term_program: Option<&str>) -> bool {
+    term.is_some_and(|t| t.starts_with("tmux")) || term_program == Some("tmux")
+}
+
+/// What stands between this process and the screen, from the environment
+/// alone: each hop makes a repaint dearer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct Link {
+    /// Inside tmux, which redraws every repaint itself.
+    pub(crate) tmux: bool,
+    /// Over ssh, where every repaint crosses the network.
+    pub(crate) ssh: bool,
+}
+
+impl Link {
+    /// The link this process's environment names.
+    pub(crate) fn of_env() -> Self {
+        let set = |name| std::env::var_os(name).is_some_and(|v| !v.is_empty());
+        let text = pixtuoid_core::platform::text_env;
+        Self {
+            tmux: set("TMUX") || in_tmux(text("TERM").as_deref(), text("TERM_PROGRAM").as_deref()),
+            // ssh(1) ENVIRONMENT: what a session's sshd sets, SSH_TTY only with a tty.
+            ssh: ["SSH_CONNECTION", "SSH_TTY"].into_iter().any(set),
+        }
+    }
+}
+
+impl Plan {
+    /// The motion this plan affords: every loop on a local kitty image or
+    /// half-block grid, a calmer pace where a repaint costs more — SIXEL's or
+    /// iTerm2's heavier image, tmux, ssh.
+    pub(crate) fn motion(self, link: Link) -> pixtuoid_scene::anim::Motion {
+        use pixtuoid_scene::anim::Motion;
+        let heavy = matches!(
+            self,
+            Plan::Cutaway {
+                protocol: ImageProtocol::Sixel | ImageProtocol::Iterm2,
+                ..
+            }
+        );
+        if heavy || link.tmux || link.ssh {
+            Motion::Calm
+        } else {
+            Motion::Full
+        }
+    }
+}
+
 /// What the probe learned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Detected {
@@ -642,6 +693,38 @@ mod tests {
         width: 120,
         height: 40,
     };
+
+    /// Each terminal kind's default motion: every loop on a local kitty image or
+    /// half-block grid, the calm pace for SIXEL, iTerm2, tmux or ssh.
+    #[test]
+    fn each_terminal_kind_paints_at_its_affordable_motion() {
+        use pixtuoid_scene::anim::Motion;
+        let plan = |protocol| {
+            let probe = answered(Some(protocol), CELL_8X16, false);
+            resolve(GraphicsMode::Auto, probe, BUNDLED, AREA)
+        };
+        let classic = resolve(GraphicsMode::Off, Probe::NotQueried, BUNDLED, AREA);
+        let local = Link::default();
+        let tmux = Link {
+            tmux: true,
+            ..local
+        };
+        let ssh = Link { ssh: true, ..local };
+        assert!(matches!(plan(ImageProtocol::Kitty), Plan::Cutaway { .. }));
+        assert_eq!(plan(ImageProtocol::Kitty).motion(local), Motion::Full);
+        assert_eq!(classic.motion(local), Motion::Full);
+        for heavy in [ImageProtocol::Sixel, ImageProtocol::Iterm2] {
+            assert_eq!(plan(heavy).motion(local), Motion::Calm, "{heavy:?}");
+        }
+        for link in [tmux, ssh] {
+            assert_eq!(
+                plan(ImageProtocol::Kitty).motion(link),
+                Motion::Calm,
+                "{link:?}"
+            );
+            assert_eq!(classic.motion(link), Motion::Calm, "{link:?}");
+        }
+    }
 
     #[test]
     fn bundled_is_the_embedded_packs_max_density() {

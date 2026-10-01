@@ -50,13 +50,15 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     rt.block_on(async move { run_async(cfg, tui).await })
 }
 
-/// The TUI's pack, and the plan for painting it.
+/// The TUI's pack, the plan for painting it, and how its office moves.
 type Boot = (
     Arc<pixtuoid_core::sprite::format::Pack>,
     crate::graphics::Plan,
+    pixtuoid_scene::anim::Motion,
 );
 
-/// Load the pack, whose densest art the plan fits, and plan.
+/// Load the pack, whose densest art the plan fits, plan, and pick the motion
+/// the plan affords unless the config names one.
 fn boot_tui(cfg: &RunConfig) -> Result<Boot> {
     let pack = Arc::new(pixtuoid_scene::embedded_pack::load_sprite_pack(
         cfg.pack.clone(),
@@ -67,7 +69,9 @@ fn boot_tui(cfg: &RunConfig) -> Result<Boot> {
         crate::graphics::run_probe,
     );
     tracing::info!(mode = ?cfg.graphics, plan = ?plan, "graphics plan");
-    Ok((pack, plan))
+    let motion = cfg.motion.or(plan.motion(crate::graphics::Link::of_env()));
+    tracing::info!(mode = ?cfg.motion, motion = ?motion, "motion");
+    Ok((pack, plan, motion))
 }
 
 async fn run_async(cfg: RunConfig, tui: Option<Boot>) -> Result<()> {
@@ -86,6 +90,7 @@ async fn run_async(cfg: RunConfig, tui: Option<Boot>) -> Result<()> {
         first_run,
         audio,
         graphics: _,
+        motion: _,
     } = cfg;
     // Audio owns no state here: `run_tui` builds the AudioController, which owns
     // the device thread and tears it down on Drop at any exit.
@@ -114,11 +119,12 @@ async fn run_async(cfg: RunConfig, tui: Option<Boot>) -> Result<()> {
 
     match tui {
         None => headless_loop(scene_rx, health_rx).await,
-        Some((pack, plan)) => {
+        Some((pack, plan, motion)) => {
             crate::tui::run_tui(crate::tui::TuiSession {
                 scene_rx,
                 pack,
                 plan,
+                motion,
                 floor_caps,
                 theme,
                 config_path,

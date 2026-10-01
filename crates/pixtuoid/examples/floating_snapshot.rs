@@ -171,7 +171,7 @@ fn main() -> Result<()> {
     let (bw, bh) = (buf.width(), buf.height());
     let labels = renderer.labels(&scene);
     paint_labels_into_surface(&mut surf, &labels, scale as i32, theme);
-    let board = renderer.board(&scene, now);
+    let board = renderer.board(&scene, pixtuoid_scene::anim::Motion::Full, now);
     pixtuoid::floating::offscreen::paint_wall_board_into_surface(
         &mut surf,
         &board,

@@ -42,6 +42,8 @@ pub(crate) struct FloatingApp {
     config_path: PathBuf,
     /// The configured office pets — one is selected per floor (v1 shows floor 0's).
     pets: Vec<pixtuoid_scene::pet::Pet>,
+    /// How the office moves.
+    motion: pixtuoid_scene::anim::Motion,
     renderer: OfficeRenderer,
     audio_ctl: crate::audio::AudioController,
     /// The pipeline inputs, held until `resumed` can supply the REAL window size
@@ -89,6 +91,7 @@ impl FloatingApp {
             pack,
             config_path,
             pets,
+            motion: pixtuoid_scene::anim::Motion::Full,
             renderer,
             audio_ctl,
             boot: Some(boot),
@@ -100,6 +103,11 @@ impl FloatingApp {
             context: None,
             surface: None,
         }
+    }
+
+    /// This window, its office moving as `motion` says.
+    pub(crate) fn with_motion(self, motion: pixtuoid_scene::anim::Motion) -> Self {
+        Self { motion, ..self }
     }
 
     /// Persist the current window geometry into `[floating]` (best-effort — a save error
@@ -144,7 +152,7 @@ impl FloatingApp {
         let volume_flash = self.audio_ctl.volume_flash(audio_now);
         let (scale, buf_w, buf_h) = super::offscreen::window_buffer_geometry(size);
         super::offscreen::sync_floor_caps(&mut self.last_caps_size, &floor_caps, buf_w, buf_h);
-        let floor_meta = FloorMeta::ground();
+        let floor_meta = FloorMeta::ground().with_motion(self.motion);
         let floor_pet =
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
         // ONE clock read, so the overlays below annotate the frame actually rendered.
@@ -184,7 +192,7 @@ impl FloatingApp {
         surf.fill_upscaled(office, scale);
         let labels = self.renderer.labels(&scene);
         super::offscreen::paint_labels_into_surface(&mut surf, &labels, scale as i32, self.theme);
-        let board = self.renderer.board(&scene, now);
+        let board = self.renderer.board(&scene, self.motion, now);
         super::offscreen::paint_wall_board_into_surface(
             &mut surf,
             &board,

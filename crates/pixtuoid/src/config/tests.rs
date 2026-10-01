@@ -1267,6 +1267,38 @@ fn graphics_parses_from_the_file() {
     );
 }
 
+/// The key parses under its documented name; absent is `auto`, and a typo
+/// warns and falls back rather than failing the whole load.
+#[test]
+fn motion_parses_from_the_file_and_a_typo_falls_back_to_auto() {
+    let resolve = |toml_text: &str, w: &mut Vec<String>| {
+        let cfg: AppConfig = toml::from_str(toml_text).expect("parses");
+        resolve_motion(&cfg, w)
+    };
+    let mut w = Vec::new();
+    assert_eq!(resolve("", &mut w), MotionMode::Auto);
+    assert_eq!(resolve("motion = \"still\"\n", &mut w), MotionMode::Still);
+    assert_eq!(resolve("motion = \"calm\"\n", &mut w), MotionMode::Calm);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(resolve("motion = \"stil\"\n", &mut w), MotionMode::Auto);
+    assert!(
+        w.len() == 1 && w[0].contains("unknown motion \"stil\""),
+        "{w:?}"
+    );
+}
+
+/// `auto` takes what the display affords; any other mode overrides it.
+#[test]
+fn a_motion_mode_overrides_only_what_auto_would_take() {
+    use pixtuoid_scene::anim::Motion;
+    for afforded in [Motion::Full, Motion::Calm] {
+        assert_eq!(MotionMode::Auto.or(afforded), afforded);
+        assert_eq!(MotionMode::Still.or(afforded), Motion::Still);
+        assert_eq!(MotionMode::Full.or(afforded), Motion::Full);
+        assert_eq!(MotionMode::Calm.or(afforded), Motion::Calm);
+    }
+}
+
 /// A typo'd value warns and falls back rather than failing the whole load, and
 /// warns even when the flag wins — the warning is the only sign the file is
 /// stale.

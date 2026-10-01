@@ -40,6 +40,7 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         connected,
         config_path,
         audio,
+        motion,
         ..
     } = cfg;
     let app_config = config::load(&config_path, &mut Vec::new());
@@ -83,7 +84,8 @@ pub fn run(cfg: RunConfig) -> Result<()> {
             rt: rt.handle().clone(),
         },
         audio,
-    );
+    )
+    .with_motion(motion.or(pixtuoid_scene::anim::Motion::Full));
     event_loop
         .run_app(&mut app)
         .context("running the floating window event loop")

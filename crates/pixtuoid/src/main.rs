@@ -202,6 +202,7 @@ fn build_run_config(
     let pack = config::resolve_pack_source(&cfg, pack_dir);
     let pets = config::resolve_pets(&cfg, &mut cfg_warnings);
     let graphics = config::resolve_graphics(&cfg, cli_graphics, &mut cfg_warnings);
+    let motion = config::resolve_motion(&cfg, &mut cfg_warnings);
     let connected = config::resolve_connected(&cfg);
     if !headless {
         // Config problems must reach stderr BEFORE any alternate screen / window,
@@ -227,6 +228,7 @@ fn build_run_config(
         first_run,
         audio: config::resolve_audio(&cfg),
         graphics,
+        motion,
     })
 }
 
