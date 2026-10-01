@@ -555,7 +555,8 @@ impl SceneLayout {
             )
             .chain(desk_fixtures(home_desks, *buf_h))
             .chain(rooms.clone().filter_map(move |(room, _, trio)| {
-                let rug = trio?.0.rug(*buf_h);
+                // Off the corridor runner a south room's floor runs into.
+                let rug = trio?.0.rug(corridor.map_or(*buf_h, |c| c.y));
                 Some(Fixture {
                     kind: FixtureKind::MeetingRug { room },
                     at: top_left(rug),

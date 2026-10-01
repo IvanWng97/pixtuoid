@@ -22,9 +22,9 @@ const MEETING_RUG_OVERHANG: u16 = 8;
 
 impl MeetingTrio {
     /// The rug under this trio's table, reaching from sofa to sofa but no
-    /// further than the table's distance to the office's south edge (plus the
-    /// same overhang), in a `buf_h`-tall office.
-    pub(crate) fn rug(&self, buf_h: u16) -> Bounds {
+    /// further than the table's distance to `floor_end`, the row its floor ends
+    /// at (plus the same overhang).
+    pub(crate) fn rug(&self, floor_end: u16) -> Bounds {
         let [north, south] = self.sofas;
         let h = south
             .y
@@ -33,7 +33,7 @@ impl MeetingTrio {
             // A trio by the south edge shortens its rug, still centred on the
             // table.
             .min(
-                buf_h
+                floor_end
                     .saturating_sub(self.table.y)
                     .saturating_add(MEETING_RUG_OVERHANG),
             );

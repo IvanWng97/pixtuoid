@@ -573,8 +573,6 @@ const OVERLAP_DEFECTS: &[(&str, &str)] = &[
     ("Station", "TrashBin"),
     ("Station", "WaterCooler"),
     ("PantryMat", "WaterCooler"),
-    // A south meeting room's rug reaches the runner.
-    ("MeetingRug", "Runner"),
 ];
 
 /// Two fixtures' art overlaps only as a listed pair, and each listed pair still
