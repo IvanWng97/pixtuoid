@@ -909,5 +909,11 @@ mod tests {
         let glass_w = glass.end() - glass.start() + 1;
         let before = col(u64::from(u16::MAX));
         assert_eq!(col(u64::from(u16::MAX) + 1), (before + 1) % glass_w);
+        let at = SystemTime::UNIX_EPOCH + Duration::from_millis(7 * SCANLINE_STEP_MS);
+        assert_eq!(
+            scanline_col(3, at),
+            (scanline_col(0, at) + 3) % glass_w,
+            "each desk a column on from its west neighbour's"
+        );
     }
 }

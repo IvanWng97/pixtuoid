@@ -609,6 +609,36 @@ mod tests {
     use crate::layout::DESK_W;
     use crate::pet::PetKind;
 
+    /// The 1x tower and sheet art are the classic's: a frame per tier up to
+    /// [`MAX_TIER`](crate::token_meter::MAX_TIER), each [`STACK_PX_PER_TIER`]
+    /// rows a tier and [`STACK_W`] wide, the full tower a column wider for its
+    /// teeter.
+    #[test]
+    fn the_1x_token_art_is_the_classics_stack() {
+        let pack = crate::embedded_pack::test_default_pack();
+        let tower = pack.animation("token_tower").expect("the tower");
+        let max = crate::token_meter::MAX_TIER;
+        assert_eq!(tower.frames().len(), usize::from(max));
+        for (tier, f) in (1..=max).zip(tower.frames()) {
+            let teeter = u16::from(tier == max);
+            assert_eq!(
+                (f.width(), f.height()),
+                (STACK_W + 1, u16::from(tier) * STACK_PX_PER_TIER),
+                "tier {tier}"
+            );
+            let drawn = |x: u16, y: u16| f.get(x, y).copied().flatten().is_some();
+            assert!(
+                (0..f.height()).all(|y| {
+                    let dx = if y == 0 { teeter } else { 0 };
+                    (0..f.width()).all(|x| drawn(x, y) == (dx..dx + STACK_W).contains(&x))
+                }),
+                "tier {tier} is not {STACK_W} wide with its teeter"
+            );
+        }
+        let sheet = &pack.animation("token_sheet").expect("the sheet").frames()[0];
+        assert_eq!((sheet.width(), sheet.height()), (STACK_W, 1));
+    }
+
     /// The 1x desk arts mark the cells the classic stands its props on, each
     /// the prop's foot: the cup's under [`desk_cup_at`], the tower's at
     /// [`STACK_X_OFF`] on [`STACK_BASE_DY`].

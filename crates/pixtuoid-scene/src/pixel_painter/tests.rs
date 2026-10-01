@@ -3401,15 +3401,22 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
         Some(0),
         "a big reading drops a sheet"
     );
-    for (i, props) in fresh.iter().enumerate().filter(|&(i, _)| i != desk) {
+    for (i, props) in fresh.iter().enumerate() {
         assert_eq!(
-            *props,
-            crate::sim::DeskProps {
-                scanline: props.scanline,
-                ..Default::default()
-            },
-            "desk {i} has no occupant"
+            props.scanline,
+            crate::sim::scanline_col(layout.home_desks[i].x, now0),
+            "desk {i}'s scanline is its own column's"
         );
+        if i != desk {
+            assert_eq!(
+                *props,
+                crate::sim::DeskProps {
+                    scanline: props.scanline,
+                    ..Default::default()
+                },
+                "desk {i} has no occupant"
+            );
+        }
     }
     let cold = desks_at(now0 + Duration::from_secs(crate::floor::CoffeeState::STEAM_WINDOW_SECS));
     assert_eq!(
