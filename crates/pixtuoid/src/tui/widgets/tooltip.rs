@@ -602,7 +602,7 @@ mod tests {
                 })
                 .collect();
             let (l, r) = (cells[0], cells[cells.len() - 1]);
-            (l + r + 1) / 2
+            (l + r) / 2
         };
         assert_eq!(centre(quip), centre(name));
     }
