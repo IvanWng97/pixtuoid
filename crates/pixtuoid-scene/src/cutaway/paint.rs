@@ -11,6 +11,7 @@ use crate::atmosphere::Moment;
 use crate::cutaway::order::{Span, depth_sort};
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::cutaway::shade::{Ramp, fill, slab};
+use crate::dither::Dithered;
 use crate::effects::EffectKind;
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
@@ -369,7 +370,7 @@ pub(crate) fn paint(
 fn paint_backdrop(
     layout: &SceneLayout,
     theme: &Theme,
-    ground: Ground,
+    ground: Dithered<Ground>,
     scale: RenderScale,
     pen: Pen,
     buf: &mut RgbBuffer,
@@ -400,7 +401,7 @@ pub(crate) struct DrawList<'a> {
     /// change repaints the whole frame.
     ambient: crate::cutaway::light::Ambient,
     /// The carpet the backdrop lays: a change repaints the whole frame too.
-    ground: Ground,
+    ground: Dithered<Ground>,
     /// How far lightning lifts the room: a change repaints the whole frame.
     flash: crate::cutaway::light::Flash,
     // What it was built with, so painting it cannot use anything else: a
@@ -420,25 +421,28 @@ pub(crate) struct Ground {
 }
 
 impl Ground {
-    /// `theme`'s carpet drawn `share` of the way to `tint`.
-    fn of(theme: &Theme, (tint, share): (pixtuoid_core::sprite::Rgb, f32)) -> Self {
+    /// `theme`'s carpet drawn `share` of the way to each `tint`.
+    fn of(
+        theme: &Theme,
+        (tint, share): (Dithered<pixtuoid_core::sprite::Rgb>, f32),
+    ) -> Dithered<Self> {
         let s = &theme.surface;
-        Self {
+        tint.map(|tint| Self {
             lit: s.carpet_light.mix(tint, share),
             base: s.carpet_base.mix(tint, share),
             dark: s.carpet_dark.mix(tint, share),
-        }
+        })
     }
 
     /// `theme`'s carpet as it is.
     #[cfg(test)]
-    fn plain(theme: &Theme) -> Self {
+    fn plain(theme: &Theme) -> Dithered<Self> {
         let s = &theme.surface;
-        Self {
+        Dithered::solid(Self {
             lit: s.carpet_light,
             base: s.carpet_base,
             dark: s.carpet_dark,
-        }
+        })
     }
 }
 
@@ -503,7 +507,7 @@ impl<'a> DrawList<'a> {
         self.ambient
     }
 
-    pub(crate) fn ground(&self) -> Ground {
+    pub(crate) fn ground(&self) -> Dithered<Ground> {
         self.ground
     }
 
@@ -2707,8 +2711,11 @@ fn push_windows(
                 }))
             })
             .collect();
-        if let Some((veil, alpha)) = weather.veil {
-            for c in px.iter_mut().flatten() {
+        for (at, c) in (0..h)
+            .flat_map(|ay| (0..w).map(move |ax| (x0 + ax, y0 + ay)))
+            .zip(px.iter_mut())
+        {
+            if let (Some(c), Some((veil, alpha))) = (c, weather.veil.at(at.0, at.1)) {
                 *c = crate::composite::blend_rgb(*c, veil, alpha);
             }
         }
@@ -2770,10 +2777,23 @@ fn paint_glass(view: &WindowView, pen: Pen, buf: &mut RgbBuffer) {
     }
 }
 
+/// The carpet [`paint_ground_tones`] lays, each art pixel in the tones
+/// `ground` dithers it to.
+fn paint_ground(layout: &SceneLayout, ground: Dithered<Ground>, pen: Pen, buf: &mut RgbBuffer) {
+    if let Some(tones) = ground.uniform() {
+        return paint_ground_tones(layout, tones, pen, buf);
+    }
+    let [from, to] = ground.ends();
+    paint_ground_tones(layout, from, pen, buf);
+    let mut incoming = buf.clone();
+    paint_ground_tones(layout, to, pen, &mut incoming);
+    pen.take_where(buf, &incoming, |x, y| ground.takes_to(x.0, y.0));
+}
+
 /// The carpet, lit near the windows, falling off south and laid in tiles, on
 /// the art grid: every edge, dither step and seam lands on an art pixel,
 /// whatever the scale.
-fn paint_ground(layout: &SceneLayout, ground: Ground, pen: Pen, buf: &mut RgbBuffer) {
+fn paint_ground_tones(layout: &SceneLayout, ground: Ground, pen: Pen, buf: &mut RgbBuffer) {
     let Ground { lit, base, dark } = ground;
 
     let h = pen.art(layout.buf_h);
@@ -5919,8 +5939,12 @@ S B B B B B B S
             (list.ground(), tint)
         };
         let (rain, (tint, share)) = ground_in(Weather::Rain);
+        let (rain, tint) = (
+            rain.uniform().expect("a pure weather tints every pixel"),
+            tint.uniform().expect("a pure weather tints every pixel"),
+        );
         assert_eq!(rain.base, theme.surface.carpet_base.mix(tint, share));
-        assert_ne!(rain, ground_in(Weather::Clear).0);
+        assert_ne!(Some(rain), ground_in(Weather::Clear).0.uniform());
     }
 
     /// A figure's dust paints straight before them and their other riders
