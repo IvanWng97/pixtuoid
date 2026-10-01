@@ -446,10 +446,7 @@ mod tests {
     #[test]
     fn renders_a_sized_nonblank_office_buffer() {
         let scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
-        let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-            pixtuoid_scene::embedded_pack::PackSource::Bundled,
-        )
-        .expect("embedded pack loads");
+        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack loads");
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
@@ -886,10 +883,7 @@ mod tests {
             ],
             cap,
         );
-        let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-            pixtuoid_scene::embedded_pack::PackSource::Bundled,
-        )
-        .expect("embedded pack loads");
+        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack loads");
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
@@ -981,10 +975,7 @@ mod tests {
         // Deterministic: fixed agent id + a hand-stepped clock; the loop bound mirrors
         // the scene crate's occupancy sim pin.
         use pixtuoid_scene::audio::OneShot;
-        let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-            pixtuoid_scene::embedded_pack::PackSource::Bundled,
-        )
-        .expect("embedded pack loads");
+        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack loads");
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now0 = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut idle = active_on("/w/wanderer.jsonl", 0, 0);
@@ -1034,10 +1025,7 @@ mod tests {
     #[test]
     fn floating_door_chime_fires_only_for_rendered_floor_arrivals() {
         let cap = 16;
-        let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-            pixtuoid_scene::embedded_pack::PackSource::Bundled,
-        )
-        .expect("embedded pack loads");
+        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack loads");
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let mut now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
@@ -1113,10 +1101,7 @@ mod tests {
     fn labels_is_empty_before_render_then_builds_a_positioned_badge_for_a_seeded_agent() {
         use pixtuoid_core::source::AgentEvent;
         use pixtuoid_core::{AgentId, Reducer, Transport};
-        let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-            pixtuoid_scene::embedded_pack::PackSource::Bundled,
-        )
-        .expect("embedded pack loads");
+        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack loads");
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();

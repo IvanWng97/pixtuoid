@@ -351,10 +351,10 @@ fn seat_view_maps_facing_to_sprite_and_flip() {
 }
 
 #[test]
+#[cfg(feature = "native")]
 fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
     use crate::layout::{Facing, Point};
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("pack");
+    let pack = crate::embedded_pack::test_default_pack();
     let desk = Point { x: 40, y: 30 };
     let back = Seat::at_desk(desk, Facing::North);
     let front = Seat::at_desk(desk, Facing::South);
@@ -394,6 +394,7 @@ fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
 /// The skeleton fixture pack with the `[animations.X]` sections named in
 /// `without` removed and `extra` appended — the only way to reach `sprite_in_pack`'s
 /// degradation rungs, since the embedded pack has every animation.
+#[cfg(feature = "native")]
 fn fixture_pack(without: &[&str], extra: &str, tmp: &std::path::Path) -> Pack {
     let dir = tmp.join("pack");
     std::fs::create_dir_all(&dir).expect("mkdir");
@@ -423,6 +424,7 @@ fn fixture_pack(without: &[&str], extra: &str, tmp: &std::path::Path) -> Pack {
 /// The middle rung of `sprite_in_pack`: a pack carrying the STILL back view but
 /// not the pose's own still hides a back-turned sitter's face.
 #[test]
+#[cfg(feature = "native")]
 fn a_pose_whose_own_back_view_is_missing_falls_back_to_the_still_one() {
     use crate::layout::{Facing, Point};
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -444,10 +446,10 @@ fn a_pose_whose_own_back_view_is_missing_falls_back_to_the_still_one() {
 }
 
 #[test]
+#[cfg(feature = "native")]
 fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
     use crate::layout::{Facing, WaypointKind};
-    let full = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("pack");
+    let full = crate::embedded_pack::test_default_pack();
     assert_eq!(
         Seat::at_waypoint(
             WaypointKind::MeetingChair,
@@ -1378,10 +1380,8 @@ fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
     }
 }
 
-/// The seat centre is the PAINTED desk's midline, not the layout box's — the two
-/// differ (`DESK_W` 10 vs a 14 px sprite), which is why the chair used to sit 2 px
-/// left of the desk it belongs to. Centring here is what makes a symmetric jitter
-/// fit: 8 px of chair on a 14 px desk leaves 3 px a side, so ±2 keeps 1 px.
+/// The seat centre is the painted desk's midline (`visual.w`), not `DESK_W`'s:
+/// only that centring leaves the jitter symmetric room on both sides.
 #[test]
 fn the_seat_centre_is_the_painted_desks_midline() {
     use crate::layout::Facing;
@@ -3898,8 +3898,7 @@ fn paint_frame_is_pure_and_byte_identical() {
 
 #[test]
 fn corridor_runner_weaves_sparse_diamonds_without_inner_edge_rows() {
-    // Taste pin: stride-10 lattice, border rows only — the old stride-6 +
-    // inner-edge treatment read as bathroom tiling, not a woven runner.
+    // Taste pin: stride-10 lattice, border rows only.
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let floor = Rgb {
         r: 150,
@@ -4163,8 +4162,7 @@ fn a_coat_rack_fills_exactly_its_bounds() {
 
 #[test]
 fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("embedded pack");
+    let pack = crate::embedded_pack::test_default_pack();
     let c = pack.palette().get('C').flatten().expect("couch fabric key");
     let g = pack
         .palette()
@@ -4182,8 +4180,7 @@ fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
 #[test]
 fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
     use crate::layout::{Facing, Point, SEAT_RENDER_Y_OFF, WaypointKind};
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("embedded pack");
+    let pack = crate::embedded_pack::test_default_pack();
     let pos = Point { x: 40, y: 30 };
     let seat = Seat::at_waypoint(WaypointKind::MeetingChair, pos, Facing::West);
     let (anim, _) = seat.sprite_for("seated");
@@ -4205,8 +4202,7 @@ fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
 
 /// Paint the appliance `sprite` at `ms` past the epoch, `busy` or not.
 fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("pack");
+    let pack = crate::embedded_pack::test_default_pack();
     let mut cache = FrameCache::new();
     let mut buf = RgbBuffer::filled(60, 40, Rgb { r: 1, g: 2, b: 3 });
     let d = Drawable {
@@ -5374,9 +5370,8 @@ fn paint_flame_crown_draws_its_pattern() {
     }
 }
 
-/// The couch's rung is NEW on the waypoint path: the old two-rung ladder went
-/// straight to the front pose, seating a face at the window.
 #[test]
+#[cfg(feature = "native")]
 fn a_back_turned_couch_falls_to_the_still_back_view_not_a_face_at_the_window() {
     use crate::layout::{Facing, Point, WaypointKind};
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -5398,9 +5393,8 @@ fn a_back_turned_couch_falls_to_the_still_back_view_not_a_face_at_the_window() {
     );
 }
 
-/// The upright kinds reach the degradation rung too: before the seat model they
-/// asked for a sprite the pack lacked and painted NOTHING.
 #[test]
+#[cfg(feature = "native")]
 fn a_pantry_visitor_is_visible_even_when_the_pack_lacks_holding_coffee() {
     use crate::layout::{Facing, Point, WaypointKind};
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -5643,8 +5637,7 @@ fn an_unflipped_character_faces_the_way_its_art_does() {
 #[test]
 #[cfg(feature = "density-art")]
 fn a_facing_flip_mirrors_the_dressed_frame() {
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("the embedded pack loads");
+    let pack = crate::embedded_pack::test_default_pack();
     let scale = crate::render_scale::RenderScale::new(pack.max_density_variant()).expect("nonzero");
     let mut cache = crate::frame_cache::FrameCache::new();
     let now = SystemTime::UNIX_EPOCH;
