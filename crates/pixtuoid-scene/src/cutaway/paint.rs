@@ -4570,7 +4570,7 @@ pub(crate) mod tests {
     fn the_floor_indicator_stays_in_its_cell() {
         use crate::cutaway::text::LINE_H;
         let pack = crate::pack::test_default_pack();
-        let door = Layout::compute_with_seed(160, 96, None, 0)
+        let door = SceneLayout::compute_with_seed(160, 96, None, 0)
             .expect("lays out")
             .door;
         let rows = crate::layout::floor_indicator_rows(door.y);
