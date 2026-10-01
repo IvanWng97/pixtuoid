@@ -217,14 +217,24 @@ fn paint_badge(badge: &Badge, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
 }
 
 /// The floor indicator over the elevator at `door`, naming floor `floor`: a
-/// plate over the cell the classic writes it across
-/// ([`floor_indicator_rows`](crate::layout::floor_indicator_rows)).
+/// plate filling the cell the classic writes it across
+/// ([`floor_indicator_rows`](crate::layout::floor_indicator_rows)), not a
+/// badge's [`PLATE_H`], which would run into the door below. Under the pack's
+/// density the cell is shorter than a line, and the plate keeps the line.
 fn indicator_plate(door: Point, floor: usize, pen: Pen) -> ArtRect {
-    plate_at(
-        pen.art(door.x + crate::layout::ELEVATOR_W / 2),
-        pen.art(crate::layout::floor_indicator_rows(door.y).start),
-        &crate::layout::floor_indicator_text(floor),
-    )
+    let rows = crate::layout::floor_indicator_rows(door.y);
+    ArtRect {
+        h: ArtPx(
+            pen.art(rows.end - rows.start)
+                .0
+                .max(crate::cutaway::text::LINE_H),
+        ),
+        ..plate_at(
+            pen.art(door.x + crate::layout::ELEVATOR_W / 2),
+            pen.art(rows.start),
+            &crate::layout::floor_indicator_text(floor),
+        )
+    }
 }
 
 /// Each run of `board` and its top-left on the art grid, as the classic's
@@ -4360,6 +4370,37 @@ pub(crate) mod tests {
             left(b).expect("the second run"),
         );
         assert_eq!(lb - la, advance(first).0, "the plate");
+    }
+
+    /// The floor indicator's plate stays in the cell the classic writes it
+    /// across, its text whole, at every density the pack draws: a row lower
+    /// and it covers the top of the elevator door, over everything.
+    #[test]
+    #[cfg(feature = "density-art")]
+    fn the_floor_indicator_stays_in_its_cell() {
+        use crate::cutaway::text::LINE_H;
+        let pack = crate::embedded_pack::test_default_pack();
+        let door = Layout::compute_with_seed(160, 96, None, 0)
+            .expect("lays out")
+            .door;
+        let rows = crate::layout::floor_indicator_rows(door.y);
+        let densities = pack.density_variants();
+        assert!(!densities.is_empty(), "the pack draws a density");
+        for d in densities {
+            let pen = Pen::new(RenderScale::new(d.get()).expect("nonzero"), d.get())
+                .expect("d divides itself");
+            for floor in [1, 12, 99] {
+                let plate = indicator_plate(door, floor, pen);
+                let span = topmost_span(plate, pen);
+                assert!(
+                    rows.contains(&span.y0) && rows.contains(&span.y1),
+                    "{d:?} floor {floor}: rows {}..={} outside {rows:?}",
+                    span.y0,
+                    span.y1
+                );
+                assert!(plate.h.0 >= LINE_H, "{d:?}: the text fits");
+            }
+        }
     }
 
     /// At the pack's 4x art the board writes inside the neon sign's dark
