@@ -61,17 +61,32 @@ fn fit(cols: u16, rows: u16) -> Fit {
 /// A renderer painting the cutaway over `protocol` into a `cols`×`rows`
 /// terminal.
 fn painter(cols: u16, rows: u16, protocol: ImageProtocol) -> (TuiRenderer<TestBackend>, Wire) {
-    let mut r = build(cols, rows, vec![]);
-    let wire = Wire::default();
-    r.set_cutaway(TileCutaway::new(
-        arc_pack(),
-        fit(cols, rows),
-        CELL,
-        protocol,
-        false,
-        Box::new(wire.clone()),
-    ));
+    let (r, wire, _) = armed(cols, rows, protocol);
     (r, wire)
+}
+
+/// [`painter`], and the flag it sets where the process's would tell the
+/// unwind that grid pixels were drawn: its own, so no test leaks into
+/// another.
+fn armed(
+    cols: u16,
+    rows: u16,
+    protocol: ImageProtocol,
+) -> (TuiRenderer<TestBackend>, Wire, &'static AtomicBool) {
+    let mut r = build(cols, rows, vec![]);
+    let (wire, in_grid) = (Wire::default(), Box::leak(Box::new(AtomicBool::new(false))));
+    r.set_cutaway(
+        TileCutaway::new(
+            arc_pack(),
+            fit(cols, rows),
+            CELL,
+            protocol,
+            false,
+            Box::new(wire.clone()),
+        )
+        .arming(in_grid),
+    );
+    (r, wire, in_grid)
 }
 
 fn kitty(cols: u16, rows: u16) -> (TuiRenderer<TestBackend>, Wire) {
@@ -297,4 +312,134 @@ fn a_floor_switch_slides_the_cutaway_then_settles() {
     assert!(mid != before && mid != after);
     assert_eq!(r.current_floor(), 1);
     hover_agent(&mut r, AgentId::from_transcript_path("/n/1.jsonl"));
+}
+
+#[test]
+fn a_grid_image_arms_the_unwinds_erase() {
+    let erases = |drew: &AtomicBool| {
+        crate::graphics::grid_unwind(drew.load(Ordering::Relaxed))
+            .windows(4)
+            .any(|w| w == b"\x1b[2J")
+    };
+    let (mut r, _wire, in_grid) = armed(120, 40, ImageProtocol::Sixel);
+    assert!(!erases(in_grid), "nothing drawn yet");
+    r.render(&office(), pack(), t0()).expect("render");
+    assert!(erases(in_grid));
+}
+
+/// While a modal stays open, the tiles under it are withheld, and never
+/// encoded only to be thrown away: every tile encoded is sent.
+#[test]
+fn a_covered_tile_is_never_encoded() {
+    let (mut r, wire) = painter(120, 40, ImageProtocol::Sixel);
+    let scene = office();
+    let cadence = ImageProtocol::Sixel.cadence();
+    let encoded = |r: &TuiRenderer<TestBackend>| r.cutaway.as_ref().expect("a cutaway").encoded();
+    r.render(&scene, pack(), t0()).expect("render");
+    wire.take();
+    r.set_help_open(true);
+    r.redraw().expect("redraw");
+    for tick in 1..4 {
+        let before = encoded(&r);
+        r.render(&scene, pack(), t0() + cadence * tick)
+            .expect("render");
+        let sent = wire.take().matches(SIXEL).count();
+        assert_eq!(encoded(&r) - before, sent, "tick {tick}");
+    }
+}
+
+/// A `TestBackend` that marks on `wire` where each flush of cells lands
+/// among the transmits.
+struct Logged {
+    inner: TestBackend,
+    wire: Wire,
+}
+
+const FLUSH: &str = "<flush>";
+
+impl ratatui::backend::Backend for Logged {
+    type Error = <TestBackend as ratatui::backend::Backend>::Error;
+    fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
+    where
+        I: Iterator<Item = (u16, u16, &'a ratatui::buffer::Cell)>,
+    {
+        let cells: Vec<_> = content.collect();
+        if !cells.is_empty() {
+            self.wire
+                .bytes
+                .lock()
+                .expect("lock")
+                .extend_from_slice(FLUSH.as_bytes());
+        }
+        self.inner.draw(cells.into_iter())
+    }
+    fn hide_cursor(&mut self) -> Result<(), Self::Error> {
+        self.inner.hide_cursor()
+    }
+    fn show_cursor(&mut self) -> Result<(), Self::Error> {
+        self.inner.show_cursor()
+    }
+    fn get_cursor_position(&mut self) -> Result<ratatui::layout::Position, Self::Error> {
+        self.inner.get_cursor_position()
+    }
+    fn set_cursor_position<P: Into<ratatui::layout::Position>>(
+        &mut self,
+        position: P,
+    ) -> Result<(), Self::Error> {
+        self.inner.set_cursor_position(position)
+    }
+    fn clear(&mut self) -> Result<(), Self::Error> {
+        self.inner.clear()
+    }
+    fn clear_region(&mut self, clear_type: ratatui::backend::ClearType) -> Result<(), Self::Error> {
+        self.inner.clear_region(clear_type)
+    }
+    fn size(&self) -> Result<ratatui::layout::Size, Self::Error> {
+        self.inner.size()
+    }
+    fn window_size(&mut self) -> Result<ratatui::backend::WindowSize, Self::Error> {
+        self.inner.window_size()
+    }
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.inner.flush()
+    }
+}
+
+/// kitty's images go out before the placeholders that show them; SIXEL's
+/// after the cells they must avoid.
+#[test]
+fn kitty_transmits_before_the_flush_and_sixel_after() {
+    for (protocol, intro, first) in [
+        (ImageProtocol::Kitty, TRANSMIT, true),
+        (ImageProtocol::Sixel, SIXEL, false),
+    ] {
+        let wire = Wire::default();
+        let backend = Logged {
+            inner: TestBackend::new(120, 40),
+            wire: wire.clone(),
+        };
+        let mut r = TuiRenderer::new(
+            Terminal::new(backend).expect("terminal"),
+            normal_theme(),
+            vec![],
+        );
+        r.set_cutaway(
+            TileCutaway::new(
+                arc_pack(),
+                fit(120, 40),
+                CELL,
+                protocol,
+                false,
+                Box::new(wire.clone()),
+            )
+            .arming(Box::leak(Box::new(AtomicBool::new(false)))),
+        );
+        r.render(&office(), pack(), t0()).expect("render");
+        let sent = wire.take();
+        let (image, flush) = (
+            sent.find(intro).expect("an image"),
+            sent.find(FLUSH).expect("a flush"),
+        );
+        assert_eq!(image < flush, first, "{protocol:?}");
+    }
 }

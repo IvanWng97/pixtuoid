@@ -854,6 +854,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             now,
             scene_area.as_position(),
         );
+        cutaway.before_flush(now);
         let mut covered = Vec::new();
         self.terminal.draw(|f| {
             let full = f.area();
@@ -863,7 +864,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             paint_overlays(f, &overlays, now, full, theme);
             covered = cutaway.cover(f.buffer_mut(), scene_area);
         })?;
-        cutaway.emit(&covered, now);
+        cutaway.after_flush(&covered, now);
         self.chrome.popup.last_scale = popup_scale;
         Ok(())
     }
@@ -923,6 +924,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .mouse_pos
             .and_then(|(mx, my)| Some((mx, my, geometry.area_at(mx, my)?)));
         let hovered = mouse.and_then(|(.., cell)| cutaway.hover_at(cell.bounds()));
+        cutaway.before_flush(now);
         let mut covered = Vec::new();
         self.terminal.draw(|f| {
             let full = f.area();
@@ -948,7 +950,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             paint_overlays(f, &overlays, now, full, theme);
             covered = cutaway.cover(f.buffer_mut(), scene_area);
         })?;
-        cutaway.emit(&covered, now);
+        cutaway.after_flush(&covered, now);
         self.record_drawn(
             scene,
             DrawOut {
