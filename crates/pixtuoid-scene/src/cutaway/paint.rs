@@ -298,16 +298,14 @@ impl<'a> DrawList<'a> {
         })
     }
 
-    /// Each drawn agent's `body` as `(agent index, box)`, in draw order: the
-    /// topmost body at a point is the last one containing it.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the cutaway's hit tests read them")
-    )]
-    pub(crate) fn hover_spans(&self) -> impl Iterator<Item = (usize, Span)> + '_ {
-        self.pieces.iter().filter_map(|p| match p.kind {
-            PieceKind::Character { label, body, .. } => Some((label.agent_idx, body)),
-            _ => None,
+    /// Each piece's hover box and the agent it shows, in draw order: a
+    /// character's `body`, every other piece's span showing none.
+    pub(crate) fn hover_spans(
+        &self,
+    ) -> impl Iterator<Item = (Span, Option<pixtuoid_core::AgentId>)> + '_ {
+        self.pieces.iter().map(|p| match &p.kind {
+            PieceKind::Character { figure, body, .. } => (*body, Some(figure.key.frame.agent_id)),
+            _ => (p.span, None),
         })
     }
 }
@@ -5551,7 +5549,10 @@ S B B B B B B S
                 .iter()
                 .filter(|p| matches!(p.kind, PieceKind::Character { .. }))
                 .collect();
-            let hovers: Vec<(usize, Span)> = list.hover_spans().collect();
+            let hovers: Vec<(pixtuoid_core::AgentId, Span)> = list
+                .hover_spans()
+                .filter_map(|(body, agent)| Some((agent?, body)))
+                .collect();
             assert_eq!(hovers.len(), pieces.len());
             assert_eq!(hovers.len(), frame.characters.len());
             for ((_, body), piece) in hovers.iter().zip(&pieces) {
@@ -5574,7 +5575,9 @@ S B B B B B B S
                 );
             }
             assert_eq!(
-                list.labels().map(|l| l.agent_idx).collect::<Vec<_>>(),
+                list.labels()
+                    .map(|l| frame.agents[l.agent_idx].agent_id)
+                    .collect::<Vec<_>>(),
                 hovers.iter().map(|&(agent, _)| agent).collect::<Vec<_>>(),
             );
         }

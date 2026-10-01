@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::format::Pack;
 
@@ -69,6 +70,8 @@ struct Shown {
     epoch: Epoch,
     /// Every piece's reach and every light's span, each with its fingerprint.
     footprints: Vec<(Span, u64)>,
+    /// [`DrawList::hover_spans`](crate::cutaway::paint::DrawList::hover_spans).
+    hovers: Vec<(Span, Option<AgentId>)>,
 }
 
 impl CutawayCanvas {
@@ -112,6 +115,7 @@ impl CutawayCanvas {
             .map(|p| (p.reach(), p.fingerprint))
             .chain(list.lights().iter().map(|l| (l.span, l.fingerprint)))
             .collect();
+        let hovers = list.hover_spans().collect();
         let size = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
         let dirty = match self.shown.take() {
             Some(shown) if shown.epoch == epoch => Dirty::Rects(
@@ -128,11 +132,23 @@ impl CutawayCanvas {
             }
             paint(layout, &list, cache, &mut self.buf);
         }
-        self.shown = Some(Shown { epoch, footprints });
+        self.shown = Some(Shown {
+            epoch,
+            footprints,
+            hovers,
+        });
         CanvasFrame {
             buf: &self.buf,
             dirty,
         }
+    }
+
+    /// The agent the last frame shows topmost over `area`, in LOGICAL units
+    /// as [`Layout`], not [`Dirty::Rects`]' buffer pixels; `None` where a
+    /// piece that is no agent lies over it, or none does.
+    pub fn hover_at(&self, area: Bounds) -> Option<AgentId> {
+        let shown = self.shown.as_ref()?;
+        shown.hovers.iter().rev().find(|(s, _)| s.meets(area))?.1
     }
 }
 
@@ -425,6 +441,147 @@ mod tests {
         );
         assert_eq!(dirty(other, 2), Dirty::All, "a new theme");
         assert_eq!(dirty(other, 3), Dirty::All, "a new scale");
+    }
+
+    /// A walk to a north-facing desk, shown at scale 2.
+    struct Hovering {
+        layout: Arc<Layout>,
+        pack: Arc<Pack>,
+        frames: Vec<SimFrame>,
+        scale: RenderScale,
+    }
+
+    impl Hovering {
+        fn new() -> Self {
+            let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+            Self {
+                layout: Arc::new(layout),
+                pack: Arc::new(pack),
+                frames,
+                scale: RenderScale::new(2).expect("nonzero"),
+            }
+        }
+
+        fn now() -> SystemTime {
+            crate::localclock::at_hour(12)
+        }
+
+        /// `frame`'s pieces as `(is a desk, hover box, agent)`, back to front.
+        fn boxes(&self, frame: &SimFrame) -> Vec<(bool, Span, Option<AgentId>)> {
+            let office = Office {
+                layout: &self.layout,
+                pack: &self.pack,
+                theme: normal(),
+                scale: self.scale,
+            };
+            let list = frame_list(frame, office, FloorMeta::ground(), Self::now());
+            list.pieces()
+                .iter()
+                .zip(list.hover_spans())
+                .map(|(p, (span, agent))| {
+                    (
+                        matches!(p.kind, crate::cutaway::paint::PieceKind::Desk { .. }),
+                        span,
+                        agent,
+                    )
+                })
+                .collect()
+        }
+
+        /// `canvas` after showing `frame`.
+        fn show(&self, canvas: &mut CutawayCanvas, frame: &SimFrame) {
+            let observed = ObservedFloor {
+                layout: Arc::clone(&self.layout),
+                frame: frame.clone(),
+            };
+            let mut cache = crate::frame_cache::FrameCache::new();
+            canvas.frame(
+                &observed,
+                normal(),
+                self.scale,
+                FloorMeta::ground(),
+                Self::now(),
+                &mut cache,
+            );
+        }
+    }
+
+    /// What one half-block terminal cell shows, from logical `(x, y)` down.
+    fn cell((x, y): (u16, u16)) -> Bounds {
+        Bounds {
+            x,
+            y,
+            width: 1,
+            height: 2,
+        }
+    }
+
+    /// Where a cell shows the walker over a desk drawn before them, hovering
+    /// names them: the topmost box wins.
+    #[test]
+    fn hovering_a_walker_in_front_of_a_desk_names_the_walker() {
+        let h = Hovering::new();
+        let (frame, area, id) = h
+            .frames
+            .iter()
+            .find_map(|frame| {
+                let boxes = h.boxes(frame);
+                boxes.iter().enumerate().find_map(|(i, &(desk, d, _))| {
+                    if !desk {
+                        return None;
+                    }
+                    boxes[i + 1..].iter().find_map(|&(_, b, agent)| {
+                        let area = cell((d.x0.max(b.x0), d.y0.max(b.y0)));
+                        (d.meets(area) && b.meets(area)).then_some((frame, area, agent?))
+                    })
+                })
+            })
+            .expect("the walk passes in front of a desk");
+        let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+        h.show(&mut canvas, frame);
+        assert_eq!(canvas.hover_at(area), Some(id));
+    }
+
+    /// A cell showing floor no piece stands on hovers nothing.
+    #[test]
+    fn hovering_bare_floor_names_nobody() {
+        let h = Hovering::new();
+        let frame = h.frames.last().expect("a frame");
+        let boxes = h.boxes(frame);
+        let area = (h.layout.top_margin..h.layout.buf_h - 1)
+            .rev()
+            .flat_map(|y| (0..h.layout.buf_w).map(move |x| cell((x, y))))
+            .find(|&a| boxes.iter().all(|&(_, s, _)| !s.meets(a)))
+            .expect("bare floor");
+        let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+        assert_eq!(canvas.hover_at(area), None, "before any frame");
+        h.show(&mut canvas, frame);
+        assert_eq!(canvas.hover_at(area), None);
+    }
+
+    /// Hovering answers from the last frame: where the walker stood before
+    /// they walked to their desk no longer names them.
+    #[test]
+    fn hovering_where_a_walker_left_names_them_no_more() {
+        let h = Hovering::new();
+        let (first, last) = (&h.frames[0], h.frames.last().expect("a frame"));
+        let (body, id) = h
+            .boxes(first)
+            .into_iter()
+            .find_map(|(_, s, agent)| Some((s, agent?)))
+            .expect("the walker");
+        let area = cell(((body.x0 + body.x1) / 2, (body.y0 + body.y1) / 2));
+        assert!(
+            h.boxes(last)
+                .iter()
+                .all(|&(_, s, agent)| agent != Some(id) || !s.meets(area)),
+            "the walker never left {area:?}"
+        );
+        let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+        h.show(&mut canvas, first);
+        assert_eq!(canvas.hover_at(area), Some(id));
+        h.show(&mut canvas, last);
+        assert_ne!(canvas.hover_at(area), Some(id));
     }
 
     /// A new layout of the same size repaints everything, even one built after
