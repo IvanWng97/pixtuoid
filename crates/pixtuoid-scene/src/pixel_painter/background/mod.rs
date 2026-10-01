@@ -6,11 +6,11 @@
 //! orchestrator (`pixel_painter/mod.rs`) calls it; the backdrop fixtures
 //! among it (clock, runner, mats) in roster order.
 
-mod floor_wash;
+mod ground_wash;
 mod lighting;
 
 use crate::celestial::SkyView;
-pub(super) use floor_wash::paint_floor_wash;
+pub(super) use ground_wash::paint_ground_wash;
 pub(super) use lighting::{
     paint_clock, paint_corridor_runner, paint_light, paint_neon_halo, paint_neon_panel,
     paint_shadows,
@@ -121,7 +121,7 @@ impl BaseFillCache {
 
 /// The floor and the north wall band `top_wall_h` tall with the windows `bays`,
 /// over the whole of `buf`, at `moment`.
-pub(super) fn paint_floor_and_walls(
+pub(super) fn paint_ground_and_walls(
     base_fill: &mut BaseFillCache,
     buf: &mut RgbBuffer,
     top_wall_h: u16,
@@ -139,7 +139,7 @@ pub(super) fn paint_floor_and_walls(
     let wall = theme.surface.wall;
     let wall_trim_color = theme.surface.wall_trim;
 
-    let (tint, share) = look.floor_tint;
+    let (tint, share) = look.ground_tint;
 
     // The noise picks one of THREE colours and the tint is fixed for the frame,
     // so resolve the blend once, not per pixel.

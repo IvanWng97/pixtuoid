@@ -16,7 +16,7 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::format::{Building, CityMaterials, CityPlane, Density, Material, Pack};
 use pixtuoid_core::sprite::{Frame, Pixel, Rgb};
 
-use crate::atmosphere::{Look, Moment};
+use crate::atmosphere::{Moment, SkyTones};
 use crate::layout::pct;
 use crate::theme::Theme;
 
@@ -373,10 +373,10 @@ pub(crate) struct PlaneColours {
 impl PlaneColours {
     /// `plane`'s colours: the hour's building tone lifted by the plane's depth
     /// and hazed toward the horizon.
-    pub(crate) fn of(plane: Plane, look: &Look, theme: &Theme) -> Self {
+    pub(crate) fn of(plane: Plane, look: &SkyTones, theme: &Theme) -> Self {
         let depth = plane.depth();
         let o = &theme.office;
-        let haze = |c: Rgb| c.mix(look.glass_a, depth.haze);
+        let haze = |c: Rgb| c.mix(look.glass_horizon, depth.haze);
         let tone = o
             .building_light
             .mix(o.building_dark, look.darkness)
@@ -893,7 +893,7 @@ mod tests {
         let materials = pack.city_materials().expect("a city");
         let near = PlaneColours::of(
             Plane::Near,
-            &Look::resolve(
+            &SkyTones::resolve(
                 &crate::sky::Sky::at_with(SystemTime::UNIX_EPOCH, crate::sky::Weather::Clear),
                 theme,
             ),

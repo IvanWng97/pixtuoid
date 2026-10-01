@@ -16,7 +16,7 @@ use pixtuoid_core::{AgentSlot, SceneState};
 
 use crate::chitchat::{ActiveChitchat, ChitchatBubble};
 #[cfg(test)]
-use crate::floor::LightingState;
+use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
 use crate::layout::{Anchor, Depth, Facing, FixtureKind, Layout, Point, Station, z_sort_row};
 use crate::motion::MotionState;
@@ -151,7 +151,7 @@ pub(crate) use furniture::paint_area_rug;
 use crate::atmosphere::Moment;
 use crate::lighting::{DeskLights, LightInputs, Lights};
 use background::{
-    paint_floor_and_walls, paint_floor_wash, paint_light, paint_neon_halo, paint_shadows,
+    paint_ground_and_walls, paint_ground_wash, paint_light, paint_neon_halo, paint_shadows,
 };
 use drawable::{Drawable, DrawableKind, Drawn, Layer, enqueue_room_walls, paint_drawable};
 
@@ -317,7 +317,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
         (buf_w, buf_h),
         "the classic pass draws layout units 1:1"
     );
-    paint_floor_and_walls(
+    paint_ground_and_walls(
         ctx.base_fill,
         ctx.buf,
         top_wall_h,
@@ -332,7 +332,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
 
     // An empty floor reads dark because its artificial lights go out with
     // `indoor_scale`, not because the FLOOR takes a second darkening of its own.
-    paint_floor_wash(ctx.buf, top_wall_h, buf_h, look.floor_wash);
+    paint_ground_wash(ctx.buf, top_wall_h, buf_h, look.ground_wash);
     if let Some(lamp) = &lights.floor_lamp {
         paint_light(ctx.buf, lamp, ctx.theme.lighting.floor_lamp_halo);
     }

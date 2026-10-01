@@ -98,7 +98,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     let buf_w = 60u16;
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(12 * 3600);
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
-    paint_floor_and_walls(
+    paint_ground_and_walls(
         &mut BaseFillCache::new(),
         &mut buf,
         top_wall_h,
@@ -131,7 +131,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     );
 }
 
-/// Render a full office wall through the real `paint_floor_and_walls` path at a
+/// Render a full office wall through the real `paint_ground_and_walls` path at a
 /// forced January `day` + local `hour` + weather.
 fn render_office_on(
     day: u32,
@@ -158,7 +158,7 @@ fn render_office_themed(
     let now = crate::localclock::on_day(day, hour);
     let buf_h = top_wall_h + 4;
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 4, g: 4, b: 6 });
-    paint_floor_and_walls(
+    paint_ground_and_walls(
         &mut BaseFillCache::new(),
         &mut buf,
         top_wall_h,
@@ -404,7 +404,7 @@ fn stars_appear_on_a_clear_night_and_vanish_under_overcast() {
             .flat_map(|d| [0, 1, 2, 3, 22, 23].map(|h| (d, h)))
             .find(|&(d, h)| {
                 let sky = Sky::at_with(crate::localclock::on_day(d, h), Weather::Clear);
-                sky.nightfall() >= 1.0 && want(sky.emitter().altitude)
+                sky.nightfall() >= 1.0 && want(sky.body().altitude)
             })
     };
     let moonless = night(|alt| alt <= 0.0).expect("a moonless deep-night hour in January");
@@ -466,8 +466,8 @@ fn disc_never_bleeds_across_a_window_pillar() {
 fn low_moon(day: u32, buf_w: u16, top_wall_h: u16) -> Option<(u32, crate::celestial::Disc)> {
     (0..24u32).find_map(|h| {
         let sky = Sky::at_with(crate::localclock::on_day(day, h), Weather::Clear);
-        let e = sky.emitter();
-        let low = e.body == crate::sky::Body::Moon && (0.2..0.5).contains(&e.altitude);
+        let e = sky.body();
+        let low = e.kind == crate::sky::BodyKind::Moon && (0.2..0.5).contains(&e.altitude);
         if !low || sky.nightfall() < 1.0 {
             return None;
         }
@@ -632,7 +632,7 @@ fn moon_glow_dims_at_new_moon() {
 
 /// Mean channel value over every PAINTED window pane's glass interior. The
 /// day-over-night invariant is asserted on THIS, not on
-/// [`Look::darkness`]: the weather veils are painted onto the glass
+/// [`SkyTones::darkness`]: the weather veils are painted onto the glass
 /// AFTER the light model resolved the sky, so a `darkness`-only assertion is
 /// structurally blind to them.
 fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {
@@ -785,7 +785,7 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
     let (buf_w, buf_h, top_wall_h) = (96u16, 64u16, 14u16);
     let paint = |base_fill: &mut BaseFillCache, theme: &'static crate::theme::Theme, weather| {
         let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 9, g: 9, b: 9 });
-        paint_floor_and_walls(
+        paint_ground_and_walls(
             base_fill,
             &mut buf,
             top_wall_h,
@@ -841,7 +841,7 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
     let now = crate::localclock::on_day(1, 12);
     let paint_at = |base_fill: &mut BaseFillCache, w: u16, h: u16| {
         let mut buf = RgbBuffer::filled(w, h, Rgb { r: 9, g: 9, b: 9 });
-        paint_floor_and_walls(
+        paint_ground_and_walls(
             base_fill,
             &mut buf,
             14,
@@ -1093,7 +1093,7 @@ fn the_wall_between_two_windows_is_one_frame_post() {
     let now = crate::localclock::on_day(1, 12);
     let (buf_w, buf_h, top_wall_h) = (160u16, 96u16, 24u16);
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 9, g: 9, b: 9 });
-    paint_floor_and_walls(
+    paint_ground_and_walls(
         &mut BaseFillCache::new(),
         &mut buf,
         top_wall_h,
