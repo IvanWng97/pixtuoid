@@ -17,21 +17,17 @@ use super::sim::{Cup, DeskProps};
 use pixtuoid_core::AgentSlot;
 
 use super::background::{paint_clock, paint_corridor_runner, paint_neon_panel};
-use super::effects::{
-    paint_coffee_steam, paint_pet_hearts, paint_screen_glow, paint_screen_idle, paint_sleep_z,
-    paint_waiting_bubble, paint_walking_dust,
-};
-use super::epoch_ms;
+use super::effects::{paint_effects, paint_screen_glow, paint_screen_idle};
 use super::frame_at;
 use super::furniture::{
     paint_area_rug, paint_coat_rack, paint_doormat, paint_fish_tank, paint_kitchen_island,
     paint_meeting_chair, paint_notice_board, paint_side_table, paint_trash_bin, paint_water_cooler,
 };
 use super::{AgentFrame, paint_character_at};
+use crate::effects::{Effect, STEAM_PUFFS};
 use crate::frame_cache::FrameCache;
 pub(super) use crate::layout::Layer;
 use crate::layout::{Point, Size};
-use crate::pet::PetKind;
 
 /// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
 /// size — hand-tuned to the sprite art so the steam sits within the coffee
@@ -46,6 +42,15 @@ fn pantry_steam_dx(anim: &str) -> i16 {
         PANTRY_STEAM_DX_LARGE
     } else {
         PANTRY_STEAM_DX_SMALL
+    }
+}
+
+/// Where the steam rises from a pantry counter centred at `pos` drawn as
+/// `anim`.
+pub(super) fn pantry_steam_at(pos: Point, anim: &str) -> Point {
+    Point {
+        x: (pos.x as i32 + pantry_steam_dx(anim) as i32).max(0) as u16,
+        y: pos.y.saturating_sub(2),
     }
 }
 
@@ -77,9 +82,7 @@ pub(super) enum DrawableKind<'a> {
         pose: super::seat::SpritePose,
         anchor: Point,
         label_anchor: Point,
-        sleep_z_seed: Option<u64>,
-        waiting_bubble: bool,
-        walking_dust_frame: Option<usize>,
+        effects: &'a [Effect],
     },
     FilingCabinet {
         pos: Point,
@@ -94,6 +97,7 @@ pub(super) enum DrawableKind<'a> {
     WaypointPantry {
         pos: Point,
         anim: &'static str,
+        steam: [Effect; STEAM_PUFFS],
     },
     MeetingSofa {
         pos: Point,
@@ -151,12 +155,11 @@ pub(super) enum DrawableKind<'a> {
         busy: bool,
     },
     Pet {
-        kind: PetKind,
         pos: Point,
         flip: bool,
         anim_name: &'static str,
         frame_idx: usize,
-        pet_elapsed_ms: Option<u64>,
+        effects: &'a [Effect],
     },
     /// The gateway lobster mascot — a presence-gated wandering creature, NOT an
     /// agent (lives in `daemons`, not `scene.agents`); y-sorted at its south row
@@ -167,7 +170,7 @@ pub(super) enum DrawableKind<'a> {
         pos: Point,
         anim_name: &'static str,
         frame_idx: usize,
-        run_count: u32,
+        effects: &'a [Effect],
         /// Gateway up but model-broken → render the lobster sickly red.
         degraded: bool,
     },
@@ -206,27 +209,6 @@ pub(super) enum DrawableKind<'a> {
     Clock {
         pos: Point,
     },
-}
-
-/// Busy "working" cue — bubbles rising above the lobster's head while a run is
-/// in flight, one per concurrent run over a small baseline (capped).
-fn paint_mascot_bubbles(buf: &mut RgbBuffer, pos: Point, frame_h: u16, runs: u32, now: SystemTime) {
-    let now_ms = epoch_ms(now);
-    let bubble = Rgb {
-        r: 0xd6,
-        g: 0xf2,
-        b: 0xf8,
-    };
-    let top = pos.y.saturating_sub(frame_h / 2 + 1);
-    let n = (runs + 1).min(4) as u16;
-    for i in 0..n {
-        let phase = ((now_ms / 110) + i as u64 * 7) % 6;
-        let by = top.saturating_sub(phase as u16);
-        let bx = (pos.x + i * 2).saturating_sub(n);
-        if bx < buf.width() && by < buf.height() {
-            buf.put(bx, by, bubble);
-        }
-    }
 }
 
 /// Blit `frame` CENTRED on `pos` (origin = `pos − size/2`, saturating).
@@ -330,7 +312,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
                 theme.effects.monitor_idle,
                 lights.screen_idle,
             );
-            paint_desk_coffee(buf, *desk, props.cup, now, theme);
+            paint_desk_coffee(buf, *desk, props.cup, &props.effects, theme);
             paint_token_stack(buf, *desk, props.token_tier, props.sheet_fall, theme);
             if let Some(tint) = screen_glow {
                 paint_screen_glow(buf, desk.x, sprite_top, now, *tint, theme);
@@ -341,20 +323,11 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             pose,
             anchor,
             label_anchor,
-            sleep_z_seed,
-            waiting_bubble,
-            walking_dust_frame,
+            effects,
         } => {
-            if let Some(dust_frame) = walking_dust_frame {
-                paint_walking_dust(buf, *anchor, *dust_frame, theme);
-            }
+            paint_effects(buf, effects.iter().filter(|e| e.kind.beneath()), theme);
             let drawn = paint_character_at(buf, *pose, *anchor, agent, pack, cache, now);
-            if let Some(seed) = sleep_z_seed {
-                paint_sleep_z(buf, *anchor, now, *seed, theme);
-            }
-            if *waiting_bubble {
-                paint_waiting_bubble(buf, *anchor, theme);
-            }
+            paint_effects(buf, effects.iter().filter(|e| !e.kind.beneath()), theme);
             return drawn.map(|Size { w, h }| {
                 Drawn::Agent(AgentFrame {
                     agent_id: agent.agent_id,
@@ -374,22 +347,12 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             }
         }
         DrawableKind::DeskChair { pos } => paint_chair_back(buf, *pos, pack),
-        DrawableKind::WaypointPantry { pos, anim } => {
+        DrawableKind::WaypointPantry { pos, anim, steam } => {
             // A character behind the counter is occluded by the counter's own
             // sprite (it y-sorts at the south base, and the mask south-anchors a
             // shallow strip there) — no synthetic cap needed.
             blit_centered_first_frame(pack, anim, *pos, buf);
-            let steam_dx = pantry_steam_dx(anim);
-            let steam_x = (pos.x as i32 + steam_dx as i32).max(0) as u16;
-            paint_coffee_steam(
-                buf,
-                Point {
-                    x: steam_x,
-                    y: pos.y.saturating_sub(2),
-                },
-                now,
-                theme,
-            );
+            paint_effects(buf, steam, theme);
         }
         DrawableKind::MeetingSofa { pos, mirrored } => {
             if let Some(f) = pack
@@ -449,12 +412,11 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             }
         }
         DrawableKind::Pet {
-            kind,
             pos,
             flip,
             anim_name,
             frame_idx,
-            pet_elapsed_ms,
+            effects,
         } => {
             let anim = pack.animation(anim_name)?;
             let frame = frame_at(anim, *frame_idx)?;
@@ -467,18 +429,14 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
                 frame
             };
             blit_centered(final_frame, *pos, buf);
-            if let Some(elapsed) = pet_elapsed_ms {
-                paint_pet_hearts(buf, *pos, *elapsed);
-            } else if *anim_name == kind.sleep_anim() {
-                paint_sleep_z(buf, *pos, now, 0xCAFE, theme);
-            }
+            paint_effects(buf, *effects, theme);
         }
         DrawableKind::GatewayMascot {
             mascot_idx,
             pos,
             anim_name,
             frame_idx,
-            run_count,
+            effects,
             degraded,
         } => {
             let anim = pack.animation(anim_name)?;
@@ -488,11 +446,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             } else {
                 blit_centered(frame, *pos, buf);
             }
-            // The busy tell keys on in-flight RUNS, not the (persistent,
-            // single-user) session count, which sticks at 1 at rest.
-            if *run_count > 0 {
-                paint_mascot_bubbles(buf, *pos, frame.height(), *run_count, now);
-            }
+            paint_effects(buf, *effects, theme);
             return Some(Drawn::Mascot {
                 mascot_idx: *mascot_idx,
                 w: frame.width(),
@@ -530,28 +484,34 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
     None
 }
 
+/// Where the cup stands on the desk at `desk`: its top-left cell.
+pub(super) fn desk_cup_at(desk: Point) -> Point {
+    Point {
+        x: desk.x + 2,
+        y: desk.y + 2,
+    }
+}
+
+/// The cup, then the `steam` riding on it.
 fn paint_desk_coffee(
     buf: &mut RgbBuffer,
     desk: Point,
     cup: Option<Cup>,
-    now: SystemTime,
+    steam: &[Effect],
     theme: &crate::theme::Theme,
 ) {
-    let Some(cup) = cup else {
+    if cup.is_none() {
         return;
-    };
+    }
     let put = |buf: &mut RgbBuffer, x: u16, y: u16, c: Rgb| {
         buf.put_checked(x, y, c);
     };
-    let cx = desk.x + 2;
-    let cy = desk.y + 2;
+    let Point { x: cx, y: cy } = desk_cup_at(desk);
     put(buf, cx, cy, theme.furniture.coffee_cup);
     put(buf, cx + 1, cy, theme.furniture.coffee_cup);
     put(buf, cx, cy + 1, theme.furniture.coffee_cup_shadow);
     put(buf, cx + 1, cy + 1, theme.furniture.coffee_cup_shadow);
-    if cup == Cup::Steaming {
-        paint_coffee_steam(buf, Point { x: cx, y: cy }, now, theme);
-    }
+    paint_effects(buf, steam, theme);
 }
 
 /// The desk task chair's pack animation.
@@ -660,6 +620,7 @@ const STACK_PX_PER_TIER: u16 = 2;
 mod tests {
     use super::*;
     use crate::layout::DESK_W;
+    use crate::pet::PetKind;
 
     #[test]
     fn steam_anchor_sits_within_the_coffee_machine_columns() {
@@ -703,6 +664,7 @@ mod tests {
                     cup: None,
                     token_tier,
                     sheet_fall,
+                    effects: Vec::new(),
                 },
             },
         }
@@ -729,7 +691,8 @@ mod tests {
         let render = |cup, ms| {
             let mut buf = RgbBuffer::filled(60, 60, bg);
             let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms);
-            paint_desk_coffee(&mut buf, desk, cup, now, th);
+            let steam = super::super::sim::cup_effects(desk, cup, now);
+            paint_desk_coffee(&mut buf, desk, cup, &steam, th);
             buf.as_slice().iter().filter(|&&c| c != bg).count()
         };
         let instants = (0..20u64).map(|i| i * 97);
@@ -1009,12 +972,11 @@ mod tests {
             anchor_y: 30,
             layer: Layer::Figure,
             kind: DrawableKind::Pet {
-                kind: PetKind::Cat,
                 pos: Point { x: 30, y: 30 },
                 flip: false,
                 anim_name: "nonexistent_anim",
                 frame_idx: 0,
-                pet_elapsed_ms: None,
+                effects: &[],
             },
         };
         paint_drawable(
@@ -1042,16 +1004,16 @@ mod tests {
         let pos = Point { x: 30, y: 40 };
         let mut render = |anim_name: &'static str| {
             let mut buf = RgbBuffer::filled(60, 60, Rgb { r: 0, g: 0, b: 0 });
+            let effects = super::super::sim::pet_effects(PetKind::Cat, pos, anim_name, None, now);
             let d = Drawable {
                 anchor_y: pos.y,
                 layer: Layer::Figure,
                 kind: DrawableKind::Pet {
-                    kind: PetKind::Cat,
                     pos,
                     flip: false,
                     anim_name,
                     frame_idx: 0,
-                    pet_elapsed_ms: None,
+                    effects: &effects,
                 },
             };
             paint_drawable(
@@ -1187,7 +1149,7 @@ mod tests {
                 pos: Point { x: 30, y: 30 },
                 anim_name: "nonexistent_anim",
                 frame_idx: 0,
-                run_count: 0,
+                effects: &[],
                 degraded: false,
             },
         };
@@ -1228,7 +1190,7 @@ mod tests {
                     pos,
                     anim_name: def.rest,
                     frame_idx: 0,
-                    run_count: 0,
+                    effects: &[],
                     degraded,
                 },
             };

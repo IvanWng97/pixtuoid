@@ -67,8 +67,8 @@ pub fn fresh_effort(slot: &AgentSlot, now: SystemTime) -> Option<&str> {
     })
 }
 
-/// The slot-level judgment the paint pass calls: freshness-filter, then
-/// `burn_tier`.
+/// The slot-level judgment the sim and the recolor call: freshness-filter,
+/// then `burn_tier`.
 pub fn slot_burn_tier(slot: &AgentSlot, now: SystemTime) -> BurnTier {
     burn_tier(slot.model.as_deref(), fresh_effort(slot, now))
 }

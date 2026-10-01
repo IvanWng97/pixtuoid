@@ -1,5 +1,5 @@
 //! Effects that ride on a character, a pet or a fixture, painted with it in
-//! z-order.
+//! z-order: the looks of the [`crate::effects`] model's, and a screen's own.
 
 use std::time::SystemTime;
 
@@ -8,6 +8,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::epoch_ms;
 use super::palette::{WHITE, blend_pixel};
+use crate::effects::{Effect, EffectKind, HEART_LIFE_MS, SLEEP_Z_RISE_MS, STEAM_CYCLE_MS};
 use crate::layout::{Point, SCREEN_GLASS_COLS};
 use crate::theme::Theme;
 
@@ -85,28 +86,39 @@ pub(super) fn paint_screen_glow(
     }
 }
 
-pub(super) fn paint_sleep_z(
+/// Paint `e` in its look.
+pub(super) fn paint_effect(buf: &mut RgbBuffer, e: &Effect, theme: &Theme) {
+    match e.kind {
+        EffectKind::SleepZ => paint_sleep_z(buf, e.at, e.phase, theme),
+        EffectKind::WaitingMark => paint_waiting_mark(buf, e.at, theme),
+        EffectKind::WalkingDust => paint_walking_dust(buf, e.at, e.phase, theme),
+        EffectKind::FlameCrown => paint_flame_crown(buf, e.at, e.phase),
+        EffectKind::PetHeart => paint_pet_heart(buf, e.at, e.phase),
+        EffectKind::SteamPuff => paint_steam_puff(buf, e.at, e.phase, theme),
+        EffectKind::MascotBubble => paint_mascot_bubble(buf, e.at, e.phase),
+    }
+}
+
+/// [`paint_effect`] each of `effects`, in order.
+pub(super) fn paint_effects<'e>(
     buf: &mut RgbBuffer,
-    head_anchor: Point,
-    now: SystemTime,
-    seed: u64,
+    effects: impl IntoIterator<Item = &'e Effect>,
     theme: &Theme,
 ) {
+    for e in effects {
+        paint_effect(buf, e, theme);
+    }
+}
+
+fn paint_sleep_z(buf: &mut RgbBuffer, head_anchor: Point, phase_ms: u64, theme: &Theme) {
     let z_color = theme.effects.sleep_z;
     // The height-coupled fade (`1.0 - t`) is what keeps the z from reading as a
     // solid mark parked over the sprite: it is only briefly visible near the
     // head, then dissolves.
-    const RISE_MS: u64 = 2000;
-    const REST_MS: u64 = 400;
-    const CYCLE_MS: u64 = RISE_MS + REST_MS;
     const MAX_RISE: u16 = 4;
     const FADE_IN_MS: f32 = 150.0;
     const PEAK_ALPHA: f32 = 0.9;
-    let phase_ms = epoch_ms(now).wrapping_add(seed % CYCLE_MS) % CYCLE_MS;
-    if phase_ms >= RISE_MS {
-        return;
-    }
-    let t = phase_ms as f32 / RISE_MS as f32;
+    let t = phase_ms as f32 / SLEEP_Z_RISE_MS as f32;
     // Ramp-in avoids a hard pop when a fresh z spawns at the head.
     let fade_in = (phase_ms as f32 / FADE_IN_MS).min(1.0);
     let alpha = PEAK_ALPHA * fade_in * (1.0 - t);
@@ -122,78 +134,69 @@ pub(super) fn paint_sleep_z(
     }
 }
 
-pub(super) fn paint_coffee_steam(buf: &mut RgbBuffer, base: Point, now: SystemTime, theme: &Theme) {
-    let steam = theme.effects.coffee_steam;
-    const STEAM_CYCLE_MS: u64 = 1800;
-    let elapsed_ms = epoch_ms(now);
-    for offset in 0..3u64 {
-        let phase = (elapsed_ms + offset * (STEAM_CYCLE_MS / 3)) % STEAM_CYCLE_MS;
-        let rise = (phase / 140) as u16;
-        let alpha = 1.0 - phase as f32 / STEAM_CYCLE_MS as f32;
-        if alpha < 0.15 {
-            continue;
-        }
-        let wiggle = if (phase / 200).is_multiple_of(2) {
-            0
-        } else {
-            1
-        };
-        let px = base.x + wiggle;
-        let py = base.y.saturating_sub(rise + 2);
-        blend_pixel(buf, px, py, steam, alpha * 0.55);
+/// How long a steam puff holds each row of its rise.
+const STEAM_ROW_MS: u64 = 140;
+/// How long it holds each side of its wiggle.
+const STEAM_WIGGLE_MS: u64 = 200;
+
+fn paint_steam_puff(buf: &mut RgbBuffer, spout: Point, phase: u64, theme: &Theme) {
+    let rise = (phase / STEAM_ROW_MS) as u16;
+    let alpha = 1.0 - phase as f32 / STEAM_CYCLE_MS as f32;
+    if alpha < 0.15 {
+        return;
     }
+    let wiggle = if (phase / STEAM_WIGGLE_MS).is_multiple_of(2) {
+        0
+    } else {
+        1
+    };
+    let px = spout.x + wiggle;
+    let py = spout.y.saturating_sub(rise + 2);
+    blend_pixel(buf, px, py, theme.effects.coffee_steam, alpha * 0.55);
 }
 
-pub(super) fn paint_walking_dust(
-    buf: &mut RgbBuffer,
-    walker_anchor: Point,
-    frame_idx: usize,
-    theme: &Theme,
-) {
+fn paint_walking_dust(buf: &mut RgbBuffer, walker_anchor: Point, stride: u64, theme: &Theme) {
     let dust = theme.effects.walking_dust;
     let foot_y = walker_anchor.y + WALKING_Y_OFF;
-    let foot_x = walker_anchor.x + if frame_idx == 0 { 6 } else { 1 };
+    let foot_x = walker_anchor.x + if stride == 0 { 6 } else { 1 };
     blend_pixel(buf, foot_x, foot_y, dust, 0.45);
 }
 
-/// Floating heart particles for the "pet the cat" interaction. The stagger and
-/// lifetime are sized so the LAST heart still completes within
-/// `PET_DURATION_MS`.
-pub(super) fn paint_pet_hearts(buf: &mut RgbBuffer, cat_pos: Point, elapsed_ms: u64) {
-    const STAGGER_MS: u64 = 150;
-    const HEART_LIFE_MS: u64 = 1550;
+/// One floating heart for the "pet the cat" interaction.
+fn paint_pet_heart(buf: &mut RgbBuffer, at: Point, phase_ms: u64) {
     let heart_color = Rgb {
         r: 255,
         g: 100,
         b: 100,
     };
-    for i in 0..4u64 {
-        let stagger = i * STAGGER_MS;
-        if elapsed_ms < stagger {
-            continue;
-        }
-        let local_ms = elapsed_ms - stagger;
-        if local_ms >= HEART_LIFE_MS {
-            continue;
-        }
-        let t = local_ms as f32 / HEART_LIFE_MS as f32;
-        let rise = (t * 6.0) as u16;
-        let alpha = 1.0 - t;
-        if alpha < 0.05 {
-            continue;
-        }
-        let dx: i16 = (i as i16) * 2 - 3;
-        let hx = (cat_pos.x as i32 + dx as i32).max(0) as u16;
-        let hy = cat_pos.y.saturating_sub(4 + rise);
-        for dy in 0..2u16 {
-            for ddx in 0..2u16 {
-                blend_pixel(buf, hx + ddx, hy + dy, heart_color, alpha * 0.8);
-            }
+    let t = phase_ms as f32 / HEART_LIFE_MS as f32;
+    let rise = (t * 6.0) as u16;
+    let alpha = 1.0 - t;
+    if alpha < 0.05 {
+        return;
+    }
+    let hy = at.y.saturating_sub(4 + rise);
+    for dy in 0..2u16 {
+        for ddx in 0..2u16 {
+            blend_pixel(buf, at.x + ddx, hy + dy, heart_color, alpha * 0.8);
         }
     }
 }
 
-pub(super) fn paint_waiting_bubble(buf: &mut RgbBuffer, anchor: Point, theme: &Theme) {
+/// One "working" bubble over a busy gateway mascot, `rise` rows up.
+fn paint_mascot_bubble(buf: &mut RgbBuffer, at: Point, rise: u64) {
+    let bubble = Rgb {
+        r: 0xd6,
+        g: 0xf2,
+        b: 0xf8,
+    };
+    let by = at.y.saturating_sub(rise as u16);
+    if at.x < buf.width() && by < buf.height() {
+        buf.put(at.x, by, bubble);
+    }
+}
+
+fn paint_waiting_mark(buf: &mut RgbBuffer, anchor: Point, theme: &Theme) {
     let fg = theme.effects.waiting_bubble;
     const GLYPH: &[&[u8]] = &[b".YYY.", b"...Y.", b"..Y..", b"..Y.."];
     let bx = anchor.x + 1;
@@ -228,12 +231,8 @@ pub(crate) const FLAME_TIP: Rgb = Rgb {
     b: 0x4a,
 };
 
-pub(super) fn paint_flame_crown(
-    buf: &mut RgbBuffer,
-    anchor: Point,
-    sprite_w: u16,
-    now: SystemTime,
-) {
+/// `crown` is the head's top-centre; `frame` which of the two shows.
+fn paint_flame_crown(buf: &mut RgbBuffer, crown: Point, frame: u64) {
     // The asymmetric two-frame flicker is what reads as fire, not a hat, and the
     // tips stay ≤2 px above the hair top so the flame never collides with the
     // name-badge row.
@@ -248,12 +247,7 @@ pub(super) fn paint_flame_crown(
         g: 0xf3,
         b: 0xa0,
     };
-    const FLICKER_MS: u64 = 260;
-    // INTEGER phase division: epoch-ms as f32 loses precision and freezes it.
-    let f2 = (epoch_ms(now) / FLICKER_MS) % 2 == 1;
-
     // Pattern entries are (dx from the head center, dy up from the hair top, color).
-    let cx = anchor.x + sprite_w / 2;
     let frame_a: &[(i32, u16, Rgb)] = &[
         (-2, 0, MID),
         (-1, 0, MID),
@@ -278,11 +272,11 @@ pub(super) fn paint_flame_crown(
         (-1, 2, TIP),
         (1, 2, TIP),
     ];
-    for &(dx, dy, c) in if f2 { frame_b } else { frame_a } {
-        let Some(px) = cx.checked_add_signed(dx as i16) else {
+    for &(dx, dy, c) in if frame == 1 { frame_b } else { frame_a } {
+        let Some(px) = crown.x.checked_add_signed(dx as i16) else {
             continue;
         };
-        let Some(py) = anchor.y.checked_sub(dy) else {
+        let Some(py) = crown.y.checked_sub(dy) else {
             continue;
         };
         if px < buf.width() && py < buf.height() {
@@ -370,7 +364,7 @@ mod tests {
     fn render(head: Point, phase_ms: u64) -> RgbBuffer {
         let mut buf = RgbBuffer::filled(64, 64, Rgb { r: 0, g: 0, b: 0 });
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(phase_ms);
-        paint_sleep_z(&mut buf, head, now, 0, theme());
+        paint_effects(&mut buf, &crate::effects::sleep_z(head, 0, now), theme());
         buf
     }
 
