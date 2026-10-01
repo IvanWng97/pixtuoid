@@ -163,3 +163,10 @@ pub(crate) fn looping_frame_index(anim: &Sprite, beat: crate::anim::Beat) -> usi
     let step = beat.ms() / u64::from(anim.frame_ms().max(1));
     usize::try_from(step % frames).unwrap_or(0)
 }
+
+/// The frame of `pack`'s looping animation `name` showing on `beat`; 0 for one
+/// the pack lacks.
+pub(crate) fn animation_frame_at(pack: &Pack, name: &str, beat: crate::anim::Beat) -> usize {
+    pack.animation(name)
+        .map_or(0, |anim| looping_frame_index(anim, beat))
+}

@@ -83,6 +83,9 @@ densest variant whose `N` divides its render scale and draws it as it is — a
 variant carries its own front, where a desk's top-down base art gets a front
 face derived under it. The recolor keys and `[ramps]` apply at every density.
 
+A pet's walk (`cat_walk`, `dog_walk`) is drawn facing east: the renderer
+mirrors it when the pet heads west, so a walk drawn facing west walks backwards.
+
 A frame can name points on itself for the renderer: `@mark <name> <x> <y>` in
 its `@frame` block, at column `x` and row `y` from the frame's top-left. A
 frame names each mark once. `head.<view>` is its head, with `view` one of

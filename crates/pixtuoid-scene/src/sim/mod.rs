@@ -510,8 +510,9 @@ fn mascot_placements(
         .filter_map(|(source, instance, presence)| {
             let def = gateway_mascot_def(source)?;
             let seed = mascot_seed(source, instance);
-            let (pos, anim_name, frame_idx) =
+            let (pos, anim_name) =
                 mascot_position(layout, presence, def.walk, def.rest, clock, seed)?;
+            let frame_idx = crate::pack::animation_frame_at(pack, anim_name, beat);
             let size = frame_size(pack, anim_name, frame_idx, MASCOT_FALLBACK);
             let pos = on_canvas(layout, Pivot::Center, pos, size);
             // The busy tell keys on in-flight RUNS, not the (persistent,
