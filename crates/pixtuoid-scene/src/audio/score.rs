@@ -327,8 +327,7 @@ pub(super) struct DayTake {
     pub(super) chords: &'static [[u8; 4]; 4],
     /// The take's key as pitch classes (0 = C) — the invariant home of the
     /// HAND-WRITTEN lead (`sparkle`), which uses diatonic color beyond the
-    /// bar's chord tones. Read only by the frozen-table drift test.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// bar's chord tones.
     pub(super) scale_pcs: [u8; 7],
     pub(super) sparkle: &'static [(f32, u8, f32)],
     pub(super) keys: &'static [(f32, u8, f32)],
@@ -349,8 +348,6 @@ impl DayTake {
         self.bar_s() * DAY_TAKE_LOOP_BARS as f32
     }
 
-    /// Read only by the frozen-table drift test.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn chord_at_bar(&self, bar: usize) -> [u8; 4] {
         self.chords[bar % self.chords.len()]
     }
