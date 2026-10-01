@@ -129,6 +129,11 @@ fn shrinking_under_the_minimum_drops_the_last_frames_hit_targets() {
             "{small_cols}x{small_rows}"
         );
         assert!(r.cached_pet_pos().is_none(), "{small_cols}x{small_rows}");
+        assert_eq!(
+            r.scene_area_at(cell.0, cell.1),
+            None,
+            "{small_cols}x{small_rows}"
+        );
     }
 }
 

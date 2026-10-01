@@ -345,6 +345,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         }) else {
             return Ok(());
         };
+        self.forget_drawn();
         let from_scene = project_floor_scene(scene, from_floor);
         let to_scene = project_floor_scene(scene, to_floor);
         // The destination floor's footer for the whole slide, so its count matches
@@ -389,7 +390,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 &overlays,
                 now,
             )?;
-            self.forget_drawn();
             // This returns before ensure_size, so the floor buffer's size
             // signature never changes and the event loop's resize detector can't
             // fire cancel_transition: the slide would stay live for its whole
@@ -533,7 +533,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         })?;
 
         self.popup.last_scale = popup_scale;
-        self.forget_drawn();
         Ok(())
     }
 
