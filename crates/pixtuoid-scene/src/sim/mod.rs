@@ -27,9 +27,8 @@ use crate::pet::PetKind;
 use crate::physics::walking_position;
 use crate::pose::{self, Pose, PoseHistory};
 
-use crate::art::{desk_art, desk_art_top};
+use crate::embedded_pack::{desk_art, desk_art_top};
 use crate::layout::CHARACTER_SPRITE_W;
-use crate::pixel_painter::drawable::desk_cup_at;
 use anchors::{
     badge_anchor, on_canvas, walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath,
 };
@@ -372,7 +371,7 @@ pub(super) fn frame_size(pack: &Pack, anim: &str, frame_idx: usize, fallback: Si
 /// The size of `anim`'s frame `frame_idx`, or `None` where the pack lacks it.
 pub(super) fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Option<Size> {
     pack.animation(anim)
-        .and_then(|a| crate::art::frame_at(a, frame_idx))
+        .and_then(|a| crate::embedded_pack::frame_at(a, frame_idx))
         .map(|f| Size {
             w: f.width(),
             h: f.height(),
@@ -841,6 +840,14 @@ pub(super) fn resolve_characters(
         new_coffee_carriers,
         wp_rank.into_keys().collect(),
     )
+}
+
+/// Where the cup stands on the desk at `desk`: its top-left cell.
+pub(crate) fn desk_cup_at(desk: Point) -> Point {
+    Point {
+        x: desk.x + 2,
+        y: desk.y + 2,
+    }
 }
 
 /// The agent whose home desk is `local`, while they have not begun to leave.

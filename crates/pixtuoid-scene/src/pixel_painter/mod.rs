@@ -148,7 +148,7 @@ fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
     })
 }
 #[cfg(test)]
-pub(crate) use crate::art::{SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
+pub(crate) use crate::embedded_pack::{SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
 pub(crate) use background::BaseFillCache;
 pub(crate) use furniture::COOLER_WATER;
 #[cfg(test)]
@@ -456,7 +456,7 @@ fn enqueue_characters<'a>(
             layer: Layer::Figure,
             kind: DrawableKind::Character {
                 agent,
-                pose: crate::art::SpritePose::of(p, agent, ctx.theme),
+                pose: crate::embedded_pack::SpritePose::of(p, agent, ctx.theme),
                 anchor: p.anchor,
                 label_anchor: p.label_anchor,
                 effects: &p.effects,
@@ -643,7 +643,9 @@ fn queue_fixtures<'a>(
                 };
                 match station {
                     Station::PantryCounter => {
-                        let anim = crate::art::pantry_counter_anim(layout.pantry_counter_size().w);
+                        let anim = crate::embedded_pack::pantry_counter_anim(
+                            layout.pantry_counter_size().w,
+                        );
                         DrawableKind::WaypointPantry {
                             pos: f.at,
                             anim,
@@ -654,8 +656,10 @@ fn queue_fixtures<'a>(
                             ),
                         }
                     }
-                    Station::VendingMachine => appliance(crate::art::VENDING_MACHINE_SPRITE),
-                    Station::Printer => appliance(crate::art::PRINTER_SPRITE),
+                    Station::VendingMachine => {
+                        appliance(crate::embedded_pack::VENDING_MACHINE_SPRITE)
+                    }
+                    Station::Printer => appliance(crate::embedded_pack::PRINTER_SPRITE),
                     Station::SnackShelf => DrawableKind::SnackShelf { pos: f.at },
                 }
             }

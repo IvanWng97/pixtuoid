@@ -13,7 +13,7 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 
 use super::palette::{BLACK, WHITE, blend_rgb};
-use crate::sim::{Cup, DeskProps};
+use crate::sim::{Cup, DeskProps, desk_cup_at};
 use pixtuoid_core::AgentSlot;
 
 use super::AgentFrame;
@@ -23,11 +23,11 @@ use super::furniture::{
     paint_area_rug, paint_coat_rack, paint_doormat, paint_fish_tank, paint_kitchen_island,
     paint_meeting_chair, paint_notice_board, paint_side_table, paint_trash_bin, paint_water_cooler,
 };
-use crate::art::{
+use crate::effects::{Effect, STEAM_PUFFS};
+use crate::embedded_pack::{
     CharacterFrame, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, SpritePose, character_frame, desk_art,
     desk_art_top, frame_at,
 };
-use crate::effects::{Effect, STEAM_PUFFS};
 use crate::frame_cache::FrameCache;
 pub(super) use crate::layout::Layer;
 use crate::layout::{Layout, Point, Size};
@@ -38,9 +38,9 @@ use crate::layout::{Layout, Point, Size};
 const PANTRY_STEAM_DX_LARGE: i16 = -2;
 const PANTRY_STEAM_DX_SMALL: i16 = 1;
 
-/// The steam offset for `anim`, a [`crate::art::pantry_counter_anim`] pick.
+/// The steam offset for `anim`, a [`crate::embedded_pack::pantry_counter_anim`] pick.
 fn pantry_steam_dx(anim: &str) -> i16 {
-    let [_, large] = crate::art::PANTRY_COUNTER_ANIMS;
+    let [_, large] = crate::embedded_pack::PANTRY_COUNTER_ANIMS;
     if anim == large {
         PANTRY_STEAM_DX_LARGE
     } else {
@@ -96,7 +96,7 @@ pub(super) enum DrawableKind<'a> {
         pos: Point,
     },
     /// Pantry counter, with coffee steam attached so the steam rides above it
-    /// in z-order. `anim` is [`crate::art::pantry_counter_anim`]'s pick.
+    /// in z-order. `anim` is [`crate::embedded_pack::pantry_counter_anim`]'s pick.
     WaypointPantry {
         pos: Point,
         anim: &'static str,
@@ -149,7 +149,7 @@ pub(super) enum DrawableKind<'a> {
         kind: crate::layout::WallDecor,
         pos: Point,
     },
-    /// A corridor appliance: its pack art ([`crate::art::appliance_art`]), centred at
+    /// A corridor appliance: its pack art ([`crate::embedded_pack::appliance_sprite`]), centred at
     /// `pos`.
     Appliance {
         pos: Point,
@@ -372,11 +372,14 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             }
         }
         DrawableKind::Appliance { pos, sprite, busy } => {
-            let art = pack
-                .animation(sprite)
-                .and_then(|anim| anim.recolorable(crate::art::appliance_frame(anim, *busy, now)));
+            let art = pack.animation(sprite).and_then(|anim| {
+                anim.recolorable(crate::embedded_pack::appliance_frame_index(
+                    anim, *busy, now,
+                ))
+            });
             if let Some(art) = art {
-                let themed = art.recolored(&crate::art::appliance_overrides(&theme.appliance));
+                let themed =
+                    art.recolored(&crate::embedded_pack::appliance_overrides(&theme.appliance));
                 blit_centered(&themed, *pos, buf);
             }
         }
@@ -451,14 +454,6 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
         DrawableKind::Clock { pos } => paint_clock(buf, pos.x, pos.y, now, theme),
     }
     None
-}
-
-/// Where the cup stands on the desk at `desk`: its top-left cell.
-pub(crate) fn desk_cup_at(desk: Point) -> Point {
-    Point {
-        x: desk.x + 2,
-        y: desk.y + 2,
-    }
 }
 
 /// The cup, then the `steam` riding on it.
@@ -640,7 +635,7 @@ mod tests {
         let large_w = crate::layout::PANTRY_COUNTER_LARGE_W;
         for counter_w in [large_w, large_w - 1] {
             let (lo, hi) = crate::layout::coffee_machine_cols(counter_w);
-            let anim = crate::art::pantry_counter_anim(counter_w);
+            let anim = crate::embedded_pack::pantry_counter_anim(counter_w);
             let steam_col = pantry_steam_dx(anim) + width(anim) / 2;
             assert!(
                 steam_col >= lo as i16 && steam_col < hi as i16,

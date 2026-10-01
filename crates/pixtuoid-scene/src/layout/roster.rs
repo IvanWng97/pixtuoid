@@ -326,6 +326,11 @@ pub(crate) const NEON_PANEL_H: u16 = 8;
 /// The frame thickness `paint_neon_panel` lights on every side — it reads THIS,
 /// so the interior derivations below match the pixels it leaves dark.
 pub(crate) const NEON_PANEL_BORDER: u16 = 1;
+
+/// The corridor runner's diamond lattice pitch, in logical px. Taste pin: a
+/// tighter stride read as bathroom tiling rather than a woven runner at
+/// half-block scale.
+pub(crate) const RUNNER_LATTICE_STRIDE: i32 = 10;
 /// The dark interior's left cell-origin — where board text starts. The board's
 /// text pins to the interior, not the outer box, or the lit text overruns the
 /// glowing frame by the border on each side.

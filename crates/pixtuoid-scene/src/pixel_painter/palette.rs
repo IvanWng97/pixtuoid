@@ -470,7 +470,7 @@ pub(super) fn blend_pixel(buf: &mut RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::art::{appliance_overrides, fixture_overrides};
+    use crate::embedded_pack::{appliance_overrides, fixture_overrides};
 
     /// Pins `MAX_RAMP_LEVEL` against the colors a recolor feeds a ramp: every
     /// agent color keeps a shade of its own at every level a pack may declare.

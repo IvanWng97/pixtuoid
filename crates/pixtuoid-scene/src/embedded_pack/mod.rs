@@ -4,6 +4,23 @@
 //! (`sprites/default/` is the canonical example); `PackSource` names where it
 //! comes from, and deciding that is the caller's job.
 
+mod character;
+mod density;
+mod lookup;
+
+pub(crate) use character::{
+    CharacterFrame, CharacterKey, SpritePose, character_frame, character_key, keyed_character_frame,
+};
+pub(crate) use density::{DenseFrame, densest_frame};
+#[cfg(test)]
+pub(crate) use lookup::DESK_BEZEL_RAISE;
+pub(crate) use lookup::{
+    CLOCK_FACE_KEY, DESK_BULB_KEY, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, PANTRY_COUNTER_ANIMS,
+    PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, VENDING_MACHINE_SPRITE,
+    appliance_frame_index, appliance_overrides, appliance_sprite, desk_art, desk_art_top,
+    desk_sprite_name, fixture_overrides, frame_at, looping_frame_index, pantry_counter_anim,
+};
+
 #[cfg(feature = "native")]
 use std::path::{Path, PathBuf};
 
@@ -37,7 +54,7 @@ pub enum PackSource {
 /// (`pixel_painter::pantry_counter_anim` picks one by room width), a pet kind's
 /// poses, or a gateway mascot's poses.
 fn art_sets() -> Vec<Vec<&'static str>> {
-    let mut sets = vec![crate::art::PANTRY_COUNTER_ANIMS.to_vec()];
+    let mut sets = vec![crate::embedded_pack::PANTRY_COUNTER_ANIMS.to_vec()];
     sets.extend(
         crate::pet::PetKind::ALL
             .iter()
@@ -263,11 +280,11 @@ pub(crate) fn test_pack_with(overrides: &[(&str, &'static str)]) -> Pack {
 }
 
 #[cfg(test)]
-#[path = "../build_support/density_art.rs"]
+#[path = "../../build_support/density_art.rs"]
 mod density_art;
 
 #[cfg(test)]
-#[path = "../build_support/comments.rs"]
+#[path = "../../build_support/comments.rs"]
 mod comments;
 
 #[cfg(test)]
@@ -396,8 +413,9 @@ mod tests {
     /// (`just hack` only checks), so this is the one place it is loaded.
     #[test]
     fn the_pack_without_density_art_loads_whole() {
-        let (toml, dropped) =
-            density_art::embedded_without_density_art(include_str!("../sprites/default/pack.toml"));
+        let (toml, dropped) = density_art::embedded_without_density_art(include_str!(
+            "../../sprites/default/pack.toml"
+        ));
         assert!(!dropped.is_empty(), "the bundled pack ships density art");
         let srcs: Vec<_> = embedded_sprite_srcs()
             .into_iter()
@@ -665,7 +683,7 @@ mod tests {
             .height()
             .checked_sub(base.height())
             .expect("the raised variant is the taller one");
-        let raise = crate::art::DESK_BEZEL_RAISE;
+        let raise = crate::embedded_pack::DESK_BEZEL_RAISE;
         let edges = [0, 1, base.width() - 2, base.width() - 1];
         for x in edges {
             for dy in 0..(base.height() - raise) {
@@ -721,7 +739,7 @@ mod tests {
     fn a_desks_rows_follow_the_layout() {
         use crate::layout::{DESK_FRONT_ROWS, DESK_LEG_ROWS, DESK_SURFACE_ROWS};
         let pack = test_default_pack();
-        let raise = crate::art::DESK_BEZEL_RAISE;
+        let raise = crate::embedded_pack::DESK_BEZEL_RAISE;
         let base_h = raise + DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS;
         for name in ["desk", "desk_north"] {
             let f = pack

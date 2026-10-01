@@ -88,7 +88,7 @@ pub(crate) fn keyed_character_frame<'c>(
 }
 
 fn recolor<'c>(
-    dense: super::dense::DenseFrame<'_>,
+    dense: super::density::DenseFrame<'_>,
     key: &CharacterKey,
     pack: &Pack,
     cache: &'c mut FrameCache,
@@ -158,7 +158,7 @@ pub(crate) fn character_key(
 }
 
 fn character_key_at(
-    dense: &super::dense::DenseFrame<'_>,
+    dense: &super::density::DenseFrame<'_>,
     pack: &Pack,
     pose: SpritePose,
     agent: &AgentSlot,

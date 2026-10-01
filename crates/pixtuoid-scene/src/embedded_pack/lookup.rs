@@ -1,17 +1,8 @@
-//! The pack's art as every painter reads it: which sprite a piece draws,
-//! which frame of it shows, the palette keys a theme recolours, and the
-//! density variant a scale picks.
-
-mod character;
-mod dense;
+//! Which sprite a piece draws, which frame of it shows, and the palette keys a
+//! theme recolours.
 
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Pixel, Sprite};
-
-pub(crate) use character::{
-    CharacterFrame, CharacterKey, SpritePose, character_frame, character_key, keyed_character_frame,
-};
-pub(crate) use dense::{DenseFrame, densest_frame};
 
 /// The pack key of a monitor's glass.
 pub(crate) const SCREEN_GLASS_KEY: char = 'j';
@@ -144,7 +135,7 @@ pub(crate) const VENDING_MACHINE_SPRITE: &str = "vending_machine";
 pub(crate) const PRINTER_SPRITE: &str = "printer";
 
 /// The pack art a corridor appliance at a `kind` waypoint is drawn from.
-pub(crate) fn appliance_art(kind: crate::layout::WaypointKind) -> Option<&'static str> {
+pub(crate) fn appliance_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
     use crate::layout::WaypointKind as K;
     match kind {
         K::VendingMachine => Some(VENDING_MACHINE_SPRITE),
@@ -162,7 +153,11 @@ pub(crate) fn appliance_art(kind: crate::layout::WaypointKind) -> Option<&'stati
 
 /// The frame of an appliance's `anim` showing at `now`: frame 0 at rest, else
 /// its busy loop — the frames after 0, one each of the art's own `frame_ms`.
-pub(crate) fn appliance_frame(anim: &Sprite, busy: bool, now: std::time::SystemTime) -> usize {
+pub(crate) fn appliance_frame_index(
+    anim: &Sprite,
+    busy: bool,
+    now: std::time::SystemTime,
+) -> usize {
     let loop_len = anim.frames().len().saturating_sub(1);
     if !busy || loop_len == 0 {
         return 0;
@@ -173,32 +168,8 @@ pub(crate) fn appliance_frame(anim: &Sprite, busy: bool, now: std::time::SystemT
 
 /// The frame of a looping `anim` showing at `now`: one each of the art's own
 /// `frame_ms`, round and round.
-pub(crate) fn looping_frame(anim: &Sprite, now: std::time::SystemTime) -> usize {
+pub(crate) fn looping_frame_index(anim: &Sprite, now: std::time::SystemTime) -> usize {
     let frames = anim.frames().len().max(1) as u64;
     let step = crate::anim::epoch_ms(now) / u64::from(anim.frame_ms().max(1));
     usize::try_from(step % frames).unwrap_or(0)
 }
-
-/// Quantize a fractional turn (0.0..1.0, 0.0 = north) to one of 8 octant
-/// (dx, dy) unit offsets.
-pub(crate) fn octant_offset(turn: f32) -> (i32, i32) {
-    // rem_euclid(8) maps every i32 (incl. a NaN turn's 0 cast) into 0..=7, so
-    // the table is total — a match would need a dead wildcard arm.
-    const OCTANTS: [(i32, i32); 8] = [
-        (0, -1),
-        (1, -1),
-        (1, 0),
-        (1, 1),
-        (0, 1),
-        (-1, 1),
-        (-1, 0),
-        (-1, -1),
-    ];
-    let oct = ((turn * 8.0).round() as i32).rem_euclid(8);
-    OCTANTS[oct as usize]
-}
-
-/// The corridor runner's diamond lattice pitch, in logical px. Taste pin: a
-/// tighter stride read as bathroom tiling rather than a woven runner at
-/// half-block scale.
-pub(crate) const RUNNER_LATTICE_STRIDE: i32 = 10;

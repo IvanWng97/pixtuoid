@@ -5,12 +5,13 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::art::{RUNNER_LATTICE_STRIDE, octant_offset};
 use crate::dither::FALLOFF_TONES;
 use crate::floor::NeonLook;
+use crate::layout::roster::RUNNER_LATTICE_STRIDE;
 use crate::lighting::Emitter;
 use crate::pixel_painter::palette::blend_rgb;
 use crate::sky::clock_reading;
+use crate::sky::octant_offset;
 use crate::theme::Theme;
 
 /// The composite every light shares: [`blend_tone`] over the caller-clipped
