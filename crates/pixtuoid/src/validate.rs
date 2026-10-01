@@ -34,6 +34,8 @@ fn unknown_line(name: &str) -> String {
     )
 }
 
+// Every line below names raw pack keys too, so each strips them as `unknown_line` does.
+
 fn missing_optional_line(m: &MissingOptional) -> String {
     let stand_in = match m.stand_in {
         StandIn::DefaultPack => "the default pack draws it, in its own style".to_string(),
