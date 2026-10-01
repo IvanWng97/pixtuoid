@@ -9,7 +9,7 @@ use crate::layout::Point;
 
 /// What an effect is, for the painter choosing its look. Each says what its
 /// [`Effect::phase`] counts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum EffectKind {
     /// A "z" rising off a sleeper's head; ms into its rise of
     /// [`SLEEP_Z_RISE_MS`].
@@ -36,7 +36,7 @@ impl EffectKind {
 }
 
 /// One effect this frame.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Effect {
     pub(crate) kind: EffectKind,
     /// Where it rides, in layout units: the point its kind's look is drawn

@@ -9,6 +9,7 @@
 //! is the one thing a follow-up cannot quietly undo.
 #[doc(hidden)]
 pub mod canvas;
+pub(crate) mod effects;
 pub(crate) mod light;
 pub(crate) mod order;
 #[doc(hidden)]

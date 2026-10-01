@@ -32,6 +32,9 @@ pub(crate) struct Dress {
     pub(crate) head: HeadMark,
     pub(crate) style: Option<String>,
     pub(crate) rise: u16,
+    /// The dressed figure's topmost drawn row, counted from the frame's top:
+    /// negative where it rises over it.
+    pub(crate) crest: i32,
 }
 
 /// The [`Dress`] of `body`, frame `head`'s art at `density`, for `agent`:
@@ -62,10 +65,12 @@ impl Dress {
         style: Option<&Hairstyle>,
         outlined: bool,
     ) -> Self {
+        let crest = crest(body, head, style, outlined);
         Dress {
             head,
             style: style.map(|s| s.name().to_owned()),
-            rise: rise(body, head, style, outlined),
+            rise: u16::try_from((-crest).max(0)).unwrap_or(0),
+            crest,
         }
     }
 }
@@ -75,9 +80,9 @@ fn opaque_top(f: &Frame) -> Option<u16> {
     (0..f.height()).find(|&y| (0..f.width()).any(|x| f.get(x, y).copied().flatten().is_some()))
 }
 
-/// How many art rows `body` dressed in `style` rises over its frame: the hair
-/// that reaches above the frame's top, and the outline's row above that.
-fn rise(body: &Frame, head: HeadMark, style: Option<&Hairstyle>, outlined: bool) -> u16 {
+/// [`Dress::crest`] of `body` dressed in `style`: its hair's top or its own,
+/// and the outline's row above that.
+fn crest(body: &Frame, head: HeadMark, style: Option<&Hairstyle>, outlined: bool) -> i32 {
     let hair = style
         .and_then(|s| s.layers(head.view))
         .into_iter()
@@ -89,9 +94,7 @@ fn rise(body: &Frame, head: HeadMark, style: Option<&Hairstyle>, outlined: bool)
                 .filter_map(|(f, _, dy)| Some(dy + i32::from(opaque_top(f)?)))
         });
     let top = hair.chain(opaque_top(body).map(i32::from)).min();
-    top.map_or(0, |top| {
-        u16::try_from((i32::from(outlined) - top).max(0)).unwrap_or(0)
-    })
+    top.map_or(0, |top| top - i32::from(outlined))
 }
 
 /// `body` dressed as `dress` says: `style`'s behind layer for its head's view,

@@ -5,7 +5,7 @@
 //! Usage:
 //!   cargo run --release --example cutaway_snapshot -- <out.png> [--scale N]
 //!       [--agents N] [--theme T] [--logical WxH] [--now-hour H] [--floor I/N]
-//!       [--weather W]
+//!       [--weather W] [--flame I]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -92,6 +92,7 @@ fn main() -> Result<()> {
     let (mut scale_n, mut agents, mut theme_name) = (None, 10usize, "tokyo-night".to_string());
     let (mut now_hour, mut floor) = (None::<u32>, (0usize, 1usize));
     let mut weather = None::<String>;
+    let mut flame = None::<usize>;
     let (mut lw, mut lh) = DEFAULT_LOGICAL;
     let rest: Vec<String> = args.collect();
     let mut i = 0;
@@ -115,6 +116,8 @@ fn main() -> Result<()> {
             }
             "--now-hour" => now_hour = Some(val("--now-hour")?.parse().context("bad --now-hour")?),
             "--weather" => weather = Some(val("--weather")?),
+            // The `I`th agent burns at the Top tier, crowned in flame.
+            "--flame" => flame = Some(val("--flame")?.parse().context("bad --flame")?),
             "--floor" => {
                 let v = val("--floor")?;
                 let (f, n) = v
@@ -152,6 +155,18 @@ fn main() -> Result<()> {
 
     let mut scene = SceneState::uniform(64);
     populate(&mut scene, now, agents);
+    if let Some(i) = flame {
+        let id = AgentId::from_transcript_path(&format!("/cutaway/a{i}.jsonl"));
+        let a = scene
+            .agents
+            .get_mut(&id)
+            .ok_or_else(|| anyhow!("--flame {i}: only {agents} agents"))?;
+        a.model = Some("claude-fable-5".into());
+        a.effort = Some(pixtuoid_core::state::EffortObservation::new(
+            "ultra".into(),
+            now,
+        ));
+    }
 
     // The real sim, at LOGICAL size — the cutaway is its second reader.
     let mut session = FloorSession::new();
