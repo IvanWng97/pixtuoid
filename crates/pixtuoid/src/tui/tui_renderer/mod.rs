@@ -654,6 +654,17 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
     /// What a floor frame leaves behind, whichever painter drew it: what the
     /// mouse hit-tests, the floor's audio, and the sim's epilogue.
+    /// The sim's per-frame epilogue for a frame the classic painter stepped;
+    /// [`pixtuoid_scene::floor::observe_floor`] runs its own.
+    fn sim_epilogue(&mut self, carriers: Vec<pixtuoid_core::AgentId>, now: SystemTime) {
+        pixtuoid_scene::floor::frame_epilogue(
+            &mut self.floors[self.current_floor].ctx,
+            &mut self.office.coffee,
+            carriers,
+            now,
+        );
+    }
+
     fn record_drawn(
         &mut self,
         scene: &SceneState,
@@ -677,12 +688,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         );
         // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
         self.chrome.audio.frame(audio_frame);
-        pixtuoid_scene::floor::frame_epilogue(
-            &mut self.floors[self.current_floor].ctx,
-            &mut self.office.coffee,
-            out.new_coffee_carriers,
-            now,
-        );
         self.cached_layout = out.layout;
         // The popup's click rect derives from the terminal bounds — NOT the
         // office layout — so the painted scale IS the clickable one on both
@@ -766,8 +771,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             connection: overlays.connection,
             onboarding: overlays.onboarding,
         };
-        let out = draw_scene(&mut self.terminal, &mut draw_ctx)?;
+        let mut out = draw_scene(&mut self.terminal, &mut draw_ctx)?;
+        let carriers = std::mem::take(&mut out.new_coffee_carriers);
         self.record_drawn(scene, out, popup_scale, now);
+        self.sim_epilogue(carriers, now);
         Ok(())
     }
 }
@@ -819,6 +826,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let Some(observed) = observed else {
             let drawn = draw_footer_only_frame(&mut self.terminal, &footer, theme, &overlays, now);
             self.record_drawn(scene, DrawOut::default(), popup_scale, now);
+            self.sim_epilogue(Vec::new(), now);
             return drawn;
         };
         kitty.paint(&observed, theme, world.floor, now);
