@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::num::NonZeroU16;
+#[cfg(feature = "native")]
 use std::path::Path;
 use std::sync::Arc;
 
@@ -204,7 +206,7 @@ mod tests {
         let tower = pack.buildings().next().expect("the tower");
         assert_eq!((tower.name(), tower.size()), ("tower", (2, 3)));
         assert!(tower.stands_in(CityPlane::Mid) && tower.stands_in(CityPlane::Near));
-        let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
+        let d = |n| Density::new(n).expect("nonzero");
         let base = tower.base();
         assert!(tower.variant(d(1)).is_none(), "the base is no variant");
         assert_eq!(
@@ -886,7 +888,7 @@ pub struct Building {
     name: String,
     planes: Vec<CityPlane>,
     base: BuildingArt,
-    variants: BTreeMap<u16, BuildingArt>,
+    variants: BTreeMap<Density, BuildingArt>,
 }
 
 impl Building {
@@ -915,8 +917,8 @@ impl Building {
     }
 
     /// Its variant drawn at `density`, above its [`base`](Self::base).
-    pub fn variant(&self, density: std::num::NonZeroU16) -> Option<&BuildingArt> {
-        self.variants.get(&density.get())
+    pub fn variant(&self, density: Density) -> Option<&BuildingArt> {
+        self.variants.get(&density)
     }
 }
 
@@ -947,7 +949,7 @@ impl BuildingArt {
 #[derive(Debug, Clone)]
 pub struct Hairstyle {
     name: String,
-    density: std::num::NonZeroU16,
+    density: Density,
     views: [Option<HairLayers>; HeadView::ALL.len()],
 }
 
@@ -958,7 +960,7 @@ impl Hairstyle {
     }
 
     /// The density of the art it dresses.
-    pub fn density(&self) -> std::num::NonZeroU16 {
+    pub fn density(&self) -> Density {
         self.density
     }
 
@@ -1010,7 +1012,7 @@ impl Pack {
     }
 
     /// The style `name` at `density`, where the pack draws one.
-    pub fn hairstyle(&self, name: &str, density: std::num::NonZeroU16) -> Option<&Hairstyle> {
+    pub fn hairstyle(&self, name: &str, density: Density) -> Option<&Hairstyle> {
         self.hairstyles.get(&format!("{name}@{density}x"))
     }
 
@@ -1037,11 +1039,10 @@ impl Pack {
         self.animation(self.piece_or_source(key)?)
     }
 
-    /// The name of the animation that draws `key`: [`animation_or_source`]'s
-    /// pick. A painter that takes a piece's density variants looks them up under
-    /// this name, since a derived piece the pack lacks draws its source's.
-    ///
-    /// [`animation_or_source`]: Self::animation_or_source
+    /// The name of the animation that draws `key`:
+    /// [`animation_or_source`](Self::animation_or_source)'s pick. A painter that
+    /// takes a piece's density variants looks them up under this name, since a
+    /// derived piece the pack lacks draws its source's.
     pub fn piece_or_source<'k>(&self, key: &'k str) -> Option<&'k str> {
         if self.animation(key).is_some() {
             return Some(key);
@@ -1054,9 +1055,13 @@ impl Pack {
         self.animations.keys().cloned().collect()
     }
 
-    /// The densest of [`Pack::density_variants`], or 1 when the pack ships none.
-    pub fn max_density_variant(&self) -> u16 {
-        self.density_variants().first().copied().unwrap_or(1)
+    /// The densest of [`Pack::density_variants`], or [`Density::ONE`] when the
+    /// pack ships none.
+    pub fn max_density_variant(&self) -> Density {
+        self.density_variants()
+            .first()
+            .copied()
+            .unwrap_or(Density::ONE)
     }
 
     /// The densities this pack's variants are drawn at, densest first, each
@@ -1067,8 +1072,8 @@ impl Pack {
     /// divides. Only a variant of a registered animation that redraws its base
     /// ([`variant_redraws`]) counts: a stray key names nothing a painter asks
     /// for, and every renderer skips a variant that does not redraw its base.
-    pub fn density_variants(&self) -> Vec<u16> {
-        let densities: std::collections::BTreeSet<u16> = self
+    pub fn density_variants(&self) -> Vec<Density> {
+        let densities: BTreeSet<Density> = self
             .animations
             .iter()
             .filter_map(|(name, variant)| {
@@ -1080,7 +1085,8 @@ impl Pack {
         densities.into_iter().rev().collect()
     }
 
-    /// Merge [`OPTIONAL_FURNITURE_ANIMATIONS`] — and their density variants —
+    /// Merge [`OPTIONAL_FURNITURE_ANIMATIONS`] and [`OPTIONAL_CREATURE_ANIMATIONS`]
+    /// — and their density variants —
     /// from `base` into self: the keys `RegisteredKey::is_inherited` passes;
     /// and `base`'s whole city, its buildings and `[city]`, when self has no
     /// buildings.
@@ -1141,10 +1147,8 @@ fn redrawn_pieces(name: &str) -> impl Iterator<Item = &str> {
     variant_base.into_iter().chain(source)
 }
 
-/// Assemble a `Pack` from parsed TOML, resolving each frame's source text via
-/// `get_src(frame_name)`. The path-traversal guard MUST stay inside
-/// [`load_pack`]'s closure: [`load_pack_from_strings`] has no filesystem and no
-/// untrusted paths to escape.
+/// The path-traversal guard MUST stay inside `load_pack`'s `get_src`:
+/// [`load_pack_from_strings`] has no filesystem and no untrusted paths to escape.
 fn build_pack(
     parsed: PackToml,
     // `dyn`, not generic, so this body compiles once for both loaders instead
@@ -1201,13 +1205,13 @@ fn build_pack(
         let Some(materials) = city_materials.as_ref() else {
             return Err(PackError::BuildingWithoutCity { key });
         };
-        let (name, density) = split_density_variant(&key).unwrap_or((&key, 1));
-        if density == 1 && key.contains(DENSITY_VARIANT_SEP) {
+        let (name, density) = split_density_variant(&key).unwrap_or((&key, Density::ONE));
+        if density == Density::ONE && key.contains(DENSITY_VARIANT_SEP) {
             return Err(PackError::BuildingDensity { key });
         }
         let art = building_art(&building.sprite, &palette, materials, get_src)?;
         match (density, building.planes) {
-            (1, Some(planes)) if !planes.is_empty() => {
+            (Density::ONE, Some(planes)) if !planes.is_empty() => {
                 let planes = planes
                     .iter()
                     .map(|p| {
@@ -1227,7 +1231,7 @@ fn build_pack(
                     },
                 );
             }
-            (1, _) => return Err(PackError::BuildingWithoutPlanes { key }),
+            (Density::ONE, _) => return Err(PackError::BuildingWithoutPlanes { key }),
             (_, Some(_)) => return Err(PackError::VariantPlanes { key }),
             (_, None) => {
                 let no_base = |key| PackError::VariantWithoutBase {
@@ -1264,9 +1268,7 @@ fn build_pack(
         .transpose()?;
     let mut hairstyles = BTreeMap::new();
     for (key, style) in parsed.hairstyles {
-        let Some((name, density)) =
-            split_density_variant(&key).and_then(|(n, d)| Some((n, std::num::NonZeroU16::new(d)?)))
-        else {
+        let Some((name, density)) = split_density_variant(&key) else {
             return Err(PackError::HairstyleDensity { key });
         };
         let mut layer = |view: HeadView, fname: &str| -> Result<Sprite> {
@@ -1309,20 +1311,20 @@ fn build_pack(
     }
     // A style changing with the density the renderer lands on would change an
     // agent's look with the window's size.
-    let names_at = |d| -> std::collections::BTreeSet<&str> {
+    let names_at = |d| -> BTreeSet<&str> {
         hairstyles
             .values()
             .filter(|s| s.density == d)
             .map(|s| s.name.as_str())
             .collect()
     };
-    let densities: std::collections::BTreeSet<_> = hairstyles.values().map(|s| s.density).collect();
+    let densities: BTreeSet<_> = hairstyles.values().map(|s| s.density).collect();
     if let [first, rest @ ..] = densities.iter().copied().collect::<Vec<_>>().as_slice()
         && let Some(d) = rest.iter().find(|&&d| names_at(d) != names_at(*first))
     {
         return Err(PackError::HairstylesDiffer {
-            first: first.get(),
-            other: d.get(),
+            first: *first,
+            other: *d,
         });
     }
 
@@ -1423,6 +1425,7 @@ pub const PACK_MANIFEST: &str = "pack.toml";
 
 /// Load a `Pack` from `dir`'s [`PACK_MANIFEST`] and its on-disk frame files,
 /// guarding each frame path against directory traversal outside `dir`.
+#[cfg(feature = "native")]
 pub fn load_pack(dir: &Path) -> Result<Pack> {
     let toml_path = dir.join(PACK_MANIFEST);
     let toml_src = std::fs::read_to_string(&toml_path).map_err(|source| {
@@ -1474,8 +1477,7 @@ pub fn load_pack(dir: &Path) -> Result<Pack> {
     })
 }
 
-/// Same as [`load_pack`] but takes in-memory strings — used by the embedded
-/// default pack, which `include_str!`s its assets at compile time.
+/// `load_pack` from in-memory strings, so it reads no files.
 pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Result<Pack> {
     let parsed: PackToml =
         toml::from_str(pack_toml).map_err(|source| PackError::Manifest { path: None, source })?;
@@ -1585,8 +1587,37 @@ pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &[
 /// meaning dependent on whichever render scale happens to measure it.
 pub(crate) const DENSITY_VARIANT_SEP: char = '@';
 
+/// The grid art is authored on, in art pixels per logical unit: 1 for base
+/// art, `N` for a `<name>@<N>x` variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Density(NonZeroU16);
+
+impl Density {
+    /// The base art's density.
+    pub const ONE: Self = Self(NonZeroU16::MIN);
+
+    /// `n` as a density, or `None` for 0.
+    pub const fn new(n: u16) -> Option<Self> {
+        match NonZeroU16::new(n) {
+            Some(n) => Some(Self(n)),
+            None => None,
+        }
+    }
+
+    /// The density as a number.
+    pub const fn get(self) -> u16 {
+        self.0.get()
+    }
+}
+
+impl std::fmt::Display for Density {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// The animation name for `base` drawn at `density`x.
-pub fn density_variant_name(base: &str, density: u16) -> String {
+pub fn density_variant_name(base: &str, density: Density) -> String {
     let mut out = String::with_capacity(base.len() + 4);
     density_variant_name_into(&mut out, base, density);
     out
@@ -1594,7 +1625,7 @@ pub fn density_variant_name(base: &str, density: u16) -> String {
 
 /// [`density_variant_name`] into a caller-owned buffer, so a lookup loop reuses
 /// one allocation.
-pub fn density_variant_name_into(out: &mut String, base: &str, density: u16) {
+pub fn density_variant_name_into(out: &mut String, base: &str, density: Density) {
     use std::fmt::Write;
     // Writing to a String is infallible.
     let _ = write!(out, "{base}{DENSITY_VARIANT_SEP}{density}x");
@@ -1612,7 +1643,7 @@ pub(crate) const MAX_DENSITY_VARIANT: u16 = 64;
 ///
 /// `1x` is deliberately NOT a variant: it would be a second name for the base
 /// animation, and one thing with two names is how a pack ends up shipping both.
-pub(crate) fn split_density_variant(name: &str) -> Option<(&str, u16)> {
+pub(crate) fn split_density_variant(name: &str) -> Option<(&str, Density)> {
     let (base, density) = name.rsplit_once(DENSITY_VARIANT_SEP)?;
     let digits = density.strip_suffix('x')?;
     // Digits only, with no leading zero. `u16::from_str` accepts a leading `+`
@@ -1622,37 +1653,46 @@ pub(crate) fn split_density_variant(name: &str) -> Option<(&str, u16)> {
     if digits.is_empty() || digits.starts_with('0') || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    let n: u16 = digits.parse().ok()?;
-    (2..=MAX_DENSITY_VARIANT).contains(&n).then_some((base, n))
+    let density = Density::new(digits.parse().ok()?)
+        .filter(|d| (2..=MAX_DENSITY_VARIANT).contains(&d.get()))?;
+    Some((base, density))
 }
 
-/// Every registered animation: the required and optional character poses and
-/// the optional furniture.
+/// Every registered animation: the required and optional character poses, then
+/// the [`inherited_animation_names`].
 fn registered_animation_names() -> impl Iterator<Item = &'static str> {
     REQUIRED_CHARACTER_ANIMATIONS
         .iter()
         .chain(OPTIONAL_CHARACTER_ANIMATIONS)
-        .chain(OPTIONAL_FURNITURE_ANIMATIONS)
+        .copied()
+        .chain(inherited_animation_names())
+}
+
+/// The animations [`Pack::merge_from`] inherits: the optional furniture and
+/// the optional creatures.
+fn inherited_animation_names() -> impl Iterator<Item = &'static str> {
+    OPTIONAL_FURNITURE_ANIMATIONS
+        .iter()
+        .chain(OPTIONAL_CREATURE_ANIMATIONS)
         .copied()
 }
 
 /// A pack key that names a registered animation: the animation itself, or a
 /// density variant of it (`desk@4x`). Any registered animation takes variants,
-/// since a character is redrawn at density like furniture; only furniture is
-/// inherited ([`RegisteredKey::is_inherited`]).
+/// since a character is redrawn at density like furniture; only furniture and
+/// creatures are inherited ([`RegisteredKey::is_inherited`]).
 ///
-/// Variants are legal BY DERIVATION rather than by their own registry rows, so
-/// authoring one needs no registry row. A second list would have to be kept in
-/// step with the first, and forgetting an entry fails QUIETLY in its least
-/// visible direction: the variant loads for the bundled pack but
-/// [`Pack::merge_from`] never inherits it, so a `--pack-dir` user silently
-/// drops back to the upscale.
+/// Variants are legal BY DERIVATION rather than by their own registry rows. A
+/// second list would have to be kept in step with the first, and forgetting an
+/// entry fails QUIETLY in its least visible direction: the variant loads for
+/// the bundled pack but [`Pack::merge_from`] never inherits it, so a
+/// `--pack-dir` user silently drops back to the upscale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RegisteredKey {
     /// The registered animation the key names or redraws.
     base: &'static str,
     /// The density a variant is drawn at; `None` for the animation itself.
-    density: Option<u16>,
+    density: Option<Density>,
 }
 
 impl RegisteredKey {
@@ -1665,10 +1705,11 @@ impl RegisteredKey {
             .map(|base| Self { base, density })
     }
 
-    /// Whether [`Pack::merge_from`] inherits this key: furniture and its
-    /// variants only, because a robot pack must not fall back to human sprites.
+    /// Whether [`Pack::merge_from`] inherits this key: furniture, creatures and
+    /// their variants only, because a robot pack must not fall back to human
+    /// sprites.
     fn is_inherited(self) -> bool {
-        OPTIONAL_FURNITURE_ANIMATIONS.contains(&self.base)
+        inherited_animation_names().any(|n| n == self.base)
     }
 }
 
@@ -1684,14 +1725,6 @@ pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "plant_succulent",
     "floor_lamp",
     "door",
-    "cat_walk",
-    "cat_sit",
-    "cat_sleep",
-    "dog_walk",
-    "dog_sit",
-    "dog_sleep",
-    "lobster_walk",
-    "lobster_rest",
     "meeting_sofa",
     "meeting_sofa_north",
     "meeting_screen",
@@ -1720,6 +1753,20 @@ pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "meeting_chair",
 ];
 
+/// The pets' and the gateway mascots' animation names a pack MAY provide, which
+/// [`Pack::merge_from`] inherits like the furniture: they stand on their feet
+/// wherever their frame ends, so they are kept apart from it.
+pub const OPTIONAL_CREATURE_ANIMATIONS: &[&str] = &[
+    "cat_walk",
+    "cat_sit",
+    "cat_sleep",
+    "dog_walk",
+    "dog_sit",
+    "dog_sleep",
+    "lobster_walk",
+    "lobster_rest",
+];
+
 const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[
     ("typing", 2),
     ("walking", 2),
@@ -1734,16 +1781,16 @@ const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[
 ///
 /// Wider than a frame dimension: a claim past `u16::MAX` stays a size no frame
 /// can meet, where a saturated one would equal a `u16::MAX`-wide frame.
-pub fn claimed_variant_size(base: &Frame, density: u16) -> (u32, u32) {
+pub fn claimed_variant_size(base: &Frame, density: Density) -> (u32, u32) {
     (
-        u32::from(base.width()) * u32::from(density),
-        u32::from(base.height()) * u32::from(density),
+        u32::from(base.width()) * u32::from(density.get()),
+        u32::from(base.height()) * u32::from(density.get()),
     )
 }
 
 /// Whether `variant` is exactly the size its density claims over `base`
 /// ([`claimed_variant_size`]).
-pub fn variant_fits(base: &Frame, density: u16, variant: &Frame) -> bool {
+pub fn variant_fits(base: &Frame, density: Density, variant: &Frame) -> bool {
     claimed_variant_size(base, density) == (u32::from(variant.width()), u32::from(variant.height()))
 }
 
@@ -1751,7 +1798,7 @@ pub fn variant_fits(base: &Frame, density: u16, variant: &Frame) -> bool {
 /// exactly the size its density claims over the matching base frame
 /// ([`variant_fits`]). The one rule a renderer takes a variant by and
 /// [`validate_pack_animations`] passes one by.
-pub fn variant_redraws(base: &Sprite, density: u16, variant: &Sprite) -> bool {
+pub fn variant_redraws(base: &Sprite, density: Density, variant: &Sprite) -> bool {
     let (base, variant) = (base.frames(), variant.frames());
     !variant.is_empty()
         && variant.len() == base.len()
@@ -1833,6 +1880,41 @@ pub struct OrphanDerived {
     pub source: &'static str,
 }
 
+/// A character frame a hairstyle would dress but for its missing head mark: it
+/// is drawn bare.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnmarkedHead {
+    /// The animation, e.g. `standing@4x`.
+    pub name: String,
+    /// Its first unmarked frame, counted as [`DensityMismatch::frame`] is.
+    pub frame: usize,
+}
+
+/// A view a hairstyle leaves out and a head at its density faces: that head is
+/// drawn bare.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingHairView {
+    /// The style's key, e.g. `mop@4x`.
+    pub style: String,
+    /// The view.
+    pub view: HeadView,
+    /// The first animation, by name, with such a head.
+    pub name: String,
+}
+
+/// A hairstyle view with a layer reaching past a character frame's sides.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HairOverhang {
+    /// The style's key, e.g. `mop@4x`.
+    pub style: String,
+    /// The view.
+    pub view: HeadView,
+    /// The first animation, by name, it overhangs.
+    pub name: String,
+    /// That animation's first such frame.
+    pub frame: usize,
+}
+
 /// Per-category tally of a pack's animation discrepancies.
 #[derive(Debug, Default)]
 pub struct ValidationReport {
@@ -1867,11 +1949,18 @@ pub struct ValidationReport {
     /// Each derived piece the pack ships without its source: the default pack
     /// draws the source, in its own style.
     pub orphan_derived: Vec<OrphanDerived>,
+    /// One per character animation.
+    pub unmarked_heads: Vec<UnmarkedHead>,
+    /// One per hairstyle view.
+    pub missing_hair_views: Vec<MissingHairView>,
+    /// One per hairstyle view.
+    pub overhanging_hair: Vec<HairOverhang>,
+    /// Each hairstyle key at a density the pack draws no character at.
+    pub orphan_hairstyles: Vec<String>,
 }
 
 impl ValidationReport {
-    /// How many findings make the pack unusable: the fields this destructure
-    /// counts. A field bound to `_` is reported, not counted.
+    /// How many findings make the pack unusable: the fields this destructure counts.
     pub fn error_count(&self) -> usize {
         // No `..`: a new report field must be classed error-or-not here before
         // this compiles.
@@ -1885,16 +1974,21 @@ impl ValidationReport {
             mismatched_frame_counts,
             partial_sets: _,
             orphan_derived: _,
+            unmarked_heads: _,
+            missing_hair_views: _,
+            overhanging_hair: _,
+            orphan_hairstyles,
         } = self;
         missing_required.len()
             + insufficient_frames.len()
             + mismatched_density.len()
             + orphan_variants.len()
             + mismatched_frame_counts.len()
+            + orphan_hairstyles.len()
     }
 
     /// How many findings leave the pack usable but not as authored: the fields
-    /// this destructure counts. A field bound to `_` is reported, not counted.
+    /// this destructure counts.
     pub fn warning_count(&self) -> usize {
         // No `..`, for the reason `error_count` gives.
         let ValidationReport {
@@ -1907,8 +2001,17 @@ impl ValidationReport {
             mismatched_frame_counts: _,
             partial_sets,
             orphan_derived,
+            unmarked_heads,
+            missing_hair_views,
+            overhanging_hair,
+            orphan_hairstyles: _,
         } = self;
-        missing_optional.len() + partial_sets.len() + orphan_derived.len()
+        missing_optional.len()
+            + partial_sets.len()
+            + orphan_derived.len()
+            + unmarked_heads.len()
+            + missing_hair_views.len()
+            + overhanging_hair.len()
     }
 
     /// True when the pack is unusable; see [`error_count`](Self::error_count).
@@ -1960,7 +2063,7 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
     let missing_optional: Vec<MissingOptional> = OPTIONAL_CHARACTER_ANIMATIONS
         .iter()
         .map(|&name| (name, StandIn::OwnPose))
-        .chain(OPTIONAL_FURNITURE_ANIMATIONS.iter().map(|&name| {
+        .chain(inherited_animation_names().map(|name| {
             let stand_in = pack
                 .own_redrawn_piece(name)
                 .map_or(StandIn::DefaultPack, StandIn::OwnPiece);
@@ -1971,7 +2074,7 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
         .collect();
     report.missing_optional = missing_optional;
 
-    let variants: Vec<(&str, &Sprite, &'static str, u16)> = pack
+    let variants: Vec<(&str, &Sprite, &'static str, Density)> = pack
         .animations
         .iter()
         .filter_map(|(name, variant)| {
@@ -2004,7 +2107,6 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
 
     for &(name, variant, base, density) in &variants {
         let Some(base) = pack.animation(base).filter(|a| !a.frames().is_empty()) else {
-            // No base, no claim to check: see `ValidationReport::orphan_variants`.
             report.orphan_variants.push(name.to_string());
             continue;
         };
@@ -2037,6 +2139,69 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
         }
     }
 
+    let mut characters: Vec<(&str, &Sprite, Density)> = variants
+        .iter()
+        .filter(|(_, _, base, _)| {
+            REQUIRED_CHARACTER_ANIMATIONS.contains(base)
+                || OPTIONAL_CHARACTER_ANIMATIONS.contains(base)
+        })
+        .map(|&(name, sprite, _, density)| (name, sprite, density))
+        .collect();
+    characters.sort_unstable_by_key(|&(name, ..)| name);
+    let dressed_densities: BTreeSet<Density> = pack.hairstyles().map(Hairstyle::density).collect();
+    for &(name, sprite, density) in &characters {
+        if !dressed_densities.contains(&density) {
+            continue;
+        }
+        if let Some(frame) = (0..sprite.frames().len()).find(|&i| sprite.head(i).is_none()) {
+            report.unmarked_heads.push(UnmarkedHead {
+                name: name.to_owned(),
+                frame,
+            });
+        }
+    }
+    for style in pack.hairstyles() {
+        let density = style.density();
+        let key = density_variant_name(style.name(), density);
+        let mut dressed = characters.iter().filter(|c| c.2 == density).peekable();
+        if dressed.peek().is_none() {
+            report.orphan_hairstyles.push(key);
+            continue;
+        }
+        let (mut missing, mut overhung) = (Vec::new(), Vec::new());
+        for &(name, sprite, _) in dressed {
+            for (frame, body) in sprite.frames().iter().enumerate() {
+                let Some(head) = sprite.head(frame) else {
+                    continue;
+                };
+                let Some(layers) = style.layers(head.view) else {
+                    if !missing.contains(&head.view) {
+                        missing.push(head.view);
+                        report.missing_hair_views.push(MissingHairView {
+                            style: key.clone(),
+                            view: head.view,
+                            name: name.to_owned(),
+                        });
+                    }
+                    continue;
+                };
+                let clipped = [layers.behind(), layers.over()]
+                    .into_iter()
+                    .flatten()
+                    .any(|layer| overhangs(layer, body, head));
+                if clipped && !overhung.contains(&head.view) {
+                    overhung.push(head.view);
+                    report.overhanging_hair.push(HairOverhang {
+                        style: key.clone(),
+                        view: head.view,
+                        name: name.to_owned(),
+                        frame,
+                    });
+                }
+            }
+        }
+    }
+
     for name in pack.animation_names() {
         if RegisteredKey::parse(&name).is_none() {
             report.unknown.push(name);
@@ -2046,9 +2211,28 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
     report
 }
 
+/// Whether `layer`, [laid on](Sprite::laid_on) `head`, puts an opaque pixel
+/// past `body`'s sides: a dressed frame grows up, never wider. Not its bottom,
+/// where the body's art ends at whatever hides the rest (`back_couch`'s seat back).
+fn overhangs(layer: &Sprite, body: &Frame, head: HeadMark) -> bool {
+    let Some((art, dx, _)) = layer.laid_on(head) else {
+        return false;
+    };
+    (0..art.height()).any(|y| {
+        (0..art.width()).any(|x| {
+            let tx = i32::from(x) + dx;
+            art.get(x, y).copied().flatten().is_some() && (tx < 0 || tx >= i32::from(body.width()))
+        })
+    })
+}
+
 #[cfg(test)]
 mod validation_floor_tests {
     use super::*;
+
+    fn d(n: u16) -> Density {
+        Density::new(n).expect("nonzero")
+    }
 
     /// A pack of `animations` whose frame files are `frames`.
     fn pack_with_frames(animations: &str, frames: &[(&str, &str)]) -> Pack {
@@ -2086,14 +2270,14 @@ mod validation_floor_tests {
     fn a_key_names_a_registered_animation_or_a_density_variant_of_one() {
         let key = |base, density| Some(RegisteredKey { base, density });
         assert_eq!(RegisteredKey::parse("desk"), key("desk", None));
-        assert_eq!(RegisteredKey::parse("desk@4x"), key("desk", Some(4)));
+        assert_eq!(RegisteredKey::parse("desk@4x"), key("desk", Some(d(4))));
         assert_eq!(
             RegisteredKey::parse("standing@2x"),
-            key("standing", Some(2))
+            key("standing", Some(d(2)))
         );
         assert_eq!(
             RegisteredKey::parse("walking_coffee@8x"),
-            key("walking_coffee", Some(8))
+            key("walking_coffee", Some(d(8)))
         );
         // The BASE must be registered, or a typo'd `dsek@4x` would validate.
         assert_eq!(RegisteredKey::parse("dsek@4x"), None);
@@ -2126,15 +2310,15 @@ mod validation_floor_tests {
             validate_pack_animations(&pack, &[]).unknown,
             vec!["desk@02x".to_string()]
         );
-        assert_eq!(pack.max_density_variant(), 1);
+        assert_eq!(pack.max_density_variant(), Density::ONE);
     }
 
     #[test]
     fn a_variant_name_carries_the_density_it_is_drawn_at() {
         // The name is the CLAIM a renderer looks up by, so it round-trips.
-        assert_eq!(density_variant_name("desk", 4), "desk@4x");
-        assert_eq!(split_density_variant("desk@4x"), Some(("desk", 4)));
-        assert_eq!(split_density_variant("desk@12x"), Some(("desk", 12)));
+        assert_eq!(density_variant_name("desk", d(4)), "desk@4x");
+        assert_eq!(split_density_variant("desk@4x"), Some(("desk", d(4))));
+        assert_eq!(split_density_variant("desk@12x"), Some(("desk", d(12))));
         assert_eq!(split_density_variant("desk@1x"), None);
         assert_eq!(split_density_variant("desk@0x"), None);
         // Malformed claims are not variants; they fall through to the plain
@@ -2226,7 +2410,7 @@ mod validation_floor_tests {
                 && report.orphan_variants.is_empty(),
             "{report:?}"
         );
-        assert_eq!(pack.max_density_variant(), 2);
+        assert_eq!(pack.max_density_variant(), d(2));
 
         let mut custom = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
         custom.merge_from(&pack);
@@ -2248,10 +2432,10 @@ mod validation_floor_tests {
         );
         assert_eq!(
             pack.density_variants(),
-            vec![4, 2],
+            vec![d(4), d(2)],
             "3x does not redraw its base"
         );
-        assert_eq!(pack.max_density_variant(), 4);
+        assert_eq!(pack.max_density_variant(), d(4));
         let plain = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
         assert!(plain.density_variants().is_empty());
     }
@@ -2335,7 +2519,7 @@ mod validation_floor_tests {
             SIZED_FRAMES,
         );
         let anim = |n| pack.animation(n).expect("in the pack");
-        assert!(variant_redraws(anim("walking"), 2, anim("walking@2x")));
+        assert!(variant_redraws(anim("walking"), d(2), anim("walking@2x")));
         let report = validate_pack_animations(&pack, &[]);
         assert!(report.mismatched_density.is_empty(), "{report:?}");
         assert_eq!(
@@ -2371,7 +2555,7 @@ mod validation_floor_tests {
             ("standing@2x", "standing", false),
         ] {
             let anim = |n| pack.animation(n).expect("in the pack");
-            let verdict = variant_redraws(anim(base), 2, anim(name));
+            let verdict = variant_redraws(anim(base), d(2), anim(name));
             let found = report.mismatched_density.iter().any(|m| m.name == name)
                 || report
                     .mismatched_frame_counts
@@ -2520,6 +2704,7 @@ mod validation_floor_tests {
             StandIn::OwnPiece("meeting_sofa")
         );
         assert_eq!(stand_in("plant"), StandIn::DefaultPack);
+        assert_eq!(stand_in("cat_walk"), StandIn::DefaultPack);
         assert_eq!(stand_in("walking_coffee"), StandIn::OwnPose);
 
         let mut merged = pack_with(&format!(
@@ -2589,9 +2774,25 @@ mod validation_floor_tests {
                 derived: "desk_north",
                 source: "desk",
             }],
+            unmarked_heads: vec![UnmarkedHead {
+                name: "standing@4x".to_string(),
+                frame: 0,
+            }],
+            missing_hair_views: vec![MissingHairView {
+                style: "mop@4x".to_string(),
+                view: HeadView::Back,
+                name: "walking_back@4x".to_string(),
+            }],
+            overhanging_hair: vec![HairOverhang {
+                style: "mop@4x".to_string(),
+                view: HeadView::Front,
+                name: "standing@4x".to_string(),
+                frame: 0,
+            }],
+            orphan_hairstyles: vec!["mop@2x".to_string()],
         };
-        assert_eq!(report.error_count(), 5);
-        assert_eq!(report.warning_count(), 3);
+        assert_eq!(report.error_count(), 6);
+        assert_eq!(report.warning_count(), 6);
     }
 
     /// Pins the frame-count check's empty case.
@@ -2632,24 +2833,24 @@ mod validation_floor_tests {
         let plain = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
         assert_eq!(
             plain.max_density_variant(),
-            1,
+            Density::ONE,
             "a pack with no variants must not push a painter off the cell's own scale"
         );
         assert_eq!(
             pack("[animations.\"plant@4x\"]\nframes=[\"four.sprite\"]\nframe_ms=100\n")
                 .max_density_variant(),
-            4
+            d(4)
         );
         assert_eq!(
             pack("[animations.\"typo@64x\"]\nframes=[\"one.sprite\"]\nframe_ms=100\n")
                 .max_density_variant(),
-            2,
+            d(2),
             "a variant of an unregistered base must not inflate the pack's density"
         );
         assert_eq!(
             pack("[animations.\"plant@8x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n")
                 .max_density_variant(),
-            2,
+            d(2),
             "a variant every renderer skips must not round a painter's scale to it"
         );
     }
@@ -2682,10 +2883,8 @@ mod validation_floor_tests {
         );
     }
 
-    /// The density is pack-author input to arithmetic that multiplies it by a
-    /// frame dimension. Unbounded, `desk@60000x` panicked every debug build —
-    /// including `run --pack-dir`, where the crash hook offered to file a bug
-    /// for a typo — and wrapped to a nonsense dimension in release.
+    /// A density is author input multiplied by a frame dimension: unbounded, a
+    /// typo like `desk@60000x` overflows it.
     #[test]
     fn a_density_past_the_ceiling_is_not_a_variant_at_all() {
         assert_eq!(split_density_variant("desk@60000x"), None);
@@ -2693,7 +2892,7 @@ mod validation_floor_tests {
         // The boundary from both sides, so a future `<` typo cannot slip through.
         assert_eq!(
             split_density_variant("desk@64x"),
-            Some(("desk", MAX_DENSITY_VARIANT))
+            Some(("desk", d(MAX_DENSITY_VARIANT)))
         );
         assert_eq!(split_density_variant("desk@65x"), None);
         // An out-of-range density is not a variant, so the name is simply
@@ -2777,6 +2976,125 @@ mod validation_floor_tests {
             "a 1-frame seated must not be flagged; got {:?}",
             report.insufficient_frames
         );
+    }
+
+    /// A 1x `standing` and its 2x redraw `body`, dressed by `hairstyles`.
+    fn dressed_pack(body: &str, hairstyles: &str, hair: &[(&str, &str)]) -> Pack {
+        let mut frames = vec![("one.sprite", "@frame 0\nA"), ("body.sprite", body)];
+        frames.extend_from_slice(hair);
+        load_pack_from_strings(
+            &format!(
+                "[pack]\nname=\"t\"\nversion=\"1\"\n\
+                 [palette]\n\"A\"=\"#010203\"\n\".\"=\"transparent\"\n\
+                 [animations.standing]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
+                 [animations.\"standing@2x\"]\nframes=[\"body.sprite\"]\nframe_ms=100\n\
+                 {hairstyles}"
+            ),
+            &frames,
+        )
+        .expect("pack builds")
+    }
+
+    const FRONT_BODY: &str = "@frame 0\n@mark head.front 0 0\nA A\nA A";
+    const MOP: &str = "[hairstyles.\"mop@2x\"]\nfront={ over=\"o.sprite\" }\n";
+
+    fn hair_findings(pack: &Pack) -> ValidationReport {
+        let report = validate_pack_animations(pack, &[]);
+        assert!(report.orphan_variants.is_empty() && report.mismatched_density.is_empty());
+        report
+    }
+
+    /// `report`'s errors and warnings past those of the same pack undressed.
+    fn hair_counts(report: &ValidationReport) -> (usize, usize) {
+        let bare = validate_pack_animations(&dressed_pack(FRONT_BODY, "", &[]), &[]);
+        (
+            report.error_count() - bare.error_count(),
+            report.warning_count() - bare.warning_count(),
+        )
+    }
+
+    #[test]
+    fn a_style_that_fits_every_head_it_dresses_is_clean() {
+        let above_top = "@frame 0\n@mark head.front 0 1\nA\nA";
+        let report = hair_findings(&dressed_pack(FRONT_BODY, MOP, &[("o.sprite", above_top)]));
+        assert!(report.unmarked_heads.is_empty(), "{report:?}");
+        assert!(report.missing_hair_views.is_empty(), "{report:?}");
+        assert!(report.overhanging_hair.is_empty(), "{report:?}");
+        assert!(report.orphan_hairstyles.is_empty(), "{report:?}");
+    }
+
+    #[test]
+    fn a_frame_the_styles_would_dress_without_a_head_mark_is_a_warning() {
+        let hair = ("o.sprite", "@frame 0\n@mark head.front 0 0\nA");
+        let bald = "@frame 0\nA A\nA A";
+        let report = hair_findings(&dressed_pack(bald, MOP, &[hair]));
+        assert_eq!(
+            report.unmarked_heads,
+            vec![UnmarkedHead {
+                name: "standing@2x".into(),
+                frame: 0
+            }]
+        );
+        assert_eq!(hair_counts(&report), (0, 1));
+
+        let undressed = hair_findings(&dressed_pack(bald, "", &[]));
+        assert!(undressed.unmarked_heads.is_empty(), "no style to dress it");
+    }
+
+    #[test]
+    fn a_style_without_a_view_a_head_faces_is_a_warning() {
+        let hair = ("o.sprite", "@frame 0\n@mark head.front 0 0\nA");
+        let back = "@frame 0\n@mark head.back 0 0\nA A\nA A";
+        let report = hair_findings(&dressed_pack(back, MOP, &[hair]));
+        assert_eq!(
+            report.missing_hair_views,
+            vec![MissingHairView {
+                style: "mop@2x".into(),
+                view: HeadView::Back,
+                name: "standing@2x".into(),
+            }]
+        );
+        assert_eq!(hair_counts(&report), (0, 1));
+    }
+
+    #[test]
+    fn hair_past_a_frames_side_is_a_warning() {
+        for (hair, what) in [
+            ("@frame 0\n@mark head.front 0 0\nA A A", "right"),
+            ("@frame 0\n@mark head.front 1 0\nA A", "left"),
+        ] {
+            let report = hair_findings(&dressed_pack(FRONT_BODY, MOP, &[("o.sprite", hair)]));
+            assert_eq!(
+                report.overhanging_hair,
+                vec![HairOverhang {
+                    style: "mop@2x".into(),
+                    view: HeadView::Front,
+                    name: "standing@2x".into(),
+                    frame: 0,
+                }],
+                "{what}"
+            );
+            assert_eq!(hair_counts(&report), (0, 1));
+        }
+        for (hair, what) in [
+            (
+                "@frame 0\n@mark head.front 0 0\nA . .",
+                "transparent padding",
+            ),
+            ("@frame 0\n@mark head.front 0 0\nA\nA\nA", "past the bottom"),
+        ] {
+            let report = hair_findings(&dressed_pack(FRONT_BODY, MOP, &[("o.sprite", hair)]));
+            assert!(report.overhanging_hair.is_empty(), "{what}");
+        }
+    }
+
+    #[test]
+    fn a_style_at_a_density_no_character_is_drawn_at_is_an_error() {
+        let hair = ("o.sprite", "@frame 0\n@mark head.front 0 0\nA");
+        let four = "[hairstyles.\"mop@4x\"]\nfront={ over=\"o.sprite\" }\n";
+        let report = hair_findings(&dressed_pack(FRONT_BODY, four, &[hair]));
+        assert_eq!(report.orphan_hairstyles, vec!["mop@4x".to_string()]);
+        assert_eq!(hair_counts(&report), (1, 0));
     }
 
     #[test]

@@ -55,6 +55,11 @@ API_NIGHTLY := "nightly-2026-07-22"
 # churning goldens.
 API_PUBLIC_API := "0.52.0"
 
+# The non-linux triples `doc-check` renders, one per OS release.yml ships.
+# rustdoc links nothing, so a triple's std is all it needs while no dependency on
+# it builds C (`cargo doc` still runs build scripts).
+DOC_TARGETS := "x86_64-pc-windows-msvc aarch64-apple-darwin"
+
 # List available recipes.
 default:
     @just --list
@@ -347,6 +352,20 @@ check-windows:
         || { echo "needs the target: rustup target add x86_64-pc-windows-msvc" >&2; exit 1; }
     cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings
 
+# The other-unix arms compile on none of the OSes release.yml ships, so only this
+# builds them. `portable` instead of the defaults: `audio`'s `alsa-sys` build
+# script can't probe a cross target.
+[doc('Cross-lint the workspace for x86_64-unknown-freebsd, the stand-in for every other unix (no linking)')]
+[group('rust')]
+check-other-unix:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # rustup's proxy cargo, so `--target` finds the std added below (see `check-windows`).
+    export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+    target=x86_64-unknown-freebsd
+    rustup target list --installed | grep -qx "$target" || rustup target add "$target"
+    cargo clippy --workspace --all-targets --target "$target" --no-default-features --features pixtuoid/portable -- -D warnings
+
 # Catches a dep bump (or newer stdlib use) that silently raises the floor past
 # the version we advertise to crates.io consumers of pixtuoid-core. CI-only in
 # practice (installs a pinned toolchain + a full check), NOT in preflight.
@@ -445,17 +464,39 @@ _api-toolchain:
 # `private_intra_doc_links` still fires on a public doc naming a private item
 # (the link docs.rs would render broken). The broken/private intra-doc-link
 # classes are already `deny` in `[workspace.lints.rustdoc]`; `-D warnings` adds
-# bare URLs, invalid HTML, redundant links, and any future rustdoc lint; (2) RUN
-# the doctests — `cargo nextest` does NOT execute doctests, so the crate-root
-# examples would otherwise go ungated. CI-only in practice (a doc build + a
-# doctest run).
-[doc('Doc gate: cargo doc (incl. private items) with -D warnings + run the doctests nextest skips (CI-only)')]
+# bare URLs, invalid HTML, redundant links, and any future rustdoc lint. "Every
+# item" spans every unit rustdoc renders: the `pixtuoid` bin, the examples, and
+# each `DOC_TARGETS` triple, whose `cfg` arms the host pass compiles out
+# (`cfg(target_os = "linux")` arms render only in CI); (2) RUN the doctests —
+# nextest does not.
+[doc('Doc gate: cargo doc (private items, bin, examples, DOC_TARGETS) with -D warnings + the doctests nextest skips (CI-only)')]
 [group('rust')]
-doc-check:
+doc-check: _doc-targets
     #!/usr/bin/env bash
     set -euo pipefail
-    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --document-private-items
+    # rustup's proxy cargo, so `--target` finds the std `_doc-targets` added (see `check-windows`).
+    export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+    doc() { RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items "$@"; }
+    host="$(rustc -vV | sed -n 's/^host: //p')"
+    for target in "" {{ DOC_TARGETS }}; do
+        [ "$target" = "$host" ] && continue # the "" pass already rendered it
+        # The `pixtuoid` bin shares its lib's name, so the workspace pass skips it
+        # (cargo still warns the two share one output path: cargo#6313).
+        doc -p pixtuoid --bin pixtuoid ${target:+--target "$target"}
+        doc --workspace ${target:+--target "$target"}
+    done
+    doc --workspace --examples
     cargo test --doc --workspace
+
+[private]
+_doc-targets:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v rustup >/dev/null || { echo "rustup not found — add the std for {{ DOC_TARGETS }} manually for doc-check" >&2; exit 1; }
+    installed="$(rustup target list --installed)"
+    for target in {{ DOC_TARGETS }}; do
+        grep -qx "$target" <<<"$installed" || rustup target add "$target"
+    done
 
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
 # profile. Writes lcov.info + target/nextest/ci/junit.xml.
@@ -1171,8 +1212,6 @@ fixture-pii-selftest:
         jq -r '[.[].File | split("/") | last] | unique | join(",")' "$d/out.json"
     }
     fail=0
-    # The credential config does NOT own the identity class — its default global
-    # allowlist waives filesystem-shaped strings, which is why the pair is split.
     for spec in ".gitleaks.toml=cred-aws.txt,cred-disguised.txt" \
                 ".gitleaks-identity.toml=identity-bearer.txt,identity-dashed.txt,identity-email.txt,identity-gituser.txt,identity-home.txt,identity-mcp.txt,identity-prefix.txt,identity-users.txt,identity-win.txt"; do
         cfg=${spec%%=*}; want=${spec#*=}

@@ -16,7 +16,7 @@ pub(crate) fn paint_theme_picker(
     use ratatui::style::Modifier;
     use ratatui::text::{Line, Span as TSpan};
 
-    /// Name column (12) + the leading selection marker + the 2-cell swatch.
+    /// Fits the title, which outruns a row.
     const THEME_W: u16 = 28;
     let items: Vec<Line<'static>> = theme::ALL_THEMES
         .iter()

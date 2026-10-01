@@ -2,6 +2,7 @@ use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Result, bail};
+use pixtuoid_core::sprite::format::PACK_MANIFEST;
 
 pub fn init_pack(dest: &Path, force: bool) -> Result<()> {
     if dest.exists() && !force {
@@ -19,7 +20,7 @@ pub fn init_pack(dest: &Path, force: bool) -> Result<()> {
     std::fs::create_dir_all(dest)?;
 
     let files: &[(&str, &str)] = &[
-        ("pack.toml", include_str!("../sprites/skeleton/pack.toml")),
+        (PACK_MANIFEST, include_str!("../sprites/skeleton/pack.toml")),
         (
             "placeholder.sprite",
             include_str!("../sprites/skeleton/placeholder.sprite"),

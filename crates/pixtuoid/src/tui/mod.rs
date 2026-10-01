@@ -27,7 +27,7 @@ use ratatui::backend::CrosstermBackend;
 use tui_renderer::TuiRenderer;
 
 use crate::runtime::SceneRx;
-use pixtuoid_scene::{embedded_pack, floor, pet, theme};
+use pixtuoid_scene::{embedded_pack, pet, theme};
 
 /// Which overlay (if any) currently owns input, plus the one count the picker needs.
 /// An open overlay swallows keys and the normal-scene bindings are suspended; the
@@ -68,11 +68,11 @@ enum KeyAction {
     /// Already validated: in range, and no transition in flight.
     NavigateFloor(usize),
     ToggleAudioMute,
-    /// `true` = up. Volume-up from muted also unmutes.
+    /// `true` = up.
     AdjustVolume(bool),
     /// The `w` dispatch arm is `#[cfg(debug_assertions)]`-gated, so in release this
-    /// variant is never constructed; the `run_tui` match arm stays unconditional for
-    /// exhaustiveness.
+    /// variant is never constructed; the `apply_key_action` match arm stays unconditional
+    /// for exhaustiveness.
     #[cfg_attr(not(debug_assertions), allow(dead_code))]
     ToggleWalkableDebug,
     ToggleDashboard,
@@ -84,8 +84,7 @@ enum KeyAction {
     DashboardJump,
     DashboardFocus,
     DashboardClose,
-    /// Open/close the Sources panel — the variant and module keep the historical
-    /// `Connection` name.
+    /// Open/close the Sources panel.
     ToggleConnection,
     ConnectionUp,
     ConnectionDown,
@@ -103,28 +102,24 @@ enum KeyAction {
 }
 
 fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
-    renderer: &mut TuiRenderer<B>,
+    renderer: &TuiRenderer<B>,
     scene_rx: &SceneRx,
     focus_roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
     col: u16,
     row: u16,
-    now: SystemTime,
 ) -> bool {
-    let snap = scene_rx.borrow().clone();
-    // Project to the VISIBLE floor first: hit_test_agent_at → character_anchor reads
-    // floor-local desk indices.
-    let floor_scene = floor::project_floor_scene(&snap, renderer.current_floor());
-    let hit = renderer.hit_test_agent_at(&floor_scene, now, col, row);
-    if let Some(slot) = hit.and_then(|id| snap.agents.get(&id)) {
-        crate::focus::focus_slot(slot, focus_roots);
-        true
-    } else {
-        false
-    }
+    let Some(id) = renderer.hit_test_agent_at(col, row) else {
+        return false;
+    };
+    let Some(slot) = scene_rx.borrow().agents.get(&id).cloned() else {
+        return false;
+    };
+    crate::focus::focus_slot(&slot, focus_roots);
+    true
 }
 
-/// The core persists the flag FIRST and rolls it back if the install fails, so on `Err`
-/// the live gate was never opened — no shown-but-broken source survives a restart.
+/// Opens the live gate only on `Ok`, matching [`crate::sources::connect`]'s flag rollback
+/// — no shown-but-broken source survives a restart.
 fn connect_source(
     config_path: &std::path::Path,
     connected: &crate::runtime::ConnectedSources,
@@ -199,18 +194,15 @@ struct OnboardingFailure {
 fn reflect_onboarding_outcomes(
     connected: &crate::runtime::ConnectedSources,
     choices: &[(&'static str, bool)],
-    outcomes: &[(String, crate::sources::ChangeOutcome)],
+    outcomes: &[(String, crate::sources::AppliedChange)],
 ) -> Vec<OnboardingFailure> {
-    use crate::sources::ChangeOutcome;
+    use crate::sources::AppliedChange;
     let mut failures = Vec::new();
     for ((_, want), (id, oc)) in choices.iter().zip(outcomes) {
         match oc {
-            ChangeOutcome::Connected => connected.set(id, true),
-            ChangeOutcome::Disconnected => connected.set(id, false),
-            // "Already in the DESIRED state — nothing written", so a NoOp on a CHECKED row
-            // must leave the gate OPEN, else its live agents vanish on confirmation.
-            ChangeOutcome::NoOp => connected.set(id, *want),
-            ChangeOutcome::Failed(e) => {
+            AppliedChange::Connected => connected.set(id, true),
+            AppliedChange::Disconnected => connected.set(id, false),
+            AppliedChange::Failed(e) => {
                 connected.set(id, false);
                 // `Failed` covers all three operations: connect, disconnect (an UNCHECKED
                 // row, which `freeze_for_skip` makes the common case), and the fold below.
@@ -241,9 +233,7 @@ fn reflect_onboarding_outcomes(
 }
 
 /// Open the Sources panel ON the first failed row and seed its result line, so the `t`
-/// retry is one keystroke away on the right source. The explicit selection is
-/// load-bearing: `open_connection` alone keeps the PREVIOUS index — 0 on a fresh
-/// `UiState` — so the offered `t` would act on whatever sorts first.
+/// retry is one keystroke away on the right source.
 fn surface_onboarding_failures(
     ui: &mut ui_state::UiState,
     connected: &crate::runtime::ConnectedSources,
@@ -346,9 +336,7 @@ impl FloorCapacitySweep {
     }
 }
 
-/// Modal precedence, highest first: onboarding > help > version popup > connection >
-/// dashboard > theme picker > normal scene. The body's early returns are that chain's
-/// single source of truth.
+/// Modal precedence, highest first, is the body's early-return order.
 fn dispatch_key(
     code: KeyCode,
     mods: KeyModifiers,
@@ -552,7 +540,7 @@ pub(crate) struct TuiSession {
     /// The warn-floor log, throttle-scanned for decode-drift breadcrumbs to drive the
     /// footer nudge. `None` = no surfacing.
     pub log_path: Option<std::path::PathBuf>,
-    /// `muted` seeds the m-toggle; `volume` the boot and the lazy spawn.
+    /// The persisted mute/volume, handed whole to `AudioController::new`.
     pub audio_cfg: crate::config::AudioConfig,
     /// Focus-jump pid point-query roots: (CC projects root, Codex sessions root).
     pub focus_roots: (Option<std::path::PathBuf>, Option<std::path::PathBuf>),
@@ -562,27 +550,24 @@ pub(crate) struct TuiSession {
 /// Whether a left-click at `(col, row)` landed on the wall's star/repo link, given the
 /// terminal's `(cols, rows)`. Callers MUST gate this on `renderer.cached_layout().is_some()`
 /// — the wall display only paints with a layout, so an ungated hit phantom-launches a
-/// browser on a too-small frame or mid floor-slide. Note the asymmetry with
-/// [`version_popup_url_clicked`]: this hit-tests the SCENE rect, that one the full bounds.
+/// browser on a too-small frame or mid floor-slide.
 fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
     let scene = renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
     widgets::star_hit_rect(scene)
         .is_some_and(|s| s.contains(ratatui::layout::Position { x: col, y: row }))
 }
 
-/// Whether a left-click at `(col, row)` landed on the version popup's URL, given the
-/// terminal's `(cols, rows)`. `scale` is the PAINTER's own last frame-scale, so the hit
-/// geometry matches what was actually painted rather than the popup's resting size — the
-/// popup is clickable mid-animation.
+/// Whether a left-click at `(col, row)` landed on the version popup's URL, hit-tested
+/// against the full terminal bounds, not [`star_clicked`]'s scene rect. `scale` is
+/// the popup's last painted scale.
 fn version_popup_url_clicked(col: u16, row: u16, scale: f32, term: (u16, u16)) -> bool {
     let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
     widgets::version_popup_url_rect(bounds, scale)
         .is_some_and(|rect| rect.contains(ratatui::layout::Position { x: col, y: row }))
 }
 
-/// Everything an applied [`KeyAction`] may touch: three `&mut` surfaces plus
-/// the read-only context. A parameter object, not an abstraction — it exists so
-/// the arm list takes one argument instead of nine.
+/// Everything an applied [`KeyAction`] may touch — a parameter object, so the arm list
+/// takes one argument.
 struct KeyCtx<'a, B: ratatui::backend::Backend<Error: Send + Sync + 'static>> {
     ui: &'a mut ui_state::UiState,
     renderer: &'a mut TuiRenderer<B>,
@@ -592,9 +577,8 @@ struct KeyCtx<'a, B: ratatui::backend::Backend<Error: Send + Sync + 'static>> {
     snapshot: &'a pixtuoid_core::state::SceneState,
     focus_roots: &'a (Option<std::path::PathBuf>, Option<std::path::PathBuf>),
     now: SystemTime,
-    /// Injected for the same reason `AudioController::apply` takes it: the real
-    /// one opens an output device, so a test firing an audio arm would grab the
-    /// machine's sound hardware.
+    /// Injected because the real `crate::audio::respawn` opens an output device, so a
+    /// test firing an audio arm would grab the machine's sound hardware.
     respawn: fn(&crate::audio::AudioHandle, f32),
 }
 
@@ -796,7 +780,7 @@ fn apply_onboarding_skip<B: ratatui::backend::Backend<Error: Send + Sync + 'stat
 /// scene behind them, where a coffee-machine or branding hit launches a browser — then the
 /// version popup's URL, then the scene. Help is tested before the popup guard so it wins even
 /// mid popup-dismiss animation. The picker/dashboard/connection overlays are inert BY DESIGN:
-/// they have explicit close keys (Tab / s / t / Esc), so a click never dismisses them.
+/// they close only by key (see [`dispatch_key`]), so a click never dismisses them.
 fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     m: crossterm::event::MouseEvent,
     ui: &mut ui_state::UiState,
@@ -816,8 +800,7 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
         return;
     }
     if renderer.last_popup_scale() > 0.0 {
-        // Only the URL link is clickable while the popup is animating or visible, at the
-        // painter's own frame-scale so the geometry matches what was actually painted.
+        // While the popup is up, only its URL is clickable.
         if left_down
             && crossterm::terminal::size().is_ok_and(|t| {
                 version_popup_url_clicked(m.column, m.row, renderer.last_popup_scale(), t)
@@ -840,7 +823,7 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
                 && crossterm::terminal::size().is_ok_and(|t| star_clicked(m.column, m.row, t));
             if on_star {
                 let _ = open::that(widgets::REPO_URL);
-            } else if focus_clicked_agent(renderer, scene_rx, focus_roots, m.column, m.row, now) {
+            } else if focus_clicked_agent(renderer, scene_rx, focus_roots, m.column, m.row) {
                 // Empty on purpose: the click was consumed. The coffee-before-pet order below
                 // is the half no mechanism holds — keep it in step with `renderer::draw_scene`.
             } else if renderer.cached_layout().is_some_and(|layout| {
@@ -934,8 +917,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
     // A LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins
-    // the device thread it owns; built after the pack-load `?`, so a pack that
-    // fails to load can't strand it.
+    // the device thread it owns.
     let mut audio_ctl = crate::audio::AudioController::new(audio_cfg, config_path.clone());
     renderer.set_audio(audio_ctl.handle().clone());
     // With no agent CLIs detected there is nothing to connect: the overlay stays closed.
@@ -946,8 +928,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     };
     let onboarding_ui = welcome::WelcomeUi::from_detected(&detected_clis);
 
-    // Yields to onboarding but still STAMPS `last_seen_version`. Gating on the overlay
-    // SHOWING, not on `first_run` — true forever for a no-CLI user — is what unmutes it.
+    // Yields to onboarding but still STAMPS `last_seen_version`. Gated on the overlay
+    // SHOWING, not on `first_run`, which a no-CLI user carries forever.
     let version_popup = if !onboarding_ui.is_empty() {
         let _ = resolve_version_popup(&config_path);
         false
@@ -1047,7 +1029,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 },
                 _ = &mut terminate => break,
             }
-            tokio::task::yield_now().await;
         }
         Ok(())
     })
@@ -1079,7 +1060,7 @@ mod capacity_sweep_tests {
         let published: Vec<usize> = caps.iter().map(|c| c.load(Ordering::Relaxed)).collect();
         assert!(
             !sweep.publish(W, H, None, &caps),
-            "an unchanged frame must skip the whole 10-floor layout sweep"
+            "an unchanged frame must skip the whole MAX_FLOORS layout sweep"
         );
         let after: Vec<usize> = caps.iter().map(|c| c.load(Ordering::Relaxed)).collect();
         assert_eq!(
@@ -1214,8 +1195,6 @@ mod teardown_tests {
 
 #[cfg(test)]
 mod runtime_model {
-    // Pins why the `block_in_place` wraps were removed: the loop runs as the
-    // `block_on` ROOT future, where `block_in_place` is inert rather than a yield.
     #[test]
     fn block_in_place_is_inert_on_the_block_on_thread() {
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -1233,7 +1212,7 @@ mod runtime_model {
                 got, 1,
                 "the spawned worker progressed while the loop blocked"
             );
-            // Without the wrap: observably identical, so the wrap was a no-op.
+            // Without it: observably identical.
             let (tx2, rx2) = std::sync::mpsc::channel::<u8>();
             tokio::spawn(async move {
                 tx2.send(2).expect("send");
@@ -1901,37 +1880,15 @@ mod dispatch_tests {
     }
 
     #[test]
-    fn onboarding_noop_outcome_keeps_the_desired_gate_state() {
-        use crate::sources::ChangeOutcome;
-        let connected = crate::runtime::ConnectedSources::new(
-            std::iter::once("antigravity".to_string()).collect(),
-        );
-        let choices: Vec<(&'static str, bool)> = vec![("antigravity", true), ("codex", false)];
-        let outcomes = vec![
-            ("antigravity".to_string(), ChangeOutcome::NoOp),
-            ("codex".to_string(), ChangeOutcome::NoOp),
-        ];
-        super::reflect_onboarding_outcomes(&connected, &choices, &outcomes);
-        assert!(
-            connected.is_connected("antigravity"),
-            "NoOp on a checked row must leave the gate open"
-        );
-        assert!(
-            !connected.is_connected("codex"),
-            "NoOp on an unchecked row keeps the gate closed"
-        );
-    }
-
-    #[test]
     fn onboarding_outcomes_map_connected_disconnected_failed() {
-        use crate::sources::ChangeOutcome;
+        use crate::sources::AppliedChange;
         let connected = crate::runtime::ConnectedSources::default();
         let choices: Vec<(&'static str, bool)> =
             vec![("antigravity", true), ("codex", false), ("cursor", true)];
         let outcomes = vec![
-            ("antigravity".to_string(), ChangeOutcome::Connected),
-            ("codex".to_string(), ChangeOutcome::Disconnected),
-            ("cursor".to_string(), ChangeOutcome::Failed("boom".into())),
+            ("antigravity".to_string(), AppliedChange::Connected),
+            ("codex".to_string(), AppliedChange::Disconnected),
+            ("cursor".to_string(), AppliedChange::Failed("boom".into())),
         ];
         super::reflect_onboarding_outcomes(&connected, &choices, &outcomes);
         assert!(connected.is_connected("antigravity"));
@@ -1944,15 +1901,15 @@ mod dispatch_tests {
 
     #[test]
     fn a_failed_onboarding_connect_reports_the_reason_to_the_caller() {
-        use crate::sources::ChangeOutcome;
+        use crate::sources::AppliedChange;
         let connected = crate::runtime::ConnectedSources::default();
         let choices: Vec<(&'static str, bool)> = vec![("cursor", true), ("antigravity", true)];
         let outcomes = vec![
             (
                 "cursor".to_string(),
-                ChangeOutcome::Failed("settings is valid JSON but not an object".into()),
+                AppliedChange::Failed("settings is valid JSON but not an object".into()),
             ),
-            ("antigravity".to_string(), ChangeOutcome::Connected),
+            ("antigravity".to_string(), AppliedChange::Connected),
         ];
         let failures = super::reflect_onboarding_outcomes(&connected, &choices, &outcomes);
         assert_eq!(
@@ -1989,17 +1946,17 @@ mod dispatch_tests {
 
     #[test]
     fn an_onboarding_failure_names_the_operation_that_actually_failed() {
-        use crate::sources::ChangeOutcome;
+        use crate::sources::AppliedChange;
         let connected = crate::runtime::ConnectedSources::default();
         let choices: Vec<(&'static str, bool)> = vec![("cursor", false), ("openclaw", false)];
         let outcomes = vec![
             (
                 "cursor".to_string(),
-                ChangeOutcome::Failed("config is not writable".into()),
+                AppliedChange::Failed("config is not writable".into()),
             ),
             (
                 "openclaw".to_string(),
-                ChangeOutcome::Failed(format!(
+                AppliedChange::Failed(format!(
                     "{}openclaw.json is JSON5, not strict JSON",
                     crate::sources::HOOK_REMOVAL_FAILED_PREFIX
                 )),
@@ -2086,13 +2043,11 @@ mod dispatch_tests {
 
     #[test]
     fn onboarding_skip_reflects_its_freeze_into_the_live_gate() {
-        use crate::sources::ChangeOutcome;
-        // `apply_choices` maps every want to Connect/Disconnect, never NoOp, so the
-        // skip path's semantic-no-op re-install really does emit `Connected`.
+        use crate::sources::AppliedChange;
         let connected = crate::runtime::ConnectedSources::default();
         assert!(!connected.is_connected("antigravity"), "gate starts empty");
         let freeze: Vec<(&'static str, bool)> = vec![("antigravity", true)];
-        let outcomes = vec![("antigravity".to_string(), ChangeOutcome::Connected)];
+        let outcomes = vec![("antigravity".to_string(), AppliedChange::Connected)];
         super::reflect_onboarding_outcomes(&connected, &freeze, &outcomes);
         assert!(
             connected.is_connected("antigravity"),
@@ -2101,9 +2056,7 @@ mod dispatch_tests {
     }
 }
 
-/// Tests for the APPLIER half of the key path. `dispatch_key` (the decoder) is
-/// covered by `dispatch_tests` above; before the #830 split these arms lived
-/// inside `run_tui`, which needs a real terminal, so nothing could reach them.
+/// Tests for the APPLIER half of the key path; `dispatch_tests` covers the decoder.
 #[cfg(test)]
 mod apply_key_action_tests {
     use super::{KeyAction, KeyCtx, apply_key_action};
@@ -2273,11 +2226,9 @@ mod apply_key_action_tests {
         assert_eq!(h.renderer.debug_walkable(), before, "w must flip back");
     }
 
-    /// The click predicates were made pure so they COULD be tested — both were previously
-    /// unreachable, calling `crossterm::terminal::size()` internally, which under `cargo test`
-    /// has no tty and returned `Err` -> `false` unconditionally. Deliberately NOT asserted:
-    /// the scene-rect-vs-full-bounds asymmetry — `star_hit_rect` puts the star at `scene.y +
-    /// 1` height 1 and `scene_rect` shrinks only HEIGHT, so both framings agree above 2 rows.
+    /// Deliberately NOT asserted: the scene-rect-vs-full-bounds asymmetry — `star_hit_rect`
+    /// puts the star at `scene.y + 1` height 1 and `scene_rect` shrinks only HEIGHT, so both
+    /// framings agree above 2 rows.
     #[test]
     fn star_clicked_hits_only_the_star_span() {
         use crate::tui::widgets::star_hit_rect;
@@ -2309,20 +2260,14 @@ mod apply_key_action_tests {
         );
     }
 
-    /// The popup URL is clickable only while the popup is actually painted —
-    /// `version_popup_url_rect` returns `None` below the clickable scale, and a
-    /// predicate that ignored `scale` would launch a browser on a click landing
-    /// where the popup merely USED to be.
+    /// Ignoring `scale` would launch a browser where the popup is still animating.
     #[test]
     fn version_popup_url_clicked_respects_the_rect_and_the_scale() {
         use crate::tui::widgets::version_popup_url_rect;
         let term = (120u16, 44u16);
         let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
-        let Some(rect) = version_popup_url_rect(bounds, 1.0) else {
-            // The popup must produce a link rect at full scale; if this ever
-            // changes the assertions below would pass vacuously.
-            panic!("the version popup must yield a URL rect at scale 1.0");
-        };
+        let rect = version_popup_url_rect(bounds, 1.0)
+            .expect("a URL rect at scale 1.0, or the misses below pass vacuously");
 
         assert!(
             super::version_popup_url_clicked(rect.x, rect.y, 1.0, term),

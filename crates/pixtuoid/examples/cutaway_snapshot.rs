@@ -59,10 +59,6 @@ fn populate(scene: &mut SceneState, now: SystemTime, n: usize) {
                 agent_id: id,
                 source: Arc::from("claude-code"),
                 session_id: Arc::from(format!("cut-{i:04x}").as_str()),
-                // VARIED cwds, like the classic `snapshot` example's fixture:
-                // the outfit is cwd-keyed (Team Palette), so one cwd for
-                // everyone renders the whole office in a single shirt and hides
-                // exactly the grouping the recolor exists to show.
                 cwd: Arc::from(PathBuf::from(REPOS[i % REPOS.len()]).as_path()),
                 label: "cc".into(),
                 state,
@@ -135,11 +131,9 @@ fn main() -> Result<()> {
     }
     let theme =
         theme_by_name(&theme_name).ok_or_else(|| anyhow!("unknown theme {theme_name:?}"))?;
-    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-        pixtuoid_scene::embedded_pack::PackSource::Bundled,
-    )?;
+    let pack = pixtuoid_scene::embedded_pack::load_bundled_pack()?;
     // Defaults to the pack's densest art, the density it was drawn for.
-    let scale_n = scale_n.unwrap_or_else(|| pack.max_density_variant());
+    let scale_n = scale_n.unwrap_or_else(|| pack.max_density_variant().get());
     let scale = RenderScale::new(scale_n).ok_or_else(|| anyhow!("--scale must be nonzero"))?;
     // The sky otherwise cycles its weather with the clock, so an hour alone
     // does not say what the room looks like.
@@ -150,14 +144,8 @@ fn main() -> Result<()> {
         ));
     }
     let now = match now_hour {
-        Some(h) => {
-            use chrono::TimeZone;
-            chrono::Local
-                .with_ymd_and_hms(2026, 1, 1, h, 0, 0)
-                .single()
-                .ok_or_else(|| anyhow!("invalid --now-hour {h}"))?
-                .into()
-        }
+        Some(h) => pixtuoid_scene::localclock::try_on_day(0, h)
+            .with_context(|| format!("invalid --now-hour {h}"))?,
         None => SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
     };
     let meta = FloorMeta::for_floor(floor.0, floor.1);
@@ -182,8 +170,7 @@ fn main() -> Result<()> {
 
     let (bw, bh) = (scale.to_buffer(lw), scale.to_buffer(lh));
     let mut buf = RgbBuffer::filled(bw, bh, theme.surface.bg_fallback);
-    // The classic painter's recolor cache: the cutaway blits the same per-agent
-    // sprites.
+    // `render_cutaway` needs the classic painter's recolor cache.
     let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
     let labels = render_cutaway(
         &frame,
@@ -210,9 +197,7 @@ fn main() -> Result<()> {
         };
         let text: &str = &agent.label.text();
         // The SHARED tone authority every other label painter uses, so the
-        // cutaway cannot invent its own state colours. `label_idle` alone was
-        // rgb(65,72,104) on a rgb(36,40,59) floor — technically drawn, visually
-        // absent, which is exactly the class of bug a dev tool should not have.
+        // cutaway cannot invent its own state colours.
         let tone = pixtuoid_scene::overlay::label_tone_rgb(
             if agent.exiting_at.is_some() {
                 pixtuoid_scene::overlay::LabelTone::Exiting

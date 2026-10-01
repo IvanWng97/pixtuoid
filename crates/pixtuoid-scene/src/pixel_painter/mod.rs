@@ -29,9 +29,12 @@ pub(super) use crate::anim::epoch_ms;
 pub struct PixelPassResult {
     /// The office pet's resolved frame this tick (for hit-testing), if present.
     pub pet_pos: Option<PetFrame>,
-    /// One resolved frame per gateway mascot drawn this tick — a source can
-    /// run ANY number of concurrent instances, each independently hoverable.
+    /// Every gateway mascot drawn this tick, in paint order — a source can run
+    /// ANY number of concurrent instances, each independently hoverable.
     pub mascots: Vec<MascotFrame>,
+    /// Every character drawn this tick, in paint order: the last one covering
+    /// a point is the one on top.
+    pub agents: Vec<AgentFrame>,
     /// Active speech bubbles this frame, for the caller's widget pass.
     pub chitchat_bubbles: Vec<ChitchatBubble>,
     /// Agent ids observed in `Walking { carrying_coffee: true }` this frame.
@@ -68,6 +71,26 @@ pub struct MascotFrame {
     pub active_sessions: u32,
 }
 
+/// Where a character's sprite was drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentFrame {
+    /// Whose sprite it is.
+    pub agent_id: pixtuoid_core::AgentId,
+    /// The sprite's top-left, in buffer pixels.
+    pub anchor: Point,
+    /// The painted frame's pixel width.
+    pub w: u16,
+    /// The painted frame's pixel height.
+    pub h: u16,
+}
+
+/// What [`paint_frame`] drew that hover can name.
+struct Hoverables {
+    pet_pos: Option<PetFrame>,
+    mascots: Vec<MascotFrame>,
+    agents: Vec<AgentFrame>,
+}
+
 mod ambient;
 mod anchors;
 mod background;
@@ -82,7 +105,7 @@ pub(crate) mod seat;
 mod sim;
 mod wall;
 
-pub use anchors::character_anchor;
+pub(crate) use anchors::character_anchor;
 
 #[doc(hidden)]
 pub use anchors::seated_anchor_facing;
@@ -99,10 +122,8 @@ pub(crate) use palette::{
     fixture_overrides,
 };
 
-// The ToolKind→glow-hue seam the binary's footer tints tool segments with. The
-// footer paints this hue RAW; the sprite's glow then takes the hour's wash, so
-// the two match in HUE, not byte-for-byte — and only on a NORTH-facing desk,
-// the only one whose screen the room can see.
+// Only the hue matches the sprite's glow, which also takes the hour's wash and
+// shows only on a NORTH-facing desk.
 pub use palette::tool_glow_for_kind;
 
 /// Applies the hour's object terms to every pixel painted since `since`.
@@ -176,7 +197,7 @@ use crate::lighting::{DeskLights, LightInputs, Lights};
 use background::{
     paint_floor_and_walls, paint_floor_wash, paint_light, paint_neon_halo, paint_shadows,
 };
-use drawable::{Drawable, DrawableKind, Layer, paint_drawable};
+use drawable::{Drawable, DrawableKind, Drawn, Layer, paint_drawable};
 use palette::{agent_overrides, outfit_seed_for};
 use seat::paint_character_at;
 use wall::enqueue_room_walls;
@@ -269,6 +290,7 @@ struct PaintCtx<'a> {
     buf: &'a mut RgbBuffer,
     cache: &'a mut FrameCache,
     base_fill: &'a mut background::BaseFillCache,
+    shadows: &'a mut crate::ground::DepthsCache,
     theme: &'a crate::theme::Theme,
     floor: crate::floor::FloorMeta,
     motion: &'a HashMap<pixtuoid_core::AgentId, MotionState>,
@@ -301,7 +323,11 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             door_anim_max_ms,
         },
     );
-    let (pet_pos, mascots) = paint_frame(
+    let Hoverables {
+        pet_pos,
+        mascots,
+        agents,
+    } = paint_frame(
         &mut PaintCtx {
             scene: ctx.world.scene,
             layout: ctx.layout,
@@ -311,6 +337,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             buf: &mut *ctx.buf,
             cache: &mut ctx.store.cache,
             base_fill: &mut ctx.store.base_fill,
+            shadows: &mut ctx.store.shadows,
             theme: ctx.theme,
             floor: ctx.world.floor,
             motion: &ctx.store.motion,
@@ -321,6 +348,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     PixelPassResult {
         pet_pos,
         mascots,
+        agents,
         chitchat_bubbles: frame.chitchat_bubbles,
         new_coffee_carriers: frame.new_coffee_carriers,
         occupied_waypoints: frame.occupied_waypoints,
@@ -330,7 +358,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
 /// The PAINT half of the frame: blit the world the sim already advanced. Every
 /// positional/lifecycle decision was made in `sim_step` — this pass only
 /// resolves presentation (theme colors, sprite pixels) and composites.
-fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, Vec<MascotFrame>) {
+fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
     let agents: &[AgentSlot] = &frame.agents;
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;
@@ -382,37 +410,51 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     } = queue_fixtures(ctx, frame, &lights.desks, neon);
     paint_backdrop(ctx, &backdrop, Wash::Spared);
     // The rest overwrite the floor, so the overlays above cannot reach them, and
-    // they paint before the drawable snapshot, so that pass cannot either — the
-    // corridor runner used to stay full-daylight tan in a dimmed office, the
-    // brightest thing in the room. Hence their own wash, which also keeps the
-    // EMITTERS painted above (the floor-lamp halo) out of it.
+    // they paint before the drawable snapshot, so that pass cannot either. Hence
+    // their own wash, which also keeps the EMITTERS painted above (the floor-lamp
+    // halo) out of it.
     let pre_floor_fixtures = ctx.buf.clone();
     paint_backdrop(ctx, &backdrop, Wash::Washed);
     wash_since(ctx.buf, &pre_floor_fixtures, look.object_wash);
 
     let shadow_strength = crate::ground::shadow_strength(look.darkness);
-    let contacts: Vec<_> = ctx.layout.fixtures().filter_map(|f| f.contact()).collect();
-    if let Some(depths) = crate::ground::Depths::of(contacts.into_iter(), 1) {
-        paint_shadows(ctx.buf, &depths, shadow_strength, ctx.theme.office.shadow);
-    }
+    let contacts = ctx.layout.fixtures().filter_map(|f| f.contact()).collect();
+    paint_shadows(
+        ctx.buf,
+        ctx.shadows.cells(contacts, 1),
+        shadow_strength,
+        ctx.theme.office.shadow,
+    );
 
     ambient::paint_ambient(ctx, &moment, &lights.monitor_halos);
 
     // Every entity gets an `anchor_y` — its floor-touching row — so sorting
     // ascending and painting in order puts things closer to the camera in
     // front: the painter's algorithm on a top-down 2D scene.
-    let resolved_pet_pos = frame.pet.map(|pet| enqueue_pet(ctx, pet, &mut drawables));
-    let resolved_mascots = enqueue_gateway_mascots(ctx, &frame.mascots, &mut drawables);
+    let pet_pos = frame.pet.map(|pet| enqueue_pet(ctx, pet, &mut drawables));
+    enqueue_gateway_mascots(&frame.mascots, &mut drawables);
     enqueue_characters(ctx, frame, &mut drawables);
     enqueue_room_walls(ctx.layout, &mut drawables);
     drawable::sort_drawables(&mut drawables);
-    // A per-pixel diff finds EXACTLY what the foreground wrote; a rectangular
-    // band seamed the window glass and washed floor-between-pieces twice.
-    // AFTER `paint_shadows`/`paint_ambient`: both already carry the hour, so
-    // folding them in here would apply it twice.
+    let mut hover = Hoverables {
+        pet_pos,
+        mascots: Vec::new(),
+        agents: Vec::new(),
+    };
+    // A per-pixel diff finds EXACTLY what the foreground wrote. AFTER
+    // `paint_shadows`/`paint_ambient`: both already carry the hour, so folding
+    // them in here would apply it twice.
     let pre_foreground = ctx.buf.clone();
     for d in &drawables {
-        paint_drawable(&d.kind, &mut ctx.drawable_ctx());
+        match paint_drawable(&d.kind, &mut ctx.drawable_ctx()) {
+            Some(Drawn::Agent(agent)) => hover.agents.push(agent),
+            Some(Drawn::Mascot { mascot_idx, w, h }) => {
+                hover
+                    .mascots
+                    .push(MascotFrame::of(&frame.mascots[mascot_idx], w, h));
+            }
+            None => {}
+        }
     }
     // The floor's day/night wash, over the foreground: the overlays above run
     // before any drawable exists, so nothing painted carries a time-of-day term.
@@ -431,7 +473,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         debug_overlay::paint(ctx.buf, ctx.layout, ctx.scene, ctx.motion);
     }
 
-    (resolved_pet_pos, resolved_mascots)
+    hover
 }
 
 /// Map the sim's resolved [`sim::CharacterPlacement`]s 1:1 onto y-sorted
@@ -525,8 +567,7 @@ pub(crate) fn desk_screen_glow(
 }
 
 /// The office pet, y-sorted at its anim's south row, since the anims differ in
-/// height — a hardcoded offset once painted a sleeping pet over a character in
-/// front.
+/// height.
 fn enqueue_pet<'a>(
     ctx: &PaintCtx<'_>,
     pet: sim::PetPlacement,
@@ -555,41 +596,38 @@ fn enqueue_pet<'a>(
 
 /// Enqueue the gateway mascots.
 fn enqueue_gateway_mascots<'a>(
-    ctx: &PaintCtx<'_>,
     mascots: &[sim::MascotPlacement],
     drawables: &mut Vec<Drawable<'a>>,
-) -> Vec<MascotFrame> {
-    mascots
-        .iter()
-        .map(|m| {
-            let pos = m.pos;
-            let Size {
-                w: mascot_w,
-                h: mascot_h,
-            } = sim::frame_size(ctx.pack, m.anim_name, m.frame_idx, sim::MASCOT_FALLBACK);
-            drawables.push(Drawable {
-                anchor_y: z_sort_row(Anchor::Center, pos, mascot_h),
-                layer: Layer::Figure,
-                kind: DrawableKind::GatewayMascot {
-                    pos,
-                    anim_name: m.anim_name,
-                    frame_idx: m.frame_idx,
-                    run_count: m.run_count,
-                    degraded: m.state == DaemonState::Degraded,
-                },
-            });
-            MascotFrame {
-                pos,
-                w: mascot_w,
-                h: mascot_h,
-                name: m.name,
-                instance: m.instance.clone(),
-                busy: m.state == DaemonState::Busy,
+) {
+    for (mascot_idx, m) in mascots.iter().enumerate() {
+        drawables.push(Drawable {
+            anchor_y: z_sort_row(Anchor::Center, m.pos, m.size.h),
+            layer: Layer::Figure,
+            kind: DrawableKind::GatewayMascot {
+                mascot_idx,
+                pos: m.pos,
+                anim_name: m.anim_name,
+                frame_idx: m.frame_idx,
+                run_count: m.run_count,
                 degraded: m.state == DaemonState::Degraded,
-                active_sessions: m.active_sessions,
-            }
-        })
-        .collect()
+            },
+        });
+    }
+}
+
+impl MascotFrame {
+    fn of(m: &sim::MascotPlacement, w: u16, h: u16) -> Self {
+        Self {
+            pos: m.pos,
+            w,
+            h,
+            name: m.name,
+            instance: m.instance.clone(),
+            busy: m.state == DaemonState::Busy,
+            degraded: m.state == DaemonState::Degraded,
+            active_sessions: m.active_sessions,
+        }
+    }
 }
 
 /// Whether the hour's object wash reaches a fixture.

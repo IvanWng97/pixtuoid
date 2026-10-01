@@ -122,12 +122,11 @@ fn layout_dense_seed6_room_walls() {
 
 #[test]
 fn floor_variant_hash_gives_unique_layouts_per_floor() {
-    use pixtuoid_scene::floor::FLOOR_SEED_MULTIPLIER;
     use std::collections::HashSet;
 
-    let signatures: HashSet<_> = (0u64..5)
+    let signatures: HashSet<_> = (0..5)
         .map(|i| {
-            let seed = i.wrapping_mul(FLOOR_SEED_MULTIPLIER);
+            let seed = pixtuoid_scene::floor::floor_seed(i);
             let l = SceneLayout::compute_with_seed(192, 160, Some(4), seed).unwrap();
             (l.meeting_rooms.clone(), l.pantry, l.home_desks)
         })

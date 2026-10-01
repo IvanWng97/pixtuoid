@@ -56,6 +56,19 @@ jobs:
           targets: x86_64-pc-windows-msvc
       - run: just check-windows
 
+  other-unix-check:
+    name: other-unix-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          targets: x86_64-unknown-freebsd
+      - run: just check-other-unix
+
   packaging-linux:
     name: packaging-build (ubuntu-latest)
     if: ${{ inputs.full }}
@@ -90,7 +103,7 @@ jobs:
     # Keep the protected gate's membership explicit; GitHub otherwise reports
     # a reusable workflow successful even after an unreferenced job is removed.
     if: ${{ always() }}
-    needs: [wasm-check, hack, windows-check, packaging-linux, packaging-macos]
+    needs: [wasm-check, hack, windows-check, other-unix-check, packaging-linux, packaging-macos]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

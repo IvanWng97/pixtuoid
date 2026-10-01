@@ -156,8 +156,8 @@ const STAR_TWINKLE_CYCLE_SPAN_MS: u64 = 3000;
 /// so it reads as one continuous sky rather than a per-window reseed.
 fn star_exists(px: u16, py: u16) -> bool {
     let mut h = (px as u64).wrapping_mul(crate::GOLDEN_GAMMA);
-    h ^= (py as u64).wrapping_mul(0xc6a4_a793_5bd1_e995);
-    h = (h ^ (h >> 17)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    h ^= (py as u64).wrapping_mul(crate::MURMUR64A_M);
+    h = (h ^ (h >> 17)).wrapping_mul(pixtuoid_core::id::SPLITMIX64_M2);
     h.is_multiple_of(STAR_SPARSITY)
 }
 

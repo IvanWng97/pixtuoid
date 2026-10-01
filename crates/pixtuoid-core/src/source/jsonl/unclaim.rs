@@ -14,7 +14,7 @@ use super::{SourceDecoders, WatchCtx};
 /// for the process lifetime. A TTL, not a size cap, because staleness — not
 /// volume — is the failure mode, and a cap could evict a fresh entry under a
 /// burst of foreign ones.
-const CHILD_END_UNCLAIM_TTL: Duration = Duration::from_secs(300);
+const CHILD_END_UNCLAIM_TTL: Duration = crate::state::reducer::CHILD_END_RELINK_TTL;
 
 /// The child-end un-claim side-channel: child ids whose hook
 /// `SessionEnd { as_child: true }` (a decoded `SubagentStop`) was observed, and
@@ -46,7 +46,7 @@ impl ChildEndUnclaims {
     }
 
     /// Test-only seam: shrinks the prune TTL so the bounded-growth contract is
-    /// testable without a 5-minute wait.
+    /// testable without waiting out `CHILD_END_UNCLAIM_TTL`.
     #[doc(hidden)]
     pub fn with_ttl(ttl: Duration) -> Self {
         Self {

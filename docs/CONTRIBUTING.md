@@ -49,13 +49,16 @@ run. The jobs:
 
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
-- **docs** — `cargo doc --document-private-items` with `-D warnings`
-  (broken/private intra-doc links deny) plus the doctests nextest skips.
+- **docs** (`just doc-check`) — rustdoc with `-D warnings` over private items,
+  the bins, the examples and each `DOC_TARGETS` triple, plus the doctests
+  nextest skips.
 - **smoke (`just gen-check`) · readme drift (`just gen-readme-check`) · npm
   package generator (`just npm-check`)** — committed media and icons, README
   freshness, and the npm package generator + OpenClaw plugin contract.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
   full suite on a real Windows runner.
+- **other-unix-check** (`just check-other-unix`) — FreeBSD cross-lint for
+  the other-unix arms.
 - **wasm-check** — builds the site's wasm (`just gen-wasm`) and caps its
   gzipped size (`just gen-wasm-check`).
 - **site** — `site.yml`: the site's static checks, then e2e and
@@ -73,12 +76,11 @@ run. The jobs:
 - **zizmor** — workflow/action security: symbolic-or-SHA pins,
   credential-dropping checkouts, exact inline suppressions.
 - **One automatic Claude reviewer per [`REVIEW.md`](../REVIEW.md) lens**
-  rides `claude-readonly-review.yml`: a
-  read-only model job on the trusted default branch, the PR diff as inert
-  data, a separate least-privilege publisher that opens a review thread per
-  finding — and a third job that comments
-  when the model job fails or declines, because absence otherwise renders as
-  a pass (#809). `claude.yml` refuses fork PR heads.
+  rides `claude-readonly-review.yml`: a read-only model job on the trusted
+  default branch, the PR diff, title, body and the lens's prior threads as
+  inert data, and a separate least-privilege publisher that opens a review
+  thread per finding and sets the lens's `claude-review/<lens>` status.
+  `claude.yml` refuses fork PR heads.
 - **CodeQL** stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).
@@ -247,15 +249,15 @@ invariants"), which every contributor and agent reads first.
 
 ### The merge gate
 
-Green CI; every lens bot's review (`claude-review-<lens>`) at the final head;
-every finding's review thread resolved by its disposition; zero open confirmed
-`issue (blocking)`; each matching [local row](../REVIEW.md#escalation)
-recorded. The local [`two-lens-review`](../.claude/skills/two-lens-review/SKILL.md)
-skill is otherwise an optional pre-flight. The review job passes even when it posts
-findings, so read each bot's latest comment at HEAD, never the check table
-(#448). An `absent-<marker>:<sha>` comment, or none at HEAD, is no review:
-split the PR smaller, else run one extra differentiated local lens and the
-owner merges, recorded in a PR comment.
+Green `ci-gate`; every lens bot's required `claude-review/<lens>` status
+`success` at the final head; every finding's review thread resolved by its
+disposition; zero open confirmed `issue (blocking)`; each matching
+[local row](../REVIEW.md#escalation)'s run recorded as a PR comment starting
+`<!-- local-row:<row>:<head sha> -->`. The local
+[`two-lens-review`](../.claude/skills/two-lens-review/SKILL.md) skill is
+otherwise an optional pre-flight. A published review passes whatever it
+found; a failed or missing status is no review: comment `/claude-review`, else
+split the PR smaller.
 
 The bots never review a fork PR on their own: a maintainer approves its CI
 run, then comments `/claude-review`, again after every push. Its author can
@@ -268,7 +270,9 @@ too.
 ### Dispositions
 
 Every finding reaches exactly one terminal state in its review thread: FIXED ·
-REFUTED (cite the mechanism, per AGENTS.md; add one where none exists) ·
+REFUTED (cite the mechanism, per AGENTS.md; add one where none exists. Before
+adding code for a finding, establish its case is reachable: when a test or
+sweep shows it isn't, that test is the mechanism and no defensive code lands) ·
 RE-SCOPED → #N (real and INTRODUCED — or first made reachable — by this
 change, and bigger than the PR: split it off into #N; a redesign that brings
 the finding into scope ends FIXED) · FOLLOW-UP → #N (real and PRE-EXISTING,
@@ -297,6 +301,9 @@ before re-litigating.
 - **Round 2's fold** is the last behavior change and is verified, not
   re-reviewed: each fix is a revert, a deletion, or a change shipping a test
   that fails without it. Anything else reverts the fold.
+- **A fix round adds no new gate** — a wanted check is its own PR, asserting
+  facts in its own layer (a Rust fact from Rust, never a Python regex over
+  `.rs`).
 
 ### Handy `gh` commands
 

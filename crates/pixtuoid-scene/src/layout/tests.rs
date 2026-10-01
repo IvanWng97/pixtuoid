@@ -169,9 +169,9 @@ fn snack_shelf_hugs_the_west_wall_and_refuses_narrow_rooms() {
         .expect("roomy pantry hosts the shelf");
     let vis = furniture_def(Furniture::SnackShelf).visual;
     assert_eq!(shelf.pos.x, pr.x + 1 + vis.w / 2, "west-wall hug");
-    // Seed 1 at the narrowest buffer leaves the pantry under the shelf's `vis.w + 4`
+    // Seed 11 at the narrowest buffer leaves the pantry under the shelf's `vis.w + 4`
     // width gate — the gate is a property of size AND seed, not of size alone.
-    let s = SceneLayout::compute_with_seed(crate::layout::compute::MIN_LAYOUT_W, 100, None, 1)
+    let s = SceneLayout::compute_with_seed(crate::layout::compute::MIN_LAYOUT_W, 100, None, 11)
         .expect("fits");
     assert!(
         !s.waypoints
@@ -463,12 +463,11 @@ fn every_floor_variant_seats_a_desk_at_the_minimum_layout_size() {
         narrowest_band = narrowest_band.min(l.cubicle_band.width);
         shortest_band = shortest_band.min(l.cubicle_band.height);
     }
-    // TIGHTNESS. The width arm is blind to a +1 overshoot (`pct` floors, so adjacent
-    // widths share a band) — `neither_floor_carries_a_safety_margin` covers that.
-    assert_eq!(
-        narrowest_band,
-        crate::layout::compute::DESK_BAND_MIN_W,
-        "the width floor overshoots: the widest left column leaves more band than one desk needs"
+    // The width floor is the north wall's, wider than one desk's band needs:
+    // `neither_floor_carries_a_safety_margin` holds it tight.
+    assert!(
+        narrowest_band >= crate::layout::compute::DESK_BAND_MIN_W,
+        "the width floor leaves a band narrower than one desk needs"
     );
     assert_eq!(
         shortest_band,
@@ -936,6 +935,20 @@ fn coat_rack_yields_to_the_east_chair_in_narrow_fitted_rooms() {
 }
 
 #[test]
+fn a_room_too_short_for_the_rack_drops_it() {
+    let room = MeetingRoom {
+        bounds: Bounds {
+            x: 0,
+            y: 0,
+            width: 30,
+            height: 4,
+        },
+        trio: None,
+    };
+    assert_eq!(room.coat_rack_pos(), None);
+}
+
+#[test]
 fn pod_grid_fills_every_desk_row_that_fits() {
     // #552: a phantom trailing aisle below the last pod row starved residual_h, so
     // a bottom row that physically fits never fired.
@@ -1052,10 +1065,10 @@ fn pantry_and_meeting_procedural_rects_match_the_painted_geometry() {
     assert_eq!(
         pantry.water_cooler_rect(),
         Some(Bounds {
-            x: 10 + 40 - 6,
-            y: 20 + 8,
-            width: 3,
-            height: 6,
+            x: 10 + 40 - 7,
+            y: 20 + 6,
+            width: 4,
+            height: 9,
         }),
     );
     assert_eq!(
@@ -1141,4 +1154,96 @@ fn sofa_east_drain_edge_reads_the_placed_sofa_and_is_none_when_bare() {
 
     let bare = MeetingRoom { bounds, trio: None };
     assert_eq!(bare.sofa_east_drain_edge(), None);
+}
+
+/// A standing fixture's height as a percent band of [`CHARACTER_SPRITE_H`].
+struct HeightBand {
+    min_pct: u16,
+    max_pct: u16,
+}
+
+/// Person-height: a figure reaches the brand panel.
+const VENDING_MACHINE_HEIGHT: HeightBand = HeightBand {
+    min_pct: 100,
+    max_pct: 115,
+};
+/// A floor-standing copier: its lid at a figure's waist.
+const PRINTER_HEIGHT: HeightBand = HeightBand {
+    min_pct: 60,
+    max_pct: 75,
+};
+/// Its taps at a standing figure's hand.
+const WATER_COOLER_HEIGHT: HeightBand = HeightBand {
+    min_pct: 70,
+    max_pct: 80,
+};
+/// Coats hang at a figure's shoulders.
+const COAT_RACK_HEIGHT: HeightBand = HeightBand {
+    min_pct: 95,
+    max_pct: 105,
+};
+/// The shade at a figure's head.
+const FLOOR_LAMP_HEIGHT: HeightBand = HeightBand {
+    min_pct: 95,
+    max_pct: 110,
+};
+/// A room its occupant steps into.
+const PHONE_BOOTH_HEIGHT: HeightBand = HeightBand {
+    min_pct: 120,
+    max_pct: 135,
+};
+
+#[test]
+fn standing_fixtures_are_in_proportion_to_a_figure() {
+    let visual_h = |f: Furniture| furniture_def(f).visual.h;
+    for (name, h, band) in [
+        (
+            "vending machine",
+            visual_h(Furniture::VendingMachine),
+            VENDING_MACHINE_HEIGHT,
+        ),
+        ("printer", visual_h(Furniture::Printer), PRINTER_HEIGHT),
+        (
+            "water cooler",
+            super::rooms::pantry::WATER_COOLER.h,
+            WATER_COOLER_HEIGHT,
+        ),
+        (
+            "coat rack",
+            coat_rack_rect_at(Point { x: 10, y: 10 }).height,
+            COAT_RACK_HEIGHT,
+        ),
+        (
+            "floor lamp",
+            visual_h(Furniture::FloorLamp),
+            FLOOR_LAMP_HEIGHT,
+        ),
+        (
+            "phone booth",
+            visual_h(Furniture::PhoneBooth),
+            PHONE_BOOTH_HEIGHT,
+        ),
+    ] {
+        let pct = h * 100 / CHARACTER_SPRITE_H;
+        assert!(
+            (band.min_pct..=band.max_pct).contains(&pct),
+            "{name}: {h}px is {pct}% of a figure, outside {}..={}%",
+            band.min_pct,
+            band.max_pct
+        );
+    }
+}
+
+#[test]
+fn waypoint_depth_baseline_is_its_grounds_south_row() {
+    let pos = Point { x: 40, y: 40 };
+    for kind in [WaypointKind::VendingMachine, WaypointKind::Printer] {
+        let def = furniture_def(kind.furniture());
+        let (tl, size) = def.ground_rect(Anchor::Center, pos).expect("has footprint");
+        assert_eq!(
+            z_sort_row(Anchor::Center, pos, def.visual.h),
+            tl.y + size.h - 1,
+            "{kind:?}: sorts on the row it stands on"
+        );
+    }
 }

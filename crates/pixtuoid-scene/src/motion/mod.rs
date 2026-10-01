@@ -572,19 +572,5 @@ pub(crate) fn measured_leg_len(route: &[Point], settle: Settle) -> u32 {
     (octile_path_len(route) + start + end).max(1)
 }
 
-/// Pure linear interpolation along the walk segment `from → to` at
-/// `t_x1000` (0..=1000).
-pub(crate) fn walking_position(from: Point, to: Point, t_x1000: u16) -> Point {
-    let t = t_x1000 as i32;
-    let dx = to.x as i32 - from.x as i32;
-    let dy = to.y as i32 - from.y as i32;
-    // Left-walking agents cross through negative x if the interpolation
-    // overshoots, and a bare `as u16` wraps to ~65k — blitting off-screen.
-    Point {
-        x: (from.x as i32 + dx * t / 1000).clamp(0, u16::MAX as i32) as u16,
-        y: (from.y as i32 + dy * t / 1000).clamp(0, u16::MAX as i32) as u16,
-    }
-}
-
 #[cfg(test)]
 mod tests;
