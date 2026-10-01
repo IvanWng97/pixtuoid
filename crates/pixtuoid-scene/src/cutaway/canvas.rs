@@ -199,6 +199,14 @@ mod tests {
     use crate::floor::FloorMeta;
     use crate::pixel_painter::SimFrame;
 
+    /// The ground floor under a clear sky: rain or snow on the glass moves
+    /// every tick, so the clock's weather would decide what a tick repaints.
+    fn clear_ground() -> FloorMeta {
+        FloorMeta::ground().with_weather(crate::sky::WeatherPolicy::Forced(
+            crate::sky::Weather::Clear,
+        ))
+    }
+
     /// How a run of frames through a canvas was reported.
     #[derive(Debug, Default)]
     struct Run {
@@ -234,14 +242,7 @@ mod tests {
             scale,
         };
         let mut cache = crate::cutaway::paint::CutawayCache::default();
-        render_cutaway(
-            frame,
-            office,
-            FloorMeta::ground(),
-            now,
-            &mut cache,
-            &mut buf,
-        );
+        render_cutaway(frame, office, clear_ground(), now, &mut cache, &mut buf);
         buf
     }
 
@@ -259,7 +260,7 @@ mod tests {
             theme,
             scale,
         };
-        let floor = FloorMeta::ground();
+        let floor = clear_ground();
         let w = scale.to_buffer(layout.buf_w);
         let inside = |rects: &[Bounds], i: usize| {
             let (x, y) = ((i % usize::from(w)) as u16, (i / usize::from(w)) as u16);
@@ -393,8 +394,6 @@ mod tests {
     /// rest.
     #[test]
     fn an_idle_office_skips_the_ticks_that_change_nothing() {
-        // Rain or snow on the glass moves every tick.
-        let _clear = crate::sky::ForcedWeather::new(crate::sky::Weather::Clear);
         let layout = lively_office();
         let quiet = empty_frame(&layout);
         let steps: Vec<_> = ticks(crate::localclock::at_hour(12), 30)
@@ -425,14 +424,7 @@ mod tests {
         let mut dirty = |theme, s| {
             let scale = RenderScale::new(s).expect("nonzero");
             canvas
-                .frame(
-                    &observed,
-                    theme,
-                    scale,
-                    FloorMeta::ground(),
-                    now,
-                    &mut cache,
-                )
+                .frame(&observed, theme, scale, clear_ground(), now, &mut cache)
                 .dirty
         };
         assert_eq!(dirty(normal(), 2), Dirty::All, "the first frame");
@@ -476,7 +468,7 @@ mod tests {
                 theme: normal(),
                 scale: self.scale,
             };
-            let list = frame_list(frame, office, FloorMeta::ground(), Self::now());
+            let list = frame_list(frame, office, clear_ground(), Self::now());
             list.pieces()
                 .iter()
                 .filter(|p| !matches!(p.kind, crate::cutaway::paint::PieceKind::Badge { .. }))
@@ -502,7 +494,7 @@ mod tests {
                 &observed,
                 normal(),
                 self.scale,
-                FloorMeta::ground(),
+                clear_ground(),
                 Self::now(),
                 &mut cache,
             );
@@ -628,7 +620,7 @@ mod tests {
                     theme: normal(),
                     scale: h.scale,
                 };
-                let list = frame_list(&both, office, FloorMeta::ground(), Hovering::now());
+                let list = frame_list(&both, office, clear_ground(), Hovering::now());
                 // Known by its text: the sitter's badge reads otherwise.
                 list.pieces().iter().find(|p| {
                     matches!(&p.kind, crate::cutaway::paint::PieceKind::Badge { badge } if badge.text == NEIGHBOUR)
@@ -680,7 +672,7 @@ mod tests {
                 theme: normal(),
                 scale: h.scale,
             };
-            let list = frame_list(frame, office, FloorMeta::ground(), Hovering::now());
+            let list = frame_list(frame, office, clear_ground(), Hovering::now());
             list.pieces()
                 .iter()
                 .find(|p| matches!(p.kind, crate::cutaway::paint::PieceKind::Badge { .. }))
@@ -705,7 +697,7 @@ mod tests {
                 &observed,
                 normal(),
                 h.scale,
-                FloorMeta::ground(),
+                clear_ground(),
                 Hovering::now(),
                 &mut cache,
             )
@@ -741,7 +733,7 @@ mod tests {
                 layout: Arc::new(layout),
             }
         };
-        let floor = FloorMeta::ground();
+        let floor = clear_ground();
         canvas.frame(&observe(0), normal(), scale, floor, now, &mut cache);
         let b = observe(1);
         let shown = canvas.frame(&b, normal(), scale, floor, now, &mut cache);

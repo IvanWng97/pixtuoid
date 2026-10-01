@@ -56,7 +56,7 @@ impl OfficeRenderer {
         self.session.render(inputs);
         // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
         self.audio
-            .frame(self.session.audio_frame(scene, floor.floor_idx, now));
+            .frame(self.session.audio_frame(scene, floor, now));
         self.session.buf()
     }
 

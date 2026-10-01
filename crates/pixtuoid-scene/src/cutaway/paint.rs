@@ -226,7 +226,12 @@ pub(crate) fn frame_list<'a>(
     floor: crate::floor::FloorMeta,
     now: std::time::SystemTime,
 ) -> DrawList<'a> {
-    let moment = Moment::resolve(crate::sky::Sky::at(now), office.theme, floor.altitude, now);
+    let moment = Moment::resolve(
+        crate::sky::Sky::at(now, floor.weather),
+        office.theme,
+        floor.altitude,
+        now,
+    );
     build_list(frame, office, &moment, floor.floor_idx)
 }
 
@@ -1615,7 +1620,7 @@ pub(crate) fn assert_variant_desk_foot(
 ) {
     // The room darkens every pixel by the hour's steps; its lights must be off.
     let ambient = crate::cutaway::light::Ambient::of(&crate::atmosphere::Look::resolve(
-        &crate::sky::Sky::at(now),
+        &crate::sky::Sky::clock(now),
         theme,
     ));
     let mut floor = RgbBuffer::filled(
@@ -3648,7 +3653,7 @@ pub(crate) mod tests {
                 scale: RenderScale::ONE,
             },
             &Moment::resolve(
-                crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                 theme,
                 0.0,
                 std::time::UNIX_EPOCH,
@@ -4108,7 +4113,7 @@ pub(crate) mod tests {
                     scale: RenderScale::ONE,
                 },
                 &Moment::resolve(
-                    crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                    crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                     theme,
                     0.0,
                     std::time::UNIX_EPOCH,
@@ -4205,7 +4210,7 @@ pub(crate) mod tests {
                 scale,
             },
             &Moment::resolve(
-                crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                 theme,
                 0.0,
                 std::time::UNIX_EPOCH,
@@ -4275,7 +4280,7 @@ pub(crate) mod tests {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let frame = empty_frame(layout);
         let now = std::time::UNIX_EPOCH;
-        let moment = Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now);
+        let moment = Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now);
         let build = Build {
             frame: &frame,
             office: Office {
@@ -4579,7 +4584,7 @@ pub(crate) mod tests {
                         scale,
                     },
                     &Moment::resolve(
-                        crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                        crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                         theme,
                         0.0,
                         std::time::UNIX_EPOCH,
@@ -4957,7 +4962,7 @@ S B B B B B B S
                             theme,
                             scale,
                         },
-                        &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
+                        &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
                         0,
                     );
                     repeats += same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
@@ -5005,7 +5010,7 @@ S B B B B B B S
                     theme,
                     scale,
                 },
-                &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
+                &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
                 0,
             );
             let is_glass = |p: &Piece| matches!(p.kind, PieceKind::Glass { .. });
@@ -5810,7 +5815,7 @@ S B B B B B B S
                             theme,
                             scale,
                         },
-                        &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
+                        &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
                         0,
                     );
                     same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
@@ -5919,7 +5924,7 @@ S B B B B B B S
                     theme,
                     scale: RenderScale::ONE
                 },
-                &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
+                &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
                 0
             )),
             summary(&build_list(
@@ -5930,7 +5935,7 @@ S B B B B B B S
                     theme,
                     scale: RenderScale::ONE
                 },
-                &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
+                &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
                 0
             )),
         );
@@ -5952,7 +5957,7 @@ S B B B B B B S
                     scale: RenderScale::ONE,
                 },
                 &Moment::resolve(
-                    crate::sky::Sky::at(std::time::SystemTime::UNIX_EPOCH),
+                    crate::sky::Sky::clock(std::time::SystemTime::UNIX_EPOCH),
                     theme,
                     0.0,
                     std::time::SystemTime::UNIX_EPOCH,
