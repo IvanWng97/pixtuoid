@@ -304,7 +304,7 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
             vWasm = w;
             vOffice = new mod.Office(VIBING_SEED);
             // Re-apply the active chips so the booted office matches what the OSD
-            // reports: a fresh Office is weather_override=None while the `clear`
+            // reports: a fresh Office follows the clock (WeatherPolicy::Clock) while the `clear`
             // chip renders is-active, and a chip clicked DURING this async boot
             // skipped its `if (vOffice)` setter yet still set aria-pressed.
             const w0 = vibingStage.querySelector('.osd__chip[data-weather].is-active');

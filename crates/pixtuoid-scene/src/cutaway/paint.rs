@@ -1,6 +1,7 @@
-//! The cutaway profile's paint pass — the second reader of `SimFrame`. EFFECTS
-//! (weather, steam, the pet) stay with the classic pass. It never advances the
-//! sim; a mover here would desync the profiles.
+//! The cutaway profile's paint pass — the second reader of `SimFrame`. Of the
+//! sim's effects it draws those riding on people (`cutaway::effects`); steam
+//! and the pet stay with the classic pass.
+//! It never advances the sim; a mover here would desync the profiles.
 
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
@@ -10,12 +11,13 @@ use crate::atmosphere::Moment;
 use crate::cutaway::order::{Span, depth_sort};
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::cutaway::shade::{Ramp, fill, slab};
+use crate::effects::EffectKind;
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, DESK_H, Depth, Fixture, FixtureKind, Layer, Layout, Point, Size, Station, Tie,
 };
-use crate::pixel_painter::SimFrame;
 use crate::render_scale::RenderScale;
+use crate::sim::SimFrame;
 use crate::theme::Theme;
 
 /// The front face the cutaway derives under a top-down piece's base-density art
@@ -210,7 +212,7 @@ pub fn render_cutaway(
     office: Office<'_>,
     floor: crate::floor::FloorMeta,
     now: std::time::SystemTime,
-    cache: &mut crate::frame_cache::FrameCache,
+    cache: &mut CutawayCache,
     buf: &mut RgbBuffer,
 ) {
     let list = frame_list(frame, office, floor, now);
@@ -224,7 +226,12 @@ pub(crate) fn frame_list<'a>(
     floor: crate::floor::FloorMeta,
     now: std::time::SystemTime,
 ) -> DrawList<'a> {
-    let moment = Moment::resolve(crate::sky::Sky::at(now), office.theme, floor.altitude, now);
+    let moment = Moment::resolve(
+        crate::sky::Sky::at(now, floor.weather),
+        office.theme,
+        floor.altitude,
+        now,
+    );
     build_list(frame, office, &moment, floor.floor_idx)
 }
 
@@ -232,7 +239,7 @@ pub(crate) fn frame_list<'a>(
 pub(crate) fn paint(
     layout: &Layout,
     list: &DrawList<'_>,
-    cache: &mut crate::frame_cache::FrameCache,
+    cache: &mut CutawayCache,
     buf: &mut RgbBuffer,
 ) {
     let pen = Pen::for_pack(list.scale, list.pack);
@@ -498,11 +505,7 @@ fn lights(
 /// last one pass ([`net_pass`](crate::cutaway::light::net_pass)) takes every
 /// other pixel to the hour: darkened with the room and lifted by its lights at
 /// once, so no pixel is darkened twice or darkened and relit.
-pub(crate) fn paint_list(
-    list: &DrawList<'_>,
-    cache: &mut crate::frame_cache::FrameCache,
-    buf: &mut RgbBuffer,
-) {
+pub(crate) fn paint_list(list: &DrawList<'_>, cache: &mut CutawayCache, buf: &mut RgbBuffer) {
     let pen = Pen::for_pack(list.scale, list.pack);
     paint_ground_shadows(
         list.pieces.iter().filter_map(|p| p.shadow),
@@ -534,7 +537,7 @@ pub(crate) fn paint_list(
 /// [`Emission`](crate::cutaway::light::Emission) they leave.
 fn paint_pieces(
     list: &DrawList<'_>,
-    cache: &mut crate::frame_cache::FrameCache,
+    cache: &mut CutawayCache,
     buf: &mut RgbBuffer,
 ) -> crate::cutaway::light::Emission {
     use crate::cutaway::light::{Emission, Glow};
@@ -552,7 +555,7 @@ fn paint_pieces(
         let glowing = mark(
             &piece.kind,
             (list.pack, list.scale),
-            &mut cache.cutaway_art,
+            &mut cache.art,
             &mut marks,
         );
         for y in y0..y1 {
@@ -569,6 +572,9 @@ fn paint_pieces(
                     PieceKind::Glass { .. } => Glow::Pane,
                     // A badge keeps the contrast its theme pins at every hour.
                     PieceKind::Neon { .. } | PieceKind::Badge { .. } => Glow::Emissive,
+                    PieceKind::Effect(r) if r.effect.kind == EffectKind::FlameCrown => {
+                        Glow::Emissive
+                    }
                     PieceKind::Desk { .. }
                     | PieceKind::Prop { .. }
                     | PieceKind::Animated { .. }
@@ -589,6 +595,7 @@ fn paint_pieces(
                     | PieceKind::PropBand { .. }
                     | PieceKind::Table { .. }
                     | PieceKind::Character { .. }
+                    | PieceKind::Effect(_)
                     | PieceKind::Clock { .. } => Glow::Lit,
                 };
                 emission.set(x, y, glow);
@@ -649,6 +656,7 @@ fn mark(
         | PieceKind::PropBand { .. }
         | PieceKind::Table { .. }
         | PieceKind::Character { .. }
+        | PieceKind::Effect(_)
         | PieceKind::Neon { .. }
         | PieceKind::Clock { .. }
         | PieceKind::Badge { .. } => false,
@@ -751,6 +759,14 @@ impl Placed {
             Self::TopLeft(at) => (scale.to_buffer(at.x), scale.to_buffer(at.y)),
         }
     }
+}
+
+/// What the cutaway keeps across frames, for one pack.
+#[derive(Default)]
+pub struct CutawayCache {
+    figures: crate::frame_cache::FrameCache,
+    art: ArtCache,
+    net_colours: crate::cutaway::light::NetMemo,
 }
 
 /// Art found by recolouring, kept across frames; keyed by sprite name, so one
@@ -869,6 +885,7 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
         | PieceKind::Door { .. }
         | PieceKind::Neon { .. }
         | PieceKind::Clock { .. }
+        | PieceKind::Effect(_)
         | PieceKind::Badge { .. } => None,
         PieceKind::Character {
             ref figure,
@@ -906,16 +923,14 @@ fn paint_ground_shadows(
     let Some(depths) = crate::ground::Depths::of(shadows, pen.art(1).0) else {
         return;
     };
-    let mut stepped: Vec<crate::cutaway::pen::Stepped> = Vec::new();
+    let mut stepped: Vec<crate::dither::Stepped> = Vec::new();
     for (ax, ay, depth) in depths.cells() {
         let level = crate::dither::nearest(depth * strength * SHADOW_STOPS_PER_STRENGTH, ax, ay);
         if level == 0 {
             continue;
         }
         while stepped.len() < usize::from(level) {
-            stepped.push(crate::cutaway::pen::Stepped::new(
-                -(stepped.len() as i8 + 1),
-            ));
+            stepped.push(crate::dither::Stepped::new(-(stepped.len() as i8 + 1)));
         }
         let r = ArtRect {
             x: ArtPx(ax),
@@ -969,6 +984,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::Badge { ref badge } => badge.hash(&mut h),
         PieceKind::Glass { ref view } => view.hash(&mut h),
         PieceKind::Hung { at, sprite } => (at, sprite).hash(&mut h),
+        PieceKind::Effect(riding) => riding.hash(&mut h),
     }
     h.finish()
 }
@@ -1153,8 +1169,7 @@ fn push_fixture(
             match station {
                 Station::PantryCounter => {
                     if let Some(pantry) = &layout.pantry {
-                        let sprite =
-                            crate::pixel_painter::pantry_counter_anim(pantry.counter_size.w);
+                        let sprite = crate::layout::pantry_counter_anim(pantry.counter_size.w);
                         push_art(
                             order,
                             pack,
@@ -1327,7 +1342,7 @@ fn push_fixture(
             ));
         }
         K::NeonSign => {
-            let look = crate::pixel_painter::neon_look(frame.neon, theme);
+            let look = crate::floor::neon_look(frame.neon, theme);
             let b = fixture.visual;
             order.push((
                 Span::new(b.x, b.y, b.width, b.height, 0).with_depth(depth),
@@ -1345,7 +1360,7 @@ fn push_fixture(
                 Span::new(b.x, b.y, b.width, b.height, 0).with_depth(depth),
                 PieceKind::Clock {
                     at: top_left,
-                    reading: crate::pixel_painter::clock_reading(moment.now),
+                    reading: crate::sky::clock_reading(moment.now),
                 },
             ));
         }
@@ -1432,19 +1447,20 @@ fn paint_piece(
     pack: &Pack,
     theme: &Theme,
     scale: RenderScale,
-    cache: &mut crate::frame_cache::FrameCache,
+    cache: &mut CutawayCache,
     buf: &mut RgbBuffer,
 ) {
     match *kind {
         PieceKind::Desk { at, art, screen } => {
-            paint_desk(at, art, screen, (pack, scale), &mut cache.cutaway_art, buf);
+            paint_desk(at, art, screen, (pack, scale), &mut cache.art, buf);
         }
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
         PieceKind::DeskProp(prop) => paint_desk_prop(prop, pack, theme, scale, buf),
+        PieceKind::Effect(ref riding) => riding.paint(theme, buf),
         PieceKind::Character {
             ref figure, chair, ..
         } => {
-            paint_figure(figure, pack, scale, cache, buf);
+            paint_figure(figure, pack, scale, &mut cache.figures, buf);
             // The sitter's own chair, straight after them: one piece, so
             // nothing can sort between a person and the chair they sit in.
             if let Some(at) = chair {
@@ -1510,7 +1526,7 @@ fn push_desk(
     };
     let screen = Screen::of(
         crate::pixel_painter::desk_screen_glow(
-            crate::pixel_painter::desk_occupant(&frame.agents, i),
+            crate::sim::desk_occupant(&frame.agents, i),
             facing,
             frame.seated_agents.get(&i).copied().unwrap_or(false),
             theme,
@@ -1679,7 +1695,7 @@ pub(crate) fn assert_variant_desk_foot(
 ) {
     // The room darkens every pixel by the hour's steps; its lights must be off.
     let ambient = crate::cutaway::light::Ambient::of(&crate::atmosphere::Look::resolve(
-        &crate::sky::Sky::at(now),
+        &crate::sky::Sky::clock(now),
         theme,
     ));
     let mut floor = RgbBuffer::filled(
@@ -1820,23 +1836,35 @@ fn push_characters(
         let hair = key
             .dress
             .as_ref()
-            .map_or(0, |d| d.rise.div_ceil(key.frame.density.get()));
+            .map_or(0, |d| d.rise().div_ceil(key.frame.density.get()));
         let top = crate::layout::Point {
             x: at.x,
             y: at.y.saturating_sub(hair),
         };
+        let span = occupant_span(
+            piece_span(crate::layout::Anchor::TopLeft, top, w, h + hair, 0),
+            c.anchor_y,
+            chair.map(|(span, _)| span),
+        );
+        let riders = riders(c, &key, (w, at), scale);
+        // Dust lies on the floor under its walker; the rest ride over them.
+        let ride = |order: &mut Vec<(Span, PieceKind)>, beneath: bool| {
+            for r in riders.iter().filter(|r| r.effect.kind.beneath() == beneath) {
+                if let Some(s) = r.span(theme, span.depth) {
+                    order.push((s, PieceKind::Effect(*r)));
+                }
+            }
+        };
+        ride(order, true);
         order.push((
-            occupant_span(
-                piece_span(crate::layout::Anchor::TopLeft, top, w, h + hair, 0),
-                c.anchor_y,
-                chair.map(|(span, _)| span),
-            ),
+            span,
             PieceKind::Character {
                 figure: Figure { at, shadow, key },
                 chair: chair.map(|(_, at)| at),
                 body: Span::new(top.x, top.y, w, h + hair, 0),
             },
         ));
+        ride(order, false);
         let badge = Badge {
             at: label_anchor(top, w, badge_ceiling),
             text: namesakes.text(agent),
@@ -1845,6 +1873,32 @@ fn push_characters(
         order.push((badge.span(pen), PieceKind::Badge { badge }));
     }
     carried
+}
+
+/// `c`'s effects on the grid of its figure `key`, `w` logical columns wide
+/// with its frame's top-left at `at`.
+fn riders(
+    c: &crate::sim::CharacterPlacement,
+    key: &crate::pixel_painter::seat::CharacterKey,
+    (w, at): (u16, crate::layout::Point),
+    scale: RenderScale,
+) -> Vec<crate::cutaway::effects::Riding> {
+    let d = key.frame.density.get();
+    let Some(pen) = Pen::new(scale, d) else {
+        return Vec::new();
+    };
+    let head = key.dress.as_ref().map(|dress| {
+        let (d, frame_w) = (i32::from(d), i32::from(w) * i32::from(d));
+        let x = i32::from(dress.head.x);
+        crate::cutaway::effects::ArtPoint {
+            x: i32::from(at.x) * d + if key.frame.flip_x { frame_w - 1 - x } else { x },
+            y: i32::from(at.y) * d + dress.crest,
+        }
+    });
+    c.effects
+        .iter()
+        .map(|&effect| crate::cutaway::effects::Riding { effect, head, pen })
+        .collect()
 }
 
 /// A figure's piece: its drawn bounds, sorted on `depth` — the sim's own z-key,
@@ -1985,6 +2039,7 @@ impl PieceKind {
             | PieceKind::Desk { .. }
             | PieceKind::DeskProp(_)
             | PieceKind::Character { .. }
+            | PieceKind::Effect(_)
             | PieceKind::Badge { .. } => false,
         }
     }
@@ -2061,7 +2116,7 @@ pub(crate) enum PieceKind {
     /// The wall clock's dial from its top-left `at`, its hands at `reading`.
     Clock {
         at: crate::layout::Point,
-        reading: crate::pixel_painter::ClockReading,
+        reading: crate::sky::ClockReading,
     },
     /// A prop the model stands on a desk ([`push_desk_props`]).
     DeskProp(DeskProp),
@@ -2073,6 +2128,8 @@ pub(crate) enum PieceKind {
         /// figure's shadow falls under it.
         body: Span,
     },
+    /// An effect riding on the figure pushed beside it.
+    Effect(crate::cutaway::effects::Riding),
     Badge {
         badge: Badge,
     },
@@ -2233,7 +2290,7 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, pen: Pen, buf:
         theme.surface.wall_trim,
     );
     // The wall's contact line: the floor under it, a shade step down.
-    let mut contact = crate::cutaway::pen::Stepped::new(crate::cutaway::shade::RAMP_SHADE_LEVEL);
+    let mut contact = crate::dither::Stepped::new(crate::cutaway::shade::RAMP_SHADE_LEVEL);
     pen.recolour(
         buf,
         ArtRect {
@@ -2610,7 +2667,7 @@ fn paint_wall_decor(
 /// The classic placement's anchor, unchanged: the seat side is a per-desk layout
 /// fact, so an override here would make the two profiles disagree about which
 /// side of its desk half the office sits on.
-fn cutaway_anchor(c: &crate::pixel_painter::CharacterPlacement) -> crate::layout::Point {
+fn cutaway_anchor(c: &crate::sim::CharacterPlacement) -> crate::layout::Point {
     c.anchor
 }
 
@@ -2817,7 +2874,7 @@ fn paint_neon(
 /// centre pin denser.
 fn paint_clock(
     at: Point,
-    reading: crate::pixel_painter::ClockReading,
+    reading: crate::sky::ClockReading,
     pack: &Pack,
     theme: &Theme,
     scale: RenderScale,
@@ -3710,7 +3767,7 @@ pub(crate) mod tests {
                 scale: RenderScale::ONE,
             },
             &Moment::resolve(
-                crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                 theme,
                 0.0,
                 std::time::UNIX_EPOCH,
@@ -3823,10 +3880,8 @@ pub(crate) mod tests {
     fn both_profiles_seat_an_occupant_on_the_side_the_layout_chose() {
         use crate::layout::{CHARACTER_SPRITE_W, Facing};
         let desk = crate::layout::Point { x: 40, y: 30 };
-        let near =
-            crate::pixel_painter::seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::North);
-        let far =
-            crate::pixel_painter::seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::South);
+        let near = crate::sim::seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::North);
+        let far = crate::sim::seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::South);
         assert_eq!(
             near.y, desk.y,
             "a back-turned occupant's shared anchor lands on desk.y"
@@ -4170,7 +4225,7 @@ pub(crate) mod tests {
                     scale: RenderScale::ONE,
                 },
                 &Moment::resolve(
-                    crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                    crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                     theme,
                     0.0,
                     std::time::UNIX_EPOCH,
@@ -4267,7 +4322,7 @@ pub(crate) mod tests {
                 scale,
             },
             &Moment::resolve(
-                crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                 theme,
                 0.0,
                 std::time::UNIX_EPOCH,
@@ -4337,7 +4392,7 @@ pub(crate) mod tests {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let frame = empty_frame(layout);
         let now = std::time::UNIX_EPOCH;
-        let moment = Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now);
+        let moment = Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now);
         let build = Build {
             frame: &frame,
             office: Office {
@@ -4356,7 +4411,7 @@ pub(crate) mod tests {
     }
 
     fn near_seat(desk: crate::layout::Point) -> crate::layout::Point {
-        crate::pixel_painter::seated_anchor_facing(
+        crate::sim::seated_anchor_facing(
             desk,
             crate::layout::CHARACTER_SPRITE_W,
             crate::layout::Facing::North,
@@ -4641,14 +4696,19 @@ pub(crate) mod tests {
                         scale,
                     },
                     &Moment::resolve(
-                        crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                        crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                         theme,
                         0.0,
                         std::time::UNIX_EPOCH,
                     ),
                 ) {
                     if only_people
-                        && !matches!(kind, PieceKind::Character { .. } | PieceKind::Badge { .. })
+                        && !matches!(
+                            kind,
+                            PieceKind::Character { .. }
+                                | PieceKind::Effect(_)
+                                | PieceKind::Badge { .. }
+                        )
                     {
                         continue;
                     }
@@ -4723,6 +4783,14 @@ pub(crate) mod tests {
             }
         }
         assert_eq!(worn, styles, "the walks wore every style");
+        // ...every effect a figure carries, on each step of a walk and the sit...
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
+        for mut frame in frames {
+            for c in &mut frame.characters {
+                c.effects = every_effect(c.anchor);
+            }
+            check(&pack, &frame, &layout, true);
+        }
         // ...a walk whose frames differ in size, so a span sized from the wrong
         // frame shows...
         const LONG_STRIDE: &str = "\
@@ -4773,6 +4841,7 @@ S B B B B B B S
                 "clock",
                 "desk",
                 "door",
+                "effect",
                 "glass",
                 "hung decor",
                 "neon",
@@ -4785,27 +4854,193 @@ S B B B B B B S
         );
         // Every fixture drawn from art must have been reached, the pantry
         // counter at both its sizes.
-        for sprite in crate::pixel_painter::PANTRY_COUNTER_ANIMS
-            .into_iter()
-            .chain([
-                "meeting_sofa",
-                "plant",
-                "filing_cabinet",
-                "meeting_chair",
-                "coat_rack",
-                "side_table",
-                "floor_lamp",
-                "kitchen_island",
-                "pantry_bin",
-                "fish_tank",
-                "water_cooler",
-                "vending_machine",
-                "printer",
-            ])
-        {
+        for sprite in crate::layout::PANTRY_COUNTER_ANIMS.into_iter().chain([
+            "meeting_sofa",
+            "plant",
+            "filing_cabinet",
+            "meeting_chair",
+            "coat_rack",
+            "side_table",
+            "floor_lamp",
+            "kitchen_island",
+            "pantry_bin",
+            "fish_tank",
+            "water_cooler",
+            "vending_machine",
+            "printer",
+        ]) {
             assert!(
                 props.contains(sprite),
                 "no {sprite} prop was painted: {props:?}"
+            );
+        }
+    }
+
+    /// At the art's density the waiting mark and a z float clear of their
+    /// figure's badge however far the z has risen, the z only climbs and drifts
+    /// away, and the dust lies along the stepping foot's row.
+    #[test]
+    #[cfg(feature = "density-art")]
+    fn the_dense_looks_keep_their_places() {
+        use crate::effects::EffectKind as K;
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale,
+        };
+        let mut frame = frames.last().expect("a seated frame").clone();
+        for c in &mut frame.characters {
+            c.effects = every_effect(c.anchor);
+        }
+        let list = list_at(&frame, office, 12);
+        let badge = list
+            .pieces()
+            .iter()
+            .find(|p| matches!(p.kind, PieceKind::Badge { .. }))
+            .expect("the badge")
+            .span;
+        let rider = |kind| {
+            list.pieces()
+                .iter()
+                .find_map(|p| match p.kind {
+                    PieceKind::Effect(r) if r.effect.kind == kind => Some((r, p.span)),
+                    _ => None,
+                })
+                .expect("the rider")
+        };
+        let clear =
+            |s: Span| s.x1 < badge.x0 || badge.x1 < s.x0 || s.y1 < badge.y0 || badge.y1 < s.y0;
+        let (_, mark) = rider(K::WaitingMark);
+        assert!(
+            clear(mark),
+            "the mark {mark:?} lands on the badge {badge:?}"
+        );
+        let (z, _) = rider(K::SleepZ);
+        let mut last: Option<Span> = None;
+        for phase in (0..crate::effects::SLEEP_Z_RISE_MS).step_by(100) {
+            let r = crate::cutaway::effects::Riding {
+                effect: crate::effects::Effect { phase, ..z.effect },
+                ..z
+            };
+            let Some(s) = r.span(theme, 0) else {
+                continue;
+            };
+            assert!(
+                clear(s),
+                "the z at {phase} ms {s:?} lands on the badge {badge:?}"
+            );
+            if let Some(l) = last {
+                assert!(
+                    s.y0 <= l.y0 && s.x0 >= l.x0,
+                    "the z sank or drifted back at {phase} ms"
+                );
+            }
+            last = Some(s);
+        }
+        let (dust, span) = rider(K::WalkingDust);
+        let foot =
+            crate::pixel_painter::effects::walking_dust_foot(dust.effect.at, dust.effect.phase);
+        assert!(
+            (span.x0..=span.x1).contains(&foot.x) && (span.y0..=span.y1).contains(&foot.y),
+            "the dust {span:?} is off the foot {foot:?}"
+        );
+    }
+
+    /// A figure's dust paints straight before them and their other riders
+    /// straight after, so nothing sorts between a person and what rides on
+    /// them.
+    #[test]
+    fn riders_paint_beside_their_figure() {
+        use crate::effects::EffectKind as K;
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale,
+        };
+        for mut frame in frames {
+            for c in &mut frame.characters {
+                c.effects = every_effect(c.anchor);
+            }
+            let list = list_at(&frame, office, 12);
+            let kinds: Vec<Option<K>> = list
+                .pieces()
+                .iter()
+                .map(|p| match p.kind {
+                    PieceKind::Effect(r) => Some(r.effect.kind),
+                    _ => None,
+                })
+                .collect();
+            let figure = list
+                .pieces()
+                .iter()
+                .position(|p| matches!(p.kind, PieceKind::Character { .. }))
+                .expect("the figure");
+            assert_eq!(
+                kinds[figure - 1..=figure + 3],
+                [
+                    Some(K::WalkingDust),
+                    None,
+                    Some(K::FlameCrown),
+                    Some(K::SleepZ),
+                    Some(K::WaitingMark)
+                ]
+            );
+        }
+    }
+
+    /// A burning figure's crown stands on the top of their hair, at the
+    /// density the art is drawn at and at the base art's.
+    #[test]
+    fn the_flame_crown_stands_on_the_hair() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
+        let mut frame = frames.last().expect("a seated frame").clone();
+        for c in &mut frame.characters {
+            c.effects = vec![crate::effects::flame_crown(
+                c.anchor,
+                8,
+                std::time::UNIX_EPOCH,
+            )];
+        }
+        for s in [1, pack.max_density_variant().get()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            let office = Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale,
+            };
+            let list = list_at(&frame, office, 12);
+            // The rows a piece paints alone, top and bottom.
+            let rows = |want: fn(&PieceKind) -> bool| {
+                let piece = list
+                    .pieces()
+                    .iter()
+                    .find(|p| want(&p.kind))
+                    .expect("the piece");
+                let [a, b] = painted_over_two_fills(&piece.kind, &layout, &pack, theme, scale);
+                let painted: Vec<u16> = (0..a.height())
+                    .filter(|&y| {
+                        (0..a.width()).any(|x| a.get(x, y) != UNDER[0] || b.get(x, y) != UNDER[1])
+                    })
+                    .collect();
+                (painted.first().copied(), painted.last().copied())
+            };
+            let (hair, _) = rows(|k| matches!(k, PieceKind::Character { .. }));
+            let (_, base) = rows(|k| matches!(k, PieceKind::Effect(_)));
+            // Within the hair's top layout row.
+            assert!(
+                base.zip(hair)
+                    .is_some_and(|(base, hair)| (hair..hair + s).contains(&base)),
+                "at scale {s} the crown's base row {base:?} is off the hair's top {hair:?}"
             );
         }
     }
@@ -4839,7 +5074,7 @@ S B B B B B B S
                             theme,
                             scale,
                         },
-                        &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
+                        &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
                         0,
                     );
                     repeats += same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
@@ -4887,7 +5122,7 @@ S B B B B B B S
                     theme,
                     scale,
                 },
-                &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
+                &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
                 0,
             );
             let is_glass = |p: &Piece| matches!(p.kind, PieceKind::Glass { .. });
@@ -5361,7 +5596,7 @@ S B B B B B B S
             pen,
             &mut buf,
         );
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = CutawayCache::default();
         let emission = paint_pieces(list, &mut cache, &mut buf);
         (buf, emission)
     }
@@ -5386,7 +5621,7 @@ S B B B B B B S
         let list = list_at(frame, office, 23);
         assert!(list.ambient.darkness() > 0.0, "23:00 is dark");
         let (day, emission) = by_day(&list, &layout);
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = CutawayCache::default();
         let mut night = RgbBuffer::filled(day.width(), day.height(), theme.surface.bg_fallback);
         paint_backdrop(
             &layout,
@@ -5538,7 +5773,7 @@ S B B B B B B S
                 scale.to_buffer(layout.buf_h),
                 theme.surface.bg_fallback,
             );
-            let mut cache = crate::frame_cache::FrameCache::new();
+            let mut cache = CutawayCache::default();
             render_cutaway(
                 frame,
                 office,
@@ -5664,7 +5899,7 @@ S B B B B B B S
             let variants: [&FigureEdit; 7] = [
                 &|_, _| {},
                 &|c, a| {
-                    c.glow = crate::pixel_painter::CharacterGlow::Tool;
+                    c.glow = crate::sim::CharacterGlow::Tool;
                     a.state = pixtuoid_core::state::ActivityState::Active {
                         tool_use_id: None,
                         detail: None,
@@ -5695,7 +5930,7 @@ S B B B B B B S
                             theme,
                             scale,
                         },
-                        &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
+                        &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
                         0,
                     );
                     same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
@@ -5719,8 +5954,7 @@ S B B B B B B S
     }
 
     /// An edit to one figure and its agent.
-    type FigureEdit =
-        dyn Fn(&mut crate::pixel_painter::CharacterPlacement, &mut pixtuoid_core::AgentSlot);
+    type FigureEdit = dyn Fn(&mut crate::sim::CharacterPlacement, &mut pixtuoid_core::AgentSlot);
 
     /// `frame` with `edit` applied to its first figure and that figure's agent.
     fn varied(frame: &SimFrame, edit: &FigureEdit) -> SimFrame {
@@ -5758,7 +5992,7 @@ S B B B B B B S
                 pack,
                 theme,
                 scale,
-                &mut crate::frame_cache::FrameCache::new(),
+                &mut CutawayCache::default(),
                 &mut buf,
             );
             buf
@@ -5804,7 +6038,7 @@ S B B B B B B S
                     theme,
                     scale: RenderScale::ONE
                 },
-                &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
+                &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
                 0
             )),
             summary(&build_list(
@@ -5815,7 +6049,7 @@ S B B B B B B S
                     theme,
                     scale: RenderScale::ONE
                 },
-                &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
+                &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
                 0
             )),
         );
@@ -5837,7 +6071,7 @@ S B B B B B B S
                     scale: RenderScale::ONE,
                 },
                 &Moment::resolve(
-                    crate::sky::Sky::at(std::time::SystemTime::UNIX_EPOCH),
+                    crate::sky::Sky::clock(std::time::SystemTime::UNIX_EPOCH),
                     theme,
                     0.0,
                     std::time::SystemTime::UNIX_EPOCH,
@@ -5903,9 +6137,22 @@ S B B B B B B S
             PieceKind::Character { .. } => "character",
             PieceKind::Glass { .. } => "glass",
             PieceKind::Hung { .. } => "hung decor",
+            PieceKind::Effect(_) => "effect",
             PieceKind::Badge { .. } => "badge",
             PieceKind::DeskProp(_) => "desk prop",
         }
+    }
+
+    /// One of each effect a figure carries, riding on its `anchor`, each at a
+    /// step it shows at.
+    fn every_effect(anchor: crate::layout::Point) -> Vec<crate::effects::Effect> {
+        let at = |ms| std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms);
+        vec![
+            crate::effects::walking_dust(anchor, 0),
+            crate::effects::flame_crown(anchor, 8, at(0)),
+            crate::effects::sleep_z(anchor, 0, at(500)).expect("a z rising at 500 ms"),
+            crate::effects::waiting_mark(anchor),
+        ]
     }
 
     /// The first logical pixel `kind` writes outside `span`, painted alone.
@@ -6313,7 +6560,7 @@ S B B B B B B S
             )
         };
         let (mut night, mut raw) = (blank(), blank());
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = CutawayCache::default();
         paint_backdrop(&layout, theme, scale, pen, &mut night);
         paint_list(&list, &mut cache, &mut night);
         paint_backdrop(&layout, theme, scale, pen, &mut raw);
@@ -6412,7 +6659,7 @@ S B B B B B B S
                 pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
             )
         };
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = CutawayCache::default();
         let painted = |keep: &dyn Fn(&PieceKind) -> bool, cache: &mut _| {
             let mut buf = blank();
             paint_backdrop(&layout, theme, scale, pen, &mut buf);
@@ -6484,7 +6731,7 @@ S B B B B B B S
         );
         let mut hands = 0;
         for minutes in (0..12 * 60).step_by(7) {
-            let reading = crate::pixel_painter::ClockReading {
+            let reading = crate::sky::ClockReading {
                 hour: minutes / 60,
                 minute: minutes % 60,
             };
@@ -7089,7 +7336,7 @@ S B B B B B B S
             scale.to_buffer(layout.buf_h),
             theme.surface.bg_fallback,
         );
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = CutawayCache::default();
         render_cutaway(
             frame,
             Office {

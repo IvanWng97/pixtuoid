@@ -2,7 +2,8 @@
 
 pub(super) use crate::composite::{BLACK, WHITE, blend_rgb};
 use pixtuoid_core::AgentSlot;
-use pixtuoid_core::id::normalize_path_key;
+
+use crate::sim::outfit_seed_for;
 use pixtuoid_core::sprite::{Frame, Pixel, Rgb, RgbBuffer};
 
 /// A complete shirt + pants combo, keyed by the agent's normalized working
@@ -301,28 +302,6 @@ const SKIN_PRESETS: &[Rgb] = &[
     }, // warm tan
 ];
 
-/// Deterministic seed from a normalized cwd string: byte-fold, then the
-/// splitmix64 finalizer. NOT `DefaultHasher`: its algorithm may change between
-/// Rust releases, which would re-dress every agent on a toolchain bump.
-fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
-    let folded = cwd_norm
-        .bytes()
-        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64));
-    pixtuoid_core::id::splitmix64(folded)
-}
-
-/// The outfit-determining seed for `agent`. Extracted so
-/// `FrameCache::note_outfit_seed` watches the mid-lifetime cwd backfill through
-/// the EXACT unknown-cwd fallback [`agent_overrides`] uses; a second copy would
-/// drift.
-pub(super) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
-    if agent.unknown_cwd || agent.cwd.as_os_str().is_empty() {
-        agent.agent_id.raw()
-    } else {
-        cwd_outfit_seed(&normalize_path_key(&agent.cwd.to_string_lossy()))
-    }
-}
-
 /// A burning agent's hair — an alias of the flame gradient's deep base, so a
 /// gradient tweak can't desync the hair from the crown.
 const EMBER_HAIR: Rgb = super::effects::FLAME_DEEP;
@@ -428,24 +407,6 @@ pub(super) fn agent_overrides(
     ]
 }
 
-/// The exhaustive `ToolKind → hue` map. Read by the office monitor glow AND, via
-/// re-export, by the binary's footer tool-segment tint, so the two share one hue
-/// per tool.
-pub fn tool_glow_for_kind(
-    kind: pixtuoid_core::state::ToolKind,
-    glow: &crate::theme::ToolGlowColors,
-) -> Rgb {
-    use pixtuoid_core::state::ToolKind;
-    match kind {
-        ToolKind::Edit => glow.edit,
-        ToolKind::Read => glow.read,
-        ToolKind::Bash => glow.bash,
-        ToolKind::Task => glow.agent,
-        ToolKind::Search => glow.grep,
-        ToolKind::Other => glow.default,
-    }
-}
-
 /// The monitor glow color for an agent's active tool, or `None` when the agent
 /// is not Active.
 pub(super) fn tool_glow_tint(
@@ -454,7 +415,7 @@ pub(super) fn tool_glow_tint(
 ) -> Option<Rgb> {
     use pixtuoid_core::state::ActivityState;
     match &agent.state {
-        ActivityState::Active { kind, .. } => Some(tool_glow_for_kind(*kind, glow)),
+        ActivityState::Active { kind, .. } => Some(glow.for_kind(*kind)),
         _ => None,
     }
 }

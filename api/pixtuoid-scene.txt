@@ -104,7 +104,7 @@ pub mod pixtuoid_scene::floor
 pub use pixtuoid_scene::floor::MAX_FLOORS
 pub struct pixtuoid_scene::floor::AudioObserver
 impl pixtuoid_scene::floor::AudioObserver
-pub fn pixtuoid_scene::floor::AudioObserver::frame(&mut self, &pixtuoid_core::state::SceneState, &std::collections::hash::set::HashSet<usize>, impl core::ops::function::Fn(usize) -> core::option::Option<pixtuoid_scene::layout::WaypointKind>, usize, std::time::SystemTime) -> AudioFrame
+pub fn pixtuoid_scene::floor::AudioObserver::frame(&mut self, &pixtuoid_core::state::SceneState, &std::collections::hash::set::HashSet<usize>, impl core::ops::function::Fn(usize) -> core::option::Option<pixtuoid_scene::layout::WaypointKind>, pixtuoid_scene::floor::FloorMeta, std::time::SystemTime) -> AudioFrame
 pub fn pixtuoid_scene::floor::AudioObserver::new() -> Self
 impl core::default::Default for pixtuoid_scene::floor::AudioObserver
 pub fn pixtuoid_scene::floor::AudioObserver::default() -> pixtuoid_scene::floor::AudioObserver
@@ -189,9 +189,11 @@ pub struct pixtuoid_scene::floor::FloorMeta
 pub pixtuoid_scene::floor::FloorMeta::altitude: f32
 pub pixtuoid_scene::floor::FloorMeta::floor_idx: usize
 pub pixtuoid_scene::floor::FloorMeta::floor_seed: u64
+pub pixtuoid_scene::floor::FloorMeta::weather: pixtuoid_scene::pixel_painter::WeatherPolicy
 impl pixtuoid_scene::floor::FloorMeta
 pub fn pixtuoid_scene::floor::FloorMeta::for_floor(usize, usize) -> Self
 pub fn pixtuoid_scene::floor::FloorMeta::ground() -> Self
+pub fn pixtuoid_scene::floor::FloorMeta::with_weather(self, pixtuoid_scene::pixel_painter::WeatherPolicy) -> Self
 impl core::clone::Clone for pixtuoid_scene::floor::FloorMeta
 pub fn pixtuoid_scene::floor::FloorMeta::clone(&self) -> pixtuoid_scene::floor::FloorMeta
 impl core::fmt::Debug for pixtuoid_scene::floor::FloorMeta
@@ -208,7 +210,7 @@ pub struct pixtuoid_scene::floor::FloorSession
 pub pixtuoid_scene::floor::FloorSession::floor: pixtuoid_scene::floor::PerFloor
 pub pixtuoid_scene::floor::FloorSession::office: pixtuoid_scene::floor::PerOffice
 impl pixtuoid_scene::floor::FloorSession
-pub fn pixtuoid_scene::floor::FloorSession::audio_frame(&mut self, &pixtuoid_core::state::SceneState, usize, std::time::SystemTime) -> AudioFrame
+pub fn pixtuoid_scene::floor::FloorSession::audio_frame(&mut self, &pixtuoid_core::state::SceneState, pixtuoid_scene::floor::FloorMeta, std::time::SystemTime) -> AudioFrame
 pub fn pixtuoid_scene::floor::FloorSession::board(&self, &pixtuoid_core::state::SceneState, std::time::SystemTime) -> crate::board::BoardModel
 pub fn pixtuoid_scene::floor::FloorSession::buf(&self) -> &pixtuoid_core::sprite::RgbBuffer
 pub fn pixtuoid_scene::floor::FloorSession::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
@@ -273,7 +275,7 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::LightingState
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::LightingState
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::LightingState
 pub struct pixtuoid_scene::floor::ObservedFloor
-pub pixtuoid_scene::floor::ObservedFloor::frame: pixtuoid_scene::pixel_painter::SimFrame
+pub pixtuoid_scene::floor::ObservedFloor::frame: pixtuoid_scene::sim::SimFrame
 pub pixtuoid_scene::floor::ObservedFloor::layout: alloc::sync::Arc<pixtuoid_scene::layout::Layout>
 impl core::marker::Freeze for pixtuoid_scene::floor::ObservedFloor
 impl core::marker::Send for pixtuoid_scene::floor::ObservedFloor
@@ -346,7 +348,7 @@ pub fn pixtuoid_scene::floor::num_floors(&pixtuoid_core::state::SceneState) -> u
 pub fn pixtuoid_scene::floor::observe_floor(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_scene::floor::CoffeeState, &mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::ObservedFloor>
 pub fn pixtuoid_scene::floor::project_floor_scene(&pixtuoid_core::state::SceneState, usize) -> pixtuoid_core::state::SceneState
 pub fn pixtuoid_scene::floor::render_floor(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_core::sprite::RgbBuffer, &mut pixtuoid_scene::floor::CoffeeState, &mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, pixtuoid_scene::floor::FrameInputs<'_>) -> core::option::Option<pixtuoid_scene::floor::FloorFrame>
-pub fn pixtuoid_scene::floor::track_for(std::time::SystemTime) -> crate::audio::TrackId
+pub fn pixtuoid_scene::floor::track_for(std::time::SystemTime, pixtuoid_scene::pixel_painter::WeatherPolicy) -> crate::audio::TrackId
 pub fn pixtuoid_scene::floor::waypoint_kind_of(core::option::Option<&pixtuoid_scene::layout::Layout>, usize) -> core::option::Option<pixtuoid_scene::layout::WaypointKind>
 pub mod pixtuoid_scene::layout
 pub enum pixtuoid_scene::layout::Anchor
@@ -1439,26 +1441,56 @@ pub fn pixtuoid_scene::physics::walk_arrived(&pixtuoid_scene::physics::WalkProfi
 pub fn pixtuoid_scene::physics::walk_profile(u32, pixtuoid_scene::physics::WalkIntent, pixtuoid_core::id::AgentId) -> pixtuoid_scene::physics::WalkProfile
 pub fn pixtuoid_scene::physics::walk_progress(&pixtuoid_scene::physics::WalkProfile, u64) -> u16
 pub mod pixtuoid_scene::pixel_painter
-pub enum pixtuoid_scene::pixel_painter::CharacterGlow
-pub pixtuoid_scene::pixel_painter::CharacterGlow::None
-pub pixtuoid_scene::pixel_painter::CharacterGlow::Thinking
-pub pixtuoid_scene::pixel_painter::CharacterGlow::Tool
-impl core::clone::Clone for pixtuoid_scene::pixel_painter::CharacterGlow
-pub fn pixtuoid_scene::pixel_painter::CharacterGlow::clone(&self) -> pixtuoid_scene::pixel_painter::CharacterGlow
-impl core::cmp::Eq for pixtuoid_scene::pixel_painter::CharacterGlow
-impl core::cmp::PartialEq for pixtuoid_scene::pixel_painter::CharacterGlow
-pub fn pixtuoid_scene::pixel_painter::CharacterGlow::eq(&self, &pixtuoid_scene::pixel_painter::CharacterGlow) -> bool
-impl core::fmt::Debug for pixtuoid_scene::pixel_painter::CharacterGlow
-pub fn pixtuoid_scene::pixel_painter::CharacterGlow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::pixel_painter::CharacterGlow
-impl core::marker::StructuralPartialEq for pixtuoid_scene::pixel_painter::CharacterGlow
-impl core::marker::Freeze for pixtuoid_scene::pixel_painter::CharacterGlow
-impl core::marker::Send for pixtuoid_scene::pixel_painter::CharacterGlow
-impl core::marker::Sync for pixtuoid_scene::pixel_painter::CharacterGlow
-impl core::marker::Unpin for pixtuoid_scene::pixel_painter::CharacterGlow
-impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::CharacterGlow
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::CharacterGlow
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::CharacterGlow
+pub enum pixtuoid_scene::pixel_painter::Weather
+pub pixtuoid_scene::pixel_painter::Weather::Clear
+pub pixtuoid_scene::pixel_painter::Weather::Fog
+pub pixtuoid_scene::pixel_painter::Weather::Overcast
+pub pixtuoid_scene::pixel_painter::Weather::Rain
+pub pixtuoid_scene::pixel_painter::Weather::Smog
+pub pixtuoid_scene::pixel_painter::Weather::Snow
+pub pixtuoid_scene::pixel_painter::Weather::Storm
+pub pixtuoid_scene::pixel_painter::Weather::Windy
+impl core::clone::Clone for pixtuoid_scene::pixel_painter::Weather
+pub fn pixtuoid_scene::pixel_painter::Weather::clone(&self) -> pixtuoid_scene::pixel_painter::Weather
+impl core::cmp::Eq for pixtuoid_scene::pixel_painter::Weather
+impl core::cmp::PartialEq for pixtuoid_scene::pixel_painter::Weather
+pub fn pixtuoid_scene::pixel_painter::Weather::eq(&self, &pixtuoid_scene::pixel_painter::Weather) -> bool
+impl core::fmt::Debug for pixtuoid_scene::pixel_painter::Weather
+pub fn pixtuoid_scene::pixel_painter::Weather::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for pixtuoid_scene::pixel_painter::Weather
+pub fn pixtuoid_scene::pixel_painter::Weather::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for pixtuoid_scene::pixel_painter::Weather
+impl core::marker::StructuralPartialEq for pixtuoid_scene::pixel_painter::Weather
+impl core::marker::Freeze for pixtuoid_scene::pixel_painter::Weather
+impl core::marker::Send for pixtuoid_scene::pixel_painter::Weather
+impl core::marker::Sync for pixtuoid_scene::pixel_painter::Weather
+impl core::marker::Unpin for pixtuoid_scene::pixel_painter::Weather
+impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::Weather
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::Weather
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::Weather
+pub enum pixtuoid_scene::pixel_painter::WeatherPolicy
+pub pixtuoid_scene::pixel_painter::WeatherPolicy::Clock
+pub pixtuoid_scene::pixel_painter::WeatherPolicy::Forced(pixtuoid_scene::pixel_painter::Weather)
+impl pixtuoid_scene::pixel_painter::WeatherPolicy
+pub fn pixtuoid_scene::pixel_painter::WeatherPolicy::from_name(core::option::Option<&str>) -> core::result::Result<Self, alloc::vec::Vec<&'static str>>
+impl core::clone::Clone for pixtuoid_scene::pixel_painter::WeatherPolicy
+pub fn pixtuoid_scene::pixel_painter::WeatherPolicy::clone(&self) -> pixtuoid_scene::pixel_painter::WeatherPolicy
+impl core::cmp::Eq for pixtuoid_scene::pixel_painter::WeatherPolicy
+impl core::cmp::PartialEq for pixtuoid_scene::pixel_painter::WeatherPolicy
+pub fn pixtuoid_scene::pixel_painter::WeatherPolicy::eq(&self, &pixtuoid_scene::pixel_painter::WeatherPolicy) -> bool
+impl core::default::Default for pixtuoid_scene::pixel_painter::WeatherPolicy
+pub fn pixtuoid_scene::pixel_painter::WeatherPolicy::default() -> pixtuoid_scene::pixel_painter::WeatherPolicy
+impl core::fmt::Debug for pixtuoid_scene::pixel_painter::WeatherPolicy
+pub fn pixtuoid_scene::pixel_painter::WeatherPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_scene::pixel_painter::WeatherPolicy
+impl core::marker::StructuralPartialEq for pixtuoid_scene::pixel_painter::WeatherPolicy
+impl core::marker::Freeze for pixtuoid_scene::pixel_painter::WeatherPolicy
+impl core::marker::Send for pixtuoid_scene::pixel_painter::WeatherPolicy
+impl core::marker::Sync for pixtuoid_scene::pixel_painter::WeatherPolicy
+impl core::marker::Unpin for pixtuoid_scene::pixel_painter::WeatherPolicy
+impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::WeatherPolicy
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::WeatherPolicy
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::WeatherPolicy
 pub struct pixtuoid_scene::pixel_painter::AgentFrame
 pub pixtuoid_scene::pixel_painter::AgentFrame::agent_id: pixtuoid_core::id::AgentId
 pub pixtuoid_scene::pixel_painter::AgentFrame::anchor: pixtuoid_scene::layout::Point
@@ -1481,29 +1513,6 @@ impl core::marker::Unpin for pixtuoid_scene::pixel_painter::AgentFrame
 impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::AgentFrame
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::AgentFrame
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::AgentFrame
-pub struct pixtuoid_scene::pixel_painter::CharacterPlacement
-pub pixtuoid_scene::pixel_painter::CharacterPlacement::agent_idx: usize
-pub pixtuoid_scene::pixel_painter::CharacterPlacement::anchor: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pixel_painter::CharacterPlacement::anchor_y: u16
-pub pixtuoid_scene::pixel_painter::CharacterPlacement::anim_name: &'static str
-pub pixtuoid_scene::pixel_painter::CharacterPlacement::breathes: bool
-pub pixtuoid_scene::pixel_painter::CharacterPlacement::flip_x: bool
-pub pixtuoid_scene::pixel_painter::CharacterPlacement::frame_idx: usize
-pub pixtuoid_scene::pixel_painter::CharacterPlacement::glow: pixtuoid_scene::pixel_painter::CharacterGlow
-pub pixtuoid_scene::pixel_painter::CharacterPlacement::label_anchor: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pixel_painter::CharacterPlacement::seat_desk: core::option::Option<pixtuoid_scene::layout::Point>
-pub pixtuoid_scene::pixel_painter::CharacterPlacement::seated: bool
-impl core::clone::Clone for pixtuoid_scene::pixel_painter::CharacterPlacement
-pub fn pixtuoid_scene::pixel_painter::CharacterPlacement::clone(&self) -> pixtuoid_scene::pixel_painter::CharacterPlacement
-impl core::fmt::Debug for pixtuoid_scene::pixel_painter::CharacterPlacement
-pub fn pixtuoid_scene::pixel_painter::CharacterPlacement::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for pixtuoid_scene::pixel_painter::CharacterPlacement
-impl core::marker::Send for pixtuoid_scene::pixel_painter::CharacterPlacement
-impl core::marker::Sync for pixtuoid_scene::pixel_painter::CharacterPlacement
-impl core::marker::Unpin for pixtuoid_scene::pixel_painter::CharacterPlacement
-impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::CharacterPlacement
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::CharacterPlacement
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::CharacterPlacement
 pub struct pixtuoid_scene::pixel_painter::MascotFrame
 pub pixtuoid_scene::pixel_painter::MascotFrame::active_sessions: u32
 pub pixtuoid_scene::pixel_painter::MascotFrame::busy: bool
@@ -1552,30 +1561,10 @@ impl core::marker::Unpin for pixtuoid_scene::pixel_painter::PixelPassResult
 impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::PixelPassResult
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::PixelPassResult
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::PixelPassResult
-pub struct pixtuoid_scene::pixel_painter::SimFrame
-pub pixtuoid_scene::pixel_painter::SimFrame::agents: alloc::vec::Vec<pixtuoid_core::state::AgentSlot>
-pub pixtuoid_scene::pixel_painter::SimFrame::characters: alloc::vec::Vec<pixtuoid_scene::pixel_painter::CharacterPlacement>
-pub pixtuoid_scene::pixel_painter::SimFrame::chitchat_bubbles: alloc::vec::Vec<pixtuoid_scene::chitchat::ChitchatBubble>
-pub pixtuoid_scene::pixel_painter::SimFrame::indoor_scale: f32
-pub pixtuoid_scene::pixel_painter::SimFrame::new_coffee_carriers: alloc::vec::Vec<pixtuoid_core::id::AgentId>
-pub pixtuoid_scene::pixel_painter::SimFrame::occupied_waypoints: std::collections::hash::set::HashSet<usize>
-pub pixtuoid_scene::pixel_painter::SimFrame::poses: std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, core::option::Option<pixtuoid_scene::pose::Pose>>
-pub pixtuoid_scene::pixel_painter::SimFrame::seated_agents: std::collections::hash::map::HashMap<pixtuoid_core::state::FloorLocalDeskIndex, bool>
-impl core::clone::Clone for pixtuoid_scene::pixel_painter::SimFrame
-pub fn pixtuoid_scene::pixel_painter::SimFrame::clone(&self) -> pixtuoid_scene::pixel_painter::SimFrame
-impl core::marker::Freeze for pixtuoid_scene::pixel_painter::SimFrame
-impl core::marker::Send for pixtuoid_scene::pixel_painter::SimFrame
-impl core::marker::Sync for pixtuoid_scene::pixel_painter::SimFrame
-impl core::marker::Unpin for pixtuoid_scene::pixel_painter::SimFrame
-impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::SimFrame
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::SimFrame
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::SimFrame
-pub fn pixtuoid_scene::pixel_painter::force_weather(core::option::Option<&str>) -> core::result::Result<(), alloc::vec::Vec<&'static str>>
 pub fn pixtuoid_scene::pixel_painter::hour_is_day(f32) -> bool
 pub fn pixtuoid_scene::pixel_painter::is_day_at(std::time::SystemTime) -> bool
-pub fn pixtuoid_scene::pixel_painter::precipitation_level(std::time::SystemTime) -> f32
+pub fn pixtuoid_scene::pixel_painter::precipitation_level(std::time::SystemTime, pixtuoid_scene::pixel_painter::WeatherPolicy) -> f32
 pub fn pixtuoid_scene::pixel_painter::render_to_rgb_buffer(&mut pixtuoid_scene::pixel_painter::PixelCtx<'_>) -> pixtuoid_scene::pixel_painter::PixelPassResult
-pub fn pixtuoid_scene::pixel_painter::tool_glow_for_kind(pixtuoid_core::state::ToolKind, &pixtuoid_scene::theme::ToolGlowColors) -> pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_scene::pixel_painter::weather_names() -> alloc::vec::Vec<&'static str>
 pub mod pixtuoid_scene::pose
 pub enum pixtuoid_scene::pose::Pose
@@ -1715,6 +1704,68 @@ impl core::marker::Unpin for pixtuoid_scene::render_scale::RenderScale
 impl core::marker::UnsafeUnpin for pixtuoid_scene::render_scale::RenderScale
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::render_scale::RenderScale
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::render_scale::RenderScale
+pub mod pixtuoid_scene::sim
+pub enum pixtuoid_scene::sim::CharacterGlow
+pub pixtuoid_scene::sim::CharacterGlow::None
+pub pixtuoid_scene::sim::CharacterGlow::Thinking
+pub pixtuoid_scene::sim::CharacterGlow::Tool
+impl core::clone::Clone for pixtuoid_scene::sim::CharacterGlow
+pub fn pixtuoid_scene::sim::CharacterGlow::clone(&self) -> pixtuoid_scene::sim::CharacterGlow
+impl core::cmp::Eq for pixtuoid_scene::sim::CharacterGlow
+impl core::cmp::PartialEq for pixtuoid_scene::sim::CharacterGlow
+pub fn pixtuoid_scene::sim::CharacterGlow::eq(&self, &pixtuoid_scene::sim::CharacterGlow) -> bool
+impl core::fmt::Debug for pixtuoid_scene::sim::CharacterGlow
+pub fn pixtuoid_scene::sim::CharacterGlow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_scene::sim::CharacterGlow
+impl core::marker::StructuralPartialEq for pixtuoid_scene::sim::CharacterGlow
+impl core::marker::Freeze for pixtuoid_scene::sim::CharacterGlow
+impl core::marker::Send for pixtuoid_scene::sim::CharacterGlow
+impl core::marker::Sync for pixtuoid_scene::sim::CharacterGlow
+impl core::marker::Unpin for pixtuoid_scene::sim::CharacterGlow
+impl core::marker::UnsafeUnpin for pixtuoid_scene::sim::CharacterGlow
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::sim::CharacterGlow
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::sim::CharacterGlow
+pub struct pixtuoid_scene::sim::CharacterPlacement
+pub pixtuoid_scene::sim::CharacterPlacement::agent_idx: usize
+pub pixtuoid_scene::sim::CharacterPlacement::anchor: pixtuoid_scene::layout::Point
+pub pixtuoid_scene::sim::CharacterPlacement::anchor_y: u16
+pub pixtuoid_scene::sim::CharacterPlacement::anim_name: &'static str
+pub pixtuoid_scene::sim::CharacterPlacement::breathes: bool
+pub pixtuoid_scene::sim::CharacterPlacement::flip_x: bool
+pub pixtuoid_scene::sim::CharacterPlacement::frame_idx: usize
+pub pixtuoid_scene::sim::CharacterPlacement::glow: pixtuoid_scene::sim::CharacterGlow
+pub pixtuoid_scene::sim::CharacterPlacement::label_anchor: pixtuoid_scene::layout::Point
+pub pixtuoid_scene::sim::CharacterPlacement::seat_desk: core::option::Option<pixtuoid_scene::layout::Point>
+pub pixtuoid_scene::sim::CharacterPlacement::seated: bool
+impl core::clone::Clone for pixtuoid_scene::sim::CharacterPlacement
+pub fn pixtuoid_scene::sim::CharacterPlacement::clone(&self) -> pixtuoid_scene::sim::CharacterPlacement
+impl core::fmt::Debug for pixtuoid_scene::sim::CharacterPlacement
+pub fn pixtuoid_scene::sim::CharacterPlacement::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for pixtuoid_scene::sim::CharacterPlacement
+impl core::marker::Send for pixtuoid_scene::sim::CharacterPlacement
+impl core::marker::Sync for pixtuoid_scene::sim::CharacterPlacement
+impl core::marker::Unpin for pixtuoid_scene::sim::CharacterPlacement
+impl core::marker::UnsafeUnpin for pixtuoid_scene::sim::CharacterPlacement
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::sim::CharacterPlacement
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::sim::CharacterPlacement
+pub struct pixtuoid_scene::sim::SimFrame
+pub pixtuoid_scene::sim::SimFrame::agents: alloc::vec::Vec<pixtuoid_core::state::AgentSlot>
+pub pixtuoid_scene::sim::SimFrame::characters: alloc::vec::Vec<pixtuoid_scene::sim::CharacterPlacement>
+pub pixtuoid_scene::sim::SimFrame::chitchat_bubbles: alloc::vec::Vec<pixtuoid_scene::chitchat::ChitchatBubble>
+pub pixtuoid_scene::sim::SimFrame::indoor_scale: f32
+pub pixtuoid_scene::sim::SimFrame::new_coffee_carriers: alloc::vec::Vec<pixtuoid_core::id::AgentId>
+pub pixtuoid_scene::sim::SimFrame::occupied_waypoints: std::collections::hash::set::HashSet<usize>
+pub pixtuoid_scene::sim::SimFrame::poses: std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, core::option::Option<pixtuoid_scene::pose::Pose>>
+pub pixtuoid_scene::sim::SimFrame::seated_agents: std::collections::hash::map::HashMap<pixtuoid_core::state::FloorLocalDeskIndex, bool>
+impl core::clone::Clone for pixtuoid_scene::sim::SimFrame
+pub fn pixtuoid_scene::sim::SimFrame::clone(&self) -> pixtuoid_scene::sim::SimFrame
+impl core::marker::Freeze for pixtuoid_scene::sim::SimFrame
+impl core::marker::Send for pixtuoid_scene::sim::SimFrame
+impl core::marker::Sync for pixtuoid_scene::sim::SimFrame
+impl core::marker::Unpin for pixtuoid_scene::sim::SimFrame
+impl core::marker::UnsafeUnpin for pixtuoid_scene::sim::SimFrame
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::sim::SimFrame
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::sim::SimFrame
 pub mod pixtuoid_scene::theme
 pub enum pixtuoid_scene::theme::ThemeKind
 pub pixtuoid_scene::theme::ThemeKind::Dark
@@ -1933,6 +1984,8 @@ pub pixtuoid_scene::theme::ToolGlowColors::default: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::ToolGlowColors::edit: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::ToolGlowColors::grep: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::ToolGlowColors::read: pixtuoid_core::sprite::Rgb
+impl pixtuoid_scene::theme::ToolGlowColors
+pub fn pixtuoid_scene::theme::ToolGlowColors::for_kind(&self, pixtuoid_core::state::ToolKind) -> pixtuoid_core::sprite::Rgb
 impl core::clone::Clone for pixtuoid_scene::theme::ToolGlowColors
 pub fn pixtuoid_scene::theme::ToolGlowColors::clone(&self) -> pixtuoid_scene::theme::ToolGlowColors
 impl core::fmt::Debug for pixtuoid_scene::theme::ToolGlowColors

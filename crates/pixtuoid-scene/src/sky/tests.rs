@@ -8,7 +8,7 @@ fn the_clock_picks_every_weather_within_a_week() {
     let start = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     const WEEK_SECS: u64 = 7 * 24 * 3600;
     let seen: HashSet<Weather> = (0..WEEK_SECS / WEATHER_CYCLE_SECS)
-        .map(|slot| weather_at(start + Duration::from_secs(slot * WEATHER_CYCLE_SECS)))
+        .map(|slot| clock_weather(start + Duration::from_secs(slot * WEATHER_CYCLE_SECS)))
         .collect();
     for w in Weather::ALL {
         assert!(
@@ -32,7 +32,7 @@ fn emitter_is_sun_by_day_moon_by_night_never_both() {
     for slot in 0..48u32 {
         let (h, m) = (slot / 2, (slot % 2) * 30);
         let s = at_hour_min(h, m);
-        let e = *Sky::at(s).emitter();
+        let e = *Sky::clock(s).emitter();
         match e.body {
             Body::Sun => assert!(
                 (5.0..20.0).contains(&(h as f32 + m as f32 / 60.0)),
@@ -48,9 +48,9 @@ fn emitter_is_sun_by_day_moon_by_night_never_both() {
 
 #[test]
 fn sun_altitude_peaks_near_midday_and_bottoms_at_the_horizon() {
-    let noon = Sky::at(at_hour_min(12, 30)).emitter().altitude;
-    let dawn = Sky::at(at_hour_min(6, 30)).emitter().altitude;
-    let dusk = Sky::at(at_hour_min(18, 0)).emitter().altitude;
+    let noon = Sky::clock(at_hour_min(12, 30)).emitter().altitude;
+    let dawn = Sky::clock(at_hour_min(6, 30)).emitter().altitude;
+    let dusk = Sky::clock(at_hour_min(18, 0)).emitter().altitude;
     assert!(noon > 0.8, "midday sun rides high: {noon}");
     // The two thresholds differ because 06:30 and 18:00 sit unequally far from
     // [`SUN_RISE_H`] and [`SUN_SET_H`].
@@ -63,20 +63,20 @@ fn sun_altitude_peaks_near_midday_and_bottoms_at_the_horizon() {
 #[test]
 fn warmth_is_high_low_on_the_horizon_and_neutral_at_apex() {
     assert!(
-        Sky::at(at_hour_min(6, 30)).emitter().warmth > 0.6,
+        Sky::clock(at_hour_min(6, 30)).emitter().warmth > 0.6,
         "low sun is warm/red"
     );
     assert!(
-        Sky::at(at_hour_min(12, 30)).emitter().warmth < 0.3,
+        Sky::clock(at_hour_min(12, 30)).emitter().warmth < 0.3,
         "apex sun is neutral"
     );
 }
 
 #[test]
 fn azimuth_advances_from_dawn_to_dusk() {
-    let a = Sky::at(at_hour_min(7, 0)).emitter().azimuth;
-    let b = Sky::at(at_hour_min(12, 0)).emitter().azimuth;
-    let c = Sky::at(at_hour_min(18, 0)).emitter().azimuth;
+    let a = Sky::clock(at_hour_min(7, 0)).emitter().azimuth;
+    let b = Sky::clock(at_hour_min(12, 0)).emitter().azimuth;
+    let c = Sky::clock(at_hour_min(18, 0)).emitter().azimuth;
     assert!(
         a < b && b < c,
         "azimuth grows through the day: {a} < {b} < {c}"
@@ -90,7 +90,7 @@ fn moon_luminance_tracks_phase() {
     for day in 1..=30u32 {
         let s = on_day(day, 2);
         let frac = moon_phase_at(s);
-        let lum = Sky::at(s).emitter().emitter_lum;
+        let lum = Sky::clock(s).emitter().emitter_lum;
         if frac < lo {
             lo = frac;
             lo_lum = lum;
@@ -106,28 +106,32 @@ fn moon_luminance_tracks_phase() {
     );
 }
 
+/// `Clock` is the clock's slot pick at every instant, and `Forced` holds its
+/// weather whatever the clock.
 #[test]
-fn weather_override_forces_a_fixed_variant_then_restores() {
+fn a_policy_picks_the_clock_or_holds_its_weather() {
     use std::time::Duration;
     let t = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let natural = weather_at(t);
-    // Force a variant that differs from the natural pick so the assert is real.
-    let forced = Weather::ALL
-        .into_iter()
-        .find(|&w| w != natural)
-        .expect("8 variants");
-    let guard = ForcedWeather::new(forced);
-    assert_eq!(weather_at(t), forced);
+    for slot in 0..40 {
+        let now = t + Duration::from_secs(slot * WEATHER_CYCLE_SECS / 2);
+        assert_eq!(
+            Sky::at(now, WeatherPolicy::Clock).weather(),
+            clock_weather(now),
+            "{slot}"
+        );
+        for w in Weather::ALL {
+            assert_eq!(Sky::at(now, WeatherPolicy::Forced(w)).weather(), w);
+        }
+    }
+    assert_eq!(WeatherPolicy::default(), WeatherPolicy::Clock);
+    assert_eq!(WeatherPolicy::from_name(None), Ok(WeatherPolicy::Clock));
     assert_eq!(
-        weather_at(t + Duration::from_secs(987_654)),
-        forced,
-        "override is time-independent"
+        WeatherPolicy::from_name(Some(" STORM ")),
+        Ok(WeatherPolicy::Forced(Weather::Storm))
     );
-    drop(guard);
     assert_eq!(
-        weather_at(t),
-        natural,
-        "dropping the guard restores time-based selection"
+        WeatherPolicy::from_name(Some("stormy")),
+        Err(crate::pixel_painter::weather_names())
     );
 }
 
@@ -316,8 +320,9 @@ fn lightning_strikes_are_jittered_not_metronomic() {
 fn the_weather_is_deterministic_and_changes_across_slots() {
     let base = std::time::UNIX_EPOCH;
     let at = |slot: u64| base + std::time::Duration::from_secs(slot * WEATHER_CYCLE_SECS);
-    assert_eq!(weather_at(at(17)), weather_at(at(17)));
-    let unique: std::collections::HashSet<_> = (0..20).map(|slot| weather_at(at(slot))).collect();
+    assert_eq!(clock_weather(at(17)), clock_weather(at(17)));
+    let unique: std::collections::HashSet<_> =
+        (0..20).map(|slot| clock_weather(at(slot))).collect();
     assert!(unique.len() >= 2, "weather should vary across slots");
 }
 
@@ -332,17 +337,17 @@ fn a_strike_flashes_at_its_bucket_offset_and_ends_with_the_flash() {
                 + std::time::Duration::from_millis(bucket * LIGHTNING_PERIOD_MS + ms)
         };
         assert_eq!(
-            Sky::at(at(off)).flash(),
+            Sky::clock(at(off)).flash(),
             lightning_envelope(0),
             "bucket {bucket}"
         );
         assert_eq!(
-            Sky::at(at(off + LIGHTNING_FLASH_MS)).flash(),
+            Sky::clock(at(off + LIGHTNING_FLASH_MS)).flash(),
             0.0,
             "bucket {bucket}"
         );
         if off > 0 {
-            assert_eq!(Sky::at(at(off - 1)).flash(), 0.0, "bucket {bucket}");
+            assert_eq!(Sky::clock(at(off - 1)).flash(), 0.0, "bucket {bucket}");
         }
     }
 }
@@ -498,13 +503,13 @@ fn the_new_moon_epoch_is_the_instant_its_doc_names() {
 fn the_moon_waxes_to_full_and_wanes_after() {
     for (mo, d, h, mi) in [(1, 26, 4, 47), (7, 21, 11, 6)] {
         assert!(
-            Sky::at(utc(2026, mo, d, h, mi)).moon_waxing(),
+            Sky::clock(utc(2026, mo, d, h, mi)).moon_waxing(),
             "first quarter 2026-{mo}-{d} {h}:{mi} waxes"
         );
     }
     for (mo, d, h, mi) in [(1, 10, 15, 48), (8, 6, 2, 21)] {
         assert!(
-            !Sky::at(utc(2026, mo, d, h, mi)).moon_waxing(),
+            !Sky::clock(utc(2026, mo, d, h, mi)).moon_waxing(),
             "last quarter 2026-{mo}-{d} {h}:{mi} wanes"
         );
     }
@@ -514,11 +519,11 @@ fn the_moon_waxes_to_full_and_wanes_after() {
     for (mo, d, h, mi) in FULL_MOONS_2026 {
         let full = utc(2026, mo, d, h, mi);
         assert!(
-            Sky::at(full - miss).moon_waxing(),
+            Sky::clock(full - miss).moon_waxing(),
             "waxes a miss before full 2026-{mo}-{d}"
         );
         assert!(
-            !Sky::at(full + miss).moon_waxing(),
+            !Sky::clock(full + miss).moon_waxing(),
             "wanes a miss after full 2026-{mo}-{d}"
         );
     }

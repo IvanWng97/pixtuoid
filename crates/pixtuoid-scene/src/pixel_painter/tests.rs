@@ -1,12 +1,14 @@
-use super::anchors::{
-    CHARACTER_SPRITE_W, back_couch_anchor, compute_door_frame_idx, seated_anchor_facing,
-    walking_anchor, waypoint_anchor,
-};
 use super::background::paint_corridor_runner;
 use super::seat::{Seat, settle_seat};
 use super::*;
 use crate::floor::{FloorInputs, PetInputs};
+use crate::layout::CHARACTER_SPRITE_W;
 use crate::pose;
+use crate::sim::anchors::{
+    back_couch_anchor, compute_door_frame_idx, seated_anchor_facing, walking_anchor,
+    waypoint_anchor,
+};
+use crate::sim::{CharacterPlacement, SimStores};
 use pixtuoid_core::sprite::{Frame, Pixel};
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
@@ -820,7 +822,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             scale.to_buffer(layout.buf_h),
             theme.surface.bg_fallback,
         );
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         let office = crate::cutaway::paint::Office {
             layout: &layout,
             pack,
@@ -969,7 +971,7 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
             scale.to_buffer(layout.buf_h),
             theme.surface.bg_fallback,
         );
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         crate::cutaway::paint::render_cutaway(
             &unlit_room(&frame),
             crate::cutaway::paint::Office {
@@ -1122,7 +1124,7 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
             scale.to_buffer(layout.buf_h),
             theme.surface.bg_fallback,
         );
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         crate::cutaway::paint::render_cutaway(
             &unlit_room(frame),
             crate::cutaway::paint::Office {
@@ -1789,12 +1791,12 @@ fn every_hover_size_is_its_painted_sprite_size() {
         (
             "LARGE_COUNTER".into(),
             LARGE_COUNTER,
-            super::pantry_counter_anim(LARGE_COUNTER.w),
+            crate::layout::pantry_counter_anim(LARGE_COUNTER.w),
         ),
         (
             "COMPACT_COUNTER".into(),
             COMPACT_COUNTER,
-            super::pantry_counter_anim(COMPACT_COUNTER.w),
+            crate::layout::pantry_counter_anim(COMPACT_COUNTER.w),
         ),
     ];
     pieces.extend(
@@ -1861,7 +1863,7 @@ fn queued(layout: &Layout, frame: &SimFrame) -> Furnishings<'static> {
         layout,
         pack: &pack,
         now,
-        sky: crate::sky::Sky::at(now),
+        sky: crate::sky::Sky::clock(now),
         buf: &mut buf,
         cache: &mut cache,
         base_fill: &mut base_fill,
@@ -1887,7 +1889,7 @@ fn queued(layout: &Layout, frame: &SimFrame) -> Furnishings<'static> {
         &ctx,
         frame,
         &lights.desks,
-        background::neon_look(frame.neon, theme),
+        crate::floor::neon_look(frame.neon, theme),
     )
 }
 
@@ -2311,8 +2313,8 @@ fn door_frame_uses_physics_window_when_nonzero() {
 
 #[test]
 fn waypoint_rank_offset_x_decollision_table() {
-    use super::anchors::waypoint_rank_offset_x;
     use crate::layout::WaypointKind;
+    use crate::sim::anchors::waypoint_rank_offset_x;
     assert_eq!(waypoint_rank_offset_x(WaypointKind::Couch, 0), 0);
     assert_eq!(waypoint_rank_offset_x(WaypointKind::Pantry, 0), 0);
     assert_eq!(waypoint_rank_offset_x(WaypointKind::Pantry, 1), 9);
@@ -2326,8 +2328,8 @@ fn waypoint_rank_offset_x_decollision_table() {
 
 #[test]
 fn no_exclusive_waypoint_kind_ever_steps_aside() {
-    use super::anchors::waypoint_rank_offset_x;
     use crate::layout::{WaypointKind, furniture_def};
+    use crate::sim::anchors::waypoint_rank_offset_x;
     let mut exclusive = 0;
     let (mut saw_booth, mut saw_shareable_steps) = (false, false);
     for &kind in WaypointKind::ALL {
@@ -2406,24 +2408,8 @@ fn kind_derivation_reproduces_the_string_parse_tint_for_representative_displays(
 }
 
 #[test]
-fn tool_glow_for_kind_is_the_shared_kind_to_hue_map() {
-    use pixtuoid_core::state::ToolKind;
+fn tool_glow_tint_is_none_unless_active() {
     let glow = &crate::theme::NORMAL.tool_glow;
-    assert_eq!(palette::tool_glow_for_kind(ToolKind::Edit, glow), glow.edit);
-    assert_eq!(palette::tool_glow_for_kind(ToolKind::Read, glow), glow.read);
-    assert_eq!(palette::tool_glow_for_kind(ToolKind::Bash, glow), glow.bash);
-    assert_eq!(
-        palette::tool_glow_for_kind(ToolKind::Task, glow),
-        glow.agent
-    );
-    assert_eq!(
-        palette::tool_glow_for_kind(ToolKind::Search, glow),
-        glow.grep
-    );
-    assert_eq!(
-        palette::tool_glow_for_kind(ToolKind::Other, glow),
-        glow.default
-    );
     let id = pixtuoid_core::AgentId::from_transcript_path("/g.jsonl");
     let edit = make_slot(
         id,
@@ -2564,8 +2550,13 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
             &mut FrameCache::new(),
             now,
         );
-        let fx =
-            sim::character_effects(slot, anchor, drawn.map(|s| s.w), sim::Cues::default(), now);
+        let fx = crate::sim::character_effects(
+            slot,
+            anchor,
+            drawn.map(|s| s.w),
+            crate::sim::Cues::default(),
+            now,
+        );
         super::effects::paint_effects(
             &mut buf,
             &fx,
@@ -2617,14 +2608,14 @@ fn a_top_burning_placement_carries_its_crown_on_its_anchor() {
     // A breathing instant, where the post-breath anchor is off the fit.
     let now = (0..u64::from(u16::MAX))
         .map(|ms| now0 + std::time::Duration::from_millis(ms))
-        .find(|&t| super::anchors::with_breath(Point { x: 0, y: 1 }, id, t).y == 0)
+        .find(|&t| crate::sim::anchors::with_breath(Point { x: 0, y: 1 }, id, t).y == 0)
         .expect("the breath rises within a cycle");
     let slot = scene.agents.get_mut(&id).expect("the rig's agent");
     slot.model = Some("claude-fable-5".into());
     let crowns = |scene: &SceneState| {
         let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
         let poses = HashMap::from([(id, Some(Pose::SeatedThinking))]);
-        let (placements, ..) = sim::resolve_characters(
+        let (placements, ..) = crate::sim::resolve_characters(
             &agents,
             &poses,
             &layout,
@@ -2647,7 +2638,7 @@ fn a_top_burning_placement_carries_its_crown_on_its_anchor() {
     let slot = scene.agents.get_mut(&id).expect("the rig's agent");
     slot.effort = Some(EffortObservation::new("ultra".into(), now));
     let (p, crowns) = crowns(&scene);
-    let w = sim::pack_frame_size(&pack, p.anim_name, p.frame_idx)
+    let w = crate::sim::pack_frame_size(&pack, p.anim_name, p.frame_idx)
         .expect("the pack draws the pose")
         .w;
     assert_eq!(
@@ -2927,63 +2918,6 @@ fn furniture_corner_clip_does_not_panic() {
     paint_side_table(&mut buf, 1, 1, theme);
     super::furniture::paint_kitchen_island(&mut buf, 1, 1, theme);
     // No panic reaching here is the assertion (negative coords are clipped).
-}
-
-#[test]
-fn force_weather_sets_known_clears_none_and_errs_on_unknown() {
-    // `t`'s natural (un-forced) weather is NOT Storm, so dropping the override
-    // shows up in the observed weather, not just in the Ok/Err return. The
-    // override is a thread-local Cell — every assert must run on one thread.
-    let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
-    force_weather(None).expect("clear is Ok");
-    let natural = crate::sky::Sky::at(t).weather();
-
-    assert!(force_weather(Some("storm")).is_ok(), "known name → Ok");
-    assert_eq!(
-        crate::sky::Sky::at(t).weather(),
-        crate::sky::Weather::Storm,
-        "force_weather(storm) must drive the sky to Storm",
-    );
-    assert_eq!(
-        crate::sky::Sky::at(t + std::time::Duration::from_secs(987_654)).weather(),
-        crate::sky::Weather::Storm,
-        "the override must ignore the clock",
-    );
-
-    assert!(
-        force_weather(Some("STORM")).is_ok(),
-        "case-insensitive → Ok"
-    );
-    assert_eq!(crate::sky::Sky::at(t).weather(), crate::sky::Weather::Storm);
-
-    assert!(force_weather(Some("snow")).is_ok());
-    assert_eq!(
-        crate::sky::Sky::at(t).weather(),
-        crate::sky::Weather::Snow,
-        "a second known name must re-set the override",
-    );
-
-    let err = force_weather(Some("not-a-weather")).expect_err("unknown → Err");
-    assert_eq!(
-        err,
-        weather_names(),
-        "Err payload must be the canonical weather names",
-    );
-    assert_eq!(
-        crate::sky::Sky::at(t).weather(),
-        crate::sky::Weather::Snow,
-        "an unknown name must NOT touch the override",
-    );
-
-    assert!(force_weather(None).is_ok(), "None → Ok");
-    assert_eq!(
-        crate::sky::Sky::at(t).weather(),
-        natural,
-        "None must restore the clock-based selection",
-    );
-
-    // Reset so the override can't leak into sibling time-based weather tests.
-    force_weather(None).expect("reset");
 }
 
 #[test]
@@ -3446,7 +3380,7 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
     };
     let fresh = desks_at(now0);
     assert_eq!(fresh.len(), layout.home_desks.len());
-    assert_eq!(fresh[desk].cup, Some(sim::Cup::Steaming));
+    assert_eq!(fresh[desk].cup, Some(crate::sim::Cup::Steaming));
     assert_eq!(fresh[desk].token_tier, 1);
     assert_eq!(
         fresh[desk].sheet_fall,
@@ -3456,14 +3390,14 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
     for (i, props) in fresh.iter().enumerate().filter(|&(i, _)| i != desk) {
         assert_eq!(
             *props,
-            sim::DeskProps::default(),
+            crate::sim::DeskProps::default(),
             "desk {i} has no occupant"
         );
     }
     let cold = desks_at(now0 + Duration::from_secs(crate::floor::CoffeeState::STEAM_WINDOW_SECS));
     assert_eq!(
         cold[desk].cup,
-        Some(sim::Cup::Cold),
+        Some(crate::sim::Cup::Cold),
         "the cup stays after it stops steaming"
     );
     assert_eq!(cold[desk].sheet_fall, None, "and the sheet has landed");
@@ -3503,7 +3437,7 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         petting: None,
     })
     .expect("the cat roams");
-    let hearts = |p: &sim::PetPlacement| -> Vec<u64> {
+    let hearts = |p: &crate::sim::PetPlacement| -> Vec<u64> {
         p.effects
             .iter()
             .filter(|e| e.kind == crate::effects::EffectKind::PetHeart)
@@ -3545,7 +3479,7 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         petting: Some(&in_corner),
     })
     .expect("the petted cat");
-    let size = sim::frame_size(&pack, cornered.anim_name, 0, sim::PET_FALLBACK);
+    let size = crate::sim::frame_size(&pack, cornered.anim_name, 0, crate::sim::PET_FALLBACK);
     assert_eq!(
         cornered.pos,
         Point {
@@ -3609,7 +3543,7 @@ fn a_mascots_state_reaches_its_hover_and_its_sprite() {
         (DaemonState::Degraded, false, true),
         (DaemonState::Down, false, false),
     ] {
-        let mascot = sim::MascotPlacement {
+        let mascot = crate::sim::MascotPlacement {
             pos: Point { x: 60, y: 60 },
             size: Size { w: 14, h: 12 },
             anim_name: def.walk,
@@ -3739,7 +3673,7 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
             layout: &layout,
             pack: &pack,
             now,
-            sky: crate::sky::Sky::at(now),
+            sky: crate::sky::Sky::clock(now),
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -3990,7 +3924,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             layout: &layout,
             pack: &pack,
             now,
-            sky: crate::sky::Sky::at(now),
+            sky: crate::sky::Sky::clock(now),
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -4118,7 +4052,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 layout: &layout,
                 pack: &pack,
                 now,
-                sky: crate::sky::Sky::at(now),
+                sky: crate::sky::Sky::clock(now),
                 buf,
                 cache: &mut cache,
                 base_fill: &mut base_fill,
@@ -4898,31 +4832,26 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
 }
 
 #[test]
-fn precipitation_level_maps_audible_rain_and_honors_the_override() {
-    // force_weather's override is thread-local — reset at the end so it can't
-    // leak into the sibling time-based weather tests.
+fn precipitation_level_maps_audible_rain_under_its_policy() {
+    use crate::sky::Weather;
     let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
-
-    force_weather(Some("storm")).expect("storm is known");
-    assert_eq!(precipitation_level(t), 1.0, "storm is full precipitation");
-
-    force_weather(Some("rain")).expect("rain is known");
-    let rain = precipitation_level(t);
+    let level = |w| precipitation_level(t, WeatherPolicy::Forced(w));
+    assert_eq!(level(Weather::Storm), 1.0, "storm is full precipitation");
+    let rain = level(Weather::Rain);
     assert!(
         rain > 0.0 && rain < 1.0,
         "rain sits strictly between clear and storm, got {rain}"
     );
-
-    for quiet in ["clear", "snow", "fog", "overcast", "windy", "smog"] {
-        force_weather(Some(quiet)).expect("known name");
-        assert_eq!(
-            precipitation_level(t),
-            0.0,
-            "{quiet} must be silent precipitation"
-        );
+    for quiet in [
+        Weather::Clear,
+        Weather::Snow,
+        Weather::Fog,
+        Weather::Overcast,
+        Weather::Windy,
+        Weather::Smog,
+    ] {
+        assert_eq!(level(quiet), 0.0, "{quiet:?} must be silent precipitation");
     }
-
-    force_weather(None).expect("restore");
 }
 
 #[test]
@@ -5244,7 +5173,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 layout: &layout,
                 pack: &pack,
                 now,
-                sky: crate::sky::Sky::at(now),
+                sky: crate::sky::Sky::clock(now),
                 buf: &mut buf,
                 cache: &mut cache,
                 base_fill: &mut base_fill,
@@ -5299,7 +5228,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
 #[test]
 fn keep_sprite_on_canvas_bounds_differ_by_anchor_convention() {
     use crate::layout::{Anchor, Size};
-    use crate::pixel_painter::anchors::keep_sprite_on_canvas;
+    use crate::sim::anchors::keep_sprite_on_canvas;
     let buf = Size { w: 100, h: 80 };
     let size = Size { w: 8, h: 12 };
     let at = |a, x, y| keep_sprite_on_canvas(a, Point { x, y }, size, buf);
@@ -5474,7 +5403,7 @@ fn paint_drawn(
             layout,
             pack,
             now,
-            sky: crate::sky::Sky::at(now),
+            sky: crate::sky::Sky::clock(now),
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -5598,7 +5527,7 @@ fn only_a_placement_that_breathes_takes_the_breath() {
     let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
     let now = (0..u64::from(u16::MAX))
         .map(|ms| now0 + std::time::Duration::from_millis(ms))
-        .find(|&t| super::anchors::with_breath(Point { x: 0, y: 1 }, id, t).y == 0)
+        .find(|&t| crate::sim::anchors::with_breath(Point { x: 0, y: 1 }, id, t).y == 0)
         .expect("the breath rises within a cycle");
     let mid = Point {
         x: layout.buf_w / 2,
@@ -5606,7 +5535,7 @@ fn only_a_placement_that_breathes_takes_the_breath() {
     };
     let place = |pose| {
         let poses = HashMap::from([(id, Some(pose))]);
-        let (placements, ..) = sim::resolve_characters(
+        let (placements, ..) = crate::sim::resolve_characters(
             &agents,
             &poses,
             &layout,
@@ -5643,7 +5572,7 @@ fn only_a_placement_that_breathes_takes_the_breath() {
 /// Co-located visitors step aside, and each one's badge goes with them.
 #[test]
 fn co_located_visitors_badges_step_aside_with_their_sprites() {
-    use super::anchors::waypoint_rank_offset_x;
+    use crate::sim::anchors::waypoint_rank_offset_x;
     let (mut scene, layout, _, now, pack) = sim_rig();
     scene.agents.clear();
     let (wp, kind) = layout
@@ -5668,7 +5597,7 @@ fn co_located_visitors_badges_step_aside_with_their_sprites() {
         .keys()
         .map(|&id| (id, Some(crate::pose::Pose::AtWaypoint { wp, kind })))
         .collect();
-    (frame.characters, ..) = sim::resolve_characters(
+    (frame.characters, ..) = crate::sim::resolve_characters(
         &frame.agents,
         &poses,
         &layout,
@@ -5800,8 +5729,12 @@ fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
             })
             .map(|(_, &d)| {
                 (
-                    super::anchors::seated_anchor_facing(d, chair_w, crate::layout::Facing::North)
-                        .x,
+                    crate::sim::anchors::seated_anchor_facing(
+                        d,
+                        chair_w,
+                        crate::layout::Facing::North,
+                    )
+                    .x,
                     d.y + 6,
                 )
             })

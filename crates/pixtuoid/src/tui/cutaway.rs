@@ -20,8 +20,8 @@ use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_scene::cutaway::canvas::{CanvasFrame, CutawayCanvas, Dirty};
+use pixtuoid_scene::cutaway::paint::CutawayCache;
 use pixtuoid_scene::floor::{FloorMeta, ObservedFloor};
-use pixtuoid_scene::frame_cache::FrameCache;
 use pixtuoid_scene::layout::{Bounds, Size};
 use pixtuoid_scene::theme::Theme;
 use ratatui::buffer::{Buffer, Cell, CellDiffOption};
@@ -30,7 +30,17 @@ use ratatui::layout::{Position, Rect};
 use crate::graphics::tiles::{Changed, Tile, Tiles};
 use crate::graphics::{CellSize, Fit, ImageProtocol, iterm2, kitty, sixel};
 use crate::tui::geometry::SceneGeometry;
+use crate::tui::geometry::slide_offsets;
 use crate::tui::renderer::set_half_block;
+
+/// A floor slide's two floors, each with its meta, at progress `t` of a
+/// [`FloorTransition`](pixtuoid_scene::floor::FloorTransition).
+pub(crate) struct Slide<'a> {
+    pub(crate) leaving: (&'a ObservedFloor, FloorMeta),
+    pub(crate) arriving: (&'a ObservedFloor, FloorMeta),
+    pub(crate) t: f32,
+    pub(crate) going_down: bool,
+}
 
 /// Where the transmits go: the terminal ratatui's backend also writes to.
 pub(crate) type Sink = Box<dyn Write + Send>;
@@ -42,7 +52,9 @@ const SENTINEL: &str = "\u{F8FF}";
 /// The cutaway's canvas, its tiles, and what of them the terminal holds.
 pub(crate) struct TileCutaway {
     canvas: CutawayCanvas,
-    cache: FrameCache,
+    /// The floor arriving in a slide, while `canvas` paints the one leaving.
+    arriving: CutawayCanvas,
+    cache: CutawayCache,
     cell: CellSize,
     protocol: ImageProtocol,
     tmux: bool,
@@ -52,7 +64,8 @@ pub(crate) struct TileCutaway {
     /// The scene `fit` was last fitted to.
     scene: Rect,
     tiles: Tiles,
-    /// The canvas's last frame, which the tiles are cut from when sent.
+    /// What the tiles are cut from when sent: the canvas's last frame, or a
+    /// slide's two composed.
     image: RgbBuffer,
     /// The image's top-left cell.
     origin: Position,
@@ -81,8 +94,9 @@ impl TileCutaway {
         out: Sink,
     ) -> Self {
         Self {
-            canvas: CutawayCanvas::new(pack),
-            cache: FrameCache::new(),
+            canvas: CutawayCanvas::new(Arc::clone(&pack)),
+            arriving: CutawayCanvas::new(pack),
+            cache: CutawayCache::default(),
             cell,
             protocol,
             tmux,
@@ -134,8 +148,58 @@ impl TileCutaway {
         if dirty != Dirty::Rects(Vec::new()) {
             self.image.clone_from(buf);
         }
+        self.stage(&dirty, now, origin);
+    }
+
+    /// Paint both floors of `slide`, composed as it places them, and queue
+    /// the tiles that changed as [`Self::paint`] does.
+    pub(crate) fn paint_slide(
+        &mut self,
+        slide: Slide<'_>,
+        theme: &'static Theme,
+        now: SystemTime,
+        origin: Position,
+    ) {
+        let scale = self.fit.render_scale();
+        let leaving = self.canvas.frame(
+            slide.leaving.0,
+            theme,
+            scale,
+            slide.leaving.1,
+            now,
+            &mut self.cache,
+        );
+        let arriving = self.arriving.frame(
+            slide.arriving.0,
+            theme,
+            scale,
+            slide.arriving.1,
+            now,
+            &mut self.cache,
+        );
+        let (w, h) = (leaving.buf.width(), leaving.buf.height());
+        let offsets = slide_offsets(slide.t, slide.going_down, f32::from(h));
+        self.image = RgbBuffer::filled(w, h, theme.surface.bg_fallback);
+        for (buf, dy) in [(leaving.buf, offsets.0), (arriving.buf, offsets.1)] {
+            for y in 0..h {
+                let src = i32::from(y) - dy;
+                if let Ok(src) = u16::try_from(src)
+                    && src < buf.height()
+                {
+                    for x in 0..w.min(buf.width()) {
+                        self.image.put(x, y, buf.get(x, src));
+                    }
+                }
+            }
+        }
+        self.stage(&Dirty::All, now, origin);
+    }
+
+    /// Queue the tiles of [`Self::image`] that differ from what was sent,
+    /// among those `dirty` reaches, once the cadence allows.
+    fn stage(&mut self, dirty: &Dirty, now: SystemTime, origin: Position) {
         self.origin = origin;
-        let changed = self.tiles.changed(&self.image, &dirty);
+        let changed = self.tiles.changed(&self.image, dirty);
         let due = self.sent_at.is_none_or(|at| {
             now.duration_since(at)
                 .map_or(true, |since| since >= self.protocol.cadence())
@@ -323,7 +387,7 @@ impl TileCutaway {
     /// Drop the recolored sprites, as a theme change must
     /// ([`TuiRenderer::set_theme`](crate::tui::tui_renderer::TuiRenderer::set_theme)).
     pub(crate) fn reset_cache(&mut self) {
-        self.cache = FrameCache::new();
+        self.cache = CutawayCache::default();
     }
 }
 

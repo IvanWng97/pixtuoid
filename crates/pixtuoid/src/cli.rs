@@ -78,8 +78,6 @@ pub enum Cmd {
         /// name uses that one whatever the terminal answers. Overrides the
         /// `graphics` config key; the default is `off`, which never queries
         /// the terminal. `pixtuoid doctor` shows what this terminal supports.
-        /// The office still draws classic half-blocks whatever this resolves
-        /// to: the cutaway is not yet painted in the terminal.
         #[arg(long, value_enum)]
         graphics: Option<crate::GraphicsMode>,
     },

@@ -58,7 +58,7 @@ The user is the final judge of "does it look like a fridge / coffee machine / et
 
 `examples/snapshot` defaults to its `COLS`×`ROWS` cells. Several layouts (pantry, corridor appliances) have conditional variants based on room dimensions. Corridor items (vending machine, printer) only appear when the cubicle aisle clears `VENDING_MIN_AISLE_*` / `PRINTER_MIN_AISLE_*` (`layout/compute.rs`). The default size clears every gate — don't shrink it while iterating.
 
-Pantry-specific threshold: the large `pantry` counter needs the left column to fit `PANTRY_COUNTER_LARGE_W` plus margin (the `pantry_counter_size` pick in `layout/compute.rs`); below that, `pantry_small.sprite` is used (`pixel_painter::pantry_counter_anim`).
+Pantry-specific threshold: the large `pantry` counter needs the left column to fit `PANTRY_COUNTER_LARGE_W` plus margin (the `pantry_counter_size` pick in `layout/compute.rs`); below that, `pantry_small.sprite` is used (`layout::pantry_counter_anim`).
 
 ### 3. Resolution budget
 
