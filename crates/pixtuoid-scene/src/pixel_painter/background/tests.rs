@@ -920,13 +920,11 @@ fn lightning_flash_matches_the_per_pixel_blend_reference() {
     }
 }
 
-/// Light through a window lands across the room from the sun. The disc
-/// (`Disc::of`), the wall spot (`paint_sun_spot`) and the spill
-/// (`Light::Spill`) each map the one azimuth to a side on their own,
-/// so this is the only check that sees them disagree, read off the pixels each
-/// paints.
+/// The spill leans away from the sun. The disc (`Disc::of`) and the spill
+/// (`Light::Spill`) each map the one azimuth to a side on their own, so this is
+/// the only check that sees them disagree, read off the pixels each paints.
 #[test]
-fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
+fn the_spill_leans_away_from_the_disc() {
     const BUF_W: u16 = 192;
     const BUF_H: u16 = 80;
     const TOP_WALL_H: u16 = 30;
@@ -936,7 +934,6 @@ fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
         b: 24,
     };
     let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let layout = crate::layout::Layout::compute(BUF_W, BUF_H, Some(4)).expect("layout fits");
     let mid = f32::from(BUF_W) / 2.0;
     // The mean x of the pixels a paint changed in rows `ys`, or `None` if none.
     let lit_x = |buf: &RgbBuffer, ys: std::ops::Range<u16>| {
@@ -954,15 +951,6 @@ fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
         let (sky, look) = (&moment.sky, &moment.look);
         let disc = crate::celestial::Disc::of(sky, BUF_W, TOP_WALL_H).expect("a clear low sun");
         let disc_side = (disc.cx - mid).signum();
-
-        let mut buf = RgbBuffer::filled(BUF_W, BUF_H, FILL);
-        crate::pixel_painter::ambient::paint_sun_spot(&mut buf, theme, &layout, &moment);
-        let spot_x = lit_x(&buf, 0..BUF_H).expect("a low sun paints a wall spot");
-        assert_eq!(
-            (spot_x - mid).signum(),
-            -disc_side,
-            "wall spot vs disc at {hour}:00"
-        );
 
         // One centred window, so the lean can run either way unclipped.
         let mut buf = RgbBuffer::filled(BUF_W, BUF_H, FILL);

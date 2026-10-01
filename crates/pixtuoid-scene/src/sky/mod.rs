@@ -191,7 +191,7 @@ pub(crate) enum Body {
 
 /// The physical sky emitter — sun by day, moon by night. Luminance + warmth
 /// follow altitude (low body = longer air path = dimmer + warmer). The ONE
-/// source the interior light, the disc, the wall spot and the spill derive from.
+/// source the interior light, the disc and the spill derive from.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Emitter {
     pub(crate) body: Body,

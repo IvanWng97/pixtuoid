@@ -36,8 +36,6 @@ pub(crate) struct Look {
     /// How brightly the star field shows, 0..=1; zero wherever it would be too
     /// faint to read.
     pub(crate) star_strength: f32,
-    /// Where the sun lands on the office walls, while it is up.
-    pub(crate) sun_spot: Option<SunSpot>,
     /// The sun's direct beam through the weather ([`Sky::beam`]), 0..=1.
     pub(crate) beam: f32,
 }
@@ -115,7 +113,7 @@ impl Look {
         let glass_b = night_b.mix(day_b, exterior).mix(twilight_b, warm * 0.5);
 
         // Leans away from the disc, which the painters place off this same
-        // azimuth; `the_wall_spot_and_the_spill_fall_away_from_the_disc` pins the
+        // azimuth; `the_spill_leans_away_from_the_disc` pins the
         // sign.
         let (sunlight, spill_slant) = match e.body {
             Body::Sun => (interior, (0.5 - e.azimuth) * 2.0 * SPILL_SLANT_MAX),
@@ -155,7 +153,6 @@ impl Look {
             glass_veil: glass_veil(weather).map(|(color, alpha)| (lit(color, veil), alpha)),
             golden_hour: golden_hour_blaze(e, &sky.transmission()),
             star_strength: ((star_strength - STAR_MIN) / (1.0 - STAR_MIN)).max(0.0),
-            sun_spot: sun_on_wall(sky),
             beam: sky.beam(),
         }
     }
@@ -169,55 +166,6 @@ fn lit(color: Rgb, lum: f32) -> Rgb {
         g: scale(color.g),
         b: scale(color.b),
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WallSide {
-    East,
-    North,
-    West,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct SunSpot {
-    pub(crate) wall: WallSide,
-    /// 0.0..=1.0 along the wall (left→right for North, top→bottom for East/West).
-    pub(crate) along: f32,
-    /// 0.0=dim, 1.0=brightest, at the sun's apex.
-    pub(crate) intensity: f32,
-    /// 0.0=neutral white (apex), 1.0=very warm gold (sunrise/sunset).
-    pub(crate) warmth: f32,
-}
-
-/// The azimuths where [`sun_on_wall`]'s spot hands off east wall → window
-/// wall → west wall.
-const AZ_EAST_MAX: f32 = 0.30;
-const AZ_WEST_MIN: f32 = 0.70;
-
-fn sun_on_wall(sky: &Sky) -> Option<SunSpot> {
-    let e = sky.emitter();
-    if !matches!(e.body, Body::Sun) {
-        return None;
-    }
-    // The SAME azimuth that places the disc and leans the floor spill;
-    // `the_wall_spot_and_the_spill_fall_away_from_the_disc` pins their sides.
-    let az = e.azimuth;
-    let (wall, along) = if az < AZ_EAST_MAX {
-        (WallSide::East, az / AZ_EAST_MAX)
-    } else if az < AZ_WEST_MIN {
-        (
-            WallSide::North,
-            (az - AZ_EAST_MAX) / (AZ_WEST_MIN - AZ_EAST_MAX),
-        )
-    } else {
-        (WallSide::West, (az - AZ_WEST_MIN) / (1.0 - AZ_WEST_MIN))
-    };
-    Some(SunSpot {
-        wall,
-        along,
-        intensity: e.altitude,
-        warmth: e.warmth,
-    })
 }
 
 /// The cast the current weather lends the floor.
@@ -410,7 +358,6 @@ mod tests {
                 ("golden hour", l.golden_hour),
                 ("stars", l.star_strength),
                 ("beam", l.beam),
-                ("sun spot", l.sun_spot.map_or(0.0, |s| s.intensity)),
             ]
         };
         let channels = |l: &Look| {
@@ -577,35 +524,5 @@ mod tests {
             lum(midnight) >= lum(unlit) * NIGHT_VEIL_FLOOR - 1.5,
             "{midnight:?} fell below the night floor of {unlit:?}"
         );
-    }
-
-    #[test]
-    fn sun_on_wall_east_at_morning() {
-        let s = sun_on_wall(&Sky::at(at_hour_min(7, 0))).expect("sun should be up at 07:00");
-        assert_eq!(s.wall, WallSide::East);
-        assert!(s.warmth > 0.5, "morning sun should be warm: {}", s.warmth);
-    }
-
-    #[test]
-    fn sun_on_wall_overhead_at_noon() {
-        let s = sun_on_wall(&Sky::at(at_hour_min(12, 0))).expect("sun should be up at 12:00");
-        assert_eq!(s.wall, WallSide::North);
-        assert!(
-            s.intensity > 0.85,
-            "noon sun should be intense: {}",
-            s.intensity
-        );
-    }
-
-    #[test]
-    fn sun_on_wall_west_at_evening() {
-        let s = sun_on_wall(&Sky::at(at_hour_min(18, 0))).expect("sun should be up at 18:00");
-        assert_eq!(s.wall, WallSide::West);
-        assert!(s.warmth > 0.55, "evening sun should be warm: {}", s.warmth);
-    }
-
-    #[test]
-    fn sun_on_wall_none_at_midnight() {
-        assert!(sun_on_wall(&Sky::at(at_hour_min(0, 0))).is_none());
     }
 }

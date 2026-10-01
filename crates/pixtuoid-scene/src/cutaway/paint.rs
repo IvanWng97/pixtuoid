@@ -4615,42 +4615,6 @@ S B B B B B B S
         assert_eq!(glass(noon, &mut painted), b, "one moment, one fingerprint");
     }
 
-    /// The cutaway takes no wall spot: a clear morning's lights are the same
-    /// with the sun on a side wall as without.
-    #[test]
-    fn the_cutaway_lights_no_wall_spot() {
-        let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
-        let frame = frames.last().expect("a seated frame");
-        let office = Office {
-            layout: &layout,
-            pack: &pack,
-            theme,
-            scale: RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
-        };
-        let now = crate::localclock::at_hour(7);
-        let lit = Moment::resolve(
-            crate::sky::Sky::at_with(now, crate::sky::Weather::Clear),
-            theme,
-            0.0,
-            now,
-        );
-        assert!(
-            crate::lighting::wall_spot(&layout, &lit.look).is_some(),
-            "a clear morning puts the sun on a side wall"
-        );
-        let mut unlit = Moment::resolve(lit.sky, theme, 0.0, now);
-        unlit.look.sun_spot = None;
-        let lights = |m: &Moment| {
-            build_list(frame, office, m, 0)
-                .lights()
-                .iter()
-                .map(|l| (l.span, l.fingerprint))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(lights(&lit), lights(&unlit));
-    }
-
     /// `frame`'s list at local `hour`, under a clear sky.
     fn list_at<'a>(frame: &SimFrame, office: Office<'a>, hour: u32) -> DrawList<'a> {
         let now = crate::localclock::at_hour(hour);

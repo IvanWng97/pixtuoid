@@ -8,7 +8,7 @@ use pixtuoid_core::sprite::Rgb;
 
 use crate::anim::epoch_ms;
 use crate::atmosphere::Moment;
-use crate::composite::{WHITE, blend, blend_rgb};
+use crate::composite::{blend, blend_rgb};
 use crate::dither::FALLOFF_TONES;
 use crate::layout::window_run;
 use crate::sky::{Body, Sky};
@@ -209,20 +209,6 @@ impl Blaze {
             b: blend(cur.b, BLAZE.b, b),
         }
     }
-}
-
-/// How far a sun at its apex pales the wall spot from the theme's warm spill
-/// toward white.
-const WALL_SPOT_PALE: f32 = 0.6;
-
-/// The sun's spot on a side wall at `warmth`: the theme's warm spill, paling
-/// toward white as the sun climbs.
-pub(crate) fn wall_spot_colour(warmth: f32, theme: &Theme) -> Rgb {
-    blend_rgb(
-        theme.lighting.sun_spill,
-        WHITE,
-        (1.0 - warmth) * WALL_SPOT_PALE,
-    )
 }
 
 /// The window sky one frame shows: its disc and stars, and every tone they

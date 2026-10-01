@@ -243,7 +243,7 @@ impl LightView {
 /// An emitter kind's place in the light order ([`LightView::rank`]).
 fn rank_of(kind: EmitterKind) -> u8 {
     match kind {
-        EmitterKind::WindowSpill | EmitterKind::WallSpot => 0,
+        EmitterKind::WindowSpill => 0,
         EmitterKind::FloorLamp => 1,
         EmitterKind::DeskLamp => 2,
         EmitterKind::MonitorHalo(_) => 3,
@@ -263,8 +263,6 @@ pub(crate) fn tint_of(
         EmitterKind::FloorLamp => Some(lighting.floor_lamp_halo),
         EmitterKind::DeskLamp => Some(lighting.desk_lamp),
         EmitterKind::WindowSpill => Some(lighting.sun_spill),
-        // The cutaway has no side wall for the sun's spot to land on.
-        EmitterKind::WallSpot => None,
         EmitterKind::NeonGlow => Some(crate::pixel_painter::neon_look(neon, theme).halo),
         // Dark themes only, as in the classic's
         // `pixel_painter::ambient::paint_ceiling_halos`: on a light one it reads as grime.
