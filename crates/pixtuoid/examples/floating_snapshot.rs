@@ -3,7 +3,7 @@
 //! overlay painters the live window uses, so the PNG is byte-faithful to what it blits.
 //!
 //! Usage:
-//!   cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N]
+//! `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N]`
 //! e.g. `... -- /tmp/floating.png 720x480 --agents 6` (Retina default), `... -- /tmp/f.png 360x240`.
 
 use std::path::PathBuf;
@@ -12,7 +12,9 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
 use image::{Rgb as ImgRgb, RgbImage};
-use pixtuoid::floating::offscreen::{OfficeRenderer, XrgbSurface, paint_labels_into_surface};
+use pixtuoid::floating::offscreen::{
+    OfficeRenderer, XrgbSurface, paint_labels_into_surface, window_buffer_geometry,
+};
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
 use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FrameInputs, PetInputs};
@@ -101,7 +103,11 @@ fn main() -> Result<()> {
         anyhow!("usage: floating_snapshot <out.png> [WxH] [--theme <name>] [--agents N]")
     })?;
 
-    let mut size = (720u16, 480u16); // Retina default (360x240 logical @2x)
+    const RETINA_SCALE_FACTOR: u32 = 2;
+    let mut size = (
+        u16::try_from(pixtuoid::config::FLOATING_DEFAULT_W * RETINA_SCALE_FACTOR)?,
+        u16::try_from(pixtuoid::config::FLOATING_DEFAULT_H * RETINA_SCALE_FACTOR)?,
+    );
     let mut theme_name = "normal".to_string();
     let mut n_agents = 0usize;
     let rest: Vec<String> = args.collect();
@@ -137,20 +143,14 @@ fn main() -> Result<()> {
 
     let theme =
         theme_by_name(&theme_name).ok_or_else(|| anyhow!("unknown --theme {theme_name:?}"))?;
-    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-        pixtuoid_scene::embedded_pack::PackSource::Bundled,
-    )?;
+    let pack = pixtuoid_scene::embedded_pack::load_bundled_pack()?;
     let now = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
     let mut scene = SceneState::uniform(64);
     populate_demo_agents(&mut scene, now, n_agents);
     let mut renderer = OfficeRenderer::new();
-    // Mirror floating::window: render at window / `office_scale`, then the same surface
-    // upscale and overlays.
     let (win_w, win_h) = (size.0 as u32, size.1 as u32);
-    let scale = pixtuoid::floating::offscreen::office_scale(win_h); // shared with the live window
-    let ow = (win_w / scale).max(1).min(u16::MAX as u32) as u16;
-    let oh = (win_h / scale).max(1).min(u16::MAX as u32) as u16;
+    let (scale, ow, oh) = window_buffer_geometry(winit::dpi::PhysicalSize::new(win_w, win_h));
     let buf = renderer.render(FrameInputs {
         world: FloorInputs {
             scene: &scene,

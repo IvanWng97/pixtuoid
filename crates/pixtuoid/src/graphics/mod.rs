@@ -367,10 +367,8 @@ mod tests {
 
     #[test]
     fn bundled_is_the_embedded_packs_densities() {
-        let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-            pixtuoid_scene::embedded_pack::PackSource::Bundled,
-        )
-        .expect("the embedded pack loads");
+        let pack =
+            pixtuoid_scene::embedded_pack::load_bundled_pack().expect("the embedded pack loads");
         assert_eq!(pack.density_variants(), BUNDLED);
     }
 

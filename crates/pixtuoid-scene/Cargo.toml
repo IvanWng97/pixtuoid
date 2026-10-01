@@ -22,8 +22,8 @@ workspace = true
 
 [features]
 default     = ["native", "density-art"]
-# Without it the render engine builds for wasm32 (no tokio/notify): the
-# WebAssembly office hero.
+# Without it the render engine builds for wasm32 (no tokio/notify, no pack
+# read from disk): the WebAssembly office hero.
 native      = ["pixtuoid-core/native"]
 # The bundled `@Nx` art and hair dressing, which only a render scale above
 # `RenderScale::ONE` reaches (`densest_frame`, `dress_for`); the wasm hero

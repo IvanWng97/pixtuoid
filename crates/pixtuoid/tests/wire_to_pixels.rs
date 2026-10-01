@@ -14,7 +14,7 @@ use pixtuoid_core::SceneState;
 use pixtuoid_core::harness::{DRIVEN_DESKS, Drive, Reach};
 use pixtuoid_core::source::daemon::apply_presence;
 use pixtuoid_core::source::registry;
-use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
+use pixtuoid_scene::embedded_pack::load_bundled_pack;
 use pixtuoid_scene::theme::NORMAL;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -64,7 +64,7 @@ fn settled_pixels(scene: &SceneState, cols: u16, rows: u16, now: SystemTime) -> 
     // would no longer be purely the agent's paint. Don't raise past ~150 frames.
     const SETTLE_FRAMES: usize = 30;
     const FRAME_STEP: Duration = Duration::from_millis(33);
-    let pack = load_sprite_pack(PackSource::Bundled).expect("pack");
+    let pack = load_bundled_pack().expect("pack");
     let mut r = new_renderer(cols, rows);
     let mut t = now;
     for _ in 0..SETTLE_FRAMES {
@@ -578,7 +578,7 @@ fn openclaw_presence_envelope_renders_a_lobster() {
 
     // `entered_at` == `now` means the lobster is mid walk-in; settle at a LATER
     // wall-clock so it's scuttling the floor, well past the elevator.
-    let pack = load_sprite_pack(PackSource::Bundled).expect("pack");
+    let pack = load_bundled_pack().expect("pack");
     let mut r = new_renderer(160, 80);
     let times: Vec<_> = (0..10)
         .map(|k| now + Duration::from_secs(20) + Duration::from_millis(k * 130))
