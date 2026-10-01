@@ -746,9 +746,8 @@ impl SceneLayout {
     }
 
     /// Where meeting room `room` hangs its notice board: on the band, its north
-    /// wall, within one window pane or the plain wall west of the windows, in
-    /// the free spot nearest its centre, on whichever is nearest the room's
-    /// middle — `None` for a room whose north wall is not the band, or with
+    /// wall, within one window pane, in the free spot nearest its centre, on
+    /// whichever pane is nearest the room's middle — `None` for a room whose north wall is not the band, or with
     /// none free.
     pub(crate) fn notice_board_rect(&self, room: usize) -> Option<Bounds> {
         let b = self.meeting_rooms.get(room)?.bounds;
@@ -781,8 +780,8 @@ impl SceneLayout {
         };
         let (lo, hi) = (b.x + 1, (b.x + b.width).saturating_sub(1));
         let middle = b.x + b.width / 2;
-        std::iter::once(NEON_PANEL.x..super::window_run(self.buf_w).start)
-            .chain(self.window_bays().flat_map(WindowBay::panes))
+        self.window_bays()
+            .flat_map(WindowBay::panes)
             .filter_map(|pane| {
                 // The free spot nearest the pane's centre the room's wall allows.
                 let west = pane.start.max(lo);
@@ -796,13 +795,14 @@ impl SceneLayout {
             .min_by_key(|board| (board.x + board.width / 2).abs_diff(middle))
     }
 
-    /// The wall clock's top-left: centred on the window post as wide as it
-    /// nearest the wall's middle, or `None` on a wall with no such post.
+    /// The wall clock's top-left: centred on the window post nearest the
+    /// wall's middle that the neon sign leaves clear, or `None` on a wall
+    /// with none.
     pub(crate) fn clock_pos(&self) -> Option<Point> {
         let middle = self.buf_w / 2;
         super::window_posts(self.buf_w)
-            .filter(|post| post.len() >= usize::from(CLOCK.w))
             .map(|post| (post.start + post.end) / 2)
+            .filter(|&centre| centre - CLOCK.w / 2 >= NEON_PANEL.x + NEON_PANEL.width)
             .min_by_key(|centre| centre.abs_diff(middle))
             .map(|centre| Point {
                 x: centre - CLOCK.w / 2,
