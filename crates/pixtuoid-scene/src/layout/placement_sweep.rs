@@ -696,9 +696,7 @@ fn no_route_around_a_wall_corner_cuts_through_it() {
 /// FIRST: `unreachable_walkable_cells` returns empty on a BLOCKED seed, so
 /// without it a sealed threshold passes vacuously.
 fn assert_walkable_connected(w: u16, h: u16, seed: u64, l: &SceneLayout) {
-    let Some(start) = l.door_threshold else {
-        panic!("{w}x{h} seed {seed}: layout has no door threshold");
-    };
+    let start = l.door_threshold;
     assert!(
         l.walkable.is_walkable(start.x, start.y),
         "{w}x{h} seed {seed}: door threshold {start:?} is not walkable"
@@ -724,9 +722,7 @@ fn walkable_is_one_connected_region() {
 /// both SNAP a displaced seed back into the component, so every routing assert
 /// still passes with the spawn north of the floor line — only this one fails.
 fn assert_spawn_stands_on_open_floor(w: u16, h: u16, seed: u64, l: &SceneLayout) {
-    let Some(dt) = l.door_threshold else {
-        panic!("{w}x{h} seed {seed}: layout has no door threshold");
-    };
+    let dt = l.door_threshold;
     assert!(
         dt.y >= l.top_margin,
         "{w}x{h} seed {seed}: spawn {dt:?} sits on the wall apron (rows {}..{}) \
@@ -814,9 +810,7 @@ fn assert_home_desk_approaches_are_routable(w: u16, h: u16, seed: u64, l: &Scene
     // the production floor seeds, and the step-1 `NARROW_BAND` width scan.
     use crate::pathfind::find_path;
     let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
-    let Some(door) = l.door_threshold else {
-        panic!("{w}x{h} seed {seed}: layout has no door threshold");
-    };
+    let door = l.door_threshold;
     for (i, &desk) in l.home_desks.iter().enumerate() {
         let approach = crate::pose::desk_approach_cell(desk, l).unwrap_or_else(|| {
             panic!(
@@ -1615,17 +1609,14 @@ fn each_pass_of_the_decor_bag_is_a_permutation_of_the_roster() {
     );
 }
 
-/// Every pod-decor kind must be able to open a floor — a one-slot floor renders
-/// only whatever the bag deals first, so a kind that never leads is a sprite
-/// that never appears. The rotation this replaced stranded `Tv` exactly that
-/// way on all ten production floors.
+/// Every pod-decor kind must be able to open a floor's deal — a one-slot floor
+/// renders only whatever the bag deals first, so a kind that never leads is a
+/// sprite that never appears there. The rotation this replaced stranded `Tv`
+/// exactly that way on all ten production floors.
 #[test]
 fn every_pod_decor_kind_can_open_a_floor() {
     let mut seen: Vec<crate::layout::PodDecor> = (0..crate::floor::MAX_FLOORS)
-        .filter_map(|f| {
-            SceneLayout::compute_with_seed(192, 80, None, crate::floor::floor_seed(f))
-                .and_then(|l| l.pod_decor.first().map(|d| d.kind))
-        })
+        .map(|f| super::compute::decor_for_slot(crate::floor::floor_seed(f), 0))
         .collect();
     seen.sort_by_key(|k| format!("{k:?}"));
     seen.dedup();

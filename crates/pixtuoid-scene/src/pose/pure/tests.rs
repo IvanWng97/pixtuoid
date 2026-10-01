@@ -392,11 +392,7 @@ fn exit_override_walks_desk_to_door_within_window() {
                 desk_walk_anchor_facing(desk, l.desk_facing_at(desk)),
                 "exit walk starts at desk anchor"
             );
-            assert_eq!(
-                Some(to),
-                l.door_threshold,
-                "exit walk targets the door threshold"
-            );
+            assert_eq!(to, l.door_threshold, "exit walk targets the door threshold");
         }
         other => panic!("expected exit Walking, got {other:?}"),
     }
@@ -417,8 +413,8 @@ fn waypoint_index_is_zero_when_no_waypoints() {
 
 #[test]
 fn entry_window_fall_through_uses_state_driven_pose() {
-    // door_threshold is Some but since_spawn >= ENTRY_ANIMATION_MS, so the
-    // entry override's inner `if` is false and derive falls through.
+    // since_spawn >= ENTRY_ANIMATION_MS, so the entry override's `if` is false
+    // and derive falls through.
     let (mut s, now) = slot(
         ActivityState::Waiting {
             reason: "perm".into(),
@@ -426,10 +422,6 @@ fn entry_window_fall_through_uses_state_driven_pose() {
         ENTRY_ANIMATION_MS + 5_000,
     );
     let l = layout();
-    assert!(
-        l.door_threshold.is_some(),
-        "layout must populate door_threshold"
-    );
     s.created_at = now - Duration::from_millis(ENTRY_ANIMATION_MS + 10_000);
     assert_eq!(derive(&s, now, &l), Some(Pose::SeatedIdle));
 }

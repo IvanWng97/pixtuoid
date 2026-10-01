@@ -236,10 +236,10 @@ pub struct SceneLayout {
     /// individual pieces via the accessors ([`Self::couch_sprite_center`],
     /// [`Self::floor_lamp`], …).
     pub lounge: Option<Lounge>,
-    /// The office entry-door position, or `None` if none fits.
-    pub door: Option<Point>,
+    /// The office entry door's top-left cell, in the window wall's last slot.
+    pub door: Point,
     /// The walkable cell just inside the door — the entry/exit waypoint.
-    pub door_threshold: Option<Point>,
+    pub door_threshold: Point,
     /// Meeting rooms in floor order — the index IS the `room_id` every
     /// waypoint and painter joins on.
     pub meeting_rooms: Vec<MeetingRoom>,
@@ -389,9 +389,8 @@ pub const INTRA_POD_GAP_X: u16 = 12;
 pub const INTRA_POD_GAP_Y: u16 = 6;
 const _: () = assert!((DESK_H + INTRA_POD_GAP_Y).is_multiple_of(2));
 /// Horizontal (E-W) gap between adjacent pod COLUMNS — wide enough to keep the
-/// pod boundary visually distinct AND to host the rolling whiteboard's GROUND
-/// footprint in the aisle. Deliberately > the N-S gap: screens are landscape,
-/// so spread wider horizontally and pack tighter vertically.
+/// pod boundary visually distinct. Deliberately > the N-S gap: screens are
+/// landscape, so spread wider horizontally and pack tighter vertically.
 pub const INTER_POD_AISLE_X: u16 = 20;
 /// Vertical (N-S) gap between adjacent pod ROWS. INTENTIONALLY < the E-W gap
 /// (landscape screens — see `INTER_POD_AISLE_X`). Shrinking it breaks
