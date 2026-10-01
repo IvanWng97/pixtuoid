@@ -354,14 +354,14 @@ pub static TOKYO_NIGHT: Theme = Theme {
             b: 104,
         },
         label_idle: Rgb {
-            r: 65,
-            g: 72,
-            b: 104,
+            r: 150,
+            g: 158,
+            b: 200,
         },
         label_exiting: Rgb {
-            r: 45,
-            g: 48,
-            b: 65,
+            r: 118,
+            g: 125,
+            b: 166,
         },
         tooltip_bg: Rgb {
             r: 18,

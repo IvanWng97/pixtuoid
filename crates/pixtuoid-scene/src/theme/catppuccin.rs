@@ -354,14 +354,14 @@ pub static CATPPUCCIN: Theme = Theme {
             b: 175,
         },
         label_idle: Rgb {
-            r: 108,
-            g: 112,
-            b: 134,
+            r: 147,
+            g: 153,
+            b: 178,
         },
         label_exiting: Rgb {
-            r: 69,
-            g: 71,
-            b: 90,
+            r: 127,
+            g: 132,
+            b: 156,
         },
         tooltip_bg: Rgb {
             r: 24,

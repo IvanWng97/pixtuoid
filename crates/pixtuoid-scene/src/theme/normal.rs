@@ -354,14 +354,14 @@ pub static NORMAL: Theme = Theme {
             b: 50,
         },
         label_idle: Rgb {
-            r: 140,
-            g: 140,
-            b: 140,
+            r: 160,
+            g: 160,
+            b: 160,
         },
         label_exiting: Rgb {
-            r: 80,
-            g: 80,
-            b: 80,
+            r: 130,
+            g: 130,
+            b: 130,
         },
         tooltip_bg: Rgb {
             r: 20,
