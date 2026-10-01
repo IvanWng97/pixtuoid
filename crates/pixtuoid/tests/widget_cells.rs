@@ -2,13 +2,10 @@
 
 mod common;
 
-use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use common::fixture_scene;
 use pixtuoid::tui::renderer::draw_scene;
-use pixtuoid_core::state::{ActivityState, ToolKind};
-use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
 use pixtuoid_scene::embedded_pack::load_bundled_pack;
 use pixtuoid_scene::theme;
 use ratatui::Terminal;
@@ -21,62 +18,6 @@ fn now() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS)
 }
 
-fn fixture_scene(now: SystemTime) -> SceneState {
-    let mut s = SceneState::uniform(12);
-    let age_offset = Duration::from_secs(60);
-    let cases: &[(&str, ActivityState)] = &[
-        (
-            "agent-a",
-            ActivityState::Active {
-                tool_use_id: Some("tu_a".into()),
-                detail: Some("Write".into()),
-                kind: ToolKind::Edit,
-            },
-        ),
-        ("agent-b", ActivityState::Idle),
-        (
-            "agent-c",
-            ActivityState::Waiting {
-                reason: "perm?".into(),
-            },
-        ),
-        ("agent-d", ActivityState::Idle),
-    ];
-    for (i, (key, state)) in cases.iter().enumerate() {
-        let id = AgentId::from_transcript_path(&format!("/demo/{key}.jsonl"));
-        let created_at = now - age_offset;
-        s.agents.insert(
-            id,
-            AgentSlot {
-                agent_id: id,
-                source: Arc::from("claude-code"),
-                session_id: Arc::from(format!("session-{i}").as_str()),
-                cwd: Arc::from(PathBuf::from("/demo").as_path()),
-                label: (*key).into(),
-                state: state.clone(),
-                state_started_at: now,
-                last_event_at: now,
-                created_at,
-                exiting_at: None,
-                pending_idle_at: None,
-
-                desk_index: GlobalDeskIndex(i),
-                floor_idx: 0,
-                tool_call_count: 0,
-                active_ms: 0,
-                unknown_cwd: false,
-                parent_id: None,
-                pid: None,
-                model: None,
-                effort: None,
-                tokens_used: 0,
-                last_usage: None,
-            },
-        );
-    }
-    s
-}
-
 fn render_and_get_buffer(
     now: SystemTime,
     floor_info: Option<pixtuoid::tui::renderer::FloorInfo>,
@@ -87,7 +28,8 @@ fn render_and_get_buffer(
     let backend = TestBackend::new(w, h);
     let mut term = Terminal::new(backend).unwrap();
     let pack = load_bundled_pack().unwrap();
-    make_draw_ctx!(draw_ctx, &scene, &pack, now, floor_info: floor_info);
+    make_draw_ctx!(draw_ctx, &scene, &pack, now);
+    draw_ctx.floor_info = floor_info;
     draw_scene(&mut term, &mut draw_ctx).unwrap();
     let buffer = term.backend().buffer().clone();
     (buffer, w, h)
@@ -120,11 +62,10 @@ fn footer_shows_agent_count() {
 
 #[test]
 fn elevator_indicator_visible() {
-    // Pass floor_info so the elevator door is placed and the indicator paints.
     let (buf, w, h) = render_and_get_buffer(
         now(),
         Some(pixtuoid::tui::renderer::FloorInfo {
-            current: 1,
+            current: 2,
             total_floors: 2,
             total_agents: 0,
         }),
@@ -132,12 +73,12 @@ fn elevator_indicator_visible() {
     let mut found = false;
     for y in 0..h {
         let row = row_text(&buf, y, w);
-        if row.contains("F1") {
+        if row.contains("F2") {
             found = true;
             break;
         }
     }
-    assert!(found, "elevator indicator with 'F1' not found in any row");
+    assert!(found, "elevator indicator with 'F2' not found in any row");
 }
 
 #[test]

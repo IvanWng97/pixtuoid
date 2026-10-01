@@ -53,9 +53,6 @@ pub(crate) mod glass;
 pub(crate) mod ground;
 pub mod layout;
 pub(crate) mod lighting;
-// Local wall-clock instants, so an hour-dependent assertion or bench case names
-// the hour instead of inheriting the runner's $TZ. `pub` for the benches —
-// MECHANISM, not a contract.
 #[doc(hidden)]
 pub mod localclock;
 pub mod motion;
