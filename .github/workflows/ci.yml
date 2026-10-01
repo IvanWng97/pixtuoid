@@ -11,7 +11,11 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Every main push gets its own group: in a shared one a newer push replaces
+  # the pending run, so that SHA never gets the ci-gate a release waits on.
+  # `queue: max` cannot do it here: it rejects `cancel-in-progress: true`,
+  # which PR runs need, and takes no expression.
+  group: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
   # NEVER cancel an in-flight main run — back-to-back merges would abort each
   # other's CI verdict + Codecov upload.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
