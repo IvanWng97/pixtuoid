@@ -367,6 +367,51 @@ fn a_floor_switch_slides_the_cutaway_then_settles() {
     hover_agent(&mut r, AgentId::from_transcript_path("/n/1.jsonl"));
 }
 
+/// Each floor slides out showing its own wall board: the first slide frame,
+/// before anything has moved, re-sends none of the tiles over the board,
+/// which a board borrowed from the other floor would change.
+#[test]
+fn a_sliding_floor_keeps_its_own_wall_board() {
+    let tile = ImageProtocol::Kitty.tile();
+    let across = 120u32.div_ceil(u32::from(tile.cols));
+    let base = crate::graphics::kitty::process_base();
+    // The neon sign and the rows its board's three lines take, in cells.
+    let (cols, rows) = (
+        u32::from(pixtuoid_scene::layout::NEON_PANEL_W + 2),
+        u32::from(pixtuoid_scene::layout::NEON_PANEL_INNER_Y / 2 + 3),
+    );
+    let board: Vec<u32> = (0..rows.div_ceil(u32::from(tile.rows)))
+        .flat_map(|ty| {
+            (0..cols.div_ceil(u32::from(tile.cols))).map(move |tx| base + ty * across + tx)
+        })
+        .collect();
+    let scene = two_floor_scene();
+    for (from, to) in [(0, 1), (1, 0)] {
+        let (mut r, wire) = kitty(120, 40);
+        let mut now = t0();
+        r.render(&scene, pack(), now).expect("render");
+        if from == 1 {
+            r.navigate_floor(1, now);
+            render_until_settled(&mut r, &scene, pack(), &mut now, 1);
+        }
+        r.render(&scene, pack(), now).expect("render");
+        wire.take();
+        r.navigate_floor(to, now);
+        r.render(&scene, pack(), now).expect("render");
+        assert!(r.transition().is_some(), "{from} → {to}: sliding");
+        let resent: Vec<u32> = kitty_images(&wire.take())
+            .into_iter()
+            .map(|(id, _)| id)
+            .filter(|id| board.contains(id))
+            .collect();
+        assert_eq!(
+            resent,
+            Vec::<u32>::new(),
+            "{from} → {to}: floor {from}'s board changed"
+        );
+    }
+}
+
 /// The image's cells, by tile, as `(tile col, tile row)` → the symbols there.
 fn image_tiles(
     r: &TuiRenderer<TestBackend>,

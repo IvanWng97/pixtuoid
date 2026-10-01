@@ -838,10 +838,20 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.cancel_transition();
             return drawn;
         };
+        // Each floor shows its own board; only the footer is the destination's.
+        let boards = [(&from_scene, from_floor), (&to_scene, to_floor)].map(|(floor_scene, i)| {
+            let ctx = self
+                .chrome
+                .frame(scene, floor_scene, pack, now, i, nf)
+                .footer;
+            let footer = pixtuoid_scene::footer::FooterInputs::new(floor_scene, ctx);
+            crate::tui::renderer::wall_board(&footer, floor_scene, now)
+        });
+        let showing = |floor, board| pixtuoid_scene::cutaway::paint::Showing { floor, now, board };
         cutaway.paint_slide(
             crate::tui::cutaway::Slide {
-                leaving: (&from_observed, from_world.floor),
-                arriving: (&to_observed, to_world.floor),
+                leaving: (&from_observed, showing(from_world.floor, &boards[0])),
+                arriving: (&to_observed, showing(to_world.floor, &boards[1])),
                 t,
                 going_down,
             },
@@ -865,7 +875,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     /// [`Self::render`] under the cutaway: the image in place of the
-    /// half-blocks, and the text a later PR does not move onto the canvas.
+    /// half-blocks, its badges, wall board and floor indicator painted in it,
+    /// and only the footer, tooltips and modals as terminal text.
     fn render_cutaway(
         &mut self,
         cutaway: &mut crate::tui::cutaway::TileCutaway,
@@ -912,7 +923,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.sim_epilogue(Vec::new(), now);
             return drawn;
         };
-        cutaway.paint(&observed, theme, world.floor, now, scene_area.as_position());
+        let board = crate::tui::renderer::wall_board(&footer, &floor_scene, now);
+        let showing = pixtuoid_scene::cutaway::paint::Showing {
+            floor: world.floor,
+            now,
+            board: &board,
+        };
+        cutaway.paint(&observed, theme, showing, scene_area.as_position());
         let geometry = cutaway.geometry(scene_area);
         let layout = &observed.layout;
         let mouse = self
