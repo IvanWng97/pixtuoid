@@ -118,7 +118,7 @@ pub struct FloorCtx {
     /// The classic's floor shadows, kept per layout.
     pub(crate) shadows: crate::ground::DepthsCache,
     /// This floor's indoor-lighting fade state.
-    pub light: VacancyDim,
+    pub vacancy_dim: VacancyDim,
     /// This floor's neon-sign fade state.
     pub(crate) neon: NeonState,
     /// Per-agent walk-timing state (physics profiles for entry/exit/wander).
@@ -149,7 +149,7 @@ impl FloorCtx {
             cache: FrameCache::new(),
             base_fill: crate::pixel_painter::BaseFillCache::new(),
             shadows: crate::ground::DepthsCache::default(),
-            light: VacancyDim::new(),
+            vacancy_dim: VacancyDim::new(),
             neon: NeonState::new(),
             motion: HashMap::new(),
             door_anim_max_ms: 0,
@@ -167,7 +167,7 @@ impl FloorCtx {
             overlay: &mut self.overlay,
             history: &mut self.history,
             motion: &mut self.motion,
-            light: &mut self.light,
+            vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat,
         }

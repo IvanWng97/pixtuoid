@@ -39,7 +39,7 @@ pub(crate) struct SimStores<'a> {
     pub overlay: &'a mut OccupancyOverlay,
     pub history: &'a mut PoseHistory,
     pub motion: &'a mut HashMap<AgentId, MotionState>,
-    pub light: &'a mut VacancyDim,
+    pub vacancy_dim: &'a mut VacancyDim,
     pub neon: &'a mut crate::floor::NeonState,
     pub chitchat: &'a mut HashMap<VenueKey, ActiveChitchat>,
 }
@@ -239,10 +239,10 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
     } = inputs;
     let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
 
-    let indoor_scale = stores.light.tick(scene.agents.is_empty(), now);
+    let indoor_scale = stores.vacancy_dim.tick(scene.agents.is_empty(), now);
     let neon = stores.neon.tick(
         crate::board::OfficeMood::of(crate::board::scene_stats(scene)),
-        stores.light.dimmed(),
+        stores.vacancy_dim.dimmed(),
         now,
     );
 
