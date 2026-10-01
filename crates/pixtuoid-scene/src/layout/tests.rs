@@ -169,9 +169,9 @@ fn snack_shelf_hugs_the_west_wall_and_refuses_narrow_rooms() {
         .expect("roomy pantry hosts the shelf");
     let vis = furniture_def(Furniture::SnackShelf).visual;
     assert_eq!(shelf.pos.x, pr.x + 1 + vis.w / 2, "west-wall hug");
-    // Seed 1 at the narrowest buffer leaves the pantry under the shelf's `vis.w + 4`
+    // Seed 11 at the narrowest buffer leaves the pantry under the shelf's `vis.w + 4`
     // width gate — the gate is a property of size AND seed, not of size alone.
-    let s = SceneLayout::compute_with_seed(crate::layout::compute::MIN_LAYOUT_W, 100, None, 1)
+    let s = SceneLayout::compute_with_seed(crate::layout::compute::MIN_LAYOUT_W, 100, None, 11)
         .expect("fits");
     assert!(
         !s.waypoints
@@ -463,12 +463,11 @@ fn every_floor_variant_seats_a_desk_at_the_minimum_layout_size() {
         narrowest_band = narrowest_band.min(l.cubicle_band.width);
         shortest_band = shortest_band.min(l.cubicle_band.height);
     }
-    // TIGHTNESS. The width arm is blind to a +1 overshoot (`pct` floors, so adjacent
-    // widths share a band) — `neither_floor_carries_a_safety_margin` covers that.
-    assert_eq!(
-        narrowest_band,
-        crate::layout::compute::DESK_BAND_MIN_W,
-        "the width floor overshoots: the widest left column leaves more band than one desk needs"
+    // The width floor is the north wall's, wider than one desk's band needs:
+    // `neither_floor_carries_a_safety_margin` holds it tight.
+    assert!(
+        narrowest_band >= crate::layout::compute::DESK_BAND_MIN_W,
+        "the width floor leaves a band narrower than one desk needs"
     );
     assert_eq!(
         shortest_band,

@@ -3505,7 +3505,7 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
 fn every_other_desk_stands_a_cabinet_starting_with_the_first() {
     let layout = Layout::compute(192, 128, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
     let cabinets: Vec<bool> = (0..layout.home_desks.len())
-        .map(|i| layout.desk_has_cabinet(FloorLocalDeskIndex(i)))
+        .map(|i| crate::layout::desk_has_cabinet(FloorLocalDeskIndex(i)))
         .collect();
     assert!(cabinets.len() >= 2);
     assert!(cabinets.iter().step_by(2).all(|&c| c), "{cabinets:?}");
