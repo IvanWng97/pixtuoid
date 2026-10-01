@@ -16,7 +16,7 @@ use image::{Rgb as ImgRgb, RgbImage};
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::cutaway::paint::{Office, render_cutaway};
+use pixtuoid_scene::cutaway::paint::{Office, Showing, render_cutaway};
 use pixtuoid_scene::floor::{FloorMeta, FloorSession, ObservedFloor};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::render_scale::RenderScale;
@@ -195,8 +195,11 @@ fn main() -> Result<()> {
             theme,
             scale,
         },
-        meta,
-        now,
+        Showing {
+            floor: meta,
+            now,
+            board: &session.board(&scene, now),
+        },
         &mut cache,
         &mut buf,
     );
