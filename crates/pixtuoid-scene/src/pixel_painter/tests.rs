@@ -2610,6 +2610,59 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
     assert!(has(&decayed, EMBER), "…back to ember hair");
 }
 
+/// The sim crowns a Top-burning agent's placement on its post-breath anchor,
+/// centred on its pack frame; a Premium one burns no crown.
+#[test]
+fn a_top_burning_placement_carries_its_crown_on_its_anchor() {
+    use crate::effects::EffectKind;
+    use crate::pose::Pose;
+    use pixtuoid_core::state::EffortObservation;
+    let (mut scene, layout, id, now0, pack) = sim_rig();
+    // A breathing instant, where the post-breath anchor is off the fit.
+    let now = (0..u64::from(u16::MAX))
+        .map(|ms| now0 + std::time::Duration::from_millis(ms))
+        .find(|&t| super::anchors::with_breath(Point { x: 0, y: 1 }, id, t).y == 0)
+        .expect("the breath rises within a cycle");
+    let slot = scene.agents.get_mut(&id).expect("the rig's agent");
+    slot.model = Some("claude-fable-5".into());
+    let crowns = |scene: &SceneState| {
+        let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
+        let poses = HashMap::from([(id, Some(Pose::SeatedThinking))]);
+        let (placements, ..) = sim::resolve_characters(
+            &agents,
+            &poses,
+            &layout,
+            &pack,
+            CHARACTER_SPRITE_W,
+            &HashMap::new(),
+            now,
+        );
+        let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
+        let crowns: Vec<Point> = p
+            .effects
+            .iter()
+            .filter(|e| e.kind == EffectKind::FlameCrown)
+            .map(|e| e.at)
+            .collect();
+        (p, crowns)
+    };
+    assert!(crowns(&scene).1.is_empty(), "Premium must not flame");
+
+    let slot = scene.agents.get_mut(&id).expect("the rig's agent");
+    slot.effort = Some(EffortObservation::new("ultra".into(), now));
+    let (p, crowns) = crowns(&scene);
+    let w = sim::pack_frame_size(&pack, p.anim_name, p.frame_idx)
+        .expect("the pack draws the pose")
+        .w;
+    assert_eq!(
+        crowns,
+        [Point {
+            x: p.anchor.x + w / 2,
+            y: p.anchor.y
+        }]
+    );
+}
+
 #[test]
 fn paint_character_at_missing_anim_is_a_noop() {
     let pack = crate::embedded_pack::test_default_pack();

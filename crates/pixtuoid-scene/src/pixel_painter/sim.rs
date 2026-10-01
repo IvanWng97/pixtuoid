@@ -362,7 +362,7 @@ pub(super) fn frame_size(pack: &Pack, anim: &str, frame_idx: usize, fallback: Si
 }
 
 /// The size of `anim`'s frame `frame_idx`, or `None` where the pack lacks it.
-fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Option<Size> {
+pub(super) fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Option<Size> {
     pack.animation(anim)
         .and_then(|a| super::frame_at(a, frame_idx))
         .map(|f| Size {
