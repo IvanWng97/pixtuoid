@@ -15,8 +15,6 @@ ignore = []
 [licenses]
 allow = [
     "MIT",
-    # Our own crates' embedded fonts.
-    "OFL-1.1",
     "Apache-2.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
@@ -25,6 +23,13 @@ allow = [
     "Unicode-3.0",
     "Unicode-DFS-2016",
     "Zlib",
+]
+# Our own crates embed OFL fonts; scoped here so a third-party OFL crate still
+# fails, since `just stage-notices` ships only our crates' font notices.
+exceptions = [
+    { allow = ["OFL-1.1"], crate = "pixtuoid" },
+    { allow = ["OFL-1.1"], crate = "pixtuoid-scene" },
+    { allow = ["OFL-1.1"], crate = "pixtuoid-web" },
 ]
 
 [bans]
