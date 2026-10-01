@@ -21,9 +21,11 @@ use pixtuoid_scene::pixel_painter::{
     AgentFrame, MascotFrame, PixelCtx, PixelPassResult, render_to_rgb_buffer,
 };
 
+#[cfg(test)]
 use crate::tui::geometry::CellArea;
+use crate::tui::geometry::SceneGeometry;
 pub(crate) use crate::tui::hit_test::{
-    hit_test_agent, hit_test_coffee_machine, hit_test_furniture, hit_test_mascot, hit_test_pet,
+    hit_test_agent, hit_test_coffee_machine, hit_test_furniture, hit_test_pet, topmost_mascot_at,
 };
 pub(crate) use crate::tui::widgets::{TooltipAt, paint_hover_tooltip};
 pub(super) use crate::tui::widgets::{
@@ -126,6 +128,8 @@ pub struct DrawOut {
     pub agents: Vec<AgentFrame>,
     pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
     pub occupied_waypoints: std::collections::HashSet<usize>,
+    /// Where the frame lies under the cells; `None` when it was refused.
+    pub(crate) geometry: Option<SceneGeometry>,
 }
 
 /// Clip a widget rect to fit inside `bounds`; `None` when nothing survives.
@@ -364,8 +368,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     });
 
     let mouse_pos = ctx.mouse_pos;
-    let hovered =
-        mouse_pos.and_then(|(mx, my)| hit_test_agent(&agents, CellArea::half_block(mx, my)));
+    let geometry = SceneGeometry::half_block(scene_rect);
+    let hovered = mouse_pos.and_then(|(mx, my)| hit_test_agent(&agents, geometry.area_at(mx, my)?));
 
     // The dim is decoupled from `onboarding.open`, so the office keeps fading back
     // up for a beat AFTER the card is gone.
@@ -403,8 +407,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         }
         if hovered.is_none()
             && let Some(at) = at
+            && let Some(cell) = geometry.area_at(at.mx, at.my)
         {
-            let cell = CellArea::half_block(at.mx, at.my);
             // `.filter` keeps the pet arm a single branch, so a
             // present-but-not-hit pet falls through to the next arm.
             // Coffee before pet here must match the click arms in
@@ -438,6 +442,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         agents,
         new_coffee_carriers,
         occupied_waypoints,
+        geometry: Some(geometry),
     })
 }
 
@@ -530,18 +535,6 @@ pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
         px.g = (px.g as f32 * factor) as u8;
         px.b = (px.b as f32 * factor) as u8;
     }
-}
-
-/// The mascot under the cursor painted on TOP: `mascots` is in
-/// `sort_drawables`' paint order, so the last hit.
-fn topmost_mascot_at(
-    mascots: &[pixtuoid_scene::pixel_painter::MascotFrame],
-    cell: CellArea,
-) -> Option<&pixtuoid_scene::pixel_painter::MascotFrame> {
-    mascots
-        .iter()
-        .rev()
-        .find(|m| hit_test_mascot(m.pos, m.w, m.h, cell))
 }
 
 #[cfg(test)]
