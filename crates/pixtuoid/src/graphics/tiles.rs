@@ -10,16 +10,7 @@ use pixtuoid_scene::cutaway::canvas::Dirty;
 use pixtuoid_scene::layout::Bounds;
 use ratatui::layout::Position;
 
-use super::{CellSize, Fit, ImageProtocol};
-
-/// A tile's extent in cells; [`ImageProtocol::tile`] is the authority.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TileShape {
-    /// Cells across.
-    pub(crate) cols: u16,
-    /// Cells down.
-    pub(crate) rows: u16,
-}
+use super::{CellSize, Fit, ImageProtocol, TileShape};
 
 /// One tile, in cells from the image's top-left cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
