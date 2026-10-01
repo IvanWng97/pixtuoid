@@ -767,19 +767,44 @@ mod tests {
         rgb(255, 255, 0),
     ];
 
-    /// Or the same color, where a lit step clips back within a [`GAMUT_JND`].
+    /// Every level of `base`'s ramp a pack may declare, darkest first.
+    fn shades(base: Rgb) -> Vec<Rgb> {
+        let max = format::MAX_RAMP_LEVEL;
+        (-max..=max).map(|n| base.ramp(n)).collect()
+    }
+
+    /// Also catches a clipped out-of-gamut step ([`Rgb::from_oklab_in_gamut`]).
     #[test]
     fn every_ramp_level_a_pack_may_declare_is_lighter_than_the_one_below() {
-        let max = format::MAX_RAMP_LEVEL;
         for base in RAMP_BASES {
             assert_eq!(base.ramp(0), base);
-            let shades: Vec<Rgb> = (-max..=max).map(|n| base.ramp(n)).collect();
+            let lightness: Vec<f32> = shades(base).iter().map(|c| c.lightness()).collect();
             assert!(
-                shades
-                    .windows(2)
-                    .all(|w| w[0].lightness() < w[1].lightness() || w[0] == w[1]),
-                "{base:?}: {shades:?}"
+                lightness.windows(2).all(|w| w[0] < w[1]),
+                "{base:?}: {lightness:?}"
             );
+        }
+    }
+
+    /// Short of white or black, which a light or dark base reaches early.
+    #[test]
+    fn every_ramp_steps_through_ever_lighter_distinct_colors() {
+        let (white, black) = (rgb(u8::MAX, u8::MAX, u8::MAX), rgb(0, 0, 0));
+        let levels = (0..=u8::MAX).step_by(15);
+        for r in levels.clone() {
+            for g in levels.clone() {
+                for b in levels.clone() {
+                    let base = rgb(r, g, b);
+                    let shades = shades(base);
+                    assert!(
+                        shades
+                            .windows(2)
+                            .all(|w| (w[0] == w[1] && (w[0] == white || w[0] == black))
+                                || (w[0] != w[1] && w[0].lightness() < w[1].lightness())),
+                        "{base:?}: {shades:?}"
+                    );
+                }
+            }
         }
     }
 
@@ -787,15 +812,13 @@ mod tests {
     /// than the base moved, or by the one level rounding allows.
     fn assert_ramp_moves_continuously(from: Rgb, to: Rgb) {
         let moved = |a: Rgb, b: Rgb| a.to_oklab().distance(b.to_oklab());
-        let max = format::MAX_RAMP_LEVEL;
-        for level in (-max..=max).filter(|&n| n != 0) {
-            let (a, b) = (from.ramp(level), to.ramp(level));
+        for (a, b) in shades(from).into_iter().zip(shades(to)) {
             let rounding = [a.r.abs_diff(b.r), a.g.abs_diff(b.g), a.b.abs_diff(b.b)]
                 .iter()
                 .all(|&d| d <= 1);
             assert!(
                 rounding || moved(a, b) - moved(from, to) < GAMUT_JND,
-                "level {level}: {from:?} -> {a:?} but {to:?} -> {b:?}"
+                "{from:?} -> {a:?} but {to:?} -> {b:?}"
             );
         }
     }
