@@ -692,6 +692,7 @@ impl RgbBuffer {
 mod tests {
     use super::*;
     use palette::IsWithinBounds;
+    use palette::color_difference::EuclideanDistance;
 
     const fn rgb(r: u8, g: u8, b: u8) -> Rgb {
         Rgb { r, g, b }
@@ -769,6 +770,47 @@ mod tests {
                 lightness.windows(2).all(|w| w[0] < w[1]),
                 "{base:?}: {lightness:?}"
             );
+        }
+    }
+
+    /// A one-level nudge to a base moves every ramp step at most a JND further
+    /// than the base moved, or by the one level rounding allows.
+    fn assert_ramp_moves_continuously(from: Rgb, to: Rgb) {
+        let moved = |a: Rgb, b: Rgb| a.to_oklab().distance(b.to_oklab());
+        let max = format::MAX_RAMP_LEVEL;
+        for level in (-max..=max).filter(|&n| n != 0) {
+            let (a, b) = (from.ramp(level), to.ramp(level));
+            let rounding = [a.r.abs_diff(b.r), a.g.abs_diff(b.g), a.b.abs_diff(b.b)]
+                .iter()
+                .all(|&d| d <= 1);
+            assert!(
+                rounding || moved(a, b) - moved(from, to) < 0.02,
+                "level {level}: {from:?} -> {a:?} but {to:?} -> {b:?}"
+            );
+        }
+    }
+
+    /// A shadow whose chroma path runs a hair outside the cube's red face
+    /// before it reaches the target.
+    #[test]
+    fn a_ramp_step_has_no_cliff_where_its_chroma_path_grazes_the_gamut() {
+        for b in 240..u8::MAX {
+            assert_ramp_moves_continuously(rgb(11, 86, b), rgb(11, 86, b + 1));
+        }
+    }
+
+    #[test]
+    fn every_ramp_step_moves_continuously_with_its_base() {
+        let levels = (0..u8::MAX).step_by(16);
+        for r in levels.clone() {
+            for g in levels.clone() {
+                for b in levels.clone() {
+                    let base = rgb(r, g, b);
+                    for next in [rgb(r + 1, g, b), rgb(r, g + 1, b), rgb(r, g, b + 1)] {
+                        assert_ramp_moves_continuously(base, next);
+                    }
+                }
+            }
         }
     }
 
