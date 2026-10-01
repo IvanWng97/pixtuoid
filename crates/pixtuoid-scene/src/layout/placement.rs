@@ -98,15 +98,15 @@ mod tests {
     }
 
     #[test]
-    fn z_sort_row_is_the_sprite_south_row_for_every_anchor() {
+    fn z_sort_row_is_the_sprite_south_row_for_every_pivot() {
         let pos = Point { x: 50, y: 40 };
-        for &a in &[Pivot::Center, Pivot::TopLeft] {
+        for &p in &[Pivot::Center, Pivot::TopLeft] {
             for h in 1u16..24 {
-                let tl = anchored_top_left(a, pos, 8, h);
+                let tl = anchored_top_left(p, pos, 8, h);
                 assert_eq!(
-                    z_sort_row(a, pos, h),
+                    z_sort_row(p, pos, h),
                     tl.y + h - 1,
-                    "{a:?} h={h}: z-sort row must equal the box south row"
+                    "{p:?} h={h}: z-sort row must equal the box south row"
                 );
             }
         }

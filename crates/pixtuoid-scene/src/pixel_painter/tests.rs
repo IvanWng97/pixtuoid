@@ -4996,12 +4996,12 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
 }
 
 #[test]
-fn keep_sprite_on_canvas_bounds_differ_by_anchor_convention() {
+fn keep_sprite_on_canvas_bounds_differ_by_pivot() {
     use crate::layout::{Pivot, Size};
     use crate::sim::anchors::keep_sprite_on_canvas;
     let buf = Size { w: 100, h: 80 };
     let size = Size { w: 8, h: 12 };
-    let at = |a, x, y| keep_sprite_on_canvas(a, Point { x, y }, size, buf);
+    let at = |p, x, y| keep_sprite_on_canvas(p, Point { x, y }, size, buf);
 
     // Centre-anchored: `pos` is the middle, so BOTH bounds inset by half.
     assert_eq!(at(Pivot::Center, 0, 0), Point { x: 4, y: 6 });
