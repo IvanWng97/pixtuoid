@@ -13,10 +13,11 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::cutaway::shade::fill;
+use crate::dither::Stepped;
 use crate::render_scale::RenderScale;
 
 /// A length or coordinate on the art grid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct ArtPx(pub(crate) u16);
 
 /// A rect on the art grid.
@@ -28,34 +29,9 @@ pub(crate) struct ArtRect {
     pub(crate) h: ArtPx,
 }
 
-/// Colours already stepped `level` stops: a shade crosses a handful of tones,
-/// and scanning them per pixel is cheaper than [`Rgb::ramp`]'s hashed memo.
-pub(crate) struct Stepped {
-    level: i8,
-    seen: Vec<(Rgb, Rgb)>,
-}
-
-impl Stepped {
-    pub(crate) fn new(level: i8) -> Self {
-        Self {
-            level,
-            seen: Vec::new(),
-        }
-    }
-
-    pub(crate) fn of(&mut self, c: Rgb) -> Rgb {
-        if let Some(&(_, stepped)) = self.seen.iter().find(|(from, _)| *from == c) {
-            return stepped;
-        }
-        let stepped = c.ramp(self.level);
-        self.seen.push((c, stepped));
-        stepped
-    }
-}
-
 /// Paints on a render's art grid (the module doc): `k` buffer pixels make one
 /// art pixel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Pen {
     d: NonZeroU16,
     k: NonZeroU16,
@@ -102,6 +78,11 @@ impl Pen {
     /// layout's units onto the grid.
     pub(crate) fn art(self, logical: u16) -> ArtPx {
         ArtPx(logical.saturating_mul(self.d.get()))
+    }
+
+    /// The logical unit art pixel `a` lies in.
+    pub(crate) fn logical(self, a: ArtPx) -> u16 {
+        a.0 / self.d.get()
     }
 
     /// `a` art pixels, as buffer pixels.

@@ -5,7 +5,7 @@
 //! Usage:
 //!   cargo run --release --example cutaway_snapshot -- <out.png> [--scale N]
 //!       [--agents N] [--theme T] [--logical WxH] [--now-hour H] [--floor I/N]
-//!       [--weather W] [--now-day D]
+//!       [--weather W] [--now-day D] [--flame I]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -16,7 +16,7 @@ use image::{Rgb as ImgRgb, RgbImage};
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::cutaway::paint::{Office, render_cutaway};
+use pixtuoid_scene::cutaway::paint::{Office, Showing, render_cutaway};
 use pixtuoid_scene::floor::{FloorMeta, FloorSession, ObservedFloor};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::render_scale::RenderScale;
@@ -27,10 +27,6 @@ use pixtuoid_scene::theme::theme_by_name;
 /// `--logical WxH` overrides it; a bigger office is how the size-gated pieces
 /// (corridor appliances) get placed at all.
 const DEFAULT_LOGICAL: (u16, u16) = (160, 96);
-
-/// Badge type size per unit of render scale. At 4x this is ~10px, which is the
-/// smallest Monaspace Neon stays legible at.
-const LABEL_PX_PER_SCALE: f32 = 2.6;
 
 /// Working directories the fixture cycles through. Fewer than the desk count on
 /// purpose: two agents sharing a repo share an outfit, which is the grouping
@@ -60,7 +56,8 @@ fn populate(scene: &mut SceneState, now: SystemTime, n: usize) {
                 source: Arc::from("claude-code"),
                 session_id: Arc::from(format!("cut-{i:04x}").as_str()),
                 cwd: Arc::from(PathBuf::from(REPOS[i % REPOS.len()]).as_path()),
-                label: "cc".into(),
+                // The decoder's `cc·<cwd basename>`, so the badges show real text.
+                label: format!("cc\u{b7}{}", &REPOS[i % REPOS.len()][3..]).into(),
                 state,
                 state_started_at: seated,
                 created_at: seated,
@@ -94,6 +91,7 @@ fn main() -> Result<()> {
     // 1 = the clock's base date, as the classic snapshot's `--now-day`.
     let mut now_day = 1u32;
     let mut weather = None::<String>;
+    let mut flame = None::<usize>;
     let (mut lw, mut lh) = DEFAULT_LOGICAL;
     let rest: Vec<String> = args.collect();
     let mut i = 0;
@@ -118,6 +116,8 @@ fn main() -> Result<()> {
             "--now-hour" => now_hour = Some(val("--now-hour")?.parse().context("bad --now-hour")?),
             "--now-day" => now_day = val("--now-day")?.parse().context("bad --now-day")?,
             "--weather" => weather = Some(val("--weather")?),
+            // The `I`th agent burns at the Top tier, crowned in flame.
+            "--flame" => flame = Some(val("--flame")?.parse().context("bad --flame")?),
             "--floor" => {
                 let v = val("--floor")?;
                 let (f, n) = v
@@ -140,21 +140,34 @@ fn main() -> Result<()> {
     let scale = RenderScale::new(scale_n).ok_or_else(|| anyhow!("--scale must be nonzero"))?;
     // The sky otherwise cycles its weather with the clock, so an hour alone
     // does not say what the room looks like.
-    if let Err(valid) = pixtuoid_scene::pixel_painter::force_weather(weather.as_deref()) {
-        return Err(anyhow!(
-            "unknown --weather {weather:?}; valid: {}",
-            valid.join(" | ")
-        ));
-    }
+    let policy = pixtuoid_scene::pixel_painter::WeatherPolicy::from_name(weather.as_deref())
+        .map_err(|valid| {
+            anyhow!(
+                "unknown --weather {weather:?}; valid: {}",
+                valid.join(" | ")
+            )
+        })?;
     let now = match now_hour {
         Some(h) => pixtuoid_scene::localclock::try_on_day(now_day.saturating_sub(1), h)
             .with_context(|| format!("invalid --now-day/--now-hour {now_day}:{h}"))?,
         None => SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
     };
-    let meta = FloorMeta::for_floor(floor.0, floor.1);
+    let meta = FloorMeta::for_floor(floor.0, floor.1).with_weather(policy);
 
     let mut scene = SceneState::uniform(64);
     populate(&mut scene, now, agents);
+    if let Some(i) = flame {
+        let id = AgentId::from_transcript_path(&format!("/cutaway/a{i}.jsonl"));
+        let a = scene
+            .agents
+            .get_mut(&id)
+            .ok_or_else(|| anyhow!("--flame {i}: only {agents} agents"))?;
+        a.model = Some("claude-fable-5".into());
+        a.effort = Some(pixtuoid_core::state::EffortObservation::new(
+            "ultra".into(),
+            now,
+        ));
+    }
 
     // The real sim, at LOGICAL size — the cutaway is its second reader.
     let mut session = FloorSession::new();
@@ -173,9 +186,8 @@ fn main() -> Result<()> {
 
     let (bw, bh) = (scale.to_buffer(lw), scale.to_buffer(lh));
     let mut buf = RgbBuffer::filled(bw, bh, theme.surface.bg_fallback);
-    // `render_cutaway` needs the classic painter's recolor cache.
-    let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
-    let labels = render_cutaway(
+    let mut cache = pixtuoid_scene::cutaway::paint::CutawayCache::default();
+    render_cutaway(
         &frame,
         Office {
             layout: &layout,
@@ -183,67 +195,14 @@ fn main() -> Result<()> {
             theme,
             scale,
         },
-        meta,
-        now,
+        Showing {
+            floor: meta,
+            now,
+            board: &session.board(&scene, now),
+        },
         &mut cache,
         &mut buf,
     );
-
-    // Name badges: the engine reports WHERE, the binary owns the font. Drawn
-    // straight into the RGB buffer here (the real painters blend post-upscale
-    // with a drop shadow — this only has to be legible enough to judge
-    // placement).
-    let label_px = f32::from(scale.get()) * LABEL_PX_PER_SCALE;
-    for l in &labels {
-        let Some(agent) = frame.agents.get(l.agent_idx) else {
-            continue;
-        };
-        let text: &str = &agent.label.text();
-        // The SHARED tone authority every other label painter uses, so the
-        // cutaway cannot invent its own state colours.
-        let tone = pixtuoid_scene::overlay::label_tone_rgb(
-            if agent.exiting_at.is_some() {
-                pixtuoid_scene::overlay::LabelTone::Exiting
-            } else {
-                match agent.state {
-                    ActivityState::Active { .. } => pixtuoid_scene::overlay::LabelTone::Active,
-                    ActivityState::Waiting { .. } => pixtuoid_scene::overlay::LabelTone::Waiting,
-                    _ => pixtuoid_scene::overlay::LabelTone::Idle,
-                }
-            },
-            theme,
-        );
-        let half = pixtuoid::aa_text::text_width(text, label_px) / 2;
-        // `draw_text_at` takes a TOP y and draws downward, so the anchor (which
-        // marks where the badge should END, just above the head) has to be
-        // lifted by a full line or the name lands on the sprite's face.
-        let (ox, oy) = (
-            i32::from(l.anchor_px.x) - half,
-            i32::from(l.anchor_px.y) - pixtuoid::aa_text::line_height(label_px),
-        );
-        pixtuoid::aa_text::draw_text_at(text, ox, oy, label_px, |x, y, cov| {
-            if cov <= 0.0 || x < 0 || y < 0 {
-                return;
-            }
-            let (x, y) = (x as u16, y as u16);
-            if x >= buf.width() || y >= buf.height() {
-                return;
-            }
-            let under = buf.get(x, y);
-            let a = cov.clamp(0.0, 1.0);
-            let mix = |u: u8, t: u8| (f32::from(u) * (1.0 - a) + f32::from(t) * a) as u8;
-            let t = tone;
-            buf.put(
-                x,
-                y,
-                pixtuoid_core::sprite::Rgb {
-                    r: mix(under.r, t.r),
-                    g: mix(under.g, t.g),
-                    b: mix(under.b, t.b),
-                },
-            );
-        });
-    }
 
     let mut img = RgbImage::new(u32::from(bw), u32::from(bh));
     for (i, px) in buf.as_slice().iter().enumerate() {

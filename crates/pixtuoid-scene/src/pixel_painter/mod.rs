@@ -82,7 +82,7 @@ pub struct AgentFrame {
     pub w: u16,
     /// The painted frame's pixel height.
     pub h: u16,
-    /// Its placement's [`CharacterPlacement::label_anchor`].
+    /// Its placement's [`CharacterPlacement::label_anchor`](crate::sim::CharacterPlacement::label_anchor).
     pub label_anchor: Point,
 }
 
@@ -94,27 +94,18 @@ struct Hoverables {
 }
 
 mod ambient;
-mod anchors;
 mod background;
 mod debug_overlay;
 mod dense;
-mod drawable;
-mod effects;
+pub(crate) mod drawable;
+pub(crate) mod effects;
 mod furniture;
 pub(crate) mod hair;
 mod palette;
 pub(crate) mod seat;
-mod sim;
 mod wall;
 
-#[cfg(test)]
-pub(crate) use anchors::character_anchor;
-
-#[doc(hidden)]
-pub use anchors::seated_anchor_facing;
-pub(crate) use background::{
-    ClockReading, RUNNER_LATTICE_STRIDE, clock_reading, neon_look, octant_offset,
-};
+pub(crate) use background::{RUNNER_LATTICE_STRIDE, octant_offset};
 #[cfg(test)]
 pub(crate) use drawable::DESK_BEZEL_RAISE;
 pub(crate) use drawable::{
@@ -124,10 +115,6 @@ pub(crate) use palette::{
     CLOCK_FACE_KEY, DESK_BULB_KEY, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, appliance_overrides,
     fixture_overrides,
 };
-
-// Only the hue matches the sprite's glow, which also takes the hour's wash and
-// shows only on a NORTH-facing desk.
-pub use palette::tool_glow_for_kind;
 
 /// Applies the hour's object terms to every pixel painted since `since`.
 ///
@@ -171,70 +158,35 @@ fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
         }
     })
 }
+use crate::sim::{CharacterGlow, SimFrame, SimInputs, desk_occupant, sim_step};
 pub(crate) use background::BaseFillCache;
 pub(crate) use dense::{DenseFrame, densest_frame};
 #[cfg(test)]
 pub(crate) use furniture::{COOLER_WATER, paint_area_rug};
-// `floor::FloorSession::observe` is the public entry to the sim tick; the step
-// itself and its per-call borrow-set stay crate-internal.
-pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
-pub(crate) use sim::{SimInputs, SimStores, desk_occupant, sim_step};
 pub(crate) use wall::paint_wall;
-
-/// The pantry counter sprites, compact then large.
-pub(crate) const PANTRY_COUNTER_ANIMS: [&str; 2] = ["pantry_small", "pantry"];
-
-/// The pantry counter sprite for a counter `counter_w` px wide: the large
-/// kitchen run when the room fits it, else the compact one.
-pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
-    let [compact, large] = PANTRY_COUNTER_ANIMS;
-    if counter_w >= crate::layout::PANTRY_COUNTER_LARGE_W {
-        large
-    } else {
-        compact
-    }
-}
 
 use crate::atmosphere::Moment;
 use crate::lighting::{DeskLights, LightInputs, Lights};
+use crate::sim::outfit_seed_for;
 use background::{
     paint_floor_and_walls, paint_floor_wash, paint_light, paint_neon_halo, paint_shadows,
 };
 use drawable::{Drawable, DrawableKind, Drawn, Layer, paint_drawable};
-use palette::{agent_overrides, outfit_seed_for};
+use palette::agent_overrides;
 use seat::paint_character_at;
 use wall::enqueue_room_walls;
 
-/// The weather names accepted by [`force_weather`], canonical order.
+pub use crate::sky::{Weather, WeatherPolicy};
+
+/// The weather names [`WeatherPolicy::from_name`] accepts, canonical order.
 pub fn weather_names() -> Vec<&'static str> {
     crate::sky::Weather::ALL.iter().map(|w| w.name()).collect()
 }
 
-/// Force every subsequent render **on this thread** to a specific weather (by
-/// name, case-insensitive), or `None` to restore the clock-based selection.
-/// It's a thread-local shared by every `Office` in the one wasm module, so the
-/// last writer before a render wins and each surface must set its own value
-/// every frame. `Err` carries the valid names when `name` is unknown.
-pub fn force_weather(name: Option<&str>) -> Result<(), Vec<&'static str>> {
-    match name {
-        None => {
-            crate::sky::set_weather_override(None);
-            Ok(())
-        }
-        Some(s) => match crate::sky::Weather::from_name(s) {
-            Some(w) => {
-                crate::sky::set_weather_override(Some(w));
-                Ok(())
-            }
-            None => Err(weather_names()),
-        },
-    }
-}
-
-/// How hard it is raining at `now` (0.0 dry … 1.0 storm; snow and fog are 0.0) —
-/// the audio model's weather feed.
-pub fn precipitation_level(now: std::time::SystemTime) -> f32 {
-    crate::sky::Sky::at(now).precipitation()
+/// How hard it is raining at `now` under `weather` (0.0 dry … 1.0 storm; snow
+/// and fog are 0.0) — the audio model's weather feed.
+pub fn precipitation_level(now: std::time::SystemTime, weather: WeatherPolicy) -> f32 {
+    crate::sky::Sky::at(now, weather).precipitation()
 }
 
 /// Whether the office's sky shows the SUN at hour-of-day `hour` (0..24).
@@ -336,7 +288,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             layout: ctx.layout,
             pack: ctx.world.pack,
             now: ctx.world.now,
-            sky: crate::sky::Sky::at(ctx.world.now),
+            sky: crate::sky::Sky::at(ctx.world.now, ctx.world.floor.weather),
             buf: &mut *ctx.buf,
             cache: &mut ctx.store.cache,
             base_fill: &mut ctx.store.base_fill,
@@ -406,7 +358,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
         paint_light(ctx.buf, lamp, ctx.theme.lighting.floor_lamp_halo);
     }
 
-    let neon = background::neon_look(frame.neon, ctx.theme);
+    let neon = crate::floor::neon_look(frame.neon, ctx.theme);
     let Furnishings {
         backdrop,
         sorted: mut drawables,
@@ -482,7 +434,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
     hover
 }
 
-/// Map the sim's resolved [`sim::CharacterPlacement`]s 1:1 onto y-sorted
+/// Map the sim's resolved [`crate::sim::CharacterPlacement`]s 1:1 onto y-sorted
 /// drawables. The ONLY paint-side work is presentation — resolving the
 /// theme-free [`CharacterGlow`] to a `Theme` color.
 fn enqueue_characters<'a>(
@@ -508,7 +460,7 @@ fn enqueue_characters<'a>(
 
 /// The frame to paint for `idx`, via [`frame_index`]. `None` only for a
 /// genuinely empty animation.
-pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
+pub(crate) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
     anim.frames().get(frame_index(anim, idx))
 }
 
@@ -568,18 +520,24 @@ pub(crate) fn desk_screen_glow(
 ) -> Option<pixtuoid_core::sprite::Rgb> {
     occupant
         .and_then(|a| crate::lighting::lit_screen(a, facing, seated))
-        .map(|tool| palette::tool_glow_for_kind(tool, &theme.tool_glow))
+        .map(|tool| theme.tool_glow.for_kind(tool))
 }
 
 /// The office pet, y-sorted at its anim's south row, since the anims differ in
 /// height.
 fn enqueue_pet<'a>(
     ctx: &PaintCtx<'_>,
-    pet: &'a sim::PetPlacement,
+    pet: &'a crate::sim::PetPlacement,
     drawables: &mut Vec<Drawable<'a>>,
 ) -> PetFrame {
     let pos = pet.pos;
-    let pet_h = sim::frame_size(ctx.pack, pet.anim_name, pet.frame_idx, sim::PET_FALLBACK).h;
+    let pet_h = crate::sim::frame_size(
+        ctx.pack,
+        pet.anim_name,
+        pet.frame_idx,
+        crate::sim::PET_FALLBACK,
+    )
+    .h;
     drawables.push(Drawable {
         anchor_y: z_sort_row(Anchor::Center, pos, pet_h),
         layer: Layer::Figure,
@@ -600,7 +558,7 @@ fn enqueue_pet<'a>(
 
 /// Enqueue the gateway mascots.
 fn enqueue_gateway_mascots<'a>(
-    mascots: &'a [sim::MascotPlacement],
+    mascots: &'a [crate::sim::MascotPlacement],
     drawables: &mut Vec<Drawable<'a>>,
 ) {
     for (mascot_idx, m) in mascots.iter().enumerate() {
@@ -620,7 +578,7 @@ fn enqueue_gateway_mascots<'a>(
 }
 
 impl MascotFrame {
-    fn of(m: &sim::MascotPlacement, w: u16, h: u16) -> Self {
+    fn of(m: &crate::sim::MascotPlacement, w: u16, h: u16) -> Self {
         Self {
             pos: m.pos,
             w,
@@ -691,7 +649,7 @@ fn queue_fixtures<'a>(
     ctx: &PaintCtx<'_>,
     frame: &SimFrame,
     desk_lights: &[DeskLights],
-    neon: background::NeonLook,
+    neon: crate::floor::NeonLook,
 ) -> Furnishings<'a> {
     let layout = ctx.layout;
     debug_assert_eq!(
@@ -730,7 +688,8 @@ fn queue_fixtures<'a>(
                 };
                 match station {
                     Station::PantryCounter => {
-                        let anim = pantry_counter_anim(layout.pantry_counter_size().w);
+                        let anim =
+                            crate::layout::pantry_counter_anim(layout.pantry_counter_size().w);
                         DrawableKind::WaypointPantry {
                             pos: f.at,
                             anim,

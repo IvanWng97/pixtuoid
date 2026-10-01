@@ -90,7 +90,7 @@ pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[E
     }
     for halo in halos {
         if let EmitterKind::MonitorHalo(tool) = halo.kind {
-            let color = crate::pixel_painter::palette::tool_glow_for_kind(tool, &theme.tool_glow);
+            let color = theme.tool_glow.for_kind(tool);
             paint_light(buf, halo, color);
         }
     }
@@ -242,7 +242,7 @@ mod tests {
         // 07:00 Clear morning → sun up + full beam.
         let now = (1..=60u32)
             .map(|day| crate::localclock::on_day(day, 7))
-            .find(|t| Sky::at(*t).weather() == Weather::Clear)
+            .find(|t| Sky::clock(*t).weather() == Weather::Clear)
             .expect("a clear morning");
         // No assertion: the test is that the clamped, out-of-bounds puts on a
         // buffer far smaller than the layout's spill columns don't panic.
@@ -253,7 +253,7 @@ mod tests {
             theme,
             &layout,
             7,
-            &Moment::resolve(Sky::at(now), theme, 0.0, now),
+            &Moment::resolve(Sky::clock(now), theme, 0.0, now),
         );
     }
 }

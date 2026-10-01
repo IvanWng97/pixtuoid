@@ -7,14 +7,12 @@ use std::time::SystemTime;
 use crate::layout::{Anchor, Layout, SEAT_RENDER_Y_OFF, Size, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
-use super::epoch_ms;
-use super::seat::Seat;
+use crate::anim::epoch_ms;
 use crate::layout::{Point, WaypointKind};
+use crate::pixel_painter::seat::Seat;
 use crate::pose;
 
-/// The ONE cross-crate sprite-width authority, re-exported so `pixel_painter`
-/// siblings keep importing it via `super::`.
-pub(super) use crate::layout::CHARACTER_SPRITE_W;
+use crate::layout::CHARACTER_SPRITE_W;
 
 /// Where a desk's occupant RENDERS — the desk's seat cell put through the same
 /// `Seat` model every other seat uses, so the chair, its occupant and the walk
@@ -23,14 +21,14 @@ pub fn seated_anchor_facing(desk: Point, sprite_w: u16, facing: crate::layout::F
     Seat::at_desk(desk, facing).render_anchor(sprite_w)
 }
 
-pub(super) fn walking_anchor(p: Point, sprite_w: u16) -> Point {
+pub(crate) fn walking_anchor(p: Point, sprite_w: u16) -> Point {
     Point {
         x: p.x.saturating_sub(sprite_w / 2),
         y: p.y.saturating_sub(WALKING_Y_OFF),
     }
 }
 
-pub(super) fn waypoint_anchor(wp: Point, sprite_w: u16) -> Point {
+pub(crate) fn waypoint_anchor(wp: Point, sprite_w: u16) -> Point {
     Point {
         x: wp.x.saturating_sub(sprite_w / 2),
         y: wp.y.saturating_sub(WALKING_Y_OFF),
@@ -47,7 +45,7 @@ fn breath_offset_y(agent_id: pixtuoid_core::AgentId, now: SystemTime) -> u16 {
     if phase < CYCLE_MS / 2 { 0 } else { 1 }
 }
 
-pub(super) fn with_breath(
+pub(crate) fn with_breath(
     anchor: Point,
     agent_id: pixtuoid_core::AgentId,
     now: SystemTime,
@@ -62,7 +60,7 @@ pub(super) fn with_breath(
 /// front-view seat anchor because `back_couch.sprite` has no transparent
 /// head/face area (hair extends across all top rows), so sitting it lower
 /// overlaps the couch back row.
-pub(super) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
+pub(crate) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
     Point {
         x: wp.x.saturating_sub(sprite_w / 2),
         y: wp.y.saturating_sub(SEAT_RENDER_Y_OFF),
@@ -120,7 +118,7 @@ const STEP_ASIDE_DX: i16 = CHARACTER_SPRITE_W as i16 + 1;
 /// singles, and anything added later without a second list to keep in sync.
 /// Shareable spots (pantry counter / vending / printer / snack shelf) still step
 /// aside; queueing is the intent there.
-pub(super) fn waypoint_rank_offset_x(kind: WaypointKind, rank: usize) -> i16 {
+pub(crate) fn waypoint_rank_offset_x(kind: WaypointKind, rank: usize) -> i16 {
     if crate::layout::furniture_def(kind.furniture()).exclusive {
         return 0;
     }
@@ -133,7 +131,7 @@ pub(super) fn waypoint_rank_offset_x(kind: WaypointKind, rank: usize) -> i16 {
 
 /// Where a figure of `size` drawn at `top_left` hangs its name badge: over its
 /// top-centre, and no lower than `ceiling`.
-pub(super) fn badge_anchor(top_left: Point, size: Size, ceiling: Option<u16>) -> Point {
+pub(crate) fn badge_anchor(top_left: Point, size: Size, ceiling: Option<u16>) -> Point {
     Point {
         x: top_left.x + size.w / 2,
         y: ceiling.map_or(top_left.y, |row| top_left.y.min(row)),
@@ -195,7 +193,7 @@ const DOOR_TRANSITION_MS: u64 = 200;
 /// `door_anim_max_ms` is the per-floor cached maximum entry/exit physics
 /// duration; it falls back to `ENTRY_ANIMATION_MS` when zero (before any entry
 /// walk is in flight).
-pub(super) fn compute_door_frame_idx(
+pub(crate) fn compute_door_frame_idx(
     agents: &[AgentSlot],
     now: SystemTime,
     door_anim_max_ms: u64,

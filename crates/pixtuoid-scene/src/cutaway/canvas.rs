@@ -12,7 +12,7 @@ use pixtuoid_core::sprite::format::Pack;
 
 use crate::cutaway::light::Ambient;
 use crate::cutaway::order::Span;
-use crate::cutaway::paint::{Office, frame_list, paint};
+use crate::cutaway::paint::{Office, Showing, frame_list, paint};
 use crate::floor::ObservedFloor;
 use crate::layout::{Bounds, Layout};
 use crate::render_scale::RenderScale;
@@ -91,9 +91,8 @@ impl CutawayCanvas {
         observed: &ObservedFloor,
         theme: &'static Theme,
         scale: RenderScale,
-        floor: crate::floor::FloorMeta,
-        now: std::time::SystemTime,
-        cache: &mut crate::frame_cache::FrameCache,
+        showing: Showing<'_>,
+        cache: &mut crate::cutaway::paint::CutawayCache,
     ) -> CanvasFrame<'_> {
         let layout = &observed.layout;
         let office = Office {
@@ -102,7 +101,7 @@ impl CutawayCanvas {
             theme,
             scale,
         };
-        let list = frame_list(&observed.frame, office, floor, now);
+        let list = frame_list(&observed.frame, office, showing);
         let epoch = Epoch {
             layout: Arc::clone(layout),
             theme,
@@ -197,7 +196,15 @@ mod tests {
     use crate::cutaway::paint::tests::{empty_frame, lively_office, sit_down};
     use crate::embedded_pack::test_default_pack;
     use crate::floor::FloorMeta;
-    use crate::pixel_painter::SimFrame;
+    use crate::sim::SimFrame;
+
+    /// The ground floor under a clear sky: rain or snow on the glass moves
+    /// every tick, so the clock's weather would decide what a tick repaints.
+    fn clear_ground() -> FloorMeta {
+        FloorMeta::ground().with_weather(crate::sky::WeatherPolicy::Forced(
+            crate::sky::Weather::Clear,
+        ))
+    }
 
     /// How a run of frames through a canvas was reported.
     #[derive(Debug, Default)]
@@ -233,12 +240,11 @@ mod tests {
             theme,
             scale,
         };
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         render_cutaway(
             frame,
             office,
-            FloorMeta::ground(),
-            now,
+            crate::cutaway::paint::tests::showing(clear_ground(), now),
             &mut cache,
             &mut buf,
         );
@@ -259,7 +265,7 @@ mod tests {
             theme,
             scale,
         };
-        let floor = FloorMeta::ground();
+        let floor = clear_ground();
         let w = scale.to_buffer(layout.buf_w);
         let inside = |rects: &[Bounds], i: usize| {
             let (x, y) = ((i % usize::from(w)) as u16, (i / usize::from(w)) as u16);
@@ -268,12 +274,16 @@ mod tests {
                 .any(|r| (r.x..r.x + r.width).contains(&x) && (r.y..r.y + r.height).contains(&y))
         };
         let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         let mut tally = Run::default();
         let mut last: Option<(RgbBuffer, Vec<(Span, u64)>)> = None;
         for (k, (frame, now)) in steps.iter().enumerate() {
             let full = full_render(&layout, &pack, scale, frame, *now);
-            let list = frame_list(frame, office, floor, *now);
+            let list = frame_list(
+                frame,
+                office,
+                crate::cutaway::paint::tests::showing(floor, *now),
+            );
             let spans: Vec<(Span, u64)> = list
                 .pieces()
                 .iter()
@@ -284,7 +294,13 @@ mod tests {
                 layout: Arc::clone(&layout),
                 frame: frame.clone(),
             };
-            let shown = canvas.frame(&observed, theme, scale, floor, *now, &mut cache);
+            let shown = canvas.frame(
+                &observed,
+                theme,
+                scale,
+                crate::cutaway::paint::tests::showing(floor, *now),
+                &mut cache,
+            );
             assert!(
                 shown.buf.as_slice() == full.as_slice(),
                 "step {k}: the canvas shows other than the full render ({:?})",
@@ -393,8 +409,6 @@ mod tests {
     /// rest.
     #[test]
     fn an_idle_office_skips_the_ticks_that_change_nothing() {
-        // Rain or snow on the glass moves every tick.
-        let _clear = crate::sky::ForcedWeather::new(crate::sky::Weather::Clear);
         let layout = lively_office();
         let quiet = empty_frame(&layout);
         let steps: Vec<_> = ticks(crate::localclock::at_hour(12), 30)
@@ -415,7 +429,7 @@ mod tests {
             layout,
         };
         let now = crate::localclock::at_hour(12);
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         let mut canvas = CutawayCanvas::new(Arc::new(test_default_pack()));
         let other = crate::theme::ALL_THEMES
             .iter()
@@ -429,8 +443,7 @@ mod tests {
                     &observed,
                     theme,
                     scale,
-                    FloorMeta::ground(),
-                    now,
+                    crate::cutaway::paint::tests::showing(clear_ground(), now),
                     &mut cache,
                 )
                 .dirty
@@ -476,9 +489,14 @@ mod tests {
                 theme: normal(),
                 scale: self.scale,
             };
-            let list = frame_list(frame, office, FloorMeta::ground(), Self::now());
+            let list = frame_list(
+                frame,
+                office,
+                crate::cutaway::paint::tests::showing(clear_ground(), Self::now()),
+            );
             list.pieces()
                 .iter()
+                .filter(|p| !matches!(p.kind, crate::cutaway::paint::PieceKind::Badge { .. }))
                 .zip(list.hover_spans())
                 .map(|(p, (span, agent))| {
                     (
@@ -496,13 +514,12 @@ mod tests {
                 layout: Arc::clone(&self.layout),
                 frame: frame.clone(),
             };
-            let mut cache = crate::frame_cache::FrameCache::new();
+            let mut cache = crate::cutaway::paint::CutawayCache::default();
             canvas.frame(
                 &observed,
                 normal(),
                 self.scale,
-                FloorMeta::ground(),
-                Self::now(),
+                crate::cutaway::paint::tests::showing(clear_ground(), Self::now()),
                 &mut cache,
             );
         }
@@ -586,6 +603,202 @@ mod tests {
         assert_ne!(canvas.hover_at(area), Some(id));
     }
 
+    /// A neighbour sitting just south has their badge plate over the sitter's
+    /// body; hovering the body there still names the sitter, as in the classic,
+    /// where a badge is no hover target.
+    #[test]
+    fn hovering_a_sitter_under_a_neighbours_badge_names_the_sitter() {
+        const NEIGHBOUR: &str = "cc\u{b7}neighbour";
+        let h = Hovering::new();
+        let seated = h.frames.last().expect("a seated frame");
+        let a = seated.characters[0].clone();
+        let a_id = seated.agents[a.agent_idx].agent_id;
+        let body = h
+            .boxes(seated)
+            .into_iter()
+            .find_map(|(_, s, agent)| (agent == Some(a_id)).then_some(s))
+            .expect("the sitter's body");
+        let mut tried = 0;
+        for dy in 1..body.y1 - body.y0 + 16 {
+            let mut both = seated.clone();
+            let mut b = both.agents[a.agent_idx].clone();
+            b.agent_id = AgentId::from_transcript_path("/neighbour.jsonl");
+            b.label = NEIGHBOUR.into();
+            both.agents.push(b.clone());
+            both.characters.push(crate::sim::CharacterPlacement {
+                agent_idx: both.agents.len() - 1,
+                anchor: crate::layout::Point {
+                    x: a.anchor.x + 2,
+                    y: a.anchor.y + dy,
+                },
+                anchor_y: a.anchor_y + dy,
+                seat_desk: None,
+                seated: false,
+                ..a.clone()
+            });
+            let plate = {
+                let office = Office {
+                    layout: &h.layout,
+                    pack: &h.pack,
+                    theme: normal(),
+                    scale: h.scale,
+                };
+                let list = frame_list(
+                    &both,
+                    office,
+                    crate::cutaway::paint::tests::showing(clear_ground(), Hovering::now()),
+                );
+                // Known by its text: the sitter's badge reads otherwise.
+                list.pieces().iter().find(|p| {
+                    matches!(&p.kind, crate::cutaway::paint::PieceKind::Badge { badge } if badge.text == NEIGHBOUR)
+                })
+                    .map(|p| p.span)
+                    .expect("the neighbour's plate")
+            };
+            let b_body = h
+                .boxes(&both)
+                .into_iter()
+                .find_map(|(_, s, agent)| (agent == Some(b.agent_id)).then_some(s))
+                .expect("the neighbour's body");
+            let Some(at) = (body.y0..=body.y1)
+                .flat_map(|y| (body.x0..=body.x1).map(move |x| cell((x, y))))
+                .find(|&c| plate.meets(c) && !b_body.meets(c))
+            else {
+                continue;
+            };
+            let mut alone = CutawayCanvas::new(Arc::clone(&h.pack));
+            h.show(&mut alone, seated);
+            if alone.hover_at(at) != Some(a_id) {
+                continue;
+            }
+            tried += 1;
+            let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+            h.show(&mut canvas, &both);
+            assert_eq!(
+                canvas.hover_at(at),
+                Some(a_id),
+                "at {at:?}, {dy} rows south"
+            );
+        }
+        assert!(
+            tried > 0,
+            "no neighbour's plate ever lay over the sitter's body"
+        );
+    }
+
+    /// A badge is a piece of its own: a sitter whose name or state changes
+    /// repaints their badge, and a renamed one nothing else.
+    #[test]
+    fn a_changed_badge_repaints_only_itself() {
+        let h = Hovering::new();
+        let seated = h.frames.last().expect("a seated frame");
+        let plate = |frame: &SimFrame| {
+            let office = Office {
+                layout: &h.layout,
+                pack: &h.pack,
+                theme: normal(),
+                scale: h.scale,
+            };
+            let list = frame_list(
+                frame,
+                office,
+                crate::cutaway::paint::tests::showing(clear_ground(), Hovering::now()),
+            );
+            list.pieces()
+                .iter()
+                .find(|p| matches!(p.kind, crate::cutaway::paint::PieceKind::Badge { .. }))
+                .map(|p| (p.span, p.fingerprint))
+                .expect("a badge")
+        };
+        let mut renamed = seated.clone();
+        renamed.agents[0].label = "cc\u{b7}renamed".into();
+        let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+        h.show(&mut canvas, seated);
+        let observed = ObservedFloor {
+            layout: Arc::clone(&h.layout),
+            frame: renamed.clone(),
+        };
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
+        let size = (
+            h.scale.to_buffer(h.layout.buf_w),
+            h.scale.to_buffer(h.layout.buf_h),
+        );
+        let dirty = canvas
+            .frame(
+                &observed,
+                normal(),
+                h.scale,
+                crate::cutaway::paint::tests::showing(clear_ground(), Hovering::now()),
+                &mut cache,
+            )
+            .dirty;
+        let spans = [plate(seated).0, plate(&renamed).0];
+        let want: Vec<Bounds> = spans
+            .iter()
+            .filter_map(|&s| on_buffer(s, h.scale, size))
+            .collect();
+        assert_eq!(dirty, Dirty::Rects(want));
+        let mut waiting = seated.clone();
+        waiting.agents[0].state = pixtuoid_core::state::ActivityState::Waiting {
+            reason: "permission?".into(),
+        };
+        let (was, now) = (plate(seated), plate(&waiting));
+        assert_eq!(was.0, now.0, "the plate stays put");
+        assert_ne!(was.1, now.1, "its tone is in its fingerprint");
+    }
+
+    /// The board's text is a piece of its own: a new tally repaints the board
+    /// and nothing else.
+    #[test]
+    fn a_new_tally_repaints_only_the_board() {
+        let h = Hovering::new();
+        let seated = h.frames.last().expect("a seated frame");
+        let quiet = crate::cutaway::paint::tests::showing(clear_ground(), Hovering::now());
+        let counts = crate::board::StateCounts {
+            active: 3,
+            total: 3,
+            ..crate::board::StateCounts::default()
+        };
+        let busy = crate::board::build_board(counts, 60, None, None, Hovering::now());
+        let busy = Showing {
+            board: &busy,
+            ..quiet
+        };
+        let board = |showing| {
+            let office = Office {
+                layout: &h.layout,
+                pack: &h.pack,
+                theme: normal(),
+                scale: h.scale,
+            };
+            frame_list(seated, office, showing)
+                .pieces()
+                .iter()
+                .find(|p| matches!(p.kind, crate::cutaway::paint::PieceKind::Board { .. }))
+                .map(|p| p.span)
+                .expect("the board")
+        };
+        let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+        h.show(&mut canvas, seated);
+        let observed = ObservedFloor {
+            layout: Arc::clone(&h.layout),
+            frame: seated.clone(),
+        };
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
+        let dirty = canvas
+            .frame(&observed, normal(), h.scale, busy, &mut cache)
+            .dirty;
+        let size = (
+            h.scale.to_buffer(h.layout.buf_w),
+            h.scale.to_buffer(h.layout.buf_h),
+        );
+        let want: Vec<Bounds> = [board(quiet), board(busy)]
+            .into_iter()
+            .filter_map(|s| on_buffer(s, h.scale, size))
+            .collect();
+        assert_eq!(dirty, Dirty::Rects(want));
+    }
+
     /// A new layout of the same size repaints everything, even one built after
     /// the last was dropped, where the allocator may hand back its address.
     #[test]
@@ -593,7 +806,7 @@ mod tests {
         let pack = Arc::new(test_default_pack());
         let scale = RenderScale::new(2).expect("nonzero");
         let now = crate::localclock::at_hour(12);
-        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut cache = crate::cutaway::paint::CutawayCache::default();
         let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
         let observe = |seed| {
             let layout = Layout::compute_with_seed(160, 96, None, seed).expect("lays out");
@@ -602,10 +815,22 @@ mod tests {
                 layout: Arc::new(layout),
             }
         };
-        let floor = FloorMeta::ground();
-        canvas.frame(&observe(0), normal(), scale, floor, now, &mut cache);
+        let floor = clear_ground();
+        canvas.frame(
+            &observe(0),
+            normal(),
+            scale,
+            crate::cutaway::paint::tests::showing(floor, now),
+            &mut cache,
+        );
         let b = observe(1);
-        let shown = canvas.frame(&b, normal(), scale, floor, now, &mut cache);
+        let shown = canvas.frame(
+            &b,
+            normal(),
+            scale,
+            crate::cutaway::paint::tests::showing(floor, now),
+            &mut cache,
+        );
         assert_eq!(shown.dirty, Dirty::All);
         assert!(
             shown.buf.as_slice() == full_render(&b.layout, &pack, scale, &b.frame, now).as_slice(),

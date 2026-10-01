@@ -13,7 +13,7 @@ use crate::tui::renderer::clip_widget_rect;
 use pixtuoid_scene::layout::DESK_W;
 use pixtuoid_scene::overlay::{LabelElement, disambig_suffix};
 use pixtuoid_scene::pet::PetKind;
-use pixtuoid_scene::pixel_painter::{AgentFrame, MascotFrame, tool_glow_for_kind};
+use pixtuoid_scene::pixel_painter::{AgentFrame, MascotFrame};
 
 /// Borderless tooltip frame shared by every hover/click tooltip: just the padded
 /// text. The caller must paint `super::paint_card_backing` UNDER it (the `Clear` +
@@ -51,28 +51,20 @@ pub(crate) fn paint_label_widgets(
 ) {
     for el in labels {
         let ly = scene_rect.y + (el.anchor_px.y / 2).saturating_sub(1);
-        let label_color = if el.hovered {
-            Color::White
+        let spans = if el.hovered {
+            let style = Style::default()
+                .fg(Color::White)
+                .add_modifier(ratatui::style::Modifier::BOLD);
+            vec![Span::styled(format!("▸{}", el.text), style)]
         } else {
-            to_color(pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme))
-        };
-        let mut style = Style::default().fg(label_color);
-        if el.hovered {
-            style = style.add_modifier(ratatui::style::Modifier::BOLD);
-        }
-        let marker = if el.hovered { "▸" } else { "●" };
-        // The CLI-identity split: the ● marker is the STATUS dot (activity tone)
-        // while the name text carries the source's badge hue, so status stays
-        // redundantly visible and identity stays constant.
-        let badge = (!el.hovered)
-            .then(|| pixtuoid_scene::overlay::badge_hue(&el.text, theme))
-            .flatten();
-        let spans = match badge {
-            Some(rgb) => vec![
-                Span::styled(marker.to_string(), style),
-                Span::styled(el.text.clone(), Style::default().fg(to_color(rgb))),
-            ],
-            None => vec![Span::styled(format!("{marker}{}", el.text), style)],
+            let ink = pixtuoid_scene::overlay::badge_ink(&el.text, el.tone, theme);
+            vec![
+                Span::styled(
+                    pixtuoid_scene::overlay::BADGE_MARKER.to_string(),
+                    Style::default().fg(to_color(ink.marker)),
+                ),
+                Span::styled(el.text.clone(), Style::default().fg(to_color(ink.name))),
+            ]
         };
         let line = ratatui::text::Line::from(spans);
         let half_w = u16::try_from(line.width() / 2).unwrap_or(u16::MAX);
@@ -167,7 +159,7 @@ pub(crate) fn paint_hover_tooltip(
                     state_spans.push(Span::raw(" \u{b7} "));
                     state_spans.push(Span::styled(
                         tool.to_string(),
-                        Style::default().fg(to_color(tool_glow_for_kind(*tk, &theme.tool_glow))),
+                        Style::default().fg(to_color(theme.tool_glow.for_kind(*tk))),
                     ));
                 }
                 if !rest.is_empty() {
@@ -545,6 +537,52 @@ mod tests {
         // The ● marker plus the name.
         let width = 1 + text.chars().count() as u16;
         assert_eq!(left, scene_rect.x + anchor.x - width / 2);
+    }
+
+    /// The classic badge paints the shared model's ink, which
+    /// `every_badge_ink_reads_on_its_plate_in_every_theme` holds at WCAG AA:
+    /// the ● in the source's hue, the name in the tone, in every theme.
+    #[test]
+    fn a_badge_paints_the_models_ink() {
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::{LabelElement, LabelTone, badge_ink};
+        let text = "cc\u{b7}repo";
+        for theme in pixtuoid_scene::theme::ALL_THEMES {
+            for tone in [
+                LabelTone::Active,
+                LabelTone::Waiting,
+                LabelTone::Idle,
+                LabelTone::Exiting,
+            ] {
+                let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
+                term.draw(|f| {
+                    super::paint_label_widgets(
+                        f,
+                        &[LabelElement {
+                            anchor_px: Point { x: 20, y: 8 },
+                            text: text.into(),
+                            tone,
+                            hovered: false,
+                        }],
+                        f.area(),
+                        theme,
+                    )
+                })
+                .unwrap();
+                let row = row_of(&term, "repo").expect("the badge painted");
+                let buf = term.backend().buffer();
+                let fg = |s: &str| {
+                    (0..buf.area.width)
+                        .find(|&x| buf[(x, row)].symbol() == s)
+                        .and_then(|x| buf[(x, row)].style().fg)
+                };
+                let ink = badge_ink(text, tone, theme);
+                let at = format!("{} {tone:?}", theme.name);
+                let marker = pixtuoid_scene::overlay::BADGE_MARKER.to_string();
+                assert_eq!(fg(&marker), Some(super::to_color(ink.marker)), "{at}");
+                assert_eq!(fg("r"), Some(super::to_color(ink.name)), "{at}");
+            }
+        }
     }
 
     #[test]

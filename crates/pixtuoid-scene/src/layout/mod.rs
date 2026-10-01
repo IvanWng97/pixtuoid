@@ -29,7 +29,9 @@ pub(crate) use decor::{repels_plants, seated_z_key};
 pub use placement::{Anchor, anchored_top_left, z_sort_row};
 pub use reach::ReachSet;
 pub(crate) use rooms::meeting::{COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W, coat_rack_rect_at};
-pub(crate) use rooms::pantry::{COMPACT_COUNTER, LARGE_COUNTER};
+pub(crate) use rooms::pantry::{
+    COMPACT_COUNTER, LARGE_COUNTER, PANTRY_COUNTER_ANIMS, pantry_counter_anim,
+};
 pub(crate) use rooms::walls::WallPiece;
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
@@ -369,13 +371,18 @@ pub const ELEVATOR_W: u16 = 16;
 pub const ELEVATOR_H: u16 = 14;
 
 /// The buffer rows a half-block terminal cell shows.
-const CELL_ROWS: u16 = 2;
+pub(crate) const CELL_ROWS: u16 = 2;
 
 /// The rows over a door whose top row is `door_y` that the terminal's floor
 /// indicator writes its text across: the whole cell above the door's.
 pub fn floor_indicator_rows(door_y: u16) -> std::ops::Range<u16> {
     let top = (door_y / CELL_ROWS).saturating_sub(1) * CELL_ROWS;
     top..top + CELL_ROWS
+}
+
+/// What the floor indicator says on floor `floor` (one-based), every painter's.
+pub fn floor_indicator_text(floor: usize) -> String {
+    format!("\u{25b2} F{floor} \u{25bc}")
 }
 
 /// Where the exit sign hangs over a door at `door`: centred above its floor
