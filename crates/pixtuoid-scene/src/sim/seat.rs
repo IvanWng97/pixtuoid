@@ -52,7 +52,7 @@ enum SeatKind {
 /// seatable furniture — both list their kinds EXPLICITLY, so a new
 /// `WaypointKind` is a compile error there. The GEOMETRY pair reads
 /// [`seated_furniture`](Self::seated_furniture) instead, which defaults a
-/// newcomer to the upright anchor and feet-row key without complaint. The net
+/// newcomer to the upright anchor and the feet's sort row without complaint. The net
 /// for THAT is `sit_arc_sort_row_is_stable_and_on_the_right_side_of_its_furniture`,
 /// a per-kind sort row oracle that stops on a kind it does not name — and it sees
 /// a newcomer only if the furniture is `occupies_pos` and the ONE layout it
@@ -105,8 +105,8 @@ impl Seat {
     }
 
     /// Whether this seat's occupant sits at SEAT height. Read by both geometry
-    /// arms so they cannot disagree — a seat-height anchor paired with a
-    /// feet sort row sorts a sitter through their own furniture. The meeting
+    /// arms so they cannot disagree — a seat-height anchor paired with the
+    /// feet's sort row orders a sitter through their own furniture. The meeting
     /// chair qualifies because its profile sprite shares the front `seated`
     /// sprite's bottom-row geometry.
     pub(crate) fn seated_furniture(self) -> bool {
@@ -223,10 +223,10 @@ impl Seat {
         }
     }
 
-    /// The y-sort key for this seat's occupant — used BOTH for the settled
+    /// The sort row of this seat's occupant — used BOTH for the settled
     /// `AtWaypoint` render AND for the sit-down / stand-up WALK glide. Letting
     /// the glide keep its natural foot sort row instead makes it cross the
-    /// furniture's own key on the way down: the agent pops in front of the sofa
+    /// furniture's own sort row on the way down: the agent pops in front of the sofa
     /// mid-glide, then jumps behind it.
     pub(crate) fn sort_row(self) -> u16 {
         if self.seated_furniture() {

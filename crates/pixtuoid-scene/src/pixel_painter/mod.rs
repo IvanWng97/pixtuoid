@@ -361,7 +361,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
 
     ambient::paint_ambient(ctx, &moment, &lights.monitor_halos);
 
-    // Every entity gets an `sort_row` — its floor-touching row — so sorting
+    // Every entity gets a `sort_row` — its floor-touching row — so sorting
     // ascending and painting in order puts things closer to the camera in
     // front: the painter's algorithm on a top-down 2D scene.
     let pet_pos = frame

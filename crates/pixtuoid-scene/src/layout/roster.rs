@@ -76,9 +76,9 @@ pub(crate) enum Depth {
     /// Painted flat under the sorted scene, in roster order: the mats, the
     /// runner, and wall fixtures nothing stands behind.
     Backdrop,
-    /// Painted in the y-sort at `row`. At an equal row, `tie` orders it
-    /// against a figure and against a fixture of the other tie; roster order
-    /// orders it against a fixture of the same tie.
+    /// Painted in the y-sort at `row`, a [`sort_row_at`] value. At an equal row,
+    /// `tie` orders it against a figure and against a fixture of the other tie;
+    /// roster order orders it against a fixture of the same tie.
     Sorted {
         row: u16,
         /// Which paints on top where a figure sorts at `row` too.

@@ -70,7 +70,7 @@ pub enum CharacterGlow {
 pub struct CharacterPlacement {
     /// Index into [`SimFrame::agents`] for this character.
     pub agent_idx: usize,
-    /// Y-sort key (breath-independent).
+    /// The row it sorts on (breath-independent).
     pub sort_row: u16,
     /// The sprite animation to blit (e.g. `"seated"`, `"walking"`).
     pub anim_name: &'static str,

@@ -66,8 +66,8 @@ pub(super) fn overlaps_within_clearance(
     rects_overlap(probe, (grown_tl, grown))
 }
 
-/// The y-sort key for a sprite of height `h` anchored at `pos`: its south
-/// (front) base ROW. Derived from [`anchored_top_left`] so it can NEVER drift
+/// The sort row of a sprite of height `h` placed at `pos`: its south
+/// (front) base row. Derived from [`anchored_top_left`] so it can NEVER drift
 /// from where the sprite actually blits (`origin.y + h - 1`).
 pub fn sort_row_at(pivot: Pivot, pos: Point, h: u16) -> u16 {
     anchored_top_left(pivot, pos, 0, h)

@@ -1,6 +1,6 @@
 //! Y-sorted drawable enum (painter's algorithm).
 //!
-//! Every mid-ground entity carries an `sort_row` = the y-pixel row where it
+//! Every mid-ground entity carries a `sort_row` = the y-pixel row where it
 //! touches the floor (front-facing bottom edge for items with thickness).
 //! Drawables sort ascending by `sort_row` and then [`Layer`], so larger
 //! `sort_row` = closer to camera = paints last. A backdrop fixture is a
