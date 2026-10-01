@@ -368,6 +368,19 @@
       .jobs.gate.steps |= map(
         if .uses == "./.github/actions/require-jobs" then .["continue-on-error"] = true else . end)
 
+- id: queue-updates-by-merge
+  file: .mergify.yml
+  why: >-
+    The queue updates the PR's own branch, and a rebase update force-pushes it
+    (docs.mergify.com/merge-queue/rules#configuration-options): a PR stacked on
+    it loses the commits it was built on, and every local checkout of it
+    diverges, with nothing to show it until the next push.
+  assert: |
+    (.queue_rules | length > 0) and all(.queue_rules[]; .update_method == "merge")
+  break:
+    - .queue_rules[0].update_method = "rebase"
+    - '.queue_rules += [{"name": "second", "update_method": "rebase"}]'
+
 # ── Publishing
 
 - id: release-plz-publishes-only-release-prs

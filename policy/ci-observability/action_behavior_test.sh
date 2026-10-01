@@ -593,3 +593,10 @@ rust_metrics 99 100 | assert_rust_health pass "one more clean file than diagnost
 rust_metrics 100 100 | assert_rust_health "Unhealthy Rust CodeQL database" "as many diagnostic files as clean ones"
 rust_metrics 247 63 | assert_rust_health "Unhealthy Rust CodeQL database" "mostly diagnostic files"
 echo '{"runs":[]}' | assert_rust_health "expected exactly one CodeQL metric" "SARIF without the metrics"
+
+# The queue's release-PR exclusion copies release-plz's branch prefix.
+release_prefix="$(yq -p toml -oy -e -r '.workspace.pr_branch_prefix' release-plz.toml)" ||
+    fail "release-plz.toml has no pr_branch_prefix"
+yq -o=json '.' .mergify.yml | jq -e --arg c "-head ~= ^$release_prefix" \
+    '(.queue_rules | length > 0) and all(.queue_rules[]; any(.queue_conditions[]; . == $c))' >/dev/null ||
+    fail ".mergify.yml has a queue that admits release-plz's ${release_prefix}* PRs"

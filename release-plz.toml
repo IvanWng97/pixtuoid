@@ -30,8 +30,9 @@ git_tag_name = "v{{ version }}"
 # that commit's title, so title it like `pr_name` below or the changelog lists it.
 # The release-plz-publishes-only-release-prs CI contract pins this key.
 release_always = false
-# release-plz's own default, declared because two mechanisms key on it: the tag
-# gate above and the recovery path in CONTRIBUTING.md#releasing.
+# release-plz's own default, declared because three mechanisms key on it: the
+# tag gate above, the recovery path in CONTRIBUTING.md#releasing, and the merge
+# queue's exclusion in .mergify.yml.
 pr_branch_prefix = "release-plz-"
 # The squash-merge title is the PR title, and the `^chore\(release\)` skip parser
 # below keeps it out of the changelog it is announcing. Never `{{ package }}`:

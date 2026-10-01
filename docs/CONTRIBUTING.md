@@ -109,10 +109,11 @@ a lint to dodge the bump.
    version, every path-dep requirement, `Cargo.lock` and `CHANGELOG.md`
    rewritten. The bump level comes from the conventional-commit log — nobody
    picks it — and the PR body carries the `cargo-semver-checks` verdict.
-2. **Review it like any PR.** `main` requires branches to be up to date, because
-   the tag lands on the squash commit and release-plz publishes to crates.io from
-   it before `ci-gate` finishes. If `main` moved, **re-dispatch — never "Update
-   branch"**: only a dispatch recomputes `CHANGELOG.md` for the new commits, and
+2. **Review it like any PR, but merge it by hand**: the merge queue refuses it,
+   since its update would merge `main` in. `main` requires branches to be up to
+   date, because the tag lands on the squash commit and release-plz publishes to
+   crates.io from it before `ci-gate` finishes. If `main` moved, **re-dispatch —
+   never "Update branch"**: only a dispatch recomputes `CHANGELOG.md` for the new commits, and
    the merge commit "Update branch" adds counts as a human's, so the next
    dispatch closes this PR and opens a new number. release-plz has already raised
    the bump for any break `cargo-semver-checks` detects; raise it further with
@@ -219,6 +220,7 @@ crate IS.
 | once you need a PR number | open it as a draft: the light tier runs, and `ci-gate` stays red by design |
 | once the draft's light tier is green | mark it ready: the full tier and the billed review bots start together, so a failure only the full tier catches costs one extra review round until the bots are chained after CI |
 | before marking ready (optional), or when a REVIEW.md local row matches (mandatory) | the `two-lens-review` skill |
+| once [the merge gate](#the-merge-gate) holds | `@mergifyio queue` |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 
 One change spanning the Rust lib + the site + the Raycast extension:
@@ -258,6 +260,12 @@ disposition; zero open confirmed `issue (blocking)`; each matching
 otherwise an optional pre-flight. A published review passes whatever it
 found; a failed or missing status is no review: comment `/claude-review`, else
 split the PR smaller.
+
+Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
+entry is a command because no queue condition can confirm a finding or match a
+local row. The queue merges `main` into a PR that is behind and waits for CI and
+the bots at that head, so nobody merges `main` in by hand; a re-review's new
+threads drop the PR from the queue until their dispositions resolve them.
 
 The bots never review a fork PR on their own: a maintainer approves its CI
 run, then comments `/claude-review`, again after every push. Its author can
@@ -309,7 +317,6 @@ before re-litigating.
 
 ```bash
 gh pr checks --watch                         # live CI status
-gh pr merge --auto --squash --delete-branch  # auto-merge once checks pass
 gh issue develop <number> --checkout         # branch linked to an issue
 gh run rerun --failed                        # rerun only failed CI jobs
 ```
