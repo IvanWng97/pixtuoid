@@ -604,8 +604,7 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
         )
     });
     for (at, sprite, frame_idx, flip, degraded, effects) in pet.chain(mascots) {
-        let Some(dense) =
-            crate::embedded_pack::densest_frame(pack, sprite, frame_idx, RenderScale::ONE)
+        let Some(dense) = crate::pack::densest_frame(pack, sprite, frame_idx, RenderScale::ONE)
         else {
             continue;
         };
@@ -620,7 +619,7 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
             flip,
         };
         order.push((span, PieceKind::Creature { at, art, degraded }));
-        let Some(pen) = crate::embedded_pack::densest_frame(pack, sprite, frame_idx, scale)
+        let Some(pen) = crate::pack::densest_frame(pack, sprite, frame_idx, scale)
             .and_then(|d| Pen::new(scale, d.density.get()))
         else {
             continue;
@@ -3143,8 +3142,7 @@ fn paint_creature(
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    let Some(dense) = crate::embedded_pack::densest_frame(pack, art.sprite, art.frame, scale)
-    else {
+    let Some(dense) = crate::pack::densest_frame(pack, art.sprite, art.frame, scale) else {
         return;
     };
     let turned = art.flip.turn(dense.frame.clone());
@@ -5767,15 +5765,10 @@ S B B B B B B S
                     unreachable!("filtered to creatures");
                 };
                 assert_eq!(art.flip, flip, "at scale {s} {} faces wrong", art.sprite);
-                let h = crate::embedded_pack::densest_frame(
-                    &pack,
-                    art.sprite,
-                    art.frame,
-                    RenderScale::ONE,
-                )
-                .expect("the art")
-                .logical
-                .1;
+                let h = crate::pack::densest_frame(&pack, art.sprite, art.frame, RenderScale::ONE)
+                    .expect("the art")
+                    .logical
+                    .1;
                 assert_eq!(p.span.depth, z_sort_row(Anchor::Center, at, h));
                 assert_eq!(
                     stray_pixel(&p.kind, p.span, &layout, &pack, theme, scale),
