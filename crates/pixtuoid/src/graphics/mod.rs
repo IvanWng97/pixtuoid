@@ -636,7 +636,7 @@ mod tests {
     const CELL_8X16: CellSize = CellSize { w: 8, h: 16 };
     /// A pack with no density variants.
     const BASE_ONLY: Density = Density::ONE;
-    /// The bundled pack's densest art (`bundled_is_the_embedded_packs_max_density`).
+    /// The bundled pack's densest art (`bundled_is_the_bundled_packs_max_density`).
     const BUNDLED: Density = Density::new(4).expect("nonzero");
     const AREA: TermSize = TermSize {
         width: 120,
@@ -644,9 +644,8 @@ mod tests {
     };
 
     #[test]
-    fn bundled_is_the_embedded_packs_max_density() {
-        let pack =
-            pixtuoid_scene::embedded_pack::load_bundled_pack().expect("the embedded pack loads");
+    fn bundled_is_the_bundled_packs_max_density() {
+        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("the bundled pack loads");
         assert_eq!(pack.max_density_variant(), BUNDLED);
     }
 

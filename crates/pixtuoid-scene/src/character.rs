@@ -7,8 +7,19 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb};
 
 use crate::frame_cache::FrameCache;
-use crate::pixel_painter::palette::agent_overrides;
 use crate::sim::{CharacterGlow, outfit_seed_for};
+
+mod colors;
+mod hair;
+#[cfg(test)]
+pub(crate) mod test_support;
+
+#[cfg(test)]
+pub(crate) use colors::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY};
+pub(crate) use colors::{agent_overrides, tool_glow_tint};
+#[cfg(all(test, feature = "density-art"))]
+pub(crate) use hair::dress;
+pub(crate) use hair::{Dress, dress_for};
 
 /// Which image of a character's art to draw: the part of its
 /// [`FrameKey`](crate::frame_cache::FrameKey) the sim's placement decides; the
@@ -43,9 +54,7 @@ impl SpritePose {
             glow_tint: match placement.glow {
                 CharacterGlow::None => None,
                 CharacterGlow::Thinking => Some(theme.tool_glow.default),
-                CharacterGlow::Tool => {
-                    crate::pixel_painter::palette::tool_glow_tint(agent, &theme.tool_glow)
-                }
+                CharacterGlow::Tool => tool_glow_tint(agent, &theme.tool_glow),
             },
         }
     }
@@ -54,9 +63,9 @@ impl SpritePose {
 /// The per-agent RECOLORED sprite for one character, and where the art marks a
 /// head, DRESSED, from the cache.
 ///
-/// Split out of [`paint_character_at`](crate::pixel_painter::drawable::paint_character_at) so a second profile gets the identical
-/// palette without a second copy of the rule. The ART and the BLIT differ
-/// between profiles — the art is [`densest_frame`](crate::embedded_pack::densest_frame)'s at
+/// One fn so a second profile gets the identical palette without a second
+/// copy of the rule. The ART and the BLIT differ
+/// between profiles — the art is [`densest_frame`](crate::pack::densest_frame)'s at
 /// `scale`, so the classic pass (at `RenderScale::ONE`) draws the base sprite
 /// 1:1 and the cutaway the densest variant its scale lands — and a per-agent
 /// palette is exactly the thing that must NOT differ: hair, skin and the
@@ -71,7 +80,7 @@ pub(crate) fn character_frame<'c>(
     cache: &'c mut FrameCache,
     now: SystemTime,
 ) -> Option<CharacterFrame<'c>> {
-    let dense = crate::embedded_pack::densest_frame(pack, pose.anim_name, pose.frame_idx, scale)?;
+    let dense = crate::pack::densest_frame(pack, pose.anim_name, pose.frame_idx, scale)?;
     let key = character_key_at(&dense, pack, pose, agent, now);
     Some(recolor(dense, &key, pack, cache))
 }
@@ -83,13 +92,12 @@ pub(crate) fn keyed_character_frame<'c>(
     scale: crate::render_scale::RenderScale,
     cache: &'c mut FrameCache,
 ) -> Option<CharacterFrame<'c>> {
-    let dense =
-        crate::embedded_pack::densest_frame(pack, key.frame.anim_name, key.frame.frame_idx, scale)?;
+    let dense = crate::pack::densest_frame(pack, key.frame.anim_name, key.frame.frame_idx, scale)?;
     Some(recolor(dense, key, pack, cache))
 }
 
 fn recolor<'c>(
-    dense: crate::embedded_pack::DenseFrame<'_>,
+    dense: crate::pack::DenseFrame<'_>,
     key: &CharacterKey,
     pack: &Pack,
     cache: &'c mut FrameCache,
@@ -104,7 +112,7 @@ fn recolor<'c>(
         // art as authored. The agent id and the art's density pick the style,
         // and the cache's key carries both.
         let recolored = match &key.dress {
-            Some(dress) => crate::pixel_painter::hair::dress(
+            Some(dress) => hair::dress(
                 &bare,
                 dress,
                 dress
@@ -142,7 +150,7 @@ pub(crate) struct CharacterKey {
     palette: [(char, pixtuoid_core::sprite::Pixel); 4],
     /// How the frame is dressed, resolved once for every reader: the recolor
     /// and the cutaway's figure box.
-    pub(crate) dress: Option<crate::pixel_painter::hair::Dress>,
+    pub(crate) dress: Option<Dress>,
 }
 
 /// [`character_frame`]'s [`CharacterKey`], without the recolor; `None` where it
@@ -154,12 +162,12 @@ pub(crate) fn character_key(
     scale: crate::render_scale::RenderScale,
     now: SystemTime,
 ) -> Option<CharacterKey> {
-    let dense = crate::embedded_pack::densest_frame(pack, pose.anim_name, pose.frame_idx, scale)?;
+    let dense = crate::pack::densest_frame(pack, pose.anim_name, pose.frame_idx, scale)?;
     Some(character_key_at(&dense, pack, pose, agent, now))
 }
 
 fn character_key_at(
-    dense: &crate::embedded_pack::DenseFrame<'_>,
+    dense: &crate::pack::DenseFrame<'_>,
     pack: &Pack,
     pose: SpritePose,
     agent: &AgentSlot,
@@ -185,22 +193,16 @@ fn character_key_at(
         },
         outfit: outfit_seed_for(agent),
         palette: agent_overrides(agent, glow_tint, burn),
-        dress: crate::pixel_painter::hair::dress_for(
-            pack,
-            agent.agent_id,
-            dense.frame,
-            dense.head,
-            density,
-        ),
+        dress: dress_for(pack, agent.agent_id, dense.frame, dense.head, density),
     }
 }
 
 /// A recolored character frame and how to draw it at the scale it was picked
-/// for; `blit_at` as in [`DenseFrame`](crate::embedded_pack::DenseFrame).
+/// for; `blit_at` as in [`DenseFrame`](crate::pack::DenseFrame).
 pub(crate) struct CharacterFrame<'c> {
     pub(crate) frame: &'c Frame,
     pub(crate) blit_at: std::num::NonZeroU16,
     /// Art rows the frame reaches above its logical top: its
-    /// [`Dress::rise`](crate::pixel_painter::hair::Dress::rise).
+    /// [`Dress::rise`].
     pub(crate) rise: u16,
 }

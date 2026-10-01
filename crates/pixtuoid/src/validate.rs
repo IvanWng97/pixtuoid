@@ -157,7 +157,7 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
     let pack = load_pack(dir)?;
     writeln!(out, "{}", ok_line(&pack.name, &pack.version))?;
 
-    let report = pixtuoid_scene::embedded_pack::validate_pack(&pack);
+    let report = pixtuoid_scene::pack::validate_pack(&pack);
 
     // Destructured without `..`: a report field added in core does not compile
     // here until this presenter prints it.

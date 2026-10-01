@@ -584,7 +584,7 @@ fn transition_escapes_a_backward_clock_step() {
 fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
     // Driven through the FULL pass: a projection or sim/paint hop dropping
     // slot.model/effort fails here while the unit-level paint test stays green.
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     let mut scene = make_scene(1, 8);
@@ -665,7 +665,7 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
 
 #[test]
 fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     let scene = SceneState::new([8; MAX_FLOORS]);
@@ -729,7 +729,7 @@ fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
 
 #[test]
 fn floor_session_render_owns_the_dual_eviction() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let gone = AgentId::from_parts("claude-code", "session-evict");
@@ -769,7 +769,7 @@ fn floor_session_render_owns_the_dual_eviction() {
 fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
     // `last_occupied` is the set the shared `AudioObserver` reads, so recording it
     // here is what lets a windowed painter avoid re-running the sim.
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let mut scene = make_scene(1, 8);
@@ -844,7 +844,7 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
 
 #[test]
 fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let scene = make_scene(1, 8);
     let id = AgentId::from_transcript_path("/p/0.jsonl");
     let t = t0() + Duration::from_millis(100); // 100ms in: entry walk in flight
@@ -901,7 +901,7 @@ fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
 /// `step` hands back the memoized layout itself, not an equal copy.
 #[test]
 fn step_hands_back_the_layout_the_sim_stepped_on() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let scene = make_scene(1, 8);
     let size = Size { w: 160, h: 96 };
     let meta = FloorMeta::ground();
@@ -930,7 +930,7 @@ fn step_hands_back_the_layout_the_sim_stepped_on() {
 /// other floor's agents: their coffee must outlive it.
 #[test]
 fn stepping_a_projected_floor_keeps_other_floors_coffee() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let scene = make_scene(17, 16);
     let downstairs = AgentId::from_transcript_path("/p/0.jsonl");
     assert_eq!(scene.agents[&downstairs].floor_idx, 0);
@@ -1103,7 +1103,7 @@ fn the_foreground_layer_is_lit_by_the_clock() {
     // clock alone.
     let clear = crate::sky::WeatherPolicy::Forced(crate::sky::Weather::Clear);
     let render = |now: SystemTime| {
-        let pack = crate::embedded_pack::test_default_pack();
+        let pack = crate::pack::test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("normal theme");
         let scene = make_scene(6, 8);
         let mut fctx = FloorCtx::new();
@@ -1406,7 +1406,7 @@ fn neon_never_flashes_while_lit_or_while_still_coasting_down() {
 /// The classic looks out from its own floor.
 #[test]
 fn the_classic_sees_the_skyline_from_its_floors_altitude() {
-    let pack = crate::embedded_pack::test_default_pack();
+    let pack = crate::pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = make_scene(1, 8);

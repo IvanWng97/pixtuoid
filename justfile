@@ -844,7 +844,7 @@ gen-readme-check:
 gen-media *args:
     .venv/bin/python3 scripts/gen-media.py "$@"
 
-[doc('Regenerate site/src/assets/pix-icons/ from the embedded sprite-pack palette')]
+[doc('Regenerate site/src/assets/pix-icons/ from the bundled sprite-pack palette')]
 [group('gen')]
 gen-icons:
     .venv/bin/python3 scripts/gen-pix-icons.py
