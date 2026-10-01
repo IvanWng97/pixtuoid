@@ -61,8 +61,6 @@ pub(crate) struct TileCutaway {
     /// Set once SIXEL or iTerm2 pixels are written, for the unwind
     /// ([`crate::graphics::grid_unwind`]).
     in_grid: &'static AtomicBool,
-    #[cfg(test)]
-    encoded: usize,
     /// When the last transmits were written, for the protocol's cadence.
     sent_at: Option<SystemTime>,
     /// A write failed, perhaps mid-escape: the next one opens with
@@ -95,8 +93,6 @@ impl TileCutaway {
             out,
             pending: Vec::new(),
             in_grid: &crate::graphics::IN_GRID,
-            #[cfg(test)]
-            encoded: 0,
             sent_at: None,
             torn: false,
         }
@@ -217,11 +213,7 @@ impl TileCutaway {
     }
 
     /// `c`'s tile in the protocol's escape; `None` where it has none.
-    fn encode(&mut self, c: Changed) -> Option<Vec<u8>> {
-        #[cfg(test)]
-        {
-            self.encoded += 1;
-        }
+    fn encode(&self, c: Changed) -> Option<Vec<u8>> {
         let image = self.tiles.image(&self.image, c.tile);
         match self.protocol {
             ImageProtocol::Kitty => {
@@ -239,12 +231,6 @@ impl TileCutaway {
     pub(crate) fn arming(mut self, in_grid: &'static AtomicBool) -> Self {
         self.in_grid = in_grid;
         self
-    }
-
-    /// How many tiles were encoded.
-    #[cfg(test)]
-    pub(crate) fn encoded(&self) -> usize {
-        self.encoded
     }
 
     /// Show every tile in `scene`'s cells of `buf`, before the frame's text
