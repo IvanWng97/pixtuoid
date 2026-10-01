@@ -320,15 +320,15 @@ fn parse_navigations(specs: &[String]) -> Result<Vec<(u64, usize)>> {
 fn main() -> Result<()> {
     let args = SnapshotArgs::parse();
 
-    // Sets a thread-local honored by every weather derivation on this thread,
-    // including each frame of the GIF path.
-    if let Err(valid) = pixtuoid_scene::pixel_painter::force_weather(args.weather.as_deref()) {
-        anyhow::bail!(
-            "unknown --weather {:?}; valid: {}",
-            args.weather.unwrap_or_default(),
-            valid.join(" | ")
-        );
-    }
+    let weather =
+        match pixtuoid_scene::pixel_painter::WeatherPolicy::from_name(args.weather.as_deref()) {
+            Ok(w) => w,
+            Err(valid) => anyhow::bail!(
+                "unknown --weather {:?}; valid: {}",
+                args.weather.unwrap_or_default(),
+                valid.join(" | ")
+            ),
+        };
 
     let now = match args.now_hour {
         Some(h) => pixtuoid_scene::localclock::try_on_day(args.now_day - 1, h)
@@ -442,6 +442,7 @@ fn main() -> Result<()> {
             max_desks: args.max_desks,
             theme,
             pack: &pack,
+            weather,
         })?;
         println!("wrote proof frames → {}", frames_dir.display());
         return Ok(());
@@ -481,6 +482,7 @@ fn main() -> Result<()> {
         scene: &scene,
         pack: &pack,
         theme,
+        weather,
     };
     let anim_dest = args.frames_dir.as_deref().unwrap_or(&args.out);
     if !navigations.is_empty() || !pet_vec.is_empty() {
@@ -489,7 +491,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let mut floor_meta = pixtuoid_scene::floor::FloorMeta::ground();
+    let mut floor_meta = pixtuoid_scene::floor::FloorMeta::ground().with_weather(weather);
     floor_meta.floor_seed = args.floor_seed;
     if args.gif || args.anim.is_some() {
         save_animation(

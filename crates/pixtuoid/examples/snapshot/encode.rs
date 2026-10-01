@@ -163,7 +163,7 @@ pub(crate) fn compute_crop_rect(
                 let desk = layout.home_desk(idx).ok_or_else(|| {
                     anyhow::anyhow!("agent {agent_label:?} is neither placed nor at a home desk")
                 })?;
-                pixtuoid_scene::pixel_painter::seated_anchor_facing(
+                pixtuoid_scene::sim::seated_anchor_facing(
                     desk,
                     pixtuoid_scene::layout::CHARACTER_SPRITE_W,
                     layout.desk_facing(idx),
@@ -393,6 +393,7 @@ pub(crate) struct AnimJob<'a> {
     pub(crate) scene: &'a SceneState,
     pub(crate) pack: &'a Pack,
     pub(crate) theme: &'static Theme,
+    pub(crate) weather: pixtuoid_scene::pixel_painter::WeatherPolicy,
 }
 
 impl AnimJob<'_> {
@@ -437,6 +438,7 @@ pub(crate) fn save_renderer_animation(
     pets: Vec<pixtuoid_scene::pet::Pet>,
 ) -> Result<()> {
     let mut r = pixtuoid::tui::tui_renderer::TuiRenderer::new(term, job.theme, pets);
+    r.set_weather(job.weather);
     let mut fired = vec![false; navigations.len()];
     // 0, not the caller's skip_ms: clap keeps every pre-roll flag off this path
     // (`conflicts_with` on --navigate-at / --pets), and a pre-roll would shift the

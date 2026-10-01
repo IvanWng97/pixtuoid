@@ -1,6 +1,6 @@
 //! The enriched orthographic cutaway profile — a SIBLING of the classic
 //! half-block painter, not a fidelity knob on it. Both read
-//! `pixel_painter::SimFrame`.
+//! `sim::SimFrame`.
 //!
 //! `render_cutaway` and `CutawayCanvas` are `#[doc(hidden)] pub` as seams for
 //! out-of-crate drivers (the snapshot example, the render bench, the painters
@@ -9,6 +9,7 @@
 //! is the one thing a follow-up cannot quietly undo.
 #[doc(hidden)]
 pub mod canvas;
+pub(crate) mod effects;
 pub(crate) mod light;
 pub(crate) mod order;
 #[doc(hidden)]

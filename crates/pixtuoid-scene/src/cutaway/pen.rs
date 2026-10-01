@@ -17,7 +17,7 @@ use crate::dither::Stepped;
 use crate::render_scale::RenderScale;
 
 /// A length or coordinate on the art grid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct ArtPx(pub(crate) u16);
 
 /// A rect on the art grid.
@@ -31,7 +31,7 @@ pub(crate) struct ArtRect {
 
 /// Paints on a render's art grid (the module doc): `k` buffer pixels make one
 /// art pixel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Pen {
     d: NonZeroU16,
     k: NonZeroU16,
@@ -60,7 +60,7 @@ impl Pen {
     }
 
     /// The pen for `pack` at `scale`: the densest of its variant densities that
-    /// divides `scale`, else the base art's. [`densest_frame`](crate::pixel_painter::densest_frame)
+    /// divides `scale`, else the base art's. [`densest_frame`](crate::embedded_pack::densest_frame)
     /// applies the same rule per piece, so the room shares every piece's grid
     /// only while the pack draws its variants at one density
     /// (`the_bundled_pack_draws_every_variant_at_one_density`).

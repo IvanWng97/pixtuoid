@@ -1,15 +1,16 @@
 //! The SIM half of the frame — advance the world, produce no pixels.
 //!
-//! `sim_step` mutates the [`SimStores`] and returns an immutable [`SimFrame`];
+//! `sim_step` mutates the `SimStores` and returns an immutable [`SimFrame`];
 //! the paint pass consumes `&SimFrame` and writes only what `PaintCtx` lends it
 //! mutably. The paint-local caches it borrows are deliberately NOT sim stores:
 //! flushing them changes no behavior, only repaint cost. Headless consumers drive
-//! `floor::FloorSession::observe` to observe poses/positions without buying a
+//! `floor::FloorSession::step` to observe poses/positions without buying a
 //! pixel pass.
 
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+use pixtuoid_core::id::normalize_path_key;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{ActivityState, DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
@@ -26,12 +27,18 @@ use crate::pet::PetKind;
 use crate::physics::walking_position;
 use crate::pose::{self, Pose, PoseHistory};
 
-use super::anchors::{
-    CHARACTER_SPRITE_W, badge_anchor, on_canvas, walking_anchor, waypoint_anchor,
-    waypoint_rank_offset_x, with_breath,
+use crate::embedded_pack::{desk_art, desk_art_top};
+use crate::layout::CHARACTER_SPRITE_W;
+use anchors::{
+    badge_anchor, on_canvas, walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath,
 };
-use super::drawable::{desk_art, desk_art_top, desk_cup_at};
-use super::seat::{Seat, settle_seat};
+use seat::{Seat, settle_seat};
+
+pub(crate) mod anchors;
+pub(crate) mod seat;
+
+#[doc(hidden)]
+pub use anchors::seated_anchor_facing;
 
 /// The mutable world state one `sim_step` advances.
 pub(crate) struct SimStores<'a> {
@@ -155,6 +162,22 @@ pub(crate) struct DeskProps {
     pub(crate) sheet_fall: Option<u16>,
     /// What rides on it this tick: a steaming cup's steam.
     pub(crate) effects: Vec<Effect>,
+    /// Which glass column its lit screen's scanline is on, from the glass's
+    /// west edge ([`scanline_col`]).
+    pub(crate) scanline: u16,
+}
+
+/// How long a screen's scanline holds each glass column.
+const SCANLINE_STEP_MS: u64 = 120;
+
+/// The glass column a desk at column `desk_x`'s scanline is on at `now`: the
+/// line sweeps east and wraps, each desk a column on from its west neighbour's.
+pub(crate) fn scanline_col(desk_x: u16, now: SystemTime) -> u16 {
+    let glass = crate::layout::SCREEN_GLASS_COLS;
+    let glass_w = u64::from(glass.end() - glass.start() + 1);
+    let phase = crate::anim::epoch_ms(now) / SCANLINE_STEP_MS + u64::from(desk_x);
+    // Below `glass_w`, a u16.
+    (phase % glass_w) as u16
 }
 
 /// The immutable outcome of one `sim_step`: the world advanced, observed.
@@ -168,7 +191,7 @@ pub struct SimFrame {
     pub agents: Vec<AgentSlot>,
     /// The authoritative routed pose per home-desk agent this tick (`None` =
     /// no renderable pose). Unread by paint BY DESIGN;
-    /// `floor::FloorSession::observe` is the lib-side consumer.
+    /// `floor::FloorSession::step` is the lib-side consumer.
     pub poses: HashMap<AgentId, Option<Pose>>,
     /// Per-desk "occupant is actually seated right now" (drives screen glow +
     /// ceiling halos; exiting agents absent by construction).
@@ -337,7 +360,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
     let mascots = mascot_placements(scene, layout, pack, now);
     let desks = desk_props(&agents, layout, coffee, now);
 
-    let door_frame = super::anchors::compute_door_frame_idx(&agents, now, door_anim_max_ms);
+    let door_frame = anchors::compute_door_frame_idx(&agents, now, door_anim_max_ms);
     SimFrame {
         agents,
         poses,
@@ -357,14 +380,14 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
 
 /// The size of `anim`'s frame `frame_idx`, or `fallback` where the pack lacks
 /// it, so a figure still sorts and fits sanely while its blit no-ops.
-pub(super) fn frame_size(pack: &Pack, anim: &str, frame_idx: usize, fallback: Size) -> Size {
+pub(crate) fn frame_size(pack: &Pack, anim: &str, frame_idx: usize, fallback: Size) -> Size {
     pack_frame_size(pack, anim, frame_idx).unwrap_or(fallback)
 }
 
 /// The size of `anim`'s frame `frame_idx`, or `None` where the pack lacks it.
-pub(super) fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Option<Size> {
+pub(crate) fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Option<Size> {
     pack.animation(anim)
-        .and_then(|a| super::frame_at(a, frame_idx))
+        .and_then(|a| crate::embedded_pack::frame_at(a, frame_idx))
         .map(|f| Size {
             w: f.width(),
             h: f.height(),
@@ -372,7 +395,7 @@ pub(super) fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Opti
 }
 
 /// The bundled cat's size, for a pack that lacks the pet's anim.
-pub(super) const PET_FALLBACK: Size = Size { w: 8, h: 6 };
+pub(crate) const PET_FALLBACK: Size = Size { w: 8, h: 6 };
 /// The bundled lobster's size, for a pack that lacks the mascot's anim.
 const MASCOT_FALLBACK: Size = Size { w: 14, h: 12 };
 
@@ -448,7 +471,7 @@ const PET_SLEEP_Z_SEED: u64 = 0xCAFE;
 
 /// What rides on a `kind` pet at `pos` drawn as `anim_name`: hearts while it
 /// is being petted, `petted_ms` in, else a z while it sleeps.
-pub(super) fn pet_effects(
+pub(crate) fn pet_effects(
     kind: PetKind,
     pos: Point,
     anim_name: &str,
@@ -531,13 +554,14 @@ fn desk_props(
                 token_tier: occupant.map_or(0, |a| crate::token_meter::token_tier(a.tokens_used)),
                 sheet_fall: occupant.and_then(|a| crate::token_meter::sheet_fall_dist(a, now)),
                 effects: cup_effects(layout.home_desks[i], cup, now),
+                scanline: scanline_col(layout.home_desks[i].x, now),
             }
         })
         .collect()
 }
 
 /// What rides on the cup on the desk at `desk`: steam while it is fresh.
-pub(super) fn cup_effects(desk: Point, cup: Option<Cup>, now: SystemTime) -> Vec<Effect> {
+pub(crate) fn cup_effects(desk: Point, cup: Option<Cup>, now: SystemTime) -> Vec<Effect> {
     match cup {
         Some(Cup::Steaming) => effects::steam(desk_cup_at(desk), now).to_vec(),
         Some(Cup::Cold) | None => Vec::new(),
@@ -546,19 +570,19 @@ pub(super) fn cup_effects(desk: Point, cup: Option<Cup>, now: SystemTime) -> Vec
 
 /// What a pose arm puts on its figure, before the fit settles where it stands.
 #[derive(Debug, Clone, Copy, Default)]
-pub(super) struct Cues {
+pub(crate) struct Cues {
     /// Asleep: its z's stagger off this seed.
-    pub(super) sleep_seed: Option<u64>,
+    pub(crate) sleep_seed: Option<u64>,
     /// Waiting on the human.
-    pub(super) waiting: bool,
+    pub(crate) waiting: bool,
     /// Walking, on this stride frame.
-    pub(super) stride: Option<usize>,
+    pub(crate) stride: Option<usize>,
 }
 
 /// What rides on `agent`, whose `w`-wide frame (`None` where its pack lacks
 /// one) stands at `anchor` this tick, in paint order: dust underfoot, then a
 /// burning head's crown, then a sleeper's z or a waiter's mark.
-pub(super) fn character_effects(
+pub(crate) fn character_effects(
     agent: &AgentSlot,
     anchor: Point,
     w: Option<u16>,
@@ -586,7 +610,7 @@ pub(super) fn character_effects(
 /// `sim_step` already derived. Returns the placements (paint maps them 1:1 to
 /// drawables), the waypoint visitors (for the chitchat venues), the agents seen
 /// carrying coffee, and the occupied waypoint indices.
-pub(super) fn resolve_characters(
+pub(crate) fn resolve_characters(
     agents: &[AgentSlot],
     poses: &HashMap<AgentId, Option<Pose>>,
     layout: &Layout,
@@ -835,6 +859,14 @@ pub(super) fn resolve_characters(
     )
 }
 
+/// Where the cup stands on the desk at `desk`: its top-left cell.
+pub(crate) fn desk_cup_at(desk: Point) -> Point {
+    Point {
+        x: desk.x + 2,
+        y: desk.y + 2,
+    }
+}
+
 /// The agent whose home desk is `local`, while they have not begun to leave.
 pub(crate) fn desk_occupant(
     agents: &[AgentSlot],
@@ -843,4 +875,54 @@ pub(crate) fn desk_occupant(
     agents
         .iter()
         .find(|a| a.desk_index.single_floor_local() == local && a.exiting_at.is_none())
+}
+
+/// Deterministic seed from a normalized cwd string: byte-fold, then the
+/// splitmix64 finalizer. NOT `DefaultHasher`: its algorithm may change between
+/// Rust releases, which would re-dress every agent on a toolchain bump.
+fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
+    let folded = cwd_norm
+        .bytes()
+        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64));
+    pixtuoid_core::id::splitmix64(folded)
+}
+
+/// The outfit-determining seed for `agent`. Extracted so
+/// `FrameCache::note_outfit_seed` watches the mid-lifetime cwd backfill through
+/// the EXACT unknown-cwd fallback the palette's `agent_overrides` uses; a second copy would
+/// drift.
+pub(crate) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
+    if agent.unknown_cwd || agent.cwd.as_os_str().is_empty() {
+        agent.agent_id.raw()
+    } else {
+        cwd_outfit_seed(&normalize_path_key(&agent.cwd.to_string_lossy()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// The phase is epoch-based, so it outgrows a u16: the scanline must keep
+    /// stepping one column per step rather than overflow or jump.
+    #[test]
+    fn the_scanline_keeps_stepping_past_a_u16_phase() {
+        let col = |step: u64| {
+            scanline_col(
+                0,
+                SystemTime::UNIX_EPOCH + Duration::from_millis(step * SCANLINE_STEP_MS + 1),
+            )
+        };
+        let glass = crate::layout::SCREEN_GLASS_COLS;
+        let glass_w = glass.end() - glass.start() + 1;
+        let before = col(u64::from(u16::MAX));
+        assert_eq!(col(u64::from(u16::MAX) + 1), (before + 1) % glass_w);
+        let at = SystemTime::UNIX_EPOCH + Duration::from_millis(7 * SCANLINE_STEP_MS);
+        assert_eq!(
+            scanline_col(3, at),
+            (scanline_col(0, at) + 3) % glass_w,
+            "each desk a column on from its west neighbour's"
+        );
+    }
 }

@@ -12,22 +12,24 @@ use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 
-use super::palette::{BLACK, WHITE, blend_rgb};
-use super::sim::{Cup, DeskProps};
+use crate::sim::{Cup, DeskProps, desk_cup_at};
 use pixtuoid_core::AgentSlot;
 
+use super::AgentFrame;
 use super::background::{paint_clock, paint_corridor_runner, paint_neon_panel};
 use super::effects::{paint_effects, paint_screen_glow, paint_screen_idle};
-use super::frame_at;
 use super::furniture::{
     paint_area_rug, paint_coat_rack, paint_doormat, paint_fish_tank, paint_kitchen_island,
     paint_meeting_chair, paint_notice_board, paint_side_table, paint_trash_bin, paint_water_cooler,
 };
-use super::{AgentFrame, paint_character_at};
+use crate::character::{CharacterFrame, SpritePose, character_frame};
 use crate::effects::{Effect, STEAM_PUFFS};
+use crate::embedded_pack::{
+    DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, desk_art, desk_art_top, frame_at,
+};
 use crate::frame_cache::FrameCache;
 pub(super) use crate::layout::Layer;
-use crate::layout::{Point, Size};
+use crate::layout::{Layout, Point, Size};
 
 /// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
 /// size — hand-tuned to the sprite art so the steam sits within the coffee
@@ -79,7 +81,7 @@ pub(super) enum DrawableKind<'a> {
     },
     Character {
         agent: &'a AgentSlot,
-        pose: super::seat::SpritePose,
+        pose: SpritePose,
         anchor: Point,
         label_anchor: Point,
         effects: &'a [Effect],
@@ -146,7 +148,7 @@ pub(super) enum DrawableKind<'a> {
         kind: crate::layout::WallDecor,
         pos: Point,
     },
-    /// A corridor appliance: its pack art ([`super::appliance_art`]), centred at
+    /// A corridor appliance: its pack art ([`crate::embedded_pack::appliance_sprite`]), centred at
     /// `pos`.
     Appliance {
         pos: Point,
@@ -204,7 +206,7 @@ pub(super) enum DrawableKind<'a> {
     /// The neon sign's panel in this frame's colours.
     NeonSign {
         panel: crate::layout::Bounds,
-        look: super::background::NeonLook,
+        look: crate::floor::NeonLook,
     },
     Clock {
         pos: Point,
@@ -241,40 +243,6 @@ pub(super) struct DrawableCtx<'a> {
     pub theme: &'a crate::theme::Theme,
 }
 
-/// The monitor bezel standing proud of the desk back, above `desk.y`.
-pub(crate) const DESK_BEZEL_RAISE: u16 = 1;
-
-/// The base desk's pack animation, whose bottom row every desk's art keeps.
-pub(crate) const DESK_SPRITE: &str = "desk";
-
-/// The row a desk's art `art_h` tall blits from at `desk_y`: the bezel raise,
-/// plus whatever a taller art adds ABOVE `desk.y`, so it keeps the base
-/// [`DESK_SPRITE`]'s bottom row. Both profiles blit desks from this.
-pub(crate) fn desk_art_top(pack: &Pack, desk_y: u16, art_h: u16) -> u16 {
-    let base_h = pack
-        .animation(DESK_SPRITE)
-        .and_then(|a| a.frames().first())
-        .map_or(0, |f| f.height());
-    desk_y.saturating_sub(DESK_BEZEL_RAISE + art_h.saturating_sub(base_h))
-}
-
-/// The desk art for a seat facing `facing`. Only a back-turned seat needs its
-/// own — its occupant y-sorts in FRONT and covers the screen.
-pub(crate) fn desk_sprite_name(facing: crate::layout::Facing) -> &'static str {
-    match facing {
-        crate::layout::Facing::North => "desk_north",
-        crate::layout::Facing::South
-        | crate::layout::Facing::East
-        | crate::layout::Facing::West => DESK_SPRITE,
-    }
-}
-
-/// The art a desk seating its occupant toward `facing` draws.
-pub(crate) fn desk_art(pack: &Pack, facing: crate::layout::Facing) -> Option<&Frame> {
-    pack.animation_or_source(desk_sprite_name(facing))
-        .and_then(|a| a.frames().first())
-}
-
 /// A hoverable [`paint_drawable`] drew, sized by the frame it blitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Drawn {
@@ -304,7 +272,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
                 sprite_top = desk_art_top(pack, desk.y, frame.height());
                 blit_frame(frame, desk.x, sprite_top, buf);
             }
-            paint_desk_lamp(buf, lights, theme);
+            paint_desk_lamp_pool(buf, lights, theme);
             paint_screen_idle(
                 buf,
                 desk.x,
@@ -315,7 +283,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             paint_desk_coffee(buf, *desk, props.cup, &props.effects, theme);
             paint_token_stack(buf, *desk, props.token_tier, props.sheet_fall, theme);
             if let Some(tint) = screen_glow {
-                paint_screen_glow(buf, desk.x, sprite_top, now, *tint, theme);
+                paint_screen_glow(buf, desk.x, sprite_top, props.scanline, *tint, theme);
             }
         }
         DrawableKind::Character {
@@ -403,11 +371,14 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             }
         }
         DrawableKind::Appliance { pos, sprite, busy } => {
-            let art = pack
-                .animation(sprite)
-                .and_then(|anim| anim.recolorable(super::appliance_frame(anim, *busy, now)));
+            let art = pack.animation(sprite).and_then(|anim| {
+                anim.recolorable(crate::embedded_pack::appliance_frame_index(
+                    anim, *busy, now,
+                ))
+            });
             if let Some(art) = art {
-                let themed = art.recolored(&super::palette::appliance_overrides(&theme.appliance));
+                let themed =
+                    art.recolored(&crate::embedded_pack::appliance_overrides(&theme.appliance));
                 blit_centered(&themed, *pos, buf);
             }
         }
@@ -454,7 +425,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             });
         }
         DrawableKind::RoomWall { piece, rows } => {
-            super::paint_wall(
+            crate::wall::paint_wall(
                 buf,
                 theme,
                 *piece,
@@ -484,14 +455,6 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
     None
 }
 
-/// Where the cup stands on the desk at `desk`: its top-left cell.
-pub(super) fn desk_cup_at(desk: Point) -> Point {
-    Point {
-        x: desk.x + 2,
-        y: desk.y + 2,
-    }
-}
-
 /// The cup, then the `steam` riding on it.
 fn paint_desk_coffee(
     buf: &mut RgbBuffer,
@@ -514,12 +477,6 @@ fn paint_desk_coffee(
     paint_effects(buf, steam, theme);
 }
 
-/// The desk task chair's pack animation.
-pub(crate) const DESK_CHAIR_SPRITE: &str = "desk_chair";
-
-/// The meeting table's pack animation.
-pub(crate) const MEETING_TABLE_SPRITE: &str = "meeting_table";
-
 /// The desk task chair's art — the ONE authority for its size, so the enqueue
 /// site centres on what is actually drawn even under a custom pack.
 pub(super) fn desk_chair_frame(pack: &Pack) -> Option<&Frame> {
@@ -534,28 +491,16 @@ pub(super) fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, pack: &Pack
     }
 }
 
-/// Task lamp on the desk's west wing (the coffee cup and token tower own the other
-/// two), plus its warm pool.
-pub(super) fn paint_desk_lamp(
+/// The task lamp's warm pool; the desk art draws the lamp itself.
+pub(super) fn paint_desk_lamp_pool(
     buf: &mut RgbBuffer,
     lights: &crate::lighting::DeskLights,
     theme: &crate::theme::Theme,
 ) {
-    let strength = lights.lamp.strength;
-    if strength <= 0.0 {
+    if lights.lamp.strength <= 0.0 {
         return;
     }
-    let warm = theme.lighting.desk_lamp;
-    // The fixture tracks the light it CASTS: fixed tones show a lamp fully lit at a strength whose pool rounds to nothing.
-    const OFF: f32 = 0.80;
-    let unlit = blend_rgb(warm, BLACK, OFF);
-    let shade = blend_rgb(unlit, blend_rgb(warm, WHITE, 0.45), strength);
-    let stem = blend_rgb(unlit, blend_rgb(warm, BLACK, 0.72), strength);
-    let (shade_at, bulb) = (lights.fixture, lights.bulb());
-    buf.put_checked(shade_at.x, shade_at.y, shade);
-    buf.put_checked(shade_at.x + 1, shade_at.y, shade);
-    buf.put_checked(bulb.x, bulb.y, stem);
-    super::background::paint_light(buf, &lights.lamp, warm);
+    super::background::paint_light(buf, &lights.lamp, theme.lighting.desk_lamp);
 }
 
 /// Token-meter paper tower: `tier` reams stacked on the desk surface against
@@ -616,11 +561,126 @@ const STACK_BASE_DY: u16 = 3;
 /// Rows per ream: one row of vertical detail is sub-legible at half-block scale.
 const STACK_PX_PER_TIER: u16 = 2;
 
+/// Paint a character at an arbitrary anchor with per-agent recolor, returning
+/// the size of the frame it drew.
+pub(crate) fn paint_character_at(
+    buf: &mut RgbBuffer,
+    pose: SpritePose,
+    anchor: Point,
+    agent: &AgentSlot,
+    pack: &Pack,
+    cache: &mut FrameCache,
+    now: SystemTime,
+) -> Option<Size> {
+    let CharacterFrame {
+        frame: cached,
+        blit_at: _,
+        rise: _,
+    } = character_frame(
+        pose,
+        agent,
+        pack,
+        crate::render_scale::RenderScale::ONE,
+        cache,
+        now,
+    )?;
+    let size = Size {
+        w: cached.width(),
+        h: cached.height(),
+    };
+    blit_frame(cached, anchor.x, anchor.y, buf);
+    Some(size)
+}
+
+/// Queue every room wall's bands into the y-sort, emitted after the fixtures so
+/// the glass also covers a chair tied with a band's row.
+pub(super) fn enqueue_room_walls<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
+    for &piece in &layout.wall_pieces {
+        for (rows, depth) in piece.sort_bands() {
+            drawables.push(Drawable {
+                anchor_y: depth,
+                // A character tied with a band's row still paints behind the glass.
+                layer: Layer::Over,
+                kind: DrawableKind::RoomWall { piece, rows },
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::layout::DESK_W;
     use crate::pet::PetKind;
+
+    /// The 1x tower and sheet art are the classic's: a frame per tier up to
+    /// [`MAX_TIER`](crate::token_meter::MAX_TIER), each [`STACK_PX_PER_TIER`]
+    /// rows a tier and [`STACK_W`] wide, the full tower a column wider for its
+    /// teeter.
+    #[test]
+    fn the_1x_token_art_is_the_classics_stack() {
+        let pack = crate::embedded_pack::test_default_pack();
+        let tower = pack.animation("token_tower").expect("the tower");
+        let max = crate::token_meter::MAX_TIER;
+        assert_eq!(tower.frames().len(), usize::from(max));
+        for (tier, f) in (1..=max).zip(tower.frames()) {
+            let teeter = u16::from(tier == max);
+            assert_eq!(
+                (f.width(), f.height()),
+                (STACK_W + 1, u16::from(tier) * STACK_PX_PER_TIER),
+                "tier {tier}"
+            );
+            let drawn = |x: u16, y: u16| f.get(x, y).copied().flatten().is_some();
+            assert!(
+                (0..f.height()).all(|y| {
+                    let dx = if y == 0 { teeter } else { 0 };
+                    (0..f.width()).all(|x| drawn(x, y) == (dx..dx + STACK_W).contains(&x))
+                }),
+                "tier {tier} is not {STACK_W} wide with its teeter"
+            );
+        }
+        let sheet = &pack.animation("token_sheet").expect("the sheet").frames()[0];
+        assert_eq!((sheet.width(), sheet.height()), (STACK_W, 1));
+    }
+
+    /// The 1x desk arts mark the cells the classic stands its props on, each
+    /// the prop's foot: the cup's under [`desk_cup_at`], the tower's at
+    /// [`STACK_X_OFF`] on [`STACK_BASE_DY`].
+    #[test]
+    fn the_1x_desk_arts_mark_the_classics_prop_cells() {
+        let pack = crate::embedded_pack::test_default_pack();
+        let cup_h = pack.animation("desk_cup").expect("the cup").frames()[0].height();
+        let desk = Point { x: 20, y: 30 };
+        for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
+            let name = crate::embedded_pack::desk_sprite_name(facing);
+            let anim = pack.animation(name).expect("the desk");
+            let top = desk_art_top(&pack, desk.y, anim.frames()[0].height());
+            let mark = |n: &str| {
+                let m = anim.marks(0).iter().find(|m| m.name() == n)?;
+                Some(Point {
+                    x: desk.x + m.x(),
+                    y: top + m.y(),
+                })
+            };
+            let cup = desk_cup_at(desk);
+            assert_eq!(
+                mark("cup"),
+                Some(Point {
+                    x: cup.x,
+                    y: cup.y + cup_h - 1
+                }),
+                "{name}'s cup"
+            );
+            assert_eq!(
+                mark("tower"),
+                Some(Point {
+                    x: desk.x + STACK_X_OFF,
+                    y: desk.y + STACK_BASE_DY
+                }),
+                "{name}'s tower"
+            );
+        }
+    }
 
     #[test]
     fn steam_anchor_sits_within_the_coffee_machine_columns() {
@@ -665,6 +725,7 @@ mod tests {
                     token_tier,
                     sheet_fall,
                     effects: Vec::new(),
+                    scanline: 0,
                 },
             },
         }
@@ -691,7 +752,7 @@ mod tests {
         let render = |cup, ms| {
             let mut buf = RgbBuffer::filled(60, 60, bg);
             let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms);
-            let steam = super::super::sim::cup_effects(desk, cup, now);
+            let steam = crate::sim::cup_effects(desk, cup, now);
             paint_desk_coffee(&mut buf, desk, cup, &steam, th);
             buf.as_slice().iter().filter(|&&c| c != bg).count()
         };
@@ -1004,7 +1065,7 @@ mod tests {
         let pos = Point { x: 30, y: 40 };
         let mut render = |anim_name: &'static str| {
             let mut buf = RgbBuffer::filled(60, 60, Rgb { r: 0, g: 0, b: 0 });
-            let effects = super::super::sim::pet_effects(PetKind::Cat, pos, anim_name, None, now);
+            let effects = crate::sim::pet_effects(PetKind::Cat, pos, anim_name, None, now);
             let d = Drawable {
                 anchor_y: pos.y,
                 layer: Layer::Figure,

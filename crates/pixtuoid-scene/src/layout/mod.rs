@@ -371,13 +371,18 @@ pub const ELEVATOR_W: u16 = 16;
 pub const ELEVATOR_H: u16 = 14;
 
 /// The buffer rows a half-block terminal cell shows.
-const CELL_ROWS: u16 = 2;
+pub(crate) const CELL_ROWS: u16 = 2;
 
 /// The rows over a door whose top row is `door_y` that the terminal's floor
 /// indicator writes its text across: the whole cell above the door's.
 pub fn floor_indicator_rows(door_y: u16) -> std::ops::Range<u16> {
     let top = (door_y / CELL_ROWS).saturating_sub(1) * CELL_ROWS;
     top..top + CELL_ROWS
+}
+
+/// What the floor indicator says on floor `floor` (one-based), every painter's.
+pub fn floor_indicator_text(floor: usize) -> String {
+    format!("\u{25b2} F{floor} \u{25bc}")
 }
 
 /// Where the exit sign hangs over a door at `door`: centred above its floor

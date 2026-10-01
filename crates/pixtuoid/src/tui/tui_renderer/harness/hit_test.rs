@@ -94,7 +94,7 @@ fn click_hit_test_follows_a_walking_sprite() {
     let mut r = build(192, 80, vec![]);
     r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout");
-    let seat = pixtuoid_scene::pixel_painter::seated_anchor_facing(
+    let seat = pixtuoid_scene::sim::seated_anchor_facing(
         layout.home_desks[0],
         pixtuoid_scene::layout::CHARACTER_SPRITE_W,
         layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(0)),
@@ -127,8 +127,8 @@ fn drawn(
     now: SystemTime,
 ) -> AgentFrame {
     let layout = r.cached_layout().expect("rendered layout");
-    let observed = pixtuoid_scene::floor::FloorSession::new()
-        .observe(
+    let stepped = pixtuoid_scene::floor::FloorSession::new()
+        .step(
             pixtuoid_scene::floor::FloorInputs {
                 scene,
                 pack: pack(),
@@ -141,8 +141,8 @@ fn drawn(
                 h: layout.buf_h,
             },
         )
-        .expect("observable floor");
-    let frame = &observed.frame;
+        .expect("steppable floor");
+    let frame = &stepped.frame;
     let c = frame
         .characters
         .iter()
@@ -186,7 +186,7 @@ fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_anchor() {
     let mut r = build(cols, rows, vec![]);
     r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout").clone();
-    let seat = pixtuoid_scene::pixel_painter::seated_anchor_facing(
+    let seat = pixtuoid_scene::sim::seated_anchor_facing(
         layout.home_desks[0],
         pixtuoid_scene::layout::CHARACTER_SPRITE_W,
         layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(0)),
