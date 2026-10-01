@@ -499,42 +499,12 @@ fn paint_pieces(
         let y1 = list.scale.to_buffer(piece.span.y1 + 1).min(buf.height());
         let epoch = buf.begin_writes();
         paint_piece(&piece.kind, list.pack, list.theme, list.scale, cache, buf);
-        let drawn = (list.pack, list.scale);
-        let art_cache = &mut cache.cutaway_art;
-        let glowing = match piece.kind {
-            PieceKind::Desk { at, art, screen } => {
-                mark_glow(at, art, screen, drawn, art_cache, &mut marks)
-            }
-            PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => {
-                mark_bulbs(Placed::Centred(at), art, drawn, art_cache, &mut marks)
-            }
-            PieceKind::Hung { at, sprite } => mark_bulbs(
-                Placed::TopLeft(at),
-                Art::still(sprite),
-                drawn,
-                art_cache,
-                &mut marks,
-            ),
-            PieceKind::Door { at, frame } => mark_bulbs(
-                Placed::TopLeft(at),
-                Art {
-                    sprite: DOOR_SPRITE,
-                    frame,
-                    flip: Flip::None,
-                },
-                drawn,
-                art_cache,
-                &mut marks,
-            ),
-            PieceKind::Glass { .. }
-            | PieceKind::WallSeg { .. }
-            | PieceKind::Chair { .. }
-            | PieceKind::PropBand { .. }
-            | PieceKind::Table { .. }
-            | PieceKind::Character { .. }
-            | PieceKind::Neon { .. }
-            | PieceKind::Clock { .. } => false,
-        };
+        let glowing = mark(
+            &piece.kind,
+            (list.pack, list.scale),
+            &mut cache.cutaway_art,
+            &mut marks,
+        );
         for y in y0..y1 {
             for x in x0..x1 {
                 if !buf.written_in(x, y, epoch) {
@@ -588,6 +558,48 @@ fn paint_pieces(
 const NO_MARK: pixtuoid_core::sprite::Rgb = pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 };
 const EMISSIVE_MARK: pixtuoid_core::sprite::Rgb = pixtuoid_core::sprite::Rgb { r: 1, g: 0, b: 0 };
 const SHADED_MARK: pixtuoid_core::sprite::Rgb = pixtuoid_core::sprite::Rgb { r: 2, g: 0, b: 0 };
+
+/// Mark into `marks` where `kind` glows of its own, never outside its span,
+/// the most [`paint_pieces`] clears; whether it marked any.
+fn mark(
+    kind: &PieceKind,
+    drawn: (&Pack, RenderScale),
+    art_cache: &mut ArtCache,
+    marks: &mut RgbBuffer,
+) -> bool {
+    match *kind {
+        PieceKind::Desk { at, art, screen } => mark_glow(at, art, screen, drawn, art_cache, marks),
+        PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => {
+            mark_bulbs(Placed::Centred(at), art, drawn, art_cache, marks)
+        }
+        PieceKind::Hung { at, sprite } => mark_bulbs(
+            Placed::TopLeft(at),
+            Art::still(sprite),
+            drawn,
+            art_cache,
+            marks,
+        ),
+        PieceKind::Door { at, frame } => mark_bulbs(
+            Placed::TopLeft(at),
+            Art {
+                sprite: DOOR_SPRITE,
+                frame,
+                flip: Flip::None,
+            },
+            drawn,
+            art_cache,
+            marks,
+        ),
+        PieceKind::Glass { .. }
+        | PieceKind::WallSeg { .. }
+        | PieceKind::Chair { .. }
+        | PieceKind::PropBand { .. }
+        | PieceKind::Table { .. }
+        | PieceKind::Character { .. }
+        | PieceKind::Neon { .. }
+        | PieceKind::Clock { .. } => false,
+    }
+}
 
 /// Mark into `marks` where the desk [`paint_desk`] drew at `at` glows of its own:
 /// its screen, emissive when on and shaded when off, and its lamp's bulb. Each
@@ -4826,6 +4838,66 @@ S B B B B B B S
         }
         assert!(lights > 0, "the night office has no lights");
         assert!(lit > 0, "no light lifted a pixel, so this pins nothing");
+    }
+
+    /// [`mark`] writes nothing outside the piece's span, at every scale: a lit
+    /// and a dark screen, a desk lamp's bulb, the wall decor's, a floor lamp's
+    /// and an open elevator's.
+    #[test]
+    fn a_piece_marks_its_glow_only_inside_its_span() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (seated, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        let lively = lively_office();
+        let open = SimFrame {
+            door_frame: 2,
+            ..empty_frame(&lively)
+        };
+        let mut marked = std::collections::BTreeSet::new();
+        for (layout, frame) in [
+            (&seated, frames.last().expect("a seated frame")),
+            (&seated, &frames[0]),
+            (&lively, &open),
+        ] {
+            for s in [1, 3, pack.max_density_variant().get()] {
+                let scale = RenderScale::new(s).expect("nonzero");
+                let office = Office {
+                    layout,
+                    pack: &pack,
+                    theme,
+                    scale,
+                };
+                let list = list_at(frame, office, 23);
+                let (w, h) = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
+                let mut art = ArtCache::default();
+                for p in list.pieces() {
+                    let mut marks = RgbBuffer::filled(w, h, NO_MARK);
+                    if mark(&p.kind, (&pack, scale), &mut art, &mut marks) {
+                        marked.insert(kind_name(&p.kind));
+                    }
+                    let stray = marks.as_slice().iter().enumerate().find(|&(i, &c)| {
+                        let (x, y) = (
+                            scale.logical((i % usize::from(w)) as u16),
+                            scale.logical((i / usize::from(w)) as u16),
+                        );
+                        c != NO_MARK
+                            && !((p.span.x0..=p.span.x1).contains(&x)
+                                && (p.span.y0..=p.span.y1).contains(&y))
+                    });
+                    assert_eq!(
+                        stray.map(|(i, _)| i),
+                        None,
+                        "{} at scale {s} marked outside {:?}",
+                        kind_name(&p.kind),
+                        p.span
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            marked.into_iter().collect::<Vec<_>>(),
+            ["desk", "door", "hung decor", "prop"],
+            "a kind that marks went unchecked"
+        );
     }
 
     /// The cutaway's sign glows only where the sign is drawn, and its lamps
