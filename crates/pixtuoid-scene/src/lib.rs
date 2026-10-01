@@ -52,6 +52,7 @@ pub mod footer;
 #[doc(hidden)]
 pub mod frame_cache;
 pub(crate) mod glass;
+pub(crate) mod glass_weather;
 pub(crate) mod ground;
 pub mod layout;
 pub(crate) mod lighting;

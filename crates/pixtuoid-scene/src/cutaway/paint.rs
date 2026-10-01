@@ -10,6 +10,7 @@ use crate::atmosphere::Moment;
 use crate::cutaway::order::{Span, depth_sort};
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::cutaway::shade::{Ramp, fill, slab};
+use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, DESK_H, Depth, Fixture, FixtureKind, Layer, Layout, Point, Size, Station, Tie,
 };
@@ -918,7 +919,7 @@ fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<
         moment,
     };
     let mut order: Vec<(Span, PieceKind)> = Vec::new();
-    push_windows(office, moment, &mut order);
+    push_windows(office, moment, &GlassWeather::of(moment), &mut order);
     let carried = push_characters(frame, office, moment.now, &mut order);
     for fixture in layout.fixtures() {
         push_fixture(fixture, build, &carried, &mut order);
@@ -2090,12 +2091,17 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, pen: Pen, buf:
 
 /// Queue each window's glass as a piece: what it looks out on — the one city
 /// ([`CityStrip`]) on the pen's art grid over a sky dithered from its zenith
-/// colour to its horizon's — resolved when the list is built, at the very back of the order, so
-/// the view changes with the sky and the city's lights without touching the
+/// colour to its horizon's, under `weather` — resolved when the list is built, at the very back of the order, so
+/// the view changes with the sky, the weather and the city's lights without touching the
 /// backdrop.
 ///
 /// [`CityStrip`]: crate::skyline::CityStrip
-fn push_windows(office: Office<'_>, moment: &Moment, order: &mut Vec<(Span, PieceKind)>) {
+fn push_windows(
+    office: Office<'_>,
+    moment: &Moment,
+    weather: &GlassWeather,
+    order: &mut Vec<(Span, PieceKind)>,
+) {
     let Office {
         layout,
         pack,
@@ -2126,7 +2132,7 @@ fn push_windows(office: Office<'_>, moment: &Moment, order: &mut Vec<(Span, Piec
         };
         let (w, h) = (bay.w * d, window_h * d);
         let (x0, y0) = (pen.art(bay.x).0, pen.art(rows.start).0);
-        let px = (0..h)
+        let mut px: Vec<_> = (0..h)
             .flat_map(|ay| (0..w).map(move |ax| (ax, ay)))
             .map(|(ax, ay)| {
                 if crate::layout::window_frame(ax / d, ay / d, size) {
@@ -2147,6 +2153,23 @@ fn push_windows(office: Office<'_>, moment: &Moment, order: &mut Vec<(Span, Piec
                 }))
             })
             .collect();
+        if let Some((veil, alpha)) = weather.veil {
+            for c in px.iter_mut().flatten() {
+                *c = crate::composite::blend_rgb(*c, veil, alpha);
+            }
+        }
+        // The glass starts a unit in from the window's top-left frame; a mark
+        // that lands on the mullion or transom stays behind it.
+        let glass = Size {
+            w: bay.w.saturating_sub(2),
+            h: glass_h,
+        };
+        for m in weather.marks(bay.idx, glass, d) {
+            let (ax, ay) = (m.x + d, m.y + d);
+            if let Some(Some(c)) = px.get_mut(usize::from(ay) * usize::from(w) + usize::from(ax)) {
+                *c = m.over(*c, (x0 + ax, y0 + ay));
+            }
+        }
         order.push((
             Span::new(bay.x, rows.start, bay.w, window_h, 0).with_depth(0),
             PieceKind::Glass {
@@ -4206,7 +4229,9 @@ pub(crate) mod tests {
         let pen = Pen::for_pack(scale, &pack);
         let d = pen.art(1).0;
         let now = std::time::UNIX_EPOCH;
-        let look = crate::atmosphere::Look::resolve(&crate::sky::Sky::at(now), theme);
+        // Clear, so no weather lies over the city and the sky.
+        let sky = crate::sky::Sky::at_with(now, crate::sky::Weather::Clear);
+        let look = crate::atmosphere::Look::resolve(&sky, theme);
         let mut buf = RgbBuffer::filled(
             scale.to_buffer(layout.buf_w),
             scale.to_buffer(layout.buf_h),
@@ -4214,6 +4239,7 @@ pub(crate) mod tests {
         );
         paint_backdrop(&layout, theme, scale, pen, &mut buf);
         let mut order = Vec::new();
+        let moment = Moment::resolve(sky, theme, 0.0, now);
         push_windows(
             Office {
                 layout: &layout,
@@ -4221,7 +4247,8 @@ pub(crate) mod tests {
                 theme,
                 scale,
             },
-            &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
+            &moment,
+            &GlassWeather::of(&moment),
             &mut order,
         );
         assert_eq!(
@@ -4239,11 +4266,10 @@ pub(crate) mod tests {
         let rows = crate::layout::window_rows(layout.wall_band_h());
         let window_h = rows.end - rows.start;
         let run = crate::layout::window_run(layout.buf_w);
-        let sky = crate::sky::Sky::at(now);
         let city = crate::skyline::CityStrip::draw(
             &pack,
             (run.end - run.start, crate::layout::glass_rows(window_h)),
-            &Moment::resolve(sky, theme, 0.0, now),
+            &moment,
             theme,
             pixtuoid_core::sprite::format::Density::new(d).expect("nonzero"),
         );
@@ -4285,6 +4311,100 @@ pub(crate) mod tests {
             }
         }
         assert!(glass > 0 && buildings > 0, "windows, and a city in them");
+    }
+
+    /// The glass `push_windows` queues for `layout` at `moment` under
+    /// `weather`, at the densest scale.
+    fn glass_views(layout: &Layout, moment: &Moment, weather: &GlassWeather) -> Vec<WindowView> {
+        let pack = test_default_pack();
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let mut order = Vec::new();
+        push_windows(
+            Office {
+                layout,
+                pack: &pack,
+                theme: &crate::theme::NORMAL,
+                scale,
+            },
+            moment,
+            weather,
+            &mut order,
+        );
+        order
+            .into_iter()
+            .map(|(_, kind)| match kind {
+                PieceKind::Glass { view } => view,
+                other => panic!("a window is glass: {other:?}"),
+            })
+            .collect()
+    }
+
+    fn moment_at(w: crate::sky::Weather, now: std::time::SystemTime) -> Moment {
+        Moment::resolve(
+            crate::sky::Sky::at_with(now, w),
+            &crate::theme::NORMAL,
+            0.0,
+            now,
+        )
+    }
+
+    /// Against the same sky under a clear model, a weather changes only glass
+    /// pixels — never a frame cell, which stays the backdrop's — and every one
+    /// that veils or falls changes some.
+    #[test]
+    fn the_weather_shows_on_the_glass_and_only_there() {
+        use crate::sky::Weather;
+        for (w, h) in [(160, 96), (240, 135)] {
+            let layout = Layout::compute_with_seed(w, h, None, 0).expect("lays out");
+            for hour in [12, 0] {
+                let now = crate::localclock::at_hour(hour);
+                let clear = GlassWeather::of(&moment_at(Weather::Clear, now));
+                for weather in Weather::ALL {
+                    let moment = moment_at(weather, now);
+                    let shown = glass_views(&layout, &moment, &GlassWeather::of(&moment));
+                    let crisp = glass_views(&layout, &moment, &clear);
+                    let mut changed = 0;
+                    for (a, b) in shown.iter().zip(&crisp) {
+                        for (pa, pb) in a.px.iter().zip(&b.px) {
+                            assert_eq!(pa.is_some(), pb.is_some(), "{weather:?} on a frame");
+                            changed += usize::from(pa != pb);
+                        }
+                    }
+                    let shows = weather != Weather::Clear;
+                    assert_eq!(changed > 0, shows, "{weather:?} at {w}x{h} {hour}h");
+                }
+            }
+        }
+    }
+
+    /// The canvas repaints a window only when its fingerprint moves: over one
+    /// sky, the glass weather's tick moves it where something falls and
+    /// nowhere else, and one key always gives one fingerprint.
+    #[test]
+    fn a_window_s_fingerprint_moves_with_the_weather_tick_where_it_falls() {
+        use crate::sky::Weather;
+        let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let at = |w, ms| {
+            moment_at(
+                w,
+                crate::localclock::at_hour(12) + std::time::Duration::from_millis(ms),
+            )
+        };
+        for w in Weather::ALL {
+            let moment = at(w, 5_000);
+            let prints = |ms| -> Vec<u64> {
+                glass_views(&layout, &moment, &GlassWeather::of(&at(w, ms)))
+                    .into_iter()
+                    .map(|view| fingerprint(&PieceKind::Glass { view }))
+                    .collect()
+            };
+            assert_eq!(prints(5_000), prints(5_000), "{w:?}: one key");
+            let falls = matches!(
+                w,
+                Weather::Rain | Weather::Storm | Weather::Snow | Weather::Windy
+            );
+            assert_eq!(prints(5_000) != prints(5_600), falls, "{w:?}");
+        }
     }
 
     #[test]
