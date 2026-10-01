@@ -104,6 +104,11 @@ impl Pen {
         ArtPx(logical.saturating_mul(self.d.get()))
     }
 
+    /// The logical unit art pixel `a` lies in.
+    pub(crate) fn logical(self, a: ArtPx) -> u16 {
+        a.0 / self.d.get()
+    }
+
     /// `a` art pixels, as buffer pixels.
     pub(crate) fn buffer(self, a: ArtPx) -> u16 {
         a.0.saturating_mul(self.k.get())
