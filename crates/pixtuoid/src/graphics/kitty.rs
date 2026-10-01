@@ -6,6 +6,7 @@
     expect(dead_code, reason = "the compositor wires the tiles")
 )]
 
+use miniz_oxide::deflate::{CompressionLevel, compress_to_vec_zlib};
 use ratatui::style::Color;
 use ratatui_image::picker::cap_parser::Parser;
 
@@ -43,14 +44,15 @@ pub(crate) fn image_id(tile: Tile) -> Option<u32> {
     tile.index.checked_add(1).filter(|&id| id < ID_LIMIT)
 }
 
-/// The escapes that (re)transmit `image` as image `id` and make its virtual
-/// placement over the tile's cells, each wrapped for tmux's passthrough
-/// (tmux(1), `allow-passthrough`) when `tmux`.
+/// The escapes that (re)transmit `image`, zlib-compressed ("Compression"), as
+/// image `id` and make its virtual placement over the tile's cells, each
+/// wrapped for tmux's passthrough (tmux(1), `allow-passthrough`) when `tmux`.
 ///
 /// `q=2` on every chunk: a reply would arrive as input mid-frame.
 pub(crate) fn transmit(id: u32, image: &TileImage, tmux: bool) -> Vec<u8> {
     let (start, esc, end) = Parser::tmux_start_escape_end(tmux);
-    let data = base64_simd::STANDARD.encode_to_string(&image.rgb);
+    let zlib = compress_to_vec_zlib(&image.rgb, CompressionLevel::BestSpeed as u8);
+    let data = base64_simd::STANDARD.encode_to_string(zlib);
     let chunks = data.as_bytes().chunks(CHUNK);
     let last = chunks.len().saturating_sub(1);
     let mut out = Vec::with_capacity(data.len() + 128);
@@ -65,7 +67,7 @@ pub(crate) fn transmit(id: u32, image: &TileImage, tmux: bool) -> Vec<u8> {
             } = image;
             out.extend_from_slice(
                 format!(
-                    "a=T,U=1,i={id},f=24,s={width},v={height},c={},r={},",
+                    "a=T,U=1,i={id},f=24,o=z,s={width},v={height},c={},r={},",
                     tile.cols, tile.rows
                 )
                 .as_bytes(),
@@ -140,35 +142,100 @@ mod tests {
             .collect()
     }
 
+    fn payloads(bytes: &[u8]) -> (Vec<String>, Vec<u8>) {
+        let all: Vec<_> = escapes(bytes)
+            .iter()
+            .map(|e| e[e.find(';').expect("payload") + 1..e.len() - 2].to_string())
+            .collect();
+        let zlib = base64_simd::STANDARD
+            .decode_to_vec(all.concat())
+            .expect("base64");
+        let rgb = miniz_oxide::inflate::decompress_to_vec_zlib(&zlib).expect("zlib");
+        (all, rgb)
+    }
+
+    fn incompressible(len: usize) -> Vec<u8> {
+        let mut x: u32 = 0x9E37_79B9;
+        (0..len)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                x.to_le_bytes()[0]
+            })
+            .collect()
+    }
+
     #[test]
-    fn a_tile_is_one_quiet_rgb_transmit_with_a_virtual_placement() {
-        assert_eq!(
-            transmit(1, &image(vec![1, 2, 3, 4, 5, 6]), false),
-            b"\x1b_Ga=T,U=1,i=1,f=24,s=2,v=1,c=1,r=1,q=2,m=0;AQIDBAUG\x1b\\"
+    fn a_tile_is_one_quiet_compressed_rgb_transmit_with_a_virtual_placement() {
+        let rgb = vec![1, 2, 3, 4, 5, 6];
+        let out = transmit(1, &image(rgb.clone()), false);
+        let [escape] = escapes(&out).try_into().expect("one escape");
+        assert!(
+            escape.starts_with("\x1b_Ga=T,U=1,i=1,f=24,o=z,s=2,v=1,c=1,r=1,q=2,m=0;"),
+            "{escape:?}"
         );
+        assert!(escape.ends_with("\x1b\\"));
+        assert_eq!(payloads(&out).1, rgb);
     }
 
     /// Every escape but the last carries a whole chunk and says more follow;
     /// the rest name nothing but `m` and `q`.
     #[test]
     fn the_payload_splits_at_the_chunk_size() {
-        let raw = CHUNK / 4 * 3;
-        assert_eq!(escapes(&transmit(1, &image(vec![0; raw]), false)).len(), 1);
-        let two = escapes(&transmit(1, &image(vec![0; raw + 1]), false));
-        assert_eq!(two.len(), 2);
-        let payload = |e: &str| e[e.find(';').expect("payload") + 1..e.len() - 2].len();
-        assert!(two[0].contains(",m=1;"));
-        assert_eq!(payload(&two[0]), CHUNK);
-        assert_eq!(two[1], "\x1b_Gq=2,m=0;AA==\x1b\\");
+        let rgb = incompressible(CHUNK * 2);
+        let out = transmit(1, &image(rgb.clone()), false);
+        let all = escapes(&out);
+        let (chunks, decoded) = payloads(&out);
+        assert_eq!(decoded, rgb);
+        let (last, full) = all.split_last().expect("escapes");
+        assert!(full.len() >= 2);
+        for (escape, chunk) in full.iter().zip(&chunks) {
+            assert!(escape.contains("q=2,m=1;"));
+            assert_eq!(chunk.len(), CHUNK);
+        }
+        for escape in &all[1..] {
+            assert!(escape.starts_with("\x1b_Gq=2,m="));
+        }
+        assert!(last.contains("m=0;"));
+        assert!((1..=CHUNK).contains(&chunks.last().expect("chunk").len()));
+    }
+
+    #[test]
+    fn a_two_colour_tile_compresses_to_a_fraction_of_its_pixels() {
+        let (w, h) = (40_u32, 40_u32);
+        let rgb: Vec<u8> = (0..w * h)
+            .flat_map(|i| {
+                let (x, y) = (i % w, i / w);
+                if (x / 4 + y / 8) % 2 == 0 {
+                    [0x3a, 0x2f, 0x4c]
+                } else {
+                    [0xe8, 0xc1, 0x70]
+                }
+            })
+            .collect();
+        let raw = rgb.len();
+        let tile = TileImage {
+            tile: tile(0, 4, 2),
+            width: w,
+            height: h,
+            rgb,
+        };
+        let sent = transmit(1, &tile, false);
+        assert!(sent.len() < raw / 4, "{} of {raw}", sent.len());
+        assert_eq!(payloads(&sent).1, tile.rgb);
     }
 
     /// Inside tmux each escape rides passthrough, its own ESCs doubled.
     #[test]
     fn inside_tmux_each_escape_is_wrapped() {
-        assert_eq!(
-            transmit(1, &image(vec![1, 2, 3, 4, 5, 6]), true),
-            b"\x1bPtmux;\x1b\x1b_Ga=T,U=1,i=1,f=24,s=2,v=1,c=1,r=1,q=2,m=0;AQIDBAUG\x1b\x1b\\\x1b\\"
-        );
+        let tile = image(incompressible(CHUNK * 2));
+        let plain = escapes(&transmit(1, &tile, false));
+        let wrapped: Vec<u8> = plain
+            .iter()
+            .flat_map(|e| format!("\x1bPtmux;{}\x1b\\", e.replace('\x1b', "\x1b\x1b")).into_bytes())
+            .collect();
+        assert_eq!(transmit(1, &tile, true), wrapped);
     }
 
     /// The spec's own 2x2 example, for image 42.
