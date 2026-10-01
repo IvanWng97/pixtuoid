@@ -28,21 +28,21 @@ const DESK_FRONT_NUMER: u16 = 2;
 /// Denominator of [`DESK_FRONT_NUMER`].
 const DESK_FRONT_DENOM: u16 = 5;
 
-/// How far the key light reaches down the room before the floor falls off.
+/// How far the key light reaches down the room before the ground falls off.
 ///
 /// The windows are the north wall, so the falloff runs north to south; these
-/// bound the dithered transition between the lit and base floor tones.
+/// bound the dithered transition between the lit and base ground tones.
 const GROUND_LIT_NUMER: u16 = 1;
 /// Denominator of [`GROUND_LIT_NUMER`].
 const GROUND_LIT_DENOM: u16 = 3;
 
 /// A carpet tile's side, in logical units: seams on this grid are what turn a
-/// flat tone into a floor you could walk on.
+/// flat tone into ground you could walk on.
 const GROUND_TILE: u16 = 4;
-/// How many ramp stops a seam sits under the floor it crosses.
+/// How many ramp stops a seam sits under the ground it crosses.
 const SEAM_LEVEL: i8 = -1;
-/// The smallest tile, in art pixels, that its seams leave reading as floor;
-/// seams on a smaller one turn the floor to plaid.
+/// The smallest tile, in art pixels, that its seams leave reading as ground;
+/// seams on a smaller one turn the ground to plaid.
 const MIN_SEAMED_TILE: u16 = 8;
 
 /// A rug's lattice pitch, in art pixels: diamonds this far apart.
@@ -385,7 +385,7 @@ fn paint_backdrop(
 }
 
 /// One frame's pieces — the windows' glass, the decor hung on the wall and
-/// everything standing on the floor — built and ordered but not painted.
+/// everything standing on the ground — built and ordered but not painted.
 ///
 /// ONE ordered list, so a character and the desk it sits at resolve against each
 /// other by depth: that order IS the occlusion, and there is no second
@@ -409,7 +409,7 @@ pub(crate) struct DrawList<'a> {
 pub(crate) struct Piece {
     pub(crate) span: Span,
     pub(crate) kind: PieceKind,
-    /// The shadow it casts on the floor ([`ground_shadow`]). Every shadow is
+    /// The shadow it casts on the ground ([`ground_shadow`]). Every shadow is
     /// painted before any piece, so it lies under them all; it may reach past
     /// `span`, but never past [`reach`](Self::reach).
     pub(crate) shadow: Option<crate::ground::Contact>,
@@ -433,7 +433,7 @@ pub(crate) struct LightPiece {
 }
 
 impl Piece {
-    /// Every logical cell painting it touches: its span, and the floor its
+    /// Every logical cell painting it touches: its span, and the ground its
     /// shadow falls on. A repaint of a damaged rect is complete only over the
     /// pieces whose reach meets it.
     pub(crate) fn reach(&self) -> Span {
@@ -983,17 +983,17 @@ fn desk_bulb(
     })
 }
 
-/// Ramp stops a shadow steps the floor at its centre, per unit of
+/// Ramp stops a shadow steps the ground at its centre, per unit of
 /// [`shadow_strength`].
 ///
 /// [`shadow_strength`]: crate::ground::shadow_strength
 const SHADOW_STOPS_PER_STRENGTH: f32 = 6.0;
 
-/// Where a piece meets the floor, as the shadow it casts there: on the row under
+/// Where a piece meets the ground, as the shadow it casts there: on the row under
 /// its south edge, a standing figure's under its feet. A sitter is grounded by
 /// what they sit on, which casts its own: a desk chair a sitter carries, under
 /// the chair. Walls, window glass, the elevator and what hangs on a wall meet
-/// no floor.
+/// no ground.
 fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::ground::Contact> {
     let under = |s: Span| {
         Some(crate::ground::Contact::under(
@@ -1027,7 +1027,7 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
                 under(Span::new(at.x, at.y, w, h, 0))
             }
         }
-        // Only the band that reaches the prop's foot meets the floor.
+        // Only the band that reaches the prop's foot meets the ground.
         PieceKind::PropBand { sprite, rows, .. } => art_size(pack, sprite)
             .filter(|&(_, h)| rows.1 == h)
             .and_then(|_| under(span)),
@@ -1035,7 +1035,7 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
     }
 }
 
-/// Step the floor darker under `shadows`, toward each one's centre: its falloff
+/// Step the ground darker under `shadows`, toward each one's centre: its falloff
 /// at `strength`, rounded to whole ramp stops by
 /// [`nearest`](crate::dither::nearest) on the art grid, over their
 /// [`Depths`](crate::ground::Depths). A shadow is the ground it falls on,
@@ -1229,7 +1229,7 @@ enum Covering {
 }
 
 /// Whether `kind` is a floor covering the backdrop lays ([`paint_backdrop`]):
-/// flat on the floor, so it lies under the shadows cast on it, and never moves.
+/// flat on the ground, so it lies under the shadows cast on it, and never moves.
 fn covering(kind: FixtureKind) -> Option<Covering> {
     use FixtureKind as K;
     match kind {
@@ -1813,7 +1813,7 @@ fn desk_span(
 /// Only this profile draws a density variant (the classic painter's scale is 1,
 /// where `densest_frame` returns the base), so `@Nx` art is authored for this
 /// profile with its whole front; a derived face under it would read as a plank
-/// on the floor.
+/// on the ground.
 fn face_rows(pack: &Pack, art: &str, scale: RenderScale) -> u16 {
     match crate::embedded_pack::densest_frame(pack, art, 0, scale) {
         Some(d) if d.density.get() > 1 => 0,
@@ -1821,7 +1821,7 @@ fn face_rows(pack: &Pack, art: &str, scale: RenderScale) -> u16 {
     }
 }
 
-/// The deepest a noon shadow steps the floor.
+/// The deepest a noon shadow steps the ground.
 #[cfg(test)]
 fn deepest_shadow_stop() -> i8 {
     let stops = crate::ground::shadow_strength(NOON_DARKNESS) * SHADOW_STOPS_PER_STRENGTH;
@@ -2011,7 +2011,7 @@ fn push_characters(
             chair.map(|(span, _)| span),
         );
         let riders = riders(c, &key, (w, at), scale);
-        // Dust lies on the floor under its walker; the rest ride over them.
+        // Dust lies on the ground under its walker; the rest ride over them.
         let ride = |order: &mut Vec<(Span, PieceKind)>, beneath: bool| {
             for r in riders.iter().filter(|r| r.effect.kind.beneath() == beneath) {
                 if let Some(s) = r.span(theme, span.depth) {
@@ -2467,7 +2467,7 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, pen: Pen, buf:
         s,
         theme.surface.wall_trim,
     );
-    // The wall's contact line: the floor under it, a shade step down.
+    // The wall's contact line: the ground under it, a shade step down.
     let mut contact = crate::dither::Stepped::new(crate::cutaway::shade::RAMP_SHADE_LEVEL);
     pen.recolour(
         buf,
@@ -2618,13 +2618,13 @@ fn paint_ground(layout: &Layout, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
     };
     pen.fill(buf, band(0, h.0), base);
 
-    // Anchored at the wall's foot, where the floor begins, not buffer row 0: the
+    // Anchored at the wall's foot, where the ground begins, not buffer row 0: the
     // wall band paints over the top of the buffer, so a lit zone anchored there
     // would start behind it.
     let ground_top = pen.art(layout.wall_band_h()).0;
     let ground_h = h.0.saturating_sub(ground_top);
 
-    // The lit share of the floor: its first half solid, dithering to base by its
+    // The lit share of the ground: its first half solid, dithering to base by its
     // end, then a final fall to dark at the south edge.
     let lit_h = ground_h * GROUND_LIT_NUMER / GROUND_LIT_DENOM;
     pen.fill(buf, band(ground_top, lit_h / 2), lit);
@@ -3617,7 +3617,7 @@ pub(crate) mod tests {
     }
 
     /// A desk's shadow centres on the row just under the one it sorts on: the
-    /// row it meets the floor on. Pinned exactly, as the ordering tests compare
+    /// row it meets the ground on. Pinned exactly, as the ordering tests compare
     /// depths by inequality, which a one-row shift passes.
     #[test]
     fn a_desks_shadow_centres_on_the_row_under_where_it_sorts() {
@@ -4459,7 +4459,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// At 1x a seam every tile would be a quarter of the floor, so there are
+    /// At 1x a seam every tile would be a quarter of the ground, so there are
     /// none: the lit zone is one flat tone.
     #[test]
     fn a_1x_floor_has_no_seams() {
@@ -4486,7 +4486,7 @@ pub(crate) mod tests {
         (pen, buf)
     }
 
-    /// Every rug in the office lies on the floor, the lounge's among them.
+    /// Every rug in the office lies on the ground, the lounge's among them.
     #[test]
     fn every_rug_lies_on_the_floor() {
         let pack = test_default_pack();
@@ -4594,7 +4594,7 @@ pub(crate) mod tests {
         crate::ground::Contact::under(2, 8, 6)
     }
 
-    /// A shadow short of one whole stop still darkens the floor: the falloff
+    /// A shadow short of one whole stop still darkens the ground: the falloff
     /// rounds to its nearest stop, where flooring would drop it.
     #[test]
     fn a_shadow_short_of_one_stop_still_darkens_the_floor() {
@@ -4609,7 +4609,7 @@ pub(crate) mod tests {
         assert!(buf.as_slice().iter().any(|&p| p != WEST));
     }
 
-    /// A shadow is the floor it falls on, darker toward its centre: whole ramp
+    /// A shadow is the ground it falls on, darker toward its centre: whole ramp
     /// stops of that floor's own colour, never a colour of its own.
     #[test]
     fn a_shadow_steps_the_floor_it_falls_on_darker_toward_its_centre() {
@@ -4684,7 +4684,7 @@ pub(crate) mod tests {
         assert_eq!(
             ground_shadow(span, &chair, &pack),
             Some(crate::ground::Contact::under(10, 8, span.y1 + 1)),
-            "centred under it, on the floor row under its south edge"
+            "centred under it, on the ground row under its south edge"
         );
         let (_, h) = art_size(&pack, MEETING_SOFA_NORTH).expect("sofa art");
         let band = |rows| PieceKind::PropBand {
@@ -6116,8 +6116,8 @@ S B B B B B B S
     }
 
     /// At night, a pixel no light reaches is its daylight colour stepped down
-    /// by the room once: a wall's glass over the floor included, which recolours
-    /// the floor it lies on and so must not darken it a second time. A pixel a
+    /// by the room once: a wall's glass over the ground included, which recolours
+    /// the ground it lies on and so must not darken it a second time. A pixel a
     /// light reaches is lifted back toward daylight, never past.
     #[test]
     fn the_night_room_is_its_daylight_stepped_down_once() {
@@ -7414,7 +7414,7 @@ S B B B B B B S
     }
 
     /// Every fixture the roster yields is drawn: queued as a piece of the list,
-    /// or laid by the backdrop as a covering, over the floor. Every kind the
+    /// or laid by the backdrop as a covering, over the ground. Every kind the
     /// roster has is met on some office.
     #[test]
     fn the_cutaway_draws_every_fixture_the_roster_yields() {
@@ -7666,7 +7666,7 @@ S B B B B B B S
         assert!(booths > 0, "the layouts place a phone booth");
     }
 
-    /// Wall decor that stands on the floor sorts among the floor's pieces, so a
+    /// Wall decor that stands on the ground sorts among the ground's pieces, so a
     /// figure north of a whiteboard between pods goes behind it; decor that
     /// only hangs on the band is left to the backdrop.
     #[test]

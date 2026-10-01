@@ -22,7 +22,7 @@ const MEETING_RUG_OVERHANG: u16 = 8;
 
 impl MeetingTrio {
     /// The rug under this trio's table, reaching from sofa to sofa but no
-    /// further than the table's distance to `ground_end`, the row its floor ends
+    /// further than the table's distance to `ground_end`, the row the ground ends
     /// at (plus the same overhang).
     pub(crate) fn rug(&self, ground_end: u16) -> Bounds {
         let [north, south] = self.sofas;

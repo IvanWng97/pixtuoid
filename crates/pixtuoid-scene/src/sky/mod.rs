@@ -532,10 +532,10 @@ impl Sky {
             BodyKind::Moon => 0.0,
         };
         let interior = (e.lum * (direct_eff * K_BEAM + a.diffuse * K_FILL)).clamp(0.0, 1.0);
-        let night_floor = city_bounce(self.weather) * self.nightfall;
+        let night_min = city_bounce(self.weather) * self.nightfall;
         InteriorLight {
             interior,
-            exterior: (interior + night_floor).min(1.0),
+            exterior: (interior + night_min).min(1.0),
         }
     }
 }
