@@ -263,10 +263,10 @@ pub struct SceneLayout {
     /// individual pieces via the accessors ([`Self::couch_sprite_center`],
     /// [`Self::floor_lamp`], …).
     pub lounge: Option<Lounge>,
-    /// The office entry-door position, or `None` if none fits.
-    pub door: Option<Point>,
+    /// The office entry door's top-left cell, in the window wall's last slot.
+    pub door: Point,
     /// The walkable cell just inside the door — the entry/exit waypoint.
-    pub door_threshold: Option<Point>,
+    pub door_threshold: Point,
     /// Meeting rooms in floor order — the index IS the `room_id` every
     /// waypoint and painter joins on.
     pub meeting_rooms: Vec<MeetingRoom>,

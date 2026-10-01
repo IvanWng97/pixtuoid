@@ -705,7 +705,7 @@ impl SceneLayout {
                     coat_rack_rect_at(pole),
                 ))
             }))
-            .chain(self.door_rect().map(|visual| Fixture {
+            .chain(std::iter::once(self.door_rect()).map(|visual| Fixture {
                 kind: FixtureKind::Door,
                 at: top_left(visual),
                 visual,
@@ -764,8 +764,7 @@ impl SceneLayout {
                     .iter()
                     .map(|p| centred(p.pos, furniture_def(p.kind.furniture()).visual)),
             )
-            .chain(self.door_rect())
-            .chain(std::iter::once(NEON_PANEL))
+            .chain([self.door_rect(), NEON_PANEL])
             .chain(self.clock_pos().map(|at| boxed(at, CLOCK)))
             .collect();
         let clear = |board: Bounds| {
