@@ -373,12 +373,14 @@ fn disc_sweeps_across_a_single_window_buffer() {
 
 #[test]
 fn moon_disc_shows_at_night() {
-    // 21:00, not the small hours: those sit near the night arc's OWN apex and
-    // clip above the glass exactly like a midday sun.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
-    let clear = render_office_at(21, Weather::Clear, buf_w, top_wall_h);
-    let overcast = render_office_at(21, Weather::Overcast, buf_w, top_wall_h);
+    let (day, hour) = (1..=31u32)
+        .filter(|&d| Sky::at(crate::localclock::on_day(d, 0)).moon_phase() > 0.9)
+        .find_map(|d| low_moon(d, buf_w, top_wall_h).map(|(h, _)| (d, h)))
+        .expect("a near-full moon shows low some January night");
+    let clear = render_office_on(day, hour, Weather::Clear, buf_w, top_wall_h);
+    let overcast = render_office_on(day, hour, Weather::Overcast, buf_w, top_wall_h);
     let clear_n = count_cool_bright(&clear, top_wall_h);
     let overcast_n = count_cool_bright(&overcast, top_wall_h);
     assert!(
@@ -394,12 +396,19 @@ fn moon_disc_shows_at_night() {
 
 #[test]
 fn stars_appear_on_a_clear_night_and_vanish_under_overcast() {
-    // 02:00 sits near the moon's night-arc apex, so its disc clips above the
-    // glass — the only bright thing left in the upper sky band is a star.
+    // A moonless small hour: the only bright thing in the upper sky band is a star.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
-    let clear = render_office_at(2, Weather::Clear, buf_w, top_wall_h);
-    let overcast = render_office_at(2, Weather::Overcast, buf_w, top_wall_h);
+    let day = (1..=31u32)
+        .find(|&d| {
+            Sky::at_with(crate::localclock::on_day(d, 2), Weather::Clear)
+                .emitter()
+                .altitude
+                <= 0.0
+        })
+        .expect("a moonless 02:00 some January night");
+    let clear = render_office_on(day, 2, Weather::Clear, buf_w, top_wall_h);
+    let overcast = render_office_on(day, 2, Weather::Overcast, buf_w, top_wall_h);
     let clear_n = count_faint_white(&clear, top_wall_h);
     let overcast_n = count_faint_white(&overcast, top_wall_h);
     assert!(
@@ -664,7 +673,7 @@ fn pane(theme: &'static crate::theme::Theme, hour: u32, w: Weather) -> f32 {
     )
 }
 
-/// Local midnight — the moon arc's apex hour. It is NOT the brightest RENDERED
+/// Local midnight. It is NOT the brightest RENDERED
 /// night pane (the pre-dawn twilight tint reads brighter on every theme), which
 /// is why the two ordering pins below sweep [`night_hours`] instead of sampling
 /// this one.

@@ -319,6 +319,39 @@ impl PaneSky<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A moon below the horizon shows no disc, and one up fades in with the
+    /// night rather than switching on at dusk.
+    #[test]
+    fn a_moon_shows_only_when_up_and_fades_in_after_dusk() {
+        use crate::sky::Weather;
+        let sky = |d, h| crate::sky::Sky::at_with(crate::localclock::on_day(d, h), Weather::Clear);
+        let disc = |s: &crate::sky::Sky| Disc::of(s, 96, 40);
+        let new_moon = (1..=31u32)
+            .find(|&d| sky(d, 23).moon_phase() < 0.05)
+            .expect("a new moon in January");
+        assert!(
+            disc(&sky(new_moon, 23)).is_none(),
+            "a new moon is down at 23:00"
+        );
+        let full = (1..=31u32)
+            .find(|&d| sky(d, 23).moon_phase() > 0.95)
+            .expect("a full moon in January");
+        let dusk = crate::sky::Sky::at_with(
+            crate::localclock::on_day(full, 20) + std::time::Duration::from_secs(20 * 60),
+            Weather::Clear,
+        );
+        let (dusk, late) = (
+            disc(&dusk).expect("a full moon is up just after dusk"),
+            disc(&sky(full, 23)).expect("and late in the night"),
+        );
+        assert!(
+            dusk.vis < late.vis,
+            "{} at dusk vs {} at 23:00",
+            dusk.vis,
+            late.vis
+        );
+    }
     use crate::sky::Weather;
 
     fn view(hour: u32) -> SkyView {

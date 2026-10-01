@@ -205,7 +205,8 @@ pub(crate) struct Emitter {
     pub(crate) emitter_lum: f32,
 }
 
-// Sun rides the arc over its up-span; the moon owns the complementary night span.
+// The sun rides the arc over its up-span; the moon's span moves with its age
+// (`moon_arc`), and a full moon's is the night.
 const SUN_RISE_H: f32 = 5.0;
 const SUN_SET_H: f32 = 20.0;
 /// How long a moon stays up: the night's length, so a full moon rises at dusk
