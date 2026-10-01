@@ -620,7 +620,7 @@ mod tests {
                     theme: normal(),
                     scale: h.scale,
                 };
-                let list = frame_list(&both, office, FloorMeta::ground(), Hovering::now());
+                let list = frame_list(&both, office, clear_ground(), Hovering::now());
                 // Known by its text: the sitter's badge reads otherwise.
                 list.pieces().iter().find(|p| {
                     matches!(&p.kind, crate::cutaway::paint::PieceKind::Badge { badge } if badge.text == NEIGHBOUR)
@@ -672,7 +672,7 @@ mod tests {
                 theme: normal(),
                 scale: h.scale,
             };
-            let list = frame_list(frame, office, FloorMeta::ground(), Hovering::now());
+            let list = frame_list(frame, office, clear_ground(), Hovering::now());
             list.pieces()
                 .iter()
                 .find(|p| matches!(p.kind, crate::cutaway::paint::PieceKind::Badge { .. }))
@@ -697,7 +697,7 @@ mod tests {
                 &observed,
                 normal(),
                 h.scale,
-                FloorMeta::ground(),
+                clear_ground(),
                 Hovering::now(),
                 &mut cache,
             )
