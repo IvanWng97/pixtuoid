@@ -140,10 +140,10 @@ pub struct pixtuoid_scene::floor::FloorCtx
 pub pixtuoid_scene::floor::FloorCtx::cache: crate::frame_cache::FrameCache
 pub pixtuoid_scene::floor::FloorCtx::door_anim_max_ms: u64
 pub pixtuoid_scene::floor::FloorCtx::history: pixtuoid_scene::pose::PoseHistory
-pub pixtuoid_scene::floor::FloorCtx::light: pixtuoid_scene::floor::VacancyDim
 pub pixtuoid_scene::floor::FloorCtx::motion: std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, pixtuoid_scene::motion::MotionState>
 pub pixtuoid_scene::floor::FloorCtx::overlay: pixtuoid_core::walkable::OccupancyOverlay
 pub pixtuoid_scene::floor::FloorCtx::router: pixtuoid_scene::pathfind::AStarRouter
+pub pixtuoid_scene::floor::FloorCtx::vacancy_dim: pixtuoid_scene::floor::VacancyDim
 impl pixtuoid_scene::floor::FloorCtx
 pub fn pixtuoid_scene::floor::FloorCtx::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::FloorCtx::frame_layout(&mut self, u16, u16, u64) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::Layout>>
