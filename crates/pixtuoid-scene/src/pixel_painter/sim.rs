@@ -603,7 +603,6 @@ pub(super) fn resolve_characters(
                             // waypoints key on their own index.
                             wp_idx: chitchat::venue_wp_idx(kind, wp, &layout.waypoints),
                             agent_id: agent.agent_id,
-                            anchor: anchor_no_breath,
                             room_id: wp_obj.room_id,
                         });
                     }
@@ -710,8 +709,7 @@ pub(super) fn resolve_characters(
         }
     }
     // ONE fit for every pose arm, on the frame each placement will blit, read by
-    // both the sprite and its badge. The z-key and the chitchat visitor keep
-    // pre-fit geometry.
+    // both the sprite and its badge. The z-key keeps pre-fit geometry.
     let fallback = Size {
         w: char_w,
         h: crate::layout::CHARACTER_SPRITE_H,
