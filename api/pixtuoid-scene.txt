@@ -328,25 +328,6 @@ pub fn pixtuoid_scene::floor::step_floor(&mut pixtuoid_scene::floor::FloorCtx, &
 pub fn pixtuoid_scene::floor::track_for(std::time::SystemTime, pixtuoid_scene::pixel_painter::WeatherPolicy) -> crate::audio::TrackId
 pub fn pixtuoid_scene::floor::waypoint_kind_of(core::option::Option<&pixtuoid_scene::layout::SceneLayout>, usize) -> core::option::Option<pixtuoid_scene::layout::WaypointKind>
 pub mod pixtuoid_scene::layout
-pub enum pixtuoid_scene::layout::Anchor
-pub pixtuoid_scene::layout::Anchor::Center
-pub pixtuoid_scene::layout::Anchor::TopLeft
-impl core::clone::Clone for pixtuoid_scene::layout::Anchor
-pub fn pixtuoid_scene::layout::Anchor::clone(&self) -> pixtuoid_scene::layout::Anchor
-impl core::cmp::Eq for pixtuoid_scene::layout::Anchor
-impl core::cmp::PartialEq for pixtuoid_scene::layout::Anchor
-pub fn pixtuoid_scene::layout::Anchor::eq(&self, &pixtuoid_scene::layout::Anchor) -> bool
-impl core::fmt::Debug for pixtuoid_scene::layout::Anchor
-pub fn pixtuoid_scene::layout::Anchor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::layout::Anchor
-impl core::marker::StructuralPartialEq for pixtuoid_scene::layout::Anchor
-impl core::marker::Freeze for pixtuoid_scene::layout::Anchor
-impl core::marker::Send for pixtuoid_scene::layout::Anchor
-impl core::marker::Sync for pixtuoid_scene::layout::Anchor
-impl core::marker::Unpin for pixtuoid_scene::layout::Anchor
-impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::Anchor
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Anchor
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::Anchor
 pub enum pixtuoid_scene::layout::Facing
 pub pixtuoid_scene::layout::Facing::East
 pub pixtuoid_scene::layout::Facing::North
@@ -487,6 +468,25 @@ impl core::marker::Unpin for pixtuoid_scene::layout::Furniture
 impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::Furniture
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Furniture
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::Furniture
+pub enum pixtuoid_scene::layout::Pivot
+pub pixtuoid_scene::layout::Pivot::Center
+pub pixtuoid_scene::layout::Pivot::TopLeft
+impl core::clone::Clone for pixtuoid_scene::layout::Pivot
+pub fn pixtuoid_scene::layout::Pivot::clone(&self) -> pixtuoid_scene::layout::Pivot
+impl core::cmp::Eq for pixtuoid_scene::layout::Pivot
+impl core::cmp::PartialEq for pixtuoid_scene::layout::Pivot
+pub fn pixtuoid_scene::layout::Pivot::eq(&self, &pixtuoid_scene::layout::Pivot) -> bool
+impl core::fmt::Debug for pixtuoid_scene::layout::Pivot
+pub fn pixtuoid_scene::layout::Pivot::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_scene::layout::Pivot
+impl core::marker::StructuralPartialEq for pixtuoid_scene::layout::Pivot
+impl core::marker::Freeze for pixtuoid_scene::layout::Pivot
+impl core::marker::Send for pixtuoid_scene::layout::Pivot
+impl core::marker::Sync for pixtuoid_scene::layout::Pivot
+impl core::marker::Unpin for pixtuoid_scene::layout::Pivot
+impl core::marker::UnsafeUnpin for pixtuoid_scene::layout::Pivot
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::layout::Pivot
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::layout::Pivot
 pub enum pixtuoid_scene::layout::PlantKind
 pub pixtuoid_scene::layout::PlantKind::Ficus
 pub pixtuoid_scene::layout::PlantKind::Flower
@@ -1079,7 +1079,7 @@ pub const pixtuoid_scene::layout::WALKING_Y_OFF: u16
 pub const pixtuoid_scene::layout::WALL_BAND_TO_TOP_MARGIN: u16
 pub const pixtuoid_scene::layout::WALL_THICK_H: u16
 pub const pixtuoid_scene::layout::WALL_THICK_V: u16
-pub fn pixtuoid_scene::layout::anchored_top_left(pixtuoid_scene::layout::Anchor, pixtuoid_scene::layout::Point, u16, u16) -> pixtuoid_scene::layout::Point
+pub fn pixtuoid_scene::layout::anchored_top_left(pixtuoid_scene::layout::Pivot, pixtuoid_scene::layout::Point, u16, u16) -> pixtuoid_scene::layout::Point
 pub const fn pixtuoid_scene::layout::desk_furniture_def() -> pixtuoid_scene::layout::FurnitureDef
 pub fn pixtuoid_scene::layout::desk_walk_anchor_facing(pixtuoid_scene::layout::Point, pixtuoid_scene::layout::Facing) -> pixtuoid_scene::layout::Point
 pub fn pixtuoid_scene::layout::floor_indicator_rows(u16) -> core::ops::range::Range<u16>
@@ -1087,7 +1087,7 @@ pub fn pixtuoid_scene::layout::floor_indicator_text(usize) -> alloc::string::Str
 pub const fn pixtuoid_scene::layout::furniture_def(pixtuoid_scene::layout::Furniture) -> pixtuoid_scene::layout::FurnitureDef
 pub fn pixtuoid_scene::layout::min_layout_size() -> pixtuoid_scene::layout::Size
 pub fn pixtuoid_scene::layout::seated_foot_cell(pixtuoid_scene::layout::Furniture, pixtuoid_scene::layout::Point) -> core::option::Option<pixtuoid_scene::layout::Point>
-pub fn pixtuoid_scene::layout::z_sort_row(pixtuoid_scene::layout::Anchor, pixtuoid_scene::layout::Point, u16) -> u16
+pub fn pixtuoid_scene::layout::z_sort_row(pixtuoid_scene::layout::Pivot, pixtuoid_scene::layout::Point, u16) -> u16
 pub mod pixtuoid_scene::motion
 pub enum pixtuoid_scene::motion::WanderKind
 pub pixtuoid_scene::motion::WanderKind::Aimless
