@@ -262,7 +262,7 @@ impl ClockReading {
     }
 }
 
-/// Its own decode, not `sky::local_hour_frac`: the hands need the raw
+/// Its own decode, not [`local_hour_frac`]: the hands need the raw
 /// `hour % 12` and `minute`.
 pub(crate) fn clock_reading(now: SystemTime) -> ClockReading {
     let unix_now = now

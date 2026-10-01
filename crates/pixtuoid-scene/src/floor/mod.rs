@@ -896,7 +896,7 @@ const NEON_TUBE_WHITEN: f32 = 0.38;
 const NEON_INTERIOR_TINT: f32 = 0.07;
 /// Map the sim's theme-free `levels` to this frame's colors; how strongly the
 /// halo throws them is the [`Lights`](crate::lighting::Lights)' call.
-pub(crate) fn neon_look(levels: crate::floor::NeonLevels, theme: &Theme) -> NeonLook {
+pub(crate) fn neon_look(levels: NeonLevels, theme: &Theme) -> NeonLook {
     let power = levels.power;
     let hue = theme.ui.neon_brand.mix(theme.ui.neon_alert, levels.alert);
     NeonLook {
