@@ -2678,6 +2678,7 @@ dependencies = [
  "image",
  "insta",
  "libc",
+ "miniz_oxide",
  "objc2-app-kit",
  "open",
  "pixtuoid-core",

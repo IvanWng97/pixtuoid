@@ -193,7 +193,7 @@ fn main() -> Result<()> {
     }
 
     // Transport arithmetic: what a rich Adapter must push per frame.
-    println!("\ntransport cost per frame (uncompressed RGB -> base64, the Kitty/iTerm2 wire):");
+    println!("\ntransport cost per frame (uncompressed RGB -> base64, an upper bound):");
     for (label, w, h) in cases {
         let raw = w as f64 * h as f64 * 3.0;
         let b64 = raw * 4.0 / 3.0;
