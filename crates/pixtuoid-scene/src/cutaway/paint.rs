@@ -160,17 +160,32 @@ pub fn render_cutaway(
     cache: &mut crate::frame_cache::FrameCache,
     buf: &mut RgbBuffer,
 ) -> Vec<CutawayLabel> {
-    let Office {
-        layout,
-        pack,
-        theme,
-        scale,
-    } = office;
-    paint_backdrop(layout, theme, scale, Pen::for_pack(scale, pack), buf);
-    let moment = Moment::resolve(crate::sky::Sky::at(now), theme, floor.altitude, now);
-    let list = build_list(frame, office, &moment, floor.floor_idx);
-    paint_list(&list, cache, buf);
+    let list = frame_list(frame, office, floor, now);
+    paint(office.layout, &list, cache, buf);
     list.labels().collect()
+}
+
+/// `frame`'s [`DrawList`] as `floor` looks at `now`.
+pub(crate) fn frame_list<'a>(
+    frame: &SimFrame,
+    office: Office<'a>,
+    floor: crate::floor::FloorMeta,
+    now: std::time::SystemTime,
+) -> DrawList<'a> {
+    let moment = Moment::resolve(crate::sky::Sky::at(now), office.theme, floor.altitude, now);
+    build_list(frame, office, &moment, floor.floor_idx)
+}
+
+/// Paint `list` whole: `layout`'s backdrop, then the list over it.
+pub(crate) fn paint(
+    layout: &Layout,
+    list: &DrawList<'_>,
+    cache: &mut crate::frame_cache::FrameCache,
+    buf: &mut RgbBuffer,
+) {
+    let pen = Pen::for_pack(list.scale, list.pack);
+    paint_backdrop(layout, list.theme, list.scale, pen, buf);
+    paint_list(list, cache, buf);
 }
 
 /// Everything under the list's pieces, none of which moves within a layout,
@@ -215,13 +230,6 @@ pub(crate) struct DrawList<'a> {
 }
 
 /// One entry of a [`DrawList`].
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the incremental canvas diffs frames by span and fingerprint"
-    )
-)]
 pub(crate) struct Piece {
     pub(crate) span: Span,
     pub(crate) kind: PieceKind,
@@ -242,13 +250,6 @@ pub(crate) struct Piece {
 /// One of the room's lights: what it lifts, over which cells. A change repaints
 /// its span from every light that meets it, which alone light a rect as the
 /// frame does ([`net_pass`](crate::cutaway::light::net_pass)).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the incremental canvas diffs lights by span and fingerprint"
-    )
-)]
 pub(crate) struct LightPiece {
     pub(crate) span: Span,
     pub(crate) view: crate::cutaway::light::LightView,
@@ -259,10 +260,6 @@ impl Piece {
     /// Every logical cell painting it touches: its span, and the floor its
     /// shadow falls on. A repaint of a damaged rect is complete only over the
     /// pieces whose reach meets it.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the incremental canvas damages by reach")
-    )]
     pub(crate) fn reach(&self) -> Span {
         let Some(((x0, y0), (x1, y1))) = self.shadow.map(|c| c.bounds()) else {
             return self.span;
@@ -279,22 +276,18 @@ impl Piece {
 
 impl<'a> DrawList<'a> {
     /// The pieces, back to front.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the incremental canvas walks them")
-    )]
     pub(crate) fn pieces(&self) -> &[Piece] {
         &self.pieces
     }
 
     /// The room's lights, in no order that matters: a pixel's light is the
     /// brightest's, ties to the lowest rank.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the incremental canvas walks them")
-    )]
     pub(crate) fn lights(&self) -> &[LightPiece] {
         &self.lights
+    }
+
+    pub(crate) fn ambient(&self) -> crate::cutaway::light::Ambient {
+        self.ambient
     }
 
     /// Where each drawn agent's badge belongs, in draw order.
@@ -2817,7 +2810,7 @@ fn paint_chair(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::embedded_pack::test_default_pack;
 
@@ -3293,7 +3286,7 @@ mod tests {
     /// `facing`, observed through the real sim every tick of their walk there:
     /// the frames up to the first where they sit, then `seated_ticks` more, and
     /// that desk.
-    fn sit_down(
+    pub(crate) fn sit_down(
         facing: crate::layout::Facing,
         seated_ticks: usize,
     ) -> (Layout, Pack, Vec<SimFrame>, crate::layout::Point) {
@@ -4128,7 +4121,7 @@ mod tests {
 
     /// A frame of an office nobody is in, its room lights full and its sign
     /// calm.
-    fn empty_frame(layout: &Layout) -> SimFrame {
+    pub(crate) fn empty_frame(layout: &Layout) -> SimFrame {
         SimFrame {
             agents: Vec::new(),
             poses: std::collections::HashMap::new(),
@@ -5880,7 +5873,7 @@ S B B B B B B S
 
     /// An office with every moving fixture: an aquarium and a cooler that
     /// loop, an elevator, the sign and the clock.
-    fn lively_office() -> Layout {
+    pub(crate) fn lively_office() -> Layout {
         many_layouts()
             .find(|l| {
                 let kinds: Vec<FixtureKind> = l.fixtures().map(|f| f.kind).collect();
