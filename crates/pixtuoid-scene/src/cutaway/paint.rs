@@ -5804,8 +5804,13 @@ S B B B B B B S
             name: "OpenClaw",
             instance: None,
             state: pixtuoid_core::state::DaemonState::Busy,
-            effects: crate::effects::mascot_bubbles(lobster, 12, 2, std::time::UNIX_EPOCH)
-                .collect(),
+            effects: crate::effects::mascot_bubbles(
+                lobster,
+                12,
+                2,
+                Motion::Full.beat(std::time::UNIX_EPOCH),
+            )
+            .collect(),
             active_sessions: 1,
         }];
         // a second gateway, degraded, nearer the viewer so it sorts last
