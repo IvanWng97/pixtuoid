@@ -354,14 +354,14 @@ pub static DRACULA: Theme = Theme {
             b: 140,
         },
         label_idle: Rgb {
-            r: 98,
-            g: 114,
-            b: 164,
+            r: 150,
+            g: 162,
+            b: 204,
         },
         label_exiting: Rgb {
-            r: 68,
-            g: 71,
-            b: 90,
+            r: 126,
+            g: 136,
+            b: 172,
         },
         tooltip_bg: Rgb {
             r: 30,

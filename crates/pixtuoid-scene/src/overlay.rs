@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::ActivityState;
-use pixtuoid_core::{AgentId, SceneState};
+use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 
 use crate::layout::{DESK_W, Point};
 use crate::pixel_painter::AgentFrame;
@@ -24,7 +24,7 @@ use crate::theme::Theme;
 const LABEL_SEP: char = '\u{b7}';
 
 /// Activity-derived label tone — backend-agnostic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LabelTone {
     Active,
     Waiting,
@@ -70,16 +70,37 @@ pub fn build_overlay(
     drawn: &[AgentFrame],
     hovered: Option<AgentId>,
 ) -> Vec<LabelElement> {
-    let mut label_counts: HashMap<&str, usize> = HashMap::new();
-    for agent in scene.agents.values() {
-        *label_counts.entry(&*agent.label).or_insert(0) += 1;
+    let namesakes = Namesakes::of(scene.agents.values());
+    drawn
+        .iter()
+        .filter_map(|frame| {
+            let agent = scene.agents.get(&frame.agent_id)?;
+            Some(LabelElement {
+                anchor_px: frame.label_anchor,
+                text: namesakes.text(agent),
+                tone: tone_of(agent),
+                hovered: hovered == Some(agent.agent_id),
+            })
+        })
+        .collect()
+}
+
+/// How many agents wear each label: an agent sharing its label carries its
+/// session's suffix, even where the namesake is not drawn.
+pub(crate) struct Namesakes<'a>(HashMap<&'a str, usize>);
+
+impl<'a> Namesakes<'a> {
+    pub(crate) fn of(agents: impl IntoIterator<Item = &'a AgentSlot>) -> Self {
+        let mut counts: HashMap<&str, usize> = HashMap::new();
+        for agent in agents {
+            *counts.entry(&*agent.label).or_insert(0) += 1;
+        }
+        Self(counts)
     }
-    let mut out = Vec::new();
-    for frame in drawn {
-        let Some(agent) = scene.agents.get(&frame.agent_id) else {
-            continue;
-        };
-        let needs_disambig = label_counts.get(&*agent.label).copied().unwrap_or(0) > 1
+
+    /// `agent`'s badge text, disambiguated and truncated, with no marker.
+    pub(crate) fn text(&self, agent: &AgentSlot) -> String {
+        let needs_disambig = self.0.get(&*agent.label).copied().unwrap_or(0) > 1
             && agent.session_id.chars().count() >= 4;
         let raw: std::borrow::Cow<'_, str> = if needs_disambig {
             let id4 = disambig_suffix(&agent.session_id);
@@ -88,24 +109,27 @@ pub fn build_overlay(
             std::borrow::Cow::Borrowed(&*agent.label)
         };
         const LABEL_BUDGET_PAD: u16 = 4;
-        let text = truncate_label(&raw, (DESK_W + LABEL_BUDGET_PAD) as usize).into_owned();
-        let tone = if agent.exiting_at.is_some() {
-            LabelTone::Exiting
-        } else {
-            match &agent.state {
-                ActivityState::Active { .. } => LabelTone::Active,
-                ActivityState::Waiting { .. } => LabelTone::Waiting,
-                ActivityState::Idle => LabelTone::Idle,
-            }
-        };
-        out.push(LabelElement {
-            anchor_px: frame.label_anchor,
-            text,
-            tone,
-            hovered: hovered == Some(agent.agent_id),
-        });
+        truncate_label(&raw, (DESK_W + LABEL_BUDGET_PAD) as usize).into_owned()
     }
-    out
+}
+
+/// `agent`'s badge tone: exiting over whatever it last did.
+pub(crate) fn tone_of(agent: &AgentSlot) -> LabelTone {
+    if agent.exiting_at.is_some() {
+        return LabelTone::Exiting;
+    }
+    match &agent.state {
+        ActivityState::Active { .. } => LabelTone::Active,
+        ActivityState::Waiting { .. } => LabelTone::Waiting,
+        ActivityState::Idle => LabelTone::Idle,
+    }
+}
+
+/// The plate a badge drawn in pixels sits on, so its text keeps one contrast
+/// whatever the room behind it
+/// (`every_badge_tone_reads_on_its_plate_in_every_theme`).
+pub(crate) fn badge_plate(theme: &Theme) -> Rgb {
+    theme.ui.tooltip_bg
 }
 
 /// Fit a label into `budget` chars without losing the `·xxxx` session-id
@@ -387,6 +411,56 @@ mod tests {
         let a = disambig_suffix("/work/client-x/app");
         let b = disambig_suffix("/work/client-y/app");
         assert_ne!(a, b);
+    }
+
+    /// WCAG 2.2's relative luminance
+    /// (<https://www.w3.org/TR/WCAG22/#dfn-relative-luminance>).
+    fn luminance(c: pixtuoid_core::sprite::Rgb) -> f64 {
+        let linear = |v: u8| {
+            let s = f64::from(v) / 255.0;
+            if s <= 0.04045 {
+                s / 12.92
+            } else {
+                ((s + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b)
+    }
+
+    /// WCAG 2.2's contrast ratio (<https://www.w3.org/TR/WCAG22/#dfn-contrast-ratio>).
+    fn contrast(a: pixtuoid_core::sprite::Rgb, b: pixtuoid_core::sprite::Rgb) -> f64 {
+        let (la, lb) = (luminance(a), luminance(b));
+        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+    }
+
+    /// A badge's text is small, never large-scale, so it holds WCAG 2.2 AA's
+    /// 4.5:1 (<https://www.w3.org/TR/WCAG22/#contrast-minimum>) on its plate;
+    /// its source dot is a graphic, held to 3:1
+    /// (<https://www.w3.org/TR/WCAG22/#non-text-contrast>). #873 measured an
+    /// idle badge at 2.05:1 straight on the floor.
+    #[test]
+    fn every_badge_tone_reads_on_its_plate_in_every_theme() {
+        use super::{badge_plate, label_tone_rgb};
+        for theme in crate::theme::ALL_THEMES {
+            let plate = badge_plate(theme);
+            for tone in [
+                LabelTone::Active,
+                LabelTone::Waiting,
+                LabelTone::Idle,
+                LabelTone::Exiting,
+            ] {
+                let ratio = contrast(label_tone_rgb(tone, theme), plate);
+                assert!(ratio >= 4.5, "{} {tone:?}: {ratio:.2}:1", theme.name);
+            }
+            for source in pixtuoid_core::source::registry::REGISTRY {
+                let hue = theme
+                    .source
+                    .by_prefix(source.label_prefix)
+                    .expect("every source has a hue");
+                let ratio = contrast(hue, plate);
+                assert!(ratio >= 3.0, "{} {}: {ratio:.2}:1", theme.name, source.name);
+            }
+        }
     }
 
     #[test]

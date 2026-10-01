@@ -586,6 +586,64 @@ mod tests {
         assert_ne!(canvas.hover_at(area), Some(id));
     }
 
+    /// A badge is a piece of its own: a sitter whose name or state changes
+    /// repaints their badge, and a renamed one nothing else.
+    #[test]
+    fn a_changed_badge_repaints_only_itself() {
+        let h = Hovering::new();
+        let seated = h.frames.last().expect("a seated frame");
+        let plate = |frame: &SimFrame| {
+            let office = Office {
+                layout: &h.layout,
+                pack: &h.pack,
+                theme: normal(),
+                scale: h.scale,
+            };
+            let list = frame_list(frame, office, FloorMeta::ground(), Hovering::now());
+            list.pieces()
+                .iter()
+                .find(|p| matches!(p.kind, crate::cutaway::paint::PieceKind::Badge { .. }))
+                .map(|p| (p.span, p.fingerprint))
+                .expect("a badge")
+        };
+        let mut renamed = seated.clone();
+        renamed.agents[0].label = "cc\u{b7}renamed".into();
+        let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+        h.show(&mut canvas, seated);
+        let observed = ObservedFloor {
+            layout: Arc::clone(&h.layout),
+            frame: renamed.clone(),
+        };
+        let mut cache = crate::frame_cache::FrameCache::new();
+        let size = (
+            h.scale.to_buffer(h.layout.buf_w),
+            h.scale.to_buffer(h.layout.buf_h),
+        );
+        let dirty = canvas
+            .frame(
+                &observed,
+                normal(),
+                h.scale,
+                FloorMeta::ground(),
+                Hovering::now(),
+                &mut cache,
+            )
+            .dirty;
+        let spans = [plate(seated).0, plate(&renamed).0];
+        let want: Vec<Bounds> = spans
+            .iter()
+            .filter_map(|&s| on_buffer(s, h.scale, size))
+            .collect();
+        assert_eq!(dirty, Dirty::Rects(want));
+        let mut waiting = seated.clone();
+        waiting.agents[0].state = pixtuoid_core::state::ActivityState::Waiting {
+            reason: "permission?".into(),
+        };
+        let (was, now) = (plate(seated), plate(&waiting));
+        assert_eq!(was.0, now.0, "the plate stays put");
+        assert_ne!(was.1, now.1, "its tone is in its fingerprint");
+    }
+
     /// A new layout of the same size repaints everything, even one built after
     /// the last was dropped, where the allocator may hand back its address.
     #[test]
