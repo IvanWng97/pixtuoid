@@ -557,6 +557,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_undimmed_frame_is_left_untouched() {
+        let px = pixtuoid_core::sprite::Rgb {
+            r: 201,
+            g: 103,
+            b: 7,
+        };
+        let mut buf = RgbBuffer::filled(3, 2, px);
+        apply_dim(&mut buf, 0.9995);
+        assert!(buf.as_slice().iter().all(|p| *p == px));
+        apply_dim(&mut buf, 0.5);
+        assert!(buf.as_slice().iter().all(|p| *p != px));
+    }
+
+    #[test]
     fn an_offscreen_still_shows_its_scenes_gateway() {
         let t0 = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut scene = SceneState::uniform(16);
