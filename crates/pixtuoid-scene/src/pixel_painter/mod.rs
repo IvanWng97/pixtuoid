@@ -434,7 +434,10 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
     // Every entity gets an `anchor_y` — its floor-touching row — so sorting
     // ascending and painting in order puts things closer to the camera in
     // front: the painter's algorithm on a top-down 2D scene.
-    let pet_pos = frame.pet.map(|pet| enqueue_pet(ctx, pet, &mut drawables));
+    let pet_pos = frame
+        .pet
+        .as_ref()
+        .map(|pet| enqueue_pet(ctx, pet, &mut drawables));
     enqueue_gateway_mascots(&frame.mascots, &mut drawables);
     enqueue_characters(ctx, frame, &mut drawables);
     enqueue_room_walls(ctx.layout, &mut drawables);
@@ -497,9 +500,7 @@ fn enqueue_characters<'a>(
                 pose: seat::SpritePose::of(p, agent, ctx.theme),
                 anchor: p.anchor,
                 label_anchor: p.label_anchor,
-                sleep_z_seed: p.sleep_z_seed,
-                waiting_bubble: p.waiting_bubble,
-                walking_dust_frame: p.walking_dust_frame,
+                effects: &p.effects,
             },
         });
     }
@@ -574,7 +575,7 @@ pub(crate) fn desk_screen_glow(
 /// height.
 fn enqueue_pet<'a>(
     ctx: &PaintCtx<'_>,
-    pet: sim::PetPlacement,
+    pet: &'a sim::PetPlacement,
     drawables: &mut Vec<Drawable<'a>>,
 ) -> PetFrame {
     let pos = pet.pos;
@@ -583,12 +584,11 @@ fn enqueue_pet<'a>(
         anchor_y: z_sort_row(Anchor::Center, pos, pet_h),
         layer: Layer::Figure,
         kind: DrawableKind::Pet {
-            kind: pet.kind,
             pos,
             flip: pet.flip,
             anim_name: pet.anim_name,
             frame_idx: pet.frame_idx,
-            pet_elapsed_ms: pet.petted_ms,
+            effects: &pet.effects,
         },
     });
     PetFrame {
@@ -600,7 +600,7 @@ fn enqueue_pet<'a>(
 
 /// Enqueue the gateway mascots.
 fn enqueue_gateway_mascots<'a>(
-    mascots: &[sim::MascotPlacement],
+    mascots: &'a [sim::MascotPlacement],
     drawables: &mut Vec<Drawable<'a>>,
 ) {
     for (mascot_idx, m) in mascots.iter().enumerate() {
@@ -612,7 +612,7 @@ fn enqueue_gateway_mascots<'a>(
                 pos: m.pos,
                 anim_name: m.anim_name,
                 frame_idx: m.frame_idx,
-                run_count: m.run_count,
+                effects: &m.effects,
                 degraded: m.state == DaemonState::Degraded,
             },
         });
@@ -729,10 +729,18 @@ fn queue_fixtures<'a>(
                     busy: frame.occupied_waypoints.contains(&waypoint),
                 };
                 match station {
-                    Station::PantryCounter => DrawableKind::WaypointPantry {
-                        pos: f.at,
-                        anim: pantry_counter_anim(layout.pantry_counter_size().w),
-                    },
+                    Station::PantryCounter => {
+                        let anim = pantry_counter_anim(layout.pantry_counter_size().w);
+                        DrawableKind::WaypointPantry {
+                            pos: f.at,
+                            anim,
+                            // A fixture, which always steams: nothing for the sim to decide.
+                            steam: crate::effects::steam(
+                                drawable::pantry_steam_at(f.at, anim),
+                                ctx.now,
+                            ),
+                        }
+                    }
                     Station::VendingMachine => appliance(VENDING_MACHINE_SPRITE),
                     Station::Printer => appliance(PRINTER_SPRITE),
                     Station::SnackShelf => DrawableKind::SnackShelf { pos: f.at },

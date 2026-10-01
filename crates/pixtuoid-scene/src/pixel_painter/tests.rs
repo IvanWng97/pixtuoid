@@ -2564,7 +2564,7 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
 
     let render = |slot: &pixtuoid_core::AgentSlot| {
         let mut buf = RgbBuffer::filled(32, 32, black);
-        paint_character_at(
+        let drawn = paint_character_at(
             &mut buf,
             seat::SpritePose {
                 anim_name: "seated",
@@ -2577,6 +2577,13 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
             &pack,
             &mut FrameCache::new(),
             now,
+        );
+        let fx =
+            sim::character_effects(slot, anchor, drawn.map(|s| s.w), sim::Cues::default(), now);
+        super::effects::paint_effects(
+            &mut buf,
+            &fx,
+            crate::theme::theme_by_name("normal").expect("normal theme"),
         );
         buf
     };
@@ -2611,6 +2618,59 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
     let decayed = render(&slot);
     assert!(!has(&decayed, TIP), "stale effort must decay the flame");
     assert!(has(&decayed, EMBER), "…back to ember hair");
+}
+
+/// The sim crowns a Top-burning agent's placement on its post-breath anchor,
+/// centred on its pack frame; a Premium one burns no crown.
+#[test]
+fn a_top_burning_placement_carries_its_crown_on_its_anchor() {
+    use crate::effects::EffectKind;
+    use crate::pose::Pose;
+    use pixtuoid_core::state::EffortObservation;
+    let (mut scene, layout, id, now0, pack) = sim_rig();
+    // A breathing instant, where the post-breath anchor is off the fit.
+    let now = (0..u64::from(u16::MAX))
+        .map(|ms| now0 + std::time::Duration::from_millis(ms))
+        .find(|&t| super::anchors::with_breath(Point { x: 0, y: 1 }, id, t).y == 0)
+        .expect("the breath rises within a cycle");
+    let slot = scene.agents.get_mut(&id).expect("the rig's agent");
+    slot.model = Some("claude-fable-5".into());
+    let crowns = |scene: &SceneState| {
+        let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
+        let poses = HashMap::from([(id, Some(Pose::SeatedThinking))]);
+        let (placements, ..) = sim::resolve_characters(
+            &agents,
+            &poses,
+            &layout,
+            &pack,
+            CHARACTER_SPRITE_W,
+            &HashMap::new(),
+            now,
+        );
+        let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
+        let crowns: Vec<Point> = p
+            .effects
+            .iter()
+            .filter(|e| e.kind == EffectKind::FlameCrown)
+            .map(|e| e.at)
+            .collect();
+        (p, crowns)
+    };
+    assert!(crowns(&scene).1.is_empty(), "Premium must not flame");
+
+    let slot = scene.agents.get_mut(&id).expect("the rig's agent");
+    slot.effort = Some(EffortObservation::new("ultra".into(), now));
+    let (p, crowns) = crowns(&scene);
+    let w = sim::pack_frame_size(&pack, p.anim_name, p.frame_idx)
+        .expect("the pack draws the pose")
+        .w;
+    assert_eq!(
+        crowns,
+        [Point {
+            x: p.anchor.x + w / 2,
+            y: p.anchor.y
+        }]
+    );
 }
 
 #[test]
@@ -2706,12 +2766,16 @@ fn glass_wall_v_clamps_past_right_edge() {
 
 #[test]
 fn pet_hearts_skip_dead_and_faded_hearts() {
-    use super::effects::paint_pet_hearts;
     let bg = Rgb { r: 0, g: 0, b: 0 };
     let cat_pos = Point { x: 20, y: 20 };
     let painted_count = |elapsed_ms: u64| -> usize {
         let mut buf = RgbBuffer::filled(40, 40, bg);
-        paint_pet_hearts(&mut buf, cat_pos, elapsed_ms);
+        let hearts: Vec<_> = crate::effects::pet_hearts(cat_pos, elapsed_ms).collect();
+        super::effects::paint_effects(
+            &mut buf,
+            &hearts,
+            crate::theme::theme_by_name("normal").expect("normal theme"),
+        );
         (0..40u16)
             .flat_map(|y| (0..40u16).map(move |x| (x, y)))
             .filter(|&(x, y)| buf.get(x, y) != bg)
@@ -3453,7 +3517,17 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         petting: None,
     })
     .expect("the cat roams");
-    assert_eq!(roaming.petted_ms, None);
+    let hearts = |p: &sim::PetPlacement| -> Vec<u64> {
+        p.effects
+            .iter()
+            .filter(|e| e.kind == crate::effects::EffectKind::PetHeart)
+            .map(|e| e.phase)
+            .collect()
+    };
+    assert!(
+        hearts(&roaming).is_empty(),
+        "a roaming cat is not being petted"
+    );
 
     let clicked = Point { x: 40, y: 50 };
     let petting = crate::pet::PetState {
@@ -3469,7 +3543,11 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
     .expect("the petted cat");
     assert_eq!(held.pos, clicked);
     assert_eq!(held.anim_name, pet.kind.sit_anim());
-    assert_eq!(held.petted_ms, Some(0));
+    assert_eq!(
+        hearts(&held),
+        [0],
+        "petted just now: its first heart leaves"
+    );
 
     // Held in the canvas's corner, its frame is fitted back on.
     let in_corner = crate::pet::PetState {
@@ -3499,8 +3577,8 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         petting: Some(&upstairs),
     })
     .expect("the cat roams");
-    assert_eq!(
-        elsewhere.petted_ms, None,
+    assert!(
+        hearts(&elsewhere).is_empty(),
         "a petting on another floor leaves this one roaming"
     );
     let a_dog = crate::pet::PetState {
@@ -3512,8 +3590,8 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         petting: Some(&a_dog),
     })
     .expect("the cat roams");
-    assert_eq!(
-        other_kind.petted_ms, None,
+    assert!(
+        hearts(&other_kind).is_empty(),
         "petting another kind of pet leaves the cat roaming"
     );
 }
@@ -3553,7 +3631,7 @@ fn a_mascots_state_reaches_its_hover_and_its_sprite() {
             name: def.display_name,
             instance: None,
             state,
-            run_count: 0,
+            effects: Vec::new(),
             active_sessions: 0,
         };
         let mut drawables = Vec::new();
@@ -3858,17 +3936,18 @@ fn a_waiting_agent_stays_seated_and_gets_its_bubble_whichever_way_the_desk_faces
             .iter()
             .find(|p| p.seat_desk.is_some())
             .expect("a waiting agent is SEATED at its desk");
+        let carries = |kind| p.effects.iter().any(|e| e.kind == kind);
         assert!(
-            p.waiting_bubble,
+            carries(crate::effects::EffectKind::WaitingMark),
             "{facing:?} desk {i}: a waiting agent must carry the bubble"
         );
         // Waiting rides the SeatedIdle pose, whose default sprite is the
         // sleeping one — a waiter drawn asleep inverts the state's meaning.
         assert!(
-            p.sleep_z_seed.is_none() && !p.anim_name.contains("sleeping"),
-            "{facing:?} desk {i}: a waiting agent must be AWAKE, saw {} with sleep seed {:?}",
+            !carries(crate::effects::EffectKind::SleepZ) && !p.anim_name.contains("sleeping"),
+            "{facing:?} desk {i}: a waiting agent must be AWAKE, saw {} with {:?}",
             p.anim_name,
-            p.sleep_z_seed
+            p.effects
         );
         seen.insert(format!("{facing:?}"));
     }
@@ -3988,9 +4067,7 @@ fn a_character_whose_anim_is_missing_is_not_hoverable() {
                 },
                 anchor: Point { x: 20, y: 20 },
                 label_anchor: Point { x: 20, y: 20 },
-                sleep_z_seed: None,
-                waiting_bubble: false,
-                walking_dust_frame: None,
+                effects: &[],
             },
             &mut drawable::DrawableCtx {
                 buf: &mut buf,
@@ -5192,7 +5269,10 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 debug_walkable: false,
             };
             let mut drawables = Vec::new();
-            let pet_frame = frame.pet.map(|p| enqueue_pet(&ctx, p, &mut drawables));
+            let pet_frame = frame
+                .pet
+                .as_ref()
+                .map(|p| enqueue_pet(&ctx, p, &mut drawables));
             for m in &frame.mascots {
                 let Size { w, h } = m.size;
                 if m.pos.x < w / 2
@@ -5549,9 +5629,7 @@ fn only_a_placement_that_breathes_takes_the_breath() {
             &HashMap::new(),
             now,
         );
-        let [p] = placements[..] else {
-            panic!("one agent, one placement")
-        };
+        let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
         p
     };
     let walker = place(Pose::Walking {
@@ -5824,7 +5902,11 @@ fn paint_flame_crown_draws_its_pattern() {
     let mut buf = RgbBuffer::filled(40, 40, BG);
     let anchor = Point { x: 12, y: 20 };
     const W: u16 = 8;
-    super::effects::paint_flame_crown(&mut buf, anchor, W, SystemTime::UNIX_EPOCH);
+    super::effects::paint_effect(
+        &mut buf,
+        &crate::effects::flame_crown(anchor, W, SystemTime::UNIX_EPOCH),
+        crate::theme::theme_by_name("normal").expect("normal theme"),
+    );
     let painted: Vec<(u16, u16)> = (0..buf.height())
         .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
         .filter(|&(x, y)| buf.get(x, y) != BG)
@@ -6042,9 +6124,7 @@ fn a_pose_is_its_placements_frame_facing_and_glow() {
         label_anchor: Point { x: 0, y: 0 },
         flip_x: true,
         glow,
-        sleep_z_seed: None,
-        waiting_bubble: false,
-        walking_dust_frame: None,
+        effects: Vec::new(),
         breathes: true,
         seat_desk: None,
         seated: true,

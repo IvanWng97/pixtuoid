@@ -78,7 +78,7 @@ A pack can also redraw an animation on a denser grid, registered as
 drawn. The classic renderers — the half-block terminal office, the
 `floating` window and the site's live office — draw the base art. Variants
 are for the pixel-graphics cutaway, which `run --graphics` paints over kitty's
-graphics protocol: it takes the
+graphics protocol, SIXEL or iTerm2's inline images: it takes the
 densest variant whose `N` divides its render scale and draws it as it is — a
 variant carries its own front, where a desk's top-down base art gets a front
 face derived under it. The recolor keys and `[ramps]` apply at every density.

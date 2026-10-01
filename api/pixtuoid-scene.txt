@@ -1494,14 +1494,10 @@ pub pixtuoid_scene::pixel_painter::CharacterPlacement::glow: pixtuoid_scene::pix
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::label_anchor: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::seat_desk: core::option::Option<pixtuoid_scene::layout::Point>
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::seated: bool
-pub pixtuoid_scene::pixel_painter::CharacterPlacement::sleep_z_seed: core::option::Option<u64>
-pub pixtuoid_scene::pixel_painter::CharacterPlacement::waiting_bubble: bool
-pub pixtuoid_scene::pixel_painter::CharacterPlacement::walking_dust_frame: core::option::Option<usize>
 impl core::clone::Clone for pixtuoid_scene::pixel_painter::CharacterPlacement
 pub fn pixtuoid_scene::pixel_painter::CharacterPlacement::clone(&self) -> pixtuoid_scene::pixel_painter::CharacterPlacement
 impl core::fmt::Debug for pixtuoid_scene::pixel_painter::CharacterPlacement
 pub fn pixtuoid_scene::pixel_painter::CharacterPlacement::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::pixel_painter::CharacterPlacement
 impl core::marker::Freeze for pixtuoid_scene::pixel_painter::CharacterPlacement
 impl core::marker::Send for pixtuoid_scene::pixel_painter::CharacterPlacement
 impl core::marker::Sync for pixtuoid_scene::pixel_painter::CharacterPlacement

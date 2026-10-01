@@ -522,12 +522,21 @@ pub(super) fn flush_buffer_to_term_at_offset(
             let py_bot = cy * 2 + 1;
             let fg = buf.as_slice()[py_top * w + cx];
             let bg = buf.as_slice()[py_bot * w + cx];
-            let cell = &mut term_buf[(x, y)];
-            cell.set_symbol("\u{2580}");
-            cell.fg = Color::Rgb(fg.r, fg.g, fg.b);
-            cell.bg = Color::Rgb(bg.r, bg.g, bg.b);
+            set_half_block(&mut term_buf[(x, y)], fg, bg);
         }
     }
+}
+
+/// Show `top` over `bottom` in `cell`: the half-block every flush of the
+/// office paints with.
+pub(crate) fn set_half_block(
+    cell: &mut ratatui::buffer::Cell,
+    top: pixtuoid_core::sprite::Rgb,
+    bottom: pixtuoid_core::sprite::Rgb,
+) {
+    cell.set_symbol("\u{2580}");
+    cell.fg = Color::Rgb(top.r, top.g, top.b);
+    cell.bg = Color::Rgb(bottom.r, bottom.g, bottom.b);
 }
 
 fn flush_buffer_to_term(f: &mut ratatui::Frame<'_>, buf: &RgbBuffer, scene_rect: Rect) {

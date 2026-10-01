@@ -2,10 +2,6 @@
 //! <https://vt100.net/docs/vt3xx-gp/chapter14.html>): every pixel its own
 //! colour up to [`REGISTERS`] distinct colours, a fixed cube beyond, and no
 //! error diffusion, so a still office never shimmers.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the compositor wires the tiles")
-)]
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
