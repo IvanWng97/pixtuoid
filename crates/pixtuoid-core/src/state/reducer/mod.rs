@@ -19,7 +19,7 @@ pub use crate::state::correlation::{
 pub const EXIT_GRACE_WINDOW: Duration = Duration::from_millis(4500);
 
 /// Defers a drained parent's b1 cascade (#151): one FSEvents coalescing hop,
-/// deliberately NOT the 60s `scan_root` poll backstop.
+/// deliberately NOT the `DEFAULT_POLL_INTERVAL` backstop.
 #[doc(hidden)]
 pub const B1_CASCADE_GRACE: Duration = Duration::from_millis(2500);
 
@@ -40,8 +40,8 @@ pub const STALE_UNKNOWN_CWD_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 
 /// For `SourceCaps::short_idle_reap()`. Codex motivates it: its `SessionEnd`
 /// hook covers only graceful teardown, its payloads carry no PID, and
-/// `ShutdownComplete` never reaches the rollout — no other reaper exists. CC has
-/// a clean-exit hook, so it keeps the 30-min one; don't give it this.
+/// `ShutdownComplete` never reaches the rollout, and its open-fd probe (`source::fd_probe`) returns nothing
+/// off macOS/Linux. CC has a clean-exit hook, so it keeps [`STALE_IDLE_TIMEOUT`].
 #[doc(hidden)]
 pub const STALE_SHORT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
@@ -1045,7 +1045,7 @@ impl Reducer {
     /// gains one Active("Delegating") so it doesn't look asleep while subagents
     /// work. b1 subagent-completion inference (CC writes no completion marker):
     /// a drained parent Task means the subtree returned — cascade EXIT to the
-    /// DESCENDANTS, not the parent, so they leave before the idle stale-sweep.
+    /// DESCENDANTS, not the parent, so they leave before [`STALE_IDLE_TIMEOUT`].
     fn track_active_tasks(
         &mut self,
         scene: &mut SceneState,

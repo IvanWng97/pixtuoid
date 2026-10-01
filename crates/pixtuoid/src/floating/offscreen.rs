@@ -54,12 +54,9 @@ impl OfficeRenderer {
             scene, floor, now, ..
         } = inputs.world;
         self.session.render(inputs);
-        // Compose EVERY frame, even muted, so the observer's cue edges stay warm —
-        // re-enabling then fires no volley; only DELIVERY is gated.
-        let audio_frame = self.session.audio_frame(scene, floor.floor_idx, now);
-        if self.audio.is_enabled() {
-            self.audio.frame(audio_frame);
-        }
+        // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
+        self.audio
+            .frame(self.session.audio_frame(scene, floor.floor_idx, now));
         self.session.buf()
     }
 
@@ -113,10 +110,9 @@ impl Default for OfficeRenderer {
     }
 }
 
-/// Integer upscale factor: render the office at `win_h / SCALE` so the buffer stays around
-/// `OFFICE_TARGET_H` px tall, keeping pixel-art sprites chunky + legible (a native 1:1 blit
-/// renders 8×12 sprites at 8×12 px — unreadably tiny). Min 1 (never downscale-and-blur).
-pub fn office_scale(win_h: u32) -> u32 {
+/// Integer upscale factor keeping the office buffer near `OFFICE_TARGET_H` px tall, so
+/// pixel-art sprites stay chunky and legible. Min 1: never downscale-and-blur.
+pub(crate) fn office_scale(win_h: u32) -> u32 {
     const OFFICE_TARGET_H: u32 = 180;
     (win_h as f64 / OFFICE_TARGET_H as f64).round().max(1.0) as u32
 }
@@ -129,7 +125,7 @@ pub fn office_scale(win_h: u32) -> u32 {
 /// Takes winit's `PhysicalSize` rather than two bare `u32`s so the UNIT is carried by
 /// the type: the `[floating]` config size is LOGICAL, and handing it here is a compile
 /// error instead of a silent HiDPI over-seed (#803).
-pub(crate) fn window_buffer_geometry(size: PhysicalSize<u32>) -> (u32, u16, u16) {
+pub fn window_buffer_geometry(size: PhysicalSize<u32>) -> (u32, u16, u16) {
     let scale = office_scale(size.height);
     let buf_w = (size.width / scale).clamp(1, u16::MAX as u32) as u16;
     let buf_h = (size.height / scale).clamp(1, u16::MAX as u32) as u16;
@@ -190,25 +186,17 @@ pub(crate) fn sync_floor_caps(
     true
 }
 
-/// The bundled character sprite width (px). Labels only center ±half a glyph, so the
-/// default width (not a custom pack's real `frame.width`) is fine here — ±1px on a
-/// non-8-wide pack is cosmetically irrelevant.
+/// Labels center on the bundled width, not a custom pack's `frame.width`; a differently-sized
+/// pack's badge sits off-center, which is cosmetic.
 const FLOATING_SPRITE_W: i32 = pixtuoid_scene::layout::CHARACTER_SPRITE_W as i32;
 
 /// Name-badge AA font size (px), drawn at NATIVE surface res (not upscaled by the office
 /// `scale`) so a badge stays a crisp fixed-height caption over the chunky sprites. Tuned
 /// by eye against `examples/floating_snapshot`.
 const LABEL_FONT_PX: f32 = 12.0;
-/// Near-black badge drop-shadow — the AA text draws straight over the office (no TUI
+/// Badge drop-shadow — the AA text draws straight over the office (no TUI
 /// cell background), so a 1px offset shadow keeps it legible over bright windows/plants.
 const BADGE_SHADOW: u32 = 0x0000_0000;
-/// The near-white AA ink for foreground captions with no theme cell behind them —
-/// shared by the hovered name badge and the volume-flash readout.
-const HOVER_INK: Rgb = Rgb {
-    r: 240,
-    g: 240,
-    b: 240,
-};
 
 /// The floating footer's keybind-hint tail — floating's REAL controls (no terminal
 /// `[q]uit`/`[t]heme`/`[?]help` chrome). The ONE painter-specific input to the shared
@@ -293,14 +281,9 @@ pub fn paint_labels_into_surface(
     theme: &Theme,
 ) {
     for el in labels {
-        let rgb = if el.hovered {
-            HOVER_INK
-        } else {
-            pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme)
-        };
-        let color = pack_xrgb(rgb);
-        // The hovered ▸ is dead today: `labels()` passes `hovered: None`.
-        let marker = if el.hovered { "\u{25b8}" } else { "\u{25cf}" };
+        debug_assert!(!el.hovered, "floating paints no hover state");
+        let color = pack_xrgb(pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme));
+        let marker = "\u{25cf}";
         let text = format!("{marker}{}", el.text);
         let tw = crate::aa_text::text_width(&text, LABEL_FONT_PX);
         // anchor_px is the sprite TOP-LEFT in office space.
@@ -308,12 +291,8 @@ pub fn paint_labels_into_surface(
         let cx = el.anchor_px.x as i32 * scale + (FLOATING_SPRITE_W * scale) / 2 - tw / 2;
         let cy = el.anchor_px.y as i32 * scale - BADGE_LIFT_PX;
         // The CLI-identity split: the ● dot keeps the activity tone (status), the name
-        // paints in the source's badge hue (identity). Unregistered prefix / hover →
-        // one run in the tone/hover ink.
-        let badge = (!el.hovered)
-            .then(|| pixtuoid_scene::overlay::badge_hue(&el.text, theme))
-            .flatten();
-        match badge {
+        // paints in the source's badge hue (identity).
+        match pixtuoid_scene::overlay::badge_hue(&el.text, theme) {
             Some(hue) => {
                 let mw = crate::aa_text::text_width(marker, LABEL_FONT_PX);
                 sb.draw_shadowed_text(marker, cx, cy, LABEL_FONT_PX, color);
@@ -697,26 +676,18 @@ mod tests {
     }
 
     #[test]
-    fn paint_labels_uses_the_right_color_per_tone_and_overrides_with_white_on_hover() {
+    fn paint_labels_uses_the_right_color_per_tone() {
         use pixtuoid_scene::layout::Point;
         use pixtuoid_scene::overlay::{LabelElement, LabelTone};
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let as_u32 = |c: Rgb| (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32;
-        let badge = |tone, hovered| {
+        let badge_dot = |tone| {
             vec![LabelElement {
                 anchor_px: Point { x: 20, y: 20 },
-                text: "cc".into(),
-                tone,
-                hovered,
-            }]
-        };
-        let badge_dot = |tone, hovered| {
-            vec![LabelElement {
-                anchor_px: Point { x: 20, y: 20 },
-                // A leading ● (the non-hover marker) guarantees a solid full-coverage glyph.
+                // A leading ● guarantees a solid full-coverage glyph.
                 text: "\u{25cf}cc".into(),
                 tone,
-                hovered,
+                hovered: false,
             }]
         };
         for (tone, expected) in [
@@ -728,7 +699,7 @@ mod tests {
             let mut sb = vec![0u32; 100 * 100];
             paint_labels_into_surface(
                 &mut XrgbSurface::new(&mut sb, 100, 100).expect("sized"),
-                &badge_dot(tone, false),
+                &badge_dot(tone),
                 2,
                 theme,
             );
@@ -737,32 +708,6 @@ mod tests {
                 "tone {tone:?} must paint its theme color {expected:?}"
             );
         }
-        // AA curve strokes don't reach coverage EXACTLY 1.0, so assert hover via
-        // brightness rather than an exact ink color.
-        let brightness = |sb: &[u32]| {
-            sb.iter()
-                .map(|&p| (p & 0xff) + ((p >> 8) & 0xff) + ((p >> 16) & 0xff))
-                .max()
-                .unwrap_or(0)
-        };
-        let mut hover_sb = vec![0u32; 100 * 100];
-        paint_labels_into_surface(
-            &mut XrgbSurface::new(&mut hover_sb, 100, 100).expect("sized"),
-            &badge(LabelTone::Idle, true),
-            2,
-            theme,
-        );
-        let mut idle_sb = vec![0u32; 100 * 100];
-        paint_labels_into_surface(
-            &mut XrgbSurface::new(&mut idle_sb, 100, 100).expect("sized"),
-            &badge(LabelTone::Idle, false),
-            2,
-            theme,
-        );
-        assert!(
-            brightness(&hover_sb) > brightness(&idle_sb),
-            "hover paints brighter (white) ink than the idle grey tone it overrides"
-        );
     }
 
     #[test]
