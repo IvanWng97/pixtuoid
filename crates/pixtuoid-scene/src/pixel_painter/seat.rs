@@ -199,7 +199,8 @@ pub(crate) struct CharacterFrame<'c> {
     pub(crate) rise: u16,
 }
 
-/// Paint a character at an arbitrary anchor with per-agent recolor.
+/// Paint a character at an arbitrary anchor with per-agent recolor, returning
+/// the size of the frame it drew.
 pub(crate) fn paint_character_at(
     buf: &mut RgbBuffer,
     pose: SpritePose,
@@ -208,28 +209,29 @@ pub(crate) fn paint_character_at(
     pack: &Pack,
     cache: &mut FrameCache,
     now: SystemTime,
-) {
-    let Some(CharacterFrame {
+) -> Option<Size> {
+    let CharacterFrame {
         frame: cached,
         burn,
         blit_at: _,
         rise: _,
-    }) = character_frame(
+    } = character_frame(
         pose,
         agent,
         pack,
         crate::render_scale::RenderScale::ONE,
         cache,
         now,
-    )
-    else {
-        return;
+    )?;
+    let size = Size {
+        w: cached.width(),
+        h: cached.height(),
     };
-    let sprite_w = cached.width();
     blit_frame(cached, anchor.x, anchor.y, buf);
     if burn == crate::burn::BurnTier::Top {
-        super::effects::paint_flame_crown(buf, anchor, sprite_w, now);
+        super::effects::paint_flame_crown(buf, anchor, size.w, now);
     }
+    Some(size)
 }
 
 /// The still back view — also the fallback for a pose that has none of its own,

@@ -3,8 +3,9 @@
 //! overlay painters the live window uses, so the PNG is byte-faithful to what it blits.
 //!
 //! Usage:
-//! `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N]`
-//! e.g. `... -- /tmp/floating.png 720x480 --agents 6` (Retina default), `... -- /tmp/f.png 360x240`.
+//!   `cargo run --release --example floating_snapshot -- <out.png> [WxH] [--theme <name>] [--agents N]`
+//! e.g. `... -- /tmp/f.png --agents 6` (`config::FLOATING_DEFAULT_{W,H}` × `RETINA_SCALE_FACTOR`),
+//! `... -- /tmp/f.png 360x240`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -143,9 +144,7 @@ fn main() -> Result<()> {
 
     let theme =
         theme_by_name(&theme_name).ok_or_else(|| anyhow!("unknown --theme {theme_name:?}"))?;
-    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-        pixtuoid_scene::embedded_pack::PackSource::Bundled,
-    )?;
+    let pack = pixtuoid_scene::embedded_pack::load_bundled_pack()?;
     let now = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
     let mut scene = SceneState::uniform(64);

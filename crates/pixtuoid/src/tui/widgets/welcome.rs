@@ -26,9 +26,13 @@ pub(crate) fn paint_welcome(
     bounds: Rect,
     theme: &Theme,
 ) {
-    let rows = &frame.rows;
-    let selected = frame.selected;
-    let elapsed_ms = frame.elapsed_ms;
+    let &OnboardingFrame {
+        open: _,
+        ref rows,
+        selected,
+        elapsed_ms,
+        dim: _,
+    } = frame;
     let dim = Style::default().fg(to_color(theme.ui.label_idle));
     let bright = Style::default().fg(to_color(theme.ui.neon_brand));
 
