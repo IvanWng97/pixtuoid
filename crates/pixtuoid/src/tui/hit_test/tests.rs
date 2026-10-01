@@ -77,7 +77,7 @@ fn furniture_hit_test_finds_desk() {
 #[test]
 fn furniture_hit_test_finds_elevator() {
     let layout = Layout::compute(160, 200, Some(4)).expect("layout");
-    let door = layout.door.expect("door");
+    let door = layout.door;
     let cell_y = (door.y + pixtuoid_scene::layout::ELEVATOR_H / 2) / 2;
     assert_eq!(
         hit_test_furniture(

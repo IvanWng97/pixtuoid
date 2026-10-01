@@ -102,7 +102,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
         &mut BaseFillCache::new(),
         &mut buf,
         top_wall_h,
-        window_bays(buf_w, None),
+        window_bays(buf_w, 0..0),
         &Moment::resolve(Sky::at(now), theme, 0.0, now),
         &test_default_pack(),
         theme,
@@ -163,7 +163,7 @@ fn render_office_themed(
         &mut BaseFillCache::new(),
         &mut buf,
         top_wall_h,
-        window_bays(buf_w, None),
+        window_bays(buf_w, 0..0),
         &Moment::resolve(Sky::at(now), theme, 0.0, now),
         &test_default_pack(),
         theme,
@@ -430,7 +430,7 @@ fn disc_never_bleeds_across_a_window_pillar() {
     // sweeping the low-sun hours makes `cx` pass over one.
     let buf_w = 280u16;
     let top_wall_h = 40u16;
-    let bays: Vec<_> = window_bays(buf_w, None).collect();
+    let bays: Vec<_> = window_bays(buf_w, 0..0).collect();
     for h in [5u32, 6, 7, 17, 18, 19] {
         let buf = render_office_at(h, Weather::Clear, buf_w, top_wall_h);
         let mut wins = std::collections::HashSet::new();
@@ -635,7 +635,7 @@ fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {
     let rows = window_rows(top_wall_h);
     let mut sum = 0.0f64;
     let mut n = 0u32;
-    for w in window_bays(buf.width(), None) {
+    for w in window_bays(buf.width(), 0..0) {
         for y in (rows.start + 1)..rows.end.saturating_sub(1) {
             for x in (w.x + 1)..w.span().end.saturating_sub(1) {
                 if x < buf.width() && y < buf.height() {
@@ -785,7 +785,7 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
             base_fill,
             &mut buf,
             top_wall_h,
-            window_bays(buf_w, None),
+            window_bays(buf_w, 0..0),
             &Moment::resolve(Sky::at(now), theme, 0.0, now),
             &test_default_pack(),
             theme,
@@ -843,7 +843,7 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
             base_fill,
             &mut buf,
             14,
-            window_bays(w, None),
+            window_bays(w, 0..0),
             &Moment::resolve(Sky::at(now), theme, 0.0, now),
             &test_default_pack(),
             theme,
@@ -1094,7 +1094,7 @@ fn the_wall_between_two_windows_is_one_frame_post() {
         &mut BaseFillCache::new(),
         &mut buf,
         top_wall_h,
-        window_bays(buf_w, None),
+        window_bays(buf_w, 0..0),
         &Moment::resolve(Sky::at(now), theme, 0.0, now),
         &test_default_pack(),
         theme,
