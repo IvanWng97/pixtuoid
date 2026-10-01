@@ -579,9 +579,8 @@ pub(crate) fn build_list<'a>(
 /// each on its cell where the ordered dither lets as much of it through as
 /// the beam shows: a speck the sun catches, never a blend.
 fn motes(office: Office<'_>, moment: &Moment, seed: u64) -> Vec<(Span, PieceKind)> {
-    let look = &moment.look;
-    let shows = look.sunlight * look.beam;
-    if look.beam <= 0.0 || shows <= 0.0 {
+    let shows = crate::motes::visibility(&moment.look);
+    if shows <= 0.0 {
         return Vec::new();
     }
     crate::motes::window_spill_columns(office.layout)
@@ -4515,8 +4514,8 @@ pub(crate) mod tests {
         );
     }
 
-    /// The floor is tiled on its own grid, from the wall's foot: a seam sits
-    /// under the tile beside it, on the lit floor and the dark alike.
+    /// The ground is tiled on its own grid, from the wall's foot: a seam sits
+    /// under the tile beside it, on the lit ground and the dark alike.
     #[test]
     fn the_ground_is_tiled_from_the_wall_foot() {
         let layout = Layout::compute_with_seed(160, 110, None, 0).expect("lays out");
@@ -4558,7 +4557,7 @@ pub(crate) mod tests {
         );
     }
 
-    /// The floor alone at scale `s`, drawn from art at density `d`, in the
+    /// The ground alone at scale `s`, drawn from art at density `d`, in the
     /// normal theme.
     fn ground(layout: &Layout, s: u16, d: u16) -> (Pen, RgbBuffer) {
         let scale = RenderScale::new(s).expect("nonzero");
@@ -4717,13 +4716,13 @@ pub(crate) mod tests {
         );
         assert_eq!(buf.get(0, 0), WEST, "nothing past the rim");
         let stepped =
-            |c, floor: pixtuoid_core::sprite::Rgb| (0..=deepest).any(|k| c == floor.ramp(-k));
+            |c, ground: pixtuoid_core::sprite::Rgb| (0..=deepest).any(|k| c == ground.ramp(-k));
         for y in 0..buf.height() {
             for x in 0..buf.width() {
                 let ground = if x < buf.width() / 2 { WEST } else { EAST };
                 assert!(
                     stepped(buf.get(x, y), ground),
-                    "({x}, {y}) is its floor, stepped"
+                    "({x}, {y}) is its ground, stepped"
                 );
             }
         }
@@ -5585,7 +5584,7 @@ S B B B B B B S
             }
             let night = list_at(&frame, office, 0);
             assert!(
-                night.pieces().iter().find(is_mote).is_none(),
+                !night.pieces().iter().any(|p| is_mote(&p)),
                 "motes at night"
             );
         }
@@ -6896,14 +6895,14 @@ S B B B B B B S
                 UNDER[0],
             )
         };
-        let (mut floor, mut laid) = (blank(), blank());
-        paint_ground(&layout, Ground::plain(theme), pen, &mut floor);
+        let (mut ground, mut laid) = (blank(), blank());
+        paint_ground(&layout, Ground::plain(theme), pen, &mut ground);
         paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut laid);
         let row = scale.to_buffer(layout.wall_band_h());
-        for x in 0..floor.width() {
+        for x in 0..ground.width() {
             assert_eq!(
                 laid.get(x, row),
-                floor
+                ground
                     .get(x, row)
                     .ramp(crate::cutaway::shade::RAMP_SHADE_LEVEL),
                 "column {x}"
@@ -7953,7 +7952,7 @@ S B B B B B B S
                 if face {
                     "the derived face"
                 } else {
-                    "bare floor"
+                    "bare ground"
                 }
             );
         }
