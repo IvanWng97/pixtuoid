@@ -124,6 +124,16 @@ pub enum GraphicsMode {
     Iterm2,
 }
 
+impl From<ImageProtocol> for GraphicsMode {
+    fn from(protocol: ImageProtocol) -> Self {
+        match protocol {
+            ImageProtocol::Kitty => Self::Kitty,
+            ImageProtocol::Sixel => Self::Sixel,
+            ImageProtocol::Iterm2 => Self::Iterm2,
+        }
+    }
+}
+
 impl GraphicsMode {
     /// The protocol the user named, which replaces the terminal's answer.
     fn forced(self) -> Option<ImageProtocol> {
@@ -523,14 +533,20 @@ impl Plan {
                     ms => format!("at most every {ms} ms"),
                 };
                 // A forced plan names its protocol: `auto` may pick another.
-                let mode = if forced { protocol.name() } else { "auto" };
-                let how = if run == GraphicsMode::Off {
-                    format!(
-                        " — off: `run --graphics {mode}` (or `graphics = \"{mode}\"` in config) \
-                         paints it"
-                    )
+                let mode = if forced {
+                    GraphicsMode::from(protocol)
                 } else {
-                    String::new()
+                    GraphicsMode::Auto
+                };
+                let how = match (run, clap::ValueEnum::to_possible_value(&mode)) {
+                    (GraphicsMode::Off, Some(value)) => {
+                        let mode = value.get_name();
+                        format!(
+                            " — off: `run --graphics {mode}` (or `graphics = \"{mode}\"` in \
+                             config) paints it"
+                        )
+                    }
+                    _ => String::new(),
                 };
                 format!(
                     "graphics: {} ({}) on a {}x{} cell, {} — the cutaway at {}x \
