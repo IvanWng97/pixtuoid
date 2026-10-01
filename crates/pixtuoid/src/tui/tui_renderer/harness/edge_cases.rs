@@ -103,6 +103,33 @@ fn the_size_the_too_small_notice_names_is_one_that_seats_someone() {
     }
 }
 
+/// A refused frame drew nothing, so the click handler must not hit-test the
+/// last drawn frame's sprites; both refusal arms.
+#[test]
+fn shrinking_under_the_minimum_drops_the_last_frames_hit_targets() {
+    let id = AgentId::from_transcript_path("/sm/0.jsonl");
+    let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
+    let (cols, rows) = (192, 80);
+    for (small_cols, small_rows) in [too_small_terminal(), (15, 8)] {
+        let mut r = build(cols, rows, vec![PetKind::Cat]);
+        r.render(&scene, pack(), t0()).expect("render");
+        let cell = (0..cols)
+            .flat_map(|c| (0..rows).map(move |row| (c, row)))
+            .find(|&(c, row)| r.hit_test_agent_at(c, row) == Some(id))
+            .expect("the drawn agent is hit-testable");
+        assert!(r.cached_pet_pos().is_some(), "the pet is drawn");
+
+        r.terminal.backend_mut().resize(small_cols, small_rows);
+        r.render(&scene, pack(), t0()).expect("render");
+        assert_eq!(
+            r.hit_test_agent_at(cell.0, cell.1),
+            None,
+            "{small_cols}x{small_rows}"
+        );
+        assert!(r.cached_pet_pos().is_none(), "{small_cols}x{small_rows}");
+    }
+}
+
 /// The other direction: a terminal that CAN lay out must never show the notice.
 #[test]
 fn a_terminal_that_fits_shows_no_too_small_notice() {

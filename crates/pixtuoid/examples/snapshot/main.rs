@@ -707,7 +707,7 @@ fn main() -> Result<()> {
             floor_meta,
         )
     };
-    draw_scene(&mut term, &mut draw_ctx)?;
+    let drawn = draw_scene(&mut term, &mut draw_ctx)?;
 
     if args.debug_walkable {
         print_walkability_report(&term, args.floor_seed)?;
@@ -716,8 +716,8 @@ fn main() -> Result<()> {
     let crop_rect = if args.crop_mascot {
         // The mascot wanders to a time-derived cell, so we crop on the position
         // the renderer actually resolved, not a precomputed layout point.
-        let m = draw_ctx
-            .last_mascots
+        let m = drawn
+            .mascots
             .first()
             .context("--crop-mascot needs a visible mascot")?;
         Some(centered_crop(m.pos, cols, rows))
