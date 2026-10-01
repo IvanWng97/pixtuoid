@@ -544,6 +544,9 @@ const OVERLAP_BY_DESIGN: &[(&str, &str)] = &[
     ("Desk", "DeskChair"),
     // `SceneLayout::island_bar_mat` shows only a sliver past the island.
     ("IslandMat", "KitchenIsland"),
+    // A short floor's first desk row hides the foot of the lamp behind it,
+    // whose ground already starts at the band's top.
+    ("Desk", "FloorLamp"),
     // A rug under what stands on it.
     ("LoungeCouch", "LoungeRug"),
     ("MeetingChair", "MeetingRug"),
@@ -566,9 +569,6 @@ const OVERLAP_DEFECTS: &[(&str, &str)] = &[
     ("Desk", "Plant"),
     ("DeskChair", "Plant"),
     ("FilingCabinet", "Plant"),
-    // The lounge crowds a short floor's desks.
-    ("Desk", "FloorLamp"),
-    ("Desk", "LoungeRug"),
 ];
 
 /// Two fixtures' art overlaps only as a listed pair, and each listed pair still

@@ -924,7 +924,7 @@ impl LoungeFlanks {
 /// elevator `door` column so the spawn threshold never routes around it.
 fn place_lounge(couch: Point, buf_w: u16, door: Option<Point>) -> Lounge {
     /// Rows from the couch's centre down to the lamp's base: the art grows
-    /// north from it (invariant #6), clear of the desks to the south.
+    /// north from it (invariant #6).
     const LAMP_BASE_DY: u16 = 6;
     let flanks = LoungeFlanks::of(couch.x);
     let floor_lamp = Point {

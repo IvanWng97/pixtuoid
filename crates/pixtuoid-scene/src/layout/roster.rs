@@ -610,11 +610,15 @@ impl SceneLayout {
                             .map(|b| upright(FixtureKind::TrashBin, top_left(b), b)),
                     )
             }))
-            .chain(lounge.as_ref().map(|l| Fixture {
-                kind: FixtureKind::LoungeRug,
-                at: top_left(l.rug()),
-                visual: l.rug(),
-                depth: Depth::sorted(l.couch_center.y.saturating_sub(LOUNGE_RUG_Z_LEAD)),
+            .chain(lounge.as_ref().map(|l| {
+                let first_desk_row = home_desks.iter().map(|d| d.y).min();
+                let rug = l.rug(first_desk_row.unwrap_or(*buf_h));
+                Fixture {
+                    kind: FixtureKind::LoungeRug,
+                    at: top_left(rug),
+                    visual: rug,
+                    depth: Depth::sorted(l.couch_center.y.saturating_sub(LOUNGE_RUG_Z_LEAD)),
+                }
             }))
             .chain(
                 couch.map(|at| {
