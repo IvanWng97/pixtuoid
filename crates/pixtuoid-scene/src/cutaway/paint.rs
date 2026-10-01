@@ -53,7 +53,7 @@ const RUG_MOTIF_LEVEL: i8 = -1;
 const RUG_FRINGE_LEVEL: i8 = 2;
 
 /// Logical rows between a head and its name badge.
-const LABEL_GAP_PX: u16 = 2;
+const LABEL_GAP: u16 = 2;
 
 /// How many ramp levels the lit glass sits below its glow colour.
 const SCREEN_GLASS_LEVEL: i8 = -3;
@@ -118,19 +118,72 @@ impl Screen {
     }
 }
 
-/// Where a painter should hang one agent's name badge, in BUFFER pixels.
-///
-/// The engine cannot draw text — the font lives in the binary — so the profile
-/// reports anchors and lets the painter render. These are the CUTAWAY's anchors:
-/// `overlay::build_overlay`'s hang off the classic-drawn sprite, so a badge
-/// placed with those would float where the classic painter drew the body.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CutawayLabel {
-    /// Index into [`SimFrame::agents`].
-    pub agent_idx: usize,
-    /// Badge anchor: horizontal centre of the sprite, clear above its head and
-    /// any raised monitor behind it.
-    pub anchor_px: crate::layout::Point,
+/// One agent's name badge, painted in the canvas so no terminal text shares a
+/// cell with the image: `overlay`'s text and
+/// [`BadgeInk`](crate::overlay::BadgeInk) on its
+/// [`badge_plate`](crate::overlay::badge_plate). Hung from the CUTAWAY's body:
+/// `overlay::build_overlay`'s anchors hang off the classic-drawn sprite, which
+/// for a sitter is elsewhere.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct Badge {
+    /// Its bottom centre, in logical units: the sprite's centre, clear above
+    /// its head and any raised monitor behind it.
+    pub(crate) at: Point,
+    pub(crate) text: String,
+    pub(crate) tone: crate::overlay::LabelTone,
+}
+
+/// Art pixels between a badge's plate edge and its text.
+const BADGE_PAD: u16 = 1;
+
+impl Badge {
+    /// Its plate on the art grid: at the pack's 4x art, one logical column a
+    /// character and two rows tall, the classic badge's terminal cells.
+    fn plate(&self, pen: Pen) -> ArtRect {
+        let ink =
+            crate::cutaway::text::width(&format!("{}{}", crate::overlay::BADGE_MARKER, self.text));
+        let w = ink.0.saturating_add(2 * BADGE_PAD);
+        let h = crate::cutaway::text::LINE_H + 2 * BADGE_PAD;
+        ArtRect {
+            x: ArtPx(pen.art(self.at.x).0.saturating_sub(w / 2)),
+            y: ArtPx(pen.art(self.at.y).0.saturating_sub(h)),
+            w: ArtPx(w),
+            h: ArtPx(h),
+        }
+    }
+
+    /// Its plate's cells, drawn over everything it meets.
+    fn span(&self, pen: Pen) -> Span {
+        let r = self.plate(pen);
+        Span {
+            x0: pen.logical(r.x),
+            x1: pen.logical(ArtPx(r.x.0 + r.w.0 - 1)),
+            y0: pen.logical(r.y),
+            y1: pen.logical(ArtPx(r.y.0 + r.h.0 - 1)),
+            depth: u16::MAX,
+            layer: Layer::Over,
+        }
+    }
+}
+
+/// Paint `badge`'s plate, marker and text.
+fn paint_badge(badge: &Badge, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
+    use crate::cutaway::text::{ADVANCE, paint};
+    let plate = badge.plate(pen);
+    pen.fill(buf, plate, crate::overlay::badge_plate(theme));
+    let crate::overlay::BadgeInk {
+        marker: dot,
+        name: ink,
+    } = crate::overlay::badge_ink(&badge.text, badge.tone, theme);
+    let (x, y) = (plate.x.0 + BADGE_PAD, ArtPx(plate.y.0 + BADGE_PAD));
+    paint(
+        pen,
+        buf,
+        (ArtPx(x), y),
+        &crate::overlay::BADGE_MARKER.to_string(),
+        dot,
+    );
+    paint(pen, buf, (ArtPx(x + ADVANCE), y), &badge.text, ink);
 }
 
 /// What a cutaway frame is drawn with and the next one is too: the office
@@ -152,7 +205,6 @@ pub struct Office<'a> {
 /// classic painter's sibling, not its successor — as `floor` of the building
 /// looks at `now`: its windows on the sky from its altitude, its room lit for
 /// the hour.
-/// Returns where each visible agent's badge belongs; see [`CutawayLabel`].
 pub fn render_cutaway(
     frame: &SimFrame,
     office: Office<'_>,
@@ -160,10 +212,9 @@ pub fn render_cutaway(
     now: std::time::SystemTime,
     cache: &mut crate::frame_cache::FrameCache,
     buf: &mut RgbBuffer,
-) -> Vec<CutawayLabel> {
+) {
     let list = frame_list(frame, office, floor, now);
     paint(office.layout, &list, cache, buf);
-    list.labels().collect()
 }
 
 /// `frame`'s [`DrawList`] as `floor` looks at `now`.
@@ -291,22 +342,29 @@ impl<'a> DrawList<'a> {
         self.ambient
     }
 
-    /// Where each drawn agent's badge belongs, in draw order.
-    pub(crate) fn labels(&self) -> impl Iterator<Item = CutawayLabel> + '_ {
-        self.pieces.iter().filter_map(|p| match p.kind {
-            PieceKind::Character { label, .. } => Some(label),
+    /// Each drawn agent's badge, in draw order.
+    #[cfg(test)]
+    pub(crate) fn badges(&self) -> impl Iterator<Item = &Badge> + '_ {
+        self.pieces.iter().filter_map(|p| match &p.kind {
+            PieceKind::Badge { badge } => Some(badge),
             _ => None,
         })
     }
 
     /// Each piece's hover box and the agent it shows, in draw order: a
-    /// character's `body`, every other piece's span showing none.
+    /// character's `body`, every other piece's span showing none. A badge is
+    /// no hover target, as in the classic: neighbours' plates overlap, so one
+    /// would claim the body under another's
+    /// (`hovering_a_sitter_under_a_neighbours_badge_names_the_sitter`).
     pub(crate) fn hover_spans(
         &self,
     ) -> impl Iterator<Item = (Span, Option<pixtuoid_core::AgentId>)> + '_ {
-        self.pieces.iter().map(|p| match &p.kind {
-            PieceKind::Character { figure, body, .. } => (*body, Some(figure.key.frame.agent_id)),
-            _ => (p.span, None),
+        self.pieces.iter().filter_map(|p| match &p.kind {
+            PieceKind::Character { figure, body, .. } => {
+                Some((*body, Some(figure.key.frame.agent_id)))
+            }
+            PieceKind::Badge { .. } => None,
+            _ => Some((p.span, None)),
         })
     }
 }
@@ -509,7 +567,8 @@ fn paint_pieces(
                 };
                 let glow = match piece.kind {
                     PieceKind::Glass { .. } => Glow::Pane,
-                    PieceKind::Neon { .. } => Glow::Emissive,
+                    // A badge keeps the contrast its theme pins at every hour.
+                    PieceKind::Neon { .. } | PieceKind::Badge { .. } => Glow::Emissive,
                     PieceKind::Desk { .. }
                     | PieceKind::Prop { .. }
                     | PieceKind::Animated { .. }
@@ -589,7 +648,8 @@ fn mark(
         | PieceKind::Table { .. }
         | PieceKind::Character { .. }
         | PieceKind::Neon { .. }
-        | PieceKind::Clock { .. } => false,
+        | PieceKind::Clock { .. }
+        | PieceKind::Badge { .. } => false,
     }
 }
 
@@ -800,7 +860,8 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
         | PieceKind::Hung { .. }
         | PieceKind::Door { .. }
         | PieceKind::Neon { .. }
-        | PieceKind::Clock { .. } => None,
+        | PieceKind::Clock { .. }
+        | PieceKind::Badge { .. } => None,
         PieceKind::Character {
             ref figure,
             body,
@@ -885,7 +946,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
             interior,
         } => (at, tube, hue, interior).hash(&mut h),
         PieceKind::Clock { at, reading } => (at, reading).hash(&mut h),
-        // The label is the caller's, and the body follows from `at` and `key`.
+        // The body follows from `at` and `key`.
         PieceKind::Character {
             figure:
                 Figure {
@@ -894,9 +955,9 @@ fn fingerprint(kind: &PieceKind) -> u64 {
                     ref key,
                 },
             chair,
-            label: _,
             body: _,
         } => (at, shadow, key, chair).hash(&mut h),
+        PieceKind::Badge { ref badge } => badge.hash(&mut h),
         PieceKind::Glass { ref view } => view.hash(&mut h),
         PieceKind::Hung { at, sprite } => (at, sprite).hash(&mut h),
     }
@@ -1396,6 +1457,9 @@ fn paint_piece(
         } => crate::wall::paint_wall(buf, theme, piece, y0..y1, Pen::for_pack(scale, pack)),
         PieceKind::Glass { ref view } => paint_glass(view, Pen::for_pack(scale, pack), buf),
         PieceKind::Hung { at, sprite } => paint_wall_decor(at, sprite, pack, scale, buf),
+        PieceKind::Badge { ref badge, .. } => {
+            paint_badge(badge, theme, Pen::for_pack(scale, pack), buf);
+        }
     }
 }
 
@@ -1631,6 +1695,8 @@ fn push_characters(
         theme,
         scale,
     } = office;
+    let pen = Pen::for_pack(scale, pack);
+    let namesakes = crate::overlay::Namesakes::of(&frame.agents);
     let mut carried = Vec::new();
     for c in &frame.characters {
         let Some(agent) = frame.agents.get(c.agent_idx) else {
@@ -1676,13 +1742,15 @@ fn push_characters(
             PieceKind::Character {
                 figure: Figure { at, shadow, key },
                 chair: chair.map(|(_, at)| at),
-                label: CutawayLabel {
-                    agent_idx: c.agent_idx,
-                    anchor_px: label_anchor(top, w, badge_ceiling, scale),
-                },
                 body: Span::new(top.x, top.y, w, h + hair, 0),
             },
         ));
+        let badge = Badge {
+            at: label_anchor(top, w, badge_ceiling),
+            text: namesakes.text(agent),
+            tone: crate::overlay::tone_of(agent),
+        };
+        order.push((badge.span(pen), PieceKind::Badge { badge }));
     }
     carried
 }
@@ -1823,7 +1891,8 @@ impl PieceKind {
             | PieceKind::Clock { .. }
             | PieceKind::Glass { .. }
             | PieceKind::Desk { .. }
-            | PieceKind::Character { .. } => false,
+            | PieceKind::Character { .. }
+            | PieceKind::Badge { .. } => false,
         }
     }
 }
@@ -1905,11 +1974,12 @@ pub(crate) enum PieceKind {
         figure: Figure,
         /// A back-turned sitter's chair, painted straight after them.
         chair: Option<crate::layout::Point>,
-        /// Where their badge belongs.
-        label: CutawayLabel,
         /// The box their art lands in: the span without their chair. A standing
         /// figure's shadow falls under it.
         body: Span,
+    },
+    Badge {
+        badge: Badge,
     },
 }
 
@@ -2483,7 +2553,7 @@ fn paint_figure(
 }
 
 /// The badge anchor for a body of `sprite_w` logical columns drawn at `at`:
-/// horizontally centred, `LABEL_GAP_PX` logical rows clear of the head — and of
+/// horizontally centred, [`LABEL_GAP`] logical rows clear of the head — and of
 /// `ceiling`, a logical row the badge must stay above (a raised monitor behind
 /// a back-turned sitter's head).
 ///
@@ -2494,16 +2564,12 @@ fn label_anchor(
     at: crate::layout::Point,
     sprite_w: u16,
     ceiling: Option<u16>,
-    scale: RenderScale,
 ) -> crate::layout::Point {
-    let clear_of = |row: u16| {
-        scale
-            .to_buffer(row)
-            .saturating_sub(LABEL_GAP_PX * scale.get())
-    };
     crate::layout::Point {
-        x: scale.to_buffer(at.x + sprite_w / 2),
-        y: ceiling.map_or(clear_of(at.y), |top| clear_of(at.y).min(clear_of(top))),
+        x: at.x + sprite_w / 2,
+        y: ceiling
+            .map_or(at.y, |top| at.y.min(top))
+            .saturating_sub(LABEL_GAP),
     }
 }
 
@@ -3393,43 +3459,34 @@ pub(crate) mod tests {
     }
 
     /// A back-turned sitter's badge clears the raised monitor behind their head:
-    /// drawn through the real render, it lands above the desk art's top.
+    /// its whole plate lands above the desk art's top.
     #[test]
     fn a_back_turned_sitters_badge_clears_their_raised_monitor() {
         let (layout, pack, frames, desk) = sit_down(crate::layout::Facing::North, 0);
         let seated = frames.last().expect("a seated frame");
-        let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let scale = RenderScale::new(4).expect("nonzero");
-        let mut buf = RgbBuffer::filled(
-            scale.to_buffer(layout.buf_w),
-            scale.to_buffer(layout.buf_h),
-            theme.surface.bg_fallback,
-        );
-        let mut cache = crate::frame_cache::FrameCache::new();
-        let labels = render_cutaway(
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme: crate::theme::theme_by_name("normal").expect("theme"),
+            scale: RenderScale::new(4).expect("nonzero"),
+        };
+        let list = frame_list(
             seated,
-            Office {
-                layout: &layout,
-                pack: &pack,
-                theme,
-                scale,
-            },
+            office,
             crate::floor::FloorMeta::ground(),
             std::time::SystemTime::UNIX_EPOCH,
-            &mut cache,
-            &mut buf,
         );
-        let label = labels.first().expect("the sitter has a badge");
+        let plate = list
+            .pieces()
+            .iter()
+            .find(|p| matches!(p.kind, PieceKind::Badge { .. }))
+            .expect("the sitter has a badge")
+            .span;
         let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
         let top = desk_span(&pack, art, desk, RenderScale::ONE)
             .expect("desk")
             .y0;
-        assert!(
-            label.anchor_px.y < scale.to_buffer(top),
-            "badge at y {} is not above the monitor top at {}",
-            label.anchor_px.y,
-            scale.to_buffer(top)
-        );
+        assert!(plate.y1 < top, "{plate:?} reaches the monitor top at {top}");
     }
 
     /// Who carries a chair is ONE decision: a sitter skipped for art the pack
@@ -3643,40 +3700,26 @@ pub(crate) mod tests {
     /// seated agent is not where the cutaway draws them.
     #[test]
     fn a_label_anchor_sits_above_the_head_and_centred_on_the_sprite() {
-        let scale = RenderScale::new(3).expect("nonzero");
         let at = crate::layout::Point { x: 10, y: 20 };
-        let anchor = label_anchor(at, 8, None, scale);
-        assert_eq!(
-            anchor.x,
-            scale.to_buffer(at.x + 4),
-            "centred on the sprite, in logical space then converted"
-        );
-        assert!(
-            anchor.y < scale.to_buffer(at.y),
-            "the badge must clear the head, not overlap it"
-        );
-        assert_eq!(
-            scale.to_buffer(at.y) - anchor.y,
-            LABEL_GAP_PX * scale.get(),
-            "the gap scales with the render, or it closes up at 8x"
-        );
+        let anchor = label_anchor(at, 8, None);
+        assert_eq!(anchor.x, at.x + 4, "centred on the sprite");
+        assert_eq!(at.y - anchor.y, LABEL_GAP, "clear of the head");
     }
 
     /// A ceiling ABOVE the head lifts the badge clear of it; one below the head
     /// changes nothing.
     #[test]
     fn a_label_anchor_clears_a_ceiling_above_the_head() {
-        let scale = RenderScale::new(3).expect("nonzero");
         let at = crate::layout::Point { x: 10, y: 20 };
-        let free = label_anchor(at, 8, None, scale);
-        let raised = label_anchor(at, 8, Some(at.y - 4), scale);
+        let free = label_anchor(at, 8, None);
+        let raised = label_anchor(at, 8, Some(at.y - 4));
         assert_eq!(
             raised.y,
-            scale.to_buffer(at.y - 4) - LABEL_GAP_PX * scale.get(),
+            at.y - 4 - LABEL_GAP,
             "the badge clears the monitor top by the same gap it clears a head by"
         );
         assert_eq!(raised.x, free.x);
-        assert_eq!(label_anchor(at, 8, Some(at.y + 4), scale), free);
+        assert_eq!(label_anchor(at, 8, Some(at.y + 4)), free);
     }
 
     /// The layout leaves walkable rows between the wall band and `top_margin`.
@@ -4459,7 +4502,9 @@ pub(crate) mod tests {
                         std::time::UNIX_EPOCH,
                     ),
                 ) {
-                    if only_people && !matches!(kind, PieceKind::Character { .. }) {
+                    if only_people
+                        && !matches!(kind, PieceKind::Character { .. } | PieceKind::Badge { .. })
+                    {
                         continue;
                     }
                     kinds.insert(kind_name(&kind));
@@ -4577,6 +4622,7 @@ S B B B B B B S
             kinds.into_iter().collect::<Vec<_>>(),
             [
                 "animated",
+                "badge",
                 "chair",
                 "character",
                 "clock",
@@ -5676,12 +5722,17 @@ S B B B B B B S
                     "hover box {body:?} belongs to a piece that paints nothing"
                 );
             }
-            assert_eq!(
-                list.labels()
-                    .map(|l| frame.agents[l.agent_idx].agent_id)
-                    .collect::<Vec<_>>(),
-                hovers.iter().map(|&(agent, _)| agent).collect::<Vec<_>>(),
-            );
+            // Each drawn agent's badge, known by its text.
+            let namesakes = crate::overlay::Namesakes::of(&frame.agents);
+            let mut badged: Vec<_> = list.badges().map(|b| b.text.clone()).collect();
+            let mut drawn: Vec<_> = hovers
+                .iter()
+                .filter_map(|&(id, _)| frame.agents.iter().find(|a| a.agent_id == id))
+                .map(|a| namesakes.text(a))
+                .collect();
+            badged.sort();
+            drawn.sort();
+            assert_eq!(badged, drawn);
         }
     }
 
@@ -5700,6 +5751,7 @@ S B B B B B B S
             PieceKind::Character { .. } => "character",
             PieceKind::Glass { .. } => "glass",
             PieceKind::Hung { .. } => "hung decor",
+            PieceKind::Badge { .. } => "badge",
         }
     }
 
