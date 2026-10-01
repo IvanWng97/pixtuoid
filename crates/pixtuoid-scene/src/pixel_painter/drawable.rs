@@ -188,7 +188,7 @@ pub(super) enum DrawableKind<'a> {
         pos: Point,
     },
     /// Lounge aquarium, y-sorted at its cabinet's south row. `pos` is the sprite
-    /// CENTER (matches the mask stamp's `Anchor::Center`).
+    /// CENTER (matches the mask stamp's `Pivot::Center`).
     FishTank {
         pos: Point,
     },

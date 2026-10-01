@@ -1413,14 +1413,8 @@ fn push_fixture(
                 office.scale,
             );
             order.push((
-                piece_span(
-                    crate::layout::Anchor::Center,
-                    centre,
-                    table.w,
-                    table.h,
-                    face,
-                )
-                .with_depth(depth),
+                piece_span(crate::layout::Pivot::Center, centre, table.w, table.h, face)
+                    .with_depth(depth),
                 PieceKind::Table { at: centre },
             ));
         }
@@ -1485,7 +1479,7 @@ fn push_fixture(
                 return;
             };
             order.push((
-                piece_span(crate::layout::Anchor::TopLeft, top_left, w, h, 0).with_depth(depth),
+                piece_span(crate::layout::Pivot::TopLeft, top_left, w, h, 0).with_depth(depth),
                 PieceKind::Door {
                     at: top_left,
                     frame: frame.door_frame,
@@ -1553,7 +1547,7 @@ fn push_art(
         Motion::Playing => PieceKind::Animated { at, art },
     };
     order.push((
-        piece_span(crate::layout::Anchor::Center, at, w, h, 0).with_depth(depth),
+        piece_span(crate::layout::Pivot::Center, at, w, h, 0).with_depth(depth),
         kind,
     ));
 }
@@ -1586,7 +1580,7 @@ fn push_hung(
 ) {
     if let Some((w, h)) = art_size(pack, sprite) {
         order.push((
-            piece_span(crate::layout::Anchor::TopLeft, at, w, h, 0).with_depth(depth),
+            piece_span(crate::layout::Pivot::TopLeft, at, w, h, 0).with_depth(depth),
             PieceKind::Hung { at, sprite },
         ));
     }
@@ -1795,7 +1789,7 @@ fn desk_span(
 ) -> Option<Span> {
     let (w, h) = art_size(pack, art)?;
     let span = piece_span(
-        crate::layout::Anchor::TopLeft,
+        crate::layout::Pivot::TopLeft,
         crate::layout::Point {
             x: desk.x,
             y: crate::embedded_pack::desk_art_top(pack, desk.y, h),
@@ -1945,7 +1939,7 @@ fn chair_span(
 ) -> Option<(Span, crate::layout::Point)> {
     let at = crate::layout::desk_chair_top_left(desk, facing)?;
     let (w, h) = art_size(pack, crate::embedded_pack::DESK_CHAIR_SPRITE)?;
-    let span = piece_span(crate::layout::Anchor::TopLeft, at, w, h, 0)
+    let span = piece_span(crate::layout::Pivot::TopLeft, at, w, h, 0)
         .with_depth(crate::layout::desk_chair_z_key(desk, facing));
     Some((span, at))
 }
@@ -2006,7 +2000,7 @@ fn push_characters(
             y: at.y.saturating_sub(hair),
         };
         let span = occupant_span(
-            piece_span(crate::layout::Anchor::TopLeft, top, w, h + hair, 0),
+            piece_span(crate::layout::Pivot::TopLeft, top, w, h + hair, 0),
             c.anchor_y,
             chair.map(|(span, _)| span),
         );
@@ -2112,7 +2106,7 @@ fn push_sofa(
 ) {
     let sitters = crate::sim::seat::sofa_sitter_z_key(at);
     if let Some((w, h)) = art_size(pack, MEETING_SOFA_NORTH).filter(|_| back_view) {
-        let tl = crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
+        let tl = crate::layout::anchored_top_left(crate::layout::Pivot::Center, at, w, h);
         let split = NORTH_SOFA_SEAT_ROWS.min(h);
         let band = |rows| PieceKind::PropBand {
             at,
@@ -2130,7 +2124,7 @@ fn push_sofa(
         return;
     }
     if let Some((w, h)) = art_size(pack, "meeting_sofa") {
-        let span = piece_span(crate::layout::Anchor::Center, at, w, h, 0)
+        let span = piece_span(crate::layout::Pivot::Center, at, w, h, 0)
             .with_depth(sitters)
             .with_layer(Layer::from(tie));
         order.push((
@@ -2388,13 +2382,13 @@ impl std::fmt::Debug for Figure {
 /// Anchoring goes through [`crate::layout::anchored_top_left`], the same function
 /// the walkable mask and the classic painter use.
 fn piece_span(
-    anchor: crate::layout::Anchor,
+    pivot: crate::layout::Pivot,
     pos: crate::layout::Point,
     w: u16,
     h: u16,
     below: u16,
 ) -> Span {
-    let tl = crate::layout::anchored_top_left(anchor, pos, w, h);
+    let tl = crate::layout::anchored_top_left(pivot, pos, w, h);
     Span::new(tl.x, tl.y, w, h, below)
 }
 
@@ -2860,7 +2854,7 @@ fn dominant_opaque_row(
 }
 
 /// Wall-hung decor, blitted at its own `pos`: [`paint_art`] would centre it, but
-/// `WallDecorItem.pos` is TOP-LEFT, like the classic painter's `Anchor::TopLeft`
+/// `WallDecorItem.pos` is TOP-LEFT, like the classic painter's `Pivot::TopLeft`
 /// z-sort rather than the centre-pinned furniture, so centring would hang every
 /// board up and west of where it belongs.
 fn paint_wall_decor(
@@ -3243,7 +3237,7 @@ fn centred_top_left(
     scale: RenderScale,
 ) -> (u16, u16) {
     let crate::layout::Point { x, y } =
-        crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, logical.0, logical.1);
+        crate::layout::anchored_top_left(crate::layout::Pivot::Center, at, logical.0, logical.1);
     (scale.to_buffer(x), scale.to_buffer(y))
 }
 
@@ -3260,7 +3254,7 @@ fn paint_prop_band(
         return;
     };
     let (w, h) = dense.logical;
-    let tl = crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
+    let tl = crate::layout::anchored_top_left(crate::layout::Pivot::Center, at, w, h);
     let (r0, r1) = (rows.0.min(h), rows.1.min(h));
     let d = dense.density.get();
     let fw = usize::from(dense.frame.width());
@@ -3334,13 +3328,8 @@ pub(crate) mod tests {
     /// A piece's base row — the ordering key — through the SAME `piece_span`
     /// the draw list builds with. Width does not affect the base row, so the
     /// call sites stay focused on depth.
-    fn sort_row(
-        anchor: crate::layout::Anchor,
-        pos: crate::layout::Point,
-        h: u16,
-        below: u16,
-    ) -> u16 {
-        piece_span(anchor, pos, 1, h, below).depth
+    fn sort_row(pivot: crate::layout::Pivot, pos: crate::layout::Point, h: u16, below: u16) -> u16 {
+        piece_span(pivot, pos, 1, h, below).depth
     }
 
     /// The desk sorts on its face's south edge and a back-turned sitter on their
@@ -3377,7 +3366,7 @@ pub(crate) mod tests {
         let feet = crate::embedded_pack::desk_art_top(&pack, desk.y, art_h) + art_h;
         let (w, h) = base_size(&pack, "standing");
         let person = piece_span(
-            crate::layout::Anchor::TopLeft,
+            crate::layout::Pivot::TopLeft,
             crate::layout::Point {
                 x: desk.x,
                 y: feet + 1 - h,
@@ -3400,7 +3389,7 @@ pub(crate) mod tests {
         let (w, h) = base_size(pack, "seated_back");
         let chair = chair_span(pack, Facing::North, desk).map(|(s, _)| s);
         occupant_span(
-            piece_span(crate::layout::Anchor::TopLeft, near_seat(desk), w, h, 0),
+            piece_span(crate::layout::Pivot::TopLeft, near_seat(desk), w, h, 0),
             crate::layout::desk_walk_anchor_facing(desk, Facing::North).y,
             chair,
         )
@@ -3421,7 +3410,7 @@ pub(crate) mod tests {
         // Standing at the desk's north approach, feet on the row just north of
         // its anchor.
         let behind_z = sort_row(
-            crate::layout::Anchor::TopLeft,
+            crate::layout::Pivot::TopLeft,
             crate::layout::Point {
                 x: desk.x,
                 y: desk.y - body_h,
@@ -3451,7 +3440,7 @@ pub(crate) mod tests {
             y: plant_base + plant_h / 2 - plant_h + 1,
         };
         let plant = piece_span(
-            crate::layout::Anchor::Center,
+            crate::layout::Pivot::Center,
             plant_centre,
             plant_w,
             plant_h,
@@ -3578,7 +3567,7 @@ pub(crate) mod tests {
             for bob in [0, 1] {
                 let seat = near_seat(desk);
                 let body = piece_span(
-                    crate::layout::Anchor::TopLeft,
+                    crate::layout::Pivot::TopLeft,
                     crate::layout::Point {
                         x: seat.x,
                         y: seat.y + bob,
@@ -4746,7 +4735,7 @@ pub(crate) mod tests {
                     let at = chair.expect("a desk sitter carries their chair");
                     let (w, h) = art_size(&pack, crate::embedded_pack::DESK_CHAIR_SPRITE)
                         .expect("chair art");
-                    let empty = piece_span(crate::layout::Anchor::TopLeft, at, w, h, 0);
+                    let empty = piece_span(crate::layout::Pivot::TopLeft, at, w, h, 0);
                     assert_eq!(
                         Some(cast),
                         ground_shadow(empty, &PieceKind::Chair { at }, &pack),

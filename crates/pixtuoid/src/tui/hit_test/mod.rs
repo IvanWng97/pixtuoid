@@ -3,7 +3,7 @@
 
 use pixtuoid_core::AgentId;
 
-use pixtuoid_scene::layout::{Anchor, Bounds, Layout, Point, Size, anchored_top_left};
+use pixtuoid_scene::layout::{Bounds, Layout, Pivot, Point, Size, anchored_top_left};
 use pixtuoid_scene::pet::PetKind;
 use pixtuoid_scene::pixel_painter::{AgentFrame, MascotFrame};
 
@@ -15,7 +15,7 @@ pub(crate) fn hit_test_agent(agents: &[AgentFrame], cell: CellArea) -> Option<Ag
     agents
         .iter()
         .rev()
-        .find(|a| box_hit(Anchor::TopLeft, a.anchor, Size { w: a.w, h: a.h }, cell))
+        .find(|a| box_hit(Pivot::TopLeft, a.anchor, Size { w: a.w, h: a.h }, cell))
         .map(|a| a.agent_id)
 }
 
@@ -33,7 +33,7 @@ pub(crate) fn hit_test_furniture(layout: &Layout, cell: CellArea) -> Option<&'st
 
 fn on_rect(b: Bounds, cell: CellArea) -> bool {
     box_hit(
-        Anchor::TopLeft,
+        Pivot::TopLeft,
         Point { x: b.x, y: b.y },
         Size {
             w: b.width,
@@ -45,14 +45,14 @@ fn on_rect(b: Bounds, cell: CellArea) -> bool {
 
 /// Whether `cell` shows the office pet's sprite.
 pub(crate) fn hit_test_pet(kind: PetKind, pet_pos: Point, anim_name: &str, cell: CellArea) -> bool {
-    box_hit(Anchor::Center, pet_pos, kind.hitbox(anim_name), cell)
+    box_hit(Pivot::Center, pet_pos, kind.hitbox(anim_name), cell)
 }
 
 /// Whether `cell` shows a `size`-px box placed at `pos` (pixel coords) by
-/// `anchor` — through [`anchored_top_left`], the painter's own placement.
-fn box_hit(anchor: Anchor, pos: Point, size: Size, cell: CellArea) -> bool {
+/// `pivot` — through [`anchored_top_left`], the painter's own placement.
+fn box_hit(pivot: Pivot, pos: Point, size: Size, cell: CellArea) -> bool {
     cell.overlaps(
-        anchored_top_left(anchor, pos, size.w, size.h),
+        anchored_top_left(pivot, pos, size.w, size.h),
         size.w,
         size.h,
     )
@@ -63,7 +63,7 @@ fn box_hit(anchor: Anchor, pos: Point, size: Size, cell: CellArea) -> bool {
 /// (`MascotFrame`, which reads the pack's real size), so a re-tuned or
 /// custom-pack mascot keeps its click box aligned with what's drawn.
 pub(crate) fn hit_test_mascot(pos: Point, w: u16, h: u16, cell: CellArea) -> bool {
-    box_hit(Anchor::Center, pos, Size { w, h }, cell)
+    box_hit(Pivot::Center, pos, Size { w, h }, cell)
 }
 
 /// The mascot under `cell` painted on TOP: `mascots` is in `sort_drawables`'

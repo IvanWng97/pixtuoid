@@ -4,7 +4,7 @@
 
 use std::time::SystemTime;
 
-use crate::layout::{Anchor, Layout, SEAT_RENDER_Y_OFF, Size, WALKING_Y_OFF};
+use crate::layout::{Layout, Pivot, SEAT_RENDER_Y_OFF, Size, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
 use crate::anim::epoch_ms;
@@ -68,14 +68,14 @@ pub(crate) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
 }
 
 /// Nudge a sprite so the whole frame lands inside the canvas, answering in the
-/// SAME anchor space `pos` came in.
+/// SAME pivot space `pos` came in.
 ///
 /// It moves a figure's paint anchor, never its sim position (invariant #6).
-pub(crate) fn keep_sprite_on_canvas(anchor: Anchor, pos: Point, size: Size, buf: Size) -> Point {
-    match anchor {
+pub(crate) fn keep_sprite_on_canvas(pivot: Pivot, pos: Point, size: Size, buf: Size) -> Point {
+    match pivot {
         // `min` before `max`: on a buffer narrower than the sprite the lower
         // bound wins instead of `clamp`'s inverted-range panic.
-        Anchor::Center => Point {
+        Pivot::Center => Point {
             x: pos
                 .x
                 .min(buf.w.saturating_sub(size.w.div_ceil(2)))
@@ -86,21 +86,21 @@ pub(crate) fn keep_sprite_on_canvas(anchor: Anchor, pos: Point, size: Size, buf:
                 .max(size.h / 2),
         },
         // No lower bound needed — `u16` already floors a top-left `pos` at 0.
-        Anchor::TopLeft => Point {
+        Pivot::TopLeft => Point {
             x: pos.x.min(buf.w.saturating_sub(size.w)),
             y: pos.y.min(buf.h.saturating_sub(size.h)),
         },
     }
 }
 
-/// `pos`, in `anchor` space, moved so a `size` frame lands on `layout`'s canvas:
+/// `pos`, in `pivot` space, moved so a `size` frame lands on `layout`'s canvas:
 /// the one fit every figure's placement takes.
-pub(crate) fn on_canvas(layout: &Layout, anchor: Anchor, pos: Point, size: Size) -> Point {
+pub(crate) fn on_canvas(layout: &Layout, pivot: Pivot, pos: Point, size: Size) -> Point {
     let canvas = Size {
         w: layout.buf_w,
         h: layout.buf_h,
     };
-    keep_sprite_on_canvas(anchor, pos, size, canvas)
+    keep_sprite_on_canvas(pivot, pos, size, canvas)
 }
 
 /// How far a later arrival steps aside along x so two agents at one
@@ -172,7 +172,7 @@ pub(crate) fn character_anchor(
     };
     Some(on_canvas(
         layout,
-        Anchor::TopLeft,
+        Pivot::TopLeft,
         anchor,
         Size {
             w,

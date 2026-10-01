@@ -2,7 +2,7 @@
 
 use super::walls::WALL_H;
 use crate::layout::{
-    Anchor, Bounds, Furniture, OBSTACLE_PAD_PX, Point, anchored_top_left, furniture_def, pct,
+    Bounds, Furniture, OBSTACLE_PAD_PX, Pivot, Point, anchored_top_left, furniture_def, pct,
 };
 
 /// One meeting room's furniture trio. The fixed-size array encodes the
@@ -37,7 +37,7 @@ impl MeetingTrio {
                     .saturating_sub(self.table.y)
                     .saturating_add(MEETING_RUG_OVERHANG),
             );
-        let tl = anchored_top_left(Anchor::Center, self.table, MEETING_RUG_W, h);
+        let tl = anchored_top_left(Pivot::Center, self.table, MEETING_RUG_W, h);
         Bounds {
             x: tl.x,
             y: tl.y,

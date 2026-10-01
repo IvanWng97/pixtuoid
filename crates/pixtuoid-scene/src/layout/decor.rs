@@ -2,7 +2,7 @@
 //! furniture and waypoint kind in the office, plus THE table giving each its
 //! geometry. Kept separate so a new sprite kind doesn't churn the layout math.
 
-use super::{Anchor, DESK_FOOT_H, DESK_H, DESK_W, Point, Size};
+use super::{DESK_FOOT_H, DESK_H, DESK_W, Pivot, Point, Size};
 
 /// Wander destinations the Idle state machine can pick — each kind controls the
 /// pose + sprite an arriving agent takes. Plants/lamps are decor, not waypoints.
@@ -185,17 +185,16 @@ impl FurnitureDef {
     /// visual box + ground aligns — so the runtime-footprint path (a waypoint's
     /// `approach::obstacle_footprint`) shares the def's alignment with the table
     /// path and no call site re-threads `visual`/`ground_x`/`ground_y`.
-    pub(super) fn ground_rect_of(&self, anchor: Anchor, pos: Point, fp: Size) -> (Point, Size) {
-        super::mask::ground_rect(anchor, pos, fp, self.visual, self.ground_x, self.ground_y)
+    pub(super) fn ground_rect_of(&self, pivot: Pivot, pos: Point, fp: Size) -> (Point, Size) {
+        super::mask::ground_rect(pivot, pos, fp, self.visual, self.ground_x, self.ground_y)
     }
 
     /// The blocked ground rect from this def's OWN table footprint, or `None` when
     /// the piece has no ground footprint (wall-hung decor, runtime-sized pantry
     /// counter). THE concentrator the mask stamp / collision checks / placement
     /// sweep all read.
-    pub(super) fn ground_rect(&self, anchor: Anchor, pos: Point) -> Option<(Point, Size)> {
-        self.footprint
-            .map(|fp| self.ground_rect_of(anchor, pos, fp))
+    pub(super) fn ground_rect(&self, pivot: Pivot, pos: Point) -> Option<(Point, Size)> {
+        self.footprint.map(|fp| self.ground_rect_of(pivot, pos, fp))
     }
 }
 

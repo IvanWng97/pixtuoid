@@ -17,7 +17,7 @@
 use crate::layout::decor::GroundAlign;
 use crate::layout::mask::ground_rect;
 use crate::layout::{
-    Anchor, Bounds, MeetingRoom, Point, Size, WALL_BAND_TO_TOP_MARGIN, WallSegment, pct,
+    Bounds, MeetingRoom, Pivot, Point, Size, WALL_BAND_TO_TOP_MARGIN, WallSegment, pct,
 };
 use std::ops::Range;
 
@@ -276,7 +276,7 @@ impl WallPiece {
             w: visual.w,
             h: visual.h.saturating_sub(cap),
         };
-        ground_rect(Anchor::TopLeft, at, fp, visual, align_x, GroundAlign::End)
+        ground_rect(Pivot::TopLeft, at, fp, visual, align_x, GroundAlign::End)
     }
 
     /// The bands both painters sort it in among the office's pieces, as

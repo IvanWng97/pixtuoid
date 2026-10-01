@@ -122,7 +122,7 @@ struct Piece {
     /// `None` = the piece stamps no obstacle of its own (wall-hung decor).
     ground: Option<(Point, Size)>,
     visual: (Point, Size),
-    /// For `Anchor::Center` pieces: the unclamped center + visual size, to catch
+    /// For `Pivot::Center` pieces: the unclamped center + visual size, to catch
     /// a west/north spill that `anchored_top_left`'s `saturating_sub` silently
     /// clamps to 0 (a centered piece "fits" iff `pos >= visual/2` per axis).
     center_fit: Option<(Point, Size)>,
@@ -142,19 +142,19 @@ struct Piece {
 impl Piece {
     fn table(
         label: String,
-        anchor: Anchor,
+        pivot: Pivot,
         pos: Point,
         kind: Furniture,
         container: Container,
         overlap_group: Option<u8>,
     ) -> Piece {
         let def = furniture_def(kind);
-        let vis_tl = anchored_top_left(anchor, pos, def.visual.w, def.visual.h);
+        let vis_tl = anchored_top_left(pivot, pos, def.visual.w, def.visual.h);
         Piece {
             label,
-            ground: def.ground_rect(anchor, pos),
+            ground: def.ground_rect(pivot, pos),
             visual: (vis_tl, def.visual),
-            center_fit: matches!(anchor, Anchor::Center).then_some((pos, def.visual)),
+            center_fit: matches!(pivot, Pivot::Center).then_some((pos, def.visual)),
             container,
             visual_in_container: false,
             overlap_group,
@@ -173,7 +173,7 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
         match f.kind {
             FixtureKind::Desk(i) => out.push(Piece::table(
                 format!("desk[{}]", i.0),
-                Anchor::TopLeft,
+                Pivot::TopLeft,
                 l.home_desks[i.0],
                 Furniture::Desk,
                 Container::Band,
@@ -182,7 +182,7 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
             FixtureKind::Pod { item, kind } => {
                 let mut piece = Piece::table(
                     format!("pod_decor[{item}] {kind:?}"),
-                    Anchor::Center,
+                    Pivot::Center,
                     l.pod_decor[item].pos,
                     kind.furniture(),
                     Container::Band,
@@ -207,7 +207,7 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
                 };
                 out.push(Piece::table(
                     format!("plant[{item}] {kind:?}"),
-                    Anchor::Center,
+                    Pivot::Center,
                     pos,
                     kind.furniture(),
                     container,
@@ -226,7 +226,7 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
                 };
                 out.push(Piece::table(
                     format!("wall_decor[{item}] {kind:?}"),
-                    Anchor::TopLeft,
+                    Pivot::TopLeft,
                     l.wall_decor[item].pos,
                     kind.furniture(),
                     container,
@@ -245,7 +245,7 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
                             label,
                             ground: Some(pantry_ground_rect(wp.pos, counter)),
                             visual: (
-                                anchored_top_left(Anchor::Center, wp.pos, counter.w, counter.h),
+                                anchored_top_left(Pivot::Center, wp.pos, counter.w, counter.h),
                                 counter,
                             ),
                             center_fit: Some((wp.pos, counter)),
@@ -256,7 +256,7 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
                     }
                     Station::VendingMachine | Station::Printer => Piece::table(
                         label,
-                        Anchor::Center,
+                        Pivot::Center,
                         wp.pos,
                         wp.kind.furniture(),
                         Container::Aisle,
@@ -264,7 +264,7 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
                     ),
                     Station::SnackShelf => Piece::table(
                         label,
-                        Anchor::Center,
+                        Pivot::Center,
                         wp.pos,
                         wp.kind.furniture(),
                         Container::Pantry,
@@ -279,7 +279,7 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
                     if wp.kind == WaypointKind::Couch {
                         out.push(Piece::table(
                             format!("waypoint[{i}] Couch seat"),
-                            Anchor::Center,
+                            Pivot::Center,
                             wp.pos,
                             Furniture::Couch,
                             Container::Band,
@@ -292,7 +292,7 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
                 if let Some(trio) = l.meeting_rooms[room].trio {
                     out.push(Piece::table(
                         format!("meeting[{room}].sofa[{seat}]"),
-                        Anchor::Center,
+                        Pivot::Center,
                         trio.sofas[seat],
                         Furniture::MeetingSofaBody,
                         Container::MeetingRoom(room),
@@ -304,7 +304,7 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
                 if let Some(trio) = l.meeting_rooms[room].trio {
                     out.push(Piece::table(
                         format!("meeting[{room}].table"),
-                        Anchor::Center,
+                        Pivot::Center,
                         trio.table,
                         Furniture::MeetingTable,
                         Container::MeetingRoom(room),
@@ -332,7 +332,7 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
                 if let Some(island) = l.pantry.and_then(|p| p.kitchen_island) {
                     out.push(Piece::table(
                         "kitchen_island".into(),
-                        Anchor::Center,
+                        Pivot::Center,
                         island,
                         Furniture::KitchenIsland,
                         Container::Pantry,
@@ -377,7 +377,7 @@ const LOUNGE_GROUP: u8 = 2;
 fn lounge_piece(label: &str, pos: Point, row: Furniture) -> Piece {
     Piece::table(
         label.into(),
-        Anchor::Center,
+        Pivot::Center,
         pos,
         row,
         Container::Band,
@@ -1010,7 +1010,7 @@ fn pod_y_extents(l: &SceneLayout) -> Vec<(u16, u16)> {
 fn assert_no_free_standing_piece_inside_a_pod(w: u16, h: u16, seed: u64, l: &SceneLayout) {
     let pods = pod_y_extents(l);
     for d in &l.wall_decor {
-        let Some((g, gs)) = furniture_def(d.kind.furniture()).ground_rect(Anchor::TopLeft, d.pos)
+        let Some((g, gs)) = furniture_def(d.kind.furniture()).ground_rect(Pivot::TopLeft, d.pos)
         else {
             continue; // wall-hung: no ground contact, nothing to wedge into a pod
         };

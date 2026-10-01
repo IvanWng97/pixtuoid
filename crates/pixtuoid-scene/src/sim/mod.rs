@@ -20,7 +20,7 @@ use crate::chitchat::{self, ActiveChitchat, ChitchatBubble, VenueKey};
 use crate::creatures::{gateway_mascot_def, mascot_position, mascot_seed, pet_position};
 use crate::effects::{self, Effect};
 use crate::floor::{CoffeeState, FloorInputs, FloorMeta, LightingState, PetInputs};
-use crate::layout::{Anchor, Layout, Point, Size, WALKING_Y_OFF};
+use crate::layout::{Layout, Pivot, Point, Size, WALKING_Y_OFF};
 use crate::motion::MotionState;
 use crate::pathfind::Router;
 use crate::pet::PetKind;
@@ -416,7 +416,7 @@ fn pet_placement(
     let fit = |anim, frame_idx, pos| {
         on_canvas(
             layout,
-            Anchor::Center,
+            Pivot::Center,
             pos,
             frame_size(pack, anim, frame_idx, PET_FALLBACK),
         )
@@ -504,7 +504,7 @@ fn mascot_placements(
             let (pos, anim_name, frame_idx) =
                 mascot_position(layout, presence, def.walk, def.rest, now, seed)?;
             let size = frame_size(pack, anim_name, frame_idx, MASCOT_FALLBACK);
-            let pos = on_canvas(layout, Anchor::Center, pos, size);
+            let pos = on_canvas(layout, Pivot::Center, pos, size);
             // The busy tell keys on in-flight RUNS, not the (persistent,
             // single-user) session count, which sticks at 1 at rest.
             let runs = presence.in_flight_runs.len() as u32;
@@ -831,7 +831,7 @@ pub(crate) fn resolve_characters(
     for (p, cues) in &mut placements {
         let art = pack_frame_size(pack, p.anim_name, p.frame_idx);
         let size = art.unwrap_or(fallback);
-        let fitted = on_canvas(layout, Anchor::TopLeft, p.anchor, size);
+        let fitted = on_canvas(layout, Pivot::TopLeft, p.anchor, size);
         // The painter's own desk art: whatever it raises behind the sitter's
         // head, the badge clears.
         let ceiling = p.seat_desk.and_then(|d| {

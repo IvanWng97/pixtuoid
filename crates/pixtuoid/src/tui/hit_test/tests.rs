@@ -351,7 +351,7 @@ fn cat_hit_test_sleep_smaller_box() {
 /// The top and bottom pixel rows of the cat's `anim` hitbox centred on `pos`.
 fn pet_rows(pos: Point, anim: &str) -> (u16, u16) {
     let hitbox = PetKind::Cat.hitbox(anim);
-    let top = anchored_top_left(Anchor::Center, pos, hitbox.w, hitbox.h).y;
+    let top = anchored_top_left(Pivot::Center, pos, hitbox.w, hitbox.h).y;
     (top, top + hitbox.h - 1)
 }
 
