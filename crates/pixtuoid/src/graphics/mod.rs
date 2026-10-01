@@ -522,10 +522,15 @@ impl Plan {
                     0 => "every frame".to_string(),
                     ms => format!("at most every {ms} ms"),
                 };
+                // A forced plan names its protocol: `auto` may pick another.
+                let mode = if forced { protocol.name() } else { "auto" };
                 let how = if run == GraphicsMode::Off {
-                    " — off: `run --graphics auto` (or `graphics = \"auto\"` in config) paints it"
+                    format!(
+                        " — off: `run --graphics {mode}` (or `graphics = \"{mode}\"` in config) \
+                         paints it"
+                    )
                 } else {
-                    ""
+                    String::new()
                 };
                 format!(
                     "graphics: {} ({}) on a {}x{} cell, {} — the cutaway at {}x \
@@ -1068,6 +1073,27 @@ mod tests {
             classic.diagnostic_row(GraphicsMode::Off),
             classic.diagnostic_row(GraphicsMode::Auto)
         );
+
+        // Forced, the hint names the protocol, as a value `--graphics` takes.
+        for mode in [
+            GraphicsMode::Kitty,
+            GraphicsMode::Sixel,
+            GraphicsMode::Iterm2,
+        ] {
+            let forced = resolve(mode, capable(CELL_8X16), BUNDLED, AREA);
+            let name = <GraphicsMode as clap::ValueEnum>::to_possible_value(&mode)
+                .expect("a value")
+                .get_name()
+                .to_string();
+            assert_eq!(
+                forced.diagnostic_row(GraphicsMode::Off),
+                format!(
+                    "{} — off: `run --graphics {name}` (or `graphics = \"{name}\"` in config) \
+                     paints it",
+                    forced.diagnostic_row(GraphicsMode::Auto)
+                )
+            );
+        }
     }
 
     /// A reason keeps its variant only by printing its own row, a remedy the
