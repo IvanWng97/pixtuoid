@@ -139,6 +139,15 @@ invariant-breaking sequence against:
    failure impossible (#1142); a check outside [its own
    layer](docs/CONTRIBUTING.md#convergence-contract). Documented load-bearing
    defense (shim exit-0, config-never-wipe, liveness ladders) stays.
+6. **Naming**, each finding citing the code, prior word or guideline the name
+   breaks, `issue (non-blocking)` unless it misleads about behavior or
+   safety: every new or renamed name, `pub(crate)` and modules included, says
+   what its item is or does at head (behavior changed, so does the name); one
+   concept, one name across crates and painters, `rg`'d before coining (never
+   `art` for both sprite pack and person, nor a module named after a session);
+   compass words are [screen-space](crates/pixtuoid-scene/AGENTS.md);
+   [C-CONV, C-GETTER, C-ITER, C-WORD-ORDER](https://rust-lang.github.io/api-guidelines/naming.html);
+   a PR body or commit names the item, never a placeholder.
 
 ## Escalation
 
