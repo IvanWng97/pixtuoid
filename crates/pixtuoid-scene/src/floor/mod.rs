@@ -703,9 +703,7 @@ impl FloorSession {
     }
 }
 
-/// [`FloorSession::observe`] for a painter that keeps its floors and office
-/// apart, as [`render_floor`] is [`FloorSession::render`]'s; eviction stays
-/// caller-side for the same reason.
+/// [`FloorSession::observe`] minus eviction, which a projected `world.scene` would turn on other floors.
 pub fn observe_floor(
     fctx: &mut FloorCtx,
     coffee: &mut CoffeeState,
