@@ -142,9 +142,9 @@ def desk_rows(lift):
 def desk_1x(lift):
     """The classic desk's wood: a lit back edge, a bright front lip, and legs
     dark on their inner side, with open floor between them so the carpet and
-    anyone walking behind the desk show through. The props (lamp, mug, paper
-    tower) are the classic painter's live overlays, so the art draws none of
-    them."""
+    anyone walking behind the desk show through, and the task lamp on its west
+    wing: a two-cell shade over its bulb. The cup and the paper tower are
+    pieces of their own, stood at the art's marks."""
     top, lip, legs, h = desk_rows(lift)
     g = canvas(DESK_ART_W, h)
     rect(g, 0, top, DESK_ART_W, lip, WOOD)
@@ -153,6 +153,9 @@ def desk_1x(lift):
     for x0, inner in ((0, DESK_LEG_W - 1), (DESK_ART_W - DESK_LEG_W, DESK_ART_W - DESK_LEG_W)):
         rect(g, x0, legs, x0 + DESK_LEG_W, h, WOOD_SH)
         rect(g, inner, legs, inner + 1, h, WOOD_DK)
+    # `lighting`'s `DESK_LAMP_BULB`: the bulb a cell east and south of the shade.
+    rect(g, 0, top, 2, top + 1, LAMP_HI)
+    put(g, 1, top + 1, BULB)
     return g
 
 

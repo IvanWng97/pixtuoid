@@ -12,7 +12,6 @@ use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 
-use super::palette::{BLACK, WHITE, blend_rgb};
 use super::sim::{Cup, DeskProps};
 use pixtuoid_core::AgentSlot;
 
@@ -534,28 +533,16 @@ pub(super) fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, pack: &Pack
     }
 }
 
-/// Task lamp on the desk's west wing (the coffee cup and token tower own the other
-/// two), plus its warm pool.
+/// The task lamp's warm pool; the desk art draws the lamp itself.
 pub(super) fn paint_desk_lamp(
     buf: &mut RgbBuffer,
     lights: &crate::lighting::DeskLights,
     theme: &crate::theme::Theme,
 ) {
-    let strength = lights.lamp.strength;
-    if strength <= 0.0 {
+    if lights.lamp.strength <= 0.0 {
         return;
     }
-    let warm = theme.lighting.desk_lamp;
-    // The fixture tracks the light it CASTS: fixed tones show a lamp fully lit at a strength whose pool rounds to nothing.
-    const OFF: f32 = 0.80;
-    let unlit = blend_rgb(warm, BLACK, OFF);
-    let shade = blend_rgb(unlit, blend_rgb(warm, WHITE, 0.45), strength);
-    let stem = blend_rgb(unlit, blend_rgb(warm, BLACK, 0.72), strength);
-    let (shade_at, bulb) = (lights.fixture, lights.bulb());
-    buf.put_checked(shade_at.x, shade_at.y, shade);
-    buf.put_checked(shade_at.x + 1, shade_at.y, shade);
-    buf.put_checked(bulb.x, bulb.y, stem);
-    super::background::paint_light(buf, &lights.lamp, warm);
+    super::background::paint_light(buf, &lights.lamp, theme.lighting.desk_lamp);
 }
 
 /// Token-meter paper tower: `tier` reams stacked on the desk surface against

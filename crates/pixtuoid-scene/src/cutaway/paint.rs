@@ -5267,75 +5267,78 @@ S B B B B B B S
     }
 
     /// Every desk's lamp pools where its art hangs the bulb, whichever way the
-    /// desk faces: the cutaway's art stands it on the side the desk faces.
+    /// desk faces and at every density its art is drawn at: the cutaway's art
+    /// stands it on the side the desk faces.
     #[test]
     #[cfg(feature = "density-art")]
     fn a_desk_lamp_pools_under_its_painted_bulb() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_default_pack();
         let layout = Layout::compute_with_seed(240, 144, None, 0).expect("lays out");
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
-        let pen = Pen::for_pack(scale, &pack);
-        let frame = empty_frame(&layout);
-        let list = list_at(
-            &frame,
-            Office {
-                layout: &layout,
-                pack: &pack,
-                theme,
-                scale,
-            },
-            23,
-        );
-        // Each painted bulb's middle, in art pixels.
-        let bulbs: Vec<(f32, f32)> = layout
-            .home_desks
-            .iter()
-            .enumerate()
-            .filter_map(|(i, &at)| {
-                let art = desk_art(
-                    &pack,
-                    layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)),
-                )?;
-                let span = desk_span(&pack, art, at, scale)?;
-                let desk = crate::pixel_painter::densest_frame(&pack, art, 0, scale)?;
-                let cells = drawn_in(&desk, &[crate::pixel_painter::DESK_BULB_KEY]);
-                let w = usize::from(desk.frame.width());
-                let hits: Vec<(f32, f32)> = cells
-                    .iter()
-                    .enumerate()
-                    .filter(|&(_, &b)| b)
-                    .map(|(i, _)| ((i % w) as f32, (i / w) as f32))
-                    .collect();
-                // Art pixels of this art, on the pen's grid.
-                let k = f32::from(pen.art(1).0) / f32::from(desk.density.get());
-                (!hits.is_empty()).then(|| {
-                    let n = hits.len() as f32;
-                    (
-                        f32::from(pen.art(span.x0).0)
-                            + hits.iter().map(|h| h.0).sum::<f32>() / n * k,
-                        f32::from(pen.art(span.y0).0)
-                            + hits.iter().map(|h| h.1).sum::<f32>() / n * k,
-                    )
-                })
-            })
-            .collect();
-        assert!(!bulbs.is_empty(), "the pack's desks draw no bulb");
-        let lamps: Vec<(f32, f32)> = list
-            .lights()
-            .iter()
-            .filter(|l| l.view.is(crate::lighting::EmitterKind::DeskLamp))
-            .map(|l| l.view.peak())
-            .collect();
-        assert_eq!(lamps.len(), bulbs.len(), "one pool a bulb");
-        let near = f32::from(pen.art(1).0);
-        for bulb in &bulbs {
-            assert!(
-                lamps
-                    .iter()
-                    .any(|p| (p.0 - bulb.0).abs() <= near && (p.1 - bulb.1).abs() <= near),
-                "no lamp pools within {near} art px of the bulb at {bulb:?}: {lamps:?}"
+        for s in [1, pack.max_density_variant().get()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            let pen = Pen::for_pack(scale, &pack);
+            let frame = empty_frame(&layout);
+            let list = list_at(
+                &frame,
+                Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme,
+                    scale,
+                },
+                23,
             );
+            // Each painted bulb's middle, in art pixels.
+            let bulbs: Vec<(f32, f32)> = layout
+                .home_desks
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &at)| {
+                    let art = desk_art(
+                        &pack,
+                        layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)),
+                    )?;
+                    let span = desk_span(&pack, art, at, scale)?;
+                    let desk = crate::pixel_painter::densest_frame(&pack, art, 0, scale)?;
+                    let cells = drawn_in(&desk, &[crate::pixel_painter::DESK_BULB_KEY]);
+                    let w = usize::from(desk.frame.width());
+                    let hits: Vec<(f32, f32)> = cells
+                        .iter()
+                        .enumerate()
+                        .filter(|&(_, &b)| b)
+                        .map(|(i, _)| ((i % w) as f32, (i / w) as f32))
+                        .collect();
+                    // Art pixels of this art, on the pen's grid.
+                    let k = f32::from(pen.art(1).0) / f32::from(desk.density.get());
+                    (!hits.is_empty()).then(|| {
+                        let n = hits.len() as f32;
+                        (
+                            f32::from(pen.art(span.x0).0)
+                                + hits.iter().map(|h| h.0).sum::<f32>() / n * k,
+                            f32::from(pen.art(span.y0).0)
+                                + hits.iter().map(|h| h.1).sum::<f32>() / n * k,
+                        )
+                    })
+                })
+                .collect();
+            assert!(!bulbs.is_empty(), "the pack's desks draw no bulb");
+            let lamps: Vec<(f32, f32)> = list
+                .lights()
+                .iter()
+                .filter(|l| l.view.is(crate::lighting::EmitterKind::DeskLamp))
+                .map(|l| l.view.peak())
+                .collect();
+            assert_eq!(lamps.len(), bulbs.len(), "one pool a bulb");
+            let near = f32::from(pen.art(1).0);
+            for bulb in &bulbs {
+                assert!(
+                    lamps
+                        .iter()
+                        .any(|p| (p.0 - bulb.0).abs() <= near && (p.1 - bulb.1).abs() <= near),
+                    "no lamp pools within {near} art px of the bulb at {bulb:?}: {lamps:?}"
+                );
+            }
         }
     }
 

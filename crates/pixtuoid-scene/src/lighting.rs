@@ -28,8 +28,8 @@ const DESK_LAMP_MAX: f32 = 0.42;
 /// The standby screen's ceiling. At parity with [`DESK_LAMP_MAX`] the lamp
 /// pool washes the desk's west half out.
 pub(crate) const SCREEN_IDLE_MAX: f32 = 0.55;
-/// Where the desk lamp's bulb hangs, from its fixture's top-left cell: the
-/// shade spans the two cells above it.
+/// Where the desk lamp's bulb hangs from its desk's point, as the 1x desk art
+/// draws it: its `9` cell, under the shade.
 const DESK_LAMP_BULB: (u16, u16) = (1, 1);
 const _: () = assert!(DESK_LAMP_MAX < SCREEN_IDLE_MAX);
 
@@ -262,10 +262,7 @@ fn spill_rows(x: u16, w: u16, slant: f32) -> impl Iterator<Item = std::ops::Rang
 /// One home desk's lights.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DeskLights {
-    /// The lamp fixture's top-left cell, on the desk's west wing.
-    pub(crate) fixture: Point,
-    /// The lamp's light, which it throws whichever way the desk faces; its
-    /// level is the fixture's too.
+    /// The lamp's light, which it throws whichever way the desk faces.
     pub(crate) lamp: Emitter,
     /// How strongly its standby screen glows; zero where the desk shows the
     /// viewer the monitor's back.
@@ -387,16 +384,14 @@ pub(crate) fn screen_idle(facing: Facing, darkness: f32, indoor: f32) -> f32 {
 }
 
 impl DeskLights {
-    /// The lights of a desk at `desk`: its lamp lit to `level` — the fixture
-    /// shows all of it, the pool [`DESK_LAMP_MAX`] — and its standby screen at
-    /// `screen_idle`.
+    /// The lights of a desk at `desk`: its lamp lit to `level`, its pool at
+    /// most [`DESK_LAMP_MAX`], and its standby screen at `screen_idle`.
     pub(crate) fn new(desk: Point, level: f32, screen_idle: f32) -> Self {
         let bulb = Point {
             x: desk.x + DESK_LAMP_BULB.0,
             y: desk.y + DESK_LAMP_BULB.1,
         };
         Self {
-            fixture: desk,
             lamp: Emitter {
                 kind: EmitterKind::DeskLamp,
                 light: Light::Halo {
@@ -407,14 +402,6 @@ impl DeskLights {
                 strength: level,
             },
             screen_idle,
-        }
-    }
-
-    /// The bulb, where the lamp's stem meets its shade and its pool centres.
-    pub(crate) fn bulb(&self) -> Point {
-        Point {
-            x: self.fixture.x + DESK_LAMP_BULB.0,
-            y: self.fixture.y + DESK_LAMP_BULB.1,
         }
     }
 }
