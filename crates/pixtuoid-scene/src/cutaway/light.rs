@@ -41,7 +41,7 @@ pub(crate) struct Ambient(u8);
 
 impl Ambient {
     /// The room under `look`.
-    pub(crate) fn of(look: &crate::atmosphere::Look) -> Self {
+    pub(crate) fn of(look: &crate::atmosphere::SkyTones) -> Self {
         let steps = (look.darkness.clamp(0.0, 1.0) * f32::from(AMBIENT_MAX_STEPS)).round();
         Self(steps as u8)
     }
@@ -463,7 +463,7 @@ mod tests {
         }
     }
 
-    fn lit_floor(views: &[&LightView], ambient: Ambient) -> RgbBuffer {
+    fn lit_ground(views: &[&LightView], ambient: Ambient) -> RgbBuffer {
         let mut buf = RgbBuffer::filled(160, 64, FLOOR);
         net_pass(
             whole(40, 16),
@@ -481,7 +481,7 @@ mod tests {
     fn a_lit_lamp_lifts_its_pool_at_night_and_nothing_past_it() {
         let night = Ambient(AMBIENT_MAX_STEPS);
         let lamp = view(&lamp(0.6, Point { x: 10, y: 8 }), Some(WARM), night);
-        let buf = lit_floor(&[&lamp], night);
+        let buf = lit_ground(&[&lamp], night);
         let luma = Rgb::lightness;
         assert!(luma(buf.get(10 * 4 + 1, 8 * 4 + 1)) > luma(night.on(FLOOR)));
         assert_eq!(buf.get(0, 0), night.on(FLOOR));
@@ -493,7 +493,7 @@ mod tests {
     fn a_lit_pixel_steps_once_by_its_net() {
         let night = Ambient(AMBIENT_MAX_STEPS);
         let lamp = view(&lamp(0.6, Point { x: 10, y: 8 }), None, night);
-        let buf = lit_floor(&[&lamp], night);
+        let buf = lit_ground(&[&lamp], night);
         let mut checked = 0;
         for ay in 0..64u16 {
             for ax in 0..160u16 {
@@ -512,7 +512,7 @@ mod tests {
     fn a_light_paints_only_whole_steps_and_tint_stops() {
         let night = Ambient(AMBIENT_MAX_STEPS);
         let lamp = view(&lamp(0.6, Point { x: 10, y: 8 }), Some(WARM), night);
-        let buf = lit_floor(&[&lamp], night);
+        let buf = lit_ground(&[&lamp], night);
         let allowed: std::collections::HashSet<Rgb> = (0..=AMBIENT_MAX_STEPS)
             .map(|l| net_colour(FLOOR, l, night, Some(WARM)))
             .collect();
@@ -563,8 +563,8 @@ mod tests {
             ),
         );
         assert_eq!(
-            lit_floor(&[&a, &b], night).as_slice(),
-            lit_floor(&[&b, &a], night).as_slice()
+            lit_ground(&[&a, &b], night).as_slice(),
+            lit_ground(&[&b, &a], night).as_slice()
         );
     }
 
@@ -577,7 +577,7 @@ mod tests {
             view(&lamp(0.8, Point { x: 10, y: 8 }), Some(WARM), night),
             view(&lamp(0.7, Point { x: 16, y: 9 }), None, night),
         );
-        let full = lit_floor(&[&a, &b], night);
+        let full = lit_ground(&[&a, &b], night);
         let rect = ArtRect {
             x: ArtPx(40),
             y: ArtPx(20),
