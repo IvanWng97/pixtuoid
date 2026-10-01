@@ -205,8 +205,11 @@ mod tests {
                 walls_with_a_window += 1;
                 assert!(min >= WINDOW_W && max - min <= 1, "{buf_w}: {windows:?}");
             }
-            let widened: u16 = windows.iter().map(|b| b.w - WINDOW_W).sum();
-            assert!(widened < WINDOW_W + POST_W, "{buf_w}: another window fits");
+            assert_eq!(
+                windows.len(),
+                usize::from((door.x - FIRST_WINDOW_X) / (WINDOW_W + POST_W)),
+                "{buf_w}: as many windows as fit west of the door's slot"
+            );
             assert_eq!(window_run(buf_w), slots[0].x..door.span().end);
             assert_eq!(door_x(buf_w), door.x + DOOR_INSET);
         }
