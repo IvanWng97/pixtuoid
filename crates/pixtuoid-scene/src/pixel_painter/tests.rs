@@ -1,8 +1,8 @@
 use super::background::paint_corridor_runner;
 use super::drawable::paint_character_at;
 use super::*;
-use crate::character::test_support::{make_slot, make_slot_cwd};
-use crate::character::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, color_of, tool_glow_tint};
+use crate::character::test_support::{color_of, make_slot, make_slot_cwd};
+use crate::character::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, tool_glow_tint};
 use crate::floor::{FloorInputs, PetInputs};
 use crate::layout::CHARACTER_SPRITE_W;
 use crate::layout::Size;

@@ -15,7 +15,7 @@ mod hair;
 pub(crate) mod test_support;
 
 #[cfg(test)]
-pub(crate) use colors::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, tests::color_of};
+pub(crate) use colors::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY};
 pub(crate) use colors::{agent_overrides, tool_glow_tint};
 #[cfg(all(test, feature = "density-art"))]
 pub(crate) use hair::dress;

@@ -4,6 +4,8 @@ use std::time::SystemTime;
 
 use pixtuoid_core::AgentSlot;
 
+use super::colors::agent_overrides;
+
 pub(crate) fn make_slot(
     id: pixtuoid_core::AgentId,
     state: pixtuoid_core::state::ActivityState,
@@ -42,4 +44,24 @@ pub(crate) fn make_slot_cwd(id_path: &str, cwd: &str, unknown_cwd: bool) -> Agen
     s.cwd = std::sync::Arc::from(std::path::Path::new(cwd));
     s.unknown_cwd = unknown_cwd;
     s
+}
+
+/// `key`'s color for `slot`, unlit and unburnt.
+pub(crate) fn color_of(slot: &AgentSlot, key: char) -> pixtuoid_core::sprite::Pixel {
+    override_of(
+        &agent_overrides(slot, None, crate::burn::BurnTier::Normal),
+        key,
+    )
+}
+
+/// `key`'s color in an agent's overrides.
+pub(crate) fn override_of(
+    overrides: &[(char, pixtuoid_core::sprite::Pixel)],
+    key: char,
+) -> pixtuoid_core::sprite::Pixel {
+    overrides
+        .iter()
+        .find(|(k, _)| *k == key)
+        .unwrap_or_else(|| panic!("no override for {key:?}"))
+        .1
 }

@@ -362,9 +362,9 @@ pub(crate) fn tool_glow_tint(
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
-    use crate::character::test_support::{make_slot, make_slot_cwd};
+    use crate::character::test_support::{color_of, make_slot, make_slot_cwd, override_of};
     use pixtuoid_core::state::{ActivityState, ToolKind};
     use std::sync::Arc;
 
@@ -580,25 +580,5 @@ pub(crate) mod tests {
                 .collect();
             assert!(shades.windows(2).all(|w| w[0] != w[1]), "{c:?}: {shades:?}");
         }
-    }
-
-    /// `key`'s color for `slot`, unlit and unburnt.
-    pub(crate) fn color_of(slot: &AgentSlot, key: char) -> pixtuoid_core::sprite::Pixel {
-        override_of(
-            &agent_overrides(slot, None, crate::burn::BurnTier::Normal),
-            key,
-        )
-    }
-
-    /// `key`'s color in an agent's overrides.
-    fn override_of(
-        overrides: &[(char, pixtuoid_core::sprite::Pixel)],
-        key: char,
-    ) -> pixtuoid_core::sprite::Pixel {
-        overrides
-            .iter()
-            .find(|(k, _)| *k == key)
-            .unwrap_or_else(|| panic!("no override for {key:?}"))
-            .1
     }
 }
