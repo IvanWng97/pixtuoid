@@ -657,6 +657,9 @@ struct DoctorReport {
     truecolor_probe: Option<bool>,
     color_pf: crate::term::ColorPreflight,
     graphics_plan: crate::graphics::Plan,
+    /// What `run` resolves `graphics` to without a flag: the config, then the
+    /// default.
+    run_graphics: crate::GraphicsMode,
     rows: Vec<DoctorSourceRow>,
     roots: Vec<RootStatus>,
     backend: &'static str,
@@ -842,6 +845,7 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
             pixtuoid_core::sprite::format::Density::ONE
         });
     let (truecolor_probe, graphics_plan) = probe_terminal_caps(probe_ok, graphics, max_density);
+    let run_graphics = crate::config::resolve_graphics(&cfg, None, &mut config_warnings);
 
     let rows: Vec<DoctorSourceRow> = registry::registered_source_names()
         .map(|src| {
@@ -901,6 +905,7 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         truecolor_probe,
         color_pf,
         graphics_plan,
+        run_graphics,
         rows,
         roots,
         backend,
@@ -950,7 +955,7 @@ fn terminal_category(r: &DoctorReport) -> Category {
     // classic, and a fallback must never go unexplained.
     let mut details = vec![format!(
         "{DETAIL_INDENT}{}",
-        r.graphics_plan.diagnostic_row()
+        r.graphics_plan.diagnostic_row(r.run_graphics)
     )];
     // Whenever it has something to say — incl. the ForceColor note, so a
     // NO_COLOR+CLICOLOR_FORCE report still states that color is being forced.
@@ -1638,6 +1643,7 @@ mod tests {
             graphics_plan: crate::graphics::Plan::Classic {
                 reason: crate::graphics::ClassicReason::NotQueried,
             },
+            run_graphics: crate::GraphicsMode::Auto,
             rows,
             roots: vec![],
             backend: "NSRunningApplication (macOS)",
@@ -1795,8 +1801,17 @@ mod tests {
         };
         assert_eq!(
             terminal_category(&r).details[0],
-            format!("{DETAIL_INDENT}{}", r.graphics_plan.diagnostic_row())
+            format!(
+                "{DETAIL_INDENT}{}",
+                r.graphics_plan.diagnostic_row(crate::GraphicsMode::Auto)
+            )
         );
+        r.run_graphics = crate::GraphicsMode::Off;
+        assert!(
+            terminal_category(&r).details[0].ends_with("paints it"),
+            "the row reads run's own setting"
+        );
+        r.run_graphics = crate::GraphicsMode::Auto;
 
         r.graphics_plan = Plan::Classic {
             reason: ClassicReason::TmuxNeedsKitty(ImageProtocol::Sixel),

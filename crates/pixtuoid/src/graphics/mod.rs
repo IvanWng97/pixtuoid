@@ -506,8 +506,9 @@ pub(crate) fn run_probe() -> Probe {
 
 impl Plan {
     /// The plan as `doctor`'s `graphics:` line: for a cutaway, everything a
-    /// tester reports back from a terminal; for classic, why it fell back.
-    pub(crate) fn diagnostic_row(self) -> String {
+    /// tester reports back from a terminal, and how to get it when `run`'s
+    /// own setting is `off`; for classic, why it fell back.
+    pub(crate) fn diagnostic_row(self, run: GraphicsMode) -> String {
         match self {
             Plan::Cutaway {
                 fit,
@@ -521,9 +522,15 @@ impl Plan {
                     0 => "every frame".to_string(),
                     ms => format!("at most every {ms} ms"),
                 };
+                let how = if run == GraphicsMode::Off {
+                    " — off: `run --graphics auto` (or `graphics = \"auto\"` in config) paints it"
+                } else {
+                    ""
+                };
                 format!(
                     "graphics: {} ({}) on a {}x{} cell, {} — the cutaway at {}x \
-                     ({}x art upscaled {}x), a {}x{} office, sent as {}x{}-cell tiles {cadence}",
+                     ({}x art upscaled {}x), a {}x{} office, sent as {}x{}-cell tiles \
+                     {cadence}{how}",
                     protocol.name(),
                     if forced {
                         "forced by --graphics"
@@ -651,7 +658,7 @@ mod tests {
     }
 
     fn row(mode: GraphicsMode, probe: Probe, max_density: Density) -> String {
-        detect(mode, max_density, AREA, || probe).diagnostic_row()
+        detect(mode, max_density, AREA, || probe).diagnostic_row(GraphicsMode::Auto)
     }
 
     fn too_small(cell: CellSize, max_density: Density) -> Plan {
@@ -1039,6 +1046,28 @@ mod tests {
             .collect();
         let distinct: std::collections::HashSet<_> = rows.iter().collect();
         assert_eq!(distinct.len(), rows.len());
+    }
+
+    /// A doctor that prints a cutaway while `run` is set `off` says how to
+    /// get it, or a bare `run` would show classic unexplained; a setting that
+    /// paints it, and every classic row, add nothing.
+    #[test]
+    fn a_cutaway_row_says_how_to_get_it_when_run_is_off() {
+        const HOW: &str =
+            " — off: `run --graphics auto` (or `graphics = \"auto\"` in config) paints it";
+        let cutaway = plan(capable(CELL_8X16), BUNDLED);
+        let painted = cutaway.diagnostic_row(GraphicsMode::Auto);
+        assert!(!painted.contains(HOW), "{painted}");
+        assert_eq!(
+            cutaway.diagnostic_row(GraphicsMode::Off),
+            format!("{painted}{HOW}")
+        );
+        assert_eq!(cutaway.diagnostic_row(GraphicsMode::Sixel), painted);
+        let classic = plan(Probe::NoAnswer, BUNDLED);
+        assert_eq!(
+            classic.diagnostic_row(GraphicsMode::Off),
+            classic.diagnostic_row(GraphicsMode::Auto)
+        );
     }
 
     /// A reason keeps its variant only by printing its own row, a remedy the
