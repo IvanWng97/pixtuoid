@@ -85,6 +85,17 @@ impl Bounds {
             && self.y < other.y + other.height
             && other.y < self.y + self.height
     }
+
+    /// The box grown `dx` columns on each side, its west edge clamped at
+    /// column 0 and its east edge kept.
+    pub(crate) fn widened(self, dx: u16) -> Bounds {
+        let x = self.x.saturating_sub(dx);
+        Bounds {
+            x,
+            width: self.x + self.width + dx - x,
+            ..self
+        }
+    }
 }
 
 /// A position in buffer-pixel space (screen-space: east = +x, south = +y,

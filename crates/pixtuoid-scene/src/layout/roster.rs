@@ -769,11 +769,7 @@ impl SceneLayout {
             .chain(self.clock_pos().map(|at| boxed(at, CLOCK)))
             .collect();
         let clear = |board: Bounds| {
-            let spaced = Bounds {
-                x: board.x.saturating_sub(NOTICE_BOARD_GAP),
-                width: board.width + 2 * NOTICE_BOARD_GAP,
-                ..board
-            };
+            let spaced = board.widened(NOTICE_BOARD_GAP);
             taken.iter().all(|v| !spaced.overlaps(*v))
         };
         let (lo, hi) = (b.x + 1, (b.x + b.width).saturating_sub(1));
