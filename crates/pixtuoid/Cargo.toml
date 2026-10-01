@@ -4,7 +4,8 @@ description            = "Terminal pixel-art office for AI coding agents"
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
-license.workspace      = true
+# Embeds Monaspace (fonts/) and links pixtuoid-scene's font.
+license                = "MIT AND OFL-1.1"
 repository.workspace   = true
 authors.workspace      = true
 homepage.workspace     = true
