@@ -2097,7 +2097,7 @@ fn push_windows(office: Office<'_>, moment: &Moment, order: &mut Vec<(Span, Piec
     let rows = crate::layout::window_rows(layout.wall_band_h());
     let window_h = rows.end - rows.start;
     let glass_h = crate::layout::glass_rows(window_h);
-    let Some(density) = std::num::NonZeroU16::new(pen.art(1).0) else {
+    let Some(density) = pixtuoid_core::sprite::format::Density::new(pen.art(1).0) else {
         return;
     };
     let run = crate::layout::window_run(layout.buf_w);
@@ -2846,7 +2846,7 @@ mod tests {
     #[cfg(feature = "density-art")]
     fn someone_just_south_of_a_variant_desk_sorts_in_front_of_it() {
         let pack = test_default_pack();
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let desk = crate::layout::Point { x: 0, y: 20 };
         let art = desk_art(&pack, crate::layout::Facing::South).expect("desk art");
         let desk_box = desk_span(&pack, art, desk, scale).expect("desk");
@@ -3103,7 +3103,7 @@ mod tests {
         let desk = crate::layout::Point { x: 20, y: 30 };
         for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
             let art = desk_art(&pack, facing).expect("desk art");
-            for s in [1, pack.max_density_variant()] {
+            for s in [1, pack.max_density_variant().get()] {
                 let scale = RenderScale::new(s).expect("nonzero");
                 let span = desk_span(&pack, art, desk, scale).expect("desk");
                 let kind = PieceKind::Desk {
@@ -3230,7 +3230,8 @@ mod tests {
             b: 255,
         };
         let glass_and_text = [SCREEN_GLASS_LEVEL, SCREEN_TEXT_LEVEL];
-        let variants = (2..=pack.max_density_variant())
+        let variants = (2..=pack.max_density_variant().get())
+            .filter_map(pixtuoid_core::sprite::format::Density::new)
             .map(|d| pixtuoid_core::sprite::format::density_variant_name(art, d))
             .filter(|n| pack.animation(n).is_some());
         let mut drawn = 0;
@@ -3750,7 +3751,7 @@ mod tests {
     fn every_rug_lies_on_the_floor() {
         let pack = test_default_pack();
         let theme = &crate::theme::NORMAL;
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let f = &theme.furniture;
         let (mut trios, mut lounges) = (0, 0);
         for (w, h) in [(160, 96), (200, 120), (240, 144), (480, 270)] {
@@ -4060,7 +4061,7 @@ mod tests {
     fn a_shadow_falls_inside_its_pieces_reach() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let floor = pixtuoid_core::sprite::Rgb {
             r: 150,
             g: 110,
@@ -4187,7 +4188,7 @@ mod tests {
         let pack = test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let pen = Pen::for_pack(scale, &pack);
         let d = pen.art(1).0;
         let now = std::time::UNIX_EPOCH;
@@ -4230,7 +4231,7 @@ mod tests {
             (run.end - run.start, crate::layout::glass_rows(window_h)),
             &Moment::resolve(sky, theme, 0.0, now),
             theme,
-            std::num::NonZeroU16::new(d).expect("nonzero"),
+            pixtuoid_core::sprite::format::Density::new(d).expect("nonzero"),
         );
         let k = scale.get() / d;
         let at = |ax: u16, ay: u16| buf.get(ax * k, ay * k);
@@ -4270,7 +4271,7 @@ mod tests {
         let pack = test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let pen = Pen::for_pack(scale, &pack);
         let mut buf = RgbBuffer::filled(
             scale.to_buffer(layout.buf_w),
@@ -4332,7 +4333,7 @@ mod tests {
             std::collections::BTreeSet::new(),
         );
         let mut check = |pack: &Pack, frame: &SimFrame, layout: &Layout, only_people: bool| {
-            for s in [1, 3, pack.max_density_variant()] {
+            for s in [1, 3, pack.max_density_variant().get()] {
                 let scale = RenderScale::new(s).expect("nonzero");
                 for (span, kind) in collect_pieces(
                     frame,
@@ -4362,7 +4363,7 @@ mod tests {
                         "{kind:?} at scale {s} wrote a logical pixel outside {span:?}"
                     );
                     // At the densities the cutaway draws at.
-                    if s % pack.max_density_variant() == 0
+                    if s % pack.max_density_variant().get() == 0
                         && ground_shadow(span, &kind, pack).is_some()
                     {
                         assert_eq!(
@@ -4398,7 +4399,7 @@ mod tests {
         let mut worn = std::collections::BTreeSet::new();
         for i in 0..1000 {
             let pack = test_default_pack();
-            let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+            let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
             let dense = crate::pixel_painter::densest_frame(&pack, "walking", 0, scale)
                 .expect("the walk's art");
             let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/style/{i}.jsonl"));
@@ -4526,7 +4527,7 @@ S B B B B B B S
         let (mut repeats, mut figure_changes, mut desk_changes) = (0, 0, 0);
         for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
             let (layout, pack, frames, desk) = sit_down(facing, 2);
-            for s in [1, pack.max_density_variant()] {
+            for s in [1, pack.max_density_variant().get()] {
                 let scale = RenderScale::new(s).expect("nonzero");
                 let mut last: Option<(u64, u64)> = None;
                 for frame in &frames {
@@ -4575,7 +4576,7 @@ S B B B B B B S
     fn a_window_s_fingerprint_moves_with_the_moment_it_shows() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let mut painted = std::collections::HashMap::new();
         let glass = |now: std::time::SystemTime, painted: &mut _| {
             let list = build_list(
@@ -4634,7 +4635,7 @@ S B B B B B B S
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
-        for s in [1, pack.max_density_variant()] {
+        for s in [1, pack.max_density_variant().get()] {
             let office = Office {
                 layout: &layout,
                 pack: &pack,
@@ -4700,7 +4701,7 @@ S B B B B B B S
         let mut seen: std::collections::HashMap<(u16, Span), std::collections::BTreeSet<u64>> =
             std::collections::HashMap::new();
         let mut repeats = 0;
-        for s in [1, pack.max_density_variant()] {
+        for s in [1, pack.max_density_variant().get()] {
             let scale = RenderScale::new(s).expect("nonzero");
             for hour in [18, 20, 23] {
                 for frame in frames.iter().step_by(4) {
@@ -4770,7 +4771,7 @@ S B B B B B B S
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
         let mut lights = 0;
-        for s in [1, 3, pack.max_density_variant()] {
+        for s in [1, 3, pack.max_density_variant().get()] {
             let scale = RenderScale::new(s).expect("nonzero");
             let office = Office {
                 layout: &layout,
@@ -4814,7 +4815,7 @@ S B B B B B B S
             layout: &layout,
             pack: &pack,
             theme,
-            scale: RenderScale::new(pack.max_density_variant()).expect("nonzero"),
+            scale: RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
         };
         let (mut lamps, mut glows) = (0, 0);
         for hour in [12, 18, 23] {
@@ -4847,7 +4848,7 @@ S B B B B B B S
             layout: &layout,
             pack: &pack,
             theme,
-            scale: RenderScale::new(pack.max_density_variant()).expect("nonzero"),
+            scale: RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
         };
         for neon in [
             crate::floor::NeonLevels::CALM,
@@ -4883,7 +4884,7 @@ S B B B B B B S
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_default_pack();
         let layout = Layout::compute_with_seed(240, 144, None, 0).expect("lays out");
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let pen = Pen::for_pack(scale, &pack);
         let frame = empty_frame(&layout);
         let list = list_at(
@@ -4982,7 +4983,7 @@ S B B B B B B S
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -5056,7 +5057,7 @@ S B B B B B B S
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -5090,7 +5091,7 @@ S B B B B B B S
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, desk) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -5131,7 +5132,7 @@ S B B B B B B S
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let frame = frames.last().expect("a seated frame");
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -5175,7 +5176,7 @@ S B B B B B B S
             layout: &layout,
             pack: &pack,
             theme,
-            scale: RenderScale::new(pack.max_density_variant()).expect("nonzero"),
+            scale: RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
         };
         let lists: Vec<Vec<(Span, u64, bool, bool)>> =
             [(&idle, 12), (&busy, 12), (&idle, 23), (&busy, 23)]
@@ -5287,7 +5288,7 @@ S B B B B B B S
                 &move |_, a| a.agent_id = other,
             ];
             // A set: without the density art the densest scale is 1.
-            let scales = std::collections::BTreeSet::from([1, pack.max_density_variant()]);
+            let scales = std::collections::BTreeSet::from([1, pack.max_density_variant().get()]);
             for s in scales {
                 let scale = RenderScale::new(s).expect("nonzero");
                 for edit in variants {
@@ -5546,7 +5547,7 @@ S B B B B B B S
     fn the_walls_contact_row_is_the_floor_a_shade_down() {
         let pack = test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let pen = Pen::for_pack(scale, &pack);
         let layout = Layout::compute_with_seed(240, 144, None, 0).expect("lays out");
         let blank = || {
@@ -5575,7 +5576,7 @@ S B B B B B B S
     fn a_rug_is_mirrored_about_its_centre_column() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_default_pack();
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let pen = Pen::for_pack(scale, &pack);
         let rug = crate::layout::Bounds {
             x: 4,
@@ -5751,7 +5752,7 @@ S B B B B B B S
         let pack = test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
-        for s in [1, pack.max_density_variant()] {
+        for s in [1, pack.max_density_variant().get()] {
             let scale = RenderScale::new(s).expect("nonzero");
             let order = queued(&layout, &pack, scale, &[], |k| {
                 matches!(k, FixtureKind::MeetingTable { .. })
@@ -5821,7 +5822,7 @@ S B B B B B B S
             layout: &layout,
             pack: &pack,
             theme,
-            scale: RenderScale::new(pack.max_density_variant()).expect("nonzero"),
+            scale: RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
         };
         let moving = |p: &Piece| {
             matches!(
@@ -5885,7 +5886,7 @@ S B B B B B B S
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_default_pack();
         let layout = lively_office();
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -5986,7 +5987,7 @@ S B B B B B B S
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_default_pack();
         let layout = lively_office();
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let office = Office {
             layout: &layout,
             pack: &pack,
@@ -6065,7 +6066,7 @@ S B B B B B B S
     fn the_clocks_hands_stay_on_its_face() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_default_pack();
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let at = Point { x: 2, y: 2 };
         let dial =
             crate::pixel_painter::densest_frame(&pack, CLOCK_SPRITE, 0, scale).expect("the dial");
@@ -6152,7 +6153,7 @@ S B B B B B B S
     #[test]
     fn a_fixture_ties_a_figure_as_the_roster_says() {
         let pack = test_default_pack();
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let mut over = std::collections::BTreeSet::new();
         for layout in many_layouts() {
             for fixture in layout.fixtures() {
@@ -6237,7 +6238,7 @@ S B B B B B B S
     #[test]
     fn the_lounge_couch_is_drawn_from_behind() {
         let pack = test_default_pack();
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let layout = many_layouts()
             .find(|l| l.lounge.is_some())
             .expect("an office with a lounge");
@@ -6261,7 +6262,7 @@ S B B B B B B S
     fn the_cutaway_draws_every_fixture_the_roster_yields() {
         let pack = test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let pen = Pen::for_pack(scale, &pack);
         let mut met = std::collections::BTreeSet::new();
         for layout in many_layouts() {
@@ -6307,7 +6308,7 @@ S B B B B B B S
     #[test]
     fn the_cutaway_grounds_what_the_roster_says_stands() {
         let pack = test_default_pack();
-        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         for layout in many_layouts() {
             for fixture in layout.fixtures() {
                 let grounded = covering(fixture.kind).is_none()
@@ -6539,7 +6540,7 @@ S B B B B B B S
         let pack = test_default_pack();
         let sofa = crate::layout::Point { x: 20, y: 10 };
         let (w, h) = base_size(&pack, MEETING_SOFA_NORTH);
-        for s in [1, pack.max_density_variant()] {
+        for s in [1, pack.max_density_variant().get()] {
             let scale = RenderScale::new(s).expect("nonzero");
             let floor = pixtuoid_core::sprite::Rgb { r: 1, g: 2, b: 3 };
             let blank =
@@ -6570,9 +6571,10 @@ S B B B B B B S
     #[test]
     fn the_north_sofas_backrest_starts_on_its_lit_ridge() {
         let pack = test_default_pack();
-        let densities = std::iter::once(1).chain(pack.density_variants());
+        let densities = std::iter::once(pixtuoid_core::sprite::format::Density::ONE)
+            .chain(pack.density_variants());
         for d in densities {
-            let name = if d == 1 {
+            let name = if d == pixtuoid_core::sprite::format::Density::ONE {
                 MEETING_SOFA_NORTH.to_owned()
             } else {
                 pixtuoid_core::sprite::format::density_variant_name(MEETING_SOFA_NORTH, d)
@@ -6580,7 +6582,7 @@ S B B B B B B S
             let Some(f) = pack.animation(&name).and_then(|a| a.frames().first()) else {
                 continue;
             };
-            let (x, split) = (f.width() / 2, NORTH_SOFA_SEAT_ROWS * d);
+            let (x, split) = (f.width() / 2, NORTH_SOFA_SEAT_ROWS * d.get());
             let luma = |y: u16| {
                 let c = f
                     .get(x, y)
@@ -6728,7 +6730,7 @@ S B B B B B B S
     fn the_cutaway_paints_whole_art_pixels() {
         use crate::floor::{FloorMeta, FloorSession};
         let pack = test_default_pack();
-        let d = pack.max_density_variant();
+        let d = pack.max_density_variant().get();
         let (walk_layout, _, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let walking = &frames[frames.len() / 2];
         let seated = frames.last().expect("a seated frame");

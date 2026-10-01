@@ -286,13 +286,16 @@ pub(crate) fn desk_sprite_name(facing: crate::layout::Facing) -> &'static str {
     }
 }
 
+/// A hoverable [`paint_drawable`] drew, sized by the frame it blitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Drawn {
+    Agent(AgentFrame),
+    Mascot { mascot_idx: usize, w: u16, h: u16 },
+}
+
 /// Dispatch one Drawable's paint; character-attached effects paint inline so
-/// they ride along with the character in z-order. Returns the character it
-/// drew, for hover.
-pub(super) fn paint_drawable(
-    kind: &DrawableKind<'_>,
-    c: &mut DrawableCtx<'_>,
-) -> Option<AgentFrame> {
+/// they ride along with the character in z-order.
+pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -> Option<Drawn> {
     let buf = &mut *c.buf;
     let cache = &mut *c.cache;
     let (pack, now, theme) = (c.pack, c.now, c.theme);
@@ -346,11 +349,13 @@ pub(super) fn paint_drawable(
             if *waiting_bubble {
                 paint_waiting_bubble(buf, *anchor, theme);
             }
-            return drawn.map(|Size { w, h }| AgentFrame {
-                agent_id: agent.agent_id,
-                anchor: *anchor,
-                w,
-                h,
+            return drawn.map(|Size { w, h }| {
+                Drawn::Agent(AgentFrame {
+                    agent_id: agent.agent_id,
+                    anchor: *anchor,
+                    w,
+                    h,
+                })
             });
         }
         DrawableKind::FilingCabinet { pos } => {
@@ -462,7 +467,7 @@ pub(super) fn paint_drawable(
             }
         }
         DrawableKind::GatewayMascot {
-            mascot_idx: _,
+            mascot_idx,
             pos,
             anim_name,
             frame_idx,
@@ -481,6 +486,11 @@ pub(super) fn paint_drawable(
             if *run_count > 0 {
                 paint_mascot_bubbles(buf, *pos, frame.height(), *run_count, now);
             }
+            return Some(Drawn::Mascot {
+                mascot_idx: *mascot_idx,
+                w: frame.width(),
+                h: frame.height(),
+            });
         }
         DrawableKind::RoomWall { piece, rows } => {
             super::paint_wall(

@@ -92,7 +92,7 @@ impl Pen {
     pub(crate) fn for_pack(scale: RenderScale, pack: &Pack) -> Self {
         pack.density_variants()
             .into_iter()
-            .find_map(|d| Self::new(scale, d))
+            .find_map(|d| Self::new(scale, d.get()))
             .unwrap_or(Self {
                 d: NonZeroU16::MIN,
                 k: scale.factor(),
@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn a_pens_density_is_the_densest_the_pack_draws_at_that_scale() {
         let pack = crate::embedded_pack::test_default_pack();
-        let d = pack.max_density_variant();
+        let d = pack.max_density_variant().get();
         let at = |s: u16| Pen::for_pack(RenderScale::new(s).expect("nonzero"), &pack);
         assert_eq!(at(d * 2), pen(d * 2, d), "the variant's grid");
         assert_eq!(at(1), pen(1, 1), "no variant fits: the base art's grid");
