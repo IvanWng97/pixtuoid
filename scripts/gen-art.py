@@ -3295,9 +3295,10 @@ CREATURE_FIXES = {
     "cat_walk_0": [(4, 0, CAT_DARK), (6, 0, CAT_DARK), (1, 1, CAT_DARK)],
     # the same, and the legs passing under the body, which read as frame 0's
     "cat_walk_1": [(4, 0, CAT_DARK), (6, 0, CAT_DARK), (1, 1, CAT_DARK), (2, 5, T), (6, 5, T)],
-    # the crown, the ear and the nose, too slim to read; the legs apart
-    "dog_walk_0": [(5, 0, TAN), (6, 0, TAN), (4, 1, BROWN), (7, 2, CAT_DARK), (2, 5, T), (4, 5, T)],
-    "dog_walk_1": [(5, 0, TAN), (6, 0, TAN), (4, 1, BROWN), (7, 2, CAT_DARK)],
+    # the crown and the ear, too slim to read; the legs apart. The nose stays
+    # tan: at 1x it would join the eye in one dark bar.
+    "dog_walk_0": [(5, 0, TAN), (6, 0, TAN), (4, 1, BROWN), (2, 5, T), (4, 5, T)],
+    "dog_walk_1": [(5, 0, TAN), (6, 0, TAN), (4, 1, BROWN)],
 }
 
 
