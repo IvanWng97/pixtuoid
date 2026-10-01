@@ -238,7 +238,7 @@ pub struct UiColors {
     pub label_idle: Rgb,
     /// Name-badge tone for an exiting agent.
     pub label_exiting: Rgb,
-    /// Tooltip / popup background fill.
+    /// Tooltip / popup background fill, and the cutaway's badge plate.
     pub tooltip_bg: Rgb,
     /// Tooltip title text.
     pub tooltip_title: Rgb,
