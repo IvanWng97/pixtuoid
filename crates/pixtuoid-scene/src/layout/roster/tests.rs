@@ -649,7 +649,7 @@ fn no_two_north_wall_fixtures_overlap() {
 }
 
 #[test]
-fn no_meeting_furniture_blocks_a_doorway() {
+fn no_meeting_furniture_or_plant_blocks_a_doorway() {
     use super::super::rooms::walls::WALL_H;
     let mut met = 0;
     for l in offices().chain(north_wall_census()) {
@@ -678,6 +678,7 @@ fn no_meeting_furniture_blocks_a_doorway() {
                         | FixtureKind::MeetingSofa { .. }
                         | FixtureKind::MeetingTable { .. }
                         | FixtureKind::MeetingChair { .. }
+                        | FixtureKind::Plant { .. }
                 )
             }) {
                 assert!(

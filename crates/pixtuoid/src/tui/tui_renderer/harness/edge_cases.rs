@@ -385,3 +385,30 @@ fn layout_compute_none_bails_to_footer_only() {
         "a layout that fails compute yields no cached layout"
     );
 }
+
+/// Below the width the door leaves the neon, the layout hangs none, and the
+/// board's text and its star link go with it.
+#[test]
+fn a_floor_too_narrow_for_the_neon_paints_no_board_and_ignores_the_star() {
+    let rows = 44;
+    for (cols, hangs) in [(120, true), (48, false)] {
+        let mut r = build(cols, rows, vec![]);
+        r.render(&SceneState::uniform(4), &pack(), t0())
+            .expect("render");
+        let layout = r.cached_layout().expect("lays out");
+        assert_eq!(layout.neon_panel().is_some(), hangs, "{cols} wide");
+        let text = frame_text(r.frame_buffer());
+        assert_eq!(
+            text.contains(pixtuoid_scene::board::BOARD_STAR),
+            hangs,
+            "{cols} wide:\n{text}"
+        );
+        let scene = crate::tui::renderer::scene_rect(ratatui::layout::Rect::new(0, 0, cols, rows));
+        let star = crate::tui::widgets::star_hit_rect(scene).expect("the star's cell fits");
+        assert_eq!(
+            crate::tui::star_link_clicked(&r, star.x, star.y, (cols, rows)),
+            hangs,
+            "{cols} wide: a click on the star's cell"
+        );
+    }
+}

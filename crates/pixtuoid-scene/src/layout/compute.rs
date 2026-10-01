@@ -431,7 +431,11 @@ pub(super) fn compute_with_seed(
         PlantItem {
             kind: PlantKind::Flower,
             pos: Point {
-                x: plan.pod_grid.band.x + 4,
+                // Its pot clear of the divider, which a doorway may cut down to here.
+                x: (plan.pod_grid.band.x + 4).max(
+                    plan.lounge_west_clear
+                        + furniture_def(PlantKind::Flower.furniture()).visual.w / 2,
+                ),
                 y: plan.cubicle_aisle.y.saturating_sub(4),
             },
         },
