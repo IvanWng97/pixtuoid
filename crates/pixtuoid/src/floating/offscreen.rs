@@ -62,12 +62,8 @@ impl OfficeRenderer {
 
     /// Build the name-badge overlay for the LAST rendered frame (call right after
     /// `render`). Floating has no agent-hover yet → `hovered = None`.
-    pub fn labels(
-        &mut self,
-        scene: &SceneState,
-        now: SystemTime,
-    ) -> Vec<pixtuoid_scene::overlay::LabelElement> {
-        self.session.overlay(scene, now, None)
+    pub fn labels(&self, scene: &SceneState) -> Vec<pixtuoid_scene::overlay::LabelElement> {
+        self.session.overlay(scene, None)
     }
 
     /// The neon wall-board model for the current scene.
@@ -184,10 +180,6 @@ pub(crate) fn sync_floor_caps(
     true
 }
 
-/// Labels center on the bundled width, not a custom pack's `frame.width`; a differently-sized
-/// pack's badge sits off-center, which is cosmetic.
-const FLOATING_SPRITE_W: i32 = pixtuoid_scene::layout::CHARACTER_SPRITE_W as i32;
-
 /// Name-badge AA font size (px), drawn at NATIVE surface res (not upscaled by the office
 /// `scale`) so a badge stays a crisp fixed-height caption over the chunky sprites. Tuned
 /// by eye against `examples/floating_snapshot`.
@@ -284,9 +276,8 @@ pub fn paint_labels_into_surface(
         let marker = "\u{25cf}";
         let text = format!("{marker}{}", el.text);
         let tw = crate::aa_text::text_width(&text, LABEL_FONT_PX);
-        // anchor_px is the sprite TOP-LEFT in office space.
         const BADGE_LIFT_PX: i32 = 12;
-        let cx = el.anchor_px.x as i32 * scale + (FLOATING_SPRITE_W * scale) / 2 - tw / 2;
+        let cx = el.anchor_px.x as i32 * scale - tw / 2;
         let cy = el.anchor_px.y as i32 * scale - BADGE_LIFT_PX;
         // The CLI-identity split: the ● dot keeps the activity tone (status), the name
         // paints in the source's badge hue (identity).
@@ -1105,7 +1096,7 @@ mod tests {
         );
 
         // No frame rendered yet → no cached layout → the guard returns empty.
-        assert!(renderer.labels(&scene, now).is_empty());
+        assert!(renderer.labels(&scene).is_empty());
         renderer.render(FrameInputs {
             world: FloorInputs {
                 scene: &scene,
@@ -1118,7 +1109,7 @@ mod tests {
             size: Size { w: 160, h: 96 },
             debug_walkable: false,
         });
-        let labels = renderer.labels(&scene, now);
+        let labels = renderer.labels(&scene);
         assert_eq!(labels.len(), 1, "one seeded agent → one name badge");
         let anchor = labels[0].anchor_px;
         assert!(

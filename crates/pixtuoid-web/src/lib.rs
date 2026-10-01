@@ -28,7 +28,7 @@ use pixtuoid_scene::embedded_pack::load_bundled_pack;
 use pixtuoid_scene::floor::{
     FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs, floor_capacity,
 };
-use pixtuoid_scene::layout::{CHARACTER_SPRITE_W, Size};
+use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::{ALL_THEMES, Theme};
 
 /// A visitor hire's one-shot event, queued OUTSIDE the loop machinery so a
@@ -278,7 +278,7 @@ impl Office {
         };
         let theme = self.theme;
 
-        let labels = self.session.overlay(&self.scene, now, None);
+        let labels = self.session.overlay(&self.scene, None);
         let board = self.session.board(&self.scene, now);
 
         let mut out = String::from("{\"labels\":[");
@@ -286,8 +286,10 @@ impl Office {
             if i > 0 {
                 out.push(',');
             }
-            let cx = el.anchor_px.x as i32 + CHARACTER_SPRITE_W as i32 / 2;
-            out.push_str(&format!("{{\"x\":{cx},\"y\":{},\"text\":", el.anchor_px.y));
+            out.push_str(&format!(
+                "{{\"x\":{},\"y\":{},\"text\":",
+                el.anchor_px.x, el.anchor_px.y
+            ));
             push_json_string(&mut out, &format!("\u{25cf}{}", el.text));
             out.push_str(&format!(",\"color\":\"{}\"", label_hex(theme, el.tone)));
             // The registry prefix before the first '·' resolves to the source's

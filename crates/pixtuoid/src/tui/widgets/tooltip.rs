@@ -50,7 +50,6 @@ pub(crate) fn paint_label_widgets(
     theme: &pixtuoid_scene::theme::Theme,
 ) {
     for el in labels {
-        let lx = scene_rect.x + el.anchor_px.x.saturating_sub(2);
         let ly = scene_rect.y + (el.anchor_px.y / 2).saturating_sub(1);
         let label_color = if el.hovered {
             Color::White
@@ -75,7 +74,10 @@ pub(crate) fn paint_label_widgets(
             ],
             None => vec![Span::styled(format!("{marker}{}", el.text), style)],
         };
-        let para = Paragraph::new(ratatui::text::Line::from(spans));
+        let line = ratatui::text::Line::from(spans);
+        let half_w = u16::try_from(line.width() / 2).unwrap_or(u16::MAX);
+        let lx = scene_rect.x + el.anchor_px.x.saturating_sub(half_w);
+        let para = Paragraph::new(line);
         if let Some(r) = clip_widget_rect(
             Rect {
                 x: lx,
