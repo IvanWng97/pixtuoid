@@ -24,8 +24,10 @@ use crate::script::{
 };
 
 use pixtuoid_scene::audio::OneShotPool;
-use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
-use pixtuoid_scene::floor::{FloorMeta, FloorSession, FrameInputs, floor_capacity};
+use pixtuoid_scene::embedded_pack::load_bundled_pack;
+use pixtuoid_scene::floor::{
+    FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs, floor_capacity,
+};
 use pixtuoid_scene::layout::{CHARACTER_SPRITE_W, Size};
 use pixtuoid_scene::theme::{ALL_THEMES, Theme};
 
@@ -145,8 +147,7 @@ impl Office {
     /// only if the compile-time-embedded sprite pack fails to parse.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
-        let pack =
-            load_sprite_pack(PackSource::Bundled).map_err(|e| JsError::new(&format!("{e:#}")))?;
+        let pack = load_bundled_pack().map_err(|e| JsError::new(&format!("{e:#}")))?;
         Ok(Office {
             // Capacity starts empty and is synced from the CANVAS's own layout
             // on every `step` before any beat fires, so the reducer only admits
@@ -608,14 +609,15 @@ impl Office {
             ..FloorMeta::for_floor(0, 1)
         };
         self.session.render(FrameInputs {
-            scene: &self.scene,
-            pack: &self.pack,
+            world: FloorInputs {
+                scene: &self.scene,
+                pack: &self.pack,
+                now,
+                floor: floor_meta,
+                pets: PetInputs::default(),
+            },
             theme: self.theme,
-            now,
             size: Size { w: buf_w, h: buf_h },
-            floor_meta,
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         });
     }

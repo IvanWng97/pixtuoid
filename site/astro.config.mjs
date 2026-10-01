@@ -10,6 +10,7 @@ import rehypeCallouts from './config/rehype-callouts.mjs';
 import rehypeBeautifulMermaid from './config/rehype-beautiful-mermaid.mjs';
 import { fetchStarCount } from './config/gh-stars.mjs';
 import { latestReleaseTag, resolveDisplayedVersion } from './config/released-version.mjs';
+import { COMPRESS_HTML } from './config/compress-html.mjs';
 
 // The DISPLAYED version is the latest RELEASE tag — what `cargo install`/brew
 // actually serve — not main's Cargo.toml, which runs AHEAD between a mid-cycle
@@ -195,10 +196,7 @@ export default defineConfig({
   site: 'https://pixtuoid.dev',
   base: '/',
   trailingSlash: 'ignore',
-  // Astro 7's 'jsx' default drops the space between adjacent inline elements on
-  // separate source lines, joining visible text ("pixtuoid v0.11.1" →
-  // "pixtuoidv0.11.1"). Pin the Astro 6 behavior.
-  compressHTML: true,
+  compressHTML: COMPRESS_HTML,
   markdown: {
     // excludeLangs keeps ```mermaid a RAW code node — the highlighter would
     // otherwise split the source into token spans the diagram plugin cannot read

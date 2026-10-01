@@ -14,7 +14,7 @@ docs, demo media all flow in from outside `site/`. Parent guide: the workspace
 
 `astro build` reads **these files from OUTSIDE `site/`** (workspace
 `Cargo.toml` + the `docs/` pages below); a rename/move of any FAILS the
-build, and every one sits in the `site.yml` / `pages.yml` path filters:
+build:
 
 - workspace `Cargo.toml` → displayed-version FALLBACK only; the primary source
   is the latest release tag (`config/released-version.mjs`, unit-tested — main
@@ -27,8 +27,10 @@ build, and every one sits in the `site.yml` / `pages.yml` path filters:
   pattern, `src/pages/*.astro`, the `DOCS` entry in `consts.ts` (`Nav.astro`
   and `Docs.astro`'s sidebar/pager derive from it; `assert-docs-rendered` is
   generic by design — it globs every rendered `article.prose` — and needs no
-  edit), both workflow path filters, `lighthouserc.json`, and the smoke
-  viewport table.
+  edit), `lighthouserc.json`, and the smoke viewport table.
+
+`public/wasm/` is gitignored `just gen-wasm` output; without it the office
+silently stays on its poster.
 
 **The architecture diagram renders at build**, in process
 (`config/rehype-beautiful-mermaid.mjs` — no browser); Playwright's Chromium is
@@ -64,7 +66,7 @@ CSP; regressions surface in `just site-e2e`'s console watchdog.
 
 `just site-dev-bg` daemonizes (`astro dev --background`, polls the dev-only
 `/_astro/status` endpoint); `just site-dev-stop` frees the port. Two edges:
-the status endpoint is dev-server only (astro 7.3.2's `core/create-vite.js` registers it
+the status endpoint is dev-server only (astro 7.3.4's `core/create-vite.js` registers it
 under `command === "dev"`; `astro preview` daemonizes too but has nothing to
 poll), and dev/preview share port 4321 — stop the
 daemon before `just site-e2e` (its webServer fails loud on a squatted port).

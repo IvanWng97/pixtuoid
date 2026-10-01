@@ -22,7 +22,7 @@ use pixtuoid_core::harness::{Drive, LineFailure};
 use pixtuoid_core::source::decoder::TailActivity;
 use pixtuoid_core::source::registry;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
+use pixtuoid_scene::embedded_pack::load_bundled_pack;
 use pixtuoid_scene::floor::{FloorMeta, FloorSession};
 
 /// The instant the whole census runs at — the drive's fold and the observe
@@ -119,11 +119,14 @@ fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
     let mut session = FloorSession::new();
     v.drawn = session
         .observe(
-            &driven.scene,
-            pack,
+            pixtuoid_scene::floor::FloorInputs {
+                scene: &driven.scene,
+                pack,
+                now: now(),
+                floor: FloorMeta::ground(),
+                pets: pixtuoid_scene::floor::PetInputs::default(),
+            },
             pixtuoid_scene::layout::Size { w: 192, h: 80 },
-            FloorMeta::ground(),
-            now(),
         )
         .map_or(0, |observed| observed.frame.characters.len());
     v
@@ -221,7 +224,7 @@ fn main() {
         std::process::exit(3);
     }
 
-    let pack = load_sprite_pack(PackSource::Bundled).expect("embedded pack");
+    let pack = load_bundled_pack().expect("embedded pack");
     let mut totals = Verdict::default();
     let mut registered_files = 0usize;
     let mut drove_files = 0usize;

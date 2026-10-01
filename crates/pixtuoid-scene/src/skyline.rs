@@ -512,8 +512,7 @@ mod tests {
     use super::*;
 
     fn pack() -> Pack {
-        crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-            .expect("the embedded pack loads")
+        crate::embedded_pack::test_default_pack()
     }
 
     /// Where each stand stands, for comparing two cities.
@@ -654,6 +653,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "density-art")]
     fn a_denser_strip_draws_the_denser_art_on_the_same_city() {
         let pack = pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");

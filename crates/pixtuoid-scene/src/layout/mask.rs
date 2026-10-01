@@ -4,8 +4,8 @@
 use super::decor::{FurnitureDef, GroundAlign};
 use super::{
     Anchor, Furniture, MeetingRoom, OBSTACLE_PAD_PX, PANTRY_FOOTPRINT_DEPTH, PlantItem,
-    PodDecorItem, Point, Size, WALL_BAND_TO_TOP_MARGIN, WAYPOINT_STAMP_PAD_PX, WallDecorItem,
-    Waypoint, WaypointKind, anchored_top_left, furniture_def,
+    PodDecorItem, Point, Size, WALL_BAND_TO_TOP_MARGIN, WALL_THICK_V, WAYPOINT_STAMP_PAD_PX,
+    WallDecorItem, Waypoint, WaypointKind, anchored_top_left, furniture_def,
 };
 use pixtuoid_core::walkable::WalkableMask;
 
@@ -131,21 +131,22 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
     mask.mark_blocked(0, baseboard_top, buf_w, BASEBOARD_H, 0);
 
     // Both block their FULL visual footprint (invariant #6); only the router
-    // clearance is asymmetric — horizontal faces already fill a routing cell, while
-    // vertical walls are thinner and take `WALL_ROUTING_MARGIN_X` westward.
+    // clearance is asymmetric — horizontal faces already fill a routing cell top to
+    // bottom, while vertical walls are thinner and take `WALL_ROUTING_MARGIN_X`
+    // westward.
     for piece in wall_pieces {
         let (origin, size) = piece.footprint();
-        let mx = match piece {
-            WallPiece::Vertical { .. } => WALL_ROUTING_MARGIN_X,
-            WallPiece::Horizontal { .. } => 0,
+        let (west, east) = match *piece {
+            WallPiece::Vertical { .. } => (WALL_ROUTING_MARGIN_X, 0),
+            // A post a door leaves at a run's end is as thin to the router as a
+            // bare vertical wall, so it widens to one, away from its door.
+            WallPiece::Horizontal { jamb_west, .. } => {
+                let short = WALL_THICK_V.saturating_sub(size.w);
+                if jamb_west { (0, short) } else { (short, 0) }
+            }
         };
-        mask.mark_blocked(
-            origin.x.saturating_sub(mx),
-            origin.y,
-            size.w.saturating_add(mx),
-            size.h,
-            0,
-        );
+        let x = origin.x.saturating_sub(west);
+        mask.mark_blocked(x, origin.y, size.w + (origin.x - x) + east, size.h, 0);
     }
 
     for desk in home_desks {

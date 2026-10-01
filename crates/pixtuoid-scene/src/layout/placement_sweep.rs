@@ -605,6 +605,93 @@ fn no_furniture_ground_overlaps_a_wall() {
     assert_no_violations("wall-overlap", v);
 }
 
+/// Half-width, in px, of the box probed around each wall-footprint corner for
+/// route endpoints: wide enough that a pair straddles the corner along both of
+/// its arms, where a diagonal coarse step cuts it.
+const CORNER_PROBE_RADIUS: i32 = 6;
+
+/// Probe spacing inside that box. Not a divisor of `COARSE_CELL_SIZE`, so the
+/// probes land on every offset within a routing cell.
+const CORNER_PROBE_STEP: usize = 3;
+
+/// The open pixels, on walkable routing cells, probed around each corner of
+/// each wall footprint: one list per corner.
+fn wall_corner_probes(l: &SceneLayout) -> Vec<Vec<Point>> {
+    let mut corners = Vec::new();
+    for piece in &l.wall_pieces {
+        let (at, sz) = piece.footprint();
+        let (x0, y0) = (i32::from(at.x) - 1, i32::from(at.y) - 1);
+        let (x1, y1) = (i32::from(at.x + sz.w), i32::from(at.y + sz.h));
+        for (cx, cy) in [(x0, y0), (x1, y0), (x0, y1), (x1, y1)] {
+            let span = (-CORNER_PROBE_RADIUS..=CORNER_PROBE_RADIUS).step_by(CORNER_PROBE_STEP);
+            let probes = span
+                .clone()
+                .flat_map(|dy| span.clone().map(move |dx| (cx + dx, cy + dy)))
+                .filter_map(|(x, y)| {
+                    Some(Point {
+                        x: u16::try_from(x).ok()?,
+                        y: u16::try_from(y).ok()?,
+                    })
+                })
+                .filter(|&p| {
+                    l.walkable.is_walkable(p.x, p.y)
+                        && crate::pathfind::point_in_walkable_cell(&l.walkable, p)
+                        && wall_at(l, p).is_none()
+                })
+                .collect();
+            corners.push(probes);
+        }
+    }
+    corners
+}
+
+/// The wall piece whose footprint holds `p`, if any.
+fn wall_at(l: &SceneLayout, p: Point) -> Option<WallPiece> {
+    l.wall_pieces.iter().copied().find(|w| {
+        let (at, sz) = w.footprint();
+        (at.x..at.x + sz.w).contains(&p.x) && (at.y..at.y + sz.h).contains(&p.y)
+    })
+}
+
+/// The first pixel a walker passes on `path` that stands inside a wall, with
+/// that wall.
+fn route_through_wall(l: &SceneLayout, path: &[Point]) -> Option<(Point, WallPiece)> {
+    path.windows(2)
+        .flat_map(|leg| crate::physics::leg_pixels(leg[0], leg[1]))
+        .find_map(|p| wall_at(l, p).map(|w| (p, w)))
+}
+
+/// No route between two open pixels around a wall's corner passes through a
+/// wall. The production legs carry the same assert in
+/// [`assert_home_desk_approaches_are_routable`] and
+/// `every_wander_destination_is_routable_from_its_desk`.
+#[test]
+fn no_route_around_a_wall_corner_cuts_through_it() {
+    use crate::pathfind::find_path;
+    let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
+    let mut v = Vec::new();
+    let mut check = |w: u16, h: u16, seed: u64, l: &SceneLayout| {
+        for probes in wall_corner_probes(l) {
+            for (i, &from) in probes.iter().enumerate() {
+                for &to in &probes[i + 1..] {
+                    let Some(path) = find_path(&l.walkable, &overlay, None, from, to) else {
+                        continue;
+                    };
+                    if let Some((p, wall)) = route_through_wall(l, &path) {
+                        v.push(format!(
+                            "{w}x{h} seed {seed}: {from:?}->{to:?} passes {p:?} inside {:?}",
+                            wall.footprint()
+                        ));
+                    }
+                }
+            }
+        }
+    };
+    sweep(&mut check);
+    sweep_production_floors(&mut check);
+    assert_no_violations("route-through-wall", v);
+}
+
 /// The door threshold is walkable AND every walkable pixel is reachable from it
 /// (4-connected), through the PRODUCTION `unreachable_walkable_cells` so the
 /// guard and its test can't drift. The threshold-walkable assert is SEPARATE and
@@ -688,12 +775,19 @@ fn every_wander_destination_is_routable_from_its_desk() {
                 if a == wp.pos || !seen.insert((origin, a)) {
                     continue;
                 }
-                assert!(
-                    find_path(&l.walkable, &overlay, None, origin, a).is_some(),
-                    "{w}x{h} seed {seed}: {:?} approach {a:?} unroutable from desk \
-                     {desk:?}'s leg origin {origin:?}",
-                    wp.kind
-                );
+                let path = find_path(&l.walkable, &overlay, None, origin, a).unwrap_or_else(|| {
+                    panic!(
+                        "{w}x{h} seed {seed}: {:?} approach {a:?} unroutable from desk \
+                         {desk:?}'s leg origin {origin:?}",
+                        wp.kind
+                    )
+                });
+                if let Some((p, wall)) = route_through_wall(l, &path) {
+                    panic!(
+                        "{w}x{h} seed {seed}: the leg {origin:?}->{a:?} passes {p:?} inside {:?}",
+                        wall.footprint()
+                    );
+                }
             }
         }
     });
@@ -732,11 +826,18 @@ fn assert_home_desk_approaches_are_routable(w: u16, h: u16, seed: u64, l: &Scene
                  side — every leg to it falls back to a straight line through the desk"
             )
         });
-        assert!(
-            find_path(&l.walkable, &overlay, None, door, approach).is_some(),
-            "{w}x{h} seed {seed}: home desk {i} at {desk:?} has approach {approach:?} \
-             unroutable from the door {door:?} — the coarse grid is severed"
-        );
+        let path = find_path(&l.walkable, &overlay, None, door, approach).unwrap_or_else(|| {
+            panic!(
+                "{w}x{h} seed {seed}: home desk {i} at {desk:?} has approach {approach:?} \
+                 unroutable from the door {door:?} — the coarse grid is severed"
+            )
+        });
+        if let Some((p, wall)) = route_through_wall(l, &path) {
+            panic!(
+                "{w}x{h} seed {seed}: the leg {door:?}->{approach:?} passes {p:?} inside {:?}",
+                wall.footprint()
+            );
+        }
     }
 }
 
@@ -1001,12 +1102,12 @@ fn free_standing_whiteboard_survives_the_west_aisle_it_used_to_seal() {
 }
 
 /// The boundary scan can't catch an over-drop: dropping the couch only IMPROVES
-/// connectivity. 57x160 seed 1 is the KNIFE-EDGE — the floor lamp flanking the
+/// connectivity. 61x160 seed 1 is the KNIFE-EDGE — the floor lamp flanking the
 /// couch east (`compute::LoungeFlanks`) meets the door threshold's column
-/// with its padded ground exactly; 62x160 seed 3 clears comfortably.
+/// with its padded ground exactly; 66x160 seed 3 clears comfortably.
 #[test]
 fn couch_survives_a_narrow_band_that_clears_the_door() {
-    for &(w, h, seed) in &[(57u16, 160u16, 1u64), (62, 160, 3)] {
+    for &(w, h, seed) in &[(61u16, 160u16, 1u64), (66, 160, 3)] {
         let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("lays out");
         assert!(
             l.couch_sprite_center().is_some(),

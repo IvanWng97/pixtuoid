@@ -75,6 +75,7 @@ pub fn pixtuoid_core::platform::home_first_dir() -> core::option::Option<std::pa
 pub fn pixtuoid_core::platform::path_env(&str) -> core::option::Option<std::path::PathBuf>
 pub fn pixtuoid_core::platform::path_env_trimmed(&str) -> core::option::Option<std::path::PathBuf>
 pub fn pixtuoid_core::platform::resolve_user_config_dir(&str, core::option::Option<std::path::PathBuf>, core::option::Option<std::path::PathBuf>, &std::path::Path) -> std::path::PathBuf
+pub fn pixtuoid_core::platform::text_env(&str) -> core::option::Option<alloc::string::String>
 pub fn pixtuoid_core::platform::user_home_opt() -> core::option::Option<std::path::PathBuf>
 pub mod pixtuoid_core::source
 pub mod pixtuoid_core::source::antigravity
@@ -1134,6 +1135,26 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::HairLayers
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::HairLayers
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::HairLayers
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::HairLayers
+pub struct pixtuoid_core::sprite::format::HairOverhang
+pub pixtuoid_core::sprite::format::HairOverhang::frame: usize
+pub pixtuoid_core::sprite::format::HairOverhang::name: alloc::string::String
+pub pixtuoid_core::sprite::format::HairOverhang::style: alloc::string::String
+pub pixtuoid_core::sprite::format::HairOverhang::view: pixtuoid_core::sprite::HeadView
+impl core::clone::Clone for pixtuoid_core::sprite::format::HairOverhang
+pub fn pixtuoid_core::sprite::format::HairOverhang::clone(&self) -> pixtuoid_core::sprite::format::HairOverhang
+impl core::cmp::Eq for pixtuoid_core::sprite::format::HairOverhang
+impl core::cmp::PartialEq for pixtuoid_core::sprite::format::HairOverhang
+pub fn pixtuoid_core::sprite::format::HairOverhang::eq(&self, &pixtuoid_core::sprite::format::HairOverhang) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::format::HairOverhang
+pub fn pixtuoid_core::sprite::format::HairOverhang::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::format::HairOverhang
+impl core::marker::Freeze for pixtuoid_core::sprite::format::HairOverhang
+impl core::marker::Send for pixtuoid_core::sprite::format::HairOverhang
+impl core::marker::Sync for pixtuoid_core::sprite::format::HairOverhang
+impl core::marker::Unpin for pixtuoid_core::sprite::format::HairOverhang
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::HairOverhang
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::HairOverhang
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::HairOverhang
 pub struct pixtuoid_core::sprite::format::Hairstyle
 impl pixtuoid_core::sprite::format::Hairstyle
 pub fn pixtuoid_core::sprite::format::Hairstyle::density(&self) -> core::num::nonzero::NonZeroU16
@@ -1150,6 +1171,25 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::Hairstyle
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::Hairstyle
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::Hairstyle
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Hairstyle
+pub struct pixtuoid_core::sprite::format::MissingHairView
+pub pixtuoid_core::sprite::format::MissingHairView::name: alloc::string::String
+pub pixtuoid_core::sprite::format::MissingHairView::style: alloc::string::String
+pub pixtuoid_core::sprite::format::MissingHairView::view: pixtuoid_core::sprite::HeadView
+impl core::clone::Clone for pixtuoid_core::sprite::format::MissingHairView
+pub fn pixtuoid_core::sprite::format::MissingHairView::clone(&self) -> pixtuoid_core::sprite::format::MissingHairView
+impl core::cmp::Eq for pixtuoid_core::sprite::format::MissingHairView
+impl core::cmp::PartialEq for pixtuoid_core::sprite::format::MissingHairView
+pub fn pixtuoid_core::sprite::format::MissingHairView::eq(&self, &pixtuoid_core::sprite::format::MissingHairView) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::format::MissingHairView
+pub fn pixtuoid_core::sprite::format::MissingHairView::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::format::MissingHairView
+impl core::marker::Freeze for pixtuoid_core::sprite::format::MissingHairView
+impl core::marker::Send for pixtuoid_core::sprite::format::MissingHairView
+impl core::marker::Sync for pixtuoid_core::sprite::format::MissingHairView
+impl core::marker::Unpin for pixtuoid_core::sprite::format::MissingHairView
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::MissingHairView
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::MissingHairView
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::MissingHairView
 pub struct pixtuoid_core::sprite::format::MissingOptional
 pub pixtuoid_core::sprite::format::MissingOptional::name: &'static str
 pub pixtuoid_core::sprite::format::MissingOptional::stand_in: pixtuoid_core::sprite::format::StandIn
@@ -1232,16 +1272,38 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::PartialSet
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::PartialSet
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::PartialSet
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::PartialSet
+pub struct pixtuoid_core::sprite::format::UnmarkedHead
+pub pixtuoid_core::sprite::format::UnmarkedHead::frame: usize
+pub pixtuoid_core::sprite::format::UnmarkedHead::name: alloc::string::String
+impl core::clone::Clone for pixtuoid_core::sprite::format::UnmarkedHead
+pub fn pixtuoid_core::sprite::format::UnmarkedHead::clone(&self) -> pixtuoid_core::sprite::format::UnmarkedHead
+impl core::cmp::Eq for pixtuoid_core::sprite::format::UnmarkedHead
+impl core::cmp::PartialEq for pixtuoid_core::sprite::format::UnmarkedHead
+pub fn pixtuoid_core::sprite::format::UnmarkedHead::eq(&self, &pixtuoid_core::sprite::format::UnmarkedHead) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::format::UnmarkedHead
+pub fn pixtuoid_core::sprite::format::UnmarkedHead::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::format::UnmarkedHead
+impl core::marker::Freeze for pixtuoid_core::sprite::format::UnmarkedHead
+impl core::marker::Send for pixtuoid_core::sprite::format::UnmarkedHead
+impl core::marker::Sync for pixtuoid_core::sprite::format::UnmarkedHead
+impl core::marker::Unpin for pixtuoid_core::sprite::format::UnmarkedHead
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::UnmarkedHead
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::UnmarkedHead
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::UnmarkedHead
 pub struct pixtuoid_core::sprite::format::ValidationReport
 pub pixtuoid_core::sprite::format::ValidationReport::insufficient_frames: alloc::vec::Vec<(alloc::string::String, usize, usize)>
 pub pixtuoid_core::sprite::format::ValidationReport::mismatched_density: alloc::vec::Vec<pixtuoid_core::sprite::format::DensityMismatch>
 pub pixtuoid_core::sprite::format::ValidationReport::mismatched_frame_counts: alloc::vec::Vec<pixtuoid_core::sprite::format::FrameCountMismatch>
+pub pixtuoid_core::sprite::format::ValidationReport::missing_hair_views: alloc::vec::Vec<pixtuoid_core::sprite::format::MissingHairView>
 pub pixtuoid_core::sprite::format::ValidationReport::missing_optional: alloc::vec::Vec<pixtuoid_core::sprite::format::MissingOptional>
 pub pixtuoid_core::sprite::format::ValidationReport::missing_required: alloc::vec::Vec<alloc::string::String>
 pub pixtuoid_core::sprite::format::ValidationReport::orphan_derived: alloc::vec::Vec<pixtuoid_core::sprite::format::OrphanDerived>
+pub pixtuoid_core::sprite::format::ValidationReport::orphan_hairstyles: alloc::vec::Vec<alloc::string::String>
 pub pixtuoid_core::sprite::format::ValidationReport::orphan_variants: alloc::vec::Vec<alloc::string::String>
+pub pixtuoid_core::sprite::format::ValidationReport::overhanging_hair: alloc::vec::Vec<pixtuoid_core::sprite::format::HairOverhang>
 pub pixtuoid_core::sprite::format::ValidationReport::partial_sets: alloc::vec::Vec<pixtuoid_core::sprite::format::PartialSet>
 pub pixtuoid_core::sprite::format::ValidationReport::unknown: alloc::vec::Vec<alloc::string::String>
+pub pixtuoid_core::sprite::format::ValidationReport::unmarked_heads: alloc::vec::Vec<pixtuoid_core::sprite::format::UnmarkedHead>
 impl pixtuoid_core::sprite::format::ValidationReport
 pub fn pixtuoid_core::sprite::format::ValidationReport::error_count(&self) -> usize
 pub fn pixtuoid_core::sprite::format::ValidationReport::has_errors(&self) -> bool
@@ -1433,13 +1495,16 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::Rgb
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::Rgb
 pub struct pixtuoid_core::sprite::RgbBuffer
 impl pixtuoid_core::sprite::RgbBuffer
-pub fn pixtuoid_core::sprite::RgbBuffer::begin_writes(&mut self) -> u32
+pub fn pixtuoid_core::sprite::RgbBuffer::as_mut_slice(&mut self) -> &mut [pixtuoid_core::sprite::Rgb]
+pub fn pixtuoid_core::sprite::RgbBuffer::begin_writes(&mut self) -> pixtuoid_core::sprite::WriteEpoch
+pub fn pixtuoid_core::sprite::RgbBuffer::end_writes(&mut self)
 pub fn pixtuoid_core::sprite::RgbBuffer::filled(u16, u16, pixtuoid_core::sprite::Rgb) -> Self
 pub fn pixtuoid_core::sprite::RgbBuffer::from_pixels(u16, u16, alloc::vec::Vec<pixtuoid_core::sprite::Rgb>) -> Self
 pub fn pixtuoid_core::sprite::RgbBuffer::get(&self, u16, u16) -> pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_core::sprite::RgbBuffer::put(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
 pub fn pixtuoid_core::sprite::RgbBuffer::put_checked(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
-pub fn pixtuoid_core::sprite::RgbBuffer::written_in(&self, u16, u16, u32) -> bool
+pub fn pixtuoid_core::sprite::RgbBuffer::resize_fill(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
+pub fn pixtuoid_core::sprite::RgbBuffer::written_in(&self, u16, u16, pixtuoid_core::sprite::WriteEpoch) -> bool
 impl core::clone::Clone for pixtuoid_core::sprite::RgbBuffer
 pub fn pixtuoid_core::sprite::RgbBuffer::clone(&self) -> pixtuoid_core::sprite::RgbBuffer
 impl core::fmt::Debug for pixtuoid_core::sprite::RgbBuffer
@@ -1447,8 +1512,6 @@ pub fn pixtuoid_core::sprite::RgbBuffer::fmt(&self, &mut core::fmt::Formatter<'_
 impl core::ops::deref::Deref for pixtuoid_core::sprite::RgbBuffer
 pub type pixtuoid_core::sprite::RgbBuffer::Target = pixtuoid_core::grid::Grid<pixtuoid_core::sprite::Rgb>
 pub fn pixtuoid_core::sprite::RgbBuffer::deref(&self) -> &pixtuoid_core::grid::Grid<pixtuoid_core::sprite::Rgb>
-impl core::ops::deref::DerefMut for pixtuoid_core::sprite::RgbBuffer
-pub fn pixtuoid_core::sprite::RgbBuffer::deref_mut(&mut self) -> &mut pixtuoid_core::grid::Grid<pixtuoid_core::sprite::Rgb>
 impl core::marker::Freeze for pixtuoid_core::sprite::RgbBuffer
 impl core::marker::Send for pixtuoid_core::sprite::RgbBuffer
 impl core::marker::Sync for pixtuoid_core::sprite::RgbBuffer
@@ -1461,6 +1524,7 @@ impl pixtuoid_core::sprite::Sprite
 pub fn pixtuoid_core::sprite::Sprite::frame_ms(&self) -> u32
 pub fn pixtuoid_core::sprite::Sprite::frames(&self) -> &[pixtuoid_core::sprite::Frame]
 pub fn pixtuoid_core::sprite::Sprite::head(&self, usize) -> core::option::Option<pixtuoid_core::sprite::HeadMark>
+pub fn pixtuoid_core::sprite::Sprite::laid_on(&self, pixtuoid_core::sprite::HeadMark) -> core::option::Option<(&pixtuoid_core::sprite::Frame, i32, i32)>
 pub fn pixtuoid_core::sprite::Sprite::marks(&self, usize) -> &[pixtuoid_core::sprite::Mark]
 pub fn pixtuoid_core::sprite::Sprite::recolorable(&self, usize) -> core::option::Option<pixtuoid_core::sprite::RecolorableFrame<'_>>
 impl core::clone::Clone for pixtuoid_core::sprite::Sprite
@@ -1474,6 +1538,23 @@ impl core::marker::Unpin for pixtuoid_core::sprite::Sprite
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::Sprite
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::Sprite
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::Sprite
+pub struct pixtuoid_core::sprite::WriteEpoch(_)
+impl core::clone::Clone for pixtuoid_core::sprite::WriteEpoch
+pub fn pixtuoid_core::sprite::WriteEpoch::clone(&self) -> pixtuoid_core::sprite::WriteEpoch
+impl core::cmp::Eq for pixtuoid_core::sprite::WriteEpoch
+impl core::cmp::PartialEq for pixtuoid_core::sprite::WriteEpoch
+pub fn pixtuoid_core::sprite::WriteEpoch::eq(&self, &pixtuoid_core::sprite::WriteEpoch) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::WriteEpoch
+pub fn pixtuoid_core::sprite::WriteEpoch::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_core::sprite::WriteEpoch
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::WriteEpoch
+impl core::marker::Freeze for pixtuoid_core::sprite::WriteEpoch
+impl core::marker::Send for pixtuoid_core::sprite::WriteEpoch
+impl core::marker::Sync for pixtuoid_core::sprite::WriteEpoch
+impl core::marker::Unpin for pixtuoid_core::sprite::WriteEpoch
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::WriteEpoch
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::WriteEpoch
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::WriteEpoch
 pub type pixtuoid_core::sprite::Pixel = core::option::Option<pixtuoid_core::sprite::Rgb>
 pub mod pixtuoid_core::state
 pub mod pixtuoid_core::state::reducer
@@ -2318,13 +2399,16 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::Rgb
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::Rgb
 pub struct pixtuoid_core::RgbBuffer
 impl pixtuoid_core::sprite::RgbBuffer
-pub fn pixtuoid_core::sprite::RgbBuffer::begin_writes(&mut self) -> u32
+pub fn pixtuoid_core::sprite::RgbBuffer::as_mut_slice(&mut self) -> &mut [pixtuoid_core::sprite::Rgb]
+pub fn pixtuoid_core::sprite::RgbBuffer::begin_writes(&mut self) -> pixtuoid_core::sprite::WriteEpoch
+pub fn pixtuoid_core::sprite::RgbBuffer::end_writes(&mut self)
 pub fn pixtuoid_core::sprite::RgbBuffer::filled(u16, u16, pixtuoid_core::sprite::Rgb) -> Self
 pub fn pixtuoid_core::sprite::RgbBuffer::from_pixels(u16, u16, alloc::vec::Vec<pixtuoid_core::sprite::Rgb>) -> Self
 pub fn pixtuoid_core::sprite::RgbBuffer::get(&self, u16, u16) -> pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_core::sprite::RgbBuffer::put(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
 pub fn pixtuoid_core::sprite::RgbBuffer::put_checked(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
-pub fn pixtuoid_core::sprite::RgbBuffer::written_in(&self, u16, u16, u32) -> bool
+pub fn pixtuoid_core::sprite::RgbBuffer::resize_fill(&mut self, u16, u16, pixtuoid_core::sprite::Rgb)
+pub fn pixtuoid_core::sprite::RgbBuffer::written_in(&self, u16, u16, pixtuoid_core::sprite::WriteEpoch) -> bool
 impl core::clone::Clone for pixtuoid_core::sprite::RgbBuffer
 pub fn pixtuoid_core::sprite::RgbBuffer::clone(&self) -> pixtuoid_core::sprite::RgbBuffer
 impl core::fmt::Debug for pixtuoid_core::sprite::RgbBuffer
@@ -2332,8 +2416,6 @@ pub fn pixtuoid_core::sprite::RgbBuffer::fmt(&self, &mut core::fmt::Formatter<'_
 impl core::ops::deref::Deref for pixtuoid_core::sprite::RgbBuffer
 pub type pixtuoid_core::sprite::RgbBuffer::Target = pixtuoid_core::grid::Grid<pixtuoid_core::sprite::Rgb>
 pub fn pixtuoid_core::sprite::RgbBuffer::deref(&self) -> &pixtuoid_core::grid::Grid<pixtuoid_core::sprite::Rgb>
-impl core::ops::deref::DerefMut for pixtuoid_core::sprite::RgbBuffer
-pub fn pixtuoid_core::sprite::RgbBuffer::deref_mut(&mut self) -> &mut pixtuoid_core::grid::Grid<pixtuoid_core::sprite::Rgb>
 impl core::marker::Freeze for pixtuoid_core::sprite::RgbBuffer
 impl core::marker::Send for pixtuoid_core::sprite::RgbBuffer
 impl core::marker::Sync for pixtuoid_core::sprite::RgbBuffer
@@ -2406,6 +2488,7 @@ impl pixtuoid_core::sprite::Sprite
 pub fn pixtuoid_core::sprite::Sprite::frame_ms(&self) -> u32
 pub fn pixtuoid_core::sprite::Sprite::frames(&self) -> &[pixtuoid_core::sprite::Frame]
 pub fn pixtuoid_core::sprite::Sprite::head(&self, usize) -> core::option::Option<pixtuoid_core::sprite::HeadMark>
+pub fn pixtuoid_core::sprite::Sprite::laid_on(&self, pixtuoid_core::sprite::HeadMark) -> core::option::Option<(&pixtuoid_core::sprite::Frame, i32, i32)>
 pub fn pixtuoid_core::sprite::Sprite::marks(&self, usize) -> &[pixtuoid_core::sprite::Mark]
 pub fn pixtuoid_core::sprite::Sprite::recolorable(&self, usize) -> core::option::Option<pixtuoid_core::sprite::RecolorableFrame<'_>>
 impl core::clone::Clone for pixtuoid_core::sprite::Sprite
@@ -2419,6 +2502,23 @@ impl core::marker::Unpin for pixtuoid_core::sprite::Sprite
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::Sprite
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::Sprite
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::Sprite
+pub struct pixtuoid_core::WriteEpoch(_)
+impl core::clone::Clone for pixtuoid_core::sprite::WriteEpoch
+pub fn pixtuoid_core::sprite::WriteEpoch::clone(&self) -> pixtuoid_core::sprite::WriteEpoch
+impl core::cmp::Eq for pixtuoid_core::sprite::WriteEpoch
+impl core::cmp::PartialEq for pixtuoid_core::sprite::WriteEpoch
+pub fn pixtuoid_core::sprite::WriteEpoch::eq(&self, &pixtuoid_core::sprite::WriteEpoch) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::WriteEpoch
+pub fn pixtuoid_core::sprite::WriteEpoch::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_core::sprite::WriteEpoch
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::WriteEpoch
+impl core::marker::Freeze for pixtuoid_core::sprite::WriteEpoch
+impl core::marker::Send for pixtuoid_core::sprite::WriteEpoch
+impl core::marker::Sync for pixtuoid_core::sprite::WriteEpoch
+impl core::marker::Unpin for pixtuoid_core::sprite::WriteEpoch
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::WriteEpoch
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::WriteEpoch
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::WriteEpoch
 pub trait pixtuoid_core::Source: core::marker::Send + 'static
 pub fn pixtuoid_core::Source::name(&self) -> &str
 pub fn pixtuoid_core::Source::run(alloc::boxed::Box<Self>, pixtuoid_core::TaggedSender) -> impl core::future::future::Future<Output = anyhow::Result<()>> + core::marker::Send

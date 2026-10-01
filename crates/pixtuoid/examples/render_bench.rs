@@ -13,7 +13,7 @@ use anyhow::Result;
 use pixtuoid::floating::offscreen::OfficeRenderer;
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::floor::{FloorMeta, FrameInputs};
+use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FrameInputs, PetInputs};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::theme_by_name;
 
@@ -65,9 +65,7 @@ fn populate(scene: &mut SceneState, now: SystemTime, n: usize) {
 
 fn main() -> Result<()> {
     let theme = theme_by_name("normal").expect("normal theme");
-    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-        pixtuoid_scene::embedded_pack::PackSource::Bundled,
-    )?;
+    let pack = pixtuoid_scene::embedded_pack::load_bundled_pack()?;
     let base = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
     // (label, buffer w, h). The rich sizes are what a 192x80-cell terminal needs
@@ -96,14 +94,15 @@ fn main() -> Result<()> {
         for i in 0..15u64 {
             let now = base + Duration::from_millis(i * 33);
             let _ = r.render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w, h },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             });
         }
@@ -115,14 +114,15 @@ fn main() -> Result<()> {
             let now = base + Duration::from_millis((15 + i) * 33);
             let t = Instant::now();
             let _ = r.render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w, h },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             });
             samples.push(t.elapsed().as_secs_f64() * 1000.0);
@@ -159,14 +159,15 @@ fn main() -> Result<()> {
         for i in 0..15u64 {
             let now = base + Duration::from_millis(i * 33);
             let _ = r.render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w: 768, h: 640 },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             });
         }
@@ -175,14 +176,15 @@ fn main() -> Result<()> {
             let now = base + Duration::from_millis((15 + i) * 33);
             let t = Instant::now();
             let _ = r.render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w: 768, h: 640 },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             });
             best = best.min(t.elapsed().as_secs_f64() * 1000.0);
@@ -223,14 +225,15 @@ fn main() -> Result<()> {
         for i in 0..12u64 {
             let now = base + Duration::from_millis(i * 33);
             let buf = r.render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w, h },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             });
             let (bw, bh) = (buf.width() as usize, buf.height() as usize);
@@ -251,16 +254,17 @@ fn main() -> Result<()> {
         // Dump the EXACT pixels just encoded, so an independent encoder
         // (img2sixel) can be run over the same input as a cross-check. Our
         // encoder is an instrument; an instrument nobody validated is a guess.
-        if let Ok(dir) = std::env::var("PIXTUOID_BENCH_DUMP") {
+        if let Some(dir) = pixtuoid_core::platform::path_env("PIXTUOID_BENCH_DUMP") {
             let buf = r.render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now: base,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now: base,
                 size: Size { w, h },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             });
             let (bw, bh) = (buf.width() as u32, buf.height() as u32);
@@ -268,9 +272,9 @@ fn main() -> Result<()> {
             for (i, p) in buf.as_slice().iter().enumerate() {
                 img.put_pixel(i as u32 % bw, i as u32 / bw, image::Rgb([p.r, p.g, p.b]));
             }
-            let path = format!("{dir}/frame_{w}x{h}.png");
+            let path = dir.join(format!("frame_{w}x{h}.png"));
             img.save(&path).ok();
-            println!("      dumped {path}");
+            println!("      dumped {}", path.display());
         }
     }
 

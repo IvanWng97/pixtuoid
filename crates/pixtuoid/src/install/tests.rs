@@ -217,11 +217,11 @@ fn resolve_hook_binary_no_overrides_uses_locate() {
 
 #[test]
 fn empty_env_override_counts_as_unset_at_the_live_read() {
-    // io::nonempty_env is the live seam install_target reads PIXTUOID_HOOK
+    // path_env is the live seam install_target reads PIXTUOID_HOOK
     // through: empty/whitespace must read as unset, or "" becomes the command.
     let read = |v| {
         temp_env::with_var("PIXTUOID_HOOK", Some(v), || {
-            io::nonempty_env("PIXTUOID_HOOK")
+            pixtuoid_core::platform::path_env("PIXTUOID_HOOK")
         })
     };
     assert_eq!(read(""), None);
