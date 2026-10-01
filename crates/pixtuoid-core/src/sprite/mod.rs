@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use palette::convert::FromColorUnclamped;
-use palette::{FromColor, IsWithinBounds, LinSrgb, Mix, Oklab, Srgb};
+use palette::{FromColor, LinSrgb, Mix, Oklab, Srgb};
 
 use crate::grid::Grid;
 
@@ -41,6 +41,13 @@ const RAMP_COOL_HUE_DEG: f32 = 280.0;
 /// Halvings of an out-of-gamut color's chroma search; far past the point where
 /// a further halving moves no 8-bit channel.
 const GAMUT_BISECTION_STEPS: u32 = 16;
+
+/// The slope of the sRGB curve's linear segment near black (IEC 61966-2-1).
+const SRGB_TOE_SLOPE: f32 = 12.92;
+
+/// How far past `0..=1` a linear channel still counts as in gamut: half an 8-bit
+/// step at the curve's steepest, [`SRGB_TOE_SLOPE`], so float noise keeps chroma.
+const GAMUT_TOLERANCE: f32 = 0.5 / (u8::MAX as f32 * SRGB_TOE_SLOPE);
 
 impl Rgb {
     /// This color `level` steps along a hue-shifted ramp: lighter and warmer
@@ -101,12 +108,18 @@ impl Rgb {
     fn from_oklab_in_gamut(c: Oklab) -> Rgb {
         let at =
             |share: f32| LinSrgb::from_color_unclamped(Oklab::new(c.l, c.a * share, c.b * share));
+        let in_gamut = |share: f32| {
+            let s = at(share);
+            [s.red, s.green, s.blue]
+                .iter()
+                .all(|v| (-GAMUT_TOLERANCE..=1.0 + GAMUT_TOLERANCE).contains(v))
+        };
         let mut share = 1.0;
-        if !at(share).is_within_bounds() {
+        if !in_gamut(share) {
             let (mut fits, mut spills) = (0.0, 1.0);
             for _ in 0..GAMUT_BISECTION_STEPS {
                 let mid = (fits + spills) / 2.0;
-                if at(mid).is_within_bounds() {
+                if in_gamut(mid) {
                     fits = mid;
                 } else {
                     spills = mid;
@@ -447,6 +460,16 @@ impl Sprite {
         self.marks(idx).iter().find_map(HeadMark::of)
     }
 
+    /// Frame 0 and its offset when its own head mark is laid on `head`.
+    pub fn laid_on(&self, head: HeadMark) -> Option<(&Frame, i32, i32)> {
+        let mark = self.head(0)?;
+        Some((
+            self.frames.first()?,
+            i32::from(head.x) - i32::from(mark.x),
+            i32::from(head.y) - i32::from(mark.y),
+        ))
+    }
+
     /// The frames, played in order.
     pub fn frames(&self) -> &[Frame] {
         &self.frames
@@ -534,6 +557,7 @@ impl std::ops::Deref for RgbBuffer {
 
 impl RgbBuffer {
     /// A `width × height` buffer with every pixel set to `fill`.
+    #[inline]
     pub fn filled(width: u16, height: u16, fill: Rgb) -> Self {
         RgbBuffer {
             pixels: Grid::filled(width, height, fill),
@@ -570,12 +594,14 @@ impl RgbBuffer {
 
     /// Read the `Rgb` at `(x, y)`. Debug-asserts the point is in bounds;
     /// unchecked in release (the hot blit path clips first).
+    #[inline]
     pub fn get(&self, x: u16, y: u16) -> Rgb {
         self.pixels.as_slice()[self.checked_index(x, y)]
     }
 
     /// Write `rgb` at `(x, y)`. Debug-asserts the point is in bounds; use
     /// [`put_checked`](Self::put_checked) when `(x, y)` may fall outside.
+    #[inline]
     pub fn put(&mut self, x: u16, y: u16, rgb: Rgb) {
         let i = self.checked_index(x, y);
         self.write(i, rgb);
@@ -585,6 +611,7 @@ impl RgbBuffer {
     /// THE clip primitive for per-pixel scatter (glyphs, particles) that can't
     /// pre-clip; the hot blit path clips its loop bounds once and keeps the
     /// unchecked [`put`](Self::put).
+    #[inline]
     pub fn put_checked(&mut self, x: u16, y: u16, rgb: Rgb) {
         if x < self.pixels.width && y < self.pixels.height {
             let i = self.raw_index(x, y);
@@ -616,6 +643,7 @@ impl RgbBuffer {
         }
     }
 
+    #[inline]
     fn write(&mut self, i: usize, rgb: Rgb) {
         self.pixels.as_mut_slice()[i] = rgb;
         if let Some(w) = &mut self.writes {
@@ -663,6 +691,7 @@ impl RgbBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use palette::IsWithinBounds;
 
     const fn rgb(r: u8, g: u8, b: u8) -> Rgb {
         Rgb { r, g, b }
@@ -740,6 +769,37 @@ mod tests {
                 lightness.windows(2).all(|w| w[0] < w[1]),
                 "{base:?}: {lightness:?}"
             );
+        }
+    }
+
+    #[test]
+    fn srgb_toe_slope_is_the_transfer_functions() {
+        let dark = 0.001;
+        assert_eq!(
+            Srgb::<f32>::from_linear(LinSrgb::new(dark, 0.0, 0.0)).red,
+            SRGB_TOE_SLOPE * dark
+        );
+    }
+
+    #[test]
+    fn a_ramp_step_grazing_the_gamut_by_float_noise_keeps_its_chroma() {
+        assert_eq!(
+            rgb(11, 86, 249).ramp(-3),
+            rgb(0, 0, 207),
+            "not (0, 39, 185), where a strict bounds check stops the chroma search"
+        );
+    }
+
+    #[test]
+    fn an_srgb_lattice_survives_an_oklab_round_trip() {
+        let levels = (0..=255u8).step_by(15);
+        for r in levels.clone() {
+            for g in levels.clone() {
+                for b in levels.clone() {
+                    let c = rgb(r, g, b);
+                    assert_eq!(Rgb::from_oklab_in_gamut(c.to_oklab()), c);
+                }
+            }
         }
     }
 

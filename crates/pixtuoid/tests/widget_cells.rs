@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use common::fixture_scene;
 use pixtuoid::tui::renderer::draw_scene;
-use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
+use pixtuoid_scene::embedded_pack::load_bundled_pack;
 use pixtuoid_scene::theme;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -27,7 +27,7 @@ fn render_and_get_buffer(
     let scene = fixture_scene(now);
     let backend = TestBackend::new(w, h);
     let mut term = Terminal::new(backend).unwrap();
-    let pack = load_sprite_pack(PackSource::Bundled).unwrap();
+    let pack = load_bundled_pack().unwrap();
     make_draw_ctx!(draw_ctx, &scene, &pack, now);
     draw_ctx.floor_info = floor_info;
     draw_scene(&mut term, &mut draw_ctx).unwrap();

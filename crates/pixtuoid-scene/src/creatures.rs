@@ -568,9 +568,7 @@ mod tests {
     /// answers with a coarse CELL CENTRE, so a clear destination is not enough.
     #[test]
     fn no_resting_creature_settles_under_a_sprite_that_paints_over_it() {
-        let pack =
-            crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-                .expect("pack");
+        let pack = crate::embedded_pack::test_default_pack();
         let mut rests = 0u32;
         let min = crate::layout::min_layout_size();
         for &(w, h) in &[
