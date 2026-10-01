@@ -364,7 +364,11 @@ pub(super) fn compute_with_seed(
 
     let (home_desks, desk_facings) = compute_pod_desks(max_desks, plan.pod_grid);
 
-    let pod_decor = compute_pod_decor(plan.pod_grid, floor_seed);
+    let desk_art: Vec<(Point, Size)> = desk_fixtures(&home_desks, plan.buf_h)
+        .chain(desk_chair_fixtures(&home_desks, |i| desk_facings[i.0]))
+        .map(|f| art_rect(f.visual))
+        .collect();
+    let pod_decor = compute_pod_decor(plan.pod_grid, floor_seed, &desk_art);
 
     // Dense's inter-meeting wall is deliberately solid (#557 door policy).
     let (room_walls, doorways) =
@@ -512,7 +516,7 @@ pub(super) fn compute_with_seed(
         }
     }
 
-    let mut wall_decor = place_wall_decor(&plan, door, &home_desks, &desk_facings, &pod_decor);
+    let mut wall_decor = place_wall_decor(&plan, door, &desk_art, &pod_decor);
 
     // The island pushes its 4 slots BEFORE the shelf's — the push order the goldens pin.
     let kitchen_island = plan.pantry.and_then(|pr| {
@@ -703,8 +707,7 @@ pub(super) fn compute_with_seed(
 fn place_wall_decor(
     plan: &FloorPlan,
     door: Option<Point>,
-    home_desks: &[Point],
-    desk_facings: &[Facing],
+    desk_art: &[(Point, Size)],
     pod_decor: &[PodDecorItem],
 ) -> Vec<WallDecorItem> {
     let FloorPlan {
@@ -753,10 +756,7 @@ fn place_wall_decor(
         x: plan.lounge_west_clear,
         y: top_margin + usable_h / 3,
     };
-    let pod_pieces: Vec<Fixture> = desk_fixtures(home_desks, plan.buf_h)
-        .chain(desk_chair_fixtures(home_desks, |i| desk_facings[i.0]))
-        .chain(pod_decor_fixtures(pod_decor))
-        .collect();
+    let pod_pieces: Vec<Fixture> = pod_decor_fixtures(pod_decor).collect();
     // A pod's own whiteboard in the same columns would read as the board's twin.
     let twin_columns: Vec<(u16, u16)> = pod_pieces
         .iter()
@@ -785,19 +785,11 @@ fn place_wall_decor(
                 .find(|&at| {
                     let east = at.x + wb_def.visual.w;
                     twin_columns.iter().all(|&(w, e)| e <= at.x || east <= w)
-                        && pod_pieces.iter().all(|f| {
-                            let v = f.visual;
-                            !super::placement::rects_overlap(
-                                (at, wb_def.visual),
-                                (
-                                    Point { x: v.x, y: v.y },
-                                    Size {
-                                        w: v.width,
-                                        h: v.height,
-                                    },
-                                ),
-                            )
-                        })
+                        && pod_pieces
+                            .iter()
+                            .map(|f| art_rect(f.visual))
+                            .chain(desk_art.iter().copied())
+                            .all(|r| !super::placement::rects_overlap((at, wb_def.visual), r))
                 })
         });
     if let Some(pos) = snapped {
@@ -1510,8 +1502,23 @@ pub(super) fn decor_for_slot(floor_seed: u64, slot_idx: usize) -> PodDecor {
 /// on, so a taller piece grows north (invariant #6) rather than out of its aisle.
 const POD_DECOR_BASE_DY: u16 = 4;
 
-/// Decor items placed in aisles between desk pods.
-pub(super) fn compute_pod_decor(grid: PodGrid, floor_seed: u64) -> Vec<PodDecorItem> {
+/// `b` as the `(top-left, size)` rect [`super::placement::rects_overlap`] takes.
+fn art_rect(b: Bounds) -> (Point, Size) {
+    (
+        Point { x: b.x, y: b.y },
+        Size {
+            w: b.width,
+            h: b.height,
+        },
+    )
+}
+
+/// Decor items placed in aisles between desk pods, clear of every rect in `desk_art`.
+pub(super) fn compute_pod_decor(
+    grid: PodGrid,
+    floor_seed: u64,
+    desk_art: &[(Point, Size)],
+) -> Vec<PodDecorItem> {
     let cubicle_band = &grid.band;
     let PodGrid {
         cols: pod_cols,
@@ -1530,13 +1537,34 @@ pub(super) fn compute_pod_decor(grid: PodGrid, floor_seed: u64) -> Vec<PodDecorI
     // Vertical twin: the LAST POD ROW's slot centre can sit close enough to the bottom
     // that a tall centred visual crosses into cubicle_aisle and blocks its cells.
     let band_bottom = cubicle_band.y + cubicle_band.height;
-    let mut push_slot = |pod_decor: &mut Vec<PodDecorItem>, x: u16, slot_y: u16| {
+    let mut push_slot = |pod_decor: &mut Vec<PodDecorItem>, x: u16, slot_y: u16, across: Point| {
         let kind = decor_for_slot(floor_seed, slot_idx);
         // The cycle advances even when the slot drops, so survivors keep the kinds
         // they'd have on a wider floor.
         slot_idx += 1;
         let vis = furniture_def(kind.furniture()).visual;
-        let y = super::placement::centre_y_standing_on(slot_y + POD_DECOR_BASE_DY, vis.h);
+        let centre = Point {
+            x,
+            y: super::placement::centre_y_standing_on(slot_y + POD_DECOR_BASE_DY, vis.h),
+        };
+        // Slides by `across` steps over its aisle, never along it into a crossing, to the
+        // nearest spot the desks' art leaves room for; art wider than the aisle drops it.
+        let reach = across.x * INTER_POD_AISLE_X / 2 + across.y * INTER_POD_AISLE_Y / 2;
+        let Some(Point { x, y }) = std::iter::once(0)
+            .chain((1..=reach as i16).flat_map(|d| [d, -d]))
+            .map(|d| Point {
+                x: centre.x.saturating_add_signed(d * across.x as i16),
+                y: centre.y.saturating_add_signed(d * across.y as i16),
+            })
+            .find(|&at| {
+                let art = (anchored_top_left(Anchor::Center, at, vis.w, vis.h), vis);
+                desk_art
+                    .iter()
+                    .all(|&r| !super::placement::rects_overlap(art, r))
+            })
+        else {
+            return;
+        };
         // Same centred-blit math the painter uses (pos − h/2 .. pos − h/2 + h).
         if x.saturating_sub(vis.w / 2) + vis.w > band_right
             || y.saturating_sub(vis.h / 2) + vis.h > band_bottom
@@ -1553,7 +1581,7 @@ pub(super) fn compute_pod_decor(grid: PodGrid, floor_seed: u64) -> Vec<PodDecorI
             let (pod_origin_x, pod_origin_y) = grid.pod_origin(pod_c, pod_r);
             let aisle_cx = pod_origin_x + pod_w + INTER_POD_AISLE_X / 2;
             let aisle_cy = pod_origin_y + pod_h / 2;
-            push_slot(&mut pod_decor, aisle_cx, aisle_cy);
+            push_slot(&mut pod_decor, aisle_cx, aisle_cy, Point { x: 1, y: 0 });
         }
     }
     for pod_r in 0..pod_rows.saturating_sub(1) {
@@ -1561,7 +1589,7 @@ pub(super) fn compute_pod_decor(grid: PodGrid, floor_seed: u64) -> Vec<PodDecorI
             let (pod_origin_x, pod_origin_y) = grid.pod_origin(pod_c, pod_r);
             let aisle_cx = pod_origin_x + pod_w / 2;
             let aisle_cy = pod_origin_y + pod_h + INTER_POD_AISLE_Y / 2;
-            push_slot(&mut pod_decor, aisle_cx, aisle_cy);
+            push_slot(&mut pod_decor, aisle_cx, aisle_cy, Point { x: 0, y: 1 });
         }
     }
     pod_decor
@@ -1903,5 +1931,65 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A slot slides its piece to the nearest spot clear of `desk_art`, and an aisle
+    /// narrower than the piece drops the slot without skipping the next slot's kind.
+    #[test]
+    fn a_pod_slot_slides_clear_of_the_desk_art_or_drops() {
+        use super::{
+            Bounds, DESK_H, DESK_W, INTER_POD_AISLE_X, INTER_POD_AISLE_Y, INTRA_POD_GAP_X,
+            INTRA_POD_GAP_Y, POD_SIDE, PodGrid, Point, Size, compute_pod_decor, furniture_def,
+        };
+        let stride_x = POD_SIDE * DESK_W + (POD_SIDE - 1) * INTRA_POD_GAP_X + INTER_POD_AISLE_X;
+        let stride_y = POD_SIDE * DESK_H + (POD_SIDE - 1) * INTRA_POD_GAP_Y + INTER_POD_AISLE_Y;
+        let grid = |cols: u16| PodGrid {
+            band: Bounds {
+                x: 0,
+                y: 0,
+                width: cols * stride_x,
+                height: stride_y,
+            },
+            cols,
+            rows: 1,
+            stride_x,
+            stride_y,
+            couch_to_desk_extra: 0,
+        };
+        let wall = |x: u16, east: u16| {
+            (
+                Point { x, y: 0 },
+                Size {
+                    w: east - x,
+                    h: stride_y,
+                },
+            )
+        };
+        let reach = INTER_POD_AISLE_X / 2;
+
+        // Art covering the centred piece's west `n` columns: it lands exactly `n` east.
+        let free = compute_pod_decor(grid(2), 0, &[]);
+        let w = furniture_def(free[0].kind.furniture()).visual.w;
+        let n = reach / 2;
+        let art_west = free[0].pos.x - w / 2;
+        let slid = compute_pod_decor(grid(2), 0, &[wall(0, art_west + n)]);
+        assert_eq!(
+            slid[0].pos,
+            Point {
+                x: free[0].pos.x + n,
+                ..free[0].pos
+            }
+        );
+
+        // A gap one column narrower than slot 0's piece over its whole reach: slot 0
+        // drops, and slot 1 still deals its own kind.
+        let free = compute_pod_decor(grid(3), 0, &[]);
+        let w = furniture_def(free[0].kind.furniture()).visual.w;
+        let art_west = free[0].pos.x - w / 2;
+        let narrow = [
+            wall(0, art_west),
+            wall(art_west + w - 1, free[0].pos.x + reach + w),
+        ];
+        assert_eq!(compute_pod_decor(grid(3), 0, &narrow), free[1..]);
     }
 }

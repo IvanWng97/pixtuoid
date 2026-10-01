@@ -424,7 +424,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
         ctx.theme.office.shadow,
     );
 
-    ambient::paint_ambient(ctx, look, &lights.monitor_halos);
+    ambient::paint_ambient(ctx, &moment, &lights.monitor_halos);
 
     // Every entity gets an `anchor_y` — its floor-touching row — so sorting
     // ascending and painting in order puts things closer to the camera in
