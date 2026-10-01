@@ -18,6 +18,7 @@ const SWEEP_SIZES: &[(u16, u16)] = &[
     (super::compute::MIN_LAYOUT_W, super::compute::MIN_LAYOUT_H),
     (super::compute::MIN_LAYOUT_W, 60),
     (super::compute::MIN_LAYOUT_W + 2, 100),
+    (super::compute::MIN_LAYOUT_W, 120),
     (48, 46),
     (64, 48),
     (80, 46),
@@ -953,16 +954,55 @@ fn free_standing_furniture_never_stands_inside_a_pod() {
     sweep_production_floors(assert_no_free_standing_piece_inside_a_pod);
 }
 
+/// The band's widest stretch of columns no desk, cabinet, chair or pod decor stands
+/// in, east of any wall: where a lone pod column leaves the board room beside it.
+fn widest_free_stretch(l: &SceneLayout) -> u16 {
+    let band = l.cubicle_band;
+    let west = l
+        .wall_pieces
+        .iter()
+        .map(|p| {
+            let (at, size) = p.visual();
+            at.x + size.w
+        })
+        .filter(|&east| east < band.x + band.width)
+        .fold(band.x, u16::max);
+    let mut taken: Vec<(u16, u16)> = l
+        .fixtures()
+        .filter(|f| {
+            matches!(
+                f.kind,
+                FixtureKind::Desk(_)
+                    | FixtureKind::DeskChair(_)
+                    | FixtureKind::FilingCabinet(_)
+                    | FixtureKind::Pod { .. }
+            )
+        })
+        .map(|f| (f.visual.x, f.visual.x + f.visual.width))
+        .collect();
+    taken.sort_unstable();
+    let (mut widest, mut from) = (0, west);
+    for (start, end) in taken {
+        widest = widest.max(start.saturating_sub(from));
+        from = from.max(end);
+    }
+    widest.max((band.x + band.width).saturating_sub(from))
+}
+
 /// `snap_inter_pod_ground_y` answers `None` by design and the caller drops the board
-/// with no trace, so a broken snap surfaces only as one fewer whiteboard. A lone pod
-/// column leaves the aisle no stretch between two pods to stand it in.
+/// with no trace, so a broken snap surfaces only as one fewer whiteboard. Only a lone
+/// pod column with no free stretch as wide as the board beside it has no spot.
 fn assert_the_whiteboard_lands_when_an_aisle_exists(w: u16, h: u16, seed: u64, l: &SceneLayout) {
     let has_side_rooms = !l.meeting_rooms.is_empty() || l.pantry.is_some();
     let mut desk_columns: Vec<u16> = l.home_desks.iter().map(|d| d.x).collect();
     desk_columns.sort_unstable();
     desk_columns.dedup();
-    let pod_columns = desk_columns.len().div_ceil(usize::from(POD_SIDE));
-    if !has_side_rooms || pod_y_extents(l).len() < 2 || pod_columns < 2 {
+    let lone_pod_column = desk_columns.len() <= usize::from(POD_SIDE);
+    let board_w = furniture_def(super::WallDecor::Whiteboard.furniture())
+        .visual
+        .w;
+    let boxed_in = lone_pod_column && widest_free_stretch(l) < board_w;
+    if !has_side_rooms || pod_y_extents(l).len() < 2 || boxed_in {
         return;
     }
     assert!(
@@ -1048,6 +1088,28 @@ fn the_whiteboard_hides_no_desk_and_stands_clear_of_the_walls_and_its_twin() {
     sweep_production_floors(assert_the_whiteboard_hides_no_desk_or_wall);
 }
 
+/// The width floor's lone pod column, where an unsnapped board once stood flush
+/// against the divider with the desk column east of it and sealed the desks'
+/// south: no spot there clears the column, so the floor stands no board and
+/// stays whole.
+#[test]
+fn the_width_floor_stays_connected_without_its_whiteboard() {
+    let (w, h, seed) = (super::compute::MIN_LAYOUT_W, 120, 3);
+    let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("the width floor lays out");
+    assert_walkable_connected(w, h, seed, &l);
+    assert!(
+        !l.wall_decor
+            .iter()
+            .any(|d| matches!(d.kind, super::WallDecor::Whiteboard)),
+        "a lone pod column has no spot that hides nothing"
+    );
+    assert_eq!(
+        l.plants.len(),
+        2,
+        "the two far-south plants survive — the guard spends nothing here"
+    );
+}
+
 /// A machine is placed only where it clears every sitter, so a corner whose
 /// seat check fails is dropped with no trace: every aisle that clears a
 /// machine's gates must hold one, slid clear of the seats.
@@ -1074,6 +1136,31 @@ fn assert_each_appliance_lands_where_its_aisle_fits(w: u16, h: u16, seed: u64, l
                 "{w}x{h} seed {seed}: the aisle {aisle:?} fits a {kind:?}, but none stands"
             );
         }
+    }
+    let machines: Vec<Bounds> = l
+        .fixtures()
+        .filter(|f| {
+            matches!(
+                f.kind,
+                FixtureKind::Station {
+                    station: super::Station::VendingMachine | super::Station::Printer,
+                    ..
+                }
+            )
+        })
+        .map(|f| f.visual)
+        .collect();
+    for m in &machines {
+        assert!(
+            aisle.x <= m.x && m.x + m.width <= aisle.x + aisle.width,
+            "{w}x{h} seed {seed}: a machine {m:?} leaves the aisle {aisle:?}"
+        );
+    }
+    if let [a, b] = machines[..] {
+        assert!(
+            a.x + a.width <= b.x || b.x + b.width <= a.x,
+            "{w}x{h} seed {seed}: the machines {a:?} and {b:?} share columns"
+        );
     }
 }
 

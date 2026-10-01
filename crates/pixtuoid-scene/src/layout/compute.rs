@@ -1584,14 +1584,17 @@ enum Slide {
 
 /// Where corridor appliance `kind` stands: at `corner`, or slid `toward` the
 /// aisle's middle by up to `reach` columns, into the gap between two pods'
-/// seats, when a south-row sitter stands over it — `None` with no clear spot.
+/// seats, when a south-row sitter stands over it, its art kept within the
+/// columns `within` — `None` with no clear spot.
 fn slid_clear_of_the_seats(
     kind: Furniture,
     corner: Point,
     toward: Slide,
     reach: u16,
+    within: std::ops::Range<u16>,
     home_desks: &[Point],
 ) -> Option<Point> {
+    let art = furniture_def(kind).visual;
     (0..=reach)
         .map(|d| Point {
             x: match toward {
@@ -1599,6 +1602,10 @@ fn slid_clear_of_the_seats(
                 Slide::West => corner.x.saturating_sub(d),
             },
             ..corner
+        })
+        .filter(|&p| {
+            let west = anchored_top_left(Anchor::Center, p, art.w, art.h).x;
+            within.start <= west && west + art.w <= within.end
         })
         .find(|&p| clears_the_seats(kind, p, home_desks))
 }
@@ -1683,20 +1690,26 @@ fn compute_waypoints(
         let base = (cubicle_aisle.y + cubicle_aisle.height).saturating_sub(2);
         super::placement::centre_y_standing_on(base, furniture_def(kind).visual.h)
     };
-    let vending = slid_clear_of_the_seats(
-        Furniture::VendingMachine,
-        Point {
-            x: right_x + VENDING_WEST_GAP + furniture_def(Furniture::VendingMachine).visual.w / 2,
-            y: appliance_y(Furniture::VendingMachine),
-        },
-        Slide::East,
-        pod_grid.stride_x,
-        home_desks,
-    );
-    if let Some(vending) = vending
-        && cubicle_aisle.height >= VENDING_MIN_AISLE_H
-        && cubicle_aisle.width > VENDING_MIN_AISLE_W
-    {
+    let aisle_cols = cubicle_aisle.x..cubicle_aisle.x + cubicle_aisle.width;
+    let vending = (cubicle_aisle.height >= VENDING_MIN_AISLE_H
+        && cubicle_aisle.width > VENDING_MIN_AISLE_W)
+        .then(|| {
+            slid_clear_of_the_seats(
+                Furniture::VendingMachine,
+                Point {
+                    x: right_x
+                        + VENDING_WEST_GAP
+                        + furniture_def(Furniture::VendingMachine).visual.w / 2,
+                    y: appliance_y(Furniture::VendingMachine),
+                },
+                Slide::East,
+                pod_grid.stride_x,
+                aisle_cols.clone(),
+                home_desks,
+            )
+        })
+        .flatten();
+    if let Some(vending) = vending {
         waypoints.push(Waypoint {
             pos: vending,
             kind: WaypointKind::VendingMachine,
@@ -1704,6 +1717,11 @@ fn compute_waypoints(
             room_id: None,
         });
     }
+    // East of the vending machine's art, so the two never share a column.
+    let printer_cols = vending.map_or(aisle_cols.start, |v| {
+        let art = furniture_def(Furniture::VendingMachine).visual;
+        anchored_top_left(Anchor::Center, v, art.w, art.h).x + art.w
+    })..aisle_cols.end;
     let printer = slid_clear_of_the_seats(
         Furniture::Printer,
         Point {
@@ -1712,6 +1730,7 @@ fn compute_waypoints(
         },
         Slide::West,
         pod_grid.stride_x,
+        printer_cols,
         home_desks,
     );
     if let Some(printer) = printer
@@ -1937,5 +1956,28 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_slid_appliance_stays_within_its_columns() {
+        use super::{
+            Furniture, Point, Slide, clears_the_seats, furniture_def, slid_clear_of_the_seats,
+        };
+        let kind = Furniture::VendingMachine;
+        let art = furniture_def(kind).visual;
+        let corner = Point { x: 40, y: 60 };
+        // A desk whose sitter stands over the corner, so the machine must slide.
+        let desk = (0..80)
+            .flat_map(|x| (0..80).map(move |y| Point { x, y }))
+            .find(|&d| !clears_the_seats(kind, corner, &[d]))
+            .expect("some desk's sitter covers the corner");
+        let anywhere = slid_clear_of_the_seats(kind, corner, Slide::East, 40, 0..u16::MAX, &[desk])
+            .expect("slides clear somewhere");
+        let tight = 0..anywhere.x + art.w / 2;
+        assert_eq!(
+            slid_clear_of_the_seats(kind, corner, Slide::East, 40, tight.clone(), &[desk]),
+            None,
+            "the clear spot at {anywhere:?} puts its art past {tight:?}"
+        );
     }
 }
