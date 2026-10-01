@@ -5,7 +5,7 @@
 use pixtuoid_core::sprite::RgbBuffer;
 
 use crate::atmosphere::Moment;
-use crate::layout::Layout;
+use crate::layout::SceneLayout;
 use crate::lighting::{Emitter, EmitterKind};
 use crate::motes::{DustMote, dust_mote_positions, window_spill_columns};
 use crate::pixel_painter::PaintCtx;
@@ -37,7 +37,7 @@ pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[E
 pub(super) fn paint_dust_motes(
     buf: &mut RgbBuffer,
     theme: &Theme,
-    layout: &Layout,
+    layout: &SceneLayout,
     floor_seed: u64,
     moment: &Moment,
 ) {
@@ -57,7 +57,7 @@ pub(super) fn paint_dust_motes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sky::{Sky, Weather};
+    use crate::sky::{Sky, Weather, WeatherMix};
     use pixtuoid_core::sprite::Rgb;
 
     /// One monitor halo centred at `(x, y)`, over an edit.
@@ -102,11 +102,11 @@ mod tests {
     #[test]
     fn dust_motes_clamp_to_a_tiny_buffer() {
         let theme = &crate::theme::NORMAL;
-        let layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
+        let layout = crate::layout::SceneLayout::compute(192, 80, Some(4)).expect("layout fits");
         // 07:00 Clear morning → sun up + full beam.
         let now = (1..=60u32)
             .map(|day| crate::localclock::on_day(day, 7))
-            .find(|t| Sky::clock(*t).weather() == Weather::Clear)
+            .find(|t| Sky::clock(*t).weather() == WeatherMix::pure(Weather::Clear))
             .expect("a clear morning");
         // No assertion: the test is that the clamped, out-of-bounds puts on a
         // buffer far smaller than the layout's spill columns don't panic.

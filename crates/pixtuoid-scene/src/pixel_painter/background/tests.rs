@@ -2,11 +2,11 @@ use super::*;
 use crate::layout::{WINDOW_W, window_bays, window_run};
 use crate::lighting::SPILL_DEPTH;
 use crate::pack::test_default_pack;
-use crate::sky::hour_is_day;
+use crate::sky::{Weather, hour_is_day};
 use std::time::SystemTime;
 
 #[test]
-fn lightning_flash_storm_only_and_mid_strike_only() {
+fn lightning_flash_lights_the_room_mid_strike_only() {
     let now = SystemTime::UNIX_EPOCH;
     let mk = || {
         RgbBuffer::filled(
@@ -32,10 +32,6 @@ fn lightning_flash_storm_only_and_mid_strike_only() {
     let mut b = mk();
     paint_lightning_flash(&mut b, &Sky::at_with(now, Weather::Storm).with_flash(0.0));
     assert_eq!(b.get(0, 0), quiet_fill, "no flash between strikes");
-
-    let mut b = mk();
-    paint_lightning_flash(&mut b, &Sky::at_with(now, Weather::Clear).with_flash(1.0));
-    assert_eq!(b.get(0, 0), quiet_fill, "flash is storm-only");
 }
 #[test]
 fn storm_window_bolt_brightens_glass_during_the_flash() {
