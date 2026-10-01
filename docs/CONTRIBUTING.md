@@ -267,7 +267,9 @@ too.
 ### Dispositions
 
 Every finding reaches exactly one terminal state in its review thread: FIXED ·
-REFUTED (cite the mechanism, per AGENTS.md; add one where none exists) ·
+REFUTED (cite the mechanism, per AGENTS.md; add one where none exists. Before
+adding code for a finding, establish its case is reachable: when a test or
+sweep shows it isn't, that test is the mechanism and no defensive code lands) ·
 RE-SCOPED → #N (real and INTRODUCED — or first made reachable — by this
 change, and bigger than the PR: split it off into #N; a redesign that brings
 the finding into scope ends FIXED) · FOLLOW-UP → #N (real and PRE-EXISTING,

@@ -82,8 +82,8 @@ Read [`AGENTS.md`](AGENTS.md) first; these rules add to generic defect hunting.
 - Speculative defense in depth where a primary defense holds. Every layer a
   trap names is primary, and a concrete, reachable extra-layer gap at a trust
   boundary is `issue (non-blocking)`.
-- Risks needing unlikely preconditions; performance unless measurable (the TUI
-  ticks at `FRAME_TICK_MS`).
+- Risks needing unlikely or unreachable preconditions; performance unless
+  measurable (the TUI ticks at `FRAME_TICK_MS`).
 - A missing comment ([comment audit](#design) owns the rest).
 - A claim about an external artifact (action tag, crate release, tap) from
   memory: verify it in-session (`gh api`, the registry) or write "unverified"
@@ -136,6 +136,17 @@ invariant-breaking sequence against:
    self-repetition; one home per story). Locally, report N items each with a
    disposition, never "passed", plus the diff's net added comment lines and
    every sentence deletable with nothing lost.
+5. Cost of the shape. Flag each with the cheaper or more direct alternative;
+   `issue (non-blocking)` unless it breaches AGENTS.md:
+   - **Over-engineering** (AGENTS.md's YAGNI): a new branch, helper,
+     parameter, type, API change or test machinery that names no concrete,
+     reachable case it serves.
+   - **Low ROI**: added code, API change or coupling out of proportion to its
+     payoff (an API made `Option` across three painters for a width almost
+     never hit).
+   - **Hard to maintain**: needless indirection or layers, special-case
+     branches, one change smeared across many files, an implicit contract no
+     type or test holds, clever code that reads hard.
 
 ## Escalation
 
