@@ -290,7 +290,10 @@ impl Office {
                 "{{\"x\":{},\"y\":{},\"text\":",
                 el.anchor_px.x, el.anchor_px.y
             ));
-            push_json_string(&mut out, &format!("\u{25cf}{}", el.text));
+            push_json_string(
+                &mut out,
+                &format!("{}{}", pixtuoid_scene::overlay::BADGE_MARKER, el.text),
+            );
             // The site paints the ● in `color` and the name in `badge`.
             let ink = pixtuoid_scene::overlay::badge_ink(&el.text, el.tone, theme);
             out.push_str(&format!(

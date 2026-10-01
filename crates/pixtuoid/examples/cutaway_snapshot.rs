@@ -5,7 +5,7 @@
 //! Usage:
 //!   cargo run --release --example cutaway_snapshot -- <out.png> [--scale N]
 //!       [--agents N] [--theme T] [--logical WxH] [--now-hour H] [--floor I/N]
-//!       [--weather W]
+//!       [--weather W] [--now-day D]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -88,6 +88,8 @@ fn main() -> Result<()> {
 
     let (mut scale_n, mut agents, mut theme_name) = (None, 10usize, "tokyo-night".to_string());
     let (mut now_hour, mut floor) = (None::<u32>, (0usize, 1usize));
+    // 1 = the clock's base date, as the classic snapshot's `--now-day`.
+    let mut now_day = 1u32;
     let mut weather = None::<String>;
     let (mut lw, mut lh) = DEFAULT_LOGICAL;
     let rest: Vec<String> = args.collect();
@@ -111,6 +113,7 @@ fn main() -> Result<()> {
                 lh = h.parse().context("bad --logical height")?;
             }
             "--now-hour" => now_hour = Some(val("--now-hour")?.parse().context("bad --now-hour")?),
+            "--now-day" => now_day = val("--now-day")?.parse().context("bad --now-day")?,
             "--weather" => weather = Some(val("--weather")?),
             "--floor" => {
                 let v = val("--floor")?;
@@ -141,8 +144,8 @@ fn main() -> Result<()> {
         ));
     }
     let now = match now_hour {
-        Some(h) => pixtuoid_scene::localclock::try_on_day(0, h)
-            .with_context(|| format!("invalid --now-hour {h}"))?,
+        Some(h) => pixtuoid_scene::localclock::try_on_day(now_day.saturating_sub(1), h)
+            .with_context(|| format!("invalid --now-day/--now-hour {now_day}:{h}"))?,
         None => SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
     };
     let meta = FloorMeta::for_floor(floor.0, floor.1);
