@@ -3093,7 +3093,7 @@ fn agent_overrides_same_id_different_cwd_changes_outfit() {
 
 struct OwnedSimStores {
     route: pose::RouteRig<crate::pathfind::AStarRouter>,
-    light: LightingState,
+    vacancy_dim: VacancyDim,
     neon: crate::floor::NeonState,
     chitchat: std::collections::HashMap<crate::chitchat::VenueKey, crate::chitchat::ActiveChitchat>,
 }
@@ -3102,7 +3102,7 @@ impl OwnedSimStores {
     fn new() -> Self {
         Self {
             route: pose::RouteRig::new(crate::pathfind::AStarRouter::new()),
-            light: LightingState::new(),
+            vacancy_dim: VacancyDim::new(),
             neon: crate::floor::NeonState::new(),
             chitchat: std::collections::HashMap::new(),
         }
@@ -3114,7 +3114,7 @@ impl OwnedSimStores {
             overlay: &mut self.route.overlay,
             history: &mut self.route.history,
             motion: &mut self.route.motion,
-            light: &mut self.light,
+            vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat: &mut self.chitchat,
         }
@@ -3172,7 +3172,7 @@ fn sim_step_keeps_the_sign_lit_through_a_gap_in_a_room_that_once_dimmed() {
         }
         last.expect("at least one frame")
     };
-    let debounce = crate::floor::LightingState::EMPTY_DEBOUNCE_MS;
+    let debounce = crate::floor::VacancyDim::EMPTY_DEBOUNCE_MS;
     assert_eq!(run(&empty, debounce * 3), crate::floor::NeonLevels::EMPTY);
     run(&populated, 60_000);
     // A gap between transcripts: the tally is empty, the room's debounce is not up.
@@ -4046,7 +4046,7 @@ fn paint_frame_is_pure_and_byte_identical() {
         },
     );
 
-    let light_before = owned.light.level();
+    let light_before = owned.vacancy_dim.level();
     let motion_before = format!("{:?}", owned.route.motion);
     let history_before = format!("{:?}", owned.route.history);
     let chitchat_before = owned.chitchat.len();
@@ -4088,7 +4088,7 @@ fn paint_frame_is_pure_and_byte_identical() {
         "the paint pass actually painted the office"
     );
     assert_eq!(
-        owned.light.level(),
+        owned.vacancy_dim.level(),
         light_before,
         "paint must not tick lighting"
     );
