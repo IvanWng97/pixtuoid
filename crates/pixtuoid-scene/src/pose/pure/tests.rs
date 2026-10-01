@@ -820,3 +820,30 @@ fn aimless_fallback_on_a_fully_blocked_mask_returns_the_desk_anchor() {
         );
     }
 }
+
+/// Each figure loop's `frame_ms` in the bundled pack is the time the sim keys
+/// it by, at every density it draws.
+#[test]
+fn each_figure_loop_holds_the_time_the_sim_keys_it_by() {
+    let pack = crate::pack::test_default_pack();
+    let keyed = [
+        ("typing", TYPING_FRAME_MS),
+        ("typing_back", TYPING_FRAME_MS),
+        ("walking", WALKING_FRAME_MS),
+        ("walking_back", WALKING_FRAME_MS),
+        ("walking_coffee", WALKING_FRAME_MS),
+    ];
+    for (base, ms) in keyed {
+        for d in pack.density_variants() {
+            let name = if d.get() == 1 {
+                base.to_string()
+            } else {
+                format!("{base}@{}x", d.get())
+            };
+            let Some(anim) = pack.animation(&name) else {
+                continue;
+            };
+            assert_eq!(u64::from(anim.frame_ms()), ms, "{name}");
+        }
+    }
+}
