@@ -12,7 +12,8 @@
 //! A second group, `render_cutaway`, costs the 2.5D painter alone: the sim
 //! window is observed up front, so each iteration is paint only — what the
 //! cutaway adds on top of the shared sim — at the pack's densest art, once at
-//! noon and once at night, when the dark room recolours every pixel.
+//! noon and once at night, when the dark room recolours every pixel; an idle
+//! office both ways too, painted whole and through `CutawayCanvas`.
 //! Distinct instrument:
 //! `crates/pixtuoid/examples/render_bench.rs` measures buffer-size SCALING
 //! through the floating offscreen renderer for the 2.5D design gate.
@@ -27,6 +28,7 @@ use pixtuoid_core::id::AgentId;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::{AgentSlot, SceneState};
+use pixtuoid_scene::cutaway::canvas::CutawayCanvas;
 use pixtuoid_scene::cutaway::paint::{Office, render_cutaway};
 use pixtuoid_scene::floor::{
     CoffeeState, FloorCtx, FloorInputs, FloorMeta, FloorSession, FrameInputs, ObservedFloor,
@@ -230,9 +232,15 @@ fn render_cutaway_frame(c: &mut Criterion) {
     let meta = FloorMeta::ground();
 
     let mut group = c.benchmark_group("render_cutaway");
-    for (label, hour) in [("noon", NOON), ("night", NIGHT)] {
+    let Size { w, h } = CUTAWAY_LOGICAL;
+    for (busy, when, hour) in [
+        (true, "noon", NOON),
+        (true, "night", NIGHT),
+        (false, "noon", NOON),
+        (false, "night", NIGHT),
+    ] {
         let base = localclock::at_hour(hour);
-        let scene = office_scene(12, 16, base, true);
+        let scene = office_scene(12, 16, base, busy);
         let mut session = FloorSession::new();
         let observed: Vec<(SystemTime, ObservedFloor)> = (0..CUTAWAY_FRAMES as u64)
             .map(|i| {
@@ -252,7 +260,14 @@ fn render_cutaway_frame(c: &mut Criterion) {
                 (now, floor)
             })
             .collect();
-        let Size { w, h } = CUTAWAY_LOGICAL;
+        let office = |layout| Office {
+            layout,
+            pack: &pack,
+            theme,
+            scale,
+        };
+        let label = if busy { "busy12" } else { "idle12" };
+        let name = format!("{label}_{w}x{h}_x{}_{when}", scale.get());
         // Outside the bench closure, which criterion calls afresh per sample: a
         // live painter's recolour cache stays warm and its frames keep advancing.
         let mut buf = RgbBuffer::filled(
@@ -262,25 +277,28 @@ fn render_cutaway_frame(c: &mut Criterion) {
         );
         let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
         let mut i = 0;
-        let name = format!("busy12_{w}x{h}_x{}_{label}", scale.get());
-        group.bench_function(name, |b| {
+        group.bench_function(&name, |b| {
             b.iter(|| {
                 let (now, ObservedFloor { layout, frame }) = &observed[i];
-                let now = *now;
                 i = (i + 1) % CUTAWAY_FRAMES;
-                render_cutaway(
-                    frame,
-                    Office {
-                        layout,
-                        pack: &pack,
-                        theme,
-                        scale,
-                    },
-                    meta,
-                    now,
-                    &mut cache,
-                    &mut buf,
-                )
+                render_cutaway(frame, office(layout), meta, *now, &mut cache, &mut buf)
+            });
+        });
+        if busy {
+            continue;
+        }
+        // The same frames through the canvas, which paints only those that
+        // change what the office shows.
+        let mut canvas = CutawayCanvas::default();
+        let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
+        let mut i = 0;
+        group.bench_function(format!("{name}_canvas"), |b| {
+            b.iter(|| {
+                let (now, ObservedFloor { layout, frame }) = &observed[i];
+                i = (i + 1) % CUTAWAY_FRAMES;
+                canvas
+                    .frame(frame, office(layout), meta, *now, &mut cache)
+                    .dirty
             });
         });
     }
