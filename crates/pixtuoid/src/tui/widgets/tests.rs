@@ -1,7 +1,9 @@
 use super::*;
-use footer::{FooterStats, build_status_spans, build_status_summary};
+use footer::{build_status_spans, build_status_summary, footer_context};
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
+use pixtuoid_scene::board::{StateCounts, gateway_rollup, per_floor_counts, scene_stats};
+use pixtuoid_scene::footer::{FooterFloor, FooterInputs};
 use std::path::PathBuf;
 use std::sync::Arc;
 use wall_board::BOARD_W;
@@ -117,10 +119,6 @@ fn display_width_counts_terminal_columns_not_chars() {
     assert_eq!(display_width("a\u{0301}"), 1);
 }
 
-// `pixtuoid_scene::footer::build_footer` measures column width via
-// `chars().count()` (no `unicode-width` dep — the `board` discipline keeps `scene`
-// window/terminal-free), which is byte-identical to `display_width` ONLY while
-// every footer glyph is single-column.
 #[test]
 fn footer_vocabulary_is_single_column_so_scene_chars_count_matches_display_width() {
     let vocab = "\u{b7}\u{d7}\u{2191}\u{2193}\u{25cf}\u{25d0}\u{25cb}\u{25cc}\u{2b22}\u{25b2}\u{2669}\u{26a0}\u{2026}";
@@ -370,25 +368,21 @@ fn scene_of(slots: Vec<AgentSlot>) -> SceneState {
     s
 }
 
-/// Assemble a `FooterStats` the way `draw_scene` does, then render the
-/// plain-string footer oracle.
+fn inputs<'a>(
+    scene: &SceneState,
+    floor: Option<FooterFloor>,
+    warning: Option<&'a str>,
+) -> FooterInputs<'a> {
+    FooterInputs::new(scene, footer_context(scene, floor, false, None, warning))
+}
+
 fn footer_line(
     scene: &SceneState,
     width: u16,
-    floor_info: Option<crate::tui::renderer::FloorInfo>,
+    floor: Option<FooterFloor>,
     warning: Option<&str>,
 ) -> String {
-    let pf = per_floor_counts(scene);
-    let stats = FooterStats {
-        counts: scene_stats(scene),
-        per_floor: &pf,
-        gateway: None,
-        audio_audible: false,
-        volume_flash: None,
-        floor_info,
-        source_warning: warning,
-    };
-    build_status_summary(scene, &stats, width)
+    build_status_summary(&inputs(scene, floor, warning), width)
 }
 
 const QUIT_SUFFIX: &str = " [?]help [p]ause [t]heme [q]uit ";
@@ -557,8 +551,8 @@ fn footer_death_keeps_the_waiting_alarm() {
     );
 }
 
-fn fi(current: usize, total_floors: usize, total_agents: usize) -> crate::tui::renderer::FloorInfo {
-    crate::tui::renderer::FloorInfo {
+fn fi(current: usize, total_floors: usize, total_agents: usize) -> FooterFloor {
+    FooterFloor {
         current,
         total_floors,
         total_agents,
@@ -618,20 +612,10 @@ fn count_str_multi_floor_keeps_slash_at_narrow_tier() {
 fn footer_spans_text(
     scene: &SceneState,
     width: u16,
-    floor_info: Option<crate::tui::renderer::FloorInfo>,
+    floor: Option<FooterFloor>,
     theme: &pixtuoid_scene::theme::Theme,
 ) -> String {
-    let pf = per_floor_counts(scene);
-    let stats = FooterStats {
-        counts: scene_stats(scene),
-        per_floor: &pf,
-        gateway: None,
-        audio_audible: false,
-        volume_flash: None,
-        floor_info,
-        source_warning: None,
-    };
-    build_status_spans(scene, &stats, width, theme)
+    build_status_spans(&inputs(scene, floor, None), width, theme)
         .iter()
         .map(|sp| sp.content.as_ref().to_string())
         .collect()
@@ -667,17 +651,7 @@ fn status_spans_color_code_state_segments() {
         waiting("b"),
         idle("c"),
     ]);
-    let pf = per_floor_counts(&s);
-    let stats = FooterStats {
-        counts: scene_stats(&s),
-        per_floor: &pf,
-        gateway: None,
-        audio_audible: false,
-        volume_flash: None,
-        floor_info: None,
-        source_warning: None,
-    };
-    let spans = build_status_spans(&s, &stats, 120, theme);
+    let spans = build_status_spans(&inputs(&s, None, None), 120, theme);
     let active = spans
         .iter()
         .find(|sp| sp.content.contains('\u{25cf}'))
@@ -722,17 +696,7 @@ fn footer_tool_hue_reads_kind_field() {
         pixtuoid_core::state::ToolKind::Task,
         "lead",
     )]);
-    let pf = per_floor_counts(&s);
-    let stats = FooterStats {
-        counts: scene_stats(&s),
-        per_floor: &pf,
-        gateway: None,
-        audio_audible: false,
-        volume_flash: None,
-        floor_info: None,
-        source_warning: None,
-    };
-    let spans = build_status_spans(&s, &stats, 160, theme);
+    let spans = build_status_spans(&inputs(&s, None, None), 160, theme);
     let tool = spans
         .iter()
         .find(|sp| sp.content.contains("Delegating"))
@@ -753,28 +717,12 @@ fn footer_tool_hue_reads_kind_field() {
 fn footer_gateway_chip_reflects_rollup_and_suppresses_when_absent() {
     use pixtuoid_core::state::DaemonState;
     let s = scene_of(vec![idle("a")]);
-    let pf = per_floor_counts(&s);
-    let with_gw = FooterStats {
-        counts: scene_stats(&s),
-        per_floor: &pf,
-        gateway: Some(DaemonState::Degraded),
-        audio_audible: false,
-        volume_flash: None,
-        floor_info: None,
-        source_warning: None,
-    };
-    let line = build_status_summary(&s, &with_gw, 160);
+    let mut with_gw = inputs(&s, None, None);
+    with_gw.context.gateway = Some(DaemonState::Degraded);
+    let line = build_status_summary(&with_gw, 160);
     assert!(line.contains("\u{2b22}gw err"), "degraded chip: {line}");
-    let no_gw = FooterStats {
-        counts: scene_stats(&s),
-        per_floor: &pf,
-        gateway: None,
-        audio_audible: false,
-        volume_flash: None,
-        floor_info: None,
-        source_warning: None,
-    };
-    let line2 = build_status_summary(&s, &no_gw, 160);
+    let no_gw = inputs(&s, None, None);
+    let line2 = build_status_summary(&no_gw, 160);
     assert!(
         !line2.contains("gw"),
         "chip suppressed when no daemon: {line2}"
@@ -786,19 +734,10 @@ fn footer_cross_floor_alarm_points_at_waiting_floor() {
     // The waiting agent sits on floor 2 (index 1) while floor 1 is the one shown —
     // `per_floor` is office-wide, not the projected floor.
     let s = scene_of(vec![idle("a")]);
-    let mut pf = per_floor_counts(&s);
-    pf[1].waiting = 1;
-    pf[1].total = 1;
-    let stats = FooterStats {
-        counts: scene_stats(&s),
-        per_floor: &pf,
-        gateway: None,
-        audio_audible: false,
-        volume_flash: None,
-        floor_info: Some(fi(1, 3, 2)),
-        source_warning: None,
-    };
-    let line = build_status_summary(&s, &stats, 160);
+    let mut footer = inputs(&s, Some(fi(1, 3, 2)), None);
+    footer.context.per_floor[1].waiting = 1;
+    footer.context.per_floor[1].total = 1;
+    let line = build_status_summary(&footer, 160);
     assert!(
         line.contains("\u{25b2}F2"),
         "cross-floor waiting cue: {line}"

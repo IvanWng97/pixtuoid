@@ -288,6 +288,7 @@ struct PaintCtx<'a> {
     buf: &'a mut RgbBuffer,
     cache: &'a mut FrameCache,
     base_fill: &'a mut background::BaseFillCache,
+    shadows: &'a mut crate::ground::DepthsCache,
     theme: &'a crate::theme::Theme,
     floor: crate::floor::FloorMeta,
     motion: &'a HashMap<pixtuoid_core::AgentId, MotionState>,
@@ -334,6 +335,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             buf: &mut *ctx.buf,
             cache: &mut ctx.store.cache,
             base_fill: &mut ctx.store.base_fill,
+            shadows: &mut ctx.store.shadows,
             theme: ctx.theme,
             floor: ctx.world.floor,
             motion: &ctx.store.motion,
@@ -414,10 +416,13 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
     wash_since(ctx.buf, &pre_floor_fixtures, look.object_wash);
 
     let shadow_strength = crate::ground::shadow_strength(look.darkness);
-    let contacts: Vec<_> = ctx.layout.fixtures().filter_map(|f| f.contact()).collect();
-    if let Some(depths) = crate::ground::Depths::of(contacts.into_iter(), 1) {
-        paint_shadows(ctx.buf, &depths, shadow_strength, ctx.theme.office.shadow);
-    }
+    let contacts = ctx.layout.fixtures().filter_map(|f| f.contact()).collect();
+    paint_shadows(
+        ctx.buf,
+        ctx.shadows.cells(contacts, 1),
+        shadow_strength,
+        ctx.theme.office.shadow,
+    );
 
     ambient::paint_ambient(ctx, look, &lights.monitor_halos);
 

@@ -19,9 +19,10 @@ use crate::chitchat::{self, ActiveChitchat, ChitchatBubble, VenueKey};
 use crate::creatures::{gateway_mascot_def, mascot_position, mascot_seed, pet_position};
 use crate::floor::{CoffeeState, FloorInputs, FloorMeta, LightingState, PetInputs};
 use crate::layout::{Anchor, Layout, Point, Size, WALKING_Y_OFF};
-use crate::motion::{MotionState, walking_position};
+use crate::motion::MotionState;
 use crate::pathfind::Router;
 use crate::pet::PetKind;
+use crate::physics::walking_position;
 use crate::pose::{self, Pose, PoseHistory};
 
 use super::anchors::{

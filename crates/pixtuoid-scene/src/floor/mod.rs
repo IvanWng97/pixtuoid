@@ -118,6 +118,8 @@ pub struct FloorCtx {
     pub cache: FrameCache,
     /// Memoized carpet+wall base fill (see `BaseFillCache`).
     pub(crate) base_fill: crate::pixel_painter::BaseFillCache,
+    /// The classic's floor shadows, kept per layout.
+    pub(crate) shadows: crate::ground::DepthsCache,
     /// This floor's indoor-lighting fade state.
     pub light: LightingState,
     /// This floor's neon-sign fade state.
@@ -149,6 +151,7 @@ impl FloorCtx {
             history: PoseHistory::new(),
             cache: FrameCache::new(),
             base_fill: crate::pixel_painter::BaseFillCache::new(),
+            shadows: crate::ground::DepthsCache::default(),
             light: LightingState::new(),
             neon: NeonState::new(),
             motion: HashMap::new(),
@@ -650,19 +653,13 @@ impl FloorSession {
         crate::overlay::build_overlay(scene, layout, now, &mut rctx, hovered)
     }
 
-    /// The neon wall-board model for `scene`. `floor` is `(current, total)`, or
-    /// `None` for a single-floor office (no cross-floor breadcrumb).
-    pub fn board(
-        &self,
-        scene: &SceneState,
-        now: SystemTime,
-        floor: Option<(usize, usize)>,
-    ) -> crate::board::BoardModel {
+    /// The neon wall-board model for `scene`, with no cross-floor breadcrumb.
+    pub fn board(&self, scene: &SceneState, now: SystemTime) -> crate::board::BoardModel {
         crate::board::build_board(
             crate::board::scene_stats(scene),
             crate::board::scene_uptime_secs(scene, now),
-            floor,
-            crate::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
+            None,
+            crate::board::office_gateway(scene),
             now,
         )
     }

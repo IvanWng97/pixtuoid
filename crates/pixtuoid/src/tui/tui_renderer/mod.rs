@@ -29,8 +29,8 @@ fn floor_info_for(
     current_idx: usize,
     nf: usize,
     total_agents: usize,
-) -> Option<crate::tui::renderer::FloorInfo> {
-    (nf > 1).then(|| crate::tui::renderer::FloorInfo {
+) -> Option<pixtuoid_scene::footer::FooterFloor> {
+    (nf > 1).then(|| pixtuoid_scene::footer::FooterFloor {
         current: current_idx + 1,
         total_floors: nf,
         total_agents,
@@ -80,8 +80,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     onboarding: crate::tui::welcome::OnboardingFrame,
     /// Ambient-audio gateway; inert unless installed.
     audio: crate::audio::AudioHandle,
-    /// Transient +/- volume readout (percent); `None` outside the
-    /// [`VOLUME_FLASH_MS`](crate::audio::VOLUME_FLASH_MS) window.
+    /// Transient +/- volume readout (percent); `None` past [`crate::audio::VOLUME_FLASH_MS`].
     volume_flash: Option<u8>,
 }
 
@@ -279,9 +278,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         }
     }
 
-    /// The scale computed during the most recent `render()`. Prefer this over
-    /// `version_popup_scale(SystemTime::now())` in the mouse handler so click
-    /// geometry matches what was painted.
+    /// The scale computed during the most recent `render()`.
     pub fn last_popup_scale(&self) -> f32 {
         self.popup.last_scale
     }
@@ -342,6 +339,18 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         };
         let from_scene = project_floor_scene(scene, from_floor);
         let to_scene = project_floor_scene(scene, to_floor);
+        // The destination floor's footer for the whole slide, so its count matches
+        // the breadcrumb.
+        let footer = pixtuoid_scene::footer::FooterInputs::new(
+            &to_scene,
+            crate::tui::widgets::footer_context(
+                scene,
+                floor_info_for(to_floor, nf, scene.agents.len()),
+                self.audio.is_audible(),
+                self.volume_flash,
+                self.source_warning.as_deref(),
+            ),
+        );
 
         let term_size = self.terminal.size()?;
         let full_rect = Rect {
@@ -366,20 +375,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             // AND land the transition: this returns before ensure_size, so the
             // floor buffer's size signature never changes and the event loop's
             // resize detector can't fire cancel_transition — the slide would
-            // otherwise stay live for its whole timer.
-            let floor_info = floor_info_for(to_floor, nf, scene.agents.len());
-            let theme = self.theme;
-            let source_warning = self.source_warning.clone();
-            let per_floor = crate::tui::widgets::per_floor_counts(scene);
-            let footer_stats = crate::tui::widgets::FooterStats {
-                counts: per_floor[to_floor.min(pixtuoid_core::state::MAX_FLOORS - 1)],
-                per_floor: &per_floor,
-                gateway: crate::tui::widgets::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-                audio_audible: self.audio.is_audible(),
-                volume_flash: self.volume_flash,
-                floor_info,
-                source_warning: source_warning.as_deref(),
-            };
+            // otherwise stay live for its whole `FloorTransition::duration_ms`.
             // The modals survive the slide (`Tab`/`s` aren't transition-gated), so
             // they paint here too — their key handlers stay live at every size.
             let popup_scale = self.version_popup_scale(now);
@@ -394,9 +390,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             };
             crate::tui::renderer::draw_footer_only_frame(
                 &mut self.terminal,
-                scene,
-                &footer_stats,
-                theme,
+                &footer,
+                self.theme,
                 &overlays,
                 now,
             )?;
@@ -404,8 +399,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             return Ok(());
         }
 
-        let buf_w = scene_rect.width;
-        let buf_h = scene_rect.height.saturating_mul(2);
+        let (buf_w, buf_h) =
+            crate::tui::renderer::scene_buf_size(full_rect.width, full_rect.height);
         // Compute popup scale before the split_at_mut borrows.
         let popup_scale = self.version_popup_scale(now);
         let onboarding_dim = self.onboarding.dim;
@@ -499,10 +494,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
         // Modal backdrop: dim BOTH sliding buffers, the same multiply draw_scene
         // applies to its single buffer.
-        if onboarding_dim < 0.999 {
-            crate::tui::renderer::apply_dim(from_buf, onboarding_dim);
-            crate::tui::renderer::apply_dim(to_buf, onboarding_dim);
-        }
+        crate::tui::renderer::apply_dim(from_buf, onboarding_dim);
+        crate::tui::renderer::apply_dim(to_buf, onboarding_dim);
 
         // `t` applies to the total travel (screen height + divider gap) so the
         // easing covers the full distance including the gap.
@@ -522,50 +515,22 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             (from_y, to_y)
         };
 
-        let theme = self.theme;
-        let theme_picker = self.theme_picker;
-        let source_warning = self.source_warning.clone();
-        let help_open = self.help_open;
-        // Clone the frames for the brief transition rather than thread disjoint
-        // borrows through the split_at_mut buffers.
-        let dashboard = self.dashboard.clone();
-        let connection = self.connection.clone();
-        let onboarding = self.onboarding.clone();
-        // Floor label tracks the destination floor for the whole slide so the
-        // footer's per-floor agent count matches the label.
-        let transition_floor_info = floor_info_for(to_floor, nf, scene.agents.len());
-        let transition_per_floor = crate::tui::widgets::per_floor_counts(scene);
-        let footer_stats = crate::tui::widgets::FooterStats {
-            counts: crate::tui::widgets::scene_stats(&to_scene),
-            per_floor: &transition_per_floor,
-            gateway: crate::tui::widgets::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-            audio_audible: self.audio.is_audible(),
-            volume_flash: self.volume_flash,
-            floor_info: transition_floor_info,
-            source_warning: source_warning.as_deref(),
+        let overlays = crate::tui::renderer::OverlayFrame {
+            theme_picker: self.theme_picker,
+            dashboard: &self.dashboard,
+            connection: &self.connection,
+            popup_scale,
+            help_open: self.help_open,
+            onboarding: &self.onboarding,
         };
-
+        let theme = self.theme;
         self.terminal.draw(|f| {
             let actual_full = f.area();
             let actual_scene = crate::tui::renderer::scene_rect(actual_full);
-            crate::tui::renderer::paint_footer(f, &to_scene, &footer_stats, actual_full, theme);
+            crate::tui::renderer::paint_footer(f, &footer, actual_full, theme);
             flush_buffer_to_term_at_offset(f, from_buf, actual_scene, from_offset);
             flush_buffer_to_term_at_offset(f, to_buf, actual_scene, to_offset);
-
-            crate::tui::renderer::paint_overlays(
-                f,
-                &crate::tui::renderer::OverlayFrame {
-                    theme_picker,
-                    dashboard: &dashboard,
-                    connection: &connection,
-                    popup_scale,
-                    help_open,
-                    onboarding: &onboarding,
-                },
-                now,
-                actual_full,
-                theme,
-            );
+            crate::tui::renderer::paint_overlays(f, &overlays, now, actual_full, theme);
         })?;
 
         self.popup.last_scale = popup_scale;
@@ -608,8 +573,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.current_floor = nf.saturating_sub(1);
         }
 
-        let floor_info = floor_info_for(self.current_floor, nf, scene.agents.len());
-
         if self.transition.is_some() {
             return self.render_transition(scene, pack, now, nf);
         }
@@ -640,13 +603,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             debug_walkable: self.debug_walkable,
             theme: self.theme,
             theme_picker: self.theme_picker,
-            floor_info,
-            // Office-wide truth from the FULL un-projected scene: the footer's
-            // cross-floor cue + gateway chip render even single-floor.
-            per_floor: crate::tui::widgets::per_floor_counts(scene),
-            gateway: crate::tui::widgets::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-            audio_audible: self.audio.is_audible(),
-            volume_flash: self.volume_flash,
+            footer: crate::tui::widgets::footer_context(
+                scene,
+                floor_info_for(self.current_floor, nf, scene.agents.len()),
+                self.audio.is_audible(),
+                self.volume_flash,
+                self.source_warning.as_deref(),
+            ),
             last_pet_pos: None,
             last_mascots: Vec::new(),
             last_agents: Vec::new(),
@@ -657,7 +620,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             occupied_waypoints: Default::default(),
             popup_scale,
             help_open: self.help_open,
-            source_warning: self.source_warning.as_deref(),
             dashboard: &self.dashboard,
             connection: &self.connection,
             onboarding: &self.onboarding,
@@ -670,11 +632,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let occupied_waypoints = std::mem::take(&mut draw_ctx.occupied_waypoints);
         drop(draw_ctx);
         // Ambient audio: one AudioFrame per rendered frame, floor-scoped (you hear
-        // the floor you're LOOKING AT; rain stays global). The observer runs EVERY
-        // frame, even muted, so its cue edges stay warm — re-enabling audio fires
-        // no volley for what arrived while silent; only DELIVERY is gated. The
-        // kind-map resolves against THIS frame's layout (the `result` handle, not
-        // `self.cached_layout`, which is still last frame's until set below).
+        // the floor you're LOOKING AT; rain stays global). The kind-map resolves against
+        // THIS frame's layout (the `result` handle, not `self.cached_layout`, which is
+        // still last frame's until set below).
         let frame_layout = result.as_ref().ok().and_then(|o| o.as_deref());
         let audio_frame = self.office.audio.frame(
             scene,
@@ -683,9 +643,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.current_floor,
             now,
         );
-        if self.audio.is_enabled() {
-            self.audio.frame(audio_frame);
-        }
+        // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
+        self.audio.frame(audio_frame);
         pixtuoid_scene::floor::frame_epilogue(
             &mut self.floors[self.current_floor].ctx,
             &mut self.office.coffee,

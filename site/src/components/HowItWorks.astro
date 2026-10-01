@@ -31,20 +31,16 @@ const steps = [
       <h2 class="statement statement--md">Up and running<br />in a minute.</h2>
     </div>
     <ol class="how__steps">
-      {
-        steps.map((s) => (
-          <li class="how__step reveal">
-            <span class="how__n" aria-hidden="true">
-              {s.n}
-            </span>
-            <div class="how__detail">
-              <code class="how__cmd">{s.cmd}</code>
-              <h3>{s.title}</h3>
-              <p>{s.body}</p>
-            </div>
-          </li>
-        ))
-      }
+      {steps.map((s) => <li class="how__step reveal">
+        <span class="how__n" aria-hidden="true">
+          {s.n}
+        </span>
+        <div class="how__detail">
+          <code class="how__cmd">{s.cmd}</code>
+          <h3>{s.title}</h3>
+          <p>{s.body}</p>
+        </div>
+      </li>)}
     </ol>
     <p class="how__more reveal">
       <a href={asset('architecture')}

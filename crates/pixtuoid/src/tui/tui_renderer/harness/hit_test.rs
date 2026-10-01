@@ -5,7 +5,7 @@ use pixtuoid_scene::pixel_painter::AgentFrame;
 fn furniture_hit_test_resolves_against_rendered_layout() {
     let scene = scene_with(vec![idle("/hit/0.jsonl", 0, t0())], 16);
     let mut r = build(120, 44, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout");
     let desk = layout.home_desks[0];
     let hit = crate::tui::hit_test::hit_test_furniture(
@@ -24,7 +24,7 @@ fn coffee_machine_hit_test_resolves_on_pantry() {
     use pixtuoid_scene::layout::WaypointKind;
     let scene = scene_with(vec![idle("/cm/0.jsonl", 0, t0())], 16);
     let mut r = build(140, 48, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout");
     let pantry = layout
         .waypoints
@@ -56,7 +56,7 @@ fn coffee_machine_hit_test_resolves_on_pantry() {
 fn pet_hit_test_resolves_at_pet_position() {
     let scene = scene_with(vec![active("/ph/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(120, 44, vec![PetKind::Cat]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let PetFrame { pos, anim, kind } = r.cached_pet_pos().expect("pet placed");
     assert!(
         crate::tui::hit_test::hit_test_pet(
@@ -76,9 +76,9 @@ fn hovering_an_agent_marks_its_label() {
     let id = s.agent_id;
     let scene = scene_with(vec![s], 16);
     let mut r = build(140, 48, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     hover_agent(&mut r, id);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("\u{25b8}HOVERME") || text.contains("\u{25b8}"),
@@ -92,7 +92,7 @@ fn click_hit_test_follows_a_walking_sprite() {
     let mut s = idle("/w/0.jsonl", 0, t0() - Duration::from_secs(300));
     let scene = scene_with(vec![s.clone()], 16);
     let mut r = build(192, 80, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout");
     let seat = pixtuoid_scene::pixel_painter::seated_anchor_facing(
         layout.home_desks[0],
@@ -109,7 +109,7 @@ fn click_hit_test_follows_a_walking_sprite() {
     let scene = scene_with(vec![s], 16);
     // Mid-exit-walk, inside EXIT_GRACE_WINDOW — off the desk box, not yet GC'd.
     let walk_now = t0() + Duration::from_millis(1500);
-    r.render(&scene, &pack(), walk_now).unwrap();
+    r.render(&scene, pack(), walk_now).unwrap();
     let drawn = drawn(&r, &scene, id, walk_now).anchor;
     assert_eq!(r.hit_test_agent_at(drawn.x, drawn.y / 2), Some(id));
     assert_eq!(
@@ -131,7 +131,7 @@ fn drawn(
         .observe(
             pixtuoid_scene::floor::FloorInputs {
                 scene,
-                pack: &pack(),
+                pack: pack(),
                 now,
                 floor: pixtuoid_scene::floor::FloorMeta::for_floor(0, 1),
                 pets: pixtuoid_scene::floor::PetInputs::default(),
@@ -183,7 +183,7 @@ fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_anchor() {
     let id = s.agent_id;
     let scene = scene_with(vec![s], 16);
     let mut r = build(cols, rows, vec![]);
-    r.render(&scene, &pack(), t0()).unwrap();
+    r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout").clone();
     let seat = pixtuoid_scene::pixel_painter::seated_anchor_facing(
         layout.home_desks[0],
@@ -196,7 +196,7 @@ fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_anchor() {
         .map(|now| (now, drawn(&r, &scene, id, now)))
         .find(|&(_, drawn)| drawn.anchor != seat)
         .expect("within one breath cycle the sitter bobs off its seat anchor");
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     let seated = AgentFrame {
         anchor: seat,
         ..drawn
@@ -218,7 +218,7 @@ fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_anchor() {
     }
     let ((col, row), shows) = moved.expect("the bob moves the sprite across a cell edge");
     r.set_mouse_pos(Some((col, row)));
-    r.render(&scene, &pack(), now).unwrap();
+    r.render(&scene, pack(), now).unwrap();
     assert_eq!(
         frame_text(r.frame_buffer()).contains('\u{25b8}'),
         shows,
@@ -241,7 +241,7 @@ fn overlapping_agents_hit_the_one_painted_on_top() {
     let render = |agents: Vec<AgentSlot>| {
         let scene = scene_with(agents, 16);
         let mut r = build(cols, rows, vec![]);
-        r.render(&scene, &pack(), now).unwrap();
+        r.render(&scene, pack(), now).unwrap();
         (r, scene)
     };
     let (mut both, scene) = render(vec![a.clone(), b.clone()]);
@@ -284,7 +284,7 @@ fn overlapping_agents_hit_the_one_painted_on_top() {
     );
     assert_eq!(both.hit_test_agent_at(x, y / 2), Some(top));
     both.set_mouse_pos(Some((x, y / 2)));
-    both.render(&scene, &pack(), now).unwrap();
+    both.render(&scene, pack(), now).unwrap();
     let hovered = scene.agents[&top].label.clone();
     assert!(
         frame_text(both.frame_buffer()).contains(&format!("\u{25b8}{hovered}")),

@@ -185,13 +185,18 @@ pub(super) fn paint_water_cooler(
 ) {
     let cooler_body = theme.office.building_light;
     let cooler_water = COOLER_WATER;
+    const BOTTLE_ROWS: u16 = 3;
     let (wx, wy) = (cooler.x, cooler.y);
     for dy in 0..cooler.height {
         for dx in 0..cooler.width {
             let px = wx + dx;
             let py = wy + dy;
             if px < buf.width() && py < buf.height() {
-                let color = if dy < 2 { cooler_water } else { cooler_body };
+                let color = if dy < BOTTLE_ROWS {
+                    cooler_water
+                } else {
+                    cooler_body
+                };
                 buf.put(px, py, color);
             }
         }

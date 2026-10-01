@@ -48,11 +48,9 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    {
-      /* CSP: injected here by Astro's built-in security.csp (astro.config.mjs) —
+    {/* CSP: injected here by Astro's built-in security.csp (astro.config.mjs) —
         hash-based script-src (NO 'unsafe-inline'), each is:inline script
-        whitelisted by content hash via the cspInlineHashes() build hook. */
-    }
+        whitelisted by content hash via the cspInlineHashes() build hook. */}
     <title>{title}</title>
     <meta name="description" content={description} />
     {/* PNG, not SVG: it's pixel art, and mobile Safari ignores SVG favicons */}
@@ -61,10 +59,8 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
     <link rel="apple-touch-icon" href={asset('apple-touch-icon.png')} />
     <link rel="canonical" href={canonical} />
     <meta name="theme-color" content={THEME_BG.day} />
-    {
-      /* `crossorigin` is required even same-origin — font requests are
-        CORS-mode, and a mismatch double-downloads. */
-    }
+    {/* `crossorigin` is required even same-origin — font requests are
+        CORS-mode, and a mismatch double-downloads. */}
     <link rel="preload" as="font" type="font/woff2" href={jerseyLatinWoff2} crossorigin />
     <link rel="preload" as="font" type="font/woff2" href={monaspaceLatinWoff2} crossorigin />
     <link rel="preload" as="font" type="font/woff2" href={loraLatinWoff2} crossorigin />
@@ -162,7 +158,6 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         }
       })();
     </script>
-
     <script is:inline>
       try {
         if (
@@ -173,11 +168,8 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         }
       } catch (e) {}
     </script>
-
-    {
-      /* .reveal starts opacity:0 and JS adds .in on scroll, so with JS disabled
-        (or a script/CSP failure) every below-hero section would stay invisible. */
-    }
+    {/* .reveal starts opacity:0 and JS adds .in on scroll, so with JS disabled
+        (or a script/CSP failure) every below-hero section would stay invisible. */}
     <noscript>
       <style>
         .reveal {
@@ -198,9 +190,8 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         <div class="boot__line">▸ {CLI_COUNT} CLIs connected… <span class="boot__ok">ok</span></div>
       </div>
       <div class="boot__hint">
-        <span class="boot__hint-key">press any key to skip</span><span class="boot__hint-tap"
-          >tap to skip</span
-        >
+        <span class="boot__hint-key">press any key to skip</span
+        ><span class="boot__hint-tap">tap to skip</span>
       </div>
     </div>
 
@@ -237,7 +228,6 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         document.addEventListener('pix:revealed', setup, { once: true });
       })();
     </script>
-
     <!-- FX: CRT power-on + a `dracula` easter egg. (No pointer glow / 3D tilt on
          purpose: perspective transforms smear pixel art's crisp edges.) -->
     <script is:inline>
@@ -336,7 +326,6 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         });
       })();
     </script>
-
     <!-- the app's literal `t` key: retint the page through the THEMES palette.
          Decorative hues only — the AA-tuned --coral-deep is deliberately
          exempt. -->
@@ -358,7 +347,6 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         });
       })();
     </script>
-
     <!-- Digits 1–6 ride to [data-floor] sections from ANY scroll depth, so unlike
          `t` they are deliberately NOT focus-gated: WCAG 2.1.4 is satisfied by the
          __pixKeys.enabled() off-switch instead. -->
@@ -381,7 +369,6 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
         });
       })();
     </script>
-
     <script is:inline>
       (function () {
         const root = document.documentElement;

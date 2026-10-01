@@ -1,37 +1,37 @@
 use pixtuoid_core::SceneState;
-use pixtuoid_core::state::{DaemonState, MAX_FLOORS};
 use pixtuoid_scene::footer::{
-    FooterFloor, FooterInputs, ToolTally, build_footer, footer_tone_rgb, footer_tool_tally,
+    FooterContext, FooterFloor, FooterInputs, build_footer, footer_tone_rgb,
 };
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 
-use super::{StateCounts, to_color};
+use super::to_color;
 
 const KEYS_STATS: &str = " [?]help [p]ause [t]heme [q]uit ";
 const KEYS_ALERT: &str = " [q]uit ";
 
-/// `counts` is the CURRENT (projected) floor's per-state breakdown; `per_floor`
-/// and `gateway` are office-wide, and are present even on a single-floor office.
-pub(crate) struct FooterStats<'a> {
-    pub counts: StateCounts,
-    pub per_floor: &'a [StateCounts; MAX_FLOORS],
-    pub gateway: Option<DaemonState>,
-    /// The audio system is live AND not effectively muted (m-state OR pause).
-    pub audio_audible: bool,
-    /// `Some(percent)` for ~1s after a volume nudge; renders as `♩ N%`.
-    pub volume_flash: Option<u8>,
-    /// As [`DrawCtx::floor_info`](crate::tui::renderer::DrawCtx::floor_info).
-    pub floor_info: Option<crate::tui::renderer::FloorInfo>,
-    /// As [`DrawCtx::source_warning`](crate::tui::renderer::DrawCtx::source_warning).
-    pub source_warning: Option<&'a str>,
+/// [`FooterContext::new`] with the TUI's keybind tails.
+pub fn footer_context<'a>(
+    office: &SceneState,
+    floor: Option<FooterFloor>,
+    audio_audible: bool,
+    volume_flash: Option<u8>,
+    source_warning: Option<&'a str>,
+) -> FooterContext<'a> {
+    FooterContext::new(
+        office,
+        floor,
+        audio_audible,
+        volume_flash,
+        source_warning,
+        KEYS_STATS,
+        KEYS_ALERT,
+    )
 }
 
-/// One-line footer warning for dead sources; `None` while healthy. `pub` because the
-/// snapshot example reuses this exact formatter, so screenshots can't drift from
-/// production wording.
+/// One-line footer warning for dead sources; `None` while healthy.
 pub fn source_warning_message(
     deaths: &[pixtuoid_core::source::manager::SourceDeath],
 ) -> Option<String> {
@@ -48,34 +48,14 @@ pub fn source_warning_message(
     }
 }
 
-fn footer_inputs<'a>(stats: &FooterStats<'a>, tools: &'a [ToolTally]) -> FooterInputs<'a> {
-    FooterInputs {
-        counts: stats.counts,
-        per_floor: stats.per_floor,
-        gateway: stats.gateway,
-        floor: stats.floor_info.map(|fi| FooterFloor {
-            current: fi.current,
-            total_floors: fi.total_floors,
-            total_agents: fi.total_agents,
-        }),
-        tools,
-        audio_audible: stats.audio_audible,
-        volume_flash: stats.volume_flash,
-        source_warning: stats.source_warning,
-        keys_stats: KEYS_STATS,
-        keys_alert: KEYS_ALERT,
-    }
-}
-
 pub(crate) fn paint_footer(
     f: &mut ratatui::Frame<'_>,
-    scene: &SceneState,
-    stats: &FooterStats<'_>,
+    inputs: &FooterInputs<'_>,
     full_rect: Rect,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
     use ratatui::text::Line;
-    let spans = build_status_spans(scene, stats, full_rect.width, theme);
+    let spans = build_status_spans(inputs, full_rect.width, theme);
     // Base style on the whole row so cells past the rendered spans keep the muted
     // footer tone rather than the terminal default.
     let footer =
@@ -92,14 +72,11 @@ pub(crate) fn paint_footer(
 }
 
 pub(crate) fn build_status_spans<'a>(
-    scene: &SceneState,
-    stats: &FooterStats<'_>,
+    inputs: &FooterInputs<'_>,
     term_width: u16,
     theme: &pixtuoid_scene::theme::Theme,
 ) -> Vec<Span<'a>> {
-    let tools = footer_tool_tally(scene);
-    let inputs = footer_inputs(stats, &tools);
-    build_footer(&inputs, term_width)
+    build_footer(inputs, term_width)
         .segments
         .into_iter()
         .map(|seg| {
@@ -114,14 +91,8 @@ pub(crate) fn build_status_spans<'a>(
 /// Byte-identical to `build_status_spans`'s content — the oracle that locks the exact
 /// footer wording.
 #[cfg(test)]
-pub(crate) fn build_status_summary(
-    scene: &SceneState,
-    stats: &FooterStats<'_>,
-    term_width: u16,
-) -> String {
-    let tools = footer_tool_tally(scene);
-    let inputs = footer_inputs(stats, &tools);
-    build_footer(&inputs, term_width).text()
+pub(crate) fn build_status_summary(inputs: &FooterInputs<'_>, term_width: u16) -> String {
+    build_footer(inputs, term_width).text()
 }
 
 #[cfg(test)]
@@ -167,17 +138,8 @@ mod tests {
         };
         let mut scene = SceneState::uniform(16);
         scene.agents.insert(slot.agent_id, slot);
-        let pf = crate::tui::widgets::per_floor_counts(&scene);
-        let stats = FooterStats {
-            counts: crate::tui::widgets::scene_stats(&scene),
-            per_floor: &pf,
-            gateway: None,
-            audio_audible: false,
-            volume_flash: None,
-            floor_info: None,
-            source_warning: None,
-        };
-        let spans = build_status_spans(&scene, &stats, 200, theme);
+        let inputs = FooterInputs::new(&scene, footer_context(&scene, None, false, None, None));
+        let spans = build_status_spans(&inputs, 200, theme);
         let active_rgb = footer_tone_rgb(FooterTone::Rung(RungKind::Active), theme);
         let rung = spans
             .iter()

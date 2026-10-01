@@ -272,7 +272,7 @@ impl From<String> for SlotLabel {
 pub struct AgentSlot {
     /// This agent's stable identity — the `SceneState::agents` map key.
     pub agent_id: AgentId,
-    /// Registry name of the source that produced this agent (e.g. `cc`, `codex`).
+    /// Registry name of the source that produced this agent (e.g. `claude-code`, `codex`).
     #[serde(with = "arc_str_serde")]
     pub source: Arc<str>,
     /// Source-native session identifier this slot is keyed under.
