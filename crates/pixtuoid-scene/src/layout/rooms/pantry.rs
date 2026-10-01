@@ -18,6 +18,20 @@ pub(crate) const LARGE_COUNTER: Size = Size {
     h: 10,
 };
 
+/// The pantry counter sprites, compact then large.
+pub(crate) const PANTRY_COUNTER_ANIMS: [&str; 2] = ["pantry_small", "pantry"];
+
+/// The pantry counter sprite for a counter `counter_w` px wide: the large
+/// kitchen run when the room fits it, else the compact one.
+pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
+    let [compact, large] = PANTRY_COUNTER_ANIMS;
+    if counter_w >= PANTRY_COUNTER_LARGE_W {
+        large
+    } else {
+        compact
+    }
+}
+
 /// The water cooler's size, [`PantryRoom::water_cooler_rect`]'s box.
 pub(crate) const WATER_COOLER: Size = Size { w: 4, h: 9 };
 

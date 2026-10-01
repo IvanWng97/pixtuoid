@@ -20,8 +20,8 @@ use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_scene::cutaway::canvas::{CanvasFrame, CutawayCanvas, Dirty};
+use pixtuoid_scene::cutaway::paint::CutawayCache;
 use pixtuoid_scene::floor::{FloorMeta, ObservedFloor};
-use pixtuoid_scene::frame_cache::FrameCache;
 use pixtuoid_scene::layout::{Bounds, Size};
 use pixtuoid_scene::theme::Theme;
 use ratatui::buffer::{Buffer, Cell, CellDiffOption};
@@ -42,7 +42,7 @@ const SENTINEL: &str = "\u{F8FF}";
 /// The cutaway's canvas, its tiles, and what of them the terminal holds.
 pub(crate) struct TileCutaway {
     canvas: CutawayCanvas,
-    cache: FrameCache,
+    cache: CutawayCache,
     cell: CellSize,
     protocol: ImageProtocol,
     tmux: bool,
@@ -82,7 +82,7 @@ impl TileCutaway {
     ) -> Self {
         Self {
             canvas: CutawayCanvas::new(pack),
-            cache: FrameCache::new(),
+            cache: CutawayCache::default(),
             cell,
             protocol,
             tmux,
@@ -323,7 +323,7 @@ impl TileCutaway {
     /// Drop the recolored sprites, as a theme change must
     /// ([`TuiRenderer::set_theme`](crate::tui::tui_renderer::TuiRenderer::set_theme)).
     pub(crate) fn reset_cache(&mut self) {
-        self.cache = FrameCache::new();
+        self.cache = CutawayCache::default();
     }
 }
 

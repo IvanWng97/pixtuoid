@@ -211,6 +211,23 @@ pub struct ToolGlowColors {
     pub default: Rgb,
 }
 
+impl ToolGlowColors {
+    /// The exhaustive `ToolKind → hue` map. Read by the office monitor glow AND
+    /// by the binary's footer tool-segment tint, so the two share one hue per
+    /// tool.
+    pub fn for_kind(&self, kind: pixtuoid_core::state::ToolKind) -> Rgb {
+        use pixtuoid_core::state::ToolKind;
+        match kind {
+            ToolKind::Edit => self.edit,
+            ToolKind::Read => self.read,
+            ToolKind::Bash => self.bash,
+            ToolKind::Task => self.agent,
+            ToolKind::Search => self.grep,
+            ToolKind::Other => self.default,
+        }
+    }
+}
+
 /// Name-badge, tooltip, and neon-brand UI colors.
 #[derive(Debug, Clone)]
 pub struct UiColors {

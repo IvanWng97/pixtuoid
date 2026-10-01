@@ -174,7 +174,7 @@ fn main() -> Result<()> {
     let (bw, bh) = (scale.to_buffer(lw), scale.to_buffer(lh));
     let mut buf = RgbBuffer::filled(bw, bh, theme.surface.bg_fallback);
     // `render_cutaway` needs the classic painter's recolor cache.
-    let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
+    let mut cache = pixtuoid_scene::cutaway::paint::CutawayCache::default();
     let labels = render_cutaway(
         &frame,
         Office {
