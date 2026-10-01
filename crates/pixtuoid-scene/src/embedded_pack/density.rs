@@ -24,7 +24,7 @@ pub(crate) struct DenseFrame<'a> {
     /// The factor still left to blit at: the scale divided by `density`.
     pub(crate) blit_at: NonZeroU16,
     /// Where the frame's head is, if the art marks it: where a hairstyle
-    /// dresses it (`pixel_painter::hair`).
+    /// dresses it ([`crate::character::dress_for`]).
     pub(crate) head: Option<pixtuoid_core::sprite::HeadMark>,
     /// Every point the art marks, on its own grid.
     pub(crate) marks: &'a [pixtuoid_core::sprite::Mark],
