@@ -693,26 +693,42 @@ impl FloorSession {
     /// draws it at. `None` when the size can't lay out.
     pub fn observe(&mut self, world: FloorInputs<'_>, size: Size) -> Option<ObservedFloor> {
         self.evict_missing(world.scene);
-        let fctx = &mut self.floor.ctx;
-        let layout = fctx.frame_layout(size.w, size.h, world.floor.floor_seed)?;
-        let door_anim_max_ms = fctx.door_anim_max_ms;
-        let frame = sim_step(
-            &mut fctx.sim_stores(&mut self.office.chitchat),
-            SimInputs {
-                world,
-                layout: &layout,
-                coffee: self.office.coffee.map(),
-                door_anim_max_ms,
-            },
-        );
-        frame_epilogue(
-            fctx,
+        observe_floor(
+            &mut self.floor.ctx,
             &mut self.office.coffee,
-            frame.new_coffee_carriers.iter().copied(),
-            world.now,
-        );
-        Some(ObservedFloor { layout, frame })
+            &mut self.office.chitchat,
+            world,
+            size,
+        )
     }
+}
+
+/// [`FloorSession::observe`] minus eviction, which a projected `world.scene` would turn on other floors.
+pub fn observe_floor(
+    fctx: &mut FloorCtx,
+    coffee: &mut CoffeeState,
+    chitchat: &mut HashMap<VenueKey, ActiveChitchat>,
+    world: FloorInputs<'_>,
+    size: Size,
+) -> Option<ObservedFloor> {
+    let layout = fctx.frame_layout(size.w, size.h, world.floor.floor_seed)?;
+    let door_anim_max_ms = fctx.door_anim_max_ms;
+    let frame = sim_step(
+        &mut fctx.sim_stores(chitchat),
+        SimInputs {
+            world,
+            layout: &layout,
+            coffee: coffee.map(),
+            door_anim_max_ms,
+        },
+    );
+    frame_epilogue(
+        fctx,
+        coffee,
+        frame.new_coffee_carriers.iter().copied(),
+        world.now,
+    );
+    Some(ObservedFloor { layout, frame })
 }
 
 impl Default for FloorSession {
