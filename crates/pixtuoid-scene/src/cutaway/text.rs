@@ -517,31 +517,32 @@ mod tests {
         assert_eq!(misfits, []);
     }
 
-    /// Whether `rows` fit `n` cells and leave their trailing gap: ink no
-    /// further right than [`width`]'s bound, so neighbours never touch.
+    /// Whether `rows` fit `n` cells: ink no further right than their advance.
+    /// The gap column may take ink, as misc-fixed's widest letters do: a
+    /// legible `ж` touching its neighbour beats a tofu box.
     fn fits(rows: &Rows, n: u16) -> bool {
         let ink = rows
             .iter()
             .map(|row| u8::BITS - row.trailing_zeros())
             .max()
             .unwrap_or(0);
-        n > 0 && ink <= u32::from(columns(n).0 - 1)
+        n > 0 && ink <= u32::from(columns(n).0)
     }
 
-    /// [`fits`] refuses ink in the gap column at one cell and at two, and the
-    /// tofu, which is drawn to the same bound, fits.
+    /// [`fits`] refuses ink past one cell's advance and takes a glyph that
+    /// fills it, at one cell and at two (where a row can hold no more).
     #[test]
-    fn a_glyph_inking_its_gap_column_does_not_fit() {
+    fn a_glyph_past_its_advance_does_not_fit() {
         let wide = |bits| {
             let mut rows = Rows::default();
             rows[usize::from(ACCENT_ROWS)] = bits;
             rows
         };
-        assert!(!fits(&wide(0b1111_0000), 1));
-        assert!(!fits(&wide(u8::MAX), 2));
-        assert!(fits(&wide(0b1110_0000), 1));
-        assert!(fits(&wide(0b1111_1110), 2));
-        assert!(fits(&tofu(1), 1) && fits(&tofu(2), 2));
+        assert!(!fits(&wide(0b1111_1000), 1));
+        assert!(!fits(&wide(u8::MAX), 1));
+        assert!(fits(&wide(0b1111_0000), 1));
+        assert!(fits(&wide(u8::MAX), 2));
+        assert!(!fits(&wide(0b1000_0000), 0));
     }
 
     #[test]

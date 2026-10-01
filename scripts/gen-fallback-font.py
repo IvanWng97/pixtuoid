@@ -9,8 +9,8 @@ Fusion Pixel 8px is the one open pixel font whose CJK fits a terminal cell's
 art (an 8x8 box); it has no Cyrillic or Greek, which X11's
 public-domain 4x6 supplies on the hand-drawn font's own 3x5 grid. Each source
 is baseline-aligned into Fusion Pixel's line box, which `text.rs` paints, and a
-glyph whose ink leaves the box, or inks the gap column that ends the cells
-`unicode-width` gives it, is dropped, not cropped: neighbours never touch.
+glyph whose ink leaves the box or the cells `unicode-width` gives it is
+dropped, not cropped.
 
 The format, which `cutaway::text` reads: one byte, the rows per glyph; a u16 LE
 glyph count n; n u16 LE code points, ascending; then n glyphs, one byte a row
@@ -139,7 +139,7 @@ def rows_of(advance, ink, n_cells):
     rows = [0] * LINE_H
     for dy, x in ink:
         y = dy + ASCENT
-        if not (0 <= y < LINE_H and 0 <= x < n_cells * CELL_W - 1):
+        if not (0 <= y < LINE_H and 0 <= x < n_cells * CELL_W):
             return None
         rows[y] |= 0x80 >> x
     return rows
