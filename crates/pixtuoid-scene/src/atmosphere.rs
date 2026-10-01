@@ -4,7 +4,7 @@
 
 use pixtuoid_core::sprite::Rgb;
 
-use crate::sky::{Atmo, Body, Emitter, Sky, Weather};
+use crate::sky::{Body, Emitter, Sky, Transmission, Weather};
 use crate::theme::Theme;
 
 /// One frame's sky, resolved against the theme: [`Look::resolve`] once per
@@ -38,6 +38,8 @@ pub(crate) struct Look {
     pub(crate) star_strength: f32,
     /// Where the sun lands on the office walls, while it is up.
     pub(crate) sun_spot: Option<SunSpot>,
+    /// The sun's direct beam through the weather ([`Sky::beam`]), 0..=1.
+    pub(crate) beam: f32,
 }
 
 /// The moment a frame shows, to either painter: the sky at `now` and its
@@ -134,7 +136,7 @@ impl Look {
                 theme.lighting.night_tint,
                 darkness * NIGHT_FLOOR_DIM * OBJECT_WASH_SHARE,
             ),
-            (SUN_TINT, interior * DAYLIGHT_FLOOR_LIFT * OBJECT_WASH_SHARE),
+            (SUN_TINT, sunlight * DAYLIGHT_FLOOR_LIFT * OBJECT_WASH_SHARE),
         ];
 
         let weather = sky.weather();
@@ -151,13 +153,14 @@ impl Look {
             object_wash,
             floor_tint: (weather_floor_tint(weather), FLOOR_TINT_SHARE),
             glass_veil: glass_veil(weather).map(|(color, alpha)| (lit(color, veil), alpha)),
-            golden_hour: golden_hour_blaze(e, &sky.atmo()),
+            golden_hour: golden_hour_blaze(e, &sky.transmission()),
             star_strength: if star_strength > STAR_MIN {
                 star_strength
             } else {
                 0.0
             },
             sun_spot: sun_on_wall(sky),
+            beam: sky.beam(),
         }
     }
 }
@@ -184,9 +187,9 @@ pub(crate) struct SunSpot {
     pub(crate) wall: WallSide,
     /// 0.0..=1.0 along the wall (left→right for North, top→bottom for East/West).
     pub(crate) along: f32,
-    /// 0.0=dim, 1.0=brightest at noon.
+    /// 0.0=dim, 1.0=brightest, at the sun's apex.
     pub(crate) intensity: f32,
-    /// 0.0=neutral white (noon), 1.0=very warm gold (sunrise/sunset).
+    /// 0.0=neutral white (apex), 1.0=very warm gold (sunrise/sunset).
     pub(crate) warmth: f32,
 }
 
@@ -324,7 +327,7 @@ const NIGHT_VEIL_FLOOR: f32 = 0.35;
 /// How much of a weather VEIL's own colour the frame's sky brings up (0..1).
 ///
 /// The day term is the emitter's OWN luminance, deliberately NOT
-/// [`Sky::atmo`] or [`Look::darkness`]: those already carry the weather (the veil
+/// [`Sky::transmission`] or [`Look::darkness`]: those already carry the weather (the veil
 /// colour does too), and folding them in would darken a stormy noon twice.
 fn veil_lum(e: &Emitter) -> f32 {
     NIGHT_VEIL_FLOOR + (1.0 - NIGHT_VEIL_FLOOR) * e.emitter_lum.clamp(0.0, 1.0)
@@ -333,7 +336,7 @@ fn veil_lum(e: &Emitter) -> f32 {
 /// Golden-hour blaze strength in the sky around the city — SUN-only: a low moon
 /// must never paint an orange cast, however warm/lit it computes, so the gate
 /// is absolute rather than incidental.
-fn golden_hour_blaze(e: &Emitter, a: &Atmo) -> f32 {
+fn golden_hour_blaze(e: &Emitter, a: &Transmission) -> f32 {
     match e.body {
         Body::Sun => (e.warmth * e.emitter_lum * a.disc).clamp(0.0, 1.0),
         Body::Moon => 0.0,
@@ -346,7 +349,7 @@ fn golden_hour_blaze(e: &Emitter, a: &Atmo) -> f32 {
 /// `darkness` alone paints a full starfield at ~7am.
 fn night_star_strength(sky: &Sky, darkness: f32) -> f32 {
     match sky.emitter().body {
-        Body::Moon => (darkness * sky.atmo().disc).clamp(0.0, 1.0),
+        Body::Moon => (darkness * sky.transmission().disc).clamp(0.0, 1.0),
         Body::Sun => 0.0,
     }
 }
@@ -366,12 +369,12 @@ mod tests {
     use super::*;
     use crate::localclock::at_hour_min;
 
-    // Hand-built Emitter/Atmo values, not real clock times: a real moon's low
+    // Hand-built Emitter/Transmission values, not real clock times: a real moon's low
     // altitude/luminance could never produce these, so a maximally warm/lit MOON
     // proves the gate is absolute rather than merely well-behaved in practice.
     #[test]
     fn golden_hour_blaze_is_sun_only() {
-        let full_atmo = Atmo {
+        let full = Transmission {
             direct: 1.0,
             diffuse: 1.0,
             disc: 1.0,
@@ -384,7 +387,7 @@ mod tests {
             emitter_lum: 1.0,
         };
         assert_eq!(
-            golden_hour_blaze(&moon, &full_atmo),
+            golden_hour_blaze(&moon, &full),
             0.0,
             "a moon must never blaze, even at maximal warmth/luminance"
         );
@@ -393,7 +396,7 @@ mod tests {
             ..moon
         };
         assert!(
-            golden_hour_blaze(&sun, &full_atmo) > 0.9,
+            golden_hour_blaze(&sun, &full) > 0.9,
             "a maximal sun should blaze near-full"
         );
     }
@@ -484,6 +487,19 @@ mod tests {
             night_dim < NIGHT_FLOOR_DIM,
             "the dim rides the darkness, which the city's glow keeps short of full"
         );
+    }
+
+    #[test]
+    fn a_lit_object_takes_the_floors_daylight_at_its_share() {
+        for (h, m) in [(0, 0), (3, 0), (7, 0), (12, 30), (19, 30), (22, 0)] {
+            let look = Look::resolve(
+                &Sky::at_with(at_hour_min(h, m), Weather::Clear),
+                &crate::theme::NORMAL,
+            );
+            let [_, (_, floor_lift)] = look.floor_wash;
+            let [_, (_, object_lift)] = look.object_wash;
+            assert_eq!(object_lift, floor_lift * OBJECT_WASH_SHARE, "{h:02}:{m:02}");
+        }
     }
 
     /// The veil keeps the weather reading after dark: dimmer than by day, but
