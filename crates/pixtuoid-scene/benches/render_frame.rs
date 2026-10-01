@@ -211,7 +211,7 @@ fn render_frame(c: &mut Criterion) {
 }
 
 fn render_cutaway_frame(c: &mut Criterion) {
-    let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack");
+    let pack = Arc::new(pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack"));
     let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
     let scale = RenderScale::new(pack.max_density_variant().get()).expect("a nonzero density");
     // The case names are claims about the sky model; hold it to them.
@@ -289,15 +289,15 @@ fn render_cutaway_frame(c: &mut Criterion) {
         }
         // The same frames through the canvas, which paints only those that
         // change what the office shows.
-        let mut canvas = CutawayCanvas::default();
+        let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
         let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
         let mut i = 0;
         group.bench_function(format!("{name}_canvas"), |b| {
             b.iter(|| {
-                let (now, ObservedFloor { layout, frame }) = &observed[i];
+                let (now, floor) = &observed[i];
                 i = (i + 1) % CUTAWAY_FRAMES;
                 canvas
-                    .frame(frame, office(layout), meta, *now, &mut cache)
+                    .frame(floor, theme, scale, meta, *now, &mut cache)
                     .dirty
             });
         });

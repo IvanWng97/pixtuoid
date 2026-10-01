@@ -4,30 +4,26 @@
 //! there.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid_core::sprite::RgbBuffer;
+use pixtuoid_core::sprite::format::Pack;
 
 use crate::cutaway::light::Ambient;
 use crate::cutaway::order::Span;
 use crate::cutaway::paint::{Office, frame_list, paint};
-use crate::layout::Bounds;
-use crate::pixel_painter::SimFrame;
+use crate::floor::ObservedFloor;
+use crate::layout::{Bounds, Layout};
 use crate::render_scale::RenderScale;
+use crate::theme::Theme;
 
-/// A cutaway painter's frame buffer and what it shows.
+/// A cutaway painter's frame buffer and what it shows, for one pack.
 pub struct CutawayCanvas {
+    // Held, so no other pack can take its place unnoticed.
+    pack: Arc<Pack>,
     buf: RgbBuffer,
     /// `None` until the first frame.
     shown: Option<Shown>,
-}
-
-impl Default for CutawayCanvas {
-    fn default() -> Self {
-        Self {
-            buf: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
-            shown: None,
-        }
-    }
 }
 
 /// One frame from [`CutawayCanvas::frame`].
@@ -49,17 +45,24 @@ pub enum Dirty {
     Rects(Vec<Bounds>),
 }
 
-/// What every pixel of a frame is painted under, beyond its draw list.
-#[derive(PartialEq, Eq)]
+/// What every pixel of a frame is painted under, beyond its draw list and
+/// the canvas's pack.
 struct Epoch {
-    // By address, as a floor memoizes it (`FloorCtx::frame_layout`): a
-    // recompute allocates while the layout it replaces is alive, and one of
-    // another size fails the buffer's size check too.
-    layout: usize,
-    theme: usize,
-    pack: usize,
+    // Held, so a later layout cannot reuse its address.
+    layout: Arc<Layout>,
+    // A static, so its address is its identity.
+    theme: &'static Theme,
     scale: RenderScale,
     ambient: Ambient,
+}
+
+impl PartialEq for Epoch {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.layout, &other.layout)
+            && std::ptr::eq(self.theme, other.theme)
+            && self.scale == other.scale
+            && self.ambient == other.ambient
+    }
 }
 
 struct Shown {
@@ -69,22 +72,38 @@ struct Shown {
 }
 
 impl CutawayCanvas {
-    /// Paint `frame`'s `office` as [`render_cutaway`](crate::cutaway::paint::render_cutaway)
+    /// A canvas that draws with `pack`.
+    pub fn new(pack: Arc<Pack>) -> Self {
+        Self {
+            pack,
+            buf: RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 }),
+            shown: None,
+        }
+    }
+
+    /// Paint `observed` as [`render_cutaway`](crate::cutaway::paint::render_cutaway)
     /// does, unless the frame would be the one already shown.
     pub fn frame(
         &mut self,
-        frame: &SimFrame,
-        office: Office<'_>,
+        observed: &ObservedFloor,
+        theme: &'static Theme,
+        scale: RenderScale,
         floor: crate::floor::FloorMeta,
         now: std::time::SystemTime,
         cache: &mut crate::frame_cache::FrameCache,
     ) -> CanvasFrame<'_> {
-        let list = frame_list(frame, office, floor, now);
+        let layout = &observed.layout;
+        let office = Office {
+            layout,
+            pack: &self.pack,
+            theme,
+            scale,
+        };
+        let list = frame_list(&observed.frame, office, floor, now);
         let epoch = Epoch {
-            layout: std::ptr::from_ref(office.layout).addr(),
-            theme: std::ptr::from_ref(office.theme).addr(),
-            pack: std::ptr::from_ref(office.pack).addr(),
-            scale: office.scale,
+            layout: Arc::clone(layout),
+            theme,
+            scale,
             ambient: list.ambient(),
         };
         let footprints: Vec<(Span, u64)> = list
@@ -93,28 +112,21 @@ impl CutawayCanvas {
             .map(|p| (p.reach(), p.fingerprint))
             .chain(list.lights().iter().map(|l| (l.span, l.fingerprint)))
             .collect();
-        let size = (
-            office.scale.to_buffer(office.layout.buf_w),
-            office.scale.to_buffer(office.layout.buf_h),
-        );
+        let size = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
         let dirty = match self.shown.take() {
-            Some(shown)
-                if shown.epoch == epoch && (self.buf.width(), self.buf.height()) == size =>
-            {
-                Dirty::Rects(
-                    changed(&shown.footprints, &footprints)
-                        .into_iter()
-                        .filter_map(|s| on_buffer(s, office.scale, size))
-                        .collect(),
-                )
-            }
+            Some(shown) if shown.epoch == epoch => Dirty::Rects(
+                changed(&shown.footprints, &footprints)
+                    .into_iter()
+                    .filter_map(|s| on_buffer(s, scale, size))
+                    .collect(),
+            ),
             _ => Dirty::All,
         };
         if dirty != Dirty::Rects(Vec::new()) {
             if (self.buf.width(), self.buf.height()) != size {
-                self.buf = RgbBuffer::filled(size.0, size.1, office.theme.surface.bg_fallback);
+                self.buf = RgbBuffer::filled(size.0, size.1, theme.surface.bg_fallback);
             }
-            paint(office.layout, &list, cache, &mut self.buf);
+            paint(layout, &list, cache, &mut self.buf);
         }
         self.shown = Some(Shown { epoch, footprints });
         CanvasFrame {
@@ -164,13 +176,12 @@ fn on_buffer(span: Span, scale: RenderScale, (w, h): (u16, u16)) -> Option<Bound
 mod tests {
     use std::time::{Duration, SystemTime};
 
-    use pixtuoid_core::sprite::format::Pack;
-
     use super::*;
     use crate::cutaway::paint::render_cutaway;
     use crate::cutaway::paint::tests::{empty_frame, lively_office, sit_down};
+    use crate::embedded_pack::test_default_pack;
     use crate::floor::FloorMeta;
-    use crate::layout::Layout;
+    use crate::pixel_painter::SimFrame;
 
     /// How a run of frames through a canvas was reported.
     #[derive(Debug, Default)]
@@ -182,37 +193,70 @@ mod tests {
         missed_by_span: usize,
     }
 
-    /// Drive `steps` through one canvas beside a full render of each, at the
-    /// pack's densest scale: every frame it shows, painted or skipped, is the
-    /// full render, and every pixel two full renders in a row differ in lies in
-    /// what it reported.
-    fn run(layout: &Layout, pack: &Pack, steps: &[(SimFrame, SystemTime)]) -> Run {
-        let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+    fn normal() -> &'static Theme {
+        crate::theme::theme_by_name("normal").expect("theme")
+    }
+
+    /// `layout`'s full render of `frame` at `now`, under the normal theme.
+    fn full_render(
+        layout: &Layout,
+        pack: &Pack,
+        scale: RenderScale,
+        frame: &SimFrame,
+        now: SystemTime,
+    ) -> RgbBuffer {
+        let theme = normal();
+        let mut buf = RgbBuffer::filled(
+            scale.to_buffer(layout.buf_w),
+            scale.to_buffer(layout.buf_h),
+            theme.surface.bg_fallback,
+        );
         let office = Office {
             layout,
             pack,
             theme,
             scale,
         };
+        let mut cache = crate::frame_cache::FrameCache::new();
+        render_cutaway(
+            frame,
+            office,
+            FloorMeta::ground(),
+            now,
+            &mut cache,
+            &mut buf,
+        );
+        buf
+    }
+
+    /// Drive `steps` through one canvas beside a full render of each, at the
+    /// pack's densest scale: every frame it shows, painted or skipped, is the
+    /// full render, and every pixel two full renders in a row differ in lies in
+    /// what it reported.
+    fn run(layout: Layout, pack: Pack, steps: &[(SimFrame, SystemTime)]) -> Run {
+        let (layout, pack) = (Arc::new(layout), Arc::new(pack));
+        let theme = normal();
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale,
+        };
         let floor = FloorMeta::ground();
-        let (w, h) = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
+        let w = scale.to_buffer(layout.buf_w);
         let inside = |rects: &[Bounds], i: usize| {
             let (x, y) = ((i % usize::from(w)) as u16, (i / usize::from(w)) as u16);
             rects
                 .iter()
                 .any(|r| (r.x..r.x + r.width).contains(&x) && (r.y..r.y + r.height).contains(&y))
         };
-        let mut canvas = CutawayCanvas::default();
-        let (mut canvas_cache, mut cache) = (
-            crate::frame_cache::FrameCache::new(),
-            crate::frame_cache::FrameCache::new(),
-        );
+        let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
+        let mut cache = crate::frame_cache::FrameCache::new();
         let mut tally = Run::default();
         let mut last: Option<(RgbBuffer, Vec<(Span, u64)>)> = None;
         for (k, (frame, now)) in steps.iter().enumerate() {
-            let mut full = RgbBuffer::filled(w, h, theme.surface.bg_fallback);
-            render_cutaway(frame, office, floor, *now, &mut cache, &mut full);
+            let full = full_render(&layout, &pack, scale, frame, *now);
             let list = frame_list(frame, office, floor, *now);
             let spans: Vec<(Span, u64)> = list
                 .pieces()
@@ -220,7 +264,11 @@ mod tests {
                 .map(|p| (p.span, p.fingerprint))
                 .chain(list.lights().iter().map(|l| (l.span, l.fingerprint)))
                 .collect();
-            let shown = canvas.frame(frame, office, floor, *now, &mut canvas_cache);
+            let observed = ObservedFloor {
+                layout: Arc::clone(&layout),
+                frame: frame.clone(),
+            };
+            let shown = canvas.frame(&observed, theme, scale, floor, *now, &mut cache);
             assert!(
                 shown.buf.as_slice() == full.as_slice(),
                 "step {k}: the canvas shows other than the full render ({:?})",
@@ -245,7 +293,7 @@ mod tests {
                         );
                         let by_span: Vec<Bounds> = changed(was_spans, &spans)
                             .into_iter()
-                            .filter_map(|s| on_buffer(s, scale, (w, h)))
+                            .filter_map(|s| on_buffer(s, scale, (w, scale.to_buffer(layout.buf_h))))
                             .collect();
                         tally.missed_by_span +=
                             differ.iter().filter(|&&i| !inside(&by_span, i)).count();
@@ -272,7 +320,7 @@ mod tests {
             .into_iter()
             .zip(ticks(crate::localclock::at_hour(12), u64::MAX))
             .collect();
-        let tally = run(&layout, &pack, &steps);
+        let tally = run(layout, pack, &steps);
         assert!(tally.partial > 0, "{tally:?}");
         assert!(
             tally.missed_by_span > 0,
@@ -295,7 +343,7 @@ mod tests {
                 )
             })
             .collect();
-        let tally = run(&layout, &pack, &steps);
+        let tally = run(layout, pack, &steps);
         assert!(tally.whole > 0 && tally.partial > 0, "{tally:?}");
     }
 
@@ -304,7 +352,6 @@ mod tests {
     #[test]
     fn what_plays_repaints_only_where_it_plays() {
         let layout = lively_office();
-        let pack = crate::embedded_pack::test_default_pack();
         let quiet = empty_frame(&layout);
         let steps: Vec<_> = ticks(crate::localclock::at_hour(21), 30)
             .enumerate()
@@ -321,7 +368,7 @@ mod tests {
                 (frame, now)
             })
             .collect();
-        let tally = run(&layout, &pack, &steps);
+        let tally = run(layout, test_default_pack(), &steps);
         assert!(tally.partial > 0, "{tally:?}");
     }
 
@@ -331,12 +378,11 @@ mod tests {
     #[test]
     fn an_idle_office_skips_the_ticks_that_change_nothing() {
         let layout = lively_office();
-        let pack = crate::embedded_pack::test_default_pack();
         let quiet = empty_frame(&layout);
         let steps: Vec<_> = ticks(crate::localclock::at_hour(12), 30)
             .map(|now| (quiet.clone(), now))
             .collect();
-        let tally = run(&layout, &pack, &steps);
+        let tally = run(layout, test_default_pack(), &steps);
         assert!(tally.skipped > 0 && tally.partial > 0, "{tally:?}");
         assert_eq!(tally.whole, 0, "{tally:?}");
     }
@@ -345,31 +391,66 @@ mod tests {
     /// frame: the theme, the scale.
     #[test]
     fn a_new_theme_or_scale_repaints_everything() {
-        let layout = lively_office();
-        let pack = crate::embedded_pack::test_default_pack();
-        let frame = empty_frame(&layout);
+        let layout = Arc::new(lively_office());
+        let observed = ObservedFloor {
+            frame: empty_frame(&layout),
+            layout,
+        };
         let now = crate::localclock::at_hour(12);
-        let floor = FloorMeta::ground();
         let mut cache = crate::frame_cache::FrameCache::new();
-        let mut canvas = CutawayCanvas::default();
-        let normal = crate::theme::theme_by_name("normal").expect("theme");
+        let mut canvas = CutawayCanvas::new(Arc::new(test_default_pack()));
         let other = crate::theme::ALL_THEMES
             .iter()
             .copied()
-            .find(|t| !std::ptr::eq(*t, normal))
+            .find(|t| !std::ptr::eq(*t, normal()))
             .expect("a second theme");
         let mut dirty = |theme, s| {
-            let office = Office {
-                layout: &layout,
-                pack: &pack,
-                theme,
-                scale: RenderScale::new(s).expect("nonzero"),
-            };
-            canvas.frame(&frame, office, floor, now, &mut cache).dirty
+            let scale = RenderScale::new(s).expect("nonzero");
+            canvas
+                .frame(
+                    &observed,
+                    theme,
+                    scale,
+                    FloorMeta::ground(),
+                    now,
+                    &mut cache,
+                )
+                .dirty
         };
-        assert_eq!(dirty(normal, 2), Dirty::All, "the first frame");
-        assert_eq!(dirty(normal, 2), Dirty::Rects(Vec::new()), "the same frame");
+        assert_eq!(dirty(normal(), 2), Dirty::All, "the first frame");
+        assert_eq!(
+            dirty(normal(), 2),
+            Dirty::Rects(Vec::new()),
+            "the same frame"
+        );
         assert_eq!(dirty(other, 2), Dirty::All, "a new theme");
         assert_eq!(dirty(other, 3), Dirty::All, "a new scale");
+    }
+
+    /// A new layout of the same size repaints everything, even one built after
+    /// the last was dropped, where the allocator may hand back its address.
+    #[test]
+    fn a_new_layout_repaints_everything() {
+        let pack = Arc::new(test_default_pack());
+        let scale = RenderScale::new(2).expect("nonzero");
+        let now = crate::localclock::at_hour(12);
+        let mut cache = crate::frame_cache::FrameCache::new();
+        let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
+        let observe = |seed| {
+            let layout = Layout::compute_with_seed(160, 96, None, seed).expect("lays out");
+            ObservedFloor {
+                frame: empty_frame(&layout),
+                layout: Arc::new(layout),
+            }
+        };
+        let floor = FloorMeta::ground();
+        canvas.frame(&observe(0), normal(), scale, floor, now, &mut cache);
+        let b = observe(1);
+        let shown = canvas.frame(&b, normal(), scale, floor, now, &mut cache);
+        assert_eq!(shown.dirty, Dirty::All);
+        assert!(
+            shown.buf.as_slice() == full_render(&b.layout, &pack, scale, &b.frame, now).as_slice(),
+            "the canvas shows other than the new layout"
+        );
     }
 }
