@@ -13,7 +13,7 @@ use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 /// A glyph's width in art pixels.
 const GLYPH_W: u16 = 3;
 /// Art pixels from one glyph's left edge to the next's.
-pub(crate) const ADVANCE: u16 = GLYPH_W + 1;
+const ADVANCE: u16 = GLYPH_W + 1;
 /// A line's height in art pixels: five rows for capitals, ascenders and
 /// digits, and a sixth for descenders.
 pub(crate) const LINE_H: u16 = 6;
@@ -72,7 +72,7 @@ fn rows(c: char) -> &'static str {
         't' => ".#. ### .#. .#. .##",
         'u' => "... #.# #.# #.# .##",
         'v' => "... #.# #.# #.# .#.",
-        'w' => "... #.# #.# ### #.#",
+        'w' => "... #.# #.# ### ###",
         'x' => "... #.# .#. #.# #.#",
         'y' => "... #.# #.# .## ..# ##.",
         'z' => "... ### .#. #.. ###",
@@ -121,6 +121,13 @@ fn rows(c: char) -> &'static str {
         '~' => "... ##. .##",
         '\u{b7}' => "... ... .#.",
         '\u{25cf}' => "... ### ### ###",
+        '\u{25cb}' => "... ### #.# ###",
+        '\u{25b2}' => "... .#. ### ###",
+        '\u{25bc}' => "... ### ### .#.",
+        '\u{2605}' => ".#. ### .#. #.#",
+        '\u{2191}' => ".#. #.# .#. .#. .#.",
+        '\u{2014}' => "... ... ###",
+        '\u{2b22}' => "... .#. ### ### .#.",
         _ => TOFU,
     }
 }
@@ -130,15 +137,29 @@ const TOFU: &str = "### ### ### ### ###";
 
 /// `text`'s width in art pixels, from its first ink column to its last.
 pub(crate) fn width(text: &str) -> ArtPx {
-    let n = u16::try_from(text.chars().count()).unwrap_or(u16::MAX);
-    ArtPx(n.saturating_mul(ADVANCE).saturating_sub(1))
+    ArtPx(advance(text).0.saturating_sub(1))
+}
+
+/// Art pixels from a run's left edge to where a run `n` characters on starts.
+pub(crate) fn columns(n: u16) -> ArtPx {
+    ArtPx(n.saturating_mul(ADVANCE))
+}
+
+/// The cells `text` takes, one per character.
+pub(crate) fn cells(text: &str) -> u16 {
+    u16::try_from(text.chars().count()).unwrap_or(u16::MAX)
+}
+
+/// [`columns`] past all of `text`: where the run after it starts.
+pub(crate) fn advance(text: &str) -> ArtPx {
+    columns(cells(text))
 }
 
 /// Paint `text` in `ink` from its top-left `(x, y)`, clipped to the buffer.
 pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text: &str, ink: Rgb) {
     for (i, c) in text.chars().enumerate() {
         let left =
-            x.0.saturating_add(u16::try_from(i).unwrap_or(u16::MAX).saturating_mul(ADVANCE));
+            x.0.saturating_add(columns(u16::try_from(i).unwrap_or(u16::MAX)).0);
         for (dy, row) in (0u16..).zip(rows(c).split(' ')) {
             for (dx, cell) in (0u16..).zip(row.bytes()) {
                 if cell == b'#' {
@@ -159,11 +180,80 @@ pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text:
 mod tests {
     use super::*;
 
+    /// Every character the wall board and the floor indicator write: each
+    /// mood over two flap cycles, each gateway state, many floors.
+    fn signs() -> std::collections::BTreeSet<char> {
+        use crate::board::{StateCounts, build_board};
+        use pixtuoid_core::state::DaemonState;
+        let mut text = crate::layout::floor_indicator_text(12);
+        let moods = [
+            StateCounts::default(),
+            StateCounts {
+                idle: 2,
+                total: 2,
+                ..StateCounts::default()
+            },
+            StateCounts {
+                active: 1,
+                total: 1,
+                ..StateCounts::default()
+            },
+            StateCounts {
+                active: 3,
+                total: 3,
+                ..StateCounts::default()
+            },
+            StateCounts {
+                waiting: 1,
+                total: 1,
+                ..StateCounts::default()
+            },
+            StateCounts {
+                waiting: 2,
+                active: 3,
+                idle: 4,
+                total: 9,
+                ..StateCounts::default()
+            },
+        ];
+        let gateways = [
+            None,
+            Some(DaemonState::Idle),
+            Some(DaemonState::Busy),
+            Some(DaemonState::Degraded),
+            Some(DaemonState::Down),
+        ];
+        for (counts, gateway) in moods.into_iter().zip(gateways.into_iter().cycle()) {
+            for ms in (0..32_000).step_by(20) {
+                let now = std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms);
+                let board = build_board(counts, 3_700, Some((2, 3)), gateway, now);
+                for seg in [&board.brand, &board.star]
+                    .into_iter()
+                    .chain(&board.mood)
+                    .chain(&board.context)
+                {
+                    text.push_str(&seg.text);
+                }
+            }
+        }
+        text.chars().collect()
+    }
+
+    /// The font draws everything the signs write: no sign shows a tofu box.
+    #[test]
+    fn the_font_draws_every_character_the_signs_write() {
+        let missing: Vec<char> = signs().into_iter().filter(|&c| rows(c) == TOFU).collect();
+        assert_eq!(missing, []);
+    }
+
     /// Every glyph fits its cell: no row wider than [`GLYPH_W`], none below
     /// [`LINE_H`], and nothing but ink or blank in it.
     #[test]
     fn every_glyph_fits_its_cell() {
-        let chars = (' '..='~').chain(['\u{b7}', crate::overlay::BADGE_MARKER, '\u{2603}']);
+        let chars =
+            (' '..='~')
+                .chain(signs())
+                .chain(['\u{b7}', crate::overlay::BADGE_MARKER, '\u{2603}']);
         for c in chars {
             let rows: Vec<&str> = rows(c).split(' ').collect();
             assert!(rows.len() <= usize::from(LINE_H), "{c:?}: {rows:?}");
@@ -224,6 +314,15 @@ mod tests {
     #[test]
     fn the_font_draws_the_badge_marker() {
         assert_ne!(rows(crate::overlay::BADGE_MARKER), TOFU);
+    }
+
+    /// A lowercase `w` closes its foot where `H` stands on open legs: the
+    /// board's "wait" read "Hait" with an open one.
+    #[test]
+    fn a_lowercase_w_closes_its_foot_unlike_an_h() {
+        let foot = |c| rows(c).split(' ').nth(4).expect("five rows");
+        assert_eq!(foot('w'), "###");
+        assert_ne!(foot('H'), "###");
     }
 
     #[test]
