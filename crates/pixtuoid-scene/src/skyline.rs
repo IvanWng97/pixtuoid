@@ -156,9 +156,8 @@ const BEACON_IN: u32 = 2;
 const BEACON_HALF_MS: u64 = 1_200;
 /// Tells the lights' hashes apart from the planes'.
 const BEACON_SALT: u32 = 0xB1EC;
-/// Tells a light's phase apart from its choice: on [`BEACON_SALT`]'s hash,
-/// which a carrier needs a multiple of [`BEACON_IN`], every light would
-/// blink in unison.
+/// A separate salt for the phase: carriers all share one [`BEACON_SALT`]
+/// hash residue, so phasing off it would blink every light in unison.
 const BEACON_PHASE_SALT: u32 = 0x9A5E;
 
 /// Whether `stand` carries a light: a near building the pack draws as tall
@@ -184,6 +183,29 @@ fn tallest_near(pack: &Pack) -> u16 {
 fn beacon_on(hash: u32, now: SystemTime) -> bool {
     (crate::anim::epoch_ms(now) / BEACON_HALF_MS + u64::from(self::hash(hash ^ BEACON_PHASE_SALT)))
         .is_multiple_of(2)
+}
+
+/// The art pixels of a light `side` across on the tip of the building
+/// `frame` draws from `origin`, `grow` art pixels to its pixel: its topmost
+/// pixel nearest its middle, a spire's tip. Only the building's own pixels:
+/// on a mast thinner than the light it runs down the mast, never out over
+/// the sky or another building.
+fn beacon_cells(frame: &Frame, origin: (i32, i32), grow: u16, side: u16) -> Vec<(i32, i32)> {
+    let drawn = |fx: u16, fy: u16| frame.get(fx, fy).copied().flatten().is_some();
+    let Some((fx, fy)) = (0..frame.height()).find_map(|fy| {
+        (0..frame.width())
+            .filter(|&fx| drawn(fx, fy))
+            .min_by_key(|&fx| fx.abs_diff(frame.width() / 2))
+            .map(|fx| (fx, fy))
+    }) else {
+        return Vec::new();
+    };
+    let (ax, ay) = (fx * grow, fy * grow);
+    (0..side)
+        .flat_map(|dy| (0..side).map(move |dx| (ax + dx, ay + dy)))
+        .filter(|&(x, y)| drawn(x / grow, y / grow))
+        .map(|(x, y)| (origin.0 + i32::from(x), origin.1 + i32::from(y)))
+        .collect()
 }
 
 /// The rows at the top of glass `glass_h` tall that no building reaches: the
@@ -439,9 +461,9 @@ impl CityStrip {
         let colours = Plane::ALL.map(|p| PlaneColours::of(p, look, theme));
         let mut recoloured: Vec<(&str, Plane, Frame)> = Vec::new();
         let tallest = tallest_near(pack);
-        // Each light's tower tip and size: drawn once every tower
-        // stands, so none stands over one.
-        let mut beacons: Vec<((i32, i32), u16)> = Vec::new();
+        // Every light's art pixels: drawn once every tower stands, so none
+        // stands over one.
+        let mut beacons: Vec<(i32, i32)> = Vec::new();
         for (plane, stand) in Skyline::of(pack, run_w, glass_h, altitude).stands() {
             let c = &colours[plane.index()];
             let window = |i: usize| c.window(lit(plane, stand.hash(), i, look.darkness, now));
@@ -508,37 +530,21 @@ impl CityStrip {
                             strip.fill(cell(wx, wy), grow, colour);
                         }
                     }
-                    // Its topmost pixel nearest its middle: a spire's tip.
-                    let tip = (0..frame.height()).find_map(|fy| {
-                        (0..frame.width())
-                            .filter(|&fx| frame.get(fx, fy).copied().flatten().is_some())
-                            .min_by_key(|&fx| fx.abs_diff(frame.width() / 2))
-                            .map(|fx| cell(fx, fy))
-                    });
                     // A cell of the art it stands in, so a base grown to the
                     // density grows its light with it; on finer art, half a
                     // unit across.
                     let side = if grow > 1 { grow } else { (d / 2).max(1) };
-                    beacons.extend(tip.filter(|_| beacon).map(|tip| (tip, side)));
+                    if beacon {
+                        beacons.extend(beacon_cells(frame, (x0, y0), grow, side));
+                    }
                 }
             }
         }
-        // Over the tower only: on a mast thinner than the light it runs down
-        // the mast, never out into the sky.
         let beacon = colours[Plane::Near.index()].beacon;
-        for ((x, y), side) in beacons {
-            for (dx, dy) in (0..side).flat_map(|dy| (0..side).map(move |dx| (dx, dy))) {
-                if strip.at_i(x + i32::from(dx), y + i32::from(dy)).is_some() {
-                    strip.put(x + i32::from(dx), y + i32::from(dy), beacon);
-                }
-            }
+        for (x, y) in beacons {
+            strip.put(x, y, beacon);
         }
         strip
-    }
-
-    fn at_i(&self, x: i32, y: i32) -> Option<Rgb> {
-        let (x, y) = (u16::try_from(x).ok()?, u16::try_from(y).ok()?);
-        self.at(x, y)
     }
 
     fn put(&mut self, x: i32, y: i32, colour: Rgb) {
@@ -874,6 +880,72 @@ mod tests {
                 assert!(on_a_roof, "{d}: a light at ({x}, {y}) off any rooftop");
             }
         }
+    }
+
+    /// A light's square takes only its own tower's pixels: where it overlaps
+    /// another building around a thin mast, a strip full of that building
+    /// keeps it there. Only art finer than its base has such a mast.
+    #[test]
+    #[cfg(feature = "density-art")]
+    fn a_light_leaves_a_neighbours_pixels_alone() {
+        let pack = pack();
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let materials = pack.city_materials().expect("a city");
+        let near = PlaneColours::of(
+            Plane::Near,
+            &Look::resolve(
+                &crate::sky::Sky::at_with(SystemTime::UNIX_EPOCH, crate::sky::Weather::Clear),
+                theme,
+            ),
+            theme,
+        );
+        let tallest = tallest_near(&pack);
+        let neighbour = Rgb { r: 1, g: 2, b: 3 };
+        let mut spared = 0;
+        for tower in pack
+            .buildings()
+            .filter(|b| b.stands_in(CityPlane::Near) && b.size().1 >= tallest)
+        {
+            for d in 1..=4 {
+                let (art, grow) = tower
+                    .variant(Density::new(d).expect("nonzero"))
+                    .map_or((tower.base(), d), |a| (a, 1));
+                let frame = art
+                    .sprite()
+                    .recolorable(0)
+                    .expect("a frame")
+                    .recolored(&near.overrides(materials));
+                let side = if grow > 1 { grow } else { (d / 2).max(1) };
+                let (w, h) = (frame.width() * grow + side, frame.height() * grow + side);
+                let mut strip = CityStrip {
+                    w,
+                    h,
+                    px: vec![Some(neighbour); usize::from(w) * usize::from(h)],
+                };
+                let cells = beacon_cells(&frame, (0, 0), grow, side);
+                let &(tx, ty) = cells.first().expect("a lit tip");
+                for &(x, y) in &cells {
+                    strip.put(x, y, near.beacon);
+                }
+                for (x, y) in (0..side).flat_map(|dy| (0..side).map(move |dx| (dx, dy))) {
+                    let (x, y) = (tx + i32::from(x), ty + i32::from(y));
+                    let own = frame
+                        .get(
+                            u16::try_from(x).expect("in") / grow,
+                            u16::try_from(y).expect("in") / grow,
+                        )
+                        .copied()
+                        .flatten()
+                        .is_some();
+                    let want = if own { near.beacon } else { neighbour };
+                    let got =
+                        strip.at(u16::try_from(x).expect("in"), u16::try_from(y).expect("in"));
+                    assert_eq!(got, Some(want), "{} at {d}: ({x}, {y})", tower.name());
+                    spared += usize::from(!own);
+                }
+            }
+        }
+        assert!(spared > 0, "some light's square overlaps a neighbour");
     }
 
     /// The towers' lights blink out of step: at one instant some carriers
