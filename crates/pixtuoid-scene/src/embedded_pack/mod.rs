@@ -4,21 +4,17 @@
 //! (`sprites/default/` is the canonical example); `PackSource` names where it
 //! comes from, and deciding that is the caller's job.
 
-mod character;
 mod density;
 mod lookup;
 
-pub(crate) use character::{
-    CharacterFrame, CharacterKey, SpritePose, character_frame, character_key, keyed_character_frame,
-};
 pub(crate) use density::{DenseFrame, densest_frame};
 #[cfg(test)]
 pub(crate) use lookup::DESK_BEZEL_RAISE;
 pub(crate) use lookup::{
-    CLOCK_FACE_KEY, DESK_BULB_KEY, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, PRINTER_SPRITE,
-    SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, VENDING_MACHINE_SPRITE, appliance_frame_index,
-    appliance_overrides, appliance_sprite, desk_art, desk_art_top, desk_sprite_name,
-    fixture_overrides, frame_at, looping_frame_index,
+    CLOCK_FACE_KEY, COOLER_WATER, DESK_BULB_KEY, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE,
+    PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, VENDING_MACHINE_SPRITE,
+    appliance_frame_index, appliance_overrides, appliance_sprite, desk_art, desk_art_top,
+    desk_sprite_name, fixture_overrides, frame_at, looping_frame_index,
 };
 
 #[cfg(feature = "native")]

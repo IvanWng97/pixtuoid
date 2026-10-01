@@ -696,8 +696,8 @@ fn character_frame_takes_a_density_variant_recolored_like_the_base() {
     let now = SystemTime::UNIX_EPOCH;
     let scale = crate::render_scale::RenderScale::new(4).expect("nonzero");
 
-    let dense = crate::embedded_pack::character_frame(
-        crate::embedded_pack::SpritePose {
+    let dense = crate::character::character_frame(
+        crate::character::SpritePose {
             anim_name: "typing",
             frame_idx: 0,
             flip_x: false,
@@ -714,8 +714,8 @@ fn character_frame_takes_a_density_variant_recolored_like_the_base() {
     let dense_shirt = dense.frame.get(0, 0).copied().flatten();
     assert_eq!(got, (2, 2));
 
-    let classic = crate::embedded_pack::character_frame(
-        crate::embedded_pack::SpritePose {
+    let classic = crate::character::character_frame(
+        crate::character::SpritePose {
             anim_name: "typing",
             frame_idx: 0,
             flip_x: false,
@@ -2565,7 +2565,7 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
         let mut buf = RgbBuffer::filled(32, 32, black);
         let drawn = paint_character_at(
             &mut buf,
-            crate::embedded_pack::SpritePose {
+            crate::character::SpritePose {
                 anim_name: "seated",
                 frame_idx: 0,
                 flip_x: false,
@@ -2687,7 +2687,7 @@ fn paint_character_at_missing_anim_is_a_noop() {
     let mut buf = RgbBuffer::filled(40, 40, bg);
     paint_character_at(
         &mut buf,
-        crate::embedded_pack::SpritePose {
+        crate::character::SpritePose {
             anim_name: "does_not_exist",
             frame_idx: 0,
             flip_x: false,
@@ -3040,7 +3040,7 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     let mut before = RgbBuffer::filled(24, 24, black);
     paint_character_at(
         &mut before,
-        crate::embedded_pack::SpritePose {
+        crate::character::SpritePose {
             anim_name: "seated",
             frame_idx: 0,
             flip_x: false,
@@ -3056,7 +3056,7 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     let mut after = RgbBuffer::filled(24, 24, black);
     paint_character_at(
         &mut after,
-        crate::embedded_pack::SpritePose {
+        crate::character::SpritePose {
             anim_name: "seated",
             frame_idx: 0,
             flip_x: false,
@@ -3072,7 +3072,7 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     let mut fresh = RgbBuffer::filled(24, 24, black);
     paint_character_at(
         &mut fresh,
-        crate::embedded_pack::SpritePose {
+        crate::character::SpritePose {
             anim_name: "seated",
             frame_idx: 0,
             flip_x: false,
@@ -4006,7 +4006,7 @@ fn a_character_whose_anim_is_missing_is_not_hoverable() {
         paint_drawable(
             &DrawableKind::Character {
                 agent: &slot,
-                pose: crate::embedded_pack::SpritePose {
+                pose: crate::character::SpritePose {
                     anim_name,
                     frame_idx: 0,
                     flip_x: false,
@@ -6075,8 +6075,7 @@ fn a_pose_is_its_placements_frame_facing_and_glow() {
         seat_desk: None,
         seated: true,
     };
-    let pose =
-        crate::embedded_pack::SpritePose::of(&placement(CharacterGlow::Tool), &typing, theme);
+    let pose = crate::character::SpritePose::of(&placement(CharacterGlow::Tool), &typing, theme);
     assert_eq!(
         (pose.anim_name, pose.frame_idx, pose.flip_x),
         ("typing", 3, true)
@@ -6086,10 +6085,9 @@ fn a_pose_is_its_placements_frame_facing_and_glow() {
         palette::tool_glow_tint(&typing, &theme.tool_glow)
     );
     let thinking =
-        crate::embedded_pack::SpritePose::of(&placement(CharacterGlow::Thinking), &typing, theme);
+        crate::character::SpritePose::of(&placement(CharacterGlow::Thinking), &typing, theme);
     assert_eq!(thinking.glow_tint, Some(theme.tool_glow.default));
-    let unlit =
-        crate::embedded_pack::SpritePose::of(&placement(CharacterGlow::None), &typing, theme);
+    let unlit = crate::character::SpritePose::of(&placement(CharacterGlow::None), &typing, theme);
     assert_eq!(unlit.glow_tint, None);
 }
 
@@ -6107,8 +6105,8 @@ fn an_unflipped_character_faces_the_way_its_art_does() {
         .animation("side_seated")
         .and_then(|a| a.frames().first().cloned())
         .expect("the side view");
-    let drawn = crate::embedded_pack::character_frame(
-        crate::embedded_pack::SpritePose {
+    let drawn = crate::character::character_frame(
+        crate::character::SpritePose {
             anim_name: "side_seated",
             frame_idx: 0,
             flip_x: false,
@@ -6147,8 +6145,8 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
         let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/flip/{i}.jsonl"));
         let slot = make_slot(id, ActivityState::Idle);
         let mut look = |flip| {
-            crate::embedded_pack::character_frame(
-                crate::embedded_pack::SpritePose {
+            crate::character::character_frame(
+                crate::character::SpritePose {
                     anim_name: "side_seated",
                     frame_idx: 0,
                     flip_x: flip,

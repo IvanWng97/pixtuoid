@@ -2,7 +2,7 @@
 //! theme recolours.
 
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::sprite::{Frame, Pixel, Sprite};
+use pixtuoid_core::sprite::{Frame, Pixel, Rgb, Sprite};
 
 /// The pack key of a monitor's glass.
 pub(crate) const SCREEN_GLASS_KEY: char = 'j';
@@ -15,6 +15,14 @@ pub(crate) const DESK_BULB_KEY: char = '9';
 
 /// The pack key of the wall clock's face, inside its rim.
 pub(crate) const CLOCK_FACE_KEY: char = 'ц';
+
+/// The cooler bottle's fill — theme-independent, so every theme's
+/// `tank_water_line` glug bubble must stay distinguishable from it.
+pub(crate) const COOLER_WATER: Rgb = Rgb {
+    r: 100,
+    g: 180,
+    b: 230,
+};
 
 /// The fixtures' [`appliance_overrides`].
 pub(crate) fn fixture_overrides(theme: &crate::theme::Theme) -> [(char, Pixel); 16] {
@@ -37,7 +45,7 @@ pub(crate) fn fixture_overrides(theme: &crate::theme::Theme) -> [(char, Pixel); 
         (CLOCK_FACE_KEY, Some(o.clock_face)),
         ('з', Some(o.clock_hand)),
         // Un-themed: the classic draws the cooler's bottle in its own blue.
-        ('χ', Some(crate::pixel_painter::COOLER_WATER)),
+        ('χ', Some(COOLER_WATER)),
     ]
 }
 

@@ -145,7 +145,6 @@ fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
 }
 use crate::sim::{SimFrame, SimInputs, desk_occupant, sim_step};
 pub(crate) use background::BaseFillCache;
-pub(crate) use furniture::COOLER_WATER;
 #[cfg(test)]
 pub(crate) use furniture::paint_area_rug;
 
@@ -429,7 +428,7 @@ fn enqueue_characters<'a>(
             layer: Layer::Figure,
             kind: DrawableKind::Character {
                 agent,
-                pose: crate::embedded_pack::SpritePose::of(p, agent, ctx.theme),
+                pose: crate::character::SpritePose::of(p, agent, ctx.theme),
                 anchor: p.anchor,
                 label_anchor: p.label_anchor,
                 effects: &p.effects,

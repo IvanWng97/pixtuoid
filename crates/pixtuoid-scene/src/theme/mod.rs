@@ -604,7 +604,7 @@ mod tests {
             // bottle's fixed fill — equal colors erase the third appliance anim.
             assert_ne!(
                 t.furniture.tank_water_line,
-                crate::pixel_painter::COOLER_WATER,
+                crate::embedded_pack::COOLER_WATER,
                 "{}: glug bubble invisible in the cooler bottle",
                 t.name
             );

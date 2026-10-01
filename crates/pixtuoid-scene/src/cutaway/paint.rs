@@ -1889,7 +1889,7 @@ fn push_characters(
         let Some(agent) = frame.agents.get(c.agent_idx) else {
             continue;
         };
-        let pose = crate::embedded_pack::SpritePose::of(c, agent, theme);
+        let pose = crate::character::SpritePose::of(c, agent, theme);
         // The frame `paint_figure` draws: an animation's frames need not
         // share a size.
         let Some((w, h)) = crate::embedded_pack::densest_frame(
@@ -1901,7 +1901,7 @@ fn push_characters(
         .map(|d| d.logical) else {
             continue;
         };
-        let Some(key) = crate::embedded_pack::character_key(pose, agent, pack, scale, now) else {
+        let Some(key) = crate::character::character_key(pose, agent, pack, scale, now) else {
             continue;
         };
         let seat = c.seat_desk.map(|d| (d, layout.desk_facing_at(d)));
@@ -1964,7 +1964,7 @@ fn push_characters(
 /// with its frame's top-left at `at`.
 fn riders(
     c: &crate::sim::CharacterPlacement,
-    key: &crate::embedded_pack::CharacterKey,
+    key: &crate::character::CharacterKey,
     (w, at): (u16, crate::layout::Point),
     scale: RenderScale,
 ) -> Vec<crate::cutaway::effects::Riding> {
@@ -2274,7 +2274,7 @@ pub(crate) struct Figure {
     /// Grounded by a contact shadow: not sitting on furniture, which grounds a
     /// sitter instead.
     shadow: bool,
-    key: crate::embedded_pack::CharacterKey,
+    key: crate::character::CharacterKey,
 }
 
 impl std::fmt::Debug for Figure {
@@ -2765,7 +2765,7 @@ fn paint_figure(
     let Figure { at, ref key, .. } = *figure;
     // The classic painter's own recolor + facing-flip path, through the same
     // cache: a raw pack blit clones one placeholder-palette person per agent.
-    let Some(art) = crate::embedded_pack::keyed_character_frame(key, pack, scale, cache) else {
+    let Some(art) = crate::character::keyed_character_frame(key, pack, scale, cache) else {
         return;
     };
     // A dressed frame reaches up over its hair, its art's top staying at `at`:

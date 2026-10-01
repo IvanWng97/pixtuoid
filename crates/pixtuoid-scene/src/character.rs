@@ -20,9 +20,9 @@ pub(crate) struct SpritePose {
     pub(crate) frame_idx: usize,
     /// Which way the character FACES: the art mirrored horizontally.
     pub(crate) flip_x: bool,
-    /// Blended into the skin by [`agent_overrides`],
-    /// so a row of typing agents shows their tools at a glance; `None` unless
-    /// typing or thinking at a desk.
+    /// The monitor glow blended into the skin by [`agent_overrides`], so a row
+    /// of typing agents shows their tools at a glance; `None` unless typing or
+    /// thinking at a desk.
     pub(crate) glow_tint: Option<Rgb>,
 }
 
@@ -56,7 +56,7 @@ impl SpritePose {
 ///
 /// Split out of [`paint_character_at`](crate::pixel_painter::drawable::paint_character_at) so a second profile gets the identical
 /// palette without a second copy of the rule. The ART and the BLIT differ
-/// between profiles — the art is [`densest_frame`](super::densest_frame)'s at
+/// between profiles — the art is [`densest_frame`](crate::embedded_pack::densest_frame)'s at
 /// `scale`, so the classic pass (at `RenderScale::ONE`) draws the base sprite
 /// 1:1 and the cutaway the densest variant its scale lands — and a per-agent
 /// palette is exactly the thing that must NOT differ: hair, skin and the
@@ -71,7 +71,7 @@ pub(crate) fn character_frame<'c>(
     cache: &'c mut FrameCache,
     now: SystemTime,
 ) -> Option<CharacterFrame<'c>> {
-    let dense = super::densest_frame(pack, pose.anim_name, pose.frame_idx, scale)?;
+    let dense = crate::embedded_pack::densest_frame(pack, pose.anim_name, pose.frame_idx, scale)?;
     let key = character_key_at(&dense, pack, pose, agent, now);
     Some(recolor(dense, &key, pack, cache))
 }
@@ -83,12 +83,13 @@ pub(crate) fn keyed_character_frame<'c>(
     scale: crate::render_scale::RenderScale,
     cache: &'c mut FrameCache,
 ) -> Option<CharacterFrame<'c>> {
-    let dense = super::densest_frame(pack, key.frame.anim_name, key.frame.frame_idx, scale)?;
+    let dense =
+        crate::embedded_pack::densest_frame(pack, key.frame.anim_name, key.frame.frame_idx, scale)?;
     Some(recolor(dense, key, pack, cache))
 }
 
 fn recolor<'c>(
-    dense: super::density::DenseFrame<'_>,
+    dense: crate::embedded_pack::DenseFrame<'_>,
     key: &CharacterKey,
     pack: &Pack,
     cache: &'c mut FrameCache,
@@ -153,12 +154,12 @@ pub(crate) fn character_key(
     scale: crate::render_scale::RenderScale,
     now: SystemTime,
 ) -> Option<CharacterKey> {
-    let dense = super::densest_frame(pack, pose.anim_name, pose.frame_idx, scale)?;
+    let dense = crate::embedded_pack::densest_frame(pack, pose.anim_name, pose.frame_idx, scale)?;
     Some(character_key_at(&dense, pack, pose, agent, now))
 }
 
 fn character_key_at(
-    dense: &super::density::DenseFrame<'_>,
+    dense: &crate::embedded_pack::DenseFrame<'_>,
     pack: &Pack,
     pose: SpritePose,
     agent: &AgentSlot,
@@ -195,7 +196,7 @@ fn character_key_at(
 }
 
 /// A recolored character frame and how to draw it at the scale it was picked
-/// for; `blit_at` as in [`DenseFrame`](super::DenseFrame).
+/// for; `blit_at` as in [`DenseFrame`](crate::embedded_pack::DenseFrame).
 pub(crate) struct CharacterFrame<'c> {
     pub(crate) frame: &'c Frame,
     pub(crate) blit_at: std::num::NonZeroU16,

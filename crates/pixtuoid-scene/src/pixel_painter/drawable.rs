@@ -23,10 +23,10 @@ use super::furniture::{
     paint_area_rug, paint_coat_rack, paint_doormat, paint_fish_tank, paint_kitchen_island,
     paint_meeting_chair, paint_notice_board, paint_side_table, paint_trash_bin, paint_water_cooler,
 };
+use crate::character::{CharacterFrame, SpritePose, character_frame};
 use crate::effects::{Effect, STEAM_PUFFS};
 use crate::embedded_pack::{
-    CharacterFrame, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, SpritePose, character_frame, desk_art,
-    desk_art_top, frame_at,
+    DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, desk_art, desk_art_top, frame_at,
 };
 use crate::frame_cache::FrameCache;
 pub(super) use crate::layout::Layer;

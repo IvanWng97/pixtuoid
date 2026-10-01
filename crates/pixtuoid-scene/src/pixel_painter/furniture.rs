@@ -2,6 +2,7 @@
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
+use crate::embedded_pack::COOLER_WATER;
 use crate::layout::{Bounds, COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W};
 
 /// Bordered area rug filling `rug` — the meeting and lounge rugs and both
@@ -165,14 +166,6 @@ pub(super) fn paint_doormat(buf: &mut RgbBuffer, mat: Bounds, theme: &crate::the
         }
     }
 }
-
-/// The cooler bottle's fill — theme-independent, so every theme's
-/// `tank_water_line` glug bubble must stay distinguishable from it.
-pub(crate) const COOLER_WATER: Rgb = Rgb {
-    r: 100,
-    g: 180,
-    b: 230,
-};
 
 /// Water cooler filling `cooler`, the box
 /// [`PantryRoom::water_cooler_rect`](crate::layout::PantryRoom::water_cooler_rect)
