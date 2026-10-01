@@ -28,7 +28,7 @@ pub(super) fn degraded_pixel(c: Rgb) -> Rgb {
 
 /// A degraded copy of a mascot frame — every opaque pixel through
 /// [`degraded_pixel`], transparency preserved.
-pub(super) fn degraded_frame(frame: &Frame) -> Frame {
+pub(crate) fn degraded_frame(frame: &Frame) -> Frame {
     let pixels = frame
         .as_slice()
         .iter()
