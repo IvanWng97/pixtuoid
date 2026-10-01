@@ -314,7 +314,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             paint_desk_coffee(buf, *desk, props.cup, &props.effects, theme);
             paint_token_stack(buf, *desk, props.token_tier, props.sheet_fall, theme);
             if let Some(tint) = screen_glow {
-                paint_screen_glow(buf, desk.x, sprite_top, now, *tint, theme);
+                paint_screen_glow(buf, desk.x, sprite_top, props.scanline, *tint, theme);
             }
         }
         DrawableKind::Character {
@@ -609,6 +609,45 @@ mod tests {
     use crate::layout::DESK_W;
     use crate::pet::PetKind;
 
+    /// The 1x desk arts mark the cells the classic stands its props on, each
+    /// the prop's foot: the cup's under [`desk_cup_at`], the tower's at
+    /// [`STACK_X_OFF`] on [`STACK_BASE_DY`].
+    #[test]
+    fn the_1x_desk_arts_mark_the_classics_prop_cells() {
+        let pack = crate::embedded_pack::test_default_pack();
+        let cup_h = pack.animation("desk_cup").expect("the cup").frames()[0].height();
+        let desk = Point { x: 20, y: 30 };
+        for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
+            let name = desk_sprite_name(facing);
+            let anim = pack.animation(name).expect("the desk");
+            let top = desk_art_top(&pack, desk.y, anim.frames()[0].height());
+            let mark = |n: &str| {
+                let m = anim.marks(0).iter().find(|m| m.name() == n)?;
+                Some(Point {
+                    x: desk.x + m.x(),
+                    y: top + m.y(),
+                })
+            };
+            let cup = desk_cup_at(desk);
+            assert_eq!(
+                mark("cup"),
+                Some(Point {
+                    x: cup.x,
+                    y: cup.y + cup_h - 1
+                }),
+                "{name}'s cup"
+            );
+            assert_eq!(
+                mark("tower"),
+                Some(Point {
+                    x: desk.x + STACK_X_OFF,
+                    y: desk.y + STACK_BASE_DY
+                }),
+                "{name}'s tower"
+            );
+        }
+    }
+
     #[test]
     fn steam_anchor_sits_within_the_coffee_machine_columns() {
         let pack = crate::embedded_pack::test_default_pack();
@@ -652,6 +691,7 @@ mod tests {
                     token_tier,
                     sheet_fall,
                     effects: Vec::new(),
+                    scanline: 0,
                 },
             },
         }

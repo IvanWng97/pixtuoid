@@ -161,6 +161,22 @@ pub(crate) struct DeskProps {
     pub(crate) sheet_fall: Option<u16>,
     /// What rides on it this tick: a steaming cup's steam.
     pub(crate) effects: Vec<Effect>,
+    /// Which glass column its lit screen's scanline is on, from the glass's
+    /// west edge ([`scanline_col`]).
+    pub(crate) scanline: u16,
+}
+
+/// How long a screen's scanline holds each glass column.
+const SCANLINE_STEP_MS: u64 = 120;
+
+/// The glass column a desk at column `desk_x`'s scanline is on at `now`: the
+/// line sweeps east and wraps, each desk a column on from its west neighbour's.
+pub(crate) fn scanline_col(desk_x: u16, now: SystemTime) -> u16 {
+    let glass = crate::layout::SCREEN_GLASS_COLS;
+    let glass_w = u64::from(glass.end() - glass.start() + 1);
+    let phase = crate::anim::epoch_ms(now) / SCANLINE_STEP_MS + u64::from(desk_x);
+    // Below `glass_w`, a u16.
+    (phase % glass_w) as u16
 }
 
 /// The immutable outcome of one `sim_step`: the world advanced, observed.
@@ -537,6 +553,7 @@ fn desk_props(
                 token_tier: occupant.map_or(0, |a| crate::token_meter::token_tier(a.tokens_used)),
                 sheet_fall: occupant.and_then(|a| crate::token_meter::sheet_fall_dist(a, now)),
                 effects: cup_effects(layout.home_desks[i], cup, now),
+                scanline: scanline_col(layout.home_desks[i].x, now),
             }
         })
         .collect()
@@ -870,5 +887,27 @@ pub(crate) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
         agent.agent_id.raw()
     } else {
         cwd_outfit_seed(&normalize_path_key(&agent.cwd.to_string_lossy()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// The phase is epoch-based, so it outgrows a u16: the scanline must keep
+    /// stepping one column per step rather than overflow or jump.
+    #[test]
+    fn the_scanline_keeps_stepping_past_a_u16_phase() {
+        let col = |step: u64| {
+            scanline_col(
+                0,
+                SystemTime::UNIX_EPOCH + Duration::from_millis(step * SCANLINE_STEP_MS + 1),
+            )
+        };
+        let glass = crate::layout::SCREEN_GLASS_COLS;
+        let glass_w = glass.end() - glass.start() + 1;
+        let before = col(u64::from(u16::MAX));
+        assert_eq!(col(u64::from(u16::MAX) + 1), (before + 1) % glass_w);
     }
 }

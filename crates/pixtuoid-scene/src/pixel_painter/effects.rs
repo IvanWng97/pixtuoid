@@ -1,12 +1,9 @@
 //! Effects that ride on a character, a pet or a fixture, painted with it in
 //! z-order: the looks of the [`crate::effects`] model's, and a screen's own.
 
-use std::time::SystemTime;
-
 use crate::layout::WALKING_Y_OFF;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use super::epoch_ms;
 use super::palette::{WHITE, blend_pixel};
 use crate::effects::{Effect, EffectKind, HEART_LIFE_MS, SLEEP_Z_RISE_MS, STEAM_CYCLE_MS};
 use crate::layout::{Point, SCREEN_GLASS_COLS};
@@ -35,11 +32,8 @@ const SCREEN_CASING_ROWS: std::ops::RangeInclusive<u16> = 0..=1;
 const SCREEN_GLASS_ROWS: std::ops::RangeInclusive<u16> = 2..=3;
 const SCREEN_CHIN_ROW: u16 = 4;
 
-/// How long the scanline holds each glass column.
-const SCANLINE_STEP_MS: u64 = 120;
-
 /// The scanline's color over a screen glowing `tint`.
-fn scanline_color(tint: Rgb) -> Rgb {
+pub(crate) fn scanline_color(tint: Rgb) -> Rgb {
     tint.mix(WHITE, 0.7)
 }
 
@@ -48,7 +42,7 @@ pub(super) fn paint_screen_glow(
     buf: &mut RgbBuffer,
     desk_x: u16,
     sprite_top: u16,
-    now: SystemTime,
+    scanline: u16,
     tint: Rgb,
     theme: &Theme,
 ) {
@@ -57,7 +51,7 @@ pub(super) fn paint_screen_glow(
     let frame_lit = theme.effects.monitor_frame_lit.mix(tint, CASING_TINT);
     let glow = tint;
     let glow_bright = tint.mix(WHITE, 0.4);
-    let scanline = scanline_color(tint);
+    let line_color = scanline_color(tint);
     let put = |buf: &mut RgbBuffer, dx: u16, dy: u16, c: Rgb| {
         buf.put_checked(desk_x + dx, sprite_top + dy, c);
     };
@@ -76,13 +70,9 @@ pub(super) fn paint_screen_glow(
     for dx in SCREEN_GLASS_COLS {
         put(buf, dx, SCREEN_CHIN_ROW, frame_lit);
     }
-    let elapsed_ms = epoch_ms(now);
-    let phase = elapsed_ms / SCANLINE_STEP_MS + u64::from(desk_x);
-    let glass_w = SCREEN_GLASS_COLS.end() - SCREEN_GLASS_COLS.start() + 1;
-    // The remainder is below `glass_w`, a u16, so the cast cannot truncate.
-    let scan_col = SCREEN_GLASS_COLS.start() + (phase % u64::from(glass_w)) as u16;
+    let scan_col = SCREEN_GLASS_COLS.start() + scanline;
     for dy in SCREEN_GLASS_ROWS {
-        put(buf, scan_col, dy, scanline);
+        put(buf, scan_col, dy, line_color);
     }
 }
 
@@ -325,32 +315,7 @@ fn plot_flame_crown(plot: &mut impl FnMut(u16, u16, Rgb, f32), crown: Point, fra
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
-
-    /// The phase is epoch-based, so it outgrows a u16: the scanline must keep
-    /// stepping one column per step rather than overflow or jump.
-    #[test]
-    fn the_scanline_keeps_stepping_past_a_u16_phase() {
-        let scan_col = |step: u64| {
-            let mut buf = RgbBuffer::filled(32, 8, Rgb { r: 0, g: 0, b: 0 });
-            let now = SystemTime::UNIX_EPOCH + Duration::from_millis(step * SCANLINE_STEP_MS + 1);
-            let tint = Rgb { r: 0, g: 200, b: 0 };
-            paint_screen_glow(&mut buf, 0, 0, now, tint, theme());
-            SCREEN_GLASS_COLS
-                .clone()
-                .find(|&x| buf.get(x, *SCREEN_GLASS_ROWS.start()) == scanline_color(tint))
-                .expect("a scanline column")
-        };
-        let (before, after) = (
-            scan_col(u64::from(u16::MAX)),
-            scan_col(u64::from(u16::MAX) + 1),
-        );
-        let glass_w = SCREEN_GLASS_COLS.end() - SCREEN_GLASS_COLS.start() + 1;
-        assert_eq!(
-            (after - SCREEN_GLASS_COLS.start()),
-            (before - SCREEN_GLASS_COLS.start() + 1) % glass_w
-        );
-    }
+    use std::time::{Duration, SystemTime};
 
     fn theme() -> &'static Theme {
         crate::theme::theme_by_name("normal").expect("normal theme")

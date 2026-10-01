@@ -3390,7 +3390,10 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
     for (i, props) in fresh.iter().enumerate().filter(|&(i, _)| i != desk) {
         assert_eq!(
             *props,
-            crate::sim::DeskProps::default(),
+            crate::sim::DeskProps {
+                scanline: props.scanline,
+                ..Default::default()
+            },
             "desk {i} has no occupant"
         );
     }

@@ -80,16 +80,21 @@ pub(crate) enum Screen {
     Off,
     /// The standby glow of an idle screen at night, its glass in this colour.
     Standby(pixtuoid_core::sprite::Rgb),
-    /// Lit by its occupant's tool, in this glow.
-    Lit(pixtuoid_core::sprite::Rgb),
+    /// Lit by its occupant's tool, in this glow, its scanline on glass column
+    /// `scan` ([`crate::sim::scanline_col`]).
+    Lit {
+        glow: pixtuoid_core::sprite::Rgb,
+        scan: u16,
+    },
 }
 
 impl Screen {
-    /// A desk's screen: lit by `glow`, else standing by at `idle`
-    /// ([`crate::lighting::screen_idle`]) in `theme`'s idle tint, else dark.
-    fn of(glow: Option<pixtuoid_core::sprite::Rgb>, idle: f32, theme: &Theme) -> Self {
+    /// A desk's screen: lit by `glow` with its scanline on `scan`, else
+    /// standing by at `idle` ([`crate::lighting::screen_idle`]) in `theme`'s
+    /// idle tint, else dark.
+    fn of(glow: Option<pixtuoid_core::sprite::Rgb>, scan: u16, idle: f32, theme: &Theme) -> Self {
         if let Some(glow) = glow {
-            return Self::Lit(glow);
+            return Self::Lit { glow, scan };
         }
         let share = idle / crate::lighting::SCREEN_IDLE_MAX;
         let stops = (share.clamp(0.0, 1.0) * f32::from(STANDBY_STOPS)).round() as u8;
@@ -115,7 +120,7 @@ impl Screen {
             Self::Standby(glass) => {
                 Some(art.recolored(&[(crate::pixel_painter::SCREEN_GLASS_KEY, Some(glass))]))
             }
-            Self::Lit(glow) => Some(relight_screen(art, glow)),
+            Self::Lit { glow, scan } => Some(scanline(relight_screen(art, glow), art, glow, scan)),
         }
     }
 }
@@ -688,7 +693,7 @@ fn mark_glow(
     let bulb = art.cells(art_name, 0, &desk, &[DESK_BULB_KEY]);
     let screen_mark = match screen {
         Screen::Off => SHADED_MARK,
-        Screen::Standby(_) | Screen::Lit(_) => EMISSIVE_MARK,
+        Screen::Standby(_) | Screen::Lit { .. } => EMISSIVE_MARK,
     };
     let (w, h) = (desk.frame.width(), desk.frame.height());
     let pixels: Vec<pixtuoid_core::sprite::Pixel> = bulb
@@ -798,7 +803,7 @@ impl ArtCache {
     ) -> Option<&pixtuoid_core::sprite::Frame> {
         match screen {
             Screen::Off => None,
-            Screen::Standby(_) | Screen::Lit(_) => Some(
+            Screen::Standby(_) | Screen::Lit { .. } => Some(
                 self.screens
                     .entry((art, desk.density.get(), screen))
                     .or_insert_with(|| {
@@ -1524,6 +1529,7 @@ fn push_desk(
     let Some(art) = desk_art(pack, facing) else {
         return;
     };
+    let props = frame.desk(i);
     let screen = Screen::of(
         crate::pixel_painter::desk_screen_glow(
             crate::sim::desk_occupant(&frame.agents, i),
@@ -1531,15 +1537,14 @@ fn push_desk(
             frame.seated_agents.get(&i).copied().unwrap_or(false),
             theme,
         ),
+        props.scanline,
         crate::lighting::screen_idle(facing, moment.look.darkness, frame.indoor_scale),
         theme,
     );
     if let Some(span) = desk_span(pack, art, d, scale) {
         let span = span.with_depth(depth);
         order.push((span, PieceKind::Desk { at: d, art, screen }));
-        let props = frame.desk(i);
-        let on_desk = (props.cup.is_some(), props.token_tier, props.sheet_fall);
-        push_desk_props(on_desk, (art, span), office, order);
+        push_desk_props(&props, (art, span), office, order);
     }
 }
 
@@ -1550,9 +1555,9 @@ const TOKEN_SHEET_SPRITE: &str = "token_sheet";
 
 /// What stands on the desk whose `art` paints `span`, each at the art's own
 /// mark for it, sorted with the desk: the cup where there is one, the token
-/// tower at its `tier` and the sheet `sheet_fall` down onto it.
+/// tower at its tier and the sheet falling onto it.
 fn push_desk_props(
-    (cup, tier, sheet_fall): (bool, u8, Option<u16>),
+    props: &crate::sim::DeskProps,
     (art, span): (&'static str, Span),
     office: Office<'_>,
     order: &mut Vec<(Span, PieceKind)>,
@@ -1590,10 +1595,10 @@ fn push_desk_props(
         ));
         Some(y)
     };
-    if let (true, Some(at)) = (cup, mark("cup")) {
+    if let (Some(_), Some(at)) = (props.cup, mark("cup")) {
         stand(DESK_CUP_SPRITE, 0, at);
     }
-    let Some(tier) = usize::from(tier).checked_sub(1) else {
+    let Some(tier) = usize::from(props.token_tier).checked_sub(1) else {
         return;
     };
     let Some((x, top)) =
@@ -1602,7 +1607,8 @@ fn push_desk_props(
         return;
     };
     // The sheet lands as the pile's next sheet: at its full fall it is gone.
-    let rest = sheet_fall
+    let rest = props
+        .sheet_fall
         .and_then(|fallen| crate::token_meter::SHEET_FALL_PX.checked_sub(fallen))
         .filter(|&rest| rest > 0);
     if let Some(rest) = rest {
@@ -2615,6 +2621,46 @@ fn relight_screen(
     ])
 }
 
+/// `lit`, the screen of `art` relit in `glow`, with its scanline on glass
+/// column `scan`: the glass's columns split evenly among the classic's
+/// [`SCREEN_GLASS_COLS`](crate::layout::SCREEN_GLASS_COLS).
+fn scanline(
+    lit: pixtuoid_core::sprite::Frame,
+    art: pixtuoid_core::sprite::RecolorableFrame<'_>,
+    glow: pixtuoid_core::sprite::Rgb,
+    scan: u16,
+) -> pixtuoid_core::sprite::Frame {
+    use crate::pixel_painter::{SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
+    // The glass is wherever the screen keys draw: what clearing them uncovers.
+    let bare = art.recolored(&[(SCREEN_GLASS_KEY, None), (SCREEN_TEXT_KEY, None)]);
+    let (w, h) = (lit.width(), lit.height());
+    let px = |f: &pixtuoid_core::sprite::Frame, x, y| f.get(x, y).copied().flatten();
+    let glass = |x, y| px(&lit, x, y).is_some() && px(&bare, x, y).is_none();
+    let Some((x0, x1)) = (0..w)
+        .filter(|&x| (0..h).any(|y| glass(x, y)))
+        .fold(None, |r: Option<(u16, u16)>, x| {
+            Some(r.map_or((x, x), |(a, _)| (a, x)))
+        })
+    else {
+        return lit;
+    };
+    let cols = crate::layout::SCREEN_GLASS_COLS;
+    let band = ((x1 - x0 + 1) / (cols.end() - cols.start() + 1)).max(1);
+    let line = (x0 + scan * band)..(x0 + (scan + 1) * band);
+    let color = crate::pixel_painter::effects::scanline_color(glow);
+    let pixels = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .map(|(x, y)| {
+            if line.contains(&x) && glass(x, y) {
+                Some(color)
+            } else {
+                px(&lit, x, y)
+            }
+        })
+        .collect();
+    pixtuoid_core::sprite::Frame::from_pixels(w, h, pixels)
+}
+
 /// The most common opaque colour in `row` of `frame` — how the cutaway learns a
 /// sprite's material without hardcoding it. The front face a top-down sprite
 /// never had has to be SOME colour, and the desk's lives in the PACK (the
@@ -3483,6 +3529,37 @@ pub(crate) mod tests {
             original[2], original[0],
             "the fixture's `x` shares the glass colour"
         );
+    }
+
+    /// A lit screen's scanline lights its glass on the column the model names
+    /// and nowhere else: at the base art, the classic's own glass column.
+    #[test]
+    fn a_lit_screens_scanline_is_on_the_models_column() {
+        let pack = test_default_pack();
+        let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
+        let anim = pack.animation(art).expect("the base art");
+        let glow = pixtuoid_core::sprite::Rgb {
+            r: 40,
+            g: 180,
+            b: 220,
+        };
+        let line = crate::pixel_painter::effects::scanline_color(glow);
+        let cols = crate::layout::SCREEN_GLASS_COLS;
+        for scan in 0..=cols.end() - cols.start() {
+            let lit = Screen::Lit { glow, scan }
+                .on(anim.recolorable(0).expect("frame 0"))
+                .expect("a lit screen");
+            let lined: std::collections::BTreeSet<u16> = (0..lit.height())
+                .flat_map(|y| (0..lit.width()).map(move |x| (x, y)))
+                .filter(|&(x, y)| lit.get(x, y).copied().flatten() == Some(line))
+                .map(|(x, _)| x)
+                .collect();
+            assert_eq!(
+                lined,
+                [cols.start() + scan].into(),
+                "scan {scan} lit other columns"
+            );
+        }
     }
 
     /// Pins the screen keys ([`SCREEN_GLASS_KEY`](crate::pixel_painter::SCREEN_GLASS_KEY),
@@ -4791,6 +4868,18 @@ pub(crate) mod tests {
             }
             check(&pack, &frame, &layout, true);
         }
+        // ...every desk prop, each tower tier with a sheet mid-fall, both ways
+        // a desk faces...
+        for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
+            let (layout, pack, frames, _) = sit_down(facing, 2);
+            let mut frame = frames.last().expect("a seated frame").clone();
+            for (i, d) in frame.desks.iter_mut().enumerate() {
+                d.cup = Some(crate::sim::Cup::Steaming);
+                d.token_tier = (i % usize::from(crate::token_meter::MAX_TIER + 1)) as u8;
+                d.sheet_fall = Some(1);
+            }
+            check(&pack, &frame, &layout, false);
+        }
         // ...a walk whose frames differ in size, so a span sized from the wrong
         // frame shows...
         const LONG_STRIDE: &str = "\
@@ -4840,6 +4929,7 @@ S B B B B B B S
                 "character",
                 "clock",
                 "desk",
+                "desk prop",
                 "door",
                 "effect",
                 "glass",
