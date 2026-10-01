@@ -327,6 +327,34 @@ frame_ms = 600
 frames   = ["desk_chair@4x.sprite"]
 frame_ms = 600
 
+# A desk's coffee cup, stood at the desk art's `cup` mark while its sitter has one.
+[animations.desk_cup]
+frames   = ["desk_cup.sprite"]
+frame_ms = 600
+
+[animations."desk_cup@4x"]
+frames   = ["desk_cup@4x.sprite"]
+frame_ms = 600
+
+# The token meter's paper tower at the desk art's `tower` mark: a frame per
+# tier, picked by the tier, never played.
+[animations.token_tower]
+frames   = ["token_tower.sprite"]
+frame_ms = 600
+
+[animations."token_tower@4x"]
+frames   = ["token_tower@4x.sprite"]
+frame_ms = 600
+
+# The sheet falling onto the token tower.
+[animations.token_sheet]
+frames   = ["token_sheet.sprite"]
+frame_ms = 600
+
+[animations."token_sheet@4x"]
+frames   = ["token_sheet@4x.sprite"]
+frame_ms = 600
+
 [animations.filing_cabinet]
 frames   = ["filing_cabinet.sprite"]
 frame_ms = 600
