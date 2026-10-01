@@ -503,7 +503,7 @@ fn pick_in(range: &RangeInclusive<u16>, n: u32) -> u16 {
 fn hash(n: u32) -> u32 {
     let mut v = n.wrapping_mul(crate::GOLDEN_GAMMA_32);
     v ^= v >> 15;
-    v = v.wrapping_mul(0x85EB_CA6B);
+    v = v.wrapping_mul(crate::MURMUR3_FMIX32_M1);
     v ^ (v >> 13)
 }
 

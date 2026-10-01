@@ -13,10 +13,15 @@ pub struct AgentId(u64);
 /// id through this before taking a bit window. Not cryptographic.
 #[doc(hidden)]
 pub fn splitmix64(z: u64) -> u64 {
-    let z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    let z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    let z = (z ^ (z >> 30)).wrapping_mul(SPLITMIX64_M1);
+    let z = (z ^ (z >> 27)).wrapping_mul(SPLITMIX64_M2);
     z ^ (z >> 31)
 }
+
+#[doc(hidden)]
+pub const SPLITMIX64_M1: u64 = 0xbf58_476d_1ce4_e5b9;
+#[doc(hidden)]
+pub const SPLITMIX64_M2: u64 = 0x94d0_49bb_1331_11eb;
 
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
