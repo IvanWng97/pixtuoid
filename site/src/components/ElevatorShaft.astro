@@ -7,21 +7,15 @@ import { FLOORS, FLOOR_SPY_ROOT_MARGIN, BOTTOM_CLAMP_EPSILON_PX } from '../const
 
 <aside class="shaft" data-shaft>
   <nav class="shaft__rail hw-panel" aria-label="Elevator — ride to a floor">
-    {
-      FLOORS.map((f) => (
-        <button
-          class="shaft__stop"
-          data-shaft-stop={f.fl}
-          aria-label={`${f.fl} ${f.label}`}
-          aria-current={f.fl === '6F' ? 'true' : undefined}
-        >
-          <span class="led-dot" aria-hidden="true" />
-          <span class="shaft__plate hw-panel" aria-hidden="true">
-            <b>{f.fl}</b> {f.label}
-          </span>
-        </button>
-      ))
-    }
+    {FLOORS.map((f) => <button
+      class="shaft__stop"
+      data-shaft-stop={f.fl}
+      aria-label={`${f.fl} ${f.label}`}
+      aria-current={f.fl === '6F' ? 'true' : undefined}
+    >
+      <span class="led-dot" aria-hidden="true" />
+      <span class="shaft__plate hw-panel" aria-hidden="true"> <b>{f.fl}</b> {f.label} </span>
+    </button>)}
     <span class="shaft__car" data-shaft-car aria-hidden="true"></span>
   </nav>
   {/* no keys hint here — the statusline owns the ONE "keys 1–6" affordance */}
