@@ -65,6 +65,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-cargo-just
+        with:
+          targets: x86_64-unknown-freebsd
       - run: just check-other-unix
 
   packaging-linux:
