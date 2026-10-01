@@ -121,8 +121,9 @@ impl Screen {
 /// One agent's name badge, painted in the canvas so no terminal text shares a
 /// cell with the image: `overlay`'s text and
 /// [`BadgeInk`](crate::overlay::BadgeInk) on its
-/// [`badge_plate`](crate::overlay::badge_plate). Hung from the CUTAWAY's body: `overlay::build_overlay`'s anchors hang off
-/// the classic-drawn sprite, which for a sitter is elsewhere.
+/// [`badge_plate`](crate::overlay::badge_plate). Hung from the CUTAWAY's body:
+/// `overlay::build_overlay`'s anchors hang off the classic-drawn sprite, which
+/// for a sitter is elsewhere.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Badge {
     /// Its bottom centre, in logical units: the sprite's centre, clear above
