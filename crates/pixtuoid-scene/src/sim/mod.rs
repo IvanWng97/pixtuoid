@@ -27,14 +27,15 @@ use crate::pet::PetKind;
 use crate::physics::walking_position;
 use crate::pose::{self, Pose, PoseHistory};
 
+use crate::embedded_pack::{desk_art, desk_art_top};
 use crate::layout::CHARACTER_SPRITE_W;
-use crate::pixel_painter::drawable::{desk_art, desk_art_top, desk_cup_at};
-use crate::pixel_painter::seat::{Seat, settle_seat};
 use anchors::{
     badge_anchor, on_canvas, walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath,
 };
+use seat::{Seat, settle_seat};
 
 pub(crate) mod anchors;
+pub(crate) mod seat;
 
 #[doc(hidden)]
 pub use anchors::seated_anchor_facing;
@@ -363,14 +364,14 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
 
 /// The size of `anim`'s frame `frame_idx`, or `fallback` where the pack lacks
 /// it, so a figure still sorts and fits sanely while its blit no-ops.
-pub(super) fn frame_size(pack: &Pack, anim: &str, frame_idx: usize, fallback: Size) -> Size {
+pub(crate) fn frame_size(pack: &Pack, anim: &str, frame_idx: usize, fallback: Size) -> Size {
     pack_frame_size(pack, anim, frame_idx).unwrap_or(fallback)
 }
 
 /// The size of `anim`'s frame `frame_idx`, or `None` where the pack lacks it.
-pub(super) fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Option<Size> {
+pub(crate) fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Option<Size> {
     pack.animation(anim)
-        .and_then(|a| crate::pixel_painter::frame_at(a, frame_idx))
+        .and_then(|a| crate::embedded_pack::frame_at(a, frame_idx))
         .map(|f| Size {
             w: f.width(),
             h: f.height(),
@@ -378,7 +379,7 @@ pub(super) fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Opti
 }
 
 /// The bundled cat's size, for a pack that lacks the pet's anim.
-pub(super) const PET_FALLBACK: Size = Size { w: 8, h: 6 };
+pub(crate) const PET_FALLBACK: Size = Size { w: 8, h: 6 };
 /// The bundled lobster's size, for a pack that lacks the mascot's anim.
 const MASCOT_FALLBACK: Size = Size { w: 14, h: 12 };
 
@@ -454,7 +455,7 @@ const PET_SLEEP_Z_SEED: u64 = 0xCAFE;
 
 /// What rides on a `kind` pet at `pos` drawn as `anim_name`: hearts while it
 /// is being petted, `petted_ms` in, else a z while it sleeps.
-pub(super) fn pet_effects(
+pub(crate) fn pet_effects(
     kind: PetKind,
     pos: Point,
     anim_name: &str,
@@ -543,7 +544,7 @@ fn desk_props(
 }
 
 /// What rides on the cup on the desk at `desk`: steam while it is fresh.
-pub(super) fn cup_effects(desk: Point, cup: Option<Cup>, now: SystemTime) -> Vec<Effect> {
+pub(crate) fn cup_effects(desk: Point, cup: Option<Cup>, now: SystemTime) -> Vec<Effect> {
     match cup {
         Some(Cup::Steaming) => effects::steam(desk_cup_at(desk), now).to_vec(),
         Some(Cup::Cold) | None => Vec::new(),
@@ -552,19 +553,19 @@ pub(super) fn cup_effects(desk: Point, cup: Option<Cup>, now: SystemTime) -> Vec
 
 /// What a pose arm puts on its figure, before the fit settles where it stands.
 #[derive(Debug, Clone, Copy, Default)]
-pub(super) struct Cues {
+pub(crate) struct Cues {
     /// Asleep: its z's stagger off this seed.
-    pub(super) sleep_seed: Option<u64>,
+    pub(crate) sleep_seed: Option<u64>,
     /// Waiting on the human.
-    pub(super) waiting: bool,
+    pub(crate) waiting: bool,
     /// Walking, on this stride frame.
-    pub(super) stride: Option<usize>,
+    pub(crate) stride: Option<usize>,
 }
 
 /// What rides on `agent`, whose `w`-wide frame (`None` where its pack lacks
 /// one) stands at `anchor` this tick, in paint order: dust underfoot, then a
 /// burning head's crown, then a sleeper's z or a waiter's mark.
-pub(super) fn character_effects(
+pub(crate) fn character_effects(
     agent: &AgentSlot,
     anchor: Point,
     w: Option<u16>,
@@ -592,7 +593,7 @@ pub(super) fn character_effects(
 /// `sim_step` already derived. Returns the placements (paint maps them 1:1 to
 /// drawables), the waypoint visitors (for the chitchat venues), the agents seen
 /// carrying coffee, and the occupied waypoint indices.
-pub(super) fn resolve_characters(
+pub(crate) fn resolve_characters(
     agents: &[AgentSlot],
     poses: &HashMap<AgentId, Option<Pose>>,
     layout: &Layout,
@@ -839,6 +840,14 @@ pub(super) fn resolve_characters(
         new_coffee_carriers,
         wp_rank.into_keys().collect(),
     )
+}
+
+/// Where the cup stands on the desk at `desk`: its top-left cell.
+pub(crate) fn desk_cup_at(desk: Point) -> Point {
+    Point {
+        x: desk.x + 2,
+        y: desk.y + 2,
+    }
 }
 
 /// The agent whose home desk is `local`, while they have not begun to leave.

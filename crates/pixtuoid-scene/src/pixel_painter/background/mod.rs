@@ -11,7 +11,6 @@ mod lighting;
 
 use crate::celestial::SkyView;
 pub(super) use floor_wash::paint_floor_wash;
-pub(crate) use lighting::{RUNNER_LATTICE_STRIDE, octant_offset};
 pub(super) use lighting::{
     paint_clock, paint_corridor_runner, paint_light, paint_neon_halo, paint_neon_panel,
     paint_shadows,

@@ -9,8 +9,8 @@ use pixtuoid_core::AgentSlot;
 
 use crate::anim::epoch_ms;
 use crate::layout::{Point, WaypointKind};
-use crate::pixel_painter::seat::Seat;
 use crate::pose;
+use crate::sim::seat::Seat;
 
 use crate::layout::CHARACTER_SPRITE_W;
 
