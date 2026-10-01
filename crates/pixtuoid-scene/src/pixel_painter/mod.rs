@@ -614,10 +614,8 @@ fn queue_fixtures<'a>(
                             ),
                         }
                     }
-                    Station::VendingMachine => {
-                        appliance(crate::embedded_pack::VENDING_MACHINE_SPRITE)
-                    }
-                    Station::Printer => appliance(crate::embedded_pack::PRINTER_SPRITE),
+                    Station::VendingMachine => appliance(crate::pack::VENDING_MACHINE_SPRITE),
+                    Station::Printer => appliance(crate::pack::PRINTER_SPRITE),
                     Station::SnackShelf => DrawableKind::SnackShelf { pos: f.at },
                 }
             }

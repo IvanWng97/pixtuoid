@@ -452,7 +452,7 @@ pub(super) fn blend_pixel(buf: &mut RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::embedded_pack::{appliance_overrides, fixture_overrides};
+    use crate::pack::{appliance_overrides, fixture_overrides};
 
     /// Pins `MAX_RAMP_LEVEL` against the colors a recolor feeds a ramp: every
     /// agent color keeps a shade of its own at every level a pack may declare.
@@ -501,7 +501,7 @@ mod tests {
     /// not recolour still shows the normal office.
     #[test]
     fn the_packs_appliance_keys_are_the_normal_themes_colours() {
-        let pack = crate::embedded_pack::test_default_pack();
+        let pack = crate::pack::test_default_pack();
         let normal = crate::theme::theme_by_name("normal").expect("theme");
         for (key, pixel) in appliance_overrides(&normal.appliance) {
             assert_eq!(pack.palette().get(key), Some(pixel), "key {key:?}");
@@ -512,7 +512,7 @@ mod tests {
     /// theme's.
     #[test]
     fn the_packs_fixture_keys_are_the_normal_themes_colours() {
-        let pack = crate::embedded_pack::test_default_pack();
+        let pack = crate::pack::test_default_pack();
         let normal = crate::theme::theme_by_name("normal").expect("theme");
         for (key, pixel) in fixture_overrides(normal) {
             assert_eq!(pack.palette().get(key), Some(pixel), "key {key:?}");
@@ -523,7 +523,7 @@ mod tests {
     #[test]
     #[cfg(feature = "density-art")]
     fn a_recolour_rethemes_the_fixture_art() {
-        let pack = crate::embedded_pack::test_default_pack();
+        let pack = crate::pack::test_default_pack();
         let art = pack
             .animation("fish_tank@4x")
             .and_then(|a| a.recolorable(0))
@@ -546,7 +546,7 @@ mod tests {
     #[test]
     #[cfg(feature = "density-art")]
     fn a_recolour_reshades_the_appliance_art() {
-        let pack = crate::embedded_pack::test_default_pack();
+        let pack = crate::pack::test_default_pack();
         let art = pack
             .animation("vending_machine@4x")
             .and_then(|a| a.recolorable(0))

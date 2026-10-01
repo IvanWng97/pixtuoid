@@ -25,12 +25,10 @@ use super::furniture::{
 };
 use crate::character::{CharacterFrame, SpritePose, character_frame};
 use crate::effects::{Effect, STEAM_PUFFS};
-use crate::embedded_pack::{
-    DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, desk_art, desk_art_top, frame_at,
-};
 use crate::frame_cache::FrameCache;
 pub(super) use crate::layout::Layer;
 use crate::layout::{Layout, Point, Size};
+use crate::pack::{DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, desk_art, desk_art_top, frame_at};
 
 /// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
 /// size — hand-tuned to the sprite art so the steam sits within the coffee
@@ -149,7 +147,7 @@ pub(super) enum DrawableKind<'a> {
         kind: crate::layout::WallDecor,
         pos: Point,
     },
-    /// A corridor appliance: its pack art ([`crate::embedded_pack::appliance_sprite`]), centred at
+    /// A corridor appliance: its pack art ([`crate::pack::appliance_sprite`]), centred at
     /// `pos`.
     Appliance {
         pos: Point,
@@ -373,13 +371,10 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
         }
         DrawableKind::Appliance { pos, sprite, busy } => {
             let art = pack.animation(sprite).and_then(|anim| {
-                anim.recolorable(crate::embedded_pack::appliance_frame_index(
-                    anim, *busy, now,
-                ))
+                anim.recolorable(crate::pack::appliance_frame_index(anim, *busy, now))
             });
             if let Some(art) = art {
-                let themed =
-                    art.recolored(&crate::embedded_pack::appliance_overrides(&theme.appliance));
+                let themed = art.recolored(&crate::pack::appliance_overrides(&theme.appliance));
                 blit_centered(&themed, *pos, buf);
             }
         }
@@ -628,7 +623,7 @@ mod tests {
 
     #[test]
     fn steam_anchor_sits_within_the_coffee_machine_columns() {
-        let pack = crate::embedded_pack::test_default_pack();
+        let pack = crate::pack::test_default_pack();
         let width = |name: &str| pack.animation(name).expect(name).frames()[0].width() as i16;
         // steam_x = pos.x + steam_dx; sprite_x = pos.x - cw/2 → sprite-local
         // steam col = steam_dx + cw/2.
@@ -645,7 +640,7 @@ mod tests {
     }
 
     fn test_pack() -> Pack {
-        crate::embedded_pack::test_default_pack()
+        crate::pack::test_default_pack()
     }
 
     fn desk_cubicle_drawable(

@@ -2091,7 +2091,7 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
             // Implicit min-1 floor: a `frames = []` entry deserializes and makes
             // `animation()` return Some (dodging the missing-required check)
             // while every render consumer guards with `.frames().first()` and
-            // draws nothing; an empty OPTIONAL entry also SHADOWS the embedded
+            // draws nothing; an empty OPTIONAL entry also SHADOWS the bundled
             // default in `Pack::merge_from` (`contains_key` is true).
             .map_or(1, |&(_, min)| min);
         if let Some(anim) = pack.animation(name)

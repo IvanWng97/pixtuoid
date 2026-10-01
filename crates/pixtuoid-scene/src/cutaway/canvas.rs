@@ -194,8 +194,8 @@ mod tests {
     use super::*;
     use crate::cutaway::paint::render_cutaway;
     use crate::cutaway::paint::tests::{empty_frame, lively_office, sit_down};
-    use crate::embedded_pack::test_default_pack;
     use crate::floor::FloorMeta;
+    use crate::pack::test_default_pack;
     use crate::sim::SimFrame;
 
     /// The ground floor under a clear sky: rain or snow on the glass moves

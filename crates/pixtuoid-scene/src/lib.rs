@@ -47,7 +47,6 @@ pub use creatures::PET_CYCLE_MS;
 pub mod cutaway;
 pub(crate) mod dither;
 pub(crate) mod effects;
-pub mod embedded_pack;
 pub mod floor;
 #[doc(hidden)]
 pub mod footer;
@@ -63,6 +62,7 @@ pub mod localclock;
 pub mod motion;
 #[doc(hidden)]
 pub mod overlay;
+pub mod pack;
 pub mod pathfind;
 /// Office pets — the `Pet`/`PetKind` model and per-floor selection.
 pub mod pet;

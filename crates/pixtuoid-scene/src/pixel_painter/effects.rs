@@ -362,8 +362,8 @@ mod tests {
     /// the glow paints, and an opaque, non-glass casing and chin around it.
     #[test]
     fn the_glow_lands_on_the_desk_arts_monitor() {
-        use crate::embedded_pack::{SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
-        let pack = crate::embedded_pack::test_default_pack();
+        use crate::pack::{SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
+        let pack = crate::pack::test_default_pack();
         let art = pack
             .animation("desk_north")
             .and_then(|a| a.frames().first())
