@@ -267,13 +267,15 @@ impl SkyView {
         self.blaze
     }
 
-    /// One pane's glass, over columns `x..x + w` and `glass_h` rows tall.
-    pub(crate) fn pane(&self, x: u16, w: u16, glass_h: u16) -> PaneSky<'_> {
+    /// One pane's glass, over columns `x..x + w` and `glass_h` rows tall, on a
+    /// grid of `d` cells to the unit.
+    pub(crate) fn pane(&self, x: u16, w: u16, glass_h: u16, d: u16) -> PaneSky<'_> {
         PaneSky {
             view: self,
             hosts_disc: self.disc.is_some_and(|d| d.hosted_by(x, w)),
             glass_h,
             clear_rows: crate::skyline::clear_sky_rows(glass_h),
+            d: d.max(1),
         }
     }
 }
@@ -285,13 +287,19 @@ pub(crate) struct PaneSky<'a> {
     hosts_disc: bool,
     glass_h: u16,
     clear_rows: u16,
+    d: u16,
 }
 
 impl PaneSky<'_> {
-    /// The colour `glass_dy` rows down this pane's glass, at sample point `p`,
-    /// dithered on grid cell `g`.
-    pub(crate) fn colour(&self, p: (f32, f32), g: (u16, u16), glass_dy: f32) -> Rgb {
+    /// The colour of grid cell `g`, `glass_dy` cells down this pane's glass.
+    /// A cell is sampled at its centre, in units with a unit's own centre on
+    /// its integer, so at one cell to the unit a cell samples where it stands.
+    /// A star is the one cell at its unit's centre.
+    pub(crate) fn colour(&self, g: (u16, u16), glass_dy: u16) -> Rgb {
         let v = self.view;
+        let d = self.d;
+        let unit = |c: u16| (f32::from(c) + 0.5) / f32::from(d) - 0.5;
+        let (p, glass_dy) = ((unit(g.0), unit(g.1)), unit(glass_dy));
         let share = crate::atmosphere::sky_share(glass_dy, self.glass_h);
         let band = crate::dither::nearest(share * (SKY_TONES - 1) as f32, g.0, g.1);
         let i = usize::from(band).min(SKY_TONES - 1);
@@ -312,8 +320,9 @@ impl PaneSky<'_> {
             }
             None => {}
         }
-        let (sx, sy) = (p.0 as u16, p.1 as u16);
+        let (sx, sy) = (g.0 / d, g.1 / d);
         if v.stars
+            && (g.0 % d, g.1 % d) == (d / 2, d / 2)
             && glass_dy < f32::from(self.clear_rows)
             && star_exists(sx, sy)
             && star_twinkle(sx, sy, v.now)
@@ -409,25 +418,51 @@ mod tests {
                 .flatten()
                 .chain(v.halo.into_iter().flatten())
                 .collect();
-            let pane = v.pane(0, 160, 30);
+            let pane = v.pane(0, 160, 30, 1);
             for y in 0..30u16 {
                 for x in 0..160u16 {
-                    let c = pane.colour((f32::from(x), f32::from(y)), (x, y), f32::from(y));
+                    let c = pane.colour((x, y), y);
                     assert!(palette.contains(&c), "{hour}h ({x},{y}): {c:?}");
                 }
             }
         }
     }
 
+    /// A star is one cell at its unit's centre at any density: the same stars
+    /// as at one cell to the unit, never a block.
+    #[test]
+    fn a_star_is_one_cell_at_any_density() {
+        let v = view(2);
+        let glass_h = 30;
+        let star = |c: Rgb| v.star.contains(&c);
+        let one = v.pane(0, 0, glass_h, 1);
+        let mut stars = 0;
+        for d in [2, 4] {
+            let dense = v.pane(0, 0, glass_h, d);
+            for y in 0..glass_h {
+                for x in 0..160u16 {
+                    let cells = (0..d)
+                        .flat_map(|j| (0..d).map(move |i| (x * d + i, y * d + j)))
+                        .filter(|&(ax, ay)| star(dense.colour((ax, ay), ay)))
+                        .count();
+                    let shines = star(one.colour((x, y), y));
+                    stars += usize::from(shines);
+                    assert_eq!(cells, usize::from(shines), "{d}: ({x}, {y})");
+                }
+            }
+        }
+        assert!(stars > 0, "a clear night shows stars");
+    }
+
     #[test]
     fn the_sky_is_flat_at_its_ends() {
         let v = view(12);
         let glass_h = 30;
-        let pane = v.pane(0, 0, glass_h);
+        let pane = v.pane(0, 0, glass_h, 1);
         let tile = |glass_dy: u16| -> Vec<Rgb> {
             (0..crate::dither::PERIOD)
                 .flat_map(|y| (0..crate::dither::PERIOD).map(move |x| (x, y)))
-                .map(|(x, y)| pane.colour((0.0, 0.0), (x, y), f32::from(glass_dy)))
+                .map(|(x, y)| pane.colour((x, y), glass_dy))
                 .collect()
         };
         assert!(tile(0).iter().all(|&c| c == v.sky[0]), "zenith");

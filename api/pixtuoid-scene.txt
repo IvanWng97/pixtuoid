@@ -42,7 +42,7 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::chitchat::ActiveChitchat
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::chitchat::ActiveChitchat
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::chitchat::ActiveChitchat
 pub struct pixtuoid_scene::chitchat::ChitchatBubble
-pub pixtuoid_scene::chitchat::ChitchatBubble::anchor: pixtuoid_scene::layout::Point
+pub pixtuoid_scene::chitchat::ChitchatBubble::speaker: pixtuoid_core::id::AgentId
 pub pixtuoid_scene::chitchat::ChitchatBubble::text: &'static str
 impl core::clone::Clone for pixtuoid_scene::chitchat::ChitchatBubble
 pub fn pixtuoid_scene::chitchat::ChitchatBubble::clone(&self) -> pixtuoid_scene::chitchat::ChitchatBubble
@@ -58,7 +58,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::chitchat::Chitc
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::chitchat::ChitchatBubble
 pub struct pixtuoid_scene::chitchat::Visitor
 pub pixtuoid_scene::chitchat::Visitor::agent_id: pixtuoid_core::id::AgentId
-pub pixtuoid_scene::chitchat::Visitor::anchor: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::chitchat::Visitor::room_id: core::option::Option<usize>
 pub pixtuoid_scene::chitchat::Visitor::wp_idx: usize
 impl core::clone::Clone for pixtuoid_scene::chitchat::Visitor
@@ -344,6 +343,7 @@ pub fn pixtuoid_scene::floor::floor_capacity(u16, u16, u64) -> usize
 pub fn pixtuoid_scene::floor::floor_seed(usize) -> u64
 pub fn pixtuoid_scene::floor::frame_epilogue(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_scene::floor::CoffeeState, impl core::iter::traits::collect::IntoIterator<Item = pixtuoid_core::id::AgentId>, std::time::SystemTime)
 pub fn pixtuoid_scene::floor::num_floors(&pixtuoid_core::state::SceneState) -> usize
+pub fn pixtuoid_scene::floor::observe_floor(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_scene::floor::CoffeeState, &mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::ObservedFloor>
 pub fn pixtuoid_scene::floor::project_floor_scene(&pixtuoid_core::state::SceneState, usize) -> pixtuoid_core::state::SceneState
 pub fn pixtuoid_scene::floor::render_floor(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_core::sprite::RgbBuffer, &mut pixtuoid_scene::floor::CoffeeState, &mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, pixtuoid_scene::floor::FrameInputs<'_>) -> core::option::Option<pixtuoid_scene::floor::FloorFrame>
 pub fn pixtuoid_scene::floor::track_for(std::time::SystemTime) -> crate::audio::TrackId

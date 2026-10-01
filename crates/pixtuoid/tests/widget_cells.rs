@@ -103,6 +103,7 @@ fn branding_visible_in_wall_display() {
 fn chitchat_bubble_text_appears_in_buffer() {
     use pixtuoid_scene::chitchat::ChitchatBubble;
     use pixtuoid_scene::layout::Point;
+    use pixtuoid_scene::pixel_painter::AgentFrame;
 
     let w = 60u16;
     let h = 30u16;
@@ -115,13 +116,26 @@ fn chitchat_bubble_text_appears_in_buffer() {
         height: h,
     };
     let bubble_text = "LGTM!";
+    let speaker = AgentFrame {
+        agent_id: pixtuoid_core::AgentId::from_transcript_path("/chat/0.jsonl"),
+        anchor: Point { x: 26, y: 40 },
+        w: 8,
+        h: 12,
+        label_anchor: Point { x: 30, y: 40 },
+    };
     let bubbles = vec![ChitchatBubble {
         text: bubble_text,
-        anchor: Point { x: 30, y: 40 },
+        speaker: speaker.agent_id,
     }];
 
     term.draw(|f| {
-        pixtuoid::tui::widgets::paint_chitchat_bubbles(f, &bubbles, scene_rect, &theme::NORMAL);
+        pixtuoid::tui::widgets::paint_chitchat_bubbles(
+            f,
+            &bubbles,
+            &[speaker],
+            scene_rect,
+            &theme::NORMAL,
+        );
     })
     .unwrap();
 

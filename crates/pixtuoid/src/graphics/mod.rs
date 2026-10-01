@@ -19,17 +19,19 @@ use pixtuoid_scene::render_scale::RenderScale;
 use ratatui::layout::Size as TermSize;
 
 #[cfg(feature = "graphics")]
-mod iterm2;
+pub(crate) mod iterm2;
 #[cfg(feature = "graphics")]
-mod kitty;
+pub(crate) mod kitty;
 #[cfg(feature = "graphics")]
 mod probe;
 #[cfg(feature = "graphics")]
-mod sixel;
-mod tiles;
+pub(crate) mod sixel;
+#[cfg(feature = "graphics")]
+pub(crate) mod tiles;
 
 #[cfg(feature = "graphics")]
 pub(crate) use probe::probe;
+#[cfg(feature = "graphics")]
 use tiles::TileShape;
 
 /// How long each wait of the capability probe may take: on Unix, the query start
@@ -68,11 +70,19 @@ impl ImageProtocol {
         }
     }
 
+    /// The least time between two frames' transmits: kitty's is the event
+    /// loop's tick, and SIXEL and iTerm2 encode heavier images less often.
+    #[cfg(feature = "graphics")]
+    pub(crate) fn cadence(self) -> std::time::Duration {
+        std::time::Duration::from_millis(match self {
+            Self::Kitty => 0,
+            Self::Sixel => 66,
+            Self::Iterm2 => 100,
+        })
+    }
+
     /// The cells one re-sent piece of the image covers.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the compositor wires the tiles")
-    )]
+    #[cfg(feature = "graphics")]
     pub(crate) fn tile(self) -> TileShape {
         match self {
             Self::Kitty => TileShape { cols: 4, rows: 2 },
@@ -272,6 +282,7 @@ fn raw_scale_for_cell(cell: CellSize) -> u16 {
 pub(crate) struct Fit {
     scale: RenderScale,
     density: Density,
+    render: RenderScale,
     logical: Size,
 }
 
@@ -282,21 +293,31 @@ impl Fit {
     /// over an image `area` cells big. `None` when no multiple of it lies within
     /// the fit's bound.
     pub(crate) fn new(cell: CellSize, area: TermSize, max_density: Density) -> Option<Self> {
-        let scale = RenderScale::fit(raw_scale_for_cell(cell), max_density)?;
+        let fit = Self {
+            scale: RenderScale::fit(raw_scale_for_cell(cell), max_density)?,
+            density: max_density,
+            render: RenderScale::new(max_density.get())?,
+            logical: Size { w: 0, h: 0 },
+        };
+        Some(fit.over(cell, area))
+    }
+
+    /// This fit over an image `area` cells big: the scale stays, and the office
+    /// takes the area's shape.
+    pub(crate) fn over(self, cell: CellSize, area: TermSize) -> Self {
         // The image anchors on cells, so its pixels are the cells', never a
         // window size that counts the terminal's padding; past what a buffer
         // can address, the office stops growing.
         let px = |cells: u16, cell_px: u16| {
             u16::try_from(u32::from(cells) * u32::from(cell_px)).unwrap_or(u16::MAX)
         };
-        Some(Self {
-            scale,
-            density: max_density,
+        Self {
             logical: Size {
-                w: scale.logical(px(area.width, cell.w)),
-                h: scale.logical(px(area.height, cell.h)),
+                w: self.scale.logical(px(area.width, cell.w)),
+                h: self.scale.logical(px(area.height, cell.h)),
             },
-        })
+            ..self
+        }
     }
 
     /// Real pixels per logical office unit.
@@ -307,6 +328,12 @@ impl Fit {
     /// The density the office renders at before the upscale.
     pub(crate) fn density(self) -> Density {
         self.density
+    }
+
+    /// [`Fit::density`] as the scale the office renders at.
+    #[cfg(feature = "graphics")]
+    pub(crate) fn render_scale(self) -> RenderScale {
+        self.render
     }
 
     /// The whole factor the density render is upscaled by.
@@ -471,8 +498,8 @@ pub(crate) fn run_probe() -> Probe {
 
 impl Plan {
     /// The plan as `doctor`'s `graphics:` line: the profile this terminal is
-    /// CAPABLE of — "would render", since `run` still paints classic — and why
-    /// it falls back when it is not.
+    /// CAPABLE of — "would render", since only `run --graphics` paints it —
+    /// and why it falls back when it is not.
     pub(crate) fn diagnostic_row(self) -> String {
         match self {
             Plan::Cutaway {
@@ -499,6 +526,40 @@ impl Plan {
     }
 }
 
+/// What the terminal unwind writes before it leaves the alt screen: our
+/// images' delete, once any reached the terminal.
+pub(crate) fn unwind_prelude() -> Vec<u8> {
+    #[cfg(feature = "graphics")]
+    return [
+        kitty::unwind(),
+        grid_unwind(IN_GRID.load(std::sync::atomic::Ordering::Relaxed)),
+    ]
+    .concat();
+    #[cfg(not(feature = "graphics"))]
+    Vec::new()
+}
+
+/// Whether this process has drawn SIXEL or iTerm2 pixels, which sit in the
+/// text grid rather than in an image store kitty-style deletes reach: read by
+/// an unwind that may run from the panic hook.
+#[cfg(feature = "graphics")]
+pub(crate) static IN_GRID: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// The unwind's part for pixels in the grid: nothing unless this process
+/// `drew` some; then an ST that ends an image a failed write cut short, and
+/// ED 2. 1049 clears the alternate screen on the way IN (ctlseqs, "Use
+/// Alternate Screen Buffer ... clearing it first"), so nothing promises its
+/// pixels go on the way out.
+#[cfg(feature = "graphics")]
+pub(crate) fn grid_unwind(drew: bool) -> Vec<u8> {
+    if drew {
+        [kitty::ST, b"\x1b[2J"].concat()
+    } else {
+        Vec::new()
+    }
+}
+
 /// Built without the `graphics` feature: there is no query to run, whatever
 /// the terminal.
 #[cfg(not(feature = "graphics"))]
@@ -509,6 +570,13 @@ pub(crate) fn probe(_ask: bool) -> Probe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "graphics")]
+    #[test]
+    fn the_grid_unwind_ends_any_image_then_erases_the_display() {
+        assert_eq!(grid_unwind(false), b"");
+        assert_eq!(grid_unwind(true), b"\x1b\\\x1b[2J");
+    }
 
     const CELL_8X16: CellSize = CellSize { w: 8, h: 16 };
     /// A pack with no density variants.
