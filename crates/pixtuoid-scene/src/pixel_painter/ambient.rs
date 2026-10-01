@@ -41,14 +41,7 @@ pub(super) fn paint_dust_motes(
     floor_seed: u64,
     moment: &Moment,
 ) {
-    let look = &moment.look;
-    // Motes scatter the DIRECT beam, so density rides [`SkyTones::beam`](crate::atmosphere::SkyTones::beam) (full
-    // under clear sky, faint through haze/snow-glare, zero under thick
-    // overcast/rain); `look.sunlight` adds the daylight ramp.
-    if look.beam <= 0.0 {
-        return;
-    }
-    let visibility = look.sunlight * look.beam;
+    let visibility = crate::motes::visibility(&moment.look);
     if visibility <= 0.0 {
         return;
     }

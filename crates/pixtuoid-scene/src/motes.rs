@@ -24,6 +24,13 @@ const MOTES_PER_COLUMN: usize = 3;
 /// How much of a mote shows in a full beam, at the height of its fall.
 pub(crate) const MOTE_PEAK: f32 = 0.7;
 
+/// How much of the motes `look`'s sky lets show: they scatter the direct beam
+/// ([`SkyTones::beam`](crate::atmosphere::SkyTones::beam)), and the daylight
+/// ramp brings them up.
+pub(crate) fn visibility(look: &crate::atmosphere::SkyTones) -> f32 {
+    (look.sunlight * look.beam).max(0.0)
+}
+
 /// Deterministic per `(floor_seed, particle_id, now)`: sine drift in x, slow
 /// fall in y, alpha fading in the top/bottom 15% bands so motes don't pop
 /// on/off at the spill boundary.
@@ -72,7 +79,7 @@ pub(crate) fn dust_mote_positions(
 }
 
 /// Returns one `SunbeamColumn` per painted window, centred on the pane and
-/// starting at the floor row, so the motes drift through the window's
+/// starting at the ground's first row, so the motes drift through the window's
 /// [`Light::Spill`](crate::lighting::Light::Spill).
 pub(crate) fn window_spill_columns(layout: &Layout) -> Vec<SunbeamColumn> {
     let top_wall_h = layout.wall_band_h();
