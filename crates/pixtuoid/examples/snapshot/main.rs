@@ -125,8 +125,7 @@ struct SnapshotArgs {
     #[arg(long, value_delimiter = ',')]
     openclaw_ports: Vec<String>,
 
-    /// Override local hour-of-day (0–23) used by time-of-day effects
-    /// (dust motes, lighting).
+    /// Override local hour-of-day (0–23) used by time-of-day lighting.
     #[arg(long)]
     now_hour: Option<u32>,
 
