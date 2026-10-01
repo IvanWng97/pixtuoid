@@ -28,7 +28,7 @@ fn weather_name_round_trips_for_every_variant() {
 }
 
 #[test]
-fn emitter_is_sun_by_day_moon_by_night_never_both() {
+fn body_is_sun_by_day_moon_by_night_never_both() {
     for slot in 0..48u32 {
         let (h, m) = (slot / 2, (slot % 2) * 30);
         let s = at_hour_min(h, m);
