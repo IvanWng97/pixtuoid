@@ -235,17 +235,63 @@ fn night_floor_varies_by_weather() {
 
 #[test]
 fn lightning_envelope_is_a_two_pulse_then_dark() {
+    let mid = |phase: u64| phase * MIN_FLASH_PHASE_MS + MIN_FLASH_PHASE_MS / 2;
     assert_eq!(lightning_envelope(0), 1.0, "primary strike");
     assert!(
-        lightning_envelope(30) < lightning_envelope(0),
+        lightning_envelope(mid(1)) < lightning_envelope(mid(0)),
         "dim between flickers"
     );
     assert!(
-        lightning_envelope(50) > lightning_envelope(30),
+        lightning_envelope(mid(2)) > lightning_envelope(mid(1)),
         "after-flash rebrightens"
     );
     assert_eq!(lightning_envelope(LIGHTNING_FLASH_MS), 0.0, "flash is over");
     assert_eq!(lightning_envelope(5000), 0.0, "dark between strikes");
+}
+
+/// A strike stays inside the photosensitive-safe envelope (WCAG 2.3.1, as the
+/// design rule tightens it): at most four phases, each at least
+/// [`MIN_FLASH_PHASE_MS`], and at most three flashes a second, where a flash
+/// is a rise and a fall of 10% of full luminance.
+#[test]
+fn a_strike_keeps_the_photosensitive_flash_bounds() {
+    let levels: Vec<f32> = (0..=LIGHTNING_FLASH_MS).map(lightning_envelope).collect();
+    let mut phases: Vec<(f32, u64)> = Vec::new();
+    for &l in &levels {
+        match phases.last_mut() {
+            Some((level, len)) if *level == l => *len += 1,
+            _ => phases.push((l, 1)),
+        }
+    }
+    let lit = &phases[..phases.len() - 1];
+    assert!(lit.len() <= 4, "{lit:?}");
+    assert!(
+        lit.iter().all(|&(_, len)| len >= MIN_FLASH_PHASE_MS),
+        "{lit:?}"
+    );
+    let changes: Vec<f32> = std::iter::once(0.0)
+        .chain(phases.iter().map(|&(l, _)| l))
+        .collect::<Vec<_>>()
+        .windows(2)
+        .map(|w| w[1] - w[0])
+        .filter(|d| d.abs() >= 0.1)
+        .collect();
+    let opposing = changes
+        .windows(2)
+        .filter(|w| w[0].signum() != w[1].signum())
+        .count();
+    assert!(opposing.div_ceil(2) <= 3, "{changes:?}");
+}
+
+/// Two strikes never fall within a second of each other, so their flashes
+/// never add up past three a second.
+#[test]
+fn strikes_are_at_least_a_second_apart() {
+    for bucket in 0..100_000u64 {
+        let end = bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket) + LIGHTNING_FLASH_MS;
+        let next = (bucket + 1) * LIGHTNING_PERIOD_MS + strike_offset(bucket + 1);
+        assert!(next - end >= FLASH_SEPARATION_MS, "bucket {bucket}");
+    }
 }
 
 #[test]
