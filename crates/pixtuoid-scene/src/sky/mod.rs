@@ -291,26 +291,35 @@ fn moon_phase_at(now: SystemTime) -> f32 {
 /// Lightning cadence: one strike per bucket this long, at a hashed offset
 /// ([`strike_offset`]) — a much faster cadence reads as a hyperactive storm.
 const LIGHTNING_PERIOD_MS: u64 = 15000;
+/// The shortest a flash's phase may last: each of [`LIGHTNING_PHASES`] holds
+/// this long, the photosensitive-safe bound.
+const MIN_FLASH_PHASE_MS: u64 = 100;
+/// A strike's levels in order, each held [`MIN_FLASH_PHASE_MS`]: the primary
+/// strike, a brief dim, an after-flash, so it reads as a flicker rather than a
+/// single blink.
+const LIGHTNING_PHASES: [f32; 3] = [1.0, 0.15, 0.55];
 /// How long one strike's [`lightning_envelope`] window lasts.
-const LIGHTNING_FLASH_MS: u64 = 90;
+const LIGHTNING_FLASH_MS: u64 = LIGHTNING_PHASES.len() as u64 * MIN_FLASH_PHASE_MS;
+/// The least dark time between one strike's end and the next's start, so two
+/// strikes never put more than three flashes in a second.
+const FLASH_SEPARATION_MS: u64 = 1000;
 
 /// Intensity envelope (0..1) of a lightning flash given ms since the strike
-/// began: primary strike → brief dim → after-flash, so it reads as a real
-/// flicker rather than a single on/off blink. Returns 0 outside the flash.
+/// began: its [`LIGHTNING_PHASES`] in turn, then 0.
 fn lightning_envelope(since_strike_ms: u64) -> f32 {
-    match since_strike_ms {
-        0..=24 => 1.0,   // primary strike
-        25..=39 => 0.15, // dim between flickers
-        40..=69 => 0.55, // after-flash
-        _ => 0.0,
-    }
+    usize::try_from(since_strike_ms / MIN_FLASH_PHASE_MS)
+        .ok()
+        .and_then(|i| LIGHTNING_PHASES.get(i).copied())
+        .unwrap_or(0.0)
 }
 
 /// Per-bucket strike offset (ms into the bucket) so strikes don't fire on a
 /// fixed metronome. Each `LIGHTNING_PERIOD_MS`-long bucket hashes to its own
-/// offset in `[0, PERIOD - FLASH)`, keeping the whole flash inside the bucket.
+/// offset, leaving the flash and [`FLASH_SEPARATION_MS`] after it inside the
+/// bucket, so the next bucket's strike is never too close.
 fn strike_offset(bucket: u64) -> u64 {
-    crate::splitmix_draw(bucket, 1) % (LIGHTNING_PERIOD_MS - LIGHTNING_FLASH_MS)
+    crate::splitmix_draw(bucket, 1)
+        % (LIGHTNING_PERIOD_MS - LIGHTNING_FLASH_MS - FLASH_SEPARATION_MS)
 }
 
 /// [`lightning_envelope`] for the clock at `now`, or 0 when not mid-strike —
