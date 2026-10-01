@@ -1615,17 +1615,14 @@ fn each_pass_of_the_decor_bag_is_a_permutation_of_the_roster() {
     );
 }
 
-/// Every pod-decor kind must be able to open a floor — a one-slot floor renders
-/// only whatever the bag deals first, so a kind that never leads is a sprite
-/// that never appears. The rotation this replaced stranded `Tv` exactly that
-/// way on all ten production floors.
+/// Every pod-decor kind must be able to open a floor's deal — a one-slot floor
+/// renders only whatever the bag deals first, so a kind that never leads is a
+/// sprite that never appears there. The rotation this replaced stranded `Tv`
+/// exactly that way on all ten production floors.
 #[test]
 fn every_pod_decor_kind_can_open_a_floor() {
     let mut seen: Vec<crate::layout::PodDecor> = (0..crate::floor::MAX_FLOORS)
-        .filter_map(|f| {
-            SceneLayout::compute_with_seed(192, 80, None, crate::floor::floor_seed(f))
-                .and_then(|l| l.pod_decor.first().map(|d| d.kind))
-        })
+        .map(|f| super::compute::decor_for_slot(crate::floor::floor_seed(f), 0))
         .collect();
     seen.sort_by_key(|k| format!("{k:?}"));
     seen.dedup();
