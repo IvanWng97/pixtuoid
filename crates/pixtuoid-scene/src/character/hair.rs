@@ -391,7 +391,7 @@ mod tests {
                 );
                 let dropped = !(0..f.height())
                     .any(|y| (0..f.width()).any(|x| f.get(x, y).copied().flatten() == Some(H)));
-                let flagged = !crate::embedded_pack::validate_pack(&pack)
+                let flagged = !crate::pack::validate_pack(&pack)
                     .overhanging_hair
                     .is_empty();
                 let below = hy + mark >= side + side;
@@ -411,7 +411,7 @@ mod tests {
     #[test]
     #[cfg(feature = "density-art")]
     fn every_bundled_character_dressed_in_every_style_keeps_its_outline_whole() {
-        let pack = crate::embedded_pack::test_default_pack();
+        let pack = crate::pack::test_default_pack();
         let line = pack.character_outline();
         assert!(line.is_some(), "the bundled pack outlines its characters");
         let (mut dressed, mut flaws) = (0, Vec::new());

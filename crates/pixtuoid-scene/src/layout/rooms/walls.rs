@@ -123,8 +123,8 @@ pub(crate) fn stitch_vertical_wall(
 
 /// One room wall as every painter draws it: where its glass stands, which of
 /// its ends a doorway frames, and the bands it sorts in. Built once from
-/// [`Layout::room_walls`](crate::layout::Layout::room_walls) and
-/// [`Layout::doorways`](crate::layout::Layout::doorways), so no painter
+/// [`SceneLayout::room_walls`](crate::layout::SceneLayout::room_walls) and
+/// [`SceneLayout::doorways`](crate::layout::SceneLayout::doorways), so no painter
 /// re-derives a room's perimeter, closes a doorway, or stands a wall the
 /// layout never cut.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -925,8 +925,8 @@ mod tests {
             (160, 192),
         ] {
             for seed in 0..12 {
-                let l =
-                    crate::layout::Layout::compute_with_seed(w, h, None, seed).expect("lays out");
+                let l = crate::layout::SceneLayout::compute_with_seed(w, h, None, seed)
+                    .expect("lays out");
                 for &piece in &l.wall_pieces {
                     met += 1;
                     let (at, size) = piece.visual();

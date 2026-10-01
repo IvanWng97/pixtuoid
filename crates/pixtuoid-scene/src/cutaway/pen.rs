@@ -60,7 +60,7 @@ impl Pen {
     }
 
     /// The pen for `pack` at `scale`: the densest of its variant densities that
-    /// divides `scale`, else the base art's. [`densest_frame`](crate::embedded_pack::densest_frame)
+    /// divides `scale`, else the base art's. [`densest_frame`](crate::pack::densest_frame)
     /// applies the same rule per piece, so the room shares every piece's grid
     /// only while the pack draws its variants at one density
     /// (`the_bundled_pack_draws_every_variant_at_one_density`).
@@ -241,7 +241,7 @@ mod tests {
     #[test]
     #[cfg(feature = "density-art")]
     fn the_bundled_pack_draws_every_variant_at_one_density() {
-        let pack = crate::embedded_pack::test_default_pack();
+        let pack = crate::pack::test_default_pack();
         assert_eq!(
             pack.density_variants().len(),
             1,
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn a_pens_density_is_the_densest_the_pack_draws_at_that_scale() {
-        let pack = crate::embedded_pack::test_default_pack();
+        let pack = crate::pack::test_default_pack();
         let d = pack.max_density_variant().get();
         let at = |s: u16| Pen::for_pack(RenderScale::new(s).expect("nonzero"), &pack);
         assert_eq!(at(d * 2), pen(d * 2, d), "the variant's grid");

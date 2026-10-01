@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 use pixtuoid::tui::tui_renderer::TuiRenderer;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
-use pixtuoid_scene::embedded_pack::load_bundled_pack;
+use pixtuoid_scene::pack::load_bundled_pack;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 

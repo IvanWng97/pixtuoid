@@ -870,3 +870,18 @@ fn a_changing_storm_fires_whole_strikes_by_its_share() {
          {partial_fired} fired, {partial_skipped} skipped"
     );
 }
+
+/// No strike runs across a slot's start, so a storm's strike never lights the
+/// pure weather of the slot that follows.
+#[test]
+fn no_strike_runs_into_the_next_slot() {
+    for bucket in 0..200_000u64 {
+        let start = bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket);
+        let last = start + LIGHTNING_FLASH_MS - 1;
+        assert_eq!(
+            start / SLOT_MS,
+            last / SLOT_MS,
+            "bucket {bucket}'s strike runs into the next slot"
+        );
+    }
+}

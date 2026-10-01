@@ -91,7 +91,7 @@ pub(crate) fn render_hash(
     use std::hash::{Hash, Hasher};
 
     let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(96, 36)).unwrap();
-    let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().unwrap();
+    let pack = pixtuoid_scene::pack::load_bundled_pack().unwrap();
     make_draw_ctx!(draw_ctx, scene, &pack, now);
     draw_ctx.theme = theme;
     draw_ctx.world.floor = floor;

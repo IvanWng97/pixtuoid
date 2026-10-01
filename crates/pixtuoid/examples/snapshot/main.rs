@@ -14,7 +14,7 @@ use anyhow::{Context as _, Result};
 use clap::Parser;
 use pixtuoid::tui::renderer::{DrawCtx, draw_scene};
 use pixtuoid_core::SceneState;
-use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
+use pixtuoid_scene::pack::{PackSource, load_sprite_pack};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
