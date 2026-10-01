@@ -1863,7 +1863,7 @@ fn queued(layout: &Layout, frame: &SimFrame) -> Furnishings<'static> {
         layout,
         pack: &pack,
         now,
-        sky: crate::sky::Sky::at(now),
+        sky: crate::sky::Sky::clock(now),
         buf: &mut buf,
         cache: &mut cache,
         base_fill: &mut base_fill,
@@ -2921,63 +2921,6 @@ fn furniture_corner_clip_does_not_panic() {
 }
 
 #[test]
-fn force_weather_sets_known_clears_none_and_errs_on_unknown() {
-    // `t`'s natural (un-forced) weather is NOT Storm, so dropping the override
-    // shows up in the observed weather, not just in the Ok/Err return. The
-    // override is a thread-local Cell — every assert must run on one thread.
-    let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
-    force_weather(None).expect("clear is Ok");
-    let natural = crate::sky::Sky::at(t).weather();
-
-    assert!(force_weather(Some("storm")).is_ok(), "known name → Ok");
-    assert_eq!(
-        crate::sky::Sky::at(t).weather(),
-        crate::sky::Weather::Storm,
-        "force_weather(storm) must drive the sky to Storm",
-    );
-    assert_eq!(
-        crate::sky::Sky::at(t + std::time::Duration::from_secs(987_654)).weather(),
-        crate::sky::Weather::Storm,
-        "the override must ignore the clock",
-    );
-
-    assert!(
-        force_weather(Some("STORM")).is_ok(),
-        "case-insensitive → Ok"
-    );
-    assert_eq!(crate::sky::Sky::at(t).weather(), crate::sky::Weather::Storm);
-
-    assert!(force_weather(Some("snow")).is_ok());
-    assert_eq!(
-        crate::sky::Sky::at(t).weather(),
-        crate::sky::Weather::Snow,
-        "a second known name must re-set the override",
-    );
-
-    let err = force_weather(Some("not-a-weather")).expect_err("unknown → Err");
-    assert_eq!(
-        err,
-        weather_names(),
-        "Err payload must be the canonical weather names",
-    );
-    assert_eq!(
-        crate::sky::Sky::at(t).weather(),
-        crate::sky::Weather::Snow,
-        "an unknown name must NOT touch the override",
-    );
-
-    assert!(force_weather(None).is_ok(), "None → Ok");
-    assert_eq!(
-        crate::sky::Sky::at(t).weather(),
-        natural,
-        "None must restore the clock-based selection",
-    );
-
-    // Reset so the override can't leak into sibling time-based weather tests.
-    force_weather(None).expect("reset");
-}
-
-#[test]
 fn weather_gallery_manifest_matches_the_weather_enum() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../site/src/weather.json");
     let json = match std::fs::read_to_string(path) {
@@ -3730,7 +3673,7 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
             layout: &layout,
             pack: &pack,
             now,
-            sky: crate::sky::Sky::at(now),
+            sky: crate::sky::Sky::clock(now),
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -3981,7 +3924,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             layout: &layout,
             pack: &pack,
             now,
-            sky: crate::sky::Sky::at(now),
+            sky: crate::sky::Sky::clock(now),
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -4109,7 +4052,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 layout: &layout,
                 pack: &pack,
                 now,
-                sky: crate::sky::Sky::at(now),
+                sky: crate::sky::Sky::clock(now),
                 buf,
                 cache: &mut cache,
                 base_fill: &mut base_fill,
@@ -4889,31 +4832,26 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
 }
 
 #[test]
-fn precipitation_level_maps_audible_rain_and_honors_the_override() {
-    // force_weather's override is thread-local — reset at the end so it can't
-    // leak into the sibling time-based weather tests.
+fn precipitation_level_maps_audible_rain_under_its_policy() {
+    use crate::sky::Weather;
     let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
-
-    force_weather(Some("storm")).expect("storm is known");
-    assert_eq!(precipitation_level(t), 1.0, "storm is full precipitation");
-
-    force_weather(Some("rain")).expect("rain is known");
-    let rain = precipitation_level(t);
+    let level = |w| precipitation_level(t, WeatherPolicy::Forced(w));
+    assert_eq!(level(Weather::Storm), 1.0, "storm is full precipitation");
+    let rain = level(Weather::Rain);
     assert!(
         rain > 0.0 && rain < 1.0,
         "rain sits strictly between clear and storm, got {rain}"
     );
-
-    for quiet in ["clear", "snow", "fog", "overcast", "windy", "smog"] {
-        force_weather(Some(quiet)).expect("known name");
-        assert_eq!(
-            precipitation_level(t),
-            0.0,
-            "{quiet} must be silent precipitation"
-        );
+    for quiet in [
+        Weather::Clear,
+        Weather::Snow,
+        Weather::Fog,
+        Weather::Overcast,
+        Weather::Windy,
+        Weather::Smog,
+    ] {
+        assert_eq!(level(quiet), 0.0, "{quiet:?} must be silent precipitation");
     }
-
-    force_weather(None).expect("restore");
 }
 
 #[test]
@@ -5235,7 +5173,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 layout: &layout,
                 pack: &pack,
                 now,
-                sky: crate::sky::Sky::at(now),
+                sky: crate::sky::Sky::clock(now),
                 buf: &mut buf,
                 cache: &mut cache,
                 base_fill: &mut base_fill,
@@ -5465,7 +5403,7 @@ fn paint_drawn(
             layout,
             pack,
             now,
-            sky: crate::sky::Sky::at(now),
+            sky: crate::sky::Sky::clock(now),
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),

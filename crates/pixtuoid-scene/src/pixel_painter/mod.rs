@@ -178,36 +178,17 @@ use palette::agent_overrides;
 use seat::paint_character_at;
 use wall::enqueue_room_walls;
 
-/// The weather names accepted by [`force_weather`], canonical order.
+pub use crate::sky::{Weather, WeatherPolicy};
+
+/// The weather names [`WeatherPolicy::from_name`] accepts, canonical order.
 pub fn weather_names() -> Vec<&'static str> {
     crate::sky::Weather::ALL.iter().map(|w| w.name()).collect()
 }
 
-/// Force every subsequent render **on this thread** to a specific weather (by
-/// name, case-insensitive), or `None` to restore the clock-based selection.
-/// It's a thread-local shared by every `Office` in the one wasm module, so the
-/// last writer before a render wins and each surface must set its own value
-/// every frame. `Err` carries the valid names when `name` is unknown.
-pub fn force_weather(name: Option<&str>) -> Result<(), Vec<&'static str>> {
-    match name {
-        None => {
-            crate::sky::set_weather_override(None);
-            Ok(())
-        }
-        Some(s) => match crate::sky::Weather::from_name(s) {
-            Some(w) => {
-                crate::sky::set_weather_override(Some(w));
-                Ok(())
-            }
-            None => Err(weather_names()),
-        },
-    }
-}
-
-/// How hard it is raining at `now` (0.0 dry … 1.0 storm; snow and fog are 0.0) —
-/// the audio model's weather feed.
-pub fn precipitation_level(now: std::time::SystemTime) -> f32 {
-    crate::sky::Sky::at(now).precipitation()
+/// How hard it is raining at `now` under `weather` (0.0 dry … 1.0 storm; snow
+/// and fog are 0.0) — the audio model's weather feed.
+pub fn precipitation_level(now: std::time::SystemTime, weather: WeatherPolicy) -> f32 {
+    crate::sky::Sky::at(now, weather).precipitation()
 }
 
 /// Whether the office's sky shows the SUN at hour-of-day `hour` (0..24).
@@ -309,7 +290,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             layout: ctx.layout,
             pack: ctx.world.pack,
             now: ctx.world.now,
-            sky: crate::sky::Sky::at(ctx.world.now),
+            sky: crate::sky::Sky::at(ctx.world.now, ctx.world.floor.weather),
             buf: &mut *ctx.buf,
             cache: &mut ctx.store.cache,
             base_fill: &mut ctx.store.base_fill,

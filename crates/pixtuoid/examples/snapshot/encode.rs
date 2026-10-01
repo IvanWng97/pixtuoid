@@ -393,6 +393,7 @@ pub(crate) struct AnimJob<'a> {
     pub(crate) scene: &'a SceneState,
     pub(crate) pack: &'a Pack,
     pub(crate) theme: &'static Theme,
+    pub(crate) weather: pixtuoid_scene::pixel_painter::WeatherPolicy,
 }
 
 impl AnimJob<'_> {
@@ -437,6 +438,7 @@ pub(crate) fn save_renderer_animation(
     pets: Vec<pixtuoid_scene::pet::Pet>,
 ) -> Result<()> {
     let mut r = pixtuoid::tui::tui_renderer::TuiRenderer::new(term, job.theme, pets);
+    r.set_weather(job.weather);
     let mut fired = vec![false; navigations.len()];
     // 0, not the caller's skip_ms: clap keeps every pre-roll flag off this path
     // (`conflicts_with` on --navigate-at / --pets), and a pre-roll would shift the
