@@ -210,7 +210,7 @@ pub pixtuoid_scene::floor::FloorSession::floor: pixtuoid_scene::floor::PerFloor
 pub pixtuoid_scene::floor::FloorSession::office: pixtuoid_scene::floor::PerOffice
 impl pixtuoid_scene::floor::FloorSession
 pub fn pixtuoid_scene::floor::FloorSession::audio_frame(&mut self, &pixtuoid_core::state::SceneState, usize, std::time::SystemTime) -> AudioFrame
-pub fn pixtuoid_scene::floor::FloorSession::board(&self, &pixtuoid_core::state::SceneState, std::time::SystemTime, core::option::Option<(usize, usize)>) -> crate::board::BoardModel
+pub fn pixtuoid_scene::floor::FloorSession::board(&self, &pixtuoid_core::state::SceneState, std::time::SystemTime) -> crate::board::BoardModel
 pub fn pixtuoid_scene::floor::FloorSession::buf(&self) -> &pixtuoid_core::sprite::RgbBuffer
 pub fn pixtuoid_scene::floor::FloorSession::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::FloorSession::new() -> Self
@@ -339,7 +339,6 @@ impl core::marker::Unpin for pixtuoid_scene::floor::ProjectedSlot
 impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::ProjectedSlot
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::ProjectedSlot
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::ProjectedSlot
-pub const pixtuoid_scene::floor::FLOOR_SEED_MULTIPLIER: u64
 pub fn pixtuoid_scene::floor::build_floor_scene(&pixtuoid_core::state::SceneState, usize) -> alloc::vec::Vec<pixtuoid_scene::floor::ProjectedSlot>
 pub fn pixtuoid_scene::floor::floor_capacity(u16, u16, u64) -> usize
 pub fn pixtuoid_scene::floor::floor_seed(usize) -> u64
@@ -1460,6 +1459,27 @@ impl core::marker::Unpin for pixtuoid_scene::pixel_painter::CharacterGlow
 impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::CharacterGlow
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::CharacterGlow
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::CharacterGlow
+pub struct pixtuoid_scene::pixel_painter::AgentFrame
+pub pixtuoid_scene::pixel_painter::AgentFrame::agent_id: pixtuoid_core::id::AgentId
+pub pixtuoid_scene::pixel_painter::AgentFrame::anchor: pixtuoid_scene::layout::Point
+pub pixtuoid_scene::pixel_painter::AgentFrame::h: u16
+pub pixtuoid_scene::pixel_painter::AgentFrame::w: u16
+impl core::clone::Clone for pixtuoid_scene::pixel_painter::AgentFrame
+pub fn pixtuoid_scene::pixel_painter::AgentFrame::clone(&self) -> pixtuoid_scene::pixel_painter::AgentFrame
+impl core::cmp::Eq for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::cmp::PartialEq for pixtuoid_scene::pixel_painter::AgentFrame
+pub fn pixtuoid_scene::pixel_painter::AgentFrame::eq(&self, &pixtuoid_scene::pixel_painter::AgentFrame) -> bool
+impl core::fmt::Debug for pixtuoid_scene::pixel_painter::AgentFrame
+pub fn pixtuoid_scene::pixel_painter::AgentFrame::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::marker::StructuralPartialEq for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::marker::Freeze for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::marker::Send for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::marker::Sync for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::marker::Unpin for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::AgentFrame
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::AgentFrame
 pub struct pixtuoid_scene::pixel_painter::CharacterPlacement
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::agent_idx: usize
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::anchor: pixtuoid_scene::layout::Point
@@ -1520,6 +1540,7 @@ impl<'a> core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::PixelCtx<'
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::PixelCtx<'a>
 impl<'a> !core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::PixelCtx<'a>
 pub struct pixtuoid_scene::pixel_painter::PixelPassResult
+pub pixtuoid_scene::pixel_painter::PixelPassResult::agents: alloc::vec::Vec<pixtuoid_scene::pixel_painter::AgentFrame>
 pub pixtuoid_scene::pixel_painter::PixelPassResult::chitchat_bubbles: alloc::vec::Vec<pixtuoid_scene::chitchat::ChitchatBubble>
 pub pixtuoid_scene::pixel_painter::PixelPassResult::mascots: alloc::vec::Vec<pixtuoid_scene::pixel_painter::MascotFrame>
 pub pixtuoid_scene::pixel_painter::PixelPassResult::new_coffee_carriers: alloc::vec::Vec<pixtuoid_core::id::AgentId>
@@ -1550,7 +1571,6 @@ impl core::marker::Unpin for pixtuoid_scene::pixel_painter::SimFrame
 impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::SimFrame
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::SimFrame
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::SimFrame
-pub fn pixtuoid_scene::pixel_painter::character_anchor(&pixtuoid_core::state::AgentSlot, &pixtuoid_scene::layout::Layout, std::time::SystemTime, &mut pixtuoid_scene::pose::RouteCtx<'_>) -> core::option::Option<pixtuoid_scene::layout::Point>
 pub fn pixtuoid_scene::pixel_painter::force_weather(core::option::Option<&str>) -> core::result::Result<(), alloc::vec::Vec<&'static str>>
 pub fn pixtuoid_scene::pixel_painter::hour_is_day(f32) -> bool
 pub fn pixtuoid_scene::pixel_painter::is_day_at(std::time::SystemTime) -> bool

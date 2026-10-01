@@ -268,7 +268,7 @@ fn paint_streaks(
         let seed = window_idx as u64 * spec.seed_mult + i;
         let sx = (seed.wrapping_mul(spec.sx_mult) % gw as u64) as u16;
         let speed = spec.speed_base + (seed.wrapping_mul(0x4f6c_dd1d) % spec.speed_span);
-        let offset = seed.wrapping_mul(0x85eb_ca6b) % (gh as u64).max(1);
+        let offset = seed.wrapping_mul(u64::from(crate::MURMUR3_FMIX32_M1)) % (gh as u64).max(1);
         let phase = (elapsed_ms / speed + offset) % gh as u64;
         match spec.particle {
             Particle::Streak {

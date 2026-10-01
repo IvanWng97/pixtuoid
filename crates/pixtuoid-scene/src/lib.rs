@@ -41,6 +41,8 @@ pub mod chitchat;
 pub(crate) mod composite;
 pub(crate) mod creatures;
 #[doc(hidden)]
+pub use creatures::PET_CYCLE_MS;
+#[doc(hidden)]
 pub mod cutaway;
 pub(crate) mod dither;
 pub mod embedded_pack;
@@ -74,6 +76,8 @@ pub mod token_meter;
 /// ⌊2⁶⁴/φ⌋, φ the golden ratio: the Fibonacci-hashing multiplier and splitmix64's increment.
 pub(crate) const GOLDEN_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
 pub(crate) const GOLDEN_GAMMA_32: u32 = (GOLDEN_GAMMA >> 32) as u32;
+pub(crate) const MURMUR64A_M: u64 = 0xc6a4_a793_5bd1_e995;
+pub(crate) const MURMUR3_FMIX32_M1: u32 = 0x85eb_ca6b;
 
 /// Draw `n` of the splitmix64 stream seeded at `seed`, counting from 1: draw 0
 /// is the bare finalizer, which maps 0 to 0.

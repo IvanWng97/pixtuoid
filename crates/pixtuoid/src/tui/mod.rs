@@ -27,7 +27,7 @@ use ratatui::backend::CrosstermBackend;
 use tui_renderer::TuiRenderer;
 
 use crate::runtime::SceneRx;
-use pixtuoid_scene::{embedded_pack, floor, pet, theme};
+use pixtuoid_scene::{embedded_pack, pet, theme};
 
 /// Which overlay (if any) currently owns input, plus the one count the picker needs.
 /// An open overlay swallows keys and the normal-scene bindings are suspended; the
@@ -103,24 +103,20 @@ enum KeyAction {
 }
 
 fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
-    renderer: &mut TuiRenderer<B>,
+    renderer: &TuiRenderer<B>,
     scene_rx: &SceneRx,
     focus_roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
     col: u16,
     row: u16,
-    now: SystemTime,
 ) -> bool {
-    let snap = scene_rx.borrow().clone();
-    // Project to the VISIBLE floor first: hit_test_agent_at → character_anchor reads
-    // floor-local desk indices.
-    let floor_scene = floor::project_floor_scene(&snap, renderer.current_floor());
-    let hit = renderer.hit_test_agent_at(&floor_scene, now, col, row);
-    if let Some(slot) = hit.and_then(|id| snap.agents.get(&id)) {
-        crate::focus::focus_slot(slot, focus_roots);
-        true
-    } else {
-        false
-    }
+    let Some(id) = renderer.hit_test_agent_at(col, row) else {
+        return false;
+    };
+    let Some(slot) = scene_rx.borrow().agents.get(&id).cloned() else {
+        return false;
+    };
+    crate::focus::focus_slot(&slot, focus_roots);
+    true
 }
 
 /// Opens the live gate only on `Ok`, matching [`crate::sources::connect`]'s flag rollback
@@ -828,7 +824,7 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
                 && crossterm::terminal::size().is_ok_and(|t| star_clicked(m.column, m.row, t));
             if on_star {
                 let _ = open::that(widgets::REPO_URL);
-            } else if focus_clicked_agent(renderer, scene_rx, focus_roots, m.column, m.row, now) {
+            } else if focus_clicked_agent(renderer, scene_rx, focus_roots, m.column, m.row) {
                 // Empty on purpose: the click was consumed. The coffee-before-pet order below
                 // is the half no mechanism holds — keep it in step with `renderer::draw_scene`.
             } else if renderer.cached_layout().is_some_and(|layout| {

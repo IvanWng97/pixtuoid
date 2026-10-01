@@ -31,13 +31,10 @@ use crate::theme::Theme;
 
 pub use pixtuoid_core::state::MAX_FLOORS;
 
-/// Fibonacci hash multiplier for floor seed derivation.
-pub const FLOOR_SEED_MULTIPLIER: u64 = crate::GOLDEN_GAMMA;
-
 /// Derive a floor's layout seed from its index — the ONE definition every call
 /// site shares, so a floor's look + capacity can't drift between paths.
 pub fn floor_seed(floor_idx: usize) -> u64 {
-    (floor_idx as u64).wrapping_mul(FLOOR_SEED_MULTIPLIER)
+    (floor_idx as u64).wrapping_mul(crate::GOLDEN_GAMMA)
 }
 
 /// How many home desks a floor of buffer size `buf_w × buf_h` with `floor_seed`
@@ -653,19 +650,13 @@ impl FloorSession {
         crate::overlay::build_overlay(scene, layout, now, &mut rctx, hovered)
     }
 
-    /// The neon wall-board model for `scene`. `floor` is `(current, total)`, or
-    /// `None` for a single-floor office (no cross-floor breadcrumb).
-    pub fn board(
-        &self,
-        scene: &SceneState,
-        now: SystemTime,
-        floor: Option<(usize, usize)>,
-    ) -> crate::board::BoardModel {
+    /// The neon wall-board model for `scene`, with no cross-floor breadcrumb.
+    pub fn board(&self, scene: &SceneState, now: SystemTime) -> crate::board::BoardModel {
         crate::board::build_board(
             crate::board::scene_stats(scene),
             crate::board::scene_uptime_secs(scene, now),
-            floor,
-            crate::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
+            None,
+            crate::board::office_gateway(scene),
             now,
         )
     }

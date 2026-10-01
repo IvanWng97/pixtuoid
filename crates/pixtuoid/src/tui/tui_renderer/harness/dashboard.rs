@@ -340,8 +340,9 @@ fn dashboard_collapsed_big_tree_shows_badge_and_hides_children() {
     let mut root = slot(root_id, 0, 0, t0());
     root.label = "cc\u{b7}root".into();
     let mut agents = vec![root];
-    // 6 > AUTO_COLLAPSE_THRESHOLD (5) → the root auto-collapses on open.
-    for i in 0..6 {
+    // Past the threshold → the root auto-collapses on open.
+    let children = crate::tui::dashboard::AUTO_COLLAPSE_THRESHOLD + 1;
+    for i in 0..children {
         let cid = AgentId::from_transcript_path(&format!("/h/root/subagents/agent-{i}.jsonl"));
         let mut c = slot(cid, 0, 1 + i, t0());
         c.label = format!("explorer{i}").into();
@@ -362,7 +363,7 @@ fn dashboard_collapsed_big_tree_shows_badge_and_hides_children() {
     let text = frame_text(r.frame_buffer());
     assert!(text.contains("cc\u{b7}root"), "root row missing:\n{text}");
     assert!(
-        text.contains("(6)"),
+        text.contains(&format!("({children})")),
         "collapsed hidden-count badge missing:\n{text}"
     );
     // The popup's own count proves only the root is listed: a global

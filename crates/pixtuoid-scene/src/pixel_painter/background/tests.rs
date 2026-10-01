@@ -1126,7 +1126,7 @@ fn a_rain_streak_steps_down_through_the_falloff_tones() {
     let spec = StreakSpec {
         count: 8,
         seed_mult: 7,
-        sx_mult: 0x9e37_79b9,
+        sx_mult: u64::from(crate::GOLDEN_GAMMA_32),
         speed_base: 60,
         speed_span: 50,
         color: white,

@@ -135,8 +135,6 @@ fn connection_line(
 ) -> Line<'static> {
     let prefix = if is_selected { "\u{25b8} " } else { "  " };
 
-    // The badge is NEVER reversed: a low-luminance hue inverted vanishes against
-    // the highlight bg.
     let badge_tag = row.label_prefix;
 
     let base = if is_selected {
