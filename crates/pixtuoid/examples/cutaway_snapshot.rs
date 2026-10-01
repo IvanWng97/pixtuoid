@@ -5,7 +5,7 @@
 //! Usage:
 //!   cargo run --release --example cutaway_snapshot -- <out.png> [--scale N]
 //!       [--agents N] [--theme T] [--logical WxH] [--now-hour H] [--floor I/N]
-//!       [--weather W] [--now-day D] [--flame I]
+//!       [--weather W] [--now-day D] [--flame I] [--repos a,b,...]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -28,12 +28,12 @@ use pixtuoid_scene::theme::theme_by_name;
 /// (corridor appliances) get placed at all.
 const DEFAULT_LOGICAL: (u16, u16) = (160, 96);
 
-/// Working directories the fixture cycles through. Fewer than the desk count on
-/// purpose: two agents sharing a repo share an outfit, which is the grouping
-/// Team Palette exists to show.
-const REPOS: &[&str] = &["/w/pixtuoid", "/w/site", "/w/raycast", "/w/notes"];
+/// The repos (cwd basenames) the fixture cycles through, unless `--repos`
+/// names others. Fewer than the desk count on purpose: two agents sharing a
+/// repo share an outfit, which is the grouping Team Palette exists to show.
+const REPOS: &[&str] = &["pixtuoid", "site", "raycast", "notes"];
 
-fn populate(scene: &mut SceneState, now: SystemTime, n: usize) {
+fn populate(scene: &mut SceneState, now: SystemTime, n: usize, repos: &[String]) {
     let seated = now.checked_sub(Duration::from_secs(120)).unwrap_or(now);
     let recent = now.checked_sub(Duration::from_secs(3)).unwrap_or(now);
     for i in 0..n {
@@ -55,9 +55,9 @@ fn populate(scene: &mut SceneState, now: SystemTime, n: usize) {
                 agent_id: id,
                 source: Arc::from("claude-code"),
                 session_id: Arc::from(format!("cut-{i:04x}").as_str()),
-                cwd: Arc::from(PathBuf::from(REPOS[i % REPOS.len()]).as_path()),
+                cwd: Arc::from(PathBuf::from(format!("/w/{}", repos[i % repos.len()])).as_path()),
                 // The decoder's `cc·<cwd basename>`, so the badges show real text.
-                label: format!("cc\u{b7}{}", &REPOS[i % REPOS.len()][3..]).into(),
+                label: format!("cc\u{b7}{}", repos[i % repos.len()]).into(),
                 state,
                 state_started_at: seated,
                 created_at: seated,
@@ -92,6 +92,7 @@ fn main() -> Result<()> {
     let mut now_day = 1u32;
     let mut weather = None::<String>;
     let mut flame = None::<usize>;
+    let mut repos: Vec<String> = REPOS.iter().map(|&r| r.to_string()).collect();
     let (mut lw, mut lh) = DEFAULT_LOGICAL;
     let rest: Vec<String> = args.collect();
     let mut i = 0;
@@ -116,6 +117,7 @@ fn main() -> Result<()> {
             "--now-hour" => now_hour = Some(val("--now-hour")?.parse().context("bad --now-hour")?),
             "--now-day" => now_day = val("--now-day")?.parse().context("bad --now-day")?,
             "--weather" => weather = Some(val("--weather")?),
+            "--repos" => repos = val("--repos")?.split(',').map(str::to_string).collect(),
             // The `I`th agent burns at the Top tier, crowned in flame.
             "--flame" => flame = Some(val("--flame")?.parse().context("bad --flame")?),
             "--floor" => {
@@ -155,7 +157,7 @@ fn main() -> Result<()> {
     let meta = FloorMeta::for_floor(floor.0, floor.1).with_weather(policy);
 
     let mut scene = SceneState::uniform(64);
-    populate(&mut scene, now, agents);
+    populate(&mut scene, now, agents, &repos);
     if let Some(i) = flame {
         let id = AgentId::from_transcript_path(&format!("/cutaway/a{i}.jsonl"));
         let a = scene

@@ -133,7 +133,7 @@ impl<'a> Namesakes<'a> {
             std::borrow::Cow::Borrowed(&*agent.label)
         };
         const LABEL_BUDGET_PAD: u16 = 4;
-        truncate_label(&raw, (DESK_W + LABEL_BUDGET_PAD) as usize).into_owned()
+        truncate_label(&raw, DESK_W + LABEL_BUDGET_PAD).into_owned()
     }
 }
 
@@ -156,26 +156,38 @@ pub(crate) fn badge_plate(theme: &Theme) -> Rgb {
     theme.ui.tooltip_bg
 }
 
-/// Fit a label into `budget` chars without losing the `·xxxx` session-id
-/// disambiguation suffix. Truncates from the base (left of the `·`), not the
-/// suffix — otherwise the disambig becomes useless ("TikTok-Android·a" tells us
-/// nothing the base alone wouldn't).
-pub(crate) fn truncate_label(label: &str, budget: usize) -> std::borrow::Cow<'_, str> {
+/// Fit a label into `budget` terminal cells without losing the `·xxxx`
+/// session-id disambiguation suffix. Truncates from the base (left of the `·`),
+/// not the suffix — otherwise the disambig becomes useless ("TikTok-Android·a"
+/// tells us nothing the base alone wouldn't).
+pub(crate) fn truncate_label(label: &str, budget: u16) -> std::borrow::Cow<'_, str> {
+    use crate::cutaway::text::cells;
     use std::borrow::Cow;
-    if label.chars().count() <= budget {
+    if cells(label) <= budget {
         return Cow::Borrowed(label);
     }
     if let Some(sep_byte) = label.rfind(LABEL_SEP) {
         let suffix = &label[sep_byte..];
-        let suffix_len = suffix.chars().count();
-        if suffix_len < budget {
-            let base = &label[..sep_byte];
-            let base_take = budget - suffix_len;
-            let truncated: String = base.chars().take(base_take).collect();
-            return Cow::Owned(format!("{truncated}{suffix}"));
+        let suffix_cells = cells(suffix);
+        if suffix_cells < budget {
+            let base = take_cells(&label[..sep_byte], budget - suffix_cells);
+            return Cow::Owned(format!("{base}{suffix}"));
         }
     }
-    Cow::Owned(label.chars().take(budget).collect())
+    Cow::Borrowed(take_cells(label, budget))
+}
+
+/// The longest start of `text` that fits `budget` cells.
+fn take_cells(text: &str, budget: u16) -> &str {
+    let mut used = 0u16;
+    let end = text
+        .char_indices()
+        .find(|&(_, c)| {
+            used = used.saturating_add(crate::cutaway::text::char_cells(c));
+            used > budget
+        })
+        .map_or(text.len(), |(i, _)| i);
+    &text[..end]
 }
 
 /// 4-hex-char disambiguation suffix, hashed from the WHOLE `session_id` —
@@ -413,6 +425,17 @@ mod tests {
         let out = truncate_label("x\u{00b7}abcdefgh", 4);
         assert_eq!(out.chars().count(), 4);
         assert_eq!(out, "x\u{00b7}ab");
+    }
+
+    /// The budget is in cells, which a CJK character takes two of: a wide name
+    /// gets half the characters, the suffix kept as for any other.
+    #[test]
+    fn truncate_label_budgets_cells_not_chars() {
+        assert_eq!(truncate_label("日本語プロジェクト", 8), "日本語プ");
+        assert_eq!(
+            truncate_label("日本語プロジェクト\u{00b7}a09a", 12),
+            "日本語\u{00b7}a09a"
+        );
     }
 
     #[test]

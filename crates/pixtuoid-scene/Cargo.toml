@@ -34,6 +34,7 @@ density-art = []
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", default-features = false }
 anyhow        = { workspace = true }
 tracing       = { workspace = true }
+unicode-width = { workspace = true }
 # `clock` gives Local::now() w/ system timezone for the wall clock.
 chrono        = { version = "0.4", default-features = false, features = ["clock"] }
 

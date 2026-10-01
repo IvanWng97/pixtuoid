@@ -138,9 +138,9 @@ pub(crate) struct Badge {
 /// Art pixels between a plate's edge and its text.
 const PLATE_PAD: u16 = 1;
 
-/// A plate's height on the art grid: at the pack's 4x art, two logical rows,
-/// the one terminal cell the classic's text takes.
-const PLATE_H: u16 = crate::cutaway::text::LINE_H + 2 * PLATE_PAD;
+/// A plate's height on the art grid: padded below only, since the line's
+/// accent rows already clear its capitals above.
+const PLATE_H: u16 = crate::cutaway::text::LINE_H + PLATE_PAD;
 
 /// A plate around `text` on the art grid, centred on column `centre`, its top
 /// at row `top`.
@@ -179,13 +179,7 @@ fn paint_plate(
     pen.fill(buf, plate, ground);
     let mut x = plate.x.0 + PLATE_PAD;
     for &(text, ink) in runs {
-        crate::cutaway::text::paint(
-            pen,
-            buf,
-            (ArtPx(x), ArtPx(plate.y.0 + PLATE_PAD)),
-            text,
-            ink,
-        );
+        crate::cutaway::text::paint(pen, buf, (ArtPx(x), plate.y), text, ink);
         x += crate::cutaway::text::advance(text).0;
     }
 }
@@ -230,7 +224,7 @@ fn indicator_plate(door: Point, floor: usize, pen: Pen) -> ArtRect {
 
 /// Each run of `board` and its top-left on the art grid, as the classic's
 /// terminal board lays it: line `i` on the neon interior's `i`th cell row,
-/// one character a column, the star flush right.
+/// one cell a column, the star flush right.
 fn board_runs(
     board: &crate::board::BoardModel,
     pen: Pen,
@@ -3995,15 +3989,16 @@ pub(crate) mod tests {
         assert_eq!(at.y - anchor.y, LABEL_GAP, "clear of the head");
     }
 
-    /// A plate's runs and the board's segments step on one grid: the run after
-    /// `n` characters starts [`columns`](crate::cutaway::text::columns)`(n)` on.
+    /// A plate's runs and the board's segments step on one grid, wide
+    /// characters included: the run after `text` starts
+    /// [`advance`](crate::cutaway::text::advance)`(text)` on.
     #[test]
     fn plate_runs_and_board_columns_share_one_grid() {
         use crate::board::{BoardSegment, BoardTone};
-        use crate::cutaway::text::columns;
+        use crate::cutaway::text::advance;
         use pixtuoid_core::sprite::Rgb;
         let pen = Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4");
-        let (first, second) = ("Iab", "I");
+        let (first, second) = ("I日b", "I");
         let mut board = quiet_board().clone();
         board.mood = [first, second]
             .map(|text| BoardSegment {
@@ -4015,7 +4010,7 @@ pub(crate) mod tests {
         let runs = board_runs(&board, pen);
         let ((x0, _), _) = runs[2];
         let ((x1, _), _) = runs[3];
-        assert_eq!(x1.0 - x0.0, columns(3).0, "the board");
+        assert_eq!(x1.0 - x0.0, advance(first).0, "the board");
         let (a, b) = (Rgb { r: 255, g: 0, b: 0 }, Rgb { r: 0, g: 255, b: 0 });
         let mut buf = RgbBuffer::filled(64, 16, Rgb { r: 0, g: 0, b: 0 });
         let plate = ArtRect {
@@ -4038,7 +4033,7 @@ pub(crate) mod tests {
             left(a).expect("the first run"),
             left(b).expect("the second run"),
         );
-        assert_eq!(lb - la, columns(3).0, "the plate");
+        assert_eq!(lb - la, advance(first).0, "the plate");
     }
 
     /// At the pack's 4x art the board writes inside the neon sign's dark
