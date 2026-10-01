@@ -1142,7 +1142,9 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
         | PieceKind::Effect(_)
         | PieceKind::Badge { .. }
         | PieceKind::Board { .. }
-        | PieceKind::Indicator { .. } => None,
+        | PieceKind::Indicator { .. }
+        // a speck adrift in a sunbeam, off the ground
+        | PieceKind::Mote { .. } => None,
         PieceKind::Character {
             ref figure,
             body,
@@ -1161,7 +1163,13 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
         PieceKind::PropBand { sprite, rows, .. } => art_size(pack, sprite)
             .filter(|&(_, h)| rows.1 == h)
             .and_then(|_| under(span)),
-        _ => under(span),
+        PieceKind::Desk { .. }
+        | PieceKind::DeskProp(_)
+        | PieceKind::Chair { .. }
+        | PieceKind::Table { .. }
+        | PieceKind::Prop { .. }
+        | PieceKind::Animated { .. }
+        | PieceKind::Creature { .. } => under(span),
     }
 }
 
@@ -5753,10 +5761,10 @@ S B B B B B B S
         }
     }
 
-    /// The pet and a gateway mascot stand as figures: each paints only inside
-    /// its span at every density, sorts on its feet's row as the classic sorts
-    /// it, and has what rides on it straight after it; a degraded gateway's
-    /// art is greyed.
+    /// The pet and the gateway mascots stand as figures: each paints only
+    /// inside its span at every density, sorts on its feet's row as the
+    /// classic sorts it, faces as the sim turns it, grounds its shadow, and has
+    /// what rides on it straight after it; a degraded gateway's art is greyed.
     #[test]
     fn creatures_stand_as_figures_with_their_riders_after_them() {
         use crate::layout::{Anchor, z_sort_row};
@@ -5785,9 +5793,18 @@ S B B B B B B S
                 .collect(),
             active_sessions: 1,
         }];
+        // a second gateway, degraded, nearer the viewer so it sorts last
+        let sick = Point { x: 110, y: 84 };
+        frame.mascots.push(crate::sim::MascotPlacement {
+            pos: sick,
+            state: pixtuoid_core::state::DaemonState::Degraded,
+            effects: Vec::new(),
+            ..frame.mascots[0].clone()
+        });
         let riders = [
             frame.pet.as_ref().map_or(0, |p| p.effects.len()),
             frame.mascots[0].effects.len(),
+            0,
         ];
         for s in [1, pack.max_density_variant().get()] {
             let scale = RenderScale::new(s).expect("nonzero");
@@ -5805,15 +5822,26 @@ S B B B B B B S
                 .filter(|(_, p)| matches!(p.kind, PieceKind::Creature { .. }))
                 .map(|(i, _)| i)
                 .collect();
-            assert_eq!(creatures.len(), 2, "at scale {s}, the pet and the mascot");
-            // The pet faces west; the mascot never turns.
-            let facing = [Flip::Horizontal, Flip::None];
-            for ((&i, ridden), flip) in creatures.iter().zip(riders).zip(facing) {
+            assert_eq!(creatures.len(), 3, "at scale {s}, the pet and the mascots");
+            // The pet faces west; a mascot never turns.
+            let facing = [Flip::Horizontal, Flip::None, Flip::None];
+            let sickly = [false, false, true];
+            for (((&i, ridden), flip), sick) in creatures.iter().zip(riders).zip(facing).zip(sickly)
+            {
                 let p = &pieces[i];
-                let PieceKind::Creature { at, art, .. } = p.kind else {
+                let PieceKind::Creature { at, art, degraded } = p.kind else {
                     unreachable!("filtered to creatures");
                 };
                 assert_eq!(art.flip, flip, "at scale {s} {} faces wrong", art.sprite);
+                assert_eq!(
+                    degraded, sick,
+                    "at scale {s} the gateway at {at:?} misreads its state"
+                );
+                assert!(
+                    p.shadow.is_some(),
+                    "at scale {s} {} casts no shadow",
+                    art.sprite
+                );
                 let h = crate::embedded_pack::densest_frame(
                     &pack,
                     art.sprite,
@@ -5877,6 +5905,10 @@ S B B B B B B S
                     "at scale {s} {:?} painted outside {:?}",
                     p.kind,
                     p.span
+                );
+                assert_eq!(
+                    p.shadow, None,
+                    "at scale {s} a mote adrift shades the ground"
                 );
             }
             let night = list_at(&frame, office, 0);
