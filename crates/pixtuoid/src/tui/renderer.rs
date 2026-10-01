@@ -187,12 +187,8 @@ pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
 pub(crate) const MIN_SCENE_WIDTH: u16 = 20;
 pub(crate) const MIN_SCENE_HEIGHT: u16 = 12;
 
-/// How many rows at the bottom of the terminal the status footer owns — THE
-/// authority for that count. `pub` so `examples/snapshot`, which mirrors the
-/// renderer's buffer arithmetic to build the committed media, reads it too — public
-/// for MECHANISM, not contract, hence `doc(hidden)`.
-#[doc(hidden)]
-pub const FOOTER_ROWS: u16 = 1;
+/// How many rows at the bottom of the terminal the status footer owns.
+pub(crate) const FOOTER_ROWS: u16 = 1;
 
 pub(crate) fn scene_rect(full: Rect) -> Rect {
     Rect {
