@@ -635,7 +635,7 @@ mod tests {
 
     #[test]
     fn a_wander_target_is_never_parked_under_a_sprite_that_paints_over_it() {
-        use crate::layout::{Anchor, Furniture};
+        use crate::layout::{Furniture, Pivot};
         let mut checked = 0u32;
         let min = crate::layout::min_layout_size();
         for &(w, h) in &[
@@ -657,7 +657,7 @@ mod tests {
                     if wp.kind == crate::layout::WaypointKind::Pantry {
                         let sz = l.pantry_counter_size();
                         boxes.push((
-                            crate::layout::anchored_top_left(Anchor::Center, wp.pos, sz.w, sz.h),
+                            crate::layout::anchored_top_left(Pivot::Center, wp.pos, sz.w, sz.h),
                             sz,
                         ));
                     }
@@ -665,7 +665,7 @@ mod tests {
                 if let Some(t) = l.lounge.and_then(|lo| lo.fish_tank) {
                     let sz = crate::layout::furniture_def(Furniture::FishTank).visual;
                     boxes.push((
-                        crate::layout::anchored_top_left(Anchor::Center, t, sz.w, sz.h),
+                        crate::layout::anchored_top_left(Pivot::Center, t, sz.w, sz.h),
                         sz,
                     ));
                 }
