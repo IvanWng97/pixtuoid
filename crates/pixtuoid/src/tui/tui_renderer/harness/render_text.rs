@@ -263,6 +263,73 @@ fn meeting_room_fills_and_hosts_group_chitchat() {
 }
 
 #[test]
+fn a_chitchat_bubble_centres_over_its_speakers_badge() {
+    let (cols, rows) = (160, 56);
+    let mut now = t0();
+    let mut scene = SceneState::uniform(64);
+    for i in 0..40usize {
+        let id = AgentId::from_transcript_path(&format!("/h/chat{i}.jsonl"));
+        let started = now - Duration::from_secs(5 + (i as u64 * 11) % 80);
+        scene.agents.insert(id, slot(id, 0, i, started));
+    }
+    let tip = normal_theme().ui.tooltip_bg;
+    let tip_bg = ratatui::style::Color::Rgb(tip.r, tip.g, tip.b);
+    let mut term = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
+    let mut floor = PerFloor::new();
+    let mut chitchat = std::collections::HashMap::new();
+    for _ in 0..1200 {
+        now += Duration::from_millis(250);
+        let mut ctx = DrawCtx::offscreen(
+            &mut floor,
+            &mut chitchat,
+            normal_theme(),
+            &scene,
+            pack(),
+            now,
+            FloorMeta::ground(),
+        );
+        let out = draw_scene(&mut term, &mut ctx).expect("draw");
+        let buf = term.backend().buffer();
+        let scene_rows = rows - crate::tui::renderer::FOOTER_ROWS;
+        let bubbles: Vec<(u16, u16)> = (0..scene_rows)
+            .flat_map(|y| (0..cols).map(move |x| (x, y)))
+            .filter_map(|(x, y)| {
+                pixtuoid_scene::chitchat::CHITCHAT_LINES
+                    .iter()
+                    .map(|quip| ratatui::text::Line::from(format!(" {quip} ")))
+                    .find(|line| {
+                        let text = line.to_string();
+                        let w = u16::try_from(line.width()).expect("a short quip");
+                        x + w <= cols
+                            && buf[(x, y)].bg == tip_bg
+                            && (x..x + w)
+                                .map(|cx| buf[(cx, y)].symbol())
+                                .collect::<String>()
+                                == text
+                    })
+                    .map(|line| (x + u16::try_from(line.width() / 2).expect("short"), y))
+            })
+            .collect();
+        if bubbles.is_empty() {
+            continue;
+        }
+        for (centre, row) in bubbles {
+            assert!(
+                out.agents.iter().any(|a| a.label_anchor.x == centre
+                    && (a.label_anchor.y / 2).saturating_sub(3) == row),
+                "the bubble centred at ({centre},{row}) is over no drawn badge: {:?}",
+                out.agents
+                    .iter()
+                    .map(|a| a.label_anchor)
+                    .collect::<Vec<_>>()
+            );
+        }
+        return;
+    }
+    panic!("no chitchat bubble ever appeared");
+}
+
+#[test]
 fn meeting_glass_partition_connects_at_window_and_corner() {
     // Asserted relative to same-row references so the check is immune to the
     // time-of-day dim / weather tint applied globally.
