@@ -4,7 +4,7 @@
 //! the paint pass consumes `&SimFrame` and writes only what `PaintCtx` lends it
 //! mutably. The paint-local caches it borrows are deliberately NOT sim stores:
 //! flushing them changes no behavior, only repaint cost. Headless consumers drive
-//! `floor::FloorSession::observe` to observe poses/positions without buying a
+//! `floor::FloorSession::step` to observe poses/positions without buying a
 //! pixel pass.
 
 use std::collections::HashMap;
@@ -191,7 +191,7 @@ pub struct SimFrame {
     pub agents: Vec<AgentSlot>,
     /// The authoritative routed pose per home-desk agent this tick (`None` =
     /// no renderable pose). Unread by paint BY DESIGN;
-    /// `floor::FloorSession::observe` is the lib-side consumer.
+    /// `floor::FloorSession::step` is the lib-side consumer.
     pub poses: HashMap<AgentId, Option<Pose>>,
     /// Per-desk "occupant is actually seated right now" (drives screen glow +
     /// ceiling halos; exiting agents absent by construction).
