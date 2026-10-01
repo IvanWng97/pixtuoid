@@ -56,7 +56,7 @@ fn neon_halo_drops_to_its_daylight_floor_and_a_calm_sign_glows_less_than_a_busy_
     let night = neon_at(NeonLevels::BUSY, 1.0);
     let day = neon_at(NeonLevels::BUSY, 0.0);
     assert!(
-        (day - night * NEON_DAYLIGHT_FLOOR).abs() < 1e-6,
+        (day - night * NEON_DAYLIGHT_MIN).abs() < 1e-6,
         "{day} vs {night}"
     );
     let calm = neon_at(NeonLevels::CALM, 1.0);
@@ -157,7 +157,7 @@ fn a_monitor_halo_hangs_over_each_lit_screen_only() {
         kind: pixtuoid_core::state::ToolKind::Edit,
     };
     let at_desk = |path: &str, desk: usize, state: pixtuoid_core::state::ActivityState| {
-        let mut a = crate::pixel_painter::tests::make_slot(id(path), state);
+        let mut a = crate::character::test_support::make_slot(id(path), state);
         a.desk_index = pixtuoid_core::state::GlobalDeskIndex(desk);
         a
     };

@@ -1,0 +1,24 @@
+# A PR enters by `@mergifyio queue` once docs/CONTRIBUTING.md#the-merge-gate
+# holds: its local rows are a judgement no condition can make. Branch
+# protection's required checks and conversation resolution are injected as
+# conditions, so they are not repeated here
+# (docs.mergify.com/merge-queue/github-rulesets#how-condition-injection-works).
+merge_queue:
+  # With one PR per batch this checks in place: CI and the review bots judge
+  # the PR's own head, where a batch's draft PR would get no review.
+  max_parallel_checks: 1
+  # Its "ready to queue" box cannot see the local rows.
+  queue_controls_comment: false
+
+queue_rules:
+  - name: default
+    batch_size: 1
+    merge_method: squash
+    update_method: merge
+    queue_conditions:
+      # A stacked PR waits until its base lands and GitHub retargets it.
+      - base = main
+      - -draft
+      # The in-place update would merge main into it, and the release would
+      # ship a CHANGELOG missing those commits (docs/CONTRIBUTING.md#cutting-the-release).
+      - -head ~= ^release-plz-
