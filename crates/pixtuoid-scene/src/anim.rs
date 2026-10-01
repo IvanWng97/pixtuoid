@@ -2,7 +2,7 @@
 //! layer shares.
 //!
 //! Wall-clock `SystemTime`, not `Instant`: matches the rest of the animation
-//! state (FloorTransition, LightingState, PoseHistory) — serializable, no
+//! state (FloorTransition, VacancyDim, PoseHistory) — serializable, no
 //! out-of-process consumer today.
 
 use std::time::{Duration, SystemTime};

@@ -377,7 +377,7 @@ mod tests {
             crate::sky::Sky::at_with(crate::localclock::at_hour(7), crate::sky::Weather::Clear);
         let lights = crate::lighting::Lights::of(
             &layout,
-            &crate::atmosphere::Look::resolve(&sky, &crate::theme::NORMAL),
+            &crate::atmosphere::SkyTones::resolve(&sky, &crate::theme::NORMAL),
             &crate::lighting::LightInputs {
                 agents: &[],
                 seated: &std::collections::HashMap::new(),
@@ -456,7 +456,7 @@ mod tests {
             crate::sky::Sky::at_with(crate::localclock::at_hour(23), crate::sky::Weather::Clear);
         let lights = crate::lighting::Lights::of(
             &layout,
-            &crate::atmosphere::Look::resolve(&sky, &crate::theme::NORMAL),
+            &crate::atmosphere::SkyTones::resolve(&sky, &crate::theme::NORMAL),
             &crate::lighting::LightInputs {
                 agents: &[],
                 seated: &std::collections::HashMap::new(),

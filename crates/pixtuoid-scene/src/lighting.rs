@@ -10,7 +10,7 @@ use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::{AgentSlot, ToolKind};
 
 use crate::anim::epoch_ms;
-use crate::atmosphere::Look;
+use crate::atmosphere::SkyTones;
 use crate::floor::NeonLevels;
 use crate::layout::{Facing, Point, SceneLayout};
 
@@ -283,7 +283,7 @@ pub(crate) struct Lights {
     pub(crate) spills: Vec<Emitter>,
 }
 
-/// What the lights depend on this frame besides the layout and the sky's [`Look`].
+/// What the lights depend on this frame besides the layout and the sky's [`SkyTones`].
 pub(crate) struct LightInputs<'a> {
     /// Every agent the scene holds; only this floor's light it.
     pub(crate) agents: &'a [AgentSlot],
@@ -298,7 +298,7 @@ pub(crate) struct LightInputs<'a> {
 
 impl Lights {
     /// The lights `layout` shows under `look`.
-    pub(crate) fn of(layout: &SceneLayout, look: &Look, inputs: &LightInputs<'_>) -> Self {
+    pub(crate) fn of(layout: &SceneLayout, look: &SkyTones, inputs: &LightInputs<'_>) -> Self {
         let (darkness, indoor) = (look.darkness, inputs.indoor_scale);
         Self {
             floor_lamp: layout.floor_lamp_base().map(|centre| Emitter {

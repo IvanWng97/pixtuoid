@@ -1,30 +1,30 @@
-//! The classic's floor wash: [`Look::floor_wash`]'s blends laid over the floor
+//! The classic's ground wash: [`SkyTones::ground_wash`]'s blends laid over the ground
 //! band.
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 #[cfg(doc)]
-use crate::atmosphere::Look;
+use crate::atmosphere::SkyTones;
 use crate::pixel_painter::palette::{RgbLut, blend_rgb};
 
-/// Lay each of `wash`'s `(tint, strength)` blends over the floor band
+/// Lay each of `wash`'s `(tint, strength)` blends over the ground band
 /// `top_y..bottom_y`, in order.
-pub(in crate::pixel_painter) fn paint_floor_wash(
+pub(in crate::pixel_painter) fn paint_ground_wash(
     buf: &mut RgbBuffer,
     top_y: u16,
     bottom_y: u16,
     wash: [(Rgb, f32); 2],
 ) {
     for (tint, s) in wash {
-        blend_floor_band(buf, top_y, bottom_y, tint, s);
+        blend_ground_band(buf, top_y, bottom_y, tint, s);
     }
 }
 
-/// Blend `tint` over every floor pixel in the band `top_y..bottom_y` at
+/// Blend `tint` over every ground pixel in the band `top_y..bottom_y` at
 /// strength `s`. `s <= 0.0` early-returns, skipping the whole pass every clear
 /// frame. Tint and strength are constant across the band, so the blend runs
 /// through an [`RgbLut`] — byte-identical to per-pixel [`blend_rgb`] (#900).
-fn blend_floor_band(buf: &mut RgbBuffer, top_y: u16, bottom_y: u16, tint: Rgb, s: f32) {
+fn blend_ground_band(buf: &mut RgbBuffer, top_y: u16, bottom_y: u16, tint: Rgb, s: f32) {
     if s <= 0.0 {
         return;
     }
@@ -46,7 +46,7 @@ mod tests {
     use crate::pixel_painter::palette::{BLACK, WHITE};
 
     #[test]
-    fn blend_floor_band_tints_only_the_band_and_noops_at_zero() {
+    fn blend_ground_band_tints_only_the_band_and_noops_at_zero() {
         let base = Rgb {
             r: 100,
             g: 100,
@@ -54,13 +54,13 @@ mod tests {
         };
         let tint = Rgb { r: 0, g: 0, b: 0 };
         let mut buf = RgbBuffer::filled(3, 4, base);
-        blend_floor_band(&mut buf, 1, 3, tint, 0.0);
+        blend_ground_band(&mut buf, 1, 3, tint, 0.0);
         for y in 0..4 {
             for x in 0..3 {
                 assert_eq!(buf.get(x, y), base, "s=0 leaves ({x},{y}) untouched");
             }
         }
-        blend_floor_band(&mut buf, 1, 3, tint, 0.5);
+        blend_ground_band(&mut buf, 1, 3, tint, 0.5);
         let blended = blend_rgb(base, tint, 0.5);
         for x in 0..3 {
             assert_eq!(buf.get(x, 0), base, "row above the band untouched");
@@ -71,7 +71,7 @@ mod tests {
     }
 
     #[test]
-    fn blend_floor_band_matches_the_per_pixel_blend_reference() {
+    fn blend_ground_band_matches_the_per_pixel_blend_reference() {
         let mut lcg = 0x9E3779B9u32;
         let mut next = || {
             lcg = lcg.wrapping_mul(1664525).wrapping_add(1013904223);
@@ -109,7 +109,7 @@ mod tests {
                         expected.put(x, y, blend_rgb(expected.get(x, y), tint, s));
                     }
                 }
-                blend_floor_band(&mut buf, 2, 9, tint, s);
+                blend_ground_band(&mut buf, 2, 9, tint, s);
                 for y in 0..h {
                     for x in 0..w {
                         assert_eq!(
@@ -124,7 +124,7 @@ mod tests {
     }
 
     #[test]
-    fn blend_floor_band_clamps_degenerate_bounds() {
+    fn blend_ground_band_clamps_degenerate_bounds() {
         let tint = Rgb {
             r: 200,
             g: 180,
@@ -140,19 +140,19 @@ mod tests {
             },
         );
         let before = buf.clone();
-        blend_floor_band(&mut buf, 4, 2, tint, 0.5);
+        blend_ground_band(&mut buf, 4, 2, tint, 0.5);
         assert_eq!(
             buf.as_slice(),
             before.as_slice(),
             "top >= bottom is a no-op"
         );
-        blend_floor_band(&mut buf, 9, 12, tint, 0.5);
+        blend_ground_band(&mut buf, 9, 12, tint, 0.5);
         assert_eq!(
             buf.as_slice(),
             before.as_slice(),
             "a band entirely past the bottom edge is a no-op"
         );
-        blend_floor_band(&mut buf, 3, 12, tint, 0.5);
+        blend_ground_band(&mut buf, 3, 12, tint, 0.5);
         let mut expected = before.clone();
         for y in 3..5u16 {
             for x in 0..6u16 {
@@ -167,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn a_floor_wash_lays_its_blends_in_order() {
+    fn a_ground_wash_lays_its_blends_in_order() {
         let base = Rgb {
             r: 100,
             g: 100,
@@ -176,13 +176,13 @@ mod tests {
         let (dark, light) = (BLACK, WHITE);
         let paint = |wash| {
             let mut buf = RgbBuffer::filled(3, 4, base);
-            paint_floor_wash(&mut buf, 1, 3, wash);
+            paint_ground_wash(&mut buf, 1, 3, wash);
             buf
         };
         let dim_then_lift = paint([(dark, 0.5), (light, 0.5)]);
         let mut expected = RgbBuffer::filled(3, 4, base);
-        blend_floor_band(&mut expected, 1, 3, dark, 0.5);
-        blend_floor_band(&mut expected, 1, 3, light, 0.5);
+        blend_ground_band(&mut expected, 1, 3, dark, 0.5);
+        blend_ground_band(&mut expected, 1, 3, light, 0.5);
         assert_eq!(dim_then_lift.as_slice(), expected.as_slice());
         assert_ne!(
             dim_then_lift.as_slice(),
