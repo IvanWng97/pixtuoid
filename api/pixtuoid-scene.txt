@@ -965,8 +965,8 @@ pub pixtuoid_scene::layout::SceneLayout::corridor: core::option::Option<pixtuoid
 pub pixtuoid_scene::layout::SceneLayout::cubicle_aisle: pixtuoid_scene::layout::Bounds
 pub pixtuoid_scene::layout::SceneLayout::cubicle_band: pixtuoid_scene::layout::Bounds
 pub pixtuoid_scene::layout::SceneLayout::desk_facings: alloc::vec::Vec<pixtuoid_scene::layout::Facing>
-pub pixtuoid_scene::layout::SceneLayout::door: core::option::Option<pixtuoid_scene::layout::Point>
-pub pixtuoid_scene::layout::SceneLayout::door_threshold: core::option::Option<pixtuoid_scene::layout::Point>
+pub pixtuoid_scene::layout::SceneLayout::door: pixtuoid_scene::layout::Point
+pub pixtuoid_scene::layout::SceneLayout::door_threshold: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::layout::SceneLayout::doorways: alloc::vec::Vec<pixtuoid_scene::layout::Doorway>
 pub pixtuoid_scene::layout::SceneLayout::home_desks: alloc::vec::Vec<pixtuoid_scene::layout::Point>
 pub pixtuoid_scene::layout::SceneLayout::lounge: core::option::Option<pixtuoid_scene::layout::Lounge>
