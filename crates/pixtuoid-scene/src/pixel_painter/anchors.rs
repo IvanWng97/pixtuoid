@@ -4,27 +4,22 @@
 
 use std::time::SystemTime;
 
-use crate::layout::{Anchor, SEAT_RENDER_Y_OFF, Size, WALKING_Y_OFF};
+use crate::layout::{Anchor, Layout, SEAT_RENDER_Y_OFF, Size, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
 use super::epoch_ms;
 use super::seat::Seat;
 use crate::layout::{Point, WaypointKind};
-pub(crate) use crate::motion::walking_position;
+pub(crate) use crate::physics::walking_position;
 use crate::pose::{self, Pose};
 
 /// The ONE cross-crate sprite-width authority, re-exported so `pixel_painter`
 /// siblings keep importing it via `super::`.
 pub(super) use crate::layout::CHARACTER_SPRITE_W;
 
-// All anchor fns center the sprite horizontally on `sprite_w` — the pack's
-// character width — so a non-8-wide pack stays centered. The vertical pose
-// offsets (8/12/7) are NOT sprite height: both packs are 12px tall, so they
-// stay fixed.
 /// Where a desk's occupant RENDERS — the desk's seat cell put through the same
 /// `Seat` model every other seat uses, so the chair, its occupant and the walk
-/// that ends there cannot drift apart. Re-exported from `pixel_painter` so the
-/// binary's hit-test can't drift from the fn that places the sprite.
+/// that ends there cannot drift apart.
 pub fn seated_anchor_facing(desk: Point, sprite_w: u16, facing: crate::layout::Facing) -> Point {
     Seat::at_desk(desk, facing).render_anchor(sprite_w)
 }
@@ -43,7 +38,7 @@ pub(super) fn waypoint_anchor(wp: Point, sprite_w: u16) -> Point {
     }
 }
 
-/// One-pixel vertical bob on a ~4.5 s cycle with a per-agent phase offset, so
+/// One-pixel vertical bob on a `CYCLE_MS` cycle with a per-agent phase offset, so
 /// static (seated / standing) characters look alive instead of frozen.
 fn breath_offset_y(agent_id: pixtuoid_core::AgentId, now: SystemTime) -> u16 {
     let elapsed_ms = epoch_ms(now);
@@ -78,8 +73,7 @@ pub(super) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
 /// Nudge a sprite so the whole frame lands inside the canvas, answering in the
 /// SAME anchor space `pos` came in.
 ///
-/// Lives at PAINT because invariant #6 runs one way: sprite size never moves a
-/// sim position.
+/// It moves a figure's paint anchor, never its sim position (invariant #6).
 pub(crate) fn keep_sprite_on_canvas(anchor: Anchor, pos: Point, size: Size, buf: Size) -> Point {
     match anchor {
         // `min` before `max`: on a buffer narrower than the sprite the lower
@@ -102,18 +96,27 @@ pub(crate) fn keep_sprite_on_canvas(anchor: Anchor, pos: Point, size: Size, buf:
     }
 }
 
+/// `pos`, in `anchor` space, moved so a `size` frame lands on `layout`'s canvas:
+/// the one fit every figure's placement takes.
+pub(crate) fn on_canvas(layout: &Layout, anchor: Anchor, pos: Point, size: Size) -> Point {
+    let canvas = Size {
+        w: layout.buf_w,
+        h: layout.buf_h,
+    };
+    keep_sprite_on_canvas(anchor, pos, size, canvas)
+}
+
 /// How far a later arrival steps aside along x so two agents at one
-/// stand-beside spot don't render on top of each other. Sized to clear a
-/// character sprite (8 px bundled) with a pixel of daylight.
-const STEP_ASIDE_DX: i16 = 9;
+/// stand-beside spot don't render on top of each other: a sprite's width and a
+/// pixel of daylight.
+const STEP_ASIDE_DX: i16 = CHARACTER_SPRITE_W as i16 + 1;
 
 /// X-offset applied to a waypoint anchor when multiple agents land at the
 /// SAME waypoint in the same cycle. rank 0 = first arrival (no offset); later
 /// arrivals step aside.
 ///
 /// An EXCLUSIVE spot never steps aside: sliding an occupant sideways off a
-/// discrete slot renders them on thin air — a generic +9 once parked a second
-/// chair-sitter ON the meeting table. Gating on `exclusive` — the one authority
+/// discrete slot renders them on thin air. Gating on `exclusive` — the one authority
 /// for "single-occupancy destination" — covers every seat, the stand-beside
 /// singles, and anything added later without a second list to keep in sync.
 /// Shareable spots (pantry counter / vending / printer / snack shelf) still step
@@ -135,9 +138,9 @@ pub(super) fn waypoint_rank_offset_x(kind: WaypointKind, rank: usize) -> i16 {
 /// jumping to the straight-line midpoint.
 ///
 /// Clamped so a DEFAULT-size frame lands inside `layout`'s buffer, keeping the
-/// badge and the tui hit box on pixels the sprite occupies — the twin of the
-/// sprite's own guard in `sim::resolve_characters` — clamped to the canvas TWICE.
-pub fn character_anchor(
+/// badge on pixels the sprite occupies — the twin of the sprite's own guard in
+/// `sim::resolve_characters`.
+pub(crate) fn character_anchor(
     agent: &AgentSlot,
     layout: &crate::layout::Layout,
     now: SystemTime,
@@ -162,9 +165,7 @@ pub fn character_anchor(
             // Anchor off the resolved stand cell so the label tracks where the
             // agent actually stands, not the blocked furniture center.
             let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
-            // Via the ONE authority the sprite blit uses, so label-vs-sprite
-            // drift is structurally impossible UPSTREAM of the canvas clamps
-            // (clamped to the canvas TWICE).
+            // Via [`Seat::render_anchor`], the sprite blit's authority.
             Seat::at_waypoint(kind, stand, wp_obj.facing).render_anchor(w)
         }
         Pose::AimlessAt { dest } => waypoint_anchor(dest, w),
@@ -172,16 +173,13 @@ pub fn character_anchor(
             from, to, t_x1000, ..
         } => walking_anchor(walking_position(from, to, t_x1000), w),
     };
-    Some(keep_sprite_on_canvas(
+    Some(on_canvas(
+        layout,
         Anchor::TopLeft,
         anchor,
         Size {
             w,
             h: crate::layout::CHARACTER_SPRITE_H,
-        },
-        Size {
-            w: layout.buf_w,
-            h: layout.buf_h,
         },
     ))
 }

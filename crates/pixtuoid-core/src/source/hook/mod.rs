@@ -106,8 +106,8 @@ impl HookSocketListener {
     }
 }
 
-/// Per-connection byte ceiling: 2× the shim's ~1MiB stdin cap, so any stamped
-/// line fits with headroom. `lines()` buffers until a newline, so without this
+/// Per-connection byte ceiling: twice the shim's stamped-line quota (`STDIN_CAP` +
+/// `STAMP_HEADROOM`). `lines()` buffers until a newline, so without this
 /// an adversarial client could grow the buffer unboundedly for the whole
 /// `CONN_TIMEOUT` window × [`MAX_CONCURRENT_CONNS`] slots.
 const MAX_CONN_BYTES: u64 = 2 * 1024 * 1024;

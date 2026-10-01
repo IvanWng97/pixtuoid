@@ -7,7 +7,7 @@
 //! type, so the hues can't drift across surfaces.
 //!
 //! [`build_footer`] owns the WHOLE tier/priority policy in one place, and is PURE:
-//! its one scene read is extracted to the free feeder [`footer_tool_tally`].
+//! every scene read happens in [`FooterInputs::new`] and [`FooterContext::new`].
 
 use std::collections::HashMap;
 
@@ -162,6 +162,8 @@ pub struct FooterFloor {
     pub total_agents: usize,
 }
 
+const TOOL_TALLY_CAP: usize = 4;
+
 /// One aggregate tool-tally entry: the raw display `token` (kept verbatim), the
 /// TYPED [`ToolKind`] for the hue, and how many Active slots show it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,8 +176,9 @@ pub struct ToolTally {
 /// The aggregate tool tally: group Active slots by their raw display token (the
 /// first alphanumeric run of the detail, kept verbatim) but carry the TYPED
 /// [`ToolKind`] for the hue — a Task slot displays "Delegating" yet tints via
-/// `kind = Task`, never the name. Sorted by count desc then name, capped at 4.
-pub fn footer_tool_tally(scene: &SceneState) -> Vec<ToolTally> {
+/// `kind = Task`, never the name. Sorted by count desc then name, capped at
+/// [`TOOL_TALLY_CAP`].
+pub(crate) fn footer_tool_tally(scene: &SceneState) -> Vec<ToolTally> {
     let mut tool_counts: HashMap<String, (ToolKind, usize)> = HashMap::new();
     for slot in scene.agents.values() {
         if let ActivityState::Active { detail, kind, .. } = &slot.state
@@ -192,31 +195,77 @@ pub fn footer_tool_tally(scene: &SceneState) -> Vec<ToolTally> {
         .map(|(token, (kind, count))| ToolTally { token, kind, count })
         .collect();
     tools.sort_by(|a, b| b.count.cmp(&a.count).then(a.token.cmp(&b.token)));
-    tools.truncate(4);
+    tools.truncate(TOOL_TALLY_CAP);
     tools
 }
 
-/// The pre-computed per-frame inputs `build_footer` renders. `counts` is the
-/// CURRENT (projected) floor's per-state breakdown; `per_floor` + `gateway` are
-/// office-wide; `tools` is [`footer_tool_tally`], precomputed for purity.
+/// The per-frame inputs `build_footer` renders: `counts` and `tools` come from
+/// the drawn floor's scene, everything else from the [`FooterContext`].
 pub struct FooterInputs<'a> {
-    pub counts: StateCounts,
-    pub per_floor: &'a [StateCounts; MAX_FLOORS],
+    counts: StateCounts,
+    tools: Vec<ToolTally>,
+    pub context: FooterContext<'a>,
+}
+
+impl<'a> FooterInputs<'a> {
+    /// The footer over `drawn`, the (projected) floor scene the painter draws.
+    pub fn new(drawn: &SceneState, context: FooterContext<'a>) -> Self {
+        Self {
+            counts: crate::board::scene_stats(drawn),
+            tools: footer_tool_tally(drawn),
+            context,
+        }
+    }
+
+    /// The drawn floor's [`StateCounts`].
+    pub fn counts(&self) -> StateCounts {
+        self.counts
+    }
+}
+
+/// Every footer input the drawn floor's scene can't supply; `per_floor` and
+/// `gateway` are office-wide.
+#[derive(Debug, Clone, Copy)]
+pub struct FooterContext<'a> {
+    pub per_floor: [StateCounts; MAX_FLOORS],
     pub gateway: Option<DaemonState>,
     pub floor: Option<FooterFloor>,
-    pub tools: &'a [ToolTally],
     /// "You would hear sound right now": audio live AND not effectively muted
     /// (m-state OR pause).
     pub audio_audible: bool,
-    /// Transient +/- readout: `Some(percent)` for ~1s after a volume nudge —
+    /// Transient +/- readout: `Some(percent)` just after a volume nudge —
     /// renders as `♩ N%`.
     pub volume_flash: Option<u8>,
     /// Pre-merged one-line death>drift warning; `None` while healthy.
     pub source_warning: Option<&'a str>,
-    /// The stats-tier right keybind tail (TUI: `" [?]help [p]ause [t]heme [q]uit "`).
+    /// The stats-tier right keybind tail.
     pub keys_stats: &'a str,
-    /// The alert-tier right keybind tail (TUI: `" [q]uit "`).
+    /// The alert-tier right keybind tail.
     pub keys_alert: &'a str,
+}
+
+impl<'a> FooterContext<'a> {
+    /// The context over `office`, the FULL scene — never a projected floor.
+    pub fn new(
+        office: &SceneState,
+        floor: Option<FooterFloor>,
+        audio_audible: bool,
+        volume_flash: Option<u8>,
+        source_warning: Option<&'a str>,
+        keys_stats: &'a str,
+        keys_alert: &'a str,
+    ) -> Self {
+        Self {
+            per_floor: crate::board::per_floor_counts(office),
+            gateway: crate::board::office_gateway(office),
+            floor,
+            audio_audible,
+            volume_flash,
+            source_warning,
+            keys_stats,
+            keys_alert,
+        }
+    }
 }
 
 /// Column width of a footer string. The footer's own glyph vocabulary is ALL
@@ -245,14 +294,15 @@ fn clip_cols(s: &str, budget: usize) -> String {
 /// the keybind tail).
 pub fn build_footer(inputs: &FooterInputs<'_>, budget: u16) -> FooterModel {
     let counts = inputs.counts;
+    let ctx = &inputs.context;
     // A dead source outranks the stats: the counts go stale once a transport is
     // gone, so the warning IS the status until restart — truncated to fit rather
     // than tiered away.
-    if let Some(warn) = inputs.source_warning {
+    if let Some(warn) = ctx.source_warning {
         let w = budget as usize;
         // Clipped, never dropped: a row with no `[q]` is a user stuck in the
         // alternate screen.
-        let quit = clip_cols(inputs.keys_alert, w);
+        let quit = clip_cols(ctx.keys_alert, w);
         let avail = w.saturating_sub(cols(&quit));
         let alarm = if counts.waiting > 0 {
             format!(" · \u{25b2}{} need you", counts.waiting)
@@ -289,19 +339,19 @@ pub fn build_footer(inputs: &FooterInputs<'_>, budget: u16) -> FooterModel {
         return FooterModel { segments: out };
     }
 
-    let count_str = match inputs.floor {
+    let count_str = match ctx.floor {
         Some(fi) => format!("{}/{}", counts.total, fi.total_agents),
         None => format!("{}", counts.total),
     };
 
     // The cross-floor `▲F{n}` cue: any OTHER floor holding a waiting agent.
-    let cross_floor = inputs.floor.and_then(|fi| {
+    let cross_floor = ctx.floor.and_then(|fi| {
         let cur = fi.current.saturating_sub(1);
         (0..MAX_FLOORS)
-            .find(|&fl| fl != cur && inputs.per_floor[fl].waiting > 0)
+            .find(|&fl| fl != cur && ctx.per_floor[fl].waiting > 0)
             .map(|fl| fl + 1)
     });
-    let floor_suffix = match inputs.floor {
+    let floor_suffix = match ctx.floor {
         Some(fi) => {
             let cross = match cross_floor {
                 Some(n) => format!(" \u{25b2}F{n}"),
@@ -314,12 +364,12 @@ pub fn build_footer(inputs: &FooterInputs<'_>, budget: u16) -> FooterModel {
         }
         None => String::new(),
     };
-    let audio_glyph = match (inputs.audio_audible, inputs.volume_flash) {
+    let audio_glyph = match (ctx.audio_audible, ctx.volume_flash) {
         (true, Some(pct)) => format!(" \u{2669} {pct}%"),
         (true, None) => " \u{2669}".to_string(),
         (false, _) => String::new(),
     };
-    let quit = format!("{audio_glyph}{floor_suffix}{}", inputs.keys_stats);
+    let quit = format!("{audio_glyph}{floor_suffix}{}", ctx.keys_stats);
 
     // The board owns the friendly "— office empty —"; here it's a bare count.
     if counts.total == 0 {
@@ -329,7 +379,7 @@ pub fn build_footer(inputs: &FooterInputs<'_>, budget: u16) -> FooterModel {
                 FooterTone::Neutral,
             )]],
             &quit,
-            inputs.keys_alert,
+            ctx.keys_alert,
             budget,
         );
     }
@@ -362,7 +412,7 @@ pub fn build_footer(inputs: &FooterInputs<'_>, budget: u16) -> FooterModel {
                 ));
             }
         }
-        if let Some(g) = inputs.gateway {
+        if let Some(g) = ctx.gateway {
             segs.push(FooterSegment::new(" · ".to_string(), FooterTone::Neutral));
             segs.push(FooterSegment::new(
                 format!("{}gw {}", GATEWAY_GLYPH, gateway_label(g)),
@@ -417,7 +467,7 @@ pub fn build_footer(inputs: &FooterInputs<'_>, budget: u16) -> FooterModel {
     fit_tiers(
         [seg_full, seg_medium, seg_min],
         &quit,
-        inputs.keys_alert,
+        ctx.keys_alert,
         budget,
     )
 }
@@ -509,23 +559,24 @@ mod tests {
 
     fn inputs<'a>(
         scene: &SceneState,
-        pf: &'a [StateCounts; MAX_FLOORS],
-        tools: &'a [ToolTally],
+        tools: &[ToolTally],
         audio_audible: bool,
         volume_flash: Option<u8>,
         source_warning: Option<&'a str>,
     ) -> FooterInputs<'a> {
         FooterInputs {
             counts: crate::board::scene_stats(scene),
-            per_floor: pf,
-            gateway: None,
-            floor: None,
-            tools,
-            audio_audible,
-            volume_flash,
-            source_warning,
-            keys_stats: KEYS_STATS,
-            keys_alert: KEYS_ALERT,
+            tools: tools.to_vec(),
+            context: FooterContext {
+                per_floor: crate::board::per_floor_counts(scene),
+                gateway: None,
+                floor: None,
+                audio_audible,
+                volume_flash,
+                source_warning,
+                keys_stats: KEYS_STATS,
+                keys_alert: KEYS_ALERT,
+            },
         }
     }
 
@@ -540,8 +591,7 @@ mod tests {
             tools.is_empty(),
             "empty leading token yields no tool: {tools:?}"
         );
-        let pf = crate::board::per_floor_counts(&scene);
-        let line = build_footer(&inputs(&scene, &pf, &tools, false, None, None), 200).text();
+        let line = build_footer(&inputs(&scene, &tools, false, None, None), 200).text();
         assert!(!line.contains('\u{00d7}'), "no × tool count: {line}");
         assert!(
             line.contains("\u{25cf}1 A"),
@@ -552,10 +602,8 @@ mod tests {
     #[test]
     fn audio_suffix_tracks_audibility_and_the_volume_flash() {
         let scene = SceneState::uniform(16);
-        let pf = crate::board::per_floor_counts(&scene);
-        let go = |audible, flash| {
-            build_footer(&inputs(&scene, &pf, &[], audible, flash, None), 200).text()
-        };
+        let go =
+            |audible, flash| build_footer(&inputs(&scene, &[], audible, flash, None), 200).text();
         assert!(!go(false, None).contains('\u{2669}'), "muted shows no note");
         let line = go(true, None);
         assert!(line.contains('\u{2669}'), "audible shows ♩: {line}");
@@ -575,10 +623,9 @@ mod tests {
         let mut scene = SceneState::uniform(16);
         let slot = active_slot("/p/mb.jsonl", "Bash ls", ToolKind::Bash);
         scene.agents.insert(slot.agent_id, slot);
-        let pf = crate::board::per_floor_counts(&scene);
         let tools = footer_tool_tally(&scene);
         let width: u16 = 200;
-        let model = build_footer(&inputs(&scene, &pf, &tools, false, None, None), width);
+        let model = build_footer(&inputs(&scene, &tools, false, None, None), width);
         let cols_sum: usize = model.segments.iter().map(|s| cols(&s.text)).sum();
         assert_eq!(cols_sum, width as usize, "fills full width: {model:?}");
         assert!(
@@ -592,9 +639,8 @@ mod tests {
         let mut scene = SceneState::uniform(16);
         let slot = waiting_slot("/p/wait.jsonl");
         scene.agents.insert(slot.agent_id, slot);
-        let pf = crate::board::per_floor_counts(&scene);
         let warn = "transport pixtuoid-hook died: connection refused after 3 retries";
-        let line = build_footer(&inputs(&scene, &pf, &[], false, None, Some(warn)), 40).text();
+        let line = build_footer(&inputs(&scene, &[], false, None, Some(warn)), 40).text();
         assert!(
             line.contains("\u{25b2}1 need you"),
             "the ▲N alarm survives body truncation: {line}"
@@ -608,8 +654,7 @@ mod tests {
     #[test]
     fn empty_office_is_a_bare_count() {
         let scene = SceneState::uniform(16);
-        let pf = crate::board::per_floor_counts(&scene);
-        let line = build_footer(&inputs(&scene, &pf, &[], false, None, None), 200).text();
+        let line = build_footer(&inputs(&scene, &[], false, None, None), 200).text();
         assert!(line.contains(" 0 "), "bare zero count: {line}");
         assert!(
             !line.contains('\u{25cf}'),
@@ -622,26 +667,21 @@ mod tests {
         let mut busy = SceneState::uniform(16);
         let slot = waiting_slot("/p/wait.jsonl");
         busy.agents.insert(slot.agent_id, slot);
-        let pf = crate::board::per_floor_counts(&busy);
         let tools = footer_tool_tally(&busy);
         let empty = SceneState::uniform(16);
-        let pf_empty = crate::board::per_floor_counts(&empty);
         for w in 0..=64u16 {
             for (label, model) in [
                 (
                     "stats",
-                    build_footer(&inputs(&busy, &pf, &tools, false, None, None), w),
+                    build_footer(&inputs(&busy, &tools, false, None, None), w),
                 ),
                 (
                     "empty",
-                    build_footer(&inputs(&empty, &pf_empty, &[], false, None, None), w),
+                    build_footer(&inputs(&empty, &[], false, None, None), w),
                 ),
                 (
                     "death",
-                    build_footer(
-                        &inputs(&busy, &pf, &[], false, None, Some("transport died")),
-                        w,
-                    ),
+                    build_footer(&inputs(&busy, &[], false, None, Some("transport died")), w),
                 ),
             ] {
                 let got: usize = model.segments.iter().map(|s| cols(&s.text)).sum();
@@ -660,17 +700,16 @@ mod tests {
         let mut scene = SceneState::uniform(16);
         let slot = active_slot("/p/a.jsonl", "Edit x", ToolKind::Edit);
         scene.agents.insert(slot.agent_id, slot);
-        let pf = crate::board::per_floor_counts(&scene);
         // Wide enough for the full hint tail, one column too narrow for the
         // minimal stats tier — so the fallback rung is what renders.
-        let wide = build_footer(&inputs(&scene, &pf, &[], false, None, None), 34).text();
+        let wide = build_footer(&inputs(&scene, &[], false, None, None), 34).text();
         assert_eq!(cols(&wide), 34, "right-flushed: {wide:?}");
         assert!(
             wide.ends_with(KEYS_STATS),
             "keeps the full hint tail: {wide:?}"
         );
         // Below the hint tail's own width the ALERT tail takes over, whole.
-        let narrow = build_footer(&inputs(&scene, &pf, &[], false, None, None), 20).text();
+        let narrow = build_footer(&inputs(&scene, &[], false, None, None), 20).text();
         assert_eq!(cols(&narrow), 20, "right-flushed: {narrow:?}");
         assert!(
             narrow.ends_with(KEYS_ALERT),
@@ -680,5 +719,29 @@ mod tests {
             !narrow.contains("[t]"),
             "no dangling half-token: {narrow:?}"
         );
+    }
+
+    #[test]
+    fn context_derives_the_office_wide_halves_from_the_full_scene() {
+        use pixtuoid_core::state::{DaemonInstanceId, DaemonLiveness, DaemonPresence};
+        let mut scene = SceneState::uniform(16);
+        let mut upstairs = waiting_slot("/p/up.jsonl");
+        upstairs.floor_idx = 1;
+        scene.agents.insert(upstairs.agent_id, upstairs);
+        scene.insert_daemon(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            DaemonInstanceId::new("18789").expect("non-empty"),
+            DaemonPresence {
+                liveness: DaemonLiveness::Down,
+                active_sessions: 0,
+                last_seen: SystemTime::UNIX_EPOCH,
+                entered_at: SystemTime::UNIX_EPOCH,
+                in_flight_runs: Default::default(),
+                current_pid: None,
+            },
+        );
+        let ctx = FooterContext::new(&scene, None, false, None, None, KEYS_STATS, KEYS_ALERT);
+        assert_eq!(ctx.per_floor[1].waiting, 1, "the upstairs agent counts");
+        assert_eq!(ctx.gateway, Some(DaemonState::Down));
     }
 }

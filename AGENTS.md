@@ -36,11 +36,11 @@ five crates. Overview: [`README.md`](README.md).
 ```
 crates/   DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}  (+ standalone pixtuoid-hook)
 ├── pixtuoid-core/   headless lib — no terminal deps; `native` feature gates the async
-│                    source runtime (no-default-features = wasm32-clean decode/reduce)
+│                    source runtime and disk pack reads (off = wasm32-clean decode/reduce)
 ├── pixtuoid-scene/  render+sim engine — terminal- AND window-free BY CRATE BOUNDARY
 ├── pixtuoid/        binary — two thin painters over pixtuoid-scene: `tui/`, `floating/`
 ├── pixtuoid-web/    third painter — wasm canvas, publish=false; a SITE BUILD INPUT
-│                    (`just gen-wasm` → committed site/public/wasm/)
+│                    (`just gen-wasm` → gitignored site/public/wasm/, built in CI)
 └── pixtuoid-hook/   tiny shim CC invokes — stdin JSON → socket/named pipe
 scripts/  gen-media.py (the ONE driver for committed media), gen-art.py (the generated sprites: every @Nx + the 1x pieces it owns), e2e tiers (lib/), drift watch
 policy/   CI contracts no linter sees (jq over yq) + behavior tests of workflow shell
@@ -59,7 +59,7 @@ cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 - clippy doesn't warm test's build ([why](docs/CONTRIBUTING.md#build--test)) — iterate with one of them. Never pipe preflight through `tail`/`head` (exit code eaten).
 - Touched `--json` / `SourceStatus` / `OutcomeRow` / the source roster → `just gen-contract` (regenerates schemas + Raycast types).
 - Renamed a decoded/registered wire name → `just gen-drift-surface`, commit both `crates/*/drift-surface.json` — the crate's own test fails on a stale fragment; regenerate, don't hand-edit.
-- Look-changing PR → `just gen`, commit everything it rewrote; a core/scene/web change ALSO needs `just gen-wasm` + commit `site/public/wasm/` (`gen` deliberately excludes it, and nothing catches a skip).
+- Look-changing PR → `just gen`, commit everything it rewrote.
 - Real wire bytes ride ONE pipeline, `pixtuoid_core::harness::Drive` — rules in [`tests/AGENTS.md`](crates/pixtuoid-core/tests/AGENTS.md#the-one-pipeline).
 - Fixtures are RECORDED, never composed (`just capture-fixture` — BILLED), and the recorder blanks every subtree no decoder reads (derived by probe, never listed); every scenario declares `provenance.json`. Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md). `just restrip-fixtures` re-strips the committed corpus offline; `just corpus-all` censuses local corpora; `just fixture-age` is advisory/local.
 - Visual verification for sprite work: snapshot example → `scripts/crop-snapshot.py` → READ the PNG; loop in `.claude/skills/beautify-decoration/SKILL.md`.
@@ -72,10 +72,9 @@ cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 
 Non-trivial work runs as an arc — pick → grill the design → design gate →
 spec → build (TDD) → self-review → merge gate → wrap. Per-step detail:
-[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-arc-loop). The merge gate is the
-`two-lens-review` skill: 2+ differentiated lenses + green CI + every bot
-finding dispositioned, under that skill's **convergence contract** (churn
-budget, two-fix-round cap, HIGH-only blocking). **A human merges.**
+[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-arc-loop). The merge gate is
+[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-merge-gate); the `two-lens-review`
+skill runs its local rows. **A human merges.**
 
 Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 `add-source`, `add-theme`, `procedural-lofi`.
@@ -91,7 +90,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 - **Shell**: match the surrounding shell; `shellcheck` + `shfmt` (`just shfmt-fix`) any `.sh` you touch. macOS-first (BSD CLI, brew).
 - **Docs current in the same commit** as any structure/API/workflow change.
 - **External-surface claims are fetched, not remembered** — cite the `path:line` you fetched THIS session or add a `check_upstream_drift.py` row; the population is the whole upstream repo (`gh api .../git/trees/<ref>?recursive=1`), not one plausible file (#938).
-- **A refuted review finding produces a MECHANISM, or nothing** — a test, a compile-time constraint, or a CI gate; refuting never produces prose, because prose has no failure mode. Only an EXTERNAL fact (another CLI's wire bytes, an OS semantic) earns a comment, on the narrowest thing it constrains. **A real finding this change introduced is fixed in-scope or forces a re-scope; a pre-existing one is a FOLLOW-UP → #N: it never grows the PR, but its fix PR exists (a draft is enough) before the PR merges (four terminal states, defined once in the `two-lens-review` skill's `briefs.md`). Agents never file issues.**
+- **A refuted review finding produces a MECHANISM, or nothing** — a test, a compile-time constraint, or a CI gate; refuting never produces prose, because prose has no failure mode. Only an EXTERNAL fact (another CLI's wire bytes, an OS semantic) earns a comment, on the narrowest thing it constrains. **A real finding this change introduced is fixed in-scope or forces a re-scope; a pre-existing one is a FOLLOW-UP → #N: it never grows the PR, but its fix PR exists (a draft is enough) before the PR merges (four terminal states, defined once in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#dispositions)). Agents never file issues.**
 - **Only the latest released version of each agent CLI is supported.** When upstream renames or reshapes a wire name, repoint the decoder, the plugin, and the drift-watcher anchor at the CURRENT declaration and DELETE the old one — no dual-listening beside a replacement, no legacy-format arm kept "just in case". Every superseded arm is a second copy of a wire contract that drifts silently and that the watcher then has to anchor twice (#981). Two things this does NOT govern: OUR OWN upgrade path (a `LEGACY_INSTANCE_ID` for a plugin file an older pixtuoid wrote is a compatibility arm for our artifact, not upstream's — #457), and mirroring a resolver upstream itself still branches on. Pre-dating arms exist (`opencode.rs`'s v1/v2 permission names, `codewhale.rs`'s `spawn_agent`); they are debt, not precedent.
 - **Path asserts compare `PathBuf` structurally**, never `to_string_lossy()` with a hardcoded separator — string asserts pass on Unix and fail only in `windows-test`. Resolution POLICY (HOME vs USERPROFILE, %APPDATA% vs `~/.config`) is per-CLI: mirror each CLI's own resolver (`platform::home_first_dir`).
 
@@ -102,7 +101,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 3. **`Source` trait is the only seam** for a transcript-bearing CLI; per-source format knowledge lives in that source's decoder. Exceptions: hook-only CLIs (Reasonix) and the shared ACP wire standard (`source/acp.rs`, reused by grok) — [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#adding-a-new-agent-cli) step 3 and `source/acp.rs`'s header.
 4. **Hook install writes through symlinks** (`resolve_symlink` in `install/io.rs`) — critical for stow-managed configs; Windows keeps the bounded rename-retry.
 5. **The hook shim never blocks CC** — always exit 0 silently; the send bound (pixtuoid-hook's `transport::WRITE_TIMEOUT`) is watchdog-enforced on both platforms. Shim coverage is child-process level only.
-6. **Walkable mask = ground footprint only**; sprite size never moves a sim position — fitting the frame is the painter's job (`keep_sprite_on_canvas`), not the sim's (#912).
+6. **Walkable mask = ground footprint only**; sprite size never moves a sim position — the canvas fit (`keep_sprite_on_canvas`) adjusts only a placement's paint anchor (#912).
 
 ## Ownership by crate
 
@@ -126,7 +125,7 @@ taller-cell terminals; bundled base character sprites max at 8×12 px (their
 - Never relax the shim's always-exit-0 contract; never add `--no-verify`/hook-skipping flags.
 - No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks — the owner reviews every doc change directly, so propose the diff rather than adding a generator or a cap. No `git push` without explicit user confirmation.
 - No stale `Closes #N` on a re-scope (fires from commit body or PR text, even conditional).
-- No merging without the two-lens review (PR #23 merged unreviewed with a path traversal). Don't blindly accept reviewer findings — verify the premise against the comments on the item it names first.
+- No merging past the review gate (PR #23 merged unreviewed with a path traversal). Don't blindly accept reviewer findings — verify the premise against the comments on the item it names first.
 
 ## Where to look
 

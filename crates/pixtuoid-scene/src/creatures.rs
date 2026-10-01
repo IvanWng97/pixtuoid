@@ -39,7 +39,7 @@ fn walkable_target(layout: &Layout, seed: u64, n: u64) -> Point {
     if w == 0 || h == 0 {
         return Point { x: 0, y: 0 };
     }
-    let mut z = seed ^ n.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    let mut z = seed ^ n.wrapping_mul(crate::GOLDEN_GAMMA);
     let mut last = Point { x: 0, y: 0 };
     for _ in 0..TARGET_TRIES {
         z = pixtuoid_core::id::splitmix64(z);
@@ -568,9 +568,7 @@ mod tests {
     /// answers with a coarse CELL CENTRE, so a clear destination is not enough.
     #[test]
     fn no_resting_creature_settles_under_a_sprite_that_paints_over_it() {
-        let pack =
-            crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-                .expect("pack");
+        let pack = crate::embedded_pack::test_default_pack();
         let mut rests = 0u32;
         let min = crate::layout::min_layout_size();
         for &(w, h) in &[

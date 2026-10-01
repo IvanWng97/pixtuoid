@@ -12,8 +12,8 @@ pub const PANTRY_COUNTER_LARGE_W: u16 = 32;
 /// anchor — shared by the lounge couch and the meeting sofas.
 const SEAT_DX: [i16; 3] = [-6, 0, 6];
 
-/// A band this wide has room for flanking greenery (the lounge pot's west edge
-/// needs 58 by derivation; +2 breathing).
+/// A band this wide has room for flanking greenery: the lounge pot's west edge,
+/// plus breathing room.
 pub(super) const ROOMY_BAND_MIN_W: u16 = 60;
 
 /// Air kept between a scatter plant's sprite box and any obstacle waypoint's
@@ -89,11 +89,11 @@ const fn cubicle_aisle_h(usable_h: u16) -> u16 {
 const MIN_CUBICLE_AISLE_H: u16 = 8;
 
 /// The smallest buffer `compute_with_seed` lays out; below either it returns `None`
-/// ("terminal too small"). BOTH axes are SOLVED against the band, not the buffer — the
-/// two hand-written floors erred in OPPOSITE directions: W advertised a size that lays
-/// out an office with no desk to seat anyone, and H was never re-derived and refused 15
-/// buffer px of sizes that render.
+/// ("terminal too small"). BOTH axes are SOLVED against the band, not the buffer, and
+/// the width against the north wall too: no narrower wall hangs the door clear of
+/// the neon.
 pub(super) const MIN_LAYOUT_W: u16 = min_layout_w();
+const _: () = assert!(MIN_LAYOUT_W >= super::NEON_DOOR_WALL_W);
 pub(super) const MIN_LAYOUT_H: u16 = min_layout_h();
 
 /// The widest left column any variant takes — the band gets the rest, so this
@@ -112,7 +112,11 @@ const fn widest_mid_x_pct() -> u16 {
 }
 
 const fn min_layout_w() -> u16 {
-    let mut w = DESK_BAND_MIN_W;
+    let mut w = if DESK_BAND_MIN_W > super::NEON_DOOR_WALL_W {
+        DESK_BAND_MIN_W
+    } else {
+        super::NEON_DOOR_WALL_W
+    };
     while band_w(w, widest_mid_x_pct()) < DESK_BAND_MIN_W {
         w += 1;
     }
@@ -169,14 +173,12 @@ fn room_fits_furniture(mr: &Bounds) -> bool {
 /// with its aisle east of it.
 struct FloorPlan {
     buf_w: u16,
+    buf_h: u16,
     top_margin: u16,
     usable_h: u16,
-    /// The divider's west edge; the side rooms span the columns before it.
-    mid_x: u16,
-    /// The west bound lounge furniture must clear: the divider wall's east edge,
-    /// or the band start when no meeting room encloses one.
+    /// The west bound lounge furniture and the whiteboard must clear: the divider
+    /// wall's east edge, or the band start when no meeting room encloses one.
     lounge_west_clear: u16,
-    cubicle_band: Bounds,
     cubicle_aisle: Bounds,
     pod_grid: PodGrid,
     pantry: Option<Bounds>,
@@ -301,6 +303,7 @@ impl FloorPlan {
             / pod_stride_y)
             .max(1);
         let pod_grid = PodGrid {
+            band: cubicle_band,
             cols: pod_cols,
             rows: pod_rows,
             stride_x: pod_stride_x,
@@ -318,11 +321,10 @@ impl FloorPlan {
         }
         Self {
             buf_w,
+            buf_h,
             top_margin,
             usable_h,
-            mid_x,
             lounge_west_clear,
-            cubicle_band,
             cubicle_aisle,
             pod_grid,
             pantry: pantry_room,
@@ -360,32 +362,29 @@ pub(super) fn compute_with_seed(
 
     let plan = FloorPlan::new(buf_w, buf_h, floor_seed);
 
-    let (home_desks, desk_facings) =
-        compute_pod_desks(max_desks, &plan.cubicle_band, plan.pod_grid);
+    let (home_desks, desk_facings) = compute_pod_desks(max_desks, plan.pod_grid);
 
-    let pod_decor = compute_pod_decor(&plan.cubicle_band, plan.pod_grid, floor_seed);
+    let pod_decor = compute_pod_decor(plan.pod_grid, floor_seed);
 
     // Dense's inter-meeting wall is deliberately solid (#557 door policy).
     let (room_walls, doorways) =
         super::rooms::walls::derive_room_walls(&plan.meeting_rooms, plan.pantry);
 
-    // Elevator door — at the east end of the window wall, taking out any window it
-    // overlaps; above the lounge gate so that gate can check couch↔door clearance.
-    // It needs windows at least as tall as itself.
+    // Elevator door — in the window wall's last slot; above the lounge gate so
+    // that gate can check couch↔door clearance. It needs windows at least as
+    // tall as itself.
     let top_wall_h = plan
         .top_margin
         .saturating_sub(super::WALL_BAND_TO_TOP_MARGIN);
     let windows_h = super::window_rows(top_wall_h).len();
-    let door = if buf_w >= ELEVATOR_W + 4 && windows_h >= usize::from(ELEVATOR_H) {
-        Some(Point {
-            x: buf_w.saturating_sub(ELEVATOR_W + 2),
+    let door = super::door_x(buf_w)
+        .filter(|_| windows_h >= usize::from(ELEVATOR_H))
+        .map(|x| Point {
+            x,
             // Its bottom row is the band's trim row, so it stands on the floor
             // line instead of floating mid-wall.
             y: super::wall_trim_row(top_wall_h) + 1 - ELEVATOR_H,
-        })
-    } else {
-        None
-    };
+        });
     /// How far SOUTH of the floor line the elevator spawn sits, so a character entering
     /// stands on open floor, not on the wall apron the straddling wall decor stamps into.
     const DOOR_THRESHOLD_CLEARANCE_PX: u16 = 4;
@@ -397,9 +396,9 @@ pub(super) fn compute_with_seed(
     let Point {
         x: couch_x,
         y: couch_y,
-    } = couch_pos(&plan.cubicle_band, plan.top_margin, plan.lounge_west_clear);
-    // Below this WEST-side fit the whole vignette degrades away; 30 = the vignette's
-    // blocked span + OBSTACLE_PAD_PX each side + walk clearance.
+    } = couch_pos(&plan.pod_grid.band, plan.top_margin, plan.lounge_west_clear);
+    // Below this WEST-side fit the whole vignette degrades away: the vignette's blocked
+    // span, OBSTACLE_PAD_PX each side, and walk clearance.
     const LOUNGE_MIN_BAND_W: u16 = 30;
     // EAST-side twin (#566): the east seat's padded ground must stay at-or-west of the
     // threshold column. WAYPOINT_STAMP_PAD_PX is the SEAT stamp's pad, NOT OBSTACLE_PAD_PX.
@@ -410,24 +409,44 @@ pub(super) fn compute_with_seed(
     let flanks = LoungeFlanks::of(couch_x);
     let couch_clears_door =
         door_threshold.is_none_or(|dt| couch_east_ground.max(flanks.east_ground()) <= dt.x);
-    let lounge_fits = plan.cubicle_band.width >= LOUNGE_MIN_BAND_W && couch_clears_door;
+    let lounge_fits = plan.pod_grid.band.width >= LOUNGE_MIN_BAND_W && couch_clears_door;
+    let lounge = lounge_fits.then(|| {
+        place_lounge(
+            Point {
+                x: couch_x,
+                y: couch_y,
+            },
+            buf_w,
+            door,
+        )
+    });
 
-    let (mut waypoints, couch_sprite_center) = compute_waypoints(&plan, &pod_decor, lounge_fits);
+    let mut waypoints = compute_waypoints(
+        &plan,
+        &pod_decor,
+        lounge.map(|l| l.couch_center),
+        &home_desks,
+    );
 
     // NOT the pantry (a plant + pad blocks the only bridge to the cubicle area), NOT the
-    // cubicle top strip (a 7-px wall-to-couch gap), NOT a meeting interior (seals the door).
+    // cubicle top strip (the narrow wall-to-couch gap), NOT a meeting interior (seals the
+    // door).
     let mut plant_candidates: Vec<PlantItem> = vec![
         PlantItem {
             kind: PlantKind::Flower,
             pos: Point {
-                x: plan.cubicle_band.x + 4,
+                // Its pot clear of the divider, which a doorway may cut down to here.
+                x: (plan.pod_grid.band.x + 4).max(
+                    plan.lounge_west_clear
+                        + furniture_def(PlantKind::Flower.furniture()).visual.w / 2,
+                ),
                 y: plan.cubicle_aisle.y.saturating_sub(4),
             },
         },
         PlantItem {
             kind: PlantKind::Succulent,
             pos: Point {
-                x: plan.cubicle_band.x + plan.cubicle_band.width.saturating_sub(4),
+                x: plan.pod_grid.band.x + plan.pod_grid.band.width.saturating_sub(4),
                 y: plan.cubicle_aisle.y.saturating_sub(4),
             },
         },
@@ -464,16 +483,9 @@ pub(super) fn compute_with_seed(
     )
     .collect();
 
-    // AFTER `door`: the tank prices its east limit against the elevator column.
-    let LoungeVignette {
-        floor_lamp,
-        side_table: lounge_side_table,
-        fish_tank,
-    } = place_lounge_vignette(couch_x, couch_y, buf_w, door, lounge_fits);
-
     // Two Ficus spots — greeting plant west of the elevator, and the lounge's west flank.
     // On a narrower band each seals a top-strip pocket, hence the ROOMY gate.
-    if plan.cubicle_band.width >= ROOMY_BAND_MIN_W {
+    if plan.pod_grid.band.width >= ROOMY_BAND_MIN_W {
         if let Some(d) = door {
             plant_candidates.push(PlantItem {
                 kind: PlantKind::Ficus,
@@ -483,7 +495,7 @@ pub(super) fn compute_with_seed(
                 },
             });
         }
-        if lounge_fits {
+        if lounge.is_some() {
             // A plant's clearance west of the side table, and its ground east
             // of the divider, or no Ficus.
             let ficus = furniture_def(PlantKind::Ficus.furniture());
@@ -500,7 +512,7 @@ pub(super) fn compute_with_seed(
         }
     }
 
-    let mut wall_decor = place_wall_decor(&plan, door);
+    let mut wall_decor = place_wall_decor(&plan, door, &home_desks, &desk_facings, &pod_decor);
 
     // The island pushes its 4 slots BEFORE the shelf's — the push order the goldens pin.
     let kitchen_island = plan.pantry.and_then(|pr| {
@@ -520,9 +532,9 @@ pub(super) fn compute_with_seed(
     // Settle only now — AFTER every waypoint exists; filtering at the candidate site
     // checked a subset of the final set.
     let singleton_rects = plant_obstacle_rects(
-        fish_tank,
-        floor_lamp,
-        lounge_side_table,
+        lounge.and_then(|l| l.fish_tank),
+        lounge.map(|l| l.floor_lamp),
+        lounge.map(|l| l.side_table),
         kitchen_island,
         &plan.meeting_rooms,
     );
@@ -540,7 +552,7 @@ pub(super) fn compute_with_seed(
             &home_desks,
             &waypoints,
             &obstacles,
-            &plan.cubicle_band,
+            &plan.pod_grid.band,
             floor_seed,
         ) {
             plants.push(settled);
@@ -558,9 +570,9 @@ pub(super) fn compute_with_seed(
             kitchen_island,
             waypoints: &waypoints,
             plants,
-            floor_lamp,
-            lounge_side_table,
-            fish_tank,
+            floor_lamp: lounge.map(|l| l.floor_lamp),
+            lounge_side_table: lounge.map(|l| l.side_table),
+            fish_tank: lounge.and_then(|l| l.fish_tank),
             wall_decor,
             pod_decor: &pod_decor,
             wall_pieces: &wall_pieces,
@@ -619,25 +631,13 @@ pub(super) fn compute_with_seed(
         debug_assert!(
             !severed(&walkable),
             "#566 connectivity guard: a pocket (or a coarse-unroutable home desk) survived \
-             dropping every scatter plant AND the free-standing whiteboard — a new NON-decor \
+             dropping every scatter plant AND every floor-standing wall decor — a new NON-decor \
              seal cause needs its own fix"
         );
     }
 
     // ReachSet's seed snap pulls a blocked seed into the adjacent component.
     let reachable = ReachSet::from_mask(&walkable, conn_seed);
-
-    // Couch + lamp + side table are Some exactly iff `lounge_fits`, so the zip is None
-    // precisely when the vignette doesn't fit; the aquarium keeps its own east gate.
-    let lounge = couch_sprite_center
-        .zip(floor_lamp)
-        .zip(lounge_side_table)
-        .map(|((couch_center, floor_lamp), side_table)| Lounge {
-            couch_center,
-            floor_lamp,
-            side_table,
-            fish_tank,
-        });
 
     // A narrow band can wall off a back-turned desk's SOUTH front — demote, don't drop.
     // A NET, not live code.
@@ -668,7 +668,7 @@ pub(super) fn compute_with_seed(
     Some(SceneLayout {
         buf_w,
         buf_h,
-        cubicle_band: plan.cubicle_band,
+        cubicle_band: plan.pod_grid.band,
         cubicle_aisle: plan.cubicle_aisle,
         desk_facings,
         home_desks,
@@ -695,18 +695,22 @@ pub(super) fn compute_with_seed(
     })
 }
 
-/// The four wall-band decorations, each TOP-LEFT-anchored so its bottom row lands on
-/// the last wall-band row however tall the band grows. The screen hugs room 0's WEST
+/// The wall-band decorations, each TOP-LEFT-anchored so its bottom row lands on the last
+/// wall-band row however tall the band grows; the whiteboard stands on the floor instead. The screen hugs room 0's WEST
 /// corner and the bookshelf spreads EAST — LOAD-BEARING, not taste: the carpet apron
 /// between the two grounds must drain south AROUND the tucked sofa. Any item whose
-/// clamped slot would pierce the divider/exit sign/elevator drops, reopening the lane.
-fn place_wall_decor(plan: &FloorPlan, door: Option<Point>) -> Vec<WallDecorItem> {
+/// clamped slot would pierce the divider/elevator drops, reopening the lane.
+fn place_wall_decor(
+    plan: &FloorPlan,
+    door: Option<Point>,
+    home_desks: &[Point],
+    desk_facings: &[Facing],
+    pod_decor: &[PodDecorItem],
+) -> Vec<WallDecorItem> {
     let FloorPlan {
         buf_w,
         top_margin,
         usable_h,
-        mid_x,
-        ref cubicle_band,
         pod_grid,
         ..
     } = *plan;
@@ -720,13 +724,11 @@ fn place_wall_decor(plan: &FloorPlan, door: Option<Point>) -> Vec<WallDecorItem>
         (sx + screen_w < mr.bounds.x + mr.bounds.width).then_some(sx)
     });
     let bookshelf_x = bookshelf_x(buf_w, screen_w, bookshelf_w, meeting_screen_x, meeting_room);
-    let exit_sign_x = buf_w.saturating_sub(9);
-    let wall_east_limit = exit_sign_x.min(door.map(|d| d.x).unwrap_or(u16::MAX));
     // WEST of the vertical divider too: on narrow trio rooms the drain clamp can push it
     // onto the wall's top segment, where it pierces the glass. Dropping reopens the apron.
     let bookshelf_east_limit = meeting_room
         .map_or(u16::MAX, |mr| mr.bounds.x + mr.bounds.width)
-        .min(wall_east_limit);
+        .min(door.map_or(buf_w, |d| d.x));
     let mut wall_decor = Vec::new();
     if bookshelf_x + bookshelf_w < bookshelf_east_limit {
         wall_decor.push(WallDecorItem {
@@ -737,28 +739,66 @@ fn place_wall_decor(plan: &FloorPlan, door: Option<Point>) -> Vec<WallDecorItem>
             },
         });
     }
-    wall_decor.push(WallDecorItem {
-        kind: WallDecor::ExitSign,
-        pos: Point {
-            x: exit_sign_x,
-            y: top_margin.saturating_sub(13),
-        },
-    });
+    wall_decor.extend(
+        door.and_then(super::exit_sign_pos)
+            .map(|pos| WallDecorItem {
+                kind: WallDecor::ExitSign,
+                pos,
+            }),
+    );
     // `usable_h / 3` is a hint, not a slot: unsnapped it drops the board on a desk row
     // or in the intra-pod gap, where the wheel strip plugs the pod's own west lane.
     let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
     let hint = Point {
-        x: mid_x + 3,
+        x: plan.lounge_west_clear,
         y: top_margin + usable_h / 3,
     };
+    let pod_pieces: Vec<Fixture> = desk_fixtures(home_desks, plan.buf_h)
+        .chain(desk_chair_fixtures(home_desks, |i| desk_facings[i.0]))
+        .chain(pod_decor_fixtures(pod_decor))
+        .collect();
+    // A pod's own whiteboard in the same columns would read as the board's twin.
+    let twin_columns: Vec<(u16, u16)> = pod_pieces
+        .iter()
+        .filter(|f| {
+            matches!(
+                f.kind,
+                FixtureKind::Pod {
+                    kind: PodDecor::Whiteboard,
+                    ..
+                }
+            )
+        })
+        .map(|f| (f.visual.x, f.visual.x + f.visual.width))
+        .collect();
+    let band_east = pod_grid.band.x + pod_grid.band.width;
+    // The westmost spot in the aisle east of the divider that hides no desk, chair,
+    // cabinet or pod decor behind the board, or no board.
     let snapped = wb_def
         .ground_rect(Anchor::TopLeft, hint)
         .and_then(|(ground, size)| {
-            let y = pod_grid.snap_inter_pod_ground_y(cubicle_band, ground.y, size.h)?;
-            Some(Point {
-                x: hint.x,
-                y: y.saturating_sub(ground.y - hint.y),
-            })
+            let y = pod_grid
+                .snap_inter_pod_ground_y(ground.y, size.h)?
+                .saturating_sub(ground.y - hint.y);
+            (hint.x..=band_east.saturating_sub(wb_def.visual.w))
+                .map(|x| Point { x, y })
+                .find(|&at| {
+                    let east = at.x + wb_def.visual.w;
+                    twin_columns.iter().all(|&(w, e)| e <= at.x || east <= w)
+                        && pod_pieces.iter().all(|f| {
+                            let v = f.visual;
+                            !super::placement::rects_overlap(
+                                (at, wb_def.visual),
+                                (
+                                    Point { x: v.x, y: v.y },
+                                    Size {
+                                        w: v.width,
+                                        h: v.height,
+                                    },
+                                ),
+                            )
+                        })
+                })
         });
     if let Some(pos) = snapped {
         wall_decor.push(WallDecorItem {
@@ -863,50 +903,43 @@ impl LoungeFlanks {
     }
 }
 
-/// The lounge vignette singletons, all anchored to the viewing couch and gated
-/// as ONE cluster on `lounge_fits`.
-struct LoungeVignette {
-    floor_lamp: Option<Point>,
-    side_table: Option<Point>,
-    fish_tank: Option<Point>,
-}
-
 /// The lounge vignette around the viewing couch — floor lamp, side table, aquarium.
 /// The lamp sits just east so its halo bathes the seating area at night; the side table
 /// takes the OPPOSITE (west) flank ([`LoungeFlanks`]). The
 /// aquarium carries an EXTRA gate the other two don't: it must stay clear of the
 /// elevator `door` column so the spawn threshold never routes around it.
-fn place_lounge_vignette(
-    couch_x: u16,
-    couch_y: u16,
-    buf_w: u16,
-    door: Option<Point>,
-    lounge_fits: bool,
-) -> LoungeVignette {
-    let flanks = LoungeFlanks::of(couch_x);
-    let floor_lamp = lounge_fits.then_some(Point {
+fn place_lounge(couch: Point, buf_w: u16, door: Option<Point>) -> Lounge {
+    /// Rows from the couch's centre down to the lamp's base: the art grows
+    /// north from it (invariant #6), clear of the desks to the south.
+    const LAMP_BASE_DY: u16 = 6;
+    let flanks = LoungeFlanks::of(couch.x);
+    let floor_lamp = Point {
         x: flanks.lamp_x,
-        y: couch_y + 2,
-    });
-    let side_table = lounge_fits.then_some(Point {
+        y: super::placement::centre_y_standing_on(
+            couch.y + LAMP_BASE_DY,
+            furniture_def(Furniture::FloorLamp).visual.h,
+        ),
+    };
+    let side_table = Point {
         x: flanks.side_table_x,
-        y: couch_y + 2,
-    });
-    let fish_tank = floor_lamp.and_then(|lamp| {
+        y: couch.y + 2,
+    };
+    let fish_tank = {
         let def = furniture_def(Furniture::FishTank);
         let half_w = def.visual.w / 2;
         // One clear floor column of breathing room past the lamp shade's east edge; a
         // center-pinned east edge is (w-1)/2 past the anchor.
         const LAMP_TANK_GAP: u16 = 2;
-        let lamp_east = lamp.x + (furniture_def(Furniture::FloorLamp).visual.w - 1) / 2;
+        let lamp_east = floor_lamp.x + (furniture_def(Furniture::FloorLamp).visual.w - 1) / 2;
         let cx = lamp_east + LAMP_TANK_GAP + half_w;
         let east_limit = door.map_or(buf_w.saturating_sub(2), |d| d.x);
         (cx + half_w + FISH_TANK_ELEVATOR_CLEARANCE <= east_limit).then_some(Point {
             x: cx,
-            y: couch_y.saturating_sub(4),
+            y: couch.y.saturating_sub(4),
         })
-    });
-    LoungeVignette {
+    };
+    Lounge {
+        couch_center: couch,
         floor_lamp,
         side_table,
         fish_tank,
@@ -1082,9 +1115,7 @@ fn plant_spot_clear(
     first_blocking_waypoint(kind, pos, waypoints).is_none()
 }
 
-/// Does `r` (a blocked ground rect) overlap ANY home desk's ground? THE one
-/// desk-collision scan — the whiteboard-yield and the scatter-plant-yield both
-/// read it, so a future pad/anchor tweak can't land on one copy.
+/// Does `r` (a blocked ground rect) overlap ANY home desk's ground?
 fn overlaps_a_desk_ground(r: (Point, Size), home_desks: &[Point]) -> bool {
     let desk = super::decor::desk_furniture_def();
     home_desks.iter().any(|&d| {
@@ -1145,9 +1176,10 @@ fn plant_ground_in_bounds(p: &PlantItem, b: &Bounds) -> bool {
     )
 }
 
-/// 2×2-pod grid geometry shared by [`compute_pod_desks`] + [`compute_pod_decor`].
+/// The [`POD_SIDE`]-square pod lattice over the cubicle band.
 #[derive(Clone, Copy)]
 pub(super) struct PodGrid {
+    band: Bounds,
     cols: u16,
     rows: u16,
     stride_x: u16,
@@ -1157,27 +1189,24 @@ pub(super) struct PodGrid {
 
 impl PodGrid {
     /// NW origin (top-left of the first desk) of pod `(pod_c, pod_r)` within the
-    /// cubicle band — the single formula the desk-placement and aisle-decor
-    /// passes both step from.
-    fn pod_origin(self, cubicle_band: &Bounds, pod_c: u16, pod_r: u16) -> (u16, u16) {
-        let x = cubicle_band.x + INTER_POD_AISLE_X / 2 + pod_c * self.stride_x;
-        let y = cubicle_band.y
-            + INTER_POD_AISLE_Y / 2
-            + self.couch_to_desk_extra
-            + pod_r * self.stride_y;
+    /// cubicle band.
+    fn pod_origin(self, pod_c: u16, pod_r: u16) -> (u16, u16) {
+        let x = self.band.x + INTER_POD_AISLE_X / 2 + pod_c * self.stride_x;
+        let y =
+            self.band.y + INTER_POD_AISLE_Y / 2 + self.couch_to_desk_extra + pod_r * self.stride_y;
         (x, y)
     }
 
     /// The full-width y-bands BETWEEN consecutive pod rows, north-to-south — the only
     /// floor a free-standing piece may stand on. NOT "every pod-free strip": the north
     /// margin and south remainder hold the lounge and the door's approach.
-    fn inter_pod_y_bands(self, cubicle_band: &Bounds) -> Vec<(u16, u16)> {
+    fn inter_pod_y_bands(self) -> Vec<(u16, u16)> {
         // NOT `stride_y - INTER_POD_AISLE_Y`: that prices the SLOT, and a desk's blocked
         // ground runs to `DESK_GROUND_H` below its corner, so the overhang rows look free.
         let pod_h = (POD_SIDE - 1) * (DESK_H + INTRA_POD_GAP_Y) + DESK_GROUND_H;
         (0..self.rows.saturating_sub(1))
             .map(|pod_r| {
-                let (_, top) = self.pod_origin(cubicle_band, 0, pod_r);
+                let (_, top) = self.pod_origin(0, pod_r);
                 (top + pod_h, top + self.stride_y)
             })
             .filter(|&(start, end)| end > start)
@@ -1187,10 +1216,10 @@ impl PodGrid {
     /// Top row for a ground strip `h` px tall, centred in the inter-pod aisle nearest
     /// `desired` — `None` when no aisle can hold it. Centred, not flush: flush against a
     /// pod the strip piles all its clearance on one side and can seal the lane.
-    fn snap_inter_pod_ground_y(self, cubicle_band: &Bounds, desired: u16, h: u16) -> Option<u16> {
+    fn snap_inter_pod_ground_y(self, desired: u16, h: u16) -> Option<u16> {
         let distance_to = |(start, end): (u16, u16)| (start + (end - start) / 2).abs_diff(desired);
         let (start, end) = self
-            .inter_pod_y_bands(cubicle_band)
+            .inter_pod_y_bands()
             .into_iter()
             .filter(|&(start, end)| end - start >= h)
             .min_by_key(|&band| distance_to(band))?;
@@ -1198,8 +1227,8 @@ impl PodGrid {
     }
 }
 
-/// The five hand-authored floor geometries. `floor_seed` selects one via
-/// Fibonacci hashing; floors past the fifth cycle through the same looks.
+/// The hand-authored floor geometries. `floor_seed` selects one via Fibonacci
+/// hashing, so floors past [`FloorVariant::ALL`]'s length cycle through the same looks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum FloorVariant {
     /// Meeting + pantry, vertical wall between them and the cubicle area,
@@ -1219,10 +1248,10 @@ pub(super) enum FloorVariant {
 
 impl FloorVariant {
     /// THE roster: the floor derivations sweep it, `from_seed` indexes it, `COUNT` is
-    /// its length. A variant missing here is unreachable — clippy's `dead_code` reds on
+    /// its length. A variant missing here is unreachable — rustc's `dead_code` reds on
     /// the never-constructed arm, NOT `the_sweep_reaches_every_floor_variant`, which
-    /// catches the other direction. What NOTHING catches: `has_meeting` /
-    /// `has_pantry_base` are `matches!` lists, so a variant left out silently gets neither.
+    /// catches the other direction. `has_meeting` / `has_pantry_base` are `matches!`
+    /// lists; the `const _` above `compute_with_seed` reds a variant in neither.
     pub(super) const ALL: [Self; 5] = [
         FloorVariant::Standard,
         FloorVariant::OpenPlan,
@@ -1314,9 +1343,9 @@ fn pod_row_facing(r: u16) -> Facing {
 /// partial row at bottom edge.
 pub(super) fn compute_pod_desks(
     max_desks: Option<usize>,
-    cubicle_band: &Bounds,
     grid: PodGrid,
 ) -> (Vec<Point>, Vec<Facing>) {
+    let cubicle_band = &grid.band;
     let PodGrid {
         cols: pod_cols,
         rows: pod_rows,
@@ -1352,7 +1381,7 @@ pub(super) fn compute_pod_desks(
 
     'outer: for pod_r in 0..pod_rows {
         for pod_c in 0..pod_cols {
-            let (pod_origin_x, pod_origin_y) = grid.pod_origin(cubicle_band, pod_c, pod_r);
+            let (pod_origin_x, pod_origin_y) = grid.pod_origin(pod_c, pod_r);
             for r in 0..POD_SIDE {
                 for c in 0..POD_SIDE {
                     let full = push_desk(
@@ -1372,7 +1401,7 @@ pub(super) fn compute_pod_desks(
 
     // Partial right-edge columns CONTINUE the pod lattice, so spacing never jumps.
     let partial_col_x = |i: u16| -> u16 {
-        let (x, _) = grid.pod_origin(cubicle_band, pod_cols + i / POD_SIDE, 0);
+        let (x, _) = grid.pod_origin(pod_cols + i / POD_SIDE, 0);
         x + (i % POD_SIDE) * (DESK_W + INTRA_POD_GAP_X)
     };
     // POD_SIDE: a further column would need a residual wider than the stride already consumed.
@@ -1382,7 +1411,7 @@ pub(super) fn compute_pod_desks(
     let partial_col_at_right = partial_col_count > 0;
     if partial_col_at_right {
         'partial_x: for pod_r in 0..pod_rows {
-            let (_, pod_origin_y) = grid.pod_origin(cubicle_band, 0, pod_r);
+            let (_, pod_origin_y) = grid.pod_origin(0, pod_r);
             for r in 0..POD_SIDE {
                 for i in 0..partial_col_count {
                     let full = push_desk(
@@ -1401,11 +1430,11 @@ pub(super) fn compute_pod_desks(
     }
 
     // The Y twin: the row IS the first row of the (pod_rows)-th pod, so the rhythm holds.
-    let (_, partial_y) = grid.pod_origin(cubicle_band, 0, pod_rows);
+    let (_, partial_y) = grid.pod_origin(0, pod_rows);
     let partial_row_at_bottom = partial_y <= desk_y_max;
     if partial_row_at_bottom {
         'partial_y: for pod_c in 0..pod_cols {
-            let (pod_origin_x, _) = grid.pod_origin(cubicle_band, pod_c, 0);
+            let (pod_origin_x, _) = grid.pod_origin(pod_c, 0);
             for c in 0..POD_SIDE {
                 let full = push_desk(
                     &mut home_desks,
@@ -1468,12 +1497,13 @@ pub(super) fn decor_for_slot(floor_seed: u64, slot_idx: usize) -> PodDecor {
     bag[slot_idx % n]
 }
 
-/// Decor items placed in aisles between 2x2 desk pods.
-pub(super) fn compute_pod_decor(
-    cubicle_band: &Bounds,
-    grid: PodGrid,
-    floor_seed: u64,
-) -> Vec<PodDecorItem> {
+/// Rows from an aisle slot's centre down to the row every piece in it stands
+/// on, so a taller piece grows north (invariant #6) rather than out of its aisle.
+const POD_DECOR_BASE_DY: u16 = 4;
+
+/// Decor items placed in aisles between desk pods.
+pub(super) fn compute_pod_decor(grid: PodGrid, floor_seed: u64) -> Vec<PodDecorItem> {
+    let cubicle_band = &grid.band;
     let PodGrid {
         cols: pod_cols,
         rows: pod_rows,
@@ -1491,12 +1521,13 @@ pub(super) fn compute_pod_decor(
     // Vertical twin: the LAST POD ROW's slot centre can sit close enough to the bottom
     // that a tall centred visual crosses into cubicle_aisle and blocks its cells.
     let band_bottom = cubicle_band.y + cubicle_band.height;
-    let mut push_slot = |pod_decor: &mut Vec<PodDecorItem>, x: u16, y: u16| {
+    let mut push_slot = |pod_decor: &mut Vec<PodDecorItem>, x: u16, slot_y: u16| {
         let kind = decor_for_slot(floor_seed, slot_idx);
         // The cycle advances even when the slot drops, so survivors keep the kinds
         // they'd have on a wider floor.
         slot_idx += 1;
         let vis = furniture_def(kind.furniture()).visual;
+        let y = super::placement::centre_y_standing_on(slot_y + POD_DECOR_BASE_DY, vis.h);
         // Same centred-blit math the painter uses (pos − h/2 .. pos − h/2 + h).
         if x.saturating_sub(vis.w / 2) + vis.w > band_right
             || y.saturating_sub(vis.h / 2) + vis.h > band_bottom
@@ -1510,7 +1541,7 @@ pub(super) fn compute_pod_decor(
     };
     for pod_r in 0..pod_rows {
         for pod_c in 0..pod_cols.saturating_sub(1) {
-            let (pod_origin_x, pod_origin_y) = grid.pod_origin(cubicle_band, pod_c, pod_r);
+            let (pod_origin_x, pod_origin_y) = grid.pod_origin(pod_c, pod_r);
             let aisle_cx = pod_origin_x + pod_w + INTER_POD_AISLE_X / 2;
             let aisle_cy = pod_origin_y + pod_h / 2;
             push_slot(&mut pod_decor, aisle_cx, aisle_cy);
@@ -1518,7 +1549,7 @@ pub(super) fn compute_pod_decor(
     }
     for pod_r in 0..pod_rows.saturating_sub(1) {
         for pod_c in 0..pod_cols {
-            let (pod_origin_x, pod_origin_y) = grid.pod_origin(cubicle_band, pod_c, pod_r);
+            let (pod_origin_x, pod_origin_y) = grid.pod_origin(pod_c, pod_r);
             let aisle_cx = pod_origin_x + pod_w / 2;
             let aisle_cy = pod_origin_y + pod_h + INTER_POD_AISLE_Y / 2;
             push_slot(&mut pod_decor, aisle_cx, aisle_cy);
@@ -1527,48 +1558,70 @@ pub(super) fn compute_pod_decor(
     pod_decor
 }
 
+/// Whether a corridor appliance centred at `pos` keeps its art off every home
+/// desk's sitter: a south-row sitter hangs into the aisle, over the art's top.
+/// Both facings, since a narrow band demotes a back-turned desk after this runs.
+fn clears_the_seats(kind: Furniture, pos: Point, home_desks: &[Point]) -> bool {
+    let art = furniture_def(kind).visual;
+    let art = (anchored_top_left(Anchor::Center, pos, art.w, art.h), art);
+    let sitter = Size {
+        w: CHARACTER_SPRITE_W,
+        h: CHARACTER_SPRITE_H,
+    };
+    home_desks.iter().all(|&desk| {
+        [Facing::North, Facing::South].into_iter().all(|facing| {
+            let foot = desk_walk_anchor_facing(desk, facing);
+            let top_left = Point {
+                x: foot.x.saturating_sub(sitter.w / 2),
+                y: foot.y.saturating_sub(WALKING_Y_OFF),
+            };
+            !super::placement::rects_overlap(art, (top_left, sitter))
+        })
+    })
+}
+
+pub(super) const VENDING_MIN_AISLE_H: u16 = 10;
+pub(super) const VENDING_MIN_AISLE_W: u16 = 30;
+pub(super) const PRINTER_MIN_AISLE_H: u16 = 9;
+pub(super) const PRINTER_MIN_AISLE_W: u16 = 40;
+/// Columns from the band's west edge to the vending machine's, clear of a
+/// vertical wall's foot there.
+const VENDING_WEST_GAP: u16 = 3;
+
 /// Waypoints: couch, pantry, pod-decor-promoted (PhoneBooth/StandingDesk), corridor
 /// appliances (VendingMachine/Printer).
 fn compute_waypoints(
     plan: &FloorPlan,
     pod_decor: &[PodDecorItem],
-    lounge_fits: bool,
-) -> (Vec<Waypoint>, Option<Point>) {
+    couch: Option<Point>,
+    home_desks: &[Point],
+) -> Vec<Waypoint> {
     let FloorPlan {
-        top_margin,
         pantry: pantry_room,
         pantry_counter_size,
-        lounge_west_clear: west_clear_x,
-        ref cubicle_band,
+        ref pod_grid,
         ref cubicle_aisle,
         ref meeting_rooms,
         ..
     } = *plan;
-    let right_x = cubicle_band.x;
-    let right_w = cubicle_band.width;
-    let Point {
-        x: couch_x,
-        y: couch_y,
-    } = couch_pos(cubicle_band, top_margin, west_clear_x);
+    let right_x = pod_grid.band.x;
+    let right_w = pod_grid.band.width;
     // room_id stays None: lounge grouping is keyed at the chitchat venue layer, not here.
-    let mut waypoints: Vec<Waypoint> = if lounge_fits {
-        SEAT_DX
-            .into_iter()
-            .map(|dx| Waypoint {
+    let mut waypoints: Vec<Waypoint> = couch
+        .into_iter()
+        .flat_map(|couch| {
+            SEAT_DX.into_iter().map(move |dx| Waypoint {
                 pos: Point {
-                    x: couch_x.saturating_add_signed(dx),
-                    y: couch_y,
+                    x: couch.x.saturating_add_signed(dx),
+                    y: couch.y,
                 },
                 kind: WaypointKind::Couch,
-                // SEATED facing: the sitter looks NORTH at the window. The APPROACH side
-                // is decoupled (Furniture::Couch uses ApproachSides::ALL, decor.rs).
+                // SEATED facing: the sitter looks NORTH at the window.
                 facing: Facing::North,
                 room_id: None,
             })
-            .collect()
-    } else {
-        Vec::new()
-    };
+        })
+        .collect();
     if let Some(pr) = pantry_room {
         let half_cw = pantry_counter_size.w / 2;
         let max_cx = pr.x + pr.width.saturating_sub(half_cw + 1);
@@ -1601,27 +1654,41 @@ fn compute_waypoints(
         }
     }
 
-    const VENDING_MIN_AISLE_H: u16 = 10;
-    const VENDING_MIN_AISLE_W: u16 = 30;
-    const PRINTER_MIN_AISLE_H: u16 = 9;
-    const PRINTER_MIN_AISLE_W: u16 = 40;
-    if cubicle_aisle.height >= VENDING_MIN_AISLE_H && cubicle_aisle.width > VENDING_MIN_AISLE_W {
+    // Each appliance's base stands one row off the aisle's south edge, its art
+    // overhanging north (invariant #6).
+    let appliance_y = |kind: Furniture| {
+        let base = (cubicle_aisle.y + cubicle_aisle.height).saturating_sub(2);
+        super::placement::centre_y_standing_on(base, furniture_def(kind).visual.h)
+    };
+    let vending = Point {
+        x: right_x + VENDING_WEST_GAP + furniture_def(Furniture::VendingMachine).visual.w / 2,
+        y: appliance_y(Furniture::VendingMachine),
+    };
+    if cubicle_aisle.height >= VENDING_MIN_AISLE_H
+        && cubicle_aisle.width > VENDING_MIN_AISLE_W
+        && clears_the_seats(Furniture::VendingMachine, vending, home_desks)
+    {
         waypoints.push(Waypoint {
-            pos: Point {
-                x: right_x + 5,
-                y: cubicle_aisle.y + 3,
-            },
+            pos: vending,
             kind: WaypointKind::VendingMachine,
             facing: Facing::South,
             room_id: None,
         });
     }
-    if cubicle_aisle.height >= PRINTER_MIN_AISLE_H && cubicle_aisle.width > PRINTER_MIN_AISLE_W {
+    // Slid west from its corner, a pod's stride at most, into the gap between
+    // two pods' seats when a south-row sitter stands over it.
+    let printer = (0..=pod_grid.stride_x)
+        .map(|dx| Point {
+            x: (right_x + right_w).saturating_sub(10 + dx),
+            y: appliance_y(Furniture::Printer),
+        })
+        .find(|&p| clears_the_seats(Furniture::Printer, p, home_desks));
+    if let Some(printer) = printer
+        && cubicle_aisle.height >= PRINTER_MIN_AISLE_H
+        && cubicle_aisle.width > PRINTER_MIN_AISLE_W
+    {
         waypoints.push(Waypoint {
-            pos: Point {
-                x: right_x + right_w.saturating_sub(10),
-                y: cubicle_aisle.y + 2,
-            },
+            pos: printer,
             kind: WaypointKind::Printer,
             facing: Facing::South,
             room_id: None,
@@ -1650,7 +1717,7 @@ fn compute_waypoints(
                 });
             }
         }
-        // The offsets must MIRROR: the table blocks x ∈ [t.x−7, t.x+7], and an asymmetric
+        // The offsets must MIRROR: the table blocks a span symmetric about t.x, and an asymmetric
         // pair puts one chair closer to the wood, swallowing the rug border its twin shows.
         let chair_dx = super::rooms::meeting::MEETING_CHAIR_TABLE_DX as i16;
         for (dx, facing) in [(-chair_dx, Facing::East), (chair_dx, Facing::West)] {
@@ -1676,13 +1743,7 @@ fn compute_waypoints(
         "room_id must be Some exactly for meeting-slot waypoints"
     );
 
-    (
-        waypoints,
-        lounge_fits.then_some(Point {
-            x: couch_x,
-            y: couch_y,
-        }),
-    )
+    waypoints
 }
 
 #[cfg(test)]
@@ -1729,17 +1790,16 @@ mod tests {
     }
 
     /// Neither floor carries a SAFETY MARGIN — one-directional on purpose. It catches a
-    /// floor set too HIGH, which on the width axis nothing else can: `pct` floors, so
-    /// `band_w(37,35) == band_w(38,35)` and `layout::tests`' `narrowest_band ==` assert
-    /// is blind to +1. Too LOW is `every_floor_variant_seats_a_desk…`'s job. Tautological
+    /// floor set too HIGH, which on the width axis nothing else can. Too LOW is
+    /// `every_floor_variant_seats_a_desk…`'s job. Tautological
     /// against today's `while` loops — that IS the point: it fires when a number replaces it.
     #[test]
     fn neither_floor_carries_a_safety_margin() {
+        let under = super::MIN_LAYOUT_W - 1;
         assert!(
-            super::band_w(super::MIN_LAYOUT_W - 1, super::widest_mid_x_pct())
-                < super::DESK_BAND_MIN_W,
-            "the width floor is not tight: {} px still clears the band",
-            super::MIN_LAYOUT_W - 1
+            super::band_w(under, super::widest_mid_x_pct()) < super::DESK_BAND_MIN_W
+                || under < super::super::NEON_DOOR_WALL_W,
+            "the width floor is not tight: {under} px still clears the band and the neon"
         );
         assert!(
             super::band_h(super::MIN_LAYOUT_H - 1) < super::DESK_BAND_MIN_H,
@@ -1756,6 +1816,12 @@ mod tests {
         let pod_h =
             super::POD_SIDE * super::DESK_H + (super::POD_SIDE - 1) * super::INTRA_POD_GAP_Y;
         let grid = super::PodGrid {
+            band: super::Bounds {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+            },
             // The forced single pod of a narrow band (`pod_cols`/`pod_rows` floor at 1).
             cols: 1,
             rows: 1,
@@ -1775,7 +1841,7 @@ mod tests {
                 width,
                 height: 200,
             };
-            let (desks, _) = super::compute_pod_desks(None, &band, grid);
+            let (desks, _) = super::compute_pod_desks(None, super::PodGrid { band, ..grid });
             assert_eq!(
                 !desks.is_empty(),
                 seats,
@@ -1794,7 +1860,7 @@ mod tests {
                 width: 200,
                 height,
             };
-            let (desks, _) = super::compute_pod_desks(None, &band, grid);
+            let (desks, _) = super::compute_pod_desks(None, super::PodGrid { band, ..grid });
             assert_eq!(
                 !desks.is_empty(),
                 seats,
@@ -1817,6 +1883,7 @@ mod tests {
         let pod_h =
             super::POD_SIDE * super::DESK_H + (super::POD_SIDE - 1) * super::INTRA_POD_GAP_Y;
         let grid = super::PodGrid {
+            band,
             cols: 2,
             rows: 3,
             stride_x: super::POD_SIDE * super::DESK_W
@@ -1825,9 +1892,9 @@ mod tests {
             stride_y: pod_h + super::INTER_POD_AISLE_Y,
             couch_to_desk_extra: 0,
         };
-        let (desks, _) = super::compute_pod_desks(None, &band, grid);
+        let (desks, _) = super::compute_pod_desks(None, grid);
         assert!(!desks.is_empty(), "the fixture grid must place desks");
-        let bands = grid.inter_pod_y_bands(&band);
+        let bands = grid.inter_pod_y_bands();
         assert!(!bands.is_empty(), "a 3-row grid has bands between its rows");
         for &(start, end) in &bands {
             for d in &desks {

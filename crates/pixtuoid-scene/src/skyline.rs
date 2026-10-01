@@ -501,7 +501,7 @@ fn pick_in(range: &RangeInclusive<u16>, n: u32) -> u16 {
 /// A deterministic hash for the city: the same office always gets the same
 /// skyline and the same lit windows, where a per-frame reshuffle would flicker.
 fn hash(n: u32) -> u32 {
-    let mut v = n.wrapping_mul(0x9E37_79B9);
+    let mut v = n.wrapping_mul(crate::GOLDEN_GAMMA_32);
     v ^= v >> 15;
     v = v.wrapping_mul(0x85EB_CA6B);
     v ^ (v >> 13)
@@ -512,8 +512,7 @@ mod tests {
     use super::*;
 
     fn pack() -> Pack {
-        crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-            .expect("the embedded pack loads")
+        crate::embedded_pack::test_default_pack()
     }
 
     /// Where each stand stands, for comparing two cities.
@@ -654,6 +653,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "density-art")]
     fn a_denser_strip_draws_the_denser_art_on_the_same_city() {
         let pack = pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");

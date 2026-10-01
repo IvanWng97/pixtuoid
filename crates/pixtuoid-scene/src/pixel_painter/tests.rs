@@ -5,6 +5,7 @@ use super::anchors::{
 use super::background::paint_corridor_runner;
 use super::seat::{Seat, settle_seat};
 use super::*;
+use crate::floor::{FloorInputs, PetInputs};
 use crate::pose;
 use pixtuoid_core::sprite::{Frame, Pixel};
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
@@ -350,10 +351,10 @@ fn seat_view_maps_facing_to_sprite_and_flip() {
 }
 
 #[test]
+#[cfg(feature = "native")]
 fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
     use crate::layout::{Facing, Point};
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("pack");
+    let pack = crate::embedded_pack::test_default_pack();
     let desk = Point { x: 40, y: 30 };
     let back = Seat::at_desk(desk, Facing::North);
     let front = Seat::at_desk(desk, Facing::South);
@@ -393,6 +394,7 @@ fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
 /// The skeleton fixture pack with the `[animations.X]` sections named in
 /// `without` removed and `extra` appended — the only way to reach `sprite_in_pack`'s
 /// degradation rungs, since the embedded pack has every animation.
+#[cfg(feature = "native")]
 fn fixture_pack(without: &[&str], extra: &str, tmp: &std::path::Path) -> Pack {
     let dir = tmp.join("pack");
     std::fs::create_dir_all(&dir).expect("mkdir");
@@ -422,6 +424,7 @@ fn fixture_pack(without: &[&str], extra: &str, tmp: &std::path::Path) -> Pack {
 /// The middle rung of `sprite_in_pack`: a pack carrying the STILL back view but
 /// not the pose's own still hides a back-turned sitter's face.
 #[test]
+#[cfg(feature = "native")]
 fn a_pose_whose_own_back_view_is_missing_falls_back_to_the_still_one() {
     use crate::layout::{Facing, Point};
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -443,10 +446,10 @@ fn a_pose_whose_own_back_view_is_missing_falls_back_to_the_still_one() {
 }
 
 #[test]
+#[cfg(feature = "native")]
 fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
     use crate::layout::{Facing, WaypointKind};
-    let full = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("pack");
+    let full = crate::embedded_pack::test_default_pack();
     assert_eq!(
         Seat::at_waypoint(
             WaypointKind::MeetingChair,
@@ -545,6 +548,7 @@ fn agent_overrides_are_deterministic_per_id() {
 /// Every look of frame `i` of `anim` a viewer could see under `overrides`:
 /// recolored and, where the art marks its head, dressed in each of the pack's
 /// hairstyles.
+#[cfg(feature = "density-art")]
 fn looks(
     pack: &pixtuoid_core::sprite::format::Pack,
     anim: &pixtuoid_core::sprite::Sprite,
@@ -566,6 +570,7 @@ fn looks(
 }
 
 /// Whether recoloring `key` changes some pixel of every look of frame `i`.
+#[cfg(feature = "density-art")]
 fn recolors(
     pack: &pixtuoid_core::sprite::format::Pack,
     anim: &pixtuoid_core::sprite::Sprite,
@@ -736,13 +741,15 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
     let frame = sim_step(
         &mut owned.stores(),
         SimInputs {
-            scene: &scene,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &bundled,
+                now: now0 + std::time::Duration::from_millis(250),
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             layout: &layout,
-            pack: &bundled,
             coffee: &coffee,
-            pets: PetInputs::default(),
-            floor: crate::floor::FloorMeta::ground(),
-            now: now0 + std::time::Duration::from_millis(250),
             door_anim_max_ms: 0,
         },
     );
@@ -896,13 +903,15 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
     let frame = sim_step(
         &mut owned.stores(),
         SimInputs {
-            scene: &scene,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &bundled,
+                now: now0 + std::time::Duration::from_secs(40),
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             layout: &layout,
-            pack: &bundled,
             coffee: &coffee,
-            pets: PetInputs::default(),
-            floor: crate::floor::FloorMeta::ground(),
-            now: now0 + std::time::Duration::from_secs(40),
             door_anim_max_ms: 0,
         },
     );
@@ -1019,13 +1028,15 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
             sim_step(
                 &mut owned.stores(),
                 SimInputs {
-                    scene: &scene,
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &bundled,
+                        now: now0 + Duration::from_millis(100 * n),
+                        floor: crate::floor::FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
                     layout: &layout,
-                    pack: &bundled,
                     coffee: &coffee,
-                    pets: PetInputs::default(),
-                    floor: crate::floor::FloorMeta::ground(),
-                    now: now0 + Duration::from_millis(100 * n),
                     door_anim_max_ms: 0,
                 },
             )
@@ -1040,13 +1051,15 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
     let unlit = sim_step(
         &mut OwnedSimStores::new().stores(),
         SimInputs {
-            scene: &SceneState::uniform(16),
+            world: FloorInputs {
+                scene: &SceneState::uniform(16),
+                pack: &bundled,
+                now: now0,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             layout: &layout,
-            pack: &bundled,
             coffee: &coffee,
-            pets: PetInputs::default(),
-            floor: crate::floor::FloorMeta::ground(),
-            now: now0,
             door_anim_max_ms: 0,
         },
     );
@@ -1367,25 +1380,8 @@ fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
     }
 }
 
-#[test]
-fn waypoint_depth_baseline_is_center_pinned_sprite_south() {
-    use crate::layout::{WaypointKind, furniture_def};
-    let south_off = |k: WaypointKind| {
-        furniture_def(k.furniture())
-            .footprint
-            .expect("has footprint")
-            .h
-            / 2
-            - 1
-    };
-    assert_eq!(south_off(WaypointKind::VendingMachine), 2);
-    assert_eq!(south_off(WaypointKind::Printer), 1);
-}
-
-/// The seat centre is the PAINTED desk's midline, not the layout box's — the two
-/// differ (`DESK_W` 10 vs a 14 px sprite), which is why the chair used to sit 2 px
-/// left of the desk it belongs to. Centring here is what makes a symmetric jitter
-/// fit: 8 px of chair on a 14 px desk leaves 3 px a side, so ±2 keeps 1 px.
+/// The seat centre is the painted desk's midline (`visual.w`), not `DESK_W`'s:
+/// only that centring leaves the jitter symmetric room on both sides.
 #[test]
 fn the_seat_centre_is_the_painted_desks_midline() {
     use crate::layout::Facing;
@@ -1866,6 +1862,7 @@ fn queued(layout: &Layout, frame: &SimFrame) -> Furnishings<'static> {
         buf: &mut buf,
         cache: &mut cache,
         base_fill: &mut base_fill,
+        shadows: &mut crate::ground::DepthsCache::default(),
         theme,
         floor: crate::floor::FloorMeta::ground(),
         motion: &motion,
@@ -3092,10 +3089,7 @@ fn agent_overrides_same_id_different_cwd_changes_outfit() {
 }
 
 struct OwnedSimStores {
-    router: crate::pathfind::AStarRouter,
-    overlay: OccupancyOverlay,
-    history: pose::PoseHistory,
-    motion: std::collections::HashMap<pixtuoid_core::AgentId, crate::motion::MotionState>,
+    route: pose::RouteRig<crate::pathfind::AStarRouter>,
     light: LightingState,
     neon: crate::floor::NeonState,
     chitchat: std::collections::HashMap<crate::chitchat::VenueKey, crate::chitchat::ActiveChitchat>,
@@ -3104,10 +3098,7 @@ struct OwnedSimStores {
 impl OwnedSimStores {
     fn new() -> Self {
         Self {
-            router: crate::pathfind::AStarRouter::new(),
-            overlay: OccupancyOverlay::new(),
-            history: pose::PoseHistory::new(),
-            motion: std::collections::HashMap::new(),
+            route: pose::RouteRig::new(crate::pathfind::AStarRouter::new()),
             light: LightingState::new(),
             neon: crate::floor::NeonState::new(),
             chitchat: std::collections::HashMap::new(),
@@ -3116,10 +3107,10 @@ impl OwnedSimStores {
 
     fn stores(&mut self) -> SimStores<'_> {
         SimStores {
-            router: &mut self.router,
-            overlay: &mut self.overlay,
-            history: &mut self.history,
-            motion: &mut self.motion,
+            router: &mut self.route.router,
+            overlay: &mut self.route.overlay,
+            history: &mut self.route.history,
+            motion: &mut self.route.motion,
             light: &mut self.light,
             neon: &mut self.neon,
             chitchat: &mut self.chitchat,
@@ -3161,13 +3152,15 @@ fn sim_step_keeps_the_sign_lit_through_a_gap_in_a_room_that_once_dimmed() {
                 sim_step(
                     &mut owned.stores(),
                     SimInputs {
-                        scene,
+                        world: FloorInputs {
+                            scene,
+                            pack: &pack,
+                            now,
+                            floor: crate::floor::FloorMeta::ground(),
+                            pets: PetInputs::default(),
+                        },
                         layout: &layout,
-                        pack: &pack,
                         coffee: &coffee,
-                        pets: PetInputs::default(),
-                        floor: crate::floor::FloorMeta::ground(),
-                        now,
                         door_anim_max_ms: 0,
                     },
                 )
@@ -3258,17 +3251,19 @@ fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
         sim_step(
             &mut owned.stores(),
             SimInputs {
-                scene: &scene,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 layout: &layout,
-                pack,
                 coffee: &coffee,
-                pets: PetInputs::default(),
-                floor: crate::floor::FloorMeta::ground(),
-                now,
                 door_anim_max_ms: 0,
             },
         );
-        reserved_bbox_width(&owned.overlay, bw, bh)
+        reserved_bbox_width(&owned.route.overlay, bw, bh)
     };
     assert_eq!(
         reserve(&wide),
@@ -3304,13 +3299,15 @@ fn seat_desk_is_set_exactly_when_the_sim_seats_someone_at_a_desk() {
         let f = sim_step(
             &mut stores,
             SimInputs {
-                scene: &scene,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now: now0 + Duration::from_millis(ms),
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 layout: &layout,
-                pack: &pack,
                 coffee: &coffee,
-                pets: PetInputs::default(),
-                floor: crate::floor::FloorMeta::ground(),
-                now: now0 + Duration::from_millis(ms),
                 door_anim_max_ms: 0,
             },
         );
@@ -3366,13 +3363,15 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
         sim_step(
             &mut owned.stores(),
             SimInputs {
-                scene: &scene,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 layout: &layout,
-                pack: &pack,
                 coffee: &coffee,
-                pets: PetInputs::default(),
-                floor: crate::floor::FloorMeta::ground(),
-                now,
                 door_anim_max_ms: 0,
             },
         )
@@ -3414,13 +3413,15 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         sim_step(
             &mut owned.stores(),
             SimInputs {
-                scene: &scene,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now: now0,
+                    floor,
+                    pets,
+                },
                 layout: &layout,
-                pack: &pack,
                 coffee: &coffee,
-                pets,
-                floor,
-                now: now0,
                 door_anim_max_ms: 0,
             },
         )
@@ -3452,6 +3453,25 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
     assert_eq!(held.pos, clicked);
     assert_eq!(held.anim_name, pet.kind.sit_anim());
     assert_eq!(held.petted_ms, Some(0));
+
+    // Held in the canvas's corner, its frame is fitted back on.
+    let in_corner = crate::pet::PetState {
+        pet_pos: Point { x: 0, y: 0 },
+        ..petting
+    };
+    let cornered = step(PetInputs {
+        pet: Some(&pet),
+        petting: Some(&in_corner),
+    })
+    .expect("the petted cat");
+    let size = sim::frame_size(&pack, cornered.anim_name, 0, sim::PET_FALLBACK);
+    assert_eq!(
+        cornered.pos,
+        Point {
+            x: size.w / 2,
+            y: size.h / 2
+        }
+    );
 
     let upstairs = crate::pet::PetState {
         floor_idx: floor.floor_idx + 1,
@@ -3485,7 +3505,7 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
 fn every_other_desk_stands_a_cabinet_starting_with_the_first() {
     let layout = Layout::compute(192, 128, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
     let cabinets: Vec<bool> = (0..layout.home_desks.len())
-        .map(|i| layout.desk_has_cabinet(FloorLocalDeskIndex(i)))
+        .map(|i| crate::layout::desk_has_cabinet(FloorLocalDeskIndex(i)))
         .collect();
     assert!(cabinets.len() >= 2);
     assert!(cabinets.iter().step_by(2).all(|&c| c), "{cabinets:?}");
@@ -3519,6 +3539,7 @@ fn a_mascots_state_reaches_its_hover_and_its_sprite() {
         buf: &mut buf,
         cache: &mut cache,
         base_fill: &mut base_fill,
+        shadows: &mut crate::ground::DepthsCache::default(),
         theme: crate::theme::theme_by_name("normal").expect("theme"),
         floor: crate::floor::FloorMeta::ground(),
         motion: &motion,
@@ -3584,13 +3605,15 @@ fn sim_step_walks_a_mascot_in_for_each_gateway_present() {
     let frame = sim_step(
         &mut owned.stores(),
         SimInputs {
-            scene: &scene,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: now0 + Duration::from_secs(6),
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             layout: &layout,
-            pack: &pack,
             coffee: &coffee,
-            pets: PetInputs::default(),
-            floor: crate::floor::FloorMeta::ground(),
-            now: now0 + Duration::from_secs(6),
             door_anim_max_ms: 0,
         },
     );
@@ -3599,6 +3622,61 @@ fn sim_step_walks_a_mascot_in_for_each_gateway_present() {
     };
     assert_eq!(mascot.name, "OpenClaw");
     assert_eq!(mascot.instance, None, "a lone instance needs no port");
+}
+
+#[test]
+fn sim_step_fits_every_mascot_frame_on_the_canvas() {
+    use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
+    use pixtuoid_core::state::DaemonInstanceId;
+    use std::time::Duration;
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    let coffee = HashMap::new();
+    for port in 0..32 {
+        let key = DaemonInstanceKey::new(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            DaemonInstanceId::new(format!("{}", 18789 + port)).expect("id"),
+        );
+        apply_presence(
+            &mut scene,
+            &key,
+            DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+            now0,
+        );
+    }
+    let mut owned = OwnedSimStores::new();
+    let mut edge = false;
+    for s in 0..600 {
+        let frame = sim_step(
+            &mut owned.stores(),
+            SimInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now: now0 + Duration::from_secs(s),
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                layout: &layout,
+                coffee: &coffee,
+                door_anim_max_ms: 0,
+            },
+        );
+        for m in &frame.mascots {
+            let size = sim::frame_size(&pack, m.anim_name, m.frame_idx, sim::MASCOT_FALLBACK);
+            let (Some(x0), Some(y0)) = (
+                m.pos.x.checked_sub(size.w / 2),
+                m.pos.y.checked_sub(size.h / 2),
+            ) else {
+                panic!("{m:?} overruns the canvas's west or north edge");
+            };
+            assert!(
+                x0 + size.w <= layout.buf_w && y0 + size.h <= layout.buf_h,
+                "{m:?} overruns the canvas"
+            );
+            edge |= x0 == 0 || y0 == 0;
+        }
+    }
+    assert!(edge, "the sweep never walked a mascot to the canvas edge");
 }
 
 #[test]
@@ -3618,26 +3696,30 @@ fn sim_step_advances_motion_without_painting() {
     let f1 = sim_step(
         &mut stores,
         SimInputs {
-            scene: &scene,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: now0 + Duration::from_millis(50),
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             layout: &layout,
-            pack: &pack,
             coffee: &coffee,
-            pets: PetInputs::default(),
-            floor: crate::floor::FloorMeta::ground(),
-            now: now0 + Duration::from_millis(50),
             door_anim_max_ms: 0,
         },
     );
     let f2 = sim_step(
         &mut stores,
         SimInputs {
-            scene: &scene,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: now0 + Duration::from_millis(250),
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             layout: &layout,
-            pack: &pack,
             coffee: &coffee,
-            pets: PetInputs::default(),
-            floor: crate::floor::FloorMeta::ground(),
-            now: now0 + Duration::from_millis(250),
             door_anim_max_ms: 0,
         },
     );
@@ -3655,7 +3737,11 @@ fn sim_step_advances_motion_without_painting() {
     );
     let _ = stores;
     assert!(
-        owned.motion.get(&id).is_some_and(|m| m.entry.is_some()),
+        owned
+            .route
+            .motion
+            .get(&id)
+            .is_some_and(|m| m.entry.is_some()),
         "sim_step snapshotted the entry walk profile into the motion store"
     );
 }
@@ -3684,13 +3770,15 @@ fn a_waiting_agent_stays_seated_and_gets_its_bubble_whichever_way_the_desk_faces
         let f = sim_step(
             &mut owned.stores(),
             SimInputs {
-                scene: &scene,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 layout: &layout,
-                pack: &pack,
                 coffee: &coffee,
-                pets: PetInputs::default(),
-                floor: crate::floor::FloorMeta::ground(),
-                now,
                 door_anim_max_ms: 0,
             },
         );
@@ -3720,6 +3808,136 @@ fn a_waiting_agent_stays_seated_and_gets_its_bubble_whichever_way_the_desk_faces
     );
 }
 
+/// An agent off the layout's desks draws nothing, so hover never names it; the
+/// rest are listed in paint order.
+#[test]
+fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
+    use std::time::Duration;
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    scene.agents.clear();
+    let slot = |path: &str, desk: usize, created: SystemTime| {
+        let mut s = make_slot(
+            pixtuoid_core::AgentId::from_transcript_path(path),
+            ActivityState::Idle,
+        );
+        s.desk_index = GlobalDeskIndex(desk);
+        (s.created_at, s.state_started_at, s.last_event_at) = (created, created, created);
+        s
+    };
+    let off = slot("/hover/off.jsonl", layout.home_desks.len(), now0);
+    let lead = slot("/hover/lead.jsonl", 0, now0);
+    let trail = slot("/hover/trail.jsonl", 1, now0 + Duration::from_millis(150));
+    for s in [&off, &lead, &trail] {
+        scene.agents.insert(s.agent_id, s.clone());
+    }
+    let now = now0 + Duration::from_millis(400);
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+    let hover = paint_frame(
+        &mut PaintCtx {
+            scene: &scene,
+            layout: &layout,
+            pack: &pack,
+            now,
+            sky: crate::sky::Sky::at(now),
+            buf: &mut buf,
+            cache: &mut FrameCache::new(),
+            base_fill: &mut BaseFillCache::new(),
+            shadows: &mut crate::ground::DepthsCache::default(),
+            theme: crate::theme::theme_by_name("normal").expect("normal theme"),
+            floor: crate::floor::FloorMeta::ground(),
+            motion: &owned.route.motion,
+            debug_walkable: false,
+        },
+        &frame,
+    );
+
+    let queued: Vec<_> = frame
+        .characters
+        .iter()
+        .map(|c| (c.anchor_y, frame.agents[c.agent_idx].agent_id))
+        .collect();
+    let mut sorted = queued.clone();
+    // Every character is a `Layer::Figure`, so `sort_drawables` orders them by row alone.
+    sorted.sort_by_key(|&(row, _)| row);
+    assert_ne!(sorted, queued, "premise: paint order is not the queue's");
+    let listed: Vec<_> = hover.agents.iter().map(|a| a.agent_id).collect();
+    assert_eq!(listed, sorted.iter().map(|&(_, id)| id).collect::<Vec<_>>());
+    assert!(!listed.contains(&off.agent_id));
+    let [a, b] = [lead.agent_id, trail.agent_id].map(|id| {
+        *hover
+            .agents
+            .iter()
+            .find(|f| f.agent_id == id)
+            .expect("drawn")
+    });
+    assert!(
+        a.anchor.x < b.anchor.x + b.w
+            && b.anchor.x < a.anchor.x + a.w
+            && a.anchor.y < b.anchor.y + b.h
+            && b.anchor.y < a.anchor.y + a.h,
+        "premise: the two arrivals overlap: {a:?} {b:?}"
+    );
+}
+
+/// A character whose anim the pack lacks paints nothing, so it lists nothing to hover.
+#[test]
+fn a_character_whose_anim_is_missing_is_not_hoverable() {
+    let pack = crate::embedded_pack::test_default_pack();
+    let slot = make_slot(
+        pixtuoid_core::AgentId::from_transcript_path("/c.jsonl"),
+        ActivityState::Idle,
+    );
+    let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 0, g: 0, b: 0 });
+    let mut cache = FrameCache::new();
+    let mut paint = |anim_name| {
+        paint_drawable(
+            &DrawableKind::Character {
+                agent: &slot,
+                pose: seat::SpritePose {
+                    anim_name,
+                    frame_idx: 0,
+                    flip_x: false,
+                    glow_tint: None,
+                },
+                anchor: Point { x: 20, y: 20 },
+                sleep_z_seed: None,
+                waiting_bubble: false,
+                walking_dust_frame: None,
+            },
+            &mut drawable::DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now: SystemTime::UNIX_EPOCH,
+                theme: crate::theme::theme_by_name("normal").expect("normal theme"),
+            },
+        )
+    };
+    assert_eq!(paint("does_not_exist"), None);
+    let seated = pack
+        .animation("seated")
+        .and_then(|a| a.frames().first())
+        .expect("seated art");
+    let drawn = paint("seated").expect("a drawn character is hoverable");
+    assert_eq!((drawn.w, drawn.h), (seated.width(), seated.height()));
+}
+
 #[test]
 fn paint_frame_is_pure_and_byte_identical() {
     use std::time::Duration;
@@ -3732,20 +3950,22 @@ fn paint_frame_is_pure_and_byte_identical() {
     let frame = sim_step(
         &mut owned.stores(),
         SimInputs {
-            scene: &scene,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             layout: &layout,
-            pack: &pack,
             coffee: &coffee,
-            pets: PetInputs::default(),
-            floor: crate::floor::FloorMeta::ground(),
-            now,
             door_anim_max_ms: 0,
         },
     );
 
     let light_before = owned.light.level();
-    let motion_before = format!("{:?}", owned.motion);
-    let history_before = format!("{:?}", owned.history);
+    let motion_before = format!("{:?}", owned.route.motion);
+    let history_before = format!("{:?}", owned.route.history);
     let chitchat_before = owned.chitchat.len();
 
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
@@ -3765,9 +3985,10 @@ fn paint_frame_is_pure_and_byte_identical() {
                 buf,
                 cache: &mut cache,
                 base_fill: &mut base_fill,
+                shadows: &mut crate::ground::DepthsCache::default(),
                 theme,
                 floor: crate::floor::FloorMeta::ground(),
-                motion: &owned.motion,
+                motion: &owned.route.motion,
                 debug_walkable: false,
             },
             &frame,
@@ -3789,12 +4010,12 @@ fn paint_frame_is_pure_and_byte_identical() {
         "paint must not tick lighting"
     );
     assert_eq!(
-        format!("{:?}", owned.motion),
+        format!("{:?}", owned.route.motion),
         motion_before,
         "paint must not move motion state"
     );
     assert_eq!(
-        format!("{:?}", owned.history),
+        format!("{:?}", owned.route.history),
         history_before,
         "paint must not record pose history"
     );
@@ -3807,8 +4028,7 @@ fn paint_frame_is_pure_and_byte_identical() {
 
 #[test]
 fn corridor_runner_weaves_sparse_diamonds_without_inner_edge_rows() {
-    // Taste pin: stride-10 lattice, border rows only — the old stride-6 +
-    // inner-edge treatment read as bathroom tiling, not a woven runner.
+    // Taste pin: stride-10 lattice, border rows only.
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let floor = Rgb {
         r: 150,
@@ -4072,8 +4292,7 @@ fn a_coat_rack_fills_exactly_its_bounds() {
 
 #[test]
 fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("embedded pack");
+    let pack = crate::embedded_pack::test_default_pack();
     let c = pack.palette().get('C').flatten().expect("couch fabric key");
     let g = pack
         .palette()
@@ -4091,8 +4310,7 @@ fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
 #[test]
 fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
     use crate::layout::{Facing, Point, SEAT_RENDER_Y_OFF, WaypointKind};
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("embedded pack");
+    let pack = crate::embedded_pack::test_default_pack();
     let pos = Point { x: 40, y: 30 };
     let seat = Seat::at_waypoint(WaypointKind::MeetingChair, pos, Facing::West);
     let (anim, _) = seat.sprite_for("seated");
@@ -4114,8 +4332,7 @@ fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
 
 /// Paint the appliance `sprite` at `ms` past the epoch, `busy` or not.
 fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("pack");
+    let pack = crate::embedded_pack::test_default_pack();
     let mut cache = FrameCache::new();
     let mut buf = RgbBuffer::filled(60, 40, Rgb { r: 1, g: 2, b: 3 });
     let d = Drawable {
@@ -4143,6 +4360,7 @@ fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
 /// A busy appliance reads busy for most of its loop at every density: fewer
 /// than half its busy frames may show it at rest.
 #[test]
+#[cfg(feature = "density-art")]
 fn a_busy_loop_spends_most_of_its_frames_away_from_rest() {
     let pack = crate::embedded_pack::test_default_pack();
     for name in [
@@ -4227,7 +4445,8 @@ fn water_cooler_glugs_a_rising_bubble() {
         buf
     };
     let bubble = theme.furniture.tank_water_line;
-    let (wx, wy) = (pr.x + pr.width - 6, pr.y + 8);
+    let cooler = pantry.water_cooler_rect().expect("fits");
+    let (wx, wy) = (cooler.x, cooler.y);
     let a = render(100); // phase 0: bubble low
     let b = render(500); // phase 1: bubble high
     assert_eq!(
@@ -4254,13 +4473,15 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
         let f = sim_step(
             &mut stores,
             SimInputs {
-                scene: &scene,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 layout: &layout,
-                pack: &pack,
                 coffee: &coffee,
-                pets: PetInputs::default(),
-                floor: crate::floor::FloorMeta::ground(),
-                now,
                 door_anim_max_ms: 0,
             },
         );
@@ -4347,13 +4568,15 @@ fn no_two_agents_ever_occupy_the_same_exclusive_waypoint() {
         let frame = sim_step(
             &mut stores,
             SimInputs {
-                scene: &scene,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 layout: &layout,
-                pack: &pack,
                 coffee: &coffee,
-                pets: PetInputs::default(),
-                floor: crate::floor::FloorMeta::ground(),
-                now,
                 door_anim_max_ms: 0,
             },
         );
@@ -4408,13 +4631,15 @@ fn a_placement_is_seated_exactly_when_its_figure_sits_on_furniture() {
         let frame = sim_step(
             &mut stores,
             SimInputs {
-                scene: &scene,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 layout: &layout,
-                pack: &pack,
                 coffee: &coffee,
-                pets: PetInputs::default(),
-                floor: crate::floor::FloorMeta::ground(),
-                now,
                 door_anim_max_ms: 0,
             },
         );
@@ -4474,13 +4699,15 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
         let frame = sim_step(
             &mut stores,
             SimInputs {
-                scene: &scene,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 layout: &layout,
-                pack: &pack,
                 coffee: &coffee,
-                pets: PetInputs::default(),
-                floor: crate::floor::FloorMeta::ground(),
-                now,
                 door_anim_max_ms: 0,
             },
         );
@@ -4494,7 +4721,7 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     let sat_at = sat_at.expect("agent never reached a seat");
     assert!(
         matches!(
-            owned.motion[&id].wander.target.kind,
+            owned.route.motion[&id].wander.target.kind,
             WanderKind::Named { wp_idx, .. } if wp_idx == sat_at
         ),
         "the seated agent should hold its seat's claim"
@@ -4511,19 +4738,24 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     sim_step(
         &mut stores,
         SimInputs {
-            scene: &scene,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             layout: &layout,
-            pack: &pack,
             coffee: &coffee,
-            pets: PetInputs::default(),
-            floor: crate::floor::FloorMeta::ground(),
-            now,
             door_anim_max_ms: 0,
         },
     );
 
     assert!(
-        matches!(owned.motion[&id].wander.target.kind, WanderKind::Aimless),
+        matches!(
+            owned.route.motion[&id].wander.target.kind,
+            WanderKind::Aimless
+        ),
         "an agent that left the wander machine must release its seat claim"
     );
 }
@@ -4617,13 +4849,15 @@ fn one_meeting_sofa_still_seats_three_agents_at_once() {
         let frame = sim_step(
             &mut stores,
             SimInputs {
-                scene: &scene,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: crate::floor::FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 layout: &layout,
-                pack: &pack,
                 coffee: &coffee,
-                pets: PetInputs::default(),
-                floor: crate::floor::FloorMeta::ground(),
-                now,
                 door_anim_max_ms: 0,
             },
         );
@@ -4647,7 +4881,7 @@ fn one_meeting_sofa_still_seats_three_agents_at_once() {
 #[test]
 fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
     use crate::layout::{TEST_DEFAULT_DESKS, WaypointKind, stand_point};
-    use crate::pose::{Pose, RouteCtx};
+    use crate::pose::Pose;
     use std::time::Duration;
 
     let pack = crate::embedded_pack::test_default_pack();
@@ -4674,13 +4908,15 @@ fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
             sim_step(
                 &mut stores,
                 SimInputs {
-                    scene: &scene,
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: crate::floor::FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
                     layout: &layout,
-                    pack: &pack,
                     coffee: &coffee,
-                    pets: PetInputs::default(),
-                    floor: crate::floor::FloorMeta::ground(),
-                    now,
                     door_anim_max_ms: 0,
                 },
             )
@@ -4710,12 +4946,7 @@ fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
         // Idempotent re-derive at the same `now` (sim_step already stamped
         // last_advanced_at, so no wander transition fires here).
         let label = {
-            let mut rctx = RouteCtx {
-                router: &mut owned.router,
-                overlay: &owned.overlay,
-                history: &mut owned.history,
-                motion: &mut owned.motion,
-            };
+            let mut rctx = owned.route.rctx();
             character_anchor(agent, &layout, now, &mut rctx).expect("chair sitter is visible")
         };
         let seat = back_couch_anchor(stand, CHARACTER_SPRITE_W);
@@ -4787,92 +5018,6 @@ fn an_upright_occupant_sorts_on_the_row_their_sprite_bottoms_out_on() {
 }
 
 #[test]
-fn desk_shadow_tracks_the_desk_zsort_row_not_a_hardcoded_offset() {
-    let desk = Point { x: 40, y: 30 };
-    let v = crate::layout::desk_furniture_def().visual;
-    let e = desk_shadow_ellipse(desk);
-    assert_eq!(e.cy, desk.y + v.h);
-    assert_eq!(e.cx, desk.x + v.w / 2);
-}
-
-/// One fitted shadow per piece that casts one, emitted in roster order: the
-/// order they blend in where they overlap.
-#[test]
-fn floor_shadow_ellipses_fit_each_caster_in_roster_order() {
-    use crate::layout::{Facing, FixtureKind, Furniture, Station, WaypointKind, furniture_def};
-    let l =
-        Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("192x160 fits");
-    let fitted = |pos: Point, kind: WaypointKind| {
-        let vis_w = furniture_def(kind.furniture()).visual.w;
-        let half_w = if vis_w > 0 { (vis_w / 2 + 1).min(7) } else { 7 };
-        (pos.x, pos.y + 2, half_w, 2)
-    };
-    let mut expected: Vec<(u16, u16, u16, u16)> = Vec::new();
-    for f in l.fixtures() {
-        match f.kind {
-            FixtureKind::Desk(i) => {
-                let e = desk_shadow_ellipse(l.home_desks[i.0]);
-                expected.push((e.cx, e.cy, e.half_w, e.half_h));
-            }
-            FixtureKind::Station { waypoint, station } => {
-                let wp = &l.waypoints[waypoint];
-                expected.push(match station {
-                    Station::Printer => (wp.pos.x, wp.pos.y + 1, 5, 1),
-                    _ => fitted(wp.pos, wp.kind),
-                });
-            }
-            FixtureKind::Pod { item, kind } => {
-                if let Some(wp) = kind.waypoint() {
-                    expected.push(fitted(l.pod_decor[item].pos, wp));
-                }
-            }
-            FixtureKind::MeetingSofa {
-                room, faces_away, ..
-            } => {
-                for w in l.waypoints.iter().filter(|w| {
-                    w.kind == WaypointKind::MeetingSofa
-                        && w.room_id == Some(room)
-                        && (w.facing == Facing::North) == faces_away
-                }) {
-                    expected.push(fitted(w.pos, w.kind));
-                }
-            }
-            FixtureKind::MeetingChair { waypoint, .. } => {
-                let wp = &l.waypoints[waypoint];
-                expected.push(fitted(wp.pos, wp.kind));
-            }
-            FixtureKind::KitchenIsland => {
-                let island = l.pantry.and_then(|p| p.kitchen_island).expect("an island");
-                let vis = furniture_def(Furniture::KitchenIsland).visual;
-                expected.push((island.x, island.y + (vis.h - 1) / 2, vis.w / 2 + 1, 2));
-            }
-            FixtureKind::LoungeCouch => {
-                let c = l.couch_sprite_center().expect("a couch");
-                expected.push((c.x, c.y + 2, 7, 2));
-            }
-            FixtureKind::Plant { item, kind } => {
-                let pos = l.plants[item].pos;
-                let h = furniture_def(kind.furniture()).visual.h;
-                expected.push((pos.x, pos.y + (h - 1) / 2, 3, 1));
-            }
-            FixtureKind::FloorLamp => {
-                let lamp = l.floor_lamp().expect("a lamp");
-                let h = furniture_def(Furniture::FloorLamp).visual.h;
-                expected.push((lamp.x, lamp.y + (h - 1) / 2, 2, 1));
-            }
-            _ => {}
-        }
-    }
-    let mut got = Vec::new();
-    floor_shadow_ellipses(&l, |el| got.push((el.cx, el.cy, el.half_w, el.half_h)));
-    assert!(
-        expected.len() > l.home_desks.len(),
-        "more than the desks cast"
-    );
-    assert_eq!(got, expected);
-}
-
-#[test]
 fn character_render_names_resolve_in_the_animation_registry() {
     use pixtuoid_core::sprite::format::{
         OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS,
@@ -4939,16 +5084,18 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
             let frame = sim_step(
                 &mut owned.stores(),
                 SimInputs {
-                    scene: &scene,
-                    layout: &layout,
-                    pack: &pack,
-                    coffee: &HashMap::new(),
-                    pets: PetInputs {
-                        pet: Some(&pet),
-                        petting: None,
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor,
+                        pets: PetInputs {
+                            pet: Some(&pet),
+                            petting: None,
+                        },
                     },
-                    floor,
-                    now,
+                    layout: &layout,
+                    coffee: &HashMap::new(),
                     door_anim_max_ms: 0,
                 },
             );
@@ -4964,6 +5111,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 buf: &mut buf,
                 cache: &mut cache,
                 base_fill: &mut base_fill,
+                shadows: &mut crate::ground::DepthsCache::default(),
                 theme,
                 floor,
                 motion: &motion,
@@ -5105,13 +5253,15 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
             let f = sim_step(
                 &mut stores,
                 SimInputs {
-                    scene: &scene,
+                    world: FloorInputs {
+                        scene: &scene,
+                        pack: &pack,
+                        now,
+                        floor: crate::floor::FloorMeta::ground(),
+                        pets: PetInputs::default(),
+                    },
                     layout: &layout,
-                    pack: &pack,
                     coffee: &coffee,
-                    pets: PetInputs::default(),
-                    floor: crate::floor::FloorMeta::ground(),
-                    now,
                     door_anim_max_ms: 0,
                 },
             );
@@ -5168,12 +5318,7 @@ fn a_character_badge_is_never_anchored_off_the_canvas() {
                 &slot,
                 &layout,
                 now0 + Duration::from_secs(secs),
-                &mut pose::RouteCtx {
-                    router: &mut owned.router,
-                    overlay: &owned.overlay,
-                    history: &mut owned.history,
-                    motion: &mut owned.motion,
-                },
+                &mut owned.route.rctx(),
             ) else {
                 continue;
             };
@@ -5355,9 +5500,8 @@ fn paint_flame_crown_draws_its_pattern() {
     }
 }
 
-/// The couch's rung is NEW on the waypoint path: the old two-rung ladder went
-/// straight to the front pose, seating a face at the window.
 #[test]
+#[cfg(feature = "native")]
 fn a_back_turned_couch_falls_to_the_still_back_view_not_a_face_at_the_window() {
     use crate::layout::{Facing, Point, WaypointKind};
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -5379,9 +5523,8 @@ fn a_back_turned_couch_falls_to_the_still_back_view_not_a_face_at_the_window() {
     );
 }
 
-/// The upright kinds reach the degradation rung too: before the seat model they
-/// asked for a sprite the pack lacked and painted NOTHING.
 #[test]
+#[cfg(feature = "native")]
 fn a_pantry_visitor_is_visible_even_when_the_pack_lacks_holding_coffee() {
     use crate::layout::{Facing, Point, WaypointKind};
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -5424,22 +5567,6 @@ fn the_chair_and_the_island_mirror_on_opposite_facings() {
                 "{kind:?} must mirror on {flips_on:?} and nothing else, saw {facing:?} -> {flip}"
             );
         }
-    }
-}
-
-/// The desk's shadow falls under the desk. `DESK_W` is the SURFACE width, not
-/// the piece's — the side cabinets that cast the shadow make it `visual.w` — so
-/// a shadow keyed on `DESK_W` sits 2 px west of the thing casting it (#906).
-#[test]
-fn the_desk_shadow_is_centred_on_the_desk_that_casts_it() {
-    let v = crate::layout::desk_furniture_def().visual;
-    for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
-        let e = super::desk_shadow_ellipse(desk);
-        // The desk's ground is stamped TOP-LEFT at `desk`, full `visual.w` wide.
-        assert!(
-            e.cx.saturating_sub(e.half_w) >= desk.x && e.cx + e.half_w <= desk.x + v.w,
-            "{desk:?}: the shadow must stay inside the desk's ground contact"
-        );
     }
 }
 
@@ -5640,8 +5767,7 @@ fn an_unflipped_character_faces_the_way_its_art_does() {
 #[test]
 #[cfg(feature = "density-art")]
 fn a_facing_flip_mirrors_the_dressed_frame() {
-    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("the embedded pack loads");
+    let pack = crate::embedded_pack::test_default_pack();
     let scale = crate::render_scale::RenderScale::new(pack.max_density_variant()).expect("nonzero");
     let mut cache = crate::frame_cache::FrameCache::new();
     let now = SystemTime::UNIX_EPOCH;
@@ -5673,4 +5799,93 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
         asymmetric += usize::from(east.as_slice() != mirrored.as_slice());
     }
     assert!(asymmetric > 0, "a profile is not its own mirror");
+}
+
+/// A corridor appliance's art overhangs north of its aisle (invariant #6), but
+/// never onto a desk, its chair or its sitter: swept over the census sizes plus
+/// every size whose aisle is 10–14 rows, where the overhang reaches the band.
+#[test]
+fn corridor_appliance_art_never_lands_on_a_workstation() {
+    use crate::layout::{CHARACTER_SPRITE_H, CHARACTER_SPRITE_W, FixtureKind, Station};
+    const TALL_AISLES: std::ops::RangeInclusive<u16> = 10..=14;
+    let overlaps = |a: crate::layout::Bounds, b: crate::layout::Bounds| {
+        a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+    };
+    let mut sizes = vec![
+        (96, 60),
+        (120, 72),
+        (140, 80),
+        (160, 96),
+        (192, 108),
+        (240, 135),
+        (320, 180),
+        (160, 192),
+    ];
+    let mut tall_seen = std::collections::BTreeSet::new();
+    for w in (96u16..=320).step_by(8) {
+        for h in 90u16..=240 {
+            let Some(l) = Layout::compute_with_seed(w, h, None, 0) else {
+                continue;
+            };
+            if TALL_AISLES.contains(&l.cubicle_aisle.height) {
+                tall_seen.insert(l.cubicle_aisle.height);
+                sizes.push((w, h));
+            }
+        }
+    }
+    assert!(
+        TALL_AISLES.clone().all(|h| tall_seen.contains(&h)),
+        "the sweep must reach every tall aisle, saw {tall_seen:?}"
+    );
+    let mut placed = 0;
+    let mut violations = Vec::new();
+    for (w, h) in sizes {
+        for seed in 0..3u64 {
+            let Some(l) = Layout::compute_with_seed(w, h, None, seed) else {
+                continue;
+            };
+            let fixtures: Vec<_> = l.fixtures().collect();
+            let mut workstations: Vec<crate::layout::Bounds> = fixtures
+                .iter()
+                .filter(|f| matches!(f.kind, FixtureKind::Desk(_) | FixtureKind::DeskChair(_)))
+                .map(|f| f.visual)
+                .collect();
+            workstations.extend(l.home_desks.iter().enumerate().map(|(i, &desk)| {
+                let at = seated_anchor_facing(
+                    desk,
+                    CHARACTER_SPRITE_W,
+                    l.desk_facing(FloorLocalDeskIndex(i)),
+                );
+                crate::layout::Bounds {
+                    x: at.x,
+                    y: at.y,
+                    width: CHARACTER_SPRITE_W,
+                    height: CHARACTER_SPRITE_H,
+                }
+            }));
+            for f in &fixtures {
+                let FixtureKind::Station {
+                    station: station @ (Station::VendingMachine | Station::Printer),
+                    ..
+                } = f.kind
+                else {
+                    continue;
+                };
+                placed += 1;
+                violations.extend(
+                    workstations
+                        .iter()
+                        .filter(|&&ws| overlaps(f.visual, ws))
+                        .map(|ws| {
+                            format!(
+                                "{w}x{h} seed {seed} aisle {:?}: {station:?} art {:?} on {ws:?}",
+                                l.cubicle_aisle, f.visual
+                            )
+                        }),
+                );
+            }
+        }
+    }
+    assert!(placed > 0, "no appliance was placed, so this pins nothing");
+    assert!(violations.is_empty(), "{}", violations.join("\n"));
 }

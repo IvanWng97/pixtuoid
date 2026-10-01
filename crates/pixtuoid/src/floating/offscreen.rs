@@ -9,9 +9,9 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 
-use pixtuoid_scene::floor::{FloorSession, FrameInputs};
+use pixtuoid_scene::floor::{FloorInputs, FloorSession, FrameInputs};
 use pixtuoid_scene::footer::{
-    FooterInputs, FooterModel, build_footer, footer_tone_rgb, footer_tool_tally,
+    FooterContext, FooterInputs, FooterModel, build_footer, footer_tone_rgb,
 };
 use pixtuoid_scene::theme::Theme;
 use winit::dpi::PhysicalSize;
@@ -50,14 +50,13 @@ impl OfficeRenderer {
     /// subtracted. A too-small layout leaves the buffer filled with the theme's
     /// `bg_fallback`.
     pub fn render(&mut self, inputs: FrameInputs<'_>) -> &RgbBuffer {
-        let (scene, floor_idx, now) = (inputs.scene, inputs.floor_meta.floor_idx, inputs.now);
+        let FloorInputs {
+            scene, floor, now, ..
+        } = inputs.world;
         self.session.render(inputs);
-        // Compose EVERY frame, even muted, so the observer's cue edges stay warm —
-        // re-enabling then fires no volley; only DELIVERY is gated.
-        let audio_frame = self.session.audio_frame(scene, floor_idx, now);
-        if self.audio.is_enabled() {
-            self.audio.frame(audio_frame);
-        }
+        // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
+        self.audio
+            .frame(self.session.audio_frame(scene, floor.floor_idx, now));
         self.session.buf()
     }
 
@@ -71,9 +70,9 @@ impl OfficeRenderer {
         self.session.overlay(scene, now, None)
     }
 
-    /// The neon wall-board model for the current scene — one floor, so `floor = None`.
+    /// The neon wall-board model for the current scene.
     pub fn board(&self, scene: &SceneState, now: SystemTime) -> pixtuoid_scene::board::BoardModel {
-        self.session.board(scene, now, None)
+        self.session.board(scene, now)
     }
 
     /// The status-footer model for the current scene — single-floor, so `floor = None`
@@ -87,20 +86,18 @@ impl OfficeRenderer {
         audio_audible: bool,
         volume_flash: Option<u8>,
     ) -> FooterModel {
-        let per_floor = pixtuoid_scene::board::per_floor_counts(scene);
-        let tools = footer_tool_tally(scene);
-        let inputs = FooterInputs {
-            counts: pixtuoid_scene::board::scene_stats(scene),
-            per_floor: &per_floor,
-            gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
-            floor: None,
-            tools: &tools,
-            audio_audible,
-            volume_flash,
-            source_warning: None,
-            keys_stats: FOOTER_KEYS,
-            keys_alert: FOOTER_KEYS,
-        };
+        let inputs = FooterInputs::new(
+            scene,
+            FooterContext::new(
+                scene,
+                None,
+                audio_audible,
+                volume_flash,
+                None,
+                FOOTER_KEYS,
+                FOOTER_KEYS,
+            ),
+        );
         build_footer(&inputs, budget)
     }
 }
@@ -111,10 +108,9 @@ impl Default for OfficeRenderer {
     }
 }
 
-/// Integer upscale factor: render the office at `win_h / SCALE` so the buffer stays around
-/// `OFFICE_TARGET_H` px tall, keeping pixel-art sprites chunky + legible (a native 1:1 blit
-/// renders 8×12 sprites at 8×12 px — unreadably tiny). Min 1 (never downscale-and-blur).
-pub fn office_scale(win_h: u32) -> u32 {
+/// Integer upscale factor keeping the office buffer near `OFFICE_TARGET_H` px tall, so
+/// pixel-art sprites stay chunky and legible. Min 1: never downscale-and-blur.
+pub(crate) fn office_scale(win_h: u32) -> u32 {
     const OFFICE_TARGET_H: u32 = 180;
     (win_h as f64 / OFFICE_TARGET_H as f64).round().max(1.0) as u32
 }
@@ -127,7 +123,7 @@ pub fn office_scale(win_h: u32) -> u32 {
 /// Takes winit's `PhysicalSize` rather than two bare `u32`s so the UNIT is carried by
 /// the type: the `[floating]` config size is LOGICAL, and handing it here is a compile
 /// error instead of a silent HiDPI over-seed (#803).
-pub(crate) fn window_buffer_geometry(size: PhysicalSize<u32>) -> (u32, u16, u16) {
+pub fn window_buffer_geometry(size: PhysicalSize<u32>) -> (u32, u16, u16) {
     let scale = office_scale(size.height);
     let buf_w = (size.width / scale).clamp(1, u16::MAX as u32) as u16;
     let buf_h = (size.height / scale).clamp(1, u16::MAX as u32) as u16;
@@ -188,25 +184,17 @@ pub(crate) fn sync_floor_caps(
     true
 }
 
-/// The bundled character sprite width (px). Labels only center ±half a glyph, so the
-/// default width (not a custom pack's real `frame.width`) is fine here — ±1px on a
-/// non-8-wide pack is cosmetically irrelevant.
+/// Labels center on the bundled width, not a custom pack's `frame.width`; a differently-sized
+/// pack's badge sits off-center, which is cosmetic.
 const FLOATING_SPRITE_W: i32 = pixtuoid_scene::layout::CHARACTER_SPRITE_W as i32;
 
 /// Name-badge AA font size (px), drawn at NATIVE surface res (not upscaled by the office
 /// `scale`) so a badge stays a crisp fixed-height caption over the chunky sprites. Tuned
 /// by eye against `examples/floating_snapshot`.
 const LABEL_FONT_PX: f32 = 12.0;
-/// Near-black badge drop-shadow — the AA text draws straight over the office (no TUI
+/// Badge drop-shadow — the AA text draws straight over the office (no TUI
 /// cell background), so a 1px offset shadow keeps it legible over bright windows/plants.
 const BADGE_SHADOW: u32 = 0x0000_0000;
-/// The near-white AA ink for foreground captions with no theme cell behind them —
-/// shared by the hovered name badge and the volume-flash readout.
-const HOVER_INK: Rgb = Rgb {
-    r: 240,
-    g: 240,
-    b: 240,
-};
 
 /// The floating footer's keybind-hint tail — floating's REAL controls (no terminal
 /// `[q]uit`/`[t]heme`/`[?]help` chrome). The ONE painter-specific input to the shared
@@ -291,14 +279,9 @@ pub fn paint_labels_into_surface(
     theme: &Theme,
 ) {
     for el in labels {
-        let rgb = if el.hovered {
-            HOVER_INK
-        } else {
-            pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme)
-        };
-        let color = pack_xrgb(rgb);
-        // The hovered ▸ is dead today: `labels()` passes `hovered: None`.
-        let marker = if el.hovered { "\u{25b8}" } else { "\u{25cf}" };
+        debug_assert!(!el.hovered, "floating paints no hover state");
+        let color = pack_xrgb(pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme));
+        let marker = "\u{25cf}";
         let text = format!("{marker}{}", el.text);
         let tw = crate::aa_text::text_width(&text, LABEL_FONT_PX);
         // anchor_px is the sprite TOP-LEFT in office space.
@@ -306,12 +289,8 @@ pub fn paint_labels_into_surface(
         let cx = el.anchor_px.x as i32 * scale + (FLOATING_SPRITE_W * scale) / 2 - tw / 2;
         let cy = el.anchor_px.y as i32 * scale - BADGE_LIFT_PX;
         // The CLI-identity split: the ● dot keeps the activity tone (status), the name
-        // paints in the source's badge hue (identity). Unregistered prefix / hover →
-        // one run in the tone/hover ink.
-        let badge = (!el.hovered)
-            .then(|| pixtuoid_scene::overlay::badge_hue(&el.text, theme))
-            .flatten();
-        match badge {
+        // paints in the source's badge hue (identity).
+        match pixtuoid_scene::overlay::badge_hue(&el.text, theme) {
             Some(hue) => {
                 let mw = crate::aa_text::text_width(marker, LABEL_FONT_PX);
                 sb.draw_shadowed_text(marker, cx, cy, LABEL_FONT_PX, color);
@@ -405,7 +384,7 @@ pub fn paint_footer_into_surface(sb: &mut XrgbSurface<'_>, model: &FooterModel, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pixtuoid_scene::floor::FloorMeta;
+    use pixtuoid_scene::floor::{FloorMeta, PetInputs};
     use pixtuoid_scene::layout::Size;
     use winit::dpi::LogicalSize;
 
@@ -460,22 +439,20 @@ mod tests {
     #[test]
     fn renders_a_sized_nonblank_office_buffer() {
         let scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
-        let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-            pixtuoid_scene::embedded_pack::PackSource::Bundled,
-        )
-        .expect("embedded pack loads");
+        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack loads");
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
         let buf = renderer.render(FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 160, h: 96 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         });
         assert_eq!((buf.width(), buf.height()), (160, 96));
@@ -694,26 +671,18 @@ mod tests {
     }
 
     #[test]
-    fn paint_labels_uses_the_right_color_per_tone_and_overrides_with_white_on_hover() {
+    fn paint_labels_uses_the_right_color_per_tone() {
         use pixtuoid_scene::layout::Point;
         use pixtuoid_scene::overlay::{LabelElement, LabelTone};
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let as_u32 = |c: Rgb| (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32;
-        let badge = |tone, hovered| {
+        let badge_dot = |tone| {
             vec![LabelElement {
                 anchor_px: Point { x: 20, y: 20 },
-                text: "cc".into(),
-                tone,
-                hovered,
-            }]
-        };
-        let badge_dot = |tone, hovered| {
-            vec![LabelElement {
-                anchor_px: Point { x: 20, y: 20 },
-                // A leading ● (the non-hover marker) guarantees a solid full-coverage glyph.
+                // A leading ● guarantees a solid full-coverage glyph.
                 text: "\u{25cf}cc".into(),
                 tone,
-                hovered,
+                hovered: false,
             }]
         };
         for (tone, expected) in [
@@ -725,7 +694,7 @@ mod tests {
             let mut sb = vec![0u32; 100 * 100];
             paint_labels_into_surface(
                 &mut XrgbSurface::new(&mut sb, 100, 100).expect("sized"),
-                &badge_dot(tone, false),
+                &badge_dot(tone),
                 2,
                 theme,
             );
@@ -734,32 +703,6 @@ mod tests {
                 "tone {tone:?} must paint its theme color {expected:?}"
             );
         }
-        // AA curve strokes don't reach coverage EXACTLY 1.0, so assert hover via
-        // brightness rather than an exact ink color.
-        let brightness = |sb: &[u32]| {
-            sb.iter()
-                .map(|&p| (p & 0xff) + ((p >> 8) & 0xff) + ((p >> 16) & 0xff))
-                .max()
-                .unwrap_or(0)
-        };
-        let mut hover_sb = vec![0u32; 100 * 100];
-        paint_labels_into_surface(
-            &mut XrgbSurface::new(&mut hover_sb, 100, 100).expect("sized"),
-            &badge(LabelTone::Idle, true),
-            2,
-            theme,
-        );
-        let mut idle_sb = vec![0u32; 100 * 100];
-        paint_labels_into_surface(
-            &mut XrgbSurface::new(&mut idle_sb, 100, 100).expect("sized"),
-            &badge(LabelTone::Idle, false),
-            2,
-            theme,
-        );
-        assert!(
-            brightness(&hover_sb) > brightness(&idle_sb),
-            "hover paints brighter (white) ink than the idle grey tone it overrides"
-        );
     }
 
     #[test]
@@ -933,24 +876,22 @@ mod tests {
             ],
             cap,
         );
-        let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-            pixtuoid_scene::embedded_pack::PackSource::Bundled,
-        )
-        .expect("embedded pack loads");
+        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack loads");
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
         let (handle, rx) = crate::audio::AudioHandle::test_pair();
         renderer.set_audio(handle);
         renderer.render(FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 160, h: 96 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         });
         let frames = crate::audio::drain_frames(&rx);
@@ -974,26 +915,15 @@ mod tests {
 
     #[test]
     fn paint_footer_blits_into_the_bottom_band_and_tones_via_the_shared_authority() {
-        use pixtuoid_scene::board::{per_floor_counts, scene_stats};
         use pixtuoid_scene::footer::{FooterTone, RungKind};
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let mut scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
         let slot = active_on("/p/a.jsonl", 0, 0);
         scene.agents.insert(slot.agent_id, slot);
-        let per_floor = per_floor_counts(&scene);
-        let tools = footer_tool_tally(&scene);
-        let inputs = FooterInputs {
-            counts: scene_stats(&scene),
-            per_floor: &per_floor,
-            gateway: None,
-            floor: None,
-            tools: &tools,
-            audio_audible: true,
-            volume_flash: None,
-            source_warning: None,
-            keys_stats: FOOTER_KEYS,
-            keys_alert: FOOTER_KEYS,
-        };
+        let inputs = FooterInputs::new(
+            &scene,
+            FooterContext::new(&scene, None, true, None, None, FOOTER_KEYS, FOOTER_KEYS),
+        );
         let (w, h) = (400usize, 160usize);
         let model = build_footer(&inputs, footer_budget(w));
         let mut sb = vec![0u32; w * h];
@@ -1027,10 +957,7 @@ mod tests {
         // Deterministic: fixed agent id + a hand-stepped clock; the loop bound mirrors
         // the scene crate's occupancy sim pin.
         use pixtuoid_scene::audio::OneShot;
-        let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-            pixtuoid_scene::embedded_pack::PackSource::Bundled,
-        )
-        .expect("embedded pack loads");
+        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack loads");
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now0 = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut idle = active_on("/w/wanderer.jsonl", 0, 0);
@@ -1046,14 +973,15 @@ mod tests {
             // 192x160: tall enough that the corridor hosts BOTH appliances
             // (the vending/printer height gates in layout::compute).
             renderer.render(FrameInputs {
-                scene: &scene,
-                pack: &pack,
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
                 theme,
-                now,
                 size: Size { w: 192, h: 160 },
-                floor_meta: FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
                 debug_walkable: false,
             });
             heard.extend(
@@ -1079,10 +1007,7 @@ mod tests {
     #[test]
     fn floating_door_chime_fires_only_for_rendered_floor_arrivals() {
         let cap = 16;
-        let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-            pixtuoid_scene::embedded_pack::PackSource::Bundled,
-        )
-        .expect("embedded pack loads");
+        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack loads");
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let mut now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
@@ -1092,14 +1017,15 @@ mod tests {
         let mut agents = vec![active_on("/d/f0.jsonl", 0, 0)];
         let scene = scene_with(agents.clone(), cap);
         renderer.render(FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 160, h: 96 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         });
         crate::audio::drain_frames(&rx); // discard the priming frames
@@ -1108,14 +1034,15 @@ mod tests {
         let scene = scene_with(agents.clone(), cap);
         now += std::time::Duration::from_millis(33);
         renderer.render(FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 160, h: 96 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         });
         let off_floor: Vec<_> = crate::audio::drain_frames(&rx)
@@ -1131,14 +1058,15 @@ mod tests {
         let scene = scene_with(agents, cap);
         now += std::time::Duration::from_millis(33);
         renderer.render(FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 160, h: 96 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         });
         let on_floor: Vec<_> = crate::audio::drain_frames(&rx)
@@ -1155,10 +1083,7 @@ mod tests {
     fn labels_is_empty_before_render_then_builds_a_positioned_badge_for_a_seeded_agent() {
         use pixtuoid_core::source::AgentEvent;
         use pixtuoid_core::{AgentId, Reducer, Transport};
-        let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
-            pixtuoid_scene::embedded_pack::PackSource::Bundled,
-        )
-        .expect("embedded pack loads");
+        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack loads");
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
@@ -1182,14 +1107,15 @@ mod tests {
         // No frame rendered yet → no cached layout → the guard returns empty.
         assert!(renderer.labels(&scene, now).is_empty());
         renderer.render(FrameInputs {
-            scene: &scene,
-            pack: &pack,
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
             theme,
-            now,
             size: Size { w: 160, h: 96 },
-            floor_meta: FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
             debug_walkable: false,
         });
         let labels = renderer.labels(&scene, now);
