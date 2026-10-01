@@ -652,8 +652,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.last_geometry = None;
     }
 
-    /// The sim's per-frame epilogue for a frame the classic painter stepped;
-    /// [`pixtuoid_scene::floor::observe_floor`] runs its own.
+    /// The sim's per-frame epilogue for a frame
+    /// [`pixtuoid_scene::floor::observe_floor`] did not step: classic's, and a
+    /// refused cutaway frame.
     fn sim_epilogue(&mut self, carriers: Vec<pixtuoid_core::AgentId>, now: SystemTime) {
         pixtuoid_scene::floor::frame_epilogue(
             &mut self.floors[self.current_floor].ctx,
