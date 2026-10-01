@@ -277,7 +277,8 @@ fn dense_look(
                 Some((theme.effects.walking_dust, 1.0))
             });
         }
-        // Riders of pets, cups and mascots, which the cutaway does not draw.
+        // A creature's riders have no head, so `look` plots them as the classic
+        // does; steam isn't drawn here.
         EffectKind::PetHeart | EffectKind::SteamPuff | EffectKind::MascotBubble => {}
     }
 }
