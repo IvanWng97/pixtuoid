@@ -18,8 +18,85 @@ pub(crate) const PERIOD: u16 = BAYER_4X4.len() as u16;
 /// Whether the pixel at `(x, y)` takes the next tone of an ordered dither
 /// covering `coverage` of its area.
 pub(crate) fn takes_next(x: u16, y: u16, coverage: f32) -> bool {
-    let level = (coverage.clamp(0.0, 1.0) * BAYER_LEVELS as f32) as u8;
+    below(x, y, level(coverage))
+}
+
+/// `coverage` as one of the levels [`BAYER_4X4`] draws.
+fn level(coverage: f32) -> u8 {
+    (coverage.clamp(0.0, 1.0) * BAYER_LEVELS as f32) as u8
+}
+
+fn below(x: u16, y: u16, level: u8) -> bool {
     BAYER_4X4[usize::from(y % PERIOD)][usize::from(x % PERIOD)] < level
+}
+
+/// A value carried from `from` to `to` by an ordered dither: the pixel at
+/// `(x, y)` takes `to` where [`takes_next`] would at the share, so a change
+/// draws as a growing share of pixels, never as a blend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Dithered<T> {
+    from: T,
+    to: T,
+    /// The share of pixels on `to`, in [`BAYER_4X4`]'s levels: all a dither
+    /// can draw, so equal levels draw equal pixels.
+    level: u8,
+}
+
+impl<T: Copy> Dithered<T> {
+    /// `value` on every pixel.
+    pub(crate) fn solid(value: T) -> Self {
+        Self {
+            from: value,
+            to: value,
+            level: 0,
+        }
+    }
+
+    /// `to` on `share` of the pixels, `from` on the rest.
+    pub(crate) fn new(from: T, to: T, share: f32) -> Self {
+        Self {
+            from,
+            to,
+            level: level(share),
+        }
+    }
+
+    /// Whether the pixel at `(x, y)` takes `to`.
+    pub(crate) fn takes_to(self, x: u16, y: u16) -> bool {
+        below(x, y, self.level)
+    }
+
+    /// The value the pixel at `(x, y)` takes.
+    pub(crate) fn at(self, x: u16, y: u16) -> T {
+        if self.takes_to(x, y) {
+            self.to
+        } else {
+            self.from
+        }
+    }
+
+    /// The value going and the value coming.
+    pub(crate) fn ends(self) -> [T; 2] {
+        [self.from, self.to]
+    }
+
+    /// The value every pixel takes, or `None` while the dither splits them.
+    pub(crate) fn uniform(self) -> Option<T> {
+        match self.level {
+            0 => Some(self.from),
+            l if u32::from(l) >= BAYER_LEVELS => Some(self.to),
+            _ => None,
+        }
+    }
+
+    /// Both values through `f`, at the same share.
+    pub(crate) fn map<U>(self, f: impl Fn(T) -> U) -> Dithered<U> {
+        Dithered {
+            from: f(self.from),
+            to: f(self.to),
+            level: self.level,
+        }
+    }
 }
 
 /// How many flat tones a falloff steps through from its peak down, the seam

@@ -90,6 +90,23 @@ impl Pen {
         a.0.saturating_mul(self.k.get())
     }
 
+    /// Copy `from`'s art pixel onto `buf` wherever `take` holds for it.
+    pub(crate) fn take_where(
+        self,
+        buf: &mut RgbBuffer,
+        from: &RgbBuffer,
+        take: impl Fn(ArtPx, ArtPx) -> bool,
+    ) {
+        let k = self.k.get();
+        for y in 0..buf.height().min(from.height()) {
+            for x in 0..buf.width().min(from.width()) {
+                if take(ArtPx(x / k), ArtPx(y / k)) {
+                    buf.put(x, y, from.get(x, y));
+                }
+            }
+        }
+    }
+
     /// Paint `r` solid, clipped to the buffer.
     pub(crate) fn fill(self, buf: &mut RgbBuffer, r: ArtRect, c: Rgb) {
         fill(

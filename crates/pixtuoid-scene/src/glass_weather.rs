@@ -5,25 +5,27 @@
 
 use pixtuoid_core::sprite::Rgb;
 
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 use crate::atmosphere::Moment;
+use crate::dither::Dithered;
 use crate::layout::Size;
-use crate::sky::Weather;
+use crate::sky::{Parameter, Weather, WeatherPolicy};
 
 /// One frame's weather on every window: [`GlassWeather::of`] once per frame.
-/// Its weather and `tick` are its whole key: two equal keys place equal marks.
+/// Its policy and `tick` are its whole key: two equal keys place equal marks.
 #[derive(Clone, Copy)]
 pub(crate) struct GlassWeather {
     /// [`SkyTones::glass_veil`](crate::atmosphere::SkyTones::glass_veil).
-    pub(crate) veil: Option<(Rgb, f32)>,
-    /// Each falling weather's [`Fall`] and how many of its particles show:
-    /// its count, scaled by that weather's share.
-    falls: [Option<(&'static Fall, u64)>; 2],
+    pub(crate) veil: Dithered<Option<(Rgb, f32)>>,
+    /// The weather at any instant: a particle shows by its weather's share
+    /// when its fall began.
+    policy: WeatherPolicy,
     /// The clock the marks move by, in ms.
     tick: u64,
 }
 
 /// One weather's falling particles.
-#[derive(PartialEq)]
 struct Fall {
     count: u64,
     seed_mult: u64,
@@ -34,7 +36,7 @@ struct Fall {
     particle: Particle,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 enum Particle {
     /// A vertical streak `len_base + seed % len_mod` units long, its alpha
     /// falling from `alpha_base` by `alpha_falloff` over its length; `drift`
@@ -170,16 +172,85 @@ impl Mark {
     }
 }
 
+/// One particle's way down the glass, at a tick.
+struct Descent {
+    seed: u64,
+    /// Its column, in units.
+    sx: u16,
+    /// Its row, in units.
+    sy: u16,
+    /// The tick, in ms, its current fall down the glass began.
+    began: u64,
+}
+
+impl Descent {
+    /// The `i`th particle of `fall` on the glass of the window `idx`th in the
+    /// run, `glass` units big, at `tick`.
+    fn of(fall: &Fall, idx: u16, i: u64, glass: Size, tick: u64) -> Self {
+        let seed = u64::from(idx) * fall.seed_mult + i;
+        let gh = u64::from(glass.h);
+        let speed = fall.speed_base + seed.wrapping_mul(SPEED_MULT) % fall.speed_span;
+        let offset = seed.wrapping_mul(u64::from(crate::MURMUR3_FMIX32_M1)) % gh;
+        let fallen = tick / speed + offset;
+        let top = fallen - fallen % gh;
+        Self {
+            seed,
+            sx: (seed.wrapping_mul(fall.sx_mult) % u64::from(glass.w)) as u16,
+            // Below `gh`, a u16.
+            sy: (fallen % gh) as u16,
+            began: top.saturating_sub(offset) * speed,
+        }
+    }
+}
+
+/// The precipitation share at which the `i`th of `count` particles falls: the
+/// middle of its even slice of the share, so a share shows its own count.
+fn threshold(i: u64, count: u64) -> f32 {
+    (i as f32 + 0.5) / count as f32
+}
+
+fn at_ms(ms: u64) -> SystemTime {
+    UNIX_EPOCH + Duration::from_millis(ms)
+}
+
 impl GlassWeather {
     pub(crate) fn of(moment: &Moment) -> Self {
-        let mut falls = moment.sky.weather().parts().map(|(w, share)| {
-            fall(w).map(|fall| (fall, (fall.count as f32 * share).round() as u64))
-        });
         Self {
             veil: moment.look.glass_veil,
-            falls: [falls.next().flatten(), falls.next().flatten()],
+            policy: moment.sky.policy(),
             tick: crate::anim::epoch_ms(moment.now),
         }
+    }
+
+    /// Whether `descent`, the `i`th of `w`'s `count`, falls: decided where its
+    /// fall began, so it never appears or vanishes partway down.
+    fn shows(&self, w: Weather, i: u64, count: u64, descent: &Descent) -> bool {
+        self.policy
+            .weather_at(at_ms(descent.began))
+            .share(Parameter::Precipitation, w)
+            >= threshold(i, count)
+    }
+
+    /// Every weather whose particles may be falling on glass `gh` units tall:
+    /// the weather now's, and the weather's when the slowest fall now on the
+    /// glass began.
+    fn falling(&self, gh: u16) -> Vec<Weather> {
+        let slowest = Weather::ALL
+            .into_iter()
+            .filter_map(fall)
+            .map(|f| (f.speed_base + f.speed_span) * u64::from(gh))
+            .max()
+            .unwrap_or(0);
+        let mut weathers = Vec::new();
+        for w in [self.tick, self.tick.saturating_sub(slowest)]
+            .into_iter()
+            .flat_map(|ms| self.policy.weather_at(at_ms(ms)).ends())
+        {
+            if !weathers.contains(&w) {
+                weathers.push(w);
+            }
+        }
+        weathers
     }
 
     /// The marks on the glass of the window `idx`th in the run, `glass` units
@@ -193,49 +264,48 @@ impl GlassWeather {
             return marks;
         }
         let (cols, rows) = (gw * d, gh * d);
-        for (fall, i) in self
-            .falls
-            .iter()
-            .flatten()
-            .flat_map(|&(fall, count)| (0..count).map(move |i| (fall, i)))
-        {
-            let seed = u64::from(idx) * fall.seed_mult + i;
-            let sx = (seed.wrapping_mul(fall.sx_mult) % u64::from(gw)) as u16;
-            let speed = fall.speed_base + seed.wrapping_mul(SPEED_MULT) % fall.speed_span;
-            let offset = seed.wrapping_mul(u64::from(crate::MURMUR3_FMIX32_M1)) % u64::from(gh);
-            // Below `gh`, a u16.
-            let sy = ((self.tick / speed + offset) % u64::from(gh)) as u16;
-            let colour = fall.colour;
-            match fall.particle {
-                Particle::Streak {
-                    len_base,
-                    len_mod,
-                    alpha_base,
-                    alpha_falloff,
-                    drift,
-                } => {
-                    let len = (len_base + (seed % len_mod) as u16) * d;
-                    marks.extend((0..len).map(|k| Mark {
-                        x: (sx * d + d / 2 + if drift { k / 2 } else { 0 }) % cols,
-                        y: (sy * d + k) % rows,
-                        colour,
-                        ink: Ink::Fade {
-                            level: alpha_base - (f32::from(k) / f32::from(len)) * alpha_falloff,
-                            peak: alpha_base,
-                        },
-                    }));
+        for w in self.falling(gh) {
+            let Some(fall) = fall(w) else {
+                continue;
+            };
+            for i in 0..fall.count {
+                let descent = Descent::of(fall, idx, i, glass, self.tick);
+                if !self.shows(w, i, fall.count, &descent) {
+                    continue;
                 }
-                Particle::Flake => {
-                    let wiggle = u16::from(!(self.tick / WIGGLE_MS + seed).is_multiple_of(2));
-                    let side = (d / 2).max(1);
-                    let x0 = (sx + wiggle) % gw * d + (d - side) / 2;
-                    let y0 = sy * d + (d - side) / 2;
-                    marks.extend((0..side * side).map(|k| Mark {
-                        x: x0 + k % side,
-                        y: y0 + k / side,
-                        colour,
-                        ink: Ink::Solid,
-                    }));
+                let Descent { seed, sx, sy, .. } = descent;
+                let colour = fall.colour;
+                match fall.particle {
+                    Particle::Streak {
+                        len_base,
+                        len_mod,
+                        alpha_base,
+                        alpha_falloff,
+                        drift,
+                    } => {
+                        let len = (len_base + (seed % len_mod) as u16) * d;
+                        marks.extend((0..len).map(|k| Mark {
+                            x: (sx * d + d / 2 + if drift { k / 2 } else { 0 }) % cols,
+                            y: (sy * d + k) % rows,
+                            colour,
+                            ink: Ink::Fade {
+                                level: alpha_base - (f32::from(k) / f32::from(len)) * alpha_falloff,
+                                peak: alpha_base,
+                            },
+                        }));
+                    }
+                    Particle::Flake => {
+                        let wiggle = u16::from(!(self.tick / WIGGLE_MS + seed).is_multiple_of(2));
+                        let side = (d / 2).max(1);
+                        let x0 = (sx + wiggle) % gw * d + (d - side) / 2;
+                        let y0 = sy * d + (d - side) / 2;
+                        marks.extend((0..side * side).map(|k| Mark {
+                            x: x0 + k % side,
+                            y: y0 + k / side,
+                            colour,
+                            ink: Ink::Solid,
+                        }));
+                    }
                 }
             }
         }
@@ -247,7 +317,7 @@ impl GlassWeather {
 mod tests {
     use super::*;
     use crate::localclock::at_hour;
-    use crate::sky::{Sky, TRANSITION_STEPS, WeatherMix};
+    use crate::sky::Sky;
 
     fn weather_at(w: Weather, tick_ms: u64) -> GlassWeather {
         let now = at_hour(12) + std::time::Duration::from_millis(tick_ms);
@@ -315,52 +385,105 @@ mod tests {
         assert!(columns.len() <= usize::try_from(RAIN.count).expect("small"));
     }
 
-    /// Mid-change, each falling weather shows its share of its particles:
-    /// rain's thin out as a storm's come in, and either end is one weather's
-    /// alone.
+    /// The weathers that fall are the sky's: [`Weather::falls`] and [`fall`]
+    /// name one set.
     #[test]
-    fn a_change_trades_one_falls_particles_for_the_others() {
-        let now = at_hour(12);
-        let counts = |step| {
-            let sky = Sky::at_with(now, Weather::Rain).with_weather(WeatherMix::stepped(
-                Weather::Rain,
-                Weather::Storm,
-                step,
-            ));
-            let glass = GlassWeather::of(&Moment::resolve(sky, &crate::theme::NORMAL, 0.0, now));
-            let count = |of: &Fall| {
-                glass
-                    .falls
-                    .iter()
-                    .flatten()
-                    .find(|(fall, _)| *fall == of)
-                    .map_or(0, |&(_, n)| n)
-            };
-            (count(&RAIN), count(&STORM))
-        };
-        assert_eq!(counts(0), (RAIN.count, 0));
-        assert_eq!(counts(TRANSITION_STEPS + 1), (0, STORM.count));
-        let mid = counts(TRANSITION_STEPS / 2);
-        assert!(mid.0 > 0 && mid.1 > 0, "{mid:?}");
-        for step in 0..=TRANSITION_STEPS {
-            let ((rain, storm), (next_rain, next_storm)) = (counts(step), counts(step + 1));
-            assert!(next_rain <= rain && next_storm >= storm, "step {step}");
+    fn the_sky_and_the_glass_agree_on_what_falls() {
+        for w in Weather::ALL {
+            assert_eq!(fall(w).is_some(), w.falls(), "{w:?}");
         }
     }
 
-    /// No two weathers fall alike, so finding a fall by value names one
-    /// weather's: `&CONST` addresses are not unique, so identity can't.
-    #[test]
-    fn every_falling_weather_has_its_own_fall() {
-        let falls: Vec<(Weather, &Fall)> = Weather::ALL
-            .into_iter()
-            .filter_map(|w| fall(w).map(|f| (w, f)))
-            .collect();
-        for (i, (a, fa)) in falls.iter().enumerate() {
-            for (b, fb) in &falls[i + 1..] {
-                assert!(fa != fb, "{a:?} and {b:?} share one fall");
+    /// Where each particle's fall began, and whether it shows, under the
+    /// clock at `tick` on window `idx`'s `glass`.
+    fn particles(tick: u64, idx: u16, glass: Size) -> Vec<((Weather, u64), u64, bool)> {
+        let gw = GlassWeather {
+            veil: Dithered::solid(None),
+            policy: WeatherPolicy::Clock,
+            tick,
+        };
+        let falling = gw.falling(glass.h);
+        let mut out = Vec::new();
+        for w in Weather::ALL {
+            let Some(f) = fall(w) else {
+                continue;
+            };
+            for i in 0..f.count {
+                let descent = Descent::of(f, idx, i, glass, tick);
+                let shows = falling.contains(&w) && gw.shows(w, i, f.count, &descent);
+                out.push(((w, i), descent.began, shows));
             }
         }
+        out
+    }
+
+    /// The start, in ms, of each clock transition that changes what falls,
+    /// with its two weathers.
+    fn falling_changes() -> impl Iterator<Item = (u64, Weather, Weather)> {
+        let slot_ms = crate::sky::WEATHER_CYCLE_SECS * 1000;
+        (0..).filter_map(move |slot: u64| {
+            let start = (slot + 1) * slot_ms - crate::sky::TRANSITION_MS;
+            let [here, next] = WeatherPolicy::Clock.weather_at(at_ms(start + 1)).ends();
+            (here != next && (here.falls() || next.falls())).then_some((start, here, next))
+        })
+    }
+
+    /// A particle shows or hides for a whole fall: none appears or vanishes
+    /// partway down, through changes of every kind and the slot boundaries
+    /// after them.
+    #[test]
+    fn no_particle_appears_or_vanishes_mid_fall() {
+        const CHANGES: usize = 16;
+        const STEP_MS: usize = 37;
+        const MARGIN_MS: u64 = 15_000;
+        let glass = Size { w: 20, h: 28 };
+        let mut kinds = std::collections::HashSet::new();
+        for (start, here, next) in falling_changes().take(CHANGES) {
+            kinds.insert((here, next));
+            let end = start + crate::sky::TRANSITION_MS + MARGIN_MS;
+            for idx in 0..3 {
+                let mut prev = particles(start - MARGIN_MS, idx, glass);
+                for tick in (start - MARGIN_MS..end).step_by(STEP_MS).skip(1) {
+                    let now = particles(tick, idx, glass);
+                    for ((id, began, was), (_, began_now, is)) in prev.iter().zip(&now) {
+                        assert!(
+                            began != began_now || was == is,
+                            "{here:?} -> {next:?}: {id:?} on window {idx} \
+                             {} mid-fall at {tick}",
+                            if *is { "appeared" } else { "vanished" }
+                        );
+                    }
+                    prev = now;
+                }
+            }
+        }
+        assert!(kinds.len() > 4, "too few kinds of change: {kinds:?}");
+    }
+
+    /// Across a rain-to-storm change the storm's particles take over from the
+    /// rain's: all rain as it opens, all storm as the next slot does, both
+    /// between.
+    #[test]
+    fn a_change_trades_one_falls_particles_for_the_others() {
+        let glass = Size { w: 20, h: 28 };
+        let (start, ..) = falling_changes()
+            .find(|&(_, here, next)| here == Weather::Rain && next == Weather::Storm)
+            .expect("the clock turns rain to storm");
+        let counts = |tick| {
+            let shown = |w| {
+                (0..8)
+                    .flat_map(|idx| particles(tick, idx, glass))
+                    .filter(|&((pw, _), _, shows)| pw == w && shows)
+                    .count()
+            };
+            (shown(Weather::Rain), shown(Weather::Storm))
+        };
+        let windows = 8 * usize::try_from(RAIN.count).expect("small");
+        let storms = 8 * usize::try_from(STORM.count).expect("small");
+        assert_eq!(counts(start), (windows, 0));
+        assert_eq!(counts(start + crate::sky::TRANSITION_MS), (0, storms));
+        let mid = counts(start + crate::sky::TRANSITION_MS / 3);
+        assert!(mid.0 > 0 && mid.1 > 0, "{mid:?}");
     }
 
     #[test]
