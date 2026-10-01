@@ -197,7 +197,7 @@ mod tests {
     use crate::cutaway::paint::tests::{empty_frame, lively_office, sit_down};
     use crate::embedded_pack::test_default_pack;
     use crate::floor::FloorMeta;
-    use crate::pixel_painter::SimFrame;
+    use crate::sim::SimFrame;
 
     /// The ground floor under a clear sky: rain or snow on the glass moves
     /// every tick, so the clock's weather would decide what a tick repaints.
@@ -601,18 +601,17 @@ mod tests {
             b.agent_id = AgentId::from_transcript_path("/neighbour.jsonl");
             b.label = NEIGHBOUR.into();
             both.agents.push(b.clone());
-            both.characters
-                .push(crate::pixel_painter::CharacterPlacement {
-                    agent_idx: both.agents.len() - 1,
-                    anchor: crate::layout::Point {
-                        x: a.anchor.x + 2,
-                        y: a.anchor.y + dy,
-                    },
-                    anchor_y: a.anchor_y + dy,
-                    seat_desk: None,
-                    seated: false,
-                    ..a.clone()
-                });
+            both.characters.push(crate::sim::CharacterPlacement {
+                agent_idx: both.agents.len() - 1,
+                anchor: crate::layout::Point {
+                    x: a.anchor.x + 2,
+                    y: a.anchor.y + dy,
+                },
+                anchor_y: a.anchor_y + dy,
+                seat_desk: None,
+                seated: false,
+                ..a.clone()
+            });
             let plate = {
                 let office = Office {
                     layout: &h.layout,

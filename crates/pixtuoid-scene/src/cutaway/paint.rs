@@ -16,8 +16,8 @@ use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, DESK_H, Depth, Fixture, FixtureKind, Layer, Layout, Point, Size, Station, Tie,
 };
-use crate::pixel_painter::SimFrame;
 use crate::render_scale::RenderScale;
+use crate::sim::SimFrame;
 use crate::theme::Theme;
 
 /// The front face the cutaway derives under a top-down piece's base-density art
@@ -1339,7 +1339,7 @@ fn push_fixture(
             ));
         }
         K::NeonSign => {
-            let look = crate::pixel_painter::neon_look(frame.neon, theme);
+            let look = crate::floor::neon_look(frame.neon, theme);
             let b = fixture.visual;
             order.push((
                 Span::new(b.x, b.y, b.width, b.height, 0).with_depth(depth),
@@ -1357,7 +1357,7 @@ fn push_fixture(
                 Span::new(b.x, b.y, b.width, b.height, 0).with_depth(depth),
                 PieceKind::Clock {
                     at: top_left,
-                    reading: crate::pixel_painter::clock_reading(moment.now),
+                    reading: crate::sky::clock_reading(moment.now),
                 },
             ));
         }
@@ -1522,7 +1522,7 @@ fn push_desk(
     };
     let screen = Screen::of(
         crate::pixel_painter::desk_screen_glow(
-            crate::pixel_painter::desk_occupant(&frame.agents, i),
+            crate::sim::desk_occupant(&frame.agents, i),
             facing,
             frame.seated_agents.get(&i).copied().unwrap_or(false),
             theme,
@@ -1803,7 +1803,7 @@ fn push_characters(
 /// `c`'s effects on the grid of its figure `key`, `w` logical columns wide
 /// with its frame's top-left at `at`.
 fn riders(
-    c: &crate::pixel_painter::CharacterPlacement,
+    c: &crate::sim::CharacterPlacement,
     key: &crate::pixel_painter::seat::CharacterKey,
     (w, at): (u16, crate::layout::Point),
     scale: RenderScale,
@@ -2040,7 +2040,7 @@ pub(crate) enum PieceKind {
     /// The wall clock's dial from its top-left `at`, its hands at `reading`.
     Clock {
         at: crate::layout::Point,
-        reading: crate::pixel_painter::ClockReading,
+        reading: crate::sky::ClockReading,
     },
     Character {
         figure: Figure,
@@ -2580,7 +2580,7 @@ fn paint_wall_decor(
 /// The classic placement's anchor, unchanged: the seat side is a per-desk layout
 /// fact, so an override here would make the two profiles disagree about which
 /// side of its desk half the office sits on.
-fn cutaway_anchor(c: &crate::pixel_painter::CharacterPlacement) -> crate::layout::Point {
+fn cutaway_anchor(c: &crate::sim::CharacterPlacement) -> crate::layout::Point {
     c.anchor
 }
 
@@ -2760,7 +2760,7 @@ fn paint_neon(
 /// centre pin denser.
 fn paint_clock(
     at: Point,
-    reading: crate::pixel_painter::ClockReading,
+    reading: crate::sky::ClockReading,
     pack: &Pack,
     theme: &Theme,
     scale: RenderScale,
@@ -3766,10 +3766,8 @@ pub(crate) mod tests {
     fn both_profiles_seat_an_occupant_on_the_side_the_layout_chose() {
         use crate::layout::{CHARACTER_SPRITE_W, Facing};
         let desk = crate::layout::Point { x: 40, y: 30 };
-        let near =
-            crate::pixel_painter::seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::North);
-        let far =
-            crate::pixel_painter::seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::South);
+        let near = crate::sim::seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::North);
+        let far = crate::sim::seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::South);
         assert_eq!(
             near.y, desk.y,
             "a back-turned occupant's shared anchor lands on desk.y"
@@ -4299,7 +4297,7 @@ pub(crate) mod tests {
     }
 
     fn near_seat(desk: crate::layout::Point) -> crate::layout::Point {
-        crate::pixel_painter::seated_anchor_facing(
+        crate::sim::seated_anchor_facing(
             desk,
             crate::layout::CHARACTER_SPRITE_W,
             crate::layout::Facing::North,
@@ -5784,7 +5782,7 @@ S B B B B B B S
             let variants: [&FigureEdit; 7] = [
                 &|_, _| {},
                 &|c, a| {
-                    c.glow = crate::pixel_painter::CharacterGlow::Tool;
+                    c.glow = crate::sim::CharacterGlow::Tool;
                     a.state = pixtuoid_core::state::ActivityState::Active {
                         tool_use_id: None,
                         detail: None,
@@ -5839,8 +5837,7 @@ S B B B B B B S
     }
 
     /// An edit to one figure and its agent.
-    type FigureEdit =
-        dyn Fn(&mut crate::pixel_painter::CharacterPlacement, &mut pixtuoid_core::AgentSlot);
+    type FigureEdit = dyn Fn(&mut crate::sim::CharacterPlacement, &mut pixtuoid_core::AgentSlot);
 
     /// `frame` with `edit` applied to its first figure and that figure's agent.
     fn varied(frame: &SimFrame, edit: &FigureEdit) -> SimFrame {
@@ -6616,7 +6613,7 @@ S B B B B B B S
         );
         let mut hands = 0;
         for minutes in (0..12 * 60).step_by(7) {
-            let reading = crate::pixel_painter::ClockReading {
+            let reading = crate::sky::ClockReading {
                 hour: minutes / 60,
                 minute: minutes % 60,
             };

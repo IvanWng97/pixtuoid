@@ -1,12 +1,14 @@
-use super::anchors::{
-    CHARACTER_SPRITE_W, back_couch_anchor, compute_door_frame_idx, seated_anchor_facing,
-    walking_anchor, waypoint_anchor,
-};
 use super::background::paint_corridor_runner;
 use super::seat::{Seat, settle_seat};
 use super::*;
 use crate::floor::{FloorInputs, PetInputs};
+use crate::layout::CHARACTER_SPRITE_W;
 use crate::pose;
+use crate::sim::anchors::{
+    back_couch_anchor, compute_door_frame_idx, seated_anchor_facing, walking_anchor,
+    waypoint_anchor,
+};
+use crate::sim::{CharacterPlacement, SimStores};
 use pixtuoid_core::sprite::{Frame, Pixel};
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
@@ -1887,7 +1889,7 @@ fn queued(layout: &Layout, frame: &SimFrame) -> Furnishings<'static> {
         &ctx,
         frame,
         &lights.desks,
-        background::neon_look(frame.neon, theme),
+        crate::floor::neon_look(frame.neon, theme),
     )
 }
 
@@ -2311,8 +2313,8 @@ fn door_frame_uses_physics_window_when_nonzero() {
 
 #[test]
 fn waypoint_rank_offset_x_decollision_table() {
-    use super::anchors::waypoint_rank_offset_x;
     use crate::layout::WaypointKind;
+    use crate::sim::anchors::waypoint_rank_offset_x;
     assert_eq!(waypoint_rank_offset_x(WaypointKind::Couch, 0), 0);
     assert_eq!(waypoint_rank_offset_x(WaypointKind::Pantry, 0), 0);
     assert_eq!(waypoint_rank_offset_x(WaypointKind::Pantry, 1), 9);
@@ -2326,8 +2328,8 @@ fn waypoint_rank_offset_x_decollision_table() {
 
 #[test]
 fn no_exclusive_waypoint_kind_ever_steps_aside() {
-    use super::anchors::waypoint_rank_offset_x;
     use crate::layout::{WaypointKind, furniture_def};
+    use crate::sim::anchors::waypoint_rank_offset_x;
     let mut exclusive = 0;
     let (mut saw_booth, mut saw_shareable_steps) = (false, false);
     for &kind in WaypointKind::ALL {
@@ -2548,8 +2550,13 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
             &mut FrameCache::new(),
             now,
         );
-        let fx =
-            sim::character_effects(slot, anchor, drawn.map(|s| s.w), sim::Cues::default(), now);
+        let fx = crate::sim::character_effects(
+            slot,
+            anchor,
+            drawn.map(|s| s.w),
+            crate::sim::Cues::default(),
+            now,
+        );
         super::effects::paint_effects(
             &mut buf,
             &fx,
@@ -2601,14 +2608,14 @@ fn a_top_burning_placement_carries_its_crown_on_its_anchor() {
     // A breathing instant, where the post-breath anchor is off the fit.
     let now = (0..u64::from(u16::MAX))
         .map(|ms| now0 + std::time::Duration::from_millis(ms))
-        .find(|&t| super::anchors::with_breath(Point { x: 0, y: 1 }, id, t).y == 0)
+        .find(|&t| crate::sim::anchors::with_breath(Point { x: 0, y: 1 }, id, t).y == 0)
         .expect("the breath rises within a cycle");
     let slot = scene.agents.get_mut(&id).expect("the rig's agent");
     slot.model = Some("claude-fable-5".into());
     let crowns = |scene: &SceneState| {
         let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
         let poses = HashMap::from([(id, Some(Pose::SeatedThinking))]);
-        let (placements, ..) = sim::resolve_characters(
+        let (placements, ..) = crate::sim::resolve_characters(
             &agents,
             &poses,
             &layout,
@@ -2631,7 +2638,7 @@ fn a_top_burning_placement_carries_its_crown_on_its_anchor() {
     let slot = scene.agents.get_mut(&id).expect("the rig's agent");
     slot.effort = Some(EffortObservation::new("ultra".into(), now));
     let (p, crowns) = crowns(&scene);
-    let w = sim::pack_frame_size(&pack, p.anim_name, p.frame_idx)
+    let w = crate::sim::pack_frame_size(&pack, p.anim_name, p.frame_idx)
         .expect("the pack draws the pose")
         .w;
     assert_eq!(
@@ -3373,7 +3380,7 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
     };
     let fresh = desks_at(now0);
     assert_eq!(fresh.len(), layout.home_desks.len());
-    assert_eq!(fresh[desk].cup, Some(sim::Cup::Steaming));
+    assert_eq!(fresh[desk].cup, Some(crate::sim::Cup::Steaming));
     assert_eq!(fresh[desk].token_tier, 1);
     assert_eq!(
         fresh[desk].sheet_fall,
@@ -3383,14 +3390,14 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
     for (i, props) in fresh.iter().enumerate().filter(|&(i, _)| i != desk) {
         assert_eq!(
             *props,
-            sim::DeskProps::default(),
+            crate::sim::DeskProps::default(),
             "desk {i} has no occupant"
         );
     }
     let cold = desks_at(now0 + Duration::from_secs(crate::floor::CoffeeState::STEAM_WINDOW_SECS));
     assert_eq!(
         cold[desk].cup,
-        Some(sim::Cup::Cold),
+        Some(crate::sim::Cup::Cold),
         "the cup stays after it stops steaming"
     );
     assert_eq!(cold[desk].sheet_fall, None, "and the sheet has landed");
@@ -3430,7 +3437,7 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         petting: None,
     })
     .expect("the cat roams");
-    let hearts = |p: &sim::PetPlacement| -> Vec<u64> {
+    let hearts = |p: &crate::sim::PetPlacement| -> Vec<u64> {
         p.effects
             .iter()
             .filter(|e| e.kind == crate::effects::EffectKind::PetHeart)
@@ -3472,7 +3479,7 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         petting: Some(&in_corner),
     })
     .expect("the petted cat");
-    let size = sim::frame_size(&pack, cornered.anim_name, 0, sim::PET_FALLBACK);
+    let size = crate::sim::frame_size(&pack, cornered.anim_name, 0, crate::sim::PET_FALLBACK);
     assert_eq!(
         cornered.pos,
         Point {
@@ -3536,7 +3543,7 @@ fn a_mascots_state_reaches_its_hover_and_its_sprite() {
         (DaemonState::Degraded, false, true),
         (DaemonState::Down, false, false),
     ] {
-        let mascot = sim::MascotPlacement {
+        let mascot = crate::sim::MascotPlacement {
             pos: Point { x: 60, y: 60 },
             size: Size { w: 14, h: 12 },
             anim_name: def.walk,
@@ -5221,7 +5228,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
 #[test]
 fn keep_sprite_on_canvas_bounds_differ_by_anchor_convention() {
     use crate::layout::{Anchor, Size};
-    use crate::pixel_painter::anchors::keep_sprite_on_canvas;
+    use crate::sim::anchors::keep_sprite_on_canvas;
     let buf = Size { w: 100, h: 80 };
     let size = Size { w: 8, h: 12 };
     let at = |a, x, y| keep_sprite_on_canvas(a, Point { x, y }, size, buf);
@@ -5520,7 +5527,7 @@ fn only_a_placement_that_breathes_takes_the_breath() {
     let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
     let now = (0..u64::from(u16::MAX))
         .map(|ms| now0 + std::time::Duration::from_millis(ms))
-        .find(|&t| super::anchors::with_breath(Point { x: 0, y: 1 }, id, t).y == 0)
+        .find(|&t| crate::sim::anchors::with_breath(Point { x: 0, y: 1 }, id, t).y == 0)
         .expect("the breath rises within a cycle");
     let mid = Point {
         x: layout.buf_w / 2,
@@ -5528,7 +5535,7 @@ fn only_a_placement_that_breathes_takes_the_breath() {
     };
     let place = |pose| {
         let poses = HashMap::from([(id, Some(pose))]);
-        let (placements, ..) = sim::resolve_characters(
+        let (placements, ..) = crate::sim::resolve_characters(
             &agents,
             &poses,
             &layout,
@@ -5565,7 +5572,7 @@ fn only_a_placement_that_breathes_takes_the_breath() {
 /// Co-located visitors step aside, and each one's badge goes with them.
 #[test]
 fn co_located_visitors_badges_step_aside_with_their_sprites() {
-    use super::anchors::waypoint_rank_offset_x;
+    use crate::sim::anchors::waypoint_rank_offset_x;
     let (mut scene, layout, _, now, pack) = sim_rig();
     scene.agents.clear();
     let (wp, kind) = layout
@@ -5590,7 +5597,7 @@ fn co_located_visitors_badges_step_aside_with_their_sprites() {
         .keys()
         .map(|&id| (id, Some(crate::pose::Pose::AtWaypoint { wp, kind })))
         .collect();
-    (frame.characters, ..) = sim::resolve_characters(
+    (frame.characters, ..) = crate::sim::resolve_characters(
         &frame.agents,
         &poses,
         &layout,
@@ -5747,8 +5754,12 @@ fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
             })
             .map(|(_, &d)| {
                 (
-                    super::anchors::seated_anchor_facing(d, chair_w, crate::layout::Facing::North)
-                        .x,
+                    crate::sim::anchors::seated_anchor_facing(
+                        d,
+                        chair_w,
+                        crate::layout::Facing::North,
+                    )
+                    .x,
                     d.y + 6,
                 )
             })
