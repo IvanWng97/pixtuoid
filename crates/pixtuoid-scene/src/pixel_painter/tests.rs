@@ -590,10 +590,13 @@ fn recolors(
 #[test]
 #[cfg(feature = "density-art")]
 fn the_embedded_pack_draws_every_key_an_agent_recolors() {
-    use pixtuoid_core::sprite::format::density_variant_name;
+    use pixtuoid_core::sprite::format::{Density, density_variant_name};
     let pack = crate::embedded_pack::test_default_pack();
-    let names = std::iter::once("standing".to_string())
-        .chain((2..=pack.max_density_variant()).map(|d| density_variant_name("standing", d)));
+    let names = std::iter::once("standing".to_string()).chain(
+        (2..=pack.max_density_variant().get())
+            .filter_map(Density::new)
+            .map(|d| density_variant_name("standing", d)),
+    );
     let mut drawn = 0;
     for name in names {
         let Some(standing) = pack.animation(&name) else {
@@ -627,7 +630,7 @@ fn the_embedded_pack_draws_every_key_an_agent_recolors() {
 #[cfg(feature = "density-art")]
 fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
     use pixtuoid_core::sprite::format::{
-        OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS, density_variant_name,
+        Density, OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS, density_variant_name,
     };
     let pack = crate::embedded_pack::test_default_pack();
     let mut variants = 0;
@@ -635,7 +638,11 @@ fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
         .iter()
         .chain(OPTIONAL_CHARACTER_ANIMATIONS)
     {
-        let densities = std::iter::once(None).chain((2..=pack.max_density_variant()).map(Some));
+        let densities = std::iter::once(None).chain(
+            (2..=pack.max_density_variant().get())
+                .filter_map(Density::new)
+                .map(Some),
+        );
         for density in densities {
             let name = density.map_or_else(|| base.to_string(), |d| density_variant_name(base, d));
             let Some(anim) = pack.animation(&name) else {
@@ -5824,7 +5831,8 @@ fn an_unflipped_character_faces_the_way_its_art_does() {
 #[cfg(feature = "density-art")]
 fn a_facing_flip_mirrors_the_dressed_frame() {
     let pack = crate::embedded_pack::test_default_pack();
-    let scale = crate::render_scale::RenderScale::new(pack.max_density_variant()).expect("nonzero");
+    let scale =
+        crate::render_scale::RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
     let mut cache = crate::frame_cache::FrameCache::new();
     let now = SystemTime::UNIX_EPOCH;
     let mut asymmetric = 0;
