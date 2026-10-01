@@ -115,16 +115,16 @@ fn floor_ctx_default_equals_new() {
 }
 
 #[test]
-fn lighting_state_default_equals_new() {
+fn vacancy_dim_default_equals_new() {
     assert_eq!(
-        LightingState::default().level(),
-        LightingState::new().level(),
-        "LightingState::default() must equal new()"
+        VacancyDim::default().level(),
+        VacancyDim::new().level(),
+        "VacancyDim::default() must equal new()"
     );
     assert_eq!(
-        LightingState::default().level(),
+        VacancyDim::default().level(),
         1.0,
-        "a fresh LightingState is fully lit"
+        "a fresh VacancyDim is fully lit"
     );
 }
 
@@ -377,7 +377,7 @@ fn t0() -> SystemTime {
 
 #[test]
 fn light_steady_state_populated() {
-    let mut light = LightingState::new();
+    let mut light = VacancyDim::new();
     let start = t0();
     for ms in (0..3_000).step_by(33) {
         let level = light.tick(false, start + Duration::from_millis(ms));
@@ -390,7 +390,7 @@ fn light_steady_state_populated() {
 
 #[test]
 fn light_holds_during_debounce_window() {
-    let mut light = LightingState::new();
+    let mut light = VacancyDim::new();
     let start = t0();
     light.tick(true, start);
     // 4 s after going empty, inside the 5 s debounce.
@@ -403,18 +403,18 @@ fn light_holds_during_debounce_window() {
 
 #[test]
 fn light_eases_toward_min_after_debounce() {
-    let mut light = LightingState::new();
+    let mut light = VacancyDim::new();
     let start = t0();
     light.tick(true, start);
     // 6 s: the debounce expired 1 s ago, ~1.25 tau of fade.
     let level = light.tick(true, start + Duration::from_millis(6_000));
     assert!(level < 0.95, "no fade started after debounce: {level}");
-    assert!(level > LightingState::MIN_LEVEL, "overshot floor: {level}");
+    assert!(level > VacancyDim::MIN_LEVEL, "overshot floor: {level}");
 }
 
 #[test]
 fn light_converges_to_min_when_empty_long_enough() {
-    let mut light = LightingState::new();
+    let mut light = VacancyDim::new();
     let start = t0();
     // A realistic frame cadence for 30 s, so the exponential ease has fully landed.
     for ms in (0..30_000).step_by(33) {
@@ -422,14 +422,14 @@ fn light_converges_to_min_when_empty_long_enough() {
     }
     let level = light.level();
     assert!(
-        (level - LightingState::MIN_LEVEL).abs() < 1e-3,
+        (level - VacancyDim::MIN_LEVEL).abs() < 1e-3,
         "did not converge to MIN_LEVEL: {level}"
     );
 }
 
 #[test]
 fn light_rises_back_when_repopulated() {
-    let mut light = LightingState::new();
+    let mut light = VacancyDim::new();
     let start = t0();
     for ms in (0..20_000).step_by(33) {
         light.tick(true, start + Duration::from_millis(ms));
@@ -445,7 +445,7 @@ fn light_rises_back_when_repopulated() {
 
 #[test]
 fn light_resets_empty_since_when_repopulated() {
-    let mut light = LightingState::new();
+    let mut light = VacancyDim::new();
     let start = t0();
     light.tick(true, start);
     light.tick(true, start + Duration::from_millis(3_000));
@@ -462,21 +462,21 @@ fn light_resets_empty_since_when_repopulated() {
 
 #[test]
 fn light_large_dt_does_not_overshoot_or_nan() {
-    let mut light = LightingState::new();
+    let mut light = VacancyDim::new();
     let start = t0();
     light.tick(true, start);
-    let later = start + Duration::from_millis(LightingState::EMPTY_DEBOUNCE_MS + 1_000);
+    let later = start + Duration::from_millis(VacancyDim::EMPTY_DEBOUNCE_MS + 1_000);
     let level = light.tick(true, later);
     assert!(level.is_finite(), "level went non-finite: {level}");
     assert!(
-        level >= LightingState::MIN_LEVEL - 1e-6,
+        level >= VacancyDim::MIN_LEVEL - 1e-6,
         "level undershot floor: {level}"
     );
 }
 
 #[test]
 fn light_backward_clock_jump_does_not_move_level() {
-    let mut light = LightingState::new();
+    let mut light = VacancyDim::new();
     let start = t0();
     light.tick(false, start);
     let before = light.level();
@@ -492,9 +492,9 @@ fn light_backward_clock_jump_does_not_move_level() {
 
 #[test]
 fn light_snap_to_empty_forces_min_level() {
-    let mut light = LightingState::new();
+    let mut light = VacancyDim::new();
     light.snap_to_empty();
-    assert!((light.level() - LightingState::MIN_LEVEL).abs() < f32::EPSILON);
+    assert!((light.level() - VacancyDim::MIN_LEVEL).abs() < f32::EPSILON);
 }
 
 #[test]
@@ -1192,7 +1192,7 @@ fn neon_first_tick_snaps_to_the_mood() {
 /// to a bit-exact 1.0, so the sign reads the room's VERDICT, not its level.
 #[test]
 fn neon_holds_through_a_walkout_in_a_room_that_once_dimmed() {
-    let mut light = LightingState::new();
+    let mut light = VacancyDim::new();
     let mut neon = NeonState::new();
     let mut now = t0();
     let mut run = |empty: bool, mood: crate::board::OfficeMood, ms: u64| {
@@ -1204,11 +1204,7 @@ fn neon_holds_through_a_walkout_in_a_room_that_once_dimmed() {
         }
         (last, light.level())
     };
-    let (starved, _) = run(
-        true,
-        neon_mood(0, 0, 0),
-        LightingState::EMPTY_DEBOUNCE_MS * 3,
-    );
+    let (starved, _) = run(true, neon_mood(0, 0, 0), VacancyDim::EMPTY_DEBOUNCE_MS * 3);
     assert_eq!(starved, NeonLevels::EMPTY);
     let (_, level) = run(false, neon_mood(2, 0, 0), 60_000);
     assert!(level < 1.0, "the premise: the f32 ease stalls short of 1.0");
@@ -1220,11 +1216,11 @@ fn neon_holds_through_a_walkout_in_a_room_that_once_dimmed() {
 /// The `--empty` still: one tick after the snap must still judge the floor empty.
 #[test]
 fn light_snap_to_empty_survives_its_first_tick_and_reads_dimmed() {
-    let mut light = LightingState::new();
+    let mut light = VacancyDim::new();
     light.snap_to_empty();
     assert!(light.dimmed());
     let level = light.tick(true, t0());
-    assert_eq!(level, LightingState::MIN_LEVEL);
+    assert_eq!(level, VacancyDim::MIN_LEVEL);
     assert!(light.dimmed(), "the debounce was back-dated, not re-armed");
     light.tick(false, t0() + FRAME);
     assert!(!light.dimmed(), "and a populated floor clears it");
@@ -1232,8 +1228,8 @@ fn light_snap_to_empty_survives_its_first_tick_and_reads_dimmed() {
 
 #[test]
 fn light_is_dimmed_exactly_once_the_debounce_runs_out() {
-    let mut light = LightingState::new();
-    let debounce = Duration::from_millis(LightingState::EMPTY_DEBOUNCE_MS);
+    let mut light = VacancyDim::new();
+    let debounce = Duration::from_millis(VacancyDim::EMPTY_DEBOUNCE_MS);
     light.tick(true, t0());
     light.tick(true, t0() + debounce - Duration::from_millis(1));
     assert!(!light.dimmed());

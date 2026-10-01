@@ -239,7 +239,7 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
 #[test]
 fn an_emptied_floor_takes_both_desk_emitters_down_with_the_level() {
     use crate::layout::Facing;
-    let min = crate::floor::LightingState::MIN_LEVEL;
+    let min = crate::floor::VacancyDim::MIN_LEVEL;
     let lit = desk_lights(DESK, Facing::North, 1.0, 1.0);
     let empty = desk_lights(DESK, Facing::North, 1.0, min);
     for (what, lit, empty) in [

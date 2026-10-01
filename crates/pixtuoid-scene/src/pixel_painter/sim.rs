@@ -18,7 +18,7 @@ use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 use crate::chitchat::{self, ActiveChitchat, ChitchatBubble, VenueKey};
 use crate::creatures::{gateway_mascot_def, mascot_position, mascot_seed, pet_position};
 use crate::effects::{self, Effect};
-use crate::floor::{CoffeeState, FloorInputs, FloorMeta, LightingState, PetInputs};
+use crate::floor::{CoffeeState, FloorInputs, FloorMeta, PetInputs, VacancyDim};
 use crate::layout::{Anchor, Layout, Point, Size, WALKING_Y_OFF};
 use crate::motion::MotionState;
 use crate::pathfind::Router;
@@ -39,7 +39,7 @@ pub(crate) struct SimStores<'a> {
     pub overlay: &'a mut OccupancyOverlay,
     pub history: &'a mut PoseHistory,
     pub motion: &'a mut HashMap<AgentId, MotionState>,
-    pub light: &'a mut LightingState,
+    pub light: &'a mut VacancyDim,
     pub neon: &'a mut crate::floor::NeonState,
     pub chitchat: &'a mut HashMap<VenueKey, ActiveChitchat>,
 }
@@ -175,7 +175,7 @@ pub struct SimFrame {
     pub seated_agents: HashMap<FloorLocalDeskIndex, bool>,
     /// Fully resolved character sprites for this tick, in agent order.
     pub characters: Vec<CharacterPlacement>,
-    /// Smoothed indoor-lighting level from `LightingState::tick`.
+    /// Smoothed indoor-lighting level from `VacancyDim::tick`.
     pub indoor_scale: f32,
     /// The neon sign's light from `NeonState::tick`.
     pub(crate) neon: crate::floor::NeonLevels,

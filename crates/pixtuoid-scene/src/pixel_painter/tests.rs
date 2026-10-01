@@ -3157,7 +3157,7 @@ fn agent_overrides_same_id_different_cwd_changes_outfit() {
 
 struct OwnedSimStores {
     route: pose::RouteRig<crate::pathfind::AStarRouter>,
-    light: LightingState,
+    light: VacancyDim,
     neon: crate::floor::NeonState,
     chitchat: std::collections::HashMap<crate::chitchat::VenueKey, crate::chitchat::ActiveChitchat>,
 }
@@ -3166,7 +3166,7 @@ impl OwnedSimStores {
     fn new() -> Self {
         Self {
             route: pose::RouteRig::new(crate::pathfind::AStarRouter::new()),
-            light: LightingState::new(),
+            light: VacancyDim::new(),
             neon: crate::floor::NeonState::new(),
             chitchat: std::collections::HashMap::new(),
         }
@@ -3236,7 +3236,7 @@ fn sim_step_keeps_the_sign_lit_through_a_gap_in_a_room_that_once_dimmed() {
         }
         last.expect("at least one frame")
     };
-    let debounce = crate::floor::LightingState::EMPTY_DEBOUNCE_MS;
+    let debounce = crate::floor::VacancyDim::EMPTY_DEBOUNCE_MS;
     assert_eq!(run(&empty, debounce * 3), crate::floor::NeonLevels::EMPTY);
     run(&populated, 60_000);
     // A gap between transcripts: the tally is empty, the room's debounce is not up.
