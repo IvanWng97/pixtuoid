@@ -272,23 +272,16 @@ pub fn paint_labels_into_surface(
 ) {
     for el in labels {
         debug_assert!(!el.hovered, "floating paints no hover state");
-        let color = pack_xrgb(pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme));
-        let marker = "\u{25cf}";
+        let ink = pixtuoid_scene::overlay::badge_ink(&el.text, el.tone, theme);
+        let marker = &pixtuoid_scene::overlay::BADGE_MARKER.to_string();
         let text = format!("{marker}{}", el.text);
         let tw = crate::aa_text::text_width(&text, LABEL_FONT_PX);
         const BADGE_LIFT_PX: i32 = 12;
         let cx = el.anchor_px.x as i32 * scale - tw / 2;
         let cy = el.anchor_px.y as i32 * scale - BADGE_LIFT_PX;
-        // The CLI-identity split: the ● dot keeps the activity tone (status), the name
-        // paints in the source's badge hue (identity).
-        match pixtuoid_scene::overlay::badge_hue(&el.text, theme) {
-            Some(hue) => {
-                let mw = crate::aa_text::text_width(marker, LABEL_FONT_PX);
-                sb.draw_shadowed_text(marker, cx, cy, LABEL_FONT_PX, color);
-                sb.draw_shadowed_text(&el.text, cx + mw, cy, LABEL_FONT_PX, pack_xrgb(hue));
-            }
-            None => sb.draw_shadowed_text(&text, cx, cy, LABEL_FONT_PX, color),
-        }
+        let mw = crate::aa_text::text_width(marker, LABEL_FONT_PX);
+        sb.draw_shadowed_text(marker, cx, cy, LABEL_FONT_PX, pack_xrgb(ink.marker));
+        sb.draw_shadowed_text(&el.text, cx + mw, cy, LABEL_FONT_PX, pack_xrgb(ink.name));
     }
 }
 
@@ -735,36 +728,49 @@ mod tests {
     }
 
     #[test]
-    fn paint_labels_split_the_status_dot_tone_from_the_cli_name_hue() {
-        // A registered prefix (`cc·`) exercises the `Some(hue)` arm the tone-only
-        // tests above skip.
+    fn paint_labels_ink_the_marker_and_the_name_as_the_model_says() {
+        // A registered prefix (`cc·`), so the marker's ink differs from the name's.
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::{LabelElement, LabelTone};
+        use pixtuoid_scene::overlay::{BADGE_MARKER, LabelElement, LabelTone, badge_ink};
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        let as_u32 = |c: Rgb| (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32;
-        let tone_rgb = theme.ui.label_idle;
-        let name_rgb = theme.source.claude_code;
-        assert_ne!(tone_rgb, name_rgb, "premise: idle tone != cc badge hue");
-        let label = vec![LabelElement {
-            anchor_px: Point { x: 20, y: 20 },
-            text: "cc\u{b7}api".into(),
-            tone: LabelTone::Idle,
-            hovered: false,
-        }];
-        let mut sb = vec![0u32; 120 * 120];
+        let text = "cc\u{b7}api";
+        let ink = badge_ink(text, LabelTone::Idle, theme);
+        assert_ne!(ink.marker, ink.name, "premise: the two parts differ");
+        let (w, h, scale, anchor) = (120usize, 120usize, 2, Point { x: 20, y: 20 });
+        let mut sb = vec![0u32; w * h];
         paint_labels_into_surface(
-            &mut XrgbSurface::new(&mut sb, 120, 120).expect("sized"),
-            &label,
-            2,
+            &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
+            &[LabelElement {
+                anchor_px: anchor,
+                text: text.into(),
+                tone: LabelTone::Idle,
+                hovered: false,
+            }],
+            scale,
             theme,
         );
+        // The marker's columns, then the name's, as `paint_labels_into_surface`
+        // lays them.
+        let marker = BADGE_MARKER.to_string();
+        let tw = crate::aa_text::text_width(&format!("{marker}{text}"), LABEL_FONT_PX);
+        let mw = crate::aa_text::text_width(&marker, LABEL_FONT_PX);
+        let left = anchor.x as i32 * scale - tw / 2;
+        let colours = |cols: std::ops::Range<i32>| -> std::collections::HashSet<u32> {
+            sb.iter()
+                .enumerate()
+                .filter(|(i, _)| cols.contains(&((i % w) as i32)))
+                .map(|(_, &p)| p)
+                .collect()
+        };
+        let (dot, name) = (colours(left..left + mw), colours(left + mw..left + tw));
+        let (m, n) = (pack_xrgb(ink.marker), pack_xrgb(ink.name));
         assert!(
-            sb.contains(&as_u32(tone_rgb)),
-            "the ● dot must paint the activity tone {tone_rgb:?}"
+            dot.contains(&m) && !dot.contains(&n),
+            "the ● takes the marker ink"
         );
         assert!(
-            sb.contains(&as_u32(name_rgb)),
-            "the name must paint the cc badge hue {name_rgb:?}"
+            name.contains(&n) && !name.contains(&m),
+            "the name takes the name ink"
         );
     }
 
