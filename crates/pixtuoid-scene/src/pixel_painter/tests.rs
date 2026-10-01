@@ -5672,11 +5672,12 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
 }
 
 /// A corridor appliance's art overhangs north of its aisle (invariant #6), but
-/// never onto a desk, its chair or its sitter: swept over the census sizes plus
-/// every size whose aisle is 10–14 rows, where the overhang reaches the band.
-/// Art can only overlap a workstation it shares a row with, and the height
-/// alone fixes every row, so a height whose rows never meet is checked at two
-/// corners of its widths and seeds rather than all of them.
+/// never onto a desk, its chair or its sitter. Art can only overlap a
+/// workstation it shares a row with, and the height alone fixes every row
+/// (asserted at every width, at seed 0 and the far corner's seed). So a
+/// tall-aisle height whose rows never meet is checked once per width; every
+/// other tall height sweeps all widths × seeds. The census sizes are always
+/// swept in full.
 #[test]
 fn corridor_appliance_art_never_lands_on_a_workstation() {
     use crate::layout::{Bounds, CHARACTER_SPRITE_H, CHARACTER_SPRITE_W, FixtureKind, Station};
@@ -5793,11 +5794,19 @@ fn corridor_appliance_art_never_lands_on_a_workstation() {
                 .all(|&(_, a)| workstations.iter().all(|&ws| !rows_meet(a, ws)));
         if apart {
             assert_eq!(probe_rows, far_rows, "{h}: rows are the height's alone");
+        }
+        let seeds = if apart {
+            SEEDS.start..SEEDS.start + 1
         } else {
-            for w in (NARROWEST..=WIDEST).step_by(8) {
-                for seed in SEEDS.filter(|&seed| !corners.contains(&(w, seed))) {
-                    check(&lay_out(w, h, seed), w, h, seed);
+            SEEDS
+        };
+        for w in (NARROWEST..=WIDEST).step_by(8) {
+            for seed in seeds.clone().filter(|&seed| !corners.contains(&(w, seed))) {
+                let l = lay_out(w, h, seed);
+                if apart {
+                    assert_eq!(rows(&l), probe_rows, "{w}x{h}: rows are the height's alone");
                 }
+                check(&l, w, h, seed);
             }
         }
         for (l, (w, seed)) in [probe, far].iter().zip(corners) {
