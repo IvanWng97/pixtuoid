@@ -503,7 +503,7 @@ fn pick_in(range: &RangeInclusive<u16>, n: u32) -> u16 {
 fn hash(n: u32) -> u32 {
     let mut v = n.wrapping_mul(crate::GOLDEN_GAMMA_32);
     v ^= v >> 15;
-    v = v.wrapping_mul(0x85EB_CA6B);
+    v = v.wrapping_mul(crate::MURMUR3_FMIX32_M1);
     v ^ (v >> 13)
 }
 
@@ -512,8 +512,7 @@ mod tests {
     use super::*;
 
     fn pack() -> Pack {
-        crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-            .expect("the embedded pack loads")
+        crate::embedded_pack::test_default_pack()
     }
 
     /// Where each stand stands, for comparing two cities.

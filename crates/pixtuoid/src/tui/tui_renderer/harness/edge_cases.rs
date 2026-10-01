@@ -5,8 +5,8 @@ use crate::tui::connection::ConnectionFrame;
 #[test]
 fn too_small_terminal_returns_no_layout_no_panic() {
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
-    let mut r = build(15, 8, vec![]); // below the 20×12 scene minimum
-    r.render(&scene, &pack(), t0())
+    let mut r = build(15, 8, vec![]); // under the `MIN_SCENE_*` gate
+    r.render(&scene, pack(), t0())
         .expect("render must not panic");
     assert!(
         r.cached_layout().is_none(),
@@ -22,7 +22,7 @@ fn a_terminal_under_the_layout_minimum_says_why_it_is_not_drawing() {
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
     for (cols, rows) in [too_small_terminal(), (15, 8)] {
         let mut r = build(cols, rows, vec![]);
-        r.render(&scene, &pack(), t0()).expect("render");
+        r.render(&scene, pack(), t0()).expect("render");
         assert!(r.cached_layout().is_none(), "{cols}x{rows} must refuse");
         let text = frame_text(r.frame_buffer());
         assert!(
@@ -58,7 +58,7 @@ fn the_too_small_notice_survives_an_open_onboarding_modal() {
         elapsed_ms: 60_000,
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).expect("render");
+    r.render(&scene, pack(), t0()).expect("render");
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("too small"),
@@ -73,7 +73,7 @@ fn the_size_the_too_small_notice_names_is_one_that_seats_someone() {
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
     let (small_cols, small_rows) = too_small_terminal();
     let mut small = build(small_cols, small_rows, vec![]);
-    small.render(&scene, &pack(), t0()).expect("render");
+    small.render(&scene, pack(), t0()).expect("render");
     let text = frame_text(small.frame_buffer());
     let named = text
         .split_whitespace()
@@ -82,7 +82,7 @@ fn the_size_the_too_small_notice_names_is_one_that_seats_someone() {
         .expect("the notice must name a size");
 
     let mut at_min = build(named.0, named.1, vec![]);
-    at_min.render(&scene, &pack(), t0()).expect("render");
+    at_min.render(&scene, pack(), t0()).expect("render");
     let layout = at_min
         .cached_layout()
         .unwrap_or_else(|| panic!("the notice asks for {named:?}, which does not lay out"));
@@ -95,7 +95,7 @@ fn the_size_the_too_small_notice_names_is_one_that_seats_someone() {
         (named.0 - 1, named.1, "column"),
     ] {
         let mut one_short = build(cols, rows, vec![]);
-        one_short.render(&scene, &pack(), t0()).expect("render");
+        one_short.render(&scene, pack(), t0()).expect("render");
         assert!(
             one_short.cached_layout().is_none(),
             "{named:?} minus a {axis} lays out, so the notice overstates"
@@ -108,7 +108,7 @@ fn the_size_the_too_small_notice_names_is_one_that_seats_someone() {
 fn a_terminal_that_fits_shows_no_too_small_notice() {
     let scene = scene_with(vec![idle("/ok/0.jsonl", 0, t0())], 16);
     let mut r = build(100, 40, vec![]);
-    r.render(&scene, &pack(), t0()).expect("render");
+    r.render(&scene, pack(), t0()).expect("render");
     assert!(r.cached_layout().is_some(), "100x40 must lay out");
     assert!(
         !frame_text(r.frame_buffer()).contains("terminal too small"),
@@ -131,13 +131,13 @@ fn colliding_labels_with_multibyte_session_ids_do_not_panic() {
     mk("/mb/0.jsonl", 0);
     mk("/mb/1.jsonl", 1);
     let mut r = build(120, 40, vec![]);
-    r.render(&scene, &pack(), t0())
+    r.render(&scene, pack(), t0())
         .expect("render must not panic on a multi-byte session_id");
 }
 
 #[test]
 fn no_layout_frame_paints_the_popup_at_its_clickable_scale() {
-    // 100x16 → scene_rect 100x15 passes render()'s 20x12 gate, but buf_h=30 is
+    // 100x16 → scene_rect 100x15 passes render()'s `MIN_SCENE_*` gate, but buf_h=30 is
     // below compute_with_seed's office minimum → draw_scene returns Ok(None).
     let scene = scene_with(vec![idle("/nl/0.jsonl", 0, t0())], 16);
     let mut r = build(100, 16, vec![]);
@@ -145,7 +145,7 @@ fn no_layout_frame_paints_the_popup_at_its_clickable_scale() {
     let t = t0() + Duration::from_millis(150); // mid-entrance ⇒ scale > 0
     let painted = r.version_popup_scale(t);
     assert!(painted > 0.0, "the popup is animating this frame");
-    r.render(&scene, &pack(), t).expect("render");
+    r.render(&scene, pack(), t).expect("render");
     assert!(
         r.cached_layout().is_none(),
         "no layout produced at this size"
@@ -169,7 +169,7 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
     let (cols, rows) = too_small_terminal();
     let mut r = build(cols, rows, vec![]);
     r.set_help_open(true);
-    r.render(&scene, &pack(), t0()).expect("render");
+    r.render(&scene, pack(), t0()).expect("render");
     assert!(
         r.cached_layout().is_none(),
         "{cols}x{rows} is below the office layout minimum — this IS the footer-only path"
@@ -193,7 +193,7 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
         elapsed_ms: 100_000,
         dim: 0.4,
     });
-    r.render(&scene, &pack(), t0()).expect("render");
+    r.render(&scene, pack(), t0()).expect("render");
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("Welcome to pixtuoid"),
@@ -206,7 +206,7 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
         socket_line: "socket  /tmp/p.sock".into(),
         ..Default::default()
     });
-    r.render(&scene, &pack(), t0()).expect("render");
+    r.render(&scene, pack(), t0()).expect("render");
     let text = frame_text(r.frame_buffer());
     assert!(
         text.contains("Sources"),
@@ -217,10 +217,14 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
 #[test]
 fn modal_overlays_still_paint_during_a_slide_on_a_too_small_terminal() {
     let scene = two_floor_scene();
-    // 19 cols ⇒ scene_rect 19x11, under the 20x12 gate on BOTH axes.
-    let mut r = build(19, 12, vec![]);
+    // Under the gate on BOTH axes.
+    let mut r = build(
+        crate::tui::renderer::MIN_SCENE_WIDTH - 1,
+        crate::tui::renderer::MIN_SCENE_HEIGHT - 1 + crate::tui::renderer::FOOTER_ROWS,
+        vec![],
+    );
     let now = t0();
-    r.render(&scene, &pack(), now).expect("render");
+    r.render(&scene, pack(), now).expect("render");
     r.set_help_open(true);
     r.set_version_popup(true, now);
     r.navigate_floor(1, now);
@@ -228,7 +232,7 @@ fn modal_overlays_still_paint_during_a_slide_on_a_too_small_terminal() {
     let t = now + Duration::from_millis(100); // mid-slide, mid-entrance
     let painted = r.version_popup_scale(t);
     assert!(painted > 0.0, "the popup is animating this frame");
-    r.render(&scene, &pack(), t)
+    r.render(&scene, pack(), t)
         .expect("transition render on a tiny terminal must not panic");
 
     let text = frame_text(r.frame_buffer());
@@ -261,13 +265,13 @@ fn departed_agent_motion_is_evicted_on_a_non_current_floor() {
     let mut now = t0();
 
     for _ in 0..10 {
-        r.render(&scene, &pack(), now).expect("render");
+        r.render(&scene, pack(), now).expect("render");
         now += Duration::from_millis(33);
     }
     r.navigate_floor(1, now);
-    render_until_settled(&mut r, &scene, &pack(), &mut now, 1);
+    render_until_settled(&mut r, &scene, pack(), &mut now, 1);
     for _ in 0..10 {
-        r.render(&scene, &pack(), now).expect("render");
+        r.render(&scene, pack(), now).expect("render");
         now += Duration::from_millis(33);
     }
     assert!(
@@ -276,11 +280,11 @@ fn departed_agent_motion_is_evicted_on_a_non_current_floor() {
     );
 
     r.navigate_floor(0, now);
-    render_until_settled(&mut r, &scene, &pack(), &mut now, 0);
+    render_until_settled(&mut r, &scene, pack(), &mut now, 0);
     let scene_without_b = scene_with(vec![slot(a, 0, 0, t0() - Duration::from_secs(120))], cap);
     now += Duration::from_millis(33);
     r.evict_missing(&scene_without_b);
-    r.render(&scene_without_b, &pack(), now).expect("render");
+    r.render(&scene_without_b, pack(), now).expect("render");
 
     assert_eq!(
         r.floor_motion(1).map(|m| m.contains_key(&b)),
@@ -302,13 +306,13 @@ fn evict_missing_drops_history_and_motion_on_every_floor() {
 
     for _ in 0..5 {
         now += Duration::from_millis(33);
-        r.render(&scene, &pack(), now).expect("render");
+        r.render(&scene, pack(), now).expect("render");
     }
     r.navigate_floor(1, now);
-    render_until_settled(&mut r, &scene, &pack(), &mut now, 1);
+    render_until_settled(&mut r, &scene, pack(), &mut now, 1);
     for _ in 0..5 {
         now += Duration::from_millis(33);
-        r.render(&scene, &pack(), now).expect("render");
+        r.render(&scene, pack(), now).expect("render");
     }
     assert_eq!(
         r.floor_history(0).map(|h| h.contains(a)),
@@ -356,7 +360,7 @@ fn floor_transition_clears_stale_pet_position() {
     let mut r = build(100, 40, vec![PetKind::Cat]);
     let mut now = t0();
     for _ in 0..3 {
-        r.render(&scene, &pack(), now).expect("render");
+        r.render(&scene, pack(), now).expect("render");
         now += Duration::from_millis(33);
     }
     assert!(
@@ -365,7 +369,7 @@ fn floor_transition_clears_stale_pet_position() {
     );
 
     r.navigate_floor(1, now);
-    r.render(&scene, &pack(), now).expect("render"); // single in-flight transition frame
+    r.render(&scene, pack(), now).expect("render"); // single in-flight transition frame
     assert!(
         r.cached_pet_pos().is_none(),
         "an in-flight floor transition must clear the stale pet position"
@@ -375,10 +379,9 @@ fn floor_transition_clears_stale_pet_position() {
 #[test]
 fn layout_compute_none_bails_to_footer_only() {
     let scene = scene_with(vec![idle("/lc/0.jsonl", 0, t0())], 16);
-    // scene_rect 28×39: width 28 ≥ 20 (passes gate), buf_w 28 < MIN_W → compute
-    // returns None, hitting the second bail arm.
+    // Clears `MIN_SCENE_WIDTH` but not the layout's `MIN_LAYOUT_W`: the second bail arm.
     let mut r = build(28, 40, vec![]);
-    r.render(&scene, &pack(), t0())
+    r.render(&scene, pack(), t0())
         .expect("render must not error on the compute-None bail");
     assert!(
         r.cached_layout().is_none(),

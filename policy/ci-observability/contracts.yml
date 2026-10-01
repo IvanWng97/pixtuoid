@@ -43,54 +43,65 @@
   file: .github/workflows/claude-readonly-review.yml
   why: >-
     The model reads untrusted diff text and its answer is published, so any
-    reach beyond reading the checkout lets an injection act, or read a runner
-    secret such as the CLI's own environment and publish it. `--tools` leaves
-    only the built-in read tools, and dontAsk denies a read outside the working
-    directory unless an allow rule pre-approves it, which a bare `Read` rule
-    does for every path (code.claude.com/docs/en/agent-sdk/permissions);
-    `blockReadsOutsideWorkingDirectories` refuses such a read even then
-    (code.claude.com/docs/en/settings-reference). Any flag or action input can
-    add a rule or drop the setting, so the arguments and the step's inputs are
-    pinned exactly; `--json-schema` keeps the answer structured for the
-    publisher to validate.
-  expected: >-
-    --max-turns ${{ inputs.max_turns }}
-    --max-budget-usd ${{ inputs.max_budget_usd }}
-    --permission-mode dontAsk
-    --tools Read,Glob,Grep
-    --settings '{"permissions":{"blockReadsOutsideWorkingDirectories":true}}'
-    --json-schema ${{ steps.schema.outputs.json }}
+    reach beyond reading the checkout lets an injection act or publish a runner
+    secret. dontAsk denies what no allow rule approves, `--tools` leaves only
+    read tools, and `blockReadsOutsideWorkingDirectories` refuses a read outside
+    the checkout even when a rule allows it
+    (code.claude.com/docs/en/settings-reference). Any other flag, action input
+    or settings key can add a rule, a tool, a hook or a directory, so all three
+    are allowlists; other values stay free.
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length == 1
-      and (.[0].with | keys) == [
+      and ((.[0].with | keys) - [
             "anthropic_federation_rule_id", "anthropic_organization_id",
             "anthropic_service_account_id", "classify_inline_comments", "claude_args",
             "claude_code_oauth_token", "display_report", "github_token",
-            "include_fix_links", "prompt", "show_full_output", "track_progress"]
-      and .[0].with.claude_args == $expected
+            "include_fix_links", "prompt", "show_full_output", "track_progress"] == [])
+      and (.[0].with.claude_args as $args
+           | ([$args | scan("(?<![\\w-])-{1,2}[A-Za-z][\\w-]*")] - [
+                "--max-turns", "--max-budget-usd", "--permission-mode",
+                "--tools", "--settings", "--json-schema"] == [])
+             and [$args | scan("--permission-mode[ =](\\S+)")] == [["dontAsk"]]
+             and ([$args | scan("--tools[ =](.*?)(?= --|$)")]
+                  | length == 1 and ([.[0][0] | splits("[ ,]+")] - ["Read", "Glob", "Grep"] == []))
+             and ([$args | scan("--settings")] | length == 1)
+             and ([$args | scan("--settings[ =]'([^']*)'")][0][0]
+                  | fromjson == {"permissions": {"blockReadsOutsideWorkingDirectories": true}}))
   break:
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       += " --allowedTools Read"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      += " --add-dir /"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      += " --mcp-config x"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       += " \"--settings\" {\"permissions\":{\"allow\":[\"Read\"]}}"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      |= sub("--permission-mode dontAsk"; "--permission-mode bypassPermissions")
+      |= sub(" --permission-mode dontAsk"; "")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("\"permissions\":\\{"; "\"permissions\":{\"defaultMode\":\"acceptEdits\",")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("\"permissions\":\\{"; "\"permissions\":{\"additionalDirectories\":[\"/\"],")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("\\{\"permissions\""; "{\"hooks\":{},\"permissions\"")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub("--tools Read,Glob,Grep"; "--tools Read,Glob,Grep,Bash")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      |= sub(" --json-schema [^ ]+"; "")
-    - |
-      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub(" --settings '[^']+'"; "")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with)
-      += {"settings": "{}"}
+      += {"additional_permissions": "actions: write"}
     - '.jobs.analyze.steps += [{"uses": "anthropics/claude-code-action@v1", "with": {"claude_args": "--tools Bash"}}]'
 
 - id: reviewer-model-auth-is-scoped

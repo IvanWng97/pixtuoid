@@ -1,5 +1,6 @@
 //! The meeting room aggregate: bounds + the sofa/table trio.
 
+use super::walls::WALL_H;
 use crate::layout::{
     Anchor, Bounds, Furniture, OBSTACLE_PAD_PX, Point, anchored_top_left, furniture_def, pct,
 };
@@ -137,14 +138,21 @@ impl MeetingRoom {
     /// sits above the wall band's walkable carpet apron, so its sofa may tuck to
     /// `sofa_h/2`; the DENSE room (room 1) sits under the glass divider (which
     /// stamps `WALL_THICK_H` rows into its top), so its sofa needs a full
-    /// `sofa_h` for its ground to clear the wall.
+    /// `sofa_h` for its ground to clear the wall. Room 0 always has a room
+    /// stacked below, whose wall's cap rises into its south rows, so its south
+    /// sofa ends above the cap, clear of the doorway cut there.
     pub(crate) fn place_trio(bounds: Bounds, dense: bool) -> MeetingTrio {
         let sofa_h = furniture_def(Furniture::MeetingSofaBody).visual.h;
         let north_floor = if dense { sofa_h } else { sofa_h / 2 };
+        let south_floor = if dense {
+            sofa_h
+        } else {
+            WALL_H.cap + sofa_h.div_ceil(2)
+        };
         let cx = bounds.x + bounds.width / 2;
         let north_y = (bounds.y + pct(bounds.height, 20)).max(bounds.y + north_floor);
         let south_y = (bounds.y + pct(bounds.height, 80))
-            .min(bounds.y + bounds.height.saturating_sub(sofa_h));
+            .min(bounds.y + bounds.height.saturating_sub(south_floor));
         MeetingTrio {
             sofas: [Point { x: cx, y: north_y }, Point { x: cx, y: south_y }],
             table: Point {

@@ -26,6 +26,9 @@ const NAP_NEAR_DESK_PX: i32 = 16;
 /// floor is roughly half the buffer, so P(all miss) is ~2^-8 per call.
 const TARGET_TRIES: u32 = 8;
 
+/// One pet roam cycle: pick a destination, walk there, rest.
+pub const PET_CYCLE_MS: u64 = 40_000;
+
 /// A destination drawn from the WHOLE walkable floor, deterministic per
 /// `(seed, n)` — the ONE destination rule both roamers and every daemon state use.
 /// A curated spot list is not an option: it is small enough that N creatures share
@@ -67,8 +70,8 @@ fn walkable_target(layout: &Layout, seed: u64, n: u64) -> Point {
     snap_point_to_walkable(&layout.walkable, layout.door_threshold.unwrap_or(last)).unwrap_or(last)
 }
 
-/// Pet roaming the whole office: each 40s cycle picks a destination, walks there
-/// from the previous one, then sits or sleeps until the next cycle.
+/// Pet roaming the whole office: each [`PET_CYCLE_MS`] cycle picks a destination,
+/// walks there from the previous one, then sits or sleeps until the next cycle.
 pub(crate) fn pet_position(
     kind: PetKind,
     layout: &Layout,
@@ -83,9 +86,8 @@ pub(crate) fn pet_position(
 
     let elapsed_ms = epoch_ms(now);
 
-    const CYCLE_MS: u64 = 40_000;
-    let cycle_n = (elapsed_ms / CYCLE_MS).wrapping_add(pet_seed);
-    let frac = (elapsed_ms % CYCLE_MS) as f32 / CYCLE_MS as f32;
+    let cycle_n = (elapsed_ms / PET_CYCLE_MS).wrapping_add(pet_seed);
+    let frac = (elapsed_ms % PET_CYCLE_MS) as f32 / PET_CYCLE_MS as f32;
 
     let dest = walkable_target(layout, pet_seed, cycle_n);
     let prev = walkable_target(layout, pet_seed, cycle_n.wrapping_sub(1));
@@ -439,8 +441,8 @@ mod tests {
     fn pet_rest_picks_sleep_anim_when_all_idle() {
         let layout = crate::layout::Layout::compute(160, 200, Some(4)).expect("layout fits");
         let pack = test_pack();
-        // elapsed % 40_000 == 20_000 → frac = 0.5 (rest phase).
-        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(20_000);
+        // frac = 0.5: the rest phase.
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(PET_CYCLE_MS / 2);
         let (_, _, anim, frame) =
             pet_position(PetKind::Cat, &layout, &pack, now, &[], true, 0).expect("a pet position");
         assert_eq!(anim, PetKind::Cat.sleep_anim(), "all_idle → sleep anim");
@@ -568,9 +570,7 @@ mod tests {
     /// answers with a coarse CELL CENTRE, so a clear destination is not enough.
     #[test]
     fn no_resting_creature_settles_under_a_sprite_that_paints_over_it() {
-        let pack =
-            crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-                .expect("pack");
+        let pack = crate::embedded_pack::test_default_pack();
         let mut rests = 0u32;
         let min = crate::layout::min_layout_size();
         for &(w, h) in &[
@@ -584,11 +584,11 @@ mod tests {
                 panic!("{w}x{h}: refused at or above the derived floor");
             };
             for seed in 0..8u64 {
-                // 40s cycle: sample well past the walk fraction so every sample
-                // is the settled pose, which is the one that must be clear.
+                // Sample well past the walk fraction so every sample is the
+                // settled pose, which is the one that must be clear.
                 for cycle in 0..6u64 {
                     let now = SystemTime::UNIX_EPOCH
-                        + std::time::Duration::from_millis(cycle * 40_000 + 34_000);
+                        + std::time::Duration::from_millis(cycle * PET_CYCLE_MS + 34_000);
                     if let Some((p, _, anim, _)) =
                         pet_position(PetKind::Cat, &l, &pack, now, &[], false, seed)
                         && !anim.contains("walk")
