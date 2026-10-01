@@ -84,6 +84,9 @@ pub struct CharacterPlacement {
     pub waiting_bubble: bool,
     /// `Some(frame)` draws the walking dust puff; `None` when standing still.
     pub walking_dust_frame: Option<usize>,
+    /// Whether `anchor` takes the idle breath: a figure at rest does, a walker's
+    /// stride is its own motion.
+    pub breathes: bool,
     /// The home desk this placement is SEATED AT, in logical units — `None` for
     /// anyone not sitting at one (walking, at a waypoint, standing). Carried
     /// because `anchor` is already PROJECTED and cannot yield it back.
@@ -552,6 +555,7 @@ pub(super) fn resolve_characters(
                 seat_desk: Some(desk),
                 seated: true,
                 walking_dust_frame: None,
+                breathes: true,
             }
         };
         match p {
@@ -619,6 +623,7 @@ pub(super) fn resolve_characters(
                         seat_desk: None,
                         seated: seat.seated_furniture(),
                         walking_dust_frame: None,
+                        breathes: true,
                     });
                 }
             }
@@ -638,6 +643,7 @@ pub(super) fn resolve_characters(
                     seat_desk: None,
                     seated: false,
                     walking_dust_frame: None,
+                    breathes: true,
                 });
             }
             Pose::Walking {
@@ -698,6 +704,7 @@ pub(super) fn resolve_characters(
                     seat_desk: None,
                     seated: false,
                     walking_dust_frame: Some(frame),
+                    breathes: false,
                 });
             }
         }
@@ -719,11 +726,11 @@ pub(super) fn resolve_characters(
                 .map(|art| desk_art_top(pack, d.y, art.height()))
         });
         p.label_anchor = badge_anchor(fitted, size, ceiling);
-        // Breath after the fit, so it never moves the badge; a walker's stride
-        // is its own motion.
-        p.anchor = match p.walking_dust_frame {
-            None => with_breath(fitted, agents[p.agent_idx].agent_id, now),
-            Some(_) => fitted,
+        // Breath after the fit, so it never moves the badge.
+        p.anchor = if p.breathes {
+            with_breath(fitted, agents[p.agent_idx].agent_id, now)
+        } else {
+            fitted
         };
     }
 

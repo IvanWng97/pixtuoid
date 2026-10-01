@@ -1486,6 +1486,7 @@ pub pixtuoid_scene::pixel_painter::CharacterPlacement::agent_idx: usize
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::anchor: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::anchor_y: u16
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::anim_name: &'static str
+pub pixtuoid_scene::pixel_painter::CharacterPlacement::breathes: bool
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::flip_x: bool
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::frame_idx: usize
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::glow: pixtuoid_scene::pixel_painter::CharacterGlow

@@ -5513,6 +5513,59 @@ fn a_breathing_sitter_s_badge_holds_still() {
     assert_eq!(badges.len(), 1, "the badge bobbed with it: {badges:?}");
 }
 
+/// Breath rides `breathes` alone: at a breathing instant a walker's sprite stays
+/// on its fit while a figure at rest rises off it.
+#[test]
+fn only_a_placement_that_breathes_takes_the_breath() {
+    use crate::pose::Pose;
+    let (scene, layout, id, now0, pack) = sim_rig();
+    let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
+    let now = (0..u64::from(u16::MAX))
+        .map(|ms| now0 + std::time::Duration::from_millis(ms))
+        .find(|&t| super::anchors::with_breath(Point { x: 0, y: 1 }, id, t).y == 0)
+        .expect("the breath rises within a cycle");
+    let mid = Point {
+        x: layout.buf_w / 2,
+        y: layout.buf_h / 2,
+    };
+    let place = |pose| {
+        let poses = HashMap::from([(id, Some(pose))]);
+        let (placements, ..) = sim::resolve_characters(
+            &agents,
+            &poses,
+            &layout,
+            &pack,
+            CHARACTER_SPRITE_W,
+            &HashMap::new(),
+            now,
+        );
+        let [p] = placements[..] else {
+            panic!("one agent, one placement")
+        };
+        p
+    };
+    let walker = place(Pose::Walking {
+        from: mid,
+        to: mid,
+        t_x1000: 0,
+        frame: 0,
+        carrying_coffee: false,
+    });
+    let idler = place(Pose::AimlessAt { dest: mid });
+    let sitter = place(Pose::SeatedThinking);
+    assert!(!walker.breathes && idler.breathes && sitter.breathes);
+    // Neither stands at a desk, so the badge row IS the fitted top.
+    assert_eq!(
+        walker.anchor.y, walker.label_anchor.y,
+        "the walker breathed"
+    );
+    assert_eq!(
+        idler.anchor.y + 1,
+        idler.label_anchor.y,
+        "the idler held its breath"
+    );
+}
+
 /// Co-located visitors step aside, and each one's badge goes with them.
 #[test]
 fn co_located_visitors_badges_step_aside_with_their_sprites() {
@@ -5982,6 +6035,7 @@ fn a_pose_is_its_placements_frame_facing_and_glow() {
         sleep_z_seed: None,
         waiting_bubble: false,
         walking_dust_frame: None,
+        breathes: true,
         seat_desk: None,
         seated: true,
     };
