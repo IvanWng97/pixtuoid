@@ -7,7 +7,7 @@
 
 use std::collections::VecDeque;
 
-use super::{COARSE_CELL_SIZE, Point, snap, walkable_neighbors};
+use super::{COARSE_CELL_SIZE, CoarseGrid, Point, snap};
 use pixtuoid_core::grid::Grid;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
@@ -16,7 +16,7 @@ use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 /// pixel (a door on a wall edge, a desk) still lands in the right component.
 const SEED_SNAP_CELLS: u16 = 3;
 
-/// The set of coarse cells reachable (by `walkable_neighbors` steps) from a
+/// The set of coarse cells reachable (by `CoarseGrid::neighbors` steps) from a
 /// seed — i.e. the agent's connected walkable component. Built once per layout
 /// from a known in-component seed (the door, or a home desk).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -26,7 +26,7 @@ pub struct ReachSet {
 }
 
 impl ReachSet {
-    /// Coarse BFS over `walkable_neighbors` from `seed`'s cell (snapped to the
+    /// Coarse BFS over `CoarseGrid::neighbors` from `seed`'s cell (snapped to the
     /// nearest walkable cell when `seed` lands on a blocked one). An
     /// empty/degenerate mask yields an all-unreachable set.
     pub fn from_mask(mask: &WalkableMask, seed: Point) -> ReachSet {
@@ -39,11 +39,12 @@ impl ReachSet {
         let empty = OccupancyOverlay::new();
         let seed_cell = (seed.x / COARSE_CELL_SIZE, seed.y / COARSE_CELL_SIZE);
         if let Some(start) = snap(mask, &empty, seed_cell, cell_w, cell_h, SEED_SNAP_CELLS) {
+            let mut coarse = CoarseGrid::new(mask, &empty);
             let mut q = VecDeque::new();
             grid.set(start.0, start.1, true);
             q.push_back(start);
             while let Some((cx, cy)) = q.pop_front() {
-                for ((nx, ny), _) in walkable_neighbors(mask, &empty, (cx, cy), cell_w, cell_h) {
+                for ((nx, ny), _) in coarse.neighbors((cx, cy)) {
                     if !grid.get_or(nx, ny, false) {
                         grid.set(nx, ny, true);
                         q.push_back((nx, ny));

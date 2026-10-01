@@ -1,7 +1,7 @@
 //! Pathfinding façade — `Router` trait + `AStarRouter` impl.
 //!
 //! `AStarRouter` runs A* on a coarsened cell grid whose primitives
-//! (`cell_walkable`/`snap`/`walkable_neighbors`/`CELL_SIZE`) are the SHARED
+//! (`cell_walkable`/`snap`/`CoarseGrid`/`CELL_SIZE`) are the SHARED
 //! `layout::coarse` ones `layout::reach` also rides, so router reachability
 //! can't drift from `ReachSet`. Routes are memoized per (from, to) and
 //! auto-invalidated when the overlay signature changes, so per-frame agent
@@ -13,8 +13,7 @@ use std::collections::{BinaryHeap, HashMap};
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 use crate::layout::{
-    Bounds, COARSE_CELL_SIZE, Point, cell_anchor, cell_center, cell_walkable, snap,
-    walkable_neighbors,
+    Bounds, COARSE_CELL_SIZE, CoarseGrid, Point, cell_anchor, cell_center, cell_walkable, snap,
 };
 
 /// Cell size in pixels — the coarse routing-grid edge, re-exported from the
@@ -250,6 +249,7 @@ pub fn find_path(
         return Some(reconstruct(mask, &HashMap::new(), start, from, to));
     }
 
+    let mut coarse = CoarseGrid::new(mask, overlay);
     let mut open: BinaryHeap<Node> = BinaryHeap::new();
     let mut came_from: HashMap<(u16, u16), (u16, u16)> = HashMap::new();
     let mut g_score: HashMap<(u16, u16), u32> = HashMap::new();
@@ -267,8 +267,7 @@ pub fn find_path(
         if current.g > *g_score.get(&current.cell).unwrap_or(&u32::MAX) {
             continue;
         }
-        for ((nx, ny), diagonal) in walkable_neighbors(mask, overlay, current.cell, cell_w, cell_h)
-        {
+        for ((nx, ny), diagonal) in coarse.neighbors(current.cell) {
             let base_step = if diagonal {
                 OCTILE_DIAGONAL_COST
             } else {
@@ -384,7 +383,7 @@ fn elbow(mask: &WalkableMask, a: Point, b: Point) -> Option<Point> {
 /// Does every pixel a walker passes strictly between `a` and `b` stand on the
 /// static `mask`? The ends are exempt: a raw endpoint may sit in a routing pad.
 fn leg_clear(mask: &WalkableMask, a: Point, b: Point) -> bool {
-    crate::motion::leg_pixels(a, b)
+    crate::physics::leg_pixels(a, b)
         .filter(|&p| p != a && p != b)
         .all(|p| mask.is_walkable(p.x, p.y))
 }

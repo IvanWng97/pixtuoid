@@ -5,6 +5,7 @@
 //! with "routable here" (A\*).
 
 use super::Point;
+use pixtuoid_core::grid::Grid;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 /// Coarse-cell edge in px. Smaller = more accurate paths, more work per query.
@@ -39,10 +40,15 @@ pub(crate) fn cell_anchor(mask: &WalkableMask, cx: u16, cy: u16) -> Point {
         .unwrap_or(centre)
 }
 
+/// Is pixel `(x, y)` open — walkable on the static `mask` and clear of the
+/// per-frame `overlay`?
+fn open(mask: &WalkableMask, overlay: &OccupancyOverlay, x: u16, y: u16) -> bool {
+    mask.is_walkable(x, y) && (overlay.is_empty() || !overlay.blocks(x, y))
+}
+
 /// Is coarse cell `(cx, cy)` walkable — ≥ `COARSE_CELL_WALKABLE_MIN` of its
-/// pixels open on the static `mask` AND clear of the per-frame `overlay`? The
-/// reach BFS passes an EMPTY overlay (static geometry only); the router passes
-/// the live occupancy overlay.
+/// pixels [open](open)? The reach BFS passes an EMPTY overlay (static geometry
+/// only); the router passes the live occupancy overlay.
 pub(crate) fn cell_walkable(
     mask: &WalkableMask,
     overlay: &OccupancyOverlay,
@@ -54,9 +60,7 @@ pub(crate) fn cell_walkable(
     let mut walk_count = 0u16;
     for dy in 0..COARSE_CELL_SIZE {
         for dx in 0..COARSE_CELL_SIZE {
-            let px = px_start + dx;
-            let py = py_start + dy;
-            if mask.is_walkable(px, py) && !overlay.blocks(px, py) {
+            if open(mask, overlay, px_start + dx, py_start + dy) {
                 walk_count += 1;
             }
         }
@@ -74,7 +78,6 @@ fn crossable(
     a: (u16, u16),
     b: (u16, u16),
 ) -> bool {
-    let open = |x: u16, y: u16| mask.is_walkable(x, y) && !overlay.blocks(x, y);
     let edge = |from: u16, to: u16| {
         let near = from * COARSE_CELL_SIZE;
         if to > from {
@@ -83,6 +86,7 @@ fn crossable(
             (near, near - 1)
         }
     };
+    let open = |x, y| open(mask, overlay, x, y);
     if a.1 == b.1 {
         let (xa, xb) = edge(a.0, b.0);
         let y0 = a.1 * COARSE_CELL_SIZE;
@@ -94,43 +98,114 @@ fn crossable(
     }
 }
 
-/// The 8-neighbours of `cell` on the `cell_w × cell_h` grid a walker can step
-/// to, each flagged `true` when the step is diagonal. An orthogonal step needs
-/// the neighbour walkable and `crossable`. A diagonal step needs BOTH
-/// orthogonal cells it squeezes between steppable on the way: a walker's
-/// straight leg between two diagonal cells crosses their shared corner, so a
-/// blocked orthogonal cell puts that corner inside a wall.
-pub(crate) fn walkable_neighbors(
-    mask: &WalkableMask,
-    overlay: &OccupancyOverlay,
-    cell: (u16, u16),
-    cell_w: u16,
-    cell_h: u16,
-) -> impl Iterator<Item = ((u16, u16), bool)> {
-    let at = |dx: i32, dy: i32| {
-        let nx = u16::try_from(i32::from(cell.0) + dx).ok()?;
-        let ny = u16::try_from(i32::from(cell.1) + dy).ok()?;
-        (nx < cell_w && ny < cell_h && cell_walkable(mask, overlay, nx, ny)).then_some((nx, ny))
-    };
-    let step = |from: (u16, u16), to: (u16, u16)| crossable(mask, overlay, from, to);
-    let [e, w, s, n] =
-        [(1, 0), (-1, 0), (0, 1), (0, -1)].map(|(dx, dy)| at(dx, dy).filter(|&o| step(cell, o)));
-    let diagonal = |a: Option<(u16, u16)>, b: Option<(u16, u16)>, dx, dy| {
-        let (a, b) = (a?, b?);
-        at(dx, dy).filter(|&d| step(a, d) && step(b, d))
-    };
-    [
-        (e, false),
-        (w, false),
-        (s, false),
-        (n, false),
-        (diagonal(e, s, 1, 1), true),
-        (diagonal(e, n, 1, -1), true),
-        (diagonal(w, s, -1, 1), true),
-        (diagonal(w, n, -1, -1), true),
-    ]
-    .into_iter()
-    .filter_map(|(c, diag)| c.map(|c| (c, diag)))
+/// A once-computed answer, or not yet asked.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Memo {
+    Unknown,
+    No,
+    Yes,
+}
+
+/// One search's view of the coarse grid over a `mask` and an `overlay`: each
+/// cell's walkability and each edge's crossability is computed at most once,
+/// then read by every step. The A\* expansion and the reach BFS both step
+/// through [`CoarseGrid::neighbors`], so "reachable" and "routable" share ONE
+/// neighbour rule.
+pub(crate) struct CoarseGrid<'a> {
+    mask: &'a WalkableMask,
+    overlay: &'a OccupancyOverlay,
+    walkable: Grid<Memo>,
+    /// Crossability from each cell to its east neighbour.
+    east: Grid<Memo>,
+    /// Crossability from each cell to its south neighbour.
+    south: Grid<Memo>,
+}
+
+impl<'a> CoarseGrid<'a> {
+    pub(crate) fn new(mask: &'a WalkableMask, overlay: &'a OccupancyOverlay) -> Self {
+        let (w, h) = (
+            mask.width() / COARSE_CELL_SIZE,
+            mask.height() / COARSE_CELL_SIZE,
+        );
+        CoarseGrid {
+            mask,
+            overlay,
+            walkable: Grid::filled(w, h, Memo::Unknown),
+            east: Grid::filled(w, h, Memo::Unknown),
+            south: Grid::filled(w, h, Memo::Unknown),
+        }
+    }
+
+    fn walkable(&mut self, (cx, cy): (u16, u16)) -> bool {
+        let (mask, overlay) = (self.mask, self.overlay);
+        memo(&mut self.walkable, cx, cy, || {
+            cell_walkable(mask, overlay, cx, cy)
+        })
+    }
+
+    fn crossable(&mut self, a: (u16, u16), b: (u16, u16)) -> bool {
+        let (mask, overlay) = (self.mask, self.overlay);
+        let (lo, edges) = match (a.1 == b.1, a < b) {
+            (true, true) => (a, &mut self.east),
+            (true, false) => (b, &mut self.east),
+            (false, true) => (a, &mut self.south),
+            (false, false) => (b, &mut self.south),
+        };
+        memo(edges, lo.0, lo.1, || crossable(mask, overlay, a, b))
+    }
+
+    /// The 8-neighbours of `cell` a walker can step to, each flagged `true`
+    /// when the step is diagonal. An orthogonal step needs the neighbour
+    /// walkable and `crossable`. A diagonal step needs BOTH orthogonal cells it
+    /// squeezes between steppable on the way: a walker's straight leg between
+    /// two diagonal cells crosses their shared corner, so a blocked orthogonal
+    /// cell puts that corner inside a wall.
+    pub(crate) fn neighbors(
+        &mut self,
+        cell: (u16, u16),
+    ) -> impl Iterator<Item = ((u16, u16), bool)> + use<> {
+        let [e, w, s, n] = [(1, 0), (-1, 0), (0, 1), (0, -1)].map(|d| self.step(Some(cell), d));
+        let mut diagonal = |a: Option<(u16, u16)>, b: Option<(u16, u16)>, (dx, dy)| {
+            let via_a = self.step(a, (0, dy))?;
+            self.step(b, (dx, 0)).and(Some(via_a))
+        };
+        [
+            (e, false),
+            (w, false),
+            (s, false),
+            (n, false),
+            (diagonal(e, s, (1, 1)), true),
+            (diagonal(e, n, (1, -1)), true),
+            (diagonal(w, s, (-1, 1)), true),
+            (diagonal(w, n, (-1, -1)), true),
+        ]
+        .into_iter()
+        .filter_map(|(c, diag)| c.map(|c| (c, diag)))
+    }
+
+    /// The orthogonal neighbour `from + d`, when it is walkable and crossable.
+    fn step(&mut self, from: Option<(u16, u16)>, (dx, dy): (i32, i32)) -> Option<(u16, u16)> {
+        let from = from?;
+        let to = (
+            u16::try_from(i32::from(from.0) + dx).ok()?,
+            u16::try_from(i32::from(from.1) + dy).ok()?,
+        );
+        let in_grid = to.0 < self.walkable.width() && to.1 < self.walkable.height();
+        (in_grid && self.walkable(to) && self.crossable(from, to)).then_some(to)
+    }
+}
+
+/// `grid[x, y]`, computing it with `f` on first ask.
+fn memo(grid: &mut Grid<Memo>, x: u16, y: u16, f: impl FnOnce() -> bool) -> bool {
+    match grid.get_or(x, y, Memo::Unknown) {
+        Memo::Yes => true,
+        Memo::No => false,
+        Memo::Unknown => {
+            let v = f();
+            grid.set(x, y, if v { Memo::Yes } else { Memo::No });
+            v
+        }
+    }
 }
 
 /// Snap coarse `cell` to the nearest walkable coarse cell within `max_radius`
@@ -177,11 +252,9 @@ mod tests {
     use super::*;
 
     fn neighbours(mask: &WalkableMask, cell: (u16, u16)) -> Vec<(u16, u16)> {
-        let (w, h) = (
-            mask.width() / COARSE_CELL_SIZE,
-            mask.height() / COARSE_CELL_SIZE,
-        );
-        walkable_neighbors(mask, &OccupancyOverlay::new(), cell, w, h)
+        let overlay = OccupancyOverlay::new();
+        CoarseGrid::new(mask, &overlay)
+            .neighbors(cell)
             .map(|(c, _)| c)
             .collect()
     }
