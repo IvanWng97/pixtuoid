@@ -37,6 +37,7 @@ pub mod board;
 #[doc(hidden)]
 pub mod burn;
 pub(crate) mod celestial;
+pub(crate) mod character;
 pub mod chitchat;
 pub(crate) mod composite;
 pub(crate) mod creatures;
@@ -75,6 +76,7 @@ pub(crate) mod skyline;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;
 pub mod token_meter;
+pub(crate) mod wall;
 
 /// ⌊2⁶⁴/φ⌋, φ the golden ratio: the Fibonacci-hashing multiplier and splitmix64's increment.
 pub(crate) const GOLDEN_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;

@@ -1,14 +1,19 @@
 use super::background::paint_corridor_runner;
-use super::seat::{Seat, settle_seat};
+use super::drawable::paint_character_at;
+use super::palette::agent_overrides;
 use super::*;
+use crate::embedded_pack::{desk_art_top, frame_at};
 use crate::floor::{FloorInputs, PetInputs};
 use crate::layout::CHARACTER_SPRITE_W;
+use crate::layout::Size;
 use crate::pose;
 use crate::sim::anchors::{
     back_couch_anchor, compute_door_frame_idx, seated_anchor_facing, walking_anchor,
     waypoint_anchor,
 };
-use crate::sim::{CharacterPlacement, SimStores};
+use crate::sim::seat::{Seat, settle_seat};
+use crate::sim::{CharacterGlow, CharacterPlacement, SimStores};
+use crate::wall::paint_wall;
 use pixtuoid_core::sprite::{Frame, Pixel};
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
@@ -691,8 +696,8 @@ fn character_frame_takes_a_density_variant_recolored_like_the_base() {
     let now = SystemTime::UNIX_EPOCH;
     let scale = crate::render_scale::RenderScale::new(4).expect("nonzero");
 
-    let dense = seat::character_frame(
-        seat::SpritePose {
+    let dense = crate::character::character_frame(
+        crate::character::SpritePose {
             anim_name: "typing",
             frame_idx: 0,
             flip_x: false,
@@ -709,8 +714,8 @@ fn character_frame_takes_a_density_variant_recolored_like_the_base() {
     let dense_shirt = dense.frame.get(0, 0).copied().flatten();
     assert_eq!(got, (2, 2));
 
-    let classic = seat::character_frame(
-        seat::SpritePose {
+    let classic = crate::character::character_frame(
+        crate::character::SpritePose {
             anim_name: "typing",
             frame_idx: 0,
             flip_x: false,
@@ -1083,7 +1088,7 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
 
     // A desk top, its screen glass, and a darker front row, whole-pixel so an
     // upscale by `DENSITY` is the variant exactly.
-    let glass_key = super::palette::SCREEN_GLASS_KEY;
+    let glass_key = crate::embedded_pack::SCREEN_GLASS_KEY;
     let rows = |w: u16, h: u16, glass: char| -> String {
         (0..h)
             .map(|y| {
@@ -1215,7 +1220,7 @@ fn agent_overrides_glow_tint_shifts_skin_toward_given_color() {
     );
 }
 
-/// Pins [`super::desk_screen_glow`], the one screen rule both profiles light
+/// Pins [`crate::lighting::desk_screen_glow`], the one screen rule both profiles light
 /// by: a seated occupant's tool, on a north-facing desk only.
 #[test]
 fn a_desk_screen_glows_only_for_a_seated_tool_user_facing_north() {
@@ -1233,7 +1238,9 @@ fn a_desk_screen_glows_only_for_a_seated_tool_user_facing_north() {
     let theme = &crate::theme::NORMAL;
     let tool = palette::tool_glow_tint(&editing, &theme.tool_glow);
     assert!(tool.is_some(), "the fixture's occupant is using a tool");
-    let glow = |occupant, facing, seated| super::desk_screen_glow(occupant, facing, seated, theme);
+    let glow = |occupant, facing, seated| {
+        crate::lighting::desk_screen_glow(occupant, facing, seated, theme)
+    };
     assert_eq!(glow(Some(&editing), Facing::North, true), tool);
     assert_eq!(
         glow(Some(&editing), Facing::South, true),
@@ -1791,8 +1798,14 @@ fn every_hover_size_is_its_painted_sprite_size() {
         def(Furniture::FloorLamp, "floor_lamp"),
         def(Furniture::VendingMachine, "vending_machine"),
         def(Furniture::Printer, "printer"),
-        def(Furniture::MeetingTable, super::MEETING_TABLE_SPRITE),
-        def(Furniture::DeskChair, super::DESK_CHAIR_SPRITE),
+        def(
+            Furniture::MeetingTable,
+            crate::embedded_pack::MEETING_TABLE_SPRITE,
+        ),
+        def(
+            Furniture::DeskChair,
+            crate::embedded_pack::DESK_CHAIR_SPRITE,
+        ),
         def(Furniture::FilingCabinet, "filing_cabinet"),
         (
             "ELEVATOR".into(),
@@ -2552,7 +2565,7 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
         let mut buf = RgbBuffer::filled(32, 32, black);
         let drawn = paint_character_at(
             &mut buf,
-            seat::SpritePose {
+            crate::character::SpritePose {
                 anim_name: "seated",
                 frame_idx: 0,
                 flip_x: false,
@@ -2674,7 +2687,7 @@ fn paint_character_at_missing_anim_is_a_noop() {
     let mut buf = RgbBuffer::filled(40, 40, bg);
     paint_character_at(
         &mut buf,
-        seat::SpritePose {
+        crate::character::SpritePose {
             anim_name: "does_not_exist",
             frame_idx: 0,
             flip_x: false,
@@ -3027,7 +3040,7 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     let mut before = RgbBuffer::filled(24, 24, black);
     paint_character_at(
         &mut before,
-        seat::SpritePose {
+        crate::character::SpritePose {
             anim_name: "seated",
             frame_idx: 0,
             flip_x: false,
@@ -3043,7 +3056,7 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     let mut after = RgbBuffer::filled(24, 24, black);
     paint_character_at(
         &mut after,
-        seat::SpritePose {
+        crate::character::SpritePose {
             anim_name: "seated",
             frame_idx: 0,
             flip_x: false,
@@ -3059,7 +3072,7 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     let mut fresh = RgbBuffer::filled(24, 24, black);
     paint_character_at(
         &mut fresh,
-        seat::SpritePose {
+        crate::character::SpritePose {
             anim_name: "seated",
             frame_idx: 0,
             flip_x: false,
@@ -3993,7 +4006,7 @@ fn a_character_whose_anim_is_missing_is_not_hoverable() {
         paint_drawable(
             &DrawableKind::Character {
                 agent: &slot,
-                pose: seat::SpritePose {
+                pose: crate::character::SpritePose {
                     anim_name,
                     frame_idx: 0,
                     flip_x: false,
@@ -5453,7 +5466,7 @@ fn assert_badges_top_their_frames(
             .find(|c| frame.agents[c.agent_idx].agent_id == f.agent_id)
             .expect("every drawn sprite has a placement");
         let desk_top = c.seat_desk.and_then(|d| {
-            drawable::desk_art(pack, layout.desk_facing_at(d))
+            crate::embedded_pack::desk_art(pack, layout.desk_facing_at(d))
                 .map(|art| desk_art_top(pack, d.y, art.height()))
         });
         match desk_top {
@@ -6062,7 +6075,7 @@ fn a_pose_is_its_placements_frame_facing_and_glow() {
         seat_desk: None,
         seated: true,
     };
-    let pose = seat::SpritePose::of(&placement(CharacterGlow::Tool), &typing, theme);
+    let pose = crate::character::SpritePose::of(&placement(CharacterGlow::Tool), &typing, theme);
     assert_eq!(
         (pose.anim_name, pose.frame_idx, pose.flip_x),
         ("typing", 3, true)
@@ -6071,9 +6084,10 @@ fn a_pose_is_its_placements_frame_facing_and_glow() {
         pose.glow_tint,
         palette::tool_glow_tint(&typing, &theme.tool_glow)
     );
-    let thinking = seat::SpritePose::of(&placement(CharacterGlow::Thinking), &typing, theme);
+    let thinking =
+        crate::character::SpritePose::of(&placement(CharacterGlow::Thinking), &typing, theme);
     assert_eq!(thinking.glow_tint, Some(theme.tool_glow.default));
-    let unlit = seat::SpritePose::of(&placement(CharacterGlow::None), &typing, theme);
+    let unlit = crate::character::SpritePose::of(&placement(CharacterGlow::None), &typing, theme);
     assert_eq!(unlit.glow_tint, None);
 }
 
@@ -6091,8 +6105,8 @@ fn an_unflipped_character_faces_the_way_its_art_does() {
         .animation("side_seated")
         .and_then(|a| a.frames().first().cloned())
         .expect("the side view");
-    let drawn = seat::character_frame(
-        seat::SpritePose {
+    let drawn = crate::character::character_frame(
+        crate::character::SpritePose {
             anim_name: "side_seated",
             frame_idx: 0,
             flip_x: false,
@@ -6131,8 +6145,8 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
         let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/flip/{i}.jsonl"));
         let slot = make_slot(id, ActivityState::Idle);
         let mut look = |flip| {
-            seat::character_frame(
-                seat::SpritePose {
+            crate::character::character_frame(
+                crate::character::SpritePose {
                     anim_name: "side_seated",
                     frame_idx: 0,
                     flip_x: flip,

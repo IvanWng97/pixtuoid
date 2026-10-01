@@ -276,6 +276,25 @@ pub(crate) fn clock_reading(now: SystemTime) -> ClockReading {
     }
 }
 
+/// Quantize a fractional turn (0.0..1.0, 0.0 = north) to one of 8 octant
+/// (dx, dy) unit offsets.
+pub(crate) fn octant_offset(turn: f32) -> (i32, i32) {
+    // rem_euclid(8) maps every i32 (incl. a NaN turn's 0 cast) into 0..=7, so
+    // the table is total — a match would need a dead wildcard arm.
+    const OCTANTS: [(i32, i32); 8] = [
+        (0, -1),
+        (1, -1),
+        (1, 0),
+        (1, 1),
+        (0, 1),
+        (-1, 1),
+        (-1, 0),
+        (-1, -1),
+    ];
+    let oct = ((turn * 8.0).round() as i32).rem_euclid(8);
+    OCTANTS[oct as usize]
+}
+
 /// Fractional local hour (`hour + minute/60`, in `0.0..24.0`) for `now` — the
 /// sky's clock decode.
 pub(crate) fn local_hour_frac(now: SystemTime) -> f32 {

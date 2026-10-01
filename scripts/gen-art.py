@@ -113,7 +113,7 @@ def outline(g, inside, out):
 #
 # The desk `FurnitureDef`'s visual width (`desk_sprite_width_tracks_the_footprint_overhang`).
 DESK_ART_W = 14
-# `pixel_painter::drawable`'s `DESK_BEZEL_RAISE`: the monitor's row above the wood.
+# `embedded_pack`'s `DESK_BEZEL_RAISE`: the monitor's row above the wood.
 DESK_BEZEL_RAISE = 1
 # `layout`'s `DESK_SURFACE_ROWS`, `DESK_FRONT_ROWS`, `DESK_LEG_ROWS`.
 DESK_SURFACE_ROWS, DESK_FRONT_ROWS, DESK_LEG_ROWS = 5, 1, 2
@@ -1923,7 +1923,7 @@ def standing_desk():
 
 
 # ---- the corridor appliances and the meeting table ---------------------------------
-# Drawn in the theme's appliance keys (pixel_painter::palette::appliance_overrides).
+# Drawn in the theme's appliance keys (embedded_pack::appliance_overrides).
 VEND_BODY, VEND_BODY_LT, VEND_BODY_SH = "Б", "Ъ", "ъ"
 VEND_PANEL, VEND_PANEL_LT = "П", "п"
 VEND_DRINKS = ("Ч", "Ш", "Щ", "Э")
@@ -2240,7 +2240,7 @@ def meeting_table_1x():
 
 
 # ---- the fixtures: the pantry's island and corner, the lounge, the meeting room, the wall -
-# Recoloured from the theme (pixel_painter::palette::fixture_overrides).
+# Recoloured from the theme (embedded_pack::fixture_overrides).
 TANK_WATER, TANK_WATER_DP, TANK_LINE = "Д", "д", "З"
 TANK_FISH, TANK_FISH_SH, TANK_FISH_ALT, TANK_FISH_ALT_SH = "И", "и", "Л", "л"
 TANK_PLANT, TANK_PLANT_SH = "Ь", "ь"
