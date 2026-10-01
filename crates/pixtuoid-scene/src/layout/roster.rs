@@ -555,7 +555,8 @@ impl SceneLayout {
             )
             .chain(desk_fixtures(home_desks, *buf_h))
             .chain(rooms.clone().filter_map(move |(room, _, trio)| {
-                let rug = trio?.0.rug(*buf_h);
+                // Off the corridor runner a south room's floor runs into.
+                let rug = trio?.0.rug(corridor.map_or(*buf_h, |c| c.y));
                 Some(Fixture {
                     kind: FixtureKind::MeetingRug { room },
                     at: top_left(rug),
@@ -609,11 +610,15 @@ impl SceneLayout {
                             .map(|b| upright(FixtureKind::TrashBin, top_left(b), b)),
                     )
             }))
-            .chain(lounge.as_ref().map(|l| Fixture {
-                kind: FixtureKind::LoungeRug,
-                at: top_left(l.rug()),
-                visual: l.rug(),
-                depth: Depth::sorted(l.couch_center.y.saturating_sub(LOUNGE_RUG_Z_LEAD)),
+            .chain(lounge.as_ref().map(|l| {
+                let first_desk_row = home_desks.iter().map(|d| d.y).min();
+                let rug = l.rug(first_desk_row.unwrap_or(*buf_h));
+                Fixture {
+                    kind: FixtureKind::LoungeRug,
+                    at: top_left(rug),
+                    visual: rug,
+                    depth: Depth::sorted(l.couch_center.y.saturating_sub(LOUNGE_RUG_Z_LEAD)),
+                }
             }))
             .chain(
                 couch.map(|at| {
@@ -700,7 +705,7 @@ impl SceneLayout {
                     coat_rack_rect_at(pole),
                 ))
             }))
-            .chain(self.door_rect().map(|visual| Fixture {
+            .chain(std::iter::once(self.door_rect()).map(|visual| Fixture {
                 kind: FixtureKind::Door,
                 at: top_left(visual),
                 visual,
@@ -730,17 +735,9 @@ impl SceneLayout {
     /// The fixture hovering `cell` points at: the topmost whose art covers any
     /// of it — the one painted last there, by depth and then roster order.
     pub fn fixture_at(&self, cell: Bounds) -> Option<FixtureKind> {
-        let overlaps = |b: Bounds| {
-            b.width > 0
-                && b.height > 0
-                && cell.x < b.x + b.width
-                && b.x < cell.x + cell.width
-                && cell.y < b.y + b.height
-                && b.y < cell.y + cell.height
-        };
         self.fixtures()
             .enumerate()
-            .filter(|(_, f)| overlaps(f.visual))
+            .filter(|(_, f)| cell.overlaps(f.visual))
             .max_by_key(|&(i, f)| (f.depth, i))
             .map(|(_, f)| f.kind)
     }
@@ -767,17 +764,12 @@ impl SceneLayout {
                     .iter()
                     .map(|p| centred(p.pos, furniture_def(p.kind.furniture()).visual)),
             )
-            .chain(self.door_rect())
-            .chain(std::iter::once(NEON_PANEL))
+            .chain([self.door_rect(), NEON_PANEL])
             .chain(self.clock_pos().map(|at| boxed(at, CLOCK)))
             .collect();
         let clear = |board: Bounds| {
-            taken.iter().all(|v| {
-                v.y >= board.y + board.height
-                    || board.y >= v.y + v.height
-                    || v.x >= board.x + board.width + NOTICE_BOARD_GAP
-                    || board.x >= v.x + v.width + NOTICE_BOARD_GAP
-            })
+            let spaced = board.widened(NOTICE_BOARD_GAP);
+            taken.iter().all(|v| !spaced.overlaps(*v))
         };
         let (lo, hi) = (b.x + 1, (b.x + b.width).saturating_sub(1));
         let middle = b.x + b.width / 2;
@@ -819,28 +811,29 @@ impl SceneLayout {
             .doorways
             .iter()
             .find(|d| d.start.y == d.end.y && d.start.y == p.bounds.y)?;
-        let mat = centred(
+        let mut mat = centred(
             Point {
                 x: (dw.start.x + dw.end.x) / 2,
                 y: dw.start.y + super::WALL_THICK_H + 1 + ENTRY_MAT.h / 2,
             },
             ENTRY_MAT,
         );
+        // Shifted west off the cooler standing against the east wall.
+        if let Some(cooler) = p.water_cooler_rect().filter(|c| c.overlaps(mat)) {
+            mat.x = cooler
+                .x
+                .checked_sub(mat.width)
+                .filter(|&x| x >= p.bounds.x)?;
+        }
         // Gives way to the island, the counter or the runner over it: half
         // hidden, it reads as a stain.
         let island = p
             .kitchen_island
             .map(|at| centred(at, furniture_def(Furniture::KitchenIsland).visual));
-        let clear = |b: Bounds| {
-            b.x + b.width <= mat.x
-                || mat.x + mat.width <= b.x
-                || b.y + b.height <= mat.y
-                || mat.y + mat.height <= b.y
-        };
         [island, self.pantry_counter(), self.corridor]
             .into_iter()
             .flatten()
-            .all(clear)
+            .all(|b| !b.overlaps(mat))
             .then_some(mat)
     }
 

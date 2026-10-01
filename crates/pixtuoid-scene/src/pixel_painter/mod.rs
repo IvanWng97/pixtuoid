@@ -195,7 +195,7 @@ pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
 use crate::atmosphere::Moment;
 use crate::lighting::{DeskLights, LightInputs, Lights};
 use background::{paint_floor_and_walls, paint_floor_wash, paint_light, paint_shadows};
-use drawable::{Drawable, DrawableKind, Layer, paint_drawable};
+use drawable::{Drawable, DrawableKind, Drawn, Layer, paint_drawable};
 use palette::{agent_overrides, outfit_seed_for};
 use seat::paint_character_at;
 use wall::enqueue_room_walls;
@@ -424,27 +424,19 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
         ctx.theme.office.shadow,
     );
 
-    ambient::paint_ambient(ctx, look, &lights.monitor_halos);
+    ambient::paint_ambient(ctx, &moment, &lights.monitor_halos);
 
     // Every entity gets an `anchor_y` — its floor-touching row — so sorting
     // ascending and painting in order puts things closer to the camera in
     // front: the painter's algorithm on a top-down 2D scene.
     let pet_pos = frame.pet.map(|pet| enqueue_pet(ctx, pet, &mut drawables));
-    let mascot_frames = enqueue_gateway_mascots(ctx, &frame.mascots, &mut drawables);
+    enqueue_gateway_mascots(&frame.mascots, &mut drawables);
     enqueue_characters(ctx, frame, &mut drawables);
     enqueue_room_walls(ctx.layout, &mut drawables);
     drawable::sort_drawables(&mut drawables);
     let mut hover = Hoverables {
         pet_pos,
-        mascots: drawables
-            .iter()
-            .filter_map(|d| match d.kind {
-                DrawableKind::GatewayMascot { mascot_idx, .. } => {
-                    Some(mascot_frames[mascot_idx].clone())
-                }
-                _ => None,
-            })
-            .collect(),
+        mascots: Vec::new(),
         agents: Vec::new(),
     };
     // A per-pixel diff finds EXACTLY what the foreground wrote. AFTER
@@ -452,9 +444,15 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
     // them in here would apply it twice.
     let pre_foreground = ctx.buf.clone();
     for d in &drawables {
-        hover
-            .agents
-            .extend(paint_drawable(&d.kind, &mut ctx.drawable_ctx()));
+        match paint_drawable(&d.kind, &mut ctx.drawable_ctx()) {
+            Some(Drawn::Agent(agent)) => hover.agents.push(agent),
+            Some(Drawn::Mascot { mascot_idx, w, h }) => {
+                hover
+                    .mascots
+                    .push(MascotFrame::of(&frame.mascots[mascot_idx], w, h));
+            }
+            None => {}
+        }
     }
     // The floor's day/night wash, over the foreground: the overlays above run
     // before any drawable exists, so nothing painted carries a time-of-day term.
@@ -596,43 +594,38 @@ fn enqueue_pet<'a>(
 
 /// Enqueue the gateway mascots.
 fn enqueue_gateway_mascots<'a>(
-    ctx: &PaintCtx<'_>,
     mascots: &[sim::MascotPlacement],
     drawables: &mut Vec<Drawable<'a>>,
-) -> Vec<MascotFrame> {
-    mascots
-        .iter()
-        .enumerate()
-        .map(|(mascot_idx, m)| {
-            let pos = m.pos;
-            let Size {
-                w: mascot_w,
-                h: mascot_h,
-            } = sim::frame_size(ctx.pack, m.anim_name, m.frame_idx, sim::MASCOT_FALLBACK);
-            drawables.push(Drawable {
-                anchor_y: z_sort_row(Anchor::Center, pos, mascot_h),
-                layer: Layer::Figure,
-                kind: DrawableKind::GatewayMascot {
-                    mascot_idx,
-                    pos,
-                    anim_name: m.anim_name,
-                    frame_idx: m.frame_idx,
-                    run_count: m.run_count,
-                    degraded: m.state == DaemonState::Degraded,
-                },
-            });
-            MascotFrame {
-                pos,
-                w: mascot_w,
-                h: mascot_h,
-                name: m.name,
-                instance: m.instance.clone(),
-                busy: m.state == DaemonState::Busy,
+) {
+    for (mascot_idx, m) in mascots.iter().enumerate() {
+        drawables.push(Drawable {
+            anchor_y: z_sort_row(Anchor::Center, m.pos, m.size.h),
+            layer: Layer::Figure,
+            kind: DrawableKind::GatewayMascot {
+                mascot_idx,
+                pos: m.pos,
+                anim_name: m.anim_name,
+                frame_idx: m.frame_idx,
+                run_count: m.run_count,
                 degraded: m.state == DaemonState::Degraded,
-                active_sessions: m.active_sessions,
-            }
-        })
-        .collect()
+            },
+        });
+    }
+}
+
+impl MascotFrame {
+    fn of(m: &sim::MascotPlacement, w: u16, h: u16) -> Self {
+        Self {
+            pos: m.pos,
+            w,
+            h,
+            name: m.name,
+            instance: m.instance.clone(),
+            busy: m.state == DaemonState::Busy,
+            degraded: m.state == DaemonState::Degraded,
+            active_sessions: m.active_sessions,
+        }
+    }
 }
 
 /// Whether the hour's object wash reaches a fixture.

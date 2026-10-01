@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn bounds_overlap_is_half_open_and_a_zero_sized_box_overlaps_nothing() {
+    let b = |x, y, width, height| Bounds {
+        x,
+        y,
+        width,
+        height,
+    };
+    let a = b(10, 10, 4, 4);
+    assert!(a.overlaps(b(13, 13, 4, 4)), "one shared pixel");
+    assert!(!a.overlaps(b(14, 10, 4, 4)), "touching edges share none");
+    assert!(!a.overlaps(b(11, 11, 0, 2)), "zero width, inside");
+    assert!(!b(11, 11, 2, 0).overlaps(a), "zero height, inside");
+}
+
+#[test]
+fn widening_against_column_0_keeps_the_east_edge() {
+    let b = |x, width| Bounds {
+        x,
+        y: 5,
+        width,
+        height: 3,
+    };
+    assert_eq!(b(4, 6).widened(2), b(2, 10));
+    assert_eq!(b(0, 6).widened(2), b(0, 8), "the east edge stays at 6 + 2");
+    assert_eq!(b(1, 6).widened(2), b(0, 9));
+}
+
+#[test]
 fn kitchen_island_places_on_roomy_pantries_and_refuses_small() {
     let l = SceneLayout::compute_with_seed(240, 160, None, 2).expect("fits");
     let island = l
@@ -867,7 +895,7 @@ fn fish_tank_sits_east_of_the_lounge_lamp_clear_of_the_elevator() {
         lamp_east + 2,
         "tank west edge sits exactly the pinned gap past the lamp's east edge"
     );
-    let door_west = l.door.expect("elevator fits at this size").x;
+    let door_west = l.door.x;
     assert!(
         tank.x + half_w + super::compute::FISH_TANK_ELEVATOR_CLEARANCE <= door_west,
         "tank + clearance stays west of the elevator door column"
@@ -1033,7 +1061,7 @@ fn ficus_greets_at_the_elevator_and_fills_the_lounge_west_flank() {
         .filter(|p| p.kind == PlantKind::Ficus)
         .collect();
     assert_eq!(ficus.len(), 2, "both ratified Ficus spots place at 192x160");
-    let door = l.door.expect("elevator");
+    let door = l.door;
     assert!(
         ficus
             .iter()

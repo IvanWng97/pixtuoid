@@ -72,6 +72,32 @@ pub struct Bounds {
     pub height: u16,
 }
 
+impl Bounds {
+    /// Whether the two half-open boxes share a pixel. A zero-sized box shares
+    /// none.
+    pub(crate) fn overlaps(self, other: Bounds) -> bool {
+        self.width > 0
+            && self.height > 0
+            && other.width > 0
+            && other.height > 0
+            && self.x < other.x + other.width
+            && other.x < self.x + self.width
+            && self.y < other.y + other.height
+            && other.y < self.y + self.height
+    }
+
+    /// The box grown `dx` columns on each side, its west edge clamped at
+    /// column 0 and its east edge kept.
+    pub(crate) fn widened(self, dx: u16) -> Bounds {
+        let x = self.x.saturating_sub(dx);
+        Bounds {
+            x,
+            width: self.x + self.width + dx - x,
+            ..self
+        }
+    }
+}
+
 /// A position in buffer-pixel space (screen-space: east = +x, south = +y,
 /// north = −y = the buffer top).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -188,8 +214,9 @@ const LOUNGE_RUG: Size = Size { w: 22, h: 7 };
 const LOUNGE_RUG_DY: u16 = 3;
 
 impl Lounge {
-    /// The rug the couch stands on.
-    pub(crate) fn rug(&self) -> Bounds {
+    /// The rug the couch stands on, ending by `floor_end`, the row the desks
+    /// south of it start at.
+    pub(crate) fn rug(&self, floor_end: u16) -> Bounds {
         let centre = Point {
             x: self.couch_center.x,
             y: self.couch_center.y + LOUNGE_RUG_DY,
@@ -197,7 +224,7 @@ impl Lounge {
         let tl = anchored_top_left(Anchor::Center, centre, LOUNGE_RUG.w, LOUNGE_RUG.h);
         Bounds {
             x: tl.x,
-            y: tl.y,
+            y: tl.y.min(floor_end.saturating_sub(LOUNGE_RUG.h)),
             width: LOUNGE_RUG.w,
             height: LOUNGE_RUG.h,
         }
@@ -236,10 +263,10 @@ pub struct SceneLayout {
     /// individual pieces via the accessors ([`Self::couch_sprite_center`],
     /// [`Self::floor_lamp`], …).
     pub lounge: Option<Lounge>,
-    /// The office entry-door position, or `None` if none fits.
-    pub door: Option<Point>,
+    /// The office entry door's top-left cell, in the window wall's last slot.
+    pub door: Point,
     /// The walkable cell just inside the door — the entry/exit waypoint.
-    pub door_threshold: Option<Point>,
+    pub door_threshold: Point,
     /// Meeting rooms in floor order — the index IS the `room_id` every
     /// waypoint and painter joins on.
     pub meeting_rooms: Vec<MeetingRoom>,
@@ -390,9 +417,8 @@ pub const INTRA_POD_GAP_X: u16 = 12;
 pub const INTRA_POD_GAP_Y: u16 = 6;
 const _: () = assert!((DESK_H + INTRA_POD_GAP_Y).is_multiple_of(2));
 /// Horizontal (E-W) gap between adjacent pod COLUMNS — wide enough to keep the
-/// pod boundary visually distinct AND to host the rolling whiteboard's GROUND
-/// footprint in the aisle. Deliberately > the N-S gap: screens are landscape,
-/// so spread wider horizontally and pack tighter vertically.
+/// pod boundary visually distinct. Deliberately > the N-S gap: screens are
+/// landscape, so spread wider horizontally and pack tighter vertically.
 pub const INTER_POD_AISLE_X: u16 = 20;
 /// Vertical (N-S) gap between adjacent pod ROWS. INTENTIONALLY < the E-W gap
 /// (landscape screens — see `INTER_POD_AISLE_X`). Shrinking it breaks

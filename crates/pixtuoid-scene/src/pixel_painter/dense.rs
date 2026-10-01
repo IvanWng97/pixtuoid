@@ -4,7 +4,7 @@
 
 use std::num::NonZeroU16;
 
-use pixtuoid_core::sprite::format::{Pack, density_variant_name_into, variant_redraws};
+use pixtuoid_core::sprite::format::{Density, Pack, density_variant_name_into, variant_redraws};
 use pixtuoid_core::sprite::{Frame, RecolorableFrame};
 
 use crate::render_scale::RenderScale;
@@ -20,7 +20,7 @@ pub(crate) struct DenseFrame<'a> {
     /// redraws that frame's box on a finer grid ([`variant_redraws`]).
     pub(crate) logical: (u16, u16),
     /// The grid the art is authored on: 1 for the base, `N` for `<name>@<N>x`.
-    pub(crate) density: NonZeroU16,
+    pub(crate) density: Density,
     /// The factor still left to blit at: the scale divided by `density`.
     pub(crate) blit_at: NonZeroU16,
     /// Where the frame's head is, if the art marks it: where a hairstyle
@@ -57,8 +57,8 @@ pub(crate) fn densest_frame<'a>(
     // ONE buffer, reused across the divisor probes; it allocates on the first
     // probe, so a scale with no divisor allocates nothing.
     let mut key = String::new();
-    for density in (2..=s).rev() {
-        if !s.is_multiple_of(density) {
+    for density in (2..=s).rev().filter_map(Density::new) {
+        if !s.is_multiple_of(density.get()) {
             continue;
         }
         key.clear();
@@ -72,11 +72,8 @@ pub(crate) fn densest_frame<'a>(
         let (Some(art), Some(recolorable)) = (anim.frames().get(idx), anim.recolorable(idx)) else {
             continue;
         };
-        // `density` is in `2..=s` and divides `s`, so it and the quotient are
-        // both nonzero.
-        if let (Some(density), Some(blit_at)) =
-            (NonZeroU16::new(density), NonZeroU16::new(s / density))
-        {
+        // `density` divides `s`, so the quotient is nonzero.
+        if let Some(blit_at) = NonZeroU16::new(s / density.get()) {
             return Some(DenseFrame {
                 frame: art,
                 recolorable,
@@ -91,7 +88,7 @@ pub(crate) fn densest_frame<'a>(
         frame: base,
         recolorable: base_anim.recolorable(idx)?,
         logical,
-        density: NonZeroU16::MIN,
+        density: Density::ONE,
         blit_at: scale.factor(),
         head: base_anim.head(idx),
     })

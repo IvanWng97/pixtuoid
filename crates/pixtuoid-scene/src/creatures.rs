@@ -67,7 +67,7 @@ fn walkable_target(layout: &Layout, seed: u64, n: u64) -> Point {
     }
     // Snapped like the loop's answers, so the idempotence above holds for EVERY
     // return and not just the ones a draw found.
-    snap_point_to_walkable(&layout.walkable, layout.door_threshold.unwrap_or(last)).unwrap_or(last)
+    snap_point_to_walkable(&layout.walkable, layout.door_threshold).unwrap_or(last)
 }
 
 /// Pet roaming the whole office: each [`PET_CYCLE_MS`] cycle picks a destination,
@@ -222,16 +222,10 @@ fn walk_between(layout: &Layout, from: Point, to: Point, t: f32) -> Point {
     }
 }
 
-/// The walkable cell the mascot enters from / leaves to (the elevator
-/// threshold), snapped to floor; falls back to the corridor centre.
+/// The walkable cell the mascot enters from / leaves to: the elevator
+/// threshold, snapped to floor.
 fn mascot_elevator(layout: &Layout) -> Option<Point> {
-    let raw = layout.door_threshold.or(layout.door).or_else(|| {
-        layout.corridor.map(|c| Point {
-            x: c.x + c.width / 2,
-            y: c.y,
-        })
-    })?;
-    snap_point_to_walkable(&layout.walkable, raw)
+    snap_point_to_walkable(&layout.walkable, layout.door_threshold)
 }
 
 /// The wander seed for ONE daemon instance — folds the source AND the instance id
@@ -531,27 +525,6 @@ mod tests {
         assert!(
             gateway_mascot_def("some-other").is_none(),
             "unknown source → no mascot"
-        );
-    }
-
-    #[test]
-    fn mascot_elevator_falls_back_to_corridor_top_when_no_door() {
-        // A normal layout always has a door_threshold, so clearing BOTH door fields
-        // is the only way to reach the `or_else` branch.
-        let mut layout = crate::layout::Layout::compute(160, 120, Some(4)).expect("layout fits");
-        layout.door = None;
-        layout.door_threshold = None;
-        let corridor = layout.corridor.expect("compute gives a corridor");
-        let raw = Point {
-            x: corridor.x + corridor.width / 2,
-            y: corridor.y,
-        };
-        let expected = snap_point_to_walkable(&layout.walkable, raw)
-            .expect("corridor-top centre must snap to a walkable cell");
-        assert_eq!(
-            mascot_elevator(&layout),
-            Some(expected),
-            "no door → snapped corridor-top centre, not None and not a door cell"
         );
     }
 

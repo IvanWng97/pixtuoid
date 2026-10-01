@@ -17,7 +17,9 @@ use pixtuoid_scene::floor::FloorInputs;
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
 use pixtuoid_scene::layout::Layout;
 use pixtuoid_scene::pet::PetFrame;
-use pixtuoid_scene::pixel_painter::{MascotFrame, PixelCtx, render_to_rgb_buffer};
+use pixtuoid_scene::pixel_painter::{
+    AgentFrame, MascotFrame, PixelCtx, PixelPassResult, render_to_rgb_buffer,
+};
 
 use crate::tui::geometry::CellArea;
 pub(crate) use crate::tui::hit_test::{
@@ -46,22 +48,12 @@ pub struct DrawCtx<'a> {
     pub theme_picker: Option<usize>,
     /// From [`footer_context`](crate::tui::widgets::footer_context).
     pub footer: FooterContext<'a>,
-    pub last_pet_pos: Option<PetFrame>,
-    /// Every gateway mascot's frame this render, for hover identity.
-    pub last_mascots: Vec<MascotFrame>,
-    /// For hover and click.
-    pub last_agents: Vec<pixtuoid_scene::pixel_painter::AgentFrame>,
     pub chitchat_state: &'a mut std::collections::HashMap<
         pixtuoid_scene::chitchat::VenueKey,
         pixtuoid_scene::chitchat::ActiveChitchat,
     >,
-    pub chitchat_bubbles: Vec<pixtuoid_scene::chitchat::ChitchatBubble>,
     /// Key present = has a desk cup; value = the steam-window anchor.
     pub coffee: &'a std::collections::HashMap<pixtuoid_core::AgentId, std::time::SystemTime>,
-    /// Out-param: the caller records these into the persistent `CoffeeState`.
-    pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
-    /// Out-param: the audio cue tracker's appliance feed.
-    pub occupied_waypoints: std::collections::HashSet<usize>,
     /// Animated scale for the version popup (0.0 = hidden, 1.0 = fully shown).
     pub popup_scale: f32,
     pub help_open: bool,
@@ -112,14 +104,8 @@ impl<'a> DrawCtx<'a> {
             theme,
             theme_picker: None,
             footer: crate::tui::widgets::footer_context(scene, None, false, None, None),
-            last_pet_pos: None,
-            last_mascots: Vec::new(),
-            last_agents: Vec::new(),
             chitchat_state,
-            chitchat_bubbles: Vec::new(),
             coffee: &NO_COFFEE,
-            new_coffee_carriers: Vec::new(),
-            occupied_waypoints: Default::default(),
             popup_scale: 0.0,
             help_open: false,
             dashboard: &CLOSED_DASHBOARD,
@@ -127,6 +113,19 @@ impl<'a> DrawCtx<'a> {
             onboarding: &CLOSED_ONBOARDING,
         }
     }
+}
+
+/// What [`draw_scene`] drew; each sprite field is [`PixelPassResult`]'s namesake.
+/// `Default` is a refused frame, which leaves nothing to hit-test.
+#[derive(Default)]
+pub struct DrawOut {
+    /// `None` when the frame was refused.
+    pub layout: Option<Arc<Layout>>,
+    pub pet_pos: Option<PetFrame>,
+    pub mascots: Vec<MascotFrame>,
+    pub agents: Vec<AgentFrame>,
+    pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
+    pub occupied_waypoints: std::collections::HashSet<usize>,
 }
 
 /// Clip a widget rect to fit inside `bounds`; `None` when nothing survives.
@@ -311,7 +310,7 @@ fn paint_too_small_notice(
 pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     ctx: &mut DrawCtx<'_>,
-) -> Result<Option<Arc<Layout>>> {
+) -> Result<DrawOut> {
     let term_size = term.size()?;
     let full_rect = Rect {
         x: 0,
@@ -336,17 +335,24 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 
     if scene_rect.width < MIN_SCENE_WIDTH || scene_rect.height < MIN_SCENE_HEIGHT {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
-        return Ok(None);
+        return Ok(DrawOut::default());
     }
 
     let (buf_w, buf_h) = scene_buf_size(full_rect.width, full_rect.height);
     ctx.buf.resize_fill(buf_w, buf_h, theme.surface.bg_fallback);
     let Some(layout) = ctx.store.frame_layout(buf_w, buf_h, world.floor.floor_seed) else {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
-        return Ok(None);
+        return Ok(DrawOut::default());
     };
 
-    let pixel_result = render_to_rgb_buffer(&mut PixelCtx {
+    let PixelPassResult {
+        pet_pos,
+        mascots,
+        agents,
+        chitchat_bubbles,
+        new_coffee_carriers,
+        occupied_waypoints,
+    } = render_to_rgb_buffer(&mut PixelCtx {
         store: &mut *ctx.store,
         buf: &mut *ctx.buf,
         world,
@@ -356,16 +362,10 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         chitchat_state: ctx.chitchat_state,
         debug_walkable: ctx.debug_walkable,
     });
-    ctx.last_pet_pos = pixel_result.pet_pos;
-    ctx.last_mascots = pixel_result.mascots;
-    ctx.last_agents = pixel_result.agents;
-    ctx.chitchat_bubbles = pixel_result.chitchat_bubbles;
-    ctx.new_coffee_carriers = pixel_result.new_coffee_carriers;
-    ctx.occupied_waypoints = pixel_result.occupied_waypoints;
 
     let mouse_pos = ctx.mouse_pos;
-    let hovered = mouse_pos
-        .and_then(|(mx, my)| hit_test_agent(&ctx.last_agents, CellArea::half_block(mx, my)));
+    let hovered =
+        mouse_pos.and_then(|(mx, my)| hit_test_agent(&agents, CellArea::half_block(mx, my)));
 
     // The dim is decoupled from `onboarding.open`, so the office keeps fading back
     // up for a beat AFTER the card is gone.
@@ -386,7 +386,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         now,
     );
     let buf = &ctx.buf;
-    let chitchat_bubbles = &ctx.chitchat_bubbles;
     term.draw(|f| {
         // Re-derive rects from the actual frame buffer to guard against
         // terminal resize between term.size() and term.draw().
@@ -395,12 +394,11 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         paint_footer(f, &footer, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
         paint_label_widgets(f, &labels, actual_scene, theme);
-        paint_chitchat_bubbles(f, chitchat_bubbles, actual_scene, theme);
+        paint_chitchat_bubbles(f, &chitchat_bubbles, actual_scene, theme);
         paint_wall_display(f, &board, actual_scene, theme);
-        if let Some(door) = layout.door {
-            let current = floor_info.map(|fi| fi.current).unwrap_or(1);
-            paint_elevator_indicator(f, door, current, actual_scene, theme);
-        }
+        let door = layout.door;
+        let current = floor_info.map(|fi| fi.current).unwrap_or(1);
+        paint_elevator_indicator(f, door, current, actual_scene, theme);
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,
             my,
@@ -418,23 +416,20 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             // Coffee before pet here must match the click arms in
             // `tui::handle_mouse_event`; the agent-wins half above needs no such care,
             // `hovered.is_none()` skips this block outright.
-            let pet_hit = ctx
-                .last_pet_pos
-                .filter(|f| hit_test_pet(f.kind, f.pos, f.anim, cell));
+            let pet_hit = pet_pos.filter(|f| hit_test_pet(f.kind, f.pos, f.anim, cell));
             if hit_test_coffee_machine(&layout, cell) {
                 paint_coffee_tooltip(f, at, theme);
             } else if let Some(PetFrame { anim, kind, .. }) = pet_hit {
                 let on_cooldown = world.pets.petting.is_some_and(|p| p.is_active(now));
-                // `last_pet_pos` is only `Some` on the normal render path,
-                // where it was written from `pets.pet` — so the kinds agree
-                // and the `default_name` arm is not a live path.
+                // `pet_pos` was drawn from `pets.pet`, so the kinds agree and
+                // the `default_name` arm is not a live path.
                 let display_name = world
                     .pets
                     .pet
                     .map(|p| p.name.as_str())
                     .unwrap_or_else(|| kind.default_name());
                 paint_pet_tooltip(f, kind, anim, on_cooldown, display_name, at, theme);
-            } else if let Some(m) = topmost_mascot_at(&ctx.last_mascots, cell) {
+            } else if let Some(m) = topmost_mascot_at(&mascots, cell) {
                 paint_mascot_tooltip(f, m, at, theme);
             } else if let Some(label) = hit_test_furniture(&layout, cell) {
                 paint_furniture_tooltip(f, label, at, theme);
@@ -442,7 +437,14 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         }
         paint_overlays(f, &overlays, now, actual_full, theme);
     })?;
-    Ok(Some(layout))
+    Ok(DrawOut {
+        layout: Some(layout),
+        pet_pos,
+        mascots,
+        agents,
+        new_coffee_carriers,
+        occupied_waypoints,
+    })
 }
 
 /// The modal-overlay dispatch, centralized so the three draw paths can't drift in
