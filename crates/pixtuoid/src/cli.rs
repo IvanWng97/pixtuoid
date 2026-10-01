@@ -73,6 +73,15 @@ pub enum Cmd {
         /// 200ms when it changes.
         #[arg(long, default_value_t = false)]
         headless: bool,
+        /// Terminal graphics (kitty/iTerm2/SIXEL) for the cutaway office:
+        /// `auto` uses them when the terminal supports them, and a protocol
+        /// name uses that one whatever the terminal answers. Overrides the
+        /// `graphics` config key; the default is `off`, which never queries
+        /// the terminal. `pixtuoid doctor` shows what this terminal supports.
+        /// The office still draws classic half-blocks whatever this resolves
+        /// to: the cutaway is not yet painted in the terminal.
+        #[arg(long, value_enum)]
+        graphics: Option<crate::GraphicsMode>,
     },
     /// Render the live office in a frameless, always-on-top desktop window
     /// (no TUI). Shares the same source flags as `run`.
@@ -101,11 +110,8 @@ pub enum Cmd {
         /// Whether to consider terminal image protocols (kitty/iTerm2/SIXEL)
         /// when reporting the `graphics:` row. `off` skips the capability query
         /// entirely and reports the classic profile with that as the reason.
-        ///
-        /// It lives on `doctor` and not on `run` because `run` paints classic
-        /// unconditionally today — the same flag moves to `run` when the
-        /// cutaway profile reaches a painter, and a flag `run` silently ignored
-        /// would be worse than no flag.
+        /// Defaults to `auto` whatever the `graphics` config key says: the row
+        /// reports what this terminal can do.
         #[arg(long, value_enum, default_value_t = crate::GraphicsMode::Auto)]
         graphics: crate::GraphicsMode,
     },
@@ -218,6 +224,7 @@ impl Cli {
             },
             max_desks: None,
             headless: false,
+            graphics: None,
         });
         (level, theme, cmd)
     }
@@ -257,10 +264,35 @@ mod tests {
         ));
     }
 
+    /// Absent stays `None` so the config key can speak; every protocol is a
+    /// value, which is how a specific protocol is tested.
+    #[test]
+    fn run_takes_graphics_and_leaves_absence_to_the_config() {
+        let graphics = |args: &[&str]| match Cli::try_parse_from(args).expect("parses").cmd {
+            Some(Cmd::Run { graphics, .. }) => graphics,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(graphics(&["pixtuoid", "run"]), None);
+        for (value, mode) in [
+            ("auto", crate::GraphicsMode::Auto),
+            ("off", crate::GraphicsMode::Off),
+            ("kitty", crate::GraphicsMode::Kitty),
+            ("sixel", crate::GraphicsMode::Sixel),
+            ("iterm2", crate::GraphicsMode::Iterm2),
+        ] {
+            assert_eq!(
+                graphics(&["pixtuoid", "run", "--graphics", value]),
+                Some(mode)
+            );
+        }
+    }
+
     #[test]
     fn graphics_typo_is_a_hard_parse_error() {
-        let err = Cli::try_parse_from(["pixtuoid", "doctor", "--graphics", "no"]).unwrap_err();
-        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
+        for cmd in ["doctor", "run"] {
+            let err = Cli::try_parse_from(["pixtuoid", cmd, "--graphics", "no"]).unwrap_err();
+            assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue, "{cmd}");
+        }
     }
 
     #[test]
@@ -329,6 +361,7 @@ mod tests {
             Cmd::Run {
                 headless: false,
                 max_desks: None,
+                graphics: None,
                 ..
             }
         ));

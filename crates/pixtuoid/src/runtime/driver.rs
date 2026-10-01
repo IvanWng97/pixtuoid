@@ -34,20 +34,46 @@ use super::{
     ConnectedSources, FALLBACK_DESKS, RunConfig, SceneRx, boot_capacities_for, resolve_boot_caps,
     summarize,
 };
+use crate::graphics::Plan;
 
 pub fn run(cfg: RunConfig) -> Result<()> {
+    // Before tokio and the boot caps: the query reads the terminal while no
+    // other thread does, and once the cutaway paints, the boot seed is the
+    // plan's geometry.
+    let tui = if cfg.headless {
+        None
+    } else {
+        Some(boot_tui(&cfg)?)
+    };
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    rt.block_on(async move { run_async(cfg).await })
+    rt.block_on(async move { run_async(cfg, tui).await })
 }
 
-async fn run_async(cfg: RunConfig) -> Result<()> {
+/// What the TUI needs before anything starts: the pack, whose densest art the
+/// plan fits, and the plan.
+fn boot_tui(cfg: &RunConfig) -> Result<(pixtuoid_core::sprite::format::Pack, Plan)> {
+    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(cfg.pack.clone())?;
+    let plan = super::tui_graphics_plan(
+        cfg.graphics,
+        &pack,
+        crate::graphics::terminal_cells(),
+        crate::graphics::run_probe,
+    );
+    tracing::info!(mode = ?cfg.graphics, plan = ?plan, "graphics plan");
+    Ok((pack, plan))
+}
+
+async fn run_async(
+    cfg: RunConfig,
+    tui: Option<(pixtuoid_core::sprite::format::Pack, Plan)>,
+) -> Result<()> {
     let RunConfig {
         socket,
         projects_root,
         codex_sessions_root,
-        pack,
+        pack: _,
         desk_cap,
         headless,
         config_path,
@@ -57,6 +83,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         log_path,
         first_run,
         audio,
+        graphics: _,
     } = cfg;
     // Audio owns no state here: `run_tui` builds the AudioController, which owns
     // the device thread and tears it down on Drop at any exit.
@@ -83,26 +110,28 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         boot_caps,
     );
 
-    if headless {
-        headless_loop(scene_rx, health_rx).await
-    } else {
-        crate::tui::run_tui(crate::tui::TuiSession {
-            scene_rx,
-            pack,
-            floor_caps,
-            theme,
-            config_path,
-            desk_cap,
-            pets,
-            source_health: health_rx,
-            socket_path,
-            connected,
-            log_path,
-            first_run,
-            focus_roots,
-            audio_cfg: audio,
-        })
-        .await
+    match tui {
+        None => headless_loop(scene_rx, health_rx).await,
+        Some((pack, graphics)) => {
+            crate::tui::run_tui(crate::tui::TuiSession {
+                scene_rx,
+                pack,
+                graphics,
+                floor_caps,
+                theme,
+                config_path,
+                desk_cap,
+                pets,
+                source_health: health_rx,
+                socket_path,
+                connected,
+                log_path,
+                first_run,
+                focus_roots,
+                audio_cfg: audio,
+            })
+            .await
+        }
     }
 }
 

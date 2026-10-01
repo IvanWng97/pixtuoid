@@ -659,8 +659,7 @@ struct DoctorReport {
     graphics: crate::GraphicsMode,
     graphics_probe: crate::graphics::Probe,
     max_density: pixtuoid_core::sprite::format::Density,
-    /// The terminal's size in cells: the area the graphics row fits the office
-    /// to.
+    /// The terminal's size in cells, which the graphics row plans for.
     term_size: ratatui::layout::Size,
     rows: Vec<DoctorSourceRow>,
     roots: Vec<RootStatus>,
@@ -846,11 +845,7 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
             config_warnings.push(reason);
             pixtuoid_core::sprite::format::Density::ONE
         });
-    // The default only off a terminal, where the graphics probe is not asked
-    // either, so no fit sees it.
-    let term_size = crossterm::terminal::size()
-        .map(|(width, height)| ratatui::layout::Size { width, height })
-        .unwrap_or_default();
+    let term_size = crate::graphics::terminal_cells();
 
     let rows: Vec<DoctorSourceRow> = registry::registered_source_names()
         .map(|src| {
@@ -1812,7 +1807,7 @@ mod tests {
             terminal_category(&r).details[0],
             format!(
                 "{DETAIL_INDENT}graphics: kitty (17x41 cell) — the cutaway profile would \
-                 render at 16x (4x art upscaled 4x), a 212x128 office (not yet wired to `run`)"
+                 render at 16x (4x art upscaled 4x), a 212x125 office (`run` does not paint it yet)"
             )
         );
 
