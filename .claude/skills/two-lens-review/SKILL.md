@@ -33,6 +33,10 @@ paraphrase here.
    and Do not flag.
    <change-specific claims (from the PR body's impl-plan answers) or design
    questions, one per line>
+   Run the applicable gates; report each exit code as observed, never through
+   a pipe. Each finding carries an integer confidence 0–100. The comment audit
+   reports N items each with a disposition, never "passed", plus the diff's
+   net added comment lines and every sentence deletable with nothing lost.
    Your final message is the report, ending in one verdict: APPROVE or
    REQUEST-CHANGES.
    ```
@@ -64,8 +68,8 @@ paraphrase here.
    ```
 
 6. **Before merge**, judge against
-   [the gate](../../../docs/CONTRIBUTING.md#the-merge-gate). Record each local
-   row's run as REVIEW.md's escalation section says.
+   [the gate](../../../docs/CONTRIBUTING.md#the-merge-gate), which also says
+   how each local row's run is recorded.
 
 ## Whole-codebase scope
 
