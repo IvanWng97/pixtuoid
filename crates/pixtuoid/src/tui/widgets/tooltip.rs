@@ -548,6 +548,66 @@ mod tests {
     }
 
     #[test]
+    fn a_chitchat_bubble_centres_over_its_speakers_badge() {
+        use pixtuoid_scene::chitchat::ChitchatBubble;
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::{LabelElement, LabelTone};
+        use pixtuoid_scene::pixel_painter::AgentFrame;
+        let mut term = Terminal::new(TestBackend::new(40, 12)).unwrap();
+        let scene_rect = Rect {
+            x: 3,
+            y: 1,
+            width: 36,
+            height: 10,
+        };
+        let speaker = AgentFrame {
+            agent_id: pixtuoid_core::AgentId::from_transcript_path("/chat/0.jsonl"),
+            anchor: Point { x: 16, y: 14 },
+            w: 8,
+            h: 12,
+            label_anchor: Point { x: 20, y: 14 },
+        };
+        let (name, quip) = ("abcdefgh", "LGTM!");
+        term.draw(|f| {
+            super::paint_label_widgets(
+                f,
+                &[LabelElement {
+                    anchor_px: speaker.label_anchor,
+                    text: name.into(),
+                    tone: LabelTone::Idle,
+                    hovered: false,
+                }],
+                scene_rect,
+                &theme::NORMAL,
+            );
+            super::paint_chitchat_bubbles(
+                f,
+                &[ChitchatBubble {
+                    text: quip,
+                    speaker: speaker.agent_id,
+                }],
+                &[speaker],
+                scene_rect,
+                &theme::NORMAL,
+            );
+        })
+        .unwrap();
+        let buf = term.backend().buffer();
+        let centre = |needle: &str| {
+            let row = row_of(&term, needle).expect("painted");
+            let cells: Vec<u16> = (0..buf.area.width)
+                .filter(|&x| {
+                    buf[(x, row)].symbol() != " "
+                        || buf[(x, row)].bg != ratatui::style::Color::Reset
+                })
+                .collect();
+            let (l, r) = (cells[0], cells[cells.len() - 1]);
+            (l + r + 1) / 2
+        };
+        assert_eq!(centre(quip), centre(name));
+    }
+
+    #[test]
     fn mascot_tooltip_paints_gateway_verb_into_buffer() {
         let mut term = Terminal::new(TestBackend::new(60, 8)).unwrap();
         term.draw(|f| {
