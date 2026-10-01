@@ -229,7 +229,8 @@ fn pet_walk_never_clips_through_furniture() {
     let layout = r.cached_layout().expect("layout after prime").clone();
     for cycle in 0u64..4 {
         for step in 0..35u64 {
-            let now = t0() + Duration::from_millis(cycle * 40_000 + step * 400);
+            let now =
+                t0() + Duration::from_millis(cycle * pixtuoid_scene::PET_CYCLE_MS + step * 400);
             r.render(&scene, pack(), now).unwrap();
             if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos()
                 && anim == PetKind::Cat.walk_anim()
@@ -256,7 +257,10 @@ fn pet_rest_pos_is_walkable() {
     let layout = r.cached_layout().expect("layout after prime").clone();
     for cycle in 0u64..4 {
         for step in 0..10u64 {
-            let now = t0() + Duration::from_millis(cycle * 40_000 + 14_200 + step * 2_600);
+            let now = t0()
+                + Duration::from_millis(
+                    cycle * pixtuoid_scene::PET_CYCLE_MS + 14_200 + step * 2_600,
+                );
             r.render(&scene, pack(), now).unwrap();
             if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos()
                 && anim != PetKind::Cat.walk_anim()

@@ -26,7 +26,8 @@ const NAP_NEAR_DESK_PX: i32 = 16;
 /// floor is roughly half the buffer, so P(all miss) is ~2^-8 per call.
 const TARGET_TRIES: u32 = 8;
 
-const PET_CYCLE_MS: u64 = 40_000;
+/// One pet roam cycle: pick a destination, walk there, rest.
+pub const PET_CYCLE_MS: u64 = 40_000;
 
 /// A destination drawn from the WHOLE walkable floor, deterministic per
 /// `(seed, n)` — the ONE destination rule both roamers and every daemon state use.

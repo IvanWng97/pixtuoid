@@ -41,6 +41,8 @@ pub mod chitchat;
 pub(crate) mod composite;
 pub(crate) mod creatures;
 #[doc(hidden)]
+pub use creatures::PET_CYCLE_MS;
+#[doc(hidden)]
 pub mod cutaway;
 pub(crate) mod dither;
 pub mod embedded_pack;
