@@ -357,10 +357,6 @@ fn north_wall_census() -> impl Iterator<Item = SceneLayout> {
     })
 }
 
-fn overlaps(a: Bounds, b: Bounds) -> bool {
-    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
-}
-
 fn is_exit_sign(k: &FixtureKind) -> bool {
     matches!(
         k,
@@ -589,7 +585,7 @@ fn no_two_fixtures_overlap_but_by_design() {
         for (i, a) in fixtures.iter().enumerate() {
             for b in fixtures[i + 1..]
                 .iter()
-                .filter(|b| overlaps(a.visual, b.visual))
+                .filter(|b| a.visual.overlaps(b.visual))
             {
                 if on_runner(a, b) || on_runner(b, a) {
                     continue;
@@ -649,7 +645,7 @@ fn no_meeting_furniture_or_plant_blocks_a_doorway() {
                 )
             }) {
                 assert!(
-                    !overlaps(f.visual, opening),
+                    !f.visual.overlaps(opening),
                     "{}x{}: {:?} {:?} in the doorway {opening:?}",
                     l.buf_w,
                     l.buf_h,

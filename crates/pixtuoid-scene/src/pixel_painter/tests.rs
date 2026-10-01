@@ -5808,9 +5808,6 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
 fn corridor_appliance_art_never_lands_on_a_workstation() {
     use crate::layout::{CHARACTER_SPRITE_H, CHARACTER_SPRITE_W, FixtureKind, Station};
     const TALL_AISLES: std::ops::RangeInclusive<u16> = 10..=14;
-    let overlaps = |a: crate::layout::Bounds, b: crate::layout::Bounds| {
-        a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
-    };
     let mut sizes = vec![
         (96, 60),
         (120, 72),
@@ -5875,7 +5872,7 @@ fn corridor_appliance_art_never_lands_on_a_workstation() {
                 violations.extend(
                     workstations
                         .iter()
-                        .filter(|&&ws| overlaps(f.visual, ws))
+                        .filter(|&&ws| f.visual.overlaps(ws))
                         .map(|ws| {
                             format!(
                                 "{w}x{h} seed {seed} aisle {:?}: {station:?} art {:?} on {ws:?}",

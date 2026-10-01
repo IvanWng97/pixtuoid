@@ -816,18 +816,14 @@ fn place_wall_decor(
         });
     }
     // A band too short to hang a piece under the neon sign drops it.
-    let neon = (
-        Point {
-            x: NEON_PANEL.x,
-            y: NEON_PANEL.y,
-        },
-        Size {
-            w: NEON_PANEL.width,
-            h: NEON_PANEL.height,
-        },
-    );
     wall_decor.retain(|d| {
-        !super::placement::rects_overlap((d.pos, furniture_def(d.kind.furniture()).visual), neon)
+        let v = furniture_def(d.kind.furniture()).visual;
+        !NEON_PANEL.overlaps(Bounds {
+            x: d.pos.x,
+            y: d.pos.y,
+            width: v.w,
+            height: v.h,
+        })
     });
     wall_decor
 }

@@ -87,24 +87,20 @@ impl PantryRoom {
             return Some(r);
         };
         let (cw, ch) = (self.counter_size.w, self.counter_size.h);
-        let counter = (
-            anchored_top_left(Anchor::Center, c, cw, ch),
-            self.counter_size,
-        );
-        let art = (
-            Point { x: r.x, y: r.y },
-            Size {
-                w: r.width,
-                h: r.height,
-            },
-        );
-        if !crate::layout::placement::rects_overlap(art, counter) {
+        let at = anchored_top_left(Anchor::Center, c, cw, ch);
+        let counter = Bounds {
+            x: at.x,
+            y: at.y,
+            width: cw,
+            height: ch,
+        };
+        if !r.overlaps(counter) {
             return Some(r);
         }
         let x = if r.x + r.width / 2 < c.x {
-            counter.0.x.checked_sub(r.width)?
+            counter.x.checked_sub(r.width)?
         } else {
-            counter.0.x + cw
+            counter.x + cw
         };
         let b = self.bounds;
         (x >= b.x && x + r.width <= b.x + b.width).then_some(Bounds { x, ..r })

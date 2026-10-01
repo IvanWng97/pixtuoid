@@ -735,17 +735,9 @@ impl SceneLayout {
     /// The fixture hovering `cell` points at: the topmost whose art covers any
     /// of it — the one painted last there, by depth and then roster order.
     pub fn fixture_at(&self, cell: Bounds) -> Option<FixtureKind> {
-        let overlaps = |b: Bounds| {
-            b.width > 0
-                && b.height > 0
-                && cell.x < b.x + b.width
-                && b.x < cell.x + cell.width
-                && cell.y < b.y + b.height
-                && b.y < cell.y + cell.height
-        };
         self.fixtures()
             .enumerate()
-            .filter(|(_, f)| overlaps(f.visual))
+            .filter(|(_, f)| cell.overlaps(f.visual))
             .max_by_key(|&(i, f)| (f.depth, i))
             .map(|(_, f)| f.kind)
     }
@@ -777,12 +769,12 @@ impl SceneLayout {
             .chain(self.clock_pos().map(|at| boxed(at, CLOCK)))
             .collect();
         let clear = |board: Bounds| {
-            taken.iter().all(|v| {
-                v.y >= board.y + board.height
-                    || board.y >= v.y + v.height
-                    || v.x >= board.x + board.width + NOTICE_BOARD_GAP
-                    || board.x >= v.x + v.width + NOTICE_BOARD_GAP
-            })
+            let spaced = Bounds {
+                x: board.x.saturating_sub(NOTICE_BOARD_GAP),
+                width: board.width + 2 * NOTICE_BOARD_GAP,
+                ..board
+            };
+            taken.iter().all(|v| !spaced.overlaps(*v))
         };
         let (lo, hi) = (b.x + 1, (b.x + b.width).saturating_sub(1));
         let middle = b.x + b.width / 2;
@@ -831,14 +823,8 @@ impl SceneLayout {
             },
             ENTRY_MAT,
         );
-        let apart = |a: Bounds, b: Bounds| {
-            a.x + a.width <= b.x
-                || b.x + b.width <= a.x
-                || a.y + a.height <= b.y
-                || b.y + b.height <= a.y
-        };
         // Shifted west off the cooler standing against the east wall.
-        if let Some(cooler) = p.water_cooler_rect().filter(|&c| !apart(c, mat)) {
+        if let Some(cooler) = p.water_cooler_rect().filter(|c| c.overlaps(mat)) {
             mat.x = cooler
                 .x
                 .checked_sub(mat.width)
@@ -852,7 +838,7 @@ impl SceneLayout {
         [island, self.pantry_counter(), self.corridor]
             .into_iter()
             .flatten()
-            .all(|b| apart(b, mat))
+            .all(|b| !b.overlaps(mat))
             .then_some(mat)
     }
 

@@ -72,6 +72,21 @@ pub struct Bounds {
     pub height: u16,
 }
 
+impl Bounds {
+    /// Whether the two half-open boxes share a pixel. A zero-sized box shares
+    /// none.
+    pub(crate) fn overlaps(self, other: Bounds) -> bool {
+        self.width > 0
+            && self.height > 0
+            && other.width > 0
+            && other.height > 0
+            && self.x < other.x + other.width
+            && other.x < self.x + self.width
+            && self.y < other.y + other.height
+            && other.y < self.y + self.height
+    }
+}
+
 /// A position in buffer-pixel space (screen-space: east = +x, south = +y,
 /// north = −y = the buffer top).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -193,42 +193,60 @@ impl MeetingRoom {
 mod tests {
     use super::*;
 
+    /// Dual-meeting floors (160x120, 192x158, 240x160) stack a room by the
+    /// south edge, whose last rows the corridor shares.
     #[test]
-    fn every_meeting_rug_ends_on_the_floor() {
-        for (w, h) in [(96u16, 60u16), (160, 96), (240, 144), (320, 180)] {
+    fn every_meeting_rug_ends_before_the_runner() {
+        let mut south_rooms = 0;
+        for (w, h) in [
+            (96u16, 60u16),
+            (160, 96),
+            (160, 120),
+            (192, 158),
+            (240, 144),
+            (240, 160),
+            (320, 180),
+        ] {
             for seed in 0..8 {
                 let Some(layout) = crate::layout::Layout::compute_with_seed(w, h, None, seed)
                 else {
                     continue;
                 };
-                for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio) {
-                    let rug = trio.rug(layout.buf_h);
+                let floor_end = layout.corridor.map_or(layout.buf_h, |c| c.y);
+                for f in layout.fixtures() {
+                    let crate::layout::FixtureKind::MeetingRug { room } = f.kind else {
+                        continue;
+                    };
+                    let room = layout.meeting_rooms[room].bounds;
+                    south_rooms += usize::from(room.y + room.height > floor_end);
+                    let rug = f.visual;
                     assert!(
-                        rug.y + rug.height <= layout.buf_h,
-                        "{w}x{h} seed {seed}: {rug:?}"
+                        rug.y + rug.height <= floor_end,
+                        "{w}x{h} seed {seed}: {rug:?} past {floor_end}"
                     );
                 }
             }
         }
+        assert!(south_rooms > 0, "no meeting room reaches the corridor");
     }
 
     #[test]
-    fn a_meeting_rug_reaches_no_further_than_the_table_is_from_the_south_edge() {
+    fn a_meeting_rug_reaches_no_further_than_the_table_is_from_the_floor_end() {
         let x = 40;
         let trio = MeetingTrio {
             sofas: [Point { x, y: 50 }, Point { x, y: 90 }],
             table: Point { x, y: 70 },
         };
-        let buf_h = 96;
+        let floor_end = 96;
         assert_eq!(
-            trio.rug(buf_h).height,
-            buf_h - trio.table.y + MEETING_RUG_OVERHANG,
-            "held to the table's distance from the office's south edge"
+            trio.rug(floor_end).height,
+            floor_end - trio.table.y + MEETING_RUG_OVERHANG,
+            "held to the table's distance from the floor's end"
         );
         assert_eq!(
             trio.rug(200).height,
             90 - 50 + MEETING_RUG_OVERHANG,
-            "sofa to sofa where the office allows"
+            "sofa to sofa where the floor allows"
         );
         let edge = trio.table.y + MEETING_RUG_OVERHANG / 2;
         assert_eq!(
