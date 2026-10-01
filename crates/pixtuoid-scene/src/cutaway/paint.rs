@@ -140,7 +140,7 @@ pub(crate) struct Badge {
     pub(crate) tone: crate::overlay::LabelTone,
 }
 
-/// Art pixels between a plate's edge and its text.
+/// Art pixels between a plate's sides or bottom and its text ([`PLATE_H`] says why not the top).
 const PLATE_PAD: u16 = 1;
 
 /// A plate's height on the art grid: padded below only, since the line's
