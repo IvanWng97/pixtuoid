@@ -182,6 +182,10 @@ api)
     repos/owner/repo/statuses/*)
         jq -c --arg sha "${path##*/}" '. + {sha: $sha}' >>"$POSTED_STATUSES"
         ;;
+    repos/owner/repo/commits/*/statuses)
+        [[ "${FAKE_STATUS_PAGES:-}" != error ]] || exit 1
+        printf '%s\n' "$FAKE_STATUS_PAGES"
+        ;;
     *) exit 1 ;;
     esac
     ;;
@@ -218,6 +222,8 @@ run_publisher() {
         FAKE_PR_FILES="${PR_FILES:-$pr_files}" \
         FAKE_HEAD_AFTER_FILES="${FAKE_HEAD_AFTER_FILES:-}" \
         FAKE_FAIL_POST="${FAKE_FAIL_POST:-}" \
+        CARRIED_FROM="${CARRIED_FROM:-}" \
+        FINGERPRINT="${FINGERPRINT:-}" \
         POSTED_STATUSES="$posted_statuses" \
         POSTED_THREADS="$posted_threads" \
         PUBLISHED_COMMENT="$published_comment" \
@@ -458,6 +464,90 @@ jq -e --arg b "$hostile_thread_body" \
 run_prior_fetch "$(page </dev/null | jq -cs .)"
 jq -e '. == []' "$prior_threads" >/dev/null ||
     fail "a PR without this lens's threads does not get an empty list, a full review: $(<"$prior_threads")"
+
+# ── Carrying a review over: only this lens's published review of the same input ──
+reviewed_head=1111111111111111111111111111111111111111
+new_head=2222222222222222222222222222222222222222
+fingerprint_a="$(printf a | sha256sum | cut -d' ' -f1)"
+fingerprint_b="$(printf b | sha256sum | cut -d' ' -f1)"
+# The comment the publisher writes is the record the carry step reads.
+FINGERPRINT="$fingerprint_a" run_publisher "$valid_review" "$reviewed_head" "$reviewed_head" ||
+    fail "Claude publisher rejected a valid review with an input fingerprint"
+published_record="$(<"$published_comment")"
+[[ "$published_record" == *$'\n'"Input: \`$fingerprint_a\`"$'\n'* ]] ||
+    fail "Claude publisher did not record the input fingerprint: $published_record"
+FINGERPRINT=not-a-fingerprint run_publisher "$valid_review" ||
+    fail "Claude publisher rejected a review with no usable fingerprint"
+[[ "$(<"$published_comment")" != *"Input:"* ]] ||
+    fail "Claude publisher recorded an unusable fingerprint"
+
+carry_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Carry over an unchanged review")"
+comments_query="$(yq -e -r '.jobs.analyze.steps[] | select(.id == "carry") | .env.COMMENTS_QUERY' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
+    fail "the carry step has no COMMENTS_QUERY"
+comment() { jq -cn --arg body "$1" --arg type "$2" --arg login "$3" '{author: {__typename: $type, login: $login}, body: $body}'; }
+comment_pages() { jq -cs '[{data: {repository: {pullRequest: {comments: {nodes: .}}}}}]'; }
+status_pages() {
+    jq -cn --arg context "$review_status" --arg state "$1" --arg login "$2" \
+        '[[{context: "ci-gate", state: "success", creator: {login: "github-actions[bot]"}},
+           {context: $context, state: $state, creator: {login: $login}}]]'
+}
+published_status="$(status_pages success 'github-actions[bot]')"
+other_lens_record="${published_record//"$review_title"/${title_template//"$lens_expr"/$(sed -n 2p <<<"$bot_lenses")}}"
+carry_output="$test_dir/carry-output"
+run_carry() {
+    : >"$carry_output"
+    (cd "$test_dir" && PATH="$fake_bin:$PATH" COMMENTS_QUERY="$comments_query" FAKE_THREAD_PAGES="$1" \
+        FAKE_STATUS_PAGES="$2" FINGERPRINT="${3:-$fingerprint_a}" GH_TOKEN=test-token GITHUB_OUTPUT="$carry_output" \
+        PR_NUMBER=42 REPOSITORY=owner/repo REVIEW_STATUS="$review_status" REVIEW_TITLE="$review_title" \
+        bash -c "$carry_script") >/dev/null 2>&1 || fail "the carry step exited non-zero instead of reviewing in full"
+}
+assert_carry() {
+    local expect="$1" label="$2"
+    shift 2
+    run_carry "$@"
+    if [[ "$expect" == carried ]]; then
+        grep -qx "carried_from=$reviewed_head" "$carry_output" ||
+            fail "the carry step did not carry over $label: $(<"$carry_output")"
+    elif grep -q '^carried_from=.' "$carry_output"; then
+        fail "the carry step carried over $label"
+    fi
+}
+assert_carry carried "the same input with a published status" \
+    "$(comment "$published_record" Bot github-actions | comment_pages)" "$published_status"
+assert_carry full "a changed input" \
+    "$(comment "$published_record" Bot github-actions | comment_pages)" "$published_status" "$fingerprint_b"
+assert_carry full "a review recorded without a fingerprint" \
+    "$(comment "$(grep -v '^Input:' <<<"$published_record")" Bot github-actions | comment_pages)" "$published_status"
+assert_carry full "a review whose status is not success" \
+    "$(comment "$published_record" Bot github-actions | comment_pages)" "$(status_pages failure 'github-actions[bot]')"
+assert_carry full "a status someone else posted" \
+    "$(comment "$published_record" Bot github-actions | comment_pages)" "$(status_pages success alice)"
+assert_carry full "unreadable statuses" \
+    "$(comment "$published_record" Bot github-actions | comment_pages)" error
+assert_carry full "a person's copy of the review comment" \
+    "$(comment "$published_record" User alice | comment_pages)" "$published_status"
+assert_carry full "the other lens's review" \
+    "$(comment "$other_lens_record" Bot github-actions | comment_pages)" "$published_status"
+assert_carry full "an older review of the same input than the latest" \
+    "$({
+        comment "$published_record" Bot github-actions
+        comment "${published_record//$fingerprint_a/$fingerprint_b}" Bot github-actions
+    } | comment_pages)" "$published_status"
+assert_carry full "no prior review" "$(comment_pages </dev/null)" "$published_status"
+assert_carry full "unreadable comments" "not json" "$published_status"
+
+CARRIED_FROM="$reviewed_head" run_publisher "" "$new_head" "$new_head" ||
+    fail "Claude publisher refused to carry a review over"
+assert_status ".state == \"success\" and .sha == \"$new_head\" and (.description | contains(\"${reviewed_head::7}\"))" \
+    "a carried review passes the lens at the new head and names the reviewed one"
+[[ ! -e "$published_comment" && ! -e "$posted_threads" ]] ||
+    fail "Claude publisher re-posted a carried review's comment or threads"
+CARRIED_FROM="$reviewed_head" run_publisher "" moved-head "$new_head" >/dev/null 2>&1 &&
+    fail "Claude publisher carried a review over to a head that moved"
+[[ ! -e "$posted_statuses" ]] || fail "Claude publisher passed a moved head's lens"
+CARRIED_FROM=not-a-head run_publisher "" "$new_head" "$new_head" >/dev/null 2>&1 &&
+    fail "Claude publisher carried over from a malformed head"
+[[ ! -e "$posted_statuses" ]] || fail "Claude publisher passed the lens from a malformed head"
 
 report_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Mark the review failed")"
 run_report() {

@@ -49,9 +49,12 @@ jobs:
       contents: read
       id-token: write
       pull-requests: read
+      statuses: read
     outputs:
       bounds: ${{ steps.schema.outputs.bounds }}
+      carried_from: ${{ steps.carry.outputs.carried_from }}
       claude_outcome: ${{ steps.claude.outcome }}
+      fingerprint: ${{ steps.fingerprint.outputs.fingerprint }}
       head_sha: ${{ steps.pr.outputs.head_sha }}
       number: ${{ steps.pr.outputs.number }}
       review: ${{ steps.claude.outputs.structured_output }}
@@ -174,8 +177,70 @@ jobs:
                 body_max: $f.body.maxLength} | tojson)"' \
             .github/prompts/review-schema.json >>"$GITHUB_OUTPUT"
 
-      - name: Run read-only Claude review
+      # What the model would judge: the PR's own changes and the trusted rules.
+      - name: Fingerprint the review input
         if: steps.pr.outputs.reviewable == 'true'
+        id: fingerprint
+        env:
+          PROMPT_PATH: ${{ inputs.prompt_path }}
+        run: |
+          set -euo pipefail
+          fingerprint="$(sha256sum .claude-review/pr.diff "$PROMPT_PATH" .github/prompts/review-schema.json |
+            sha256sum | cut -d' ' -f1)"
+          echo "fingerprint=$fingerprint" >>"$GITHUB_OUTPUT"
+
+      # A model re-run on unchanged input is not a new verdict, only fresh
+      # noise: the merge queue's update of an approved PR would re-open review
+      # with nits on code already reviewed. A maintainer's /claude-review always
+      # gets a full review.
+      - name: Carry over an unchanged review
+        if: steps.pr.outputs.reviewable == 'true' && github.event_name == 'pull_request_target'
+        id: carry
+        env:
+          FINGERPRINT: ${{ steps.fingerprint.outputs.fingerprint }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          REPOSITORY: ${{ github.repository }}
+          COMMENTS_QUERY: >-
+            query($owner: String!, $repo: String!, $number: Int!, $endCursor: String) {
+            repository(owner: $owner, name: $repo) { pullRequest(number: $number) {
+            comments(first: 100, after: $endCursor) { pageInfo { hasNextPage endCursor }
+            nodes { author { __typename login } body } } } } }
+        run: |
+          set -euo pipefail
+          # Fail closed: anything short of this lens's published review of the
+          # same input leaves carried_from empty, which means a full review.
+          if ! prior="$(gh api graphql --paginate --slurp -f query="$COMMENTS_QUERY" \
+            -f owner="${REPOSITORY%/*}" -f repo="${REPOSITORY#*/}" -F number="$PR_NUMBER" |
+            jq -r --arg title "$REVIEW_TITLE" '
+              [.[].data.repository.pullRequest.comments.nodes[]
+                | select(.author == {__typename: "Bot", login: "github-actions"}
+                    and (.body | split("\n")[0] == "## \($title)"))]
+              | last | .body // ""')"; then
+            echo "::notice::no prior review readable; reviewing in full"
+            exit 0
+          fi
+          reviewed_head="$(sed -n 's/^Head: .\([0-9a-f]\{40\}\).$/\1/p' <<<"$prior" | head -n 1)"
+          reviewed_input="$(sed -n 's/^Input: .\([0-9a-f]\{64\}\).$/\1/p' <<<"$prior" | head -n 1)"
+          if [[ -z "$reviewed_head" || "$reviewed_input" != "$FINGERPRINT" ]]; then
+            echo "::notice::the input changed since the last published review; reviewing in full"
+            exit 0
+          fi
+          # The comment only names the review; the verdict is the lens's status
+          # at that head, set by an Actions token, never by a person.
+          if ! verdict="$(gh api --paginate --slurp "repos/$REPOSITORY/commits/$reviewed_head/statuses" |
+            jq -r --arg context "$REVIEW_STATUS" '
+              [.[][] | select(.context == $context)] | first
+              | if . != null and .state == "success" and .creator.login == "github-actions[bot]"
+                then "published" else "absent" end')" || [[ "$verdict" != published ]]; then
+            echo "::notice::no published $REVIEW_STATUS at ${reviewed_head::7}; reviewing in full"
+            exit 0
+          fi
+          echo "carried_from=$reviewed_head" >>"$GITHUB_OUTPUT"
+          echo "::notice::the input is unchanged since the review at ${reviewed_head::7}; carrying it over"
+
+      - name: Run read-only Claude review
+        if: steps.pr.outputs.reviewable == 'true' && steps.carry.outputs.carried_from == ''
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
@@ -211,7 +276,7 @@ jobs:
             --json-schema ${{ steps.schema.outputs.json }}
 
       - name: Require a valid structured review
-        if: steps.pr.outputs.reviewable == 'true'
+        if: steps.pr.outputs.reviewable == 'true' && steps.carry.outputs.carried_from == ''
         env:
           REVIEW_JSON: ${{ steps.claude.outputs.structured_output }}
         run: |
@@ -227,7 +292,7 @@ jobs:
     needs: analyze
     if: >
       needs.analyze.outputs.reviewable == 'true' &&
-      needs.analyze.outputs.claude_outcome == 'success'
+      (needs.analyze.outputs.claude_outcome == 'success' || needs.analyze.outputs.carried_from != '')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -237,7 +302,9 @@ jobs:
     steps:
       - name: Publish validated Claude review
         env:
+          CARRIED_FROM: ${{ needs.analyze.outputs.carried_from }}
           EXPECTED_HEAD_SHA: ${{ needs.analyze.outputs.head_sha }}
+          FINGERPRINT: ${{ needs.analyze.outputs.fingerprint }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ needs.analyze.outputs.number }}
           REPOSITORY: ${{ github.repository }}
@@ -246,6 +313,26 @@ jobs:
           BOUNDS: ${{ needs.analyze.outputs.bounds }}
         run: |
           set -euo pipefail
+          post_status() {
+            jq -n --arg state success --arg context "$REVIEW_STATUS" --arg target_url "$RUN_URL" \
+              --arg description "$1" '$ARGS.named' |
+              gh api --method POST "repos/${REPOSITORY}/statuses/${EXPECTED_HEAD_SHA}" --input - > /dev/null
+          }
+          # The carried review's threads already sit on the PR, so only the
+          # status moves to the new head.
+          if [[ -n "${CARRIED_FROM:-}" ]]; then
+            if [[ ! "$CARRIED_FROM" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error title=Malformed carried review::$CARRIED_FROM"
+              exit 1
+            fi
+            current_head="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+            if [[ "$current_head" != "$EXPECTED_HEAD_SHA" ]]; then
+              echo "::error title=Stale Claude review::Expected $EXPECTED_HEAD_SHA but PR head is $current_head"
+              exit 1
+            fi
+            post_status "Carried over from ${CARRIED_FROM::7}: unchanged input"
+            exit 0
+          fi
           # Severities reach a heading and a thread body, so only a plain label passes.
           if ! jq -n --exit-status --argjson b "$BOUNDS" '
             ($b.severities | type == "array" and length > 0 and all(.[]; type == "string" and test("^[a-z-]+$")))
@@ -305,6 +392,11 @@ jobs:
             echo "## $REVIEW_TITLE"
             echo
             echo "Head: \`$EXPECTED_HEAD_SHA\`"
+            # What a later run compares to carry this review over.
+            if [[ "${FINGERPRINT:-}" =~ ^[0-9a-f]{64}$ ]]; then
+              echo
+              echo "Input: \`$FINGERPRINT\`"
+            fi
             echo
             if (( finding_count == 0 )); then
               echo "**Findings: 0** — No findings"
@@ -376,9 +468,7 @@ jobs:
             exit 1
           fi
           # Success whatever the findings: each one blocks as its unresolved thread.
-          jq -n --arg state success --arg context "$REVIEW_STATUS" --arg target_url "$RUN_URL" \
-            --arg description "Published at this head: $finding_count findings" '$ARGS.named' |
-            gh api --method POST "repos/${REPOSITORY}/statuses/${EXPECTED_HEAD_SHA}" --input - > /dev/null
+          post_status "Published at this head: $finding_count findings"
 
   # `!cancelled()` is load-bearing: an implicit `success()` would skip this job
   # exactly when it is needed.

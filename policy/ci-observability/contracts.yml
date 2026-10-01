@@ -19,7 +19,7 @@
     is one a prompt injection could reach; id-token is the only write it holds,
     for the model's workload-identity login.
   assert: |
-    .jobs.analyze.permissions == {"contents": "read", "id-token": "write", "pull-requests": "read"}
+    .jobs.analyze.permissions == {"contents": "read", "id-token": "write", "pull-requests": "read", "statuses": "read"}
   break:
     - .jobs.analyze.permissions.contents = "write"
     - .jobs.analyze.permissions.actions = "write"
@@ -174,6 +174,26 @@
     - '.jobs.report_absence.steps += [{"uses": "actions/checkout@v7"}]'
     - .jobs.publish.permissions.contents = "write"
     - .jobs.report_absence.permissions["pull-requests"] = "write"
+
+- id: reviewer-carries-over-only-an-unchanged-review
+  file: .github/workflows/claude-readonly-review.yml
+  why: >-
+    A carried-over review passes the lens with no model run, so only the carry
+    step may decide it, only on a push (a maintainer's /claude-review always
+    asks for a fresh one), and the model runs whenever that step carried
+    nothing; what the step accepts as unchanged is action_behavior_test.sh's.
+  assert: |
+    .jobs.analyze as $analyze
+    | [$analyze.steps[] | select(.id == "carry")] as $carry
+    | [$analyze.steps[] | select(.id == "claude")] as $claude
+    | ($carry | length == 1) and ($claude | length == 1)
+      and ($carry[0].if | contains("github.event_name == 'pull_request_target'"))
+      and $claude[0].if == "steps.pr.outputs.reviewable == 'true' && steps.carry.outputs.carried_from == ''"
+      and $analyze.outputs.carried_from == "${{ steps.carry.outputs.carried_from }}"
+  break:
+    - (.jobs.analyze.steps[] | select(.id == "carry") | .if) = "steps.pr.outputs.reviewable == 'true'"
+    - (.jobs.analyze.steps[] | select(.id == "claude") | .if) = "steps.pr.outputs.reviewable == 'true' && steps.carry.outcome != 'success'"
+    - .jobs.analyze.outputs.carried_from = "${{ steps.pr.outputs.head_sha }}"
 
 - id: reviewer-fork-head-needs-a-maintainer
   file: .github/workflows/claude-review.yml

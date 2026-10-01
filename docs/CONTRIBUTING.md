@@ -80,7 +80,10 @@ run. The jobs:
   default branch, the PR diff, title, body and the lens's prior threads as
   inert data, and a separate least-privilege publisher that opens a review
   thread per finding and sets the lens's `claude-review/<lens>` status.
-  `claude.yml` refuses fork PR heads.
+  A push that leaves the PR's own diff and the review rules unchanged, like
+  the queue merging `main` in, carries the last published review over rather
+  than asking a non-deterministic model again; `/claude-review` always
+  reviews afresh. `claude.yml` refuses fork PR heads.
 - **CodeQL** stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).
