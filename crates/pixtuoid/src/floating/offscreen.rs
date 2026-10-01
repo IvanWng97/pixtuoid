@@ -62,12 +62,8 @@ impl OfficeRenderer {
 
     /// Build the name-badge overlay for the LAST rendered frame (call right after
     /// `render`). Floating has no agent-hover yet → `hovered = None`.
-    pub fn labels(
-        &mut self,
-        scene: &SceneState,
-        now: SystemTime,
-    ) -> Vec<pixtuoid_scene::overlay::LabelElement> {
-        self.session.overlay(scene, now, None)
+    pub fn labels(&self, scene: &SceneState) -> Vec<pixtuoid_scene::overlay::LabelElement> {
+        self.session.overlay(scene, None)
     }
 
     /// The neon wall-board model for the current scene.
@@ -184,10 +180,6 @@ pub(crate) fn sync_floor_caps(
     true
 }
 
-/// Labels center on the bundled width, not a custom pack's `frame.width`; a differently-sized
-/// pack's badge sits off-center, which is cosmetic.
-const FLOATING_SPRITE_W: i32 = pixtuoid_scene::layout::CHARACTER_SPRITE_W as i32;
-
 /// Name-badge AA font size (px), drawn at NATIVE surface res (not upscaled by the office
 /// `scale`) so a badge stays a crisp fixed-height caption over the chunky sprites. Tuned
 /// by eye against `examples/floating_snapshot`.
@@ -284,9 +276,8 @@ pub fn paint_labels_into_surface(
         let marker = "\u{25cf}";
         let text = format!("{marker}{}", el.text);
         let tw = crate::aa_text::text_width(&text, LABEL_FONT_PX);
-        // anchor_px is the sprite TOP-LEFT in office space.
         const BADGE_LIFT_PX: i32 = 12;
-        let cx = el.anchor_px.x as i32 * scale + (FLOATING_SPRITE_W * scale) / 2 - tw / 2;
+        let cx = el.anchor_px.x as i32 * scale - tw / 2;
         let cy = el.anchor_px.y as i32 * scale - BADGE_LIFT_PX;
         // The CLI-identity split: the ● dot keeps the activity tone (status), the name
         // paints in the source's badge hue (identity).
@@ -705,6 +696,44 @@ mod tests {
         }
     }
 
+    /// The badge's ink centres on the anchor scaled to the surface: `anchor_px` is
+    /// already the sprite's top-centre, so any extra offset walks it off the sprite.
+    #[test]
+    fn a_badge_centres_its_ink_on_the_scaled_anchor() {
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::{LabelElement, LabelTone};
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let (w, h, scale) = (240usize, 60usize, 3i32);
+        let ground = 0x0080_8080u32;
+        let mut sb = vec![ground; w * h];
+        let anchor = Point { x: 40, y: 15 };
+        paint_labels_into_surface(
+            &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
+            &[LabelElement {
+                anchor_px: anchor,
+                text: "idle-x".into(),
+                tone: LabelTone::Idle,
+                hovered: false,
+            }],
+            scale,
+            theme,
+        );
+        let cols: Vec<i32> = (0..w)
+            .filter(|&x| (0..h).any(|y| sb[y * w + x] != ground))
+            .map(|x| x as i32)
+            .collect();
+        let (Some(&left), Some(&right)) = (cols.first(), cols.last()) else {
+            panic!("the badge painted nothing");
+        };
+        let centre = i32::from(anchor.x) * scale;
+        // Glyph side bearings and the 1-px drop shadow, not an offset.
+        const ROUNDING_PX: i32 = 2;
+        assert!(
+            ((left + right) / 2 - centre).abs() <= ROUNDING_PX,
+            "ink spans {left}..={right}, centred off the anchor's {centre}"
+        );
+    }
+
     #[test]
     fn paint_labels_split_the_status_dot_tone_from_the_cli_name_hue() {
         // A registered prefix (`cc·`) exercises the `Some(hue)` arm the tone-only
@@ -1104,8 +1133,8 @@ mod tests {
             Transport::Jsonl,
         );
 
-        // No frame rendered yet → no cached layout → the guard returns empty.
-        assert!(renderer.labels(&scene, now).is_empty());
+        // No frame rendered yet → no drawn sprites → no badges.
+        assert!(renderer.labels(&scene).is_empty());
         renderer.render(FrameInputs {
             world: FloorInputs {
                 scene: &scene,
@@ -1118,7 +1147,7 @@ mod tests {
             size: Size { w: 160, h: 96 },
             debug_walkable: false,
         });
-        let labels = renderer.labels(&scene, now);
+        let labels = renderer.labels(&scene);
         assert_eq!(labels.len(), 1, "one seeded agent → one name badge");
         let anchor = labels[0].anchor_px;
         assert!(

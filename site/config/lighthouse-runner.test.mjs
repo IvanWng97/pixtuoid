@@ -241,6 +241,35 @@ test('an upstream that dies mid-body ends the response instead of crashing the r
   }
 });
 
+test('a client that aborts before upstream answers does not crash the runner', async () => {
+  let answer;
+  const upstream = await listen(
+    http.createServer((req, res) => {
+      if (req.url !== '/late') return res.end('ok');
+      answer = () => res.end('too late');
+    })
+  );
+  const proxy = await startPagesLikeProxy({ upstreamPort: upstream.address().port, port: 0 });
+  try {
+    const closed = new Promise((resolve) =>
+      proxy.once('request', (_, res) => res.once('close', resolve))
+    );
+    const client = http.get({ host: 'localhost', port: proxy.address().port, path: '/late' });
+    client.on('error', () => {});
+    while (!answer) await new Promise(setImmediate);
+    client.destroy();
+    await closed;
+    answer();
+    const after = await wire(proxy.address().port, '/next');
+    assert.equal(after.body.toString(), 'ok');
+  } finally {
+    proxy.closeAllConnections();
+    proxy.close();
+    upstream.closeAllConnections();
+    upstream.close();
+  }
+});
+
 test('the audited port and the preview port come from the config, and must differ', () => {
   const collect = (url, previewPort) => ({ collect: { url, previewPort } });
   assert.deepEqual(

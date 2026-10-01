@@ -462,10 +462,8 @@ impl Seat {
         self.pos.y
     }
 
-    /// The render ANCHOR-BASE. The ONE authority BOTH the sprite blit
-    /// (`sim::resolve_characters`) AND its label twin
-    /// (`anchors::character_anchor`) derive the anchor from, so the badge can
-    /// never float above the sitter.
+    /// The render ANCHOR-BASE, which `sim::resolve_characters` places the sprite
+    /// and its badge from.
     pub(super) fn render_anchor(self, sprite_w: u16) -> Point {
         if self.seated_furniture() {
             back_couch_anchor(self.pos, sprite_w)
