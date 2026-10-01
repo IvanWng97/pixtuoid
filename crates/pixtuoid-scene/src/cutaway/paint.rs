@@ -5669,8 +5669,8 @@ S B B B B B B S
     }
 
     /// A storm's strike lifts the whole frame by whole ramp steps, what glows
-    /// of its own too, and its window glass further, the bolt's; outside a
-    /// storm the same flash lifts nothing.
+    /// of its own too, and its window glass further, the bolt's. That only a
+    /// storm strikes is the model's: `a_strike_flashes_at_its_bucket_offset_and_ends_with_the_flash`.
     #[test]
     fn a_strike_lifts_the_room_and_its_glass_most() {
         use crate::sky::{Sky, Weather};
@@ -5733,12 +5733,6 @@ S B B B B B B S
             assert!(
                 bolted > 0,
                 "at scale {s} the bolt lit no glass past the room"
-            );
-            let (clear, _) = drawn(Weather::Clear, 0.0);
-            let (clear_flash, _) = drawn(Weather::Clear, 1.0);
-            assert!(
-                clear.as_slice() == clear_flash.as_slice(),
-                "a flash outside a storm lit the room"
             );
         }
     }
