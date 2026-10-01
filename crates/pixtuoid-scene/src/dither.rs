@@ -3,6 +3,8 @@
 //! flat bands with a dithered seam ([`step`]); a gradient between two is
 //! dithered across its span ([`takes_next`]).
 
+use pixtuoid_core::sprite::Rgb;
+
 /// The 4x4 ordered (Bayer) threshold matrix.
 ///
 /// Its evenly-spread levels are why a dither reads as a smooth ramp rather than
@@ -52,6 +54,31 @@ pub(crate) fn stepped(level: f32, peak: f32, tones: u8, x: u16, y: u16) -> f32 {
     }
     let tone = peak / f32::from(tones);
     f32::from(nearest(level / tone, x, y).min(tones)) * tone
+}
+
+/// Colours already stepped `level` stops: a shade crosses a handful of tones,
+/// and scanning them per pixel is cheaper than [`Rgb::ramp`]'s hashed memo.
+pub(crate) struct Stepped {
+    level: i8,
+    seen: Vec<(Rgb, Rgb)>,
+}
+
+impl Stepped {
+    pub(crate) fn new(level: i8) -> Self {
+        Self {
+            level,
+            seen: Vec::new(),
+        }
+    }
+
+    pub(crate) fn of(&mut self, c: Rgb) -> Rgb {
+        if let Some(&(_, stepped)) = self.seen.iter().find(|(from, _)| *from == c) {
+            return stepped;
+        }
+        let stepped = c.ramp(self.level);
+        self.seen.push((c, stepped));
+        stepped
+    }
 }
 
 #[cfg(test)]

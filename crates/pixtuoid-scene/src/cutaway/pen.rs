@@ -13,6 +13,7 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::cutaway::shade::fill;
+use crate::dither::Stepped;
 use crate::render_scale::RenderScale;
 
 /// A length or coordinate on the art grid.
@@ -26,31 +27,6 @@ pub(crate) struct ArtRect {
     pub(crate) y: ArtPx,
     pub(crate) w: ArtPx,
     pub(crate) h: ArtPx,
-}
-
-/// Colours already stepped `level` stops: a shade crosses a handful of tones,
-/// and scanning them per pixel is cheaper than [`Rgb::ramp`]'s hashed memo.
-pub(crate) struct Stepped {
-    level: i8,
-    seen: Vec<(Rgb, Rgb)>,
-}
-
-impl Stepped {
-    pub(crate) fn new(level: i8) -> Self {
-        Self {
-            level,
-            seen: Vec::new(),
-        }
-    }
-
-    pub(crate) fn of(&mut self, c: Rgb) -> Rgb {
-        if let Some(&(_, stepped)) = self.seen.iter().find(|(from, _)| *from == c) {
-            return stepped;
-        }
-        let stepped = c.ramp(self.level);
-        self.seen.push((c, stepped));
-        stepped
-    }
 }
 
 /// Paints on a render's art grid (the module doc): `k` buffer pixels make one
