@@ -323,6 +323,42 @@ mod tests {
         RgbBuffer::from_pixels(w, h, px)
     }
 
+    /// Each half-block shows the buffer pixel the classic flush would: the
+    /// one under the middle of that half of its cell. A 6x13 cell (odd, so
+    /// the halves' middles round) fits 2x art at scale 6, upscale 3; each
+    /// pixel holds its own (x, y).
+    #[test]
+    fn a_half_block_samples_the_middle_of_its_half_cell() {
+        let cell = CellSize { w: 6, h: 13 };
+        let area = TermSize {
+            width: 4,
+            height: 3,
+        };
+        let fit = Fit::new(cell, area, Density::new(2).expect("nonzero")).expect("fits");
+        assert_eq!(fit.upscale(), 3);
+        let mut t = Tiles::new(ImageProtocol::Sixel, cell, fit);
+        let (w, h) = (8, 12);
+        let px = (0..h)
+            .flat_map(|y| (0..w).map(move |x| Rgb { r: x, g: y, b: 0 }))
+            .collect();
+        let buf = RgbBuffer::from_pixels(u16::from(w), u16::from(h), px);
+        t.changed(&buf, &Dirty::All);
+        let halves = t.half_blocks(&buf);
+        assert_eq!((halves.width(), halves.height()), (4, 6));
+        let shows = |col: u16, row: u16| {
+            let (top, bottom) = (halves.get(col, row * 2), halves.get(col, row * 2 + 1));
+            ((top.r, top.g), (bottom.r, bottom.g))
+        };
+        // Image px x = 6c + 3, y = 13r + 3 (top) and 13r + 9 (bottom), over 3.
+        assert_eq!(shows(0, 0), ((1, 1), (1, 3)));
+        assert_eq!(shows(1, 1), ((3, 5), (3, 7)));
+        assert_eq!(
+            shows(3, 2),
+            ((7, 9), (7, 11)),
+            "the last cell, which the art only partly covers"
+        );
+    }
+
     fn rect(x: u16, y: u16, width: u16, height: u16) -> Dirty {
         Dirty::Rects(vec![Bounds {
             x,
