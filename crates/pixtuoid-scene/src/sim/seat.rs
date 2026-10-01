@@ -1,12 +1,12 @@
 //! The seat model. [`Seat`] (kind × cell × facing) is the single source of
 //! truth for an occupant of ANY seat — waypoint couch, sofa, meeting chair,
-//! island stool, or a home desk: sprite + flip, render anchor, sort row and
+//! island stool, or a home desk: sprite + flip, render top-left, sort row and
 //! sit-down glide all derive from it. [`SeatView`] is the LOOK it resolves to,
 //! not the authority.
 
 use super::*;
 
-use crate::sim::anchors::{back_couch_anchor, waypoint_anchor};
+use crate::sim::anchors::{back_couch_top_left, waypoint_top_left};
 use pixtuoid_core::state::FloorLocalDeskIndex;
 
 /// The still back view — also the fallback for a pose that has none of its own,
@@ -45,14 +45,14 @@ enum SeatKind {
 }
 
 /// A seat: WHAT you sit on, WHERE, and which way you LOOK. Everything a sitter
-/// needs — sprite, flip, render anchor, sort row, sit-down glide — derives from
+/// needs — sprite, flip, render top-left, sort row, sit-down glide — derives from
 /// these three, so a couch, a meeting chair and a home desk are one thing.
 ///
 /// Extend [`view`](Self::view) and [`sprite_for`](Self::sprite_for) to add a
 /// seatable furniture — both list their kinds EXPLICITLY, so a new
 /// `WaypointKind` is a compile error there. The GEOMETRY pair reads
 /// [`seated_furniture`](Self::seated_furniture) instead, which defaults a
-/// newcomer to the upright anchor and feet-row key without complaint. The net
+/// newcomer to the upright top-left and feet-row key without complaint. The net
 /// for THAT is `sit_arc_sort_row_is_stable_and_on_the_right_side_of_its_furniture`,
 /// a per-kind sort row oracle that stops on a kind it does not name — and it sees
 /// a newcomer only if the furniture is `occupies_pos` and the ONE layout it
@@ -63,7 +63,7 @@ pub(crate) struct Seat {
     /// The cell the SPRITE renders on — a waypoint's resolved stand cell, a
     /// desk's walk anchor. NOT the settle foot-cell `settle_seat` matches on,
     /// which for a couch/sofa/chair is `WALKING_Y_OFF - SEAT_RENDER_Y_OFF`
-    /// further south; constructing a `Seat` from that shifts anchor and sort row.
+    /// further south; constructing a `Seat` from that shifts top-left and sort row.
     pos: Point,
     /// Which way the SITTER looks, decoupled from the side they approached from.
     facing: crate::layout::Facing,
@@ -105,7 +105,7 @@ impl Seat {
     }
 
     /// Whether this seat's occupant sits at SEAT height. Read by both geometry
-    /// arms so they cannot disagree — a seat-height anchor paired with a
+    /// arms so they cannot disagree — a seat-height top-left paired with a
     /// feet sort row sorts a sitter through their own furniture. The meeting
     /// chair qualifies because its profile sprite shares the front `seated`
     /// sprite's bottom-row geometry.
@@ -239,13 +239,13 @@ impl Seat {
 
     /// The render ANCHOR-BASE, which `sim::resolve_characters` places the sprite
     /// and its badge from.
-    pub(crate) fn render_anchor(self, sprite_w: u16) -> Point {
+    pub(crate) fn render_top_left(self, sprite_w: u16) -> Point {
         if self.seated_furniture() {
-            back_couch_anchor(self.pos, sprite_w)
+            back_couch_top_left(self.pos, sprite_w)
         } else {
-            // The desk sitter keeps the UPRIGHT anchor: their seat cell IS the
+            // The desk sitter keeps the UPRIGHT top-left: their seat cell IS the
             // walk anchor the arrival settles on, so sprite and walk share it.
-            waypoint_anchor(self.pos, sprite_w)
+            waypoint_top_left(self.pos, sprite_w)
         }
     }
 }

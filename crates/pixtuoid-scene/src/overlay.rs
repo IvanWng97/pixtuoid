@@ -253,7 +253,7 @@ mod tests {
     fn drawn(slot: &AgentSlot, at: Point) -> AgentFrame {
         AgentFrame {
             agent_id: slot.agent_id,
-            anchor: at,
+            top_left: at,
             w: 8,
             h: 12,
             label_anchor: at,
