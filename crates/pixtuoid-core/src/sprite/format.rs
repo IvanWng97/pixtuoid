@@ -1513,7 +1513,8 @@ fn single_char(k: &str, what: KeySite) -> Result<char> {
 }
 
 /// The furthest a `[ramps]` level may step either way. Past it the darkest
-/// colors stop changing from one level to the next in 8 bits.
+/// colors stop changing from one level to the next in 8 bits. Also the depth
+/// [`Rgb::ramp`](super::Rgb::ramp) shares its headroom over, so changing it recolours every ramp.
 pub const MAX_RAMP_LEVEL: i8 = 10;
 
 fn build_palette(

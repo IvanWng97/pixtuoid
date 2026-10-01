@@ -15,7 +15,10 @@ const CMD_UNSAFE: &[char] = &[
     ' ', '\t', ';', ',', '=', '"', '&', '|', '<', '>', '(', ')', '^', '%',
 ];
 
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(
+    all(not(windows), not(test)),
+    expect(dead_code, reason = "only the Windows installer calls it off test")
+)]
 fn first_cmd_unsafe_char(p: &str) -> Option<char> {
     p.chars().find(|c| CMD_UNSAFE.contains(c))
 }
@@ -31,7 +34,10 @@ pub(super) fn windows_bare_hook_command(resolved_path: &str, source: &str) -> Re
     resolve_windows_command(resolved_path, source, short_path_windows)
 }
 
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(
+    all(not(windows), not(test)),
+    expect(dead_code, reason = "only the Windows installer calls it off test")
+)]
 fn resolve_windows_command(
     path: &str,
     source: &str,

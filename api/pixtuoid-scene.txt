@@ -150,7 +150,6 @@ pub fn pixtuoid_scene::floor::FloorCtx::evict_missing(&mut self, &pixtuoid_core:
 pub fn pixtuoid_scene::floor::FloorCtx::frame_layout(&mut self, u16, u16, u64) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::Layout>>
 pub fn pixtuoid_scene::floor::FloorCtx::new() -> Self
 pub fn pixtuoid_scene::floor::FloorCtx::recompute_door_anim_max_ms(&mut self, std::time::SystemTime)
-pub fn pixtuoid_scene::floor::FloorCtx::route_ctx(&mut self) -> pixtuoid_scene::pose::RouteCtx<'_>
 impl core::default::Default for pixtuoid_scene::floor::FloorCtx
 pub fn pixtuoid_scene::floor::FloorCtx::default() -> Self
 impl core::marker::Freeze for pixtuoid_scene::floor::FloorCtx
@@ -161,6 +160,7 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::floor::FloorCtx
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::floor::FloorCtx
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::FloorCtx
 pub struct pixtuoid_scene::floor::FloorFrame
+pub pixtuoid_scene::floor::FloorFrame::agents: alloc::vec::Vec<pixtuoid_scene::pixel_painter::AgentFrame>
 pub pixtuoid_scene::floor::FloorFrame::layout: alloc::sync::Arc<pixtuoid_scene::layout::Layout>
 pub pixtuoid_scene::floor::FloorFrame::occupied_waypoints: std::collections::hash::set::HashSet<usize>
 impl core::marker::Freeze for pixtuoid_scene::floor::FloorFrame
@@ -215,7 +215,7 @@ pub fn pixtuoid_scene::floor::FloorSession::buf(&self) -> &pixtuoid_core::sprite
 pub fn pixtuoid_scene::floor::FloorSession::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::FloorSession::new() -> Self
 pub fn pixtuoid_scene::floor::FloorSession::observe(&mut self, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::ObservedFloor>
-pub fn pixtuoid_scene::floor::FloorSession::overlay(&mut self, &pixtuoid_core::state::SceneState, std::time::SystemTime, core::option::Option<pixtuoid_core::id::AgentId>) -> alloc::vec::Vec<crate::overlay::LabelElement>
+pub fn pixtuoid_scene::floor::FloorSession::overlay(&self, &pixtuoid_core::state::SceneState, core::option::Option<pixtuoid_core::id::AgentId>) -> alloc::vec::Vec<crate::overlay::LabelElement>
 pub fn pixtuoid_scene::floor::FloorSession::render(&mut self, pixtuoid_scene::floor::FrameInputs<'_>) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::Layout>>
 pub fn pixtuoid_scene::floor::FloorSession::reset_frame_cache(&mut self)
 impl core::default::Default for pixtuoid_scene::floor::FloorSession
@@ -1463,6 +1463,7 @@ pub struct pixtuoid_scene::pixel_painter::AgentFrame
 pub pixtuoid_scene::pixel_painter::AgentFrame::agent_id: pixtuoid_core::id::AgentId
 pub pixtuoid_scene::pixel_painter::AgentFrame::anchor: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::pixel_painter::AgentFrame::h: u16
+pub pixtuoid_scene::pixel_painter::AgentFrame::label_anchor: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::pixel_painter::AgentFrame::w: u16
 impl core::clone::Clone for pixtuoid_scene::pixel_painter::AgentFrame
 pub fn pixtuoid_scene::pixel_painter::AgentFrame::clone(&self) -> pixtuoid_scene::pixel_painter::AgentFrame
@@ -1485,9 +1486,11 @@ pub pixtuoid_scene::pixel_painter::CharacterPlacement::agent_idx: usize
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::anchor: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::anchor_y: u16
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::anim_name: &'static str
+pub pixtuoid_scene::pixel_painter::CharacterPlacement::breathes: bool
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::flip_x: bool
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::frame_idx: usize
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::glow: pixtuoid_scene::pixel_painter::CharacterGlow
+pub pixtuoid_scene::pixel_painter::CharacterPlacement::label_anchor: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::seat_desk: core::option::Option<pixtuoid_scene::layout::Point>
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::seated: bool
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::sleep_z_seed: core::option::Option<u64>

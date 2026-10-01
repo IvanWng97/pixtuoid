@@ -428,7 +428,7 @@ fn the_exit_sign_hangs_centred_over_the_door_indicator_below_the_window_head() {
 }
 
 #[test]
-fn a_notice_board_hangs_within_one_pane_or_west_of_the_windows() {
+fn a_notice_board_hangs_within_one_pane() {
     let mut met = 0;
     for l in north_wall_census().chain(offices()) {
         for f in l.fixtures() {
@@ -437,11 +437,9 @@ fn a_notice_board_hangs_within_one_pane_or_west_of_the_windows() {
             };
             met += 1;
             let b = f.visual;
-            let plain = NEON_PANEL.x..super::super::window_run(l.buf_w).start;
             assert!(
                 l.window_bays()
                     .flat_map(|bay| bay.panes())
-                    .chain([plain])
                     .any(|p| p.start <= b.x && b.x + b.width <= p.end),
                 "{}x{}: {b:?} straddles a frame",
                 l.buf_w,
@@ -470,7 +468,12 @@ fn snapping_to_a_pane_keeps_the_notice_board() {
 fn the_clock_hangs_centred_on_a_window_post() {
     let mut met = 0;
     for l in north_wall_census() {
+        let at = format!("{}x{}", l.buf_w, l.buf_h);
         let Some(clock) = l.fixtures().find(|f| f.kind == FixtureKind::Clock) else {
+            assert!(
+                super::super::window_posts(l.buf_w).count() <= 1,
+                "{at}: no clock, though a post stands clear of the neon"
+            );
             continue;
         };
         met += 1;
@@ -478,60 +481,10 @@ fn the_clock_hangs_centred_on_a_window_post() {
         let centre = clock.x + clock.width / 2;
         assert!(
             super::super::window_posts(l.buf_w).any(|p| (p.start + p.end) / 2 == centre),
-            "{}x{}: {clock:?} off every post",
-            l.buf_w,
-            l.buf_h
+            "{at}: {clock:?} off every post"
         );
     }
     assert!(met > 0, "the census met a clock");
-}
-
-#[test]
-fn a_clock_covering_no_window_hangs_wherever_two_windows_fit() {
-    let mut met = 0;
-    for l in north_wall_census() {
-        let Some(clock) = l.fixtures().find(|f| f.kind == FixtureKind::Clock) else {
-            assert!(
-                l.buf_w < super::super::TWO_WINDOW_WALL_W,
-                "{}x{}: no clock",
-                l.buf_w,
-                l.buf_h
-            );
-            continue;
-        };
-        met += 1;
-        let clock = clock.visual;
-        assert!(
-            l.window_bays()
-                .all(|b| clock.x + clock.width <= b.x || b.span().end <= clock.x),
-            "{}x{}: {clock:?} over a window",
-            l.buf_w,
-            l.buf_h
-        );
-    }
-    assert!(met > 0, "the census met a clock");
-}
-
-#[test]
-fn the_neon_sign_hangs_a_post_west_of_the_first_window() {
-    for l in north_wall_census() {
-        let Some(first) = super::super::window_slots(l.buf_w).next() else {
-            continue;
-        };
-        let gap = first.x - (NEON_PANEL.x + NEON_PANEL.width);
-        let clock = l.fixtures().find(|f| f.kind == FixtureKind::Clock);
-        let holds_clock = |p: &std::ops::Range<u16>| {
-            clock.is_some_and(|c| p.start <= c.visual.x && c.visual.x < p.end)
-        };
-        assert!(
-            super::super::window_posts(l.buf_w)
-                .filter(|p| !holds_clock(p))
-                .all(|p| (p.end - p.start).abs_diff(gap) <= 1),
-            "{}x{}: the neon stands a post's width west of the first window",
-            l.buf_w,
-            l.buf_h
-        );
-    }
 }
 
 /// The [`kind_key`] pairs whose art overlaps by design, each in key order.

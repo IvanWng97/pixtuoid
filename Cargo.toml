@@ -30,6 +30,12 @@ categories   = ["command-line-utilities", "visualization"]
 [workspace.lints.rust]
 unreachable_pub = "warn"
 
+# An `allow` outlives the warning it silenced; an `expect` fails once its lint
+# stops firing, and a `reason` says why the suppression exists.
+[workspace.lints.clippy]
+allow_attributes                = "warn"
+allow_attributes_without_reason = "warn"
+
 # Rustdoc lints only fire during a doc build, so they're invisible to
 # `cargo build`/`clippy`; CI's `docs` job runs `cargo doc` to execute them.
 [workspace.lints.rustdoc]

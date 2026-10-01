@@ -62,8 +62,7 @@ pub(crate) fn install_crash_hook() {
     }));
 }
 
-#[allow(deprecated)]
-fn extract_panic_message(info: &std::panic::PanicInfo<'_>) -> String {
+fn extract_panic_message(info: &std::panic::PanicHookInfo<'_>) -> String {
     if let Some(s) = info.payload().downcast_ref::<&str>() {
         return (*s).to_string();
     }

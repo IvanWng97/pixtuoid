@@ -1,7 +1,7 @@
 use super::*;
 use crate::composite::blend;
 use crate::embedded_pack::test_default_pack;
-use crate::layout::{window_bays, window_run};
+use crate::layout::{WINDOW_W, window_bays, window_run};
 use crate::lighting::SPILL_DEPTH;
 use crate::sky::{ForcedWeather, hour_is_day, set_weather_override};
 use std::time::SystemTime;

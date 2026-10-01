@@ -45,10 +45,10 @@ pub(crate) fn activate_os(pid: i32) -> bool {
     unsafe {
         NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
             .map(|app| {
-                // ActivateIgnoringOtherApps is deprecated on 14+ but still
-                // honored; the plain no-options activate() is "cooperative"
-                // and drops the request while the user interacts elsewhere.
-                #[allow(deprecated)]
+                #[expect(
+                    deprecated,
+                    reason = "deprecated on 14+ but still honored; the no-options activate() is cooperative and drops the request while the user interacts elsewhere"
+                )]
                 app.activateWithOptions(
                     objc2_app_kit::NSApplicationActivationOptions::NSApplicationActivateIgnoringOtherApps,
                 )

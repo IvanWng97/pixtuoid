@@ -12,7 +12,7 @@ use pixtuoid_core::{AgentSlot, ToolKind};
 use crate::anim::epoch_ms;
 use crate::atmosphere::Look;
 use crate::floor::NeonLevels;
-use crate::layout::{Facing, Layout, Point, WINDOW_W};
+use crate::layout::{Facing, Layout, Point};
 
 /// The floor lamp's level at full dark, before the room's own level.
 const FLOOR_LAMP_GAIN: f32 = 0.55;
@@ -350,7 +350,7 @@ impl Lights {
                         kind: EmitterKind::WindowSpill,
                         light: Light::Spill {
                             x: bay.x,
-                            w: WINDOW_W,
+                            w: bay.w,
                             top,
                             slant: look.spill_slant,
                         },

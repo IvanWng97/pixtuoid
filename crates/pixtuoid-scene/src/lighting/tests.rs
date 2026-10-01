@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 use super::*;
+use crate::layout::WINDOW_W;
 use crate::sky::{Sky, Weather};
 
 /// A desk away from every edge.

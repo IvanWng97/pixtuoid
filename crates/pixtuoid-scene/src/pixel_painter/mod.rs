@@ -82,6 +82,8 @@ pub struct AgentFrame {
     pub w: u16,
     /// The painted frame's pixel height.
     pub h: u16,
+    /// Its placement's [`CharacterPlacement::label_anchor`].
+    pub label_anchor: Point,
 }
 
 /// What [`paint_frame`] drew that hover can name.
@@ -105,6 +107,7 @@ pub(crate) mod seat;
 mod sim;
 mod wall;
 
+#[cfg(test)]
 pub(crate) use anchors::character_anchor;
 
 #[doc(hidden)]
@@ -493,6 +496,7 @@ fn enqueue_characters<'a>(
                 agent,
                 pose: seat::SpritePose::of(p, agent, ctx.theme),
                 anchor: p.anchor,
+                label_anchor: p.label_anchor,
                 sleep_z_seed: p.sleep_z_seed,
                 waiting_bubble: p.waiting_bubble,
                 walking_dust_frame: p.walking_dust_frame,

@@ -521,7 +521,13 @@ fn activation_backend() -> (&'static str, bool) {
 /// and non-forwarded ssh sessions leave them routinely) would otherwise print a confidently
 /// wrong verdict at a user whose X11 EWMH channel works fine. `focus::linux::detect_channel`
 /// keys the live channel through the SAME reader.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(
+    all(not(target_os = "linux"), not(test)),
+    expect(
+        dead_code,
+        reason = "only the Linux activation backend reads it off test"
+    )
+)]
 fn marker_set(name: &str) -> bool {
     pixtuoid_core::platform::path_env(name).is_some()
 }
@@ -531,7 +537,13 @@ fn marker_set(name: &str) -> bool {
 /// be reported as "X11 EWMH ✓": XWayland sets $DISPLAY, but a native-Wayland terminal never
 /// appears in XWayland's client list and mutter/kwin block focus-steal anyway, so the ✓
 /// would mislead exactly the users focus fails for.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(
+    all(not(target_os = "linux"), not(test)),
+    expect(
+        dead_code,
+        reason = "only the Linux activation backend reads it off test"
+    )
+)]
 fn linux_activation_backend(
     sway: bool,
     hyprland: bool,
@@ -607,14 +619,14 @@ struct RootStatus {
     env: Option<(&'static str, bool)>,
 }
 
-/// The density variants of the pack `source` loads, or why that pack fails to
+/// The densest art of the pack `source` loads, or why that pack fails to
 /// load: `run` refuses to start on it, so doctor says so.
-fn pack_densities(
+fn pack_max_density(
     source: pixtuoid_scene::embedded_pack::PackSource,
-) -> Result<Vec<pixtuoid_core::sprite::format::Density>, String> {
+) -> Result<pixtuoid_core::sprite::format::Density, String> {
     use pixtuoid_core::sprite::error::PackError;
     pixtuoid_scene::embedded_pack::load_sprite_pack(source)
-        .map(|pack| pack.density_variants())
+        .map(|pack| pack.max_density_variant())
         .map_err(|e| {
             let no_manifest = e.chain().any(|c| {
                 matches!(
@@ -646,7 +658,10 @@ struct DoctorReport {
     color_pf: crate::term::ColorPreflight,
     graphics: crate::GraphicsMode,
     graphics_probe: crate::graphics::Probe,
-    densities: Vec<pixtuoid_core::sprite::format::Density>,
+    max_density: pixtuoid_core::sprite::format::Density,
+    /// The terminal's size in cells: the area the graphics row fits the office
+    /// to.
+    term_size: ratatui::layout::Size,
     rows: Vec<DoctorSourceRow>,
     roots: Vec<RootStatus>,
     backend: &'static str,
@@ -826,11 +841,16 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
     let (truecolor_probe, graphics_probe) = probe_terminal_caps(probe_ok, graphics);
     // The pack `run` draws, not the bundled art alone, which understates a user
     // pack shipping density variants.
-    let densities =
-        pack_densities(crate::config::resolve_pack_source(&cfg, None)).unwrap_or_else(|reason| {
+    let max_density = pack_max_density(crate::config::resolve_pack_source(&cfg, None))
+        .unwrap_or_else(|reason| {
             config_warnings.push(reason);
-            Vec::new()
+            pixtuoid_core::sprite::format::Density::ONE
         });
+    // The default only off a terminal, where the graphics probe is not asked
+    // either, so no fit sees it.
+    let term_size = crossterm::terminal::size()
+        .map(|(width, height)| ratatui::layout::Size { width, height })
+        .unwrap_or_default();
 
     let rows: Vec<DoctorSourceRow> = registry::registered_source_names()
         .map(|src| {
@@ -891,7 +911,8 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         color_pf,
         graphics,
         graphics_probe,
-        densities,
+        max_density,
+        term_size,
         rows,
         roots,
         backend,
@@ -941,7 +962,12 @@ fn terminal_category(r: &DoctorReport) -> Category {
     // classic, and a fallback must never go unexplained.
     let mut details = vec![format!(
         "{DETAIL_INDENT}{}",
-        crate::graphics::graphics_diagnostic_row(r.graphics, r.graphics_probe, &r.densities)
+        crate::graphics::graphics_diagnostic_row(
+            r.graphics,
+            r.graphics_probe,
+            r.max_density,
+            r.term_size
+        )
     )];
     // Whenever it has something to say — incl. the ForceColor note, so a
     // NO_COLOR+CLICOLOR_FORCE report still states that color is being forced.
@@ -1525,13 +1551,13 @@ mod tests {
         use pixtuoid_scene::embedded_pack::PackSource;
         let base = tempfile::TempDir::new().expect("tempdir");
         for dir in [base.path().join("gone"), base.path().to_path_buf()] {
-            let reason = pack_densities(PackSource::Explicit(dir)).expect_err("no manifest");
+            let reason = pack_max_density(PackSource::Explicit(dir)).expect_err("no manifest");
             assert!(
                 reason.contains("holds no pack.toml") && reason.contains("pack-dir"),
                 "{reason}"
             );
         }
-        assert!(pack_densities(PackSource::Bundled).is_ok());
+        assert!(pack_max_density(PackSource::Bundled).is_ok());
     }
 
     #[test]
@@ -1628,7 +1654,8 @@ mod tests {
             color_pf: crate::term::ColorPreflight::Proceed,
             graphics: crate::GraphicsMode::Auto,
             graphics_probe: crate::graphics::Probe::NotQueried,
-            densities: Vec::new(),
+            max_density: pixtuoid_core::sprite::format::Density::ONE,
+            term_size: ratatui::layout::Size::default(),
             rows,
             roots: vec![],
             backend: "NSRunningApplication (macOS)",
@@ -1763,6 +1790,44 @@ mod tests {
         let c = terminal_category(&r);
         assert_eq!(c.status, CategoryStatus::Ok);
         assert!(c.summary.contains("probe skipped"), "{}", c.summary);
+    }
+
+    /// The graphics row, as the terminal category prints it: first, whole,
+    /// under the category line.
+    #[test]
+    fn terminal_category_leads_with_the_graphics_plan() {
+        use crate::graphics::{CellSize, Detected, ImageProtocol, Probe};
+        let mut r = summary_report(vec![]);
+        r.graphics_probe = Probe::Answered(Detected {
+            protocol: Some(ImageProtocol::Kitty),
+            cell: Some(CellSize { w: 17, h: 41 }),
+            tmux: false,
+        });
+        r.max_density = pixtuoid_core::sprite::format::Density::new(4).expect("nonzero");
+        r.term_size = ratatui::layout::Size {
+            width: 200,
+            height: 50,
+        };
+        assert_eq!(
+            terminal_category(&r).details[0],
+            format!(
+                "{DETAIL_INDENT}graphics: kitty (17x41 cell) — the cutaway profile would \
+                 render at 16x (4x art upscaled 4x), a 212x128 office (not yet wired to `run`)"
+            )
+        );
+
+        r.graphics_probe = Probe::Answered(Detected {
+            protocol: Some(ImageProtocol::Sixel),
+            cell: Some(CellSize { w: 17, h: 41 }),
+            tmux: true,
+        });
+        assert_eq!(
+            terminal_category(&r).details[0],
+            format!(
+                "{DETAIL_INDENT}graphics: classic half-blocks — inside tmux only kitty \
+                 graphics survive a pane switch here, and this terminal speaks sixel"
+            )
+        );
     }
 
     #[test]

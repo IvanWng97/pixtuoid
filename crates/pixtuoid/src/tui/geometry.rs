@@ -1,6 +1,31 @@
 //! Where the office sits under the terminal's cells.
 
 use pixtuoid_scene::layout::{Bounds, Point};
+use ratatui::layout::{Position, Rect};
+
+/// The one place the TUI knows a cell's shape: a hit test asks it for a cell's
+/// [`CellArea`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SceneGeometry {
+    HalfBlock { origin: Position },
+}
+
+impl SceneGeometry {
+    /// The classic flush of `renderer::scene_rect`'s `scene`.
+    pub(crate) fn half_block(scene: Rect) -> Self {
+        Self::HalfBlock {
+            origin: scene.as_position(),
+        }
+    }
+
+    /// The logical pixels cell `(col, row)` shows, `None` before the origin;
+    /// past the far edge it maps onto pixels nothing paints.
+    pub(crate) fn area_at(self, col: u16, row: u16) -> Option<CellArea> {
+        let Self::HalfBlock { origin } = self;
+        let (col, row) = (col.checked_sub(origin.x)?, row.checked_sub(origin.y)?);
+        Some(CellArea::half_block(col, row))
+    }
+}
 
 /// The office pixels one terminal cell shows, inclusive on both ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,9 +37,8 @@ pub(crate) struct CellArea {
 }
 
 impl CellArea {
-    /// Under the half-block flush (`renderer::flush_buffer_to_term_at_offset`,
-    /// from `renderer::scene_rect`'s origin) a cell shows one pixel column and
-    /// two rows: its upper half and its lower half.
+    /// Under the half-block flush (`renderer::flush_buffer_to_term_at_offset`)
+    /// a cell shows one pixel column and two rows, its upper and lower half.
     pub(crate) fn half_block(col: u16, row: u16) -> Self {
         let y0 = row.saturating_mul(2);
         Self {
@@ -36,8 +60,7 @@ impl CellArea {
     }
 
     /// Whether this cell shows any pixel of the `w`×`h` box whose top-left is
-    /// `tl`, so a box whose edge falls inside the cell is hit from it, whichever
-    /// part of the cell shows it. An empty box shows nowhere.
+    /// `tl`; an empty box shows nowhere.
     pub(crate) fn overlaps(self, tl: Point, w: u16, h: u16) -> bool {
         // u32: a box's exclusive end can lie one past `u16::MAX`.
         let (end_x, end_y) = (
@@ -76,6 +99,14 @@ mod tests {
         let at = Point { x: 3, y: 4 };
         assert!(!CellArea::half_block(3, 2).overlaps(at, 0, 4));
         assert!(!CellArea::half_block(3, 2).overlaps(at, 2, 0));
+    }
+
+    #[test]
+    fn the_half_block_maps_from_the_scene_origin() {
+        let geometry = SceneGeometry::half_block(Rect::new(2, 3, 10, 10));
+        assert_eq!(geometry.area_at(5, 7), Some(CellArea::half_block(3, 4)));
+        assert_eq!(geometry.area_at(1, 7), None);
+        assert_eq!(geometry.area_at(5, 2), None);
     }
 
     #[test]
