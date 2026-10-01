@@ -17,7 +17,7 @@ use crate::dither::Stepped;
 use crate::render_scale::RenderScale;
 
 /// A length or coordinate on the art grid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct ArtPx(pub(crate) u16);
 
 /// A rect on the art grid.
@@ -31,7 +31,7 @@ pub(crate) struct ArtRect {
 
 /// Paints on a render's art grid (the module doc): `k` buffer pixels make one
 /// art pixel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Pen {
     d: NonZeroU16,
     k: NonZeroU16,

@@ -101,6 +101,7 @@ struct Chrome {
     audio: crate::audio::AudioHandle,
     /// Transient +/- volume readout (percent); `None` past [`crate::audio::VOLUME_FLASH_MS`].
     volume_flash: Option<u8>,
+    weather: pixtuoid_scene::pixel_painter::WeatherPolicy,
 }
 
 /// One floor frame's inputs, the same under either painter.
@@ -133,6 +134,11 @@ impl PopupState {
 }
 
 impl Chrome {
+    /// Floor `floor` of `nf`, under this office's weather.
+    fn floor_meta(&self, floor: usize, nf: usize) -> FloorMeta {
+        FloorMeta::for_floor(floor, nf).with_weather(self.weather)
+    }
+
     /// Floor `floor` of `nf` in `scene`, whose projection is `floor_scene`.
     fn frame<'a>(
         &'a self,
@@ -143,7 +149,7 @@ impl Chrome {
         floor: usize,
         nf: usize,
     ) -> Frame<'a> {
-        let meta = FloorMeta::for_floor(floor, nf);
+        let meta = self.floor_meta(floor, nf);
         Frame {
             world: FloorInputs {
                 scene: floor_scene,
@@ -176,7 +182,7 @@ impl Chrome {
         floor: usize,
         nf: usize,
     ) -> FloorInputs<'a> {
-        let meta = FloorMeta::for_floor(floor, nf);
+        let meta = self.floor_meta(floor, nf);
         FloorInputs {
             scene: floor_scene,
             pack,
@@ -235,6 +241,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 onboarding: crate::tui::welcome::OnboardingFrame::default(),
                 audio: crate::audio::AudioHandle::disabled(),
                 volume_flash: None,
+                weather: pixtuoid_scene::pixel_painter::WeatherPolicy::Clock,
             },
             #[cfg(feature = "graphics")]
             cutaway: None,
@@ -414,6 +421,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 cutaway.reset_cache();
             }
         }
+    }
+
+    /// Which weather every floor shows from the next frame on.
+    pub fn set_weather(&mut self, weather: pixtuoid_scene::pixel_painter::WeatherPolicy) {
+        self.chrome.weather = weather;
     }
 
     pub fn set_theme_picker(&mut self, picker: Option<usize>) {
@@ -660,7 +672,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             scene,
             &out.occupied_waypoints,
             |idx| pixtuoid_scene::floor::waypoint_kind_of(out.layout.as_deref(), idx),
-            self.current_floor,
+            self.chrome.floor_meta(
+                self.current_floor,
+                num_floors(scene).min(pixtuoid_scene::floor::MAX_FLOORS),
+            ),
             now,
         );
         // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
@@ -823,10 +838,20 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.cancel_transition();
             return drawn;
         };
+        // Each floor shows its own board; only the footer is the destination's.
+        let boards = [(&from_scene, from_floor), (&to_scene, to_floor)].map(|(floor_scene, i)| {
+            let ctx = self
+                .chrome
+                .frame(scene, floor_scene, pack, now, i, nf)
+                .footer;
+            let footer = pixtuoid_scene::footer::FooterInputs::new(floor_scene, ctx);
+            crate::tui::renderer::wall_board(&footer, floor_scene, now)
+        });
+        let showing = |floor, board| pixtuoid_scene::cutaway::paint::Showing { floor, now, board };
         cutaway.paint_slide(
             crate::tui::cutaway::Slide {
-                leaving: (&from_stepped, from_world.floor),
-                arriving: (&to_stepped, to_world.floor),
+                leaving: (&from_stepped, showing(from_world.floor, &boards[0])),
+                arriving: (&to_stepped, showing(to_world.floor, &boards[1])),
                 t,
                 going_down,
             },
@@ -850,7 +875,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     /// [`Self::render`] under the cutaway: the image in place of the
-    /// half-blocks, and the text a later PR does not move onto the canvas.
+    /// half-blocks, its badges, wall board and floor indicator painted in it,
+    /// and only the footer, tooltips and modals as terminal text.
     fn render_cutaway(
         &mut self,
         cutaway: &mut crate::tui::cutaway::TileCutaway,
@@ -897,7 +923,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.sim_epilogue(Vec::new(), now);
             return drawn;
         };
-        cutaway.paint(&stepped, theme, world.floor, now, scene_area.as_position());
+        let board = crate::tui::renderer::wall_board(&footer, &floor_scene, now);
+        let showing = pixtuoid_scene::cutaway::paint::Showing {
+            floor: world.floor,
+            now,
+            board: &board,
+        };
+        cutaway.paint(&stepped, theme, showing, scene_area.as_position());
         let geometry = cutaway.geometry(scene_area);
         let layout = &stepped.layout;
         let mouse = self

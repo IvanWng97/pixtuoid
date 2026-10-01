@@ -185,3 +185,47 @@ fn footer_note_glyph_tracks_effective_audibility() {
         "restoring volume restores the glyph"
     );
 }
+
+/// A forced weather reaches every consumer the renderer feeds: the viewed
+/// frame, both halves of a floor slide, and the audio frame's rain.
+#[test]
+fn a_forced_weather_reaches_the_frame_both_slide_halves_and_the_rain() {
+    use pixtuoid_scene::pixel_painter::{Weather, WeatherPolicy};
+    let cap = 16;
+    let scene = scene_with(
+        vec![
+            active_on("/w/f0.jsonl", 0, 0),
+            active_on("/w/f1.jsonl", 1, cap),
+        ],
+        cap,
+    );
+    let under = |w| {
+        let mut r = build(80, 40, vec![]);
+        let (handle, rx) = AudioHandle::test_pair();
+        r.set_audio(handle);
+        r.set_weather(WeatherPolicy::Forced(w));
+        r.render(&scene, pack(), t0()).expect("render");
+        let rain = drain_frames(&rx).last().expect("a frame").stems.rain;
+        let still = r.buf().as_slice().to_vec();
+        r.navigate_floor(1, t0());
+        r.render(&scene, pack(), t0() + Duration::from_millis(33))
+            .expect("render");
+        assert!(r.transition().is_some(), "{w:?}: mid-slide");
+        let halves = [0, 1].map(|f| r.floors[f].buf.as_slice().to_vec());
+        (rain, still, halves)
+    };
+    let (storm, clear) = (under(Weather::Storm), under(Weather::Clear));
+    assert!(
+        storm.0 > 0.0 && clear.0 == 0.0,
+        "the rain follows the weather: {} vs {}",
+        storm.0,
+        clear.0
+    );
+    assert!(storm.1 != clear.1, "the viewed frame follows the weather");
+    for f in 0..2 {
+        assert!(
+            storm.2[f] != clear.2[f],
+            "slide half {f} follows the weather"
+        );
+    }
+}

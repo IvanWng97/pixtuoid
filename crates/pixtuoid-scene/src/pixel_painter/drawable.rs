@@ -13,7 +13,7 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 
 use super::palette::{BLACK, WHITE, blend_rgb};
-use super::sim::{Cup, DeskProps};
+use crate::sim::{Cup, DeskProps};
 use pixtuoid_core::AgentSlot;
 
 use super::background::{paint_clock, paint_corridor_runner, paint_neon_panel};
@@ -204,7 +204,7 @@ pub(super) enum DrawableKind<'a> {
     /// The neon sign's panel in this frame's colours.
     NeonSign {
         panel: crate::layout::Bounds,
-        look: super::background::NeonLook,
+        look: crate::floor::NeonLook,
     },
     Clock {
         pos: Point,
@@ -485,7 +485,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
 }
 
 /// Where the cup stands on the desk at `desk`: its top-left cell.
-pub(super) fn desk_cup_at(desk: Point) -> Point {
+pub(crate) fn desk_cup_at(desk: Point) -> Point {
     Point {
         x: desk.x + 2,
         y: desk.y + 2,
@@ -691,7 +691,7 @@ mod tests {
         let render = |cup, ms| {
             let mut buf = RgbBuffer::filled(60, 60, bg);
             let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms);
-            let steam = super::super::sim::cup_effects(desk, cup, now);
+            let steam = crate::sim::cup_effects(desk, cup, now);
             paint_desk_coffee(&mut buf, desk, cup, &steam, th);
             buf.as_slice().iter().filter(|&&c| c != bg).count()
         };
@@ -1004,7 +1004,7 @@ mod tests {
         let pos = Point { x: 30, y: 40 };
         let mut render = |anim_name: &'static str| {
             let mut buf = RgbBuffer::filled(60, 60, Rgb { r: 0, g: 0, b: 0 });
-            let effects = super::super::sim::pet_effects(PetKind::Cat, pos, anim_name, None, now);
+            let effects = crate::sim::pet_effects(PetKind::Cat, pos, anim_name, None, now);
             let d = Drawable {
                 anchor_y: pos.y,
                 layer: Layer::Figure,

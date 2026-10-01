@@ -28,15 +28,16 @@ use pixtuoid_core::id::AgentId;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::{AgentSlot, SceneState};
+use pixtuoid_scene::board::BoardModel;
 use pixtuoid_scene::cutaway::canvas::CutawayCanvas;
-use pixtuoid_scene::cutaway::paint::{Office, render_cutaway};
+use pixtuoid_scene::cutaway::paint::{Office, Showing, render_cutaway};
 use pixtuoid_scene::floor::{
     CoffeeState, FloorCtx, FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs,
     SteppedFloor, render_floor,
 };
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::localclock;
-use pixtuoid_scene::pixel_painter::hour_is_day;
+use pixtuoid_scene::pixel_painter::{Weather, WeatherPolicy, hour_is_day};
 use pixtuoid_scene::render_scale::RenderScale;
 
 // Inside a weather slot (`sky::WEATHER_CYCLE_SECS`, crate-private) with room to
@@ -228,8 +229,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
     assert!(seats >= 12, "{CUTAWAY_LOGICAL:?} seats {seats} < 12");
     // The sky otherwise picks its weather from the clock, so noon and night
     // would each also be a different weather.
-    pixtuoid_scene::pixel_painter::force_weather(Some("clear")).expect("clear is a weather");
-    let meta = FloorMeta::ground();
+    let meta = FloorMeta::ground().with_weather(WeatherPolicy::Forced(Weather::Clear));
 
     let mut group = c.benchmark_group("render_cutaway");
     let Size { w, h } = CUTAWAY_LOGICAL;
@@ -242,7 +242,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
         let base = localclock::at_hour(hour);
         let scene = office_scene(12, 16, base, busy);
         let mut session = FloorSession::new();
-        let stepped: Vec<(SystemTime, SteppedFloor)> = (0..CUTAWAY_FRAMES as u64)
+        let stepped: Vec<(SystemTime, SteppedFloor, BoardModel)> = (0..CUTAWAY_FRAMES as u64)
             .map(|i| {
                 let now = base + Duration::from_millis(i * FRAME_STEP_MS);
                 let floor = session
@@ -257,7 +257,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
                         CUTAWAY_LOGICAL,
                     )
                     .expect("the cutaway extent lays out");
-                (now, floor)
+                (now, floor, session.board(&scene, now))
             })
             .collect();
         let office = |layout| Office {
@@ -279,9 +279,14 @@ fn render_cutaway_frame(c: &mut Criterion) {
         let mut i = 0;
         group.bench_function(&name, |b| {
             b.iter(|| {
-                let (now, SteppedFloor { layout, frame }) = &stepped[i];
+                let (now, SteppedFloor { layout, frame }, board) = &stepped[i];
                 i = (i + 1) % CUTAWAY_FRAMES;
-                render_cutaway(frame, office(layout), meta, *now, &mut cache, &mut buf)
+                let showing = Showing {
+                    floor: meta,
+                    now: *now,
+                    board,
+                };
+                render_cutaway(frame, office(layout), showing, &mut cache, &mut buf)
             });
         });
         if busy {
@@ -294,16 +299,18 @@ fn render_cutaway_frame(c: &mut Criterion) {
         let mut i = 0;
         group.bench_function(format!("{name}_canvas"), |b| {
             b.iter(|| {
-                let (now, floor) = &stepped[i];
+                let (now, floor, board) = &stepped[i];
                 i = (i + 1) % CUTAWAY_FRAMES;
-                canvas
-                    .frame(floor, theme, scale, meta, *now, &mut cache)
-                    .dirty
+                let showing = Showing {
+                    floor: meta,
+                    now: *now,
+                    board,
+                };
+                canvas.frame(floor, theme, scale, showing, &mut cache).dirty
             });
         });
     }
     group.finish();
-    pixtuoid_scene::pixel_painter::force_weather(None).expect("None always resets");
 }
 
 // A module, because rustc ignores a lint attribute on the macro call itself.

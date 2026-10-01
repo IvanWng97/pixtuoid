@@ -20,8 +20,8 @@ use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_scene::cutaway::canvas::{CanvasFrame, CutawayCanvas, Dirty};
-use pixtuoid_scene::cutaway::paint::CutawayCache;
-use pixtuoid_scene::floor::{FloorMeta, SteppedFloor};
+use pixtuoid_scene::cutaway::paint::{CutawayCache, Showing};
+use pixtuoid_scene::floor::SteppedFloor;
 use pixtuoid_scene::layout::{Bounds, Size};
 use pixtuoid_scene::theme::Theme;
 use ratatui::buffer::{Buffer, Cell, CellDiffOption};
@@ -33,11 +33,11 @@ use crate::tui::geometry::SceneGeometry;
 use crate::tui::geometry::slide_offsets;
 use crate::tui::renderer::set_half_block;
 
-/// A floor slide's two floors, each with its meta, at progress `t` of a
-/// [`FloorTransition`](pixtuoid_scene::floor::FloorTransition).
+/// A floor slide's two floors, each as it shows with its own wall board, at
+/// progress `t` of a [`FloorTransition`](pixtuoid_scene::floor::FloorTransition).
 pub(crate) struct Slide<'a> {
-    pub(crate) leaving: (&'a SteppedFloor, FloorMeta),
-    pub(crate) arriving: (&'a SteppedFloor, FloorMeta),
+    pub(crate) leaving: (&'a SteppedFloor, Showing<'a>),
+    pub(crate) arriving: (&'a SteppedFloor, Showing<'a>),
     pub(crate) t: f32,
     pub(crate) going_down: bool,
 }
@@ -133,16 +133,15 @@ impl TileCutaway {
         &mut self,
         stepped: &SteppedFloor,
         theme: &'static Theme,
-        floor: FloorMeta,
-        now: SystemTime,
+        showing: Showing<'_>,
         origin: Position,
     ) {
+        let now = showing.now;
         let CanvasFrame { buf, dirty } = self.canvas.frame(
             stepped,
             theme,
             self.fit.render_scale(),
-            floor,
-            now,
+            showing,
             &mut self.cache,
         );
         if dirty != Dirty::Rects(Vec::new()) {
@@ -166,7 +165,6 @@ impl TileCutaway {
             theme,
             scale,
             slide.leaving.1,
-            now,
             &mut self.cache,
         );
         let arriving = self.arriving.frame(
@@ -174,7 +172,6 @@ impl TileCutaway {
             theme,
             scale,
             slide.arriving.1,
-            now,
             &mut self.cache,
         );
         let (w, h) = (leaving.buf.width(), leaving.buf.height());

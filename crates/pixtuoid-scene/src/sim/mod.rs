@@ -1,6 +1,6 @@
 //! The SIM half of the frame — advance the world, produce no pixels.
 //!
-//! `sim_step` mutates the [`SimStores`] and returns an immutable [`SimFrame`];
+//! `sim_step` mutates the `SimStores` and returns an immutable [`SimFrame`];
 //! the paint pass consumes `&SimFrame` and writes only what `PaintCtx` lends it
 //! mutably. The paint-local caches it borrows are deliberately NOT sim stores:
 //! flushing them changes no behavior, only repaint cost. Headless consumers drive
@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+use pixtuoid_core::id::normalize_path_key;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{ActivityState, DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
@@ -26,12 +27,17 @@ use crate::pet::PetKind;
 use crate::physics::walking_position;
 use crate::pose::{self, Pose, PoseHistory};
 
-use super::anchors::{
-    CHARACTER_SPRITE_W, badge_anchor, on_canvas, walking_anchor, waypoint_anchor,
-    waypoint_rank_offset_x, with_breath,
+use crate::layout::CHARACTER_SPRITE_W;
+use crate::pixel_painter::drawable::{desk_art, desk_art_top, desk_cup_at};
+use crate::pixel_painter::seat::{Seat, settle_seat};
+use anchors::{
+    badge_anchor, on_canvas, walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath,
 };
-use super::drawable::{desk_art, desk_art_top, desk_cup_at};
-use super::seat::{Seat, settle_seat};
+
+pub(crate) mod anchors;
+
+#[doc(hidden)]
+pub use anchors::seated_anchor_facing;
 
 /// The mutable world state one `sim_step` advances.
 pub(crate) struct SimStores<'a> {
@@ -337,7 +343,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
     let mascots = mascot_placements(scene, layout, pack, now);
     let desks = desk_props(&agents, layout, coffee, now);
 
-    let door_frame = super::anchors::compute_door_frame_idx(&agents, now, door_anim_max_ms);
+    let door_frame = anchors::compute_door_frame_idx(&agents, now, door_anim_max_ms);
     SimFrame {
         agents,
         poses,
@@ -364,7 +370,7 @@ pub(super) fn frame_size(pack: &Pack, anim: &str, frame_idx: usize, fallback: Si
 /// The size of `anim`'s frame `frame_idx`, or `None` where the pack lacks it.
 pub(super) fn pack_frame_size(pack: &Pack, anim: &str, frame_idx: usize) -> Option<Size> {
     pack.animation(anim)
-        .and_then(|a| super::frame_at(a, frame_idx))
+        .and_then(|a| crate::pixel_painter::frame_at(a, frame_idx))
         .map(|f| Size {
             w: f.width(),
             h: f.height(),
@@ -843,4 +849,26 @@ pub(crate) fn desk_occupant(
     agents
         .iter()
         .find(|a| a.desk_index.single_floor_local() == local && a.exiting_at.is_none())
+}
+
+/// Deterministic seed from a normalized cwd string: byte-fold, then the
+/// splitmix64 finalizer. NOT `DefaultHasher`: its algorithm may change between
+/// Rust releases, which would re-dress every agent on a toolchain bump.
+fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
+    let folded = cwd_norm
+        .bytes()
+        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64));
+    pixtuoid_core::id::splitmix64(folded)
+}
+
+/// The outfit-determining seed for `agent`. Extracted so
+/// `FrameCache::note_outfit_seed` watches the mid-lifetime cwd backfill through
+/// the EXACT unknown-cwd fallback the palette's `agent_overrides` uses; a second copy would
+/// drift.
+pub(crate) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
+    if agent.unknown_cwd || agent.cwd.as_os_str().is_empty() {
+        agent.agent_id.raw()
+    } else {
+        cwd_outfit_seed(&normalize_path_key(&agent.cwd.to_string_lossy()))
+    }
 }
