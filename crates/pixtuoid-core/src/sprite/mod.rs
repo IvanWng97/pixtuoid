@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use palette::color_difference::EuclideanDistance;
 use palette::convert::FromColorUnclamped;
-use palette::{FromColor, LinSrgb, Mix, Oklab, Srgb};
+use palette::{Clamp, FromColor, IsWithinBounds, LinSrgb, Mix, Oklab, Oklch, Srgb};
 
 use crate::grid::Grid;
 
@@ -38,16 +39,12 @@ const RAMP_WARM_HUE_DEG: f32 = 80.0;
 /// The OKLCH hue shadows pull toward: blue-violet, a cool ambient fill.
 const RAMP_COOL_HUE_DEG: f32 = 280.0;
 
-/// Halvings of an out-of-gamut color's chroma search; far past the point where
-/// a further halving moves no 8-bit channel.
-const GAMUT_BISECTION_STEPS: u32 = 16;
+/// One just-noticeable ΔE-OK, the farthest a clipped color may land from its
+/// target: CSS Color 4's <https://www.w3.org/TR/css-color-4/#GMA-Binary-local-MINDE>.
+const GAMUT_JND: f32 = 0.02;
 
-/// The slope of the sRGB curve's linear segment near black (IEC 61966-2-1).
-const SRGB_TOE_SLOPE: f32 = 12.92;
-
-/// How far past `0..=1` a linear channel still counts as in gamut: half an 8-bit
-/// step at the curve's steepest, [`SRGB_TOE_SLOPE`], so float noise keeps chroma.
-const GAMUT_TOLERANCE: f32 = 0.5 / (u8::MAX as f32 * SRGB_TOE_SLOPE);
+/// Where that search stops, in chroma and in ΔE-OK short of [`GAMUT_JND`].
+const GAMUT_EPSILON: f32 = 0.0001;
 
 impl Rgb {
     /// This color `level` steps along a hue-shifted ramp: lighter and warmer
@@ -102,32 +99,45 @@ impl Rgb {
         Oklab::from_color(Srgb::new(self.r, self.g, self.b).into_format::<f32>())
     }
 
-    /// The sRGB color at `c`'s lightness and hue with as much of its chroma as
-    /// fits. Clipping each channel instead shifts the hue and can undo a ramp
-    /// step outright: lit yellow clips back to the yellow itself.
+    /// `c` cut in chroma at its lightness and hue until clipping it lands within
+    /// [`GAMUT_JND`]. Clipping alone turns a far color's hue; cutting chroma alone
+    /// jumps wherever the path grazes a cube face.
     fn from_oklab_in_gamut(c: Oklab) -> Rgb {
-        let at =
-            |share: f32| LinSrgb::from_color_unclamped(Oklab::new(c.l, c.a * share, c.b * share));
-        let in_gamut = |share: f32| {
-            let s = at(share);
-            [s.red, s.green, s.blue]
-                .iter()
-                .all(|v| (-GAMUT_TOLERANCE..=1.0 + GAMUT_TOLERANCE).contains(v))
+        let lin = |c: Oklch| LinSrgb::from_color_unclamped(c);
+        let clip = |c: Oklch| {
+            let clipped = lin(c).clamp();
+            let miss =
+                Oklab::from_color_unclamped(clipped).distance(Oklab::from_color_unclamped(c));
+            (clipped, miss)
         };
-        let mut share = 1.0;
-        if !in_gamut(share) {
-            let (mut fits, mut spills) = (0.0, 1.0);
-            for _ in 0..GAMUT_BISECTION_STEPS {
-                let mid = (fits + spills) / 2.0;
-                if in_gamut(mid) {
-                    fits = mid;
-                } else {
-                    spills = mid;
+        let mut current = Oklch::from_color_unclamped(c);
+        let mut clipped = lin(current);
+        if !clipped.is_within_bounds() {
+            let miss;
+            (clipped, miss) = clip(current);
+            if miss >= GAMUT_JND {
+                let (mut min, mut max) = (0.0, current.chroma);
+                let mut min_in_gamut = true;
+                while max - min > GAMUT_EPSILON {
+                    current.chroma = (min + max) / 2.0;
+                    if min_in_gamut && lin(current).is_within_bounds() {
+                        min = current.chroma;
+                        continue;
+                    }
+                    let miss;
+                    (clipped, miss) = clip(current);
+                    if miss >= GAMUT_JND {
+                        max = current.chroma;
+                    } else if GAMUT_JND - miss < GAMUT_EPSILON {
+                        break;
+                    } else {
+                        min_in_gamut = false;
+                        min = current.chroma;
+                    }
                 }
             }
-            share = fits;
         }
-        let out: Srgb<u8> = Srgb::<f32>::from_linear(at(share)).into_format();
+        let out: Srgb<u8> = Srgb::<f32>::from_linear(clipped).into_format();
         Rgb {
             r: out.red,
             g: out.green,
@@ -691,8 +701,6 @@ impl RgbBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use palette::IsWithinBounds;
-    use palette::color_difference::EuclideanDistance;
 
     const fn rgb(r: u8, g: u8, b: u8) -> Rgb {
         Rgb { r, g, b }
@@ -759,16 +767,18 @@ mod tests {
         rgb(255, 255, 0),
     ];
 
-    /// Also catches a clipped out-of-gamut step ([`Rgb::from_oklab_in_gamut`]).
+    /// Or the same color, where a lit step clips back within a [`GAMUT_JND`].
     #[test]
     fn every_ramp_level_a_pack_may_declare_is_lighter_than_the_one_below() {
         let max = format::MAX_RAMP_LEVEL;
         for base in RAMP_BASES {
             assert_eq!(base.ramp(0), base);
-            let lightness: Vec<f32> = (-max..=max).map(|n| base.ramp(n).lightness()).collect();
+            let shades: Vec<Rgb> = (-max..=max).map(|n| base.ramp(n)).collect();
             assert!(
-                lightness.windows(2).all(|w| w[0] < w[1]),
-                "{base:?}: {lightness:?}"
+                shades
+                    .windows(2)
+                    .all(|w| w[0].lightness() < w[1].lightness() || w[0] == w[1]),
+                "{base:?}: {shades:?}"
             );
         }
     }
@@ -784,14 +794,12 @@ mod tests {
                 .iter()
                 .all(|&d| d <= 1);
             assert!(
-                rounding || moved(a, b) - moved(from, to) < 0.02,
+                rounding || moved(a, b) - moved(from, to) < GAMUT_JND,
                 "level {level}: {from:?} -> {a:?} but {to:?} -> {b:?}"
             );
         }
     }
 
-    /// A shadow whose chroma path runs a hair outside the cube's red face
-    /// before it reaches the target.
     #[test]
     fn a_ramp_step_has_no_cliff_where_its_chroma_path_grazes_the_gamut() {
         for b in 240..u8::MAX {
@@ -812,15 +820,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn srgb_toe_slope_is_the_transfer_functions() {
-        let dark = 0.001;
-        assert_eq!(
-            Srgb::<f32>::from_linear(LinSrgb::new(dark, 0.0, 0.0)).red,
-            SRGB_TOE_SLOPE * dark
-        );
     }
 
     #[test]
@@ -900,26 +899,27 @@ mod tests {
         );
     }
 
-    /// Blue to yellow leaves the sRGB gamut just past blue: the mix gives up
-    /// chroma and keeps the hue it interpolated, where clipping each channel
-    /// would turn it.
+    /// Blue to green leaves the gamut through its middle, where clipping each
+    /// channel alone would turn the hue a JND or more.
     #[test]
     fn a_mix_that_leaves_the_gamut_keeps_its_hue() {
-        let (blue, yellow) = (rgb(0, 0, 255), rgb(255, 255, 0));
-        let (from, to) = (blue.to_oklab(), yellow.to_oklab());
-        let hue = |c: Oklab| c.b.atan2(c.a).to_degrees();
-        for t in [0.05, 0.1] {
+        let (blue, green) = (rgb(0, 0, 255), rgb(0, 255, 0));
+        let (from, to) = (blue.to_oklab(), green.to_oklab());
+        let off_hue = |c: Oklab, of: Oklab| {
+            let lch = Oklch::from_color_unclamped(c);
+            let on_hue = Oklch::new(lch.l, lch.chroma, Oklch::from_color_unclamped(of).hue);
+            c.distance(Oklab::from_color_unclamped(on_hue))
+        };
+        for t in [0.2, 0.3] {
             let lerped = from.mix(to, t);
+            let clipped =
+                Oklab::from_color_unclamped(LinSrgb::from_color_unclamped(lerped).clamp());
             assert!(
-                !LinSrgb::from_color_unclamped(lerped).is_within_bounds(),
-                "t={t} must leave the gamut, or this checks nothing"
+                off_hue(clipped, lerped) >= GAMUT_JND,
+                "t={t}: clipping must turn the hue, or this checks nothing"
             );
-            let got = hue(blue.mix(yellow, t).to_oklab());
-            assert!(
-                (got - hue(lerped)).abs() < 0.3,
-                "t={t}: hue {got} vs {}",
-                hue(lerped)
-            );
+            let got = off_hue(blue.mix(green, t).to_oklab(), lerped);
+            assert!(got < GAMUT_JND, "t={t}: {got} off the hue");
         }
     }
 
