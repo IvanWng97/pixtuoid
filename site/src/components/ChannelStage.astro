@@ -47,142 +47,128 @@ function defaultVariant(g: EnrichedVariantGroup): ShowcaseVariant | undefined {
     <span class="terminal__dot terminal__dot--g"></span>
     <span class="terminal__title" data-stage-title>{title}</span>
   </div>
-  {
-    /* No `autoplay`: it overrides preload="metadata" and eagerly downloads the
+  {/* No `autoplay`: it overrides preload="metadata" and eagerly downloads the
       whole below-the-fold webm at page load, and Showcase.astro's
       IntersectionObserver already play()s the picked+visible clip. Trade-off: a
       no-JS visitor sees the poster instead of a playing clip — acceptable, the
-      dial/OSD are JS-only anyway. */
-  }
-  {
-    isClip ? (
-      <video
-        class="terminal__screen px"
-        width={c.w}
-        height={c.h}
-        muted
-        loop
-        playsinline
-        preload={active ? 'metadata' : 'none'}
-        poster={active ? asset(`demos/${c.asset}-poster.png`) : undefined}
-        data-poster={active ? undefined : asset(`demos/${c.asset}-poster.png`)}
-        data-mp4={active ? undefined : asset(`demos/${c.asset}.mp4`)}
-        data-webm={active ? undefined : asset(`demos/${c.asset}.webm`)}
-        aria-label={`pixtuoid demo: ${description}`}
-      >
-        {active && <source src={asset(`demos/${c.asset}.webm`)} type="video/webm" />}
-        {active && <source src={asset(`demos/${c.asset}.mp4`)} type="video/mp4" />}
-      </video>
-    ) : isLive ? (
-      <div class="vibing__screen">
-        <img
-          class="terminal__screen px vibing__poster"
-          width={c.w ?? 320}
-          height={c.h ?? 180}
-          src={active && c.poster ? asset(`demos/${c.poster}`) : undefined}
-          data-src={active || !c.poster ? undefined : asset(`demos/${c.poster}`)}
-          data-vibing-poster
-          alt={imgAlt}
-          loading="lazy"
-        />
-        <canvas
-          class="terminal__screen px"
-          width={c.w ?? 320}
-          height={c.h ?? 180}
-          data-vibing-canvas
-        />
-      </div>
-    ) : (
+      dial/OSD are JS-only anyway. */}
+  {isClip ? (
+    <video
+      class="terminal__screen px"
+      width={c.w}
+      height={c.h}
+      muted
+      loop
+      playsinline
+      preload={active ? 'metadata' : 'none'}
+      poster={active ? asset(`demos/${c.asset}-poster.png`) : undefined}
+      data-poster={active ? undefined : asset(`demos/${c.asset}-poster.png`)}
+      data-mp4={active ? undefined : asset(`demos/${c.asset}.mp4`)}
+      data-webm={active ? undefined : asset(`demos/${c.asset}.webm`)}
+      aria-label={`pixtuoid demo: ${description}`}
+    >
+      {active && <source src={asset(`demos/${c.asset}.webm`)} type="video/webm" />}
+      {active && <source src={asset(`demos/${c.asset}.mp4`)} type="video/mp4" />}
+    </video>
+  ) : isLive ? (
+    <div class="vibing__screen">
       <img
-        class="terminal__screen px"
-        width={c.w ?? 1600}
-        height={c.h ?? 1440}
-        src={active ? asset(`demos/${defVariant!.src}`) : undefined}
-        data-src={active ? undefined : asset(`demos/${defVariant!.src}`)}
+        class="terminal__screen px vibing__poster"
+        width={c.w ?? 320}
+        height={c.h ?? 180}
+        src={active && c.poster ? asset(`demos/${c.poster}`) : undefined}
+        data-src={active || !c.poster ? undefined : asset(`demos/${c.poster}`)}
+        data-vibing-poster
         alt={imgAlt}
         loading="lazy"
       />
-    )
-  }
+      <canvas
+        class="terminal__screen px"
+        width={c.w ?? 320}
+        height={c.h ?? 180}
+        data-vibing-canvas
+      />
+    </div>
+  ) : (
+    <img
+      class="terminal__screen px"
+      width={c.w ?? 1600}
+      height={c.h ?? 1440}
+      src={active ? asset(`demos/${defVariant!.src}`) : undefined}
+      data-src={active ? undefined : asset(`demos/${defVariant!.src}`)}
+      alt={imgAlt}
+      loading="lazy"
+    />
+  )}
   <span class="terminal__scan" aria-hidden="true"></span>
-  {
-    isLive ? (
-      <>
-        {c.timeSlider && (
-          <div class="vibing__time" data-phase="day">
-            <div class="vibing__sky">
-              <input
-                type="range"
-                min="0"
-                max="24"
-                step="0.5"
-                value="18"
-                data-vibing-time
-                aria-label="time of day"
-              />
-              <div class="vibing__ticks" aria-hidden="true">
-                <span>00</span>
-                <span>06</span>
-                <span>12</span>
-                <span>18</span>
-                <span>24</span>
-              </div>
-            </div>
-            <span class="vibing__clock" data-vibing-time-label>
-              18:00
-            </span>
+  {isLive ? (
+    <>
+      {c.timeSlider && <div class="vibing__time" data-phase="day">
+        <div class="vibing__sky">
+          <input
+            type="range"
+            min="0"
+            max="24"
+            step="0.5"
+            value="18"
+            data-vibing-time
+            aria-label="time of day"
+          />
+          <div class="vibing__ticks" aria-hidden="true">
+            <span>00</span>
+            <span>06</span>
+            <span>12</span>
+            <span>18</span>
+            <span>24</span>
           </div>
-        )}
-        {c.groups.map((g: EnrichedVariantGroup) => {
-          const def = defaultVariant(g);
-          const dataKey = `data-${g.key}`;
-          return (
-            <div
-              class="stage__osd"
-              data-group={g.key}
-              data-retint={g.retint ? 'true' : undefined}
-              role="group"
-              aria-label={g.label}
-            >
-              {g.variants.map((v: ShowcaseVariant) => (
-                <button
-                  class:list={['osd__chip', { 'is-active': v.id === def?.id }]}
-                  aria-pressed={v.id === def?.id ? 'true' : 'false'}
-                  {...{ [dataKey]: v.id }}
-                  data-accent={v.accent}
-                  data-accent2={v.accent2}
-                  style={v.accent ? `--chip:${v.accent}` : undefined}
-                >
-                  {v.accent && <span class="osd__swatch" />}
-                  {v.name}
-                </button>
-              ))}
-            </div>
-          );
-        })}
-      </>
-    ) : (
-      c.variants.length > 0 && (
-        <div class="stage__osd" role="group" aria-label={c.label.toLowerCase()}>
-          {c.variants.map((v: ShowcaseVariant) => (
-            <button
-              class:list={['osd__chip', { 'is-active': v.id === defVariant!.id }]}
-              aria-pressed={v.id === defVariant!.id ? 'true' : 'false'}
-              data-src={asset(`demos/${v.src}`)}
-              data-title={`pixtuoid — CH ${c.ch} ${c.label} · ${v.name}`}
-              data-alt={`pixtuoid office — ${v.name} (${c.label.toLowerCase()})`}
-              data-accent={v.accent}
-              data-accent2={v.accent2}
-              style={v.accent ? `--chip:${v.accent}` : undefined}
-            >
-              {v.accent && <span class="osd__swatch" />}
-              {v.name}
-            </button>
-          ))}
         </div>
-      )
-    )
-  }
+        <span class="vibing__clock" data-vibing-time-label> 18:00 </span>
+      </div>}
+      {c.groups.map((g: EnrichedVariantGroup) => {
+        const def = defaultVariant(g);
+        const dataKey = `data-${g.key}`;
+        return <div
+          class="stage__osd"
+          data-group={g.key}
+          data-retint={g.retint ? 'true' : undefined}
+          role="group"
+          aria-label={g.label}
+        >
+          {g.variants.map((v: ShowcaseVariant) => <button
+            class:list={['osd__chip', { 'is-active': v.id === def?.id }]}
+            aria-pressed={v.id === def?.id ? 'true' : 'false'}
+            {...{ [dataKey]: v.id }}
+            data-accent={v.accent}
+            data-accent2={v.accent2}
+            style={v.accent ? `--chip:${v.accent}` : undefined}
+          >
+            {v.accent && <span class="osd__swatch" />}
+            {v.name}
+          </button>)}
+        </div>;
+      })}
+    </>
+  ) : (
+    c.variants.length > 0 && <div
+      class="stage__osd"
+      role="group"
+      aria-label={c.label.toLowerCase()}
+    >
+      {c.variants.map((v: ShowcaseVariant) => <button
+        class:list={['osd__chip', { 'is-active': v.id === defVariant!.id }]}
+        aria-pressed={v.id === defVariant!.id ? 'true' : 'false'}
+        data-src={asset(`demos/${v.src}`)}
+        data-title={`pixtuoid — CH ${c.ch} ${c.label} · ${v.name}`}
+        data-alt={`pixtuoid office — ${v.name} (${c.label.toLowerCase()})`}
+        data-accent={v.accent}
+        data-accent2={v.accent2}
+        style={v.accent ? `--chip:${v.accent}` : undefined}
+      >
+        {v.accent && <span class="osd__swatch" />}
+        {v.name}
+      </button>)}
+    </div>
+  )}
   <figcaption class="stage__caption">{description}</figcaption>
 </figure>
 

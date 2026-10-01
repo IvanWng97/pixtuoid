@@ -1033,8 +1033,7 @@ fn spill(x: u16, slant: f32) -> crate::lighting::Emitter {
 
 /// The bundled pack, whose city the windows show.
 fn pack() -> Pack {
-    crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
-        .expect("the embedded pack loads")
+    crate::embedded_pack::test_default_pack()
 }
 
 /// Every pane shows its own stretch of the one city, read from the run's west

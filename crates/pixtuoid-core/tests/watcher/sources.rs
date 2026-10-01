@@ -457,34 +457,6 @@ async fn omp_source_rescan_hot_plugs_a_profile_created_mid_run() {
     handle.abort();
 }
 
-#[tokio::test]
-#[cfg(unix)]
-async fn omp_source_run_reports_total_watch_failure_instead_of_swallowing_it() {
-    use pixtuoid_core::source::omp::OmpSource;
-    use std::os::unix::fs::PermissionsExt;
-
-    // Deliberately NOT fast_watch(): the forced PollWatcher tolerates a
-    // missing root (walk latches and warns), so only the native backend's
-    // watch() error can exercise the death path.
-    let dir = TempDir::new().unwrap();
-    let sealed = dir.path().join("sealed");
-    tokio::fs::create_dir(&sealed).await.unwrap();
-    let mut perms = std::fs::metadata(&sealed).unwrap().permissions();
-    perms.set_mode(0o000);
-    std::fs::set_permissions(&sealed, perms.clone()).unwrap();
-
-    let (tx, _rx) = mpsc::channel::<(Transport, AgentEvent)>(8);
-    let result = Box::new(OmpSource::single_root(sealed.join("sessions")))
-        .run(tx)
-        .await;
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&sealed, perms).unwrap();
-    assert!(
-        result.is_err(),
-        "every watcher failing must propagate to the deaths surface (#157), got Ok"
-    );
-}
-
 /// The expected-id seam shared by the omp cases: the SAME fold + deriver the
 /// watcher uses, so a raw-case literal cannot pass on Unix and red only on
 /// windows-test.

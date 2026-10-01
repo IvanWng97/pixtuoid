@@ -44,37 +44,29 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     <nav class="docs__rail docs__sidebar hw-panel" aria-label="Docs">
       <p class="docs__bank">elevator — docs wing</p>
       <ul class="docs__list">
-        {
-          DOCS.map((d) => (
-            <li>
-              <a href={asset(d.route)} aria-current={d.id === current ? 'page' : undefined}>
-                <span
-                  class:list={[
-                    'led-dot',
-                    { 'led-selected': d.id === current, 'is-on': d.id === current },
-                  ]}
-                  aria-hidden="true"
-                />
-                {d.label}
-              </a>
-            </li>
-          ))
-        }
+        {DOCS.map((d) => <li>
+          <a href={asset(d.route)} aria-current={d.id === current ? 'page' : undefined}>
+            <span
+              class:list={[
+                'led-dot',
+                { 'led-selected': d.id === current, 'is-on': d.id === current },
+              ]}
+              aria-hidden="true"
+            />
+            {d.label}
+          </a>
+        </li>)}
       </ul>
       <p class="docs__bank">the building</p>
       <ul class="docs__list docs__list--building">
-        {
-          FLOORS.map((f) => (
-            <li>
-              <a href={`${asset('')}#${f.id}`}>
-                <span class="docs__fl" aria-hidden="true">
-                  {f.fl}
-                </span>
-                {f.label}
-              </a>
-            </li>
-          ))
-        }
+        {FLOORS.map((f) => <li>
+          <a href={`${asset('')}#${f.id}`}>
+            <span class="docs__fl" aria-hidden="true">
+              {f.fl}
+            </span>
+            {f.label}
+          </a>
+        </li>)}
       </ul>
     </nav>
 
@@ -84,54 +76,43 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
       </article>
 
       <nav class="docs__pager" aria-label="Docs pagination">
-        {
-          prev ? (
-            <a class="docs__pager-link" href={asset(prev.route)} rel="prev">
-              <span class="docs__pager-dir" aria-hidden="true">
-                ← previous
-              </span>
-              {prev.label}
-            </a>
-          ) : (
-            <span />
-          )
-        }
-        {
-          next && (
-            <a class="docs__pager-link docs__pager-link--next" href={asset(next.route)} rel="next">
-              <span class="docs__pager-dir" aria-hidden="true">
-                next →
-              </span>
-              {next.label}
-            </a>
-          )
-        }
+        {prev ? (
+          <a class="docs__pager-link" href={asset(prev.route)} rel="prev">
+            <span class="docs__pager-dir" aria-hidden="true"> ← previous </span>
+            {prev.label}
+          </a>
+        ) : (
+          <span />
+        )}
+        {next && <a
+          class="docs__pager-link docs__pager-link--next"
+          href={asset(next.route)}
+          rel="next"
+        >
+          <span class="docs__pager-dir" aria-hidden="true"> next → </span>
+          {next.label}
+        </a>}
       </nav>
 
       <p class="docs__source">
         Source of truth:
         <a href={`${REPO}/blob/main/${sourcePath}`} target="_blank" rel="noreferrer">
           {sourcePath}
-        </a> — {sourceNote}
+        </a>
+        — {sourceNote}
       </p>
     </div>
 
-    {
-      toc.length > 0 && (
-        <nav class="docs__rail docs__toc" aria-label="On this page">
-          <p class="docs__toc-label">on this page</p>
-          <ul class="docs__list">
-            {toc.map((h) => (
-              <li class={h.depth === 3 ? 'docs__toc-sub' : undefined}>
-                <a href={`#${h.slug}`} data-toc-link={h.slug}>
-                  {h.text}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </nav>
-      )
-    }
+    {toc.length > 0 && <nav class="docs__rail docs__toc" aria-label="On this page">
+      <p class="docs__toc-label">on this page</p>
+      <ul class="docs__list">
+        {toc.map((h) => <li class={h.depth === 3 ? 'docs__toc-sub' : undefined}>
+          <a href={`#${h.slug}`} data-toc-link={h.slug}>
+            {h.text}
+          </a>
+        </li>)}
+      </ul>
+    </nav>}
   </main>
   <Footer />
   <Statusline doc={routeSlug} />

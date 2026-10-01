@@ -165,6 +165,30 @@ fn argv_source_flag_stamps_source_without_env() {
 }
 
 #[test]
+fn a_non_utf8_workspace_keys_the_session_not_the_fallback() {
+    use std::os::unix::ffi::OsStrExt;
+    let path = sock_path("cwlossy");
+    let listener = UnixListener::bind(&path).expect("bind listener");
+    listener.set_nonblocking(true).unwrap();
+
+    let status = Command::new(BIN)
+        .env("PIXTUOID_SOCKET", &path)
+        .env("PIXTUOID_SOURCE", "codewhale")
+        .env(
+            "DEEPSEEK_WORKSPACE",
+            std::ffi::OsStr::from_bytes(b"/ws/\xff"),
+        )
+        .args(["--event", "session_start"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("run shim");
+    assert!(status.success(), "shim must exit 0; got {status:?}");
+    assert_eq!(recv_delivered_json(&listener)["cwd"], "/ws/\u{FFFD}");
+}
+
+#[test]
 fn codewhale_event_mode_builds_envelope_from_env_and_ignores_stdin() {
     // Env-mode MUST NOT read stdin: CodeWhale leaves the child's stdin = the
     // TUI terminal, which NEVER reaches EOF, and `tool_call_before` runs
