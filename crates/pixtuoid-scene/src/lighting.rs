@@ -431,7 +431,7 @@ pub(crate) fn lit_screen(agent: &AgentSlot, facing: Facing, seated: bool) -> Opt
     }
 }
 
-/// The glow of a desk's screen: its occupant's [`lit_screen`](crate::lighting::lit_screen),
+/// The glow of a desk's screen: its occupant's [`lit_screen`],
 /// tinted by the tool. Both profiles light screens from this.
 pub(crate) fn desk_screen_glow(
     occupant: Option<&AgentSlot>,
