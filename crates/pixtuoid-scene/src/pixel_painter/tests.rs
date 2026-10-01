@@ -1895,7 +1895,7 @@ fn queued(layout: &Layout, frame: &SimFrame) -> Furnishings<'static> {
     };
     let lights = crate::lighting::Lights::of(
         layout,
-        &crate::atmosphere::Look::resolve(&ctx.sky, theme),
+        &crate::atmosphere::SkyTones::resolve(&ctx.sky, theme),
         &crate::lighting::LightInputs {
             agents: &frame.agents,
             seated: &frame.seated_agents,

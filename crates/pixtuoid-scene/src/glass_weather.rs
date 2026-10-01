@@ -13,7 +13,7 @@ use crate::sky::Weather;
 /// Its weather and `tick` are its whole key: two equal keys place equal marks.
 #[derive(Clone, Copy)]
 pub(crate) struct GlassWeather {
-    /// [`Look::glass_veil`](crate::atmosphere::Look::glass_veil).
+    /// [`SkyTones::glass_veil`](crate::atmosphere::SkyTones::glass_veil).
     pub(crate) veil: Option<(Rgb, f32)>,
     fall: Option<&'static Fall>,
     /// The clock the marks move by, in ms.
