@@ -23,8 +23,8 @@ use crate::encode::{
     save_backend_as_png, save_renderer_animation,
 };
 use crate::scenes::{
-    anim_scene, capture_live_scene, dashboard_scene, inject_openclaw_presence, meeting_scene,
-    sample_scene,
+    GatewayState, anim_scene, capture_live_scene, dashboard_scene, inject_openclaw_presence,
+    meeting_scene, sample_scene,
 };
 
 const COLS: u16 = 192;
@@ -114,9 +114,9 @@ struct SnapshotArgs {
     empty: bool,
 
     /// Inject an OpenClaw gateway presence (the wandering lobster mascot) in the
-    /// given state (idle | busy | down).
-    #[arg(long)]
-    openclaw: Option<String>,
+    /// given state.
+    #[arg(long, value_enum)]
+    openclaw: Option<GatewayState>,
 
     /// Gateway PORTS to stage for `--openclaw`, comma-separated (default: one, the
     /// upstream default port).
@@ -399,7 +399,7 @@ fn main() -> Result<()> {
             }
         }
     }
-    if let Some(state) = args.openclaw.as_deref() {
+    if let Some(state) = args.openclaw {
         inject_openclaw_presence(&mut scene, state, now, &args.openclaw_ports)?;
     }
     let backend = TestBackend::new(cols, rows);
