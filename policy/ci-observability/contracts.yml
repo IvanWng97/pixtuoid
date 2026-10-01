@@ -49,12 +49,14 @@
     the checkout even when a rule allows it
     (code.claude.com/docs/en/settings-reference). Any other flag, action input
     or settings key can add a rule, a tool, a hook or a directory, so all three
-    are allowlists; other values stay free.
+    are allowlists; other values stay free. `allowed_bots` admits the merge
+    queue's app alone, never `*`, which would let any App's push trigger it.
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length == 1
+      and ((.[0].with.allowed_bots // "") == "mergify[bot]")
       and ((.[0].with | keys) - [
-            "anthropic_federation_rule_id", "anthropic_organization_id",
+            "allowed_bots", "anthropic_federation_rule_id", "anthropic_organization_id",
             "anthropic_service_account_id", "classify_inline_comments", "claude_args",
             "claude_code_oauth_token", "display_report", "github_token",
             "include_fix_links", "prompt", "show_full_output", "track_progress"] == [])
@@ -69,6 +71,9 @@
              and ([$args | scan("--settings[ =]'([^']*)'")][0][0]
                   | fromjson == {"permissions": {"blockReadsOutsideWorkingDirectories": true}}))
   break:
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.allowed_bots)
+      = "*"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       += " --allowedTools Read"
