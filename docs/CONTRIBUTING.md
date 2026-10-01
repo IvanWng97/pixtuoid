@@ -109,13 +109,12 @@ a lint to dodge the bump.
    version, every path-dep requirement, `Cargo.lock` and `CHANGELOG.md`
    rewritten. The bump level comes from the conventional-commit log — nobody
    picks it — and the PR body carries the `cargo-semver-checks` verdict.
-2. **Review it like any PR.** `main` requires branches to be up to date, because
-   the tag lands on the squash commit and release-plz publishes to crates.io from
-   it before `ci-gate` finishes. If `main` moved, **re-dispatch — never "Update
-   branch"**: only a dispatch recomputes `CHANGELOG.md` for the new commits, and
-   the merge commit "Update branch" adds counts as a human's, so the next
-   dispatch closes this PR and opens a new number. release-plz has already raised
-   the bump for any break `cargo-semver-checks` detects; raise it further with
+2. **Review it like any PR, but merge it by hand**: the merge queue refuses it,
+   since its update would merge `main` in. If `main` moved, **re-dispatch —
+   never "Update branch"**: only a dispatch recomputes `CHANGELOG.md` for the
+   new commits, and the merge commit "Update branch" adds counts as a human's,
+   so the next dispatch closes this PR and opens a new number. release-plz has
+   already raised the bump for any break `cargo-semver-checks` detects; raise it further with
    `cargo set-version --workspace X.Y.Z` (cargo-edit) and push only for a break
    its lints cannot see. A user-facing change that touched no packaged file
    (`npm/`, `release.yml` packaging) is not in the generated notes — add its line
@@ -127,10 +126,11 @@ a lint to dodge the bump.
    publishes the draft, and publishes the npm packages. The tag also starts a
    homebrew-core autobump.
 
-The crates.io upload happens in the `release` job, which runs on the merge push
-with no `needs` — `ci.yml` is still running at that moment. What makes that safe
-is the branch-protection setting above: a release PR cannot merge unless its
-tree is `main`'s tree, and that tree is the one its own CI already passed.
+The crates.io upload happens in the `release` job on the merge push, which
+first waits for that commit's own `ci-gate`: a failure or timeout publishes
+nothing, and re-running the workflow after a passing `ci.yml` re-run resumes it.
+The wait is in the workflow because the queue can land other PRs while a
+release PR is open, so no merge-time check proves the tree it publishes.
 
 `cargo-semver-checks` runs inside release-plz on the release PR, not as a CI
 job; `just semver` reproduces its verdict locally.
@@ -141,9 +141,8 @@ the records are updated — the record is keyed on the filename.
 
 Both jobs authenticate with `RELEASE_PLZ_TOKEN`, a fine-grained PAT scoped to
 this repository with Contents and Pull requests read/write; `release-plz.yml`'s
-header says why it cannot be the automatic token. **The secret has to exist
-before `release-plz.yml` reaches main, not before the first dispatch**: the
-`release` job runs on every push, and the action refuses an empty token.
+header says why it cannot be the automatic token, and the action refuses an
+empty one.
 
 A release PR that release-plz closes and re-opens (it does that when the branch
 carries non-bot commits) leaves a commit you pushed to it — a raised bump —
@@ -219,6 +218,7 @@ crate IS.
 | once you need a PR number | open it as a draft: the light tier runs, and `ci-gate` stays red by design |
 | once the draft's light tier is green | mark it ready: the full tier and the billed review bots start together, so a failure only the full tier catches costs one extra review round until the bots are chained after CI |
 | before marking ready (optional), or when a REVIEW.md local row matches (mandatory) | the `two-lens-review` skill |
+| once [the merge gate](#the-merge-gate) holds | `@mergifyio queue` |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 
 One change spanning the Rust lib + the site + the Raycast extension:
@@ -258,6 +258,12 @@ disposition; zero open confirmed `issue (blocking)`; each matching
 otherwise an optional pre-flight. A published review passes whatever it
 found; a failed or missing status is no review: comment `/claude-review`, else
 split the PR smaller.
+
+Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
+entry is a command because no queue condition can confirm a finding or match a
+local row. The queue merges `main` into a PR that is behind and waits for CI and
+the bots at that head, so nobody merges `main` in by hand; branch protection
+still holds the merge until a re-review's new threads are resolved.
 
 The bots never review a fork PR on their own: a maintainer approves its CI
 run, then comments `/claude-review`, again after every push. Its author can
@@ -309,7 +315,6 @@ before re-litigating.
 
 ```bash
 gh pr checks --watch                         # live CI status
-gh pr merge --auto --squash --delete-branch  # auto-merge once checks pass
 gh issue develop <number> --checkout         # branch linked to an issue
 gh run rerun --failed                        # rerun only failed CI jobs
 ```
