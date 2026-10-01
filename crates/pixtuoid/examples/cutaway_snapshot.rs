@@ -140,18 +140,19 @@ fn main() -> Result<()> {
     let scale = RenderScale::new(scale_n).ok_or_else(|| anyhow!("--scale must be nonzero"))?;
     // The sky otherwise cycles its weather with the clock, so an hour alone
     // does not say what the room looks like.
-    if let Err(valid) = pixtuoid_scene::pixel_painter::force_weather(weather.as_deref()) {
-        return Err(anyhow!(
-            "unknown --weather {weather:?}; valid: {}",
-            valid.join(" | ")
-        ));
-    }
+    let policy = pixtuoid_scene::pixel_painter::WeatherPolicy::from_name(weather.as_deref())
+        .map_err(|valid| {
+            anyhow!(
+                "unknown --weather {weather:?}; valid: {}",
+                valid.join(" | ")
+            )
+        })?;
     let now = match now_hour {
         Some(h) => pixtuoid_scene::localclock::try_on_day(now_day.saturating_sub(1), h)
             .with_context(|| format!("invalid --now-day/--now-hour {now_day}:{h}"))?,
         None => SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
     };
-    let meta = FloorMeta::for_floor(floor.0, floor.1);
+    let meta = FloorMeta::for_floor(floor.0, floor.1).with_weather(policy);
 
     let mut scene = SceneState::uniform(64);
     populate(&mut scene, now, agents);

@@ -198,6 +198,14 @@ mod tests {
     use crate::floor::FloorMeta;
     use crate::pixel_painter::SimFrame;
 
+    /// The ground floor under a clear sky: rain or snow on the glass moves
+    /// every tick, so the clock's weather would decide what a tick repaints.
+    fn clear_ground() -> FloorMeta {
+        FloorMeta::ground().with_weather(crate::sky::WeatherPolicy::Forced(
+            crate::sky::Weather::Clear,
+        ))
+    }
+
     /// How a run of frames through a canvas was reported.
     #[derive(Debug, Default)]
     struct Run {
@@ -236,7 +244,7 @@ mod tests {
         render_cutaway(
             frame,
             office,
-            crate::cutaway::paint::tests::showing(FloorMeta::ground(), now),
+            crate::cutaway::paint::tests::showing(clear_ground(), now),
             &mut cache,
             &mut buf,
         );
@@ -257,7 +265,7 @@ mod tests {
             theme,
             scale,
         };
-        let floor = FloorMeta::ground();
+        let floor = clear_ground();
         let w = scale.to_buffer(layout.buf_w);
         let inside = |rects: &[Bounds], i: usize| {
             let (x, y) = ((i % usize::from(w)) as u16, (i / usize::from(w)) as u16);
@@ -401,8 +409,6 @@ mod tests {
     /// rest.
     #[test]
     fn an_idle_office_skips_the_ticks_that_change_nothing() {
-        // Rain or snow on the glass moves every tick.
-        let _clear = crate::sky::ForcedWeather::new(crate::sky::Weather::Clear);
         let layout = lively_office();
         let quiet = empty_frame(&layout);
         let steps: Vec<_> = ticks(crate::localclock::at_hour(12), 30)
@@ -437,7 +443,7 @@ mod tests {
                     &observed,
                     theme,
                     scale,
-                    crate::cutaway::paint::tests::showing(FloorMeta::ground(), now),
+                    crate::cutaway::paint::tests::showing(clear_ground(), now),
                     &mut cache,
                 )
                 .dirty
@@ -486,7 +492,7 @@ mod tests {
             let list = frame_list(
                 frame,
                 office,
-                crate::cutaway::paint::tests::showing(FloorMeta::ground(), Self::now()),
+                crate::cutaway::paint::tests::showing(clear_ground(), Self::now()),
             );
             list.pieces()
                 .iter()
@@ -513,7 +519,7 @@ mod tests {
                 &observed,
                 normal(),
                 self.scale,
-                crate::cutaway::paint::tests::showing(FloorMeta::ground(), Self::now()),
+                crate::cutaway::paint::tests::showing(clear_ground(), Self::now()),
                 &mut cache,
             );
         }
@@ -641,7 +647,7 @@ mod tests {
                 let list = frame_list(
                     &both,
                     office,
-                    crate::cutaway::paint::tests::showing(FloorMeta::ground(), Hovering::now()),
+                    crate::cutaway::paint::tests::showing(clear_ground(), Hovering::now()),
                 );
                 // Known by its text: the sitter's badge reads otherwise.
                 list.pieces().iter().find(|p| {
@@ -697,7 +703,7 @@ mod tests {
             let list = frame_list(
                 frame,
                 office,
-                crate::cutaway::paint::tests::showing(FloorMeta::ground(), Hovering::now()),
+                crate::cutaway::paint::tests::showing(clear_ground(), Hovering::now()),
             );
             list.pieces()
                 .iter()
@@ -723,7 +729,7 @@ mod tests {
                 &observed,
                 normal(),
                 h.scale,
-                crate::cutaway::paint::tests::showing(FloorMeta::ground(), Hovering::now()),
+                crate::cutaway::paint::tests::showing(clear_ground(), Hovering::now()),
                 &mut cache,
             )
             .dirty;
@@ -748,7 +754,7 @@ mod tests {
     fn a_new_tally_repaints_only_the_board() {
         let h = Hovering::new();
         let seated = h.frames.last().expect("a seated frame");
-        let quiet = crate::cutaway::paint::tests::showing(FloorMeta::ground(), Hovering::now());
+        let quiet = crate::cutaway::paint::tests::showing(clear_ground(), Hovering::now());
         let counts = crate::board::StateCounts {
             active: 3,
             total: 3,
@@ -810,7 +816,7 @@ mod tests {
                 layout: Arc::new(layout),
             }
         };
-        let floor = FloorMeta::ground();
+        let floor = clear_ground();
         canvas.frame(
             &observe(0),
             normal(),
