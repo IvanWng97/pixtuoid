@@ -996,8 +996,7 @@ pub enum PodDecor {
 
 impl PodDecor {
     /// The randomly-picked pool. Every member's GROUND footprint has to fit the
-    /// aisle width once the obstacle pad is added — the whiteboard, whose board
-    /// panel overhangs its wheelbase, is the tight one.
+    /// aisle width once the obstacle pad is added.
     pub const ALL: &'static [PodDecor] = &[
         PodDecor::PlantTall,
         PodDecor::Whiteboard,
