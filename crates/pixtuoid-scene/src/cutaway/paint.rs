@@ -585,6 +585,7 @@ fn paint_pieces(
                     | PieceKind::Door { .. }
                     | PieceKind::WallSeg { .. }
                     | PieceKind::Chair { .. }
+                    | PieceKind::DeskProp(_)
                     | PieceKind::PropBand { .. }
                     | PieceKind::Table { .. }
                     | PieceKind::Character { .. }
@@ -644,6 +645,7 @@ fn mark(
         PieceKind::Glass { .. }
         | PieceKind::WallSeg { .. }
         | PieceKind::Chair { .. }
+        | PieceKind::DeskProp(_)
         | PieceKind::PropBand { .. }
         | PieceKind::Table { .. }
         | PieceKind::Character { .. }
@@ -941,6 +943,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::WallSeg { piece, rows } => (piece, rows).hash(&mut h),
         PieceKind::Desk { at, art, screen } => (at, art, screen).hash(&mut h),
         PieceKind::Chair { at } => at.hash(&mut h),
+        PieceKind::DeskProp(prop) => prop.hash(&mut h),
         PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => (at, art).hash(&mut h),
         PieceKind::PropBand { at, sprite, rows } => (at, sprite, rows).hash(&mut h),
         PieceKind::Table { at } => at.hash(&mut h),
@@ -1437,6 +1440,7 @@ fn paint_piece(
             paint_desk(at, art, screen, (pack, scale), &mut cache.cutaway_art, buf);
         }
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
+        PieceKind::DeskProp(prop) => paint_desk_prop(prop, pack, theme, scale, buf),
         PieceKind::Character {
             ref figure, chair, ..
         } => {
@@ -1515,10 +1519,81 @@ fn push_desk(
         theme,
     );
     if let Some(span) = desk_span(pack, art, d, scale) {
+        let span = span.with_depth(depth);
+        order.push((span, PieceKind::Desk { at: d, art, screen }));
+        let props = frame.desk(i);
+        let on_desk = (props.cup.is_some(), props.token_tier, props.sheet_fall);
+        push_desk_props(on_desk, (art, span), office, order);
+    }
+}
+
+/// The desk props' pack animations.
+const DESK_CUP_SPRITE: &str = "desk_cup";
+const TOKEN_TOWER_SPRITE: &str = "token_tower";
+const TOKEN_SHEET_SPRITE: &str = "token_sheet";
+
+/// What stands on the desk whose `art` paints `span`, each at the art's own
+/// mark for it, sorted with the desk: the cup where there is one, the token
+/// tower at its `tier` and the sheet `sheet_fall` down onto it.
+fn push_desk_props(
+    (cup, tier, sheet_fall): (bool, u8, Option<u16>),
+    (art, span): (&'static str, Span),
+    office: Office<'_>,
+    order: &mut Vec<(Span, PieceKind)>,
+) {
+    let Office { pack, scale, .. } = office;
+    let Some(desk) = crate::pixel_painter::densest_frame(pack, art, 0, scale) else {
+        return;
+    };
+    let k = desk.blit_at.get();
+    let (x0, y0) = (scale.to_buffer(span.x0), scale.to_buffer(span.y0));
+    // A mark's cell, as the buffer column of its west edge and row past its foot.
+    let mark = |name: &str| {
+        let m = desk.marks.iter().find(|m| m.name() == name)?;
+        Some((x0 + m.x() * k, y0 + (m.y() + 1) * k))
+    };
+    // Stand frame `frame` of `sprite` on `(x, foot)`; where its top lands.
+    let mut stand = |sprite: &'static str, frame: usize, (x, foot): (u16, u16)| {
+        let f = crate::pixel_painter::densest_frame(pack, sprite, frame, scale)?;
+        let b = f.blit_at.get();
+        let (w, h) = (f.frame.width() * b, f.frame.height() * b);
+        let y = foot.checked_sub(h)?;
+        let s = scale.get();
+        let cells = |at: u16, len: u16| (at / s, (at + len - 1) / s - at / s + 1);
+        let ((cx, cw), (cy, ch)) = (cells(x, w), cells(y, h));
+        let prop = DeskProp {
+            sprite,
+            frame,
+            at: (x, y),
+        };
         order.push((
-            span.with_depth(depth),
-            PieceKind::Desk { at: d, art, screen },
+            Span::new(cx, cy, cw, ch, 0)
+                .with_depth(span.depth)
+                .with_layer(span.layer),
+            PieceKind::DeskProp(prop),
         ));
+        Some(y)
+    };
+    if let (true, Some(at)) = (cup, mark("cup")) {
+        stand(DESK_CUP_SPRITE, 0, at);
+    }
+    let Some(tier) = usize::from(tier).checked_sub(1) else {
+        return;
+    };
+    let Some((x, top)) =
+        mark("tower").and_then(|at| Some((at.0, stand(TOKEN_TOWER_SPRITE, tier, at)?)))
+    else {
+        return;
+    };
+    // The sheet lands as the pile's next sheet: at its full fall it is gone.
+    let rest = sheet_fall
+        .and_then(|fallen| crate::token_meter::SHEET_FALL_PX.checked_sub(fallen))
+        .filter(|&rest| rest > 0);
+    if let Some(rest) = rest {
+        let foot = top.checked_sub((rest - 1) * scale.get());
+        if let Some(foot) = foot {
+            stand(TOKEN_SHEET_SPRITE, 0, (x, foot));
+        }
     }
 }
 
@@ -1908,6 +1983,7 @@ impl PieceKind {
             | PieceKind::Clock { .. }
             | PieceKind::Glass { .. }
             | PieceKind::Desk { .. }
+            | PieceKind::DeskProp(_)
             | PieceKind::Character { .. }
             | PieceKind::Badge { .. } => false,
         }
@@ -1987,6 +2063,8 @@ pub(crate) enum PieceKind {
         at: crate::layout::Point,
         reading: crate::pixel_painter::ClockReading,
     },
+    /// A prop the model stands on a desk ([`push_desk_props`]).
+    DeskProp(DeskProp),
     Character {
         figure: Figure,
         /// A back-turned sitter's chair, painted straight after them.
@@ -1998,6 +2076,15 @@ pub(crate) enum PieceKind {
     Badge {
         badge: Badge,
     },
+}
+
+/// One desk prop: frame `frame` of `sprite`, its art's top-left at buffer pixel
+/// `at`, where the desk art's mark for it stands it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct DeskProp {
+    sprite: &'static str,
+    frame: usize,
+    at: (u16, u16),
 }
 
 /// Which art a prop draws: a sprite's frame, turned.
@@ -2629,6 +2716,33 @@ fn paint_art(
     let themed = dense.recolorable.recolored(&theme_overrides(theme));
     let (x, y) = centred_top_left(at, dense.logical, scale);
     blit_frame_scaled(&art.flip.turn(themed), x, y, dense.blit_at, buf);
+}
+
+/// A desk prop in the theme's cup and paper.
+fn paint_desk_prop(
+    prop: DeskProp,
+    pack: &Pack,
+    theme: &Theme,
+    scale: RenderScale,
+    buf: &mut RgbBuffer,
+) {
+    let Some(f) = crate::pixel_painter::densest_frame(pack, prop.sprite, prop.frame, scale) else {
+        return;
+    };
+    let f_themed = f.recolorable.recolored(&desk_prop_overrides(theme));
+    blit_frame_scaled(&f_themed, prop.at.0, prop.at.1, f.blit_at, buf);
+}
+
+/// The pack keys the desk props take from the theme: the cup's body and
+/// shadow, the paper and its shade.
+fn desk_prop_overrides(theme: &Theme) -> [(char, pixtuoid_core::sprite::Pixel); 4] {
+    let f = &theme.furniture;
+    [
+        ('V', Some(f.coffee_cup)),
+        ('%', Some(f.coffee_cup_shadow)),
+        ('¤', Some(f.paper)),
+        ('!', Some(f.paper_shade)),
+    ]
 }
 
 /// The pack keys art takes from the theme.
@@ -5787,6 +5901,7 @@ S B B B B B B S
             PieceKind::Glass { .. } => "glass",
             PieceKind::Hung { .. } => "hung decor",
             PieceKind::Badge { .. } => "badge",
+            PieceKind::DeskProp(_) => "desk prop",
         }
     }
 

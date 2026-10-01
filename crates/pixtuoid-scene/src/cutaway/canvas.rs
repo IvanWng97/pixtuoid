@@ -595,7 +595,7 @@ mod tests {
         const NEIGHBOUR: &str = "cc\u{b7}neighbour";
         let h = Hovering::new();
         let seated = h.frames.last().expect("a seated frame");
-        let a = seated.characters[0];
+        let a = &seated.characters[0];
         let a_id = seated.agents[a.agent_idx].agent_id;
         let body = h
             .boxes(seated)
@@ -619,7 +619,7 @@ mod tests {
                     anchor_y: a.anchor_y + dy,
                     seat_desk: None,
                     seated: false,
-                    ..a
+                    ..a.clone()
                 });
             let plate = {
                 let office = Office {
