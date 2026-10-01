@@ -12,7 +12,6 @@ use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 
-use super::palette::{BLACK, WHITE, blend_rgb};
 use crate::sim::{Cup, DeskProps, desk_cup_at};
 use pixtuoid_core::AgentSlot;
 
@@ -271,7 +270,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
                 sprite_top = desk_art_top(pack, desk.y, frame.height());
                 blit_frame(frame, desk.x, sprite_top, buf);
             }
-            paint_desk_lamp(buf, lights, theme);
+            paint_desk_lamp_pool(buf, lights, theme);
             paint_screen_idle(
                 buf,
                 desk.x,
@@ -282,7 +281,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             paint_desk_coffee(buf, *desk, props.cup, &props.effects, theme);
             paint_token_stack(buf, *desk, props.token_tier, props.sheet_fall, theme);
             if let Some(tint) = screen_glow {
-                paint_screen_glow(buf, desk.x, sprite_top, now, *tint, theme);
+                paint_screen_glow(buf, desk.x, sprite_top, props.scanline, *tint, theme);
             }
         }
         DrawableKind::Character {
@@ -487,28 +486,16 @@ pub(super) fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, pack: &Pack
     }
 }
 
-/// Task lamp on the desk's west wing (the coffee cup and token tower own the other
-/// two), plus its warm pool.
-pub(super) fn paint_desk_lamp(
+/// The task lamp's warm pool; the desk art draws the lamp itself.
+pub(super) fn paint_desk_lamp_pool(
     buf: &mut RgbBuffer,
     lights: &crate::lighting::DeskLights,
     theme: &crate::theme::Theme,
 ) {
-    let strength = lights.lamp.strength;
-    if strength <= 0.0 {
+    if lights.lamp.strength <= 0.0 {
         return;
     }
-    let warm = theme.lighting.desk_lamp;
-    // The fixture tracks the light it CASTS: fixed tones show a lamp fully lit at a strength whose pool rounds to nothing.
-    const OFF: f32 = 0.80;
-    let unlit = blend_rgb(warm, BLACK, OFF);
-    let shade = blend_rgb(unlit, blend_rgb(warm, WHITE, 0.45), strength);
-    let stem = blend_rgb(unlit, blend_rgb(warm, BLACK, 0.72), strength);
-    let (shade_at, bulb) = (lights.fixture, lights.bulb());
-    buf.put_checked(shade_at.x, shade_at.y, shade);
-    buf.put_checked(shade_at.x + 1, shade_at.y, shade);
-    buf.put_checked(bulb.x, bulb.y, stem);
-    super::background::paint_light(buf, &lights.lamp, warm);
+    super::background::paint_light(buf, &lights.lamp, theme.lighting.desk_lamp);
 }
 
 /// Token-meter paper tower: `tier` reams stacked on the desk surface against
@@ -621,6 +608,75 @@ mod tests {
     use crate::layout::DESK_W;
     use crate::pet::PetKind;
 
+    /// The 1x tower and sheet art are the classic's: a frame per tier up to
+    /// [`MAX_TIER`](crate::token_meter::MAX_TIER), each [`STACK_PX_PER_TIER`]
+    /// rows a tier and [`STACK_W`] wide, the full tower a column wider for its
+    /// teeter.
+    #[test]
+    fn the_1x_token_art_is_the_classics_stack() {
+        let pack = crate::pack::test_default_pack();
+        let tower = pack.animation("token_tower").expect("the tower");
+        let max = crate::token_meter::MAX_TIER;
+        assert_eq!(tower.frames().len(), usize::from(max));
+        for (tier, f) in (1..=max).zip(tower.frames()) {
+            let teeter = u16::from(tier == max);
+            assert_eq!(
+                (f.width(), f.height()),
+                (STACK_W + 1, u16::from(tier) * STACK_PX_PER_TIER),
+                "tier {tier}"
+            );
+            let drawn = |x: u16, y: u16| f.get(x, y).copied().flatten().is_some();
+            assert!(
+                (0..f.height()).all(|y| {
+                    let dx = if y == 0 { teeter } else { 0 };
+                    (0..f.width()).all(|x| drawn(x, y) == (dx..dx + STACK_W).contains(&x))
+                }),
+                "tier {tier} is not {STACK_W} wide with its teeter"
+            );
+        }
+        let sheet = &pack.animation("token_sheet").expect("the sheet").frames()[0];
+        assert_eq!((sheet.width(), sheet.height()), (STACK_W, 1));
+    }
+
+    /// The 1x desk arts mark the cells the classic stands its props on, each
+    /// the prop's foot: the cup's under [`desk_cup_at`], the tower's at
+    /// [`STACK_X_OFF`] on [`STACK_BASE_DY`].
+    #[test]
+    fn the_1x_desk_arts_mark_the_classics_prop_cells() {
+        let pack = crate::pack::test_default_pack();
+        let cup_h = pack.animation("desk_cup").expect("the cup").frames()[0].height();
+        let desk = Point { x: 20, y: 30 };
+        for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
+            let name = crate::pack::desk_sprite_name(facing);
+            let anim = pack.animation(name).expect("the desk");
+            let top = desk_art_top(&pack, desk.y, anim.frames()[0].height());
+            let mark = |n: &str| {
+                let m = anim.marks(0).iter().find(|m| m.name() == n)?;
+                Some(Point {
+                    x: desk.x + m.x(),
+                    y: top + m.y(),
+                })
+            };
+            let cup = desk_cup_at(desk);
+            assert_eq!(
+                mark("cup"),
+                Some(Point {
+                    x: cup.x,
+                    y: cup.y + cup_h - 1
+                }),
+                "{name}'s cup"
+            );
+            assert_eq!(
+                mark("tower"),
+                Some(Point {
+                    x: desk.x + STACK_X_OFF,
+                    y: desk.y + STACK_BASE_DY
+                }),
+                "{name}'s tower"
+            );
+        }
+    }
+
     #[test]
     fn steam_anchor_sits_within_the_coffee_machine_columns() {
         let pack = crate::pack::test_default_pack();
@@ -664,6 +720,7 @@ mod tests {
                     token_tier,
                     sheet_fall,
                     effects: Vec::new(),
+                    scanline: 0,
                 },
             },
         }
