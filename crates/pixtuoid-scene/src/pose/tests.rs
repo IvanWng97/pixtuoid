@@ -405,7 +405,7 @@ fn snap_back_derive_is_idempotent_within_a_frame() {
 #[test]
 fn wander_derive_is_idempotent_within_a_frame() {
     use crate::pathfind::AStarRouter;
-    use crate::pixel_painter::character_anchor;
+    use crate::sim::anchors::character_anchor;
 
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
@@ -1111,7 +1111,7 @@ fn max_anchor_step(
     churn: bool,
 ) -> (i32, usize) {
     use crate::pathfind::AStarRouter;
-    use crate::pixel_painter::character_anchor;
+    use crate::sim::anchors::character_anchor;
 
     let mut rig = RouteRig::new(AStarRouter::new());
     rig.router.set_preferred_zone(l.corridor);
@@ -1421,7 +1421,7 @@ fn wander_coffee_run_coordinates_continuous_under_churn() {
 #[test]
 fn wander_interrupted_by_active_does_not_teleport() {
     use crate::pathfind::AStarRouter;
-    use crate::pixel_painter::character_anchor;
+    use crate::sim::anchors::character_anchor;
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
@@ -1437,7 +1437,7 @@ fn wander_interrupted_by_active_does_not_teleport() {
     let mut rig = RouteRig::new(AStarRouter::new());
     rig.router.set_preferred_zone(l.corridor);
     // The desk seated anchor, on throwaway stores — the "far from desk" reference.
-    let seated = crate::pixel_painter::character_anchor(
+    let seated = crate::sim::anchors::character_anchor(
         &idle,
         &l,
         now,
@@ -1494,7 +1494,7 @@ fn floor_offscreen_then_resume_does_not_replay() {
     // An off-screen floor is simply not rendered, so its motion freezes: the
     // fixture warms up, SKIPS a long gap (no calls at all), then resumes.
     use crate::pathfind::AStarRouter;
-    use crate::pixel_painter::character_anchor;
+    use crate::sim::anchors::character_anchor;
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
@@ -1539,7 +1539,7 @@ fn floor_offscreen_then_resume_does_not_replay() {
 #[test]
 fn exit_while_wandering_does_not_teleport_to_desk() {
     use crate::pathfind::AStarRouter;
-    use crate::pixel_painter::character_anchor;
+    use crate::sim::anchors::character_anchor;
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     // A real-sized floor, not the tiny 120×96 `layout()`: in the tiny room the
@@ -1765,7 +1765,7 @@ fn multiple_agents_share_overlay_without_teleport() {
     // itself reproduce the freeze regression —
     // `frozen_leg_anchor_continuous_across_router_shape_change` is that guard.
     use crate::pathfind::AStarRouter;
-    use crate::pixel_painter::character_anchor;
+    use crate::sim::anchors::character_anchor;
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();

@@ -240,6 +240,36 @@ pub(crate) fn hour_is_day(h: f32) -> bool {
     (SUN_RISE_H..SUN_SET_H).contains(&h)
 }
 
+/// What a wall clock reads at `now`, local time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ClockReading {
+    /// On a twelve-hour dial.
+    pub(crate) hour: u32,
+    pub(crate) minute: u32,
+}
+
+impl ClockReading {
+    /// The hour and the minute hands, as turns from twelve o'clock.
+    pub(crate) fn turns(self) -> (f32, f32) {
+        let (hour, minute) = (self.hour as f32, self.minute as f32);
+        ((hour + minute / 60.0) / 12.0, minute / 60.0)
+    }
+}
+
+/// Its own decode, not `sky::local_hour_frac`: the hands need the raw
+/// `hour % 12` and `minute`.
+pub(crate) fn clock_reading(now: SystemTime) -> ClockReading {
+    let unix_now = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let local = chrono::DateTime::<chrono::Local>::from(std::time::UNIX_EPOCH + unix_now);
+    use chrono::Timelike;
+    ClockReading {
+        hour: local.hour() % 12,
+        minute: local.minute(),
+    }
+}
+
 /// Fractional local hour (`hour + minute/60`, in `0.0..24.0`) for `now` — the
 /// sky's clock decode.
 pub(crate) fn local_hour_frac(now: SystemTime) -> f32 {

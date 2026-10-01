@@ -82,7 +82,7 @@ pub struct AgentFrame {
     pub w: u16,
     /// The painted frame's pixel height.
     pub h: u16,
-    /// Its placement's [`CharacterPlacement::label_anchor`].
+    /// Its placement's [`CharacterPlacement::label_anchor`](crate::sim::CharacterPlacement::label_anchor).
     pub label_anchor: Point,
 }
 
@@ -94,27 +94,18 @@ struct Hoverables {
 }
 
 mod ambient;
-mod anchors;
 mod background;
 mod debug_overlay;
 mod dense;
-mod drawable;
+pub(crate) mod drawable;
 mod effects;
 mod furniture;
 pub(crate) mod hair;
-mod palette;
+pub(crate) mod palette;
 pub(crate) mod seat;
-mod sim;
 mod wall;
 
-#[cfg(test)]
-pub(crate) use anchors::character_anchor;
-
-#[doc(hidden)]
-pub use anchors::seated_anchor_facing;
-pub(crate) use background::{
-    ClockReading, RUNNER_LATTICE_STRIDE, clock_reading, neon_look, octant_offset,
-};
+pub(crate) use background::{RUNNER_LATTICE_STRIDE, octant_offset};
 #[cfg(test)]
 pub(crate) use drawable::DESK_BEZEL_RAISE;
 pub(crate) use drawable::{
@@ -177,8 +168,7 @@ pub(crate) use dense::{DenseFrame, densest_frame};
 pub(crate) use furniture::{COOLER_WATER, paint_area_rug};
 // `floor::FloorSession::observe` is the public entry to the sim tick; the step
 // itself and its per-call borrow-set stay crate-internal.
-pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
-pub(crate) use sim::{SimInputs, SimStores, desk_occupant, sim_step};
+use crate::sim::{CharacterGlow, SimFrame, SimInputs, desk_occupant, sim_step};
 pub(crate) use wall::paint_wall;
 
 /// The pantry counter sprites, compact then large.
@@ -197,11 +187,12 @@ pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
 
 use crate::atmosphere::Moment;
 use crate::lighting::{DeskLights, LightInputs, Lights};
+use crate::sim::outfit_seed_for;
 use background::{
     paint_floor_and_walls, paint_floor_wash, paint_light, paint_neon_halo, paint_shadows,
 };
 use drawable::{Drawable, DrawableKind, Drawn, Layer, paint_drawable};
-use palette::{agent_overrides, outfit_seed_for};
+use palette::agent_overrides;
 use seat::paint_character_at;
 use wall::enqueue_room_walls;
 
@@ -406,7 +397,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
         paint_light(ctx.buf, lamp, ctx.theme.lighting.floor_lamp_halo);
     }
 
-    let neon = background::neon_look(frame.neon, ctx.theme);
+    let neon = crate::floor::neon_look(frame.neon, ctx.theme);
     let Furnishings {
         backdrop,
         sorted: mut drawables,
@@ -482,7 +473,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
     hover
 }
 
-/// Map the sim's resolved [`sim::CharacterPlacement`]s 1:1 onto y-sorted
+/// Map the sim's resolved [`crate::sim::CharacterPlacement`]s 1:1 onto y-sorted
 /// drawables. The ONLY paint-side work is presentation — resolving the
 /// theme-free [`CharacterGlow`] to a `Theme` color.
 fn enqueue_characters<'a>(
@@ -508,7 +499,7 @@ fn enqueue_characters<'a>(
 
 /// The frame to paint for `idx`, via [`frame_index`]. `None` only for a
 /// genuinely empty animation.
-pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
+pub(crate) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
     anim.frames().get(frame_index(anim, idx))
 }
 
@@ -575,11 +566,17 @@ pub(crate) fn desk_screen_glow(
 /// height.
 fn enqueue_pet<'a>(
     ctx: &PaintCtx<'_>,
-    pet: &'a sim::PetPlacement,
+    pet: &'a crate::sim::PetPlacement,
     drawables: &mut Vec<Drawable<'a>>,
 ) -> PetFrame {
     let pos = pet.pos;
-    let pet_h = sim::frame_size(ctx.pack, pet.anim_name, pet.frame_idx, sim::PET_FALLBACK).h;
+    let pet_h = crate::sim::frame_size(
+        ctx.pack,
+        pet.anim_name,
+        pet.frame_idx,
+        crate::sim::PET_FALLBACK,
+    )
+    .h;
     drawables.push(Drawable {
         anchor_y: z_sort_row(Anchor::Center, pos, pet_h),
         layer: Layer::Figure,
@@ -600,7 +597,7 @@ fn enqueue_pet<'a>(
 
 /// Enqueue the gateway mascots.
 fn enqueue_gateway_mascots<'a>(
-    mascots: &'a [sim::MascotPlacement],
+    mascots: &'a [crate::sim::MascotPlacement],
     drawables: &mut Vec<Drawable<'a>>,
 ) {
     for (mascot_idx, m) in mascots.iter().enumerate() {
@@ -620,7 +617,7 @@ fn enqueue_gateway_mascots<'a>(
 }
 
 impl MascotFrame {
-    fn of(m: &sim::MascotPlacement, w: u16, h: u16) -> Self {
+    fn of(m: &crate::sim::MascotPlacement, w: u16, h: u16) -> Self {
         Self {
             pos: m.pos,
             w,
@@ -691,7 +688,7 @@ fn queue_fixtures<'a>(
     ctx: &PaintCtx<'_>,
     frame: &SimFrame,
     desk_lights: &[DeskLights],
-    neon: background::NeonLook,
+    neon: crate::floor::NeonLook,
 ) -> Furnishings<'a> {
     let layout = ctx.layout;
     debug_assert_eq!(

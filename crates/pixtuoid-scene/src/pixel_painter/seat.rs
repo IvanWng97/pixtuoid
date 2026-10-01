@@ -7,7 +7,7 @@
 
 use super::*;
 
-use super::anchors::{back_couch_anchor, waypoint_anchor};
+use crate::sim::anchors::{back_couch_anchor, waypoint_anchor};
 use pixtuoid_core::state::FloorLocalDeskIndex;
 
 /// Which image of a character's art to draw: the part of its
@@ -32,7 +32,7 @@ impl SpritePose {
     /// each to resolve it, the same agent would glow differently in the two for
     /// no reason anyone chose.
     pub(crate) fn of(
-        placement: &super::sim::CharacterPlacement,
+        placement: &crate::sim::CharacterPlacement,
         agent: &AgentSlot,
         theme: &crate::theme::Theme,
     ) -> Self {
@@ -276,7 +276,7 @@ enum SeatKind {
 /// a newcomer only if the furniture is `occupies_pos` and the ONE layout it
 /// renders places it, not the whole sweep.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) struct Seat {
+pub(crate) struct Seat {
     kind: SeatKind,
     /// The cell the SPRITE renders on — a waypoint's resolved stand cell, a
     /// desk's walk anchor. NOT the settle foot-cell `settle_seat` matches on,
@@ -300,7 +300,7 @@ pub(crate) fn sofa_sitter_z_key(sofa: Point) -> u16 {
 }
 
 impl Seat {
-    pub(super) fn at_waypoint(
+    pub(crate) fn at_waypoint(
         kind: crate::layout::WaypointKind,
         pos: Point,
         facing: crate::layout::Facing,
@@ -314,7 +314,7 @@ impl Seat {
 
     /// The seat at a home `desk`. Its cell is the desk's walk anchor — the ONE
     /// value the chair sprite, its occupant and the walk that ends there share.
-    pub(super) fn at_desk(desk: Point, facing: crate::layout::Facing) -> Self {
+    pub(crate) fn at_desk(desk: Point, facing: crate::layout::Facing) -> Self {
         Seat {
             kind: SeatKind::HomeDesk,
             pos: crate::layout::desk_walk_anchor_facing(desk, facing),
@@ -327,7 +327,7 @@ impl Seat {
     /// feet-row z-key sorts a sitter through their own furniture. The meeting
     /// chair qualifies because its profile sprite shares the front `seated`
     /// sprite's bottom-row geometry.
-    pub(super) fn seated_furniture(self) -> bool {
+    pub(crate) fn seated_furniture(self) -> bool {
         use crate::layout::WaypointKind;
         matches!(
             self.kind,
@@ -375,7 +375,7 @@ impl Seat {
     /// only decides which side of it shows. The furniture with art of its own —
     /// the couch's `back_couch`, the chair's profile, an upright stander —
     /// answers with that and ignores `base`; nobody types on a sofa.
-    pub(super) fn sprite_for(self, base: &'static str) -> (&'static str, bool) {
+    pub(crate) fn sprite_for(self, base: &'static str) -> (&'static str, bool) {
         use crate::layout::WaypointKind;
         let view = self.view();
         match self.kind {
@@ -417,7 +417,7 @@ impl Seat {
     /// UPRIGHT kind goes through it too, so missing art degrades instead of
     /// painting nothing; and a back-turned couch lacking `back_couch` falls to
     /// `seated_back` when the pack HAS it, rather than to a face at the window.
-    pub(super) fn sprite_in_pack(self, base: &'static str, pack: &Pack) -> (&'static str, bool) {
+    pub(crate) fn sprite_in_pack(self, base: &'static str, pack: &Pack) -> (&'static str, bool) {
         let (anim, flip) = self.sprite_for(base);
         if pack.animation(anim).is_some() {
             return (anim, flip);
@@ -433,7 +433,7 @@ impl Seat {
     /// `(going_back, flip)` for the sit-down WALK glide that settles onto this
     /// seat — the SAME orientation as [`sprite_for`](Self::sprite_for),
     /// overriding the travel-direction rule for this terminal segment.
-    pub(super) fn settle_walk(self) -> (bool, bool) {
+    pub(crate) fn settle_walk(self) -> (bool, bool) {
         match self.view() {
             SeatView::Front => (false, false),
             SeatView::Back => (true, false),
@@ -446,7 +446,7 @@ impl Seat {
     /// the glide keep its natural foot z-key instead makes it cross the
     /// furniture's own key on the way down: the agent pops in front of the sofa
     /// mid-glide, then jumps behind it.
-    pub(super) fn z_key(self) -> u16 {
+    pub(crate) fn z_key(self) -> u16 {
         if self.seated_furniture() {
             return crate::layout::seated_z_key(self.pos);
         }
@@ -457,7 +457,7 @@ impl Seat {
 
     /// The render ANCHOR-BASE, which `sim::resolve_characters` places the sprite
     /// and its badge from.
-    pub(super) fn render_anchor(self, sprite_w: u16) -> Point {
+    pub(crate) fn render_anchor(self, sprite_w: u16) -> Point {
         if self.seated_furniture() {
             back_couch_anchor(self.pos, sprite_w)
         } else {
@@ -476,7 +476,7 @@ impl Seat {
 ///
 /// Covers the home desk too: `layout.home_desks` are NOT waypoints, but the
 /// chair is a settle target once the desk's arrival glides onto it.
-pub(super) fn settle_seat(cell: Point, layout: &Layout) -> Option<Seat> {
+pub(crate) fn settle_seat(cell: Point, layout: &Layout) -> Option<Seat> {
     use crate::layout::seated_foot_cell;
     layout
         .waypoints

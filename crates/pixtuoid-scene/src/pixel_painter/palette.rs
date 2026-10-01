@@ -2,7 +2,8 @@
 
 pub(super) use crate::composite::{BLACK, WHITE, blend_rgb};
 use pixtuoid_core::AgentSlot;
-use pixtuoid_core::id::normalize_path_key;
+
+use crate::sim::outfit_seed_for;
 use pixtuoid_core::sprite::{Frame, Pixel, Rgb, RgbBuffer};
 
 /// A complete shirt + pants combo, keyed by the agent's normalized working
@@ -300,28 +301,6 @@ const SKIN_PRESETS: &[Rgb] = &[
         b: 0x64,
     }, // warm tan
 ];
-
-/// Deterministic seed from a normalized cwd string: byte-fold, then the
-/// splitmix64 finalizer. NOT `DefaultHasher`: its algorithm may change between
-/// Rust releases, which would re-dress every agent on a toolchain bump.
-fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
-    let folded = cwd_norm
-        .bytes()
-        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64));
-    pixtuoid_core::id::splitmix64(folded)
-}
-
-/// The outfit-determining seed for `agent`. Extracted so
-/// `FrameCache::note_outfit_seed` watches the mid-lifetime cwd backfill through
-/// the EXACT unknown-cwd fallback [`agent_overrides`] uses; a second copy would
-/// drift.
-pub(super) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
-    if agent.unknown_cwd || agent.cwd.as_os_str().is_empty() {
-        agent.agent_id.raw()
-    } else {
-        cwd_outfit_seed(&normalize_path_key(&agent.cwd.to_string_lossy()))
-    }
-}
 
 /// A burning agent's hair — an alias of the flame gradient's deep base, so a
 /// gradient tweak can't desync the hair from the crown.

@@ -197,7 +197,7 @@ mod tests {
     use crate::cutaway::paint::tests::{empty_frame, lively_office, sit_down};
     use crate::embedded_pack::test_default_pack;
     use crate::floor::FloorMeta;
-    use crate::pixel_painter::SimFrame;
+    use crate::sim::SimFrame;
 
     /// How a run of frames through a canvas was reported.
     #[derive(Debug, Default)]

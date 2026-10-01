@@ -18,15 +18,15 @@ use pixtuoid_core::walkable::OccupancyOverlay;
 
 use crate::audio::{AudioCueTracker, AudioFrame};
 use crate::chitchat::{ActiveChitchat, VenueKey};
+use crate::composite::{BLACK, WHITE, blend_rgb};
 use crate::frame_cache::FrameCache;
 use crate::layout::Size;
 use crate::motion::MotionState;
 use crate::pathfind::{AStarRouter, Router};
 use crate::pet::{Pet, PetState};
-use crate::pixel_painter::{
-    PixelCtx, SimFrame, SimInputs, SimStores, render_to_rgb_buffer, sim_step,
-};
+use crate::pixel_painter::{PixelCtx, render_to_rgb_buffer};
 use crate::pose::PoseHistory;
+use crate::sim::{SimFrame, SimInputs, SimStores, sim_step};
 use crate::theme::Theme;
 
 pub use pixtuoid_core::state::MAX_FLOORS;
@@ -823,7 +823,7 @@ impl LightingState {
 }
 
 /// The neon sign's light for one frame — theme-free, like
-/// [`crate::pixel_painter::CharacterGlow`]: the sim decides HOW LIT and how ALARMED
+/// [`crate::sim::CharacterGlow`]: the sim decides HOW LIT and how ALARMED
 /// the sign is, paint maps that to colors.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct NeonLevels {
@@ -865,6 +865,32 @@ impl NeonLevels {
             alert: self.alert + (to.alert - self.alert) * t,
             power: self.power + (to.power - self.power) * t,
         }
+    }
+}
+
+/// The neon sign's colors for one frame: a bright TUBE, a colored HALO that
+/// spills onto the wall and whatever hangs there, and a faintly tinted interior.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct NeonLook {
+    pub tube: Rgb,
+    pub interior: Rgb,
+    pub halo: Rgb,
+}
+
+/// A lit tube is its hue pushed this far toward white — the core of a real neon
+/// reads near-white, the COLOR lives in the halo.
+const NEON_TUBE_WHITEN: f32 = 0.38;
+/// How much of the hue the dark interior picks up at full power.
+const NEON_INTERIOR_TINT: f32 = 0.07;
+/// Map the sim's theme-free `levels` to this frame's colors; how strongly the
+/// halo throws them is the [`Lights`](crate::lighting::Lights)' call.
+pub(crate) fn neon_look(levels: crate::floor::NeonLevels, theme: &Theme) -> NeonLook {
+    let power = levels.power;
+    let hue = theme.ui.neon_brand.mix(theme.ui.neon_alert, levels.alert);
+    NeonLook {
+        tube: blend_rgb(BLACK, blend_rgb(hue, WHITE, NEON_TUBE_WHITEN), power),
+        interior: blend_rgb(theme.office.neon_panel_bg, hue, NEON_INTERIOR_TINT * power),
+        halo: hue,
     }
 }
 

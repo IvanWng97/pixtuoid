@@ -51,7 +51,7 @@ impl FrameCache {
     /// CHANGE (the cwd backfill) drops the agent's cached frames — otherwise
     /// already-cached poses keep the stale outfit for the agent's lifetime while
     /// new poses render the healed one. Callers pass the exact seed the palette
-    /// derives (`pixel_painter::palette::outfit_seed_for`).
+    /// derives (`sim::outfit_seed_for`).
     pub fn note_outfit_seed(&mut self, id: AgentId, seed: u64) {
         match self.outfit_seeds.entry(id) {
             Entry::Occupied(mut e) => {
