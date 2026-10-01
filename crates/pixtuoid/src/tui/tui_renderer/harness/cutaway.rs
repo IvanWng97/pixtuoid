@@ -123,6 +123,23 @@ fn the_cutaway_shows_no_wall_display() {
     assert!(classic.shows_wall_display());
 }
 
+/// A refused frame sends no tiles and leaves no hit targets behind.
+#[test]
+fn shrinking_under_the_minimum_refuses_the_cutaway_frame() {
+    let (cols, rows) = (120, 40);
+    let (mut r, wire) = kitty(cols, rows);
+    let scene = office();
+    r.render(&scene, pack(), t0()).expect("render");
+    assert!(r.scene_area_at(cols / 2, rows / 2).is_some());
+    wire.take();
+    let (small_cols, small_rows) = too_small_terminal();
+    r.terminal.backend_mut().resize(small_cols, small_rows);
+    r.render(&scene, pack(), t0()).expect("render");
+    assert!(!wire.take().contains(TRANSMIT));
+    assert_eq!(r.scene_area_at(cols / 2, rows / 2), None);
+    assert!(r.cached_pet_pos().is_none());
+}
+
 #[test]
 fn a_modal_over_the_image_shows_its_text() {
     let (mut r, _wire) = kitty(120, 40);
