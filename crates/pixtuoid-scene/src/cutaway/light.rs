@@ -81,15 +81,17 @@ impl Flash {
         Self(storm_steps(sky, FLASH_MAX_STEPS))
     }
 
-    /// The window glass's own lift under `sky`, the bolt's.
-    pub(crate) fn bolt(sky: &crate::sky::Sky) -> u8 {
-        storm_steps(sky, BOLT_MAX_STEPS)
-    }
-
     /// `c` lifted by it.
     fn on(self, c: Rgb) -> Rgb {
         if self.0 == 0 { c } else { c.ramp(self.0 as i8) }
     }
+}
+
+/// The steps the bolt lifts the window glass under `sky`, before the room's
+/// [`Flash`] lifts it with everything else: up to [`BOLT_MAX_STEPS`] +
+/// [`FLASH_MAX_STEPS`] at a strike's peak.
+pub(crate) fn bolt_steps(sky: &crate::sky::Sky) -> u8 {
+    storm_steps(sky, BOLT_MAX_STEPS)
 }
 
 /// `sky`'s flash level in whole steps up to `max`, in a storm.
