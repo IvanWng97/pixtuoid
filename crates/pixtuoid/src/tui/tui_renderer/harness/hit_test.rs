@@ -292,3 +292,85 @@ fn overlapping_agents_hit_the_one_painted_on_top() {
         "hover marks the label of the agent on top"
     );
 }
+
+#[test]
+fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
+    use crate::tui::geometry::CellArea;
+    use crate::tui::hit_test::{
+        hit_test_agent, hit_test_coffee_machine, hit_test_furniture, hit_test_pet,
+        topmost_mascot_at,
+    };
+    let now = t0() + Duration::from_secs(20);
+    let mut scene = scene_with(
+        (0..6)
+            .map(|i| active(&format!("/geo/{i}.jsonl"), i, "Edit", t0()))
+            .collect(),
+        16,
+    );
+    scene.insert_daemon(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty"),
+        pixtuoid_core::state::DaemonPresence {
+            liveness: pixtuoid_core::state::DaemonLiveness::UP,
+            active_sessions: 1,
+            last_seen: now,
+            entered_at: t0(),
+            in_flight_runs: Default::default(),
+            current_pid: Some(1),
+        },
+    );
+    let cat = pixtuoid_scene::pet::Pet::defaulted(PetKind::Cat);
+    for (cols, rows) in [(80, 30), (120, 52), (157, 41)] {
+        let mut term = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
+        let mut floor = PerFloor::new();
+        let mut chitchat = std::collections::HashMap::new();
+        let mut ctx = DrawCtx::offscreen(
+            &mut floor,
+            &mut chitchat,
+            normal_theme(),
+            &scene,
+            pack(),
+            now,
+            FloorMeta::ground(),
+        );
+        ctx.world.pets.pet = Some(&cat);
+        let out = draw_scene(&mut term, &mut ctx).expect("draw");
+        let (layout, geometry) = (
+            out.layout.as_deref().expect("drawn"),
+            out.geometry.expect("drawn"),
+        );
+        let hits = |at: CellArea| {
+            (
+                hit_test_agent(&out.agents, at),
+                hit_test_coffee_machine(layout, at),
+                out.pet_pos
+                    .is_some_and(|p| hit_test_pet(p.kind, p.pos, p.anim, at)),
+                topmost_mascot_at(&out.mascots, at).map(|m| m.pos),
+                hit_test_furniture(layout, at),
+            )
+        };
+        let mut seen = [false; 5];
+        for (col, row) in (0..rows).flat_map(|row| (0..cols).map(move |col| (col, row))) {
+            let old = hits(CellArea::half_block(col, row));
+            assert_eq!(
+                geometry.area_at(col, row).map(hits),
+                Some(old),
+                "{cols}x{rows} cell ({col},{row})"
+            );
+            let (agent, coffee, pet, mascot, furniture) = old;
+            for (seen, hit) in seen.iter_mut().zip([
+                agent.is_some(),
+                coffee,
+                pet,
+                mascot.is_some(),
+                furniture.is_some(),
+            ]) {
+                *seen |= hit;
+            }
+        }
+        assert_eq!(
+            seen, [true; 5],
+            "{cols}x{rows}: every kind is hit somewhere"
+        );
+    }
+}
