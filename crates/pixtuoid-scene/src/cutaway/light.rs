@@ -64,6 +64,42 @@ impl Ambient {
     }
 }
 
+/// How far a storm's lightning lifts the whole room this frame, in ramp steps,
+/// at [`Sky::flash`](crate::sky::Sky::flash): a strike's phases step it, never
+/// a blend toward white. Outside a storm it lifts nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub(crate) struct Flash(u8);
+
+/// The steps a strike's brightest phase lifts the room.
+pub(crate) const FLASH_MAX_STEPS: u8 = 2;
+/// The steps it lifts the window glass, where the bolt is.
+const BOLT_MAX_STEPS: u8 = 4;
+
+impl Flash {
+    /// The room's lift under `sky`.
+    pub(crate) fn of(sky: &crate::sky::Sky) -> Self {
+        Self(storm_steps(sky, FLASH_MAX_STEPS))
+    }
+
+    /// The window glass's own lift under `sky`, the bolt's.
+    pub(crate) fn bolt(sky: &crate::sky::Sky) -> u8 {
+        storm_steps(sky, BOLT_MAX_STEPS)
+    }
+
+    /// `c` lifted by it.
+    fn on(self, c: Rgb) -> Rgb {
+        if self.0 == 0 { c } else { c.ramp(self.0 as i8) }
+    }
+}
+
+/// `sky`'s flash level in whole steps up to `max`, in a storm.
+fn storm_steps(sky: &crate::sky::Sky, max: u8) -> u8 {
+    if sky.weather() != crate::sky::Weather::Storm {
+        return 0;
+    }
+    (sky.flash().clamp(0.0, 1.0) * f32::from(max)).round() as u8
+}
+
 /// How a painted pixel takes the room's light.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Glow {
@@ -280,7 +316,7 @@ pub(crate) fn tint_of(
 pub(crate) fn net_pass(
     rect: ArtRect,
     lights: &[&LightView],
-    ambient: Ambient,
+    (ambient, flash): (Ambient, Flash),
     emission: &Emission,
     pen: Pen,
     memo: &mut NetMemo,
@@ -333,12 +369,12 @@ pub(crate) fn net_pass(
         for bx in bx0..bx1 {
             let a = art_row + usize::from(bx / k - rect.x.0);
             let (lift, tint) = (lift[a], tint[a]);
-            if lift == 0 && ambient.0 == 0 {
+            if lift == 0 && ambient.0 == 0 && flash.0 == 0 {
                 continue;
             }
             let i = usize::from(by) * bw + usize::from(bx);
             let glow = emission.glow.get(i).copied().unwrap_or(Glow::Lit);
-            pixels[i] = memo.of(pixels[i], glow, lift, tint, ambient);
+            pixels[i] = memo.of(pixels[i], glow, lift, tint, (ambient, flash));
         }
     }
 }
@@ -353,14 +389,21 @@ pub(crate) struct NetMemo {
 }
 
 /// Everything [`net_colour`] reads for one pixel.
-type NetKey = (Rgb, Glow, u8, Option<Rgb>, Ambient);
+type NetKey = (Rgb, Glow, u8, Option<Rgb>, Ambient, Flash);
 
 /// Bounds the memo in a room whose colours never settle.
 const NET_MEMO_CAP: usize = 1 << 16;
 
 impl NetMemo {
-    fn of(&mut self, under: Rgb, glow: Glow, lift: u8, tint: Option<Rgb>, ambient: Ambient) -> Rgb {
-        let key = (under, glow, lift, tint, ambient);
+    fn of(
+        &mut self,
+        under: Rgb,
+        glow: Glow,
+        lift: u8,
+        tint: Option<Rgb>,
+        (ambient, flash): (Ambient, Flash),
+    ) -> Rgb {
+        let key = (under, glow, lift, tint, ambient, flash);
         if let Some((k, c)) = self.last
             && k == key
         {
@@ -369,11 +412,14 @@ impl NetMemo {
         if self.colours.len() >= NET_MEMO_CAP {
             self.colours.clear();
         }
-        let c = *self.colours.entry(key).or_insert_with(|| match glow {
-            Glow::Lit => net_colour(under, lift, ambient, tint),
-            Glow::Emissive => under,
-            Glow::Shaded => ambient.on(under),
-            Glow::Pane => net_colour(under, lift, Ambient::default(), tint),
+        // A strike lights everything, what glows of its own too.
+        let c = *self.colours.entry(key).or_insert_with(|| {
+            flash.on(match glow {
+                Glow::Lit => net_colour(under, lift, ambient, tint),
+                Glow::Emissive => under,
+                Glow::Shaded => ambient.on(under),
+                Glow::Pane => net_colour(under, lift, Ambient::default(), tint),
+            })
         });
         self.last = Some((key, c));
         c
@@ -468,7 +514,7 @@ mod tests {
         net_pass(
             whole(40, 16),
             views,
-            ambient,
+            (ambient, Flash::default()),
             &Emission::new(160, 64),
             pen(),
             &mut NetMemo::default(),
@@ -588,7 +634,7 @@ mod tests {
         net_pass(
             rect,
             &[&a, &b],
-            night,
+            (night, Flash::default()),
             &Emission::new(160, 64),
             pen(),
             &mut NetMemo::default(),
@@ -614,7 +660,7 @@ mod tests {
         net_pass(
             whole(40, 16),
             &[&lamp],
-            night,
+            (night, Flash::default()),
             &emission,
             pen(),
             &mut NetMemo::default(),
