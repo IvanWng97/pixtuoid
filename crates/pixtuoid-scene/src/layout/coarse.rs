@@ -47,7 +47,7 @@ fn open(mask: &WalkableMask, overlay: &OccupancyOverlay, x: u16, y: u16) -> bool
 }
 
 /// Is coarse cell `(cx, cy)` walkable — ≥ `COARSE_CELL_WALKABLE_MIN` of its
-/// pixels [open](open)? The reach BFS passes an EMPTY overlay (static geometry
+/// pixels [`open`]? The reach BFS passes an EMPTY overlay (static geometry
 /// only); the router passes the live occupancy overlay.
 pub(crate) fn cell_walkable(
     mask: &WalkableMask,
