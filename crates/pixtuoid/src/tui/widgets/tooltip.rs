@@ -500,6 +500,44 @@ mod tests {
         }
     }
 
+    /// A badge's text centres on its anchor, the sprite's top-centre.
+    #[test]
+    fn a_badge_centres_its_text_on_the_anchor() {
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::{LabelElement, LabelTone};
+        let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        let scene_rect = Rect {
+            x: 3,
+            y: 1,
+            width: 36,
+            height: 8,
+        };
+        let anchor = Point { x: 20, y: 8 };
+        let text = "abcdefgh";
+        term.draw(|f| {
+            super::paint_label_widgets(
+                f,
+                &[LabelElement {
+                    anchor_px: anchor,
+                    text: text.into(),
+                    tone: LabelTone::Idle,
+                    hovered: false,
+                }],
+                scene_rect,
+                &theme::NORMAL,
+            )
+        })
+        .unwrap();
+        let row = row_of(&term, text).expect("the badge painted");
+        let buf = term.backend().buffer();
+        let left = (0..buf.area.width)
+            .find(|&x| buf[(x, row)].symbol() != " ")
+            .expect("a painted cell");
+        // The ● marker plus the name.
+        let width = 1 + text.chars().count() as u16;
+        assert_eq!(left, scene_rect.x + anchor.x - width / 2);
+    }
+
     #[test]
     fn mascot_tooltip_paints_gateway_verb_into_buffer() {
         let mut term = Terminal::new(TestBackend::new(60, 8)).unwrap();

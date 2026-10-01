@@ -696,6 +696,44 @@ mod tests {
         }
     }
 
+    /// The badge's ink centres on the anchor scaled to the surface: `anchor_px` is
+    /// already the sprite's top-centre, so any extra offset walks it off the sprite.
+    #[test]
+    fn a_badge_centres_its_ink_on_the_scaled_anchor() {
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::{LabelElement, LabelTone};
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let (w, h, scale) = (240usize, 60usize, 3i32);
+        let ground = 0x0080_8080u32;
+        let mut sb = vec![ground; w * h];
+        let anchor = Point { x: 40, y: 15 };
+        paint_labels_into_surface(
+            &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
+            &[LabelElement {
+                anchor_px: anchor,
+                text: "idle-x".into(),
+                tone: LabelTone::Idle,
+                hovered: false,
+            }],
+            scale,
+            theme,
+        );
+        let cols: Vec<i32> = (0..w)
+            .filter(|&x| (0..h).any(|y| sb[y * w + x] != ground))
+            .map(|x| x as i32)
+            .collect();
+        let (Some(&left), Some(&right)) = (cols.first(), cols.last()) else {
+            panic!("the badge painted nothing");
+        };
+        let centre = i32::from(anchor.x) * scale;
+        // Glyph side bearings and the 1-px drop shadow, not an offset.
+        const ROUNDING_PX: i32 = 2;
+        assert!(
+            ((left + right) / 2 - centre).abs() <= ROUNDING_PX,
+            "ink spans {left}..={right}, centred off the anchor's {centre}"
+        );
+    }
+
     #[test]
     fn paint_labels_split_the_status_dot_tone_from_the_cli_name_hue() {
         // A registered prefix (`cc·`) exercises the `Some(hue)` arm the tone-only

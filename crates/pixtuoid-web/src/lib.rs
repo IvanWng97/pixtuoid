@@ -926,6 +926,33 @@ mod tests {
         }
     }
 
+    /// The site centres each span on `x`, so `x` is the anchor itself.
+    #[test]
+    fn overlay_json_hangs_each_label_at_its_anchor() {
+        let mut o = office();
+        let mut t = 0u64;
+        while t <= LOOP_MS / 2 {
+            o.step(T0_MS + t as f64, 288, 180);
+            t += 5_000;
+        }
+        let v: serde_json::Value =
+            serde_json::from_str(&o.overlay_json()).expect("overlay_json is valid JSON");
+        let got: Vec<(u64, u64)> = v["labels"]
+            .as_array()
+            .expect("labels")
+            .iter()
+            .map(|l| (l["x"].as_u64().unwrap(), l["y"].as_u64().unwrap()))
+            .collect();
+        let want: Vec<(u64, u64)> = o
+            .session
+            .overlay(&o.scene, None)
+            .iter()
+            .map(|e| (u64::from(e.anchor_px.x), u64::from(e.anchor_px.y)))
+            .collect();
+        assert!(!want.is_empty(), "premise: agents are drawn");
+        assert_eq!(got, want);
+    }
+
     #[test]
     fn overlay_json_colors_track_set_theme() {
         let mut o = office();
