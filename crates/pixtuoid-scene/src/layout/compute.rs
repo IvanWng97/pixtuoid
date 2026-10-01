@@ -444,14 +444,22 @@ pub(super) fn compute_with_seed(
                     plan.lounge_west_clear
                         + furniture_def(PlantKind::Flower.furniture()).visual.w / 2,
                 ),
-                y: plan.cubicle_aisle.y.saturating_sub(4),
+                // In the corridor beside its appliances: the band's bottom row is a desk
+                // row on a packed floor.
+                y: corridor_centre_y(
+                    &plan.cubicle_aisle,
+                    furniture_def(PlantKind::Flower.furniture()).visual.h,
+                ),
             },
         },
         PlantItem {
             kind: PlantKind::Succulent,
             pos: Point {
                 x: plan.pod_grid.band.x + plan.pod_grid.band.width.saturating_sub(4),
-                y: plan.cubicle_aisle.y.saturating_sub(4),
+                y: corridor_centre_y(
+                    &plan.cubicle_aisle,
+                    furniture_def(PlantKind::Succulent.furniture()).visual.h,
+                ),
             },
         },
     ]
@@ -553,7 +561,7 @@ pub(super) fn compute_with_seed(
         }));
         if let Some(settled) = settle_plant(
             p,
-            &home_desks,
+            &desk_art,
             &waypoints,
             &obstacles,
             &plan.pod_grid.band,
@@ -993,11 +1001,11 @@ pub(super) fn plant_obstacle_rects(
 }
 
 /// Settle a scatter-plant candidate: keep its authored spot when clear, else slide 1px
-/// at a time toward the band's horizontal centre (bounded) until the desk-ground and
+/// at a time toward the band's horizontal centre (bounded) until the desk-art and
 /// clearance rules pass. SLIDING, not deleting — yield-by-deletion stripped the greenery.
 fn settle_plant(
     p: PlantItem,
-    home_desks: &[Point],
+    desk_art: &[(Point, Size)],
     waypoints: &[Waypoint],
     singletons: &[(Point, Size)],
     band: &Bounds,
@@ -1017,7 +1025,7 @@ fn settle_plant(
     } else {
         -1
     };
-    let clear = |cand: Point| plant_spot_clear(p.kind, cand, home_desks, waypoints, singletons);
+    let clear = |cand: Point| plant_spot_clear(p.kind, cand, desk_art, waypoints, singletons);
     let slide = |step: u16| Point {
         x: p.pos.x.saturating_add_signed(dir * step as i16),
         y: p.pos.y,
@@ -1031,8 +1039,7 @@ fn settle_plant(
             pos: first,
         });
     }
-    // Beside the blocking obstacle on ITS row: the plant's own row is desk-saturated on
-    // packed floors, so the corridor floor beside it is the one desk-free spot.
+    // Beside the blocking obstacle, past its clearance.
     let pv = furniture_def(p.kind.furniture()).visual;
     if let Some(w) = first_blocking_waypoint(p.kind, p.pos, waypoints) {
         let wdef = furniture_def(w.kind.furniture());
@@ -1048,7 +1055,7 @@ fn settle_plant(
         };
         let cand = Point {
             x: cand_x,
-            y: w.pos.y,
+            y: p.pos.y,
         };
         if clear(cand) {
             return Some(PlantItem {
@@ -1089,26 +1096,25 @@ fn first_blocking_waypoint(
     })
 }
 
-/// Both placement rules for one plant spot: ground never overlaps a desk
-/// ground, and the sprite box keeps PLANT_OBSTACLE_CLEARANCE_PX of air from
-/// every obstacle waypoint's box.
+/// Both placement rules for one plant spot: the sprite box never overlaps a
+/// rect in `desk_art`, and keeps PLANT_OBSTACLE_CLEARANCE_PX of air from every
+/// obstacle waypoint's box.
 fn plant_spot_clear(
     kind: PlantKind,
     pos: Point,
-    home_desks: &[Point],
+    desk_art: &[(Point, Size)],
     waypoints: &[Waypoint],
     singletons: &[(Point, Size)],
 ) -> bool {
-    let def = furniture_def(kind.furniture());
-    if def
-        .ground_rect(Anchor::Center, pos)
-        .is_some_and(|r| overlaps_a_desk_ground(r, home_desks))
+    let pv = furniture_def(kind.furniture()).visual;
+    let plant_tl = anchored_top_left(Anchor::Center, pos, pv.w, pv.h);
+    if desk_art
+        .iter()
+        .any(|&r| super::placement::rects_overlap((plant_tl, pv), r))
     {
         return false;
     }
     // Fixed singletons get the same inflated-clearance rule as waypoints.
-    let pv = def.visual;
-    let plant_tl = anchored_top_left(Anchor::Center, pos, pv.w, pv.h);
     if singletons.iter().any(|&(tl, sz)| {
         super::placement::overlaps_within_clearance(
             (plant_tl, pv),
@@ -1119,15 +1125,6 @@ fn plant_spot_clear(
         return false;
     }
     first_blocking_waypoint(kind, pos, waypoints).is_none()
-}
-
-/// Does `r` (a blocked ground rect) overlap ANY home desk's ground?
-fn overlaps_a_desk_ground(r: (Point, Size), home_desks: &[Point]) -> bool {
-    let desk = super::decor::desk_furniture_def();
-    home_desks.iter().any(|&d| {
-        desk.ground_rect(Anchor::TopLeft, d)
-            .is_some_and(|desk_ground| super::placement::rects_overlap(r, desk_ground))
-    })
 }
 
 /// Walkable cells NOT reachable from `seed` by 4-connected flood (a sealed
@@ -1629,6 +1626,12 @@ pub(super) const PRINTER_MIN_AISLE_W: u16 = 40;
 /// vertical wall's foot there.
 const VENDING_WEST_GAP: u16 = 3;
 
+/// The centre `y` of a corridor piece `h` tall: its base one row off the aisle's
+/// south edge, its art overhanging north (invariant #6).
+fn corridor_centre_y(aisle: &Bounds, h: u16) -> u16 {
+    super::placement::centre_y_standing_on((aisle.y + aisle.height).saturating_sub(2), h)
+}
+
 /// Waypoints: couch, pantry, pod-decor-promoted (PhoneBooth/StandingDesk), corridor
 /// appliances (VendingMachine/Printer).
 fn compute_waypoints(
@@ -1695,15 +1698,12 @@ fn compute_waypoints(
         }
     }
 
-    // Each appliance's base stands one row off the aisle's south edge, its art
-    // overhanging north (invariant #6).
-    let appliance_y = |kind: Furniture| {
-        let base = (cubicle_aisle.y + cubicle_aisle.height).saturating_sub(2);
-        super::placement::centre_y_standing_on(base, furniture_def(kind).visual.h)
-    };
     let vending = Point {
         x: right_x + VENDING_WEST_GAP + furniture_def(Furniture::VendingMachine).visual.w / 2,
-        y: appliance_y(Furniture::VendingMachine),
+        y: corridor_centre_y(
+            cubicle_aisle,
+            furniture_def(Furniture::VendingMachine).visual.h,
+        ),
     };
     if cubicle_aisle.height >= VENDING_MIN_AISLE_H
         && cubicle_aisle.width > VENDING_MIN_AISLE_W
@@ -1721,7 +1721,7 @@ fn compute_waypoints(
     let printer = (0..=pod_grid.stride_x)
         .map(|dx| Point {
             x: (right_x + right_w).saturating_sub(10 + dx),
-            y: appliance_y(Furniture::Printer),
+            y: corridor_centre_y(cubicle_aisle, furniture_def(Furniture::Printer).visual.h),
         })
         .find(|&p| clears_the_seats(Furniture::Printer, p, home_desks));
     if let Some(printer) = printer

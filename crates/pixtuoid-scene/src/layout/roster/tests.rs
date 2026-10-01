@@ -554,10 +554,6 @@ const OVERLAP_BY_DESIGN: &[(&str, &str)] = &[
 /// The [`kind_key`] pairs still overlapping where they should not, each in key
 /// order: a fix deletes its entry.
 const OVERLAP_DEFECTS: &[(&str, &str)] = &[
-    // A plant settled against a desk.
-    ("Desk", "Plant"),
-    ("DeskChair", "Plant"),
-    ("FilingCabinet", "Plant"),
     // The lounge crowds a short floor's desks.
     ("Desk", "FloorLamp"),
     ("Desk", "LoungeRug"),
