@@ -1,6 +1,7 @@
-//! The cutaway profile's paint pass — the second reader of `SimFrame`. EFFECTS
-//! (weather, steam, the pet) stay with the classic pass. It never advances the
-//! sim; a mover here would desync the profiles.
+//! The cutaway profile's paint pass — the second reader of `SimFrame`. Of the
+//! sim's effects it draws those riding on people (`cutaway::effects`); steam
+//! and the pet stay with the classic pass.
+//! It never advances the sim; a mover here would desync the profiles.
 
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
@@ -10,6 +11,7 @@ use crate::atmosphere::Moment;
 use crate::cutaway::order::{Span, depth_sort};
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::cutaway::shade::{Ramp, fill, slab};
+use crate::effects::EffectKind;
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, DESK_H, Depth, Fixture, FixtureKind, Layer, Layout, Point, Size, Station, Tie,
@@ -683,6 +685,9 @@ fn paint_pieces(
                     | PieceKind::Badge { .. }
                     | PieceKind::Board { .. }
                     | PieceKind::Indicator { .. } => Glow::Emissive,
+                    PieceKind::Effect(r) if r.effect.kind == EffectKind::FlameCrown => {
+                        Glow::Emissive
+                    }
                     PieceKind::Desk { .. }
                     | PieceKind::Prop { .. }
                     | PieceKind::Animated { .. }
@@ -702,6 +707,7 @@ fn paint_pieces(
                     | PieceKind::PropBand { .. }
                     | PieceKind::Table { .. }
                     | PieceKind::Character { .. }
+                    | PieceKind::Effect(_)
                     | PieceKind::Clock { .. } => Glow::Lit,
                 };
                 emission.set(x, y, glow);
@@ -761,6 +767,7 @@ fn mark(
         | PieceKind::PropBand { .. }
         | PieceKind::Table { .. }
         | PieceKind::Character { .. }
+        | PieceKind::Effect(_)
         | PieceKind::Neon { .. }
         | PieceKind::Clock { .. }
         | PieceKind::Badge { .. }
@@ -991,6 +998,7 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
         | PieceKind::Door { .. }
         | PieceKind::Neon { .. }
         | PieceKind::Clock { .. }
+        | PieceKind::Effect(_)
         | PieceKind::Badge { .. }
         | PieceKind::Board { .. }
         | PieceKind::Indicator { .. } => None,
@@ -1092,6 +1100,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::Indicator { door, floor } => (door, floor).hash(&mut h),
         PieceKind::Glass { ref view } => view.hash(&mut h),
         PieceKind::Hung { at, sprite } => (at, sprite).hash(&mut h),
+        PieceKind::Effect(riding) => riding.hash(&mut h),
     }
     h.finish()
 }
@@ -1585,6 +1594,7 @@ fn paint_piece(
             paint_desk(at, art, screen, (pack, scale), &mut cache.art, buf);
         }
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
+        PieceKind::Effect(ref riding) => riding.paint(theme, buf),
         PieceKind::Character {
             ref figure, chair, ..
         } => {
@@ -1907,23 +1917,35 @@ fn push_characters(
         let hair = key
             .dress
             .as_ref()
-            .map_or(0, |d| d.rise.div_ceil(key.frame.density.get()));
+            .map_or(0, |d| d.rise().div_ceil(key.frame.density.get()));
         let top = crate::layout::Point {
             x: at.x,
             y: at.y.saturating_sub(hair),
         };
+        let span = occupant_span(
+            piece_span(crate::layout::Anchor::TopLeft, top, w, h + hair, 0),
+            c.anchor_y,
+            chair.map(|(span, _)| span),
+        );
+        let riders = riders(c, &key, (w, at), scale);
+        // Dust lies on the floor under its walker; the rest ride over them.
+        let ride = |order: &mut Vec<(Span, PieceKind)>, beneath: bool| {
+            for r in riders.iter().filter(|r| r.effect.kind.beneath() == beneath) {
+                if let Some(s) = r.span(theme, span.depth) {
+                    order.push((s, PieceKind::Effect(*r)));
+                }
+            }
+        };
+        ride(order, true);
         order.push((
-            occupant_span(
-                piece_span(crate::layout::Anchor::TopLeft, top, w, h + hair, 0),
-                c.anchor_y,
-                chair.map(|(span, _)| span),
-            ),
+            span,
             PieceKind::Character {
                 figure: Figure { at, shadow, key },
                 chair: chair.map(|(_, at)| at),
                 body: Span::new(top.x, top.y, w, h + hair, 0),
             },
         ));
+        ride(order, false);
         let badge = Badge {
             at: label_anchor(top, w, badge_ceiling),
             text: namesakes.text(agent),
@@ -1935,6 +1957,32 @@ fn push_characters(
         ));
     }
     carried
+}
+
+/// `c`'s effects on the grid of its figure `key`, `w` logical columns wide
+/// with its frame's top-left at `at`.
+fn riders(
+    c: &crate::pixel_painter::CharacterPlacement,
+    key: &crate::pixel_painter::seat::CharacterKey,
+    (w, at): (u16, crate::layout::Point),
+    scale: RenderScale,
+) -> Vec<crate::cutaway::effects::Riding> {
+    let d = key.frame.density.get();
+    let Some(pen) = Pen::new(scale, d) else {
+        return Vec::new();
+    };
+    let head = key.dress.as_ref().map(|dress| {
+        let (d, frame_w) = (i32::from(d), i32::from(w) * i32::from(d));
+        let x = i32::from(dress.head.x);
+        crate::cutaway::effects::ArtPoint {
+            x: i32::from(at.x) * d + if key.frame.flip_x { frame_w - 1 - x } else { x },
+            y: i32::from(at.y) * d + dress.crest,
+        }
+    });
+    c.effects
+        .iter()
+        .map(|&effect| crate::cutaway::effects::Riding { effect, head, pen })
+        .collect()
 }
 
 /// A figure's piece: its drawn bounds, sorted on `depth` — the sim's own z-key,
@@ -2074,6 +2122,7 @@ impl PieceKind {
             | PieceKind::Glass { .. }
             | PieceKind::Desk { .. }
             | PieceKind::Character { .. }
+            | PieceKind::Effect(_)
             | PieceKind::Badge { .. }
             | PieceKind::Board { .. }
             | PieceKind::Indicator { .. } => false,
@@ -2162,6 +2211,8 @@ pub(crate) enum PieceKind {
         /// figure's shadow falls under it.
         body: Span,
     },
+    /// An effect riding on the figure pushed beside it.
+    Effect(crate::cutaway::effects::Riding),
     Badge {
         badge: Badge,
     },
@@ -4820,7 +4871,12 @@ pub(crate) mod tests {
                     .chain(signs(office, 0, quiet_board()))
                 {
                     if only_people
-                        && !matches!(kind, PieceKind::Character { .. } | PieceKind::Badge { .. })
+                        && !matches!(
+                            kind,
+                            PieceKind::Character { .. }
+                                | PieceKind::Effect(_)
+                                | PieceKind::Badge { .. }
+                        )
                     {
                         continue;
                     }
@@ -4895,6 +4951,14 @@ pub(crate) mod tests {
             }
         }
         assert_eq!(worn, styles, "the walks wore every style");
+        // ...every effect a figure carries, on each step of a walk and the sit...
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
+        for mut frame in frames {
+            for c in &mut frame.characters {
+                c.effects = every_effect(c.anchor);
+            }
+            check(&pack, &frame, &layout, true);
+        }
         // ...a walk whose frames differ in size, so a span sized from the wrong
         // frame shows...
         const LONG_STRIDE: &str = "\
@@ -4946,6 +5010,7 @@ S B B B B B B S
                 "clock",
                 "desk",
                 "door",
+                "effect",
                 "glass",
                 "hung decor",
                 "indicator",
@@ -4977,6 +5042,175 @@ S B B B B B B S
             assert!(
                 props.contains(sprite),
                 "no {sprite} prop was painted: {props:?}"
+            );
+        }
+    }
+
+    /// At the art's density the waiting mark and a z float clear of their
+    /// figure's badge however far the z has risen, the z only climbs and drifts
+    /// away, and the dust lies along the stepping foot's row.
+    #[test]
+    #[cfg(feature = "density-art")]
+    fn the_dense_looks_keep_their_places() {
+        use crate::effects::EffectKind as K;
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale,
+        };
+        let mut frame = frames.last().expect("a seated frame").clone();
+        for c in &mut frame.characters {
+            c.effects = every_effect(c.anchor);
+        }
+        let list = list_at(&frame, office, 12);
+        let badge = list
+            .pieces()
+            .iter()
+            .find(|p| matches!(p.kind, PieceKind::Badge { .. }))
+            .expect("the badge")
+            .span;
+        let rider = |kind| {
+            list.pieces()
+                .iter()
+                .find_map(|p| match p.kind {
+                    PieceKind::Effect(r) if r.effect.kind == kind => Some((r, p.span)),
+                    _ => None,
+                })
+                .expect("the rider")
+        };
+        let clear =
+            |s: Span| s.x1 < badge.x0 || badge.x1 < s.x0 || s.y1 < badge.y0 || badge.y1 < s.y0;
+        let (_, mark) = rider(K::WaitingMark);
+        assert!(
+            clear(mark),
+            "the mark {mark:?} lands on the badge {badge:?}"
+        );
+        let (z, _) = rider(K::SleepZ);
+        let mut last: Option<Span> = None;
+        for phase in (0..crate::effects::SLEEP_Z_RISE_MS).step_by(100) {
+            let r = crate::cutaway::effects::Riding {
+                effect: crate::effects::Effect { phase, ..z.effect },
+                ..z
+            };
+            let Some(s) = r.span(theme, 0) else {
+                continue;
+            };
+            assert!(
+                clear(s),
+                "the z at {phase} ms {s:?} lands on the badge {badge:?}"
+            );
+            if let Some(l) = last {
+                assert!(
+                    s.y0 <= l.y0 && s.x0 >= l.x0,
+                    "the z sank or drifted back at {phase} ms"
+                );
+            }
+            last = Some(s);
+        }
+        let (dust, span) = rider(K::WalkingDust);
+        let foot =
+            crate::pixel_painter::effects::walking_dust_foot(dust.effect.at, dust.effect.phase);
+        assert!(
+            (span.x0..=span.x1).contains(&foot.x) && (span.y0..=span.y1).contains(&foot.y),
+            "the dust {span:?} is off the foot {foot:?}"
+        );
+    }
+
+    /// A figure's dust paints straight before them and their other riders
+    /// straight after, so nothing sorts between a person and what rides on
+    /// them.
+    #[test]
+    fn riders_paint_beside_their_figure() {
+        use crate::effects::EffectKind as K;
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
+        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale,
+        };
+        for mut frame in frames {
+            for c in &mut frame.characters {
+                c.effects = every_effect(c.anchor);
+            }
+            let list = list_at(&frame, office, 12);
+            let kinds: Vec<Option<K>> = list
+                .pieces()
+                .iter()
+                .map(|p| match p.kind {
+                    PieceKind::Effect(r) => Some(r.effect.kind),
+                    _ => None,
+                })
+                .collect();
+            let figure = list
+                .pieces()
+                .iter()
+                .position(|p| matches!(p.kind, PieceKind::Character { .. }))
+                .expect("the figure");
+            assert_eq!(
+                kinds[figure - 1..=figure + 3],
+                [
+                    Some(K::WalkingDust),
+                    None,
+                    Some(K::FlameCrown),
+                    Some(K::SleepZ),
+                    Some(K::WaitingMark)
+                ]
+            );
+        }
+    }
+
+    /// A burning figure's crown stands on the top of their hair, at the
+    /// density the art is drawn at and at the base art's.
+    #[test]
+    fn the_flame_crown_stands_on_the_hair() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
+        let mut frame = frames.last().expect("a seated frame").clone();
+        for c in &mut frame.characters {
+            c.effects = vec![crate::effects::flame_crown(
+                c.anchor,
+                8,
+                std::time::UNIX_EPOCH,
+            )];
+        }
+        for s in [1, pack.max_density_variant().get()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            let office = Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale,
+            };
+            let list = list_at(&frame, office, 12);
+            // The rows a piece paints alone, top and bottom.
+            let rows = |want: fn(&PieceKind) -> bool| {
+                let piece = list
+                    .pieces()
+                    .iter()
+                    .find(|p| want(&p.kind))
+                    .expect("the piece");
+                let [a, b] = painted_over_two_fills(&piece.kind, &layout, &pack, theme, scale);
+                let painted: Vec<u16> = (0..a.height())
+                    .filter(|&y| {
+                        (0..a.width()).any(|x| a.get(x, y) != UNDER[0] || b.get(x, y) != UNDER[1])
+                    })
+                    .collect();
+                (painted.first().copied(), painted.last().copied())
+            };
+            let (hair, _) = rows(|k| matches!(k, PieceKind::Character { .. }));
+            let (_, base) = rows(|k| matches!(k, PieceKind::Effect(_)));
+            // Within the hair's top layout row.
+            assert!(
+                base.zip(hair)
+                    .is_some_and(|(base, hair)| (hair..hair + s).contains(&base)),
+                "at scale {s} the crown's base row {base:?} is off the hair's top {hair:?}"
             );
         }
     }
@@ -6080,10 +6314,23 @@ S B B B B B B S
             PieceKind::Character { .. } => "character",
             PieceKind::Glass { .. } => "glass",
             PieceKind::Hung { .. } => "hung decor",
+            PieceKind::Effect(_) => "effect",
             PieceKind::Badge { .. } => "badge",
             PieceKind::Board { .. } => "board",
             PieceKind::Indicator { .. } => "indicator",
         }
+    }
+
+    /// One of each effect a figure carries, riding on its `anchor`, each at a
+    /// step it shows at.
+    fn every_effect(anchor: crate::layout::Point) -> Vec<crate::effects::Effect> {
+        let at = |ms| std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms);
+        vec![
+            crate::effects::walking_dust(anchor, 0),
+            crate::effects::flame_crown(anchor, 8, at(0)),
+            crate::effects::sleep_z(anchor, 0, at(500)).expect("a z rising at 500 ms"),
+            crate::effects::waiting_mark(anchor),
+        ]
     }
 
     /// The first logical pixel `kind` writes outside `span`, painted alone.
