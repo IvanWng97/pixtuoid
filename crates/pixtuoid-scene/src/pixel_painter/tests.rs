@@ -5330,7 +5330,7 @@ fn only_a_placement_that_breathes_takes_the_breath() {
         from: mid,
         to: mid,
         t_x1000: 0,
-        frame: 0,
+        travelled: 0,
         carrying_coffee: false,
     });
     let idler = place(Pose::AimlessAt { dest: mid });

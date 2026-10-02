@@ -53,6 +53,28 @@ pub(crate) fn epoch_ms(now: SystemTime) -> u64 {
     elapsed_ms(now, SystemTime::UNIX_EPOCH)
 }
 
+/// The frame walk `anim` shows `travelled` along a leg, in the octile tenths
+/// of a layout pixel A* measures by: a full cycle each
+/// [`stride`](pixtuoid_core::sprite::Sprite::stride), so a planted foot holds
+/// its place at any speed and on any tier. A walk without one loops on its own
+/// clock at `now`. People, pets and the mascot all walk by this.
+pub(crate) fn walk_frame(
+    travelled: u32,
+    anim: &pixtuoid_core::sprite::Sprite,
+    now: SystemTime,
+) -> usize {
+    let frames = anim.frames().len().max(1) as u64;
+    match anim.stride() {
+        Some(stride) => {
+            let per_cycle =
+                u64::from(stride.get()) * u64::from(crate::pathfind::OCTILE_STRAIGHT_COST);
+            ((u64::from(travelled) * frames / per_cycle) % frames) as usize
+        }
+        // a walk is the agent's doing, not ambient life: the clock, not a beat
+        None => (epoch_ms(now) / u64::from(anim.frame_ms().max(1)) % frames) as usize,
+    }
+}
+
 /// How much of the office's ambient life moves: the loops that only make it
 /// look alive — a flicker, a twinkle, an idle wander — never what an agent is
 /// doing. Each tier steps those loops on its own clock.
@@ -176,6 +198,49 @@ mod tests {
 
     fn approx_eq(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-4
+    }
+
+    /// A walk steps one frame each `stride / frames` of ground, wrapping each
+    /// stride, whatever the clock says.
+    #[test]
+    fn a_walk_steps_by_the_ground_it_covers() {
+        let pack = crate::pack::test_default_pack();
+        let walk = pack.animation("walking").expect("the walk");
+        let stride = u32::from(walk.stride().expect("a stride").get());
+        let frames = walk.frames().len() as u32;
+        let per_frame = stride * crate::pathfind::OCTILE_STRAIGHT_COST / frames;
+        let later = SystemTime::UNIX_EPOCH + Duration::from_millis(12_345);
+        for (travelled, frame) in [
+            (0, 0),
+            (per_frame - 1, 0),
+            (per_frame, 1),
+            (per_frame * frames, 0),
+        ] {
+            for now in [SystemTime::UNIX_EPOCH, later] {
+                assert_eq!(
+                    walk_frame(travelled, walk, now),
+                    frame as usize,
+                    "{travelled} in"
+                );
+            }
+        }
+    }
+
+    /// Every walk in the bundled pack, the people's, the pets' and the
+    /// mascots', carries a stride, so none slides on its clock.
+    #[test]
+    fn every_bundled_walk_carries_its_stride() {
+        let pack = crate::pack::test_default_pack();
+        let people = ["walking", "walking_back", "walking_coffee"];
+        let pets = crate::pet::PetKind::ALL.iter().map(|k| k.walk_anim());
+        let mascots = pixtuoid_core::source::registry::REGISTRY
+            .iter()
+            .filter_map(|d| crate::creatures::gateway_mascot_def(d.name))
+            .map(|def| def.walk);
+        for name in people.into_iter().chain(pets).chain(mascots) {
+            let walk = pack.animation(name).expect("a bundled walk");
+            assert!(walk.stride().is_some(), "{name} walks on its clock");
+        }
     }
 
     fn at(ms: u64) -> SystemTime {

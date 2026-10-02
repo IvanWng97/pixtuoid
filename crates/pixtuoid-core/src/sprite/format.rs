@@ -766,6 +766,9 @@ struct PackMeta {
 struct AnimationToml {
     frames: Vec<String>,
     frame_ms: u32,
+    /// A walk's base-grid pixels travelled per full cycle (`Sprite::stride`).
+    #[serde(default)]
+    stride: Option<std::num::NonZeroU16>,
 }
 
 /// A loaded sprite pack: a named, versioned palette, its animations, the
@@ -1166,7 +1169,7 @@ fn build_pack(
         }
         animations.insert(
             anim_name,
-            Sprite::new(frames, Arc::clone(&palette), anim.frame_ms),
+            Sprite::new(frames, Arc::clone(&palette), anim.frame_ms, anim.stride),
         );
     }
 
@@ -1285,7 +1288,7 @@ fn build_pack(
                     view,
                 });
             }
-            Ok(Sprite::new(marked, Arc::clone(&palette), 0))
+            Ok(Sprite::new(marked, Arc::clone(&palette), 0, None))
         };
         let mut views: [Option<HairLayers>; HeadView::ALL.len()] = Default::default();
         for (view, layers) in [
@@ -1373,7 +1376,7 @@ fn building_art(
     let glass = index(Material::Glass).and_then(|i| PaletteIndex::try_from(i).ok());
     let windows = glass.map_or_else(Vec::new, |g| runs_of(grid, g));
     Ok(BuildingArt {
-        sprite: Sprite::new(marked, Arc::clone(palette), 0),
+        sprite: Sprite::new(marked, Arc::clone(palette), 0, None),
         windows,
     })
 }
@@ -2254,6 +2257,30 @@ mod validation_floor_tests {
         pack_with(&format!(
             "[animations.{name}]\nframes={frames_toml}\nframe_ms=100\n"
         ))
+    }
+
+    /// A walk carries its stride; art without one loops on the clock; a
+    /// stride of nothing is no walk and the pack refuses it.
+    #[test]
+    fn a_walk_carries_its_stride_and_refuses_a_zero_one() {
+        let pack = pack_with(
+            "[animations.walking]\nframes=[\"f.sprite\"]\nframe_ms=100\nstride=12\n\
+             [animations.seated]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+        );
+        let stride = |name| {
+            pack.animation(name)
+                .expect("loaded")
+                .stride()
+                .map(|s| s.get())
+        };
+        assert_eq!(stride("walking"), Some(12));
+        assert_eq!(stride("seated"), None);
+        let zero = load_pack_from_strings(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+             [animations.walking]\nframes=[\"f.sprite\"]\nframe_ms=100\nstride=0\n",
+            &[("f.sprite", "@frame 0\nA")],
+        );
+        assert!(zero.is_err(), "a zero stride loaded");
     }
 
     /// 1x1 and 3x1 base frames, their 2x variants and a 4x of the 1x1; each

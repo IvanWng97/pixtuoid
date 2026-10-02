@@ -513,10 +513,16 @@ pub struct Sprite {
     /// through another pack's keys.
     palette: Arc<Palette>,
     frame_ms: u32,
+    stride: Option<std::num::NonZeroU16>,
 }
 
 impl Sprite {
-    fn new(marked: Vec<(IndexedFrame, Vec<Mark>)>, palette: Arc<Palette>, frame_ms: u32) -> Self {
+    fn new(
+        marked: Vec<(IndexedFrame, Vec<Mark>)>,
+        palette: Arc<Palette>,
+        frame_ms: u32,
+        stride: Option<std::num::NonZeroU16>,
+    ) -> Self {
         let pixels = palette.resolved();
         let (indexed, marks): (Vec<_>, Vec<_>) = marked.into_iter().unzip();
         let frames = indexed.iter().map(|f| f.resolve(&pixels)).collect();
@@ -526,6 +532,7 @@ impl Sprite {
             marks,
             palette,
             frame_ms,
+            stride,
         }
     }
 
@@ -557,6 +564,13 @@ impl Sprite {
     /// How long each frame holds before advancing, in milliseconds.
     pub fn frame_ms(&self) -> u32 {
         self.frame_ms
+    }
+
+    /// For a walk, the base-grid pixels a walker covers in one full cycle of
+    /// its frames: they advance by distance travelled, so a planted foot
+    /// stays planted at any speed. `None` for art that loops on the clock.
+    pub fn stride(&self) -> Option<std::num::NonZeroU16> {
+        self.stride
     }
 
     /// Frame `idx` as the palette indices a recolor resolves; `None` past the

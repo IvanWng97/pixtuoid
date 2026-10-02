@@ -122,9 +122,11 @@ fn idle_phase_1_is_walking_out() {
     let (s, now) = slot(ActivityState::Idle, midpoint);
     let l = layout();
     match derive(&s, now, &l).expect("pose") {
-        Pose::Walking { t_x1000, frame, .. } => {
+        Pose::Walking {
+            t_x1000, travelled, ..
+        } => {
             assert!((400..=600).contains(&t_x1000), "t_x1000={t_x1000}");
-            assert!(frame < WALKING_FRAMES);
+            assert!(travelled > 0, "halfway down the leg, it has walked");
         }
         other => panic!("expected Walking, got {other:?}"),
     }
@@ -821,30 +823,5 @@ fn aimless_fallback_on_a_fully_blocked_mask_returns_the_desk_anchor() {
             crate::layout::desk_walk_anchor_facing(desk, l.desk_facing_at(desk)),
             "seed {seed}: fully blocked corridor must fall back to the desk anchor"
         );
-    }
-}
-
-/// Each walking loop's `frame_ms` in the bundled pack is the time the sim
-/// keys it by, at every density it draws. (A typist reads its art's own.)
-#[test]
-fn each_walking_loop_holds_the_time_the_sim_keys_it_by() {
-    let pack = crate::pack::test_default_pack();
-    let keyed = [
-        ("walking", WALKING_FRAME_MS),
-        ("walking_back", WALKING_FRAME_MS),
-        ("walking_coffee", WALKING_FRAME_MS),
-    ];
-    for (base, ms) in keyed {
-        for d in pack.density_variants() {
-            let name = if d.get() == 1 {
-                base.to_string()
-            } else {
-                format!("{base}@{}x", d.get())
-            };
-            let Some(anim) = pack.animation(&name) else {
-                continue;
-            };
-            assert_eq!(u64::from(anim.frame_ms()), ms, "{name}");
-        }
     }
 }

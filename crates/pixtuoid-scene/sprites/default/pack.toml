@@ -208,6 +208,7 @@ frame_ms = 600
 [animations.walking]
 frames   = ["walking_0.sprite", "walking_1.sprite"]
 frame_ms = 220
+stride   = 11
 
 [animations."walking@4x"]
 frames   = ["walking_0@4x.sprite", "walking_1@4x.sprite"]
@@ -216,6 +217,7 @@ frame_ms = 220
 [animations.walking_back]
 frames   = ["walking_back_0.sprite", "walking_back_1.sprite"]
 frame_ms = 220
+stride   = 11
 
 [animations."walking_back@4x"]
 frames   = ["walking_back_0@4x.sprite", "walking_back_1@4x.sprite"]
@@ -224,6 +226,7 @@ frame_ms = 220
 [animations.walking_coffee]
 frames   = ["walking_coffee_0.sprite", "walking_coffee_1.sprite"]
 frame_ms = 220
+stride   = 11
 
 [animations."walking_coffee@4x"]
 frames   = ["walking_coffee_0@4x.sprite", "walking_coffee_1@4x.sprite"]
@@ -370,6 +373,7 @@ frame_ms = 600
 [animations.cat_walk]
 frames   = ["cat_walk_0.sprite", "cat_walk_1.sprite"]
 frame_ms = 250
+stride   = 2
 
 [animations."cat_walk@4x"]
 frames   = ["cat_walk_0@4x.sprite", "cat_walk_1@4x.sprite"]
@@ -386,6 +390,7 @@ frame_ms = 600
 [animations.dog_walk]
 frames   = ["dog_walk_0.sprite", "dog_walk_1.sprite"]
 frame_ms = 250
+stride   = 2
 
 [animations."dog_walk@4x"]
 frames   = ["dog_walk_0@4x.sprite", "dog_walk_1@4x.sprite"]
@@ -402,6 +407,7 @@ frame_ms = 600
 [animations.lobster_walk]
 frames   = ["lobster_walk_0.sprite", "lobster_walk_1.sprite"]
 frame_ms = 250
+stride   = 6
 
 [animations.lobster_rest]
 frames   = ["lobster_rest.sprite"]

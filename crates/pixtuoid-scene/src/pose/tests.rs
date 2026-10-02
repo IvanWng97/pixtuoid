@@ -1840,7 +1840,7 @@ fn route_walking_pose_straight_leg_records_lerp_and_clears_walk_path() {
             from,
             to,
             t_x1000: 500,
-            frame: 0,
+            travelled: 0,
             carrying_coffee: false,
         },
         Settle::None,
@@ -1889,7 +1889,7 @@ fn route_walking_pose_coincident_path_returns_input_pose() {
         from: p,
         to: p,
         t_x1000: 500,
-        frame: 2,
+        travelled: 2,
         carrying_coffee: false,
     };
     let out = route_walking_pose(&slot, now, &l, &mut rig.rctx(), input, Settle::None);
@@ -2010,7 +2010,7 @@ fn route_walking_pose_t_overshoot_snaps_to_final_segment() {
             from: a,
             to: c,
             t_x1000: 2000,
-            frame: 0,
+            travelled: 0,
             carrying_coffee: false,
         },
         Settle::None,
