@@ -91,22 +91,22 @@ fn plot_steam_puff(
     plot(px, py, theme.effects.coffee_steam, alpha * 0.55);
 }
 
-/// The cell under the foot a walker anchored at `walker_anchor` steps on with
+/// The cell under the foot a walker whose top-left is `walker_top_left` steps on with
 /// stride frame `stride`, where its dust rises.
-pub(crate) fn walking_dust_foot(walker_anchor: Point, stride: u64) -> Point {
+pub(crate) fn walking_dust_foot(walker_top_left: Point, stride: u64) -> Point {
     Point {
-        x: walker_anchor.x + if stride == 0 { 6 } else { 1 },
-        y: walker_anchor.y + WALKING_Y_OFF,
+        x: walker_top_left.x + if stride == 0 { 6 } else { 1 },
+        y: walker_top_left.y + WALKING_Y_OFF,
     }
 }
 
 fn plot_walking_dust(
     plot: &mut impl FnMut(u16, u16, Rgb, f32),
-    walker_anchor: Point,
+    walker_top_left: Point,
     stride: u64,
     theme: &Theme,
 ) {
-    let foot = walking_dust_foot(walker_anchor, stride);
+    let foot = walking_dust_foot(walker_top_left, stride);
     plot(foot.x, foot.y, theme.effects.walking_dust, 0.45);
 }
 
@@ -141,11 +141,11 @@ fn plot_mascot_bubble(plot: &mut impl FnMut(u16, u16, Rgb, f32), at: Point, rise
     plot(at.x, at.y.saturating_sub(rise as u16), bubble, 1.0);
 }
 
-fn plot_waiting_mark(plot: &mut impl FnMut(u16, u16, Rgb, f32), anchor: Point, theme: &Theme) {
+fn plot_waiting_mark(plot: &mut impl FnMut(u16, u16, Rgb, f32), top_left: Point, theme: &Theme) {
     let fg = theme.effects.waiting_bubble;
     const GLYPH: &[&[u8]] = &[b".YYY.", b"...Y.", b"..Y..", b"..Y.."];
-    let bx = anchor.x + 1;
-    let by = anchor.y.saturating_sub(5) & !1u16;
+    let bx = top_left.x + 1;
+    let by = top_left.y.saturating_sub(5) & !1u16;
     for (dy, row) in GLYPH.iter().enumerate() {
         for (dx, byte) in row.iter().enumerate() {
             if *byte != b'Y' {
