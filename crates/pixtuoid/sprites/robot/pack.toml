@@ -34,10 +34,12 @@ frame_ms = 500
 [animations.walking]
 frames = ["walking_0.sprite", "walking_1.sprite"]
 frame_ms = 200
+stride = 10
 
 [animations.walking_back]
 frames = ["walking_back_0.sprite", "walking_back_1.sprite"]
 frame_ms = 200
+stride = 10
 
 [animations.seated_sleeping]
 frames = ["seated_sleeping.sprite"]

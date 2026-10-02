@@ -825,3 +825,37 @@ fn aimless_fallback_on_a_fully_blocked_mask_returns_the_desk_anchor() {
         );
     }
 }
+
+/// A walking person steps by the ground covered, never the clock: a short
+/// leg and a long one walked in the same time (so at different speeds) turn
+/// their frames once per `stride / frames` of ground each.
+#[test]
+fn a_walking_person_never_slides() {
+    let pack = crate::pack::test_default_pack();
+    let walk = pack.animation("walking").expect("the walk");
+    let per_frame = f32::from(walk.stride().expect("a stride").get()) / walk.frames().len() as f32;
+    let now = SystemTime::UNIX_EPOCH;
+    for length in [12u16, 70] {
+        let (from, to) = (
+            Point { x: 10, y: 40 },
+            Point {
+                x: 10 + length,
+                y: 40,
+            },
+        );
+        let (mut turns, mut last) = (0.0_f32, None);
+        for since in (0..=ENTRY_ANIMATION_MS).step_by(10) {
+            let Pose::Walking { travelled, .. } = linear_walk_pose(since, from, to) else {
+                panic!("a walk");
+            };
+            let frame = crate::anim::walk_frame(travelled, walk, now);
+            turns += f32::from(u8::from(last.is_some_and(|f| f != frame)));
+            last = Some(frame);
+        }
+        let expected = f32::from(length) / per_frame;
+        assert!(
+            (turns - expected).abs() <= 1.0,
+            "{length} px: {turns} steps, {expected} by its stride"
+        );
+    }
+}

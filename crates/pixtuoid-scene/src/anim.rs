@@ -231,13 +231,7 @@ mod tests {
     #[test]
     fn every_bundled_walk_carries_its_stride() {
         let pack = crate::pack::test_default_pack();
-        let people = ["walking", "walking_back", "walking_coffee"];
-        let pets = crate::pet::PetKind::ALL.iter().map(|k| k.walk_anim());
-        let mascots = pixtuoid_core::source::registry::REGISTRY
-            .iter()
-            .filter_map(|d| crate::creatures::gateway_mascot_def(d.name))
-            .map(|def| def.walk);
-        for name in people.into_iter().chain(pets).chain(mascots) {
+        for name in crate::pack::walks() {
             let walk = pack.animation(name).expect("a bundled walk");
             assert!(walk.stride().is_some(), "{name} walks on its clock");
         }

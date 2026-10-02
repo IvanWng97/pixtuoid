@@ -65,9 +65,23 @@ fn art_sets() -> Vec<Vec<&'static str>> {
     sets
 }
 
-/// [`validate_pack_animations`], against this crate's painters' art sets.
+/// Every walk the sim steps by distance ([`crate::anim::walk_frame`]): the
+/// people's, each pet kind's and each gateway mascot's.
+pub(crate) fn walks() -> Vec<&'static str> {
+    let mut walks = vec!["walking", "walking_back", "walking_coffee"];
+    walks.extend(crate::pet::PetKind::ALL.iter().map(|k| k.walk_anim()));
+    walks.extend(
+        pixtuoid_core::source::registry::registered_source_names()
+            .filter_map(crate::creatures::gateway_mascot_def)
+            .map(|d| d.walk),
+    );
+    walks
+}
+
+/// [`validate_pack_animations`], against this crate's painters' art sets and
+/// walks.
 pub fn validate_pack(pack: &Pack) -> ValidationReport {
-    validate_pack_animations(pack, &art_sets())
+    validate_pack_animations(pack, &art_sets(), &walks())
 }
 
 /// Log a custom pack's animation-validation gaps at load time: a pack missing a
@@ -95,6 +109,9 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         missing_hair_views: _,
         overhanging_hair: _,
         orphan_hairstyles,
+        // A walk without a stride still steps, on its clock: `validate-pack`
+        // reports it.
+        walks_without_stride: _,
     } = &report;
     for name in missing_required {
         tracing::warn!(
