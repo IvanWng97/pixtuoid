@@ -17,7 +17,7 @@ pixtuoid is a Cargo workspace of **five crates** wired as a strict
   terminal dependencies.
 - **`pixtuoid-scene`** — the backend-agnostic render + simulation **engine**:
   the office world itself (`render_to_rgb_buffer`, layout, walk physics,
-  pose/motion/pathfinding, themes, pets). Terminal- AND window-free **by
+  pose/walk/pathfinding, themes, pets). Terminal- AND window-free **by
   crate boundary** — compiler-enforced, not just a lint.
 - **`pixtuoid`** — the binary: the CLI, the runtime wiring, and two thin
   painters over the engine — the TUI renderer and the floating desktop

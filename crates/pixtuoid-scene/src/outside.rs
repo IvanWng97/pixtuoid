@@ -356,7 +356,7 @@ pub(crate) mod tests {
             Sky::at_with(now, Weather::Overcast),
             theme,
             0.0,
-            crate::anim::Motion::Full.clock(now),
+            crate::anim::Motion::Full.timing(now),
         );
         let dx = 7;
         let far = (crate::layout::WINDOW_W + dx).next_multiple_of(crate::dither::PERIOD);

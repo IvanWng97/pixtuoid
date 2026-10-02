@@ -1732,7 +1732,7 @@ fn empty_frame(layout: &SceneLayout) -> SimFrame {
 fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
     let pack = crate::pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let (scene, motion) = (SceneState::uniform(16), HashMap::new());
+    let (scene, walks) = (SceneState::uniform(16), HashMap::new());
     let now = SystemTime::UNIX_EPOCH;
     let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
     let (mut cache, mut base_fill) = (FrameCache::new(), BaseFillCache::new());
@@ -1740,7 +1740,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
         scene: &scene,
         layout,
         pack: &pack,
-        clock: Motion::Full.clock(now),
+        timing: Motion::Full.timing(now),
         sky: crate::sky::Sky::clock(now),
         outside: None,
         buf: &mut buf,
@@ -1749,7 +1749,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
         shadows: &mut crate::ground::DepthsCache::default(),
         theme,
         floor: crate::floor::FloorMeta::ground(),
-        motion: &motion,
+        walks: &walks,
         debug_walkable: false,
     };
     let lights = crate::lighting::Lights::of(
@@ -1761,7 +1761,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
             floor_idx: 0,
             indoor_scale: frame.indoor_scale,
             neon: frame.neon,
-            beat: ctx.clock.beat,
+            beat: ctx.timing.beat,
         },
     );
     queue_fixtures(
@@ -2063,12 +2063,12 @@ fn character_sort_row_exceeds_desk_when_south_of_it() {
 #[test]
 fn character_sort_row_below_desk_when_seated_at_it() {
     let desk_y: u16 = 20;
-    let seated_top_left = seated_top_left(
+    let top_left = seated_top_left(
         Point { x: 0, y: desk_y },
         CHARACTER_SPRITE_W,
         crate::layout::Facing::South,
     );
-    let char_sort_row = seated_top_left.y + 12;
+    let char_sort_row = top_left.y + 12;
     let desk_sort_row = desk_y
         + crate::layout::furniture_def(crate::layout::Furniture::Desk)
             .visual
@@ -2370,7 +2370,7 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
             top_left,
             drawn.map(|s| s.w),
             crate::sim::Cues::default(),
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
         );
         super::effects::paint_effects(
             &mut buf,
@@ -2439,7 +2439,7 @@ fn a_top_burning_placement_carries_its_crown_on_its_top_left() {
             &pack,
             CHARACTER_SPRITE_W,
             &HashMap::new(),
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
         );
         let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
         let crowns: Vec<Point> = p
@@ -2867,7 +2867,7 @@ impl OwnedSimStores {
             router: &mut self.route.router,
             overlay: &mut self.route.overlay,
             history: &mut self.route.history,
-            motion: &mut self.route.motion,
+            walks: &mut self.route.walks,
             vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat: &mut self.chitchat,
@@ -3445,7 +3445,7 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
             scene: &scene,
             layout: &layout,
             pack: &pack,
-            clock: Motion::Full.clock(now),
+            timing: Motion::Full.timing(now),
             sky: crate::sky::Sky::clock(now),
             outside: None,
             buf: &mut buf,
@@ -3454,7 +3454,7 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
             shadows: &mut crate::ground::DepthsCache::default(),
             theme: crate::theme::theme_by_name("normal").expect("normal theme"),
             floor: crate::floor::FloorMeta::ground(),
-            motion: &owned.route.motion,
+            walks: &owned.route.walks,
             debug_walkable: false,
         },
         &frame,
@@ -3582,10 +3582,10 @@ fn sim_step_advances_motion_without_painting() {
     assert!(
         owned
             .route
-            .motion
+            .walks
             .get(&id)
             .is_some_and(|m| m.entry.is_some()),
-        "sim_step snapshotted the entry walk profile into the motion store"
+        "sim_step snapshotted the entry walk profile into the walks map"
     );
 }
 
@@ -3697,7 +3697,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             scene: &scene,
             layout: &layout,
             pack: &pack,
-            clock: Motion::Full.clock(now),
+            timing: Motion::Full.timing(now),
             sky: crate::sky::Sky::clock(now),
             outside: None,
             buf: &mut buf,
@@ -3706,7 +3706,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             shadows: &mut crate::ground::DepthsCache::default(),
             theme: crate::theme::theme_by_name("normal").expect("normal theme"),
             floor: crate::floor::FloorMeta::ground(),
-            motion: &owned.route.motion,
+            walks: &owned.route.walks,
             debug_walkable: false,
         },
         &frame,
@@ -3768,7 +3768,7 @@ fn a_character_whose_anim_is_missing_is_not_hoverable() {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                 theme: crate::theme::theme_by_name("normal").expect("normal theme"),
             },
         )
@@ -3810,7 +3810,7 @@ fn paint_frame_is_pure_and_byte_identical() {
     );
 
     let light_before = owned.vacancy_dim.level();
-    let motion_before = format!("{:?}", owned.route.motion);
+    let walks_before = format!("{:?}", owned.route.walks);
     let history_before = format!("{:?}", owned.route.history);
     let chitchat_before = owned.chitchat.len();
 
@@ -3826,7 +3826,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 scene: &scene,
                 layout: &layout,
                 pack: &pack,
-                clock: Motion::Full.clock(now),
+                timing: Motion::Full.timing(now),
                 sky: crate::sky::Sky::clock(now),
                 outside: None,
                 buf,
@@ -3835,7 +3835,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 shadows: &mut crate::ground::DepthsCache::default(),
                 theme,
                 floor: crate::floor::FloorMeta::ground(),
-                motion: &owned.route.motion,
+                walks: &owned.route.walks,
                 debug_walkable: false,
             },
             &frame,
@@ -3857,9 +3857,9 @@ fn paint_frame_is_pure_and_byte_identical() {
         "paint must not tick lighting"
     );
     assert_eq!(
-        format!("{:?}", owned.route.motion),
-        motion_before,
-        "paint must not move motion state"
+        format!("{:?}", owned.route.walks),
+        walks_before,
+        "paint must not move walk state"
     );
     assert_eq!(
         format!("{:?}", owned.route.history),
@@ -4197,8 +4197,8 @@ fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
             buf: &mut buf,
             pack: &pack,
             cache: &mut cache,
-            clock: Motion::Full
-                .clock(SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms)),
+            timing: Motion::Full
+                .timing(SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms)),
             theme: crate::theme::theme_by_name("normal").expect("theme"),
         },
     );
@@ -4522,8 +4522,8 @@ fn a_placement_is_seated_exactly_when_its_figure_sits_on_furniture() {
 #[test]
 fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     use crate::layout::{TEST_DEFAULT_DESKS, furniture_def};
-    use crate::motion::WanderKind;
     use crate::pose::Pose;
+    use crate::walk::WanderKind;
     use std::time::Duration;
 
     let pack = crate::pack::test_default_pack();
@@ -4571,7 +4571,7 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     let sat_at = sat_at.expect("agent never reached a seat");
     assert!(
         matches!(
-            owned.route.motion[&id].wander.target.kind,
+            owned.route.walks[&id].wander.target.kind,
             WanderKind::Named { wp_idx, .. } if wp_idx == sat_at
         ),
         "the seated agent should hold its seat's claim"
@@ -4603,7 +4603,7 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
 
     assert!(
         matches!(
-            owned.route.motion[&id].wander.target.kind,
+            owned.route.walks[&id].wander.target.kind,
             WanderKind::Aimless
         ),
         "an agent that left the wander machine must release its seat claim"
@@ -4903,7 +4903,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     let layout = SceneLayout::compute_with_seed(192, 128, None, 0).expect("layout");
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
     let boot = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let motion = HashMap::new();
+    let walks = HashMap::new();
     let src = pixtuoid_core::source::openclaw::SOURCE_NAME;
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
 
@@ -4953,7 +4953,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 scene: &scene,
                 layout: &layout,
                 pack: &pack,
-                clock: Motion::Full.clock(now),
+                timing: Motion::Full.timing(now),
                 sky: crate::sky::Sky::clock(now),
                 outside: None,
                 buf: &mut buf,
@@ -4962,7 +4962,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 shadows: &mut crate::ground::DepthsCache::default(),
                 theme,
                 floor,
-                motion: &motion,
+                walks: &walks,
                 debug_walkable: false,
             };
             let mut drawables = Vec::new();
@@ -5184,7 +5184,7 @@ fn paint_drawn(
             scene,
             layout,
             pack,
-            clock: Motion::Full.clock(now),
+            timing: Motion::Full.timing(now),
             sky: crate::sky::Sky::clock(now),
             outside: None,
             buf: &mut buf,
@@ -5193,7 +5193,7 @@ fn paint_drawn(
             shadows: &mut crate::ground::DepthsCache::default(),
             theme: crate::theme::theme_by_name("normal").expect("normal theme"),
             floor: crate::floor::FloorMeta::ground(),
-            motion: &owned.route.motion,
+            walks: &owned.route.walks,
             debug_walkable: false,
         },
         frame,
@@ -5334,7 +5334,7 @@ fn only_a_placement_that_breathes_takes_the_breath() {
             &pack,
             CHARACTER_SPRITE_W,
             &HashMap::new(),
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
         );
         let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
         p
@@ -5396,7 +5396,7 @@ fn co_located_visitors_badges_step_aside_with_their_sprites() {
         &pack,
         CHARACTER_SPRITE_W,
         &HashMap::new(),
-        Motion::Full.clock(now),
+        Motion::Full.timing(now),
     );
     let drawn = paint_drawn(&owned, &scene, &layout, &pack, now, &frame);
     assert_eq!(drawn.len(), 3, "premise: all three are drawn");
@@ -6079,7 +6079,7 @@ fn the_outside_reaches_only_the_glass() {
     let mut covered: Option<(std::time::SystemTime, Vec<bool>)> = None;
     for weathered in crate::outside::tests::every_sky() {
         let name = &weathered.name;
-        let clock = Motion::Full.clock(weathered.now);
+        let timing = Motion::Full.timing(weathered.now);
         let paint = |outside| {
             let mut buf = RgbBuffer::filled(w, h, UNPAINTED);
             paint_frame(
@@ -6087,7 +6087,7 @@ fn the_outside_reaches_only_the_glass() {
                     scene: &scene,
                     layout: &layout,
                     pack: &pack,
-                    clock,
+                    timing,
                     sky: weathered.sky,
                     outside,
                     buf: &mut buf,
@@ -6096,7 +6096,7 @@ fn the_outside_reaches_only_the_glass() {
                     shadows: &mut crate::ground::DepthsCache::default(),
                     theme,
                     floor: crate::floor::FloorMeta::ground(),
-                    motion: &owned.route.motion,
+                    walks: &owned.route.walks,
                     debug_walkable: false,
                 },
                 &frame,
@@ -6112,7 +6112,7 @@ fn the_outside_reaches_only_the_glass() {
                 scene: &scene,
                 layout: &layout,
                 pack: &pack,
-                clock,
+                timing,
                 sky: weathered.sky,
                 outside: None,
                 buf: &mut scratch,
@@ -6121,10 +6121,10 @@ fn the_outside_reaches_only_the_glass() {
                 shadows: &mut crate::ground::DepthsCache::default(),
                 theme,
                 floor: crate::floor::FloorMeta::ground(),
-                motion: &owned.route.motion,
+                walks: &owned.route.walks,
                 debug_walkable: false,
             };
-            let moment = Moment::resolve(weathered.sky, theme, 0.0, clock);
+            let moment = Moment::resolve(weathered.sky, theme, 0.0, timing);
             let lights = Lights::of(
                 &layout,
                 &moment.look,
@@ -6134,7 +6134,7 @@ fn the_outside_reaches_only_the_glass() {
                     floor_idx: 0,
                     indoor_scale: frame.indoor_scale,
                     neon: frame.neon,
-                    beat: clock.beat,
+                    beat: timing.beat,
                 },
             );
             let neon = crate::floor::neon_look(frame.neon, theme);
@@ -6154,7 +6154,7 @@ fn the_outside_reaches_only_the_glass() {
                         buf: &mut over,
                         pack: &pack,
                         cache: &mut cache,
-                        clock,
+                        timing,
                         theme,
                     },
                 );

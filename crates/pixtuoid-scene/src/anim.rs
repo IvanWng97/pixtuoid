@@ -79,32 +79,37 @@ impl Motion {
     /// too: Full's is the instant floored to its tick, Calm's that many
     /// repaints of Full ticks.
     pub(crate) fn beat(self, now: SystemTime) -> Beat {
-        let ms = epoch_ms(now);
-        match self {
-            Self::Full => Beat::looping(ms / FULL_TICK_MS * FULL_TICK_MS, 1),
-            Self::Calm => Beat::looping(
-                ms / CALM_TICK_MS * FULL_TICK_MS,
-                CALM_TICK_MS / FULL_TICK_MS,
-            ),
-            Self::Still => Beat {
-                loop_ms: None,
-                pace: 1,
-            },
-        }
+        let pace = match self {
+            Self::Full => 1,
+            Self::Calm => CALM_TICK_MS / FULL_TICK_MS,
+            Self::Still => {
+                return Beat {
+                    loop_ms: None,
+                    pace: 1,
+                };
+            }
+        };
+        Beat::looping(loop_time(now, pace), pace)
     }
 
     /// `now` and its [`beat`](Self::beat).
-    pub(crate) fn clock(self, now: SystemTime) -> Clock {
-        Clock {
+    pub(crate) fn timing(self, now: SystemTime) -> Timing {
+        Timing {
             now,
             beat: self.beat(now),
         }
     }
 }
 
+/// Loop time at `wall` for a tier `pace` wall ms to the loop ms: whole Full
+/// ticks, one each `pace` of them.
+fn loop_time(wall: SystemTime, pace: u64) -> u64 {
+    epoch_ms(wall) / (FULL_TICK_MS * pace) * FULL_TICK_MS
+}
+
 /// An instant, and the [`Beat`] its ambient loops read at it.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Clock {
+pub(crate) struct Timing {
     pub(crate) now: SystemTime,
     pub(crate) beat: Beat,
 }
@@ -137,6 +142,13 @@ impl Beat {
     /// none.
     pub(crate) fn is_rest(self) -> bool {
         self.loop_ms.is_none()
+    }
+
+    /// The loop time this beat's tier reads at `wall`: what [`ms`](Self::ms)
+    /// is when `wall` is now, so an ambient walk times its start and its
+    /// present on one clock.
+    pub(crate) fn loop_at(self, wall: SystemTime) -> u64 {
+        loop_time(wall, self.pace)
     }
 
     /// The wall-clock ms loop time `loop_ms` plays at, where what keeps real

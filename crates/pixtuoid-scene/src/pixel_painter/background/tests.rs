@@ -53,7 +53,7 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
         paint_band(
             &mut buf,
             top_wall_h,
-            &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(now)),
+            &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now)),
             theme,
         );
         window_rows(top_wall_h)
@@ -86,7 +86,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     paint_band(
         &mut buf,
         top_wall_h,
-        &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.clock(now)),
+        &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.timing(now)),
         theme,
     );
     let spill = crate::lighting::Emitter {
@@ -147,7 +147,7 @@ fn render_office_themed(
             Sky::at_with(now, weather),
             theme,
             0.0,
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
         ),
         theme,
     );
@@ -777,7 +777,7 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
                 Sky::at_with(now, weather),
                 theme,
                 0.0,
-                Motion::Full.clock(now),
+                Motion::Full.timing(now),
             ),
             theme,
         );
@@ -832,7 +832,7 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
             base_fill,
             &mut buf,
             14,
-            &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.clock(now)),
+            &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.timing(now)),
             theme,
         );
         buf
@@ -946,7 +946,7 @@ fn the_spill_leans_away_from_the_disc() {
             Sky::at_with(at, Weather::Clear),
             theme,
             0.0,
-            Motion::Full.clock(at),
+            Motion::Full.timing(at),
         );
         let (sky, look) = (&moment.sky, &moment.look);
         let disc = crate::celestial::Disc::of(sky, BUF_W, TOP_WALL_H).expect("a clear low sun");
@@ -1032,7 +1032,7 @@ fn the_wall_between_two_windows_is_one_frame_post() {
         &mut BaseFillCache::new(),
         &mut buf,
         top_wall_h,
-        &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.clock(now)),
+        &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.timing(now)),
         theme,
     );
     let mut posts = 0;

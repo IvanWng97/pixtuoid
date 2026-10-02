@@ -51,7 +51,7 @@ pub trait Router {
 /// mints a fresh destination every cycle and snap-back/exit legs route from live
 /// interpolated origins — so an always-on office would accumulate keys forever.
 /// Overflowing clears the whole map, which is safe: cornered in-flight legs are
-/// frozen on `MotionState.walk_path` and never re-consult the router, and every
+/// frozen on `WalkState.walk_path` and never re-consult the router, and every
 /// other evicted route just re-routes under the CURRENT overlay.
 const PATH_CACHE_CAP: usize = 512;
 

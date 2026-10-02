@@ -267,7 +267,7 @@ mod tests {
             Sky::at_with(now, w),
             &crate::theme::NORMAL,
             0.0,
-            crate::anim::Motion::Full.clock(now),
+            crate::anim::Motion::Full.timing(now),
         ))
     }
 
@@ -343,7 +343,7 @@ mod tests {
                 sky,
                 &crate::theme::NORMAL,
                 0.0,
-                crate::anim::Motion::Full.clock(now),
+                crate::anim::Motion::Full.timing(now),
             ));
             let count = |of: &Fall| {
                 glass
