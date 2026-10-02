@@ -94,30 +94,36 @@ impl PantryRoom {
         })
     }
 
+    /// The counter's sprite box, or `None` for a room narrower than the
+    /// counter.
+    pub(crate) fn counter_rect(&self) -> Option<Bounds> {
+        let c = Self::counter_center(self.bounds, self.counter_size)?;
+        let Size { w, h } = self.counter_size;
+        let at = anchored_top_left(Pivot::Center, c, w, h);
+        Some(Bounds {
+            x: at.x,
+            y: at.y,
+            width: w,
+            height: h,
+        })
+    }
+
     /// `r`, or `r` slid out past the counter's nearer end when the counter's
     /// art would cover it — `None` when that leaves the room.
     fn off_the_counter(&self, r: Bounds) -> Option<Bounds> {
-        let Some(c) = Self::counter_center(self.bounds, self.counter_size) else {
+        let Some(counter) = self.counter_rect().filter(|c| c.overlaps(r)) else {
             return Some(r);
-        };
-        let (cw, ch) = (self.counter_size.w, self.counter_size.h);
-        let at = anchored_top_left(Pivot::Center, c, cw, ch);
-        let counter = Bounds {
-            x: at.x,
-            y: at.y,
-            width: cw,
-            height: ch,
-        };
-        if !r.overlaps(counter) {
-            return Some(r);
-        }
-        let x = if r.x + r.width / 2 < c.x {
-            counter.x.checked_sub(r.width)?
-        } else {
-            counter.x + cw
         };
         let b = self.bounds;
-        (x >= b.x && x + r.width <= b.x + b.width).then_some(Bounds { x, ..r })
+        // `counter_center` clamps the counter into the room, so each side's one
+        // limit is the floor between its end and the wall.
+        let x = if r.x + r.width / 2 < counter.x + counter.width / 2 {
+            (counter.x - b.x >= r.width).then(|| counter.x - r.width)
+        } else {
+            let east_end = counter.x + counter.width;
+            (b.x + b.width - east_end >= r.width).then_some(east_end)
+        };
+        x.map(|x| Bounds { x, ..r })
     }
 
     /// The room height at which the pantry can actually HOST its content — the
@@ -253,5 +259,81 @@ pub(crate) fn place_snack_shelf(pr: Bounds, counter: Size, waypoints: &mut Vec<W
             facing: Facing::West,
             room_id: None,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::SceneLayout;
+
+    fn bx(x: u16, y: u16, width: u16, height: u16) -> Bounds {
+        Bounds {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    /// Every way `off_the_counter` resolves, each on an office whose cooler or
+    /// bin takes it, the slides on both sides of the fit.
+    #[test]
+    fn off_the_counter_resolves_each_way() {
+        let counter = |x, y| Some(bx(x, y, COMPACT_COUNTER.w, COMPACT_COUNTER.h));
+        let cooler = |x, y| bx(x, y, WATER_COOLER.w, WATER_COOLER.h);
+        let bin = |x, y| bx(x, y, 4, 5);
+        // (office w, h, seed; its counter; the piece's own box; the x it ends at)
+        let rows = [
+            // A room narrower than the counter has none.
+            (55, 72, 0, None, cooler(8, 52), Some(8)),
+            // Clear of it, its base on the row above the counter's top.
+            (60, 89, 2, counter(0, 72), cooler(14, 63), Some(14)),
+            // West of its centre, the floor west of it exactly the bin's width.
+            (72, 61, 2, counter(4, 48), bin(3, 47), Some(0)),
+            // One column short.
+            (69, 61, 2, counter(3, 48), bin(3, 47), None),
+            // East of it, the floor east of it exactly the cooler's width.
+            (95, 72, 2, counter(9, 57), cooler(26, 52), Some(29)),
+            // One column short.
+            (89, 72, 2, counter(8, 57), cooler(24, 52), None),
+        ];
+        for (w, h, seed, counter, r, x) in rows {
+            let p = SceneLayout::compute_with_seed(w, h, None, seed)
+                .and_then(|l| l.pantry)
+                .expect("a pantry");
+            assert_eq!(p.counter_rect(), counter, "{w}x{h} seed {seed}");
+            assert_eq!(
+                p.off_the_counter(r),
+                x.map(|x| Bounds { x, ..r }),
+                "{w}x{h} seed {seed}"
+            );
+        }
+    }
+
+    /// The premise of `off_the_counter`'s one check per side, wherever the
+    /// room sits.
+    #[test]
+    fn the_counter_stands_inside_its_room() {
+        for counter_size in [COMPACT_COUNTER, LARGE_COUNTER] {
+            for x in [0, 7] {
+                for width in 0..=2 * LARGE_COUNTER.w {
+                    let p = PantryRoom {
+                        bounds: bx(x, 0, width, 40),
+                        counter_size,
+                        kitchen_island: None,
+                    };
+                    let counter = p.counter_rect();
+                    assert_eq!(counter.is_some(), width > counter_size.w, "{:?}", p.bounds);
+                    if let Some(c) = counter {
+                        assert!(
+                            x <= c.x && c.x + c.width <= x + width,
+                            "{c:?} outside {:?}",
+                            p.bounds
+                        );
+                    }
+                }
+            }
+        }
     }
 }
