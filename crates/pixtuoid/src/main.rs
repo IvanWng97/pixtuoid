@@ -90,7 +90,8 @@ fn run() -> Result<()> {
         std::io::IsTerminal::is_terminal(&std::io::stderr()),
         pixtuoid_core::platform::text_env("COLORTERM").as_deref(),
         pixtuoid_core::platform::text_env("PIXTUOID_NO_TRUECOLOR_WARN").as_deref(),
-    ) && pixtuoid::term::query_truecolor(pixtuoid::term::TRUECOLOR_PROBE_TIMEOUT) != Some(true)
+    ) && pixtuoid::term::query_truecolor(pixtuoid::term::TRUECOLOR_PROBE_TIMEOUT)
+        != pixtuoid::term::Truecolor::Answered(true)
     {
         let _ = writeln!(
             std::io::stderr(),
