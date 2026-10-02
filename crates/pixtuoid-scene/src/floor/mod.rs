@@ -660,19 +660,17 @@ impl FloorSession {
         crate::overlay::build_overlay(scene, &self.last_agents, hovered)
     }
 
-    /// The neon wall-board model for `scene`, with no cross-floor breadcrumb,
-    /// its flap moving as `motion` says.
+    /// The [`wall_board`](crate::board::wall_board) of `scene`, a one-floor office.
     pub fn board(
         &self,
         scene: &SceneState,
         motion: crate::anim::Motion,
         now: SystemTime,
     ) -> crate::board::BoardModel {
-        crate::board::build_board(
-            crate::board::scene_stats(scene),
-            crate::board::scene_uptime_secs(scene, now),
-            None,
+        crate::board::wall_board(
+            scene,
             crate::board::office_gateway(scene),
+            None,
             motion,
             now,
         )

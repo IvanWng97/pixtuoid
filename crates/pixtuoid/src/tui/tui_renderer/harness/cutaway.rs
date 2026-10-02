@@ -129,13 +129,13 @@ fn placeholders_fill_the_scene_and_never_the_footer() {
 
 /// Its star link would launch a browser from a cell showing the image.
 #[test]
-fn the_cutaway_shows_no_wall_display() {
+fn the_cutaway_star_is_not_clickable() {
     let (mut r, _wire) = kitty(120, 40);
     r.render(&office(), pack(), t0()).expect("render");
-    assert!(!r.shows_wall_display());
+    assert!(!r.star_clickable());
     let mut classic = build(120, 40, vec![]);
     classic.render(&office(), pack(), t0()).expect("render");
-    assert!(classic.shows_wall_display());
+    assert!(classic.star_clickable());
 }
 
 /// A refused frame sends no tiles and leaves no hit targets behind.

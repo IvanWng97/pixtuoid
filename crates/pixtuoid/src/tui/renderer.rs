@@ -157,10 +157,14 @@ pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
     })
 }
 
-/// Minimum drawable scene size (cells) below which the world render is skipped
-/// for a footer-only draw. Shared by both "too small" gates so they can't drift.
+/// Minimum drawable scene size (cells), the bound [`scene_too_small`] gates on.
 pub(crate) const MIN_SCENE_WIDTH: u16 = 20;
 pub(crate) const MIN_SCENE_HEIGHT: u16 = 12;
+
+/// Whether `scene` is too small to render the world, for a footer-only draw.
+pub(crate) fn scene_too_small(scene: Rect) -> bool {
+    scene.width < MIN_SCENE_WIDTH || scene.height < MIN_SCENE_HEIGHT
+}
 
 /// How many rows at the bottom of the terminal the status footer owns.
 pub(crate) const FOOTER_ROWS: u16 = 1;
@@ -311,24 +315,6 @@ fn paint_too_small_notice(
     }
 }
 
-/// The wall board `footer` tallies off `scene` at `now`, its flap moving as
-/// `motion` says, whichever profile paints it.
-pub(crate) fn wall_board(
-    footer: &FooterInputs<'_>,
-    scene: &SceneState,
-    motion: pixtuoid_scene::anim::Motion,
-    now: SystemTime,
-) -> pixtuoid_scene::board::BoardModel {
-    pixtuoid_scene::board::build_board(
-        footer.counts(),
-        pixtuoid_scene::board::scene_uptime_secs(scene, now),
-        footer.context.floor.map(|fi| (fi.current, fi.total_floors)),
-        footer.context.gateway,
-        motion,
-        now,
-    )
-}
-
 pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     ctx: &mut DrawCtx<'_>,
@@ -355,7 +341,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         onboarding: ctx.onboarding,
     };
 
-    if scene_rect.width < MIN_SCENE_WIDTH || scene_rect.height < MIN_SCENE_HEIGHT {
+    if scene_too_small(scene_rect) {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
         return Ok(DrawOut::default());
     }
@@ -394,7 +380,13 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     apply_dim(ctx.buf, ctx.onboarding.dim);
 
     let labels = pixtuoid_scene::overlay::build_overlay(scene, &agents, hovered);
-    let board = wall_board(&footer, scene, ctx.world.floor.motion, now);
+    let board = pixtuoid_scene::board::wall_board(
+        scene,
+        footer.context.gateway,
+        footer.context.floor,
+        ctx.world.floor.motion,
+        now,
+    );
     let buf = &ctx.buf;
     term.draw(|f| {
         // Re-derive rects from the actual frame buffer to guard against
