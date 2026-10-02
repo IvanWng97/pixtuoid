@@ -16,9 +16,7 @@ use super::{env_set, env_text};
 /// What the environment says about the terminal beyond [`TermEnv`], read once
 /// per probe.
 ///
-/// Every rule on it mirrors ratatui-image 11.1.0's picker, cited per rule: the
-/// cutaway draws through that crate's encoders, so what the plan expects a
-/// terminal to take must be what those encoders were built for.
+/// Its protocol rules mirror ratatui-image 11.1.0's picker, cited per rule.
 #[cfg(any(unix, test))]
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct EnvHints {
@@ -42,11 +40,11 @@ impl EnvHints {
         }
     }
 
-    /// Inside tmux AND a client of it (`$TMUX`): only then does a bare `tmux`
-    /// answer for the pane this process runs in. Without `$TMUX` — a tmux `TERM`
-    /// carried over ssh — it answers for whatever server this host runs.
+    /// A tmux client (`$TMUX`): only then does a bare `tmux` answer for the
+    /// pane this process runs in. Without `$TMUX` — a tmux `TERM` carried over
+    /// ssh — it answers for whatever server this host runs.
     fn our_tmux_pane(&self) -> bool {
-        self.env.tmux_term() && self.env.tmux_client
+        self.env.tmux_client
     }
 
     /// Protocols never asked for under WezTerm or Konsole: neither implements
@@ -76,7 +74,7 @@ impl EnvHints {
             "Bobcat",
             "WarpTerminal",
         ];
-        let outer = self.env.tmux_term() && (self.iterm_session || self.wezterm);
+        let outer = self.env.tmux() && (self.iterm_session || self.wezterm);
         let named = self
             .env
             .term_program
@@ -110,7 +108,7 @@ fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSi
     Detected {
         protocol: queried.or_else(|| hints.iterm2()),
         cell: answered_cell.or(window_cell),
-        tmux: hints.env.tmux_term(),
+        tmux: hints.env.tmux(),
     }
 }
 
@@ -170,7 +168,7 @@ pub(crate) fn probe(ask: bool) -> Probe {
         return Probe::TmuxPassthroughOff;
     }
     let query = Parser::query(
-        hints.env.tmux_term(),
+        hints.env.tmux(),
         QueryStdioOptions {
             blacklist_protocols: hints.blacklist(),
             ..QueryStdioOptions::default()
@@ -261,7 +259,7 @@ pub(crate) fn probe(ask: bool) -> Probe {
             w: font.width,
             h: font.height,
         }),
-        tmux: TermEnv::read().tmux_term(),
+        tmux: TermEnv::read().tmux(),
     })
 }
 
@@ -391,18 +389,34 @@ mod tests {
     #[test]
     fn passthrough_is_read_only_for_a_tmux_clients_own_pane() {
         let carried = hints("tmux-256color", "");
-        assert!(carried.env.tmux_term() && !carried.our_tmux_pane());
+        assert!(carried.env.tmux() && !carried.our_tmux_pane());
         assert!(client(carried).our_tmux_pane());
-        assert!(!client(hints("xterm-ghostty", "ghostty")).our_tmux_pane());
+    }
+
+    /// Under a tmux whose `default-terminal` is not tmux's own, `$TMUX` alone
+    /// puts this process inside tmux: the image is wrapped, the link is
+    /// tmux's, our pane is asked about passthrough, and the outer terminal's
+    /// markers count.
+    #[test]
+    fn a_tmux_client_is_inside_tmux_whatever_its_term() {
+        let pane = client(hints("xterm-256color", ""));
+        assert!(detected(&[Response::Kitty], &pane, None).tmux);
+        assert!(pane.env.link().tmux);
+        assert!(pane.our_tmux_pane());
+        let outer = EnvHints {
+            iterm_session: true,
+            ..pane
+        };
+        assert_eq!(outer.iterm2(), Some(ImageProtocol::Iterm2));
     }
 
     /// The same `TERM`/`TERM_PROGRAM` test ratatui-image applies.
     #[test]
     fn tmux_is_named_by_term_or_term_program() {
-        assert!(hints("tmux-256color", "").env.tmux_term());
-        assert!(hints("xterm-ghostty", "tmux").env.tmux_term());
-        assert!(!hints("screen-256color", "ghostty").env.tmux_term());
-        assert!(!EnvHints::default().env.tmux_term());
+        assert!(hints("tmux-256color", "").env.tmux());
+        assert!(hints("xterm-ghostty", "tmux").env.tmux());
+        assert!(!hints("screen-256color", "ghostty").env.tmux());
+        assert!(!EnvHints::default().env.tmux());
     }
 
     #[test]

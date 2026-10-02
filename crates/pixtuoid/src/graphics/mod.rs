@@ -253,16 +253,18 @@ impl TermEnv {
         }
     }
 
-    /// Upstream's test before wrapping every image in passthrough
-    /// (ratatui-image 11.1.0 `picker.rs:341-347`), on every platform.
-    fn tmux_term(&self) -> bool {
-        self.term.as_deref().is_some_and(|t| t.starts_with("tmux"))
+    /// Inside tmux: a tmux client, or a terminal named tmux — upstream's test
+    /// before wrapping every image in passthrough (ratatui-image 11.1.0
+    /// `picker.rs:341-347`), which a tmux `TERM` carried over ssh also passes.
+    fn tmux(&self) -> bool {
+        self.tmux_client
+            || self.term.as_deref().is_some_and(|t| t.starts_with("tmux"))
             || self.term_program.as_deref() == Some("tmux")
     }
 
     fn link(&self) -> Link {
         Link {
-            tmux: self.tmux_client || self.tmux_term(),
+            tmux: self.tmux(),
             ssh: self.ssh,
         }
     }
