@@ -16,17 +16,17 @@ use pixtuoid_core::state::{ActivityState, DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 
-use crate::anim::{Beat, Clock};
+use crate::anim::{Beat, Timing};
 use crate::chitchat::{self, ActiveChitchat, ChitchatBubble, VenueKey};
 use crate::creatures::{gateway_mascot_def, mascot_position, mascot_seed, pet_position};
 use crate::effects::{self, Effect};
 use crate::floor::{CoffeeState, FloorInputs, FloorMeta, PetInputs, VacancyDim};
 use crate::layout::{Pivot, Point, SceneLayout, Size, WALKING_Y_OFF};
-use crate::motion::MotionState;
 use crate::pathfind::Router;
 use crate::pet::PetKind;
 use crate::physics::walking_position;
 use crate::pose::{self, Pose, PoseHistory};
+use crate::walk::WalkState;
 
 use crate::layout::CHARACTER_SPRITE_W;
 use crate::pack::{desk_art, desk_art_top};
@@ -47,7 +47,7 @@ pub(crate) struct SimStores<'a> {
     pub router: &'a mut dyn Router,
     pub overlay: &'a mut OccupancyOverlay,
     pub history: &'a mut PoseHistory,
-    pub motion: &'a mut HashMap<AgentId, MotionState>,
+    pub walks: &'a mut HashMap<AgentId, WalkState>,
     pub vacancy_dim: &'a mut VacancyDim,
     pub neon: &'a mut crate::floor::NeonState,
     pub chitchat: &'a mut HashMap<VenueKey, ActiveChitchat>,
@@ -263,15 +263,15 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
         coffee,
         door_anim_max_ms,
     } = inputs;
-    let clock = floor.motion.clock(now);
-    let beat = clock.beat;
+    let timing = floor.motion.timing(now);
+    let beat = timing.beat;
     let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
 
     let indoor_scale = stores.vacancy_dim.tick(scene.agents.is_empty(), now);
     let neon = stores.neon.tick(
         crate::board::OfficeMood::of(crate::board::scene_stats(scene)),
         stores.vacancy_dim.dimmed(),
-        clock,
+        timing,
     );
 
     let char_w = pack
@@ -332,7 +332,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
                     router: &mut *stores.router,
                     overlay: &*stores.overlay,
                     history: &mut *stores.history,
-                    motion: &mut *stores.motion,
+                    walks: &mut *stores.walks,
                     wanders: !beat.is_rest(),
                 },
             );
@@ -360,13 +360,13 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
         .collect();
 
     let (characters, waypoint_visitors, new_coffee_carriers, occupied_waypoints) =
-        resolve_characters(&agents, &poses, layout, pack, char_w, coffee, clock);
+        resolve_characters(&agents, &poses, layout, pack, char_w, coffee, timing);
 
     let chitchat_bubbles =
         chitchat::update_and_collect(stores.chitchat, floor.floor_idx, &waypoint_visitors, now);
-    let pet = pet_placement(&agents, layout, pack, pets, floor, clock);
-    let mascots = mascot_placements(scene, layout, pack, clock);
-    let desks = desk_props(&agents, layout, coffee, clock);
+    let pet = pet_placement(&agents, layout, pack, pets, floor, timing);
+    let mascots = mascot_placements(scene, layout, pack, timing);
+    let desks = desk_props(&agents, layout, coffee, timing);
 
     let door_frame = anchors::compute_door_frame_idx(&agents, now, door_anim_max_ms);
     SimFrame {
@@ -415,9 +415,9 @@ fn pet_placement(
     pack: &Pack,
     pets: PetInputs<'_>,
     floor: FloorMeta,
-    clock: Clock,
+    timing: Timing,
 ) -> Option<PetPlacement> {
-    let Clock { now, beat } = clock;
+    let Timing { now, beat } = timing;
     let kind = pets.pet.map(|p| p.kind)?;
     let petting = pets
         .petting
@@ -459,7 +459,7 @@ fn pet_placement(
         kind,
         layout,
         pack,
-        clock,
+        timing,
         &idle_desk_indices,
         all_idle,
         floor.floor_seed,
@@ -503,16 +503,16 @@ fn mascot_placements(
     scene: &SceneState,
     layout: &SceneLayout,
     pack: &Pack,
-    clock: Clock,
+    timing: Timing,
 ) -> Vec<MascotPlacement> {
-    let beat = clock.beat;
+    let beat = timing.beat;
     scene
         .daemons()
         .filter_map(|(source, instance, presence)| {
             let def = gateway_mascot_def(source)?;
             let seed = mascot_seed(source, instance);
             let (pos, anim_name) =
-                mascot_position(layout, presence, def.walk, def.rest, clock, seed)?;
+                mascot_position(layout, presence, def.walk, def.rest, timing, seed)?;
             let frame_idx = crate::pack::animation_frame_at(pack, anim_name, beat);
             let size = frame_size(pack, anim_name, frame_idx, MASCOT_FALLBACK);
             let pos = on_canvas(layout, Pivot::Center, pos, size);
@@ -548,9 +548,9 @@ fn desk_props(
     agents: &[AgentSlot],
     layout: &SceneLayout,
     coffee: &HashMap<AgentId, SystemTime>,
-    clock: Clock,
+    timing: Timing,
 ) -> Vec<DeskProps> {
-    let Clock { now, beat } = clock;
+    let Timing { now, beat } = timing;
     (0..layout.home_desks.len())
         .map(|i| {
             let occupant = desk_occupant(agents, FloorLocalDeskIndex(i));
@@ -599,9 +599,9 @@ pub(crate) fn character_effects(
     top_left: Point,
     w: Option<u16>,
     cues: Cues,
-    clock: Clock,
+    timing: Timing,
 ) -> Vec<Effect> {
-    let Clock { now, beat } = clock;
+    let Timing { now, beat } = timing;
     let mut out = Vec::new();
     out.extend(cues.stride.map(|s| effects::walking_dust(top_left, s)));
     if let Some(w) = w
@@ -630,14 +630,14 @@ pub(crate) fn resolve_characters(
     pack: &Pack,
     char_w: u16,
     coffee: &HashMap<AgentId, SystemTime>,
-    clock: Clock,
+    timing: Timing,
 ) -> (
     Vec<CharacterPlacement>,
     Vec<chitchat::Visitor>,
     Vec<AgentId>,
     std::collections::HashSet<usize>,
 ) {
-    let beat = clock.beat;
+    let beat = timing.beat;
     let mut placements: Vec<(CharacterPlacement, Cues)> = Vec::new();
     let mut new_coffee_carriers: Vec<AgentId> = Vec::new();
     let mut wp_rank: HashMap<usize, usize> = HashMap::new();
@@ -861,7 +861,7 @@ pub(crate) fn resolve_characters(
         } else {
             fitted
         };
-        p.effects = character_effects(agent, p.top_left, art.map(|s| s.w), *cues, clock);
+        p.effects = character_effects(agent, p.top_left, art.map(|s| s.w), *cues, timing);
     }
 
     // wp_rank's keys ARE this tick's occupied waypoints — every AtWaypoint

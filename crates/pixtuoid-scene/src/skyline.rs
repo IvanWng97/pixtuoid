@@ -151,8 +151,10 @@ const BEACON: Rgb = Rgb {
 };
 /// One of the tallest towers in this many carries a light.
 const BEACON_IN: u32 = 2;
-/// How long a light holds on, then off: whole Full beats, so it flips on one.
-const BEACON_HALF_MS: u64 = 10 * crate::anim::FULL_TICK_MS;
+/// How many Full beats a light holds on, then off, so it flips on one.
+const BEACON_HALF_BEATS: u64 = 10;
+/// [`BEACON_HALF_BEATS`] in ms.
+const BEACON_HALF_MS: u64 = BEACON_HALF_BEATS * crate::anim::FULL_TICK_MS;
 /// Tells the lights' hashes apart from the planes'.
 const BEACON_SALT: u32 = 0xB1EC;
 /// A separate salt for the phase: carriers all share one [`BEACON_SALT`]
@@ -743,7 +745,7 @@ mod tests {
             CityStrip::draw(
                 &pack,
                 (60, 20),
-                &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(std::time::UNIX_EPOCH)),
+                &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(std::time::UNIX_EPOCH)),
                 theme,
                 Density::new(d).expect("nonzero"),
             )
@@ -811,7 +813,7 @@ mod tests {
                     crate::sky::Sky::at_with(now, crate::sky::Weather::Clear),
                     theme,
                     0.0,
-                    Motion::Full.clock(now),
+                    Motion::Full.timing(now),
                 );
                 let near = PlaneColours::of(Plane::Near, &moment.look, theme);
                 let s = CityStrip::draw(

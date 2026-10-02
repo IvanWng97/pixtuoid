@@ -40,6 +40,7 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         connected,
         config_path,
         audio,
+        motion,
         ..
     } = cfg;
     let app_config = config::load(&config_path, &mut Vec::new());
@@ -70,7 +71,10 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     // `crate::audio::AudioController::new`).
     let mut app = FloatingApp::new(
         floating_cfg,
-        theme,
+        window::Appearance {
+            theme,
+            motion: motion.or(pixtuoid_scene::anim::Motion::Full),
+        },
         pack,
         config_path,
         pets,

@@ -1,4 +1,4 @@
-//! The cutaway painted into a buffer kept across frames: a frame whose draw
+//! The cutaway painted into a buffer kept across frames: a frame whose display
 //! list matches the last one's is not painted at all, and one that differs is
 //! painted whole but reports where it can differ, so a painter re-encodes only
 //! there.
@@ -406,7 +406,7 @@ mod tests {
         let strike = (0..60_000u64)
             .step_by(10)
             .map(|ms| SystemTime::UNIX_EPOCH + Duration::from_millis(ms))
-            .find(|&t| crate::sky::Sky::at(Motion::Full.clock(t), storm).flash() > 0.0)
+            .find(|&t| crate::sky::Sky::at(Motion::Full.timing(t), storm).flash() > 0.0)
             .expect("a strike in the first minute");
         let steps: Vec<_> = ticks(strike - Duration::from_millis(200), 8)
             .map(|t| (seated.clone(), t))
@@ -882,12 +882,15 @@ mod tests {
 
     /// The digests [`the_canvas_paints_the_pinned_frames`] pins, one frame a
     /// line.
+    #[cfg(feature = "density-art")]
     const PINNED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/cutaway/canvas.golden");
 
     /// Every pixel of a fixed set of frames, as committed: a refactor of the
     /// cutaway leaves this file as it found it, and a change to its look
     /// rewrites it (`just gen-cutaway-golden`). Each instant is a local
     /// hour ([`localclock`](crate::localclock)), so any `$TZ` paints it alike.
+    // Without the density art every frame is d=1, and the d4 rows would go unchecked.
+    #[cfg(feature = "density-art")]
     #[test]
     fn the_canvas_paints_the_pinned_frames() {
         use crate::sky::{Weather, WeatherPolicy};
@@ -994,15 +997,10 @@ mod tests {
             return;
         }
         let pinned = std::fs::read_to_string(PINNED).expect("reads the golden");
-        let moved: Vec<&str> = digests
-            .lines()
-            .filter(|l| !pinned.lines().any(|p| p == *l))
-            .collect();
-        assert!(
-            moved.is_empty() && pinned.lines().count() == digests.lines().count(),
+        assert_eq!(
+            digests, pinned,
             "these frames are not the pixels {PINNED} pins; run \
-             `just gen-cutaway-golden` if the look changed on purpose:\n{}",
-            moved.join("\n")
+             `just gen-cutaway-golden` if the look changed on purpose"
         );
     }
 }
