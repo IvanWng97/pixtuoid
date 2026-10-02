@@ -94,8 +94,9 @@ pub(crate) fn bolt_steps(sky: &crate::sky::Sky) -> u8 {
     flash_steps(sky, BOLT_MAX_STEPS)
 }
 
-/// `sky`'s flash level in whole steps up to `max`: zero except in a storm, by
-/// [`Sky::flash`](crate::sky::Sky::flash).
+/// `sky`'s flash level in whole steps up to `max`, by
+/// [`Sky::flash`](crate::sky::Sky::flash): a strike lights only if the storm
+/// held at its start.
 fn flash_steps(sky: &crate::sky::Sky, max: u8) -> u8 {
     (sky.flash().clamp(0.0, 1.0) * f32::from(max)).round() as u8
 }

@@ -55,7 +55,7 @@ struct Epoch {
     theme: &'static Theme,
     scale: RenderScale,
     ambient: Ambient,
-    ground: crate::cutaway::paint::Ground,
+    ground: crate::dither::Dithered<crate::cutaway::paint::Ground>,
     flash: crate::cutaway::light::Flash,
 }
 
