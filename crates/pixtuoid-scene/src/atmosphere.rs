@@ -97,7 +97,27 @@ const GROUND_TINT_SHARE: f32 = 0.15;
 /// by day and under thick cloud or fog; above it the stars ramp in from nothing.
 const STAR_MIN: f32 = 0.15;
 
+/// The carpet's three tones one frame lays: the theme's, cast by the weather.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Carpet {
+    pub(crate) lit: Rgb,
+    pub(crate) base: Rgb,
+    pub(crate) dark: Rgb,
+}
+
 impl SkyTones {
+    /// `theme`'s carpet drawn toward [`ground_tint`](Self::ground_tint): the
+    /// one carpet both painters lay.
+    pub(crate) fn carpet(&self, theme: &Theme) -> Carpet {
+        let (tint, share) = self.ground_tint;
+        let s = &theme.surface;
+        Carpet {
+            lit: s.carpet_light.mix(tint, share),
+            base: s.carpet_base.mix(tint, share),
+            dark: s.carpet_dark.mix(tint, share),
+        }
+    }
+
     pub(crate) fn resolve(sky: &Sky, theme: &Theme) -> SkyTones {
         let light = sky.light();
         let (interior, exterior) = (light.interior, light.exterior);
