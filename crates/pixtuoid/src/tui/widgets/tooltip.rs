@@ -599,7 +599,7 @@ mod tests {
         };
         let speaker = AgentFrame {
             agent_id: pixtuoid_core::AgentId::from_transcript_path("/chat/0.jsonl"),
-            anchor: Point { x: 16, y: 14 },
+            top_left: Point { x: 16, y: 14 },
             w: 8,
             h: 12,
             label_anchor: Point { x: 20, y: 14 },
