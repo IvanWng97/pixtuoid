@@ -5851,8 +5851,7 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
 
 /// A corridor appliance's art overhangs north of its aisle (invariant #6), but
 /// never onto a desk, its chair or its sitter. Art can only overlap a
-/// workstation it shares a row with, and the height alone fixes every row
-/// (asserted at every width at the first seed, plus the rest at `MID_WIDTH`).
+/// workstation it shares a row with, and the height alone fixes every row.
 /// So a tall-aisle height whose rows never meet is checked once per width;
 /// every other tall height sweeps all widths × seeds.
 #[test]
