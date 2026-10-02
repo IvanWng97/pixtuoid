@@ -1394,6 +1394,23 @@ fn neon_a_starved_tube_flashes_inside_its_windows_and_only_there() {
     }
 }
 
+/// Calm plays every loop slower, the stutter too: an empty, dimmed sign
+/// repainted at Calm's cadence flashes within one stutter cycle of its loop
+/// time.
+#[test]
+fn neon_a_starved_tube_stutters_at_the_calm_pace() {
+    use crate::anim::{CALM_TICK_MS, FULL_TICK_MS};
+    let mut neon = NeonState::new();
+    let repaints = NeonState::STUTTER_MS / FULL_TICK_MS;
+    let flashed = (0..=repaints)
+        .map(|n| {
+            let at = in_stutter_cycle(0) + Duration::from_millis(n * CALM_TICK_MS);
+            neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Calm.clock(at))
+        })
+        .any(|levels| levels == NeonLevels::FLASH);
+    assert!(flashed, "the stutter never played at Calm");
+}
+
 /// At rest a starved tube holds steady: no flash, for the photosensitive.
 #[test]
 fn neon_a_starved_tube_never_flashes_at_rest() {
@@ -1405,19 +1422,21 @@ fn neon_a_starved_tube_never_flashes_at_rest() {
     }
 }
 
-/// A flash shorter than the frame gap can't be drawn: a still (one tick) and the
-/// floating window's ambient cadence get the steady tube, never a held flash.
+/// A painter stepping further than a flash can't draw it: a still (one tick)
+/// and the floating window's ambient cadence get the steady tube, never a
+/// held flash.
 #[test]
 fn neon_a_painter_slower_than_a_flash_never_shows_one() {
     let shortest = Duration::from_millis(NeonState::shortest_flash_ms());
-    for (ms, levels) in starved_cycle(shortest) {
-        assert_eq!(levels, NeonLevels::EMPTY, "{ms}ms at a {shortest:?} tick");
+    let slower = shortest + Duration::from_millis(crate::anim::FULL_TICK_MS);
+    for (ms, levels) in starved_cycle(slower) {
+        assert_eq!(levels, NeonLevels::EMPTY, "{ms}ms at a {slower:?} tick");
     }
-    let just_faster = shortest - Duration::from_millis(1);
     assert!(
-        starved_cycle(just_faster)
+        starved_cycle(shortest)
             .iter()
-            .any(|(_, levels)| *levels == NeonLevels::FLASH)
+            .any(|(_, levels)| *levels == NeonLevels::FLASH),
+        "a painter stepping a flash at a time draws each"
     );
     let in_a_flash = in_stutter_cycle(NeonState::STUTTER_FLASHES_MS[0].0);
     assert_eq!(
