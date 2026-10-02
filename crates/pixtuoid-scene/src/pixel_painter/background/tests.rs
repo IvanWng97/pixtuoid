@@ -40,7 +40,7 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let render_lum = |flash: f32| -> u64 {
         let sky = Sky::at_with(now, Weather::Storm).with_flash(flash);
-        let moment = &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(now));
+        let moment = &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now));
         let city = CityStrip::draw(
             &test_default_pack(),
             (WINDOW_W, 28),
@@ -100,7 +100,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
         &mut buf,
         top_wall_h,
         window_bays(buf_w, 0..0),
-        &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.clock(now)),
+        &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.timing(now)),
         &test_default_pack(),
         theme,
     );
@@ -164,7 +164,7 @@ fn render_office_themed(
             Sky::at_with(now, weather),
             theme,
             0.0,
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
         ),
         &test_default_pack(),
         theme,
@@ -796,7 +796,7 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
                 Sky::at_with(now, weather),
                 theme,
                 0.0,
-                Motion::Full.clock(now),
+                Motion::Full.timing(now),
             ),
             &test_default_pack(),
             theme,
@@ -853,7 +853,7 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
             &mut buf,
             14,
             window_bays(w, 0..0),
-            &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.clock(now)),
+            &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.timing(now)),
             &test_default_pack(),
             theme,
         );
@@ -968,7 +968,7 @@ fn the_spill_leans_away_from_the_disc() {
             Sky::at_with(at, Weather::Clear),
             theme,
             0.0,
-            Motion::Full.clock(at),
+            Motion::Full.timing(at),
         );
         let (sky, look) = (&moment.sky, &moment.look);
         let disc = crate::celestial::Disc::of(sky, BUF_W, TOP_WALL_H).expect("a clear low sun");
@@ -1057,7 +1057,7 @@ fn a_window_shows_the_city_strip_from_its_own_column() {
         Sky::at_with(now, Weather::Overcast),
         theme,
         0.0,
-        Motion::Full.clock(now),
+        Motion::Full.timing(now),
     );
     let sky = crate::celestial::SkyView::of(moment, WINDOW_W * 3, 40, theme);
     let dx = 7;
@@ -1114,7 +1114,7 @@ fn the_wall_between_two_windows_is_one_frame_post() {
         &mut buf,
         top_wall_h,
         window_bays(buf_w, 0..0),
-        &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.clock(now)),
+        &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.timing(now)),
         &test_default_pack(),
         theme,
     );

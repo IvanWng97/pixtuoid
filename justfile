@@ -781,7 +781,7 @@ site-e2e: gen-wasm
 
 [doc('Regenerate the committed art (generated sprites + icons + README sections + docs images + site demos)')]
 [group('gen')]
-gen: gen-art gen-icons gen-media gen-readme
+gen: gen-art gen-icons gen-media gen-readme gen-cutaway-golden
 
 [doc("Regenerate the bundled pack's generated sprites (every @Nx variant + the 1x pieces it owns) from scripts/gen-art.py")]
 [group('gen')]
@@ -830,6 +830,11 @@ gen-contract:
 gen-drift-surface:
     UPDATE_DRIFT_SURFACE=1 just test -p pixtuoid-core --lib drift_surface::tests::the_committed_fragment_matches
     UPDATE_DRIFT_SURFACE=1 just test -p pixtuoid --lib drift_surface::tests::the_committed_fragment_matches
+
+[doc("Regenerate the cutaway's pinned-frame digests (crates/pixtuoid-scene/src/cutaway/canvas.golden)")]
+[group('gen')]
+gen-cutaway-golden:
+    UPDATE_CUTAWAY_GOLDEN=1 just test -p pixtuoid-scene --lib the_canvas_paints_the_pinned_frames
 
 # Pure node:builtins — no npm ci.
 [doc('Fail if the committed README drifted from site data (features/sources/install.json)')]
