@@ -48,4 +48,6 @@ tokio = { workspace = true, features = ["sync", "rt", "macros", "net", "time", "
 section = "utils"
 assets = [
     ["target/release/pixtuoid-hook", "usr/bin/", "755"],
+    # cargo-deb's generated copyright names the license; MIT wants its text.
+    ["../../LICENSE", "usr/share/doc/pixtuoid-hook/", "644"],
 ]

@@ -2760,6 +2760,7 @@ dependencies = [
  "tempfile",
  "toml_edit",
  "tracing",
+ "unicode-width",
 ]
 
 [[package]]
