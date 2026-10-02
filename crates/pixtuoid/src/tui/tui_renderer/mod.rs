@@ -78,6 +78,8 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     /// Live walkable/approach/route debug layer toggle (`w`); not persisted.
     debug_walkable: bool,
     chrome: Chrome,
+    /// The flashes the half-blocks show; the cutaway holds its own.
+    flash: pixtuoid_scene::flash::FlashHold<pixtuoid_scene::flash::Flashes>,
     /// The cutaway, painted as terminal images in place of the half-blocks.
     #[cfg(feature = "graphics")]
     cutaway: Option<crate::tui::cutaway::TileCutaway>,
@@ -247,6 +249,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 weather: pixtuoid_scene::pixel_painter::WeatherPolicy::Clock,
                 motion: pixtuoid_scene::anim::Motion::Full,
             },
+            flash: Default::default(),
             #[cfg(feature = "graphics")]
             cutaway: None,
         }
@@ -617,6 +620,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             },
         );
 
+        let flashes = [(from_floor, &*from_ctx), (to_floor, &*to_ctx)].map(|(i, ctx)| {
+            pixtuoid_scene::flash::flash_phase(self.chrome.floor_meta(i, nf), ctx, now)
+        });
+        if self.flash.holds(flashes, now) {
+            return Ok(());
+        }
+
         // Modal backdrop: dim BOTH sliding buffers, the same multiply draw_scene
         // applies to its single buffer.
         crate::tui::renderer::apply_dim(from_buf, onboarding_dim);
@@ -635,6 +645,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             flush_buffer_to_term_at_offset(f, to_buf, actual_scene, to_offset);
             crate::tui::renderer::paint_overlays(f, &overlays, now, actual_full, theme);
         })?;
+        self.flash.shown(flashes, now);
 
         self.chrome.popup.last_scale = popup_scale;
         Ok(())
@@ -773,10 +784,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             dashboard: overlays.dashboard,
             connection: overlays.connection,
             onboarding: overlays.onboarding,
+            flash: Some(&mut self.flash),
         };
         let mut out = draw_scene(&mut self.terminal, &mut draw_ctx)?;
         let carriers = std::mem::take(&mut out.new_coffee_carriers);
-        self.record_drawn(scene, out, popup_scale, now);
+        if !out.held {
+            self.record_drawn(scene, out, popup_scale, now);
+        }
         self.sim_epilogue(carriers, now);
         Ok(())
     }
@@ -861,10 +875,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             crate::tui::renderer::wall_board(&footer, floor_scene, world.floor.motion, now)
         });
         let showing = |floor, board| pixtuoid_scene::cutaway::paint::Showing { floor, now, board };
+        let flashes = [(from_floor, from_world), (to_floor, to_world)].map(|(i, world)| {
+            pixtuoid_scene::flash::flash_phase(world.floor, &self.floors[i].ctx, now)
+        });
         cutaway.paint_slide(
             crate::tui::cutaway::Slide {
                 leaving: (&from_stepped, showing(from_world.floor, &boards[0])),
                 arriving: (&to_stepped, showing(to_world.floor, &boards[1])),
+                flashes,
                 t,
                 going_down,
             },
@@ -943,7 +961,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             now,
             board: &board,
         };
-        cutaway.paint(&stepped, theme, showing, scene_area.as_position());
+        let flash = pixtuoid_scene::flash::flash_phase(world.floor, &pf.ctx, now);
+        cutaway.paint(&stepped, flash, theme, showing, scene_area.as_position());
         let geometry = cutaway.geometry(scene_area);
         let layout = &stepped.layout;
         let mouse = self

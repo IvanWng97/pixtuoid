@@ -931,6 +931,8 @@ pub(crate) struct NeonState {
     last_tick: Option<SystemTime>,
     /// The loop time the last tick read, which the stutter steps by.
     last_beat_ms: Option<u64>,
+    /// Whether the last tick's light was a stutter's flash.
+    stutter: bool,
 }
 
 struct NeonFade {
@@ -1072,11 +1074,17 @@ impl NeonState {
         };
         // Only a tube that has LANDED on starved stutters, not one coasting down.
         let drawable = step_ms.is_some_and(|step| step <= Self::shortest_flash_ms());
-        if current == NeonLevels::EMPTY && drawable && Self::stutter_flash(clock.beat) {
+        self.stutter = current == NeonLevels::EMPTY && drawable && Self::stutter_flash(clock.beat);
+        if self.stutter {
             NeonLevels::FLASH
         } else {
             current
         }
+    }
+
+    /// Whether the last [`tick`](Self::tick)'s light was a stutter's flash.
+    pub(crate) fn stutters(&self) -> bool {
+        self.stutter
     }
 }
 

@@ -308,72 +308,125 @@ fn intro(protocol: ImageProtocol) -> &'static str {
 }
 
 /// Each phase of a strike stays on screen at least the photosensitive floor
-/// on every protocol, at its cadence: from the send that first shows it to
-/// the one that replaces it, with frames each tick or half again as long,
-/// landing on a phase's start or half a frame after. A strike lifts the whole
-/// room, so a send of most of the tiles is a change of phase.
+/// on every protocol, at its cadence, at each frame grid: from the send that
+/// first shows it to the one that replaces it. A strike lifts the whole room,
+/// so a send of most of the tiles is a change of phase.
 #[test]
 fn each_strike_phase_holds_the_floor_on_screen_at_every_protocols_cadence() {
-    use crate::tui::FRAME_TICK_MS;
-    use pixtuoid_scene::anim::{FULL_TICK_MS, Motion, PHOTOSENSITIVE_PHASE_MIN_MS};
-    use pixtuoid_scene::cutaway::canvas::{StrikePhase, strike_phase};
-    use pixtuoid_scene::pixel_painter::{Weather, WeatherPolicy};
-    const MINUTE_MS: u64 = 60_000;
-    let ms = Duration::from_millis;
-    let storm = WeatherPolicy::Forced(Weather::Storm);
-    let floor = pixtuoid_scene::floor::FloorMeta::for_floor(0, 1)
-        .with_weather(storm)
-        .with_motion(Motion::Full);
-    let phase = |at| strike_phase(floor, at);
-    let noon = pixtuoid_scene::localclock::at_hour_min(12, 0);
-    let start = (0..MINUTE_MS)
-        .step_by(FULL_TICK_MS as usize)
-        .map(|n| noon + ms(n))
-        .find(|&at| phase(at) != StrikePhase::default())
-        .expect("a storm strikes within a minute");
-    let end = (0..)
-        .map(|n| start + ms(n))
-        .find(|&at| phase(at) == StrikePhase::default())
-        .expect("a strike ends");
-    let changes = (0..=end.duration_since(start).expect("ends after").as_millis() as u64)
-        .filter(|&n| phase(start + ms(n)) != phase(start + ms(n) - ms(1)))
-        .count();
+    use crate::test_flash::{assert_each_phase_holds_the_floor, frame_grid, lead, storm_strike};
+    let strike = storm_strike();
+    let tick = Duration::from_millis(crate::tui::FRAME_TICK_MS);
     for protocol in [
         ImageProtocol::Kitty,
         ImageProtocol::Sixel,
         ImageProtocol::Iterm2,
     ] {
-        for frame in [FRAME_TICK_MS, FRAME_TICK_MS * 3 / 2] {
-            for offset in [0, frame / 2] {
-                let (cols, rows) = crate::tui::renderer::min_terminal_size();
-                let (mut r, wire) = painter(cols, rows, protocol);
-                r.set_weather(storm);
-                r.set_motion(Motion::Full);
-                let scene = office();
-                // The dark before has shown the floor, as the gap between
-                // strikes sees to.
-                let lead = frame * (PHOTOSENSITIVE_PHASE_MIN_MS.div_ceil(frame) + 1);
-                let mut now = start - ms(lead) + ms(offset);
+        for (frame, offset) in frame_grid(tick) {
+            let (cols, rows) = crate::tui::renderer::min_terminal_size();
+            let (mut r, wire) = painter(cols, rows, protocol);
+            r.set_weather(strike.weather);
+            r.set_motion(pixtuoid_scene::anim::Motion::Full);
+            let scene = office();
+            let mut now = strike.start - lead(frame) + offset;
+            r.render(&scene, pack(), now).expect("render");
+            let tiles = wire.take().matches(intro(protocol)).count();
+            let mut changed = Vec::new();
+            while now < strike.end + lead(frame) {
+                now += frame;
                 r.render(&scene, pack(), now).expect("render");
-                let tiles = wire.take().matches(intro(protocol)).count();
-                let mut changed = Vec::new();
-                while now < end + ms(PHOTOSENSITIVE_PHASE_MIN_MS + frame) {
-                    now += ms(frame);
-                    r.render(&scene, pack(), now).expect("render");
-                    if 2 * wire.take().matches(intro(protocol)).count() > tiles {
-                        changed.push(now);
-                    }
-                }
-                let at = format!("{protocol:?}, a frame each {frame} ms from +{offset} ms");
-                assert_eq!(changed.len(), changes, "{at}");
-                for pair in changed.windows(2) {
-                    let shown = pair[1].duration_since(pair[0]).expect("in order");
-                    assert!(
-                        shown >= ms(PHOTOSENSITIVE_PHASE_MIN_MS),
-                        "{at}: a phase shown {shown:?}"
-                    );
+                if 2 * wire.take().matches(intro(protocol)).count() > tiles {
+                    changed.push(now);
                 }
             }
+            let at = format!("{protocol:?}, a frame each {frame:?} from +{offset:?}");
+            assert_each_phase_holds_the_floor(&changed, strike.changes.len(), &at);
+        }
+    }
+}
+
+/// A sliding frame whose strike phase would replace one shown under the floor
+/// sends nothing; the frame the floor later does.
+#[test]
+fn a_held_slide_frame_sends_nothing() {
+    use crate::test_flash::{held_frames, storm_strike};
+    let strike = storm_strike();
+    let [dark, late, held, shown] = held_frames(&strike);
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let (mut r, wire) = kitty(cols, rows);
+    r.set_weather(strike.weather);
+    r.set_motion(pixtuoid_scene::anim::Motion::Full);
+    let scene = two_floor_scene();
+    r.navigate_floor(1, dark);
+    for at in [dark, late] {
+        r.render(&scene, pack(), at).expect("render");
+    }
+    wire.take();
+    r.render(&scene, pack(), held).expect("render");
+    assert_eq!(wire.take(), "", "held");
+    r.render(&scene, pack(), shown).expect("render");
+    assert!(wire.take().contains(TRANSMIT), "shown");
+    assert!(r.transition().is_some(), "still sliding");
+}
+
+/// A starved neon's every catch, and every dark between, stays on screen at
+/// least the photosensitive floor on every protocol, at its cadence, at each
+/// frame grid: from the send of the tube's tiles that shows it to the one
+/// that replaces it.
+#[test]
+fn each_stutter_phase_holds_the_floor_on_screen_at_every_protocols_cadence() {
+    use crate::test_flash::{
+        assert_each_phase_holds_the_floor, frame_grid, lead, neon_tube, starved_stutter,
+    };
+    let stutter = starved_stutter(pack());
+    let tick = Duration::from_millis(crate::tui::FRAME_TICK_MS);
+    let scene = scene_with(vec![], 16);
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows));
+    for protocol in [
+        ImageProtocol::Kitty,
+        ImageProtocol::Sixel,
+        ImageProtocol::Iterm2,
+    ] {
+        let shape = protocol.tile();
+        let across = u32::from(area.width.div_ceil(shape.cols));
+        let tiles: std::collections::BTreeSet<(u16, u16)> = area
+            .positions()
+            .filter(|p| neon_tube(p.x, 2 * p.y))
+            .map(|p| (p.x / shape.cols, p.y / shape.rows))
+            .collect();
+        let tube_sent = |wire: &str| match protocol {
+            ImageProtocol::Kitty => kitty_images(wire).iter().any(|&(id, _)| {
+                tiles.iter().any(|&(tx, ty)| {
+                    id == crate::graphics::kitty::process_base()
+                        + u32::from(ty) * across
+                        + u32::from(tx)
+                })
+            }),
+            ImageProtocol::Sixel | ImageProtocol::Iterm2 => tiles.iter().any(|&(tx, ty)| {
+                let at = (ty * shape.rows + 1, tx * shape.cols + 1);
+                wire.contains(&format!("\x1b[{};{}H{}", at.0, at.1, intro(protocol)))
+            }),
+        };
+        for (frame, offset) in frame_grid(tick) {
+            let (mut r, wire) = painter(cols, rows, protocol);
+            r.set_weather(stutter.weather);
+            r.set_motion(pixtuoid_scene::anim::Motion::Full);
+            for at in stutter.setup {
+                r.render(&scene, pack(), at).expect("render");
+            }
+            let mut now = stutter.start - lead(frame) + offset;
+            r.render(&scene, pack(), now).expect("render");
+            wire.take();
+            let mut changed = Vec::new();
+            while now < stutter.end + lead(frame) {
+                now += frame;
+                r.render(&scene, pack(), now).expect("render");
+                if tube_sent(&wire.take()) {
+                    changed.push(now);
+                }
+            }
+            let at = format!("{protocol:?}, a frame each {frame:?} from +{offset:?}");
+            assert_each_phase_holds_the_floor(&changed, stutter.changes, &at);
         }
     }
 }

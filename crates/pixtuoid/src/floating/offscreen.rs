@@ -9,6 +9,7 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 
+use pixtuoid_scene::flash::{FlashHold, FlashPhase, flash_phase};
 use pixtuoid_scene::floor::{FloorInputs, FloorSession, FrameInputs};
 use pixtuoid_scene::footer::{
     FooterContext, FooterInputs, FooterModel, build_footer, footer_tone_rgb,
@@ -31,6 +32,10 @@ pub struct OfficeRenderer {
     session: FloorSession,
     /// Ambient-audio gateway. Inert unless installed.
     audio: crate::audio::AudioHandle,
+    /// The flash the window shows.
+    flash: FlashHold<FlashPhase>,
+    /// The flash the last [`render_live`](Self::render_live) handed out.
+    rendered: FlashPhase,
 }
 
 impl OfficeRenderer {
@@ -38,6 +43,8 @@ impl OfficeRenderer {
         Self {
             session: FloorSession::new(),
             audio: crate::audio::AudioHandle::disabled(),
+            flash: FlashHold::default(),
+            rendered: FlashPhase::default(),
         }
     }
 
@@ -58,6 +65,26 @@ impl OfficeRenderer {
         self.audio
             .frame(self.session.audio_frame(scene, floor, now));
         self.session.buf()
+    }
+
+    /// [`render`](Self::render) for the window on screen: `None` when the
+    /// flash hold keeps the frame back, so the window keeps the last. A frame
+    /// handed out is [`presented`](Self::presented) once it shows.
+    pub fn render_live(&mut self, inputs: FrameInputs<'_>) -> Option<&RgbBuffer> {
+        let FloorInputs { floor, now, .. } = inputs.world;
+        self.render(inputs);
+        let flash = flash_phase(floor, &self.session.floor.ctx, now);
+        if self.flash.holds(flash, now) {
+            return None;
+        }
+        self.rendered = flash;
+        Some(self.session.buf())
+    }
+
+    /// The frame [`render_live`](Self::render_live) last handed out showed at
+    /// `now`.
+    pub fn presented(&mut self, now: SystemTime) {
+        self.flash.shown(self.rendered, now);
     }
 
     /// Build the name-badge overlay for the LAST rendered frame (call right after
@@ -455,6 +482,133 @@ mod tests {
                 .any(|p| *p != Rgb { r: 0, g: 0, b: 0 } && *p != bg),
             "the painter draws office content beyond the cleared background"
         );
+    }
+
+    /// An empty office's window, under `weather`, moving fully.
+    struct Window {
+        renderer: OfficeRenderer,
+        scene: SceneState,
+        pack: &'static pixtuoid_core::sprite::format::Pack,
+        floor: FloorMeta,
+        /// What the window shows.
+        shown: RgbBuffer,
+    }
+
+    /// Parsed once per test process.
+    fn bundled() -> &'static pixtuoid_core::sprite::format::Pack {
+        static PACK: std::sync::OnceLock<pixtuoid_core::sprite::format::Pack> =
+            std::sync::OnceLock::new();
+        PACK.get_or_init(|| pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"))
+    }
+
+    impl Window {
+        fn new(weather: pixtuoid_scene::pixel_painter::WeatherPolicy) -> Self {
+            Self {
+                renderer: OfficeRenderer::new(),
+                scene: SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]),
+                pack: bundled(),
+                floor: FloorMeta::ground()
+                    .with_weather(weather)
+                    .with_motion(pixtuoid_scene::anim::Motion::Full),
+                shown: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
+            }
+        }
+
+        /// What the window shows after its redraw at `now`, as `window.rs`
+        /// presents it.
+        fn present(&mut self, now: SystemTime) -> RgbBuffer {
+            let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
+            let frame = self.renderer.render_live(FrameInputs {
+                world: FloorInputs {
+                    scene: &self.scene,
+                    pack: self.pack,
+                    now,
+                    floor: self.floor,
+                    pets: PetInputs::default(),
+                },
+                theme,
+                size: Size { w: 160, h: 96 },
+                debug_walkable: false,
+            });
+            if let Some(frame) = frame {
+                self.shown = frame.clone();
+                self.renderer.presented(now);
+            }
+            self.shown.clone()
+        }
+    }
+
+    /// Each phase of a strike stays on screen at least the photosensitive
+    /// floor in the window, at its active cadence and each frame grid: from
+    /// the frame that first shows it to the one that replaces it. A strike
+    /// lifts the whole room, so a frame that changes most of the office's
+    /// pixels is a change of phase.
+    #[test]
+    fn each_strike_phase_holds_the_floor_on_screen_in_the_window() {
+        use crate::test_flash::{
+            assert_each_phase_holds_the_floor, frame_grid, lead, storm_strike,
+        };
+        let strike = storm_strike();
+        for (frame, offset) in frame_grid(super::super::cadence::tick(false)) {
+            let mut window = Window::new(strike.weather);
+            let mut now = strike.start - lead(frame) + offset;
+            let mut shown = window.present(now);
+            let mut changed = Vec::new();
+            while now < strike.end + lead(frame) {
+                now += frame;
+                let presented = window.present(now);
+                let differ = presented
+                    .as_slice()
+                    .iter()
+                    .zip(shown.as_slice())
+                    .filter(|(a, b)| a != b)
+                    .count();
+                if 2 * differ > presented.as_slice().len() {
+                    changed.push(now);
+                }
+                shown = presented;
+            }
+            let at = format!("a frame each {frame:?} from +{offset:?}");
+            assert_each_phase_holds_the_floor(&changed, strike.changes.len(), &at);
+        }
+    }
+
+    /// A starved neon's every catch, and every dark between, stays on screen
+    /// at least the photosensitive floor in the window, at its active cadence
+    /// and each frame grid. The pixels by the tube's west side change only
+    /// with it.
+    #[test]
+    fn each_stutter_phase_holds_the_floor_on_screen_in_the_window() {
+        use crate::test_flash::{
+            assert_each_phase_holds_the_floor, frame_grid, lead, neon_tube, starved_stutter,
+        };
+        let stutter = starved_stutter(bundled());
+        let tube = |buf: &RgbBuffer| -> Vec<Rgb> {
+            (0..buf.height())
+                .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
+                .filter(|&(x, y)| neon_tube(x, y))
+                .map(|(x, y)| buf.get(x, y))
+                .collect()
+        };
+        for (frame, offset) in frame_grid(super::super::cadence::tick(false)) {
+            let mut window = Window::new(stutter.weather);
+            for at in stutter.setup {
+                window.present(at);
+            }
+            let mut now = stutter.start - lead(frame) + offset;
+            let mut shown = tube(&window.present(now));
+            let mut changed = Vec::new();
+            while now < stutter.end + lead(frame) {
+                now += frame;
+                let presented = tube(&window.present(now));
+                if presented != shown {
+                    changed.push(now);
+                }
+                shown = presented;
+            }
+            let at = format!("a frame each {frame:?} from +{offset:?}");
+            assert_each_phase_holds_the_floor(&changed, stutter.changes, &at);
+        }
     }
 
     #[test]

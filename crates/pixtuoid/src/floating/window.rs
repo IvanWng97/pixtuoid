@@ -158,7 +158,7 @@ impl FloatingApp {
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
         // ONE clock read, so the overlays below annotate the frame actually rendered.
         let now = SystemTime::now();
-        let office = self.renderer.render(FrameInputs {
+        let Some(office) = self.renderer.render_live(FrameInputs {
             world: FloorInputs {
                 scene: &scene,
                 pack: &self.pack,
@@ -173,7 +173,9 @@ impl FloatingApp {
             theme: self.theme,
             size: Size { w: buf_w, h: buf_h },
             debug_walkable: false,
-        });
+        }) else {
+            return; // held: the window keeps the last frame
+        };
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -206,7 +208,9 @@ impl FloatingApp {
             .footer(&scene, budget, audio_audible, volume_flash);
         super::offscreen::paint_footer_into_surface(&mut surf, &footer, self.theme);
         window.pre_present_notify();
-        let _ = sb.present();
+        if sb.present().is_ok() {
+            self.renderer.presented(now);
+        }
     }
 }
 

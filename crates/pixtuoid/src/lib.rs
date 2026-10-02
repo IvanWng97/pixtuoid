@@ -262,6 +262,184 @@ pub(crate) mod test_io {
     }
 }
 
+/// What every painter's photosensitive tests drive and measure: a strike,
+/// the frames it is drawn on, and what reached the screen.
+#[cfg(test)]
+pub(crate) mod test_flash {
+    use std::time::{Duration, SystemTime};
+
+    use pixtuoid_scene::anim::{FULL_TICK_MS, Motion, PHOTOSENSITIVE_PHASE_MIN_MS};
+    use pixtuoid_scene::flash::{FlashPhase, flash_phase};
+    use pixtuoid_scene::floor::{FloorCtx, FloorMeta};
+    use pixtuoid_scene::pixel_painter::{Weather, WeatherPolicy};
+
+    /// How long a probe looks for a flash before the test gives up on it.
+    const MINUTE_MS: u64 = 60_000;
+
+    /// A forced storm's first strike after local noon, on a Full floor.
+    pub(crate) struct Strike {
+        pub(crate) weather: WeatherPolicy,
+        pub(crate) start: SystemTime,
+        pub(crate) end: SystemTime,
+        /// Where its phase changes, its start and its return to dark included.
+        pub(crate) changes: Vec<SystemTime>,
+    }
+
+    pub(crate) fn storm_strike() -> Strike {
+        let ms = Duration::from_millis;
+        let weather = WeatherPolicy::Forced(Weather::Storm);
+        let floor = FloorMeta::for_floor(0, 1)
+            .with_weather(weather)
+            .with_motion(Motion::Full);
+        // A floor never stepped: its neon is no stutter's, so only the sky flashes.
+        let unstepped = FloorCtx::new();
+        let phase = |at| flash_phase(floor, &unstepped, at);
+        let noon = pixtuoid_scene::localclock::at_hour_min(12, 0);
+        let start = (0..MINUTE_MS)
+            .step_by(FULL_TICK_MS as usize)
+            .map(|n| noon + ms(n))
+            .find(|&at| phase(at) != FlashPhase::default())
+            .expect("a storm strikes within a minute");
+        let end = (0..MINUTE_MS)
+            .map(|n| start + ms(n))
+            .find(|&at| phase(at) == FlashPhase::default())
+            .expect("a strike ends within a minute");
+        let changes = (0..=end.duration_since(start).expect("ends after").as_millis() as u64)
+            .map(|n| start + ms(n))
+            .filter(|&at| phase(at) != phase(at - ms(1)))
+            .collect();
+        Strike {
+            weather,
+            start,
+            end,
+            changes,
+        }
+    }
+
+    /// Four frames over `strike`: one long in the dark; one late in its first
+    /// phase; one at its second phase's start, inside the floor of the last,
+    /// so held; and the first the floor after the last, so shown.
+    pub(crate) fn held_frames(strike: &Strike) -> [SystemTime; 4] {
+        let floor = Duration::from_millis(PHOTOSENSITIVE_PHASE_MIN_MS);
+        let second = strike.changes[1];
+        let late = second - floor / 4;
+        [strike.start - 2 * floor, late, second, late + floor]
+    }
+
+    /// A starved neon's first burst of catches on an empty, clear, Full floor:
+    /// a painter's two setup frames empty the room and land the tube, and the
+    /// burst follows a second later.
+    pub(crate) struct Stutter {
+        pub(crate) weather: WeatherPolicy,
+        pub(crate) setup: [SystemTime; 2],
+        pub(crate) start: SystemTime,
+        pub(crate) end: SystemTime,
+        /// Its catches and darks, the last return to dark included.
+        pub(crate) changes: usize,
+    }
+
+    pub(crate) fn starved_stutter(pack: &pixtuoid_core::sprite::format::Pack) -> Stutter {
+        use pixtuoid_scene::floor::{CoffeeState, FloorInputs, PetInputs, VacancyDim, step_floor};
+        const BURST_MS: u64 = 1_000;
+        let ms = Duration::from_millis;
+        let weather = WeatherPolicy::Forced(Weather::Clear);
+        let floor = FloorMeta::for_floor(0, 1)
+            .with_weather(weather)
+            .with_motion(Motion::Full);
+        let scene = pixtuoid_core::state::SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
+        let noon = pixtuoid_scene::localclock::at_hour_min(12, 0);
+        let setup = [noon, noon + ms(VacancyDim::EMPTY_DEBOUNCE_MS)];
+        let (mut ctx, mut coffee) = (FloorCtx::new(), CoffeeState::default());
+        let mut chitchat = std::collections::HashMap::new();
+        let mut phase = |at| {
+            let inputs = FloorInputs {
+                scene: &scene,
+                pack,
+                now: at,
+                floor,
+                pets: PetInputs::default(),
+            };
+            let size = pixtuoid_scene::layout::Size { w: 160, h: 96 };
+            step_floor(&mut ctx, &mut coffee, &mut chitchat, inputs, size).expect("lays out");
+            flash_phase(floor, &ctx, at)
+        };
+        phase(setup[0]);
+        let mut was = phase(setup[1]);
+        let mut last = setup[1];
+        let mut changed: Vec<SystemTime> = Vec::new();
+        for at in (1..=MINUTE_MS / FULL_TICK_MS).map(|n| setup[1] + ms(n * FULL_TICK_MS)) {
+            let now = phase(at);
+            if now != was {
+                // A burst opens after a second of dark, so none is caught mid-way.
+                let opens = at.duration_since(last).expect("in order") >= ms(BURST_MS);
+                if !changed.is_empty() || opens {
+                    changed.push(at);
+                }
+                (was, last) = (now, at);
+            }
+            if changed
+                .first()
+                .is_some_and(|&first| at > first + ms(BURST_MS))
+            {
+                break;
+            }
+        }
+        let start = *changed
+            .first()
+            .expect("a starved tube catches within a minute");
+        changed.retain(|&at| at <= start + ms(BURST_MS));
+        Stutter {
+            weather,
+            setup,
+            start,
+            end: *changed.last().expect("a burst"),
+            changes: changed.len(),
+        }
+    }
+
+    /// The neon sign's tube on its west side and the wall it lights, in
+    /// logical units: what a starved tube's catch changes and nothing else
+    /// in an empty office does.
+    pub(crate) fn neon_tube(x: u16, y: u16) -> bool {
+        use pixtuoid_scene::layout::{NEON_PANEL_INNER_H, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y};
+        x < NEON_PANEL_INNER_X && y < NEON_PANEL_INNER_Y + NEON_PANEL_INNER_H
+    }
+
+    /// The frame periods and first-frame offsets a painter whose frames come
+    /// each `tick` is driven at: each tick or half again as long, landing on
+    /// a phase's start or half a frame after.
+    pub(crate) fn frame_grid(tick: Duration) -> impl Iterator<Item = (Duration, Duration)> {
+        [tick, tick * 3 / 2]
+            .into_iter()
+            .flat_map(|frame| [(frame, Duration::ZERO), (frame, frame / 2)])
+    }
+
+    /// How far before a phase a painter's frames start, on its frame grid:
+    /// the dark before has shown the floor, as the gap between strikes sees
+    /// to.
+    pub(crate) fn lead(frame: Duration) -> Duration {
+        let floor = Duration::from_millis(PHOTOSENSITIVE_PHASE_MIN_MS);
+        frame * (floor.as_nanos().div_ceil(frame.as_nanos()) as u32 + 1)
+    }
+
+    /// `changed`, the instants a picture's flash changed on screen, are
+    /// `changes` of them, and each phase between showed at least the floor.
+    pub(crate) fn assert_each_phase_holds_the_floor(
+        changed: &[SystemTime],
+        changes: usize,
+        at: &str,
+    ) {
+        assert_eq!(changed.len(), changes, "{at}: {changed:?}");
+        for pair in changed.windows(2) {
+            let shown = pair[1].duration_since(pair[0]).expect("in order");
+            assert!(
+                shown >= Duration::from_millis(PHOTOSENSITIVE_PHASE_MIN_MS),
+                "{at}: a phase shown {shown:?}"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
