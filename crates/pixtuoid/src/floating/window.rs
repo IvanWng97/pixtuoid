@@ -70,7 +70,7 @@ pub(crate) struct FloatingApp {
 }
 
 /// How the office looks and moves.
-pub(crate) struct Look {
+pub(crate) struct Appearance {
     pub(crate) theme: &'static Theme,
     pub(crate) motion: pixtuoid_scene::anim::Motion,
 }
@@ -81,7 +81,7 @@ const RESIZE_CORNER_PX: f64 = 18.0;
 impl FloatingApp {
     pub(crate) fn new(
         cfg: FloatingConfig,
-        Look { theme, motion }: Look,
+        Appearance { theme, motion }: Appearance,
         pack: Pack,
         config_path: PathBuf,
         pets: Vec<pixtuoid_scene::pet::Pet>,

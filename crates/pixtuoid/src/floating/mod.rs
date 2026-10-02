@@ -71,7 +71,7 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     // `crate::audio::AudioController::new`).
     let mut app = FloatingApp::new(
         floating_cfg,
-        window::Look {
+        window::Appearance {
             theme,
             motion: motion.or(pixtuoid_scene::anim::Motion::Full),
         },
