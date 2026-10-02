@@ -5,6 +5,7 @@
 pub(crate) mod compose;
 mod list;
 mod order;
+pub(crate) mod pen;
 
 pub(crate) use compose::{
     DOOR_SPRITE, PLATE_PAD, board_runs, compose, desk_span, drawn_in, face_rows, indicator_plate,

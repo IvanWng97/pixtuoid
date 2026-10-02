@@ -10,7 +10,7 @@ use super::{
     Span, StoodProp, WindowView, depth_sort, fingerprint,
 };
 use crate::atmosphere::Moment;
-use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
+use crate::display::pen::{ArtPx, ArtRect, Pen};
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, DESK_H, Depth, Fixture, FixtureKind, Point, SceneLayout, Size, Station, Tie,

@@ -4,10 +4,10 @@ use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
 use pixtuoid_core::sprite::format::Pack;
 
-use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::cutaway::shade::{Ramp, fill, slab};
 #[cfg(test)]
 use crate::display::compose::{art_size, desk_art, desk_front_h};
+use crate::display::pen::{ArtPx, ArtRect, Pen};
 use crate::display::{
     Art, Badge, DOOR_SPRITE, DisplayList, Figure, Flip, Ground, Office, PLATE_PAD, PieceKind,
     Screen, Showing, StoodProp, WindowView, board_runs, compose, desk_span, drawn_in, face_rows,
