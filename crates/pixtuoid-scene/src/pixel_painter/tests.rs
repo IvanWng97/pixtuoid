@@ -2062,12 +2062,12 @@ fn character_sort_row_exceeds_desk_when_south_of_it() {
 #[test]
 fn character_sort_row_below_desk_when_seated_at_it() {
     let desk_y: u16 = 20;
-    let seated_top_left = seated_top_left(
+    let seat_top_left = seated_top_left(
         Point { x: 0, y: desk_y },
         CHARACTER_SPRITE_W,
         crate::layout::Facing::South,
     );
-    let char_sort_row = seated_top_left.y + 12;
+    let char_sort_row = seat_top_left.y + 12;
     let desk_sort_row = desk_y
         + crate::layout::furniture_def(crate::layout::Furniture::Desk)
             .visual
