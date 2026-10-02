@@ -48,9 +48,10 @@
     read tools, and `blockReadsOutsideWorkingDirectories` refuses a read outside
     the checkout even when a rule allows it
     (code.claude.com/docs/en/settings-reference). `--setting-sources user`
-    keeps the checkout's own `.claude/` settings, which can add a hook, out:
-    the action loads every source by default
-    (claude-code-action base-action/src/parse-sdk-options.ts). Any other flag, action input
+    drops the checkout's `.claude/` settings, which can add a hook and which
+    the action loads by default
+    (github.com/anthropics/claude-code-action/blob/v1/base-action/src/parse-sdk-options.ts);
+    the action parses only its space-separated form. Any other flag, action input
     or settings key can add a rule, a tool, a hook or a directory, so all three
     are allowlists; other values stay free. `allowed_bots` admits the merge
     queue's app alone, never `*`, which would let any App's push trigger it.
@@ -68,7 +69,7 @@
                 "--max-turns", "--max-budget-usd", "--permission-mode",
                 "--setting-sources", "--tools", "--settings", "--json-schema"] == [])
              and [$args | scan("--permission-mode[ =](\\S+)")] == [["dontAsk"]]
-             and [$args | scan("--setting-sources[ =](\\S+)")] == [["user"]]
+             and [$args | scan("--setting-sources (\\S+)")] == [["user"]]
              and ([$args | scan("--tools[ =](.*?)(?= --|$)")]
                   | length == 1 and ([.[0][0] | splits("[ ,]+")] - ["Read", "Glob", "Grep"] == []))
              and ([$args | scan("--settings")] | length == 1)
@@ -99,6 +100,9 @@
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub("--setting-sources user"; "--setting-sources user,project")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("--setting-sources user"; "--setting-sources=user")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub("\"permissions\":\\{"; "\"permissions\":{\"defaultMode\":\"acceptEdits\",")

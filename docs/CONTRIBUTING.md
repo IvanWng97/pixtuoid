@@ -114,7 +114,7 @@ a lint to dodge the bump.
    never "Update branch"**: only a dispatch recomputes `CHANGELOG.md` for the
    new commits, and the merge commit "Update branch" adds counts as a human's,
    so the next dispatch closes this PR and opens a new number. Merged behind
-   `main` or with `main` merged in, it fails `release-plz.yml`'s
+   `main`, or with `main` merged or rebased in, it fails `release-plz.yml`'s
    `release-merge` and publishes nothing. release-plz has
    already raised the bump for any break `cargo-semver-checks` detects; raise it further with
    `cargo set-version --workspace X.Y.Z` (cargo-edit) and push only for a break
