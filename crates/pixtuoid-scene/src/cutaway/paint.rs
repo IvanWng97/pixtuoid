@@ -2104,7 +2104,7 @@ pub(crate) mod tests {
                 crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                 theme,
                 0.0,
-                Motion::Full.clock(std::time::UNIX_EPOCH),
+                Motion::Full.timing(std::time::UNIX_EPOCH),
             ),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
@@ -2380,7 +2380,7 @@ pub(crate) mod tests {
                 let list = compose_at(
                     &frame,
                     office,
-                    &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(now)),
+                    &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now)),
                     crate::floor::FloorMeta::ground(),
                     quiet_board(),
                 );
@@ -3719,7 +3719,7 @@ pub(crate) mod tests {
             crate::sky::Sky::at_with(now, w),
             &crate::theme::NORMAL,
             0.0,
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
         )
     }
 
@@ -3806,7 +3806,7 @@ pub(crate) mod tests {
                     crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                     theme,
                     0.0,
-                    Motion::Full.clock(std::time::UNIX_EPOCH),
+                    Motion::Full.timing(std::time::UNIX_EPOCH),
                 );
                 let list = compose_at(
                     frame,
@@ -4139,7 +4139,7 @@ pub(crate) mod tests {
                     theme,
                     scale: RenderScale::ONE,
                 },
-                &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(now)),
+                &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now)),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
             );
@@ -4229,7 +4229,7 @@ pub(crate) mod tests {
                             crate::sky::Sky::clock(now),
                             theme,
                             0.0,
-                            Motion::Full.clock(now),
+                            Motion::Full.timing(now),
                         ),
                         crate::floor::FloorMeta::ground(),
                         quiet_board(),
@@ -4283,7 +4283,7 @@ pub(crate) mod tests {
                     crate::sky::Sky::clock(now),
                     theme,
                     0.0,
-                    Motion::Full.clock(now),
+                    Motion::Full.timing(now),
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
@@ -4818,7 +4818,7 @@ pub(crate) mod tests {
                             crate::sky::Sky::clock(now),
                             theme,
                             0.0,
-                            Motion::Full.clock(now),
+                            Motion::Full.timing(now),
                         ),
                         crate::floor::FloorMeta::ground(),
                         quiet_board(),
@@ -4882,7 +4882,7 @@ pub(crate) mod tests {
                     crate::sky::Sky::clock(now),
                     theme,
                     0.0,
-                    Motion::Full.clock(now)
+                    Motion::Full.timing(now)
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board()
@@ -4899,7 +4899,7 @@ pub(crate) mod tests {
                     crate::sky::Sky::clock(now),
                     theme,
                     0.0,
-                    Motion::Full.clock(now)
+                    Motion::Full.timing(now)
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board()
@@ -4926,7 +4926,7 @@ pub(crate) mod tests {
                     crate::sky::Sky::clock(std::time::SystemTime::UNIX_EPOCH),
                     theme,
                     0.0,
-                    Motion::Full.clock(std::time::SystemTime::UNIX_EPOCH),
+                    Motion::Full.timing(std::time::SystemTime::UNIX_EPOCH),
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
@@ -5029,7 +5029,7 @@ pub(crate) mod tests {
         compose_at(
             frame,
             office,
-            &Moment::resolve(sky, office.theme, 0.0, Motion::Full.clock(now)),
+            &Moment::resolve(sky, office.theme, 0.0, Motion::Full.timing(now)),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
         )

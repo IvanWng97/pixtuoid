@@ -521,7 +521,7 @@ fn chair_over_person(
             crate::sky::Sky::clock(std::time::UNIX_EPOCH),
             theme,
             0.0,
-            Motion::Full.clock(std::time::UNIX_EPOCH),
+            Motion::Full.timing(std::time::UNIX_EPOCH),
         ),
     );
     let (person, person_span) = order
@@ -743,7 +743,7 @@ fn a_sitters_chair_casts_the_shadow_they_do_not() {
                 crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                 theme,
                 0.0,
-                Motion::Full.clock(std::time::UNIX_EPOCH),
+                Motion::Full.timing(std::time::UNIX_EPOCH),
             ),
         ) {
             let PieceKind::Character {
@@ -851,7 +851,7 @@ pub(crate) fn queued(
         crate::sky::Sky::clock(now),
         theme,
         0.0,
-        Motion::Full.clock(now),
+        Motion::Full.timing(now),
     );
     let inputs = ComposeInputs {
         frame: &frame,
@@ -916,7 +916,7 @@ pub(crate) fn list_at<'a>(frame: &SimFrame, office: Office<'a>, hour: u32) -> Di
     compose_at(
         frame,
         office,
-        &Moment::resolve(sky, office.theme, 0.0, Motion::Full.clock(now)),
+        &Moment::resolve(sky, office.theme, 0.0, Motion::Full.timing(now)),
         crate::floor::FloorMeta::ground(),
         quiet_board(),
     )

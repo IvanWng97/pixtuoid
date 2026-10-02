@@ -237,7 +237,7 @@ pub(super) struct DrawableCtx<'a> {
     pub buf: &'a mut RgbBuffer,
     pub pack: &'a Pack,
     pub cache: &'a mut FrameCache,
-    pub clock: crate::anim::Clock,
+    pub timing: crate::anim::Timing,
     pub theme: &'a crate::theme::Theme,
 }
 
@@ -254,7 +254,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
     let buf = &mut *c.buf;
     let cache = &mut *c.cache;
     let (pack, theme) = (c.pack, c.theme);
-    let crate::anim::Clock { now, beat } = c.clock;
+    let crate::anim::Timing { now, beat } = c.timing;
     match kind {
         DrawableKind::DeskCubicle {
             desk,
@@ -780,7 +780,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -796,7 +796,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -820,7 +820,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                    timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                     theme: th,
                 },
             );
@@ -849,7 +849,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -877,7 +877,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -892,7 +892,7 @@ mod tests {
                 buf: &mut buf2,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -949,7 +949,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    clock: Motion::Full.clock(now),
+                    timing: Motion::Full.timing(now),
                     theme: theme(),
                 },
             );
@@ -1000,7 +1000,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    clock: Motion::Full.clock(now),
+                    timing: Motion::Full.timing(now),
                     theme: theme(),
                 },
             );
@@ -1043,7 +1043,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(now),
+                timing: Motion::Full.timing(now),
                 theme: theme(),
             },
         );
@@ -1081,7 +1081,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    clock: Motion::Full.clock(now),
+                    timing: Motion::Full.timing(now),
                     theme: theme(),
                 },
             );
@@ -1126,7 +1126,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -1218,7 +1218,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(now),
+                timing: Motion::Full.timing(now),
                 theme: theme(),
             },
         );
@@ -1259,7 +1259,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    clock: Motion::Full.clock(now),
+                    timing: Motion::Full.timing(now),
                     theme: theme(),
                 },
             );

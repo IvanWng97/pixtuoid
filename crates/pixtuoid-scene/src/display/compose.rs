@@ -194,12 +194,12 @@ pub(crate) fn compose<'a>(
     office: Office<'a>,
     Showing { floor, now, board }: Showing<'_>,
 ) -> DisplayList<'a> {
-    let clock = floor.motion.clock(now);
+    let timing = floor.motion.timing(now);
     let moment = Moment::resolve(
-        crate::sky::Sky::at(clock, floor.weather),
+        crate::sky::Sky::at(timing, floor.weather),
         office.theme,
         floor.altitude,
-        clock,
+        timing,
     );
     compose_at(frame, office, &moment, floor, board)
 }
