@@ -681,9 +681,19 @@ assert_detect() {
     grep -qx "release=$expect" "$output_file" ||
         fail "the release detection did not answer release=$expect for $label: $(<"$output_file")"
 }
-pr_heads() { jq -cn '[$ARGS.positional[] | {head: {ref: .}}]' --args "$@"; }
-assert_detect true "a merged release PR" "$(pr_heads "${detect_prefix}v1.2.3")"
-assert_detect true "a release PR among others" "$(pr_heads feat/x "${detect_prefix}v1.2.3")"
+pr_heads() { jq -cn '[$ARGS.positional[] | {head: {ref: ., sha: "head123"}}]' --args "$@"; }
+# A release PR's next two calls: the merge's parent, then its comparison with the head.
+held_main() {
+    printf '%s\n' '{"parents":[{"sha":"main123"}]}' \
+        "$(jq -cn --argjson behind "$1" --argjson parents "$2" \
+            '{behind_by: $behind, commits: [{parents: [range($parents) | {sha: "p\(.)"}]}]}')"
+}
+assert_detect true "a merged release PR" "$(pr_heads "${detect_prefix}v1.2.3")"$'\n'"$(held_main 0 1)"
+assert_detect true "a release PR among others" "$(pr_heads feat/x "${detect_prefix}v1.2.3")"$'\n'"$(held_main 0 1)"
+assert_detect error "a release PR main moved past" "$(pr_heads "${detect_prefix}v1.2.3")"$'\n'"$(held_main 1 1)"
+assert_detect error "a release PR main was merged into" "$(pr_heads "${detect_prefix}v1.2.3")"$'\n'"$(held_main 0 2)"
+assert_detect error "an API failure on the comparison" \
+    "$(pr_heads "${detect_prefix}v1.2.3")"$'\n'"$(held_main 0 1 | head -n 1)"$'\n'error
 assert_detect false "an ordinary PR" "$(pr_heads feat/x)"
 assert_detect false "a branch merely naming the prefix" "$(pr_heads "feat/${detect_prefix}x")"
 assert_detect false "a direct push with no PR" "$(pr_heads)"

@@ -110,8 +110,21 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          release="$(gh api "repos/$REPOSITORY/commits/$SHA/pulls" \
-            --jq "any(.[]; .head.ref | startswith(\"$PR_BRANCH_PREFIX\"))")"
+          head="$(gh api "repos/$REPOSITORY/commits/$SHA/pulls" \
+            --jq "[.[] | select(.head.ref | startswith(\"$PR_BRANCH_PREFIX\")) | .head.sha][0] // \"\"")"
+          release=false
+          if [[ -n "$head" ]]; then
+            # Its CHANGELOG and semver verdict cover only the main it was cut
+            # from: main moved after the dispatch, or was merged into it.
+            parent="$(gh api "repos/$REPOSITORY/commits/$SHA" --jq '.parents[0].sha')"
+            stale="$(gh api "repos/$REPOSITORY/compare/$parent...$head" \
+              --jq '.behind_by > 0 or any(.commits[]; (.parents | length) > 1)')"
+            if [[ "$stale" != false ]]; then
+              echo "::error::the release PR merged at ${SHA::7} did not hold all of main@${parent::7}, so its changelog misses commits and nothing is published. Revert this commit, then re-dispatch release-plz.yml (docs/CONTRIBUTING.md#cutting-the-release)"
+              exit 1
+            fi
+            release=true
+          fi
           echo "release=$release" >>"$GITHUB_OUTPUT"
           echo "a merged release PR at ${SHA::7}: $release"
 

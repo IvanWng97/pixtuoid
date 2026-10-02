@@ -47,7 +47,10 @@
     secret. dontAsk denies what no allow rule approves, `--tools` leaves only
     read tools, and `blockReadsOutsideWorkingDirectories` refuses a read outside
     the checkout even when a rule allows it
-    (code.claude.com/docs/en/settings-reference). Any other flag, action input
+    (code.claude.com/docs/en/settings-reference). `--setting-sources user`
+    keeps the checkout's own `.claude/` settings, which can add a hook, out:
+    the action loads every source by default
+    (claude-code-action base-action/src/parse-sdk-options.ts). Any other flag, action input
     or settings key can add a rule, a tool, a hook or a directory, so all three
     are allowlists; other values stay free. `allowed_bots` admits the merge
     queue's app alone, never `*`, which would let any App's push trigger it.
@@ -63,8 +66,9 @@
       and (.[0].with.claude_args as $args
            | ([$args | scan("(?<![\\w-])-{1,2}[A-Za-z][\\w-]*")] - [
                 "--max-turns", "--max-budget-usd", "--permission-mode",
-                "--tools", "--settings", "--json-schema"] == [])
+                "--setting-sources", "--tools", "--settings", "--json-schema"] == [])
              and [$args | scan("--permission-mode[ =](\\S+)")] == [["dontAsk"]]
+             and [$args | scan("--setting-sources[ =](\\S+)")] == [["user"]]
              and ([$args | scan("--tools[ =](.*?)(?= --|$)")]
                   | length == 1 and ([.[0][0] | splits("[ ,]+")] - ["Read", "Glob", "Grep"] == []))
              and ([$args | scan("--settings")] | length == 1)
@@ -89,6 +93,12 @@
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub(" --permission-mode dontAsk"; "")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub(" --setting-sources user"; "")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("--setting-sources user"; "--setting-sources user,project")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub("\"permissions\":\\{"; "\"permissions\":{\"defaultMode\":\"acceptEdits\",")
@@ -425,14 +435,16 @@
     so a release commit whose run was replaced never gets one and the publish
     times out. A main push therefore owns its group or queues in it, and a run
     already in progress is never cancelled.
+  expected: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
   assert: |
     .concurrency as $c
-    | (($c.group | test("github\\.sha"))
+    | (($c.group == $expected)
         or ($c.queue == "max" and ($c["cancel-in-progress"] // false | tostring) == "false"))
       and (($c["cancel-in-progress"] // false | tostring) as $cancel
            | $cancel == "false" or $cancel == "${{ github.event_name == 'pull_request' }}")
   break:
     - .concurrency.group = "ci-${{ github.ref }}"
+    - .concurrency.group = "ci-${{ github.event_name == 'push' && github.ref || github.sha }}"
     - .concurrency["cancel-in-progress"] = true
     - .concurrency["cancel-in-progress"] = "${{ github.event_name != 'workflow_dispatch' }}"
 
