@@ -114,14 +114,14 @@ fn a_policy_picks_the_clock_or_holds_its_weather() {
     for s in (0..40 * WEATHER_CYCLE_SECS).step_by(STRIDE_SECS) {
         let now = at_secs(1_700_000_000 + s);
         assert_eq!(
-            Sky::at(crate::anim::Motion::Full.clock(now), WeatherPolicy::Clock).weather(),
+            Sky::at(crate::anim::Motion::Full.timing(now), WeatherPolicy::Clock).weather(),
             clock_weather(now),
             "{s}"
         );
         for w in Weather::ALL {
             assert_eq!(
                 Sky::at(
-                    crate::anim::Motion::Full.clock(now),
+                    crate::anim::Motion::Full.timing(now),
                     WeatherPolicy::Forced(w)
                 )
                 .weather(),
@@ -340,7 +340,7 @@ fn no_strike_flashes_at_rest() {
                 bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket),
             );
         let sky = Sky::at(
-            crate::anim::Motion::Still.clock(strike),
+            crate::anim::Motion::Still.timing(strike),
             WeatherPolicy::Forced(Weather::Storm),
         );
         assert_eq!(sky.flash(), 0.0, "bucket {bucket}");
@@ -790,7 +790,7 @@ fn the_weather_keeps_real_time_on_every_tier() {
     use crate::anim::Motion;
     for s in (0..86_400u64).step_by(97) {
         let now = at_secs(1_700_000_000 + s);
-        let weather = |m: Motion| Sky::at(m.clock(now), WeatherPolicy::Clock).weather();
+        let weather = |m: Motion| Sky::at(m.timing(now), WeatherPolicy::Clock).weather();
         assert_eq!(weather(Motion::Calm), weather(Motion::Full), "{s}s");
         assert_eq!(weather(Motion::Still), weather(Motion::Full), "{s}s");
     }

@@ -118,8 +118,8 @@ impl Motion {
     }
 
     /// `now` and its [`beat`](Self::beat).
-    pub(crate) fn clock(self, now: SystemTime) -> Clock {
-        Clock {
+    pub(crate) fn timing(self, now: SystemTime) -> Timing {
+        Timing {
             now,
             beat: self.beat(now),
         }
@@ -134,7 +134,7 @@ fn loop_time(wall: SystemTime, pace: u64) -> u64 {
 
 /// An instant, and the [`Beat`] its ambient loops read at it.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Clock {
+pub(crate) struct Timing {
     pub(crate) now: SystemTime,
     pub(crate) beat: Beat,
 }
@@ -238,8 +238,8 @@ mod tests {
         }
     }
 
-    /// Every walk in the bundled pack, the people's, the pets' and the
-    /// mascots', carries a stride, so none slides on its clock.
+    /// Every walk the sim steps by distance carries a stride in the bundled
+    /// pack, so none slides on its clock.
     #[test]
     fn every_bundled_walk_carries_its_stride() {
         let pack = crate::pack::test_default_pack();
