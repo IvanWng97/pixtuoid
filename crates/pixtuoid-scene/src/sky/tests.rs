@@ -766,15 +766,14 @@ fn a_changing_storm_fires_whole_strikes_by_its_share() {
     );
 }
 
-/// The wall-clock instant `motion`'s loop clock reads `loop_ms` at, and the
-/// strikes of buckets `0..200_000` on it, each as its first loop ms.
-fn strikes_on(motion: Motion) -> Option<(impl Fn(u64) -> SystemTime, Vec<(u64, u64)>)> {
-    let pace = motion.pace()?;
-    let wall = move |loop_ms: u64| std::time::UNIX_EPOCH + Duration::from_millis(loop_ms * pace);
-    let starts = (0..200_000u64)
-        .map(|bucket| (bucket, bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket)))
-        .collect();
-    Some((wall, starts))
+/// Buckets `0..200_000`, each with its strike's first loop ms.
+fn strike_starts() -> impl Iterator<Item = (u64, u64)> {
+    (0..200_000u64).map(|bucket| (bucket, bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket)))
+}
+
+/// The wall-clock instant a loop clock of `pace` reads `loop_ms` at.
+fn wall_at(pace: u64, loop_ms: u64) -> SystemTime {
+    std::time::UNIX_EPOCH + Duration::from_millis(loop_ms * pace)
 }
 
 /// On no moving tier does a strike run across a slot's start, so a storm's
@@ -783,10 +782,11 @@ fn strikes_on(motion: Motion) -> Option<(impl Fn(u64) -> SystemTime, Vec<(u64, u
 fn no_strike_runs_into_the_next_slot() {
     let slot = |at: SystemTime| crate::anim::epoch_ms(at) / (WEATHER_CYCLE_SECS * 1000);
     for motion in Motion::ALL {
-        let Some((wall, starts)) = strikes_on(motion) else {
+        let Some(pace) = motion.pace() else {
             continue;
         };
-        for (bucket, start) in starts {
+        let wall = |loop_ms| wall_at(pace, loop_ms);
+        for (bucket, start) in strike_starts() {
             let last = wall(start + STRIKE_MS) - Duration::from_millis(1);
             assert_eq!(
                 slot(wall(start)),
@@ -806,11 +806,12 @@ fn every_strike_fires_by_its_start_and_runs_whole_on_every_tier() {
     let whole: Vec<f32> = phase_starts().map(lightning_envelope).collect();
     let mut cut_by_a_later_read = 0;
     for motion in Motion::ALL {
-        let Some((wall, starts)) = strikes_on(motion) else {
+        let Some(pace) = motion.pace() else {
             continue;
         };
+        let wall = |loop_ms| wall_at(pace, loop_ms);
         let storm = |loop_ms| clock_weather(wall(loop_ms)).share(Weather::Storm);
-        for (bucket, start) in starts {
+        for (bucket, start) in strike_starts() {
             let fires = strikes(bucket, storm(start));
             let levels: Vec<f32> = phase_starts()
                 .map(|ms| flash_level_at(motion.beat(wall(start + ms)), WeatherPolicy::Clock))
