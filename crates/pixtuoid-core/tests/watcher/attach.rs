@@ -439,3 +439,45 @@ async fn cwd_split_attach_links_subagent_to_probe_live_stale_parent() {
     );
     handle.abort();
 }
+
+/// A watcher creates no directory: its root is another CLI's, whose presence
+/// auto-detect keys on (`install::grok::detect_installed`). It attaches once the
+/// root appears.
+#[tokio::test]
+async fn an_absent_root_is_never_created_and_is_watched_once_it_appears() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("projects");
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
+    let watcher = cc_watcher(root.clone())
+        .with_initial_window(Duration::from_secs(60))
+        .with_poll_interval(Duration::from_millis(50));
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!root.exists(), "the watcher created {root:?}");
+
+    let uuid = "ee000000-0000-7000-8000-00000000000e";
+    let proj = root.join("-Users-me-late");
+    tokio::fs::create_dir_all(&proj).await.unwrap();
+    write_lines(
+        &proj.join(format!("{uuid}.jsonl")),
+        &[cc_session_start_line(uuid, "/Users/me/late")],
+    )
+    .await;
+    let id = AgentId::from_parts("claude-code", uuid);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut seen = false;
+    while !seen && tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(100), rx.recv()).await
+        {
+            seen = agent_id == id;
+        }
+    }
+    assert!(
+        seen,
+        "a session under the root that appeared was never seen"
+    );
+    assert!(!handle.is_finished(), "the watcher stopped: {handle:?}");
+    handle.abort();
+}
