@@ -16,7 +16,7 @@ use super::{env_set, env_text};
 /// What the environment says about the terminal beyond [`TermEnv`], read once
 /// per probe.
 ///
-/// Every rule on it mirrors ratatui-image 11.0.8's picker, cited per rule: the
+/// Every rule on it mirrors ratatui-image 11.1.0's picker, cited per rule: the
 /// cutaway draws through that crate's encoders, so what the plan expects a
 /// terminal to take must be what those encoders were built for.
 #[cfg(any(unix, test))]
@@ -51,7 +51,7 @@ impl EnvHints {
 
     /// Protocols never asked for under WezTerm or Konsole: neither implements
     /// kitty's placeholders, Konsole's SIXEL is buggy, and WezTerm draws better
-    /// through iTerm2 (`picker.rs:110-119`).
+    /// through iTerm2 (`picker.rs:119-128`).
     fn blacklist(&self) -> Vec<ProtocolType> {
         if self.wezterm || self.konsole {
             vec![ProtocolType::Kitty, ProtocolType::Sixel]
@@ -61,9 +61,9 @@ impl EnvHints {
     }
 
     /// iTerm2 inline images, which upstream's query does not ask about
-    /// (`cap_parser.rs:107-108`), guessed from the terminal the environment
-    /// names: inside tmux, the outer terminal's markers (`picker.rs:336-347`);
-    /// anywhere, `TERM_PROGRAM`/`LC_TERMINAL` (`picker.rs:351-369`).
+    /// (`cap_parser.rs:132-133`), guessed from the terminal the environment
+    /// names: inside tmux, the outer terminal's markers (`picker.rs:357-368`);
+    /// anywhere, `TERM_PROGRAM`/`LC_TERMINAL` (`picker.rs:372-390`).
     fn iterm2(&self) -> Option<ImageProtocol> {
         const ITERM2_TERM_PROGRAMS: [&str; 9] = [
             "iTerm",
@@ -91,8 +91,8 @@ impl EnvHints {
 }
 
 /// What the terminal's answer and the environment together say: kitty over
-/// SIXEL when it answers both (ratatui-image 11.0.8 `picker.rs:523-533`), then
-/// the iTerm2 guess (`picker.rs:127-131`); the cell from its answer, else from
+/// SIXEL when it answers both (ratatui-image 11.1.0 `picker.rs:544-554`), then
+/// the iTerm2 guess (`picker.rs:136-140`); the cell from its answer, else from
 /// the kernel's window size.
 #[cfg(any(unix, test))]
 fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSize>) -> Detected {
@@ -116,7 +116,7 @@ fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSi
 
 /// A terminal whose reply never completed is still the protocol the
 /// environment names, as upstream falls back when its query goes unanswered
-/// (ratatui-image 11.0.8 `picker.rs:147-157`); with nothing named, it is
+/// (ratatui-image 11.1.0 `picker.rs:156-166`); with nothing named, it is
 /// [`Probe::NoAnswer`].
 #[cfg(any(unix, test))]
 fn unanswered(hints: &EnvHints, window_cell: Option<CellSize>) -> Probe {
@@ -157,9 +157,9 @@ const MAX_REPLY_BYTES: usize = 4096;
 ///
 /// Through [`crate::term::query_tty`], not upstream's
 /// `Picker::from_query_stdio`, whose detached reader outlives its timeout and
-/// restores the mode only once a reply lands (ratatui-image 11.0.8
-/// `picker.rs:584-622`); and read-only: inside tmux it reads
-/// `allow-passthrough` where upstream turns it on (`picker.rs:328-334`).
+/// restores the mode only once a reply lands (ratatui-image 11.1.0
+/// `picker.rs:606-644`); and read-only: inside tmux it reads
+/// `allow-passthrough` where upstream turns it on (`picker.rs:349-355`).
 #[cfg(unix)]
 pub(crate) fn probe(ask: bool) -> Probe {
     if !ask {
@@ -230,8 +230,8 @@ fn window_cell() -> Option<CellSize> {
 
 /// Off Unix there is no controlling-terminal primitive yet, so the probe is
 /// upstream's, detached reader and tmux write included. Upstream answers a
-/// timeout with its fallback picker (ratatui-image 11.0.8 `picker.rs:147-157`),
-/// which without a window size — never one on Windows (`picker.rs:453-456`) —
+/// timeout with its fallback picker (ratatui-image 11.1.0 `picker.rs:156-166`),
+/// which without a window size — never one on Windows (`picker.rs:475-478`) —
 /// is halfblocks whatever the environment names, so a terminal that never
 /// answers arrives as upstream's answer for it, [`Probe::Answered`] with no
 /// protocol.
