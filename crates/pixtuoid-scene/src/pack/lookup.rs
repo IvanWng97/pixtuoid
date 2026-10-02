@@ -166,3 +166,10 @@ pub(crate) fn looping_frame_index(anim: &Sprite, now: std::time::SystemTime) -> 
     let step = crate::anim::epoch_ms(now) / u64::from(anim.frame_ms().max(1));
     usize::try_from(step % frames).unwrap_or(0)
 }
+
+/// The frame of `pack`'s looping animation `name` showing at `now`; 0 for one
+/// the pack lacks.
+pub(crate) fn animation_frame_at(pack: &Pack, name: &str, now: std::time::SystemTime) -> usize {
+    pack.animation(name)
+        .map_or(0, |anim| looping_frame_index(anim, now))
+}

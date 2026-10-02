@@ -18,7 +18,7 @@ use crate::chitchat::{ActiveChitchat, ChitchatBubble};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
-use crate::layout::{Depth, Facing, FixtureKind, Pivot, Point, SceneLayout, Station, z_sort_row};
+use crate::layout::{Depth, Facing, FixtureKind, Pivot, Point, SceneLayout, Station, sort_row_at};
 use crate::motion::MotionState;
 use crate::pet::PetFrame;
 
@@ -361,7 +361,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
 
     ambient::paint_ceiling_halos(ctx.buf, ctx.theme, &lights.monitor_halos);
 
-    // Every entity gets an `anchor_y` — its floor-touching row — so sorting
+    // Every entity gets a `sort_row` — its floor-touching row — so sorting
     // ascending and painting in order puts things closer to the camera in
     // front: the painter's algorithm on a top-down 2D scene.
     let pet_pos = frame
@@ -423,7 +423,7 @@ fn enqueue_characters<'a>(
     for p in &frame.characters {
         let agent = &frame.agents[p.agent_idx];
         drawables.push(Drawable {
-            anchor_y: p.anchor_y,
+            sort_row: p.sort_row,
             layer: Layer::Figure,
             kind: DrawableKind::Character {
                 agent,
@@ -452,7 +452,7 @@ fn enqueue_pet<'a>(
     )
     .h;
     drawables.push(Drawable {
-        anchor_y: z_sort_row(Pivot::Center, pos, pet_h),
+        sort_row: sort_row_at(Pivot::Center, pos, pet_h),
         layer: Layer::Figure,
         kind: DrawableKind::Pet {
             pos,
@@ -476,7 +476,7 @@ fn enqueue_gateway_mascots<'a>(
 ) {
     for (mascot_idx, m) in mascots.iter().enumerate() {
         drawables.push(Drawable {
-            anchor_y: z_sort_row(Pivot::Center, m.pos, m.size.h),
+            sort_row: sort_row_at(Pivot::Center, m.pos, m.size.h),
             layer: Layer::Figure,
             kind: DrawableKind::GatewayMascot {
                 mascot_idx,
@@ -667,7 +667,7 @@ fn queue_fixtures<'a>(
         match f.depth {
             Depth::Backdrop => out.backdrop.push((wash_of(f.kind), kind)),
             Depth::Sorted { row, tie } => out.sorted.push(Drawable {
-                anchor_y: row,
+                sort_row: row,
                 layer: tie.into(),
                 kind,
             }),
