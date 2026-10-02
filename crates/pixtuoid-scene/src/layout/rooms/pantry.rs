@@ -115,8 +115,8 @@ impl PantryRoom {
             return Some(r);
         };
         let b = self.bounds;
-        // `counter_center` clamps the counter into the room, so each side's one
-        // limit is the floor between its end and the wall.
+        // `counter_center` clamps the counter between the room's side walls, so
+        // each side's one limit is the floor between its end and the wall.
         let x = if r.x + r.width / 2 < counter.x + counter.width / 2 {
             (counter.x - b.x >= r.width).then(|| counter.x - r.width)
         } else {
