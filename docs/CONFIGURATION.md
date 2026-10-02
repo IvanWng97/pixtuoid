@@ -87,6 +87,12 @@ face derived under it. The recolor keys and `[ramps]` apply at every density.
 A pet's walk (`cat_walk`, `dog_walk`) is drawn facing east: the renderer
 mirrors it when the pet heads west, so a walk drawn facing west walks backwards.
 
+A person's walk (`walking`, `walking_back`, `walking_coffee`) takes
+`stride = <pixels>`: how far, on the base grid, the walker travels in one full
+cycle of its frames. Its frames, and its `@Nx` variants', then step by the
+ground covered, not by `frame_ms`. A walk without one steps on its `frame_ms`,
+and `validate-pack` warns that its feet slide.
+
 A frame can name points on itself for the renderer: `@mark <name> <x> <y>` in
 its `@frame` block, at column `x` and row `y` from the frame's top-left. A
 frame names each mark once. `head.<view>` is its head, with `view` one of
