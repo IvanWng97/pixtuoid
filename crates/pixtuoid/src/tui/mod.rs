@@ -575,7 +575,7 @@ pub(crate) struct TuiSession {
 }
 
 /// Whether a left-click at `(col, row)` landed on the wall's star/repo link, given the
-/// terminal's `(cols, rows)`. Callers MUST gate this on `renderer.shows_wall_display()`, or
+/// terminal's `(cols, rows)`. Callers MUST gate this on `renderer.star_clickable()`, or
 /// a hit phantom-launches a browser where none is painted.
 fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
     let scene = renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
@@ -850,7 +850,7 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
         }
         MouseEventKind::Down(MouseButton::Left) => {
             renderer.set_mouse_pos(Some((m.column, m.row)));
-            let on_star = renderer.shows_wall_display()
+            let on_star = renderer.star_clickable()
                 && crossterm::terminal::size().is_ok_and(|t| star_clicked(m.column, m.row, t));
             if on_star {
                 let _ = open::that(widgets::REPO_URL);

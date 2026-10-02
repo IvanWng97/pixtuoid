@@ -521,3 +521,50 @@ fn the_wall_board_upstairs_shows_the_breadcrumb_and_the_office_gateway() {
         "board keeps the office-wide gateway chip upstairs:\n{office}"
     );
 }
+
+/// Every painter's board for a floor comes out of the one builder: a one-floor
+/// office's TUI board is the floating window's, and an upper floor, whose
+/// projection carries no daemon, still shows the office's gateway.
+#[test]
+fn every_painter_shows_the_one_board_of_a_floor() {
+    use pixtuoid_scene::anim::Motion;
+    use pixtuoid_scene::floor::{num_floors, project_floor_scene};
+    let now = t0() + Duration::from_secs(90);
+    let with_gateway = |mut scene: SceneState| {
+        scene.insert_daemon(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty"),
+            pixtuoid_core::state::DaemonPresence {
+                liveness: pixtuoid_core::state::DaemonLiveness::UP,
+                active_sessions: 1,
+                last_seen: now,
+                entered_at: t0(),
+                in_flight_runs: Default::default(),
+                current_pid: Some(1),
+            },
+        );
+        scene
+    };
+    let r = build(120, 40, vec![]);
+    let tui = |scene: &SceneState, floor: usize| {
+        let drawn = project_floor_scene(scene, floor);
+        let ctx = r
+            .chrome
+            .frame(scene, &drawn, pack(), now, floor, num_floors(scene))
+            .footer;
+        pixtuoid_scene::board::wall_board(&drawn, ctx.gateway, ctx.floor, Motion::Full, now)
+    };
+
+    let one_floor = with_gateway(scene_with(vec![idle("/b/0.jsonl", 0, t0())], 16));
+    let floating =
+        crate::floating::offscreen::OfficeRenderer::new().board(&one_floor, Motion::Full, now);
+    assert_eq!(tui(&one_floor, 0), floating);
+
+    let upper = tui(&with_gateway(two_floor_scene()), 1);
+    let context: Vec<_> = upper.context.iter().map(|s| s.text.trim()).collect();
+    assert!(context.contains(&"F2/2"), "{context:?}");
+    assert!(
+        context.iter().any(|t| t.contains("gw")),
+        "floor 2 lost the office's gateway chip: {context:?}"
+    );
+}

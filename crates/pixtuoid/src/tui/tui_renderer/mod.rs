@@ -352,9 +352,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.cached_layout.as_deref()
     }
 
-    /// Whether the last frame drew the wall display's text: only a half-block
-    /// frame does, and not a too-small one or a floor slide.
-    pub(crate) fn shows_wall_display(&self) -> bool {
+    /// Whether the last frame set the wall board's star as text, the one place a
+    /// click opens the repo: only a half-block frame does, not a too-small one or
+    /// a floor slide; the cutaway paints its board into the image.
+    pub(crate) fn star_clickable(&self) -> bool {
         matches!(
             self.last_geometry,
             Some(crate::tui::geometry::SceneGeometry::HalfBlock { .. })
@@ -545,9 +546,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         };
         let scene_rect = crate::tui::renderer::scene_rect(full_rect);
 
-        if scene_rect.width < crate::tui::renderer::MIN_SCENE_WIDTH
-            || scene_rect.height < crate::tui::renderer::MIN_SCENE_HEIGHT
-        {
+        if crate::tui::renderer::scene_too_small(scene_rect) {
             let popup_scale = self.version_popup_scale(now);
             self.chrome.popup.last_scale = popup_scale;
             let overlays = self.chrome.overlays(popup_scale);
@@ -819,8 +818,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let popup_scale = overlays.popup_scale;
         let footer = pixtuoid_scene::footer::FooterInputs::new(&to_scene, footer);
         let theme = self.chrome.theme;
-        let too_small = scene_area.width < crate::tui::renderer::MIN_SCENE_WIDTH
-            || scene_area.height < crate::tui::renderer::MIN_SCENE_HEIGHT;
+        let too_small = crate::tui::renderer::scene_too_small(scene_area);
         let size = cutaway.fit_to(scene_area);
         let (leaving, arriving) = floor_pair(&mut self.floors, from_floor, to_floor);
         let mut transition_chitchat = std::collections::HashMap::new();
@@ -857,8 +855,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 .chrome
                 .frame(scene, floor_scene, pack, now, i, nf)
                 .footer;
-            let footer = pixtuoid_scene::footer::FooterInputs::new(floor_scene, ctx);
-            crate::tui::renderer::wall_board(&footer, floor_scene, world.floor.motion, now)
+            pixtuoid_scene::board::wall_board(
+                floor_scene,
+                ctx.gateway,
+                ctx.floor,
+                world.floor.motion,
+                now,
+            )
         });
         let showing = |floor, board| pixtuoid_scene::cutaway::paint::Showing { floor, now, board };
         cutaway.paint_slide(
@@ -917,8 +920,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let footer = pixtuoid_scene::footer::FooterInputs::new(&floor_scene, footer);
         let theme = self.chrome.theme;
         let pf = &mut self.floors[self.current_floor];
-        let too_small = scene_area.width < crate::tui::renderer::MIN_SCENE_WIDTH
-            || scene_area.height < crate::tui::renderer::MIN_SCENE_HEIGHT;
+        let too_small = crate::tui::renderer::scene_too_small(scene_area);
         let stepped = (!too_small)
             .then(|| {
                 pixtuoid_scene::floor::step_floor(
@@ -936,8 +938,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.sim_epilogue(Vec::new(), now);
             return drawn;
         };
-        let board =
-            crate::tui::renderer::wall_board(&footer, &floor_scene, world.floor.motion, now);
+        let board = pixtuoid_scene::board::wall_board(
+            &floor_scene,
+            footer.context.gateway,
+            footer.context.floor,
+            world.floor.motion,
+            now,
+        );
         let showing = pixtuoid_scene::cutaway::paint::Showing {
             floor: world.floor,
             now,
