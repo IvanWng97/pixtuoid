@@ -327,13 +327,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     #[cfg(test)]
-    pub fn floor_motion(
+    pub fn floor_walks(
         &self,
         floor: usize,
-    ) -> Option<
-        &std::collections::HashMap<pixtuoid_core::AgentId, pixtuoid_scene::motion::MotionState>,
-    > {
-        self.floors.get(floor).map(|f| &f.ctx.motion)
+    ) -> Option<&std::collections::HashMap<pixtuoid_core::AgentId, pixtuoid_scene::walk::WalkState>>
+    {
+        self.floors.get(floor).map(|f| &f.ctx.walks)
     }
 
     #[cfg(test)]
@@ -863,7 +862,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 now,
             )
         });
-        let showing = |floor, board| pixtuoid_scene::cutaway::paint::Showing { floor, now, board };
+        let showing = |floor, board| pixtuoid_scene::display::Showing { floor, now, board };
         cutaway.paint_slide(
             crate::tui::cutaway::Slide {
                 leaving: (&from_stepped, showing(from_world.floor, &boards[0])),
@@ -945,7 +944,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             world.floor.motion,
             now,
         );
-        let showing = pixtuoid_scene::cutaway::paint::Showing {
+        let showing = pixtuoid_scene::display::Showing {
             floor: world.floor,
             now,
             board: &board,

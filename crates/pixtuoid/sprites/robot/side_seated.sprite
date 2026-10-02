@@ -1,6 +1,6 @@
 # 10x12 robot seated in PROFILE, facing EAST (flip mirrors west) — the
 # head-of-table meeting chairs. Same dims as the robot's front `seated`
-# so the shared seat anchor math holds; single visor eye + arm toward
+# so the shared seat top-left math holds; single visor eye + arm toward
 # the table carry the direction.
 @frame 0
 . D D D D D D D . .
