@@ -247,7 +247,7 @@ def token_sheet_1x():
 # (`every_hover_size_is_its_painted_sprite_size`).
 SOFA_W, SOFA_H = 20, 7
 # The back view's seat rows, under its sitter; the backrest below draws over
-# their lap. `cutaway::paint`'s `NORTH_SOFA_SEAT_ROWS`
+# their lap. `pack`'s `NORTH_SOFA_SEAT_ROWS`
 # (`the_north_sofas_backrest_starts_on_its_lit_ridge`).
 SOFA_SEAT_ROWS = 3
 SOFA_RIDGE_ROWS = 1  # the backrest's lit top, then its back panel to the foot
