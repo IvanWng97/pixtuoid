@@ -3,7 +3,7 @@
 use pixtuoid_core::sprite::format::Pack;
 
 use super::Span;
-use crate::layout::{Bounds, Point, Tie};
+use crate::layout::{Bounds, Point};
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
@@ -35,7 +35,7 @@ impl Screen {
     /// A desk's screen: lit by `glow` with its scanline on `scan`, else
     /// standing by at `idle` ([`crate::lighting::screen_idle`]) in `theme`'s
     /// idle tint, else dark.
-    pub(crate) fn of(
+    pub(super) fn of(
         glow: Option<pixtuoid_core::sprite::Rgb>,
         scan: u16,
         idle: f32,
@@ -181,6 +181,12 @@ impl<'a> DisplayList<'a> {
     /// The pieces, back to front.
     pub(crate) fn pieces(&self) -> &[Piece] {
         &self.pieces
+    }
+
+    /// The pieces, for a rasterizer test to add or drop one.
+    #[cfg(test)]
+    pub(crate) fn pieces_mut(&mut self) -> &mut Vec<Piece> {
+        &mut self.pieces
     }
 
     /// The room's lights, in no order that matters: a pixel's light is the
@@ -510,27 +516,4 @@ pub(crate) struct WindowView {
     pub(crate) y: u16,
     pub(crate) w: u16,
     pub(crate) px: Vec<Option<pixtuoid_core::sprite::Rgb>>,
-}
-
-/// Which of everything sorted at one row paints on top: a painter's tie key,
-/// ordered as [`Tie`] orders the fixtures in it. The derived order is the
-/// paint order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) enum Layer {
-    /// A fixture a figure at its row sits on or stands in front of.
-    Under,
-    /// A character, a pet or a mascot.
-    Figure,
-    /// A fixture that hides a figure at its row, and a glass wall band, which
-    /// composites over whoever stands behind it.
-    Over,
-}
-
-impl From<Tie> for Layer {
-    fn from(tie: Tie) -> Self {
-        match tie {
-            Tie::FigureOver => Layer::Under,
-            Tie::FixtureOver => Layer::Over,
-        }
-    }
 }

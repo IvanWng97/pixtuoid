@@ -6,14 +6,12 @@ pub(crate) mod compose;
 mod list;
 mod order;
 
-pub(crate) use compose::{
-    DOOR_SPRITE, PLATE_PAD, board_runs, compose, desk_span, drawn_in, face_rows, indicator_plate,
-};
 pub use compose::{Office, Showing};
+pub(crate) use compose::{PLATE_PAD, board_runs, compose, desk_span, face_rows, indicator_plate};
 pub(crate) use list::{
-    Art, Badge, DisplayList, Figure, Flip, Ground, Layer, LightPiece, Piece, PieceKind, Screen,
-    StoodProp, WindowView, fingerprint,
+    Art, Badge, DisplayList, Figure, Flip, Ground, LightPiece, Piece, PieceKind, Screen, StoodProp,
+    WindowView, fingerprint,
 };
 #[cfg(test)]
 pub(crate) use order::check_order;
-pub(crate) use order::{Span, depth_sort};
+pub(crate) use order::{Layer, Span, depth_sort};

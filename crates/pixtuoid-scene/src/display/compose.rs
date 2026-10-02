@@ -15,6 +15,10 @@ use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, DESK_H, Depth, Fixture, FixtureKind, Point, SceneLayout, Size, Station, Tie,
 };
+use crate::pack::{
+    DESK_CUP_SPRITE, DOOR_SPRITE, MEETING_SOFA_NORTH_SPRITE, NORTH_SOFA_SEAT_ROWS,
+    TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE, drawn_in,
+};
 use crate::render_scale::RenderScale;
 use crate::sim::SimFrame;
 use crate::theme::Theme;
@@ -382,20 +386,6 @@ fn lights(
         .collect()
 }
 
-/// Which of `art`'s pixels, row by row, it draws in one of `keys`: those that
-/// go transparent when the keys are painted so.
-pub(crate) fn drawn_in(art: &crate::pack::DenseFrame<'_>, keys: &[char]) -> Vec<bool> {
-    let without = art
-        .recolorable
-        .recolored(&keys.iter().map(|&k| (k, None)).collect::<Vec<_>>());
-    let (w, h) = (art.frame.width(), art.frame.height());
-    let opaque = |f: &pixtuoid_core::sprite::Frame, x, y| f.get(x, y).and_then(|p| *p).is_some();
-    (0..h)
-        .flat_map(|y| (0..w).map(move |x| (x, y)))
-        .map(|(x, y)| opaque(art.frame, x, y) && !opaque(&without, x, y))
-        .collect()
-}
-
 /// The layout cell of the desk lamp's bulb the desk `art_name` at `at` draws at
 /// `scale`: the middle of its [`DESK_BULB_KEY`](crate::pack::DESK_BULB_KEY)
 /// pixels, or `None` for art that draws no bulb.
@@ -513,7 +503,7 @@ fn signs(
 /// push order breaks the tie, so it is part of the result.
 fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<(Span, PieceKind)> {
     let layout = office.layout;
-    let build = Build {
+    let inputs = ComposeInputs {
         frame,
         office,
         moment,
@@ -523,14 +513,14 @@ fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<
     let carried = push_characters(frame, office, moment.now, &mut order);
     push_creatures(frame, office, &mut order);
     for fixture in layout.fixtures() {
-        push_fixture(fixture, build, &carried, &mut order);
+        push_fixture(fixture, inputs, &carried, &mut order);
     }
     wall_segments(layout, &mut order);
     order
 }
 
 #[derive(Clone, Copy)]
-struct Build<'a, 'f> {
+struct ComposeInputs<'a, 'f> {
     frame: &'f SimFrame,
     office: Office<'a>,
     moment: &'f Moment,
@@ -592,23 +582,20 @@ fn centre_of(b: Bounds) -> Point {
     }
 }
 
-/// The elevator's art.
-pub(crate) const DOOR_SPRITE: &str = "door";
-
 /// Queue one of the roster's fixtures, sorted on its depth ([`sort_row`]). A
 /// desk chair whose desk is in `carried` rides its sitter's piece instead.
 fn push_fixture(
     fixture: Fixture,
-    build: Build<'_, '_>,
+    inputs: ComposeInputs<'_, '_>,
     carried: &[Point],
     order: &mut Vec<(Span, PieceKind)>,
 ) {
     use FixtureKind as K;
-    let Build {
+    let ComposeInputs {
         frame,
         office,
         moment,
-    } = build;
+    } = inputs;
     let Office {
         layout,
         pack,
@@ -623,7 +610,7 @@ fn push_fixture(
         y: fixture.visual.y,
     };
     match fixture.kind {
-        K::Desk(i) => push_desk(i, build, depth, order),
+        K::Desk(i) => push_desk(i, inputs, depth, order),
         K::FilingCabinet(_) => push_art(
             order,
             pack,
@@ -932,15 +919,15 @@ fn push_hung(
 /// lit; sorted on `depth`.
 fn push_desk(
     i: pixtuoid_core::state::FloorLocalDeskIndex,
-    build: Build<'_, '_>,
+    inputs: ComposeInputs<'_, '_>,
     depth: u16,
     order: &mut Vec<(Span, PieceKind)>,
 ) {
-    let Build {
+    let ComposeInputs {
         frame,
         office,
         moment,
-    } = build;
+    } = inputs;
     let Office {
         layout,
         pack,
@@ -972,11 +959,6 @@ fn push_desk(
         push_desk_props(&props, (art, span), office, order);
     }
 }
-
-/// The desk props' pack animations.
-pub(crate) const DESK_CUP_SPRITE: &str = "desk_cup";
-pub(crate) const TOKEN_TOWER_SPRITE: &str = "token_tower";
-pub(crate) const TOKEN_SHEET_SPRITE: &str = "token_sheet";
 
 /// What stands on the desk whose `art` paints `span`, each at the art's own
 /// mark for it, sorted with the desk: the cup where there is one, the token
@@ -1248,16 +1230,8 @@ fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
     }
 }
 
-/// The back-view sofa's art: its seat beyond the backrest, the backrest nearest
-/// the viewer.
-pub(crate) const MEETING_SOFA_NORTH: &str = "meeting_sofa_north";
-/// The rows of [`MEETING_SOFA_NORTH`]'s art that lie UNDER its sitter, the seat;
-/// the backrest below them draws OVER the sitter's lap. `scripts/gen-art.py`'s
-/// `SOFA_SEAT_ROWS` draws to it (`the_north_sofas_backrest_starts_on_its_lit_ridge`).
-pub(crate) const NORTH_SOFA_SEAT_ROWS: u16 = 3;
-
 /// Queue one sofa body, sorted with its sitters at `tie`: the front view, or
-/// the `back_view`. A pack that draws [`MEETING_SOFA_NORTH`] gets it as two
+/// the `back_view`. A pack that draws [`MEETING_SOFA_NORTH_SPRITE`] gets it as two
 /// bands, the seat under its sitter and the backrest over their lap
 /// ([`NORTH_SOFA_SEAT_ROWS`]); one that draws only its own `meeting_sofa` gets
 /// that flipped top-to-bottom, as the classic painter draws it.
@@ -1272,12 +1246,12 @@ fn push_sofa(
     tie: Tie,
 ) {
     let sitters = crate::sim::seat::sofa_sitter_sort_row(at);
-    if let Some((w, h)) = art_size(pack, MEETING_SOFA_NORTH).filter(|_| back_view) {
+    if let Some((w, h)) = art_size(pack, MEETING_SOFA_NORTH_SPRITE).filter(|_| back_view) {
         let tl = crate::layout::anchored_top_left(crate::layout::Pivot::Center, at, w, h);
         let split = NORTH_SOFA_SEAT_ROWS.min(h);
         let band = |rows| PieceKind::PropBand {
             at,
-            sprite: MEETING_SOFA_NORTH,
+            sprite: MEETING_SOFA_NORTH_SPRITE,
             rows,
         };
         // Its own south edge lies rows north of where the sofa stands, where a

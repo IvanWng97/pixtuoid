@@ -30,8 +30,30 @@
 //! `no_wall_segment_is_taller_than_the_cast` pins that no segment is tall
 //! enough to straddle a figure.
 
-use super::Layer;
-use crate::layout::Bounds;
+use crate::layout::{Bounds, Tie};
+
+/// Which of everything sorted at one row paints on top: a painter's tie key,
+/// ordered as [`Tie`] orders the fixtures in it. The derived order is the
+/// paint order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum Layer {
+    /// A fixture a figure at its row sits on or stands in front of.
+    Under,
+    /// A character, a pet or a mascot.
+    Figure,
+    /// A fixture that hides a figure at its row, and a glass wall band, which
+    /// composites over whoever stands behind it.
+    Over,
+}
+
+impl From<Tie> for Layer {
+    fn from(tie: Tie) -> Self {
+        match tie {
+            Tie::FigureOver => Layer::Under,
+            Tie::FixtureOver => Layer::Over,
+        }
+    }
+}
 
 /// A piece's painted bounds in LOGICAL units, inclusive on both ends, and the
 /// row it sorts on.
