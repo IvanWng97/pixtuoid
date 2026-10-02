@@ -71,7 +71,10 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     // `crate::audio::AudioController::new`).
     let mut app = FloatingApp::new(
         floating_cfg,
-        theme,
+        window::Look {
+            theme,
+            motion: motion.or(pixtuoid_scene::anim::Motion::Full),
+        },
         pack,
         config_path,
         pets,
@@ -84,8 +87,7 @@ pub fn run(cfg: RunConfig) -> Result<()> {
             rt: rt.handle().clone(),
         },
         audio,
-    )
-    .with_motion(motion.or(pixtuoid_scene::anim::Motion::Full));
+    );
     event_loop
         .run_app(&mut app)
         .context("running the floating window event loop")
