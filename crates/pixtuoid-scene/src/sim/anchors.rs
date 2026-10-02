@@ -56,8 +56,8 @@ pub(crate) fn with_breath(
     }
 }
 
-/// Anchor for a back-view sitter on a mirror_vertical'd couch — higher than a
-/// front-view seat top_left because `back_couch.sprite` has no transparent
+/// Top-left of a back-view sitter on a mirror_vertical'd couch — higher than a
+/// front-view seat's because `back_couch.sprite` has no transparent
 /// head/face area (hair extends across all top rows), so sitting it lower
 /// overlaps the couch back row.
 pub(crate) fn back_couch_top_left(wp: Point, sprite_w: u16) -> Point {

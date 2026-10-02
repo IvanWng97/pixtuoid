@@ -712,7 +712,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
 pub enum GroundAlign {
     /// Flush to the box's LOW edge — North (y) / West (x): offset 0.
     Start,
-    /// Centered ON the sprite center (== the placement `pos` for a Center anchor);
+    /// Centered ON the sprite center (== the placement `pos` for a `Center` pivot);
     /// [`Self::offset`] carries the parity rule that makes it exact.
     Center,
     /// Flush to the box's HIGH edge — South (y) / East (x). THE walk-behind shape

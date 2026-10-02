@@ -90,7 +90,7 @@ fn plot_steam_puff(
     plot(px, py, theme.effects.coffee_steam, alpha * 0.55);
 }
 
-/// The cell under the foot a walker anchored at `walker_top_left` steps on with
+/// The cell under the foot a walker whose top-left is `walker_top_left` steps on with
 /// stride frame `stride`, where its dust rises.
 pub(crate) fn walking_dust_foot(walker_top_left: Point, stride: u64) -> Point {
     Point {

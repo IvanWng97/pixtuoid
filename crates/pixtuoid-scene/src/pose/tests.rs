@@ -1095,7 +1095,7 @@ fn exit_uses_commute_speed_faster_than_wander() {
     );
 }
 
-/// One frame's max per-axis (Chebyshev) anchor jump. Cruise is ≤ ~15 px/frame and
+/// One frame's max per-axis (Chebyshev) top-left jump. Cruise is ≤ ~15 px/frame and
 /// pose-type boundaries add ≤ ~5 px, while a real teleport on this layout
 /// (desk↔waypoint ≈ 30–70 px) blows past it.
 const MAX_FRAME_STEP_PX: i32 = 20;
@@ -1436,14 +1436,14 @@ fn wander_interrupted_by_active_does_not_teleport() {
 
     let mut rig = RouteRig::new(AStarRouter::new());
     rig.router.set_preferred_zone(l.corridor);
-    // The desk seated anchor, on throwaway stores — the "far from desk" reference.
+    // The desk's seated top-left, on throwaway stores — the "far from desk" reference.
     let seated = crate::sim::anchors::character_top_left(
         &idle,
         &l,
         now,
         &mut RouteRig::new(AStarRouter::new()).rctx(),
     )
-    .expect("anchor");
+    .expect("top-left");
 
     let mut last_pos = seated;
     let mut flip_frame = None;
@@ -1564,7 +1564,7 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
         now,
         &mut RouteRig::new(AStarRouter::new()).rctx(),
     )
-    .expect("anchor");
+    .expect("top-left");
 
     let mut last = seat;
     let mut away_frame = None;

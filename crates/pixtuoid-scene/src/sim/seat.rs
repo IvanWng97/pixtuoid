@@ -237,8 +237,8 @@ impl Seat {
         self.pos.y
     }
 
-    /// The render ANCHOR-BASE, which `sim::resolve_characters` places the sprite
-    /// and its badge from.
+    /// The sprite's top-left, from which `sim::resolve_characters` places the
+    /// sprite and its badge.
     pub(crate) fn render_top_left(self, sprite_w: u16) -> Point {
         if self.seated_furniture() {
             back_couch_top_left(self.pos, sprite_w)

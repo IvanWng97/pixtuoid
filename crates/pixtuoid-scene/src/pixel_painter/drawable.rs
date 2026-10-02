@@ -556,7 +556,7 @@ const STACK_BASE_DY: u16 = 3;
 /// Rows per ream: one row of vertical detail is sub-legible at half-block scale.
 const STACK_PX_PER_TIER: u16 = 2;
 
-/// Paint a character at an arbitrary top_left with per-agent recolor, returning
+/// Paint a character at a top-left with per-agent recolor, returning
 /// the size of the frame it drew.
 pub(crate) fn paint_character_at(
     buf: &mut RgbBuffer,

@@ -2410,7 +2410,7 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
     assert!(has(&decayed, EMBER), "…back to ember hair");
 }
 
-/// The sim crowns a Top-burning agent's placement on its post-breath top_left,
+/// The sim crowns a Top-burning agent's placement on its post-breath top-left,
 /// centred on its pack frame; a Premium one burns no crown.
 #[test]
 fn a_top_burning_placement_carries_its_crown_on_its_top_left() {
@@ -2418,7 +2418,7 @@ fn a_top_burning_placement_carries_its_crown_on_its_top_left() {
     use crate::pose::Pose;
     use pixtuoid_core::state::EffortObservation;
     let (mut scene, layout, id, now0, pack) = sim_rig();
-    // A breathing instant, where the post-breath top_left is off the fit.
+    // A breathing instant, where the post-breath top-left is off the fit.
     let now = (0..u64::from(u16::MAX))
         .map(|ms| now0 + std::time::Duration::from_millis(ms))
         .find(|&t| crate::sim::anchors::with_breath(Point { x: 0, y: 1 }, id, t).y == 0)
