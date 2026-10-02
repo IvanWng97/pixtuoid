@@ -5,7 +5,7 @@
 //! Usage:
 //!   cargo run --release --example cutaway_snapshot -- <out.png> [--scale N]
 //!       [--agents N] [--theme T] [--logical WxH] [--now-hour H] [--floor I/N]
-//!       [--weather W] [--now-day D] [--flame I] [--repos a,b,...]
+//!       [--weather W] [--now-day D] [--now-min M] [--flame I] [--repos a,b,...]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -87,7 +87,7 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow!("usage: see the `//!` header of examples/cutaway_snapshot.rs"))?;
 
     let (mut scale_n, mut agents, mut theme_name) = (None, 10usize, "tokyo-night".to_string());
-    let (mut now_hour, mut floor) = (None::<u32>, (0usize, 1usize));
+    let (mut now_hour, mut now_min, mut floor) = (None::<u32>, 0u64, (0usize, 1usize));
     // 1 = the clock's base date, as the classic snapshot's `--now-day`.
     let mut now_day = 1u32;
     let mut weather = None::<String>;
@@ -116,6 +116,8 @@ fn main() -> Result<()> {
             }
             "--now-hour" => now_hour = Some(val("--now-hour")?.parse().context("bad --now-hour")?),
             "--now-day" => now_day = val("--now-day")?.parse().context("bad --now-day")?,
+            // Minutes past `--now-hour`: a weather transition runs mid-hour.
+            "--now-min" => now_min = val("--now-min")?.parse().context("bad --now-min")?,
             "--weather" => weather = Some(val("--weather")?),
             "--repos" => repos = val("--repos")?.split(',').map(str::to_string).collect(),
             // The `I`th agent burns at the Top tier, crowned in flame.
@@ -154,6 +156,10 @@ fn main() -> Result<()> {
             .with_context(|| format!("invalid --now-day/--now-hour {now_day}:{h}"))?,
         None => SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
     };
+    if now_min >= 60 || (now_min > 0 && now_hour.is_none()) {
+        return Err(anyhow!("--now-min wants 0..60 and a --now-hour"));
+    }
+    let now = now + Duration::from_secs(60 * now_min);
     let meta = FloorMeta::for_floor(floor.0, floor.1).with_weather(policy);
 
     let mut scene = SceneState::uniform(64);

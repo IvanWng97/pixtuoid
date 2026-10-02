@@ -15,12 +15,15 @@ use crate::sky::Weather;
 pub(crate) struct GlassWeather {
     /// [`SkyTones::glass_veil`](crate::atmosphere::SkyTones::glass_veil).
     pub(crate) veil: Option<(Rgb, f32)>,
-    fall: Option<&'static Fall>,
+    /// Each falling weather's [`Fall`] and how many of its particles show:
+    /// its count, scaled by that weather's share.
+    falls: [Option<(&'static Fall, u64)>; 2],
     /// The clock the marks move by, in ms.
     tick: u64,
 }
 
 /// One weather's falling particles.
+#[derive(PartialEq)]
 struct Fall {
     count: u64,
     seed_mult: u64,
@@ -31,7 +34,7 @@ struct Fall {
     particle: Particle,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum Particle {
     /// A vertical streak `len_base + seed % len_mod` units long, its alpha
     /// falling from `alpha_base` by `alpha_falloff` over its length; `drift`
@@ -169,9 +172,12 @@ impl Mark {
 
 impl GlassWeather {
     pub(crate) fn of(moment: &Moment) -> Self {
+        let mut falls = moment.sky.weather().parts().map(|(w, share)| {
+            fall(w).map(|fall| (fall, (fall.count as f32 * share).round() as u64))
+        });
         Self {
             veil: moment.look.glass_veil,
-            fall: fall(moment.sky.weather()),
+            falls: [falls.next().flatten(), falls.next().flatten()],
             tick: crate::anim::epoch_ms(moment.now),
         }
     }
@@ -183,11 +189,16 @@ impl GlassWeather {
     pub(crate) fn marks(&self, idx: u16, glass: Size, d: u16) -> Vec<Mark> {
         let Size { w: gw, h: gh } = glass;
         let mut marks = Vec::new();
-        let Some(fall) = self.fall.filter(|_| gw > 0 && gh > 0 && d > 0) else {
+        if gw == 0 || gh == 0 || d == 0 {
             return marks;
-        };
+        }
         let (cols, rows) = (gw * d, gh * d);
-        for i in 0..fall.count {
+        for (fall, i) in self
+            .falls
+            .iter()
+            .flatten()
+            .flat_map(|&(fall, count)| (0..count).map(move |i| (fall, i)))
+        {
             let seed = u64::from(idx) * fall.seed_mult + i;
             let sx = (seed.wrapping_mul(fall.sx_mult) % u64::from(gw)) as u16;
             let speed = fall.speed_base + seed.wrapping_mul(SPEED_MULT) % fall.speed_span;
@@ -236,7 +247,7 @@ impl GlassWeather {
 mod tests {
     use super::*;
     use crate::localclock::at_hour;
-    use crate::sky::Sky;
+    use crate::sky::{Sky, TRANSITION_STEPS, WeatherMix};
 
     fn weather_at(w: Weather, tick_ms: u64) -> GlassWeather {
         let now = at_hour(12) + std::time::Duration::from_millis(tick_ms);
@@ -302,6 +313,54 @@ mod tests {
         assert_eq!(marks.len(), one.len() * 4);
         let columns: std::collections::BTreeSet<u16> = marks.iter().map(|m| m.x).collect();
         assert!(columns.len() <= usize::try_from(RAIN.count).expect("small"));
+    }
+
+    /// Mid-change, each falling weather shows its share of its particles:
+    /// rain's thin out as a storm's come in, and either end is one weather's
+    /// alone.
+    #[test]
+    fn a_change_trades_one_falls_particles_for_the_others() {
+        let now = at_hour(12);
+        let counts = |step| {
+            let sky = Sky::at_with(now, Weather::Rain).with_weather(WeatherMix::stepped(
+                Weather::Rain,
+                Weather::Storm,
+                step,
+            ));
+            let glass = GlassWeather::of(&Moment::resolve(sky, &crate::theme::NORMAL, 0.0, now));
+            let count = |of: &Fall| {
+                glass
+                    .falls
+                    .iter()
+                    .flatten()
+                    .find(|(fall, _)| *fall == of)
+                    .map_or(0, |&(_, n)| n)
+            };
+            (count(&RAIN), count(&STORM))
+        };
+        assert_eq!(counts(0), (RAIN.count, 0));
+        assert_eq!(counts(TRANSITION_STEPS + 1), (0, STORM.count));
+        let mid = counts(TRANSITION_STEPS / 2);
+        assert!(mid.0 > 0 && mid.1 > 0, "{mid:?}");
+        for step in 0..=TRANSITION_STEPS {
+            let ((rain, storm), (next_rain, next_storm)) = (counts(step), counts(step + 1));
+            assert!(next_rain <= rain && next_storm >= storm, "step {step}");
+        }
+    }
+
+    /// No two weathers fall alike, so finding a fall by value names one
+    /// weather's: `&CONST` addresses are not unique, so identity can't.
+    #[test]
+    fn every_falling_weather_has_its_own_fall() {
+        let falls: Vec<(Weather, &Fall)> = Weather::ALL
+            .into_iter()
+            .filter_map(|w| fall(w).map(|f| (w, f)))
+            .collect();
+        for (i, (a, fa)) in falls.iter().enumerate() {
+            for (b, fb) in &falls[i + 1..] {
+                assert!(fa != fb, "{a:?} and {b:?} share one fall");
+            }
+        }
     }
 
     #[test]

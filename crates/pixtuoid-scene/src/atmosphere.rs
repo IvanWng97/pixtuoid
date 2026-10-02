@@ -4,7 +4,7 @@
 
 use pixtuoid_core::sprite::Rgb;
 
-use crate::sky::{BodyKind, Sky, SkyBody, Transmission, Weather};
+use crate::sky::{BodyKind, Sky, SkyBody, Transmission, Weather, WeatherMix};
 use crate::theme::Theme;
 
 /// One frame's sky, resolved against the theme: [`SkyTones::resolve`] once per
@@ -99,7 +99,7 @@ impl SkyTones {
     pub(crate) fn resolve(sky: &Sky, theme: &Theme) -> SkyTones {
         let light = sky.light();
         let (interior, exterior) = (light.interior, light.exterior);
-        let e = sky.body();
+        let body = sky.body();
 
         let day_a = theme.lighting.day_sky_a;
         let day_b = theme.lighting.day_sky_b;
@@ -108,15 +108,15 @@ impl SkyTones {
         let twilight_a = theme.lighting.twilight_a;
         let twilight_b = theme.lighting.twilight_b;
 
-        let warm = (e.warmth * interior).clamp(0.0, 1.0);
+        let warm = (body.warmth * interior).clamp(0.0, 1.0);
         let glass_horizon = night_a.mix(day_a, exterior).mix(twilight_a, warm * 0.5);
         let glass_zenith = night_b.mix(day_b, exterior).mix(twilight_b, warm * 0.5);
 
         // Leans away from the disc, which the painters place off this same
         // azimuth; `the_spill_leans_away_from_the_disc` pins the
         // sign.
-        let (sunlight, spill_slant) = match e.kind {
-            BodyKind::Sun => (interior, (0.5 - e.azimuth) * 2.0 * SPILL_SLANT_MAX),
+        let (sunlight, spill_slant) = match body.kind {
+            BodyKind::Sun => (interior, (0.5 - body.azimuth) * 2.0 * SPILL_SLANT_MAX),
             BodyKind::Moon => (0.0, 0.0),
         };
 
@@ -141,7 +141,7 @@ impl SkyTones {
         ];
 
         let weather = sky.weather();
-        let veil = veil_lum(e);
+        let veil = veil_lum(body);
         let star_strength = night_star_strength(sky, darkness);
 
         SkyTones {
@@ -152,9 +152,9 @@ impl SkyTones {
             spill_slant,
             ground_wash,
             object_wash,
-            ground_tint: (weather_ground_tint(weather), GROUND_TINT_SHARE),
-            glass_veil: glass_veil(weather).map(|(color, alpha)| (lit(color, veil), alpha)),
-            golden_hour: golden_hour_blaze(e, &sky.transmission()),
+            ground_tint: (weather.mix(weather_ground_tint), GROUND_TINT_SHARE),
+            glass_veil: mixed_veil(weather).map(|(color, alpha)| (lit(color, veil), alpha)),
+            golden_hour: golden_hour_blaze(body, &sky.transmission()),
             star_strength: ((star_strength - STAR_MIN) / (1.0 - STAR_MIN)).max(0.0),
             beam: sky.beam(),
         }
@@ -265,6 +265,22 @@ fn glass_veil(w: Weather) -> Option<(Rgb, f32)> {
         )),
         Weather::Clear | Weather::Snow | Weather::Windy => None,
     }
+}
+
+/// [`glass_veil`] under `weather`: each weather's veil at its share of its
+/// alpha, their colours mixed by what each lays on the glass.
+fn mixed_veil(weather: WeatherMix) -> Option<(Rgb, f32)> {
+    let mut veils = weather
+        .parts()
+        .filter_map(|(w, share)| glass_veil(w).map(|(color, alpha)| (color, alpha * share)));
+    let (color, alpha) = veils.next()?;
+    Some(match veils.next() {
+        None => (color, alpha),
+        Some((next, next_alpha)) => (
+            color.mix(next, next_alpha / (alpha + next_alpha)),
+            alpha + next_alpha,
+        ),
+    })
 }
 
 /// The least of a veil's own colour [`veil_lum`] brings up: the city-light
@@ -451,6 +467,61 @@ mod tests {
             "clear skyline is crisp"
         );
         assert!(glass_veil(Weather::Snow).is_none(), "snow skyline is crisp");
+    }
+
+    /// A weather coming in lays its veil and its ground tint on by its share:
+    /// fog over a clear sky veils in fog's colour at a growing share of fog's
+    /// alpha, and two veils meet between their colours.
+    #[test]
+    fn a_change_veils_and_tints_by_share() {
+        use crate::sky::TRANSITION_STEPS;
+        let now = crate::localclock::at_hour(12);
+        let look = |mix| {
+            SkyTones::resolve(
+                &Sky::at_with(now, Weather::Clear).with_weather(mix),
+                &crate::theme::NORMAL,
+            )
+        };
+        let pure = |w| look(WeatherMix::pure(w));
+        let fog = pure(Weather::Fog).glass_veil.expect("fog veils");
+        assert_eq!(pure(Weather::Clear).glass_veil, None);
+        let mut prev = 0.0;
+        for step in 1..=TRANSITION_STEPS {
+            let mix = WeatherMix::stepped(Weather::Clear, Weather::Fog, step);
+            let (color, alpha) = look(mix).glass_veil.expect("fog coming in veils");
+            assert_eq!(color, fog.0, "step {step}");
+            assert!(
+                (alpha - fog.1 * mix.share(Weather::Fog)).abs() < 1e-6,
+                "step {step}: {alpha}"
+            );
+            assert!(alpha > prev, "step {step}");
+            prev = alpha;
+        }
+        let mid = look(WeatherMix::stepped(
+            Weather::Clear,
+            Weather::Fog,
+            TRANSITION_STEPS / 2,
+        ));
+        let (clear_tint, fog_tint) = (
+            pure(Weather::Clear).ground_tint.0,
+            pure(Weather::Fog).ground_tint.0,
+        );
+        assert_eq!(clear_tint, weather_ground_tint(Weather::Clear));
+        assert!(
+            mid.ground_tint.0 != clear_tint && mid.ground_tint.0 != fog_tint,
+            "{:?}",
+            mid.ground_tint
+        );
+        let storm = pure(Weather::Storm).glass_veil.expect("storm veils");
+        let (color, alpha) = look(WeatherMix::stepped(
+            Weather::Fog,
+            Weather::Storm,
+            TRANSITION_STEPS / 2,
+        ))
+        .glass_veil
+        .expect("both veil");
+        assert!(storm.1.min(fog.1) < alpha && alpha < storm.1.max(fog.1));
+        assert!(color != fog.0 && color != storm.0, "{color:?}");
     }
 
     #[test]

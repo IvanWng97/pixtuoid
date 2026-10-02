@@ -556,7 +556,7 @@ pub(super) fn compute_with_seed(
         let mut obstacles = singleton_rects.clone();
         obstacles.extend(plants.iter().map(|q| {
             let v = furniture_def(q.kind.furniture()).visual;
-            (anchored_top_left(Anchor::Center, q.pos, v.w, v.h), v)
+            (anchored_top_left(Pivot::Center, q.pos, v.w, v.h), v)
         }));
         if let Some(settled) = settle_plant(
             p,
@@ -774,7 +774,7 @@ fn place_wall_decor(
     // The westmost spot in the aisle east of the divider that hides no desk, chair,
     // cabinet or pod decor behind the board, or no board.
     let snapped = wb_def
-        .ground_rect(Anchor::TopLeft, hint)
+        .ground_rect(Pivot::TopLeft, hint)
         .and_then(|(ground, size)| {
             let y = pod_grid
                 .snap_inter_pod_ground_y(ground.y, size.h)?
@@ -961,7 +961,7 @@ pub(super) fn plant_obstacle_rects(
     let boxed = |kind: Furniture, pos: Point| -> Option<(Point, Size)> {
         repels_plants(kind).then(|| {
             let v = furniture_def(kind).visual;
-            (anchored_top_left(Anchor::Center, pos, v.w, v.h), v)
+            (anchored_top_left(Pivot::Center, pos, v.w, v.h), v)
         })
     };
     [
@@ -1067,13 +1067,13 @@ fn first_blocking_waypoint(
     waypoints: &[Waypoint],
 ) -> Option<&Waypoint> {
     let pv = furniture_def(kind.furniture()).visual;
-    let plant_tl = anchored_top_left(Anchor::Center, pos, pv.w, pv.h);
+    let plant_tl = anchored_top_left(Pivot::Center, pos, pv.w, pv.h);
     waypoints.iter().find(|w| {
         let wdef = furniture_def(w.kind.furniture());
         if wdef.footprint.is_none() {
             return false;
         }
-        let wp_tl = anchored_top_left(Anchor::Center, w.pos, wdef.visual.w, wdef.visual.h);
+        let wp_tl = anchored_top_left(Pivot::Center, w.pos, wdef.visual.w, wdef.visual.h);
         super::placement::overlaps_within_clearance(
             (plant_tl, pv),
             (wp_tl, wdef.visual),
@@ -1093,7 +1093,7 @@ fn plant_spot_clear(
     singletons: &[(Point, Size)],
 ) -> bool {
     let pv = furniture_def(kind.furniture()).visual;
-    let plant_tl = anchored_top_left(Anchor::Center, pos, pv.w, pv.h);
+    let plant_tl = anchored_top_left(Pivot::Center, pos, pv.w, pv.h);
     if desk_art
         .iter()
         .any(|&r| super::placement::rects_overlap((plant_tl, pv), r))
@@ -1150,7 +1150,7 @@ pub(super) fn unreachable_walkable_cells(mask: &WalkableMask, seed: Point) -> Ve
 /// plug the drain — THE seal-causer selector for the #566 connectivity guard.
 fn plant_ground_in_bounds(p: &PlantItem, b: &Bounds) -> bool {
     let def = furniture_def(p.kind.furniture());
-    let Some(ground) = def.ground_rect(Anchor::Center, p.pos) else {
+    let Some(ground) = def.ground_rect(Pivot::Center, p.pos) else {
         return false;
     };
     super::placement::rects_overlap(
@@ -1544,7 +1544,7 @@ pub(super) fn compute_pod_decor(
                 y: centre.y.saturating_add_signed(d * across.y as i16),
             })
             .find(|&at| {
-                let art = (anchored_top_left(Anchor::Center, at, vis.w, vis.h), vis);
+                let art = (anchored_top_left(Pivot::Center, at, vis.w, vis.h), vis);
                 desk_art
                     .iter()
                     .all(|&r| !super::placement::rects_overlap(art, r))
@@ -1587,7 +1587,7 @@ pub(super) fn compute_pod_decor(
 /// Both facings, since a narrow band demotes a back-turned desk after this runs.
 fn clears_the_seats(kind: Furniture, pos: Point, home_desks: &[Point]) -> bool {
     let art = furniture_def(kind).visual;
-    let art = (anchored_top_left(Anchor::Center, pos, art.w, art.h), art);
+    let art = (anchored_top_left(Pivot::Center, pos, art.w, art.h), art);
     let sitter = Size {
         w: CHARACTER_SPRITE_W,
         h: CHARACTER_SPRITE_H,

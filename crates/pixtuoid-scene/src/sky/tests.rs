@@ -1,14 +1,14 @@
 use super::*;
 use crate::localclock::{at_hour_min, on_day};
+use std::time::Duration;
 
 #[test]
 fn the_clock_picks_every_weather_within_a_week() {
     use std::collections::HashSet;
-    use std::time::Duration;
-    let start = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let start = 1_700_000_000 / WEATHER_CYCLE_SECS;
     const WEEK_SECS: u64 = 7 * 24 * 3600;
-    let seen: HashSet<Weather> = (0..WEEK_SECS / WEATHER_CYCLE_SECS)
-        .map(|slot| clock_weather(start + Duration::from_secs(slot * WEATHER_CYCLE_SECS)))
+    let seen: HashSet<Weather> = (start..start + WEEK_SECS / WEATHER_CYCLE_SECS)
+        .map(slot_weather)
         .collect();
     for w in Weather::ALL {
         assert!(
@@ -106,21 +106,23 @@ fn moon_luminance_tracks_phase() {
     );
 }
 
-/// `Clock` is the clock's slot pick at every instant, and `Forced` holds its
-/// weather whatever the clock.
+/// `Clock` is the clock's weather at every instant, and `Forced` holds its
+/// weather, pure, whatever the clock, through its transitions included.
 #[test]
 fn a_policy_picks_the_clock_or_holds_its_weather() {
-    use std::time::Duration;
-    let t = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    for slot in 0..40 {
-        let now = t + Duration::from_secs(slot * WEATHER_CYCLE_SECS / 2);
+    const STRIDE_SECS: usize = 7;
+    for s in (0..40 * WEATHER_CYCLE_SECS).step_by(STRIDE_SECS) {
+        let now = at_secs(1_700_000_000 + s);
         assert_eq!(
             Sky::at(now, WeatherPolicy::Clock).weather(),
             clock_weather(now),
-            "{slot}"
+            "{s}"
         );
         for w in Weather::ALL {
-            assert_eq!(Sky::at(now, WeatherPolicy::Forced(w)).weather(), w);
+            assert_eq!(
+                Sky::at(now, WeatherPolicy::Forced(w)).weather(),
+                WeatherMix::pure(w)
+            );
         }
     }
     assert_eq!(WeatherPolicy::default(), WeatherPolicy::Clock);
@@ -321,13 +323,13 @@ fn the_weather_is_deterministic_and_changes_across_slots() {
     let base = std::time::UNIX_EPOCH;
     let at = |slot: u64| base + std::time::Duration::from_secs(slot * WEATHER_CYCLE_SECS);
     assert_eq!(clock_weather(at(17)), clock_weather(at(17)));
-    let unique: std::collections::HashSet<_> =
-        (0..20).map(|slot| clock_weather(at(slot))).collect();
+    let unique: std::collections::HashSet<_> = (0..20).map(slot_weather).collect();
     assert!(unique.len() >= 2, "weather should vary across slots");
 }
 
-/// The one pin on the clock-to-flash path through [`Sky::at`]; painter tests
-/// inject the flash with [`Sky::with_flash`].
+/// The one pin on the clock-to-flash path through [`Sky::at`], and on the
+/// flash being the storm's alone; painter tests inject the flash with
+/// [`Sky::with_flash`].
 #[test]
 fn a_strike_flashes_at_its_bucket_offset_and_ends_with_the_flash() {
     for bucket in 0..24u64 {
@@ -336,18 +338,14 @@ fn a_strike_flashes_at_its_bucket_offset_and_ends_with_the_flash() {
             std::time::UNIX_EPOCH
                 + std::time::Duration::from_millis(bucket * LIGHTNING_PERIOD_MS + ms)
         };
-        assert_eq!(
-            Sky::clock(at(off)).flash(),
-            lightning_envelope(0),
-            "bucket {bucket}"
-        );
-        assert_eq!(
-            Sky::clock(at(off + LIGHTNING_FLASH_MS)).flash(),
-            0.0,
-            "bucket {bucket}"
-        );
+        let storm = |ms| Sky::at_with(at(ms), Weather::Storm).flash();
+        assert_eq!(storm(off), lightning_envelope(0), "bucket {bucket}");
+        assert_eq!(storm(off + LIGHTNING_FLASH_MS), 0.0, "bucket {bucket}");
         if off > 0 {
-            assert_eq!(Sky::clock(at(off - 1)).flash(), 0.0, "bucket {bucket}");
+            assert_eq!(storm(off - 1), 0.0, "bucket {bucket}");
+        }
+        for w in Weather::ALL.into_iter().filter(|&w| w != Weather::Storm) {
+            assert_eq!(Sky::at_with(at(off), w).flash(), 0.0, "{w:?} never strikes");
         }
     }
 }
@@ -582,6 +580,185 @@ fn the_moons_light_rides_the_skys_nightfall() {
             e.lum,
             MOON_PEAK_LUM * e.altitude * s.moon_phase() * s.nightfall(),
             "minute {m}"
+        );
+    }
+}
+
+fn at_secs(secs: u64) -> SystemTime {
+    std::time::UNIX_EPOCH + Duration::from_secs(secs)
+}
+
+/// Every slot opens on its own weather, pure, and so does every local `hh:00`
+/// the committed media render at.
+#[test]
+fn every_slot_opens_on_its_own_pure_weather() {
+    for slot in 0..10_000u64 {
+        assert_eq!(
+            clock_weather(at_secs(slot * WEATHER_CYCLE_SECS)),
+            WeatherMix::pure(slot_weather(slot)),
+            "slot {slot}"
+        );
+    }
+    for day in 0..40 {
+        for h in 0..24 {
+            let mix = Sky::clock(on_day(day, h)).weather();
+            assert_eq!(mix.parts().count(), 1, "day {day} {h}:00: {mix:?}");
+        }
+    }
+}
+
+/// A slot holds its weather until its last [`TRANSITION_SECS`], then steps
+/// toward the next slot's in [`TRANSITION_STEPS`] equal steps held equally
+/// long, the step out of the last landing on the next slot's pure weather.
+#[test]
+fn a_slot_steps_into_the_next_slots_weather_over_its_last_minutes() {
+    const SLOTS: u64 = 2_000;
+    let step_secs = TRANSITION_SECS / TRANSITION_STEPS;
+    let step = 1.0 / (TRANSITION_STEPS + 1) as f32;
+    let hold = WEATHER_CYCLE_SECS - TRANSITION_SECS;
+    let mut changes = 0;
+    for slot in 0..SLOTS {
+        let (here, next) = (slot_weather(slot), slot_weather(slot + 1));
+        let at = |s| clock_weather(at_secs(slot * WEATHER_CYCLE_SECS + s));
+        for s in 0..hold {
+            assert_eq!(at(s), WeatherMix::pure(here), "slot {slot} +{s}s");
+        }
+        for s in hold..WEATHER_CYCLE_SECS {
+            let mix = at(s);
+            if here == next {
+                assert_eq!(mix, WeatherMix::pure(here), "slot {slot} +{s}s");
+                continue;
+            }
+            let k = (s - hold) / step_secs + 1;
+            let came_in = mix.share(next);
+            assert!(
+                (came_in - k as f32 * step).abs() < 1e-6,
+                "slot {slot} +{s}s: {mix:?}"
+            );
+            assert!(
+                (mix.share(here) + came_in - 1.0).abs() < 1e-6,
+                "slot {slot} +{s}s: {mix:?}"
+            );
+        }
+        changes += usize::from(here != next);
+    }
+    assert!(changes > 0, "no slot changed weather in {SLOTS}");
+}
+
+/// Mid-change, each parameter the sky hands on is its two presets' lerp by
+/// the incoming weather's share, and at either end exactly one preset's.
+#[test]
+fn a_change_lerps_the_skys_parameters_between_the_presets() {
+    let hold = WEATHER_CYCLE_SECS - TRANSITION_SECS;
+    let step_secs = TRANSITION_SECS / TRANSITION_STEPS;
+    type Handed = fn(&Sky) -> f32;
+    type Preset = fn(Weather) -> f32;
+    let params: [(&str, Handed, Preset); 4] = [
+        (
+            "direct",
+            |s| s.transmission().direct,
+            |w| transmission(w).direct,
+        ),
+        (
+            "diffuse",
+            |s| s.transmission().diffuse,
+            |w| transmission(w).diffuse,
+        ),
+        ("disc", |s| s.transmission().disc, |w| transmission(w).disc),
+        ("rain", Sky::precipitation, rain_level),
+    ];
+    let slot = (0..)
+        .find(|&s| slot_weather(s) != Weather::Storm && slot_weather(s + 1) == Weather::Storm)
+        .expect("a slot a storm comes in on");
+    let (here, next) = (slot_weather(slot), Weather::Storm);
+    let sky = |s| Sky::clock(at_secs(slot * WEATHER_CYCLE_SECS + s));
+    for (name, of, preset) in params {
+        assert_eq!(of(&sky(0)), preset(here), "{name} opens on {here:?}'s");
+        assert_eq!(
+            of(&sky(WEATHER_CYCLE_SECS)),
+            preset(next),
+            "{name} lands on {next:?}'s"
+        );
+        for k in 0..TRANSITION_STEPS {
+            let s = sky(hold + k * step_secs);
+            let p = s.weather().share(next);
+            assert!(0.0 < p && p < 1.0, "step {k}: {:?}", s.weather());
+            let want = preset(here) + (preset(next) - preset(here)) * p;
+            assert!(
+                (of(&s) - want).abs() < 1e-6,
+                "{name} at step {k}: {} vs {want}",
+                of(&s)
+            );
+        }
+    }
+}
+
+/// A storm coming in or going out fires its share of the strikes, each one
+/// whole: a step of the ramp never cuts a strike's phases short.
+#[test]
+fn a_changing_storm_fires_whole_strikes_by_its_share() {
+    const BUCKETS: u64 = 10_000;
+    const SAMPLE_MS: usize = 25;
+    for share in [0.0, 0.25, 0.5, 0.75, 1.0] {
+        let fired = (0..BUCKETS).filter(|&b| strikes(b, share)).count();
+        let rate = fired as f32 / BUCKETS as f32;
+        assert!((rate - share).abs() < 0.03, "share {share}: fired {rate}");
+    }
+    for bucket in 0..BUCKETS {
+        for k in 0..=TRANSITION_STEPS {
+            let share = |k: u64| k as f32 / (TRANSITION_STEPS + 1) as f32;
+            assert!(
+                !strikes(bucket, share(k)) || strikes(bucket, share(k + 1)),
+                "a stronger storm keeps bucket {bucket}'s strike"
+            );
+        }
+    }
+    let whole: Vec<f32> = (0..LIGHTNING_FLASH_MS)
+        .step_by(SAMPLE_MS)
+        .map(lightning_envelope)
+        .collect();
+    let (mut partial_fired, mut partial_skipped) = (0, 0);
+    for bucket in 0..200_000u64 {
+        let start = bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket);
+        let at = |ms: u64| std::time::UNIX_EPOCH + Duration::from_millis(start + ms);
+        let phases: Vec<f32> = (0..LIGHTNING_FLASH_MS)
+            .step_by(SAMPLE_MS)
+            .map(|ms| flash_level_at(at(ms), WeatherPolicy::Clock))
+            .collect();
+        let fired = phases == whole;
+        assert!(
+            fired || phases.iter().all(|&l| l == 0.0),
+            "bucket {bucket} cut short: {phases:?}"
+        );
+        let storm = clock_weather(at(0)).share(Weather::Storm);
+        if 0.0 < storm && storm < 1.0 {
+            if fired {
+                partial_fired += 1;
+            } else {
+                partial_skipped += 1;
+            }
+        }
+    }
+    assert!(
+        partial_fired > 0 && partial_skipped > 0,
+        "a changing storm fires some strikes and skips others: \
+         {partial_fired} fired, {partial_skipped} skipped"
+    );
+}
+
+/// No strike runs across a change of weather, a transition's step or a slot's
+/// start: the weather at its last instant is the weather it started in, so a
+/// storm's strike never lights the sky that follows.
+#[test]
+fn no_strike_runs_across_a_change_of_weather() {
+    for bucket in 0..200_000u64 {
+        let start = bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket);
+        let last = start + LIGHTNING_FLASH_MS - 1;
+        let at = |ms| std::time::UNIX_EPOCH + Duration::from_millis(ms);
+        assert_eq!(
+            clock_weather(at(start)),
+            clock_weather(at(last)),
+            "bucket {bucket}'s strike crosses a change"
         );
     }
 }
