@@ -1,9 +1,9 @@
 //! Y-sorted drawable enum (painter's algorithm).
 //!
-//! Every mid-ground entity carries an `anchor_y` = the y-pixel row where it
+//! Every mid-ground entity carries a `sort_row` = the y-pixel row where it
 //! touches the floor (front-facing bottom edge for items with thickness).
-//! Drawables sort ascending by `anchor_y` and then [`Layer`], so larger
-//! `anchor_y` = closer to camera = paints last. A backdrop fixture is a
+//! Drawables sort ascending by `sort_row` and then [`Layer`], so larger
+//! `sort_row` = closer to camera = paints last. A backdrop fixture is a
 //! [`DrawableKind`] the background pass paints flat instead.
 
 use std::time::SystemTime;
@@ -55,7 +55,7 @@ pub(super) fn pantry_steam_at(pos: Point, anim: &str) -> Point {
 }
 
 pub(super) struct Drawable<'a> {
-    pub(super) anchor_y: u16,
+    pub(super) sort_row: u16,
     pub(super) layer: Layer,
     pub(super) kind: DrawableKind<'a>,
 }
@@ -63,7 +63,7 @@ pub(super) struct Drawable<'a> {
 /// Sorts `drawables` into paint order. Stable, so drawables tied on row and
 /// layer keep their queue order: the roster's among fixtures.
 pub(super) fn sort_drawables(drawables: &mut [Drawable<'_>]) {
-    drawables.sort_by_key(|d| (d.anchor_y, d.layer));
+    drawables.sort_by_key(|d| (d.sort_row, d.layer));
 }
 
 pub(super) enum DrawableKind<'a> {
@@ -594,7 +594,7 @@ pub(super) fn enqueue_room_walls<'a>(layout: &'a SceneLayout, drawables: &mut Ve
     for &piece in &layout.wall_pieces {
         for (rows, depth) in piece.sort_bands() {
             drawables.push(Drawable {
-                anchor_y: depth,
+                sort_row: depth,
                 // A character tied with a band's row still paints behind the glass.
                 layer: Layer::Over,
                 kind: DrawableKind::RoomWall { piece, rows },
@@ -707,7 +707,7 @@ mod tests {
         sheet_fall: Option<u16>,
     ) -> Drawable<'static> {
         Drawable {
-            anchor_y: desk.y
+            sort_row: desk.y
                 + crate::layout::furniture_def(crate::layout::Furniture::Desk)
                     .visual
                     .h,
@@ -990,7 +990,7 @@ mod tests {
         let mut render = |mirrored: bool| {
             let mut buf = RgbBuffer::filled(80, 80, Rgb { r: 0, g: 0, b: 0 });
             let d = Drawable {
-                anchor_y: pos.y,
+                sort_row: pos.y,
                 layer: Layer::Under,
                 kind: DrawableKind::MeetingSofa { pos, mirrored },
             };
@@ -1027,7 +1027,7 @@ mod tests {
         let bg = Rgb { r: 7, g: 8, b: 9 };
         let mut buf = RgbBuffer::filled(60, 60, bg);
         let d = Drawable {
-            anchor_y: 30,
+            sort_row: 30,
             layer: Layer::Figure,
             kind: DrawableKind::Pet {
                 pos: Point { x: 30, y: 30 },
@@ -1065,7 +1065,7 @@ mod tests {
             let effects =
                 crate::sim::pet_effects(PetKind::Cat, pos, anim_name, None, Motion::Full.beat(now));
             let d = Drawable {
-                anchor_y: pos.y,
+                sort_row: pos.y,
                 layer: Layer::Figure,
                 kind: DrawableKind::Pet {
                     pos,
@@ -1112,7 +1112,7 @@ mod tests {
         let mut cache = FrameCache::new();
         let mut buf = RgbBuffer::filled(80, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = Drawable {
-            anchor_y: pos.y,
+            sort_row: pos.y,
             layer: Layer::Under,
             kind: DrawableKind::Appliance {
                 pos,
@@ -1201,7 +1201,7 @@ mod tests {
         let bg = Rgb { r: 7, g: 8, b: 9 };
         let mut buf = RgbBuffer::filled(60, 60, bg);
         let d = Drawable {
-            anchor_y: 30,
+            sort_row: 30,
             layer: Layer::Figure,
             kind: DrawableKind::GatewayMascot {
                 mascot_idx: 0,
@@ -1242,7 +1242,7 @@ mod tests {
         let mut render = |degraded: bool| {
             let mut buf = RgbBuffer::filled(80, 80, black);
             let d = Drawable {
-                anchor_y: pos.y,
+                sort_row: pos.y,
                 layer: Layer::Figure,
                 kind: DrawableKind::GatewayMascot {
                     mascot_idx: 0,

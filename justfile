@@ -795,6 +795,12 @@ gen-art-check:
     python3 scripts/gen-art.py --selftest
     python3 scripts/gen-art.py --check crates/pixtuoid-scene/sprites/default
 
+# Not in `gen`: it downloads its pinned fonts.
+[doc("Regenerate the cutaway's fallback font + its licenses (crates/pixtuoid-scene/fonts/) from scripts/gen-fallback-font.py")]
+[group('gen')]
+gen-fallback-font:
+    python3 scripts/gen-fallback-font.py
+
 [doc('Sync README install/features/tools sections from site/src/*.json')]
 [group('gen')]
 gen-readme:
@@ -964,6 +970,21 @@ build-target target cross="false":
     else
         cargo build --release --target "$target" $flags
     fi
+
+# Globbed, not listed, so a font embedded later ships its notice too: a font's
+# notice is any .txt under the `fonts/` beside it. The tree mirrors the repo's
+# (licenses/<crate>/fonts/…), as pixtuoid's .deb assets do with the same glob.
+[doc("Copy LICENSE + every embedded font's notice (licenses/) into a release archive's DIR")]
+[group('release')]
+stage-notices dir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cp LICENSE "$1/"
+    find crates/*/fonts -name '*.txt' | while IFS= read -r notice; do
+        dest="$1/licenses/${notice#crates/}"
+        mkdir -p "$(dirname "$dest")"
+        cp "$notice" "$dest"
+    done
 
 # `--no-build`: the target is already built by `build-target`. Needs cargo-deb
 # (CI installs it via taiki-e/install-action@cargo-deb).

@@ -1,6 +1,6 @@
 # 8x10 seated person in PROFILE, facing EAST (flip mirrors west). Same
 # height/bottom-row geometry as the front `seated` sprite so the chair
-# anchor + z-key math is unchanged. Profile torso is NARROWER than the
+# anchor + sort row math is unchanged. Profile torso is NARROWER than the
 # front view (5px, back edge under the hair mass) so it reads as a person
 # seen from the side, not a slab; hair mass at the back, single profile
 # eye + mouth at the front edge, forward arm with a skin hand toward the
