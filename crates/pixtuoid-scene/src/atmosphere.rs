@@ -60,14 +60,14 @@ impl Moment {
         sky: Sky,
         theme: &Theme,
         altitude: f32,
-        clock: crate::anim::Clock,
+        timing: crate::anim::Timing,
     ) -> Self {
         Self {
             look: SkyTones::resolve(&sky, theme),
             sky,
             altitude,
-            now: clock.now,
-            beat: clock.beat,
+            now: timing.now,
+            beat: timing.beat,
         }
     }
 }

@@ -406,7 +406,7 @@ mod tests {
         let strike = (0..60_000u64)
             .step_by(10)
             .map(|ms| SystemTime::UNIX_EPOCH + Duration::from_millis(ms))
-            .find(|&t| crate::sky::Sky::at(Motion::Full.clock(t), storm).flash() > 0.0)
+            .find(|&t| crate::sky::Sky::at(Motion::Full.timing(t), storm).flash() > 0.0)
             .expect("a strike in the first minute");
         let steps: Vec<_> = ticks(strike - Duration::from_millis(200), 8)
             .map(|t| (seated.clone(), t))

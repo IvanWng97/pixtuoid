@@ -343,12 +343,12 @@ pub(crate) fn frame_list<'a>(
     office: Office<'a>,
     Showing { floor, now, board }: Showing<'_>,
 ) -> DrawList<'a> {
-    let clock = floor.motion.clock(now);
+    let timing = floor.motion.timing(now);
     let moment = Moment::resolve(
-        crate::sky::Sky::at(clock, floor.weather),
+        crate::sky::Sky::at(timing, floor.weather),
         office.theme,
         floor.altitude,
-        clock,
+        timing,
     );
     build_list(frame, office, &moment, floor, board)
 }
@@ -4382,7 +4382,7 @@ pub(crate) mod tests {
                 crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                 theme,
                 0.0,
-                Motion::Full.clock(std::time::UNIX_EPOCH),
+                Motion::Full.timing(std::time::UNIX_EPOCH),
             ),
         );
         let (person, person_span) = order
@@ -4932,7 +4932,7 @@ pub(crate) mod tests {
                     crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                     theme,
                     0.0,
-                    Motion::Full.clock(std::time::UNIX_EPOCH),
+                    Motion::Full.timing(std::time::UNIX_EPOCH),
                 ),
             ) {
                 let PieceKind::Character {
@@ -5029,7 +5029,7 @@ pub(crate) mod tests {
                 crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                 theme,
                 0.0,
-                Motion::Full.clock(std::time::UNIX_EPOCH),
+                Motion::Full.timing(std::time::UNIX_EPOCH),
             ),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
@@ -5101,7 +5101,7 @@ pub(crate) mod tests {
             crate::sky::Sky::clock(now),
             theme,
             0.0,
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
         );
         let build = Build {
             frame: &frame,
@@ -5269,7 +5269,7 @@ pub(crate) mod tests {
             crate::sky::Sky::at_with(now, w),
             &crate::theme::NORMAL,
             0.0,
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
         )
     }
 
@@ -5411,7 +5411,7 @@ pub(crate) mod tests {
                     crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                     theme,
                     0.0,
-                    Motion::Full.clock(std::time::UNIX_EPOCH),
+                    Motion::Full.timing(std::time::UNIX_EPOCH),
                 );
                 for (span, kind) in collect_pieces(frame, office, &moment)
                     .into_iter()
@@ -5711,7 +5711,7 @@ S B B B B B B S
                 let list = build_list(
                     &frame,
                     office,
-                    &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(now)),
+                    &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now)),
                     crate::floor::FloorMeta::ground(),
                     quiet_board(),
                 );
@@ -5935,7 +5935,7 @@ S B B B B B B S
                     theme,
                     scale: RenderScale::ONE,
                 },
-                &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(now)),
+                &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now)),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
             );
@@ -6074,7 +6074,7 @@ S B B B B B B S
                             crate::sky::Sky::clock(now),
                             theme,
                             0.0,
-                            Motion::Full.clock(now),
+                            Motion::Full.timing(now),
                         ),
                         crate::floor::FloorMeta::ground(),
                         quiet_board(),
@@ -6128,7 +6128,7 @@ S B B B B B B S
                     crate::sky::Sky::clock(now),
                     theme,
                     0.0,
-                    Motion::Full.clock(now),
+                    Motion::Full.timing(now),
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
@@ -6165,7 +6165,7 @@ S B B B B B B S
         build_list(
             frame,
             office,
-            &Moment::resolve(sky, office.theme, 0.0, Motion::Full.clock(now)),
+            &Moment::resolve(sky, office.theme, 0.0, Motion::Full.timing(now)),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
         )
@@ -6946,7 +6946,7 @@ S B B B B B B S
                             crate::sky::Sky::clock(now),
                             theme,
                             0.0,
-                            Motion::Full.clock(now),
+                            Motion::Full.timing(now),
                         ),
                         crate::floor::FloorMeta::ground(),
                         quiet_board(),
@@ -7060,7 +7060,7 @@ S B B B B B B S
                     crate::sky::Sky::clock(now),
                     theme,
                     0.0,
-                    Motion::Full.clock(now)
+                    Motion::Full.timing(now)
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board()
@@ -7077,7 +7077,7 @@ S B B B B B B S
                     crate::sky::Sky::clock(now),
                     theme,
                     0.0,
-                    Motion::Full.clock(now)
+                    Motion::Full.timing(now)
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board()
@@ -7104,7 +7104,7 @@ S B B B B B B S
                     crate::sky::Sky::clock(std::time::SystemTime::UNIX_EPOCH),
                     theme,
                     0.0,
-                    Motion::Full.clock(std::time::SystemTime::UNIX_EPOCH),
+                    Motion::Full.timing(std::time::SystemTime::UNIX_EPOCH),
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
@@ -7492,7 +7492,7 @@ S B B B B B B S
         build_list(
             frame,
             office,
-            &Moment::resolve(sky, office.theme, 0.0, Motion::Full.clock(now)),
+            &Moment::resolve(sky, office.theme, 0.0, Motion::Full.timing(now)),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
         )

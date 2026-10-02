@@ -407,7 +407,7 @@ mod tests {
             Sky::at_with(now, Weather::Clear),
             theme,
             0.0,
-            crate::anim::Motion::Full.clock(now),
+            crate::anim::Motion::Full.timing(now),
         );
         SkyView::of(&moment, 160, 40, theme)
     }

@@ -1020,10 +1020,10 @@ impl NeonState {
         &mut self,
         mood: crate::board::OfficeMood,
         room_dimmed: bool,
-        clock: crate::anim::Clock,
+        timing: crate::anim::Timing,
     ) -> NeonLevels {
         use crate::board::OfficeMood;
-        let now = clock.now;
+        let now = timing.now;
         let to = match mood {
             OfficeMood::Alert { .. } => NeonLevels::ALERT,
             OfficeMood::Busy { .. } => NeonLevels::BUSY,
@@ -1036,7 +1036,7 @@ impl NeonState {
         self.last_tick = Some(now);
         // Stepped in loop time, which Calm walks at a quarter of the wall
         // clock's pace, so Calm plays the stutter slower rather than never.
-        let beat_ms = clock.beat.ms();
+        let beat_ms = timing.beat.ms();
         let step_ms = self.last_beat_ms.map(|last| beat_ms.abs_diff(last));
         self.last_beat_ms = Some(beat_ms);
         let recent = gap_ms.is_some_and(|gap| gap <= u64::from(Self::FADE_MS));
@@ -1062,7 +1062,7 @@ impl NeonState {
         };
         // Only a tube that has LANDED on starved stutters, not one coasting down.
         let drawable = step_ms.is_some_and(|step| step <= Self::shortest_flash_ms());
-        if current == NeonLevels::EMPTY && drawable && Self::stutter_flash(clock.beat) {
+        if current == NeonLevels::EMPTY && drawable && Self::stutter_flash(timing.beat) {
             NeonLevels::FLASH
         } else {
             current

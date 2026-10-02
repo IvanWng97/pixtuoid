@@ -121,7 +121,7 @@ mod tests {
                 Sky::clock(now),
                 theme,
                 0.0,
-                crate::anim::Motion::Full.clock(now),
+                crate::anim::Motion::Full.timing(now),
             ),
         );
     }
