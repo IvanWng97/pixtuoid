@@ -1411,6 +1411,39 @@ fn neon_a_starved_tube_stutters_at_the_calm_pace() {
     assert!(flashed, "the stutter never played at Calm");
 }
 
+/// On every moving tier a starved tube holds each catch, and each dark
+/// between, at least the photosensitive floor, across the cycle's wrap too.
+#[test]
+fn neon_a_starved_tube_holds_each_flash_and_dark_the_floor() {
+    const CYCLES: u64 = 2;
+    for motion in Motion::ALL {
+        let Some(pace) = motion.pace() else {
+            continue;
+        };
+        let mut neon = NeonState::new();
+        let mut runs: Vec<(bool, u64)> = Vec::new();
+        for ms in 0..CYCLES * NeonState::STUTTER_MS * pace {
+            let clock = motion.clock(in_stutter_cycle(0) + Duration::from_millis(ms));
+            let lit = neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, clock) == NeonLevels::FLASH;
+            match runs.last_mut() {
+                Some((was, len)) if *was == lit => *len += 1,
+                _ => runs.push((lit, 1)),
+            }
+        }
+        let whole = &runs[1..runs.len() - 1];
+        assert!(
+            whole.iter().any(|&(lit, _)| lit),
+            "{motion:?} never flashed"
+        );
+        assert!(
+            whole
+                .iter()
+                .all(|&(_, ms)| ms >= crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS),
+            "{motion:?}: {whole:?}"
+        );
+    }
+}
+
 /// At rest a starved tube holds steady: no flash, for the photosensitive.
 #[test]
 fn neon_a_starved_tube_never_flashes_at_rest() {

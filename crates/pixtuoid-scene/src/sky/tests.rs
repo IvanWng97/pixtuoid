@@ -245,7 +245,7 @@ fn night_floor_varies_by_weather() {
 
 #[test]
 fn lightning_envelope_is_a_two_pulse_then_dark() {
-    let mid = |phase: u64| phase * MIN_FLASH_PHASE_MS + MIN_FLASH_PHASE_MS / 2;
+    let mid = |phase: u64| phase * PHASE_MS + PHASE_MS / 2;
     assert_eq!(lightning_envelope(0), 1.0, "primary strike");
     assert!(
         lightning_envelope(mid(1)) < lightning_envelope(mid(0)),
@@ -255,17 +255,19 @@ fn lightning_envelope_is_a_two_pulse_then_dark() {
         lightning_envelope(mid(2)) > lightning_envelope(mid(1)),
         "after-flash rebrightens"
     );
-    assert_eq!(lightning_envelope(LIGHTNING_FLASH_MS), 0.0, "flash is over");
+    assert_eq!(lightning_envelope(STRIKE_MS), 0.0, "flash is over");
     assert_eq!(lightning_envelope(5000), 0.0, "dark between strikes");
 }
 
-/// A strike stays inside the photosensitive-safe envelope (WCAG 2.3.1, as the
-/// design rule tightens it): at most four phases, each at least
-/// [`MIN_FLASH_PHASE_MS`], and at most three flashes a second, where a flash
-/// is a rise and a fall of 10% of full luminance.
+/// A strike stays inside the photosensitive-safe envelope: at most four
+/// phases, each at least [`PHOTOSENSITIVE_PHASE_MIN_MS`], and at most three
+/// flashes a second, where a flash is a rise and a fall of 10% of full
+/// luminance.
+///
+/// [`PHOTOSENSITIVE_PHASE_MIN_MS`]: crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS
 #[test]
 fn a_strike_keeps_the_photosensitive_flash_bounds() {
-    let levels: Vec<f32> = (0..=LIGHTNING_FLASH_MS).map(lightning_envelope).collect();
+    let levels: Vec<f32> = (0..=STRIKE_MS).map(lightning_envelope).collect();
     let mut phases: Vec<(f32, u64)> = Vec::new();
     for &l in &levels {
         match phases.last_mut() {
@@ -276,7 +278,8 @@ fn a_strike_keeps_the_photosensitive_flash_bounds() {
     let lit = &phases[..phases.len() - 1];
     assert!(lit.len() <= 4, "{lit:?}");
     assert!(
-        lit.iter().all(|&(_, len)| len >= MIN_FLASH_PHASE_MS),
+        lit.iter()
+            .all(|&(_, len)| len >= crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS),
         "{lit:?}"
     );
     let changes: Vec<f32> = std::iter::once(0.0)
@@ -297,10 +300,11 @@ fn a_strike_keeps_the_photosensitive_flash_bounds() {
 /// never add up past three a second.
 #[test]
 fn strikes_are_at_least_a_second_apart() {
+    const SECOND_MS: u64 = 1000;
     for bucket in 0..100_000u64 {
-        let end = bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket) + LIGHTNING_FLASH_MS;
+        let end = bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket) + STRIKE_MS;
         let next = (bucket + 1) * LIGHTNING_PERIOD_MS + strike_offset(bucket + 1);
-        assert!(next - end >= FLASH_SEPARATION_MS, "bucket {bucket}");
+        assert!(next - end >= SECOND_MS, "bucket {bucket}");
     }
 }
 
@@ -315,11 +319,7 @@ fn lightning_strikes_are_jittered_not_metronomic() {
         distinct > 12,
         "strike offsets should vary across buckets, got {offsets:?}"
     );
-    assert!(
-        offsets
-            .iter()
-            .all(|&o| o < LIGHTNING_PERIOD_MS - LIGHTNING_FLASH_MS)
-    );
+    assert!(offsets.iter().all(|&o| o < LIGHTNING_PERIOD_MS - STRIKE_MS));
 }
 
 #[test]
@@ -360,7 +360,7 @@ fn a_strike_flashes_at_its_bucket_offset_and_ends_with_the_flash() {
         };
         let storm = |ms| Sky::at_with(at(ms), Weather::Storm).flash();
         assert_eq!(storm(off), lightning_envelope(0), "bucket {bucket}");
-        assert_eq!(storm(off + LIGHTNING_FLASH_MS), 0.0, "bucket {bucket}");
+        assert_eq!(storm(off + STRIKE_MS), 0.0, "bucket {bucket}");
         if off > 0 {
             assert_eq!(storm(off - 1), 0.0, "bucket {bucket}");
         }
@@ -733,7 +733,7 @@ fn a_changing_storm_fires_whole_strikes_by_its_share() {
             );
         }
     }
-    let whole: Vec<f32> = (0..LIGHTNING_FLASH_MS)
+    let whole: Vec<f32> = (0..STRIKE_MS)
         .step_by(SAMPLE_MS)
         .map(lightning_envelope)
         .collect();
@@ -741,7 +741,7 @@ fn a_changing_storm_fires_whole_strikes_by_its_share() {
     for bucket in 0..200_000u64 {
         let start = bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket);
         let at = |ms: u64| std::time::UNIX_EPOCH + Duration::from_millis(start + ms);
-        let phases: Vec<f32> = (0..LIGHTNING_FLASH_MS)
+        let phases: Vec<f32> = (0..STRIKE_MS)
             .step_by(SAMPLE_MS)
             .map(|ms| flash_level_at(crate::anim::Beat::at_ms(start + ms), WeatherPolicy::Clock))
             .collect();
@@ -766,21 +766,70 @@ fn a_changing_storm_fires_whole_strikes_by_its_share() {
     );
 }
 
-/// No strike runs across a change of weather, a transition's step or a slot's
-/// start: the weather at its last instant is the weather it started in, so a
-/// storm's strike never lights the sky that follows.
+/// Buckets `0..200_000`, each with its strike's first loop ms.
+fn strike_starts() -> impl Iterator<Item = (u64, u64)> {
+    (0..200_000u64).map(|bucket| (bucket, bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket)))
+}
+
+/// The wall-clock instant a loop clock of `pace` reads `loop_ms` at.
+fn wall_at(pace: u64, loop_ms: u64) -> SystemTime {
+    std::time::UNIX_EPOCH + Duration::from_millis(loop_ms * pace)
+}
+
+/// On no moving tier does a strike run across a slot's start, so a storm's
+/// strike never lights the next slot's weather.
 #[test]
-fn no_strike_runs_across_a_change_of_weather() {
-    for bucket in 0..200_000u64 {
-        let start = bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket);
-        let last = start + LIGHTNING_FLASH_MS - 1;
-        let at = |ms| std::time::UNIX_EPOCH + Duration::from_millis(ms);
-        assert_eq!(
-            clock_weather(at(start)),
-            clock_weather(at(last)),
-            "bucket {bucket}'s strike crosses a change"
-        );
+fn no_strike_runs_into_the_next_slot() {
+    let slot = |at: SystemTime| crate::anim::epoch_ms(at) / (WEATHER_CYCLE_SECS * 1000);
+    for motion in Motion::ALL {
+        let Some(pace) = motion.pace() else {
+            continue;
+        };
+        let wall = |loop_ms| wall_at(pace, loop_ms);
+        for (bucket, start) in strike_starts() {
+            let last = wall(start + STRIKE_MS) - Duration::from_millis(1);
+            assert_eq!(
+                slot(wall(start)),
+                slot(last),
+                "{motion:?} bucket {bucket}'s strike runs into the next slot"
+            );
+        }
     }
+}
+
+/// On every moving tier a strike fires by the storm's share at its start, read
+/// on the wall clock its loop time plays at, and then runs whole. On Calm a
+/// bucket spans several of a transition's steps, so a step can fall mid-strike.
+#[test]
+fn every_strike_fires_by_its_start_and_runs_whole_on_every_tier() {
+    let phase_starts = || (0..STRIKE_MS).step_by(PHASE_MS as usize);
+    let whole: Vec<f32> = phase_starts().map(lightning_envelope).collect();
+    let mut cut_by_a_later_read = 0;
+    for motion in Motion::ALL {
+        let Some(pace) = motion.pace() else {
+            continue;
+        };
+        let wall = |loop_ms| wall_at(pace, loop_ms);
+        let storm = |loop_ms| clock_weather(wall(loop_ms)).share(Weather::Storm);
+        for (bucket, start) in strike_starts() {
+            let fires = strikes(bucket, storm(start));
+            let levels: Vec<f32> = phase_starts()
+                .map(|ms| flash_level_at(motion.beat(wall(start + ms)), WeatherPolicy::Clock))
+                .collect();
+            let want = if fires {
+                whole.clone()
+            } else {
+                vec![0.0; whole.len()]
+            };
+            assert_eq!(levels, want, "{motion:?} bucket {bucket}");
+            cut_by_a_later_read +=
+                usize::from(fires != strikes(bucket, storm(start + STRIKE_MS - 1)));
+        }
+    }
+    assert!(
+        cut_by_a_later_read > 0,
+        "no strike's eligibility changes mid-strike, so none tells a start read from a later one"
+    );
 }
 
 /// The weather, transitions included, keeps the wall clock on every tier:
