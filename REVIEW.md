@@ -6,8 +6,8 @@ Read [`AGENTS.md`](AGENTS.md) first; these rules add to generic defect hunting.
 
 - A lens bot applies [What to check](#what-to-check), its [lens](#lenses)
   and [Re-review](#re-review); the **correctness** bot also applies every
-  matching non-local [escalation](#escalation) row and names the local rows in
-  its summary.
+  matching [escalation](#escalation) row to the diff and names the local rows
+  in its summary.
 - A local row lens applies only its [row](#escalation).
 - All apply [Do not flag](#do-not-flag), the Lenses preamble,
   [Severity](#severity) and [Output](#output).
@@ -155,8 +155,8 @@ invariant-breaking sequence against:
 
 Two lenses are the floor; each matching row adds one focused lens. The first
 column decides; Paths are where it usually fires. A **local** row needs the
-head built or run, an upstream fetched, or the whole tree in context, so its local run is mandatory
-([recorded](docs/CONTRIBUTING.md#the-merge-gate)).
+head tree read, built or run, or an upstream fetched, so its local run is
+mandatory ([recorded](docs/CONTRIBUTING.md#the-merge-gate)).
 
 | Diff touches… | Paths | Local | The added lens must… |
 |---|---|---|---|
@@ -170,10 +170,10 @@ head built or run, an upstream fetched, or the whole tree in context, so its loc
 | A string/layout a painter frames | | local | Render the COMPOSED frame; string-equality tests are blind to framing (#308). |
 | Another CLI's config | `crates/pixtuoid/src/install/` | local | Enumerate every resolution axis and re-verify each against that CLI's upstream in-session; write ⊆ verify (#338). |
 | A new source / hook integration | `crates/pixtuoid-core/src/source/registry.rs` | local | LIVE run or hermetic replay without capture-rig convenience flags; event shapes from canonical upstream docs, never a fork. |
-| A refactor: a move, rename, dedup or other "behavior-preserving" change across modules | | local | Run both lenses locally with the whole tree in context, and the moved tests at head: adversarial toward revert, per consolidation: one reason-to-change per call site; name the conversions that moved semantics — a batch hides exactly one (#461). |
-| Geometry, sky, lighting or other domain math, or an arc's last PR | `crates/pixtuoid-scene/src/` `sky/`, `celestial.rs`, `lighting/`, `layout/` | local | Enumerate the domain invariants and re-derive each across the parameter space, edges included (#471, #1049, #1053). |
-| A crate boundary, dependency or public API | `Cargo.toml`, `api/`, AGENTS.md's invariants | local | Run `just arch` and the api goldens at head; every new edge points down the DAG and every widened item has a consumer outside its crate. |
-| CI, the merge gate or the release | `.github/`, `.mergify.yml`, `policy/`, `release-plz.toml`, REVIEW.md, CONTRIBUTING's gate | local | Run actionlint, zizmor and `just ci-observability` at the CI pins; trace each trigger (fork, bot actor, cancelled or superseded run) to a closed gate. |
+| A refactor: a `refactor` PR, or a move or dedup across modules | | local | Adversarial toward revert, per consolidation: one reason-to-change per call site; name the conversions that moved semantics — a batch hides exactly one (#461). No test leaves `cargo nextest list` at head unless the PR body names it. |
+| Geometry, sky, lighting or other domain math | `crates/pixtuoid-scene/src/` `sky/`, `celestial.rs`, `lighting/`, `layout/` | local | Enumerate the domain invariants and re-derive each across the parameter space, edges included (#471, #1049, #1053). |
+| A crate edge, new dependency or widened public API | `Cargo.toml`, `crates/*/Cargo.toml`, `api/` | local | Justify every crate `cargo tree -e normal` adds at head, transitive ones included; every new workspace edge follows [AGENTS.md](AGENTS.md#layout)'s crate DAG; every item made `pub` has a consumer outside its crate. |
+| CI, the merge gate or release tooling | `.github/workflows/`, `.github/actions/`, `.mergify.yml`, `policy/`, `release-plz.toml`, `REVIEW.md`, `docs/CONTRIBUTING.md` | local | Name every check, contract or row the diff loosens; trace each trigger (fork, bot actor, cancelled or superseded run) to a gate that fails closed. |
 
 ## Severity
 
@@ -183,8 +183,8 @@ nits and taste are never posted. Dispositions:
 [CONTRIBUTING](docs/CONTRIBUTING.md#pull-requests).
 
 - `issue (blocking)` — correctness, security or invariant. It blocks only once
-  the orchestrator or a maintainer confirms it against the code; the finder's
-  label alone never blocks.
+  the agent that ran the review or a maintainer confirms it against the code;
+  the finder's label alone never blocks.
 - `issue (non-blocking)` — any other real defect this PR introduced.
 - `issue (pre-existing)` — real, not introduced here.
 

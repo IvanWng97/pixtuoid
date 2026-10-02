@@ -195,7 +195,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    rules, and the cleanup rides the same PR (population and dispositions:
    [`REVIEW.md`](../REVIEW.md#design)'s comment audit). Not the merge gate.
 8. **Merge gate** — [the gate](#the-merge-gate); the `two-lens-review` skill
-   runs its local rows. **A human merges.**
+   runs its local rows; merging is `@mergifyio queue`, a release PR by hand.
 9. **Wrap** — retro; durable lessons go to the agent's own memory layer, not
    new repo docs.
 
@@ -253,7 +253,9 @@ Green `ci-gate`; every lens bot's required `claude-review/<lens>` status
 `success` at the final head; every finding's review thread resolved by its
 disposition; zero open confirmed `issue (blocking)`; each matching
 [local row](../REVIEW.md#escalation)'s run recorded as a PR comment starting
-`<!-- local-row:<row>:<head sha> -->`. The local
+`<!-- local-row:<row>:<head sha> -->`, where `<row>` kebab-cases the row's
+first column up to any colon and the sha is the head the run judged; a queue
+update that only merges `main` in leaves the record standing. The local
 [`two-lens-review`](../.claude/skills/two-lens-review/SKILL.md) skill is
 otherwise an optional pre-flight. A published review passes whatever it
 found; a failed or missing status is no review: comment `/claude-review`, else
@@ -271,7 +273,7 @@ resolve their own threads, so before merging read each thread's `resolvedBy`
 and its reply. Its bot verdict is advisory, since the
 author can steer it through the diff, so the maintainer reads the diff too.
 The bots skip Dependabot as an actor, so a maintainer comments it on its PRs
-too.
+too, until the queue's own update re-runs them as Mergify.
 
 ### Dispositions
 
