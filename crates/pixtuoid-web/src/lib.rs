@@ -24,6 +24,7 @@ use crate::script::{
 };
 
 use pixtuoid_scene::audio::OneShotPool;
+use pixtuoid_scene::flash::{FlashHold, FlashPhase, flash_phase};
 use pixtuoid_scene::floor::{
     FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs, floor_capacity,
 };
@@ -134,6 +135,8 @@ pub struct Office {
     /// `sync_capacity` skip the layout recompute on every other frame.
     caps_size: Option<(u16, u16)>,
     weather: WeatherPolicy,
+    /// The flash the page shows: the frame `step` leaves is the one it draws.
+    flash: FlashHold<FlashPhase>,
     /// The WebAudio engine — `None` until the visitor clicks ♩ (browser autoplay
     /// policy: no sound without a gesture).
     audio: Option<audio::WebAudioDriver>,
@@ -169,13 +172,15 @@ impl Office {
             last_now: None,
             caps_size: None,
             weather: WeatherPolicy::Clock,
+            flash: FlashHold::default(),
             audio: None,
             adopting: None,
         })
     }
 
     /// Advance to `now_ms` and render at `w`×`h` pixels into the RGBA staging
-    /// buffer.
+    /// buffer, which keeps the last frame while the flash hold keeps this one
+    /// back.
     ///
     /// CONTRACT: `now_ms` must be UNIX-epoch milliseconds — `Date.now()`, NOT
     /// `performance.now()` and NOT a `requestAnimationFrame` timestamp: those are
@@ -202,7 +207,14 @@ impl Office {
         // — load-bearing: the looped script REUSES agent ids, and a returning cast
         // member with stale walk legs teleports in.
         self.render(now, buf_w, buf_h);
+        let flash = flash_phase(self.floor_meta(), &self.session.floor.ctx, now);
+        // A canvas of a new shape gets this frame whatever it shows.
+        let same_shape = self.rgba.len() == self.session.buf().as_slice().len() * 4;
+        if same_shape && self.flash.holds(flash, now) {
+            return;
+        }
         self.expand_rgba();
+        self.flash.shown(flash, now);
     }
 
     /// Pointer to the RGBA frame in wasm linear memory (`w*h*4` bytes).
@@ -828,6 +840,81 @@ mod tests {
             frame.chunks(4).any(|p| p[0] != 0 || p[1] != 0 || p[2] != 0),
             "the office actually painted (not an all-black frame)"
         );
+    }
+
+    /// The site backdrop's paint gate, read from its authority,
+    /// `OfficeBackdrop.astro`'s `FRAME_MS`.
+    fn backdrop_frame_ms() -> u64 {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../site/src/components/OfficeBackdrop.astro"
+        );
+        let page = std::fs::read_to_string(path).expect("the backdrop page");
+        page.split("const FRAME_MS = ")
+            .nth(1)
+            .and_then(|rest| rest.split(';').next())
+            .and_then(|ms| ms.trim().parse().ok())
+            .expect("OfficeBackdrop.astro declares FRAME_MS")
+    }
+
+    /// Each phase of a strike stays on the page at least the photosensitive
+    /// floor at the backdrop's paint gate, its frames landing on a phase's
+    /// start or half a frame after: the frame `step` leaves is the one the
+    /// page draws. A strike lifts the whole room, so a frame that changes most
+    /// of the pixels is a change of phase.
+    #[test]
+    fn each_strike_phase_holds_the_floor_on_the_page() {
+        use pixtuoid_scene::anim::{FULL_TICK_MS, PHOTOSENSITIVE_PHASE_MIN_MS};
+        const MINUTE_MS: u64 = 60_000;
+        let storm = || {
+            let mut o = office();
+            o.set_weather(Some("storm".into()));
+            o
+        };
+        let floor = storm().floor_meta();
+        let unstepped = pixtuoid_scene::floor::FloorCtx::new();
+        let phase = |ms: u64| {
+            let at = SystemTime::UNIX_EPOCH + Duration::from_millis(ms);
+            flash_phase(floor, &unstepped, at)
+        };
+        let t0 = T0_MS as u64;
+        let start = (t0..t0 + MINUTE_MS)
+            .step_by(FULL_TICK_MS as usize)
+            .find(|&ms| phase(ms) != FlashPhase::default())
+            .expect("a storm strikes within a minute");
+        let end = (start..start + MINUTE_MS)
+            .find(|&ms| phase(ms) == FlashPhase::default())
+            .expect("a strike ends within a minute");
+        let changes = (start..=end)
+            .filter(|&ms| phase(ms) != phase(ms - 1))
+            .count();
+        let frame = backdrop_frame_ms();
+        // The dark before has shown the floor, as the gap between strikes sees to.
+        let lead = frame * (PHOTOSENSITIVE_PHASE_MIN_MS.div_ceil(frame) + 1);
+        for offset in [0, frame / 2] {
+            let mut o = storm();
+            let mut now = start - lead + offset;
+            o.step(now as f64, 160, 96);
+            let mut shown = o.frame().to_vec();
+            let mut changed = Vec::new();
+            while now < end + lead {
+                now += frame;
+                o.step(now as f64, 160, 96);
+                let pixels = o.frame().chunks(4).zip(shown.chunks(4));
+                if 2 * pixels.filter(|(a, b)| a != b).count() > shown.len() / 4 {
+                    changed.push(now);
+                }
+                shown = o.frame().to_vec();
+            }
+            assert_eq!(changed.len(), changes, "+{offset} ms: {changed:?}");
+            for pair in changed.windows(2) {
+                let shown_ms = pair[1] - pair[0];
+                assert!(
+                    shown_ms >= PHOTOSENSITIVE_PHASE_MIN_MS,
+                    "+{offset} ms: a phase shown {shown_ms} ms"
+                );
+            }
+        }
     }
 
     #[test]
