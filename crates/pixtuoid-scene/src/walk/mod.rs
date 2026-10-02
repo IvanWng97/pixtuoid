@@ -155,7 +155,7 @@ pub struct WanderState {
 /// Walk state for one live agent on one floor.
 #[derive(Debug, Clone)]
 pub struct WalkState {
-    /// The agent this motion state belongs to.
+    /// The agent this walk state belongs to.
     pub agent_id: AgentId,
 
     /// The arrival walk, snapshotted once at door-crossing. Carries its own
@@ -226,12 +226,12 @@ pub fn advance_wander(
     // Claims must be snapshotted BEFORE this agent's `&mut` — the two borrows of
     // `walks` can't overlap.
     let claimed = spot_claims(walks, id);
-    let ms = walks.entry(id).or_insert_with(|| WalkState::new(id));
+    let walk = walks.entry(id).or_insert_with(|| WalkState::new(id));
 
     // A fresh WalkState's epoch `phase_started_at` is below any real
     // `state_started_at`; we also re-seed when the slot (re-)entered Idle after a
     // different state.
-    let is_fresh = ms
+    let is_fresh = walk
         .wander
         .phase_started_at
         .checked_add(Duration::from_millis(1))
@@ -247,9 +247,9 @@ pub fn advance_wander(
     // every frame even DURING a 40 s lounge dwell, so only an off-screen floor or
     // a pause can exceed it. `unwrap_or(false)` treats a backward clock step as
     // "not stale" rather than snapping every agent to Seated.
-    let is_stale_resume = ms.wander.last_advanced_at != SystemTime::UNIX_EPOCH
+    let is_stale_resume = walk.wander.last_advanced_at != SystemTime::UNIX_EPOCH
         && now
-            .duration_since(ms.wander.last_advanced_at)
+            .duration_since(walk.wander.last_advanced_at)
             .map(|d| d.as_millis() as u64 > stale_resume_gap_ms(id))
             .unwrap_or(false);
 
@@ -262,27 +262,27 @@ pub fn advance_wander(
         // Seated at `now`. Anchoring mid-cycle (`now - partial_ms`) made the phase
         // machine rush through the partial cycle's already-expired legs one
         // transition per frame — a desk↔waypoint teleport.
-        ms.wander.phase = WanderPhase::Seated;
-        ms.wander.cycle_n = elapsed_idle / cycle;
-        ms.wander.phase_started_at = now;
+        walk.wander.phase = WanderPhase::Seated;
+        walk.wander.cycle_n = elapsed_idle / cycle;
+        walk.wander.phase_started_at = now;
     }
 
-    let may_transition = now > ms.wander.last_advanced_at;
+    let may_transition = now > walk.wander.last_advanced_at;
 
-    let elapsed_phase = crate::anim::elapsed_ms(now, ms.wander.phase_started_at);
+    let elapsed_phase = crate::anim::elapsed_ms(now, walk.wander.phase_started_at);
 
     let seated_dur = seated_dwell_ms(id);
-    let dwell_dur = match ms.wander.target.kind {
+    let dwell_dur = match walk.wander.target.kind {
         WanderKind::Named { kind, .. } => dwell_ms(kind, id),
         WanderKind::Aimless => WANDER_DWELL_EST_MS,
     };
 
-    let result = match ms.wander.phase {
+    let result = match walk.wander.phase {
         WanderPhase::Seated => {
             if may_transition && elapsed_phase >= seated_dur {
-                if !takes_trip(id, ms.wander.cycle_n) || layout.waypoints.is_empty() {
-                    ms.wander.cycle_n += 1;
-                    ms.wander.phase_started_at = ms
+                if !takes_trip(id, walk.wander.cycle_n) || layout.waypoints.is_empty() {
+                    walk.wander.cycle_n += 1;
+                    walk.wander.phase_started_at = walk
                         .wander
                         .phase_started_at
                         .checked_add(Duration::from_millis(seated_dur))
@@ -292,14 +292,15 @@ pub fn advance_wander(
                     // stateless/stateful destinations stay in lockstep.
                     let desk_pt = layout.home_desk(slot.desk_index.single_floor_local());
                     let origin = desk_pt.unwrap_or(Point { x: 0, y: 0 });
-                    let target = pick_wander_dest(id, ms.wander.cycle_n, layout, origin, &claimed);
-                    ms.wander.target = target;
+                    let target =
+                        pick_wander_dest(id, walk.wander.cycle_n, layout, origin, &claimed);
+                    walk.wander.target = target;
                     let dest = target.dest;
                     let seat = target.kind.seat();
 
                     let desk = desk_pt.unwrap_or(dest);
                     let (from, chair_settle) = desk_leg_endpoint(desk, layout);
-                    ms.wander.phase = WanderPhase::WalkingOut(snapshot_leg_profile(
+                    walk.wander.phase = WanderPhase::WalkingOut(snapshot_leg_profile(
                         router,
                         &layout.walkable,
                         overlay,
@@ -311,14 +312,14 @@ pub fn advance_wander(
                             intent: WalkIntent::WanderOut,
                         },
                     ));
-                    ms.wander.phase_started_at = ms
+                    walk.wander.phase_started_at = walk
                         .wander
                         .phase_started_at
                         .checked_add(Duration::from_millis(seated_dur))
                         .unwrap_or(now);
                 }
             }
-            (ms.wander.phase, 0)
+            (walk.wander.phase, 0)
         }
 
         WanderPhase::WalkingOut(profile) => {
@@ -330,9 +331,9 @@ pub fn advance_wander(
                 } => {
                     // Snapshot the walk-back profile now — the overlay may differ
                     // by the time the dwell ends.
-                    let back = snapshot_back_profile(slot, ms, layout, router, overlay);
-                    ms.wander.phase = WanderPhase::AtWaypoint(back);
-                    advance_phase_clock(ms, walk_total, now);
+                    let back = snapshot_back_profile(slot, walk, layout, router, overlay);
+                    walk.wander.phase = WanderPhase::AtWaypoint(back);
+                    advance_phase_clock(walk, walk_total, now);
                     (WanderPhase::AtWaypoint(back), t_x1000)
                 }
             }
@@ -340,14 +341,14 @@ pub fn advance_wander(
 
         WanderPhase::AtWaypoint(back) => {
             if may_transition && elapsed_phase >= dwell_dur {
-                ms.wander.phase = WanderPhase::WalkingBack(back);
-                ms.wander.phase_started_at = ms
+                walk.wander.phase = WanderPhase::WalkingBack(back);
+                walk.wander.phase_started_at = walk
                     .wander
                     .phase_started_at
                     .checked_add(Duration::from_millis(dwell_dur))
                     .unwrap_or(now);
             }
-            (ms.wander.phase, 0)
+            (walk.wander.phase, 0)
         }
 
         WanderPhase::WalkingBack(profile) => {
@@ -356,10 +357,10 @@ pub fn advance_wander(
                 WalkLegStatus::Arrived { walk_total, .. } => {
                     // `target.dest` is deliberately left as-is: the Seated arm
                     // never reads it and the next WalkingOut overwrites it.
-                    ms.wander.cycle_n += 1;
-                    ms.wander.target.kind = WanderKind::Aimless;
-                    ms.wander.phase = WanderPhase::Seated;
-                    advance_phase_clock(ms, walk_total, now);
+                    walk.wander.cycle_n += 1;
+                    walk.wander.target.kind = WanderKind::Aimless;
+                    walk.wander.phase = WanderPhase::Seated;
+                    advance_phase_clock(walk, walk_total, now);
                     (WanderPhase::Seated, 0)
                 }
             }
@@ -367,7 +368,7 @@ pub fn advance_wander(
     };
 
     if may_transition {
-        ms.wander.last_advanced_at = now;
+        walk.wander.last_advanced_at = now;
     }
 
     // `result.0` == `ms.wander.phase` in every arm, so the frame's
@@ -376,9 +377,9 @@ pub fn advance_wander(
     WanderFrame {
         phase,
         t_x1000,
-        dest: ms.wander.target.dest,
-        kind: ms.wander.target.kind,
-        phase_started_at: ms.wander.phase_started_at,
+        dest: walk.wander.target.dest,
+        kind: walk.wander.target.kind,
+        phase_started_at: walk.wander.phase_started_at,
     }
 }
 
@@ -406,8 +407,8 @@ fn poll_walk_leg(profile: &WalkProfile, elapsed_phase: u64, may_transition: bool
 
 /// Advance the phase clock from its CURRENT anchor — not from `now` — so the
 /// next phase starts exactly when this one's wall-time budget elapsed.
-fn advance_phase_clock(ms: &mut WalkState, walk_total: u64, now: SystemTime) {
-    ms.wander.phase_started_at = ms
+fn advance_phase_clock(walk: &mut WalkState, walk_total: u64, now: SystemTime) {
+    walk.wander.phase_started_at = walk
         .wander
         .phase_started_at
         .checked_add(Duration::from_millis(walk_total))
@@ -415,7 +416,7 @@ fn advance_phase_clock(ms: &mut WalkState, walk_total: u64, now: SystemTime) {
 }
 
 /// Delegates to the ONE stateless resolver `crate::pose::resolve_wander_target`,
-/// which `idle_pose` also calls, so the routed motion path and the stateless
+/// which `idle_pose` also calls, so the routed walk path and the stateless
 /// overlay can never drift to different destinations. `origin` is the agent's
 /// home desk, kept identical to `idle_pose`'s `desk`.
 fn pick_wander_dest(
@@ -441,11 +442,11 @@ fn pick_wander_dest(
 /// offset is a genuine step-aside queue there.
 fn spot_claims(walks: &HashMap<AgentId, WalkState>, exclude: AgentId) -> SpotClaims {
     let mut claims = SpotClaims::default();
-    for (id, ms) in walks {
-        if *id == exclude || matches!(ms.wander.phase, WanderPhase::Seated) {
+    for (id, walk) in walks {
+        if *id == exclude || matches!(walk.wander.phase, WanderPhase::Seated) {
             continue;
         }
-        if let WanderKind::Named { wp_idx, kind, .. } = ms.wander.target.kind
+        if let WanderKind::Named { wp_idx, kind, .. } = walk.wander.target.kind
             && crate::layout::furniture_def(kind.furniture()).exclusive
         {
             claims.claim(wp_idx);
@@ -524,14 +525,14 @@ pub(crate) fn snapshot_leg_profile(
 /// only the routed path is user-visible.
 fn snapshot_back_profile(
     slot: &AgentSlot,
-    ms: &WalkState,
+    walk: &WalkState,
     layout: &SceneLayout,
     router: &mut dyn Router,
     overlay: &OccupancyOverlay,
 ) -> WalkProfile {
     let desk = layout
         .home_desk(slot.desk_index.single_floor_local())
-        .unwrap_or(ms.wander.target.dest);
+        .unwrap_or(walk.wander.target.dest);
     let (snap_to, chair_settle) = desk_leg_endpoint(desk, layout);
     snapshot_leg_profile(
         router,
@@ -539,9 +540,9 @@ fn snapshot_back_profile(
         overlay,
         slot.agent_id,
         LegPlan {
-            from: ms.wander.target.dest,
+            from: walk.wander.target.dest,
             to: snap_to,
-            settle: Settle::from_pair(ms.wander.target.kind.seat(), chair_settle),
+            settle: Settle::from_pair(walk.wander.target.kind.seat(), chair_settle),
             intent: WalkIntent::WanderBack,
         },
     )

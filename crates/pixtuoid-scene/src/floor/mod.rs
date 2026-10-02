@@ -239,12 +239,12 @@ impl FloorCtx {
                 p.duration_ms + p.pause_ms
             }
         };
-        self.door_anim_max_ms = self.walks.values().fold(0u64, |acc, ms| {
-            let entry = ms
+        self.door_anim_max_ms = self.walks.values().fold(0u64, |acc, walk| {
+            let entry = walk
                 .entry
                 .as_ref()
                 .map_or(0, |l| in_flight(l.started_at, &l.profile));
-            let exit = ms
+            let exit = walk
                 .exit
                 .as_ref()
                 .map_or(0, |leg| in_flight(leg.started_at, &leg.profile));

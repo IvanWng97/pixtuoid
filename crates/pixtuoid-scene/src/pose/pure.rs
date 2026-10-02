@@ -54,13 +54,13 @@ pub(crate) fn typing_frame(slot: &AgentSlot, beat: crate::anim::Beat) -> usize {
 }
 
 /// The walking sprite's frame index at `elapsed_ms` into the walk — the one
-/// cadence the stateless overlay and the routed motion authority share.
+/// cadence the stateless overlay and the routed walk authority share.
 pub fn walking_frame(elapsed_ms: u64) -> usize {
     (elapsed_ms / WALKING_FRAME_MS) as usize % WALKING_FRAMES
 }
 
 /// Spawn-window guard for entry routing in `pose::derive_with_routing`: the
-/// *upper bound* on the window during which the routed motion layer will
+/// *upper bound* on the window during which the routed walk layer will
 /// attempt an entry walk and (via `FloorCtx::door_anim_max_ms`) drive door-open
 /// cosmetics. NOT the walk duration — the walk completes when
 /// `physics::walk_arrived` returns true.
@@ -425,7 +425,7 @@ impl SpotClaims {
 
 /// Resolve the wander destination for `(agent_id, cycle_n)` on `layout`, with
 /// `origin` (the home desk) as the approach-side tiebreaker. The ONE stateless
-/// wander-destination resolver: the stateful motion authority
+/// wander-destination resolver: the stateful walk authority
 /// (`walk::advance_wander` via `pick_wander_dest`) delegates to it, and
 /// `idle_pose` calls it then maps the [`WanderTarget`] to a [`Pose`].
 ///

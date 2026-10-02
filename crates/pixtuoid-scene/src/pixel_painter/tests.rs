@@ -3521,7 +3521,7 @@ fn sim_step_fits_every_mascot_frame_on_the_canvas() {
 }
 
 #[test]
-fn sim_step_advances_motion_without_painting() {
+fn sim_step_advances_walks_without_painting() {
     use crate::pose::Pose;
     use std::time::Duration;
     let (scene, layout, id, now0, pack) = sim_rig();
@@ -3582,7 +3582,7 @@ fn sim_step_advances_motion_without_painting() {
             .route
             .walks
             .get(&id)
-            .is_some_and(|m| m.entry.is_some()),
+            .is_some_and(|walk| walk.entry.is_some()),
         "sim_step snapshotted the entry walk profile into the walks map"
     );
 }

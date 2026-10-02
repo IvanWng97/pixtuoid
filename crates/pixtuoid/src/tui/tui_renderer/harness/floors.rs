@@ -38,7 +38,7 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     let frozen_at = r
         .floor_walks(0)
         .and_then(|m| m.get(&a))
-        .map(|ms| ms.wander.last_advanced_at)
+        .map(|walk| walk.wander.last_advanced_at)
         .expect("floor-0 walks present");
 
     // ~30 s on floor 1.
@@ -49,7 +49,7 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     let still_frozen = r
         .floor_walks(0)
         .and_then(|m| m.get(&a))
-        .map(|ms| ms.wander.last_advanced_at)
+        .map(|walk| walk.wander.last_advanced_at)
         .expect("floor-0 walks present");
     assert_eq!(
         frozen_at, still_frozen,
@@ -60,12 +60,12 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     r.navigate_floor(0, now);
     render_until_settled(&mut r, &scene, &pack, &mut now, 0);
 
-    let ms = r
+    let walk = r
         .floor_walks(0)
         .and_then(|m| m.get(&a))
         .expect("floor-0 walks present");
     assert!(
-        ms.wander.phase_started_at >= back_at,
+        walk.wander.phase_started_at >= back_at,
         "floor-0 agent must resync its wander clock on return (got an anchor before the switch-back ⇒ replay)"
     );
 }
