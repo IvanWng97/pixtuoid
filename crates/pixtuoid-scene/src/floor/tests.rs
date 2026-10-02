@@ -1584,13 +1584,13 @@ fn both_painters(
     let board = session.board(scene, floor.motion, now);
     crate::cutaway::paint::render_cutaway(
         &stepped.frame,
-        crate::cutaway::paint::Office {
+        crate::display::Office {
             layout: &stepped.layout,
             pack: &pack,
             theme,
             scale,
         },
-        crate::cutaway::paint::Showing {
+        crate::display::Showing {
             floor,
             now,
             board: &board,

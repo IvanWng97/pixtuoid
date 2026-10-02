@@ -26,11 +26,12 @@
 //! height of the room, so its south edge would sort it in front of everything
 //! inside. No predicate rescues that; the object has to be SPLIT into pieces
 //! each of which does have a base row (the canonical "split a block to prevent
-//! a cycle"). `paint.rs` splits wall runs; this module assumes it happened, and
+//! a cycle"). `compose.rs` splits wall runs; this module assumes it happened, and
 //! `no_wall_segment_is_taller_than_the_cast` pins that no segment is tall
 //! enough to straddle a figure.
 
-use crate::layout::{Bounds, Layer};
+use super::Layer;
+use crate::layout::Bounds;
 
 /// A piece's painted bounds in LOGICAL units, inclusive on both ends, and the
 /// row it sorts on.
@@ -38,7 +39,7 @@ use crate::layout::{Bounds, Layer};
 /// The bounds hold EVERY pixel the piece's own paint writes — a repaint of the
 /// pieces whose bounds meet a damaged rect is only complete if nothing a piece
 /// draws falls outside its own. Its shadow is laid in a pass of its own under
-/// every piece and reaches further (`paint.rs`'s `Piece::reach`). The depth is
+/// every piece and reaches further ([`Piece::reach`](super::Piece::reach)). The depth is
 /// a separate fact: a person sorts on the sim's sort row, which is not the south
 /// edge of what they paint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -191,7 +192,7 @@ pub(crate) fn depth_sort<T>(items: Vec<(Span, T)>) -> Vec<T> {
 /// than a render nobody looks at.
 ///
 /// Test-only deliberately. It is O(n²) on top of the sort's own O(n²), which is
-/// affordable once over a fixture and not per frame; `paint.rs` drives it over
+/// affordable once over a fixture and not per frame; `compose.rs`'s tests drive it over
 /// a REAL laid-out office, which is the case a synthetic fixture would miss.
 #[cfg(test)]
 pub(crate) fn check_order(spans: &[Span], order: &[usize]) -> Option<(usize, usize)> {

@@ -754,7 +754,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             theme.surface.bg_fallback,
         );
         let mut cache = crate::cutaway::paint::CutawayCache::default();
-        let office = crate::cutaway::paint::Office {
+        let office = crate::display::Office {
             layout: &layout,
             pack,
             theme,
@@ -764,14 +764,14 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
         crate::cutaway::paint::render_cutaway(
             &frame,
             office,
-            crate::cutaway::paint::tests::showing(ground, now0),
+            crate::display::compose::tests::showing(ground, now0),
             &mut cache,
             &mut buf,
         );
-        let list = crate::cutaway::paint::frame_list(
+        let list = crate::display::frame_list(
             &frame,
             office,
-            crate::cutaway::paint::tests::showing(ground, now0),
+            crate::display::compose::tests::showing(ground, now0),
         );
         let anchors: Vec<_> = list.badges().map(|b| b.at).collect();
         (buf.as_slice().to_vec(), anchors)
@@ -915,13 +915,13 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
         let mut cache = crate::cutaway::paint::CutawayCache::default();
         crate::cutaway::paint::render_cutaway(
             &unlit_room(&frame),
-            crate::cutaway::paint::Office {
+            crate::display::Office {
                 layout: &layout,
                 pack,
                 theme,
                 scale,
             },
-            crate::cutaway::paint::tests::showing(
+            crate::display::compose::tests::showing(
                 crate::floor::FloorMeta::ground(),
                 desk_foot_hour(),
             ),
@@ -1070,13 +1070,13 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
         let mut cache = crate::cutaway::paint::CutawayCache::default();
         crate::cutaway::paint::render_cutaway(
             &unlit_room(frame),
-            crate::cutaway::paint::Office {
+            crate::display::Office {
                 layout: &layout,
                 pack,
                 theme,
                 scale,
             },
-            crate::cutaway::paint::tests::showing(
+            crate::display::compose::tests::showing(
                 crate::floor::FloorMeta::ground(),
                 desk_foot_hour(),
             ),

@@ -23,9 +23,9 @@ use super::furniture::{
     paint_meeting_chair, paint_notice_board, paint_side_table, paint_trash_bin, paint_water_cooler,
 };
 use crate::character::{CharacterFrame, SpritePose, character_frame};
+pub(super) use crate::display::Layer;
 use crate::effects::{Effect, STEAM_PUFFS};
 use crate::frame_cache::FrameCache;
-pub(super) use crate::layout::Layer;
 use crate::layout::{Point, SceneLayout, Size};
 use crate::pack::{DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, desk_art, desk_art_top, frame_at};
 

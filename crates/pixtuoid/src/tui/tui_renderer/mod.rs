@@ -860,7 +860,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             let footer = pixtuoid_scene::footer::FooterInputs::new(floor_scene, ctx);
             crate::tui::renderer::wall_board(&footer, floor_scene, world.floor.motion, now)
         });
-        let showing = |floor, board| pixtuoid_scene::cutaway::paint::Showing { floor, now, board };
+        let showing = |floor, board| pixtuoid_scene::display::Showing { floor, now, board };
         cutaway.paint_slide(
             crate::tui::cutaway::Slide {
                 leaving: (&from_stepped, showing(from_world.floor, &boards[0])),
@@ -938,7 +938,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         };
         let board =
             crate::tui::renderer::wall_board(&footer, &floor_scene, world.floor.motion, now);
-        let showing = pixtuoid_scene::cutaway::paint::Showing {
+        let showing = pixtuoid_scene::display::Showing {
             floor: world.floor,
             now,
             board: &board,

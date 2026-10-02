@@ -11,8 +11,8 @@ use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::format::Pack;
 
 use crate::cutaway::light::Ambient;
-use crate::cutaway::order::Span;
-use crate::cutaway::paint::{Office, Showing, frame_list, paint};
+use crate::cutaway::paint::paint;
+use crate::display::{Office, Showing, Span, frame_list};
 use crate::floor::SteppedFloor;
 use crate::layout::{Bounds, SceneLayout};
 use crate::render_scale::RenderScale;
@@ -55,7 +55,7 @@ struct Epoch {
     theme: &'static Theme,
     scale: RenderScale,
     ambient: Ambient,
-    ground: crate::cutaway::paint::Ground,
+    ground: crate::display::Ground,
     flash: crate::cutaway::light::Flash,
 }
 
@@ -74,7 +74,7 @@ struct Shown {
     epoch: Epoch,
     /// Every piece's reach and every light's span, each with its fingerprint.
     footprints: Vec<(Span, u64)>,
-    /// [`DrawList::hover_spans`](crate::cutaway::paint::DrawList::hover_spans).
+    /// [`DrawList::hover_spans`](crate::display::DrawList::hover_spans).
     hovers: Vec<(Span, Option<AgentId>)>,
 }
 
@@ -200,7 +200,7 @@ mod tests {
     use super::*;
     use crate::anim::Motion;
     use crate::cutaway::paint::render_cutaway;
-    use crate::cutaway::paint::tests::{empty_frame, lively_office, sit_down};
+    use crate::display::compose::tests::{empty_frame, lively_office, sit_down};
     use crate::floor::FloorMeta;
     use crate::pack::test_default_pack;
     use crate::sim::SimFrame;
@@ -252,7 +252,7 @@ mod tests {
         render_cutaway(
             frame,
             office,
-            crate::cutaway::paint::tests::showing(floor, now),
+            crate::display::compose::tests::showing(floor, now),
             &mut cache,
             &mut buf,
         );
@@ -299,7 +299,7 @@ mod tests {
             let list = frame_list(
                 frame,
                 office,
-                crate::cutaway::paint::tests::showing(floor, *now),
+                crate::display::compose::tests::showing(floor, *now),
             );
             let spans: Vec<(Span, u64)> = list
                 .pieces()
@@ -315,7 +315,7 @@ mod tests {
                 &stepped,
                 theme,
                 scale,
-                crate::cutaway::paint::tests::showing(floor, *now),
+                crate::display::compose::tests::showing(floor, *now),
                 &mut cache,
             );
             assert!(
@@ -484,7 +484,7 @@ mod tests {
                     &stepped,
                     theme,
                     scale,
-                    crate::cutaway::paint::tests::showing(clear_ground(), now),
+                    crate::display::compose::tests::showing(clear_ground(), now),
                     &mut cache,
                 )
                 .dirty
@@ -533,15 +533,15 @@ mod tests {
             let list = frame_list(
                 frame,
                 office,
-                crate::cutaway::paint::tests::showing(clear_ground(), Self::now()),
+                crate::display::compose::tests::showing(clear_ground(), Self::now()),
             );
             list.pieces()
                 .iter()
-                .filter(|p| !matches!(p.kind, crate::cutaway::paint::PieceKind::Badge { .. }))
+                .filter(|p| !matches!(p.kind, crate::display::PieceKind::Badge { .. }))
                 .zip(list.hover_spans())
                 .map(|(p, (span, agent))| {
                     (
-                        matches!(p.kind, crate::cutaway::paint::PieceKind::Desk { .. }),
+                        matches!(p.kind, crate::display::PieceKind::Desk { .. }),
                         span,
                         agent,
                     )
@@ -560,7 +560,7 @@ mod tests {
                 &stepped,
                 normal(),
                 self.scale,
-                crate::cutaway::paint::tests::showing(clear_ground(), Self::now()),
+                crate::display::compose::tests::showing(clear_ground(), Self::now()),
                 &mut cache,
             );
         }
@@ -687,11 +687,11 @@ mod tests {
                 let list = frame_list(
                     &both,
                     office,
-                    crate::cutaway::paint::tests::showing(clear_ground(), Hovering::now()),
+                    crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
                 );
                 // Known by its text: the sitter's badge reads otherwise.
                 list.pieces().iter().find(|p| {
-                    matches!(&p.kind, crate::cutaway::paint::PieceKind::Badge { badge } if badge.text == NEIGHBOUR)
+                    matches!(&p.kind, crate::display::PieceKind::Badge { badge } if badge.text == NEIGHBOUR)
                 })
                     .map(|p| p.span)
                     .expect("the neighbour's plate")
@@ -743,11 +743,11 @@ mod tests {
             let list = frame_list(
                 frame,
                 office,
-                crate::cutaway::paint::tests::showing(clear_ground(), Hovering::now()),
+                crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
             );
             list.pieces()
                 .iter()
-                .find(|p| matches!(p.kind, crate::cutaway::paint::PieceKind::Badge { .. }))
+                .find(|p| matches!(p.kind, crate::display::PieceKind::Badge { .. }))
                 .map(|p| (p.span, p.fingerprint))
                 .expect("a badge")
         };
@@ -769,7 +769,7 @@ mod tests {
                 &stepped,
                 normal(),
                 h.scale,
-                crate::cutaway::paint::tests::showing(clear_ground(), Hovering::now()),
+                crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
                 &mut cache,
             )
             .dirty;
@@ -794,7 +794,7 @@ mod tests {
     fn a_new_tally_repaints_only_the_board() {
         let h = Hovering::new();
         let seated = h.frames.last().expect("a seated frame");
-        let quiet = crate::cutaway::paint::tests::showing(clear_ground(), Hovering::now());
+        let quiet = crate::display::compose::tests::showing(clear_ground(), Hovering::now());
         let counts = crate::board::StateCounts {
             active: 3,
             total: 3,
@@ -815,7 +815,7 @@ mod tests {
             frame_list(seated, office, showing)
                 .pieces()
                 .iter()
-                .find(|p| matches!(p.kind, crate::cutaway::paint::PieceKind::Board { .. }))
+                .find(|p| matches!(p.kind, crate::display::PieceKind::Board { .. }))
                 .map(|p| p.span)
                 .expect("the board")
         };
@@ -861,7 +861,7 @@ mod tests {
             &stepped(0),
             normal(),
             scale,
-            crate::cutaway::paint::tests::showing(floor, now),
+            crate::display::compose::tests::showing(floor, now),
             &mut cache,
         );
         let b = stepped(1);
@@ -869,7 +869,7 @@ mod tests {
             &b,
             normal(),
             scale,
-            crate::cutaway::paint::tests::showing(floor, now),
+            crate::display::compose::tests::showing(floor, now),
             &mut cache,
         );
         assert_eq!(shown.dirty, Dirty::All);
@@ -965,7 +965,7 @@ mod tests {
                         &stepped,
                         theme,
                         scale,
-                        crate::cutaway::paint::tests::showing(
+                        crate::display::compose::tests::showing(
                             floor,
                             crate::localclock::on_day(new_moon, hour),
                         ),
