@@ -49,6 +49,14 @@ pub(crate) type Sink = Box<dyn Write + Send>;
 /// equal to it afterwards is image, any other is text.
 const SENTINEL: &str = "\u{F8FF}";
 
+/// Where a frame's cutaway lies: the scene's cells, and the office's logical
+/// extent over them.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Fitted {
+    pub(crate) scene: Rect,
+    pub(crate) office: Size,
+}
+
 /// The cutaway's canvas, its tiles, and what of them the terminal holds.
 pub(crate) struct TileCutaway {
     canvas: CutawayCanvas,
@@ -61,8 +69,8 @@ pub(crate) struct TileCutaway {
     /// [`kitty::process_base`].
     base: u32,
     fit: Fit,
-    /// The scene `fit` was last fitted to.
-    scene: Rect,
+    /// The scene `fit` was last fitted to; `None` while classic paints.
+    scene: Option<Rect>,
     tiles: Tiles,
     /// What the tiles are cut from when sent: the canvas's last frame, or a
     /// slide's two composed.
@@ -102,7 +110,7 @@ impl TileCutaway {
             tmux,
             base: kitty::process_base(),
             fit,
-            scene: Rect::default(),
+            scene: None,
             tiles: Tiles::new(protocol, cell, fit),
             image: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
             origin: Position::ORIGIN,
@@ -114,16 +122,31 @@ impl TileCutaway {
         }
     }
 
-    /// The office's logical extent over `scene`'s cells. The scale is the
-    /// cell's, so a resize changes only the extent. A resize also clears the
-    /// screen ratatui redraws, so every tile is re-sent.
-    pub(crate) fn fit_to(&mut self, scene: Rect) -> Size {
-        if scene != self.scene {
-            self.scene = scene;
-            self.fit = self.fit.over(self.cell, scene.as_size());
-            self.tiles.forget();
+    /// Fit the office over `scene`'s cells, each `cell` big where the window
+    /// reports one; `None` while that cell has no [`Fit`], when classic paints.
+    /// Every frame fits, a refused one too: any change re-sends every tile,
+    /// since a resize clears the screen ratatui redraws, a new cell cuts a new
+    /// grid, and classic paints over the image.
+    pub(crate) fn fit_to(&mut self, scene: Rect, cell: Option<CellSize>) -> Option<Fitted> {
+        let cell = cell.unwrap_or(self.cell);
+        let Some(fit) = Fit::new(cell, scene.as_size(), self.fit.density()) else {
+            self.scene = None;
+            return None;
+        };
+        if (Some(scene), cell) != (self.scene, self.cell) {
+            self.tiles = Tiles::new(self.protocol, cell, fit);
         }
-        self.fit.logical()
+        (self.scene, self.cell, self.fit) = (Some(scene), cell, fit);
+        Some(Fitted {
+            scene,
+            office: fit.logical(),
+        })
+    }
+
+    /// The office's logical extent as last fitted; `None` while classic
+    /// paints.
+    pub(crate) fn extent(&self) -> Option<Size> {
+        self.scene.map(|_| self.fit.logical())
     }
 
     /// Paint `stepped`, its top-left cell at `origin`, and queue the tiles

@@ -731,9 +731,7 @@ impl Ink {
 }
 
 /// DECRQSS only on a real tty and a non-dumb `$TERM` (`probe_ok`): the same
-/// `color_preflight` gate the launcher acts on, so the row matches `run`. Off Unix it also
-/// keeps the graphics probe, which is upstream's and writes its query to stdout, out of a
-/// piped `doctor > file`.
+/// `color_preflight` gate the launcher acts on, so the row matches `run`.
 fn probe_terminal_caps(
     probe_ok: bool,
     graphics: crate::GraphicsMode,
@@ -744,9 +742,7 @@ fn probe_terminal_caps(
     } else {
         None
     };
-    let graphics_plan = crate::graphics::plan_this_terminal(graphics, max_density, || {
-        crate::graphics::probe(probe_ok)
-    });
+    let graphics_plan = crate::graphics::plan_this_terminal(graphics, max_density, probe_ok);
     (truecolor_probe, graphics_plan)
 }
 
