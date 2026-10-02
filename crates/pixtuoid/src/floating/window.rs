@@ -69,13 +69,19 @@ pub(crate) struct FloatingApp {
     surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
 }
 
+/// How the office looks and moves.
+pub(crate) struct Appearance {
+    pub(crate) theme: &'static Theme,
+    pub(crate) motion: pixtuoid_scene::anim::Motion,
+}
+
 /// Click within this many physical px of the bottom-right corner = resize, else move.
 const RESIZE_CORNER_PX: f64 = 18.0;
 
 impl FloatingApp {
     pub(crate) fn new(
         cfg: FloatingConfig,
-        theme: &'static Theme,
+        Appearance { theme, motion }: Appearance,
         pack: Pack,
         config_path: PathBuf,
         pets: Vec<pixtuoid_scene::pet::Pet>,
@@ -91,7 +97,7 @@ impl FloatingApp {
             pack,
             config_path,
             pets,
-            motion: pixtuoid_scene::anim::Motion::Full,
+            motion,
             renderer,
             audio_ctl,
             boot: Some(boot),
@@ -103,11 +109,6 @@ impl FloatingApp {
             context: None,
             surface: None,
         }
-    }
-
-    /// This window, its office moving as `motion` says.
-    pub(crate) fn with_motion(self, motion: pixtuoid_scene::anim::Motion) -> Self {
-        Self { motion, ..self }
     }
 
     /// Persist the current window geometry into `[floating]` (best-effort — a save error

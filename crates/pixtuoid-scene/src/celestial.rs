@@ -166,12 +166,22 @@ fn star_exists(px: u16, py: u16) -> bool {
     h.is_multiple_of(STAR_SPARSITY)
 }
 
+/// The star at `(px, py)`'s own seed, which picks its cycle and its turns.
+fn star_seed(px: u16, py: u16) -> u64 {
+    (px as u64).wrapping_mul(131) ^ (py as u64).wrapping_mul(521)
+}
+
+/// How long a star seeded `seed` holds each turn.
+fn star_twinkle_cycle_ms(seed: u64) -> u64 {
+    (STAR_TWINKLE_CYCLE_BASE_BEATS + seed % STAR_TWINKLE_CYCLE_SPAN_BEATS)
+        * crate::anim::FULL_TICK_MS
+}
+
 /// Per-star twinkle: a hashed per-star cycle length, rerolled on/off each cycle.
 fn star_twinkle(px: u16, py: u16, beat: crate::anim::Beat) -> bool {
     let now_ms = beat.ms();
-    let seed = (px as u64).wrapping_mul(131) ^ (py as u64).wrapping_mul(521);
-    let cycle_ms = (STAR_TWINKLE_CYCLE_BASE_BEATS + seed % STAR_TWINKLE_CYCLE_SPAN_BEATS)
-        * crate::anim::FULL_TICK_MS;
+    let seed = star_seed(px, py);
+    let cycle_ms = star_twinkle_cycle_ms(seed);
     let phase = now_ms / cycle_ms;
     let hash = seed.wrapping_add(phase).wrapping_mul(crate::GOLDEN_GAMMA);
     (hash % 10) < 7
@@ -334,6 +344,30 @@ impl PaneSky<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A star turns only on a Full beat, and the field's cycles span every
+    /// beat count from the base to the base plus the span.
+    #[test]
+    fn a_star_twinkles_only_on_beats_across_its_cycle_range() {
+        use crate::anim::{Beat, FULL_TICK_MS};
+        let mut cycles = std::collections::BTreeSet::new();
+        for (px, py) in (0..48u16).flat_map(|x| (0..8u16).map(move |y| (x, y))) {
+            let cycle_ms = star_twinkle_cycle_ms(star_seed(px, py));
+            cycles.insert(cycle_ms / FULL_TICK_MS);
+            let mut was = star_twinkle(px, py, Beat::at_ms(0));
+            for ms in 1..3 * cycle_ms {
+                let on = star_twinkle(px, py, Beat::at_ms(ms));
+                assert!(
+                    on == was || ms % FULL_TICK_MS == 0,
+                    "({px},{py}) turned at {ms} ms, off the beat"
+                );
+                was = on;
+            }
+        }
+        let range = STAR_TWINKLE_CYCLE_BASE_BEATS
+            ..STAR_TWINKLE_CYCLE_BASE_BEATS + STAR_TWINKLE_CYCLE_SPAN_BEATS;
+        assert_eq!(cycles, range.collect(), "the cycles in beats");
+    }
 
     /// The moon's disc fades in as it rises and out as it sets, never popping
     /// a whole step between two minutes.
