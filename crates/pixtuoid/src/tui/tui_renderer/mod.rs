@@ -67,6 +67,8 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     floors: Vec<PerFloor>,
     current_floor: usize,
     transition: Option<FloorTransition>,
+    /// [`Self::office_extent`] after the last frame.
+    last_extent: Option<(u16, u16)>,
     mouse_pos: Option<(u16, u16)>,
     cached_layout: Option<Arc<SceneLayout>>,
     last_pet_pos: Option<PetFrame>,
@@ -224,6 +226,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             floors: vec![PerFloor::new()],
             current_floor: 0,
             transition: None,
+            last_extent: None,
             mouse_pos: None,
             cached_layout: None,
             last_pet_pos: None,
@@ -269,16 +272,27 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     /// The logical extent the current floor last laid out on: what a resize
-    /// changes.
-    pub(crate) fn scene_extent(&self) -> (u16, u16) {
+    /// changes, and a slide does not.
+    fn office_extent(&self) -> (u16, u16) {
         #[cfg(feature = "graphics")]
-        if self.cutaway.is_some() {
-            return self
-                .cached_layout
-                .as_deref()
-                .map_or((0, 0), |l| (l.buf_w, l.buf_h));
+        if let Some(office) = self.cutaway.as_ref().and_then(|c| c.office()) {
+            return (office.w, office.h);
         }
         (self.buf().width(), self.buf().height())
+    }
+
+    /// A frame laid out at a new extent — a resize — re-routes every floor and
+    /// lands any slide.
+    fn follow_resize(&mut self) {
+        let extent = self.office_extent();
+        if self
+            .last_extent
+            .replace(extent)
+            .is_some_and(|was| was != extent)
+        {
+            self.invalidate_routes();
+            self.cancel_transition();
+        }
     }
 
     pub(crate) fn set_audio(&mut self, audio: crate::audio::AudioHandle) {
@@ -374,7 +388,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     pub(crate) fn hit_test_agent_at(&self, col: u16, row: u16) -> Option<pixtuoid_core::AgentId> {
         let area = self.scene_area_at(col, row)?;
         #[cfg(feature = "graphics")]
-        if let Some(cutaway) = &self.cutaway {
+        if let (Some(crate::tui::geometry::SceneGeometry::Cutaway { .. }), Some(cutaway)) =
+            (self.last_geometry, &self.cutaway)
+        {
             return cutaway.hover_at(area.bounds());
         }
         crate::tui::hit_test::hit_test_agent(&self.last_agents, area)
@@ -494,12 +510,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.office.coffee.map().contains_key(&id)
     }
 
-    /// Call when the static walkable mask changes (terminal resize, floor capacity).
-    pub fn invalidate_routes(&mut self) {
+    fn invalidate_routes(&mut self) {
         for pf in &mut self.floors {
             pf.ctx.router.invalidate();
         }
     }
+
     /// Composite two floors sliding in/out during a `FloorTransition`. `nf` is the
     /// live floor count from [`Self::render`].
     fn render_transition(
@@ -557,10 +573,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 &overlays,
                 now,
             )?;
-            // This returns before ensure_size, so the floor buffer's size
-            // signature never changes and the event loop's resize detector can't
-            // fire cancel_transition: the slide would stay live for its whole
-            // `FloorTransition::duration_ms`.
+            // This returns before ensure_size, so `office_extent` holds and
+            // `follow_resize` can't land the slide: it would stay live for its
+            // whole `FloorTransition::duration_ms`.
             self.cancel_transition();
             return Ok(());
         }
@@ -698,6 +713,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     pub fn render(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
+        self.draw_frame(scene, pack, now)?;
+        self.follow_resize();
+        Ok(())
+    }
+
+    fn draw_frame(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
         if self
             .chrome
             .active_pet
@@ -733,13 +754,26 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
         #[cfg(feature = "graphics")]
         if let Some(mut cutaway) = self.cutaway.take() {
-            let drawn = if self.transition.is_some() {
-                self.render_cutaway_slide(&mut cutaway, scene, pack, now, nf)
-            } else {
-                self.render_cutaway(&mut cutaway, scene, pack, now, nf)
-            };
+            let size = self.terminal.size()?;
+            let scene_area =
+                crate::tui::renderer::scene_rect(Rect::new(0, 0, size.width, size.height));
+            let window = self
+                .terminal
+                .backend_mut()
+                .window_size()
+                .ok()
+                .and_then(crate::graphics::CellSize::of_window);
+            let drawn = cutaway.fit_to(scene_area, window).map(|fitted| {
+                if self.transition.is_some() {
+                    self.render_cutaway_slide(&mut cutaway, fitted, scene, pack, now, nf)
+                } else {
+                    self.render_cutaway(&mut cutaway, fitted, scene, pack, now, nf)
+                }
+            });
             self.cutaway = Some(cutaway);
-            return drawn;
+            if let Some(drawn) = drawn {
+                return drawn;
+            }
         }
 
         if self.transition.is_some() {
@@ -788,6 +822,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     fn render_cutaway_slide(
         &mut self,
         cutaway: &mut crate::tui::cutaway::TileCutaway,
+        fitted: crate::tui::cutaway::Fitted,
         scene: &SceneState,
         pack: &Pack,
         now: SystemTime,
@@ -807,10 +842,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             return Ok(());
         };
         self.forget_drawn();
-        let size = self.terminal.size()?;
-        let scene_area = scene_rect(Rect::new(0, 0, size.width, size.height));
         let from_scene = project_floor_scene(scene, from_floor);
         let to_scene = project_floor_scene(scene, to_floor);
+        let scene_area = fitted.scene;
         // The destination floor's footer for the whole slide, as classic's.
         let Frame {
             footer, overlays, ..
@@ -820,7 +854,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let theme = self.chrome.theme;
         let too_small = scene_area.width < crate::tui::renderer::MIN_SCENE_WIDTH
             || scene_area.height < crate::tui::renderer::MIN_SCENE_HEIGHT;
-        let size = cutaway.fit_to(scene_area);
         let (leaving, arriving) = floor_pair(&mut self.floors, from_floor, to_floor);
         let mut transition_chitchat = std::collections::HashMap::new();
         let mut step = |pf: &mut PerFloor, world| {
@@ -829,7 +862,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 &mut self.office.coffee,
                 &mut transition_chitchat,
                 world,
-                size,
+                fitted.fit.logical(),
             )
         };
         let from_world = self
@@ -861,6 +894,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         });
         let showing = |floor, board| pixtuoid_scene::cutaway::paint::Showing { floor, now, board };
         cutaway.paint_slide(
+            fitted,
             crate::tui::cutaway::Slide {
                 leaving: (&from_stepped, showing(from_world.floor, &boards[0])),
                 arriving: (&to_stepped, showing(to_world.floor, &boards[1])),
@@ -869,7 +903,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             },
             theme,
             now,
-            scene_area.as_position(),
         );
         cutaway.before_flush(now);
         let mut covered = Vec::new();
@@ -892,6 +925,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     fn render_cutaway(
         &mut self,
         cutaway: &mut crate::tui::cutaway::TileCutaway,
+        fitted: crate::tui::cutaway::Fitted,
         scene: &SceneState,
         pack: &Pack,
         now: SystemTime,
@@ -902,8 +936,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             hit_test_furniture, paint_coffee_tooltip, paint_footer, paint_furniture_tooltip,
             paint_hover_tooltip, paint_overlays, scene_rect,
         };
-        let size = self.terminal.size()?;
-        let scene_area = scene_rect(Rect::new(0, 0, size.width, size.height));
+        let scene_area = fitted.scene;
         let floor_scene = project_floor_scene(scene, self.current_floor);
         let Frame {
             world,
@@ -925,7 +958,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                     &mut self.office.coffee,
                     &mut self.office.chitchat,
                     world,
-                    cutaway.fit_to(scene_area),
+                    fitted.fit.logical(),
                 )
             })
             .flatten();
@@ -942,8 +975,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             now,
             board: &board,
         };
-        cutaway.paint(&stepped, theme, showing, scene_area.as_position());
-        let geometry = cutaway.geometry(scene_area);
+        cutaway.paint(fitted, &stepped, theme, showing);
+        let geometry = fitted.geometry();
         let layout = &stepped.layout;
         let mouse = self
             .mouse_pos
@@ -991,12 +1024,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 }
 
-/// Test-only access to the rendered ratatui frame. Specialised to `TestBackend`
+/// Test-only access to the rendered ratatui frame, through a `TestBackend`
 /// because only it exposes the post-draw cell buffer.
 #[cfg(test)]
-impl TuiRenderer<ratatui::backend::TestBackend> {
+impl<B> TuiRenderer<B>
+where
+    B: Backend<Error: Send + Sync + 'static> + std::borrow::Borrow<ratatui::backend::TestBackend>,
+{
     pub fn frame_buffer(&self) -> &ratatui::buffer::Buffer {
-        self.terminal.backend().buffer()
+        self.terminal.backend().borrow().buffer()
     }
 }
 
