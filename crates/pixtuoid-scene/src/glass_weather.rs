@@ -5,13 +5,14 @@
 
 use pixtuoid_core::sprite::Rgb;
 
+use crate::anim::Beat;
 use crate::atmosphere::Moment;
 use crate::dither::Dithered;
 use crate::layout::Size;
 use crate::sky::{Element, Weather, WeatherPolicy};
 
 /// One frame's weather on every window: [`GlassWeather::of`] once per frame.
-/// Its policy and `tick` are its whole key: two equal keys place equal marks.
+/// Its policy and `beat` are its whole key: two equal keys place equal marks.
 #[derive(Clone, Copy)]
 pub(crate) struct GlassWeather {
     /// [`SkyTones::glass_veil`](crate::atmosphere::SkyTones::glass_veil).
@@ -19,8 +20,8 @@ pub(crate) struct GlassWeather {
     /// The weather at any instant: a particle shows by its weather's share
     /// when its fall began.
     policy: WeatherPolicy,
-    /// The clock the marks move by, in ms.
-    tick: u64,
+    /// The clock the marks move by; at rest nothing falls.
+    beat: Beat,
 }
 
 /// One weather's falling particles.
@@ -212,7 +213,7 @@ impl GlassWeather {
         Self {
             veil: moment.look.glass_veil,
             policy: moment.sky.policy(),
-            tick: crate::anim::epoch_ms(moment.now),
+            beat: moment.beat,
         }
     }
 
@@ -220,7 +221,7 @@ impl GlassWeather {
     /// fall began, so it never appears or vanishes partway down.
     fn shows(&self, w: Weather, i: u64, count: u64, descent: &Descent) -> bool {
         self.policy
-            .weather_at_ms(descent.began)
+            .weather_at_ms(self.beat.wall_ms(descent.began))
             .share(Element::Precipitation, w)
             >= threshold(i, count)
     }
@@ -236,9 +237,10 @@ impl GlassWeather {
             .max()
             .unwrap_or(0);
         let mut weathers = Vec::new();
-        for w in [self.tick, self.tick.saturating_sub(slowest)]
+        let tick = self.beat.ms();
+        for w in [tick, tick.saturating_sub(slowest)]
             .into_iter()
-            .flat_map(|ms| self.policy.weather_at_ms(ms).ends())
+            .flat_map(|ms| self.policy.weather_at_ms(self.beat.wall_ms(ms)).ends())
         {
             if !weathers.contains(&w) {
                 weathers.push(w);
@@ -254,7 +256,7 @@ impl GlassWeather {
     pub(crate) fn marks(&self, idx: u16, glass: Size, d: u16) -> Vec<Mark> {
         let Size { w: gw, h: gh } = glass;
         let mut marks = Vec::new();
-        if gw == 0 || gh == 0 || d == 0 {
+        if gw == 0 || gh == 0 || d == 0 || self.beat.is_rest() {
             return marks;
         }
         let (cols, rows) = (gw * d, gh * d);
@@ -263,7 +265,7 @@ impl GlassWeather {
                 continue;
             };
             for i in 0..fall.count {
-                let descent = Descent::of(fall, idx, i, glass, self.tick);
+                let descent = Descent::of(fall, idx, i, glass, self.beat.ms());
                 if !self.shows(w, i, fall.count, &descent) {
                     continue;
                 }
@@ -289,7 +291,8 @@ impl GlassWeather {
                         }));
                     }
                     Particle::Flake => {
-                        let wiggle = u16::from(!(self.tick / WIGGLE_MS + seed).is_multiple_of(2));
+                        let wiggle =
+                            u16::from(!(self.beat.ms() / WIGGLE_MS + seed).is_multiple_of(2));
                         let side = (d / 2).max(1);
                         let x0 = (sx + wiggle) % gw * d + (d - side) / 2;
                         let y0 = sy * d + (d - side) / 2;
@@ -310,16 +313,21 @@ impl GlassWeather {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::anim::Motion;
     use crate::localclock::at_hour;
     use crate::sky::Sky;
 
     fn weather_at(w: Weather, tick_ms: u64) -> GlassWeather {
+        weather_on(Motion::Full, w, tick_ms)
+    }
+
+    fn weather_on(motion: Motion, w: Weather, tick_ms: u64) -> GlassWeather {
         let now = at_hour(12) + std::time::Duration::from_millis(tick_ms);
         GlassWeather::of(&Moment::resolve(
             Sky::at_with(now, w),
             &crate::theme::NORMAL,
             0.0,
-            now,
+            motion.clock(now),
         ))
     }
 
@@ -356,6 +364,17 @@ mod tests {
         }
     }
 
+    #[test]
+    fn nothing_falls_at_rest() {
+        let glass = Size { w: 20, h: 13 };
+        for w in Weather::ALL {
+            for tick in [0, 37, 99_999] {
+                let marks = weather_on(Motion::Still, w, tick).marks(0, glass, 4);
+                assert!(marks.is_empty(), "{w:?} {tick}");
+            }
+        }
+    }
+
     /// The tick moves the marks, and is all that does within one weather.
     #[test]
     fn equal_keys_place_equal_marks_and_the_tick_moves_them() {
@@ -389,12 +408,18 @@ mod tests {
     }
 
     /// Where each particle's fall began, and whether it shows, under the
-    /// clock at `tick` on window `idx`'s `glass`.
-    fn particles(tick: u64, idx: u16, glass: Size) -> Vec<((Weather, u64), u64, bool)> {
+    /// clock at `tick` ms on `motion`'s beat on window `idx`'s `glass`.
+    fn particles(
+        motion: Motion,
+        tick: u64,
+        idx: u16,
+        glass: Size,
+    ) -> Vec<((Weather, u64), u64, bool)> {
+        let beat = motion.beat(std::time::UNIX_EPOCH + std::time::Duration::from_millis(tick));
         let gw = GlassWeather {
             veil: Dithered::solid(None),
             policy: WeatherPolicy::Clock,
-            tick,
+            beat,
         };
         let falling = gw.falling(glass.h);
         let mut out = Vec::new();
@@ -403,7 +428,7 @@ mod tests {
                 continue;
             };
             for i in 0..f.count {
-                let descent = Descent::of(f, idx, i, glass, tick);
+                let descent = Descent::of(f, idx, i, glass, beat.ms());
                 let shows = falling.contains(&w) && gw.shows(w, i, f.count, &descent);
                 out.push(((w, i), descent.began, shows));
             }
@@ -422,9 +447,9 @@ mod tests {
         })
     }
 
-    /// A particle shows or hides for a whole fall: none appears or vanishes
-    /// partway down, through changes of every kind and the slot boundaries
-    /// after them.
+    /// A particle shows or hides for a whole fall on every moving tier: none
+    /// appears or vanishes partway down, through changes of every kind and the
+    /// slot boundaries after them.
     #[test]
     fn no_particle_appears_or_vanishes_mid_fall() {
         const CHANGES: usize = 16;
@@ -435,14 +460,17 @@ mod tests {
         for (start, here, next) in falling_changes().take(CHANGES) {
             kinds.insert((here, next));
             let end = start + crate::sky::TRANSITION_MS + MARGIN_MS;
-            for idx in 0..3 {
-                let mut prev = particles(start - MARGIN_MS, idx, glass);
+            for (motion, idx) in [Motion::Full, Motion::Calm]
+                .into_iter()
+                .flat_map(|m| (0..3).map(move |i| (m, i)))
+            {
+                let mut prev = particles(motion, start - MARGIN_MS, idx, glass);
                 for tick in (start - MARGIN_MS..end).step_by(STEP_MS).skip(1) {
-                    let now = particles(tick, idx, glass);
+                    let now = particles(motion, tick, idx, glass);
                     for ((id, began, was), (_, began_now, is)) in prev.iter().zip(&now) {
                         assert!(
                             began != began_now || was == is,
-                            "{here:?} -> {next:?}: {id:?} on window {idx} \
+                            "{motion:?} {here:?} -> {next:?}: {id:?} on window {idx} \
                              {} mid-fall at {tick}",
                             if *is { "appeared" } else { "vanished" }
                         );
@@ -455,29 +483,35 @@ mod tests {
     }
 
     /// Across a rain-to-storm change the storm's particles take over from the
-    /// rain's: all rain as it opens, all storm as the next slot does, both
-    /// between.
+    /// rain's on every moving tier: all rain as it opens, all storm as the
+    /// next slot does, both between.
     #[test]
     fn a_change_trades_one_falls_particles_for_the_others() {
         let glass = Size { w: 20, h: 28 };
         let (start, ..) = falling_changes()
             .find(|&(_, here, next)| here == Weather::Rain && next == Weather::Storm)
             .expect("the clock turns rain to storm");
-        let counts = |tick| {
-            let shown = |w| {
-                (0..8)
-                    .flat_map(|idx| particles(tick, idx, glass))
-                    .filter(|&((pw, _), _, shows)| pw == w && shows)
-                    .count()
-            };
-            (shown(Weather::Rain), shown(Weather::Storm))
-        };
         let windows = 8 * usize::try_from(RAIN.count).expect("small");
         let storms = 8 * usize::try_from(STORM.count).expect("small");
-        assert_eq!(counts(start), (windows, 0));
-        assert_eq!(counts(start + crate::sky::TRANSITION_MS), (0, storms));
-        let mid = counts(start + crate::sky::TRANSITION_MS / 3);
-        assert!(mid.0 > 0 && mid.1 > 0, "{mid:?}");
+        for motion in [Motion::Full, Motion::Calm] {
+            let counts = |tick| {
+                let shown = |w| {
+                    (0..8)
+                        .flat_map(|idx| particles(motion, tick, idx, glass))
+                        .filter(|&((pw, _), _, shows)| pw == w && shows)
+                        .count()
+                };
+                (shown(Weather::Rain), shown(Weather::Storm))
+            };
+            assert_eq!(counts(start), (windows, 0), "{motion:?}");
+            assert_eq!(
+                counts(start + crate::sky::TRANSITION_MS),
+                (0, storms),
+                "{motion:?}"
+            );
+            let mid = counts(start + crate::sky::TRANSITION_MS / 3);
+            assert!(mid.0 > 0 && mid.1 > 0, "{motion:?}: {mid:?}");
+        }
     }
 
     #[test]

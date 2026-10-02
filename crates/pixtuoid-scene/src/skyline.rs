@@ -11,7 +11,6 @@
 //! towers and a tall one shows them whole over more sky.
 
 use std::ops::RangeInclusive;
-use std::time::SystemTime;
 
 use pixtuoid_core::sprite::format::{Building, CityMaterials, CityPlane, Density, Material, Pack};
 use pixtuoid_core::sprite::{Frame, Pixel, Rgb};
@@ -152,8 +151,8 @@ const BEACON: Rgb = Rgb {
 };
 /// One of the tallest towers in this many carries a light.
 const BEACON_IN: u32 = 2;
-/// How long a light holds on, then off.
-const BEACON_HALF_MS: u64 = 1_200;
+/// How long a light holds on, then off: whole Full beats, so it flips on one.
+const BEACON_HALF_MS: u64 = 10 * crate::anim::FULL_TICK_MS;
 /// Tells the lights' hashes apart from the planes'.
 const BEACON_SALT: u32 = 0xB1EC;
 /// A separate salt for the phase: carriers all share one [`BEACON_SALT`]
@@ -178,11 +177,10 @@ fn tallest_near(pack: &Pack) -> u16 {
         .unwrap_or(u16::MAX)
 }
 
-/// Whether the light on a stand hashed `hash` shines at `now`: on and off a
+/// Whether the light on a stand hashed `hash` shines on `beat`: on and off a
 /// [`BEACON_HALF_MS`] each, out of step with its neighbours'.
-fn beacon_on(hash: u32, now: SystemTime) -> bool {
-    (crate::anim::epoch_ms(now) / BEACON_HALF_MS + u64::from(self::hash(hash ^ BEACON_PHASE_SALT)))
-        .is_multiple_of(2)
+fn beacon_on(hash: u32, beat: crate::anim::Beat) -> bool {
+    (beat.ms() / BEACON_HALF_MS + u64::from(self::hash(hash ^ BEACON_PHASE_SALT))).is_multiple_of(2)
 }
 
 /// The art pixels of a light `side` across on the tip of the building
@@ -337,7 +335,7 @@ pub(crate) fn lit(
     hash: u32,
     index: usize,
     darkness: f32,
-    now: SystemTime,
+    beat: crate::anim::Beat,
 ) -> Option<u32> {
     let depth = plane.depth();
     let r = self::hash(hash ^ depth.salt ^ (index as u32).wrapping_mul(0x2545_F491));
@@ -347,7 +345,7 @@ pub(crate) fn lit(
         return None;
     }
     let span = BLINK_CYCLE_MS.end() - BLINK_CYCLE_MS.start() + 1;
-    let turn = crate::anim::epoch_ms(now) / (BLINK_CYCLE_MS.start() + u64::from(r) % span);
+    let turn = beat.ms() / (BLINK_CYCLE_MS.start() + u64::from(r) % span);
     if self::hash(r ^ turn as u32).is_multiple_of(BLINK_OFF_IN) {
         return None;
     }
@@ -448,7 +446,7 @@ impl CityStrip {
         theme: &Theme,
         density: Density,
     ) -> Self {
-        let (look, altitude, now) = (&moment.look, moment.altitude, moment.now);
+        let (look, altitude, beat) = (&moment.look, moment.altitude, moment.beat);
         let d = density.get();
         let mut strip = CityStrip {
             w: run_w.saturating_mul(d),
@@ -466,8 +464,8 @@ impl CityStrip {
         let mut beacons: Vec<(i32, i32)> = Vec::new();
         for (plane, stand) in Skyline::of(pack, run_w, glass_h, altitude).stands() {
             let c = &colours[plane.index()];
-            let window = |i: usize| c.window(lit(plane, stand.hash(), i, look.darkness, now));
-            let beacon = carries_beacon(plane, &stand, tallest) && beacon_on(stand.hash(), now);
+            let window = |i: usize| c.window(lit(plane, stand.hash(), i, look.darkness, beat));
+            let beacon = carries_beacon(plane, &stand, tallest) && beacon_on(stand.hash(), beat);
             match stand {
                 Stand::Block { x, w, top, .. } => {
                     let (x0, y0) = (x * i32::from(d), top * i32::from(d));
@@ -592,6 +590,7 @@ fn hash(n: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::anim::{Beat, Motion};
 
     fn pack() -> Pack {
         crate::pack::test_default_pack()
@@ -739,12 +738,12 @@ mod tests {
     fn a_denser_strip_draws_the_denser_art_on_the_same_city() {
         let pack = pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let sky = crate::sky::Sky::clock(SystemTime::UNIX_EPOCH);
+        let sky = crate::sky::Sky::clock(std::time::UNIX_EPOCH);
         let strip = |d| {
             CityStrip::draw(
                 &pack,
                 (60, 20),
-                &Moment::resolve(sky, theme, 0.0, SystemTime::UNIX_EPOCH),
+                &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(std::time::UNIX_EPOCH)),
                 theme,
                 Density::new(d).expect("nonzero"),
             )
@@ -812,7 +811,7 @@ mod tests {
                     crate::sky::Sky::at_with(now, crate::sky::Weather::Clear),
                     theme,
                     0.0,
-                    now,
+                    Motion::Full.clock(now),
                 );
                 let near = PlaneColours::of(Plane::Near, &moment.look, theme);
                 let s = CityStrip::draw(
@@ -894,7 +893,7 @@ mod tests {
         let near = PlaneColours::of(
             Plane::Near,
             &SkyTones::resolve(
-                &crate::sky::Sky::at_with(SystemTime::UNIX_EPOCH, crate::sky::Weather::Clear),
+                &crate::sky::Sky::at_with(std::time::UNIX_EPOCH, crate::sky::Weather::Clear),
                 theme,
             ),
             theme,
@@ -960,7 +959,7 @@ mod tests {
             .map(|(_, s)| s.hash())
             .collect();
         assert!(carriers.len() >= 2, "{} carriers", carriers.len());
-        let now = crate::localclock::at_hour(23);
+        let now = Motion::Full.beat(crate::localclock::at_hour(23));
         let lit = carriers.iter().filter(|&&h| beacon_on(h, now)).count();
         assert!(
             0 < lit && lit < carriers.len(),
@@ -971,7 +970,7 @@ mod tests {
 
     #[test]
     fn more_windows_burn_as_it_darkens() {
-        let now = SystemTime::UNIX_EPOCH;
+        let now = Beat::at_ms(0);
         let count = |d: f32| {
             (0..2000)
                 .filter(|&i| lit(Plane::Near, 7, i, d, now).is_some())

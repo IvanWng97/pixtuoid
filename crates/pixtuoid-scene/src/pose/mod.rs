@@ -28,7 +28,7 @@ pub use pure::{
 };
 // These stay crate-internal: a `pub use` would try to widen their `pub(crate)`
 // visibility.
-pub(crate) use pure::{SpotClaims, resolve_wander_target};
+pub(crate) use pure::{SpotClaims, resolve_wander_target, typing_frame};
 
 use crate::layout::{Point, SceneLayout, desk_walk_anchor_facing};
 use crate::pathfind::Router;
@@ -45,6 +45,9 @@ pub struct RouteCtx<'a> {
     pub history: &'a mut PoseHistory,
     /// Per-agent walk-timing state, keyed by `AgentId`.
     pub motion: &'a mut HashMap<AgentId, MotionState>,
+    /// Whether an idle agent wanders off its desk: an ambient loop, so not at
+    /// [`Motion::Still`](crate::anim::Motion::Still).
+    pub wanders: bool,
 }
 
 /// Owns the stores a [`RouteCtx`] borrows, so a test threads one value.
@@ -73,6 +76,7 @@ impl<R: Router> RouteRig<R> {
             overlay: &self.overlay,
             history: &mut self.history,
             motion: &mut self.motion,
+            wanders: true,
         }
     }
 }
@@ -403,6 +407,9 @@ pub fn derive_with_routing(
         if pure::in_thinking_window(slot, now) {
             return Some(Pose::SeatedThinking);
         }
+        if !rctx.wanders {
+            return Some(Pose::SeatedIdle);
+        }
 
         // A per-frame snapshot, so the arms below never re-borrow `rctx.motion`.
         let wf = advance_wander(slot, now, layout, rctx.router, rctx.overlay, rctx.motion);
@@ -486,7 +493,7 @@ pub fn derive_with_routing(
     // state changed, so walk it from the previous rendered position instead.
     let desk_pose = matches!(
         raw,
-        Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. }
+        Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping
     );
     let since_state = crate::anim::elapsed_ms(now, slot.state_started_at);
     let mut final_settle = Settle::None;

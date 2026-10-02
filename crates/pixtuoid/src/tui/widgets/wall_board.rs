@@ -165,6 +165,7 @@ mod tests {
                 pixtuoid_scene::board::scene_uptime_secs(&scene, SystemTime::UNIX_EPOCH),
                 None,
                 Some(DaemonState::Idle),
+                pixtuoid_scene::anim::Motion::Full,
                 SystemTime::UNIX_EPOCH,
             );
             paint_wall_display(f, &model, scene_rect, &pixtuoid_scene::theme::NORMAL);
@@ -215,7 +216,14 @@ mod tests {
             };
             for ms in (0..A_MINUTE_MS).step_by(FRAME_MS) {
                 let now = SystemTime::UNIX_EPOCH + Duration::from_millis(ms);
-                let model = pixtuoid_scene::board::build_board(counts, 0, None, None, now);
+                let model = pixtuoid_scene::board::build_board(
+                    counts,
+                    0,
+                    None,
+                    None,
+                    pixtuoid_scene::anim::Motion::Full,
+                    now,
+                );
                 let l2: String = model.mood.iter().map(|s| s.text.as_str()).collect();
                 assert_eq!(display_width(&l2), l2.chars().count(), "{l2:?} at {ms}ms");
                 assert!(display_width(&l2) <= BOARD_W as usize, "{l2:?} at {ms}ms");

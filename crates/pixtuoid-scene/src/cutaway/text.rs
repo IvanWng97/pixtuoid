@@ -262,6 +262,7 @@ pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::anim::Motion;
 
     /// Every character the wall board and the floor indicator write: each
     /// mood over two flap cycles, each gateway state, many floors.
@@ -309,7 +310,7 @@ mod tests {
         for (counts, gateway) in moods.into_iter().zip(gateways.into_iter().cycle()) {
             for ms in (0..32_000).step_by(20) {
                 let now = std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms);
-                let board = build_board(counts, 3_700, Some((2, 3)), gateway, now);
+                let board = build_board(counts, 3_700, Some((2, 3)), gateway, Motion::Full, now);
                 for seg in [&board.brand, &board.star]
                     .into_iter()
                     .chain(&board.mood)

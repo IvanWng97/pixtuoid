@@ -1,6 +1,7 @@
 use super::background::paint_corridor_runner;
 use super::drawable::paint_character_at;
 use super::*;
+use crate::anim::{Motion, epoch_ms};
 use crate::character::test_support::{color_of, make_slot, make_slot_cwd};
 use crate::character::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, tool_glow_tint};
 use crate::floor::{FloorInputs, PetInputs};
@@ -1739,7 +1740,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
         scene: &scene,
         layout,
         pack: &pack,
-        now,
+        clock: Motion::Full.clock(now),
         sky: crate::sky::Sky::clock(now),
         buf: &mut buf,
         cache: &mut cache,
@@ -1759,7 +1760,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
             floor_idx: 0,
             indoor_scale: frame.indoor_scale,
             neon: frame.neon,
-            now,
+            beat: ctx.clock.beat,
         },
     );
     queue_fixtures(
@@ -2368,7 +2369,7 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
             anchor,
             drawn.map(|s| s.w),
             crate::sim::Cues::default(),
-            now,
+            Motion::Full.clock(now),
         );
         super::effects::paint_effects(
             &mut buf,
@@ -2421,7 +2422,9 @@ fn a_top_burning_placement_carries_its_crown_on_its_anchor() {
     // A breathing instant, where the post-breath anchor is off the fit.
     let now = (0..u64::from(u16::MAX))
         .map(|ms| now0 + std::time::Duration::from_millis(ms))
-        .find(|&t| crate::sim::anchors::with_breath(Point { x: 0, y: 1 }, id, t).y == 0)
+        .find(|&t| {
+            crate::sim::anchors::with_breath(Point { x: 0, y: 1 }, id, Motion::Full.beat(t)).y == 0
+        })
         .expect("the breath rises within a cycle");
     let slot = scene.agents.get_mut(&id).expect("the rig's agent");
     slot.model = Some("claude-fable-5".into());
@@ -2435,7 +2438,7 @@ fn a_top_burning_placement_carries_its_crown_on_its_anchor() {
             &pack,
             CHARACTER_SPRITE_W,
             &HashMap::new(),
-            now,
+            Motion::Full.clock(now),
         );
         let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
         let crowns: Vec<Point> = p
@@ -2643,7 +2646,7 @@ fn furniture_room_decor_large_bounds_paint() {
         paint_water_cooler(
             b,
             big_pantry.water_cooler_rect().expect("fits"),
-            std::time::SystemTime::UNIX_EPOCH,
+            Motion::Full.beat(std::time::SystemTime::UNIX_EPOCH),
             theme,
         )
     });
@@ -2707,7 +2710,12 @@ fn furniture_painters_fill_exactly_their_rect_authority() {
         "doormat paints exactly its rect",
     );
     assert_eq!(
-        painted_bbox(&|b| paint_water_cooler(b, cooler, std::time::SystemTime::UNIX_EPOCH, theme)),
+        painted_bbox(&|b| paint_water_cooler(
+            b,
+            cooler,
+            Motion::Full.beat(std::time::SystemTime::UNIX_EPOCH),
+            theme
+        )),
         Some(cooler),
         "water cooler paints exactly its rect (glug bubble stays inside)",
     );
@@ -3076,7 +3084,7 @@ fn seat_desk_is_set_exactly_when_the_sim_seats_someone_at_a_desk() {
                     "a WALKING agent is not seated at a desk (t={ms}ms)"
                 );
             }
-            Some(Some(Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. })) => {
+            Some(Some(Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping)) => {
                 seated_seen = true;
                 let desk = c.seat_desk.expect("a seated agent carries its desk");
                 assert!(
@@ -3143,7 +3151,7 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
     for (i, props) in fresh.iter().enumerate() {
         assert_eq!(
             props.scanline,
-            crate::sim::scanline_col(layout.home_desks[i].x, now0),
+            crate::sim::scanline_col(layout.home_desks[i].x, Motion::Full.beat(now0)),
             "desk {i}'s scanline is its own column's"
         );
         if i != desk {
@@ -3436,7 +3444,7 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
             scene: &scene,
             layout: &layout,
             pack: &pack,
-            now,
+            clock: Motion::Full.clock(now),
             sky: crate::sky::Sky::clock(now),
             buf: &mut buf,
             cache: &mut FrameCache::new(),
@@ -3687,7 +3695,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             scene: &scene,
             layout: &layout,
             pack: &pack,
-            now,
+            clock: Motion::Full.clock(now),
             sky: crate::sky::Sky::clock(now),
             buf: &mut buf,
             cache: &mut FrameCache::new(),
@@ -3757,7 +3765,7 @@ fn a_character_whose_anim_is_missing_is_not_hoverable() {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now: SystemTime::UNIX_EPOCH,
+                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
                 theme: crate::theme::theme_by_name("normal").expect("normal theme"),
             },
         )
@@ -3815,7 +3823,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 scene: &scene,
                 layout: &layout,
                 pack: &pack,
-                now,
+                clock: Motion::Full.clock(now),
                 sky: crate::sky::Sky::clock(now),
                 buf,
                 cache: &mut cache,
@@ -4022,7 +4030,7 @@ fn fish_tank_paints_water_fish_and_cabinet_from_the_furniture_row() {
     let mut buf = RgbBuffer::filled(60, 40, floor);
     let pos = Point { x: 30, y: 20 };
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(1_234_567);
-    furniture::paint_fish_tank(&mut buf, pos, now, theme);
+    furniture::paint_fish_tank(&mut buf, pos, Motion::Full.beat(now), theme);
     let def = furniture_def(Furniture::FishTank);
     let (x0, y0) = (pos.x - def.visual.w / 2, pos.y - def.visual.h / 2);
     let fc = &theme.furniture;
@@ -4185,7 +4193,8 @@ fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
             buf: &mut buf,
             pack: &pack,
             cache: &mut cache,
-            now: SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms),
+            clock: Motion::Full
+                .clock(SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms)),
             theme: crate::theme::theme_by_name("normal").expect("theme"),
         },
     );
@@ -4274,7 +4283,7 @@ fn water_cooler_glugs_a_rising_bubble() {
         furniture::paint_water_cooler(
             &mut buf,
             pantry.water_cooler_rect().expect("fits"),
-            SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms),
+            Motion::Full.beat(SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms)),
             theme,
         );
         buf
@@ -4484,9 +4493,7 @@ fn a_placement_is_seated_exactly_when_its_figure_sits_on_furniture() {
         for c in &frame.characters {
             let id = frame.agents[c.agent_idx].agent_id;
             let sits = match frame.poses.get(&id) {
-                Some(Some(Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. })) => {
-                    true
-                }
+                Some(Some(Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping)) => true,
                 Some(Some(Pose::AtWaypoint { kind, .. })) => matches!(
                     kind,
                     WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair
@@ -4942,7 +4949,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 scene: &scene,
                 layout: &layout,
                 pack: &pack,
-                now,
+                clock: Motion::Full.clock(now),
                 sky: crate::sky::Sky::clock(now),
                 buf: &mut buf,
                 cache: &mut cache,
@@ -5172,7 +5179,7 @@ fn paint_drawn(
             scene,
             layout,
             pack,
-            now,
+            clock: Motion::Full.clock(now),
             sky: crate::sky::Sky::clock(now),
             buf: &mut buf,
             cache: &mut FrameCache::new(),
@@ -5297,7 +5304,9 @@ fn only_a_placement_that_breathes_takes_the_breath() {
     let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
     let now = (0..u64::from(u16::MAX))
         .map(|ms| now0 + std::time::Duration::from_millis(ms))
-        .find(|&t| crate::sim::anchors::with_breath(Point { x: 0, y: 1 }, id, t).y == 0)
+        .find(|&t| {
+            crate::sim::anchors::with_breath(Point { x: 0, y: 1 }, id, Motion::Full.beat(t)).y == 0
+        })
         .expect("the breath rises within a cycle");
     let mid = Point {
         x: layout.buf_w / 2,
@@ -5312,7 +5321,7 @@ fn only_a_placement_that_breathes_takes_the_breath() {
             &pack,
             CHARACTER_SPRITE_W,
             &HashMap::new(),
-            now,
+            Motion::Full.clock(now),
         );
         let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
         p
@@ -5374,7 +5383,7 @@ fn co_located_visitors_badges_step_aside_with_their_sprites() {
         &pack,
         CHARACTER_SPRITE_W,
         &HashMap::new(),
-        now,
+        Motion::Full.clock(now),
     );
     let drawn = paint_drawn(&owned, &scene, &layout, &pack, now, &frame);
     assert_eq!(drawn.len(), 3, "premise: all three are drawn");
@@ -5568,7 +5577,7 @@ fn paint_flame_crown_draws_its_pattern() {
     const W: u16 = 8;
     super::effects::paint_effect(
         &mut buf,
-        &crate::effects::flame_crown(anchor, W, SystemTime::UNIX_EPOCH),
+        &crate::effects::flame_crown(anchor, W, Motion::Full.beat(SystemTime::UNIX_EPOCH)),
         crate::theme::theme_by_name("normal").expect("normal theme"),
     );
     let painted: Vec<(u16, u16)> = (0..buf.height())

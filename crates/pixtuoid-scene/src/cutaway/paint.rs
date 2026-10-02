@@ -348,11 +348,12 @@ pub(crate) fn frame_list<'a>(
     office: Office<'a>,
     Showing { floor, now, board }: Showing<'_>,
 ) -> DrawList<'a> {
+    let clock = floor.motion.clock(now);
     let moment = Moment::resolve(
-        crate::sky::Sky::at(now, floor.weather),
+        crate::sky::Sky::at(clock, floor.weather),
         office.theme,
         floor.altitude,
-        now,
+        clock,
     );
     build_list(frame, office, &moment, floor, board)
 }
@@ -667,7 +668,7 @@ fn lights(
             floor_idx,
             indoor_scale: frame.indoor_scale,
             neon: frame.neon,
-            now: moment.now,
+            beat: moment.beat,
         },
     );
     let pen = Pen::for_pack(scale, pack);
@@ -1414,7 +1415,7 @@ fn push_fixture(
             centre,
             Art::still("filing_cabinet"),
             depth,
-            Motion::Still,
+            Playback::Held,
         ),
         K::DeskChair(i) => {
             let Some(&desk) = layout.home_desks.get(i.0) else {
@@ -1441,7 +1442,7 @@ fn push_fixture(
                             wp.pos,
                             Art::still(sprite),
                             depth,
-                            Motion::Still,
+                            Playback::Held,
                         );
                     }
                 }
@@ -1451,7 +1452,7 @@ fn push_fixture(
                     wp.pos,
                     Art::still("snack_shelf"),
                     depth,
-                    Motion::Still,
+                    Playback::Held,
                 ),
                 Station::VendingMachine | Station::Printer => {
                     let Some(sprite) = crate::pack::appliance_sprite(wp.kind) else {
@@ -1463,10 +1464,10 @@ fn push_fixture(
                     let busy = frame.occupied_waypoints.contains(&waypoint);
                     let art = Art {
                         sprite,
-                        frame: crate::pack::appliance_frame_index(anim, busy, moment.now),
+                        frame: crate::pack::appliance_frame_index(anim, busy, moment.beat),
                         flip: Flip::None,
                     };
-                    push_art(order, pack, wp.pos, art, depth, Motion::Playing);
+                    push_art(order, pack, wp.pos, art, depth, Playback::Looping);
                 }
             }
         }
@@ -1476,7 +1477,7 @@ fn push_fixture(
             centre,
             Art::still(kind.sprite_name()),
             depth,
-            Motion::Still,
+            Playback::Held,
         ),
         K::Pod { kind, .. } => push_art(
             order,
@@ -1484,7 +1485,7 @@ fn push_fixture(
             centre,
             Art::still(kind.sprite_name()),
             depth,
-            Motion::Still,
+            Playback::Held,
         ),
         K::Wall { kind, .. } if kind.stands_on_floor() => push_art(
             order,
@@ -1492,7 +1493,7 @@ fn push_fixture(
             centre,
             Art::still(kind.sprite_name()),
             depth,
-            Motion::Still,
+            Playback::Held,
         ),
         K::Wall { kind, .. } => push_hung(order, pack, top_left, kind.sprite_name(), depth),
         K::NoticeBoard { .. } => push_hung(order, pack, top_left, "notice_board", depth),
@@ -1540,7 +1541,7 @@ fn push_fixture(
                 frame: 0,
                 flip,
             };
-            push_art(order, pack, centre, art, depth, Motion::Still);
+            push_art(order, pack, centre, art, depth, Playback::Held);
         }
         K::CoatRack { .. } => push_art(
             order,
@@ -1548,7 +1549,7 @@ fn push_fixture(
             centre,
             Art::still("coat_rack"),
             depth,
-            Motion::Still,
+            Playback::Held,
         ),
         K::SideTable => push_art(
             order,
@@ -1556,7 +1557,7 @@ fn push_fixture(
             centre,
             Art::still("side_table"),
             depth,
-            Motion::Still,
+            Playback::Held,
         ),
         K::FloorLamp => push_art(
             order,
@@ -1564,7 +1565,7 @@ fn push_fixture(
             centre,
             Art::still("floor_lamp"),
             depth,
-            Motion::Still,
+            Playback::Held,
         ),
         K::KitchenIsland => push_art(
             order,
@@ -1572,7 +1573,7 @@ fn push_fixture(
             centre,
             Art::still("kitchen_island"),
             depth,
-            Motion::Still,
+            Playback::Held,
         ),
         K::TrashBin => push_art(
             order,
@@ -1580,10 +1581,24 @@ fn push_fixture(
             centre,
             Art::still("pantry_bin"),
             depth,
-            Motion::Still,
+            Playback::Held,
         ),
-        K::FishTank => push_looping(order, pack, centre, "fish_tank", moment.now, depth),
-        K::WaterCooler => push_looping(order, pack, centre, "water_cooler", moment.now, depth),
+        K::FishTank => push_looping(
+            order,
+            pack,
+            centre,
+            crate::pack::FISH_TANK_SPRITE,
+            moment.beat,
+            depth,
+        ),
+        K::WaterCooler => push_looping(
+            order,
+            pack,
+            centre,
+            crate::pack::WATER_COOLER_SPRITE,
+            moment.beat,
+            depth,
+        ),
         K::Door => {
             let Some((w, h)) = art_size(pack, DOOR_SPRITE) else {
                 return;
@@ -1636,9 +1651,9 @@ fn push_fixture(
 
 /// Whether an art piece's frame moves between builds.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Motion {
-    Still,
-    Playing,
+enum Playback {
+    Held,
+    Looping,
 }
 
 fn push_art(
@@ -1647,14 +1662,14 @@ fn push_art(
     at: Point,
     art: Art,
     depth: u16,
-    motion: Motion,
+    playback: Playback,
 ) {
     let Some((w, h)) = art_size(pack, art.sprite) else {
         return;
     };
-    let kind = match motion {
-        Motion::Still => PieceKind::Prop { at, art },
-        Motion::Playing => PieceKind::Animated { at, art },
+    let kind = match playback {
+        Playback::Held => PieceKind::Prop { at, art },
+        Playback::Looping => PieceKind::Animated { at, art },
     };
     order.push((
         piece_span(crate::layout::Pivot::Center, at, w, h, 0).with_depth(depth),
@@ -1667,7 +1682,7 @@ fn push_looping(
     pack: &Pack,
     at: Point,
     sprite: &'static str,
-    now: std::time::SystemTime,
+    beat: crate::anim::Beat,
     depth: u16,
 ) {
     let Some(anim) = pack.animation(sprite) else {
@@ -1675,10 +1690,10 @@ fn push_looping(
     };
     let art = Art {
         sprite,
-        frame: crate::pack::looping_frame_index(anim, now),
+        frame: crate::pack::looping_frame_index(anim, beat),
         flip: Flip::None,
     };
-    push_art(order, pack, at, art, depth, Motion::Playing);
+    push_art(order, pack, at, art, depth, Playback::Looping);
 }
 
 fn push_hung(
@@ -3467,6 +3482,7 @@ fn paint_chair(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::anim::Motion;
     use crate::pack::test_default_pack;
 
     /// The wall board of an empty office, which no clock moves: for frames
@@ -3479,6 +3495,7 @@ pub(crate) mod tests {
                     0,
                     None,
                     None,
+                    crate::anim::Motion::Full,
                     std::time::UNIX_EPOCH,
                 )
             });
@@ -4343,7 +4360,7 @@ pub(crate) mod tests {
                 crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                 theme,
                 0.0,
-                std::time::UNIX_EPOCH,
+                Motion::Full.clock(std::time::UNIX_EPOCH),
             ),
         );
         let (person, person_span) = order
@@ -4576,7 +4593,14 @@ pub(crate) mod tests {
         let gateway = Some(pixtuoid_core::state::DaemonState::Degraded);
         for ms in (0..16_000).step_by(100) {
             let now = std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms);
-            let board = crate::board::build_board(counts, 99 * 3_600, Some((12, 12)), gateway, now);
+            let board = crate::board::build_board(
+                counts,
+                99 * 3_600,
+                Some((12, 12)),
+                gateway,
+                crate::anim::Motion::Full,
+                now,
+            );
             let span = board_span(&board, Pen::for_pack(scale, &pack));
             assert!(
                 span.x0 >= NEON_PANEL_INNER_X
@@ -4918,7 +4942,7 @@ pub(crate) mod tests {
                     crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                     theme,
                     0.0,
-                    std::time::UNIX_EPOCH,
+                    Motion::Full.clock(std::time::UNIX_EPOCH),
                 ),
             ) {
                 let PieceKind::Character {
@@ -5015,7 +5039,7 @@ pub(crate) mod tests {
                 crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                 theme,
                 0.0,
-                std::time::UNIX_EPOCH,
+                Motion::Full.clock(std::time::UNIX_EPOCH),
             ),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
@@ -5083,7 +5107,12 @@ pub(crate) mod tests {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let frame = empty_frame(layout);
         let now = std::time::UNIX_EPOCH;
-        let moment = Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now);
+        let moment = Moment::resolve(
+            crate::sky::Sky::clock(now),
+            theme,
+            0.0,
+            Motion::Full.clock(now),
+        );
         let build = Build {
             frame: &frame,
             office: Office {
@@ -5250,7 +5279,7 @@ pub(crate) mod tests {
             crate::sky::Sky::at_with(now, w),
             &crate::theme::NORMAL,
             0.0,
-            now,
+            Motion::Full.clock(now),
         )
     }
 
@@ -5392,7 +5421,7 @@ pub(crate) mod tests {
                     crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                     theme,
                     0.0,
-                    std::time::UNIX_EPOCH,
+                    Motion::Full.clock(std::time::UNIX_EPOCH),
                 );
                 for (span, kind) in collect_pieces(frame, office, &moment)
                     .into_iter()
@@ -5692,7 +5721,7 @@ S B B B B B B S
                 let list = build_list(
                     &frame,
                     office,
-                    &Moment::resolve(sky, theme, 0.0, now),
+                    &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(now)),
                     crate::floor::FloorMeta::ground(),
                     quiet_board(),
                 );
@@ -5764,8 +5793,13 @@ S B B B B B B S
             name: "OpenClaw",
             instance: None,
             state: pixtuoid_core::state::DaemonState::Busy,
-            effects: crate::effects::mascot_bubbles(lobster, 12, 2, std::time::UNIX_EPOCH)
-                .collect(),
+            effects: crate::effects::mascot_bubbles(
+                lobster,
+                12,
+                2,
+                Motion::Full.beat(std::time::UNIX_EPOCH),
+            )
+            .collect(),
             active_sessions: 1,
         }];
         // a second gateway, degraded, nearer the viewer so it sorts last
@@ -5870,7 +5904,7 @@ S B B B B B B S
                     theme,
                     scale: RenderScale::ONE,
                 },
-                &Moment::resolve(sky, theme, 0.0, now),
+                &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(now)),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
             );
@@ -5942,7 +5976,7 @@ S B B B B B B S
             c.effects = vec![crate::effects::flame_crown(
                 c.anchor,
                 8,
-                std::time::UNIX_EPOCH,
+                Motion::Full.beat(std::time::UNIX_EPOCH),
             )];
         }
         for s in [1, pack.max_density_variant().get()] {
@@ -6009,7 +6043,12 @@ S B B B B B B S
                             theme,
                             scale,
                         },
-                        &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
+                        &Moment::resolve(
+                            crate::sky::Sky::clock(now),
+                            theme,
+                            0.0,
+                            Motion::Full.clock(now),
+                        ),
                         crate::floor::FloorMeta::ground(),
                         quiet_board(),
                     );
@@ -6058,7 +6097,12 @@ S B B B B B B S
                     theme,
                     scale,
                 },
-                &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
+                &Moment::resolve(
+                    crate::sky::Sky::clock(now),
+                    theme,
+                    0.0,
+                    Motion::Full.clock(now),
+                ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
             );
@@ -6094,7 +6138,7 @@ S B B B B B B S
         build_list(
             frame,
             office,
-            &Moment::resolve(sky, office.theme, 0.0, now),
+            &Moment::resolve(sky, office.theme, 0.0, Motion::Full.clock(now)),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
         )
@@ -6871,7 +6915,12 @@ S B B B B B B S
                             theme,
                             scale,
                         },
-                        &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
+                        &Moment::resolve(
+                            crate::sky::Sky::clock(now),
+                            theme,
+                            0.0,
+                            Motion::Full.clock(now),
+                        ),
                         crate::floor::FloorMeta::ground(),
                         quiet_board(),
                     );
@@ -6980,7 +7029,12 @@ S B B B B B B S
                     theme,
                     scale: RenderScale::ONE
                 },
-                &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
+                &Moment::resolve(
+                    crate::sky::Sky::clock(now),
+                    theme,
+                    0.0,
+                    Motion::Full.clock(now)
+                ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board()
             )),
@@ -6992,7 +7046,12 @@ S B B B B B B S
                     theme,
                     scale: RenderScale::ONE
                 },
-                &Moment::resolve(crate::sky::Sky::clock(now), theme, 0.0, now),
+                &Moment::resolve(
+                    crate::sky::Sky::clock(now),
+                    theme,
+                    0.0,
+                    Motion::Full.clock(now)
+                ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board()
             )),
@@ -7018,7 +7077,7 @@ S B B B B B B S
                     crate::sky::Sky::clock(std::time::SystemTime::UNIX_EPOCH),
                     theme,
                     0.0,
-                    std::time::SystemTime::UNIX_EPOCH,
+                    Motion::Full.clock(std::time::SystemTime::UNIX_EPOCH),
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
@@ -7097,8 +7156,9 @@ S B B B B B B S
         let at = |ms| std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms);
         vec![
             crate::effects::walking_dust(anchor, 0),
-            crate::effects::flame_crown(anchor, 8, at(0)),
-            crate::effects::sleep_z(anchor, 0, at(500)).expect("a z rising at 500 ms"),
+            crate::effects::flame_crown(anchor, 8, Motion::Full.beat(at(0))),
+            crate::effects::sleep_z(anchor, 0, Motion::Full.beat(at(500)))
+                .expect("a z rising at 500 ms"),
             crate::effects::waiting_mark(anchor),
         ]
     }
@@ -7404,7 +7464,7 @@ S B B B B B B S
         build_list(
             frame,
             office,
-            &Moment::resolve(sky, office.theme, 0.0, now),
+            &Moment::resolve(sky, office.theme, 0.0, Motion::Full.clock(now)),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
         )

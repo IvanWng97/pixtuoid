@@ -453,13 +453,15 @@ fn board_mood_at(counts: StateCounts, now_ms: u64) -> Vec<BoardSegment> {
 
 /// Assemble the whole board model. `floor` is `(current, total_floors)` — a
 /// single-floor office passes `None`; `gateway` is the [`gateway_rollup`], where
-/// `None` suppresses the chip; `now` drives L2's flap. The context separators
-/// (`"  "`) are baked into each following segment so painters just concatenate.
+/// `None` suppresses the chip; `now` on `motion`'s beat drives L2's flap. The
+/// context separators (`"  "`) are baked into each following segment so
+/// painters just concatenate.
 pub fn build_board(
     counts: StateCounts,
     uptime_secs: u64,
     floor: Option<(usize, usize)>,
     gateway: Option<DaemonState>,
+    motion: crate::anim::Motion,
     now: SystemTime,
 ) -> BoardModel {
     let mut context = vec![BoardSegment::new(
@@ -481,7 +483,7 @@ pub fn build_board(
     BoardModel {
         brand: BoardSegment::new(BOARD_BRAND, BoardTone::Brand),
         star: BoardSegment::new(BOARD_STAR, BoardTone::Star),
-        mood: board_mood_at(counts, crate::anim::epoch_ms(now)),
+        mood: board_mood_at(counts, motion.beat(now).ms()),
         context,
     }
 }
@@ -489,6 +491,7 @@ pub fn build_board(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::anim::Motion;
 
     fn mood_text(counts: StateCounts) -> String {
         board_mood_segments(counts)
@@ -552,7 +555,14 @@ mod tests {
     fn the_brand_carries_no_version_so_a_release_cannot_drift_committed_media() {
         assert_eq!(BOARD_BRAND, "pixtuoid");
         assert!(!BOARD_BRAND.contains(env!("CARGO_PKG_VERSION")));
-        let b = build_board(counts(1, 0, 0), 0, None, None, SystemTime::UNIX_EPOCH);
+        let b = build_board(
+            counts(1, 0, 0),
+            0,
+            None,
+            None,
+            Motion::Full,
+            SystemTime::UNIX_EPOCH,
+        );
         assert_eq!(b.brand.text, BOARD_BRAND);
     }
 
@@ -930,7 +940,7 @@ mod tests {
             exiting: 0,
             total: 3,
         };
-        let b = build_board(c, 3661, None, None, SystemTime::UNIX_EPOCH);
+        let b = build_board(c, 3661, None, None, Motion::Full, SystemTime::UNIX_EPOCH);
         assert_eq!(b.brand.tone, BoardTone::Brand);
         assert_eq!(b.mood, board_mood_segments(c), "the epoch is a whole hour");
         assert_eq!(b.star.text, BOARD_STAR);
@@ -944,6 +954,7 @@ mod tests {
             30,
             Some((2, 3)),
             Some(DaemonState::Busy),
+            Motion::Full,
             SystemTime::UNIX_EPOCH,
         );
         let ctx: String = b2.context.iter().map(|s| s.text.clone()).collect();

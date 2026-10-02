@@ -64,10 +64,11 @@ fn plot_sleep_z(
     }
 }
 
-/// How long a steam puff holds each row of its rise.
-const STEAM_ROW_MS: u64 = 140;
-/// How long it holds each side of its wiggle.
-const STEAM_WIGGLE_MS: u64 = 200;
+/// How long a steam puff holds each row of its rise: one Full beat, so it
+/// rises evenly.
+const STEAM_ROW_MS: u64 = crate::anim::FULL_TICK_MS;
+/// How long it holds each side of its wiggle, in whole beats.
+const STEAM_WIGGLE_MS: u64 = 2 * crate::anim::FULL_TICK_MS;
 
 fn plot_steam_puff(
     plot: &mut impl FnMut(u16, u16, Rgb, f32),

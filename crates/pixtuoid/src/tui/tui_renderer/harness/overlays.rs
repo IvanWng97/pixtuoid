@@ -656,3 +656,36 @@ fn hovered_then_removed_agent_is_a_safe_noop() {
     r.render(&empty, pack(), t0() + Duration::from_millis(33))
         .expect("render must not panic when the hovered agent vanished");
 }
+
+/// A Still floor's wall board holds its flap: an instant where the same office
+/// under Full rolls its board within one beat leaves the Still board as it was.
+#[test]
+fn a_still_floor_holds_its_wall_board_flap() {
+    use pixtuoid_scene::anim::{FULL_TICK_MS, Motion};
+    let scene = scene_with(vec![active("/t/0.jsonl", 0, "Edit a.rs", t0())], 16);
+    let (cols, rows) = (
+        pixtuoid_scene::layout::NEON_PANEL_W + 2,
+        pixtuoid_scene::layout::NEON_PANEL_INNER_Y / 2 + 3,
+    );
+    let board_at = |motion, at| {
+        let mut r = build(120, 40, vec![]);
+        r.set_motion(motion);
+        r.render(&scene, pack(), at).expect("render");
+        let buf = r.frame_buffer();
+        (0..rows)
+            .flat_map(|y| (0..cols).map(move |x| (x, y)))
+            .map(|cell| buf.cell(cell).map(|c| c.symbol().to_string()))
+            .collect::<Vec<_>>()
+    };
+    let beat = Duration::from_millis(FULL_TICK_MS);
+    // One flap cycle is two halves of whole beats; some beat in it rolls.
+    let rolling = (0..64)
+        .map(|n| t0() + beat * n)
+        .find(|&at| board_at(Motion::Full, at) != board_at(Motion::Full, at + beat))
+        .expect("a Full board rolls its flap within a cycle");
+    assert_eq!(
+        board_at(Motion::Still, rolling),
+        board_at(Motion::Still, rolling + beat),
+        "the Still board rolled"
+    );
+}

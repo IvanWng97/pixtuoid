@@ -72,11 +72,15 @@ fn first_trip_cycle(agent_id: AgentId) -> u64 {
 fn active_state_is_seated_typing_with_cycling_frame() {
     let (s, now) = slot(typing(), 0);
     let l = layout();
-    assert_eq!(derive(&s, now, &l), Some(Pose::SeatedTyping { frame: 0 }));
-    let (s, now) = slot(typing(), TYPING_FRAME_MS);
-    assert_eq!(derive(&s, now, &l), Some(Pose::SeatedTyping { frame: 1 }));
-    let (s, now) = slot(typing(), TYPING_FRAME_MS * 2);
-    assert_eq!(derive(&s, now, &l), Some(Pose::SeatedTyping { frame: 0 }));
+    assert_eq!(derive(&s, now, &l), Some(Pose::SeatedTyping));
+    let frame = |ms| typing_frame(&s, crate::anim::Beat::at_ms(ms));
+    assert_ne!(frame(0), frame(TYPING_FRAME_MS), "it keys every frame");
+    assert_eq!(frame(0), frame(TYPING_FRAME_MS * 2));
+    assert_eq!(
+        typing_frame(&s, crate::anim::Motion::Still.beat(now)),
+        0,
+        "at rest a typist holds the first frame"
+    );
 }
 
 /// Waiting gets NO pose of its own — it rides `SeatedIdle`, so a back-turned
@@ -663,7 +667,7 @@ fn derive_state_only_skips_entry_override() {
     }
 
     match derive_state_only(&s, probe, &l).expect("derive_state_only pose") {
-        Pose::SeatedTyping { .. } => {}
+        Pose::SeatedTyping => {}
         other => panic!(
             "derive_state_only should return SeatedTyping for Active slot in entry window, got {other:?}"
         ),

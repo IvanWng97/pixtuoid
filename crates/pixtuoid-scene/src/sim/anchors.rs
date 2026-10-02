@@ -7,7 +7,6 @@ use std::time::SystemTime;
 use crate::layout::{Pivot, SEAT_RENDER_Y_OFF, SceneLayout, Size, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
-use crate::anim::epoch_ms;
 use crate::layout::{Point, WaypointKind};
 use crate::pose;
 use crate::sim::seat::Seat;
@@ -37,8 +36,8 @@ pub(crate) fn waypoint_anchor(wp: Point, sprite_w: u16) -> Point {
 
 /// One-pixel vertical bob on a `CYCLE_MS` cycle with a per-agent phase offset, so
 /// static (seated / standing) characters look alive instead of frozen.
-fn breath_offset_y(agent_id: pixtuoid_core::AgentId, now: SystemTime) -> u16 {
-    let elapsed_ms = epoch_ms(now);
+fn breath_offset_y(agent_id: pixtuoid_core::AgentId, beat: crate::anim::Beat) -> u16 {
+    let elapsed_ms = beat.ms();
     const CYCLE_MS: u64 = 4500;
     let offset_ms = agent_id.raw() % CYCLE_MS;
     let phase = elapsed_ms.wrapping_add(offset_ms) % CYCLE_MS;
@@ -48,11 +47,11 @@ fn breath_offset_y(agent_id: pixtuoid_core::AgentId, now: SystemTime) -> u16 {
 pub(crate) fn with_breath(
     anchor: Point,
     agent_id: pixtuoid_core::AgentId,
-    now: SystemTime,
+    beat: crate::anim::Beat,
 ) -> Point {
     Point {
         x: anchor.x,
-        y: anchor.y.saturating_sub(breath_offset_y(agent_id, now)),
+        y: anchor.y.saturating_sub(breath_offset_y(agent_id, beat)),
     }
 }
 
@@ -152,13 +151,11 @@ pub(crate) fn character_anchor(
     let pose = pose::derive_with_routing(agent, now, layout, rctx)?;
     let w = CHARACTER_SPRITE_W;
     let anchor = match pose {
-        Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. } => {
-            seated_anchor_facing(
-                desk,
-                w,
-                layout.desk_facing(agent.desk_index.single_floor_local()),
-            )
-        }
+        Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping => seated_anchor_facing(
+            desk,
+            w,
+            layout.desk_facing(agent.desk_index.single_floor_local()),
+        ),
         Pose::AtWaypoint { wp, kind } => {
             let wp_obj = layout.waypoints.get(wp)?;
             let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);

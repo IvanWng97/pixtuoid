@@ -2,9 +2,7 @@
 //! how far along their animation they are. A painter draws each its own way;
 //! none decides when one shows or which step it is at.
 
-use std::time::SystemTime;
-
-use crate::anim::epoch_ms;
+use crate::anim::Beat;
 use crate::layout::Point;
 
 pub(crate) mod look;
@@ -56,8 +54,8 @@ const SLEEP_Z_CYCLE_MS: u64 = SLEEP_Z_RISE_MS + SLEEP_Z_REST_MS;
 
 /// The z over a sleeper whose head is at `at`, or `None` while it rests. The
 /// `seed` staggers sleepers so their z's don't rise in lockstep.
-pub(crate) fn sleep_z(at: Point, seed: u64, now: SystemTime) -> Option<Effect> {
-    let phase = epoch_ms(now).wrapping_add(seed % SLEEP_Z_CYCLE_MS) % SLEEP_Z_CYCLE_MS;
+pub(crate) fn sleep_z(at: Point, seed: u64, beat: Beat) -> Option<Effect> {
+    let phase = beat.ms().wrapping_add(seed % SLEEP_Z_CYCLE_MS) % SLEEP_Z_CYCLE_MS;
     (phase < SLEEP_Z_RISE_MS).then_some(Effect {
         kind: EffectKind::SleepZ,
         at,
@@ -83,12 +81,13 @@ pub(crate) fn walking_dust(at: Point, stride: usize) -> Effect {
     }
 }
 
-/// How long the flame crown holds each of its two frames.
-const FLAME_FLICKER_MS: u64 = 260;
+/// How long the flame crown holds each of its two frames: whole Full beats,
+/// so it flickers evenly.
+const FLAME_FLICKER_MS: u64 = 2 * crate::anim::FULL_TICK_MS;
 
 /// The flame crowning a `width`-wide figure whose frame's top-left is
 /// `anchor`: it stands on the head's top row, centred on the frame.
-pub(crate) fn flame_crown(anchor: Point, width: u16, now: SystemTime) -> Effect {
+pub(crate) fn flame_crown(anchor: Point, width: u16, beat: Beat) -> Effect {
     Effect {
         kind: EffectKind::FlameCrown,
         at: Point {
@@ -96,7 +95,7 @@ pub(crate) fn flame_crown(anchor: Point, width: u16, now: SystemTime) -> Effect 
             y: anchor.y,
         },
         // Integer division: epoch-ms as f32 loses precision and freezes the flicker.
-        phase: (epoch_ms(now) / FLAME_FLICKER_MS) % 2,
+        phase: (beat.ms() / FLAME_FLICKER_MS) % 2,
     }
 }
 
@@ -106,8 +105,8 @@ pub(crate) const STEAM_CYCLE_MS: u64 = 1800;
 pub(crate) const STEAM_PUFFS: usize = 3;
 
 /// The steam rising from a spout at `at`.
-pub(crate) fn steam(at: Point, now: SystemTime) -> [Effect; STEAM_PUFFS] {
-    let elapsed = epoch_ms(now);
+pub(crate) fn steam(at: Point, beat: Beat) -> [Effect; STEAM_PUFFS] {
+    let elapsed = beat.ms();
     let spacing = STEAM_CYCLE_MS / STEAM_PUFFS as u64;
     std::array::from_fn(|puff| Effect {
         kind: EffectKind::SteamPuff,
@@ -148,8 +147,9 @@ pub(crate) fn pet_hearts(pet: Point, petted_ms: u64) -> impl Iterator<Item = Eff
     })
 }
 
-/// How long a mascot's bubble holds each row of its rise.
-const BUBBLE_STEP_MS: u64 = 110;
+/// How long a mascot's bubble holds each row of its rise: one Full beat, so
+/// it never skips a row.
+const BUBBLE_STEP_MS: u64 = crate::anim::FULL_TICK_MS;
 /// The rows a bubble rises before it starts again.
 const BUBBLE_RISE_ROWS: u64 = 6;
 /// Steps between neighbouring bubbles' rises.
@@ -165,9 +165,9 @@ pub(crate) fn mascot_bubbles(
     pos: Point,
     frame_h: u16,
     runs: u32,
-    now: SystemTime,
+    beat: Beat,
 ) -> impl Iterator<Item = Effect> {
-    let step = epoch_ms(now) / BUBBLE_STEP_MS;
+    let step = beat.ms() / BUBBLE_STEP_MS;
     let top = pos.y.saturating_sub(frame_h / 2 + 1);
     // Below `MAX_BUBBLES`, a u32 that fits a u16.
     let n = runs.saturating_add(1).min(MAX_BUBBLES) as u16;
@@ -184,12 +184,11 @@ pub(crate) fn mascot_bubbles(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     const AT: Point = Point { x: 20, y: 30 };
 
-    fn at_ms(ms: u64) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
+    fn at_ms(ms: u64) -> Beat {
+        Beat::at_ms(ms)
     }
 
     #[test]

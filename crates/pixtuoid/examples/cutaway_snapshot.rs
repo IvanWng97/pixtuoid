@@ -207,7 +207,7 @@ fn main() -> Result<()> {
         Showing {
             floor: meta,
             now,
-            board: &session.board(&scene, now),
+            board: &session.board(&scene, meta.motion, now),
         },
         &mut cache,
         &mut buf,
