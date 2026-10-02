@@ -39,8 +39,6 @@ pub(crate) struct SkyTones {
     /// How brightly the star field shows, 0..=1; zero wherever it would be too
     /// faint to read.
     pub(crate) star_strength: f32,
-    /// The sun's direct beam through the weather ([`Sky::beam`]), 0..=1.
-    pub(crate) beam: f32,
 }
 
 /// The moment a frame shows, to either painter: the sky at `now` and its
@@ -164,7 +162,6 @@ impl SkyTones {
             }),
             golden_hour: golden_hour_blaze(body, &sky.transmission()),
             star_strength: ((star_strength - STAR_MIN) / (1.0 - STAR_MIN)).max(0.0),
-            beam: sky.beam(),
         }
     }
 }
@@ -379,7 +376,6 @@ mod tests {
                 ("object lift", l.object_wash[1].1),
                 ("golden hour", l.golden_hour),
                 ("stars", l.star_strength),
-                ("beam", l.beam),
             ]
         };
         let channels = |l: &SkyTones| {

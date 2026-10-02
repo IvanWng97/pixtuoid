@@ -141,12 +141,12 @@ pub(crate) struct Badge {
     pub(crate) tone: crate::overlay::LabelTone,
 }
 
-/// Art pixels between a plate's edge and its text.
+/// Art pixels between a plate's sides or bottom and its text ([`PLATE_H`] says why not the top).
 const PLATE_PAD: u16 = 1;
 
-/// A plate's height on the art grid: at the pack's 4x art, two logical rows,
-/// the one terminal cell the classic's text takes.
-const PLATE_H: u16 = crate::cutaway::text::LINE_H + 2 * PLATE_PAD;
+/// A plate's height on the art grid: padded below only, since the line's
+/// accent rows already clear its capitals above.
+const PLATE_H: u16 = crate::cutaway::text::LINE_H + PLATE_PAD;
 
 /// A plate around `text` on the art grid, centred on column `centre`, its top
 /// at row `top`.
@@ -185,13 +185,7 @@ fn paint_plate(
     pen.fill(buf, plate, ground);
     let mut x = plate.x.0 + PLATE_PAD;
     for &(text, ink) in runs {
-        crate::cutaway::text::paint(
-            pen,
-            buf,
-            (ArtPx(x), ArtPx(plate.y.0 + PLATE_PAD)),
-            text,
-            ink,
-        );
+        crate::cutaway::text::paint(pen, buf, (ArtPx(x), plate.y), text, ink);
         x += crate::cutaway::text::advance(text).0;
     }
 }
@@ -224,19 +218,29 @@ fn paint_badge(badge: &Badge, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
 }
 
 /// The floor indicator over the elevator at `door`, naming floor `floor`: a
-/// plate over the cell the classic writes it across
-/// ([`floor_indicator_rows`](crate::layout::floor_indicator_rows)).
+/// plate filling the cell the classic writes it across
+/// ([`floor_indicator_rows`](crate::layout::floor_indicator_rows)), not a
+/// badge's [`PLATE_H`], which would run into the door below. Under the pack's
+/// density the cell is shorter than a line, and the plate keeps the line.
 fn indicator_plate(door: Point, floor: usize, pen: Pen) -> ArtRect {
-    plate_at(
-        pen.art(door.x + crate::layout::ELEVATOR_W / 2),
-        pen.art(crate::layout::floor_indicator_rows(door.y).start),
-        &crate::layout::floor_indicator_text(floor),
-    )
+    let rows = crate::layout::floor_indicator_rows(door.y);
+    ArtRect {
+        h: ArtPx(
+            pen.art(rows.end - rows.start)
+                .0
+                .max(crate::cutaway::text::LINE_H),
+        ),
+        ..plate_at(
+            pen.art(door.x + crate::layout::ELEVATOR_W / 2),
+            pen.art(rows.start),
+            &crate::layout::floor_indicator_text(floor),
+        )
+    }
 }
 
 /// Each run of `board` and its top-left on the art grid, as the classic's
 /// terminal board lays it: line `i` on the neon interior's `i`th cell row,
-/// one character a column, the star flush right.
+/// one cell a column, the star flush right.
 fn board_runs(
     board: &crate::board::BoardModel,
     pen: Pen,
@@ -558,7 +562,6 @@ pub(crate) fn build_list<'a>(
     let ambient = crate::cutaway::light::Ambient::of(&moment.look);
     let mut collected = collect_pieces(frame, office, moment);
     collected.extend(signs(office, floor.floor_idx, board));
-    collected.extend(motes(office, moment, floor.floor_seed));
     let sorted = depth_sort(
         collected
             .into_iter()
@@ -613,8 +616,8 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
             continue;
         };
         let (w, h) = dense.logical;
-        let depth = crate::layout::z_sort_row(crate::layout::Anchor::Center, at, h);
-        let span = piece_span(crate::layout::Anchor::Center, at, w, h, 0)
+        let depth = crate::layout::sort_row_at(crate::layout::Pivot::Center, at, h);
+        let span = piece_span(crate::layout::Pivot::Center, at, w, h, 0)
             .with_depth(depth)
             .with_layer(Layer::Figure);
         let art = Art {
@@ -639,28 +642,6 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
             }
         }
     }
-}
-
-/// The dust motes in the windows' sunbeams this moment ([`crate::motes`]),
-/// each on its cell where the ordered dither lets as much of it through as
-/// the beam shows: a speck the sun catches, never a blend.
-fn motes(office: Office<'_>, moment: &Moment, seed: u64) -> Vec<(Span, PieceKind)> {
-    let shows = crate::motes::visibility(&moment.look);
-    if shows <= 0.0 {
-        return Vec::new();
-    }
-    crate::motes::window_spill_columns(office.layout)
-        .iter()
-        .flat_map(|col| crate::motes::dust_mote_positions(seed, moment.now, col))
-        .filter(|m| crate::dither::takes_next(m.x, m.y, m.alpha * crate::motes::MOTE_PEAK * shows))
-        .map(|m| {
-            let at = crate::layout::Point { x: m.x, y: m.y };
-            let span = Span::new(m.x, m.y, 1, 1, 0)
-                .with_depth(m.y)
-                .with_layer(Layer::Over);
-            (span, PieceKind::Mote { at })
-        })
-        .collect()
 }
 
 /// The room's own lights (`crate::lighting`) this frame that the cutaway paints.
@@ -843,7 +824,6 @@ fn paint_pieces(
                     | PieceKind::WallSeg { .. }
                     | PieceKind::Chair { .. }
                     | PieceKind::DeskProp(_)
-                    | PieceKind::Mote { .. }
                     | PieceKind::Creature { .. }
                     | PieceKind::PropBand { .. }
                     | PieceKind::Table { .. }
@@ -906,7 +886,6 @@ fn mark(
         | PieceKind::WallSeg { .. }
         | PieceKind::Chair { .. }
         | PieceKind::DeskProp(_)
-        | PieceKind::Mote { .. }
         | PieceKind::Creature { .. }
         | PieceKind::PropBand { .. }
         | PieceKind::Table { .. }
@@ -1139,9 +1118,7 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
         | PieceKind::Effect(_)
         | PieceKind::Badge { .. }
         | PieceKind::Board { .. }
-        | PieceKind::Indicator { .. }
-        // a speck adrift in a sunbeam, off the ground
-        | PieceKind::Mote { .. } => None,
+        | PieceKind::Indicator { .. } => None,
         PieceKind::Character {
             ref figure,
             body,
@@ -1220,7 +1197,6 @@ fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::Desk { at, art, screen } => (at, art, screen).hash(&mut h),
         PieceKind::Chair { at } => at.hash(&mut h),
         PieceKind::DeskProp(prop) => prop.hash(&mut h),
-        PieceKind::Mote { at } => at.hash(&mut h),
         PieceKind::Creature { at, art, degraded } => (at, art, degraded).hash(&mut h),
         PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => (at, art).hash(&mut h),
         PieceKind::PropBand { at, sprite, rows } => (at, sprite, rows).hash(&mut h),
@@ -1547,14 +1523,8 @@ fn push_fixture(
             let table = crate::layout::furniture_def(crate::layout::Furniture::MeetingTable).visual;
             let face = face_rows(pack, crate::pack::MEETING_TABLE_SPRITE, office.scale);
             order.push((
-                piece_span(
-                    crate::layout::Anchor::Center,
-                    centre,
-                    table.w,
-                    table.h,
-                    face,
-                )
-                .with_depth(depth),
+                piece_span(crate::layout::Pivot::Center, centre, table.w, table.h, face)
+                    .with_depth(depth),
                 PieceKind::Table { at: centre },
             ));
         }
@@ -1619,7 +1589,7 @@ fn push_fixture(
                 return;
             };
             order.push((
-                piece_span(crate::layout::Anchor::TopLeft, top_left, w, h, 0).with_depth(depth),
+                piece_span(crate::layout::Pivot::TopLeft, top_left, w, h, 0).with_depth(depth),
                 PieceKind::Door {
                     at: top_left,
                     frame: frame.door_frame,
@@ -1687,7 +1657,7 @@ fn push_art(
         Motion::Playing => PieceKind::Animated { at, art },
     };
     order.push((
-        piece_span(crate::layout::Anchor::Center, at, w, h, 0).with_depth(depth),
+        piece_span(crate::layout::Pivot::Center, at, w, h, 0).with_depth(depth),
         kind,
     ));
 }
@@ -1720,7 +1690,7 @@ fn push_hung(
 ) {
     if let Some((w, h)) = art_size(pack, sprite) {
         order.push((
-            piece_span(crate::layout::Anchor::TopLeft, at, w, h, 0).with_depth(depth),
+            piece_span(crate::layout::Pivot::TopLeft, at, w, h, 0).with_depth(depth),
             PieceKind::Hung { at, sprite },
         ));
     }
@@ -1741,7 +1711,6 @@ fn paint_piece(
         }
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
         PieceKind::DeskProp(prop) => paint_desk_prop(prop, pack, theme, scale, buf),
-        PieceKind::Mote { at } => paint_mote(at, theme, Pen::for_pack(scale, pack), buf),
         PieceKind::Creature { at, art, degraded } => {
             paint_creature(at, art, degraded, pack, scale, buf);
         }
@@ -1933,7 +1902,7 @@ fn desk_span(
 ) -> Option<Span> {
     let (w, h) = art_size(pack, art)?;
     let span = piece_span(
-        crate::layout::Anchor::TopLeft,
+        crate::layout::Pivot::TopLeft,
         crate::layout::Point {
             x: desk.x,
             y: crate::pack::desk_art_top(pack, desk.y, h),
@@ -2077,7 +2046,7 @@ pub(crate) fn assert_variant_desk_foot(
 /// The chair's box and top-left at a desk facing `facing`, placed and keyed by
 /// the layout's rules
 /// ([`desk_chair_top_left`](crate::layout::desk_chair_top_left),
-/// [`desk_chair_z_key`](crate::layout::desk_chair_z_key)); `None` where
+/// [`desk_chair_sort_row`](crate::layout::desk_chair_sort_row)); `None` where
 /// those stand no chair or the pack has none.
 fn chair_span(
     pack: &Pack,
@@ -2086,8 +2055,8 @@ fn chair_span(
 ) -> Option<(Span, crate::layout::Point)> {
     let at = crate::layout::desk_chair_top_left(desk, facing)?;
     let (w, h) = art_size(pack, crate::pack::DESK_CHAIR_SPRITE)?;
-    let span = piece_span(crate::layout::Anchor::TopLeft, at, w, h, 0)
-        .with_depth(crate::layout::desk_chair_z_key(desk, facing));
+    let span = piece_span(crate::layout::Pivot::TopLeft, at, w, h, 0)
+        .with_depth(crate::layout::desk_chair_sort_row(desk, facing));
     Some((span, at))
 }
 
@@ -2144,8 +2113,8 @@ fn push_characters(
             y: at.y.saturating_sub(hair),
         };
         let span = occupant_span(
-            piece_span(crate::layout::Anchor::TopLeft, top, w, h + hair, 0),
-            c.anchor_y,
+            piece_span(crate::layout::Pivot::TopLeft, top, w, h + hair, 0),
+            c.sort_row,
             chair.map(|(span, _)| span),
         );
         let riders = riders(c, &key, (w, at), scale);
@@ -2215,7 +2184,7 @@ fn riders(
         .collect()
 }
 
-/// A figure's piece: its drawn bounds, sorted on `depth` — the sim's own z-key,
+/// A figure's piece: its drawn bounds, sorted on `depth` — the sim's own sort row,
 /// which neither breath nor the sit arc moves, so a person never flips against a
 /// neighbour mid-breath. A back-turned sitter and their chair are one piece,
 /// bounding the chair's whole box too.
@@ -2257,9 +2226,9 @@ fn push_sofa(
     back_view: bool,
     tie: Tie,
 ) {
-    let sitters = crate::sim::seat::sofa_sitter_z_key(at);
+    let sitters = crate::sim::seat::sofa_sitter_sort_row(at);
     if let Some((w, h)) = art_size(pack, MEETING_SOFA_NORTH).filter(|_| back_view) {
-        let tl = crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
+        let tl = crate::layout::anchored_top_left(crate::layout::Pivot::Center, at, w, h);
         let split = NORTH_SOFA_SEAT_ROWS.min(h);
         let band = |rows| PieceKind::PropBand {
             at,
@@ -2277,7 +2246,7 @@ fn push_sofa(
         return;
     }
     if let Some((w, h)) = art_size(pack, "meeting_sofa") {
-        let span = piece_span(crate::layout::Anchor::Center, at, w, h, 0)
+        let span = piece_span(crate::layout::Pivot::Center, at, w, h, 0)
             .with_depth(sitters)
             .with_layer(Layer::from(tie));
         order.push((
@@ -2352,7 +2321,6 @@ impl PieceKind {
             | PieceKind::Glass { .. }
             | PieceKind::Desk { .. }
             | PieceKind::DeskProp(_)
-            | PieceKind::Mote { .. }
             | PieceKind::Creature { .. }
             | PieceKind::Character { .. }
             | PieceKind::Effect(_)
@@ -2444,10 +2412,6 @@ pub(crate) enum PieceKind {
         at: crate::layout::Point,
         art: Art,
         degraded: bool,
-    },
-    /// A dust mote in a sunbeam, on cell `at` ([`motes`]).
-    Mote {
-        at: crate::layout::Point,
     },
     Character {
         figure: Figure,
@@ -2548,13 +2512,13 @@ impl std::fmt::Debug for Figure {
 /// Anchoring goes through [`crate::layout::anchored_top_left`], the same function
 /// the walkable mask and the classic painter use.
 fn piece_span(
-    anchor: crate::layout::Anchor,
+    pivot: crate::layout::Pivot,
     pos: crate::layout::Point,
     w: u16,
     h: u16,
     below: u16,
 ) -> Span {
-    let tl = crate::layout::anchored_top_left(anchor, pos, w, h);
+    let tl = crate::layout::anchored_top_left(pivot, pos, w, h);
     Span::new(tl.x, tl.y, w, h, below)
 }
 
@@ -3048,7 +3012,7 @@ fn dominant_opaque_row(
 }
 
 /// Wall-hung decor, blitted at its own `pos`: [`paint_art`] would centre it, but
-/// `WallDecorItem.pos` is TOP-LEFT, like the classic painter's `Anchor::TopLeft`
+/// `WallDecorItem.pos` is TOP-LEFT, like the classic painter's `Pivot::TopLeft`
 /// z-sort rather than the centre-pinned furniture, so centring would hang every
 /// board up and west of where it belongs.
 fn paint_wall_decor(
@@ -3196,18 +3160,6 @@ fn paint_creature(
     };
     let (x, y) = centred_top_left(at, dense.logical, scale);
     blit_frame_scaled(&shown, x, y, dense.blit_at, buf);
-}
-
-/// A mote: the middle art pixel of its cell, lit in the sun's spill.
-fn paint_mote(at: crate::layout::Point, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
-    let d = pen.art(1).0;
-    let speck = ArtRect {
-        x: ArtPx(pen.art(at.x).0 + d / 2),
-        y: ArtPx(pen.art(at.y).0 + d / 2),
-        w: ArtPx(1),
-        h: ArtPx(1),
-    };
-    pen.fill(buf, speck, theme.lighting.sun_spill);
 }
 
 /// A desk prop in the theme's cup and paper.
@@ -3461,7 +3413,7 @@ fn centred_top_left(
     scale: RenderScale,
 ) -> (u16, u16) {
     let crate::layout::Point { x, y } =
-        crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, logical.0, logical.1);
+        crate::layout::anchored_top_left(crate::layout::Pivot::Center, at, logical.0, logical.1);
     (scale.to_buffer(x), scale.to_buffer(y))
 }
 
@@ -3478,7 +3430,7 @@ fn paint_prop_band(
         return;
     };
     let (w, h) = dense.logical;
-    let tl = crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
+    let tl = crate::layout::anchored_top_left(crate::layout::Pivot::Center, at, w, h);
     let (r0, r1) = (rows.0.min(h), rows.1.min(h));
     let d = dense.density.get();
     let fw = usize::from(dense.frame.width());
@@ -3548,17 +3500,12 @@ pub(crate) mod tests {
     /// A piece's base row — the ordering key — through the SAME `piece_span`
     /// the draw list builds with. Width does not affect the base row, so the
     /// call sites stay focused on depth.
-    fn sort_row(
-        anchor: crate::layout::Anchor,
-        pos: crate::layout::Point,
-        h: u16,
-        below: u16,
-    ) -> u16 {
-        piece_span(anchor, pos, 1, h, below).depth
+    fn sort_row(pivot: crate::layout::Pivot, pos: crate::layout::Point, h: u16, below: u16) -> u16 {
+        piece_span(pivot, pos, 1, h, below).depth
     }
 
     /// The desk sorts on its face's south edge and a back-turned sitter on their
-    /// seat's z-key; that key lands south of the face, so the "head
+    /// seat's sort row; that row lands south of the face, so the "head
     /// over the surface" reading needs no special case.
     #[test]
     fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
@@ -3591,7 +3538,7 @@ pub(crate) mod tests {
         let feet = crate::pack::desk_art_top(&pack, desk.y, art_h) + art_h;
         let (w, h) = base_size(&pack, "standing");
         let person = piece_span(
-            crate::layout::Anchor::TopLeft,
+            crate::layout::Pivot::TopLeft,
             crate::layout::Point {
                 x: desk.x,
                 y: feet + 1 - h,
@@ -3608,13 +3555,13 @@ pub(crate) mod tests {
     }
 
     /// A back-turned sitter's depth box, built the way `push_characters` builds
-    /// it, at the z-key the sim seats an occupant at (their seat's walk anchor).
+    /// it, at the sort row the sim seats an occupant at (their seat's walk anchor).
     fn seated_back_span(pack: &Pack, desk: crate::layout::Point) -> Span {
         use crate::layout::Facing;
         let (w, h) = base_size(pack, "seated_back");
         let chair = chair_span(pack, Facing::North, desk).map(|(s, _)| s);
         occupant_span(
-            piece_span(crate::layout::Anchor::TopLeft, near_seat(desk), w, h, 0),
+            piece_span(crate::layout::Pivot::TopLeft, near_seat(desk), w, h, 0),
             crate::layout::desk_walk_anchor_facing(desk, Facing::North).y,
             chair,
         )
@@ -3635,7 +3582,7 @@ pub(crate) mod tests {
         // Standing at the desk's north approach, feet on the row just north of
         // its anchor.
         let behind_z = sort_row(
-            crate::layout::Anchor::TopLeft,
+            crate::layout::Pivot::TopLeft,
             crate::layout::Point {
                 x: desk.x,
                 y: desk.y - body_h,
@@ -3665,7 +3612,7 @@ pub(crate) mod tests {
             y: plant_base + plant_h / 2 - plant_h + 1,
         };
         let plant = piece_span(
-            crate::layout::Anchor::Center,
+            crate::layout::Pivot::Center,
             plant_centre,
             plant_w,
             plant_h,
@@ -3792,7 +3739,7 @@ pub(crate) mod tests {
             for bob in [0, 1] {
                 let seat = near_seat(desk);
                 let body = piece_span(
-                    crate::layout::Anchor::TopLeft,
+                    crate::layout::Pivot::TopLeft,
                     crate::layout::Point {
                         x: seat.x,
                         y: seat.y + bob,
@@ -3863,13 +3810,13 @@ pub(crate) mod tests {
             .expect("a back-turned desk stands a chair");
         assert_eq!(
             span.depth,
-            crate::layout::desk_chair_z_key(desk, crate::layout::Facing::North)
+            crate::layout::desk_chair_sort_row(desk, crate::layout::Facing::North)
         );
     }
 
-    /// A walker sorts on the sim's z-key for them, every step.
+    /// A walker sorts on the sim's sort row for them, every step.
     #[test]
-    fn a_walker_sorts_on_the_sims_z_key() {
+    fn a_walker_sorts_on_the_sims_sort_row() {
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 0);
         let mut walked = 0;
         for frame in &frames {
@@ -3889,7 +3836,7 @@ pub(crate) mod tests {
                 &mut order,
             );
             let (span, _) = order.first().expect("the walker is drawn");
-            assert_eq!(span.depth, c.anchor_y);
+            assert_eq!(span.depth, c.sort_row);
             walked += 1;
         }
         assert!(walked > 1, "the fixture never walked, so this pins nothing");
@@ -4438,11 +4385,11 @@ pub(crate) mod tests {
     fn a_chair_keeps_its_order_to_its_sitter_through_the_settle() {
         use crate::layout::Facing;
         let (layout, pack, frames, desk) = sit_down(Facing::North, 0);
-        let seat_key = crate::layout::desk_chair_z_key(desk, Facing::North);
+        let seat_row = crate::layout::desk_chair_sort_row(desk, Facing::North);
         let orders: Vec<(usize, bool)> = frames
             .iter()
             .enumerate()
-            .filter(|(_, f)| f.characters.first().is_some_and(|c| c.anchor_y == seat_key))
+            .filter(|(_, f)| f.characters.first().is_some_and(|c| c.sort_row == seat_row))
             .filter_map(|(n, f)| chair_over_person(f, &layout, &pack, desk).map(|o| (n, o)))
             .collect();
         assert!(
@@ -4531,15 +4478,16 @@ pub(crate) mod tests {
         assert_eq!(at.y - anchor.y, LABEL_GAP, "clear of the head");
     }
 
-    /// A plate's runs and the board's segments step on one grid: the run after
-    /// `n` characters starts [`columns`](crate::cutaway::text::columns)`(n)` on.
+    /// A plate's runs and the board's segments step on one grid, wide
+    /// characters included: the run after `text` starts
+    /// [`advance`](crate::cutaway::text::advance)`(text)` on.
     #[test]
     fn plate_runs_and_board_columns_share_one_grid() {
         use crate::board::{BoardSegment, BoardTone};
-        use crate::cutaway::text::columns;
+        use crate::cutaway::text::advance;
         use pixtuoid_core::sprite::Rgb;
         let pen = Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4");
-        let (first, second) = ("Iab", "I");
+        let (first, second) = ("I日b", "I");
         let mut board = quiet_board().clone();
         board.mood = [first, second]
             .map(|text| BoardSegment {
@@ -4551,7 +4499,7 @@ pub(crate) mod tests {
         let runs = board_runs(&board, pen);
         let ((x0, _), _) = runs[2];
         let ((x1, _), _) = runs[3];
-        assert_eq!(x1.0 - x0.0, columns(3).0, "the board");
+        assert_eq!(x1.0 - x0.0, advance(first).0, "the board");
         let (a, b) = (Rgb { r: 255, g: 0, b: 0 }, Rgb { r: 0, g: 255, b: 0 });
         let mut buf = RgbBuffer::filled(64, 16, Rgb { r: 0, g: 0, b: 0 });
         let plate = ArtRect {
@@ -4574,7 +4522,38 @@ pub(crate) mod tests {
             left(a).expect("the first run"),
             left(b).expect("the second run"),
         );
-        assert_eq!(lb - la, columns(3).0, "the plate");
+        assert_eq!(lb - la, advance(first).0, "the plate");
+    }
+
+    /// The floor indicator's plate stays in the cell the classic writes it
+    /// across, its text whole, at every density the pack draws: a row lower
+    /// and it covers the top of the elevator door, over everything.
+    #[test]
+    #[cfg(feature = "density-art")]
+    fn the_floor_indicator_stays_in_its_cell() {
+        use crate::cutaway::text::LINE_H;
+        let pack = crate::pack::test_default_pack();
+        let door = SceneLayout::compute_with_seed(160, 96, None, 0)
+            .expect("lays out")
+            .door;
+        let rows = crate::layout::floor_indicator_rows(door.y);
+        let densities = pack.density_variants();
+        assert!(!densities.is_empty(), "the pack draws a density");
+        for d in densities {
+            let pen = Pen::new(RenderScale::new(d.get()).expect("nonzero"), d.get())
+                .expect("d divides itself");
+            for floor in [1, 12, 99] {
+                let plate = indicator_plate(door, floor, pen);
+                let span = topmost_span(plate, pen);
+                assert!(
+                    rows.contains(&span.y0) && rows.contains(&span.y1),
+                    "{d:?} floor {floor}: rows {}..={} outside {rows:?}",
+                    span.y0,
+                    span.y1
+                );
+                assert!(plate.h.0 >= LINE_H, "{d:?}: the text fits");
+            }
+        }
     }
 
     /// At the pack's 4x art the board writes inside the neon sign's dark
@@ -4963,7 +4942,7 @@ pub(crate) mod tests {
                     let at = chair.expect("a desk sitter carries their chair");
                     let (w, h) =
                         art_size(&pack, crate::pack::DESK_CHAIR_SPRITE).expect("chair art");
-                    let empty = piece_span(crate::layout::Anchor::TopLeft, at, w, h, 0);
+                    let empty = piece_span(crate::layout::Pivot::TopLeft, at, w, h, 0);
                     assert_eq!(
                         Some(cast),
                         ground_shadow(empty, &PieceKind::Chair { at }, &pack),
@@ -5004,7 +4983,7 @@ pub(crate) mod tests {
             panic!("a flipped sofa is one mirrored prop: {order:?}");
         };
         let sitter = Span::new(at.x, at.y, 1, 1, 0)
-            .with_depth(crate::sim::seat::sofa_sitter_z_key(at))
+            .with_depth(crate::sim::seat::sofa_sitter_sort_row(at))
             .with_layer(Layer::Figure);
         assert_eq!(
             crate::cutaway::order::depth_sort(vec![(*span, "sofa"), (sitter, "sitter")]),
@@ -5763,7 +5742,7 @@ S B B B B B B S
     /// what rides on it straight after it; a degraded gateway's art is greyed.
     #[test]
     fn creatures_stand_as_figures_with_their_riders_after_them() {
-        use crate::layout::{Anchor, z_sort_row};
+        use crate::layout::{Pivot, sort_row_at};
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_default_pack();
         let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
@@ -5842,7 +5821,7 @@ S B B B B B B S
                     .expect("the art")
                     .logical
                     .1;
-                assert_eq!(p.span.depth, z_sort_row(Anchor::Center, at, h));
+                assert_eq!(p.span.depth, sort_row_at(Pivot::Center, at, h));
                 assert_eq!(
                     stray_pixel(&p.kind, p.span, &layout, &pack, theme, scale),
                     None,
@@ -5865,47 +5844,6 @@ S B B B B B B S
                 painted_alone(&lobster_kind(true), &layout, &pack, theme, scale),
                 painted_alone(&lobster_kind(false), &layout, &pack, theme, scale),
                 "at scale {s} a degraded gateway looks as a healthy one"
-            );
-        }
-    }
-
-    /// A clear noon's sunbeams carry motes, each a speck painted on its own
-    /// cell, at every density; a night's carry none.
-    #[test]
-    fn motes_drift_in_a_clear_noons_beams_and_not_at_night() {
-        let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pack = test_default_pack();
-        let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
-        let frame = empty_frame(&layout);
-        let is_mote = |p: &&Piece| matches!(p.kind, PieceKind::Mote { .. });
-        for s in [1, pack.max_density_variant().get()] {
-            let scale = RenderScale::new(s).expect("nonzero");
-            let office = Office {
-                layout: &layout,
-                pack: &pack,
-                theme,
-                scale,
-            };
-            let noon = list_at(&frame, office, 12);
-            let motes: Vec<&Piece> = noon.pieces().iter().filter(is_mote).collect();
-            assert!(!motes.is_empty(), "at scale {s} a clear noon has no motes");
-            for p in motes {
-                assert_eq!(
-                    stray_pixel(&p.kind, p.span, &layout, &pack, theme, scale),
-                    None,
-                    "at scale {s} {:?} painted outside {:?}",
-                    p.kind,
-                    p.span
-                );
-                assert_eq!(
-                    p.shadow, None,
-                    "at scale {s} a mote adrift shades the ground"
-                );
-            }
-            let night = list_at(&frame, office, 0);
-            assert!(
-                !night.pieces().iter().any(|p| is_mote(&p)),
-                "motes at night"
             );
         }
     }
@@ -7147,7 +7085,6 @@ S B B B B B B S
             PieceKind::Effect(_) => "effect",
             PieceKind::Badge { .. } => "badge",
             PieceKind::DeskProp(_) => "desk prop",
-            PieceKind::Mote { .. } => "mote",
             PieceKind::Creature { .. } => "creature",
             PieceKind::Board { .. } => "board",
             PieceKind::Indicator { .. } => "indicator",
@@ -7360,7 +7297,7 @@ S B B B B B B S
         else {
             panic!("a back-view sofa is two bands: {order:?}");
         };
-        let sitter = crate::sim::seat::sofa_sitter_z_key(sofa);
+        let sitter = crate::sim::seat::sofa_sitter_sort_row(sofa);
         assert!(
             seat.depth == sitter && sitter < back.depth,
             "seat {} = sitter {sitter} < backrest {}",
@@ -8015,7 +7952,7 @@ S B B B B B B S
         else {
             panic!("a front sofa is one prop: {order:?}");
         };
-        assert_eq!(span.depth, crate::sim::seat::sofa_sitter_z_key(sofa));
+        assert_eq!(span.depth, crate::sim::seat::sofa_sitter_sort_row(sofa));
     }
 
     /// No wall this module stands closes a doorway, and every doorway is framed

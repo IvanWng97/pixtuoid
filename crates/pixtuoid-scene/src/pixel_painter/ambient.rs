@@ -1,22 +1,11 @@
-//! Ambient pass — non-character, non-furniture effects painted between
-//! the background and the y-sorted drawables: dust motes in window spill,
-//! ceiling halos above active monitors.
+//! Ambient pass — painted between the background and the y-sorted
+//! drawables: ceiling halos above active monitors.
 
 use pixtuoid_core::sprite::RgbBuffer;
 
-use crate::atmosphere::Moment;
-use crate::layout::SceneLayout;
 use crate::lighting::{Emitter, EmitterKind};
-use crate::motes::{DustMote, dust_mote_positions, window_spill_columns};
-use crate::pixel_painter::PaintCtx;
 use crate::pixel_painter::background::paint_light;
-use crate::pixel_painter::palette::blend_pixel;
 use crate::theme::Theme;
-
-pub(super) fn paint_ambient(ctx: &mut PaintCtx<'_>, moment: &Moment, monitor_halos: &[Emitter]) {
-    paint_dust_motes(ctx.buf, ctx.theme, ctx.layout, ctx.floor.floor_seed, moment);
-    paint_ceiling_halos(ctx.buf, ctx.theme, monitor_halos);
-}
 
 /// Each halo over a lit monitor, tinted by its tool. Dark themes only — on a
 /// light theme the warm tint reads as grime.
@@ -33,31 +22,9 @@ pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[E
     }
 }
 
-/// Drift 1-pixel warm specks through each window's sunbeam spill column.
-pub(super) fn paint_dust_motes(
-    buf: &mut RgbBuffer,
-    theme: &Theme,
-    layout: &SceneLayout,
-    floor_seed: u64,
-    moment: &Moment,
-) {
-    let visibility = crate::motes::visibility(&moment.look);
-    if visibility <= 0.0 {
-        return;
-    }
-    let warm = theme.lighting.sun_spill;
-    for col in window_spill_columns(layout) {
-        for DustMote { x, y, alpha } in dust_mote_positions(floor_seed, moment.now, &col) {
-            let strength = alpha * crate::motes::MOTE_PEAK * visibility;
-            blend_pixel(buf, x, y, warm, strength);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sky::{Sky, Weather, WeatherMix};
     use pixtuoid_core::sprite::Rgb;
 
     /// One monitor halo centred at `(x, y)`, over an edit.
@@ -97,27 +64,5 @@ mod tests {
         let theme = &crate::theme::CYBERPUNK; // Dark theme so halos paint.
         let halos = one_halo(5, 0);
         paint_ceiling_halos(&mut buf, theme, &halos);
-    }
-
-    #[test]
-    fn dust_motes_clamp_to_a_tiny_buffer() {
-        let theme = &crate::theme::NORMAL;
-        let layout = crate::layout::SceneLayout::compute(192, 80, Some(4)).expect("layout fits");
-        // 07:00 Clear morning → sun up + full beam.
-        let now = (1..=60u32)
-            .map(|day| crate::localclock::on_day(day, 7))
-            .find(|t| Sky::clock(*t).weather() == WeatherMix::pure(Weather::Clear))
-            .expect("a clear morning");
-        // No assertion: the test is that the clamped, out-of-bounds puts on a
-        // buffer far smaller than the layout's spill columns don't panic.
-        let fill = Rgb { r: 0, g: 0, b: 0 };
-        let mut buf = RgbBuffer::filled(1, 1, fill);
-        paint_dust_motes(
-            &mut buf,
-            theme,
-            &layout,
-            7,
-            &Moment::resolve(Sky::clock(now), theme, 0.0, now),
-        );
     }
 }

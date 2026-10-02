@@ -767,16 +767,6 @@ impl Sky {
         self.flash
     }
 
-    /// Direct-beam strength reaching the interior = the sky body's luminance carried by
-    /// the weather's DIRECT transmission. Zero at night (the moon casts no usable
-    /// beam) and under thick cloud.
-    pub(crate) fn beam(&self) -> f32 {
-        match self.body.kind {
-            BodyKind::Sun => self.body.lum * self.transmission().direct,
-            BodyKind::Moon => 0.0,
-        }
-    }
-
     /// [`rain_level`] under this sky's weather.
     pub(crate) fn precipitation(&self) -> f32 {
         self.weather.lerp(Element::Precipitation, rain_level)
@@ -785,9 +775,9 @@ impl Sky {
     pub(crate) fn light(&self) -> InteriorLight {
         let body = &self.body;
         let through = self.transmission();
-        // The moon casts no USABLE direct beam (mirrors `beam`'s gate) — a
-        // moonlit night must never out-light a cloudy solar noon, so the moon's
-        // illuminance is diffuse-fill only.
+        // The moon casts no USABLE direct beam — a moonlit night must never
+        // out-light a cloudy solar noon, so the moon's illuminance is
+        // diffuse-fill only.
         let direct = match body.kind {
             BodyKind::Sun => through.direct,
             BodyKind::Moon => 0.0,
