@@ -1504,8 +1504,8 @@ fn the_classic_sees_the_skyline_from_its_floors_altitude() {
 }
 
 /// An office with every ambient loop running at `t0`, long settled: a typist,
-/// a burning typist and a waiter; at rest also idle sleepers and a gateway
-/// mascot, whose wandering only rest stills.
+/// a burning typist, a waiter and a wandering gateway mascot; at rest also
+/// idle sleepers, whose wander leaves the sim's walks for real time.
 fn ambient_office(t0: SystemTime, resting: bool) -> SceneState {
     use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
     use pixtuoid_core::state::{DaemonInstanceId, EffortObservation, ToolKind};
@@ -1533,18 +1533,16 @@ fn ambient_office(t0: SystemTime, resting: bool) -> SceneState {
             slot.effort = Some(EffortObservation::new(Arc::from("max"), t0));
         }
     }
-    if resting {
-        let key = DaemonInstanceKey::new(
-            pixtuoid_core::source::openclaw::SOURCE_NAME,
-            DaemonInstanceId::new("18789".to_string()).expect("id"),
-        );
-        apply_presence(
-            &mut scene,
-            &key,
-            DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
-            settled,
-        );
-    }
+    let key = DaemonInstanceKey::new(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        DaemonInstanceId::new("18789".to_string()).expect("id"),
+    );
+    apply_presence(
+        &mut scene,
+        &key,
+        DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+        settled,
+    );
     scene
 }
 
@@ -1625,7 +1623,7 @@ fn both_painters_paint_one_frame_per_beat() {
             let floor = FloorMeta::ground()
                 .with_weather(WeatherPolicy::Forced(weather))
                 .with_motion(motion);
-            let pet = resting.then_some(&cat);
+            let pet = Some(&cat);
             let (classic, cutaway) = both_painters(&scene, floor, pet, t0);
             let later = both_painters(&scene, floor, pet, t0 + Duration::from_millis(later_ms));
             assert!(
