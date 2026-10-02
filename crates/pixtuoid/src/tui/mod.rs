@@ -863,8 +863,8 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
                     .is_some_and(|layout| renderer::hit_test_coffee_machine(layout, at))
             {
                 let _ = open::that("https://buymeacoffee.com/IvanWng97");
-            } else if let Some(pixtuoid_scene::pet::PetFrame {
-                pos: pet_pos,
+            } else if let Some(pixtuoid_scene::display::PetHover {
+                centre: pet_pos,
                 anim,
                 kind,
             }) = renderer.cached_pet_pos()

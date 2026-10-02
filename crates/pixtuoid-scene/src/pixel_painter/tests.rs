@@ -4983,14 +4983,14 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                     .animation(p.anim)
                     .and_then(|a| a.frames().first())
                     .map_or((0, 0), |f| (f.width(), f.height()));
-                if p.pos.x < w / 2
-                    || p.pos.x + w.div_ceil(2) > layout.buf_w
-                    || p.pos.y < h / 2
-                    || p.pos.y + h.div_ceil(2) > layout.buf_h
+                if p.centre.x < w / 2
+                    || p.centre.x + w.div_ceil(2) > layout.buf_w
+                    || p.centre.y < h / 2
+                    || p.centre.y + h.div_ceil(2) > layout.buf_h
                 {
                     escapes.push(format!(
                         "pet step {step} at {:?} ({w}x{h}) escapes {}x{}",
-                        p.pos, layout.buf_w, layout.buf_h
+                        p.centre, layout.buf_w, layout.buf_h
                     ));
                 }
             }

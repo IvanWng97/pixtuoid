@@ -17,13 +17,13 @@ use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 
 use crate::tui::renderer::{DrawCtx, PetState, draw_scene, flush_buffer_to_term_at_offset};
+use pixtuoid_scene::display::PetHover;
 use pixtuoid_scene::floor::{
     FloorInputs, FloorMeta, FloorTransition, FrameInputs, PerFloor, PerOffice, PetInputs,
     num_floors, project_floor_scene, render_floor,
 };
 use pixtuoid_scene::layout::{SceneLayout, Size};
 use pixtuoid_scene::pathfind::Router;
-use pixtuoid_scene::pet::PetFrame;
 
 /// Floors `a` and `b`, which differ, borrowed together.
 fn floor_pair(floors: &mut [PerFloor], a: usize, b: usize) -> (&mut PerFloor, &mut PerFloor) {
@@ -69,7 +69,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     transition: Option<FloorTransition>,
     mouse_pos: Option<(u16, u16)>,
     cached_layout: Option<Arc<SceneLayout>>,
-    last_pet_pos: Option<PetFrame>,
+    last_pet_pos: Option<PetHover>,
     last_agents: Vec<pixtuoid_scene::pixel_painter::AgentFrame>,
     last_geometry: Option<crate::tui::geometry::SceneGeometry>,
     /// Coffee + venue chitchat, ONE per office — shared across every floor so a
@@ -473,7 +473,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.chrome.active_pet.as_ref()
     }
 
-    pub fn cached_pet_pos(&self) -> Option<PetFrame> {
+    pub fn cached_pet_pos(&self) -> Option<PetHover> {
         self.last_pet_pos
     }
 

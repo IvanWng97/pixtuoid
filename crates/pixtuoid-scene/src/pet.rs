@@ -36,17 +36,6 @@ impl PetState {
     }
 }
 
-/// The pet's resolved render frame for one tick (position + anim + kind).
-#[derive(Clone, Copy)]
-pub struct PetFrame {
-    /// Buffer-pixel position of the pet this tick.
-    pub pos: Point,
-    /// Resolved sprite/animation name (walk/sit/sleep).
-    pub anim: &'static str,
-    /// Which pet this frame renders.
-    pub kind: PetKind,
-}
-
 /// The kind of office pet — selects sprites, hitbox, and idle-sleep behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PetKind {

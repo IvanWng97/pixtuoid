@@ -13,10 +13,10 @@ use ratatui::style::Color;
 
 use std::sync::Arc;
 
+use pixtuoid_scene::display::PetHover;
 use pixtuoid_scene::floor::FloorInputs;
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
 use pixtuoid_scene::layout::SceneLayout;
-use pixtuoid_scene::pet::PetFrame;
 use pixtuoid_scene::pixel_painter::{
     AgentFrame, MascotFrame, PixelCtx, PixelPassResult, render_to_rgb_buffer,
 };
@@ -123,7 +123,7 @@ impl<'a> DrawCtx<'a> {
 pub struct DrawOut {
     /// `None` when the frame was refused.
     pub layout: Option<Arc<SceneLayout>>,
-    pub pet_pos: Option<PetFrame>,
+    pub pet_pos: Option<PetHover>,
     pub mascots: Vec<MascotFrame>,
     pub agents: Vec<AgentFrame>,
     pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
@@ -426,10 +426,10 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             // Coffee before pet here must match the click arms in
             // `tui::handle_mouse_event`; the agent-wins half above needs no such care,
             // `hovered.is_none()` skips this block outright.
-            let pet_hit = pet_pos.filter(|f| hit_test_pet(f.kind, f.pos, f.anim, cell));
+            let pet_hit = pet_pos.filter(|f| hit_test_pet(f.kind, f.centre, f.anim, cell));
             if hit_test_coffee_machine(&layout, cell) {
                 paint_coffee_tooltip(f, at, theme);
-            } else if let Some(PetFrame { anim, kind, .. }) = pet_hit {
+            } else if let Some(PetHover { anim, kind, .. }) = pet_hit {
                 let on_cooldown = world.pets.petting.is_some_and(|p| p.is_active(now));
                 // `pet_pos` was drawn from `pets.pet`, so the kinds agree and
                 // the `default_name` arm is not a live path.

@@ -323,7 +323,7 @@ fn pet_tooltip_on_hover() {
     let scene = scene_with(vec![active("/tt/p.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(140, 48, vec![PetKind::Cat]);
     r.render(&scene, pack(), t0()).unwrap();
-    let PetFrame { pos, .. } = r.cached_pet_pos().expect("cat placed");
+    let PetHover { centre: pos, .. } = r.cached_pet_pos().expect("cat placed");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
     r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -342,7 +342,7 @@ fn pet_tooltip_shows_custom_name() {
     };
     let mut r = build_pets(140, 48, vec![cat]);
     r.render(&scene, pack(), t0()).unwrap();
-    let PetFrame { pos, .. } = r.cached_pet_pos().expect("cat placed");
+    let PetHover { centre: pos, .. } = r.cached_pet_pos().expect("cat placed");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
     r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
@@ -361,7 +361,7 @@ fn pet_tooltip_falls_back_to_default_name_when_not_configured() {
     let scene = scene_with(vec![active("/tt/fb.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(140, 48, vec![PetKind::Cat]);
     r.render(&scene, pack(), t0()).unwrap();
-    let PetFrame { pos, .. } = r.cached_pet_pos().expect("cat placed");
+    let PetHover { centre: pos, .. } = r.cached_pet_pos().expect("cat placed");
     r.set_mouse_pos(Some((pos.x, pos.y / 2)));
     r.render(&scene, pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());

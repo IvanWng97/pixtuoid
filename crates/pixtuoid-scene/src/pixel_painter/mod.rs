@@ -15,17 +15,17 @@ use pixtuoid_core::state::DaemonState;
 use pixtuoid_core::{AgentSlot, SceneState};
 
 use crate::chitchat::{ActiveChitchat, ChitchatBubble};
+use crate::display::PetHover;
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
 use crate::layout::{Depth, Facing, FixtureKind, Pivot, Point, SceneLayout, Station, sort_row_at};
-use crate::pet::PetFrame;
 use crate::walk::WalkState;
 
 /// Everything the pure-pixel pass observed that the caller still needs.
 pub struct PixelPassResult {
     /// The office pet's resolved frame this tick (for hit-testing), if present.
-    pub pet_pos: Option<PetFrame>,
+    pub pet_pos: Option<PetHover>,
     /// Every gateway mascot drawn this tick, in paint order — a source can run
     /// ANY number of concurrent instances, each independently hoverable.
     pub mascots: Vec<MascotFrame>,
@@ -85,7 +85,7 @@ pub struct AgentFrame {
 
 /// What [`paint_frame`] drew that hover can name.
 struct Hoverables {
-    pet_pos: Option<PetFrame>,
+    pet_pos: Option<PetHover>,
     mascots: Vec<MascotFrame>,
     agents: Vec<AgentFrame>,
 }
@@ -441,7 +441,7 @@ fn enqueue_pet<'a>(
     ctx: &PaintCtx<'_>,
     pet: &'a crate::sim::PetPlacement,
     drawables: &mut Vec<Drawable<'a>>,
-) -> PetFrame {
+) -> PetHover {
     let pos = pet.pos;
     let pet_h = crate::sim::frame_size(
         ctx.pack,
@@ -461,10 +461,10 @@ fn enqueue_pet<'a>(
             effects: &pet.effects,
         },
     });
-    PetFrame {
-        pos,
-        anim: pet.anim_name,
+    PetHover {
         kind: pet.kind,
+        centre: pos,
+        anim: pet.anim_name,
     }
 }
 

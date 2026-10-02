@@ -57,7 +57,11 @@ fn pet_hit_test_resolves_at_pet_position() {
     let scene = scene_with(vec![active("/ph/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(120, 44, vec![PetKind::Cat]);
     r.render(&scene, pack(), t0()).unwrap();
-    let PetFrame { pos, anim, kind } = r.cached_pet_pos().expect("pet placed");
+    let PetHover {
+        centre: pos,
+        anim,
+        kind,
+    } = r.cached_pet_pos().expect("pet placed");
     assert!(
         crate::tui::hit_test::hit_test_pet(
             kind,
@@ -348,7 +352,7 @@ fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
                 hit_test_agent(&out.agents, at),
                 hit_test_coffee_machine(layout, at),
                 out.pet_pos
-                    .is_some_and(|p| hit_test_pet(p.kind, p.pos, p.anim, at)),
+                    .is_some_and(|p| hit_test_pet(p.kind, p.centre, p.anim, at)),
                 topmost_mascot_at(&out.mascots, at).map(|m| m.pos),
                 hit_test_furniture(layout, at),
             )
