@@ -14,7 +14,7 @@ use anyhow::{Context as _, Result};
 use clap::Parser;
 use pixtuoid::tui::renderer::{DrawCtx, draw_scene};
 use pixtuoid_core::SceneState;
-use pixtuoid_scene::embedded_pack::{PackSource, load_sprite_pack};
+use pixtuoid_scene::pack::{PackSource, load_sprite_pack};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -125,14 +125,17 @@ struct SnapshotArgs {
     #[arg(long, value_delimiter = ',')]
     openclaw_ports: Vec<String>,
 
-    /// Override local hour-of-day (0–23) used by time-of-day effects
-    /// (dust motes, lighting).
+    /// Override local hour-of-day (0–23) used by time-of-day lighting.
     #[arg(long)]
     now_hour: Option<u32>,
 
     /// Override the local day (1 = `pixtuoid_scene::localclock`'s base date) used by time-of-day.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     now_day: u32,
+
+    /// Minutes past `--now-hour` (0–59): a weather transition runs mid-hour.
+    #[arg(long, default_value_t = 0, requires = "now_hour", value_parser = clap::value_parser!(u64).range(0..60))]
+    now_min: u64,
 
     /// Force a specific weather, bypassing the clock-based 10-minute cycle.
     /// One of: clear | rain | storm | snow | fog | overcast | windy | smog.
@@ -331,8 +334,11 @@ fn main() -> Result<()> {
         };
 
     let now = match args.now_hour {
-        Some(h) => pixtuoid_scene::localclock::try_on_day(args.now_day - 1, h)
-            .with_context(|| format!("invalid --now-day/--now-hour {}:{h}", args.now_day))?,
+        Some(h) => {
+            pixtuoid_scene::localclock::try_on_day(args.now_day - 1, h)
+                .with_context(|| format!("invalid --now-day/--now-hour {}:{h}", args.now_day))?
+                + std::time::Duration::from_secs(60 * args.now_min)
+        }
         None => SystemTime::now(),
     };
     let cols = args.cols.unwrap_or(COLS);
@@ -529,7 +535,7 @@ fn main() -> Result<()> {
     // Static snapshots have no time to animate the fade — snap straight
     // to the steady-state level for the chosen scene.
     if args.empty {
-        floor.ctx.light.snap_to_empty();
+        floor.ctx.vacancy_dim.snap_to_empty();
     }
     let (dash_rows, dash_selected) = if args.dashboard {
         let folds = pixtuoid::tui::dashboard::DashboardFolds::default();

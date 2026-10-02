@@ -4,15 +4,13 @@
 //! or how bright it is.
 
 use std::collections::HashMap;
-use std::time::SystemTime;
 
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::{AgentSlot, ToolKind};
 
-use crate::anim::epoch_ms;
-use crate::atmosphere::Look;
+use crate::atmosphere::SkyTones;
 use crate::floor::NeonLevels;
-use crate::layout::{Facing, Layout, Point};
+use crate::layout::{Facing, Point, SceneLayout};
 
 /// The floor lamp's level at full dark, before the room's own level.
 const FLOOR_LAMP_GAIN: f32 = 0.55;
@@ -59,7 +57,7 @@ const NEON_BREATH_FLOOR: f32 = 0.85;
 const NEON_ALERT_BREATH_MS: u64 = 3_000;
 const NEON_ALERT_BREATH_FLOOR: f32 = 0.62;
 /// Daylight washes a neon out: the halo keeps this share at noon, all of it at night.
-const NEON_DAYLIGHT_FLOOR: f32 = 0.5;
+const NEON_DAYLIGHT_MIN: f32 = 0.5;
 
 /// How far below its window the sun's spill reaches, in rows.
 pub(crate) const SPILL_DEPTH: u16 = 12;
@@ -283,7 +281,7 @@ pub(crate) struct Lights {
     pub(crate) spills: Vec<Emitter>,
 }
 
-/// What the lights depend on this frame besides the layout and the sky's [`Look`].
+/// What the lights depend on this frame besides the layout and the sky's [`SkyTones`].
 pub(crate) struct LightInputs<'a> {
     /// Every agent the scene holds; only this floor's light it.
     pub(crate) agents: &'a [AgentSlot],
@@ -293,12 +291,13 @@ pub(crate) struct LightInputs<'a> {
     /// The room's artificial-light level, which an emptied floor turns down.
     pub(crate) indoor_scale: f32,
     pub(crate) neon: NeonLevels,
-    pub(crate) now: SystemTime,
+    /// The neon halo's breath steps on it.
+    pub(crate) beat: crate::anim::Beat,
 }
 
 impl Lights {
     /// The lights `layout` shows under `look`.
-    pub(crate) fn of(layout: &Layout, look: &Look, inputs: &LightInputs<'_>) -> Self {
+    pub(crate) fn of(layout: &SceneLayout, look: &SkyTones, inputs: &LightInputs<'_>) -> Self {
         let (darkness, indoor) = (look.darkness, inputs.indoor_scale);
         Self {
             floor_lamp: layout.floor_lamp_base().map(|centre| Emitter {
@@ -335,7 +334,7 @@ impl Lights {
                     h: crate::layout::NEON_PANEL.height,
                     reach: NEON_HALO_RADIUS,
                 },
-                strength: neon_halo_strength(inputs.neon, inputs.now, darkness),
+                strength: neon_halo_strength(inputs.neon, inputs.beat, darkness),
             },
             // `sunlight` already carries the weather, so heavy cloud dims the
             // spill with it.
@@ -433,7 +432,7 @@ pub(crate) fn desk_screen_glow(
 
 /// One halo over each [`lit_screen`], on the row above its desk, clear of the
 /// monitor.
-fn monitor_halos(layout: &Layout, inputs: &LightInputs<'_>) -> Vec<Emitter> {
+fn monitor_halos(layout: &SceneLayout, inputs: &LightInputs<'_>) -> Vec<Emitter> {
     inputs
         .agents
         .iter()
@@ -467,11 +466,11 @@ fn neon_breath(elapsed_ms: u64, period_ms: u64, floor: f32) -> f32 {
 
 /// The neon halo's strength at the tube: breathing, dimmed by daylight, and
 /// none from a tube driven no harder than it is starved.
-fn neon_halo_strength(levels: NeonLevels, now: SystemTime, darkness: f32) -> f32 {
-    let ms = epoch_ms(now);
+fn neon_halo_strength(levels: NeonLevels, beat: crate::anim::Beat, darkness: f32) -> f32 {
+    let ms = beat.ms();
     let brand = NEON_HALO_BRAND * neon_breath(ms, NEON_BREATH_MS, NEON_BREATH_FLOOR);
     let alert = NEON_HALO_ALERT * neon_breath(ms, NEON_ALERT_BREATH_MS, NEON_ALERT_BREATH_FLOOR);
-    let daylight = NEON_DAYLIGHT_FLOOR + (1.0 - NEON_DAYLIGHT_FLOOR) * darkness.clamp(0.0, 1.0);
+    let daylight = NEON_DAYLIGHT_MIN + (1.0 - NEON_DAYLIGHT_MIN) * darkness.clamp(0.0, 1.0);
     // A tube only throws light ABOVE its starved level — one darker than the wall
     // it hangs on has none to give.
     let starved = NeonLevels::EMPTY.power;

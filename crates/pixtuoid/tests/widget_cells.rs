@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use common::fixture_scene;
 use pixtuoid::tui::renderer::draw_scene;
-use pixtuoid_scene::embedded_pack::load_bundled_pack;
+use pixtuoid_scene::pack::load_bundled_pack;
 use pixtuoid_scene::theme;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -118,7 +118,7 @@ fn chitchat_bubble_text_appears_in_buffer() {
     let bubble_text = "LGTM!";
     let speaker = AgentFrame {
         agent_id: pixtuoid_core::AgentId::from_transcript_path("/chat/0.jsonl"),
-        anchor: Point { x: 26, y: 40 },
+        top_left: Point { x: 26, y: 40 },
         w: 8,
         h: 12,
         label_anchor: Point { x: 30, y: 40 },

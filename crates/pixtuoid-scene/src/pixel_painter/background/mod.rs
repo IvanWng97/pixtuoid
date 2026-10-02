@@ -6,11 +6,11 @@
 //! orchestrator (`pixel_painter/mod.rs`) calls it; the backdrop fixtures
 //! among it (clock, runner, mats) in roster order.
 
-mod floor_wash;
+mod ground_wash;
 mod lighting;
 
 use crate::celestial::SkyView;
-pub(super) use floor_wash::paint_floor_wash;
+pub(super) use ground_wash::paint_ground_wash;
 pub(super) use lighting::{
     paint_clock, paint_corridor_runner, paint_light, paint_neon_halo, paint_neon_panel,
     paint_shadows,
@@ -19,24 +19,20 @@ pub(super) use lighting::{
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use super::ambient::SunbeamColumn;
 use super::palette::{RgbLut, WHITE, blend_pixel, blend_rgb};
 
 use crate::atmosphere::Moment;
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
-    Bounds, Layout, Size, WindowBay, glass_rows, wall_trim_row, window_frame, window_posts,
-    window_rows, window_run,
+    Bounds, Size, WindowBay, glass_rows, wall_trim_row, window_frame, window_posts, window_rows,
+    window_run,
 };
-use crate::sky::{Sky, Weather};
+use crate::sky::Sky;
 use crate::skyline::CityStrip;
 use crate::theme::Theme;
 
-/// Room-wide ambient bounce from a Storm lightning strike, at [`Sky::flash`].
+/// Room-wide ambient bounce from a lightning strike, at [`Sky::flash`].
 pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, sky: &Sky) {
-    if sky.weather() != Weather::Storm {
-        return;
-    }
     let level = sky.flash();
     if level <= 0.0 {
         return;
@@ -46,21 +42,6 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, sky: &Sky) {
     for px in buf.as_mut_slice() {
         *px = lut.apply(*px);
     }
-}
-
-/// Returns one `SunbeamColumn` per painted window, centred on the pane and
-/// starting at the floor row, so the motes drift through the window's
-/// [`Light::Spill`](crate::lighting::Light::Spill).
-pub(in crate::pixel_painter) fn window_spill_columns(layout: &Layout) -> Vec<SunbeamColumn> {
-    let top_wall_h = layout.wall_band_h();
-    layout
-        .window_bays()
-        .map(|w| SunbeamColumn {
-            x: w.center_x(),
-            top_y: top_wall_h,
-            depth: crate::lighting::SPILL_DEPTH,
-        })
-        .collect()
 }
 
 /// The base fill's complete input set. Every value the fill loops read is a
@@ -119,9 +100,9 @@ impl BaseFillCache {
     }
 }
 
-/// The floor and the north wall band `top_wall_h` tall with the windows `bays`,
+/// The ground and the north wall band `top_wall_h` tall with the windows `bays`,
 /// over the whole of `buf`, at `moment`.
-pub(super) fn paint_floor_and_walls(
+pub(super) fn paint_ground_and_walls(
     base_fill: &mut BaseFillCache,
     buf: &mut RgbBuffer,
     top_wall_h: u16,
@@ -139,7 +120,7 @@ pub(super) fn paint_floor_and_walls(
     let wall = theme.surface.wall;
     let wall_trim_color = theme.surface.wall_trim;
 
-    let (tint, share) = look.floor_tint;
+    let (tint, share) = look.ground_tint;
 
     // The noise picks one of THREE colours and the tint is fixed for the frame,
     // so resolve the blend once, not per pixel.
@@ -298,11 +279,9 @@ fn paint_floor_to_ceiling_window(
 
     // The bright on-glass bolt — the strike's source. Rides the shared flash
     // level so it fires in lockstep with `paint_lightning_flash`.
-    if sky.weather() == Weather::Storm {
-        let level = sky.flash();
-        if level > 0.0 {
-            wash_glass(buf, pane, WHITE, 0.6 * level);
-        }
+    let level = sky.flash();
+    if level > 0.0 {
+        wash_glass(buf, pane, WHITE, 0.6 * level);
     }
 
     if let Some(blaze) = sky_view.blaze() {

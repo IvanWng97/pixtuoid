@@ -49,12 +49,14 @@
     the checkout even when a rule allows it
     (code.claude.com/docs/en/settings-reference). Any other flag, action input
     or settings key can add a rule, a tool, a hook or a directory, so all three
-    are allowlists; other values stay free.
+    are allowlists; other values stay free. `allowed_bots` admits the merge
+    queue's app alone, never `*`, which would let any App's push trigger it.
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length == 1
+      and ((.[0].with.allowed_bots // "") == "mergify[bot]")
       and ((.[0].with | keys) - [
-            "anthropic_federation_rule_id", "anthropic_organization_id",
+            "allowed_bots", "anthropic_federation_rule_id", "anthropic_organization_id",
             "anthropic_service_account_id", "classify_inline_comments", "claude_args",
             "claude_code_oauth_token", "display_report", "github_token",
             "include_fix_links", "prompt", "show_full_output", "track_progress"] == [])
@@ -69,6 +71,9 @@
              and ([$args | scan("--settings[ =]'([^']*)'")][0][0]
                   | fromjson == {"permissions": {"blockReadsOutsideWorkingDirectories": true}}))
   break:
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.allowed_bots)
+      = "*"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       += " --allowedTools Read"
@@ -368,16 +373,155 @@
       .jobs.gate.steps |= map(
         if .uses == "./.github/actions/require-jobs" then .["continue-on-error"] = true else . end)
 
+- id: queue-updates-by-merge
+  file: .mergify.yml
+  why: >-
+    The queue updates the PR's own branch, and a rebase update force-pushes it
+    (docs.mergify.com/merge-queue/rules#configuration-options): a PR stacked on
+    it loses the commits it was built on, and every local checkout of it
+    diverges, with nothing to show it until the next push.
+  assert: |
+    (.queue_rules | length > 0) and all(.queue_rules[]; .update_method == "merge")
+  break:
+    - .queue_rules[0].update_method = "rebase"
+    - '.queue_rules += [{"name": "second", "update_method": "rebase"}]'
+
 # ── Publishing
+
+- id: release-publishes-after-ci-gate
+  file: .github/workflows/release-plz.yml
+  why: >-
+    The publish runs on the merge push, and the merge queue can land other PRs
+    while a release PR is open, so only a wait on that commit's own ci-gate
+    proves the published tree passed CI. A job whose need failed or timed out
+    is skipped unless its `if:` calls a status function
+    (docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idneeds),
+    so the publish must need the wait and call none.
+  assert: |
+    .jobs as $jobs
+    | [$jobs[] | select(any(.steps[]?; ((.uses // "") | startswith("release-plz/action@"))
+                                       and .with.command == "release"))] as $publishers
+    | ($publishers | length == 1)
+      and (($publishers[0].if // "") | test("always\\(|failure\\(|cancelled\\(") | not)
+      and ([$publishers[0].needs] | flatten | any(.[]; . as $need | $jobs[$need]
+            | (has("continue-on-error") | not)
+              and any(.steps[]; .env.CHECK_NAME == "ci-gate" and .env.SHA == "${{ github.sha }}"
+                                and ((has("if") or has("continue-on-error")) | not))))
+  break:
+    - del(.jobs.release.needs)
+    - .jobs.release.if += " || always()"
+    - .jobs["ci-passed"]["continue-on-error"] = true
+    - .jobs["ci-passed"].steps[0].env.SHA = "${{ github.event.before }}"
+    - .jobs["ci-passed"].steps[0].env.CHECK_NAME = "lint"
+    - .jobs["ci-passed"].steps[0]["continue-on-error"] = true
+    - .jobs["ci-passed"].steps[0].if = "${{ false }}"
+
+- id: every-main-push-gets-its-ci-gate
+  file: .github/workflows/ci.yml
+  why: >-
+    The release waits for ci-gate on its own merge commit, and a concurrency
+    group's newer run replaces its pending one unless the group queues
+    (docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency),
+    so a release commit whose run was replaced never gets one and the publish
+    times out. A main push therefore owns its group or queues in it, and a run
+    already in progress is never cancelled.
+  assert: |
+    .concurrency as $c
+    | (($c.group | test("github\\.sha"))
+        or ($c.queue == "max" and ($c["cancel-in-progress"] // false | tostring) == "false"))
+      and (($c["cancel-in-progress"] // false | tostring) as $cancel
+           | $cancel == "false" or $cancel == "${{ github.event_name == 'pull_request' }}")
+  break:
+    - .concurrency.group = "ci-${{ github.ref }}"
+    - .concurrency["cancel-in-progress"] = true
+    - .concurrency["cancel-in-progress"] = "${{ github.event_name != 'workflow_dispatch' }}"
+
+- id: release-wait-only-for-a-release-merge
+  file: .github/workflows/release-plz.yml
+  why: >-
+    The wait holds a runner, from the concurrency CI itself uses, for as long
+    as CI takes, and only a merged release PR has anything to publish
+    (release-plz's `should_release`), so it runs only when the detection says
+    so. The tag check is what turns a detection miss red, so it runs after
+    every push, whatever the publish did.
+  assert: |
+    .jobs as $jobs
+    | [$jobs | to_entries[] | select(any(.value.steps[]?; .env.PR_BRANCH_PREFIX != null
+                                         and ((.run // "") | contains("/commits/$SHA/pulls"))))] as $detectors
+    | [$jobs[] | select(any(.steps[]?; .env.CHECK_NAME == "ci-gate"))] as $waits
+    | [$jobs[] | select(any(.steps[]?; (.run // "") | contains("just workspace-version")))] as $tagged
+    | ($detectors | length == 1)
+      and ($waits | length == 1)
+      and $waits[0].if == "needs.\($detectors[0].key).outputs.release == 'true'"
+      and ($tagged | length == 1)
+      and (($tagged[0].if // "") | contains("!cancelled()"))
+      and (($tagged[0].if // "") | contains("outputs.release") | not)
+  break:
+    - del(.jobs["ci-passed"].if)
+    - .jobs["ci-passed"].if = "needs.release-merge.outputs.release != 'false'"
+    - del(.jobs["release-merge"].steps[0].env.PR_BRANCH_PREFIX)
+    - del(.jobs["version-tagged"].if)
+    - .jobs["version-tagged"].if = "${{ !cancelled() && needs.release-merge.outputs.release == 'true' }}"
 
 - id: release-plz-publishes-only-release-prs
   file: release-plz.toml
   why: >-
     release-plz's default releases every unpublished package on every run
-    (release-plz.dev/docs/config#the-release_always-field), and the release job
-    runs on every push to main, so without this key a version bump that lands
-    outside a release PR ships to crates.io with no human decision.
+    (release-plz.dev/docs/config#the-release_always-field), and the release
+    job's own gate is a copy of release-plz's test, so without this key a gate
+    that stopped testing would ship a version bump that lands outside a release
+    PR to crates.io with no human decision.
   assert: .workspace.release_always == false
   break:
     - del(.workspace.release_always)
     - .workspace.release_always = true
+
+- id: release-archives-stage-every-notice
+  file: .github/workflows/release.yml
+  why: >-
+    The binary embeds OFL-1.1 fonts, whose license must travel with every copy
+    (crates/*/fonts/), and the archives ship only what these steps stage; npm
+    repackages them. A missing notice fails nothing, and `just stage-notices`
+    globs every embedded font's, so each packaging step must call it.
+  assert: |
+    [.jobs.build.steps[] | select((.name // "") | startswith("Package"))]
+    | length == 2 and all(.run | contains("just stage-notices \"$DIR\""))
+  break:
+    - |
+      (.jobs.build.steps[] | select(.name == "Package (Windows)") | .run)
+      |= sub("just stage-notices \"\\$DIR\""; "cp LICENSE \"$DIR/\"")
+    - .jobs.build.steps |= map(select(.name != "Package (Unix)"))
+
+- id: debs-ship-the-license
+  file:
+    - crates/pixtuoid/Cargo.toml
+    - crates/pixtuoid-hook/Cargo.toml
+  why: >-
+    cargo-deb's generated copyright file names the license without its text,
+    which MIT requires in every copy; without this row a .deb ships none.
+  assert: |
+    .package.name as $name
+    | [.package.metadata.deb.assets[]
+       | select(.[0] == "../../LICENSE" and .[1] == "usr/share/doc/\($name)/")]
+    | length == 1
+  break:
+    - .package.metadata.deb.assets |= map(select(.[0] != "../../LICENSE"))
+    - |
+      (.package.metadata.deb.assets[] | select(.[0] == "../../LICENSE") | .[1])
+      = "usr/share/doc/"
+
+- id: deb-ships-every-font-notice
+  file: crates/pixtuoid/Cargo.toml
+  why: >-
+    The .deb is another copy of the binary, so it carries the embedded fonts'
+    notices by the same glob `just stage-notices` uses; a narrower one drops a
+    font silently.
+  assert: |
+    [.package.metadata.deb.assets[]
+     | select(.[0] == "../*/fonts/**/*.txt" and .[1] == "usr/share/doc/pixtuoid/licenses/")]
+    | length == 1
+  break:
+    - .package.metadata.deb.assets |= map(select(.[0] | startswith("target/")))
+    - |
+      (.package.metadata.deb.assets[] | select(.[0] | contains("fonts")) | .[0])
+      = "../pixtuoid/fonts/*.txt"

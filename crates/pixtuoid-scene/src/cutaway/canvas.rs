@@ -13,8 +13,8 @@ use pixtuoid_core::sprite::format::Pack;
 use crate::cutaway::light::Ambient;
 use crate::cutaway::order::Span;
 use crate::cutaway::paint::{Office, Showing, frame_list, paint};
-use crate::floor::ObservedFloor;
-use crate::layout::{Bounds, Layout};
+use crate::floor::SteppedFloor;
+use crate::layout::{Bounds, SceneLayout};
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
@@ -50,11 +50,13 @@ pub enum Dirty {
 /// the canvas's pack.
 struct Epoch {
     // Held, so a later layout cannot reuse its address.
-    layout: Arc<Layout>,
+    layout: Arc<SceneLayout>,
     // A static, so its address is its identity.
     theme: &'static Theme,
     scale: RenderScale,
     ambient: Ambient,
+    ground: crate::cutaway::paint::Ground,
+    flash: crate::cutaway::light::Flash,
 }
 
 impl PartialEq for Epoch {
@@ -63,6 +65,8 @@ impl PartialEq for Epoch {
             && std::ptr::eq(self.theme, other.theme)
             && self.scale == other.scale
             && self.ambient == other.ambient
+            && self.ground == other.ground
+            && self.flash == other.flash
     }
 }
 
@@ -84,29 +88,31 @@ impl CutawayCanvas {
         }
     }
 
-    /// Paint `observed` as [`render_cutaway`](crate::cutaway::paint::render_cutaway)
+    /// Paint `stepped` as [`render_cutaway`](crate::cutaway::paint::render_cutaway)
     /// does, unless the frame would be the one already shown.
     pub fn frame(
         &mut self,
-        observed: &ObservedFloor,
+        stepped: &SteppedFloor,
         theme: &'static Theme,
         scale: RenderScale,
         showing: Showing<'_>,
         cache: &mut crate::cutaway::paint::CutawayCache,
     ) -> CanvasFrame<'_> {
-        let layout = &observed.layout;
+        let layout = &stepped.layout;
         let office = Office {
             layout,
             pack: &self.pack,
             theme,
             scale,
         };
-        let list = frame_list(&observed.frame, office, showing);
+        let list = frame_list(&stepped.frame, office, showing);
         let epoch = Epoch {
             layout: Arc::clone(layout),
             theme,
             scale,
             ambient: list.ambient(),
+            ground: list.ground(),
+            flash: list.flash(),
         };
         let footprints: Vec<(Span, u64)> = list
             .pieces()
@@ -143,7 +149,7 @@ impl CutawayCanvas {
     }
 
     /// The agent the last frame shows topmost over `area`, in LOGICAL units
-    /// as [`Layout`], not [`Dirty::Rects`]' buffer pixels; `None` where a
+    /// as [`SceneLayout`], not [`Dirty::Rects`]' buffer pixels; `None` where a
     /// piece that is no agent lies over it, or none does.
     pub fn hover_at(&self, area: Bounds) -> Option<AgentId> {
         let shown = self.shown.as_ref()?;
@@ -192,10 +198,11 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use super::*;
+    use crate::anim::Motion;
     use crate::cutaway::paint::render_cutaway;
     use crate::cutaway::paint::tests::{empty_frame, lively_office, sit_down};
-    use crate::embedded_pack::test_default_pack;
     use crate::floor::FloorMeta;
+    use crate::pack::test_default_pack;
     use crate::sim::SimFrame;
 
     /// The ground floor under a clear sky: rain or snow on the glass moves
@@ -220,12 +227,13 @@ mod tests {
         crate::theme::theme_by_name("normal").expect("theme")
     }
 
-    /// `layout`'s full render of `frame` at `now`, under the normal theme.
+    /// `layout`'s full render of `frame` on `floor` at `now`, under the normal
+    /// theme.
     fn full_render(
-        layout: &Layout,
+        layout: &SceneLayout,
         pack: &Pack,
         scale: RenderScale,
-        frame: &SimFrame,
+        (frame, floor): (&SimFrame, FloorMeta),
         now: SystemTime,
     ) -> RgbBuffer {
         let theme = normal();
@@ -244,7 +252,7 @@ mod tests {
         render_cutaway(
             frame,
             office,
-            crate::cutaway::paint::tests::showing(clear_ground(), now),
+            crate::cutaway::paint::tests::showing(floor, now),
             &mut cache,
             &mut buf,
         );
@@ -255,7 +263,17 @@ mod tests {
     /// pack's densest scale: every frame it shows, painted or skipped, is the
     /// full render, and every pixel two full renders in a row differ in lies in
     /// what it reported.
-    fn run(layout: Layout, pack: Pack, steps: &[(SimFrame, SystemTime)]) -> Run {
+    fn run(layout: SceneLayout, pack: Pack, steps: &[(SimFrame, SystemTime)]) -> Run {
+        run_under(layout, pack, steps, clear_ground())
+    }
+
+    /// [`run`] on `floor`, under its weather.
+    fn run_under(
+        layout: SceneLayout,
+        pack: Pack,
+        steps: &[(SimFrame, SystemTime)],
+        floor: FloorMeta,
+    ) -> Run {
         let (layout, pack) = (Arc::new(layout), Arc::new(pack));
         let theme = normal();
         let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
@@ -265,7 +283,6 @@ mod tests {
             theme,
             scale,
         };
-        let floor = clear_ground();
         let w = scale.to_buffer(layout.buf_w);
         let inside = |rects: &[Bounds], i: usize| {
             let (x, y) = ((i % usize::from(w)) as u16, (i / usize::from(w)) as u16);
@@ -278,7 +295,7 @@ mod tests {
         let mut tally = Run::default();
         let mut last: Option<(RgbBuffer, Vec<(Span, u64)>)> = None;
         for (k, (frame, now)) in steps.iter().enumerate() {
-            let full = full_render(&layout, &pack, scale, frame, *now);
+            let full = full_render(&layout, &pack, scale, (frame, floor), *now);
             let list = frame_list(
                 frame,
                 office,
@@ -290,12 +307,12 @@ mod tests {
                 .map(|p| (p.span, p.fingerprint))
                 .chain(list.lights().iter().map(|l| (l.span, l.fingerprint)))
                 .collect();
-            let observed = ObservedFloor {
+            let stepped = SteppedFloor {
                 layout: Arc::clone(&layout),
                 frame: frame.clone(),
             };
             let shown = canvas.frame(
-                &observed,
+                &stepped,
                 theme,
                 scale,
                 crate::cutaway::paint::tests::showing(floor, *now),
@@ -379,6 +396,30 @@ mod tests {
         assert!(tally.whole > 0 && tally.partial > 0, "{tally:?}");
     }
 
+    /// A storm's strike, a tick apart through its phases: each change of the
+    /// flash repaints the whole frame, and the canvas shows the full render.
+    #[test]
+    fn each_phase_of_a_strike_repaints_the_whole_frame() {
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        let seated = frames.last().expect("a seated frame");
+        let storm = crate::sky::WeatherPolicy::Forced(crate::sky::Weather::Storm);
+        let strike = (0..60_000u64)
+            .step_by(10)
+            .map(|ms| SystemTime::UNIX_EPOCH + Duration::from_millis(ms))
+            .find(|&t| crate::sky::Sky::at(Motion::Full.clock(t), storm).flash() > 0.0)
+            .expect("a strike in the first minute");
+        let steps: Vec<_> = ticks(strike - Duration::from_millis(200), 8)
+            .map(|t| (seated.clone(), t))
+            .collect();
+        let tally = run_under(
+            layout,
+            pack,
+            &steps,
+            FloorMeta::ground().with_weather(storm),
+        );
+        assert!(tally.whole >= 2, "{tally:?}");
+    }
+
     /// The elevator opening, the sign fading up to alert and both appliances
     /// busy, a tick apart.
     #[test]
@@ -424,7 +465,7 @@ mod tests {
     #[test]
     fn a_new_theme_or_scale_repaints_everything() {
         let layout = Arc::new(lively_office());
-        let observed = ObservedFloor {
+        let stepped = SteppedFloor {
             frame: empty_frame(&layout),
             layout,
         };
@@ -440,7 +481,7 @@ mod tests {
             let scale = RenderScale::new(s).expect("nonzero");
             canvas
                 .frame(
-                    &observed,
+                    &stepped,
                     theme,
                     scale,
                     crate::cutaway::paint::tests::showing(clear_ground(), now),
@@ -460,7 +501,7 @@ mod tests {
 
     /// A walk to a north-facing desk, shown at scale 2.
     struct Hovering {
-        layout: Arc<Layout>,
+        layout: Arc<SceneLayout>,
         pack: Arc<Pack>,
         frames: Vec<SimFrame>,
         scale: RenderScale,
@@ -510,13 +551,13 @@ mod tests {
 
         /// `canvas` after showing `frame`.
         fn show(&self, canvas: &mut CutawayCanvas, frame: &SimFrame) {
-            let observed = ObservedFloor {
+            let stepped = SteppedFloor {
                 layout: Arc::clone(&self.layout),
                 frame: frame.clone(),
             };
             let mut cache = crate::cutaway::paint::CutawayCache::default();
             canvas.frame(
-                &observed,
+                &stepped,
                 normal(),
                 self.scale,
                 crate::cutaway::paint::tests::showing(clear_ground(), Self::now()),
@@ -627,11 +668,11 @@ mod tests {
             both.agents.push(b.clone());
             both.characters.push(crate::sim::CharacterPlacement {
                 agent_idx: both.agents.len() - 1,
-                anchor: crate::layout::Point {
-                    x: a.anchor.x + 2,
-                    y: a.anchor.y + dy,
+                top_left: crate::layout::Point {
+                    x: a.top_left.x + 2,
+                    y: a.top_left.y + dy,
                 },
-                anchor_y: a.anchor_y + dy,
+                sort_row: a.sort_row + dy,
                 seat_desk: None,
                 seated: false,
                 ..a.clone()
@@ -714,7 +755,7 @@ mod tests {
         renamed.agents[0].label = "cc\u{b7}renamed".into();
         let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
         h.show(&mut canvas, seated);
-        let observed = ObservedFloor {
+        let stepped = SteppedFloor {
             layout: Arc::clone(&h.layout),
             frame: renamed.clone(),
         };
@@ -725,7 +766,7 @@ mod tests {
         );
         let dirty = canvas
             .frame(
-                &observed,
+                &stepped,
                 normal(),
                 h.scale,
                 crate::cutaway::paint::tests::showing(clear_ground(), Hovering::now()),
@@ -759,7 +800,7 @@ mod tests {
             total: 3,
             ..crate::board::StateCounts::default()
         };
-        let busy = crate::board::build_board(counts, 60, None, None, Hovering::now());
+        let busy = crate::board::build_board(counts, 60, None, None, Motion::Full, Hovering::now());
         let busy = Showing {
             board: &busy,
             ..quiet
@@ -780,13 +821,13 @@ mod tests {
         };
         let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
         h.show(&mut canvas, seated);
-        let observed = ObservedFloor {
+        let stepped = SteppedFloor {
             layout: Arc::clone(&h.layout),
             frame: seated.clone(),
         };
         let mut cache = crate::cutaway::paint::CutawayCache::default();
         let dirty = canvas
-            .frame(&observed, normal(), h.scale, busy, &mut cache)
+            .frame(&stepped, normal(), h.scale, busy, &mut cache)
             .dirty;
         let size = (
             h.scale.to_buffer(h.layout.buf_w),
@@ -808,22 +849,22 @@ mod tests {
         let now = crate::localclock::at_hour(12);
         let mut cache = crate::cutaway::paint::CutawayCache::default();
         let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
-        let observe = |seed| {
-            let layout = Layout::compute_with_seed(160, 96, None, seed).expect("lays out");
-            ObservedFloor {
+        let stepped = |seed| {
+            let layout = SceneLayout::compute_with_seed(160, 96, None, seed).expect("lays out");
+            SteppedFloor {
                 frame: empty_frame(&layout),
                 layout: Arc::new(layout),
             }
         };
         let floor = clear_ground();
         canvas.frame(
-            &observe(0),
+            &stepped(0),
             normal(),
             scale,
             crate::cutaway::paint::tests::showing(floor, now),
             &mut cache,
         );
-        let b = observe(1);
+        let b = stepped(1);
         let shown = canvas.frame(
             &b,
             normal(),
@@ -833,7 +874,8 @@ mod tests {
         );
         assert_eq!(shown.dirty, Dirty::All);
         assert!(
-            shown.buf.as_slice() == full_render(&b.layout, &pack, scale, &b.frame, now).as_slice(),
+            shown.buf.as_slice()
+                == full_render(&b.layout, &pack, scale, (&b.frame, clear_ground()), now).as_slice(),
             "the canvas shows other than the new layout"
         );
     }

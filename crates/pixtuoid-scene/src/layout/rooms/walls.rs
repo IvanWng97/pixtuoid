@@ -17,7 +17,7 @@
 use crate::layout::decor::GroundAlign;
 use crate::layout::mask::ground_rect;
 use crate::layout::{
-    Anchor, Bounds, MeetingRoom, Point, Size, WALL_BAND_TO_TOP_MARGIN, WallSegment, pct,
+    Bounds, MeetingRoom, Pivot, Point, Size, WALL_BAND_TO_TOP_MARGIN, WallSegment, pct,
 };
 use std::ops::Range;
 
@@ -123,8 +123,8 @@ pub(crate) fn stitch_vertical_wall(
 
 /// One room wall as every painter draws it: where its glass stands, which of
 /// its ends a doorway frames, and the bands it sorts in. Built once from
-/// [`Layout::room_walls`](crate::layout::Layout::room_walls) and
-/// [`Layout::doorways`](crate::layout::Layout::doorways), so no painter
+/// [`SceneLayout::room_walls`](crate::layout::SceneLayout::room_walls) and
+/// [`SceneLayout::doorways`](crate::layout::SceneLayout::doorways), so no painter
 /// re-derives a room's perimeter, closes a doorway, or stands a wall the
 /// layout never cut.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -276,7 +276,7 @@ impl WallPiece {
             w: visual.w,
             h: visual.h.saturating_sub(cap),
         };
-        ground_rect(Anchor::TopLeft, at, fp, visual, align_x, GroundAlign::End)
+        ground_rect(Pivot::TopLeft, at, fp, visual, align_x, GroundAlign::End)
     }
 
     /// The bands both painters sort it in among the office's pieces, as
@@ -925,8 +925,8 @@ mod tests {
             (160, 192),
         ] {
             for seed in 0..12 {
-                let l =
-                    crate::layout::Layout::compute_with_seed(w, h, None, seed).expect("lays out");
+                let l = crate::layout::SceneLayout::compute_with_seed(w, h, None, seed)
+                    .expect("lays out");
                 for &piece in &l.wall_pieces {
                     met += 1;
                     let (at, size) = piece.visual();

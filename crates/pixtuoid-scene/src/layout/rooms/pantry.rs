@@ -1,7 +1,7 @@
 //! The pantry aggregate: bounds + the counter size + the island.
 
 use crate::layout::{
-    Anchor, Bounds, Facing, Furniture, OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W, Point, Size,
+    Bounds, Facing, Furniture, OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W, Pivot, Point, Size,
     WALL_THICK_H, Waypoint, WaypointKind, anchored_top_left, furniture_def, pct,
 };
 
@@ -101,7 +101,7 @@ impl PantryRoom {
             return Some(r);
         };
         let (cw, ch) = (self.counter_size.w, self.counter_size.h);
-        let at = anchored_top_left(Anchor::Center, c, cw, ch);
+        let at = anchored_top_left(Pivot::Center, c, cw, ch);
         let counter = Bounds {
             x: at.x,
             y: at.y,
@@ -207,7 +207,7 @@ pub(crate) fn place_kitchen_island(
     // the sprites can't overlap each other. A BLOCKED pos is fine for an
     // `occupies_pos` slot (the couch-seat pattern): approach_point finds the lane
     // BEHIND the island, the settle glide bridges in, and the island's south-row
-    // z-key occludes the standers' legs.
+    // sort row occludes the standers' legs.
     let bar_dx = (vis.w / 4) as i16;
     for (dx, facing) in [
         (-(stand_dx as i16), Facing::East),

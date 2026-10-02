@@ -92,7 +92,7 @@ version = "1"
 "Ξ" = "#1c2a36"   # j's colour on a key the cutaway never relights: a TV's, a slide's glass
 "Ж" = "#34424e"   # J's colour: a sheen on dark glass (a display, a microwave's window)
 # The corridor appliances' keys, each recoloured from the theme's ApplianceColors
-# (embedded_pack::appliance_overrides); the values are theme::normal's.
+# (pack::appliance_overrides); the values are theme::normal's.
 "Б" = "#323741"   # vending machine body
 "П" = "#b43c3c"   # vending machine brand panel
 "Ч" = "#dc3232"   # a vending machine's first drink
@@ -106,7 +106,7 @@ version = "1"
 "Ё" = "#82b4c8"   # printer scanner glass
 "Й" = "#f5f5f0"   # printer paper
 "Ц" = "#b4b4b9"   # printer output tray
-# The fixtures' keys, recoloured from the theme (embedded_pack::fixture_overrides);
+# The fixtures' keys, recoloured from the theme (pack::fixture_overrides);
 # the values are theme::normal's.
 "Д" = "#2e6f86"   # aquarium water
 "З" = "#9adbe8"   # pale aqua
@@ -123,7 +123,7 @@ version = "1"
 "ф" = "#c8c8d2"   # the wall clock's rim
 "ц" = "#f0f0f0"   # its face
 "з" = "#141419"   # its hands, ticks and centre pin
-# Un-themed, as the classic draws it (embedded_pack::COOLER_WATER).
+# Un-themed (pack::COOLER_WATER).
 "χ" = "#64b4e6"   # the water cooler's bottle
 
 # Shades of a recolor key, derived from it: `level` steps along the key's ramp
@@ -155,6 +155,10 @@ version = "1"
 "ё" = { of = "б", level = -2 }   # the water cooler's cabinet, shaded east side
 "α" = { of = "ч", level = -2 }   # the first coat, turned from the pole
 "β" = { of = "ш", level = -2 }   # the second
+"ţ" = { of = "t", level = -2 }   # the cat's fur, shaded
+"Ţ" = { of = "t", level = 2 }    # the cat's fur, lit
+"ƭ" = { of = "x", level = -2 }   # the dog's coat, shaded
+"Ƭ" = { of = "x", level = 2 }    # the dog's coat, lit
 "γ" = { of = "щ", level = -2 }   # the third
 "η" = { of = "ф", level = 2 }    # the clock's rim, lit upper west
 "ε" = { of = "ц", level = -2 }   # the clock's face, shaded lower east
@@ -187,11 +191,11 @@ frame_ms = 600
 
 [animations.typing]
 frames   = ["typing_0.sprite", "typing_1.sprite"]
-frame_ms = 140
+frame_ms = 125
 
 [animations."typing@4x"]
 frames   = ["typing_0@4x.sprite", "typing_1@4x.sprite"]
-frame_ms = 140
+frame_ms = 125
 
 [animations.standing]
 frames   = ["standing.sprite"]
@@ -365,7 +369,11 @@ frame_ms = 600
 
 [animations.cat_walk]
 frames   = ["cat_walk_0.sprite", "cat_walk_1.sprite"]
-frame_ms = 220
+frame_ms = 250
+
+[animations."cat_walk@4x"]
+frames   = ["cat_walk_0@4x.sprite", "cat_walk_1@4x.sprite"]
+frame_ms = 250
 
 [animations.cat_sit]
 frames   = ["cat_sit.sprite"]
@@ -377,7 +385,11 @@ frame_ms = 600
 
 [animations.dog_walk]
 frames   = ["dog_walk_0.sprite", "dog_walk_1.sprite"]
-frame_ms = 220
+frame_ms = 250
+
+[animations."dog_walk@4x"]
+frames   = ["dog_walk_0@4x.sprite", "dog_walk_1@4x.sprite"]
+frame_ms = 250
 
 [animations.dog_sit]
 frames   = ["dog_sit.sprite"]
@@ -389,7 +401,7 @@ frame_ms = 600
 
 [animations.lobster_walk]
 frames   = ["lobster_walk_0.sprite", "lobster_walk_1.sprite"]
-frame_ms = 200
+frame_ms = 250
 
 [animations.lobster_rest]
 frames   = ["lobster_rest.sprite"]
@@ -467,7 +479,7 @@ frames   = ["snack_shelf@4x.sprite"]
 frame_ms = 600
 
 # Frame 0 is the appliance at rest; the rest are its busy loop, one frame each
-# `frame_ms` (`embedded_pack::appliance_frame_index`).
+# `frame_ms` (`pack::appliance_frame_index`).
 [animations.vending_machine]
 frames   = ["vending_machine.sprite"]
 frame_ms = 500
@@ -479,11 +491,11 @@ frame_ms = 500
 # As the vending machine: frame 0 at rest, then its busy loop.
 [animations.printer]
 frames   = ["printer.sprite"]
-frame_ms = 300
+frame_ms = 250
 
 [animations."printer@4x"]
 frames   = ["printer@4x.sprite"]
-frame_ms = 300
+frame_ms = 250
 
 [animations.meeting_table]
 frames   = ["meeting_table.sprite"]
@@ -513,11 +525,11 @@ frame_ms = 600
 # The glug: a bubble climbs the bottle, then the water stills.
 [animations.water_cooler]
 frames   = ["water_cooler.sprite"]
-frame_ms = 400
+frame_ms = 375
 
 [animations."water_cooler@4x"]
 frames   = ["water_cooler@4x.sprite"]
-frame_ms = 400
+frame_ms = 375
 
 [animations.pantry_bin]
 frames   = ["pantry_bin.sprite"]
@@ -529,11 +541,11 @@ frame_ms = 600
 
 [animations.fish_tank]
 frames   = ["fish_tank.sprite"]
-frame_ms = 450
+frame_ms = 500
 
 [animations."fish_tank@4x"]
 frames   = ["fish_tank@4x.sprite"]
-frame_ms = 450
+frame_ms = 500
 
 [animations.coat_rack]
 frames   = ["coat_rack.sprite"]
@@ -627,7 +639,7 @@ frame_ms = 600
 
 # Hairstyles and the line round every marked @Nx character:
 # docs/CONFIGURATION.md#custom-sprite-packs. The layers are scripts/gen-art.py's
-# HAIRSTYLES, registered here by hand (`every_embedded_sprite_is_a_frame_the_pack_loads`
+# HAIRSTYLES, registered here by hand (`every_bundled_sprite_is_a_frame_the_pack_loads`
 # fails on one left out).
 [characters]
 outline = "κ"
@@ -687,7 +699,7 @@ side = { behind = "hair_side_part_side_behind@4x.sprite", over = "hair_side_part
 crown = { over = "hair_side_part_crown_over@4x.sprite" }
 
 # The city behind the windows: scripts/gen-art.py's BUILDINGS, registered here
-# by hand (`every_embedded_sprite_is_a_frame_the_pack_loads` fails on one left
+# by hand (`every_bundled_sprite_is_a_frame_the_pack_loads` fails on one left
 # out), each with the planes it stands in. A tower stands near, where it rises
 # tallest; a low block only in the middle distance, behind the towers.
 [city]

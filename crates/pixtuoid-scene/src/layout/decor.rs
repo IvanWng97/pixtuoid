@@ -2,7 +2,7 @@
 //! furniture and waypoint kind in the office, plus THE table giving each its
 //! geometry. Kept separate so a new sprite kind doesn't churn the layout math.
 
-use super::{Anchor, DESK_FOOT_H, DESK_H, DESK_W, Point, Size};
+use super::{DESK_FOOT_H, DESK_H, DESK_W, Pivot, Point, Size};
 
 /// Wander destinations the Idle state machine can pick — each kind controls the
 /// pose + sprite an arriving agent takes. Plants/lamps are decor, not waypoints.
@@ -185,17 +185,16 @@ impl FurnitureDef {
     /// visual box + ground aligns — so the runtime-footprint path (a waypoint's
     /// `approach::obstacle_footprint`) shares the def's alignment with the table
     /// path and no call site re-threads `visual`/`ground_x`/`ground_y`.
-    pub(super) fn ground_rect_of(&self, anchor: Anchor, pos: Point, fp: Size) -> (Point, Size) {
-        super::mask::ground_rect(anchor, pos, fp, self.visual, self.ground_x, self.ground_y)
+    pub(super) fn ground_rect_of(&self, pivot: Pivot, pos: Point, fp: Size) -> (Point, Size) {
+        super::mask::ground_rect(pivot, pos, fp, self.visual, self.ground_x, self.ground_y)
     }
 
     /// The blocked ground rect from this def's OWN table footprint, or `None` when
     /// the piece has no ground footprint (wall-hung decor, runtime-sized pantry
     /// counter). THE concentrator the mask stamp / collision checks / placement
     /// sweep all read.
-    pub(super) fn ground_rect(&self, anchor: Anchor, pos: Point) -> Option<(Point, Size)> {
-        self.footprint
-            .map(|fp| self.ground_rect_of(anchor, pos, fp))
+    pub(super) fn ground_rect(&self, pivot: Pivot, pos: Point) -> Option<(Point, Size)> {
+        self.footprint.map(|fp| self.ground_rect_of(pivot, pos, fp))
     }
 }
 
@@ -713,7 +712,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
 pub enum GroundAlign {
     /// Flush to the box's LOW edge — North (y) / West (x): offset 0.
     Start,
-    /// Centered ON the sprite center (== the placement `pos` for a Center anchor);
+    /// Centered ON the sprite center (== the placement `pos` for a `Center` pivot);
     /// [`Self::offset`] carries the parity rule that makes it exact.
     Center,
     /// Flush to the box's HIGH edge — South (y) / East (x). THE walk-behind shape
@@ -765,13 +764,13 @@ pub const fn desk_furniture_def() -> FurnitureDef {
     furniture_def(Furniture::Desk)
 }
 
-/// Vertical offset baked into the walking / waypoint sprite anchor
+/// Vertical offset baked into the walking / waypoint sprite top-left
 /// (`p.y - WALKING_Y_OFF`) — the standing sprite height, owned here so
-/// [`seated_foot_cell`] and the anchor invert each other by construction.
+/// [`seated_foot_cell`] and the top-left invert each other by construction.
 pub const WALKING_Y_OFF: u16 = 12;
-/// Vertical offset of the back-view seat sprite anchor (`pos.y - SEAT_RENDER_Y_OFF`).
+/// Vertical offset of the back-view seat sprite top-left (`pos.y - SEAT_RENDER_Y_OFF`).
 /// The seat's settle cell is `WALKING_Y_OFF - SEAT_RENDER_Y_OFF` px south of `pos`,
-/// where `walking_anchor` lands exactly on `back_couch_anchor`.
+/// where `walking_top_left` lands exactly on `back_couch_top_left`.
 pub const SEAT_RENDER_Y_OFF: u16 = 7;
 
 /// How far south of their seat a sitter on seated furniture (couch, sofa,
@@ -780,14 +779,14 @@ const SEATED_Z_OFF: u16 = 2;
 
 /// The depth a sitter on seated furniture at `seat` sorts at, which the
 /// furniture under them keys its own depth from.
-pub(crate) fn seated_z_key(seat: Point) -> u16 {
+pub(crate) fn seated_sort_row(seat: Point) -> u16 {
     seat.y + SEATED_Z_OFF
 }
 
 /// Y offset from a home desk's top-left to the agent's WALK anchor — how far south
 /// of the desk origin a FAR seat sits (a near one takes `DESK_WALK_Y_OFF_BACK`).
 /// The no-arrival-pop identity holds structurally now that sprite and walk both
-/// route through `Seat::render_anchor`, and
+/// route through `Seat::render_top_left`, and
 /// `desk_walk_anchor_settles_exactly_on_the_seat` still pins it.
 pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
 
@@ -819,7 +818,7 @@ fn seat_center_x(desk: Point) -> u16 {
 
 pub(crate) const DESK_WALK_Y_OFF_BACK: u16 = WALKING_Y_OFF;
 
-// Below `WALKING_Y_OFF`, `seated_anchor_facing`'s `saturating_sub` clamps and the sitter's sprite lands off its chair.
+// Below `WALKING_Y_OFF`, `seated_top_left`'s `saturating_sub` clamps and the sitter's sprite lands off its chair.
 const _: () = assert!(DESK_WALK_Y_OFF_BACK >= WALKING_Y_OFF);
 
 /// Where an agent walks to/from for its home `desk` (`East`/`West` never occur, and take the `South` arrangement).
@@ -835,8 +834,8 @@ pub fn desk_walk_anchor_facing(desk: Point, facing: Facing) -> Point {
 }
 
 /// The cell where a seated agent's WALK visually ends so the seated sprite renders
-/// with no arrival jump — the inverse of the render anchor under
-/// [`WALKING_Y_OFF`], solving `walking_anchor(S) == render_anchor(pos)`. `Some`
+/// with no arrival jump — the inverse of the render top-left under
+/// [`WALKING_Y_OFF`], solving `walking_top_left(S) == render_top_left(pos)`. `Some`
 /// for every `occupies_pos` furniture; `None` for obstacles, whose sprite renders
 /// AT the approach cell. The post-A\* settle walks `approach_point → S`, and a
 /// blocked `S` (meeting sofa, desk) makes that leg the "sit down" motion rather
@@ -1152,7 +1151,7 @@ mod tests {
         );
         assert!(
             d.occupies_pos,
-            "agent renders ON the desk (seated_anchor); seat = seated_foot_cell(Desk)"
+            "agent renders ON the desk (seated_top_left); seat = seated_foot_cell(Desk)"
         );
         assert_eq!(
             d.approach, DESK_APPROACH,

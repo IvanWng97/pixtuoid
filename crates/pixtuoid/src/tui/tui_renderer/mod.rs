@@ -21,7 +21,7 @@ use pixtuoid_scene::floor::{
     FloorInputs, FloorMeta, FloorTransition, FrameInputs, PerFloor, PerOffice, PetInputs,
     num_floors, project_floor_scene, render_floor,
 };
-use pixtuoid_scene::layout::{Layout, Size};
+use pixtuoid_scene::layout::{SceneLayout, Size};
 use pixtuoid_scene::pathfind::Router;
 use pixtuoid_scene::pet::PetFrame;
 
@@ -68,7 +68,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     current_floor: usize,
     transition: Option<FloorTransition>,
     mouse_pos: Option<(u16, u16)>,
-    cached_layout: Option<Arc<Layout>>,
+    cached_layout: Option<Arc<SceneLayout>>,
     last_pet_pos: Option<PetFrame>,
     last_agents: Vec<pixtuoid_scene::pixel_painter::AgentFrame>,
     last_geometry: Option<crate::tui::geometry::SceneGeometry>,
@@ -102,6 +102,7 @@ struct Chrome {
     /// Transient +/- volume readout (percent); `None` past [`crate::audio::VOLUME_FLASH_MS`].
     volume_flash: Option<u8>,
     weather: pixtuoid_scene::pixel_painter::WeatherPolicy,
+    motion: pixtuoid_scene::anim::Motion,
 }
 
 /// One floor frame's inputs, the same under either painter.
@@ -134,9 +135,11 @@ impl PopupState {
 }
 
 impl Chrome {
-    /// Floor `floor` of `nf`, under this office's weather.
+    /// Floor `floor` of `nf`, under this office's weather, moving as it does.
     fn floor_meta(&self, floor: usize, nf: usize) -> FloorMeta {
-        FloorMeta::for_floor(floor, nf).with_weather(self.weather)
+        FloorMeta::for_floor(floor, nf)
+            .with_weather(self.weather)
+            .with_motion(self.motion)
     }
 
     /// Floor `floor` of `nf` in `scene`, whose projection is `floor_scene`.
@@ -242,6 +245,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 audio: crate::audio::AudioHandle::disabled(),
                 volume_flash: None,
                 weather: pixtuoid_scene::pixel_painter::WeatherPolicy::Clock,
+                motion: pixtuoid_scene::anim::Motion::Full,
             },
             #[cfg(feature = "graphics")]
             cutaway: None,
@@ -344,7 +348,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.office.coffee.insert(id, fetched_at);
     }
 
-    pub fn cached_layout(&self) -> Option<&Layout> {
+    pub fn cached_layout(&self) -> Option<&SceneLayout> {
         self.cached_layout.as_deref()
     }
 
@@ -426,6 +430,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// Which weather every floor shows from the next frame on.
     pub fn set_weather(&mut self, weather: pixtuoid_scene::pixel_painter::WeatherPolicy) {
         self.chrome.weather = weather;
+    }
+
+    /// How every floor moves from the next frame on.
+    pub fn set_motion(&mut self, motion: pixtuoid_scene::anim::Motion) {
+        self.chrome.motion = motion;
     }
 
     pub fn set_theme_picker(&mut self, picker: Option<usize>) {
@@ -641,7 +650,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     /// The sim's per-frame epilogue for a frame
-    /// [`pixtuoid_scene::floor::observe_floor`] did not step: classic's, and a
+    /// [`pixtuoid_scene::floor::step_floor`] did not step: classic's, and a
     /// refused cutaway frame.
     fn sim_epilogue(&mut self, carriers: Vec<pixtuoid_core::AgentId>, now: SystemTime) {
         pixtuoid_scene::floor::frame_epilogue(
@@ -815,8 +824,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let size = cutaway.fit_to(scene_area);
         let (leaving, arriving) = floor_pair(&mut self.floors, from_floor, to_floor);
         let mut transition_chitchat = std::collections::HashMap::new();
-        let mut observe = |pf: &mut PerFloor, world| {
-            pixtuoid_scene::floor::observe_floor(
+        let mut step = |pf: &mut PerFloor, world| {
+            pixtuoid_scene::floor::step_floor(
                 &mut pf.ctx,
                 &mut self.office.coffee,
                 &mut transition_chitchat,
@@ -828,10 +837,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .chrome
             .slide_world(&from_scene, pack, now, from_floor, nf);
         let to_world = self.chrome.slide_world(&to_scene, pack, now, to_floor, nf);
-        let observed = (!too_small)
-            .then(|| Some((observe(leaving, from_world)?, observe(arriving, to_world)?)))
+        let stepped = (!too_small)
+            .then(|| Some((step(leaving, from_world)?, step(arriving, to_world)?)))
             .flatten();
-        let Some((from_observed, to_observed)) = observed else {
+        let Some((from_stepped, to_stepped)) = stepped else {
             let drawn = draw_footer_only_frame(&mut self.terminal, &footer, theme, &overlays, now);
             self.chrome.popup.last_scale = popup_scale;
             // As classic's: a slide nothing shows would otherwise run its course.
@@ -839,19 +848,23 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             return drawn;
         };
         // Each floor shows its own board; only the footer is the destination's.
-        let boards = [(&from_scene, from_floor), (&to_scene, to_floor)].map(|(floor_scene, i)| {
+        let boards = [
+            (&from_scene, from_floor, from_world),
+            (&to_scene, to_floor, to_world),
+        ]
+        .map(|(floor_scene, i, world)| {
             let ctx = self
                 .chrome
                 .frame(scene, floor_scene, pack, now, i, nf)
                 .footer;
             let footer = pixtuoid_scene::footer::FooterInputs::new(floor_scene, ctx);
-            crate::tui::renderer::wall_board(&footer, floor_scene, now)
+            crate::tui::renderer::wall_board(&footer, floor_scene, world.floor.motion, now)
         });
         let showing = |floor, board| pixtuoid_scene::cutaway::paint::Showing { floor, now, board };
         cutaway.paint_slide(
             crate::tui::cutaway::Slide {
-                leaving: (&from_observed, showing(from_world.floor, &boards[0])),
-                arriving: (&to_observed, showing(to_world.floor, &boards[1])),
+                leaving: (&from_stepped, showing(from_world.floor, &boards[0])),
+                arriving: (&to_stepped, showing(to_world.floor, &boards[1])),
                 t,
                 going_down,
             },
@@ -906,9 +919,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let pf = &mut self.floors[self.current_floor];
         let too_small = scene_area.width < crate::tui::renderer::MIN_SCENE_WIDTH
             || scene_area.height < crate::tui::renderer::MIN_SCENE_HEIGHT;
-        let observed = (!too_small)
+        let stepped = (!too_small)
             .then(|| {
-                pixtuoid_scene::floor::observe_floor(
+                pixtuoid_scene::floor::step_floor(
                     &mut pf.ctx,
                     &mut self.office.coffee,
                     &mut self.office.chitchat,
@@ -917,21 +930,22 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 )
             })
             .flatten();
-        let Some(observed) = observed else {
+        let Some(stepped) = stepped else {
             let drawn = draw_footer_only_frame(&mut self.terminal, &footer, theme, &overlays, now);
             self.record_drawn(scene, DrawOut::default(), popup_scale, now);
             self.sim_epilogue(Vec::new(), now);
             return drawn;
         };
-        let board = crate::tui::renderer::wall_board(&footer, &floor_scene, now);
+        let board =
+            crate::tui::renderer::wall_board(&footer, &floor_scene, world.floor.motion, now);
         let showing = pixtuoid_scene::cutaway::paint::Showing {
             floor: world.floor,
             now,
             board: &board,
         };
-        cutaway.paint(&observed, theme, showing, scene_area.as_position());
+        cutaway.paint(&stepped, theme, showing, scene_area.as_position());
         let geometry = cutaway.geometry(scene_area);
-        let layout = &observed.layout;
+        let layout = &stepped.layout;
         let mouse = self
             .mouse_pos
             .and_then(|(mx, my)| Some((mx, my, geometry.area_at(mx, my)?)));
@@ -966,8 +980,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.record_drawn(
             scene,
             DrawOut {
-                layout: Some(observed.layout),
-                occupied_waypoints: observed.frame.occupied_waypoints,
+                layout: Some(stepped.layout),
+                occupied_waypoints: stepped.frame.occupied_waypoints,
                 geometry: Some(geometry),
                 ..DrawOut::default()
             },

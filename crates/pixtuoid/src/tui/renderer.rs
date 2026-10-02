@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use pixtuoid_scene::floor::FloorInputs;
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
-use pixtuoid_scene::layout::Layout;
+use pixtuoid_scene::layout::SceneLayout;
 use pixtuoid_scene::pet::PetFrame;
 use pixtuoid_scene::pixel_painter::{
     AgentFrame, MascotFrame, PixelCtx, PixelPassResult, render_to_rgb_buffer,
@@ -122,7 +122,7 @@ impl<'a> DrawCtx<'a> {
 #[derive(Default)]
 pub struct DrawOut {
     /// `None` when the frame was refused.
-    pub layout: Option<Arc<Layout>>,
+    pub layout: Option<Arc<SceneLayout>>,
     pub pet_pos: Option<PetFrame>,
     pub mascots: Vec<MascotFrame>,
     pub agents: Vec<AgentFrame>,
@@ -311,11 +311,12 @@ fn paint_too_small_notice(
     }
 }
 
-/// The wall board `footer` tallies off `scene` at `now`, whichever profile
-/// paints it.
+/// The wall board `footer` tallies off `scene` at `now`, its flap moving as
+/// `motion` says, whichever profile paints it.
 pub(crate) fn wall_board(
     footer: &FooterInputs<'_>,
     scene: &SceneState,
+    motion: pixtuoid_scene::anim::Motion,
     now: SystemTime,
 ) -> pixtuoid_scene::board::BoardModel {
     pixtuoid_scene::board::build_board(
@@ -323,6 +324,7 @@ pub(crate) fn wall_board(
         pixtuoid_scene::board::scene_uptime_secs(scene, now),
         footer.context.floor.map(|fi| (fi.current, fi.total_floors)),
         footer.context.gateway,
+        motion,
         now,
     )
 }
@@ -392,7 +394,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     apply_dim(ctx.buf, ctx.onboarding.dim);
 
     let labels = pixtuoid_scene::overlay::build_overlay(scene, &agents, hovered);
-    let board = wall_board(&footer, scene, now);
+    let board = wall_board(&footer, scene, ctx.world.floor.motion, now);
     let buf = &ctx.buf;
     term.draw(|f| {
         // Re-derive rects from the actual frame buffer to guard against
@@ -590,7 +592,7 @@ mod tests {
                 current_pid: Some(1),
             },
         );
-        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("pack");
+        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("pack");
         let mut floor = pixtuoid_scene::floor::PerFloor::new();
         let mut chitchat = std::collections::HashMap::new();
         let ctx = DrawCtx::offscreen(

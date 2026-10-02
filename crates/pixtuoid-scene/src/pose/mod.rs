@@ -28,9 +28,9 @@ pub use pure::{
 };
 // These stay crate-internal: a `pub use` would try to widen their `pub(crate)`
 // visibility.
-pub(crate) use pure::{SpotClaims, resolve_wander_target};
+pub(crate) use pure::{SpotClaims, resolve_wander_target, typing_frame};
 
-use crate::layout::{Layout, Point, desk_walk_anchor_facing};
+use crate::layout::{Point, SceneLayout, desk_walk_anchor_facing};
 use crate::pathfind::Router;
 
 /// The per-frame routing engine state threaded through pose derivation,
@@ -45,6 +45,9 @@ pub struct RouteCtx<'a> {
     pub history: &'a mut PoseHistory,
     /// Per-agent walk-timing state, keyed by `AgentId`.
     pub motion: &'a mut HashMap<AgentId, MotionState>,
+    /// Whether an idle agent wanders off its desk: an ambient loop, so not at
+    /// [`Motion::Still`](crate::anim::Motion::Still).
+    pub wanders: bool,
 }
 
 /// Owns the stores a [`RouteCtx`] borrows, so a test threads one value.
@@ -73,6 +76,7 @@ impl<R: Router> RouteRig<R> {
             overlay: &self.overlay,
             history: &mut self.history,
             motion: &mut self.motion,
+            wanders: true,
         }
     }
 }
@@ -136,7 +140,7 @@ const EXIT_BUDGET_MARGIN_MS: u64 = 300;
 /// anchored top-left, so a corner scan is lopsided and can't clear the body to
 /// the EAST — the east side would read as walled-off. `None` only in a
 /// degenerate layout where every allowed side is walled off.
-pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> {
+pub(crate) fn desk_approach_cell(desk: Point, layout: &SceneLayout) -> Option<Point> {
     use crate::layout::{Furniture, desk_walk_anchor_facing};
     // The desk's OWN facing, not a constant: `ApproachSides` is canonical (facing-South) and
     // rotated by it, so a back-turned desk is approached from its south front, not walled off there.
@@ -157,7 +161,7 @@ pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> 
 /// A\*, plus `Some(chair)` to prepend/append via [`Settle`] (the short glide
 /// on/off the seat the router never plans), or `None` in the degenerate boxed-in
 /// layout where the leg reverts to the direct chair target.
-pub(crate) fn desk_leg_endpoint(desk: Point, layout: &Layout) -> (Point, Option<Point>) {
+pub(crate) fn desk_leg_endpoint(desk: Point, layout: &SceneLayout) -> (Point, Option<Point>) {
     let chair = crate::layout::desk_walk_anchor_facing(desk, layout.desk_facing_at(desk));
     match desk_approach_cell(desk, layout) {
         Some(approach) => (approach, Some(chair)),
@@ -228,7 +232,7 @@ fn exit_elapsed_ms(profile: &WalkProfile, elapsed_ms: u64) -> u64 {
 pub fn derive_with_routing(
     slot: &AgentSlot,
     now: SystemTime,
-    layout: &Layout,
+    layout: &SceneLayout,
     rctx: &mut RouteCtx<'_>,
 ) -> Option<Pose> {
     let desk = layout.home_desk(slot.desk_index.single_floor_local())?;
@@ -403,6 +407,9 @@ pub fn derive_with_routing(
         if pure::in_thinking_window(slot, now) {
             return Some(Pose::SeatedThinking);
         }
+        if !rctx.wanders {
+            return Some(Pose::SeatedIdle);
+        }
 
         // A per-frame snapshot, so the arms below never re-borrow `rctx.motion`.
         let wf = advance_wander(slot, now, layout, rctx.router, rctx.overlay, rctx.motion);
@@ -486,7 +493,7 @@ pub fn derive_with_routing(
     // state changed, so walk it from the previous rendered position instead.
     let desk_pose = matches!(
         raw,
-        Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. }
+        Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping
     );
     let since_state = crate::anim::elapsed_ms(now, slot.state_started_at);
     let mut final_settle = Settle::None;
@@ -583,7 +590,7 @@ pub fn derive_with_routing(
 fn route_walking_pose(
     slot: &AgentSlot,
     now: SystemTime,
-    layout: &Layout,
+    layout: &SceneLayout,
     rctx: &mut RouteCtx<'_>,
     pose: Pose,
     settle: Settle,

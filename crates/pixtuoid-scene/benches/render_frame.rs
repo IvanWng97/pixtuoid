@@ -10,7 +10,7 @@
 //! under `samply record`. Numbers are LOCAL statistical evidence: shared-CI
 //! wall-clock is noise, so CI runs this advisory-only.
 //! A second group, `render_cutaway`, costs the 2.5D painter alone: the sim
-//! window is observed up front, so each iteration is paint only — what the
+//! window is stepped up front, so each iteration is paint only — what the
 //! cutaway adds on top of the shared sim — at the pack's densest art, once at
 //! noon and once at night, when the dark room recolours every pixel; an idle
 //! office both ways too, painted whole and through `CutawayCanvas`.
@@ -32,8 +32,8 @@ use pixtuoid_scene::board::BoardModel;
 use pixtuoid_scene::cutaway::canvas::CutawayCanvas;
 use pixtuoid_scene::cutaway::paint::{Office, Showing, render_cutaway};
 use pixtuoid_scene::floor::{
-    CoffeeState, FloorCtx, FloorInputs, FloorMeta, FloorSession, FrameInputs, ObservedFloor,
-    PetInputs, render_floor,
+    CoffeeState, FloorCtx, FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs,
+    SteppedFloor, render_floor,
 };
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::localclock;
@@ -131,7 +131,7 @@ fn office_scene(n: usize, max_desks: usize, base: SystemTime, busy: bool) -> Sce
 }
 
 fn render_frame(c: &mut Criterion) {
-    let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack");
+    let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack");
     let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
     let base = SystemTime::UNIX_EPOCH + Duration::from_secs(BASE_EPOCH_SECS);
     let busy = office_scene(12, 16, base, true);
@@ -212,7 +212,7 @@ fn render_frame(c: &mut Criterion) {
 }
 
 fn render_cutaway_frame(c: &mut Criterion) {
-    let pack = Arc::new(pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack"));
+    let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"));
     let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
     let scale = RenderScale::new(pack.max_density_variant().get()).expect("a nonzero density");
     // The case names are claims about the sky model; hold it to them.
@@ -242,11 +242,11 @@ fn render_cutaway_frame(c: &mut Criterion) {
         let base = localclock::at_hour(hour);
         let scene = office_scene(12, 16, base, busy);
         let mut session = FloorSession::new();
-        let observed: Vec<(SystemTime, ObservedFloor, BoardModel)> = (0..CUTAWAY_FRAMES as u64)
+        let stepped: Vec<(SystemTime, SteppedFloor, BoardModel)> = (0..CUTAWAY_FRAMES as u64)
             .map(|i| {
                 let now = base + Duration::from_millis(i * FRAME_STEP_MS);
                 let floor = session
-                    .observe(
+                    .step(
                         pixtuoid_scene::floor::FloorInputs {
                             scene: &scene,
                             pack: &pack,
@@ -257,7 +257,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
                         CUTAWAY_LOGICAL,
                     )
                     .expect("the cutaway extent lays out");
-                (now, floor, session.board(&scene, now))
+                (now, floor, session.board(&scene, meta.motion, now))
             })
             .collect();
         let office = |layout| Office {
@@ -279,7 +279,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
         let mut i = 0;
         group.bench_function(&name, |b| {
             b.iter(|| {
-                let (now, ObservedFloor { layout, frame }, board) = &observed[i];
+                let (now, SteppedFloor { layout, frame }, board) = &stepped[i];
                 i = (i + 1) % CUTAWAY_FRAMES;
                 let showing = Showing {
                     floor: meta,
@@ -299,7 +299,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
         let mut i = 0;
         group.bench_function(format!("{name}_canvas"), |b| {
             b.iter(|| {
-                let (now, floor, board) = &observed[i];
+                let (now, floor, board) = &stepped[i];
                 i = (i + 1) % CUTAWAY_FRAMES;
                 let showing = Showing {
                     floor: meta,

@@ -1267,9 +1267,9 @@ fn waypoint_depth_baseline_is_its_grounds_south_row() {
     let pos = Point { x: 40, y: 40 };
     for kind in [WaypointKind::VendingMachine, WaypointKind::Printer] {
         let def = furniture_def(kind.furniture());
-        let (tl, size) = def.ground_rect(Anchor::Center, pos).expect("has footprint");
+        let (tl, size) = def.ground_rect(Pivot::Center, pos).expect("has footprint");
         assert_eq!(
-            z_sort_row(Anchor::Center, pos, def.visual.h),
+            sort_row_at(Pivot::Center, pos, def.visual.h),
             tl.y + size.h - 1,
             "{kind:?}: sorts on the row it stands on"
         );

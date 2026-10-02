@@ -10,7 +10,6 @@ use ratatui::widgets::{Block, Padding, Paragraph};
 
 use super::{StateKind, compact_hms, display_width, source_badge_span, state_color, to_color};
 use crate::tui::renderer::clip_widget_rect;
-use pixtuoid_scene::layout::DESK_W;
 use pixtuoid_scene::overlay::{LabelElement, disambig_suffix};
 use pixtuoid_scene::pet::PetKind;
 use pixtuoid_scene::pixel_painter::{AgentFrame, MascotFrame};
@@ -74,7 +73,7 @@ pub(crate) fn paint_label_widgets(
             Rect {
                 x: lx,
                 y: ly,
-                width: DESK_W + 4,
+                width: pixtuoid_scene::overlay::BADGE_CELLS,
                 height: 1,
             },
             scene_rect,
@@ -600,7 +599,7 @@ mod tests {
         };
         let speaker = AgentFrame {
             agent_id: pixtuoid_core::AgentId::from_transcript_path("/chat/0.jsonl"),
-            anchor: Point { x: 16, y: 14 },
+            top_left: Point { x: 16, y: 14 },
             w: 8,
             h: 12,
             label_anchor: Point { x: 20, y: 14 },

@@ -24,11 +24,11 @@ use crate::script::{
 };
 
 use pixtuoid_scene::audio::OneShotPool;
-use pixtuoid_scene::embedded_pack::load_bundled_pack;
 use pixtuoid_scene::floor::{
     FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs, floor_capacity,
 };
 use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::pack::load_bundled_pack;
 use pixtuoid_scene::pixel_painter::WeatherPolicy;
 use pixtuoid_scene::theme::{ALL_THEMES, Theme};
 
@@ -145,7 +145,7 @@ pub struct Office {
 #[wasm_bindgen]
 impl Office {
     /// Build an office seeded with `seed` (drives the layout variant). Errors
-    /// only if the compile-time-embedded sprite pack fails to parse.
+    /// only if the bundled sprite pack fails to parse.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
         let pack = load_bundled_pack().map_err(|e| JsError::new(&format!("{e:#}")))?;
@@ -273,7 +273,9 @@ impl Office {
         let theme = self.theme;
 
         let labels = self.session.overlay(&self.scene, None);
-        let board = self.session.board(&self.scene, now);
+        let board = self
+            .session
+            .board(&self.scene, self.floor_meta().motion, now);
 
         let mut out = String::from("{\"labels\":[");
         for (i, el) in labels.iter().enumerate() {
@@ -705,7 +707,7 @@ mod tests {
     fn office() -> Office {
         match Office::new(1) {
             Ok(o) => o,
-            Err(_) => panic!("embedded pack must parse"),
+            Err(_) => panic!("bundled pack must parse"),
         }
     }
 
@@ -1101,7 +1103,7 @@ mod tests {
 
     #[test]
     fn capacity_tracks_the_canvas_layout_so_no_agent_is_stranded_unpainted() {
-        use pixtuoid_scene::layout::Layout;
+        use pixtuoid_scene::layout::SceneLayout;
         // The site renders BUF_H=130; this width seats the full cast plus at
         // least one spare. The free-desk count is DERIVED, not a size literal —
         // the density pass re-tunes desks-per-buffer out from under a literal.
@@ -1125,7 +1127,7 @@ mod tests {
             "the click past exhaustion is refused outright: {admitted:?}"
         );
         o.step(T0_MS + 32_000.0, w, h);
-        let layout = Layout::compute_with_seed(w as u16, h as u16, None, o.seed)
+        let layout = SceneLayout::compute_with_seed(w as u16, h as u16, None, o.seed)
             .expect("the portrait buffer lays out");
         assert_eq!(
             o.scene.total_capacity(),

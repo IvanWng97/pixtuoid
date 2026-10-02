@@ -2,8 +2,8 @@
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::embedded_pack::COOLER_WATER;
 use crate::layout::{Bounds, COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W};
+use crate::pack::COOLER_WATER;
 
 /// Bordered area rug filling `rug` — the meeting and lounge rugs and both
 /// pantry mats.
@@ -173,7 +173,7 @@ pub(super) fn paint_doormat(buf: &mut RgbBuffer, mat: Bounds, theme: &crate::the
 pub(super) fn paint_water_cooler(
     buf: &mut RgbBuffer,
     cooler: Bounds,
-    now: std::time::SystemTime,
+    beat: crate::anim::Beat,
     theme: &crate::theme::Theme,
 ) {
     let cooler_body = theme.office.building_light;
@@ -198,7 +198,7 @@ pub(super) fn paint_water_cooler(
     // tank_water_line also keeps it off the mascot harness's bubble sentinel.
     const GLUG_CYCLE_MS: u64 = 2_000;
     const GLUG_STEP_MS: u64 = 400;
-    let phase = (super::epoch_ms(now) % GLUG_CYCLE_MS) / GLUG_STEP_MS;
+    let phase = (beat.ms() % GLUG_CYCLE_MS) / GLUG_STEP_MS;
     if phase < 2 {
         let (bx, by) = (wx + 1, wy + 1 - phase as u16);
         if bx < buf.width() && by < buf.height() {
@@ -263,7 +263,7 @@ pub(super) fn paint_trash_bin(buf: &mut RgbBuffer, bin: Bounds) {
 pub(super) fn paint_fish_tank(
     buf: &mut RgbBuffer,
     pos: crate::layout::Point,
-    now: std::time::SystemTime,
+    beat: crate::anim::Beat,
     theme: &crate::theme::Theme,
 ) {
     use crate::layout::{Furniture, furniture_def};
@@ -315,7 +315,7 @@ pub(super) fn paint_fish_tank(
     }
     // Fish patrol: a triangle wave over the interior span, one lane each. Distinct
     // periods (and a phase offset) keep the pair from mirroring in lockstep.
-    let t = super::epoch_ms(now);
+    let t = beat.ms();
     const FISH_STEP_MS: u64 = 430;
     const FISH_ALT_STEP_MS: u64 = 520;
     const FISH_ALT_PHASE_STEPS: u64 = 7;

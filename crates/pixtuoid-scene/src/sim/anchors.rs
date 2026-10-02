@@ -1,13 +1,12 @@
-//! Per-pose sprite anchor + breath bob + walking-position helpers.
+//! Per-pose sprite top-left + breath bob + walking-position helpers.
 //!
 //! Pure geometry — no `RgbBuffer`, no rendering.
 
 use std::time::SystemTime;
 
-use crate::layout::{Anchor, Layout, SEAT_RENDER_Y_OFF, Size, WALKING_Y_OFF};
+use crate::layout::{Pivot, SEAT_RENDER_Y_OFF, SceneLayout, Size, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
-use crate::anim::epoch_ms;
 use crate::layout::{Point, WaypointKind};
 use crate::pose;
 use crate::sim::seat::Seat;
@@ -17,18 +16,18 @@ use crate::layout::CHARACTER_SPRITE_W;
 /// Where a desk's occupant RENDERS — the desk's seat cell put through the same
 /// `Seat` model every other seat uses, so the chair, its occupant and the walk
 /// that ends there cannot drift apart.
-pub fn seated_anchor_facing(desk: Point, sprite_w: u16, facing: crate::layout::Facing) -> Point {
-    Seat::at_desk(desk, facing).render_anchor(sprite_w)
+pub fn seated_top_left(desk: Point, sprite_w: u16, facing: crate::layout::Facing) -> Point {
+    Seat::at_desk(desk, facing).render_top_left(sprite_w)
 }
 
-pub(crate) fn walking_anchor(p: Point, sprite_w: u16) -> Point {
+pub(crate) fn walking_top_left(p: Point, sprite_w: u16) -> Point {
     Point {
         x: p.x.saturating_sub(sprite_w / 2),
         y: p.y.saturating_sub(WALKING_Y_OFF),
     }
 }
 
-pub(crate) fn waypoint_anchor(wp: Point, sprite_w: u16) -> Point {
+pub(crate) fn waypoint_top_left(wp: Point, sprite_w: u16) -> Point {
     Point {
         x: wp.x.saturating_sub(sprite_w / 2),
         y: wp.y.saturating_sub(WALKING_Y_OFF),
@@ -37,8 +36,8 @@ pub(crate) fn waypoint_anchor(wp: Point, sprite_w: u16) -> Point {
 
 /// One-pixel vertical bob on a `CYCLE_MS` cycle with a per-agent phase offset, so
 /// static (seated / standing) characters look alive instead of frozen.
-fn breath_offset_y(agent_id: pixtuoid_core::AgentId, now: SystemTime) -> u16 {
-    let elapsed_ms = epoch_ms(now);
+fn breath_offset_y(agent_id: pixtuoid_core::AgentId, beat: crate::anim::Beat) -> u16 {
+    let elapsed_ms = beat.ms();
     const CYCLE_MS: u64 = 4500;
     let offset_ms = agent_id.raw() % CYCLE_MS;
     let phase = elapsed_ms.wrapping_add(offset_ms) % CYCLE_MS;
@@ -46,21 +45,21 @@ fn breath_offset_y(agent_id: pixtuoid_core::AgentId, now: SystemTime) -> u16 {
 }
 
 pub(crate) fn with_breath(
-    anchor: Point,
+    top_left: Point,
     agent_id: pixtuoid_core::AgentId,
-    now: SystemTime,
+    beat: crate::anim::Beat,
 ) -> Point {
     Point {
-        x: anchor.x,
-        y: anchor.y.saturating_sub(breath_offset_y(agent_id, now)),
+        x: top_left.x,
+        y: top_left.y.saturating_sub(breath_offset_y(agent_id, beat)),
     }
 }
 
-/// Anchor for a back-view sitter on a mirror_vertical'd couch — higher than a
-/// front-view seat anchor because `back_couch.sprite` has no transparent
+/// Top-left of a back-view sitter on a mirror_vertical'd couch — higher than a
+/// front-view seat's because `back_couch.sprite` has no transparent
 /// head/face area (hair extends across all top rows), so sitting it lower
 /// overlaps the couch back row.
-pub(crate) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
+pub(crate) fn back_couch_top_left(wp: Point, sprite_w: u16) -> Point {
     Point {
         x: wp.x.saturating_sub(sprite_w / 2),
         y: wp.y.saturating_sub(SEAT_RENDER_Y_OFF),
@@ -68,14 +67,14 @@ pub(crate) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
 }
 
 /// Nudge a sprite so the whole frame lands inside the canvas, answering in the
-/// SAME anchor space `pos` came in.
+/// SAME pivot space `pos` came in.
 ///
-/// It moves a figure's paint anchor, never its sim position (invariant #6).
-pub(crate) fn keep_sprite_on_canvas(anchor: Anchor, pos: Point, size: Size, buf: Size) -> Point {
-    match anchor {
+/// It moves a figure's paint top-left, never its sim position (invariant #6).
+pub(crate) fn keep_sprite_on_canvas(pivot: Pivot, pos: Point, size: Size, buf: Size) -> Point {
+    match pivot {
         // `min` before `max`: on a buffer narrower than the sprite the lower
         // bound wins instead of `clamp`'s inverted-range panic.
-        Anchor::Center => Point {
+        Pivot::Center => Point {
             x: pos
                 .x
                 .min(buf.w.saturating_sub(size.w.div_ceil(2)))
@@ -86,21 +85,21 @@ pub(crate) fn keep_sprite_on_canvas(anchor: Anchor, pos: Point, size: Size, buf:
                 .max(size.h / 2),
         },
         // No lower bound needed — `u16` already floors a top-left `pos` at 0.
-        Anchor::TopLeft => Point {
+        Pivot::TopLeft => Point {
             x: pos.x.min(buf.w.saturating_sub(size.w)),
             y: pos.y.min(buf.h.saturating_sub(size.h)),
         },
     }
 }
 
-/// `pos`, in `anchor` space, moved so a `size` frame lands on `layout`'s canvas:
+/// `pos`, in `pivot` space, moved so a `size` frame lands on `layout`'s canvas:
 /// the one fit every figure's placement takes.
-pub(crate) fn on_canvas(layout: &Layout, anchor: Anchor, pos: Point, size: Size) -> Point {
+pub(crate) fn on_canvas(layout: &SceneLayout, pivot: Pivot, pos: Point, size: Size) -> Point {
     let canvas = Size {
         w: layout.buf_w,
         h: layout.buf_h,
     };
-    keep_sprite_on_canvas(anchor, pos, size, canvas)
+    keep_sprite_on_canvas(pivot, pos, size, canvas)
 }
 
 /// How far a later arrival steps aside along x so two agents at one
@@ -108,7 +107,7 @@ pub(crate) fn on_canvas(layout: &Layout, anchor: Anchor, pos: Point, size: Size)
 /// pixel of daylight.
 const STEP_ASIDE_DX: i16 = CHARACTER_SPRITE_W as i16 + 1;
 
-/// X-offset applied to a waypoint anchor when multiple agents land at the
+/// X-offset applied to a waypoint top-left when multiple agents land at the
 /// SAME waypoint in the same cycle. rank 0 = first arrival (no offset); later
 /// arrivals step aside.
 ///
@@ -141,9 +140,9 @@ pub(crate) fn badge_anchor(top_left: Point, size: Size, ceiling: Option<u16>) ->
 /// A test oracle: the sprite's default-size top-left, re-derived from the pose
 /// alone.
 #[cfg(test)]
-pub(crate) fn character_anchor(
+pub(crate) fn character_top_left(
     agent: &AgentSlot,
-    layout: &crate::layout::Layout,
+    layout: &crate::layout::SceneLayout,
     now: SystemTime,
     rctx: &mut pose::RouteCtx<'_>,
 ) -> Option<Point> {
@@ -151,29 +150,27 @@ pub(crate) fn character_anchor(
     use crate::pose::Pose;
     let pose = pose::derive_with_routing(agent, now, layout, rctx)?;
     let w = CHARACTER_SPRITE_W;
-    let anchor = match pose {
-        Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. } => {
-            seated_anchor_facing(
-                desk,
-                w,
-                layout.desk_facing(agent.desk_index.single_floor_local()),
-            )
-        }
+    let top_left = match pose {
+        Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping => seated_top_left(
+            desk,
+            w,
+            layout.desk_facing(agent.desk_index.single_floor_local()),
+        ),
         Pose::AtWaypoint { wp, kind } => {
             let wp_obj = layout.waypoints.get(wp)?;
             let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
-            // Via [`Seat::render_anchor`], the sprite blit's authority.
-            Seat::at_waypoint(kind, stand, wp_obj.facing).render_anchor(w)
+            // Via [`Seat::render_top_left`], the sprite blit's authority.
+            Seat::at_waypoint(kind, stand, wp_obj.facing).render_top_left(w)
         }
-        Pose::AimlessAt { dest } => waypoint_anchor(dest, w),
+        Pose::AimlessAt { dest } => waypoint_top_left(dest, w),
         Pose::Walking {
             from, to, t_x1000, ..
-        } => walking_anchor(crate::physics::walking_position(from, to, t_x1000), w),
+        } => walking_top_left(crate::physics::walking_position(from, to, t_x1000), w),
     };
     Some(on_canvas(
         layout,
-        Anchor::TopLeft,
-        anchor,
+        Pivot::TopLeft,
+        top_left,
         Size {
             w,
             h: crate::layout::CHARACTER_SPRITE_H,

@@ -1,5 +1,5 @@
+use crate::anim::Beat;
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
 
 use super::*;
 use crate::layout::WINDOW_W;
@@ -13,18 +13,14 @@ const DESK: Point = Point { x: 40, y: 30 };
 const WALL_CLOCK_MS: u64 = 1_767_000_000_000;
 
 fn neon_at(levels: NeonLevels, darkness: f32) -> f32 {
-    neon_halo_strength(
-        levels,
-        SystemTime::UNIX_EPOCH + Duration::from_millis(WALL_CLOCK_MS),
-        darkness,
-    )
+    neon_halo_strength(levels, Beat::at_ms(WALL_CLOCK_MS), darkness)
 }
 
 /// The lights of a `w`×`h` office with nobody in it, at `hour` under a clear sky.
-fn lights_at(w: u16, h: u16, hour: u32) -> (Layout, Lights) {
-    let layout = Layout::compute(w, h, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
+fn lights_at(w: u16, h: u16, hour: u32) -> (SceneLayout, Lights) {
+    let layout = SceneLayout::compute(w, h, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
     let sky = Sky::at_with(crate::localclock::at_hour(hour), Weather::Clear);
-    let look = Look::resolve(&sky, &crate::theme::NORMAL);
+    let look = SkyTones::resolve(&sky, &crate::theme::NORMAL);
     let lights = Lights::of(
         &layout,
         &look,
@@ -34,7 +30,7 @@ fn lights_at(w: u16, h: u16, hour: u32) -> (Layout, Lights) {
             floor_idx: 0,
             indoor_scale: 1.0,
             neon: NeonLevels::BUSY,
-            now: SystemTime::UNIX_EPOCH,
+            beat: Beat::at_ms(0),
         },
     );
     (layout, lights)
@@ -56,7 +52,7 @@ fn neon_halo_drops_to_its_daylight_floor_and_a_calm_sign_glows_less_than_a_busy_
     let night = neon_at(NeonLevels::BUSY, 1.0);
     let day = neon_at(NeonLevels::BUSY, 0.0);
     assert!(
-        (day - night * NEON_DAYLIGHT_FLOOR).abs() < 1e-6,
+        (day - night * NEON_DAYLIGHT_MIN).abs() < 1e-6,
         "{day} vs {night}"
     );
     let calm = neon_at(NeonLevels::CALM, 1.0);
@@ -71,10 +67,11 @@ fn a_starved_tube_throws_no_halo_and_a_flash_does() {
 
 #[test]
 fn the_neon_halo_throws_the_signs_own_levels() {
-    let layout = Layout::compute(192, 80, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
+    let layout =
+        SceneLayout::compute(192, 80, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
     let sky = Sky::at_with(crate::localclock::at_hour(0), Weather::Clear);
-    let look = Look::resolve(&sky, &crate::theme::NORMAL);
-    let now = SystemTime::UNIX_EPOCH + Duration::from_millis(WALL_CLOCK_MS);
+    let look = SkyTones::resolve(&sky, &crate::theme::NORMAL);
+    let beat = Beat::at_ms(WALL_CLOCK_MS);
     for levels in [NeonLevels::CALM, NeonLevels::ALERT, NeonLevels::EMPTY] {
         let lights = Lights::of(
             &layout,
@@ -85,12 +82,12 @@ fn the_neon_halo_throws_the_signs_own_levels() {
                 floor_idx: 0,
                 indoor_scale: 1.0,
                 neon: levels,
-                now,
+                beat,
             },
         );
         assert_eq!(
             lights.neon.strength,
-            neon_halo_strength(levels, now, look.darkness),
+            neon_halo_strength(levels, beat, look.darkness),
             "{levels:?}"
         );
     }
@@ -138,7 +135,8 @@ fn a_spills_bounds_hold_every_row_whichever_way_it_leans() {
 
 #[test]
 fn a_monitor_halo_hangs_over_each_lit_screen_only() {
-    let layout = Layout::compute(192, 80, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
+    let layout =
+        SceneLayout::compute(192, 80, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
     let facing = |i: usize| layout.desk_facing(FloorLocalDeskIndex(i));
     let north: Vec<usize> = (0..layout.home_desks.len())
         .filter(|&i| facing(i) == Facing::North)
@@ -157,7 +155,7 @@ fn a_monitor_halo_hangs_over_each_lit_screen_only() {
         kind: pixtuoid_core::state::ToolKind::Edit,
     };
     let at_desk = |path: &str, desk: usize, state: pixtuoid_core::state::ActivityState| {
-        let mut a = crate::pixel_painter::tests::make_slot(id(path), state);
+        let mut a = crate::character::test_support::make_slot(id(path), state);
         a.desk_index = pixtuoid_core::state::GlobalDeskIndex(desk);
         a
     };
@@ -180,14 +178,14 @@ fn a_monitor_halo_hangs_over_each_lit_screen_only() {
     let sky = Sky::at_with(crate::localclock::at_hour(0), Weather::Clear);
     let lights = Lights::of(
         &layout,
-        &Look::resolve(&sky, &crate::theme::NORMAL),
+        &SkyTones::resolve(&sky, &crate::theme::NORMAL),
         &LightInputs {
             agents: &agents,
             seated: &seated,
             floor_idx: 0,
             indoor_scale: 1.0,
             neon: NeonLevels::BUSY,
-            now: SystemTime::UNIX_EPOCH,
+            beat: Beat::at_ms(0),
         },
     );
     let kinds: Vec<_> = lights.monitor_halos.iter().map(|h| h.kind).collect();
@@ -239,7 +237,7 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
 #[test]
 fn an_emptied_floor_takes_both_desk_emitters_down_with_the_level() {
     use crate::layout::Facing;
-    let min = crate::floor::LightingState::MIN_LEVEL;
+    let min = crate::floor::VacancyDim::MIN_LEVEL;
     let lit = desk_lights(DESK, Facing::North, 1.0, 1.0);
     let empty = desk_lights(DESK, Facing::North, 1.0, min);
     for (what, lit, empty) in [

@@ -1,7 +1,7 @@
 //! Multi-floor office partitioning: the floor arithmetic, the per-floor
 //! rendering context ([`FloorCtx`]), the shared headless frame seams
-//! ([`render_floor`], and [`FloorSession::observe`] for a painter that draws the
-//! frame itself), the per-floor fade states ([`LightingState`], the neon
+//! ([`render_floor`], and [`FloorSession::step`] for a painter that draws the
+//! frame itself), the per-floor fade states ([`VacancyDim`], the neon
 //! sign's), and the per-office [`CoffeeState`] bookkeeping.
 
 use std::collections::HashMap;
@@ -79,6 +79,8 @@ pub struct FloorMeta {
     pub floor_seed: u64,
     /// Which weather its windows show, and its rain sounds.
     pub weather: crate::sky::WeatherPolicy,
+    /// How much of its ambient life moves.
+    pub motion: crate::anim::Motion,
 }
 
 impl FloorMeta {
@@ -96,12 +98,18 @@ impl FloorMeta {
             altitude,
             floor_seed: floor_seed(floor_idx),
             weather: crate::sky::WeatherPolicy::Clock,
+            motion: crate::anim::Motion::Full,
         }
     }
 
     /// This floor under `weather`.
     pub fn with_weather(self, weather: crate::sky::WeatherPolicy) -> Self {
         Self { weather, ..self }
+    }
+
+    /// This floor moving as `motion` says.
+    pub fn with_motion(self, motion: crate::anim::Motion) -> Self {
+        Self { motion, ..self }
     }
 
     /// The lone floor of a single-floor office (index 0, altitude 0.0).
@@ -126,7 +134,7 @@ pub struct FloorCtx {
     /// The classic's floor shadows, kept per layout.
     pub(crate) shadows: crate::ground::DepthsCache,
     /// This floor's indoor-lighting fade state.
-    pub light: LightingState,
+    pub vacancy_dim: VacancyDim,
     /// This floor's neon-sign fade state.
     pub(crate) neon: NeonState,
     /// Per-agent walk-timing state (physics profiles for entry/exit/wander).
@@ -135,10 +143,10 @@ pub struct FloorCtx {
     /// floor (ms) — drives the door-open cosmetic without a hardcoded window.
     pub door_anim_max_ms: u64,
     /// Memo of the last per-frame layout, keyed by the ONLY inputs
-    /// `Layout::compute_with_seed` reads on the frame path. Rebuilding it every
+    /// `SceneLayout::compute_with_seed` reads on the frame path. Rebuilding it every
     /// frame re-allocs + re-stamps the walkable mask and re-runs the coarse BFS
     /// — the dominant fixed per-frame CPU, quadratic in buffer area.
-    layout_memo: Option<((u16, u16, u64), Arc<crate::layout::Layout>)>,
+    layout_memo: Option<((u16, u16, u64), Arc<crate::layout::SceneLayout>)>,
 }
 
 impl Default for FloorCtx {
@@ -157,7 +165,7 @@ impl FloorCtx {
             cache: FrameCache::new(),
             base_fill: crate::pixel_painter::BaseFillCache::new(),
             shadows: crate::ground::DepthsCache::default(),
-            light: LightingState::new(),
+            vacancy_dim: VacancyDim::new(),
             neon: NeonState::new(),
             motion: HashMap::new(),
             door_anim_max_ms: 0,
@@ -175,7 +183,7 @@ impl FloorCtx {
             overlay: &mut self.overlay,
             history: &mut self.history,
             motion: &mut self.motion,
-            light: &mut self.light,
+            vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat,
         }
@@ -184,19 +192,19 @@ impl FloorCtx {
     /// The per-frame layout — memoized `compute_with_seed(w, h, None, seed)` +
     /// the router corridor re-point, the ONE frame prologue every painter rides.
     /// Returns a cheap `Arc` handle so callers can hold it across later
-    /// `&mut self` uses without re-cloning the whole `Layout` every frame. A
+    /// `&mut self` uses without re-cloning the whole `SceneLayout` every frame. A
     /// too-small buffer returns `None` without poisoning the memo.
     pub fn frame_layout(
         &mut self,
         buf_w: u16,
         buf_h: u16,
         floor_seed: u64,
-    ) -> Option<Arc<crate::layout::Layout>> {
+    ) -> Option<Arc<crate::layout::SceneLayout>> {
         let key = (buf_w, buf_h, floor_seed);
         let layout = match &self.layout_memo {
             Some((k, l)) if *k == key => Arc::clone(l),
             _ => {
-                let l = Arc::new(crate::layout::Layout::compute_with_seed(
+                let l = Arc::new(crate::layout::SceneLayout::compute_with_seed(
                     buf_w, buf_h, None, floor_seed,
                 )?);
                 self.layout_memo = Some((key, Arc::clone(&l)));
@@ -308,7 +316,7 @@ impl CoffeeState {
 
 /// The shared per-frame EPILOGUE: stamp this frame's new coffee carriers and
 /// refresh the door-cosmetic clamp. `pub` so the TUI's `draw_scene` — which
-/// can't call [`render_floor`]/[`FloorSession::observe`] — runs THIS seam instead of
+/// can't call [`render_floor`]/[`FloorSession::step`] — runs THIS seam instead of
 /// re-inlining the pair.
 pub fn frame_epilogue(
     fctx: &mut FloorCtx,
@@ -368,7 +376,7 @@ pub struct FrameInputs<'a> {
 /// layout plus the sim's occupancy observation.
 pub struct FloorFrame {
     /// The frame's computed layout (callers cache it for overlays / hit-testing).
-    pub layout: Arc<crate::layout::Layout>,
+    pub layout: Arc<crate::layout::SceneLayout>,
     /// The occupied-waypoint indices this frame — the appliance audio-cue feed.
     pub occupied_waypoints: std::collections::HashSet<usize>,
     /// Every character drawn this frame, in paint order.
@@ -414,13 +422,13 @@ pub fn render_floor(
     })
 }
 
-/// One floor, one tick, observed rather than painted: the world advanced, and the
+/// One floor, one tick, stepped rather than painted: the world advanced, and the
 /// layout it advanced on. A second profile paints THIS layout — laying the office
 /// out again beside the sim is how a painter ends up drawing one office while the
 /// sim walked another.
-pub struct ObservedFloor {
+pub struct SteppedFloor {
     /// The layout the sim stepped on.
-    pub layout: Arc<crate::layout::Layout>,
+    pub layout: Arc<crate::layout::SceneLayout>,
     /// The world, advanced one tick.
     pub frame: SimFrame,
 }
@@ -459,7 +467,7 @@ impl Default for PerFloor {
 /// Resolve an occupied-waypoint index to its [`WaypointKind`](crate::layout::WaypointKind)
 /// against `layout` — the ONE authored form of the audio cue tracker's kind lookup.
 pub fn waypoint_kind_of(
-    layout: Option<&crate::layout::Layout>,
+    layout: Option<&crate::layout::SceneLayout>,
     idx: usize,
 ) -> Option<crate::layout::WaypointKind> {
     layout.and_then(|l| l.waypoints.get(idx)).map(|w| w.kind)
@@ -578,7 +586,7 @@ pub struct FloorSession {
     pub office: PerOffice,
     /// The layout the last `render` laid out, so a painter can't pass a layout
     /// that disagrees with the sprite pass.
-    last_layout: Option<Arc<crate::layout::Layout>>,
+    last_layout: Option<Arc<crate::layout::SceneLayout>>,
     /// The occupancy the last `render` observed, so a painter reads the SAME
     /// frame's occupancy it just painted.
     last_occupied: std::collections::HashSet<usize>,
@@ -611,7 +619,7 @@ impl FloorSession {
     /// seam. Returns the computed layout ([`FloorSession::buf`] holds the
     /// pixels), or `None` when the size can't lay out. `scene` MUST be the full
     /// live scene — the session evicts against it.
-    pub fn render(&mut self, inputs: FrameInputs) -> Option<Arc<crate::layout::Layout>> {
+    pub fn render(&mut self, inputs: FrameInputs) -> Option<Arc<crate::layout::SceneLayout>> {
         self.evict_missing(inputs.world.scene);
         let frame = render_floor(
             &mut self.floor.ctx,
@@ -652,13 +660,20 @@ impl FloorSession {
         crate::overlay::build_overlay(scene, &self.last_agents, hovered)
     }
 
-    /// The neon wall-board model for `scene`, with no cross-floor breadcrumb.
-    pub fn board(&self, scene: &SceneState, now: SystemTime) -> crate::board::BoardModel {
+    /// The neon wall-board model for `scene`, with no cross-floor breadcrumb,
+    /// its flap moving as `motion` says.
+    pub fn board(
+        &self,
+        scene: &SceneState,
+        motion: crate::anim::Motion,
+        now: SystemTime,
+    ) -> crate::board::BoardModel {
         crate::board::build_board(
             crate::board::scene_stats(scene),
             crate::board::scene_uptime_secs(scene, now),
             None,
             crate::board::office_gateway(scene),
+            motion,
             now,
         )
     }
@@ -703,9 +718,9 @@ impl FloorSession {
     /// [`render_floor`]'s layout prologue, sim tick and epilogue,
     /// minus its paint pass. `size` is the layout's logical extent, whatever scale a painter
     /// draws it at. `None` when the size can't lay out.
-    pub fn observe(&mut self, world: FloorInputs<'_>, size: Size) -> Option<ObservedFloor> {
+    pub fn step(&mut self, world: FloorInputs<'_>, size: Size) -> Option<SteppedFloor> {
         self.evict_missing(world.scene);
-        observe_floor(
+        step_floor(
             &mut self.floor.ctx,
             &mut self.office.coffee,
             &mut self.office.chitchat,
@@ -715,14 +730,14 @@ impl FloorSession {
     }
 }
 
-/// [`FloorSession::observe`] minus eviction, which a projected `world.scene` would turn on other floors.
-pub fn observe_floor(
+/// [`FloorSession::step`] minus eviction, which a projected `world.scene` would turn on other floors.
+pub fn step_floor(
     fctx: &mut FloorCtx,
     coffee: &mut CoffeeState,
     chitchat: &mut HashMap<VenueKey, ActiveChitchat>,
     world: FloorInputs<'_>,
     size: Size,
-) -> Option<ObservedFloor> {
+) -> Option<SteppedFloor> {
     let layout = fctx.frame_layout(size.w, size.h, world.floor.floor_seed)?;
     let door_anim_max_ms = fctx.door_anim_max_ms;
     let frame = sim_step(
@@ -740,7 +755,7 @@ pub fn observe_floor(
         frame.new_coffee_carriers.iter().copied(),
         world.now,
     );
-    Some(ObservedFloor { layout, frame })
+    Some(SteppedFloor { layout, frame })
 }
 
 impl Default for FloorSession {
@@ -753,20 +768,20 @@ impl Default for FloorSession {
 /// `EMPTY_DEBOUNCE_MS` (so agents briefly disappearing between transcripts don't
 /// flicker it) then eases toward `MIN_LEVEL`; repopulating snaps the target
 /// straight back to 1.0.
-pub struct LightingState {
+pub struct VacancyDim {
     level: f32,
     empty_since: Option<SystemTime>,
     last_update: Option<SystemTime>,
     dimmed: bool,
 }
 
-impl Default for LightingState {
+impl Default for VacancyDim {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LightingState {
+impl VacancyDim {
     /// Floor of the smoothed lit level — an empty floor dims to here, never to black.
     pub const MIN_LEVEL: f32 = 0.10;
     /// How long an emptied floor holds full light before it starts fading (ms).
@@ -944,12 +959,13 @@ impl NeonState {
     pub(crate) const FADE_MS: u32 = 1_600;
     /// A starved tube's stutter cycle (ms).
     const STUTTER_MS: u64 = 5_000;
-    /// The flash windows inside one cycle, `[start, end)` ms.
+    /// The flash windows inside one cycle, `[start, end)` ms: each a whole
+    /// Full beat, so the beat neither skips nor stretches one.
     const STUTTER_FLASHES_MS: [(u64, u64); 4] = [
-        (1_900, 1_980),
-        (2_060, 2_130),
-        (2_280, 2_400),
-        (4_100, 4_170),
+        (1_875, 2_000),
+        (2_125, 2_250),
+        (2_375, 2_500),
+        (4_125, 4_250),
     ];
 
     /// A sign that has not been lit yet.
@@ -957,8 +973,11 @@ impl NeonState {
         Self::default()
     }
 
-    fn stutter_flash(now: SystemTime) -> bool {
-        let t = crate::anim::epoch_ms(now) % Self::STUTTER_MS;
+    fn stutter_flash(beat: crate::anim::Beat) -> bool {
+        if beat.is_rest() {
+            return false;
+        }
+        let t = beat.ms() % Self::STUTTER_MS;
         Self::STUTTER_FLASHES_MS
             .iter()
             .any(|&(start, end)| (start..end).contains(&t))
@@ -976,11 +995,11 @@ impl NeonState {
             .unwrap_or(0)
     }
 
-    /// Advance to `mood` at `now`; returns this frame's light. A count change
+    /// Advance to `mood` on `clock`; returns this frame's light. A count change
     /// inside one mood is not a change, and a reversal mid-fade restarts from the
     /// light it interrupted.
     ///
-    /// `room_dimmed` is [`LightingState::dimmed`]: the sign only starves once the
+    /// `room_dimmed` is [`VacancyDim::dimmed`]: the sign only starves once the
     /// ROOM is judged empty, so that debounce is the one "is the office really
     /// empty" clock — a gap between transcripts, or the last agent still walking
     /// out of a lit room, can't drop the sign.
@@ -988,9 +1007,10 @@ impl NeonState {
         &mut self,
         mood: crate::board::OfficeMood,
         room_dimmed: bool,
-        now: SystemTime,
+        clock: crate::anim::Clock,
     ) -> NeonLevels {
         use crate::board::OfficeMood;
+        let now = clock.now;
         let to = match mood {
             OfficeMood::Alert { .. } => NeonLevels::ALERT,
             OfficeMood::Busy { .. } => NeonLevels::BUSY,
@@ -1024,7 +1044,7 @@ impl NeonState {
         };
         // Only a tube that has LANDED on starved stutters, not one coasting down.
         let drawable = gap_ms.is_some_and(|gap| gap < Self::shortest_flash_ms());
-        if current == NeonLevels::EMPTY && drawable && Self::stutter_flash(now) {
+        if current == NeonLevels::EMPTY && drawable && Self::stutter_flash(clock.beat) {
             NeonLevels::FLASH
         } else {
             current

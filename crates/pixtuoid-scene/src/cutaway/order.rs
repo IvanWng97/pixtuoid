@@ -39,7 +39,7 @@ use crate::layout::{Bounds, Layer};
 /// pieces whose bounds meet a damaged rect is only complete if nothing a piece
 /// draws falls outside its own. Its shadow is laid in a pass of its own under
 /// every piece and reaches further (`paint.rs`'s `Piece::reach`). The depth is
-/// a separate fact: a person sorts on the sim's z-key, which is not the south
+/// a separate fact: a person sorts on the sim's sort row, which is not the south
 /// edge of what they paint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Span {

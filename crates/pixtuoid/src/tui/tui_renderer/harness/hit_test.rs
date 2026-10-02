@@ -94,7 +94,7 @@ fn click_hit_test_follows_a_walking_sprite() {
     let mut r = build(192, 80, vec![]);
     r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout");
-    let seat = pixtuoid_scene::sim::seated_anchor_facing(
+    let seat = pixtuoid_scene::sim::seated_top_left(
         layout.home_desks[0],
         pixtuoid_scene::layout::CHARACTER_SPRITE_W,
         layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(0)),
@@ -110,7 +110,7 @@ fn click_hit_test_follows_a_walking_sprite() {
     // Mid-exit-walk, inside EXIT_GRACE_WINDOW — off the desk box, not yet GC'd.
     let walk_now = t0() + Duration::from_millis(1500);
     r.render(&scene, pack(), walk_now).unwrap();
-    let drawn = drawn(&r, &scene, id, walk_now).anchor;
+    let drawn = drawn(&r, &scene, id, walk_now).top_left;
     assert_eq!(r.hit_test_agent_at(drawn.x, drawn.y / 2), Some(id));
     assert_eq!(
         r.hit_test_agent_at(dx, dy),
@@ -127,8 +127,8 @@ fn drawn(
     now: SystemTime,
 ) -> AgentFrame {
     let layout = r.cached_layout().expect("rendered layout");
-    let observed = pixtuoid_scene::floor::FloorSession::new()
-        .observe(
+    let stepped = pixtuoid_scene::floor::FloorSession::new()
+        .step(
             pixtuoid_scene::floor::FloorInputs {
                 scene,
                 pack: pack(),
@@ -141,8 +141,8 @@ fn drawn(
                 h: layout.buf_h,
             },
         )
-        .expect("observable floor");
-    let frame = &observed.frame;
+        .expect("steppable floor");
+    let frame = &stepped.frame;
     let c = frame
         .characters
         .iter()
@@ -155,7 +155,7 @@ fn drawn(
         .expect("the pack draws the placement");
     AgentFrame {
         agent_id: id,
-        anchor: c.anchor,
+        top_left: c.top_left,
         w: art.0,
         h: art.1,
         label_anchor: c.label_anchor,
@@ -164,7 +164,11 @@ fn drawn(
 
 /// Whether the half-block cell `(col, row)` shows a pixel of `sprite`.
 fn cell_shows(sprite: AgentFrame, col: u16, row: u16) -> bool {
-    crate::tui::geometry::CellArea::half_block(col, row).overlaps(sprite.anchor, sprite.w, sprite.h)
+    crate::tui::geometry::CellArea::half_block(col, row).overlaps(
+        sprite.top_left,
+        sprite.w,
+        sprite.h,
+    )
 }
 
 /// Cells swept past each edge of the sprite, so the sweep sees its misses too.
@@ -177,7 +181,7 @@ const BREATH_PROBES_MS: [u64; 10] = [
 ];
 
 #[test]
-fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_anchor() {
+fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_top_left() {
     let (cols, rows) = (140, 48);
     let mut s = active("/breath/0.jsonl", 0, "Edit", t0() - Duration::from_secs(60));
     s.label = "BREATH".into();
@@ -186,7 +190,7 @@ fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_anchor() {
     let mut r = build(cols, rows, vec![]);
     r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout").clone();
-    let seat = pixtuoid_scene::sim::seated_anchor_facing(
+    let seat = pixtuoid_scene::sim::seated_top_left(
         layout.home_desks[0],
         pixtuoid_scene::layout::CHARACTER_SPRITE_W,
         layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(0)),
@@ -195,11 +199,11 @@ fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_anchor() {
         .into_iter()
         .map(|ms| t0() + Duration::from_millis(ms))
         .map(|now| (now, drawn(&r, &scene, id, now)))
-        .find(|&(_, drawn)| drawn.anchor != seat)
-        .expect("within one breath cycle the sitter bobs off its seat anchor");
+        .find(|&(_, drawn)| drawn.top_left != seat)
+        .expect("within one breath cycle the sitter bobs off its seat top-left");
     r.render(&scene, pack(), now).unwrap();
     let seated = AgentFrame {
-        anchor: seat,
+        top_left: seat,
         ..drawn
     };
 
@@ -255,12 +259,12 @@ fn overlapping_agents_hit_the_one_painted_on_top() {
     );
     // Where the two sprites cover each other the frame shows only the top one.
     let (x0, y0) = (
-        drawn_a.anchor.x.max(drawn_b.anchor.x),
-        drawn_a.anchor.y.max(drawn_b.anchor.y),
+        drawn_a.top_left.x.max(drawn_b.top_left.x),
+        drawn_a.top_left.y.max(drawn_b.top_left.y),
     );
     let (x1, y1) = (
-        (drawn_a.anchor.x + drawn_a.w).min(drawn_b.anchor.x + drawn_b.w),
-        (drawn_a.anchor.y + drawn_a.h).min(drawn_b.anchor.y + drawn_b.h),
+        (drawn_a.top_left.x + drawn_a.w).min(drawn_b.top_left.x + drawn_b.w),
+        (drawn_a.top_left.y + drawn_a.h).min(drawn_b.top_left.y + drawn_b.h),
     );
     let (x, y, top) = (y0..y1)
         .flat_map(|y| (x0..x1).map(move |x| (x, y)))
