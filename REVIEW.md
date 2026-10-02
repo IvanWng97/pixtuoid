@@ -6,8 +6,8 @@ Read [`AGENTS.md`](AGENTS.md) first; these rules add to generic defect hunting.
 
 - A lens bot applies [What to check](#what-to-check), its [lens](#lenses)
   and [Re-review](#re-review); the **correctness** bot also applies every
-  matching non-local [escalation](#escalation) row and names the local rows in
-  its summary.
+  matching [escalation](#escalation) row to the diff and names the local rows
+  in its summary.
 - A local row lens applies only its [row](#escalation).
 - All apply [Do not flag](#do-not-flag), the Lenses preamble,
   [Severity](#severity) and [Output](#output).
@@ -155,23 +155,25 @@ invariant-breaking sequence against:
 
 Two lenses are the floor; each matching row adds one focused lens. The first
 column decides; Paths are where it usually fires. A **local** row needs the
-head built or run, or an upstream fetched, so its local run is mandatory
-([recorded](docs/CONTRIBUTING.md#the-merge-gate)).
+head tree read, built or run, or an upstream fetched, so its local run is
+mandatory ([recorded](docs/CONTRIBUTING.md#the-merge-gate)).
 
 | Diff touches… | Paths | Local | The added lens must… |
 |---|---|---|---|
 | Generated art / clips | | local | Extract frames and READ them; census the money shot. |
-| Reducer / liveness / sweeps | `crates/pixtuoid-core/src/state/`, `…/source/jsonl/liveness.rs`, `…/source/exit_watch.rs`, `…/source/daemon.rs` | | Trace the downstream interaction graph (rebind, sweeps, TTLs, cascade, dedup, polarity) and the provenance of every newly keyed signal. |
+| Reducer / liveness / sweeps | `crates/pixtuoid-core/src/state/`, `…/source/jsonl/liveness.rs`, `…/source/exit_watch.rs`, `…/source/daemon.rs` | local | Trace the downstream interaction graph (rebind, sweeps, TTLs, cascade, dedup, polarity) and the provenance of every newly keyed signal. |
 | A public rendered artifact | `site/src/`, `integrations/raycast/src/` | local | DRIVE the built page and MEASURE: WCAG in every interactive state, mobile pan, no-JS (#455). |
 | An interactive TUI flow | | local | WALK each user path end-to-end: first run, failure branches, the no-CLI user (#359). |
-| The shim | `crates/pixtuoid-hook/` | | Audit the WHOLE shim for never-panic: `args_os()`, no slicing of untrusted bytes, bounded reads, every error path `exit(0)` (#198). |
-| The hook's daemon side | `crates/pixtuoid-core/src/source/hook/` | | The endpoint is never looser than owner-only, arbitration cannot steal a live owner's socket, both `unix.rs`/`windows.rs` arms hold (Windows runs only in CI, outside mutation testing), and each guard is PINNED. |
-| Motion / pose / walk-leg | `crates/pixtuoid-scene/src/` `motion/`, `pose/`, `pathfind/`, `physics.rs` | local | Render and WATCH it (the snapshot example, or `scripts/lib/tier-replay.sh` for resume/lifecycle) before the verdict (#61). |
+| The shim | `crates/pixtuoid-hook/` | local | Audit the WHOLE shim for never-panic: `args_os()`, no slicing of untrusted bytes, bounded reads, every error path `exit(0)` (#198). |
+| The hook's daemon side | `crates/pixtuoid-core/src/source/hook/` | local | The endpoint is never looser than owner-only, arbitration cannot steal a live owner's socket, both `unix.rs`/`windows.rs` arms hold (Windows runs only in CI, outside mutation testing), and each guard is PINNED. |
+| Motion / pose / walk-leg | `crates/pixtuoid-scene/src/` `walk/`, `pose/`, `pathfind/`, `physics.rs` | local | Render and WATCH it (the snapshot example, or `scripts/lib/tier-replay.sh` for resume/lifecycle) before the verdict (#61). |
 | A string/layout a painter frames | | local | Render the COMPOSED frame; string-equality tests are blind to framing (#308). |
 | Another CLI's config | `crates/pixtuoid/src/install/` | local | Enumerate every resolution axis and re-verify each against that CLI's upstream in-session; write ⊆ verify (#338). |
 | A new source / hook integration | `crates/pixtuoid-core/src/source/registry.rs` | local | LIVE run or hermetic replay without capture-rig convenience flags; event shapes from canonical upstream docs, never a fork. |
-| A dedup / "behavior-preserving" refactor | | | Adversarial toward revert, per consolidation: one reason-to-change per call site; name the conversions that moved semantics — a batch hides exactly one (#461). |
-| Geometry, sky, lighting or other domain math, or an arc's last PR | `crates/pixtuoid-scene/src/` `sky/`, `celestial.rs`, `lighting/`, `layout/` | | Enumerate the domain invariants and re-derive each across the parameter space, edges included (#471, #1049, #1053). |
+| A refactor: a `refactor` PR, or a move or dedup across modules | | local | Adversarial toward revert, per consolidation: one reason-to-change per call site; name the conversions that moved semantics — a batch hides exactly one (#461). No test leaves `cargo nextest list` at head unless the PR body names it. |
+| Geometry, sky, lighting or other domain math | `crates/pixtuoid-scene/src/` `sky/`, `celestial.rs`, `lighting/`, `layout/` | local | Enumerate the domain invariants and re-derive each across the parameter space, edges included (#471, #1049, #1053). |
+| A crate edge, new dependency or widened public API (a version bump of an existing dependency doesn't match) | `Cargo.toml`, `crates/*/Cargo.toml`, `api/` | local | Justify every crate `cargo tree -e normal` adds at head, transitive ones included; every new workspace edge follows [AGENTS.md](AGENTS.md#layout)'s crate DAG; every item made `pub` has a consumer outside its crate. |
+| CI, the merge gate or release tooling | `.github/workflows/`, `.github/actions/`, `.mergify.yml`, `policy/`, `release-plz.toml`, `REVIEW.md`, `docs/CONTRIBUTING.md` | local | Name every check, contract or row the diff loosens; trace each trigger (fork, bot actor, cancelled or superseded run) to a gate that fails closed. |
 
 ## Severity
 
@@ -181,8 +183,8 @@ nits and taste are never posted. Dispositions:
 [CONTRIBUTING](docs/CONTRIBUTING.md#pull-requests).
 
 - `issue (blocking)` — correctness, security or invariant. It blocks only once
-  the orchestrator or a maintainer confirms it against the code; the finder's
-  label alone never blocks.
+  the agent that ran the review or a maintainer confirms it against the code;
+  the finder's label alone never blocks.
 - `issue (non-blocking)` — any other real defect this PR introduced.
 - `issue (pre-existing)` — real, not introduced here.
 

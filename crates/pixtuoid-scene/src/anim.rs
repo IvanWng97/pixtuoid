@@ -118,8 +118,8 @@ impl Motion {
     }
 
     /// `now` and its [`beat`](Self::beat).
-    pub(crate) fn clock(self, now: SystemTime) -> Clock {
-        Clock {
+    pub(crate) fn timing(self, now: SystemTime) -> Timing {
+        Timing {
             now,
             beat: self.beat(now),
         }
@@ -134,7 +134,7 @@ fn loop_time(wall: SystemTime, pace: u64) -> u64 {
 
 /// An instant, and the [`Beat`] its ambient loops read at it.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Clock {
+pub(crate) struct Timing {
     pub(crate) now: SystemTime,
     pub(crate) beat: Beat,
 }

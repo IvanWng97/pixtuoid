@@ -1,6 +1,6 @@
 use super::*;
-use crate::motion::{octile_path_len, settle_len};
 use crate::physics::walk_profile;
+use crate::walk::{octile_path_len, settle_len};
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::WalkableMask;
 use std::path::PathBuf;
@@ -113,7 +113,7 @@ fn walk_leg_freezes_path_against_midleg_reroute() {
     );
 
     let frozen = rig
-        .motion
+        .walks
         .get(&slot2.agent_id)
         .and_then(|ms| ms.walk_path.as_ref())
         .expect("walk_path must be snapshotted while walking");
@@ -208,23 +208,23 @@ fn seated_waypoint_snap_back_starts_from_the_seat_not_the_approach_cell() {
     let mut rig = RouteRig::new(StubRouter::straight());
 
     let idle = entry_slot(now - Duration::from_secs(60));
-    let mut ms = MotionState::new(idle.agent_id);
-    ms.wander.phase = crate::motion::WanderPhase::AtWaypoint(walk_profile(
+    let mut ms = WalkState::new(idle.agent_id);
+    ms.wander.phase = crate::walk::WanderPhase::AtWaypoint(walk_profile(
         100,
         WalkIntent::WanderBack,
         idle.agent_id,
     ));
     ms.wander.phase_started_at = now;
     ms.wander.last_advanced_at = now; // pin the phase (advance_wander no-ops at now)
-    ms.wander.target = crate::motion::WanderTarget {
+    ms.wander.target = crate::walk::WanderTarget {
         dest: approach,
-        kind: crate::motion::WanderKind::Named {
+        kind: crate::walk::WanderKind::Named {
             wp_idx: 0,
             kind: crate::layout::WaypointKind::Couch,
             seat: Some(seat),
         },
     };
-    rig.motion.insert(idle.agent_id, ms);
+    rig.walks.insert(idle.agent_id, ms);
     match derive_with_routing(&idle, now, &l, &mut rig.rctx()) {
         Some(Pose::AtWaypoint { .. }) => {}
         other => panic!("expected AtWaypoint pose, got {other:?}"),
@@ -335,7 +335,7 @@ fn snap_back_cornered_leg_freezes_path_no_reroute() {
         rig.router.calls - calls_after_frame1
     );
     let frozen = rig
-        .motion
+        .walks
         .get(&slot.agent_id)
         .and_then(|ms| ms.walk_path.as_ref())
         .expect("walk_path must be snapshotted while snapping back");
@@ -503,7 +503,7 @@ fn snap_back_routes_via_the_approach_cell_then_settles_onto_the_chair() {
         matches!(pose, Pose::Walking { .. }),
         "snap-back must be Walking, got {pose:?}"
     );
-    let snap = rig.motion[&slot.agent_id]
+    let snap = rig.walks[&slot.agent_id]
         .walk_path
         .as_ref()
         .expect("the cornered snap-back leg is frozen (… approach, chair, len > 2)");
@@ -698,9 +698,9 @@ fn snap_back_progress_is_physics_eased_not_linear() {
 
     let _pose0 = derive_with_routing(&slot, now, &l, &mut rig.rctx());
     let ms = rig
-        .motion
+        .walks
         .get(&slot.agent_id)
-        .expect("MotionState created on frame 0");
+        .expect("WalkState created on frame 0");
     let profile = &ms
         .snap_back
         .as_ref()
@@ -752,20 +752,20 @@ fn snap_back_profile_stored_in_motion_state() {
 
     let _p1 = derive_with_routing(&slot, now, &l, &mut rig.rctx());
     let dur1 = rig
-        .motion
+        .walks
         .get(&slot.agent_id)
         .and_then(|ms| ms.snap_back.as_ref())
         .map(|leg| leg.profile.duration_ms)
         .expect("snap_back profile created on frame 1");
 
-    // Fresh history but the SAME persistent motion map.
+    // Fresh history but the SAME persistent walks map.
     let slot2 = active_slot(now, now - Duration::from_secs(60));
     let t2 = now + Duration::from_millis(100);
     rig.history
         .record(slot2.agent_id, prev, t2 - Duration::from_millis(50));
     let _p2 = derive_with_routing(&slot2, t2, &l, &mut rig.rctx());
     let dur2 = rig
-        .motion
+        .walks
         .get(&slot2.agent_id)
         .and_then(|ms| ms.snap_back.as_ref())
         .map(|leg| leg.profile.duration_ms)
@@ -794,7 +794,7 @@ fn snap_back_rearms_on_new_state_transition() {
         .record(slot0.agent_id, prev0, t0 - Duration::from_millis(50));
     let _ = derive_with_routing(&slot0, t0, &l, &mut rig.rctx());
     let stored0 = rig
-        .motion
+        .walks
         .get(&slot0.agent_id)
         .and_then(|ms| ms.snap_back.as_ref())
         .map(|leg| leg.started_at)
@@ -814,7 +814,7 @@ fn snap_back_rearms_on_new_state_transition() {
         .record(slot1.agent_id, prev1, now1 - Duration::from_millis(50));
     let _ = derive_with_routing(&slot1, now1, &l, &mut rig.rctx());
     let stored1 = rig
-        .motion
+        .walks
         .get(&slot1.agent_id)
         .and_then(|ms| ms.snap_back.as_ref())
         .map(|leg| leg.started_at)
@@ -899,20 +899,20 @@ fn entry_duration_scales_with_path_longer_desk_takes_longer() {
     let near = entry_slot_far(now, near_idx);
     let far = entry_slot_far(now, far_idx);
 
-    // Separate motion maps — each agent's first call snapshots its own profile.
+    // Separate walks maps — each agent's first call snapshots its own profile.
     let mut rig_near = RouteRig::new(StubRouter::straight());
     let mut rig_far = RouteRig::new(StubRouter::straight());
 
     let _pn = derive_with_routing(&near, now, &l, &mut rig_near.rctx());
     let _pf = derive_with_routing(&far, now, &l, &mut rig_far.rctx());
 
-    let dur_near = rig_near.motion[&near.agent_id]
+    let dur_near = rig_near.walks[&near.agent_id]
         .entry
         .as_ref()
         .expect("entry profile set for near desk")
         .profile
         .duration_ms;
-    let dur_far = rig_far.motion[&far.agent_id]
+    let dur_far = rig_far.walks[&far.agent_id]
         .entry
         .as_ref()
         .expect("entry profile set for far desk")
@@ -941,7 +941,7 @@ fn nearer_desk_arrives_before_farther_desk() {
     let _ = derive_with_routing(&far, now, &l, &mut rig_far.rctx());
 
     // One ms past the near desk's full trip, still inside the far desk's window.
-    let near_profile = rig_near.motion[&near.agent_id]
+    let near_profile = rig_near.walks[&near.agent_id]
         .entry
         .as_ref()
         .unwrap()
@@ -977,7 +977,7 @@ fn five_same_created_at_agents_have_distinct_entry_durations() {
         let mut slot = entry_slot_near(now);
         slot.agent_id = id;
         let _ = derive_with_routing(&slot, now, &l, &mut rig.rctx());
-        let dur = rig.motion[&id]
+        let dur = rig.walks[&id]
             .entry
             .as_ref()
             .expect("entry profile set")
@@ -1001,7 +1001,7 @@ fn exit_profile_snapshotted_once_not_on_subsequent_calls() {
     let mut rig = RouteRig::new(StubRouter::straight());
 
     let _ = derive_with_routing(&slot, now, &l, &mut rig.rctx());
-    let started_at_1 = rig.motion[&slot.agent_id]
+    let started_at_1 = rig.walks[&slot.agent_id]
         .exit
         .as_ref()
         .expect("exit profile set on first call")
@@ -1009,7 +1009,7 @@ fn exit_profile_snapshotted_once_not_on_subsequent_calls() {
 
     let t1 = now + Duration::from_millis(100);
     let _ = derive_with_routing(&slot, t1, &l, &mut rig.rctx());
-    let started_at_2 = rig.motion[&slot.agent_id]
+    let started_at_2 = rig.walks[&slot.agent_id]
         .exit
         .as_ref()
         .expect("exit profile still present")
@@ -1057,7 +1057,7 @@ fn exit_far_completes_before_grace_window_no_vanish() {
         None => {}
         other => panic!("expected Walking near the door or None (arrived), got {other:?}"),
     }
-    let dur = rig.motion[&slot.agent_id]
+    let dur = rig.walks[&slot.agent_id]
         .exit
         .as_ref()
         .expect("exit profile snapshotted")
@@ -1077,7 +1077,7 @@ fn exit_uses_commute_speed_faster_than_wander() {
     let mut rig = RouteRig::new(StubRouter::straight());
 
     let _ = derive_with_routing(&slot, now, &l, &mut rig.rctx());
-    let profile = &rig.motion[&slot.agent_id]
+    let profile = &rig.walks[&slot.agent_id]
         .exit
         .as_ref()
         .expect("exit profile set")
@@ -1244,7 +1244,7 @@ fn desk_entry_routes_around_the_desk_then_settles_onto_the_chair() {
         "a fresh entry must be Walking, got {pose:?}"
     );
 
-    let snap = rig.motion[&slot.agent_id]
+    let snap = rig.walks[&slot.agent_id]
         .walk_path
         .as_ref()
         .expect("the cornered entry+settle leg is frozen (len > 2)");
@@ -1294,7 +1294,7 @@ fn wander_legs_approach_the_desk_via_an_allowed_side_not_through_the_front() {
     for i in 0..6000u64 {
         let t = now + Duration::from_millis(i * 33);
         let _ = derive_with_routing(&slot, t, &l, &mut rig.rctx());
-        let Some(snap) = rig.motion.get(&trip_id).and_then(|m| m.walk_path.as_ref()) else {
+        let Some(snap) = rig.walks.get(&trip_id).and_then(|m| m.walk_path.as_ref()) else {
             continue;
         };
         if let (Some(&f), Some(&la)) = (snap.path.first(), snap.path.last())
@@ -1374,7 +1374,7 @@ fn exit_from_desk_rises_off_the_chair_via_the_approach_cell() {
         "a fresh exit must be Walking, got {pose:?}"
     );
 
-    let snap = rig.motion[&slot.agent_id]
+    let snap = rig.walks[&slot.agent_id]
         .walk_path
         .as_ref()
         .expect("the cornered exit leg is frozen (chair → approach → door, len > 2)");
@@ -1859,7 +1859,7 @@ fn route_walking_pose_straight_leg_records_lerp_and_clears_walk_path() {
         other => panic!("expected straight Walking, got {other:?}"),
     }
     assert!(
-        rig.motion
+        rig.walks
             .get(&slot.agent_id)
             .is_some_and(|ms| ms.walk_path.is_none()),
         "straight 2-point walk must clear walk_path"
@@ -1969,7 +1969,7 @@ fn snap_back_profile_length_measures_the_routed_polyline() {
     let _ = derive_with_routing(&slot, now, &l, &mut rig.rctx());
 
     let leg = rig
-        .motion
+        .walks
         .get(&slot.agent_id)
         .and_then(|ms| ms.snap_back.as_ref())
         .expect("snap-back must be armed");
@@ -2052,7 +2052,7 @@ fn a_resurrect_after_the_walkout_arrived_re_enters_through_the_door() {
     // nothing recent — the state the snap-back cannot recover from.
     derive_with_routing(&slot, t0, &l, &mut rig.rctx());
     assert!(
-        rig.motion[&slot.agent_id].exit.is_some(),
+        rig.walks[&slot.agent_id].exit.is_some(),
         "test setup: the walkout must have snapshotted a leg"
     );
     let arrived = t0 + pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
@@ -2075,7 +2075,7 @@ fn a_resurrect_after_the_walkout_arrived_re_enters_through_the_door() {
         other => panic!("expected a fresh entry walk, got {other:?}"),
     }
     assert!(
-        rig.motion[&slot.agent_id].exit.is_none(),
+        rig.walks[&slot.agent_id].exit.is_none(),
         "the spent exit leg must be cleared, or the NEXT exit replays an \
          already-arrived profile and the sprite vanishes instead of walking out"
     );
@@ -2109,7 +2109,7 @@ fn a_resurrect_mid_walkout_re_enters_from_the_live_position() {
     slot.state_started_at = mid;
     let pose = derive_with_routing(&slot, mid, &l, &mut rig.rctx());
 
-    let leg = rig.motion[&slot.agent_id]
+    let leg = rig.walks[&slot.agent_id]
         .entry
         .as_ref()
         .expect("an in-flight resurrect must re-arm entry");
@@ -2150,7 +2150,7 @@ fn the_resurrect_check_reads_the_same_compressed_clock_as_the_exit_render() {
     let mut rig = RouteRig::new(StubRouter::corners(far));
 
     derive_with_routing(&slot, t0, &l, &mut rig.rctx());
-    let profile = rig.motion[&slot.agent_id]
+    let profile = rig.walks[&slot.agent_id]
         .exit
         .as_ref()
         .expect("exit leg snapshotted")
@@ -2193,7 +2193,7 @@ fn the_resurrect_check_reads_the_same_compressed_clock_as_the_exit_render() {
     slot.exiting_at = None;
     slot.state_started_at = at;
     derive_with_routing(&slot, at, &l, &mut rig.rctx());
-    let leg = rig.motion[&slot.agent_id]
+    let leg = rig.walks[&slot.agent_id]
         .entry
         .as_ref()
         .expect("a resurrect must re-arm entry");
