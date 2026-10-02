@@ -1089,7 +1089,7 @@ pub fn pixtuoid_scene::layout::floor_indicator_text(usize) -> alloc::string::Str
 pub const fn pixtuoid_scene::layout::furniture_def(pixtuoid_scene::layout::Furniture) -> pixtuoid_scene::layout::FurnitureDef
 pub fn pixtuoid_scene::layout::min_layout_size() -> pixtuoid_scene::layout::Size
 pub fn pixtuoid_scene::layout::seated_foot_cell(pixtuoid_scene::layout::Furniture, pixtuoid_scene::layout::Point) -> core::option::Option<pixtuoid_scene::layout::Point>
-pub fn pixtuoid_scene::layout::z_sort_row(pixtuoid_scene::layout::Pivot, pixtuoid_scene::layout::Point, u16) -> u16
+pub fn pixtuoid_scene::layout::sort_row_at(pixtuoid_scene::layout::Pivot, pixtuoid_scene::layout::Point, u16) -> u16
 pub mod pixtuoid_scene::motion
 pub enum pixtuoid_scene::motion::WanderKind
 pub pixtuoid_scene::motion::WanderKind::Aimless
@@ -1730,7 +1730,6 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::sim::CharacterGlow
 pub struct pixtuoid_scene::sim::CharacterPlacement
 pub pixtuoid_scene::sim::CharacterPlacement::agent_idx: usize
 pub pixtuoid_scene::sim::CharacterPlacement::anchor: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::sim::CharacterPlacement::anchor_y: u16
 pub pixtuoid_scene::sim::CharacterPlacement::anim_name: &'static str
 pub pixtuoid_scene::sim::CharacterPlacement::breathes: bool
 pub pixtuoid_scene::sim::CharacterPlacement::flip_x: bool
@@ -1739,6 +1738,7 @@ pub pixtuoid_scene::sim::CharacterPlacement::glow: pixtuoid_scene::sim::Characte
 pub pixtuoid_scene::sim::CharacterPlacement::label_anchor: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::sim::CharacterPlacement::seat_desk: core::option::Option<pixtuoid_scene::layout::Point>
 pub pixtuoid_scene::sim::CharacterPlacement::seated: bool
+pub pixtuoid_scene::sim::CharacterPlacement::sort_row: u16
 impl core::clone::Clone for pixtuoid_scene::sim::CharacterPlacement
 pub fn pixtuoid_scene::sim::CharacterPlacement::clone(&self) -> pixtuoid_scene::sim::CharacterPlacement
 impl core::fmt::Debug for pixtuoid_scene::sim::CharacterPlacement

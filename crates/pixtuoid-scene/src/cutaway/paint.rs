@@ -610,7 +610,7 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
             continue;
         };
         let (w, h) = dense.logical;
-        let depth = crate::layout::z_sort_row(crate::layout::Pivot::Center, at, h);
+        let depth = crate::layout::sort_row_at(crate::layout::Pivot::Center, at, h);
         let span = piece_span(crate::layout::Pivot::Center, at, w, h, 0)
             .with_depth(depth)
             .with_layer(Layer::Figure);
@@ -2082,7 +2082,7 @@ pub(crate) fn assert_variant_desk_foot(
 /// The chair's box and top-left at a desk facing `facing`, placed and keyed by
 /// the layout's rules
 /// ([`desk_chair_top_left`](crate::layout::desk_chair_top_left),
-/// [`desk_chair_z_key`](crate::layout::desk_chair_z_key)); `None` where
+/// [`desk_chair_sort_row`](crate::layout::desk_chair_sort_row)); `None` where
 /// those stand no chair or the pack has none.
 fn chair_span(
     pack: &Pack,
@@ -2092,7 +2092,7 @@ fn chair_span(
     let at = crate::layout::desk_chair_top_left(desk, facing)?;
     let (w, h) = art_size(pack, crate::pack::DESK_CHAIR_SPRITE)?;
     let span = piece_span(crate::layout::Pivot::TopLeft, at, w, h, 0)
-        .with_depth(crate::layout::desk_chair_z_key(desk, facing));
+        .with_depth(crate::layout::desk_chair_sort_row(desk, facing));
     Some((span, at))
 }
 
@@ -2150,7 +2150,7 @@ fn push_characters(
         };
         let span = occupant_span(
             piece_span(crate::layout::Pivot::TopLeft, top, w, h + hair, 0),
-            c.anchor_y,
+            c.sort_row,
             chair.map(|(span, _)| span),
         );
         let riders = riders(c, &key, (w, at), scale);
@@ -2220,7 +2220,7 @@ fn riders(
         .collect()
 }
 
-/// A figure's piece: its drawn bounds, sorted on `depth` — the sim's own z-key,
+/// A figure's piece: its drawn bounds, sorted on `depth` — the sim's own sort row,
 /// which neither breath nor the sit arc moves, so a person never flips against a
 /// neighbour mid-breath. A back-turned sitter and their chair are one piece,
 /// bounding the chair's whole box too.
@@ -2262,7 +2262,7 @@ fn push_sofa(
     back_view: bool,
     tie: Tie,
 ) {
-    let sitters = crate::sim::seat::sofa_sitter_z_key(at);
+    let sitters = crate::sim::seat::sofa_sitter_sort_row(at);
     if let Some((w, h)) = art_size(pack, MEETING_SOFA_NORTH).filter(|_| back_view) {
         let tl = crate::layout::anchored_top_left(crate::layout::Pivot::Center, at, w, h);
         let split = NORTH_SOFA_SEAT_ROWS.min(h);
@@ -3544,7 +3544,7 @@ pub(crate) mod tests {
     }
 
     /// The desk sorts on its face's south edge and a back-turned sitter on their
-    /// seat's z-key; that key lands south of the face, so the "head
+    /// seat's sort row; that row lands south of the face, so the "head
     /// over the surface" reading needs no special case.
     #[test]
     fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
@@ -3594,7 +3594,7 @@ pub(crate) mod tests {
     }
 
     /// A back-turned sitter's depth box, built the way `push_characters` builds
-    /// it, at the z-key the sim seats an occupant at (their seat's walk anchor).
+    /// it, at the sort row the sim seats an occupant at (their seat's walk anchor).
     fn seated_back_span(pack: &Pack, desk: crate::layout::Point) -> Span {
         use crate::layout::Facing;
         let (w, h) = base_size(pack, "seated_back");
@@ -3849,13 +3849,13 @@ pub(crate) mod tests {
             .expect("a back-turned desk stands a chair");
         assert_eq!(
             span.depth,
-            crate::layout::desk_chair_z_key(desk, crate::layout::Facing::North)
+            crate::layout::desk_chair_sort_row(desk, crate::layout::Facing::North)
         );
     }
 
-    /// A walker sorts on the sim's z-key for them, every step.
+    /// A walker sorts on the sim's sort row for them, every step.
     #[test]
-    fn a_walker_sorts_on_the_sims_z_key() {
+    fn a_walker_sorts_on_the_sims_sort_row() {
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 0);
         let mut walked = 0;
         for frame in &frames {
@@ -3875,7 +3875,7 @@ pub(crate) mod tests {
                 &mut order,
             );
             let (span, _) = order.first().expect("the walker is drawn");
-            assert_eq!(span.depth, c.anchor_y);
+            assert_eq!(span.depth, c.sort_row);
             walked += 1;
         }
         assert!(walked > 1, "the fixture never walked, so this pins nothing");
@@ -4424,11 +4424,11 @@ pub(crate) mod tests {
     fn a_chair_keeps_its_order_to_its_sitter_through_the_settle() {
         use crate::layout::Facing;
         let (layout, pack, frames, desk) = sit_down(Facing::North, 0);
-        let seat_key = crate::layout::desk_chair_z_key(desk, Facing::North);
+        let seat_row = crate::layout::desk_chair_sort_row(desk, Facing::North);
         let orders: Vec<(usize, bool)> = frames
             .iter()
             .enumerate()
-            .filter(|(_, f)| f.characters.first().is_some_and(|c| c.anchor_y == seat_key))
+            .filter(|(_, f)| f.characters.first().is_some_and(|c| c.sort_row == seat_row))
             .filter_map(|(n, f)| chair_over_person(f, &layout, &pack, desk).map(|o| (n, o)))
             .collect();
         assert!(
@@ -4997,7 +4997,7 @@ pub(crate) mod tests {
             panic!("a flipped sofa is one mirrored prop: {order:?}");
         };
         let sitter = Span::new(at.x, at.y, 1, 1, 0)
-            .with_depth(crate::sim::seat::sofa_sitter_z_key(at))
+            .with_depth(crate::sim::seat::sofa_sitter_sort_row(at))
             .with_layer(Layer::Figure);
         assert_eq!(
             crate::cutaway::order::depth_sort(vec![(*span, "sofa"), (sitter, "sitter")]),
@@ -5761,7 +5761,7 @@ S B B B B B B S
     /// what rides on it straight after it; a degraded gateway's art is greyed.
     #[test]
     fn creatures_stand_as_figures_with_their_riders_after_them() {
-        use crate::layout::{Pivot, z_sort_row};
+        use crate::layout::{Pivot, sort_row_at};
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_default_pack();
         let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
@@ -5845,7 +5845,7 @@ S B B B B B B S
                     .expect("the art")
                     .logical
                     .1;
-                assert_eq!(p.span.depth, z_sort_row(Pivot::Center, at, h));
+                assert_eq!(p.span.depth, sort_row_at(Pivot::Center, at, h));
                 assert_eq!(
                     stray_pixel(&p.kind, p.span, &layout, &pack, theme, scale),
                     None,
@@ -7385,7 +7385,7 @@ S B B B B B B S
         else {
             panic!("a back-view sofa is two bands: {order:?}");
         };
-        let sitter = crate::sim::seat::sofa_sitter_z_key(sofa);
+        let sitter = crate::sim::seat::sofa_sitter_sort_row(sofa);
         assert!(
             seat.depth == sitter && sitter < back.depth,
             "seat {} = sitter {sitter} < backrest {}",
@@ -8040,7 +8040,7 @@ S B B B B B B S
         else {
             panic!("a front sofa is one prop: {order:?}");
         };
-        assert_eq!(span.depth, crate::sim::seat::sofa_sitter_z_key(sofa));
+        assert_eq!(span.depth, crate::sim::seat::sofa_sitter_sort_row(sofa));
     }
 
     /// No wall this module stands closes a doorway, and every doorway is framed
