@@ -152,10 +152,10 @@ const STAR_COLOR: Rgb = Rgb {
 };
 /// Cap on the star blend alpha — a faint glimmer, not a bright dot.
 const STAR_ALPHA_MAX: f32 = 0.55;
-/// Per-star twinkle cycle length range (ms), hashed per position so the field
-/// doesn't blink in unison.
-const STAR_TWINKLE_CYCLE_BASE_MS: u64 = 2000;
-const STAR_TWINKLE_CYCLE_SPAN_MS: u64 = 3000;
+/// Per-star twinkle cycle length range, in whole Full beats so a star turns on
+/// one, hashed per position so the field doesn't blink in unison.
+const STAR_TWINKLE_CYCLE_BASE_BEATS: u64 = 16;
+const STAR_TWINKLE_CYCLE_SPAN_BEATS: u64 = 24;
 
 /// Deterministic sparse star field, hashed on the ABSOLUTE buffer `(px, py)`
 /// so it reads as one continuous sky rather than a per-window reseed.
@@ -170,7 +170,8 @@ fn star_exists(px: u16, py: u16) -> bool {
 fn star_twinkle(px: u16, py: u16, beat: crate::anim::Beat) -> bool {
     let now_ms = beat.ms();
     let seed = (px as u64).wrapping_mul(131) ^ (py as u64).wrapping_mul(521);
-    let cycle_ms = STAR_TWINKLE_CYCLE_BASE_MS + (seed % STAR_TWINKLE_CYCLE_SPAN_MS);
+    let cycle_ms = (STAR_TWINKLE_CYCLE_BASE_BEATS + seed % STAR_TWINKLE_CYCLE_SPAN_BEATS)
+        * crate::anim::FULL_TICK_MS;
     let phase = now_ms / cycle_ms;
     let hash = seed.wrapping_add(phase).wrapping_mul(crate::GOLDEN_GAMMA);
     (hash % 10) < 7
