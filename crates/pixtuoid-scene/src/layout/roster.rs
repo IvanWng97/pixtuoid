@@ -106,29 +106,6 @@ pub(crate) enum Tie {
     FixtureOver,
 }
 
-/// Which of everything sorted at one row paints on top: a painter's tie key,
-/// ordered as [`Tie`] orders the fixtures in it. The derived order is the
-/// paint order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) enum Layer {
-    /// A fixture a figure at its row sits on or stands in front of.
-    Under,
-    /// A character, a pet or a mascot.
-    Figure,
-    /// A fixture that hides a figure at its row, and a glass wall band, which
-    /// composites over whoever stands behind it.
-    Over,
-}
-
-impl From<Tie> for Layer {
-    fn from(tie: Tie) -> Self {
-        match tie {
-            Tie::FigureOver => Layer::Under,
-            Tie::FixtureOver => Layer::Over,
-        }
-    }
-}
-
 /// The waypoint kinds that are furniture in their own right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Station {

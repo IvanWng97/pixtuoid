@@ -30,7 +30,8 @@ use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::{AgentSlot, SceneState};
 use pixtuoid_scene::board::BoardModel;
 use pixtuoid_scene::cutaway::canvas::CutawayCanvas;
-use pixtuoid_scene::cutaway::paint::{Office, Showing, render_cutaway};
+use pixtuoid_scene::cutaway::paint::render_cutaway;
+use pixtuoid_scene::display::{Office, Showing};
 use pixtuoid_scene::floor::{
     CoffeeState, FloorCtx, FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs,
     SteppedFloor, render_floor,

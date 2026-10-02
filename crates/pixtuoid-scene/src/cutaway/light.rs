@@ -10,8 +10,8 @@
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::cutaway::order::Span;
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
+use crate::display::Span;
 use crate::lighting::{Emitter, EmitterKind};
 use crate::theme::Theme;
 
