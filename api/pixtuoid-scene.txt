@@ -167,12 +167,12 @@ pub pixtuoid_scene::floor::FloorMeta::altitude: f32
 pub pixtuoid_scene::floor::FloorMeta::floor_idx: usize
 pub pixtuoid_scene::floor::FloorMeta::floor_seed: u64
 pub pixtuoid_scene::floor::FloorMeta::motion: crate::anim::Motion
-pub pixtuoid_scene::floor::FloorMeta::weather: pixtuoid_scene::pixel_painter::WeatherPolicy
+pub pixtuoid_scene::floor::FloorMeta::weather: pixtuoid_scene::sky::WeatherPolicy
 impl pixtuoid_scene::floor::FloorMeta
 pub fn pixtuoid_scene::floor::FloorMeta::for_floor(usize, usize) -> Self
 pub fn pixtuoid_scene::floor::FloorMeta::ground() -> Self
 pub fn pixtuoid_scene::floor::FloorMeta::with_motion(self, crate::anim::Motion) -> Self
-pub fn pixtuoid_scene::floor::FloorMeta::with_weather(self, pixtuoid_scene::pixel_painter::WeatherPolicy) -> Self
+pub fn pixtuoid_scene::floor::FloorMeta::with_weather(self, pixtuoid_scene::sky::WeatherPolicy) -> Self
 impl core::clone::Clone for pixtuoid_scene::floor::FloorMeta
 pub fn pixtuoid_scene::floor::FloorMeta::clone(&self) -> pixtuoid_scene::floor::FloorMeta
 impl core::fmt::Debug for pixtuoid_scene::floor::FloorMeta
@@ -327,7 +327,7 @@ pub fn pixtuoid_scene::floor::num_floors(&pixtuoid_core::state::SceneState) -> u
 pub fn pixtuoid_scene::floor::project_floor_scene(&pixtuoid_core::state::SceneState, usize) -> pixtuoid_core::state::SceneState
 pub fn pixtuoid_scene::floor::render_floor(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_core::sprite::RgbBuffer, &mut pixtuoid_scene::floor::CoffeeState, &mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, pixtuoid_scene::floor::FrameInputs<'_>) -> core::option::Option<pixtuoid_scene::floor::FloorFrame>
 pub fn pixtuoid_scene::floor::step_floor(&mut pixtuoid_scene::floor::FloorCtx, &mut pixtuoid_scene::floor::CoffeeState, &mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::SteppedFloor>
-pub fn pixtuoid_scene::floor::track_for(std::time::SystemTime, pixtuoid_scene::pixel_painter::WeatherPolicy) -> crate::audio::TrackId
+pub fn pixtuoid_scene::floor::track_for(std::time::SystemTime, pixtuoid_scene::sky::WeatherPolicy) -> crate::audio::TrackId
 pub fn pixtuoid_scene::floor::waypoint_kind_of(core::option::Option<&pixtuoid_scene::layout::SceneLayout>, usize) -> core::option::Option<pixtuoid_scene::layout::WaypointKind>
 pub mod pixtuoid_scene::layout
 pub enum pixtuoid_scene::layout::Facing
@@ -1290,56 +1290,6 @@ pub fn pixtuoid_scene::physics::walk_arrived(&pixtuoid_scene::physics::WalkProfi
 pub fn pixtuoid_scene::physics::walk_profile(u32, pixtuoid_scene::physics::WalkIntent, pixtuoid_core::id::AgentId) -> pixtuoid_scene::physics::WalkProfile
 pub fn pixtuoid_scene::physics::walk_progress(&pixtuoid_scene::physics::WalkProfile, u64) -> u16
 pub mod pixtuoid_scene::pixel_painter
-pub enum pixtuoid_scene::pixel_painter::Weather
-pub pixtuoid_scene::pixel_painter::Weather::Clear
-pub pixtuoid_scene::pixel_painter::Weather::Fog
-pub pixtuoid_scene::pixel_painter::Weather::Overcast
-pub pixtuoid_scene::pixel_painter::Weather::Rain
-pub pixtuoid_scene::pixel_painter::Weather::Smog
-pub pixtuoid_scene::pixel_painter::Weather::Snow
-pub pixtuoid_scene::pixel_painter::Weather::Storm
-pub pixtuoid_scene::pixel_painter::Weather::Windy
-impl core::clone::Clone for pixtuoid_scene::pixel_painter::Weather
-pub fn pixtuoid_scene::pixel_painter::Weather::clone(&self) -> pixtuoid_scene::pixel_painter::Weather
-impl core::cmp::Eq for pixtuoid_scene::pixel_painter::Weather
-impl core::cmp::PartialEq for pixtuoid_scene::pixel_painter::Weather
-pub fn pixtuoid_scene::pixel_painter::Weather::eq(&self, &pixtuoid_scene::pixel_painter::Weather) -> bool
-impl core::fmt::Debug for pixtuoid_scene::pixel_painter::Weather
-pub fn pixtuoid_scene::pixel_painter::Weather::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for pixtuoid_scene::pixel_painter::Weather
-pub fn pixtuoid_scene::pixel_painter::Weather::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for pixtuoid_scene::pixel_painter::Weather
-impl core::marker::StructuralPartialEq for pixtuoid_scene::pixel_painter::Weather
-impl core::marker::Freeze for pixtuoid_scene::pixel_painter::Weather
-impl core::marker::Send for pixtuoid_scene::pixel_painter::Weather
-impl core::marker::Sync for pixtuoid_scene::pixel_painter::Weather
-impl core::marker::Unpin for pixtuoid_scene::pixel_painter::Weather
-impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::Weather
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::Weather
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::Weather
-pub enum pixtuoid_scene::pixel_painter::WeatherPolicy
-pub pixtuoid_scene::pixel_painter::WeatherPolicy::Clock
-pub pixtuoid_scene::pixel_painter::WeatherPolicy::Forced(pixtuoid_scene::pixel_painter::Weather)
-impl pixtuoid_scene::pixel_painter::WeatherPolicy
-pub fn pixtuoid_scene::pixel_painter::WeatherPolicy::from_name(core::option::Option<&str>) -> core::result::Result<Self, alloc::vec::Vec<&'static str>>
-impl core::clone::Clone for pixtuoid_scene::pixel_painter::WeatherPolicy
-pub fn pixtuoid_scene::pixel_painter::WeatherPolicy::clone(&self) -> pixtuoid_scene::pixel_painter::WeatherPolicy
-impl core::cmp::Eq for pixtuoid_scene::pixel_painter::WeatherPolicy
-impl core::cmp::PartialEq for pixtuoid_scene::pixel_painter::WeatherPolicy
-pub fn pixtuoid_scene::pixel_painter::WeatherPolicy::eq(&self, &pixtuoid_scene::pixel_painter::WeatherPolicy) -> bool
-impl core::default::Default for pixtuoid_scene::pixel_painter::WeatherPolicy
-pub fn pixtuoid_scene::pixel_painter::WeatherPolicy::default() -> pixtuoid_scene::pixel_painter::WeatherPolicy
-impl core::fmt::Debug for pixtuoid_scene::pixel_painter::WeatherPolicy
-pub fn pixtuoid_scene::pixel_painter::WeatherPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_scene::pixel_painter::WeatherPolicy
-impl core::marker::StructuralPartialEq for pixtuoid_scene::pixel_painter::WeatherPolicy
-impl core::marker::Freeze for pixtuoid_scene::pixel_painter::WeatherPolicy
-impl core::marker::Send for pixtuoid_scene::pixel_painter::WeatherPolicy
-impl core::marker::Sync for pixtuoid_scene::pixel_painter::WeatherPolicy
-impl core::marker::Unpin for pixtuoid_scene::pixel_painter::WeatherPolicy
-impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::WeatherPolicy
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::WeatherPolicy
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::WeatherPolicy
 pub struct pixtuoid_scene::pixel_painter::AgentFrame
 pub pixtuoid_scene::pixel_painter::AgentFrame::agent_id: pixtuoid_core::id::AgentId
 pub pixtuoid_scene::pixel_painter::AgentFrame::h: u16
@@ -1410,11 +1360,7 @@ impl core::marker::Unpin for pixtuoid_scene::pixel_painter::PixelPassResult
 impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::PixelPassResult
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::PixelPassResult
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::PixelPassResult
-pub fn pixtuoid_scene::pixel_painter::hour_is_day(f32) -> bool
-pub fn pixtuoid_scene::pixel_painter::is_day_at(std::time::SystemTime) -> bool
-pub fn pixtuoid_scene::pixel_painter::precipitation_level(std::time::SystemTime, pixtuoid_scene::pixel_painter::WeatherPolicy) -> f32
 pub fn pixtuoid_scene::pixel_painter::render_to_rgb_buffer(&mut pixtuoid_scene::pixel_painter::PixelCtx<'_>) -> pixtuoid_scene::pixel_painter::PixelPassResult
-pub fn pixtuoid_scene::pixel_painter::weather_names() -> alloc::vec::Vec<&'static str>
 pub mod pixtuoid_scene::pose
 pub enum pixtuoid_scene::pose::Pose
 pub pixtuoid_scene::pose::Pose::AimlessAt
@@ -1615,6 +1561,61 @@ impl core::marker::Unpin for pixtuoid_scene::sim::SimFrame
 impl core::marker::UnsafeUnpin for pixtuoid_scene::sim::SimFrame
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::sim::SimFrame
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::sim::SimFrame
+pub mod pixtuoid_scene::sky
+pub enum pixtuoid_scene::sky::Weather
+pub pixtuoid_scene::sky::Weather::Clear
+pub pixtuoid_scene::sky::Weather::Fog
+pub pixtuoid_scene::sky::Weather::Overcast
+pub pixtuoid_scene::sky::Weather::Rain
+pub pixtuoid_scene::sky::Weather::Smog
+pub pixtuoid_scene::sky::Weather::Snow
+pub pixtuoid_scene::sky::Weather::Storm
+pub pixtuoid_scene::sky::Weather::Windy
+impl core::clone::Clone for pixtuoid_scene::sky::Weather
+pub fn pixtuoid_scene::sky::Weather::clone(&self) -> pixtuoid_scene::sky::Weather
+impl core::cmp::Eq for pixtuoid_scene::sky::Weather
+impl core::cmp::PartialEq for pixtuoid_scene::sky::Weather
+pub fn pixtuoid_scene::sky::Weather::eq(&self, &pixtuoid_scene::sky::Weather) -> bool
+impl core::fmt::Debug for pixtuoid_scene::sky::Weather
+pub fn pixtuoid_scene::sky::Weather::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for pixtuoid_scene::sky::Weather
+pub fn pixtuoid_scene::sky::Weather::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for pixtuoid_scene::sky::Weather
+impl core::marker::StructuralPartialEq for pixtuoid_scene::sky::Weather
+impl core::marker::Freeze for pixtuoid_scene::sky::Weather
+impl core::marker::Send for pixtuoid_scene::sky::Weather
+impl core::marker::Sync for pixtuoid_scene::sky::Weather
+impl core::marker::Unpin for pixtuoid_scene::sky::Weather
+impl core::marker::UnsafeUnpin for pixtuoid_scene::sky::Weather
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::sky::Weather
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::sky::Weather
+pub enum pixtuoid_scene::sky::WeatherPolicy
+pub pixtuoid_scene::sky::WeatherPolicy::Clock
+pub pixtuoid_scene::sky::WeatherPolicy::Forced(pixtuoid_scene::sky::Weather)
+impl pixtuoid_scene::sky::WeatherPolicy
+pub fn pixtuoid_scene::sky::WeatherPolicy::from_name(core::option::Option<&str>) -> core::result::Result<Self, alloc::vec::Vec<&'static str>>
+impl core::clone::Clone for pixtuoid_scene::sky::WeatherPolicy
+pub fn pixtuoid_scene::sky::WeatherPolicy::clone(&self) -> pixtuoid_scene::sky::WeatherPolicy
+impl core::cmp::Eq for pixtuoid_scene::sky::WeatherPolicy
+impl core::cmp::PartialEq for pixtuoid_scene::sky::WeatherPolicy
+pub fn pixtuoid_scene::sky::WeatherPolicy::eq(&self, &pixtuoid_scene::sky::WeatherPolicy) -> bool
+impl core::default::Default for pixtuoid_scene::sky::WeatherPolicy
+pub fn pixtuoid_scene::sky::WeatherPolicy::default() -> pixtuoid_scene::sky::WeatherPolicy
+impl core::fmt::Debug for pixtuoid_scene::sky::WeatherPolicy
+pub fn pixtuoid_scene::sky::WeatherPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_scene::sky::WeatherPolicy
+impl core::marker::StructuralPartialEq for pixtuoid_scene::sky::WeatherPolicy
+impl core::marker::Freeze for pixtuoid_scene::sky::WeatherPolicy
+impl core::marker::Send for pixtuoid_scene::sky::WeatherPolicy
+impl core::marker::Sync for pixtuoid_scene::sky::WeatherPolicy
+impl core::marker::Unpin for pixtuoid_scene::sky::WeatherPolicy
+impl core::marker::UnsafeUnpin for pixtuoid_scene::sky::WeatherPolicy
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::sky::WeatherPolicy
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::sky::WeatherPolicy
+pub fn pixtuoid_scene::sky::hour_is_day(f32) -> bool
+pub fn pixtuoid_scene::sky::is_day_at(std::time::SystemTime) -> bool
+pub fn pixtuoid_scene::sky::rain_at(std::time::SystemTime, pixtuoid_scene::sky::WeatherPolicy) -> f32
+pub fn pixtuoid_scene::sky::weather_names() -> alloc::vec::Vec<&'static str>
 pub mod pixtuoid_scene::theme
 pub enum pixtuoid_scene::theme::ThemeKind
 pub pixtuoid_scene::theme::ThemeKind::Dark

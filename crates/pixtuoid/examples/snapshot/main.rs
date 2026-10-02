@@ -323,15 +323,14 @@ fn parse_navigations(specs: &[String]) -> Result<Vec<(u64, usize)>> {
 fn main() -> Result<()> {
     let args = SnapshotArgs::parse();
 
-    let weather =
-        match pixtuoid_scene::pixel_painter::WeatherPolicy::from_name(args.weather.as_deref()) {
-            Ok(w) => w,
-            Err(valid) => anyhow::bail!(
-                "unknown --weather {:?}; valid: {}",
-                args.weather.unwrap_or_default(),
-                valid.join(" | ")
-            ),
-        };
+    let weather = match pixtuoid_scene::sky::WeatherPolicy::from_name(args.weather.as_deref()) {
+        Ok(w) => w,
+        Err(valid) => anyhow::bail!(
+            "unknown --weather {:?}; valid: {}",
+            args.weather.unwrap_or_default(),
+            valid.join(" | ")
+        ),
+    };
 
     let now = match args.now_hour {
         Some(h) => {

@@ -38,8 +38,8 @@ use pixtuoid_scene::floor::{
 };
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::localclock;
-use pixtuoid_scene::pixel_painter::{Weather, WeatherPolicy, hour_is_day};
 use pixtuoid_scene::render_scale::RenderScale;
+use pixtuoid_scene::sky::{Weather, WeatherPolicy, hour_is_day};
 
 // Inside a weather slot (`sky::WEATHER_CYCLE_SECS`, crate-private) with room to
 // spare, so the `SIM_WINDOW_FRAMES` × `FRAME_STEP_MS` window below never

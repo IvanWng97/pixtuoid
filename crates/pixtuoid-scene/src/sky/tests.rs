@@ -137,7 +137,7 @@ fn a_policy_picks_the_clock_or_holds_its_weather() {
     );
     assert_eq!(
         WeatherPolicy::from_name(Some("stormy")),
-        Err(crate::pixel_painter::weather_names())
+        Err(weather_names())
     );
 }
 
@@ -793,5 +793,27 @@ fn the_weather_keeps_real_time_on_every_tier() {
         let weather = |m: Motion| Sky::at(m.timing(now), WeatherPolicy::Clock).weather();
         assert_eq!(weather(Motion::Calm), weather(Motion::Full), "{s}s");
         assert_eq!(weather(Motion::Still), weather(Motion::Full), "{s}s");
+    }
+}
+
+#[test]
+fn rain_at_maps_audible_rain_under_its_policy() {
+    let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
+    let level = |w| rain_at(t, WeatherPolicy::Forced(w));
+    assert_eq!(level(Weather::Storm), 1.0, "storm is full rain");
+    let rain = level(Weather::Rain);
+    assert!(
+        rain > 0.0 && rain < 1.0,
+        "rain sits strictly between clear and storm, got {rain}"
+    );
+    for quiet in [
+        Weather::Clear,
+        Weather::Snow,
+        Weather::Fog,
+        Weather::Overcast,
+        Weather::Windy,
+        Weather::Smog,
+    ] {
+        assert_eq!(level(quiet), 0.0, "{quiet:?} must be silent");
     }
 }
