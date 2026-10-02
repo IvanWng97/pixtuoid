@@ -138,7 +138,7 @@ pub struct FloorCtx {
     /// This floor's neon-sign fade state.
     pub(crate) neon: NeonState,
     /// Per-agent walk-timing state (physics profiles for entry/exit/wander).
-    pub motion: HashMap<AgentId, MotionState>,
+    pub walks: HashMap<AgentId, MotionState>,
     /// Longest in-flight entry- or exit-walk `duration_ms + pause_ms` on this
     /// floor (ms) — drives the door-open cosmetic without a hardcoded window.
     pub door_anim_max_ms: u64,
@@ -167,7 +167,7 @@ impl FloorCtx {
             shadows: crate::ground::DepthsCache::default(),
             vacancy_dim: VacancyDim::new(),
             neon: NeonState::new(),
-            motion: HashMap::new(),
+            walks: HashMap::new(),
             door_anim_max_ms: 0,
             layout_memo: None,
         }
@@ -182,7 +182,7 @@ impl FloorCtx {
             router: &mut self.router,
             overlay: &mut self.overlay,
             history: &mut self.history,
-            motion: &mut self.motion,
+            walks: &mut self.walks,
             vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat,
@@ -222,7 +222,7 @@ impl FloorCtx {
     pub fn evict_missing(&mut self, scene: &SceneState) {
         self.cache.evict_missing(scene);
         self.history.evict_missing(scene);
-        self.motion.retain(|id, _| scene.agents.contains_key(id));
+        self.walks.retain(|id, _| scene.agents.contains_key(id));
     }
 
     /// Recompute `door_anim_max_ms`: the max `duration_ms + pause_ms` over the
@@ -239,7 +239,7 @@ impl FloorCtx {
                 p.duration_ms + p.pause_ms
             }
         };
-        self.door_anim_max_ms = self.motion.values().fold(0u64, |acc, ms| {
+        self.door_anim_max_ms = self.walks.values().fold(0u64, |acc, ms| {
             let entry = ms
                 .entry
                 .as_ref()

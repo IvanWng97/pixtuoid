@@ -56,7 +56,7 @@ pub(crate) struct RouteRig<R> {
     pub(crate) router: R,
     pub(crate) overlay: OccupancyOverlay,
     pub(crate) history: PoseHistory,
-    pub(crate) motion: HashMap<AgentId, MotionState>,
+    pub(crate) walks: HashMap<AgentId, MotionState>,
 }
 
 #[cfg(test)]
@@ -66,7 +66,7 @@ impl<R: Router> RouteRig<R> {
             router,
             overlay: OccupancyOverlay::new(),
             history: PoseHistory::new(),
-            motion: HashMap::new(),
+            walks: HashMap::new(),
         }
     }
 
@@ -75,7 +75,7 @@ impl<R: Router> RouteRig<R> {
             router: &mut self.router,
             overlay: &self.overlay,
             history: &mut self.history,
-            walks: &mut self.motion,
+            walks: &mut self.walks,
             wanders: true,
         }
     }

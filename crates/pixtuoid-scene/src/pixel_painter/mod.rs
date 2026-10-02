@@ -224,7 +224,7 @@ struct PaintCtx<'a> {
     shadows: &'a mut crate::ground::DepthsCache,
     theme: &'a crate::theme::Theme,
     floor: crate::floor::FloorMeta,
-    motion: &'a HashMap<pixtuoid_core::AgentId, MotionState>,
+    walks: &'a HashMap<pixtuoid_core::AgentId, MotionState>,
     debug_walkable: bool,
 }
 
@@ -272,7 +272,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             shadows: &mut ctx.store.shadows,
             theme: ctx.theme,
             floor: ctx.world.floor,
-            motion: &ctx.store.motion,
+            walks: &ctx.store.walks,
             debug_walkable: ctx.debug_walkable,
         },
         &frame,
@@ -405,7 +405,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
     background::paint_lightning_flash(ctx.buf, &ctx.sky);
 
     if ctx.debug_walkable {
-        debug_overlay::paint(ctx.buf, ctx.layout, ctx.scene, ctx.motion);
+        debug_overlay::paint(ctx.buf, ctx.layout, ctx.scene, ctx.walks);
     }
 
     hover

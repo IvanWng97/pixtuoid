@@ -333,7 +333,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     ) -> Option<
         &std::collections::HashMap<pixtuoid_core::AgentId, pixtuoid_scene::motion::MotionState>,
     > {
-        self.floors.get(floor).map(|f| &f.ctx.motion)
+        self.floors.get(floor).map(|f| &f.ctx.walks)
     }
 
     #[cfg(test)]

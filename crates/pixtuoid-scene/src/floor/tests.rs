@@ -86,7 +86,7 @@ fn door_anim_excludes_arrived_entry_profiles() {
         },
         from: crate::layout::Point { x: 0, y: 0 },
     });
-    fctx.motion.insert(id, ms);
+    fctx.walks.insert(id, ms);
 
     fctx.recompute_door_anim_max_ms(t0 + Duration::from_millis(1000));
     assert_eq!(
@@ -110,7 +110,7 @@ fn floor_ctx_default_equals_new() {
         "FloorCtx::default() must match new() (door_anim_max_ms == 0)"
     );
     assert!(
-        d.motion.is_empty(),
+        d.walks.is_empty(),
         "default FloorCtx has no in-flight motion"
     );
 }
@@ -735,11 +735,7 @@ fn floor_session_render_owns_the_dual_eviction() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let gone = AgentId::from_parts("claude-code", "session-evict");
     let mut session = FloorSession::new();
-    session
-        .floor
-        .ctx
-        .motion
-        .insert(gone, MotionState::new(gone));
+    session.floor.ctx.walks.insert(gone, MotionState::new(gone));
     session.office.coffee.insert(gone, now);
 
     let scene = SceneState::new([8; MAX_FLOORS]);
@@ -757,7 +753,7 @@ fn floor_session_render_owns_the_dual_eviction() {
     });
     assert!(layout.is_some(), "a layoutable size renders");
     assert!(
-        !session.floor.ctx.motion.contains_key(&gone),
+        !session.floor.ctx.walks.contains_key(&gone),
         "render() evicts the floor half (motion) — the floating-leak class"
     );
     assert!(
@@ -869,7 +865,7 @@ fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
         "the frame carries the agent's routed pose"
     );
     assert!(
-        session.floor.ctx.motion.contains_key(&id),
+        session.floor.ctx.walks.contains_key(&id),
         "the sim advanced: the entry leg was snapshotted into motion"
     );
     assert!(
@@ -969,7 +965,7 @@ fn session_types_default_equals_new() {
     assert!(PerOffice::default().coffee.map().is_empty());
     assert!(PerOffice::default().chitchat.is_empty());
     let s = FloorSession::default();
-    assert!(s.floor.ctx.motion.is_empty());
+    assert!(s.floor.ctx.walks.is_empty());
     assert!(s.office.coffee.map().is_empty());
 }
 

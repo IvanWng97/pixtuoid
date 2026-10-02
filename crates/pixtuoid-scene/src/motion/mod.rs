@@ -45,7 +45,7 @@ pub enum WanderPhase {
 }
 
 /// The wander frame `advance_wander` resolves, snapshotted off `MotionState` at
-/// return time so the caller never re-reads (or re-borrows) `motion`.
+/// return time so the caller never re-reads (or re-borrows) `walks`.
 #[derive(Debug, Clone, Copy)]
 pub struct WanderFrame {
     /// The resolved phase this frame — selects the pose builder's arm.
@@ -220,13 +220,13 @@ pub fn advance_wander(
     layout: &SceneLayout,
     router: &mut dyn Router,
     overlay: &OccupancyOverlay,
-    motion: &mut HashMap<AgentId, MotionState>,
+    walks: &mut HashMap<AgentId, MotionState>,
 ) -> WanderFrame {
     let id = slot.agent_id;
     // Claims must be snapshotted BEFORE this agent's `&mut` — the two borrows of
-    // `motion` can't overlap.
-    let claimed = spot_claims(motion, id);
-    let ms = motion.entry(id).or_insert_with(|| MotionState::new(id));
+    // `walks` can't overlap.
+    let claimed = spot_claims(walks, id);
+    let ms = walks.entry(id).or_insert_with(|| MotionState::new(id));
 
     // A fresh MotionState's epoch `phase_started_at` is below any real
     // `state_started_at`; we also re-seed when the slot (re-)entered Idle after a
@@ -439,9 +439,9 @@ fn pick_wander_dest(
 /// authority for "single-occupancy destination", so a future exclusive kind
 /// inherits it; shareable waypoints are NOT claimed, since the painter's rank
 /// offset is a genuine step-aside queue there.
-fn spot_claims(motion: &HashMap<AgentId, MotionState>, exclude: AgentId) -> SpotClaims {
+fn spot_claims(walks: &HashMap<AgentId, MotionState>, exclude: AgentId) -> SpotClaims {
     let mut claims = SpotClaims::default();
-    for (id, ms) in motion {
+    for (id, ms) in walks {
         if *id == exclude || matches!(ms.wander.phase, WanderPhase::Seated) {
             continue;
         }

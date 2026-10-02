@@ -45,11 +45,11 @@ pub(super) fn paint(
     buf: &mut RgbBuffer,
     layout: &SceneLayout,
     scene: &SceneState,
-    motion: &HashMap<AgentId, MotionState>,
+    walks: &HashMap<AgentId, MotionState>,
 ) {
     paint_mask(buf, layout);
     paint_approach(buf, layout);
-    paint_routes(buf, scene, motion);
+    paint_routes(buf, scene, walks);
 }
 
 fn tint(buf: &mut RgbBuffer, x: i32, y: i32, c: Rgb, t: f32) {
@@ -151,9 +151,9 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &SceneLayout) {
     }
 }
 
-fn paint_routes(buf: &mut RgbBuffer, scene: &SceneState, motion: &HashMap<AgentId, MotionState>) {
+fn paint_routes(buf: &mut RgbBuffer, scene: &SceneState, walks: &HashMap<AgentId, MotionState>) {
     for agent in scene.agents.values() {
-        let Some(ms) = motion.get(&agent.agent_id) else {
+        let Some(ms) = walks.get(&agent.agent_id) else {
             continue;
         };
         let Some(wp) = &ms.walk_path else {
@@ -306,20 +306,20 @@ mod tests {
         for id in [id_path, id_nopath, id_absent] {
             scene.agents.insert(id, slot(id));
         }
-        let mut motion: HashMap<AgentId, MotionState> = HashMap::new();
+        let mut walks: HashMap<AgentId, MotionState> = HashMap::new();
         let mut ms_path = MotionState::new(id_path);
         ms_path.walk_path = Some(WalkPathSnapshot {
             from: Point { x: 5, y: 5 },
             to: Point { x: 80, y: 80 },
             path: vec![Point { x: 5, y: 5 }, Point { x: 80, y: 80 }],
         });
-        motion.insert(id_path, ms_path);
-        motion.insert(id_nopath, MotionState::new(id_nopath));
+        walks.insert(id_path, ms_path);
+        walks.insert(id_nopath, MotionState::new(id_nopath));
         // id_absent is intentionally NOT in the motion map.
 
         let bg = Rgb { r: 0, g: 0, b: 0 };
         let mut buf = RgbBuffer::filled(50, 50, bg);
-        paint_routes(&mut buf, &scene, &motion);
+        paint_routes(&mut buf, &scene, &walks);
         let painted = (0..50u16)
             .flat_map(|y| (0..50u16).map(move |x| (x, y)))
             .any(|(x, y)| buf.get(x, y) != bg);

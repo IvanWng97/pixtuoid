@@ -1748,7 +1748,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
         shadows: &mut crate::ground::DepthsCache::default(),
         theme,
         floor: crate::floor::FloorMeta::ground(),
-        motion: &motion,
+        walks: &motion,
         debug_walkable: false,
     };
     let lights = crate::lighting::Lights::of(
@@ -2866,7 +2866,7 @@ impl OwnedSimStores {
             router: &mut self.route.router,
             overlay: &mut self.route.overlay,
             history: &mut self.route.history,
-            motion: &mut self.route.motion,
+            walks: &mut self.route.walks,
             vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat: &mut self.chitchat,
@@ -3452,7 +3452,7 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
             shadows: &mut crate::ground::DepthsCache::default(),
             theme: crate::theme::theme_by_name("normal").expect("normal theme"),
             floor: crate::floor::FloorMeta::ground(),
-            motion: &owned.route.motion,
+            walks: &owned.route.walks,
             debug_walkable: false,
         },
         &frame,
@@ -3580,7 +3580,7 @@ fn sim_step_advances_motion_without_painting() {
     assert!(
         owned
             .route
-            .motion
+            .walks
             .get(&id)
             .is_some_and(|m| m.entry.is_some()),
         "sim_step snapshotted the entry walk profile into the motion store"
@@ -3703,7 +3703,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             shadows: &mut crate::ground::DepthsCache::default(),
             theme: crate::theme::theme_by_name("normal").expect("normal theme"),
             floor: crate::floor::FloorMeta::ground(),
-            motion: &owned.route.motion,
+            walks: &owned.route.walks,
             debug_walkable: false,
         },
         &frame,
@@ -3807,7 +3807,7 @@ fn paint_frame_is_pure_and_byte_identical() {
     );
 
     let light_before = owned.vacancy_dim.level();
-    let motion_before = format!("{:?}", owned.route.motion);
+    let motion_before = format!("{:?}", owned.route.walks);
     let history_before = format!("{:?}", owned.route.history);
     let chitchat_before = owned.chitchat.len();
 
@@ -3831,7 +3831,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 shadows: &mut crate::ground::DepthsCache::default(),
                 theme,
                 floor: crate::floor::FloorMeta::ground(),
-                motion: &owned.route.motion,
+                walks: &owned.route.walks,
                 debug_walkable: false,
             },
             &frame,
@@ -3853,7 +3853,7 @@ fn paint_frame_is_pure_and_byte_identical() {
         "paint must not tick lighting"
     );
     assert_eq!(
-        format!("{:?}", owned.route.motion),
+        format!("{:?}", owned.route.walks),
         motion_before,
         "paint must not move motion state"
     );
@@ -4567,7 +4567,7 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     let sat_at = sat_at.expect("agent never reached a seat");
     assert!(
         matches!(
-            owned.route.motion[&id].wander.target.kind,
+            owned.route.walks[&id].wander.target.kind,
             WanderKind::Named { wp_idx, .. } if wp_idx == sat_at
         ),
         "the seated agent should hold its seat's claim"
@@ -4599,7 +4599,7 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
 
     assert!(
         matches!(
-            owned.route.motion[&id].wander.target.kind,
+            owned.route.walks[&id].wander.target.kind,
             WanderKind::Aimless
         ),
         "an agent that left the wander machine must release its seat claim"
@@ -4899,7 +4899,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     let layout = SceneLayout::compute_with_seed(192, 128, None, 0).expect("layout");
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
     let boot = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let motion = HashMap::new();
+    let walks = HashMap::new();
     let src = pixtuoid_core::source::openclaw::SOURCE_NAME;
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
 
@@ -4957,7 +4957,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 shadows: &mut crate::ground::DepthsCache::default(),
                 theme,
                 floor,
-                motion: &motion,
+                walks: &walks,
                 debug_walkable: false,
             };
             let mut drawables = Vec::new();
@@ -5187,7 +5187,7 @@ fn paint_drawn(
             shadows: &mut crate::ground::DepthsCache::default(),
             theme: crate::theme::theme_by_name("normal").expect("normal theme"),
             floor: crate::floor::FloorMeta::ground(),
-            motion: &owned.route.motion,
+            walks: &owned.route.walks,
             debug_walkable: false,
         },
         frame,

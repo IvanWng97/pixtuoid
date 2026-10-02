@@ -47,7 +47,7 @@ pub(crate) struct SimStores<'a> {
     pub router: &'a mut dyn Router,
     pub overlay: &'a mut OccupancyOverlay,
     pub history: &'a mut PoseHistory,
-    pub motion: &'a mut HashMap<AgentId, MotionState>,
+    pub walks: &'a mut HashMap<AgentId, MotionState>,
     pub vacancy_dim: &'a mut VacancyDim,
     pub neon: &'a mut crate::floor::NeonState,
     pub chitchat: &'a mut HashMap<VenueKey, ActiveChitchat>,
@@ -332,7 +332,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
                     router: &mut *stores.router,
                     overlay: &*stores.overlay,
                     history: &mut *stores.history,
-                    walks: &mut *stores.motion,
+                    walks: &mut *stores.walks,
                     wanders: !beat.is_rest(),
                 },
             );
