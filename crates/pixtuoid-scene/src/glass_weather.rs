@@ -352,13 +352,9 @@ mod tests {
     fn only_falling_weather_marks_the_glass() {
         let glass = Size { w: 20, h: 13 };
         for w in Weather::ALL {
-            let falls = matches!(
-                w,
-                Weather::Rain | Weather::Storm | Weather::Windy | Weather::Snow
-            );
             assert_eq!(
                 !weather_at(w, 0).marks(0, glass, 4).is_empty(),
-                falls,
+                w.falls(),
                 "{w:?}"
             );
         }
