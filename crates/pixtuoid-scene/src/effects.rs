@@ -86,13 +86,13 @@ pub(crate) fn walking_dust(at: Point, stride: usize) -> Effect {
 const FLAME_FLICKER_MS: u64 = 2 * crate::anim::FULL_TICK_MS;
 
 /// The flame crowning a `width`-wide figure whose frame's top-left is
-/// `anchor`: it stands on the head's top row, centred on the frame.
-pub(crate) fn flame_crown(anchor: Point, width: u16, beat: Beat) -> Effect {
+/// `top_left`: it stands on the head's top row, centred on the frame.
+pub(crate) fn flame_crown(top_left: Point, width: u16, beat: Beat) -> Effect {
     Effect {
         kind: EffectKind::FlameCrown,
         at: Point {
-            x: anchor.x + width / 2,
-            y: anchor.y,
+            x: top_left.x + width / 2,
+            y: top_left.y,
         },
         // Integer division: epoch-ms as f32 loses precision and freezes the flicker.
         phase: (beat.ms() / FLAME_FLICKER_MS) % 2,

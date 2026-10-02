@@ -163,7 +163,7 @@ pub(crate) fn compute_crop_rect(
                 let desk = layout.home_desk(idx).ok_or_else(|| {
                     anyhow::anyhow!("agent {agent_label:?} is neither placed nor at a home desk")
                 })?;
-                pixtuoid_scene::sim::seated_anchor_facing(
+                pixtuoid_scene::sim::seated_top_left(
                     desk,
                     pixtuoid_scene::layout::CHARACTER_SPRITE_W,
                     layout.desk_facing(idx),

@@ -219,12 +219,12 @@ fn an_agent_is_hit_from_exactly_the_cells_that_show_it() {
     for y in [30, 31] {
         let agent = AgentFrame {
             agent_id: id,
-            anchor: Point { x: 40, y },
+            top_left: Point { x: 40, y },
             w: 10,
             h: 14,
             label_anchor: Point { x: 45, y },
         };
-        let tl = agent.anchor;
+        let tl = agent.top_left;
         let agents = [agent];
         let hits = |col, row| {
             hit_test_agent(
@@ -254,7 +254,7 @@ fn overlapping_agents_hit_the_last_painted() {
     );
     let at = |agent_id, x| AgentFrame {
         agent_id,
-        anchor: Point { x, y: 30 },
+        top_left: Point { x, y: 30 },
         w: 8,
         h: 12,
         label_anchor: Point { x: x + 4, y: 30 },
@@ -273,7 +273,7 @@ fn overlapping_agents_hit_the_last_painted() {
 /// holding its bottom pixel.
 fn covering_cells(agent: AgentFrame) -> (std::ops::Range<u16>, std::ops::RangeInclusive<u16>) {
     let AgentFrame {
-        anchor: tl, w, h, ..
+        top_left: tl, w, h, ..
     } = agent;
     (tl.x..tl.x + w, tl.y / 2..=(tl.y + h - 1) / 2)
 }
