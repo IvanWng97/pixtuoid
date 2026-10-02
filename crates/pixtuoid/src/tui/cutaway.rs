@@ -14,15 +14,12 @@
 use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
-use pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS;
-use pixtuoid_scene::cutaway::canvas::{
-    CanvasFrame, CutawayCanvas, Dirty, StrikePhase, strike_phase,
-};
+use pixtuoid_scene::cutaway::canvas::{CanvasFrame, CutawayCanvas, Dirty};
 use pixtuoid_scene::cutaway::paint::CutawayCache;
 use pixtuoid_scene::display::Showing;
 use pixtuoid_scene::floor::SteppedFloor;
@@ -53,22 +50,6 @@ pub(crate) type Sink = Box<dyn Write + Send>;
 /// equal to it afterwards is image, any other is text.
 const SENTINEL: &str = "\u{F8FF}";
 
-/// The strike phases an image shows: a slide's leaving and arriving floors',
-/// or one floor's twice.
-type Phases = [StrikePhase; 2];
-
-/// Whether a frame showing `phases` waits: the screen has shown others since
-/// `shown`'s instant, for less than [`PHOTOSENSITIVE_PHASE_MIN_MS`]. Only here
-/// is a phase's time on screen known, whatever the cadence or the frame times.
-fn held(shown: Option<(Phases, SystemTime)>, phases: Phases, now: SystemTime) -> bool {
-    shown.is_some_and(|(on, since)| {
-        on != phases
-            && now
-                .duration_since(since)
-                .is_ok_and(|d| d < Duration::from_millis(PHOTOSENSITIVE_PHASE_MIN_MS))
-    })
-}
-
 /// The cutaway's canvas, its tiles, and what of them the terminal holds.
 pub(crate) struct TileCutaway {
     canvas: CutawayCanvas,
@@ -98,10 +79,6 @@ pub(crate) struct TileCutaway {
     in_grid: &'static AtomicBool,
     /// When the last transmits were written, for the protocol's cadence.
     sent_at: Option<SystemTime>,
-    /// The phases on screen, and since when ([`held`]).
-    shown_phases: Option<(Phases, SystemTime)>,
-    /// The phases [`Self::pending`] shows.
-    pending_phases: Phases,
     /// A write failed, perhaps mid-escape: the next one opens with
     /// [`kitty::ST`].
     torn: bool,
@@ -134,8 +111,6 @@ impl TileCutaway {
             pending: Vec::new(),
             in_grid: &crate::graphics::IN_GRID,
             sent_at: None,
-            shown_phases: None,
-            pending_phases: Phases::default(),
             torn: false,
         }
     }
@@ -154,7 +129,7 @@ impl TileCutaway {
 
     /// Paint `stepped`, its top-left cell at `origin`, and queue the tiles
     /// it changed once the protocol's cadence allows; until then they stay
-    /// owed. A frame [`held`] is not painted, so the screen keeps the last.
+    /// owed.
     pub(crate) fn paint(
         &mut self,
         stepped: &SteppedFloor,
@@ -163,11 +138,6 @@ impl TileCutaway {
         origin: Position,
     ) {
         let now = showing.now;
-        let phases = [strike_phase(showing.floor, now); 2];
-        if held(self.shown_phases, phases, now) {
-            self.pending.clear();
-            return;
-        }
         let CanvasFrame { buf, dirty } = self.canvas.frame(
             stepped,
             theme,
@@ -178,7 +148,7 @@ impl TileCutaway {
         if dirty != Dirty::Rects(Vec::new()) {
             self.image.clone_from(buf);
         }
-        self.stage(&dirty, phases, now, origin);
+        self.stage(&dirty, now, origin);
     }
 
     /// Paint both floors of `slide`, composed as it places them, and queue
@@ -190,11 +160,6 @@ impl TileCutaway {
         now: SystemTime,
         origin: Position,
     ) {
-        let phases = [slide.leaving.1.floor, slide.arriving.1.floor].map(|f| strike_phase(f, now));
-        if held(self.shown_phases, phases, now) {
-            self.pending.clear();
-            return;
-        }
         let scale = self.fit.render_scale();
         let leaving = self.canvas.frame(
             slide.leaving.0,
@@ -225,22 +190,19 @@ impl TileCutaway {
                 }
             }
         }
-        self.stage(&Dirty::All, phases, now, origin);
+        self.stage(&Dirty::All, now, origin);
     }
 
-    /// Queue the tiles of [`Self::image`], which shows `phases`, that differ
-    /// from what was sent, among those `dirty` reaches, once the cadence
-    /// allows: at once for a new phase, so it shows as long as it lasts.
-    fn stage(&mut self, dirty: &Dirty, phases: Phases, now: SystemTime, origin: Position) {
+    /// Queue the tiles of [`Self::image`] that differ from what was sent,
+    /// among those `dirty` reaches, once the cadence allows.
+    fn stage(&mut self, dirty: &Dirty, now: SystemTime, origin: Position) {
         self.origin = origin;
         let changed = self.tiles.changed(&self.image, dirty);
-        let due = self.shown_phases.is_none_or(|(on, _)| on != phases)
-            || self.sent_at.is_none_or(|at| {
-                now.duration_since(at)
-                    .map_or(true, |since| since >= self.protocol.cadence())
-            });
+        let due = self.sent_at.is_none_or(|at| {
+            now.duration_since(at)
+                .map_or(true, |since| since >= self.protocol.cadence())
+        });
         self.pending = if due { changed } else { Vec::new() };
-        self.pending_phases = phases;
     }
 
     /// Send kitty's tiles before ratatui's flush, so the placeholders it
@@ -265,12 +227,11 @@ impl TileCutaway {
     }
 
     /// Encode and write the queued tiles but the `covered` ones. A failed
-    /// write is logged and leaves its tiles owed, and its phases unshown.
+    /// write is logged and leaves its tiles owed.
     fn send(&mut self, covered: &[u32], now: SystemTime) {
         let mut send = std::mem::take(&mut self.pending);
         send.retain(|c| !covered.contains(&c.tile.index));
         if send.is_empty() {
-            self.shown(now);
             return;
         }
         match self.protocol {
@@ -307,23 +268,11 @@ impl TileCutaway {
                 self.torn = false;
                 self.sent_at = Some(now);
                 self.tiles.sent(&sent);
-                self.shown(now);
             }
             Err(e) => {
                 self.torn = true;
                 tracing::warn!(error = %e, "image transmit failed");
             }
-        }
-    }
-
-    /// The staged frame is on screen, sent or under text as half-blocks:
-    /// its phases, if new, show from `now`.
-    fn shown(&mut self, now: SystemTime) {
-        if self
-            .shown_phases
-            .is_none_or(|(on, _)| on != self.pending_phases)
-        {
-            self.shown_phases = Some((self.pending_phases, now));
         }
     }
 

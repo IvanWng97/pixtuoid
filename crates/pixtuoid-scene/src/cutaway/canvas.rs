@@ -157,23 +157,6 @@ impl CutawayCanvas {
     }
 }
 
-/// Which of a strike's levels lights a floor, dark between strikes: a painter
-/// shows each at least
-/// [`PHOTOSENSITIVE_PHASE_MIN_MS`](crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS)
-/// before the next.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct StrikePhase(
-    // The sky's flash level's bits: a strike's levels are exact constants.
-    u32,
-);
-
-/// The [`StrikePhase`] `floor` shows at `now`, under the sky its frame is
-/// painted under.
-pub fn strike_phase(floor: crate::floor::FloorMeta, now: std::time::SystemTime) -> StrikePhase {
-    let sky = crate::sky::Sky::at(floor.motion.timing(now), floor.weather);
-    StrikePhase(sky.flash().to_bits())
-}
-
 /// The spans of the footprints in `was` or `now` but not both, counting
 /// repeats; each once, in order.
 fn changed(was: &[(Span, u64)], now: &[(Span, u64)]) -> Vec<Span> {

@@ -245,7 +245,7 @@ fn night_floor_varies_by_weather() {
 
 #[test]
 fn lightning_envelope_is_a_two_pulse_then_dark() {
-    let mid = |phase: u64| phase * PHASE_MS + PHASE_MS / 2;
+    let mid = |phase: u64| phase * STRIKE_PHASE_MS + STRIKE_PHASE_MS / 2;
     assert_eq!(lightning_envelope(0), 1.0, "primary strike");
     assert!(
         lightning_envelope(mid(1)) < lightning_envelope(mid(0)),
@@ -766,7 +766,7 @@ fn a_changing_storm_fires_whole_strikes_by_its_share() {
     );
 }
 
-/// Buckets `0..200_000`, each with its strike's first loop ms.
+/// Each bucket with its strike's first loop ms.
 fn strike_starts() -> impl Iterator<Item = (u64, u64)> {
     (0..200_000u64).map(|bucket| (bucket, bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket)))
 }
@@ -802,7 +802,7 @@ fn no_strike_runs_into_the_next_slot() {
 /// bucket spans several of a transition's steps, so a step can fall mid-strike.
 #[test]
 fn every_strike_fires_by_its_start_and_runs_whole_on_every_tier() {
-    let phase_starts = || (0..STRIKE_MS).step_by(PHASE_MS as usize);
+    let phase_starts = || (0..STRIKE_MS).step_by(STRIKE_PHASE_MS as usize);
     let whole: Vec<f32> = phase_starts().map(lightning_envelope).collect();
     let mut cut_by_a_later_read = 0;
     for motion in Motion::ALL {

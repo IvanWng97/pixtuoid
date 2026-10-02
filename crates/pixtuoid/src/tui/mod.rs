@@ -950,9 +950,6 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     }
 }
 
-/// The least time between two of the event loop's frames.
-pub(crate) const FRAME_TICK_MS: u64 = 33;
-
 /// The event loop, running as the `block_on` ROOT future rather than on a tokio worker — so
 /// `tokio::task::block_in_place` here is inert, not a yield point, and does not panic either
 /// (that is `current_thread`-only). Pinned by `block_in_place_is_inert_on_the_block_on_thread`.
@@ -1003,6 +1000,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let mut last_layout_sig: Option<(u16, u16)> = None;
     let mut cap_sweep = FloorCapacitySweep::new();
 
+    const FRAME_TICK_MS: u64 = 33;
     let tick = Duration::from_millis(FRAME_TICK_MS);
     let result: Result<()> = (async {
         let mut ctrl_c = pin_ctrl_c();
