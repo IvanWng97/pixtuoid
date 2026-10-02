@@ -1518,7 +1518,7 @@ fn paint_chair(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
     use crate::anim::Motion;
     use crate::atmosphere::Moment;
@@ -3714,7 +3714,7 @@ pub(crate) mod tests {
             .collect()
     }
 
-    pub(crate) fn moment_at(w: crate::sky::Weather, now: std::time::SystemTime) -> Moment {
+    fn moment_at(w: crate::sky::Weather, now: std::time::SystemTime) -> Moment {
         Moment::resolve(
             crate::sky::Sky::at_with(now, w),
             &crate::theme::NORMAL,
@@ -4977,7 +4977,7 @@ pub(crate) mod tests {
 
     /// One of each effect a figure carries, riding on its `top_left`, each at a
     /// step it shows at.
-    pub(crate) fn every_effect(top_left: crate::layout::Point) -> Vec<crate::effects::Effect> {
+    fn every_effect(top_left: crate::layout::Point) -> Vec<crate::effects::Effect> {
         let at = |ms| std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms);
         vec![
             crate::effects::walking_dust(top_left, 0),
@@ -5020,7 +5020,7 @@ pub(crate) mod tests {
     }
 
     /// `frame`'s list at `now`, under a clear sky.
-    pub(crate) fn list_now<'a>(
+    fn list_now<'a>(
         frame: &SimFrame,
         office: Office<'a>,
         now: std::time::SystemTime,
