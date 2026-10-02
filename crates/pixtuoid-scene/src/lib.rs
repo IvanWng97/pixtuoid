@@ -60,6 +60,7 @@ pub(crate) mod lighting;
 #[doc(hidden)]
 pub mod localclock;
 pub mod motion;
+pub(crate) mod outside;
 #[doc(hidden)]
 pub mod overlay;
 pub mod pack;
@@ -72,7 +73,6 @@ pub mod pose;
 pub mod render_scale;
 pub mod sim;
 pub(crate) mod sky;
-pub(crate) mod sky_layer;
 pub(crate) mod skyline;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;

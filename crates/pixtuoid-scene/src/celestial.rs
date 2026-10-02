@@ -8,8 +8,8 @@ use crate::atmosphere::Moment;
 use crate::composite::{blend, blend_rgb};
 use crate::dither::FALLOFF_TONES;
 use crate::layout::{WindowBay, glass_rows, window_run};
+use crate::outside::WindowView;
 use crate::sky::{BodyKind, Sky};
-use crate::sky_layer::SkyLayer;
 use crate::theme::Theme;
 
 /// One frame's disc (sun by day, moon by night), arcing across the window
@@ -260,16 +260,16 @@ impl SkyView {
         }
     }
 
-    /// `bay`'s glass over the window `rows`, on a grid of `d` cells to the
-    /// unit, showing this sky under the golden hour's cast.
-    pub(crate) fn layer(&self, bay: WindowBay, rows: std::ops::Range<u16>, d: u16) -> SkyLayer {
+    /// `bay`'s window over `rows`, on a grid of `d` cells to the unit, its
+    /// glass showing this sky under the golden hour's cast.
+    pub(crate) fn window(&self, bay: WindowBay, rows: std::ops::Range<u16>, d: u16) -> WindowView {
         let pane = self.pane(
             bay.x,
             bay.w,
             glass_rows(rows.end.saturating_sub(rows.start)),
             d,
         );
-        SkyLayer::new(bay, rows, d, |cell| {
+        WindowView::new(bay, rows, d, |cell| {
             let open = pane.colour(cell.at, cell.glass.1);
             self.blaze.map_or(open, |b| b.over(open))
         })
@@ -420,6 +420,31 @@ mod tests {
             crate::anim::Motion::Full.clock(now),
         );
         SkyView::of(&moment, 160, 40, theme)
+    }
+
+    /// A window's glass is its pane's sky under the blaze, read from the
+    /// glass's top, at every density.
+    #[test]
+    fn a_window_shows_its_pane_s_sky_under_the_blaze() {
+        let v = view(19);
+        let blaze = v.blaze.expect("a clear 19h casts the golden hour");
+        let bay = WindowBay {
+            x: 30,
+            w: crate::layout::WINDOW_W,
+            idx: 1,
+        };
+        let rows = 1..33;
+        for d in [1, 4] {
+            let pane = v.pane(bay.x, bay.w, glass_rows(rows.end - rows.start), d);
+            let window = v.window(bay, rows.clone(), d);
+            let mut cells = 0;
+            for (at, c) in window.cells() {
+                let ay = at.1 - rows.start * d;
+                assert_eq!(c, blaze.over(pane.colour(at, ay - d)), "{d}: {at:?}");
+                cells += 1;
+            }
+            assert!(cells > 0, "{d}: the window has glass");
+        }
     }
 
     #[test]

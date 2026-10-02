@@ -16,9 +16,9 @@ use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, DESK_H, Depth, Fixture, FixtureKind, Layer, Point, SceneLayout, Station, Tie,
 };
+use crate::outside::WindowView;
 use crate::render_scale::RenderScale;
 use crate::sim::SimFrame;
-use crate::sky_layer::SkyLayer;
 use crate::theme::Theme;
 
 /// The front face the cutaway derives under a top-down piece's base-density art
@@ -797,7 +797,7 @@ fn paint_pieces(
                     _ => Glow::Lit,
                 };
                 let glow = match piece.kind {
-                    PieceKind::Window { ref view }
+                    PieceKind::Window { ref view, .. }
                         if view.shows((pen.art_at(x).0, pen.art_at(y).0)) =>
                     {
                         Glow::Pane
@@ -1227,7 +1227,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::Badge { ref badge } => badge.hash(&mut h),
         PieceKind::Board { ref board } => board.hash(&mut h),
         PieceKind::Indicator { door, floor } => (door, floor).hash(&mut h),
-        PieceKind::Window { ref view } => view.hash(&mut h),
+        PieceKind::Window { ref view, frame } => (view, frame).hash(&mut h),
         PieceKind::Hung { at, sprite } => (at, sprite).hash(&mut h),
         PieceKind::Effect(riding) => riding.hash(&mut h),
     }
@@ -1762,12 +1762,9 @@ fn paint_piece(
             piece,
             rows: (y0, y1),
         } => crate::wall::paint_wall(buf, theme, piece, y0..y1, Pen::for_pack(scale, pack)),
-        PieceKind::Window { ref view } => paint_window(
-            view,
-            theme.surface.window_frame,
-            Pen::for_pack(scale, pack),
-            buf,
-        ),
+        PieceKind::Window { ref view, frame } => {
+            paint_window(view, frame, Pen::for_pack(scale, pack), buf);
+        }
         PieceKind::Hung { at, sprite } => paint_wall_decor(at, sprite, pack, scale, buf),
         PieceKind::Badge { ref badge, .. } => {
             paint_badge(badge, theme, Pen::for_pack(scale, pack), buf);
@@ -2364,9 +2361,10 @@ impl PieceKind {
 /// paint fn writes lies inside its span.
 #[derive(Debug)]
 pub(crate) enum PieceKind {
-    /// One window: what its glass looks out on, its frame over it.
+    /// One window: its glass, then its joinery in `frame`.
     Window {
-        view: SkyLayer,
+        view: WindowView,
+        frame: pixtuoid_core::sprite::Rgb,
     },
     /// Decor hung on the north band, blitted at its top-left `at`.
     Hung {
@@ -2558,8 +2556,7 @@ fn desk_front_h() -> u16 {
 }
 
 /// Paint the north wall band: the wall, the posts between its windows and its
-/// trim. The windows are list pieces ([`push_windows`]), each its glass with
-/// its frame over it.
+/// trim. The windows are list pieces ([`push_windows`]).
 ///
 /// Its height is [`SceneLayout::wall_band_h`], not `top_margin`: the rows between
 /// are floor the agents walk on, so a band drawn to `top_margin` would paint
@@ -2613,12 +2610,9 @@ fn paint_wall(
 }
 
 /// Queue each window as a piece at the very back of the order: what its glass
-/// looks out on under `weather` ([`Outside::through`]) on the pen's art grid,
-/// its frame over it, resolved when the list is built, so the view changes
-/// with the sky, the weather and the city's lights without touching the
-/// backdrop.
-///
-/// [`Outside::through`]: crate::sky_layer::Outside::through
+/// looks out on under `weather` on the pen's art grid, resolved when the list
+/// is built, so the view changes with the sky, the weather and the city's
+/// lights without touching the backdrop.
 fn push_windows(
     office: Office<'_>,
     moment: &Moment,
@@ -2631,45 +2625,45 @@ fn push_windows(
         theme,
         scale,
     } = office;
-    let pen = Pen::for_pack(scale, pack);
-    let rows = crate::layout::window_rows(layout.wall_band_h());
-    let window_h = rows.end - rows.start;
-    let glass_h = crate::layout::glass_rows(window_h);
-    let Some(density) = pixtuoid_core::sprite::format::Density::new(pen.art(1).0) else {
+    let Some(density) =
+        pixtuoid_core::sprite::format::Density::new(Pen::for_pack(scale, pack).art(1).0)
+    else {
         return;
     };
-    let run = crate::layout::window_run(layout.buf_w);
-    let city = crate::skyline::CityStrip::draw(
-        pack,
-        (run.end - run.start, glass_h),
+    let outside = crate::outside::Outside::of(
         moment,
+        pack,
         theme,
+        (layout.buf_w, layout.wall_band_h()),
         density,
+        *weather,
     );
-    let outside = crate::sky_layer::Outside {
-        sky: &crate::celestial::SkyView::of(moment, layout.buf_w, layout.wall_band_h(), theme),
-        city: &city,
-        run_x0: run.start,
-        weather,
-    };
+    let rows = crate::layout::window_rows(layout.wall_band_h());
     // The bolt lights the glass and all it shows, over the weather on it.
     let bolt = crate::cutaway::light::bolt_steps(&moment.sky);
     let mut bolt_lift = crate::dither::Stepped::new(bolt as i8);
     for bay in layout.window_bays() {
-        let mut view = outside.through(bay, rows.clone(), density.get());
+        let mut view = outside.through(bay);
         if bolt > 0 {
             view.paint(|_, c| bolt_lift.of(c));
         }
         order.push((
-            Span::new(bay.x, rows.start, bay.w, window_h, 0).with_depth(0),
-            PieceKind::Window { view },
+            Span::new(bay.x, rows.start, bay.w, rows.end - rows.start, 0).with_depth(0),
+            PieceKind::Window {
+                view,
+                frame: theme.surface.window_frame,
+            },
         ));
     }
 }
 
-/// Paint a window: its glass, then its frame in `frame` over it, each cell an
-/// art pixel.
-fn paint_window(view: &SkyLayer, frame: pixtuoid_core::sprite::Rgb, pen: Pen, buf: &mut RgbBuffer) {
+/// Paint a [`PieceKind::Window`], each cell an art pixel.
+fn paint_window(
+    view: &WindowView,
+    frame: pixtuoid_core::sprite::Rgb,
+    pen: Pen,
+    buf: &mut RgbBuffer,
+) {
     let cell = |(x, y)| ArtRect {
         x: ArtPx(x),
         y: ArtPx(y),
@@ -5062,9 +5056,9 @@ pub(crate) mod tests {
     }
 
     /// The windows stand where the layout tiles them, as the classic painter's
-    /// do, and their glass shows the one city over the sky
-    /// ([`Outside::through`](crate::sky_layer::Outside::through)) art pixel for
-    /// art pixel, the frame untouched.
+    /// do, and show [`Outside::through`](crate::outside::Outside::through) art
+    /// pixel for art pixel, the one city over the sky, their joinery in the
+    /// theme's frame.
     #[test]
     fn the_windows_look_out_on_the_one_city_where_the_layout_tiles_them() {
         let pack = test_default_pack();
@@ -5080,9 +5074,6 @@ pub(crate) mod tests {
             scale,
         };
         let rows = crate::layout::window_rows(layout.wall_band_h());
-        let window_h = rows.end - rows.start;
-        let glass_h = crate::layout::glass_rows(window_h);
-        let run = crate::layout::window_run(layout.buf_w);
         let k = scale.get() / d;
         // Noon, the sun at dusk, a full moon up, a new moon down.
         for (day, hour) in [(1, 12), (2, 18), (2, 22), (17, 0)] {
@@ -5109,32 +5100,28 @@ pub(crate) mod tests {
                 "a piece a window"
             );
             for (span, kind) in &order {
-                let PieceKind::Window { view } = kind else {
+                let PieceKind::Window { view, frame } = kind else {
                     panic!("only windows: {kind:?}");
                 };
-                assert_eq!(span.depth, 0, "glass sorts at the very back");
-                paint_window(view, theme.surface.window_frame, pen, &mut buf);
+                assert_eq!(span.depth, 0, "a window sorts at the very back");
+                paint_window(view, *frame, pen, &mut buf);
             }
-            let city = crate::skyline::CityStrip::draw(
-                &pack,
-                (run.end - run.start, glass_h),
+            let density = pixtuoid_core::sprite::format::Density::new(d).expect("nonzero");
+            let band = (layout.buf_w, layout.wall_band_h());
+            let outside = crate::outside::Outside::of(
                 &moment,
+                &pack,
                 theme,
-                pixtuoid_core::sprite::format::Density::new(d).expect("nonzero"),
+                band,
+                density,
+                GlassWeather::of(&moment),
             );
-            let sky =
-                crate::celestial::SkyView::of(&moment, layout.buf_w, layout.wall_band_h(), theme);
-            let outside = crate::sky_layer::Outside {
-                sky: &sky,
-                city: &city,
-                run_x0: run.start,
-                weather: &GlassWeather::of(&moment),
-            };
+            let sky = crate::celestial::SkyView::of(&moment, band.0, band.1, theme);
             let at = |(ax, ay): (u16, u16)| buf.get(ax * k, ay * k);
             let (mut glass, mut buildings) = (0, 0);
             for bay in layout.window_bays() {
                 let here = format!("{day}/{hour}h bay {}", bay.idx);
-                let view = outside.through(bay, rows.clone(), d);
+                let view = outside.through(bay);
                 for cell in view.joinery() {
                     assert_eq!(
                         at(cell),
@@ -5143,7 +5130,7 @@ pub(crate) mod tests {
                     );
                 }
                 for ((cell, c), (_, open)) in
-                    view.cells().zip(sky.layer(bay, rows.clone(), d).cells())
+                    view.cells().zip(sky.window(bay, rows.clone(), d).cells())
                 {
                     glass += 1;
                     buildings += usize::from(c != open);
@@ -5154,9 +5141,66 @@ pub(crate) mod tests {
         }
     }
 
+    /// A window is drawn before every piece over it: first at depth 0, ahead
+    /// of the sign and the clock that sort there too, by push order.
+    #[test]
+    fn a_window_is_drawn_before_whatever_hangs_over_it() {
+        use crate::floor::{FloorMeta, FloorSession};
+        let pack = test_default_pack();
+        let office = FloorSession::new()
+            .step(
+                crate::floor::FloorInputs {
+                    scene: &pixtuoid_core::SceneState::uniform(16),
+                    pack: &pack,
+                    now: std::time::SystemTime::UNIX_EPOCH,
+                    floor: FloorMeta::ground(),
+                    pets: crate::floor::PetInputs::default(),
+                },
+                crate::layout::Size { w: 240, h: 144 },
+            )
+            .expect("lays out");
+        let at = Office {
+            layout: &office.layout,
+            pack: &pack,
+            theme: &crate::theme::NORMAL,
+            scale: RenderScale::new(pack.max_density_variant().get()).expect("nonzero"),
+        };
+        let list = list_at(&office.frame, at, 12);
+        let is_window = |p: &Piece| matches!(p.kind, PieceKind::Window { .. });
+        let mut over = 0;
+        for (i, window) in list.pieces.iter().enumerate().filter(|(_, p)| is_window(p)) {
+            let span = window.span;
+            let area = Bounds {
+                x: span.x0,
+                y: span.y0,
+                width: span.x1 - span.x0 + 1,
+                height: span.y1 - span.y0 + 1,
+            };
+            for (j, piece) in list.pieces.iter().enumerate() {
+                if is_window(piece) || !piece.span.meets(area) {
+                    continue;
+                }
+                assert!(
+                    j > i,
+                    "{:?} drawn before the window at {span:?}",
+                    piece.kind
+                );
+                over += 1;
+            }
+        }
+        assert!(
+            over > 0,
+            "nothing hangs over a window, so nothing was ordered"
+        );
+    }
+
     /// The glass `push_windows` queues for `layout` at `moment` under
     /// `weather`, at the densest scale.
-    fn glass_views(layout: &SceneLayout, moment: &Moment, weather: &GlassWeather) -> Vec<SkyLayer> {
+    fn glass_views(
+        layout: &SceneLayout,
+        moment: &Moment,
+        weather: &GlassWeather,
+    ) -> Vec<WindowView> {
         let pack = test_default_pack();
         let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let mut order = Vec::new();
@@ -5174,7 +5218,7 @@ pub(crate) mod tests {
         order
             .into_iter()
             .map(|(_, kind)| match kind {
-                PieceKind::Window { view } => view,
+                PieceKind::Window { view, .. } => view,
                 other => panic!("only windows: {other:?}"),
             })
             .collect()
@@ -5190,8 +5234,7 @@ pub(crate) mod tests {
     }
 
     /// Against the same sky under a clear model, a weather changes only glass
-    /// pixels — never a frame cell, which stays the backdrop's — and every one
-    /// that veils or falls changes some.
+    /// pixels, and every one that veils or falls changes some.
     #[test]
     fn the_weather_shows_on_the_glass_and_only_there() {
         use crate::sky::Weather;
@@ -5216,11 +5259,9 @@ pub(crate) mod tests {
         }
     }
 
-    /// The outside reaches only the windows' glass, at every density the pack
-    /// draws: under every sky the sweep draws, a frame differs from the one
-    /// whose windows show its instant's no-weather sky — the same room, lit
-    /// alike — only on glass no other piece paints over, so the joinery and
-    /// what hangs on the wall, the clock, the boards and the sign, match it.
+    /// At every density the pack draws and under every sky the sweep draws, a
+    /// frame matches the one whose windows show its instant's no-weather sky —
+    /// the same room, lit alike — everywhere but on glass no other piece paints.
     #[test]
     fn the_outside_reaches_only_the_glass() {
         use crate::floor::{FloorMeta, FloorSession};
@@ -5258,7 +5299,8 @@ pub(crate) mod tests {
                 buf
             };
             let mut hung_over_glass = 0;
-            for weathered in crate::sky_layer::tests::every_sky() {
+            let mut covered: Option<(std::time::SystemTime, Vec<bool>)> = None;
+            for weathered in crate::outside::tests::every_sky() {
                 let name = format!("{} at {s}x", weathered.name);
                 let clock = Motion::Full.clock(weathered.now);
                 let moment = |sky| Moment::resolve(sky, theme, 0.0, clock);
@@ -5290,30 +5332,37 @@ pub(crate) mod tests {
                         piece.fingerprint = fingerprint(&piece.kind);
                     }
                 }
-                // What every piece but a window paints, a glass wall aside: it
-                // shows what lies behind it.
-                let mut over = RgbBuffer::filled(w, h, UNPAINTED);
-                let mut covered = vec![false; usize::from(w) * usize::from(h)];
-                let mut cache = CutawayCache::default();
-                for piece in &list.pieces {
-                    if matches!(piece.kind, PieceKind::Window { .. }) || piece.kind.reads_under() {
-                        continue;
-                    }
-                    let epoch = over.begin_writes();
-                    paint_piece(&piece.kind, &pack, theme, scale, &mut cache, &mut over);
-                    for y in
-                        scale.to_buffer(piece.span.y0)..scale.to_buffer(piece.span.y1 + 1).min(h)
-                    {
-                        for x in scale.to_buffer(piece.span.x0)
-                            ..scale.to_buffer(piece.span.x1 + 1).min(w)
+                // What every piece but a window paints, a glass wall aside (it
+                // shows what lies behind it): one set an instant.
+                if covered.as_ref().is_none_or(|(at, _)| *at != weathered.now) {
+                    let mut over = RgbBuffer::filled(w, h, UNPAINTED);
+                    let mut painted = vec![false; usize::from(w) * usize::from(h)];
+                    let mut cache = CutawayCache::default();
+                    for piece in &list.pieces {
+                        if matches!(piece.kind, PieceKind::Window { .. })
+                            || piece.kind.reads_under()
                         {
-                            if over.written_in(x, y, epoch) {
-                                covered[usize::from(y) * usize::from(w) + usize::from(x)] = true;
+                            continue;
+                        }
+                        let epoch = over.begin_writes();
+                        paint_piece(&piece.kind, &pack, theme, scale, &mut cache, &mut over);
+                        for y in scale.to_buffer(piece.span.y0)
+                            ..scale.to_buffer(piece.span.y1 + 1).min(h)
+                        {
+                            for x in scale.to_buffer(piece.span.x0)
+                                ..scale.to_buffer(piece.span.x1 + 1).min(w)
+                            {
+                                if over.written_in(x, y, epoch) {
+                                    painted[usize::from(y) * usize::from(w) + usize::from(x)] =
+                                        true;
+                                }
                             }
                         }
                     }
+                    over.end_writes();
+                    covered = Some((weathered.now, painted));
                 }
-                over.end_writes();
+                let covered = &covered.as_ref().expect("filled above").1;
                 let (shown, plain) = (painted(&list), painted(&bare));
                 let mut glass = 0;
                 for y in 0..h {
@@ -5331,7 +5380,11 @@ pub(crate) mod tests {
                         glass += 1;
                     }
                 }
-                assert_eq!(glass > 0, weathered.shows, "{name}: {glass} glass pixels");
+                assert_eq!(
+                    glass > 0,
+                    weathered.changes_glass,
+                    "{name}: {glass} glass pixels"
+                );
             }
             assert!(
                 hung_over_glass > 0,
@@ -5358,7 +5411,12 @@ pub(crate) mod tests {
             let prints = |ms| -> Vec<u64> {
                 glass_views(&layout, &moment, &GlassWeather::of(&at(w, ms)))
                     .into_iter()
-                    .map(|view| fingerprint(&PieceKind::Window { view }))
+                    .map(|view| {
+                        fingerprint(&PieceKind::Window {
+                            view,
+                            frame: crate::theme::NORMAL.surface.window_frame,
+                        })
+                    })
                     .collect()
             };
             assert_eq!(prints(5_000), prints(5_000), "{w:?}: one key");
@@ -5604,14 +5662,14 @@ S B B B B B B S
                 "desk prop",
                 "door",
                 "effect",
-                "glass",
                 "hung decor",
                 "indicator",
                 "neon",
                 "prop",
                 "prop band",
                 "table",
-                "wall"
+                "wall",
+                "window"
             ],
             "a piece kind went untested"
         );
@@ -6130,11 +6188,11 @@ S B B B B B B S
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
             );
-            let is_glass = |p: &Piece| matches!(p.kind, PieceKind::Window { .. });
-            same_fingerprint_same_pixels(painted, &list, &layout, is_glass);
+            let is_window = |p: &Piece| matches!(p.kind, PieceKind::Window { .. });
+            same_fingerprint_same_pixels(painted, &list, &layout, is_window);
             list.pieces()
                 .iter()
-                .filter(|p| is_glass(p))
+                .filter(|p| is_window(p))
                 .map(|p| (p.span, p.fingerprint))
                 .collect::<Vec<_>>()
         };
@@ -6742,7 +6800,7 @@ S B B B B B B S
             w: 4,
             idx: 0,
         };
-        let view = SkyLayer::new(bay, desk.y..desk.y + 4, pen.art(1).0, |cell| {
+        let view = WindowView::new(bay, desk.y..desk.y + 4, pen.art(1).0, |cell| {
             let (x, y) = at(cell.at);
             painted.get(x, y)
         });
@@ -6753,7 +6811,10 @@ S B B B B B B S
             .expect("the pane has glass");
         list.pieces.push(Piece {
             span: Span::new(desk.x, desk.y, 4, 4, 0),
-            kind: PieceKind::Window { view },
+            kind: PieceKind::Window {
+                view,
+                frame: theme.surface.window_frame,
+            },
             shadow: None,
             fingerprint: 0,
         });
@@ -7169,7 +7230,7 @@ S B B B B B B S
             PieceKind::Neon { .. } => "neon",
             PieceKind::Clock { .. } => "clock",
             PieceKind::Character { .. } => "character",
-            PieceKind::Window { .. } => "glass",
+            PieceKind::Window { .. } => "window",
             PieceKind::Hung { .. } => "hung decor",
             PieceKind::Effect(_) => "effect",
             PieceKind::Badge { .. } => "badge",

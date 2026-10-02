@@ -1,14 +1,14 @@
 //! The weather on the windows' glass: the veil over the view and the rain or
-//! snow running down the panes, drawn onto a window's
-//! [`SkyLayer`] on a grid of `d` cells to the layout unit, so each painter
-//! draws one design at its own density.
+//! snow running down the panes, drawn onto a [`WindowView`] on a grid of `d`
+//! cells to the layout unit, so each painter draws one design at its own
+//! density.
 
 use pixtuoid_core::sprite::Rgb;
 
 use crate::atmosphere::Moment;
 use crate::layout::Size;
+use crate::outside::WindowView;
 use crate::sky::Weather;
-use crate::sky_layer::SkyLayer;
 
 /// One frame's weather on every window: [`GlassWeather::of`] once per frame.
 /// Its weather and `tick` are its whole key: two equal keys place equal marks.
@@ -183,14 +183,14 @@ impl GlassWeather {
         }
     }
 
-    /// This weather on `layer`'s glass: the veil, then the marks over it, so
+    /// This weather on `view`'s glass: the veil, then the marks over it, so
     /// rain still reads through the murk.
-    pub(crate) fn paint(&self, layer: &mut SkyLayer) {
+    pub(crate) fn paint(&self, view: &mut WindowView) {
         if let Some((veil, alpha)) = self.veil {
-            layer.paint(|_, c| crate::composite::blend_rgb(c, veil, alpha));
+            view.paint(|_, c| crate::composite::blend_rgb(c, veil, alpha));
         }
-        for m in self.marks(layer.idx(), layer.glass(), layer.d()) {
-            layer.paint_at((m.x, m.y), |cell, under| m.over(under, cell.at));
+        for m in self.marks(view.idx(), view.glass(), view.d()) {
+            view.paint_glass_at((m.x, m.y), |cell, under| m.over(under, cell.at));
         }
     }
 

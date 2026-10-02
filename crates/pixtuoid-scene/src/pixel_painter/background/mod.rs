@@ -9,7 +9,6 @@
 mod ground_wash;
 mod lighting;
 
-use crate::celestial::SkyView;
 pub(super) use ground_wash::paint_ground_wash;
 pub(super) use lighting::{
     paint_clock, paint_corridor_runner, paint_light, paint_neon_halo, paint_neon_panel,
@@ -23,10 +22,9 @@ use super::palette::{RgbLut, WHITE, blend_rgb};
 
 use crate::atmosphere::Moment;
 use crate::glass_weather::GlassWeather;
-use crate::layout::{WindowBay, glass_rows, wall_trim_row, window_posts, window_rows, window_run};
+use crate::layout::{WindowBay, wall_trim_row, window_posts, window_rows};
+use crate::outside::Outside;
 use crate::sky::Sky;
-use crate::sky_layer::Outside;
-use crate::skyline::CityStrip;
 use crate::theme::Theme;
 
 /// How far a strike's peak washes the window glass white.
@@ -156,8 +154,7 @@ pub(super) fn paint_ground_and_walls(
     }
 }
 
-/// The windows `bays` on a wall band `top_wall_h` tall: what each one's glass
-/// looks out on at `moment`, its frame over it.
+/// The windows `bays` on a wall band `top_wall_h` tall, at `moment`.
 pub(super) fn paint_windows(
     buf: &mut RgbBuffer,
     top_wall_h: u16,
@@ -166,27 +163,19 @@ pub(super) fn paint_windows(
     pack: &Pack,
     theme: &Theme,
 ) {
-    let buf_w = buf.width();
-    let rows = window_rows(top_wall_h);
-    let run = window_run(buf_w);
-    let city = CityStrip::draw(
-        pack,
-        (run.end - run.start, glass_rows(rows.end - rows.start)),
+    let outside = Outside::of(
         moment,
+        pack,
         theme,
+        (buf.width(), top_wall_h),
         pixtuoid_core::sprite::format::Density::ONE,
+        GlassWeather::of(moment),
     );
-    let outside = Outside {
-        sky: &SkyView::of(moment, buf_w, top_wall_h, theme),
-        city: &city,
-        run_x0: run.start,
-        weather: &GlassWeather::of(moment),
-    };
     // The bolt, the strike's source, lights the glass in lockstep with
     // `paint_lightning_flash`, over all it shows.
     let bolt = BOLT_ALPHA * moment.sky.flash();
     for bay in bays {
-        let mut view = outside.through(bay, rows.clone(), 1);
+        let mut view = outside.through(bay);
         if bolt > 0.0 {
             view.paint(|_, c| blend_rgb(c, WHITE, bolt));
         }

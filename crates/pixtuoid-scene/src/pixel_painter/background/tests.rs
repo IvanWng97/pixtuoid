@@ -113,7 +113,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     );
 }
 
-/// Render a full office wall through the real [`paint_band`] path at a
+/// Render a full office wall through [`paint_band`] at a
 /// forced January `day` + local `hour` + weather.
 fn render_office_on(
     day: u32,
@@ -1020,59 +1020,6 @@ fn spill(x: u16, slant: f32) -> crate::lighting::Emitter {
         },
         strength: 0.32,
     }
-}
-
-/// Every pane shows its own stretch of the one city, read from the run's west
-/// end.
-#[test]
-fn a_window_shows_the_city_strip_from_its_own_column() {
-    // Overcast noon: no stars and no disc, which key on the screen column, not
-    // the city's; the sky's dither does too, so the far pane sits a whole
-    // number of its periods east.
-    let now = crate::localclock::on_day(15, 12);
-    let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let moment = &Moment::resolve(
-        Sky::at_with(now, Weather::Overcast),
-        theme,
-        0.0,
-        Motion::Full.clock(now),
-    );
-    let sky = crate::celestial::SkyView::of(moment, WINDOW_W * 3, 40, theme);
-    let dx = 7;
-    let far = (WINDOW_W + dx).next_multiple_of(crate::dither::PERIOD);
-    let city = CityStrip::draw(
-        &test_default_pack(),
-        (WINDOW_W * 2, 28),
-        moment,
-        theme,
-        pixtuoid_core::sprite::format::Density::ONE,
-    );
-    let weather = GlassWeather::of(moment);
-    let pane = |x: u16, run_x0: u16| {
-        let outside = Outside {
-            sky: &sky,
-            city: &city,
-            run_x0,
-            weather: &weather,
-        };
-        let bay = WindowBay {
-            x,
-            w: WINDOW_W,
-            idx: 0,
-        };
-        outside
-            .through(bay, 0..30, 1)
-            .cells()
-            .map(|(_, c)| c)
-            .collect::<Vec<_>>()
-    };
-    let (west, east) = (pane(0, 0), pane(far, far));
-    assert_eq!(west, east, "a pane shows the strip from the run's west end");
-    assert_ne!(
-        pane(dx, 0),
-        west,
-        "a pane {dx} columns east shows a different stretch of city"
-    );
 }
 
 #[test]

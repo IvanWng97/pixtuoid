@@ -1,45 +1,47 @@
-//! What the windows show, held to their glass: everything outside — the sky,
-//! the city and the weather on the panes — is drawn onto one window's
-//! [`SkyLayer`] at a time, on a painter's grid, and the layer has no cell on
-//! the window's joinery for anything to land on.
+//! What the windows show: everything outside — the sky, the city and the
+//! weather on the panes — drawn onto one window's [`WindowView`] at a time on
+//! a painter's grid, which holds no cell on the window's joinery.
 
 use std::ops::Range;
 
 use pixtuoid_core::sprite::Rgb;
+use pixtuoid_core::sprite::format::{Density, Pack};
 
+use crate::atmosphere::Moment;
 use crate::celestial::SkyView;
 use crate::glass_weather::GlassWeather;
-use crate::layout::{Size, WindowBay, glass_rows, window_frame};
+use crate::layout::{Bounds, Size, WindowBay, window_frame, window_rows, window_run};
 use crate::skyline::CityStrip;
+use crate::theme::Theme;
 
 /// One cell of a window's glass on a painter's grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Cell {
     /// Where it stands on the painter's grid, which a dither keys on.
     pub(crate) at: (u16, u16),
-    /// Its offset from the glass's top-left, inside the window's frame.
+    /// Its offset from the glass's top-left ([`WindowBay::glass`]).
     pub(crate) glass: (u16, u16),
 }
 
-/// One window's glass on a grid `d` cells to the layout unit, showing what
-/// lies outside: the only surface a sky effect draws on. Only the glass
-/// [`window_frame`] leaves holds a cell; the frame, mullion and transom hold
-/// none, so no write reaches them.
+/// One window on a grid `d` cells to the layout unit, and what its glass
+/// shows: the only surface a sky effect draws on.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct SkyLayer {
+pub(crate) struct WindowView {
     bay: WindowBay,
     /// The window's top row, in units.
     top: u16,
     /// The window's height in units, its frame included.
     h: u16,
+    glass: Bounds,
     d: u16,
-    /// The window's box row by row from its top-left, `None` on its joinery.
+    /// The window's box row by row from its top-left, `None` on its joinery
+    /// ([`window_frame`]).
     px: Vec<Option<Rgb>>,
 }
 
-impl SkyLayer {
-    /// `bay`'s glass over the window `rows`, on a grid `d` cells to the unit,
-    /// each cell in `base`.
+impl WindowView {
+    /// `bay`'s window over `rows`, on a grid `d` cells to the unit, each glass
+    /// cell in `base`.
     pub(crate) fn new(
         bay: WindowBay,
         rows: Range<u16>,
@@ -47,23 +49,24 @@ impl SkyLayer {
         mut base: impl FnMut(Cell) -> Rgb,
     ) -> Self {
         let h = rows.end.saturating_sub(rows.start);
-        let mut layer = Self {
+        let mut view = Self {
             bay,
             top: rows.start,
             h,
+            glass: bay.glass(rows),
             d: d.max(1),
             px: Vec::new(),
         };
         let size = Size { w: bay.w, h };
-        let d = layer.d;
-        layer.px = (0..usize::from(layer.cols()) * usize::from(layer.rows()))
+        let d = view.d;
+        view.px = (0..usize::from(view.cols()) * usize::from(view.rows()))
             .map(|i| {
-                let (ax, ay) = layer.offset(i);
+                let (ax, ay) = view.offset(i);
                 let glass = !window_frame(ax / d, ay / d, size);
-                glass.then(|| base(layer.cell(ax, ay)))
+                glass.then(|| base(view.cell(ax, ay)))
             })
             .collect();
-        layer
+        view
     }
 
     /// Recolour every glass cell: `f` takes the cell and what it shows.
@@ -77,14 +80,11 @@ impl SkyLayer {
         }
     }
 
-    /// Recolour the cell at `glass` from the glass's top-left, as
-    /// [`paint`](Self::paint) does; one on the joinery or past the window
-    /// takes nothing.
-    pub(crate) fn paint_at(&mut self, glass: (u16, u16), f: impl FnOnce(Cell, Rgb) -> Rgb) {
-        let (ax, ay) = (
-            glass.0.saturating_add(self.d),
-            glass.1.saturating_add(self.d),
-        );
+    /// Recolour the glass cell `glass` cells from the glass's top-left, as
+    /// [`paint`](Self::paint) does.
+    pub(crate) fn paint_glass_at(&mut self, glass: (u16, u16), f: impl FnOnce(Cell, Rgb) -> Rgb) {
+        let (ix, iy) = self.inset();
+        let (ax, ay) = (glass.0.saturating_add(ix), glass.1.saturating_add(iy));
         if ax >= self.cols() || ay >= self.rows() {
             return;
         }
@@ -95,27 +95,24 @@ impl SkyLayer {
         }
     }
 
-    /// The window's place in the run, counted from the west.
+    /// Its window's [`WindowBay::idx`].
     pub(crate) fn idx(&self) -> u16 {
         self.bay.idx
     }
 
-    /// The glass inside the window's frame, in units: its mullion and transom
-    /// included.
+    /// Its [`WindowBay::glass`], in units.
     pub(crate) fn glass(&self) -> Size {
         Size {
-            w: self.bay.w.saturating_sub(2),
-            h: glass_rows(self.h),
+            w: self.glass.width,
+            h: self.glass.height,
         }
     }
 
-    /// Cells to the layout unit.
     pub(crate) fn d(&self) -> u16 {
         self.d
     }
 
-    /// Whether the glass shows at `at` on the grid: inside the window and off
-    /// its joinery.
+    /// Whether its glass shows at `at` on the grid.
     pub(crate) fn shows(&self, at: (u16, u16)) -> bool {
         let d = self.d;
         let (Some(ax), Some(ay)) = (
@@ -155,6 +152,15 @@ impl SkyLayer {
         self.h.saturating_mul(self.d)
     }
 
+    /// The glass's top-left, in cells from the window's.
+    fn inset(&self) -> (u16, u16) {
+        let d = self.d;
+        (
+            (self.glass.x - self.bay.x).saturating_mul(d),
+            (self.glass.y - self.top).saturating_mul(d),
+        )
+    }
+
     /// Cell `i` of [`px`](Self::px), from the window's top-left.
     fn offset(&self, i: usize) -> (u16, u16) {
         let cols = usize::from(self.cols()).max(1);
@@ -162,39 +168,62 @@ impl SkyLayer {
         ((i % cols) as u16, (i / cols) as u16)
     }
 
-    /// The cell `(ax, ay)` from the window's top-left.
     fn cell(&self, ax: u16, ay: u16) -> Cell {
         let d = self.d;
+        let (ix, iy) = self.inset();
         Cell {
             at: (
                 self.bay.x.saturating_mul(d).saturating_add(ax),
                 self.top.saturating_mul(d).saturating_add(ay),
             ),
-            glass: (ax.saturating_sub(d), ay.saturating_sub(d)),
+            glass: (ax.saturating_sub(ix), ay.saturating_sub(iy)),
         }
     }
 }
 
-/// Everything one frame's windows look out on, the same through every one.
-#[derive(Clone, Copy)]
-pub(crate) struct Outside<'a> {
-    pub(crate) sky: &'a SkyView,
-    /// The city along the whole run of windows.
-    pub(crate) city: &'a CityStrip,
+/// Everything one frame's windows look out on, the same through every one,
+/// on one painter's grid.
+pub(crate) struct Outside {
+    sky: SkyView,
+    city: CityStrip,
     /// The column, in units, the city's west end stands at.
-    pub(crate) run_x0: u16,
-    pub(crate) weather: &'a GlassWeather,
+    run_x0: u16,
+    weather: GlassWeather,
+    rows: Range<u16>,
+    d: u16,
 }
 
-impl Outside<'_> {
-    /// What `bay`'s glass shows over the window `rows`, on a grid `d` cells to
-    /// the unit: each layer of the outside, back to front, in the one order
-    /// every painter draws it in.
-    pub(crate) fn through(&self, bay: WindowBay, rows: Range<u16>, d: u16) -> SkyLayer {
-        let mut layer = self.sky.layer(bay, rows, d);
-        self.city.paint(&mut layer, self.run_x0);
-        self.weather.paint(&mut layer);
-        layer
+impl Outside {
+    /// The outside at `moment` of a wall `buf_w` wide and `band_h` tall under
+    /// `weather`, at `density`.
+    pub(crate) fn of(
+        moment: &Moment,
+        pack: &Pack,
+        theme: &Theme,
+        (buf_w, band_h): (u16, u16),
+        density: Density,
+        weather: GlassWeather,
+    ) -> Self {
+        let rows = window_rows(band_h);
+        let run = window_run(buf_w);
+        let glass_h = crate::layout::glass_rows(rows.end - rows.start);
+        Self {
+            sky: SkyView::of(moment, buf_w, band_h, theme),
+            city: CityStrip::draw(pack, (run.end - run.start, glass_h), moment, theme, density),
+            run_x0: run.start,
+            weather,
+            rows,
+            d: density.get(),
+        }
+    }
+
+    /// What `bay`'s glass shows: each part of the outside, back to front, in
+    /// the one order every painter draws it in.
+    pub(crate) fn through(&self, bay: WindowBay) -> WindowView {
+        let mut view = self.sky.window(bay, self.rows.clone(), self.d);
+        self.city.paint(&mut view, self.run_x0);
+        self.weather.paint(&mut view);
+        view
     }
 }
 
@@ -210,8 +239,7 @@ pub(crate) mod tests {
         pub(crate) now: std::time::SystemTime,
         pub(crate) sky: Sky,
         pub(crate) bare: Sky,
-        /// Whether its outside differs from the bare one's.
-        pub(crate) shows: bool,
+        pub(crate) changes_glass: bool,
     }
 
     /// Every weather by day, at sunset and by night, a storm mid-strike too.
@@ -231,7 +259,7 @@ pub(crate) mod tests {
                         now,
                         sky: Sky::at_with(now, w).with_flash(flash),
                         bare: Sky::at_with(now, Weather::Clear),
-                        shows: w != Weather::Clear,
+                        changes_glass: w != Weather::Clear,
                     });
                 }
             }
@@ -256,15 +284,15 @@ pub(crate) mod tests {
 
     const ROWS: Range<u16> = 1..21;
 
-    /// The layer's cells are the glass [`window_frame`] leaves and nothing
+    /// The view's cells are the glass [`window_frame`] leaves and nothing
     /// else, at every grid density, so its mask is the window geometry's.
     #[test]
-    fn a_layer_holds_the_glass_and_none_of_the_joinery() {
+    fn a_view_holds_the_glass_and_none_of_the_joinery() {
         let h = ROWS.end - ROWS.start;
         for d in [1, 2, 4] {
-            let layer = SkyLayer::new(bay(), ROWS, d, |_| Rgb { r: 1, g: 2, b: 3 });
-            let glass: std::collections::HashSet<_> = layer.cells().map(|(at, _)| at).collect();
-            let joinery: std::collections::HashSet<_> = layer.joinery().collect();
+            let view = WindowView::new(bay(), ROWS, d, |_| Rgb { r: 1, g: 2, b: 3 });
+            let glass: std::collections::HashSet<_> = view.cells().map(|(at, _)| at).collect();
+            let joinery: std::collections::HashSet<_> = view.joinery().collect();
             for ay in ROWS.start * d..ROWS.end * d {
                 for ax in bay().x * d..bay().span().end * d {
                     let frame = window_frame(
@@ -274,48 +302,91 @@ pub(crate) mod tests {
                     );
                     assert_eq!(glass.contains(&(ax, ay)), !frame, "d={d} ({ax}, {ay})");
                     assert_eq!(joinery.contains(&(ax, ay)), frame, "d={d} ({ax}, {ay})");
+                    assert_eq!(view.shows((ax, ay)), !frame, "d={d} ({ax}, {ay})");
                 }
             }
         }
     }
 
-    /// No write path reaches the joinery: painting every cell, and painting
-    /// at every offset the glass and its surround span, leaves it empty.
     #[test]
     fn no_write_reaches_the_joinery() {
         const INK: Rgb = Rgb { r: 9, g: 9, b: 9 };
         for d in [1, 4] {
-            let mut layer = SkyLayer::new(bay(), ROWS, d, |_| Rgb { r: 1, g: 2, b: 3 });
-            let joinery: Vec<_> = layer.joinery().collect();
-            layer.paint(|_, _| INK);
-            let glass = layer.glass();
+            let mut view = WindowView::new(bay(), ROWS, d, |_| Rgb { r: 1, g: 2, b: 3 });
+            let joinery: Vec<_> = view.joinery().collect();
+            view.paint(|_, _| INK);
+            let glass = view.glass();
             for gy in 0..(glass.h + 2) * d {
                 for gx in 0..(glass.w + 2) * d {
-                    layer.paint_at((gx, gy), |_, _| INK);
+                    view.paint_glass_at((gx, gy), |_, _| INK);
                 }
             }
-            assert_eq!(layer.joinery().collect::<Vec<_>>(), joinery, "d={d}");
-            assert!(layer.cells().all(|(_, c)| c == INK), "d={d}");
+            assert_eq!(view.joinery().collect::<Vec<_>>(), joinery, "d={d}");
+            assert!(view.cells().all(|(_, c)| c == INK), "d={d}");
         }
     }
 
-    /// A cell's glass offset counts from the glass's top-left, inside the
-    /// window's one-unit frame.
     #[test]
-    fn a_glass_offset_counts_from_inside_the_frame() {
+    fn a_glass_offset_counts_from_the_glass() {
         let d = 4;
-        let mut layer = SkyLayer::new(bay(), ROWS, d, |_| Rgb { r: 0, g: 0, b: 0 });
+        let mut view = WindowView::new(bay(), ROWS, d, |_| Rgb { r: 0, g: 0, b: 0 });
         let mut seen = None;
-        layer.paint_at((0, 0), |cell, c| {
+        view.paint_glass_at((0, 0), |cell, c| {
             seen = Some(cell);
             c
         });
+        let glass = bay().glass(ROWS);
         assert_eq!(
             seen,
             Some(Cell {
-                at: ((bay().x + 1) * d, (ROWS.start + 1) * d),
+                at: (glass.x * d, glass.y * d),
                 glass: (0, 0),
             })
+        );
+    }
+
+    #[test]
+    fn a_window_shows_the_city_strip_from_its_own_column() {
+        // Overcast noon: no stars and no disc, which key on the screen column,
+        // not the city's; the sky's dither does too, so the far pane sits a
+        // whole number of its periods east.
+        let now = crate::localclock::on_day(15, 12);
+        let theme = &crate::theme::NORMAL;
+        let moment = Moment::resolve(
+            Sky::at_with(now, Weather::Overcast),
+            theme,
+            0.0,
+            crate::anim::Motion::Full.clock(now),
+        );
+        let dx = 7;
+        let far = (crate::layout::WINDOW_W + dx).next_multiple_of(crate::dither::PERIOD);
+        let mut outside = Outside::of(
+            &moment,
+            &crate::pack::test_default_pack(),
+            theme,
+            (crate::layout::WINDOW_W * 3, 32),
+            Density::ONE,
+            GlassWeather::of(&moment),
+        );
+        let mut pane = |x: u16, run_x0: u16| {
+            outside.run_x0 = run_x0;
+            let bay = WindowBay {
+                x,
+                w: crate::layout::WINDOW_W,
+                idx: 0,
+            };
+            outside
+                .through(bay)
+                .cells()
+                .map(|(_, c)| c)
+                .collect::<Vec<_>>()
+        };
+        let (west, east) = (pane(0, 0), pane(far, far));
+        assert_eq!(west, east, "a pane shows the strip from the run's west end");
+        assert_ne!(
+            pane(dx, 0),
+            west,
+            "a pane {dx} columns east shows a different stretch of city"
         );
     }
 }
