@@ -208,8 +208,8 @@ impl WalkState {
 /// Advance the wander state machine by one frame for the given idle agent.
 ///
 /// Transitions run ONLY when `now > wander.last_advanced_at`; otherwise the pose
-/// is computed from the existing phase WITHOUT mutating any wander field, so
-/// this is safe to call 2+ times per frame (seated-overlay pass, character loop).
+/// is computed from the existing phase WITHOUT mutating any wander field, so a
+/// repeat call at the same `now` changes nothing.
 ///
 /// On the first call for a fresh Idle slot, `cycle_n` is fast-forwarded so
 /// destination selection agrees with what core's stateless `idle_pose` would

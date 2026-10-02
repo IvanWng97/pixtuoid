@@ -353,9 +353,8 @@ fn snap_back_cornered_leg_freezes_path_no_reroute() {
 
 #[test]
 fn snap_back_derive_is_idempotent_within_a_frame() {
-    // The render loop calls derive_with_routing up to 4x per agent per frame
-    // (seated map, sprite paint, hit-test, label) at the SAME `now`, sharing one
-    // history + motion — hence the inner k-loop.
+    // A repeat derive at the SAME `now` must change neither the pose nor the
+    // shared history and walks — hence the inner k-loop.
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
     let slot = active_slot(now0, now0 - Duration::from_secs(60));

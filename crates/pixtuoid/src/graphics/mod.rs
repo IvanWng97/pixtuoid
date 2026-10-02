@@ -226,8 +226,7 @@ fn env_text(name: &str) -> Option<String> {
     pixtuoid_core::platform::text_env(name).filter(|v| !v.trim().is_empty())
 }
 
-/// A marker variable, presence only: [`path_env`](pixtuoid_core::platform::path_env)'s
-/// rule, so a non-UTF-8 value (`$TMUX` holds a path) is set and a blank one is not.
+/// A marker variable, presence only, by [`path_env`](pixtuoid_core::platform::path_env)'s rule.
 fn env_set(name: &str) -> bool {
     pixtuoid_core::platform::path_env(name).is_some()
 }
@@ -261,8 +260,6 @@ impl TermEnv {
             || self.term_program.as_deref() == Some("tmux")
     }
 
-    /// A tmux client, or a tmux terminal name carried over ssh: either way tmux
-    /// redraws every repaint.
     fn link(&self) -> Link {
         Link {
             tmux: self.tmux_client || self.tmux_term(),

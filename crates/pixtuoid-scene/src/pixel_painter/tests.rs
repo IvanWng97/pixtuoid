@@ -4358,7 +4358,7 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
         .waypoints
         .iter()
         .position(|w| w.kind == crate::layout::WaypointKind::Printer)
-        .expect("printer at 160x96");
+        .expect("the layout places a printer");
     let frame = SimFrame {
         occupied_waypoints: [printer_idx].into(),
         ..empty_frame(&layout)

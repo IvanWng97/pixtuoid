@@ -1034,8 +1034,8 @@ impl NeonState {
             .last_tick
             .map(|last| crate::anim::elapsed_ms(now, last));
         self.last_tick = Some(now);
-        // Stepped in loop time, which Calm walks at a quarter of the wall
-        // clock's pace, so Calm plays the stutter slower rather than never.
+        // Stepped in loop time, which `Motion::Calm` paces slower than the wall
+        // clock, so Calm plays the stutter slower rather than never.
         let beat_ms = timing.beat.ms();
         let step_ms = self.last_beat_ms.map(|last| beat_ms.abs_diff(last));
         self.last_beat_ms = Some(beat_ms);
