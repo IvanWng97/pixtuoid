@@ -254,8 +254,9 @@ Green `ci-gate`; every lens bot's required `claude-review/<lens>` status
 disposition; zero open confirmed `issue (blocking)`; each matching
 [local row](../REVIEW.md#escalation)'s run recorded as a PR comment starting
 `<!-- local-row:<row>:<head sha> -->`, where `<row>` is the row's first column
-up to any colon or parenthesis, lowercased, each run of non-alphanumerics one `-` and the sha is the head the run judged; a queue
-update that only merges `main` in leaves the record standing. The local
+up to any colon or parenthesis, lowercased, each run of non-alphanumerics one
+`-`, leading and trailing `-` dropped, and the sha is the head the run judged;
+a queue update that only merges `main` in leaves the record standing. The local
 [`two-lens-review`](../.claude/skills/two-lens-review/SKILL.md) skill is
 otherwise an optional pre-flight. A published review passes whatever it
 found; a failed or missing status is no review: comment `/claude-review`, else
