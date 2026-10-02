@@ -508,7 +508,9 @@ impl ClassicReason {
     pub(crate) fn describe(self) -> String {
         match self {
             Self::Disabled => "disabled by --graphics off".to_string(),
-            Self::Unsupported => "this build has no terminal-graphics support".to_string(),
+            Self::Unsupported => "this build cannot ask the terminal for graphics (not on Unix, \
+                 or built without `graphics`)"
+                .to_string(),
             Self::NotQueried => "the terminal was not asked (stdout is not a terminal, there \
                  is no controlling terminal, or $TERM is dumb) — run in an interactive \
                  terminal to see what it supports"
@@ -1297,7 +1299,8 @@ mod tests {
                 GraphicsMode::Auto,
                 Probe::Unsupported,
                 BUNDLED,
-                "this build has no terminal-graphics support",
+                "this build cannot ask the terminal for graphics (not on Unix, or built without \
+                 `graphics`)",
             ),
             (
                 GraphicsMode::Auto,

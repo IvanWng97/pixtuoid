@@ -283,19 +283,64 @@ fn a_terminal_restored_from_too_small_gets_every_tile_again() {
     }
 }
 
+/// The image's top-left SIXEL tile, whole, for a `cell`-sized cell.
+fn first_tile(cell: CellSize) -> String {
+    let shape = ImageProtocol::Sixel.tile();
+    format!(
+        "\x1b[1;1H{SIXEL}\"1;1;{};{}",
+        shape.cols * cell.w,
+        shape.rows * cell.h
+    )
+}
+
+/// The plan's cell is the terminal's own answer, which outranks the window's
+/// where they differ, so `doctor`, the boot seed and the painted office all
+/// read it until a font zoom moves the window's cell.
+#[test]
+fn the_plans_cell_holds_until_the_windows_moves() {
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let padded = CellSize {
+        w: CELL.w + 1,
+        h: CELL.h + 2,
+    };
+    let (mut r, wire) = painter(cols, rows, ImageProtocol::Sixel);
+    r.terminal.backend_mut().zoom(padded);
+    let scene = office();
+    let cadence = ImageProtocol::Sixel.cadence();
+    r.render(&scene, pack(), t0()).expect("render");
+    assert!(wire.take().contains(&first_tile(CELL)), "the plan's cell");
+    let plan = crate::graphics::Plan::Cutaway {
+        fit: fit(cols, rows),
+        protocol: ImageProtocol::Sixel,
+        cell: CELL,
+        tmux: false,
+        forced: false,
+    };
+    let office = plan.office_extent(ratatui::layout::Size::new(cols, rows));
+    assert_eq!(
+        r.office_extent(),
+        (office.w, office.h),
+        "the boot seed's office"
+    );
+
+    let zoomed = CellSize {
+        w: CELL.w * 2,
+        h: CELL.h * 2,
+    };
+    r.terminal.backend_mut().zoom(zoomed);
+    r.render(&scene, pack(), t0() + cadence).expect("render");
+    assert!(wire.take().contains(&first_tile(zoomed)), "zoomed in");
+    r.terminal.backend_mut().zoom(padded);
+    r.render(&scene, pack(), t0() + cadence * 2)
+        .expect("render");
+    assert!(wire.take().contains(&first_tile(CELL)), "zoomed back");
+}
+
 /// A font zoom changes the cell's pixels: the window's cell cuts the tiles,
 /// classic paints while the cell is too small for the art, and the cutaway
 /// returns once it fits.
 #[test]
 fn a_font_zoom_refits_the_cutaway_to_the_windows_cell() {
-    let shape = ImageProtocol::Sixel.tile();
-    let first_tile = |cell: CellSize| {
-        format!(
-            "\x1b[1;1H{SIXEL}\"1;1;{};{}",
-            shape.cols * cell.w,
-            shape.rows * cell.h
-        )
-    };
     let (cols, rows) = crate::tui::renderer::min_terminal_size();
     let (mut r, wire) = painter(cols, rows, ImageProtocol::Sixel);
     let scene = office();
@@ -574,14 +619,14 @@ fn a_cutaway_slide_runs_until_a_resize_lands_it() {
     let scene = two_floor_scene();
     let start = t0();
     r.render(&scene, pack(), start).expect("render");
-    let extent = r.scene_extent();
+    let extent = r.office_extent();
     r.navigate_floor(1, start);
     let slide = Duration::from_millis(r.transition().expect("sliding").duration_ms);
     let frames = 4;
     let at = |frame| start + slide * frame / frames;
     for frame in 1..frames - 1 {
         r.render(&scene, pack(), at(frame)).expect("render");
-        assert_eq!(r.scene_extent(), extent, "frame {frame}");
+        assert_eq!(r.office_extent(), extent, "frame {frame}");
         assert!(r.transition().is_some(), "landed at frame {frame}");
     }
     r.terminal.backend_mut().resize(cols - 1, rows);
@@ -757,7 +802,7 @@ fn a_covered_tile_is_never_sent() {
     }
 }
 
-/// A `TestBackend` that marks on `wire` where each flush of cells lands
+/// A backend that marks on `wire` where each flush of cells lands
 /// among the transmits.
 struct Logged {
     inner: Window,

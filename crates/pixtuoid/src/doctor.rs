@@ -730,8 +730,8 @@ impl Ink {
     }
 }
 
-/// DECRQSS only on a real tty and a non-dumb `$TERM` (`probe_ok`): the same
-/// `color_preflight` gate the launcher acts on, so the row matches `run`.
+/// Each query only on a real tty and a non-dumb `$TERM` (`probe_ok`): the same
+/// `color_preflight` gate the launcher acts on, so the rows match `run`.
 fn probe_terminal_caps(
     probe_ok: bool,
     graphics: crate::GraphicsMode,

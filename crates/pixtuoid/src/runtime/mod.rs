@@ -90,23 +90,26 @@ impl ConnectedSources {
     }
 }
 
-/// Per-floor boot capacities of the office `plan` paints on a terminal `term`
-/// cells big — not another painter's, whose spare desks would seat agents
-/// nowhere drawn — each floor with its own seed. When a floor's layout rejects
-/// the office (e.g. too small), fall back to `FALLBACK_DESKS` for that floor so
-/// the reducer can still seat agents — they may render off-grid on the tiny
-/// terminal, but won't be silently dropped during the boot race before the first
-/// TUI frame.
-pub(crate) fn boot_capacities_for(plan: Plan, term: TermSize) -> [usize; MAX_FLOORS] {
+/// Each floor's desks in the office `plan` paints on a terminal `term` cells
+/// big, each floor with its own seed; 0 where a floor's layout rejects it.
+fn floor_capacities(plan: Plan, term: TermSize) -> [usize; MAX_FLOORS] {
     let office = plan.office_extent(term);
     std::array::from_fn(|i| {
         // The ONE seed derivation every call site shares — an inline copy of the
         // formula would silently drift the boot capacities from the rendered layout
         // (over-seeded atomics strand agents on unrendered desks).
         let seed = pixtuoid_scene::floor::floor_seed(i);
-        let cap = pixtuoid_scene::floor::floor_capacity(office.w, office.h, seed);
-        if cap == 0 { FALLBACK_DESKS } else { cap }
+        pixtuoid_scene::floor::floor_capacity(office.w, office.h, seed)
     })
+}
+
+/// [`floor_capacities`] as the boot seed. When a floor's layout rejects the
+/// office (e.g. too small), fall back to `FALLBACK_DESKS` for that floor so the
+/// reducer can still seat agents — they may render off-grid on the tiny
+/// terminal, but won't be silently dropped during the boot race before the first
+/// TUI frame.
+pub(crate) fn boot_capacities_for(plan: Plan, term: TermSize) -> [usize; MAX_FLOORS] {
+    floor_capacities(plan, term).map(|cap| if cap == 0 { FALLBACK_DESKS } else { cap })
 }
 
 /// Clamp each per-floor boot capacity to an optional `--max-desks` cap, so the boot
@@ -119,12 +122,9 @@ fn cap_boot_capacities(base: [usize; MAX_FLOORS], cap: Option<usize>) -> [usize;
     }
 }
 
-/// The headless-vs-interactive boot capacity POLICY. Headless — no `plan` — honors
-/// `--max-desks` UNCLAMPED (there is no terminal layout to measure) and never calls
-/// `measure`; interactive measures the terminal (injected so the query stays in the
-/// shell), lays the plan's office out over it, then clamps to the cap — clamping, not
-/// `[cap; N]`, keeps the `fetch_max` boot atomics from over-seeding agents onto
-/// non-existent desks.
+/// The headless-vs-interactive boot capacity POLICY: headless (no `plan`) honors
+/// `--max-desks` UNCLAMPED and never calls `measure`; interactive clamps
+/// [`boot_capacities_for`] to the cap ([`cap_boot_capacities`]).
 pub(crate) fn resolve_boot_caps(
     desk_cap: Option<usize>,
     plan: Option<Plan>,
@@ -238,10 +238,9 @@ mod tests {
         TermSize { width, height }
     }
 
-    /// Floor `seed`'s desks in classic's office on a `cols`×`rows` terminal.
-    fn capacity_for_terminal(cols: u16, rows: u16, seed: u64) -> usize {
-        let office = classic().office_extent(term(cols, rows));
-        pixtuoid_scene::floor::floor_capacity(office.w, office.h, seed)
+    /// Floor 0's desks in classic's office on a `cols`×`rows` terminal.
+    fn ground_floor(cols: u16, rows: u16) -> usize {
+        floor_capacities(classic(), term(cols, rows))[0]
     }
 
     #[test]
@@ -282,24 +281,24 @@ mod tests {
 
     #[test]
     fn capacity_for_normal_terminal() {
-        let cap = capacity_for_terminal(192, 48, 0);
+        let cap = ground_floor(192, 48);
         assert!(cap > 0);
     }
 
     #[test]
     fn capacity_for_small_terminal() {
-        let cap = capacity_for_terminal(80, 35, 0);
+        let cap = ground_floor(80, 35);
         assert!(cap > 0, "80x35 should fit at least one desk");
     }
 
     #[test]
     fn capacity_for_tiny_terminal_returns_zero() {
-        assert_eq!(capacity_for_terminal(10, 10, 0), 0);
+        assert_eq!(ground_floor(10, 10), 0);
     }
 
     #[test]
     fn capacity_for_zero_rows_returns_zero() {
-        assert_eq!(capacity_for_terminal(192, 0, 0), 0);
+        assert_eq!(ground_floor(192, 0), 0);
     }
 
     /// The notice advertises `min_terminal_size()`; boot capacity computes the buffer
@@ -309,8 +308,8 @@ mod tests {
     fn the_advertised_minimum_seats_someone_through_the_boot_capacity_path() {
         let (cols, rows) = crate::tui::renderer::min_terminal_size();
         assert!(
-            capacity_for_terminal(cols, rows, pixtuoid_scene::floor::floor_seed(0)) > 0,
-            "the advertised minimum {cols}x{rows} seeds no desks through capacity_for_terminal"
+            ground_floor(cols, rows) > 0,
+            "the advertised minimum {cols}x{rows} seeds no desks through floor_capacities"
         );
     }
 
@@ -323,7 +322,7 @@ mod tests {
             pixtuoid_scene::layout::SceneLayout::compute_with_seed(buf_w, buf_h, None, 0)
                 .map(|l| l.home_desks.len())
                 .unwrap_or(0);
-        assert_eq!(capacity_for_terminal(cols, rows, 0), expected);
+        assert_eq!(ground_floor(cols, rows), expected);
     }
 
     #[test]
@@ -331,10 +330,10 @@ mod tests {
         let mut found = false;
         'outer: for cols in [120u16, 140, 160, 180, 200, 220, 240] {
             for rows in [30u16, 36, 40, 48, 56, 64] {
-                let mut unique = std::collections::HashSet::new();
-                for i in 0..MAX_FLOORS {
-                    unique.insert(capacity_for_terminal(cols, rows, floor_seed(i)));
-                }
+                let unique: std::collections::HashSet<usize> =
+                    floor_capacities(classic(), term(cols, rows))
+                        .into_iter()
+                        .collect();
                 if unique.len() > 1 {
                     found = true;
                     break 'outer;
@@ -377,7 +376,6 @@ mod tests {
     fn a_cutaway_boot_seeds_no_desk_its_office_lacks() {
         use crate::graphics::{CellSize, Fit, ImageProtocol};
         let (cols, rows) = (120, 40);
-        // A 6-px cell's natural scale lands on the 4x art's 8.
         let cell = CellSize { w: 6, h: 12 };
         let area = crate::tui::renderer::scene_rect(ratatui::layout::Rect::new(0, 0, cols, rows));
         let density = pixtuoid_core::sprite::format::Density::new(4).expect("nonzero");
@@ -404,13 +402,12 @@ mod tests {
     }
 
     #[test]
-    fn boot_capacities_uses_each_floor_seed() {
-        let caps = boot_capacities_for(classic(), term(192, 48));
+    fn floor_capacities_uses_each_floor_seed() {
+        let office = classic().office_extent(term(192, 48));
         let expected: [usize; MAX_FLOORS] = std::array::from_fn(|i| {
-            let c = capacity_for_terminal(192, 48, floor_seed(i));
-            if c == 0 { FALLBACK_DESKS } else { c }
+            pixtuoid_scene::floor::floor_capacity(office.w, office.h, floor_seed(i))
         });
-        assert_eq!(caps, expected);
+        assert_eq!(floor_capacities(classic(), term(192, 48)), expected);
     }
 
     #[test]
