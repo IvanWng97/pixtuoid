@@ -9,7 +9,7 @@ use ratatui_image::picker::cap_parser::QueryStdioOptions;
 #[cfg(any(unix, test))]
 use ratatui_image::picker::cap_parser::{Parser, Response};
 
-use super::{CellSize, Detected, ImageProtocol, Probe};
+use super::{CellSize, Detected, ImageProtocol, Probe, in_tmux};
 
 /// What the environment says about the terminal, read once per probe.
 ///
@@ -96,13 +96,6 @@ impl EnvHints {
                 .is_some_and(|t| t.contains("iTerm"));
         (outer || named).then_some(ImageProtocol::Iterm2)
     }
-}
-
-/// Inside tmux: `TERM` starting `tmux`, or `TERM_PROGRAM` = `tmux` — the test
-/// upstream applies before wrapping every image in passthrough (ratatui-image
-/// 11.0.8 `picker.rs:320-326`), on every platform.
-fn in_tmux(term: Option<&str>, term_program: Option<&str>) -> bool {
-    term.is_some_and(|t| t.starts_with("tmux")) || term_program == Some("tmux")
 }
 
 /// What the terminal's answer and the environment together say: kitty over

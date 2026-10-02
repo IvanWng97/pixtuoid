@@ -1394,6 +1394,23 @@ fn neon_a_starved_tube_flashes_inside_its_windows_and_only_there() {
     }
 }
 
+/// Calm plays every loop slower, the stutter too: an empty, dimmed sign
+/// repainted at Calm's cadence flashes within one stutter cycle of its loop
+/// time.
+#[test]
+fn neon_a_starved_tube_stutters_at_the_calm_pace() {
+    use crate::anim::{CALM_TICK_MS, FULL_TICK_MS};
+    let mut neon = NeonState::new();
+    let repaints = NeonState::STUTTER_MS / FULL_TICK_MS;
+    let flashed = (0..=repaints)
+        .map(|n| {
+            let at = in_stutter_cycle(0) + Duration::from_millis(n * CALM_TICK_MS);
+            neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Calm.clock(at))
+        })
+        .any(|levels| levels == NeonLevels::FLASH);
+    assert!(flashed, "the stutter never played at Calm");
+}
+
 /// At rest a starved tube holds steady: no flash, for the photosensitive.
 #[test]
 fn neon_a_starved_tube_never_flashes_at_rest() {
@@ -1405,19 +1422,21 @@ fn neon_a_starved_tube_never_flashes_at_rest() {
     }
 }
 
-/// A flash shorter than the frame gap can't be drawn: a still (one tick) and the
-/// floating window's ambient cadence get the steady tube, never a held flash.
+/// A painter stepping further than a flash can't draw it: a still (one tick)
+/// and the floating window's ambient cadence get the steady tube, never a
+/// held flash.
 #[test]
 fn neon_a_painter_slower_than_a_flash_never_shows_one() {
     let shortest = Duration::from_millis(NeonState::shortest_flash_ms());
-    for (ms, levels) in starved_cycle(shortest) {
-        assert_eq!(levels, NeonLevels::EMPTY, "{ms}ms at a {shortest:?} tick");
+    let slower = shortest + Duration::from_millis(crate::anim::FULL_TICK_MS);
+    for (ms, levels) in starved_cycle(slower) {
+        assert_eq!(levels, NeonLevels::EMPTY, "{ms}ms at a {slower:?} tick");
     }
-    let just_faster = shortest - Duration::from_millis(1);
     assert!(
-        starved_cycle(just_faster)
+        starved_cycle(shortest)
             .iter()
-            .any(|(_, levels)| *levels == NeonLevels::FLASH)
+            .any(|(_, levels)| *levels == NeonLevels::FLASH),
+        "a painter stepping a flash at a time draws each"
     );
     let in_a_flash = in_stutter_cycle(NeonState::STUTTER_FLASHES_MS[0].0);
     assert_eq!(
@@ -1504,8 +1523,8 @@ fn the_classic_sees_the_skyline_from_its_floors_altitude() {
 }
 
 /// An office with every ambient loop running at `t0`, long settled: a typist,
-/// a burning typist and a waiter; at rest also idle sleepers and a gateway
-/// mascot, whose wandering only rest stills.
+/// a burning typist, a waiter and a wandering gateway mascot; at rest also
+/// idle sleepers, whose wander leaves the sim's walks for real time.
 fn ambient_office(t0: SystemTime, resting: bool) -> SceneState {
     use pixtuoid_core::source::daemon::{DaemonInstanceKey, DaemonPresenceUpdate, apply_presence};
     use pixtuoid_core::state::{DaemonInstanceId, EffortObservation, ToolKind};
@@ -1533,18 +1552,16 @@ fn ambient_office(t0: SystemTime, resting: bool) -> SceneState {
             slot.effort = Some(EffortObservation::new(Arc::from("max"), t0));
         }
     }
-    if resting {
-        let key = DaemonInstanceKey::new(
-            pixtuoid_core::source::openclaw::SOURCE_NAME,
-            DaemonInstanceId::new("18789".to_string()).expect("id"),
-        );
-        apply_presence(
-            &mut scene,
-            &key,
-            DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
-            settled,
-        );
-    }
+    let key = DaemonInstanceKey::new(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        DaemonInstanceId::new("18789".to_string()).expect("id"),
+    );
+    apply_presence(
+        &mut scene,
+        &key,
+        DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+        settled,
+    );
     scene
 }
 
@@ -1625,7 +1642,7 @@ fn both_painters_paint_one_frame_per_beat() {
             let floor = FloorMeta::ground()
                 .with_weather(WeatherPolicy::Forced(weather))
                 .with_motion(motion);
-            let pet = resting.then_some(&cat);
+            let pet = Some(&cat);
             let (classic, cutaway) = both_painters(&scene, floor, pet, t0);
             let later = both_painters(&scene, floor, pet, t0 + Duration::from_millis(later_ms));
             assert!(
