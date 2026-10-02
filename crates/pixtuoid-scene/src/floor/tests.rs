@@ -69,13 +69,13 @@ fn daemons_projects_onto_the_ground_floor_only() {
 
 #[test]
 fn door_anim_excludes_arrived_entry_profiles() {
-    use crate::motion::MotionState;
+    use crate::walk::WalkState;
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let id = AgentId::from_transcript_path("/p/door.jsonl");
     let mut fctx = FloorCtx::new();
-    let mut ms = MotionState::new(id);
+    let mut ms = WalkState::new(id);
     // Entry walk: duration 2000ms + pause 300ms → walk_arrived at 2300ms.
-    ms.entry = Some(crate::motion::WalkLeg {
+    ms.entry = Some(crate::walk::WalkLeg {
         started_at: t0,
         profile: WalkProfile {
             duration_ms: 2000,
@@ -86,7 +86,7 @@ fn door_anim_excludes_arrived_entry_profiles() {
         },
         from: crate::layout::Point { x: 0, y: 0 },
     });
-    fctx.motion.insert(id, ms);
+    fctx.walks.insert(id, ms);
 
     fctx.recompute_door_anim_max_ms(t0 + Duration::from_millis(1000));
     assert_eq!(
@@ -94,7 +94,7 @@ fn door_anim_excludes_arrived_entry_profiles() {
         "in-flight entry walk should drive the door cosmetic window"
     );
 
-    // Past arrival, even though MotionState.entry is never cleared for this agent.
+    // Past arrival, even though WalkState.entry is never cleared for this agent.
     fctx.recompute_door_anim_max_ms(t0 + Duration::from_millis(3000));
     assert_eq!(
         fctx.door_anim_max_ms, 0,
@@ -110,7 +110,7 @@ fn floor_ctx_default_equals_new() {
         "FloorCtx::default() must match new() (door_anim_max_ms == 0)"
     );
     assert!(
-        d.motion.is_empty(),
+        d.walks.is_empty(),
         "default FloorCtx has no in-flight motion"
     );
 }
@@ -735,11 +735,7 @@ fn floor_session_render_owns_the_dual_eviction() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let gone = AgentId::from_parts("claude-code", "session-evict");
     let mut session = FloorSession::new();
-    session
-        .floor
-        .ctx
-        .motion
-        .insert(gone, MotionState::new(gone));
+    session.floor.ctx.walks.insert(gone, WalkState::new(gone));
     session.office.coffee.insert(gone, now);
 
     let scene = SceneState::new([8; MAX_FLOORS]);
@@ -757,7 +753,7 @@ fn floor_session_render_owns_the_dual_eviction() {
     });
     assert!(layout.is_some(), "a layoutable size renders");
     assert!(
-        !session.floor.ctx.motion.contains_key(&gone),
+        !session.floor.ctx.walks.contains_key(&gone),
         "render() evicts the floor half (motion) — the floating-leak class"
     );
     assert!(
@@ -869,7 +865,7 @@ fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
         "the frame carries the agent's routed pose"
     );
     assert!(
-        session.floor.ctx.motion.contains_key(&id),
+        session.floor.ctx.walks.contains_key(&id),
         "the sim advanced: the entry leg was snapshotted into motion"
     );
     assert!(
@@ -969,7 +965,7 @@ fn session_types_default_equals_new() {
     assert!(PerOffice::default().coffee.map().is_empty());
     assert!(PerOffice::default().chitchat.is_empty());
     let s = FloorSession::default();
-    assert!(s.floor.ctx.motion.is_empty());
+    assert!(s.floor.ctx.walks.is_empty());
     assert!(s.office.coffee.map().is_empty());
 }
 
@@ -1192,7 +1188,7 @@ fn neon_first_tick_snaps_to_the_mood() {
         (neon_mood(0, 0, 0), ROOM_LIT, NeonLevels::CALM),
     ] {
         assert_eq!(
-            NeonState::new().tick(mood, room, Motion::Full.clock(t0())),
+            NeonState::new().tick(mood, room, Motion::Full.timing(t0())),
             want,
             "{mood:?}"
         );
@@ -1211,7 +1207,7 @@ fn neon_holds_through_a_walkout_in_a_room_that_once_dimmed() {
         for _ in 0..ms / FRAME.as_millis() as u64 {
             now += FRAME;
             dim.tick(empty, now);
-            last = neon.tick(mood, dim.dimmed(), Motion::Full.clock(now));
+            last = neon.tick(mood, dim.dimmed(), Motion::Full.timing(now));
         }
         (last, dim.level())
     };
@@ -1253,28 +1249,28 @@ fn neon_eases_into_a_new_mood_and_lands_on_it() {
     let mut neon = NeonState::new();
     let fade = Duration::from_millis(NeonState::FADE_MS as u64);
     let alert = neon_mood(2, 1, 0);
-    neon.tick(neon_mood(2, 0, 0), ROOM_LIT, Motion::Full.clock(t0()));
+    neon.tick(neon_mood(2, 0, 0), ROOM_LIT, Motion::Full.timing(t0()));
     let changed = t0() + FRAME;
-    let first = neon.tick(alert, ROOM_LIT, Motion::Full.clock(changed));
+    let first = neon.tick(alert, ROOM_LIT, Motion::Full.timing(changed));
     assert_eq!(
         first,
         NeonLevels::BUSY,
         "the change frame still shows the old mood"
     );
-    let mid = neon.tick(alert, ROOM_LIT, Motion::Full.clock(changed + fade / 2));
+    let mid = neon.tick(alert, ROOM_LIT, Motion::Full.timing(changed + fade / 2));
     assert!(
         mid.alert > NeonLevels::BUSY.alert && mid.alert < NeonLevels::ALERT.alert,
         "mid-fade alert is between the moods: {mid:?}"
     );
     // Not `fade - 1ms`: an ease-out's last millisecond rounds to the target in f32.
-    let late = neon.tick(alert, ROOM_LIT, Motion::Full.clock(changed + fade * 3 / 4));
+    let late = neon.tick(alert, ROOM_LIT, Motion::Full.timing(changed + fade * 3 / 4));
     assert_ne!(
         late,
         NeonLevels::ALERT,
         "still crossing over late in the fade"
     );
     assert_eq!(
-        neon.tick(alert, ROOM_LIT, Motion::Full.clock(changed + fade)),
+        neon.tick(alert, ROOM_LIT, Motion::Full.timing(changed + fade)),
         NeonLevels::ALERT
     );
 }
@@ -1286,17 +1282,17 @@ fn neon_snaps_when_its_last_light_is_older_than_a_fade() {
     let fade = Duration::from_millis(NeonState::FADE_MS as u64);
     let (calm, busy) = (neon_mood(0, 0, 1), neon_mood(3, 0, 0));
     let mut fresh = NeonState::new();
-    fresh.tick(calm, ROOM_LIT, Motion::Full.clock(t0()));
+    fresh.tick(calm, ROOM_LIT, Motion::Full.timing(t0()));
     assert_eq!(
-        fresh.tick(busy, ROOM_LIT, Motion::Full.clock(t0() + fade)),
+        fresh.tick(busy, ROOM_LIT, Motion::Full.timing(t0() + fade)),
         NeonLevels::CALM,
         "fades"
     );
     let mut stale = NeonState::new();
-    stale.tick(calm, ROOM_LIT, Motion::Full.clock(t0()));
+    stale.tick(calm, ROOM_LIT, Motion::Full.timing(t0()));
     let later = t0() + fade + Duration::from_millis(1);
     assert_eq!(
-        stale.tick(busy, ROOM_LIT, Motion::Full.clock(later)),
+        stale.tick(busy, ROOM_LIT, Motion::Full.timing(later)),
         NeonLevels::BUSY,
         "snaps"
     );
@@ -1305,12 +1301,12 @@ fn neon_snaps_when_its_last_light_is_older_than_a_fade() {
 #[test]
 fn neon_ignores_a_count_change_within_a_mood() {
     let mut neon = NeonState::new();
-    neon.tick(neon_mood(0, 2, 0), ROOM_LIT, Motion::Full.clock(t0()));
+    neon.tick(neon_mood(0, 2, 0), ROOM_LIT, Motion::Full.timing(t0()));
     assert_eq!(
         neon.tick(
             neon_mood(0, 3, 0),
             ROOM_LIT,
-            Motion::Full.clock(t0() + FRAME)
+            Motion::Full.timing(t0() + FRAME)
         ),
         NeonLevels::ALERT
     );
@@ -1319,18 +1315,18 @@ fn neon_ignores_a_count_change_within_a_mood() {
 #[test]
 fn neon_reversing_mid_fade_starts_from_the_current_light() {
     let mut neon = NeonState::new();
-    neon.tick(neon_mood(0, 0, 3), ROOM_LIT, Motion::Full.clock(t0()));
+    neon.tick(neon_mood(0, 0, 3), ROOM_LIT, Motion::Full.timing(t0()));
     let half = Duration::from_millis(NeonState::FADE_MS as u64 / 2);
-    neon.tick(neon_mood(0, 1, 3), ROOM_LIT, Motion::Full.clock(t0()));
+    neon.tick(neon_mood(0, 1, 3), ROOM_LIT, Motion::Full.timing(t0()));
     let mid = neon.tick(
         neon_mood(0, 1, 3),
         ROOM_LIT,
-        Motion::Full.clock(t0() + half),
+        Motion::Full.timing(t0() + half),
     );
     let reversed = neon.tick(
         neon_mood(0, 0, 3),
         ROOM_LIT,
-        Motion::Full.clock(t0() + half),
+        Motion::Full.timing(t0() + half),
     );
     assert_eq!(
         reversed, mid,
@@ -1344,16 +1340,16 @@ fn neon_holds_on_a_backward_clock() {
     neon.tick(
         neon_mood(2, 0, 0),
         ROOM_LIT,
-        Motion::Full.clock(t0() + Duration::from_secs(5)),
+        Motion::Full.timing(t0() + Duration::from_secs(5)),
     );
     neon.tick(
         neon_mood(0, 0, 3),
         ROOM_LIT,
-        Motion::Full.clock(t0() + Duration::from_secs(5)),
+        Motion::Full.timing(t0() + Duration::from_secs(5)),
     );
     let earlier = t0() + Duration::from_secs(1);
     assert_eq!(
-        neon.tick(neon_mood(0, 0, 3), ROOM_LIT, Motion::Full.clock(earlier)),
+        neon.tick(neon_mood(0, 0, 3), ROOM_LIT, Motion::Full.timing(earlier)),
         NeonLevels::BUSY
     );
 }
@@ -1373,7 +1369,11 @@ fn starved_cycle(step: Duration) -> Vec<(u64, NeonLevels)> {
         .map(|ms| {
             (
                 ms,
-                neon.tick(empty, ROOM_DIMMED, Motion::Full.clock(in_stutter_cycle(ms))),
+                neon.tick(
+                    empty,
+                    ROOM_DIMMED,
+                    Motion::Full.timing(in_stutter_cycle(ms)),
+                ),
             )
         })
         .collect()
@@ -1405,7 +1405,7 @@ fn neon_a_starved_tube_stutters_at_the_calm_pace() {
     let flashed = (0..=repaints)
         .map(|n| {
             let at = in_stutter_cycle(0) + Duration::from_millis(n * CALM_TICK_MS);
-            neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Calm.clock(at))
+            neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Calm.timing(at))
         })
         .any(|levels| levels == NeonLevels::FLASH);
     assert!(flashed, "the stutter never played at Calm");
@@ -1423,7 +1423,7 @@ fn neon_a_starved_tube_holds_each_flash_and_dark_the_floor() {
         let mut neon = NeonState::new();
         let mut runs: Vec<(bool, u64)> = Vec::new();
         for ms in 0..CYCLES * NeonState::STUTTER_MS * pace {
-            let clock = motion.clock(in_stutter_cycle(0) + Duration::from_millis(ms));
+            let clock = motion.timing(in_stutter_cycle(0) + Duration::from_millis(ms));
             let lit = neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, clock) == NeonLevels::FLASH;
             match runs.last_mut() {
                 Some((was, len)) if *was == lit => *len += 1,
@@ -1449,8 +1449,8 @@ fn neon_a_starved_tube_holds_each_flash_and_dark_the_floor() {
 fn neon_a_starved_tube_never_flashes_at_rest() {
     let mut neon = NeonState::new();
     for ms in (0..NeonState::STUTTER_MS).step_by(10) {
-        let clock = Motion::Still.clock(in_stutter_cycle(ms));
-        let levels = neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, clock);
+        let timing = Motion::Still.timing(in_stutter_cycle(ms));
+        let levels = neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, timing);
         assert_eq!(levels, NeonLevels::EMPTY, "{ms}ms");
     }
 }
@@ -1476,7 +1476,7 @@ fn neon_a_painter_slower_than_a_flash_never_shows_one() {
         NeonState::new().tick(
             neon_mood(0, 0, 0),
             ROOM_DIMMED,
-            Motion::Full.clock(in_a_flash)
+            Motion::Full.timing(in_a_flash)
         ),
         NeonLevels::EMPTY,
         "a still's single tick"
@@ -1490,10 +1490,10 @@ fn neon_never_flashes_while_lit_or_while_still_coasting_down() {
     lit.tick(
         neon_mood(0, 0, 3),
         ROOM_LIT,
-        Motion::Full.clock(flash_at - FRAME),
+        Motion::Full.timing(flash_at - FRAME),
     );
     assert_eq!(
-        lit.tick(neon_mood(0, 0, 3), ROOM_LIT, Motion::Full.clock(flash_at)),
+        lit.tick(neon_mood(0, 0, 3), ROOM_LIT, Motion::Full.timing(flash_at)),
         NeonLevels::CALM
     );
     let mut coasting = NeonState::new();
@@ -1501,12 +1501,12 @@ fn neon_never_flashes_while_lit_or_while_still_coasting_down() {
     coasting.tick(
         neon_mood(2, 0, 0),
         ROOM_LIT,
-        Motion::Full.clock(now - FRAME),
+        Motion::Full.timing(now - FRAME),
     );
-    let mut last = coasting.tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Full.clock(now));
+    let mut last = coasting.tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Full.timing(now));
     while now < flash_at {
         now += Duration::from_millis(10);
-        last = coasting.tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Full.clock(now));
+        last = coasting.tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Full.timing(now));
     }
     assert_ne!(last, NeonLevels::FLASH);
     assert!(last.power > NeonLevels::EMPTY.power, "{last:?}");
@@ -1634,13 +1634,13 @@ fn both_painters(
     let board = session.board(scene, floor.motion, now);
     crate::cutaway::paint::render_cutaway(
         &stepped.frame,
-        crate::cutaway::paint::Office {
+        crate::display::Office {
             layout: &stepped.layout,
             pack: &pack,
             theme,
             scale,
         },
-        crate::cutaway::paint::Showing {
+        crate::display::Showing {
             floor,
             now,
             board: &board,

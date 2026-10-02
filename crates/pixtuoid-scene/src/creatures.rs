@@ -10,7 +10,7 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{DaemonLiveness, DaemonPresence, DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
 
-use crate::anim::Clock;
+use crate::anim::Timing;
 use crate::layout::{Point, SceneLayout};
 use crate::pathfind::{find_path, snap_point_to_walkable};
 use crate::pet::PetKind;
@@ -77,21 +77,21 @@ pub(crate) fn pet_position(
     kind: PetKind,
     layout: &SceneLayout,
     pack: &Pack,
-    clock: Clock,
+    timing: Timing,
     idle_desk_indices: &[FloorLocalDeskIndex],
     all_idle: bool,
     pet_seed: u64,
 ) -> Option<(Point, bool, &'static str, usize)> {
     pack.animation(kind.walk_anim())?;
     layout.corridor?;
-    let frame_at = |anim: &str| crate::pack::animation_frame_at(pack, anim, clock.beat);
+    let frame_at = |anim: &str| crate::pack::animation_frame_at(pack, anim, timing.beat);
 
     // Its roam is ambient, so it walks on the beat its legs step on; at rest it
     // holds the middle of its first cycle, resting at that cycle's spot.
-    let elapsed_ms = if clock.beat.is_rest() {
+    let elapsed_ms = if timing.beat.is_rest() {
         PET_CYCLE_MS / 2
     } else {
-        clock.beat.ms()
+        timing.beat.ms()
     };
 
     let cycle_n = (elapsed_ms / PET_CYCLE_MS).wrapping_add(pet_seed);
@@ -297,10 +297,10 @@ pub(crate) fn mascot_position(
     presence: &DaemonPresence,
     walk_anim: &'static str,
     rest_anim: &'static str,
-    clock: Clock,
+    timing: Timing,
     seed: u64,
 ) -> Option<(Point, &'static str)> {
-    let now = clock.now;
+    let now = timing.now;
     let elevator = mascot_elevator(layout)?;
     // Every clock below is measured from the END of this instance's stagger, so the
     // walk-out's reconstructed origin stays on the same wander phase as the walk-in.
@@ -310,10 +310,10 @@ pub(crate) fn mascot_position(
     let wander_start =
         presence.entered_at + std::time::Duration::from_millis(enter_delay + MASCOT_ENTER_MS);
     let wandered_by = |at| {
-        clock
+        timing
             .beat
             .loop_at(at)
-            .saturating_sub(clock.beat.loop_at(wander_start))
+            .saturating_sub(timing.beat.loop_at(wander_start))
     };
 
     if presence.liveness == DaemonLiveness::Down {
@@ -322,7 +322,7 @@ pub(crate) fn mascot_position(
         if down_age >= MASCOT_LEAVE_MS {
             return None;
         }
-        let from = if clock.beat.is_rest() {
+        let from = if timing.beat.is_rest() {
             mascot_rest_cell(layout, seed)
         } else {
             // Reconstructed at the IDLE CADENCE even if the gateway was Busy at the
@@ -356,7 +356,7 @@ pub(crate) fn mascot_position(
         ));
     }
 
-    if clock.beat.is_rest() {
+    if timing.beat.is_rest() {
         return Some((mascot_rest_cell(layout, seed), rest_anim));
     }
     let cycle_ms = match presence.display_state() {
@@ -504,7 +504,7 @@ mod tests {
                     PetKind::Cat,
                     &layout,
                     &pack,
-                    Motion::Full.clock(at(t)),
+                    Motion::Full.timing(at(t)),
                     &[],
                     false,
                     seed,
@@ -532,7 +532,7 @@ mod tests {
             PetKind::Cat,
             &layout,
             &pack,
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
             &[],
             true,
             0,
@@ -605,7 +605,7 @@ mod tests {
             PetKind::Cat,
             &layout,
             &pack,
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
             &[],
             false,
             seed,
@@ -673,7 +673,7 @@ mod tests {
                         PetKind::Cat,
                         &l,
                         &pack,
-                        Motion::Full.clock(now),
+                        Motion::Full.timing(now),
                         &[],
                         false,
                         seed,
@@ -771,7 +771,7 @@ mod tests {
                         &idle_presence(now, 30_000),
                         "lobster_walk",
                         "lobster_rest",
-                        Motion::Full.clock(now),
+                        Motion::Full.timing(now),
                         7,
                     )
                     .is_some(),
@@ -834,7 +834,7 @@ mod tests {
                     &presence,
                     "lobster_walk",
                     "lobster_rest",
-                    Motion::Full.clock(now),
+                    Motion::Full.timing(now),
                     seed,
                 ) else {
                     continue;
@@ -938,7 +938,7 @@ mod tests {
                         &p,
                         "lobster_walk",
                         "lobster_rest",
-                        Motion::Full.clock(now),
+                        Motion::Full.timing(now),
                         sd,
                     )
                     .map(|(pos, _)| pos)
@@ -990,7 +990,7 @@ mod tests {
                 &p,
                 "lobster_walk",
                 "lobster_rest",
-                Motion::Full.clock(now),
+                Motion::Full.timing(now),
                 seed,
             )
             .expect("inside the enter window")
@@ -1021,7 +1021,7 @@ mod tests {
                 &p,
                 "lobster_walk",
                 "lobster_rest",
-                Motion::Full.clock(now),
+                Motion::Full.timing(now),
                 seed,
             )
             .is_some()
@@ -1055,7 +1055,7 @@ mod tests {
             &p0,
             "lobster_walk",
             "lobster_rest",
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
             seed,
         )
         .expect("walk-in position");
@@ -1073,7 +1073,7 @@ mod tests {
             &p_mid,
             "lobster_walk",
             "lobster_rest",
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
             seed,
         )
         .expect("walk-in mid position");
@@ -1131,7 +1131,7 @@ mod tests {
             &idle,
             "lobster_walk",
             "lobster_rest",
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
             seed,
         )
         .expect("idle pos");
@@ -1140,7 +1140,7 @@ mod tests {
             &degraded,
             "lobster_walk",
             "lobster_rest",
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
             seed,
         )
         .expect("degraded pos");
@@ -1196,7 +1196,7 @@ mod tests {
                 presence,
                 "w",
                 "r",
-                Motion::Full.clock(killed_at),
+                Motion::Full.timing(killed_at),
                 seed
             )
             .is_some(),
@@ -1230,7 +1230,7 @@ mod tests {
                 liveness: DaemonLiveness::Down,
                 ..alive.clone()
             };
-            let still = Motion::Still.clock(died_at);
+            let still = Motion::Still.timing(died_at);
             let (resting, ..) = mascot_position(&layout, &alive, "w", "r", still, seed)
                 .expect("a live gateway renders a mascot");
             let (leaving_from, ..) = mascot_position(&layout, &down, "w", "r", still, seed)
@@ -1271,11 +1271,17 @@ mod tests {
                 ..alive.clone()
             };
 
-            let (was, _) =
-                mascot_position(&layout, &alive, "w", "r", Motion::Full.clock(died_at), seed)
-                    .expect("a live gateway renders a mascot");
+            let (was, _) = mascot_position(
+                &layout,
+                &alive,
+                "w",
+                "r",
+                Motion::Full.timing(died_at),
+                seed,
+            )
+            .expect("a live gateway renders a mascot");
             let (leaving_from, _) =
-                mascot_position(&layout, &down, "w", "r", Motion::Full.clock(died_at), seed)
+                mascot_position(&layout, &down, "w", "r", Motion::Full.timing(died_at), seed)
                     .expect("a just-died gateway is still walking out");
             // NOT byte-equality: the exit lerp routes its origin through
             // `walk_between`'s A*+snap, which shifts it a pixel or two off the raw
@@ -1300,7 +1306,7 @@ mod tests {
                     ..alive.clone()
                 };
                 assert!(
-                    mascot_position(&layout, &held, "w", "r", Motion::Full.clock(at), seed)
+                    mascot_position(&layout, &held, "w", "r", Motion::Full.timing(at), seed)
                         .is_none(),
                     "gateway {port} at age {early_ms}ms (< {delay}ms stagger) must not be \
                      drawn yet"
@@ -1317,7 +1323,7 @@ mod tests {
                     &at_arrival,
                     "w",
                     "r",
-                    Motion::Full.clock(arrived),
+                    Motion::Full.timing(arrived),
                     seed
                 )
                 .is_some(),

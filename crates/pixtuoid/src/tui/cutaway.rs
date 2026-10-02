@@ -23,7 +23,8 @@ use pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS;
 use pixtuoid_scene::cutaway::canvas::{
     CanvasFrame, CutawayCanvas, Dirty, StrikePhase, strike_phase,
 };
-use pixtuoid_scene::cutaway::paint::{CutawayCache, Showing};
+use pixtuoid_scene::cutaway::paint::CutawayCache;
+use pixtuoid_scene::display::Showing;
 use pixtuoid_scene::floor::SteppedFloor;
 use pixtuoid_scene::layout::{Bounds, Size};
 use pixtuoid_scene::theme::Theme;
