@@ -80,7 +80,7 @@ pub(super) enum DrawableKind<'a> {
     Character {
         agent: &'a AgentSlot,
         pose: SpritePose,
-        anchor: Point,
+        top_left: Point,
         label_anchor: Point,
         effects: &'a [Effect],
     },
@@ -237,7 +237,7 @@ pub(super) struct DrawableCtx<'a> {
     pub buf: &'a mut RgbBuffer,
     pub pack: &'a Pack,
     pub cache: &'a mut FrameCache,
-    pub clock: crate::anim::Clock,
+    pub timing: crate::anim::Timing,
     pub theme: &'a crate::theme::Theme,
 }
 
@@ -254,7 +254,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
     let buf = &mut *c.buf;
     let cache = &mut *c.cache;
     let (pack, theme) = (c.pack, c.theme);
-    let crate::anim::Clock { now, beat } = c.clock;
+    let crate::anim::Timing { now, beat } = c.timing;
     match kind {
         DrawableKind::DeskCubicle {
             desk,
@@ -288,17 +288,17 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
         DrawableKind::Character {
             agent,
             pose,
-            anchor,
+            top_left,
             label_anchor,
             effects,
         } => {
             paint_effects(buf, effects.iter().filter(|e| e.kind.beneath()), theme);
-            let drawn = paint_character_at(buf, *pose, *anchor, agent, pack, cache, now);
+            let drawn = paint_character_at(buf, *pose, *top_left, agent, pack, cache, now);
             paint_effects(buf, effects.iter().filter(|e| !e.kind.beneath()), theme);
             return drawn.map(|Size { w, h }| {
                 Drawn::Agent(AgentFrame {
                     agent_id: agent.agent_id,
-                    anchor: *anchor,
+                    top_left: *top_left,
                     w,
                     h,
                     label_anchor: *label_anchor,
@@ -557,12 +557,12 @@ const STACK_BASE_DY: u16 = 3;
 /// Rows per ream: one row of vertical detail is sub-legible at half-block scale.
 const STACK_PX_PER_TIER: u16 = 2;
 
-/// Paint a character at an arbitrary anchor with per-agent recolor, returning
+/// Paint a character at a top-left with per-agent recolor, returning
 /// the size of the frame it drew.
 pub(crate) fn paint_character_at(
     buf: &mut RgbBuffer,
     pose: SpritePose,
-    anchor: Point,
+    top_left: Point,
     agent: &AgentSlot,
     pack: &Pack,
     cache: &mut FrameCache,
@@ -584,7 +584,7 @@ pub(crate) fn paint_character_at(
         w: cached.width(),
         h: cached.height(),
     };
-    blit_frame(cached, anchor.x, anchor.y, buf);
+    blit_frame(cached, top_left.x, top_left.y, buf);
     Some(size)
 }
 
@@ -780,7 +780,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -796,7 +796,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -820,7 +820,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                    timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                     theme: th,
                 },
             );
@@ -849,7 +849,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -877,7 +877,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -892,7 +892,7 @@ mod tests {
                 buf: &mut buf2,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -949,7 +949,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    clock: Motion::Full.clock(now),
+                    timing: Motion::Full.timing(now),
                     theme: theme(),
                 },
             );
@@ -1000,7 +1000,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    clock: Motion::Full.clock(now),
+                    timing: Motion::Full.timing(now),
                     theme: theme(),
                 },
             );
@@ -1043,7 +1043,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(now),
+                timing: Motion::Full.timing(now),
                 theme: theme(),
             },
         );
@@ -1081,7 +1081,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    clock: Motion::Full.clock(now),
+                    timing: Motion::Full.timing(now),
                     theme: theme(),
                 },
             );
@@ -1126,7 +1126,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
+                timing: Motion::Full.timing(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -1218,7 +1218,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                clock: Motion::Full.clock(now),
+                timing: Motion::Full.timing(now),
                 theme: theme(),
             },
         );
@@ -1259,7 +1259,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    clock: Motion::Full.clock(now),
+                    timing: Motion::Full.timing(now),
                     theme: theme(),
                 },
             );

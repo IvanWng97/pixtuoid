@@ -55,20 +55,20 @@ pub(crate) struct Moment {
 }
 
 impl Moment {
-    /// `sky`, looked at under `theme` from `altitude` on `clock`. The sky is
-    /// given, not derived from the clock, so a forced weather or flash carries.
+    /// `sky`, looked at under `theme` from `altitude` on `timing`. The sky is
+    /// given, not derived from `timing`, so a forced weather or flash carries.
     pub(crate) fn resolve(
         sky: Sky,
         theme: &Theme,
         altitude: f32,
-        clock: crate::anim::Clock,
+        timing: crate::anim::Timing,
     ) -> Self {
         Self {
             look: SkyTones::resolve(&sky, theme),
             sky,
             altitude,
-            now: clock.now,
-            beat: clock.beat,
+            now: timing.now,
+            beat: timing.beat,
         }
     }
 }

@@ -21,13 +21,13 @@ use crate::chitchat::{ActiveChitchat, VenueKey};
 use crate::composite::{BLACK, WHITE, blend_rgb};
 use crate::frame_cache::FrameCache;
 use crate::layout::Size;
-use crate::motion::MotionState;
 use crate::pathfind::{AStarRouter, Router};
 use crate::pet::{Pet, PetState};
 use crate::pixel_painter::{PixelCtx, render_to_rgb_buffer};
 use crate::pose::PoseHistory;
 use crate::sim::{SimFrame, SimInputs, SimStores, sim_step};
 use crate::theme::Theme;
+use crate::walk::WalkState;
 
 pub use pixtuoid_core::state::MAX_FLOORS;
 
@@ -137,8 +137,8 @@ pub struct FloorCtx {
     pub vacancy_dim: VacancyDim,
     /// This floor's neon-sign fade state.
     pub(crate) neon: NeonState,
-    /// Per-agent walk-timing state (physics profiles for entry/exit/wander).
-    pub motion: HashMap<AgentId, MotionState>,
+    /// Per-agent walk state (physics profiles for entry/exit/wander).
+    pub walks: HashMap<AgentId, WalkState>,
     /// Longest in-flight entry- or exit-walk `duration_ms + pause_ms` on this
     /// floor (ms) — drives the door-open cosmetic without a hardcoded window.
     pub door_anim_max_ms: u64,
@@ -167,7 +167,7 @@ impl FloorCtx {
             shadows: crate::ground::DepthsCache::default(),
             vacancy_dim: VacancyDim::new(),
             neon: NeonState::new(),
-            motion: HashMap::new(),
+            walks: HashMap::new(),
             door_anim_max_ms: 0,
             layout_memo: None,
         }
@@ -182,7 +182,7 @@ impl FloorCtx {
             router: &mut self.router,
             overlay: &mut self.overlay,
             history: &mut self.history,
-            motion: &mut self.motion,
+            walks: &mut self.walks,
             vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat,
@@ -222,12 +222,12 @@ impl FloorCtx {
     pub fn evict_missing(&mut self, scene: &SceneState) {
         self.cache.evict_missing(scene);
         self.history.evict_missing(scene);
-        self.motion.retain(|id, _| scene.agents.contains_key(id));
+        self.walks.retain(|id, _| scene.agents.contains_key(id));
     }
 
     /// Recompute `door_anim_max_ms`: the max `duration_ms + pause_ms` over the
     /// **in-flight** entry/exit profiles only. An ARRIVED profile is excluded
-    /// because `MotionState` keeps an agent's `entry` profile for its whole
+    /// because `WalkState` keeps an agent's `entry` profile for its whole
     /// lifetime — without the gate the door would stay "open" for as long as the
     /// agent lives rather than just while they walk through it.
     pub fn recompute_door_anim_max_ms(&mut self, now: SystemTime) {
@@ -239,7 +239,7 @@ impl FloorCtx {
                 p.duration_ms + p.pause_ms
             }
         };
-        self.door_anim_max_ms = self.motion.values().fold(0u64, |acc, ms| {
+        self.door_anim_max_ms = self.walks.values().fold(0u64, |acc, ms| {
             let entry = ms
                 .entry
                 .as_ref()
@@ -929,6 +929,8 @@ pub(crate) fn neon_look(levels: NeonLevels, theme: &Theme) -> NeonLook {
 pub(crate) struct NeonState {
     fade: Option<NeonFade>,
     last_tick: Option<SystemTime>,
+    /// The loop time the last tick read, which the stutter steps by.
+    last_beat_ms: Option<u64>,
 }
 
 struct NeonFade {
@@ -954,13 +956,24 @@ impl NeonFade {
     }
 }
 
+// Every stutter bound on a whole Full tick, so the beat neither skips a flash
+// nor stretches one.
+const _: () = {
+    let mut i = 0;
+    while i < NeonState::STUTTER_FLASHES_MS.len() {
+        let (start, end) = NeonState::STUTTER_FLASHES_MS[i];
+        assert!(start % crate::anim::FULL_TICK_MS == 0 && end % crate::anim::FULL_TICK_MS == 0);
+        i += 1;
+    }
+};
+
 impl NeonState {
     /// How long a mood change takes to cross over (ms).
     pub(crate) const FADE_MS: u32 = 1_600;
     /// A starved tube's stutter cycle (ms).
     const STUTTER_MS: u64 = 5_000;
-    /// The flash windows inside one cycle, `[start, end)` ms: each a whole
-    /// Full beat, so the beat neither skips nor stretches one.
+    /// The flash windows inside one cycle, `[start, end)` ms, each on whole
+    /// Full beats.
     const STUTTER_FLASHES_MS: [(u64, u64); 4] = [
         (1_875, 2_000),
         (2_125, 2_250),
@@ -983,10 +996,10 @@ impl NeonState {
             .any(|&(start, end)| (start..end).contains(&t))
     }
 
-    /// The frame gap from which a flash can't be drawn faithfully: the shortest
-    /// flash. A painter sampling slower than that — a still, the floating
-    /// window's ambient cadence — would hold one flash for its whole frame or
-    /// miss it, so it gets the steady starved tube instead.
+    /// The longest loop-time step a flash can still be drawn across: the
+    /// shortest flash. A painter stepping further — a still, the floating
+    /// window's ambient cadence — would skip some flashes and hold others, so
+    /// it gets the steady starved tube instead.
     fn shortest_flash_ms() -> u64 {
         Self::STUTTER_FLASHES_MS
             .iter()
@@ -995,7 +1008,7 @@ impl NeonState {
             .unwrap_or(0)
     }
 
-    /// Advance to `mood` on `clock`; returns this frame's light. A count change
+    /// Advance to `mood` on `timing`; returns this frame's light. A count change
     /// inside one mood is not a change, and a reversal mid-fade restarts from the
     /// light it interrupted.
     ///
@@ -1007,10 +1020,10 @@ impl NeonState {
         &mut self,
         mood: crate::board::OfficeMood,
         room_dimmed: bool,
-        clock: crate::anim::Clock,
+        timing: crate::anim::Timing,
     ) -> NeonLevels {
         use crate::board::OfficeMood;
-        let now = clock.now;
+        let now = timing.now;
         let to = match mood {
             OfficeMood::Alert { .. } => NeonLevels::ALERT,
             OfficeMood::Busy { .. } => NeonLevels::BUSY,
@@ -1021,6 +1034,11 @@ impl NeonState {
             .last_tick
             .map(|last| crate::anim::elapsed_ms(now, last));
         self.last_tick = Some(now);
+        // Stepped in loop time, which Calm walks at a quarter of the wall
+        // clock's pace, so Calm plays the stutter slower rather than never.
+        let beat_ms = timing.beat.ms();
+        let step_ms = self.last_beat_ms.map(|last| beat_ms.abs_diff(last));
+        self.last_beat_ms = Some(beat_ms);
         let recent = gap_ms.is_some_and(|gap| gap <= u64::from(Self::FADE_MS));
         let current = match &self.fade {
             Some(fade) if recent && fade.to == to => fade.at(now),
@@ -1043,8 +1061,8 @@ impl NeonState {
             }
         };
         // Only a tube that has LANDED on starved stutters, not one coasting down.
-        let drawable = gap_ms.is_some_and(|gap| gap < Self::shortest_flash_ms());
-        if current == NeonLevels::EMPTY && drawable && Self::stutter_flash(clock.beat) {
+        let drawable = step_ms.is_some_and(|step| step <= Self::shortest_flash_ms());
+        if current == NeonLevels::EMPTY && drawable && Self::stutter_flash(timing.beat) {
             NeonLevels::FLASH
         } else {
             current

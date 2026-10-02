@@ -348,12 +348,12 @@ pub(crate) fn frame_list<'a>(
     office: Office<'a>,
     Showing { floor, now, board }: Showing<'_>,
 ) -> DrawList<'a> {
-    let clock = floor.motion.clock(now);
+    let timing = floor.motion.timing(now);
     let moment = Moment::resolve(
-        crate::sky::Sky::at(clock, floor.weather),
+        crate::sky::Sky::at(timing, floor.weather),
         office.theme,
         floor.altitude,
-        clock,
+        timing,
     );
     build_list(frame, office, &moment, floor, board)
 }
@@ -2116,7 +2116,7 @@ fn push_characters(
         let badge_ceiling = seat.and_then(|(d, facing)| {
             desk_span(pack, desk_art(pack, facing)?, d, scale).map(|s| s.y0)
         });
-        let at = cutaway_anchor(c);
+        let at = cutaway_top_left(c);
         let shadow = !c.seated;
         // The drawn box reaches up over the hair its style dresses it in.
         let hair = key
@@ -3049,11 +3049,11 @@ fn paint_wall_decor(
     );
 }
 
-/// The classic placement's anchor, unchanged: the seat side is a per-desk layout
+/// The classic placement's top-left, unchanged: the seat side is a per-desk layout
 /// fact, so an override here would make the two profiles disagree about which
 /// side of its desk half the office sits on.
-fn cutaway_anchor(c: &crate::sim::CharacterPlacement) -> crate::layout::Point {
-    c.anchor
+fn cutaway_top_left(c: &crate::sim::CharacterPlacement) -> crate::layout::Point {
+    c.top_left
 }
 
 fn paint_figure(
@@ -4360,7 +4360,7 @@ pub(crate) mod tests {
                 crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                 theme,
                 0.0,
-                Motion::Full.clock(std::time::UNIX_EPOCH),
+                Motion::Full.timing(std::time::UNIX_EPOCH),
             ),
         );
         let (person, person_span) = order
@@ -4470,11 +4470,11 @@ pub(crate) mod tests {
     fn both_profiles_seat_an_occupant_on_the_side_the_layout_chose() {
         use crate::layout::{CHARACTER_SPRITE_W, Facing};
         let desk = crate::layout::Point { x: 40, y: 30 };
-        let near = crate::sim::seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::North);
-        let far = crate::sim::seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::South);
+        let near = crate::sim::seated_top_left(desk, CHARACTER_SPRITE_W, Facing::North);
+        let far = crate::sim::seated_top_left(desk, CHARACTER_SPRITE_W, Facing::South);
         assert_eq!(
             near.y, desk.y,
-            "a back-turned occupant's shared anchor lands on desk.y"
+            "a back-turned occupant's shared top-left lands on desk.y"
         );
         assert!(
             far.y < near.y,
@@ -4942,7 +4942,7 @@ pub(crate) mod tests {
                     crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                     theme,
                     0.0,
-                    Motion::Full.clock(std::time::UNIX_EPOCH),
+                    Motion::Full.timing(std::time::UNIX_EPOCH),
                 ),
             ) {
                 let PieceKind::Character {
@@ -5039,7 +5039,7 @@ pub(crate) mod tests {
                 crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                 theme,
                 0.0,
-                Motion::Full.clock(std::time::UNIX_EPOCH),
+                Motion::Full.timing(std::time::UNIX_EPOCH),
             ),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
@@ -5111,7 +5111,7 @@ pub(crate) mod tests {
             crate::sky::Sky::clock(now),
             theme,
             0.0,
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
         );
         let build = Build {
             frame: &frame,
@@ -5131,7 +5131,7 @@ pub(crate) mod tests {
     }
 
     fn near_seat(desk: crate::layout::Point) -> crate::layout::Point {
-        crate::sim::seated_anchor_facing(
+        crate::sim::seated_top_left(
             desk,
             crate::layout::CHARACTER_SPRITE_W,
             crate::layout::Facing::North,
@@ -5279,7 +5279,7 @@ pub(crate) mod tests {
             crate::sky::Sky::at_with(now, w),
             &crate::theme::NORMAL,
             0.0,
-            Motion::Full.clock(now),
+            Motion::Full.timing(now),
         )
     }
 
@@ -5421,7 +5421,7 @@ pub(crate) mod tests {
                     crate::sky::Sky::clock(std::time::UNIX_EPOCH),
                     theme,
                     0.0,
-                    Motion::Full.clock(std::time::UNIX_EPOCH),
+                    Motion::Full.timing(std::time::UNIX_EPOCH),
                 );
                 for (span, kind) in collect_pieces(frame, office, &moment)
                     .into_iter()
@@ -5507,7 +5507,7 @@ pub(crate) mod tests {
         let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
         for mut frame in frames {
             for c in &mut frame.characters {
-                c.effects = every_effect(c.anchor);
+                c.effects = every_effect(c.top_left);
             }
             check(&pack, &frame, &layout, true);
         }
@@ -5640,7 +5640,7 @@ S B B B B B B S
         };
         let mut frame = frames.last().expect("a seated frame").clone();
         for c in &mut frame.characters {
-            c.effects = every_effect(c.anchor);
+            c.effects = every_effect(c.top_left);
         }
         let list = list_at(&frame, office, 12);
         let badge = list
@@ -5721,7 +5721,7 @@ S B B B B B B S
                 let list = build_list(
                     &frame,
                     office,
-                    &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(now)),
+                    &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now)),
                     crate::floor::FloorMeta::ground(),
                     quiet_board(),
                 );
@@ -5904,7 +5904,7 @@ S B B B B B B S
                     theme,
                     scale: RenderScale::ONE,
                 },
-                &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(now)),
+                &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now)),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
             );
@@ -5936,7 +5936,7 @@ S B B B B B B S
         };
         for mut frame in frames {
             for c in &mut frame.characters {
-                c.effects = every_effect(c.anchor);
+                c.effects = every_effect(c.top_left);
             }
             let list = list_at(&frame, office, 12);
             let kinds: Vec<Option<K>> = list
@@ -5974,7 +5974,7 @@ S B B B B B B S
         let mut frame = frames.last().expect("a seated frame").clone();
         for c in &mut frame.characters {
             c.effects = vec![crate::effects::flame_crown(
-                c.anchor,
+                c.top_left,
                 8,
                 Motion::Full.beat(std::time::UNIX_EPOCH),
             )];
@@ -6047,7 +6047,7 @@ S B B B B B B S
                             crate::sky::Sky::clock(now),
                             theme,
                             0.0,
-                            Motion::Full.clock(now),
+                            Motion::Full.timing(now),
                         ),
                         crate::floor::FloorMeta::ground(),
                         quiet_board(),
@@ -6101,7 +6101,7 @@ S B B B B B B S
                     crate::sky::Sky::clock(now),
                     theme,
                     0.0,
-                    Motion::Full.clock(now),
+                    Motion::Full.timing(now),
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
@@ -6138,7 +6138,7 @@ S B B B B B B S
         build_list(
             frame,
             office,
-            &Moment::resolve(sky, office.theme, 0.0, Motion::Full.clock(now)),
+            &Moment::resolve(sky, office.theme, 0.0, Motion::Full.timing(now)),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
         )
@@ -6919,7 +6919,7 @@ S B B B B B B S
                             crate::sky::Sky::clock(now),
                             theme,
                             0.0,
-                            Motion::Full.clock(now),
+                            Motion::Full.timing(now),
                         ),
                         crate::floor::FloorMeta::ground(),
                         quiet_board(),
@@ -7033,7 +7033,7 @@ S B B B B B B S
                     crate::sky::Sky::clock(now),
                     theme,
                     0.0,
-                    Motion::Full.clock(now)
+                    Motion::Full.timing(now)
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board()
@@ -7050,7 +7050,7 @@ S B B B B B B S
                     crate::sky::Sky::clock(now),
                     theme,
                     0.0,
-                    Motion::Full.clock(now)
+                    Motion::Full.timing(now)
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board()
@@ -7077,7 +7077,7 @@ S B B B B B B S
                     crate::sky::Sky::clock(std::time::SystemTime::UNIX_EPOCH),
                     theme,
                     0.0,
-                    Motion::Full.clock(std::time::SystemTime::UNIX_EPOCH),
+                    Motion::Full.timing(std::time::SystemTime::UNIX_EPOCH),
                 ),
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
@@ -7150,16 +7150,16 @@ S B B B B B B S
         }
     }
 
-    /// One of each effect a figure carries, riding on its `anchor`, each at a
+    /// One of each effect a figure carries, riding on its `top_left`, each at a
     /// step it shows at.
-    fn every_effect(anchor: crate::layout::Point) -> Vec<crate::effects::Effect> {
+    fn every_effect(top_left: crate::layout::Point) -> Vec<crate::effects::Effect> {
         let at = |ms| std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms);
         vec![
-            crate::effects::walking_dust(anchor, 0),
-            crate::effects::flame_crown(anchor, 8, Motion::Full.beat(at(0))),
-            crate::effects::sleep_z(anchor, 0, Motion::Full.beat(at(500)))
+            crate::effects::walking_dust(top_left, 0),
+            crate::effects::flame_crown(top_left, 8, Motion::Full.beat(at(0))),
+            crate::effects::sleep_z(top_left, 0, Motion::Full.beat(at(500)))
                 .expect("a z rising at 500 ms"),
-            crate::effects::waiting_mark(anchor),
+            crate::effects::waiting_mark(top_left),
         ]
     }
 
@@ -7464,7 +7464,7 @@ S B B B B B B S
         build_list(
             frame,
             office,
-            &Moment::resolve(sky, office.theme, 0.0, Motion::Full.clock(now)),
+            &Moment::resolve(sky, office.theme, 0.0, Motion::Full.timing(now)),
             crate::floor::FloorMeta::ground(),
             quiet_board(),
         )

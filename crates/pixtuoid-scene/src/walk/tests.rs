@@ -8,7 +8,7 @@ fn id() -> AgentId {
 
 #[test]
 fn motion_state_new_default_fields() {
-    let ms = MotionState::new(id());
+    let ms = WalkState::new(id());
     assert!(ms.entry.is_none());
     assert!(ms.exit.is_none());
     assert!(ms.snap_back.is_none());
@@ -222,13 +222,13 @@ impl<R: Router> WanderRig<R> {
             &self.layout,
             &mut self.route.router,
             &self.route.overlay,
-            &mut self.route.motion,
+            &mut self.route.walks,
         );
     }
 
-    fn state(&self) -> &MotionState {
+    fn state(&self) -> &WalkState {
         self.route
-            .motion
+            .walks
             .get(&self.slot.agent_id)
             .expect("state inserted")
     }
@@ -253,7 +253,7 @@ impl<R: Router> WanderRig<R> {
         let start = now;
         while self
             .route
-            .motion
+            .walks
             .get(&self.slot.agent_id)
             .map(|m| phase_kind(m.wander.phase))
             == Some(from_phase)
@@ -812,7 +812,7 @@ fn back_profile_routes_to_the_jittered_desk_goal_the_render_uses() {
     let l = layout();
     let overlay = OccupancyOverlay::new();
     let mut router = Recording { calls: Vec::new() };
-    let mut ms = MotionState::new(trip_id);
+    let mut ms = WalkState::new(trip_id);
     ms.wander.target.dest = Point { x: 40, y: 60 };
 
     let _ = snapshot_back_profile(&slot, &ms, &l, &mut router, &overlay);
@@ -906,7 +906,7 @@ fn pick_wander_dest_falls_back_to_aimless_when_boxed_in() {
 }
 
 /// Dropping or forging the settle cell shows up as a mid-walk pop / wrong
-/// render anchor, so pin the `Named{seat:None}`-vs-seat boundary directly.
+/// render top-left, so pin the `Named{seat:None}`-vs-seat boundary directly.
 #[test]
 fn wander_named_seat_is_some_iff_the_destination_is_sat_on() {
     use crate::layout::furniture_def;
@@ -945,8 +945,8 @@ fn wander_named_seat_is_some_iff_the_destination_is_sat_on() {
     );
 }
 
-fn tripping_at(id: AgentId, wp_idx: usize, kind: WaypointKind) -> MotionState {
-    let mut ms = MotionState::new(id);
+fn tripping_at(id: AgentId, wp_idx: usize, kind: WaypointKind) -> WalkState {
+    let mut ms = WalkState::new(id);
     ms.wander.phase =
         WanderPhase::AtWaypoint(crate::physics::walk_profile(100, WalkIntent::WanderOut, id));
     ms.wander.target = WanderTarget {
@@ -966,13 +966,13 @@ fn spot_claims_holds_only_exclusive_spots_of_other_agents_out_on_a_trip() {
     let sitter = AgentId::from_transcript_path("/p/claims-sitter.jsonl");
     let caller = AgentId::from_transcript_path("/p/claims-caller.jsonl");
     let stander = AgentId::from_transcript_path("/p/claims-stander.jsonl");
-    let mut motion = HashMap::new();
-    motion.insert(sitter, tripping_at(sitter, 3, WaypointKind::MeetingChair));
-    motion.insert(caller, tripping_at(caller, 9, WaypointKind::PhoneBooth));
-    motion.insert(stander, tripping_at(stander, 7, WaypointKind::Printer));
-    motion.insert(me, tripping_at(me, 5, WaypointKind::Couch));
+    let mut walks = HashMap::new();
+    walks.insert(sitter, tripping_at(sitter, 3, WaypointKind::MeetingChair));
+    walks.insert(caller, tripping_at(caller, 9, WaypointKind::PhoneBooth));
+    walks.insert(stander, tripping_at(stander, 7, WaypointKind::Printer));
+    walks.insert(me, tripping_at(me, 5, WaypointKind::Couch));
 
-    let claims = spot_claims(&motion, me);
+    let claims = spot_claims(&walks, me);
     assert!(claims.holds(3), "another agent's seat must be claimed");
     assert!(claims.holds(9), "a phone booth is exclusive → claimed");
     assert!(
@@ -994,11 +994,11 @@ fn spot_claims_ignores_a_seated_agents_stale_target() {
     let resumed = AgentId::from_transcript_path("/p/claims-resumed.jsonl");
     let mut ms = tripping_at(resumed, 3, WaypointKind::MeetingChair);
     ms.wander.phase = WanderPhase::Seated; // what the stale-resume bootstrap does
-    let mut motion = HashMap::new();
-    motion.insert(resumed, ms);
+    let mut walks = HashMap::new();
+    walks.insert(resumed, ms);
 
     assert!(
-        !spot_claims(&motion, me).holds(3),
+        !spot_claims(&walks, me).holds(3),
         "an agent re-seated at its desk must not keep holding a meeting seat"
     );
 }

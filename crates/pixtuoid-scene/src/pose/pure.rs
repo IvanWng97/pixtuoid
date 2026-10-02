@@ -9,7 +9,7 @@ use crate::layout::{
     Bounds, DwellWindow, Point, SceneLayout, WaypointKind, desk_furniture_def,
     desk_walk_anchor_facing, furniture_def,
 };
-use crate::motion::{WanderKind, WanderTarget};
+use crate::walk::{WanderKind, WanderTarget};
 use pixtuoid_core::AgentId;
 use pixtuoid_core::state::{ActivityState, AgentSlot};
 
@@ -19,7 +19,7 @@ use pixtuoid_core::state::{ActivityState, AgentSlot};
 pub const THINKING_WINDOW_SECS: u64 = 20;
 
 /// Base of the stale-resume / off-screen-gap sentinel in
-/// `motion::advance_wander` — above on-screen frame cadence, below a
+/// `walk::advance_wander` — above on-screen frame cadence, below a
 /// floor-switch-away gap. NOT the wander dwell; see `dwell_ms` for that.
 pub const STALE_RESUME_GAP_BASE_MS: u64 = 7_000;
 /// Maximum extra time added per agent — jitter range is `[0, RANGE)`.
@@ -67,7 +67,7 @@ pub fn walking_frame(elapsed_ms: u64) -> usize {
 pub const ENTRY_ANIMATION_MS: u64 = 4000;
 
 /// Per-agent stale-resume gap (ms): above this `now - last_advanced_at`,
-/// `motion::advance_wander` treats the floor as off-screen/paused and
+/// `walk::advance_wander` treats the floor as off-screen/paused and
 /// re-bootstraps analytically instead of replaying the backlog one transition
 /// per frame. Jittered per agent so floors don't re-bootstrap in lockstep.
 pub fn stale_resume_gap_ms(agent_id: AgentId) -> u64 {
@@ -426,7 +426,7 @@ impl SpotClaims {
 /// Resolve the wander destination for `(agent_id, cycle_n)` on `layout`, with
 /// `origin` (the home desk) as the approach-side tiebreaker. The ONE stateless
 /// wander-destination resolver: the stateful motion authority
-/// (`motion::advance_wander` via `pick_wander_dest`) delegates to it, and
+/// (`walk::advance_wander` via `pick_wander_dest`) delegates to it, and
 /// `idle_pose` calls it then maps the [`WanderTarget`] to a [`Pose`].
 ///
 /// `idle_pose` passes an EMPTY `claimed` set because the pure half has no
@@ -503,7 +503,7 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
     // cycle's seated phase, the first pose emitted after it is mid-Walking — a
     // desk→corridor pop in every stateless consumer. Sit out the RELEASE cycle
     // instead. Deliberately phase-only: shifting `cycle_n` would desync
-    // destination selection from `motion::advance_wander`'s bootstrap, which
+    // destination selection from `walk::advance_wander`'s bootstrap, which
     // must stay in lockstep with this function.
     let hold = thinking_hold_ms(slot);
     if cycle_n == hold / cycle_ms && hold % cycle_ms > seated_end {

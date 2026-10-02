@@ -406,7 +406,7 @@ mod tests {
         let strike = (0..60_000u64)
             .step_by(10)
             .map(|ms| SystemTime::UNIX_EPOCH + Duration::from_millis(ms))
-            .find(|&t| crate::sky::Sky::at(Motion::Full.clock(t), storm).flash() > 0.0)
+            .find(|&t| crate::sky::Sky::at(Motion::Full.timing(t), storm).flash() > 0.0)
             .expect("a strike in the first minute");
         let steps: Vec<_> = ticks(strike - Duration::from_millis(200), 8)
             .map(|t| (seated.clone(), t))
@@ -668,9 +668,9 @@ mod tests {
             both.agents.push(b.clone());
             both.characters.push(crate::sim::CharacterPlacement {
                 agent_idx: both.agents.len() - 1,
-                anchor: crate::layout::Point {
-                    x: a.anchor.x + 2,
-                    y: a.anchor.y + dy,
+                top_left: crate::layout::Point {
+                    x: a.top_left.x + 2,
+                    y: a.top_left.y + dy,
                 },
                 sort_row: a.sort_row + dy,
                 seat_desk: None,

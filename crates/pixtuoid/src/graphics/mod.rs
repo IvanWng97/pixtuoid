@@ -221,6 +221,94 @@ pub(crate) enum Plan {
     },
 }
 
+/// A text variable: `None` when unset, blank or not UTF-8.
+fn env_text(name: &str) -> Option<String> {
+    pixtuoid_core::platform::text_env(name).filter(|v| !v.trim().is_empty())
+}
+
+/// A marker variable, presence only: [`path_env`](pixtuoid_core::platform::path_env)'s
+/// rule, so a non-UTF-8 value (`$TMUX` holds a path) is set and a blank one is not.
+fn env_set(name: &str) -> bool {
+    pixtuoid_core::platform::path_env(name).is_some()
+}
+
+/// The terminal and the link to it as the environment names them: the probe
+/// and the motion default read these variables only through here.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct TermEnv {
+    term: Option<String>,
+    term_program: Option<String>,
+    /// `$TMUX`: this process is a tmux client.
+    tmux_client: bool,
+    ssh: bool,
+}
+
+impl TermEnv {
+    fn read() -> Self {
+        Self {
+            term: env_text("TERM"),
+            term_program: env_text("TERM_PROGRAM"),
+            tmux_client: env_set("TMUX"),
+            // ssh(1) ENVIRONMENT: what a session's sshd sets, SSH_TTY only with a tty.
+            ssh: env_set("SSH_CONNECTION") || env_set("SSH_TTY"),
+        }
+    }
+
+    /// Upstream's test before wrapping every image in passthrough
+    /// (ratatui-image 11.0.8 `picker.rs:320-326`), on every platform.
+    fn tmux_term(&self) -> bool {
+        self.term.as_deref().is_some_and(|t| t.starts_with("tmux"))
+            || self.term_program.as_deref() == Some("tmux")
+    }
+
+    /// A tmux client, or a tmux terminal name carried over ssh: either way tmux
+    /// redraws every repaint.
+    fn link(&self) -> Link {
+        Link {
+            tmux: self.tmux_client || self.tmux_term(),
+            ssh: self.ssh,
+        }
+    }
+}
+
+/// What stands between this process and the screen: each hop makes a repaint
+/// dearer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct Link {
+    /// Inside tmux, which redraws every repaint itself.
+    pub(crate) tmux: bool,
+    /// Over ssh, where every repaint crosses the network.
+    pub(crate) ssh: bool,
+}
+
+impl Link {
+    /// The link this process's environment names.
+    pub(crate) fn of_env() -> Self {
+        TermEnv::read().link()
+    }
+}
+
+impl Plan {
+    /// The motion this plan affords: every loop on a local kitty image or
+    /// half-block grid, a calmer pace where a repaint costs more — SIXEL's or
+    /// iTerm2's heavier image, tmux, ssh.
+    pub(crate) fn motion(self, link: Link) -> pixtuoid_scene::anim::Motion {
+        use pixtuoid_scene::anim::Motion;
+        let heavy = matches!(
+            self,
+            Plan::Cutaway {
+                protocol: ImageProtocol::Sixel | ImageProtocol::Iterm2,
+                ..
+            }
+        );
+        if heavy || link.tmux || link.ssh {
+            Motion::Calm
+        } else {
+            Motion::Full
+        }
+    }
+}
+
 /// What the probe learned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Detected {
@@ -642,6 +730,74 @@ mod tests {
         width: 120,
         height: 40,
     };
+
+    /// Each terminal kind's default motion: every loop on a local kitty image or
+    /// half-block grid, the calm pace for SIXEL, iTerm2, tmux or ssh.
+    #[test]
+    fn each_terminal_kind_paints_at_its_affordable_motion() {
+        use pixtuoid_scene::anim::Motion;
+        let plan = |protocol| {
+            let probe = answered(Some(protocol), CELL_8X16, false);
+            resolve(GraphicsMode::Auto, probe, BUNDLED, AREA)
+        };
+        let classic = resolve(GraphicsMode::Off, Probe::NotQueried, BUNDLED, AREA);
+        let local = Link::default();
+        let tmux = Link {
+            tmux: true,
+            ..local
+        };
+        let ssh = Link { ssh: true, ..local };
+        assert!(matches!(plan(ImageProtocol::Kitty), Plan::Cutaway { .. }));
+        assert_eq!(plan(ImageProtocol::Kitty).motion(local), Motion::Full);
+        assert_eq!(classic.motion(local), Motion::Full);
+        for heavy in [ImageProtocol::Sixel, ImageProtocol::Iterm2] {
+            assert_eq!(plan(heavy).motion(local), Motion::Calm, "{heavy:?}");
+        }
+        for link in [tmux, ssh] {
+            assert_eq!(
+                plan(ImageProtocol::Kitty).motion(link),
+                Motion::Calm,
+                "{link:?}"
+            );
+            assert_eq!(classic.motion(link), Motion::Calm, "{link:?}");
+        }
+    }
+
+    #[test]
+    fn the_environment_names_the_link() {
+        const VARS: [&str; 5] = ["TERM", "TERM_PROGRAM", "TMUX", "SSH_CONNECTION", "SSH_TTY"];
+        let link = |set: &[(&str, &str)]| {
+            let vars = VARS.map(|name| {
+                let value = set.iter().find(|(n, _)| *n == name).map(|(_, v)| *v);
+                (name, value)
+            });
+            temp_env::with_vars(vars, Link::of_env)
+        };
+        let tmux = Link {
+            tmux: true,
+            ..Link::default()
+        };
+        let ssh = Link {
+            ssh: true,
+            ..Link::default()
+        };
+        assert_eq!(link(&[("TERM", "xterm-ghostty")]), Link::default());
+        for blank in ["", " \t"] {
+            assert_eq!(
+                link(&[("TMUX", blank)]),
+                Link::default(),
+                "{blank:?} is unset"
+            );
+        }
+        assert_eq!(link(&[("TMUX", "/tmp/tmux-501/default,1,0")]), tmux);
+        assert_eq!(link(&[("TERM", "tmux-256color")]), tmux, "carried over ssh");
+        assert_eq!(link(&[("TERM_PROGRAM", "tmux")]), tmux);
+        assert_eq!(
+            link(&[("SSH_CONNECTION", "10.0.0.2 51234 10.0.0.1 22")]),
+            ssh
+        );
+        assert_eq!(link(&[("SSH_TTY", "/dev/ttys004")]), ssh);
+    }
 
     #[test]
     fn bundled_is_the_bundled_packs_max_density() {

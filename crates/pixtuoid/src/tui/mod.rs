@@ -550,6 +550,8 @@ pub(crate) struct TuiSession {
     pub pack: Arc<pixtuoid_core::sprite::format::Pack>,
     /// What `boot_tui` planned to paint.
     pub plan: crate::graphics::Plan,
+    /// How the office moves, which `boot_tui` resolved beside the plan.
+    pub motion: pixtuoid_scene::anim::Motion,
     pub floor_caps: Arc<[std::sync::atomic::AtomicUsize; pixtuoid_core::state::MAX_FLOORS]>,
     pub theme: &'static theme::Theme,
     pub config_path: std::path::PathBuf,
@@ -956,6 +958,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         mut scene_rx,
         pack,
         plan,
+        motion,
         floor_caps,
         theme,
         config_path,
@@ -971,6 +974,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     } = session;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
+    renderer.set_motion(motion);
     paint_plan(&mut renderer, plan, &pack);
     // A LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins
     // the device thread it owns.

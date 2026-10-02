@@ -341,7 +341,7 @@ mod tests {
             Sky::at_with(now, w),
             &crate::theme::NORMAL,
             0.0,
-            motion.clock(now),
+            motion.timing(now),
         ))
     }
 
@@ -395,7 +395,7 @@ mod tests {
                     sky,
                     &crate::theme::NORMAL,
                     0.0,
-                    Motion::Still.clock(now),
+                    Motion::Still.timing(now),
                 ))
                 .marks(0, glass, 4)
             };
