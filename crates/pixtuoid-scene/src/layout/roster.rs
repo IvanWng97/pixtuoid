@@ -6,7 +6,7 @@
 use super::{
     Bounds, Facing, Furniture, Lounge, MeetingRoom, MeetingTrio, PantryRoom, Pivot, PlantItem,
     PlantKind, PodDecor, PodDecorItem, Point, SceneLayout, Size, WallDecor, WallDecorItem,
-    WaypointKind, WindowBay, anchored_top_left, coat_rack_rect_at, furniture_def, z_sort_row,
+    WaypointKind, WindowBay, anchored_top_left, coat_rack_rect_at, furniture_def, sort_row_at,
 };
 use pixtuoid_core::state::FloorLocalDeskIndex;
 
@@ -76,9 +76,9 @@ pub(crate) enum Depth {
     /// Painted flat under the sorted scene, in roster order: the mats, the
     /// runner, and wall fixtures nothing stands behind.
     Backdrop,
-    /// Painted in the y-sort at `row`. At an equal row, `tie` orders it
-    /// against a figure and against a fixture of the other tie; roster order
-    /// orders it against a fixture of the same tie.
+    /// Painted in the y-sort at `row`, a [`sort_row_at`] value. At an equal row,
+    /// `tie` orders it against a figure and against a fixture of the other tie;
+    /// roster order orders it against a fixture of the same tie.
     Sorted {
         row: u16,
         /// Which paints on top where a figure sorts at `row` too.
@@ -423,7 +423,7 @@ pub(crate) fn desk_chair_fixtures(
             at: tl,
             visual: boxed(tl, furniture_def(Furniture::DeskChair).visual),
             depth: Depth::Sorted {
-                row: desk_chair_z_key(at, facing),
+                row: desk_chair_sort_row(at, facing),
                 tie: Tie::FixtureOver,
             },
         })
@@ -447,7 +447,7 @@ fn centred_row(kind: FixtureKind, pos: Point, row: Furniture) -> Fixture {
         kind,
         at: pos,
         visual: centred(pos, size),
-        depth: Depth::sorted(z_sort_row(Pivot::Center, pos, size.h)),
+        depth: Depth::sorted(sort_row_at(Pivot::Center, pos, size.h)),
     }
 }
 
@@ -582,7 +582,7 @@ impl SceneLayout {
                             at: sofa,
                             visual: centred(sofa, furniture_def(Furniture::MeetingSofaBody).visual),
                             depth: Depth::Sorted {
-                                row: super::seated_z_key(sofa),
+                                row: super::seated_sort_row(sofa),
                                 tie: if faces_away {
                                     Tie::FixtureOver
                                 } else {
@@ -662,7 +662,11 @@ impl SceneLayout {
                                     kind,
                                     at: wp.pos,
                                     visual: centred(wp.pos, size),
-                                    depth: Depth::sorted(z_sort_row(Pivot::Center, wp.pos, size.h)),
+                                    depth: Depth::sorted(sort_row_at(
+                                        Pivot::Center,
+                                        wp.pos,
+                                        size.h,
+                                    )),
                                 }
                             }
                             Station::VendingMachine | Station::Printer | Station::SnackShelf => {
@@ -694,7 +698,7 @@ impl SceneLayout {
                         at: wp.pos,
                         visual: centred(wp.pos, furniture_def(Furniture::MeetingChair).visual),
                         // Its sitter's own row: they sit on it.
-                        depth: Depth::sorted(super::seated_z_key(wp.pos)),
+                        depth: Depth::sorted(super::seated_sort_row(wp.pos)),
                     }),
             )
             .chain(tank.map(|at| centred_row(FixtureKind::FishTank, at, Furniture::FishTank)))
@@ -722,7 +726,7 @@ impl SceneLayout {
                             kind: FixtureKind::Wall { item, kind },
                             at: pos,
                             visual: boxed(pos, size),
-                            depth: Depth::sorted(z_sort_row(Pivot::TopLeft, pos, size.h)),
+                            depth: Depth::sorted(sort_row_at(Pivot::TopLeft, pos, size.h)),
                         }
                     }),
             )
@@ -861,7 +865,7 @@ impl SceneLayout {
         let lamp = self.floor_lamp()?;
         Some(Point {
             x: lamp.x,
-            y: z_sort_row(
+            y: sort_row_at(
                 Pivot::Center,
                 lamp,
                 furniture_def(Furniture::FloorLamp).visual.h,
@@ -937,11 +941,11 @@ pub(crate) fn desk_chair_top_left(desk: Point, facing: Facing) -> Option<Point> 
     })
 }
 
-/// The depth a desk's task chair sorts at: its seat's own z-key, which the sim
+/// The depth a desk's task chair sorts at: its seat's own sort row, which the sim
 /// gives the occupant arriving at, sitting in and leaving the seat alike. Its
 /// [`Tie::FixtureOver`] therefore draws the chair over its occupant throughout —
 /// no flip where the walk ends and the sit begins.
-pub(crate) fn desk_chair_z_key(desk: Point, facing: Facing) -> u16 {
+pub(crate) fn desk_chair_sort_row(desk: Point, facing: Facing) -> u16 {
     super::desk_walk_anchor_facing(desk, facing).y
 }
 

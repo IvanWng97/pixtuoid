@@ -44,7 +44,7 @@ pub struct RouteCtx<'a> {
     /// Per-agent rendered-position cache.
     pub history: &'a mut PoseHistory,
     /// Per-agent walk-timing state, keyed by `AgentId`.
-    pub motion: &'a mut HashMap<AgentId, MotionState>,
+    pub walks: &'a mut HashMap<AgentId, MotionState>,
     /// Whether an idle agent wanders off its desk: an ambient loop, so not at
     /// [`Motion::Still`](crate::anim::Motion::Still).
     pub wanders: bool,
@@ -75,7 +75,7 @@ impl<R: Router> RouteRig<R> {
             router: &mut self.router,
             overlay: &self.overlay,
             history: &mut self.history,
-            motion: &mut self.motion,
+            walks: &mut self.motion,
             wanders: true,
         }
     }
@@ -224,7 +224,7 @@ fn exit_elapsed_ms(profile: &WalkProfile, elapsed_ms: u64) -> u64 {
 /// (layout mask + per-frame [`RouteCtx::overlay`]) corner-by-corner instead of
 /// cutting through obstacles or other agents.
 ///
-/// [`RouteCtx::motion`] drives entry/exit physics — the A* path length is
+/// [`RouteCtx::walks`] drives entry/exit physics — the A* path length is
 /// snapshotted into a `WalkProfile` on first sighting (commit-to-route), and
 /// later frames compute `t_x1000` against that frozen profile.
 /// [`RouteCtx::history`] is consulted on state transitions so an agent whose
@@ -241,7 +241,7 @@ pub fn derive_with_routing(
         let door_target = layout.door_threshold;
 
         let mstate = rctx
-            .motion
+            .walks
             .entry(slot.agent_id)
             .or_insert_with(|| MotionState::new(slot.agent_id));
 
@@ -321,7 +321,7 @@ pub fn derive_with_routing(
     }
 
     let live_now = rctx.history.recent(slot.agent_id, HISTORY_RECENT_MS, now);
-    let re_enter = take_cancelled_walkout(rctx.motion.get_mut(&slot.agent_id), now, live_now);
+    let re_enter = take_cancelled_walkout(rctx.walks.get_mut(&slot.agent_id), now, live_now);
 
     // ENTRY_ANIMATION_MS bounds only how long we try to ROUTE; the physics
     // duration is the real walk time.
@@ -335,7 +335,7 @@ pub fn derive_with_routing(
     let settle = chair_settle.map_or(Settle::None, Settle::End);
 
     let mstate = rctx
-        .motion
+        .walks
         .entry(slot.agent_id)
         .or_insert_with(|| MotionState::new(slot.agent_id));
 
@@ -409,8 +409,8 @@ pub fn derive_with_routing(
             return Some(Pose::SeatedIdle);
         }
 
-        // A per-frame snapshot, so the arms below never re-borrow `rctx.motion`.
-        let wf = advance_wander(slot, now, layout, rctx.router, rctx.overlay, rctx.motion);
+        // A per-frame snapshot, so the arms below never re-borrow `rctx.walks`.
+        let wf = advance_wander(slot, now, layout, rctx.router, rctx.overlay, rctx.walks);
 
         match wf.phase {
             WanderPhase::WalkingOut(_) => {
@@ -475,7 +475,7 @@ pub fn derive_with_routing(
 
     // Went Active/Waiting: drop any exclusive-spot claim, else the frozen
     // `wander.target` blocks that spot for the whole burst.
-    if let Some(ms) = rctx.motion.get_mut(&slot.agent_id) {
+    if let Some(ms) = rctx.walks.get_mut(&slot.agent_id) {
         ms.wander.target.kind = WanderKind::Aimless;
     }
 
@@ -493,7 +493,7 @@ pub fn derive_with_routing(
     let mut final_settle = Settle::None;
     let pose = if desk_pose {
         let ms_entry = rctx
-            .motion
+            .walks
             .entry(slot.agent_id)
             .or_insert_with(|| MotionState::new(slot.agent_id));
         // ARM ONCE per transition: `route_walking_pose` records the advancing walker
@@ -569,7 +569,7 @@ pub fn derive_with_routing(
     } else {
         // Clear any stale snap-back so the next transition snapshots afresh rather
         // than replaying a previous one.
-        if let Some(ms) = rctx.motion.get_mut(&slot.agent_id)
+        if let Some(ms) = rctx.walks.get_mut(&slot.agent_id)
             && ms.snap_back.is_some()
         {
             ms.snap_back = None;
@@ -591,7 +591,7 @@ fn route_walking_pose(
     let router = &mut *rctx.router;
     let overlay = rctx.overlay;
     let history = &mut *rctx.history;
-    let motion = &mut *rctx.motion;
+    let walks = &mut *rctx.walks;
     let Pose::Walking {
         from,
         to,
@@ -600,7 +600,7 @@ fn route_walking_pose(
         carrying_coffee,
     } = pose
     else {
-        if let Some(ms) = motion.get_mut(&slot.agent_id) {
+        if let Some(ms) = walks.get_mut(&slot.agent_id) {
             ms.walk_path = None;
         }
         // AtWaypoint / AimlessAt positions are a valid "previous position" for a
@@ -621,7 +621,7 @@ fn route_walking_pose(
     // re-routes onto a differently-shaped path, landing the frozen progress `t` on a
     // new pixel — the visible "flash" — and spiking the frame's A* cost.
     let path = {
-        let ms = motion
+        let ms = walks
             .entry(slot.agent_id)
             .or_insert_with(|| MotionState::new(slot.agent_id));
         match &ms.walk_path {

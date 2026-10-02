@@ -1089,7 +1089,7 @@ pub fn pixtuoid_scene::layout::floor_indicator_text(usize) -> alloc::string::Str
 pub const fn pixtuoid_scene::layout::furniture_def(pixtuoid_scene::layout::Furniture) -> pixtuoid_scene::layout::FurnitureDef
 pub fn pixtuoid_scene::layout::min_layout_size() -> pixtuoid_scene::layout::Size
 pub fn pixtuoid_scene::layout::seated_foot_cell(pixtuoid_scene::layout::Furniture, pixtuoid_scene::layout::Point) -> core::option::Option<pixtuoid_scene::layout::Point>
-pub fn pixtuoid_scene::layout::z_sort_row(pixtuoid_scene::layout::Pivot, pixtuoid_scene::layout::Point, u16) -> u16
+pub fn pixtuoid_scene::layout::sort_row_at(pixtuoid_scene::layout::Pivot, pixtuoid_scene::layout::Point, u16) -> u16
 pub mod pixtuoid_scene::motion
 pub enum pixtuoid_scene::motion::WanderKind
 pub pixtuoid_scene::motion::WanderKind::Aimless
@@ -1495,9 +1495,9 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::WeatherPolicy
 pub struct pixtuoid_scene::pixel_painter::AgentFrame
 pub pixtuoid_scene::pixel_painter::AgentFrame::agent_id: pixtuoid_core::id::AgentId
-pub pixtuoid_scene::pixel_painter::AgentFrame::anchor: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::pixel_painter::AgentFrame::h: u16
 pub pixtuoid_scene::pixel_painter::AgentFrame::label_anchor: pixtuoid_scene::layout::Point
+pub pixtuoid_scene::pixel_painter::AgentFrame::top_left: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::pixel_painter::AgentFrame::w: u16
 impl core::clone::Clone for pixtuoid_scene::pixel_painter::AgentFrame
 pub fn pixtuoid_scene::pixel_painter::AgentFrame::clone(&self) -> pixtuoid_scene::pixel_painter::AgentFrame
@@ -1641,9 +1641,9 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pose::PoseHisto
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pose::PoseHistory
 pub struct pixtuoid_scene::pose::RouteCtx<'a>
 pub pixtuoid_scene::pose::RouteCtx::history: &'a mut pixtuoid_scene::pose::PoseHistory
-pub pixtuoid_scene::pose::RouteCtx::motion: &'a mut std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, pixtuoid_scene::motion::MotionState>
 pub pixtuoid_scene::pose::RouteCtx::overlay: &'a pixtuoid_core::walkable::OccupancyOverlay
 pub pixtuoid_scene::pose::RouteCtx::router: &'a mut dyn pixtuoid_scene::pathfind::Router
+pub pixtuoid_scene::pose::RouteCtx::walks: &'a mut std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, pixtuoid_scene::motion::MotionState>
 pub pixtuoid_scene::pose::RouteCtx::wanders: bool
 impl<'a> core::marker::Freeze for pixtuoid_scene::pose::RouteCtx<'a>
 impl<'a> !core::marker::Send for pixtuoid_scene::pose::RouteCtx<'a>
@@ -1729,8 +1729,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::sim::CharacterG
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::sim::CharacterGlow
 pub struct pixtuoid_scene::sim::CharacterPlacement
 pub pixtuoid_scene::sim::CharacterPlacement::agent_idx: usize
-pub pixtuoid_scene::sim::CharacterPlacement::anchor: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::sim::CharacterPlacement::anchor_y: u16
 pub pixtuoid_scene::sim::CharacterPlacement::anim_name: &'static str
 pub pixtuoid_scene::sim::CharacterPlacement::breathes: bool
 pub pixtuoid_scene::sim::CharacterPlacement::flip_x: bool
@@ -1739,6 +1737,8 @@ pub pixtuoid_scene::sim::CharacterPlacement::glow: pixtuoid_scene::sim::Characte
 pub pixtuoid_scene::sim::CharacterPlacement::label_anchor: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::sim::CharacterPlacement::seat_desk: core::option::Option<pixtuoid_scene::layout::Point>
 pub pixtuoid_scene::sim::CharacterPlacement::seated: bool
+pub pixtuoid_scene::sim::CharacterPlacement::sort_row: u16
+pub pixtuoid_scene::sim::CharacterPlacement::top_left: pixtuoid_scene::layout::Point
 impl core::clone::Clone for pixtuoid_scene::sim::CharacterPlacement
 pub fn pixtuoid_scene::sim::CharacterPlacement::clone(&self) -> pixtuoid_scene::sim::CharacterPlacement
 impl core::fmt::Debug for pixtuoid_scene::sim::CharacterPlacement

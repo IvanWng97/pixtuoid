@@ -42,6 +42,8 @@ pub(crate) struct FloatingApp {
     config_path: PathBuf,
     /// The configured office pets — one is selected per floor (v1 shows floor 0's).
     pets: Vec<pixtuoid_scene::pet::Pet>,
+    /// How the office moves.
+    motion: pixtuoid_scene::anim::Motion,
     renderer: OfficeRenderer,
     audio_ctl: crate::audio::AudioController,
     /// The pipeline inputs, held until `resumed` can supply the REAL window size
@@ -67,13 +69,19 @@ pub(crate) struct FloatingApp {
     surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
 }
 
+/// How the office looks and moves.
+pub(crate) struct Appearance {
+    pub(crate) theme: &'static Theme,
+    pub(crate) motion: pixtuoid_scene::anim::Motion,
+}
+
 /// Click within this many physical px of the bottom-right corner = resize, else move.
 const RESIZE_CORNER_PX: f64 = 18.0;
 
 impl FloatingApp {
     pub(crate) fn new(
         cfg: FloatingConfig,
-        theme: &'static Theme,
+        Appearance { theme, motion }: Appearance,
         pack: Pack,
         config_path: PathBuf,
         pets: Vec<pixtuoid_scene::pet::Pet>,
@@ -89,6 +97,7 @@ impl FloatingApp {
             pack,
             config_path,
             pets,
+            motion,
             renderer,
             audio_ctl,
             boot: Some(boot),
@@ -144,7 +153,7 @@ impl FloatingApp {
         let volume_flash = self.audio_ctl.volume_flash(audio_now);
         let (scale, buf_w, buf_h) = super::offscreen::window_buffer_geometry(size);
         super::offscreen::sync_floor_caps(&mut self.last_caps_size, &floor_caps, buf_w, buf_h);
-        let floor_meta = FloorMeta::ground();
+        let floor_meta = FloorMeta::ground().with_motion(self.motion);
         let floor_pet =
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
         // ONE clock read, so the overlays below annotate the frame actually rendered.

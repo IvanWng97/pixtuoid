@@ -31,7 +31,8 @@ use crate::pose::{self, Pose, PoseHistory};
 use crate::layout::CHARACTER_SPRITE_W;
 use crate::pack::{desk_art, desk_art_top};
 use anchors::{
-    badge_anchor, on_canvas, walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath,
+    badge_anchor, on_canvas, walking_top_left, waypoint_rank_offset_x, waypoint_top_left,
+    with_breath,
 };
 use seat::{Seat, settle_seat};
 
@@ -39,7 +40,7 @@ pub(crate) mod anchors;
 pub(crate) mod seat;
 
 #[doc(hidden)]
-pub use anchors::seated_anchor_facing;
+pub use anchors::seated_top_left;
 
 /// The mutable world state one `sim_step` advances.
 pub(crate) struct SimStores<'a> {
@@ -71,15 +72,15 @@ pub enum CharacterGlow {
 pub struct CharacterPlacement {
     /// Index into [`SimFrame::agents`] for this character.
     pub agent_idx: usize,
-    /// Y-sort key (breath-independent).
-    pub anchor_y: u16,
+    /// The row it sorts on (breath-independent).
+    pub sort_row: u16,
     /// The sprite animation to blit (e.g. `"seated"`, `"walking"`).
     pub anim_name: &'static str,
     /// The frame within `anim_name` to draw this tick.
     pub frame_idx: usize,
     /// Top-left screen position to blit the sprite at.
-    pub anchor: Point,
-    /// Where its name badge hangs: the top-centre of the frame `anchor` was
+    pub top_left: Point,
+    /// Where its name badge hangs: the top-centre of the frame `top_left` was
     /// fitted for, without the breath, held clear of the art of the desk it sits
     /// at.
     pub label_anchor: Point,
@@ -89,12 +90,12 @@ pub struct CharacterPlacement {
     pub glow: CharacterGlow,
     /// What rides on it this tick, in paint order.
     pub(crate) effects: Vec<Effect>,
-    /// Whether `anchor` takes the idle breath: a figure at rest does, a walker's
+    /// Whether `top_left` takes the idle breath: a figure at rest does, a walker's
     /// stride is its own motion.
     pub breathes: bool,
     /// The home desk this placement is SEATED AT, in logical units — `None` for
     /// anyone not sitting at one (walking, at a waypoint, standing). Carried
-    /// because `anchor` is already PROJECTED and cannot yield it back.
+    /// because `top_left` is already PROJECTED and cannot yield it back.
     pub seat_desk: Option<Point>,
     /// Whether this figure sits on furniture — a desk's chair, a couch, a sofa
     /// or a meeting chair — which grounds it in place of a shadow.
@@ -331,7 +332,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
                     router: &mut *stores.router,
                     overlay: &*stores.overlay,
                     history: &mut *stores.history,
-                    motion: &mut *stores.motion,
+                    walks: &mut *stores.motion,
                     wanders: !beat.is_rest(),
                 },
             );
@@ -596,29 +597,29 @@ pub(crate) struct Cues {
 }
 
 /// What rides on `agent`, whose `w`-wide frame (`None` where its pack lacks
-/// one) stands at `anchor` this tick, in paint order: dust underfoot, then a
+/// one) stands at `top_left` this tick, in paint order: dust underfoot, then a
 /// burning head's crown, then a sleeper's z or a waiter's mark.
 pub(crate) fn character_effects(
     agent: &AgentSlot,
-    anchor: Point,
+    top_left: Point,
     w: Option<u16>,
     cues: Cues,
     clock: Clock,
 ) -> Vec<Effect> {
     let Clock { now, beat } = clock;
     let mut out = Vec::new();
-    out.extend(cues.stride.map(|s| effects::walking_dust(anchor, s)));
+    out.extend(cues.stride.map(|s| effects::walking_dust(top_left, s)));
     if let Some(w) = w
         && crate::burn::slot_burn_tier(agent, now) == crate::burn::BurnTier::Top
     {
-        out.push(effects::flame_crown(anchor, w, beat));
+        out.push(effects::flame_crown(top_left, w, beat));
     }
     out.extend(
         cues.sleep_seed
-            .and_then(|seed| effects::sleep_z(anchor, seed, beat)),
+            .and_then(|seed| effects::sleep_z(top_left, seed, beat)),
     );
     if cues.waiting {
-        out.push(effects::waiting_mark(anchor));
+        out.push(effects::waiting_mark(top_left));
     }
     out
 }
@@ -662,18 +663,18 @@ pub(crate) fn resolve_characters(
                       sleep_seed: Option<u64>| {
             let facing = layout.desk_facing(agent.desk_index.single_floor_local());
             let seat = Seat::at_desk(desk, facing);
-            let anchor = seat.render_anchor(char_w);
+            let top_left = seat.render_top_left(char_w);
             let (anim_name, flip_x) = seat.sprite_in_pack(base, pack);
             let frame_idx = frame_of(anim_name);
             let placement = CharacterPlacement {
                 agent_idx,
-                // Breath-independent z-key: the breath's 1 px rise must not flip
+                // Breath-independent sort row: the breath's 1 px rise must not flip
                 // sort order against nearby desk decor frame-to-frame.
-                anchor_y: seat.z_key(),
+                sort_row: seat.sort_row(),
                 anim_name,
                 frame_idx,
-                anchor,
-                label_anchor: anchor,
+                top_left,
+                label_anchor: top_left,
                 flip_x,
                 glow,
                 effects: Vec::new(),
@@ -725,11 +726,11 @@ pub(crate) fn resolve_characters(
                     let dx = waypoint_rank_offset_x(kind, rank);
                     let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
                     let seat = Seat::at_waypoint(kind, stand, wp_obj.facing);
-                    let anchor_base = seat.render_anchor(char_w);
+                    let upright_top_left = seat.render_top_left(char_w);
                     let (anim_name, flip_x) = seat.sprite_in_pack("seated", pack);
-                    let anchor_no_breath = Point {
-                        x: anchor_base.x.saturating_add_signed(dx),
-                        y: anchor_base.y,
+                    let top_left = Point {
+                        x: upright_top_left.x.saturating_add_signed(dx),
+                        y: upright_top_left.y,
                     };
                     if chitchat::supports_chitchat(kind) {
                         waypoint_visitors.push(chitchat::Visitor {
@@ -746,11 +747,11 @@ pub(crate) fn resolve_characters(
                             agent_idx,
                             // The glide's own key, so nothing pops at the
                             // walk→seat seam.
-                            anchor_y: seat.z_key(),
+                            sort_row: seat.sort_row(),
                             anim_name,
                             frame_idx: 0,
-                            anchor: anchor_no_breath,
-                            label_anchor: anchor_no_breath,
+                            top_left,
+                            label_anchor: top_left,
                             flip_x,
                             glow: CharacterGlow::None,
                             effects: Vec::new(),
@@ -763,15 +764,15 @@ pub(crate) fn resolve_characters(
                 }
             }
             Pose::AimlessAt { dest } => {
-                let anchor = waypoint_anchor(dest, char_w);
+                let top_left = waypoint_top_left(dest, char_w);
                 placements.push((
                     CharacterPlacement {
                         agent_idx,
-                        anchor_y: anchor.y + WALKING_Y_OFF,
+                        sort_row: top_left.y + WALKING_Y_OFF,
                         anim_name: "standing",
                         frame_idx: 0,
-                        anchor,
-                        label_anchor: anchor,
+                        top_left,
+                        label_anchor: top_left,
                         flip_x: false,
                         glow: CharacterGlow::None,
                         effects: Vec::new(),
@@ -798,15 +799,15 @@ pub(crate) fn resolve_characters(
                     new_coffee_carriers.push(agent.agent_id);
                 }
                 let pos = walking_position(from, to, t_x1000);
-                let walker_anchor = walking_anchor(pos, char_w);
+                let walker_top_left = walking_top_left(pos, char_w);
                 let dx = to.x as i32 - from.x as i32;
                 let dy = to.y as i32 - from.y as i32;
                 // A glide on/off a seat (`to` is a foot-cell sitting down,
                 // `from` rising) renders in the SEAT's view and at the SEAT's
-                // z-key, NOT the travel direction's. Without it a window-facing
+                // sort row, NOT the travel direction's. Without it a window-facing
                 // seat renders a FRONT walk and the agent sits facing the
                 // camera until it snaps at AtWaypoint. Ordinary travel segments
-                // keep the travel-direction facing and foot-position z-key.
+                // keep the travel-direction facing and foot-position sort row.
                 let settle = settle_seat(to, layout).or_else(|| settle_seat(from, layout));
                 let (going_back, flip) = match settle {
                     Some(seat) => seat.settle_walk(),
@@ -829,14 +830,14 @@ pub(crate) fn resolve_characters(
                 placements.push((
                     CharacterPlacement {
                         agent_idx,
-                        anchor_y: match settle {
-                            Some(seat) => seat.z_key(),
-                            None => walker_anchor.y + WALKING_Y_OFF,
+                        sort_row: match settle {
+                            Some(seat) => seat.sort_row(),
+                            None => walker_top_left.y + WALKING_Y_OFF,
                         },
                         anim_name,
                         frame_idx: frame,
-                        anchor: walker_anchor,
-                        label_anchor: walker_anchor,
+                        top_left: walker_top_left,
+                        label_anchor: walker_top_left,
                         flip_x: flip,
                         glow: CharacterGlow::None,
                         effects: Vec::new(),
@@ -853,7 +854,7 @@ pub(crate) fn resolve_characters(
         }
     }
     // ONE fit for every pose arm, on the frame each placement will blit, read by
-    // both the sprite and its badge. The z-key keeps pre-fit geometry.
+    // both the sprite and its badge. The sort row keeps pre-fit geometry.
     let fallback = Size {
         w: char_w,
         h: crate::layout::CHARACTER_SPRITE_H,
@@ -861,7 +862,7 @@ pub(crate) fn resolve_characters(
     for (p, cues) in &mut placements {
         let art = pack_frame_size(pack, p.anim_name, p.frame_idx);
         let size = art.unwrap_or(fallback);
-        let fitted = on_canvas(layout, Pivot::TopLeft, p.anchor, size);
+        let fitted = on_canvas(layout, Pivot::TopLeft, p.top_left, size);
         // The painter's own desk art: whatever it raises behind the sitter's
         // head, the badge clears.
         let ceiling = p.seat_desk.and_then(|d| {
@@ -871,12 +872,12 @@ pub(crate) fn resolve_characters(
         p.label_anchor = badge_anchor(fitted, size, ceiling);
         // Breath after the fit, so it never moves the badge.
         let agent = &agents[p.agent_idx];
-        p.anchor = if p.breathes {
+        p.top_left = if p.breathes {
             with_breath(fitted, agent.agent_id, beat)
         } else {
             fitted
         };
-        p.effects = character_effects(agent, p.anchor, art.map(|s| s.w), *cues, clock);
+        p.effects = character_effects(agent, p.top_left, art.map(|s| s.w), *cues, clock);
     }
 
     // wp_rank's keys ARE this tick's occupied waypoints — every AtWaypoint

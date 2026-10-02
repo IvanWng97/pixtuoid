@@ -668,11 +668,11 @@ mod tests {
             both.agents.push(b.clone());
             both.characters.push(crate::sim::CharacterPlacement {
                 agent_idx: both.agents.len() - 1,
-                anchor: crate::layout::Point {
-                    x: a.anchor.x + 2,
-                    y: a.anchor.y + dy,
+                top_left: crate::layout::Point {
+                    x: a.top_left.x + 2,
+                    y: a.top_left.y + dy,
                 },
-                anchor_y: a.anchor_y + dy,
+                sort_row: a.sort_row + dy,
                 seat_desk: None,
                 seated: false,
                 ..a.clone()

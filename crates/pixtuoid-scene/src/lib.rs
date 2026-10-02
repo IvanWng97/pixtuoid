@@ -59,7 +59,6 @@ pub mod layout;
 pub(crate) mod lighting;
 #[doc(hidden)]
 pub mod localclock;
-pub(crate) mod motes;
 pub mod motion;
 #[doc(hidden)]
 pub mod overlay;
