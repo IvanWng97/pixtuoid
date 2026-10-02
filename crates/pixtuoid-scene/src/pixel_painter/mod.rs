@@ -162,7 +162,7 @@ pub fn weather_names() -> Vec<&'static str> {
 /// How hard it is raining at `now` under `weather` (0.0 dry … 1.0 storm; snow
 /// and fog are 0.0) — the audio model's weather feed.
 pub fn precipitation_level(now: std::time::SystemTime, weather: WeatherPolicy) -> f32 {
-    crate::sky::Sky::at(crate::anim::Motion::Full.timing(now), weather).precipitation()
+    crate::sky::Sky::at(crate::anim::Motion::Full.timing(now), weather).rain()
 }
 
 /// Whether the office's sky shows the SUN at hour-of-day `hour` (0..24).

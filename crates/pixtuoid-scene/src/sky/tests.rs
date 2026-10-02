@@ -5,9 +5,9 @@ use std::time::Duration;
 #[test]
 fn the_clock_picks_every_weather_within_a_week() {
     use std::collections::HashSet;
-    let start = 1_700_000_000 / WEATHER_CYCLE_SECS;
-    const WEEK_SECS: u64 = 7 * 24 * 3600;
-    let seen: HashSet<Weather> = (start..start + WEEK_SECS / WEATHER_CYCLE_SECS)
+    const WEEK_MS: u64 = 7 * 24 * crate::anim::HOUR_MS;
+    let start = 1_700_000_000_000 / WEATHER_CYCLE_MS;
+    let seen: HashSet<Weather> = (start..start + WEEK_MS / WEATHER_CYCLE_MS)
         .map(slot_weather)
         .collect();
     for w in Weather::ALL {
@@ -110,9 +110,9 @@ fn moon_luminance_tracks_phase() {
 /// weather, pure, whatever the clock, through its transitions included.
 #[test]
 fn a_policy_picks_the_clock_or_holds_its_weather() {
-    const STRIDE_SECS: usize = 7;
-    for s in (0..40 * WEATHER_CYCLE_SECS).step_by(STRIDE_SECS) {
-        let now = at_secs(1_700_000_000 + s);
+    const STRIDE_MS: usize = 7_000;
+    for s in (0..40 * WEATHER_CYCLE_MS).step_by(STRIDE_MS) {
+        let now = at_ms(1_700_000_000_000 + s);
         assert_eq!(
             Sky::at(crate::anim::Motion::Full.timing(now), WeatherPolicy::Clock).weather(),
             clock_weather(now),
@@ -325,7 +325,7 @@ fn lightning_strikes_are_jittered_not_metronomic() {
 #[test]
 fn the_weather_is_deterministic_and_changes_across_slots() {
     let base = std::time::UNIX_EPOCH;
-    let at = |slot: u64| base + std::time::Duration::from_secs(slot * WEATHER_CYCLE_SECS);
+    let at = |slot: u64| base + std::time::Duration::from_millis(slot * WEATHER_CYCLE_MS);
     assert_eq!(clock_weather(at(17)), clock_weather(at(17)));
     let unique: std::collections::HashSet<_> = (0..20).map(slot_weather).collect();
     assert!(unique.len() >= 2, "weather should vary across slots");
@@ -604,12 +604,11 @@ fn the_moons_light_rides_the_skys_nightfall() {
     }
 }
 
-fn at_secs(secs: u64) -> SystemTime {
-    std::time::UNIX_EPOCH + Duration::from_secs(secs)
+fn at_ms(ms: u64) -> SystemTime {
+    std::time::UNIX_EPOCH + Duration::from_millis(ms)
 }
 
-const SLOT_MS: u64 = WEATHER_CYCLE_SECS * 1000;
-const HOLD_MS: u64 = SLOT_MS - TRANSITION_MS;
+const HOLD_MS: u64 = WEATHER_CYCLE_MS - TRANSITION_MS;
 
 /// Every ordered pair of different weathers.
 fn changes() -> impl Iterator<Item = (Weather, Weather)> {
@@ -625,15 +624,15 @@ fn progress() -> impl Iterator<Item = f32> {
     (0..SAMPLES).map(|k| k as f32 / SAMPLES as f32)
 }
 
-/// `element`'s `(start, end)` stage for `from → to`, read off the eased
+/// `element`'s `(start, end)` stage for `from → to`, read off the incoming
 /// share: where it first leaves 0 and first reaches 1.
 fn observed_stage(from: Weather, to: Weather, element: Element) -> (f32, f32) {
-    let eased = |p| WeatherMix::toward(from, to, p).eased(element);
+    let incoming = |p| WeatherMix::toward(from, to, p).incoming(element);
     let start = progress()
-        .take_while(|&p| eased(p) == 0.0)
+        .take_while(|&p| incoming(p) == 0.0)
         .last()
         .unwrap_or(0.0);
-    let end = progress().find(|&p| eased(p) >= 1.0).unwrap_or(1.0);
+    let end = progress().find(|&p| incoming(p) >= 1.0).unwrap_or(1.0);
     (start, end)
 }
 
@@ -643,7 +642,7 @@ fn observed_stage(from: Weather, to: Weather, element: Element) -> (f32, f32) {
 fn every_slot_opens_on_its_own_pure_weather() {
     for slot in 0..10_000u64 {
         assert_eq!(
-            clock_weather(at_secs(slot * WEATHER_CYCLE_SECS)),
+            clock_weather(at_ms(slot * WEATHER_CYCLE_MS)),
             WeatherMix::pure(slot_weather(slot)),
             "slot {slot}"
         );
@@ -665,8 +664,8 @@ fn a_slot_holds_then_runs_into_the_next_slots_weather() {
     let mut changed = 0;
     for slot in 0..SLOTS {
         let (here, next) = (slot_weather(slot), slot_weather(slot + 1));
-        for into in (0..SLOT_MS).step_by(STRIDE_MS) {
-            let mix = WeatherPolicy::Clock.weather_at_ms(slot * SLOT_MS + into);
+        for into in (0..WEATHER_CYCLE_MS).step_by(STRIDE_MS) {
+            let mix = WeatherPolicy::Clock.weather_at_ms(slot * WEATHER_CYCLE_MS + into);
             let want = match into.checked_sub(HOLD_MS) {
                 None => WeatherMix::pure(here),
                 Some(since) => WeatherMix::toward(here, next, since as f32 / TRANSITION_MS as f32),
@@ -684,15 +683,15 @@ fn a_slot_holds_then_runs_into_the_next_slots_weather() {
 fn every_share_rises_from_nothing_to_whole() {
     for (from, to) in changes() {
         for element in Element::ALL {
-            let eased = |p| WeatherMix::toward(from, to, p).eased(element);
-            assert_eq!(eased(0.0), 0.0, "{from:?} -> {to:?} {element:?}");
+            let incoming = |p| WeatherMix::toward(from, to, p).incoming(element);
+            assert_eq!(incoming(0.0), 0.0, "{from:?} -> {to:?} {element:?}");
             assert!(
-                eased(1.0) == 1.0 && eased(1.0 - 1e-6) > 1.0 - 1e-3,
+                incoming(1.0) == 1.0 && incoming(1.0 - 1e-6) > 1.0 - 1e-3,
                 "{from:?} -> {to:?} {element:?}"
             );
             let mut prev = 0.0;
             for p in progress() {
-                let now = eased(p);
+                let now = incoming(p);
                 assert!(now >= prev, "{from:?} -> {to:?} {element:?} fell at {p}");
                 prev = now;
             }
@@ -752,8 +751,7 @@ fn the_elements_move_in_their_weathers_order() {
     );
 }
 
-/// What falls settles [`FALL_SETTLE`] from either end of every change, so no
-/// particle is mid-fall as a slot opens on its pure weather.
+/// What falls settles [`FALL_SETTLE`] from either end of every change.
 #[test]
 fn precipitation_settles_clear_of_the_slot_boundary() {
     for (from, to) in changes() {
@@ -766,7 +764,7 @@ fn precipitation_settles_clear_of_the_slot_boundary() {
 }
 
 /// Mid-change, each parameter the sky hands on is its two presets' lerp by
-/// its element's share, and at either end exactly one preset's.
+/// its element's share, and at either end one preset's.
 #[test]
 fn a_change_lerps_the_skys_parameters_between_the_presets() {
     type Handed = fn(&Sky) -> f32;
@@ -791,29 +789,35 @@ fn a_change_lerps_the_skys_parameters_between_the_presets() {
             |s| s.transmission().disc,
             |w| transmission(w).disc,
         ),
-        (
-            "rain",
-            Element::Precipitation,
-            Sky::precipitation,
-            rain_level,
-        ),
+        ("rain", Element::Precipitation, Sky::rain, rain_level),
         (
             "city bounce",
             Element::Cloud,
-            |s| s.weather().lerp(Element::Cloud, city_bounce),
+            |s| s.light().exterior - s.light().interior,
             city_bounce,
         ),
     ];
-    let slot = (0..)
-        .find(|&s| slot_weather(s) == Weather::Clear && slot_weather(s + 1) == Weather::Storm)
-        .expect("a slot a storm comes in on");
     let (here, next) = (Weather::Clear, Weather::Storm);
-    let sky = |ms| Sky::clock(std::time::UNIX_EPOCH + Duration::from_millis(slot * SLOT_MS + ms));
+    let sky_in = |slot: u64, ms| Sky::clock(at_ms(slot * WEATHER_CYCLE_MS + ms));
+    // At full night the glass's light is the room's plus the whole city bounce.
+    let slot = (0..)
+        .find(|&s| {
+            let night = |ms| sky_in(s, ms).nightfall() == 1.0;
+            slot_weather(s) == here
+                && slot_weather(s + 1) == next
+                && night(0)
+                && night(WEATHER_CYCLE_MS)
+        })
+        .expect("a night slot a storm comes in on");
+    let sky = |ms| sky_in(slot, ms);
+    let close = |got: f32, want: f32| (got - want).abs() < 1e-6;
     for (name, element, of, preset) in params {
-        assert_eq!(of(&sky(0)), preset(here), "{name} opens on {here:?}'s");
-        assert_eq!(
-            of(&sky(SLOT_MS)),
-            preset(next),
+        assert!(
+            close(of(&sky(0)), preset(here)),
+            "{name} opens on {here:?}'s"
+        );
+        assert!(
+            close(of(&sky(WEATHER_CYCLE_MS)), preset(next)),
             "{name} lands on {next:?}'s"
         );
         for k in 0..SAMPLES {
@@ -821,7 +825,7 @@ fn a_change_lerps_the_skys_parameters_between_the_presets() {
             let p = s.weather().share(element, next);
             let want = preset(here) + (preset(next) - preset(here)) * p;
             assert!(
-                (of(&s) - want).abs() < 1e-6,
+                close(of(&s), want),
                 "{name} at sample {k}: {} vs {want}",
                 of(&s)
             );
@@ -896,8 +900,8 @@ fn no_strike_runs_into_the_next_slot() {
         let start = bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket);
         let last = start + LIGHTNING_FLASH_MS - 1;
         assert_eq!(
-            start / SLOT_MS,
-            last / SLOT_MS,
+            start / WEATHER_CYCLE_MS,
+            last / WEATHER_CYCLE_MS,
             "bucket {bucket}'s strike runs into the next slot"
         );
     }
@@ -908,10 +912,10 @@ fn no_strike_runs_into_the_next_slot() {
 #[test]
 fn the_weather_keeps_real_time_on_every_tier() {
     use crate::anim::Motion;
-    for s in (0..86_400u64).step_by(97) {
-        let now = at_secs(1_700_000_000 + s);
+    for ms in (0..24 * crate::anim::HOUR_MS).step_by(97_000) {
+        let now = at_ms(1_700_000_000_000 + ms);
         let weather = |m: Motion| Sky::at(m.timing(now), WeatherPolicy::Clock).weather();
-        assert_eq!(weather(Motion::Calm), weather(Motion::Full), "{s}s");
-        assert_eq!(weather(Motion::Still), weather(Motion::Full), "{s}s");
+        assert_eq!(weather(Motion::Calm), weather(Motion::Full), "{ms}ms");
+        assert_eq!(weather(Motion::Still), weather(Motion::Full), "{ms}ms");
     }
 }

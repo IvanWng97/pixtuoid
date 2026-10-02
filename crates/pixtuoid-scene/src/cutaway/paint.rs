@@ -2759,7 +2759,7 @@ fn paint_glass(view: &WindowView, pen: Pen, buf: &mut RgbBuffer) {
 /// The carpet [`paint_ground_tones`] lays, each art pixel in the tones
 /// `ground` dithers it to.
 fn paint_ground(layout: &SceneLayout, ground: Dithered<Ground>, pen: Pen, buf: &mut RgbBuffer) {
-    if let Some(tones) = ground.uniform() {
+    if let Some(tones) = ground.as_solid() {
         return paint_ground_tones(layout, tones, pen, buf);
     }
     let [from, to] = ground.ends();
@@ -5251,8 +5251,19 @@ pub(crate) mod tests {
         moment: &Moment,
         weather: &GlassWeather,
     ) -> Vec<WindowView> {
+        let densest = test_default_pack().max_density_variant().get();
+        let scale = RenderScale::new(densest).expect("nonzero");
+        glass_views_at(scale, layout, moment, weather)
+    }
+
+    /// [`glass_views`] at `scale`.
+    fn glass_views_at(
+        scale: RenderScale,
+        layout: &SceneLayout,
+        moment: &Moment,
+        weather: &GlassWeather,
+    ) -> Vec<WindowView> {
         let pack = test_default_pack();
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let mut order = Vec::new();
         push_windows(
             Office {
@@ -5912,11 +5923,99 @@ S B B B B B B S
         };
         let (rain, (tint, share)) = ground_in(Weather::Rain);
         let (rain, tint) = (
-            rain.uniform().expect("a pure weather tints every pixel"),
-            tint.uniform().expect("a pure weather tints every pixel"),
+            rain.as_solid().expect("a pure weather tints every pixel"),
+            tint.as_solid().expect("a pure weather tints every pixel"),
         );
         assert_eq!(rain.base, theme.surface.carpet_base.mix(tint, share));
-        assert_ne!(Some(rain), ground_in(Weather::Clear).0.uniform());
+        assert_ne!(Some(rain), ground_in(Weather::Clear).0.as_solid());
+    }
+
+    /// Mid-change, the ground and the glass's veil each take the incoming
+    /// weather's look on the art pixels the dither gives it, keyed on the art
+    /// grid, and the going weather's on the rest.
+    #[test]
+    fn a_change_dithers_the_ground_and_the_veil_on_the_art_grid() {
+        use crate::sky::{Sky, Weather, WeatherMix};
+        use pixtuoid_core::sprite::Rgb;
+        let theme = &crate::theme::NORMAL;
+        let pack = test_default_pack();
+        let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let now = crate::localclock::at_hour(12);
+        // Partway through a change of cloud, at a share whose dither, unlike
+        // half's checkerboard, moves with any shift of its key.
+        let mix = WeatherMix::toward(Weather::Clear, Weather::Fog, 0.4);
+        let moment = || {
+            let sky = Sky::at_with(now, Weather::Clear).with_weather(mix);
+            Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now))
+        };
+        // Tallies a pixel the two ends draw apart: `mid` must be the incoming
+        // end's where the dither `takes` it, else the going end's.
+        let tally =
+            |took: &mut [usize; 2], what: &str, takes: bool, [going, coming, mid]: [Rgb; 3]| {
+                if going != coming {
+                    assert_eq!(mid, if takes { coming } else { going }, "{what}");
+                    took[usize::from(takes)] += 1;
+                }
+            };
+
+        // Two buffer pixels to the art pixel, so a key off the art grid shows.
+        let d = pack.max_density_variant().get();
+        let pen = Pen::for_pack(RenderScale::new(2 * d).expect("nonzero"), &pack);
+        let k = pen.buffer(ArtPx(1));
+        let ground = Ground::of(theme, moment().look.ground_tint);
+        let [from, to] = ground.ends();
+        let lay = |paint: &dyn Fn(&mut RgbBuffer)| {
+            let mut buf = RgbBuffer::filled(
+                pen.buffer(pen.art(layout.buf_w)),
+                pen.buffer(pen.art(layout.buf_h)),
+                Rgb { r: 0, g: 0, b: 0 },
+            );
+            paint(&mut buf);
+            buf
+        };
+        let [going, coming, mid] = [
+            lay(&|buf| paint_ground_tones(&layout, from, pen, buf)),
+            lay(&|buf| paint_ground_tones(&layout, to, pen, buf)),
+            lay(&|buf| paint_ground(&layout, ground, pen, buf)),
+        ];
+        let mut took = [0; 2];
+        for y in 0..mid.height() {
+            for x in 0..mid.width() {
+                let px = [&going, &coming, &mid].map(|b| b.get(x, y));
+                let what = format!("ground at ({x}, {y})");
+                tally(&mut took, &what, ground.takes_to(x / k, y / k), px);
+            }
+        }
+        assert!(took[0] > 0 && took[1] > 0, "ground: {took:?}");
+
+        let veil = moment().look.glass_veil;
+        let [clear, fog] = veil.ends();
+        let look = |veil| {
+            let m = moment();
+            let mut weather = GlassWeather::of(&m);
+            weather.veil = veil;
+            // One art pixel to the unit, so a window's corner sits off the
+            // dither's period and a key from it would show.
+            glass_views_at(RenderScale::ONE, &layout, &m, &weather)
+        };
+        let [going, coming, mid] = [Dithered::solid(clear), Dithered::solid(fog), veil].map(look);
+        assert!(
+            mid.iter().any(|v| v.x % crate::dither::PERIOD != 0),
+            "every window on the dither's phase: a key from its corner would pass"
+        );
+        let mut took = [0; 2];
+        for ((g, c), view) in going.iter().zip(&coming).zip(&mid) {
+            for (i, px) in g.px.iter().zip(&c.px).zip(&view.px).enumerate() {
+                let ((Some(g), Some(c)), Some(m)) = px else {
+                    continue;
+                };
+                let i = u16::try_from(i).expect("a window's pixels");
+                let at = (view.x + i % view.w, view.y + i / view.w);
+                let what = format!("veil at {at:?}");
+                tally(&mut took, &what, veil.takes_to(at.0, at.1), [*g, *c, *m]);
+            }
+        }
+        assert!(took[0] > 0 && took[1] > 0, "veil: {took:?}");
     }
 
     /// A figure's dust paints straight before them and their other riders

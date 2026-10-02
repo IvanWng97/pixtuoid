@@ -133,8 +133,8 @@ struct SnapshotArgs {
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     now_day: u32,
 
-    /// Seconds past `--now-hour` (0–3599): a weather transition runs over two
-    /// minutes mid-hour.
+    /// Seconds past `--now-hour` (0–3599), fine enough to sample a weather
+    /// transition.
     #[arg(long, default_value_t = 0, requires = "now_hour", value_parser = clap::value_parser!(u64).range(0..3600))]
     now_sec: u64,
 

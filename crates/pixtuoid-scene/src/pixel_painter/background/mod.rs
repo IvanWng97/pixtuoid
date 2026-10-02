@@ -124,8 +124,8 @@ pub(super) fn paint_ground_and_walls(
 
     let (tint, share) = look.ground_tint;
 
-    // The noise picks one of THREE colours and the tint is fixed for the frame,
-    // so resolve the blend once, not per pixel.
+    // The noise picks one of THREE colours per tint, so resolve each tint's
+    // blend once, not per pixel.
     let carpet = tint.map(|tint| {
         [
             blend_rgb(carpet_light, tint, share),

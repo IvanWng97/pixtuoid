@@ -116,8 +116,8 @@ fn main() -> Result<()> {
             }
             "--now-hour" => now_hour = Some(val("--now-hour")?.parse().context("bad --now-hour")?),
             "--now-day" => now_day = val("--now-day")?.parse().context("bad --now-day")?,
-            // Seconds past `--now-hour`: a weather transition runs over two
-            // minutes mid-hour.
+            // Seconds past `--now-hour`, fine enough to sample a weather
+            // transition.
             "--now-sec" => now_sec = val("--now-sec")?.parse().context("bad --now-sec")?,
             "--weather" => weather = Some(val("--weather")?),
             "--repos" => repos = val("--repos")?.split(',').map(str::to_string).collect(),

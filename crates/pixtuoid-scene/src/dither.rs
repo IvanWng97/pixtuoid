@@ -81,7 +81,7 @@ impl<T: Copy> Dithered<T> {
     }
 
     /// The value every pixel takes, or `None` while the dither splits them.
-    pub(crate) fn uniform(self) -> Option<T> {
+    pub(crate) fn as_solid(self) -> Option<T> {
         match self.level {
             0 => Some(self.from),
             l if u32::from(l) >= BAYER_LEVELS => Some(self.to),

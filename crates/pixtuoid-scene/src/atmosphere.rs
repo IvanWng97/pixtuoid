@@ -27,12 +27,10 @@ pub(crate) struct SkyTones {
     /// The cast this sky puts on a LIT OBJECT: the cool night term then the
     /// warm day one, applied in order like the ground's two washes.
     pub(crate) object_wash: [(Rgb, f32); 2],
-    /// The weather's cast on the ground, as `(tint, strength)`; a transition
-    /// dithers the incoming weather's tint in.
+    /// The weather's cast on the ground, as `(tint, strength)`.
     pub(crate) ground_tint: (Dithered<Rgb>, f32),
     /// The weather's veil over the window glass, lit for this frame, as
-    /// `(color, alpha)`, or `None` where the city shows crisp; a transition
-    /// dithers the incoming weather's veil in.
+    /// `(color, alpha)`, or `None` where the city shows crisp.
     pub(crate) glass_veil: Dithered<Option<(Rgb, f32)>>,
     /// How strongly the golden hour blazes in the sky around the city, 0..=1.
     pub(crate) golden_hour: f32,
@@ -178,7 +176,7 @@ fn dithered<T: Copy>(
     preset: impl Fn(Weather) -> T,
 ) -> Dithered<T> {
     let [from, to] = weather.ends();
-    Dithered::new(preset(from), preset(to), weather.eased(element))
+    Dithered::new(preset(from), preset(to), weather.incoming(element))
 }
 
 /// `color` at `lum` of its own brightness, its hue kept.
@@ -385,7 +383,7 @@ mod tests {
         let channels = |l: &SkyTones| {
             let veil = l
                 .glass_veil
-                .uniform()
+                .as_solid()
                 .flatten()
                 .map_or(Rgb { r: 0, g: 0, b: 0 }, |v| v.0);
             [
@@ -491,10 +489,10 @@ mod tests {
             )
         };
         let pure = |w| look(WeatherMix::pure(w));
-        let fog_veil = pure(Weather::Fog).glass_veil.uniform().flatten();
+        let fog_veil = pure(Weather::Fog).glass_veil.as_solid().flatten();
         assert!(fog_veil.is_some(), "fog veils");
-        assert_eq!(pure(Weather::Clear).glass_veil.uniform(), Some(None));
-        let tint = |w| pure(w).ground_tint.0.uniform().expect("pure");
+        assert_eq!(pure(Weather::Clear).glass_veil.as_solid(), Some(None));
+        let tint = |w| pure(w).ground_tint.0.as_solid().expect("pure");
         let (clear_tint, fog_tint) = (tint(Weather::Clear), tint(Weather::Fog));
         assert_eq!(clear_tint, weather_ground_tint(Weather::Clear));
         let tile = || (0..PERIOD).flat_map(|y| (0..PERIOD).map(move |x| (x, y)));
@@ -522,7 +520,7 @@ mod tests {
             assert_eq!(veiled + clear, tile().count(), "sample {k}");
             assert_eq!(tinted + untinted, tile().count(), "sample {k}");
             assert_eq!(veiled, tinted, "sample {k}: one cloud share");
-            let share = mix.eased(Element::Cloud);
+            let share = mix.incoming(Element::Cloud);
             assert!(
                 (veiled as f32 / pixels - share).abs() <= 1.0 / pixels,
                 "sample {k}: {veiled} of {pixels} at {share}"
@@ -601,7 +599,7 @@ mod tests {
         let veil = |h| {
             SkyTones::resolve(&Sky::at_with(at(h), Weather::Fog), &crate::theme::NORMAL)
                 .glass_veil
-                .uniform()
+                .as_solid()
                 .flatten()
                 .expect("fog veils the glass")
                 .0

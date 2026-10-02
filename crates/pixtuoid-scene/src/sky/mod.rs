@@ -63,7 +63,7 @@ impl Weather {
         }
     }
 
-    /// Whether something falls: rain, sleet or snow.
+    /// Whether something falls: rain or snow.
     pub(crate) const fn falls(self) -> bool {
         matches!(
             self,
@@ -82,7 +82,7 @@ impl Weather {
 /// rendered side by side each show their own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WeatherPolicy {
-    /// The clock's pick, one per `WEATHER_CYCLE_SECS` slot, each slot's last
+    /// The clock's pick, one per `WEATHER_CYCLE_MS` slot, each slot's last
     /// `TRANSITION_MS` easing into the next one's.
     #[default]
     Clock,
@@ -117,19 +117,17 @@ impl WeatherPolicy {
 }
 
 /// How long one weather holds before the next slot picks again.
-pub(crate) const WEATHER_CYCLE_SECS: u64 = 600;
+pub(crate) const WEATHER_CYCLE_MS: u64 = 600_000;
 /// How much of a slot's end the next slot's weather takes to come in, so every
 /// slot opens on its own weather, pure.
 pub(crate) const TRANSITION_MS: u64 = 120_000;
-const _: () = assert!(TRANSITION_MS < WEATHER_CYCLE_SECS * 1000);
+const _: () = assert!(TRANSITION_MS < WEATHER_CYCLE_MS);
 
 /// What a transition moves, each across its own [`Stage`] of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Element {
-    /// The cloud: the light it lets in, the night's glow, the ground's cast
-    /// and the veil over the glass.
     Cloud,
-    /// What falls: the rain you hear and the particles on the glass.
+    /// What falls.
     Precipitation,
     /// Whether a storm's strikes fire.
     Lightning,
@@ -165,8 +163,7 @@ impl Course {
         }
     }
 
-    /// Its [`Stages`], run forward. Run backward, a stage mirrors, so rain
-    /// stops before the sky clears and lightning before the rain eases.
+    /// Its [`Stages`], run forward.
     fn stages(self) -> &'static Stages {
         match self {
             Course::Wetting => &WETTING,
@@ -177,10 +174,11 @@ impl Course {
 }
 
 /// How far from either end of a transition precipitation settles, as a share
-/// of it: a particle mid-fall at a slot's start would break its pure weather.
+/// of it: a fall landing in the next slot shows by that slot's weather, so one
+/// no longer than this began under it too.
 const FALL_SETTLE: f32 = 0.1;
-/// Where precipitation has settled by, from a transition's start.
-const SETTLED: f32 = 1.0 - FALL_SETTLE;
+/// How far from either end of a transition lightning settles, as a share of it.
+const LIGHTNING_SETTLE: f32 = 0.1;
 
 /// A `(start, end)` span of a transition, as shares of it.
 type Stage = (f32, f32);
@@ -205,34 +203,27 @@ impl Stages {
 /// The cloud gathers, then the rain falls, a storm's lightning last.
 const WETTING: Stages = Stages {
     cloud: (0.0, 0.5),
-    precipitation: (0.5, SETTLED),
-    lightning: (0.7, SETTLED),
+    precipitation: (0.5, 1.0 - FALL_SETTLE),
+    lightning: (0.7, 1.0 - LIGHTNING_SETTLE),
 };
 
 /// The rain heavies, then the lightning starts.
 const STORMING: Stages = Stages {
     cloud: (0.0, 1.0),
     precipitation: (FALL_SETTLE, 0.5),
-    lightning: (0.5, SETTLED),
+    lightning: (0.5, 1.0 - LIGHTNING_SETTLE),
 };
 
 /// Everything together.
 const SHIFTING: Stages = Stages {
     cloud: (0.0, 1.0),
-    precipitation: (FALL_SETTLE, SETTLED),
-    lightning: (FALL_SETTLE, SETTLED),
+    precipitation: (FALL_SETTLE, 1.0 - FALL_SETTLE),
+    lightning: (LIGHTNING_SETTLE, 1.0 - LIGHTNING_SETTLE),
 };
 
-/// `x`'s smooth Hermite ease from 0 at `edge0` to 1 at `edge1`: GLSL's
-/// `smoothstep` (<https://registry.khronos.org/OpenGL-Refpages/gl4/html/smoothstep.xhtml>),
-/// flat at both edges, so an element leaves and lands without a jolt.
-fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
-    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
 /// The weather a frame shows: one weather, or, mid-transition, the next
-/// slot's coming in over it, each [`Element`] eased across its own [`Stage`].
+/// slot's coming in over it, each [`Element`] eased across its own [`Stage`]
+/// by [`Easing::Smoothstep`](crate::anim::Easing::Smoothstep).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct WeatherMix {
     from: Weather,
@@ -264,26 +255,33 @@ impl WeatherMix {
         [self.from, self.to]
     }
 
-    /// How far `element` has gone over to the incoming weather, `0..=1`.
-    pub(crate) fn eased(self, element: Element) -> f32 {
-        if self.from == self.to {
+    /// Whether one weather holds, none coming in.
+    pub(crate) fn is_pure(self) -> bool {
+        self.from == self.to
+    }
+
+    /// `element`'s share of the incoming weather, `0..=1`.
+    pub(crate) fn incoming(self, element: Element) -> f32 {
+        if self.is_pure() {
             return 0.0;
         }
         let (course, backward) = Course::of(self.from, self.to);
         let (start, end) = course.stages().of(element);
+        // Run backward, a stage mirrors, so rain stops before the sky clears
+        // and lightning before the rain eases.
         let (start, end) = if backward {
             (1.0 - end, 1.0 - start)
         } else {
             (start, end)
         };
-        smoothstep(start, end, self.progress)
+        crate::anim::Easing::Smoothstep.apply((self.progress - start) / (end - start))
     }
 
     /// Each weather the frame shows in `element`, with its share; the shares
     /// sum to 1.
     pub(crate) fn parts(self, element: Element) -> impl Iterator<Item = (Weather, f32)> {
-        let eased = self.eased(element);
-        [(self.from, 1.0 - eased), (self.to, eased)]
+        let incoming = self.incoming(element);
+        [(self.from, 1.0 - incoming), (self.to, incoming)]
             .into_iter()
             .filter(|&(_, share)| share > 0.0)
     }
@@ -308,10 +306,9 @@ impl WeatherMix {
 /// The clock's weather at `now`: its slot's pick, with the next slot's coming
 /// in over the slot's last [`TRANSITION_MS`].
 fn clock_weather(now: SystemTime) -> WeatherMix {
-    let slot_ms = WEATHER_CYCLE_SECS * 1000;
     let ms = crate::anim::epoch_ms(now);
-    let (slot, into) = (ms / slot_ms, ms % slot_ms);
-    match into.checked_sub(slot_ms - TRANSITION_MS) {
+    let (slot, into) = (ms / WEATHER_CYCLE_MS, ms % WEATHER_CYCLE_MS);
+    match into.checked_sub(WEATHER_CYCLE_MS - TRANSITION_MS) {
         None => WeatherMix::pure(slot_weather(slot)),
         Some(since) => WeatherMix::toward(
             slot_weather(slot),
@@ -321,7 +318,7 @@ fn clock_weather(now: SystemTime) -> WeatherMix {
     }
 }
 
-/// The weather [`WEATHER_CYCLE_SECS`] slot `slot` picks: one hashed draw.
+/// The weather [`WEATHER_CYCLE_MS`] slot `slot` picks: one hashed draw.
 fn slot_weather(slot: u64) -> Weather {
     match crate::splitmix_draw(slot, 1) % 15 {
         0..=5 => Weather::Clear,
@@ -595,7 +592,7 @@ fn moon_phase_at(now: SystemTime) -> f32 {
 const LIGHTNING_PERIOD_MS: u64 = 15000;
 // A slot's start falls on a bucket's start, which no strike runs across: a
 // strike never runs into the next slot's weather.
-const _: () = assert!((WEATHER_CYCLE_SECS * 1000).is_multiple_of(LIGHTNING_PERIOD_MS));
+const _: () = assert!(WEATHER_CYCLE_MS.is_multiple_of(LIGHTNING_PERIOD_MS));
 /// The shortest a flash's phase may last: each of [`LIGHTNING_PHASES`] holds
 /// this long, the photosensitive-safe bound, and a whole Full beat so none is
 /// skipped.
@@ -688,19 +685,19 @@ pub(crate) struct Sky {
 }
 
 impl Sky {
-    pub(crate) fn at(timing: crate::anim::Timing, weather: WeatherPolicy) -> Self {
+    pub(crate) fn at(timing: crate::anim::Timing, policy: WeatherPolicy) -> Self {
         let now = timing.now;
         let (moon_phase, moon_age) = (moon_phase_at(now), moon_age_at(now));
         let h = local_hour_frac(now);
         let nightfall = nightfall(h);
         Self {
-            policy: weather,
-            weather: weather.weather_at(now),
+            policy,
+            weather: policy.weather_at(now),
             body: body_at(h, nightfall, moon_phase, moon_age),
             moon_phase,
             moon_waxing: moon_age < SYNODIC_DAYS / 2.0,
             nightfall,
-            flash: flash_level_at(timing.beat, weather),
+            flash: flash_level_at(timing.beat, policy),
         }
     }
 
@@ -772,14 +769,13 @@ impl Sky {
         self.nightfall
     }
 
-    /// [`flash_level_at`] at this instant: a strike lights only if the storm
-    /// held at its start, and then runs whole.
+    /// [`flash_level_at`] at this instant.
     pub(crate) fn flash(&self) -> f32 {
         self.flash
     }
 
     /// [`rain_level`] under this sky's weather.
-    pub(crate) fn precipitation(&self) -> f32 {
+    pub(crate) fn rain(&self) -> f32 {
         self.weather.lerp(Element::Precipitation, rain_level)
     }
 

@@ -310,6 +310,27 @@ mod tests {
     }
 
     #[test]
+    fn a_take_copies_whole_art_pixels_where_it_holds() {
+        let take = |x: ArtPx, y: ArtPx| (x.0 + 2 * y.0).is_multiple_of(3);
+        for (s, d) in [(1u16, 1u16), (8, 4), (12, 4)] {
+            let pen = pen(s, d);
+            let k = s / d;
+            let mut buf = RgbBuffer::filled(9 * k, 9 * k, BG);
+            pen.take_where(&mut buf, &RgbBuffer::filled(9 * k, 9 * k, LIGHT), take);
+            for y in 0..buf.height() {
+                for x in 0..buf.width() {
+                    let want = if take(ArtPx(x / k), ArtPx(y / k)) {
+                        LIGHT
+                    } else {
+                        BG
+                    };
+                    assert_eq!(buf.get(x, y), want, "s {s} d {d}: ({x}, {y})");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn a_dither_level_steps_per_art_row() {
         // Two renders of one band, one art grid apart in resolution, must agree
         // art pixel for art pixel: a level stepping per buffer row would put a
