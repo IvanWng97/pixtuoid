@@ -1641,9 +1641,9 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pose::PoseHisto
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pose::PoseHistory
 pub struct pixtuoid_scene::pose::RouteCtx<'a>
 pub pixtuoid_scene::pose::RouteCtx::history: &'a mut pixtuoid_scene::pose::PoseHistory
-pub pixtuoid_scene::pose::RouteCtx::motion: &'a mut std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, pixtuoid_scene::motion::MotionState>
 pub pixtuoid_scene::pose::RouteCtx::overlay: &'a pixtuoid_core::walkable::OccupancyOverlay
 pub pixtuoid_scene::pose::RouteCtx::router: &'a mut dyn pixtuoid_scene::pathfind::Router
+pub pixtuoid_scene::pose::RouteCtx::walks: &'a mut std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, pixtuoid_scene::motion::MotionState>
 pub pixtuoid_scene::pose::RouteCtx::wanders: bool
 impl<'a> core::marker::Freeze for pixtuoid_scene::pose::RouteCtx<'a>
 impl<'a> !core::marker::Send for pixtuoid_scene::pose::RouteCtx<'a>
