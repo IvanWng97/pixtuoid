@@ -144,45 +144,6 @@ fn the_pantry_uprights_sort_at_their_south_row() {
     }
 }
 
-/// The counter the cooler and the bin step off is the one rostered at its
-/// waypoint.
-#[test]
-fn the_pantry_counter_fixture_is_the_rooms_counter_rect() {
-    let mut widths = BTreeSet::new();
-    for (w, h) in [(55, 72), (89, 72), (120, 96), (192, 158), (320, 180)] {
-        for seed in 0..12 {
-            let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) else {
-                continue;
-            };
-            let fixture = l.fixtures().find_map(|f| {
-                matches!(
-                    f.kind,
-                    FixtureKind::Station {
-                        station: Station::PantryCounter,
-                        ..
-                    }
-                )
-                .then_some(f.visual)
-            });
-            widths.insert(fixture.map(|f| f.width));
-            assert_eq!(
-                fixture,
-                l.pantry.and_then(|p| p.counter_rect()),
-                "{w}x{h} seed {seed}"
-            );
-        }
-    }
-    assert_eq!(
-        widths,
-        BTreeSet::from([
-            None,
-            Some(crate::layout::COMPACT_COUNTER.w),
-            Some(crate::layout::LARGE_COUNTER.w)
-        ]),
-        "no counter, and each counter size"
-    );
-}
-
 /// Where two fixtures overlap, the one painted over the other answers: a
 /// back-turned desk's chair sorts past the desk and covers its front edge.
 #[test]
@@ -274,8 +235,6 @@ fn the_floor_lamp_base_is_its_sprite_south_row() {
     assert_eq!((base.x, base.y), (lamp.x, lamp.y - h / 2 + h - 1));
 }
 
-/// The large columns' last one is the falsifier for the large/small split:
-/// outside the small machine but inside the large one.
 #[test]
 fn the_coffee_machine_follows_the_counter_size() {
     let mut l = SceneLayout::compute(160, 200, Some(4)).expect("fits");

@@ -1,8 +1,9 @@
 //! The pantry aggregate: bounds + the counter size + the island.
 
+use crate::layout::placement::centred;
 use crate::layout::{
-    Bounds, Facing, Furniture, OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W, Pivot, Point, Size,
-    WALL_THICK_H, Waypoint, WaypointKind, anchored_top_left, furniture_def, pct,
+    Bounds, Facing, Furniture, OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W, Point, Size, WALL_THICK_H,
+    Waypoint, WaypointKind, furniture_def, pct,
 };
 
 /// The compact counter — the fallback for a pantry too narrow for
@@ -78,7 +79,7 @@ impl PantryRoom {
     }
 
     /// The counter's centre in a room of `bounds`, or `None` for a room
-    /// narrower than the counter: refuse rather than force.
+    /// no wider than the counter: refuse rather than force.
     pub(crate) fn counter_center(bounds: Bounds, counter: Size) -> Option<Point> {
         let half_cw = counter.w / 2;
         let max_cx = bounds.x + bounds.width.saturating_sub(half_cw + 1);
@@ -94,18 +95,10 @@ impl PantryRoom {
         })
     }
 
-    /// The counter's sprite box, or `None` for a room narrower than the
-    /// counter.
+    /// The counter's sprite box, centred where [`Self::counter_center`] stands
+    /// it.
     pub(crate) fn counter_rect(&self) -> Option<Bounds> {
-        let c = Self::counter_center(self.bounds, self.counter_size)?;
-        let Size { w, h } = self.counter_size;
-        let at = anchored_top_left(Pivot::Center, c, w, h);
-        Some(Bounds {
-            x: at.x,
-            y: at.y,
-            width: w,
-            height: h,
-        })
+        Self::counter_center(self.bounds, self.counter_size).map(|c| centred(c, self.counter_size))
     }
 
     /// `r`, or `r` slid out past the counter's nearer end when the counter's
@@ -115,8 +108,8 @@ impl PantryRoom {
             return Some(r);
         };
         let b = self.bounds;
-        // `counter_center` clamps the counter between the room's side walls, so
-        // each side's one limit is the floor between its end and the wall.
+        // `counter_center` keeps the counter inside the room's columns, so each
+        // side's one limit is the floor between its end and the room's edge.
         let x = if r.x + r.width / 2 < counter.x + counter.width / 2 {
             (counter.x - b.x >= r.width).then(|| counter.x - r.width)
         } else {
@@ -311,10 +304,10 @@ mod tests {
         }
     }
 
-    /// The premise of `off_the_counter`'s one check per side, wherever the
-    /// room sits.
+    /// The premise of `off_the_counter`'s one check per side, and the bin that
+    /// check keeps inside a room off the office's west edge.
     #[test]
-    fn the_counter_stands_inside_its_room() {
+    fn the_counter_and_the_bin_slid_off_it_keep_to_the_rooms_columns() {
         for counter_size in [COMPACT_COUNTER, LARGE_COUNTER] {
             for x in [0, 7] {
                 for width in 0..=2 * LARGE_COUNTER.w {
@@ -325,10 +318,13 @@ mod tests {
                     };
                     let counter = p.counter_rect();
                     assert_eq!(counter.is_some(), width > counter_size.w, "{:?}", p.bounds);
-                    if let Some(c) = counter {
+                    let Some(c) = counter else { continue };
+                    let in_columns = |b: Bounds| x <= b.x && b.x + b.width <= x + width;
+                    assert!(in_columns(c), "{c:?} outside {:?}", p.bounds);
+                    if let Some(bin) = p.trash_bin_rect() {
                         assert!(
-                            x <= c.x && c.x + c.width <= x + width,
-                            "{c:?} outside {:?}",
+                            in_columns(bin) && !bin.overlaps(c),
+                            "{bin:?} vs {c:?} in {:?}",
                             p.bounds
                         );
                     }

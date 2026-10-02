@@ -3,10 +3,11 @@
 //! visual-clearance probe and the placement sweep map over
 //! [`SceneLayout::fixtures`].
 
+use super::placement::{boxed, centred};
 use super::{
     Bounds, Facing, Furniture, Lounge, MeetingRoom, MeetingTrio, PantryRoom, Pivot, PlantItem,
     PlantKind, PodDecor, PodDecorItem, Point, SceneLayout, Size, WallDecor, WallDecorItem,
-    WaypointKind, WindowBay, anchored_top_left, coat_rack_rect_at, furniture_def, sort_row_at,
+    WaypointKind, WindowBay, coat_rack_rect_at, furniture_def, sort_row_at,
 };
 use pixtuoid_core::state::FloorLocalDeskIndex;
 
@@ -342,22 +343,8 @@ const NOTICE_BOARD_GAP: u16 = 1;
 /// which then sits on it.
 const LOUNGE_RUG_Z_LEAD: u16 = 2;
 
-/// A centre-pinned `size` box at `pos`.
-fn centred(pos: Point, size: Size) -> Bounds {
-    boxed(anchored_top_left(Pivot::Center, pos, size.w, size.h), size)
-}
-
 fn top_left(b: Bounds) -> Point {
     Point { x: b.x, y: b.y }
-}
-
-fn boxed(tl: Point, size: Size) -> Bounds {
-    Bounds {
-        x: tl.x,
-        y: tl.y,
-        width: size.w,
-        height: size.h,
-    }
 }
 
 /// Each home desk's filing cabinet, then the desk: the fixture authority the
@@ -482,9 +469,9 @@ impl SceneLayout {
         let (island, pantry_uprights) = match pantry {
             Some(
                 p @ PantryRoom {
-                    // Place the cooler and the bin through their rect methods.
+                    // Place the counter, the cooler and the bin through their
+                    // rect methods.
                     bounds: _,
-                    // Sizes its counter, which rosters as a waypoint station.
                     counter_size: _,
                     kitchen_island,
                 },
@@ -634,17 +621,7 @@ impl SceneLayout {
                         Some(match station {
                             // Runtime-sized: the furniture row is empty on purpose.
                             Station::PantryCounter => {
-                                let size = self.pantry_counter_size();
-                                Fixture {
-                                    kind,
-                                    at: wp.pos,
-                                    visual: centred(wp.pos, size),
-                                    depth: Depth::sorted(sort_row_at(
-                                        Pivot::Center,
-                                        wp.pos,
-                                        size.h,
-                                    )),
-                                }
+                                upright(kind, wp.pos, pantry_uprights?.counter_rect()?)
                             }
                             Station::VendingMachine | Station::Printer | Station::SnackShelf => {
                                 centred_row(kind, wp.pos, wp.kind.furniture())
