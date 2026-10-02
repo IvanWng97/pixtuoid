@@ -12,7 +12,7 @@
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use unicode_width::UnicodeWidthChar;
 
-use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
+use crate::display::pen::{ArtPx, ArtRect, Pen};
 
 /// A hand-drawn glyph's width in art pixels.
 const GLYPH_W: u16 = 3;

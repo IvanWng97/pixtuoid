@@ -426,7 +426,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
                 theme,
                 *piece,
                 rows.clone(),
-                crate::cutaway::pen::Pen::UNIT,
+                crate::display::pen::Pen::UNIT,
             );
         }
         DrawableKind::FishTank { pos } => {

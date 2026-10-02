@@ -889,7 +889,6 @@ mod tests {
     /// cutaway leaves this file as it found it, and a change to its look
     /// rewrites it (`just gen-cutaway-golden`). Each instant is a local
     /// hour ([`localclock`](crate::localclock)), so any `$TZ` paints it alike.
-    // Without the density art every frame is d=1, and the d4 rows would go unchecked.
     #[cfg(feature = "density-art")]
     #[test]
     fn the_canvas_paints_the_pinned_frames() {

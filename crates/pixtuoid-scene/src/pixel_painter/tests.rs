@@ -33,7 +33,7 @@ fn paint_whole_wall(
         theme,
         piece,
         at.y..at.y + size.h,
-        crate::cutaway::pen::Pen::UNIT,
+        crate::display::pen::Pen::UNIT,
     );
 }
 
@@ -800,7 +800,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
 
 /// The TOML and art of a pet shipped at `density` too, drawn in palette `key`:
 /// both packs of a with-and-without-variant comparison carry it, so both paint
-/// the room on one art grid ([`Pen::for_pack`](crate::cutaway::pen::Pen::for_pack))
+/// the room on one art grid ([`Pen::for_pack`](crate::display::pen::Pen::for_pack))
 /// and differ only in the piece compared.
 fn grid_anchor(density: u16, key: char) -> (String, [(&'static str, String); 2]) {
     let square =
