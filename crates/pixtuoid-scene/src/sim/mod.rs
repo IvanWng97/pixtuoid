@@ -331,7 +331,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
                     router: &mut *stores.router,
                     overlay: &*stores.overlay,
                     history: &mut *stores.history,
-                    motion: &mut *stores.motion,
+                    walks: &mut *stores.motion,
                     wanders: !beat.is_rest(),
                 },
             );
