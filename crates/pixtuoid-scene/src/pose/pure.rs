@@ -33,14 +33,25 @@ pub const WANDER_WALK_EST_MS: u64 = 3_500;
 /// Companion estimate: the at-waypoint dwell beat (paired with `WANDER_WALK_EST_MS`).
 pub const WANDER_DWELL_EST_MS: u64 = 18_000;
 
-/// Frame-cycle period for animated poses.
-pub const TYPING_FRAME_MS: u64 = 140;
+/// How long the typing loop holds each frame: one Full beat, so a typist
+/// keys on every beat rather than skipping one.
+pub const TYPING_FRAME_MS: u64 = crate::anim::FULL_TICK_MS;
 /// Per-frame duration of the walking animation.
 pub const WALKING_FRAME_MS: u64 = 220;
 /// Frame count of the typing animation loop.
 pub const TYPING_FRAMES: usize = 2;
 /// Frame count of the walking animation loop.
 pub const WALKING_FRAMES: usize = 2;
+
+/// The typing loop's frame for `slot` on `beat`, phased by when it began
+/// typing so neighbours key out of step; the first frame at rest.
+pub(crate) fn typing_frame(slot: &AgentSlot, beat: crate::anim::Beat) -> usize {
+    if beat.is_rest() {
+        return 0;
+    }
+    let phase = crate::anim::epoch_ms(slot.state_started_at) / TYPING_FRAME_MS;
+    (beat.ms() / TYPING_FRAME_MS).wrapping_add(phase) as usize % TYPING_FRAMES
+}
 
 /// The walking sprite's frame index at `elapsed_ms` into the walk — the one
 /// cadence the stateless overlay and the routed motion authority share.
@@ -148,11 +159,9 @@ pub enum Pose {
     /// Seated at desk, awake but not typing — the agent recently finished a
     /// tool call and the LLM is likely thinking.
     SeatedThinking,
-    /// Seated at the desk, typing.
-    SeatedTyping {
-        /// Typing animation frame index (`0..TYPING_FRAMES`).
-        frame: usize,
-    },
+    /// Seated at the desk, typing; the sim steps its frame on the floor's
+    /// beat.
+    SeatedTyping,
     /// At a lounge waypoint; the concrete sprite depends on the kind.
     AtWaypoint {
         /// Index of the target waypoint.
@@ -256,10 +265,7 @@ fn state_driven_pose(
         .as_millis() as u64;
 
     match &slot.state {
-        ActivityState::Active { .. } => {
-            let frame = ((elapsed / TYPING_FRAME_MS) as usize) % TYPING_FRAMES;
-            Some(Pose::SeatedTyping { frame })
-        }
+        ActivityState::Active { .. } => Some(Pose::SeatedTyping),
         ActivityState::Waiting { .. } => Some(Pose::SeatedIdle),
         ActivityState::Idle => {
             if in_thinking_window(slot, now) {

@@ -28,9 +28,9 @@ pub use pure::{
 };
 // These stay crate-internal: a `pub use` would try to widen their `pub(crate)`
 // visibility.
-pub(crate) use pure::{SpotClaims, resolve_wander_target};
+pub(crate) use pure::{SpotClaims, resolve_wander_target, typing_frame};
 
-use crate::layout::{Layout, Point, desk_walk_anchor_facing};
+use crate::layout::{Point, SceneLayout, desk_walk_anchor_facing};
 use crate::pathfind::Router;
 
 /// The per-frame routing engine state threaded through pose derivation,
@@ -44,7 +44,10 @@ pub struct RouteCtx<'a> {
     /// Per-agent rendered-position cache.
     pub history: &'a mut PoseHistory,
     /// Per-agent walk-timing state, keyed by `AgentId`.
-    pub motion: &'a mut HashMap<AgentId, MotionState>,
+    pub walks: &'a mut HashMap<AgentId, MotionState>,
+    /// Whether an idle agent wanders off its desk: an ambient loop, so not at
+    /// [`Motion::Still`](crate::anim::Motion::Still).
+    pub wanders: bool,
 }
 
 /// Owns the stores a [`RouteCtx`] borrows, so a test threads one value.
@@ -72,7 +75,8 @@ impl<R: Router> RouteRig<R> {
             router: &mut self.router,
             overlay: &self.overlay,
             history: &mut self.history,
-            motion: &mut self.motion,
+            walks: &mut self.motion,
+            wanders: true,
         }
     }
 }
@@ -136,7 +140,7 @@ const EXIT_BUDGET_MARGIN_MS: u64 = 300;
 /// anchored top-left, so a corner scan is lopsided and can't clear the body to
 /// the EAST — the east side would read as walled-off. `None` only in a
 /// degenerate layout where every allowed side is walled off.
-pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> {
+pub(crate) fn desk_approach_cell(desk: Point, layout: &SceneLayout) -> Option<Point> {
     use crate::layout::{Furniture, desk_walk_anchor_facing};
     // The desk's OWN facing, not a constant: `ApproachSides` is canonical (facing-South) and
     // rotated by it, so a back-turned desk is approached from its south front, not walled off there.
@@ -157,7 +161,7 @@ pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> 
 /// A\*, plus `Some(chair)` to prepend/append via [`Settle`] (the short glide
 /// on/off the seat the router never plans), or `None` in the degenerate boxed-in
 /// layout where the leg reverts to the direct chair target.
-pub(crate) fn desk_leg_endpoint(desk: Point, layout: &Layout) -> (Point, Option<Point>) {
+pub(crate) fn desk_leg_endpoint(desk: Point, layout: &SceneLayout) -> (Point, Option<Point>) {
     let chair = crate::layout::desk_walk_anchor_facing(desk, layout.desk_facing_at(desk));
     match desk_approach_cell(desk, layout) {
         Some(approach) => (approach, Some(chair)),
@@ -220,7 +224,7 @@ fn exit_elapsed_ms(profile: &WalkProfile, elapsed_ms: u64) -> u64 {
 /// (layout mask + per-frame [`RouteCtx::overlay`]) corner-by-corner instead of
 /// cutting through obstacles or other agents.
 ///
-/// [`RouteCtx::motion`] drives entry/exit physics — the A* path length is
+/// [`RouteCtx::walks`] drives entry/exit physics — the A* path length is
 /// snapshotted into a `WalkProfile` on first sighting (commit-to-route), and
 /// later frames compute `t_x1000` against that frozen profile.
 /// [`RouteCtx::history`] is consulted on state transitions so an agent whose
@@ -228,7 +232,7 @@ fn exit_elapsed_ms(profile: &WalkProfile, elapsed_ms: u64) -> u64 {
 pub fn derive_with_routing(
     slot: &AgentSlot,
     now: SystemTime,
-    layout: &Layout,
+    layout: &SceneLayout,
     rctx: &mut RouteCtx<'_>,
 ) -> Option<Pose> {
     let desk = layout.home_desk(slot.desk_index.single_floor_local())?;
@@ -237,7 +241,7 @@ pub fn derive_with_routing(
         let door_target = layout.door_threshold;
 
         let mstate = rctx
-            .motion
+            .walks
             .entry(slot.agent_id)
             .or_insert_with(|| MotionState::new(slot.agent_id));
 
@@ -318,7 +322,7 @@ pub fn derive_with_routing(
     }
 
     let live_now = rctx.history.recent(slot.agent_id, HISTORY_RECENT_MS, now);
-    let re_enter = take_cancelled_walkout(rctx.motion.get_mut(&slot.agent_id), now, live_now);
+    let re_enter = take_cancelled_walkout(rctx.walks.get_mut(&slot.agent_id), now, live_now);
 
     // ENTRY_ANIMATION_MS bounds only how long we try to ROUTE; the physics
     // duration is the real walk time.
@@ -332,7 +336,7 @@ pub fn derive_with_routing(
     let settle = chair_settle.map_or(Settle::None, Settle::End);
 
     let mstate = rctx
-        .motion
+        .walks
         .entry(slot.agent_id)
         .or_insert_with(|| MotionState::new(slot.agent_id));
 
@@ -403,9 +407,12 @@ pub fn derive_with_routing(
         if pure::in_thinking_window(slot, now) {
             return Some(Pose::SeatedThinking);
         }
+        if !rctx.wanders {
+            return Some(Pose::SeatedIdle);
+        }
 
-        // A per-frame snapshot, so the arms below never re-borrow `rctx.motion`.
-        let wf = advance_wander(slot, now, layout, rctx.router, rctx.overlay, rctx.motion);
+        // A per-frame snapshot, so the arms below never re-borrow `rctx.walks`.
+        let wf = advance_wander(slot, now, layout, rctx.router, rctx.overlay, rctx.walks);
 
         match wf.phase {
             WanderPhase::WalkingOut(_) => {
@@ -474,7 +481,7 @@ pub fn derive_with_routing(
 
     // Went Active/Waiting: drop any exclusive-spot claim, else the frozen
     // `wander.target` blocks that spot for the whole burst.
-    if let Some(ms) = rctx.motion.get_mut(&slot.agent_id) {
+    if let Some(ms) = rctx.walks.get_mut(&slot.agent_id) {
         ms.wander.target.kind = WanderKind::Aimless;
     }
 
@@ -486,13 +493,13 @@ pub fn derive_with_routing(
     // state changed, so walk it from the previous rendered position instead.
     let desk_pose = matches!(
         raw,
-        Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. }
+        Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping
     );
     let since_state = crate::anim::elapsed_ms(now, slot.state_started_at);
     let mut final_settle = Settle::None;
     let pose = if desk_pose {
         let ms_entry = rctx
-            .motion
+            .walks
             .entry(slot.agent_id)
             .or_insert_with(|| MotionState::new(slot.agent_id));
         // ARM ONCE per transition: `route_walking_pose` records the advancing walker
@@ -569,7 +576,7 @@ pub fn derive_with_routing(
     } else {
         // Clear any stale snap-back so the next transition snapshots afresh rather
         // than replaying a previous one.
-        if let Some(ms) = rctx.motion.get_mut(&slot.agent_id)
+        if let Some(ms) = rctx.walks.get_mut(&slot.agent_id)
             && ms.snap_back.is_some()
         {
             ms.snap_back = None;
@@ -583,7 +590,7 @@ pub fn derive_with_routing(
 fn route_walking_pose(
     slot: &AgentSlot,
     now: SystemTime,
-    layout: &Layout,
+    layout: &SceneLayout,
     rctx: &mut RouteCtx<'_>,
     pose: Pose,
     settle: Settle,
@@ -591,7 +598,7 @@ fn route_walking_pose(
     let router = &mut *rctx.router;
     let overlay = rctx.overlay;
     let history = &mut *rctx.history;
-    let motion = &mut *rctx.motion;
+    let walks = &mut *rctx.walks;
     let Pose::Walking {
         from,
         to,
@@ -600,7 +607,7 @@ fn route_walking_pose(
         carrying_coffee,
     } = pose
     else {
-        if let Some(ms) = motion.get_mut(&slot.agent_id) {
+        if let Some(ms) = walks.get_mut(&slot.agent_id) {
             ms.walk_path = None;
         }
         // AtWaypoint / AimlessAt positions are a valid "previous position" for a
@@ -621,7 +628,7 @@ fn route_walking_pose(
     // re-routes onto a differently-shaped path, landing the frozen progress `t` on a
     // new pixel — the visible "flash" — and spiking the frame's A* cost.
     let path = {
-        let ms = motion
+        let ms = walks
             .entry(slot.agent_id)
             .or_insert_with(|| MotionState::new(slot.agent_id));
         match &ms.walk_path {

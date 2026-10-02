@@ -4,15 +4,13 @@
 //! or how bright it is.
 
 use std::collections::HashMap;
-use std::time::SystemTime;
 
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::{AgentSlot, ToolKind};
 
-use crate::anim::epoch_ms;
-use crate::atmosphere::{Look, WallSide};
+use crate::atmosphere::SkyTones;
 use crate::floor::NeonLevels;
-use crate::layout::{Facing, Layout, Point, WINDOW_W};
+use crate::layout::{Facing, Point, SceneLayout};
 
 /// The floor lamp's level at full dark, before the room's own level.
 const FLOOR_LAMP_GAIN: f32 = 0.55;
@@ -28,8 +26,8 @@ const DESK_LAMP_MAX: f32 = 0.42;
 /// The standby screen's ceiling. At parity with [`DESK_LAMP_MAX`] the lamp
 /// pool washes the desk's west half out.
 pub(crate) const SCREEN_IDLE_MAX: f32 = 0.55;
-/// Where the desk lamp's bulb hangs, from its fixture's top-left cell: the
-/// shade spans the two cells above it.
+/// Where the desk lamp's bulb hangs from its desk's point, as the 1x desk art
+/// draws it: its `9` cell, under the shade.
 const DESK_LAMP_BULB: (u16, u16) = (1, 1);
 const _: () = assert!(DESK_LAMP_MAX < SCREEN_IDLE_MAX);
 
@@ -59,7 +57,7 @@ const NEON_BREATH_FLOOR: f32 = 0.85;
 const NEON_ALERT_BREATH_MS: u64 = 3_000;
 const NEON_ALERT_BREATH_FLOOR: f32 = 0.62;
 /// Daylight washes a neon out: the halo keeps this share at noon, all of it at night.
-const NEON_DAYLIGHT_FLOOR: f32 = 0.5;
+const NEON_DAYLIGHT_MIN: f32 = 0.5;
 
 /// How far below its window the sun's spill reaches, in rows.
 pub(crate) const SPILL_DEPTH: u16 = 12;
@@ -67,18 +65,6 @@ pub(crate) const SPILL_DEPTH: u16 = 12;
 const SPILL_SILL: f32 = 0.32;
 /// The most the spill widens past the window on either side.
 const SPILL_MAX_WIDEN: u16 = 3;
-
-/// The wall spot's size at a full beam, and the least it shrinks to: under
-/// that, the falloff leaves it too faint to read on a dark wall.
-const WALL_SPOT_W: f32 = 10.0;
-const WALL_SPOT_H: f32 = 4.0;
-const WALL_SPOT_MIN_W: u16 = 7;
-const WALL_SPOT_MIN_H: u16 = 3;
-/// The wall spot's level: a strong base, so the small spot reads, lifted by
-/// how direct the beam is, up to a ceiling.
-const WALL_SPOT_BASE: f32 = 0.45;
-const WALL_SPOT_GAIN: f32 = 0.35;
-const WALL_SPOT_MAX: f32 = 0.7;
 
 /// What an emitter is, for the painter choosing its colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,8 +75,6 @@ pub(crate) enum EmitterKind {
     MonitorHalo(ToolKind),
     NeonGlow,
     WindowSpill,
-    /// The sun's spot on a side wall.
-    WallSpot,
 }
 
 /// The shape an emitter lights and how its light falls off across it, in
@@ -126,9 +110,6 @@ pub(crate) enum Light {
     /// row holds `centre`, falling off by Manhattan distance from it; the
     /// centre gets [`MONITOR_HALO_SHARE`] of the level.
     Patch { centre: Point },
-    /// A `w`×`h` box at `(x, y)` lit by the ellipse inscribed in it, falling
-    /// off by [`ground::falloff`](crate::ground::falloff).
-    Spot { x: u16, y: u16, w: u16, h: u16 },
 }
 
 /// One light in the room this frame.
@@ -173,7 +154,6 @@ impl Emitter {
                     (x0 + MONITOR_HALO_W, centre.y + 1),
                 )
             }
-            Light::Spot { x, y, w, h } => ((x, y), (x + w, y + h)),
         }
     }
 
@@ -189,7 +169,7 @@ impl Emitter {
                 self.strength * near * near
             }
             Light::Patch { .. } => self.strength * MONITOR_HALO_SHARE,
-            Light::Spill { .. } | Light::Spot { .. } => self.strength,
+            Light::Spill { .. } => self.strength,
         }
     }
 
@@ -261,40 +241,8 @@ impl Emitter {
                 let dist = ((dx - f32::from(MONITOR_HALO_W / 2)).abs() + dy) / MONITOR_HALO_REACH;
                 Some((strength * (1.0 - dist).max(0.0) * MONITOR_HALO_SHARE).clamp(0.0, 1.0))
             }
-            Light::Spot { x: sx, y: sy, w, h } => {
-                // Centred on `(w − 1) / 2`, so the ellipse spans the box's cells
-                // symmetrically; `w / 2` would sample only its top-left quadrant.
-                let half = |n: u16| f32::from(n.saturating_sub(1)) * 0.5;
-                let (cx, cy) = (f32::from(sx) + half(w), f32::from(sy) + half(h));
-                let (rx, ry) = (half(w).max(1.0), half(h).max(1.0));
-                crate::ground::falloff((x - cx) / rx, (y - cy) / ry).map(|f| f * strength)
-            }
         }
     }
-}
-
-/// The sun's spot on the east or west wall, sized and lit by how directly its
-/// beam lands; none on the north wall, which is glass, or with no beam.
-pub(crate) fn wall_spot(layout: &Layout, look: &Look) -> Option<Emitter> {
-    let spot = look.sun_spot?;
-    let level = spot.intensity * look.sunlight * look.beam;
-    let band = layout.wall_band_h();
-    if spot.wall == WallSide::North || level <= 0.0 || band == 0 {
-        return None;
-    }
-    let w = ((WALL_SPOT_W * level).round() as u16).max(WALL_SPOT_MIN_W);
-    let h = ((WALL_SPOT_H * level).round() as u16).max(WALL_SPOT_MIN_H);
-    // Slid within the band; one shorter than the spot pins it to the top.
-    let y = (f32::from(band.saturating_sub(h)) * spot.along.min(1.0)) as u16;
-    let x = match spot.wall {
-        WallSide::East => layout.buf_w.saturating_sub(w),
-        WallSide::West | WallSide::North => 0,
-    };
-    Some(Emitter {
-        kind: EmitterKind::WallSpot,
-        light: Light::Spot { x, y, w, h },
-        strength: (WALL_SPOT_BASE + WALL_SPOT_GAIN * level).min(WALL_SPOT_MAX),
-    })
 }
 
 /// The columns each row of a spill spans, top row first, unclipped: the
@@ -312,10 +260,7 @@ fn spill_rows(x: u16, w: u16, slant: f32) -> impl Iterator<Item = std::ops::Rang
 /// One home desk's lights.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DeskLights {
-    /// The lamp fixture's top-left cell, on the desk's west wing.
-    pub(crate) fixture: Point,
-    /// The lamp's light, which it throws whichever way the desk faces; its
-    /// level is the fixture's too.
+    /// The lamp's light, which it throws whichever way the desk faces.
     pub(crate) lamp: Emitter,
     /// How strongly its standby screen glows; zero where the desk shows the
     /// viewer the monitor's back.
@@ -336,7 +281,7 @@ pub(crate) struct Lights {
     pub(crate) spills: Vec<Emitter>,
 }
 
-/// What the lights depend on this frame besides the layout and the sky's [`Look`].
+/// What the lights depend on this frame besides the layout and the sky's [`SkyTones`].
 pub(crate) struct LightInputs<'a> {
     /// Every agent the scene holds; only this floor's light it.
     pub(crate) agents: &'a [AgentSlot],
@@ -346,12 +291,13 @@ pub(crate) struct LightInputs<'a> {
     /// The room's artificial-light level, which an emptied floor turns down.
     pub(crate) indoor_scale: f32,
     pub(crate) neon: NeonLevels,
-    pub(crate) now: SystemTime,
+    /// The neon halo's breath steps on it.
+    pub(crate) beat: crate::anim::Beat,
 }
 
 impl Lights {
     /// The lights `layout` shows under `look`.
-    pub(crate) fn of(layout: &Layout, look: &Look, inputs: &LightInputs<'_>) -> Self {
+    pub(crate) fn of(layout: &SceneLayout, look: &SkyTones, inputs: &LightInputs<'_>) -> Self {
         let (darkness, indoor) = (look.darkness, inputs.indoor_scale);
         Self {
             floor_lamp: layout.floor_lamp_base().map(|centre| Emitter {
@@ -388,7 +334,7 @@ impl Lights {
                     h: crate::layout::NEON_PANEL.height,
                     reach: NEON_HALO_RADIUS,
                 },
-                strength: neon_halo_strength(inputs.neon, inputs.now, darkness),
+                strength: neon_halo_strength(inputs.neon, inputs.beat, darkness),
             },
             // `sunlight` already carries the weather, so heavy cloud dims the
             // spill with it.
@@ -400,7 +346,7 @@ impl Lights {
                         kind: EmitterKind::WindowSpill,
                         light: Light::Spill {
                             x: bay.x,
-                            w: WINDOW_W,
+                            w: bay.w,
                             top,
                             slant: look.spill_slant,
                         },
@@ -437,16 +383,14 @@ pub(crate) fn screen_idle(facing: Facing, darkness: f32, indoor: f32) -> f32 {
 }
 
 impl DeskLights {
-    /// The lights of a desk at `desk`: its lamp lit to `level` — the fixture
-    /// shows all of it, the pool [`DESK_LAMP_MAX`] — and its standby screen at
-    /// `screen_idle`.
+    /// The lights of a desk at `desk`: its lamp lit to `level`, its pool at
+    /// most [`DESK_LAMP_MAX`], and its standby screen at `screen_idle`.
     pub(crate) fn new(desk: Point, level: f32, screen_idle: f32) -> Self {
         let bulb = Point {
             x: desk.x + DESK_LAMP_BULB.0,
             y: desk.y + DESK_LAMP_BULB.1,
         };
         Self {
-            fixture: desk,
             lamp: Emitter {
                 kind: EmitterKind::DeskLamp,
                 light: Light::Halo {
@@ -457,14 +401,6 @@ impl DeskLights {
                 strength: level,
             },
             screen_idle,
-        }
-    }
-
-    /// The bulb, where the lamp's stem meets its shade and its pool centres.
-    pub(crate) fn bulb(&self) -> Point {
-        Point {
-            x: self.fixture.x + DESK_LAMP_BULB.0,
-            y: self.fixture.y + DESK_LAMP_BULB.1,
         }
     }
 }
@@ -481,9 +417,22 @@ pub(crate) fn lit_screen(agent: &AgentSlot, facing: Facing, seated: bool) -> Opt
     }
 }
 
+/// The glow of a desk's screen: its occupant's [`lit_screen`],
+/// tinted by the tool. Both profiles light screens from this.
+pub(crate) fn desk_screen_glow(
+    occupant: Option<&AgentSlot>,
+    facing: crate::layout::Facing,
+    seated: bool,
+    theme: &crate::theme::Theme,
+) -> Option<pixtuoid_core::sprite::Rgb> {
+    occupant
+        .and_then(|a| crate::lighting::lit_screen(a, facing, seated))
+        .map(|tool| theme.tool_glow.for_kind(tool))
+}
+
 /// One halo over each [`lit_screen`], on the row above its desk, clear of the
 /// monitor.
-fn monitor_halos(layout: &Layout, inputs: &LightInputs<'_>) -> Vec<Emitter> {
+fn monitor_halos(layout: &SceneLayout, inputs: &LightInputs<'_>) -> Vec<Emitter> {
     inputs
         .agents
         .iter()
@@ -517,11 +466,11 @@ fn neon_breath(elapsed_ms: u64, period_ms: u64, floor: f32) -> f32 {
 
 /// The neon halo's strength at the tube: breathing, dimmed by daylight, and
 /// none from a tube driven no harder than it is starved.
-fn neon_halo_strength(levels: NeonLevels, now: SystemTime, darkness: f32) -> f32 {
-    let ms = epoch_ms(now);
+fn neon_halo_strength(levels: NeonLevels, beat: crate::anim::Beat, darkness: f32) -> f32 {
+    let ms = beat.ms();
     let brand = NEON_HALO_BRAND * neon_breath(ms, NEON_BREATH_MS, NEON_BREATH_FLOOR);
     let alert = NEON_HALO_ALERT * neon_breath(ms, NEON_ALERT_BREATH_MS, NEON_ALERT_BREATH_FLOOR);
-    let daylight = NEON_DAYLIGHT_FLOOR + (1.0 - NEON_DAYLIGHT_FLOOR) * darkness.clamp(0.0, 1.0);
+    let daylight = NEON_DAYLIGHT_MIN + (1.0 - NEON_DAYLIGHT_MIN) * darkness.clamp(0.0, 1.0);
     // A tube only throws light ABOVE its starved level — one darker than the wall
     // it hangs on has none to give.
     let starved = NeonLevels::EMPTY.power;

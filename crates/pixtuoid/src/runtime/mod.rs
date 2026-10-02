@@ -32,7 +32,7 @@ pub struct RunConfig {
     pub socket: Option<PathBuf>,
     pub projects_root: Option<PathBuf>,
     pub codex_sessions_root: Option<PathBuf>,
-    pub pack: pixtuoid_scene::embedded_pack::PackSource,
+    pub pack: pixtuoid_scene::pack::PackSource,
     pub desk_cap: Option<usize>,
     pub headless: bool,
     pub config_path: PathBuf,
@@ -50,6 +50,11 @@ pub struct RunConfig {
     /// Resolved `[audio]` settings — muted defaults TRUE (the lazy spawn waits for the
     /// first `m`), volume pre-clamped by `config::resolve_audio`. Headless ignores it.
     pub audio: crate::config::AudioConfig,
+    /// Resolved by `config::resolve_graphics`. Headless and `floating` ignore it.
+    pub graphics: crate::GraphicsMode,
+    /// Resolved by `config::resolve_motion`; `auto` is what the TUI's graphics
+    /// plan affords, and Full in the floating window.
+    pub motion: crate::config::MotionMode,
 }
 
 /// A live, shared set of connected source ids — the runtime mirror of the persisted

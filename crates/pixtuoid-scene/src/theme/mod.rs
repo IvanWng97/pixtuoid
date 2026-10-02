@@ -211,6 +211,22 @@ pub struct ToolGlowColors {
     pub default: Rgb,
 }
 
+impl ToolGlowColors {
+    /// The exhaustive `ToolKind → hue` map, shared by the monitor glow, the
+    /// footer tint and the tooltip so each tool has one hue.
+    pub fn for_kind(&self, kind: pixtuoid_core::state::ToolKind) -> Rgb {
+        use pixtuoid_core::state::ToolKind;
+        match kind {
+            ToolKind::Edit => self.edit,
+            ToolKind::Read => self.read,
+            ToolKind::Bash => self.bash,
+            ToolKind::Task => self.agent,
+            ToolKind::Search => self.grep,
+            ToolKind::Other => self.default,
+        }
+    }
+}
+
 /// Name-badge, tooltip, and neon-brand UI colors.
 #[derive(Debug, Clone)]
 pub struct UiColors {
@@ -222,7 +238,7 @@ pub struct UiColors {
     pub label_idle: Rgb,
     /// Name-badge tone for an exiting agent.
     pub label_exiting: Rgb,
-    /// Tooltip / popup background fill.
+    /// Tooltip / popup background fill, and the cutaway's badge plate.
     pub tooltip_bg: Rgb,
     /// Tooltip title text.
     pub tooltip_title: Rgb,
@@ -588,7 +604,7 @@ mod tests {
             // bottle's fixed fill — equal colors erase the third appliance anim.
             assert_ne!(
                 t.furniture.tank_water_line,
-                crate::pixel_painter::COOLER_WATER,
+                crate::pack::COOLER_WATER,
                 "{}: glug bubble invisible in the cooler bottle",
                 t.name
             );
@@ -677,5 +693,17 @@ mod tests {
                 d.label_prefix
             );
         }
+    }
+
+    #[test]
+    fn tool_glow_is_the_shared_kind_to_hue_map() {
+        use pixtuoid_core::state::ToolKind;
+        let glow = &NORMAL.tool_glow;
+        assert_eq!(glow.for_kind(ToolKind::Edit), glow.edit);
+        assert_eq!(glow.for_kind(ToolKind::Read), glow.read);
+        assert_eq!(glow.for_kind(ToolKind::Bash), glow.bash);
+        assert_eq!(glow.for_kind(ToolKind::Task), glow.agent);
+        assert_eq!(glow.for_kind(ToolKind::Search), glow.grep);
+        assert_eq!(glow.for_kind(ToolKind::Other), glow.default);
     }
 }

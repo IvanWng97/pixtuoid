@@ -11,12 +11,11 @@
 //! towers and a tall one shows them whole over more sky.
 
 use std::ops::RangeInclusive;
-use std::time::SystemTime;
 
 use pixtuoid_core::sprite::format::{Building, CityMaterials, CityPlane, Density, Material, Pack};
 use pixtuoid_core::sprite::{Frame, Pixel, Rgb};
 
-use crate::atmosphere::{Look, Moment};
+use crate::atmosphere::{Moment, SkyTones};
 use crate::layout::pct;
 use crate::theme::Theme;
 
@@ -143,6 +142,71 @@ const PER_MILLE: u32 = 1000;
 const BLINK_CYCLE_MS: RangeInclusive<u64> = 6_000..=14_000;
 /// One lit window in this many goes dark on a given turn.
 const BLINK_OFF_IN: u32 = 12;
+
+/// An aviation obstruction light's red, the same under every theme.
+const BEACON: Rgb = Rgb {
+    r: 255,
+    g: 36,
+    b: 28,
+};
+/// One of the tallest towers in this many carries a light.
+const BEACON_IN: u32 = 2;
+/// How many Full beats a light holds on, then off, so it flips on one.
+const BEACON_HALF_BEATS: u64 = 10;
+/// [`BEACON_HALF_BEATS`] in ms.
+const BEACON_HALF_MS: u64 = BEACON_HALF_BEATS * crate::anim::FULL_TICK_MS;
+/// Tells the lights' hashes apart from the planes'.
+const BEACON_SALT: u32 = 0xB1EC;
+/// A separate salt for the phase: carriers all share one [`BEACON_SALT`]
+/// hash residue, so phasing off it would blink every light in unison.
+const BEACON_PHASE_SALT: u32 = 0x9A5E;
+
+/// Whether `stand` carries a light: a near building the pack draws as tall
+/// as its `tallest`, a few of them. The band crops every near tower to one
+/// line, so only the art's own height tells the tallest apart.
+fn carries_beacon(plane: Plane, stand: &Stand<'_>, tallest: u16) -> bool {
+    plane == Plane::Near
+        && matches!(stand, Stand::Kit { building, .. } if building.size().1 >= tallest)
+        && hash(stand.hash() ^ BEACON_SALT).is_multiple_of(BEACON_IN)
+}
+
+/// The tallest building `pack` stands in the near plane.
+fn tallest_near(pack: &Pack) -> u16 {
+    pack.buildings()
+        .filter(|b| b.stands_in(CityPlane::Near))
+        .map(|b| b.size().1)
+        .max()
+        .unwrap_or(u16::MAX)
+}
+
+/// Whether the light on a stand hashed `hash` shines on `beat`: on and off a
+/// [`BEACON_HALF_MS`] each, out of step with its neighbours'.
+fn beacon_on(hash: u32, beat: crate::anim::Beat) -> bool {
+    (beat.ms() / BEACON_HALF_MS + u64::from(self::hash(hash ^ BEACON_PHASE_SALT))).is_multiple_of(2)
+}
+
+/// The art pixels of a light `side` across on the tip of the building
+/// `frame` draws from `origin`, `grow` art pixels to its pixel: its topmost
+/// pixel nearest its middle, a spire's tip. Only the building's own pixels:
+/// on a mast thinner than the light it runs down the mast, never out over
+/// the sky or another building.
+fn beacon_cells(frame: &Frame, origin: (i32, i32), grow: u16, side: u16) -> Vec<(i32, i32)> {
+    let drawn = |fx: u16, fy: u16| frame.get(fx, fy).copied().flatten().is_some();
+    let Some((fx, fy)) = (0..frame.height()).find_map(|fy| {
+        (0..frame.width())
+            .filter(|&fx| drawn(fx, fy))
+            .min_by_key(|&fx| fx.abs_diff(frame.width() / 2))
+            .map(|fx| (fx, fy))
+    }) else {
+        return Vec::new();
+    };
+    let (ax, ay) = (fx * grow, fy * grow);
+    (0..side)
+        .flat_map(|dy| (0..side).map(move |dx| (ax + dx, ay + dy)))
+        .filter(|&(x, y)| drawn(x / grow, y / grow))
+        .map(|(x, y)| (origin.0 + i32::from(x), origin.1 + i32::from(y)))
+        .collect()
+}
 
 /// The rows at the top of glass `glass_h` tall that no building reaches: the
 /// sky the sun, the moon and the stars always have.
@@ -273,7 +337,7 @@ pub(crate) fn lit(
     hash: u32,
     index: usize,
     darkness: f32,
-    now: SystemTime,
+    beat: crate::anim::Beat,
 ) -> Option<u32> {
     let depth = plane.depth();
     let r = self::hash(hash ^ depth.salt ^ (index as u32).wrapping_mul(0x2545_F491));
@@ -283,7 +347,7 @@ pub(crate) fn lit(
         return None;
     }
     let span = BLINK_CYCLE_MS.end() - BLINK_CYCLE_MS.start() + 1;
-    let turn = crate::anim::epoch_ms(now) / (BLINK_CYCLE_MS.start() + u64::from(r) % span);
+    let turn = beat.ms() / (BLINK_CYCLE_MS.start() + u64::from(r) % span);
     if self::hash(r ^ turn as u32).is_multiple_of(BLINK_OFF_IN) {
         return None;
     }
@@ -302,15 +366,17 @@ pub(crate) struct PlaneColours {
     detail: Rgb,
     sign: Rgb,
     lit: [Rgb; 3],
+    /// A tower's aviation light, glowing as its lit windows do.
+    beacon: Rgb,
 }
 
 impl PlaneColours {
     /// `plane`'s colours: the hour's building tone lifted by the plane's depth
     /// and hazed toward the horizon.
-    pub(crate) fn of(plane: Plane, look: &Look, theme: &Theme) -> Self {
+    pub(crate) fn of(plane: Plane, look: &SkyTones, theme: &Theme) -> Self {
         let depth = plane.depth();
         let o = &theme.office;
-        let haze = |c: Rgb| c.mix(look.glass_a, depth.haze);
+        let haze = |c: Rgb| c.mix(look.glass_horizon, depth.haze);
         let tone = o
             .building_light
             .mix(o.building_dark, look.darkness)
@@ -326,6 +392,7 @@ impl PlaneColours {
             detail: haze(tone.ramp(-1)),
             sign: haze(tone.mix(theme.lighting.twilight_a, look.darkness)),
             lit: o.city_lit_windows.map(|c| haze(glass.mix(c, glow))),
+            beacon: haze(glass.mix(BEACON, glow)),
         }
     }
 
@@ -381,7 +448,7 @@ impl CityStrip {
         theme: &Theme,
         density: Density,
     ) -> Self {
-        let (look, altitude, now) = (&moment.look, moment.altitude, moment.now);
+        let (look, altitude, beat) = (&moment.look, moment.altitude, moment.beat);
         let d = density.get();
         let mut strip = CityStrip {
             w: run_w.saturating_mul(d),
@@ -393,9 +460,14 @@ impl CityStrip {
         };
         let colours = Plane::ALL.map(|p| PlaneColours::of(p, look, theme));
         let mut recoloured: Vec<(&str, Plane, Frame)> = Vec::new();
+        let tallest = tallest_near(pack);
+        // Every light's art pixels: drawn once every tower stands, so none
+        // stands over one.
+        let mut beacons: Vec<(i32, i32)> = Vec::new();
         for (plane, stand) in Skyline::of(pack, run_w, glass_h, altitude).stands() {
             let c = &colours[plane.index()];
-            let window = |i: usize| c.window(lit(plane, stand.hash(), i, look.darkness, now));
+            let window = |i: usize| c.window(lit(plane, stand.hash(), i, look.darkness, beat));
+            let beacon = carries_beacon(plane, &stand, tallest) && beacon_on(stand.hash(), beat);
             match stand {
                 Stand::Block { x, w, top, .. } => {
                     let (x0, y0) = (x * i32::from(d), top * i32::from(d));
@@ -458,8 +530,19 @@ impl CityStrip {
                             strip.fill(cell(wx, wy), grow, colour);
                         }
                     }
+                    // A cell of the art it stands in, so a base grown to the
+                    // density grows its light with it; on finer art, half a
+                    // unit across.
+                    let side = if grow > 1 { grow } else { (d / 2).max(1) };
+                    if beacon {
+                        beacons.extend(beacon_cells(frame, (x0, y0), grow, side));
+                    }
                 }
             }
+        }
+        let beacon = colours[Plane::Near.index()].beacon;
+        for (x, y) in beacons {
+            strip.put(x, y, beacon);
         }
         strip
     }
@@ -509,9 +592,10 @@ fn hash(n: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::anim::{Beat, Motion};
 
     fn pack() -> Pack {
-        crate::embedded_pack::test_default_pack()
+        crate::pack::test_default_pack()
     }
 
     /// Where each stand stands, for comparing two cities.
@@ -656,12 +740,12 @@ mod tests {
     fn a_denser_strip_draws_the_denser_art_on_the_same_city() {
         let pack = pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let sky = crate::sky::Sky::at(SystemTime::UNIX_EPOCH);
+        let sky = crate::sky::Sky::clock(std::time::UNIX_EPOCH);
         let strip = |d| {
             CityStrip::draw(
                 &pack,
                 (60, 20),
-                &Moment::resolve(sky, theme, 0.0, SystemTime::UNIX_EPOCH),
+                &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(std::time::UNIX_EPOCH)),
                 theme,
                 Density::new(d).expect("nonzero"),
             )
@@ -713,9 +797,182 @@ mod tests {
         );
     }
 
+    /// A light burns only on a tallest near tower that carries one, in its
+    /// top rows, over pixels the tower already covers; half a turn later each
+    /// has flipped, and the city stands where it stood.
+    #[test]
+    fn aviation_lights_sit_only_on_rooftops_and_blink() {
+        let pack = pack();
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (run_w, glass_h) = (400, 24);
+        let night = crate::localclock::at_hour(23);
+        for d in [1, 4] {
+            let side = (d / 2).max(1);
+            let strip = |now| {
+                let moment = Moment::resolve(
+                    crate::sky::Sky::at_with(now, crate::sky::Weather::Clear),
+                    theme,
+                    0.0,
+                    Motion::Full.clock(now),
+                );
+                let near = PlaneColours::of(Plane::Near, &moment.look, theme);
+                let s = CityStrip::draw(
+                    &pack,
+                    (run_w, glass_h),
+                    &moment,
+                    theme,
+                    Density::new(d).expect("nonzero"),
+                );
+                (s, near)
+            };
+            let half = std::time::Duration::from_millis(BEACON_HALF_MS);
+            let ((a, near), (b, _)) = (strip(night), strip(night + half));
+            let beacon = near.beacon;
+            let lights = |s: &CityStrip| -> Vec<(u16, u16)> {
+                (0..s.h)
+                    .flat_map(|y| (0..s.w).map(move |x| (x, y)))
+                    .filter(|&(x, y)| s.at(x, y) == Some(beacon))
+                    .collect()
+            };
+            let (on_a, on_b) = (lights(&a), lights(&b));
+            assert!(
+                !on_a.is_empty() || !on_b.is_empty(),
+                "{d}: the towers blink"
+            );
+            assert!(on_a.iter().all(|p| !on_b.contains(p)), "{d}: in turn");
+            let shown = |s: &CityStrip| -> Vec<bool> { s.px.iter().map(Option::is_some).collect() };
+            assert_eq!(shown(&a), shown(&b), "{d}: no light in the sky");
+            let city = Skyline::of(&pack, run_w, glass_h, 0.0);
+            let tallest = tallest_near(&pack);
+            let materials = pack.city_materials().expect("a city");
+            for &(x, y) in on_a.iter().chain(&on_b) {
+                let (x, y) = (i32::from(x), i32::from(y));
+                let on_a_roof = city.stands().any(|(plane, s)| {
+                    let Stand::Kit {
+                        building,
+                        x: sx,
+                        top,
+                        ..
+                    } = s
+                    else {
+                        return false;
+                    };
+                    let (art, grow) = building
+                        .variant(Density::new(d).expect("nonzero"))
+                        .map_or((building.base(), d), |a| (a, 1));
+                    let frame = art
+                        .sprite()
+                        .recolorable(0)
+                        .expect("a frame")
+                        .recolored(&near.overrides(materials));
+                    // Its art's first drawn row: its roof, or its spire's tip.
+                    let first = (0..frame.height())
+                        .find(|&fy| {
+                            (0..frame.width())
+                                .any(|fx| frame.get(fx, fy).copied().flatten().is_some())
+                        })
+                        .expect("drawn");
+                    let d = i32::from(d);
+                    let roof = top * d + i32::from(first * grow);
+                    carries_beacon(plane, &s, tallest)
+                        && (sx * d..(sx + i32::from(building.size().0)) * d).contains(&x)
+                        && (roof..roof + i32::from(side.max(grow))).contains(&y)
+                });
+                assert!(on_a_roof, "{d}: a light at ({x}, {y}) off any rooftop");
+            }
+        }
+    }
+
+    /// A light's square takes only its own tower's pixels: where it overlaps
+    /// another building around a thin mast, a strip full of that building
+    /// keeps it there. Only art finer than its base has such a mast.
+    #[test]
+    #[cfg(feature = "density-art")]
+    fn a_light_leaves_a_neighbours_pixels_alone() {
+        let pack = pack();
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let materials = pack.city_materials().expect("a city");
+        let near = PlaneColours::of(
+            Plane::Near,
+            &SkyTones::resolve(
+                &crate::sky::Sky::at_with(std::time::UNIX_EPOCH, crate::sky::Weather::Clear),
+                theme,
+            ),
+            theme,
+        );
+        let tallest = tallest_near(&pack);
+        let neighbour = Rgb { r: 1, g: 2, b: 3 };
+        let mut spared = 0;
+        for tower in pack
+            .buildings()
+            .filter(|b| b.stands_in(CityPlane::Near) && b.size().1 >= tallest)
+        {
+            for d in 1..=4 {
+                let (art, grow) = tower
+                    .variant(Density::new(d).expect("nonzero"))
+                    .map_or((tower.base(), d), |a| (a, 1));
+                let frame = art
+                    .sprite()
+                    .recolorable(0)
+                    .expect("a frame")
+                    .recolored(&near.overrides(materials));
+                let side = if grow > 1 { grow } else { (d / 2).max(1) };
+                let (w, h) = (frame.width() * grow + side, frame.height() * grow + side);
+                let mut strip = CityStrip {
+                    w,
+                    h,
+                    px: vec![Some(neighbour); usize::from(w) * usize::from(h)],
+                };
+                let cells = beacon_cells(&frame, (0, 0), grow, side);
+                let &(tx, ty) = cells.first().expect("a lit tip");
+                for &(x, y) in &cells {
+                    strip.put(x, y, near.beacon);
+                }
+                for (x, y) in (0..side).flat_map(|dy| (0..side).map(move |dx| (dx, dy))) {
+                    let (x, y) = (tx + i32::from(x), ty + i32::from(y));
+                    let own = frame
+                        .get(
+                            u16::try_from(x).expect("in") / grow,
+                            u16::try_from(y).expect("in") / grow,
+                        )
+                        .copied()
+                        .flatten()
+                        .is_some();
+                    let want = if own { near.beacon } else { neighbour };
+                    let got =
+                        strip.at(u16::try_from(x).expect("in"), u16::try_from(y).expect("in"));
+                    assert_eq!(got, Some(want), "{} at {d}: ({x}, {y})", tower.name());
+                    spared += usize::from(!own);
+                }
+            }
+        }
+        assert!(spared > 0, "some light's square overlaps a neighbour");
+    }
+
+    /// The towers' lights blink out of step: at one instant some carriers
+    /// are lit and others dark.
+    #[test]
+    fn aviation_lights_blink_out_of_step() {
+        let pack = pack();
+        let tallest = tallest_near(&pack);
+        let carriers: Vec<u32> = Skyline::of(&pack, 1200, 24, 0.0)
+            .stands()
+            .filter(|(plane, s)| carries_beacon(*plane, s, tallest))
+            .map(|(_, s)| s.hash())
+            .collect();
+        assert!(carriers.len() >= 2, "{} carriers", carriers.len());
+        let now = Motion::Full.beat(crate::localclock::at_hour(23));
+        let lit = carriers.iter().filter(|&&h| beacon_on(h, now)).count();
+        assert!(
+            0 < lit && lit < carriers.len(),
+            "{lit} of {} lit at once",
+            carriers.len()
+        );
+    }
+
     #[test]
     fn more_windows_burn_as_it_darkens() {
-        let now = SystemTime::UNIX_EPOCH;
+        let now = Beat::at_ms(0);
         let count = |d: f32| {
             (0..2000)
                 .filter(|&i| lit(Plane::Near, 7, i, d, now).is_some())

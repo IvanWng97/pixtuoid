@@ -6,8 +6,12 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::dither::FALLOFF_TONES;
+use crate::floor::NeonLook;
+use crate::layout::roster::RUNNER_LATTICE_STRIDE;
 use crate::lighting::Emitter;
-use crate::pixel_painter::palette::{BLACK, WHITE, blend_rgb};
+use crate::pixel_painter::palette::blend_rgb;
+use crate::sky::clock_reading;
+use crate::sky::octant_offset;
 use crate::theme::Theme;
 
 /// The composite every light shares: [`blend_tone`] over the caller-clipped
@@ -58,40 +62,35 @@ pub(in crate::pixel_painter) fn paint_shadows(
 /// Blend `emitter`'s light in `color` over what is already painted, at the
 /// level the model gives each cell.
 pub(in crate::pixel_painter) fn paint_light(buf: &mut RgbBuffer, emitter: &Emitter, color: Rgb) {
+    paint_light_sparing(buf, emitter, color, |_, _| false);
+}
+
+/// The neon sign's halo in `color`, off the window glass, which shows the
+/// outside rather than the wall the sign hangs on.
+pub(in crate::pixel_painter) fn paint_neon_halo(
+    buf: &mut RgbBuffer,
+    layout: &crate::layout::SceneLayout,
+    neon: &Emitter,
+    color: Rgb,
+) {
+    paint_light_sparing(buf, neon, color, |x, y| layout.glass_at(x, y));
+}
+
+/// [`paint_light`], leaving every cell `spared` holds alone.
+fn paint_light_sparing(
+    buf: &mut RgbBuffer,
+    emitter: &Emitter,
+    color: Rgb,
+    spared: impl Fn(u16, u16) -> bool,
+) {
     if emitter.strength <= 0.0 {
         return;
     }
     let ((x0, y0), (x1, y1)) = emitter.bounds();
     let (xs, ys) = (x0..x1.min(buf.width()), y0..y1.min(buf.height()));
     blend_falloff(buf, xs, ys, color, emitter.peak(), |x, y| {
-        emitter.level_at(x, y)
+        (!spared(x, y)).then(|| emitter.level_at(x, y)).flatten()
     });
-}
-
-/// The neon sign's colors for one frame: a bright TUBE, a colored HALO that
-/// spills onto the wall and whatever hangs there, and a faintly tinted interior.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct NeonLook {
-    pub tube: Rgb,
-    pub interior: Rgb,
-    pub halo: Rgb,
-}
-
-/// A lit tube is its hue pushed this far toward white — the core of a real neon
-/// reads near-white, the COLOR lives in the halo.
-const NEON_TUBE_WHITEN: f32 = 0.38;
-/// How much of the hue the dark interior picks up at full power.
-const NEON_INTERIOR_TINT: f32 = 0.07;
-/// Map the sim's theme-free `levels` to this frame's colors; how strongly the
-/// halo throws them is the [`Lights`](crate::lighting::Lights)' call.
-pub(crate) fn neon_look(levels: crate::floor::NeonLevels, theme: &Theme) -> NeonLook {
-    let power = levels.power;
-    let hue = theme.ui.neon_brand.mix(theme.ui.neon_alert, levels.alert);
-    NeonLook {
-        tube: blend_rgb(BLACK, blend_rgb(hue, WHITE, NEON_TUBE_WHITEN), power),
-        interior: blend_rgb(theme.office.neon_panel_bg, hue, NEON_INTERIOR_TINT * power),
-        halo: hue,
-    }
 }
 
 /// Neon sign panel — a flat dark interior inside a lit tube, painted in the wall
@@ -176,60 +175,6 @@ pub(in crate::pixel_painter) fn paint_clock(
     }
 }
 
-/// What a wall clock reads at `now`, local time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ClockReading {
-    /// On a twelve-hour dial.
-    pub(crate) hour: u32,
-    pub(crate) minute: u32,
-}
-
-impl ClockReading {
-    /// The hour and the minute hands, as turns from twelve o'clock.
-    pub(crate) fn turns(self) -> (f32, f32) {
-        let (hour, minute) = (self.hour as f32, self.minute as f32);
-        ((hour + minute / 60.0) / 12.0, minute / 60.0)
-    }
-}
-
-/// Its own decode, not `sky::local_hour_frac`: the hands need the raw
-/// `hour % 12` and `minute`.
-pub(crate) fn clock_reading(now: SystemTime) -> ClockReading {
-    let unix_now = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let local = chrono::DateTime::<chrono::Local>::from(std::time::UNIX_EPOCH + unix_now);
-    use chrono::Timelike;
-    ClockReading {
-        hour: local.hour() % 12,
-        minute: local.minute(),
-    }
-}
-
-/// Quantize a fractional turn (0.0..1.0, 0.0 = north) to one of 8 octant
-/// (dx, dy) unit offsets.
-pub(crate) fn octant_offset(turn: f32) -> (i32, i32) {
-    // rem_euclid(8) maps every i32 (incl. a NaN turn's 0 cast) into 0..=7, so
-    // the table is total — a match would need a dead wildcard arm.
-    const OCTANTS: [(i32, i32); 8] = [
-        (0, -1),
-        (1, -1),
-        (1, 0),
-        (1, 1),
-        (0, 1),
-        (-1, 1),
-        (-1, 0),
-        (-1, -1),
-    ];
-    let oct = ((turn * 8.0).round() as i32).rem_euclid(8);
-    OCTANTS[oct as usize]
-}
-
-/// The corridor runner's diamond lattice pitch, in logical px. Taste pin: a
-/// tighter stride read as bathroom tiling rather than a woven runner at
-/// half-block scale.
-pub(crate) const RUNNER_LATTICE_STRIDE: i32 = 10;
-
 /// Office corridor runner, painted along the cubicle_aisle band so the eye
 /// traces a path connecting the door, meeting room, pantry, cubicles and lounge.
 /// Just texture over the floor — walls and decor paint on top.
@@ -265,8 +210,9 @@ pub(in crate::pixel_painter) fn paint_corridor_runner(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::anim::Beat;
 
-    use crate::floor::NeonLevels;
+    use crate::floor::{NeonLevels, neon_look};
     use crate::layout::{NEON_PANEL_BORDER, NEON_PANEL_H, NEON_PANEL_W, Point};
     use crate::lighting::{EmitterKind, Light, NEON_HALO_RADIUS};
 
@@ -425,21 +371,21 @@ mod tests {
     #[test]
     fn every_light_paints_only_inside_its_bounds() {
         let layout =
-            crate::layout::Layout::compute(192, 80, Some(crate::layout::TEST_DEFAULT_DESKS))
+            crate::layout::SceneLayout::compute(192, 80, Some(crate::layout::TEST_DEFAULT_DESKS))
                 .expect("fits");
         // 07:00 lights the lamps AND leans the sun through the windows.
         let sky =
             crate::sky::Sky::at_with(crate::localclock::at_hour(7), crate::sky::Weather::Clear);
         let lights = crate::lighting::Lights::of(
             &layout,
-            &crate::atmosphere::Look::resolve(&sky, &crate::theme::NORMAL),
+            &crate::atmosphere::SkyTones::resolve(&sky, &crate::theme::NORMAL),
             &crate::lighting::LightInputs {
                 agents: &[],
                 seated: &std::collections::HashMap::new(),
                 floor_idx: 0,
                 indoor_scale: 1.0,
                 neon: NeonLevels::FLASH,
-                now: SystemTime::UNIX_EPOCH,
+                beat: Beat::at_ms(0),
             },
         );
         let patch = Emitter {
@@ -499,6 +445,58 @@ mod tests {
             buf.get(8, 8),
             Rgb { r: 0, g: 0, b: 0 },
             "in-bounds frame paints"
+        );
+    }
+
+    #[test]
+    fn the_neon_halo_leaves_the_window_glass_alone() {
+        let layout =
+            crate::layout::SceneLayout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS))
+                .expect("192x160 fits");
+        let sky =
+            crate::sky::Sky::at_with(crate::localclock::at_hour(23), crate::sky::Weather::Clear);
+        let lights = crate::lighting::Lights::of(
+            &layout,
+            &crate::atmosphere::SkyTones::resolve(&sky, &crate::theme::NORMAL),
+            &crate::lighting::LightInputs {
+                agents: &[],
+                seated: &std::collections::HashMap::new(),
+                floor_idx: 0,
+                indoor_scale: 1.0,
+                neon: NeonLevels::FLASH,
+                beat: Beat::at_ms(0),
+            },
+        );
+        let fill = Rgb {
+            r: 20,
+            g: 20,
+            b: 30,
+        };
+        let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, fill);
+        paint_neon_halo(
+            &mut buf,
+            &layout,
+            &lights.neon,
+            Rgb {
+                r: 255,
+                g: 0,
+                b: 200,
+            },
+        );
+        let ((x0, y0), (x1, y1)) = lights.neon.bounds();
+        let cells: Vec<_> = (y0..y1.min(layout.buf_h))
+            .flat_map(|y| (x0..x1.min(layout.buf_w)).map(move |x| (x, y)))
+            .collect();
+        let (glass, wall): (Vec<_>, Vec<_>) =
+            cells.into_iter().partition(|&(x, y)| layout.glass_at(x, y));
+        assert!(!glass.is_empty(), "the halo reaches a window");
+        assert!(
+            glass.iter().all(|&(x, y)| buf.get(x, y) == fill),
+            "the glass is spared"
+        );
+        assert!(
+            wall.iter().any(|&(x, y)| buf.get(x, y) != fill),
+            "the wall around the sign is lit"
         );
     }
 }

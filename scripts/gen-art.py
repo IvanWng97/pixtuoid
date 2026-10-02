@@ -108,12 +108,12 @@ def outline(g, inside, out):
 # density, so the `@Nx` art cannot drift from the 1x it redraws.
 #
 # Rust owns these facts; the copies here are pinned against the generated art
-# by `embedded_pack`'s `a_desks_rows_follow_the_layout` and `effects`'s
+# by `pack`'s `a_desks_rows_follow_the_layout` and `effects`'s
 # `the_glow_lands_on_the_desk_arts_monitor`.
 #
 # The desk `FurnitureDef`'s visual width (`desk_sprite_width_tracks_the_footprint_overhang`).
 DESK_ART_W = 14
-# `pixel_painter::drawable`'s `DESK_BEZEL_RAISE`: the monitor's row above the wood.
+# `pack`'s `DESK_BEZEL_RAISE`: the monitor's row above the wood.
 DESK_BEZEL_RAISE = 1
 # `layout`'s `DESK_SURFACE_ROWS`, `DESK_FRONT_ROWS`, `DESK_LEG_ROWS`.
 DESK_SURFACE_ROWS, DESK_FRONT_ROWS, DESK_LEG_ROWS = 5, 1, 2
@@ -142,9 +142,9 @@ def desk_rows(lift):
 def desk_1x(lift):
     """The classic desk's wood: a lit back edge, a bright front lip, and legs
     dark on their inner side, with open floor between them so the carpet and
-    anyone walking behind the desk show through. The props (lamp, mug, paper
-    tower) are the classic painter's live overlays, so the art draws none of
-    them."""
+    anyone walking behind the desk show through, and the task lamp on its west
+    wing: a two-cell shade over its bulb. The cup and the paper tower are
+    pieces of their own, stood at the art's marks."""
     top, lip, legs, h = desk_rows(lift)
     g = canvas(DESK_ART_W, h)
     rect(g, 0, top, DESK_ART_W, lip, WOOD)
@@ -153,6 +153,9 @@ def desk_1x(lift):
     for x0, inner in ((0, DESK_LEG_W - 1), (DESK_ART_W - DESK_LEG_W, DESK_ART_W - DESK_LEG_W)):
         rect(g, x0, legs, x0 + DESK_LEG_W, h, WOOD_SH)
         rect(g, inner, legs, inner + 1, h, WOOD_DK)
+    # `lighting`'s `DESK_LAMP_BULB`: the bulb a cell east and south of the shade.
+    rect(g, 0, top, 2, top + 1, LAMP_HI)
+    put(g, 1, top + 1, BULB)
     return g
 
 
@@ -193,6 +196,49 @@ def desk_north_1x():
     for x in (x0 + 1, x1 - 2):
         put(g, x, keys, KEY_DK)
     return g
+
+
+# The desk props the cutaway stands on a desk's art at its marks, each mark the
+# cell the prop's bottom-left lands on: the cup at `pixel_painter::drawable`'s
+# `desk_cup_at`, the token tower at its `STACK_X_OFF`/`STACK_BASE_DY`, both
+# from the desk's point, one row under the art's top (`DESK_BEZEL_RAISE`).
+DESK_CUP_1X = (2, 2 + 1)
+DESK_TOWER_1X = (11, 3)
+# `token_meter`'s `MAX_TIER`: the tower's frames, one per tier.
+TOKEN_MAX_TIER = 3
+# `pixel_painter::drawable`'s `STACK_W` and `STACK_PX_PER_TIER`.
+TOKEN_W_1X, TOKEN_ROWS_PER_TIER_1X = 3, 2
+
+
+def desk_marks_1x(lift):
+    """A 1x desk's prop marks, `lift` rows taller above."""
+    (cx, cy), (tx, ty) = DESK_CUP_1X, DESK_TOWER_1X
+    return [("cup", cx, cy + 1 + lift), ("tower", tx, ty + 1 + lift)]
+
+
+def desk_cup_1x():
+    """The desk's coffee cup at 1x: its rim over its shadowed body."""
+    return [[MUG, MUG], [MUG_SH, MUG_SH]]
+
+
+def token_tower_1x():
+    """The token meter's paper tower at 1x, a frame per tier: reams stacked
+    two rows each, sheet over shade, the full tower's top sheet teetering a
+    column east."""
+    frames = []
+    for tier in range(1, TOKEN_MAX_TIER + 1):
+        h = tier * TOKEN_ROWS_PER_TIER_1X
+        g = canvas(TOKEN_W_1X + 1, h)
+        for i in range(h):
+            dx = 1 if tier == TOKEN_MAX_TIER and i == h - 1 else 0
+            rect(g, dx, h - 1 - i, dx + TOKEN_W_1X, h - i, OFFWHITE_SH if i % 2 else OFFWHITE)
+        frames.append(g)
+    return frames
+
+
+def token_sheet_1x():
+    """The sheet falling onto the token tower at 1x."""
+    return [[OFFWHITE] * TOKEN_W_1X]
 
 
 # ---- the meeting sofas: one layout for both views and densities, in logical rows ----
@@ -1243,11 +1289,61 @@ def desk_lamp(g, bx, by, facing):
     return sx, ey
 
 
-def paper_stack(g, x, y):
-    rect(g, x + 1, y + 1, x + 9, y + 9, OFFWHITE_SH)
-    rect(g, x, y, x + 8, y + 8, OFFWHITE)
-    for i in range(3):
-        rect(g, x + 1, y + 2 + i * 2, x + 6 - (i % 2) * 2, y + 3 + i * 2, PRINT)
+# The props' marks on the `@Nx` desks, each the art pixel the prop's outlined
+# bottom-left lands on: the cup and tower east of a viewer-facing monitor, west
+# of a back-turned one, clear of the lamp either way.
+DESK_MARKS = {
+    "desk": [("cup", 45, (DESK_BEZEL_RAISE * S) + 18), ("tower", 43, (DESK_BEZEL_RAISE * S) + 12)],
+    "desk_north": [
+        ("cup", 3, (DESK_BEZEL_RAISE + DESK_NORTH_LIFT) * S + 19),
+        ("tower", 2, (DESK_BEZEL_RAISE + DESK_NORTH_LIFT) * S + 13),
+    ],
+}
+# The `@Nx` tower's reams fill its frame, `S` times the 1x tier's rows: the
+# bottom ream gives up the outline's two rows.
+TOKEN_REAM_ROWS = TOKEN_ROWS_PER_TIER_1X * S
+TOKEN_W = TOKEN_W_1X * S - 2
+# How far the full tower's top ream teeters east.
+TOKEN_TEETER = 2
+
+
+def desk_cup():
+    """The desk's coffee cup: a mug with coffee showing, its handle east."""
+    g = canvas(2 * S, 2 * S)
+    desk_mug(g, 1, 2)
+    union_outline(g)
+    return g
+
+
+def token_tower():
+    """The token meter's paper tower, a frame per tier: reams stacked, each a
+    lit top sheet over its page edges, the full tower's top ream teetering
+    east."""
+    frames = []
+    for tier in range(1, TOKEN_MAX_TIER + 1):
+        h = tier * TOKEN_REAM_ROWS
+        g = canvas((TOKEN_W_1X + 1) * S, h)
+        foot = h - 1
+        for r in range(tier):
+            top = foot - (TOKEN_REAM_ROWS - (2 if r == 0 else 0))
+            x0 = 1 + (TOKEN_TEETER if tier == TOKEN_MAX_TIER and r == tier - 1 else 0)
+            for y in range(top, foot):
+                rect(g, x0, y, x0 + TOKEN_W, y + 1, OFFWHITE if (foot - y) % 2 else OFFWHITE_SH)
+            rect(g, x0, top, x0 + TOKEN_W, top + 1, OFFWHITE)
+            rect(g, x0, foot - 1, x0 + TOKEN_W, foot, OFFWHITE_SH)
+            foot = top
+        union_outline(g)
+        frames.append(g)
+    return frames
+
+
+def token_sheet():
+    """The sheet falling onto the token tower."""
+    g = canvas(TOKEN_W + 2, 4)
+    rect(g, 1, 1, TOKEN_W + 1, 2, OFFWHITE)
+    rect(g, 1, 2, TOKEN_W + 1, 3, OFFWHITE_SH)
+    union_outline(g)
+    return g
 
 
 def desk_mug(g, x, y):
@@ -1281,8 +1377,6 @@ def desk_south():
     rect(g, mid - 2, 9, mid + 2, 11, SLATE)
     monitor_stand(g, mid, chin - 1)
     desk_lamp(g, 5, ty + 10, 1)
-    paper_stack(g, 44, ty + 3)
-    desk_mug(g, 46, ty + 14)
     union_outline(g)
     return g
 
@@ -1306,8 +1400,6 @@ def desk_north():
     rect(g, mx0 + 4, ky + 1, mx1 - 6, ky + 2, KEYCAP)
     rect(g, mx1 - 2, ky, mx1 + 1, ky + 3, KEYCAP)
     desk_lamp(g, 49, ty + 12, -1)
-    paper_stack(g, 3, ty + 4)
-    desk_mug(g, 4, ty + 15)
     union_outline(g)
     return g
 
@@ -1923,7 +2015,7 @@ def standing_desk():
 
 
 # ---- the corridor appliances and the meeting table ---------------------------------
-# Drawn in the theme's appliance keys (pixel_painter::palette::appliance_overrides).
+# Drawn in the theme's appliance keys (pack::appliance_overrides).
 VEND_BODY, VEND_BODY_LT, VEND_BODY_SH = "Б", "Ъ", "ъ"
 VEND_PANEL, VEND_PANEL_LT = "П", "п"
 VEND_DRINKS = ("Ч", "Ш", "Щ", "Э")
@@ -2240,7 +2332,7 @@ def meeting_table_1x():
 
 
 # ---- the fixtures: the pantry's island and corner, the lounge, the meeting room, the wall -
-# Recoloured from the theme (pixel_painter::palette::fixture_overrides).
+# Recoloured from the theme (pack::fixture_overrides).
 TANK_WATER, TANK_WATER_DP, TANK_LINE = "Д", "д", "З"
 TANK_FISH, TANK_FISH_SH, TANK_FISH_ALT, TANK_FISH_ALT_SH = "И", "и", "Л", "л"
 TANK_PLANT, TANK_PLANT_SH = "Ь", "ь"
@@ -3003,31 +3095,43 @@ def building_slab():
     return g
 
 
-def city_base(g):
-    """A building drawn at `S`, read at 1x, `S`x`S` block by block: a thin part
-    running through a block (a sign, then plant or a mast, then a roof line) wins it; a block
-    less than half drawn is sky; one holding glass on an odd row and column is glass,
-    the lit-dot grid a 1x city is read by (the scene's `skyline::block_window`);
-    any other takes whichever of facade and shade it holds more of."""
+def block_read(g, pick):
+    """`g`, drawn at `S`, read at 1x: each `S`x`S` block's cells, with the
+    block's column and row, to `pick`, which names the 1x cell's key or leaves
+    it empty with `None`."""
     h, w = len(g) // S, len(g[0]) // S
     out = canvas(w, h)
     for by in range(h):
         for bx in range(w):
-            cells = [g[by * S + y][bx * S + x] for y in range(S) for x in range(S)]
-            thin = next((k for k in (CITY_SIGN, CITY_DETAIL, CITY_ROOF) if cells.count(k) >= S), None)
-            if thin:
-                out[by][bx] = thin
-            elif (S * S - cells.count(T)) * 2 < S * S:
-                continue
-            elif CITY_GLASS in cells and bx % 2 == 1 and by % 2 == 1:
-                out[by][bx] = CITY_GLASS
-            else:
-                out[by][bx] = max((CITY_FACADE, CITY_SHADE), key=cells.count)
+            k = pick([g[by * S + y][bx * S + x] for y in range(S) for x in range(S)], bx, by)
+            if k is not None:
+                out[by][bx] = k
     return out
 
 
+def city_cell(cells, bx, by):
+    """A building's block at 1x: a thin part running through it (a sign, then
+    plant or a mast, then a roof line) wins it; a block less than half drawn is
+    sky; one holding glass on an odd row and column is glass, the lit-dot grid a
+    1x city is read by (the scene's `skyline::block_window`); any other takes
+    whichever of facade and shade it holds more of."""
+    thin = next((k for k in (CITY_SIGN, CITY_DETAIL, CITY_ROOF) if cells.count(k) >= S), None)
+    if thin:
+        return thin
+    if (len(cells) - cells.count(T)) * 2 < len(cells):
+        return None
+    if CITY_GLASS in cells and bx % 2 == 1 and by % 2 == 1:
+        return CITY_GLASS
+    return max((CITY_FACADE, CITY_SHADE), key=cells.count)
+
+
+def city_base(g):
+    """A building drawn at `S`, read at 1x."""
+    return block_read(g, city_cell)
+
+
 # Each building, registered in pack.toml's `[buildings]` by hand with the planes it
-# stands in (`every_embedded_sprite_is_a_frame_the_pack_loads` fails on one left out).
+# stands in (`every_bundled_sprite_is_a_frame_the_pack_loads` fails on one left out).
 BUILDINGS = {
     "setback": building_setback,
     "curtain": building_curtain,
@@ -3041,14 +3145,200 @@ BUILDINGS = {
 }
 
 
+# ---- the creatures: each species' master placed by hand at `S`, its 1x read from it
+# Every frame faces east: `pet_position` flips a walk heading west. A master is
+# the art itself, key by key; the 1x frame is that master read block by block
+# (`creature_cell`), with `CREATURE_FIXES` setting the cells the reading gets
+# wrong, so the classic and the cutaway draw one animal.
+CAT_FUR, CAT_FUR_SH, CAT_FUR_LT, CAT_DARK, CAT_PALE = "t", "ţ", "Ţ", "u", "w"
+DOG_COAT_SH, DOG_COAT_LT, DOG_TONGUE = "ƭ", "Ƭ", "R"
+CAT_WALK = [
+    """
+    ................................
+    ........κκ......................
+    .......κuuκ.........κ.....κ.....
+    ......κţtκ.........κuκ...κuκ....
+    .....κţtκ.........κu^κκκκ^uκ....
+    .....κţtκ.........κŢŢŢuŢŢŢŢŢκ...
+    .....κţtκ.......κtttuttuttttκ...
+    ......κţtκ......κţttttttwetttκ..
+    .......κţtκ.....κţttettteetttκ..
+    ........κţtκκκκκţttetttteetttκ..
+    ........κttŢŢŢŢŢtţttttt^ttww^κ..
+    .......κtttttttttţtttttttwwuwκ..
+    .......κţtttttttttţţtttttwwwκ...
+    ......κţţtttttttttttttttwwwκ....
+    ......κţţtttttttttttttttwwκ.....
+    .......κţţţttttttttttttttwκ.....
+    ........κţţţţţţţţţţţţţţţţκ......
+    .........κttţţκκκκκκţţκttκ......
+    .........κttţţκ....κţţκttκ......
+    ........κttκţţκ....κţţκκttκ.....
+    ........κttκţţκ....κţţκκttκ.....
+    .......κwwκκţţκ....κwwκ.κwwκ....
+    ........κκ..κκ......κκ...κκ.....
+    ................................
+    """,
+    """
+    ................................
+    .......κκ.......................
+    ......κuuκ..........κ.....κ.....
+    .....κţtκ..........κuκ...κuκ....
+    ....κţtκ..........κu^κκκκ^uκ....
+    ....κţtκ..........κŢŢŢuŢŢŢŢŢκ...
+    .....κţtκ.......κtttuttuttttκ...
+    ......κţtκ......κţttttttwetttκ..
+    .......κţtκ.....κţttettteetttκ..
+    ........κţtκκκκκţttetttteetttκ..
+    ........κttŢŢŢŢŢtţttttt^ttww^κ..
+    .......κtttttttttţtttttttwwuwκ..
+    .......κţtttttttttţţtttttwwwκ...
+    ......κţţtttttttttttttttwwwκ....
+    ......κţţtttttttttttttttwwκ.....
+    .......κţţţttttttttttttttwκ.....
+    ........κţţţţţţţţţţţţţţţţκ......
+    .........κttκţţκκκκκκţţttκ......
+    .........κttκţţκ....κţţttκ......
+    .........κttκţţκ....κţţttκ......
+    .........κttκţţκ....κţţttκ......
+    .........κwwκţţκ....κwwwwκ......
+    ..........κκ.κκ......κκκκ.......
+    ................................
+    """,
+]
+DOG_WALK = [
+    """
+    ................................
+    ................................
+    ....................κκκκκ.......
+    ..................κκƬƬƬƬƬκκ.....
+    .................κƬƬƬƬƬƬƬƬƬκ....
+    ................κƬƬƬƬƬƬƬƬƬƬƬκ...
+    ...............κzzzzxxxxxwexxκκ.
+    .....κκ........κzzzzzxxxxeexƬƬuκ
+    ....κƬxκ.......κzzzzzxxxxeexƬƬuκ
+    ....κƬxκ..κκκκκκκzzzzxx^xxxƬƬƬκ.
+    .....κƬxκκƬƬƬƬƬƬƬƬzzzxxxxxxxRκ..
+    ......κκƬƬxxxxxxxxƬƬƭƭƭƭƭƭƭκκ...
+    ......κxxxxxxxxxxxxxxκκκκκκ.....
+    .....κxxxxxxxxxxxxxxxxκ.........
+    .....κxxxxxxxxxxxxxxxxκ.........
+    ......κƭxxxxxxxxxxxxƭκ..........
+    .......κƭƭxxxƭƭƭƭƭƭxxxκ.........
+    .......κƭƭxxxκκκκƭƭxxxκ.........
+    ......κƭƭƭxxxκ..κƭƭƭxxxκ........
+    ......κƭƭƭxxxκ..κƭƭƭxxxκ........
+    .....κƭƭƭκxxxκ..κƭƭƭκxxxκ.......
+    .....κƭƭƭκƬƬƬκ..κƭƭƭκƬƬƬκ.......
+    ......κκκ.κκκ....κκκ.κκκ........
+    ................................
+    """,
+    """
+    ................................
+    ....................κκκκκ.......
+    ..................κκƬƬƬƬƬκκ.....
+    .................κƬƬƬƬƬƬƬƬƬκ....
+    ................κƬƬƬƬƬƬƬƬƬƬƬκ...
+    ...............κzzzzxxxxxwexxκκ.
+    .......κκ......κzzzzzxxxxeexƬƬuκ
+    ......κƬxκ.....κzzzzzxxxxeexƬƬuκ
+    .....κƬxκ.κκκκκκκzzzzxx^xxxƬƬƬκ.
+    .....κƬxκκƬƬƬƬƬƬƬƬzzzxxxxxxxRκ..
+    ......κκƬƬxxxxxxxxƬƬƭƭƭƭƭƭƭκκ...
+    ......κxxxxxxxxxxxxxxκκκκκκ.....
+    .....κxxxxxxxxxxxxxxxxκ.........
+    .....κxxxxxxxxxxxxxxxxκ.........
+    ......κƭxxxxxxxxxxxxƭκ..........
+    .......κƭƭxxxƭƭƭƭƭƭxxxκ.........
+    ........κƭxxxκκκκƭƭƭxxxκ........
+    .......κƭƭxxxκ..κƭƭƭxxxκ........
+    .......κƭxxxκ..κƭƭƭƬƬƬκ.........
+    ........κxxxκ..κƭƭƭκκκ..........
+    ........κxxxκ..κƭƭƭκ............
+    ........κƬƬƬκ..κƭƭƭκ............
+    .........κκκ....κκκ.............
+    ................................
+    """,
+]
+
+
+# The share of a block, outline counted, that makes it a 1x cell: under half,
+# so a slim leg or tail still stands.
+CREATURE_COVER = (3, 8)
+# The features a 1x cell keeps from fewer of its block's pixels than the rest:
+# each key's least count. A creature's eye is its face.
+CREATURE_FEATURES = {EYE: 3}
+# Each ramp read as its base: at 1x a shade is a speck, not a form.
+CREATURE_RAMPS = {CAT_FUR_SH: CAT_FUR, CAT_FUR_LT: CAT_FUR, DOG_COAT_SH: TAN, DOG_COAT_LT: TAN}
+
+
+def creature_cell(cells, _bx, _by):
+    """A creature's block at 1x: drawn to `CREATURE_COVER`, so the silhouette
+    holds; then a feature it shows, else its commonest material inside the
+    outline."""
+    need, of = CREATURE_COVER
+    if (len(cells) - cells.count(T)) * of < len(cells) * need:
+        return None
+    inside = [CREATURE_RAMPS.get(k, k) for k in cells if k not in (T, SILHOUETTE)]
+    if not inside:
+        return None
+    feature = next((k for k, least in CREATURE_FEATURES.items() if cells.count(k) >= least), None)
+    return feature or max(dict.fromkeys(inside), key=inside.count)
+
+
+# Per frame, the master rows its bob lifts it: a 1x cell is `S` rows, so the
+# 1x reads the frame settled back, or the bob would jump it a whole cell.
+CREATURE_BOB = {"dog_walk_1": 1}
+# Per frame, the 1x cells set by hand where the reading misses: `(x, y, key)`.
+CREATURE_FIXES = {
+    # the ears and the tail's dark tip, too slim to read
+    "cat_walk_0": [(4, 0, CAT_DARK), (6, 0, CAT_DARK), (1, 1, CAT_DARK)],
+    # the same, and the legs passing under the body, which read as frame 0's
+    "cat_walk_1": [(4, 0, CAT_DARK), (6, 0, CAT_DARK), (1, 1, CAT_DARK), (2, 5, T), (6, 5, T)],
+    # the crown and the ear, too slim to read; the legs apart. The nose stays
+    # tan: at 1x it would join the eye in one dark bar.
+    "dog_walk_0": [(5, 0, TAN), (6, 0, TAN), (4, 1, BROWN), (2, 5, T), (4, 5, T)],
+    "dog_walk_1": [(5, 0, TAN), (6, 0, TAN), (4, 1, BROWN)],
+}
+
+
+# The most cells a frame's fixes may draw or clear: past it, the 1x is no
+# longer its master read, and the master should change instead.
+CREATURE_FIX_MOST = 4
+
+
+def creature_base(name, g):
+    """Frame `name`'s 1x: its master `g`, settled from its bob, read at 1x,
+    then its fixes."""
+    bob = CREATURE_BOB.get(name, 0)
+    out = block_read([[T] * len(g[0])] * bob + g[: len(g) - bob], creature_cell)
+    reshaped = 0
+    for x, y, k in CREATURE_FIXES.get(name, ()):
+        reshaped += (out[y][x] == T) != (k == T)
+        out[y][x] = k
+    assert reshaped <= CREATURE_FIX_MOST, f"{name}: {reshaped} cells fixed past its master's silhouette"
+    return out
+
+
+def master(text):
+    return [list(row) for row in inspect.cleandoc(text).split("\n")]
+
+
+CREATURES = {
+    "cat_walk": ("The cat walking, east.", CAT_WALK),
+    "dog_walk": ("The dog walking, east.", DOG_WALK),
+}
+
+
 # ---- output -----------------------------------------------------------------
 PROVENANCE = "Generated by scripts/gen-art.py: edit the generator, not this file."
 ENCODING = "utf-8"  # the keys include σ/ψ/Θ, and the locale's encoding need not be the file's
 
 
-def render_sprite(header, frames, heads=()):
+def render_sprite(header, frames, heads=(), marks=()):
     """A .sprite file: the header as comments, then each frame, marked with its
-    `heads` entry `(view, x, y)` where it has one."""
+    `heads` entry `(view, x, y)` where it has one; the first frame also carries
+    `marks`, each `(name, x, y)`."""
     text = inspect.cleandoc(header) + "\n" + PROVENANCE
     lines = [f"# {l}" if l else "#" for l in text.split("\n")]
     body = []
@@ -3057,6 +3347,8 @@ def render_sprite(header, frames, heads=()):
         if i < len(heads) and heads[i] is not None:
             view, x, y = heads[i]
             body.append(f"@mark head.{view} {x} {y}")
+        if i == 0:
+            body.extend(f"@mark {name} {x} {y}" for name, x, y in marks)
         body.extend(" ".join(r) for r in g)
     return "\n".join(lines + body) + "\n"
 
@@ -3178,6 +3470,9 @@ def main():
         "phone_booth": (phone_booth.__doc__, [phone_booth()]),
         "standing_desk": (standing_desk.__doc__, [standing_desk()]),
         "desk_chair": (desk_chair.__doc__, [desk_chair()]),
+        "desk_cup": (desk_cup.__doc__, [desk_cup()]),
+        "token_tower": (token_tower.__doc__, token_tower()),
+        "token_sheet": (token_sheet.__doc__, [token_sheet()]),
         "desk": (desk_south.__doc__, [desk_south()]),
         "desk_north": (desk_north.__doc__, [desk_north()]),
         "meeting_sofa": (meeting_sofa.__doc__, [meeting_sofa()]),
@@ -3200,6 +3495,9 @@ def main():
         "meeting_sofa_north": (meeting_sofa_north_1x.__doc__, [meeting_sofa_north_1x()]),
         "desk": (desk_south_1x.__doc__, [desk_south_1x()]),
         "desk_north": (desk_north_1x.__doc__, [desk_north_1x()]),
+        "desk_cup": (desk_cup_1x.__doc__, [desk_cup_1x()]),
+        "token_tower": (token_tower_1x.__doc__, token_tower_1x()),
+        "token_sheet": (token_sheet_1x.__doc__, [token_sheet_1x()]),
         "vending_machine": (vending_machine_1x.__doc__, vending_machine_1x()),
         "floor_lamp": (floor_lamp_1x.__doc__, [floor_lamp_1x()]),
         "phone_booth": (phone_booth_1x.__doc__, [phone_booth_1x()]),
@@ -3216,7 +3514,7 @@ def main():
         "meeting_chair": (meeting_chair_1x.__doc__, [meeting_chair_1x()]),
     }
     sprites = {
-        f"{base}@{S}x.sprite": render_sprite(header, grounded(frames))
+        f"{base}@{S}x.sprite": render_sprite(header, grounded(frames), marks=DESK_MARKS.get(base, ()))
         for base, (header, frames) in pieces.items()
     }
     for pose, (*_, header) in POSES.items():
@@ -3231,9 +3529,17 @@ def main():
                         [lyr],
                         [(view, HEAD_MARK[0], HEAD_MARK[1] + o)],
                     )
+    classic_marks = {"desk": desk_marks_1x(0), "desk_north": desk_marks_1x(DESK_NORTH_LIFT)}
     sprites |= {
-        f"{base}.sprite": render_sprite(header, grounded(frames)) for base, (header, frames) in classic.items()
+        f"{base}.sprite": render_sprite(header, grounded(frames), marks=classic_marks.get(base, ()))
+        for base, (header, frames) in classic.items()
     }
+    for anim, (header, texts) in CREATURES.items():
+        for i, g in enumerate(grounded([master(t) for t in texts])):
+            sprites[f"{anim}_{i}@{S}x.sprite"] = render_sprite(header, [g])
+            sprites[f"{anim}_{i}.sprite"] = render_sprite(
+                header + "\n\nIts base: the master read at 1x.", [creature_base(f"{anim}_{i}", g)]
+            )
     for name, draw in BUILDINGS.items():
         art = draw()
         sprites[f"building_{name}@{S}x.sprite"] = render_sprite(draw.__doc__, [art])

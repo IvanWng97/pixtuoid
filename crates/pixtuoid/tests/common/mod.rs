@@ -1,3 +1,8 @@
+#![allow(
+    dead_code,
+    reason = "every test crate includes `common` whole, and none uses every helper"
+)]
+
 /// Binds `$name` to a `DrawCtx::offscreen` of `$scene`; a macro so the stores it
 /// borrows live in the caller's scope.
 #[macro_export]
@@ -17,7 +22,6 @@ macro_rules! make_draw_ctx {
     };
 }
 
-#[allow(dead_code)]
 pub(crate) fn fixture_scene(now: std::time::SystemTime) -> pixtuoid_core::SceneState {
     use pixtuoid_core::state::{ActivityState, ToolKind};
     use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
@@ -78,7 +82,6 @@ pub(crate) fn fixture_scene(now: std::time::SystemTime) -> pixtuoid_core::SceneS
     s
 }
 
-#[allow(dead_code)]
 pub(crate) fn render_hash(
     scene: &pixtuoid_core::SceneState,
     now: std::time::SystemTime,
@@ -88,7 +91,7 @@ pub(crate) fn render_hash(
     use std::hash::{Hash, Hasher};
 
     let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(96, 36)).unwrap();
-    let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().unwrap();
+    let pack = pixtuoid_scene::pack::load_bundled_pack().unwrap();
     make_draw_ctx!(draw_ctx, scene, &pack, now);
     draw_ctx.theme = theme;
     draw_ctx.world.floor = floor;
@@ -109,7 +112,6 @@ pub(crate) fn render_hash(
 /// an instrumented child writes its profile where the run collects it rather
 /// than into the crate dir.
 #[cfg(unix)]
-#[allow(dead_code)] // every test crate includes `common` whole; not every one spawns
 pub(crate) fn isolated(args: &[&str], home: &std::path::Path) -> std::process::Command {
     let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"));
     cmd.args(args)

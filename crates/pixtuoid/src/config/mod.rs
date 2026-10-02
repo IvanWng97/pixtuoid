@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use pixtuoid_scene::embedded_pack::PackSource;
+use pixtuoid_scene::pack::PackSource;
 
 /// One `[[pets]]` stanza. `kind` is an OPTIONAL raw `String` (NOT a serde-derived
 /// `PetKind`) on purpose: an unknown or typo'd value is warn-skipped in
@@ -27,6 +27,13 @@ pub struct AppConfig {
     /// Supports `~` expansion.
     #[serde(rename = "pack-dir")]
     pub pack_dir: Option<String>,
+    /// A [`GraphicsMode`](crate::GraphicsMode) name, raw so a typo warns in
+    /// [`resolve_graphics`] instead of failing the whole load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graphics: Option<String>,
+    /// A [`MotionMode`] name, raw so a typo warns in [`resolve_motion`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion: Option<String>,
     #[serde(
         rename = "last-seen-version",
         default,
@@ -440,6 +447,73 @@ pub fn resolve_theme(
         });
     }
     Ok(config_theme.unwrap_or(&NORMAL))
+}
+
+/// Resolve CLI + config into the run's [`GraphicsMode`](crate::GraphicsMode)
+/// (CLI > config > default). The config value is checked even when the flag
+/// wins, as in [`resolve_theme`], and by clap's own parser, so the file and the
+/// flag accept the same names.
+pub fn resolve_graphics(
+    config: &AppConfig,
+    cli: Option<crate::GraphicsMode>,
+    warnings: &mut Vec<String>,
+) -> crate::GraphicsMode {
+    let configured = config.graphics.as_deref().and_then(|v| {
+        let mode = <crate::GraphicsMode as clap::ValueEnum>::from_str(v, false).ok();
+        if mode.is_none() {
+            warn_user(
+                warnings,
+                format!(
+                    "unknown graphics {v:?} in config — ignoring (falling back to the default)"
+                ),
+            );
+        }
+        mode
+    });
+    cli.or(configured).unwrap_or_default()
+}
+
+/// How much of the office's ambient life moves: the `motion` config key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum MotionMode {
+    /// What the display affords: calmer where a repaint is dear.
+    #[default]
+    Auto,
+    /// Every ambient loop.
+    Full,
+    /// Every ambient loop, at a quarter of the pace.
+    Calm,
+    /// No ambient loop and no flash.
+    Still,
+}
+
+impl MotionMode {
+    /// The tier this mode names, `auto` being `afforded`.
+    pub fn or(self, afforded: pixtuoid_scene::anim::Motion) -> pixtuoid_scene::anim::Motion {
+        use pixtuoid_scene::anim::Motion;
+        match self {
+            Self::Auto => afforded,
+            Self::Full => Motion::Full,
+            Self::Calm => Motion::Calm,
+            Self::Still => Motion::Still,
+        }
+    }
+}
+
+/// Resolve config into the run's [`MotionMode`], warning on an unknown name
+/// as [`resolve_graphics`] does.
+pub fn resolve_motion(config: &AppConfig, warnings: &mut Vec<String>) -> MotionMode {
+    let configured = config.motion.as_deref().and_then(|v| {
+        let mode = <MotionMode as clap::ValueEnum>::from_str(v, false).ok();
+        if mode.is_none() {
+            warn_user(
+                warnings,
+                format!("unknown motion {v:?} in config — ignoring (falling back to the default)"),
+            );
+        }
+        mode
+    });
+    configured.unwrap_or_default()
 }
 
 /// Resolve config into the office's `Pet`s. An unknown `kind` is warn-skipped —

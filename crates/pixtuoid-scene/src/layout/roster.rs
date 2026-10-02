@@ -4,9 +4,9 @@
 //! [`SceneLayout::fixtures`].
 
 use super::{
-    Anchor, Bounds, Facing, Furniture, Lounge, MeetingRoom, MeetingTrio, PantryRoom, PlantItem,
+    Bounds, Facing, Furniture, Lounge, MeetingRoom, MeetingTrio, PantryRoom, Pivot, PlantItem,
     PlantKind, PodDecor, PodDecorItem, Point, SceneLayout, Size, WallDecor, WallDecorItem,
-    WaypointKind, WindowBay, anchored_top_left, coat_rack_rect_at, furniture_def, z_sort_row,
+    WaypointKind, WindowBay, anchored_top_left, coat_rack_rect_at, furniture_def, sort_row_at,
 };
 use pixtuoid_core::state::FloorLocalDeskIndex;
 
@@ -76,9 +76,9 @@ pub(crate) enum Depth {
     /// Painted flat under the sorted scene, in roster order: the mats, the
     /// runner, and wall fixtures nothing stands behind.
     Backdrop,
-    /// Painted in the y-sort at `row`. At an equal row, `tie` orders it
-    /// against a figure and against a fixture of the other tie; roster order
-    /// orders it against a fixture of the same tie.
+    /// Painted in the y-sort at `row`, a [`sort_row_at`] value. At an equal row,
+    /// `tie` orders it against a figure and against a fixture of the other tie;
+    /// roster order orders it against a fixture of the same tie.
     Sorted {
         row: u16,
         /// Which paints on top where a figure sorts at `row` too.
@@ -326,6 +326,11 @@ pub(crate) const NEON_PANEL_H: u16 = 8;
 /// The frame thickness `paint_neon_panel` lights on every side — it reads THIS,
 /// so the interior derivations below match the pixels it leaves dark.
 pub(crate) const NEON_PANEL_BORDER: u16 = 1;
+
+/// The corridor runner's diamond lattice pitch, in logical px. Taste pin: a
+/// tighter stride read as bathroom tiling rather than a woven runner at
+/// half-block scale.
+pub(crate) const RUNNER_LATTICE_STRIDE: i32 = 10;
 /// The dark interior's left cell-origin — where board text starts. The board's
 /// text pins to the interior, not the outer box, or the lit text overruns the
 /// glowing frame by the border on each side.
@@ -362,7 +367,7 @@ const LOUNGE_RUG_Z_LEAD: u16 = 2;
 
 /// A centre-pinned `size` box at `pos`.
 fn centred(pos: Point, size: Size) -> Bounds {
-    boxed(anchored_top_left(Anchor::Center, pos, size.w, size.h), size)
+    boxed(anchored_top_left(Pivot::Center, pos, size.w, size.h), size)
 }
 
 fn top_left(b: Bounds) -> Point {
@@ -418,7 +423,7 @@ pub(crate) fn desk_chair_fixtures(
             at: tl,
             visual: boxed(tl, furniture_def(Furniture::DeskChair).visual),
             depth: Depth::Sorted {
-                row: desk_chair_z_key(at, facing),
+                row: desk_chair_sort_row(at, facing),
                 tie: Tie::FixtureOver,
             },
         })
@@ -442,7 +447,7 @@ fn centred_row(kind: FixtureKind, pos: Point, row: Furniture) -> Fixture {
         kind,
         at: pos,
         visual: centred(pos, size),
-        depth: Depth::sorted(z_sort_row(Anchor::Center, pos, size.h)),
+        depth: Depth::sorted(sort_row_at(Pivot::Center, pos, size.h)),
     }
 }
 
@@ -555,7 +560,8 @@ impl SceneLayout {
             )
             .chain(desk_fixtures(home_desks, *buf_h))
             .chain(rooms.clone().filter_map(move |(room, _, trio)| {
-                let rug = trio?.0.rug(*buf_h);
+                // Off the corridor runner a south room's floor runs into.
+                let rug = trio?.0.rug(corridor.map_or(*buf_h, |c| c.y));
                 Some(Fixture {
                     kind: FixtureKind::MeetingRug { room },
                     at: top_left(rug),
@@ -576,7 +582,7 @@ impl SceneLayout {
                             at: sofa,
                             visual: centred(sofa, furniture_def(Furniture::MeetingSofaBody).visual),
                             depth: Depth::Sorted {
-                                row: super::seated_z_key(sofa),
+                                row: super::seated_sort_row(sofa),
                                 tie: if faces_away {
                                     Tie::FixtureOver
                                 } else {
@@ -609,11 +615,15 @@ impl SceneLayout {
                             .map(|b| upright(FixtureKind::TrashBin, top_left(b), b)),
                     )
             }))
-            .chain(lounge.as_ref().map(|l| Fixture {
-                kind: FixtureKind::LoungeRug,
-                at: top_left(l.rug()),
-                visual: l.rug(),
-                depth: Depth::sorted(l.couch_center.y.saturating_sub(LOUNGE_RUG_Z_LEAD)),
+            .chain(lounge.as_ref().map(|l| {
+                let first_desk_row = home_desks.iter().map(|d| d.y).min();
+                let rug = l.rug(first_desk_row.unwrap_or(*buf_h));
+                Fixture {
+                    kind: FixtureKind::LoungeRug,
+                    at: top_left(rug),
+                    visual: rug,
+                    depth: Depth::sorted(l.couch_center.y.saturating_sub(LOUNGE_RUG_Z_LEAD)),
+                }
             }))
             .chain(
                 couch.map(|at| {
@@ -652,8 +662,8 @@ impl SceneLayout {
                                     kind,
                                     at: wp.pos,
                                     visual: centred(wp.pos, size),
-                                    depth: Depth::sorted(z_sort_row(
-                                        Anchor::Center,
+                                    depth: Depth::sorted(sort_row_at(
+                                        Pivot::Center,
                                         wp.pos,
                                         size.h,
                                     )),
@@ -688,7 +698,7 @@ impl SceneLayout {
                         at: wp.pos,
                         visual: centred(wp.pos, furniture_def(Furniture::MeetingChair).visual),
                         // Its sitter's own row: they sit on it.
-                        depth: Depth::sorted(super::seated_z_key(wp.pos)),
+                        depth: Depth::sorted(super::seated_sort_row(wp.pos)),
                     }),
             )
             .chain(tank.map(|at| centred_row(FixtureKind::FishTank, at, Furniture::FishTank)))
@@ -716,7 +726,7 @@ impl SceneLayout {
                             kind: FixtureKind::Wall { item, kind },
                             at: pos,
                             visual: boxed(pos, size),
-                            depth: Depth::sorted(z_sort_row(Anchor::TopLeft, pos, size.h)),
+                            depth: Depth::sorted(sort_row_at(Pivot::TopLeft, pos, size.h)),
                         }
                     }),
             )
@@ -730,26 +740,17 @@ impl SceneLayout {
     /// The fixture hovering `cell` points at: the topmost whose art covers any
     /// of it — the one painted last there, by depth and then roster order.
     pub fn fixture_at(&self, cell: Bounds) -> Option<FixtureKind> {
-        let overlaps = |b: Bounds| {
-            b.width > 0
-                && b.height > 0
-                && cell.x < b.x + b.width
-                && b.x < cell.x + cell.width
-                && cell.y < b.y + b.height
-                && b.y < cell.y + cell.height
-        };
         self.fixtures()
             .enumerate()
-            .filter(|(_, f)| overlaps(f.visual))
+            .filter(|(_, f)| cell.overlaps(f.visual))
             .max_by_key(|&(i, f)| (f.depth, i))
             .map(|(_, f)| f.kind)
     }
 
     /// Where meeting room `room` hangs its notice board: on the band, its north
-    /// wall, within one window pane or the plain wall west of the windows, in
-    /// the free spot nearest its centre, on whichever is nearest the room's
-    /// middle — `None` for a room whose north wall is not the band, or with
-    /// none free.
+    /// wall, within the window pane nearest the room's middle, at the free spot
+    /// nearest the pane's centre — `None` for a room whose north wall is not
+    /// the band, or with none free.
     pub(crate) fn notice_board_rect(&self, room: usize) -> Option<Bounds> {
         let b = self.meeting_rooms.get(room)?.bounds;
         if b.y > self.top_margin {
@@ -771,17 +772,13 @@ impl SceneLayout {
             .chain(self.clock_pos().map(|at| boxed(at, CLOCK)))
             .collect();
         let clear = |board: Bounds| {
-            taken.iter().all(|v| {
-                v.y >= board.y + board.height
-                    || board.y >= v.y + v.height
-                    || v.x >= board.x + board.width + NOTICE_BOARD_GAP
-                    || board.x >= v.x + v.width + NOTICE_BOARD_GAP
-            })
+            let spaced = board.widened(NOTICE_BOARD_GAP);
+            taken.iter().all(|v| !spaced.overlaps(*v))
         };
         let (lo, hi) = (b.x + 1, (b.x + b.width).saturating_sub(1));
         let middle = b.x + b.width / 2;
-        std::iter::once(NEON_PANEL.x..super::window_run(self.buf_w).start)
-            .chain(self.window_bays().flat_map(WindowBay::panes))
+        self.window_bays()
+            .flat_map(WindowBay::panes)
             .filter_map(|pane| {
                 // The free spot nearest the pane's centre the room's wall allows.
                 let west = pane.start.max(lo);
@@ -795,13 +792,14 @@ impl SceneLayout {
             .min_by_key(|board| (board.x + board.width / 2).abs_diff(middle))
     }
 
-    /// The wall clock's top-left: centred on the window post as wide as it
-    /// nearest the wall's middle, or `None` on a wall with no such post.
+    /// The wall clock's top-left: centred on the window post nearest the
+    /// wall's middle that the neon sign leaves clear, or `None` on a wall
+    /// with none.
     pub(crate) fn clock_pos(&self) -> Option<Point> {
         let middle = self.buf_w / 2;
         super::window_posts(self.buf_w)
-            .filter(|post| post.len() >= usize::from(CLOCK.w))
             .map(|post| (post.start + post.end) / 2)
+            .filter(|&centre| centre - CLOCK.w / 2 >= NEON_PANEL.x + NEON_PANEL.width)
             .min_by_key(|centre| centre.abs_diff(middle))
             .map(|centre| Point {
                 x: centre - CLOCK.w / 2,
@@ -818,28 +816,29 @@ impl SceneLayout {
             .doorways
             .iter()
             .find(|d| d.start.y == d.end.y && d.start.y == p.bounds.y)?;
-        let mat = centred(
+        let mut mat = centred(
             Point {
                 x: (dw.start.x + dw.end.x) / 2,
                 y: dw.start.y + super::WALL_THICK_H + 1 + ENTRY_MAT.h / 2,
             },
             ENTRY_MAT,
         );
+        // Shifted west off the cooler standing against the east wall.
+        if let Some(cooler) = p.water_cooler_rect().filter(|c| c.overlaps(mat)) {
+            mat.x = cooler
+                .x
+                .checked_sub(mat.width)
+                .filter(|&x| x >= p.bounds.x)?;
+        }
         // Gives way to the island, the counter or the runner over it: half
         // hidden, it reads as a stain.
         let island = p
             .kitchen_island
             .map(|at| centred(at, furniture_def(Furniture::KitchenIsland).visual));
-        let clear = |b: Bounds| {
-            b.x + b.width <= mat.x
-                || mat.x + mat.width <= b.x
-                || b.y + b.height <= mat.y
-                || mat.y + mat.height <= b.y
-        };
         [island, self.pantry_counter(), self.corridor]
             .into_iter()
             .flatten()
-            .all(clear)
+            .all(|b| !b.overlaps(mat))
             .then_some(mat)
     }
 
@@ -866,8 +865,8 @@ impl SceneLayout {
         let lamp = self.floor_lamp()?;
         Some(Point {
             x: lamp.x,
-            y: z_sort_row(
-                Anchor::Center,
+            y: sort_row_at(
+                Pivot::Center,
                 lamp,
                 furniture_def(Furniture::FloorLamp).visual.h,
             ),
@@ -942,11 +941,11 @@ pub(crate) fn desk_chair_top_left(desk: Point, facing: Facing) -> Option<Point> 
     })
 }
 
-/// The depth a desk's task chair sorts at: its seat's own z-key, which the sim
+/// The depth a desk's task chair sorts at: its seat's own sort row, which the sim
 /// gives the occupant arriving at, sitting in and leaving the seat alike. Its
 /// [`Tie::FixtureOver`] therefore draws the chair over its occupant throughout —
 /// no flip where the walk ends and the sit begins.
-pub(crate) fn desk_chair_z_key(desk: Point, facing: Facing) -> u16 {
+pub(crate) fn desk_chair_sort_row(desk: Point, facing: Facing) -> u16 {
     super::desk_walk_anchor_facing(desk, facing).y
 }
 

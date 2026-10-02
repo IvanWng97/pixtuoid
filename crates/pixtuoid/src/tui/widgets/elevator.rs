@@ -15,7 +15,10 @@ pub(crate) fn paint_elevator_indicator(
     use ratatui::style::Modifier;
     use ratatui::text::Line;
 
-    let label = format!(" \u{25b2} F{current_floor} \u{25bc} ");
+    let label = format!(
+        " {} ",
+        pixtuoid_scene::layout::floor_indicator_text(current_floor)
+    );
     // Display COLUMNS, not byte length: the ▲/▼ arrows are 3-byte single-column
     // glyphs, so a byte-length anchor lands 2 cells left of the door's center.
     let label_w = super::display_width(&label) as u16;

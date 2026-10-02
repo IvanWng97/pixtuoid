@@ -1513,7 +1513,8 @@ fn single_char(k: &str, what: KeySite) -> Result<char> {
 }
 
 /// The furthest a `[ramps]` level may step either way. Past it the darkest
-/// colors stop changing from one level to the next in 8 bits.
+/// colors stop changing from one level to the next in 8 bits. Also the depth
+/// [`Rgb::ramp`](super::Rgb::ramp) shares its headroom over, so changing it recolours every ramp.
 pub const MAX_RAMP_LEVEL: i8 = 10;
 
 fn build_palette(
@@ -1739,6 +1740,9 @@ pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "bulletin_board",
     "exit_sign",
     "desk_chair",
+    "desk_cup",
+    "token_tower",
+    "token_sheet",
     "vending_machine",
     "printer",
     "meeting_table",
@@ -2090,7 +2094,7 @@ pub fn validate_pack_animations(pack: &Pack, art_sets: &[Vec<&'static str>]) -> 
             // Implicit min-1 floor: a `frames = []` entry deserializes and makes
             // `animation()` return Some (dodging the missing-required check)
             // while every render consumer guards with `.frames().first()` and
-            // draws nothing; an empty OPTIONAL entry also SHADOWS the embedded
+            // draws nothing; an empty OPTIONAL entry also SHADOWS the bundled
             // default in `Pack::merge_from` (`contains_key` is true).
             .map_or(1, |&(_, min)| min);
         if let Some(anim) = pack.animation(name)

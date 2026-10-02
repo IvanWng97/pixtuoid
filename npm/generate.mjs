@@ -9,6 +9,7 @@ import {
   existsSync,
   mkdirSync,
   copyFileSync,
+  cpSync,
   chmodSync,
   readFileSync,
   writeFileSync,
@@ -20,6 +21,9 @@ import { fileURLToPath } from "node:url";
 
 const SCOPE = "@pixtuoid";
 const BINS = ["pixtuoid", "pixtuoid-hook"];
+// What the release archive carries beside the binaries (`just stage-notices`):
+// the license and every embedded font's notice, which travel with each copy.
+const NOTICES = ["LICENSE", "licenses"];
 
 // Must stay equal to release.yml's build matrix; npm/generate.test.mjs pins that,
 // so a missing target fails `just npm-check` instead of silently shipping nowhere.
@@ -52,6 +56,15 @@ if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
   process.exit(1);
 }
 
+// Copy `NOTICES` from a target's extracted archive into `pkgDir`.
+function copyNotices(from, pkgDir) {
+  for (const notice of NOTICES) {
+    const src = join(from, notice);
+    if (!existsSync(src)) throw new Error(`missing ${notice} in ${from}`);
+    cpSync(src, join(pkgDir, notice), { recursive: true });
+  }
+}
+
 const launcherPath = join(NPM_DIR, "pixtuoid", "package.json");
 const launcher = JSON.parse(readFileSync(launcherPath, "utf8"));
 
@@ -75,6 +88,8 @@ for (const t of TARGETS) {
     if (!isWin) chmodSync(dst, 0o755);
     files.push(exe);
   }
+  copyNotices(join(artifacts, t.rust), pkgDir);
+  files.push(...NOTICES);
 
   const pkg = {
     name: pkgName,
@@ -93,6 +108,8 @@ for (const t of TARGETS) {
   console.log(`generated ${pkgName}@${version} (${files.join(", ")})`);
 }
 
+// The launcher ships no binary, but its license field names the fonts too.
+copyNotices(join(artifacts, TARGETS[0].rust), dirname(launcherPath));
 launcher.version = version;
 writeFileSync(launcherPath, JSON.stringify(launcher, null, 2) + "\n");
 console.log(`stamped launcher pixtuoid@${version} (${TARGETS.length} optionalDependencies)`);

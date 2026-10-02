@@ -24,8 +24,10 @@ pub(crate) struct DenseFrame<'a> {
     /// The factor still left to blit at: the scale divided by `density`.
     pub(crate) blit_at: NonZeroU16,
     /// Where the frame's head is, if the art marks it: where a hairstyle
-    /// dresses it (`pixel_painter::hair`).
+    /// dresses it ([`crate::character::dress_for`]).
     pub(crate) head: Option<pixtuoid_core::sprite::HeadMark>,
+    /// Every point the art marks, on its own grid.
+    pub(crate) marks: &'a [pixtuoid_core::sprite::Mark],
 }
 
 /// Frame `frame_idx` of `name` from the densest `<name>@<N>x` variant whose `N`
@@ -50,7 +52,7 @@ pub(crate) fn densest_frame<'a>(
     scale: RenderScale,
 ) -> Option<DenseFrame<'a>> {
     let base_anim = pack.animation(name)?;
-    let idx = super::frame_index(base_anim, frame_idx);
+    let idx = super::lookup::frame_index(base_anim, frame_idx);
     let base = base_anim.frames().get(idx)?;
     let logical = (base.width(), base.height());
     let s = scale.get();
@@ -81,6 +83,7 @@ pub(crate) fn densest_frame<'a>(
                 density,
                 blit_at,
                 head: anim.head(idx),
+                marks: anim.marks(idx),
             });
         }
     }
@@ -91,6 +94,7 @@ pub(crate) fn densest_frame<'a>(
         density: Density::ONE,
         blit_at: scale.factor(),
         head: base_anim.head(idx),
+        marks: base_anim.marks(idx),
     })
 }
 

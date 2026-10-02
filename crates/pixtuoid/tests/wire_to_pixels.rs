@@ -14,7 +14,7 @@ use pixtuoid_core::SceneState;
 use pixtuoid_core::harness::{DRIVEN_DESKS, Drive, Reach};
 use pixtuoid_core::source::daemon::apply_presence;
 use pixtuoid_core::source::registry;
-use pixtuoid_scene::embedded_pack::load_bundled_pack;
+use pixtuoid_scene::pack::load_bundled_pack;
 use pixtuoid_scene::theme::NORMAL;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -58,7 +58,7 @@ fn new_renderer(cols: u16, rows: u16) -> TuiRenderer<TestBackend> {
 /// (timezone-dependent) sky and isolates the agent's footprint.
 fn settled_pixels(scene: &SceneState, cols: u16, rows: u16, now: SystemTime) -> Vec<(u8, u8, u8)> {
     // Bounded on BOTH sides: long enough for the entry walk to finish, and
-    // SHORTER than LightingState's 5s EMPTY_DEBOUNCE_MS — past that the empty
+    // SHORTER than VacancyDim's 5s EMPTY_DEBOUNCE_MS — past that the empty
     // office's floor dim would start easing while the occupied office holds its
     // lights, so the two backgrounds would stop being byte-identical and the diff
     // would no longer be purely the agent's paint. Don't raise past ~150 frames.

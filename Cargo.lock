@@ -2668,18 +2668,22 @@ version = "0.19.0"
 dependencies = [
  "ab_glyph_rasterizer",
  "anyhow",
+ "base64-simd",
  "chrono",
  "clap",
  "clap_complete",
  "clap_mangen",
  "crossterm",
+ "icy_sixel",
  "image",
  "insta",
  "libc",
+ "miniz_oxide",
  "objc2-app-kit",
  "open",
  "pixtuoid-core",
  "pixtuoid-scene",
+ "png",
  "ratatui",
  "ratatui-image",
  "rodio",
@@ -2756,6 +2760,7 @@ dependencies = [
  "tempfile",
  "toml_edit",
  "tracing",
+ "unicode-width",
 ]
 
 [[package]]

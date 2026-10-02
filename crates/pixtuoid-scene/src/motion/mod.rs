@@ -8,7 +8,7 @@ use pixtuoid_core::AgentId;
 use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
-use crate::layout::{Layout, Point, WaypointKind};
+use crate::layout::{Point, SceneLayout, WaypointKind};
 use crate::pathfind::Router;
 use crate::pose::{
     SpotClaims, WANDER_DWELL_EST_MS, dwell_ms, est_wander_cycle_ms, seated_dwell_ms,
@@ -209,8 +209,7 @@ impl MotionState {
 ///
 /// Transitions run ONLY when `now > wander.last_advanced_at`; otherwise the pose
 /// is computed from the existing phase WITHOUT mutating any wander field, so
-/// this is safe to call 2+ times per frame (seated-overlay pass, character loop,
-/// `character_anchor`).
+/// this is safe to call 2+ times per frame (seated-overlay pass, character loop).
 ///
 /// On the first call for a fresh Idle slot, `cycle_n` is fast-forwarded so
 /// destination selection agrees with what core's stateless `idle_pose` would
@@ -218,7 +217,7 @@ impl MotionState {
 pub fn advance_wander(
     slot: &AgentSlot,
     now: SystemTime,
-    layout: &Layout,
+    layout: &SceneLayout,
     router: &mut dyn Router,
     overlay: &OccupancyOverlay,
     motion: &mut HashMap<AgentId, MotionState>,
@@ -422,7 +421,7 @@ fn advance_phase_clock(ms: &mut MotionState, walk_total: u64, now: SystemTime) {
 fn pick_wander_dest(
     id: AgentId,
     cycle_n: u64,
-    layout: &Layout,
+    layout: &SceneLayout,
     origin: Point,
     claimed: &SpotClaims,
 ) -> WanderTarget {
@@ -520,13 +519,13 @@ pub(crate) fn snapshot_leg_profile(
 }
 
 /// Freeze the WanderBack profile. The endpoint is the desk APPROACH cell
-/// (matching `seated_anchor` via the chair-glide) so there's no jump on arrival;
+/// (matching `seated_top_left` via the chair-glide) so there's no jump on arrival;
 /// this intentionally differs from `core::idle_pose`'s raw `to: desk`, since
 /// only the routed path is user-visible.
 fn snapshot_back_profile(
     slot: &AgentSlot,
     ms: &MotionState,
-    layout: &Layout,
+    layout: &SceneLayout,
     router: &mut dyn Router,
     overlay: &OccupancyOverlay,
 ) -> WalkProfile {

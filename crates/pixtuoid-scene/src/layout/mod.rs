@@ -25,17 +25,19 @@ pub use decor::{
     PodDecor, SEAT_RENDER_Y_OFF, WALKING_Y_OFF, WallDecor, WaypointKind, desk_furniture_def,
     desk_walk_anchor_facing, furniture_def, seated_foot_cell,
 };
-pub(crate) use decor::{repels_plants, seated_z_key};
-pub use placement::{Anchor, anchored_top_left, z_sort_row};
+pub(crate) use decor::{repels_plants, seated_sort_row};
+pub use placement::{Pivot, anchored_top_left, sort_row_at};
 pub use reach::ReachSet;
 pub(crate) use rooms::meeting::{COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W, coat_rack_rect_at};
-pub(crate) use rooms::pantry::{COMPACT_COUNTER, LARGE_COUNTER};
+pub(crate) use rooms::pantry::{
+    COMPACT_COUNTER, LARGE_COUNTER, PANTRY_COUNTER_ANIMS, pantry_counter_anim,
+};
 pub(crate) use rooms::walls::WallPiece;
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 pub(crate) use roster::{
     CLOCK, Depth, Fixture, Layer, NEON_PANEL, NEON_PANEL_BORDER, Tie, desk_chair_fixtures,
-    desk_chair_top_left, desk_chair_z_key, desk_fixtures, pod_decor_fixtures,
+    desk_chair_sort_row, desk_chair_top_left, desk_fixtures, pod_decor_fixtures,
 };
 pub use roster::{
     FixtureKind, NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
@@ -45,11 +47,11 @@ pub use roster::{
 pub(crate) use roster::{NEON_PANEL_H, coffee_machine_cols, desk_has_cabinet};
 // Painter tests tile walls no `SceneLayout` has.
 pub(crate) use windows::{
-    NEON_DOOR_WALL_W, WINDOW_TOP, WINDOW_W, WindowBay, door_x, glass_rows, wall_trim_row,
-    window_frame, window_posts, window_rows, window_run,
+    NEON_DOOR_WALL_W, WINDOW_TOP, WindowBay, door_x, glass_rows, wall_trim_row, window_frame,
+    window_posts, window_rows, window_run,
 };
 #[cfg(test)]
-pub(crate) use windows::{TWO_WINDOW_WALL_W, window_bays, window_slots};
+pub(crate) use windows::{WINDOW_W, window_bays, window_slots};
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
 pub(crate) use coarse::{
     COARSE_CELL_SIZE, CoarseGrid, cell_anchor, cell_center, cell_walkable, snap,
@@ -70,6 +72,32 @@ pub struct Bounds {
     pub width: u16,
     /// Height in pixels.
     pub height: u16,
+}
+
+impl Bounds {
+    /// Whether the two half-open boxes share a pixel. A zero-sized box shares
+    /// none.
+    pub(crate) fn overlaps(self, other: Bounds) -> bool {
+        self.width > 0
+            && self.height > 0
+            && other.width > 0
+            && other.height > 0
+            && self.x < other.x + other.width
+            && other.x < self.x + self.width
+            && self.y < other.y + other.height
+            && other.y < self.y + self.height
+    }
+
+    /// The box grown `dx` columns on each side, its west edge clamped at
+    /// column 0 and its east edge kept.
+    pub(crate) fn widened(self, dx: u16) -> Bounds {
+        let x = self.x.saturating_sub(dx);
+        Bounds {
+            x,
+            width: self.x + self.width + dx - x,
+            ..self
+        }
+    }
 }
 
 /// A position in buffer-pixel space (screen-space: east = +x, south = +y,
@@ -160,9 +188,6 @@ pub struct Waypoint {
     pub room_id: Option<usize>,
 }
 
-/// Backwards-compat alias for [`SceneLayout`].
-pub type Layout = SceneLayout;
-
 /// The lounge vignette placed as one unit. Couch + floor lamp + side table
 /// share one fit gate (hence non-optional here); the aquarium
 /// carries an EXTRA east-clearance gate against the elevator door, so it
@@ -188,16 +213,17 @@ const LOUNGE_RUG: Size = Size { w: 22, h: 7 };
 const LOUNGE_RUG_DY: u16 = 3;
 
 impl Lounge {
-    /// The rug the couch stands on.
-    pub(crate) fn rug(&self) -> Bounds {
+    /// The rug the couch stands on, ending by `ground_end`, the row the desks
+    /// south of it start at.
+    pub(crate) fn rug(&self, ground_end: u16) -> Bounds {
         let centre = Point {
             x: self.couch_center.x,
             y: self.couch_center.y + LOUNGE_RUG_DY,
         };
-        let tl = anchored_top_left(Anchor::Center, centre, LOUNGE_RUG.w, LOUNGE_RUG.h);
+        let tl = anchored_top_left(Pivot::Center, centre, LOUNGE_RUG.w, LOUNGE_RUG.h);
         Bounds {
             x: tl.x,
-            y: tl.y,
+            y: tl.y.min(ground_end.saturating_sub(LOUNGE_RUG.h)),
             width: LOUNGE_RUG.w,
             height: LOUNGE_RUG.h,
         }
@@ -331,25 +357,29 @@ pub(crate) const DESK_FOOT_H: u16 = 2;
 /// Lives in `layout` so `layout::decor` can read it without a module cycle.
 pub const CHARACTER_SPRITE_W: u16 = 8;
 /// Default character sprite height (px) — [`CHARACTER_SPRITE_W`]'s twin: the
-/// height `character_anchor` clamps by, and the fallback where a custom pack's
-/// real frame isn't threaded. The pose offsets are a
-/// SEPARATE vertical-anchor concern.
+/// fallback where a custom pack's real frame isn't threaded. The pose offsets
+/// are a SEPARATE vertical-anchor concern.
 pub const CHARACTER_SPRITE_H: u16 = 12;
 /// Elevator-door sprite width in buffer px, read by the layout, the wall's
 /// window cut-out and the hover box; `every_hover_size_is_its_painted_sprite_size`
 /// pins it to the door sprite.
 pub const ELEVATOR_W: u16 = 16;
-/// Elevator-door sprite height in buffer px — the door's z-sort anchor row.
+/// Elevator-door sprite height in buffer px — which sets the door's sort row.
 pub const ELEVATOR_H: u16 = 14;
 
 /// The buffer rows a half-block terminal cell shows.
-const CELL_ROWS: u16 = 2;
+pub(crate) const CELL_ROWS: u16 = 2;
 
 /// The rows over a door whose top row is `door_y` that the terminal's floor
 /// indicator writes its text across: the whole cell above the door's.
 pub fn floor_indicator_rows(door_y: u16) -> std::ops::Range<u16> {
     let top = (door_y / CELL_ROWS).saturating_sub(1) * CELL_ROWS;
     top..top + CELL_ROWS
+}
+
+/// What the floor indicator says on floor `floor` (one-based), every painter's.
+pub fn floor_indicator_text(floor: usize) -> String {
+    format!("\u{25b2} F{floor} \u{25bc}")
 }
 
 /// Where the exit sign hangs over a door at `door`: centred above its floor

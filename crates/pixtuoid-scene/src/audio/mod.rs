@@ -252,7 +252,7 @@ impl AudioCueTracker {
 
     /// Feed one frame's observations; returns the events that fired on this
     /// frame's edges. `waypoint_kind` resolves an occupied-waypoint index to its
-    /// kind so the tracker never holds a `Layout` borrow and tests need no
+    /// kind so the tracker never holds a `SceneLayout` borrow and tests need no
     /// layout at all. Purely EDGE-triggered — it takes no clock, so a caller
     /// can't read it as time-dependent.
     pub fn observe<'a>(
@@ -283,7 +283,7 @@ impl AudioCueTracker {
         self.seen_agents = ids;
 
         // A waypoint BECOMING occupied is the moment the matching feedback
-        // animation starts — `sim.rs` keys its anims on this same set.
+        // animation starts — `sim::resolve_characters` keys its anims on this same set.
         for &idx in occupied_waypoints.difference(&self.occupied) {
             match waypoint_kind(idx) {
                 Some(WaypointKind::Printer) => events.push(OneShot::PrinterWhir),

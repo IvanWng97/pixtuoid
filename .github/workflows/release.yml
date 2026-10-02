@@ -131,7 +131,7 @@ jobs:
           mkdir "$DIR"
           cp "target/${{ matrix.target }}/release/pixtuoid" "$DIR/"
           cp "target/${{ matrix.target }}/release/pixtuoid-hook" "$DIR/"
-          cp LICENSE "$DIR/"
+          just stage-notices "$DIR"
           tar czf "${DIR}.tar.gz" "$DIR"
 
       - name: Package (Windows)
@@ -144,7 +144,7 @@ jobs:
           mkdir "$DIR"
           cp "target/${{ matrix.target }}/release/pixtuoid.exe" "$DIR/"
           cp "target/${{ matrix.target }}/release/pixtuoid-hook.exe" "$DIR/"
-          cp LICENSE "$DIR/"
+          just stage-notices "$DIR"
           ( cd "$DIR" && 7z a "../${DIR}.zip" . )
 
       - uses: actions/upload-artifact@v7

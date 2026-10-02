@@ -56,23 +56,25 @@ impl OfficeRenderer {
         self.session.render(inputs);
         // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
         self.audio
-            .frame(self.session.audio_frame(scene, floor.floor_idx, now));
+            .frame(self.session.audio_frame(scene, floor, now));
         self.session.buf()
     }
 
     /// Build the name-badge overlay for the LAST rendered frame (call right after
     /// `render`). Floating has no agent-hover yet → `hovered = None`.
-    pub fn labels(
-        &mut self,
-        scene: &SceneState,
-        now: SystemTime,
-    ) -> Vec<pixtuoid_scene::overlay::LabelElement> {
-        self.session.overlay(scene, now, None)
+    pub fn labels(&self, scene: &SceneState) -> Vec<pixtuoid_scene::overlay::LabelElement> {
+        self.session.overlay(scene, None)
     }
 
-    /// The neon wall-board model for the current scene.
-    pub fn board(&self, scene: &SceneState, now: SystemTime) -> pixtuoid_scene::board::BoardModel {
-        self.session.board(scene, now)
+    /// The neon wall-board model for the current scene, its flap moving as
+    /// `motion` says.
+    pub fn board(
+        &self,
+        scene: &SceneState,
+        motion: pixtuoid_scene::anim::Motion,
+        now: SystemTime,
+    ) -> pixtuoid_scene::board::BoardModel {
+        self.session.board(scene, motion, now)
     }
 
     /// The status-footer model for the current scene — single-floor, so `floor = None`
@@ -184,10 +186,6 @@ pub(crate) fn sync_floor_caps(
     true
 }
 
-/// Labels center on the bundled width, not a custom pack's `frame.width`; a differently-sized
-/// pack's badge sits off-center, which is cosmetic.
-const FLOATING_SPRITE_W: i32 = pixtuoid_scene::layout::CHARACTER_SPRITE_W as i32;
-
 /// Name-badge AA font size (px), drawn at NATIVE surface res (not upscaled by the office
 /// `scale`) so a badge stays a crisp fixed-height caption over the chunky sprites. Tuned
 /// by eye against `examples/floating_snapshot`.
@@ -280,24 +278,16 @@ pub fn paint_labels_into_surface(
 ) {
     for el in labels {
         debug_assert!(!el.hovered, "floating paints no hover state");
-        let color = pack_xrgb(pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme));
-        let marker = "\u{25cf}";
+        let ink = pixtuoid_scene::overlay::badge_ink(&el.text, el.tone, theme);
+        let marker = &pixtuoid_scene::overlay::BADGE_MARKER.to_string();
         let text = format!("{marker}{}", el.text);
         let tw = crate::aa_text::text_width(&text, LABEL_FONT_PX);
-        // anchor_px is the sprite TOP-LEFT in office space.
         const BADGE_LIFT_PX: i32 = 12;
-        let cx = el.anchor_px.x as i32 * scale + (FLOATING_SPRITE_W * scale) / 2 - tw / 2;
+        let cx = el.anchor_px.x as i32 * scale - tw / 2;
         let cy = el.anchor_px.y as i32 * scale - BADGE_LIFT_PX;
-        // The CLI-identity split: the ● dot keeps the activity tone (status), the name
-        // paints in the source's badge hue (identity).
-        match pixtuoid_scene::overlay::badge_hue(&el.text, theme) {
-            Some(hue) => {
-                let mw = crate::aa_text::text_width(marker, LABEL_FONT_PX);
-                sb.draw_shadowed_text(marker, cx, cy, LABEL_FONT_PX, color);
-                sb.draw_shadowed_text(&el.text, cx + mw, cy, LABEL_FONT_PX, pack_xrgb(hue));
-            }
-            None => sb.draw_shadowed_text(&text, cx, cy, LABEL_FONT_PX, color),
-        }
+        let mw = crate::aa_text::text_width(marker, LABEL_FONT_PX);
+        sb.draw_shadowed_text(marker, cx, cy, LABEL_FONT_PX, pack_xrgb(ink.marker));
+        sb.draw_shadowed_text(&el.text, cx + mw, cy, LABEL_FONT_PX, pack_xrgb(ink.name));
     }
 }
 
@@ -439,7 +429,7 @@ mod tests {
     #[test]
     fn renders_a_sized_nonblank_office_buffer() {
         let scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
-        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack loads");
+        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
@@ -705,37 +695,88 @@ mod tests {
         }
     }
 
+    /// The badge's ink centres on the anchor scaled to the surface: `anchor_px` is
+    /// already the sprite's top-centre, so any extra offset walks it off the sprite.
     #[test]
-    fn paint_labels_split_the_status_dot_tone_from_the_cli_name_hue() {
-        // A registered prefix (`cc·`) exercises the `Some(hue)` arm the tone-only
-        // tests above skip.
+    fn a_badge_centres_its_ink_on_the_scaled_anchor() {
         use pixtuoid_scene::layout::Point;
         use pixtuoid_scene::overlay::{LabelElement, LabelTone};
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
-        let as_u32 = |c: Rgb| (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32;
-        let tone_rgb = theme.ui.label_idle;
-        let name_rgb = theme.source.claude_code;
-        assert_ne!(tone_rgb, name_rgb, "premise: idle tone != cc badge hue");
-        let label = vec![LabelElement {
-            anchor_px: Point { x: 20, y: 20 },
-            text: "cc\u{b7}api".into(),
-            tone: LabelTone::Idle,
-            hovered: false,
-        }];
-        let mut sb = vec![0u32; 120 * 120];
+        let (w, h, scale) = (240usize, 60usize, 3i32);
+        let ground = 0x0080_8080u32;
+        let mut sb = vec![ground; w * h];
+        let anchor = Point { x: 40, y: 15 };
         paint_labels_into_surface(
-            &mut XrgbSurface::new(&mut sb, 120, 120).expect("sized"),
-            &label,
-            2,
+            &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
+            &[LabelElement {
+                anchor_px: anchor,
+                text: "idle-x".into(),
+                tone: LabelTone::Idle,
+                hovered: false,
+            }],
+            scale,
             theme,
         );
+        let cols: Vec<i32> = (0..w)
+            .filter(|&x| (0..h).any(|y| sb[y * w + x] != ground))
+            .map(|x| x as i32)
+            .collect();
+        let (Some(&left), Some(&right)) = (cols.first(), cols.last()) else {
+            panic!("the badge painted nothing");
+        };
+        let centre = i32::from(anchor.x) * scale;
+        // Glyph side bearings and the 1-px drop shadow, not an offset.
+        const ROUNDING_PX: i32 = 2;
         assert!(
-            sb.contains(&as_u32(tone_rgb)),
-            "the ● dot must paint the activity tone {tone_rgb:?}"
+            ((left + right) / 2 - centre).abs() <= ROUNDING_PX,
+            "ink spans {left}..={right}, centred off the anchor's {centre}"
+        );
+    }
+
+    #[test]
+    fn paint_labels_ink_the_marker_and_the_name_as_the_model_says() {
+        // A registered prefix (`cc·`), so the marker's ink differs from the name's.
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::{BADGE_MARKER, LabelElement, LabelTone, badge_ink};
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let text = "cc\u{b7}api";
+        let ink = badge_ink(text, LabelTone::Idle, theme);
+        assert_ne!(ink.marker, ink.name, "premise: the two parts differ");
+        let (w, h, scale, anchor) = (120usize, 120usize, 2, Point { x: 20, y: 20 });
+        let mut sb = vec![0u32; w * h];
+        paint_labels_into_surface(
+            &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
+            &[LabelElement {
+                anchor_px: anchor,
+                text: text.into(),
+                tone: LabelTone::Idle,
+                hovered: false,
+            }],
+            scale,
+            theme,
+        );
+        // The marker's columns, then the name's, as `paint_labels_into_surface`
+        // lays them.
+        let marker = BADGE_MARKER.to_string();
+        let tw = crate::aa_text::text_width(&format!("{marker}{text}"), LABEL_FONT_PX);
+        let mw = crate::aa_text::text_width(&marker, LABEL_FONT_PX);
+        let left = anchor.x as i32 * scale - tw / 2;
+        let colours = |cols: std::ops::Range<i32>| -> std::collections::HashSet<u32> {
+            sb.iter()
+                .enumerate()
+                .filter(|(i, _)| cols.contains(&((i % w) as i32)))
+                .map(|(_, &p)| p)
+                .collect()
+        };
+        let (dot, name) = (colours(left..left + mw), colours(left + mw..left + tw));
+        let (m, n) = (pack_xrgb(ink.marker), pack_xrgb(ink.name));
+        assert!(
+            dot.contains(&m) && !dot.contains(&n),
+            "the ● takes the marker ink"
         );
         assert!(
-            sb.contains(&as_u32(name_rgb)),
-            "the name must paint the cc badge hue {name_rgb:?}"
+            name.contains(&n) && !name.contains(&m),
+            "the name takes the name ink"
         );
     }
 
@@ -788,6 +829,7 @@ mod tests {
             90,
             None,
             None,
+            pixtuoid_scene::anim::Motion::Full,
             std::time::SystemTime::UNIX_EPOCH,
         );
         let scale = 8i32;
@@ -876,7 +918,7 @@ mod tests {
             ],
             cap,
         );
-        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack loads");
+        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
@@ -957,7 +999,7 @@ mod tests {
         // Deterministic: fixed agent id + a hand-stepped clock; the loop bound mirrors
         // the scene crate's occupancy sim pin.
         use pixtuoid_scene::audio::OneShot;
-        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack loads");
+        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now0 = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut idle = active_on("/w/wanderer.jsonl", 0, 0);
@@ -1007,7 +1049,7 @@ mod tests {
     #[test]
     fn floating_door_chime_fires_only_for_rendered_floor_arrivals() {
         let cap = 16;
-        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack loads");
+        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let mut now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
@@ -1083,7 +1125,7 @@ mod tests {
     fn labels_is_empty_before_render_then_builds_a_positioned_badge_for_a_seeded_agent() {
         use pixtuoid_core::source::AgentEvent;
         use pixtuoid_core::{AgentId, Reducer, Transport};
-        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("embedded pack loads");
+        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut renderer = OfficeRenderer::new();
@@ -1104,8 +1146,8 @@ mod tests {
             Transport::Jsonl,
         );
 
-        // No frame rendered yet → no cached layout → the guard returns empty.
-        assert!(renderer.labels(&scene, now).is_empty());
+        // No frame rendered yet → no drawn sprites → no badges.
+        assert!(renderer.labels(&scene).is_empty());
         renderer.render(FrameInputs {
             world: FloorInputs {
                 scene: &scene,
@@ -1118,7 +1160,7 @@ mod tests {
             size: Size { w: 160, h: 96 },
             debug_walkable: false,
         });
-        let labels = renderer.labels(&scene, now);
+        let labels = renderer.labels(&scene);
         assert_eq!(labels.len(), 1, "one seeded agent → one name badge");
         let anchor = labels[0].anchor_px;
         assert!(

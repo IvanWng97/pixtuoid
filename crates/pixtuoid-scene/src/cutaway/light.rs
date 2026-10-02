@@ -41,7 +41,7 @@ pub(crate) struct Ambient(u8);
 
 impl Ambient {
     /// The room under `look`.
-    pub(crate) fn of(look: &crate::atmosphere::Look) -> Self {
+    pub(crate) fn of(look: &crate::atmosphere::SkyTones) -> Self {
         let steps = (look.darkness.clamp(0.0, 1.0) * f32::from(AMBIENT_MAX_STEPS)).round();
         Self(steps as u8)
     }
@@ -62,6 +62,42 @@ impl Ambient {
     fn ceiling(self) -> u8 {
         if self.0 == 0 { DAYLIGHT_LIFT } else { self.0 }
     }
+}
+
+/// How far a storm's lightning lifts the whole room this frame, in ramp steps,
+/// at [`Sky::flash`](crate::sky::Sky::flash): a strike's phases step it, never
+/// a blend toward white. Outside a storm it lifts nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub(crate) struct Flash(u8);
+
+/// The steps a strike's brightest phase lifts the room.
+pub(crate) const FLASH_MAX_STEPS: u8 = 2;
+/// The steps it lifts the window glass, where the bolt is.
+const BOLT_MAX_STEPS: u8 = 4;
+
+impl Flash {
+    /// The room's lift under `sky`.
+    pub(crate) fn of(sky: &crate::sky::Sky) -> Self {
+        Self(flash_steps(sky, FLASH_MAX_STEPS))
+    }
+
+    /// `c` lifted by it.
+    fn on(self, c: Rgb) -> Rgb {
+        if self.0 == 0 { c } else { c.ramp(self.0 as i8) }
+    }
+}
+
+/// The steps the bolt lifts the window glass under `sky`, before the room's
+/// [`Flash`] lifts it with everything else: up to [`BOLT_MAX_STEPS`] +
+/// [`FLASH_MAX_STEPS`] at a strike's peak.
+pub(crate) fn bolt_steps(sky: &crate::sky::Sky) -> u8 {
+    flash_steps(sky, BOLT_MAX_STEPS)
+}
+
+/// `sky`'s flash level in whole steps up to `max`: zero except in a storm, by
+/// [`Sky::flash`](crate::sky::Sky::flash).
+fn flash_steps(sky: &crate::sky::Sky, max: u8) -> u8 {
+    (sky.flash().clamp(0.0, 1.0) * f32::from(max)).round() as u8
 }
 
 /// How a painted pixel takes the room's light.
@@ -243,7 +279,7 @@ impl LightView {
 /// An emitter kind's place in the light order ([`LightView::rank`]).
 fn rank_of(kind: EmitterKind) -> u8 {
     match kind {
-        EmitterKind::WindowSpill | EmitterKind::WallSpot => 0,
+        EmitterKind::WindowSpill => 0,
         EmitterKind::FloorLamp => 1,
         EmitterKind::DeskLamp => 2,
         EmitterKind::MonitorHalo(_) => 3,
@@ -262,12 +298,13 @@ pub(crate) fn tint_of(
     match kind {
         EmitterKind::FloorLamp => Some(lighting.floor_lamp_halo),
         EmitterKind::DeskLamp => Some(lighting.desk_lamp),
-        EmitterKind::WindowSpill | EmitterKind::WallSpot => Some(lighting.sun_spill),
-        EmitterKind::NeonGlow => Some(crate::pixel_painter::neon_look(neon, theme).halo),
+        EmitterKind::WindowSpill => Some(lighting.sun_spill),
+        EmitterKind::NeonGlow => Some(crate::floor::neon_look(neon, theme).halo),
         // Dark themes only, as in the classic's
         // `pixel_painter::ambient::paint_ceiling_halos`: on a light one it reads as grime.
-        EmitterKind::MonitorHalo(tool) => (theme.kind == crate::theme::ThemeKind::Dark)
-            .then(|| crate::pixel_painter::tool_glow_for_kind(tool, &theme.tool_glow)),
+        EmitterKind::MonitorHalo(tool) => {
+            (theme.kind == crate::theme::ThemeKind::Dark).then(|| theme.tool_glow.for_kind(tool))
+        }
     }
 }
 
@@ -279,7 +316,7 @@ pub(crate) fn tint_of(
 pub(crate) fn net_pass(
     rect: ArtRect,
     lights: &[&LightView],
-    ambient: Ambient,
+    (ambient, flash): (Ambient, Flash),
     emission: &Emission,
     pen: Pen,
     memo: &mut NetMemo,
@@ -332,12 +369,12 @@ pub(crate) fn net_pass(
         for bx in bx0..bx1 {
             let a = art_row + usize::from(bx / k - rect.x.0);
             let (lift, tint) = (lift[a], tint[a]);
-            if lift == 0 && ambient.0 == 0 {
+            if lift == 0 && ambient.0 == 0 && flash.0 == 0 {
                 continue;
             }
             let i = usize::from(by) * bw + usize::from(bx);
             let glow = emission.glow.get(i).copied().unwrap_or(Glow::Lit);
-            pixels[i] = memo.of(pixels[i], glow, lift, tint, ambient);
+            pixels[i] = memo.of(pixels[i], glow, lift, tint, (ambient, flash));
         }
     }
 }
@@ -352,14 +389,21 @@ pub(crate) struct NetMemo {
 }
 
 /// Everything [`net_colour`] reads for one pixel.
-type NetKey = (Rgb, Glow, u8, Option<Rgb>, Ambient);
+type NetKey = (Rgb, Glow, u8, Option<Rgb>, Ambient, Flash);
 
 /// Bounds the memo in a room whose colours never settle.
 const NET_MEMO_CAP: usize = 1 << 16;
 
 impl NetMemo {
-    fn of(&mut self, under: Rgb, glow: Glow, lift: u8, tint: Option<Rgb>, ambient: Ambient) -> Rgb {
-        let key = (under, glow, lift, tint, ambient);
+    fn of(
+        &mut self,
+        under: Rgb,
+        glow: Glow,
+        lift: u8,
+        tint: Option<Rgb>,
+        (ambient, flash): (Ambient, Flash),
+    ) -> Rgb {
+        let key = (under, glow, lift, tint, ambient, flash);
         if let Some((k, c)) = self.last
             && k == key
         {
@@ -368,11 +412,14 @@ impl NetMemo {
         if self.colours.len() >= NET_MEMO_CAP {
             self.colours.clear();
         }
-        let c = *self.colours.entry(key).or_insert_with(|| match glow {
-            Glow::Lit => net_colour(under, lift, ambient, tint),
-            Glow::Emissive => under,
-            Glow::Shaded => ambient.on(under),
-            Glow::Pane => net_colour(under, lift, Ambient::default(), tint),
+        // A strike lights everything, what glows of its own too.
+        let c = *self.colours.entry(key).or_insert_with(|| {
+            flash.on(match glow {
+                Glow::Lit => net_colour(under, lift, ambient, tint),
+                Glow::Emissive => under,
+                Glow::Shaded => ambient.on(under),
+                Glow::Pane => net_colour(under, lift, Ambient::default(), tint),
+            })
         });
         self.last = Some((key, c));
         c
@@ -462,12 +509,12 @@ mod tests {
         }
     }
 
-    fn lit_floor(views: &[&LightView], ambient: Ambient) -> RgbBuffer {
+    fn lit_ground(views: &[&LightView], ambient: Ambient) -> RgbBuffer {
         let mut buf = RgbBuffer::filled(160, 64, FLOOR);
         net_pass(
             whole(40, 16),
             views,
-            ambient,
+            (ambient, Flash::default()),
             &Emission::new(160, 64),
             pen(),
             &mut NetMemo::default(),
@@ -480,7 +527,7 @@ mod tests {
     fn a_lit_lamp_lifts_its_pool_at_night_and_nothing_past_it() {
         let night = Ambient(AMBIENT_MAX_STEPS);
         let lamp = view(&lamp(0.6, Point { x: 10, y: 8 }), Some(WARM), night);
-        let buf = lit_floor(&[&lamp], night);
+        let buf = lit_ground(&[&lamp], night);
         let luma = Rgb::lightness;
         assert!(luma(buf.get(10 * 4 + 1, 8 * 4 + 1)) > luma(night.on(FLOOR)));
         assert_eq!(buf.get(0, 0), night.on(FLOOR));
@@ -492,7 +539,7 @@ mod tests {
     fn a_lit_pixel_steps_once_by_its_net() {
         let night = Ambient(AMBIENT_MAX_STEPS);
         let lamp = view(&lamp(0.6, Point { x: 10, y: 8 }), None, night);
-        let buf = lit_floor(&[&lamp], night);
+        let buf = lit_ground(&[&lamp], night);
         let mut checked = 0;
         for ay in 0..64u16 {
             for ax in 0..160u16 {
@@ -511,7 +558,7 @@ mod tests {
     fn a_light_paints_only_whole_steps_and_tint_stops() {
         let night = Ambient(AMBIENT_MAX_STEPS);
         let lamp = view(&lamp(0.6, Point { x: 10, y: 8 }), Some(WARM), night);
-        let buf = lit_floor(&[&lamp], night);
+        let buf = lit_ground(&[&lamp], night);
         let allowed: std::collections::HashSet<Rgb> = (0..=AMBIENT_MAX_STEPS)
             .map(|l| net_colour(FLOOR, l, night, Some(WARM)))
             .collect();
@@ -562,8 +609,8 @@ mod tests {
             ),
         );
         assert_eq!(
-            lit_floor(&[&a, &b], night).as_slice(),
-            lit_floor(&[&b, &a], night).as_slice()
+            lit_ground(&[&a, &b], night).as_slice(),
+            lit_ground(&[&b, &a], night).as_slice()
         );
     }
 
@@ -576,7 +623,7 @@ mod tests {
             view(&lamp(0.8, Point { x: 10, y: 8 }), Some(WARM), night),
             view(&lamp(0.7, Point { x: 16, y: 9 }), None, night),
         );
-        let full = lit_floor(&[&a, &b], night);
+        let full = lit_ground(&[&a, &b], night);
         let rect = ArtRect {
             x: ArtPx(40),
             y: ArtPx(20),
@@ -587,7 +634,7 @@ mod tests {
         net_pass(
             rect,
             &[&a, &b],
-            night,
+            (night, Flash::default()),
             &Emission::new(160, 64),
             pen(),
             &mut NetMemo::default(),
@@ -613,7 +660,7 @@ mod tests {
         net_pass(
             whole(40, 16),
             &[&lamp],
-            night,
+            (night, Flash::default()),
             &emission,
             pen(),
             &mut NetMemo::default(),

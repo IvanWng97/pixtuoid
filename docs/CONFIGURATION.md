@@ -30,6 +30,8 @@ kind = "dog"        # name omitted → "Office Dog"
 | `theme` | `"normal"` | Color theme — `normal`, `cyberpunk`, `dracula`, `tokyo-night`, `catppuccin`, `gruvbox`. |
 | `max-desks` | auto | Cap desks per floor (≥ 1; `0` is ignored with a warning). If unset, auto-computed from terminal size. Excess agents overflow to additional floors. Applies to the `run` TUI; `pixtuoid floating` sizes its floors from the window. |
 | `pack-dir` | — | Custom sprite pack directory. Supports `~` expansion. Without it, a pack in `${XDG_CONFIG_HOME:-~/.config}/pixtuoid/sprites/` is used when present, and the bundled one if that fails to load. See [Custom sprite packs](#custom-sprite-packs). |
+| `graphics` | `"off"` | Terminal graphics (kitty/iTerm2/SIXEL) for the cutaway office: `auto` uses them when the terminal supports them; `kitty`, `sixel` or `iterm2` uses that protocol whatever the terminal answers. `off` never queries the terminal. `run --graphics <value>` overrides it; an unknown value is ignored with a warning. `pixtuoid doctor` shows what your terminal supports. |
+| `motion` | `"auto"` | How much of the office's ambient life moves — flickers, twinkles, idle wandering, lightning. `full` moves all of it; `calm` plays it at a quarter of the pace, with a quarter of the repaints; `still` holds it still and flashes no lightning, for reduced motion. Agents still walk where they're going. `auto` is `full`, except `calm` over SIXEL or iTerm2 graphics, inside tmux or over ssh; the floating window's `auto` is `full`. An unknown value is ignored with a warning. |
 | `[[pets]]` | all kinds, default names | One stanza per pet. `kind` (`"cat"`/`"dog"`) is required; `name` is optional (the hover-tooltip label, default `Office Cat`/`Office Dog`). Omit the section for all pets; `pets = []` for none; an unknown `kind` is skipped without affecting other settings. Keep it last (it's a table section). |
 
 ## System-managed (don't edit — pixtuoid writes these for you)
@@ -74,12 +76,16 @@ A pack can also redraw an animation on a denser grid, registered as
 `<name>@<N>x` (`desk@4x` is `desk` drawn on a 4x grid). Each frame is exactly
 `N` times the size of the matching base frame, and the frame counts match;
 `validate-pack` reports a variant that breaks either rule, and it is never
-drawn. Every renderer pixtuoid ships today — the terminal office, the
-`floating` window and the site's live office — draws the base art. Variants
-are for the pixel-graphics cutaway, not yet wired to `run`: it takes the
+drawn. The classic renderers — the half-block terminal office, the
+`floating` window and the site's live office — draw the base art. Variants
+are for the pixel-graphics cutaway, which `run --graphics` paints over kitty's
+graphics protocol, SIXEL or iTerm2's inline images: it takes the
 densest variant whose `N` divides its render scale and draws it as it is — a
 variant carries its own front, where a desk's top-down base art gets a front
 face derived under it. The recolor keys and `[ramps]` apply at every density.
+
+A pet's walk (`cat_walk`, `dog_walk`) is drawn facing east: the renderer
+mirrors it when the pet heads west, so a walk drawn facing west walks backwards.
 
 A frame can name points on itself for the renderer: `@mark <name> <x> <y>` in
 its `@frame` block, at column `x` and row `y` from the frame's top-left. A

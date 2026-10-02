@@ -132,7 +132,7 @@ pub(crate) fn first_reachable_on_side(
 /// footprint (seats / wall decor).
 ///
 /// INVARIANT: the `visual/2` half-extent derived from this assumes
-/// `Anchor::Center` placement. A future `TopLeft`-placed obstacle waypoint would
+/// `Pivot::Center` placement. A future `TopLeft`-placed obstacle waypoint would
 /// compute the stand cell off a wrong center and must pass a center, not the raw
 /// origin.
 fn approach_clearance_extent(kind: Furniture, pantry_counter_size: Size) -> Option<Size> {

@@ -65,7 +65,7 @@ fn populate(scene: &mut SceneState, now: SystemTime, n: usize) {
 
 fn main() -> Result<()> {
     let theme = theme_by_name("normal").expect("normal theme");
-    let pack = pixtuoid_scene::embedded_pack::load_bundled_pack()?;
+    let pack = pixtuoid_scene::pack::load_bundled_pack()?;
     let base = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
     // (label, buffer w, h). The rich sizes are what a 192x80-cell terminal needs
@@ -193,7 +193,7 @@ fn main() -> Result<()> {
     }
 
     // Transport arithmetic: what a rich Adapter must push per frame.
-    println!("\ntransport cost per frame (uncompressed RGB -> base64, the Kitty/iTerm2 wire):");
+    println!("\ntransport cost per frame (uncompressed RGB -> base64, an upper bound):");
     for (label, w, h) in cases {
         let raw = w as f64 * h as f64 * 3.0;
         let b64 = raw * 4.0 / 3.0;

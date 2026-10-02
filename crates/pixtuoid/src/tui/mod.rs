@@ -1,4 +1,6 @@
 pub mod connection;
+#[cfg(feature = "graphics")]
+pub(crate) mod cutaway;
 pub mod dashboard;
 pub(crate) mod geometry;
 pub(crate) mod hit_test;
@@ -27,7 +29,7 @@ use ratatui::backend::CrosstermBackend;
 use tui_renderer::TuiRenderer;
 
 use crate::runtime::SceneRx;
-use pixtuoid_scene::{embedded_pack, pet, theme};
+use pixtuoid_scene::{pet, theme};
 
 /// Which overlay (if any) currently owns input, plus the one count the picker needs.
 /// An open overlay swallows keys and the normal-scene bindings are suspended; the
@@ -70,10 +72,13 @@ enum KeyAction {
     ToggleAudioMute,
     /// `true` = up.
     AdjustVolume(bool),
-    /// The `w` dispatch arm is `#[cfg(debug_assertions)]`-gated, so in release this
-    /// variant is never constructed; the `apply_key_action` match arm stays unconditional
-    /// for exhaustiveness.
-    #[cfg_attr(not(debug_assertions), allow(dead_code))]
+    #[cfg_attr(
+        all(not(debug_assertions), not(test)),
+        expect(
+            dead_code,
+            reason = "only the debug-build `w` dispatch arm builds it; the apply arm stays unconditional for exhaustiveness"
+        )
+    )]
     ToggleWalkableDebug,
     ToggleDashboard,
     DashboardUp,
@@ -99,6 +104,8 @@ enum KeyAction {
     OnboardingToggle,
     OnboardingConfirm,
     OnboardingSkip,
+    /// Ctrl-L: repaint the whole screen, images included.
+    Redraw,
 }
 
 fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
@@ -293,7 +300,7 @@ fn toggle_intent(state: connection::ConnState) -> ToggleIntent {
 
 /// The per-floor desk-capacity sweep, memoized on its own inputs.
 ///
-/// `floor_capacity` runs a FULL `Layout::compute_with_seed` — walkable-mask stamp plus
+/// `floor_capacity` runs a FULL `SceneLayout::compute_with_seed` — walkable-mask stamp plus
 /// coarse BFS, quadratic in buffer area — once per floor, and keeps only
 /// `home_desks.len()`. It is a pure function of `(buf_w, buf_h, desk_cap)` and the
 /// publish is a monotone `fetch_max`, so a repeat with identical inputs could only
@@ -343,6 +350,10 @@ fn dispatch_key(
     modal: ModalState,
     floor: FloorNav,
 ) -> KeyAction {
+    // Above every modal: a garbled screen is no less garbled under one.
+    if (code, mods) == (KeyCode::Char('l'), KeyModifiers::CONTROL) {
+        return KeyAction::Redraw;
+    }
     if modal.onboarding_open {
         return match (code, mods) {
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
@@ -491,8 +502,20 @@ pub fn unwind_terminal_modes<W: std::io::Write>(
     out: &mut W,
     disable_raw: impl FnOnce() -> std::io::Result<()>,
 ) -> Result<()> {
+    unwind_after(&crate::graphics::unwind_prelude(), out, disable_raw)
+}
+
+/// [`unwind_terminal_modes`] with the graphics' own unwind as `prelude`: the
+/// images go while the alt screen that holds them is still up.
+fn unwind_after<W: std::io::Write>(
+    prelude: &[u8],
+    out: &mut W,
+    disable_raw: impl FnOnce() -> std::io::Result<()>,
+) -> Result<()> {
+    let images = out.write_all(prelude);
     let seq = execute!(out, DisableMouseCapture, LeaveAlternateScreen);
     let raw = disable_raw();
+    images?;
     seq?;
     raw?;
     Ok(())
@@ -524,7 +547,11 @@ fn resolve_version_popup(config_path: &std::path::Path) -> bool {
 
 pub(crate) struct TuiSession {
     pub scene_rx: SceneRx,
-    pub pack: embedded_pack::PackSource,
+    pub pack: Arc<pixtuoid_core::sprite::format::Pack>,
+    /// What `boot_tui` planned to paint.
+    pub plan: crate::graphics::Plan,
+    /// How the office moves, which `boot_tui` resolved beside the plan.
+    pub motion: pixtuoid_scene::anim::Motion,
     pub floor_caps: Arc<[std::sync::atomic::AtomicUsize; pixtuoid_core::state::MAX_FLOORS]>,
     pub theme: &'static theme::Theme,
     pub config_path: std::path::PathBuf,
@@ -548,9 +575,8 @@ pub(crate) struct TuiSession {
 }
 
 /// Whether a left-click at `(col, row)` landed on the wall's star/repo link, given the
-/// terminal's `(cols, rows)`. Callers MUST gate this on `renderer.cached_layout().is_some()`
-/// — the wall display only paints with a layout, so an ungated hit phantom-launches a
-/// browser on a too-small frame or mid floor-slide.
+/// terminal's `(cols, rows)`. Callers MUST gate this on `renderer.shows_wall_display()`, or
+/// a hit phantom-launches a browser where none is painted.
 fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
     let scene = renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
     widgets::star_hit_rect(scene)
@@ -747,6 +773,11 @@ fn apply_key_action<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             surface_onboarding_failures(cx.ui, cx.connected, failed);
         }
         KeyAction::OnboardingSkip => apply_onboarding_skip(cx),
+        KeyAction::Redraw => {
+            if let Err(e) = cx.renderer.redraw() {
+                tracing::warn!(error = %e, "redraw failed");
+            }
+        }
     }
     false
 }
@@ -819,19 +850,18 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
         }
         MouseEventKind::Down(MouseButton::Left) => {
             renderer.set_mouse_pos(Some((m.column, m.row)));
-            let on_star = renderer.cached_layout().is_some()
+            let on_star = renderer.shows_wall_display()
                 && crossterm::terminal::size().is_ok_and(|t| star_clicked(m.column, m.row, t));
             if on_star {
                 let _ = open::that(widgets::REPO_URL);
             } else if focus_clicked_agent(renderer, scene_rx, focus_roots, m.column, m.row) {
                 // Empty on purpose: the click was consumed. The coffee-before-pet order below
                 // is the half no mechanism holds — keep it in step with `renderer::draw_scene`.
-            } else if renderer.cached_layout().is_some_and(|layout| {
-                renderer::hit_test_coffee_machine(
-                    layout,
-                    geometry::CellArea::half_block(m.column, m.row),
-                )
-            }) {
+            } else if let Some(at) = renderer.scene_area_at(m.column, m.row)
+                && renderer
+                    .cached_layout()
+                    .is_some_and(|layout| renderer::hit_test_coffee_machine(layout, at))
+            {
                 let _ = open::that("https://buymeacoffee.com/IvanWng97");
             } else if let Some(pixtuoid_scene::pet::PetFrame {
                 pos: pet_pos,
@@ -839,12 +869,9 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
                 kind,
             }) = renderer.cached_pet_pos()
                 && renderer.active_pet_ref().is_none_or(|p| !p.is_active(now))
-                && renderer::hit_test_pet(
-                    kind,
-                    pet_pos,
-                    anim,
-                    geometry::CellArea::half_block(m.column, m.row),
-                )
+                && renderer
+                    .scene_area_at(m.column, m.row)
+                    .is_some_and(|at| renderer::hit_test_pet(kind, pet_pos, anim, at))
             {
                 renderer.set_active_pet(Some(renderer::PetState {
                     petted_at: now,
@@ -893,6 +920,36 @@ fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
     }
 }
 
+/// Hand `renderer` the painter `plan` names.
+#[cfg_attr(
+    not(feature = "graphics"),
+    expect(unused_variables, reason = "only a graphics build paints the cutaway")
+)]
+fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
+    renderer: &mut TuiRenderer<B>,
+    plan: crate::graphics::Plan,
+    pack: &Arc<pixtuoid_core::sprite::format::Pack>,
+) {
+    match plan {
+        #[cfg(feature = "graphics")]
+        crate::graphics::Plan::Cutaway {
+            fit,
+            protocol,
+            cell,
+            tmux,
+            ..
+        } => renderer.set_cutaway(cutaway::TileCutaway::new(
+            Arc::clone(pack),
+            fit,
+            cell,
+            protocol,
+            tmux,
+            Box::new(stdout()),
+        )),
+        _ => tracing::info!(plan = ?plan, "painting classic"),
+    }
+}
+
 /// The event loop, running as the `block_on` ROOT future rather than on a tokio worker — so
 /// `tokio::task::block_in_place` here is inert, not a yield point, and does not panic either
 /// (that is `current_thread`-only). Pinned by `block_in_place_is_inert_on_the_block_on_thread`.
@@ -900,6 +957,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let TuiSession {
         mut scene_rx,
         pack,
+        plan,
+        motion,
         floor_caps,
         theme,
         config_path,
@@ -913,9 +972,10 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         first_run,
         audio_cfg,
     } = session;
-    let pack = embedded_pack::load_sprite_pack(pack)?;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
+    renderer.set_motion(motion);
+    paint_plan(&mut renderer, plan, &pack);
     // A LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins
     // the device thread it owns.
     let mut audio_ctl = crate::audio::AudioController::new(audio_cfg, config_path.clone());
@@ -953,7 +1013,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             let now = ui.now();
             let snapshot = scene_rx.borrow_and_update().clone();
             renderer.evict_missing(&snapshot);
-            let sig = (renderer.buf().width(), renderer.buf().height());
+            let sig = renderer.scene_extent();
             if last_layout_sig != Some(sig) {
                 renderer.invalidate_routes();
                 renderer.cancel_transition();
@@ -1107,7 +1167,7 @@ mod capacity_sweep_tests {
 
 #[cfg(test)]
 mod teardown_tests {
-    use super::unwind_terminal_modes;
+    use super::unwind_after;
     use std::cell::Cell;
 
     struct FailingWriter;
@@ -1123,7 +1183,7 @@ mod teardown_tests {
     #[test]
     fn raw_mode_is_disabled_even_when_the_escape_write_fails() {
         let disabled = Cell::new(false);
-        let err = unwind_terminal_modes(&mut FailingWriter, || {
+        let err = unwind_after(&[], &mut FailingWriter, || {
             disabled.set(true);
             Ok(())
         })
@@ -1144,7 +1204,7 @@ mod teardown_tests {
     #[test]
     fn the_unwind_writes_the_leave_sequence_into_the_writer_it_is_given() {
         let mut buf: Vec<u8> = Vec::new();
-        unwind_terminal_modes(&mut buf, || Ok(())).unwrap();
+        unwind_after(&[], &mut buf, || Ok(())).unwrap();
         let s = String::from_utf8(buf).unwrap();
         assert!(
             s.contains(LEAVE_ALT_SCREEN),
@@ -1169,7 +1229,7 @@ mod teardown_tests {
 
         let wrote = Cell::new(false);
         let raw_saw_write = Cell::new(false);
-        unwind_terminal_modes(&mut Recorder(&wrote), || {
+        unwind_after(&[], &mut Recorder(&wrote), || {
             raw_saw_write.set(wrote.get());
             Ok(())
         })
@@ -1180,9 +1240,23 @@ mod teardown_tests {
         );
     }
 
+    #[cfg(all(unix, feature = "graphics"))]
+    #[test]
+    fn our_images_go_before_the_alt_screen_that_holds_them() {
+        let prelude = crate::graphics::kitty::unwind_for(65536..=65541, false);
+        let mut buf: Vec<u8> = Vec::new();
+        unwind_after(&prelude, &mut buf, || Ok(())).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        let leave = s.find(LEAVE_ALT_SCREEN).expect("leaves");
+        assert!(
+            s.as_bytes().starts_with(&prelude) && prelude.len() <= leave,
+            "{s:?}"
+        );
+    }
+
     #[test]
     fn the_escape_write_error_outranks_a_later_raw_mode_error() {
-        let err = unwind_terminal_modes(&mut FailingWriter, || {
+        let err = unwind_after(&[], &mut FailingWriter, || {
             Err(std::io::Error::other("raw mode gone"))
         })
         .expect_err("both steps failed");
@@ -1564,6 +1638,28 @@ mod dispatch_tests {
         assert_eq!(
             dispatch_key(KeyCode::Down, NONE, hi, nav()),
             KeyAction::ThemePreview(5)
+        );
+    }
+
+    #[test]
+    fn ctrl_l_redraws_under_any_modal() {
+        let dashboard = ModalState {
+            dashboard_open: true,
+            ..modal()
+        };
+        let onboarding = ModalState {
+            onboarding_open: true,
+            ..modal()
+        };
+        for m in [modal(), dashboard, onboarding] {
+            assert_eq!(
+                dispatch_key(KeyCode::Char('l'), CTRL, m, nav()),
+                KeyAction::Redraw
+            );
+        }
+        assert_eq!(
+            dispatch_key(KeyCode::Char('l'), NONE, dashboard, nav()),
+            KeyAction::DashboardFoldRight
         );
     }
 

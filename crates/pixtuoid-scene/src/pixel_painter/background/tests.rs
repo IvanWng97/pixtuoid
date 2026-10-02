@@ -1,13 +1,13 @@
 use super::*;
-use crate::composite::blend;
-use crate::embedded_pack::test_default_pack;
-use crate::layout::{window_bays, window_run};
+use crate::anim::Motion;
+use crate::layout::{WINDOW_W, window_bays, window_run};
 use crate::lighting::SPILL_DEPTH;
-use crate::sky::{ForcedWeather, hour_is_day, set_weather_override};
+use crate::pack::test_default_pack;
+use crate::sky::{Weather, hour_is_day};
 use std::time::SystemTime;
 
 #[test]
-fn lightning_flash_storm_only_and_mid_strike_only() {
+fn lightning_flash_lights_the_room_mid_strike_only() {
     let now = SystemTime::UNIX_EPOCH;
     let mk = || {
         RgbBuffer::filled(
@@ -33,10 +33,6 @@ fn lightning_flash_storm_only_and_mid_strike_only() {
     let mut b = mk();
     paint_lightning_flash(&mut b, &Sky::at_with(now, Weather::Storm).with_flash(0.0));
     assert_eq!(b.get(0, 0), quiet_fill, "no flash between strikes");
-
-    let mut b = mk();
-    paint_lightning_flash(&mut b, &Sky::at_with(now, Weather::Clear).with_flash(1.0));
-    assert_eq!(b.get(0, 0), quiet_fill, "flash is storm-only");
 }
 #[test]
 fn storm_window_bolt_brightens_glass_during_the_flash() {
@@ -44,7 +40,7 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let render_lum = |flash: f32| -> u64 {
         let sky = Sky::at_with(now, Weather::Storm).with_flash(flash);
-        let moment = &Moment::resolve(sky, theme, 0.0, now);
+        let moment = &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(now));
         let city = CityStrip::draw(
             &test_default_pack(),
             (WINDOW_W, 28),
@@ -68,6 +64,7 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
                 city: &city,
                 run_x0: 0,
                 sky: &crate::celestial::SkyView::of(moment, 40, 40, theme),
+                weather: GlassWeather::of(moment),
             },
         );
         let mut sum = 0u64;
@@ -98,12 +95,12 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     let buf_w = 60u16;
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(12 * 3600);
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
-    paint_floor_and_walls(
+    paint_ground_and_walls(
         &mut BaseFillCache::new(),
         &mut buf,
         top_wall_h,
         window_bays(buf_w, 0..0),
-        &Moment::resolve(Sky::at(now), theme, 0.0, now),
+        &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.clock(now)),
         &test_default_pack(),
         theme,
     );
@@ -131,7 +128,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     );
 }
 
-/// Render a full office wall through the real `paint_floor_and_walls` path at a
+/// Render a full office wall through the real `paint_ground_and_walls` path at a
 /// forced January `day` + local `hour` + weather.
 fn render_office_on(
     day: u32,
@@ -155,16 +152,20 @@ fn render_office_themed(
     buf_w: u16,
     top_wall_h: u16,
 ) -> RgbBuffer {
-    let _weather = ForcedWeather::new(weather);
     let now = crate::localclock::on_day(day, hour);
     let buf_h = top_wall_h + 4;
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 4, g: 4, b: 6 });
-    paint_floor_and_walls(
+    paint_ground_and_walls(
         &mut BaseFillCache::new(),
         &mut buf,
         top_wall_h,
         window_bays(buf_w, 0..0),
-        &Moment::resolve(Sky::at(now), theme, 0.0, now),
+        &Moment::resolve(
+            Sky::at_with(now, weather),
+            theme,
+            0.0,
+            Motion::Full.clock(now),
+        ),
         &test_default_pack(),
         theme,
     );
@@ -373,12 +374,14 @@ fn disc_sweeps_across_a_single_window_buffer() {
 
 #[test]
 fn moon_disc_shows_at_night() {
-    // 21:00, not the small hours: those sit near the night arc's OWN apex and
-    // clip above the glass exactly like a midday sun.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
-    let clear = render_office_at(21, Weather::Clear, buf_w, top_wall_h);
-    let overcast = render_office_at(21, Weather::Overcast, buf_w, top_wall_h);
+    let (day, hour) = (1..=31u32)
+        .filter(|&d| Sky::clock(crate::localclock::on_day(d, 0)).moon_phase() > 0.9)
+        .find_map(|d| low_moon(d, buf_w, top_wall_h).map(|(h, _)| (d, h)))
+        .expect("a near-full moon shows low some January night");
+    let clear = render_office_on(day, hour, Weather::Clear, buf_w, top_wall_h);
+    let overcast = render_office_on(day, hour, Weather::Overcast, buf_w, top_wall_h);
     let clear_n = count_cool_bright(&clear, top_wall_h);
     let overcast_n = count_cool_bright(&overcast, top_wall_h);
     assert!(
@@ -394,23 +397,35 @@ fn moon_disc_shows_at_night() {
 
 #[test]
 fn stars_appear_on_a_clear_night_and_vanish_under_overcast() {
-    // 02:00 sits near the moon's night-arc apex, so its disc clips above the
-    // glass — the only bright thing left in the upper sky band is a star.
+    // A moonless small hour, and one under a moon high enough to clip above the
+    // glass: either way the bright things in the upper sky band are stars.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
-    let clear = render_office_at(2, Weather::Clear, buf_w, top_wall_h);
-    let overcast = render_office_at(2, Weather::Overcast, buf_w, top_wall_h);
-    let clear_n = count_faint_white(&clear, top_wall_h);
-    let overcast_n = count_faint_white(&overcast, top_wall_h);
-    assert!(
-        clear_n >= 3,
-        "a clear night should show some stars in the upper sky, got {clear_n}"
-    );
-    assert!(
-        clear_n > overcast_n,
-        "overcast should hide the stars a clear sky shows: \
-         clear={clear_n} overcast={overcast_n}"
-    );
+    let night = |want: fn(f32) -> bool| {
+        (1..=31u32)
+            .flat_map(|d| [0, 1, 2, 3, 22, 23].map(|h| (d, h)))
+            .find(|&(d, h)| {
+                let sky = Sky::at_with(crate::localclock::on_day(d, h), Weather::Clear);
+                sky.nightfall() >= 1.0 && want(sky.body().altitude)
+            })
+    };
+    let moonless = night(|alt| alt <= 0.0).expect("a moonless deep-night hour in January");
+    let high_moon = night(|alt| alt > 0.95).expect("a high-moon deep-night hour in January");
+    for (day, hour) in [moonless, high_moon] {
+        let clear = render_office_on(day, hour, Weather::Clear, buf_w, top_wall_h);
+        let overcast = render_office_on(day, hour, Weather::Overcast, buf_w, top_wall_h);
+        let clear_n = count_faint_white(&clear, top_wall_h);
+        let overcast_n = count_faint_white(&overcast, top_wall_h);
+        assert!(
+            clear_n >= 3,
+            "day {day} {hour}:00: a clear night should show some stars, got {clear_n}"
+        );
+        assert!(
+            clear_n > overcast_n,
+            "day {day} {hour}:00: overcast should hide the stars a clear sky shows: \
+             clear={clear_n} overcast={overcast_n}"
+        );
+    }
 }
 
 #[test]
@@ -446,57 +461,64 @@ fn disc_never_bleeds_across_a_window_pillar() {
     }
 }
 
+/// The first whole hour of `day`'s night its moon stands low in the glass,
+/// fully faded in under a clear sky, with that disc: low, since a high moon
+/// clips above the glass like a midday sun. Every pixel inside it is then
+/// EXACTLY `moon_core` or EXACTLY `MOON_SHADOW`.
+fn low_moon(day: u32, buf_w: u16, top_wall_h: u16) -> Option<(u32, crate::celestial::Disc)> {
+    (0..24u32).find_map(|h| {
+        let sky = Sky::at_with(crate::localclock::on_day(day, h), Weather::Clear);
+        let e = sky.body();
+        let low = e.kind == crate::sky::BodyKind::Moon && (0.2..0.5).contains(&e.altitude);
+        if !low || sky.nightfall() < 1.0 {
+            return None;
+        }
+        crate::celestial::Disc::of(&sky, buf_w, top_wall_h).map(|d| (h, d))
+    })
+}
+
 #[test]
 fn crescent_moon_leaves_the_dark_limb_unlit() {
-    // 21:00 Clear puts the disc in-glass at FULL atmo visibility, so every
-    // disc-interior pixel is EXACTLY `moon_core` or EXACTLY `MOON_SHADOW` — no
-    // partial blend to muddy the count. (cx, cy, r) depend only on the hour, not
-    // the date, so one `Disc::of` call gives the bounding box for every day.
     let buf_w = 96u16;
     let top_wall_h = 40u16;
-    let geom = crate::celestial::Disc::of(
-        &Sky::at_with(crate::localclock::at_hour(21), Weather::Clear),
-        buf_w,
-        top_wall_h,
-    )
-    .expect("moon disc visible at 21:00 under Clear");
+    let shown = |pick: fn(f32) -> bool| {
+        (1..=31u32)
+            .filter(|&d| pick(Sky::clock(crate::localclock::on_day(d, 0)).moon_phase()))
+            .find_map(|d| low_moon(d, buf_w, top_wall_h).map(|(h, geom)| (d, h, geom)))
+    };
+    let crescent = shown(|p| p < 0.35).expect("a crescent shows low some January night");
+    let full = shown(|p| p > 0.9).expect("a near-full moon shows low some January night");
 
-    let crescent_day = (1..=31u32)
-        .find(|&d| Sky::at(crate::localclock::on_day(d, 21)).moon_phase() < 0.35)
-        .expect("a crescent night exists in January 2026");
-    let full_day = (1..=31u32)
-        .find(|&d| Sky::at(crate::localclock::on_day(d, 21)).moon_phase() > 0.9)
-        .expect("a near-full night exists in January 2026");
-
-    let count_dark_and_bright = |day: u32| -> (usize, usize) {
-        let buf = render_office_on(day, 21, Weather::Clear, buf_w, top_wall_h);
-        let r = geom.r.ceil() as i32;
-        let (cx, cy) = (geom.cx.round() as i32, geom.cy.round() as i32);
-        let mut dark = 0usize;
-        let mut bright = 0usize;
-        for py in (cy - r)..=(cy + r) {
-            for px in (cx - r)..=(cx + r) {
-                if px < 0 || py < 0 || px as u16 >= buf.width() || py as u16 >= buf.height() {
-                    continue;
-                }
-                let dx = px as f32 - geom.cx;
-                let dy = py as f32 - geom.cy;
-                if dx * dx + dy * dy > geom.r * geom.r {
-                    continue; // outside the disc proper
-                }
-                let p = buf.get(px as u16, py as u16);
-                if p == crate::celestial::MOON_SHADOW {
-                    dark += 1;
-                } else if p.b > 200 && p.b > p.r.saturating_add(10) {
-                    bright += 1;
+    let count_dark_and_bright =
+        |(day, hour, geom): (u32, u32, crate::celestial::Disc)| -> (usize, usize) {
+            let buf = render_office_on(day, hour, Weather::Clear, buf_w, top_wall_h);
+            let r = geom.r.ceil() as i32;
+            let (cx, cy) = (geom.cx.round() as i32, geom.cy.round() as i32);
+            let mut dark = 0usize;
+            let mut bright = 0usize;
+            for py in (cy - r)..=(cy + r) {
+                for px in (cx - r)..=(cx + r) {
+                    if px < 0 || py < 0 || px as u16 >= buf.width() || py as u16 >= buf.height() {
+                        continue;
+                    }
+                    let dx = px as f32 - geom.cx;
+                    let dy = py as f32 - geom.cy;
+                    if dx * dx + dy * dy > geom.r * geom.r {
+                        continue; // outside the disc proper
+                    }
+                    let p = buf.get(px as u16, py as u16);
+                    if p == crate::celestial::MOON_SHADOW {
+                        dark += 1;
+                    } else if p.b > 200 && p.b > p.r.saturating_add(10) {
+                        bright += 1;
+                    }
                 }
             }
-        }
-        (dark, bright)
-    };
+            (dark, bright)
+        };
 
-    let (crescent_dark, crescent_bright) = count_dark_and_bright(crescent_day);
-    let (full_dark, full_bright) = count_dark_and_bright(full_day);
+    let (crescent_dark, crescent_bright) = count_dark_and_bright(crescent);
+    let (full_dark, full_bright) = count_dark_and_bright(full);
 
     assert!(
         crescent_bright >= 2,
@@ -530,15 +552,10 @@ fn a_waning_moon_lights_its_left_limb() {
     let buf_w = 96u16;
     let top_wall_h = 40u16;
     let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let geom = crate::celestial::Disc::of(
-        &Sky::at_with(crate::localclock::at_hour(21), Weather::Clear),
-        buf_w,
-        top_wall_h,
-    )
-    .expect("moon disc visible at 21:00 under Clear");
     // Lit disc pixels left and right of the disc's centre column.
     let lit_sides = |day: u32| -> (usize, usize) {
-        let buf = render_office_on(day, 21, Weather::Clear, buf_w, top_wall_h);
+        let (hour, geom) = low_moon(day, buf_w, top_wall_h).expect("the quarter moon shows low");
+        let buf = render_office_on(day, hour, Weather::Clear, buf_w, top_wall_h);
         let r = geom.r.ceil() as i32;
         let (cx, cy) = (geom.cx.round() as i32, geom.cy.round() as i32);
         let (mut left, mut right) = (0usize, 0usize);
@@ -580,7 +597,7 @@ fn moon_glow_dims_at_new_moon() {
     let (mut new_moon_day, mut new_moon_frac) = (1u32, f32::MAX);
     let (mut full_moon_day, mut full_moon_frac) = (1u32, f32::MIN);
     for day in 1..=31u32 {
-        let frac = Sky::at(crate::localclock::on_day(day, 21)).moon_phase();
+        let frac = Sky::clock(crate::localclock::on_day(day, 21)).moon_phase();
         if frac < new_moon_frac {
             new_moon_frac = frac;
             new_moon_day = day;
@@ -617,7 +634,7 @@ fn moon_glow_dims_at_new_moon() {
 
 /// Mean channel value over every PAINTED window pane's glass interior. The
 /// day-over-night invariant is asserted on THIS, not on
-/// [`Look::darkness`]: the weather veils are painted onto the glass
+/// [`SkyTones::darkness`]: the weather veils are painted onto the glass
 /// AFTER the light model resolved the sky, so a `darkness`-only assertion is
 /// structurally blind to them.
 fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {
@@ -643,7 +660,7 @@ fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {
 fn fullest_moon_day() -> u32 {
     (1..=31u32)
         .max_by(|&a, &b| {
-            let phase = |d: u32| Sky::at(crate::localclock::on_day(d, 0)).moon_phase();
+            let phase = |d: u32| Sky::clock(crate::localclock::on_day(d, 0)).moon_phase();
             phase(a)
                 .partial_cmp(&phase(b))
                 .expect("moon_phase is never NaN")
@@ -662,7 +679,7 @@ fn pane(theme: &'static crate::theme::Theme, hour: u32, w: Weather) -> f32 {
     )
 }
 
-/// Local midnight — the moon arc's apex hour. It is NOT the brightest RENDERED
+/// Local midnight. It is NOT the brightest RENDERED
 /// night pane (the pre-dawn twilight tint reads brighter on every theme), which
 /// is why the two ordering pins below sweep [`night_hours`] instead of sampling
 /// this one.
@@ -768,35 +785,40 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
         .expect("a theme with a different carpet/wall exists");
     let now = crate::localclock::on_day(1, 12);
     let (buf_w, buf_h, top_wall_h) = (96u16, 64u16, 14u16);
-    let paint = |base_fill: &mut BaseFillCache, theme: &'static crate::theme::Theme| {
+    let paint = |base_fill: &mut BaseFillCache, theme: &'static crate::theme::Theme, weather| {
         let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 9, g: 9, b: 9 });
-        paint_floor_and_walls(
+        paint_ground_and_walls(
             base_fill,
             &mut buf,
             top_wall_h,
             window_bays(buf_w, 0..0),
-            &Moment::resolve(Sky::at(now), theme, 0.0, now),
+            &Moment::resolve(
+                Sky::at_with(now, weather),
+                theme,
+                0.0,
+                Motion::Full.clock(now),
+            ),
             &test_default_pack(),
             theme,
         );
         buf
     };
     let mut shared = BaseFillCache::new();
-    let first = paint(&mut shared, normal);
-    let hit = paint(&mut shared, normal);
+    let first = paint(&mut shared, normal, Weather::Clear);
+    let hit = paint(&mut shared, normal, Weather::Clear);
     assert_eq!(
         first.as_slice(),
         hit.as_slice(),
         "a cache HIT must be byte-identical to the fill it memoized"
     );
-    let switched = paint(&mut shared, other);
-    let fresh = paint(&mut BaseFillCache::new(), other);
+    let switched = paint(&mut shared, other, Weather::Clear);
+    let fresh = paint(&mut BaseFillCache::new(), other, Weather::Clear);
     assert_eq!(
         switched.as_slice(),
         fresh.as_slice(),
         "a theme swap on a warm cache must repaint, not serve the stale fill"
     );
-    let back = paint(&mut shared, normal);
+    let back = paint(&mut shared, normal, Weather::Clear);
     assert_eq!(
         first.as_slice(),
         back.as_slice(),
@@ -805,11 +827,9 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
 
     // Weather leg: the tint changes the CARPET colours while the wall stays
     // put — the one key component nothing else covers.
-    let _weather = ForcedWeather::new(Weather::Clear);
-    let clear = paint(&mut shared, normal);
-    set_weather_override(Some(Weather::Rain));
-    let rain_shared = paint(&mut shared, normal);
-    let rain_fresh = paint(&mut BaseFillCache::new(), normal);
+    let clear = paint(&mut shared, normal, Weather::Clear);
+    let rain_shared = paint(&mut shared, normal, Weather::Rain);
+    let rain_fresh = paint(&mut BaseFillCache::new(), normal, Weather::Rain);
     assert_eq!(
         rain_shared.as_slice(),
         rain_fresh.as_slice(),
@@ -828,12 +848,12 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
     let now = crate::localclock::on_day(1, 12);
     let paint_at = |base_fill: &mut BaseFillCache, w: u16, h: u16| {
         let mut buf = RgbBuffer::filled(w, h, Rgb { r: 9, g: 9, b: 9 });
-        paint_floor_and_walls(
+        paint_ground_and_walls(
             base_fill,
             &mut buf,
             14,
             window_bays(w, 0..0),
-            &Moment::resolve(Sky::at(now), theme, 0.0, now),
+            &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.clock(now)),
             &test_default_pack(),
             theme,
         );
@@ -918,13 +938,11 @@ fn lightning_flash_matches_the_per_pixel_blend_reference() {
     }
 }
 
-/// Light through a window lands across the room from the sun. The disc
-/// (`Disc::of`), the wall spot (`paint_sun_spot`) and the spill
-/// (`Light::Spill`) each map the one azimuth to a side on their own,
-/// so this is the only check that sees them disagree, read off the pixels each
-/// paints.
+/// The spill leans away from the sun. The disc (`Disc::of`) and the spill
+/// (`Light::Spill`) each map the one azimuth to a side on their own, so this is
+/// the only check that sees them disagree, read off the pixels each paints.
 #[test]
-fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
+fn the_spill_leans_away_from_the_disc() {
     const BUF_W: u16 = 192;
     const BUF_H: u16 = 80;
     const TOP_WALL_H: u16 = 30;
@@ -934,7 +952,6 @@ fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
         b: 24,
     };
     let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let layout = crate::layout::Layout::compute(BUF_W, BUF_H, Some(4)).expect("layout fits");
     let mid = f32::from(BUF_W) / 2.0;
     // The mean x of the pixels a paint changed in rows `ys`, or `None` if none.
     let lit_x = |buf: &RgbBuffer, ys: std::ops::Range<u16>| {
@@ -947,20 +964,15 @@ fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
     };
     for hour in [6, 19] {
         let at = crate::localclock::at_hour(hour);
-        let moment =
-            crate::atmosphere::Moment::resolve(Sky::at_with(at, Weather::Clear), theme, 0.0, at);
+        let moment = crate::atmosphere::Moment::resolve(
+            Sky::at_with(at, Weather::Clear),
+            theme,
+            0.0,
+            Motion::Full.clock(at),
+        );
         let (sky, look) = (&moment.sky, &moment.look);
         let disc = crate::celestial::Disc::of(sky, BUF_W, TOP_WALL_H).expect("a clear low sun");
         let disc_side = (disc.cx - mid).signum();
-
-        let mut buf = RgbBuffer::filled(BUF_W, BUF_H, FILL);
-        crate::pixel_painter::ambient::paint_sun_spot(&mut buf, theme, &layout, &moment);
-        let spot_x = lit_x(&buf, 0..BUF_H).expect("a low sun paints a wall spot");
-        assert_eq!(
-            (spot_x - mid).signum(),
-            -disc_side,
-            "wall spot vs disc at {hour}:00"
-        );
 
         // One centred window, so the lean can run either way unclipped.
         let mut buf = RgbBuffer::filled(BUF_W, BUF_H, FILL);
@@ -1041,7 +1053,12 @@ fn a_window_shows_the_city_strip_from_its_own_column() {
     // number of its periods east.
     let now = crate::localclock::on_day(15, 12);
     let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let moment = &Moment::resolve(Sky::at_with(now, Weather::Overcast), theme, 0.0, now);
+    let moment = &Moment::resolve(
+        Sky::at_with(now, Weather::Overcast),
+        theme,
+        0.0,
+        Motion::Full.clock(now),
+    );
     let sky = crate::celestial::SkyView::of(moment, WINDOW_W * 3, 40, theme);
     let dx = 7;
     let far = (WINDOW_W + dx).next_multiple_of(crate::dither::PERIOD);
@@ -1069,6 +1086,7 @@ fn a_window_shows_the_city_strip_from_its_own_column() {
                 city: &city,
                 run_x0,
                 sky: &sky,
+                weather: GlassWeather::of(moment),
             },
         );
         (0..30u16)
@@ -1091,12 +1109,12 @@ fn the_wall_between_two_windows_is_one_frame_post() {
     let now = crate::localclock::on_day(1, 12);
     let (buf_w, buf_h, top_wall_h) = (160u16, 96u16, 24u16);
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 9, g: 9, b: 9 });
-    paint_floor_and_walls(
+    paint_ground_and_walls(
         &mut BaseFillCache::new(),
         &mut buf,
         top_wall_h,
         window_bays(buf_w, 0..0),
-        &Moment::resolve(Sky::at(now), theme, 0.0, now),
+        &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.clock(now)),
         &test_default_pack(),
         theme,
     );
@@ -1114,55 +1132,4 @@ fn the_wall_between_two_windows_is_one_frame_post() {
         }
     }
     assert!(posts > 0, "this wall has posts");
-}
-
-#[test]
-fn a_rain_streak_steps_down_through_the_falloff_tones() {
-    const ALPHA_BASE: f32 = 0.35;
-    let white = Rgb {
-        r: 255,
-        g: 255,
-        b: 255,
-    };
-    let black = Rgb { r: 0, g: 0, b: 0 };
-    let spec = StreakSpec {
-        count: 8,
-        seed_mult: 7,
-        sx_mult: u64::from(crate::GOLDEN_GAMMA_32),
-        speed_base: 60,
-        speed_span: 50,
-        color: white,
-        particle: Particle::Streak {
-            len_base: 6,
-            len_mod: 3,
-            alpha_base: ALPHA_BASE,
-            alpha_falloff: 0.3,
-            drift: false,
-        },
-    };
-    let tones: Vec<u8> = (1..=crate::dither::FALLOFF_TONES)
-        .map(|k| {
-            let alpha = ALPHA_BASE * f32::from(k) / f32::from(crate::dither::FALLOFF_TONES);
-            blend(0, 255, alpha)
-        })
-        .collect();
-    let mut buf = RgbBuffer::filled(20, 30, black);
-    let glass = GlassRect {
-        x0: 1,
-        y0: 1,
-        w: 18,
-        h: 28,
-    };
-    paint_streaks(&mut buf, &spec, 0, glass, 12_345);
-    let touched: Vec<u8> = buf
-        .as_slice()
-        .iter()
-        .filter(|&&p| p != black)
-        .map(|p| p.r)
-        .collect();
-    assert!(!touched.is_empty(), "the streaks painted");
-    assert!(
-        touched.iter().all(|r| tones.contains(r)),
-        "{touched:?} vs {tones:?}"
-    );
 }

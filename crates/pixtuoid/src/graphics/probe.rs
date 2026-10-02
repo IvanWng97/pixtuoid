@@ -9,7 +9,7 @@ use ratatui_image::picker::cap_parser::QueryStdioOptions;
 #[cfg(any(unix, test))]
 use ratatui_image::picker::cap_parser::{Parser, Response};
 
-use super::{CellSize, Detected, ImageProtocol, Probe};
+use super::{CellSize, Detected, ImageProtocol, Probe, in_tmux};
 
 /// What the environment says about the terminal, read once per probe.
 ///
@@ -98,13 +98,6 @@ impl EnvHints {
     }
 }
 
-/// Inside tmux: `TERM` starting `tmux`, or `TERM_PROGRAM` = `tmux` — the test
-/// upstream applies before wrapping every image in passthrough (ratatui-image
-/// 11.0.8 `picker.rs:320-326`), on every platform.
-fn in_tmux(term: Option<&str>, term_program: Option<&str>) -> bool {
-    term.is_some_and(|t| t.starts_with("tmux")) || term_program == Some("tmux")
-}
-
 /// What the terminal's answer and the environment together say: kitty over
 /// SIXEL when it answers both (ratatui-image 11.0.8 `picker.rs:523-533`), then
 /// the iTerm2 guess (`picker.rs:127-131`); the cell from its answer, else from
@@ -137,7 +130,7 @@ fn detected(responses: &[Response], env: &EnvHints, window_cell: Option<CellSize
 fn unanswered(env: &EnvHints, window_cell: Option<CellSize>) -> Probe {
     let d = detected(&[], env, window_cell);
     if d.protocol.is_some() {
-        Probe::Detected(d)
+        Probe::Answered(d)
     } else {
         Probe::NoAnswer
     }
@@ -201,7 +194,7 @@ pub(crate) fn probe(ask: bool) -> Probe {
     ) {
         None => Probe::NotQueried,
         Some(false) => unanswered(&env, window_cell()),
-        Some(true) => Probe::Detected(detected(&responses, &env, window_cell())),
+        Some(true) => Probe::Answered(detected(&responses, &env, window_cell())),
     }
 }
 
@@ -248,7 +241,8 @@ fn window_cell() -> Option<CellSize> {
 /// timeout with its fallback picker (ratatui-image 11.0.8 `picker.rs:147-157`),
 /// which without a window size — never one on Windows (`picker.rs:453-456`) —
 /// is halfblocks whatever the environment names, so a terminal that never
-/// answers arrives as [`Probe::Detected`] with no protocol.
+/// answers arrives as upstream's answer for it, [`Probe::Answered`] with no
+/// protocol.
 #[cfg(not(unix))]
 pub(crate) fn probe(ask: bool) -> Probe {
     use ratatui_image::picker::Picker;
@@ -264,7 +258,7 @@ pub(crate) fn probe(ask: bool) -> Probe {
         return Probe::NotQueried;
     };
     let font = picker.font_size();
-    Probe::Detected(Detected {
+    Probe::Answered(Detected {
         protocol: match picker.protocol_type() {
             ProtocolType::Kitty => Some(ImageProtocol::Kitty),
             ProtocolType::Sixel => Some(ImageProtocol::Sixel),
@@ -373,7 +367,7 @@ mod tests {
         let window = Some(CellSize { w: 9, h: 18 });
         assert_eq!(
             unanswered(&env("xterm-256color", "iTerm.app"), window),
-            Probe::Detected(Detected {
+            Probe::Answered(Detected {
                 protocol: Some(ImageProtocol::Iterm2),
                 cell: window,
                 tmux: false,

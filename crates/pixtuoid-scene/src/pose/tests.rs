@@ -40,8 +40,8 @@ impl Router for StubRouter {
     fn invalidate(&mut self) {}
 }
 
-fn layout() -> Layout {
-    Layout::compute(120, 96, Some(4)).expect("fits")
+fn layout() -> SceneLayout {
+    SceneLayout::compute(120, 96, Some(4)).expect("fits")
 }
 
 /// Returns a stable polyline (`first`) for its first few calls then a DIFFERENT
@@ -378,7 +378,7 @@ fn snap_back_derive_is_idempotent_within_a_frame() {
         if arrived_frame.is_none()
             && matches!(
                 p0,
-                Some(Pose::SeatedTyping { .. } | Pose::SeatedIdle | Pose::SeatedThinking)
+                Some(Pose::SeatedTyping | Pose::SeatedIdle | Pose::SeatedThinking)
             )
         {
             arrived_frame = Some(i);
@@ -405,7 +405,7 @@ fn snap_back_derive_is_idempotent_within_a_frame() {
 #[test]
 fn wander_derive_is_idempotent_within_a_frame() {
     use crate::pathfind::AStarRouter;
-    use crate::pixel_painter::character_anchor;
+    use crate::sim::anchors::character_top_left;
 
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
@@ -423,9 +423,9 @@ fn wander_derive_is_idempotent_within_a_frame() {
 
     for i in 0..200u64 {
         let t = now0 + Duration::from_millis(i * 33);
-        let a0 = character_anchor(&slot, &l, t, &mut rig.rctx());
+        let a0 = character_top_left(&slot, &l, t, &mut rig.rctx());
         for k in 1..4 {
-            let ak = character_anchor(&slot, &l, t, &mut rig.rctx());
+            let ak = character_top_left(&slot, &l, t, &mut rig.rctx());
             assert_eq!(
                 a0, ak,
                 "frame {i} call {k}: wander anchor differs within one frame ({a0:?} vs {ak:?}) — K-call desync"
@@ -455,7 +455,7 @@ fn snap_back_long_distance_renders_past_window_by_physics() {
         match derive_with_routing(&slot, t, &l, &mut rig.rctx()) {
             Some(Pose::Walking { .. }) if i * 33 > SNAP_BACK_MS => walking_after_window = true,
             Some(Pose::Walking { .. }) => {}
-            Some(Pose::SeatedTyping { .. } | Pose::SeatedIdle | Pose::SeatedThinking)
+            Some(Pose::SeatedTyping | Pose::SeatedIdle | Pose::SeatedThinking)
                 if walking_after_window =>
             {
                 arrived = true;
@@ -539,7 +539,7 @@ fn snap_back_skipped_when_prev_within_min_distance() {
         .record(slot.agent_id, close, now - Duration::from_millis(50));
     let p = derive_with_routing(&slot, now, &l, &mut rig.rctx());
     assert!(
-        matches!(p, Some(Pose::SeatedTyping { .. })),
+        matches!(p, Some(Pose::SeatedTyping)),
         "close prev should NOT trigger snap-back, got {p:?}"
     );
 }
@@ -563,7 +563,7 @@ fn snap_back_skipped_after_900ms_window() {
         .record(slot.agent_id, prev, now - Duration::from_millis(50));
     let p = derive_with_routing(&slot, now, &l, &mut rig.rctx());
     assert!(
-        matches!(p, Some(Pose::SeatedTyping { .. })),
+        matches!(p, Some(Pose::SeatedTyping)),
         "snap-back window should be expired at 1.5s, got {p:?}"
     );
 }
@@ -576,7 +576,7 @@ fn snap_back_skipped_without_recent_history() {
     let mut rig = RouteRig::new(StubRouter::straight());
     let p = derive_with_routing(&slot, now, &l, &mut rig.rctx());
     assert!(
-        matches!(p, Some(Pose::SeatedTyping { .. })),
+        matches!(p, Some(Pose::SeatedTyping)),
         "no prev history → raw pose, got {p:?}"
     );
 }
@@ -852,7 +852,7 @@ fn exiting_slot(exiting_at: SystemTime, created_at: SystemTime) -> AgentSlot {
 }
 
 /// `(near, far)` desk indices by octile distance from the door.
-fn near_far_desk_indices(l: &Layout) -> (usize, usize) {
+fn near_far_desk_indices(l: &SceneLayout) -> (usize, usize) {
     let door = l.door_threshold;
     let dists: Vec<u32> = l
         .home_desks
@@ -1095,23 +1095,23 @@ fn exit_uses_commute_speed_faster_than_wander() {
     );
 }
 
-/// One frame's max per-axis (Chebyshev) anchor jump. Cruise is ≤ ~15 px/frame and
+/// One frame's max per-axis (Chebyshev) top-left jump. Cruise is ≤ ~15 px/frame and
 /// pose-type boundaries add ≤ ~5 px, while a real teleport on this layout
 /// (desk↔waypoint ≈ 30–70 px) blows past it.
 const MAX_FRAME_STEP_PX: i32 = 20;
 
-/// Step `slot` for `frames` frames at 33 ms, sampling `character_anchor` against a
+/// Step `slot` for `frames` frames at 33 ms, sampling `character_top_left` against a
 /// real `AStarRouter`. Returns `(max_chebyshev_step, walking_frame_count)`. `churn`
 /// toggles an interior obstacle every other frame to force A* cache invalidation.
-fn max_anchor_step(
+fn max_top_left_step(
     slot: &AgentSlot,
-    l: &Layout,
+    l: &SceneLayout,
     start: SystemTime,
     frames: u64,
     churn: bool,
 ) -> (i32, usize) {
     use crate::pathfind::AStarRouter;
-    use crate::pixel_painter::character_anchor;
+    use crate::sim::anchors::character_top_left;
 
     let mut rig = RouteRig::new(AStarRouter::new());
     rig.router.set_preferred_zone(l.corridor);
@@ -1136,7 +1136,7 @@ fn max_anchor_step(
                     .add(ob.x.saturating_sub(5), ob.y.saturating_sub(5), 12, 12);
             }
         }
-        if let Some(a) = character_anchor(slot, l, now, &mut rig.rctx()) {
+        if let Some(a) = character_top_left(slot, l, now, &mut rig.rctx()) {
             if let Some(p) = prev {
                 let step = (a.x as i32 - p.x as i32)
                     .abs()
@@ -1155,7 +1155,7 @@ fn entry_walk_coordinates_are_continuous() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
     let slot = entry_slot(now);
-    let (max_step, walking) = max_anchor_step(&slot, &l, now, 150, true);
+    let (max_step, walking) = max_top_left_step(&slot, &l, now, 150, true);
     assert!(walking > 20, "entry walk should render many frames");
     assert!(
         max_step <= MAX_FRAME_STEP_PX,
@@ -1340,7 +1340,7 @@ fn exit_walk_coordinates_are_continuous() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
     let slot = exiting_slot(now, now - Duration::from_secs(60));
-    let (max_step, walking) = max_anchor_step(&slot, &l, now, 200, true);
+    let (max_step, walking) = max_top_left_step(&slot, &l, now, 200, true);
     assert!(walking > 20, "exit walk should render many frames");
     assert!(
         max_step <= MAX_FRAME_STEP_PX,
@@ -1410,7 +1410,7 @@ fn wander_coffee_run_coordinates_continuous_under_churn() {
 
     // 1500 frames ≈ 50 s — several full Seated→WalkingOut→AtWaypoint→WalkingBack
     // cycles, so every leg and boundary is exercised.
-    let (max_step, walking) = max_anchor_step(&slot, &l, now, 1500, true);
+    let (max_step, walking) = max_top_left_step(&slot, &l, now, 1500, true);
     assert!(walking > 1000, "idle agent should render every frame");
     assert!(
         max_step <= MAX_FRAME_STEP_PX,
@@ -1421,7 +1421,7 @@ fn wander_coffee_run_coordinates_continuous_under_churn() {
 #[test]
 fn wander_interrupted_by_active_does_not_teleport() {
     use crate::pathfind::AStarRouter;
-    use crate::pixel_painter::character_anchor;
+    use crate::sim::anchors::character_top_left;
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
@@ -1436,20 +1436,20 @@ fn wander_interrupted_by_active_does_not_teleport() {
 
     let mut rig = RouteRig::new(AStarRouter::new());
     rig.router.set_preferred_zone(l.corridor);
-    // The desk seated anchor, on throwaway stores — the "far from desk" reference.
-    let seated = crate::pixel_painter::character_anchor(
+    // The desk's seated top-left, on throwaway stores — the "far from desk" reference.
+    let seated = crate::sim::anchors::character_top_left(
         &idle,
         &l,
         now,
         &mut RouteRig::new(AStarRouter::new()).rctx(),
     )
-    .expect("anchor");
+    .expect("top-left");
 
     let mut last_pos = seated;
     let mut flip_frame = None;
     for i in 0..1500u64 {
         let t = now + Duration::from_millis(i * 33);
-        if let Some(a) = character_anchor(&idle, &l, t, &mut rig.rctx()) {
+        if let Some(a) = character_top_left(&idle, &l, t, &mut rig.rctx()) {
             let d = (a.x as i32 - seated.x as i32)
                 .abs()
                 .max((a.y as i32 - seated.y as i32).abs());
@@ -1475,7 +1475,7 @@ fn wander_interrupted_by_active_does_not_teleport() {
     let mut max_step = 0i32;
     for i in (flip_frame + 1)..(flip_frame + 46) {
         let t = now + Duration::from_millis(i * 33);
-        if let Some(a) = character_anchor(&active, &l, t, &mut rig.rctx()) {
+        if let Some(a) = character_top_left(&active, &l, t, &mut rig.rctx()) {
             let step = (a.x as i32 - prev.x as i32)
                 .abs()
                 .max((a.y as i32 - prev.y as i32).abs());
@@ -1494,7 +1494,7 @@ fn floor_offscreen_then_resume_does_not_replay() {
     // An off-screen floor is simply not rendered, so its motion freezes: the
     // fixture warms up, SKIPS a long gap (no calls at all), then resumes.
     use crate::pathfind::AStarRouter;
-    use crate::pixel_painter::character_anchor;
+    use crate::sim::anchors::character_top_left;
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
@@ -1512,7 +1512,7 @@ fn floor_offscreen_then_resume_does_not_replay() {
 
     for i in 0..60u64 {
         let t = now + Duration::from_millis(i * 33);
-        let _ = character_anchor(&slot, &l, t, &mut rig.rctx());
+        let _ = character_top_left(&slot, &l, t, &mut rig.rctx());
     }
 
     // Frames 60..1000 are NOT rendered — the off-screen gap.
@@ -1520,7 +1520,7 @@ fn floor_offscreen_then_resume_does_not_replay() {
     let mut max_step = 0i32;
     for i in 1000..1120u64 {
         let t = now + Duration::from_millis(i * 33);
-        if let Some(a) = character_anchor(&slot, &l, t, &mut rig.rctx()) {
+        if let Some(a) = character_top_left(&slot, &l, t, &mut rig.rctx()) {
             if let Some(p) = prev {
                 let step = (a.x as i32 - p.x as i32)
                     .abs()
@@ -1539,13 +1539,13 @@ fn floor_offscreen_then_resume_does_not_replay() {
 #[test]
 fn exit_while_wandering_does_not_teleport_to_desk() {
     use crate::pathfind::AStarRouter;
-    use crate::pixel_painter::character_anchor;
+    use crate::sim::anchors::character_top_left;
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     // A real-sized floor, not the tiny 120×96 `layout()`: in the tiny room the
     // meeting sofas are boxed in to their backrest, so a trip agent skips them and
     // never wanders far — and this test needs the agent to genuinely walk out.
-    let l = Layout::compute(160, 120, Some(4)).expect("fits");
+    let l = SceneLayout::compute(160, 120, Some(4)).expect("fits");
     let trip_id = (0u64..1000)
         .map(|i| AgentId::from_transcript_path(&format!("/exitw/{i}.jsonl")))
         .find(|id| takes_trip(*id, 0))
@@ -1558,13 +1558,13 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
     let mut rig = RouteRig::new(AStarRouter::new());
     rig.router.set_preferred_zone(l.corridor);
 
-    let seat = character_anchor(
+    let seat = character_top_left(
         &idle,
         &l,
         now,
         &mut RouteRig::new(AStarRouter::new()).rctx(),
     )
-    .expect("anchor");
+    .expect("top-left");
 
     let mut last = seat;
     let mut away_frame = None;
@@ -1572,7 +1572,7 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
     // pick can't starve the away-detection.
     for i in 0..3000u64 {
         let t = now + Duration::from_millis(i * 33);
-        if let Some(a) = character_anchor(&idle, &l, t, &mut rig.rctx()) {
+        if let Some(a) = character_top_left(&idle, &l, t, &mut rig.rctx()) {
             last = a;
             let d = (a.x as i32 - seat.x as i32)
                 .abs()
@@ -1595,7 +1595,7 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
         ..idle.clone()
     };
     let t_next = exit_at + Duration::from_millis(33);
-    let first_exit = character_anchor(&exiting, &l, t_next, &mut rig.rctx()).expect("exit pose");
+    let first_exit = character_top_left(&exiting, &l, t_next, &mut rig.rctx()).expect("exit pose");
     let jump = (first_exit.x as i32 - last.x as i32)
         .abs()
         .max((first_exit.y as i32 - last.y as i32).abs());
@@ -1608,7 +1608,7 @@ fn exit_while_wandering_does_not_teleport_to_desk() {
     let mut max_step = 0i32;
     for i in 2..200u64 {
         let t = exit_at + Duration::from_millis(i * 33);
-        match character_anchor(&exiting, &l, t, &mut rig.rctx()) {
+        match character_top_left(&exiting, &l, t, &mut rig.rctx()) {
             Some(a) => {
                 let step = (a.x as i32 - prev.x as i32)
                     .abs()
@@ -1639,7 +1639,7 @@ fn wander_continuous_across_layouts_and_agents() {
     ];
 
     for (w, h, seed) in geometries {
-        let Some(l) = Layout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed) else {
+        let Some(l) = SceneLayout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), seed) else {
             continue;
         };
         if l.home_desks.is_empty() || l.waypoints.is_empty() {
@@ -1654,7 +1654,7 @@ fn wander_continuous_across_layouts_and_agents() {
             slot.desk_index = GlobalDeskIndex(k);
             slot.last_event_at = old;
             // ~20 s ⇒ 2–3 full wander cycles per agent.
-            let (max_step, _) = max_anchor_step(&slot, &l, now, 600, true);
+            let (max_step, _) = max_top_left_step(&slot, &l, now, 600, true);
             assert!(
                 max_step <= MAX_FRAME_STEP_PX,
                 "geometry {w}x{h} seed={seed} desk={k}: max frame jump {max_step}px (> {MAX_FRAME_STEP_PX})"
@@ -1765,7 +1765,7 @@ fn multiple_agents_share_overlay_without_teleport() {
     // itself reproduce the freeze regression —
     // `frozen_leg_anchor_continuous_across_router_shape_change` is that guard.
     use crate::pathfind::AStarRouter;
-    use crate::pixel_painter::character_anchor;
+    use crate::sim::anchors::character_top_left;
 
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
@@ -1800,7 +1800,7 @@ fn multiple_agents_share_overlay_without_teleport() {
             }
         }
         for s in &slots {
-            if let Some(a) = character_anchor(s, &l, t, &mut rig.rctx()) {
+            if let Some(a) = character_top_left(s, &l, t, &mut rig.rctx()) {
                 if let Some(p) = prev.get(&s.agent_id) {
                     let step = (a.x as i32 - p.x as i32)
                         .abs()

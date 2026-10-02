@@ -37,6 +37,7 @@ pub mod board;
 #[doc(hidden)]
 pub mod burn;
 pub(crate) mod celestial;
+pub(crate) mod character;
 pub mod chitchat;
 pub(crate) mod composite;
 pub(crate) mod creatures;
@@ -45,13 +46,14 @@ pub use creatures::PET_CYCLE_MS;
 #[doc(hidden)]
 pub mod cutaway;
 pub(crate) mod dither;
-pub mod embedded_pack;
+pub(crate) mod effects;
 pub mod floor;
 #[doc(hidden)]
 pub mod footer;
 #[doc(hidden)]
 pub mod frame_cache;
 pub(crate) mod glass;
+pub(crate) mod glass_weather;
 pub(crate) mod ground;
 pub mod layout;
 pub(crate) mod lighting;
@@ -60,6 +62,7 @@ pub mod localclock;
 pub mod motion;
 #[doc(hidden)]
 pub mod overlay;
+pub mod pack;
 pub mod pathfind;
 /// Office pets — the `Pet`/`PetKind` model and per-floor selection.
 pub mod pet;
@@ -67,11 +70,13 @@ pub mod physics;
 pub mod pixel_painter;
 pub mod pose;
 pub mod render_scale;
+pub mod sim;
 pub(crate) mod sky;
 pub(crate) mod skyline;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;
 pub mod token_meter;
+pub(crate) mod wall;
 
 /// ⌊2⁶⁴/φ⌋, φ the golden ratio: the Fibonacci-hashing multiplier and splitmix64's increment.
 pub(crate) const GOLDEN_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;

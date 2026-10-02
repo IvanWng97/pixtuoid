@@ -1,9 +1,9 @@
 //! Y-sorted drawable enum (painter's algorithm).
 //!
-//! Every mid-ground entity carries an `anchor_y` = the y-pixel row where it
+//! Every mid-ground entity carries a `sort_row` = the y-pixel row where it
 //! touches the floor (front-facing bottom edge for items with thickness).
-//! Drawables sort ascending by `anchor_y` and then [`Layer`], so larger
-//! `anchor_y` = closer to camera = paints last. A backdrop fixture is a
+//! Drawables sort ascending by `sort_row` and then [`Layer`], so larger
+//! `sort_row` = closer to camera = paints last. A backdrop fixture is a
 //! [`DrawableKind`] the background pass paints flat instead.
 
 use std::time::SystemTime;
@@ -12,26 +12,22 @@ use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 
-use super::palette::{BLACK, WHITE, blend_rgb};
-use super::sim::{Cup, DeskProps};
+use crate::sim::{Cup, DeskProps, desk_cup_at};
 use pixtuoid_core::AgentSlot;
 
+use super::AgentFrame;
 use super::background::{paint_clock, paint_corridor_runner, paint_neon_panel};
-use super::effects::{
-    paint_coffee_steam, paint_pet_hearts, paint_screen_glow, paint_screen_idle, paint_sleep_z,
-    paint_waiting_bubble, paint_walking_dust,
-};
-use super::epoch_ms;
-use super::frame_at;
+use super::effects::{paint_effects, paint_screen_glow, paint_screen_idle};
 use super::furniture::{
     paint_area_rug, paint_coat_rack, paint_doormat, paint_fish_tank, paint_kitchen_island,
     paint_meeting_chair, paint_notice_board, paint_side_table, paint_trash_bin, paint_water_cooler,
 };
-use super::{AgentFrame, paint_character_at};
+use crate::character::{CharacterFrame, SpritePose, character_frame};
+use crate::effects::{Effect, STEAM_PUFFS};
 use crate::frame_cache::FrameCache;
 pub(super) use crate::layout::Layer;
-use crate::layout::{Point, Size};
-use crate::pet::PetKind;
+use crate::layout::{Point, SceneLayout, Size};
+use crate::pack::{DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, desk_art, desk_art_top, frame_at};
 
 /// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
 /// size — hand-tuned to the sprite art so the steam sits within the coffee
@@ -39,9 +35,9 @@ use crate::pet::PetKind;
 const PANTRY_STEAM_DX_LARGE: i16 = -2;
 const PANTRY_STEAM_DX_SMALL: i16 = 1;
 
-/// The steam offset for `anim`, a [`super::pantry_counter_anim`] pick.
+/// The steam offset for `anim`, a [`pantry_counter_anim`](crate::layout::pantry_counter_anim) pick.
 fn pantry_steam_dx(anim: &str) -> i16 {
-    let [_, large] = super::PANTRY_COUNTER_ANIMS;
+    let [_, large] = crate::layout::PANTRY_COUNTER_ANIMS;
     if anim == large {
         PANTRY_STEAM_DX_LARGE
     } else {
@@ -49,8 +45,17 @@ fn pantry_steam_dx(anim: &str) -> i16 {
     }
 }
 
+/// Where the steam rises from a pantry counter centred at `pos` drawn as
+/// `anim`.
+pub(super) fn pantry_steam_at(pos: Point, anim: &str) -> Point {
+    Point {
+        x: (pos.x as i32 + pantry_steam_dx(anim) as i32).max(0) as u16,
+        y: pos.y.saturating_sub(2),
+    }
+}
+
 pub(super) struct Drawable<'a> {
-    pub(super) anchor_y: u16,
+    pub(super) sort_row: u16,
     pub(super) layer: Layer,
     pub(super) kind: DrawableKind<'a>,
 }
@@ -58,7 +63,7 @@ pub(super) struct Drawable<'a> {
 /// Sorts `drawables` into paint order. Stable, so drawables tied on row and
 /// layer keep their queue order: the roster's among fixtures.
 pub(super) fn sort_drawables(drawables: &mut [Drawable<'_>]) {
-    drawables.sort_by_key(|d| (d.anchor_y, d.layer));
+    drawables.sort_by_key(|d| (d.sort_row, d.layer));
 }
 
 pub(super) enum DrawableKind<'a> {
@@ -74,11 +79,10 @@ pub(super) enum DrawableKind<'a> {
     },
     Character {
         agent: &'a AgentSlot,
-        pose: super::seat::SpritePose,
-        anchor: Point,
-        sleep_z_seed: Option<u64>,
-        waiting_bubble: bool,
-        walking_dust_frame: Option<usize>,
+        pose: SpritePose,
+        top_left: Point,
+        label_anchor: Point,
+        effects: &'a [Effect],
     },
     FilingCabinet {
         pos: Point,
@@ -89,10 +93,11 @@ pub(super) enum DrawableKind<'a> {
         pos: Point,
     },
     /// Pantry counter, with coffee steam attached so the steam rides above it
-    /// in z-order. `anim` is [`super::pantry_counter_anim`]'s pick.
+    /// in z-order. `anim` is [`pantry_counter_anim`](crate::layout::pantry_counter_anim)'s pick.
     WaypointPantry {
         pos: Point,
         anim: &'static str,
+        steam: [Effect; STEAM_PUFFS],
     },
     MeetingSofa {
         pos: Point,
@@ -141,7 +146,7 @@ pub(super) enum DrawableKind<'a> {
         kind: crate::layout::WallDecor,
         pos: Point,
     },
-    /// A corridor appliance: its pack art ([`super::appliance_art`]), centred at
+    /// A corridor appliance: its pack art ([`crate::pack::appliance_sprite`]), centred at
     /// `pos`.
     Appliance {
         pos: Point,
@@ -150,12 +155,11 @@ pub(super) enum DrawableKind<'a> {
         busy: bool,
     },
     Pet {
-        kind: PetKind,
         pos: Point,
         flip: bool,
         anim_name: &'static str,
         frame_idx: usize,
-        pet_elapsed_ms: Option<u64>,
+        effects: &'a [Effect],
     },
     /// The gateway lobster mascot — a presence-gated wandering creature, NOT an
     /// agent (lives in `daemons`, not `scene.agents`); y-sorted at its south row
@@ -166,7 +170,7 @@ pub(super) enum DrawableKind<'a> {
         pos: Point,
         anim_name: &'static str,
         frame_idx: usize,
-        run_count: u32,
+        effects: &'a [Effect],
         /// Gateway up but model-broken → render the lobster sickly red.
         degraded: bool,
     },
@@ -182,7 +186,7 @@ pub(super) enum DrawableKind<'a> {
         pos: Point,
     },
     /// Lounge aquarium, y-sorted at its cabinet's south row. `pos` is the sprite
-    /// CENTER (matches the mask stamp's `Anchor::Center`).
+    /// CENTER (matches the mask stamp's `Pivot::Center`).
     FishTank {
         pos: Point,
     },
@@ -200,32 +204,11 @@ pub(super) enum DrawableKind<'a> {
     /// The neon sign's panel in this frame's colours.
     NeonSign {
         panel: crate::layout::Bounds,
-        look: super::background::NeonLook,
+        look: crate::floor::NeonLook,
     },
     Clock {
         pos: Point,
     },
-}
-
-/// Busy "working" cue — bubbles rising above the lobster's head while a run is
-/// in flight, one per concurrent run over a small baseline (capped).
-fn paint_mascot_bubbles(buf: &mut RgbBuffer, pos: Point, frame_h: u16, runs: u32, now: SystemTime) {
-    let now_ms = epoch_ms(now);
-    let bubble = Rgb {
-        r: 0xd6,
-        g: 0xf2,
-        b: 0xf8,
-    };
-    let top = pos.y.saturating_sub(frame_h / 2 + 1);
-    let n = (runs + 1).min(4) as u16;
-    for i in 0..n {
-        let phase = ((now_ms / 110) + i as u64 * 7) % 6;
-        let by = top.saturating_sub(phase as u16);
-        let bx = (pos.x + i * 2).saturating_sub(n);
-        if bx < buf.width() && by < buf.height() {
-            buf.put(bx, by, bubble);
-        }
-    }
 }
 
 /// Blit `frame` CENTRED on `pos` (origin = `pos − size/2`, saturating).
@@ -254,36 +237,8 @@ pub(super) struct DrawableCtx<'a> {
     pub buf: &'a mut RgbBuffer,
     pub pack: &'a Pack,
     pub cache: &'a mut FrameCache,
-    pub now: SystemTime,
+    pub clock: crate::anim::Clock,
     pub theme: &'a crate::theme::Theme,
-}
-
-/// The monitor bezel standing proud of the desk back, above `desk.y`.
-pub(crate) const DESK_BEZEL_RAISE: u16 = 1;
-
-/// The base desk's pack animation, whose bottom row every desk's art keeps.
-pub(crate) const DESK_SPRITE: &str = "desk";
-
-/// The row a desk's art `art_h` tall blits from at `desk_y`: the bezel raise,
-/// plus whatever a taller art adds ABOVE `desk.y`, so it keeps the base
-/// [`DESK_SPRITE`]'s bottom row. Both profiles blit desks from this.
-pub(crate) fn desk_art_top(pack: &Pack, desk_y: u16, art_h: u16) -> u16 {
-    let base_h = pack
-        .animation(DESK_SPRITE)
-        .and_then(|a| a.frames().first())
-        .map_or(0, |f| f.height());
-    desk_y.saturating_sub(DESK_BEZEL_RAISE + art_h.saturating_sub(base_h))
-}
-
-/// The desk art for a seat facing `facing`. Only a back-turned seat needs its
-/// own — its occupant y-sorts in FRONT and covers the screen.
-pub(crate) fn desk_sprite_name(facing: crate::layout::Facing) -> &'static str {
-    match facing {
-        crate::layout::Facing::North => "desk_north",
-        crate::layout::Facing::South
-        | crate::layout::Facing::East
-        | crate::layout::Facing::West => DESK_SPRITE,
-    }
 }
 
 /// A hoverable [`paint_drawable`] drew, sized by the frame it blitted.
@@ -298,7 +253,8 @@ pub(super) enum Drawn {
 pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -> Option<Drawn> {
     let buf = &mut *c.buf;
     let cache = &mut *c.cache;
-    let (pack, now, theme) = (c.pack, c.now, c.theme);
+    let (pack, theme) = (c.pack, c.theme);
+    let crate::anim::Clock { now, beat } = c.clock;
     match kind {
         DrawableKind::DeskCubicle {
             desk,
@@ -307,9 +263,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             lights,
             props,
         } => {
-            let art = pack
-                .animation_or_source(desk_sprite_name(*facing))
-                .and_then(|a| a.frames().first());
+            let art = desk_art(pack, *facing);
             // The effects address the monitor by the sprite's OWN row numbering, so this is
             // the blit origin; passing `sprite_top + DESK_BEZEL_RAISE` caps every glow with a bar.
             let mut sprite_top = desk.y;
@@ -317,7 +271,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
                 sprite_top = desk_art_top(pack, desk.y, frame.height());
                 blit_frame(frame, desk.x, sprite_top, buf);
             }
-            paint_desk_lamp(buf, lights, theme);
+            paint_desk_lamp_pool(buf, lights, theme);
             paint_screen_idle(
                 buf,
                 desk.x,
@@ -325,36 +279,29 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
                 theme.effects.monitor_idle,
                 lights.screen_idle,
             );
-            paint_desk_coffee(buf, *desk, props.cup, now, theme);
+            paint_desk_coffee(buf, *desk, props.cup, &props.effects, theme);
             paint_token_stack(buf, *desk, props.token_tier, props.sheet_fall, theme);
             if let Some(tint) = screen_glow {
-                paint_screen_glow(buf, desk.x, sprite_top, now, *tint, theme);
+                paint_screen_glow(buf, desk.x, sprite_top, props.scanline, *tint, theme);
             }
         }
         DrawableKind::Character {
             agent,
             pose,
-            anchor,
-            sleep_z_seed,
-            waiting_bubble,
-            walking_dust_frame,
+            top_left,
+            label_anchor,
+            effects,
         } => {
-            if let Some(dust_frame) = walking_dust_frame {
-                paint_walking_dust(buf, *anchor, *dust_frame, theme);
-            }
-            let drawn = paint_character_at(buf, *pose, *anchor, agent, pack, cache, now);
-            if let Some(seed) = sleep_z_seed {
-                paint_sleep_z(buf, *anchor, now, *seed, theme);
-            }
-            if *waiting_bubble {
-                paint_waiting_bubble(buf, *anchor, theme);
-            }
+            paint_effects(buf, effects.iter().filter(|e| e.kind.beneath()), theme);
+            let drawn = paint_character_at(buf, *pose, *top_left, agent, pack, cache, now);
+            paint_effects(buf, effects.iter().filter(|e| !e.kind.beneath()), theme);
             return drawn.map(|Size { w, h }| {
                 Drawn::Agent(AgentFrame {
                     agent_id: agent.agent_id,
-                    anchor: *anchor,
+                    top_left: *top_left,
                     w,
                     h,
+                    label_anchor: *label_anchor,
                 })
             });
         }
@@ -367,22 +314,12 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             }
         }
         DrawableKind::DeskChair { pos } => paint_chair_back(buf, *pos, pack),
-        DrawableKind::WaypointPantry { pos, anim } => {
+        DrawableKind::WaypointPantry { pos, anim, steam } => {
             // A character behind the counter is occluded by the counter's own
             // sprite (it y-sorts at the south base, and the mask south-anchors a
             // shallow strip there) — no synthetic cap needed.
             blit_centered_first_frame(pack, anim, *pos, buf);
-            let steam_dx = pantry_steam_dx(anim);
-            let steam_x = (pos.x as i32 + steam_dx as i32).max(0) as u16;
-            paint_coffee_steam(
-                buf,
-                Point {
-                    x: steam_x,
-                    y: pos.y.saturating_sub(2),
-                },
-                now,
-                theme,
-            );
+            paint_effects(buf, steam, theme);
         }
         DrawableKind::MeetingSofa { pos, mirrored } => {
             if let Some(f) = pack
@@ -433,21 +370,20 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             }
         }
         DrawableKind::Appliance { pos, sprite, busy } => {
-            let art = pack
-                .animation(sprite)
-                .and_then(|anim| anim.recolorable(super::appliance_frame(anim, *busy, now)));
+            let art = pack.animation(sprite).and_then(|anim| {
+                anim.recolorable(crate::pack::appliance_frame_index(anim, *busy, beat))
+            });
             if let Some(art) = art {
-                let themed = art.recolored(&super::palette::appliance_overrides(&theme.appliance));
+                let themed = art.recolored(&crate::pack::appliance_overrides(&theme.appliance));
                 blit_centered(&themed, *pos, buf);
             }
         }
         DrawableKind::Pet {
-            kind,
             pos,
             flip,
             anim_name,
             frame_idx,
-            pet_elapsed_ms,
+            effects,
         } => {
             let anim = pack.animation(anim_name)?;
             let frame = frame_at(anim, *frame_idx)?;
@@ -460,18 +396,14 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
                 frame
             };
             blit_centered(final_frame, *pos, buf);
-            if let Some(elapsed) = pet_elapsed_ms {
-                paint_pet_hearts(buf, *pos, *elapsed);
-            } else if *anim_name == kind.sleep_anim() {
-                paint_sleep_z(buf, *pos, now, 0xCAFE, theme);
-            }
+            paint_effects(buf, *effects, theme);
         }
         DrawableKind::GatewayMascot {
             mascot_idx,
             pos,
             anim_name,
             frame_idx,
-            run_count,
+            effects,
             degraded,
         } => {
             let anim = pack.animation(anim_name)?;
@@ -481,11 +413,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             } else {
                 blit_centered(frame, *pos, buf);
             }
-            // The busy tell keys on in-flight RUNS, not the (persistent,
-            // single-user) session count, which sticks at 1 at rest.
-            if *run_count > 0 {
-                paint_mascot_bubbles(buf, *pos, frame.height(), *run_count, now);
-            }
+            paint_effects(buf, *effects, theme);
             return Some(Drawn::Mascot {
                 mascot_idx: *mascot_idx,
                 w: frame.width(),
@@ -493,7 +421,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             });
         }
         DrawableKind::RoomWall { piece, rows } => {
-            super::paint_wall(
+            crate::wall::paint_wall(
                 buf,
                 theme,
                 *piece,
@@ -502,7 +430,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             );
         }
         DrawableKind::FishTank { pos } => {
-            paint_fish_tank(buf, *pos, now, theme);
+            paint_fish_tank(buf, *pos, beat, theme);
         }
         DrawableKind::MeetingChair { pos, back_west } => {
             paint_meeting_chair(buf, *pos, *back_west, theme);
@@ -510,7 +438,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
         DrawableKind::CoatRack { pos } => {
             paint_coat_rack(buf, *pos, theme);
         }
-        DrawableKind::WaterCooler(cooler) => paint_water_cooler(buf, *cooler, now, theme),
+        DrawableKind::WaterCooler(cooler) => paint_water_cooler(buf, *cooler, beat, theme),
         DrawableKind::TrashBin(bin) => paint_trash_bin(buf, *bin),
         DrawableKind::Doormat(mat) => paint_doormat(buf, *mat, theme),
         DrawableKind::NoticeBoard(board) => paint_notice_board(buf, *board, theme),
@@ -523,35 +451,27 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
     None
 }
 
+/// The cup, then the `steam` riding on it.
 fn paint_desk_coffee(
     buf: &mut RgbBuffer,
     desk: Point,
     cup: Option<Cup>,
-    now: SystemTime,
+    steam: &[Effect],
     theme: &crate::theme::Theme,
 ) {
-    let Some(cup) = cup else {
+    if cup.is_none() {
         return;
-    };
+    }
     let put = |buf: &mut RgbBuffer, x: u16, y: u16, c: Rgb| {
         buf.put_checked(x, y, c);
     };
-    let cx = desk.x + 2;
-    let cy = desk.y + 2;
+    let Point { x: cx, y: cy } = desk_cup_at(desk);
     put(buf, cx, cy, theme.furniture.coffee_cup);
     put(buf, cx + 1, cy, theme.furniture.coffee_cup);
     put(buf, cx, cy + 1, theme.furniture.coffee_cup_shadow);
     put(buf, cx + 1, cy + 1, theme.furniture.coffee_cup_shadow);
-    if cup == Cup::Steaming {
-        paint_coffee_steam(buf, Point { x: cx, y: cy }, now, theme);
-    }
+    paint_effects(buf, steam, theme);
 }
-
-/// The desk task chair's pack animation.
-pub(crate) const DESK_CHAIR_SPRITE: &str = "desk_chair";
-
-/// The meeting table's pack animation.
-pub(crate) const MEETING_TABLE_SPRITE: &str = "meeting_table";
 
 /// The desk task chair's art — the ONE authority for its size, so the enqueue
 /// site centres on what is actually drawn even under a custom pack.
@@ -567,28 +487,16 @@ pub(super) fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, pack: &Pack
     }
 }
 
-/// Task lamp on the desk's west wing (the coffee cup and token tower own the other
-/// two), plus its warm pool.
-pub(super) fn paint_desk_lamp(
+/// The task lamp's warm pool; the desk art draws the lamp itself.
+pub(super) fn paint_desk_lamp_pool(
     buf: &mut RgbBuffer,
     lights: &crate::lighting::DeskLights,
     theme: &crate::theme::Theme,
 ) {
-    let strength = lights.lamp.strength;
-    if strength <= 0.0 {
+    if lights.lamp.strength <= 0.0 {
         return;
     }
-    let warm = theme.lighting.desk_lamp;
-    // The fixture tracks the light it CASTS: fixed tones show a lamp fully lit at a strength whose pool rounds to nothing.
-    const OFF: f32 = 0.80;
-    let unlit = blend_rgb(warm, BLACK, OFF);
-    let shade = blend_rgb(unlit, blend_rgb(warm, WHITE, 0.45), strength);
-    let stem = blend_rgb(unlit, blend_rgb(warm, BLACK, 0.72), strength);
-    let (shade_at, bulb) = (lights.fixture, lights.bulb());
-    buf.put_checked(shade_at.x, shade_at.y, shade);
-    buf.put_checked(shade_at.x + 1, shade_at.y, shade);
-    buf.put_checked(bulb.x, bulb.y, stem);
-    super::background::paint_light(buf, &lights.lamp, warm);
+    super::background::paint_light(buf, &lights.lamp, theme.lighting.desk_lamp);
 }
 
 /// Token-meter paper tower: `tier` reams stacked on the desk surface against
@@ -649,21 +557,138 @@ const STACK_BASE_DY: u16 = 3;
 /// Rows per ream: one row of vertical detail is sub-legible at half-block scale.
 const STACK_PX_PER_TIER: u16 = 2;
 
+/// Paint a character at a top-left with per-agent recolor, returning
+/// the size of the frame it drew.
+pub(crate) fn paint_character_at(
+    buf: &mut RgbBuffer,
+    pose: SpritePose,
+    top_left: Point,
+    agent: &AgentSlot,
+    pack: &Pack,
+    cache: &mut FrameCache,
+    now: SystemTime,
+) -> Option<Size> {
+    let CharacterFrame {
+        frame: cached,
+        blit_at: _,
+        rise: _,
+    } = character_frame(
+        pose,
+        agent,
+        pack,
+        crate::render_scale::RenderScale::ONE,
+        cache,
+        now,
+    )?;
+    let size = Size {
+        w: cached.width(),
+        h: cached.height(),
+    };
+    blit_frame(cached, top_left.x, top_left.y, buf);
+    Some(size)
+}
+
+/// Queue every room wall's bands into the y-sort, emitted after the fixtures so
+/// the glass also covers a chair tied with a band's row.
+pub(super) fn enqueue_room_walls<'a>(layout: &'a SceneLayout, drawables: &mut Vec<Drawable<'a>>) {
+    for &piece in &layout.wall_pieces {
+        for (rows, depth) in piece.sort_bands() {
+            drawables.push(Drawable {
+                sort_row: depth,
+                // A character tied with a band's row still paints behind the glass.
+                layer: Layer::Over,
+                kind: DrawableKind::RoomWall { piece, rows },
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::anim::Motion;
     use crate::layout::DESK_W;
+    use crate::pet::PetKind;
+
+    /// The 1x tower and sheet art are the classic's: a frame per tier up to
+    /// [`MAX_TIER`](crate::token_meter::MAX_TIER), each [`STACK_PX_PER_TIER`]
+    /// rows a tier and [`STACK_W`] wide, the full tower a column wider for its
+    /// teeter.
+    #[test]
+    fn the_1x_token_art_is_the_classics_stack() {
+        let pack = crate::pack::test_default_pack();
+        let tower = pack.animation("token_tower").expect("the tower");
+        let max = crate::token_meter::MAX_TIER;
+        assert_eq!(tower.frames().len(), usize::from(max));
+        for (tier, f) in (1..=max).zip(tower.frames()) {
+            let teeter = u16::from(tier == max);
+            assert_eq!(
+                (f.width(), f.height()),
+                (STACK_W + 1, u16::from(tier) * STACK_PX_PER_TIER),
+                "tier {tier}"
+            );
+            let drawn = |x: u16, y: u16| f.get(x, y).copied().flatten().is_some();
+            assert!(
+                (0..f.height()).all(|y| {
+                    let dx = if y == 0 { teeter } else { 0 };
+                    (0..f.width()).all(|x| drawn(x, y) == (dx..dx + STACK_W).contains(&x))
+                }),
+                "tier {tier} is not {STACK_W} wide with its teeter"
+            );
+        }
+        let sheet = &pack.animation("token_sheet").expect("the sheet").frames()[0];
+        assert_eq!((sheet.width(), sheet.height()), (STACK_W, 1));
+    }
+
+    /// The 1x desk arts mark the cells the classic stands its props on, each
+    /// the prop's foot: the cup's under [`desk_cup_at`], the tower's at
+    /// [`STACK_X_OFF`] on [`STACK_BASE_DY`].
+    #[test]
+    fn the_1x_desk_arts_mark_the_classics_prop_cells() {
+        let pack = crate::pack::test_default_pack();
+        let cup_h = pack.animation("desk_cup").expect("the cup").frames()[0].height();
+        let desk = Point { x: 20, y: 30 };
+        for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
+            let name = crate::pack::desk_sprite_name(facing);
+            let anim = pack.animation(name).expect("the desk");
+            let top = desk_art_top(&pack, desk.y, anim.frames()[0].height());
+            let mark = |n: &str| {
+                let m = anim.marks(0).iter().find(|m| m.name() == n)?;
+                Some(Point {
+                    x: desk.x + m.x(),
+                    y: top + m.y(),
+                })
+            };
+            let cup = desk_cup_at(desk);
+            assert_eq!(
+                mark("cup"),
+                Some(Point {
+                    x: cup.x,
+                    y: cup.y + cup_h - 1
+                }),
+                "{name}'s cup"
+            );
+            assert_eq!(
+                mark("tower"),
+                Some(Point {
+                    x: desk.x + STACK_X_OFF,
+                    y: desk.y + STACK_BASE_DY
+                }),
+                "{name}'s tower"
+            );
+        }
+    }
 
     #[test]
     fn steam_anchor_sits_within_the_coffee_machine_columns() {
-        let pack = crate::embedded_pack::test_default_pack();
+        let pack = crate::pack::test_default_pack();
         let width = |name: &str| pack.animation(name).expect(name).frames()[0].width() as i16;
         // steam_x = pos.x + steam_dx; sprite_x = pos.x - cw/2 → sprite-local
         // steam col = steam_dx + cw/2.
         let large_w = crate::layout::PANTRY_COUNTER_LARGE_W;
         for counter_w in [large_w, large_w - 1] {
             let (lo, hi) = crate::layout::coffee_machine_cols(counter_w);
-            let anim = crate::pixel_painter::pantry_counter_anim(counter_w);
+            let anim = crate::layout::pantry_counter_anim(counter_w);
             let steam_col = pantry_steam_dx(anim) + width(anim) / 2;
             assert!(
                 steam_col >= lo as i16 && steam_col < hi as i16,
@@ -673,7 +698,7 @@ mod tests {
     }
 
     fn test_pack() -> Pack {
-        crate::embedded_pack::test_default_pack()
+        crate::pack::test_default_pack()
     }
 
     fn desk_cubicle_drawable(
@@ -682,7 +707,7 @@ mod tests {
         sheet_fall: Option<u16>,
     ) -> Drawable<'static> {
         Drawable {
-            anchor_y: desk.y
+            sort_row: desk.y
                 + crate::layout::furniture_def(crate::layout::Furniture::Desk)
                     .visual
                     .h,
@@ -696,6 +721,8 @@ mod tests {
                     cup: None,
                     token_tier,
                     sheet_fall,
+                    effects: Vec::new(),
+                    scanline: 0,
                 },
             },
         }
@@ -722,7 +749,8 @@ mod tests {
         let render = |cup, ms| {
             let mut buf = RgbBuffer::filled(60, 60, bg);
             let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms);
-            paint_desk_coffee(&mut buf, desk, cup, now, th);
+            let steam = crate::sim::cup_effects(desk, cup, Motion::Full.beat(now));
+            paint_desk_coffee(&mut buf, desk, cup, &steam, th);
             buf.as_slice().iter().filter(|&&c| c != bg).count()
         };
         let instants = (0..20u64).map(|i| i * 97);
@@ -752,7 +780,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now: SystemTime::UNIX_EPOCH,
+                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -768,7 +796,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now: SystemTime::UNIX_EPOCH,
+                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -792,7 +820,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    now: SystemTime::UNIX_EPOCH,
+                    clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
                     theme: th,
                 },
             );
@@ -821,7 +849,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now: SystemTime::UNIX_EPOCH,
+                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -849,7 +877,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now: SystemTime::UNIX_EPOCH,
+                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -864,7 +892,7 @@ mod tests {
                 buf: &mut buf2,
                 pack: &pack,
                 cache: &mut cache,
-                now: SystemTime::UNIX_EPOCH,
+                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -891,7 +919,7 @@ mod tests {
         assert!(pack.animation("trash_bin").is_none());
         let mut cache = FrameCache::new();
         let now = SystemTime::UNIX_EPOCH;
-        let layout = crate::layout::Layout::compute(160, 120, None).expect("fits");
+        let layout = crate::layout::SceneLayout::compute(160, 120, None).expect("fits");
         let first = pixtuoid_core::state::FloorLocalDeskIndex(0);
         let desk = layout.home_desks[first.0];
         let cabinet = layout
@@ -921,7 +949,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    now,
+                    clock: Motion::Full.clock(now),
                     theme: theme(),
                 },
             );
@@ -962,7 +990,7 @@ mod tests {
         let mut render = |mirrored: bool| {
             let mut buf = RgbBuffer::filled(80, 80, Rgb { r: 0, g: 0, b: 0 });
             let d = Drawable {
-                anchor_y: pos.y,
+                sort_row: pos.y,
                 layer: Layer::Under,
                 kind: DrawableKind::MeetingSofa { pos, mirrored },
             };
@@ -972,7 +1000,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    now,
+                    clock: Motion::Full.clock(now),
                     theme: theme(),
                 },
             );
@@ -999,15 +1027,14 @@ mod tests {
         let bg = Rgb { r: 7, g: 8, b: 9 };
         let mut buf = RgbBuffer::filled(60, 60, bg);
         let d = Drawable {
-            anchor_y: 30,
+            sort_row: 30,
             layer: Layer::Figure,
             kind: DrawableKind::Pet {
-                kind: PetKind::Cat,
                 pos: Point { x: 30, y: 30 },
                 flip: false,
                 anim_name: "nonexistent_anim",
                 frame_idx: 0,
-                pet_elapsed_ms: None,
+                effects: &[],
             },
         };
         paint_drawable(
@@ -1016,7 +1043,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now,
+                clock: Motion::Full.clock(now),
                 theme: theme(),
             },
         );
@@ -1035,16 +1062,17 @@ mod tests {
         let pos = Point { x: 30, y: 40 };
         let mut render = |anim_name: &'static str| {
             let mut buf = RgbBuffer::filled(60, 60, Rgb { r: 0, g: 0, b: 0 });
+            let effects =
+                crate::sim::pet_effects(PetKind::Cat, pos, anim_name, None, Motion::Full.beat(now));
             let d = Drawable {
-                anchor_y: pos.y,
+                sort_row: pos.y,
                 layer: Layer::Figure,
                 kind: DrawableKind::Pet {
-                    kind: PetKind::Cat,
                     pos,
                     flip: false,
                     anim_name,
                     frame_idx: 0,
-                    pet_elapsed_ms: None,
+                    effects: &effects,
                 },
             };
             paint_drawable(
@@ -1053,7 +1081,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    now,
+                    clock: Motion::Full.clock(now),
                     theme: theme(),
                 },
             );
@@ -1084,7 +1112,7 @@ mod tests {
         let mut cache = FrameCache::new();
         let mut buf = RgbBuffer::filled(80, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = Drawable {
-            anchor_y: pos.y,
+            sort_row: pos.y,
             layer: Layer::Under,
             kind: DrawableKind::Appliance {
                 pos,
@@ -1098,7 +1126,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now: SystemTime::UNIX_EPOCH,
+                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -1173,14 +1201,14 @@ mod tests {
         let bg = Rgb { r: 7, g: 8, b: 9 };
         let mut buf = RgbBuffer::filled(60, 60, bg);
         let d = Drawable {
-            anchor_y: 30,
+            sort_row: 30,
             layer: Layer::Figure,
             kind: DrawableKind::GatewayMascot {
                 mascot_idx: 0,
                 pos: Point { x: 30, y: 30 },
                 anim_name: "nonexistent_anim",
                 frame_idx: 0,
-                run_count: 0,
+                effects: &[],
                 degraded: false,
             },
         };
@@ -1190,7 +1218,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now,
+                clock: Motion::Full.clock(now),
                 theme: theme(),
             },
         );
@@ -1214,14 +1242,14 @@ mod tests {
         let mut render = |degraded: bool| {
             let mut buf = RgbBuffer::filled(80, 80, black);
             let d = Drawable {
-                anchor_y: pos.y,
+                sort_row: pos.y,
                 layer: Layer::Figure,
                 kind: DrawableKind::GatewayMascot {
                     mascot_idx: 0,
                     pos,
                     anim_name: def.rest,
                     frame_idx: 0,
-                    run_count: 0,
+                    effects: &[],
                     degraded,
                 },
             };
@@ -1231,7 +1259,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    now,
+                    clock: Motion::Full.clock(now),
                     theme: theme(),
                 },
             );

@@ -15,15 +15,17 @@ use std::sync::Arc;
 
 use pixtuoid_scene::floor::FloorInputs;
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
-use pixtuoid_scene::layout::Layout;
+use pixtuoid_scene::layout::SceneLayout;
 use pixtuoid_scene::pet::PetFrame;
 use pixtuoid_scene::pixel_painter::{
     AgentFrame, MascotFrame, PixelCtx, PixelPassResult, render_to_rgb_buffer,
 };
 
+#[cfg(test)]
 use crate::tui::geometry::CellArea;
+use crate::tui::geometry::SceneGeometry;
 pub(crate) use crate::tui::hit_test::{
-    hit_test_agent, hit_test_coffee_machine, hit_test_furniture, hit_test_mascot, hit_test_pet,
+    hit_test_agent, hit_test_coffee_machine, hit_test_furniture, hit_test_pet, topmost_mascot_at,
 };
 pub(crate) use crate::tui::widgets::{TooltipAt, paint_hover_tooltip};
 pub(super) use crate::tui::widgets::{
@@ -120,12 +122,14 @@ impl<'a> DrawCtx<'a> {
 #[derive(Default)]
 pub struct DrawOut {
     /// `None` when the frame was refused.
-    pub layout: Option<Arc<Layout>>,
+    pub layout: Option<Arc<SceneLayout>>,
     pub pet_pos: Option<PetFrame>,
     pub mascots: Vec<MascotFrame>,
     pub agents: Vec<AgentFrame>,
     pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
     pub occupied_waypoints: std::collections::HashSet<usize>,
+    /// Where the frame lies under the cells; `None` when it was refused.
+    pub(crate) geometry: Option<SceneGeometry>,
 }
 
 /// Clip a widget rect to fit inside `bounds`; `None` when nothing survives.
@@ -307,6 +311,24 @@ fn paint_too_small_notice(
     }
 }
 
+/// The wall board `footer` tallies off `scene` at `now`, its flap moving as
+/// `motion` says, whichever profile paints it.
+pub(crate) fn wall_board(
+    footer: &FooterInputs<'_>,
+    scene: &SceneState,
+    motion: pixtuoid_scene::anim::Motion,
+    now: SystemTime,
+) -> pixtuoid_scene::board::BoardModel {
+    pixtuoid_scene::board::build_board(
+        footer.counts(),
+        pixtuoid_scene::board::scene_uptime_secs(scene, now),
+        footer.context.floor.map(|fi| (fi.current, fi.total_floors)),
+        footer.context.gateway,
+        motion,
+        now,
+    )
+}
+
 pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     ctx: &mut DrawCtx<'_>,
@@ -364,27 +386,15 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     });
 
     let mouse_pos = ctx.mouse_pos;
-    let hovered =
-        mouse_pos.and_then(|(mx, my)| hit_test_agent(&agents, CellArea::half_block(mx, my)));
+    let geometry = SceneGeometry::half_block(scene_rect);
+    let hovered = mouse_pos.and_then(|(mx, my)| hit_test_agent(&agents, geometry.area_at(mx, my)?));
 
     // The dim is decoupled from `onboarding.open`, so the office keeps fading back
     // up for a beat AFTER the card is gone.
     apply_dim(ctx.buf, ctx.onboarding.dim);
 
-    let labels = pixtuoid_scene::overlay::build_overlay(
-        scene,
-        &layout,
-        now,
-        &mut ctx.store.route_ctx(),
-        hovered,
-    );
-    let board = pixtuoid_scene::board::build_board(
-        footer.counts(),
-        pixtuoid_scene::board::scene_uptime_secs(scene, now),
-        floor_info.map(|fi| (fi.current, fi.total_floors)),
-        footer.context.gateway,
-        now,
-    );
+    let labels = pixtuoid_scene::overlay::build_overlay(scene, &agents, hovered);
+    let board = wall_board(&footer, scene, ctx.world.floor.motion, now);
     let buf = &ctx.buf;
     term.draw(|f| {
         // Re-derive rects from the actual frame buffer to guard against
@@ -394,7 +404,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         paint_footer(f, &footer, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
         paint_label_widgets(f, &labels, actual_scene, theme);
-        paint_chitchat_bubbles(f, &chitchat_bubbles, actual_scene, theme);
+        paint_chitchat_bubbles(f, &chitchat_bubbles, &agents, actual_scene, theme);
         paint_wall_display(f, &board, actual_scene, theme);
         let door = layout.door;
         let current = floor_info.map(|fi| fi.current).unwrap_or(1);
@@ -409,8 +419,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         }
         if hovered.is_none()
             && let Some(at) = at
+            && let Some(cell) = geometry.area_at(at.mx, at.my)
         {
-            let cell = CellArea::half_block(at.mx, at.my);
             // `.filter` keeps the pet arm a single branch, so a
             // present-but-not-hit pet falls through to the next arm.
             // Coffee before pet here must match the click arms in
@@ -444,6 +454,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         agents,
         new_coffee_carriers,
         occupied_waypoints,
+        geometry: Some(geometry),
     })
 }
 
@@ -513,12 +524,21 @@ pub(super) fn flush_buffer_to_term_at_offset(
             let py_bot = cy * 2 + 1;
             let fg = buf.as_slice()[py_top * w + cx];
             let bg = buf.as_slice()[py_bot * w + cx];
-            let cell = &mut term_buf[(x, y)];
-            cell.set_symbol("\u{2580}");
-            cell.fg = Color::Rgb(fg.r, fg.g, fg.b);
-            cell.bg = Color::Rgb(bg.r, bg.g, bg.b);
+            set_half_block(&mut term_buf[(x, y)], fg, bg);
         }
     }
+}
+
+/// Show `top` over `bottom` in `cell`: the half-block every flush of the
+/// office paints with.
+pub(crate) fn set_half_block(
+    cell: &mut ratatui::buffer::Cell,
+    top: pixtuoid_core::sprite::Rgb,
+    bottom: pixtuoid_core::sprite::Rgb,
+) {
+    cell.set_symbol("\u{2580}");
+    cell.fg = Color::Rgb(top.r, top.g, top.b);
+    cell.bg = Color::Rgb(bottom.r, bottom.g, bottom.b);
 }
 
 fn flush_buffer_to_term(f: &mut ratatui::Frame<'_>, buf: &RgbBuffer, scene_rect: Rect) {
@@ -536,18 +556,6 @@ pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
         px.g = (px.g as f32 * factor) as u8;
         px.b = (px.b as f32 * factor) as u8;
     }
-}
-
-/// The mascot under the cursor painted on TOP: `mascots` is in
-/// `sort_drawables`' paint order, so the last hit.
-fn topmost_mascot_at(
-    mascots: &[pixtuoid_scene::pixel_painter::MascotFrame],
-    cell: CellArea,
-) -> Option<&pixtuoid_scene::pixel_painter::MascotFrame> {
-    mascots
-        .iter()
-        .rev()
-        .find(|m| hit_test_mascot(m.pos, m.w, m.h, cell))
 }
 
 #[cfg(test)]
@@ -584,7 +592,7 @@ mod tests {
                 current_pid: Some(1),
             },
         );
-        let pack = pixtuoid_scene::embedded_pack::load_bundled_pack().expect("pack");
+        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("pack");
         let mut floor = pixtuoid_scene::floor::PerFloor::new();
         let mut chitchat = std::collections::HashMap::new();
         let ctx = DrawCtx::offscreen(

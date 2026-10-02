@@ -94,7 +94,7 @@ fn click_hit_test_follows_a_walking_sprite() {
     let mut r = build(192, 80, vec![]);
     r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout");
-    let seat = pixtuoid_scene::pixel_painter::seated_anchor_facing(
+    let seat = pixtuoid_scene::sim::seated_top_left(
         layout.home_desks[0],
         pixtuoid_scene::layout::CHARACTER_SPRITE_W,
         layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(0)),
@@ -110,7 +110,7 @@ fn click_hit_test_follows_a_walking_sprite() {
     // Mid-exit-walk, inside EXIT_GRACE_WINDOW — off the desk box, not yet GC'd.
     let walk_now = t0() + Duration::from_millis(1500);
     r.render(&scene, pack(), walk_now).unwrap();
-    let drawn = drawn(&r, &scene, id, walk_now).anchor;
+    let drawn = drawn(&r, &scene, id, walk_now).top_left;
     assert_eq!(r.hit_test_agent_at(drawn.x, drawn.y / 2), Some(id));
     assert_eq!(
         r.hit_test_agent_at(dx, dy),
@@ -127,8 +127,8 @@ fn drawn(
     now: SystemTime,
 ) -> AgentFrame {
     let layout = r.cached_layout().expect("rendered layout");
-    let observed = pixtuoid_scene::floor::FloorSession::new()
-        .observe(
+    let stepped = pixtuoid_scene::floor::FloorSession::new()
+        .step(
             pixtuoid_scene::floor::FloorInputs {
                 scene,
                 pack: pack(),
@@ -141,8 +141,8 @@ fn drawn(
                 h: layout.buf_h,
             },
         )
-        .expect("observable floor");
-    let frame = &observed.frame;
+        .expect("steppable floor");
+    let frame = &stepped.frame;
     let c = frame
         .characters
         .iter()
@@ -155,15 +155,20 @@ fn drawn(
         .expect("the pack draws the placement");
     AgentFrame {
         agent_id: id,
-        anchor: c.anchor,
+        top_left: c.top_left,
         w: art.0,
         h: art.1,
+        label_anchor: c.label_anchor,
     }
 }
 
 /// Whether the half-block cell `(col, row)` shows a pixel of `sprite`.
 fn cell_shows(sprite: AgentFrame, col: u16, row: u16) -> bool {
-    crate::tui::geometry::CellArea::half_block(col, row).overlaps(sprite.anchor, sprite.w, sprite.h)
+    crate::tui::geometry::CellArea::half_block(col, row).overlaps(
+        sprite.top_left,
+        sprite.w,
+        sprite.h,
+    )
 }
 
 /// Cells swept past each edge of the sprite, so the sweep sees its misses too.
@@ -176,7 +181,7 @@ const BREATH_PROBES_MS: [u64; 10] = [
 ];
 
 #[test]
-fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_anchor() {
+fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_top_left() {
     let (cols, rows) = (140, 48);
     let mut s = active("/breath/0.jsonl", 0, "Edit", t0() - Duration::from_secs(60));
     s.label = "BREATH".into();
@@ -185,7 +190,7 @@ fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_anchor() {
     let mut r = build(cols, rows, vec![]);
     r.render(&scene, pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout").clone();
-    let seat = pixtuoid_scene::pixel_painter::seated_anchor_facing(
+    let seat = pixtuoid_scene::sim::seated_top_left(
         layout.home_desks[0],
         pixtuoid_scene::layout::CHARACTER_SPRITE_W,
         layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(0)),
@@ -194,11 +199,11 @@ fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_anchor() {
         .into_iter()
         .map(|ms| t0() + Duration::from_millis(ms))
         .map(|now| (now, drawn(&r, &scene, id, now)))
-        .find(|&(_, drawn)| drawn.anchor != seat)
-        .expect("within one breath cycle the sitter bobs off its seat anchor");
+        .find(|&(_, drawn)| drawn.top_left != seat)
+        .expect("within one breath cycle the sitter bobs off its seat top-left");
     r.render(&scene, pack(), now).unwrap();
     let seated = AgentFrame {
-        anchor: seat,
+        top_left: seat,
         ..drawn
     };
 
@@ -254,12 +259,12 @@ fn overlapping_agents_hit_the_one_painted_on_top() {
     );
     // Where the two sprites cover each other the frame shows only the top one.
     let (x0, y0) = (
-        drawn_a.anchor.x.max(drawn_b.anchor.x),
-        drawn_a.anchor.y.max(drawn_b.anchor.y),
+        drawn_a.top_left.x.max(drawn_b.top_left.x),
+        drawn_a.top_left.y.max(drawn_b.top_left.y),
     );
     let (x1, y1) = (
-        (drawn_a.anchor.x + drawn_a.w).min(drawn_b.anchor.x + drawn_b.w),
-        (drawn_a.anchor.y + drawn_a.h).min(drawn_b.anchor.y + drawn_b.h),
+        (drawn_a.top_left.x + drawn_a.w).min(drawn_b.top_left.x + drawn_b.w),
+        (drawn_a.top_left.y + drawn_a.h).min(drawn_b.top_left.y + drawn_b.h),
     );
     let (x, y, top) = (y0..y1)
         .flat_map(|y| (x0..x1).map(move |x| (x, y)))
@@ -290,4 +295,86 @@ fn overlapping_agents_hit_the_one_painted_on_top() {
         frame_text(both.frame_buffer()).contains(&format!("\u{25b8}{hovered}")),
         "hover marks the label of the agent on top"
     );
+}
+
+#[test]
+fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
+    use crate::tui::geometry::CellArea;
+    use crate::tui::hit_test::{
+        hit_test_agent, hit_test_coffee_machine, hit_test_furniture, hit_test_pet,
+        topmost_mascot_at,
+    };
+    let now = t0() + Duration::from_secs(20);
+    let mut scene = scene_with(
+        (0..6)
+            .map(|i| active(&format!("/geo/{i}.jsonl"), i, "Edit", t0()))
+            .collect(),
+        16,
+    );
+    scene.insert_daemon(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty"),
+        pixtuoid_core::state::DaemonPresence {
+            liveness: pixtuoid_core::state::DaemonLiveness::UP,
+            active_sessions: 1,
+            last_seen: now,
+            entered_at: t0(),
+            in_flight_runs: Default::default(),
+            current_pid: Some(1),
+        },
+    );
+    let cat = pixtuoid_scene::pet::Pet::defaulted(PetKind::Cat);
+    for (cols, rows) in [(80, 30), (120, 52), (157, 41)] {
+        let mut term = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
+        let mut floor = PerFloor::new();
+        let mut chitchat = std::collections::HashMap::new();
+        let mut ctx = DrawCtx::offscreen(
+            &mut floor,
+            &mut chitchat,
+            normal_theme(),
+            &scene,
+            pack(),
+            now,
+            FloorMeta::ground(),
+        );
+        ctx.world.pets.pet = Some(&cat);
+        let out = draw_scene(&mut term, &mut ctx).expect("draw");
+        let (layout, geometry) = (
+            out.layout.as_deref().expect("drawn"),
+            out.geometry.expect("drawn"),
+        );
+        let hits = |at: CellArea| {
+            (
+                hit_test_agent(&out.agents, at),
+                hit_test_coffee_machine(layout, at),
+                out.pet_pos
+                    .is_some_and(|p| hit_test_pet(p.kind, p.pos, p.anim, at)),
+                topmost_mascot_at(&out.mascots, at).map(|m| m.pos),
+                hit_test_furniture(layout, at),
+            )
+        };
+        let mut seen = [false; 5];
+        for (col, row) in (0..rows).flat_map(|row| (0..cols).map(move |col| (col, row))) {
+            let old = hits(CellArea::half_block(col, row));
+            assert_eq!(
+                geometry.area_at(col, row).map(hits),
+                Some(old),
+                "{cols}x{rows} cell ({col},{row})"
+            );
+            let (agent, coffee, pet, mascot, furniture) = old;
+            for (seen, hit) in seen.iter_mut().zip([
+                agent.is_some(),
+                coffee,
+                pet,
+                mascot.is_some(),
+                furniture.is_some(),
+            ]) {
+                *seen |= hit;
+            }
+        }
+        assert_eq!(
+            seen, [true; 5],
+            "{cols}x{rows}: every kind is hit somewhere"
+        );
+    }
 }
