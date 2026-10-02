@@ -257,7 +257,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
                         CUTAWAY_LOGICAL,
                     )
                     .expect("the cutaway extent lays out");
-                (now, floor, session.board(&scene, now))
+                (now, floor, session.board(&scene, meta.motion, now))
             })
             .collect();
         let office = |layout| Office {

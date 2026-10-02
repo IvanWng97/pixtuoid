@@ -16,6 +16,7 @@ use pixtuoid_core::state::{ActivityState, DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 
+use crate::anim::{Beat, Clock};
 use crate::chitchat::{self, ActiveChitchat, ChitchatBubble, VenueKey};
 use crate::creatures::{gateway_mascot_def, mascot_position, mascot_seed, pet_position};
 use crate::effects::{self, Effect};
@@ -167,15 +168,16 @@ pub(crate) struct DeskProps {
     pub(crate) scanline: u16,
 }
 
-/// How long a screen's scanline holds each glass column.
-const SCANLINE_STEP_MS: u64 = 120;
+/// How long a screen's scanline holds each glass column: one Full beat, so it
+/// never skips one.
+const SCANLINE_STEP_MS: u64 = crate::anim::FULL_TICK_MS;
 
-/// The glass column a desk at column `desk_x`'s scanline is on at `now`: the
+/// The glass column a desk at column `desk_x`'s scanline is on at `beat`: the
 /// line sweeps east and wraps, each desk a column on from its west neighbour's.
-pub(crate) fn scanline_col(desk_x: u16, now: SystemTime) -> u16 {
+pub(crate) fn scanline_col(desk_x: u16, beat: Beat) -> u16 {
     let glass = crate::layout::SCREEN_GLASS_COLS;
     let glass_w = u64::from(glass.end() - glass.start() + 1);
-    let phase = crate::anim::epoch_ms(now) / SCANLINE_STEP_MS + u64::from(desk_x);
+    let phase = beat.ms() / SCANLINE_STEP_MS + u64::from(desk_x);
     // Below `glass_w`, a u16.
     (phase % glass_w) as u16
 }
@@ -260,13 +262,15 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
         coffee,
         door_anim_max_ms,
     } = inputs;
+    let clock = floor.motion.clock(now);
+    let beat = clock.beat;
     let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
 
     let indoor_scale = stores.vacancy_dim.tick(scene.agents.is_empty(), now);
     let neon = stores.neon.tick(
         crate::board::OfficeMood::of(crate::board::scene_stats(scene)),
         stores.vacancy_dim.dimmed(),
-        now,
+        clock,
     );
 
     let char_w = pack
@@ -281,7 +285,9 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
     // visible "flash"). Sitters at desks are already covered by the static desk
     // mask, so only waypoint visitors — stable across frames — contribute.
     stores.overlay.clear();
-    for agent in &agents {
+    // Only a wanderer stands at a waypoint, and at rest none wanders.
+    let wanderers = if beat.is_rest() { &[][..] } else { &agents[..] };
+    for agent in wanderers {
         let Some(pose) = pose::derive(agent, now, layout) else {
             continue;
         };
@@ -326,6 +332,7 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
                     overlay: &*stores.overlay,
                     history: &mut *stores.history,
                     motion: &mut *stores.motion,
+                    wanders: !beat.is_rest(),
                 },
             );
             (a.agent_id, p)
@@ -345,20 +352,20 @@ pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> Sim
         .map(|a| {
             let seated = matches!(
                 poses.get(&a.agent_id),
-                Some(Some(Pose::SeatedTyping { .. } | Pose::SeatedThinking))
+                Some(Some(Pose::SeatedTyping | Pose::SeatedThinking))
             );
             (a.desk_index.single_floor_local(), seated)
         })
         .collect();
 
     let (characters, waypoint_visitors, new_coffee_carriers, occupied_waypoints) =
-        resolve_characters(&agents, &poses, layout, pack, char_w, coffee, now);
+        resolve_characters(&agents, &poses, layout, pack, char_w, coffee, clock);
 
     let chitchat_bubbles =
         chitchat::update_and_collect(stores.chitchat, floor.floor_idx, &waypoint_visitors, now);
-    let pet = pet_placement(&agents, layout, pack, pets, floor, now);
-    let mascots = mascot_placements(scene, layout, pack, now);
-    let desks = desk_props(&agents, layout, coffee, now);
+    let pet = pet_placement(&agents, layout, pack, pets, floor, clock);
+    let mascots = mascot_placements(scene, layout, pack, clock);
+    let desks = desk_props(&agents, layout, coffee, clock);
 
     let door_frame = anchors::compute_door_frame_idx(&agents, now, door_anim_max_ms);
     SimFrame {
@@ -407,8 +414,9 @@ fn pet_placement(
     pack: &Pack,
     pets: PetInputs<'_>,
     floor: FloorMeta,
-    now: SystemTime,
+    clock: Clock,
 ) -> Option<PetPlacement> {
+    let Clock { now, beat } = clock;
     let kind = pets.pet.map(|p| p.kind)?;
     let petting = pets
         .petting
@@ -429,7 +437,7 @@ fn pet_placement(
             flip: false,
             anim_name: kind.sit_anim(),
             frame_idx: 0,
-            effects: pet_effects(kind, pos, kind.sit_anim(), Some(p.elapsed_ms(now)), now),
+            effects: pet_effects(kind, pos, kind.sit_anim(), Some(p.elapsed_ms(now)), beat),
         });
     }
     let idle_desk_indices: Vec<FloorLocalDeskIndex> = agents
@@ -450,7 +458,7 @@ fn pet_placement(
         kind,
         layout,
         pack,
-        now,
+        clock,
         &idle_desk_indices,
         all_idle,
         floor.floor_seed,
@@ -462,7 +470,7 @@ fn pet_placement(
         flip,
         anim_name,
         frame_idx,
-        effects: pet_effects(kind, pos, anim_name, None, now),
+        effects: pet_effects(kind, pos, anim_name, None, beat),
     })
 }
 
@@ -476,11 +484,11 @@ pub(crate) fn pet_effects(
     pos: Point,
     anim_name: &str,
     petted_ms: Option<u64>,
-    now: SystemTime,
+    beat: Beat,
 ) -> Vec<Effect> {
     match petted_ms {
         Some(ms) => effects::pet_hearts(pos, ms).collect(),
-        None if anim_name == kind.sleep_anim() => effects::sleep_z(pos, PET_SLEEP_Z_SEED, now)
+        None if anim_name == kind.sleep_anim() => effects::sleep_z(pos, PET_SLEEP_Z_SEED, beat)
             .into_iter()
             .collect(),
         None => Vec::new(),
@@ -494,16 +502,17 @@ fn mascot_placements(
     scene: &SceneState,
     layout: &SceneLayout,
     pack: &Pack,
-    now: SystemTime,
+    clock: Clock,
 ) -> Vec<MascotPlacement> {
+    let beat = clock.beat;
     scene
         .daemons()
         .filter_map(|(source, instance, presence)| {
             let def = gateway_mascot_def(source)?;
             let seed = mascot_seed(source, instance);
             let (pos, anim_name) =
-                mascot_position(layout, presence, def.walk, def.rest, now, seed)?;
-            let frame_idx = crate::pack::animation_frame_at(pack, anim_name, now);
+                mascot_position(layout, presence, def.walk, def.rest, clock, seed)?;
+            let frame_idx = crate::pack::animation_frame_at(pack, anim_name, beat);
             let size = frame_size(pack, anim_name, frame_idx, MASCOT_FALLBACK);
             let pos = on_canvas(layout, Pivot::Center, pos, size);
             // The busy tell keys on in-flight RUNS, not the (persistent,
@@ -522,7 +531,7 @@ fn mascot_placements(
                     .then(|| instance.as_str().to_string()),
                 state: presence.display_state(),
                 effects: if runs > 0 {
-                    effects::mascot_bubbles(pos, size.h, runs, now).collect()
+                    effects::mascot_bubbles(pos, size.h, runs, beat).collect()
                 } else {
                     Vec::new()
                 },
@@ -538,8 +547,9 @@ fn desk_props(
     agents: &[AgentSlot],
     layout: &SceneLayout,
     coffee: &HashMap<AgentId, SystemTime>,
-    now: SystemTime,
+    clock: Clock,
 ) -> Vec<DeskProps> {
+    let Clock { now, beat } = clock;
     (0..layout.home_desks.len())
         .map(|i| {
             let occupant = desk_occupant(agents, FloorLocalDeskIndex(i));
@@ -554,17 +564,17 @@ fn desk_props(
                 cup,
                 token_tier: occupant.map_or(0, |a| crate::token_meter::token_tier(a.tokens_used)),
                 sheet_fall: occupant.and_then(|a| crate::token_meter::sheet_fall_dist(a, now)),
-                effects: cup_effects(layout.home_desks[i], cup, now),
-                scanline: scanline_col(layout.home_desks[i].x, now),
+                effects: cup_effects(layout.home_desks[i], cup, beat),
+                scanline: scanline_col(layout.home_desks[i].x, beat),
             }
         })
         .collect()
 }
 
 /// What rides on the cup on the desk at `desk`: steam while it is fresh.
-pub(crate) fn cup_effects(desk: Point, cup: Option<Cup>, now: SystemTime) -> Vec<Effect> {
+pub(crate) fn cup_effects(desk: Point, cup: Option<Cup>, beat: Beat) -> Vec<Effect> {
     match cup {
-        Some(Cup::Steaming) => effects::steam(desk_cup_at(desk), now).to_vec(),
+        Some(Cup::Steaming) => effects::steam(desk_cup_at(desk), beat).to_vec(),
         Some(Cup::Cold) | None => Vec::new(),
     }
 }
@@ -588,18 +598,19 @@ pub(crate) fn character_effects(
     anchor: Point,
     w: Option<u16>,
     cues: Cues,
-    now: SystemTime,
+    clock: Clock,
 ) -> Vec<Effect> {
+    let Clock { now, beat } = clock;
     let mut out = Vec::new();
     out.extend(cues.stride.map(|s| effects::walking_dust(anchor, s)));
     if let Some(w) = w
         && crate::burn::slot_burn_tier(agent, now) == crate::burn::BurnTier::Top
     {
-        out.push(effects::flame_crown(anchor, w, now));
+        out.push(effects::flame_crown(anchor, w, beat));
     }
     out.extend(
         cues.sleep_seed
-            .and_then(|seed| effects::sleep_z(anchor, seed, now)),
+            .and_then(|seed| effects::sleep_z(anchor, seed, beat)),
     );
     if cues.waiting {
         out.push(effects::waiting_mark(anchor));
@@ -618,13 +629,14 @@ pub(crate) fn resolve_characters(
     pack: &Pack,
     char_w: u16,
     coffee: &HashMap<AgentId, SystemTime>,
-    now: SystemTime,
+    clock: Clock,
 ) -> (
     Vec<CharacterPlacement>,
     Vec<chitchat::Visitor>,
     Vec<AgentId>,
     std::collections::HashSet<usize>,
 ) {
+    let beat = clock.beat;
     let mut placements: Vec<(CharacterPlacement, Cues)> = Vec::new();
     let mut new_coffee_carriers: Vec<AgentId> = Vec::new();
     let mut wp_rank: HashMap<usize, usize> = HashMap::new();
@@ -689,7 +701,8 @@ pub(crate) fn resolve_characters(
             Pose::SeatedThinking => {
                 placements.push(seated("seated", 0, CharacterGlow::Thinking, None));
             }
-            Pose::SeatedTyping { frame } => {
+            Pose::SeatedTyping => {
+                let frame = pose::typing_frame(agent, beat);
                 placements.push(seated("typing", frame, CharacterGlow::Tool, None));
             }
             Pose::AtWaypoint { wp, kind } => {
@@ -843,11 +856,11 @@ pub(crate) fn resolve_characters(
         // Breath after the fit, so it never moves the badge.
         let agent = &agents[p.agent_idx];
         p.anchor = if p.breathes {
-            with_breath(fitted, agent.agent_id, now)
+            with_breath(fitted, agent.agent_id, beat)
         } else {
             fitted
         };
-        p.effects = character_effects(agent, p.anchor, art.map(|s| s.w), *cues, now);
+        p.effects = character_effects(agent, p.anchor, art.map(|s| s.w), *cues, clock);
     }
 
     // wp_rank's keys ARE this tick's occupied waypoints — every AtWaypoint
@@ -903,23 +916,17 @@ pub(crate) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     /// The phase is epoch-based, so it outgrows a u16: the scanline must keep
     /// stepping one column per step rather than overflow or jump.
     #[test]
     fn the_scanline_keeps_stepping_past_a_u16_phase() {
-        let col = |step: u64| {
-            scanline_col(
-                0,
-                SystemTime::UNIX_EPOCH + Duration::from_millis(step * SCANLINE_STEP_MS + 1),
-            )
-        };
+        let col = |step: u64| scanline_col(0, Beat::at_ms(step * SCANLINE_STEP_MS + 1));
         let glass = crate::layout::SCREEN_GLASS_COLS;
         let glass_w = glass.end() - glass.start() + 1;
         let before = col(u64::from(u16::MAX));
         assert_eq!(col(u64::from(u16::MAX) + 1), (before + 1) % glass_w);
-        let at = SystemTime::UNIX_EPOCH + Duration::from_millis(7 * SCANLINE_STEP_MS);
+        let at = Beat::at_ms(7 * SCANLINE_STEP_MS);
         assert_eq!(
             scanline_col(3, at),
             (scanline_col(0, at) + 3) % glass_w,
