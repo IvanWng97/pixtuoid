@@ -36,7 +36,8 @@ pub(crate) fn kind_key(kind: FixtureKind) -> &'static str {
     }
 }
 
-/// Every kind's census key: the census fails on a kind placed but missing here.
+/// Every kind's census key: [`every_fixture_kind_is_placed_on_some_office`]
+/// fails on a kind placed but missing here.
 pub(crate) fn every_kind_key() -> BTreeSet<&'static str> {
     [
         "Desk",
@@ -72,8 +73,8 @@ pub(crate) fn every_kind_key() -> BTreeSet<&'static str> {
     .collect()
 }
 
-/// The offices the census and the hover sweep lay out.
-fn offices() -> impl Iterator<Item = SceneLayout> {
+/// Sizes × seeds that between them place every fixture kind.
+pub(crate) fn offices() -> impl Iterator<Item = SceneLayout> {
     [
         (96u16, 60u16),
         (160, 120),
@@ -328,10 +329,10 @@ fn a_standing_fixture_casts_its_shadow_under_its_whole_box() {
     assert!(desks > 0, "the sweep saw a desk");
 }
 
-/// The sizes the north-wall census rendered, the narrowest sweep walls, the
-/// committed heroes' buffers (`scripts/media.json`) and the mid sizes the
-/// lounge and island checks this census subsumed swept, each at [`CENSUS_SEEDS`].
-pub(crate) const CENSUS: &[(u16, u16)] = &[
+/// The sizes the roster invariants sweep, each at [`CENSUS_SEEDS`]: the layout
+/// floor, a spread of window-grid widths, the committed heroes' buffers
+/// (`scripts/media.json`) and two mid sizes that place a lounge and an island.
+pub(crate) const CENSUS_SIZES: &[(u16, u16)] = &[
     (
         super::super::compute::MIN_LAYOUT_W,
         super::super::compute::MIN_LAYOUT_H,
@@ -352,10 +353,10 @@ pub(crate) const CENSUS: &[(u16, u16)] = &[
     (231, 130),
 ];
 
-pub(crate) const CENSUS_SEEDS: std::ops::Range<u64> = 0..3;
+pub(crate) const CENSUS_SEEDS: std::ops::Range<u64> = 0..4;
 
 fn census() -> impl Iterator<Item = SceneLayout> {
-    CENSUS.iter().flat_map(|&(w, h)| {
+    CENSUS_SIZES.iter().flat_map(|&(w, h)| {
         CENSUS_SEEDS.map(move |seed| {
             SceneLayout::compute_with_seed(w, h, None, seed).expect("a census size lays out")
         })
@@ -512,11 +513,19 @@ const OVERLAP_BY_DESIGN: &[(&str, &str)] = &[
     ("MeetingSofa", "MeetingTable"),
 ];
 
+/// The [`kind_key`] pairs still overlapping where they should not, each in key
+/// order: a fix deletes its entry.
+const OVERLAP_DEFECTS: &[(&str, &str)] = &[];
+
 /// Two fixtures' art overlaps only as a listed pair, and each listed pair still
 /// occurs.
 #[test]
 fn no_two_fixtures_overlap_but_by_design() {
-    let listed: BTreeSet<(&str, &str)> = OVERLAP_BY_DESIGN.iter().copied().collect();
+    let listed: BTreeSet<(&str, &str)> = OVERLAP_BY_DESIGN
+        .iter()
+        .chain(OVERLAP_DEFECTS)
+        .copied()
+        .collect();
     // The corridor's floor: whatever stands in the corridor stands on it.
     let on_runner =
         |f: &Fixture, g: &Fixture| f.kind == FixtureKind::Runner && g.contact().is_some();
