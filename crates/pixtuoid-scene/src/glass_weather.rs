@@ -9,10 +9,11 @@ use crate::anim::Beat;
 use crate::atmosphere::Moment;
 use crate::dither::Dithered;
 use crate::layout::Size;
-use crate::sky::{Element, Weather, WeatherPolicy};
+use crate::sky::{Element, Weather, WeatherMix, WeatherPolicy};
 
 /// One frame's weather on every window: [`GlassWeather::of`] once per frame.
-/// Its policy and `beat` are its whole key: two equal keys place equal marks.
+/// Its policy, `now` and `beat` are its whole key: two equal keys place equal
+/// marks.
 #[derive(Clone, Copy)]
 pub(crate) struct GlassWeather {
     /// [`SkyTones::glass_veil`](crate::atmosphere::SkyTones::glass_veil).
@@ -20,7 +21,10 @@ pub(crate) struct GlassWeather {
     /// The weather at any instant: a particle shows by its weather's share
     /// when its fall began.
     policy: WeatherPolicy,
-    /// The clock the marks move by; at rest nothing falls.
+    /// The sky's weather at the frame's instant: at rest, where no fall
+    /// began, the share every particle shows by.
+    now: WeatherMix,
+    /// The clock the marks move by; at rest they hold their first frame.
     beat: Beat,
 }
 
@@ -213,15 +217,25 @@ impl GlassWeather {
         Self {
             veil: moment.look.glass_veil,
             policy: moment.sky.policy(),
+            now: moment.sky.weather(),
             beat: moment.beat,
+        }
+    }
+
+    /// The weather at loop time `loop_ms`: at rest, where loop time stands
+    /// still, the sky's now.
+    fn weather_at(&self, loop_ms: u64) -> WeatherMix {
+        if self.beat.is_rest() {
+            self.now
+        } else {
+            self.policy.weather_at_ms(self.beat.wall_ms(loop_ms))
         }
     }
 
     /// Whether `descent`, the `i`th of `w`'s `count`, falls: decided where its
     /// fall began, so it never appears or vanishes partway down.
     fn shows(&self, w: Weather, i: u64, count: u64, descent: &Descent) -> bool {
-        self.policy
-            .weather_at_ms(self.beat.wall_ms(descent.began))
+        self.weather_at(descent.began)
             .share(Element::Precipitation, w)
             >= threshold(i, count)
     }
@@ -240,7 +254,7 @@ impl GlassWeather {
         let tick = self.beat.ms();
         for w in [tick, tick.saturating_sub(slowest)]
             .into_iter()
-            .flat_map(|ms| self.policy.weather_at_ms(self.beat.wall_ms(ms)).ends())
+            .flat_map(|ms| self.weather_at(ms).ends())
         {
             if !weathers.contains(&w) {
                 weathers.push(w);
@@ -256,7 +270,7 @@ impl GlassWeather {
     pub(crate) fn marks(&self, idx: u16, glass: Size, d: u16) -> Vec<Mark> {
         let Size { w: gw, h: gh } = glass;
         let mut marks = Vec::new();
-        if gw == 0 || gh == 0 || d == 0 || self.beat.is_rest() {
+        if gw == 0 || gh == 0 || d == 0 {
             return marks;
         }
         let (cols, rows) = (gw * d, gh * d);
@@ -351,23 +365,52 @@ mod tests {
     #[test]
     fn only_falling_weather_marks_the_glass() {
         let glass = Size { w: 20, h: 13 };
-        for w in Weather::ALL {
-            assert_eq!(
-                !weather_at(w, 0).marks(0, glass, 4).is_empty(),
-                w.falls(),
-                "{w:?}"
-            );
+        for motion in [Motion::Full, Motion::Calm, Motion::Still] {
+            for w in Weather::ALL {
+                assert_eq!(
+                    !weather_on(motion, w, 0).marks(0, glass, 4).is_empty(),
+                    w.falls(),
+                    "{motion:?} {w:?}"
+                );
+            }
         }
     }
 
+    /// Still freezes the marks, never the weather: the glass still shows the
+    /// sky's rain or snow now, held in place, as dense as its share.
     #[test]
-    fn nothing_falls_at_rest() {
+    fn at_rest_the_weather_shows_frozen() {
+        const STEPS: u16 = 20;
         let glass = Size { w: 20, h: 13 };
-        for w in Weather::ALL {
-            for tick in [0, 37, 99_999] {
-                let marks = weather_on(Motion::Still, w, tick).marks(0, glass, 4);
-                assert!(marks.is_empty(), "{w:?} {tick}");
+        let now = at_hour(12);
+        for w in [Weather::Rain, Weather::Snow] {
+            let still = |tick| weather_on(Motion::Still, w, tick).marks(0, glass, 4);
+            let full = still(0);
+            assert!(!full.is_empty(), "{w:?} vanished at rest");
+            assert_eq!(still(37), still(99_999), "{w:?} moved at rest");
+            let coming_in = |progress| {
+                let mix = WeatherMix::toward(Weather::Clear, w, progress);
+                let sky = Sky::at_with(now, w).with_weather(mix);
+                GlassWeather::of(&Moment::resolve(
+                    sky,
+                    &crate::theme::NORMAL,
+                    0.0,
+                    Motion::Still.clock(now),
+                ))
+                .marks(0, glass, 4)
+            };
+            let shares: Vec<Vec<Mark>> = (0..=STEPS)
+                .map(|k| coming_in(f32::from(k) / f32::from(STEPS)))
+                .collect();
+            assert!(shares[0].is_empty(), "{w:?} showed with no share");
+            assert_eq!(shares[usize::from(STEPS)], full, "{w:?}");
+            for pair in shares.windows(2) {
+                assert!(pair[1].starts_with(&pair[0]), "{w:?} thinned as it came in");
             }
+            assert!(
+                shares.iter().any(|m| !m.is_empty() && m.len() < full.len()),
+                "{w:?} never showed a part share"
+            );
         }
     }
 
@@ -415,6 +458,7 @@ mod tests {
         let gw = GlassWeather {
             veil: Dithered::solid(None),
             policy: WeatherPolicy::Clock,
+            now: WeatherPolicy::Clock.weather_at_ms(tick),
             beat,
         };
         let falling = gw.falling(glass.h);

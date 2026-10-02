@@ -725,8 +725,8 @@ impl Sky {
 
     /// This sky under `weather` — a painter test's transition without the
     /// clock arithmetic that places one. Its [`policy`](Self::policy) stays
-    /// as it was, so a `GlassWeather` built from it follows the policy, not
-    /// `weather`.
+    /// as it was, so a `GlassWeather` built from it on a moving beat follows
+    /// the policy, not `weather`.
     #[cfg(test)]
     pub(crate) fn with_weather(self, weather: WeatherMix) -> Self {
         Self { weather, ..self }
