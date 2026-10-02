@@ -672,7 +672,7 @@ mod tests {
                     x: a.anchor.x + 2,
                     y: a.anchor.y + dy,
                 },
-                anchor_y: a.anchor_y + dy,
+                sort_row: a.sort_row + dy,
                 seat_desk: None,
                 seated: false,
                 ..a.clone()

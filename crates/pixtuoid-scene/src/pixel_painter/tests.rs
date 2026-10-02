@@ -200,7 +200,7 @@ fn v_wall_jamb_flags_and_south_anchor_on_the_doorway_cut_ends() {
                     },
                 ref rows,
             } if x == dw.start.x && rows.end == y_bot + 1 => {
-                Some((d.anchor_y, y_top, y_bot, jamb_north, jamb_south))
+                Some((d.sort_row, y_top, y_bot, jamb_north, jamb_south))
             }
             _ => None,
         })
@@ -1142,9 +1142,9 @@ fn a_desk_screen_glows_only_for_a_seated_tool_user_facing_north() {
     assert_eq!(glow(None, Facing::North, true), None, "nobody");
 }
 
-fn drawable(anchor_y: u16) -> Drawable<'static> {
+fn drawable(sort_row: u16) -> Drawable<'static> {
     Drawable {
-        anchor_y,
+        sort_row,
         layer: Layer::Under,
         kind: DrawableKind::MeetingTable {
             pos: Point { x: 0, y: 0 },
@@ -1153,10 +1153,10 @@ fn drawable(anchor_y: u16) -> Drawable<'static> {
 }
 
 #[test]
-fn drawables_sort_ascending_by_anchor_y() {
+fn drawables_sort_ascending_by_sort_row() {
     let mut v = [drawable(30), drawable(10), drawable(20)];
     drawable::sort_drawables(&mut v);
-    let ys: Vec<u16> = v.iter().map(|d| d.anchor_y).collect();
+    let ys: Vec<u16> = v.iter().map(|d| d.sort_row).collect();
     assert_eq!(ys, [10, 20, 30]);
 }
 
@@ -1164,21 +1164,21 @@ fn drawables_sort_ascending_by_anchor_y() {
 fn drawables_sort_is_stable_on_ties() {
     let mut v = [
         Drawable {
-            anchor_y: 10,
+            sort_row: 10,
             layer: Layer::Under,
             kind: DrawableKind::MeetingTable {
                 pos: Point { x: 1, y: 0 },
             },
         },
         Drawable {
-            anchor_y: 10,
+            sort_row: 10,
             layer: Layer::Under,
             kind: DrawableKind::MeetingTable {
                 pos: Point { x: 2, y: 0 },
             },
         },
         Drawable {
-            anchor_y: 10,
+            sort_row: 10,
             layer: Layer::Under,
             kind: DrawableKind::MeetingTable {
                 pos: Point { x: 3, y: 0 },
@@ -1202,7 +1202,7 @@ fn drawables_sort_is_stable_on_ties() {
 #[test]
 fn a_tied_row_paints_by_layer_whatever_the_queue_order() {
     let tied = |layer, x| Drawable {
-        anchor_y: 10,
+        sort_row: 10,
         layer,
         kind: DrawableKind::MeetingTable {
             pos: Point { x, y: 0 },
@@ -1221,8 +1221,8 @@ fn a_tied_row_paints_by_layer_whatever_the_queue_order() {
 /// The layer only breaks a tie: a row north still paints first.
 #[test]
 fn a_row_north_paints_first_whatever_its_layer() {
-    let at = |anchor_y, layer, x| Drawable {
-        anchor_y,
+    let at = |sort_row, layer, x| Drawable {
+        sort_row,
         layer,
         kind: DrawableKind::MeetingTable {
             pos: Point { x, y: 0 },
@@ -1230,12 +1230,12 @@ fn a_row_north_paints_first_whatever_its_layer() {
     };
     let mut v = [at(10, Layer::Under, 2), at(5, Layer::Over, 1)];
     drawable::sort_drawables(&mut v);
-    let rows: Vec<u16> = v.iter().map(|d| d.anchor_y).collect();
+    let rows: Vec<u16> = v.iter().map(|d| d.sort_row).collect();
     assert_eq!(rows, [5, 10]);
 }
 
 #[test]
-fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
+fn pet_sort_row_tracks_the_selected_anim_sprite_height() {
     let pack = crate::pack::test_default_pack();
     let pos = Point { x: 40, y: 30 };
     let anim_h = |name: &str| {
@@ -1246,9 +1246,9 @@ fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
     };
     for &kind in crate::pet::PetKind::ALL {
         let sleep_h = anim_h(kind.sleep_anim());
-        let sleep = z_sort_row(Pivot::Center, pos, sleep_h);
-        let walk = z_sort_row(Pivot::Center, pos, anim_h(kind.walk_anim()));
-        let sit = z_sort_row(Pivot::Center, pos, anim_h(kind.sit_anim()));
+        let sleep = sort_row_at(Pivot::Center, pos, sleep_h);
+        let walk = sort_row_at(Pivot::Center, pos, anim_h(kind.walk_anim()));
+        let sit = sort_row_at(Pivot::Center, pos, anim_h(kind.sit_anim()));
         assert!(
             sleep <= walk && sleep <= sit,
             "{kind:?}: shorter sleep sprite must not sort south of walk/sit \
@@ -1443,7 +1443,7 @@ fn island_settle_z_stays_behind_the_countertop() {
             continue;
         };
         exercised = true;
-        let island_z = crate::layout::z_sort_row(
+        let island_sort_row = crate::layout::sort_row_at(
             Pivot::Center,
             island,
             crate::layout::furniture_def(Furniture::KitchenIsland)
@@ -1457,15 +1457,15 @@ fn island_settle_z_stays_behind_the_countertop() {
         {
             let z = settle_seat(wp.pos, &l)
                 .expect("island stand foot-cell == pos, so it settles")
-                .z_key();
+                .sort_row();
             assert_eq!(
                 z, wp.pos.y,
                 "island stand glide z must be the plain feet row (the settled \
                  AtWaypoint key), not a Side-style +3"
             );
             assert!(
-                z < island_z,
-                "stand z {z} must sort BEHIND the island's south-row key {island_z}"
+                z < island_sort_row,
+                "stand z {z} must sort BEHIND the island's south-row key {island_sort_row}"
             );
         }
     }
@@ -1487,7 +1487,7 @@ fn settle_seat_recognizes_the_home_desk() {
         "the desk chair {chair:?} must settle as that seat"
     );
     assert_eq!(
-        want.z_key(),
+        want.sort_row(),
         chair.y,
         "and sort on its own chair row, not a couch-style pos+2"
     );
@@ -1516,16 +1516,16 @@ fn desk_sitter_feet_row_is_its_sort_row_on_the_documented_side_of_the_desk() {
                 let seat = Seat::at_desk(desk, facing);
                 assert_eq!(
                     seat.render_anchor(w).y + crate::layout::WALKING_Y_OFF,
-                    seat.z_key(),
+                    seat.sort_row(),
                     "{facing:?}: the sitter's feet row must BE the row they sort on"
                 );
                 let desk_z = desk.y + desk_furniture_def().visual.h;
-                let sitter_z = seat.z_key();
+                let sitter_sort_row = seat.sort_row();
                 assert_eq!(
-                    sitter_z < desk_z,
+                    sitter_sort_row < desk_z,
                     facing == Facing::South,
                     "{facing:?}: a viewer-facing sitter sorts BEHIND their desk \
-                     ({sitter_z} < {desk_z}), a back-turned one in FRONT"
+                     ({sitter_sort_row} < {desk_z}), a back-turned one in FRONT"
                 );
             }
         }
@@ -1533,9 +1533,9 @@ fn desk_sitter_feet_row_is_its_sort_row_on_the_documented_side_of_the_desk() {
 }
 
 #[test]
-fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
+fn sit_arc_sort_row_is_stable_and_on_the_right_side_of_its_furniture() {
     use crate::layout::{
-        Facing, Furniture, Pivot, TEST_DEFAULT_DESKS, WaypointKind, furniture_def, z_sort_row,
+        Facing, Furniture, Pivot, TEST_DEFAULT_DESKS, WaypointKind, furniture_def, sort_row_at,
     };
     let l = SceneLayout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let mut saw_back = false;
@@ -1544,7 +1544,7 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
         .iter()
         .filter(|w| crate::layout::seated_foot_cell(w.kind.furniture(), w.pos).is_some())
     {
-        let z = Seat::at_waypoint(w.kind, w.pos, w.facing).z_key();
+        let z = Seat::at_waypoint(w.kind, w.pos, w.facing).sort_row();
 
         // Independent oracle: the pre-lift partition, keyed on kind alone.
         let historical = match w.kind {
@@ -1559,20 +1559,20 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
         };
         assert_eq!(
             z, historical,
-            "{:?}@{:?}: seat z-key {z} must equal the historical AtWaypoint key {historical}",
+            "{:?}@{:?}: seat sort row {z} must equal the historical AtWaypoint key {historical}",
             w.kind, w.pos
         );
 
         match w.kind {
             WaypointKind::Couch => {
-                let couch_z = z_sort_row(
+                let couch_sort_row = sort_row_at(
                     Pivot::Center,
                     w.pos,
                     furniture_def(Furniture::Couch).visual.h,
                 );
                 assert!(
-                    z < couch_z,
-                    "couch sitter z {z} must be BEHIND the couch back {couch_z}"
+                    z < couch_sort_row,
+                    "couch sitter z {z} must be BEHIND the couch back {couch_sort_row}"
                 );
                 saw_back = true;
             }
@@ -1581,7 +1581,7 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
             WaypointKind::MeetingSofa => {
                 assert_eq!(
                     z,
-                    crate::layout::seated_z_key(w.pos),
+                    crate::layout::seated_sort_row(w.pos),
                     "sofa sitter z {z} must tie the sofa"
                 );
                 saw_back |= w.facing == Facing::North;
@@ -1604,11 +1604,11 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
 #[test]
 fn desk_occupant_always_sorts_behind_its_desk() {
     let visual_h = crate::layout::desk_furniture_def().visual.h;
-    // The z-key is width-independent, so a second width would run the identical
+    // The sort row is width-independent, so a second width would run the identical
     // assertion; the axis worth sweeping is the desk position.
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
         let desk_furniture_z = desk.y + visual_h;
-        let seated_z = Seat::at_desk(desk, crate::layout::Facing::South).z_key();
+        let seated_z = Seat::at_desk(desk, crate::layout::Facing::South).sort_row();
         assert!(
             seated_z < desk_furniture_z,
             "seated desk occupant z {seated_z} must be BEHIND the desk {desk_furniture_z}"
@@ -1616,11 +1616,11 @@ fn desk_occupant_always_sorts_behind_its_desk() {
     }
 }
 
-/// The geometry table's desk height must match the ART's, or the z-key sorts on
-/// a south row the sprite does not reach. The `- 1`: `desk` blits at `desk.y - 1`
+/// The geometry table's desk height must match the ART's, or the desk's sort row
+/// lands on a south row the sprite does not reach. The `- 1`: `desk` blits at `desk.y - 1`
 /// (top row is the north-overhanging bezel), so it covers `height - 1` from `desk.y`.
 #[test]
-fn desk_z_key_is_the_visual_south() {
+fn desk_sort_row_is_the_visual_south() {
     let pack = crate::pack::test_default_pack();
     let art = pack
         .animation("desk")
@@ -1635,11 +1635,11 @@ fn desk_z_key_is_the_visual_south() {
     );
 }
 
-/// The painter centres a pack sprite by the ART's size, while its z-sort row,
+/// The painter centres a pack sprite by the ART's size, while its sort row,
 /// ground strip and the binary's hover box place it by the size the layout
 /// reads — a def's `.visual`, the elevator's, a counter's — so the two must
 /// agree for the bundled pack. The desk is the exception: its box starts under
-/// the bezel row it blits above `desk.y` (`desk_z_key_is_the_visual_south`).
+/// the bezel row it blits above `desk.y` (`desk_sort_row_is_the_visual_south`).
 #[test]
 fn every_hover_size_is_its_painted_sprite_size() {
     use crate::layout::{
@@ -1874,7 +1874,7 @@ fn the_classic_queues_every_fixture_the_roster_yields() {
             .chain(
                 q.sorted
                     .iter()
-                    .map(|d| (Some((d.anchor_y, d.layer)), drawn_as(&d.kind))),
+                    .map(|d| (Some((d.sort_row, d.layer)), drawn_as(&d.kind))),
             )
             .collect();
         let want: Vec<(Option<(u16, Layer)>, &str)> = layout
@@ -1979,7 +1979,7 @@ fn a_seat_ties_its_sitter_and_hides_them_only_from_behind() {
                 fronts += 1;
                 Tie::FigureOver
             };
-            let row = Seat::at_waypoint(w.kind, w.pos, w.facing).z_key();
+            let row = Seat::at_waypoint(w.kind, w.pos, w.facing).sort_row();
             assert_eq!(sofa.depth, Depth::Sorted { row, tie }, "{w:?}");
         }
         for w in layout
@@ -1992,7 +1992,7 @@ fn a_seat_ties_its_sitter_and_hides_them_only_from_behind() {
                 .find(|f| f.at == w.pos && matches!(f.kind, FixtureKind::MeetingChair { .. }))
                 .expect("its chair");
             meeting_chairs += 1;
-            let row = Seat::at_waypoint(w.kind, w.pos, w.facing).z_key();
+            let row = Seat::at_waypoint(w.kind, w.pos, w.facing).sort_row();
             assert_eq!(
                 chair.depth,
                 Depth::Sorted {
@@ -2005,7 +2005,7 @@ fn a_seat_ties_its_sitter_and_hides_them_only_from_behind() {
         for f in &fixtures {
             if let FixtureKind::DeskChair(i) = f.kind {
                 chairs += 1;
-                let row = Seat::at_desk(layout.home_desks[i.0], layout.desk_facing(i)).z_key();
+                let row = Seat::at_desk(layout.home_desks[i.0], layout.desk_facing(i)).sort_row();
                 assert_eq!(
                     f.depth,
                     Depth::Sorted {
@@ -2046,35 +2046,35 @@ fn every_pod_occludes_via_overhang() {
 }
 
 #[test]
-fn character_anchor_y_exceeds_desk_when_south_of_it() {
+fn character_sort_row_exceeds_desk_when_south_of_it() {
     let desk_y: u16 = 20;
-    let desk_anchor_y = desk_y
+    let desk_sort_row = desk_y
         + crate::layout::furniture_def(crate::layout::Furniture::Desk)
             .visual
             .h;
-    let char_feet_anchor = (desk_y + 10) + 12;
+    let char_sort_row = (desk_y + 10) + 12;
     assert!(
-        char_feet_anchor > desk_anchor_y,
-        "walker south of desk must sort after it: char={char_feet_anchor}, desk={desk_anchor_y}"
+        char_sort_row > desk_sort_row,
+        "walker south of desk must sort after it: char={char_sort_row}, desk={desk_sort_row}"
     );
 }
 
 #[test]
-fn character_anchor_y_below_desk_when_seated_at_it() {
+fn character_sort_row_below_desk_when_seated_at_it() {
     let desk_y: u16 = 20;
     let seated_anchor = seated_anchor_facing(
         Point { x: 0, y: desk_y },
         CHARACTER_SPRITE_W,
         crate::layout::Facing::South,
     );
-    let char_feet_anchor = seated_anchor.y + 12;
-    let desk_anchor_y = desk_y
+    let char_sort_row = seated_anchor.y + 12;
+    let desk_sort_row = desk_y
         + crate::layout::furniture_def(crate::layout::Furniture::Desk)
             .visual
             .h;
     assert!(
-        char_feet_anchor < desk_anchor_y,
-        "seated char must sort before desk: char={char_feet_anchor}, desk={desk_anchor_y}"
+        char_sort_row < desk_sort_row,
+        "seated char must sort before desk: char={char_sort_row}, desk={desk_sort_row}"
     );
 }
 
@@ -3712,7 +3712,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
     let queued: Vec<_> = frame
         .characters
         .iter()
-        .map(|c| (c.anchor_y, frame.agents[c.agent_idx].agent_id))
+        .map(|c| (c.sort_row, frame.agents[c.agent_idx].agent_id))
         .collect();
     let mut sorted = queued.clone();
     // Every character is a `Layer::Figure`, so `sort_drawables` orders them by row alone.
@@ -4151,7 +4151,7 @@ fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
 }
 
 #[test]
-fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
+fn chair_sitter_bottom_row_lands_on_its_sort_row_overlapping_the_chair_body() {
     use crate::layout::{Facing, Point, SEAT_RENDER_Y_OFF, WaypointKind};
     let pack = crate::pack::test_default_pack();
     let pos = Point { x: 40, y: 30 };
@@ -4162,8 +4162,8 @@ fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
     let bottom = anchor_y + seated_h - 1;
     assert_eq!(
         bottom,
-        seat.z_key(),
-        "the chair sprite's bottom row must land on its seat z-key row"
+        seat.sort_row(),
+        "the chair sprite's bottom row must land on its seat sort row"
     );
     let chair = crate::layout::furniture_def(crate::layout::Furniture::MeetingChair).visual;
     let chair_top = pos.y - chair.h / 2;
@@ -4179,7 +4179,7 @@ fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
     let mut cache = FrameCache::new();
     let mut buf = RgbBuffer::filled(60, 40, Rgb { r: 1, g: 2, b: 3 });
     let d = Drawable {
-        anchor_y: 23,
+        sort_row: 23,
         layer: Layer::Under,
         kind: DrawableKind::Appliance {
             pos: Point { x: 30, y: 20 },
@@ -4849,11 +4849,11 @@ fn an_upright_occupant_sorts_on_the_row_their_sprite_bottoms_out_on() {
         let seat = Seat::at_waypoint(kind, stand, Facing::South);
         assert_eq!(
             seat.render_anchor(w).y + crate::layout::WALKING_Y_OFF,
-            seat.z_key(),
+            seat.sort_row(),
             "{kind:?}: an upright occupant's feet row must BE the row they sort on"
         );
         assert_eq!(
-            seat.z_key(),
+            seat.sort_row(),
             stand.y,
             "{kind:?}: and that row is the stand cell"
         );
@@ -5790,7 +5790,7 @@ fn a_pose_is_its_placements_frame_facing_and_glow() {
     );
     let placement = |glow| CharacterPlacement {
         agent_idx: 0,
-        anchor_y: 0,
+        sort_row: 0,
         anim_name: "typing",
         frame_idx: 3,
         anchor: Point { x: 0, y: 0 },

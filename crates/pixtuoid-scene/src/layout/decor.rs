@@ -779,7 +779,7 @@ const SEATED_Z_OFF: u16 = 2;
 
 /// The depth a sitter on seated furniture at `seat` sorts at, which the
 /// furniture under them keys its own depth from.
-pub(crate) fn seated_z_key(seat: Point) -> u16 {
+pub(crate) fn seated_sort_row(seat: Point) -> u16 {
     seat.y + SEATED_Z_OFF
 }
 

@@ -66,17 +66,17 @@ pub(super) fn overlaps_within_clearance(
     rects_overlap(probe, (grown_tl, grown))
 }
 
-/// The y-sort key for a sprite of height `h` anchored at `pos`: its south
-/// (front) base ROW. Derived from [`anchored_top_left`] so it can NEVER drift
+/// The sort row of a sprite of height `h` placed at `pos`: its south
+/// (front) base row. Derived from [`anchored_top_left`] so it can NEVER drift
 /// from where the sprite actually blits (`origin.y + h - 1`).
-pub fn z_sort_row(pivot: Pivot, pos: Point, h: u16) -> u16 {
+pub fn sort_row_at(pivot: Pivot, pos: Point, h: u16) -> u16 {
     anchored_top_left(pivot, pos, 0, h)
         .y
         .saturating_add(h.saturating_sub(1))
 }
 
 /// The centre `y` an [`Pivot::Center`] sprite `h` tall takes to stand on row
-/// `base`: [`z_sort_row`]'s inverse.
+/// `base`: [`sort_row_at`]'s inverse.
 pub(super) fn centre_y_standing_on(base: u16, h: u16) -> u16 {
     (base + 1).saturating_sub(h - h / 2)
 }
@@ -93,20 +93,20 @@ mod tests {
                 x: 50,
                 y: centre_y_standing_on(base, h),
             };
-            assert_eq!(z_sort_row(Pivot::Center, pos, h), base, "h={h}");
+            assert_eq!(sort_row_at(Pivot::Center, pos, h), base, "h={h}");
         }
     }
 
     #[test]
-    fn z_sort_row_is_the_sprite_south_row_for_every_pivot() {
+    fn sort_row_at_is_the_sprite_south_row_for_every_pivot() {
         let pos = Point { x: 50, y: 40 };
         for &p in &[Pivot::Center, Pivot::TopLeft] {
             for h in 1u16..24 {
                 let tl = anchored_top_left(p, pos, 8, h);
                 assert_eq!(
-                    z_sort_row(p, pos, h),
+                    sort_row_at(p, pos, h),
                     tl.y + h - 1,
-                    "{p:?} h={h}: z-sort row must equal the box south row"
+                    "{p:?} h={h}: sort row must equal the box south row"
                 );
             }
         }
@@ -117,7 +117,7 @@ mod tests {
         let pos = Point { x: 30, y: 25 };
         for h in 1u16..24 {
             assert_eq!(
-                z_sort_row(Pivot::Center, pos, h),
+                sort_row_at(Pivot::Center, pos, h),
                 pos.y + (h - 1) / 2,
                 "h={h}"
             );
@@ -128,7 +128,7 @@ mod tests {
     fn topleft_origin_is_pos() {
         let pos = Point { x: 7, y: 9 };
         assert_eq!(anchored_top_left(Pivot::TopLeft, pos, 14, 11), pos);
-        assert_eq!(z_sort_row(Pivot::TopLeft, pos, 11), pos.y + 10);
+        assert_eq!(sort_row_at(Pivot::TopLeft, pos, 11), pos.y + 10);
     }
 
     #[test]

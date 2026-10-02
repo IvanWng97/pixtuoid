@@ -242,7 +242,7 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::{WALL_THICK_V, z_sort_row};
+    use crate::layout::{WALL_THICK_V, sort_row_at};
 
     #[test]
     fn vertical_wall_blocks_its_whole_visual_width_in_the_mask() {
@@ -342,7 +342,7 @@ mod tests {
             GroundAlign::End,
         );
         mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, 0);
-        let south = z_sort_row(Pivot::Center, pos, 12);
+        let south = sort_row_at(Pivot::Center, pos, 12);
         for dy in 0..3 {
             assert!(
                 !mask.is_walkable(pos.x, south - dy),
