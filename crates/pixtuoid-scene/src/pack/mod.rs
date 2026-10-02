@@ -11,11 +11,12 @@ pub(crate) use density::{DenseFrame, densest_frame};
 #[cfg(test)]
 pub(crate) use lookup::DESK_BEZEL_RAISE;
 pub(crate) use lookup::{
-    CLOCK_FACE_KEY, COOLER_WATER, DESK_BULB_KEY, DESK_CHAIR_SPRITE, FISH_TANK_SPRITE,
-    MEETING_TABLE_SPRITE, PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY,
-    VENDING_MACHINE_SPRITE, WATER_COOLER_SPRITE, animation_frame_at, appliance_frame_index,
-    appliance_overrides, appliance_sprite, desk_art, desk_art_top, desk_sprite_name,
-    fixture_overrides, frame_at, looping_frame_index,
+    CLOCK_FACE_KEY, CLOCK_SPRITE, COOLER_WATER, DESK_BULB_KEY, DESK_CHAIR_SPRITE, DESK_CUP_SPRITE,
+    DOOR_SPRITE, FISH_TANK_SPRITE, MEETING_SOFA_NORTH_SPRITE, MEETING_TABLE_SPRITE,
+    NORTH_SOFA_SEAT_ROWS, PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, TOKEN_SHEET_SPRITE,
+    TOKEN_TOWER_SPRITE, VENDING_MACHINE_SPRITE, WATER_COOLER_SPRITE, animation_frame_at,
+    appliance_frame_index, appliance_overrides, appliance_sprite, desk_art, desk_art_top,
+    desk_sprite_name, drawn_in, fixture_overrides, frame_at, looping_frame_index,
 };
 
 #[cfg(feature = "native")]
