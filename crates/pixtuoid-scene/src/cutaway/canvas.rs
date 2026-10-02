@@ -148,6 +148,11 @@ impl CutawayCanvas {
         }
     }
 
+    /// The last frame painted, empty before the first.
+    pub fn buf(&self) -> &RgbBuffer {
+        &self.buf
+    }
+
     /// The agent the last frame shows topmost over `area`, in LOGICAL units
     /// as [`SceneLayout`], not [`Dirty::Rects`]' buffer pixels; `None` where a
     /// piece that is no agent lies over it, or none does.

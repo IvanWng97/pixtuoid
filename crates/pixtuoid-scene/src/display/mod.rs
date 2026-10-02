@@ -1,14 +1,10 @@
 //! The display list: one frame of the office as pieces in paint order,
 //! composed model-side from an [`Office`] and what it is [`Showing`], for a
-//! rasterizer to draw, with the hovers and text set beside it.
+//! rasterizer to draw.
 
 pub(crate) mod compose;
-#[expect(dead_code, reason = "the scene's Look entry and 3b's builders fill it")]
-pub(crate) mod hover;
 mod list;
 mod order;
-#[expect(dead_code, reason = "the scene's Look entry and 3b's builders fill it")]
-pub(crate) mod text;
 
 pub use compose::{Office, Showing};
 pub(crate) use compose::{PLATE_PAD, board_runs, compose, desk_span, face_rows, indicator_plate};

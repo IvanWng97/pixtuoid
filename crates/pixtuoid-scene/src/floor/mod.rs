@@ -559,6 +559,8 @@ pub struct PerOffice {
     /// The office-wide [`AudioObserver`] — one cue tracker + reprime latch,
     /// shared across floors.
     pub audio: AudioObserver,
+    /// The cutaway's art, shared by every floor's canvas.
+    pub cutaway_cache: crate::cutaway::paint::CutawayCache,
 }
 
 impl PerOffice {

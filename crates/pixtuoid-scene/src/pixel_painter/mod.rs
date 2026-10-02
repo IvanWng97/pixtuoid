@@ -84,10 +84,28 @@ pub struct AgentFrame {
 }
 
 /// What [`paint_frame`] drew that hover can name.
-struct Hoverables {
-    pet_pos: Option<PetFrame>,
-    mascots: Vec<MascotFrame>,
-    agents: Vec<AgentFrame>,
+#[derive(Default)]
+pub(crate) struct Hoverables {
+    pub(crate) pet_pos: Option<PetFrame>,
+    pub(crate) mascots: Vec<MascotFrame>,
+    pub(crate) agents: Vec<AgentFrame>,
+}
+
+/// The classic's raster state for one floor, kept across frames.
+pub(crate) struct ClassicCaches {
+    pub(crate) sprites: FrameCache,
+    pub(crate) base_fill: BaseFillCache,
+    pub(crate) shadows: crate::ground::DepthsCache,
+}
+
+impl ClassicCaches {
+    pub(crate) fn new() -> Self {
+        Self {
+            sprites: FrameCache::new(),
+            base_fill: BaseFillCache::new(),
+            shadows: crate::ground::DepthsCache::default(),
+        }
+    }
 }
 
 mod ambient;
@@ -209,7 +227,7 @@ pub struct PixelCtx<'a> {
 /// `BaseFillCache`); the sim stores are absent BY TYPE (`motion` is an
 /// immutable view, read by the debug route overlay), so painting cannot move
 /// the world.
-struct PaintCtx<'a> {
+pub(crate) struct PaintCtx<'a> {
     scene: &'a SceneState,
     layout: &'a SceneLayout,
     pack: &'a Pack,
@@ -228,7 +246,35 @@ struct PaintCtx<'a> {
     debug_walkable: bool,
 }
 
-impl PaintCtx<'_> {
+impl<'a> PaintCtx<'a> {
+    /// The classic pass over `world` on `layout`, painting into `buf` with `caches`.
+    pub(crate) fn classic(
+        world: crate::floor::FloorInputs<'a>,
+        layout: &'a SceneLayout,
+        theme: &'a crate::theme::Theme,
+        caches: &'a mut ClassicCaches,
+        buf: &'a mut RgbBuffer,
+        walks: &'a HashMap<pixtuoid_core::AgentId, WalkState>,
+        debug_walkable: bool,
+    ) -> Self {
+        let timing = world.floor.motion.timing(world.now);
+        Self {
+            scene: world.scene,
+            layout,
+            pack: world.pack,
+            timing,
+            sky: crate::sky::Sky::at(timing, world.floor.weather),
+            buf,
+            cache: &mut caches.sprites,
+            base_fill: &mut caches.base_fill,
+            shadows: &mut caches.shadows,
+            theme,
+            floor: world.floor,
+            walks,
+            debug_walkable,
+        }
+    }
+
     /// The subset of the pass a [`Drawable`] paints with.
     fn drawable_ctx(&mut self) -> drawable::DrawableCtx<'_> {
         drawable::DrawableCtx {
@@ -290,7 +336,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
 /// The PAINT half of the frame: blit the world the sim already advanced. Every
 /// positional/lifecycle decision was made in `sim_step` — this pass only
 /// resolves presentation (theme colors, sprite pixels) and composites.
-fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
+pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
     let agents: &[AgentSlot] = &frame.agents;
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;
