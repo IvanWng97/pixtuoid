@@ -170,7 +170,7 @@ head built or run, or an upstream fetched, so its local run is mandatory
 | A string/layout a painter frames | | local | Render the COMPOSED frame; string-equality tests are blind to framing (#308). |
 | Another CLI's config | `crates/pixtuoid/src/install/` | local | Enumerate every resolution axis and re-verify each against that CLI's upstream in-session; write ⊆ verify (#338). |
 | A new source / hook integration | `crates/pixtuoid-core/src/source/registry.rs` | local | LIVE run or hermetic replay without capture-rig convenience flags; event shapes from canonical upstream docs, never a fork. |
-| A dedup / "behavior-preserving" refactor | | | Adversarial toward revert, per consolidation: one reason-to-change per call site; name the conversions that moved semantics — a batch hides exactly one (#461). |
+| A refactor: a move, rename, dedup or other "behavior-preserving" change across modules | | local | Run both lenses locally with the whole tree in context, and the moved tests at head: adversarial toward revert, per consolidation: one reason-to-change per call site; name the conversions that moved semantics — a batch hides exactly one (#461). |
 | Geometry, sky, lighting or other domain math, or an arc's last PR | `crates/pixtuoid-scene/src/` `sky/`, `celestial.rs`, `lighting/`, `layout/` | | Enumerate the domain invariants and re-derive each across the parameter space, edges included (#471, #1049, #1053). |
 
 ## Severity
