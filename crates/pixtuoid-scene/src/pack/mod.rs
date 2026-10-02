@@ -65,15 +65,10 @@ fn art_sets() -> Vec<Vec<&'static str>> {
     sets
 }
 
-/// Every walk the sim steps by distance ([`crate::anim::walk_frame`]).
-pub(crate) fn walks() -> Vec<&'static str> {
-    vec!["walking", "walking_back", "walking_coffee"]
-}
-
 /// [`validate_pack_animations`], against this crate's painters' art sets and
 /// walks.
 pub fn validate_pack(pack: &Pack) -> ValidationReport {
-    validate_pack_animations(pack, &art_sets(), &walks())
+    validate_pack_animations(pack, &art_sets(), &crate::sim::WALKS)
 }
 
 /// Log a custom pack's animation-validation gaps at load time: a pack missing a
@@ -100,10 +95,8 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         unmarked_heads: _,
         missing_hair_views: _,
         overhanging_hair: _,
-        orphan_hairstyles,
-        // A walk without a stride still steps, on its clock: `validate-pack`
-        // reports it.
         walks_without_stride: _,
+        orphan_hairstyles,
     } = &report;
     for name in missing_required {
         tracing::warn!(
@@ -285,6 +278,21 @@ pub(crate) fn test_pack_with(overrides: &[(&str, &'static str)]) -> Pack {
     load_pack_from_strings(BUNDLED_PACK_TOML, &srcs).expect("the test pack loads")
 }
 
+/// The bundled pack with its manifest's `old` text read as `new`, for a test
+/// of what a pack declares.
+#[cfg(test)]
+pub(crate) fn test_pack_declaring(old: &str, new: &str) -> Pack {
+    assert!(
+        BUNDLED_PACK_TOML.contains(old),
+        "the bundled manifest says {old:?}"
+    );
+    load_pack_from_strings(
+        &BUNDLED_PACK_TOML.replacen(old, new, 1),
+        &bundled_sprite_srcs(),
+    )
+    .expect("the test pack loads")
+}
+
 #[cfg(test)]
 #[path = "../../build_support/density_art.rs"]
 mod density_art;
@@ -307,8 +315,24 @@ mod tests {
     /// no-alias test on whole-tick loops leaves.
     #[test]
     fn every_bundled_loop_holds_its_frames_whole_beats() {
+        loops_hold_whole_beats("default", &test_default_pack());
+    }
+
+    /// The same of the binary's example packs: `init-pack` starts a pack from
+    /// the skeleton.
+    #[test]
+    #[cfg(feature = "native")]
+    fn every_example_pack_loop_holds_its_frames_whole_beats() {
+        let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../pixtuoid/sprites");
+        for name in ["robot", "skeleton"] {
+            let pack = pixtuoid_core::sprite::format::load_pack(&examples.join(name))
+                .expect("an example pack");
+            loops_hold_whole_beats(name, &pack);
+        }
+    }
+
+    fn loops_hold_whole_beats(pack_name: &str, pack: &Pack) {
         use pixtuoid_core::sprite::format::density_variant_name;
-        let pack = test_default_pack();
         let pets = crate::pet::PetKind::ALL
             .iter()
             .flat_map(|k| [k.walk_anim(), k.sit_anim(), k.sleep_anim()]);
@@ -342,7 +366,7 @@ mod tests {
                 let frame_ms = u64::from(anim.frame_ms());
                 assert!(
                     anim.frames().len() < 2 || frame_ms % crate::anim::FULL_TICK_MS == 0,
-                    "{name}: {frame_ms} ms is not whole beats"
+                    "{pack_name} {name}: {frame_ms} ms is not whole beats"
                 );
             }
         }

@@ -587,8 +587,8 @@ pub(crate) struct Cues {
     pub(crate) sleep_seed: Option<u64>,
     /// Waiting on the human.
     pub(crate) waiting: bool,
-    /// Walking, on this stride frame.
-    pub(crate) stride: Option<usize>,
+    /// Walking, its weight on this foot ([`effects::planted_foot`]).
+    pub(crate) walking: Option<usize>,
 }
 
 /// What rides on `agent`, whose `w`-wide frame (`None` where its pack lacks
@@ -603,7 +603,7 @@ pub(crate) fn character_effects(
 ) -> Vec<Effect> {
     let Timing { now, beat } = timing;
     let mut out = Vec::new();
-    out.extend(cues.stride.map(|s| effects::walking_dust(top_left, s)));
+    out.extend(cues.walking.map(|f| effects::walking_dust(top_left, f)));
     if let Some(w) = w
         && crate::burn::slot_burn_tier(agent, now) == crate::burn::BurnTier::Top
     {
@@ -618,6 +618,14 @@ pub(crate) fn character_effects(
     }
     out
 }
+
+/// A person's walks, the sim's pick by the leg: facing the camera, walking
+/// away, carrying a coffee.
+const WALK: &str = "walking";
+const WALK_BACK: &str = "walking_back";
+const WALK_COFFEE: &str = "walking_coffee";
+/// Every walk [`resolve_characters`] steps by the ground covered.
+pub(crate) const WALKS: [&str; 3] = [WALK, WALK_BACK, WALK_COFFEE];
 
 /// Resolve every character's placement for this tick from the routed poses
 /// `sim_step` already derived. Returns the placements (paint maps them 1:1 to
@@ -650,24 +658,18 @@ pub(crate) fn resolve_characters(
             continue;
         };
         let is_waiting = matches!(agent.state, ActivityState::Waiting { .. });
-        // `frame_of` picks the frame from the art the seat resolves to, which
-        // may be another view's (`typing_back`) with its own timing.
-        let seated = |base: &'static str,
-                      frame_of: &dyn Fn(&'static str) -> usize,
-                      glow: CharacterGlow,
-                      sleep_seed: Option<u64>| {
+        let seated = |base: &'static str, glow: CharacterGlow, sleep_seed: Option<u64>| {
             let facing = layout.desk_facing(agent.desk_index.single_floor_local());
             let seat = Seat::at_desk(desk, facing);
             let top_left = seat.render_top_left(char_w);
             let (anim_name, flip_x) = seat.sprite_in_pack(base, pack);
-            let frame_idx = frame_of(anim_name);
             let placement = CharacterPlacement {
                 agent_idx,
                 // Breath-independent sort row: the breath's 1 px rise must not flip
                 // sort order against nearby desk decor frame-to-frame.
                 sort_row: seat.sort_row(),
                 anim_name,
-                frame_idx,
+                frame_idx: 0,
                 top_left,
                 label_anchor: top_left,
                 flip_x,
@@ -681,7 +683,7 @@ pub(crate) fn resolve_characters(
             let cues = Cues {
                 sleep_seed,
                 waiting: is_waiting,
-                stride: None,
+                walking: None,
             };
             (placement, cues)
         };
@@ -689,7 +691,7 @@ pub(crate) fn resolve_characters(
             Pose::SeatedIdle if is_waiting => {
                 // Waiting is the one state that WANTS the human — the `N wait`
                 // counter's twin. Asleep-with-zzz reads as the opposite.
-                placements.push(seated("seated", &|_| 0, CharacterGlow::None, None));
+                placements.push(seated("seated", CharacterGlow::None, None));
             }
             Pose::SeatedIdle => {
                 let sleep_variant = if agent.agent_id.raw() % 2 == 0 {
@@ -699,20 +701,20 @@ pub(crate) fn resolve_characters(
                 };
                 placements.push(seated(
                     sleep_variant,
-                    &|_| 0,
                     CharacterGlow::None,
                     Some(agent.agent_id.raw()),
                 ));
             }
             Pose::SeatedThinking => {
-                placements.push(seated("seated", &|_| 0, CharacterGlow::Thinking, None));
+                placements.push(seated("seated", CharacterGlow::Thinking, None));
             }
             Pose::SeatedTyping => {
-                let frame_of = |name: &'static str| {
-                    pack.animation(name)
-                        .map_or(0, |anim| pose::typing_frame(agent, beat, anim))
-                };
-                placements.push(seated("typing", &frame_of, CharacterGlow::Tool, None));
+                let (mut placement, cues) = seated("typing", CharacterGlow::Tool, None);
+                // the art the seat resolved to, a back view's own loop included
+                placement.frame_idx = pack
+                    .animation(placement.anim_name)
+                    .map_or(0, |anim| pose::typing_frame(agent, beat, anim));
+                placements.push((placement, cues));
             }
             Pose::AtWaypoint { wp, kind } => {
                 if let Some(wp_obj) = layout.waypoints.get(wp) {
@@ -813,15 +815,15 @@ pub(crate) fn resolve_characters(
                 };
                 // walking_back always wins (no back-facing coffee sprite).
                 let anim_name: &'static str = if going_back {
-                    "walking_back"
-                } else if carrying_coffee && pack.animation("walking_coffee").is_some() {
-                    "walking_coffee"
+                    WALK_BACK
+                } else if carrying_coffee && pack.animation(WALK_COFFEE).is_some() {
+                    WALK_COFFEE
                 } else {
-                    "walking"
+                    WALK
                 };
-                let frame = pack.animation(anim_name).map_or(0, |anim| {
-                    crate::anim::walk_frame(travelled, anim, timing.now)
-                });
+                let frame = pack
+                    .animation(anim_name)
+                    .map_or(0, |anim| pose::walk_frame(travelled, anim, timing.now));
                 placements.push((
                     CharacterPlacement {
                         agent_idx,
@@ -841,7 +843,10 @@ pub(crate) fn resolve_characters(
                         breathes: false,
                     },
                     Cues {
-                        stride: Some(frame),
+                        walking: Some(effects::planted_foot(
+                            frame,
+                            pack.animation(anim_name).map_or(1, |a| a.frames().len()),
+                        )),
                         ..Cues::default()
                     },
                 ));

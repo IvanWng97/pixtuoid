@@ -766,7 +766,6 @@ struct PackMeta {
 struct AnimationToml {
     frames: Vec<String>,
     frame_ms: u32,
-    /// A walk's base-grid pixels travelled per full cycle (`Sprite::stride`).
     #[serde(default)]
     stride: Option<std::num::NonZeroU16>,
 }
@@ -2035,9 +2034,9 @@ impl ValidationReport {
 
 /// Check a pack's animations against the required/optional/multi-frame
 /// registries, each density variant against its base, each derived piece
-/// against its source, the pack against `art_sets`: the sets of pieces a
-/// pack should ship whole, and each of `walks` for its stride, which only the
-/// caller's painters know.
+/// against its source, and against what only the caller knows: `art_sets`,
+/// the sets of pieces a pack should ship whole, and `walks`, the animations it
+/// steps by [`Sprite::stride`].
 ///
 /// An unauthored variant is not reported missing: a pack that has not been
 /// redrawn at a density is the normal case, not a gap.
@@ -2294,8 +2293,8 @@ mod validation_floor_tests {
         );
     }
 
-    /// A walk carries its stride; art without one loops on the clock; a
-    /// stride of nothing is no walk and the pack refuses it.
+    /// A walk carries its stride; a stride of nothing is no walk and the pack
+    /// refuses it.
     #[test]
     fn a_walk_carries_its_stride_and_refuses_a_zero_one() {
         let pack = pack_with(

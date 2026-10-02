@@ -1836,13 +1836,7 @@ fn route_walking_pose_straight_leg_records_lerp_and_clears_walk_path() {
         now,
         &l,
         &mut rig.rctx(),
-        Pose::Walking {
-            from,
-            to,
-            t_x1000: 500,
-            travelled: 0,
-            carrying_coffee: false,
-        },
+        Pose::walking(from, to, 500, false),
         Settle::None,
     );
 
@@ -1987,9 +1981,37 @@ fn snap_back_profile_length_measures_the_routed_polyline() {
     );
 }
 
+/// A cornered walk's `travelled` is how far along the WHOLE polyline it is,
+/// not along the segment it is on: the frame keeps stepping across a corner.
+#[test]
+fn route_walking_pose_measures_travelled_along_the_whole_route() {
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let l = layout();
+    let slot = unit_slot(now);
+    let a = Point { x: 10, y: 10 };
+    let b = Point { x: 30, y: 10 };
+    let c = Point { x: 30, y: 30 };
+    let total = octile_path_len(&[a, b, c]);
+    let mut rig = RouteRig::new(StubRouter::corners(vec![a, b, c]));
+    for t in [0, 250, 500, 750, 1000] {
+        let out = route_walking_pose(
+            &slot,
+            now,
+            &l,
+            &mut rig.rctx(),
+            Pose::walking(a, c, t, false),
+            Settle::None,
+        );
+        let Some(Pose::Walking { travelled, .. }) = out else {
+            panic!("a walk at {t}, got {out:?}");
+        };
+        assert_eq!(travelled, pure::distance_at(t, total), "at {t}");
+    }
+}
+
 #[test]
 fn route_walking_pose_t_overshoot_snaps_to_final_segment() {
-    // The "past the last segment" fall-through fires only when `traveled` exceeds
+    // The "past the last segment" fall-through fires only when `travelled` exceeds
     // the summed leg lengths, which in-tree callers never do — hence the
     // out-of-range t_x1000=2000 below.
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
@@ -2006,13 +2028,7 @@ fn route_walking_pose_t_overshoot_snaps_to_final_segment() {
         now,
         &l,
         &mut rig.rctx(),
-        Pose::Walking {
-            from: a,
-            to: c,
-            t_x1000: 2000,
-            travelled: 0,
-            carrying_coffee: false,
-        },
+        Pose::walking(a, c, 2000, false),
         Settle::None,
     );
 

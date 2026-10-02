@@ -72,13 +72,19 @@ pub(crate) fn waiting_mark(at: Point) -> Effect {
     }
 }
 
-/// The dust under the walker at `at`, on its stride's frame `stride`.
-pub(crate) fn walking_dust(at: Point, stride: usize) -> Effect {
+/// The dust under the walker at `at`, at its planted foot `foot` ([`planted_foot`]).
+pub(crate) fn walking_dust(at: Point, foot: usize) -> Effect {
     Effect {
         kind: EffectKind::WalkingDust,
         at,
-        phase: stride as u64,
+        phase: foot as u64,
     }
+}
+
+/// The foot a walk on `frame` of `frames` bears its weight on: the east (0)
+/// from the strike that opens its cycle, the west (1) from the one halfway.
+pub(crate) fn planted_foot(frame: usize, frames: usize) -> usize {
+    usize::from(frame * 2 >= frames)
 }
 
 /// How long the flame crown holds each of its two frames: whole Full beats,

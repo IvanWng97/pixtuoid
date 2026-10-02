@@ -53,28 +53,6 @@ pub(crate) fn epoch_ms(now: SystemTime) -> u64 {
     elapsed_ms(now, SystemTime::UNIX_EPOCH)
 }
 
-/// The frame walk `anim` shows `travelled` along a leg, in the octile tenths
-/// of a layout pixel A* measures by: a full cycle each
-/// [`stride`](pixtuoid_core::sprite::Sprite::stride), so a planted foot holds
-/// its place at any speed and on any tier. A walk without one loops on its own
-/// clock at `now`.
-pub(crate) fn walk_frame(
-    travelled: u32,
-    anim: &pixtuoid_core::sprite::Sprite,
-    now: SystemTime,
-) -> usize {
-    let frames = anim.frames().len().max(1) as u64;
-    match anim.stride() {
-        Some(stride) => {
-            let per_cycle =
-                u64::from(stride.get()) * u64::from(crate::pathfind::OCTILE_STRAIGHT_COST);
-            ((u64::from(travelled) * frames / per_cycle) % frames) as usize
-        }
-        // a walk is the agent's doing, not ambient life: the clock, not a beat
-        None => (epoch_ms(now) / u64::from(anim.frame_ms().max(1)) % frames) as usize,
-    }
-}
-
 /// How much of the office's ambient life moves: the loops that only make it
 /// look alive — a flicker, a twinkle, an idle wander — never what an agent is
 /// doing. Each tier steps those loops on its own clock.
@@ -93,11 +71,12 @@ pub enum Motion {
 
 /// How often a [`Motion::Full`] loop steps.
 pub const FULL_TICK_MS: u64 = 125;
-/// How often a live painter repaints while anything moves, on every tier:
-/// what a walker covers between two paints is what its walk's frames step over.
-pub const PAINT_FPS: u32 = 30;
 /// How often a [`Motion::Calm`] loop steps.
 pub const CALM_TICK_MS: u64 = 500;
+/// The rate the TUI and the floating window repaint an office with agents in
+/// it, on every tier: the sampling rate the walks' strides are sized for
+/// (`a_walking_person_never_slides`).
+pub const PAINT_FPS: u32 = 30;
 
 impl Motion {
     /// The ambient clock at `now`, a function of `now` alone so a frame is
@@ -213,98 +192,6 @@ mod tests {
 
     fn approx_eq(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-4
-    }
-
-    /// A walk steps one frame each `stride / frames` of ground, wrapping each
-    /// stride, whatever the clock says.
-    #[test]
-    fn a_walk_steps_by_the_ground_it_covers() {
-        let pack = crate::pack::test_default_pack();
-        let walk = pack.animation("walking").expect("the walk");
-        let stride = u32::from(walk.stride().expect("a stride").get());
-        let frames = walk.frames().len() as u32;
-        let per_cycle = stride * crate::pathfind::OCTILE_STRAIGHT_COST;
-        // the first distance the second frame shows at
-        let next = per_cycle.div_ceil(frames);
-        let later = SystemTime::UNIX_EPOCH + Duration::from_millis(12_345);
-        for (travelled, frame) in [(0, 0), (next - 1, 0), (next, 1), (per_cycle, 0)] {
-            for now in [SystemTime::UNIX_EPOCH, later] {
-                assert_eq!(
-                    walk_frame(travelled, walk, now),
-                    frame as usize,
-                    "{travelled} in"
-                );
-            }
-        }
-    }
-
-    /// Every walk the sim steps by distance carries a stride in the bundled
-    /// pack, so none slides on its clock.
-    #[test]
-    fn every_bundled_walk_carries_its_stride() {
-        let pack = crate::pack::test_default_pack();
-        for name in crate::pack::walks() {
-            let walk = pack.animation(name).expect("a bundled walk");
-            assert!(walk.stride().is_some(), "{name} walks on its clock");
-        }
-    }
-
-    /// A base-art walker is the base art's standing person with only its feet
-    /// and hands moved: the same head, neck, shirt and leg rows, so a sit,
-    /// stand or walk never reshapes them. A hand may hang beside the hips, a
-    /// foot may step out a column or clear the ground.
-    #[test]
-    fn a_base_walker_keeps_the_standing_figure() {
-        let pack = crate::pack::test_default_pack();
-        let opaque = |f: &pixtuoid_core::sprite::Frame, y: u16| -> Vec<u16> {
-            (0..f.width())
-                .filter(|&x| f.get(x, y).copied().flatten().is_some())
-                .collect()
-        };
-        let stand = &pack
-            .animation("standing")
-            .expect("the standing art")
-            .frames()[0];
-        let (w, h) = (stand.width(), stand.height());
-        // a dropped hand hangs past the shirt's last full-width row
-        let hips = 1
-            + (0..h)
-                .rev()
-                .find(|&y| opaque(stand, y).len() == usize::from(w))
-                .expect("a full-width row");
-        let ground = h - 1;
-        let sides = [0, w - 1];
-        for name in crate::pack::walks() {
-            for (i, f) in pack
-                .animation(name)
-                .expect("a walk")
-                .frames()
-                .iter()
-                .enumerate()
-            {
-                assert_eq!((f.width(), f.height()), (w, h), "{name} {i}");
-                for y in 0..h {
-                    let (walk, rest) = (opaque(f, y), opaque(stand, y));
-                    if y == hips {
-                        let extra: Vec<u16> =
-                            walk.iter().filter(|x| !rest.contains(x)).copied().collect();
-                        assert!(
-                            extra.iter().all(|x| sides.contains(x)),
-                            "{name} {i}: hips {walk:?}"
-                        );
-                        assert!(
-                            rest.iter().all(|x| walk.contains(x)),
-                            "{name} {i}: hips {walk:?}"
-                        );
-                    } else if y == ground {
-                        let steps = |x: &u16| rest.iter().any(|r| r.abs_diff(*x) <= 1);
-                        assert!(walk.iter().all(steps), "{name} {i}: feet {walk:?}");
-                    } else {
-                        assert_eq!(walk, rest, "{name} {i}: row {y}");
-                    }
-                }
-            }
-        }
     }
 
     fn at(ms: u64) -> SystemTime {

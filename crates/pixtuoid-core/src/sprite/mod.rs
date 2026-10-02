@@ -499,7 +499,7 @@ impl HeadMark {
 pub(crate) const HEAD_MARK: &str = "head.";
 
 /// An animation: its frames in order, the palette indices they were drawn
-/// with, each frame's marks, and the per-frame hold time.
+/// with, each frame's marks, the per-frame hold time, and a walk's stride.
 #[derive(Debug, Clone)]
 pub struct Sprite {
     /// The frames in their own palette's colors.
@@ -561,14 +561,15 @@ impl Sprite {
         &self.frames
     }
 
-    /// How long each frame holds before advancing, in milliseconds.
+    /// How long each frame holds before advancing, in milliseconds: a walk
+    /// with a [`stride`](Self::stride) steps by distance instead.
     pub fn frame_ms(&self) -> u32 {
         self.frame_ms
     }
 
-    /// For a walk, the base-grid pixels a walker covers in one full cycle of
-    /// its frames: they advance by distance travelled, so a planted foot
-    /// stays planted at any speed. `None` for art that loops on the clock.
+    /// The base-grid pixels a walker covers in one full cycle of its frames:
+    /// they advance by distance travelled, so a planted foot stays planted at
+    /// any speed. `None` where the pack declares none.
     pub fn stride(&self) -> Option<std::num::NonZeroU16> {
         self.stride
     }

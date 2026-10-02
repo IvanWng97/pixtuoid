@@ -80,7 +80,7 @@ Read [`AGENTS.md`](AGENTS.md) first; these rules add to generic defect hunting.
   trap names is primary, and a concrete, reachable extra-layer gap at a trust
   boundary is `issue (non-blocking)`.
 - Risks needing unlikely or unreachable preconditions; performance unless
-  measurable (the TUI ticks at `FRAME_TICK_MS`).
+  measurable (the TUI repaints at `anim::PAINT_FPS`).
 - A missing comment ([comment audit](#design) owns the rest).
 
 ## Lenses
