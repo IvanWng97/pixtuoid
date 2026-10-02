@@ -1133,3 +1133,33 @@ fn the_wall_between_two_windows_is_one_frame_post() {
     }
     assert!(posts > 0, "this wall has posts");
 }
+
+#[test]
+fn the_classic_lays_the_carpet_the_model_tints() {
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let (top_wall_h, buf_w, buf_h) = (18u16, 60u16, 60u16);
+    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(12 * 3600);
+    let moment = Moment::resolve(
+        Sky::at_with(now, crate::sky::Weather::Rain),
+        theme,
+        0.0,
+        Motion::Full.clock(now),
+    );
+    let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
+    paint_ground_and_walls(
+        &mut BaseFillCache::new(),
+        &mut buf,
+        top_wall_h,
+        window_bays(buf_w, 0..0),
+        &moment,
+        &test_default_pack(),
+        theme,
+    );
+    let carpet = moment.look.carpet(theme);
+    let tones = [carpet.lit, carpet.base, carpet.dark];
+    let floor_row = buf_h - 1;
+    assert!(
+        (0..buf_w).all(|x| tones.contains(&buf.get(x, floor_row))),
+        "every carpet pixel is one of the model's three tones"
+    );
+}
