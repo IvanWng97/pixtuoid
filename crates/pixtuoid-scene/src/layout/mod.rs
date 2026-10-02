@@ -36,7 +36,7 @@ pub(crate) use rooms::walls::WallPiece;
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 pub(crate) use roster::{
-    CLOCK, Depth, Fixture, Layer, NEON_PANEL, NEON_PANEL_BORDER, Tie, desk_chair_fixtures,
+    CLOCK, Depth, Fixture, NEON_PANEL, NEON_PANEL_BORDER, Tie, desk_chair_fixtures,
     desk_chair_sort_row, desk_chair_top_left, desk_fixtures, pod_decor_fixtures,
 };
 pub use roster::{

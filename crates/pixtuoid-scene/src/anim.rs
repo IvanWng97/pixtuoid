@@ -75,9 +75,8 @@ pub const FULL_TICK_MS: u64 = 125;
 pub const CALM_TICK_MS: u64 = 500;
 
 /// The least any phase of a flash — a strike's level, a starved neon's catch,
-/// the dark between — may last, in loop time and on screen. [WCAG 2.3.1]
-/// allows at most three flashes in any one second; the project also holds
-/// every phase this long.
+/// the dark between — lasts in loop time: the project's own floor, beside
+/// [WCAG 2.3.1]'s three flashes in any one second.
 ///
 /// [WCAG 2.3.1]: https://www.w3.org/TR/WCAG22/#three-flashes-or-below-threshold
 pub const PHOTOSENSITIVE_PHASE_MIN_MS: u64 = 100;
@@ -109,8 +108,8 @@ impl Motion {
     }
 
     /// `now` and its [`beat`](Self::beat).
-    pub(crate) fn clock(self, now: SystemTime) -> Clock {
-        Clock {
+    pub(crate) fn timing(self, now: SystemTime) -> Timing {
+        Timing {
             now,
             beat: self.beat(now),
         }
@@ -125,7 +124,7 @@ fn loop_time(wall: SystemTime, pace: u64) -> u64 {
 
 /// An instant, and the [`Beat`] its ambient loops read at it.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Clock {
+pub(crate) struct Timing {
     pub(crate) now: SystemTime,
     pub(crate) beat: Beat,
 }

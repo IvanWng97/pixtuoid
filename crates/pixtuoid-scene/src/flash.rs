@@ -20,7 +20,7 @@ pub struct FlashPhase {
 /// The [`FlashPhase`] of the frame `ctx` was last stepped to at `now` on
 /// `floor`, under the sky that frame is painted under.
 pub fn flash_phase(floor: FloorMeta, ctx: &FloorCtx, now: SystemTime) -> FlashPhase {
-    let sky = crate::sky::Sky::at(floor.motion.clock(now), floor.weather);
+    let sky = crate::sky::Sky::at(floor.motion.timing(now), floor.weather);
     FlashPhase {
         strike: sky.flash().to_bits(),
         stutter: ctx.neon.stutters(),
@@ -110,7 +110,7 @@ mod tests {
             crate::sky::Weather::Storm,
         ));
         let ctx = FloorCtx::new();
-        let sky = |ms| crate::sky::Sky::at(storm.motion.clock(at(ms)), storm.weather).flash();
+        let sky = |ms| crate::sky::Sky::at(storm.motion.timing(at(ms)), storm.weather).flash();
         let phase = |ms| flash_phase(storm, &ctx, at(ms));
         let tick = crate::anim::FULL_TICK_MS;
         let mut lit = 0;
