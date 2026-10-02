@@ -10,7 +10,7 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{DaemonLiveness, DaemonPresence, DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
 
-use crate::anim::{Clock, epoch_ms};
+use crate::anim::Clock;
 use crate::layout::{Point, SceneLayout};
 use crate::pathfind::{find_path, snap_point_to_walkable};
 use crate::pet::PetKind;
@@ -86,12 +86,12 @@ pub(crate) fn pet_position(
     layout.corridor?;
     let frame_at = |anim: &str| crate::pack::animation_frame_at(pack, anim, clock.beat);
 
-    // Its roam is ambient: at rest it holds the middle of its first cycle,
-    // resting at that cycle's spot.
+    // Its roam is ambient, so it walks on the beat its legs step on; at rest it
+    // holds the middle of its first cycle, resting at that cycle's spot.
     let elapsed_ms = if clock.beat.is_rest() {
         PET_CYCLE_MS / 2
     } else {
-        epoch_ms(clock.now)
+        clock.beat.ms()
     };
 
     let cycle_n = (elapsed_ms / PET_CYCLE_MS).wrapping_add(pet_seed);
@@ -305,6 +305,16 @@ pub(crate) fn mascot_position(
     // Every clock below is measured from the END of this instance's stagger, so the
     // walk-out's reconstructed origin stays on the same wander phase as the walk-in.
     let enter_delay = mascot_enter_delay(seed);
+    // The wander is ambient, so it walks on the beat its legs step on, from
+    // the instant its walk-in ends.
+    let wander_start =
+        presence.entered_at + std::time::Duration::from_millis(enter_delay + MASCOT_ENTER_MS);
+    let wandered_by = |at| {
+        clock
+            .beat
+            .loop_at(at)
+            .saturating_sub(clock.beat.loop_at(wander_start))
+    };
 
     if presence.liveness == DaemonLiveness::Down {
         // Walk-out: from where the lobster was at the instant of Down, to the elevator.
@@ -319,14 +329,13 @@ pub(crate) fn mascot_position(
             // instant of death: the mascot is STATELESS and `DaemonState` carries no
             // prev-state, so Idle is the only reconstructable clock. Every state draws
             // from the same whole-floor rule, so only the CYCLE LENGTH differs.
-            let down_we = presence
-                .last_seen
-                .duration_since(presence.entered_at)
-                .ok()
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0)
-                .saturating_sub(MASCOT_ENTER_MS + enter_delay);
-            mascot_wander(layout, down_we, seed, MASCOT_IDLE_CYCLE_MS).0
+            mascot_wander(
+                layout,
+                wandered_by(presence.last_seen),
+                seed,
+                MASCOT_IDLE_CYCLE_MS,
+            )
+            .0
         };
         let t = down_age as f32 / MASCOT_LEAVE_MS as f32;
         return Some((walk_between(layout, from, elevator, t), walk_anim));
@@ -355,7 +364,7 @@ pub(crate) fn mascot_position(
         DaemonState::Degraded => MASCOT_DEGRADED_CYCLE_MS,
         _ => MASCOT_IDLE_CYCLE_MS,
     };
-    let (pos, walking) = mascot_wander(layout, entered - MASCOT_ENTER_MS, seed, cycle_ms);
+    let (pos, walking) = mascot_wander(layout, wandered_by(now), seed, cycle_ms);
     Some((pos, if walking { walk_anim } else { rest_anim }))
 }
 

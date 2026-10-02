@@ -929,6 +929,8 @@ pub(crate) fn neon_look(levels: NeonLevels, theme: &Theme) -> NeonLook {
 pub(crate) struct NeonState {
     fade: Option<NeonFade>,
     last_tick: Option<SystemTime>,
+    /// The loop time the last tick read, which the stutter steps by.
+    last_beat_ms: Option<u64>,
 }
 
 struct NeonFade {
@@ -954,13 +956,24 @@ impl NeonFade {
     }
 }
 
+// Every stutter bound on a whole Full tick, so the beat neither skips a flash
+// nor stretches one.
+const _: () = {
+    let mut i = 0;
+    while i < NeonState::STUTTER_FLASHES_MS.len() {
+        let (start, end) = NeonState::STUTTER_FLASHES_MS[i];
+        assert!(start % crate::anim::FULL_TICK_MS == 0 && end % crate::anim::FULL_TICK_MS == 0);
+        i += 1;
+    }
+};
+
 impl NeonState {
     /// How long a mood change takes to cross over (ms).
     pub(crate) const FADE_MS: u32 = 1_600;
     /// A starved tube's stutter cycle (ms).
     const STUTTER_MS: u64 = 5_000;
-    /// The flash windows inside one cycle, `[start, end)` ms: each a whole
-    /// Full beat, so the beat neither skips nor stretches one.
+    /// The flash windows inside one cycle, `[start, end)` ms, each on whole
+    /// Full beats.
     const STUTTER_FLASHES_MS: [(u64, u64); 4] = [
         (1_875, 2_000),
         (2_125, 2_250),
@@ -983,10 +996,10 @@ impl NeonState {
             .any(|&(start, end)| (start..end).contains(&t))
     }
 
-    /// The frame gap from which a flash can't be drawn faithfully: the shortest
-    /// flash. A painter sampling slower than that — a still, the floating
-    /// window's ambient cadence — would hold one flash for its whole frame or
-    /// miss it, so it gets the steady starved tube instead.
+    /// The longest loop-time step a flash can still be drawn across: the
+    /// shortest flash. A painter stepping further — a still, the floating
+    /// window's ambient cadence — would skip some flashes and hold others, so
+    /// it gets the steady starved tube instead.
     fn shortest_flash_ms() -> u64 {
         Self::STUTTER_FLASHES_MS
             .iter()
@@ -1021,6 +1034,11 @@ impl NeonState {
             .last_tick
             .map(|last| crate::anim::elapsed_ms(now, last));
         self.last_tick = Some(now);
+        // Stepped in loop time, which Calm walks at a quarter of the wall
+        // clock's pace, so Calm plays the stutter slower rather than never.
+        let beat_ms = clock.beat.ms();
+        let step_ms = self.last_beat_ms.map(|last| beat_ms.abs_diff(last));
+        self.last_beat_ms = Some(beat_ms);
         let recent = gap_ms.is_some_and(|gap| gap <= u64::from(Self::FADE_MS));
         let current = match &self.fade {
             Some(fade) if recent && fade.to == to => fade.at(now),
@@ -1043,7 +1061,7 @@ impl NeonState {
             }
         };
         // Only a tube that has LANDED on starved stutters, not one coasting down.
-        let drawable = gap_ms.is_some_and(|gap| gap < Self::shortest_flash_ms());
+        let drawable = step_ms.is_some_and(|step| step <= Self::shortest_flash_ms());
         if current == NeonLevels::EMPTY && drawable && Self::stutter_flash(clock.beat) {
             NeonLevels::FLASH
         } else {
