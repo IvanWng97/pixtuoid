@@ -1,4 +1,5 @@
 use super::*;
+use crate::display::Layer;
 use std::collections::BTreeSet;
 
 /// Every roster kind's census key, by an exhaustive match: a new kind fails to

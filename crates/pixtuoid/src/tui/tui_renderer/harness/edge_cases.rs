@@ -283,11 +283,11 @@ fn modal_overlays_still_paint_during_a_slide_on_a_too_small_terminal() {
 }
 
 #[test]
-fn departed_agent_motion_is_evicted_on_a_non_current_floor() {
+fn departed_agent_walks_are_evicted_on_a_non_current_floor() {
     let cap = 16;
     let a = AgentId::from_transcript_path("/ev/floor0.jsonl");
     let b = AgentId::from_transcript_path("/ev/floor1.jsonl");
-    // Long-idle so both wander and acquire a MotionState.
+    // Long-idle so both wander and acquire a WalkState.
     let scene = scene_with(
         vec![
             slot(a, 0, 0, t0() - Duration::from_secs(120)),
@@ -309,8 +309,8 @@ fn departed_agent_motion_is_evicted_on_a_non_current_floor() {
         now += Duration::from_millis(33);
     }
     assert!(
-        r.floor_motion(1).and_then(|m| m.get(&b)).is_some(),
-        "floor-1 agent B should have a MotionState after visiting floor 1"
+        r.floor_walks(1).and_then(|m| m.get(&b)).is_some(),
+        "floor-1 agent B should have a WalkState after visiting floor 1"
     );
 
     r.navigate_floor(0, now);
@@ -321,19 +321,19 @@ fn departed_agent_motion_is_evicted_on_a_non_current_floor() {
     r.render(&scene_without_b, pack(), now).expect("render");
 
     assert_eq!(
-        r.floor_motion(1).map(|m| m.contains_key(&b)),
+        r.floor_walks(1).map(|m| m.contains_key(&b)),
         Some(false),
-        "a departed agent's MotionState must be evicted even on a non-current floor"
+        "a departed agent's WalkState must be evicted even on a non-current floor"
     );
 }
 
 #[test]
-fn evict_missing_drops_history_and_motion_on_every_floor() {
+fn evict_missing_drops_history_and_walks_on_every_floor() {
     let cap = 16;
     let a = AgentId::from_transcript_path("/ev2/floor0.jsonl");
     let b = AgentId::from_transcript_path("/ev2/floor1.jsonl");
     // Fresh agents: the entry walk populates BOTH history (per-frame walker
-    // position records) and motion (entry profile) on their floors.
+    // position records) and walks (entry profile) on their floors.
     let scene = scene_with(vec![slot(a, 0, 0, t0()), slot(b, 1, cap, t0())], cap);
     let mut r = build(100, 40, vec![]);
     let mut now = t0();
@@ -359,8 +359,8 @@ fn evict_missing_drops_history_and_motion_on_every_floor() {
         "floor-1 history should hold agent B after its entry frames"
     );
     assert!(
-        r.floor_motion(1).and_then(|m| m.get(&b)).is_some(),
-        "floor-1 motion should hold agent B"
+        r.floor_walks(1).and_then(|m| m.get(&b)).is_some(),
+        "floor-1 walks should hold agent B"
     );
 
     let empty = SceneState::uniform(cap);
@@ -374,10 +374,10 @@ fn evict_missing_drops_history_and_motion_on_every_floor() {
             "departed agents' PoseHistory must be evicted on floor {floor}"
         );
         assert_eq!(
-            r.floor_motion(floor)
+            r.floor_walks(floor)
                 .map(|m| m.contains_key(&a) || m.contains_key(&b)),
             Some(false),
-            "departed agents' MotionState must be evicted on floor {floor}"
+            "departed agents' WalkState must be evicted on floor {floor}"
         );
     }
 }

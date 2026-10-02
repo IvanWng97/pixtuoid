@@ -745,7 +745,7 @@ mod tests {
             CityStrip::draw(
                 &pack,
                 (60, 20),
-                &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(std::time::UNIX_EPOCH)),
+                &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(std::time::UNIX_EPOCH)),
                 theme,
                 Density::new(d).expect("nonzero"),
             )
@@ -813,7 +813,7 @@ mod tests {
                     crate::sky::Sky::at_with(now, crate::sky::Weather::Clear),
                     theme,
                     0.0,
-                    Motion::Full.clock(now),
+                    Motion::Full.timing(now),
                 );
                 let near = PlaneColours::of(Plane::Near, &moment.look, theme);
                 let s = CityStrip::draw(

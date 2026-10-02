@@ -11,7 +11,6 @@
 pub mod canvas;
 pub(crate) mod effects;
 pub(crate) mod light;
-pub(crate) mod order;
 #[doc(hidden)]
 pub mod paint;
 pub(crate) mod pen;
