@@ -34,6 +34,29 @@ fn frame_layout_memo_matches_fresh_compute_across_hits_resizes_and_none() {
     );
 }
 
+/// A new layout drops the router's cached paths: `route` revalidates a cached
+/// path against the overlay alone, never the mask, so a stale one would walk
+/// through the new layout's walls.
+#[test]
+fn a_new_layout_drops_the_routers_cached_paths() {
+    use crate::pathfind::Router;
+    use pixtuoid_core::walkable::OccupancyOverlay;
+    let mut ctx = FloorCtx::new();
+    let l = ctx.frame_layout(192, 156, 0).unwrap();
+    let mut walkable = (0..l.buf_h)
+        .flat_map(|y| (0..l.buf_w).map(move |x| crate::layout::Point { x, y }))
+        .filter(|p| l.is_walkable(p.x, p.y));
+    let from = walkable.next().expect("a walkable cell");
+    let to = walkable.next_back().expect("another walkable cell");
+    ctx.router
+        .route(&l.walkable, &OccupancyOverlay::new(), from, to);
+    assert!(!ctx.router.is_empty(), "the route was cached");
+    ctx.frame_layout(192, 156, 0).unwrap();
+    assert!(!ctx.router.is_empty(), "the same layout keeps its paths");
+    ctx.frame_layout(120, 100, 0).unwrap();
+    assert!(ctx.router.is_empty(), "a new layout drops its paths");
+}
+
 #[test]
 fn daemons_projects_onto_the_ground_floor_only() {
     use pixtuoid_core::state::{DaemonInstanceId, DaemonLiveness, DaemonPresence};
