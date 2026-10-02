@@ -140,12 +140,12 @@ pub(crate) struct Badge {
     pub(crate) tone: crate::overlay::LabelTone,
 }
 
-/// Art pixels between a plate's edge and its text.
+/// Art pixels between a plate's sides or bottom and its text ([`PLATE_H`] says why not the top).
 const PLATE_PAD: u16 = 1;
 
-/// A plate's height on the art grid: at the pack's 4x art, two logical rows,
-/// the one terminal cell the classic's text takes.
-const PLATE_H: u16 = crate::cutaway::text::LINE_H + 2 * PLATE_PAD;
+/// A plate's height on the art grid: padded below only, since the line's
+/// accent rows already clear its capitals above.
+const PLATE_H: u16 = crate::cutaway::text::LINE_H + PLATE_PAD;
 
 /// A plate around `text` on the art grid, centred on column `centre`, its top
 /// at row `top`.
@@ -184,13 +184,7 @@ fn paint_plate(
     pen.fill(buf, plate, ground);
     let mut x = plate.x.0 + PLATE_PAD;
     for &(text, ink) in runs {
-        crate::cutaway::text::paint(
-            pen,
-            buf,
-            (ArtPx(x), ArtPx(plate.y.0 + PLATE_PAD)),
-            text,
-            ink,
-        );
+        crate::cutaway::text::paint(pen, buf, (ArtPx(x), plate.y), text, ink);
         x += crate::cutaway::text::advance(text).0;
     }
 }
@@ -223,19 +217,29 @@ fn paint_badge(badge: &Badge, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
 }
 
 /// The floor indicator over the elevator at `door`, naming floor `floor`: a
-/// plate over the cell the classic writes it across
-/// ([`floor_indicator_rows`](crate::layout::floor_indicator_rows)).
+/// plate filling the cell the classic writes it across
+/// ([`floor_indicator_rows`](crate::layout::floor_indicator_rows)), not a
+/// badge's [`PLATE_H`], which would run into the door below. Under the pack's
+/// density the cell is shorter than a line, and the plate keeps the line.
 fn indicator_plate(door: Point, floor: usize, pen: Pen) -> ArtRect {
-    plate_at(
-        pen.art(door.x + crate::layout::ELEVATOR_W / 2),
-        pen.art(crate::layout::floor_indicator_rows(door.y).start),
-        &crate::layout::floor_indicator_text(floor),
-    )
+    let rows = crate::layout::floor_indicator_rows(door.y);
+    ArtRect {
+        h: ArtPx(
+            pen.art(rows.end - rows.start)
+                .0
+                .max(crate::cutaway::text::LINE_H),
+        ),
+        ..plate_at(
+            pen.art(door.x + crate::layout::ELEVATOR_W / 2),
+            pen.art(rows.start),
+            &crate::layout::floor_indicator_text(floor),
+        )
+    }
 }
 
 /// Each run of `board` and its top-left on the art grid, as the classic's
 /// terminal board lays it: line `i` on the neon interior's `i`th cell row,
-/// one character a column, the star flush right.
+/// one cell a column, the star flush right.
 fn board_runs(
     board: &crate::board::BoardModel,
     pen: Pen,
@@ -4471,15 +4475,16 @@ pub(crate) mod tests {
         assert_eq!(at.y - anchor.y, LABEL_GAP, "clear of the head");
     }
 
-    /// A plate's runs and the board's segments step on one grid: the run after
-    /// `n` characters starts [`columns`](crate::cutaway::text::columns)`(n)` on.
+    /// A plate's runs and the board's segments step on one grid, wide
+    /// characters included: the run after `text` starts
+    /// [`advance`](crate::cutaway::text::advance)`(text)` on.
     #[test]
     fn plate_runs_and_board_columns_share_one_grid() {
         use crate::board::{BoardSegment, BoardTone};
-        use crate::cutaway::text::columns;
+        use crate::cutaway::text::advance;
         use pixtuoid_core::sprite::Rgb;
         let pen = Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4");
-        let (first, second) = ("Iab", "I");
+        let (first, second) = ("I日b", "I");
         let mut board = quiet_board().clone();
         board.mood = [first, second]
             .map(|text| BoardSegment {
@@ -4491,7 +4496,7 @@ pub(crate) mod tests {
         let runs = board_runs(&board, pen);
         let ((x0, _), _) = runs[2];
         let ((x1, _), _) = runs[3];
-        assert_eq!(x1.0 - x0.0, columns(3).0, "the board");
+        assert_eq!(x1.0 - x0.0, advance(first).0, "the board");
         let (a, b) = (Rgb { r: 255, g: 0, b: 0 }, Rgb { r: 0, g: 255, b: 0 });
         let mut buf = RgbBuffer::filled(64, 16, Rgb { r: 0, g: 0, b: 0 });
         let plate = ArtRect {
@@ -4514,7 +4519,38 @@ pub(crate) mod tests {
             left(a).expect("the first run"),
             left(b).expect("the second run"),
         );
-        assert_eq!(lb - la, columns(3).0, "the plate");
+        assert_eq!(lb - la, advance(first).0, "the plate");
+    }
+
+    /// The floor indicator's plate stays in the cell the classic writes it
+    /// across, its text whole, at every density the pack draws: a row lower
+    /// and it covers the top of the elevator door, over everything.
+    #[test]
+    #[cfg(feature = "density-art")]
+    fn the_floor_indicator_stays_in_its_cell() {
+        use crate::cutaway::text::LINE_H;
+        let pack = crate::pack::test_default_pack();
+        let door = SceneLayout::compute_with_seed(160, 96, None, 0)
+            .expect("lays out")
+            .door;
+        let rows = crate::layout::floor_indicator_rows(door.y);
+        let densities = pack.density_variants();
+        assert!(!densities.is_empty(), "the pack draws a density");
+        for d in densities {
+            let pen = Pen::new(RenderScale::new(d.get()).expect("nonzero"), d.get())
+                .expect("d divides itself");
+            for floor in [1, 12, 99] {
+                let plate = indicator_plate(door, floor, pen);
+                let span = topmost_span(plate, pen);
+                assert!(
+                    rows.contains(&span.y0) && rows.contains(&span.y1),
+                    "{d:?} floor {floor}: rows {}..={} outside {rows:?}",
+                    span.y0,
+                    span.y1
+                );
+                assert!(plate.h.0 >= LINE_H, "{d:?}: the text fits");
+            }
+        }
     }
 
     /// At the pack's 4x art the board writes inside the neon sign's dark
