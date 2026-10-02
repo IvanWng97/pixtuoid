@@ -45,6 +45,7 @@ pub(crate) mod creatures;
 pub use creatures::PET_CYCLE_MS;
 #[doc(hidden)]
 pub mod cutaway;
+pub(crate) mod display;
 pub(crate) mod dither;
 pub(crate) mod effects;
 pub mod floor;
