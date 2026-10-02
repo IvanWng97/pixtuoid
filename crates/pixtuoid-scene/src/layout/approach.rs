@@ -8,7 +8,7 @@
 //!
 //! Pure geometry over [`WalkableMask`] — no A*, no terminal deps — so the
 //! stateless `pose::pure::idle_pose` and the stateful `motion` walk destinations
-//! stay in lockstep with the render anchor (all three call this with the same
+//! stay in lockstep with the render top-left (all three call this with the same
 //! `origin = home desk`).
 
 use super::decor::{Facing, Furniture, WaypointKind, furniture_def};
