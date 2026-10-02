@@ -558,7 +558,6 @@ pub(crate) fn build_list<'a>(
     let ambient = crate::cutaway::light::Ambient::of(&moment.look);
     let mut collected = collect_pieces(frame, office, moment);
     collected.extend(signs(office, floor.floor_idx, board));
-    collected.extend(motes(office, moment, floor.floor_seed));
     let sorted = depth_sort(
         collected
             .into_iter()
@@ -639,28 +638,6 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
             }
         }
     }
-}
-
-/// The dust motes in the windows' sunbeams this moment ([`crate::motes`]),
-/// each on its cell where the ordered dither lets as much of it through as
-/// the beam shows: a speck the sun catches, never a blend.
-fn motes(office: Office<'_>, moment: &Moment, seed: u64) -> Vec<(Span, PieceKind)> {
-    let shows = crate::motes::visibility(&moment.look);
-    if shows <= 0.0 {
-        return Vec::new();
-    }
-    crate::motes::window_spill_columns(office.layout)
-        .iter()
-        .flat_map(|col| crate::motes::dust_mote_positions(seed, moment.now, col))
-        .filter(|m| crate::dither::takes_next(m.x, m.y, m.alpha * crate::motes::MOTE_PEAK * shows))
-        .map(|m| {
-            let at = crate::layout::Point { x: m.x, y: m.y };
-            let span = Span::new(m.x, m.y, 1, 1, 0)
-                .with_depth(m.y)
-                .with_layer(Layer::Over);
-            (span, PieceKind::Mote { at })
-        })
-        .collect()
 }
 
 /// The room's own lights (`crate::lighting`) this frame that the cutaway paints.
@@ -843,7 +820,6 @@ fn paint_pieces(
                     | PieceKind::WallSeg { .. }
                     | PieceKind::Chair { .. }
                     | PieceKind::DeskProp(_)
-                    | PieceKind::Mote { .. }
                     | PieceKind::Creature { .. }
                     | PieceKind::PropBand { .. }
                     | PieceKind::Table { .. }
@@ -906,7 +882,6 @@ fn mark(
         | PieceKind::WallSeg { .. }
         | PieceKind::Chair { .. }
         | PieceKind::DeskProp(_)
-        | PieceKind::Mote { .. }
         | PieceKind::Creature { .. }
         | PieceKind::PropBand { .. }
         | PieceKind::Table { .. }
@@ -1139,9 +1114,7 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
         | PieceKind::Effect(_)
         | PieceKind::Badge { .. }
         | PieceKind::Board { .. }
-        | PieceKind::Indicator { .. }
-        // a speck adrift in a sunbeam, off the ground
-        | PieceKind::Mote { .. } => None,
+        | PieceKind::Indicator { .. } => None,
         PieceKind::Character {
             ref figure,
             body,
@@ -1220,7 +1193,6 @@ fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::Desk { at, art, screen } => (at, art, screen).hash(&mut h),
         PieceKind::Chair { at } => at.hash(&mut h),
         PieceKind::DeskProp(prop) => prop.hash(&mut h),
-        PieceKind::Mote { at } => at.hash(&mut h),
         PieceKind::Creature { at, art, degraded } => (at, art, degraded).hash(&mut h),
         PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => (at, art).hash(&mut h),
         PieceKind::PropBand { at, sprite, rows } => (at, sprite, rows).hash(&mut h),
@@ -1735,7 +1707,6 @@ fn paint_piece(
         }
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
         PieceKind::DeskProp(prop) => paint_desk_prop(prop, pack, theme, scale, buf),
-        PieceKind::Mote { at } => paint_mote(at, theme, Pen::for_pack(scale, pack), buf),
         PieceKind::Creature { at, art, degraded } => {
             paint_creature(at, art, degraded, pack, scale, buf);
         }
@@ -2346,7 +2317,6 @@ impl PieceKind {
             | PieceKind::Glass { .. }
             | PieceKind::Desk { .. }
             | PieceKind::DeskProp(_)
-            | PieceKind::Mote { .. }
             | PieceKind::Creature { .. }
             | PieceKind::Character { .. }
             | PieceKind::Effect(_)
@@ -2438,10 +2408,6 @@ pub(crate) enum PieceKind {
         at: crate::layout::Point,
         art: Art,
         degraded: bool,
-    },
-    /// A dust mote in a sunbeam, on cell `at` ([`motes`]).
-    Mote {
-        at: crate::layout::Point,
     },
     Character {
         figure: Figure,
@@ -3174,18 +3140,6 @@ fn paint_creature(
     };
     let (x, y) = centred_top_left(at, dense.logical, scale);
     blit_frame_scaled(&shown, x, y, dense.blit_at, buf);
-}
-
-/// A mote: the middle art pixel of its cell, lit in the sun's spill.
-fn paint_mote(at: crate::layout::Point, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
-    let d = pen.art(1).0;
-    let speck = ArtRect {
-        x: ArtPx(pen.art(at.x).0 + d / 2),
-        y: ArtPx(pen.art(at.y).0 + d / 2),
-        w: ArtPx(1),
-        h: ArtPx(1),
-    };
-    pen.fill(buf, speck, theme.lighting.sun_spill);
 }
 
 /// A desk prop in the theme's cup and paper.
@@ -5874,47 +5828,6 @@ S B B B B B B S
         }
     }
 
-    /// A clear noon's sunbeams carry motes, each a speck painted on its own
-    /// cell, at every density; a night's carry none.
-    #[test]
-    fn motes_drift_in_a_clear_noons_beams_and_not_at_night() {
-        let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pack = test_default_pack();
-        let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
-        let frame = empty_frame(&layout);
-        let is_mote = |p: &&Piece| matches!(p.kind, PieceKind::Mote { .. });
-        for s in [1, pack.max_density_variant().get()] {
-            let scale = RenderScale::new(s).expect("nonzero");
-            let office = Office {
-                layout: &layout,
-                pack: &pack,
-                theme,
-                scale,
-            };
-            let noon = list_at(&frame, office, 12);
-            let motes: Vec<&Piece> = noon.pieces().iter().filter(is_mote).collect();
-            assert!(!motes.is_empty(), "at scale {s} a clear noon has no motes");
-            for p in motes {
-                assert_eq!(
-                    stray_pixel(&p.kind, p.span, &layout, &pack, theme, scale),
-                    None,
-                    "at scale {s} {:?} painted outside {:?}",
-                    p.kind,
-                    p.span
-                );
-                assert_eq!(
-                    p.shadow, None,
-                    "at scale {s} a mote adrift shades the ground"
-                );
-            }
-            let night = list_at(&frame, office, 0);
-            assert!(
-                !night.pieces().iter().any(|p| is_mote(&p)),
-                "motes at night"
-            );
-        }
-    }
-
     /// The carpet takes the weather's tint: the list a rainy hour builds lays
     /// the theme's carpet drawn toward the rain's tint, which no clear hour's
     /// ground matches.
@@ -7148,7 +7061,6 @@ S B B B B B B S
             PieceKind::Effect(_) => "effect",
             PieceKind::Badge { .. } => "badge",
             PieceKind::DeskProp(_) => "desk prop",
-            PieceKind::Mote { .. } => "mote",
             PieceKind::Creature { .. } => "creature",
             PieceKind::Board { .. } => "board",
             PieceKind::Indicator { .. } => "indicator",
