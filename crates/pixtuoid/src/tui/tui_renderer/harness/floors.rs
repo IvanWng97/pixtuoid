@@ -20,7 +20,7 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     let term = Terminal::new(TestBackend::new(100, 40)).expect("test backend");
     let mut r = TuiRenderer::new(term, theme, vec![]);
 
-    // Warm up floor 0 so agent A's MotionState initialises and wanders.
+    // Warm up floor 0 so agent A's WalkState initialises and wanders.
     let mut now = t0;
     for _ in 0..10 {
         r.render(&scene, &pack, now).expect("render");
@@ -28,18 +28,18 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     }
     assert_eq!(r.current_floor(), 0);
     assert!(
-        r.floor_motion(0).and_then(|m| m.get(&a)).is_some(),
-        "floor-0 agent should have a MotionState after warm-up"
+        r.floor_walks(0).and_then(|m| m.get(&a)).is_some(),
+        "floor-0 agent should have a WalkState after warm-up"
     );
 
     r.navigate_floor(1, now);
     render_until_settled(&mut r, &scene, &pack, &mut now, 1);
 
     let frozen_at = r
-        .floor_motion(0)
+        .floor_walks(0)
         .and_then(|m| m.get(&a))
         .map(|ms| ms.wander.last_advanced_at)
-        .expect("floor-0 motion present");
+        .expect("floor-0 walks present");
 
     // ~30 s on floor 1.
     for _ in 0..900 {
@@ -47,13 +47,13 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
         r.render(&scene, &pack, now).expect("render");
     }
     let still_frozen = r
-        .floor_motion(0)
+        .floor_walks(0)
         .and_then(|m| m.get(&a))
         .map(|ms| ms.wander.last_advanced_at)
-        .expect("floor-0 motion present");
+        .expect("floor-0 walks present");
     assert_eq!(
         frozen_at, still_frozen,
-        "off-screen floor 0 motion must stay frozen while floor 1 is visible"
+        "off-screen floor 0 walks must stay frozen while floor 1 is visible"
     );
 
     let back_at = now;
@@ -61,9 +61,9 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     render_until_settled(&mut r, &scene, &pack, &mut now, 0);
 
     let ms = r
-        .floor_motion(0)
+        .floor_walks(0)
         .and_then(|m| m.get(&a))
-        .expect("floor-0 motion present");
+        .expect("floor-0 walks present");
     assert!(
         ms.wander.phase_started_at >= back_at,
         "floor-0 agent must resync its wander clock on return (got an anchor before the switch-back ⇒ replay)"

@@ -341,13 +341,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     #[cfg(test)]
-    pub fn floor_motion(
+    pub fn floor_walks(
         &self,
         floor: usize,
-    ) -> Option<
-        &std::collections::HashMap<pixtuoid_core::AgentId, pixtuoid_scene::motion::MotionState>,
-    > {
-        self.floors.get(floor).map(|f| &f.ctx.motion)
+    ) -> Option<&std::collections::HashMap<pixtuoid_core::AgentId, pixtuoid_scene::walk::WalkState>>
+    {
+        self.floors.get(floor).map(|f| &f.ctx.walks)
     }
 
     #[cfg(test)]

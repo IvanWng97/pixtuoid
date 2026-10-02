@@ -227,15 +227,58 @@ pub(crate) enum Plan {
     },
 }
 
-/// Inside tmux: `TERM` starting `tmux`, or `TERM_PROGRAM` = `tmux` — the test
-/// upstream applies before wrapping every image in passthrough (ratatui-image
-/// 11.0.8 `picker.rs:320-326`), on every platform.
-fn in_tmux(term: Option<&str>, term_program: Option<&str>) -> bool {
-    term.is_some_and(|t| t.starts_with("tmux")) || term_program == Some("tmux")
+/// A text variable: `None` when unset, blank or not UTF-8.
+fn env_text(name: &str) -> Option<String> {
+    pixtuoid_core::platform::text_env(name).filter(|v| !v.trim().is_empty())
 }
 
-/// What stands between this process and the screen, from the environment
-/// alone: each hop makes a repaint dearer.
+/// A marker variable, presence only: [`path_env`](pixtuoid_core::platform::path_env)'s
+/// rule, so a non-UTF-8 value (`$TMUX` holds a path) is set and a blank one is not.
+fn env_set(name: &str) -> bool {
+    pixtuoid_core::platform::path_env(name).is_some()
+}
+
+/// The terminal and the link to it as the environment names them: the probe
+/// and the motion default read these variables only through here.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct TermEnv {
+    term: Option<String>,
+    term_program: Option<String>,
+    /// `$TMUX`: this process is a tmux client.
+    tmux_client: bool,
+    ssh: bool,
+}
+
+impl TermEnv {
+    fn read() -> Self {
+        Self {
+            term: env_text("TERM"),
+            term_program: env_text("TERM_PROGRAM"),
+            tmux_client: env_set("TMUX"),
+            // ssh(1) ENVIRONMENT: what a session's sshd sets, SSH_TTY only with a tty.
+            ssh: env_set("SSH_CONNECTION") || env_set("SSH_TTY"),
+        }
+    }
+
+    /// Upstream's test before wrapping every image in passthrough
+    /// (ratatui-image 11.0.8 `picker.rs:320-326`), on every platform.
+    fn tmux_term(&self) -> bool {
+        self.term.as_deref().is_some_and(|t| t.starts_with("tmux"))
+            || self.term_program.as_deref() == Some("tmux")
+    }
+
+    /// A tmux client, or a tmux terminal name carried over ssh: either way tmux
+    /// redraws every repaint.
+    fn link(&self) -> Link {
+        Link {
+            tmux: self.tmux_client || self.tmux_term(),
+            ssh: self.ssh,
+        }
+    }
+}
+
+/// What stands between this process and the screen: each hop makes a repaint
+/// dearer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct Link {
     /// Inside tmux, which redraws every repaint itself.
@@ -247,13 +290,7 @@ pub(crate) struct Link {
 impl Link {
     /// The link this process's environment names.
     pub(crate) fn of_env() -> Self {
-        let set = |name| std::env::var_os(name).is_some_and(|v| !v.is_empty());
-        let text = pixtuoid_core::platform::text_env;
-        Self {
-            tmux: set("TMUX") || in_tmux(text("TERM").as_deref(), text("TERM_PROGRAM").as_deref()),
-            // ssh(1) ENVIRONMENT: what a session's sshd sets, SSH_TTY only with a tty.
-            ssh: ["SSH_CONNECTION", "SSH_TTY"].into_iter().any(set),
-        }
+        TermEnv::read().link()
     }
 }
 
@@ -720,6 +757,42 @@ mod tests {
             );
             assert_eq!(classic.motion(link), Motion::Calm, "{link:?}");
         }
+    }
+
+    #[test]
+    fn the_environment_names_the_link() {
+        const VARS: [&str; 5] = ["TERM", "TERM_PROGRAM", "TMUX", "SSH_CONNECTION", "SSH_TTY"];
+        let link = |set: &[(&str, &str)]| {
+            let vars = VARS.map(|name| {
+                let value = set.iter().find(|(n, _)| *n == name).map(|(_, v)| *v);
+                (name, value)
+            });
+            temp_env::with_vars(vars, Link::of_env)
+        };
+        let tmux = Link {
+            tmux: true,
+            ..Link::default()
+        };
+        let ssh = Link {
+            ssh: true,
+            ..Link::default()
+        };
+        assert_eq!(link(&[("TERM", "xterm-ghostty")]), Link::default());
+        for blank in ["", " \t"] {
+            assert_eq!(
+                link(&[("TMUX", blank)]),
+                Link::default(),
+                "{blank:?} is unset"
+            );
+        }
+        assert_eq!(link(&[("TMUX", "/tmp/tmux-501/default,1,0")]), tmux);
+        assert_eq!(link(&[("TERM", "tmux-256color")]), tmux, "carried over ssh");
+        assert_eq!(link(&[("TERM_PROGRAM", "tmux")]), tmux);
+        assert_eq!(
+            link(&[("SSH_CONNECTION", "10.0.0.2 51234 10.0.0.1 22")]),
+            ssh
+        );
+        assert_eq!(link(&[("SSH_TTY", "/dev/ttys004")]), ssh);
     }
 
     #[test]
