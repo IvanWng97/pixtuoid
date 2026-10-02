@@ -1,6 +1,6 @@
 use super::*;
-use crate::motion::{octile_path_len, settle_len};
 use crate::physics::walk_profile;
+use crate::walk::{octile_path_len, settle_len};
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::WalkableMask;
 use std::path::PathBuf;
@@ -208,17 +208,17 @@ fn seated_waypoint_snap_back_starts_from_the_seat_not_the_approach_cell() {
     let mut rig = RouteRig::new(StubRouter::straight());
 
     let idle = entry_slot(now - Duration::from_secs(60));
-    let mut ms = MotionState::new(idle.agent_id);
-    ms.wander.phase = crate::motion::WanderPhase::AtWaypoint(walk_profile(
+    let mut ms = WalkState::new(idle.agent_id);
+    ms.wander.phase = crate::walk::WanderPhase::AtWaypoint(walk_profile(
         100,
         WalkIntent::WanderBack,
         idle.agent_id,
     ));
     ms.wander.phase_started_at = now;
     ms.wander.last_advanced_at = now; // pin the phase (advance_wander no-ops at now)
-    ms.wander.target = crate::motion::WanderTarget {
+    ms.wander.target = crate::walk::WanderTarget {
         dest: approach,
-        kind: crate::motion::WanderKind::Named {
+        kind: crate::walk::WanderKind::Named {
             wp_idx: 0,
             kind: crate::layout::WaypointKind::Couch,
             seat: Some(seat),
@@ -700,7 +700,7 @@ fn snap_back_progress_is_physics_eased_not_linear() {
     let ms = rig
         .walks
         .get(&slot.agent_id)
-        .expect("MotionState created on frame 0");
+        .expect("WalkState created on frame 0");
     let profile = &ms
         .snap_back
         .as_ref()

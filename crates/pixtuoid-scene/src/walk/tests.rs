@@ -8,7 +8,7 @@ fn id() -> AgentId {
 
 #[test]
 fn motion_state_new_default_fields() {
-    let ms = MotionState::new(id());
+    let ms = WalkState::new(id());
     assert!(ms.entry.is_none());
     assert!(ms.exit.is_none());
     assert!(ms.snap_back.is_none());
@@ -226,7 +226,7 @@ impl<R: Router> WanderRig<R> {
         );
     }
 
-    fn state(&self) -> &MotionState {
+    fn state(&self) -> &WalkState {
         self.route
             .walks
             .get(&self.slot.agent_id)
@@ -812,7 +812,7 @@ fn back_profile_routes_to_the_jittered_desk_goal_the_render_uses() {
     let l = layout();
     let overlay = OccupancyOverlay::new();
     let mut router = Recording { calls: Vec::new() };
-    let mut ms = MotionState::new(trip_id);
+    let mut ms = WalkState::new(trip_id);
     ms.wander.target.dest = Point { x: 40, y: 60 };
 
     let _ = snapshot_back_profile(&slot, &ms, &l, &mut router, &overlay);
@@ -945,8 +945,8 @@ fn wander_named_seat_is_some_iff_the_destination_is_sat_on() {
     );
 }
 
-fn tripping_at(id: AgentId, wp_idx: usize, kind: WaypointKind) -> MotionState {
-    let mut ms = MotionState::new(id);
+fn tripping_at(id: AgentId, wp_idx: usize, kind: WaypointKind) -> WalkState {
+    let mut ms = WalkState::new(id);
     ms.wander.phase =
         WanderPhase::AtWaypoint(crate::physics::walk_profile(100, WalkIntent::WanderOut, id));
     ms.wander.target = WanderTarget {

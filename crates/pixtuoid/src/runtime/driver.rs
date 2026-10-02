@@ -67,8 +67,7 @@ fn boot_tui(cfg: &RunConfig) -> Result<Boot> {
         crate::graphics::run_probe,
     );
     tracing::info!(mode = ?cfg.graphics, plan = ?plan, "graphics plan");
-    let link = crate::graphics::Link::from(&crate::graphics::TermEnv::read());
-    let motion = cfg.motion.or(plan.motion(link));
+    let motion = cfg.motion.or(plan.motion(crate::graphics::Link::of_env()));
     tracing::info!(mode = ?cfg.motion, motion = ?motion, "motion");
     Ok((pack, plan, motion))
 }

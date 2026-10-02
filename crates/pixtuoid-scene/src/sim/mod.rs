@@ -22,11 +22,11 @@ use crate::creatures::{gateway_mascot_def, mascot_position, mascot_seed, pet_pos
 use crate::effects::{self, Effect};
 use crate::floor::{CoffeeState, FloorInputs, FloorMeta, PetInputs, VacancyDim};
 use crate::layout::{Pivot, Point, SceneLayout, Size, WALKING_Y_OFF};
-use crate::motion::MotionState;
 use crate::pathfind::Router;
 use crate::pet::PetKind;
 use crate::physics::walking_position;
 use crate::pose::{self, Pose, PoseHistory};
+use crate::walk::WalkState;
 
 use crate::layout::CHARACTER_SPRITE_W;
 use crate::pack::{desk_art, desk_art_top};
@@ -47,7 +47,7 @@ pub(crate) struct SimStores<'a> {
     pub router: &'a mut dyn Router,
     pub overlay: &'a mut OccupancyOverlay,
     pub history: &'a mut PoseHistory,
-    pub walks: &'a mut HashMap<AgentId, MotionState>,
+    pub walks: &'a mut HashMap<AgentId, WalkState>,
     pub vacancy_dim: &'a mut VacancyDim,
     pub neon: &'a mut crate::floor::NeonState,
     pub chitchat: &'a mut HashMap<VenueKey, ActiveChitchat>,

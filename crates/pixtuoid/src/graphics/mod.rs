@@ -221,22 +221,21 @@ pub(crate) enum Plan {
     },
 }
 
-/// A text variable: `None` when unset, empty or not UTF-8.
+/// A text variable: `None` when unset, blank or not UTF-8.
 fn env_text(name: &str) -> Option<String> {
-    pixtuoid_core::platform::text_env(name).filter(|v| !v.is_empty())
+    pixtuoid_core::platform::text_env(name).filter(|v| !v.trim().is_empty())
 }
 
-/// A marker variable, presence only: a non-UTF-8 value (`$TMUX` holds a path)
-/// still counts as set.
+/// A marker variable, presence only: [`path_env`](pixtuoid_core::platform::path_env)'s
+/// rule, so a non-UTF-8 value (`$TMUX` holds a path) is set and a blank one is not.
 fn env_set(name: &str) -> bool {
-    std::env::var_os(name).is_some_and(|v| !v.is_empty())
+    pixtuoid_core::platform::path_env(name).is_some()
 }
 
-/// The terminal and the link to it as the environment names them: the one
-/// read of these variables, so the probe and the motion default cannot decide
-/// tmux or ssh differently.
+/// The terminal and the link to it as the environment names them: the probe
+/// and the motion default read these variables only through here.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub(crate) struct TermEnv {
+struct TermEnv {
     term: Option<String>,
     term_program: Option<String>,
     /// `$TMUX`: this process is a tmux client.
@@ -245,7 +244,7 @@ pub(crate) struct TermEnv {
 }
 
 impl TermEnv {
-    pub(crate) fn read() -> Self {
+    fn read() -> Self {
         Self {
             term: env_text("TERM"),
             term_program: env_text("TERM_PROGRAM"),
@@ -255,12 +254,20 @@ impl TermEnv {
         }
     }
 
-    /// Inside tmux: `TERM` starting `tmux`, or `TERM_PROGRAM` = `tmux` — the
-    /// test upstream applies before wrapping every image in passthrough
+    /// Upstream's test before wrapping every image in passthrough
     /// (ratatui-image 11.0.8 `picker.rs:320-326`), on every platform.
-    fn tmux(&self) -> bool {
+    fn tmux_term(&self) -> bool {
         self.term.as_deref().is_some_and(|t| t.starts_with("tmux"))
             || self.term_program.as_deref() == Some("tmux")
+    }
+
+    /// A tmux client, or a tmux terminal name carried over ssh: either way tmux
+    /// redraws every repaint.
+    fn link(&self) -> Link {
+        Link {
+            tmux: self.tmux_client || self.tmux_term(),
+            ssh: self.ssh,
+        }
     }
 }
 
@@ -274,12 +281,10 @@ pub(crate) struct Link {
     pub(crate) ssh: bool,
 }
 
-impl From<&TermEnv> for Link {
-    fn from(env: &TermEnv) -> Self {
-        Self {
-            tmux: env.tmux_client || env.tmux(),
-            ssh: env.ssh,
-        }
+impl Link {
+    /// The link this process's environment names.
+    pub(crate) fn of_env() -> Self {
+        TermEnv::read().link()
     }
 }
 
@@ -758,7 +763,6 @@ mod tests {
         }
     }
 
-    /// The link the environment names, through the one reader the probe shares.
     #[test]
     fn the_environment_names_the_link() {
         const VARS: [&str; 5] = ["TERM", "TERM_PROGRAM", "TMUX", "SSH_CONNECTION", "SSH_TTY"];
@@ -767,7 +771,7 @@ mod tests {
                 let value = set.iter().find(|(n, _)| *n == name).map(|(_, v)| *v);
                 (name, value)
             });
-            temp_env::with_vars(vars, || Link::from(&TermEnv::read()))
+            temp_env::with_vars(vars, Link::of_env)
         };
         let tmux = Link {
             tmux: true,
@@ -778,7 +782,13 @@ mod tests {
             ..Link::default()
         };
         assert_eq!(link(&[("TERM", "xterm-ghostty")]), Link::default());
-        assert_eq!(link(&[("TMUX", "")]), Link::default(), "empty is unset");
+        for blank in ["", " \t"] {
+            assert_eq!(
+                link(&[("TMUX", blank)]),
+                Link::default(),
+                "{blank:?} is unset"
+            );
+        }
         assert_eq!(link(&[("TMUX", "/tmp/tmux-501/default,1,0")]), tmux);
         assert_eq!(link(&[("TERM", "tmux-256color")]), tmux, "carried over ssh");
         assert_eq!(link(&[("TERM_PROGRAM", "tmux")]), tmux);

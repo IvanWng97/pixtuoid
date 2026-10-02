@@ -1732,7 +1732,7 @@ fn empty_frame(layout: &SceneLayout) -> SimFrame {
 fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
     let pack = crate::pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let (scene, motion) = (SceneState::uniform(16), HashMap::new());
+    let (scene, walks) = (SceneState::uniform(16), HashMap::new());
     let now = SystemTime::UNIX_EPOCH;
     let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
     let (mut cache, mut base_fill) = (FrameCache::new(), BaseFillCache::new());
@@ -1748,7 +1748,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
         shadows: &mut crate::ground::DepthsCache::default(),
         theme,
         floor: crate::floor::FloorMeta::ground(),
-        walks: &motion,
+        walks: &walks,
         debug_walkable: false,
     };
     let lights = crate::lighting::Lights::of(
@@ -2062,12 +2062,12 @@ fn character_sort_row_exceeds_desk_when_south_of_it() {
 #[test]
 fn character_sort_row_below_desk_when_seated_at_it() {
     let desk_y: u16 = 20;
-    let seat_top_left = seated_top_left(
+    let top_left = seated_top_left(
         Point { x: 0, y: desk_y },
         CHARACTER_SPRITE_W,
         crate::layout::Facing::South,
     );
-    let char_sort_row = seat_top_left.y + 12;
+    let char_sort_row = top_left.y + 12;
     let desk_sort_row = desk_y
         + crate::layout::furniture_def(crate::layout::Furniture::Desk)
             .visual
@@ -3583,7 +3583,7 @@ fn sim_step_advances_motion_without_painting() {
             .walks
             .get(&id)
             .is_some_and(|m| m.entry.is_some()),
-        "sim_step snapshotted the entry walk profile into the motion store"
+        "sim_step snapshotted the entry walk profile into the walks map"
     );
 }
 
@@ -3807,7 +3807,7 @@ fn paint_frame_is_pure_and_byte_identical() {
     );
 
     let light_before = owned.vacancy_dim.level();
-    let motion_before = format!("{:?}", owned.route.walks);
+    let walks_before = format!("{:?}", owned.route.walks);
     let history_before = format!("{:?}", owned.route.history);
     let chitchat_before = owned.chitchat.len();
 
@@ -3854,8 +3854,8 @@ fn paint_frame_is_pure_and_byte_identical() {
     );
     assert_eq!(
         format!("{:?}", owned.route.walks),
-        motion_before,
-        "paint must not move motion state"
+        walks_before,
+        "paint must not move walk state"
     );
     assert_eq!(
         format!("{:?}", owned.route.history),
@@ -4518,8 +4518,8 @@ fn a_placement_is_seated_exactly_when_its_figure_sits_on_furniture() {
 #[test]
 fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     use crate::layout::{TEST_DEFAULT_DESKS, furniture_def};
-    use crate::motion::WanderKind;
     use crate::pose::Pose;
+    use crate::walk::WanderKind;
     use std::time::Duration;
 
     let pack = crate::pack::test_default_pack();

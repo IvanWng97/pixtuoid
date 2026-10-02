@@ -22,7 +22,7 @@ use super::{env_set, env_text};
 #[cfg(any(unix, test))]
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct EnvHints {
-    term: TermEnv,
+    env: TermEnv,
     lc_terminal: Option<String>,
     wezterm: bool,
     konsole: bool,
@@ -34,7 +34,7 @@ impl EnvHints {
     #[cfg(unix)]
     fn read() -> Self {
         Self {
-            term: TermEnv::read(),
+            env: TermEnv::read(),
             lc_terminal: env_text("LC_TERMINAL"),
             wezterm: env_set("WEZTERM_EXECUTABLE"),
             konsole: env_set("KONSOLE_VERSION"),
@@ -42,15 +42,11 @@ impl EnvHints {
         }
     }
 
-    fn tmux(&self) -> bool {
-        self.term.tmux()
-    }
-
     /// Inside tmux AND a client of it (`$TMUX`): only then does a bare `tmux`
     /// answer for the pane this process runs in. Without `$TMUX` — a tmux `TERM`
     /// carried over ssh — it answers for whatever server this host runs.
     fn our_tmux_pane(&self) -> bool {
-        self.tmux() && self.term.tmux_client
+        self.env.tmux_term() && self.env.tmux_client
     }
 
     /// Protocols never asked for under WezTerm or Konsole: neither implements
@@ -80,9 +76,9 @@ impl EnvHints {
             "Bobcat",
             "WarpTerminal",
         ];
-        let outer = self.tmux() && (self.iterm_session || self.wezterm);
+        let outer = self.env.tmux_term() && (self.iterm_session || self.wezterm);
         let named = self
-            .term
+            .env
             .term_program
             .as_deref()
             .is_some_and(|p| ITERM2_TERM_PROGRAMS.iter().any(|t| p.contains(t)))
@@ -99,7 +95,7 @@ impl EnvHints {
 /// the iTerm2 guess (`picker.rs:127-131`); the cell from its answer, else from
 /// the kernel's window size.
 #[cfg(any(unix, test))]
-fn detected(responses: &[Response], env: &EnvHints, window_cell: Option<CellSize>) -> Detected {
+fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSize>) -> Detected {
     let queried = if responses.contains(&Response::Kitty) {
         Some(ImageProtocol::Kitty)
     } else if responses.contains(&Response::Sixel) {
@@ -112,9 +108,9 @@ fn detected(responses: &[Response], env: &EnvHints, window_cell: Option<CellSize
         _ => None,
     });
     Detected {
-        protocol: queried.or_else(|| env.iterm2()),
+        protocol: queried.or_else(|| hints.iterm2()),
         cell: answered_cell.or(window_cell),
-        tmux: env.tmux(),
+        tmux: hints.env.tmux_term(),
     }
 }
 
@@ -123,8 +119,8 @@ fn detected(responses: &[Response], env: &EnvHints, window_cell: Option<CellSize
 /// (ratatui-image 11.0.8 `picker.rs:147-157`); with nothing named, it is
 /// [`Probe::NoAnswer`].
 #[cfg(any(unix, test))]
-fn unanswered(env: &EnvHints, window_cell: Option<CellSize>) -> Probe {
-    let d = detected(&[], env, window_cell);
+fn unanswered(hints: &EnvHints, window_cell: Option<CellSize>) -> Probe {
+    let d = detected(&[], hints, window_cell);
     if d.protocol.is_some() {
         Probe::Answered(d)
     } else {
@@ -169,14 +165,14 @@ pub(crate) fn probe(ask: bool) -> Probe {
     if !ask {
         return Probe::NotQueried;
     }
-    let env = EnvHints::read();
-    if env.our_tmux_pane() && tmux_passthrough() == Some(false) {
+    let hints = EnvHints::read();
+    if hints.our_tmux_pane() && tmux_passthrough() == Some(false) {
         return Probe::TmuxPassthroughOff;
     }
     let query = Parser::query(
-        env.tmux(),
+        hints.env.tmux_term(),
         QueryStdioOptions {
-            blacklist_protocols: env.blacklist(),
+            blacklist_protocols: hints.blacklist(),
             ..QueryStdioOptions::default()
         },
     );
@@ -189,8 +185,8 @@ pub(crate) fn probe(ask: bool) -> Probe {
         |chunk| take_reply(&mut parser, &mut responses, chunk),
     ) {
         None => Probe::NotQueried,
-        Some(false) => unanswered(&env, window_cell()),
-        Some(true) => Probe::Answered(detected(&responses, &env, window_cell())),
+        Some(false) => unanswered(&hints, window_cell()),
+        Some(true) => Probe::Answered(detected(&responses, &hints, window_cell())),
     }
 }
 
@@ -265,7 +261,7 @@ pub(crate) fn probe(ask: bool) -> Probe {
             w: font.width,
             h: font.height,
         }),
-        tmux: TermEnv::read().tmux(),
+        tmux: TermEnv::read().tmux_term(),
     })
 }
 
@@ -273,9 +269,9 @@ pub(crate) fn probe(ask: bool) -> Probe {
 mod tests {
     use super::*;
 
-    fn env(term: &str, term_program: &str) -> EnvHints {
+    fn hints(term: &str, term_program: &str) -> EnvHints {
         EnvHints {
-            term: TermEnv {
+            env: TermEnv {
                 term: Some(term.to_string()).filter(|s| !s.is_empty()),
                 term_program: Some(term_program.to_string()).filter(|s| !s.is_empty()),
                 ..TermEnv::default()
@@ -284,14 +280,13 @@ mod tests {
         }
     }
 
-    /// `env` as a tmux client, `$TMUX` set.
-    fn client(hints: EnvHints) -> EnvHints {
+    fn client(of: EnvHints) -> EnvHints {
         EnvHints {
-            term: TermEnv {
+            env: TermEnv {
                 tmux_client: true,
-                ..hints.term
+                ..of.env
             },
-            ..hints
+            ..of
         }
     }
 
@@ -336,11 +331,16 @@ mod tests {
     #[test]
     fn iterm2_is_guessed_from_the_terminal_the_environment_names() {
         assert_eq!(
-            detected(&[], &env("xterm-256color", "iTerm.app"), None).protocol,
+            detected(&[], &hints("xterm-256color", "iTerm.app"), None).protocol,
             Some(ImageProtocol::Iterm2)
         );
         assert_eq!(
-            detected(&[Response::Kitty], &env("xterm-256color", "WezTerm"), None).protocol,
+            detected(
+                &[Response::Kitty],
+                &hints("xterm-256color", "WezTerm"),
+                None
+            )
+            .protocol,
             Some(ImageProtocol::Kitty)
         );
         let lc = EnvHints {
@@ -348,7 +348,7 @@ mod tests {
             ..EnvHints::default()
         };
         assert_eq!(lc.iterm2(), Some(ImageProtocol::Iterm2));
-        assert_eq!(env("xterm-ghostty", "ghostty").iterm2(), None);
+        assert_eq!(hints("xterm-ghostty", "ghostty").iterm2(), None);
     }
 
     /// Inside tmux the outer terminal's markers name iTerm2; outside they do
@@ -357,12 +357,12 @@ mod tests {
     fn inside_tmux_the_outer_terminals_markers_name_iterm2() {
         let outer = EnvHints {
             iterm_session: true,
-            ..env("tmux-256color", "tmux")
+            ..hints("tmux-256color", "tmux")
         };
         assert_eq!(outer.iterm2(), Some(ImageProtocol::Iterm2));
         let not_tmux = EnvHints {
             iterm_session: true,
-            ..env("xterm-ghostty", "ghostty")
+            ..hints("xterm-ghostty", "ghostty")
         };
         assert_eq!(not_tmux.iterm2(), None);
     }
@@ -373,7 +373,7 @@ mod tests {
     fn a_silent_terminal_falls_back_to_the_protocol_the_environment_names() {
         let window = Some(CellSize { w: 9, h: 18 });
         assert_eq!(
-            unanswered(&env("xterm-256color", "iTerm.app"), window),
+            unanswered(&hints("xterm-256color", "iTerm.app"), window),
             Probe::Answered(Detected {
                 protocol: Some(ImageProtocol::Iterm2),
                 cell: window,
@@ -381,7 +381,7 @@ mod tests {
             })
         );
         assert_eq!(
-            unanswered(&env("xterm-ghostty", "ghostty"), window),
+            unanswered(&hints("xterm-ghostty", "ghostty"), window),
             Probe::NoAnswer
         );
     }
@@ -390,19 +390,19 @@ mod tests {
     /// `$TMUX` (carried over ssh) names no server this process runs in.
     #[test]
     fn passthrough_is_read_only_for_a_tmux_clients_own_pane() {
-        let carried = env("tmux-256color", "");
-        assert!(carried.tmux() && !carried.our_tmux_pane());
+        let carried = hints("tmux-256color", "");
+        assert!(carried.env.tmux_term() && !carried.our_tmux_pane());
         assert!(client(carried).our_tmux_pane());
-        assert!(!client(env("xterm-ghostty", "ghostty")).our_tmux_pane());
+        assert!(!client(hints("xterm-ghostty", "ghostty")).our_tmux_pane());
     }
 
     /// The same `TERM`/`TERM_PROGRAM` test ratatui-image applies.
     #[test]
     fn tmux_is_named_by_term_or_term_program() {
-        assert!(env("tmux-256color", "").tmux());
-        assert!(env("xterm-ghostty", "tmux").tmux());
-        assert!(!env("screen-256color", "ghostty").tmux());
-        assert!(!EnvHints::default().tmux());
+        assert!(hints("tmux-256color", "").env.tmux_term());
+        assert!(hints("xterm-ghostty", "tmux").env.tmux_term());
+        assert!(!hints("screen-256color", "ghostty").env.tmux_term());
+        assert!(!EnvHints::default().env.tmux_term());
     }
 
     #[test]

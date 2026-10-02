@@ -19,8 +19,8 @@ use crate::chitchat::{ActiveChitchat, ChitchatBubble};
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
 use crate::layout::{Depth, Facing, FixtureKind, Pivot, Point, SceneLayout, Station, sort_row_at};
-use crate::motion::MotionState;
 use crate::pet::PetFrame;
+use crate::walk::WalkState;
 
 /// Everything the pure-pixel pass observed that the caller still needs.
 pub struct PixelPassResult {
@@ -216,7 +216,7 @@ struct PaintCtx<'a> {
     /// Event ages and the wall clock, and the beat every ambient loop reads —
     /// every sky fact reads [`Self::sky`].
     timing: crate::anim::Timing,
-    /// The sky on `clock`, sampled once for the whole pass.
+    /// The sky on `timing`, sampled once for the whole pass.
     sky: crate::sky::Sky,
     buf: &'a mut RgbBuffer,
     cache: &'a mut FrameCache,
@@ -224,7 +224,7 @@ struct PaintCtx<'a> {
     shadows: &'a mut crate::ground::DepthsCache,
     theme: &'a crate::theme::Theme,
     floor: crate::floor::FloorMeta,
-    walks: &'a HashMap<pixtuoid_core::AgentId, MotionState>,
+    walks: &'a HashMap<pixtuoid_core::AgentId, WalkState>,
     debug_walkable: bool,
 }
 

@@ -7,9 +7,9 @@
 //! agent's home desk.
 //!
 //! Pure geometry over [`WalkableMask`] — no A*, no terminal deps — so the
-//! stateless `pose::pure::idle_pose` and the stateful `motion` walk destinations
-//! stay in lockstep with the render top-left (all three call this with the same
-//! `origin = home desk`).
+//! stateless `pose::pure::idle_pose` and the stateful `walk` destinations
+//! stay in lockstep with where the render stands the sprite (all three call
+//! this with the same `origin = home desk`).
 
 use super::decor::{Facing, Furniture, WaypointKind, furniture_def};
 use super::reach::ReachSet;
@@ -46,8 +46,8 @@ pub(super) fn obstacle_footprint(kind: WaypointKind, pantry_counter_size: Size) 
 }
 
 /// The walkable cell where an agent should stand to use the OBSTACLE furniture
-/// of `kind` centered at `pos` — the RENDER anchor for an `AtWaypoint` obstacle
-/// sprite. It MUST equal the walk goal [`approach_point`] returns for the same
+/// of `kind` centered at `pos` — the cell an `AtWaypoint` obstacle sprite
+/// renders at. It MUST equal the walk goal [`approach_point`] returns for the same
 /// furniture (else the sprite pops onto a different face on arrival), so it
 /// DELEGATES there rather than re-scanning. Seat furniture (`occupies_pos`)
 /// renders ON its `pos` and short-circuits; falls back to `pos` (the "no valid

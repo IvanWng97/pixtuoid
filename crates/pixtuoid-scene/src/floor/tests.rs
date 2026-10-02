@@ -69,13 +69,13 @@ fn daemons_projects_onto_the_ground_floor_only() {
 
 #[test]
 fn door_anim_excludes_arrived_entry_profiles() {
-    use crate::motion::MotionState;
+    use crate::walk::WalkState;
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let id = AgentId::from_transcript_path("/p/door.jsonl");
     let mut fctx = FloorCtx::new();
-    let mut ms = MotionState::new(id);
+    let mut ms = WalkState::new(id);
     // Entry walk: duration 2000ms + pause 300ms → walk_arrived at 2300ms.
-    ms.entry = Some(crate::motion::WalkLeg {
+    ms.entry = Some(crate::walk::WalkLeg {
         started_at: t0,
         profile: WalkProfile {
             duration_ms: 2000,
@@ -94,7 +94,7 @@ fn door_anim_excludes_arrived_entry_profiles() {
         "in-flight entry walk should drive the door cosmetic window"
     );
 
-    // Past arrival, even though MotionState.entry is never cleared for this agent.
+    // Past arrival, even though WalkState.entry is never cleared for this agent.
     fctx.recompute_door_anim_max_ms(t0 + Duration::from_millis(3000));
     assert_eq!(
         fctx.door_anim_max_ms, 0,
@@ -735,7 +735,7 @@ fn floor_session_render_owns_the_dual_eviction() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let gone = AgentId::from_parts("claude-code", "session-evict");
     let mut session = FloorSession::new();
-    session.floor.ctx.walks.insert(gone, MotionState::new(gone));
+    session.floor.ctx.walks.insert(gone, WalkState::new(gone));
     session.office.coffee.insert(gone, now);
 
     let scene = SceneState::new([8; MAX_FLOORS]);
