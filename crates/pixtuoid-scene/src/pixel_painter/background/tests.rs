@@ -1143,7 +1143,7 @@ fn the_classic_lays_the_carpet_the_model_tints() {
         Sky::at_with(now, crate::sky::Weather::Rain),
         theme,
         0.0,
-        Motion::Full.clock(now),
+        Motion::Full.timing(now),
     );
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
     paint_ground_and_walls(

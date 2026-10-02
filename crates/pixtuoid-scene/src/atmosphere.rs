@@ -27,7 +27,7 @@ pub(crate) struct SkyTones {
     /// warm day one, applied in order like the ground's two washes.
     pub(crate) object_wash: [(Rgb, f32); 2],
     /// The weather's cast on the ground, as `(tint, strength)`.
-    pub(crate) ground_tint: (Rgb, f32),
+    ground_tint: (Rgb, f32),
     /// The weather's veil over the window glass, lit for this frame, as
     /// `(color, alpha)`, or `None` where the city shows crisp.
     pub(crate) glass_veil: Option<(Rgb, f32)>,
@@ -103,6 +103,19 @@ pub(crate) struct Carpet {
     pub(crate) lit: Rgb,
     pub(crate) base: Rgb,
     pub(crate) dark: Rgb,
+}
+
+impl Carpet {
+    /// `theme`'s carpet as it is.
+    #[cfg(test)]
+    pub(crate) fn plain(theme: &Theme) -> Self {
+        let s = &theme.surface;
+        Carpet {
+            lit: s.carpet_light,
+            base: s.carpet_base,
+            dark: s.carpet_dark,
+        }
+    }
 }
 
 impl SkyTones {
