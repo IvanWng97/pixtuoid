@@ -11,10 +11,11 @@ pub(crate) use density::{DenseFrame, densest_frame};
 #[cfg(test)]
 pub(crate) use lookup::DESK_BEZEL_RAISE;
 pub(crate) use lookup::{
-    CLOCK_FACE_KEY, COOLER_WATER, DESK_BULB_KEY, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE,
-    PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, VENDING_MACHINE_SPRITE, animation_frame_at,
-    appliance_frame_index, appliance_overrides, appliance_sprite, desk_art, desk_art_top,
-    desk_sprite_name, fixture_overrides, frame_at, looping_frame_index,
+    CLOCK_FACE_KEY, COOLER_WATER, DESK_BULB_KEY, DESK_CHAIR_SPRITE, FISH_TANK_SPRITE,
+    MEETING_TABLE_SPRITE, PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY,
+    VENDING_MACHINE_SPRITE, WATER_COOLER_SPRITE, animation_frame_at, appliance_frame_index,
+    appliance_overrides, appliance_sprite, desk_art, desk_art_top, desk_sprite_name,
+    fixture_overrides, frame_at, looping_frame_index,
 };
 
 #[cfg(feature = "native")]
@@ -291,6 +292,51 @@ mod tests {
     use std::fs;
     #[cfg(feature = "native")]
     use std::path::Path;
+
+    /// Every loop the beat plays from the bundled pack holds each frame whole
+    /// Full beats, so the beat neither skips nor stretches one: the gap the
+    /// no-alias test on whole-tick loops leaves.
+    #[test]
+    fn every_bundled_loop_holds_its_frames_whole_beats() {
+        use pixtuoid_core::sprite::format::density_variant_name;
+        let pack = test_default_pack();
+        let pets = crate::pet::PetKind::ALL
+            .iter()
+            .flat_map(|k| [k.walk_anim(), k.sit_anim(), k.sleep_anim()]);
+        let mascots = pixtuoid_core::source::registry::REGISTRY
+            .iter()
+            .filter_map(|d| crate::creatures::gateway_mascot_def(d.name))
+            .flat_map(|def| [def.walk, def.rest]);
+        let fixtures = [
+            FISH_TANK_SPRITE,
+            WATER_COOLER_SPRITE,
+            VENDING_MACHINE_SPRITE,
+            PRINTER_SPRITE,
+        ];
+        let looped = fixtures.into_iter().chain(pets).chain(mascots);
+        for base in looped {
+            let names = std::iter::once(base.to_string()).chain(
+                pack.density_variants()
+                    .into_iter()
+                    .map(|d| density_variant_name(base, d)),
+            );
+            for name in names {
+                let Some(anim) = pack.animation(&name) else {
+                    continue;
+                };
+                let frame_ms = u64::from(anim.frame_ms());
+                assert!(
+                    anim.frames().len() < 2 || frame_ms % crate::anim::FULL_TICK_MS == 0,
+                    "{name}: {frame_ms} ms is not whole beats"
+                );
+            }
+        }
+        assert_eq!(
+            pack.animation("typing").map(|a| u64::from(a.frame_ms())),
+            Some(crate::pose::TYPING_FRAME_MS),
+            "the pack's typing loop says what the sim keys it by"
+        );
+    }
 
     #[test]
     fn every_art_set_member_is_registered_inherited_art_in_one_set_only() {

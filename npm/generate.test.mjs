@@ -31,7 +31,10 @@ const TARGETS = [
   { rust: "aarch64-pc-windows-msvc", pkg: "win32-arm64", os: "win32", cpu: "arm64", win: true },
 ];
 
-function scaffold(t, { skip } = {}) {
+// A release archive's notices as `just stage-notices` lays them out.
+const NOTICE_FILES = ["LICENSE", join("licenses", "pixtuoid", "fonts", "OFL-Font.txt")];
+
+function scaffold(t, { skip, skipNotices } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "pixtuoid-gen-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -61,6 +64,11 @@ function scaffold(t, { skip } = {}) {
     const ext = tg.win ? ".exe" : "";
     writeFileSync(join(tdir, "pixtuoid" + ext), "fake-tui");
     writeFileSync(join(tdir, "pixtuoid-hook" + ext), "fake-hook");
+    if (tg.rust === skipNotices) continue;
+    for (const f of NOTICE_FILES) {
+      mkdirSync(dirname(join(tdir, f)), { recursive: true });
+      writeFileSync(join(tdir, f), `notice ${f}`);
+    }
   }
   return { dir, npmDir, artifacts };
 }
@@ -96,11 +104,38 @@ test("stamps launcher + all 6 platform packages with the asymmetric libc gate", 
     else assert.equal("libc" in pkg, false, `${name} omits libc`);
 
     const ext = tg.win ? ".exe" : "";
-    assert.deepEqual(pkg.files.sort(), ["pixtuoid" + ext, "pixtuoid-hook" + ext].sort());
+    assert.deepEqual(
+      pkg.files.sort(),
+      ["pixtuoid" + ext, "pixtuoid-hook" + ext, "LICENSE", "licenses"].sort(),
+    );
     for (const f of pkg.files) {
       assert.ok(existsSync(join(npmDir, "@pixtuoid", `cli-${tg.pkg}`, f)), `${f} copied`);
     }
+    for (const f of NOTICE_FILES) {
+      assert.equal(
+        readFileSync(join(npmDir, "@pixtuoid", `cli-${tg.pkg}`, f), "utf8"),
+        `notice ${f}`,
+        `${name} carries ${f}`,
+      );
+    }
   }
+  for (const f of NOTICE_FILES) {
+    assert.ok(existsSync(join(npmDir, "pixtuoid", f)), `launcher carries ${f}`);
+  }
+});
+
+test("throws when a target's archive lacks the notices", (t) => {
+  const { npmDir, artifacts } = scaffold(t, { skipNotices: "x86_64-pc-windows-msvc" });
+  const r = run(npmDir, artifacts, "1.2.3");
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /missing LICENSE in .*x86_64-pc-windows-msvc/);
+});
+
+test("the launcher publishes the notices it is given", () => {
+  const launcher = JSON.parse(
+    readFileSync(join(dirname(SCRIPT), "pixtuoid", "package.json"), "utf8"),
+  );
+  assert.ok(launcher.files.includes("LICENSE") && launcher.files.includes("licenses/"));
 });
 
 test("accepts a prerelease semver", (t) => {

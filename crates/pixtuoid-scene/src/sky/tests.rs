@@ -114,13 +114,17 @@ fn a_policy_picks_the_clock_or_holds_its_weather() {
     for s in (0..40 * WEATHER_CYCLE_SECS).step_by(STRIDE_SECS) {
         let now = at_secs(1_700_000_000 + s);
         assert_eq!(
-            Sky::at(now, WeatherPolicy::Clock).weather(),
+            Sky::at(crate::anim::Motion::Full.clock(now), WeatherPolicy::Clock).weather(),
             clock_weather(now),
             "{s}"
         );
         for w in Weather::ALL {
             assert_eq!(
-                Sky::at(now, WeatherPolicy::Forced(w)).weather(),
+                Sky::at(
+                    crate::anim::Motion::Full.clock(now),
+                    WeatherPolicy::Forced(w)
+                )
+                .weather(),
                 WeatherMix::pure(w)
             );
         }
@@ -325,6 +329,22 @@ fn the_weather_is_deterministic_and_changes_across_slots() {
     assert_eq!(clock_weather(at(17)), clock_weather(at(17)));
     let unique: std::collections::HashSet<_> = (0..20).map(slot_weather).collect();
     assert!(unique.len() >= 2, "weather should vary across slots");
+}
+
+/// At rest no strike flashes, for the photosensitive.
+#[test]
+fn no_strike_flashes_at_rest() {
+    for bucket in 0..24u64 {
+        let strike = std::time::UNIX_EPOCH
+            + std::time::Duration::from_millis(
+                bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket),
+            );
+        let sky = Sky::at(
+            crate::anim::Motion::Still.clock(strike),
+            WeatherPolicy::Forced(Weather::Storm),
+        );
+        assert_eq!(sky.flash(), 0.0, "bucket {bucket}");
+    }
 }
 
 /// The one pin on the clock-to-flash path through [`Sky::at`], and on the
@@ -723,7 +743,7 @@ fn a_changing_storm_fires_whole_strikes_by_its_share() {
         let at = |ms: u64| std::time::UNIX_EPOCH + Duration::from_millis(start + ms);
         let phases: Vec<f32> = (0..LIGHTNING_FLASH_MS)
             .step_by(SAMPLE_MS)
-            .map(|ms| flash_level_at(at(ms), WeatherPolicy::Clock))
+            .map(|ms| flash_level_at(crate::anim::Beat::at_ms(start + ms), WeatherPolicy::Clock))
             .collect();
         let fired = phases == whole;
         assert!(
@@ -760,5 +780,18 @@ fn no_strike_runs_across_a_change_of_weather() {
             clock_weather(at(last)),
             "bucket {bucket}'s strike crosses a change"
         );
+    }
+}
+
+/// The weather, transitions included, keeps the wall clock on every tier:
+/// only the loops slow or rest.
+#[test]
+fn the_weather_keeps_real_time_on_every_tier() {
+    use crate::anim::Motion;
+    for s in (0..86_400u64).step_by(97) {
+        let now = at_secs(1_700_000_000 + s);
+        let weather = |m: Motion| Sky::at(m.clock(now), WeatherPolicy::Clock).weather();
+        assert_eq!(weather(Motion::Calm), weather(Motion::Full), "{s}s");
+        assert_eq!(weather(Motion::Still), weather(Motion::Full), "{s}s");
     }
 }

@@ -2,11 +2,8 @@
 //! and what a pane's glass shows at a point, as a few tones resolved once a
 //! frame and picked per pixel by ordered dither.
 
-use std::time::SystemTime;
-
 use pixtuoid_core::sprite::Rgb;
 
-use crate::anim::epoch_ms;
 use crate::atmosphere::Moment;
 use crate::composite::{blend, blend_rgb};
 use crate::dither::FALLOFF_TONES;
@@ -170,8 +167,8 @@ fn star_exists(px: u16, py: u16) -> bool {
 }
 
 /// Per-star twinkle: a hashed per-star cycle length, rerolled on/off each cycle.
-fn star_twinkle(px: u16, py: u16, now: SystemTime) -> bool {
-    let now_ms = epoch_ms(now);
+fn star_twinkle(px: u16, py: u16, beat: crate::anim::Beat) -> bool {
+    let now_ms = beat.ms();
     let seed = (px as u64).wrapping_mul(131) ^ (py as u64).wrapping_mul(521);
     let cycle_ms = STAR_TWINKLE_CYCLE_BASE_MS + (seed % STAR_TWINKLE_CYCLE_SPAN_MS);
     let phase = now_ms / cycle_ms;
@@ -224,7 +221,7 @@ impl Blaze {
 pub(crate) struct SkyView {
     disc: Option<Disc>,
     stars: bool,
-    now: SystemTime,
+    beat: crate::anim::Beat,
     sky: Bands,
     star: Bands,
     lit: Bands,
@@ -252,7 +249,7 @@ impl SkyView {
         Self {
             disc,
             stars: look.star_strength > 0.0,
-            now: moment.now,
+            beat: moment.beat,
             sky,
             star: over(STAR_COLOR, look.star_strength * STAR_ALPHA_MAX),
             lit: over(core, vis),
@@ -325,7 +322,7 @@ impl PaneSky<'_> {
             && (g.0 % d, g.1 % d) == (d / 2, d / 2)
             && glass_dy < f32::from(self.clear_rows)
             && star_exists(sx, sy)
-            && star_twinkle(sx, sy, v.now)
+            && star_twinkle(sx, sy, v.beat)
         {
             return v.star[i];
         }
@@ -405,7 +402,12 @@ mod tests {
     fn view(hour: u32) -> SkyView {
         let now = crate::localclock::at_hour(hour);
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let moment = Moment::resolve(Sky::at_with(now, Weather::Clear), theme, 0.0, now);
+        let moment = Moment::resolve(
+            Sky::at_with(now, Weather::Clear),
+            theme,
+            0.0,
+            crate::anim::Motion::Full.clock(now),
+        );
         SkyView::of(&moment, 160, 40, theme)
     }
 

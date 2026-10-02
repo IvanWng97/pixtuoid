@@ -178,7 +178,7 @@ impl GlassWeather {
         Self {
             veil: moment.look.glass_veil,
             falls: [falls.next().flatten(), falls.next().flatten()],
-            tick: crate::anim::epoch_ms(moment.now),
+            tick: moment.beat.ms(),
         }
     }
 
@@ -255,7 +255,7 @@ mod tests {
             Sky::at_with(now, w),
             &crate::theme::NORMAL,
             0.0,
-            now,
+            crate::anim::Motion::Full.clock(now),
         ))
     }
 
@@ -327,7 +327,12 @@ mod tests {
                 Weather::Storm,
                 step,
             ));
-            let glass = GlassWeather::of(&Moment::resolve(sky, &crate::theme::NORMAL, 0.0, now));
+            let glass = GlassWeather::of(&Moment::resolve(
+                sky,
+                &crate::theme::NORMAL,
+                0.0,
+                crate::anim::Motion::Full.clock(now),
+            ));
             let count = |of: &Fall| {
                 glass
                     .falls

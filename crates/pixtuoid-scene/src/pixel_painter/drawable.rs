@@ -237,7 +237,7 @@ pub(super) struct DrawableCtx<'a> {
     pub buf: &'a mut RgbBuffer,
     pub pack: &'a Pack,
     pub cache: &'a mut FrameCache,
-    pub now: SystemTime,
+    pub clock: crate::anim::Clock,
     pub theme: &'a crate::theme::Theme,
 }
 
@@ -253,7 +253,8 @@ pub(super) enum Drawn {
 pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -> Option<Drawn> {
     let buf = &mut *c.buf;
     let cache = &mut *c.cache;
-    let (pack, now, theme) = (c.pack, c.now, c.theme);
+    let (pack, theme) = (c.pack, c.theme);
+    let crate::anim::Clock { now, beat } = c.clock;
     match kind {
         DrawableKind::DeskCubicle {
             desk,
@@ -370,7 +371,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
         }
         DrawableKind::Appliance { pos, sprite, busy } => {
             let art = pack.animation(sprite).and_then(|anim| {
-                anim.recolorable(crate::pack::appliance_frame_index(anim, *busy, now))
+                anim.recolorable(crate::pack::appliance_frame_index(anim, *busy, beat))
             });
             if let Some(art) = art {
                 let themed = art.recolored(&crate::pack::appliance_overrides(&theme.appliance));
@@ -429,7 +430,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             );
         }
         DrawableKind::FishTank { pos } => {
-            paint_fish_tank(buf, *pos, now, theme);
+            paint_fish_tank(buf, *pos, beat, theme);
         }
         DrawableKind::MeetingChair { pos, back_west } => {
             paint_meeting_chair(buf, *pos, *back_west, theme);
@@ -437,7 +438,7 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
         DrawableKind::CoatRack { pos } => {
             paint_coat_rack(buf, *pos, theme);
         }
-        DrawableKind::WaterCooler(cooler) => paint_water_cooler(buf, *cooler, now, theme),
+        DrawableKind::WaterCooler(cooler) => paint_water_cooler(buf, *cooler, beat, theme),
         DrawableKind::TrashBin(bin) => paint_trash_bin(buf, *bin),
         DrawableKind::Doormat(mat) => paint_doormat(buf, *mat, theme),
         DrawableKind::NoticeBoard(board) => paint_notice_board(buf, *board, theme),
@@ -605,6 +606,7 @@ pub(super) fn enqueue_room_walls<'a>(layout: &'a SceneLayout, drawables: &mut Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::anim::Motion;
     use crate::layout::DESK_W;
     use crate::pet::PetKind;
 
@@ -747,7 +749,7 @@ mod tests {
         let render = |cup, ms| {
             let mut buf = RgbBuffer::filled(60, 60, bg);
             let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms);
-            let steam = crate::sim::cup_effects(desk, cup, now);
+            let steam = crate::sim::cup_effects(desk, cup, Motion::Full.beat(now));
             paint_desk_coffee(&mut buf, desk, cup, &steam, th);
             buf.as_slice().iter().filter(|&&c| c != bg).count()
         };
@@ -778,7 +780,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now: SystemTime::UNIX_EPOCH,
+                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -794,7 +796,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now: SystemTime::UNIX_EPOCH,
+                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -818,7 +820,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    now: SystemTime::UNIX_EPOCH,
+                    clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
                     theme: th,
                 },
             );
@@ -847,7 +849,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now: SystemTime::UNIX_EPOCH,
+                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -875,7 +877,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now: SystemTime::UNIX_EPOCH,
+                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -890,7 +892,7 @@ mod tests {
                 buf: &mut buf2,
                 pack: &pack,
                 cache: &mut cache,
-                now: SystemTime::UNIX_EPOCH,
+                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -947,7 +949,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    now,
+                    clock: Motion::Full.clock(now),
                     theme: theme(),
                 },
             );
@@ -998,7 +1000,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    now,
+                    clock: Motion::Full.clock(now),
                     theme: theme(),
                 },
             );
@@ -1041,7 +1043,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now,
+                clock: Motion::Full.clock(now),
                 theme: theme(),
             },
         );
@@ -1060,7 +1062,8 @@ mod tests {
         let pos = Point { x: 30, y: 40 };
         let mut render = |anim_name: &'static str| {
             let mut buf = RgbBuffer::filled(60, 60, Rgb { r: 0, g: 0, b: 0 });
-            let effects = crate::sim::pet_effects(PetKind::Cat, pos, anim_name, None, now);
+            let effects =
+                crate::sim::pet_effects(PetKind::Cat, pos, anim_name, None, Motion::Full.beat(now));
             let d = Drawable {
                 sort_row: pos.y,
                 layer: Layer::Figure,
@@ -1078,7 +1081,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    now,
+                    clock: Motion::Full.clock(now),
                     theme: theme(),
                 },
             );
@@ -1123,7 +1126,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now: SystemTime::UNIX_EPOCH,
+                clock: Motion::Full.clock(SystemTime::UNIX_EPOCH),
                 theme: th,
             },
         );
@@ -1215,7 +1218,7 @@ mod tests {
                 buf: &mut buf,
                 pack: &pack,
                 cache: &mut cache,
-                now,
+                clock: Motion::Full.clock(now),
                 theme: theme(),
             },
         );
@@ -1256,7 +1259,7 @@ mod tests {
                     buf: &mut buf,
                     pack: &pack,
                     cache: &mut cache,
-                    now,
+                    clock: Motion::Full.clock(now),
                     theme: theme(),
                 },
             );

@@ -45,23 +45,27 @@ pub(crate) struct Moment {
     /// Always `sky`'s, resolved against the frame's theme.
     pub(crate) look: SkyTones,
     pub(crate) altitude: f32,
+    /// The wall clock, for what tells the time: the sky's hour, the clock face.
     pub(crate) now: std::time::SystemTime,
+    /// What every ambient loop reads instead of [`now`](Self::now).
+    pub(crate) beat: crate::anim::Beat,
 }
 
 impl Moment {
-    /// `sky`, looked at under `theme` from `altitude` at `now`. The sky is
-    /// given, not derived from `now`, so a forced weather or flash carries.
+    /// `sky`, looked at under `theme` from `altitude` on `clock`. The sky is
+    /// given, not derived from the clock, so a forced weather or flash carries.
     pub(crate) fn resolve(
         sky: Sky,
         theme: &Theme,
         altitude: f32,
-        now: std::time::SystemTime,
+        clock: crate::anim::Clock,
     ) -> Self {
         Self {
             look: SkyTones::resolve(&sky, theme),
             sky,
             altitude,
-            now,
+            now: clock.now,
+            beat: clock.beat,
         }
     }
 }
