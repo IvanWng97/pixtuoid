@@ -519,7 +519,7 @@ pub(crate) fn snapshot_leg_profile(
 }
 
 /// Freeze the WanderBack profile. The endpoint is the desk APPROACH cell
-/// (matching `seated_anchor` via the chair-glide) so there's no jump on arrival;
+/// (matching `seated_top_left` via the chair-glide) so there's no jump on arrival;
 /// this intentionally differs from `core::idle_pose`'s raw `to: desk`, since
 /// only the routed path is user-visible.
 fn snapshot_back_profile(

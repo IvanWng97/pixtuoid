@@ -15,7 +15,7 @@ pub(crate) fn hit_test_agent(agents: &[AgentFrame], cell: CellArea) -> Option<Ag
     agents
         .iter()
         .rev()
-        .find(|a| box_hit(Pivot::TopLeft, a.anchor, Size { w: a.w, h: a.h }, cell))
+        .find(|a| box_hit(Pivot::TopLeft, a.top_left, Size { w: a.w, h: a.h }, cell))
         .map(|a| a.agent_id)
 }
 

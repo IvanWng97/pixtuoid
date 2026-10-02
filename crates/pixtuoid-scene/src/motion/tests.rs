@@ -906,7 +906,7 @@ fn pick_wander_dest_falls_back_to_aimless_when_boxed_in() {
 }
 
 /// Dropping or forging the settle cell shows up as a mid-walk pop / wrong
-/// render anchor, so pin the `Named{seat:None}`-vs-seat boundary directly.
+/// render top-left, so pin the `Named{seat:None}`-vs-seat boundary directly.
 #[test]
 fn wander_named_seat_is_some_iff_the_destination_is_sat_on() {
     use crate::layout::furniture_def;

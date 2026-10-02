@@ -10,8 +10,8 @@ use crate::layout::Size;
 use crate::pack::{desk_art_top, frame_at};
 use crate::pose;
 use crate::sim::anchors::{
-    back_couch_anchor, compute_door_frame_idx, seated_anchor_facing, walking_anchor,
-    waypoint_anchor,
+    back_couch_top_left, compute_door_frame_idx, seated_top_left, walking_top_left,
+    waypoint_top_left,
 };
 use crate::sim::seat::{Seat, settle_seat};
 use crate::sim::{CharacterGlow, CharacterPlacement, SimStores};
@@ -1295,7 +1295,7 @@ fn a_seeded_seat_moves_the_chair_the_sitter_and_the_walk_together() {
                 // the sitter and the chair both centre on it
                 for w in [CHARACTER_SPRITE_W, 10] {
                     assert_eq!(
-                        seated_anchor_facing(desk, w, facing).x,
+                        seated_top_left(desk, w, facing).x,
                         centre.x - w / 2,
                         "{desk:?} {facing:?} w={w}: sprite must centre on the seat"
                     );
@@ -1327,10 +1327,10 @@ fn desk_walk_anchor_settles_exactly_on_the_seat() {
             // Y drift: `a_back_turned_seat_puts_the_occupant_past_the_desk_body`.
             for facing in [crate::layout::Facing::South, crate::layout::Facing::North] {
                 assert_eq!(
-                    walking_anchor(crate::layout::desk_walk_anchor_facing(desk, facing), w),
-                    seated_anchor_facing(desk, w, facing),
-                    "walking_anchor(desk_walk_anchor_facing({desk:?}, {facing:?}), {w}) \
-                     must equal seated_anchor_facing",
+                    walking_top_left(crate::layout::desk_walk_anchor_facing(desk, facing), w),
+                    seated_top_left(desk, w, facing),
+                    "walking_top_left(desk_walk_anchor_facing({desk:?}, {facing:?}), {w}) \
+                     must equal seated_top_left",
                 );
             }
         }
@@ -1338,7 +1338,7 @@ fn desk_walk_anchor_settles_exactly_on_the_seat() {
 }
 
 #[test]
-fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
+fn seated_foot_cell_settles_exactly_on_the_render_top_left() {
     use crate::layout::{Furniture, seated_foot_cell};
     for pos in [
         Point { x: 40, y: 30 },
@@ -1349,23 +1349,23 @@ fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
             for f in [Furniture::Couch, Furniture::MeetingSofa] {
                 let s = seated_foot_cell(f, pos).expect("occupies_pos seat");
                 assert_eq!(
-                    walking_anchor(s, w),
-                    back_couch_anchor(pos, w),
-                    "{f:?}: walking_anchor(S={s:?}) must equal back_couch_anchor(pos={pos:?}) w={w}",
+                    walking_top_left(s, w),
+                    back_couch_top_left(pos, w),
+                    "{f:?}: walking_top_left(S={s:?}) must equal back_couch_top_left(pos={pos:?}) w={w}",
                 );
             }
             let s = seated_foot_cell(Furniture::MeetingChair, pos).expect("occupies_pos seat");
             assert_eq!(
-                walking_anchor(s, w),
-                back_couch_anchor(pos, w),
-                "MeetingChair: walking_anchor(S={s:?}) must equal back_couch_anchor(pos={pos:?}) w={w}",
+                walking_top_left(s, w),
+                back_couch_top_left(pos, w),
+                "MeetingChair: walking_top_left(S={s:?}) must equal back_couch_top_left(pos={pos:?}) w={w}",
             );
             let sd = seated_foot_cell(Furniture::Desk, pos).expect("desk is occupies_pos");
             assert_eq!(
-                walking_anchor(sd, w),
-                seated_anchor_facing(pos, w, crate::layout::Facing::South),
-                "Desk: walking_anchor(seated_foot_cell)={:?} must equal seated_anchor",
-                walking_anchor(sd, w),
+                walking_top_left(sd, w),
+                seated_top_left(pos, w, crate::layout::Facing::South),
+                "Desk: walking_top_left(seated_foot_cell)={:?} must equal seated_top_left",
+                walking_top_left(sd, w),
             );
         }
         assert_eq!(seated_foot_cell(Furniture::Pantry, pos), None);
@@ -1515,7 +1515,7 @@ fn desk_sitter_feet_row_is_its_sort_row_on_the_documented_side_of_the_desk() {
             for w in [CHARACTER_SPRITE_W, 10] {
                 let seat = Seat::at_desk(desk, facing);
                 assert_eq!(
-                    seat.render_anchor(w).y + crate::layout::WALKING_Y_OFF,
+                    seat.render_top_left(w).y + crate::layout::WALKING_Y_OFF,
                     seat.sort_row(),
                     "{facing:?}: the sitter's feet row must BE the row they sort on"
                 );
@@ -1548,13 +1548,13 @@ fn sit_arc_sort_row_is_stable_and_on_the_right_side_of_its_furniture() {
 
         // Independent oracle: the pre-lift partition, keyed on kind alone.
         let historical = match w.kind {
-            // back_couch_anchor.y + sprite_h(9) = (pos.y - 7) + 9. The chair
-            // shares the front seat anchor + bottom-row geometry by design.
+            // back_couch_top_left.y + sprite_h(9) = (pos.y - 7) + 9. The chair
+            // shares the front seat top-left + bottom-row geometry by design.
             WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair => {
-                back_couch_anchor(w.pos, CHARACTER_SPRITE_W).y + 9
+                back_couch_top_left(w.pos, CHARACTER_SPRITE_W).y + 9
             }
-            // waypoint_anchor.y + sprite_h(12) = pos.y — the AtWaypoint default.
-            WaypointKind::Island => waypoint_anchor(w.pos, CHARACTER_SPRITE_W).y + 12,
+            // waypoint_top_left.y + sprite_h(12) = pos.y — the AtWaypoint default.
+            WaypointKind::Island => waypoint_top_left(w.pos, CHARACTER_SPRITE_W).y + 12,
             _ => unreachable!("{:?} has a foot cell but no oracle arm — add one", w.kind),
         };
         assert_eq!(
@@ -2063,12 +2063,12 @@ fn character_sort_row_exceeds_desk_when_south_of_it() {
 #[test]
 fn character_sort_row_below_desk_when_seated_at_it() {
     let desk_y: u16 = 20;
-    let seated_anchor = seated_anchor_facing(
+    let seated_top_left = seated_top_left(
         Point { x: 0, y: desk_y },
         CHARACTER_SPRITE_W,
         crate::layout::Facing::South,
     );
-    let char_sort_row = seated_anchor.y + 12;
+    let char_sort_row = seated_top_left.y + 12;
     let desk_sort_row = desk_y
         + crate::layout::furniture_def(crate::layout::Furniture::Desk)
             .visual
@@ -2343,7 +2343,7 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
     let pack = crate::pack::test_default_pack();
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let black = Rgb { r: 0, g: 0, b: 0 };
-    let anchor = Point { x: 8, y: 8 };
+    let top_left = Point { x: 8, y: 8 };
     let mut slot = make_slot(
         pixtuoid_core::AgentId::from_parts("claude-code", "ses_burn"),
         ActivityState::Idle,
@@ -2359,7 +2359,7 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
                 flip_x: false,
                 glow_tint: None,
             },
-            anchor,
+            top_left,
             slot,
             &pack,
             &mut FrameCache::new(),
@@ -2367,7 +2367,7 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
         );
         let fx = crate::sim::character_effects(
             slot,
-            anchor,
+            top_left,
             drawn.map(|s| s.w),
             crate::sim::Cues::default(),
             Motion::Full.clock(now),
@@ -2400,7 +2400,7 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
     slot.effort = Some(EffortObservation::new("ultra".into(), now));
     let burning = render(&slot);
     assert!(has(&burning, TIP), "Top paints flame tips");
-    let above = (0..anchor.y).any(|y| (0..32).any(|x| burning.get(x, y) != black));
+    let above = (0..top_left.y).any(|y| (0..32).any(|x| burning.get(x, y) != black));
     assert!(above, "the crown must rise above the sprite's top row");
 
     slot.effort = Some(EffortObservation::new(
@@ -2412,15 +2412,15 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
     assert!(has(&decayed, EMBER), "…back to ember hair");
 }
 
-/// The sim crowns a Top-burning agent's placement on its post-breath anchor,
+/// The sim crowns a Top-burning agent's placement on its post-breath top-left,
 /// centred on its pack frame; a Premium one burns no crown.
 #[test]
-fn a_top_burning_placement_carries_its_crown_on_its_anchor() {
+fn a_top_burning_placement_carries_its_crown_on_its_top_left() {
     use crate::effects::EffectKind;
     use crate::pose::Pose;
     use pixtuoid_core::state::EffortObservation;
     let (mut scene, layout, id, now0, pack) = sim_rig();
-    // A breathing instant, where the post-breath anchor is off the fit.
+    // A breathing instant, where the post-breath top-left is off the fit.
     let now = (0..u64::from(u16::MAX))
         .map(|ms| now0 + std::time::Duration::from_millis(ms))
         .find(|&t| {
@@ -2461,8 +2461,8 @@ fn a_top_burning_placement_carries_its_crown_on_its_anchor() {
     assert_eq!(
         crowns,
         [Point {
-            x: p.anchor.x + w / 2,
-            y: p.anchor.y
+            x: p.top_left.x + w / 2,
+            y: p.top_left.y
         }]
     );
 }
@@ -2782,7 +2782,7 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
         .find(|h| color_of(h, SHIRT_KEY) != color_of(&unknown, SHIRT_KEY))
         .expect("some cwd lands on a different outfit than the fallback");
 
-    let anchor = Point { x: 2, y: 2 };
+    let top_left = Point { x: 2, y: 2 };
     let black = Rgb { r: 0, g: 0, b: 0 };
     let mut cache = FrameCache::new();
     let mut before = RgbBuffer::filled(24, 24, black);
@@ -2794,7 +2794,7 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
             flip_x: false,
             glow_tint: None,
         },
-        anchor,
+        top_left,
         &unknown,
         &pack,
         &mut cache,
@@ -2810,7 +2810,7 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
             flip_x: false,
             glow_tint: None,
         },
-        anchor,
+        top_left,
         &healed,
         &pack,
         &mut cache,
@@ -2826,7 +2826,7 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
             flip_x: false,
             glow_tint: None,
         },
-        anchor,
+        top_left,
         &healed,
         &pack,
         &mut FrameCache::new(),
@@ -3732,10 +3732,10 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             .expect("drawn")
     });
     assert!(
-        a.anchor.x < b.anchor.x + b.w
-            && b.anchor.x < a.anchor.x + a.w
-            && a.anchor.y < b.anchor.y + b.h
-            && b.anchor.y < a.anchor.y + a.h,
+        a.top_left.x < b.top_left.x + b.w
+            && b.top_left.x < a.top_left.x + a.w
+            && a.top_left.y < b.top_left.y + b.h
+            && b.top_left.y < a.top_left.y + a.h,
         "premise: the two arrivals overlap: {a:?} {b:?}"
     );
 }
@@ -3760,7 +3760,7 @@ fn a_character_whose_anim_is_missing_is_not_hoverable() {
                     flip_x: false,
                     glow_tint: None,
                 },
-                anchor: Point { x: 20, y: 20 },
+                top_left: Point { x: 20, y: 20 },
                 label_anchor: Point { x: 20, y: 20 },
                 effects: &[],
             },
@@ -4162,8 +4162,8 @@ fn chair_sitter_bottom_row_lands_on_its_sort_row_overlapping_the_chair_body() {
     let seat = Seat::at_waypoint(WaypointKind::MeetingChair, pos, Facing::West);
     let (anim, _) = seat.sprite_for("seated");
     let seated_h = pack.animation(anim).expect("chair sprite").frames()[0].height();
-    let anchor_y = pos.y - SEAT_RENDER_Y_OFF;
-    let bottom = anchor_y + seated_h - 1;
+    let top = pos.y - SEAT_RENDER_Y_OFF;
+    let bottom = top + seated_h - 1;
     assert_eq!(
         bottom,
         seat.sort_row(),
@@ -4794,19 +4794,19 @@ fn a_meeting_chair_sitter_is_drawn_on_the_seat_not_5px_high() {
             .characters
             .iter()
             .find(|c| frame.agents[c.agent_idx].agent_id == id)
-            .map(|c| c.anchor)
+            .map(|c| c.top_left)
             .expect("chair sitter is placed");
-        let seat = back_couch_anchor(stand, CHARACTER_SPRITE_W);
-        let walk = waypoint_anchor(stand, CHARACTER_SPRITE_W);
+        let seat = back_couch_top_left(stand, CHARACTER_SPRITE_W);
+        let walk = waypoint_top_left(stand, CHARACTER_SPRITE_W);
         assert!(
             (drawn.y as i32 - seat.y as i32).abs() <= 1,
-            "meeting-chair sitter y {} must track the seat anchor {} (±breath)",
+            "meeting-chair sitter y {} must track the seat top-left {} (±breath)",
             drawn.y,
             seat.y
         );
         assert!(
             (drawn.y as i32 - walk.y as i32).abs() >= 4,
-            "meeting-chair sitter must NOT sit on the 5px-high waypoint_anchor {} (the bug)",
+            "meeting-chair sitter must NOT sit on the 5px-high waypoint_top_left {} (the bug)",
             walk.y
         );
         checked = true;
@@ -4816,7 +4816,7 @@ fn a_meeting_chair_sitter_is_drawn_on_the_seat_not_5px_high() {
 }
 
 #[test]
-fn render_anchor_matches_the_pre_lift_kind_partition() {
+fn render_top_left_matches_the_pre_lift_kind_partition() {
     use crate::layout::{Facing, Point, WaypointKind};
     let stand = Point { x: 80, y: 60 };
     let w = CHARACTER_SPRITE_W;
@@ -4824,15 +4824,15 @@ fn render_anchor_matches_the_pre_lift_kind_partition() {
         // Independent oracle: the exact pre-lift partition, keyed on kind alone.
         let expected = match kind {
             WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair => {
-                back_couch_anchor(stand, w)
+                back_couch_top_left(stand, w)
             }
-            _ => waypoint_anchor(stand, w),
+            _ => waypoint_top_left(stand, w),
         };
         for facing in [Facing::North, Facing::South, Facing::East, Facing::West] {
             assert_eq!(
-                Seat::at_waypoint(kind, stand, facing).render_anchor(w),
+                Seat::at_waypoint(kind, stand, facing).render_top_left(w),
                 expected,
-                "{kind:?}/{facing:?}: render anchor drifted from the pre-lift partition"
+                "{kind:?}/{facing:?}: render top-left drifted from the pre-lift partition"
             );
         }
     }
@@ -4852,7 +4852,7 @@ fn an_upright_occupant_sorts_on_the_row_their_sprite_bottoms_out_on() {
         }
         let seat = Seat::at_waypoint(kind, stand, Facing::South);
         assert_eq!(
-            seat.render_anchor(w).y + crate::layout::WALKING_Y_OFF,
+            seat.render_top_left(w).y + crate::layout::WALKING_Y_OFF,
             seat.sort_row(),
             "{kind:?}: an upright occupant's feet row must BE the row they sort on"
         );
@@ -5057,7 +5057,7 @@ fn east_rim_targets(layout: &SceneLayout, now0: SystemTime) -> Vec<(u32, u64)> {
                     matches!(
                         pose::derive(&slot, now0 + Duration::from_secs(secs), layout),
                         Some(Pose::AimlessAt { dest })
-                            if waypoint_anchor(dest, w).x + w > layout.buf_w
+                            if waypoint_top_left(dest, w).x + w > layout.buf_w
                     )
                 })
                 .map(|secs| (aid, secs))
@@ -5117,7 +5117,7 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
                 },
             );
             if let Some(Some(Pose::AimlessAt { dest })) = f.poses.get(&id)
-                && waypoint_anchor(*dest, w).x + w > layout.buf_w
+                && waypoint_top_left(*dest, w).x + w > layout.buf_w
             {
                 hit += 1;
             }
@@ -5127,11 +5127,11 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
                     .and_then(|a| a.frames().first())
                     .map_or(w, |fr| fr.width());
                 assert!(
-                    c.anchor.x + fw <= layout.buf_w,
+                    c.top_left.x + fw <= layout.buf_w,
                     "agent {aid} at {secs}s renders at {:?} ({fw} px wide), running {} px \
                      past the {} px canvas",
-                    c.anchor,
-                    c.anchor.x + fw - layout.buf_w,
+                    c.top_left,
+                    c.top_left.x + fw - layout.buf_w,
                     layout.buf_w
                 );
             }
@@ -5214,8 +5214,15 @@ fn assert_badges_top_their_frames(
     assert!(!drawn.is_empty(), "premise: something is drawn");
     for f in drawn {
         let at = f.label_anchor;
-        assert_eq!(at.x, f.anchor.x + f.w / 2, "{f:?}: off its frame's centre");
-        assert!(at.y <= f.anchor.y + BREATH, "{f:?}: under its frame's top");
+        assert_eq!(
+            at.x,
+            f.top_left.x + f.w / 2,
+            "{f:?}: off its frame's centre"
+        );
+        assert!(
+            at.y <= f.top_left.y + BREATH,
+            "{f:?}: under its frame's top"
+        );
         let c = frame
             .characters
             .iter()
@@ -5227,10 +5234,10 @@ fn assert_badges_top_their_frames(
         });
         match desk_top {
             Some(row) => assert!(
-                at.y <= row && (at.y == row || at.y >= f.anchor.y),
+                at.y <= row && (at.y == row || at.y >= f.top_left.y),
                 "{f:?}: a sitter's badge rises to its desk art's top {row} and no higher"
             ),
-            None => assert!(at.y >= f.anchor.y, "{f:?}: floats above its frame"),
+            None => assert!(at.y >= f.top_left.y, "{f:?}: floats above its frame"),
         }
     }
 }
@@ -5265,7 +5272,7 @@ fn every_seated_badge_tops_its_frame_and_clears_a_raised_monitor() {
     );
     assert_badges_top_their_frames(&frame, &drawn, &layout, &pack);
     assert!(
-        drawn.iter().any(|f| f.label_anchor.y < f.anchor.y),
+        drawn.iter().any(|f| f.label_anchor.y < f.top_left.y),
         "premise: some back-turned sitter's monitor rises over their head"
     );
 }
@@ -5294,7 +5301,7 @@ fn a_breathing_sitter_s_badge_holds_still() {
         let [f] = drawn[..] else {
             panic!("one agent, one sprite: {drawn:?}")
         };
-        tops.insert(f.anchor.y);
+        tops.insert(f.top_left.y);
         badges.insert((f.label_anchor.x, f.label_anchor.y));
     }
     assert_eq!(tops.len(), 2, "premise: the sprite breathes");
@@ -5344,11 +5351,11 @@ fn only_a_placement_that_breathes_takes_the_breath() {
     assert!(!walker.breathes && idler.breathes && sitter.breathes);
     // Neither stands at a desk, so the badge row IS the fitted top.
     assert_eq!(
-        walker.anchor.y, walker.label_anchor.y,
+        walker.top_left.y, walker.label_anchor.y,
         "the walker breathed"
     );
     assert_eq!(
-        idler.anchor.y + 1,
+        idler.top_left.y + 1,
         idler.label_anchor.y,
         "the idler held its breath"
     );
@@ -5441,14 +5448,14 @@ fn a_badge_follows_its_sprite_fitted_to_the_canvas_rim() {
             let Some(Some(Pose::AimlessAt { dest })) = frame.poses.get(&id) else {
                 continue;
             };
-            if waypoint_anchor(*dest, w).x + w <= layout.buf_w {
+            if waypoint_top_left(*dest, w).x + w <= layout.buf_w {
                 continue;
             }
             let drawn = paint_drawn(&owned, &scene, &layout, &pack, now, &frame);
             assert_badges_top_their_frames(&frame, &drawn, &layout, &pack);
             at_the_rim += drawn
                 .iter()
-                .filter(|f| f.anchor.x + f.w == layout.buf_w)
+                .filter(|f| f.top_left.x + f.w == layout.buf_w)
                 .count();
             break;
         }
@@ -5461,8 +5468,8 @@ fn a_back_turned_seat_puts_the_occupant_past_the_desk_body() {
     use crate::layout::{Facing, Furniture};
     let desk_h = crate::layout::furniture_def(Furniture::Desk).visual.h;
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
-        let far = seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::South);
-        let near = seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::North);
+        let far = seated_top_left(desk, CHARACTER_SPRITE_W, Facing::South);
+        let near = seated_top_left(desk, CHARACTER_SPRITE_W, Facing::North);
         assert!(
             far.y < desk.y,
             "a viewer-facing occupant sits ABOVE the desk row: {far:?} vs {desk:?}"
@@ -5514,12 +5521,8 @@ fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
             })
             .map(|(_, &d)| {
                 (
-                    crate::sim::anchors::seated_anchor_facing(
-                        d,
-                        chair_w,
-                        crate::layout::Facing::North,
-                    )
-                    .x,
+                    crate::sim::anchors::seated_top_left(d, chair_w, crate::layout::Facing::North)
+                        .x,
                     d.y + 6,
                 )
             })
@@ -5579,11 +5582,11 @@ fn paint_chair_back_writes_its_mask_and_nothing_outside_it() {
 fn paint_flame_crown_draws_its_pattern() {
     const BG: Rgb = Rgb { r: 9, g: 9, b: 9 };
     let mut buf = RgbBuffer::filled(40, 40, BG);
-    let anchor = Point { x: 12, y: 20 };
+    let top_left = Point { x: 12, y: 20 };
     const W: u16 = 8;
     super::effects::paint_effect(
         &mut buf,
-        &crate::effects::flame_crown(anchor, W, Motion::Full.beat(SystemTime::UNIX_EPOCH)),
+        &crate::effects::flame_crown(top_left, W, Motion::Full.beat(SystemTime::UNIX_EPOCH)),
         crate::theme::theme_by_name("normal").expect("normal theme"),
     );
     let painted: Vec<(u16, u16)> = (0..buf.height())
@@ -5591,10 +5594,10 @@ fn paint_flame_crown_draws_its_pattern() {
         .filter(|&(x, y)| buf.get(x, y) != BG)
         .collect();
     assert!(!painted.is_empty(), "the crown must paint");
-    let cx = anchor.x + W / 2;
+    let cx = top_left.x + W / 2;
     for &(x, y) in &painted {
         assert!(
-            (cx - 2..=cx + 1).contains(&x) && (anchor.y - 2..=anchor.y).contains(&y),
+            (cx - 2..=cx + 1).contains(&x) && (top_left.y - 2..=top_left.y).contains(&y),
             "the crown painted outside its own box at ({x}, {y})"
         );
     }
@@ -5799,7 +5802,7 @@ fn a_pose_is_its_placements_frame_facing_and_glow() {
         sort_row: 0,
         anim_name: "typing",
         frame_idx: 3,
-        anchor: Point { x: 0, y: 0 },
+        top_left: Point { x: 0, y: 0 },
         label_anchor: Point { x: 0, y: 0 },
         flip_x: true,
         glow,
@@ -5939,7 +5942,7 @@ fn corridor_appliance_art_never_lands_on_a_workstation() {
             .map(|f| f.visual)
             .collect();
         workstations.extend(l.home_desks.iter().enumerate().map(|(i, &desk)| {
-            let at = seated_anchor_facing(
+            let at = seated_top_left(
                 desk,
                 CHARACTER_SPRITE_W,
                 l.desk_facing(FloorLocalDeskIndex(i)),

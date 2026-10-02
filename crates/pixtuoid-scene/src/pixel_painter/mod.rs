@@ -74,7 +74,7 @@ pub struct AgentFrame {
     /// Whose sprite it is.
     pub agent_id: pixtuoid_core::AgentId,
     /// The sprite's top-left, in buffer pixels.
-    pub anchor: Point,
+    pub top_left: Point,
     /// The painted frame's pixel width.
     pub w: u16,
     /// The painted frame's pixel height.
@@ -435,7 +435,7 @@ fn enqueue_characters<'a>(
             kind: DrawableKind::Character {
                 agent,
                 pose: crate::character::SpritePose::of(p, agent, ctx.theme),
-                anchor: p.anchor,
+                top_left: p.top_left,
                 label_anchor: p.label_anchor,
                 effects: &p.effects,
             },
