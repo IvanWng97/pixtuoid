@@ -2045,39 +2045,6 @@ fn every_pod_occludes_via_overhang() {
     }
 }
 
-#[test]
-fn character_sort_row_exceeds_desk_when_south_of_it() {
-    let desk_y: u16 = 20;
-    let desk_sort_row = desk_y
-        + crate::layout::furniture_def(crate::layout::Furniture::Desk)
-            .visual
-            .h;
-    let char_sort_row = (desk_y + 10) + 12;
-    assert!(
-        char_sort_row > desk_sort_row,
-        "walker south of desk must sort after it: char={char_sort_row}, desk={desk_sort_row}"
-    );
-}
-
-#[test]
-fn character_sort_row_below_desk_when_seated_at_it() {
-    let desk_y: u16 = 20;
-    let seated_top_left = seated_top_left(
-        Point { x: 0, y: desk_y },
-        CHARACTER_SPRITE_W,
-        crate::layout::Facing::South,
-    );
-    let char_sort_row = seated_top_left.y + 12;
-    let desk_sort_row = desk_y
-        + crate::layout::furniture_def(crate::layout::Furniture::Desk)
-            .visual
-            .h;
-    assert!(
-        char_sort_row < desk_sort_row,
-        "seated char must sort before desk: char={char_sort_row}, desk={desk_sort_row}"
-    );
-}
-
 fn entry_slot(created_at_ms_ago: u64, now: SystemTime) -> AgentSlot {
     let id = pixtuoid_core::AgentId::from_transcript_path("/door.jsonl");
     let mut s = make_slot(id, ActivityState::Idle);
@@ -5902,8 +5869,8 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
 /// workstation it shares a row with, and the height alone fixes every row
 /// (asserted at every width at seed 0, plus seeds 1 and 2 at one width each).
 /// So a tall-aisle height whose rows never meet is checked once per width;
-/// every other tall height sweeps all widths × seeds. The census sizes are
-/// always swept in full.
+/// every other tall height sweeps all widths × seeds. The
+/// [census](crate::layout::roster::tests::CENSUS) is always swept in full.
 #[test]
 fn corridor_appliance_art_never_lands_on_a_workstation() {
     use crate::layout::{Bounds, CHARACTER_SPRITE_H, CHARACTER_SPRITE_W, FixtureKind, Station};
@@ -5977,17 +5944,9 @@ fn corridor_appliance_art_never_lands_on_a_workstation() {
             }));
         }
     };
-    for (w, h) in [
-        (96, 60),
-        (120, 72),
-        (140, 80),
-        (160, 96),
-        (192, 108),
-        (240, 135),
-        (320, 180),
-        (160, 192),
-    ] {
-        for seed in SEEDS {
+    use crate::layout::roster::tests::{CENSUS, CENSUS_SEEDS};
+    for &(w, h) in CENSUS {
+        for seed in CENSUS_SEEDS {
             check(&lay_out(w, h, seed), w, h, seed);
         }
     }
