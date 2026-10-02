@@ -12,7 +12,7 @@ use pixtuoid_core::sprite::format::Pack;
 
 use crate::cutaway::light::Ambient;
 use crate::cutaway::paint::paint;
-use crate::display::{Office, Showing, Span, frame_list};
+use crate::display::{Office, Showing, Span, compose};
 use crate::floor::SteppedFloor;
 use crate::layout::{Bounds, SceneLayout};
 use crate::render_scale::RenderScale;
@@ -46,7 +46,7 @@ pub enum Dirty {
     Rects(Vec<Bounds>),
 }
 
-/// What every pixel of a frame is painted under, beyond its draw list and
+/// What every pixel of a frame is painted under, beyond its display list and
 /// the canvas's pack.
 struct Epoch {
     // Held, so a later layout cannot reuse its address.
@@ -74,7 +74,7 @@ struct Shown {
     epoch: Epoch,
     /// Every piece's reach and every light's span, each with its fingerprint.
     footprints: Vec<(Span, u64)>,
-    /// [`DrawList::hover_spans`](crate::display::DrawList::hover_spans).
+    /// [`DisplayList::hover_spans`](crate::display::DisplayList::hover_spans).
     hovers: Vec<(Span, Option<AgentId>)>,
 }
 
@@ -105,7 +105,7 @@ impl CutawayCanvas {
             theme,
             scale,
         };
-        let list = frame_list(&stepped.frame, office, showing);
+        let list = compose(&stepped.frame, office, showing);
         let epoch = Epoch {
             layout: Arc::clone(layout),
             theme,
@@ -296,7 +296,7 @@ mod tests {
         let mut last: Option<(RgbBuffer, Vec<(Span, u64)>)> = None;
         for (k, (frame, now)) in steps.iter().enumerate() {
             let full = full_render(&layout, &pack, scale, (frame, floor), *now);
-            let list = frame_list(
+            let list = compose(
                 frame,
                 office,
                 crate::display::compose::tests::showing(floor, *now),
@@ -530,7 +530,7 @@ mod tests {
                 theme: normal(),
                 scale: self.scale,
             };
-            let list = frame_list(
+            let list = compose(
                 frame,
                 office,
                 crate::display::compose::tests::showing(clear_ground(), Self::now()),
@@ -684,7 +684,7 @@ mod tests {
                     theme: normal(),
                     scale: h.scale,
                 };
-                let list = frame_list(
+                let list = compose(
                     &both,
                     office,
                     crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
@@ -740,7 +740,7 @@ mod tests {
                 theme: normal(),
                 scale: h.scale,
             };
-            let list = frame_list(
+            let list = compose(
                 frame,
                 office,
                 crate::display::compose::tests::showing(clear_ground(), Hovering::now()),
@@ -812,7 +812,7 @@ mod tests {
                 theme: normal(),
                 scale: h.scale,
             };
-            frame_list(seated, office, showing)
+            compose(seated, office, showing)
                 .pieces()
                 .iter()
                 .find(|p| matches!(p.kind, crate::display::PieceKind::Board { .. }))

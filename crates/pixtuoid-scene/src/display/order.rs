@@ -1,10 +1,10 @@
-//! Back-to-front ordering for the cutaway's draw list.
+//! Back-to-front ordering for the display list.
 //!
 //! The painter's algorithm needs a total order, and the office does not hand it
 //! one: what it hands over is a set of PAIRWISE facts ("this desk is behind that
 //! walker"). Deriving the order from a dependency graph rather than from a
 //! single sort key is the standard treatment — a sprite is a node, "must be
-//! drawn behind" is an edge, and a topological sort produces the draw list.
+//! drawn behind" is an edge, and a topological sort produces the display list.
 //!
 //! ## Why not just sort by the base row
 //!

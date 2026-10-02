@@ -768,7 +768,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             &mut cache,
             &mut buf,
         );
-        let list = crate::display::frame_list(
+        let list = crate::display::compose(
             &frame,
             office,
             crate::display::compose::tests::showing(ground, now0),

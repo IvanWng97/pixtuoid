@@ -36,7 +36,7 @@ pub(crate) fn showing(
 }
 
 /// A piece's base row — the ordering key — through the SAME `piece_span`
-/// the draw list builds with. Width does not affect the base row, so the
+/// the display list builds with. Width does not affect the base row, so the
 /// call sites stay focused on depth.
 fn sort_row(pivot: crate::layout::Pivot, pos: crate::layout::Point, h: u16, below: u16) -> u16 {
     piece_span(pivot, pos, 1, h, below).depth
@@ -561,7 +561,7 @@ fn a_back_turned_sitters_badge_clears_their_raised_monitor() {
         theme: crate::theme::theme_by_name("normal").expect("theme"),
         scale: RenderScale::new(4).expect("nonzero"),
     };
-    let list = frame_list(
+    let list = compose(
         seated,
         office,
         showing(
@@ -1153,10 +1153,10 @@ fn a_window_s_fingerprint_moves_with_the_weather_tick_where_it_falls() {
     }
 }
 
-/// A REAL office's draw list, checked against every pairwise "must be
+/// A REAL office's display list, checked against every pairwise "must be
 /// behind" fact its own geometry states — what a sort key cannot give you.
 #[test]
-fn a_real_offices_draw_list_satisfies_every_ordering_constraint() {
+fn a_real_offices_display_list_satisfies_every_ordering_constraint() {
     let pack = test_default_pack();
     for (w, h) in [(160u16, 96u16), (240, 144), (100, 60)] {
         let layout = SceneLayout::compute_with_seed(w, h, None, 0).expect("lays out");
@@ -1171,7 +1171,7 @@ fn a_real_offices_draw_list_satisfies_every_ordering_constraint() {
         assert_eq!(
             crate::display::check_order(&spans, &produced),
             None,
-            "{w}x{h}: the draw list violates a constraint its geometry states"
+            "{w}x{h}: the display list violates a constraint its geometry states"
         );
     }
 }
@@ -1518,7 +1518,7 @@ fn the_ground_takes_the_weathers_tint() {
     let ground_in = |w: Weather| {
         let sky = Sky::at_with(now, w);
         let tint = crate::atmosphere::SkyTones::resolve(&sky, theme).ground_tint;
-        let list = build_list(
+        let list = compose_at(
             &frame,
             Office {
                 layout: &layout,
@@ -1604,7 +1604,7 @@ fn one_span_and_fingerprint_always_paint_the_same_pixels() {
             let scale = RenderScale::new(s).expect("nonzero");
             let mut last: Option<(u64, u64)> = None;
             for frame in &frames {
-                let list = build_list(
+                let list = compose_at(
                     frame,
                     Office {
                         layout: &layout,
@@ -1658,7 +1658,7 @@ fn a_window_s_fingerprint_moves_with_the_moment_it_shows() {
     let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
     let mut painted = std::collections::HashMap::new();
     let glass = |now: std::time::SystemTime, painted: &mut _| {
-        let list = build_list(
+        let list = compose_at(
             &frames[0],
             Office {
                 layout: &layout,
@@ -1701,10 +1701,10 @@ fn a_window_s_fingerprint_moves_with_the_moment_it_shows() {
 }
 
 /// `frame`'s list at local `hour`, under a clear sky.
-pub(crate) fn list_at<'a>(frame: &SimFrame, office: Office<'a>, hour: u32) -> DrawList<'a> {
+pub(crate) fn list_at<'a>(frame: &SimFrame, office: Office<'a>, hour: u32) -> DisplayList<'a> {
     let now = crate::localclock::at_hour(hour);
     let sky = crate::sky::Sky::at_with(now, crate::sky::Weather::Clear);
-    build_list(
+    compose_at(
         frame,
         office,
         &Moment::resolve(sky, office.theme, 0.0, Motion::Full.clock(now)),
@@ -1729,7 +1729,7 @@ fn noon_and_midnight_differ_only_in_dynamic_pieces() {
             scale: RenderScale::new(s).expect("nonzero"),
         };
         let (noon, night) = (list_at(frame, office, 12), list_at(frame, office, 23));
-        let at_rest = |list: &DrawList| -> Vec<(Span, u64)> {
+        let at_rest = |list: &DisplayList| -> Vec<(Span, u64)> {
             list.pieces()
                 .iter()
                 .filter(|p| p.kind.is_static())
@@ -1738,15 +1738,16 @@ fn noon_and_midnight_differ_only_in_dynamic_pieces() {
         };
         assert_eq!(at_rest(&noon), at_rest(&night), "a static piece moved");
         assert_ne!(noon.ambient, night.ambient, "the room keeps its noon tone");
-        let lit =
-            |list: &DrawList| -> Vec<u64> { list.lights().iter().map(|l| l.fingerprint).collect() };
+        let lit = |list: &DisplayList| -> Vec<u64> {
+            list.lights().iter().map(|l| l.fingerprint).collect()
+        };
         assert_ne!(lit(&noon), lit(&night), "the lights keep their noon levels");
     }
 }
 
 /// `list`'s lights over a flat `under`, relit over `rect` alone by the
 /// frame's own pass: every light that meets it, over an all-lit room.
-fn lights_over(list: &DrawList<'_>, layout: &SceneLayout, rect: Span) -> RgbBuffer {
+fn lights_over(list: &DisplayList<'_>, layout: &SceneLayout, rect: Span) -> RgbBuffer {
     let (w, h) = (
         list.scale.to_buffer(layout.buf_w),
         list.scale.to_buffer(layout.buf_h),
@@ -2201,7 +2202,7 @@ fn a_sitters_fingerprint_moves_with_everything_their_figure_paints_from() {
             for edit in variants {
                 built += 1;
                 let frame = varied(seated, edit);
-                let list = build_list(
+                let list = compose_at(
                     &frame,
                     Office {
                         layout: &layout,
@@ -2258,14 +2259,14 @@ fn one_frame_builds_one_list() {
     let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 0);
     let frame = frames.last().expect("a seated frame");
     let now = std::time::SystemTime::UNIX_EPOCH;
-    let summary = |list: &DrawList| {
+    let summary = |list: &DisplayList| {
         list.pieces()
             .iter()
             .map(|p| (p.span, p.fingerprint))
             .collect::<Vec<_>>()
     };
     assert_eq!(
-        summary(&build_list(
+        summary(&compose_at(
             frame,
             Office {
                 layout: &layout,
@@ -2282,7 +2283,7 @@ fn one_frame_builds_one_list() {
             crate::floor::FloorMeta::ground(),
             quiet_board()
         )),
-        summary(&build_list(
+        summary(&compose_at(
             frame,
             Office {
                 layout: &layout,
@@ -2309,7 +2310,7 @@ fn each_drawn_agent_hovers_inside_its_piece() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
     for frame in &frames {
-        let list = build_list(
+        let list = compose_at(
             frame,
             Office {
                 layout: &layout,
@@ -2551,9 +2552,9 @@ pub(crate) fn list_now<'a>(
     frame: &SimFrame,
     office: Office<'a>,
     now: std::time::SystemTime,
-) -> DrawList<'a> {
+) -> DisplayList<'a> {
     let sky = crate::sky::Sky::at_with(now, crate::sky::Weather::Clear);
-    build_list(
+    compose_at(
         frame,
         office,
         &Moment::resolve(sky, office.theme, 0.0, Motion::Full.clock(now)),

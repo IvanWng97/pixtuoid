@@ -80,7 +80,7 @@ pub(crate) struct Badge {
 /// ONE ordered list, so a character and the desk it sits at resolve against each
 /// other by depth: that order IS the occlusion, and there is no second
 /// occlusion pass.
-pub(crate) struct DrawList<'a> {
+pub(crate) struct DisplayList<'a> {
     pub(super) pieces: Vec<Piece>,
     /// The room's own lights, which paint over every piece at once
     /// ([`paint_list`](crate::cutaway::paint::paint_list)).
@@ -131,13 +131,14 @@ impl Ground {
     }
 }
 
-/// One entry of a [`DrawList`].
+/// One entry of a [`DisplayList`].
 pub(crate) struct Piece {
     pub(crate) span: Span,
     pub(crate) kind: PieceKind,
-    /// The shadow it casts on the ground ([`ground_shadow`](crate::display::compose::ground_shadow)). Every shadow is
-    /// painted before any piece, so it lies under them all; it may reach past
-    /// `span`, but never past [`reach`](Self::reach).
+    /// The shadow it casts on the ground
+    /// ([`ground_shadow`](crate::display::compose::ground_shadow)). Every
+    /// shadow is painted before any piece, so it lies under them all; it may
+    /// reach past `span`, but never past [`reach`](Self::reach).
     pub(crate) shadow: Option<crate::ground::Contact>,
     /// Two pieces with one span and one fingerprint paint the same pixels over
     /// the same pixels under them, so a caller can keep a piece whose pair did
@@ -176,7 +177,7 @@ impl Piece {
     }
 }
 
-impl<'a> DrawList<'a> {
+impl<'a> DisplayList<'a> {
     /// The pieces, back to front.
     pub(crate) fn pieces(&self) -> &[Piece] {
         &self.pieces
@@ -239,8 +240,9 @@ impl<'a> DrawList<'a> {
     }
 }
 
-/// A hash of every input `paint_piece` and [`ground_shadow`](crate::display::compose::ground_shadow) draw `kind` from
-/// beyond the layout, theme, pack and scale. Each arm destructures every field,
+/// A hash of every input `paint_piece` and
+/// [`ground_shadow`](crate::display::compose::ground_shadow) draw `kind`
+/// from beyond the layout, theme, pack and scale. Each arm destructures every field,
 /// so a field added to a kind fails to compile here until it is hashed or named
 /// `_`.
 pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {

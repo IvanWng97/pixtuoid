@@ -9,8 +9,8 @@ use crate::cutaway::shade::{Ramp, fill, slab};
 #[cfg(test)]
 use crate::display::compose::{art_size, desk_art, desk_front_h};
 use crate::display::{
-    Art, Badge, DOOR_SPRITE, DrawList, Figure, Flip, Ground, Office, PLATE_PAD, PieceKind, Screen,
-    Showing, StoodProp, WindowView, board_runs, desk_span, drawn_in, face_rows, frame_list,
+    Art, Badge, DOOR_SPRITE, DisplayList, Figure, Flip, Ground, Office, PLATE_PAD, PieceKind,
+    Screen, Showing, StoodProp, WindowView, board_runs, compose, desk_span, drawn_in, face_rows,
     indicator_plate,
 };
 use crate::effects::EffectKind;
@@ -111,14 +111,14 @@ pub fn render_cutaway(
     cache: &mut CutawayCache,
     buf: &mut RgbBuffer,
 ) {
-    let list = frame_list(frame, office, showing);
+    let list = compose(frame, office, showing);
     paint(office.layout, &list, cache, buf);
 }
 
 /// Paint `list` whole: `layout`'s backdrop, then the list over it.
 pub(crate) fn paint(
     layout: &SceneLayout,
-    list: &DrawList<'_>,
+    list: &DisplayList<'_>,
     cache: &mut CutawayCache,
     buf: &mut RgbBuffer,
 ) {
@@ -149,12 +149,13 @@ fn paint_backdrop(
 }
 
 /// Paint `list` over the backdrop `buf` holds: every piece's shadow
-/// ([`ground_shadow`](crate::display::compose::ground_shadow)) first, then the pieces back to front as by day, noting
-/// which pixels glow of their own ([`Glow`](crate::cutaway::light::Glow)), and
-/// last one pass ([`net_pass`](crate::cutaway::light::net_pass)) takes every
-/// other pixel to the hour: darkened with the room and lifted by its lights at
-/// once, so no pixel is darkened twice or darkened and relit.
-pub(crate) fn paint_list(list: &DrawList<'_>, cache: &mut CutawayCache, buf: &mut RgbBuffer) {
+/// ([`ground_shadow`](crate::display::compose::ground_shadow))
+/// first, then the pieces back to front as by day, noting which pixels glow of
+/// their own ([`Glow`](crate::cutaway::light::Glow)), and last one pass
+/// ([`net_pass`](crate::cutaway::light::net_pass)) takes every other pixel to
+/// the hour: darkened with the room and lifted by its lights at once, so no
+/// pixel is darkened twice or darkened and relit.
+pub(crate) fn paint_list(list: &DisplayList<'_>, cache: &mut CutawayCache, buf: &mut RgbBuffer) {
     let pen = Pen::for_pack(list.scale(), list.pack());
     paint_ground_shadows(
         list.pieces().iter().filter_map(|p| p.shadow),
@@ -185,7 +186,7 @@ pub(crate) fn paint_list(list: &DrawList<'_>, cache: &mut CutawayCache, buf: &mu
 /// Paint every piece but the lights, back to front as by day, and return the
 /// [`Emission`](crate::cutaway::light::Emission) they leave.
 fn paint_pieces(
-    list: &DrawList<'_>,
+    list: &DisplayList<'_>,
     cache: &mut CutawayCache,
     buf: &mut RgbBuffer,
 ) -> crate::cutaway::light::Emission {
@@ -548,7 +549,7 @@ fn covering(kind: FixtureKind) -> Option<Covering> {
     }
 }
 
-/// Paint one piece of the draw list.
+/// Paint one piece of the display list.
 fn paint_piece(
     kind: &PieceKind,
     pack: &Pack,
@@ -1530,7 +1531,7 @@ pub(crate) mod tests {
     };
     use crate::display::compose::{
         DESK_CUP_SPRITE, MEETING_SOFA_NORTH, NORTH_SOFA_SEAT_ROWS, PLATE_H, TOKEN_SHEET_SPRITE,
-        TOKEN_TOWER_SPRITE, build_list, ground_shadow, push_windows,
+        TOKEN_TOWER_SPRITE, compose_at, ground_shadow, push_windows,
     };
     use crate::display::{Piece, Span, fingerprint};
     use crate::glass_weather::GlassWeather;
@@ -2094,7 +2095,7 @@ pub(crate) mod tests {
             g: 110,
             b: 72,
         };
-        let list = build_list(
+        let list = compose_at(
             frames.last().expect("a frame"),
             Office {
                 layout: &layout,
@@ -2379,7 +2380,7 @@ pub(crate) mod tests {
             };
             let drawn = |weather, flash| {
                 let sky = Sky::at_with(now, weather).with_flash(flash);
-                let list = build_list(
+                let list = compose_at(
                     &frame,
                     office,
                     &Moment::resolve(sky, theme, 0.0, Motion::Full.clock(now)),
@@ -2544,7 +2545,7 @@ pub(crate) mod tests {
     /// `list` painted as by day, over its backdrop and shadows, with each
     /// pixel's glow: what the net pass starts from.
     pub(crate) fn by_day(
-        list: &DrawList<'_>,
+        list: &DisplayList<'_>,
         layout: &SceneLayout,
     ) -> (RgbBuffer, crate::cutaway::light::Emission) {
         let mut buf = RgbBuffer::filled(
@@ -2693,7 +2694,7 @@ pub(crate) mod tests {
     /// before; returns how many recurred.
     pub(crate) fn same_fingerprint_same_pixels(
         painted: &mut std::collections::HashMap<(u16, Span, u64), u64>,
-        list: &DrawList<'_>,
+        list: &DisplayList<'_>,
         layout: &SceneLayout,
         keep: impl Fn(&Piece) -> bool,
     ) -> usize {

@@ -1,4 +1,4 @@
-//! Composing a frame's [`DrawList`], the second reader of `SimFrame`. Of the
+//! Composing a frame's [`DisplayList`], the second reader of `SimFrame`. Of the
 //! sim's effects it lists those riding on people and creatures
 //! (`cutaway::effects`); steam stays with the classic pass.
 //! It never advances the sim; a mover here would desync the profiles.
@@ -6,8 +6,8 @@
 use pixtuoid_core::sprite::format::Pack;
 
 use super::{
-    Art, Badge, DrawList, Figure, Flip, Ground, Layer, LightPiece, Piece, PieceKind, Screen, Span,
-    StoodProp, WindowView, depth_sort, fingerprint,
+    Art, Badge, DisplayList, Figure, Flip, Ground, Layer, LightPiece, Piece, PieceKind, Screen,
+    Span, StoodProp, WindowView, depth_sort, fingerprint,
 };
 use crate::atmosphere::Moment;
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
@@ -184,12 +184,12 @@ pub struct Showing<'a> {
     pub board: &'a crate::board::BoardModel,
 }
 
-/// `frame`'s [`DrawList`] as `showing` says.
-pub(crate) fn frame_list<'a>(
+/// `frame`'s [`DisplayList`] as `showing` says.
+pub(crate) fn compose<'a>(
     frame: &SimFrame,
     office: Office<'a>,
     Showing { floor, now, board }: Showing<'_>,
-) -> DrawList<'a> {
+) -> DisplayList<'a> {
     let clock = floor.motion.clock(now);
     let moment = Moment::resolve(
         crate::sky::Sky::at(clock, floor.weather),
@@ -197,19 +197,19 @@ pub(crate) fn frame_list<'a>(
         floor.altitude,
         clock,
     );
-    build_list(frame, office, &moment, floor, board)
+    compose_at(frame, office, &moment, floor, board)
 }
 
-/// Build `frame`'s [`DrawList`] at `moment`, on `floor`. Every
+/// Compose `frame`'s [`DisplayList`] at `moment`, on `floor`. Every
 /// figure, window view and light is resolved here, so painting the list reads
 /// neither `frame` nor the moment again.
-pub(crate) fn build_list<'a>(
+pub(crate) fn compose_at<'a>(
     frame: &SimFrame,
     office: Office<'a>,
     moment: &Moment,
     floor: crate::floor::FloorMeta,
     board: &crate::board::BoardModel,
-) -> DrawList<'a> {
+) -> DisplayList<'a> {
     let Office {
         pack, theme, scale, ..
     } = office;
@@ -231,7 +231,7 @@ pub(crate) fn build_list<'a>(
             kind,
         })
         .collect();
-    DrawList {
+    DisplayList {
         pieces,
         lights: lights(frame, office, moment, floor.floor_idx, ambient),
         ambient,

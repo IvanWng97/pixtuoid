@@ -7,11 +7,11 @@ mod list;
 mod order;
 
 pub(crate) use compose::{
-    DOOR_SPRITE, PLATE_PAD, board_runs, desk_span, drawn_in, face_rows, frame_list, indicator_plate,
+    DOOR_SPRITE, PLATE_PAD, board_runs, compose, desk_span, drawn_in, face_rows, indicator_plate,
 };
 pub use compose::{Office, Showing};
 pub(crate) use list::{
-    Art, Badge, DrawList, Figure, Flip, Ground, Layer, LightPiece, Piece, PieceKind, Screen,
+    Art, Badge, DisplayList, Figure, Flip, Ground, Layer, LightPiece, Piece, PieceKind, Screen,
     StoodProp, WindowView, fingerprint,
 };
 #[cfg(test)]
