@@ -131,6 +131,39 @@ pub(crate) const FISH_TANK_SPRITE: &str = "fish_tank";
 /// See [`FISH_TANK_SPRITE`].
 pub(crate) const WATER_COOLER_SPRITE: &str = "water_cooler";
 
+/// The elevator's art.
+pub(crate) const DOOR_SPRITE: &str = "door";
+
+/// The dial's art.
+pub(crate) const CLOCK_SPRITE: &str = "wall_clock";
+
+/// The desk props' pack animations.
+pub(crate) const DESK_CUP_SPRITE: &str = "desk_cup";
+pub(crate) const TOKEN_TOWER_SPRITE: &str = "token_tower";
+pub(crate) const TOKEN_SHEET_SPRITE: &str = "token_sheet";
+
+/// The back-view sofa's art: its seat beyond the backrest, the backrest nearest
+/// the viewer.
+pub(crate) const MEETING_SOFA_NORTH_SPRITE: &str = "meeting_sofa_north";
+/// The rows of [`MEETING_SOFA_NORTH_SPRITE`]'s art that lie UNDER its sitter, the seat;
+/// the backrest below them draws OVER the sitter's lap. `scripts/gen-art.py`'s
+/// `SOFA_SEAT_ROWS` draws to it (`the_north_sofas_backrest_starts_on_its_lit_ridge`).
+pub(crate) const NORTH_SOFA_SEAT_ROWS: u16 = 3;
+
+/// Which of `art`'s pixels, row by row, it draws in one of `keys`: those that
+/// go transparent when the keys are painted so.
+pub(crate) fn drawn_in(art: &super::DenseFrame<'_>, keys: &[char]) -> Vec<bool> {
+    let without = art
+        .recolorable
+        .recolored(&keys.iter().map(|&k| (k, None)).collect::<Vec<_>>());
+    let (w, h) = (art.frame.width(), art.frame.height());
+    let opaque = |f: &pixtuoid_core::sprite::Frame, x, y| f.get(x, y).and_then(|p| *p).is_some();
+    (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .map(|(x, y)| opaque(art.frame, x, y) && !opaque(&without, x, y))
+        .collect()
+}
+
 /// The pack art a corridor appliance at a `kind` waypoint is drawn from.
 pub(crate) fn appliance_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
     use crate::layout::WaypointKind as K;

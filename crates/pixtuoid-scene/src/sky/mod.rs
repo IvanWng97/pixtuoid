@@ -561,8 +561,8 @@ pub(crate) struct Sky {
 }
 
 impl Sky {
-    pub(crate) fn at(clock: crate::anim::Clock, weather: WeatherPolicy) -> Self {
-        let now = clock.now;
+    pub(crate) fn at(timing: crate::anim::Timing, weather: WeatherPolicy) -> Self {
+        let now = timing.now;
         let (moon_phase, moon_age) = (moon_phase_at(now), moon_age_at(now));
         let h = local_hour_frac(now);
         let nightfall = nightfall(h);
@@ -572,20 +572,20 @@ impl Sky {
             moon_phase,
             moon_waxing: moon_age < SYNODIC_DAYS / 2.0,
             nightfall,
-            flash: flash_level_at(clock.beat, weather),
+            flash: flash_level_at(timing.beat, weather),
         }
     }
 
     /// The sky at `now` under `weather`, whatever the clock picks.
     #[cfg(test)]
     pub(crate) fn at_with(now: SystemTime, weather: Weather) -> Self {
-        Self::at(Motion::Full.clock(now), WeatherPolicy::Forced(weather))
+        Self::at(Motion::Full.timing(now), WeatherPolicy::Forced(weather))
     }
 
     /// The sky at `now` under the clock's weather.
     #[cfg(test)]
     pub(crate) fn clock(now: SystemTime) -> Self {
-        Self::at(Motion::Full.clock(now), WeatherPolicy::Clock)
+        Self::at(Motion::Full.timing(now), WeatherPolicy::Clock)
     }
 
     /// This sky with the lightning envelope at `flash` — a painter test's

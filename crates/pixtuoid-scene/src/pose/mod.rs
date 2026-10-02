@@ -12,11 +12,11 @@ use std::time::{Duration, SystemTime};
 use pixtuoid_core::AgentId;
 use pixtuoid_core::state::AgentSlot;
 
-use crate::motion::{
-    LegPlan, MotionState, Settle, WalkLeg, WalkPathSnapshot, WanderKind, WanderPhase,
-    advance_wander, snapshot_leg_profile,
-};
 use crate::physics::{WalkIntent, WalkProfile, walk_arrived, walk_progress, walking_position};
+use crate::walk::{
+    LegPlan, Settle, WalkLeg, WalkPathSnapshot, WalkState, WanderKind, WanderPhase, advance_wander,
+    snapshot_leg_profile,
+};
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 pub use pure::{
@@ -43,8 +43,8 @@ pub struct RouteCtx<'a> {
     pub overlay: &'a OccupancyOverlay,
     /// Per-agent rendered-position cache.
     pub history: &'a mut PoseHistory,
-    /// Per-agent walk-timing state, keyed by `AgentId`.
-    pub walks: &'a mut HashMap<AgentId, MotionState>,
+    /// Per-agent walk state, keyed by `AgentId`.
+    pub walks: &'a mut HashMap<AgentId, WalkState>,
     /// Whether an idle agent wanders off its desk: an ambient loop, so not at
     /// [`Motion::Still`](crate::anim::Motion::Still).
     pub wanders: bool,
@@ -56,7 +56,7 @@ pub(crate) struct RouteRig<R> {
     pub(crate) router: R,
     pub(crate) overlay: OccupancyOverlay,
     pub(crate) history: PoseHistory,
-    pub(crate) motion: HashMap<AgentId, MotionState>,
+    pub(crate) walks: HashMap<AgentId, WalkState>,
 }
 
 #[cfg(test)]
@@ -66,7 +66,7 @@ impl<R: Router> RouteRig<R> {
             router,
             overlay: OccupancyOverlay::new(),
             history: PoseHistory::new(),
-            motion: HashMap::new(),
+            walks: HashMap::new(),
         }
     }
 
@@ -75,7 +75,7 @@ impl<R: Router> RouteRig<R> {
             router: &mut self.router,
             overlay: &self.overlay,
             history: &mut self.history,
-            walks: &mut self.motion,
+            walks: &mut self.walks,
             wanders: true,
         }
     }
@@ -185,7 +185,7 @@ enum ReEnter {
 /// load-bearing on its own: a retained arrived leg is replayed by the NEXT exit,
 /// vanishing the sprite on its first frame instead of walking out.
 fn take_cancelled_walkout(
-    ms: Option<&mut MotionState>,
+    ms: Option<&mut WalkState>,
     now: SystemTime,
     live: Option<Point>,
 ) -> Option<ReEnter> {
@@ -243,7 +243,7 @@ pub fn derive_with_routing(
         let mstate = rctx
             .walks
             .entry(slot.agent_id)
-            .or_insert_with(|| MotionState::new(slot.agent_id));
+            .or_insert_with(|| WalkState::new(slot.agent_id));
 
         if mstate.exit.is_none() {
             // From wherever the agent actually is — otherwise one mid-coffee-run at
@@ -338,7 +338,7 @@ pub fn derive_with_routing(
     let mstate = rctx
         .walks
         .entry(slot.agent_id)
-        .or_insert_with(|| MotionState::new(slot.agent_id));
+        .or_insert_with(|| WalkState::new(slot.agent_id));
 
     let entry_from = match re_enter {
         Some(ReEnter::Live(p)) => p,
@@ -501,7 +501,7 @@ pub fn derive_with_routing(
         let ms_entry = rctx
             .walks
             .entry(slot.agent_id)
-            .or_insert_with(|| MotionState::new(slot.agent_id));
+            .or_insert_with(|| WalkState::new(slot.agent_id));
         // ARM ONCE per transition: `route_walking_pose` records the advancing walker
         // into history every call, so re-checking the gate on a second `derive` this
         // frame sees a CLOSER `prev` and drops the agent to Seated mid-walk. Keyed on
@@ -630,7 +630,7 @@ fn route_walking_pose(
     let path = {
         let ms = walks
             .entry(slot.agent_id)
-            .or_insert_with(|| MotionState::new(slot.agent_id));
+            .or_insert_with(|| WalkState::new(slot.agent_id));
         match &ms.walk_path {
             Some(wp) if wp.from == from && wp.to == to => wp.path.clone(),
             _ => {
