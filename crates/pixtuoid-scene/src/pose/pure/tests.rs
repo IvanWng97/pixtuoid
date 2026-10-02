@@ -831,10 +831,31 @@ fn aimless_fallback_on_a_fully_blocked_mask_returns_the_desk_anchor() {
 /// their frames once per `stride / frames` of ground each.
 #[test]
 fn a_walking_person_never_slides() {
+    use crate::physics::{
+        PROGRESS_SCALE, SPEED_MULT_MAX, WalkIntent, speed_mult, walk_profile, walk_progress,
+    };
     let pack = crate::pack::test_default_pack();
     let walk = pack.animation("walking").expect("the walk");
     let per_frame = f32::from(walk.stride().expect("a stride").get()) / walk.frames().len() as f32;
     let now = SystemTime::UNIX_EPOCH;
+    // sampled as a painter paints: a frame stepped past between two paints is lost
+    let paint_ms = 1000 / u64::from(crate::anim::PAINT_FPS);
+    let steps = |total_ms: u64, travelled_at: &dyn Fn(u64) -> u32| {
+        let (mut turns, mut last) = (0.0_f32, None);
+        for ms in (0..=total_ms).step_by(paint_ms as usize) {
+            let frame = crate::anim::walk_frame(travelled_at(ms), walk, now);
+            turns += f32::from(u8::from(last.is_some_and(|f| f != frame)));
+            last = Some(frame);
+        }
+        turns
+    };
+    let judge = |what: &str, turns: f32, px: f32| {
+        let expected = px / per_frame;
+        assert!(
+            (turns - expected).abs() <= 1.0,
+            "{what}: {turns} steps over {px} px, {expected} by its stride"
+        );
+    };
     for length in [12u16, 70] {
         let (from, to) = (
             Point { x: 10, y: 40 },
@@ -843,19 +864,37 @@ fn a_walking_person_never_slides() {
                 y: 40,
             },
         );
-        let (mut turns, mut last) = (0.0_f32, None);
-        for since in (0..=ENTRY_ANIMATION_MS).step_by(10) {
-            let Pose::Walking { travelled, .. } = linear_walk_pose(since, from, to) else {
+        let turns = steps(ENTRY_ANIMATION_MS, &|ms| {
+            let Pose::Walking { travelled, .. } = linear_walk_pose(ms, from, to) else {
                 panic!("a walk");
             };
-            let frame = crate::anim::walk_frame(travelled, walk, now);
-            turns += f32::from(u8::from(last.is_some_and(|f| f != frame)));
-            last = Some(frame);
-        }
-        let expected = f32::from(length) / per_frame;
-        assert!(
-            (turns - expected).abs() <= 1.0,
-            "{length} px: {turns} steps, {expected} by its stride"
+            travelled
+        });
+        judge("the entry walk", turns, f32::from(length));
+    }
+    // every routed walk at the fastest agent's pace, snap-back the fastest of all
+    let fastest = (0..256)
+        .map(|i| AgentId::from_transcript_path(&format!("/p/fast{i}.jsonl")))
+        .max_by(|a, b| speed_mult(*a).total_cmp(&speed_mult(*b)))
+        .expect("agents");
+    assert!(
+        speed_mult(fastest) > SPEED_MULT_MAX * 0.98,
+        "a near-fastest agent"
+    );
+    let length = 200 * crate::pathfind::OCTILE_STRAIGHT_COST;
+    for intent in [
+        WalkIntent::Entry,
+        WalkIntent::WanderOut,
+        WalkIntent::SnapBack,
+    ] {
+        let profile = walk_profile(length, intent, fastest);
+        let turns = steps(profile.duration_ms, &|ms| {
+            u32::from(walk_progress(&profile, ms)) * length / u32::from(PROGRESS_SCALE)
+        });
+        judge(
+            &format!("{intent:?}"),
+            turns,
+            length as f32 / crate::pathfind::OCTILE_STRAIGHT_COST as f32,
         );
     }
 }

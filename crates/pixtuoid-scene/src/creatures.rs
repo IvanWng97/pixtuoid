@@ -110,12 +110,9 @@ pub(crate) fn pet_position(
         let t = (frac / PET_WALK_SHARE).clamp(0.0, 1.0);
         // Facing follows the raw destination intent, not where the snapped anchors land.
         let flip = dest.x < prev.x;
-        let (pos, travelled) = walk_between(layout, prev, dest, t);
+        let pos = walk_between(layout, prev, dest, t);
         let anim = kind.walk_anim();
-        let frame = pack.animation(anim).map_or(0, |walk| {
-            crate::anim::walk_frame(travelled, walk, clock.now)
-        });
-        return Some((pos, flip, anim, frame));
+        return Some((pos, flip, anim, frame_at(anim)));
     }
 
     // Snap so the sit/sleep pose isn't on furniture — the same anchor as the leg
@@ -210,28 +207,24 @@ pub(crate) fn gateway_mascot_def(source: &str) -> Option<GatewayMascotDef> {
 /// A* on the STATIC mask with a throwaway EMPTY overlay (identical inputs every
 /// frame of a leg ⇒ identical polyline ⇒ no flash), endpoints pre-snapped to
 /// walkable floor, sampled at arc-length `t`.
-fn walk_between(layout: &SceneLayout, from: Point, to: Point, t: f32) -> (Point, u32) {
+fn walk_between(layout: &SceneLayout, from: Point, to: Point, t: f32) -> Point {
     let src = snap_point_to_walkable(&layout.walkable, from).unwrap_or(from);
     let dst = snap_point_to_walkable(&layout.walkable, to).unwrap_or(to);
     let empty = OccupancyOverlay::new();
-    let pts = match find_path(&layout.walkable, &empty, layout.corridor, from, to) {
-        Some(mut pts) => {
-            if let Some(first) = pts.first_mut() {
-                *first = src;
-            }
-            if let Some(last) = pts.last_mut() {
-                *last = dst;
-            }
-            pts
+    if let Some(mut pts) = find_path(&layout.walkable, &empty, layout.corridor, from, to) {
+        if let Some(first) = pts.first_mut() {
+            *first = src;
         }
-        None => vec![src, dst],
-    };
-    let length: u32 = pts
-        .windows(2)
-        .map(|w| crate::pose::octile_distance(w[0], w[1]))
-        .sum();
-    let travelled = (t.clamp(0.0, 1.0) * length as f32) as u32;
-    (sample_polyline(&pts, t, dst), travelled)
+        if let Some(last) = pts.last_mut() {
+            *last = dst;
+        }
+        sample_polyline(&pts, t, dst)
+    } else {
+        Point {
+            x: (src.x as f32 + (dst.x as f32 - src.x as f32) * t) as u16,
+            y: (src.y as f32 + (dst.y as f32 - src.y as f32) * t) as u16,
+        }
+    }
 }
 
 /// The walkable cell the mascot enters from / leaves to: the elevator
@@ -272,26 +265,20 @@ fn mascot_enter_delay(seed: u64) -> u64 {
     pixtuoid_core::id::splitmix64(seed) % MASCOT_ENTER_STAGGER_MS
 }
 
-/// Steady wander position at wander-clock `we_ms`, and while it walks (the
-/// first `MASCOT_WALK_FRAC` of each cycle) how far along its leg it is.
-fn mascot_wander(
-    layout: &SceneLayout,
-    we_ms: u64,
-    seed: u64,
-    cycle_ms: u64,
-) -> (Point, Option<u32>) {
+/// Steady wander position at wander-clock `we_ms`. Returns `(pos, walking)`:
+/// walking during the first `MASCOT_WALK_FRAC` of each cycle, resting after.
+fn mascot_wander(layout: &SceneLayout, we_ms: u64, seed: u64, cycle_ms: u64) -> (Point, bool) {
     let cycle = we_ms / cycle_ms;
     let frac = (we_ms % cycle_ms) as f32 / cycle_ms as f32;
     let dest = walkable_target(layout, seed, cycle.wrapping_add(1));
     let prev = walkable_target(layout, seed, cycle);
     if frac < MASCOT_WALK_FRAC {
         let t = (frac / MASCOT_WALK_FRAC).clamp(0.0, 1.0);
-        let (pos, travelled) = walk_between(layout, prev, dest, t);
-        (pos, Some(travelled))
+        (walk_between(layout, prev, dest, t), true)
     } else {
         (
             snap_point_to_walkable(&layout.walkable, dest).unwrap_or(dest),
-            None,
+            false,
         )
     }
 }
@@ -303,9 +290,8 @@ fn mascot_rest_cell(layout: &SceneLayout, seed: u64) -> Point {
     snap_point_to_walkable(&layout.walkable, home).unwrap_or(home)
 }
 
-/// Resolve the mascot this tick: `(pos, anim_name, travelled)`, the last how
-/// far along a walk's leg it is (0 at rest), or `None` when it should not be
-/// drawn (gateway gone after the walk-out).
+/// Resolve the mascot this tick: `(pos, anim_name)`, or `None` when it should
+/// not be drawn (gateway gone after the walk-out).
 pub(crate) fn mascot_position(
     layout: &SceneLayout,
     presence: &DaemonPresence,
@@ -313,7 +299,7 @@ pub(crate) fn mascot_position(
     rest_anim: &'static str,
     clock: Clock,
     seed: u64,
-) -> Option<(Point, &'static str, u32)> {
+) -> Option<(Point, &'static str)> {
     let now = clock.now;
     let elevator = mascot_elevator(layout)?;
     // Every clock below is measured from the END of this instance's stagger, so the
@@ -352,8 +338,7 @@ pub(crate) fn mascot_position(
             .0
         };
         let t = down_age as f32 / MASCOT_LEAVE_MS as f32;
-        let (pos, travelled) = walk_between(layout, from, elevator, t);
-        return Some((pos, walk_anim, travelled));
+        return Some((walk_between(layout, from, elevator, t), walk_anim));
     }
 
     let age = now.duration_since(presence.entered_at).ok()?.as_millis() as u64;
@@ -365,24 +350,22 @@ pub(crate) fn mascot_position(
     let entered = age - enter_delay;
     if entered < MASCOT_ENTER_MS {
         let t = entered as f32 / MASCOT_ENTER_MS as f32;
-        let (pos, travelled) = walk_between(layout, elevator, walkable_target(layout, seed, 0), t);
-        return Some((pos, walk_anim, travelled));
+        return Some((
+            walk_between(layout, elevator, walkable_target(layout, seed, 0), t),
+            walk_anim,
+        ));
     }
 
     if clock.beat.is_rest() {
-        return Some((mascot_rest_cell(layout, seed), rest_anim, 0));
+        return Some((mascot_rest_cell(layout, seed), rest_anim));
     }
     let cycle_ms = match presence.display_state() {
         DaemonState::Busy => MASCOT_BUSY_CYCLE_MS,
         DaemonState::Degraded => MASCOT_DEGRADED_CYCLE_MS,
         _ => MASCOT_IDLE_CYCLE_MS,
     };
-    Some(
-        match mascot_wander(layout, wandered_by(now), seed, cycle_ms) {
-            (pos, Some(travelled)) => (pos, walk_anim, travelled),
-            (pos, None) => (pos, rest_anim, 0),
-        },
-    )
+    let (pos, walking) = mascot_wander(layout, wandered_by(now), seed, cycle_ms);
+    Some((pos, if walking { walk_anim } else { rest_anim }))
 }
 
 #[cfg(test)]
@@ -504,54 +487,6 @@ mod tests {
                 assert!(faces_east(&pack, f), "{name} {i} faces west");
             }
         }
-    }
-
-    /// A walking pet steps by the ground it covers, never the clock: on legs
-    /// of every length, so every speed, and on Full and Calm alike, its frame
-    /// turns once per `stride / frames` of ground, give or take the pixel grid.
-    /// Its paws keep their place on the floor.
-    #[test]
-    fn a_walking_pet_never_slides() {
-        let layout = crate::layout::SceneLayout::compute(160, 200, Some(4)).expect("layout fits");
-        let pack = test_pack();
-        let kind = PetKind::Cat;
-        let walk = pack.animation(kind.walk_anim()).expect("the walk");
-        let stride = f32::from(walk.stride().expect("a stride").get());
-        let per_frame = stride / walk.frames().len() as f32;
-        let at = |ms: u64| SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms);
-        let leg_ms = (PET_CYCLE_MS as f32 * PET_WALK_SHARE) as u64;
-        let mut legs = 0;
-        for seed in 0..12 {
-            for motion in [Motion::Full, Motion::Calm] {
-                let (mut last, mut ground, mut turns) = (None, 0.0_f32, 0.0_f32);
-                for ms in (1..leg_ms).step_by(20) {
-                    let pos =
-                        pet_position(kind, &layout, &pack, motion.clock(at(ms)), &[], false, seed);
-                    let Some((pos, _, anim, frame)) = pos else {
-                        continue;
-                    };
-                    if anim != kind.walk_anim() {
-                        continue;
-                    }
-                    if let Some((was, turned_from)) = last {
-                        ground += crate::pose::octile_distance(was, pos) as f32
-                            / crate::pathfind::OCTILE_STRAIGHT_COST as f32;
-                        turns += f32::from(u8::from(frame != turned_from));
-                    }
-                    last = Some((pos, frame));
-                }
-                if ground < per_frame * 4.0 {
-                    continue;
-                }
-                legs += 1;
-                let expected = ground / per_frame;
-                assert!(
-                    (turns - expected).abs() <= 2.0 + expected * 0.1,
-                    "seed {seed} on {motion:?}: {turns} steps over {ground} px, {expected} by its stride"
-                );
-            }
-        }
-        assert!(legs >= 10, "too few legs walked to judge: {legs}");
     }
 
     /// A walking pet is turned to where its leg heads: flipped, so facing
@@ -869,8 +804,8 @@ mod tests {
             t,
         );
         let (pos, walking) = mascot_wander(&layout, we_ms, seed, cycle_ms);
-        assert_eq!(walking, Some(expected.1), "frac < walk_frac → walking");
-        assert_eq!(pos, expected.0, "cycle 0 must originate from draw 0");
+        assert!(walking, "frac < walk_frac → walking");
+        assert_eq!(pos, expected, "cycle 0 must originate from draw 0");
     }
 
     /// The sim's guarantee, and its limit: where a mascot SETTLES is walkable and
@@ -894,7 +829,7 @@ mod tests {
             for step_ms in (0..MASCOT_IDLE_CYCLE_MS * 4).step_by(120) {
                 let now = t0 + std::time::Duration::from_millis(MASCOT_ENTER_MS * 2 + step_ms);
                 let presence = idle_presence(now, MASCOT_ENTER_MS * 2 + step_ms);
-                let Some((pos, anim, _)) = mascot_position(
+                let Some((pos, anim)) = mascot_position(
                     &layout,
                     &presence,
                     "lobster_walk",
@@ -1006,7 +941,7 @@ mod tests {
                         Motion::Full.clock(now),
                         sd,
                     )
-                    .map(|(pos, _, _)| pos)
+                    .map(|(pos, _)| pos)
                 })
                 .collect();
             if pts.len() < 2 {
@@ -1115,7 +1050,7 @@ mod tests {
         let seed = 0u64;
 
         let p0 = idle_presence(now, 0);
-        let (pos0, anim0, _) = mascot_position(
+        let (pos0, anim0) = mascot_position(
             &layout,
             &p0,
             "lobster_walk",
@@ -1127,13 +1062,13 @@ mod tests {
         assert_eq!(anim0, "lobster_walk", "enter window → walk anim");
         assert_eq!(
             pos0,
-            walk_between(&layout, elevator, draw_zero, 0.0).0,
+            walk_between(&layout, elevator, draw_zero, 0.0),
             "age 0 → exactly at the elevator"
         );
 
         let age = 1_100u64;
         let p_mid = idle_presence(now, age);
-        let (pos_mid, anim_mid, _) = mascot_position(
+        let (pos_mid, anim_mid) = mascot_position(
             &layout,
             &p_mid,
             "lobster_walk",
@@ -1146,7 +1081,7 @@ mod tests {
         let t = age as f32 / MASCOT_ENTER_MS as f32;
         assert_eq!(
             pos_mid,
-            walk_between(&layout, elevator, draw_zero, t).0,
+            walk_between(&layout, elevator, draw_zero, t),
             "mid enter → the elevator→draw-0 interpolation"
         );
         assert_ne!(
@@ -1191,7 +1126,7 @@ mod tests {
 
         let idle = mk(false, now);
         let degraded = mk(true, now);
-        let (_, idle_anim, _) = mascot_position(
+        let (_, idle_anim) = mascot_position(
             &layout,
             &idle,
             "lobster_walk",
@@ -1200,7 +1135,7 @@ mod tests {
             seed,
         )
         .expect("idle pos");
-        let (_, deg_anim, _) = mascot_position(
+        let (_, deg_anim) = mascot_position(
             &layout,
             &degraded,
             "lobster_walk",
@@ -1336,10 +1271,10 @@ mod tests {
                 ..alive.clone()
             };
 
-            let (was, _, _) =
+            let (was, _) =
                 mascot_position(&layout, &alive, "w", "r", Motion::Full.clock(died_at), seed)
                     .expect("a live gateway renders a mascot");
-            let (leaving_from, _, _) =
+            let (leaving_from, _) =
                 mascot_position(&layout, &down, "w", "r", Motion::Full.clock(died_at), seed)
                     .expect("a just-died gateway is still walking out");
             // NOT byte-equality: the exit lerp routes its origin through

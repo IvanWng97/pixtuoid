@@ -57,7 +57,7 @@ pub(crate) fn epoch_ms(now: SystemTime) -> u64 {
 /// of a layout pixel A* measures by: a full cycle each
 /// [`stride`](pixtuoid_core::sprite::Sprite::stride), so a planted foot holds
 /// its place at any speed and on any tier. A walk without one loops on its own
-/// clock at `now`. People, pets and the mascot all walk by this.
+/// clock at `now`.
 pub(crate) fn walk_frame(
     travelled: u32,
     anim: &pixtuoid_core::sprite::Sprite,
@@ -93,6 +93,9 @@ pub enum Motion {
 
 /// How often a [`Motion::Full`] loop steps.
 pub const FULL_TICK_MS: u64 = 125;
+/// How often a live painter repaints while anything moves, on every tier:
+/// what a walker covers between two paints is what its walk's frames step over.
+pub const PAINT_FPS: u32 = 30;
 /// How often a [`Motion::Calm`] loop steps.
 pub const CALM_TICK_MS: u64 = 500;
 

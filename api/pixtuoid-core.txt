@@ -1333,6 +1333,7 @@ pub pixtuoid_core::sprite::format::ValidationReport::overhanging_hair: alloc::ve
 pub pixtuoid_core::sprite::format::ValidationReport::partial_sets: alloc::vec::Vec<pixtuoid_core::sprite::format::PartialSet>
 pub pixtuoid_core::sprite::format::ValidationReport::unknown: alloc::vec::Vec<alloc::string::String>
 pub pixtuoid_core::sprite::format::ValidationReport::unmarked_heads: alloc::vec::Vec<pixtuoid_core::sprite::format::UnmarkedHead>
+pub pixtuoid_core::sprite::format::ValidationReport::walks_without_stride: alloc::vec::Vec<alloc::string::String>
 impl pixtuoid_core::sprite::format::ValidationReport
 pub fn pixtuoid_core::sprite::format::ValidationReport::error_count(&self) -> usize
 pub fn pixtuoid_core::sprite::format::ValidationReport::has_errors(&self) -> bool
@@ -1359,7 +1360,7 @@ pub fn pixtuoid_core::sprite::format::density_variant_name(&str, pixtuoid_core::
 pub fn pixtuoid_core::sprite::format::density_variant_name_into(&mut alloc::string::String, &str, pixtuoid_core::sprite::format::Density)
 pub fn pixtuoid_core::sprite::format::load_pack(&std::path::Path) -> core::result::Result<pixtuoid_core::sprite::format::Pack, pixtuoid_core::sprite::error::PackError>
 pub fn pixtuoid_core::sprite::format::load_pack_from_strings(&str, &[(&str, &str)]) -> core::result::Result<pixtuoid_core::sprite::format::Pack, pixtuoid_core::sprite::error::PackError>
-pub fn pixtuoid_core::sprite::format::validate_pack_animations(&pixtuoid_core::sprite::format::Pack, &[alloc::vec::Vec<&'static str>]) -> pixtuoid_core::sprite::format::ValidationReport
+pub fn pixtuoid_core::sprite::format::validate_pack_animations(&pixtuoid_core::sprite::format::Pack, &[alloc::vec::Vec<&'static str>], &[&'static str]) -> pixtuoid_core::sprite::format::ValidationReport
 pub fn pixtuoid_core::sprite::format::variant_fits(&pixtuoid_core::sprite::Frame, pixtuoid_core::sprite::format::Density, &pixtuoid_core::sprite::Frame) -> bool
 pub fn pixtuoid_core::sprite::format::variant_redraws(&pixtuoid_core::sprite::Sprite, pixtuoid_core::sprite::format::Density, &pixtuoid_core::sprite::Sprite) -> bool
 #[non_exhaustive] pub enum pixtuoid_core::sprite::HeadView
@@ -1557,6 +1558,7 @@ pub fn pixtuoid_core::sprite::Sprite::head(&self, usize) -> core::option::Option
 pub fn pixtuoid_core::sprite::Sprite::laid_on(&self, pixtuoid_core::sprite::HeadMark) -> core::option::Option<(&pixtuoid_core::sprite::Frame, i32, i32)>
 pub fn pixtuoid_core::sprite::Sprite::marks(&self, usize) -> &[pixtuoid_core::sprite::Mark]
 pub fn pixtuoid_core::sprite::Sprite::recolorable(&self, usize) -> core::option::Option<pixtuoid_core::sprite::RecolorableFrame<'_>>
+pub fn pixtuoid_core::sprite::Sprite::stride(&self) -> core::option::Option<core::num::nonzero::NonZeroU16>
 impl core::clone::Clone for pixtuoid_core::sprite::Sprite
 pub fn pixtuoid_core::sprite::Sprite::clone(&self) -> pixtuoid_core::sprite::Sprite
 impl core::fmt::Debug for pixtuoid_core::sprite::Sprite
@@ -2521,6 +2523,7 @@ pub fn pixtuoid_core::sprite::Sprite::head(&self, usize) -> core::option::Option
 pub fn pixtuoid_core::sprite::Sprite::laid_on(&self, pixtuoid_core::sprite::HeadMark) -> core::option::Option<(&pixtuoid_core::sprite::Frame, i32, i32)>
 pub fn pixtuoid_core::sprite::Sprite::marks(&self, usize) -> &[pixtuoid_core::sprite::Mark]
 pub fn pixtuoid_core::sprite::Sprite::recolorable(&self, usize) -> core::option::Option<pixtuoid_core::sprite::RecolorableFrame<'_>>
+pub fn pixtuoid_core::sprite::Sprite::stride(&self) -> core::option::Option<core::num::nonzero::NonZeroU16>
 impl core::clone::Clone for pixtuoid_core::sprite::Sprite
 pub fn pixtuoid_core::sprite::Sprite::clone(&self) -> pixtuoid_core::sprite::Sprite
 impl core::fmt::Debug for pixtuoid_core::sprite::Sprite

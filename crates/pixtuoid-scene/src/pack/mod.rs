@@ -65,17 +65,9 @@ fn art_sets() -> Vec<Vec<&'static str>> {
     sets
 }
 
-/// Every walk the sim steps by distance ([`crate::anim::walk_frame`]): the
-/// people's, each pet kind's and each gateway mascot's.
+/// Every walk the sim steps by distance ([`crate::anim::walk_frame`]).
 pub(crate) fn walks() -> Vec<&'static str> {
-    let mut walks = vec!["walking", "walking_back", "walking_coffee"];
-    walks.extend(crate::pet::PetKind::ALL.iter().map(|k| k.walk_anim()));
-    walks.extend(
-        pixtuoid_core::source::registry::registered_source_names()
-            .filter_map(crate::creatures::gateway_mascot_def)
-            .map(|d| d.walk),
-    );
-    walks
+    vec!["walking", "walking_back", "walking_coffee"]
 }
 
 /// [`validate_pack_animations`], against this crate's painters' art sets and

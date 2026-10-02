@@ -1000,8 +1000,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let mut last_layout_sig: Option<(u16, u16)> = None;
     let mut cap_sweep = FloorCapacitySweep::new();
 
-    const FRAME_TICK_MS: u64 = 33;
-    let tick = Duration::from_millis(FRAME_TICK_MS);
+    let tick = Duration::from_secs(1) / pixtuoid_scene::anim::PAINT_FPS;
     let result: Result<()> = (async {
         let mut ctrl_c = pin_ctrl_c();
         #[cfg(unix)]

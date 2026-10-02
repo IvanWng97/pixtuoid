@@ -176,7 +176,7 @@ pub enum Pose {
         t_x1000: u16,
         /// How far into the whole leg the walker is, in the octile tenths of a
         /// layout pixel A* measures by; the sim turns it into the walk's frame
-        /// ([`crate::anim::walk_frame`]).
+        /// (`anim::walk_frame`).
         travelled: u32,
         /// Whether the agent renders holding a coffee on this leg.
         carrying_coffee: bool,
