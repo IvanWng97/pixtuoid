@@ -45,6 +45,8 @@ pub(crate) mod creatures;
 pub use creatures::PET_CYCLE_MS;
 #[doc(hidden)]
 pub mod cutaway;
+#[doc(hidden)]
+pub mod display;
 pub(crate) mod dither;
 pub(crate) mod effects;
 pub mod floor;
@@ -59,7 +61,6 @@ pub mod layout;
 pub(crate) mod lighting;
 #[doc(hidden)]
 pub mod localclock;
-pub mod motion;
 #[doc(hidden)]
 pub mod overlay;
 pub mod pack;
@@ -76,6 +77,7 @@ pub(crate) mod skyline;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;
 pub mod token_meter;
+pub mod walk;
 pub(crate) mod wall;
 
 /// ⌊2⁶⁴/φ⌋, φ the golden ratio: the Fibonacci-hashing multiplier and splitmix64's increment.

@@ -167,7 +167,7 @@ mandatory ([recorded](docs/CONTRIBUTING.md#the-merge-gate)).
 | An interactive TUI flow | | local | WALK each user path end-to-end: first run, failure branches, the no-CLI user (#359). |
 | The shim | `crates/pixtuoid-hook/` | local | Audit the WHOLE shim for never-panic: `args_os()`, no slicing of untrusted bytes, bounded reads, every error path `exit(0)` (#198). |
 | The hook's daemon side | `crates/pixtuoid-core/src/source/hook/` | local | The endpoint is never looser than owner-only, arbitration cannot steal a live owner's socket, both `unix.rs`/`windows.rs` arms hold (Windows runs only in CI, outside mutation testing), and each guard is PINNED. |
-| Motion / pose / walk-leg | `crates/pixtuoid-scene/src/` `motion/`, `pose/`, `pathfind/`, `physics.rs` | local | Render and WATCH it (the snapshot example, or `scripts/lib/tier-replay.sh` for resume/lifecycle) before the verdict (#61). |
+| Motion / pose / walk-leg | `crates/pixtuoid-scene/src/` `walk/`, `pose/`, `pathfind/`, `physics.rs` | local | Render and WATCH it (the snapshot example, or `scripts/lib/tier-replay.sh` for resume/lifecycle) before the verdict (#61). |
 | A string/layout a painter frames | | local | Render the COMPOSED frame; string-equality tests are blind to framing (#308). |
 | Another CLI's config | `crates/pixtuoid/src/install/` | local | Enumerate every resolution axis and re-verify each against that CLI's upstream in-session; write ⊆ verify (#338). |
 | A new source / hook integration | `crates/pixtuoid-core/src/source/registry.rs` | local | LIVE run or hermetic replay without capture-rig convenience flags; event shapes from canonical upstream docs, never a fork. |
