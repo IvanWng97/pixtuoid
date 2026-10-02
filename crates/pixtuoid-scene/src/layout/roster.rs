@@ -835,7 +835,7 @@ impl SceneLayout {
         let island = p
             .kitchen_island
             .map(|at| centred(at, furniture_def(Furniture::KitchenIsland).visual));
-        [island, self.pantry_counter(), self.corridor]
+        [island, p.counter_rect(), self.corridor]
             .into_iter()
             .flatten()
             .all(|b| !b.overlaps(mat))
@@ -873,18 +873,9 @@ impl SceneLayout {
         })
     }
 
-    /// The pantry counter's box, or `None` without one.
-    fn pantry_counter(&self) -> Option<Bounds> {
-        let wp = self
-            .waypoints
-            .iter()
-            .find(|w| w.kind == WaypointKind::Pantry)?;
-        Some(centred(wp.pos, self.pantry_counter_size()))
-    }
-
     /// The coffee machine's box on the pantry counter, or `None` without one.
     pub fn coffee_machine(&self) -> Option<Bounds> {
-        let counter = self.pantry_counter()?;
+        let counter = self.pantry?.counter_rect()?;
         let (x0, x1) = coffee_machine_cols(counter.width);
         Some(Bounds {
             x: counter.x + x0,
