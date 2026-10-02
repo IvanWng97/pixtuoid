@@ -116,7 +116,8 @@ jobs:
           if [[ -n "$head" ]]; then
             # Its CHANGELOG and semver verdict cover only the main release-plz
             # wrote its commit on, so that commit must sit on the merge's
-            # parent unrewritten: a rebase moves the committer date alone.
+            # parent unrewritten: createCommitOnBranch stamps both its dates
+            # at once, and a rebase moves the committer date alone.
             parent="$(gh api "repos/$REPOSITORY/commits/$SHA" --jq '.parents[0].sha')"
             stale="$(gh api "repos/$REPOSITORY/compare/$parent...$head" \
               --jq ".commits[0] | .parents[0].sha != \"$parent\" or .commit.author.date != .commit.committer.date")"

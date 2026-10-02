@@ -70,6 +70,7 @@
                 "--setting-sources", "--tools", "--settings", "--json-schema"] == [])
              and [$args | scan("--permission-mode[ =](\\S+)")] == [["dontAsk"]]
              and [$args | scan("--setting-sources (\\S+)")] == [["user"]]
+             and ($args | test("--setting-sources=") | not)
              and ([$args | scan("--tools[ =](.*?)(?= --|$)")]
                   | length == 1 and ([.[0][0] | splits("[ ,]+")] - ["Read", "Glob", "Grep"] == []))
              and ([$args | scan("--settings")] | length == 1)
@@ -103,6 +104,9 @@
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub("--setting-sources user"; "--setting-sources=user")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      += " --setting-sources=user,project"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub("\"permissions\":\\{"; "\"permissions\":{\"defaultMode\":\"acceptEdits\",")
