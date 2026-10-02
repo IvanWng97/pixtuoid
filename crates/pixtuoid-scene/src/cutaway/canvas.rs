@@ -879,4 +879,130 @@ mod tests {
             "the canvas shows other than the new layout"
         );
     }
+
+    /// The digests [`the_canvas_paints_the_pinned_frames`] pins, one frame a
+    /// line.
+    const PINNED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/cutaway/canvas.golden");
+
+    /// Every pixel of a fixed set of frames, as committed: a refactor of the
+    /// cutaway leaves this file as it found it, and a change to its look
+    /// rewrites it (`just gen-cutaway-golden`). Each instant is a local
+    /// hour ([`localclock`](crate::localclock)), so any `$TZ` paints it alike.
+    #[test]
+    fn the_canvas_paints_the_pinned_frames() {
+        use crate::sky::{Weather, WeatherPolicy};
+        use std::fmt::Write as _;
+        let pack = Arc::new(test_default_pack());
+        let (walk_layout, _, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        let walk_layout = Arc::new(walk_layout);
+        let office = crate::floor::FloorSession::new()
+            .step(
+                crate::floor::FloorInputs {
+                    scene: &pixtuoid_core::SceneState::uniform(16),
+                    pack: &pack,
+                    now: SystemTime::UNIX_EPOCH,
+                    floor: FloorMeta::ground(),
+                    pets: crate::floor::PetInputs::default(),
+                },
+                crate::layout::Size { w: 240, h: 144 },
+            )
+            .expect("lays out");
+        let lively = Arc::new(lively_office());
+        let busy = SimFrame {
+            door_frame: 2,
+            neon: crate::floor::NeonLevels {
+                alert: 1.0,
+                ..crate::floor::NeonLevels::CALM
+            },
+            occupied_waypoints: (0..lively.waypoints.len()).collect(),
+            ..empty_frame(&lively)
+        };
+        let scenes = [
+            ("walk", &walk_layout, &frames[frames.len() / 2]),
+            (
+                "seated",
+                &walk_layout,
+                frames.last().expect("a seated frame"),
+            ),
+            ("office", &office.layout, &office.frame),
+            ("lively", &lively, &busy),
+        ];
+        let moments = [
+            ("normal", Weather::Clear, 12),
+            ("cyberpunk", Weather::Rain, 17),
+            ("dracula", Weather::Storm, 21),
+            ("tokyo-night", Weather::Snow, 7),
+            ("gruvbox", Weather::Fog, 2),
+        ];
+        let densities = [1, pack.max_density_variant().get()];
+        // What the local hour leaves to the absolute instant, so to `$TZ`, held
+        // still: the loops, and the moon, which a new moon keeps out of the
+        // night sky.
+        let new_moon = (0..31u32)
+            .min_by(|&a, &b| {
+                let phase = |day| {
+                    crate::sky::Sky::at_with(crate::localclock::on_day(day, 0), Weather::Clear)
+                        .moon_phase()
+                };
+                phase(a).total_cmp(&phase(b))
+            })
+            .expect("a lunation has days");
+        let mut digests = String::new();
+        for (scene, layout, frame) in scenes {
+            for (i, (theme_name, weather, hour)) in moments.into_iter().enumerate() {
+                let theme = crate::theme::theme_by_name(theme_name).expect("theme");
+                let floor = FloorMeta::for_floor(i % 2 * 3, 4)
+                    .with_weather(WeatherPolicy::Forced(weather))
+                    .with_motion(Motion::Still);
+                for d in densities {
+                    let scale = RenderScale::new(d).expect("nonzero");
+                    let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
+                    let stepped = SteppedFloor {
+                        layout: Arc::clone(layout),
+                        frame: frame.clone(),
+                    };
+                    let shown = canvas.frame(
+                        &stepped,
+                        theme,
+                        scale,
+                        crate::cutaway::paint::tests::showing(
+                            floor,
+                            crate::localclock::on_day(new_moon, hour),
+                        ),
+                        &mut crate::cutaway::paint::CutawayCache::default(),
+                    );
+                    let digest = shown.buf.as_slice().iter().fold(
+                        u64::from(shown.buf.width()) << 16 | u64::from(shown.buf.height()),
+                        |h, c| {
+                            pixtuoid_core::id::splitmix64(
+                                h ^ u64::from_be_bytes([0, 0, 0, 0, 0, c.r, c.g, c.b]),
+                            )
+                        },
+                    );
+                    let name = weather.name();
+                    let floor_idx = floor.floor_idx;
+                    writeln!(
+                        digests,
+                        "{scene} {theme_name} {name} {hour:02}h floor{floor_idx} d{d} {digest:016x}"
+                    )
+                    .expect("a String takes every write");
+                }
+            }
+        }
+        if std::env::var_os("UPDATE_CUTAWAY_GOLDEN").is_some() {
+            std::fs::write(PINNED, &digests).expect("writes the golden");
+            return;
+        }
+        let pinned = std::fs::read_to_string(PINNED).expect("reads the golden");
+        let moved: Vec<&str> = digests
+            .lines()
+            .filter(|l| !pinned.lines().any(|p| p == *l))
+            .collect();
+        assert!(
+            moved.is_empty() && pinned.lines().count() == digests.lines().count(),
+            "these frames are not the pixels {PINNED} pins; run \
+             `just gen-cutaway-golden` if the look changed on purpose:\n{}",
+            moved.join("\n")
+        );
+    }
 }
