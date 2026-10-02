@@ -17,6 +17,7 @@ use pixtuoid_core::sprite::{Frame, Pixel, Rgb};
 
 use crate::atmosphere::{Moment, SkyTones};
 use crate::layout::pct;
+use crate::sky_layer::SkyLayer;
 use crate::theme::Theme;
 
 /// A depth of the city.
@@ -563,9 +564,19 @@ impl CityStrip {
         }
     }
 
+    /// Stand this city's buildings on `layer`'s glass, the run's west end at
+    /// column `run_x0`.
+    pub(crate) fn paint(&self, layer: &mut SkyLayer, run_x0: u16) {
+        let x0 = run_x0.saturating_mul(layer.d());
+        layer.paint(|cell, sky| {
+            self.at(cell.at.0.wrapping_sub(x0), cell.glass.1)
+                .unwrap_or(sky)
+        });
+    }
+
     /// What stands at `(x, y)` art pixels from the run's west end and the
     /// glass's top, or `None` where the sky shows.
-    pub(crate) fn at(&self, x: u16, y: u16) -> Option<Rgb> {
+    fn at(&self, x: u16, y: u16) -> Option<Rgb> {
         (x < self.w && y < self.h)
             .then(|| self.px[usize::from(y) * usize::from(self.w) + usize::from(x)])
             .flatten()

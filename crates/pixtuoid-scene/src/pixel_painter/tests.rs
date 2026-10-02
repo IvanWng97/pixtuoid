@@ -1742,6 +1742,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
         pack: &pack,
         clock: Motion::Full.clock(now),
         sky: crate::sky::Sky::clock(now),
+        outside: None,
         buf: &mut buf,
         cache: &mut cache,
         base_fill: &mut base_fill,
@@ -3446,6 +3447,7 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
             pack: &pack,
             clock: Motion::Full.clock(now),
             sky: crate::sky::Sky::clock(now),
+            outside: None,
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -3697,6 +3699,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             pack: &pack,
             clock: Motion::Full.clock(now),
             sky: crate::sky::Sky::clock(now),
+            outside: None,
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -3825,6 +3828,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 pack: &pack,
                 clock: Motion::Full.clock(now),
                 sky: crate::sky::Sky::clock(now),
+                outside: None,
                 buf,
                 cache: &mut cache,
                 base_fill: &mut base_fill,
@@ -4951,6 +4955,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 pack: &pack,
                 clock: Motion::Full.clock(now),
                 sky: crate::sky::Sky::clock(now),
+                outside: None,
                 buf: &mut buf,
                 cache: &mut cache,
                 base_fill: &mut base_fill,
@@ -5181,6 +5186,7 @@ fn paint_drawn(
             pack,
             clock: Motion::Full.clock(now),
             sky: crate::sky::Sky::clock(now),
+            outside: None,
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -6037,4 +6043,79 @@ fn corridor_appliance_art_never_lands_on_a_workstation() {
     );
     assert!(placed > 0, "no appliance was placed, so this pins nothing");
     assert!(violations.is_empty(), "{}", violations.join("\n"));
+}
+
+/// The outside reaches only the windows' glass: under every sky the sweep
+/// draws, a frame differs from the one whose windows show its instant's
+/// no-weather sky — the same room, lit alike — only on glass nothing hangs in
+/// front of, so the joinery, the clock and the neon sign match it.
+#[test]
+fn the_outside_reaches_only_the_glass() {
+    let (scene, layout, _, now0, pack) = sim_rig();
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: now0,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    const UNPAINTED: Rgb = Rgb { r: 1, g: 2, b: 3 };
+    for weathered in crate::sky_layer::tests::every_sky() {
+        let name = &weathered.name;
+        let clock = Motion::Full.clock(weathered.now);
+        let paint = |outside| {
+            let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, UNPAINTED);
+            paint_frame(
+                &mut PaintCtx {
+                    scene: &scene,
+                    layout: &layout,
+                    pack: &pack,
+                    clock,
+                    sky: weathered.sky,
+                    outside,
+                    buf: &mut buf,
+                    cache: &mut FrameCache::new(),
+                    base_fill: &mut BaseFillCache::new(),
+                    shadows: &mut crate::ground::DepthsCache::default(),
+                    theme,
+                    floor: crate::floor::FloorMeta::ground(),
+                    motion: &owned.route.motion,
+                    debug_walkable: false,
+                },
+                &frame,
+            );
+            buf
+        };
+        let (shown, bare) = (paint(None), paint(Some(weathered.bare)));
+        let mut hung = RgbBuffer::filled(layout.buf_w, layout.buf_h, UNPAINTED);
+        let clock_at = layout.clock_pos().expect("the wall has a clock");
+        background::paint_clock(&mut hung, clock_at.x, clock_at.y, weathered.now, theme);
+        let sign = crate::layout::NEON_PANEL;
+        let mut glass = 0;
+        for y in 0..layout.buf_h {
+            for x in 0..layout.buf_w {
+                if shown.get(x, y) == bare.get(x, y) {
+                    continue;
+                }
+                let on_sign = (sign.x..sign.x + sign.width).contains(&x)
+                    && (sign.y..sign.y + sign.height).contains(&y);
+                assert!(
+                    layout.glass_at(x, y) && hung.get(x, y) == UNPAINTED && !on_sign,
+                    "{name}: the outside reached ({x}, {y}), off the glass"
+                );
+                glass += 1;
+            }
+        }
+        assert_eq!(glass > 0, weathered.shows, "{name}: {glass} glass pixels");
+    }
 }

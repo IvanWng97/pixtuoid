@@ -25,7 +25,7 @@ pub(crate) const NEON_DOOR_WALL_W: u16 = NEON_PANEL.x + NEON_PANEL.width + DOOR_
 pub(crate) const WINDOW_TOP: u16 = 1;
 
 /// One window on the north wall.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct WindowBay {
     /// The window's left edge.
     pub(crate) x: u16,
