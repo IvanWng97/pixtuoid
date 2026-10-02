@@ -1,7 +1,7 @@
 //! The sky as a MODEL: the weather, the sun and the moon, lightning timing, and
 //! the light they let into the office.
 //!
-//! Painters read it through one [`Sky`] sampled per frame, so no two of them can
+//! Painters read it through one `Sky` sampled per frame, so no two of them can
 //! disagree about the hour, the weather or whether lightning is striking.
 //! Nothing here knows a theme or a pixel.
 
@@ -86,14 +86,14 @@ pub enum WeatherPolicy {
 
 impl WeatherPolicy {
     /// The policy a CLI or page names: one of
-    /// [`weather_names`](crate::pixel_painter::weather_names), case-insensitive,
+    /// [`weather_names`], case-insensitive,
     /// or `None` for the clock. `Err` carries the valid names.
     pub fn from_name(name: Option<&str>) -> Result<Self, Vec<&'static str>> {
         match name {
             None => Ok(Self::Clock),
             Some(s) => Weather::from_name(s)
                 .map(Self::Forced)
-                .ok_or_else(crate::pixel_painter::weather_names),
+                .ok_or_else(weather_names),
         }
     }
 
@@ -341,8 +341,25 @@ fn arc_progress(h: f32, rise: f32, set: f32) -> f32 {
 /// Whether the sky shows the SUN (not the moon) at hour-of-day `h` (0..24) — the
 /// ONE definition of the day/night boundary, so the sky body and any external
 /// consumer can't drift from a second hardcoded copy.
-pub(crate) fn hour_is_day(h: f32) -> bool {
+pub fn hour_is_day(h: f32) -> bool {
     (SUN_RISE_H..SUN_SET_H).contains(&h)
+}
+
+/// Day/night at `now` on the LOCAL clock: the native painters' feed for the
+/// audio track selector (wasm passes its own hour to [`hour_is_day`]).
+pub fn is_day_at(now: SystemTime) -> bool {
+    hour_is_day(local_hour_frac(now))
+}
+
+/// The weather names [`WeatherPolicy::from_name`] accepts, canonical order.
+pub fn weather_names() -> Vec<&'static str> {
+    Weather::ALL.iter().map(|w| w.name()).collect()
+}
+
+/// How hard it is raining at `now` under `policy` (0.0 dry … 1.0 storm; snow
+/// and fog are 0.0): the audio model's weather feed.
+pub fn rain_at(now: SystemTime, policy: WeatherPolicy) -> f32 {
+    Sky::at(crate::anim::Motion::Full.timing(now), policy).precipitation()
 }
 
 /// What a wall clock reads at `now`, local time.

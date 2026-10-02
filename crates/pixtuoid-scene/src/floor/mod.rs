@@ -475,15 +475,15 @@ pub fn waypoint_kind_of(
 
 /// The mood [`TrackId`](crate::audio::TrackId) for `now` under `weather` — the
 /// ONE place the day/precip/epoch input wiring lives. Lives here (not `audio`)
-/// because it reaches the lighting layer's `is_day_at`/`precipitation_level`,
+/// because it reaches [`crate::sky::is_day_at`] and [`crate::sky::rain_at`],
 /// which `audio` must not depend on.
 pub fn track_for(
     now: std::time::SystemTime,
     weather: crate::sky::WeatherPolicy,
 ) -> crate::audio::TrackId {
     crate::audio::select_track(
-        crate::pixel_painter::is_day_at(now),
-        crate::pixel_painter::precipitation_level(now, weather),
+        crate::sky::is_day_at(now),
+        crate::sky::rain_at(now, weather),
         crate::audio::track_epoch(now),
     )
 }
@@ -527,7 +527,7 @@ impl AudioObserver {
         // You hear the floor you're LOOKING AT — but rain stays global, since
         // it's weather, not agent activity.
         let counts = crate::board::per_floor_counts(scene)[floor_idx.min(MAX_FLOORS - 1)];
-        let precipitation = crate::pixel_painter::precipitation_level(now, floor.weather);
+        let precipitation = crate::sky::rain_at(now, floor.weather);
         let floor_ids = scene
             .agents
             .iter()

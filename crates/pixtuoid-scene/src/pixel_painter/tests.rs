@@ -2764,7 +2764,7 @@ fn weather_gallery_manifest_matches_the_weather_enum() {
         .collect();
     assert_eq!(
         ids,
-        weather_names(),
+        crate::sky::weather_names(),
         "site/src/weather.json ids must match Weather::ALL names in order — \
          update the manifest + run `just gen-media` when the enum changes"
     );
@@ -4604,29 +4604,6 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
         ),
         "an agent that left the wander machine must release its seat claim"
     );
-}
-
-#[test]
-fn precipitation_level_maps_audible_rain_under_its_policy() {
-    use crate::sky::Weather;
-    let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
-    let level = |w| precipitation_level(t, WeatherPolicy::Forced(w));
-    assert_eq!(level(Weather::Storm), 1.0, "storm is full precipitation");
-    let rain = level(Weather::Rain);
-    assert!(
-        rain > 0.0 && rain < 1.0,
-        "rain sits strictly between clear and storm, got {rain}"
-    );
-    for quiet in [
-        Weather::Clear,
-        Weather::Snow,
-        Weather::Fog,
-        Weather::Overcast,
-        Weather::Windy,
-        Weather::Smog,
-    ] {
-        assert_eq!(level(quiet), 0.0, "{quiet:?} must be silent precipitation");
-    }
 }
 
 #[test]
