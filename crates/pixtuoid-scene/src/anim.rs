@@ -223,14 +223,11 @@ mod tests {
         let walk = pack.animation("walking").expect("the walk");
         let stride = u32::from(walk.stride().expect("a stride").get());
         let frames = walk.frames().len() as u32;
-        let per_frame = stride * crate::pathfind::OCTILE_STRAIGHT_COST / frames;
+        let per_cycle = stride * crate::pathfind::OCTILE_STRAIGHT_COST;
+        // the first distance the second frame shows at
+        let next = per_cycle.div_ceil(frames);
         let later = SystemTime::UNIX_EPOCH + Duration::from_millis(12_345);
-        for (travelled, frame) in [
-            (0, 0),
-            (per_frame - 1, 0),
-            (per_frame, 1),
-            (per_frame * frames, 0),
-        ] {
+        for (travelled, frame) in [(0, 0), (next - 1, 0), (next, 1), (per_cycle, 0)] {
             for now in [SystemTime::UNIX_EPOCH, later] {
                 assert_eq!(
                     walk_frame(travelled, walk, now),
@@ -249,6 +246,64 @@ mod tests {
         for name in crate::pack::walks() {
             let walk = pack.animation(name).expect("a bundled walk");
             assert!(walk.stride().is_some(), "{name} walks on its clock");
+        }
+    }
+
+    /// A base-art walker is the base art's standing person with only its feet
+    /// and hands moved: the same head, neck, shirt and leg rows, so a sit,
+    /// stand or walk never reshapes them. A hand may hang beside the hips, a
+    /// foot may step out a column or clear the ground.
+    #[test]
+    fn a_base_walker_keeps_the_standing_figure() {
+        let pack = crate::pack::test_default_pack();
+        let opaque = |f: &pixtuoid_core::sprite::Frame, y: u16| -> Vec<u16> {
+            (0..f.width())
+                .filter(|&x| f.get(x, y).copied().flatten().is_some())
+                .collect()
+        };
+        let stand = &pack
+            .animation("standing")
+            .expect("the standing art")
+            .frames()[0];
+        let (w, h) = (stand.width(), stand.height());
+        // a dropped hand hangs past the shirt's last full-width row
+        let hips = 1
+            + (0..h)
+                .rev()
+                .find(|&y| opaque(stand, y).len() == usize::from(w))
+                .expect("a full-width row");
+        let ground = h - 1;
+        let sides = [0, w - 1];
+        for name in crate::pack::walks() {
+            for (i, f) in pack
+                .animation(name)
+                .expect("a walk")
+                .frames()
+                .iter()
+                .enumerate()
+            {
+                assert_eq!((f.width(), f.height()), (w, h), "{name} {i}");
+                for y in 0..h {
+                    let (walk, rest) = (opaque(f, y), opaque(stand, y));
+                    if y == hips {
+                        let extra: Vec<u16> =
+                            walk.iter().filter(|x| !rest.contains(x)).copied().collect();
+                        assert!(
+                            extra.iter().all(|x| sides.contains(x)),
+                            "{name} {i}: hips {walk:?}"
+                        );
+                        assert!(
+                            rest.iter().all(|x| walk.contains(x)),
+                            "{name} {i}: hips {walk:?}"
+                        );
+                    } else if y == ground {
+                        let steps = |x: &u16| rest.iter().any(|r| r.abs_diff(*x) <= 1);
+                        assert!(walk.iter().all(steps), "{name} {i}: feet {walk:?}");
+                    } else {
+                        assert_eq!(walk, rest, "{name} {i}: row {y}");
+                    }
+                }
+            }
         }
     }
 
