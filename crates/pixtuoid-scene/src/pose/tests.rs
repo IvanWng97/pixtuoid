@@ -115,7 +115,7 @@ fn walk_leg_freezes_path_against_midleg_reroute() {
     let frozen = rig
         .walks
         .get(&slot2.agent_id)
-        .and_then(|ms| ms.walk_path.as_ref())
+        .and_then(|walk| walk.walk_path.as_ref())
         .expect("walk_path must be snapshotted while walking");
     assert!(
         frozen.path.contains(&mid_a),
@@ -208,15 +208,15 @@ fn seated_waypoint_snap_back_starts_from_the_seat_not_the_approach_cell() {
     let mut rig = RouteRig::new(StubRouter::straight());
 
     let idle = entry_slot(now - Duration::from_secs(60));
-    let mut ms = WalkState::new(idle.agent_id);
-    ms.wander.phase = crate::walk::WanderPhase::AtWaypoint(walk_profile(
+    let mut walk = WalkState::new(idle.agent_id);
+    walk.wander.phase = crate::walk::WanderPhase::AtWaypoint(walk_profile(
         100,
         WalkIntent::WanderBack,
         idle.agent_id,
     ));
-    ms.wander.phase_started_at = now;
-    ms.wander.last_advanced_at = now; // pin the phase (advance_wander no-ops at now)
-    ms.wander.target = crate::walk::WanderTarget {
+    walk.wander.phase_started_at = now;
+    walk.wander.last_advanced_at = now; // pin the phase (advance_wander no-ops at now)
+    walk.wander.target = crate::walk::WanderTarget {
         dest: approach,
         kind: crate::walk::WanderKind::Named {
             wp_idx: 0,
@@ -224,7 +224,7 @@ fn seated_waypoint_snap_back_starts_from_the_seat_not_the_approach_cell() {
             seat: Some(seat),
         },
     };
-    rig.walks.insert(idle.agent_id, ms);
+    rig.walks.insert(idle.agent_id, walk);
     match derive_with_routing(&idle, now, &l, &mut rig.rctx()) {
         Some(Pose::AtWaypoint { .. }) => {}
         other => panic!("expected AtWaypoint pose, got {other:?}"),
@@ -337,7 +337,7 @@ fn snap_back_cornered_leg_freezes_path_no_reroute() {
     let frozen = rig
         .walks
         .get(&slot.agent_id)
-        .and_then(|ms| ms.walk_path.as_ref())
+        .and_then(|walk| walk.walk_path.as_ref())
         .expect("walk_path must be snapshotted while snapping back");
     assert!(
         frozen.path.contains(&corner_a),
@@ -353,9 +353,8 @@ fn snap_back_cornered_leg_freezes_path_no_reroute() {
 
 #[test]
 fn snap_back_derive_is_idempotent_within_a_frame() {
-    // The render loop calls derive_with_routing up to 4x per agent per frame
-    // (seated map, sprite paint, hit-test, label) at the SAME `now`, sharing one
-    // history + motion — hence the inner k-loop.
+    // A repeat derive at the SAME `now` must change neither the pose nor the
+    // shared history and walks — hence the inner k-loop.
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
     let slot = active_slot(now0, now0 - Duration::from_secs(60));
@@ -697,11 +696,11 @@ fn snap_back_progress_is_physics_eased_not_linear() {
         .record(slot.agent_id, prev, now - Duration::from_millis(50));
 
     let _pose0 = derive_with_routing(&slot, now, &l, &mut rig.rctx());
-    let ms = rig
+    let walk = rig
         .walks
         .get(&slot.agent_id)
         .expect("WalkState created on frame 0");
-    let profile = &ms
+    let profile = &walk
         .snap_back
         .as_ref()
         .expect("snap_back profile stored")
@@ -736,7 +735,7 @@ fn snap_back_progress_is_physics_eased_not_linear() {
 }
 
 #[test]
-fn snap_back_profile_stored_in_motion_state() {
+fn snap_back_profile_stored_in_walk_state() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
     let slot = active_slot(now, now - Duration::from_secs(60));
@@ -754,7 +753,7 @@ fn snap_back_profile_stored_in_motion_state() {
     let dur1 = rig
         .walks
         .get(&slot.agent_id)
-        .and_then(|ms| ms.snap_back.as_ref())
+        .and_then(|walk| walk.snap_back.as_ref())
         .map(|leg| leg.profile.duration_ms)
         .expect("snap_back profile created on frame 1");
 
@@ -767,7 +766,7 @@ fn snap_back_profile_stored_in_motion_state() {
     let dur2 = rig
         .walks
         .get(&slot2.agent_id)
-        .and_then(|ms| ms.snap_back.as_ref())
+        .and_then(|walk| walk.snap_back.as_ref())
         .map(|leg| leg.profile.duration_ms)
         .expect("snap_back profile still present on frame 2");
 
@@ -796,13 +795,13 @@ fn snap_back_rearms_on_new_state_transition() {
     let stored0 = rig
         .walks
         .get(&slot0.agent_id)
-        .and_then(|ms| ms.snap_back.as_ref())
+        .and_then(|walk| walk.snap_back.as_ref())
         .map(|leg| leg.started_at)
         .expect("snap_back armed at T0");
     assert_eq!(stored0, t0, "first arm should key on T0 state_started_at");
 
     // A NEW transition inside the window. Same agent_id (active_slot uses a fixed
-    // transcript path) so the motion entry is reused; only state_started_at moved.
+    // transcript path) so its walk state is reused; only state_started_at moved.
     let t1_state = t0 + Duration::from_millis(400);
     let slot1 = active_slot(t1_state, now - Duration::from_secs(60));
     let now1 = t1_state;
@@ -816,7 +815,7 @@ fn snap_back_rearms_on_new_state_transition() {
     let stored1 = rig
         .walks
         .get(&slot1.agent_id)
-        .and_then(|ms| ms.snap_back.as_ref())
+        .and_then(|walk| walk.snap_back.as_ref())
         .map(|leg| leg.started_at)
         .expect("snap_back still present after new transition");
     assert_eq!(
@@ -1294,7 +1293,11 @@ fn wander_legs_approach_the_desk_via_an_allowed_side_not_through_the_front() {
     for i in 0..6000u64 {
         let t = now + Duration::from_millis(i * 33);
         let _ = derive_with_routing(&slot, t, &l, &mut rig.rctx());
-        let Some(snap) = rig.walks.get(&trip_id).and_then(|m| m.walk_path.as_ref()) else {
+        let Some(snap) = rig
+            .walks
+            .get(&trip_id)
+            .and_then(|walk| walk.walk_path.as_ref())
+        else {
             continue;
         };
         if let (Some(&f), Some(&la)) = (snap.path.first(), snap.path.last())
@@ -1491,7 +1494,7 @@ fn wander_interrupted_by_active_does_not_teleport() {
 
 #[test]
 fn floor_offscreen_then_resume_does_not_replay() {
-    // An off-screen floor is simply not rendered, so its motion freezes: the
+    // An off-screen floor is simply not rendered, so its walks freeze: the
     // fixture warms up, SKIPS a long gap (no calls at all), then resumes.
     use crate::pathfind::AStarRouter;
     use crate::sim::anchors::character_top_left;
@@ -1861,7 +1864,7 @@ fn route_walking_pose_straight_leg_records_lerp_and_clears_walk_path() {
     assert!(
         rig.walks
             .get(&slot.agent_id)
-            .is_some_and(|ms| ms.walk_path.is_none()),
+            .is_some_and(|walk| walk.walk_path.is_none()),
         "straight 2-point walk must clear walk_path"
     );
     let recorded = rig
@@ -1971,7 +1974,7 @@ fn snap_back_profile_length_measures_the_routed_polyline() {
     let leg = rig
         .walks
         .get(&slot.agent_id)
-        .and_then(|ms| ms.snap_back.as_ref())
+        .and_then(|walk| walk.snap_back.as_ref())
         .expect("snap-back must be armed");
     let settle = settle_len(snap_target, chair_settle);
     let routed = octile_path_len(&detour) + settle;
