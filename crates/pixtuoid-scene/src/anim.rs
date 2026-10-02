@@ -241,8 +241,8 @@ mod tests {
         }
     }
 
-    /// Every walk in the bundled pack, the people's, the pets' and the
-    /// mascots', carries a stride, so none slides on its clock.
+    /// Every walk the sim steps by distance carries a stride in the bundled
+    /// pack, so none slides on its clock.
     #[test]
     fn every_bundled_walk_carries_its_stride() {
         let pack = crate::pack::test_default_pack();
