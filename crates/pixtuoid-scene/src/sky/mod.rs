@@ -101,7 +101,7 @@ impl WeatherPolicy {
     }
 
     /// The weather at `now` under this policy.
-    pub(crate) fn weather_at(self, now: SystemTime) -> WeatherMix {
+    fn weather_at(self, now: SystemTime) -> WeatherMix {
         match self {
             Self::Clock => clock_weather(now),
             Self::Forced(w) => WeatherMix::pure(w),
