@@ -843,7 +843,7 @@ fn a_walking_person_never_slides() {
     let steps = |total_ms: u64, travelled_at: &dyn Fn(u64) -> u32| {
         let (mut turns, mut last) = (0.0_f32, None);
         for ms in (0..=total_ms).step_by(paint_ms as usize) {
-            let frame = crate::anim::walk_frame(travelled_at(ms), walk, now);
+            let frame = walk_frame(travelled_at(ms), walk, now);
             turns += f32::from(u8::from(last.is_some_and(|f| f != frame)));
             last = Some(frame);
         }
@@ -896,5 +896,28 @@ fn a_walking_person_never_slides() {
             turns,
             length as f32 / crate::pathfind::OCTILE_STRAIGHT_COST as f32,
         );
+    }
+}
+
+/// A walk steps one frame each `stride / frames` of ground, wrapping each
+/// stride, whatever the clock says.
+#[test]
+fn a_walk_steps_by_the_ground_it_covers() {
+    let pack = crate::pack::test_default_pack();
+    let walk = pack.animation("walking").expect("the walk");
+    let stride = u32::from(walk.stride().expect("a stride").get());
+    let frames = walk.frames().len() as u32;
+    let per_cycle = stride * crate::pathfind::OCTILE_STRAIGHT_COST;
+    // the first distance the second frame shows at
+    let next = per_cycle.div_ceil(frames);
+    let later = SystemTime::UNIX_EPOCH + Duration::from_millis(12_345);
+    for (travelled, frame) in [(0, 0), (next - 1, 0), (next, 1), (per_cycle, 0)] {
+        for now in [SystemTime::UNIX_EPOCH, later] {
+            assert_eq!(
+                walk_frame(travelled, walk, now),
+                frame as usize,
+                "{travelled} in"
+            );
+        }
     }
 }

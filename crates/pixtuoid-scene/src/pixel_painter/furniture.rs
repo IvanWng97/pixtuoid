@@ -2,19 +2,9 @@
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
+use crate::anim::FULL_TICK_MS;
 use crate::layout::{Bounds, COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W};
 use crate::pack::COOLER_WATER;
-
-// The ambient loops' steps, each whole beats (`anim::FULL_TICK_MS`) so the
-// beat neither skips nor stretches one.
-/// The cooler's glug: a bubble climbing the bottle, a step at a time.
-const GLUG_CYCLE_MS: u64 = 1_875;
-const GLUG_STEP_MS: u64 = 375;
-/// The fish's swim steps: distinct, so the pair never mirror in lockstep.
-const FISH_STEP_MS: u64 = 375;
-const FISH_ALT_STEP_MS: u64 = 500;
-/// The tank's bubbles rising.
-const BUBBLE_RISE_STEP_MS: u64 = 250;
 
 /// Bordered area rug filling `rug` — the meeting and lounge rugs and both
 /// pantry mats.
@@ -207,6 +197,8 @@ pub(super) fn paint_water_cooler(
     }
     // Ambient glug: a bubble climbs the bottle each cycle. Reusing
     // tank_water_line also keeps it off the mascot harness's bubble sentinel.
+    const GLUG_STEP_MS: u64 = 3 * FULL_TICK_MS;
+    const GLUG_CYCLE_MS: u64 = 5 * GLUG_STEP_MS;
     let phase = (beat.ms() % GLUG_CYCLE_MS) / GLUG_STEP_MS;
     if phase < 2 {
         let (bx, by) = (wx + 1, wy + 1 - phase as u16);
@@ -325,7 +317,10 @@ pub(super) fn paint_fish_tank(
     // Fish patrol: a triangle wave over the interior span, one lane each. Distinct
     // periods (and a phase offset) keep the pair from mirroring in lockstep.
     let t = beat.ms();
+    const FISH_STEP_MS: u64 = 3 * FULL_TICK_MS;
+    const FISH_ALT_STEP_MS: u64 = 4 * FULL_TICK_MS;
     const FISH_ALT_PHASE_STEPS: u64 = 7;
+    const BUBBLE_RISE_STEP_MS: u64 = 2 * FULL_TICK_MS;
     let span = (w - 5) as u64;
     let mut fish = |lane_dy: u16, color: Rgb, step_ms: u64, phase: u64| {
         let cycle = span * 2;
@@ -447,25 +442,6 @@ pub(super) fn paint_coat_rack(
                     buf.put(px, py, coat_color);
                 }
             }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Every ambient step here is whole beats, so the beat steps it evenly.
-    #[test]
-    fn every_furniture_step_is_whole_beats() {
-        for (name, ms) in [
-            ("GLUG_CYCLE_MS", GLUG_CYCLE_MS),
-            ("GLUG_STEP_MS", GLUG_STEP_MS),
-            ("FISH_STEP_MS", FISH_STEP_MS),
-            ("FISH_ALT_STEP_MS", FISH_ALT_STEP_MS),
-            ("BUBBLE_RISE_STEP_MS", BUBBLE_RISE_STEP_MS),
-        ] {
-            assert_eq!(ms % crate::anim::FULL_TICK_MS, 0, "{name}: {ms} ms");
         }
     }
 }

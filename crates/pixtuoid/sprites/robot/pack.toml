@@ -25,7 +25,7 @@ frame_ms = 500
 
 [animations.typing]
 frames = ["typing_0.sprite", "typing_1.sprite"]
-frame_ms = 400
+frame_ms = 375
 
 [animations.standing]
 frames = ["standing.sprite"]
