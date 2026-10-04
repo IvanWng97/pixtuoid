@@ -245,6 +245,7 @@ pub(crate) fn query_tty(
     // SAFETY: `tcgetattr` only fills the zeroed repr(C) `termios` for a valid fd;
     // all-zero is a valid starting value (overwritten on success).
     let mut saved: libc::termios = unsafe { std::mem::zeroed() };
+    // SAFETY: `fd` is the open `/dev/tty` above and `saved` an owned `termios`.
     if unsafe { libc::tcgetattr(fd, &mut saved) } != 0 {
         return None;
     }
@@ -327,6 +328,7 @@ fn read_reply(
         // SAFETY: a zeroed `fd_set` with our single valid fd registered; the fd
         // is < FD_SETSIZE by the structural guard at the top of this fn.
         let mut rfds: libc::fd_set = unsafe { std::mem::zeroed() };
+        // SAFETY: `fd` is a valid open fd below FD_SETSIZE (the guard above).
         unsafe { libc::FD_SET(fd, &mut rfds) };
         // SAFETY: one read fd, null write/error sets, a valid timeval.
         let ready = unsafe {
