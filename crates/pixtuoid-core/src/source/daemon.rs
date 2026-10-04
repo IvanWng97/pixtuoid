@@ -299,8 +299,9 @@ pub fn apply_presence(
             }
         }
     }
-    // Re-anchor the enter animation on a Down → up resurrection; Idle↔Busy leaves
-    // it, so the steady wander clock stays continuous.
+    // Re-anchor the walk-in on a Down → up resurrection (the sim walks the
+    // mascot in from `entered_at`); Idle↔Busy leaves it, so a mascot already in
+    // the room does not walk in again.
     if was_down && p.liveness != DaemonLiveness::Down {
         p.entered_at = now;
     }
