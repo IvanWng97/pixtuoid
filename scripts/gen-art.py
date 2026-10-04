@@ -3695,7 +3695,7 @@ CREATURES = {
     "dog_walk": ("The dog walking, east.", DOG_WALK),
     "cat_sit": ("The cat sitting: breathing, and once a loop a tail flick.", CAT_SIT),
     "cat_sleep": ("The cat asleep, curled up: breathing.", CAT_SLEEP),
-    "dog_sit": ("The dog sitting: breathing, its stub tail wagging.", DOG_SIT),
+    "dog_sit": ("The dog sitting: breathing.", DOG_SIT),
     "dog_sleep": ("The dog asleep, chin on its paws: breathing.", DOG_SLEEP),
 }
 
