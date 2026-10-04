@@ -110,7 +110,7 @@ impl Depths {
 
 /// One floor's [`Depths::cells`], kept across frames: the contacts change only
 /// with the layout, so the cells are rebuilt only when they do.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct DepthsCache {
     key: Option<(Vec<Contact>, u16)>,
     cells: Vec<(u16, u16, f32)>,

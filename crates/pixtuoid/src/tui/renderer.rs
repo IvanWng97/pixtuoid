@@ -30,6 +30,7 @@ pub(super) use crate::tui::widgets::{
 
 pub use pixtuoid_scene::pet::PetState;
 
+#[derive(Debug)]
 pub struct DrawCtx<'a> {
     pub world: FloorInputs<'a>,
     /// The floor drawn: its sim stores and raster.
@@ -99,7 +100,7 @@ impl<'a> DrawCtx<'a> {
 
 /// What [`draw_scene`] drew; each sprite field is [`ClassicDrawn`]'s namesake.
 /// `Default` is a refused frame, which leaves nothing to hit-test.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct DrawOut {
     /// `None` when the frame was refused.
     pub layout: Option<Arc<SceneLayout>>,

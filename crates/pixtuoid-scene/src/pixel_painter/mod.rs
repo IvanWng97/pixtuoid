@@ -19,7 +19,7 @@ use crate::sim::pack_frame_size;
 use crate::walk::WalkState;
 
 /// What [`paint_frame`] drew that the caller points at or badges.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct Drawn {
     /// Each drawn agent's badge, in paint order, then each chitchat bubble.
     pub(crate) texts: Vec<TextRun>,
@@ -27,6 +27,7 @@ pub(crate) struct Drawn {
 }
 
 /// The classic's raster state for one floor, kept across frames.
+#[derive(Debug)]
 pub(crate) struct ClassicCaches {
     pub(crate) sprites: FrameCache,
     pub(crate) base_fill: BaseFillCache,
