@@ -161,6 +161,15 @@ pub enum Truecolor {
     CantAsk,
 }
 
+impl Truecolor {
+    /// Whether the launcher's stderr warning and doctor's ⚠ row fire. Both read
+    /// this, so they cannot disagree; `CantAsk` stays quiet because a platform
+    /// with nothing to ask would nag on every launch.
+    pub fn warrants_warning(self) -> bool {
+        matches!(self, Self::NoAnswer | Self::Answered(false))
+    }
+}
+
 /// The truecolor verdict, naming HOW it was determined so a "colors look wrong"
 /// report is self-diagnosable. `probe` is the `query_truecolor` result, `None`
 /// when the caller never ran it (piped / `$TERM=dumb`); only an asked probe may
@@ -484,6 +493,18 @@ mod tests {
         assert!(response_terminated(b"\x1bP1$r0m\x1b\\"));
         assert!(response_terminated(b"\x1bP1$r0m\x07"));
         assert!(!response_terminated(b"\x1bP1$r0m"));
+    }
+
+    #[test]
+    fn cant_ask_never_warns_the_launcher_or_doctor() {
+        for (probe, warns) in [
+            (Truecolor::Answered(true), false),
+            (Truecolor::Answered(false), true),
+            (Truecolor::NoAnswer, true),
+            (Truecolor::CantAsk, false),
+        ] {
+            assert_eq!(probe.warrants_warning(), warns, "{probe:?}");
+        }
     }
 
     #[test]
