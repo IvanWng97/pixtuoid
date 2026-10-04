@@ -5300,7 +5300,7 @@ mod tests {
                 );
             }
             // Each drawn agent's badge, known by its text.
-            let namesakes = crate::overlay::Namesakes::of(&frame.agents);
+            let namesakes = crate::badge::Namesakes::of(&frame.agents);
             let mut badged: Vec<_> = list.badges().map(|run| run.spans[1].text.clone()).collect();
             let mut drawn: Vec<_> = hovers
                 .iter()

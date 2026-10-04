@@ -258,7 +258,7 @@ impl FixtureKind {
             FixtureKind::Wall { kind, .. } => match kind {
                 WallDecor::Whiteboard => "Whiteboard",
                 WallDecor::Bookshelf => "Bookshelf",
-                WallDecor::BulletinBoard => "Bulletin Board",
+                WallDecor::CorkBoard => "Bulletin Board",
                 WallDecor::ExitSign => "Exit Sign",
                 WallDecor::MeetingScreen => "Meeting Screen",
             },

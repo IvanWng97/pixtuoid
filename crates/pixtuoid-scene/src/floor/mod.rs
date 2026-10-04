@@ -439,7 +439,7 @@ impl AudioObserver {
         }
         // You hear the floor you're LOOKING AT — but rain stays global, since
         // it's weather, not agent activity.
-        let counts = crate::board::per_floor_counts(scene)[floor_idx.min(MAX_FLOORS - 1)];
+        let counts = crate::neon_sign::per_floor_counts(scene)[floor_idx.min(MAX_FLOORS - 1)];
         let precipitation = crate::sky::rain_at(now, floor.weather);
         let floor_ids = scene
             .agents
@@ -591,16 +591,16 @@ impl FloorSession {
         self.floor.raster.classic_texts()
     }
 
-    /// The [`wall_board`](crate::board::wall_board) of `scene`, a one-floor office.
+    /// The [`wall_board`](crate::neon_sign::wall_board) of `scene`, a one-floor office.
     pub fn board(
         &self,
         scene: &SceneState,
         motion: crate::anim::Motion,
         now: SystemTime,
-    ) -> crate::board::BoardModel {
-        crate::board::wall_board(
+    ) -> crate::neon_sign::BoardModel {
+        crate::neon_sign::wall_board(
             scene,
-            crate::board::office_gateway(scene),
+            crate::neon_sign::office_gateway(scene),
             None,
             motion,
             now,
@@ -950,11 +950,11 @@ impl NeonState {
     /// out of a lit room, can't drop the sign.
     pub(crate) fn tick(
         &mut self,
-        mood: crate::board::OfficeMood,
+        mood: crate::neon_sign::OfficeMood,
         room_dimmed: bool,
         timing: crate::anim::Timing,
     ) -> NeonLevels {
-        use crate::board::OfficeMood;
+        use crate::neon_sign::OfficeMood;
         let now = timing.now;
         let to = match mood {
             OfficeMood::Alert { .. } => NeonLevels::ALERT,

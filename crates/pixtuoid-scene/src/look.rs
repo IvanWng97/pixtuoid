@@ -34,7 +34,7 @@ pub enum Look {
 /// board's gateway chip and breadcrumb.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Place {
-    /// The office's [`office_gateway`](crate::board::office_gateway).
+    /// The office's [`office_gateway`](crate::neon_sign::office_gateway).
     pub gateway: Option<DaemonState>,
     /// Where the floor sits, `None` in a one-floor office.
     pub floor: Option<FooterFloor>,
@@ -229,7 +229,7 @@ pub fn render<'r>(
         .shown
         .replace(look)
         .is_none_or(|was| std::mem::discriminant(&was) != std::mem::discriminant(&look));
-    let board = crate::board::wall_board(
+    let board = crate::neon_sign::wall_board(
         world.scene,
         place.gateway,
         place.floor,

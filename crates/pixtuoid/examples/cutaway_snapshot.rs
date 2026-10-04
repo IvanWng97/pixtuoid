@@ -193,7 +193,7 @@ fn main() -> Result<()> {
                 theme,
                 size: Size { w: lw, h: lh },
                 place: Place {
-                    gateway: pixtuoid_scene::board::office_gateway(&scene),
+                    gateway: pixtuoid_scene::neon_sign::office_gateway(&scene),
                     floor: None,
                 },
                 debug_walkable: false,

@@ -5,8 +5,8 @@
 //! and the wasm hero. It also owns `OfficeMood`, which the sign's light reads.
 //!
 //! `scene` has no terminal/window deps (invariant #1), so the model carries a
-//! backend-agnostic `BoardTone` and `tone_rgb` is the ONE tone→theme-role map all
-//! three painters share. Also owns the per-scene activity tally the footer reads.
+//! backend-agnostic `BoardTone` and [`BoardTone::rgb`] is the ONE tone→theme-role
+//! map all three painters share. Also owns the per-scene activity tally the footer reads.
 
 use std::time::SystemTime;
 
@@ -116,7 +116,7 @@ pub fn compact_hms(secs: u64) -> String {
 }
 
 /// The board text's tone — backend-agnostic. Deliberately NOT
-/// `overlay::LabelTone`: the variant sets are disjoint (labels never show
+/// `badge::BadgeTone`: the variant sets are disjoint (labels never show
 /// Brand/Star/Dim; the board never shows a per-agent Exiting).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BoardTone {
@@ -134,16 +134,18 @@ pub enum BoardTone {
     Dim,
 }
 
-/// Resolve a `BoardTone` to its theme color role — the SINGLE authority the three
-/// board painters share, so a `theme.ui` role change lands in ONE place.
-pub fn tone_rgb(tone: BoardTone, theme: &Theme) -> Rgb {
-    match tone {
-        BoardTone::Brand => theme.ui.neon_brand,
-        BoardTone::Star => theme.ui.neon_star,
-        BoardTone::Active => theme.ui.label_active,
-        BoardTone::Waiting => theme.ui.label_waiting,
-        BoardTone::Idle => theme.ui.label_idle,
-        BoardTone::Dim => theme.ui.tooltip_dim,
+impl BoardTone {
+    /// This tone's theme color role — the SINGLE authority the three board
+    /// painters share, so a `theme.ui` role change lands in ONE place.
+    pub fn rgb(self, theme: &Theme) -> Rgb {
+        match self {
+            BoardTone::Brand => theme.ui.neon_brand,
+            BoardTone::Star => theme.ui.neon_star,
+            BoardTone::Active => theme.ui.label_active,
+            BoardTone::Waiting => theme.ui.label_waiting,
+            BoardTone::Idle => theme.ui.label_idle,
+            BoardTone::Dim => theme.ui.tooltip_dim,
+        }
     }
 }
 
@@ -519,7 +521,7 @@ impl BoardModel {
         };
         let span = |s: &BoardSegment| TextSpan {
             text: s.text.clone(),
-            ink: tone_rgb(s.tone, theme),
+            ink: s.tone.rgb(theme),
         };
         let line = |n: u16| crate::layout::Point {
             x: NEON_PANEL_INNER_X,
@@ -1031,8 +1033,8 @@ mod tests {
             DaemonState::Down,
         ] {
             assert_eq!(
-                crate::footer::footer_tone_rgb(crate::footer::FooterTone::Gateway(st), theme),
-                tone_rgb(gateway_tone(st), theme),
+                crate::footer::FooterTone::Gateway(st).rgb(theme),
+                gateway_tone(st).rgb(theme),
                 "board and footer must resolve the same gateway color for {st:?}"
             );
         }

@@ -22,22 +22,24 @@ const LABEL_SEP: char = '\u{b7}';
 
 /// Activity-derived label tone — backend-agnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum LabelTone {
+pub enum BadgeTone {
     Active,
     Waiting,
     Idle,
     Exiting,
 }
 
-/// Resolve a `LabelTone` to its theme color role — the SINGLE authority every
-/// label painter shares. The `hovered` near-white highlight is deliberately NOT
-/// a `LabelTone`; it stays a per-painter surface choice.
-pub fn label_tone_rgb(tone: LabelTone, theme: &Theme) -> Rgb {
-    match tone {
-        LabelTone::Exiting => theme.ui.label_exiting,
-        LabelTone::Active => theme.ui.label_active,
-        LabelTone::Waiting => theme.ui.label_waiting,
-        LabelTone::Idle => theme.ui.label_idle,
+impl BadgeTone {
+    /// This tone's theme color role — the SINGLE authority every label painter
+    /// shares. The `hovered` near-white highlight is deliberately NOT a
+    /// `BadgeTone`; it stays a per-painter surface choice.
+    pub fn rgb(self, theme: &Theme) -> Rgb {
+        match self {
+            BadgeTone::Exiting => theme.ui.label_exiting,
+            BadgeTone::Active => theme.ui.label_active,
+            BadgeTone::Waiting => theme.ui.label_waiting,
+            BadgeTone::Idle => theme.ui.label_idle,
+        }
     }
 }
 
@@ -71,8 +73,8 @@ pub const BADGE_CELLS: u16 = DESK_W + BADGE_OVERHANG;
 const BADGE_OVERHANG: u16 = 4;
 
 /// The [`BadgeInk`] of a badge reading `text` in `tone`.
-pub fn badge_ink(text: &str, tone: LabelTone, theme: &Theme) -> BadgeInk {
-    let name = label_tone_rgb(tone, theme);
+pub fn badge_ink(text: &str, tone: BadgeTone, theme: &Theme) -> BadgeInk {
+    let name = tone.rgb(theme);
     BadgeInk {
         marker: badge_hue(text, theme).unwrap_or(name),
         name,
@@ -108,14 +110,14 @@ impl<'a> Namesakes<'a> {
 }
 
 /// `agent`'s badge tone: exiting over whatever it last did.
-pub(crate) fn tone_of(agent: &AgentSlot) -> LabelTone {
+pub(crate) fn tone_of(agent: &AgentSlot) -> BadgeTone {
     if agent.exiting_at.is_some() {
-        return LabelTone::Exiting;
+        return BadgeTone::Exiting;
     }
     match &agent.state {
-        ActivityState::Active { .. } => LabelTone::Active,
-        ActivityState::Waiting { .. } => LabelTone::Waiting,
-        ActivityState::Idle => LabelTone::Idle,
+        ActivityState::Active { .. } => BadgeTone::Active,
+        ActivityState::Waiting { .. } => BadgeTone::Waiting,
+        ActivityState::Idle => BadgeTone::Idle,
     }
 }
 
@@ -160,7 +162,7 @@ pub fn disambig_suffix(session_id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{LabelTone, Namesakes, badge_hue, disambig_suffix, tone_of, truncate_label};
+    use super::{BadgeTone, Namesakes, badge_hue, disambig_suffix, tone_of, truncate_label};
     use pixtuoid_core::AgentId;
     use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
     use std::path::PathBuf;
@@ -230,7 +232,7 @@ mod tests {
         let a = slot("cc", "sess-abcd", 0, active());
         let s = scene_of(vec![a.clone()]);
         assert_eq!(Namesakes::of(s.agents.values()).text(&a), "cc");
-        assert_eq!(tone_of(&a), LabelTone::Active);
+        assert_eq!(tone_of(&a), BadgeTone::Active);
     }
 
     #[test]
@@ -277,9 +279,9 @@ mod tests {
         let mut exiting = slot("ex", "sess-e", 2, active());
         exiting.exiting_at = Some(now());
 
-        assert_eq!(tone_of(&waiting), LabelTone::Waiting);
-        assert_eq!(tone_of(&idle), LabelTone::Idle);
-        assert_eq!(tone_of(&exiting), LabelTone::Exiting);
+        assert_eq!(tone_of(&waiting), BadgeTone::Waiting);
+        assert_eq!(tone_of(&idle), BadgeTone::Idle);
+        assert_eq!(tone_of(&exiting), BadgeTone::Exiting);
     }
 
     #[test]
@@ -403,10 +405,10 @@ mod tests {
         for theme in crate::theme::ALL_THEMES {
             let plate = badge_plate(theme);
             for tone in [
-                LabelTone::Active,
-                LabelTone::Waiting,
-                LabelTone::Idle,
-                LabelTone::Exiting,
+                BadgeTone::Active,
+                BadgeTone::Waiting,
+                BadgeTone::Idle,
+                BadgeTone::Exiting,
             ] {
                 for label in &labels {
                     let ink = badge_ink(label, tone, theme);

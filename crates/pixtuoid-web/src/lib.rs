@@ -654,8 +654,8 @@ fn hex(c: pixtuoid_core::sprite::Rgb) -> String {
     format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
 }
 
-fn board_hex(theme: &Theme, tone: pixtuoid_scene::board::BoardTone) -> String {
-    hex(pixtuoid_scene::board::tone_rgb(tone, theme))
+fn board_hex(theme: &Theme, tone: pixtuoid_scene::neon_sign::BoardTone) -> String {
+    hex(tone.rgb(theme))
 }
 
 /// Append `s` as a JSON string literal (quotes + escapes) to `out`. Agent labels
@@ -680,7 +680,7 @@ fn push_json_string(out: &mut String, s: &str) {
 fn push_board_segment(
     out: &mut String,
     key: &str,
-    seg: &pixtuoid_scene::board::BoardSegment,
+    seg: &pixtuoid_scene::neon_sign::BoardSegment,
     theme: &Theme,
 ) {
     out.push_str(&format!("\"{key}\":{{\"text\":"));
@@ -690,7 +690,7 @@ fn push_board_segment(
 
 fn push_board_segments(
     out: &mut String,
-    segs: &[pixtuoid_scene::board::BoardSegment],
+    segs: &[pixtuoid_scene::neon_sign::BoardSegment],
     theme: &Theme,
 ) {
     out.push('[');
@@ -912,7 +912,7 @@ mod tests {
         let board = &v["board"];
         assert_eq!(
             board["brand"]["text"].as_str().unwrap(),
-            pixtuoid_scene::board::BOARD_BRAND
+            pixtuoid_scene::neon_sign::BOARD_BRAND
         );
         assert_eq!(board["star"]["text"].as_str().unwrap(), "\u{2605} Star");
         assert!(board["mood"].is_array() && board["context"].is_array());

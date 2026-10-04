@@ -145,17 +145,17 @@ impl TextRun {
     pub(crate) fn badge(
         anchor: Point,
         agent: &AgentSlot,
-        namesakes: &crate::overlay::Namesakes<'_>,
+        namesakes: &crate::badge::Namesakes<'_>,
         theme: &Theme,
     ) -> Self {
         let text = namesakes.text(agent);
-        let ink = crate::overlay::badge_ink(&text, crate::overlay::tone_of(agent), theme);
+        let ink = crate::badge::badge_ink(&text, crate::badge::tone_of(agent), theme);
         Self {
             at: anchor,
             align: Align::Over,
             spans: vec![
                 TextSpan {
-                    text: crate::overlay::BADGE_MARKER.to_string(),
+                    text: crate::badge::BADGE_MARKER.to_string(),
                     ink: ink.marker,
                 },
                 TextSpan {
@@ -163,7 +163,7 @@ impl TextRun {
                     ink: ink.name,
                 },
             ],
-            plate: Some(crate::overlay::badge_plate(theme)),
+            plate: Some(crate::badge::badge_plate(theme)),
             role: TextRole::Badge(agent.agent_id),
         }
     }
@@ -181,7 +181,7 @@ impl TextRun {
                 text: crate::layout::floor_indicator_text(floor),
                 ink: theme.ui.neon_brand,
             }],
-            plate: Some(crate::overlay::badge_plate(theme)),
+            plate: Some(crate::badge::badge_plate(theme)),
             role: TextRole::Indicator,
         }
     }

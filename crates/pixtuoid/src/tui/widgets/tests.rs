@@ -2,8 +2,8 @@ use super::*;
 use footer::{build_status_spans, build_status_summary, footer_context};
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
-use pixtuoid_scene::board::{StateCounts, gateway_rollup, per_floor_counts, scene_stats};
 use pixtuoid_scene::footer::{FooterFloor, FooterInputs};
+use pixtuoid_scene::neon_sign::{StateCounts, gateway_rollup, per_floor_counts, scene_stats};
 use std::path::PathBuf;
 use std::sync::Arc;
 

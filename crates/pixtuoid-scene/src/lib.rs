@@ -33,8 +33,6 @@ pub(crate) mod atmosphere;
 #[doc(hidden)]
 pub mod audio;
 #[doc(hidden)]
-pub mod board;
-#[doc(hidden)]
 pub mod burn;
 pub(crate) mod celestial;
 pub(crate) mod character;
@@ -42,7 +40,11 @@ pub mod chitchat;
 pub(crate) mod composite;
 pub(crate) mod creatures;
 #[doc(hidden)]
+pub mod neon_sign;
+#[doc(hidden)]
 pub use creatures::PET_CYCLE_MS;
+#[doc(hidden)]
+pub mod badge;
 #[doc(hidden)]
 pub mod cutaway;
 #[doc(hidden)]
@@ -63,8 +65,6 @@ pub(crate) mod lighting;
 pub mod localclock;
 pub mod look;
 pub(crate) mod outside;
-#[doc(hidden)]
-pub mod overlay;
 pub mod pack;
 pub mod pathfind;
 /// Office pets — the `Pet`/`PetKind` model and per-floor selection.

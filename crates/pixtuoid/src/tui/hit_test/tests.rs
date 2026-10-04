@@ -162,7 +162,7 @@ fn furniture_hit_test_respects_floor_seed() {
     }
 }
 
-// BulletinBoard is never emitted by compute_with_seed and Ficus only appears on
+// CorkBoard is never emitted by compute_with_seed and Ficus only appears on
 // ROOMY-band floors, so both are placed synthetically below.
 
 #[test]
@@ -194,7 +194,7 @@ fn furniture_hit_test_bulletin_board_via_synthetic_wall_decor() {
     layout
         .wall_decor
         .push(pixtuoid_scene::layout::WallDecorItem {
-            kind: pixtuoid_scene::layout::WallDecor::BulletinBoard,
+            kind: pixtuoid_scene::layout::WallDecor::CorkBoard,
             pos,
         });
     assert_eq!(

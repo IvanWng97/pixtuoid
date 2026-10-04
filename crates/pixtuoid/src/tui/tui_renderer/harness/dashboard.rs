@@ -398,7 +398,7 @@ fn dashboard_closed_paints_no_popup() {
 /// The popup's content lines, so substring assertions don't false-match the
 /// office sprite labels behind it. The popup is borderless (no `│` to key on),
 /// so isolate it by its `tooltip_bg` fill: a badge's plate shares the colour
-/// but spans at most [`BADGE_CELLS`](pixtuoid_scene::overlay::BADGE_CELLS)
+/// but spans at most [`BADGE_CELLS`](pixtuoid_scene::badge::BADGE_CELLS)
 /// cells, and the popup's rows run wider.
 fn dash_popup(buf: &ratatui::buffer::Buffer) -> String {
     let tb = pixtuoid_scene::theme::NORMAL.ui.tooltip_bg;
@@ -416,7 +416,7 @@ fn dash_popup(buf: &ratatui::buffer::Buffer) -> String {
                     cells += 1;
                 }
                 None => {
-                    if cells > pixtuoid_scene::overlay::BADGE_CELLS {
+                    if cells > pixtuoid_scene::badge::BADGE_CELLS {
                         row.push_str(&run);
                     }
                     run.clear();

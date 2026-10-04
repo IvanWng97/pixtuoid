@@ -714,7 +714,7 @@ impl SceneState {
 
     /// Which floor does `desk_index` belong to? Recomputed from CURRENT
     /// capacities, while `AgentSlot.floor_idx` freezes at allocation — so after
-    /// growth `pixtuoid_scene::board::per_floor_counts` still counts an agent
+    /// growth `pixtuoid_scene::neon_sign::per_floor_counts` still counts an agent
     /// that `pixtuoid_scene::floor::build_floor_scene` skips. The skip is
     /// deliberate — desk 0 has a real occupant — and is pinned by
     /// `build_floor_scene_skips_agent_below_grown_offset`.

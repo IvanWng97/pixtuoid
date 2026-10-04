@@ -10,8 +10,8 @@ use ratatui::widgets::{Block, Padding, Paragraph};
 
 use super::{StateKind, compact_hms, display_width, source_badge_span, state_color, to_color};
 use crate::tui::renderer::clip_widget_rect;
+use pixtuoid_scene::badge::disambig_suffix;
 use pixtuoid_scene::display::{Align, GatewayCard, TextRole, TextRun};
-use pixtuoid_scene::overlay::disambig_suffix;
 use pixtuoid_scene::pet::PetKind;
 
 /// Borderless tooltip frame shared by every hover/click tooltip: just the padded
@@ -104,7 +104,7 @@ pub(crate) fn paint_text_runs(
                 run.at.x.saturating_sub(w / 2),
                 run.at.y.saturating_sub(gap) / 2,
                 match run.role {
-                    TextRole::Badge(_) => pixtuoid_scene::overlay::BADGE_CELLS,
+                    TextRole::Badge(_) => pixtuoid_scene::badge::BADGE_CELLS,
                     _ => w,
                 },
             ),
@@ -497,10 +497,10 @@ mod tests {
     fn badge(
         at: pixtuoid_scene::layout::Point,
         name: &str,
-        tone: pixtuoid_scene::overlay::LabelTone,
+        tone: pixtuoid_scene::badge::BadgeTone,
         theme: &pixtuoid_scene::theme::Theme,
     ) -> super::TextRun {
-        let ink = pixtuoid_scene::overlay::badge_ink(name, tone, theme);
+        let ink = pixtuoid_scene::badge::badge_ink(name, tone, theme);
         let span = |text: &str, ink| pixtuoid_scene::display::TextSpan {
             text: text.into(),
             ink,
@@ -509,10 +509,7 @@ mod tests {
             at,
             align: super::Align::Over,
             spans: vec![
-                span(
-                    &pixtuoid_scene::overlay::BADGE_MARKER.to_string(),
-                    ink.marker,
-                ),
+                span(&pixtuoid_scene::badge::BADGE_MARKER.to_string(), ink.marker),
                 span(name, ink.name),
             ],
             plate: None,
@@ -528,14 +525,14 @@ mod tests {
     fn the_board_runs_land_on_the_signs_interior() {
         use pixtuoid_core::state::DaemonState;
         use pixtuoid_scene::layout::{NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y};
-        let counts = pixtuoid_scene::board::StateCounts {
+        let counts = pixtuoid_scene::neon_sign::StateCounts {
             active: 2,
             waiting: 1,
             idle: 1,
             exiting: 0,
             total: 4,
         };
-        let model = pixtuoid_scene::board::build_board(
+        let model = pixtuoid_scene::neon_sign::build_board(
             counts,
             0,
             None,
@@ -557,7 +554,7 @@ mod tests {
         };
         let (l1, l2, l3) = (row(0), row(1), row(2));
         assert!(
-            l1.starts_with(pixtuoid_scene::board::BOARD_BRAND),
+            l1.starts_with(pixtuoid_scene::neon_sign::BOARD_BRAND),
             "brand leads L1: {l1:?}"
         );
         assert!(l1.ends_with("\u{2605} Star"), "star flush right: {l1:?}");
@@ -613,15 +610,15 @@ mod tests {
     /// colour as its background, hovered or not.
     #[test]
     fn a_badge_sits_on_its_plate() {
+        use pixtuoid_scene::badge::BadgeTone;
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::LabelTone;
         let plate = pixtuoid_core::sprite::Rgb { r: 1, g: 2, b: 3 };
         let run = super::TextRun {
             plate: Some(plate),
             ..badge(
                 Point { x: 20, y: 8 },
                 "cc\u{b7}repo",
-                LabelTone::Idle,
+                BadgeTone::Idle,
                 &theme::NORMAL,
             )
         };
@@ -649,8 +646,8 @@ mod tests {
     /// A badge's text centres on its anchor, the sprite's top-centre.
     #[test]
     fn a_badge_centres_its_text_on_the_anchor() {
+        use pixtuoid_scene::badge::BadgeTone;
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::LabelTone;
         let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
         let scene_rect = Rect {
             x: 3,
@@ -663,7 +660,7 @@ mod tests {
         term.draw(|f| {
             super::paint_text_runs(
                 f,
-                &[badge(anchor, text, LabelTone::Idle, &theme::NORMAL)],
+                &[badge(anchor, text, BadgeTone::Idle, &theme::NORMAL)],
                 scene_rect,
                 None,
             )
@@ -684,15 +681,15 @@ mod tests {
     /// the ● in the source's hue, the name in the tone, in every theme.
     #[test]
     fn a_badge_paints_the_models_ink() {
+        use pixtuoid_scene::badge::{BadgeTone, badge_ink};
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::{LabelTone, badge_ink};
         let text = "cc\u{b7}repo";
         for theme in pixtuoid_scene::theme::ALL_THEMES {
             for tone in [
-                LabelTone::Active,
-                LabelTone::Waiting,
-                LabelTone::Idle,
-                LabelTone::Exiting,
+                BadgeTone::Active,
+                BadgeTone::Waiting,
+                BadgeTone::Idle,
+                BadgeTone::Exiting,
             ] {
                 let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
                 term.draw(|f| {
@@ -713,7 +710,7 @@ mod tests {
                 };
                 let ink = badge_ink(text, tone, theme);
                 let at = format!("{} {tone:?}", theme.name);
-                let marker = pixtuoid_scene::overlay::BADGE_MARKER.to_string();
+                let marker = pixtuoid_scene::badge::BADGE_MARKER.to_string();
                 assert_eq!(fg(&marker), Some(super::to_color(ink.marker)), "{at}");
                 assert_eq!(fg("r"), Some(super::to_color(ink.name)), "{at}");
             }
@@ -722,9 +719,9 @@ mod tests {
 
     #[test]
     fn a_chitchat_bubble_centres_over_its_speakers_badge() {
+        use pixtuoid_scene::badge::BadgeTone;
         use pixtuoid_scene::chitchat::ChitchatBubble;
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::LabelTone;
         let mut term = Terminal::new(TestBackend::new(40, 12)).unwrap();
         let scene_rect = Rect {
             x: 3,
@@ -736,7 +733,7 @@ mod tests {
         let speaker = badge(
             Point { x: 20, y: 14 },
             name,
-            LabelTone::Idle,
+            BadgeTone::Idle,
             &theme::NORMAL,
         );
         let super::TextRole::Badge(id) = speaker.role else {

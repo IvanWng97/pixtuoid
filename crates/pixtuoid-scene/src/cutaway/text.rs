@@ -235,7 +235,7 @@ mod tests {
     /// Every character the wall board and the floor indicator write: each
     /// mood over two flap cycles, each gateway state, many floors.
     fn signs() -> std::collections::BTreeSet<char> {
-        use crate::board::{StateCounts, build_board};
+        use crate::neon_sign::{StateCounts, build_board};
         use pixtuoid_core::state::DaemonState;
         let mut text = crate::layout::floor_indicator_text(12);
         let moods = [
@@ -308,7 +308,7 @@ mod tests {
         let chars =
             (' '..='~')
                 .chain(signs())
-                .chain(['\u{b7}', crate::overlay::BADGE_MARKER, '\u{2603}']);
+                .chain(['\u{b7}', crate::badge::BADGE_MARKER, '\u{2603}']);
         for c in chars {
             let rows: Vec<&str> = hand_drawn(c).unwrap_or_default().split(' ').collect();
             assert!(
@@ -377,7 +377,7 @@ mod tests {
     /// cutaway's badges leading with a tofu box.
     #[test]
     fn the_font_draws_the_badge_marker() {
-        assert!(hand_drawn(crate::overlay::BADGE_MARKER).is_some());
+        assert!(hand_drawn(crate::badge::BADGE_MARKER).is_some());
     }
 
     /// A lowercase `w` closes its foot where `H` stands on open legs: the

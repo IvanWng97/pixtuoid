@@ -306,8 +306,8 @@ pub enum Furniture {
     Bookshelf,
     /// A cork bulletin board. Truly wall-HUNG: no part touches the floor, so it
     /// carries no footprint and only `visual` is read.
-    BulletinBoard,
-    /// An exit sign (wall-hung, like [`Furniture::BulletinBoard`]).
+    CorkBoard,
+    /// An exit sign (wall-hung, like [`Furniture::CorkBoard`]).
     ExitSign,
     /// A meeting-room presentation screen on a soundbar base (bookshelf-class):
     /// the floor base blocks, the panel above overhangs it inside the
@@ -387,7 +387,7 @@ impl Furniture {
         Furniture::Whiteboard,
         Furniture::Tv,
         Furniture::Bookshelf,
-        Furniture::BulletinBoard,
+        Furniture::CorkBoard,
         Furniture::ExitSign,
         Furniture::MeetingScreen,
         Furniture::MeetingSofaBody,
@@ -435,7 +435,7 @@ pub(crate) const fn repels_plants(kind: Furniture) -> bool {
         | Furniture::Whiteboard
         | Furniture::Tv
         | Furniture::Bookshelf
-        | Furniture::BulletinBoard
+        | Furniture::CorkBoard
         | Furniture::ExitSign
         | Furniture::MeetingScreen
         | Furniture::IslandStand
@@ -604,7 +604,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             visual: Size { w: 8, h: 12 },
             ..DECOR
         },
-        Furniture::BulletinBoard => FurnitureDef {
+        Furniture::CorkBoard => FurnitureDef {
             visual: Size { w: 10, h: 6 },
             ..DECOR
         },
@@ -883,7 +883,7 @@ pub enum WallDecor {
     /// A wall-mounted whiteboard.
     Whiteboard,
     /// A cork bulletin board.
-    BulletinBoard,
+    CorkBoard,
     /// An exit sign.
     ExitSign,
     /// Wall-mounted meeting-room display.
@@ -895,7 +895,7 @@ impl WallDecor {
     pub const ALL: &'static [WallDecor] = &[
         WallDecor::Bookshelf,
         WallDecor::Whiteboard,
-        WallDecor::BulletinBoard,
+        WallDecor::CorkBoard,
         WallDecor::ExitSign,
         WallDecor::MeetingScreen,
     ];
@@ -905,7 +905,7 @@ impl WallDecor {
         match self {
             WallDecor::Whiteboard => Furniture::Whiteboard,
             WallDecor::Bookshelf => Furniture::Bookshelf,
-            WallDecor::BulletinBoard => Furniture::BulletinBoard,
+            WallDecor::CorkBoard => Furniture::CorkBoard,
             WallDecor::ExitSign => Furniture::ExitSign,
             WallDecor::MeetingScreen => Furniture::MeetingScreen,
         }
@@ -925,7 +925,7 @@ impl WallDecor {
         match self {
             WallDecor::Bookshelf => "bookshelf",
             WallDecor::Whiteboard => "whiteboard",
-            WallDecor::BulletinBoard => "bulletin_board",
+            WallDecor::CorkBoard => "bulletin_board",
             WallDecor::ExitSign => "exit_sign",
             WallDecor::MeetingScreen => "meeting_screen",
         }

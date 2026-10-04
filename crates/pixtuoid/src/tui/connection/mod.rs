@@ -47,7 +47,7 @@ pub enum LiveFacet {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DaemonRollup {
     pub instances: std::num::NonZeroUsize,
-    /// Their worst-of state via the shared `board::gateway_rollup` — the same
+    /// Their worst-of state via the shared `neon_sign::gateway_rollup` — the same
     /// worst-of the footer's `⬢gw` chip and the wall board read.
     pub state: pixtuoid_core::state::DaemonState,
 }
@@ -125,7 +125,7 @@ pub fn live_for(
             .map(|(_, _, p)| p)
             .collect();
         let rollup = std::num::NonZeroUsize::new(mine.len())
-            .zip(pixtuoid_scene::board::gateway_rollup(mine.into_iter()))
+            .zip(pixtuoid_scene::neon_sign::gateway_rollup(mine.into_iter()))
             .map(|(instances, state)| DaemonRollup { instances, state });
         return LiveInfo {
             facet: LiveFacet::Daemon(rollup),
