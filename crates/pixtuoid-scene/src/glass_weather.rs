@@ -178,7 +178,7 @@ impl GlassWeather {
         Self {
             veil: moment.look.glass_veil,
             falls: [falls.next().flatten(), falls.next().flatten()],
-            tick: moment.beat.ms(),
+            tick: moment.timing.beat.ms(),
         }
     }
 

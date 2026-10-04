@@ -511,7 +511,7 @@ impl SceneLayout {
             )
             .chain(corridor.map(|b| backdrop(FixtureKind::Runner, b)))
             .chain(rooms.clone().filter_map(move |(room, r, _)| {
-                r.doormat_rect()
+                self.doormat(r)
                     .map(|b| backdrop(FixtureKind::Doormat { room }, b))
             }))
             .chain(
@@ -761,6 +761,27 @@ impl SceneLayout {
             })
     }
 
+    /// The mat outside meeting room `r`'s door, or `None` when the lounge's
+    /// side table or a plant stands over it: half hidden, it reads as a stain.
+    fn doormat(&self, r: &MeetingRoom) -> Option<Bounds> {
+        let mat = r.doormat_rect()?;
+        let side_table = self.lounge.as_ref().map(|l| {
+            centred(
+                l.side_table,
+                furniture_def(Furniture::LoungeSideTable).visual,
+            )
+        });
+        let plants = self
+            .plants
+            .iter()
+            .map(|p| Some(centred(p.pos, furniture_def(p.kind.furniture()).visual)));
+        std::iter::once(side_table)
+            .chain(plants)
+            .flatten()
+            .all(|b| !b.overlaps(mat))
+            .then_some(mat)
+    }
+
     /// The mat inside the pantry's north doorway, one clear floor row south of
     /// the wall face, or `None` without a pantry or that doorway.
     pub(crate) fn pantry_entry_mat(&self) -> Option<Bounds> {
@@ -777,6 +798,12 @@ impl SceneLayout {
             },
             ENTRY_MAT,
         );
+        // Inside the room's columns, or none: past them it lies under the wall.
+        let b = p.bounds;
+        let last_x = (b.x + b.width)
+            .checked_sub(mat.width)
+            .filter(|&x| x >= b.x)?;
+        mat.x = mat.x.clamp(b.x, last_x);
         // Shifted west off the cooler standing against the east wall.
         if let Some(cooler) = p.water_cooler_rect().filter(|c| c.overlaps(mat)) {
             mat.x = cooler
@@ -784,16 +811,22 @@ impl SceneLayout {
                 .checked_sub(mat.width)
                 .filter(|&x| x >= p.bounds.x)?;
         }
-        // Gives way to the island, the counter or the runner over it: half
-        // hidden, it reads as a stain.
+        // Gives way to whatever stands or lies over it: half hidden, it reads
+        // as a stain.
         let island = p
             .kitchen_island
             .map(|at| centred(at, furniture_def(Furniture::KitchenIsland).visual));
-        [island, p.counter_rect(), self.corridor]
-            .into_iter()
-            .flatten()
-            .all(|b| !b.overlaps(mat))
-            .then_some(mat)
+        [
+            island,
+            p.counter_rect(),
+            p.snack_shelf_rect(),
+            p.trash_bin_rect(),
+            self.corridor,
+        ]
+        .into_iter()
+        .flatten()
+        .all(|b| !b.overlaps(mat))
+        .then_some(mat)
     }
 
     /// The thin bar mat under the kitchen island: the island covers most of
