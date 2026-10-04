@@ -1,13 +1,13 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use pixtuoid_core::source::claude_code::claude_config_dir;
 use serde_json::{Value, json};
 
 use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::merge;
-use crate::install::target::MergeOutcome;
+use crate::install::target::{HostRegistration, MergeOutcome};
 
 pub(crate) const EVENTS: &[&str] = &[
     "SessionStart",
@@ -26,11 +26,180 @@ pub(crate) const EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
+/// The marketplace and the plugin share one name, so the plugin id is
+/// `pixtuoid@pixtuoid`.
+const PLUGIN_NAME: &str = "pixtuoid";
+
+/// Claude Code loads the hooks through its plugin system
+/// (code.claude.com/docs/en/plugins): a local marketplace whose one plugin loads
+/// in place, so a re-install's rewrite reaches the next session.
+pub(crate) const HOST: HostRegistration = HostRegistration {
+    register,
+    unregister,
+    is_registered,
+    legacy_config: legacy_config_path,
+    legacy_uninstall,
+};
+
+/// `<marketplace>/<plugin>/hooks/hooks.json`, under pixtuoid's own config dir.
 pub(crate) fn default_config_path() -> Result<PathBuf> {
+    let base = crate::config::config_base().context("no home directory resolves")?;
+    Ok(base
+        .join("pixtuoid")
+        .join("claude-plugin")
+        .join(PLUGIN_NAME)
+        .join("hooks")
+        .join("hooks.json"))
+}
+
+/// The settings.json earlier pixtuoid releases merged the hooks into.
+fn legacy_config_path() -> Result<PathBuf> {
     if let Some(dir) = claude_config_dir() {
         return Ok(dir.join("settings.json"));
     }
     io::home_relative_checked(".claude/settings.json")
+}
+
+/// Claude Code is present when its config dir exists; the hooks file is ours, so
+/// its absence says nothing.
+pub(crate) fn detect_installed() -> bool {
+    legacy_config_path()
+        .ok()
+        .and_then(|p| p.parent().map(Path::is_dir))
+        .unwrap_or(false)
+}
+
+/// The plugin dir and the marketplace root of `<root>/<plugin>/hooks/hooks.json`.
+fn plugin_layout(config: &Path) -> Result<(&Path, &Path)> {
+    let plugin = config.parent().and_then(Path::parent);
+    plugin.zip(plugin.and_then(Path::parent)).with_context(|| {
+        format!(
+            "{} is not <marketplace>/<plugin>/hooks/hooks.json",
+            config.display()
+        )
+    })
+}
+
+fn plugin_id() -> String {
+    format!("{PLUGIN_NAME}@{PLUGIN_NAME}")
+}
+
+fn register(config: &Path) -> Result<()> {
+    let (plugin, root) = plugin_layout(config)?;
+    let source = Path::new(".").join(plugin.file_name().context("the plugin dir has no name")?);
+    let marketplace = json!({
+        "name": PLUGIN_NAME,
+        "owner": { "name": PLUGIN_NAME },
+        "plugins": [{
+            "name": PLUGIN_NAME,
+            "source": source.to_string_lossy().replace('\\', "/"),
+            "description": "Sends Claude Code's session events to the pixtuoid office",
+        }],
+    });
+    let manifest = json!({
+        "name": PLUGIN_NAME,
+        "version": env!("CARGO_PKG_VERSION"),
+        "description": "Sends Claude Code's session events to the pixtuoid office",
+        "homepage": env!("CARGO_PKG_HOMEPAGE"),
+    });
+    for (path, doc) in [
+        (
+            root.join(".claude-plugin").join("marketplace.json"),
+            marketplace,
+        ),
+        (plugin.join(".claude-plugin").join("plugin.json"), manifest),
+    ] {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        }
+        io::write_config_atomic(&path, &serde_json::to_string_pretty(&doc)?)
+            .with_context(|| format!("writing {}", path.display()))?;
+    }
+    // Both are idempotent: a repeat add reports the marketplace already on disk,
+    // a repeat install that the plugin already loads in place.
+    run_claude(&[
+        "plugin".as_ref(),
+        "marketplace".as_ref(),
+        "add".as_ref(),
+        root.as_os_str(),
+    ])?;
+    run_claude(&["plugin".as_ref(), "install".as_ref(), plugin_id().as_ref()])?;
+    Ok(())
+}
+
+/// Removing the marketplace uninstalls its plugins too. `remove` exits non-zero on
+/// a marketplace it doesn't know, hence the list first.
+fn unregister() -> Result<()> {
+    let listed = run_claude(&[
+        "plugin".as_ref(),
+        "marketplace".as_ref(),
+        "list".as_ref(),
+        "--json".as_ref(),
+    ])?;
+    if marketplace_listed(&listed)? {
+        run_claude(&[
+            "plugin".as_ref(),
+            "marketplace".as_ref(),
+            "remove".as_ref(),
+            PLUGIN_NAME.as_ref(),
+        ])?;
+    }
+    Ok(())
+}
+
+/// Read where Claude Code records a user-scope install as enabled
+/// (code.claude.com/docs/en/plugins/install#choose-an-install-scope) — the settings
+/// file, not `claude plugin list`, which costs a CLI start per check.
+fn is_registered() -> Result<bool> {
+    let settings = legacy_config_path()?;
+    let content = io::read_config(&settings)?;
+    let doc: Value = serde_json::from_str(&content)
+        .with_context(|| format!("parsing {}", settings.display()))?;
+    Ok(doc["enabledPlugins"][plugin_id()].as_bool() == Some(true))
+}
+
+fn marketplace_listed(json_out: &str) -> Result<bool> {
+    let rows: Vec<Value> = serde_json::from_str(json_out)
+        .context("parsing `claude plugin marketplace list --json`")?;
+    Ok(rows
+        .iter()
+        .any(|r| r.get("name").and_then(Value::as_str) == Some(PLUGIN_NAME)))
+}
+
+/// `which` applies PATHEXT, so an npm install's `claude.cmd` resolves on Windows.
+fn run_claude(args: &[&std::ffi::OsStr]) -> Result<String> {
+    let cli = which::which("claude").context(
+        "Claude Code's `claude` command is not on PATH; pixtuoid installs its hooks as a Claude Code plugin through it",
+    )?;
+    // The real CLI would register and remove plugins in the developer's own Claude
+    // Code — a test run once did.
+    #[cfg(test)]
+    assert!(
+        cli.starts_with(std::env::temp_dir()),
+        "a test is about to run the real {} — put a fake `claude` first on PATH",
+        cli.display()
+    );
+    let out = std::process::Command::new(&cli)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .with_context(|| format!("running {}", cli.display()))?;
+    if !out.status.success() {
+        bail!(
+            "`claude {}` failed: {}",
+            args.iter()
+                .map(|a| a.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" "),
+            String::from_utf8_lossy(if out.stderr.is_empty() {
+                &out.stdout
+            } else {
+                &out.stderr
+            })
+            .trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// Unix: the bare name behind the `PIXTUOID_SOURCE=` prefix every other source
@@ -91,7 +260,7 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
         let managed: Option<&Value> = hooks
             .and_then(|h| h.get(*ev))
             .and_then(|a| a.as_array())
-            .and_then(|arr| arr.iter().find(|e| is_managed_entry(e)));
+            .and_then(|arr| arr.first());
         match managed {
             Some(entry) => {
                 any = true;
@@ -132,16 +301,65 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
     }
 }
 
+/// The plugin's hooks file is ours whole, so install writes the full document and
+/// replaces whatever was there.
 pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
-    merge::flat_json_merge_outcome_install(content, "settings", |doc| {
-        merge::flat_json_merge_install(doc, EVENTS, SENTINEL_KEY, managed_entry, hook_cmd)
+    let want = json!({
+        "hooks": EVENTS
+            .iter()
+            .map(|ev| ((*ev).to_string(), json!([managed_entry(hook_cmd)])))
+            .collect::<serde_json::Map<_, _>>()
+    });
+    Ok(MergeOutcome {
+        changed: serde_json::from_str::<Value>(content).ok().as_ref() != Some(&want),
+        content: serde_json::to_string_pretty(&want)?,
     })
 }
 
 pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    merge::flat_json_merge_outcome_uninstall(content, |doc| {
-        merge::flat_json_merge_uninstall(doc, SENTINEL_KEY)
+    let had_hooks = serde_json::from_str::<Value>(content)
+        .ok()
+        .and_then(|doc| doc.get("hooks")?.as_object().map(|h| !h.is_empty()))
+        .unwrap_or(false);
+    Ok(MergeOutcome {
+        content: "{}\n".to_string(),
+        changed: had_hooks,
     })
+}
+
+/// Strips our entries from the settings.json an earlier pixtuoid merged into,
+/// keeping everything else.
+fn legacy_uninstall(content: &str) -> Result<MergeOutcome> {
+    merge::flat_json_merge_outcome_uninstall(content, |doc| {
+        merge::flat_json_merge_uninstall_by(doc, is_ours)
+    })
+}
+
+/// A legacy entry is ours by its sentinel, its source stamp, or the shim it runs.
+/// The sentinel alone isn't enough: Claude Code drops the unknown `_pixtuoid` key
+/// whenever it rewrites settings.json, after which each re-install appended a
+/// duplicate.
+fn is_ours(entry: &Value) -> bool {
+    let stamp = format!(
+        "{}={}",
+        crate::install::hook_cmd::SOURCE_ENV,
+        pixtuoid_core::source::claude_code::SOURCE_NAME
+    );
+    is_managed_entry(entry)
+        || entry["hooks"].as_array().is_some_and(|hs| {
+            hs.iter()
+                .any(|h| h["command"].as_str().is_some_and(|c| c.contains(&stamp)))
+        })
+        || runs_our_shim(entry)
+}
+
+fn runs_our_shim(entry: &Value) -> bool {
+    use crate::install::verify::ShimRef;
+    match claude_shim_ref(entry) {
+        ShimRef::BareName => true,
+        ShimRef::Absolute(p) => p.file_stem().is_some_and(|s| s == "pixtuoid-hook"),
+        ShimRef::Unknown => false,
+    }
 }
 
 // A foreign hook entry — another tool's, or one carrying an unrecognized legacy
@@ -155,7 +373,6 @@ fn is_managed_entry(entry: &Value) -> bool {
 /// entry opaquely, keying only on the sentinel.
 fn managed_entry(hook_command: &str) -> Value {
     json!({
-        SENTINEL_KEY: true,
         "matcher": ".*",
         "hooks": [ hook_entry(hook_command, cfg!(windows)) ]
     })
@@ -165,20 +382,12 @@ fn managed_entry(hook_command: &str) -> Value {
 mod tests {
     use super::*;
 
-    fn json_merge_install(doc: Value, hook_command: &str) -> Value {
-        merge::flat_json_merge_install(doc, EVENTS, SENTINEL_KEY, managed_entry, hook_command)
-    }
-
-    fn json_merge_uninstall(doc: Value) -> Value {
-        merge::flat_json_merge_uninstall(doc, SENTINEL_KEY)
-    }
-
     #[test]
-    fn default_config_path_honors_claude_config_dir() {
+    fn legacy_config_path_honors_claude_config_dir() {
         let fallback_suffix = PathBuf::from(".claude").join("settings.json");
 
         temp_env::with_var_unset("CLAUDE_CONFIG_DIR", || {
-            let unset_path = default_config_path().unwrap();
+            let unset_path = legacy_config_path().unwrap();
             assert!(
                 unset_path.ends_with(&fallback_suffix),
                 "default config path must end with .claude/settings.json, got {unset_path:?}"
@@ -188,13 +397,13 @@ mod tests {
         let custom_dir = std::env::temp_dir().join("pixtuoid-claude-config-dir");
         temp_env::with_var("CLAUDE_CONFIG_DIR", Some(&custom_dir), || {
             assert_eq!(
-                default_config_path().unwrap(),
+                legacy_config_path().unwrap(),
                 custom_dir.join("settings.json")
             );
         });
 
         temp_env::with_var("CLAUDE_CONFIG_DIR", Some(""), || {
-            let empty_path = default_config_path().unwrap();
+            let empty_path = legacy_config_path().unwrap();
             assert!(
                 empty_path.ends_with(&fallback_suffix),
                 "empty CLAUDE_CONFIG_DIR must fall back to .claude/settings.json, got {empty_path:?}"
@@ -203,176 +412,101 @@ mod tests {
     }
 
     #[test]
-    fn install_creates_entries_for_all_events() {
-        let doc = json_merge_install(json!({}), "/usr/local/bin/pixtuoid-hook");
-        let hooks = doc.get("hooks").and_then(|v| v.as_object()).unwrap();
-        for ev in EVENTS {
-            let arr = hooks.get(*ev).and_then(|v| v.as_array()).unwrap();
-            assert_eq!(arr.len(), 1, "event {ev}");
-            assert_eq!(arr[0][SENTINEL_KEY], json!(true));
+    fn the_hooks_file_sits_in_pixtuoids_own_marketplace() {
+        let base = std::env::temp_dir().join("pixtuoid-xdg");
+        temp_env::with_var("XDG_CONFIG_HOME", Some(&base), || {
+            let hooks = default_config_path().unwrap();
             assert_eq!(
-                arr[0]["hooks"][0]["command"],
+                hooks,
+                base.join("pixtuoid/claude-plugin/pixtuoid/hooks/hooks.json")
+            );
+            let (plugin, root) = plugin_layout(&hooks).unwrap();
+            assert_eq!(plugin, base.join("pixtuoid/claude-plugin/pixtuoid"));
+            assert_eq!(root, base.join("pixtuoid/claude-plugin"));
+        });
+    }
+
+    #[test]
+    fn the_marketplace_listing_is_read_by_name() {
+        assert!(marketplace_listed(r#"[{"name":"other"},{"name":"pixtuoid"}]"#).unwrap());
+        assert!(!marketplace_listed(r#"[{"name":"other"}]"#).unwrap());
+        assert!(marketplace_listed("not json").is_err());
+    }
+
+    #[test]
+    fn legacy_cleanup_finds_entries_claude_code_stripped_of_the_sentinel() {
+        // Claude Code drops `_pixtuoid` when it rewrites settings.json; three
+        // re-installs then left three copies, as one real config had.
+        let ours = json!({ "matcher": ".*", "hooks": [{ "type": "command", "command": "pixtuoid-hook" }] });
+        let prefixed = json!({ "hooks": [{ "type": "command", "command": "PIXTUOID_SOURCE=claude-code pixtuoid-hook" }] });
+        let theirs = json!({ "hooks": [{ "type": "command", "command": "/usr/bin/say done" }] });
+        let doc = json!({ "hooks": { "Stop": [ours.clone(), ours, prefixed, theirs.clone()] }, "theme": "dark" });
+        let out = legacy_uninstall(&doc.to_string()).unwrap();
+        assert!(out.changed);
+        let cleaned: Value = serde_json::from_str(&out.content).unwrap();
+        assert_eq!(
+            cleaned,
+            json!({ "hooks": { "Stop": [theirs] }, "theme": "dark" })
+        );
+    }
+
+    #[test]
+    fn install_writes_every_event_and_is_idempotent() {
+        let first = merge_install("", "/usr/local/bin/pixtuoid-hook").unwrap();
+        assert!(first.changed);
+        let doc: Value = serde_json::from_str(&first.content).unwrap();
+        let hooks = doc["hooks"].as_object().unwrap();
+        assert_eq!(hooks.len(), EVENTS.len());
+        for ev in EVENTS {
+            assert_eq!(
+                hooks[*ev][0]["hooks"][0]["command"],
                 json!("/usr/local/bin/pixtuoid-hook")
             );
-        }
-    }
-
-    #[test]
-    fn install_is_idempotent() {
-        let d1 = json_merge_install(json!({}), "/x");
-        let d2 = json_merge_install(d1.clone(), "/x");
-        assert_eq!(d1, d2);
-    }
-
-    #[test]
-    fn merge_install_rejects_valid_json_that_is_not_an_object() {
-        assert!(merge_install("[1, 2, 3]", "/x").is_err());
-        assert!(merge_install("\"hi\"", "/x").is_err());
-        assert!(merge_install("null", "/x").is_ok());
-        assert!(merge_install("{}", "/x").unwrap().changed);
-    }
-
-    #[test]
-    fn install_preserves_unrelated_entries() {
-        let initial = json!({
-            "hooks": {
-                "PreToolUse": [
-                    { "matcher": "Write", "hooks": [{"type":"command","command":"/other"}] }
-                ]
-            },
-            "theme": "dark"
-        });
-        let merged = json_merge_install(initial, "/x");
-        let arr = merged["hooks"]["PreToolUse"].as_array().unwrap();
-        assert_eq!(arr.len(), 2);
-        assert_eq!(merged["theme"], json!("dark"));
-    }
-
-    #[test]
-    fn uninstall_removes_sentinel_entries_only() {
-        let installed = json_merge_install(
-            json!({
-                "hooks": { "PreToolUse": [
-                    { "matcher": "Write", "hooks": [{"type":"command","command":"/other"}] }
-                ]}
-            }),
-            "/x",
-        );
-        let cleaned = json_merge_uninstall(installed);
-        let arr = cleaned["hooks"]["PreToolUse"].as_array().unwrap();
-        assert_eq!(arr.len(), 1);
-        assert_eq!(arr[0][SENTINEL_KEY], json!(null));
-    }
-
-    #[test]
-    fn uninstall_drops_empty_hooks_map() {
-        let installed = json_merge_install(json!({}), "/x");
-        let cleaned = json_merge_uninstall(installed);
-        assert!(cleaned.get("hooks").is_none(), "got {cleaned}");
-    }
-
-    #[test]
-    fn foreign_sentinel_entries_are_no_longer_stripped() {
-        let initial = json!({
-            "hooks": {
-                "PreToolUse": [
-                    { "_legacy": true, "matcher": ".*", "hooks": [{"type":"command","command":"/old"}] }
-                ]
-            }
-        });
-        let merged = json_merge_install(initial.clone(), "/new");
-        let arr = merged["hooks"]["PreToolUse"].as_array().unwrap();
-        let commands: Vec<&str> = arr
-            .iter()
-            .map(|e| e["hooks"][0]["command"].as_str().unwrap())
-            .collect();
-        assert!(commands.contains(&"/old"), "legacy entry left in place");
-        assert!(commands.contains(&"/new"));
-
-        let cleaned = json_merge_uninstall(initial);
-        let arr = cleaned["hooks"]["PreToolUse"].as_array().unwrap();
-        assert_eq!(arr.len(), 1, "uninstall keeps the legacy entry too");
-        assert_eq!(arr[0]["hooks"][0]["command"], json!("/old"));
-    }
-
-    #[test]
-    fn uninstall_non_array_hook_value_does_not_panic() {
-        let doc = json!({
-            "hooks": {
-                "PreToolUse": "not-an-array",
-                "PostToolUse": 42
-            }
-        });
-        let cleaned = json_merge_uninstall(doc);
-        let hooks = cleaned["hooks"].as_object().unwrap();
-        assert_eq!(
-            hooks["PreToolUse"],
-            json!("not-an-array"),
-            "non-array values should pass through unchanged"
-        );
-        assert_eq!(hooks["PostToolUse"], json!(42));
-    }
-
-    #[test]
-    fn install_coerces_non_object_hooks_to_object() {
-        let doc = json_merge_install(json!({ "hooks": "garbage-string" }), "/x");
-        let hooks = doc.get("hooks").and_then(|v| v.as_object()).unwrap();
-        for ev in EVENTS {
-            assert_eq!(
-                hooks.get(*ev).and_then(|v| v.as_array()).unwrap().len(),
-                1,
-                "event {ev} populated after coercion"
+            assert!(
+                hooks[*ev][0].get(SENTINEL_KEY).is_none(),
+                "Claude Code rejects unknown keys in a plugin's hooks.json"
             );
         }
+        assert!(
+            !merge_install(&first.content, "/usr/local/bin/pixtuoid-hook")
+                .unwrap()
+                .changed
+        );
     }
 
     #[test]
-    fn install_coerces_non_array_event_to_array() {
-        let doc = json_merge_install(json!({ "hooks": { "PreToolUse": 42 } }), "/x");
-        let arr = doc["hooks"]["PreToolUse"].as_array().unwrap();
-        assert_eq!(arr.len(), 1);
-        assert!(arr[0][SENTINEL_KEY].as_bool().unwrap());
+    fn install_replaces_whatever_the_owned_file_held() {
+        for prior in ["{not json", "[1, 2]", r#"{"hooks":{"Stop":[]}}"#] {
+            let out = merge_install(prior, "pixtuoid-hook").unwrap();
+            assert!(out.changed, "{prior}");
+            let doc: Value = serde_json::from_str(&out.content).unwrap();
+            assert!(doc["hooks"].get("Stop").is_none(), "{prior}");
+        }
     }
 
     #[test]
-    fn uninstall_non_object_doc_returns_unchanged() {
-        let input = json!([1, 2, 3]);
-        assert_eq!(json_merge_uninstall(input.clone()), input);
-    }
-
-    #[test]
-    fn merge_install_on_empty_string_produces_valid_populated_config() {
-        let out = merge_install("", "pixtuoid-hook").unwrap();
+    fn uninstall_empties_the_file_and_reports_a_change_only_with_hooks() {
+        let installed = merge_install("", "pixtuoid-hook").unwrap().content;
+        let out = merge_uninstall(&installed).unwrap();
         assert!(out.changed);
-        let v: Value = serde_json::from_str(&out.content).unwrap();
-        assert!(v["hooks"]["PreToolUse"][0][SENTINEL_KEY].as_bool().unwrap());
+        assert!(!merge_uninstall(&out.content).unwrap().changed);
+        assert!(!merge_uninstall("").unwrap().changed);
     }
 
     #[test]
-    fn merge_uninstall_on_empty_string_is_noop() {
-        let out = merge_uninstall("").unwrap();
-        assert!(!out.changed, "empty doc has nothing to remove");
-        let v: Value = serde_json::from_str(&out.content).unwrap();
-        assert!(v.get("hooks").is_none());
-    }
-
-    #[test]
-    fn merge_install_rejects_invalid_json() {
-        assert!(merge_install("{not json", "pixtuoid-hook").is_err());
-    }
-
-    #[test]
-    fn merge_install_idempotent_reports_unchanged() {
-        let first = merge_install("", "pixtuoid-hook").unwrap();
-        let second = merge_install(&first.content, "pixtuoid-hook").unwrap();
-        assert!(!second.changed, "second install is a semantic no-op");
-    }
-
-    #[test]
-    fn merge_uninstall_no_pixtuoid_hooks_reports_unchanged() {
-        let user = "{\n  \"theme\": \"dark\",\n  \"hooks\": {\n    \"PreToolUse\": [ { \"matcher\": \"Write\", \"hooks\": [ {\"type\":\"command\",\"command\":\"/mine\"} ] } ]\n  }\n}";
-        let out = merge_uninstall(user).unwrap();
-        assert!(!out.changed, "no managed entries → semantic no-op");
+    fn legacy_cleanup_keeps_foreign_entries_and_settings() {
+        let theirs =
+            json!({ "matcher": "Write", "hooks": [{ "type": "command", "command": "/mine" }] });
+        let old_sentinel = json!({ SENTINEL_KEY: true, "hooks": [{ "type": "command", "command": "/renamed/shim" }] });
+        let doc = json!({ "hooks": { "PreToolUse": [theirs.clone(), old_sentinel], "Stop": "not-an-array" }, "theme": "dark" });
+        let out = legacy_uninstall(&doc.to_string()).unwrap();
+        assert!(out.changed);
+        let cleaned: Value = serde_json::from_str(&out.content).unwrap();
+        assert_eq!(
+            cleaned,
+            json!({ "hooks": { "PreToolUse": [theirs], "Stop": "not-an-array" }, "theme": "dark" })
+        );
+        assert!(!legacy_uninstall(&out.content).unwrap().changed);
     }
 
     #[cfg(unix)]
@@ -514,18 +648,14 @@ mod tests {
         ];
         let mut old = json!({ "hooks": {} });
         for ev in old_events {
-            old["hooks"][ev] = json!([{
-                SENTINEL_KEY: true,
-                "matcher": ".*",
-                "hooks": [ hook_entry("pixtuoid-hook", false) ]
-            }]);
+            old["hooks"][ev] = json!([managed_entry("pixtuoid-hook")]);
         }
         let out = merge_install(&old.to_string(), "pixtuoid-hook").unwrap();
         assert!(out.changed, "adding the Subagent events is a real change");
         let v: Value = serde_json::from_str(&out.content).unwrap();
         for ev in EVENTS {
             assert!(
-                v["hooks"][*ev][0][SENTINEL_KEY].as_bool().unwrap_or(false),
+                v["hooks"][*ev][0]["hooks"][0]["command"].is_string(),
                 "event {ev} must be installed after the upgrade re-run"
             );
         }

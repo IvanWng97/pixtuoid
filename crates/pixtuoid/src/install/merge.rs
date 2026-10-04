@@ -63,6 +63,23 @@ pub(crate) fn flat_json_merge_install(
     make_entry: impl Fn(&str) -> Value,
     hook_command: &str,
 ) -> Value {
+    flat_json_merge_install_by(
+        doc,
+        events,
+        |e| is_flat_managed(e, sentinel),
+        make_entry,
+        hook_command,
+    )
+}
+
+/// [`flat_json_merge_install`] replacing the entries `is_ours` recognizes.
+pub(crate) fn flat_json_merge_install_by(
+    doc: Value,
+    events: &[&str],
+    is_ours: impl Fn(&Value) -> bool,
+    make_entry: impl Fn(&str) -> Value,
+    hook_command: &str,
+) -> Value {
     let mut root: Map<String, Value> = doc.as_object().cloned().unwrap_or_default();
     let hooks = root
         .entry("hooks".to_string())
@@ -79,7 +96,7 @@ pub(crate) fn flat_json_merge_install(
                 *list = Value::Array(vec![]);
             }
             if let Value::Array(arr) = list {
-                arr.retain(|entry| !is_flat_managed(entry, sentinel));
+                arr.retain(|entry| !is_ours(entry));
                 arr.push(make_entry(hook_command));
             }
         }
@@ -111,7 +128,15 @@ pub(crate) fn prune_empty_root(root: &mut Value, key: &str) {
 /// event key whose array went empty and the `hooks` object if it emptied. A
 /// target-specific key the install set (Cursor's `version`) is deliberately
 /// preserved — this only touches `hooks`.
-pub(crate) fn flat_json_merge_uninstall(mut doc: Value, sentinel: &str) -> Value {
+pub(crate) fn flat_json_merge_uninstall(doc: Value, sentinel: &str) -> Value {
+    flat_json_merge_uninstall_by(doc, |entry| is_flat_managed(entry, sentinel))
+}
+
+/// [`flat_json_merge_uninstall`] for entries `is_ours` recognizes.
+pub(crate) fn flat_json_merge_uninstall_by(
+    mut doc: Value,
+    is_ours: impl Fn(&Value) -> bool,
+) -> Value {
     let Some(root) = doc.as_object_mut() else {
         return doc;
     };
@@ -120,7 +145,7 @@ pub(crate) fn flat_json_merge_uninstall(mut doc: Value, sentinel: &str) -> Value
     };
     for (_ev, list) in hooks_obj.iter_mut() {
         if let Some(arr) = list.as_array_mut() {
-            arr.retain(|entry| !is_flat_managed(entry, sentinel));
+            arr.retain(|entry| !is_ours(entry));
         }
     }
     let to_remove: Vec<String> = hooks_obj

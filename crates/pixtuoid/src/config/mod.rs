@@ -181,7 +181,7 @@ fn pack_source(
 /// The directory `pixtuoid/` config lives under: a set `XDG_CONFIG_HOME`, else
 /// `$HOME/.config`. Empty or relative `XDG_CONFIG_HOME` is invalid (XDG spec),
 /// so `nonempty_abs_env` falls through rather than resolving against the CWD.
-fn config_base() -> Option<PathBuf> {
+pub(crate) fn config_base() -> Option<PathBuf> {
     crate::install::io::nonempty_abs_env("XDG_CONFIG_HOME")
         .or_else(|| pixtuoid_core::platform::user_home_opt().map(|h| h.join(".config")))
 }

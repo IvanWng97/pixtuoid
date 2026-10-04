@@ -709,6 +709,7 @@ mod tests {
         presence_probe: None,
         extra_artifacts: None,
         post_install_hint: None,
+        host: None,
     };
 
     #[test]

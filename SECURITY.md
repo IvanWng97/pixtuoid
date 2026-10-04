@@ -56,13 +56,15 @@ The components that handle untrusted or privileged input, and how they're bounde
    labels derive from project-directory path components, read over the user's own
    `0600` socket and transcripts), not by echoing raw bytes to the terminal.
 
-3. **Hook installation** (when you explicitly *connect* a source) edits the agent
-   CLI's own config — e.g. `~/.claude/settings.json` — through a single
-   advisory-locked, `fsync` + atomic-rename writer that **preserves the file's
-   permissions, follows stow symlinks, and takes a one-time backup** before the
-   first change. Installs are idempotent and reversible (*disconnect* removes the
-   hook entries via a sentinel). pixtuoid never writes another tool's config
-   except on an explicit connect/disconnect.
+3. **Hook installation** (when you explicitly *connect* a source) goes through
+   the agent CLI's own plugin system where it has one — Claude Code gets a local
+   plugin registered with `claude plugin`, so Claude Code writes its own settings
+   — and otherwise edits the CLI's config through a single advisory-locked,
+   `fsync` + atomic-rename writer that **preserves the file's permissions,
+   follows stow symlinks, and takes a one-time backup** before the first change.
+   Installs are idempotent and reversible (*disconnect* removes the plugin or the
+   hook entries). pixtuoid never writes another tool's config except on an
+   explicit connect/disconnect.
 
 If you find a way to cross one of these boundaries (e.g. a transcript or hook
 payload that escapes the terminal, a non-owner socket connect, an install path

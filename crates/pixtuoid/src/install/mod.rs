@@ -43,7 +43,11 @@ pub(crate) fn has_hooks(t: &'static Target, config: Option<PathBuf>) -> bool {
         Ok(p) => p,
         Err(_) => return false,
     };
-    match io::read_config(&path) {
+    file_has_hooks(t, &path) || legacy_hooks(t).is_some()
+}
+
+fn file_has_hooks(t: &Target, path: &std::path::Path) -> bool {
+    match io::read_config(path) {
         Ok(c) if c.trim().is_empty() => false,
         // A merge that ERRS means "we could not tell" — never "installed".
         Ok(c) => (t.merge_uninstall)(&c)
@@ -51,6 +55,17 @@ pub(crate) fn has_hooks(t: &'static Target, config: Option<PathBuf>) -> bool {
             .unwrap_or_else(|_| config_mentions_us(&c)),
         Err(_) => true,
     }
+}
+
+/// The legacy config of a host target, when it still bears our hooks — an install
+/// from before the plugin, which keeps firing until a reconnect migrates it.
+fn legacy_hooks(t: &Target) -> Option<PathBuf> {
+    let host = t.host?;
+    let legacy = (host.legacy_config)().ok()?;
+    let content = io::read_config(&legacy).ok()?;
+    (host.legacy_uninstall)(&content)
+        .is_ok_and(|o| o.changed)
+        .then_some(legacy)
 }
 
 const PLUGIN_MENTION: &str = "pixtuoid";
@@ -83,6 +98,19 @@ pub(crate) fn verify_target(
             };
         }
     };
+    if !target::config_present(&path)
+        && let Some(legacy) = legacy_hooks(t)
+    {
+        return verify::SchemaVerifyResult {
+            issues: vec![],
+            notes: vec![format!(
+                "hooks still live in {}, the install from before the {} plugin; \
+                 reconnect the source to move them into it",
+                crate::display_path(&legacy),
+                t.display_name
+            )],
+        };
+    }
     let content = match io::read_config(&path) {
         Ok(c) if c.trim().is_empty() => {
             return verify::SchemaVerifyResult {
@@ -119,6 +147,19 @@ pub(crate) fn verify_target(
         }
     }
     verify_extra_artifacts(t, &mut issues, &mut notes);
+    if let Some(host) = t.host {
+        match (host.is_registered)() {
+            Ok(true) => {}
+            Ok(false) => issues.push(format!(
+                "the pixtuoid plugin is not installed and enabled in {} — reconnect the source",
+                t.display_name
+            )),
+            Err(e) => notes.push(format!(
+                "could not ask {} which plugins are enabled: {e:#}",
+                t.display_name
+            )),
+        }
+    }
     verify::SchemaVerifyResult { issues, notes }
 }
 
@@ -374,24 +415,55 @@ pub(crate) fn install_target(
     let path_warning = t.binary_strategy == BinaryStrategy::BareNameOnPath
         && !explicit_hook
         && !io::hook_on_path();
-    if !outcome.changed {
-        return Ok(InstallReport {
-            outcome: InstallOutcome::AlreadyUpToDate,
-            config_path: path,
-            backup: None,
-            path_warning,
-            post_install_hint: t.post_install_hint,
-        });
-    }
-    let backup = lock.backup_once(BACKUP_SUFFIX)?;
-    lock.write_atomic(&outcome.content)?;
+    let (installed, backup) = if outcome.changed {
+        let backup = lock.backup_once(BACKUP_SUFFIX)?;
+        lock.write_atomic(&outcome.content)?;
+        (true, backup)
+    } else {
+        (false, None)
+    };
+    drop(lock);
+    // After the hooks file is written, so the plugin never registers empty; the
+    // legacy hooks go last, so neither copy is missing in between.
+    let migrated = match t.host {
+        Some(host) => {
+            (host.register)(&path)?;
+            strip_managed(host.legacy_uninstall, &(host.legacy_config)()?)?
+        }
+        None => false,
+    };
     Ok(InstallReport {
-        outcome: InstallOutcome::Installed,
+        outcome: if installed || migrated {
+            InstallOutcome::Installed
+        } else {
+            InstallOutcome::AlreadyUpToDate
+        },
         config_path: path,
         backup,
         path_warning,
         post_install_hint: t.post_install_hint,
     })
+}
+
+/// Remove the entries `uninstall` recognizes from `path` under its lock; whether
+/// it changed. Never rewrites on a semantic no-op, and drops the backup once the
+/// hooks are gone.
+fn strip_managed(
+    uninstall: fn(&str) -> Result<target::MergeOutcome>,
+    path: &std::path::Path,
+) -> Result<bool> {
+    if !target::config_present(path) {
+        return Ok(false);
+    }
+    let lock = io::lock_config(path)?;
+    let content = lock.read()?;
+    let outcome = uninstall(&content).with_context(|| format!("processing {}", path.display()))?;
+    if !outcome.changed {
+        return Ok(false);
+    }
+    lock.write_atomic(&outcome.content)?;
+    lock.remove_backup(BACKUP_SUFFIX)?;
+    Ok(true)
 }
 
 /// Render the wholly-owned artifacts a target ships beside its config. Called before the
@@ -446,11 +518,18 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
     let path = config
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
+    let legacy_removed = match t.host {
+        Some(host) => {
+            (host.unregister)()?;
+            strip_managed(host.legacy_uninstall, &(host.legacy_config)()?)?
+        }
+        None => false,
+    };
     // Decided BEFORE locking: `lock_config` creates the parent dir + a .lock sidecar, and
     // materializing ~/.reasonix here would flip that target's presence probe on a no-op.
     if !target::config_present(&path) {
         return Ok(UninstallReport {
-            outcome: UninstallOutcome::NothingToRemove,
+            outcome: removed_or_not(legacy_removed),
             config_path: path,
             removed_backup: None,
         });
@@ -463,7 +542,7 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
         // SEMANTIC no-op — never rewrite the file or delete the backup here: the backup is
         // the user's only recovery, and a byte compare would falsely fire on hand formatting.
         return Ok(UninstallReport {
-            outcome: UninstallOutcome::NothingToRemove,
+            outcome: removed_or_not(legacy_removed),
             config_path: path,
             removed_backup: None,
         });
@@ -475,6 +554,14 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
         config_path: path,
         removed_backup,
     })
+}
+
+fn removed_or_not(removed: bool) -> UninstallOutcome {
+    if removed {
+        UninstallOutcome::Removed
+    } else {
+        UninstallOutcome::NothingToRemove
+    }
 }
 
 /// Deleting a registered event ships GREEN — cargo-mutants does not mutate slice
@@ -497,4 +584,4 @@ pub(crate) fn assert_event_roster<T: Ord + std::fmt::Debug + Copy>(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

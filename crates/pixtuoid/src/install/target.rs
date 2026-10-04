@@ -74,6 +74,27 @@ pub struct Target {
     /// installing is not the last step the user must take. `None` for every target
     /// whose hooks take effect on the CLI's next run.
     pub post_install_hint: Option<&'static str>,
+    /// Set when the CLI loads our hooks through its own plugin system: the merged
+    /// config is then the plugin's hooks file, which this registers with the CLI.
+    pub host: Option<&'static HostRegistration>,
+}
+
+/// A CLI-side plugin registration, run through the CLI's own commands so the CLI
+/// owns its settings.
+#[derive(Debug)]
+pub struct HostRegistration {
+    /// Write the plugin's manifests beside the hooks file `config` and register
+    /// the plugin. Idempotent, and run on every install so a deregistered plugin
+    /// heals.
+    pub register: fn(config: &Path) -> Result<()>,
+    /// Deregister the plugin; a no-op when it isn't registered.
+    pub unregister: fn() -> Result<()>,
+    /// Whether the CLI reports the plugin installed and enabled.
+    pub is_registered: fn() -> Result<bool>,
+    /// The config an earlier pixtuoid merged its hooks into, and the merge that
+    /// strips our entries from it on install and uninstall.
+    pub legacy_config: fn() -> Result<PathBuf>,
+    pub legacy_uninstall: fn(content: &str) -> Result<MergeOutcome>,
 }
 
 pub(crate) const BACKUP_SUFFIX: &str = "pixtuoid.bak";
@@ -94,9 +115,10 @@ pub(crate) const CLAUDE: Target = Target {
     } else {
         BinaryStrategy::BareNameOnPath
     },
-    presence_probe: None,
+    presence_probe: Some(crate::install::claude::detect_installed),
     extra_artifacts: None,
     post_install_hint: None,
+    host: Some(&crate::install::claude::HOST),
 };
 
 pub(crate) const CODEX: Target = Target {
@@ -112,6 +134,7 @@ pub(crate) const CODEX: Target = Target {
     presence_probe: None,
     extra_artifacts: None,
     post_install_hint: None,
+    host: None,
 };
 
 pub(crate) const REASONIX: Target = Target {
@@ -127,6 +150,7 @@ pub(crate) const REASONIX: Target = Target {
     presence_probe: Some(crate::install::reasonix::detect_installed),
     extra_artifacts: None,
     post_install_hint: None,
+    host: None,
 };
 
 pub(crate) const CODEWHALE: Target = Target {
@@ -142,6 +166,7 @@ pub(crate) const CODEWHALE: Target = Target {
     presence_probe: Some(crate::install::codewhale::detect_installed),
     extra_artifacts: None,
     post_install_hint: None,
+    host: None,
 };
 
 pub(crate) const OPENCODE: Target = Target {
@@ -159,6 +184,7 @@ pub(crate) const OPENCODE: Target = Target {
     presence_probe: Some(crate::install::opencode::detect_installed),
     extra_artifacts: None,
     post_install_hint: None,
+    host: None,
 };
 
 pub(crate) const GROK: Target = Target {
@@ -174,6 +200,7 @@ pub(crate) const GROK: Target = Target {
     presence_probe: Some(crate::install::grok::detect_installed),
     extra_artifacts: None,
     post_install_hint: None,
+    host: None,
 };
 
 pub(crate) const CURSOR: Target = Target {
@@ -189,6 +216,7 @@ pub(crate) const CURSOR: Target = Target {
     presence_probe: Some(crate::install::cursor::detect_installed),
     extra_artifacts: None,
     post_install_hint: None,
+    host: None,
 };
 
 pub(crate) const HERMES: Target = Target {
@@ -205,6 +233,7 @@ pub(crate) const HERMES: Target = Target {
     presence_probe: Some(crate::install::hermes::detect_installed),
     extra_artifacts: None,
     post_install_hint: None,
+    host: None,
 };
 
 pub(crate) const OPENCLAW: Target = Target {
@@ -225,6 +254,7 @@ pub(crate) const OPENCLAW: Target = Target {
     // `plugins.load` is `kind: "restart"` upstream, so a RUNNING gateway does not
     // hot-load the plugin — the lobster appears on its next restart.
     post_install_hint: Some("restart the gateway to load it (openclaw gateway restart)"),
+    host: None,
     verify_schema: crate::install::openclaw::verify_schema,
 };
 
@@ -243,6 +273,7 @@ pub(crate) const KIMI: Target = Target {
     presence_probe: Some(crate::install::kimi::detect_installed),
     extra_artifacts: None,
     post_install_hint: None,
+    host: None,
 };
 
 pub(crate) const DSH: Target = Target {
@@ -263,6 +294,7 @@ pub(crate) const DSH: Target = Target {
     post_install_hint: Some(
         "running dsh sessions (except the web profile) must restart to load the plugin",
     ),
+    host: None,
 };
 
 pub(crate) const OMP: Target = Target {
@@ -281,6 +313,7 @@ pub(crate) const OMP: Target = Target {
     extra_artifacts: None,
     // Extensions load once at startup (`discoverAndLoadExtensions`).
     post_install_hint: Some("already-running omp sessions must restart to load the bridge"),
+    host: None,
 };
 
 pub const TARGETS: &[&Target] = &[
@@ -376,6 +409,7 @@ mod tests {
             presence_probe: None,
             extra_artifacts: None,
             post_install_hint: None,
+            host: None,
         };
         assert!(!is_present(&NO_HOME));
     }
