@@ -18,8 +18,9 @@ use pixtuoid::floating::offscreen::{
 };
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FrameInputs, PetInputs};
+use pixtuoid_scene::floor::{FloorInputs, FloorMeta, PetInputs};
 use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::look::RenderInputs;
 use pixtuoid_scene::theme::theme_by_name;
 
 /// The two `cc` labels are a DELIBERATE collision, so the snapshot exercises the
@@ -144,26 +145,29 @@ fn main() -> Result<()> {
 
     let theme =
         theme_by_name(&theme_name).ok_or_else(|| anyhow!("unknown --theme {theme_name:?}"))?;
-    let pack = pixtuoid_scene::pack::load_bundled_pack()?;
+    let pack = std::sync::Arc::new(pixtuoid_scene::pack::load_bundled_pack()?);
     let now = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
     let mut scene = SceneState::uniform(64);
     populate_demo_agents(&mut scene, now, n_agents);
-    let mut renderer = OfficeRenderer::new();
+    let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
     let (win_w, win_h) = (size.0 as u32, size.1 as u32);
     let (scale, ow, oh) = window_buffer_geometry(winit::dpi::PhysicalSize::new(win_w, win_h));
-    let buf = renderer.render(FrameInputs {
-        world: FloorInputs {
-            scene: &scene,
-            pack: &pack,
-            now,
-            floor: FloorMeta::ground(),
-            pets: PetInputs::default(),
-        },
-        theme,
-        size: Size { w: ow, h: oh },
-        debug_walkable: false,
-    });
+    let buf = renderer
+        .render(RenderInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            theme,
+            size: Size { w: ow, h: oh },
+            place: pixtuoid_scene::look::Place::default(),
+            debug_walkable: false,
+        })
+        .expect("a frame");
     let (ww, wh) = (win_w as usize, win_h as usize);
     let mut sb: Vec<u32> = vec![0; ww * wh];
     let mut surf = XrgbSurface::new(&mut sb, ww, wh).expect("sized to the window");

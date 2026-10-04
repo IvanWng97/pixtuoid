@@ -16,7 +16,7 @@ pixtuoid is a Cargo workspace of **five crates** wired as a strict
   reducer + scene state, the sprite format, the grid/walkable vocabulary. No
   terminal dependencies.
 - **`pixtuoid-scene`** — the backend-agnostic render + simulation **engine**:
-  the office world itself (`render_to_rgb_buffer`, layout, pose, walk
+  the office world itself (`look::render`, layout, pose, walk
   physics and pathfinding, themes, pets). Terminal- AND window-free **by
   crate boundary** — compiler-enforced, not just a lint.
 - **`pixtuoid`** — the binary: the CLI, the runtime wiring, and two thin
@@ -31,10 +31,9 @@ pixtuoid is a Cargo workspace of **five crates** wired as a strict
   **always exits 0** so it can never block your agent.
 
 Dependency direction is one-way: `pixtuoid-core ← pixtuoid-scene ←
-{pixtuoid, pixtuoid-web}`. The engine's render seam (`render_floor` /
-`render_to_rgb_buffer`) is the inversion point that keeps the core
-terminal-free — the same pixel pass drives the terminal, the desktop window,
-and the browser canvas.
+{pixtuoid, pixtuoid-web}`. The engine's frame entry (`look::render`) is the
+inversion point that keeps the core terminal-free — the same entry drives the
+terminal, the desktop window, and the browser canvas, in either look.
 
 A **`Source`** is an **Agent** — a transcript- or hook-bearing coding CLI
 whose events become a **desk sprite** — or a **Daemon** — a long-running
@@ -79,7 +78,7 @@ flowchart TB
   end
 
   subgraph scene["pixtuoid-scene (engine)"]
-    PX["render_to_rgb_buffer<br/>(desks + mascots)"]
+    PX["look::render<br/>(desks + mascots)"]
   end
 
   W --> TR --> PX --> FL

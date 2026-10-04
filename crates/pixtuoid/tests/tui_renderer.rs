@@ -2,9 +2,11 @@
 //! just an in-memory `SceneState` capture.
 
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use pixtuoid::tui::tui_renderer::TuiRenderer;
+use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::ActivityState;
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex, SceneState};
 use pixtuoid_scene::pack::load_bundled_pack;
@@ -13,6 +15,11 @@ use ratatui::backend::TestBackend;
 
 /// Build an `AgentSlot` for these render tests — fills the boilerplate fields so each
 /// call site only varies what it cares about.
+fn pack() -> Arc<Pack> {
+    static PACK: OnceLock<Arc<Pack>> = OnceLock::new();
+    Arc::clone(PACK.get_or_init(|| Arc::new(load_bundled_pack().expect("pack"))))
+}
+
 fn agent_slot(
     id: AgentId,
     session: &str,
@@ -79,14 +86,15 @@ fn tui_renderer_render_paints_a_full_frame() {
             .iter()
             .map(|&k| pixtuoid_scene::pet::Pet::defaulted(k))
             .collect(),
+        pack(),
     );
-    let pack = load_bundled_pack().expect("pack");
+    let pack = pack();
 
     renderer.render(&scene, &pack, now).expect("render");
 
     // The 96×(36-1) scene area (one row reserved for the footer), doubled vertically
     // via half-block ⇒ 96 × 70.
-    let buf = renderer.buf();
+    let buf = renderer.buf().expect("a frame");
     assert_eq!(buf.width(), 96);
     assert_eq!(buf.height(), 70);
 
@@ -136,8 +144,9 @@ fn tui_renderer_transition_paints_pets_and_coffee() {
             .iter()
             .map(|&k| pixtuoid_scene::pet::Pet::defaulted(k))
             .collect(),
+        pack(),
     );
-    let pack = load_bundled_pack().expect("pack");
+    let pack = pack();
 
     // Initial render so the renderer grows its per-floor state to nf=2.
     renderer.render(&scene, &pack, now).expect("initial render");
@@ -164,7 +173,7 @@ fn tui_renderer_transition_paints_pets_and_coffee() {
         "transition should not have completed yet (was the path skipped?)"
     );
 
-    let buf = renderer.buf();
+    let buf = renderer.buf().expect("a frame");
     let nonzero = buf
         .as_slice()
         .iter()
@@ -189,6 +198,7 @@ fn set_version_popup_records_timestamp_on_edge() {
             .iter()
             .map(|&k| pixtuoid_scene::pet::Pet::defaulted(k))
             .collect(),
+        pack(),
     );
 
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
@@ -238,6 +248,7 @@ fn version_popup_animation_starts_small_then_grows() {
             .iter()
             .map(|&k| pixtuoid_scene::pet::Pet::defaulted(k))
             .collect(),
+        pack(),
     );
 
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
@@ -288,6 +299,7 @@ fn dismiss_mid_entrance_does_not_snap_to_full() {
             .iter()
             .map(|&k| pixtuoid_scene::pet::Pet::defaulted(k))
             .collect(),
+        pack(),
     );
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
@@ -345,8 +357,9 @@ fn cancel_transition_lands_on_destination_floor() {
             .iter()
             .map(|&k| pixtuoid_scene::pet::Pet::defaulted(k))
             .collect(),
+        pack(),
     );
-    let pack = load_bundled_pack().expect("pack");
+    let pack = pack();
 
     renderer.render(&scene, &pack, now).expect("initial render");
     assert_eq!(renderer.current_floor(), 0);
@@ -378,6 +391,7 @@ fn make_renderer() -> TuiRenderer<TestBackend> {
             .iter()
             .map(|&k| pixtuoid_scene::pet::Pet::defaulted(k))
             .collect(),
+        pack(),
     )
 }
 

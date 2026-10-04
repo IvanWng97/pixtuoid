@@ -1,5 +1,6 @@
-//! The model names no rasterizer: outside `pixel_painter/` and `cutaway/`, no
-//! source file paths into either, but for the edges [`KNOWN_EDGES`] lists.
+//! The model names no rasterizer: outside `pixel_painter/`, `cutaway/` and the
+//! frame entry, no source file paths into either, but for the edges
+//! [`KNOWN_EDGES`] lists.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -8,16 +9,15 @@ use syn::visit::Visit;
 
 const RASTERIZERS: [&str; 2] = ["pixel_painter", "cutaway"];
 
+/// The frame entry, `look::render`: it steps the model and runs a rasterizer
+/// on the result, so it names both by design.
+const ENTRY: &str = "look";
+
 /// Each model file or directory still naming a rasterizer, how many paths do,
 /// and the PR that removes the edge. A fix deletes its entry; a new edge under a
 /// listed path changes its count.
 const KNOWN_EDGES: &[(&str, usize, &str)] = &[
     ("display/", 29, "pen: #1253; text, light and effects: #1270"),
-    (
-        "floor/",
-        8,
-        "render_to_rgb_buffer, BaseFillCache and the both-painters tests: #1244; AgentFrame: #1270",
-    ),
     (
         "overlay.rs",
         6,
@@ -139,8 +139,10 @@ fn the_model_names_no_rasterizer() {
         let rel = rel.join("/");
         // lib.rs declares the modules; a rasterizer may name itself.
         if rel == "lib.rs"
+            || rel == format!("{ENTRY}.rs")
             || RASTERIZERS
                 .iter()
+                .chain([&ENTRY])
                 .any(|r| rel.starts_with(&format!("{r}/")))
         {
             continue;

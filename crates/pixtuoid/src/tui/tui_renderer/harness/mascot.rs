@@ -96,7 +96,10 @@ impl Probe {
     ) -> std::collections::BTreeSet<(u16, u16)> {
         self.base.render(baseline, pack(), now).unwrap();
         self.r.render(scene, pack(), now).unwrap();
-        let (base, buf) = (self.base.buf(), self.r.buf());
+        let (base, buf) = (
+            self.base.buf().expect("a frame"),
+            self.r.buf().expect("a frame"),
+        );
         (0..buf.height())
             .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
             .filter(|&(x, y)| buf.get(x, y) != base.get(x, y))
