@@ -36,6 +36,10 @@ jobs:
       # `*_schema_matches_the_committed_contract` tests in ci-tests.yml.
       - name: contract types match the committed schemas
         run: npm run gen:contract && git diff --exit-code src/contract.ts src/contract-outcome.ts
+      # Writes raycast-env.d.ts (the manifest's generated `Preferences`), which
+      # tsc reads, and validates the manifest, icons and metadata for the store.
+      - run: npx ray build -e dist -I -o "$RUNNER_TEMP/ray-dist"
+      - run: npx ray lint
       - run: npx tsc --noEmit
       - run: npm test
       - run: npx eslint .

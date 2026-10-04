@@ -33,12 +33,6 @@ export class BinaryNotFoundError extends Error {
   }
 }
 
-// Not raycast-env.d.ts's generated type: `ray build` writes it and needs the
-// macOS app, and CI type-checks with plain `tsc` on Linux.
-interface Preferences {
-  binaryPath?: string;
-}
-
 function expandTilde(p: string): string {
   if (p === "~") return homedir();
   if (p.startsWith("~/")) return join(homedir(), p.slice(2));

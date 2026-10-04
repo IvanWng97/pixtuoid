@@ -71,10 +71,9 @@ it is clear.
 ## Gates
 
 CI runs `.github/workflows/raycast.yml`'s steps on a Linux runner; run them
-locally before "done." **`ray build` /
-`ray lint`** (manifest + icon validation, the Prettier pass) need the **macOS
-Raycast app** and only run before a store publish — they are NOT in CI, so a
-green PR does not prove the manifest is publishable. See the
+locally before "done." `ray build` writes `raycast-env.d.ts`, the
+manifest's generated `Preferences` that `tsc` reads, and `ray lint` validates
+the manifest, icons and metadata and runs the Prettier pass. See the
 [README](README.md) for `npm run {build,dev,lint}`.
 
 - **`npm run audit` is plain `npm audit --audit-level=low`, same as site's.**
@@ -88,6 +87,5 @@ green PR does not prove the manifest is publishable. See the
   `@raycast/no-reserved-shortcut` is escalated to `error` here.** Upstream ships
   it at warn and `eslint .` exits 0 on warnings, which is how an `Open Extension
   Preferences` action bound to `⌘,` (Raycast's own `OpenPreferences`) shipped
-  dead. Nothing else sees it: `tsc` types the chord fine and `ray lint` is not in
-  CI. Its sibling `@raycast/prefer-common-shortcut` stays a warning — style
+  dead. Nothing else sees it: `tsc` types the chord fine. Its sibling `@raycast/prefer-common-shortcut` stays a warning — style
   advice a routine version bump could turn into a surprise red.
