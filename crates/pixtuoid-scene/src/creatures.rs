@@ -1196,6 +1196,32 @@ mod tests {
         }
     }
 
+    /// A pet's 1x walk moves its legs: each contact's ground row differs from
+    /// the pass a quarter cycle on, or the classic's pet glides on frozen feet.
+    #[test]
+    fn every_pet_walk_steps_its_legs_at_1x() {
+        let pack = test_pack();
+        for kind in PetKind::ALL {
+            let frames = pack.animation(kind.walk_anim()).expect("the walk").frames();
+            let ground = |i: usize| {
+                let f = &frames[i];
+                let y = f.height() - 1;
+                (0..f.width())
+                    .map(|x| f.get(x, y).copied().flatten().is_some())
+                    .collect::<Vec<_>>()
+            };
+            let quarter = (frames.len() / 4).max(1);
+            for contact in [0, frames.len() / 2] {
+                assert_ne!(
+                    ground(contact),
+                    ground((contact + quarter) % frames.len()),
+                    "{}'s legs hold still from frame {contact} at 1x",
+                    kind.walk_anim()
+                );
+            }
+        }
+    }
+
     /// Every pet's walk master faces east too, so both densities face one way.
     #[cfg(feature = "density-art")]
     #[test]

@@ -4382,11 +4382,29 @@ CREATURE_FIXES = {
     **{f"cat_sleep_{i}": [(0, 0, CAT_DARK), (2, 0, CAT_DARK)] for i in range(4)},
     # the crown's near half, too slim to read
     **{f"dog_sit_{i}": [(1, 0, TAN)] for i in range(4)},
-    # the ears, too slim to read
-    **{f"cat_walk_{i}": [(4, 0, CAT_DARK), (6, 0, CAT_DARK)] for i in range(8)},
-    # the crown and the floppy ear, too slim to read; the legs parted where
-    # the read joins them in one bar
-    **{f"dog_walk_{i}": [(5, 0, TAN), (4, 1, BROWN)] + [(3, 5, T)] * (i != 6) for i in range(8)},
+    # the ears, too slim to read; the legs, apart on the contacts and crossed
+    # on the passes, which the read leaves standing still
+    **{
+        f"cat_walk_{i}": [(4, 0, CAT_DARK), (6, 0, CAT_DARK)] + legs
+        for i, legs in enumerate(
+            (
+                [(3, 5, T), (4, 5, T)],
+                [(3, 5, T)],
+                [(2, 5, T), (6, 5, T)],
+                [(2, 5, T)],
+                [(3, 5, T)],
+                [(3, 5, T), (6, 5, CAT_FUR)],
+                [(2, 5, T), (6, 5, T)],
+                [(2, 5, T), (6, 5, T)],
+            )
+        )
+    },
+    # the crown and the floppy ear, too slim to read; the legs, which the read
+    # joins into one bar, apart on the contacts and crossed on the passes
+    **{
+        f"dog_walk_{i}": [(5, 0, TAN), (4, 1, BROWN)] + [(x, 5, T) for x in gap]
+        for i, gap in enumerate(((2, 3, 4), (2, 3, 4), (1, 3, 5), (1, 3, 5), (2, 3, 4), (2, 3), (1, 5), (1, 3, 5)))
+    },
     # each claw's pincer gap, too slim to read: whole, a claw is a block
     **{f"lobster_{pose}_{i}": [(2, 1, T), (11, 1, T)] for pose in ("rest", "walk") for i in range(4)},
 }
