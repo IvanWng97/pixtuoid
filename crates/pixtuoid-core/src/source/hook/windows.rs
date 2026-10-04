@@ -30,6 +30,14 @@ struct OwnerOnlySd {
     attrs: SECURITY_ATTRIBUTES,
 }
 
+impl std::fmt::Debug for OwnerOnlySd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OwnerOnlySd")
+            .field("psd", &self.psd)
+            .finish_non_exhaustive()
+    }
+}
+
 // SAFETY: the descriptor is immutable after creation (the Win32 calls only
 // read through these pointers) and freed exactly once in Drop; none of the
 // APIs involved carry thread affinity, so moving the owner across threads
@@ -81,6 +89,7 @@ impl Drop for OwnerOnlySd {
     }
 }
 
+#[derive(Debug)]
 pub(super) struct Listener {
     server: NamedPipeServer,
     name: String,

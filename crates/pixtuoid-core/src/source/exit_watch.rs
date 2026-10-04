@@ -22,10 +22,12 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::sync::mpsc::UnboundedSender;
 
+#[derive(Debug)]
 pub(crate) struct ExitWatch {
     shared: Arc<Shared>,
 }
 
+#[derive(Debug)]
 struct Shared {
     pending: Mutex<Vec<i32>>,
     closed: AtomicBool,
@@ -142,6 +144,7 @@ mod imp {
         }
     }
 
+    #[derive(Debug)]
     pub(super) struct Backend {
         /// One kqueue for the whole watch. Owned HERE (reached by both sides
         /// through `Arc<Shared>`) so the fd closes only when both the waker and
@@ -339,6 +342,7 @@ mod imp {
 
     use super::{Shared, drain_pending};
 
+    #[derive(Debug)]
     pub(super) struct Backend {
         /// Self-pipe: `wake()` writes a byte; the thread keeps the read end in
         /// its poll set and drains on wake. Both ends are O_NONBLOCK — a full
@@ -506,6 +510,7 @@ mod imp {
     /// `None` makes `ExitWatch::spawn` return `None`, so the watcher keeps the
     /// negative-vouch + TTL backstops only — instant exit is an additive fast
     /// path, never a dependency.
+    #[derive(Debug)]
     pub(super) struct Backend;
 
     impl Backend {
