@@ -61,6 +61,7 @@ pub mod layout;
 pub(crate) mod lighting;
 #[doc(hidden)]
 pub mod localclock;
+pub mod look;
 #[doc(hidden)]
 pub mod overlay;
 pub mod pack;

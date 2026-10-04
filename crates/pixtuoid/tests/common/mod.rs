@@ -4,15 +4,15 @@
 )]
 
 /// Binds `$name` to a `DrawCtx::offscreen` of `$scene`; a macro so the stores it
-/// borrows live in the caller's scope.
+/// borrows live in the caller's scope. `$pack` is the `Arc<Pack>` its floor draws with.
 #[macro_export]
 macro_rules! make_draw_ctx {
     ($name:ident, $scene:expr, $pack:expr, $now:expr) => {
-        let mut _floor = pixtuoid_scene::floor::PerFloor::new();
-        let mut _chitchat_state = std::collections::HashMap::new();
+        let mut _floor = pixtuoid_scene::floor::PerFloor::new(std::sync::Arc::clone($pack));
+        let mut _office = pixtuoid_scene::floor::PerOffice::new();
         let mut $name = pixtuoid::tui::renderer::DrawCtx::offscreen(
             &mut _floor,
-            &mut _chitchat_state,
+            _office.stores(),
             &pixtuoid_scene::theme::NORMAL,
             $scene,
             $pack,
@@ -85,20 +85,20 @@ pub(crate) fn fixture_scene(now: std::time::SystemTime) -> pixtuoid_core::SceneS
 pub(crate) fn render_hash(
     scene: &pixtuoid_core::SceneState,
     now: std::time::SystemTime,
-    theme: &pixtuoid_scene::theme::Theme,
+    theme: &'static pixtuoid_scene::theme::Theme,
     floor: pixtuoid_scene::floor::FloorMeta,
 ) -> u64 {
     use std::hash::{Hash, Hasher};
 
     let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(96, 36)).unwrap();
-    let pack = pixtuoid_scene::pack::load_bundled_pack().unwrap();
+    let pack = std::sync::Arc::new(pixtuoid_scene::pack::load_bundled_pack().unwrap());
     make_draw_ctx!(draw_ctx, scene, &pack, now);
     draw_ctx.theme = theme;
     draw_ctx.world.floor = floor;
     pixtuoid::tui::renderer::draw_scene(&mut term, &mut draw_ctx).unwrap();
 
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for px in draw_ctx.buf.as_slice() {
+    for px in draw_ctx.floor.raster.pixels().expect("a frame").as_slice() {
         px.r.hash(&mut hasher);
         px.g.hash(&mut hasher);
         px.b.hash(&mut hasher);
