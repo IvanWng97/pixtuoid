@@ -1034,6 +1034,29 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::StandIn
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::StandIn
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::StandIn
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::StandIn
+pub enum pixtuoid_core::sprite::format::UnreadField
+pub pixtuoid_core::sprite::format::UnreadField::FrameMs
+pub pixtuoid_core::sprite::format::UnreadField::FrameMs::base: u32
+pub pixtuoid_core::sprite::format::UnreadField::FrameMs::variant: u32
+pub pixtuoid_core::sprite::format::UnreadField::Stride
+pub pixtuoid_core::sprite::format::UnreadField::Stride::base: core::option::Option<core::num::nonzero::NonZeroU16>
+pub pixtuoid_core::sprite::format::UnreadField::Stride::variant: core::num::nonzero::NonZeroU16
+impl core::clone::Clone for pixtuoid_core::sprite::format::UnreadField
+pub fn pixtuoid_core::sprite::format::UnreadField::clone(&self) -> pixtuoid_core::sprite::format::UnreadField
+impl core::cmp::Eq for pixtuoid_core::sprite::format::UnreadField
+impl core::cmp::PartialEq for pixtuoid_core::sprite::format::UnreadField
+pub fn pixtuoid_core::sprite::format::UnreadField::eq(&self, &pixtuoid_core::sprite::format::UnreadField) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::format::UnreadField
+pub fn pixtuoid_core::sprite::format::UnreadField::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_core::sprite::format::UnreadField
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::format::UnreadField
+impl core::marker::Freeze for pixtuoid_core::sprite::format::UnreadField
+impl core::marker::Send for pixtuoid_core::sprite::format::UnreadField
+impl core::marker::Sync for pixtuoid_core::sprite::format::UnreadField
+impl core::marker::Unpin for pixtuoid_core::sprite::format::UnreadField
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::UnreadField
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::UnreadField
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::UnreadField
 pub struct pixtuoid_core::sprite::format::Building
 impl pixtuoid_core::sprite::format::Building
 pub fn pixtuoid_core::sprite::format::Building::base(&self) -> &pixtuoid_core::sprite::format::BuildingArt
@@ -1255,6 +1278,24 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::MissingOptional
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::MissingOptional
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::MissingOptional
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::MissingOptional
+pub struct pixtuoid_core::sprite::format::OffBeatLoop
+pub pixtuoid_core::sprite::format::OffBeatLoop::frame_ms: u32
+pub pixtuoid_core::sprite::format::OffBeatLoop::name: alloc::string::String
+impl core::clone::Clone for pixtuoid_core::sprite::format::OffBeatLoop
+pub fn pixtuoid_core::sprite::format::OffBeatLoop::clone(&self) -> pixtuoid_core::sprite::format::OffBeatLoop
+impl core::cmp::Eq for pixtuoid_core::sprite::format::OffBeatLoop
+impl core::cmp::PartialEq for pixtuoid_core::sprite::format::OffBeatLoop
+pub fn pixtuoid_core::sprite::format::OffBeatLoop::eq(&self, &pixtuoid_core::sprite::format::OffBeatLoop) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::format::OffBeatLoop
+pub fn pixtuoid_core::sprite::format::OffBeatLoop::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::format::OffBeatLoop
+impl core::marker::Freeze for pixtuoid_core::sprite::format::OffBeatLoop
+impl core::marker::Send for pixtuoid_core::sprite::format::OffBeatLoop
+impl core::marker::Sync for pixtuoid_core::sprite::format::OffBeatLoop
+impl core::marker::Unpin for pixtuoid_core::sprite::format::OffBeatLoop
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::OffBeatLoop
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::OffBeatLoop
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::OffBeatLoop
 pub struct pixtuoid_core::sprite::format::OrphanDerived
 pub pixtuoid_core::sprite::format::OrphanDerived::derived: &'static str
 pub pixtuoid_core::sprite::format::OrphanDerived::source: &'static str
@@ -1303,6 +1344,8 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Pack
 pub struct pixtuoid_core::sprite::format::PackContract<'a>
 pub pixtuoid_core::sprite::format::PackContract::art_sets: &'a [alloc::vec::Vec<&'static str>]
+pub pixtuoid_core::sprite::format::PackContract::beat_ms: u64
+pub pixtuoid_core::sprite::format::PackContract::loops: &'a [&'static str]
 pub pixtuoid_core::sprite::format::PackContract::marks: &'a [(&'static str, &'static [&'static str])]
 pub pixtuoid_core::sprite::format::PackContract::walks: &'a [&'static str]
 impl<'a> core::clone::Clone for pixtuoid_core::sprite::format::PackContract<'a>
@@ -1355,6 +1398,24 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::UnmarkedHead
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::UnmarkedHead
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::UnmarkedHead
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::UnmarkedHead
+pub struct pixtuoid_core::sprite::format::UnreadTiming
+pub pixtuoid_core::sprite::format::UnreadTiming::field: pixtuoid_core::sprite::format::UnreadField
+pub pixtuoid_core::sprite::format::UnreadTiming::name: alloc::string::String
+impl core::clone::Clone for pixtuoid_core::sprite::format::UnreadTiming
+pub fn pixtuoid_core::sprite::format::UnreadTiming::clone(&self) -> pixtuoid_core::sprite::format::UnreadTiming
+impl core::cmp::Eq for pixtuoid_core::sprite::format::UnreadTiming
+impl core::cmp::PartialEq for pixtuoid_core::sprite::format::UnreadTiming
+pub fn pixtuoid_core::sprite::format::UnreadTiming::eq(&self, &pixtuoid_core::sprite::format::UnreadTiming) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::format::UnreadTiming
+pub fn pixtuoid_core::sprite::format::UnreadTiming::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::format::UnreadTiming
+impl core::marker::Freeze for pixtuoid_core::sprite::format::UnreadTiming
+impl core::marker::Send for pixtuoid_core::sprite::format::UnreadTiming
+impl core::marker::Sync for pixtuoid_core::sprite::format::UnreadTiming
+impl core::marker::Unpin for pixtuoid_core::sprite::format::UnreadTiming
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::UnreadTiming
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::UnreadTiming
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::UnreadTiming
 pub struct pixtuoid_core::sprite::format::ValidationReport
 pub pixtuoid_core::sprite::format::ValidationReport::insufficient_frames: alloc::vec::Vec<(alloc::string::String, usize, usize)>
 pub pixtuoid_core::sprite::format::ValidationReport::mismatched_density: alloc::vec::Vec<pixtuoid_core::sprite::format::DensityMismatch>
@@ -1363,6 +1424,7 @@ pub pixtuoid_core::sprite::format::ValidationReport::missing_hair_views: alloc::
 pub pixtuoid_core::sprite::format::ValidationReport::missing_marks: alloc::vec::Vec<pixtuoid_core::sprite::format::MissingMark>
 pub pixtuoid_core::sprite::format::ValidationReport::missing_optional: alloc::vec::Vec<pixtuoid_core::sprite::format::MissingOptional>
 pub pixtuoid_core::sprite::format::ValidationReport::missing_required: alloc::vec::Vec<alloc::string::String>
+pub pixtuoid_core::sprite::format::ValidationReport::off_beat_loops: alloc::vec::Vec<pixtuoid_core::sprite::format::OffBeatLoop>
 pub pixtuoid_core::sprite::format::ValidationReport::orphan_derived: alloc::vec::Vec<pixtuoid_core::sprite::format::OrphanDerived>
 pub pixtuoid_core::sprite::format::ValidationReport::orphan_hairstyles: alloc::vec::Vec<alloc::string::String>
 pub pixtuoid_core::sprite::format::ValidationReport::orphan_variants: alloc::vec::Vec<alloc::string::String>
@@ -1370,6 +1432,7 @@ pub pixtuoid_core::sprite::format::ValidationReport::overhanging_hair: alloc::ve
 pub pixtuoid_core::sprite::format::ValidationReport::partial_sets: alloc::vec::Vec<pixtuoid_core::sprite::format::PartialSet>
 pub pixtuoid_core::sprite::format::ValidationReport::unknown: alloc::vec::Vec<alloc::string::String>
 pub pixtuoid_core::sprite::format::ValidationReport::unmarked_heads: alloc::vec::Vec<pixtuoid_core::sprite::format::UnmarkedHead>
+pub pixtuoid_core::sprite::format::ValidationReport::unread_variant_timing: alloc::vec::Vec<pixtuoid_core::sprite::format::UnreadTiming>
 pub pixtuoid_core::sprite::format::ValidationReport::walks_without_stride: alloc::vec::Vec<alloc::string::String>
 impl pixtuoid_core::sprite::format::ValidationReport
 pub fn pixtuoid_core::sprite::format::ValidationReport::error_count(&self) -> usize
