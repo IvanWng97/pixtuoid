@@ -82,9 +82,9 @@ fn diff_cells(
     now: SystemTime,
 ) -> std::collections::BTreeSet<(u16, u16)> {
     r.render(baseline, pack(), now).unwrap();
-    let base = r.buf().clone();
+    let base = r.buf().expect("a frame").clone();
     r.render(scene, pack(), now).unwrap();
-    let buf = r.buf();
+    let buf = r.buf().expect("a frame");
     (0..buf.height())
         .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
         .filter(|&(x, y)| buf.get(x, y) != base.get(x, y))

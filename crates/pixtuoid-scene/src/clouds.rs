@@ -588,7 +588,7 @@ impl Clouds {
     pub(crate) fn of(moment: &Moment, span: u16, glass_h: u16) -> Self {
         let (span_f, glass_h_f) = (f32::from(span), f32::from(glass_h));
         let weather = moment.sky.weather();
-        let secs = moment.beat.ms() as f32 / 1000.0;
+        let secs = moment.timing.beat.ms() as f32 / 1000.0;
         let mut masses = Vec::new();
         for (w, share) in weather.parts() {
             let full = deck(w, span_f, glass_h_f);
@@ -642,7 +642,7 @@ impl Clouds {
         let flash = moment.sky.flash();
         if flash > 0.0 {
             clouds.strike = clouds.strike_at(
-                crate::sky::strike_bucket(moment.beat),
+                crate::sky::strike_bucket(moment.timing.beat),
                 flash,
                 span_f,
                 glass_h_f,

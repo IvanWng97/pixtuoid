@@ -80,7 +80,7 @@ fn epoch(t: SystemTime) -> Option<u64> {
 /// but never rendered" for a reason that has nothing to do with the decoder. The
 /// seed's own events are then excluded from every count, or the census would
 /// report a verdict on bytes that decoded to nothing.
-fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
+fn check_file(source: &str, path: &Path, pack: &std::sync::Arc<Pack>) -> Verdict {
     let mut v = Verdict {
         mtime: std::fs::metadata(path)
             .ok()
@@ -116,7 +116,7 @@ fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
 
     // One `FloorSession` per file so no cross-file render state can carry a
     // verdict.
-    let mut session = FloorSession::new();
+    let mut session = FloorSession::new(std::sync::Arc::clone(pack));
     v.drawn = session
         .step(
             pixtuoid_scene::floor::FloorInputs {
@@ -224,7 +224,7 @@ fn main() {
         std::process::exit(3);
     }
 
-    let pack = load_bundled_pack().expect("bundled pack");
+    let pack = std::sync::Arc::new(load_bundled_pack().expect("bundled pack"));
     let mut totals = Verdict::default();
     let mut registered_files = 0usize;
     let mut drove_files = 0usize;
