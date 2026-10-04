@@ -564,7 +564,9 @@ fn paint_piece(
         }
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
         PieceKind::DeskProp(prop) => paint_desk_prop(prop, pack, theme, scale, buf),
-        PieceKind::Creature { at, art, degraded } => {
+        PieceKind::Creature {
+            at, art, degraded, ..
+        } => {
             paint_creature(at, art, degraded, pack, scale, buf);
         }
         PieceKind::Effect(ref riding) => riding.paint(theme, buf),
@@ -4000,15 +4002,9 @@ mod tests {
         }
     }
 
-    /// The pet and the gateway mascots stand as figures: each paints only
-    /// inside its span at every density, sorts on its feet's row as the
-    /// classic sorts it, faces as the sim turns it, grounds its shadow, and has
-    /// what rides on it straight after it; a degraded gateway's art is greyed.
-    #[test]
-    fn creatures_stand_as_figures_with_their_riders_after_them() {
-        use crate::layout::{Pivot, sort_row_at};
-        let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pack = test_default_pack();
+    /// A cat and two gateways of one source, the second degraded and nearer
+    /// the viewer, so it sorts last.
+    fn creatures() -> (SceneLayout, SimFrame) {
         let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let mut frame = empty_frame(&layout);
         let (cat, lobster) = (Point { x: 40, y: 70 }, Point { x: 110, y: 70 });
@@ -4041,7 +4037,6 @@ mod tests {
             )
             .collect(),
         }];
-        // a second gateway, degraded, nearer the viewer so it sorts last
         let sick = Point { x: 110, y: 84 };
         frame.mascots.push(crate::sim::MascotPlacement {
             pos: sick,
@@ -4054,6 +4049,222 @@ mod tests {
             effects: Vec::new(),
             ..frame.mascots[0].clone()
         });
+        (layout, frame)
+    }
+
+    /// The pet and each gateway hover on their art as themselves, in paint
+    /// order.
+    #[test]
+    fn the_cutaway_lists_the_pet_and_each_mascot_as_hovers() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = test_default_pack();
+        let (layout, frame) = creatures();
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale: RenderScale::ONE,
+        };
+        let list = list_at(&frame, office, 12);
+        let creatures: Vec<_> = list
+            .pieces()
+            .iter()
+            .filter_map(|p| match &p.kind {
+                PieceKind::Creature { who, .. } => Some(crate::display::Hover {
+                    at: p.span.bounds(),
+                    target: who.clone(),
+                }),
+                _ => None,
+            })
+            .collect();
+        let expected: Vec<_> = std::iter::once(frame.pet.as_ref().expect("the cat").target())
+            .chain(
+                frame
+                    .mascots
+                    .iter()
+                    .map(crate::sim::MascotPlacement::target),
+            )
+            .collect();
+        assert_eq!(
+            creatures
+                .iter()
+                .map(|h| h.target.clone())
+                .collect::<Vec<_>>(),
+            expected,
+            "premise: the cat, then each gateway"
+        );
+        assert_eq!(list.hovers().listed(), creatures);
+    }
+
+    /// TEMPORARY (3b S2d 1/2; deleted with `hover_at`): on every cell, a
+    /// canvas frame's hovers name what `hover_at` names, save the deltas: a
+    /// later piece that is no figure no longer covers one (D5), and a creature
+    /// is named (D6, D7).
+    #[test]
+    fn a_frames_hovers_agree_with_hover_at_but_for_the_deltas() {
+        use crate::cutaway::canvas::CutawayCanvas;
+        use crate::display::HoverTarget;
+        use std::sync::Arc;
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = Arc::new(test_default_pack());
+        let mut cases = vec![creatures()];
+        for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
+            let (layout, _, frames, _) = sit_down(facing, 2);
+            cases.extend(frames.into_iter().map(|f| (layout.clone(), f)));
+        }
+        let at_noon = || {
+            showing(
+                crate::floor::FloorMeta::ground(),
+                crate::localclock::at_hour(12),
+            )
+        };
+        // The box `hover_at` resolved each piece by: a character's body,
+        // any other's span, a badge none.
+        let old_box = |p: &Piece| match &p.kind {
+            PieceKind::Character { body, .. } => Some(*body),
+            PieceKind::Badge { .. } => None,
+            _ => Some(p.span),
+        };
+        let mut deltas = [0usize; 2];
+        for (layout, frame) in cases {
+            let layout = Arc::new(layout);
+            for s in [1, pack.max_density_variant().get()] {
+                let scale = RenderScale::new(s).expect("nonzero");
+                let office = Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme,
+                    scale,
+                };
+                let list = crate::display::compose(&frame, office, at_noon());
+                let stepped = crate::floor::SteppedFloor {
+                    layout: Arc::clone(&layout),
+                    frame: frame.clone(),
+                };
+                let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
+                let hovers = canvas
+                    .frame(
+                        &stepped,
+                        theme,
+                        scale,
+                        at_noon(),
+                        &mut CutawayCache::default(),
+                    )
+                    .hovers
+                    .clone();
+                for (x, y) in (0..layout.buf_h).flat_map(|y| (0..layout.buf_w).map(move |x| (x, y)))
+                {
+                    let cell = Bounds {
+                        x,
+                        y,
+                        width: 1,
+                        height: 1,
+                    };
+                    match (canvas.hover_at(cell), hovers.at(cell)) {
+                        (Some(a), new) => {
+                            assert_eq!(new, Some(&HoverTarget::Agent(a)), "at scale {s}, {cell:?}")
+                        }
+                        (None, None) => {}
+                        (None, Some(HoverTarget::Pet(_) | HoverTarget::Mascot(_))) => {
+                            deltas[1] += 1;
+                        }
+                        (None, Some(HoverTarget::Agent(_))) => {
+                            let top = list
+                                .pieces()
+                                .iter()
+                                .rev()
+                                .find(|p| old_box(p).is_some_and(|b| b.meets(cell)))
+                                .expect("hover_at met a piece");
+                            assert!(
+                                !matches!(
+                                    top.kind,
+                                    PieceKind::Character { .. } | PieceKind::Creature { .. }
+                                ),
+                                "at scale {s}, {cell:?}: only D5 lets a hover through"
+                            );
+                            deltas[0] += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            deltas.iter().all(|&n| n > 0),
+            "premise: both deltas show: {deltas:?}"
+        );
+    }
+
+    /// What rides on a figure never covers it from the pointer: every cell of
+    /// an effect over its body names the figure.
+    #[test]
+    fn an_effect_never_blocks_its_figure() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
+        let mut frame = frames.last().expect("a seated frame").clone();
+        for c in &mut frame.characters {
+            c.effects = every_effect(c.top_left);
+        }
+        let id = crate::display::HoverTarget::Agent(
+            frame.agents[frame.characters[0].agent_idx].agent_id,
+        );
+        for s in [1, pack.max_density_variant().get()] {
+            let office = Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale: RenderScale::new(s).expect("nonzero"),
+            };
+            let list = list_at(&frame, office, 12);
+            let body = list
+                .pieces()
+                .iter()
+                .find_map(|p| match p.kind {
+                    PieceKind::Character { body, .. } => Some(body),
+                    _ => None,
+                })
+                .expect("the sitter");
+            let mut over = 0;
+            for p in list.pieces() {
+                let PieceKind::Effect(riding) = p.kind else {
+                    continue;
+                };
+                let e = p.span;
+                for y in e.y0.max(body.y0)..=e.y1.min(body.y1) {
+                    for x in e.x0.max(body.x0)..=e.x1.min(body.x1) {
+                        over += 1;
+                        let cell = Bounds {
+                            x,
+                            y,
+                            width: 1,
+                            height: 1,
+                        };
+                        assert_eq!(
+                            list.hovers().at(cell),
+                            Some(&id),
+                            "at scale {s}, {:?} at {cell:?}",
+                            riding.effect.kind
+                        );
+                    }
+                }
+            }
+            assert!(
+                over > 0,
+                "premise: at scale {s} an effect lies over the body"
+            );
+        }
+    }
+
+    /// The pet and the gateway mascots stand as figures: each paints only
+    /// inside its span at every density, sorts on its feet's row as the
+    /// classic sorts it, faces as the sim turns it, grounds its shadow, and has
+    /// what rides on it straight after it; a degraded gateway's art is greyed.
+    #[test]
+    fn creatures_stand_as_figures_with_their_riders_after_them() {
+        use crate::layout::{Pivot, sort_row_at};
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = test_default_pack();
+        let (layout, frame) = creatures();
+        let lobster = frame.mascots[0].pos;
         let riders = [
             frame.pet.as_ref().map_or(0, |p| p.effects.len()),
             frame.mascots[0].effects.len(),
@@ -4082,7 +4293,10 @@ mod tests {
             for (((&i, ridden), flip), sick) in creatures.iter().zip(riders).zip(facing).zip(sickly)
             {
                 let p = &pieces[i];
-                let PieceKind::Creature { at, art, degraded } = p.kind else {
+                let PieceKind::Creature {
+                    at, art, degraded, ..
+                } = p.kind
+                else {
                     unreachable!("filtered to creatures");
                 };
                 assert_eq!(art.flip, flip, "at scale {s} {} faces wrong", art.sprite);
@@ -4117,6 +4331,7 @@ mod tests {
                 at: lobster,
                 art: Art::still("lobster_rest"),
                 degraded,
+                who: frame.mascots[0].target(),
             };
             assert_ne!(
                 painted_alone(&lobster_kind(true), &layout, &pack, theme, scale),

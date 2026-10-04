@@ -14,7 +14,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentSlot, SceneState};
 
 use crate::chitchat::{ActiveChitchat, ChitchatBubble};
-use crate::display::{Hover, HoverTarget, Hovers, PetHover};
+use crate::display::{Hover, HoverTarget, Hovers};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
@@ -415,11 +415,6 @@ fn enqueue_pet<'a>(
 ) {
     let pos = pet.pos;
     let size = pack_frame_size(ctx.pack, pet.anim_name, pet.frame_idx);
-    let target = HoverTarget::Pet(PetHover {
-        kind: pet.kind,
-        centre: pos,
-        anim: pet.anim_name,
-    });
     drawables.push(Drawable {
         sort_row: sort_row_at(
             Pivot::Center,
@@ -427,7 +422,7 @@ fn enqueue_pet<'a>(
             size.unwrap_or(crate::sim::PET_FALLBACK).h,
         ),
         layer: Layer::Figure,
-        hover: size.map(|size| Hover::figure(Pivot::Center, pos, size, target)),
+        hover: size.map(|size| Hover::figure(Pivot::Center, pos, size, pet.target())),
         kind: DrawableKind::Pet {
             pos,
             flip: pet.flip,
@@ -448,14 +443,8 @@ fn enqueue_gateway_mascots<'a>(
         drawables.push(Drawable {
             sort_row: sort_row_at(Pivot::Center, m.pos, m.size.h),
             layer: Layer::Figure,
-            hover: pack_frame_size(pack, m.anim_name, m.frame_idx).map(|size| {
-                Hover::figure(
-                    Pivot::Center,
-                    m.pos,
-                    size,
-                    HoverTarget::Mascot(m.key.clone()),
-                )
-            }),
+            hover: pack_frame_size(pack, m.anim_name, m.frame_idx)
+                .map(|size| Hover::figure(Pivot::Center, m.pos, size, m.target())),
             kind: DrawableKind::GatewayMascot {
                 pos: m.pos,
                 anim_name: m.anim_name,

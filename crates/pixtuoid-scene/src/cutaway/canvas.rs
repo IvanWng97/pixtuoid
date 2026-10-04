@@ -12,7 +12,7 @@ use pixtuoid_core::sprite::format::Pack;
 
 use crate::cutaway::light::Ambient;
 use crate::cutaway::paint::paint;
-use crate::display::{Office, Showing, Span, compose};
+use crate::display::{Hovers, Office, Showing, Span, compose};
 use crate::floor::SteppedFloor;
 use crate::layout::{Bounds, SceneLayout};
 use crate::render_scale::RenderScale;
@@ -34,6 +34,8 @@ pub struct CanvasFrame<'a> {
     pub buf: &'a RgbBuffer,
     /// Where it may differ from the canvas's previous frame.
     pub dirty: Dirty,
+    /// What it answers a pointer with.
+    pub hovers: &'a Hovers,
 }
 
 /// Where a frame's pixels may differ from the frame before.
@@ -75,7 +77,8 @@ struct Shown {
     /// Every piece's reach and every light's span, each with its fingerprint.
     footprints: Vec<(Span, u64)>,
     /// [`DisplayList::hover_spans`](crate::display::DisplayList::hover_spans).
-    hovers: Vec<(Span, Option<AgentId>)>,
+    spans: Vec<(Span, Option<AgentId>)>,
+    hovers: Hovers,
 }
 
 impl CutawayCanvas {
@@ -120,7 +123,7 @@ impl CutawayCanvas {
             .map(|p| (p.reach(), p.fingerprint))
             .chain(list.lights().iter().map(|l| (l.span, l.fingerprint)))
             .collect();
-        let hovers = list.hover_spans().collect();
+        let spans = list.hover_spans().collect();
         let size = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
         let dirty = match self.shown.take() {
             Some(shown) if shown.epoch == epoch => Dirty::Rects(
@@ -137,14 +140,16 @@ impl CutawayCanvas {
             }
             paint(layout, &list, cache, &mut self.buf);
         }
-        self.shown = Some(Shown {
+        let shown = self.shown.insert(Shown {
             epoch,
             footprints,
-            hovers,
+            spans,
+            hovers: list.hovers().clone(),
         });
         CanvasFrame {
             buf: &self.buf,
             dirty,
+            hovers: &shown.hovers,
         }
     }
 
@@ -153,7 +158,7 @@ impl CutawayCanvas {
     /// piece that is no agent lies over it, or none does.
     pub fn hover_at(&self, area: Bounds) -> Option<AgentId> {
         let shown = self.shown.as_ref()?;
-        shown.hovers.iter().rev().find(|(s, _)| s.meets(area))?.1
+        shown.spans.iter().rev().find(|(s, _)| s.meets(area))?.1
     }
 }
 
@@ -499,7 +504,7 @@ mod tests {
         assert_eq!(dirty(other, 3), Dirty::All, "a new scale");
     }
 
-    /// A walk to a north-facing desk, shown at scale 2.
+    /// A walk to a desk, shown at scale 2.
     struct Hovering {
         layout: Arc<SceneLayout>,
         pack: Arc<Pack>,
@@ -508,8 +513,13 @@ mod tests {
     }
 
     impl Hovering {
+        /// To a north-facing desk.
         fn new() -> Self {
-            let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+            Self::facing(crate::layout::Facing::North)
+        }
+
+        fn facing(facing: crate::layout::Facing) -> Self {
+            let (layout, pack, frames, _) = sit_down(facing, 2);
             Self {
                 layout: Arc::new(layout),
                 pack: Arc::new(pack),
@@ -549,20 +559,23 @@ mod tests {
                 .collect()
         }
 
-        /// `canvas` after showing `frame`.
-        fn show(&self, canvas: &mut CutawayCanvas, frame: &SimFrame) {
+        /// `canvas` after showing `frame`, and the frame's hovers.
+        fn show(&self, canvas: &mut CutawayCanvas, frame: &SimFrame) -> Hovers {
             let stepped = SteppedFloor {
                 layout: Arc::clone(&self.layout),
                 frame: frame.clone(),
             };
             let mut cache = crate::cutaway::paint::CutawayCache::default();
-            canvas.frame(
-                &stepped,
-                normal(),
-                self.scale,
-                crate::display::compose::tests::showing(clear_ground(), Self::now()),
-                &mut cache,
-            );
+            canvas
+                .frame(
+                    &stepped,
+                    normal(),
+                    self.scale,
+                    crate::display::compose::tests::showing(clear_ground(), Self::now()),
+                    &mut cache,
+                )
+                .hovers
+                .clone()
         }
     }
 
@@ -600,6 +613,31 @@ mod tests {
         let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
         h.show(&mut canvas, frame);
         assert_eq!(canvas.hover_at(area), Some(id));
+    }
+
+    /// A desk painted over its sitter's legs leaves them to the pointer: only
+    /// a later figure covers one.
+    #[test]
+    fn a_desk_over_a_sitter_names_the_sitter() {
+        let h = Hovering::facing(crate::layout::Facing::South);
+        let seated = h.frames.last().expect("a seated frame");
+        let boxes = h.boxes(seated);
+        let (area, id) = boxes
+            .iter()
+            .enumerate()
+            .find_map(|(i, &(_, b, agent))| {
+                let id = agent?;
+                boxes[i + 1..].iter().find_map(|&(desk, d, _)| {
+                    let area = cell((d.x0.max(b.x0), d.y0.max(b.y0)));
+                    (desk && d.meets(area) && b.meets(area)).then_some((area, id))
+                })
+            })
+            .expect("the desk lies over its sitter");
+        let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
+        assert_eq!(
+            h.show(&mut canvas, seated).at(area),
+            Some(&crate::display::HoverTarget::Agent(id))
+        );
     }
 
     /// A cell showing floor no piece stands on hovers nothing.

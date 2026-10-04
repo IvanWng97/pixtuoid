@@ -187,7 +187,7 @@ impl TileCutaway {
         showing: Showing<'_>,
     ) {
         let now = showing.now;
-        let CanvasFrame { buf, dirty } = self.canvas.frame(
+        let CanvasFrame { buf, dirty, .. } = self.canvas.frame(
             stepped,
             theme,
             fitted.fit.render_scale(),

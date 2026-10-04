@@ -122,6 +122,17 @@ pub(crate) struct PetPlacement {
     pub(crate) effects: Vec<Effect>,
 }
 
+impl PetPlacement {
+    /// Who its hover names.
+    pub(crate) fn target(&self) -> crate::display::HoverTarget {
+        crate::display::HoverTarget::Pet(crate::display::PetHover {
+            kind: self.kind,
+            centre: self.pos,
+            anim: self.anim_name,
+        })
+    }
+}
+
 /// One gateway mascot this tick.
 #[derive(Debug, Clone)]
 pub(crate) struct MascotPlacement {
@@ -139,6 +150,13 @@ pub(crate) struct MascotPlacement {
     pub(crate) card: GatewayCard,
     /// What rides on it this tick: a bubble per run in flight.
     pub(crate) effects: Vec<Effect>,
+}
+
+impl MascotPlacement {
+    /// Who its hover names.
+    pub(crate) fn target(&self) -> crate::display::HoverTarget {
+        crate::display::HoverTarget::Mascot(self.key.clone())
+    }
 }
 
 /// A coffee on a desk.

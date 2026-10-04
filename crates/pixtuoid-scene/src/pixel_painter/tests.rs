@@ -3773,10 +3773,11 @@ fn a_character_whose_anim_is_missing_is_not_hoverable() {
     assert_eq!(badged, vec![walker]);
 }
 
-/// Each figure on a walk to a desk hovers on exactly the box its frame is
-/// blitted in.
+/// Each figure on a walk to a desk hovers on exactly the box the classic
+/// blits its frame in; the cutaway's at 1x is the same box, and at its densest
+/// stands on the same feet, raised by the hair it draws.
 #[test]
-fn a_figure_hovers_on_the_box_it_is_drawn_in() {
+fn a_figure_hovers_on_the_box_it_is_drawn_in_in_both_looks() {
     let (layout, pack, frames, _) =
         crate::display::compose::tests::sit_down(crate::layout::Facing::North, 2);
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
@@ -3810,6 +3811,35 @@ fn a_figure_hovers_on_the_box_it_is_drawn_in() {
             .collect();
         let drawn = paint_drawn(&owned, &scene, &layout, &pack, now, frame);
         assert_eq!(drawn.hovers.listed(), blitted);
+        let cutaway = |scale| {
+            let office = crate::display::Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale,
+            };
+            crate::display::compose::tests::list_at(frame, office, 12)
+                .hovers()
+                .clone()
+        };
+        let scale = crate::render_scale::RenderScale::new;
+        assert_eq!(
+            cutaway(scale(1).expect("nonzero")).listed(),
+            blitted,
+            "the cutaway at 1x"
+        );
+        let densest = cutaway(scale(pack.max_density_variant().get()).expect("nonzero"));
+        assert_eq!(densest.listed().len(), blitted.len());
+        for (dense, flat) in densest.listed().iter().zip(&blitted) {
+            let (d, f) = (dense.at, flat.at);
+            assert_eq!(dense.target, flat.target);
+            assert_eq!(
+                (d.x, d.width, d.y + d.height),
+                (f.x, f.width, f.y + f.height),
+                "the same columns and feet"
+            );
+            assert!(d.y <= f.y, "{d:?} sinks below {f:?}");
+        }
     }
 }
 

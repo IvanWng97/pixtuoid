@@ -118,6 +118,16 @@ impl Span {
             && u32::from(self.y0) < end(area.y, area.height)
     }
 
+    /// The same cells as a [`Bounds`].
+    pub(crate) fn bounds(self) -> Bounds {
+        Bounds {
+            x: self.x0,
+            y: self.y0,
+            width: (self.x1 - self.x0).saturating_add(1),
+            height: (self.y1 - self.y0).saturating_add(1),
+        }
+    }
+
     fn key(self) -> (u16, Layer) {
         (self.depth, self.layer)
     }

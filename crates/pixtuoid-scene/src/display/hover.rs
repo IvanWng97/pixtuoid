@@ -57,6 +57,12 @@ pub struct PetHover {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Hovers(Vec<Hover>);
 
+impl FromIterator<Hover> for Hovers {
+    fn from_iter<I: IntoIterator<Item = Hover>>(hovers: I) -> Self {
+        Self(hovers.into_iter().collect())
+    }
+}
+
 impl Hovers {
     /// List `hover` over every hover listed before it.
     pub(crate) fn push(&mut self, hover: Hover) {
