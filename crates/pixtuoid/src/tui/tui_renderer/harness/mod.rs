@@ -61,8 +61,14 @@ pub(super) fn render_until_settled<B: Backend<Error: Send + Sync + 'static>>(
 
 /// Parsed once per test process and shared by every harness test.
 pub(super) fn pack() -> &'static Pack {
-    static PACK: std::sync::OnceLock<Pack> = std::sync::OnceLock::new();
-    PACK.get_or_init(|| pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"))
+    pack_static()
+}
+pub(super) fn pack_arc() -> Arc<Pack> {
+    Arc::clone(pack_static())
+}
+fn pack_static() -> &'static Arc<Pack> {
+    static PACK: std::sync::OnceLock<Arc<Pack>> = std::sync::OnceLock::new();
+    PACK.get_or_init(|| Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack")))
 }
 pub(super) fn t0() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000)
@@ -101,6 +107,7 @@ pub(super) fn build_pets(
         Terminal::new(TestBackend::new(cols, rows)).expect("test backend"),
         normal_theme(),
         pets,
+        pack_arc(),
     )
 }
 /// Idle agent on floor 0 at desk `desk`.

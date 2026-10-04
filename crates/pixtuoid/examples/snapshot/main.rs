@@ -410,12 +410,12 @@ fn main() -> Result<()> {
     }
     let backend = TestBackend::new(cols, rows);
     let mut term = Terminal::new(backend)?;
-    let pack = load_sprite_pack(
+    let pack = std::sync::Arc::new(load_sprite_pack(
         args.pack_dir
             .clone()
             .map_or(PackSource::Bundled, PackSource::Explicit),
-    )?;
-    let mut floor = pixtuoid_scene::floor::PerFloor::new();
+    )?);
+    let mut floor = pixtuoid_scene::floor::PerFloor::new(std::sync::Arc::clone(&pack));
     // A typo'd theme silently rendering NORMAL would put wrong-palette art into
     // the docs/site screenshot pipelines.
     let theme = pixtuoid_scene::theme::theme_by_name(&args.theme).ok_or_else(|| {
@@ -531,7 +531,7 @@ fn main() -> Result<()> {
         })
         .unwrap_or_default();
     let warning_text = pixtuoid::doctor::footer_warning(death_text.as_deref(), &drifted);
-    let mut chitchat_state = std::collections::HashMap::new();
+    let mut office = pixtuoid_scene::floor::PerOffice::new();
     // Static snapshots have no time to animate the fade — snap straight
     // to the steady-state level for the chosen scene.
     if args.empty {
@@ -707,7 +707,7 @@ fn main() -> Result<()> {
         onboarding: &onboarding_frame,
         ..DrawCtx::offscreen(
             &mut floor,
-            &mut chitchat_state,
+            office.stores(),
             theme,
             &scene,
             &pack,

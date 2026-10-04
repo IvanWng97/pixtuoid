@@ -296,7 +296,7 @@ impl GlassWeather {
             veil: moment.look.glass_veil,
             policy: moment.sky.policy(),
             weather: moment.sky.weather(),
-            beat: moment.beat,
+            beat: moment.timing.beat,
         }
     }
 

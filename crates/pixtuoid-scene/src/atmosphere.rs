@@ -46,10 +46,9 @@ pub(crate) struct Moment {
     /// Always `sky`'s, resolved against the frame's theme.
     pub(crate) look: SkyTones,
     pub(crate) altitude: f32,
-    /// The wall clock, for what tells the time: the sky's hour, the clock face.
-    pub(crate) now: std::time::SystemTime,
-    /// What every ambient loop reads instead of [`now`](Self::now).
-    pub(crate) beat: crate::anim::Beat,
+    /// The wall clock for what tells the time (the sky's hour, the clock
+    /// face), and the beat every ambient loop reads instead.
+    pub(crate) timing: crate::anim::Timing,
 }
 
 impl Moment {
@@ -65,8 +64,7 @@ impl Moment {
             look: SkyTones::resolve(&sky, theme),
             sky,
             altitude,
-            now: timing.now,
-            beat: timing.beat,
+            timing,
         }
     }
 }
