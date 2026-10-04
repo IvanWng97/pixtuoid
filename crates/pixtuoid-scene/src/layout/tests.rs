@@ -15,6 +15,23 @@ fn bounds_overlap_is_half_open_and_a_zero_sized_box_overlaps_nothing() {
     assert!(!b(11, 11, 2, 0).overlaps(a), "zero height, inside");
 }
 
+/// A cell on the far edge, which `CellArea` saturates to `u16::MAX`, ends one
+/// past the last representable column and row.
+#[test]
+fn a_box_on_the_far_edge_overlaps_by_its_pixels() {
+    let b = |x, y, width, height| Bounds {
+        x,
+        y,
+        width,
+        height,
+    };
+    let edge = b(u16::MAX, u16::MAX, 1, 1);
+    let near = b(u16::MAX - 1, u16::MAX - 1, 2, 2);
+    assert!(edge.overlaps(near));
+    assert!(near.overlaps(edge));
+    assert!(!edge.overlaps(b(0, 0, 4, 4)));
+}
+
 #[test]
 fn widening_against_column_0_keeps_the_east_edge() {
     let b = |x, width| Bounds {
