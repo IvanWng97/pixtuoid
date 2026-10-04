@@ -12,7 +12,7 @@
 use std::time::{Duration, Instant};
 
 /// Motion is time-driven, so a populated office must repaint continuously.
-const ACTIVE_FPS: u32 = 30;
+const ACTIVE_FPS: u32 = pixtuoid_scene::anim::PAINT_FPS;
 /// Never 0fps: a frozen clock reads as a dead/broken window.
 const IDLE_AMBIENT_FPS: u32 = 1;
 

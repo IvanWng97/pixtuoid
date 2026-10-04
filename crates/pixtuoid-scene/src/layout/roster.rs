@@ -3,10 +3,11 @@
 //! visual-clearance probe and the placement sweep map over
 //! [`SceneLayout::fixtures`].
 
+use super::placement::{boxed, centred};
 use super::{
     Bounds, Facing, Furniture, Lounge, MeetingRoom, MeetingTrio, PantryRoom, Pivot, PlantItem,
     PlantKind, PodDecor, PodDecorItem, Point, SceneLayout, Size, WallDecor, WallDecorItem,
-    WaypointKind, WindowBay, anchored_top_left, coat_rack_rect_at, furniture_def, sort_row_at,
+    WaypointKind, WindowBay, coat_rack_rect_at, furniture_def, sort_row_at,
 };
 use pixtuoid_core::state::FloorLocalDeskIndex;
 
@@ -342,22 +343,8 @@ const NOTICE_BOARD_GAP: u16 = 1;
 /// which then sits on it.
 const LOUNGE_RUG_Z_LEAD: u16 = 2;
 
-/// A centre-pinned `size` box at `pos`.
-fn centred(pos: Point, size: Size) -> Bounds {
-    boxed(anchored_top_left(Pivot::Center, pos, size.w, size.h), size)
-}
-
 fn top_left(b: Bounds) -> Point {
     Point { x: b.x, y: b.y }
-}
-
-fn boxed(tl: Point, size: Size) -> Bounds {
-    Bounds {
-        x: tl.x,
-        y: tl.y,
-        width: size.w,
-        height: size.h,
-    }
 }
 
 /// Each home desk's filing cabinet, then the desk: the fixture authority the
@@ -482,9 +469,9 @@ impl SceneLayout {
         let (island, pantry_uprights) = match pantry {
             Some(
                 p @ PantryRoom {
-                    // Place the cooler and the bin through their rect methods.
+                    // Place the counter, the cooler and the bin through their
+                    // rect methods.
                     bounds: _,
-                    // Sizes its counter, which rosters as a waypoint station.
                     counter_size: _,
                     kitchen_island,
                 },
@@ -524,7 +511,7 @@ impl SceneLayout {
             )
             .chain(corridor.map(|b| backdrop(FixtureKind::Runner, b)))
             .chain(rooms.clone().filter_map(move |(room, r, _)| {
-                r.doormat_rect()
+                self.doormat(r)
                     .map(|b| backdrop(FixtureKind::Doormat { room }, b))
             }))
             .chain(
@@ -634,17 +621,7 @@ impl SceneLayout {
                         Some(match station {
                             // Runtime-sized: the furniture row is empty on purpose.
                             Station::PantryCounter => {
-                                let size = self.pantry_counter_size();
-                                Fixture {
-                                    kind,
-                                    at: wp.pos,
-                                    visual: centred(wp.pos, size),
-                                    depth: Depth::sorted(sort_row_at(
-                                        Pivot::Center,
-                                        wp.pos,
-                                        size.h,
-                                    )),
-                                }
+                                upright(kind, wp.pos, pantry_uprights?.counter_rect()?)
                             }
                             Station::VendingMachine | Station::Printer | Station::SnackShelf => {
                                 centred_row(kind, wp.pos, wp.kind.furniture())
@@ -784,6 +761,27 @@ impl SceneLayout {
             })
     }
 
+    /// The mat outside meeting room `r`'s door, or `None` when the lounge's
+    /// side table or a plant stands over it: half hidden, it reads as a stain.
+    fn doormat(&self, r: &MeetingRoom) -> Option<Bounds> {
+        let mat = r.doormat_rect()?;
+        let side_table = self.lounge.as_ref().map(|l| {
+            centred(
+                l.side_table,
+                furniture_def(Furniture::LoungeSideTable).visual,
+            )
+        });
+        let plants = self
+            .plants
+            .iter()
+            .map(|p| Some(centred(p.pos, furniture_def(p.kind.furniture()).visual)));
+        std::iter::once(side_table)
+            .chain(plants)
+            .flatten()
+            .all(|b| !b.overlaps(mat))
+            .then_some(mat)
+    }
+
     /// The mat inside the pantry's north doorway, one clear floor row south of
     /// the wall face, or `None` without a pantry or that doorway.
     pub(crate) fn pantry_entry_mat(&self) -> Option<Bounds> {
@@ -800,6 +798,12 @@ impl SceneLayout {
             },
             ENTRY_MAT,
         );
+        // Inside the room's columns, or none: past them it lies under the wall.
+        let b = p.bounds;
+        let last_x = (b.x + b.width)
+            .checked_sub(mat.width)
+            .filter(|&x| x >= b.x)?;
+        mat.x = mat.x.clamp(b.x, last_x);
         // Shifted west off the cooler standing against the east wall.
         if let Some(cooler) = p.water_cooler_rect().filter(|c| c.overlaps(mat)) {
             mat.x = cooler
@@ -807,16 +811,22 @@ impl SceneLayout {
                 .checked_sub(mat.width)
                 .filter(|&x| x >= p.bounds.x)?;
         }
-        // Gives way to the island, the counter or the runner over it: half
-        // hidden, it reads as a stain.
+        // Gives way to whatever stands or lies over it: half hidden, it reads
+        // as a stain.
         let island = p
             .kitchen_island
             .map(|at| centred(at, furniture_def(Furniture::KitchenIsland).visual));
-        [island, self.pantry_counter(), self.corridor]
-            .into_iter()
-            .flatten()
-            .all(|b| !b.overlaps(mat))
-            .then_some(mat)
+        [
+            island,
+            p.counter_rect(),
+            p.snack_shelf_rect(),
+            p.trash_bin_rect(),
+            self.corridor,
+        ]
+        .into_iter()
+        .flatten()
+        .all(|b| !b.overlaps(mat))
+        .then_some(mat)
     }
 
     /// The thin bar mat under the kitchen island: the island covers most of
@@ -850,18 +860,9 @@ impl SceneLayout {
         })
     }
 
-    /// The pantry counter's box, or `None` without one.
-    fn pantry_counter(&self) -> Option<Bounds> {
-        let wp = self
-            .waypoints
-            .iter()
-            .find(|w| w.kind == WaypointKind::Pantry)?;
-        Some(centred(wp.pos, self.pantry_counter_size()))
-    }
-
     /// The coffee machine's box on the pantry counter, or `None` without one.
     pub fn coffee_machine(&self) -> Option<Bounds> {
-        let counter = self.pantry_counter()?;
+        let counter = self.pantry?.counter_rect()?;
         let (x0, x1) = coffee_machine_cols(counter.width);
         Some(Bounds {
             x: counter.x + x0,

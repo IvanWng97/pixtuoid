@@ -1,5 +1,5 @@
 //! `pixtuoid-web` — the WebAssembly canvas painter over the `pixtuoid-scene`
-//! engine: an [`Office`] handle owns everything cross-frame so motion/pose stay
+//! engine: an [`Office`] handle owns everything cross-frame so walks/poses stay
 //! continuous, and `step(now_ms, w, h)` renders one frame into an RGBA staging
 //! buffer JS reads zero-copy via [`Office::frame_ptr`]/[`Office::frame_len`].
 //!
@@ -26,12 +26,11 @@ use crate::script::{
 
 use pixtuoid_scene::audio::OneShotPool;
 use pixtuoid_scene::flash::{FlashHold, FlashPhase, ScreenClock};
-use pixtuoid_scene::floor::{
-    FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs, floor_capacity,
-};
+use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FloorSession, PetInputs, floor_capacity};
 use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::pack::load_bundled_pack;
-use pixtuoid_scene::pixel_painter::WeatherPolicy;
+use pixtuoid_scene::sky::WeatherPolicy;
 use pixtuoid_scene::theme::{ALL_THEMES, Theme};
 
 /// A visitor hire's one-shot event, queued OUTSIDE the loop machinery so a
@@ -127,7 +126,7 @@ fn page_clock() -> ScreenClock {
 }
 
 /// A live office rendered to a reusable RGBA buffer across frames. Keeping ONE
-/// handle alive across `step` calls is what keeps motion/pose continuous.
+/// handle alive across `step` calls is what keeps walks/poses continuous.
 #[wasm_bindgen]
 pub struct Office {
     scene: SceneState,
@@ -135,7 +134,7 @@ pub struct Office {
     /// RGBA staging (the render buffer is packed RGB) — its ptr/len back a JS
     /// view into wasm memory, so blitting is zero-copy on the JS side.
     rgba: Vec<u8>,
-    pack: Pack,
+    pack: std::sync::Arc<Pack>,
     theme: &'static Theme,
     seed: u64,
     reducer: Reducer,
@@ -171,13 +170,14 @@ impl Office {
     /// only if the bundled sprite pack fails to parse.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
-        let pack = load_bundled_pack().map_err(|e| JsError::new(&format!("{e:#}")))?;
+        let pack =
+            std::sync::Arc::new(load_bundled_pack().map_err(|e| JsError::new(&format!("{e:#}")))?);
         Ok(Office {
             // Capacity starts empty and is synced from the CANVAS's own layout
             // on every `step` before any beat fires, so the reducer only admits
             // agents the rendered office can seat.
             scene: SceneState::default(),
-            session: FloorSession::new(),
+            session: FloorSession::new(std::sync::Arc::clone(&pack)),
             rgba: Vec::new(),
             pack,
             theme: ALL_THEMES[0],
@@ -229,7 +229,8 @@ impl Office {
         self.render(now, buf_w, buf_h);
         let flash = self.session.flash();
         // A canvas of a new shape gets this frame whatever it shows.
-        let same_shape = self.rgba.len() == self.session.buf().as_slice().len() * 4;
+        let pixels = self.session.buf().map_or(0, |b| b.as_slice().len());
+        let same_shape = self.rgba.len() == pixels * 4;
         if same_shape && self.flash.holds(flash) {
             return;
         }
@@ -264,7 +265,7 @@ impl Office {
         self.hires.try_hire(base, &self.scene)
     }
 
-    /// Force one of the [`weather_names`](pixtuoid_scene::pixel_painter::weather_names),
+    /// Force one of the [`weather_names`](pixtuoid_scene::sky::weather_names),
     /// or `None` (or an unrecognized name) to follow the clock-based cycle.
     pub fn set_weather(&mut self, name: Option<String>) {
         self.weather = WeatherPolicy::from_name(name.as_deref()).unwrap_or_default();
@@ -283,7 +284,7 @@ impl Office {
     /// site's sky-slider thumb reads this, so it delegates to the engine's ONE
     /// day/night boundary rather than restating it.
     pub fn is_day(&self, hour: f32) -> bool {
-        pixtuoid_scene::pixel_painter::hour_is_day(hour)
+        pixtuoid_scene::sky::hour_is_day(hour)
     }
 
     /// Export the current frame's name-badge labels + neon wall-board TEXT as a
@@ -573,8 +574,8 @@ impl Office {
         if self.caps_size == Some((buf_w, buf_h)) {
             return;
         }
-        // The SAME (size, cap=None, seed) computation `render` feeds
-        // `render_floor`, so reducer capacity and painted layout can't drift.
+        // The SAME (size, cap=None, seed) computation `render` lays out, so
+        // reducer capacity and painted layout can't drift.
         let cap = floor_capacity(buf_w, buf_h, self.seed);
         self.scene.floor_capacities = std::array::from_fn(|i| if i == 0 { cap } else { 0 });
         self.caps_size = Some((buf_w, buf_h));
@@ -648,24 +649,28 @@ impl Office {
     fn render(&mut self, now: SystemTime, buf_w: u16, buf_h: u16) {
         // Too-small layouts leave the cleared buffer; never panics.
         let floor_meta = self.floor_meta();
-        self.session.render(FrameInputs {
-            world: FloorInputs {
-                scene: &self.scene,
-                pack: &self.pack,
-                now,
-                floor: floor_meta,
-                pets: PetInputs::default(),
+        self.session.render(
+            Look::Classic,
+            RenderInputs {
+                world: FloorInputs {
+                    scene: &self.scene,
+                    pack: &self.pack,
+                    now,
+                    floor: floor_meta,
+                    pets: PetInputs::default(),
+                },
+                theme: self.theme,
+                size: Size { w: buf_w, h: buf_h },
+                place: Place::default(),
+                debug_walkable: false,
             },
-            theme: self.theme,
-            size: Size { w: buf_w, h: buf_h },
-            debug_walkable: false,
-        });
+        );
     }
 
     /// `Rgb` is not `repr(C)`, so expand into the RGBA staging vec per-pixel
     /// (opaque alpha) — don't cast.
     fn expand_rgba(&mut self) {
-        let px = self.session.buf().as_slice();
+        let px = self.session.buf().map_or(&[][..], |b| b.as_slice());
         self.rgba.clear();
         self.rgba.reserve(px.len() * 4);
         for c in px {
@@ -1187,7 +1192,7 @@ mod tests {
         assert!(
             o.scene.agents.contains_key(&cast_id(5))
                 && o.session.floor.ctx.walks.contains_key(&cast_id(5)),
-            "agent 5 must be live with motion state mid-loop (positive control)"
+            "agent 5 must be live with walk state mid-loop (positive control)"
         );
         // Past agent 5's SessionEnd + the exit grace + sweep.
         while t <= 115_000 {
@@ -1200,7 +1205,7 @@ mod tests {
         );
         assert!(
             !o.session.floor.ctx.walks.contains_key(&cast_id(5)),
-            "agent 5's motion state was evicted with its slot"
+            "agent 5's walk state was evicted with its slot"
         );
         assert!(
             !o.session.office.coffee.map().contains_key(&cast_id(5)),

@@ -266,41 +266,57 @@ pub(crate) mod test_io {
 /// the frames it is drawn on, and what reached the screen.
 #[cfg(test)]
 pub(crate) mod test_flash {
-    use std::sync::OnceLock;
+    use std::sync::{Arc, OnceLock};
     use std::time::{Duration, SystemTime};
 
     use pixtuoid_core::sprite::format::Pack;
     use pixtuoid_core::state::{MAX_FLOORS, SceneState};
     use pixtuoid_scene::anim::{FULL_TICK_MS, Motion, PHOTOSENSITIVE_PHASE_MIN_MS};
     use pixtuoid_scene::flash::FlashPhase;
-    use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs};
-    use pixtuoid_scene::pixel_painter::{Weather, WeatherPolicy};
+    use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FloorSession, PetInputs};
+    use pixtuoid_scene::look::{Look, Place, RenderInputs};
+    use pixtuoid_scene::sky::{Weather, WeatherPolicy};
 
     /// How long a probe looks for a flash before the test gives up on it.
     const MINUTE_MS: u64 = 60_000;
 
     /// The bundled pack, parsed once per test process.
     pub(crate) fn pack() -> &'static Pack {
-        static PACK: OnceLock<Pack> = OnceLock::new();
-        PACK.get_or_init(|| pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"))
+        pack_static()
+    }
+
+    /// [`pack`], shared: a floor's raster draws the pack its frames step.
+    pub(crate) fn pack_arc() -> Arc<Pack> {
+        Arc::clone(pack_static())
+    }
+
+    fn pack_static() -> &'static Arc<Pack> {
+        static PACK: OnceLock<Arc<Pack>> = OnceLock::new();
+        PACK.get_or_init(|| {
+            Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"))
+        })
     }
 
     /// What an empty floor's frame flashes at `at`, rendered on `session` as a
     /// painter renders it.
     fn rendered_flash(session: &mut FloorSession, floor: FloorMeta, at: SystemTime) -> FlashPhase {
         let scene = SceneState::new([8; MAX_FLOORS]);
-        session.render(FrameInputs {
-            world: FloorInputs {
-                scene: &scene,
-                pack: pack(),
-                now: at,
-                floor,
-                pets: PetInputs::default(),
+        session.render(
+            Look::Classic,
+            RenderInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: pack(),
+                    now: at,
+                    floor,
+                    pets: PetInputs::default(),
+                },
+                theme: pixtuoid_scene::theme::ALL_THEMES[0],
+                size: pixtuoid_scene::layout::min_layout_size(),
+                place: Place::default(),
+                debug_walkable: false,
             },
-            theme: pixtuoid_scene::theme::ALL_THEMES[0],
-            size: pixtuoid_scene::layout::min_layout_size(),
-            debug_walkable: false,
-        });
+        );
         session.flash()
     }
 
@@ -320,7 +336,7 @@ pub(crate) mod test_flash {
             .with_weather(weather)
             .with_motion(Motion::Full);
         // A fresh floor each instant: a room never left to dim, so only the sky flashes.
-        let phase = |at| rendered_flash(&mut FloorSession::new(), floor, at);
+        let phase = |at| rendered_flash(&mut FloorSession::new(pack_arc()), floor, at);
         let noon = pixtuoid_scene::localclock::at_hour_min(12, 0);
         let start = (0..MINUTE_MS)
             .step_by(FULL_TICK_MS as usize)
@@ -380,7 +396,7 @@ pub(crate) mod test_flash {
             .with_motion(Motion::Full);
         let noon = pixtuoid_scene::localclock::at_hour_min(12, 0);
         let setup = [noon, noon + ms(VacancyDim::EMPTY_DEBOUNCE_MS)];
-        let mut session = FloorSession::new();
+        let mut session = FloorSession::new(pack_arc());
         let mut phase = |at| rendered_flash(&mut session, floor, at);
         phase(setup[0]);
         let mut was = phase(setup[1]);

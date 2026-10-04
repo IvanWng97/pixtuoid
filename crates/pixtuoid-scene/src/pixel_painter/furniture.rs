@@ -2,6 +2,7 @@
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
+use crate::anim::FULL_TICK_MS;
 use crate::layout::{Bounds, COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W};
 use crate::pack::COOLER_WATER;
 
@@ -149,9 +150,7 @@ pub(super) fn paint_notice_board(buf: &mut RgbBuffer, board: Bounds, theme: &cra
     }
 }
 
-/// Small doormat filling `mat`, the box
-/// [`MeetingRoom::doormat_rect`](crate::layout::MeetingRoom::doormat_rect)
-/// places and gates.
+/// Small doormat filling `mat`, its fixture's box.
 pub(super) fn paint_doormat(buf: &mut RgbBuffer, mat: Bounds, theme: &crate::theme::Theme) {
     let mat_color = theme.furniture.rug_trim;
     let mat_accent = theme.furniture.rug_field;
@@ -196,8 +195,8 @@ pub(super) fn paint_water_cooler(
     }
     // Ambient glug: a bubble climbs the bottle each cycle. Reusing
     // tank_water_line also keeps it off the mascot harness's bubble sentinel.
-    const GLUG_CYCLE_MS: u64 = 2_000;
-    const GLUG_STEP_MS: u64 = 400;
+    const GLUG_STEP_MS: u64 = 3 * FULL_TICK_MS;
+    const GLUG_CYCLE_MS: u64 = 5 * GLUG_STEP_MS;
     let phase = (beat.ms() % GLUG_CYCLE_MS) / GLUG_STEP_MS;
     if phase < 2 {
         let (bx, by) = (wx + 1, wy + 1 - phase as u16);
@@ -316,10 +315,10 @@ pub(super) fn paint_fish_tank(
     // Fish patrol: a triangle wave over the interior span, one lane each. Distinct
     // periods (and a phase offset) keep the pair from mirroring in lockstep.
     let t = beat.ms();
-    const FISH_STEP_MS: u64 = 430;
-    const FISH_ALT_STEP_MS: u64 = 520;
+    const FISH_STEP_MS: u64 = 3 * FULL_TICK_MS;
+    const FISH_ALT_STEP_MS: u64 = 4 * FULL_TICK_MS;
     const FISH_ALT_PHASE_STEPS: u64 = 7;
-    const BUBBLE_RISE_STEP_MS: u64 = 300;
+    const BUBBLE_RISE_STEP_MS: u64 = 2 * FULL_TICK_MS;
     let span = (w - 5) as u64;
     let mut fish = |lane_dy: u16, color: Rgb, step_ms: u64, phase: u64| {
         let cycle = span * 2;

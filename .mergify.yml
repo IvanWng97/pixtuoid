@@ -15,10 +15,13 @@ queue_rules:
     batch_size: 1
     merge_method: squash
     update_method: merge
+    # `auto` sizes this from unloaded runs, so a backlog of runners alone times
+    # a PR out and costs a full CI rerun; this covers the backlogged full tier.
+    checks_timeout: 60 min
     queue_conditions:
       # A stacked PR waits until its base lands and GitHub retargets it.
       - base = main
       - -draft
-      # The in-place update would merge main into it, and the release would
-      # ship a CHANGELOG missing those commits (docs/CONTRIBUTING.md#cutting-the-release).
+      # The in-place update would merge main into it, which release-plz.yml's
+      # release-merge refuses after the merge (docs/CONTRIBUTING.md#cutting-the-release).
       - -head ~= ^release-plz-

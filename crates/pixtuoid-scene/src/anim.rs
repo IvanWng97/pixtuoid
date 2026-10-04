@@ -13,6 +13,10 @@ pub enum Easing {
     EaseOutCubic,
     EaseInOutCubic,
     EaseInQuad,
+    /// GLSL's `smoothstep` Hermite, `t²(3 − 2t)`
+    /// (<https://registry.khronos.org/OpenGL-Refpages/gl4/html/smoothstep.xhtml>):
+    /// flat at both ends, so what it moves leaves and lands without a jolt.
+    Smoothstep,
 }
 
 impl Easing {
@@ -30,6 +34,7 @@ impl Easing {
                 }
             }
             Easing::EaseInQuad => t * t,
+            Easing::Smoothstep => t * t * (3.0 - 2.0 * t),
         }
     }
 }
@@ -73,6 +78,10 @@ pub enum Motion {
 pub const FULL_TICK_MS: u64 = 125;
 /// How often a [`Motion::Calm`] loop steps.
 pub const CALM_TICK_MS: u64 = 500;
+/// The rate the TUI and the floating window repaint an office with agents in
+/// it, on every tier: the sampling rate the walks' strides are sized for
+/// (`a_walking_person_never_slides`).
+pub const PAINT_FPS: u32 = 30;
 
 /// The least any phase of a flash — a strike's level, a starved neon's catch,
 /// the dark between — lasts in loop time: the project's own floor, beside
@@ -80,6 +89,52 @@ pub const CALM_TICK_MS: u64 = 500;
 ///
 /// [WCAG 2.3.1]: https://www.w3.org/TR/WCAG22/#three-flashes-or-below-threshold
 pub const PHOTOSENSITIVE_PHASE_MIN_MS: u64 = 100;
+
+/// The most flashes [WCAG 2.3.1] allows in any one second.
+///
+/// [WCAG 2.3.1]: https://www.w3.org/TR/WCAG22/#three-flashes-or-below-threshold
+#[cfg(test)]
+pub(crate) const PHOTOSENSITIVE_FLASHES_PER_SECOND: usize = 3;
+
+/// The least change of a level, as a share of full, that counts toward a
+/// flash: [WCAG]'s general flash threshold.
+///
+/// [WCAG]: https://www.w3.org/TR/WCAG22/#dfn-general-flash-and-red-flash-thresholds
+#[cfg(test)]
+const FLASH_MIN_CHANGE: f32 = 0.1;
+
+/// The most flashes in any one second of `samples`, each `(wall ms, level)`
+/// in time order with the level a share of full: a flash is a pair of
+/// opposing changes, each at least [`FLASH_MIN_CHANGE`], and a run of changes
+/// one way is one change.
+#[cfg(test)]
+pub(crate) fn most_flashes_in_a_second(samples: impl IntoIterator<Item = (u64, f32)>) -> usize {
+    const SECOND_MS: u64 = 1000;
+    let mut samples = samples.into_iter();
+    let Some((_, mut settled)) = samples.next() else {
+        return 0;
+    };
+    let mut turns: Vec<(u64, bool)> = Vec::new();
+    for (ms, level) in samples {
+        if (level - settled).abs() < FLASH_MIN_CHANGE {
+            continue;
+        }
+        let up = level > settled;
+        settled = level;
+        if turns.last().is_none_or(|&(_, was_up)| was_up != up) {
+            turns.push((ms, up));
+        }
+    }
+    let mut first = 0;
+    let mut most = 0;
+    for last in 0..turns.len() {
+        while turns[last].0 - turns[first].0 >= SECOND_MS {
+            first += 1;
+        }
+        most = most.max((last - first + 1).div_ceil(2));
+    }
+    most
+}
 
 impl Motion {
     /// Every tier.
@@ -201,6 +256,52 @@ mod tests {
     use super::*;
     use std::time::{Duration, SystemTime};
 
+    /// `flashes` square flashes, one each `period_ms`: up at its start, down
+    /// halfway through.
+    fn square(flashes: u64, period_ms: u64) -> Vec<(u64, f32)> {
+        std::iter::once((0, 0.0))
+            .chain((0..flashes).flat_map(|k| {
+                let start = 1 + k * period_ms;
+                [(start, 1.0), (start + period_ms / 2, 0.0)]
+            }))
+            .collect()
+    }
+
+    /// WCAG's general flash: a rise and a fall of 10% of full or more.
+    #[test]
+    fn a_flash_is_a_rise_and_a_fall_of_a_tenth_or_more() {
+        let pulse = |level: f32| most_flashes_in_a_second([(0, 0.0), (100, level), (200, 0.0)]);
+        assert_eq!(pulse(0.10), 1);
+        assert_eq!(pulse(0.09), 0);
+    }
+
+    /// Four flashes spread so no second holds more than three pass; the same
+    /// four inside a second do not.
+    #[test]
+    fn flashes_are_counted_in_any_one_second() {
+        assert_eq!(most_flashes_in_a_second(square(4, 350)), 3);
+        assert_eq!(most_flashes_in_a_second(square(4, 200)), 4);
+    }
+
+    /// A slow ramp, each step under the threshold, is one change once it has
+    /// moved past it, so a ramp up and back down is one flash.
+    #[test]
+    fn a_slow_ramp_is_one_change() {
+        const STEPS: u64 = 10;
+        let step = 2.0 * FLASH_MIN_CHANGE / STEPS as f32;
+        let up = (0..=STEPS).map(|i| (i * 20, step * i as f32));
+        let down = (1..=STEPS).map(|i| ((STEPS + i) * 20, step * (STEPS - i) as f32));
+        assert_eq!(most_flashes_in_a_second(up.chain(down)), 1);
+    }
+
+    /// Changes one way in a row are one change: a rise in two steps and a
+    /// fall in two is one flash.
+    #[test]
+    fn a_run_of_changes_one_way_is_one_change() {
+        let stepped = [(0, 0.0), (20, 0.5), (40, 1.0), (60, 0.5), (80, 0.0)];
+        assert_eq!(most_flashes_in_a_second(stepped), 1);
+    }
+
     fn approx_eq(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-4
     }
@@ -274,12 +375,21 @@ mod tests {
     }
 
     #[test]
+    fn smoothstep_is_the_hermite_cubic() {
+        assert_eq!(Easing::Smoothstep.apply(0.0), 0.0);
+        assert_eq!(Easing::Smoothstep.apply(1.0), 1.0);
+        // 3t² − 2t³, exact in f32; a linear curve gives 0.25.
+        assert_eq!(Easing::Smoothstep.apply(0.25), 0.15625);
+    }
+
+    #[test]
     fn all_curves_are_monotone_non_decreasing() {
         for curve in [
             Easing::Linear,
             Easing::EaseOutCubic,
             Easing::EaseInOutCubic,
             Easing::EaseInQuad,
+            Easing::Smoothstep,
         ] {
             let mut prev = -1.0_f32;
             for i in 0..=100 {

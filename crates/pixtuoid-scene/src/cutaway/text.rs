@@ -33,7 +33,10 @@ const LEFTMOST_PIXEL: u8 = 1 << (u8::BITS - 1);
 
 /// The fallback font, written by `scripts/gen-fallback-font.py` (its format);
 /// license and sources in `fonts/`.
+#[cfg(feature = "cutaway-assets")]
 static FALLBACK: &[u8] = include_bytes!("../../fonts/fallback.bin");
+#[cfg(not(feature = "cutaway-assets"))]
+static FALLBACK: &[u8] = &[];
 
 /// The fallback font's code points, ascending, and their glyphs; `None` when
 /// it was generated for another [`LINE_H`].
@@ -439,6 +442,7 @@ mod tests {
 
     /// Project names in CJK, Cyrillic and accented Latin draw real glyphs,
     /// each as wide as the cells `unicode-width` gives it.
+    #[cfg(feature = "cutaway-assets")]
     #[test]
     fn names_beyond_ascii_draw_glyphs_as_wide_as_their_cells() {
         for (name, n) in [
@@ -483,8 +487,16 @@ mod tests {
         }
     }
 
+    /// Without `cutaway-assets` a character only the fallback font draws is
+    /// the no-font box.
+    #[test]
+    fn the_fallback_font_ships_with_cutaway_assets() {
+        assert_eq!(fallback('é').is_some(), cfg!(feature = "cutaway-assets"));
+    }
+
     /// A fallback glyph stands on the hand-drawn baseline and under its
     /// capital line, so a mixed name reads as one line.
+    #[cfg(feature = "cutaway-assets")]
     #[test]
     fn fallback_glyphs_share_the_hand_drawn_lines() {
         let bottom = |c| glyph(c).and_then(|g| g.iter().rposition(|&row| row != 0));
@@ -497,6 +509,7 @@ mod tests {
 
     /// The fallback font is well formed, and every glyph in it fits the
     /// cells its character takes.
+    #[cfg(feature = "cutaway-assets")]
     #[test]
     fn every_fallback_glyph_fits_its_characters_cells() {
         let (points, glyphs) = fallback_font().expect("the header matches LINE_H");

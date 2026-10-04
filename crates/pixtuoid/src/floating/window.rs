@@ -25,8 +25,9 @@ use winit::window::{ResizeDirection, Window, WindowId, WindowLevel};
 
 use super::offscreen::OfficeRenderer;
 use crate::config::{self, FloatingConfig};
-use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FrameInputs, PetInputs};
+use pixtuoid_scene::floor::{FloorInputs, FloorMeta, PetInputs};
 use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::look::{Place, RenderInputs};
 use pixtuoid_scene::theme::Theme;
 
 /// Wake reasons delivered to the winit loop from the background tokio pipeline.
@@ -38,7 +39,7 @@ pub(crate) enum FloatingEvent {
 pub(crate) struct FloatingApp {
     cfg: FloatingConfig,
     theme: &'static Theme,
-    pack: Pack,
+    pack: std::sync::Arc<Pack>,
     config_path: PathBuf,
     /// The configured office pets — one is selected per floor (v1 shows floor 0's).
     pets: Vec<pixtuoid_scene::pet::Pet>,
@@ -89,7 +90,8 @@ impl FloatingApp {
         audio: config::AudioConfig,
     ) -> Self {
         let audio_ctl = crate::audio::AudioController::new(audio, config_path.clone());
-        let mut renderer = OfficeRenderer::new();
+        let pack = std::sync::Arc::new(pack);
+        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         renderer.set_audio(audio_ctl.handle().clone());
         Self {
             cfg,
@@ -158,7 +160,7 @@ impl FloatingApp {
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
         // ONE clock read, so the overlays below annotate the frame actually rendered.
         let now = SystemTime::now();
-        let Some(office) = self.renderer.render_live(FrameInputs {
+        let office = self.renderer.render_live(RenderInputs {
             world: FloorInputs {
                 scene: &scene,
                 pack: &self.pack,
@@ -172,10 +174,9 @@ impl FloatingApp {
             },
             theme: self.theme,
             size: Size { w: buf_w, h: buf_h },
+            place: Place::default(),
             debug_walkable: false,
-        }) else {
-            return; // held: the window keeps the last frame
-        };
+        });
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -186,9 +187,9 @@ impl FloatingApp {
             return;
         };
         let (win_w, win_h, scale) = (win_w as usize, win_h as usize, scale as usize);
-        if office.width() == 0 || office.height() == 0 {
-            return; // nothing rendered — skip this frame
-        }
+        let Some(office) = office.filter(|o| o.width() > 0 && o.height() > 0) else {
+            return; // nothing rendered, or held: the window keeps the last frame
+        };
         let Some(mut surf) = super::offscreen::XrgbSurface::new(&mut sb, win_w, win_h) else {
             return;
         };

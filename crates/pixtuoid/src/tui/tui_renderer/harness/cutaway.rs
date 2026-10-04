@@ -5,8 +5,8 @@ use crate::graphics::{CellSize, Fit, ImageProtocol};
 use crate::tui::cutaway::TileCutaway;
 use pixtuoid_core::sprite::format::Density;
 use std::io::Write;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
 
 /// A cell whose natural scale is the bundled art's density, so the image is
 /// the density render itself, one cell per 4×8 image pixels.
@@ -49,13 +49,93 @@ impl Wire {
     }
 }
 
+/// A terminal whose window reports each cell `cell` pixels big, as a real
+/// one's does.
+struct Window {
+    inner: TestBackend,
+    cell: CellSize,
+}
+
+impl Window {
+    fn new(cols: u16, rows: u16) -> Self {
+        Self {
+            inner: TestBackend::new(cols, rows),
+            cell: CELL,
+        }
+    }
+
+    fn resize(&mut self, cols: u16, rows: u16) {
+        self.inner.resize(cols, rows);
+    }
+
+    /// Zoom the font to `cell`, the window keeping its cells: only the pixels
+    /// change.
+    fn zoom(&mut self, cell: CellSize) {
+        self.cell = cell;
+    }
+}
+
+impl std::borrow::Borrow<TestBackend> for Window {
+    fn borrow(&self) -> &TestBackend {
+        &self.inner
+    }
+}
+
+impl ratatui::backend::Backend for Window {
+    type Error = <TestBackend as ratatui::backend::Backend>::Error;
+    fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
+    where
+        I: Iterator<Item = (u16, u16, &'a ratatui::buffer::Cell)>,
+    {
+        self.inner.draw(content)
+    }
+    fn hide_cursor(&mut self) -> Result<(), Self::Error> {
+        self.inner.hide_cursor()
+    }
+    fn show_cursor(&mut self) -> Result<(), Self::Error> {
+        self.inner.show_cursor()
+    }
+    fn get_cursor_position(&mut self) -> Result<ratatui::layout::Position, Self::Error> {
+        self.inner.get_cursor_position()
+    }
+    fn set_cursor_position<P: Into<ratatui::layout::Position>>(
+        &mut self,
+        position: P,
+    ) -> Result<(), Self::Error> {
+        self.inner.set_cursor_position(position)
+    }
+    fn clear(&mut self) -> Result<(), Self::Error> {
+        self.inner.clear()
+    }
+    fn clear_region(&mut self, clear_type: ratatui::backend::ClearType) -> Result<(), Self::Error> {
+        self.inner.clear_region(clear_type)
+    }
+    fn size(&self) -> Result<ratatui::layout::Size, Self::Error> {
+        self.inner.size()
+    }
+    fn window_size(&mut self) -> Result<ratatui::backend::WindowSize, Self::Error> {
+        let columns_rows = self.inner.size()?;
+        let cell = self.cell;
+        Ok(ratatui::backend::WindowSize {
+            columns_rows,
+            pixels: ratatui::layout::Size::new(
+                columns_rows.width * cell.w,
+                columns_rows.height * cell.h,
+            ),
+        })
+    }
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.inner.flush()
+    }
+}
+
 /// [`painter`], its flashes held on a screen clock the test moves.
 fn on_screen(
     cols: u16,
     rows: u16,
     protocol: ImageProtocol,
 ) -> (
-    TuiRenderer<TestBackend>,
+    TuiRenderer<Window>,
     Wire,
     pixtuoid_scene::flash::ManualClock,
 ) {
@@ -68,15 +148,10 @@ fn on_screen(
     (r, wire, screen)
 }
 
-fn arc_pack() -> Arc<Pack> {
-    static PACK: OnceLock<Arc<Pack>> = OnceLock::new();
-    Arc::clone(PACK.get_or_init(|| Arc::new(pack().clone())))
-}
-
 /// The plan's fit over a `cols`×`rows` terminal's scene.
 fn fit(cols: u16, rows: u16) -> Fit {
     let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
-    let fit = Fit::new(CELL, area, arc_pack().max_density_variant()).expect("fits");
+    let fit = Fit::new(CELL, area, pack_arc().max_density_variant()).expect("fits");
     assert_eq!(fit.upscale(), 1);
     assert_eq!(fit.density(), Density::new(4).expect("nonzero"));
     fit
@@ -84,7 +159,7 @@ fn fit(cols: u16, rows: u16) -> Fit {
 
 /// A renderer painting the cutaway over `protocol` into a `cols`×`rows`
 /// terminal.
-fn painter(cols: u16, rows: u16, protocol: ImageProtocol) -> (TuiRenderer<TestBackend>, Wire) {
+fn painter(cols: u16, rows: u16, protocol: ImageProtocol) -> (TuiRenderer<Window>, Wire) {
     let (r, wire, _) = armed(cols, rows, protocol);
     (r, wire)
 }
@@ -96,12 +171,16 @@ fn armed(
     cols: u16,
     rows: u16,
     protocol: ImageProtocol,
-) -> (TuiRenderer<TestBackend>, Wire, &'static AtomicBool) {
-    let mut r = build(cols, rows, vec![]);
+) -> (TuiRenderer<Window>, Wire, &'static AtomicBool) {
+    let mut r = TuiRenderer::new(
+        Terminal::new(Window::new(cols, rows)).expect("terminal"),
+        normal_theme(),
+        vec![],
+        pack_arc(),
+    );
     let (wire, in_grid) = (Wire::default(), Box::leak(Box::new(AtomicBool::new(false))));
     r.set_cutaway(
         TileCutaway::new(
-            arc_pack(),
             fit(cols, rows),
             CELL,
             protocol,
@@ -113,7 +192,7 @@ fn armed(
     (r, wire, in_grid)
 }
 
-fn kitty(cols: u16, rows: u16) -> (TuiRenderer<TestBackend>, Wire) {
+fn kitty(cols: u16, rows: u16) -> (TuiRenderer<Window>, Wire) {
     painter(cols, rows, ImageProtocol::Kitty)
 }
 
@@ -121,7 +200,7 @@ fn office() -> SceneState {
     scene_with(vec![idle("/k/0.jsonl", 0, t0())], 16)
 }
 
-fn placeholders_in_row(r: &TuiRenderer<TestBackend>, y: u16) -> usize {
+fn placeholders_in_row(r: &TuiRenderer<Window>, y: u16) -> usize {
     let buf = r.frame_buffer();
     (0..buf.area.width)
         .filter(|&x| buf[(x, y)].symbol().starts_with(PLACEHOLDER))
@@ -153,13 +232,13 @@ fn placeholders_fill_the_scene_and_never_the_footer() {
 
 /// Its star link would launch a browser from a cell showing the image.
 #[test]
-fn the_cutaway_shows_no_wall_display() {
+fn the_cutaway_star_is_not_clickable() {
     let (mut r, _wire) = kitty(120, 40);
     r.render(&office(), pack(), t0()).expect("render");
-    assert!(!r.shows_wall_display());
+    assert!(!r.star_clickable());
     let mut classic = build(120, 40, vec![]);
     classic.render(&office(), pack(), t0()).expect("render");
-    assert!(classic.shows_wall_display());
+    assert!(classic.star_clickable());
 }
 
 /// A refused frame sends no tiles and leaves no hit targets behind.
@@ -177,6 +256,197 @@ fn shrinking_under_the_minimum_refuses_the_cutaway_frame() {
     assert!(!wire.take().contains(TRANSMIT));
     assert_eq!(r.scene_area_at(cols / 2, rows / 2), None);
     assert!(r.cached_pet_pos().is_none());
+}
+
+/// A resize clears the screen ratatui redraws, SIXEL and iTerm2 pixels with
+/// it: a terminal shrunk under the minimum and restored gets every tile again.
+/// Both refusal arms: the layout's, and the scene minimum's.
+#[test]
+fn a_terminal_restored_from_too_small_gets_every_tile_again() {
+    use crate::tui::renderer::{FOOTER_ROWS, MIN_SCENE_HEIGHT, min_terminal_size};
+    let (cols, rows) = min_terminal_size();
+    let smalls = [
+        too_small_terminal(),
+        (cols, MIN_SCENE_HEIGHT + FOOTER_ROWS - 1),
+    ];
+    for (protocol, intro) in [
+        (ImageProtocol::Sixel, SIXEL),
+        (ImageProtocol::Iterm2, ITERM2),
+    ] {
+        // Every tile, then those the last of three frames sends.
+        let sent = |between: (u16, u16)| {
+            let (mut r, wire) = painter(cols, rows, protocol);
+            let scene = office();
+            let cadence = protocol.cadence();
+            r.render(&scene, pack(), t0()).expect("render");
+            let all = wire.take().matches(intro).count();
+            r.terminal.backend_mut().resize(between.0, between.1);
+            r.render(&scene, pack(), t0() + cadence).expect("render");
+            r.terminal.backend_mut().resize(cols, rows);
+            r.render(&scene, pack(), t0() + cadence * 2)
+                .expect("render");
+            (all, wire.take().matches(intro).count())
+        };
+        let (all, steady) = sent((cols, rows));
+        assert!(
+            steady < all,
+            "{protocol:?}: {steady} of {all} change anyway"
+        );
+        for (small_cols, small_rows) in smalls {
+            assert_eq!(
+                sent((small_cols, small_rows)).1,
+                all,
+                "{protocol:?} from {small_cols}x{small_rows}"
+            );
+        }
+    }
+}
+
+/// The image's top-left SIXEL tile, whole, for a `cell`-sized cell.
+fn first_tile(cell: CellSize) -> String {
+    let shape = ImageProtocol::Sixel.tile();
+    format!(
+        "\x1b[1;1H{SIXEL}\"1;1;{};{}",
+        shape.cols * cell.w,
+        shape.rows * cell.h
+    )
+}
+
+/// The plan's cell is the terminal's own answer, which outranks the window's
+/// where they differ, so `doctor`, the boot seed and the painted office all
+/// read it until a font zoom moves the window's cell.
+#[test]
+fn the_plans_cell_holds_until_the_windows_moves() {
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let padded = CellSize {
+        w: CELL.w + 1,
+        h: CELL.h + 2,
+    };
+    let (mut r, wire) = painter(cols, rows, ImageProtocol::Sixel);
+    r.terminal.backend_mut().zoom(padded);
+    let scene = office();
+    let cadence = ImageProtocol::Sixel.cadence();
+    r.render(&scene, pack(), t0()).expect("render");
+    assert!(wire.take().contains(&first_tile(CELL)), "the plan's cell");
+    let plan = crate::graphics::Plan::Cutaway {
+        fit: fit(cols, rows),
+        protocol: ImageProtocol::Sixel,
+        cell: CELL,
+        tmux: false,
+        forced: false,
+    };
+    let office = plan.office_extent(ratatui::layout::Size::new(cols, rows));
+    assert_eq!(
+        r.office_extent(),
+        (office.w, office.h),
+        "the boot seed's office"
+    );
+
+    let zoomed = CellSize {
+        w: CELL.w * 2,
+        h: CELL.h * 2,
+    };
+    r.terminal.backend_mut().zoom(zoomed);
+    r.render(&scene, pack(), t0() + cadence).expect("render");
+    assert!(wire.take().contains(&first_tile(zoomed)), "zoomed in");
+    r.terminal.backend_mut().zoom(padded);
+    r.render(&scene, pack(), t0() + cadence * 2)
+        .expect("render");
+    assert!(wire.take().contains(&first_tile(CELL)), "zoomed back");
+}
+
+/// A window that reports 0 px on the first frame has read nothing, so the
+/// plan's cell holds when the real cell arrives: it is no font zoom.
+#[test]
+fn a_first_frame_with_no_pixels_does_not_pose_as_the_windows_baseline() {
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let padded = CellSize {
+        w: CELL.w + 1,
+        h: CELL.h + 2,
+    };
+    let (mut r, wire) = painter(cols, rows, ImageProtocol::Sixel);
+    r.terminal.backend_mut().zoom(CellSize { w: 0, h: 0 });
+    let scene = office();
+    r.render(&scene, pack(), t0()).expect("render");
+    assert!(wire.take().contains(&first_tile(CELL)), "the plan's cell");
+    r.terminal.backend_mut().zoom(padded);
+    r.render(&scene, pack(), t0() + ImageProtocol::Sixel.cadence())
+        .expect("render");
+    assert_eq!(wire.take(), "", "the plan's cell holds, nothing re-cut");
+    let plan = crate::graphics::Plan::Cutaway {
+        fit: fit(cols, rows),
+        protocol: ImageProtocol::Sixel,
+        cell: CELL,
+        tmux: false,
+        forced: false,
+    };
+    let office = plan.office_extent(ratatui::layout::Size::new(cols, rows));
+    assert_eq!(
+        r.office_extent(),
+        (office.w, office.h),
+        "the boot seed's office"
+    );
+}
+
+/// A font zoom changes the cell's pixels: the window's cell cuts the tiles,
+/// classic paints while the cell is too small for the art, and the cutaway
+/// returns once it fits.
+#[test]
+fn a_font_zoom_refits_the_cutaway_to_the_windows_cell() {
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let (mut r, wire) = painter(cols, rows, ImageProtocol::Sixel);
+    let scene = office();
+    let cadence = ImageProtocol::Sixel.cadence();
+    r.render(&scene, pack(), t0()).expect("render");
+    assert!(wire.take().contains(&first_tile(CELL)));
+
+    let zoomed = CellSize {
+        w: CELL.w * 2,
+        h: CELL.h * 2,
+    };
+    r.terminal.backend_mut().zoom(zoomed);
+    r.render(&scene, pack(), t0() + cadence).expect("render");
+    assert!(wire.take().contains(&first_tile(zoomed)), "zoomed in");
+
+    let tiny = CellSize {
+        w: CELL.w / 2,
+        h: CELL.h / 2,
+    };
+    let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
+    assert!(Fit::new(tiny, area, pack_arc().max_density_variant()).is_none());
+    r.terminal.backend_mut().zoom(tiny);
+    r.render(&scene, pack(), t0() + cadence * 2)
+        .expect("render");
+    assert!(!wire.take().contains(SIXEL), "too small for the art");
+    assert!(
+        frame_text(r.frame_buffer()).contains('\u{2580}'),
+        "classic paints meanwhile"
+    );
+
+    r.terminal.backend_mut().zoom(zoomed);
+    r.render(&scene, pack(), t0() + cadence * 3)
+        .expect("render");
+    assert!(wire.take().contains(&first_tile(zoomed)), "zoomed back in");
+}
+
+/// While classic paints in the cutaway's place, a click hit-tests classic's
+/// frame, never the canvas's last: an agent gone since is gone.
+#[test]
+fn a_cell_too_small_hit_tests_the_classic_frame() {
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let (mut r, _wire) = kitty(cols, rows);
+    let id = AgentId::from_transcript_path("/k/0.jsonl");
+    r.render(&office(), pack(), t0()).expect("render");
+    hover_agent(&mut r, id);
+    let (col, row) = r.mouse_pos.expect("hovered");
+    r.set_mouse_pos(None);
+    r.terminal.backend_mut().zoom(CellSize {
+        w: CELL.w / 2,
+        h: CELL.h / 2,
+    });
+    r.render(&scene_with(vec![], 16), pack(), t0())
+        .expect("render");
+    assert_eq!(r.hit_test_agent_at(col, row), None);
 }
 
 /// A slide the terminal shrinks under mid-way is cancelled, as classic's is:
@@ -339,7 +609,7 @@ fn intro(protocol: ImageProtocol) -> &'static str {
 fn each_strike_phase_holds_the_floor_on_screen_at_every_protocols_cadence() {
     use crate::test_flash::{assert_each_phase_holds_the_floor, frame_grid, lead, storm_strike};
     let strike = storm_strike();
-    let tick = Duration::from_millis(crate::tui::FRAME_TICK_MS);
+    let tick = crate::tui::frame_tick();
     for protocol in [
         ImageProtocol::Kitty,
         ImageProtocol::Sixel,
@@ -476,7 +746,7 @@ fn each_strike_phase_holds_the_floor_in_the_half_blocks_under_a_full_modal() {
     use crate::test_flash::{assert_each_phase_holds_the_floor, frame_grid, lead, storm_strike};
     const HALF_BLOCK: &str = "\u{2580}";
     let strike = storm_strike();
-    let tick = Duration::from_millis(crate::tui::FRAME_TICK_MS);
+    let tick = crate::tui::frame_tick();
     for (frame, offset) in frame_grid(tick) {
         let (cols, rows) = crate::tui::renderer::min_terminal_size();
         let (mut r, wire, screen) = on_screen(cols, rows, ImageProtocol::Sixel);
@@ -493,7 +763,7 @@ fn each_strike_phase_holds_the_floor_in_the_half_blocks_under_a_full_modal() {
             .positions()
             .filter(|&p| r.frame_buffer()[p].symbol() == HALF_BLOCK)
             .collect();
-        let half_blocks = |r: &TuiRenderer<TestBackend>| -> Vec<ratatui::buffer::Cell> {
+        let half_blocks = |r: &TuiRenderer<Window>| -> Vec<ratatui::buffer::Cell> {
             free.iter().map(|&p| r.frame_buffer()[p].clone()).collect()
         };
         let mut shown = half_blocks(&r);
@@ -525,7 +795,7 @@ fn each_stutter_phase_holds_the_floor_on_screen_at_every_protocols_cadence() {
         assert_each_phase_holds_the_floor, frame_grid, lead, neon_tube, starved_stutter,
     };
     let stutter = starved_stutter();
-    let tick = Duration::from_millis(crate::tui::FRAME_TICK_MS);
+    let tick = crate::tui::frame_tick();
     let scene = scene_with(vec![], 16);
     let (cols, rows) = crate::tui::renderer::min_terminal_size();
     let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows));
@@ -650,6 +920,32 @@ fn a_floor_switch_slides_the_cutaway_then_settles() {
     hover_agent(&mut r, AgentId::from_transcript_path("/n/1.jsonl"));
 }
 
+/// A slide is no resize: the extent a resize changes holds through it, so the
+/// slide runs its course rather than landing after its first frame; a resize
+/// lands it on the destination.
+#[test]
+fn a_cutaway_slide_runs_until_a_resize_lands_it() {
+    let (cols, rows) = (120, 40);
+    let (mut r, _wire) = kitty(cols, rows);
+    let scene = two_floor_scene();
+    let start = t0();
+    r.render(&scene, pack(), start).expect("render");
+    let extent = r.office_extent();
+    r.navigate_floor(1, start);
+    let slide = Duration::from_millis(r.transition().expect("sliding").duration_ms);
+    let frames = 4;
+    let at = |frame| start + slide * frame / frames;
+    for frame in 1..frames - 1 {
+        r.render(&scene, pack(), at(frame)).expect("render");
+        assert_eq!(r.office_extent(), extent, "frame {frame}");
+        assert!(r.transition().is_some(), "landed at frame {frame}");
+    }
+    r.terminal.backend_mut().resize(cols - 1, rows);
+    r.render(&scene, pack(), at(frames - 1)).expect("render");
+    assert!(r.transition().is_none());
+    assert_eq!(r.current_floor(), 1);
+}
+
 /// Each floor slides out showing its own wall board: the first slide frame,
 /// before anything has moved, re-sends none of the tiles over the board,
 /// which a board borrowed from the other floor would change.
@@ -697,7 +993,7 @@ fn a_sliding_floor_keeps_its_own_wall_board() {
 
 /// The image's cells, by tile, as `(tile col, tile row)` → the symbols there.
 fn image_tiles(
-    r: &TuiRenderer<TestBackend>,
+    r: &TuiRenderer<Window>,
     rows: u16,
 ) -> std::collections::BTreeMap<(u16, u16), Vec<String>> {
     let shape = ImageProtocol::Sixel.tile();
@@ -817,10 +1113,10 @@ fn a_covered_tile_is_never_sent() {
     }
 }
 
-/// A `TestBackend` that marks on `wire` where each flush of cells lands
+/// A backend that marks on `wire` where each flush of cells lands
 /// among the transmits.
 struct Logged {
-    inner: TestBackend,
+    inner: Window,
     wire: Wire,
 }
 
@@ -884,24 +1180,18 @@ fn kitty_transmits_before_the_flush_and_sixel_after() {
     ] {
         let wire = Wire::default();
         let backend = Logged {
-            inner: TestBackend::new(120, 40),
+            inner: Window::new(120, 40),
             wire: wire.clone(),
         };
         let mut r = TuiRenderer::new(
             Terminal::new(backend).expect("terminal"),
             normal_theme(),
             vec![],
+            pack_arc(),
         );
         r.set_cutaway(
-            TileCutaway::new(
-                arc_pack(),
-                fit(120, 40),
-                CELL,
-                protocol,
-                false,
-                Box::new(wire.clone()),
-            )
-            .arming(Box::leak(Box::new(AtomicBool::new(false)))),
+            TileCutaway::new(fit(120, 40), CELL, protocol, false, Box::new(wire.clone()))
+                .arming(Box::leak(Box::new(AtomicBool::new(false)))),
         );
         r.render(&office(), pack(), t0()).expect("render");
         let sent = wire.take();
@@ -911,4 +1201,86 @@ fn kitty_transmits_before_the_flush_and_sixel_after() {
         );
         assert_eq!(image < flush, first, "{protocol:?}");
     }
+}
+
+/// The cutaway's twin of the classic's refused-frame clamp: the door closes
+/// on time while the frame is refused.
+#[test]
+fn a_refused_cutaway_frame_keeps_the_doors_clamp_on_time() {
+    let (mut r, _wire) = kitty(120, 40);
+    let scene = office();
+    r.render(&scene, pack(), t0()).expect("render");
+    assert!(
+        r.floors[0].ctx.door_anim_max_ms > 0,
+        "the entry walk holds the door"
+    );
+    let (small_cols, small_rows) = too_small_terminal();
+    r.terminal.backend_mut().resize(small_cols, small_rows);
+    r.render(&scene, pack(), t0() + Duration::from_secs(600))
+        .expect("render");
+    assert_eq!(r.floors[0].ctx.door_anim_max_ms, 0, "the walk long arrived");
+}
+
+/// A slide cancelled on its first frame never paints, so nothing marks the
+/// screen as the slide's; the destination floor drawn before still repaints
+/// whole once the terminal is back, not as a diff of its own last frame.
+#[test]
+fn a_slide_cancelled_on_its_first_frame_repaints_the_destination_whole() {
+    let (cols, rows) = (120, 40);
+    let (mut r, wire) = painter(cols, rows, ImageProtocol::Sixel);
+    let scene = two_floor_scene();
+    let mut now = t0();
+    r.render(&scene, pack(), now).expect("render");
+    let every = wire.take().matches(SIXEL).count();
+    r.navigate_floor(1, now);
+    render_until_settled(&mut r, &scene, pack(), &mut now, 1);
+    r.navigate_floor(0, now);
+    render_until_settled(&mut r, &scene, pack(), &mut now, 0);
+    r.navigate_floor(1, now);
+    let (small_cols, small_rows) = too_small_terminal();
+    r.terminal.backend_mut().resize(small_cols, small_rows);
+    now += ImageProtocol::Sixel.cadence();
+    r.render(&scene, pack(), now).expect("render");
+    assert_eq!(r.current_floor(), 1);
+    r.terminal.backend_mut().resize(cols, rows);
+    wire.take();
+    now += ImageProtocol::Sixel.cadence();
+    r.render(&scene, pack(), now).expect("render");
+    assert_eq!(wire.take().matches(SIXEL).count(), every);
+}
+
+/// A floor can leave the screen without a slide: the top floor's last agent
+/// ends, the floor count drops, and the view clamps to the floor below. That
+/// floor's raster diffs against its own last frame, not the vanished floor
+/// on screen, so the terminal ends up holding exactly what a fresh painter of
+/// that floor sends.
+#[test]
+fn a_floor_clamped_into_view_repaints_whole() {
+    let held = |wire: &str, tiles: &mut std::collections::BTreeMap<u32, Vec<u8>>| {
+        tiles.extend(kitty_images(wire));
+    };
+    let (cols, rows) = (120, 40);
+    let (mut r, wire) = kitty(cols, rows);
+    let mut scene = two_floor_scene();
+    let mut now = t0();
+    let mut terminal = std::collections::BTreeMap::new();
+    r.render(&scene, pack(), now).expect("render");
+    r.navigate_floor(1, now);
+    render_until_settled(&mut r, &scene, pack(), &mut now, 1);
+    scene
+        .agents
+        .remove(&AgentId::from_transcript_path("/n/1.jsonl"));
+    now += ImageProtocol::Kitty.cadence();
+    r.render(&scene, pack(), now).expect("render");
+    assert_eq!(r.current_floor(), 0, "the view clamped");
+    held(&wire.take(), &mut terminal);
+
+    let (mut fresh, fresh_wire) = kitty(cols, rows);
+    fresh.render(&scene, pack(), now).expect("render");
+    let mut want = std::collections::BTreeMap::new();
+    held(&fresh_wire.take(), &mut want);
+    assert!(
+        terminal == want,
+        "the terminal still shows the vanished floor"
+    );
 }

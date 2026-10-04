@@ -448,7 +448,7 @@ impl CityStrip {
         theme: &Theme,
         density: Density,
     ) -> Self {
-        let (look, altitude, beat) = (&moment.look, moment.altitude, moment.beat);
+        let (look, altitude, beat) = (&moment.look, moment.altitude, moment.timing.beat);
         let d = density.get();
         let mut strip = CityStrip {
             w: run_w.saturating_mul(d),
@@ -736,7 +736,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn a_denser_strip_draws_the_denser_art_on_the_same_city() {
         let pack = pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");
@@ -887,7 +887,7 @@ mod tests {
     /// another building around a thin mast, a strip full of that building
     /// keeps it there. Only art finer than its base has such a mast.
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn a_light_leaves_a_neighbours_pixels_alone() {
         let pack = pack();
         let theme = crate::theme::theme_by_name("normal").expect("theme");

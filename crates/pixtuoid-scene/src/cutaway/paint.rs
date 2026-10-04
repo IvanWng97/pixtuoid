@@ -4,14 +4,16 @@ use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
 use pixtuoid_core::sprite::format::Pack;
 
+use crate::atmosphere::Carpet;
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::cutaway::shade::{Ramp, fill, slab};
 #[cfg(test)]
 use crate::display::compose::{art_size, desk_art, desk_front_h};
 use crate::display::{
-    Art, Badge, DisplayList, Figure, Flip, Ground, Office, PLATE_PAD, PieceKind, Screen, Showing,
+    Art, Badge, DisplayList, Figure, Flip, Office, PLATE_PAD, PieceKind, Screen, Showing,
     StoodProp, WindowView, board_runs, compose, desk_span, face_rows, indicator_plate,
 };
+use crate::dither::Dithered;
 use crate::effects::EffectKind;
 use crate::layout::{Bounds, FixtureKind, Point, SceneLayout, Size};
 use crate::pack::{CLOCK_SPRITE, DOOR_SPRITE, drawn_in};
@@ -123,21 +125,21 @@ pub(crate) fn paint(
     buf: &mut RgbBuffer,
 ) {
     let pen = Pen::for_pack(list.scale(), list.pack());
-    paint_backdrop(layout, list.theme(), list.ground(), list.scale(), pen, buf);
+    paint_backdrop(layout, list.theme(), list.carpet(), list.scale(), pen, buf);
     paint_list(list, cache, buf);
 }
 
 /// Everything under the list's pieces, none of which moves within a layout,
-/// theme, ground, pack and scale.
+/// theme, carpet, pack and scale.
 fn paint_backdrop(
     layout: &SceneLayout,
     theme: &Theme,
-    ground: Ground,
+    carpet: Dithered<Carpet>,
     scale: RenderScale,
     pen: Pen,
     buf: &mut RgbBuffer,
 ) {
-    paint_ground(layout, ground, pen, buf);
+    paint_carpet(layout, carpet, pen, buf);
     for fixture in layout.fixtures() {
         match covering(fixture.kind) {
             Some(Covering::Rug) => paint_rug(fixture.visual, theme, pen, buf),
@@ -663,9 +665,9 @@ pub(crate) fn assert_variant_desk_foot(
         scale.to_buffer(layout.buf_h),
         theme.surface.bg_fallback,
     );
-    paint_ground(
+    paint_carpet(
         layout,
-        Ground::of(theme, tones.ground_tint),
+        tones.carpet(theme),
         Pen::for_pack(scale, base_pack),
         &mut ground,
     );
@@ -838,11 +840,24 @@ fn paint_glass(view: &WindowView, pen: Pen, buf: &mut RgbBuffer) {
     }
 }
 
+/// The carpet [`paint_carpet_tones`] lays, each art pixel in the tones
+/// `carpet` dithers it to.
+fn paint_carpet(layout: &SceneLayout, carpet: Dithered<Carpet>, pen: Pen, buf: &mut RgbBuffer) {
+    if let Some(tones) = carpet.as_solid() {
+        return paint_carpet_tones(layout, tones, pen, buf);
+    }
+    let [from, to] = carpet.ends();
+    paint_carpet_tones(layout, from, pen, buf);
+    let mut incoming = buf.clone();
+    paint_carpet_tones(layout, to, pen, &mut incoming);
+    pen.take_where(buf, &incoming, |x, y| carpet.takes_to(x.0, y.0));
+}
+
 /// The carpet, lit near the windows, falling off south and laid in tiles, on
 /// the art grid: every edge, dither step and seam lands on an art pixel,
 /// whatever the scale.
-fn paint_ground(layout: &SceneLayout, ground: Ground, pen: Pen, buf: &mut RgbBuffer) {
-    let Ground { lit, base, dark } = ground;
+fn paint_carpet_tones(layout: &SceneLayout, carpet: Carpet, pen: Pen, buf: &mut RgbBuffer) {
+    let Carpet { lit, base, dark } = carpet;
 
     let h = pen.art(layout.buf_h);
     let w = pen.art(layout.buf_w);
@@ -1693,7 +1708,7 @@ pub(crate) mod tests {
     /// and its text at every density the pack draws it, or a key names nothing
     /// and that screen never lights.
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn the_bundled_back_turned_desk_draws_its_screen_in_the_screen_keys() {
         let pack = test_default_pack();
         let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
@@ -1841,7 +1856,7 @@ pub(crate) mod tests {
             "a wall foot off the buffer's own grid, or one anchored at row 0 passes too"
         );
         let s = 8;
-        let (pen, buf) = ground(&layout, s, 4);
+        let (pen, buf) = carpet(&layout, s, 4);
         let luma = |x: u16, y: u16| buf.get(x, y).lightness();
         let k = s / 4;
         let tile = pen.art(GROUND_TILE).0 * k;
@@ -1865,7 +1880,7 @@ pub(crate) mod tests {
     #[test]
     fn a_1x_ground_has_no_seams() {
         let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
-        let (_, buf) = ground(&layout, 1, 1);
+        let (_, buf) = carpet(&layout, 1, 1);
         let y = layout.wall_band_h() + 1;
         assert!(
             (0..buf.width()).all(|x| buf.get(x, y) == crate::theme::NORMAL.surface.carpet_light),
@@ -1873,9 +1888,9 @@ pub(crate) mod tests {
         );
     }
 
-    /// The ground alone at scale `s`, drawn from art at density `d`, in the
+    /// The carpet alone at scale `s`, drawn from art at density `d`, in the
     /// normal theme.
-    fn ground(layout: &SceneLayout, s: u16, d: u16) -> (Pen, RgbBuffer) {
+    fn carpet(layout: &SceneLayout, s: u16, d: u16) -> (Pen, RgbBuffer) {
         let scale = RenderScale::new(s).expect("nonzero");
         let pen = Pen::new(scale, d).expect("d divides s");
         let mut buf = RgbBuffer::filled(
@@ -1883,7 +1898,7 @@ pub(crate) mod tests {
             scale.to_buffer(layout.buf_h),
             pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
         );
-        paint_ground(layout, Ground::plain(&crate::theme::NORMAL), pen, &mut buf);
+        paint_carpet(layout, Carpet::plain(&crate::theme::NORMAL), pen, &mut buf);
         (pen, buf)
     }
 
@@ -1912,7 +1927,7 @@ pub(crate) mod tests {
                 paint_backdrop(
                     &layout,
                     theme,
-                    Ground::plain(theme),
+                    Carpet::plain(theme),
                     scale,
                     Pen::for_pack(scale, &pack),
                     &mut buf,
@@ -2172,7 +2187,7 @@ pub(crate) mod tests {
                 scale.to_buffer(layout.buf_h),
                 theme.surface.bg_fallback,
             );
-            paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut buf);
+            paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut buf);
             let mut order = Vec::new();
             push_windows(office, &moment, &GlassWeather::of(&moment), &mut order);
             let mut again = Vec::new();
@@ -2250,7 +2265,7 @@ pub(crate) mod tests {
             scale.to_buffer(layout.buf_h),
             theme.surface.bg_fallback,
         );
-        paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut buf);
+        paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut buf);
         let k = scale.get() / pen.art(1).0;
         let rows = crate::layout::window_rows(layout.wall_band_h());
         let mut posts = 0;
@@ -2274,7 +2289,7 @@ pub(crate) mod tests {
     /// figure's badge however far the z has risen, the z only climbs and drifts
     /// away, and the dust lies along the stepping foot's row.
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn the_dense_looks_keep_their_places() {
         looks_keep_their_places(test_default_pack().max_density_variant().get());
     }
@@ -2527,7 +2542,7 @@ pub(crate) mod tests {
             }
         }
         // Only the density art draws bulbs.
-        let want: &[&str] = if cfg!(feature = "density-art") {
+        let want: &[&str] = if cfg!(feature = "cutaway-assets") {
             &["desk", "door", "hung decor", "prop"]
         } else {
             &["desk"]
@@ -2554,7 +2569,7 @@ pub(crate) mod tests {
         paint_backdrop(
             layout,
             list.theme(),
-            list.ground(),
+            list.carpet(),
             list.scale(),
             pen,
             &mut buf,
@@ -2595,7 +2610,7 @@ pub(crate) mod tests {
         paint_backdrop(
             &layout,
             theme,
-            list.ground(),
+            list.carpet(),
             scale,
             Pen::for_pack(scale, &pack),
             &mut night,
@@ -2824,8 +2839,8 @@ pub(crate) mod tests {
             )
         };
         let (mut ground, mut laid) = (blank(), blank());
-        paint_ground(&layout, Ground::plain(theme), pen, &mut ground);
-        paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut laid);
+        paint_carpet(&layout, Carpet::plain(theme), pen, &mut ground);
+        paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut laid);
         let row = scale.to_buffer(layout.wall_band_h());
         for x in 0..ground.width() {
             assert_eq!(
@@ -2992,7 +3007,7 @@ pub(crate) mod tests {
     /// a floor lamp's bulb, and the ceiling of an open elevator's car, while
     /// the room around them darkens.
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn what_glows_of_its_own_keeps_its_colour_at_night() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_default_pack();
@@ -3020,9 +3035,9 @@ pub(crate) mod tests {
         };
         let (mut night, mut raw) = (blank(), blank());
         let mut cache = CutawayCache::default();
-        paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut night);
+        paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut night);
         paint_list(&list, &mut cache, &mut night);
-        paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut raw);
+        paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut raw);
         for p in list.pieces() {
             paint_piece(&p.kind, &pack, theme, scale, &mut cache, &mut raw);
         }
@@ -3121,7 +3136,7 @@ pub(crate) mod tests {
         let mut cache = CutawayCache::default();
         let painted = |keep: &dyn Fn(&PieceKind) -> bool, cache: &mut _| {
             let mut buf = blank();
-            paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut buf);
+            paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut buf);
             for p in list.pieces().iter().filter(|p| keep(&p.kind)) {
                 paint_piece(&p.kind, &pack, theme, scale, cache, &mut buf);
             }
@@ -3131,7 +3146,7 @@ pub(crate) mod tests {
         let glass = painted(&|k| matches!(k, PieceKind::Glass { .. }), &mut cache);
         let all = painted(&|_| true, &mut cache);
         let mut night = blank();
-        paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut night);
+        paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut night);
         paint_list(&list, &mut cache, &mut night);
         let luma = pixtuoid_core::sprite::Rgb::lightness;
         let (mut kept, mut lifted) = (0, 0);
@@ -3229,8 +3244,8 @@ pub(crate) mod tests {
                 )
             };
             let (mut bare, mut laid) = (blank(), blank());
-            paint_ground(&layout, Ground::plain(theme), pen, &mut bare);
-            paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut laid);
+            paint_carpet(&layout, Carpet::plain(theme), pen, &mut bare);
+            paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut laid);
             for fixture in layout.fixtures() {
                 met.insert(crate::layout::roster::tests::kind_key(fixture.kind));
                 if covering(fixture.kind).is_some() {
@@ -3323,7 +3338,7 @@ pub(crate) mod tests {
 
     /// [`face_rows`]' rule, through the real paint.
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn only_the_top_down_base_desk_gets_a_derived_front_face() {
         let pack = test_default_pack();
         let ground = pixtuoid_core::sprite::Rgb { r: 1, g: 2, b: 3 };
@@ -3459,7 +3474,7 @@ pub(crate) mod tests {
         let (walk_layout, _, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let walking = &frames[frames.len() / 2];
         let seated = frames.last().expect("a seated frame");
-        let office = FloorSession::new()
+        let office = FloorSession::new(std::sync::Arc::new(pack.clone()))
             .step(
                 crate::floor::FloorInputs {
                     scene: &pixtuoid_core::SceneState::uniform(16),
@@ -3691,8 +3706,19 @@ pub(crate) mod tests {
         moment: &Moment,
         weather: &GlassWeather,
     ) -> Vec<WindowView> {
+        let densest = test_default_pack().max_density_variant().get();
+        let scale = RenderScale::new(densest).expect("nonzero");
+        glass_views_at(scale, layout, moment, weather)
+    }
+
+    /// [`glass_views`] at `scale`.
+    fn glass_views_at(
+        scale: RenderScale,
+        layout: &SceneLayout,
+        moment: &Moment,
+        weather: &GlassWeather,
+    ) -> Vec<WindowView> {
         let pack = test_default_pack();
-        let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
         let mut order = Vec::new();
         push_windows(
             Office {
@@ -3938,7 +3964,7 @@ pub(crate) mod tests {
         // ...and offices whose sizes gate in the pieces 160x96 lacks, empty.
         let pack = test_default_pack();
         for (w, h) in [(240u16, 144u16), (100, 60)] {
-            let stepped = FloorSession::new()
+            let stepped = FloorSession::new(std::sync::Arc::new(pack.clone()))
                 .step(
                     crate::floor::FloorInputs {
                         scene: &pixtuoid_core::SceneState::uniform(16),
@@ -4130,7 +4156,7 @@ pub(crate) mod tests {
         let now = crate::localclock::at_hour(12);
         let ground_in = |w: Weather| {
             let sky = Sky::at_with(now, w);
-            let tint = crate::atmosphere::SkyTones::resolve(&sky, theme).ground_tint;
+            let carpet = crate::atmosphere::SkyTones::resolve(&sky, theme).carpet(theme);
             let list = compose_at(
                 &frame,
                 Office {
@@ -4143,11 +4169,99 @@ pub(crate) mod tests {
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
             );
-            (list.ground(), tint)
+            (list.carpet(), carpet)
         };
-        let (rain, (tint, share)) = ground_in(Weather::Rain);
-        assert_eq!(rain.base, theme.surface.carpet_base.mix(tint, share));
+        let (rain, model) = ground_in(Weather::Rain);
+        assert_eq!(rain, model, "the list lays the model's carpet");
         assert_ne!(rain, ground_in(Weather::Clear).0);
+    }
+
+    /// Mid-change, the ground and the glass's veil each take the incoming
+    /// weather's look on the art pixels the dither gives it, keyed on the art
+    /// grid, and the going weather's on the rest.
+    #[test]
+    fn a_change_dithers_the_ground_and_the_veil_on_the_art_grid() {
+        use crate::sky::{Sky, Weather, WeatherMix};
+        use pixtuoid_core::sprite::Rgb;
+        let theme = &crate::theme::NORMAL;
+        let pack = test_default_pack();
+        let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let now = crate::localclock::at_hour(12);
+        // Partway through a change of cloud, at a share whose dither, unlike
+        // half's checkerboard, moves with any shift of its key.
+        let mix = WeatherMix::toward(Weather::Clear, Weather::Fog, 0.4);
+        let moment = || {
+            let sky = Sky::at_with(now, Weather::Clear).with_weather(mix);
+            Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now))
+        };
+        // Tallies a pixel the two ends draw apart: `mid` must be the incoming
+        // end's where the dither `takes` it, else the going end's.
+        let tally =
+            |took: &mut [usize; 2], what: &str, takes: bool, [going, coming, mid]: [Rgb; 3]| {
+                if going != coming {
+                    assert_eq!(mid, if takes { coming } else { going }, "{what}");
+                    took[usize::from(takes)] += 1;
+                }
+            };
+
+        // Two buffer pixels to the art pixel, so a key off the art grid shows.
+        let d = pack.max_density_variant().get();
+        let pen = Pen::for_pack(RenderScale::new(2 * d).expect("nonzero"), &pack);
+        let k = pen.buffer(ArtPx(1));
+        let carpet = moment().look.carpet(theme);
+        let [from, to] = carpet.ends();
+        let lay = |paint: &dyn Fn(&mut RgbBuffer)| {
+            let mut buf = RgbBuffer::filled(
+                pen.buffer(pen.art(layout.buf_w)),
+                pen.buffer(pen.art(layout.buf_h)),
+                Rgb { r: 0, g: 0, b: 0 },
+            );
+            paint(&mut buf);
+            buf
+        };
+        let [going, coming, mid] = [
+            lay(&|buf| paint_carpet_tones(&layout, from, pen, buf)),
+            lay(&|buf| paint_carpet_tones(&layout, to, pen, buf)),
+            lay(&|buf| paint_carpet(&layout, carpet, pen, buf)),
+        ];
+        let mut took = [0; 2];
+        for y in 0..mid.height() {
+            for x in 0..mid.width() {
+                let px = [&going, &coming, &mid].map(|b| b.get(x, y));
+                let what = format!("ground at ({x}, {y})");
+                tally(&mut took, &what, carpet.takes_to(x / k, y / k), px);
+            }
+        }
+        assert!(took[0] > 0 && took[1] > 0, "ground: {took:?}");
+
+        let veil = moment().look.glass_veil;
+        let [clear, fog] = veil.ends();
+        let look = |veil| {
+            let m = moment();
+            let mut weather = GlassWeather::of(&m);
+            weather.veil = veil;
+            // One art pixel to the unit, so a window's corner sits off the
+            // dither's period and a key from it would show.
+            glass_views_at(RenderScale::ONE, &layout, &m, &weather)
+        };
+        let [going, coming, mid] = [Dithered::solid(clear), Dithered::solid(fog), veil].map(look);
+        assert!(
+            mid.iter().any(|v| v.x % crate::dither::PERIOD != 0),
+            "every window on the dither's phase: a key from its corner would pass"
+        );
+        let mut took = [0; 2];
+        for ((g, c), view) in going.iter().zip(&coming).zip(&mid) {
+            for (i, px) in g.px.iter().zip(&c.px).zip(&view.px).enumerate() {
+                let ((Some(g), Some(c)), Some(m)) = px else {
+                    continue;
+                };
+                let i = u16::try_from(i).expect("a window's pixels");
+                let at = (view.x + i % view.w, view.y + i / view.w);
+                let what = format!("veil at {at:?}");
+                tally(&mut took, &what, veil.takes_to(at.0, at.1), [*g, *c, *m]);
+            }
+        }
+        assert!(took[0] > 0 && took[1] > 0, "veil: {took:?}");
     }
 
     /// A figure's dust paints straight before them and their other riders
@@ -4594,7 +4708,7 @@ pub(crate) mod tests {
     /// desk faces and at every density its art is drawn at: the cutaway's art
     /// stands it on the side the desk faces.
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn a_desk_lamp_pools_under_its_painted_bulb() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let pack = test_default_pack();

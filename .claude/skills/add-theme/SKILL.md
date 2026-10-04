@@ -25,5 +25,5 @@ metadata:
 6. Run `just test`; update insta snapshots if the theme list changed.
 7. Visually verify with the **beautify-decoration** skill's snapshot loop — a
    palette that passes the legibility guards can still read badly.
-8. `just preflight full`, then the **two-lens-review** skill — the regenerated
+8. `just preflight full`, then the **local-review** skill — the regenerated
    stills fire REVIEW.md's local "Generated art / clips" row.

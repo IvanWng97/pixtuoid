@@ -6,10 +6,17 @@ fn theme_switch_recolors_floor() {
     let mut r = build(100, 40, vec![]);
     let now = t0();
     r.render(&scene, pack(), now).unwrap();
-    let before = r.buf().clone();
+    let before = r.buf().expect("a frame").clone();
     r.set_theme(dark_theme());
     r.render(&scene, pack(), now).unwrap();
-    let d = region_diff(&before, r.buf(), 0, 0, before.width(), before.height());
+    let d = region_diff(
+        &before,
+        r.buf().expect("a frame"),
+        0,
+        0,
+        before.width(),
+        before.height(),
+    );
     assert!(
         d > 5_000,
         "switching to a different theme must recolor the floor (diff={d})"
@@ -22,10 +29,17 @@ fn set_theme_with_same_theme_is_a_noop() {
     let mut r = build(100, 40, vec![]); // built with normal_theme()
     let now = t0();
     r.render(&scene, pack(), now).unwrap();
-    let before = r.buf().clone();
+    let before = r.buf().expect("a frame").clone();
     r.set_theme(normal_theme());
     r.render(&scene, pack(), now).unwrap();
-    let d = region_diff(&before, r.buf(), 0, 0, before.width(), before.height());
+    let d = region_diff(
+        &before,
+        r.buf().expect("a frame"),
+        0,
+        0,
+        before.width(),
+        before.height(),
+    );
     assert_eq!(
         d, 0,
         "re-setting the identical theme must not recolor (cache not flushed), diff={d}"
@@ -56,7 +70,7 @@ fn occupied_floor_stays_lit() {
 fn each_strike_phase_holds_the_floor_on_screen_in_half_blocks() {
     use crate::test_flash::{assert_each_phase_holds_the_floor, frame_grid, lead, storm_strike};
     let strike = storm_strike();
-    let tick = Duration::from_millis(crate::tui::FRAME_TICK_MS);
+    let tick = crate::tui::frame_tick();
     for (frame, offset) in frame_grid(tick) {
         let (cols, rows) = crate::tui::renderer::min_terminal_size();
         let (mut r, screen) = half_blocks_on_screen(cols, rows);
@@ -202,7 +216,7 @@ fn each_stutter_phase_holds_the_floor_on_screen_in_half_blocks() {
         assert_each_phase_holds_the_floor, frame_grid, lead, neon_tube, starved_stutter,
     };
     let stutter = starved_stutter();
-    let tick = Duration::from_millis(crate::tui::FRAME_TICK_MS);
+    let tick = crate::tui::frame_tick();
     let scene = scene_with(vec![], 16);
     for (frame, offset) in frame_grid(tick) {
         let (cols, rows) = crate::tui::renderer::min_terminal_size();
@@ -259,7 +273,7 @@ fn version_popup_paints_when_open() {
     let scene = scene_with(vec![idle("/vp/0.jsonl", 0, t0())], 16);
     let mut r = build(140, 48, vec![]);
     r.render(&scene, pack(), t0()).unwrap();
-    let baseline = r.buf().clone();
+    let baseline = r.buf().expect("a frame").clone();
     // Render past the 200ms entrance animation so the popup is at full scale.
     r.set_version_popup(true, t0());
     let t1 = t0() + Duration::from_millis(250);
@@ -270,7 +284,7 @@ fn version_popup_paints_when_open() {
     );
     let d = region_diff(
         &baseline,
-        r.buf(),
+        r.buf().expect("a frame"),
         0,
         0,
         baseline.width(),

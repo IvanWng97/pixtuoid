@@ -59,7 +59,7 @@ pub(super) fn render_until_settled<B: Backend<Error: Send + Sync + 'static>>(
     panic!("floor transition to {target_floor} did not settle");
 }
 
-pub(super) use crate::test_flash::pack;
+pub(super) use crate::test_flash::{pack, pack_arc};
 pub(super) fn t0() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000)
 }
@@ -97,6 +97,7 @@ pub(super) fn build_pets(
         Terminal::new(TestBackend::new(cols, rows)).expect("test backend"),
         normal_theme(),
         pets,
+        pack_arc(),
     )
 }
 /// Idle agent on floor 0 at desk `desk`.
@@ -227,6 +228,7 @@ pub(super) fn half_blocks_on_screen(
         Terminal::new(backend).expect("test backend"),
         normal_theme(),
         vec![],
+        pack_arc(),
     );
     r.flash = pixtuoid_scene::flash::FlashHold::on(screen.clock());
     (r, screen)
@@ -265,7 +267,10 @@ mod theme_lighting;
 /// frame for a cell whose agent hit-test resolves to `id` and park the mouse
 /// there. Panics when the agent isn't hit-testable — a test wiring error, not a
 /// case.
-pub(super) fn hover_agent(r: &mut TuiRenderer<TestBackend>, id: pixtuoid_core::AgentId) {
+pub(super) fn hover_agent<B>(r: &mut TuiRenderer<B>, id: pixtuoid_core::AgentId)
+where
+    B: Backend<Error: Send + Sync + 'static> + std::borrow::Borrow<TestBackend>,
+{
     let cell = r
         .frame_buffer()
         .area()

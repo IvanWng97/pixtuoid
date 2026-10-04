@@ -14,13 +14,12 @@ use ratatui::style::Color;
 use std::sync::Arc;
 
 use pixtuoid_scene::flash::{FlashHold, Flashes};
-use pixtuoid_scene::floor::FloorInputs;
+use pixtuoid_scene::floor::{FloorInputs, OfficeStores, PerFloor};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
-use pixtuoid_scene::layout::SceneLayout;
+use pixtuoid_scene::layout::{SceneLayout, Size};
+use pixtuoid_scene::look::{ClassicDrawn, Look, Place, RenderInputs, Rendered};
 use pixtuoid_scene::pet::PetFrame;
-use pixtuoid_scene::pixel_painter::{
-    AgentFrame, MascotFrame, PixelCtx, PixelPassResult, render_to_rgb_buffer,
-};
+use pixtuoid_scene::pixel_painter::{AgentFrame, MascotFrame};
 
 #[cfg(test)]
 use crate::tui::geometry::CellArea;
@@ -40,23 +39,18 @@ pub use pixtuoid_scene::pet::PetState;
 
 pub struct DrawCtx<'a> {
     pub world: FloorInputs<'a>,
-    pub buf: &'a mut RgbBuffer,
-    /// A sibling of `buf` on a `PerFloor`, borrowed disjointly.
-    pub store: &'a mut pixtuoid_scene::floor::FloorCtx,
+    /// The floor drawn: its sim stores and raster.
+    pub floor: &'a mut PerFloor,
+    /// The office stores its frame steps and draws with.
+    pub office: OfficeStores<'a>,
     pub mouse_pos: Option<(u16, u16)>,
     /// Walkable/approach/route debug layer toggle (`w`) — transient, never
     /// persisted to config.
     pub debug_walkable: bool,
-    pub theme: &'a pixtuoid_scene::theme::Theme,
+    pub theme: &'static pixtuoid_scene::theme::Theme,
     pub theme_picker: Option<usize>,
     /// From [`footer_context`](crate::tui::widgets::footer_context).
     pub footer: FooterContext<'a>,
-    pub chitchat_state: &'a mut std::collections::HashMap<
-        pixtuoid_scene::chitchat::VenueKey,
-        pixtuoid_scene::chitchat::ActiveChitchat,
-    >,
-    /// Key present = has a desk cup; value = the steam-window anchor.
-    pub coffee: &'a std::collections::HashMap<pixtuoid_core::AgentId, std::time::SystemTime>,
     /// Animated scale for the version popup (0.0 = hidden, 1.0 = fully shown).
     pub popup_scale: f32,
     pub help_open: bool,
@@ -74,21 +68,15 @@ impl<'a> DrawCtx<'a> {
     /// keeps its exhaustive literal, so a new field is a compile error there, not a silent default.
     #[doc(hidden)]
     pub fn offscreen(
-        floor: &'a mut pixtuoid_scene::floor::PerFloor,
-        chitchat_state: &'a mut std::collections::HashMap<
-            pixtuoid_scene::chitchat::VenueKey,
-            pixtuoid_scene::chitchat::ActiveChitchat,
-        >,
-        theme: &'a pixtuoid_scene::theme::Theme,
+        floor: &'a mut PerFloor,
+        office: OfficeStores<'a>,
+        theme: &'static pixtuoid_scene::theme::Theme,
         scene: &'a SceneState,
         pack: &'a pixtuoid_core::sprite::format::Pack,
         now: SystemTime,
         meta: pixtuoid_scene::floor::FloorMeta,
     ) -> Self {
         use std::sync::LazyLock;
-        static NO_COFFEE: LazyLock<
-            std::collections::HashMap<pixtuoid_core::AgentId, std::time::SystemTime>,
-        > = LazyLock::new(Default::default);
         static CLOSED_DASHBOARD: LazyLock<crate::tui::dashboard::DashboardFrame> =
             LazyLock::new(Default::default);
         static CLOSED_CONNECTION: LazyLock<crate::tui::connection::ConnectionFrame> =
@@ -103,15 +91,13 @@ impl<'a> DrawCtx<'a> {
                 floor: meta,
                 pets: Default::default(),
             },
-            buf: &mut floor.buf,
-            store: &mut floor.ctx,
+            floor,
+            office,
             mouse_pos: None,
             debug_walkable: false,
             theme,
             theme_picker: None,
             footer: crate::tui::widgets::footer_context(scene, None, false, None, None),
-            chitchat_state,
-            coffee: &NO_COFFEE,
             popup_scale: 0.0,
             help_open: false,
             dashboard: &CLOSED_DASHBOARD,
@@ -122,7 +108,7 @@ impl<'a> DrawCtx<'a> {
     }
 }
 
-/// What [`draw_scene`] drew; each sprite field is [`PixelPassResult`]'s namesake.
+/// What [`draw_scene`] drew; each sprite field is [`ClassicDrawn`]'s namesake.
 /// `Default` is a refused frame, which leaves nothing to hit-test.
 #[derive(Default)]
 pub struct DrawOut {
@@ -131,7 +117,6 @@ pub struct DrawOut {
     pub pet_pos: Option<PetFrame>,
     pub mascots: Vec<MascotFrame>,
     pub agents: Vec<AgentFrame>,
-    pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
     pub occupied_waypoints: std::collections::HashSet<usize>,
     /// Where the frame lies under the cells; `None` when it was refused.
     pub(crate) geometry: Option<SceneGeometry>,
@@ -165,10 +150,14 @@ pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
     })
 }
 
-/// Minimum drawable scene size (cells) below which the world render is skipped
-/// for a footer-only draw. Shared by both "too small" gates so they can't drift.
+/// Minimum drawable scene size (cells), the bound [`scene_too_small`] gates on.
 pub(crate) const MIN_SCENE_WIDTH: u16 = 20;
 pub(crate) const MIN_SCENE_HEIGHT: u16 = 12;
+
+/// Whether `scene` is too small to render the world, for a footer-only draw.
+pub(crate) fn scene_too_small(scene: Rect) -> bool {
+    scene.width < MIN_SCENE_WIDTH || scene.height < MIN_SCENE_HEIGHT
+}
 
 /// How many rows at the bottom of the terminal the status footer owns.
 pub(crate) const FOOTER_ROWS: u16 = 1;
@@ -228,7 +217,7 @@ pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
 /// `min_layout_size` in the terminal's own units — rows carry TWO buffer pixels
 /// (half-block), the footer takes its own, and the painter's own floor can outrank
 /// the layout's. The notice states it and the harness derives its fixtures from it;
-/// `runtime::capacity_for_terminal` holds the INVERSE and reads the same `FOOTER_ROWS`.
+/// [`scene_buf_size`] is its inverse.
 pub(crate) fn min_terminal_size() -> (u16, u16) {
     let min = pixtuoid_scene::layout::min_layout_size();
     (min.w.max(MIN_SCENE_WIDTH), advertised_rows(min.h))
@@ -319,24 +308,6 @@ fn paint_too_small_notice(
     }
 }
 
-/// The wall board `footer` tallies off `scene` at `now`, its flap moving as
-/// `motion` says, whichever profile paints it.
-pub(crate) fn wall_board(
-    footer: &FooterInputs<'_>,
-    scene: &SceneState,
-    motion: pixtuoid_scene::anim::Motion,
-    now: SystemTime,
-) -> pixtuoid_scene::board::BoardModel {
-    pixtuoid_scene::board::build_board(
-        footer.counts(),
-        pixtuoid_scene::board::scene_uptime_secs(scene, now),
-        footer.context.floor.map(|fi| (fi.current, fi.total_floors)),
-        footer.context.gateway,
-        motion,
-        now,
-    )
-}
-
 pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     ctx: &mut DrawCtx<'_>,
@@ -363,56 +334,70 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         onboarding: ctx.onboarding,
     };
 
-    if scene_rect.width < MIN_SCENE_WIDTH || scene_rect.height < MIN_SCENE_HEIGHT {
+    if scene_too_small(scene_rect) {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
         return Ok(DrawOut::default());
     }
 
     let (buf_w, buf_h) = scene_buf_size(full_rect.width, full_rect.height);
-    ctx.buf.resize_fill(buf_w, buf_h, theme.surface.bg_fallback);
-    let Some(layout) = ctx.store.frame_layout(buf_w, buf_h, world.floor.floor_seed) else {
+    let rendered = pixtuoid_scene::look::render(
+        ctx.floor,
+        ctx.office.reborrow(),
+        Look::Classic,
+        RenderInputs {
+            world,
+            theme,
+            size: Size { w: buf_w, h: buf_h },
+            place: Place::default(),
+            debug_walkable: ctx.debug_walkable,
+        },
+    );
+    let Some(Rendered {
+        layout,
+        occupied_waypoints,
+        flash,
+        ..
+    }) = rendered
+    else {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
         return Ok(DrawOut::default());
     };
-
-    let PixelPassResult {
-        pet_pos,
-        mascots,
-        agents,
-        flash,
-        chitchat_bubbles,
-        new_coffee_carriers,
-        occupied_waypoints,
-    } = render_to_rgb_buffer(&mut PixelCtx {
-        store: &mut *ctx.store,
-        buf: &mut *ctx.buf,
-        world,
-        layout: &layout,
-        theme,
-        coffee: ctx.coffee,
-        chitchat_state: ctx.chitchat_state,
-        debug_walkable: ctx.debug_walkable,
-    });
     let flashes = [flash; 2];
     if ctx.flash.as_ref().is_some_and(|f| f.holds(flashes)) {
         return Ok(DrawOut {
-            new_coffee_carriers,
             held: true,
             ..DrawOut::default()
         });
     }
+    let Some(ClassicDrawn {
+        pixels,
+        agents,
+        pet: pet_pos,
+        mascots,
+        bubbles: chitchat_bubbles,
+    }) = ctx.floor.raster.classic_drawn()
+    else {
+        draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
+        return Ok(DrawOut::default());
+    };
 
     let mouse_pos = ctx.mouse_pos;
     let geometry = SceneGeometry::half_block(scene_rect);
-    let hovered = mouse_pos.and_then(|(mx, my)| hit_test_agent(&agents, geometry.area_at(mx, my)?));
+    let hovered = mouse_pos.and_then(|(mx, my)| hit_test_agent(agents, geometry.area_at(mx, my)?));
 
     // The dim is decoupled from `onboarding.open`, so the office keeps fading back
     // up for a beat AFTER the card is gone.
-    apply_dim(ctx.buf, ctx.onboarding.dim);
+    apply_dim(pixels, ctx.onboarding.dim);
 
-    let labels = pixtuoid_scene::overlay::build_overlay(scene, &agents, hovered);
-    let board = wall_board(&footer, scene, ctx.world.floor.motion, now);
-    let buf = &ctx.buf;
+    let labels = pixtuoid_scene::overlay::build_overlay(scene, agents, hovered);
+    let board = pixtuoid_scene::board::wall_board(
+        scene,
+        footer.context.gateway,
+        footer.context.floor,
+        ctx.world.floor.motion,
+        now,
+    );
+    let buf = &*pixels;
     term.draw(|f| {
         // Re-derive rects from the actual frame buffer to guard against
         // terminal resize between term.size() and term.draw().
@@ -421,7 +406,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         paint_footer(f, &footer, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
         paint_label_widgets(f, &labels, actual_scene, theme);
-        paint_chitchat_bubbles(f, &chitchat_bubbles, &agents, actual_scene, theme);
+        paint_chitchat_bubbles(f, chitchat_bubbles, agents, actual_scene, theme);
         paint_wall_display(f, &board, actual_scene, theme);
         let door = layout.door;
         let current = floor_info.map(|fi| fi.current).unwrap_or(1);
@@ -456,7 +441,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                     .map(|p| p.name.as_str())
                     .unwrap_or_else(|| kind.default_name());
                 paint_pet_tooltip(f, kind, anim, on_cooldown, display_name, at, theme);
-            } else if let Some(m) = topmost_mascot_at(&mascots, cell) {
+            } else if let Some(m) = topmost_mascot_at(mascots, cell) {
                 paint_mascot_tooltip(f, m, at, theme);
             } else if let Some(label) = hit_test_furniture(&layout, cell) {
                 paint_furniture_tooltip(f, label, at, theme);
@@ -470,9 +455,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     Ok(DrawOut {
         layout: Some(layout),
         pet_pos,
-        mascots,
-        agents,
-        new_coffee_carriers,
+        mascots: mascots.to_vec(),
+        agents: agents.to_vec(),
         occupied_waypoints,
         geometry: Some(geometry),
         held: false,
@@ -613,12 +597,12 @@ mod tests {
                 current_pid: Some(1),
             },
         );
-        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("pack");
-        let mut floor = pixtuoid_scene::floor::PerFloor::new();
-        let mut chitchat = std::collections::HashMap::new();
+        let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("pack"));
+        let mut floor = pixtuoid_scene::floor::PerFloor::new(Arc::clone(&pack));
+        let mut office = pixtuoid_scene::floor::PerOffice::new();
         let ctx = DrawCtx::offscreen(
             &mut floor,
-            &mut chitchat,
+            office.stores(),
             &pixtuoid_scene::theme::NORMAL,
             &scene,
             &pack,

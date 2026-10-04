@@ -133,9 +133,10 @@ struct SnapshotArgs {
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     now_day: u32,
 
-    /// Minutes past `--now-hour` (0–59): a weather transition runs mid-hour.
-    #[arg(long, default_value_t = 0, requires = "now_hour", value_parser = clap::value_parser!(u64).range(0..60))]
-    now_min: u64,
+    /// Seconds past `--now-hour` (0–3599), fine enough to sample a weather
+    /// transition.
+    #[arg(long, default_value_t = 0, requires = "now_hour", value_parser = clap::value_parser!(u64).range(0..3600))]
+    now_sec: u64,
 
     /// Force a specific weather, bypassing the clock-based 10-minute cycle.
     /// One of: clear | rain | storm | snow | fog | overcast | windy | smog.
@@ -219,7 +220,7 @@ struct SnapshotArgs {
     meeting: Option<u8>,
 
     /// Pre-roll a `--gif` capture: advance the simulated clock through the
-    /// real per-frame render (motion state advances) WITHOUT encoding frames
+    /// real per-frame render (walk state advances) WITHOUT encoding frames
     /// for the first N seconds, so the clip starts mid-action. Overrides the
     /// `--meeting` auto-computed warmup. (`--anim` has its own pre-roll knob,
     /// `--anim-skip-ms`.)
@@ -323,21 +324,20 @@ fn parse_navigations(specs: &[String]) -> Result<Vec<(u64, usize)>> {
 fn main() -> Result<()> {
     let args = SnapshotArgs::parse();
 
-    let weather =
-        match pixtuoid_scene::pixel_painter::WeatherPolicy::from_name(args.weather.as_deref()) {
-            Ok(w) => w,
-            Err(valid) => anyhow::bail!(
-                "unknown --weather {:?}; valid: {}",
-                args.weather.unwrap_or_default(),
-                valid.join(" | ")
-            ),
-        };
+    let weather = match pixtuoid_scene::sky::WeatherPolicy::from_name(args.weather.as_deref()) {
+        Ok(w) => w,
+        Err(valid) => anyhow::bail!(
+            "unknown --weather {:?}; valid: {}",
+            args.weather.unwrap_or_default(),
+            valid.join(" | ")
+        ),
+    };
 
     let now = match args.now_hour {
         Some(h) => {
             pixtuoid_scene::localclock::try_on_day(args.now_day - 1, h)
                 .with_context(|| format!("invalid --now-day/--now-hour {}:{h}", args.now_day))?
-                + std::time::Duration::from_secs(60 * args.now_min)
+                + std::time::Duration::from_secs(args.now_sec)
         }
         None => SystemTime::now(),
     };
@@ -410,12 +410,12 @@ fn main() -> Result<()> {
     }
     let backend = TestBackend::new(cols, rows);
     let mut term = Terminal::new(backend)?;
-    let pack = load_sprite_pack(
+    let pack = std::sync::Arc::new(load_sprite_pack(
         args.pack_dir
             .clone()
             .map_or(PackSource::Bundled, PackSource::Explicit),
-    )?;
-    let mut floor = pixtuoid_scene::floor::PerFloor::new();
+    )?);
+    let mut floor = pixtuoid_scene::floor::PerFloor::new(std::sync::Arc::clone(&pack));
     // A typo'd theme silently rendering NORMAL would put wrong-palette art into
     // the docs/site screenshot pipelines.
     let theme = pixtuoid_scene::theme::theme_by_name(&args.theme).ok_or_else(|| {
@@ -531,7 +531,7 @@ fn main() -> Result<()> {
         })
         .unwrap_or_default();
     let warning_text = pixtuoid::doctor::footer_warning(death_text.as_deref(), &drifted);
-    let mut chitchat_state = std::collections::HashMap::new();
+    let mut office = pixtuoid_scene::floor::PerOffice::new();
     // Static snapshots have no time to animate the fade — snap straight
     // to the steady-state level for the chosen scene.
     if args.empty {
@@ -707,7 +707,7 @@ fn main() -> Result<()> {
         onboarding: &onboarding_frame,
         ..DrawCtx::offscreen(
             &mut floor,
-            &mut chitchat_state,
+            office.stores(),
             theme,
             &scene,
             &pack,

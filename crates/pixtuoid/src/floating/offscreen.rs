@@ -1,7 +1,7 @@
 //! Headless office → `RgbBuffer` rendering for the `pixtuoid floating` desktop window.
 //!
 //! Paints the buffer at whatever dims it's handed, owning one
-//! `pixtuoid_scene::floor::FloorSession` across frames so motion stays continuous.
+//! `pixtuoid_scene::floor::FloorSession` across frames so walks stay continuous.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
@@ -10,10 +10,11 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{MAX_FLOORS, SceneState};
 
 use pixtuoid_scene::flash::{FlashHold, FlashPhase};
-use pixtuoid_scene::floor::{FloorInputs, FloorSession, FrameInputs};
+use pixtuoid_scene::floor::{FloorInputs, FloorSession};
 use pixtuoid_scene::footer::{
     FooterContext, FooterInputs, FooterModel, build_footer, footer_tone_rgb,
 };
+use pixtuoid_scene::look::{Look, RenderInputs};
 use pixtuoid_scene::theme::Theme;
 use winit::dpi::PhysicalSize;
 
@@ -27,7 +28,7 @@ pub(crate) fn pack_xrgb(c: Rgb) -> u32 {
 }
 
 /// Renders the live office to a reusable `RgbBuffer`. One per window — keeping it
-/// alive across frames is what keeps motion/pose continuous (no walk-flash).
+/// alive across frames is what keeps walks/poses continuous (no walk-flash).
 pub struct OfficeRenderer {
     session: FloorSession,
     /// Ambient-audio gateway. Inert unless installed.
@@ -39,9 +40,10 @@ pub struct OfficeRenderer {
 }
 
 impl OfficeRenderer {
-    pub fn new() -> Self {
+    /// A renderer drawing with `pack`, which every frame's `world.pack` must be.
+    pub fn new(pack: std::sync::Arc<pixtuoid_core::sprite::format::Pack>) -> Self {
         Self {
-            session: FloorSession::new(),
+            session: FloorSession::new(pack),
             audio: crate::audio::AudioHandle::disabled(),
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
             rendered: FlashPhase::default(),
@@ -56,28 +58,28 @@ impl OfficeRenderer {
     /// the window downscaled by `window_buffer_geometry`, with no footer row
     /// subtracted. A too-small layout leaves the buffer filled with the theme's
     /// `bg_fallback`.
-    pub fn render(&mut self, inputs: FrameInputs<'_>) -> &RgbBuffer {
+    pub fn render(&mut self, inputs: RenderInputs<'_>) -> Option<&RgbBuffer> {
         let FloorInputs {
             scene, floor, now, ..
         } = inputs.world;
-        self.session.render(inputs);
+        self.session.render(Look::Classic, inputs);
         // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
         self.audio
             .frame(self.session.audio_frame(scene, floor, now));
         self.session.buf()
     }
 
-    /// [`render`](Self::render) for the window on screen: `None` when the
+    /// [`render`](Self::render) for the window on screen: `None` also when the
     /// flash hold keeps the frame back, so the window keeps the last. A frame
     /// handed out is [`presented`](Self::presented) once it shows.
-    pub fn render_live(&mut self, inputs: FrameInputs<'_>) -> Option<&RgbBuffer> {
+    pub fn render_live(&mut self, inputs: RenderInputs<'_>) -> Option<&RgbBuffer> {
         self.render(inputs);
         let flash = self.session.flash();
         if self.flash.holds(flash) {
             return None;
         }
         self.rendered = flash;
-        Some(self.session.buf())
+        self.session.buf()
     }
 
     /// The frame [`render_live`](Self::render_live) last handed out finished
@@ -127,12 +129,6 @@ impl OfficeRenderer {
             ),
         );
         build_footer(&inputs, budget)
-    }
-}
-
-impl Default for OfficeRenderer {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -456,22 +452,27 @@ mod tests {
     #[test]
     fn renders_a_sized_nonblank_office_buffer() {
         let scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
-        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
+        let pack = std::sync::Arc::new(
+            pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
+        );
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-        let mut renderer = OfficeRenderer::new();
-        let buf = renderer.render(FrameInputs {
-            world: FloorInputs {
-                scene: &scene,
-                pack: &pack,
-                now,
-                floor: FloorMeta::ground(),
-                pets: PetInputs::default(),
-            },
-            theme,
-            size: Size { w: 160, h: 96 },
-            debug_walkable: false,
-        });
+        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
+        let buf = renderer
+            .render(RenderInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                theme,
+                size: Size { w: 160, h: 96 },
+                place: pixtuoid_scene::look::Place::default(),
+                debug_walkable: false,
+            })
+            .expect("a frame");
         assert_eq!((buf.width(), buf.height()), (160, 96));
         // `ensure_size` pre-fills with `bg_fallback` (non-black) BEFORE the painter runs,
         // so "any non-black pixel" would pass even if the painter no-op'd.
@@ -498,9 +499,9 @@ mod tests {
     }
 
     impl Window {
-        fn new(weather: pixtuoid_scene::pixel_painter::WeatherPolicy) -> Self {
+        fn new(weather: pixtuoid_scene::sky::WeatherPolicy) -> Self {
             let screen = pixtuoid_scene::flash::ManualClock::default();
-            let mut renderer = OfficeRenderer::new();
+            let mut renderer = OfficeRenderer::new(crate::test_flash::pack_arc());
             renderer.flash = FlashHold::on(screen.clock());
             Self {
                 renderer,
@@ -519,7 +520,7 @@ mod tests {
         fn present(&mut self, now: SystemTime) -> RgbBuffer {
             let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
             self.screen.at(now);
-            let frame = self.renderer.render_live(FrameInputs {
+            let frame = self.renderer.render_live(RenderInputs {
                 world: FloorInputs {
                     scene: &self.scene,
                     pack: crate::test_flash::pack(),
@@ -529,6 +530,7 @@ mod tests {
                 },
                 theme,
                 size: Size { w: 160, h: 96 },
+                place: pixtuoid_scene::look::Place::default(),
                 debug_walkable: false,
             });
             if let Some(frame) = frame {
@@ -672,7 +674,12 @@ mod tests {
                 "floor {i} boot cap must match the rendered geometry"
             );
         }
-        let overseed = crate::runtime::boot_capacities_for(w as u16, (h / 2) as u16);
+        let overseed = crate::runtime::boot_capacities_for(
+            crate::graphics::Plan::Classic {
+                reason: crate::graphics::ClassicReason::Disabled,
+            },
+            ratatui::layout::Size::new(w as u16, (h / 2) as u16),
+        );
         assert!(
             overseed[0] >= boot[0],
             "TUI helper over-seeds ({} vs {})",
@@ -1105,13 +1112,15 @@ mod tests {
             ],
             cap,
         );
-        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
+        let pack = std::sync::Arc::new(
+            pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
+        );
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-        let mut renderer = OfficeRenderer::new();
+        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         let (handle, rx) = crate::audio::AudioHandle::test_pair();
         renderer.set_audio(handle);
-        renderer.render(FrameInputs {
+        renderer.render(RenderInputs {
             world: FloorInputs {
                 scene: &scene,
                 pack: &pack,
@@ -1121,6 +1130,7 @@ mod tests {
             },
             theme,
             size: Size { w: 160, h: 96 },
+            place: pixtuoid_scene::look::Place::default(),
             debug_walkable: false,
         });
         let frames = crate::audio::drain_frames(&rx);
@@ -1186,13 +1196,15 @@ mod tests {
         // Deterministic: fixed agent id + a hand-stepped clock; the loop bound mirrors
         // the scene crate's occupancy sim pin.
         use pixtuoid_scene::audio::OneShot;
-        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
+        let pack = std::sync::Arc::new(
+            pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
+        );
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now0 = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut idle = active_on("/w/wanderer.jsonl", 0, 0);
         idle.state = pixtuoid_core::state::ActivityState::Idle;
         let scene = scene_with(vec![idle], 16);
-        let mut renderer = OfficeRenderer::new();
+        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         let (handle, rx) = crate::audio::AudioHandle::test_pair();
         renderer.set_audio(handle);
         let mut heard = Vec::new();
@@ -1201,7 +1213,7 @@ mod tests {
             let now = now0 + std::time::Duration::from_secs(2 * step);
             // 192x160: tall enough that the corridor hosts BOTH appliances
             // (the vending/printer height gates in layout::compute).
-            renderer.render(FrameInputs {
+            renderer.render(RenderInputs {
                 world: FloorInputs {
                     scene: &scene,
                     pack: &pack,
@@ -1211,6 +1223,7 @@ mod tests {
                 },
                 theme,
                 size: Size { w: 192, h: 160 },
+                place: pixtuoid_scene::look::Place::default(),
                 debug_walkable: false,
             });
             heard.extend(
@@ -1236,16 +1249,18 @@ mod tests {
     #[test]
     fn floating_door_chime_fires_only_for_rendered_floor_arrivals() {
         let cap = 16;
-        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
+        let pack = std::sync::Arc::new(
+            pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
+        );
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let mut now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-        let mut renderer = OfficeRenderer::new();
+        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         let (handle, rx) = crate::audio::AudioHandle::test_pair();
         renderer.set_audio(handle);
 
         let mut agents = vec![active_on("/d/f0.jsonl", 0, 0)];
         let scene = scene_with(agents.clone(), cap);
-        renderer.render(FrameInputs {
+        renderer.render(RenderInputs {
             world: FloorInputs {
                 scene: &scene,
                 pack: &pack,
@@ -1255,6 +1270,7 @@ mod tests {
             },
             theme,
             size: Size { w: 160, h: 96 },
+            place: pixtuoid_scene::look::Place::default(),
             debug_walkable: false,
         });
         crate::audio::drain_frames(&rx); // discard the priming frames
@@ -1262,7 +1278,7 @@ mod tests {
         agents.push(active_on("/d/f1-new.jsonl", 1, cap));
         let scene = scene_with(agents.clone(), cap);
         now += std::time::Duration::from_millis(33);
-        renderer.render(FrameInputs {
+        renderer.render(RenderInputs {
             world: FloorInputs {
                 scene: &scene,
                 pack: &pack,
@@ -1272,6 +1288,7 @@ mod tests {
             },
             theme,
             size: Size { w: 160, h: 96 },
+            place: pixtuoid_scene::look::Place::default(),
             debug_walkable: false,
         });
         let off_floor: Vec<_> = crate::audio::drain_frames(&rx)
@@ -1286,7 +1303,7 @@ mod tests {
         agents.push(active_on("/d/f0-new.jsonl", 0, 1));
         let scene = scene_with(agents, cap);
         now += std::time::Duration::from_millis(33);
-        renderer.render(FrameInputs {
+        renderer.render(RenderInputs {
             world: FloorInputs {
                 scene: &scene,
                 pack: &pack,
@@ -1296,6 +1313,7 @@ mod tests {
             },
             theme,
             size: Size { w: 160, h: 96 },
+            place: pixtuoid_scene::look::Place::default(),
             debug_walkable: false,
         });
         let on_floor: Vec<_> = crate::audio::drain_frames(&rx)
@@ -1312,10 +1330,12 @@ mod tests {
     fn labels_is_empty_before_render_then_builds_a_positioned_badge_for_a_seeded_agent() {
         use pixtuoid_core::source::AgentEvent;
         use pixtuoid_core::{AgentId, Reducer, Transport};
-        let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads");
+        let pack = std::sync::Arc::new(
+            pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack loads"),
+        );
         let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
         let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-        let mut renderer = OfficeRenderer::new();
+        let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
 
         // Seeded the production way: a SessionStart through the reducer assigns the desk.
         let mut scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
@@ -1335,7 +1355,7 @@ mod tests {
 
         // No frame rendered yet → no drawn sprites → no badges.
         assert!(renderer.labels(&scene).is_empty());
-        renderer.render(FrameInputs {
+        renderer.render(RenderInputs {
             world: FloorInputs {
                 scene: &scene,
                 pack: &pack,
@@ -1345,6 +1365,7 @@ mod tests {
             },
             theme,
             size: Size { w: 160, h: 96 },
+            place: pixtuoid_scene::look::Place::default(),
             debug_walkable: false,
         });
         let labels = renderer.labels(&scene);
