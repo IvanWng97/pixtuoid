@@ -48,14 +48,19 @@ def leaf(test: TestId) -> str:
 
 def diff(base: set[TestId], head: set[TestId]):
     """(removed, added, moved): a move pairs the ONE removed and ONE added test
-    sharing a leaf name; an ambiguous leaf stays in removed and added."""
+    sharing a leaf name in the same binary; an ambiguous leaf, or one that
+    crosses binaries, stays in removed and added."""
     removed, added = base - head, head - base
     by_leaf: dict[str, tuple[list[TestId], list[TestId]]] = {}
     for t in removed:
         by_leaf.setdefault(leaf(t), ([], []))[0].append(t)
     for t in added:
         by_leaf.setdefault(leaf(t), ([], []))[1].append(t)
-    moved = sorted((r[0], a[0]) for r, a in by_leaf.values() if len(r) == 1 and len(a) == 1)
+    moved = sorted(
+        (r[0], a[0])
+        for r, a in by_leaf.values()
+        if len(r) == 1 and len(a) == 1 and r[0][0] == a[0][0]
+    )
     for old, new in moved:
         removed.discard(old)
         added.discard(new)
@@ -83,7 +88,7 @@ def read_artifact(got: pathlib.Path) -> tuple[str, list[str]] | None:
         tests = (got / "tests.json").read_text()
         parse_list(tests)
         parents = (got / "parents.txt").read_text().split() if (got / "parents.txt").exists() else []
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return None
     return tests, parents
 
@@ -92,20 +97,20 @@ def gh(*args: str) -> str:
     return subprocess.run(["gh", *args], check=True, capture_output=True, text=True).stdout
 
 
-def artifact_run(sha: str, branch: str | None) -> int | None:
-    """The newest unexpired run whose API-set head is `sha` (on `branch`, if given)."""
+def artifact_runs(sha: str, branch: str | None) -> list[int]:
+    """Unexpired runs whose API-set head is `sha` (on `branch`, if given), newest first."""
     rows = gh(
         "api", "--paginate",
         f"repos/{{owner}}/{{repo}}/actions/artifacts?name={ARTIFACT}&per_page=100",
         "--jq", ".artifacts[] | select(.expired | not) | .workflow_run"
         " | [.id, .head_sha, .head_branch] | @json",
     )
-    return pick_run([tuple(json.loads(r)) for r in rows.splitlines()], sha, branch)
+    return pick_runs([tuple(json.loads(r)) for r in rows.splitlines()], sha, branch)
 
 
-def pick_run(rows: list[tuple[int, str, str]], sha: str, branch: str | None) -> int | None:
-    """The newest `(run id, head sha, head branch)` row at `sha`, on `branch` if given."""
-    return max((run for run, head, ref in rows if head == sha and branch in (None, ref)), default=None)
+def pick_runs(rows: list[tuple[int, str, str]], sha: str, branch: str | None) -> list[int]:
+    """The `(run id, head sha, head branch)` rows at `sha`, on `branch` if given, newest first."""
+    return sorted((run for run, head, ref in rows if head == sha and branch in (None, ref)), reverse=True)
 
 
 def download(run: int, into: pathlib.Path) -> pathlib.Path:
@@ -142,17 +147,16 @@ def main(argv: list[str]) -> int:
                   "--jq", ".merge_base_commit.sha").strip()
         print(f"head {head} (local list), base merge-base {base}")
     else:
-        run = artifact_run(head, None)
-        if run is None:
+        # A push run builds the same sha without a merge; only a PR run's
+        # checkout says which main commit the head was merged into.
+        for run in artifact_runs(head, None):
+            art = read_artifact(download(run, tmp / f"head-{run}"))
+            base = art and merge_parent(art[1], head)
+            if base:
+                head_list = art[0]
+                break
+        else:
             return fallback("PR head", head, "--head-list")
-        art = read_artifact(download(run, tmp / "head"))
-        if art is None:
-            return fallback("PR head", head, "--head-list")
-        head_list, parents = art
-        base = merge_parent(parents, head)
-        if base is None:
-            print(f"run {run}'s checkout was not a merge of {head}: {parents}", file=sys.stderr)
-            return 1
         status = gh("api", f"repos/{{owner}}/{{repo}}/compare/{base}...{MAIN}", "--jq", ".status")
         if not on_main(status.strip()):
             print(f"run {run}'s merge parent {base} is not on {MAIN}", file=sys.stderr)
@@ -163,13 +167,13 @@ def main(argv: list[str]) -> int:
         base_list = args.base_list.read_text()
         print(f"base {base} (local list)")
     else:
-        run = artifact_run(base, MAIN)
-        if run is None:
+        for run in artifact_runs(base, MAIN):
+            art = read_artifact(download(run, tmp / f"base-{run}"))
+            if art:
+                base_list = art[0]
+                break
+        else:
             return fallback(f"{MAIN} commit", base, "--base-list")
-        art = read_artifact(download(run, tmp / "base"))
-        if art is None:
-            return fallback(f"{MAIN} commit", base, "--base-list")
-        base_list = art[0]
         print(f"base {MAIN} {base} run {run}")
 
     removed, added, moved = diff(parse_list(base_list), parse_list(head_list))
@@ -196,23 +200,23 @@ def selftest() -> int:
     try:
         suites = {"rust-suites": {"core": {"binary-id": "core", "testcases": {"a::t": {}, "b::u": {}}}}}
         check("parse", parse_list(json.dumps(suites)), {("core", "a::t"), ("core", "b::u")})
-        base = {("x", "m::kept"), ("x", "m::gone"), ("x", "m::moves"), ("x", "p::dup"), ("x", "q::dup")}
-        head = {("x", "m::kept"), ("x", "m::new"), ("y", "n::moves"), ("x", "r::dup")}
+        base = {("x", "m::kept"), ("x", "m::gone"), ("x", "m::moves"), ("x", "p::dup"), ("x", "q::dup"), ("x", "a::works")}
+        head = {("x", "m::kept"), ("x", "m::new"), ("x", "n::moves"), ("x", "r::dup"), ("y", "b::works")}
         check(
             "diff",
             diff(base, head),
             (
-                [("x", "m::gone"), ("x", "p::dup"), ("x", "q::dup")],
-                [("x", "m::new"), ("x", "r::dup")],
-                [(("x", "m::moves"), ("y", "n::moves"))],
+                [("x", "a::works"), ("x", "m::gone"), ("x", "p::dup"), ("x", "q::dup")],
+                [("x", "m::new"), ("x", "r::dup"), ("y", "b::works")],
+                [(("x", "m::moves"), ("x", "n::moves"))],
             ),
         )
         check("identical", diff(base, base), ([], [], []))
         rows = [(1, "s", "main"), (2, "s", "feature"), (3, "t", "main"), (4, "s", "main")]
-        check("newest run on the branch", pick_run(rows, "s", "main"), 4)
-        check("the sha on another branch only", pick_run([(2, "s", "feature")], "s", "main"), None)
-        check("any branch", pick_run(rows, "s", None), 4)
-        check("no run at the sha", pick_run(rows, "u", None), None)
+        check("newest first on the branch", pick_runs(rows, "s", "main"), [4, 1])
+        check("the sha on another branch only", pick_runs([(2, "s", "feature")], "s", "main"), [])
+        check("any branch", pick_runs(rows, "s", None), [4, 2, 1])
+        check("no run at the sha", pick_runs(rows, "u", None), [])
         check("merge of head", merge_parent(["m", "h"], "h"), "m")
         check("parents swapped", merge_parent(["h", "m"], "h"), None)
         check("not a merge", merge_parent(["h"], "h"), None)
@@ -222,6 +226,8 @@ def selftest() -> int:
             got = pathlib.Path(d)
             (got / "tests.json").write_text("")
             check("an empty list is no artifact", read_artifact(got), None)
+            (got / "tests.json").write_text(json.dumps({"rust-suites": []}))
+            check("a wrongly shaped list is no artifact", read_artifact(got), None)
             (got / "tests.json").write_text(json.dumps(suites))
             check("parents missing", read_artifact(got), (json.dumps(suites), []))
     except Exception:
