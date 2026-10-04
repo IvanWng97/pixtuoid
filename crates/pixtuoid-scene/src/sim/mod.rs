@@ -455,7 +455,8 @@ fn pet_placement(
         walk.hold(now);
     }
     let Stance { at, walking } = walk.step(Roam::pet(Some(walk_anim)), ground, timing)?;
-    let (anim_name, frame_idx, flip) = match walking {
+    // a petted pet sits for it, even held mid-leg
+    let (anim_name, frame_idx, flip) = match walking.filter(|_| petted.is_none()) {
         Some(leg) => (
             kind.walk_anim(),
             pose::walk_frame(leg.travelled, walk_anim, now),
@@ -523,6 +524,17 @@ pub(crate) fn pet_effects(
     }
 }
 
+/// One gateway mascot to draw this frame, and what its card shows.
+struct DrawnMascot {
+    key: DaemonInstanceKey,
+    stance: Stance,
+    state: DaemonState,
+    /// Its gateway's runs in flight.
+    runs: u32,
+    /// Its gateway's sessions.
+    active_sessions: u32,
+}
+
 /// Every gateway mascot in the scene's daemon roster, walking the people's
 /// walker, plus each one still walking out after its gateway left the roster.
 /// The runtime keeps the roster honest, so "entry present" tracks "connected +
@@ -540,7 +552,7 @@ fn mascot_placements(
         creatures.retain(|key, _| matches!(key, CreatureKey::Pet(_)));
         return Vec::new();
     };
-    let mut drawn: Vec<(DaemonInstanceKey, Stance, DaemonState, u32, u32)> = Vec::new();
+    let mut drawn: Vec<DrawnMascot> = Vec::new();
     for (source, instance, presence) in scene.daemons() {
         let Some(def) = gateway_mascot_def(source) else {
             continue;
@@ -575,36 +587,61 @@ fn mascot_placements(
             walk.leave(elevator, roam, ground, now);
         }
         if let Some(stance) = walk.step(roam, ground, timing) {
-            let runs = presence.in_flight_runs.len() as u32;
-            drawn.push((key, stance, state, runs, presence.active_sessions));
+            drawn.push(DrawnMascot {
+                key,
+                stance,
+                state,
+                runs: presence.in_flight_runs.len() as u32,
+                active_sessions: presence.active_sessions,
+            });
         }
     }
-    // One whose gateway left the roster walks out, on past the entry.
-    creatures.retain(|key, walk| match key {
-        CreatureKey::Pet(_) => true,
-        CreatureKey::Mascot(k) if scene.daemon(k.source(), k.instance()).is_some() => true,
-        CreatureKey::Mascot(k) => {
-            let Some(def) = gateway_mascot_def(k.source()) else {
-                return false;
-            };
-            let roam = Roam::mascot(pack.animation(def.walk), DaemonState::Down);
-            if !walk.leaving() {
-                walk.leave(elevator, roam, ground, now);
+    // One whose gateway left the roster walks out, on past the entry; in key
+    // order, so the draw order holds frame to frame.
+    let mut orphans: Vec<DaemonInstanceKey> = creatures
+        .keys()
+        .filter_map(|key| match key {
+            CreatureKey::Mascot(k) if scene.daemon(k.source(), k.instance()).is_none() => {
+                Some(k.clone())
             }
-            match walk.step(roam, ground, timing) {
-                Some(stance) => {
-                    drawn.push((k.clone(), stance, DaemonState::Down, 0, 0));
-                    true
-                }
-                None => false,
-            }
+            CreatureKey::Mascot(_) | CreatureKey::Pet(_) => None,
+        })
+        .collect();
+    orphans.sort();
+    for key in orphans {
+        let creature = CreatureKey::Mascot(key.clone());
+        let (Some(def), Some(walk)) = (
+            gateway_mascot_def(key.source()),
+            creatures.get_mut(&creature),
+        ) else {
+            creatures.remove(&creature);
+            continue;
+        };
+        let roam = Roam::mascot(pack.animation(def.walk), DaemonState::Down);
+        if !walk.leaving() {
+            walk.leave(elevator, roam, ground, now);
         }
-    });
+        if let Some(stance) = walk.step(roam, ground, timing) {
+            drawn.push(DrawnMascot {
+                key,
+                stance,
+                state: DaemonState::Down,
+                runs: 0,
+                active_sessions: 0,
+            });
+        }
+    }
     creatures.retain(|key, walk| !matches!(key, CreatureKey::Mascot(_)) || !walk.gone());
     drawn
         .iter()
         .filter_map(
-            |(key, Stance { at, walking }, state, runs, active_sessions)| {
+            |DrawnMascot {
+                 key,
+                 stance: Stance { at, walking },
+                 state,
+                 runs,
+                 active_sessions,
+             }| {
                 let def = gateway_mascot_def(key.source())?;
                 let (anim_name, frame_idx) = match walking {
                     Some(leg) => (
@@ -633,9 +670,9 @@ fn mascot_placements(
                     instance: (scene.daemons().filter(|(s, ..)| *s == key.source()).count()
                         + drawn
                             .iter()
-                            .filter(|(k, ..)| {
-                                k.source() == key.source()
-                                    && scene.daemon(k.source(), k.instance()).is_none()
+                            .filter(|d| {
+                                d.key.source() == key.source()
+                                    && scene.daemon(d.key.source(), d.key.instance()).is_none()
                             })
                             .count()
                         > 1)
