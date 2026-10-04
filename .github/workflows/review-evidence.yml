@@ -56,7 +56,7 @@ jobs:
       - id: list
         env:
           BASE: ${{ steps.base.outputs.sha }}
-          MUTANTS_PER_SHARD: 30
+          MUTANTS_PER_SHARD: 25
         run: |
           git diff "$BASE...HEAD" > pr.diff
           count=$(cargo mutants --in-diff pr.diff --list | wc -l | tr -d ' ')
@@ -91,9 +91,8 @@ jobs:
       # it partial. Round-robin evens the shards' work, so the box cuts them alike.
       - env:
           MUTANTS_BASE: ${{ needs.plan.outputs.base }}
-        run: >-
-          timeout 35m just mutants --shard "${{ matrix.shard }}/${{ needs.plan.outputs.shards }}"
-          --sharding round-robin --no-shuffle
+          SHARD: ${{ matrix.shard }}/${{ needs.plan.outputs.shards }}
+        run: timeout 35m just mutants --shard "$SHARD" --sharding round-robin --no-shuffle
       - if: always()
         uses: actions/upload-artifact@v7
         with:
