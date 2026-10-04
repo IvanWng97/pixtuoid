@@ -839,7 +839,7 @@ fn a_walking_person_never_slides() {
     let per_frame = f32::from(walk.stride().expect("a stride").get()) / walk.frames().len() as f32;
     let now = SystemTime::UNIX_EPOCH;
     // sampled as a painter paints: a frame stepped past between two paints is lost
-    let paint_ms = 1000 / u64::from(crate::anim::PAINT_FPS);
+    let paint_ms = crate::anim::PAINT_FRAME_MS;
     let steps = |total_ms: u64, travelled_at: &dyn Fn(u64) -> u32| {
         let (mut turns, mut last) = (0.0_f32, None);
         for ms in (0..=total_ms).step_by(paint_ms as usize) {

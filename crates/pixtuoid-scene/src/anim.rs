@@ -82,6 +82,8 @@ pub const CALM_TICK_MS: u64 = 500;
 /// it, on every tier: the sampling rate the walks' strides are sized for
 /// (`a_walking_person_never_slides`).
 pub const PAINT_FPS: u32 = 30;
+/// One [`PAINT_FPS`] frame, in whole ms: the step a test samples a painter at.
+pub const PAINT_FRAME_MS: u64 = 1000 / PAINT_FPS as u64;
 
 /// The least any phase of a flash — a strike's level, a starved neon's catch,
 /// the dark between — lasts in loop time: the project's own floor, beside

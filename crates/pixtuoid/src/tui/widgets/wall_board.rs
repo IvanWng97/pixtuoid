@@ -204,7 +204,7 @@ mod tests {
     fn every_l2_face_is_one_terminal_column_per_char() {
         use std::time::Duration;
         const A_MINUTE_MS: u64 = 60_000;
-        const FRAME_MS: usize = 33;
+        const FRAME_MS: usize = pixtuoid_scene::anim::PAINT_FRAME_MS as usize;
         let offices = [(0, 0, 0), (0, 0, 3), (4, 0, 6), (4, 2, 6), (1, 1, 0)];
         for (active, waiting, idle) in offices {
             let counts = StateCounts {

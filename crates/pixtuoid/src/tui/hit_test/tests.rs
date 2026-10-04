@@ -355,8 +355,6 @@ fn pet_rows(pos: Point, anim: &str) -> (u16, u16) {
     (top, top + hitbox.h - 1)
 }
 
-// Probing coords that DO hit while the pantry is present is what proves the
-// false comes from the missing-pantry guard rather than an off-counter miss.
 #[test]
 fn coffee_machine_returns_false_without_a_pantry() {
     let mut layout = SceneLayout::compute(160, 200, Some(4)).expect("layout");

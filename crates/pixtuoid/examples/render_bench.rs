@@ -93,7 +93,7 @@ fn main() -> Result<()> {
         // Warm the caches (layout memo + recolored frames) — steady state is
         // what a running office pays, not the first frame.
         for i in 0..15u64 {
-            let now = base + Duration::from_millis(i * 33);
+            let now = base + Duration::from_millis(i * pixtuoid_scene::anim::PAINT_FRAME_MS);
             let _ = r.render(RenderInputs {
                 world: FloorInputs {
                     scene: &scene,
@@ -160,7 +160,7 @@ fn main() -> Result<()> {
         populate(&mut scene, base, n);
         let mut r = OfficeRenderer::new(std::sync::Arc::clone(&pack));
         for i in 0..15u64 {
-            let now = base + Duration::from_millis(i * 33);
+            let now = base + Duration::from_millis(i * pixtuoid_scene::anim::PAINT_FRAME_MS);
             let _ = r.render(RenderInputs {
                 world: FloorInputs {
                     scene: &scene,
@@ -228,7 +228,7 @@ fn main() -> Result<()> {
         let mut enc_ms = f64::MAX;
         let mut bytes = 0usize;
         for i in 0..12u64 {
-            let now = base + Duration::from_millis(i * 33);
+            let now = base + Duration::from_millis(i * pixtuoid_scene::anim::PAINT_FRAME_MS);
             let buf = r
                 .render(RenderInputs {
                     world: FloorInputs {

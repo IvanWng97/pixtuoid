@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A cell whose natural scale is the bundled art's density, so the image is
-/// the density render itself, one cell per 4×8 image pixels.
+/// the density render itself, unscaled.
 const CELL: CellSize = CellSize { w: 4, h: 8 };
 const PLACEHOLDER: char = '\u{10EEEE}';
 const TRANSMIT: &str = "\x1b_Ga=T,";

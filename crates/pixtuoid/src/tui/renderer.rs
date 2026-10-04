@@ -253,7 +253,7 @@ mod min_size_tests {
     }
 }
 
-/// Say WHY there is no office. All three callers of `draw_footer_only_frame` are
+/// Say WHY there is no office. Every caller of `draw_footer_only_frame` is
 /// a refusal — the scene rect is under the painter's own floor, `frame_layout`
 /// declined, or a floor transition hit the same gate — and a silent refusal reads
 /// as a crash on the small terminal a first-time user is most likely to be at.
@@ -443,7 +443,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     })
 }
 
-/// The modal-overlay dispatch, centralized so the three draw paths can't drift in
+/// The modal-overlay dispatch, centralized so the draw paths can't drift in
 /// ordering or args. `bounds` is the FULL terminal area — a modal is centered over
 /// the whole frame, and `PanelGeometry` keeps it off the footer row itself.
 pub(super) fn paint_overlays(

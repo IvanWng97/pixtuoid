@@ -2949,8 +2949,7 @@ mod validation_floor_tests {
         );
     }
 
-    /// A density is author input multiplied by a frame dimension: unbounded, a
-    /// typo like `desk@60000x` overflows it.
+    /// Pins [`MAX_DENSITY_VARIANT`].
     #[test]
     fn a_density_past_the_ceiling_is_not_a_variant_at_all() {
         assert_eq!(split_density_variant("desk@60000x"), None);

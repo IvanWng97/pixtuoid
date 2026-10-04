@@ -505,7 +505,7 @@ pub fn unwind_terminal_modes<W: std::io::Write>(
     unwind_after(&crate::graphics::unwind_prelude(), out, disable_raw)
 }
 
-/// [`unwind_terminal_modes`] with the graphics' own unwind as `prelude`: the
+/// [`unwind_terminal_modes`]' unwind behind `prelude`, written first so the
 /// images go while the alt screen that holds them is still up.
 fn unwind_after<W: std::io::Write>(
     prelude: &[u8],
