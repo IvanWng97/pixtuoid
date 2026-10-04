@@ -19,6 +19,7 @@ use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
 /// A cutaway painter's frame buffer and what it shows, for one pack.
+#[derive(Debug)]
 pub struct CutawayCanvas {
     // Held, so no other pack can take its place unnoticed.
     pack: Arc<Pack>,
@@ -28,6 +29,7 @@ pub struct CutawayCanvas {
 }
 
 /// One frame from [`CutawayCanvas::frame`].
+#[derive(Debug)]
 pub struct CanvasFrame<'a> {
     /// The whole frame, as [`render_cutaway`](crate::cutaway::paint::render_cutaway)
     /// paints it.
@@ -48,6 +50,7 @@ pub enum Dirty {
 
 /// What every pixel of a frame is painted under, beyond its display list and
 /// the canvas's pack.
+#[derive(Debug)]
 struct Epoch {
     // Held, so a later layout cannot reuse its address.
     layout: Arc<SceneLayout>,
@@ -70,6 +73,7 @@ impl PartialEq for Epoch {
     }
 }
 
+#[derive(Debug)]
 struct Shown {
     epoch: Epoch,
     /// Every piece's reach and every light's span, each with its fingerprint.

@@ -381,7 +381,7 @@ pub(crate) fn net_pass(
 
 /// [`net_pass`]'s colours, kept across frames: OKLab maths a room asks again
 /// every frame.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct NetMemo {
     colours: std::collections::HashMap<NetKey, Rgb, std::hash::BuildHasherDefault<SplitMix>>,
     /// Neighbouring pixels mostly ask the last question again.

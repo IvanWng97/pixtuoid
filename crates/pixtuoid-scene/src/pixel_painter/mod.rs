@@ -20,7 +20,7 @@ use crate::walk::WalkState;
 
 /// The gateway mascot's screen frame — enough to hover-identify it. Recaptured
 /// each render, since the wandering position is recomputed every frame.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct MascotFrame {
     /// The mascot's centre screen position this tick.
     pub pos: Point,
@@ -60,7 +60,7 @@ pub struct AgentFrame {
 }
 
 /// What [`paint_frame`] drew that hover can name.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct Hoverables {
     pub(crate) pet_pos: Option<PetFrame>,
     pub(crate) mascots: Vec<MascotFrame>,
@@ -68,6 +68,7 @@ pub(crate) struct Hoverables {
 }
 
 /// The classic's raster state for one floor, kept across frames.
+#[derive(Debug)]
 pub(crate) struct ClassicCaches {
     pub(crate) sprites: FrameCache,
     pub(crate) base_fill: BaseFillCache,

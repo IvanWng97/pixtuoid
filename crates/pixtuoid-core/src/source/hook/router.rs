@@ -50,6 +50,7 @@ pub(crate) async fn tee_child_end_unclaims(
 /// The shared hook-socket owner: binds the ONE socket, runs the per-connection
 /// decode loop, interposes the #246 tee, and feeds the daemon-presence side
 /// channel.
+#[derive(Debug)]
 pub struct HookRouter {
     socket_path: PathBuf,
     /// The #246 child-end un-claim PRODUCER handle; the runtime shares ONE with

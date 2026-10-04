@@ -163,7 +163,7 @@ fn board_span(board: &crate::board::BoardModel, pen: Pen) -> Span {
 /// What a cutaway frame is drawn with and the next one is too: the office
 /// itself, where the sky's look, `altitude` and `now` are what move from frame
 /// to frame.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Office<'a> {
     /// Where everything stands, in LOGICAL units.
     pub layout: &'a SceneLayout,
@@ -177,7 +177,7 @@ pub struct Office<'a> {
 
 /// Which floor a frame shows, when, and what its wall board says: what moves
 /// a frame beyond its office and the sim's world.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Showing<'a> {
     /// The floor of the building it shows.
     pub floor: crate::floor::FloorMeta,
