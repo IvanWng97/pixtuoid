@@ -195,7 +195,7 @@ pub(crate) fn toml_merge_outcome(
     let mut out = edit.to_string();
     // toml_edit writes LF; a file that was all-CRLF stays so.
     if content.contains("\r\n") && !content.replace("\r\n", "").contains('\n') {
-        out = out.replace('\n', "\r\n");
+        out = out.replace("\r\n", "\n").replace('\n', "\r\n");
     }
     Ok(MergeOutcome {
         content: out,
@@ -345,12 +345,7 @@ mod tests {
             d
         })
         .unwrap();
-        assert!(
-            !out.content.replace("\r\n", "").contains('\n'),
-            "{:?}",
-            out.content
-        );
-        assert!(out.content.contains("# note"));
+        assert_eq!(out.content, "# note\r\na = 1\r\nb = 2\r\n");
     }
 
     /// A merge rewrites only what it changed: the owner's comments, on the keys,
