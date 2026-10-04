@@ -6,7 +6,7 @@
 //! and runs on the beat, so a calmer motion tier starts fewer walks and a still
 //! one starts none, while a walk under way always finishes.
 
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use pixtuoid_core::AgentSlot;
 use pixtuoid_core::id::splitmix64;
@@ -324,15 +324,23 @@ impl CreatureWalk {
         };
     }
 
-    /// Held still where it stands (a pet being petted), resting from `now`.
+    /// Held still where it stands (a pet being petted) since it last
+    /// stepped: a rest restarts from `now`; a leg pauses, its clock pushed on
+    /// by the hold, and walks on from the same point after, so it never rests
+    /// mid-leg off the clear floor a rest needs.
     pub(crate) fn hold(&mut self, now: SystemTime) {
-        if let Some(Stance { at, .. }) = self.stance(now) {
-            self.phase = Phase::Resting {
-                at,
-                since: now,
-                walked_ms: 0,
-            };
+        let held = Duration::from_millis(elapsed_ms(now, self.advanced_at));
+        match &mut self.phase {
+            Phase::Resting {
+                since, walked_ms, ..
+            } => {
+                *since = now;
+                *walked_ms = 0;
+            }
+            Phase::Walking(w) | Phase::Leaving(w) => w.started_at += held,
+            Phase::Gone => {}
         }
+        self.advanced_at = now;
     }
 
     /// Where it is at `now`, without advancing it; `None` once gone.
@@ -522,19 +530,27 @@ mod tests {
     }
 
     /// Every creature's roam: each pet's, and the mascot's in every live state.
-    fn roams(pack: &Pack) -> Vec<(&'static str, Roam)> {
+    /// Every creature's roam with the Full ticks it takes per cycle of its
+    /// walk: each pet's, and the mascot's in every state.
+    fn roams(pack: &Pack) -> Vec<(&'static str, Roam, u64)> {
         let lobster = pack.animation("lobster_walk");
         PetKind::ALL
             .iter()
-            .map(|k| (k.walk_anim(), Roam::pet(pack.animation(k.walk_anim()))))
+            .map(|k| {
+                (
+                    k.walk_anim(),
+                    Roam::pet(pack.animation(k.walk_anim())),
+                    PET_TICKS_PER_STRIDE,
+                )
+            })
             .chain(
                 [
-                    DaemonState::Idle,
-                    DaemonState::Busy,
-                    DaemonState::Degraded,
-                    DaemonState::Down,
+                    (DaemonState::Idle, 2 * MASCOT_TICKS_PER_STRIDE),
+                    (DaemonState::Busy, MASCOT_TICKS_PER_STRIDE),
+                    (DaemonState::Degraded, 3 * MASCOT_TICKS_PER_STRIDE),
+                    (DaemonState::Down, MASCOT_TICKS_PER_STRIDE),
                 ]
-                .map(|s| ("lobster_walk", Roam::mascot(lobster, s))),
+                .map(|(s, ticks)| ("lobster_walk", Roam::mascot(lobster, s), ticks)),
             )
             .collect()
     }
@@ -583,9 +599,8 @@ mod tests {
         SceneLayout::compute(w, h, None).expect("layout fits")
     }
 
-    /// A planted foot stays planted: no creature's legs cycle faster than one
-    /// stride per [`PET_TICKS_PER_STRIDE`] Full ticks (the briskest any keeps),
-    /// nor cover half a stride
+    /// A planted foot stays planted: each creature cruises exactly one stride
+    /// per its own Full ticks, never covers more, nor half a stride
     /// between two paints, where its distance-stepped frames would alias.
     #[test]
     fn no_creature_outpaces_its_stride() {
@@ -600,14 +615,18 @@ mod tests {
             * u64::from(OCTILE_STRAIGHT_COST)
             / u64::from(crate::physics::PROGRESS_SCALE)
             + 1;
-        for (anim, roam) in roams(&pack) {
+        for (anim, roam, ticks) in roams(&pack) {
             let stride = pack
                 .animation(anim)
                 .and_then(Sprite::stride)
                 .map(|s| u32::from(s.get()) * OCTILE_STRAIGHT_COST)
                 .expect("a creature's walk steps by the ground");
-            let cadence =
-                stride as u64 * PAINTS as u64 * PAINT_MS / (PET_TICKS_PER_STRIDE * FULL_TICK_MS);
+            assert_eq!(
+                roam.gait.cruise,
+                stride as f32 / (ticks * FULL_TICK_MS) as f32,
+                "{anim} cruises off its {ticks}-tick cadence"
+            );
+            let cadence = stride as u64 * PAINTS as u64 * PAINT_MS / (ticks * FULL_TICK_MS);
             let mut walked = 0;
             for seed in 0..4 {
                 let mut walk = CreatureWalk::at_home(&l, seed, at(0));
@@ -959,6 +978,58 @@ mod tests {
         assert!(
             pct <= CROWDED_MAX_PCT,
             "four gateways crowded in {pct}% of {frames} frames — a small destination set is back"
+        );
+    }
+
+    /// A pet petted mid-walk holds where it stands, then walks on from there
+    /// and rests where its leg was headed: never on the leg's way, off the
+    /// clear floor a rest needs.
+    #[test]
+    fn a_pet_petted_mid_walk_walks_on_from_where_it_was_held() {
+        let pack = test_pack();
+        let roam = Roam::pet(pack.animation(PetKind::Cat.walk_anim()));
+        let l = layout(192, 80);
+        let mut router = AStarRouter::new();
+        let overlay = OccupancyOverlay::new();
+        let mut ground = Ground {
+            layout: &l,
+            router: &mut router,
+            overlay: &overlay,
+        };
+        let mut walk = CreatureWalk::at_home(&l, 3, at(0));
+        let mut ms = 0;
+        let held = loop {
+            ms += PAINT_MS;
+            let s = walk
+                .step(roam, &mut ground, Motion::Full.timing(at(ms)))
+                .expect("drawn");
+            if s.walking.is_some() {
+                break s;
+            }
+            assert!(ms < 120_000, "the cat sets off");
+        };
+        let until = ms + crate::pet::PET_DURATION_MS;
+        while ms < until {
+            ms += PAINT_MS;
+            walk.hold(at(ms));
+            let s = walk
+                .step(roam, &mut ground, Motion::Full.timing(at(ms)))
+                .expect("drawn");
+            assert_eq!(s.at, held.at, "it moved while petted");
+        }
+        let rest = loop {
+            ms += PAINT_MS;
+            let s = walk
+                .step(roam, &mut ground, Motion::Full.timing(at(ms)))
+                .expect("drawn");
+            if s.walking.is_none() {
+                break s.at;
+            }
+        };
+        assert_ne!(rest, held.at, "it rested where it was held, mid-leg");
+        assert!(
+            l.walkable.is_walkable(rest.x, rest.y) && l.is_visually_clear(rest),
+            "it rested at {rest:?}, off clear floor"
         );
     }
 
