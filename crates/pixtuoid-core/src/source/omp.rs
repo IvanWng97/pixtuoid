@@ -276,8 +276,8 @@ fn omp_profile_sessions_dirs_resolved(
     };
     let primary = resolve_omp_sessions_dir(env, xdg_platform, exists);
     // Through the same validator omp applies: a dir failing its name regex (or
-    // a stray `default`) is one omp can never select, and enumerating it would
-    // make the watcher MATERIALIZE junk roots via its create_dir_all.
+    // a stray `default`) is one omp can never select, so watching it would
+    // follow a root omp never writes.
     let mut names: Vec<String> = list_profiles(&base.join(PROFILES_SUBDIR))
         .iter()
         .filter_map(|n| normalize_profile_name(Some(n)))
