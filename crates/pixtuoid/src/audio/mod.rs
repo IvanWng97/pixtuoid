@@ -1103,6 +1103,43 @@ mod listen_gate {
         sink.master
     }
 
+    /// The stems sum with no soft clip (`BUS_TRIM`'s doc), so the loudest
+    /// office there is stays under full scale: every agent active, a storm's
+    /// rain, and the appliances firing together over and over.
+    #[test]
+    fn the_loudest_mix_stays_under_full_scale() {
+        let mut rng = dsp::NoiseStream::new(BUILD_SEED);
+        let bank = AssetBank::build(&mut rng);
+        let rain = Arc::new(synth::rain_bed(&mut rng));
+        let day = TrackBeds::build(&mut rng, TrackId::GenDay(0));
+        let night = TrackBeds::build(&mut rng, TrackId::GenNight(0));
+        // The busy tier saturates, so no count is louder.
+        let busiest = pixtuoid_scene::board::StateCounts {
+            active: usize::MAX,
+            waiting: 0,
+            idle: 0,
+            exiting: 0,
+            total: usize::MAX,
+        };
+        let stems = pixtuoid_scene::audio::stem_levels(&busiest, 1.0);
+        let volley: Vec<(f32, OneShot)> = (0..8u8)
+            .flat_map(|k| {
+                let at = 1.0 + f32::from(k) * 1.5;
+                [
+                    OneShot::DoorChime,
+                    OneShot::PrinterWhir,
+                    OneShot::VendingDrop,
+                ]
+                .map(|e| (at, e))
+            })
+            .collect();
+        for (beds, track) in [(&day, TrackId::GenDay(0)), (&night, TrackId::GenNight(0))] {
+            let buf = render_tier(&bank, beds, &rain, track, stems, &volley, 15.0);
+            let peak = buf.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
+            assert!(peak < 1.0, "{track:?} peaks at {peak}");
+        }
+    }
+
     #[test]
     #[ignore = "the LISTEN gate: renders audition wavs for the owner's ears"]
     fn render_listen_gate_wavs() {
