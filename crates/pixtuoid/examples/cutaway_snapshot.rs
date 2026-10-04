@@ -13,13 +13,11 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
 use image::{Rgb as ImgRgb, RgbImage};
-use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::cutaway::paint::render_cutaway;
-use pixtuoid_scene::display::{Office, Showing};
-use pixtuoid_scene::floor::{FloorMeta, FloorSession, SteppedFloor};
+use pixtuoid_scene::floor::{FloorMeta, FloorSession};
 use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::render_scale::RenderScale;
 use pixtuoid_scene::theme::theme_by_name;
 
@@ -139,7 +137,7 @@ fn main() -> Result<()> {
     }
     let theme =
         theme_by_name(&theme_name).ok_or_else(|| anyhow!("unknown theme {theme_name:?}"))?;
-    let pack = pixtuoid_scene::pack::load_bundled_pack()?;
+    let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack()?);
     // Defaults to the pack's densest art, the density it was drawn for.
     let scale_n = scale_n.unwrap_or_else(|| pack.max_density_variant().get());
     let scale = RenderScale::new(scale_n).ok_or_else(|| anyhow!("--scale must be nonzero"))?;
@@ -178,40 +176,31 @@ fn main() -> Result<()> {
         ));
     }
 
-    // The real sim, at LOGICAL size — the cutaway is its second reader.
-    let mut session = FloorSession::new();
-    let SteppedFloor { layout, frame } = session
-        .step(
-            pixtuoid_scene::floor::FloorInputs {
-                scene: &scene,
-                pack: &pack,
-                now,
-                floor: meta,
-                pets: pixtuoid_scene::floor::PetInputs::default(),
+    // The real sim, at LOGICAL size, drawn through the painters' one entry.
+    let mut session = FloorSession::new(Arc::clone(&pack));
+    let layout = session
+        .render(
+            Look::Cutaway { scale },
+            RenderInputs {
+                world: pixtuoid_scene::floor::FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: meta,
+                    pets: pixtuoid_scene::floor::PetInputs::default(),
+                },
+                theme,
+                size: Size { w: lw, h: lh },
+                place: Place {
+                    gateway: pixtuoid_scene::board::office_gateway(&scene),
+                    floor: None,
+                },
+                debug_walkable: false,
             },
-            Size { w: lw, h: lh },
         )
         .ok_or_else(|| anyhow!("{lw}x{lh} does not lay out"))?;
-
-    let (bw, bh) = (scale.to_buffer(lw), scale.to_buffer(lh));
-    let mut buf = RgbBuffer::filled(bw, bh, theme.surface.bg_fallback);
-    let mut cache = pixtuoid_scene::cutaway::paint::CutawayCache::default();
-    render_cutaway(
-        &frame,
-        Office {
-            layout: &layout,
-            pack: &pack,
-            theme,
-            scale,
-        },
-        Showing {
-            floor: meta,
-            now,
-            board: &session.board(&scene, meta.motion, now),
-        },
-        &mut cache,
-        &mut buf,
-    );
+    let buf = session.buf().ok_or_else(|| anyhow!("no frame drawn"))?;
+    let (bw, bh) = (buf.width(), buf.height());
 
     let mut img = RgbImage::new(u32::from(bw), u32::from(bh));
     for (i, px) in buf.as_slice().iter().enumerate() {
@@ -221,9 +210,9 @@ fn main() -> Result<()> {
     img.save(&out).with_context(|| format!("writing {out}"))?;
     eprintln!(
         "wrote {out} ({bw}x{bh} = {lw}x{lh} logical @{scale_n}x, \
-         {} desks, {} characters)",
+         {} desks, {} agents)",
         layout.home_desks.len(),
-        frame.characters.len()
+        scene.agents.len()
     );
     Ok(())
 }
