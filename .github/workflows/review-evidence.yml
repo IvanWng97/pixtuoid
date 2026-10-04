@@ -38,6 +38,7 @@ jobs:
       base: ${{ steps.base.outputs.sha }}
       head: ${{ steps.base.outputs.head }}
       mutants: ${{ steps.list.outputs.count }}
+      shards: ${{ steps.list.outputs.shards }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -55,17 +56,22 @@ jobs:
       - id: list
         env:
           BASE: ${{ steps.base.outputs.sha }}
+          MUTANTS_PER_SHARD: 30
         run: |
           git diff "$BASE...HEAD" > pr.diff
-          echo "count=$(cargo mutants --in-diff pr.diff --list | wc -l | tr -d ' ')" >> "$GITHUB_OUTPUT"
+          count=$(cargo mutants --in-diff pr.diff --list | wc -l | tr -d ' ')
+          # About MUTANTS_PER_SHARD fit a shard's time box; past four shards'
+          # worth, the four jobs run the first four of more round-robin
+          # shards: an even sample rather than a run that times out.
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "shards=$(( count > 4 * MUTANTS_PER_SHARD ? (count + MUTANTS_PER_SHARD - 1) / MUTANTS_PER_SHARD : 4 ))" >> "$GITHUB_OUTPUT"
 
   mutants:
     name: mutants shard ${{ matrix.shard }}
     needs: plan
     if: needs.plan.outputs.mutants != '0'
     runs-on: ubuntu-latest
-    # A time box, not a hang guard: a shard that runs out is reported partial.
-    timeout-minutes: 40
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -80,11 +86,15 @@ jobs:
       - uses: ./.github/actions/setup-cargo-just
       - uses: taiki-e/install-action@cargo-mutants
       - uses: taiki-e/install-action@cargo-nextest
+      # A time box inside the job's, so a shard that runs out still uploads the
+      # outcomes cargo-mutants rewrites after every mutant; the manifest reports
+      # it partial. Round-robin evens the shards' work, so the box cuts them alike.
       - env:
           MUTANTS_BASE: ${{ needs.plan.outputs.base }}
-        # Round-robin evens the shards' work, so the time box cuts them alike.
-        run: just mutants --shard "${{ matrix.shard }}/4" --sharding round-robin --no-shuffle
-      - if: ${{ !cancelled() }}
+        run: >-
+          timeout 35m just mutants --shard "${{ matrix.shard }}/${{ needs.plan.outputs.shards }}"
+          --sharding round-robin --no-shuffle
+      - if: always()
         uses: actions/upload-artifact@v7
         with:
           name: mutants-shard-${{ matrix.shard }}
@@ -108,18 +118,21 @@ jobs:
           BASE: ${{ needs.plan.outputs.base }}
           HEAD_SHA: ${{ needs.plan.outputs.head }}
           LISTED: ${{ needs.plan.outputs.mutants }}
+          SHARDS: ${{ needs.plan.outputs.shards }}
           RUN_ID: ${{ github.run_id }}
         run: |
           shopt -s nullglob
           outcomes=(shards/*/outcomes.json)
           # A shard is whole only once cargo-mutants stamps its end_time.
           jq -n --arg base "$BASE" --arg head "$HEAD_SHA" --arg run "$RUN_ID" \
-            --argjson listed "$LISTED" --argjson shards 4 \
+            --argjson listed "$LISTED" --argjson shards "$SHARDS" \
             '[inputs] as $s | {
               head_sha: $head, base_sha: $base, run_id: ($run | tonumber),
               listed: $listed,
+              shards_total: $shards,
+              sampled: ($shards > 4),
               shards_complete: ($s | map(select(.end_time != null)) | length),
-              partial: ($listed > 0 and ($s | map(select(.end_time != null)) | length) < $shards),
+              partial: ($listed > 0 and ($s | map(select(.end_time != null)) | length) < ([$shards, 4] | min)),
               caught: ($s | map(.caught) | add // 0),
               missed: ($s | map(.missed) | add // 0),
               timeout: ($s | map(.timeout) | add // 0),
