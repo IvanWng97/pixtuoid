@@ -188,7 +188,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    gets its entire comment population re-read against `AGENTS.md`'s comment
    rules, and the cleanup rides the same PR (population and dispositions:
    [`REVIEW.md`](../REVIEW.md#design)'s comment audit). Not the merge gate.
-8. **Merge gate** — [the gate](#the-merge-gate); the `two-lens-review` skill
+8. **Merge gate** — [the gate](#the-merge-gate); the `local-review` skill
    runs its local rows; merging is `@mergifyio queue`, a release PR by hand.
 9. **Wrap** — retro; durable lessons go to the agent's own memory layer, not
    new repo docs.
@@ -211,7 +211,7 @@ crate IS.
 | while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
 | once you need a PR number | open it as a draft: the light tier runs, and `ci-gate` stays red by design |
 | once the draft's light tier is green | mark it ready: the full tier and the billed review bots start together, so a failure only the full tier catches costs one extra review round until the bots are chained after CI |
-| before marking ready (optional), or when a REVIEW.md local row matches (mandatory) | the `two-lens-review` skill |
+| when a REVIEW.md local row matches | the `local-review` skill |
 | once [the merge gate](#the-merge-gate) holds | `@mergifyio queue` |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 
@@ -250,11 +250,10 @@ disposition; zero open confirmed `issue (blocking)`; each matching
 `<!-- local-row:<row>:<head sha> -->`, where `<row>` is the row's first column
 up to any colon or parenthesis, lowercased, each run of non-alphanumerics one
 `-`, leading and trailing `-` dropped, and the sha is the head the run judged;
-a queue update that only merges `main` in leaves the record standing. The local
-[`two-lens-review`](../.claude/skills/two-lens-review/SKILL.md) skill is
-otherwise an optional pre-flight. A published review passes whatever it
-found; a failed or missing status is no review: comment `/claude-review`, else
-split the PR smaller.
+a queue update that only merges `main` in leaves the record standing. The
+[`local-review`](../.claude/skills/local-review/SKILL.md) skill runs those
+rows. A published review passes whatever it found; a failed or missing status
+is no review: comment `/claude-review`, else split the PR smaller.
 
 Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
 entry is a command because no queue condition can confirm a finding or match a
