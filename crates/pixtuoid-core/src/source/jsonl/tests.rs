@@ -2829,8 +2829,10 @@ async fn park_if_truncated_below_cursor_lands_exactly_at_new_eof() {
 
 #[tokio::test]
 async fn scan_root_on_unreadable_root_latches_failure_and_emits_nothing() {
-    let bad: PathBuf = std::env::temp_dir().join(format!("pixtuoid-no-such-{}", uuid_like()));
-    assert!(!bad.exists(), "fixture: the bad root must not exist");
+    // A file where the root should be: present, but not listable.
+    let dir = tempfile::tempdir().unwrap();
+    let bad = dir.path().join("projects");
+    std::fs::write(&bad, b"").unwrap();
     let cursors = Arc::new(Mutex::new(HashMap::new()));
     let seen = Arc::new(Mutex::new(HashMap::new()));
     let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
@@ -2856,6 +2858,38 @@ async fn scan_root_on_unreadable_root_latches_failure_and_emits_nothing() {
     assert!(
         !health.on_failure(),
         "scan_root's Err arm must have already latched the failure"
+    );
+}
+
+#[tokio::test]
+async fn scan_root_on_absent_root_is_healthy_and_emits_nothing() {
+    let bad: PathBuf = std::env::temp_dir().join(format!("pixtuoid-no-such-{}", uuid_like()));
+    assert!(!bad.exists(), "fixture: the bad root must not exist");
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
+    let source: Arc<str> = Arc::from("test");
+    let live = Arc::new(Mutex::new(HashSet::new()));
+    let ctx = WatchCtx {
+        source: &source,
+        cursors: &cursors,
+        seen: &seen,
+        tx: &tx,
+        window: Duration::from_secs(3600),
+        live: &live,
+    };
+
+    let mut health = FailureLatch::default();
+    scan_root(&bad, t_decoders(), &ctx, &mut health).await;
+    drop(tx);
+    let events = drain_events(&mut rx);
+    assert!(
+        events.is_empty(),
+        "an absent root discovers no sessions, got {events:?}"
+    );
+    assert!(
+        health.on_failure(),
+        "an absent root (an uninstalled CLI's) must not latch a failure"
     );
 }
 
