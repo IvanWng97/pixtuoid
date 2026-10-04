@@ -132,10 +132,10 @@ impl PantryRoom {
     }
 
     /// The water cooler's sprite box against the pantry's east side, clear of
-    /// the counter, or `None` when the room can't fit it or it would stand over
-    /// the snack shelf. THE one authority
-    /// `paint_water_cooler` AND the binary's hover hit-test both read, so the
-    /// drawn sprite and its hover box can't drift across the crate boundary.
+    /// the counter, or `None` when the room can't fit it or it gives way
+    /// (`clear_of`). THE one authority `paint_water_cooler` AND the binary's
+    /// hover hit-test both read, so the drawn sprite and its hover box can't
+    /// drift across the crate boundary.
     pub fn water_cooler_rect(&self) -> Option<Bounds> {
         /// Columns between the cooler's east edge and the room's.
         const EAST_GAP: u16 = 3;
@@ -156,8 +156,8 @@ impl PantryRoom {
     }
 
     /// The trash bin's sprite box near the pantry's west counter, clear of it,
-    /// or `None` when the room can't fit it or it would stand over the snack
-    /// shelf or the water cooler. Shared placement authority for
+    /// or `None` when the room can't fit it or it gives way (`clear_of`).
+    /// Shared placement authority for
     /// `paint_trash_bin` and the hover hit-test — see [`Self::water_cooler_rect`].
     pub fn trash_bin_rect(&self) -> Option<Bounds> {
         let b = self.bounds;
@@ -204,7 +204,8 @@ impl PantryRoom {
 }
 
 /// Whether `r` overlaps none of `others` that exist: the pantry's small
-/// pieces give way to what is placed before them, refuse-don't-force.
+/// pieces give way, in the order snack shelf, then water cooler, then trash
+/// bin, each to those before it — refuse-don't-force.
 fn clear_of<const N: usize>(r: Bounds, others: [Option<Bounds>; N]) -> bool {
     others.into_iter().flatten().all(|o| !o.overlaps(r))
 }

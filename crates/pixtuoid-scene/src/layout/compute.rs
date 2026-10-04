@@ -1587,29 +1587,32 @@ pub(super) fn compute_pod_decor(
 /// a south-row sitter hangs into the aisle, over the art's top. Both facings,
 /// since a narrow band demotes a back-turned desk after this runs.
 fn clears_the_workstations(kind: Furniture, pos: Point, home_desks: &[Point], buf_h: u16) -> bool {
-    let art = furniture_def(kind).visual;
-    let art = (anchored_top_left(Pivot::Center, pos, art.w, art.h), art);
-    let sitter = Size {
-        w: CHARACTER_SPRITE_W,
-        h: CHARACTER_SPRITE_H,
-    };
-    let art_box = Bounds {
-        x: art.0.x,
-        y: art.0.y,
-        width: art.1.w,
-        height: art.1.h,
-    };
-    super::roster::desk_fixtures(home_desks, buf_h).all(|f| !f.visual.overlaps(art_box))
+    let art = corridor_art(kind, pos);
+    super::roster::desk_fixtures(home_desks, buf_h).all(|f| !f.visual.overlaps(art))
         && home_desks.iter().all(|&desk| {
             [Facing::North, Facing::South].into_iter().all(|facing| {
                 let foot = desk_walk_anchor_facing(desk, facing);
-                let top_left = Point {
-                    x: foot.x.saturating_sub(sitter.w / 2),
+                let sitter = Bounds {
+                    x: foot.x.saturating_sub(CHARACTER_SPRITE_W / 2),
                     y: foot.y.saturating_sub(WALKING_Y_OFF),
+                    width: CHARACTER_SPRITE_W,
+                    height: CHARACTER_SPRITE_H,
                 };
-                !super::placement::rects_overlap(art, (top_left, sitter))
+                !art.overlaps(sitter)
             })
         })
+}
+
+/// The art box of a corridor appliance of `kind` centred at `pos`.
+fn corridor_art(kind: Furniture, pos: Point) -> Bounds {
+    let art = furniture_def(kind).visual;
+    let at = anchored_top_left(Pivot::Center, pos, art.w, art.h);
+    Bounds {
+        x: at.x,
+        y: at.y,
+        width: art.w,
+        height: art.h,
+    }
 }
 
 pub(super) const VENDING_MIN_AISLE_H: u16 = 10;
@@ -1718,16 +1721,8 @@ fn compute_waypoints(
         .find(|&p| {
             clears_the_workstations(Furniture::Printer, p, home_desks, buf_h)
                 && vending.is_none_or(|v| {
-                    let columns = |kind, at: Point| {
-                        let w = furniture_def(kind).visual.w;
-                        let x = at.x - w / 2;
-                        x..x + w
-                    };
-                    let (a, b) = (
-                        columns(Furniture::Printer, p),
-                        columns(Furniture::VendingMachine, v),
-                    );
-                    a.end <= b.start || b.end <= a.start
+                    !corridor_art(Furniture::Printer, p)
+                        .shares_columns(corridor_art(Furniture::VendingMachine, v))
                 })
         });
     if let Some(printer) = printer
