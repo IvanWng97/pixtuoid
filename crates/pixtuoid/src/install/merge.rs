@@ -233,6 +233,7 @@ fn apply_toml(
         {
             let mut kept = vec![false; old.len()];
             let mut last_reused = None;
+            let mut new_seen = false;
             let mut in_order = true;
             let mut rebuilt = toml_edit::ArrayOfTables::new();
             for value in new {
@@ -240,19 +241,23 @@ fn apply_toml(
                 let table = match reuse.and_then(|i| aot.get(i).map(|t| (i, t.clone()))) {
                     Some((i, t)) => {
                         kept[i] = true;
-                        in_order &= last_reused.is_none_or(|j| j < i);
+                        in_order &= !new_seen && last_reused.is_none_or(|j| j < i);
                         last_reused = Some(i);
                         t
                     }
-                    None => match toml_item(value)? {
-                        toml_edit::Item::Table(t) => t,
-                        _ => anyhow::bail!("a table entry did not render as a table"),
-                    },
+                    None => {
+                        new_seen = true;
+                        match toml_item(value)? {
+                            toml_edit::Item::Table(t) => t,
+                            _ => anyhow::bail!("a table entry did not render as a table"),
+                        }
+                    }
                 };
                 rebuilt.push(table);
             }
             // A reused entry keeps its place in the file, which wins over its
-            // place in the array; reordered, they take the array's.
+            // place in the array; reordered, or behind a new one, they take the
+            // array's.
             if !in_order {
                 rebuilt.iter_mut().for_each(clear_table_positions);
             }
@@ -310,6 +315,22 @@ mod tests {
             .map(|t| t["x"].as_integer().unwrap())
             .collect();
         assert_eq!(xs, [2, 1], "{}", reorder.content);
+        let between = toml_merge_outcome("[[a]]\nx = 1\n\n[[a]]\nx = 2\n", |mut d: toml::Value| {
+            let a = d["a"].as_array_mut().unwrap();
+            a.insert(
+                1,
+                toml::Value::Table(toml::Table::from_iter([("x".into(), 9.into())])),
+            );
+            d
+        })
+        .unwrap();
+        let xs: Vec<i64> = toml::from_str::<toml::Value>(&between.content).unwrap()["a"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["x"].as_integer().unwrap())
+            .collect();
+        assert_eq!(xs, [1, 9, 2], "{}", between.content);
         let emptied = toml_merge_outcome("[[a]]\nx = 1\n", |mut d: toml::Value| {
             d["a"] = toml::Value::Array(vec![]);
             d
