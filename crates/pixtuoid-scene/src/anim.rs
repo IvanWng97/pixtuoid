@@ -85,6 +85,52 @@ pub const PAINT_FPS: u32 = 30;
 /// [WCAG 2.3.1]: https://www.w3.org/TR/WCAG22/#three-flashes-or-below-threshold
 pub const PHOTOSENSITIVE_PHASE_MIN_MS: u64 = 100;
 
+/// The most flashes [WCAG 2.3.1] allows in any one second.
+///
+/// [WCAG 2.3.1]: https://www.w3.org/TR/WCAG22/#three-flashes-or-below-threshold
+#[cfg(test)]
+pub(crate) const PHOTOSENSITIVE_FLASHES_PER_SECOND: usize = 3;
+
+/// The least change of a level, as a share of full, that counts toward a
+/// flash: [WCAG]'s general flash threshold.
+///
+/// [WCAG]: https://www.w3.org/TR/WCAG22/#dfn-general-flash-and-red-flash-thresholds
+#[cfg(test)]
+const FLASH_MIN_CHANGE: f32 = 0.1;
+
+/// The most flashes in any one second of `samples`, each `(wall ms, level)`
+/// in time order with the level a share of full: a flash is a pair of
+/// opposing changes, each at least [`FLASH_MIN_CHANGE`], and a run of changes
+/// one way is one change.
+#[cfg(test)]
+pub(crate) fn most_flashes_in_a_second(samples: impl IntoIterator<Item = (u64, f32)>) -> usize {
+    const SECOND_MS: u64 = 1000;
+    let mut samples = samples.into_iter();
+    let Some((_, mut settled)) = samples.next() else {
+        return 0;
+    };
+    let mut turns: Vec<(u64, bool)> = Vec::new();
+    for (ms, level) in samples {
+        if (level - settled).abs() < FLASH_MIN_CHANGE {
+            continue;
+        }
+        let up = level > settled;
+        settled = level;
+        if turns.last().is_none_or(|&(_, was_up)| was_up != up) {
+            turns.push((ms, up));
+        }
+    }
+    let mut first = 0;
+    let mut most = 0;
+    for last in 0..turns.len() {
+        while turns[last].0 - turns[first].0 >= SECOND_MS {
+            first += 1;
+        }
+        most = most.max((last - first + 1).div_ceil(2));
+    }
+    most
+}
+
 impl Motion {
     /// Every tier.
     pub(crate) const ALL: [Motion; 3] = [Motion::Full, Motion::Calm, Motion::Still];
