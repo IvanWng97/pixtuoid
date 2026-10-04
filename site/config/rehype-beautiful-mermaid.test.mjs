@@ -118,13 +118,15 @@ test('a non-mermaid code block is left alone', () => {
   assert.equal(tree.children[0], block);
 });
 
-test('a diagram without accessibility directives still renders, unlabelled', () => {
-  const tree = run({ type: 'root', children: [codeBlock('mermaid', 'flowchart LR\n  A --> B')] });
-  const svg = tree.children[0];
-  assert.equal(svg.tagName, 'svg');
-  assert.equal(
-    svg.children.some((c) => c.tagName === 'title'),
-    false
-  );
-  assert.equal(svg.properties.ariaLabelledBy, undefined);
+test('a diagram without its accTitle and accDescr fails the build (WCAG 1.1.1)', () => {
+  for (const src of [
+    'flowchart LR\n  A --> B',
+    'flowchart LR\n  accTitle: Only a title\n  A --> B',
+    'flowchart LR\n  accDescr: Only a description\n  A --> B',
+  ]) {
+    assert.throws(
+      () => run({ type: 'root', children: [codeBlock('mermaid', src)] }),
+      /accTitle and accDescr/
+    );
+  }
 });

@@ -79,22 +79,24 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
         ))}
       </div>
       <div class="studio__panel">
-        <div class="dial" role="group" aria-label="Demos">
+        <div class="dial" role="tablist" aria-label="Demos">
           {channels.map((c) =>
             c.status === 'live' ? (
               <button
                 class="mon dial__ch"
+                id={`dial-${c.id}`}
+                role="tab"
                 data-ch={c.id}
                 data-desc={c.featureDesc}
-                aria-pressed={c.id === def.id ? 'true' : 'false'}
-                aria-expanded={c.id === def.id ? 'true' : 'false'}
-                aria-controls="dial-desc"
+                aria-selected={c.id === def.id ? 'true' : 'false'}
+                tabindex={c.id === def.id ? 0 : -1}
+                aria-controls={`stage-${c.id}`}
               >
                 <span class="dial__num">{c.ch}</span> {c.label}
                 {c.kind === 'live' && <small class="dial__live">live</small>}
               </button>
             ) : (
-              <span class="dial__ch dial__ch--soon">
+              <span class="dial__ch dial__ch--soon" role="tab" aria-disabled="true">
                 <span class="dial__num">{c.ch}</span> {c.label} <small>soon</small>
               </span>
             )
@@ -391,8 +393,8 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
         });
         monitors.forEach(function (m) {
           const on = m.dataset.ch === id;
-          m.setAttribute('aria-pressed', on ? 'true' : 'false');
-          m.setAttribute('aria-expanded', on ? 'true' : 'false');
+          m.setAttribute('aria-selected', on ? 'true' : 'false');
+          m.tabIndex = on ? 0 : -1;
           if (on && dialDesc) dialDesc.textContent = m.dataset.desc || '';
         });
         if (dialDesc) {
@@ -407,9 +409,22 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
       else swap();
       if (!silent) history.replaceState(null, '', '#showcase-' + id);
     }
-    monitors.forEach(function (m) {
+    // WAI-ARIA APG tabs: one tab stop, arrows (and Home/End) move and select.
+    monitors.forEach(function (m, i) {
       m.addEventListener('click', function () {
         tune(m.dataset.ch);
+      });
+      m.addEventListener('keydown', function (e) {
+        const to = {
+          ArrowLeft: (i - 1 + monitors.length) % monitors.length,
+          ArrowRight: (i + 1) % monitors.length,
+          Home: 0,
+          End: monitors.length - 1,
+        }[e.key];
+        if (to === undefined) return;
+        e.preventDefault();
+        monitors[to].focus();
+        tune(monitors[to].dataset.ch);
       });
       function warm() {
         const st = studio.querySelector('[data-stage="' + m.dataset.ch + '"]');
@@ -555,10 +570,10 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
   .dial__ch:focus-visible {
     color: var(--fg);
   }
-  .dial__ch[aria-pressed='true'] {
+  .dial__ch[aria-selected='true'] {
     color: var(--fg);
   }
-  .dial__ch[aria-pressed='true'] .dial__num {
+  .dial__ch[aria-selected='true'] .dial__num {
     /* --led-ink, not --led: the dial is the one LED surface with no --screen under it */
     color: var(--led-ink);
     text-shadow: 0 0 6px var(--led-glow);

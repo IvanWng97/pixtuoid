@@ -1271,13 +1271,35 @@ test('theme chain: saved choice, URL override, toggle persist, Escape restore, s
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
 });
 
+test('install: the method switcher is APG tabs — one tab stop, arrows select', async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+  await page.goto('./');
+  const tabs = page.locator('.install__tabs[role="tablist"] [role="tab"]');
+  const n = await tabs.count();
+  expect(n).toBeGreaterThan(1);
+  await expect(page.locator('.install__tab[tabindex="0"]')).toHaveCount(1);
+  await tabs.first().focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(tabs.nth(1)).toBeFocused();
+  await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+  await expect(tabs.nth(1)).toHaveAttribute('tabindex', '0');
+  await expect(tabs.first()).toHaveAttribute('tabindex', '-1');
+  const panel = await tabs.nth(1).getAttribute('aria-controls');
+  await expect(page.locator(`#${panel}[role="tabpanel"]`)).toBeVisible();
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expect(tabs.nth(n - 1)).toBeFocused(); // wraps
+  await page.keyboard.press('Home');
+  await expect(tabs.first()).toHaveAttribute('aria-selected', 'true');
+});
+
 test('install: tabs swap panels and both clipboard branches deliver', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./'); // no live-office wait — tabs/copy are wasm-independent
   await page.locator('.install__tab[data-tab="cargo"]').click();
   await expect(page.locator('.install__tab[data-tab="cargo"]')).toHaveAttribute(
-    'aria-pressed',
+    'aria-selected',
     'true'
   );
   await expect(page.locator('#install-panel-cargo')).toBeVisible();
@@ -1307,7 +1329,7 @@ test('showcase studio: deep-links tune, dial and chips swap hydrated stages, the
   await page.goto('./#showcase-spaces');
   await expect(page.locator('[data-stage="spaces"]')).toBeVisible();
   await expect(page.locator('button.mon[data-ch="spaces"]')).toHaveAttribute(
-    'aria-pressed',
+    'aria-selected',
     'true'
   );
   await expect(page.locator('[data-stage="spaces"] img.terminal__screen')).toHaveAttribute(
@@ -1322,7 +1344,7 @@ test('showcase studio: deep-links tune, dial and chips swap hydrated stages, the
   await expect(page.locator('[data-stage="spaces"]')).toBeVisible();
   await expect(page.locator('[data-stage="dashboard"]')).toBeHidden();
   await expect(page.locator('button.mon[data-ch="spaces"]')).toHaveAttribute(
-    'aria-pressed',
+    'aria-selected',
     'true'
   );
   await expect(page).toHaveURL(/#showcase-spaces$/);
@@ -1668,11 +1690,11 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
       '#showcase .section-head .lead',
       '#showcase .eyebrow',
       '.roster__body',
-      ".dial__ch:not([aria-pressed='true'])",
+      ".dial__ch:not([aria-selected='true'])",
       '.dial__desc',
       // the PRESSED row overrides its number's colour, so the `:not()` above
       // misses it; `live` is the only marker for the one interactive demo.
-      ".dial__ch[aria-pressed='true'] .dial__num",
+      ".dial__ch[aria-selected='true'] .dial__num",
       '.dial__live',
       '#how .eyebrow',
       '#tools .section-head .lead',

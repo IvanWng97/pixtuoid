@@ -36,6 +36,9 @@ function defaultVariant(g: EnrichedVariantGroup): ShowcaseVariant | undefined {
 
 <figure
   class="terminal stage crt"
+  id={`stage-${c.id}`}
+  role="tabpanel"
+  aria-labelledby={`dial-${c.id}`}
   data-stage={c.id}
   data-retint={c.retint ? 'true' : undefined}
   hidden={!active}
