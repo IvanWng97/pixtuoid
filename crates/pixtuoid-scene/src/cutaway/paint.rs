@@ -230,7 +230,7 @@ fn paint_pieces(
                 };
                 let glow = match piece.kind {
                     PieceKind::Window { ref view, .. }
-                        if view.shows((pen.art_at(x).0, pen.art_at(y).0)) =>
+                        if view.shows((pen.art_of_buffer(x).0, pen.art_of_buffer(y).0)) =>
                     {
                         Glow::Pane
                     }

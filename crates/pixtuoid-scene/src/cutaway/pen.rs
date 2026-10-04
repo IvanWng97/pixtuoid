@@ -86,7 +86,7 @@ impl Pen {
     }
 
     /// The art pixel buffer pixel `b` lies in.
-    pub(crate) fn art_at(self, b: u16) -> ArtPx {
+    pub(crate) fn art_of_buffer(self, b: u16) -> ArtPx {
         ArtPx(b / self.k.get())
     }
 
