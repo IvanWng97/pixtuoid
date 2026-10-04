@@ -103,7 +103,7 @@ pub struct ActiveChitchat {
 }
 
 impl ActiveChitchat {
-    /// Starts a conversation at `venue` among `participants`.
+    /// Starts a conversation among `participants`.
     pub fn new(participants: Vec<AgentId>, now: SystemTime) -> Self {
         let ms = crate::anim::epoch_ms(now);
         let mut chat = Self {
