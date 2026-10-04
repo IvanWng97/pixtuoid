@@ -499,7 +499,7 @@ impl HeadMark {
 pub(crate) const HEAD_MARK: &str = "head.";
 
 /// An animation: its frames in order, the palette indices they were drawn
-/// with, each frame's marks, and the per-frame hold time.
+/// with, each frame's marks, the per-frame hold time, and a walk's stride.
 #[derive(Debug, Clone)]
 pub struct Sprite {
     /// The frames in their own palette's colors.
@@ -513,10 +513,16 @@ pub struct Sprite {
     /// through another pack's keys.
     palette: Arc<Palette>,
     frame_ms: u32,
+    stride: Option<std::num::NonZeroU16>,
 }
 
 impl Sprite {
-    fn new(marked: Vec<(IndexedFrame, Vec<Mark>)>, palette: Arc<Palette>, frame_ms: u32) -> Self {
+    fn new(
+        marked: Vec<(IndexedFrame, Vec<Mark>)>,
+        palette: Arc<Palette>,
+        frame_ms: u32,
+        stride: Option<std::num::NonZeroU16>,
+    ) -> Self {
         let pixels = palette.resolved();
         let (indexed, marks): (Vec<_>, Vec<_>) = marked.into_iter().unzip();
         let frames = indexed.iter().map(|f| f.resolve(&pixels)).collect();
@@ -526,6 +532,7 @@ impl Sprite {
             marks,
             palette,
             frame_ms,
+            stride,
         }
     }
 
@@ -554,9 +561,17 @@ impl Sprite {
         &self.frames
     }
 
-    /// How long each frame holds before advancing, in milliseconds.
+    /// How long each frame holds before advancing, in milliseconds: a walk
+    /// with a [`stride`](Self::stride) steps by distance instead.
     pub fn frame_ms(&self) -> u32 {
         self.frame_ms
+    }
+
+    /// The base-grid pixels a walker covers in one full cycle of its frames:
+    /// they advance by distance travelled, so a planted foot stays planted at
+    /// any speed. `None` where the pack declares none.
+    pub fn stride(&self) -> Option<std::num::NonZeroU16> {
+        self.stride
     }
 
     /// Frame `idx` as the palette indices a recolor resolves; `None` past the
