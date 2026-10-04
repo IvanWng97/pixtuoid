@@ -2,6 +2,11 @@ use super::*;
 use crate::tui::hit_test::SceneHit;
 use pixtuoid_scene::display::HoverTarget;
 
+/// The half-block cell row a buffer pixel row `px` falls in.
+fn cell_row(px: u16) -> u16 {
+    px / 2
+}
+
 #[test]
 fn furniture_hit_test_resolves_against_rendered_layout() {
     let scene = scene_with(vec![idle("/hit/0.jsonl", 0, t0())], 16);
@@ -100,7 +105,7 @@ fn click_hit_test_follows_a_walking_sprite() {
     );
     let (dx, dy) = (
         seat.x + pixtuoid_scene::layout::CHARACTER_SPRITE_W / 2,
-        u16::midpoint(seat.y, pixtuoid_scene::layout::CHARACTER_SPRITE_H / 2),
+        cell_row(seat.y + pixtuoid_scene::layout::CHARACTER_SPRITE_H / 2),
     );
     assert_eq!(r.hit_test_agent_at(dx, dy), Some(id));
 
@@ -209,7 +214,7 @@ fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_top_left() {
 
     let mut moved = None;
     for row in
-        (seat.y / 2).saturating_sub(SWEEP_MARGIN)..=u16::midpoint(seat.y, drawn.h) + SWEEP_MARGIN
+        cell_row(seat.y).saturating_sub(SWEEP_MARGIN)..=cell_row(seat.y + drawn.h) + SWEEP_MARGIN
     {
         for col in seat.x.saturating_sub(SWEEP_MARGIN)..seat.x + drawn.w + SWEEP_MARGIN {
             let shows = cell_shows(drawn, col, row);

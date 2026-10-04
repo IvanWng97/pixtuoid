@@ -331,8 +331,12 @@ pub fn sweep_presence_ttl(scene: &mut SceneState, source: &str, ttl: PresenceTtl
             p.enter_down(now);
         } else {
             p.in_flight_runs.retain(|_, started| {
-                now.duration_since(*started)
-                    .map_or(true, |d| (d.as_millis() as u64) < ttl.busy_decay_ms)
+                now.duration_since(*started).map_or(
+                    // A clock regression keeps the lease: a backwards step must not
+                    // expire every run at once.
+                    true,
+                    |d| (d.as_millis() as u64) < ttl.busy_decay_ms,
+                )
             });
         }
     }

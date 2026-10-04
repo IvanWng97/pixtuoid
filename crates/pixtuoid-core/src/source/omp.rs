@@ -213,6 +213,7 @@ fn resolve_omp_agent_dir_parts(env: &OmpEnv) -> Option<(PathBuf, bool, Option<St
 
 fn resolve_omp_agent_dir(env: &OmpEnv) -> PathBuf {
     resolve_omp_agent_dir_parts(env).map_or_else(
+        // Keeps the pre-#880 shape: an unresolvable home is already `/tmp`-rooted.
         || crate::platform::user_home().join(".omp").join(AGENT_SUBDIR),
         |(d, _, _)| d,
     )

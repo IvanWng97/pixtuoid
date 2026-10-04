@@ -243,6 +243,8 @@ pub fn decode_copilot_line(
                 .and_then(|p| str_at(p, "kind"))
                 .map_or_else(
                     || "permission".to_string(),
+                    // Capped at the decode boundary: `kind` is raw wire content that
+                    // persists in the slot + egresses on the headless summary.
                     |k| ellipsize(&format!("permission: {k}"), MAX_DECODED_FIELD_CHARS),
                 );
             vec![AgentEvent::Waiting {

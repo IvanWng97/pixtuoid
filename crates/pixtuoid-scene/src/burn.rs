@@ -58,9 +58,11 @@ pub fn fresh_effort(slot: &AgentSlot, now: SystemTime) -> Option<&str> {
         if &*obs.value == pixtuoid_core::source::claude_code::ULTRA_EXIT_LABEL {
             return None;
         }
-        let fresh = now
-            .duration_since(obs.seen_at)
-            .map_or(true, |d| d.as_secs() <= EFFORT_TTL_SECS);
+        let fresh = now.duration_since(obs.seen_at).map_or(
+            // A future-stamped observation (clock skew) counts as fresh.
+            true,
+            |d| d.as_secs() <= EFFORT_TTL_SECS,
+        );
         fresh.then_some(&*obs.value)
     })
 }

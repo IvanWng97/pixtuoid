@@ -383,7 +383,7 @@ impl Office {
     ///
     /// # Panics
     ///
-    /// If the audio engine is absent after the readiness check above it, which that check rules out.
+    /// Never: the readiness check returns early whenever the engine is absent.
     pub fn audio_tick(&mut self, now_ms: f64) -> String {
         let Some(now) = self.last_now else {
             return r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
