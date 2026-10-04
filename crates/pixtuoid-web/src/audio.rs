@@ -16,6 +16,7 @@ use pixtuoid_scene::audio::{
     AudioEngine, AudioFrame, BUILD_SEED, MAX_DT_S, OneShotPool, TickCommands, TrackId, synth,
 };
 
+#[derive(Debug)]
 pub(crate) struct WebAudioDriver {
     rng: NoiseStream,
     bank: Option<AssetBank>,
@@ -180,6 +181,7 @@ impl WebAudioDriver {
 
 const WARMUP_STAGES: u8 = 2 + TRACK_STEMS.len() as u8;
 
+#[derive(Debug)]
 struct LaneBuild {
     score: GeneratedScore,
     beds: Vec<Arc<Vec<f32>>>,
@@ -205,6 +207,7 @@ impl LaneBuild {
     }
 }
 
+#[derive(Debug)]
 struct PendingBuild {
     to: TrackId,
     build: LaneBuild,
@@ -214,6 +217,7 @@ struct PendingBuild {
 /// instance are copied here piece-by-piece, because a postMessage transfer
 /// can't cross wasm memories. A torn handoff (worker died mid-stream) yields
 /// `None` so the click-time warmup runs instead.
+#[derive(Debug)]
 pub(crate) struct Adoption {
     track: TrackId,
     keystrokes: Vec<Arc<Vec<f32>>>,

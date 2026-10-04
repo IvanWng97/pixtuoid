@@ -26,6 +26,7 @@ pub(crate) fn pack_xrgb(c: Rgb) -> u32 {
 
 /// Renders the live office to a reusable `RgbBuffer`. One per window — keeping it
 /// alive across frames is what keeps walks/poses continuous (no walk-flash).
+#[derive(Debug)]
 pub struct OfficeRenderer {
     session: FloorSession,
     /// Ambient-audio gateway. Inert unless installed.
@@ -188,6 +189,7 @@ const FOOTER_MARGIN_PX: i32 = 6;
 
 /// The window's row-major `0x00RRGGBB` pixel surface, `w`×`h`, that the text
 /// overlays composite into.
+#[derive(Debug)]
 pub struct XrgbSurface<'a> {
     px: &'a mut [u32],
     w: usize,

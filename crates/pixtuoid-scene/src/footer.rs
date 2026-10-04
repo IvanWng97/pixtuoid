@@ -205,6 +205,7 @@ pub(crate) fn footer_tool_tally(scene: &SceneState) -> Vec<ToolTally> {
 
 /// The per-frame inputs `build_footer` renders: `counts` and `tools` come from
 /// the drawn floor's scene, everything else from the [`FooterContext`].
+#[derive(Debug)]
 pub struct FooterInputs<'a> {
     counts: StateCounts,
     tools: Vec<ToolTally>,

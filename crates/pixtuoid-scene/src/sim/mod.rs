@@ -205,7 +205,7 @@ pub(crate) fn scanline_col(desk_x: u16, beat: Beat) -> u16 {
 /// Paint consumes it by `&` — rendering the same frame twice is byte-identical
 /// and cannot move the sim. Owned data, so the stores are free again the moment
 /// `sim_step` returns.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SimFrame {
     /// The tick's agent snapshot — placements index into it, paint borrows
     /// from it.
