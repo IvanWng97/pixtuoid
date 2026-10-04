@@ -34,6 +34,8 @@ pub fn pixtuoid_scene::chitchat::ActiveChitchat::current_bubble(&self, std::time
 pub fn pixtuoid_scene::chitchat::ActiveChitchat::is_expired(&self, std::time::SystemTime) -> bool
 pub fn pixtuoid_scene::chitchat::ActiveChitchat::new(pixtuoid_scene::chitchat::VenueKey, alloc::vec::Vec<pixtuoid_core::id::AgentId>, std::time::SystemTime) -> Self
 pub fn pixtuoid_scene::chitchat::ActiveChitchat::set_participants(&mut self, alloc::vec::Vec<pixtuoid_core::id::AgentId>)
+impl core::fmt::Debug for pixtuoid_scene::chitchat::ActiveChitchat
+pub fn pixtuoid_scene::chitchat::ActiveChitchat::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::chitchat::ActiveChitchat
 impl core::marker::Send for pixtuoid_scene::chitchat::ActiveChitchat
 impl core::marker::Sync for pixtuoid_scene::chitchat::ActiveChitchat
@@ -127,6 +129,8 @@ pub fn pixtuoid_scene::floor::FloorCtx::new() -> Self
 pub fn pixtuoid_scene::floor::FloorCtx::recompute_door_anim_max_ms(&mut self, std::time::SystemTime)
 impl core::default::Default for pixtuoid_scene::floor::FloorCtx
 pub fn pixtuoid_scene::floor::FloorCtx::default() -> Self
+impl core::fmt::Debug for pixtuoid_scene::floor::FloorCtx
+pub fn pixtuoid_scene::floor::FloorCtx::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::floor::FloorCtx
 impl core::marker::Send for pixtuoid_scene::floor::FloorCtx
 impl core::marker::Sync for pixtuoid_scene::floor::FloorCtx
@@ -142,6 +146,8 @@ pub pixtuoid_scene::floor::FloorInputs::pets: pixtuoid_scene::floor::PetInputs<'
 pub pixtuoid_scene::floor::FloorInputs::scene: &'a pixtuoid_core::state::SceneState
 impl<'a> core::clone::Clone for pixtuoid_scene::floor::FloorInputs<'a>
 pub fn pixtuoid_scene::floor::FloorInputs<'a>::clone(&self) -> pixtuoid_scene::floor::FloorInputs<'a>
+impl<'a> core::fmt::Debug for pixtuoid_scene::floor::FloorInputs<'a>
+pub fn pixtuoid_scene::floor::FloorInputs<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'a> core::marker::Copy for pixtuoid_scene::floor::FloorInputs<'a>
 impl<'a> core::marker::Freeze for pixtuoid_scene::floor::FloorInputs<'a>
 impl<'a> core::marker::Send for pixtuoid_scene::floor::FloorInputs<'a>
@@ -187,6 +193,8 @@ pub fn pixtuoid_scene::floor::FloorSession::overlay(&self, &pixtuoid_core::state
 pub fn pixtuoid_scene::floor::FloorSession::render(&mut self, pixtuoid_scene::look::Look, pixtuoid_scene::look::RenderInputs<'_>) -> core::option::Option<alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>>
 pub fn pixtuoid_scene::floor::FloorSession::reset_frame_cache(&mut self)
 pub fn pixtuoid_scene::floor::FloorSession::step(&mut self, pixtuoid_scene::floor::FloorInputs<'_>, pixtuoid_scene::layout::Size) -> core::option::Option<pixtuoid_scene::floor::SteppedFloor>
+impl core::fmt::Debug for pixtuoid_scene::floor::FloorSession
+pub fn pixtuoid_scene::floor::FloorSession::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::floor::FloorSession
 impl core::marker::Send for pixtuoid_scene::floor::FloorSession
 impl core::marker::Sync for pixtuoid_scene::floor::FloorSession
@@ -203,6 +211,8 @@ impl pixtuoid_scene::floor::FloorTransition
 pub fn pixtuoid_scene::floor::FloorTransition::is_done(&self, std::time::SystemTime) -> bool
 pub fn pixtuoid_scene::floor::FloorTransition::new(usize, usize, std::time::SystemTime) -> Self
 pub fn pixtuoid_scene::floor::FloorTransition::t(&self, std::time::SystemTime) -> f32
+impl core::fmt::Debug for pixtuoid_scene::floor::FloorTransition
+pub fn pixtuoid_scene::floor::FloorTransition::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::floor::FloorTransition
 impl core::marker::Send for pixtuoid_scene::floor::FloorTransition
 impl core::marker::Sync for pixtuoid_scene::floor::FloorTransition
@@ -216,6 +226,8 @@ pub pixtuoid_scene::floor::OfficeStores::coffee: &'a mut pixtuoid_scene::floor::
 pub pixtuoid_scene::floor::OfficeStores::raster: &'a mut pixtuoid_scene::look::OfficeRaster
 impl pixtuoid_scene::floor::OfficeStores<'_>
 pub fn pixtuoid_scene::floor::OfficeStores<'_>::reborrow(&mut self) -> pixtuoid_scene::floor::OfficeStores<'_>
+impl<'a> core::fmt::Debug for pixtuoid_scene::floor::OfficeStores<'a>
+pub fn pixtuoid_scene::floor::OfficeStores<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'a> core::marker::Freeze for pixtuoid_scene::floor::OfficeStores<'a>
 impl<'a> core::marker::Send for pixtuoid_scene::floor::OfficeStores<'a>
 impl<'a> core::marker::Sync for pixtuoid_scene::floor::OfficeStores<'a>
@@ -229,6 +241,8 @@ pub pixtuoid_scene::floor::PerFloor::raster: pixtuoid_scene::look::Raster
 impl pixtuoid_scene::floor::PerFloor
 pub fn pixtuoid_scene::floor::PerFloor::evict_missing(&mut self, &pixtuoid_core::state::SceneState)
 pub fn pixtuoid_scene::floor::PerFloor::new(alloc::sync::Arc<pixtuoid_core::sprite::format::Pack>) -> Self
+impl core::fmt::Debug for pixtuoid_scene::floor::PerFloor
+pub fn pixtuoid_scene::floor::PerFloor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::floor::PerFloor
 impl core::marker::Send for pixtuoid_scene::floor::PerFloor
 impl core::marker::Sync for pixtuoid_scene::floor::PerFloor
@@ -247,6 +261,8 @@ pub fn pixtuoid_scene::floor::PerOffice::new() -> Self
 pub fn pixtuoid_scene::floor::PerOffice::stores(&mut self) -> pixtuoid_scene::floor::OfficeStores<'_>
 impl core::default::Default for pixtuoid_scene::floor::PerOffice
 pub fn pixtuoid_scene::floor::PerOffice::default() -> pixtuoid_scene::floor::PerOffice
+impl core::fmt::Debug for pixtuoid_scene::floor::PerOffice
+pub fn pixtuoid_scene::floor::PerOffice::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::floor::PerOffice
 impl core::marker::Send for pixtuoid_scene::floor::PerOffice
 impl core::marker::Sync for pixtuoid_scene::floor::PerOffice
@@ -261,6 +277,8 @@ impl<'a> core::clone::Clone for pixtuoid_scene::floor::PetInputs<'a>
 pub fn pixtuoid_scene::floor::PetInputs<'a>::clone(&self) -> pixtuoid_scene::floor::PetInputs<'a>
 impl<'a> core::default::Default for pixtuoid_scene::floor::PetInputs<'a>
 pub fn pixtuoid_scene::floor::PetInputs<'a>::default() -> pixtuoid_scene::floor::PetInputs<'a>
+impl<'a> core::fmt::Debug for pixtuoid_scene::floor::PetInputs<'a>
+pub fn pixtuoid_scene::floor::PetInputs<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'a> core::marker::Copy for pixtuoid_scene::floor::PetInputs<'a>
 impl<'a> core::marker::Freeze for pixtuoid_scene::floor::PetInputs<'a>
 impl<'a> core::marker::Send for pixtuoid_scene::floor::PetInputs<'a>
@@ -272,6 +290,8 @@ impl<'a> core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::PetInpu
 pub struct pixtuoid_scene::floor::ProjectedSlot
 pub pixtuoid_scene::floor::ProjectedSlot::desk: pixtuoid_core::state::FloorLocalDeskIndex
 pub pixtuoid_scene::floor::ProjectedSlot::slot: pixtuoid_core::state::AgentSlot
+impl core::fmt::Debug for pixtuoid_scene::floor::ProjectedSlot
+pub fn pixtuoid_scene::floor::ProjectedSlot::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::floor::ProjectedSlot
 impl core::marker::Send for pixtuoid_scene::floor::ProjectedSlot
 impl core::marker::Sync for pixtuoid_scene::floor::ProjectedSlot
@@ -282,6 +302,8 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::ProjectedSl
 pub struct pixtuoid_scene::floor::SteppedFloor
 pub pixtuoid_scene::floor::SteppedFloor::frame: pixtuoid_scene::sim::SimFrame
 pub pixtuoid_scene::floor::SteppedFloor::layout: alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>
+impl core::fmt::Debug for pixtuoid_scene::floor::SteppedFloor
+pub fn pixtuoid_scene::floor::SteppedFloor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::floor::SteppedFloor
 impl core::marker::Send for pixtuoid_scene::floor::SteppedFloor
 impl core::marker::Sync for pixtuoid_scene::floor::SteppedFloor
@@ -300,6 +322,8 @@ pub fn pixtuoid_scene::floor::VacancyDim::snap_to_empty(&mut self)
 pub fn pixtuoid_scene::floor::VacancyDim::tick(&mut self, bool, std::time::SystemTime) -> f32
 impl core::default::Default for pixtuoid_scene::floor::VacancyDim
 pub fn pixtuoid_scene::floor::VacancyDim::default() -> Self
+impl core::fmt::Debug for pixtuoid_scene::floor::VacancyDim
+pub fn pixtuoid_scene::floor::VacancyDim::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::floor::VacancyDim
 impl core::marker::Send for pixtuoid_scene::floor::VacancyDim
 impl core::marker::Sync for pixtuoid_scene::floor::VacancyDim
@@ -1103,6 +1127,8 @@ pub pixtuoid_scene::look::ClassicDrawn::bubbles: &'a [pixtuoid_scene::chitchat::
 pub pixtuoid_scene::look::ClassicDrawn::mascots: &'a [pixtuoid_scene::pixel_painter::MascotFrame]
 pub pixtuoid_scene::look::ClassicDrawn::pet: core::option::Option<pixtuoid_scene::pet::PetFrame>
 pub pixtuoid_scene::look::ClassicDrawn::pixels: &'a mut pixtuoid_core::sprite::RgbBuffer
+impl<'a> core::fmt::Debug for pixtuoid_scene::look::ClassicDrawn<'a>
+pub fn pixtuoid_scene::look::ClassicDrawn<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'a> core::marker::Freeze for pixtuoid_scene::look::ClassicDrawn<'a>
 impl<'a> core::marker::Send for pixtuoid_scene::look::ClassicDrawn<'a>
 impl<'a> core::marker::Sync for pixtuoid_scene::look::ClassicDrawn<'a>
@@ -1115,6 +1141,8 @@ impl pixtuoid_scene::look::OfficeRaster
 pub fn pixtuoid_scene::look::OfficeRaster::reset(&mut self)
 impl core::default::Default for pixtuoid_scene::look::OfficeRaster
 pub fn pixtuoid_scene::look::OfficeRaster::default() -> pixtuoid_scene::look::OfficeRaster
+impl core::fmt::Debug for pixtuoid_scene::look::OfficeRaster
+pub fn pixtuoid_scene::look::OfficeRaster::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::look::OfficeRaster
 impl core::marker::Send for pixtuoid_scene::look::OfficeRaster
 impl core::marker::Sync for pixtuoid_scene::look::OfficeRaster
@@ -1145,6 +1173,8 @@ pub fn pixtuoid_scene::look::Raster::classic_drawn(&mut self) -> core::option::O
 pub fn pixtuoid_scene::look::Raster::hover_at(&self, pixtuoid_scene::layout::Bounds) -> core::option::Option<pixtuoid_core::id::AgentId>
 pub fn pixtuoid_scene::look::Raster::pixels(&self) -> core::option::Option<&pixtuoid_core::sprite::RgbBuffer>
 pub fn pixtuoid_scene::look::Raster::reset_sprite_cache(&mut self)
+impl core::fmt::Debug for pixtuoid_scene::look::Raster
+pub fn pixtuoid_scene::look::Raster::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::look::Raster
 impl core::marker::Send for pixtuoid_scene::look::Raster
 impl core::marker::Sync for pixtuoid_scene::look::Raster
@@ -1160,6 +1190,8 @@ pub pixtuoid_scene::look::RenderInputs::theme: &'static pixtuoid_scene::theme::T
 pub pixtuoid_scene::look::RenderInputs::world: pixtuoid_scene::floor::FloorInputs<'a>
 impl<'a> core::clone::Clone for pixtuoid_scene::look::RenderInputs<'a>
 pub fn pixtuoid_scene::look::RenderInputs<'a>::clone(&self) -> pixtuoid_scene::look::RenderInputs<'a>
+impl<'a> core::fmt::Debug for pixtuoid_scene::look::RenderInputs<'a>
+pub fn pixtuoid_scene::look::RenderInputs<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'a> core::marker::Copy for pixtuoid_scene::look::RenderInputs<'a>
 impl<'a> core::marker::Freeze for pixtuoid_scene::look::RenderInputs<'a>
 impl<'a> core::marker::Send for pixtuoid_scene::look::RenderInputs<'a>
@@ -1173,6 +1205,8 @@ pub pixtuoid_scene::look::Rendered::dirty: crate::cutaway::canvas::Dirty
 pub pixtuoid_scene::look::Rendered::layout: alloc::sync::Arc<pixtuoid_scene::layout::SceneLayout>
 pub pixtuoid_scene::look::Rendered::occupied_waypoints: std::collections::hash::set::HashSet<usize>
 pub pixtuoid_scene::look::Rendered::pixels: &'r pixtuoid_core::sprite::RgbBuffer
+impl<'r> core::fmt::Debug for pixtuoid_scene::look::Rendered<'r>
+pub fn pixtuoid_scene::look::Rendered<'r>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'r> core::marker::Freeze for pixtuoid_scene::look::Rendered<'r>
 impl<'r> core::marker::Send for pixtuoid_scene::look::Rendered<'r>
 impl<'r> core::marker::Sync for pixtuoid_scene::look::Rendered<'r>
@@ -1228,7 +1262,7 @@ impl core::marker::UnsafeUnpin for pixtuoid_scene::pathfind::AStarRouter
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pathfind::AStarRouter
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pathfind::AStarRouter
 pub const pixtuoid_scene::pathfind::CELL_SIZE: u16
-pub trait pixtuoid_scene::pathfind::Router
+pub trait pixtuoid_scene::pathfind::Router: core::fmt::Debug
 pub fn pixtuoid_scene::pathfind::Router::invalidate(&mut self)
 pub fn pixtuoid_scene::pathfind::Router::route(&mut self, &pixtuoid_core::walkable::WalkableMask, &pixtuoid_core::walkable::OccupancyOverlay, pixtuoid_scene::layout::Point, pixtuoid_scene::layout::Point) -> alloc::vec::Vec<pixtuoid_scene::layout::Point>
 pub fn pixtuoid_scene::pathfind::Router::set_preferred_zone(&mut self, core::option::Option<pixtuoid_scene::layout::Bounds>)
@@ -1296,6 +1330,8 @@ pub pixtuoid_scene::pet::PetFrame::kind: pixtuoid_scene::pet::PetKind
 pub pixtuoid_scene::pet::PetFrame::pos: pixtuoid_scene::layout::Point
 impl core::clone::Clone for pixtuoid_scene::pet::PetFrame
 pub fn pixtuoid_scene::pet::PetFrame::clone(&self) -> pixtuoid_scene::pet::PetFrame
+impl core::fmt::Debug for pixtuoid_scene::pet::PetFrame
+pub fn pixtuoid_scene::pet::PetFrame::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for pixtuoid_scene::pet::PetFrame
 impl core::marker::Freeze for pixtuoid_scene::pet::PetFrame
 impl core::marker::Send for pixtuoid_scene::pet::PetFrame
@@ -1311,6 +1347,8 @@ pub pixtuoid_scene::pet::PetState::petted_at: std::time::SystemTime
 impl pixtuoid_scene::pet::PetState
 pub fn pixtuoid_scene::pet::PetState::elapsed_ms(&self, std::time::SystemTime) -> u64
 pub fn pixtuoid_scene::pet::PetState::is_active(&self, std::time::SystemTime) -> bool
+impl core::fmt::Debug for pixtuoid_scene::pet::PetState
+pub fn pixtuoid_scene::pet::PetState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::pet::PetState
 impl core::marker::Send for pixtuoid_scene::pet::PetState
 impl core::marker::Sync for pixtuoid_scene::pet::PetState
@@ -1413,6 +1451,8 @@ pub pixtuoid_scene::pixel_painter::MascotFrame::pos: pixtuoid_scene::layout::Poi
 pub pixtuoid_scene::pixel_painter::MascotFrame::w: u16
 impl core::clone::Clone for pixtuoid_scene::pixel_painter::MascotFrame
 pub fn pixtuoid_scene::pixel_painter::MascotFrame::clone(&self) -> pixtuoid_scene::pixel_painter::MascotFrame
+impl core::fmt::Debug for pixtuoid_scene::pixel_painter::MascotFrame
+pub fn pixtuoid_scene::pixel_painter::MascotFrame::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::pixel_painter::MascotFrame
 impl core::marker::Send for pixtuoid_scene::pixel_painter::MascotFrame
 impl core::marker::Sync for pixtuoid_scene::pixel_painter::MascotFrame
@@ -1497,6 +1537,8 @@ pub pixtuoid_scene::pose::RouteCtx::overlay: &'a pixtuoid_core::walkable::Occupa
 pub pixtuoid_scene::pose::RouteCtx::router: &'a mut dyn pixtuoid_scene::pathfind::Router
 pub pixtuoid_scene::pose::RouteCtx::walks: &'a mut std::collections::hash::map::HashMap<pixtuoid_core::id::AgentId, pixtuoid_scene::walk::WalkState>
 pub pixtuoid_scene::pose::RouteCtx::wanders: bool
+impl<'a> core::fmt::Debug for pixtuoid_scene::pose::RouteCtx<'a>
+pub fn pixtuoid_scene::pose::RouteCtx<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'a> core::marker::Freeze for pixtuoid_scene::pose::RouteCtx<'a>
 impl<'a> !core::marker::Send for pixtuoid_scene::pose::RouteCtx<'a>
 impl<'a> !core::marker::Sync for pixtuoid_scene::pose::RouteCtx<'a>
@@ -1608,6 +1650,8 @@ pub pixtuoid_scene::sim::SimFrame::poses: std::collections::hash::map::HashMap<p
 pub pixtuoid_scene::sim::SimFrame::seated_agents: std::collections::hash::map::HashMap<pixtuoid_core::state::FloorLocalDeskIndex, bool>
 impl core::clone::Clone for pixtuoid_scene::sim::SimFrame
 pub fn pixtuoid_scene::sim::SimFrame::clone(&self) -> pixtuoid_scene::sim::SimFrame
+impl core::fmt::Debug for pixtuoid_scene::sim::SimFrame
+pub fn pixtuoid_scene::sim::SimFrame::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_scene::sim::SimFrame
 impl core::marker::Send for pixtuoid_scene::sim::SimFrame
 impl core::marker::Sync for pixtuoid_scene::sim::SimFrame

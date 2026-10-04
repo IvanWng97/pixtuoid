@@ -6,6 +6,7 @@ use super::Span;
 use crate::atmosphere::Carpet;
 use crate::dither::Dithered;
 use crate::layout::{Bounds, Point};
+use crate::outside::WindowView;
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
@@ -76,7 +77,7 @@ pub(crate) struct Badge {
     pub(crate) tone: crate::overlay::LabelTone,
 }
 
-/// One frame's pieces — the windows' glass, the decor hung on the wall and
+/// One frame's pieces — the windows, the decor hung on the wall and
 /// everything standing on the ground — built and ordered but not painted.
 ///
 /// ONE ordered list, so a character and the desk it sits at resolve against each
@@ -259,7 +260,7 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::Badge { ref badge } => badge.hash(&mut h),
         PieceKind::Board { ref board } => board.hash(&mut h),
         PieceKind::Indicator { door, floor } => (door, floor).hash(&mut h),
-        PieceKind::Glass { ref view } => view.hash(&mut h),
+        PieceKind::Window { ref view, frame } => (view, frame).hash(&mut h),
         PieceKind::Hung { at, sprite } => (at, sprite).hash(&mut h),
         PieceKind::Effect(riding) => riding.hash(&mut h),
     }
@@ -268,8 +269,8 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
 
 impl PieceKind {
     /// Whether it recolours what lies under it rather than painting colours of
-    /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window's
-    /// [`PieceKind::Glass`].
+    /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window
+    /// ([`PieceKind::Window`]).
     #[cfg_attr(
         not(test),
         expect(dead_code, reason = "the incremental canvas repaints under it")
@@ -298,7 +299,7 @@ impl PieceKind {
             | PieceKind::Door { .. }
             | PieceKind::Neon { .. }
             | PieceKind::Clock { .. }
-            | PieceKind::Glass { .. }
+            | PieceKind::Window { .. }
             | PieceKind::Desk { .. }
             | PieceKind::DeskProp(_)
             | PieceKind::Creature { .. }
@@ -321,9 +322,10 @@ impl PieceKind {
 /// paint fn writes lies inside its span.
 #[derive(Debug)]
 pub(crate) enum PieceKind {
-    /// One window's glass and what it looks out on.
-    Glass {
+    /// One window: its glass, then its joinery in `frame`.
+    Window {
         view: WindowView,
+        frame: pixtuoid_core::sprite::Rgb,
     },
     /// Decor hung on the north band, blitted at its top-left `at`.
     Hung {
@@ -476,14 +478,4 @@ impl std::fmt::Debug for Figure {
             .field("frame_idx", &self.key.frame.frame_idx)
             .finish()
     }
-}
-
-/// What one window shows this frame, resolved when the list is built: the
-/// art pixels of its box from its top-left, row by row, `None` on its frame.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct WindowView {
-    pub(crate) x: u16,
-    pub(crate) y: u16,
-    pub(crate) w: u16,
-    pub(crate) px: Vec<Option<pixtuoid_core::sprite::Rgb>>,
 }
