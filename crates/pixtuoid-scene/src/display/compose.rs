@@ -6,8 +6,8 @@
 use pixtuoid_core::sprite::format::Pack;
 
 use super::{
-    Art, Badge, DisplayList, Figure, Flip, Ground, Layer, LightPiece, Piece, PieceKind, Screen,
-    Span, StoodProp, depth_sort, fingerprint,
+    Art, Badge, DisplayList, Figure, Flip, Layer, LightPiece, Piece, PieceKind, Screen, Span,
+    StoodProp, depth_sort, fingerprint,
 };
 use crate::atmosphere::Moment;
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
@@ -239,7 +239,7 @@ pub(crate) fn compose_at<'a>(
         pieces,
         lights: lights(frame, office, moment, floor.floor_idx, ambient),
         ambient,
-        ground: Ground::of(theme, moment.look.ground_tint),
+        carpet: moment.look.carpet(theme),
         flash: crate::cutaway::light::Flash::of(&moment.sky),
         pack,
         theme,

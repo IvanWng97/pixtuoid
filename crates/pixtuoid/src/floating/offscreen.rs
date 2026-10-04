@@ -1,7 +1,7 @@
 //! Headless office → `RgbBuffer` rendering for the `pixtuoid floating` desktop window.
 //!
 //! Paints the buffer at whatever dims it's handed, owning one
-//! `pixtuoid_scene::floor::FloorSession` across frames so motion stays continuous.
+//! `pixtuoid_scene::floor::FloorSession` across frames so walks stay continuous.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
@@ -26,7 +26,7 @@ pub(crate) fn pack_xrgb(c: Rgb) -> u32 {
 }
 
 /// Renders the live office to a reusable `RgbBuffer`. One per window — keeping it
-/// alive across frames is what keeps motion/pose continuous (no walk-flash).
+/// alive across frames is what keeps walks/poses continuous (no walk-flash).
 pub struct OfficeRenderer {
     session: FloorSession,
     /// Ambient-audio gateway. Inert unless installed.
