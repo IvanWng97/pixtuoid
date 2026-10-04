@@ -24,7 +24,7 @@ frame_ms = 500
 
 [animations.typing]
 frames = ["placeholder.sprite", "placeholder.sprite"]
-frame_ms = 400
+frame_ms = 375
 
 [animations.standing]
 frames = ["placeholder.sprite"]
@@ -33,10 +33,12 @@ frame_ms = 500
 [animations.walking]
 frames = ["placeholder.sprite", "placeholder.sprite"]
 frame_ms = 200
+stride = 10
 
 [animations.walking_back]
 frames = ["placeholder.sprite", "placeholder.sprite"]
 frame_ms = 200
+stride = 10
 
 [animations.seated_sleeping]
 frames = ["placeholder.sprite"]

@@ -754,7 +754,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             theme.surface.bg_fallback,
         );
         let mut cache = crate::cutaway::paint::CutawayCache::default();
-        let office = crate::cutaway::paint::Office {
+        let office = crate::display::Office {
             layout: &layout,
             pack,
             theme,
@@ -764,14 +764,14 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
         crate::cutaway::paint::render_cutaway(
             &frame,
             office,
-            crate::cutaway::paint::tests::showing(ground, now0),
+            crate::display::compose::tests::showing(ground, now0),
             &mut cache,
             &mut buf,
         );
-        let list = crate::cutaway::paint::frame_list(
+        let list = crate::display::compose(
             &frame,
             office,
-            crate::cutaway::paint::tests::showing(ground, now0),
+            crate::display::compose::tests::showing(ground, now0),
         );
         let anchors: Vec<_> = list.badges().map(|b| b.at).collect();
         (buf.as_slice().to_vec(), anchors)
@@ -915,13 +915,13 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
         let mut cache = crate::cutaway::paint::CutawayCache::default();
         crate::cutaway::paint::render_cutaway(
             &unlit_room(&frame),
-            crate::cutaway::paint::Office {
+            crate::display::Office {
                 layout: &layout,
                 pack,
                 theme,
                 scale,
             },
-            crate::cutaway::paint::tests::showing(
+            crate::display::compose::tests::showing(
                 crate::floor::FloorMeta::ground(),
                 desk_foot_hour(),
             ),
@@ -1070,13 +1070,13 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
         let mut cache = crate::cutaway::paint::CutawayCache::default();
         crate::cutaway::paint::render_cutaway(
             &unlit_room(frame),
-            crate::cutaway::paint::Office {
+            crate::display::Office {
                 layout: &layout,
                 pack,
                 theme,
                 scale,
             },
-            crate::cutaway::paint::tests::showing(
+            crate::display::compose::tests::showing(
                 crate::floor::FloorMeta::ground(),
                 desk_foot_hour(),
             ),
@@ -5302,6 +5302,52 @@ fn a_breathing_sitter_s_badge_holds_still() {
     assert_eq!(badges.len(), 1, "the badge bobbed with it: {badges:?}");
 }
 
+/// A typist keys on the art its seat resolves to: a back-turned desk plays
+/// `typing_back`'s own loop, which a pack may time apart from `typing`'s.
+#[test]
+fn a_typist_keys_on_the_art_its_seat_resolves_to() {
+    use crate::layout::Facing;
+    use crate::pose::Pose;
+    let (mut scene, layout, id, now0, _) = sim_rig();
+    let pack = crate::pack::test_pack_declaring(
+        "[animations.typing_back]\nframes   = [\"typing_back_0.sprite\", \"typing_back_1.sprite\"]\nframe_ms = 125",
+        "[animations.typing_back]\nframes   = [\"typing_back_0.sprite\", \"typing_back_1.sprite\"]\nframe_ms = 250",
+    );
+    let back = (0..layout.home_desks.len())
+        .find(|&i| layout.desk_facing(FloorLocalDeskIndex(i)) == Facing::North)
+        .expect("a back-turned desk");
+    scene.agents.get_mut(&id).expect("the agent").desk_index = GlobalDeskIndex(back);
+    let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
+    let art = pack.animation("typing_back").expect("the back view");
+    let ms = u64::from(art.frame_ms());
+    let typing = pack.animation("typing").expect("the front view");
+    assert_ne!(
+        ms,
+        u64::from(typing.frame_ms()),
+        "premise: the two views keep their own time"
+    );
+    let frames = art.frames().len() as u64;
+    let phase = epoch_ms(agents[0].state_started_at) / ms;
+    let tick = crate::anim::FULL_TICK_MS;
+    for step in 0..2 * frames * ms / tick {
+        let timing = Motion::Full.timing(now0 + std::time::Duration::from_millis(step * tick));
+        let poses = HashMap::from([(id, Some(Pose::SeatedTyping))]);
+        let (placements, ..) = crate::sim::resolve_characters(
+            &agents,
+            &poses,
+            &layout,
+            &pack,
+            CHARACTER_SPRITE_W,
+            &HashMap::new(),
+            timing,
+        );
+        let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
+        assert_eq!(p.anim_name, "typing_back");
+        let want = ((timing.beat.ms() / ms + phase) % frames) as usize;
+        assert_eq!(p.frame_idx, want, "at {} ms", step * tick);
+    }
+}
+
 /// Breath rides `breathes` alone: at a breathing instant a walker's sprite stays
 /// on its fit while a figure at rest rises off it.
 #[test]
@@ -5333,13 +5379,7 @@ fn only_a_placement_that_breathes_takes_the_breath() {
         let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
         p
     };
-    let walker = place(Pose::Walking {
-        from: mid,
-        to: mid,
-        t_x1000: 0,
-        frame: 0,
-        carrying_coffee: false,
-    });
+    let walker = place(Pose::walking(mid, mid, 0, false));
     let idler = place(Pose::AimlessAt { dest: mid });
     let sitter = place(Pose::SeatedThinking);
     assert!(!walker.breathes && idler.breathes && sitter.breathes);
