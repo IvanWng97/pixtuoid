@@ -667,6 +667,12 @@ pub(crate) fn strike_bucket(beat: crate::anim::Beat) -> u64 {
     beat.ms() / LIGHTNING_PERIOD_MS
 }
 
+/// When the strike of the bucket `beat` falls in starts, in `beat`'s ms.
+pub(crate) fn strike_start_ms(beat: crate::anim::Beat) -> u64 {
+    let bucket = strike_bucket(beat);
+    bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket)
+}
+
 /// [`lightning_envelope`] on `beat` under `policy`, or 0 when not mid-strike
 /// or at rest.
 fn flash_level_at(beat: crate::anim::Beat, policy: WeatherPolicy) -> f32 {
@@ -675,7 +681,7 @@ fn flash_level_at(beat: crate::anim::Beat, policy: WeatherPolicy) -> f32 {
     }
     let elapsed_ms = beat.ms();
     let bucket = strike_bucket(beat);
-    let strike_ms = bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket);
+    let strike_ms = strike_start_ms(beat);
     let Some(since) = elapsed_ms
         .checked_sub(strike_ms)
         .filter(|&since| since < STRIKE_MS)

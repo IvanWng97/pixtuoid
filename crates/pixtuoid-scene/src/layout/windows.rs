@@ -108,6 +108,12 @@ pub(crate) fn window_bays(buf_w: u16, door: Range<u16>) -> impl Iterator<Item = 
     window_slots(buf_w).filter(move |b| !(b.x < door.end && b.span().end > door.start))
 }
 
+/// The windows a wall `buf_w` wide shows: every slot but the door's.
+pub(crate) fn shown_bays(buf_w: u16) -> impl Iterator<Item = WindowBay> {
+    let door = door_x(buf_w);
+    window_bays(buf_w, door..door + ELEVATOR_W)
+}
+
 /// The columns from the first slot's left edge to the last one's right, the
 /// door's included; the first window alone when none fits.
 pub(crate) fn window_run(buf_w: u16) -> Range<u16> {
@@ -169,8 +175,7 @@ impl SceneLayout {
     /// The windows this office's north wall shows, left to right: every slot
     /// but the door's.
     pub(crate) fn window_bays(&self) -> impl Iterator<Item = WindowBay> + use<> {
-        let door = self.door_rect();
-        window_bays(self.buf_w, door.x..door.x + door.width)
+        shown_bays(self.buf_w)
     }
 
     /// The box the elevator door's art covers.

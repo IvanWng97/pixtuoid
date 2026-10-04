@@ -218,12 +218,17 @@ impl Outside {
         let rows = window_rows(band_h);
         let run = window_run(buf_w);
         let glass_h = crate::layout::glass_rows(rows.end - rows.start);
+        let panes: Vec<Range<u16>> = crate::layout::shown_bays(buf_w)
+            .flat_map(WindowBay::panes)
+            .map(|p| p.start - run.start..p.end - run.start)
+            .collect();
         Self {
             sky: SkyView::of(moment, buf_w, band_h, theme),
             clouds: crate::clouds::Clouds::of(
                 moment,
                 (run.end - run.start, glass_h),
                 density.get(),
+                &panes,
                 clouds,
             ),
             city: CityStrip::draw(pack, (run.end - run.start, glass_h), moment, theme, density),

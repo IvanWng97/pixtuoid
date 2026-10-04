@@ -7,10 +7,13 @@
 //! Every length is in layout units: x from the window run's west end, y from
 //! the glass's top.
 
+use std::ops::Range;
+
 use pixtuoid_core::sprite::Rgb;
 
 use crate::atmosphere::Moment;
 use crate::outside::{Cell, WindowView};
+
 use crate::sky::{Element, Weather};
 
 /// A deterministic stream of `0..1` draws.
@@ -100,6 +103,8 @@ struct Mass {
     anchor: f32,
     /// How far east it has drifted this frame, in units.
     off: f32,
+    /// Its deck's widest mass's width: its wrap period is the run plus two.
+    widest: f32,
 }
 
 impl Mass {
@@ -122,6 +127,12 @@ impl Mass {
     fn base_at(&self, x: f32) -> f32 {
         let local = (x - self.anchor) / BASE_WAVER_PERIOD;
         self.base + BASE_WAVER * noise(self.seed, local) - BASE_WAVER / 2.0
+    }
+
+    /// How far east it has drifted `secs` into the beat over a run `span` wide.
+    fn drift_at(&self, secs: f64, span: f32) -> f32 {
+        let travelled = secs * f64::from(self.layer.drift());
+        drifted_west(self.anchor, travelled, span, self.widest) - self.anchor
     }
 
     /// The mass `share` of the way grown from its base, drifted `off` east.
@@ -342,6 +353,7 @@ fn deck(weather: Weather, span: f32, glass_h: f32) -> Vec<Mass> {
                 id: 0,
                 anchor: 0.0,
                 off: 0.0,
+                widest: 0.0,
             });
         }
     };
@@ -376,6 +388,7 @@ fn deck(weather: Weather, span: f32, glass_h: f32) -> Vec<Mass> {
                 id: 0,
                 anchor: 0.0,
                 off: 0.0,
+                widest: 0.0,
             });
         }
     }
@@ -719,6 +732,7 @@ impl Clouds {
         moment: &Moment,
         (span, glass_h): (u16, u16),
         d: u16,
+        panes: &[Range<u16>],
         mut cache: Option<&mut CloudCache>,
     ) -> Self {
         let (span_f, glass_h_f) = (f32::from(span), f32::from(glass_h));
@@ -778,9 +792,8 @@ impl Clouds {
                 .fold(0.0, f32::max);
             let share = step(ease(share), SHARE_STEPS);
             for m in full {
-                let west =
-                    drifted_west(m.anchor, secs * f64::from(m.layer.drift()), span_f, widest);
-                let mass = m.grown(unstep(share, SHARE_STEPS), west - m.anchor);
+                let m = Mass { widest, ..m };
+                let mass = m.grown(unstep(share, SHARE_STEPS), m.drift_at(secs, span_f));
                 let key = RasterKey {
                     weather: w,
                     id: m.id,
@@ -814,11 +827,13 @@ impl Clouds {
         (clouds.masses, clouds.rasters) = (masses, rasters);
         let flash = moment.sky.flash();
         if flash > 0.0 {
+            let beat = moment.timing.beat;
             clouds.strike = clouds.strike_at(
-                crate::sky::strike_bucket(moment.timing.beat),
+                crate::sky::strike_bucket(beat),
                 flash,
-                span_f,
-                glass_h_f,
+                (span_f, glass_h_f),
+                crate::sky::strike_start_ms(beat) as f64 / 1000.0,
+                panes,
             );
         }
         clouds
@@ -893,30 +908,52 @@ impl Clouds {
     }
 
     /// The nearest mass with a lobe within [`BOLT_REACH`] of its radius over
-    /// `x`.
-    fn nearest_over(&self, x: f32) -> Option<usize> {
+    /// `x`, each mass drifted by its `offs`.
+    fn nearest_over(&self, x: f32, offs: &[f32]) -> Option<usize> {
         (0..self.masses.len()).rev().find(|&i| {
-            let m = &self.masses[i];
-            m.lobes
+            self.masses[i]
+                .lobes
                 .iter()
-                .any(|l| l.r > 0.0 && (x - m.off - l.x).abs() < l.r * BOLT_REACH)
+                .any(|l| l.r > 0.0 && (x - offs[i] - l.x).abs() < l.r * BOLT_REACH)
         })
     }
 
-    fn strike_at(&self, bucket: u64, flash: f32, span: f32, glass_h: f32) -> Option<Strike> {
+    /// Bucket `bucket`'s strike at `flash` over a run `(span, glass_h)`, its
+    /// cloud the one over a column of one of `panes` as the masses stood
+    /// `start` seconds into the beat, when it struck: so neither the drift
+    /// nor the joinery hides it partway through.
+    fn strike_at(
+        &self,
+        bucket: u64,
+        flash: f32,
+        (span, glass_h): (f32, f32),
+        start: f64,
+        panes: &[Range<u16>],
+    ) -> Option<Strike> {
         let mut r = Rng(bucket.wrapping_mul(31).wrapping_add(7));
-        let x = span * r.between(0.15, 0.85);
-        let i = self.nearest_over(x)?;
-        let base = self.masses[i].base_at(x - self.masses[i].off);
-        let intra = r.u() < 0.4;
+        let pane = panes.get((r.u() * panes.len() as f32) as usize)?;
+        let (west, east) = (f32::from(pane.start), f32::from(pane.end));
+        let x = r.between(west + BOLT_PANE_MARGIN, (east - BOLT_PANE_MARGIN).max(west));
+        let offs: Vec<f32> = self
+            .masses
+            .iter()
+            .map(|m| m.drift_at(start, span))
+            .collect();
+        let i = self.nearest_over(x, &offs)?;
+        let base = self.masses[i].base_at(x - offs[i]);
+        let intra = r.u() < INTRA_SHARE;
         let step = if flash > 0.9 {
             2
         } else {
             u8::from(flash >= 0.5)
         };
         Some(Strike {
-            at: (x, base - if intra { 3.0 } else { 0.8 }),
-            radius: if intra { 3.5 } else { 8.0 },
+            at: (x, base - if intra { INTRA_DEPTH } else { BOLT_FLASH_DEPTH }),
+            radius: if intra {
+                INTRA_RADIUS
+            } else {
+                BOLT_FLASH_RADIUS
+            },
             intra: intra.then_some(i),
             bolt: if intra {
                 Vec::new()
@@ -1038,7 +1075,7 @@ impl Clouds {
         } = self.lighting;
         if self.diffuse {
             // a heavy deck hides the sky body: the light is diffuse, from above
-            (lx, ly, lz) = (lx * 0.3, -1.0, 0.8);
+            (lx, ly, lz) = (lx * DIFFUSE_SIDE, DIFFUSE_FROM.0, DIFFUSE_FROM.1);
         }
         let ln = (lx * lx + ly * ly + lz * lz).sqrt();
         let mut v = (nx * lx + ny * ly + nz * lz) / (nn * ln);
@@ -1046,12 +1083,15 @@ impl Clouds {
         // how far up the base's shadow climbs, by the mass's own column: two
         // octaves, never a ruled line
         let lx = x - m.anchor;
-        let reach =
-            0.12 + 0.22 * noise(0x1b5b, lx * 2.3 + 40.0) + 0.14 * noise(0x1b5b, lx * 6.1 + 13.0);
+        let reach = SHADE_REACH
+            + SHADE_REACH_OCTAVES
+                .iter()
+                .map(|&(amp, freq, phase)| amp * noise(0x1b5b, lx * freq + phase))
+                .sum::<f32>();
         v -= (occlude + STORM_OCCLUDE * self.storm) * (1.0 - t / reach).max(0.0);
         let cuts = (
-            0.55 + 0.12 * self.heaviness + rim,
-            0.05 + 0.1 * self.heaviness,
+            LIT_CUT.0 + LIT_CUT.1 * self.heaviness + rim,
+            BODY_CUT.0 + BODY_CUT.1 * self.heaviness,
         );
         let mut band = if v > cuts.0 {
             Band::Lit
@@ -1081,10 +1121,20 @@ impl Clouds {
         if s.intra.is_some_and(|i| i != m) {
             return None;
         }
-        let ry = s.radius * if s.intra.is_some() { 0.6 } else { 0.5 };
+        let ry = s.radius
+            * if s.intra.is_some() {
+                INTRA_ASPECT
+            } else {
+                BOLT_FLASH_ASPECT
+            };
         let mut dist = ((x - s.at.0) / s.radius).hypot((y - s.at.1) / ry);
-        dist += 0.3 * (noise(0xf1a5, x * 4.3 + y * 7.1) - 0.5);
-        let ring = if dist < 0.55 { 2 } else { u8::from(dist < 1.0) };
+        let (fx, fy) = RING_GRAIN;
+        dist += RING_RAGGED * (noise(0xf1a5, x * fx + y * fy) - 0.5);
+        let ring = if dist < INNER_RING {
+            2
+        } else {
+            u8::from(dist < 1.0)
+        };
         let lift = if s.dim {
             if ring == 2 {
                 FLASH_RINGS[1] * DIM_SHARE
@@ -1106,7 +1156,9 @@ impl Clouds {
             m.layer >= Layer::Mid
                 && m.base < y
                 && y <= m.base + VIRGA_DEPTH
-                && m.lobes.iter().any(|l| (x - m.off - l.x).abs() < l.r * 0.7)
+                && m.lobes
+                    .iter()
+                    .any(|l| (x - m.off - l.x).abs() < l.r * VIRGA_REACH)
         }) else {
             return c;
         };
@@ -1117,7 +1169,7 @@ impl Clouds {
         if streak && gx % 2 == gy % 2 {
             c.mix(
                 self.tone(m.weather, Band::Shade),
-                0.35 * self.rain.min(1.0) * fade,
+                VIRGA_STRENGTH * self.rain.min(1.0) * fade,
             )
         } else {
             c
@@ -1172,6 +1224,54 @@ const VIRGA_PITCH: u32 = 3;
 /// where its drawn bottom reaches its base, never its fringe, which curls up.
 const BOLT_REACH: f32 = 0.5;
 
+/// How far in from a pane's edges, in units, a strike may fall.
+const BOLT_PANE_MARGIN: f32 = 1.0;
+/// The share of strikes that light their cloud from inside, with no bolt.
+const INTRA_SHARE: f32 = 0.4;
+/// How far over its cloud's base an intra-cloud flash centres, its radius,
+/// and its rings' height to width.
+const INTRA_DEPTH: f32 = 3.0;
+const INTRA_RADIUS: f32 = 3.5;
+const INTRA_ASPECT: f32 = 0.6;
+/// The same of a bolt's flash, round the bolt's top.
+const BOLT_FLASH_DEPTH: f32 = 0.8;
+const BOLT_FLASH_RADIUS: f32 = 8.0;
+const BOLT_FLASH_ASPECT: f32 = 0.5;
+/// How ragged a flash's rings run, by noise of this grain across `(x, y)`.
+const RING_RAGGED: f32 = 0.3;
+const RING_GRAIN: (f32, f32) = (4.3, 7.1);
+/// The brightest ring's reach, a share of the flash's radius.
+const INNER_RING: f32 = 0.55;
+/// A bolt's trunk: its length a share of the glass, each step down, each
+/// sway aside, the share of sways that follow its lean, and the units it
+/// keeps from the run's west and east ends.
+const BOLT_DEPTH: (f32, f32) = (0.25, 0.40);
+const BOLT_STEP: (f32, f32) = (0.7, 1.3);
+const BOLT_SWAY: (f32, f32) = (0.15, 0.65);
+const BOLT_WITH_LEAN: f32 = 0.7;
+const BOLT_INSET: (f32, f32) = (1.5, 2.5);
+/// Its fork: at least the first segments, up to the second more, each step
+/// down and sway back against the lean.
+const FORK_SEGMENTS: (usize, usize) = (2, 2);
+const FORK_STEP: (f32, f32) = (0.6, 1.1);
+const FORK_SWAY: (f32, f32) = (0.4, 0.9);
+/// A heavy deck's diffuse light: its sideways share of the body's, and the
+/// `(y, z)` it comes from.
+const DIFFUSE_SIDE: f32 = 0.3;
+const DIFFUSE_FROM: (f32, f32) = (-1.0, 0.8);
+/// How far up a base its shade climbs, a share of the mass's height, with
+/// two octaves `(amplitude, frequency, phase)` of the mass's own column.
+const SHADE_REACH: f32 = 0.12;
+const SHADE_REACH_OCTAVES: [(f32, f32, f32); 2] = [(0.22, 2.3, 40.0), (0.14, 6.1, 13.0)];
+/// The light above which a cell is lit, and above which it is body: each at
+/// no heaviness, and more per unit of it.
+const LIT_CUT: (f32, f32) = (0.55, 0.12);
+const BODY_CUT: (f32, f32) = (0.05, 0.1);
+/// Virga falls under a lobe within this share of its radius, at most this
+/// far toward the cloud's shade.
+const VIRGA_REACH: f32 = 0.7;
+const VIRGA_STRENGTH: f32 = 0.35;
+
 /// The sun's altitude, from the horizon's 0, above which its clouds wear
 /// their full day tones.
 const FULL_DAY_ALTITUDE: f32 = 0.3;
@@ -1195,21 +1295,22 @@ fn ease(share: f32) -> f32 {
 /// of the glass long, and one fork.
 fn bolt(r: &mut Rng, (mut x, base): (f32, f32), span: f32, glass_h: f32) -> Vec<Vec<(f32, f32)>> {
     let mut y = base;
-    let depth = y + glass_h * r.between(0.25, 0.40);
+    let depth = y + glass_h * r.between(BOLT_DEPTH.0, BOLT_DEPTH.1);
     let mut trunk = vec![(x, y)];
     let lean = if r.u() < 0.5 { 1.0 } else { -1.0 };
     while y < depth {
-        y += r.between(0.7, 1.3);
-        x += lean * r.between(0.15, 0.65) * if r.u() < 0.7 { 1.0 } else { -1.0 };
-        x = x.clamp(1.5, span - 2.5);
+        y += r.between(BOLT_STEP.0, BOLT_STEP.1);
+        let with = if r.u() < BOLT_WITH_LEAN { 1.0 } else { -1.0 };
+        x += lean * r.between(BOLT_SWAY.0, BOLT_SWAY.1) * with;
+        x = x.clamp(BOLT_INSET.0, span - BOLT_INSET.1);
         trunk.push((x, y));
     }
     let k = 1 + (r.u() * (trunk.len().saturating_sub(3)).max(1) as f32) as usize;
     let (mut fx, mut fy) = trunk[k.min(trunk.len() - 1)];
     let mut fork = vec![(fx, fy)];
-    for _ in 0..2 + (r.u() * 2.0) as usize {
-        fy += r.between(0.6, 1.1);
-        fx = (fx - lean * r.between(0.4, 0.9)).clamp(1.0, span - 2.0);
+    for _ in 0..FORK_SEGMENTS.0 + (r.u() * FORK_SEGMENTS.1 as f32) as usize {
+        fy += r.between(FORK_STEP.0, FORK_STEP.1);
+        fx = (fx - lean * r.between(FORK_SWAY.0, FORK_SWAY.1)).clamp(1.0, span - 2.0);
         fork.push((fx, fy));
     }
     vec![trunk, fork]
@@ -1331,12 +1432,18 @@ mod tests {
 
     const SPAN: u16 = 160;
     const GLASS_H: u16 = 20;
+    /// One pane the run's width: a strike may fall anywhere over it.
+    const WHOLE_RUN: Range<u16> = 0..SPAN;
+    const RUN: &[Range<u16>] = std::slice::from_ref(&WHOLE_RUN);
 
     fn clouds(weather: Weather, hour: u32, flash: f32) -> Clouds {
-        let now = crate::localclock::at_hour(hour);
+        clouds_at(crate::localclock::at_hour(hour), weather, flash)
+    }
+
+    fn clouds_at(now: std::time::SystemTime, weather: Weather, flash: f32) -> Clouds {
         let sky = Sky::at_with(now, weather).with_flash(flash);
         let moment = Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
-        Clouds::of(&moment, (SPAN, GLASS_H), 1, None)
+        Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, None)
     }
 
     /// A transition's two fullest decks, on the classic's grid and the
@@ -1362,7 +1469,7 @@ mod tests {
             let now = crate::localclock::at_hour(12) + Duration::from_millis(ms);
             let sky = Sky::at_with(now, Weather::Overcast);
             let moment = Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
-            Clouds::of(&moment, (SPAN, GLASS_H), 1, None).masses
+            Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, None).masses
         };
         let beat = crate::anim::FULL_TICK_MS;
         let first = at(0);
@@ -1442,14 +1549,16 @@ mod tests {
         let moment = Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
         let mut bolts = 0;
         for d in [1u16, 4] {
-            let c = Clouds::of(&moment, (SPAN, GLASS_H), d, None);
+            let c = Clouds::of(&moment, (SPAN, GLASS_H), d, RUN, None);
             let drift = c.drift(d);
             assert!(
                 drift.iter().any(|&o| o != 0),
                 "a drifted deck, so the drift counts"
             );
+            let run = (f32::from(SPAN), f32::from(GLASS_H));
+            let now_secs = moment.timing.beat.ms() as f64 / 1000.0;
             for bucket in 0..40 {
-                let Some(s) = c.strike_at(bucket, 1.0, f32::from(SPAN), f32::from(GLASS_H)) else {
+                let Some(s) = c.strike_at(bucket, 1.0, run, now_secs, RUN) else {
                     continue;
                 };
                 let Some(&(x, y)) = s.bolt.first().and_then(|trunk| trunk.first()) else {
@@ -1465,6 +1574,55 @@ mod tests {
             }
         }
         assert!(bolts > 0, "the sample must strike a bolt");
+    }
+
+    /// A strike's cloud, bolt and flash hold through all of its phases: they
+    /// are chosen as the masses stood when it struck, not as they drift on.
+    #[test]
+    fn a_strike_holds_through_its_phases() {
+        let mut strikes = 0;
+        for k in 0..60u64 {
+            let then = crate::localclock::at_hour(12) + Duration::from_secs(k * 15);
+            let beat = Motion::Full.timing(then).beat;
+            let start = crate::sky::strike_start_ms(beat) - beat.ms();
+            let at = |phase: u64| {
+                let now = then + Duration::from_millis(start + phase * crate::anim::FULL_TICK_MS);
+                let sky = Sky::at_with(now, Weather::Storm).with_flash(1.0);
+                let moment =
+                    Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
+                Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, None).strike
+            };
+            let first = at(0);
+            strikes += usize::from(first.is_some());
+            for phase in 1..3 {
+                assert_eq!(at(phase), first, "strike {k}, phase {phase}");
+            }
+        }
+        assert!(strikes > 0, "the sample must strike");
+    }
+
+    /// A strike falls over a pane's glass, clear of its frame, whichever pane
+    /// its bucket picks.
+    #[test]
+    fn a_strike_falls_in_a_pane() {
+        let c = clouds(Weather::Storm, 12, 1.0);
+        let panes = [3..12, 14..23, 40..50];
+        let run = (f32::from(SPAN), f32::from(GLASS_H));
+        let mut seen = std::collections::HashSet::new();
+        for bucket in 0..200 {
+            let Some(s) = c.strike_at(bucket, 1.0, run, 0.0, &panes) else {
+                continue;
+            };
+            let pane = panes
+                .iter()
+                .position(|p| {
+                    (f32::from(p.start) + BOLT_PANE_MARGIN..=f32::from(p.end) - BOLT_PANE_MARGIN)
+                        .contains(&s.at.0)
+                })
+                .unwrap_or_else(|| panic!("bucket {bucket}: struck at {} in no pane", s.at.0));
+            seen.insert(pane);
+        }
+        assert_eq!(seen.len(), panes.len(), "every pane takes strikes");
     }
 
     /// A far mass leans further to the sky behind it than a near one.
@@ -1495,8 +1653,13 @@ mod tests {
     /// the flash's phase changes, never within one.
     #[test]
     fn a_strike_lights_the_deck_only_by_its_phase() {
+        // a noon instant whose bucket's strike finds a cloud
+        let struck = (0..60u64)
+            .map(|k| crate::localclock::at_hour(12) + Duration::from_secs(k * 15))
+            .find(|&now| clouds_at(now, Weather::Storm, 1.0).strike.is_some())
+            .expect("a storm strikes");
         let lifts = |flash: f32| {
-            let c = clouds(Weather::Storm, 12, flash);
+            let c = clouds_at(struck, Weather::Storm, flash);
             (0..SPAN * 4)
                 .flat_map(|x| (0..GLASS_H * 4).map(move |y| (x, y)))
                 .map(|(x, y)| {
@@ -1522,7 +1685,7 @@ mod tests {
             let sky = Sky::at_with(now, Weather::Overcast);
             let moment =
                 Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Still.timing(now));
-            Clouds::of(&moment, (SPAN, GLASS_H), 1, None).masses
+            Clouds::of(&moment, (SPAN, GLASS_H), 1, RUN, None).masses
         };
         assert_eq!(at(0), at(600_000));
     }
