@@ -6,7 +6,7 @@
 use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use pixtuoid_core::sprite::format::Pack;
@@ -185,8 +185,4 @@ pub fn renderer(
     Ok((r, wire))
 }
 
-/// When the TUI loop's next frame is due ([`crate::tui::next_due`]), for the
-/// bench's real-clock case to pace as the loop does.
-pub fn next_due(due: Instant, now: Instant, period: Duration) -> Instant {
-    crate::tui::next_due(due, now, period)
-}
+pub use crate::tui::Pacer;

@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result};
-use pixtuoid::pacing::{Protocol, next_due, renderer};
+use pixtuoid::pacing::{Pacer, Protocol, renderer};
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
 use pixtuoid_scene::anim::{Motion, PAINT_FPS};
@@ -278,7 +278,7 @@ fn real_clock(
     let clock = Instant::now();
     let (mut renders, mut intervals) = (Vec::new(), Vec::new());
     let mut last = None;
-    let mut due = Instant::now();
+    let mut pacer = Pacer::new(Instant::now(), tick);
     while clock.elapsed() < SCENARIO {
         let begun = Instant::now();
         if let Some(prev) = last.replace(begun) {
@@ -286,9 +286,9 @@ fn real_clock(
         }
         r.render(&scene, pack, start + clock.elapsed())?;
         renders.push(begun.elapsed());
-        let next = next_due(due, Instant::now(), tick);
+        let next = pacer.next(Instant::now());
         std::thread::sleep(next.saturating_duration_since(Instant::now()));
-        due = next;
+        pacer.woke(next, Instant::now());
     }
     Ok((renders, intervals))
 }

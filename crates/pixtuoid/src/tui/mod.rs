@@ -1005,7 +1005,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         #[cfg(not(unix))]
         let terminate = std::future::pending::<()>();
         tokio::pin!(terminate);
-        let mut due = Instant::now();
+        let mut pacer = Pacer::new(Instant::now(), tick);
         loop {
             let now = ui.now();
             let snapshot = scene_rx.borrow_and_update().clone();
@@ -1022,7 +1022,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 cap_sweep.publish(layout.buf_w, layout.buf_h, desk_cap, &floor_caps);
             }
 
-            let next = next_due(due, Instant::now(), tick);
+            let next = pacer.next(Instant::now());
             let mut polled = event::poll(next.saturating_duration_since(Instant::now()))?;
             let mut quit = false;
             while polled {
@@ -1080,7 +1080,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 },
                 _ = &mut terminate => break,
             }
-            due = next;
+            pacer.woke(next, Instant::now());
         }
         Ok(())
     })
@@ -1090,43 +1090,96 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     result
 }
 
-/// When the frame after one due at `due` is due, its render having ended at
-/// `now`: a paint `period` on from `due`, so neither the render nor a late
-/// wake from the wait pushes every later frame back; or `now`, when the render
-/// overran that, so the loop paints at once and re-anchors there rather than
-/// bursting frames to catch up.
-pub(crate) fn next_due(due: Instant, now: Instant, period: Duration) -> Instant {
-    (due + period).max(now)
+/// The TUI loop's frame clock: when each frame is due.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct Pacer {
+    due: Instant,
+    period: Duration,
+}
+
+impl Pacer {
+    /// A clock whose first frame is due at `now`, one each `period`.
+    pub fn new(now: Instant, period: Duration) -> Self {
+        Self { due: now, period }
+    }
+
+    /// When the next frame is due, the last one's render having ended at
+    /// `now`: a period after the last was due, so neither the render nor a
+    /// late wake pushes every later frame back; or `now`, when the render
+    /// overran that, painting at once rather than bursting to catch up.
+    pub fn next(&self, now: Instant) -> Instant {
+        (self.due + self.period).max(now)
+    }
+
+    /// The wait for the frame due at `next` ended at `woke`. That frame counts
+    /// as due at its deadline, so a wake's timer slack comes back out of the
+    /// next interval; after a stall of a whole period or more it counts as due
+    /// at the wake, re-anchoring there, as tokio's `MissedTickBehavior::Delay`
+    /// does, rather than painting a second frame back to back.
+    pub fn woke(&mut self, next: Instant, woke: Instant) {
+        self.due = if woke >= next + self.period {
+            woke
+        } else {
+            next
+        };
+    }
 }
 
 #[cfg(test)]
 mod pacing_tests {
-    use super::next_due;
+    use super::Pacer;
     use std::time::{Duration, Instant};
 
     const PERIOD: Duration = Duration::from_millis(33);
+    const MS: Duration = Duration::from_millis(1);
 
-    /// The next frame is due a period after the last one was due, wherever in
-    /// that period its render ended: a late wake from the wait or a slow render
-    /// shifts nothing after it.
-    #[test]
-    fn the_next_frame_is_due_a_period_after_the_last_was() {
-        let due = Instant::now();
-        for ended in [1, 5, 32].map(Duration::from_millis) {
-            assert_eq!(next_due(due, due + ended, PERIOD), due + PERIOD);
-        }
+    /// One loop turn: the render ends `render` after the frame began, then
+    /// the wait wakes `late` after the next frame is due. When the next frame
+    /// begins.
+    fn turn(pacer: &mut Pacer, began: Instant, render: Duration, late: Duration) -> Instant {
+        let next = pacer.next(began + render);
+        let woke = next.max(began + render) + late;
+        pacer.woke(next, woke);
+        woke
     }
 
-    /// A render that overran its period paints the next frame at once, once:
-    /// the frame after that is a whole period on, not a burst.
+    /// Frames a period apart, a wake's timer slack coming back out of the
+    /// interval after it rather than adding to every one.
+    #[test]
+    fn frames_keep_their_period_through_a_late_wake() {
+        let start = Instant::now();
+        let mut pacer = Pacer::new(start, PERIOD);
+        let first = turn(&mut pacer, start, 5 * MS, Duration::ZERO);
+        assert_eq!(first, start + PERIOD);
+        let slack = turn(&mut pacer, first, 5 * MS, 4 * MS);
+        assert_eq!(slack, start + 2 * PERIOD + 4 * MS);
+        let after = turn(&mut pacer, slack, 5 * MS, Duration::ZERO);
+        assert_eq!(after, start + 3 * PERIOD, "the slack came back out");
+    }
+
+    /// A render that overran its period: the next frame at once, once, then a
+    /// whole period on, not a burst.
     #[test]
     fn an_overrun_reanchors_without_a_burst() {
-        let due = Instant::now();
-        let overran = due + 3 * PERIOD;
-        let next = next_due(due, overran, PERIOD);
-        assert_eq!(next, overran);
-        let rendered = next + Duration::from_millis(5);
-        assert_eq!(next_due(next, rendered, PERIOD), overran + PERIOD);
+        let start = Instant::now();
+        let mut pacer = Pacer::new(start, PERIOD);
+        let overran = turn(&mut pacer, start, 3 * PERIOD, Duration::ZERO);
+        assert_eq!(overran, start + 3 * PERIOD);
+        let after = turn(&mut pacer, overran, 5 * MS, Duration::ZERO);
+        assert_eq!(after, overran + PERIOD);
+    }
+
+    /// A wait that stalls a whole period or more: the frame after the wake is
+    /// a period on, not painted back to back.
+    #[test]
+    fn a_stalled_wait_reanchors_at_the_wake() {
+        let start = Instant::now();
+        let mut pacer = Pacer::new(start, PERIOD);
+        let stalled = turn(&mut pacer, start, 5 * MS, 2 * PERIOD);
+        assert_eq!(stalled, start + 3 * PERIOD);
+        let after = turn(&mut pacer, stalled, 5 * MS, Duration::ZERO);
+        assert_eq!(after, stalled + PERIOD);
     }
 }
 
