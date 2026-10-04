@@ -1115,7 +1115,7 @@ fn neon_mood(active: usize, waiting: usize, idle: usize) -> crate::board::Office
 const ROOM_LIT: bool = false;
 const ROOM_DIMMED: bool = true;
 /// A live painter's frame tick — well under the shortest stutter flash.
-const FRAME: Duration = Duration::from_millis(33);
+const FRAME: Duration = Duration::from_millis(1000 / crate::anim::PAINT_FPS as u64);
 
 #[test]
 fn neon_first_tick_snaps_to_the_mood() {
