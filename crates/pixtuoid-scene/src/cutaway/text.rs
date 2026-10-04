@@ -490,7 +490,7 @@ mod tests {
     /// Without `cutaway-assets` a character only the fallback font draws is
     /// the no-font box.
     #[test]
-    fn the_fallback_font_ships_with_density_art() {
+    fn the_fallback_font_ships_with_cutaway_assets() {
         assert_eq!(fallback('é').is_some(), cfg!(feature = "cutaway-assets"));
     }
 
