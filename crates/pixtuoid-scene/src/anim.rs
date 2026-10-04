@@ -251,6 +251,52 @@ mod tests {
     use super::*;
     use std::time::{Duration, SystemTime};
 
+    /// `flashes` square flashes, one each `period_ms`: up at its start, down
+    /// halfway through.
+    fn square(flashes: u64, period_ms: u64) -> Vec<(u64, f32)> {
+        std::iter::once((0, 0.0))
+            .chain((0..flashes).flat_map(|k| {
+                let start = 1 + k * period_ms;
+                [(start, 1.0), (start + period_ms / 2, 0.0)]
+            }))
+            .collect()
+    }
+
+    /// WCAG's general flash: a rise and a fall of 10% of full or more.
+    #[test]
+    fn a_flash_is_a_rise_and_a_fall_of_a_tenth_or_more() {
+        let pulse = |level: f32| most_flashes_in_a_second([(0, 0.0), (100, level), (200, 0.0)]);
+        assert_eq!(pulse(0.10), 1);
+        assert_eq!(pulse(0.09), 0);
+    }
+
+    /// Four flashes spread so no second holds more than three pass; the same
+    /// four inside a second do not.
+    #[test]
+    fn flashes_are_counted_in_any_one_second() {
+        assert_eq!(most_flashes_in_a_second(square(4, 350)), 3);
+        assert_eq!(most_flashes_in_a_second(square(4, 200)), 4);
+    }
+
+    /// A slow ramp, each step under the threshold, is one change once it has
+    /// moved past it, so a ramp up and back down is one flash.
+    #[test]
+    fn a_slow_ramp_is_one_change() {
+        const STEPS: u64 = 10;
+        let step = 2.0 * FLASH_MIN_CHANGE / STEPS as f32;
+        let up = (0..=STEPS).map(|i| (i * 20, step * i as f32));
+        let down = (1..=STEPS).map(|i| ((STEPS + i) * 20, step * (STEPS - i) as f32));
+        assert_eq!(most_flashes_in_a_second(up.chain(down)), 1);
+    }
+
+    /// Changes one way in a row are one change: a rise in two steps and a
+    /// fall in two is one flash.
+    #[test]
+    fn a_run_of_changes_one_way_is_one_change() {
+        let stepped = [(0, 0.0), (20, 0.5), (40, 1.0), (60, 0.5), (80, 0.0)];
+        assert_eq!(most_flashes_in_a_second(stepped), 1);
+    }
+
     fn approx_eq(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-4
     }
