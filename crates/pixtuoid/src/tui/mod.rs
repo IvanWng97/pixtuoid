@@ -997,7 +997,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         resolve_version_popup(&config_path)
     };
     let mut ui = ui_state::UiState::new(theme, onboarding_ui, version_popup, socket_path, log_path);
-    let mut last_layout_sig: Option<(u16, u16)> = None;
     let mut cap_sweep = FloorCapacitySweep::new();
 
     let tick = Duration::from_secs(1) / pixtuoid_scene::anim::PAINT_FPS;
@@ -1012,12 +1011,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             let now = ui.now();
             let snapshot = scene_rx.borrow_and_update().clone();
             renderer.evict_missing(&snapshot);
-            let sig = renderer.scene_extent();
-            if last_layout_sig != Some(sig) {
-                renderer.invalidate_routes();
-                renderer.cancel_transition();
-                last_layout_sig = Some(sig);
-            }
             let health = source_health.borrow_and_update().clone();
             ui.build_frames(now, &snapshot, &health)
                 .apply_to(&mut renderer, now);
