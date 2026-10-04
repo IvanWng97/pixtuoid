@@ -268,13 +268,6 @@ mod tests {
     }
 
     #[test]
-    fn smoothstep_endpoints() {
-        assert!(approx_eq(Easing::Smoothstep.apply(0.0), 0.0));
-        assert!(approx_eq(Easing::Smoothstep.apply(1.0), 1.0));
-        assert!(approx_eq(Easing::Smoothstep.apply(0.5), 0.5));
-    }
-
-    #[test]
     fn smoothstep_is_the_hermite_cubic() {
         assert_eq!(Easing::Smoothstep.apply(0.0), 0.0);
         assert_eq!(Easing::Smoothstep.apply(1.0), 1.0);
