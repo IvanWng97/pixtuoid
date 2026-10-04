@@ -16,8 +16,9 @@ pub(crate) use lookup::{
     MEETING_TABLE_SPRITE, NORTH_SOFA_SEAT_ROWS, PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY,
     TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE, TOWER_MARK, VENDING_MACHINE_SPRITE,
     WATER_COOLER_SPRITE, animation_frame_at, appliance_frame_index, appliance_overrides,
-    appliance_sprite, desk_art, desk_art_top, desk_bulb_offset, desk_mark, desk_prop_overrides,
-    desk_sprite_name, drawn_in, fixture_overrides, frame_at, looping_frame_index,
+    appliance_sprite, bulb_cell, desk_art, desk_art_top, desk_bulb_offset, desk_mark,
+    desk_prop_overrides, desk_sprite_name, drawn_in, fixture_overrides, frame_at,
+    looping_frame_index,
 };
 
 #[cfg(feature = "native")]
@@ -525,6 +526,12 @@ mod tests {
             );
             assert_eq!(at(Facing::North), at(Facing::South), "{mark}");
         }
+        let bulb = |facing| desk_bulb_offset(&pack, facing);
+        assert!(
+            bulb(Facing::North).is_some(),
+            "the back-turned lamp went dark"
+        );
+        assert_eq!(bulb(Facing::North), bulb(Facing::South));
     }
 
     /// `build.rs` embeds every sprite in `sprites/default/`, so one no animation,

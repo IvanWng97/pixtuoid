@@ -46,9 +46,10 @@ impl DeskBulbs {
 
     /// A desk facing `facing`'s.
     pub(crate) fn at(self, facing: Facing) -> Option<(u16, u16)> {
-        match facing {
-            Facing::North => self.back_turned,
-            Facing::South | Facing::East | Facing::West => self.facing_viewer,
+        if crate::pack::desk_sprite_name(facing) == crate::pack::desk_sprite_name(Facing::North) {
+            self.back_turned
+        } else {
+            self.facing_viewer
         }
     }
 }

@@ -132,23 +132,32 @@ pub(crate) fn desk_mark(
 pub(crate) fn desk_bulb_offset(pack: &Pack, facing: crate::layout::Facing) -> Option<(u16, u16)> {
     let name = pack.piece_or_source(desk_sprite_name(facing))?;
     let art = super::densest_frame(pack, name, 0, crate::render_scale::RenderScale::ONE)?;
+    let (x, y) = bulb_cell(&art)?;
+    // the art's rows from the desk's: its top is `desk_art_top` off the desk
+    let above = DESK_BEZEL_RAISE + art.frame.height().saturating_sub(base_desk_height(pack));
+    Some((x, y.checked_sub(above)?))
+}
+
+/// The layout cell, from `art`'s top-left, that the middle of its
+/// [`DESK_BULB_KEY`] pixels lies in; `None` for art that draws no bulb.
+pub(crate) fn bulb_cell(art: &super::DenseFrame<'_>) -> Option<(u16, u16)> {
     let w = usize::from(art.frame.width());
-    let cells: Vec<(u32, u32)> = drawn_in(&art, &[DESK_BULB_KEY])
+    let (mut n, mut sx, mut sy) = (0u32, 0u32, 0u32);
+    for (i, _) in drawn_in(art, &[DESK_BULB_KEY])
         .iter()
         .enumerate()
         .filter(|&(_, &bulb)| bulb)
-        .map(|(i, _)| ((i % w) as u32, (i / w) as u32))
-        .collect();
-    let art = art.frame;
-    let n = u32::try_from(cells.len()).ok().filter(|&n| n > 0)?;
-    let mid = |sum: u32| u16::try_from((2 * sum + n) / (2 * n)).ok();
-    let (x, y) = (
-        mid(cells.iter().map(|c| c.0).sum())?,
-        mid(cells.iter().map(|c| c.1).sum())?,
-    );
-    // the art's rows from the desk's: its top is `desk_art_top` off the desk
-    let above = DESK_BEZEL_RAISE + art.height().saturating_sub(base_desk_height(pack));
-    Some((x, y.checked_sub(above)?))
+    {
+        n += 1;
+        sx += (i % w) as u32;
+        sy += (i / w) as u32;
+    }
+    // a pixel's middle, `(sum / n + ½) / d`, floored to its cell
+    let cell = |sum: u32| {
+        let d = u32::from(art.density.get());
+        u16::try_from((2 * sum + n) / (2 * n * d)).ok()
+    };
+    (n > 0).then(|| Some((cell(sx)?, cell(sy)?))).flatten()
 }
 
 /// The base [`DESK_SPRITE`]'s height, which every desk's art keeps at its
