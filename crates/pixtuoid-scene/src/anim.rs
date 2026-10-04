@@ -73,6 +73,10 @@ pub enum Motion {
 pub const FULL_TICK_MS: u64 = 125;
 /// How often a [`Motion::Calm`] loop steps.
 pub const CALM_TICK_MS: u64 = 500;
+/// The rate the TUI and the floating window repaint an office with agents in
+/// it, on every tier: the sampling rate the walks' strides are sized for
+/// (`a_walking_person_never_slides`).
+pub const PAINT_FPS: u32 = 30;
 
 /// The least any phase of a flash — a strike's level, a starved neon's catch,
 /// the dark between — lasts in loop time: the project's own floor, beside
