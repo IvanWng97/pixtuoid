@@ -29,7 +29,7 @@ use pixtuoid_core::sprite::error::PackError;
 #[cfg(feature = "native")]
 use pixtuoid_core::sprite::format::{DensityMismatch, FrameCountMismatch, load_pack};
 use pixtuoid_core::sprite::format::{
-    Pack, ValidationReport, load_pack_from_strings, validate_pack_animations,
+    Pack, PackContract, ValidationReport, load_pack_from_strings, validate_pack_animations,
 };
 
 /// Where a sprite pack's custom half comes from. The source decides what a
@@ -67,10 +67,24 @@ fn art_sets() -> Vec<Vec<&'static str>> {
     sets
 }
 
-/// [`validate_pack_animations`], against this crate's painters' art sets and
-/// walks.
+/// The marks every desk's first frame carries: the cup and the token tower
+/// stand there ([`display`](crate::display)'s `push_desk_props`).
+const DESK_MARKS: [(&str, &[&str]); 2] = [
+    ("desk", &["cup", "tower"]),
+    ("desk_north", &["cup", "tower"]),
+];
+
+/// [`validate_pack_animations`], against this crate's painters' art sets,
+/// walks and desk marks.
 pub fn validate_pack(pack: &Pack) -> ValidationReport {
-    validate_pack_animations(pack, &art_sets(), &crate::sim::WALKS)
+    validate_pack_animations(
+        pack,
+        &PackContract {
+            art_sets: &art_sets(),
+            walks: &crate::sim::WALKS,
+            marks: &DESK_MARKS,
+        },
+    )
 }
 
 /// Log a custom pack's animation-validation gaps at load time: a pack missing a
@@ -98,6 +112,7 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         missing_hair_views: _,
         overhanging_hair: _,
         walks_without_stride: _,
+        missing_marks: _,
         orphan_hairstyles,
     } = &report;
     for name in missing_required {
