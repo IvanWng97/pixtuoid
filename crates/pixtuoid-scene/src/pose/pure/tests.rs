@@ -1020,17 +1020,18 @@ fn a_walker_s_dust_rises_under_its_planted_foot() {
 /// its cycle and on its west from the one halfway; mirrored, the other.
 #[test]
 fn the_planted_foot_changes_at_the_halfway_strike() {
-    for frames in [2, 8] {
-        for i in 0..frames {
-            let east = usize::from(2 * i >= frames);
+    let cycles: [&[usize]; 2] = [&[0, 1], &[0, 0, 0, 0, 1, 1, 1, 1]];
+    for east in cycles {
+        let frames = east.len();
+        for (i, &foot) in east.iter().enumerate() {
             assert_eq!(
                 crate::effects::planted_foot(i, frames, false),
-                east,
+                foot,
                 "{i} of {frames}"
             );
             assert_eq!(
                 crate::effects::planted_foot(i, frames, true),
-                1 - east,
+                1 - foot,
                 "{i} of {frames}, mirrored"
             );
         }
