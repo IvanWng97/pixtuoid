@@ -129,16 +129,21 @@ jobs:
           # shards/<name>/, so search at any depth.
           mkdir -p shards out
           mapfile -t outcomes < <(find shards -name outcomes.json)
-          # A shard is whole only once cargo-mutants stamps its end_time.
+          # A shard is whole only once cargo-mutants stamps its end_time, which
+          # it also stamps after a failed baseline that mutated nothing.
           jq -n --arg base "$BASE" --arg head "$HEAD_SHA" --arg run "$RUN_ID" \
             --argjson listed "$LISTED" --argjson shards "$SHARDS" \
-            '[inputs] as $s | {
+            '[inputs] as $s
+            | ($s | map(select(any(.outcomes[]?; .scenario == "Baseline" and .summary != "Success")))) as $failed
+            | (($s | map(select(.end_time != null)) | length) - ($failed | length)) as $whole
+            | {
               head_sha: $head, base_sha: $base, run_id: ($run | tonumber),
               listed: $listed,
               shards_total: $shards,
               sampled: ($shards > 4),
-              shards_complete: ($s | map(select(.end_time != null)) | length),
-              partial: ($listed > 0 and ($s | map(select(.end_time != null)) | length) < ([$shards, 4] | min)),
+              baseline_failed: ($failed | length > 0),
+              shards_complete: $whole,
+              partial: ($listed > 0 and $whole < ([$shards, 4] | min)),
               caught: ($s | map(.caught) | add // 0),
               missed: ($s | map(.missed) | add // 0),
               timeout: ($s | map(.timeout) | add // 0),
