@@ -75,6 +75,7 @@ fn codex_probe_root_resolved(sessions_root: &Path, home: &Path) -> Option<PathBu
 }
 
 /// Source that watches the Codex session transcript directory.
+#[derive(Debug)]
 pub struct CodexSource {
     /// The watched Codex `sessions` rollout root (`~/.codex/sessions`).
     pub sessions_root: PathBuf,

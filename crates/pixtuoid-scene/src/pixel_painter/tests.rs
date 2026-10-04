@@ -1743,6 +1743,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
         pack: &pack,
         timing: Motion::Full.timing(now),
         sky: crate::sky::Sky::clock(now),
+        outside: None,
         buf: &mut buf,
         cache: &mut cache,
         base_fill: &mut base_fill,
@@ -3399,6 +3400,7 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
             pack: &pack,
             timing: Motion::Full.timing(now),
             sky: crate::sky::Sky::clock(now),
+            outside: None,
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -3650,6 +3652,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             pack: &pack,
             timing: Motion::Full.timing(now),
             sky: crate::sky::Sky::clock(now),
+            outside: None,
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -3778,6 +3781,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 pack: &pack,
                 timing: Motion::Full.timing(now),
                 sky: crate::sky::Sky::clock(now),
+                outside: None,
                 buf,
                 cache: &mut cache,
                 base_fill: &mut base_fill,
@@ -4881,6 +4885,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 pack: &pack,
                 timing: Motion::Full.timing(now),
                 sky: crate::sky::Sky::clock(now),
+                outside: None,
                 buf: &mut buf,
                 cache: &mut cache,
                 base_fill: &mut base_fill,
@@ -5111,6 +5116,7 @@ fn paint_drawn(
             pack,
             timing: Motion::Full.timing(now),
             sky: crate::sky::Sky::clock(now),
+            outside: None,
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -5865,4 +5871,169 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
         asymmetric += usize::from(east.as_slice() != mirrored.as_slice());
     }
     assert!(asymmetric > 0, "a profile is not its own mirror");
+}
+
+/// Under every sky the sweep draws, a frame matches the one whose windows show
+/// its instant's no-weather sky — the same room, lit alike — everywhere but on
+/// glass no fixture paints.
+#[test]
+fn the_outside_reaches_only_the_glass() {
+    let (scene, _, _, now0, pack) = sim_rig();
+    // Wide enough for meeting rooms, whose notice boards hang on the panes.
+    let layout = SceneLayout::compute_with_seed(240, 144, None, 0).expect("240x144 lays out");
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: now0,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
+    );
+    const UNPAINTED: Rgb = Rgb { r: 1, g: 2, b: 3 };
+    let (w, h) = (layout.buf_w, layout.buf_h);
+    let mut hung_on_glass = std::collections::HashSet::new();
+    let mut covered: Option<(std::time::SystemTime, Vec<bool>)> = None;
+    for weathered in crate::outside::tests::every_sky() {
+        let name = &weathered.name;
+        let timing = Motion::Full.timing(weathered.now);
+        let paint = |outside| {
+            let mut buf = RgbBuffer::filled(w, h, UNPAINTED);
+            paint_frame(
+                &mut PaintCtx {
+                    scene: &scene,
+                    layout: &layout,
+                    pack: &pack,
+                    timing,
+                    sky: weathered.sky,
+                    outside,
+                    buf: &mut buf,
+                    cache: &mut FrameCache::new(),
+                    base_fill: &mut BaseFillCache::new(),
+                    shadows: &mut crate::ground::DepthsCache::default(),
+                    theme,
+                    floor: crate::floor::FloorMeta::ground(),
+                    walks: &owned.route.walks,
+                    debug_walkable: false,
+                },
+                &frame,
+            );
+            buf
+        };
+        let (shown, bare) = (paint(None), paint(Some(weathered.bare)));
+        // Every pixel a fixture paints, each painted alone: one set an instant.
+        if covered.as_ref().is_none_or(|(at, _)| *at != weathered.now) {
+            let mut over = RgbBuffer::filled(w, h, UNPAINTED);
+            let mut scratch = RgbBuffer::filled(w, h, UNPAINTED);
+            let fctx = PaintCtx {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                timing,
+                sky: weathered.sky,
+                outside: None,
+                buf: &mut scratch,
+                cache: &mut FrameCache::new(),
+                base_fill: &mut BaseFillCache::new(),
+                shadows: &mut crate::ground::DepthsCache::default(),
+                theme,
+                floor: crate::floor::FloorMeta::ground(),
+                walks: &owned.route.walks,
+                debug_walkable: false,
+            };
+            let moment = Moment::resolve(weathered.sky, theme, 0.0, timing);
+            let lights = Lights::of(
+                &layout,
+                &moment.look,
+                &LightInputs {
+                    agents: &frame.agents,
+                    seated: &frame.seated_agents,
+                    floor_idx: 0,
+                    indoor_scale: frame.indoor_scale,
+                    neon: frame.neon,
+                    beat: timing.beat,
+                },
+            );
+            let neon = crate::floor::neon_look(frame.neon, theme);
+            let Furnishings { backdrop, sorted } =
+                queue_fixtures(&fctx, &frame, &lights.desks, neon);
+            let kinds = backdrop
+                .iter()
+                .map(|(_, k)| k)
+                .chain(sorted.iter().map(|d| &d.kind));
+            let mut painted = vec![false; usize::from(w) * usize::from(h)];
+            let mut cache = FrameCache::new();
+            for kind in kinds {
+                let epoch = over.begin_writes();
+                paint_drawable(
+                    kind,
+                    &mut drawable::DrawableCtx {
+                        buf: &mut over,
+                        pack: &pack,
+                        cache: &mut cache,
+                        timing,
+                        theme,
+                    },
+                );
+                for y in 0..h {
+                    for x in 0..w {
+                        if over.written_in(x, y, epoch) {
+                            painted[usize::from(y) * usize::from(w) + usize::from(x)] = true;
+                        }
+                    }
+                }
+            }
+            over.end_writes();
+            covered = Some((weathered.now, painted));
+        }
+        let covered = &covered.as_ref().expect("filled above").1;
+        let mut glass = 0;
+        for y in 0..h {
+            for x in 0..w {
+                let hung = covered[usize::from(y) * usize::from(w) + usize::from(x)];
+                if hung && layout.glass_at(x, y) {
+                    hung_on_glass.insert((x, y));
+                }
+                if shown.get(x, y) == bare.get(x, y) {
+                    continue;
+                }
+                assert!(
+                    layout.glass_at(x, y) && !hung,
+                    "{name}: the outside reached ({x}, {y}), off the glass"
+                );
+                glass += 1;
+            }
+        }
+        assert_eq!(
+            glass > 0,
+            weathered.changes_glass,
+            "{name}: {glass} glass pixels"
+        );
+    }
+    for kind in ["neon sign", "notice board"] {
+        let over_glass = layout.fixtures().any(|f| {
+            let named = match f.kind {
+                FixtureKind::NeonSign => "neon sign",
+                FixtureKind::NoticeBoard { .. } => "notice board",
+                _ => return false,
+            };
+            named == kind
+                && (f.visual.y..f.visual.y + f.visual.height).any(|y| {
+                    (f.visual.x..f.visual.x + f.visual.width)
+                        .any(|x| hung_on_glass.contains(&(x, y)))
+                })
+        });
+        assert!(
+            over_glass,
+            "no {kind} hangs over a window, so none was compared there"
+        );
+    }
 }
