@@ -30,6 +30,8 @@ jobs:
       - uses: ./.github/actions/setup-just
       - name: Run frame + wire benchmarks (advisory, non-blocking)
         run: just bench
+      - name: Run frame pacing (advisory, non-blocking)
+        run: just bench-pacing
       # JSON measurements only — the lean criterion feature set builds no HTML.
       - name: Upload criterion measurements
         if: always()
@@ -37,5 +39,13 @@ jobs:
         with:
           name: criterion-measurements
           path: target/criterion/
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Upload frame pacing report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frame-pacing-report
+          path: target/pacing/report.json
           retention-days: 14
           if-no-files-found: ignore

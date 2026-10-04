@@ -64,7 +64,7 @@ cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 - Fixtures are RECORDED, never composed (`just capture-fixture` — BILLED), and the recorder blanks every subtree no decoder reads (derived by probe, never listed); every scenario declares `provenance.json`. Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md). `just restrip-fixtures` re-strips the committed corpus offline; `just corpus-all` censuses local corpora; `just fixture-age` is advisory/local.
 - Visual verification for sprite work: snapshot example → `scripts/crop-snapshot.py` → READ the PNG; loop in `.claude/skills/beautify-decoration/SKILL.md`.
 - CI gates, and which of them preflight can't see (a green preflight is NOT a green PR): [`CONTRIBUTING.md#ci-gates`](docs/CONTRIBUTING.md#ci-gates) lists them and what each catches. A draft PR runs only the light tier and its `ci-gate` is red by design; marking it ready runs the full tier.
-- Advisory (never gates): `just mutants`, `just bench`, CodSpeed.
+- Advisory (never gates): `just mutants`, `just bench`, `just bench-pacing`, CodSpeed.
 - Hooks: `git config core.hooksPath .githooks` once per clone; `just setup-tools` installs cargo tools (incl. rust-analyzer — without it the agent LSP degrades to grep).
 - Release is a human step: [`CONTRIBUTING.md#releasing`](docs/CONTRIBUTING.md#releasing).
 

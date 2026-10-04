@@ -1,0 +1,186 @@
+//! The frame-pacing bench's way into the real TUI painter: a renderer over
+//! ratatui's own crossterm encoder and, for an image protocol, the real tile
+//! sink, both writing into a [`Wire`] that counts bytes and the time spent
+//! writing them. Mechanism for `examples/pacing.rs`, not a contract.
+
+use std::io::Write;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
+
+use anyhow::{Context, Result};
+use pixtuoid_core::sprite::format::Pack;
+use ratatui::Terminal;
+use ratatui::backend::{Backend, ClearType, CrosstermBackend, WindowSize};
+use ratatui::layout::{Position, Rect, Size};
+
+use crate::graphics::{CellSize, Fit, ImageProtocol};
+use crate::tui::tui_renderer::TuiRenderer;
+
+/// How the bench's office reaches the terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Protocol {
+    /// The classic, in half-block cells.
+    HalfBlock,
+    /// The cutaway over the kitty graphics protocol.
+    Kitty,
+    /// The cutaway over SIXEL.
+    Sixel,
+    /// The cutaway over iTerm2's inline images.
+    Iterm2,
+}
+
+/// What a [`Wire`] has carried: bytes, and the time spent writing them.
+#[derive(Debug, Default)]
+struct Carried {
+    bytes: AtomicU64,
+    write_ns: AtomicU64,
+}
+
+/// A writer that discards what it is given, counting its bytes and timing each
+/// write and flush on the monotonic clock. Clones share one count.
+#[derive(Debug, Clone, Default)]
+pub struct Wire(Arc<Carried>);
+
+impl Wire {
+    /// Bytes and write nanoseconds since the last take, zeroing both.
+    pub fn take(&self) -> (u64, u64) {
+        (
+            self.0.bytes.swap(0, Ordering::Relaxed),
+            self.0.write_ns.swap(0, Ordering::Relaxed),
+        )
+    }
+
+    fn timed<T>(&self, f: impl FnOnce() -> T) -> T {
+        let start = Instant::now();
+        let out = f();
+        let ns = u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        self.0.write_ns.fetch_add(ns, Ordering::Relaxed);
+        out
+    }
+}
+
+impl Write for Wire {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.timed(|| {
+            self.0.bytes.fetch_add(buf.len() as u64, Ordering::Relaxed);
+            std::hint::black_box(buf);
+        });
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.timed(|| ());
+        Ok(())
+    }
+}
+
+/// A terminal `size` cells big whose cells are `cell` pixels, encoding through
+/// ratatui's crossterm backend into a [`Wire`]: nothing asks a real terminal.
+pub struct PacedBackend {
+    inner: CrosstermBackend<Wire>,
+    size: Size,
+    cell: CellSize,
+    cursor: Position,
+}
+
+impl PacedBackend {
+    /// Resize the terminal to `cols`×`rows`, as a window drag does.
+    pub fn resize(&mut self, cols: u16, rows: u16) {
+        self.size = Size::new(cols, rows);
+    }
+}
+
+impl Backend for PacedBackend {
+    type Error = std::io::Error;
+    fn draw<'a, I>(&mut self, content: I) -> std::io::Result<()>
+    where
+        I: Iterator<Item = (u16, u16, &'a ratatui::buffer::Cell)>,
+    {
+        self.inner.draw(content)
+    }
+    fn hide_cursor(&mut self) -> std::io::Result<()> {
+        self.inner.hide_cursor()
+    }
+    fn show_cursor(&mut self) -> std::io::Result<()> {
+        self.inner.show_cursor()
+    }
+    fn get_cursor_position(&mut self) -> std::io::Result<Position> {
+        Ok(self.cursor)
+    }
+    fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> std::io::Result<()> {
+        let position = position.into();
+        self.cursor = position;
+        self.inner.set_cursor_position(position)
+    }
+    fn clear(&mut self) -> std::io::Result<()> {
+        self.inner.clear()
+    }
+    fn clear_region(&mut self, clear_type: ClearType) -> std::io::Result<()> {
+        self.inner.clear_region(clear_type)
+    }
+    fn size(&self) -> std::io::Result<Size> {
+        Ok(self.size)
+    }
+    fn window_size(&mut self) -> std::io::Result<WindowSize> {
+        Ok(WindowSize {
+            columns_rows: self.size,
+            pixels: Size::new(
+                self.size.width * self.cell.w,
+                self.size.height * self.cell.h,
+            ),
+        })
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Backend::flush(&mut self.inner)
+    }
+}
+
+/// A renderer drawing the office over `protocol` into a `cols`×`rows`
+/// terminal of `cell_px` cells, with `pets`, and the wire every byte it writes
+/// crosses.
+pub fn renderer(
+    protocol: Protocol,
+    cols: u16,
+    rows: u16,
+    cell_px: (u16, u16),
+    pets: Vec<pixtuoid_scene::pet::Pet>,
+    pack: Arc<Pack>,
+) -> Result<(TuiRenderer<PacedBackend>, Wire)> {
+    let wire = Wire::default();
+    let cell = CellSize {
+        w: cell_px.0,
+        h: cell_px.1,
+    };
+    let backend = PacedBackend {
+        inner: CrosstermBackend::new(wire.clone()),
+        size: Size::new(cols, rows),
+        cell,
+        cursor: Position::ORIGIN,
+    };
+    let mut r = TuiRenderer::new(
+        Terminal::new(backend)?,
+        pixtuoid_scene::theme::ALL_THEMES[0],
+        pets,
+        Arc::clone(&pack),
+    );
+    let image = match protocol {
+        Protocol::HalfBlock => None,
+        Protocol::Kitty => Some(ImageProtocol::Kitty),
+        Protocol::Sixel => Some(ImageProtocol::Sixel),
+        Protocol::Iterm2 => Some(ImageProtocol::Iterm2),
+    };
+    if let Some(image) = image {
+        let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
+        let fit = Fit::new(cell, area, pack.max_density_variant())
+            .context("the cell is too small for the cutaway")?;
+        r.set_cutaway(crate::tui::cutaway::TileCutaway::new(
+            fit,
+            cell,
+            image,
+            false,
+            Box::new(wire.clone()),
+        ));
+    }
+    Ok((r, wire))
+}
