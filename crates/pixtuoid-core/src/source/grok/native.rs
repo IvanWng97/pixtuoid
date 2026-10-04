@@ -160,6 +160,7 @@ fn grok_probe_root_resolved(sessions_root: &Path, home: &Path) -> Option<PathBuf
 }
 
 /// Source that watches the grok session transcript tree.
+#[derive(Debug)]
 pub struct GrokSource {
     /// The watched grok session-transcript root; per-session `updates.jsonl` lives under it.
     pub sessions_root: PathBuf,

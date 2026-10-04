@@ -117,6 +117,7 @@ impl FloorMeta {
 
 /// Per-floor rendering state — each floor owns its stores, so floors are
 /// fully independent.
+#[derive(Debug)]
 pub struct FloorCtx {
     /// This floor's A\* pathfinder.
     pub router: AStarRouter,
@@ -318,7 +319,7 @@ fn frame_epilogue(
 }
 
 /// A floor's pet and the live interaction with it.
-#[derive(Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct PetInputs<'a> {
     /// This floor's configured pet; `None` when no pets are configured or none
     /// maps to this floor seed.
@@ -330,7 +331,7 @@ pub struct PetInputs<'a> {
 
 /// What one floor shows at one instant — the inputs the frame, the paint pass
 /// and the sim share.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct FloorInputs<'a> {
     /// The scene to render (the full live scene, or a projected single-floor one).
     pub scene: &'a SceneState,
@@ -348,6 +349,7 @@ pub struct FloorInputs<'a> {
 /// layout it advanced on. A second profile paints THIS layout — laying the office
 /// out again beside the sim is how a painter ends up drawing one office while the
 /// sim walked another.
+#[derive(Debug)]
 pub struct SteppedFloor {
     /// The layout the sim stepped on.
     pub layout: Arc<crate::layout::SceneLayout>,
@@ -357,6 +359,7 @@ pub struct SteppedFloor {
 
 /// The per-FLOOR half of a painter's persistent session state: the sim
 /// stores ([`FloorCtx`]) plus what the floor is drawn into.
+#[derive(Debug)]
 pub struct PerFloor {
     /// This floor's sim stores.
     pub ctx: FloorCtx,
@@ -467,7 +470,7 @@ impl AudioObserver {
 
 /// The per-OFFICE half: cross-frame state that survives floor navigation — ONE
 /// per painter surface, shared across every floor.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct PerOffice {
     /// Every agent's desk cup + fetch time — survives floor navigation.
     pub coffee: CoffeeState,
@@ -481,6 +484,7 @@ pub struct PerOffice {
 }
 
 /// The office stores one floor's frame steps and draws with.
+#[derive(Debug)]
 pub struct OfficeStores<'a> {
     /// See [`PerOffice::coffee`].
     pub coffee: &'a mut CoffeeState,
@@ -528,6 +532,7 @@ impl PerOffice {
 /// [`PerOffice`] plus the dual `evict_missing` protocol behind one type, so a
 /// painter can't hand-roll (and silently skip) the eviction — a skipped
 /// eviction leaks per-agent state or teleports a recurring agent.
+#[derive(Debug)]
 pub struct FloorSession {
     /// This session's single floor — its sim stores + raster.
     pub floor: PerFloor,
@@ -705,6 +710,7 @@ pub fn step_floor(
 /// `EMPTY_DEBOUNCE_MS` (so agents briefly disappearing between transcripts don't
 /// flicker it) then eases toward `MIN_LEVEL`; repopulating snaps the target
 /// straight back to 1.0.
+#[derive(Debug)]
 pub struct VacancyDim {
     level: f32,
     empty_since: Option<SystemTime>,
@@ -862,7 +868,7 @@ pub(crate) fn neon_look(levels: NeonLevels, theme: &Theme) -> NeonLook {
 /// [`NeonState::FADE_MS`] instead of snapping the hue. A sign with no recent light
 /// to ease FROM — its first tick, or one nobody has drawn for longer than a fade
 /// (a still's warm-up step, a floor switched back to) — snaps to the mood's own.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct NeonState {
     fade: Option<NeonFade>,
     last_tick: Option<SystemTime>,
@@ -870,6 +876,7 @@ pub(crate) struct NeonState {
     last_beat_ms: Option<u64>,
 }
 
+#[derive(Debug)]
 struct NeonFade {
     from: NeonLevels,
     to: NeonLevels,
@@ -1018,6 +1025,7 @@ impl NeonState {
 }
 
 /// Animated floor-switch transition.
+#[derive(Debug)]
 pub struct FloorTransition {
     /// The floor being slid away FROM.
     pub from_floor: usize,
@@ -1084,6 +1092,7 @@ pub fn num_floors(scene: &SceneState) -> usize {
 /// offset rides a SEPARATE `desk` field rather than being written back into
 /// `AgentSlot.desk_index`, which keeps that field's GLOBAL type honest until
 /// [`project_floor_scene`] re-hosts the slot.
+#[derive(Debug)]
 pub struct ProjectedSlot {
     /// The projected agent — its `desk_index` still the ORIGINAL global allocation.
     pub slot: AgentSlot,
