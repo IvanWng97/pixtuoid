@@ -279,10 +279,8 @@ sweep shows it isn't, that test is the mechanism and no defensive code lands) ·
 RE-SCOPED → #N (real and INTRODUCED — or first made reachable — by this
 change, and bigger than the PR: split it off into #N; a redesign that brings
 the finding into scope ends FIXED) · FOLLOW-UP → #N (real and PRE-EXISTING,
-whether or not this change touched its file, and fixed in #N; a defect in
-another session's tree cites that session's PR). A small pre-existing finding
-inside the code the PR already changes, which moves none of its rows or risk,
-may instead end FIXED in place. A
+whether or not this change touched its file: it never grows the PR, and is
+fixed in #N; a defect in another session's tree cites that session's PR). A
 disposition is the reply that resolves the thread, STARTING with its state:
 `FIXED: …` · `REFUTED: … — <mechanism>` · `RE-SCOPED → #N: …` ·
 `FOLLOW-UP → #N: …`, where #N is an open or merged PR other than this one. A
