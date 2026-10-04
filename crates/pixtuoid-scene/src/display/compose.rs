@@ -1383,8 +1383,11 @@ pub(crate) fn push_windows(
                 }))
             })
             .collect();
-        if let Some((veil, alpha)) = weather.veil {
-            for c in px.iter_mut().flatten() {
+        for (at, c) in (0..h)
+            .flat_map(|ay| (0..w).map(move |ax| (x0 + ax, y0 + ay)))
+            .zip(px.iter_mut())
+        {
+            if let (Some(c), Some((veil, alpha))) = (c, weather.veil.at(at.0, at.1)) {
                 *c = crate::composite::blend_rgb(*c, veil, alpha);
             }
         }
