@@ -731,7 +731,7 @@ site-demos:
     want=$(cat scripts/media.json scripts/gen-media.py site/src/themes.json site/src/weather.json | shasum | cut -d' ' -f1)
     # The rendered listing rides in the stamp, so a lost or half-written demo
     # re-renders instead of passing on the inputs alone.
-    have() { ls -l site/public/demos 2>/dev/null | shasum | cut -d' ' -f1; }
+    have() { find site/public/demos -type f -exec cksum {} + 2>/dev/null | sort | shasum | cut -d' ' -f1; }
     [ "$(cat "$stamp" 2>/dev/null)" = "$want $(have)" ] && exit 0
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
     .venv/bin/python3 scripts/gen-media.py --only site
