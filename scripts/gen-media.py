@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Regenerate every committed office image from a release `snapshot` build.
+"""Regenerate the office media from a release `snapshot` build: the README's
+committed images and the site's CI-rendered demos.
 
 Single source of truth for BOTH surfaces' render media. Every render job lives
 in scripts/media.json; this driver builds the binary once and runs each job,
@@ -11,7 +12,8 @@ Theme/weather lists are read from site/src/{themes,weather}.json (`@themes.json`
   just gen-media --only docs   # docs/images/ only
   just gen-media-check     # → gen-media.py --check --only docs (evidence on a PR)
 
---check renders to a temp dir and pixel-diffs every committed PNG (threshold 0,
+--check renders to a temp dir and pixel-diffs every committed PNG of the
+selected targets (threshold 0,
 via scripts/compare-screenshots.py); video clips (.mp4/.webm) and the animated
 demo.gif are presence-checked only, since ffmpeg/gifsicle output is not
 byte-stable across versions. Exits non-zero on any drift.
@@ -252,7 +254,8 @@ def run_wasm_still(job, out_dirs, work, intermediates):
     # The live-office backdrop's poster: a REAL frame of the pixtuoid-web Office,
     # in the same buffer geometry the live canvas computes, so the poster→canvas
     # crossfade dissolves in place instead of reframing. Deterministic per
-    # (t0_ms, advance_ms) under the TZ=UTC pin, so --check pixel-gates it.
+    # (t0_ms, advance_ms) under the TZ=UTC pin, so a re-render reproduces it; it is
+    # site-only, so no gate compares it.
     subprocess.run(
         ["cargo", "build", "--release", "-p", "pixtuoid-web", "--example", "hero_still"],
         check=True,
