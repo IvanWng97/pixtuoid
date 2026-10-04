@@ -239,12 +239,12 @@ impl FloorCtx {
                 p.duration_ms + p.pause_ms
             }
         };
-        self.door_anim_max_ms = self.walks.values().fold(0u64, |acc, ms| {
-            let entry = ms
+        self.door_anim_max_ms = self.walks.values().fold(0u64, |acc, walk| {
+            let entry = walk
                 .entry
                 .as_ref()
                 .map_or(0, |l| in_flight(l.started_at, &l.profile));
-            let exit = ms
+            let exit = walk
                 .exit
                 .as_ref()
                 .map_or(0, |leg| in_flight(leg.started_at, &leg.profile));
@@ -475,15 +475,15 @@ pub fn waypoint_kind_of(
 
 /// The mood [`TrackId`](crate::audio::TrackId) for `now` under `weather` — the
 /// ONE place the day/precip/epoch input wiring lives. Lives here (not `audio`)
-/// because it reaches the lighting layer's `is_day_at`/`precipitation_level`,
+/// because it reaches `sky::is_day_at` and `sky::rain_at`,
 /// which `audio` must not depend on.
 pub fn track_for(
     now: std::time::SystemTime,
     weather: crate::sky::WeatherPolicy,
 ) -> crate::audio::TrackId {
     crate::audio::select_track(
-        crate::pixel_painter::is_day_at(now),
-        crate::pixel_painter::precipitation_level(now, weather),
+        crate::sky::is_day_at(now),
+        crate::sky::rain_at(now, weather),
         crate::audio::track_epoch(now),
     )
 }
@@ -527,7 +527,7 @@ impl AudioObserver {
         // You hear the floor you're LOOKING AT — but rain stays global, since
         // it's weather, not agent activity.
         let counts = crate::board::per_floor_counts(scene)[floor_idx.min(MAX_FLOORS - 1)];
-        let precipitation = crate::pixel_painter::precipitation_level(now, floor.weather);
+        let precipitation = crate::sky::rain_at(now, floor.weather);
         let floor_ids = scene
             .agents
             .iter()
@@ -1044,8 +1044,8 @@ impl NeonState {
             .last_tick
             .map(|last| crate::anim::elapsed_ms(now, last));
         self.last_tick = Some(now);
-        // Stepped in loop time, which Calm walks at a quarter of the wall
-        // clock's pace, so Calm plays the stutter slower rather than never.
+        // Stepped in loop time, which `Motion::Calm` paces slower than the wall
+        // clock, so Calm plays the stutter slower rather than never.
         let beat_ms = timing.beat.ms();
         let step_ms = self.last_beat_ms.map(|last| beat_ms.abs_diff(last));
         self.last_beat_ms = Some(beat_ms);

@@ -3,22 +3,22 @@ use crate::pose::{RouteRig, is_aimless_cycle, waypoint_index_for_cycle};
 use pixtuoid_core::{AgentId, GlobalDeskIndex};
 
 fn id() -> AgentId {
-    AgentId::from_parts("test", "motion-test-agent")
+    AgentId::from_parts("test", "walk-test-agent")
 }
 
 #[test]
-fn motion_state_new_default_fields() {
-    let ms = WalkState::new(id());
-    assert!(ms.entry.is_none());
-    assert!(ms.exit.is_none());
-    assert!(ms.snap_back.is_none());
-    assert_eq!(ms.wander.cycle_n, 0);
-    assert_eq!(ms.wander.phase, WanderPhase::Seated);
-    assert_eq!(ms.wander.phase_started_at, SystemTime::UNIX_EPOCH);
-    assert_eq!(ms.wander.last_advanced_at, SystemTime::UNIX_EPOCH);
-    assert!(matches!(ms.wander.phase, WanderPhase::Seated));
-    assert!(matches!(ms.wander.target.kind, WanderKind::Aimless));
-    assert!(ms.walk_path.is_none());
+fn walk_state_new_default_fields() {
+    let walk = WalkState::new(id());
+    assert!(walk.entry.is_none());
+    assert!(walk.exit.is_none());
+    assert!(walk.snap_back.is_none());
+    assert_eq!(walk.wander.cycle_n, 0);
+    assert_eq!(walk.wander.phase, WanderPhase::Seated);
+    assert_eq!(walk.wander.phase_started_at, SystemTime::UNIX_EPOCH);
+    assert_eq!(walk.wander.last_advanced_at, SystemTime::UNIX_EPOCH);
+    assert!(matches!(walk.wander.phase, WanderPhase::Seated));
+    assert!(matches!(walk.wander.target.kind, WanderKind::Aimless));
+    assert!(walk.walk_path.is_none());
 }
 
 #[test]
@@ -255,7 +255,7 @@ impl<R: Router> WanderRig<R> {
             .route
             .walks
             .get(&self.slot.agent_id)
-            .map(|m| phase_kind(m.wander.phase))
+            .map(|walk| phase_kind(walk.wander.phase))
             == Some(from_phase)
         {
             let elapsed = now
@@ -281,13 +281,13 @@ fn fresh_idle_inits_to_seated_phase() {
 
     rig.advance(now);
 
-    let ms = rig.state();
+    let walk = rig.state();
     assert!(
-        matches!(ms.wander.phase, WanderPhase::Seated),
+        matches!(walk.wander.phase, WanderPhase::Seated),
         "fresh idle should init to Seated, got {:?}",
-        ms.wander.phase
+        walk.wander.phase
     );
-    assert_eq!(ms.wander.cycle_n, 0);
+    assert_eq!(walk.wander.cycle_n, 0);
 }
 
 #[test]
@@ -304,11 +304,11 @@ fn seated_transitions_to_walking_out_on_trip_cycle() {
     rig.advance(now);
     rig.advance_until_leaves(now, PhaseKind::Seated, 60_000);
 
-    let ms = rig.state();
+    let walk = rig.state();
     assert!(
-        matches!(ms.wander.phase, WanderPhase::WalkingOut(_)),
+        matches!(walk.wander.phase, WanderPhase::WalkingOut(_)),
         "after seated dwell on trip cycle, expected WalkingOut, got {:?}",
-        ms.wander.phase
+        walk.wander.phase
     );
 }
 
@@ -365,11 +365,11 @@ fn walking_out_transitions_to_at_waypoint_on_arrival() {
     ));
     rig.advance_until_leaves(t1, PhaseKind::WalkingOut, 20_000);
 
-    let ms = rig.state();
+    let walk = rig.state();
     assert!(
-        matches!(ms.wander.phase, WanderPhase::AtWaypoint(_)),
+        matches!(walk.wander.phase, WanderPhase::AtWaypoint(_)),
         "expected AtWaypoint after walk-out arrival, got {:?}",
-        ms.wander.phase
+        walk.wander.phase
     );
 }
 
@@ -399,11 +399,11 @@ fn at_waypoint_transitions_to_walking_back_after_dwell() {
     ));
     rig.advance_until_leaves(t2, PhaseKind::AtWaypoint, 60_000);
 
-    let ms = rig.state();
+    let walk = rig.state();
     assert!(
-        matches!(ms.wander.phase, WanderPhase::WalkingBack(_)),
+        matches!(walk.wander.phase, WanderPhase::WalkingBack(_)),
         "expected WalkingBack after dwell, got {:?}",
-        ms.wander.phase
+        walk.wander.phase
     );
 }
 
@@ -430,13 +430,13 @@ fn walking_back_arrival_increments_cycle_n_and_resets_to_seated() {
     let t = rig.advance_until_leaves(t, PhaseKind::AtWaypoint, 60_000);
     rig.advance_until_leaves(t, PhaseKind::WalkingBack, 20_000);
 
-    let ms = rig.state();
+    let walk = rig.state();
     assert!(
-        matches!(ms.wander.phase, WanderPhase::Seated),
+        matches!(walk.wander.phase, WanderPhase::Seated),
         "completed cycle must reset to Seated, got {:?}",
-        ms.wander.phase
+        walk.wander.phase
     );
-    assert_eq!(ms.wander.cycle_n, 1, "cycle_n must increment once");
+    assert_eq!(walk.wander.cycle_n, 1, "cycle_n must increment once");
 }
 
 #[test]
@@ -638,19 +638,19 @@ fn idempotent_same_now_does_not_mutate_state() {
     let t1 = rig.advance_until_leaves(now, PhaseKind::Seated, 60_000);
 
     let (phase_before, cycle_before) = {
-        let ms = rig.state();
-        (ms.wander.phase, ms.wander.cycle_n)
+        let walk = rig.state();
+        (walk.wander.phase, walk.wander.cycle_n)
     };
 
     rig.advance(t1);
 
-    let ms = rig.state();
+    let walk = rig.state();
     assert_eq!(
-        ms.wander.phase, phase_before,
+        walk.wander.phase, phase_before,
         "2nd call with same now must not change phase"
     );
     assert_eq!(
-        ms.wander.cycle_n, cycle_before,
+        walk.wander.cycle_n, cycle_before,
         "2nd call with same now must not change cycle_n"
     );
 }
@@ -669,9 +669,9 @@ fn bootstrap_fast_forwards_cycle_n() {
 
     rig.advance(now);
 
-    let ms = rig.state();
+    let walk = rig.state();
     assert_eq!(
-        ms.wander.cycle_n, 10,
+        walk.wander.cycle_n, 10,
         "bootstrap: elapsed = 10*est_cycle => cycle_n must equal exactly 10"
     );
 }
@@ -702,16 +702,16 @@ fn stale_resume_resyncs_without_replay() {
     let resume = t1 + Duration::from_millis(20 * est_cycle);
     rig.advance(resume);
 
-    let ms = rig.state();
+    let walk = rig.state();
     assert!(
-        matches!(ms.wander.phase, WanderPhase::Seated),
+        matches!(walk.wander.phase, WanderPhase::Seated),
         "stale resume must resync to Seated (no per-frame replay), got {:?}",
-        ms.wander.phase
+        walk.wander.phase
     );
     assert!(
-        ms.wander.cycle_n >= 18,
+        walk.wander.cycle_n >= 18,
         "stale resume must fast-forward cycle_n across the gap, got {}",
-        ms.wander.cycle_n
+        walk.wander.cycle_n
     );
 }
 
@@ -786,8 +786,8 @@ fn wander_out_profile_routes_to_the_jittered_goal_the_render_uses() {
     rig.advance(now);
     rig.advance_until_leaves(now, PhaseKind::Seated, 60_000);
 
-    let ms = rig.state();
-    assert!(matches!(ms.wander.phase, WanderPhase::WalkingOut(_)));
+    let walk = rig.state();
+    assert!(matches!(walk.wander.phase, WanderPhase::WalkingOut(_)));
     let (_, routed_to) = *rig
         .route
         .router
@@ -796,7 +796,7 @@ fn wander_out_profile_routes_to_the_jittered_goal_the_render_uses() {
         .expect("the trip snapshot routed");
     assert_eq!(
         routed_to,
-        jitter_dest(trip_id, ms.wander.target.dest),
+        jitter_dest(trip_id, walk.wander.target.dest),
         "the WalkingOut profile must route to the render's jittered goal"
     );
 }
@@ -812,15 +812,15 @@ fn back_profile_routes_to_the_jittered_desk_goal_the_render_uses() {
     let l = layout();
     let overlay = OccupancyOverlay::new();
     let mut router = Recording { calls: Vec::new() };
-    let mut ms = WalkState::new(trip_id);
-    ms.wander.target.dest = Point { x: 40, y: 60 };
+    let mut walk = WalkState::new(trip_id);
+    walk.wander.target.dest = Point { x: 40, y: 60 };
 
-    let _ = snapshot_back_profile(&slot, &ms, &l, &mut router, &overlay);
+    let _ = snapshot_back_profile(&slot, &walk, &l, &mut router, &overlay);
 
     let (snap_to, _) = desk_leg_endpoint(l.home_desks[0], &l);
     assert_eq!(
         router.calls,
-        vec![(ms.wander.target.dest, jitter_dest(trip_id, snap_to))],
+        vec![(walk.wander.target.dest, jitter_dest(trip_id, snap_to))],
         "the walk-back profile must route to the render's jittered desk goal"
     );
 }
@@ -853,9 +853,9 @@ fn wander_dest_for_pantry_is_the_home_desk_stand_point() {
     rig.advance_until_leaves(now, PhaseKind::Seated, 120_000);
 
     let l = &rig.layout;
-    let ms = rig.state();
+    let walk = rig.state();
     assert!(matches!(
-        ms.wander.target.kind,
+        walk.wander.target.kind,
         WanderKind::Named {
             kind: WaypointKind::Pantry,
             seat: None, // Pantry is an obstacle (stands AT, not sits ON)
@@ -873,8 +873,8 @@ fn wander_dest_for_pantry_is_the_home_desk_stand_point() {
         &l.reachable,
     );
     assert_eq!(
-        ms.wander.target.dest, expected,
-        "motion dest must equal the home-desk approach_point (core↔tui mirror)"
+        walk.wander.target.dest, expected,
+        "the wander dest must equal the home-desk approach_point (core↔tui mirror)"
     );
 }
 
@@ -946,10 +946,10 @@ fn wander_named_seat_is_some_iff_the_destination_is_sat_on() {
 }
 
 fn tripping_at(id: AgentId, wp_idx: usize, kind: WaypointKind) -> WalkState {
-    let mut ms = WalkState::new(id);
-    ms.wander.phase =
+    let mut walk = WalkState::new(id);
+    walk.wander.phase =
         WanderPhase::AtWaypoint(crate::physics::walk_profile(100, WalkIntent::WanderOut, id));
-    ms.wander.target = WanderTarget {
+    walk.wander.target = WanderTarget {
         dest: Point { x: 0, y: 0 },
         kind: WanderKind::Named {
             wp_idx,
@@ -957,7 +957,7 @@ fn tripping_at(id: AgentId, wp_idx: usize, kind: WaypointKind) -> WalkState {
             seat: None,
         },
     };
-    ms
+    walk
 }
 
 #[test]
@@ -992,10 +992,10 @@ fn spot_claims_holds_only_exclusive_spots_of_other_agents_out_on_a_trip() {
 fn spot_claims_ignores_a_seated_agents_stale_target() {
     let me = AgentId::from_transcript_path("/p/claims-me.jsonl");
     let resumed = AgentId::from_transcript_path("/p/claims-resumed.jsonl");
-    let mut ms = tripping_at(resumed, 3, WaypointKind::MeetingChair);
-    ms.wander.phase = WanderPhase::Seated; // what the stale-resume bootstrap does
+    let mut walk = tripping_at(resumed, 3, WaypointKind::MeetingChair);
+    walk.wander.phase = WanderPhase::Seated; // what the stale-resume bootstrap does
     let mut walks = HashMap::new();
-    walks.insert(resumed, ms);
+    walks.insert(resumed, walk);
 
     assert!(
         !spot_claims(&walks, me).holds(3),
