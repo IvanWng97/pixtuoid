@@ -77,7 +77,7 @@ fn walkable_target(layout: &SceneLayout, seed: u64, n: u64) -> Point {
         if let Some(cand) = snap_point_to_walkable(&layout.walkable, last) {
             // Walkable is not enough: a cell under a desk's overhang is walkable
             // by invariant #6 and painted over anyway, and a creature RESTS here
-            // for most of its cycle. Walking through one stays fine.
+            // between walks. Walking through one stays fine.
             // And reachable: a creature walks there, and A* from the door's
             // ground cannot reach a pocket the walls close off.
             if layout.is_visually_clear(cand) && layout.reachable.reaches(cand) {
