@@ -72,6 +72,34 @@ PETAL_R, PETAL_Y, PETAL_HI = RED, GOLD, "ζ"
 T = "."
 
 
+def require(holds, why):
+    """Fail with `why` unless `holds`: an explicit check, where an `assert`
+    is compiled away under `-O`."""
+    if not holds:
+        raise ValueError(why)
+
+
+class Draws:
+    """A seeded stream of draws built on `random()` alone: the one sequence
+    the `random` docs keep across Python versions ("Notes on
+    Reproducibility"), where `randrange` and `choice` may change, and the
+    committed art must not."""
+
+    def __init__(self, seed):
+        self._rng = random.Random(seed)
+
+    def random(self):
+        return self._rng.random()
+
+    def randrange(self, start, stop=None):
+        if stop is None:
+            start, stop = 0, start
+        return start + int(self._rng.random() * (stop - start))
+
+    def choice(self, seq):
+        return seq[self.randrange(len(seq))]
+
+
 def canvas(w, h):
     return [[T] * w for _ in range(h)]
 
@@ -1232,7 +1260,7 @@ def desk_wood(lift, seed):
     ty, ly, gy = top * S, lip * S, legs * S
     x0, x1 = 1, w - 1
     g = canvas(w, h)
-    rng = random.Random(seed)
+    rng = Draws(seed)
     rect(g, x0, ty, x1, ly, WOOD)
     rect(g, x0, ty, x1, ty + 1, WOOD_LT)
     for y in range(ty + DESK_BOARD_ROWS, ly - 2, DESK_BOARD_ROWS):
@@ -1736,7 +1764,7 @@ def bookshelf():
     rect(g, 1, 1, 31, 2, WOOD_LT)
     rect(g, 28, 2, 31, 46, WOOD_SH)
     rect(g, 3, 3, 29, 34, WOOD_DK)
-    rng = random.Random(21)
+    rng = Draws(21)
     for shelf in range(3):
         floor_y = 12 + shelf * 11
         x = 4
@@ -1902,7 +1930,7 @@ def snack_shelf():
     rect(g, 1, 1, 27, 2, WOOD_LT)
     rect(g, 24, 2, 27, 40, WOOD_SH)
     rect(g, 3, 3, 24, 30, WOOD_DK)
-    rng = random.Random(33)
+    rng = Draws(33)
     for shelf in range(3):
         yb = 11 + shelf * 9
         x = 4
@@ -2239,7 +2267,7 @@ def printer():
         dict(led=True, page=3),
         dict(led=False),
     ]
-    assert len(busy) == PRINT_STEPS
+    require(len(busy) == PRINT_STEPS, "the printer's busy art fills its PRINT_STEPS")
     return [union_outlined(printer_body(**f)) for f in [{}] + busy]
 
 
@@ -2270,7 +2298,7 @@ def printer_1x():
         return g
     steps = [dict(scan=1, led=True), dict(scan=2, page=1), dict(scan=3, page=2, led=True), dict(scan=4, page=2),
              dict(page=2, led=True), dict(page=2), dict(page=1, led=True), dict()]
-    assert len(steps) == PRINT_STEPS
+    require(len(steps) == PRINT_STEPS, "the printer's steps fill its PRINT_STEPS")
     return [body()] + [body(**f) for f in steps]
 
 
@@ -2289,7 +2317,7 @@ def meeting_table():
     laptop, a notepad with a pen, and a mug, set well apart."""
     w, h = TABLE_W * S, TABLE_H * S
     g = canvas(w, h)
-    rng = random.Random(11)
+    rng = Draws(11)
     front = h - 4
     rect(g, 1, 1, w - 1, front, WOOD)
     rect(g, 1, 1, w - 1, 2, WOOD_LT)
@@ -2572,7 +2600,7 @@ TANK_FISH_LEN = 3
 TANK_BUBBLE_X = TANK_W - 3
 TANK_BUBBLE_ROWS = (6, 5, 4, 3, 2, None)
 TANK_PLANT_AT = ((2, 5), (2, 6), (2, 7), (3, 6))
-assert TANK_STEPS % len(TANK_BUBBLE_ROWS) == 0
+require(TANK_STEPS % len(TANK_BUBBLE_ROWS) == 0, "the bubble cycle divides TANK_STEPS")
 
 
 def tank_fish_at(step):
@@ -3316,7 +3344,10 @@ def creature_base(name, g):
     for x, y, k in CREATURE_FIXES.get(name, ()):
         reshaped += (out[y][x] == T) != (k == T)
         out[y][x] = k
-    assert reshaped <= CREATURE_FIX_MOST, f"{name}: {reshaped} cells fixed past its master's silhouette"
+    require(
+        reshaped <= CREATURE_FIX_MOST,
+        f"{name}: {reshaped} cells fixed past its master's silhouette",
+    )
     return out
 
 
@@ -3340,7 +3371,7 @@ def render_sprite(header, frames, heads=(), marks=()):
     `heads` entry `(view, x, y)` where it has one; the first frame also carries
     `marks`, each `(name, x, y)`."""
     text = inspect.cleandoc(header) + "\n" + PROVENANCE
-    lines = [f"# {l}" if l else "#" for l in text.split("\n")]
+    lines = [f"# {line}" if line else "#" for line in text.split("\n")]
     body = []
     for i, g in enumerate(frames):
         body.append(f"@frame {i}")
@@ -3418,25 +3449,25 @@ def selftest(sprites):
     with tempfile.TemporaryDirectory() as tmp:
         pack = pathlib.Path(tmp)
         write(pack, sprites)
-        assert check(pack, sprites) is None, "a freshly drawn pack must pass"
+        require(check(pack, sprites) is None, "a freshly drawn pack must pass")
         first = min(sprites)
         (pack / first).write_text(sprites[first] + ". .\n", encoding=ENCODING)
-        assert check(pack, sprites) is not None, "an edited sprite must fail"
+        require(check(pack, sprites) is not None, "an edited sprite must fail")
         (pack / first).unlink()
-        assert check(pack, sprites) is not None, "a missing sprite must fail"
+        require(check(pack, sprites) is not None, "a missing sprite must fail")
         write(pack, sprites)
         (pack / "gone@4x.sprite").write_text(f"# {PROVENANCE}\n", encoding=ENCODING)
-        assert check(pack, sprites) is not None, "an orphan must fail"
+        require(check(pack, sprites) is not None, "an orphan must fail")
         write(pack, sprites)
-        assert check(pack, sprites) is None, "a write must delete the orphan"
+        require(check(pack, sprites) is None, "a write must delete the orphan")
         (pack / "hand.sprite").write_text(f"# copied from {first}: {PROVENANCE}\n@frame 0\n.\n", encoding=ENCODING)
-        assert check(pack, sprites) is None, "hand art quoting the provenance is not an orphan"
+        require(check(pack, sprites) is None, "hand art quoting the provenance is not an orphan")
         (pack / "pack.toml").write_text('[characters]\noutline = "n"\n', encoding=ENCODING)
-        assert check(pack, sprites) is not None, "an outline the art does not draw must fail"
+        require(check(pack, sprites) is not None, "an outline the art does not draw must fail")
         (pack / "pack.toml").write_text("[pack]\n", encoding=ENCODING)
-        assert check(pack, sprites) is not None, "a pack naming no outline must fail"
+        require(check(pack, sprites) is not None, "a pack naming no outline must fail")
         (pack / "pack.toml").write_text(f'[characters]\noutline = "{SILHOUETTE}"\n', encoding=ENCODING)
-        assert check(pack, sprites) is None, "the art's own outline passes"
+        require(check(pack, sprites) is None, "the art's own outline passes")
     print(f"gen-art --selftest: OK ({len(sprites)} sprites)")
 
 

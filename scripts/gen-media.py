@@ -61,7 +61,7 @@ def build_once():
 
 
 def expand_ref(ref):
-    return json.loads((SITE_SRC / ref[1:]).read_text())
+    return json.loads((SITE_SRC / ref[1:]).read_text(encoding="utf-8"))
 
 
 def snap(out_path, *, cols, rows, hour, day=None, theme=None, weather=None,
@@ -102,7 +102,8 @@ def run_render(job, out_dirs, work, intermediates):
     for d in out_dirs:
         dst = d / f"{job['id']}.png"
         if scale:
-            img = Image.open(raw).convert("RGB")
+            with Image.open(raw) as im:
+                img = im.convert("RGB")
             img.resize((img.width * scale, img.height * scale), Image.NEAREST).save(dst)
         else:
             shutil.copyfile(raw, dst)
@@ -125,7 +126,8 @@ def run_crop(job, out_dirs, work, intermediates):
             f"gen-media: crop job '{job['id']}' needs its source render '{job['from']}' "
             f"— include it, e.g. --jobs {job['from']},{job['id']}"
         )
-    img = Image.open(src).convert("RGB")
+    with Image.open(src) as im:
+        img = im.convert("RGB")
     if "quadrants" in job:
         w, h = img.size
         scale = job.get("scale", 1)
@@ -151,7 +153,8 @@ def run_composite(job, out_dirs, work, intermediates):
              theme=theme)
         paths.append(p)
 
-    comp = Image.open(paths[0]).convert("RGB")
+    with Image.open(paths[0]) as im:
+        comp = im.convert("RGB")
     w, h = comp.size
     n = len(themes)
     half = h / 2
@@ -161,7 +164,8 @@ def run_composite(job, out_dirs, work, intermediates):
         return k * w / n + slant * (y - half)
 
     for i in range(n):
-        im = Image.open(paths[i]).convert("RGB")
+        with Image.open(paths[i]) as src:
+            im = src.convert("RGB")
         lt = -far if i == 0 else boundary(i, 0)
         lb = -far if i == 0 else boundary(i, h)
         rt = far if i == n - 1 else boundary(i + 1, 0)
@@ -197,8 +201,9 @@ def run_matrix(job, out_dirs, work, intermediates):
 
 
 # H.264 and VP9 both require even width/height. `neighbor`: the pixel-art rule
-# (no smoothing), where swscale's default is bicubic.
-SCALE_EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=neighbor"
+# (no smoothing), where swscale's default is bicubic; set through `scaler`,
+# since the algorithm in `flags` is deprecated (ffmpeg-scaler).
+SCALE_EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2:scaler=neighbor"
 # VP9 constant-quality knob (with `-b:v 0`, no target bitrate).
 VP9_CRF = "36"
 # Without it the muxers stamp every file with ffmpeg's version (MP4's `©too`
@@ -240,7 +245,8 @@ def run_clip(job, out_dirs, work, intermediates):
     crop = job.get("crop")
     vf = f"crop={crop},{SCALE_EVEN}" if crop else SCALE_EVEN
     # RGB, not a copy of the frame: the snapshot writes opaque RGBA, far larger.
-    poster = Image.open(poster_frame(frames, job)).convert("RGB")
+    with Image.open(poster_frame(frames, job)) as im:
+        poster = im.convert("RGB")
     if crop:
         poster = crop_box(poster, crop, cid)
     for d in out_dirs:
@@ -427,7 +433,7 @@ def main():
 
     # Validate --jobs BEFORE the release build: an unknown id would otherwise be
     # a silent no-op that still prints "wrote media → …".
-    manifest = json.loads(MANIFEST.read_text())
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     if only_jobs:
         known = {j["id"] for j in manifest}
         unknown = sorted(only_jobs - known)

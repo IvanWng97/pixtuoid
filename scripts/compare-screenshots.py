@@ -27,12 +27,14 @@ def compare_images(ref_path, cand_path, diff_path, threshold_percent=0.0):
     diff_path = Path(diff_path)
 
     try:
-        ref = Image.open(ref_path).convert("RGB")
+        with Image.open(ref_path) as im:
+            ref = im.convert("RGB")
     except (OSError, UnidentifiedImageError) as e:
         print(f"ERROR: cannot read reference image {ref_path}: {e}")
         return 2
     try:
-        cand = Image.open(cand_path).convert("RGB")
+        with Image.open(cand_path) as im:
+            cand = im.convert("RGB")
     except (OSError, UnidentifiedImageError) as e:
         print(f"ERROR: cannot read candidate image {cand_path}: {e}")
         return 2

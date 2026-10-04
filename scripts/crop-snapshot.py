@@ -42,7 +42,8 @@ def main():
                         help="Which quadrant to crop (default: all)")
     args = parser.parse_args()
 
-    img = Image.open(args.input)
+    with Image.open(args.input) as img:
+        img.load()
     w, h = img.size
     stem = args.input.stem
     out_dir = args.input.parent

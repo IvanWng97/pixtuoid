@@ -295,7 +295,7 @@ def load_palette():
 
 def sprite_rows(name, frame=0):
     rows, in_frame = [], False
-    for line in (PACK / name).read_text().splitlines():
+    for line in (PACK / name).read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
