@@ -151,6 +151,10 @@ invariant-breaking sequence against:
    - **Concise**: the shortest name that stays clear, in the domain's existing
      word and Rust's [naming guidelines](https://rust-lang.github.io/api-guidelines/naming.html);
      never a placeholder.
+7. **Sourced practice**: a PR body, design or comment calling an approach best
+   practice, idiomatic or standard cites what it was checked against (a doc
+   URL or `path:line`). A missing source is `issue (non-blocking)`; a source
+   that contradicts the change is blocking.
 
 ## Escalation
 

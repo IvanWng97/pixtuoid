@@ -82,8 +82,8 @@ Repo skills (committed): `local-review`, `beautify-decoration`,
 
 ## Conventions
 
-- **TDD first** — failing test → minimal impl → commit. **DRY, YAGNI** — nothing beyond the current spec; reuse or merge an existing helper before writing a new one.
-- **Best practice over the existing design** — pick what the field's best practice is, never the option that is smaller or keeps compatibility; pre-1.0, a genuine future-proofing break is paid now.
+- **TDD first** — failing test → minimal impl → commit. **DRY, YAGNI** — nothing beyond the current spec.
+- **Best practice, sourced** — choose it over the smaller or compatible option, and cite what you checked it against this session (doc URL, `path:line`); a claim without a source is an opinion ([`REVIEW.md`](REVIEW.md#design) Design 7).
 - **No bespoke gate without ROI** — a custom checker or tool lands only after a run over the whole tree catches a real bug; prefer the official tool.
 - **Pixel art, always** — every pixel on the art grid, colours from pack keys and their ramps, a gradient as dither; no blur, anti-aliasing or soft blend, in art, light, weather and mocks alike. Chibi figures and pets stay round, the head flowing into the body.
 - **`#[allow(clippy::too_many_arguments)]` is a last resort** — group related parameters into a struct first.
