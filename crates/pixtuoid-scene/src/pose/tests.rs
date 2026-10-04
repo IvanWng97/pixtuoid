@@ -547,12 +547,11 @@ fn snap_back_skipped_when_prev_within_min_distance() {
 }
 
 #[test]
-fn snap_back_skipped_after_900ms_window() {
+fn snap_back_skipped_past_its_window() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
-    // state_started_at is past `SNAP_BACK_MS`.
     let slot = active_slot(
-        now - Duration::from_millis(1_500),
+        now - Duration::from_millis(2 * SNAP_BACK_MS),
         now - Duration::from_secs(60),
     );
     let desk = l.home_desks[0];
