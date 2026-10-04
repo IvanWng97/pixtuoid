@@ -890,3 +890,25 @@ fn rain_at_maps_audible_rain_under_its_policy() {
         assert_eq!(level(quiet), 0.0, "{quiet:?} must be silent");
     }
 }
+
+/// From any start, a full storm on a moving tier has a strike to find; at rest
+/// it has none.
+#[test]
+fn a_strike_follows_every_start_on_a_moving_tier() {
+    use crate::anim::Motion;
+    let base = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    for motion in Motion::ALL {
+        for start in (0..LIGHTNING_PERIOD_MS * 3).step_by(97) {
+            let after = base + Duration::from_millis(start);
+            let strike = first_strike_after(after, motion);
+            if motion.pace().is_none() {
+                assert_eq!(strike, None, "{motion:?}");
+            } else {
+                assert!(
+                    strike.is_some_and(|t| t >= after),
+                    "{motion:?} from {start} ms"
+                );
+            }
+        }
+    }
+}
