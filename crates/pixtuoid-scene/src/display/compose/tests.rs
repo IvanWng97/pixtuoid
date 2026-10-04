@@ -688,6 +688,29 @@ fn the_floor_indicator_stays_in_its_cell() {
     }
 }
 
+/// The board's star ends at the sign's interior's right edge at every scale
+/// the pack draws, measured on the art grid, not in text cells.
+#[test]
+fn the_star_sits_flush_with_the_interior_at_every_scale() {
+    use crate::layout::{NEON_PANEL_INNER_W, NEON_PANEL_INNER_X};
+    let pack = test_default_pack();
+    for s in [1, pack.max_density_variant().get()] {
+        let pen = Pen::for_pack(RenderScale::new(s).expect("nonzero"), &pack);
+        let board = quiet_board();
+        let runs = board_runs(board, pen);
+        let ((x, _), star) = runs[1];
+        assert_eq!(
+            star.text, board.star.text,
+            "premise: the second run is the star"
+        );
+        assert_eq!(
+            x.0 + crate::display::text::advance(&star.text).0,
+            pen.art(NEON_PANEL_INNER_X + NEON_PANEL_INNER_W).0,
+            "at scale {s}"
+        );
+    }
+}
+
 /// At the pack's 4x art the board writes inside the neon sign's dark
 /// interior, as the classic's terminal board does, however full its lines.
 #[test]

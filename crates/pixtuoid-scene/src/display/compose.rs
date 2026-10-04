@@ -99,7 +99,7 @@ pub(crate) fn indicator_plate(door: Point, floor: usize, pen: Pen) -> ArtRect {
 
 /// Each run of `board` and its top-left on the art grid, as the classic's
 /// terminal board lays it: line `i` on the neon interior's `i`th cell row,
-/// one cell a column, the star flush right.
+/// one cell a column, the star flush with the interior's right edge.
 pub(crate) fn board_runs(
     board: &crate::board::BoardModel,
     pen: Pen,
@@ -117,13 +117,12 @@ pub(crate) fn board_runs(
         )
     };
     let cols = |s: &crate::board::BoardSegment| crate::display::text::cells(&s.text);
-    let mut runs = vec![
-        (at(0, 0), &board.brand),
-        (
-            at(NEON_PANEL_INNER_W.saturating_sub(cols(&board.star)), 0),
-            &board.star,
-        ),
-    ];
+    let right = pen.art(NEON_PANEL_INNER_X + NEON_PANEL_INNER_W).0;
+    let star = (
+        ArtPx(right.saturating_sub(crate::display::text::advance(&board.star.text).0)),
+        at(0, 0).1,
+    );
+    let mut runs = vec![(at(0, 0), &board.brand), (star, &board.star)];
     for (line, segs) in (1..).zip([&board.mood, &board.context]) {
         let mut col = 0;
         for seg in segs {
