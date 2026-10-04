@@ -174,6 +174,8 @@ pub(crate) fn sync_floor_caps(
 /// `scale`) so a badge stays a crisp fixed-height caption over the chunky sprites. Tuned
 /// by eye against `examples/floating_snapshot`.
 const LABEL_FONT_PX: f32 = 12.0;
+/// Window pixels a badge's plate reaches past its text on every side.
+const BADGE_PLATE_PAD_PX: i32 = 2;
 /// Badge drop-shadow — the AA text draws straight over the office (no TUI
 /// cell background), so a 1px offset shadow keeps it legible over bright windows/plants.
 const BADGE_SHADOW: u32 = 0x0000_0000;
@@ -239,6 +241,19 @@ impl<'a> XrgbSurface<'a> {
         });
     }
 
+    /// Fill the `w`×`h` rect from `(x, y)` with `color`, clipped to the
+    /// surface.
+    fn fill(&mut self, (x, y): (i32, i32), (w, h): (i32, i32), color: u32) {
+        let (x0, y0) = (x.max(0), y.max(0));
+        let (x1, y1) = ((x + w).min(self.w as i32), (y + h).min(self.h as i32));
+        for py in y0..y1 {
+            let row = py as usize * self.w;
+            for px in x0..x1 {
+                self.px[row + px as usize] = color;
+            }
+        }
+    }
+
     /// `text` at `(x, top_y)` in `color`, over a one-pixel drop shadow.
     fn draw_shadowed_text(&mut self, text: &str, x: i32, top_y: i32, font_px: f32, color: u32) {
         crate::aa_text::draw_text_at(text, x + 1, top_y + 1, font_px, |gx, gy, cov| {
@@ -265,6 +280,15 @@ pub fn paint_labels_into_surface(sb: &mut XrgbSurface<'_>, runs: &[TextRun], sca
         const BADGE_LIFT_PX: i32 = 12;
         let cx = run.at.x as i32 * scale - tw / 2;
         let cy = run.at.y as i32 * scale - BADGE_LIFT_PX;
+        if let Some(plate) = run.plate {
+            let pad = BADGE_PLATE_PAD_PX;
+            let h = LABEL_FONT_PX.ceil() as i32;
+            sb.fill(
+                (cx - pad, cy - pad),
+                (tw + 2 * pad, h + 2 * pad),
+                pack_xrgb(plate),
+            );
+        }
         let mw = crate::aa_text::text_width(&marker.text, LABEL_FONT_PX);
         sb.draw_shadowed_text(&marker.text, cx, cy, LABEL_FONT_PX, pack_xrgb(marker.ink));
         sb.draw_shadowed_text(&name.text, cx + mw, cy, LABEL_FONT_PX, pack_xrgb(name.ink));
@@ -661,6 +685,35 @@ mod tests {
             caps[0].load(Ordering::Relaxed),
             999,
             "a skipped publish must not touch the atomics"
+        );
+    }
+
+    /// A badge sits on its plate in the window too: a fill behind its text.
+    #[test]
+    fn a_badge_sits_on_its_plate_in_the_window() {
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::LabelTone;
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let plate = Rgb { r: 1, g: 2, b: 3 };
+        let run = TextRun {
+            plate: Some(plate),
+            ..badge(
+                Point { x: 40, y: 30 },
+                "cc\u{b7}api",
+                LabelTone::Idle,
+                theme,
+            )
+        };
+        let (w, h) = (240usize, 120usize);
+        let mut sb = vec![0x00FF_FFFFu32; w * h];
+        paint_labels_into_surface(
+            &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
+            &[run],
+            2,
+        );
+        assert!(
+            sb.contains(&pack_xrgb(plate)),
+            "the plate fills behind the badge"
         );
     }
 

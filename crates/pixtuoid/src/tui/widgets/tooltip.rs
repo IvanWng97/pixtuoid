@@ -46,8 +46,8 @@ fn flip_x_anchor(mx: u16, tip_w: u16, scene_rect: Rect) -> u16 {
 /// cell [`LABEL_GAP`](pixtuoid_scene::display::text::LABEL_GAP) logical rows
 /// over its anchor, any other run in the cell its anchor lies in. The board's
 /// brand and star and the floor indicator are bold, the indicator and a
-/// chitchat bubble padded a cell each side on their plates, and `hovered`'s
-/// badge reads `▸name` in bold white.
+/// chitchat bubble padded a cell each side on their plates, a badge's cells on
+/// its plate, and `hovered`'s badge reads `▸name` in bold white.
 pub(crate) fn paint_text_runs(
     f: &mut ratatui::Frame<'_>,
     runs: &[TextRun],
@@ -68,14 +68,23 @@ pub(crate) fn paint_text_runs(
                 style
             }
         };
+        let on_plate = |style: Style| match run.plate {
+            Some(plate) => style.bg(to_color(plate)),
+            None => style,
+        };
         let spans = match (run.role, run.plate) {
             (TextRole::Badge(id), _) if hovered == Some(id) => {
                 let name: String = run.spans.iter().skip(1).map(|s| s.text.as_str()).collect();
                 let style = Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD);
-                vec![Span::styled(format!("\u{25b8}{name}"), style)]
+                vec![Span::styled(format!("\u{25b8}{name}"), on_plate(style))]
             }
+            (TextRole::Badge(_), _) => run
+                .spans
+                .iter()
+                .map(|s| Span::styled(s.text.clone(), on_plate(style(s.ink))))
+                .collect(),
             (TextRole::Indicator | TextRole::Bubble(_), Some(plate)) => run
                 .spans
                 .iter()
@@ -598,6 +607,43 @@ mod tests {
             Some(&(at.x - cols.len() as u16 / 2)),
             "centred on its anchor"
         );
+    }
+
+    /// A badge sits on its plate: every cell of its text takes the plate's
+    /// colour as its background, hovered or not.
+    #[test]
+    fn a_badge_sits_on_its_plate() {
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::LabelTone;
+        let plate = pixtuoid_core::sprite::Rgb { r: 1, g: 2, b: 3 };
+        let run = super::TextRun {
+            plate: Some(plate),
+            ..badge(
+                Point { x: 20, y: 8 },
+                "cc\u{b7}repo",
+                LabelTone::Idle,
+                &theme::NORMAL,
+            )
+        };
+        let super::TextRole::Badge(id) = run.role else {
+            unreachable!("built a badge");
+        };
+        for hovered in [None, Some(id)] {
+            let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
+            term.draw(|f| super::paint_text_runs(f, std::slice::from_ref(&run), f.area(), hovered))
+                .unwrap();
+            let row = row_of(&term, "repo").expect("the badge painted");
+            let buf = term.backend().buffer();
+            let inked: Vec<_> = (0..buf.area.width)
+                .filter(|&x| buf[(x, row)].symbol() != " ")
+                .map(|x| buf[(x, row)].bg)
+                .collect();
+            assert!(!inked.is_empty(), "premise: the badge painted");
+            assert!(
+                inked.iter().all(|&bg| bg == super::to_color(plate)),
+                "{hovered:?}: {inked:?}"
+            );
+        }
     }
 
     /// A badge's text centres on its anchor, the sprite's top-centre.

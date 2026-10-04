@@ -396,9 +396,10 @@ fn dashboard_closed_paints_no_popup() {
 }
 
 /// The popup's content lines, so substring assertions don't false-match the
-/// office sprite labels behind it. The popup is borderless (no `│` to key on)
-/// but is the only region painted with the UI `tooltip_bg` fill, so isolate it
-/// by background color — the pixel office never produces that exact chrome RGB.
+/// office sprite labels behind it. The popup is borderless (no `│` to key on),
+/// so isolate it by its `tooltip_bg` fill: a badge's plate shares the colour
+/// but spans at most [`BADGE_CELLS`](pixtuoid_scene::overlay::BADGE_CELLS)
+/// cells, and the popup's rows run wider.
 fn dash_popup(buf: &ratatui::buffer::Buffer) -> String {
     let tb = pixtuoid_scene::theme::NORMAL.ui.tooltip_bg;
     let bg = ratatui::style::Color::Rgb(tb.r, tb.g, tb.b);
@@ -406,11 +407,21 @@ fn dash_popup(buf: &ratatui::buffer::Buffer) -> String {
     let mut out = String::new();
     for y in area.y..area.y + area.height {
         let mut row = String::new();
-        for x in area.x..area.x + area.width {
-            if let Some(cell) = buf.cell((x, y))
-                && cell.bg == bg
-            {
-                row.push_str(cell.symbol());
+        let mut run = String::new();
+        let mut cells = 0;
+        for x in area.x..=area.x + area.width {
+            match buf.cell((x, y)).filter(|cell| cell.bg == bg) {
+                Some(cell) => {
+                    run.push_str(cell.symbol());
+                    cells += 1;
+                }
+                None => {
+                    if cells > pixtuoid_scene::overlay::BADGE_CELLS {
+                        row.push_str(&run);
+                    }
+                    run.clear();
+                    cells = 0;
+                }
             }
         }
         if !row.trim().is_empty() {
