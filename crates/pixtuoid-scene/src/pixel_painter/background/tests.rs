@@ -132,29 +132,16 @@ fn a_change_dithers_the_carpet_and_the_veil_on_the_buffer() {
     );
 
     let veil = moment().look.glass_veil;
-    // Off the dither's period, so a key from the glass's corner would show.
-    let bay = WindowBay {
-        x: 3,
-        w: WINDOW_W,
-        idx: 0,
-    };
+    assert!(
+        window_bays(buf_w, 0..0)
+            .any(|b| b.glass_box(window_rows(top_wall_h)).x % crate::dither::PERIOD != 0),
+        "every glass on the dither's phase: a key from its corner would pass"
+    );
     let window = |veil| {
-        let m = moment();
-        let mut weather = GlassWeather::of(&m);
-        weather.veil = veil;
-        let outside = crate::outside::Outside::of(
-            &m,
-            &test_default_pack(),
-            theme,
-            (buf_w, top_wall_h),
-            pixtuoid_core::sprite::format::Density::ONE,
-            weather,
-            None,
-        );
+        let mut m = moment();
+        m.look.glass_veil = veil;
         let mut buf = RgbBuffer::filled(buf_w, buf_h, black);
-        for ((x, y), c) in outside.through(bay).cells() {
-            buf.put_checked(x, y, c);
-        }
+        paint_band(&mut buf, top_wall_h, &m, theme);
         buf
     };
     let [clear, fog] = veil.ends();
@@ -279,8 +266,9 @@ fn count_cool_bright(buf: &RgbBuffer, top_wall_h: u16) -> usize {
         .count()
 }
 
-/// The stars in the upper sky band: lone faint-white cells, where a cloud's
-/// moonlit edge runs on.
+/// Count STAR pixels in the same sky-only top-third band: bright cells with
+/// no bright neighbour. Only a `STAR_COLOR` blend lifts a lone cell this
+/// bright; a moonlit cloud's edge is bright too, but never alone.
 fn count_stars(buf: &RgbBuffer, top_wall_h: u16) -> usize {
     let bright = |x: u16, y: u16| {
         let p = buf.get(x, y);

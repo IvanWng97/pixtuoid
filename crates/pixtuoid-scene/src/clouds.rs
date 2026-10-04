@@ -235,35 +235,61 @@ const RELIEF: f32 = 0.5;
 const CLOSE: f32 = 1.0;
 
 /// A heap: one or two big top lobes, smaller side lobes, a filled base.
+/// A cumulus's crown: the chance of a second crown lobe, each lobe's radius
+/// and its sway aside as shares of the mass's width, and how far its radius
+/// sits it below the top.
+const CROWN_SECOND: f32 = 0.5;
+const CROWN_R: (f32, f32) = (0.26, 0.36);
+const CROWN_SWAY: (f32, f32) = (-0.18, 0.18);
+const CROWN_SIT: f32 = 0.9;
+/// Its flanks, each side: up to this many more lobes than one, each lobe's
+/// radius and reach out as shares of the width, and how far its radius sinks
+/// it past the base, which cuts it flat.
+const FLANK_MORE: f32 = 2.0;
+const FLANK_R: (f32, f32) = (0.14, 0.24);
+const FLANK_REACH: (f32, f32) = (0.22, 0.46);
+const FLANK_SINK: (f32, f32) = (0.4, 0.8);
+/// Its skirt along the base: one lobe per this many units of width (at
+/// least [`SKIRT_LOBES_MIN`]), each lobe's radius a share of the width,
+/// spread over this share of it from its west edge's share, jittered by this
+/// share of a slot, and sat this share of its radius above the base.
+const SKIRT_PITCH: f32 = 3.0;
+const SKIRT_LOBES_MIN: usize = 2;
+const SKIRT_R: (f32, f32) = (0.12, 0.2);
+const SKIRT_FROM: f32 = 0.45;
+const SKIRT_SPAN: f32 = 0.9;
+const SKIRT_JITTER: f32 = 0.6;
+const SKIRT_SIT: f32 = 0.6;
+
 fn cumulus(r: &mut Rng, cx: f32, base: f32, width: f32, height: f32) -> Vec<Lobe> {
     let mut lobes = Vec::new();
-    for _ in 0..1 + usize::from(r.u() < 0.5) {
-        let rad = width * r.between(0.26, 0.36);
+    for _ in 0..1 + usize::from(r.u() < CROWN_SECOND) {
+        let rad = width * r.between(CROWN_R.0, CROWN_R.1);
         lobes.push(Lobe {
-            x: cx + width * r.between(-0.18, 0.18),
-            y: base - height + rad * 0.9,
+            x: cx + width * r.between(CROWN_SWAY.0, CROWN_SWAY.1),
+            y: base - height + rad * CROWN_SIT,
             r: rad,
         });
     }
     for side in [-1.0, 1.0] {
-        for _ in 0..1 + (r.u() * 2.0) as usize {
-            let rad = width * r.between(0.14, 0.24);
-            let x = cx + side * width * r.between(0.22, 0.46);
-            // down past the base: the base cuts it flat
+        for _ in 0..1 + (r.u() * FLANK_MORE) as usize {
+            let rad = width * r.between(FLANK_R.0, FLANK_R.1);
+            let x = cx + side * width * r.between(FLANK_REACH.0, FLANK_REACH.1);
             lobes.push(Lobe {
                 x,
-                y: base - rad * r.between(0.4, 0.8),
+                y: base - rad * r.between(FLANK_SINK.0, FLANK_SINK.1),
                 r: rad,
             });
         }
     }
-    let n = ((width / 3.0) as usize).max(2);
+    let n = ((width / SKIRT_PITCH) as usize).max(SKIRT_LOBES_MIN);
     for i in 0..n {
-        let rad = width * r.between(0.12, 0.2);
-        let x = cx - width * 0.45 + width * 0.9 * (i as f32 + r.u() * 0.6) / n as f32;
+        let rad = width * r.between(SKIRT_R.0, SKIRT_R.1);
+        let x = cx - width * SKIRT_FROM
+            + width * SKIRT_SPAN * (i as f32 + r.u() * SKIRT_JITTER) / n as f32;
         lobes.push(Lobe {
             x,
-            y: base - rad * 0.6,
+            y: base - rad * SKIRT_SIT,
             r: rad,
         });
     }
@@ -272,36 +298,62 @@ fn cumulus(r: &mut Rng, cx: f32, base: f32, width: f32, height: f32) -> Vec<Lobe
 
 /// A cumulonimbus: a broad heap, a column narrowing as it climbs, and an anvil
 /// spread flat across its top at `anvil_y`.
+/// A cumulonimbus: its heap's height and its anvil's row as shares of the
+/// glass, how near the anvil its column stops, how far the column narrows
+/// at the top, each column lobe's radius and sway as shares of the width and
+/// its step up as a share of its radius.
+const HEAP_H: f32 = 0.22;
+const ANVIL_Y: f32 = 0.10;
+const COLUMN_STOP: f32 = 1.5;
+const COLUMN_TAPER: f32 = 0.45;
+const COLUMN_R: (f32, f32) = (0.28, 0.36);
+const COLUMN_SWAY: (f32, f32) = (-0.12, 0.12);
+const COLUMN_STEP: (f32, f32) = (0.7, 1.1);
+/// Its anvil: this many lobes, each lobe's radius a share of the width,
+/// spread from this share of it west across this share, ragged by this much.
+const ANVIL_LOBES: usize = 6;
+const ANVIL_R: (f32, f32) = (0.12, 0.2);
+const ANVIL_FROM: f32 = 0.95;
+const ANVIL_SPAN: f32 = 1.9;
+const ANVIL_RAGGED: (f32, f32) = (-0.4, 0.6);
+
 fn tower(r: &mut Rng, cx: f32, base: f32, width: f32, glass_h: f32) -> Vec<Lobe> {
-    let mut lobes = cumulus(r, cx, base, width, glass_h * 0.22);
-    let anvil_y = glass_h * 0.10;
-    let mut y = base - glass_h * 0.22;
+    let mut lobes = cumulus(r, cx, base, width, glass_h * HEAP_H);
+    let anvil_y = glass_h * ANVIL_Y;
+    let mut y = base - glass_h * HEAP_H;
     let mut climb = 0.0;
-    while y > anvil_y + 1.5 {
-        let taper = 1.0 - 0.45 * climb / (base - anvil_y).max(1.0);
+    while y > anvil_y + COLUMN_STOP {
+        let taper = 1.0 - COLUMN_TAPER * climb / (base - anvil_y).max(1.0);
         // a column as broad as the heap: a thin one reads as smoke
-        let rad = width * taper * r.between(0.28, 0.36);
-        let side = r.between(-0.12, 0.12) * width * taper;
+        let rad = width * taper * r.between(COLUMN_R.0, COLUMN_R.1);
+        let side = r.between(COLUMN_SWAY.0, COLUMN_SWAY.1) * width * taper;
         lobes.push(Lobe {
             x: cx + side,
             y,
             r: rad,
         });
-        let step = rad * r.between(0.7, 1.1);
+        let step = rad * r.between(COLUMN_STEP.0, COLUMN_STEP.1);
         y -= step;
         climb += step;
     }
-    for i in 0..6 {
+    for i in 0..ANVIL_LOBES {
         // the anvil: flat on top, ragged underneath
-        let rad = width * r.between(0.12, 0.2);
+        let rad = width * r.between(ANVIL_R.0, ANVIL_R.1);
         lobes.push(Lobe {
-            x: cx + width * (-0.95 + 1.9 * (i as f32 + r.u()) / 6.0),
-            y: anvil_y + r.between(-0.4, 0.6),
+            x: cx + width * (-ANVIL_FROM + ANVIL_SPAN * (i as f32 + r.u()) / ANVIL_LOBES as f32),
+            y: anvil_y + r.between(ANVIL_RAGGED.0, ANVIL_RAGGED.1),
             r: rad,
         });
     }
     lobes
 }
+
+/// A rim bump: the chance of a third, the arc it sits on in half-turns, its
+/// radius as a share of its lobe's, and how far its radius sinks it in.
+const BUMP_THIRD: f32 = 0.5;
+const BUMP_ARC: (f32, f32) = (1.1, 1.9);
+const BUMP_R: (f32, f32) = (0.3, 0.45);
+const BUMP_INSET: f32 = 0.4;
 
 /// Every big lobe's arc broken by two or three smaller bumps on its upper rim,
 /// so no silhouette is one clean circle.
@@ -309,13 +361,13 @@ fn cauliflower(lobes: Vec<Lobe>, seed: u64) -> Vec<Lobe> {
     let mut r = Rng(seed);
     let mut out = lobes.clone();
     for l in lobes.iter().filter(|l| l.r >= BUMP_FROM) {
-        for _ in 0..2 + usize::from(r.u() < 0.5) {
+        for _ in 0..2 + usize::from(r.u() < BUMP_THIRD) {
             // the upper half, y down
-            let a = std::f32::consts::PI * r.between(1.1, 1.9);
-            let b = l.r * r.between(0.3, 0.45);
+            let a = std::f32::consts::PI * r.between(BUMP_ARC.0, BUMP_ARC.1);
+            let b = l.r * r.between(BUMP_R.0, BUMP_R.1);
             out.push(Lobe {
-                x: l.x + a.cos() * (l.r - b * 0.4),
-                y: l.y + a.sin() * (l.r - b * 0.4),
+                x: l.x + a.cos() * (l.r - b * BUMP_INSET),
+                y: l.y + a.sin() * (l.r - b * BUMP_INSET),
                 r: b,
             });
         }
@@ -323,10 +375,17 @@ fn cauliflower(lobes: Vec<Lobe>, seed: u64) -> Vec<Lobe> {
     out
 }
 
+/// The seeds of the decks' draws and of the city glow's, the shade reach's
+/// and the flash rings' noise: each its own stream.
+const DECK_SEED: u64 = 0x0c10_0d5e;
+const GLOW_SEED: u64 = 0x617;
+const SHADE_SEED: u64 = 0x1b5b;
+const RING_SEED: u64 = 0xf1a5;
+
 /// The deck a weather hangs over a run `span` units wide and glass `glass_h`
 /// tall, far first: every mass at its full share, undrifted.
 fn deck(weather: Weather, span: f32, glass_h: f32) -> Vec<Mass> {
-    let mut r = Rng(0x0c10_0d5e ^ weather as u64);
+    let mut r = Rng(DECK_SEED ^ weather as u64);
     let mut out = Vec::new();
     let mut row = |r: &mut Rng,
                    layer: Layer,
@@ -546,6 +605,11 @@ const CITY_GLOW: Rgb = Rgb {
     b: 62,
 };
 const CITY_GLOW_STEP: f32 = 0.16;
+/// The glow takes a shade past this much night, in patches this many units
+/// across, over this share of them.
+const GLOW_NIGHT: f32 = 0.5;
+const GLOW_GRAIN: f32 = 9.0;
+const GLOW_SHARE: f32 = 0.5;
 /// What a strike's light tints a deck toward, ring by ring.
 const FLASH_TINT: Rgb = Rgb {
     r: 214,
@@ -976,10 +1040,10 @@ impl Clouds {
         let unit = |cell: Cell| {
             (
                 (f32::from(cell.at.0) + 0.5) / df - f32::from(run_x0),
-                (f32::from(cell.glass.1) + 0.5) / df,
+                (f32::from(cell.glass_offset.1) + 0.5) / df,
             )
         };
-        let size = view.glass();
+        let size = view.glass_size();
         let (cols, rows) = (usize::from(size.w * d), usize::from(size.h * d));
         if cols == 0 || rows == 0 {
             return;
@@ -997,7 +1061,7 @@ impl Clouds {
         }
         let mut row_sky = vec![(0u32, [0u32; 3]); rows];
         view.paint(|cell, c| {
-            let gy = usize::from(cell.glass.1);
+            let gy = usize::from(cell.glass_offset.1);
             if let Some(acc) = row_sky.get_mut(gy) {
                 acc.0 += 1;
                 acc.1[0] += u32::from(c.r);
@@ -1018,13 +1082,19 @@ impl Clouds {
             .collect();
         let bolt = self.bolt_cells(d, run_x0);
         view.paint(|cell, c| {
-            let (gx, gy) = (usize::from(cell.glass.0), usize::from(cell.glass.1));
+            let (gx, gy) = (
+                usize::from(cell.glass_offset.0),
+                usize::from(cell.glass_offset.1),
+            );
             let (x, y) = unit(cell);
             let mut c = match px.get(gy * cols + gx).copied().flatten() {
                 Some((band, m)) => {
                     let mass = &self.masses[m];
                     let mut tone = self.tone(mass.weather, band);
-                    if band == Band::Shade && self.night > 0.5 && noise(0x617, x / 9.0) > 0.5 {
+                    if band == Band::Shade
+                        && self.night > GLOW_NIGHT
+                        && noise(GLOW_SEED, x / GLOW_GRAIN) > GLOW_SHARE
+                    {
                         tone = tone.mix(CITY_GLOW, CITY_GLOW_STEP);
                     }
                     if let Some(lift) = self.flash_lift(m, x, y) {
@@ -1035,7 +1105,7 @@ impl Clouds {
                 }
                 None => self.virga(cell, d, (x, y), c),
             };
-            if bolt.contains(&(cell.at.0, cell.glass.1)) {
+            if bolt.contains(&(cell.at.0, cell.glass_offset.1)) {
                 c = c.mix(BOLT_CORE, if d > 1 { 1.0 } else { BOLT_1X });
             }
             c
@@ -1086,7 +1156,7 @@ impl Clouds {
         let reach = SHADE_REACH
             + SHADE_REACH_OCTAVES
                 .iter()
-                .map(|&(amp, freq, phase)| amp * noise(0x1b5b, lx * freq + phase))
+                .map(|&(amp, freq, phase)| amp * noise(SHADE_SEED, lx * freq + phase))
                 .sum::<f32>();
         v -= (occlude + STORM_OCCLUDE * self.storm) * (1.0 - t / reach).max(0.0);
         let cuts = (
@@ -1129,7 +1199,7 @@ impl Clouds {
             };
         let mut dist = ((x - s.at.0) / s.radius).hypot((y - s.at.1) / ry);
         let (fx, fy) = RING_GRAIN;
-        dist += RING_RAGGED * (noise(0xf1a5, x * fx + y * fy) - 0.5);
+        dist += RING_RAGGED * (noise(RING_SEED, x * fx + y * fy) - 0.5);
         let ring = if dist < INNER_RING {
             2
         } else {

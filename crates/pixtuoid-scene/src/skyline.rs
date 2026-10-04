@@ -571,7 +571,7 @@ impl CityStrip {
     pub(crate) fn paint(&self, view: &mut WindowView, run_x0: u16) {
         let x0 = run_x0.saturating_mul(view.d());
         view.paint(|cell, sky| {
-            self.at(cell.at.0.wrapping_sub(x0), cell.glass.1)
+            self.at(cell.at.0.wrapping_sub(x0), cell.glass_offset.1)
                 .unwrap_or(sky)
         });
     }

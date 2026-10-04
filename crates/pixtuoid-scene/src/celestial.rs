@@ -281,7 +281,7 @@ impl SkyView {
             d,
         );
         WindowView::new(bay, rows, d, |cell| {
-            let open = pane.colour(cell.at, cell.glass.1);
+            let open = pane.colour(cell.at, cell.glass_offset.1);
             self.blaze.map_or(open, |b| b.over(open))
         })
     }

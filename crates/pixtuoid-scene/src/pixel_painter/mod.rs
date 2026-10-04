@@ -161,7 +161,8 @@ pub(crate) struct PaintCtx<'a> {
     /// The sky on `timing`, sampled once for the whole pass.
     sky: crate::sky::Sky,
     /// The sky the windows look out on where a test parts it from the room's
-    /// [`Self::sky`]; `None` for the room's.
+    /// [`Self::sky`]; `None` for the room's. A test seam only.
+    #[cfg(test)]
     outside: Option<crate::sky::Sky>,
     buf: &'a mut RgbBuffer,
     cache: &'a mut FrameCache,
@@ -194,6 +195,7 @@ impl<'a> PaintCtx<'a> {
             pack: world.pack,
             timing,
             sky: crate::sky::Sky::at(timing, world.floor.weather),
+            #[cfg(test)]
             outside: None,
             buf,
             cache: &mut caches.sprites,
@@ -248,9 +250,12 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverable
         "the classic pass draws layout units 1:1"
     );
     paint_ground_and_walls(ctx.base_fill, ctx.buf, top_wall_h, &moment, ctx.theme);
+    #[cfg(test)]
     let outside = ctx
         .outside
         .map(|sky| Moment::resolve(sky, ctx.theme, ctx.floor.altitude, ctx.timing));
+    #[cfg(not(test))]
+    let outside: Option<Moment> = None;
     paint_windows(
         ctx.buf,
         top_wall_h,

@@ -4451,19 +4451,19 @@ pub(crate) mod tests {
         let veil = moment().look.glass_veil;
         let [clear, fog] = veil.ends();
         let look = |veil| {
-            let m = moment();
-            let mut weather = GlassWeather::of(&m);
-            weather.veil = veil;
-            // One art pixel to the unit, so a window's corner sits off the
+            let mut m = moment();
+            m.look.glass_veil = veil;
+            // One art pixel to the unit, so a glass's corner sits off the
             // dither's period and a key from it would show.
-            glass_views_at(RenderScale::ONE, &layout, &m, &weather)
+            glass_views_at(RenderScale::ONE, &layout, &m, &GlassWeather::of(&m))
         };
         let [going, coming, mid] = [Dithered::solid(clear), Dithered::solid(fog), veil].map(look);
+        let rows = crate::layout::window_rows(layout.wall_band_h());
         assert!(
-            mid.iter()
-                .filter_map(|v| v.cells().next())
-                .any(|((x, _), _)| x % crate::dither::PERIOD != 0),
-            "every window on the dither's phase: a key from its corner would pass"
+            layout
+                .window_bays()
+                .any(|b| b.glass_box(rows.clone()).x % crate::dither::PERIOD != 0),
+            "every glass on the dither's phase: a key from its corner would pass"
         );
         let mut took = [0; 2];
         for ((g, c), view) in going.iter().zip(&coming).zip(&mid) {

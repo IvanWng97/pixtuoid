@@ -19,8 +19,8 @@ use crate::theme::Theme;
 pub(crate) struct Cell {
     /// Where it stands on the painter's grid, which a dither keys on.
     pub(crate) at: (u16, u16),
-    /// Its offset from the glass's top-left ([`WindowBay::glass`]).
-    pub(crate) glass: (u16, u16),
+    /// Its offset from the glass's top-left ([`WindowBay::glass_box`]).
+    pub(crate) glass_offset: (u16, u16),
 }
 
 /// One window on a grid `d` cells to the layout unit, and what its glass
@@ -32,7 +32,7 @@ pub(crate) struct WindowView {
     top: u16,
     /// The window's height in units, its frame included.
     h: u16,
-    glass: Bounds,
+    glass_box: Bounds,
     d: u16,
     /// The window's box row by row from its top-left, `None` on its joinery
     /// ([`window_frame`]).
@@ -53,7 +53,7 @@ impl WindowView {
             bay,
             top: rows.start,
             h,
-            glass: bay.glass(rows),
+            glass_box: bay.glass_box(rows),
             d: d.max(1),
             px: Vec::new(),
         };
@@ -80,11 +80,18 @@ impl WindowView {
         }
     }
 
-    /// Recolour the glass cell `glass` cells from the glass's top-left, as
+    /// Recolour the glass cell `glass_offset` cells from the glass's top-left, as
     /// [`paint`](Self::paint) does.
-    pub(crate) fn paint_glass_at(&mut self, glass: (u16, u16), f: impl FnOnce(Cell, Rgb) -> Rgb) {
+    pub(crate) fn paint_glass_at(
+        &mut self,
+        glass_offset: (u16, u16),
+        f: impl FnOnce(Cell, Rgb) -> Rgb,
+    ) {
         let (ix, iy) = self.inset();
-        let (ax, ay) = (glass.0.saturating_add(ix), glass.1.saturating_add(iy));
+        let (ax, ay) = (
+            glass_offset.0.saturating_add(ix),
+            glass_offset.1.saturating_add(iy),
+        );
         if ax >= self.cols() || ay >= self.rows() {
             return;
         }
@@ -100,11 +107,11 @@ impl WindowView {
         self.bay.idx
     }
 
-    /// Its [`WindowBay::glass`], in units.
-    pub(crate) fn glass(&self) -> Size {
+    /// Its [`WindowBay::glass_box`], in units.
+    pub(crate) fn glass_size(&self) -> Size {
         Size {
-            w: self.glass.width,
-            h: self.glass.height,
+            w: self.glass_box.width,
+            h: self.glass_box.height,
         }
     }
 
@@ -156,16 +163,16 @@ impl WindowView {
     fn inset(&self) -> (u16, u16) {
         let d = self.d;
         (
-            (self.glass.x - self.bay.x).saturating_mul(d),
-            (self.glass.y - self.top).saturating_mul(d),
+            (self.glass_box.x - self.bay.x).saturating_mul(d),
+            (self.glass_box.y - self.top).saturating_mul(d),
         )
     }
 
     /// The glass's top-left cell on the painter's grid.
     pub(crate) fn glass_origin(&self) -> (u16, u16) {
         (
-            self.glass.x.saturating_mul(self.d),
-            self.glass.y.saturating_mul(self.d),
+            self.glass_box.x.saturating_mul(self.d),
+            self.glass_box.y.saturating_mul(self.d),
         )
     }
 
@@ -184,7 +191,7 @@ impl WindowView {
                 self.bay.x.saturating_mul(d).saturating_add(ax),
                 self.top.saturating_mul(d).saturating_add(ay),
             ),
-            glass: (ax.saturating_sub(ix), ay.saturating_sub(iy)),
+            glass_offset: (ax.saturating_sub(ix), ay.saturating_sub(iy)),
         }
     }
 }
@@ -338,7 +345,7 @@ pub(crate) mod tests {
             let mut view = WindowView::new(bay(), ROWS, d, |_| Rgb { r: 1, g: 2, b: 3 });
             let joinery: Vec<_> = view.joinery().collect();
             view.paint(|_, _| INK);
-            let glass = view.glass();
+            let glass = view.glass_size();
             for gy in 0..(glass.h + 2) * d {
                 for gx in 0..(glass.w + 2) * d {
                     view.paint_glass_at((gx, gy), |_, _| INK);
@@ -358,12 +365,12 @@ pub(crate) mod tests {
             seen = Some(cell);
             c
         });
-        let glass = bay().glass(ROWS);
+        let glass = bay().glass_box(ROWS);
         assert_eq!(
             seen,
             Some(Cell {
                 at: (glass.x * d, glass.y * d),
-                glass: (0, 0),
+                glass_offset: (0, 0),
             })
         );
     }
