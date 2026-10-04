@@ -191,8 +191,8 @@ fn per_floor_layout_seeds_differ() {
     );
 }
 
-// The only production caller is the codecov-ignored resize handler in tui/mod.rs, so
-// the loop body is otherwise never exercised.
+// Pinned directly: the resize that fires it through `follow_resize` also re-lays
+// the floor out, which can clear the cache on its own.
 #[test]
 fn invalidate_routes_clears_every_floor_router_cache() {
     // A fresh agent bootstraps Seated@now then sits 15-30s before its first walk-out,

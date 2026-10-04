@@ -30,10 +30,7 @@ use pixtuoid_core::{Reducer, SceneState, TaggedReceiver};
 use tokio::sync::watch;
 
 use super::gate;
-use super::{
-    ConnectedSources, FALLBACK_DESKS, RunConfig, SceneRx, boot_capacities_for, resolve_boot_caps,
-    summarize,
-};
+use super::{ConnectedSources, RunConfig, SceneRx, resolve_boot_caps, summarize};
 
 pub fn run(cfg: RunConfig) -> Result<()> {
     // Before tokio and the boot caps: the query reads the terminal while no
@@ -61,11 +58,7 @@ type Boot = (
 /// the plan affords unless the config names one.
 fn boot_tui(cfg: &RunConfig) -> Result<Boot> {
     let pack = Arc::new(pixtuoid_scene::pack::load_sprite_pack(cfg.pack.clone())?);
-    let plan = crate::graphics::plan_this_terminal(
-        cfg.graphics,
-        pack.max_density_variant(),
-        crate::graphics::run_probe,
-    );
+    let plan = crate::graphics::plan_this_terminal(cfg.graphics, pack.max_density_variant(), true);
     tracing::info!(mode = ?cfg.graphics, plan = ?plan, "graphics plan");
     let motion = cfg.motion.or(plan.motion(crate::graphics::Link::of_env()));
     tracing::info!(mode = ?cfg.motion, motion = ?motion, "motion");
@@ -99,7 +92,11 @@ async fn run_async(cfg: RunConfig, tui: Option<Boot>) -> Result<()> {
     let socket_path = socket.unwrap_or_else(ClaudeCodeSource::default_socket_path);
     // The terminal-size query stays here in the shell (the injected `measure`);
     // the policy is the covered + mutation-tested `resolve_boot_caps`.
-    let boot_caps = resolve_boot_caps(desk_cap, tui.is_none(), compute_boot_capacities);
+    let boot_caps = resolve_boot_caps(
+        desk_cap,
+        tui.as_ref().map(|(_, plan, _)| *plan),
+        crate::graphics::terminal_cells,
+    );
     // The shared spine — ONE authority with `floating::run`. The tasks live on
     // this fn's runtime; `_source_handles` is an inert anchor (see Pipeline's doc).
     let super::pipeline::Pipeline {
@@ -361,16 +358,10 @@ async fn headless_loop_with_signal(
     }
 }
 
-fn compute_boot_capacities() -> [usize; MAX_FLOORS] {
-    match crossterm::terminal::size().ok() {
-        Some((cols, rows)) => boot_capacities_for(cols, rows),
-        None => [FALLBACK_DESKS; MAX_FLOORS],
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::FALLBACK_DESKS;
     use pixtuoid_core::source::manager::SourceDeath;
 
     type HealthPair = (

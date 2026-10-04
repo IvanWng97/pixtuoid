@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use pixtuoid_core::AgentId;
-use pixtuoid_core::sprite::format::Pack;
+use pixtuoid_core::sprite::format::{Density, Pack};
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_scene::cutaway::canvas::{CanvasFrame, CutawayCanvas, Dirty};
 use pixtuoid_scene::cutaway::paint::CutawayCache;
@@ -50,20 +50,43 @@ pub(crate) type Sink = Box<dyn Write + Send>;
 /// equal to it afterwards is image, any other is text.
 const SENTINEL: &str = "\u{F8FF}";
 
+/// What a frame's tiles are cut for: the scene's cells, each `cell` big, and
+/// the office fitted over them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Fitted {
+    pub(crate) scene: Rect,
+    pub(crate) cell: CellSize,
+    pub(crate) fit: Fit,
+}
+
+impl Fitted {
+    /// The image's cells, its top-left on the scene's.
+    pub(crate) fn geometry(self) -> SceneGeometry {
+        SceneGeometry::Cutaway {
+            origin: self.scene.as_position(),
+            cell: self.cell,
+            scale: self.fit.scale(),
+        }
+    }
+}
+
 /// The cutaway's canvas, its tiles, and what of them the terminal holds.
 pub(crate) struct TileCutaway {
     canvas: CutawayCanvas,
     /// The floor arriving in a slide, while `canvas` paints the one leaving.
     arriving: CutawayCanvas,
     cache: CutawayCache,
-    cell: CellSize,
+    /// The plan's cell.
+    planned: CellSize,
+    /// The window's cell on the first frame, once read.
+    first_window: Option<Option<CellSize>>,
+    density: Density,
     protocol: ImageProtocol,
     tmux: bool,
     /// [`kitty::process_base`].
     base: u32,
-    fit: Fit,
-    /// The scene `fit` was last fitted to.
-    scene: Rect,
+    /// `None` while classic paints.
+    fitted: Option<Fitted>,
     tiles: Tiles,
     /// What the tiles are cut from when sent: the canvas's last frame, or a
     /// slide's two composed.
@@ -98,12 +121,13 @@ impl TileCutaway {
             canvas: CutawayCanvas::new(Arc::clone(&pack)),
             arriving: CutawayCanvas::new(pack),
             cache: CutawayCache::default(),
-            cell,
+            planned: cell,
+            first_window: None,
+            density: fit.density(),
             protocol,
             tmux,
             base: kitty::process_base(),
-            fit,
-            scene: Rect::default(),
+            fitted: None,
             tiles: Tiles::new(protocol, cell, fit),
             image: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
             origin: Position::ORIGIN,
@@ -115,52 +139,75 @@ impl TileCutaway {
         }
     }
 
-    /// The office's logical extent over `scene`'s cells. The scale is the
-    /// cell's, so a resize changes only the extent. A resize also clears the
-    /// screen ratatui redraws, so every tile is re-sent.
-    pub(crate) fn fit_to(&mut self, scene: Rect) -> Size {
-        if scene != self.scene {
-            self.scene = scene;
-            self.fit = self.fit.over(self.cell, scene.as_size());
-            self.tiles.forget();
+    /// Fit the office over `scene`'s cells under a window whose cell reads
+    /// `window`; `None` while the cell has no [`Fit`], when classic paints.
+    /// Every frame fits, a refused one too: any change re-sends every tile,
+    /// since a resize clears the screen ratatui redraws, a new cell cuts a new
+    /// grid, and classic paints over the image.
+    pub(crate) fn fit_to(&mut self, scene: Rect, window: Option<CellSize>) -> Option<Fitted> {
+        let cell = self.cell_under(window);
+        let Some(fit) = Fit::new(cell, scene.as_size(), self.density) else {
+            self.fitted = None;
+            return None;
+        };
+        let fitted = Fitted { scene, cell, fit };
+        if self.fitted != Some(fitted) {
+            self.tiles = Tiles::new(self.protocol, cell, fit);
         }
-        self.fit.logical()
+        self.fitted = Some(fitted);
+        Some(fitted)
     }
 
-    /// Paint `stepped`, its top-left cell at `origin`, and queue the tiles
-    /// it changed once the protocol's cadence allows; until then they stay
-    /// owed.
+    /// The plan's cell, which the terminal answered and so outranks the
+    /// window's (as [`crate::graphics::probe`] ranks them), until a font zoom
+    /// moves the window's cell from what it read on the first frame.
+    fn cell_under(&mut self, window: Option<CellSize>) -> CellSize {
+        let first = *self.first_window.get_or_insert(window);
+        match window {
+            Some(cell) if window != first => cell,
+            _ => self.planned,
+        }
+    }
+
+    /// The office's logical extent as last fitted; `None` while classic
+    /// paints.
+    pub(crate) fn office(&self) -> Option<Size> {
+        self.fitted.map(|f| f.fit.logical())
+    }
+
+    /// Paint `stepped` as `fitted`, and queue the tiles it changed once the
+    /// protocol's cadence allows; until then they stay owed.
     pub(crate) fn paint(
         &mut self,
+        fitted: Fitted,
         stepped: &SteppedFloor,
         theme: &'static Theme,
         showing: Showing<'_>,
-        origin: Position,
     ) {
         let now = showing.now;
         let CanvasFrame { buf, dirty } = self.canvas.frame(
             stepped,
             theme,
-            self.fit.render_scale(),
+            fitted.fit.render_scale(),
             showing,
             &mut self.cache,
         );
         if dirty != Dirty::Rects(Vec::new()) {
             self.image.clone_from(buf);
         }
-        self.stage(&dirty, now, origin);
+        self.stage(&dirty, now, fitted.scene.as_position());
     }
 
     /// Paint both floors of `slide`, composed as it places them, and queue
     /// the tiles that changed as [`Self::paint`] does.
     pub(crate) fn paint_slide(
         &mut self,
+        fitted: Fitted,
         slide: Slide<'_>,
         theme: &'static Theme,
         now: SystemTime,
-        origin: Position,
     ) {
-        let scale = self.fit.render_scale();
+        let scale = fitted.fit.render_scale();
         let leaving = self.canvas.frame(
             slide.leaving.0,
             theme,
@@ -190,7 +237,7 @@ impl TileCutaway {
                 }
             }
         }
-        self.stage(&Dirty::All, now, origin);
+        self.stage(&Dirty::All, now, fitted.scene.as_position());
     }
 
     /// Queue the tiles of [`Self::image`] that differ from what was sent,
@@ -366,15 +413,6 @@ impl TileCutaway {
     /// [`CutawayCanvas::hover_at`] on the last frame painted.
     pub(crate) fn hover_at(&self, area: Bounds) -> Option<AgentId> {
         self.canvas.hover_at(area)
-    }
-
-    /// The image's cells, its top-left on `scene`'s.
-    pub(crate) fn geometry(&self, scene: Rect) -> SceneGeometry {
-        SceneGeometry::Cutaway {
-            origin: scene.as_position(),
-            cell: self.cell,
-            scale: self.fit.scale(),
-        }
     }
 
     /// Owe every tile again: the terminal may have dropped them.
