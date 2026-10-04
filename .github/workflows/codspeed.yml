@@ -4,7 +4,7 @@ name: codspeed
 # modes: `simulation` counts weighted instructions (not wall-clock, so
 # shared-runner noise doesn't apply — <1% variance; the same setup ruff/uv
 # run) and `memory` counts heap allocations. ADVISORY by construction like
-# bench.yml/mutants.yml: nothing `needs:` it, it is not a required check, and
+# bench.yml/review-evidence.yml: nothing `needs:` it, it is not a required check, and
 # both action steps are `continue-on-error` — trend evidence, never a gate.
 # Reports need the CodSpeed GitHub App installed on the repo; auth is OIDC
 # (`id-token: write`, job-scoped per this repo's convention — see ci-tests.yml's

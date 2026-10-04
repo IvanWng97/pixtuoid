@@ -287,6 +287,23 @@
     - .jobs["closed-pr"].permissions.contents = "write"
     - .jobs["closed-pr"].steps[0].uses = "actions/checkout@v7"
 
+- id: review-evidence-stays-read-only
+  file: .github/workflows/review-evidence.yml
+  why: >-
+    It builds and runs every non-draft PR's code, so a scope beyond reading the
+    repo, a secret, or a trigger that carries the base branch's token is one that
+    code could spend.
+  assert: |
+    .permissions == {"contents": "read"}
+      and all(.jobs[]; (.permissions // {"contents": "read"}) == {"contents": "read"})
+      and ((.on | keys) - ["pull_request", "workflow_dispatch"]) == []
+      and (tostring | test("secrets\\.") | not)
+  break:
+    - .permissions.contents = "write"
+    - '.jobs.mutants.permissions = {"contents": "read", "id-token": "write"}'
+    - .on.pull_request_target = {}
+    - '.jobs.mutants.steps += [{"run": "echo ${{ secrets.TOKEN }}"}]'
+
 - id: oidc-only-on-the-tests-call
   file: .github/workflows/ci.yml
   why: >-

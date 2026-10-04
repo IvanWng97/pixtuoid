@@ -1,0 +1,138 @@
+name: review evidence
+
+# Mutation evidence a local refactor or domain-math lens reads instead of
+# re-mutating on a developer's machine. ADVISORY: nothing `needs:` it and it is
+# not a required check, and cargo-mutants exits non-zero exactly for surviving
+# mutants, so a red run is the evidence, not a gate.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: ["crates/**", ".cargo/mutants.toml"]
+  workflow_dispatch:
+    inputs:
+      head:
+        description: "Mutate this commit (default: the dispatched ref)"
+        required: false
+      base:
+        description: "Mutate the diff from this commit (default: the merge base with main)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: review-evidence-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: list the diff's mutants
+    # A fork's or a draft's head waits for a maintainer's dispatch.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (!github.event.pull_request.draft &&
+        github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      base: ${{ steps.base.outputs.sha }}
+      head: ${{ steps.base.outputs.head }}
+      mutants: ${{ steps.list.outputs.count }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The PR head, not the merge ref: the diff is the PR's own.
+          ref: ${{ github.event.pull_request.head.sha || inputs.head || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: base
+        env:
+          BASE: ${{ inputs.base }}
+        run: |
+          echo "sha=${BASE:-$(git merge-base origin/main HEAD)}" >> "$GITHUB_OUTPUT"
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@cargo-mutants
+      - id: list
+        env:
+          BASE: ${{ steps.base.outputs.sha }}
+        run: |
+          git diff "$BASE...HEAD" > pr.diff
+          echo "count=$(cargo mutants --in-diff pr.diff --list | wc -l | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+  mutants:
+    name: mutants shard ${{ matrix.shard }}
+    needs: plan
+    if: needs.plan.outputs.mutants != '0'
+    runs-on: ubuntu-latest
+    # A time box, not a hang guard: a shard that runs out is reported partial.
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.head }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-alsa
+      - uses: ./.github/actions/setup-cargo-just
+      - uses: taiki-e/install-action@cargo-mutants
+      - uses: taiki-e/install-action@cargo-nextest
+      - env:
+          MUTANTS_BASE: ${{ needs.plan.outputs.base }}
+        # Round-robin evens the shards' work, so the time box cuts them alike.
+        run: just mutants --shard "${{ matrix.shard }}/4" --sharding round-robin --no-shuffle
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutants-shard-${{ matrix.shard }}
+          path: mutants.out/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  manifest:
+    name: evidence manifest
+    needs: [plan, mutants]
+    # Written whatever the shards did, so a lens sees a partial run as one.
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: mutants-shard-*
+          path: shards
+      - env:
+          BASE: ${{ needs.plan.outputs.base }}
+          HEAD_SHA: ${{ needs.plan.outputs.head }}
+          LISTED: ${{ needs.plan.outputs.mutants }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          shopt -s nullglob
+          outcomes=(shards/*/outcomes.json)
+          # A shard is whole only once cargo-mutants stamps its end_time.
+          jq -n --arg base "$BASE" --arg head "$HEAD_SHA" --arg run "$RUN_ID" \
+            --argjson listed "$LISTED" --argjson shards 4 \
+            '[inputs] as $s | {
+              head_sha: $head, base_sha: $base, run_id: ($run | tonumber),
+              listed: $listed,
+              shards_complete: ($s | map(select(.end_time != null)) | length),
+              partial: ($listed > 0 and ($s | map(select(.end_time != null)) | length) < $shards),
+              caught: ($s | map(.caught) | add // 0),
+              missed: ($s | map(.missed) | add // 0),
+              timeout: ($s | map(.timeout) | add // 0),
+              unviable: ($s | map(.unviable) | add // 0)
+            }' "${outcomes[@]:-/dev/null}" > manifest.json
+          cat shards/*/missed.txt > missed.txt 2>/dev/null || true
+          cat shards/*/timeout.txt > timeout.txt 2>/dev/null || true
+          cat manifest.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: review-evidence
+          path: |
+            manifest.json
+            missed.txt
+            timeout.txt
+          retention-days: 30

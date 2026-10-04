@@ -1,6 +1,6 @@
 name: bench
 
-# ON-DEMAND only, mirroring mutants.yml: a dispatch runs ONLY this, and nothing
+# ON-DEMAND only: a dispatch runs ONLY this, and nothing
 # `needs:` it, so a slow run gates nothing. Shared-runner wall-clock is noise
 # (criterion's own FAQ says not to rely on CI numbers), so this exists for
 # trend evidence on request — the authoritative numbers are `just bench` runs
