@@ -89,15 +89,18 @@ jobs:
       - uses: taiki-e/install-action@cargo-insta
       # An uninstrumented run lets insta detect pending and orphan snapshots.
       - run: just snapshots
-      # Review evidence (scripts/review/test_list_diff.py), listed from the build
-      # above. On a PR the checkout is the merge commit, so its parents name the
-      # main commit whose list is the base.
+      # Review evidence (scripts/test-list-diff.py), listed from the build
+      # above; advisory, so a missing artifact never reds the gate. On a PR the
+      # checkout is the merge commit, so its parents name the main commit whose
+      # list is the base.
       - name: List the tests
+        continue-on-error: true
         run: |
           mkdir -p target/test-list
           cargo nextest list --workspace --message-format json > target/test-list/tests.json
           git cat-file -p HEAD | sed -n 's/^parent //p' > target/test-list/parents.txt
       - uses: actions/upload-artifact@v7
+        continue-on-error: true
         with:
           name: test-list
           path: target/test-list/
