@@ -1033,7 +1033,7 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     let occupied = std::collections::HashSet::new();
     let mut obs = AudioObserver::new();
     let frame = obs.frame(&scene, &occupied, |_| None, FloorMeta::ground(), now);
-    let precip = crate::pixel_painter::precipitation_level(now, crate::sky::WeatherPolicy::Clock);
+    let precip = crate::sky::rain_at(now, crate::sky::WeatherPolicy::Clock);
     assert_eq!(
         frame.stems,
         crate::audio::stem_levels(&crate::board::per_floor_counts(&scene)[0], precip),
@@ -1042,7 +1042,7 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     assert_eq!(
         frame.track,
         crate::audio::select_track(
-            crate::pixel_painter::is_day_at(now),
+            crate::sky::is_day_at(now),
             precip,
             crate::audio::track_epoch(now),
         ),

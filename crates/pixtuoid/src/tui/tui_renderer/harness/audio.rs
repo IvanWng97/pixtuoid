@@ -190,7 +190,7 @@ fn footer_note_glyph_tracks_effective_audibility() {
 /// frame, both halves of a floor slide, and the audio frame's rain.
 #[test]
 fn a_forced_weather_reaches_the_frame_both_slide_halves_and_the_rain() {
-    use pixtuoid_scene::pixel_painter::{Weather, WeatherPolicy};
+    use pixtuoid_scene::sky::{Weather, WeatherPolicy};
     let cap = 16;
     let scene = scene_with(
         vec![

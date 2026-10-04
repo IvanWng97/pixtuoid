@@ -29,7 +29,7 @@ use pixtuoid_scene::floor::{
 };
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::pack::load_bundled_pack;
-use pixtuoid_scene::pixel_painter::WeatherPolicy;
+use pixtuoid_scene::sky::WeatherPolicy;
 use pixtuoid_scene::theme::{ALL_THEMES, Theme};
 
 /// A visitor hire's one-shot event, queued OUTSIDE the loop machinery so a
@@ -231,7 +231,7 @@ impl Office {
         self.hires.try_hire(base, &self.scene)
     }
 
-    /// Force one of the [`weather_names`](pixtuoid_scene::pixel_painter::weather_names),
+    /// Force one of the [`weather_names`](pixtuoid_scene::sky::weather_names),
     /// or `None` (or an unrecognized name) to follow the clock-based cycle.
     pub fn set_weather(&mut self, name: Option<String>) {
         self.weather = WeatherPolicy::from_name(name.as_deref()).unwrap_or_default();
@@ -250,7 +250,7 @@ impl Office {
     /// site's sky-slider thumb reads this, so it delegates to the engine's ONE
     /// day/night boundary rather than restating it.
     pub fn is_day(&self, hour: f32) -> bool {
-        pixtuoid_scene::pixel_painter::hour_is_day(hour)
+        pixtuoid_scene::sky::hour_is_day(hour)
     }
 
     /// Export the current frame's name-badge labels + neon wall-board TEXT as a
