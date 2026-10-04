@@ -83,14 +83,6 @@ impl Hovers {
             .find(|h| h.at.overlaps(area))
             .map(|h| &h.target)
     }
-
-    /// The pet's hover, wherever it lies.
-    pub fn pet(&self) -> Option<&PetHover> {
-        self.0.iter().find_map(|h| match &h.target {
-            HoverTarget::Pet(pet) => Some(pet),
-            _ => None,
-        })
-    }
 }
 
 #[cfg(test)]

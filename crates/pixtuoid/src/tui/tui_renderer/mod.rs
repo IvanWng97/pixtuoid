@@ -495,9 +495,25 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.chrome.active_pet.as_ref()
     }
 
+    /// The pet the last frame drew, found as the pointer finds it: on some
+    /// logical pixel it is the topmost hover.
     #[cfg(test)]
     pub(crate) fn drawn_pet(&self) -> Option<pixtuoid_scene::display::PetHover> {
-        self.last_hovers.pet().copied()
+        let layout = self.cached_layout.as_deref()?;
+        (0..layout.buf_h)
+            .flat_map(|y| (0..layout.buf_w).map(move |x| (x, y)))
+            .find_map(|(x, y)| {
+                let pixel = pixtuoid_scene::layout::Bounds {
+                    x,
+                    y,
+                    width: 1,
+                    height: 1,
+                };
+                match self.last_hovers.at(pixel)? {
+                    pixtuoid_scene::display::HoverTarget::Pet(pet) => Some(*pet),
+                    _ => None,
+                }
+            })
     }
 
     /// Drop per-agent state for agents no longer in `scene` — BOTH halves: the

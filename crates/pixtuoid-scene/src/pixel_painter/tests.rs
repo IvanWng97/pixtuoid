@@ -3738,10 +3738,10 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
     );
 }
 
-/// A character whose anim the pack lacks paints nothing, so it neither hovers
-/// nor wears a badge.
+/// A character or a pet whose anim the pack lacks paints nothing, so it
+/// neither hovers nor wears a badge.
 #[test]
-fn a_character_whose_anim_is_missing_is_not_hoverable() {
+fn a_figure_whose_anim_is_missing_is_not_hoverable() {
     let (layout, pack, frames, _) =
         crate::display::compose::tests::sit_down(crate::layout::Facing::North, 2);
     let mut frame = frames.last().expect("a walk").clone();
@@ -3754,6 +3754,14 @@ fn a_character_whose_anim_is_missing_is_not_hoverable() {
         ..frame.agents[0].clone()
     });
     frame.characters.push(ghost);
+    frame.pet = Some(crate::sim::PetPlacement {
+        kind: crate::pet::PetKind::Cat,
+        pos: frame.characters[0].top_left,
+        flip: false,
+        anim_name: "does_not_exist",
+        frame_idx: 0,
+        effects: Vec::new(),
+    });
     let drawn = paint_drawn(
         &OwnedSimStores::new(),
         &SceneState::uniform(16),
