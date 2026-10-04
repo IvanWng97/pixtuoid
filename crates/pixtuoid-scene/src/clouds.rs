@@ -875,8 +875,6 @@ impl Clouds {
         }
     }
 
-    /// The flat base of the nearest mass over column `x`, where a bolt from it
-    /// starts; `None` with no mass overhead.
     /// Each mass's drift this frame, in whole cells of a grid `d` to the unit.
     fn drift(&self, d: u16) -> Vec<i32> {
         let df = f32::from(d);
