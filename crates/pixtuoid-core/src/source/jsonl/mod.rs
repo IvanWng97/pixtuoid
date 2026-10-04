@@ -100,7 +100,7 @@ struct SourceDecoders {
 mod folded {
     use std::path::Path;
 
-    #[derive(Clone, Copy)]
+    #[derive(Debug, Clone, Copy)]
     pub(super) struct FoldedDeriver(super::IdDeriver);
 
     impl FoldedDeriver {
@@ -176,6 +176,18 @@ pub struct JsonlWatcher {
     poll_interval: Duration,
     negative_vouch_min_span: Duration,
     child_end_unclaims: Option<ChildEndUnclaims>,
+}
+
+impl std::fmt::Debug for JsonlWatcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JsonlWatcher")
+            .field("root", &self.root)
+            .field("source_name", &self.source_name)
+            .field("initial_window", &self.initial_window)
+            .field("poll_interval", &self.poll_interval)
+            .field("liveness_probe", &self.liveness_probe.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 const DEFAULT_INITIAL_WINDOW: Duration = Duration::from_secs(3600);

@@ -271,8 +271,7 @@ async fn second_listener_on_same_name_fails_with_typed_socket_busy() {
     let _first = HookSocketListener::bind(&name).await.unwrap();
     let err = HookSocketListener::bind(&name)
         .await
-        .err()
-        .expect("bind on an already-owned pipe must fail, not silently queue");
+        .expect_err("bind on an already-owned pipe must fail, not silently queue");
     assert!(
         err.downcast_ref::<pixtuoid_core::source::hook::SocketBusy>()
             .is_some(),

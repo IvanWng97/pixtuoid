@@ -10,9 +10,10 @@ use ratatui::widgets::{Block, Padding, Paragraph};
 
 use super::{StateKind, compact_hms, display_width, source_badge_span, state_color, to_color};
 use crate::tui::renderer::clip_widget_rect;
+use pixtuoid_scene::display::GatewayCard;
 use pixtuoid_scene::overlay::{LabelElement, disambig_suffix};
 use pixtuoid_scene::pet::PetKind;
-use pixtuoid_scene::pixel_painter::{AgentFrame, MascotFrame};
+use pixtuoid_scene::pixel_painter::AgentFrame;
 
 /// Borderless tooltip frame shared by every hover/click tooltip: just the padded
 /// text. The caller must paint `super::paint_card_backing` UNDER it (the `Clear` +
@@ -361,28 +362,27 @@ pub(crate) fn paint_pet_tooltip(
 
 pub(crate) fn paint_mascot_tooltip(
     f: &mut ratatui::Frame<'_>,
-    mascot: &MascotFrame,
+    card: &GatewayCard,
     at: TooltipAt,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
-    let text = mascot_tooltip_text(mascot);
+    let text = mascot_tooltip_text(card);
     paint_simple_tooltip(f, &text, at, theme);
 }
 
 /// The mascot tooltip's text. The verb keys on `busy` — see
-/// [`pixtuoid_scene::pixel_painter::MascotFrame::busy`] for why the run state,
-/// not the session count — and `degraded` outranks busy/idle.
-fn mascot_tooltip_text(mascot: &MascotFrame) -> String {
-    let &MascotFrame {
+/// [`GatewayCard::busy`] for why the run state, not the session count — and
+/// `degraded` outranks busy/idle.
+fn mascot_tooltip_text(card: &GatewayCard) -> String {
+    let &GatewayCard {
         name,
         ref instance,
         busy,
         degraded,
         active_sessions,
-        ..
-    } = mascot;
-    // `OpenClaw:19789` — the painter sets `instance` only when there IS a sibling to
-    // tell apart, so the single-gateway tooltip stays byte-unchanged.
+    } = card;
+    // `OpenClaw:19789` — `instance` is set only when there IS a sibling to tell
+    // apart, so the single-gateway tooltip stays byte-unchanged.
     let name = match instance {
         Some(i) => format!("{name}:{i}"),
         None => name.to_string(),
@@ -449,7 +449,7 @@ pub fn paint_chitchat_bubbles(
 
 #[cfg(test)]
 mod tests {
-    use super::{MascotFrame, TooltipAt, mascot_tooltip_text};
+    use super::{GatewayCard, TooltipAt, mascot_tooltip_text};
     use pixtuoid_scene::theme;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -487,11 +487,8 @@ mod tests {
         busy: bool,
         degraded: bool,
         active_sessions: u32,
-    ) -> MascotFrame {
-        MascotFrame {
-            pos: pixtuoid_scene::layout::Point { x: 0, y: 0 },
-            w: 0,
-            h: 0,
+    ) -> GatewayCard {
+        GatewayCard {
             name: "OpenClaw",
             instance: instance.map(str::to_string),
             busy,
@@ -599,9 +596,6 @@ mod tests {
         };
         let speaker = AgentFrame {
             agent_id: pixtuoid_core::AgentId::from_transcript_path("/chat/0.jsonl"),
-            top_left: Point { x: 16, y: 14 },
-            w: 8,
-            h: 12,
             label_anchor: Point { x: 20, y: 14 },
         };
         let (name, quip) = ("abcdefgh", "LGTM!");

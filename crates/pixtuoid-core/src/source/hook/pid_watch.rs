@@ -24,7 +24,7 @@ use crate::source::{AgentEvent, TaggedSender, Transport};
 
 /// Cloneable handle (one per hook connection task) over a shared pid→agents
 /// registry + the process-exit watcher.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct HookPidWatch {
     exit: Arc<ExitWatch>,
     bindings: Arc<Mutex<Bindings>>,
@@ -33,6 +33,7 @@ pub(crate) struct HookPidWatch {
 /// One agent's pid sighting. An agent is armed on AT MOST ONE pid, which is why
 /// this is an enum and not a pair of maps: "armed on two pids at once" was
 /// reachable when the two states lived in separate collections.
+#[derive(Debug)]
 enum Sighting {
     /// A shim GUESS seen once — armed only if the next sighting repeats it.
     Candidate(i32),
@@ -40,7 +41,7 @@ enum Sighting {
     Armed(i32),
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Bindings {
     by_agent: HashMap<AgentId, Sighting>,
 }
