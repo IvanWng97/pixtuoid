@@ -1043,9 +1043,8 @@ fn exit_far_completes_before_grace_window_no_vanish() {
         y: mid1.y.saturating_add(80),
     };
     let mut rig = RouteRig::new(StubRouter::corners(vec![from, mid1, mid2, door]));
-    // Exit started just inside `EXIT_GRACE_WINDOW`.
     let slot = exiting_slot(
-        now - Duration::from_millis(4300),
+        now - (pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW - Duration::from_millis(200)),
         now - Duration::from_secs(60),
     );
     match derive_with_routing(&slot, now, &l, &mut rig.rctx()) {
