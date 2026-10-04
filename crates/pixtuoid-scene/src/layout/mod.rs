@@ -90,6 +90,20 @@ impl Bounds {
             && u32::from(other.y) < end(self.y, self.height)
     }
 
+    /// Whether the two half-open boxes share a column, whatever their rows.
+    pub(crate) fn shares_columns(self, other: Bounds) -> bool {
+        Bounds {
+            y: 0,
+            height: 1,
+            ..self
+        }
+        .overlaps(Bounds {
+            y: 0,
+            height: 1,
+            ..other
+        })
+    }
+
     /// The box grown `dx` columns on each side, its west edge clamped at
     /// column 0 and its east edge kept.
     pub(crate) fn widened(self, dx: u16) -> Bounds {

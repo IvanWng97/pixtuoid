@@ -1200,7 +1200,7 @@ fn assert_each_appliance_lands_where_its_aisle_fits(w: u16, h: u16, seed: u64, l
     }
     if let [a, b] = machines[..] {
         assert!(
-            a.x + a.width <= b.x || b.x + b.width <= a.x,
+            !a.shares_columns(b),
             "{w}x{h} seed {seed}: the machines {a:?} and {b:?} share columns"
         );
     }

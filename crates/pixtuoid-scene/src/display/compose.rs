@@ -7,14 +7,14 @@ use pixtuoid_core::sprite::format::Pack;
 
 use super::{
     Art, DisplayList, Figure, Flip, Layer, LightPiece, Piece, PieceKind, Screen, Span, StoodProp,
-    WindowView, depth_sort, fingerprint,
+    depth_sort, fingerprint,
 };
 use crate::atmosphere::Moment;
 use crate::display::pen::{ArtPx, ArtRect, Pen};
 use crate::display::text::{Align, LABEL_GAP, TextRun};
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
-    Bounds, DESK_H, Depth, Fixture, FixtureKind, Point, SceneLayout, Size, Station, Tie,
+    Bounds, DESK_H, Depth, Fixture, FixtureKind, Point, SceneLayout, Station, Tie,
 };
 use crate::pack::{
     DESK_CUP_SPRITE, DOOR_SPRITE, MEETING_SOFA_NORTH_SPRITE, NORTH_SOFA_SEAT_ROWS,
@@ -110,7 +110,7 @@ pub(crate) fn run_rect(run: &TextRun, pen: Pen) -> ArtRect {
 /// What a cutaway frame is drawn with and the next one is too: the office
 /// itself, where the sky's look, `altitude` and `now` are what move from frame
 /// to frame.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Office<'a> {
     /// Where everything stands, in LOGICAL units.
     pub layout: &'a SceneLayout,
@@ -124,7 +124,7 @@ pub struct Office<'a> {
 
 /// Which floor a frame shows, when, and what its wall board says: what moves
 /// a frame beyond its office and the sim's world.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Showing<'a> {
     /// The floor of the building it shows.
     pub floor: crate::floor::FloorMeta,
@@ -387,7 +387,7 @@ fn desk_bulb(
 /// Where a piece meets the ground, as the shadow it casts there: on the row under
 /// its south edge, a standing figure's under its feet. A sitter is grounded by
 /// what they sit on, which casts its own: a desk chair a sitter carries, under
-/// the chair. Walls, window glass, the elevator and what hangs on a wall meet
+/// the chair. Walls, windows, the elevator and what hangs on a wall meet
 /// no ground.
 pub(crate) fn ground_shadow(
     span: Span,
@@ -403,7 +403,7 @@ pub(crate) fn ground_shadow(
     };
     match *kind {
         PieceKind::WallSeg { .. }
-        | PieceKind::Glass { .. }
+        | PieceKind::Window { .. }
         | PieceKind::Hung { .. }
         | PieceKind::Door { .. }
         | PieceKind::Neon { .. }
@@ -1293,14 +1293,10 @@ pub(crate) fn desk_front_h() -> u16 {
     (DESK_H * DESK_FRONT_NUMER / DESK_FRONT_DENOM).max(1)
 }
 
-/// Queue each window's glass as a piece: what it looks out on — the one city
-/// ([`CityStrip`]) on the pen's art grid over the classic's sky, disc, stars
-/// and blaze ([`SkyView`]), under `weather` — resolved when the list is built, at the very back of the order, so
-/// the view changes with the sky, the weather and the city's lights without touching the
-/// backdrop.
-///
-/// [`CityStrip`]: crate::skyline::CityStrip
-/// [`SkyView`]: crate::celestial::SkyView
+/// Queue each window as a piece at the very back of the order: what its glass
+/// looks out on under `weather` on the pen's art grid, resolved when the list
+/// is built, so the view changes with the sky, the weather and the city's
+/// lights without touching the backdrop.
 pub(crate) fn push_windows(
     office: Office<'_>,
     moment: &Moment,
@@ -1313,81 +1309,33 @@ pub(crate) fn push_windows(
         theme,
         scale,
     } = office;
-    let pen = Pen::for_pack(scale, pack);
-    let rows = crate::layout::window_rows(layout.wall_band_h());
-    let window_h = rows.end - rows.start;
-    let glass_h = crate::layout::glass_rows(window_h);
-    let Some(density) = pixtuoid_core::sprite::format::Density::new(pen.art(1).0) else {
+    let Some(density) =
+        pixtuoid_core::sprite::format::Density::new(Pen::for_pack(scale, pack).art(1).0)
+    else {
         return;
     };
-    let run = crate::layout::window_run(layout.buf_w);
-    let city = crate::skyline::CityStrip::draw(
-        pack,
-        (run.end - run.start, glass_h),
+    let outside = crate::outside::Outside::of(
         moment,
+        pack,
         theme,
+        (layout.buf_w, layout.wall_band_h()),
         density,
+        *weather,
     );
-    let d = density.get();
-    let sky = crate::celestial::SkyView::of(moment, layout.buf_w, layout.wall_band_h(), theme);
+    let rows = crate::layout::window_rows(layout.wall_band_h());
     // The bolt lights the glass and all it shows, over the weather on it.
     let bolt = crate::display::light::bolt_steps(&moment.sky);
     let mut bolt_lift = crate::dither::Stepped::new(bolt as i8);
     for bay in layout.window_bays() {
-        let size = Size {
-            w: bay.w,
-            h: window_h,
-        };
-        let (w, h) = (bay.w * d, window_h * d);
-        let (x0, y0) = (pen.art(bay.x).0, pen.art(rows.start).0);
-        let pane = sky.pane(bay.x, bay.w, glass_h, d);
-        let mut px: Vec<_> = (0..h)
-            .flat_map(|ay| (0..w).map(move |ax| (ax, ay)))
-            .map(|(ax, ay)| {
-                if crate::layout::window_frame(ax / d, ay / d, size) {
-                    return None;
-                }
-                // The strip's art pixel: x from the run's west end, so one city
-                // runs on behind every frame and the wall between windows; y from
-                // the glass's top, under its top frame row.
-                let (cx, cy) = ((bay.x - run.start) * d + ax, ay - d);
-                Some(city.at(cx, cy).unwrap_or_else(|| {
-                    let open = pane.colour((x0 + ax, y0 + ay), cy);
-                    sky.blaze().map_or(open, |b| b.over(open))
-                }))
-            })
-            .collect();
-        if let Some((veil, alpha)) = weather.veil {
-            for c in px.iter_mut().flatten() {
-                *c = crate::composite::blend_rgb(*c, veil, alpha);
-            }
-        }
-        // The glass starts a unit in from the window's top-left frame; a mark
-        // that lands on the mullion or transom stays behind it.
-        let glass = Size {
-            w: bay.w.saturating_sub(2),
-            h: glass_h,
-        };
-        for m in weather.marks(bay.idx, glass, d) {
-            let (ax, ay) = (m.x + d, m.y + d);
-            if let Some(Some(c)) = px.get_mut(usize::from(ay) * usize::from(w) + usize::from(ax)) {
-                *c = m.over(*c, (x0 + ax, y0 + ay));
-            }
-        }
+        let mut view = outside.through(bay);
         if bolt > 0 {
-            for c in px.iter_mut().flatten() {
-                *c = bolt_lift.of(*c);
-            }
+            view.paint(|_, c| bolt_lift.of(c));
         }
         order.push((
-            Span::new(bay.x, rows.start, bay.w, window_h, 0).with_depth(0),
-            PieceKind::Glass {
-                view: WindowView {
-                    x: x0,
-                    y: y0,
-                    w,
-                    px,
-                },
+            Span::new(bay.x, rows.start, bay.w, rows.end - rows.start, 0).with_depth(0),
+            PieceKind::Window {
+                view,
+                frame: theme.surface.window_frame,
             },
         ));
     }

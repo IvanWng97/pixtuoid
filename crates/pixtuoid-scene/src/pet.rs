@@ -7,6 +7,7 @@ pub const PET_DURATION_MS: u64 = 2000;
 
 /// State for the "pet the animal" interaction — render-side only, not a data
 /// model concern.
+#[derive(Debug)]
 pub struct PetState {
     /// When the pet was last clicked — anchors the `PET_DURATION_MS` freeze.
     pub petted_at: SystemTime,

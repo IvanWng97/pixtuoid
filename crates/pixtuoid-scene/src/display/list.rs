@@ -4,7 +4,9 @@ use pixtuoid_core::sprite::format::Pack;
 
 use super::Span;
 use crate::atmosphere::Carpet;
+use crate::dither::Dithered;
 use crate::layout::Bounds;
+use crate::outside::WindowView;
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
@@ -60,7 +62,7 @@ impl Screen {
     }
 }
 
-/// One frame's pieces — the windows' glass, the decor hung on the wall and
+/// One frame's pieces — the windows, the decor hung on the wall and
 /// everything standing on the ground — built and ordered but not painted.
 ///
 /// ONE ordered list, so a character and the desk it sits at resolve against each
@@ -75,7 +77,7 @@ pub(crate) struct DisplayList<'a> {
     /// change repaints the whole frame.
     pub(super) ambient: crate::display::light::Ambient,
     /// The carpet the backdrop lays: a change repaints the whole frame too.
-    pub(super) carpet: Carpet,
+    pub(super) carpet: Dithered<Carpet>,
     /// How far lightning lifts the room: a change repaints the whole frame.
     pub(super) flash: crate::display::light::Flash,
     /// The figures' hovers, in `pieces`' order.
@@ -173,7 +175,7 @@ impl<'a> DisplayList<'a> {
         self.ambient
     }
 
-    pub(crate) fn carpet(&self) -> Carpet {
+    pub(crate) fn carpet(&self) -> Dithered<Carpet> {
         self.carpet
     }
 
@@ -261,7 +263,7 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
             body: _,
         } => (at, shadow, key, chair).hash(&mut h),
         PieceKind::Text { ref run } => run.hash(&mut h),
-        PieceKind::Glass { ref view } => view.hash(&mut h),
+        PieceKind::Window { ref view, frame } => (view, frame).hash(&mut h),
         PieceKind::Hung { at, sprite } => (at, sprite).hash(&mut h),
         PieceKind::Effect(riding) => riding.hash(&mut h),
     }
@@ -270,8 +272,8 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
 
 impl PieceKind {
     /// Whether it recolours what lies under it rather than painting colours of
-    /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window's
-    /// [`PieceKind::Glass`].
+    /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window
+    /// ([`PieceKind::Window`]).
     #[cfg_attr(
         not(test),
         expect(dead_code, reason = "the incremental canvas repaints under it")
@@ -300,7 +302,7 @@ impl PieceKind {
             | PieceKind::Door { .. }
             | PieceKind::Neon { .. }
             | PieceKind::Clock { .. }
-            | PieceKind::Glass { .. }
+            | PieceKind::Window { .. }
             | PieceKind::Desk { .. }
             | PieceKind::DeskProp(_)
             | PieceKind::Creature { .. }
@@ -321,9 +323,10 @@ impl PieceKind {
 /// paint fn writes lies inside its span.
 #[derive(Debug)]
 pub(crate) enum PieceKind {
-    /// One window's glass and what it looks out on.
-    Glass {
+    /// One window: its glass, then its joinery in `frame`.
+    Window {
         view: WindowView,
+        frame: pixtuoid_core::sprite::Rgb,
     },
     /// Decor hung on the north band, blitted at its top-left `at`.
     Hung {
@@ -469,14 +472,4 @@ impl std::fmt::Debug for Figure {
             .field("frame_idx", &self.key.frame.frame_idx)
             .finish()
     }
-}
-
-/// What one window shows this frame, resolved when the list is built: the
-/// art pixels of its box from its top-left, row by row, `None` on its frame.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct WindowView {
-    pub(crate) x: u16,
-    pub(crate) y: u16,
-    pub(crate) w: u16,
-    pub(crate) px: Vec<Option<pixtuoid_core::sprite::Rgb>>,
 }

@@ -489,7 +489,7 @@ fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
 /// Every look of frame `i` of `anim` a viewer could see under `overrides`:
 /// recolored and, where the art marks its head, dressed in each of the pack's
 /// hairstyles.
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn looks(
     pack: &pixtuoid_core::sprite::format::Pack,
     anim: &pixtuoid_core::sprite::Sprite,
@@ -511,7 +511,7 @@ fn looks(
 }
 
 /// Whether recoloring `key` changes some pixel of every look of frame `i`.
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn recolors(
     pack: &pixtuoid_core::sprite::format::Pack,
     anim: &pixtuoid_core::sprite::Sprite,
@@ -529,7 +529,7 @@ fn recolors(
 /// the pack's own color there: `standing` shows all four, at every density,
 /// dressed in whichever hairstyle.
 #[test]
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn the_bundled_pack_draws_every_key_an_agent_recolors() {
     use pixtuoid_core::sprite::format::{Density, density_variant_name};
     let pack = crate::pack::test_default_pack();
@@ -563,7 +563,7 @@ fn the_bundled_pack_draws_every_key_an_agent_recolors() {
 /// (the key itself or one of its `[ramps]` shades), or it shows every agent in
 /// the pack's own colours. Skin and pants may be out of sight.
 #[test]
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
     use pixtuoid_core::sprite::format::{
         Density, OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS, density_variant_name,
@@ -1749,6 +1749,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
         pack: &pack,
         timing: Motion::Full.timing(now),
         sky: crate::sky::Sky::clock(now),
+        outside: None,
         buf: &mut buf,
         cache: &mut cache,
         base_fill: &mut base_fill,
@@ -3633,6 +3634,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
             pack: &pack,
             timing: Motion::Full.timing(now),
             sky: crate::sky::Sky::clock(now),
+            outside: None,
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -3921,6 +3923,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 pack: &pack,
                 timing: Motion::Full.timing(now),
                 sky: crate::sky::Sky::clock(now),
+                outside: None,
                 buf,
                 cache: &mut cache,
                 base_fill: &mut base_fill,
@@ -4301,7 +4304,7 @@ fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
 /// A busy appliance reads busy for most of its loop at every density: fewer
 /// than half its busy frames may show it at rest.
 #[test]
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn a_busy_loop_spends_most_of_its_frames_away_from_rest() {
     let pack = crate::pack::test_default_pack();
     for name in [
@@ -5230,6 +5233,7 @@ fn paint_drawn(
             pack,
             timing: Motion::Full.timing(now),
             sky: crate::sky::Sky::clock(now),
+            outside: None,
             buf: &mut buf,
             cache: &mut FrameCache::new(),
             base_fill: &mut BaseFillCache::new(),
@@ -5987,7 +5991,7 @@ fn an_unflipped_character_faces_the_way_its_art_does() {
 /// style's layers are drawn for the art as authored, so profile hair laid on a
 /// flipped body would land on the face side.
 #[test]
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn a_facing_flip_mirrors_the_dressed_frame() {
     let pack = crate::pack::test_default_pack();
     let scale =
@@ -6024,137 +6028,167 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
     assert!(asymmetric > 0, "a profile is not its own mirror");
 }
 
-/// A corridor appliance's art overhangs north of its aisle (invariant #6), but
-/// never onto a desk, its chair or its sitter. Art can only overlap a
-/// workstation it shares a row with, and the height alone fixes every row.
-/// So a tall-aisle height whose rows never meet is checked once per width;
-/// every other tall height sweeps all widths × seeds.
+/// Under every sky the sweep draws, a frame matches the one whose windows show
+/// its instant's no-weather sky — the same room, lit alike — everywhere but on
+/// glass no fixture paints.
 #[test]
-fn corridor_appliance_art_never_lands_on_a_workstation() {
-    use crate::layout::{Bounds, CHARACTER_SPRITE_H, CHARACTER_SPRITE_W, FixtureKind, Station};
-    use std::collections::BTreeSet;
-    const TALL_AISLES: std::ops::RangeInclusive<u16> = 10..=14;
-    const APPLIANCES: [Station; 2] = [Station::VendingMachine, Station::Printer];
-    const SEEDS: std::ops::Range<u64> = 0..3;
-    const NARROWEST: u16 = 96;
-    const WIDEST: u16 = 320;
-    const MID_WIDTH: u16 = 208;
-    let rows_meet = |a: Bounds, b: Bounds| a.y < b.y + b.height && b.y < a.y + a.height;
-    let lay_out = |w, h, seed| {
-        SceneLayout::compute_with_seed(w, h, None, seed)
-            .unwrap_or_else(|| panic!("{w}x{h} seed {seed} lays out"))
-    };
-    let pieces = |l: &SceneLayout| {
-        let fixtures: Vec<_> = l.fixtures().collect();
-        let art: Vec<(Station, Bounds)> = fixtures
-            .iter()
-            .filter_map(|f| match f.kind {
-                FixtureKind::Station { station, .. } if APPLIANCES.contains(&station) => {
-                    Some((station, f.visual))
-                }
-                _ => None,
-            })
-            .collect();
-        let mut workstations: Vec<Bounds> = fixtures
-            .iter()
-            .filter(|f| matches!(f.kind, FixtureKind::Desk(_) | FixtureKind::DeskChair(_)))
-            .map(|f| f.visual)
-            .collect();
-        workstations.extend(l.home_desks.iter().enumerate().map(|(i, &desk)| {
-            let at = seated_top_left(
-                desk,
-                CHARACTER_SPRITE_W,
-                l.desk_facing(FloorLocalDeskIndex(i)),
-            );
-            Bounds {
-                x: at.x,
-                y: at.y,
-                width: CHARACTER_SPRITE_W,
-                height: CHARACTER_SPRITE_H,
-            }
-        }));
-        (art, workstations)
-    };
-    let rows = |l: &SceneLayout| {
-        let (art, workstations) = pieces(l);
-        (
-            (l.cubicle_aisle.y, l.cubicle_aisle.height),
-            art.iter()
-                .map(|&(station, a)| (station, a.y, a.height))
-                .collect::<Vec<_>>(),
-            workstations
-                .iter()
-                .map(|ws| (ws.y, ws.height))
-                .collect::<BTreeSet<_>>(),
-        )
-    };
-    let mut placed = 0;
-    let mut violations = Vec::new();
-    let mut check = |l: &SceneLayout, w: u16, h: u16, seed: u64| {
-        let (art, workstations) = pieces(l);
-        placed += art.len();
-        for (station, a) in art {
-            violations.extend(workstations.iter().filter(|&&ws| a.overlaps(ws)).map(|ws| {
-                format!(
-                    "{w}x{h} seed {seed} aisle {:?}: {station:?} art {a:?} on {ws:?}",
-                    l.cubicle_aisle
-                )
-            }));
-        }
-    };
-    use crate::layout::roster::tests::{CENSUS_SEEDS, CENSUS_SIZES};
-    for &(w, h) in CENSUS_SIZES {
-        for seed in CENSUS_SEEDS {
-            check(&lay_out(w, h, seed), w, h, seed);
-        }
-    }
-    let corners = [(NARROWEST, SEEDS.start), (WIDEST, SEEDS.end - 1)];
-    let mut tall_seen = BTreeSet::new();
-    for h in 90u16..=240 {
-        let [probe, far] = corners.map(|(w, seed)| lay_out(w, h, seed));
-        let (probe_rows, far_rows) = (rows(&probe), rows(&far));
-        assert_eq!(
-            probe_rows.0, far_rows.0,
-            "{h}: the aisle is the height's alone"
-        );
-        if !TALL_AISLES.contains(&probe.cubicle_aisle.height) {
-            continue;
-        }
-        tall_seen.insert(probe.cubicle_aisle.height);
-        let (art, workstations) = pieces(&probe);
-        // An appliance the probe didn't place has rows it can't vouch for.
-        let apart = APPLIANCES
-            .iter()
-            .all(|kind| art.iter().any(|(station, _)| station == kind))
-            && art
-                .iter()
-                .all(|&(_, a)| workstations.iter().all(|&ws| !rows_meet(a, ws)));
-        if apart {
-            assert_eq!(probe_rows, far_rows, "{h}: rows are the height's alone");
-        }
-        let sampled =
-            |w, seed| !apart || seed == SEEDS.start || (w, seed) == (MID_WIDTH, SEEDS.start + 1);
-        for w in (NARROWEST..=WIDEST).step_by(8) {
-            for seed in SEEDS.filter(|&seed| !corners.contains(&(w, seed)) && sampled(w, seed)) {
-                let l = lay_out(w, h, seed);
-                if apart {
-                    assert_eq!(
-                        rows(&l),
-                        probe_rows,
-                        "{w}x{h} seed {seed}: rows are the height's alone"
-                    );
-                }
-                check(&l, w, h, seed);
-            }
-        }
-        for (l, (w, seed)) in [probe, far].iter().zip(corners) {
-            check(l, w, h, seed);
-        }
-    }
-    assert!(
-        TALL_AISLES.clone().all(|h| tall_seen.contains(&h)),
-        "the sweep must reach every tall aisle, saw {tall_seen:?}"
+fn the_outside_reaches_only_the_glass() {
+    let (scene, _, _, now0, pack) = sim_rig();
+    // Wide enough for meeting rooms, whose notice boards hang on the panes.
+    let layout = SceneLayout::compute_with_seed(240, 144, None, 0).expect("240x144 lays out");
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now: now0,
+                floor: crate::floor::FloorMeta::ground(),
+                pets: PetInputs::default(),
+            },
+            layout: &layout,
+            coffee: &HashMap::new(),
+            door_anim_max_ms: 0,
+        },
     );
-    assert!(placed > 0, "no appliance was placed, so this pins nothing");
-    assert!(violations.is_empty(), "{}", violations.join("\n"));
+    const UNPAINTED: Rgb = Rgb { r: 1, g: 2, b: 3 };
+    let (w, h) = (layout.buf_w, layout.buf_h);
+    let mut hung_on_glass = std::collections::HashSet::new();
+    let mut covered: Option<(std::time::SystemTime, Vec<bool>)> = None;
+    for weathered in crate::outside::tests::every_sky() {
+        let name = &weathered.name;
+        let timing = Motion::Full.timing(weathered.now);
+        let paint = |outside| {
+            let mut buf = RgbBuffer::filled(w, h, UNPAINTED);
+            paint_frame(
+                &mut PaintCtx {
+                    scene: &scene,
+                    layout: &layout,
+                    pack: &pack,
+                    timing,
+                    sky: weathered.sky,
+                    outside,
+                    buf: &mut buf,
+                    cache: &mut FrameCache::new(),
+                    base_fill: &mut BaseFillCache::new(),
+                    shadows: &mut crate::ground::DepthsCache::default(),
+                    theme,
+                    floor: crate::floor::FloorMeta::ground(),
+                    walks: &owned.route.walks,
+                    debug_walkable: false,
+                },
+                &frame,
+            );
+            buf
+        };
+        let (shown, bare) = (paint(None), paint(Some(weathered.bare)));
+        // Every pixel a fixture paints, each painted alone: one set an instant.
+        if covered.as_ref().is_none_or(|(at, _)| *at != weathered.now) {
+            let mut over = RgbBuffer::filled(w, h, UNPAINTED);
+            let mut scratch = RgbBuffer::filled(w, h, UNPAINTED);
+            let fctx = PaintCtx {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                timing,
+                sky: weathered.sky,
+                outside: None,
+                buf: &mut scratch,
+                cache: &mut FrameCache::new(),
+                base_fill: &mut BaseFillCache::new(),
+                shadows: &mut crate::ground::DepthsCache::default(),
+                theme,
+                floor: crate::floor::FloorMeta::ground(),
+                walks: &owned.route.walks,
+                debug_walkable: false,
+            };
+            let moment = Moment::resolve(weathered.sky, theme, 0.0, timing);
+            let lights = Lights::of(
+                &layout,
+                &moment.look,
+                &LightInputs {
+                    agents: &frame.agents,
+                    seated: &frame.seated_agents,
+                    floor_idx: 0,
+                    indoor_scale: frame.indoor_scale,
+                    neon: frame.neon,
+                    beat: timing.beat,
+                },
+            );
+            let neon = crate::floor::neon_look(frame.neon, theme);
+            let Furnishings { backdrop, sorted } =
+                queue_fixtures(&fctx, &frame, &lights.desks, neon);
+            let kinds = backdrop
+                .iter()
+                .map(|(_, k)| k)
+                .chain(sorted.iter().map(|d| &d.kind));
+            let mut painted = vec![false; usize::from(w) * usize::from(h)];
+            let mut cache = FrameCache::new();
+            for kind in kinds {
+                let epoch = over.begin_writes();
+                paint_drawable(
+                    kind,
+                    &mut drawable::DrawableCtx {
+                        buf: &mut over,
+                        pack: &pack,
+                        cache: &mut cache,
+                        timing,
+                        theme,
+                    },
+                );
+                for y in 0..h {
+                    for x in 0..w {
+                        if over.written_in(x, y, epoch) {
+                            painted[usize::from(y) * usize::from(w) + usize::from(x)] = true;
+                        }
+                    }
+                }
+            }
+            over.end_writes();
+            covered = Some((weathered.now, painted));
+        }
+        let covered = &covered.as_ref().expect("filled above").1;
+        let mut glass = 0;
+        for y in 0..h {
+            for x in 0..w {
+                let hung = covered[usize::from(y) * usize::from(w) + usize::from(x)];
+                if hung && layout.glass_at(x, y) {
+                    hung_on_glass.insert((x, y));
+                }
+                if shown.get(x, y) == bare.get(x, y) {
+                    continue;
+                }
+                assert!(
+                    layout.glass_at(x, y) && !hung,
+                    "{name}: the outside reached ({x}, {y}), off the glass"
+                );
+                glass += 1;
+            }
+        }
+        assert_eq!(
+            glass > 0,
+            weathered.changes_glass,
+            "{name}: {glass} glass pixels"
+        );
+    }
+    for kind in ["neon sign", "notice board"] {
+        let over_glass = layout.fixtures().any(|f| {
+            let named = match f.kind {
+                FixtureKind::NeonSign => "neon sign",
+                FixtureKind::NoticeBoard { .. } => "notice board",
+                _ => return false,
+            };
+            named == kind
+                && (f.visual.y..f.visual.y + f.visual.height).any(|y| {
+                    (f.visual.x..f.visual.x + f.visual.width)
+                        .any(|x| hung_on_glass.contains(&(x, y)))
+                })
+        });
+        assert!(
+            over_glass,
+            "no {kind} hangs over a window, so none was compared there"
+        );
+    }
 }

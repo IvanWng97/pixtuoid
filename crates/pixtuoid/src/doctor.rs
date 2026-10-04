@@ -654,7 +654,8 @@ struct DoctorReport {
     log_warning: Option<String>,
     term_env: Option<String>,
     colorterm_env: Option<String>,
-    truecolor_probe: Option<bool>,
+    /// `None` when the DECRQSS truecolor probe never ran.
+    truecolor_probe: Option<crate::term::Truecolor>,
     color_pf: crate::term::ColorPreflight,
     graphics_plan: crate::graphics::Plan,
     /// What `run` resolves `graphics` to without a flag: the config, then the
@@ -678,9 +679,6 @@ struct DoctorReport {
     home_split: Option<String>,
     /// Whether the report may carry ANSI color — see [`report_color`].
     color: bool,
-    /// Whether the DECRQSS truecolor probe was actually attempted, so the
-    /// terminal category can tell "asked, no answer" from "never asked".
-    truecolor_probe_ran: bool,
 }
 
 /// Whether the report may carry ANSI color: a tty with color allowed by the
@@ -736,12 +734,9 @@ fn probe_terminal_caps(
     probe_ok: bool,
     graphics: crate::GraphicsMode,
     max_density: pixtuoid_core::sprite::format::Density,
-) -> (Option<bool>, crate::graphics::Plan) {
-    let truecolor_probe = if probe_ok {
-        crate::term::query_truecolor(crate::term::TRUECOLOR_PROBE_TIMEOUT)
-    } else {
-        None
-    };
+) -> (Option<crate::term::Truecolor>, crate::graphics::Plan) {
+    let truecolor_probe =
+        probe_ok.then(|| crate::term::query_truecolor(crate::term::TRUECOLOR_PROBE_TIMEOUT));
     let graphics_plan = crate::graphics::plan_this_terminal(graphics, max_density, probe_ok);
     (truecolor_probe, graphics_plan)
 }
@@ -912,7 +907,6 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         grok_registry: (ShownPath::new(grok_registry), grok_exists),
         home_split,
         color,
-        truecolor_probe_ran: probe_ok,
     }
 }
 
@@ -938,11 +932,7 @@ const DETAIL_INDENT: &str = "      ";
 const CONT_INDENT: &str = "          ";
 
 fn terminal_category(r: &DoctorReport) -> Category {
-    let verdict = crate::term::truecolor_verdict(
-        r.colorterm_env.as_deref(),
-        r.truecolor_probe,
-        !r.truecolor_probe_ran,
-    );
+    let verdict = crate::term::truecolor_verdict(r.colorterm_env.as_deref(), r.truecolor_probe);
     let refused = matches!(
         r.color_pf,
         crate::term::ColorPreflight::RefuseNoColor | crate::term::ColorPreflight::RefuseDumbTerm
@@ -958,9 +948,12 @@ fn terminal_category(r: &DoctorReport) -> Category {
     if let Some(row) = crate::term::color_status_row(r.color_pf) {
         details.push(format!("{DETAIL_INDENT}{row}"));
     }
-    // An ATTEMPTED probe that didn't confirm is a warning — the launcher warned about
-    // exactly this terminal and pointed the user here; a skipped probe (piped) stays ✓.
-    let unconfirmed = r.truecolor_probe_ran && !verdict.starts_with("yes");
+    // Same predicate as the launcher's warning, so the two never disagree; a skipped
+    // probe (piped) stays ✓.
+    let unconfirmed = r
+        .truecolor_probe
+        .is_some_and(crate::term::Truecolor::warrants_warning)
+        && !verdict.starts_with("yes");
     let status = if refused || unconfirmed {
         CategoryStatus::Warn
     } else {
@@ -1650,7 +1643,6 @@ mod tests {
             grok_registry: (ShownPath::new("/tmp/gk/active_sessions.json"), true),
             home_split: None,
             color: false,
-            truecolor_probe_ran: false,
         }
     }
 
@@ -1755,25 +1747,31 @@ mod tests {
     #[test]
     fn terminal_category_warns_when_an_attempted_probe_did_not_confirm() {
         let mut r = summary_report(vec![]);
-        r.truecolor_probe_ran = true;
-        r.truecolor_probe = None; // asked, no answer — the launcher warned here
+        use crate::term::Truecolor;
+        // Asked, no answer — the launcher warned here.
+        r.truecolor_probe = Some(Truecolor::NoAnswer);
         let c = terminal_category(&r);
         assert_eq!(c.status, CategoryStatus::Warn);
         assert!(c.summary.contains("did not answer"), "{}", c.summary);
 
-        r.truecolor_probe = Some(false);
+        r.truecolor_probe = Some(Truecolor::Answered(false));
         assert_eq!(terminal_category(&r).status, CategoryStatus::Warn);
 
-        r.truecolor_probe = Some(true);
+        r.truecolor_probe = Some(Truecolor::Answered(true));
         assert_eq!(terminal_category(&r).status, CategoryStatus::Ok);
 
-        // Piped: the probe never ran — that is not a warning, and the wording
-        // must not claim the terminal went silent.
-        r.truecolor_probe_ran = false;
-        r.truecolor_probe = None;
-        let c = terminal_category(&r);
-        assert_eq!(c.status, CategoryStatus::Ok);
-        assert!(c.summary.contains("probe skipped"), "{}", c.summary);
+        // Piped, or nothing could ask: no query ran, which is not a warning,
+        // and the wording must not claim the terminal went silent.
+        for (unasked, says) in [
+            (None, "probe skipped"),
+            (Some(Truecolor::CantAsk), "can't be asked"),
+        ] {
+            r.truecolor_probe = unasked;
+            let c = terminal_category(&r);
+            assert_eq!(c.status, CategoryStatus::Ok, "{unasked:?}");
+            assert!(!unasked.is_some_and(Truecolor::warrants_warning));
+            assert!(c.summary.contains(says), "{}", c.summary);
+        }
     }
 
     /// The graphics row, as the terminal category prints it: first, whole,
