@@ -919,3 +919,49 @@ fn kitty_transmits_before_the_flush_and_sixel_after() {
         assert_eq!(image < flush, first, "{protocol:?}");
     }
 }
+
+/// The cutaway's twin of the classic's refused-frame clamp: the door closes
+/// on time while the frame is refused.
+#[test]
+fn a_refused_cutaway_frame_keeps_the_doors_clamp_on_time() {
+    let (mut r, _wire) = kitty(120, 40);
+    let scene = office();
+    r.render(&scene, pack(), t0()).expect("render");
+    assert!(
+        r.floors[0].ctx.door_anim_max_ms > 0,
+        "the entry walk holds the door"
+    );
+    let (small_cols, small_rows) = too_small_terminal();
+    r.terminal.backend_mut().resize(small_cols, small_rows);
+    r.render(&scene, pack(), t0() + Duration::from_secs(600))
+        .expect("render");
+    assert_eq!(r.floors[0].ctx.door_anim_max_ms, 0, "the walk long arrived");
+}
+
+/// A slide cancelled on its first frame never paints, so nothing marks the
+/// screen as the slide's; the destination floor drawn before still repaints
+/// whole once the terminal is back, not as a diff of its own last frame.
+#[test]
+fn a_slide_cancelled_on_its_first_frame_repaints_the_destination_whole() {
+    let (cols, rows) = (120, 40);
+    let (mut r, wire) = painter(cols, rows, ImageProtocol::Sixel);
+    let scene = two_floor_scene();
+    let mut now = t0();
+    r.render(&scene, pack(), now).expect("render");
+    let every = wire.take().matches(SIXEL).count();
+    r.navigate_floor(1, now);
+    render_until_settled(&mut r, &scene, pack(), &mut now, 1);
+    r.navigate_floor(0, now);
+    render_until_settled(&mut r, &scene, pack(), &mut now, 0);
+    r.navigate_floor(1, now);
+    let (small_cols, small_rows) = too_small_terminal();
+    r.terminal.backend_mut().resize(small_cols, small_rows);
+    now += ImageProtocol::Sixel.cadence();
+    r.render(&scene, pack(), now).expect("render");
+    assert_eq!(r.current_floor(), 1);
+    r.terminal.backend_mut().resize(cols, rows);
+    wire.take();
+    now += ImageProtocol::Sixel.cadence();
+    r.render(&scene, pack(), now).expect("render");
+    assert_eq!(wire.take().matches(SIXEL).count(), every);
+}

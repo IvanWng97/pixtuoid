@@ -627,10 +627,7 @@ impl Office {
                 },
                 theme: self.theme,
                 size: Size { w: buf_w, h: buf_h },
-                place: Place {
-                    gateway: pixtuoid_scene::board::office_gateway(&self.scene),
-                    floor: None,
-                },
+                place: Place::default(),
                 debug_walkable: false,
             },
         );

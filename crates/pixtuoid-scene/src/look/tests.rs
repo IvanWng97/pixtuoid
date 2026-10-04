@@ -190,3 +190,52 @@ fn reset_sprite_cache_clears_cached_sprites() {
     raster.reset_sprite_cache();
     assert_eq!(raster.classic().caches.sprites.len(), 0, "reset clears it");
 }
+
+/// A refused frame shows the bare floor, so nothing hover named on the last
+/// drawn one is still there.
+#[test]
+fn a_refused_classic_frame_names_no_one() {
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let scene = office(t0);
+    let (mut floor, mut office) = (PerFloor::new(Arc::clone(&pack)), PerOffice::new());
+    render(
+        &mut floor,
+        office.stores(),
+        Look::Classic,
+        inputs(&scene, &pack, t0),
+    )
+    .expect("lays out");
+    assert!(
+        !floor.raster.classic_agents().is_empty(),
+        "the office is drawn"
+    );
+    let refused = RenderInputs {
+        size: Size { w: 1, h: 1 },
+        ..inputs(&scene, &pack, t0)
+    };
+    assert!(render(&mut floor, office.stores(), Look::Classic, refused).is_none());
+    assert!(floor.raster.classic_agents().is_empty());
+    assert!(
+        floor
+            .raster
+            .classic_drawn()
+            .expect("shown")
+            .bubbles
+            .is_empty()
+    );
+}
+
+/// The sim and the raster draw one pack: a frame stepped with another is
+/// refused rather than drawn with art the sim never placed.
+#[test]
+fn a_frame_stepped_with_another_pack_is_refused() {
+    let pack = Arc::new(crate::pack::test_default_pack());
+    let other = crate::pack::test_default_pack();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let scene = office(t0);
+    let (mut floor, mut office) = (PerFloor::new(Arc::clone(&pack)), PerOffice::new());
+    let stepped = |pack| inputs(&scene, pack, t0);
+    assert!(render(&mut floor, office.stores(), Look::Classic, stepped(&other)).is_none());
+    assert!(render(&mut floor, office.stores(), Look::Classic, stepped(&pack)).is_some());
+}

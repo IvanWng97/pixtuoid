@@ -109,7 +109,7 @@ pub struct ClassicDrawn<'a> {
 
 impl Raster {
     /// A floor drawn with `pack`, in no look yet.
-    pub fn new(pack: Arc<Pack>) -> Self {
+    pub(crate) fn new(pack: Arc<Pack>) -> Self {
         Self {
             pack,
             classic: None,
@@ -182,7 +182,8 @@ impl Raster {
 }
 
 /// Step `floor` one frame and draw it in `look` on its raster: the one frame
-/// entry every painter calls. `None` when `inputs.size` can't lay out.
+/// entry every painter calls. `None` when `inputs.size` can't lay out, or when
+/// `world.pack` is not the one `floor` was made with.
 pub fn render<'r>(
     floor: &'r mut PerFloor,
     office: OfficeStores<'_>,
@@ -197,16 +198,18 @@ pub fn render<'r>(
         place,
         debug_walkable,
     } = inputs;
-    debug_assert!(
-        std::ptr::eq(world.pack, &*raster.pack),
-        "the sim steps one pack and the raster draws another"
-    );
+    if !std::ptr::eq(world.pack, &*raster.pack) {
+        tracing::error!("frame refused: the sim steps one pack and the raster draws another");
+        return None;
+    }
     let Some(mut stepped) = step_floor(ctx, office.coffee, office.chitchat, world, size) else {
         if look == Look::Classic {
-            raster
-                .classic()
+            let classic = raster.classic();
+            classic
                 .buf
                 .resize_fill(size.w, size.h, theme.surface.bg_fallback);
+            classic.hits = Hoverables::default();
+            classic.bubbles.clear();
             raster.shown = Some(look);
         }
         return None;

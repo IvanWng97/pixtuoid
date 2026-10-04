@@ -149,7 +149,7 @@ impl CutawayCanvas {
     }
 
     /// The last frame painted, empty before the first.
-    pub fn buf(&self) -> &RgbBuffer {
+    pub(crate) fn buf(&self) -> &RgbBuffer {
         &self.buf
     }
 
