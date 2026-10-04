@@ -116,23 +116,10 @@ pub(super) fn paint_ground_and_walls(
     let (buf_w, buf_h) = (buf.width(), buf.height());
     let look = &moment.look;
     let window_frame = theme.surface.window_frame;
-    let carpet_base = theme.surface.carpet_base;
-    let carpet_light = theme.surface.carpet_light;
-    let carpet_dark = theme.surface.carpet_dark;
     let wall = theme.surface.wall;
     let wall_trim_color = theme.surface.wall_trim;
 
-    let (tint, share) = look.ground_tint;
-
-    // The noise picks one of THREE colours per tint, so resolve each tint's
-    // blend once, not per pixel.
-    let carpet = tint.map(|tint| {
-        [
-            blend_rgb(carpet_light, tint, share),
-            blend_rgb(carpet_dark, tint, share),
-            blend_rgb(carpet_base, tint, share),
-        ]
-    });
+    let carpet = look.carpet(theme).map(|c| [c.lit, c.dark, c.base]);
     base_fill.blit_into(
         buf,
         BaseFillKey {

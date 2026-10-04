@@ -3,6 +3,8 @@
 use pixtuoid_core::sprite::format::Pack;
 
 use super::Span;
+use crate::atmosphere::Carpet;
+use crate::dither::Dithered;
 use crate::layout::{Bounds, Point};
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
@@ -89,7 +91,7 @@ pub(crate) struct DisplayList<'a> {
     /// change repaints the whole frame.
     pub(super) ambient: crate::cutaway::light::Ambient,
     /// The carpet the backdrop lays: a change repaints the whole frame too.
-    pub(super) ground: crate::dither::Dithered<Ground>,
+    pub(super) carpet: Dithered<Carpet>,
     /// How far lightning lifts the room: a change repaints the whole frame.
     pub(super) flash: crate::cutaway::light::Flash,
     // What it was built with, so painting it cannot use anything else: a
@@ -97,41 +99,6 @@ pub(crate) struct DisplayList<'a> {
     pub(super) pack: &'a Pack,
     pub(super) theme: &'a Theme,
     pub(super) scale: RenderScale,
-}
-
-/// The carpet's three tones this frame: the theme's, drawn toward the
-/// weather's [`ground_tint`](crate::atmosphere::SkyTones::ground_tint).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Ground {
-    pub(crate) lit: pixtuoid_core::sprite::Rgb,
-    pub(crate) base: pixtuoid_core::sprite::Rgb,
-    pub(crate) dark: pixtuoid_core::sprite::Rgb,
-}
-
-impl Ground {
-    /// `theme`'s carpet drawn `share` of the way to each `tint`.
-    pub(crate) fn of(
-        theme: &Theme,
-        (tint, share): (crate::dither::Dithered<pixtuoid_core::sprite::Rgb>, f32),
-    ) -> crate::dither::Dithered<Self> {
-        let s = &theme.surface;
-        tint.map(|tint| Self {
-            lit: s.carpet_light.mix(tint, share),
-            base: s.carpet_base.mix(tint, share),
-            dark: s.carpet_dark.mix(tint, share),
-        })
-    }
-
-    /// `theme`'s carpet as it is.
-    #[cfg(test)]
-    pub(crate) fn plain(theme: &Theme) -> crate::dither::Dithered<Self> {
-        let s = &theme.surface;
-        crate::dither::Dithered::solid(Self {
-            lit: s.carpet_light,
-            base: s.carpet_base,
-            dark: s.carpet_dark,
-        })
-    }
 }
 
 /// One entry of a [`DisplayList`].
@@ -202,8 +169,8 @@ impl<'a> DisplayList<'a> {
         self.ambient
     }
 
-    pub(crate) fn ground(&self) -> crate::dither::Dithered<Ground> {
-        self.ground
+    pub(crate) fn carpet(&self) -> Dithered<Carpet> {
+        self.carpet
     }
 
     pub(crate) fn flash(&self) -> crate::cutaway::light::Flash {

@@ -146,8 +146,8 @@ fn main() -> Result<()> {
     let scale = RenderScale::new(scale_n).ok_or_else(|| anyhow!("--scale must be nonzero"))?;
     // The sky otherwise cycles its weather with the clock, so an hour alone
     // does not say what the room looks like.
-    let policy = pixtuoid_scene::pixel_painter::WeatherPolicy::from_name(weather.as_deref())
-        .map_err(|valid| {
+    let policy =
+        pixtuoid_scene::sky::WeatherPolicy::from_name(weather.as_deref()).map_err(|valid| {
             anyhow!(
                 "unknown --weather {weather:?}; valid: {}",
                 valid.join(" | ")
