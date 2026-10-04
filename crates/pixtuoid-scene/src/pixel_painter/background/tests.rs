@@ -120,10 +120,10 @@ fn a_change_dithers_the_carpet_and_the_veil_on_the_buffer() {
             assert!(took[0] > 0 && took[1] > 0, "{what}: {took:?}");
         };
 
-    let tint = moment().look.ground_tint.0;
+    let tint = moment().look.ground_tint_color();
     let carpet = |tint: Dithered<Rgb>| {
         let mut m = moment();
-        m.look.ground_tint.0 = tint;
+        m.look = m.look.with_ground_tint_color(tint);
         let mut buf = RgbBuffer::filled(buf_w, buf_h, black);
         paint_ground_and_walls(
             &mut BaseFillCache::new(),

@@ -28,7 +28,7 @@ pub(crate) struct SkyTones {
     /// warm day one, applied in order like the ground's two washes.
     pub(crate) object_wash: [(Rgb, f32); 2],
     /// The weather's cast on the ground, as `(tint, strength)`.
-    pub(crate) ground_tint: (Dithered<Rgb>, f32),
+    ground_tint: (Dithered<Rgb>, f32),
     /// The weather's veil over the window glass, lit for this frame, as
     /// `(color, alpha)`, or `None` where the city shows crisp.
     pub(crate) glass_veil: Dithered<Option<(Rgb, f32)>>,
@@ -120,6 +120,19 @@ impl Carpet {
 }
 
 impl SkyTones {
+    /// The ground tint's dithered colour, for tests that pin its two ends.
+    #[cfg(test)]
+    pub(crate) fn ground_tint_color(&self) -> Dithered<Rgb> {
+        self.ground_tint.0
+    }
+
+    /// `self` with the ground tint's colour swapped, its strength kept.
+    #[cfg(test)]
+    pub(crate) fn with_ground_tint_color(mut self, tint: Dithered<Rgb>) -> Self {
+        self.ground_tint.0 = tint;
+        self
+    }
+
     /// `theme`'s carpet drawn toward [`ground_tint`](Self::ground_tint): the
     /// one carpet both painters lay.
     pub(crate) fn carpet(&self, theme: &Theme) -> Dithered<Carpet> {
