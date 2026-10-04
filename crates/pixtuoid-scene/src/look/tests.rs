@@ -207,7 +207,7 @@ fn a_refused_classic_frame_names_no_one() {
     )
     .expect("lays out");
     assert!(
-        !floor.raster.classic_agents().is_empty(),
+        !floor.raster.classic_texts().is_empty(),
         "the office is drawn"
     );
     let refused = RenderInputs {
@@ -215,7 +215,7 @@ fn a_refused_classic_frame_names_no_one() {
         ..inputs(&scene, &pack, t0)
     };
     assert!(render(&mut floor, office.stores(), Look::Classic, refused).is_none());
-    assert!(floor.raster.classic_agents().is_empty());
+    assert!(floor.raster.classic_texts().is_empty());
     assert!(
         floor
             .raster

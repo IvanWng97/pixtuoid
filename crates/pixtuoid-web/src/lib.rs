@@ -272,30 +272,31 @@ impl Office {
         };
         let theme = self.theme;
 
-        let labels = self.session.overlay(&self.scene, None);
+        let badges: Vec<_> = self
+            .session
+            .texts()
+            .iter()
+            .filter_map(|run| match run.spans.as_slice() {
+                [marker, name] => Some((run.at, run.text(), marker.ink, name.ink)),
+                _ => None,
+            })
+            .collect();
         let board = self
             .session
             .board(&self.scene, self.floor_meta().motion, now);
 
         let mut out = String::from("{\"labels\":[");
-        for (i, el) in labels.iter().enumerate() {
+        for (i, (at, text, marker, name)) in badges.iter().enumerate() {
             if i > 0 {
                 out.push(',');
             }
-            out.push_str(&format!(
-                "{{\"x\":{},\"y\":{},\"text\":",
-                el.anchor_px.x, el.anchor_px.y
-            ));
-            push_json_string(
-                &mut out,
-                &format!("{}{}", pixtuoid_scene::overlay::BADGE_MARKER, el.text),
-            );
+            out.push_str(&format!("{{\"x\":{},\"y\":{},\"text\":", at.x, at.y));
+            push_json_string(&mut out, text);
             // The site paints the ● in `color` and the name in `badge`.
-            let ink = pixtuoid_scene::overlay::badge_ink(&el.text, el.tone, theme);
             out.push_str(&format!(
                 ",\"color\":\"{}\",\"badge\":\"{}\"",
-                hex(ink.marker),
-                hex(ink.name)
+                hex(*marker),
+                hex(*name)
             ));
             out.push('}');
         }
@@ -951,9 +952,9 @@ mod tests {
             .collect();
         let want: Vec<(u64, u64)> = o
             .session
-            .overlay(&o.scene, None)
+            .texts()
             .iter()
-            .map(|e| (u64::from(e.anchor_px.x), u64::from(e.anchor_px.y)))
+            .map(|run| (u64::from(run.at.x), u64::from(run.at.y)))
             .collect();
         assert!(!want.is_empty(), "premise: agents are drawn");
         assert_eq!(got, want);

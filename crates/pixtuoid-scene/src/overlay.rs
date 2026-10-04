@@ -1,17 +1,14 @@
-//! Backend-agnostic name-badge overlay model — the SINGLE source of truth for
-//! "what label, what tone, where", shared by the TUI and floating painters.
-//!
-//! `scene` has no terminal/window deps (invariant #1), so the model carries an
-//! activity-derived `LabelTone` and each painter maps it to its own color type.
+//! A name badge's words and colours: its agent's disambiguated, truncated
+//! name, its activity tone, its inks and its plate, which
+//! [`TextRun::badge`](crate::display::TextRun) puts together for every painter.
 
 use std::collections::HashMap;
 
+use pixtuoid_core::AgentSlot;
 use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::ActivityState;
-use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 
-use crate::layout::{DESK_W, Point};
-use crate::pixel_painter::AgentFrame;
+use crate::layout::DESK_W;
 use crate::theme::Theme;
 
 /// The separator between a label's source prefix and its cwd/disambiguation
@@ -52,17 +49,6 @@ pub fn badge_hue(text: &str, theme: &Theme) -> Option<Rgb> {
         .and_then(|(prefix, _)| theme.source.by_prefix(prefix))
 }
 
-/// One agent name-badge to paint above its sprite. `text` is already
-/// disambiguated + truncated and carries NO ●/▸ marker (each painter adds its own).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LabelElement {
-    /// The drawn sprite's [`AgentFrame::label_anchor`], in SCENE-buffer pixels.
-    pub anchor_px: Point,
-    pub text: String,
-    pub tone: LabelTone,
-    pub hovered: bool,
-}
-
 /// The colours of a badge's two parts, the one decision every painter reads:
 /// the name in the activity tone, which every theme holds at text contrast,
 /// and the source's identity on the marker, a graphic, since a brand hue as
@@ -91,28 +77,6 @@ pub fn badge_ink(text: &str, tone: LabelTone, theme: &Theme) -> BadgeInk {
         marker: badge_hue(text, theme).unwrap_or(name),
         name,
     }
-}
-
-/// One `LabelElement` per sprite in `drawn`, in its paint order: an agent the
-/// painter did not draw gets no badge.
-pub fn build_overlay(
-    scene: &SceneState,
-    drawn: &[AgentFrame],
-    hovered: Option<AgentId>,
-) -> Vec<LabelElement> {
-    let namesakes = Namesakes::of(scene.agents.values());
-    drawn
-        .iter()
-        .filter_map(|frame| {
-            let agent = scene.agents.get(&frame.agent_id)?;
-            Some(LabelElement {
-                anchor_px: frame.label_anchor,
-                text: namesakes.text(agent),
-                tone: tone_of(agent),
-                hovered: hovered == Some(agent.agent_id),
-            })
-        })
-        .collect()
 }
 
 /// How many agents wear each label: an agent sharing its label carries its
@@ -196,11 +160,7 @@ pub fn disambig_suffix(session_id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        LabelElement, LabelTone, badge_hue, build_overlay, disambig_suffix, truncate_label,
-    };
-    use crate::layout::Point;
-    use crate::pixel_painter::AgentFrame;
+    use super::{LabelTone, Namesakes, badge_hue, disambig_suffix, tone_of, truncate_label};
     use pixtuoid_core::AgentId;
     use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, SceneState, ToolKind};
     use std::path::PathBuf;
@@ -254,73 +214,23 @@ mod tests {
         s
     }
 
-    /// `slot`'s sprite as drawn, its badge hung at `at`.
-    fn drawn(slot: &AgentSlot, at: Point) -> AgentFrame {
-        AgentFrame {
-            agent_id: slot.agent_id,
-            label_anchor: at,
-        }
-    }
-
-    /// Every agent in `scene` drawn, the order immaterial to the test.
-    fn overlay_of(scene: &SceneState, hovered: Option<AgentId>) -> Vec<LabelElement> {
-        let frames: Vec<_> = scene
-            .agents
-            .values()
-            .map(|a| drawn(a, Point { x: 0, y: 0 }))
-            .collect();
-        build_overlay(scene, &frames, hovered)
-    }
-
-    #[test]
-    fn badges_follow_the_drawn_frames_in_paint_order() {
-        let a = slot("aa", "sess-aaaa", 0, active());
-        let b = slot("bb", "sess-bbbb", 1, active());
-        let (at_a, at_b) = (Point { x: 30, y: 9 }, Point { x: 12, y: 40 });
-        let frames = [drawn(&b, at_b), drawn(&a, at_a)];
-        let s = scene_of(vec![a, b]);
-        let els = build_overlay(&s, &frames, None);
-        let got: Vec<_> = els.iter().map(|e| (e.text.as_str(), e.anchor_px)).collect();
-        assert_eq!(got, [("bb", at_b), ("aa", at_a)]);
-    }
-
-    /// The missing-anim case: the painter skips a sprite it has no art for, and its
-    /// badge goes with it.
-    #[test]
-    fn an_agent_the_painter_did_not_draw_gets_no_badge() {
-        let a = slot("aa", "sess-aaaa", 0, active());
-        let b = slot("bb", "sess-bbbb", 1, active());
-        let frames = [drawn(&a, Point { x: 4, y: 4 })];
-        let s = scene_of(vec![a, b]);
-        let texts: Vec<_> = build_overlay(&s, &frames, None)
-            .into_iter()
-            .map(|e| e.text)
-            .collect();
-        assert_eq!(texts, ["aa"]);
-    }
-
     /// Disambiguation is over the scene, not the sprites: an undrawn namesake still
     /// makes the drawn one's badge carry its id.
     #[test]
     fn an_undrawn_namesake_still_disambiguates_the_drawn_badge() {
         let a = slot("cc", "session-aaaa", 0, active());
         let b = slot("cc", "session-bbbb", 1, active());
-        let frames = [drawn(&a, Point { x: 4, y: 4 })];
         let want = format!("cc\u{00b7}{}", disambig_suffix(&a.session_id));
-        let s = scene_of(vec![a, b]);
-        let els = build_overlay(&s, &frames, None);
-        assert_eq!(els.len(), 1);
-        assert_eq!(els[0].text, want);
+        let s = scene_of(vec![a.clone(), b]);
+        assert_eq!(Namesakes::of(s.agents.values()).text(&a), want);
     }
 
     #[test]
-    fn single_active_agent_yields_bare_label_active_tone_unhovered() {
-        let s = scene_of(vec![slot("cc", "sess-abcd", 0, active())]);
-        let els = overlay_of(&s, None);
-        assert_eq!(els.len(), 1);
-        assert_eq!(els[0].text, "cc");
-        assert_eq!(els[0].tone, LabelTone::Active);
-        assert!(!els[0].hovered);
+    fn a_lone_active_agent_reads_its_bare_label_in_the_active_tone() {
+        let a = slot("cc", "sess-abcd", 0, active());
+        let s = scene_of(vec![a.clone()]);
+        assert_eq!(Namesakes::of(s.agents.values()).text(&a), "cc");
+        assert_eq!(tone_of(&a), LabelTone::Active);
     }
 
     #[test]
@@ -344,29 +254,13 @@ mod tests {
     fn colliding_labels_get_disambig_suffixes() {
         let a = slot("cc", "session-aaaa", 0, active());
         let b = slot("cc", "session-bbbb", 1, active());
-        let (ida, idb) = (a.session_id.clone(), b.session_id.clone());
-        let s = scene_of(vec![a, b]);
-        let els = overlay_of(&s, None);
-        assert_eq!(els.len(), 2);
-        let want_a = format!("cc\u{00b7}{}", disambig_suffix(&ida));
-        let want_b = format!("cc\u{00b7}{}", disambig_suffix(&idb));
-        let texts: Vec<&str> = els.iter().map(|e| e.text.as_str()).collect();
-        assert!(texts.contains(&want_a.as_str()), "got {texts:?}");
-        assert!(texts.contains(&want_b.as_str()), "got {texts:?}");
+        let s = scene_of(vec![a.clone(), b.clone()]);
+        let namesakes = Namesakes::of(s.agents.values());
+        let want_a = format!("cc\u{00b7}{}", disambig_suffix(&a.session_id));
+        let want_b = format!("cc\u{00b7}{}", disambig_suffix(&b.session_id));
+        assert_eq!(namesakes.text(&a), want_a);
+        assert_eq!(namesakes.text(&b), want_b);
         assert_ne!(want_a, want_b);
-    }
-
-    #[test]
-    fn hovered_agent_marks_its_element() {
-        let a = slot("cc", "sess-abcd", 0, active());
-        let b = slot("cx", "sess-efgh", 1, active());
-        let hovered_id = b.agent_id;
-        let s = scene_of(vec![a, b]);
-        let els = overlay_of(&s, Some(hovered_id));
-        let cc = els.iter().find(|e| e.text == "cc").expect("cc present");
-        let cx = els.iter().find(|e| e.text == "cx").expect("cx present");
-        assert!(!cc.hovered);
-        assert!(cx.hovered);
     }
 
     #[test]
@@ -383,12 +277,9 @@ mod tests {
         let mut exiting = slot("ex", "sess-e", 2, active());
         exiting.exiting_at = Some(now());
 
-        let s = scene_of(vec![waiting, idle, exiting]);
-        let els = overlay_of(&s, None);
-        let tone_of = |t: &str| els.iter().find(|e| e.text == t).map(|e| e.tone);
-        assert_eq!(tone_of("wa"), Some(LabelTone::Waiting));
-        assert_eq!(tone_of("id"), Some(LabelTone::Idle));
-        assert_eq!(tone_of("ex"), Some(LabelTone::Exiting));
+        assert_eq!(tone_of(&waiting), LabelTone::Waiting);
+        assert_eq!(tone_of(&idle), LabelTone::Idle);
+        assert_eq!(tone_of(&exiting), LabelTone::Exiting);
     }
 
     #[test]
@@ -429,8 +320,10 @@ mod tests {
             "cc\u{b7}日本語プロジェクト管理ツール",
             "cc\u{b7}a日本語プロジェクト管理",
         ] {
-            let s = scene_of(vec![slot(label, "sess-abcd", 0, active())]);
-            let badge = format!("{}{}", super::BADGE_MARKER, overlay_of(&s, None)[0].text);
+            let a = slot(label, "sess-abcd", 0, active());
+            let s = scene_of(vec![a.clone()]);
+            let name = Namesakes::of(s.agents.values()).text(&a);
+            let badge = format!("{}{name}", super::BADGE_MARKER);
             let n = cells(&badge);
             assert!(
                 (super::BADGE_CELLS - 1..=super::BADGE_CELLS).contains(&n),

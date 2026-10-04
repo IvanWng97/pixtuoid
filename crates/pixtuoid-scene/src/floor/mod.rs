@@ -585,14 +585,10 @@ impl FloorSession {
         }
     }
 
-    /// Agent labels for the LAST rendered frame's sprites. Empty before the
-    /// first `render`.
-    pub fn overlay(
-        &self,
-        scene: &SceneState,
-        hovered: Option<AgentId>,
-    ) -> Vec<crate::overlay::LabelElement> {
-        crate::overlay::build_overlay(scene, self.floor.raster.classic_agents(), hovered)
+    /// The badges of the LAST rendered frame's sprites, in paint order. Empty
+    /// before the first `render`.
+    pub fn texts(&self) -> &[crate::display::TextRun] {
+        self.floor.raster.classic_texts()
     }
 
     /// The [`wall_board`](crate::board::wall_board) of `scene`, a one-floor office.

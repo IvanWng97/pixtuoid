@@ -25,7 +25,7 @@ pub(crate) use crate::tui::widgets::{TooltipAt, paint_hover_tooltip};
 pub(super) use crate::tui::widgets::{
     paint_chitchat_bubbles, paint_coffee_tooltip, paint_connection_panel, paint_dashboard,
     paint_elevator_indicator, paint_footer, paint_furniture_tooltip, paint_help_overlay,
-    paint_label_widgets, paint_mascot_tooltip, paint_pet_tooltip, paint_theme_picker,
+    paint_mascot_tooltip, paint_pet_tooltip, paint_text_runs, paint_theme_picker,
     paint_version_popup, paint_wall_display, paint_welcome,
 };
 
@@ -382,10 +382,9 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     };
     let Some(ClassicDrawn {
         pixels,
-        agents,
+        texts,
         hovers,
         bubbles: chitchat_bubbles,
-        ..
     }) = ctx.floor.raster.classic_drawn()
     else {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
@@ -404,7 +403,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     // up for a beat AFTER the card is gone.
     apply_dim(pixels, ctx.onboarding.dim);
 
-    let labels = pixtuoid_scene::overlay::build_overlay(scene, agents, hovered);
     let board = pixtuoid_scene::board::wall_board(
         scene,
         footer.context.gateway,
@@ -420,8 +418,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
         paint_footer(f, &footer, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
-        paint_label_widgets(f, &labels, actual_scene, theme);
-        paint_chitchat_bubbles(f, chitchat_bubbles, agents, actual_scene, theme);
+        paint_text_runs(f, texts, actual_scene, hovered);
+        paint_chitchat_bubbles(f, chitchat_bubbles, texts, actual_scene, theme);
         paint_wall_display(f, &board, actual_scene, theme);
         let door = layout.door;
         let current = floor_info.map(|fi| fi.current).unwrap_or(1);

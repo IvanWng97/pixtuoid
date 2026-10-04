@@ -7,7 +7,7 @@ use crate::character::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, tool_glow_tint}
 use crate::cutaway::wall::paint_wall;
 use crate::floor::{FloorInputs, PetInputs};
 use crate::layout::CHARACTER_SPRITE_W;
-use crate::layout::Size;
+use crate::layout::{Point, Size};
 use crate::pack::{desk_art_top, frame_at};
 use crate::pose;
 use crate::sim::anchors::{
@@ -3654,7 +3654,7 @@ fn the_hover_list_omits_the_undrawn_and_follows_sort_drawables() {
     // Every character is a `Layer::Figure`, so `sort_drawables` orders them by row alone.
     sorted.sort_by_key(|&(row, _)| row);
     assert_ne!(sorted, queued, "premise: paint order is not the queue's");
-    let listed: Vec<_> = hover.agents.iter().map(|a| a.agent_id).collect();
+    let listed = badged_ids(&hover);
     assert_eq!(listed, sorted.iter().map(|&(_, id)| id).collect::<Vec<_>>());
     let hovered: Vec<_> = hover
         .hovers
@@ -3709,9 +3709,13 @@ fn a_figure_whose_anim_is_missing_is_not_hoverable() {
         frame_idx: 0,
         effects: Vec::new(),
     });
+    let mut scene = SceneState::uniform(16);
+    for agent in &frame.agents {
+        scene.agents.insert(agent.agent_id, agent.clone());
+    }
     let drawn = paint_drawn(
         &OwnedSimStores::new(),
-        &SceneState::uniform(16),
+        &scene,
         &layout,
         &pack,
         SystemTime::UNIX_EPOCH,
@@ -3724,7 +3728,7 @@ fn a_figure_whose_anim_is_missing_is_not_hoverable() {
         .map(|h| h.target.clone())
         .collect();
     assert_eq!(hovered, vec![HoverTarget::Agent(walker)]);
-    let badged: Vec<_> = drawn.agents.iter().map(|a| a.agent_id).collect();
+    let badged = badged_ids(&drawn);
     assert_eq!(badged, vec![walker]);
 }
 
@@ -5190,7 +5194,7 @@ fn sim_and_paint(
     layout: &SceneLayout,
     pack: &Pack,
     now: SystemTime,
-) -> (SimFrame, Vec<(AgentFrame, crate::layout::Bounds)>) {
+) -> (SimFrame, Vec<(Badged, crate::layout::Bounds)>) {
     let frame = sim_step(
         &mut owned.stores(),
         SimInputs {
@@ -5239,13 +5243,36 @@ fn paint_drawn(
     )
 }
 
+/// A drawn sprite's badge: whose, and where it hangs.
+#[derive(Debug, Clone, Copy)]
+struct Badged {
+    agent_id: pixtuoid_core::AgentId,
+    label_anchor: Point,
+}
+
+/// Who `drawn` badged, in paint order.
+fn badged_ids(drawn: &Drawn) -> Vec<pixtuoid_core::AgentId> {
+    drawn
+        .texts
+        .iter()
+        .map(|run| match run.role {
+            crate::display::TextRole::Badge(id) => id,
+        })
+        .collect()
+}
+
 /// Each badged sprite and the box it hovers on, which is the box it is drawn
 /// in.
-fn badged(drawn: &Drawn) -> Vec<(AgentFrame, crate::layout::Bounds)> {
+fn badged(drawn: &Drawn) -> Vec<(Badged, crate::layout::Bounds)> {
     drawn
-        .agents
+        .texts
         .iter()
-        .map(|&f| {
+        .zip(badged_ids(drawn))
+        .map(|(run, agent_id)| Badged {
+            agent_id,
+            label_anchor: run.at,
+        })
+        .map(|f| {
             let hover = drawn
                 .hovers
                 .listed()
@@ -5261,7 +5288,7 @@ fn badged(drawn: &Drawn) -> Vec<(AgentFrame, crate::layout::Bounds)> {
 /// breath-free top, or higher only as far as the art of the desk it sits at.
 fn assert_badges_top_their_frames(
     frame: &SimFrame,
-    drawn: &[(AgentFrame, crate::layout::Bounds)],
+    drawn: &[(Badged, crate::layout::Bounds)],
     layout: &SceneLayout,
     pack: &Pack,
 ) {

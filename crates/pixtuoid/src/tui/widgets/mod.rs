@@ -21,9 +21,7 @@ pub(super) use help::paint_help_overlay;
 pub(crate) use panel::{Overflow, Panel, PanelGeometry, borderless_panel};
 pub(super) use theme_picker::paint_theme_picker;
 pub use tooltip::paint_chitchat_bubbles;
-#[cfg(test)]
-pub(crate) use tooltip::paint_text_runs;
-pub(crate) use tooltip::{TooltipAt, paint_hover_tooltip, paint_label_widgets};
+pub(crate) use tooltip::{TooltipAt, paint_hover_tooltip, paint_text_runs};
 pub(super) use tooltip::{
     paint_coffee_tooltip, paint_furniture_tooltip, paint_mascot_tooltip, paint_pet_tooltip,
 };

@@ -14,23 +14,13 @@ use crate::display::{Hover, HoverTarget, Hovers, TextRun};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
-use crate::layout::{Depth, Facing, FixtureKind, Pivot, Point, SceneLayout, Station, sort_row_at};
+use crate::layout::{Depth, Facing, FixtureKind, Pivot, SceneLayout, Station, sort_row_at};
 use crate::sim::pack_frame_size;
 use crate::walk::WalkState;
-
-/// Where a drawn character's badge goes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AgentFrame {
-    /// Whose sprite it is.
-    pub agent_id: pixtuoid_core::AgentId,
-    /// Its placement's [`CharacterPlacement::label_anchor`](crate::sim::CharacterPlacement::label_anchor).
-    pub label_anchor: Point,
-}
 
 /// What [`paint_frame`] drew that the caller points at or badges.
 #[derive(Default)]
 pub(crate) struct Drawn {
-    pub(crate) agents: Vec<AgentFrame>,
     /// Each drawn agent's badge, in paint order.
     pub(crate) texts: Vec<TextRun>,
     pub(crate) hovers: Hovers,
@@ -277,16 +267,11 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
             label_anchor,
             ..
         } = d.kind
+            && let Some(agent) = ctx.scene.agents.get(&agent.agent_id)
         {
-            drawn.agents.push(AgentFrame {
-                agent_id: agent.agent_id,
-                label_anchor,
-            });
-            if let Some(agent) = ctx.scene.agents.get(&agent.agent_id) {
-                drawn
-                    .texts
-                    .push(TextRun::badge(label_anchor, agent, &namesakes, ctx.theme));
-            }
+            drawn
+                .texts
+                .push(TextRun::badge(label_anchor, agent, &namesakes, ctx.theme));
         }
         drawn.hovers.push(hover);
     }

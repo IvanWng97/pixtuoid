@@ -194,8 +194,7 @@ impl FloatingApp {
             return;
         };
         surf.fill_upscaled(office, scale);
-        let labels = self.renderer.labels(&scene);
-        super::offscreen::paint_labels_into_surface(&mut surf, &labels, scale as i32, self.theme);
+        super::offscreen::paint_labels_into_surface(&mut surf, self.renderer.texts(), scale as i32);
         let board = self.renderer.board(&scene, floor_meta.motion, now);
         super::offscreen::paint_wall_board_into_surface(
             &mut surf,

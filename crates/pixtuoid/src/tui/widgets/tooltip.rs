@@ -11,9 +11,8 @@ use ratatui::widgets::{Block, Padding, Paragraph};
 use super::{StateKind, compact_hms, display_width, source_badge_span, state_color, to_color};
 use crate::tui::renderer::clip_widget_rect;
 use pixtuoid_scene::display::{GatewayCard, TextRole, TextRun};
-use pixtuoid_scene::overlay::{LabelElement, disambig_suffix};
+use pixtuoid_scene::overlay::disambig_suffix;
 use pixtuoid_scene::pet::PetKind;
-use pixtuoid_scene::pixel_painter::AgentFrame;
 
 /// Borderless tooltip frame shared by every hover/click tooltip: just the padded
 /// text. The caller must paint `super::paint_card_backing` UNDER it (the `Clear` +
@@ -43,54 +42,9 @@ fn flip_x_anchor(mx: u16, tip_w: u16, scene_rect: Rect) -> u16 {
     }
 }
 
-pub(crate) fn paint_label_widgets(
-    f: &mut ratatui::Frame<'_>,
-    labels: &[LabelElement],
-    scene_rect: Rect,
-    theme: &pixtuoid_scene::theme::Theme,
-) {
-    for el in labels {
-        let ly = scene_rect.y + (el.anchor_px.y / 2).saturating_sub(1);
-        let spans = if el.hovered {
-            let style = Style::default()
-                .fg(Color::White)
-                .add_modifier(ratatui::style::Modifier::BOLD);
-            vec![Span::styled(format!("▸{}", el.text), style)]
-        } else {
-            let ink = pixtuoid_scene::overlay::badge_ink(&el.text, el.tone, theme);
-            vec![
-                Span::styled(
-                    pixtuoid_scene::overlay::BADGE_MARKER.to_string(),
-                    Style::default().fg(to_color(ink.marker)),
-                ),
-                Span::styled(el.text.clone(), Style::default().fg(to_color(ink.name))),
-            ]
-        };
-        let line = ratatui::text::Line::from(spans);
-        let half_w = u16::try_from(line.width() / 2).unwrap_or(u16::MAX);
-        let lx = scene_rect.x + el.anchor_px.x.saturating_sub(half_w);
-        let para = Paragraph::new(line);
-        if let Some(r) = clip_widget_rect(
-            Rect {
-                x: lx,
-                y: ly,
-                width: pixtuoid_scene::overlay::BADGE_CELLS,
-                height: 1,
-            },
-            scene_rect,
-        ) {
-            f.render_widget(para, r);
-        }
-    }
-}
-
 /// Paint each badge in `runs` as terminal text, centred over its anchor's
 /// column in the cell [`LABEL_GAP`](pixtuoid_scene::display::text::LABEL_GAP)
 /// logical rows above it; `hovered`'s reads `▸name` in bold white.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "3b-2 T3 2/2 switches the painters onto it")
-)]
 pub(crate) fn paint_text_runs(
     f: &mut ratatui::Frame<'_>,
     runs: &[TextRun],
@@ -450,16 +404,16 @@ fn mascot_tooltip_text(card: &GatewayCard) -> String {
 pub fn paint_chitchat_bubbles(
     f: &mut ratatui::Frame<'_>,
     bubbles: &[pixtuoid_scene::chitchat::ChitchatBubble],
-    agents: &[AgentFrame],
+    badges: &[TextRun],
     scene_rect: Rect,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
     for bubble in bubbles {
         // The speaker's badge anchor, so bubble and badge share one centre.
-        let Some(at) = agents
+        let Some(at) = badges
             .iter()
-            .find(|a| a.agent_id == bubble.speaker)
-            .map(|a| a.label_anchor)
+            .find(|run| run.role == TextRole::Badge(bubble.speaker))
+            .map(|run| run.at)
         else {
             continue;
         };
@@ -543,11 +497,39 @@ mod tests {
         }
     }
 
+    /// A badge reading `name` in `tone` under `theme`, hung from `at`.
+    fn badge(
+        at: pixtuoid_scene::layout::Point,
+        name: &str,
+        tone: pixtuoid_scene::overlay::LabelTone,
+        theme: &pixtuoid_scene::theme::Theme,
+    ) -> super::TextRun {
+        let ink = pixtuoid_scene::overlay::badge_ink(name, tone, theme);
+        let span = |text: &str, ink| pixtuoid_scene::display::TextSpan {
+            text: text.into(),
+            ink,
+        };
+        super::TextRun {
+            at,
+            spans: vec![
+                span(
+                    &pixtuoid_scene::overlay::BADGE_MARKER.to_string(),
+                    ink.marker,
+                ),
+                span(name, ink.name),
+            ],
+            plate: None,
+            role: super::TextRole::Badge(pixtuoid_core::AgentId::from_transcript_path(
+                "/badge/0.jsonl",
+            )),
+        }
+    }
+
     /// A badge's text centres on its anchor, the sprite's top-centre.
     #[test]
     fn a_badge_centres_its_text_on_the_anchor() {
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::{LabelElement, LabelTone};
+        use pixtuoid_scene::overlay::LabelTone;
         let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
         let scene_rect = Rect {
             x: 3,
@@ -558,16 +540,11 @@ mod tests {
         let anchor = Point { x: 20, y: 8 };
         let text = "abcdefgh";
         term.draw(|f| {
-            super::paint_label_widgets(
+            super::paint_text_runs(
                 f,
-                &[LabelElement {
-                    anchor_px: anchor,
-                    text: text.into(),
-                    tone: LabelTone::Idle,
-                    hovered: false,
-                }],
+                &[badge(anchor, text, LabelTone::Idle, &theme::NORMAL)],
                 scene_rect,
-                &theme::NORMAL,
+                None,
             )
         })
         .unwrap();
@@ -587,7 +564,7 @@ mod tests {
     #[test]
     fn a_badge_paints_the_models_ink() {
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::{LabelElement, LabelTone, badge_ink};
+        use pixtuoid_scene::overlay::{LabelTone, badge_ink};
         let text = "cc\u{b7}repo";
         for theme in pixtuoid_scene::theme::ALL_THEMES {
             for tone in [
@@ -598,16 +575,11 @@ mod tests {
             ] {
                 let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
                 term.draw(|f| {
-                    super::paint_label_widgets(
+                    super::paint_text_runs(
                         f,
-                        &[LabelElement {
-                            anchor_px: Point { x: 20, y: 8 },
-                            text: text.into(),
-                            tone,
-                            hovered: false,
-                        }],
+                        &[badge(Point { x: 20, y: 8 }, text, tone, theme)],
                         f.area(),
-                        theme,
+                        None,
                     )
                 })
                 .unwrap();
@@ -631,8 +603,7 @@ mod tests {
     fn a_chitchat_bubble_centres_over_its_speakers_badge() {
         use pixtuoid_scene::chitchat::ChitchatBubble;
         use pixtuoid_scene::layout::Point;
-        use pixtuoid_scene::overlay::{LabelElement, LabelTone};
-        use pixtuoid_scene::pixel_painter::AgentFrame;
+        use pixtuoid_scene::overlay::LabelTone;
         let mut term = Terminal::new(TestBackend::new(40, 12)).unwrap();
         let scene_rect = Rect {
             x: 3,
@@ -640,30 +611,24 @@ mod tests {
             width: 36,
             height: 10,
         };
-        let speaker = AgentFrame {
-            agent_id: pixtuoid_core::AgentId::from_transcript_path("/chat/0.jsonl"),
-            label_anchor: Point { x: 20, y: 14 },
-        };
         let (name, quip) = ("abcdefgh", "LGTM!");
+        let speaker = badge(
+            Point { x: 20, y: 14 },
+            name,
+            LabelTone::Idle,
+            &theme::NORMAL,
+        );
+        let super::TextRole::Badge(id) = speaker.role;
         term.draw(|f| {
-            super::paint_label_widgets(
-                f,
-                &[LabelElement {
-                    anchor_px: speaker.label_anchor,
-                    text: name.into(),
-                    tone: LabelTone::Idle,
-                    hovered: false,
-                }],
-                scene_rect,
-                &theme::NORMAL,
-            );
+            let speakers = std::slice::from_ref(&speaker);
+            super::paint_text_runs(f, speakers, scene_rect, None);
             super::paint_chitchat_bubbles(
                 f,
                 &[ChitchatBubble {
                     text: quip,
-                    speaker: speaker.agent_id,
+                    speaker: id,
                 }],
-                &[speaker],
+                speakers,
                 scene_rect,
                 &theme::NORMAL,
             );

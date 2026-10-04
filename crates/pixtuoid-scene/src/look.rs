@@ -15,7 +15,7 @@ use crate::display::Hovers;
 use crate::floor::{FloorInputs, OfficeStores, PerFloor, step_floor};
 use crate::footer::FooterFloor;
 use crate::layout::{SceneLayout, Size};
-use crate::pixel_painter::{AgentFrame, ClassicCaches, Drawn, PaintCtx, paint_frame};
+use crate::pixel_painter::{ClassicCaches, Drawn, PaintCtx, paint_frame};
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
@@ -107,8 +107,6 @@ struct Classic {
 pub struct ClassicDrawn<'a> {
     /// The frame, for a painter's own wash over it (a modal's dim).
     pub pixels: &'a mut RgbBuffer,
-    /// Every character, in paint order, for its badge.
-    pub agents: &'a [AgentFrame],
     /// Each drawn agent's badge, in paint order.
     pub texts: &'a [crate::display::TextRun],
     /// What the frame answers a pointer with.
@@ -145,7 +143,6 @@ impl Raster {
             .filter(|_| self.shown == Some(Look::Classic))?;
         Some(ClassicDrawn {
             pixels: &mut classic.buf,
-            agents: &classic.hits.agents,
             texts: &classic.hits.texts,
             hovers: &classic.hits.hovers,
             bubbles: &classic.bubbles,
@@ -161,10 +158,11 @@ impl Raster {
         }
     }
 
-    /// The agents the last classic frame drew, in paint order; none in another look.
-    pub(crate) fn classic_agents(&self) -> &[crate::pixel_painter::AgentFrame] {
+    /// The badges the last classic frame drew, in paint order; none in another
+    /// look.
+    pub(crate) fn classic_texts(&self) -> &[crate::display::TextRun] {
         match (self.shown, &self.classic) {
-            (Some(Look::Classic), Some(classic)) => &classic.hits.agents,
+            (Some(Look::Classic), Some(classic)) => &classic.hits.texts,
             _ => &[],
         }
     }

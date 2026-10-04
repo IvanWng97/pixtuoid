@@ -173,8 +173,7 @@ fn main() -> Result<()> {
     let mut surf = XrgbSurface::new(&mut sb, ww, wh).expect("sized to the window");
     surf.fill_upscaled(buf, scale as usize);
     let (bw, bh) = (buf.width(), buf.height());
-    let labels = renderer.labels(&scene);
-    paint_labels_into_surface(&mut surf, &labels, scale as i32, theme);
+    paint_labels_into_surface(&mut surf, renderer.texts(), scale as i32);
     let board = renderer.board(
         &scene,
         pixtuoid_scene::floor::FloorMeta::ground().motion,
