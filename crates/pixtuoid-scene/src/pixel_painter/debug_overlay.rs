@@ -153,10 +153,10 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &SceneLayout) {
 
 fn paint_routes(buf: &mut RgbBuffer, scene: &SceneState, walks: &HashMap<AgentId, WalkState>) {
     for agent in scene.agents.values() {
-        let Some(ms) = walks.get(&agent.agent_id) else {
+        let Some(walk) = walks.get(&agent.agent_id) else {
             continue;
         };
-        let Some(wp) = &ms.walk_path else {
+        let Some(wp) = &walk.walk_path else {
             continue;
         };
         for seg in wp.path.windows(2) {
