@@ -98,11 +98,12 @@ def artifact_run(sha: str, branch: str | None) -> int | None:
         "--jq", ".artifacts[] | select(.expired | not) | .workflow_run"
         " | [.id, .head_sha, .head_branch] | @json",
     )
-    runs = [
-        run for run, head, ref in map(json.loads, rows.splitlines())
-        if head == sha and branch in (None, ref)
-    ]
-    return max(runs, default=None)
+    return pick_run([tuple(json.loads(r)) for r in rows.splitlines()], sha, branch)
+
+
+def pick_run(rows: list[tuple[int, str, str]], sha: str, branch: str | None) -> int | None:
+    """The newest `(run id, head sha, head branch)` row at `sha`, on `branch` if given."""
+    return max((run for run, head, ref in rows if head == sha and branch in (None, ref)), default=None)
 
 
 def download(run: int, into: pathlib.Path) -> pathlib.Path:
@@ -205,6 +206,11 @@ def selftest() -> int:
             ),
         )
         check("identical", diff(base, base), ([], [], []))
+        rows = [(1, "s", "main"), (2, "s", "feature"), (3, "t", "main"), (4, "s", "main")]
+        check("newest run on the branch", pick_run(rows, "s", "main"), 4)
+        check("the sha on another branch only", pick_run([(2, "s", "feature")], "s", "main"), None)
+        check("any branch", pick_run(rows, "s", None), 4)
+        check("no run at the sha", pick_run(rows, "u", None), None)
         check("merge of head", merge_parent(["m", "h"], "h"), "m")
         check("parents swapped", merge_parent(["h", "m"], "h"), None)
         check("not a merge", merge_parent(["h"], "h"), None)
