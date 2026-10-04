@@ -1615,6 +1615,28 @@ fn corridor_art(kind: Furniture, pos: Point) -> Bounds {
     }
 }
 
+/// Where the corridor's vending machine stands: slid east from the band's
+/// `west` edge, a pod's `stride` at most, off a workstation standing over it;
+/// `None` in an aisle too small for it, so nothing keeps off a machine that
+/// isn't there.
+fn vending_spot(
+    aisle: &Bounds,
+    west: u16,
+    stride: u16,
+    home_desks: &[Point],
+    buf_h: u16,
+) -> Option<Point> {
+    let fits = aisle.height >= VENDING_MIN_AISLE_H && aisle.width > VENDING_MIN_AISLE_W;
+    let art = furniture_def(Furniture::VendingMachine).visual;
+    (0..=stride)
+        .filter(|_| fits)
+        .map(|dx| Point {
+            x: west + VENDING_WEST_GAP + art.w / 2 + dx,
+            y: corridor_centre_y(aisle, art.h),
+        })
+        .find(|&p| clears_the_workstations(Furniture::VendingMachine, p, home_desks, buf_h))
+}
+
 pub(super) const VENDING_MIN_AISLE_H: u16 = 10;
 pub(super) const VENDING_MIN_AISLE_W: u16 = 30;
 pub(super) const PRINTER_MIN_AISLE_H: u16 = 9;
@@ -1685,24 +1707,8 @@ fn compute_waypoints(
         }
     }
 
-    // Slid east from its corner, a pod's stride at most, off a workstation
-    // standing over it.
-    let vending = (0..=pod_grid.stride_x)
-        .map(|dx| Point {
-            x: right_x
-                + VENDING_WEST_GAP
-                + furniture_def(Furniture::VendingMachine).visual.w / 2
-                + dx,
-            y: corridor_centre_y(
-                cubicle_aisle,
-                furniture_def(Furniture::VendingMachine).visual.h,
-            ),
-        })
-        .find(|&p| clears_the_workstations(Furniture::VendingMachine, p, home_desks, buf_h));
-    if let Some(vending) = vending
-        && cubicle_aisle.height >= VENDING_MIN_AISLE_H
-        && cubicle_aisle.width > VENDING_MIN_AISLE_W
-    {
+    let vending = vending_spot(cubicle_aisle, right_x, pod_grid.stride_x, home_desks, buf_h);
+    if let Some(vending) = vending {
         waypoints.push(Waypoint {
             pos: vending,
             kind: WaypointKind::VendingMachine,
@@ -1791,6 +1797,25 @@ fn compute_waypoints(
 #[cfg(test)]
 mod tests {
     use super::{FloorGeometry, FloorVariant};
+
+    /// An aisle too short or too narrow for a vending machine has none, so the
+    /// printer keeps off nothing there.
+    #[test]
+    fn a_vending_machine_stands_only_where_its_aisle_fits() {
+        use super::{VENDING_MIN_AISLE_H, VENDING_MIN_AISLE_W, vending_spot};
+        use crate::layout::Bounds;
+        let aisle = |height, width| Bounds {
+            x: 0,
+            y: 100,
+            width,
+            height,
+        };
+        let wide = VENDING_MIN_AISLE_W + 1;
+        let spot = |a| vending_spot(&a, 0, 0, &[], u16::MAX);
+        assert!(spot(aisle(VENDING_MIN_AISLE_H, wide)).is_some());
+        assert_eq!(spot(aisle(VENDING_MIN_AISLE_H - 1, wide)), None);
+        assert_eq!(spot(aisle(VENDING_MIN_AISLE_H, VENDING_MIN_AISLE_W)), None);
+    }
 
     #[test]
     fn a_degraded_dense_floor_reads_the_standard_column_percent() {

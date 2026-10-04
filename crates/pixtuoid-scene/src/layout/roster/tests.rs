@@ -531,34 +531,51 @@ fn the_clock_hangs_centred_on_a_window_post() {
     assert!(met > 0, "the census met a clock");
 }
 
-/// The [`kind_key`] pairs whose art overlaps by design, each in key order.
-const OVERLAP_BY_DESIGN: &[(&str, &str)] = &[
+/// [`kind_key`], with a pod decor by its own kind: a phone booth and a
+/// whiteboard overlap their neighbours differently.
+fn overlap_key(kind: FixtureKind) -> &'static str {
+    use crate::layout::PodDecor;
+    match kind {
+        FixtureKind::Pod { kind, .. } => match kind {
+            PodDecor::PlantTall => "PlantTall",
+            PodDecor::Whiteboard => "Whiteboard",
+            PodDecor::Tv => "Tv",
+            PodDecor::PhoneBooth => "PhoneBooth",
+            PodDecor::StandingDesk => "StandingDesk",
+        },
+        _ => kind_key(kind),
+    }
+}
+
+/// The [`overlap_key`] pairs whose art overlaps by design, each in key order,
+/// with the most a depth occlusion may cover where the overlap is one.
+const OVERLAP_BY_DESIGN: &[(&str, &str, Option<Size>)] = &[
     // `desk_chair_top_left`'s backrest crosses its desk.
-    ("Desk", "DeskChair"),
+    ("Desk", "DeskChair", None),
     // `SceneLayout::island_bar_mat` shows only a sliver past the island.
-    ("IslandMat", "KitchenIsland"),
+    ("IslandMat", "KitchenIsland", None),
     // A short floor's first desk row (a desk and its filing cabinet) or its
     // phone booth hides the foot of the lamp behind it, whose ground already
     // starts at the band's top.
-    ("Desk", "FloorLamp"),
-    ("FilingCabinet", "FloorLamp"),
-    ("FloorLamp", "Pod"),
+    ("Desk", "FloorLamp", None),
+    ("FilingCabinet", "FloorLamp", Some(Size { w: 4, h: 1 })),
+    ("FloorLamp", "PhoneBooth", Some(Size { w: 4, h: 2 })),
     // On a short floor the phone booth's top hides the far corner of the
     // lounge rug behind it.
-    ("LoungeRug", "Pod"),
+    ("LoungeRug", "PhoneBooth", Some(Size { w: 7, h: 1 })),
     // A rug under what stands on it.
-    ("LoungeCouch", "LoungeRug"),
-    ("MeetingChair", "MeetingRug"),
-    ("MeetingRug", "MeetingSofa"),
-    ("MeetingRug", "MeetingTable"),
+    ("LoungeCouch", "LoungeRug", None),
+    ("MeetingChair", "MeetingRug", None),
+    ("MeetingRug", "MeetingSofa", None),
+    ("MeetingRug", "MeetingTable", None),
     // One composed meeting set: in a compact room each piece's art overlaps the
     // edge of the one behind it.
-    ("MeetingChair", "MeetingSofa"),
-    ("MeetingSofa", "MeetingTable"),
+    ("MeetingChair", "MeetingSofa", None),
+    ("MeetingSofa", "MeetingTable", None),
 ];
 
-/// The [`kind_key`] pairs still overlapping where they should not, each in key
-/// order: a fix deletes its entry.
+/// The [`overlap_key`] pairs still overlapping where they should not, each in
+/// key order: a fix deletes its entry.
 const OVERLAP_DEFECTS: &[(&str, &str)] = &[];
 
 /// Two fixtures' art overlaps only as a listed pair, and each listed pair still
@@ -567,9 +584,14 @@ const OVERLAP_DEFECTS: &[(&str, &str)] = &[];
 fn no_two_fixtures_overlap_but_by_design() {
     let listed: BTreeSet<(&str, &str)> = OVERLAP_BY_DESIGN
         .iter()
-        .chain(OVERLAP_DEFECTS)
-        .copied()
+        .map(|&(a, b, _)| (a, b))
+        .chain(OVERLAP_DEFECTS.iter().copied())
         .collect();
+    let bound = |pair: (&str, &str)| {
+        OVERLAP_BY_DESIGN
+            .iter()
+            .find_map(|&(a, b, most)| ((a, b) == pair).then_some(most).flatten())
+    };
     // The corridor's floor: whatever stands in the corridor stands on it.
     let on_runner =
         |f: &Fixture, g: &Fixture| f.kind == FixtureKind::Runner && g.contact().is_some();
@@ -587,9 +609,18 @@ fn no_two_fixtures_overlap_but_by_design() {
                 if on_runner(a, b) || on_runner(b, a) {
                     continue;
                 }
-                let (x, y) = (kind_key(a.kind), kind_key(b.kind));
+                let (x, y) = (overlap_key(a.kind), overlap_key(b.kind));
                 let pair = (x.min(y), x.max(y));
-                if listed.contains(&pair) {
+                let end = |at: u16, len: u16| at + len;
+                let covered = Size {
+                    w: end(a.visual.x, a.visual.width).min(end(b.visual.x, b.visual.width))
+                        - a.visual.x.max(b.visual.x),
+                    h: end(a.visual.y, a.visual.height).min(end(b.visual.y, b.visual.height))
+                        - a.visual.y.max(b.visual.y),
+                };
+                let within =
+                    bound(pair).is_none_or(|most| covered.w <= most.w && covered.h <= most.h);
+                if listed.contains(&pair) && within {
                     met.insert(pair);
                 } else {
                     stray.push(format!(
@@ -657,10 +688,10 @@ fn no_meeting_furniture_or_plant_blocks_a_doorway() {
 
 /// A corridor appliance's art overhangs north of its aisle (invariant #6), but
 /// never onto a workstation: a desk, its filing cabinet, its chair or its
-/// sitter. Art can only overlap a
-/// workstation it shares a row with, and the height alone fixes every row.
-/// So a tall-aisle height whose rows never meet is checked once per width;
-/// every other tall height sweeps all widths × seeds.
+/// sitter. Art can only overlap a workstation it shares a row with, and the
+/// height alone fixes every row. So a tall-aisle height whose rows never meet
+/// is checked once per width; every other tall height sweeps all widths ×
+/// seeds.
 #[test]
 fn corridor_appliance_art_never_lands_on_a_workstation() {
     use crate::layout::{CHARACTER_SPRITE_H, CHARACTER_SPRITE_W};
