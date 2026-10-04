@@ -195,7 +195,10 @@ mod theme_lighting;
 /// frame for a cell whose agent hit-test resolves to `id` and park the mouse
 /// there. Panics when the agent isn't hit-testable — a test wiring error, not a
 /// case.
-pub(super) fn hover_agent(r: &mut TuiRenderer<TestBackend>, id: pixtuoid_core::AgentId) {
+pub(super) fn hover_agent<B>(r: &mut TuiRenderer<B>, id: pixtuoid_core::AgentId)
+where
+    B: Backend<Error: Send + Sync + 'static> + std::borrow::Borrow<TestBackend>,
+{
     let cell = r
         .frame_buffer()
         .area()

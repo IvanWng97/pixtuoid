@@ -72,12 +72,12 @@ pub(crate) fn waiting_mark(at: Point) -> Effect {
     }
 }
 
-/// The dust under the walker at `at`, on its stride's frame `stride`.
-pub(crate) fn walking_dust(at: Point, stride: usize) -> Effect {
+/// The dust under the walker at `at`, on its walk's frame `frame`.
+pub(crate) fn walking_dust(at: Point, frame: usize) -> Effect {
     Effect {
         kind: EffectKind::WalkingDust,
         at,
-        phase: stride as u64,
+        phase: frame as u64,
     }
 }
 
