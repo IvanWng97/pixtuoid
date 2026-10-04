@@ -4025,6 +4025,7 @@ mod tests {
             size: crate::layout::Size { w: 14, h: 12 },
             anim_name: "lobster_walk",
             frame_idx: 0,
+            key: crate::creatures::openclaw_key("18789"),
             card: crate::creatures::GatewayCard {
                 name: "OpenClaw",
                 instance: None,
@@ -4044,6 +4045,7 @@ mod tests {
         let sick = Point { x: 110, y: 84 };
         frame.mascots.push(crate::sim::MascotPlacement {
             pos: sick,
+            key: crate::creatures::openclaw_key("18790"),
             card: crate::creatures::GatewayCard {
                 busy: false,
                 degraded: true,

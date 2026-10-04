@@ -382,3 +382,130 @@ fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
         );
     }
 }
+
+/// TEMPORARY (3b S2c): the hover ladder answers every cell as the per-type
+/// ladder it replaces, except where a later pet or mascot covers what that
+/// ladder named first (D1–D3). Deleted with the per-type ladder.
+#[test]
+fn the_hover_ladder_answers_every_cell_as_the_per_type_ladder_did() {
+    use crate::tui::geometry::CellArea;
+    use crate::tui::hit_test::{
+        SceneHit, hit_test_agent, hit_test_coffee_machine, hit_test_furniture, hit_test_pet,
+        scene_hit, topmost_mascot_at,
+    };
+    use pixtuoid_scene::display::HoverTarget;
+    #[derive(Debug, Clone, PartialEq)]
+    enum Named {
+        Agent(AgentId),
+        Coffee,
+        Pet,
+        Mascot(Option<String>),
+        Furniture(&'static str),
+        Nothing,
+    }
+    let mut scene = scene_with(
+        (0..6)
+            .map(|i| active(&format!("/ab/{i}.jsonl"), i, "Edit", t0()))
+            .collect(),
+        16,
+    );
+    for port in ["18789", "18790"] {
+        scene.insert_daemon(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            pixtuoid_core::state::DaemonInstanceId::new(port).expect("non-empty"),
+            pixtuoid_core::state::DaemonPresence {
+                liveness: pixtuoid_core::state::DaemonLiveness::UP,
+                active_sessions: 1,
+                last_seen: t0(),
+                entered_at: t0(),
+                in_flight_runs: Default::default(),
+                current_pid: Some(1),
+            },
+        );
+    }
+    let cat = pixtuoid_scene::pet::Pet::defaulted(PetKind::Cat);
+    let mut seen_kinds = [false; 5];
+    let mut deltas = 0;
+    for ms in [400, 2_000, 5_000, 20_000, 31_000, 47_000] {
+        let now = t0() + Duration::from_millis(ms);
+        for (cols, rows) in [(80, 30), (120, 52), (157, 41)] {
+            let mut term = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
+            let mut floor = PerFloor::new();
+            let mut chitchat = std::collections::HashMap::new();
+            let mut ctx = DrawCtx::offscreen(
+                &mut floor,
+                &mut chitchat,
+                normal_theme(),
+                &scene,
+                pack(),
+                now,
+                FloorMeta::ground(),
+            );
+            ctx.world.pets.pet = Some(&cat);
+            let out = draw_scene(&mut term, &mut ctx).expect("draw");
+            let (layout, geometry) = (
+                out.layout.as_deref().expect("drawn"),
+                out.geometry.expect("drawn"),
+            );
+            let old_pet = |at| {
+                out.pet_pos
+                    .is_some_and(|p| hit_test_pet(p.kind, p.centre, p.anim, at))
+            };
+            let old_mascot =
+                |at| topmost_mascot_at(&out.mascots, at).map(|m| m.card.instance.clone());
+            let old = |at: CellArea| {
+                if let Some(id) = hit_test_agent(&out.agents, at) {
+                    Named::Agent(id)
+                } else if hit_test_coffee_machine(layout, at) {
+                    Named::Coffee
+                } else if old_pet(at) {
+                    Named::Pet
+                } else if let Some(m) = old_mascot(at) {
+                    Named::Mascot(m)
+                } else if let Some(label) = hit_test_furniture(layout, at) {
+                    Named::Furniture(label)
+                } else {
+                    Named::Nothing
+                }
+            };
+            let new = |at| match scene_hit(&out.hovers, layout, at) {
+                Some(SceneHit::Figure(HoverTarget::Agent(id))) => Named::Agent(*id),
+                Some(SceneHit::Figure(HoverTarget::Pet(_))) => Named::Pet,
+                Some(SceneHit::Figure(HoverTarget::Mascot(k))) => {
+                    Named::Mascot(Some(k.instance().as_str().to_string()))
+                }
+                Some(SceneHit::Coffee) => Named::Coffee,
+                Some(SceneHit::Furniture(label)) => Named::Furniture(label),
+                None => Named::Nothing,
+            };
+            for (col, row) in (0..rows).flat_map(|row| (0..cols).map(move |col| (col, row))) {
+                let at = geometry.area_at(col, row).expect("inside the scene");
+                let (was, is) = (old(at), new(at));
+                let declared = match &is {
+                    Named::Pet => old_pet(at),
+                    Named::Mascot(m) => out.mascots.iter().any(|f| {
+                        &f.card.instance == m
+                            && crate::tui::hit_test::hit_test_mascot(f.pos, f.w, f.h, at)
+                    }),
+                    _ => false,
+                };
+                assert!(
+                    was == is || declared,
+                    "{ms}ms {cols}x{rows} cell ({col},{row}): was {was:?}, is {is:?}"
+                );
+                deltas += usize::from(was != is);
+                for (seen, hit) in seen_kinds.iter_mut().zip([
+                    matches!(was, Named::Agent(_)),
+                    was == Named::Coffee,
+                    was == Named::Pet,
+                    matches!(was, Named::Mascot(_)),
+                    matches!(was, Named::Furniture(_)),
+                ]) {
+                    *seen |= hit;
+                }
+            }
+        }
+    }
+    assert_eq!(seen_kinds, [true; 5], "every kind is named somewhere");
+    assert!(deltas > 0, "premise: a declared delta is exercised");
+}

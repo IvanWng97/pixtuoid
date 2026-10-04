@@ -14,10 +14,6 @@ pub(crate) struct Hover {
     pub(crate) target: HoverTarget,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the classic and the cutaway list their figures")
-)]
 impl Hover {
     /// A figure of `size` placed at `pos` by `pivot`, where the painters place
     /// its art ([`anchored_top_left`]).
@@ -61,14 +57,15 @@ pub struct PetHover {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Hovers(Vec<Hover>);
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the classic and the cutaway list their figures")
-)]
 impl Hovers {
     /// List `hover` over every hover listed before it.
     pub(crate) fn push(&mut self, hover: Hover) {
         self.0.push(hover);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn listed(&self) -> &[Hover] {
+        &self.0
     }
 
     /// Who the topmost hover meeting `area` names: the last painted. `area` is

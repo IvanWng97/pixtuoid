@@ -126,6 +126,7 @@ pub struct DrawOut {
     pub pet_pos: Option<PetHover>,
     pub mascots: Vec<MascotFrame>,
     pub agents: Vec<AgentFrame>,
+    pub hovers: pixtuoid_scene::display::Hovers,
     pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
     pub occupied_waypoints: std::collections::HashSet<usize>,
     /// Where the frame lies under the cells; `None` when it was refused.
@@ -371,6 +372,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         pet_pos,
         mascots,
         agents,
+        hovers,
         chitchat_bubbles,
         new_coffee_carriers,
         occupied_waypoints,
@@ -452,6 +454,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         pet_pos,
         mascots,
         agents,
+        hovers,
         new_coffee_carriers,
         occupied_waypoints,
         geometry: Some(geometry),

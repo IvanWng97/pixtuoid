@@ -57,6 +57,8 @@ pub(super) fn pantry_steam_at(pos: Point, anim: &str) -> Point {
 pub(super) struct Drawable<'a> {
     pub(super) sort_row: u16,
     pub(super) layer: Layer,
+    /// Set only on a figure the pack can draw.
+    pub(super) hover: Option<crate::display::Hover>,
     pub(super) kind: DrawableKind<'a>,
 }
 
@@ -597,6 +599,7 @@ pub(super) fn enqueue_room_walls<'a>(layout: &'a SceneLayout, drawables: &mut Ve
                 sort_row: depth,
                 // A character tied with a band's row still paints behind the glass.
                 layer: Layer::Over,
+                hover: None,
                 kind: DrawableKind::RoomWall { piece, rows },
             });
         }
@@ -712,6 +715,7 @@ mod tests {
                     .visual
                     .h,
             layer: Layer::Under,
+            hover: None,
             kind: DrawableKind::DeskCubicle {
                 desk,
                 facing: crate::layout::Facing::South,
@@ -992,6 +996,7 @@ mod tests {
             let d = Drawable {
                 sort_row: pos.y,
                 layer: Layer::Under,
+                hover: None,
                 kind: DrawableKind::MeetingSofa { pos, mirrored },
             };
             paint_drawable(
@@ -1029,6 +1034,7 @@ mod tests {
         let d = Drawable {
             sort_row: 30,
             layer: Layer::Figure,
+            hover: None,
             kind: DrawableKind::Pet {
                 pos: Point { x: 30, y: 30 },
                 flip: false,
@@ -1067,6 +1073,7 @@ mod tests {
             let d = Drawable {
                 sort_row: pos.y,
                 layer: Layer::Figure,
+                hover: None,
                 kind: DrawableKind::Pet {
                     pos,
                     flip: false,
@@ -1114,6 +1121,7 @@ mod tests {
         let d = Drawable {
             sort_row: pos.y,
             layer: Layer::Under,
+            hover: None,
             kind: DrawableKind::Appliance {
                 pos,
                 sprite,
@@ -1203,6 +1211,7 @@ mod tests {
         let d = Drawable {
             sort_row: 30,
             layer: Layer::Figure,
+            hover: None,
             kind: DrawableKind::GatewayMascot {
                 mascot_idx: 0,
                 pos: Point { x: 30, y: 30 },
@@ -1244,6 +1253,7 @@ mod tests {
             let d = Drawable {
                 sort_row: pos.y,
                 layer: Layer::Figure,
+                hover: None,
                 kind: DrawableKind::GatewayMascot {
                     mascot_idx: 0,
                     pos,

@@ -14,11 +14,12 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentSlot, SceneState};
 
 use crate::chitchat::{ActiveChitchat, ChitchatBubble};
-use crate::display::PetHover;
+use crate::display::{Hover, HoverTarget, Hovers, PetHover};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
 use crate::layout::{Depth, Facing, FixtureKind, Pivot, Point, SceneLayout, Station, sort_row_at};
+use crate::sim::pack_frame_size;
 use crate::walk::WalkState;
 
 /// Everything the pure-pixel pass observed that the caller still needs.
@@ -31,6 +32,8 @@ pub struct PixelPassResult {
     /// Every character drawn this tick, in paint order: the last one covering
     /// a point is the one on top.
     pub agents: Vec<AgentFrame>,
+    /// Every figure drawn this tick, in paint order.
+    pub hovers: Hovers,
     /// Active speech bubbles this frame, for the caller's widget pass.
     pub chitchat_bubbles: Vec<ChitchatBubble>,
     /// Agent ids observed in `Walking { carrying_coffee: true }` this frame.
@@ -76,6 +79,7 @@ struct Hoverables {
     pet_pos: Option<PetHover>,
     mascots: Vec<MascotFrame>,
     agents: Vec<AgentFrame>,
+    hovers: Hovers,
 }
 
 mod ambient;
@@ -247,6 +251,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         pet_pos,
         mascots,
         agents,
+        hovers,
     } = paint_frame(
         &mut PaintCtx {
             scene: ctx.world.scene,
@@ -269,6 +274,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         pet_pos,
         mascots,
         agents,
+        hovers,
         chitchat_bubbles: frame.chitchat_bubbles,
         new_coffee_carriers: frame.new_coffee_carriers,
         occupied_waypoints: frame.occupied_waypoints,
@@ -355,7 +361,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
         .pet
         .as_ref()
         .map(|pet| enqueue_pet(ctx, pet, &mut drawables));
-    enqueue_gateway_mascots(&frame.mascots, &mut drawables);
+    enqueue_gateway_mascots(ctx.pack, &frame.mascots, &mut drawables);
     enqueue_characters(ctx, frame, &mut drawables);
     enqueue_room_walls(ctx.layout, &mut drawables);
     drawable::sort_drawables(&mut drawables);
@@ -363,12 +369,16 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
         pet_pos,
         mascots: Vec::new(),
         agents: Vec::new(),
+        hovers: Hovers::default(),
     };
     // A per-pixel diff finds EXACTLY what the foreground wrote. AFTER
     // `paint_shadows`/`paint_ceiling_halos`: both already carry the hour, so folding
     // them in here would apply it twice.
     let pre_foreground = ctx.buf.clone();
-    for d in &drawables {
+    for d in drawables {
+        if let Some(h) = d.hover {
+            hover.hovers.push(h);
+        }
         match paint_drawable(&d.kind, &mut ctx.drawable_ctx()) {
             Some(Drawn::Agent(agent)) => hover.agents.push(agent),
             Some(Drawn::Mascot { mascot_idx, w, h }) => {
@@ -409,12 +419,21 @@ fn enqueue_characters<'a>(
 ) {
     for p in &frame.characters {
         let agent = &frame.agents[p.agent_idx];
+        let pose = crate::character::SpritePose::of(p, agent, ctx.theme);
         drawables.push(Drawable {
             sort_row: p.sort_row,
             layer: Layer::Figure,
+            hover: pack_frame_size(ctx.pack, pose.anim_name, pose.frame_idx).map(|size| {
+                Hover::figure(
+                    Pivot::TopLeft,
+                    p.top_left,
+                    size,
+                    HoverTarget::Agent(agent.agent_id),
+                )
+            }),
             kind: DrawableKind::Character {
                 agent,
-                pose: crate::character::SpritePose::of(p, agent, ctx.theme),
+                pose,
                 top_left: p.top_left,
                 label_anchor: p.label_anchor,
                 effects: &p.effects,
@@ -431,16 +450,21 @@ fn enqueue_pet<'a>(
     drawables: &mut Vec<Drawable<'a>>,
 ) -> PetHover {
     let pos = pet.pos;
-    let pet_h = crate::sim::frame_size(
-        ctx.pack,
-        pet.anim_name,
-        pet.frame_idx,
-        crate::sim::PET_FALLBACK,
-    )
-    .h;
+    let size = pack_frame_size(ctx.pack, pet.anim_name, pet.frame_idx);
+    let pet_hover = PetHover {
+        kind: pet.kind,
+        centre: pos,
+        anim: pet.anim_name,
+    };
     drawables.push(Drawable {
-        sort_row: sort_row_at(Pivot::Center, pos, pet_h),
+        sort_row: sort_row_at(
+            Pivot::Center,
+            pos,
+            size.unwrap_or(crate::sim::PET_FALLBACK).h,
+        ),
         layer: Layer::Figure,
+        hover: size
+            .map(|size| Hover::figure(Pivot::Center, pos, size, HoverTarget::Pet(pet_hover))),
         kind: DrawableKind::Pet {
             pos,
             flip: pet.flip,
@@ -449,15 +473,12 @@ fn enqueue_pet<'a>(
             effects: &pet.effects,
         },
     });
-    PetHover {
-        kind: pet.kind,
-        centre: pos,
-        anim: pet.anim_name,
-    }
+    pet_hover
 }
 
 /// Enqueue the gateway mascots.
 fn enqueue_gateway_mascots<'a>(
+    pack: &Pack,
     mascots: &'a [crate::sim::MascotPlacement],
     drawables: &mut Vec<Drawable<'a>>,
 ) {
@@ -465,6 +486,14 @@ fn enqueue_gateway_mascots<'a>(
         drawables.push(Drawable {
             sort_row: sort_row_at(Pivot::Center, m.pos, m.size.h),
             layer: Layer::Figure,
+            hover: pack_frame_size(pack, m.anim_name, m.frame_idx).map(|size| {
+                Hover::figure(
+                    Pivot::Center,
+                    m.pos,
+                    size,
+                    HoverTarget::Mascot(m.key.clone()),
+                )
+            }),
             kind: DrawableKind::GatewayMascot {
                 mascot_idx,
                 pos: m.pos,
@@ -652,6 +681,7 @@ fn queue_fixtures<'a>(
             Depth::Sorted { row, tie } => out.sorted.push(Drawable {
                 sort_row: row,
                 layer: tie.into(),
+                hover: None,
                 kind,
             }),
         }

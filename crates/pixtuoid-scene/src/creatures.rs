@@ -247,6 +247,15 @@ impl GatewayCard {
     }
 }
 
+/// The OpenClaw gateway listening on `port`.
+#[cfg(test)]
+pub(crate) fn openclaw_key(port: &str) -> DaemonInstanceKey {
+    DaemonInstanceKey::new(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        pixtuoid_core::state::DaemonInstanceId::new(port).expect("a port is an id"),
+    )
+}
+
 /// A* on the STATIC mask with a throwaway EMPTY overlay (identical inputs every
 /// frame of a leg ⇒ identical polyline ⇒ no flash), endpoints pre-snapped to
 /// walkable floor, sampled at arc-length `t`.
@@ -911,10 +920,7 @@ mod tests {
     #[test]
     fn a_gateways_state_reaches_its_card() {
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(60);
-        let key = DaemonInstanceKey::new(
-            pixtuoid_core::source::openclaw::SOURCE_NAME,
-            pixtuoid_core::state::DaemonInstanceId::new("18789").expect("id"),
-        );
+        let key = openclaw_key("18789");
         let running = || std::collections::BTreeMap::from([("run".to_string(), now)]);
         for (liveness, in_flight_runs, busy, degraded) in [
             (DaemonLiveness::UP, Default::default(), false, false),

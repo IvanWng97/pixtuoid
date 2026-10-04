@@ -3,6 +3,7 @@
 
 use pixtuoid_core::AgentId;
 
+use pixtuoid_scene::display::{HoverTarget, Hovers};
 use pixtuoid_scene::layout::{Bounds, Pivot, Point, SceneLayout, Size, anchored_top_left};
 use pixtuoid_scene::pet::PetKind;
 use pixtuoid_scene::pixel_painter::{AgentFrame, MascotFrame};
@@ -17,6 +18,38 @@ pub(crate) fn hit_test_agent(agents: &[AgentFrame], cell: CellArea) -> Option<Ag
         .rev()
         .find(|a| box_hit(Pivot::TopLeft, a.top_left, Size { w: a.w, h: a.h }, cell))
         .map(|a| a.agent_id)
+}
+
+/// What a cell shows the pointer. A tooltip and a click both resolve a cell
+/// through [`scene_hit`], so a click acts on exactly what the tooltip names.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the tooltips and the click switch to it next")
+)]
+pub(crate) enum SceneHit<'a> {
+    Figure(&'a HoverTarget),
+    Coffee,
+    Furniture(&'static str),
+}
+
+/// The topmost of `hovers` at `cell`, else the coffee machine, else a labelled
+/// fixture of `layout`.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the tooltips and the click switch to it next")
+)]
+pub(crate) fn scene_hit<'a>(
+    hovers: &'a Hovers,
+    layout: &SceneLayout,
+    cell: CellArea,
+) -> Option<SceneHit<'a>> {
+    if let Some(target) = hovers.at(cell.bounds()) {
+        Some(SceneHit::Figure(target))
+    } else if hit_test_coffee_machine(layout, cell) {
+        Some(SceneHit::Coffee)
+    } else {
+        hit_test_furniture(layout, cell).map(SceneHit::Furniture)
+    }
 }
 
 /// Whether `cell` shows the coffee-machine section of the pantry counter
