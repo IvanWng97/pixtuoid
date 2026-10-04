@@ -95,6 +95,7 @@ pub enum VenueKey {
 }
 
 /// A live conversation among the agents currently at a venue.
+#[derive(Debug)]
 pub struct ActiveChitchat {
     /// Current attendees, sorted ascending by raw id for a stable rotation.
     pub(crate) participants: Vec<AgentId>,

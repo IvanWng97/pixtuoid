@@ -537,7 +537,7 @@ mod controls_tests {
 }
 
 /// The painters' handle — clone-cheap, non-blocking.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct AudioHandle {
     /// The live device sender, swappable IN PLACE behind a shared cell: every
     /// clone shares this `Arc`, so a consumer's cached clone survives a lazy

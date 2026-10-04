@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// Stub router: returns a pre-baked polyline instead of running A*.
+#[derive(Debug)]
 struct StubRouter {
     path: Vec<Point>,
 }
@@ -46,6 +47,7 @@ fn layout() -> SceneLayout {
 
 /// Returns a stable polyline (`first`) for its first few calls then a DIFFERENT
 /// one (`rest`) — an overlay-driven A* reroute mid-walk. Counts calls.
+#[derive(Debug)]
 struct ChangingRouter {
     calls: usize,
     first: Vec<Point>,
@@ -1667,6 +1669,7 @@ fn wander_continuous_across_layouts_and_agents() {
 }
 
 /// Returns shape `a` until `flipped`, then `b` — switches the A* result mid-leg.
+#[derive(Debug)]
 struct FlipRouter {
     flipped: bool,
     a: Vec<Point>,

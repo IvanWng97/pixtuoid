@@ -54,6 +54,7 @@ struct PopupState {
     last_scale: f32,
 }
 
+#[derive(Debug)]
 pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     pub terminal: Terminal<B>,
     /// The pack every floor's raster draws with, which each frame's must be.
@@ -81,6 +82,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
 
 /// Everything a frame shows besides the floor: kept apart from `floors` and
 /// `office` so a frame borrows it beside them ([`Chrome::frame`]).
+#[derive(Debug)]
 struct Chrome {
     theme: &'static pixtuoid_scene::theme::Theme,
     theme_picker: Option<usize>,

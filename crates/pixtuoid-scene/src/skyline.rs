@@ -17,6 +17,7 @@ use pixtuoid_core::sprite::{Frame, Pixel, Rgb};
 
 use crate::atmosphere::{Moment, SkyTones};
 use crate::layout::pct;
+use crate::outside::WindowView;
 use crate::theme::Theme;
 
 /// A depth of the city.
@@ -565,9 +566,19 @@ impl CityStrip {
         }
     }
 
+    /// Stand this city's buildings on `view`'s glass, the run's west end at
+    /// column `run_x0`.
+    pub(crate) fn paint(&self, view: &mut WindowView, run_x0: u16) {
+        let x0 = run_x0.saturating_mul(view.d());
+        view.paint(|cell, sky| {
+            self.at(cell.at.0.wrapping_sub(x0), cell.glass_offset.1)
+                .unwrap_or(sky)
+        });
+    }
+
     /// What stands at `(x, y)` art pixels from the run's west end and the
     /// glass's top, or `None` where the sky shows.
-    pub(crate) fn at(&self, x: u16, y: u16) -> Option<Rgb> {
+    fn at(&self, x: u16, y: u16) -> Option<Rgb> {
         (x < self.w && y < self.h)
             .then(|| self.px[usize::from(y) * usize::from(self.w) + usize::from(x)])
             .flatten()
@@ -610,6 +621,42 @@ mod tests {
 
     fn pack() -> Pack {
         crate::pack::test_default_pack()
+    }
+
+    /// A window shows the strip read from the run's west end and the glass's
+    /// top, at every density.
+    #[test]
+    fn a_window_shows_the_strip_from_the_runs_west_end() {
+        const SKY: Rgb = Rgb { r: 1, g: 2, b: 3 };
+        let now = crate::localclock::at_hour(12);
+        let theme = &crate::theme::NORMAL;
+        let moment = Moment::resolve(
+            crate::sky::Sky::at_with(now, crate::sky::Weather::Clear),
+            theme,
+            0.0,
+            Motion::Full.timing(now),
+        );
+        let (run_x0, glass_h) = (3, 30);
+        let rows = 1..glass_h + 3;
+        let bay = crate::layout::WindowBay {
+            x: run_x0 + 25,
+            w: crate::layout::WINDOW_W,
+            idx: 1,
+        };
+        for d in [1, 4] {
+            let density = Density::new(d).expect("nonzero");
+            let strip = CityStrip::draw(&pack(), (80, glass_h), &moment, theme, density);
+            let mut view = crate::outside::WindowView::new(bay, rows.clone(), d, |_| SKY);
+            strip.paint(&mut view, run_x0);
+            let mut buildings = 0;
+            for (at, c) in view.cells() {
+                let (ax, ay) = (at.0 - bay.x * d, at.1 - rows.start * d);
+                let stands = strip.at((bay.x - run_x0) * d + ax, ay - d);
+                assert_eq!(c, stands.unwrap_or(SKY), "{d}: {at:?}");
+                buildings += usize::from(stands.is_some());
+            }
+            assert!(buildings > 0, "{d}: the window shows a city");
+        }
     }
 
     /// Where each stand stands, for comparing two cities.

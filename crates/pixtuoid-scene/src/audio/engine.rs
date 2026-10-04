@@ -49,6 +49,7 @@ pub struct TickCommands {
 
 /// The per-tick audio state both backends share. Constructed once; `init_track`
 /// once the caller has built the first track's beds; then `tick` per frame.
+#[derive(Debug)]
 pub struct AudioEngine {
     mixer: Mixer,
     typing: TypingScheduler,

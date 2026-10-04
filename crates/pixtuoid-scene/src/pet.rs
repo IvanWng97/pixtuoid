@@ -7,6 +7,7 @@ pub const PET_DURATION_MS: u64 = 2000;
 
 /// State for the "pet the animal" interaction — render-side only, not a data
 /// model concern.
+#[derive(Debug)]
 pub struct PetState {
     /// When the pet was last clicked — anchors the `PET_DURATION_MS` freeze.
     pub petted_at: SystemTime,
@@ -37,7 +38,7 @@ impl PetState {
 }
 
 /// The pet's resolved render frame for one tick (position + anim + kind).
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct PetFrame {
     /// Buffer-pixel position of the pet this tick.
     pub pos: Point,

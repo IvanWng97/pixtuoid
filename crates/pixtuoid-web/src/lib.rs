@@ -33,6 +33,7 @@ use pixtuoid_scene::theme::{NORMAL, Theme};
 
 /// A visitor hire's one-shot event, queued OUTSIDE the loop machinery so a
 /// hire's lifecycle never replays on wrap.
+#[derive(Debug)]
 struct ScheduledEvent {
     at: SystemTime,
     event: AgentEvent,
@@ -40,7 +41,7 @@ struct ScheduledEvent {
 
 /// The visitor-hire lane — grouped so the cap invariant lives in ONE place
 /// across the enqueue (`try_hire`) and drain (`drain_due`) sides.
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct VisitorHires {
     /// Kept sorted by time; drained from the front.
     pending: Vec<ScheduledEvent>,
@@ -107,6 +108,7 @@ impl VisitorHires {
 /// A live office rendered to a reusable RGBA buffer across frames. Keeping ONE
 /// handle alive across `step` calls is what keeps walks/poses continuous.
 #[wasm_bindgen]
+#[derive(Debug)]
 pub struct Office {
     scene: SceneState,
     session: FloorSession,
@@ -447,6 +449,7 @@ impl Office {
 /// OWN wasm module (memories can't be shared), pumps [`SynthTake::step`] to 0,
 /// then transfers each buffer to the main thread for `Office::audio_adopt_*`.
 #[wasm_bindgen]
+#[derive(Debug)]
 pub struct SynthTake {
     driver: audio::WebAudioDriver,
     night: bool,
