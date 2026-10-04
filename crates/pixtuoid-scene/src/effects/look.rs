@@ -106,8 +106,8 @@ fn plot_walking_dust(
     foot: u64,
     theme: &Theme,
 ) {
-    let foot = walking_dust_foot(walker_top_left, foot);
-    plot(foot.x, foot.y, theme.effects.walking_dust, 0.45);
+    let cell = walking_dust_foot(walker_top_left, foot);
+    plot(cell.x, cell.y, theme.effects.walking_dust, 0.45);
 }
 
 /// One floating heart for the "pet the cat" interaction.
