@@ -224,7 +224,7 @@ mod tests {
     fn a_mullion_keeps_two_units_clear_of_every_jamb_and_joint() {
         const CLEAR: u16 = 2;
         let mut met = 0;
-        for (w, h) in [(120, 72), (160, 96), (192, 108), (240, 135), (320, 180)] {
+        for &(w, h) in crate::layout::roster::tests::CENSUS_SIZES {
             for seed in 0..12 {
                 let l = crate::layout::SceneLayout::compute_with_seed(w, h, None, seed)
                     .expect("lays out");
@@ -243,6 +243,10 @@ mod tests {
                         continue;
                     };
                     let rows = y_top + run.start..y_top + run.end;
+                    // A door's stub has no clear run, so no glass to meet anything.
+                    if rows.is_empty() {
+                        continue;
+                    }
                     for other in l.wall_pieces.iter().filter(|&&p| p != piece) {
                         let (at, size) = other.visual();
                         assert!(
