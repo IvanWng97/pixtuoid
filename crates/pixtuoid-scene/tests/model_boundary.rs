@@ -10,6 +10,10 @@ const RASTERIZERS: [&str; 2] = ["pixel_painter", "cutaway"];
 /// removes the edge. A fix deletes its entry.
 const KNOWN_EDGES: &[(&str, &str)] = &[
     (
+        "display/",
+        "pen, text, light and effects move model-side: #1253",
+    ),
+    (
         "floor/",
         "render_to_rgb_buffer, BaseFillCache and the both-painters tests: #1244; AgentFrame: #1253",
     ),
