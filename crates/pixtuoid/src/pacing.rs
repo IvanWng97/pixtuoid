@@ -185,4 +185,7 @@ pub fn renderer(
     Ok((r, wire))
 }
 
-pub use crate::tui::Pacer;
+/// The TUI loop's frame clock.
+pub fn frame_clock(period: std::time::Duration) -> tokio::time::Interval {
+    crate::tui::frame_clock(period)
+}

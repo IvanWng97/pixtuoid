@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result};
-use pixtuoid::pacing::{Pacer, Protocol, renderer};
+use pixtuoid::pacing::{Protocol, frame_clock, renderer};
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
 use pixtuoid_scene::anim::{Motion, PAINT_FPS};
@@ -256,9 +256,9 @@ fn run(
     Ok(out)
 }
 
-/// The production loop's pacing on the wall clock: render, then wait for input
-/// that never comes until the next frame is due. Each frame's interval,
-/// observed.
+/// The production loop's frame clock on the wall clock, rendering on each
+/// tick; its input arm is left out, as no input comes. Each frame's
+/// interval, observed.
 fn real_clock(
     pack: &Arc<pixtuoid_core::sprite::format::Pack>,
 ) -> Result<(Vec<Duration>, Vec<Duration>)> {
@@ -275,22 +275,25 @@ fn real_clock(
     r.set_motion(Motion::Full);
     let start = start_for(Motion::Full)?;
     let scene = office(start);
-    let clock = Instant::now();
-    let (mut renders, mut intervals) = (Vec::new(), Vec::new());
-    let mut last = None;
-    let mut pacer = Pacer::new(Instant::now(), tick);
-    while clock.elapsed() < SCENARIO {
-        let begun = Instant::now();
-        if let Some(prev) = last.replace(begun) {
-            intervals.push(begun - prev);
-        }
-        r.render(&scene, pack, start + clock.elapsed())?;
-        renders.push(begun.elapsed());
-        let next = pacer.next(Instant::now());
-        std::thread::sleep(next.saturating_duration_since(Instant::now()));
-        pacer.woke(next, Instant::now());
-    }
-    Ok((renders, intervals))
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()?
+        .block_on(async {
+            let mut frames = frame_clock(tick);
+            let clock = Instant::now();
+            let (mut renders, mut intervals) = (Vec::new(), Vec::new());
+            let mut last = None;
+            while clock.elapsed() < SCENARIO {
+                frames.tick().await;
+                let begun = Instant::now();
+                if let Some(prev) = last.replace(begun) {
+                    intervals.push(begun - prev);
+                }
+                r.render(&scene, pack, start + clock.elapsed())?;
+                renders.push(begun.elapsed());
+            }
+            Ok((renders, intervals))
+        })
 }
 
 /// The `p`th percentile of `xs`, nearest rank.
@@ -311,11 +314,24 @@ fn sleep_loop(renders: &[Duration], tick: Duration) -> Vec<Duration> {
     renders.iter().map(|&r| r + tick).collect()
 }
 
-/// Each frame's interval under a deadline-paced loop: the next frame starts at
-/// the previous deadline plus a paint interval, or as soon as the render ends
-/// when it overran, re-anchoring there rather than bursting to catch up.
+/// Each frame's interval under [`frame_clock`]: frames due a paint interval
+/// apart; a render that overran starts the next frame at once, the one after
+/// that falling back on the grid.
 fn deadline_loop(renders: &[Duration], tick: Duration) -> Vec<Duration> {
-    renders.iter().map(|&r| r.max(tick)).collect()
+    let (mut start, mut due) = (Duration::ZERO, tick);
+    renders
+        .iter()
+        .map(|&r| {
+            let end = start + r;
+            let next = end.max(due);
+            let late = u32::try_from((end.saturating_sub(due)).as_nanos() / tick.as_nanos())
+                .unwrap_or(u32::MAX);
+            due += tick * (late + 1);
+            let interval = next - start;
+            start = next;
+            interval
+        })
+        .collect()
 }
 
 fn stats(xs: &[Duration]) -> serde_json::Value {

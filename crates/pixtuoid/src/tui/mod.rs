@@ -14,17 +14,19 @@ use std::io::{Stdout, stdout};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-    MouseButton, MouseEventKind,
+    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind,
+    KeyModifiers, MouseButton, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use futures_util::StreamExt;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use tokio::time::MissedTickBehavior;
 
 use tui_renderer::TuiRenderer;
 
@@ -1005,28 +1007,29 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         #[cfg(not(unix))]
         let terminate = std::future::pending::<()>();
         tokio::pin!(terminate);
-        let mut pacer = Pacer::new(Instant::now(), tick);
+        let mut frames = frame_clock(tick);
+        let mut events = EventStream::new();
+        let mut snapshot = scene_rx.borrow().clone();
+        let mut now = ui.now();
         loop {
-            let now = ui.now();
-            let snapshot = scene_rx.borrow_and_update().clone();
-            renderer.evict_missing(&snapshot);
-            let health = source_health.borrow_and_update().clone();
-            ui.build_frames(now, &snapshot, &health)
-                .apply_to(&mut renderer, now);
-            let audio_now = std::time::Instant::now();
-            audio_ctl.tick(audio_now);
-            renderer.set_volume_flash(audio_ctl.volume_flash(audio_now));
-            renderer.render(&snapshot, &pack, now)?;
+            tokio::select! {
+                _ = frames.tick() => {
+                    now = ui.now();
+                    snapshot = scene_rx.borrow_and_update().clone();
+                    renderer.evict_missing(&snapshot);
+                    let health = source_health.borrow_and_update().clone();
+                    ui.build_frames(now, &snapshot, &health)
+                        .apply_to(&mut renderer, now);
+                    let audio_now = std::time::Instant::now();
+                    audio_ctl.tick(audio_now);
+                    renderer.set_volume_flash(audio_ctl.volume_flash(audio_now));
+                    renderer.render(&snapshot, &pack, now)?;
 
-            if let Some(layout) = renderer.cached_layout() {
-                cap_sweep.publish(layout.buf_w, layout.buf_h, desk_cap, &floor_caps);
-            }
-
-            let next = pacer.next(Instant::now());
-            let mut polled = event::poll(next.saturating_duration_since(Instant::now()))?;
-            let mut quit = false;
-            while polled {
-                match event::read()? {
+                    if let Some(layout) = renderer.cached_layout() {
+                        cap_sweep.publish(layout.buf_w, layout.buf_h, desk_cap, &floor_caps);
+                    }
+                }
+                event = events.next() => match event.context("terminal input closed")?? {
                     Event::Key(k) if should_dispatch_key(k.kind) => {
                         let floor = FloorNav {
                             n_floors: pixtuoid_scene::floor::num_floors(&snapshot),
@@ -1034,7 +1037,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             in_transition: renderer.transition().is_some(),
                         };
                         let action = dispatch_key(k.code, k.modifiers, ui.modal(), floor);
-                        quit |= apply_key_action(
+                        let quit = apply_key_action(
                             action,
                             &mut KeyCtx {
                                 ui: &mut ui,
@@ -1048,25 +1051,18 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 respawn: crate::audio::respawn,
                             },
                         );
+                        if quit {
+                            if ui.theme_picker.is_some() {
+                                renderer.set_theme(theme::ALL_THEMES[ui.saved_theme_idx]);
+                            }
+                            break;
+                        }
                     }
                     Event::Mouse(m) => {
                         handle_mouse_event(m, &mut ui, &mut renderer, &scene_rx, &focus_roots, now)
                     }
                     _ => {}
-                }
-                polled = event::poll(Duration::from_millis(0))?;
-            }
-            if quit {
-                if ui.theme_picker.is_some() {
-                    renderer.set_theme(theme::ALL_THEMES[ui.saved_theme_idx]);
-                }
-                break;
-            }
-            // The frame-pacing sleep doubles as the signal-listen window: the crossterm
-            // poll above is synchronous, so this is the loop's only await point.
-            let rem = next.saturating_duration_since(Instant::now());
-            tokio::select! {
-                _ = tokio::time::sleep(rem) => {}
+                },
                 res = &mut ctrl_c => match res {
                     Ok(()) => break,
                     Err(e) => {
@@ -1080,7 +1076,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 },
                 _ = &mut terminate => break,
             }
-            pacer.woke(next, Instant::now());
         }
         Ok(())
     })
@@ -1090,96 +1085,39 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     result
 }
 
-/// The TUI loop's frame clock: when each frame is due.
-#[doc(hidden)]
-#[derive(Debug)]
-pub struct Pacer {
-    due: Instant,
-    period: Duration,
-}
-
-impl Pacer {
-    /// A clock whose first frame is due at `now`, one each `period`.
-    pub fn new(now: Instant, period: Duration) -> Self {
-        Self { due: now, period }
-    }
-
-    /// When the next frame is due, the last one's render having ended at
-    /// `now`: a period after the last was due, so neither the render nor a
-    /// late wake pushes every later frame back; or `now`, when the render
-    /// overran that, painting at once rather than bursting to catch up.
-    pub fn next(&self, now: Instant) -> Instant {
-        (self.due + self.period).max(now)
-    }
-
-    /// The wait for the frame due at `next` ended at `woke`. That frame counts
-    /// as due at its deadline, so a wake's timer slack comes back out of the
-    /// next interval; after a stall of a whole period or more it counts as due
-    /// at the wake, re-anchoring there, as tokio's `MissedTickBehavior::Delay`
-    /// does, rather than painting a second frame back to back.
-    pub fn woke(&mut self, next: Instant, woke: Instant) {
-        self.due = if woke >= next + self.period {
-            woke
-        } else {
-            next
-        };
-    }
+/// The TUI loop's frame clock, one tick per `period`. A frame that overran
+/// paints at once and the next back on the grid, neither a burst to catch up
+/// nor a re-anchor that lets every late wake stretch the rate
+/// ([`MissedTickBehavior::Skip`]).
+pub(crate) fn frame_clock(period: Duration) -> tokio::time::Interval {
+    let mut frames = tokio::time::interval(period);
+    frames.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    frames
 }
 
 #[cfg(test)]
-mod pacing_tests {
-    use super::Pacer;
-    use std::time::{Duration, Instant};
+mod frame_clock_tests {
+    use super::frame_clock;
+    use std::time::Duration;
+    use tokio::time::{Instant, advance};
 
-    const PERIOD: Duration = Duration::from_millis(33);
-    const MS: Duration = Duration::from_millis(1);
+    // Whole milliseconds: tokio's timer rounds a deadline up to one.
+    const PERIOD: Duration = Duration::from_millis(30);
 
-    /// One loop turn: the render ends `render` after the frame began, then
-    /// the wait wakes `late` after the next frame is due. When the next frame
-    /// begins.
-    fn turn(pacer: &mut Pacer, began: Instant, render: Duration, late: Duration) -> Instant {
-        let next = pacer.next(began + render);
-        let woke = next.max(began + render) + late;
-        pacer.woke(next, woke);
-        woke
-    }
-
-    /// Frames a period apart, a wake's timer slack coming back out of the
-    /// interval after it rather than adding to every one.
-    #[test]
-    fn frames_keep_their_period_through_a_late_wake() {
+    /// A render that overran by a non-whole number of periods: the next frame
+    /// at once, then back on the start's grid — neither a burst nor a whole
+    /// period from the late frame.
+    #[tokio::test(start_paused = true)]
+    async fn an_overrun_paints_at_once_then_falls_back_on_the_grid() {
+        let mut frames = frame_clock(PERIOD);
         let start = Instant::now();
-        let mut pacer = Pacer::new(start, PERIOD);
-        let first = turn(&mut pacer, start, 5 * MS, Duration::ZERO);
-        assert_eq!(first, start + PERIOD);
-        let slack = turn(&mut pacer, first, 5 * MS, 4 * MS);
-        assert_eq!(slack, start + 2 * PERIOD + 4 * MS);
-        let after = turn(&mut pacer, slack, 5 * MS, Duration::ZERO);
-        assert_eq!(after, start + 3 * PERIOD, "the slack came back out");
-    }
-
-    /// A render that overran its period: the next frame at once, once, then a
-    /// whole period on, not a burst.
-    #[test]
-    fn an_overrun_reanchors_without_a_burst() {
-        let start = Instant::now();
-        let mut pacer = Pacer::new(start, PERIOD);
-        let overran = turn(&mut pacer, start, 3 * PERIOD, Duration::ZERO);
-        assert_eq!(overran, start + 3 * PERIOD);
-        let after = turn(&mut pacer, overran, 5 * MS, Duration::ZERO);
-        assert_eq!(after, overran + PERIOD);
-    }
-
-    /// A wait that stalls a whole period or more: the frame after the wake is
-    /// a period on, not painted back to back.
-    #[test]
-    fn a_stalled_wait_reanchors_at_the_wake() {
-        let start = Instant::now();
-        let mut pacer = Pacer::new(start, PERIOD);
-        let stalled = turn(&mut pacer, start, 5 * MS, 2 * PERIOD);
-        assert_eq!(stalled, start + 3 * PERIOD);
-        let after = turn(&mut pacer, stalled, 5 * MS, Duration::ZERO);
-        assert_eq!(after, stalled + PERIOD);
+        frames.tick().await;
+        advance(PERIOD * 5 / 2).await;
+        let late = Instant::now();
+        frames.tick().await;
+        assert_eq!(Instant::now(), late, "the late frame paints at once");
+        frames.tick().await;
+        assert_eq!(Instant::now(), start + 3 * PERIOD);
     }
 }
 
