@@ -477,14 +477,10 @@ mod tests {
     /// without a stride slides its feet too.
     #[test]
     fn a_creature_walk_without_a_stride_is_flagged() {
-        for (walk, stride) in [
-            ("cat_walk", "stride   = 2\n"),
-            ("lobster_walk", "stride   = 6\n"),
-        ] {
-            let manifest = format!(
-                "[animations.{walk}]\nframes   = [\"{walk}_0.sprite\", \"{walk}_1.sprite\"]\nframe_ms = 250\n"
-            );
-            let pack = test_pack_declaring(&format!("{manifest}{stride}"), &manifest);
+        for (walk, stride) in [("cat_walk", 2), ("lobster_walk", 6)] {
+            // its stride is the last line before its density variant's table
+            let variant = format!("\n[animations.\"{walk}@4x\"]");
+            let pack = test_pack_declaring(&format!("stride   = {stride}\n{variant}"), &variant);
             assert_eq!(validate_pack(&pack).walks_without_stride, [walk]);
         }
     }

@@ -244,7 +244,7 @@ ICONS = {
     },
     # the OpenClaw gateway mascot, straight from the pack, so the icon IS the
     # lobster as the office renders it
-    "lobster": {"sprite": "lobster_rest.sprite"},
+    "lobster": {"sprite": "lobster_rest_0.sprite"},
     # ambient atmosphere: day/night + weather + themes (NOT audio — that's the
     # lofi row). The cloud is fully grey-OUTLINED, not base-edged, or its white
     # body washes out on the light theme's cream.
