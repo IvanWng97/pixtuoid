@@ -1,6 +1,7 @@
 # Review rules
 
-Read [`AGENTS.md`](AGENTS.md) first; these rules add to generic defect hunting.
+Read [`AGENTS.md`](AGENTS.md), and the nested `AGENTS.md` of each directory the
+diff touches, first; these rules add to generic defect hunting.
 
 ## Scope
 
