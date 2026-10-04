@@ -904,3 +904,19 @@ fn a_route_turns_on_the_open_pixel_nearest_a_blocked_centre() {
         "an open centre is kept"
     );
 }
+
+/// At 127x45 the anchors of two half-open cells beside a door's wall stub
+/// share a column the stub stands in, so neither the straight leg nor an L
+/// clears it; the route steps through the one-pixel gap instead.
+#[test]
+fn a_route_through_a_one_pixel_gap_stays_on_open_floor() {
+    let l = SceneLayout::compute_with_seed(127, 45, None, 0).expect("127x45 lays out");
+    let (from, to) = (Point { x: 55, y: 31 }, Point { x: 33, y: 39 });
+    let path = find_path(&l.walkable, &OccupancyOverlay::new(), None, from, to).expect("routable");
+    let off: Vec<Point> = path
+        .windows(2)
+        .flat_map(|leg| crate::physics::leg_pixels(leg[0], leg[1]))
+        .filter(|p| !l.walkable.is_walkable(p.x, p.y))
+        .collect();
+    assert_eq!(off, [], "{path:?}");
+}

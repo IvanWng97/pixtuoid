@@ -12,7 +12,7 @@ use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 /// `pathfind::CELL_SIZE` re-exports this value.
 pub(crate) const COARSE_CELL_SIZE: u16 = 4;
 
-/// Min walkable px (of `COARSE_CELL_SIZE²`) for a coarse cell to count as
+/// Min pixels of a coarse cell's [`floor`] for the cell to count as
 /// walkable. At 50% the grid squeezes through the 2px corridors the meeting-room
 /// interior needs after furniture padding; tighter made the meeting room
 /// unreachable, looser grazed furniture edges.
@@ -27,17 +27,82 @@ pub(crate) fn cell_center(cx: u16, cy: u16) -> Point {
 }
 
 /// The pixel a route turns on in coarse cell `(cx, cy)`: its centre, or the
-/// open pixel nearest it when the centre is blocked. A cell counts as walkable
-/// at half open, so the half holding its centre can be a wall's, and a walker
-/// turning on the centre would stand in it.
+/// [`floor`] pixel nearest it when the centre is off it. A cell counts as
+/// walkable at half open, so the half holding its centre can be a wall's, and a
+/// walker turning on the centre would stand in it.
 pub(crate) fn cell_anchor(mask: &WalkableMask, cx: u16, cy: u16) -> Point {
     let centre = cell_center(cx, cy);
-    let (x0, y0) = (cx * COARSE_CELL_SIZE, cy * COARSE_CELL_SIZE);
-    (y0..y0 + COARSE_CELL_SIZE)
-        .flat_map(|y| (x0..x0 + COARSE_CELL_SIZE).map(move |x| Point { x, y }))
-        .filter(|p| mask.is_walkable(p.x, p.y))
+    let floor = floor(mask, &OccupancyOverlay::new(), cx, cy);
+    cell_pixels(cx, cy)
+        .filter(|&(bit, _)| floor & bit != 0)
+        .map(|(_, p)| p)
         .min_by_key(|p| (p.x.abs_diff(centre.x) + p.y.abs_diff(centre.y), p.y, p.x))
         .unwrap_or(centre)
+}
+
+/// A coarse cell's pixels, one bit each, row-major.
+type CellBits = u16;
+const _: () = assert!(COARSE_CELL_SIZE * COARSE_CELL_SIZE <= CellBits::BITS as u16);
+
+/// Each pixel of coarse cell `(cx, cy)` with its [`CellBits`] bit.
+fn cell_pixels(cx: u16, cy: u16) -> impl Iterator<Item = (CellBits, Point)> {
+    let (x0, y0) = (cx * COARSE_CELL_SIZE, cy * COARSE_CELL_SIZE);
+    (0..COARSE_CELL_SIZE).flat_map(move |dy| {
+        (0..COARSE_CELL_SIZE).map(move |dx| {
+            (
+                1 << (dy * COARSE_CELL_SIZE + dx),
+                Point {
+                    x: x0 + dx,
+                    y: y0 + dy,
+                },
+            )
+        })
+    })
+}
+
+/// The bits of a cell's west column.
+const WEST_COLUMN: CellBits = {
+    let mut bits = 0;
+    let mut row = 0;
+    while row < COARSE_CELL_SIZE {
+        bits |= 1 << (row * COARSE_CELL_SIZE);
+        row += 1;
+    }
+    bits
+};
+/// The bits of a cell's east column.
+const EAST_COLUMN: CellBits = WEST_COLUMN << (COARSE_CELL_SIZE - 1);
+
+/// Where a walker stands in coarse cell `(cx, cy)`: the largest 4-connected
+/// piece of its [`open`] pixels, the first in row order among equals. A wall's
+/// corner can split a cell's open pixels into pieces touching only diagonally,
+/// and a walker crossing between them cuts that corner.
+fn floor(mask: &WalkableMask, overlay: &OccupancyOverlay, cx: u16, cy: u16) -> CellBits {
+    let open_bits = cell_pixels(cx, cy)
+        .filter(|&(_, p)| open(mask, overlay, p.x, p.y))
+        .fold(0, |bits, (bit, _)| bits | bit);
+    let mut unseen = open_bits;
+    let mut largest: CellBits = 0;
+    while unseen != 0 {
+        let mut piece = unseen.isolate_lowest_one();
+        loop {
+            let grown = (piece
+                | ((piece << 1) & !WEST_COLUMN)
+                | ((piece >> 1) & !EAST_COLUMN)
+                | (piece << COARSE_CELL_SIZE)
+                | (piece >> COARSE_CELL_SIZE))
+                & open_bits;
+            if grown == piece {
+                break;
+            }
+            piece = grown;
+        }
+        if piece.count_ones() > largest.count_ones() {
+            largest = piece;
+        }
+        unseen &= !piece;
+    }
+    largest
 }
 
 /// Is pixel `(x, y)` open — walkable on the static `mask` and clear of the
@@ -46,30 +111,20 @@ fn open(mask: &WalkableMask, overlay: &OccupancyOverlay, x: u16, y: u16) -> bool
     mask.is_walkable(x, y) && (overlay.is_empty() || !overlay.blocks(x, y))
 }
 
-/// Is coarse cell `(cx, cy)` walkable — ≥ `COARSE_CELL_WALKABLE_MIN` of its
-/// pixels [`open`]? The reach BFS passes an EMPTY overlay (static geometry
-/// only); the router passes the live occupancy overlay.
+/// Is coarse cell `(cx, cy)` walkable — ≥ `COARSE_CELL_WALKABLE_MIN` pixels
+/// of [`floor`]? The reach BFS passes an EMPTY overlay (static geometry only);
+/// the router passes the live occupancy overlay.
 pub(crate) fn cell_walkable(
     mask: &WalkableMask,
     overlay: &OccupancyOverlay,
     cx: u16,
     cy: u16,
 ) -> bool {
-    let px_start = cx.saturating_mul(COARSE_CELL_SIZE);
-    let py_start = cy.saturating_mul(COARSE_CELL_SIZE);
-    let mut walk_count = 0u16;
-    for dy in 0..COARSE_CELL_SIZE {
-        for dx in 0..COARSE_CELL_SIZE {
-            if open(mask, overlay, px_start + dx, py_start + dy) {
-                walk_count += 1;
-            }
-        }
-    }
-    walk_count >= COARSE_CELL_WALKABLE_MIN
+    floor(mask, overlay, cx, cy).count_ones() >= u32::from(COARSE_CELL_WALKABLE_MIN)
 }
 
 /// Can a walker cross from coarse cell `a` into the orthogonally adjacent `b`
-/// — does some pixel on `a`'s side of their shared edge face an open pixel on
+/// — does some pixel of `a`'s [`floor`] on their shared edge face one of
 /// `b`'s? Both cells can be half open with the open halves on opposite sides,
 /// meeting only at a pixel corner a straight leg between them cuts.
 fn crossable(
@@ -86,15 +141,22 @@ fn crossable(
             (near, near - 1)
         }
     };
-    let open = |x, y| open(mask, overlay, x, y);
+    let on_floor = |cell: (u16, u16)| {
+        let bits = floor(mask, overlay, cell.0, cell.1);
+        move |x: u16, y: u16| {
+            let (dx, dy) = (x - cell.0 * COARSE_CELL_SIZE, y - cell.1 * COARSE_CELL_SIZE);
+            bits & (1 << (dy * COARSE_CELL_SIZE + dx)) != 0
+        }
+    };
+    let (on_a, on_b) = (on_floor(a), on_floor(b));
     if a.1 == b.1 {
         let (xa, xb) = edge(a.0, b.0);
         let y0 = a.1 * COARSE_CELL_SIZE;
-        (0..COARSE_CELL_SIZE).any(|d| open(xa, y0 + d) && open(xb, y0 + d))
+        (0..COARSE_CELL_SIZE).any(|d| on_a(xa, y0 + d) && on_b(xb, y0 + d))
     } else {
         let (ya, yb) = edge(a.1, b.1);
         let x0 = a.0 * COARSE_CELL_SIZE;
-        (0..COARSE_CELL_SIZE).any(|d| open(x0 + d, ya) && open(x0 + d, yb))
+        (0..COARSE_CELL_SIZE).any(|d| on_a(x0 + d, ya) && on_b(x0 + d, yb))
     }
 }
 
@@ -290,5 +352,27 @@ mod tests {
         assert!(cell_walkable(&m, &OccupancyOverlay::new(), 2, 1));
         assert!(!neighbours(&m, (1, 1)).contains(&(2, 1)));
         assert!(!neighbours(&m, (2, 1)).contains(&(1, 1)));
+    }
+
+    /// A wall's corner splits cell (1, 1)'s open pixels into a piece of six
+    /// and one of two touching it only diagonally: enough open pixels, but
+    /// no floor big enough to stand on.
+    #[test]
+    fn a_cell_counts_only_its_largest_piece_of_floor() {
+        let mut m = WalkableMask::new_open(32, 32);
+        let s = COARSE_CELL_SIZE;
+        m.mark_blocked(s, s, s, s, 0);
+        m.mark_walkable(s + 1, s, s - 1, s / 2);
+        m.mark_walkable(s, s + s / 2, 1, s / 2);
+        let open = cell_pixels(1, 1)
+            .filter(|&(_, p)| m.is_walkable(p.x, p.y))
+            .count();
+        assert_eq!(open, usize::from(COARSE_CELL_WALKABLE_MIN));
+        assert!(!cell_walkable(&m, &OccupancyOverlay::new(), 1, 1));
+        m.mark_walkable(s, s + 1, 1, 1);
+        assert!(
+            cell_walkable(&m, &OccupancyOverlay::new(), 1, 1),
+            "joined into one piece, it stands"
+        );
     }
 }

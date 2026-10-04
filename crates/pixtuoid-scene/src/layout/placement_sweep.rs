@@ -730,9 +730,9 @@ fn no_route_on_a_short_floor_passes_through_a_wall() {
 const WALL_SCAN_TOP_H: u16 = 64;
 /// The widest floor that scan lays out.
 const WALL_SCAN_RIGHT_W: u16 = 240;
-/// That scan's width step: one routing cell's worth of shift moves every wall
-/// against the grid.
-const WALL_SCAN_W_STEP: usize = 7;
+/// That scan's width step, prime to the routing cell so each width shifts the
+/// walls against the grid.
+const WALL_SCAN_W_STEP: usize = 23;
 
 /// The door threshold is walkable AND every walkable pixel is reachable from it
 /// (4-connected), through the PRODUCTION `unreachable_walkable_cells` so the
