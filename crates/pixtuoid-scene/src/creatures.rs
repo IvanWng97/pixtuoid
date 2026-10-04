@@ -529,7 +529,6 @@ mod tests {
         SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000) + Duration::from_millis(ms)
     }
 
-    /// Every creature's roam: each pet's, and the mascot's in every live state.
     /// Every creature's roam with the Full ticks it takes per cycle of its
     /// walk: each pet's, and the mascot's in every state.
     fn roams(pack: &Pack) -> Vec<(&'static str, Roam, u64)> {
