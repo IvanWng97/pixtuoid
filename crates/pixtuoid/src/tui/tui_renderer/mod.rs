@@ -17,7 +17,7 @@ use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 
 use crate::tui::renderer::{DrawCtx, PetState, draw_scene, flush_buffer_to_term_at_offset};
-use pixtuoid_scene::display::{HoverTarget, Hovers};
+use pixtuoid_scene::display::Hovers;
 use pixtuoid_scene::floor::{
     FloorInputs, FloorMeta, FloorTransition, FrameInputs, PerFloor, PerOffice, PetInputs,
     num_floors, project_floor_scene, render_floor,
@@ -392,15 +392,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     /// The agent topmost at cell `(col, row)` in the last frame drawn.
+    #[cfg(test)]
     pub(crate) fn hit_test_agent_at(&self, col: u16, row: u16) -> Option<pixtuoid_core::AgentId> {
-        #[cfg(feature = "graphics")]
-        if let (Some(crate::tui::geometry::SceneGeometry::Cutaway { .. }), Some(cutaway)) =
-            (self.last_geometry, &self.cutaway)
-        {
-            return cutaway.hover_at(self.scene_area_at(col, row)?.bounds());
-        }
         match self.scene_hit_at(col, row)? {
-            crate::tui::hit_test::SceneHit::Figure(HoverTarget::Agent(id)) => Some(*id),
+            crate::tui::hit_test::SceneHit::Figure(
+                pixtuoid_scene::display::HoverTarget::Agent(id),
+            ) => Some(*id),
             _ => None,
         }
     }
@@ -939,10 +936,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         now: SystemTime,
         nf: usize,
     ) -> Result<()> {
-        use crate::tui::hit_test::{hit_test_coffee_machine, hit_test_furniture};
         use crate::tui::renderer::{
-            DrawOut, TooltipAt, draw_footer_only_frame, paint_coffee_tooltip, paint_footer,
-            paint_furniture_tooltip, paint_hover_tooltip, paint_overlays, scene_rect,
+            DrawOut, TooltipAt, draw_footer_only_frame, paint_footer, paint_overlays,
+            paint_scene_tooltip, scene_hit, scene_rect,
         };
         let scene_area = fitted.scene;
         let floor_scene = project_floor_scene(scene, self.current_floor);
@@ -983,13 +979,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             now,
             board: &board,
         };
-        cutaway.paint(fitted, &stepped, theme, showing);
+        let hovers = cutaway.paint(fitted, &stepped, theme, showing);
         let geometry = fitted.geometry();
-        let layout = &stepped.layout;
-        let mouse = self
-            .mouse_pos
-            .and_then(|(mx, my)| Some((mx, my, geometry.area_at(mx, my)?)));
-        let hovered = mouse.and_then(|(.., cell)| cutaway.hover_at(cell.bounds()));
+        let mouse = self.mouse_pos.and_then(|(mx, my)| {
+            let hit = scene_hit(&hovers, &stepped.layout, geometry.area_at(mx, my)?)?;
+            Some((mx, my, hit))
+        });
         cutaway.before_flush(now);
         let mut covered = Vec::new();
         self.terminal.draw(|f| {
@@ -997,21 +992,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             let scene_area = scene_rect(full);
             paint_footer(f, &footer, full, theme);
             cutaway.place(f.buffer_mut(), scene_area);
-            if let Some((mx, my, cell)) = mouse {
+            if let Some((mx, my, hit)) = &mouse {
                 let at = TooltipAt {
-                    mx,
-                    my,
+                    mx: *mx,
+                    my: *my,
                     scene_rect: scene_area,
                 };
-                // The agent first, then the classic's fall-through, less the
-                // pet and mascots the cutaway does not report.
-                if let Some(id) = hovered {
-                    paint_hover_tooltip(f, &floor_scene, id, at, now, theme);
-                } else if hit_test_coffee_machine(layout, cell) {
-                    paint_coffee_tooltip(f, at, theme);
-                } else if let Some(label) = hit_test_furniture(layout, cell) {
-                    paint_furniture_tooltip(f, label, at, theme);
-                }
+                paint_scene_tooltip(f, hit, &world, at, theme);
             }
             paint_overlays(f, &overlays, now, full, theme);
             covered = cutaway.cover(f.buffer_mut(), scene_area);
@@ -1021,6 +1008,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             scene,
             DrawOut {
                 layout: Some(stepped.layout),
+                hovers,
                 occupied_waypoints: stepped.frame.occupied_waypoints,
                 geometry: Some(geometry),
                 ..DrawOut::default()

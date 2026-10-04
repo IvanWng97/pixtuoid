@@ -251,23 +251,6 @@ impl<'a> DisplayList<'a> {
             _ => None,
         })
     }
-
-    /// Each piece's hover box and the agent it shows, in draw order: a
-    /// character's `body`, every other piece's span showing none. A badge is
-    /// no hover target, as in the classic: neighbours' plates overlap, so one
-    /// would claim the body under another's
-    /// (`hovering_a_sitter_under_a_neighbours_badge_names_the_sitter`).
-    pub(crate) fn hover_spans(
-        &self,
-    ) -> impl Iterator<Item = (Span, Option<pixtuoid_core::AgentId>)> + '_ {
-        self.pieces.iter().filter_map(|p| match &p.kind {
-            PieceKind::Character { figure, body, .. } => {
-                Some((*body, Some(figure.key.frame.agent_id)))
-            }
-            PieceKind::Badge { .. } => None,
-            _ => Some((p.span, None)),
-        })
-    }
 }
 
 /// A hash of every input `paint_piece` and

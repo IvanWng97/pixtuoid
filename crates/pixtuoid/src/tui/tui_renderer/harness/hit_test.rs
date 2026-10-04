@@ -429,6 +429,20 @@ fn a_pet_over_the_coffee_machine_is_the_hover() {
 /// the coffee machine, the tooltip there names the same thing.
 #[test]
 fn what_the_tooltip_names_is_what_a_click_acts_on() {
+    let (cols, rows) = (140, 48);
+    the_tooltip_names_what_a_click_acts_on(&mut build(cols, rows, vec![PetKind::Cat]), |a| {
+        format!("\u{25b8}{}", a.label)
+    });
+}
+
+/// [`what_the_tooltip_names_is_what_a_click_acts_on`] on `r`, a renderer with
+/// a cat, where a hovered agent shows `agent_says`.
+pub(super) fn the_tooltip_names_what_a_click_acts_on<B>(
+    r: &mut TuiRenderer<B>,
+    agent_says: impl Fn(&AgentSlot) -> String,
+) where
+    B: Backend<Error: Send + Sync + 'static> + std::borrow::Borrow<TestBackend>,
+{
     let now = t0() + Duration::from_secs(20);
     let mut scene = scene_with(
         (0..3)
@@ -454,15 +468,11 @@ fn what_the_tooltip_names_is_what_a_click_acts_on() {
             },
         );
     }
-    let (cols, rows) = (140, 48);
-    let mut r = build(cols, rows, vec![PetKind::Cat]);
     r.render(&scene, pack(), now).unwrap();
     let (mut named, mut seen) = (Vec::new(), [false; 4]);
-    for (col, row) in (0..rows).flat_map(|row| (0..cols).map(move |col| (col, row))) {
+    for (col, row) in r.frame_buffer().area().positions().map(|p| (p.x, p.y)) {
         let (kind, says) = match r.scene_hit_at(col, row) {
-            Some(SceneHit::Figure(HoverTarget::Agent(id))) => {
-                (0, format!("\u{25b8}{}", scene.agents[id].label))
-            }
+            Some(SceneHit::Figure(HoverTarget::Agent(id))) => (0, agent_says(&scene.agents[id])),
             Some(SceneHit::Figure(HoverTarget::Pet(pet))) => (
                 1,
                 if pet.anim == PetKind::Cat.sleep_anim() {

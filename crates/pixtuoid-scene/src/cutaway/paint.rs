@@ -4096,104 +4096,6 @@ mod tests {
         assert_eq!(list.hovers().listed(), creatures);
     }
 
-    /// TEMPORARY (3b S2d 1/2; deleted with `hover_at`): on every cell, a
-    /// canvas frame's hovers name what `hover_at` names, save the deltas: a
-    /// later piece that is no figure no longer covers one (D5), and a creature
-    /// is named (D6, D7).
-    #[test]
-    fn a_frames_hovers_agree_with_hover_at_but_for_the_deltas() {
-        use crate::cutaway::canvas::CutawayCanvas;
-        use crate::display::HoverTarget;
-        use std::sync::Arc;
-        let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pack = Arc::new(test_default_pack());
-        let mut cases = vec![creatures()];
-        for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
-            let (layout, _, frames, _) = sit_down(facing, 2);
-            cases.extend(frames.into_iter().map(|f| (layout.clone(), f)));
-        }
-        let at_noon = || {
-            showing(
-                crate::floor::FloorMeta::ground(),
-                crate::localclock::at_hour(12),
-            )
-        };
-        // The box `hover_at` resolved each piece by: a character's body,
-        // any other's span, a badge none.
-        let old_box = |p: &Piece| match &p.kind {
-            PieceKind::Character { body, .. } => Some(*body),
-            PieceKind::Badge { .. } => None,
-            _ => Some(p.span),
-        };
-        let mut deltas = [0usize; 2];
-        for (layout, frame) in cases {
-            let layout = Arc::new(layout);
-            for s in [1, pack.max_density_variant().get()] {
-                let scale = RenderScale::new(s).expect("nonzero");
-                let office = Office {
-                    layout: &layout,
-                    pack: &pack,
-                    theme,
-                    scale,
-                };
-                let list = crate::display::compose(&frame, office, at_noon());
-                let stepped = crate::floor::SteppedFloor {
-                    layout: Arc::clone(&layout),
-                    frame: frame.clone(),
-                };
-                let mut canvas = CutawayCanvas::new(Arc::clone(&pack));
-                let hovers = canvas
-                    .frame(
-                        &stepped,
-                        theme,
-                        scale,
-                        at_noon(),
-                        &mut CutawayCache::default(),
-                    )
-                    .hovers
-                    .clone();
-                for (x, y) in (0..layout.buf_h).flat_map(|y| (0..layout.buf_w).map(move |x| (x, y)))
-                {
-                    let cell = Bounds {
-                        x,
-                        y,
-                        width: 1,
-                        height: 1,
-                    };
-                    match (canvas.hover_at(cell), hovers.at(cell)) {
-                        (Some(a), new) => {
-                            assert_eq!(new, Some(&HoverTarget::Agent(a)), "at scale {s}, {cell:?}")
-                        }
-                        (None, None) => {}
-                        (None, Some(HoverTarget::Pet(_) | HoverTarget::Mascot(_))) => {
-                            deltas[1] += 1;
-                        }
-                        (None, Some(HoverTarget::Agent(_))) => {
-                            let top = list
-                                .pieces()
-                                .iter()
-                                .rev()
-                                .find(|p| old_box(p).is_some_and(|b| b.meets(cell)))
-                                .expect("hover_at met a piece");
-                            assert!(
-                                !matches!(
-                                    top.kind,
-                                    PieceKind::Character { .. } | PieceKind::Creature { .. }
-                                ),
-                                "at scale {s}, {cell:?}: only D5 lets a hover through"
-                            );
-                            deltas[0] += 1;
-                        }
-                    }
-                }
-            }
-        }
-        assert!(
-            deltas.iter().all(|&n| n > 0),
-            "premise: both deltas show: {deltas:?}"
-        );
-    }
-
     /// What rides on a figure never covers it from the pointer: every cell of
     /// an effect over its body names the figure.
     #[test]
@@ -5161,8 +5063,21 @@ mod tests {
                 .filter(|p| matches!(p.kind, PieceKind::Character { .. }))
                 .collect();
             let hovers: Vec<(pixtuoid_core::AgentId, Span)> = list
-                .hover_spans()
-                .filter_map(|(body, agent)| Some((agent?, body)))
+                .hovers()
+                .listed()
+                .iter()
+                .map(|h| match h.target {
+                    crate::display::HoverTarget::Agent(id) => {
+                        let Bounds {
+                            x,
+                            y,
+                            width,
+                            height,
+                        } = h.at;
+                        (id, Span::new(x, y, width, height, 0))
+                    }
+                    ref other => panic!("{other:?} in an office of agents"),
+                })
                 .collect();
             assert_eq!(hovers.len(), pieces.len());
             assert_eq!(hovers.len(), frame.characters.len());

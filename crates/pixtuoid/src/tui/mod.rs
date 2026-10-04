@@ -110,23 +110,6 @@ enum KeyAction {
     Redraw,
 }
 
-fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
-    renderer: &TuiRenderer<B>,
-    scene_rx: &SceneRx,
-    focus_roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
-    col: u16,
-    row: u16,
-) -> bool {
-    let Some(id) = renderer.hit_test_agent_at(col, row) else {
-        return false;
-    };
-    let Some(slot) = scene_rx.borrow().agents.get(&id).cloned() else {
-        return false;
-    };
-    crate::focus::focus_slot(&slot, focus_roots);
-    true
-}
-
 /// Opens the live gate only on `Ok`, matching [`crate::sources::connect`]'s flag rollback
 /// — no shown-but-broken source survives a restart.
 fn connect_source(
@@ -856,10 +839,14 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
                 && crossterm::terminal::size().is_ok_and(|t| star_clicked(m.column, m.row, t));
             if on_star {
                 let _ = open::that(widgets::REPO_URL);
-            } else if focus_clicked_agent(renderer, scene_rx, focus_roots, m.column, m.row) {
-                // Empty on purpose: the click was consumed.
             } else {
                 match renderer.scene_hit_at(m.column, m.row) {
+                    Some(SceneHit::Figure(&HoverTarget::Agent(id))) => {
+                        let slot = scene_rx.borrow().agents.get(&id).cloned();
+                        if let Some(slot) = slot {
+                            crate::focus::focus_slot(&slot, focus_roots);
+                        }
+                    }
                     Some(SceneHit::Coffee) => {
                         let _ = open::that("https://buymeacoffee.com/IvanWng97");
                     }

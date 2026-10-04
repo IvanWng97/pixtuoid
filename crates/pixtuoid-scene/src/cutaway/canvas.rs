@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::format::Pack;
 
@@ -76,8 +75,6 @@ struct Shown {
     epoch: Epoch,
     /// Every piece's reach and every light's span, each with its fingerprint.
     footprints: Vec<(Span, u64)>,
-    /// [`DisplayList::hover_spans`](crate::display::DisplayList::hover_spans).
-    spans: Vec<(Span, Option<AgentId>)>,
     hovers: Hovers,
 }
 
@@ -123,7 +120,6 @@ impl CutawayCanvas {
             .map(|p| (p.reach(), p.fingerprint))
             .chain(list.lights().iter().map(|l| (l.span, l.fingerprint)))
             .collect();
-        let spans = list.hover_spans().collect();
         let size = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
         let dirty = match self.shown.take() {
             Some(shown) if shown.epoch == epoch => Dirty::Rects(
@@ -143,7 +139,6 @@ impl CutawayCanvas {
         let shown = self.shown.insert(Shown {
             epoch,
             footprints,
-            spans,
             hovers: list.hovers().clone(),
         });
         CanvasFrame {
@@ -151,14 +146,6 @@ impl CutawayCanvas {
             dirty,
             hovers: &shown.hovers,
         }
-    }
-
-    /// The agent the last frame shows topmost over `area`, in LOGICAL units
-    /// as [`SceneLayout`], not [`Dirty::Rects`]' buffer pixels; `None` where a
-    /// piece that is no agent lies over it, or none does.
-    pub fn hover_at(&self, area: Bounds) -> Option<AgentId> {
-        let shown = self.shown.as_ref()?;
-        shown.spans.iter().rev().find(|(s, _)| s.meets(area))?.1
     }
 }
 
@@ -202,10 +189,13 @@ fn on_buffer(span: Span, scale: RenderScale, (w, h): (u16, u16)) -> Option<Bound
 mod tests {
     use std::time::{Duration, SystemTime};
 
+    use pixtuoid_core::AgentId;
+
     use super::*;
     use crate::anim::Motion;
     use crate::cutaway::paint::render_cutaway;
     use crate::display::compose::tests::{empty_frame, lively_office, sit_down};
+    use crate::display::{HoverTarget, PieceKind};
     use crate::floor::FloorMeta;
     use crate::pack::test_default_pack;
     use crate::sim::SimFrame;
@@ -532,7 +522,8 @@ mod tests {
             crate::localclock::at_hour(12)
         }
 
-        /// `frame`'s pieces as `(is a desk, hover box, agent)`, back to front.
+        /// `frame`'s pieces bar the badges as `(is a desk, box, agent)`, back
+        /// to front: a character's box is their body.
         fn boxes(&self, frame: &SimFrame) -> Vec<(bool, Span, Option<AgentId>)> {
             let office = Office {
                 layout: &self.layout,
@@ -547,14 +538,12 @@ mod tests {
             );
             list.pieces()
                 .iter()
-                .filter(|p| !matches!(p.kind, crate::display::PieceKind::Badge { .. }))
-                .zip(list.hover_spans())
-                .map(|(p, (span, agent))| {
-                    (
-                        matches!(p.kind, crate::display::PieceKind::Desk { .. }),
-                        span,
-                        agent,
-                    )
+                .filter_map(|p| match &p.kind {
+                    PieceKind::Badge { .. } => None,
+                    PieceKind::Character { figure, body, .. } => {
+                        Some((false, *body, Some(figure.key.frame.agent_id)))
+                    }
+                    kind => Some((matches!(kind, PieceKind::Desk { .. }), p.span, None)),
                 })
                 .collect()
         }
@@ -611,8 +600,10 @@ mod tests {
             })
             .expect("the walk passes in front of a desk");
         let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
-        h.show(&mut canvas, frame);
-        assert_eq!(canvas.hover_at(area), Some(id));
+        assert_eq!(
+            h.show(&mut canvas, frame).at(area),
+            Some(&HoverTarget::Agent(id))
+        );
     }
 
     /// A desk painted over its sitter's legs leaves them to the pointer: only
@@ -636,7 +627,7 @@ mod tests {
         let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
         assert_eq!(
             h.show(&mut canvas, seated).at(area),
-            Some(&crate::display::HoverTarget::Agent(id))
+            Some(&HoverTarget::Agent(id))
         );
     }
 
@@ -652,9 +643,7 @@ mod tests {
             .find(|&a| boxes.iter().all(|&(_, s, _)| !s.meets(a)))
             .expect("bare floor");
         let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
-        assert_eq!(canvas.hover_at(area), None, "before any frame");
-        h.show(&mut canvas, frame);
-        assert_eq!(canvas.hover_at(area), None);
+        assert_eq!(h.show(&mut canvas, frame).at(area), None);
     }
 
     /// Hovering answers from the last frame: where the walker stood before
@@ -676,10 +665,9 @@ mod tests {
             "the walker never left {area:?}"
         );
         let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
-        h.show(&mut canvas, first);
-        assert_eq!(canvas.hover_at(area), Some(id));
-        h.show(&mut canvas, last);
-        assert_ne!(canvas.hover_at(area), Some(id));
+        let id = HoverTarget::Agent(id);
+        assert_eq!(h.show(&mut canvas, first).at(area), Some(&id));
+        assert_ne!(h.show(&mut canvas, last).at(area), Some(&id));
     }
 
     /// A neighbour sitting just south has their badge plate over the sitter's
@@ -745,17 +733,11 @@ mod tests {
             else {
                 continue;
             };
-            let mut alone = CutawayCanvas::new(Arc::clone(&h.pack));
-            h.show(&mut alone, seated);
-            if alone.hover_at(at) != Some(a_id) {
-                continue;
-            }
             tried += 1;
             let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
-            h.show(&mut canvas, &both);
             assert_eq!(
-                canvas.hover_at(at),
-                Some(a_id),
+                h.show(&mut canvas, &both).at(at),
+                Some(&HoverTarget::Agent(a_id)),
                 "at {at:?}, {dy} rows south"
             );
         }

@@ -16,14 +16,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
-use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::format::{Density, Pack};
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_scene::cutaway::canvas::{CanvasFrame, CutawayCanvas, Dirty};
 use pixtuoid_scene::cutaway::paint::CutawayCache;
-use pixtuoid_scene::display::Showing;
+use pixtuoid_scene::display::{Hovers, Showing};
 use pixtuoid_scene::floor::SteppedFloor;
-use pixtuoid_scene::layout::{Bounds, Size};
+use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::Theme;
 use ratatui::buffer::{Buffer, Cell, CellDiffOption};
 use ratatui::layout::{Position, Rect};
@@ -178,16 +177,17 @@ impl TileCutaway {
     }
 
     /// Paint `stepped` as `fitted`, and queue the tiles it changed once the
-    /// protocol's cadence allows; until then they stay owed.
+    /// protocol's cadence allows; until then they stay owed. Returns what the
+    /// frame answers a pointer with.
     pub(crate) fn paint(
         &mut self,
         fitted: Fitted,
         stepped: &SteppedFloor,
         theme: &'static Theme,
         showing: Showing<'_>,
-    ) {
+    ) -> Hovers {
         let now = showing.now;
-        let CanvasFrame { buf, dirty, .. } = self.canvas.frame(
+        let CanvasFrame { buf, dirty, hovers } = self.canvas.frame(
             stepped,
             theme,
             fitted.fit.render_scale(),
@@ -197,7 +197,9 @@ impl TileCutaway {
         if dirty != Dirty::Rects(Vec::new()) {
             self.image.clone_from(buf);
         }
+        let hovers = hovers.clone();
         self.stage(&dirty, now, fitted.scene.as_position());
+        hovers
     }
 
     /// Paint both floors of `slide`, composed as it places them, and queue
@@ -410,11 +412,6 @@ impl TileCutaway {
             }
         }
         covered
-    }
-
-    /// [`CutawayCanvas::hover_at`] on the last frame painted.
-    pub(crate) fn hover_at(&self, area: Bounds) -> Option<AgentId> {
-        self.canvas.hover_at(area)
     }
 
     /// Owe every tile again: the terminal may have dropped them.
