@@ -1,6 +1,6 @@
 //! Composing a frame's [`DisplayList`], the second reader of `SimFrame`. Of the
 //! sim's effects it lists those riding on people and creatures
-//! (`cutaway::effects`); steam stays with the classic pass.
+//! ([`effects`](crate::display::effects)); steam stays with the classic pass.
 //! It never advances the sim; a mover here would desync the profiles.
 
 use pixtuoid_core::sprite::format::Pack;
@@ -217,7 +217,7 @@ pub(crate) fn compose_at<'a>(
     let Office {
         pack, theme, scale, ..
     } = office;
-    let ambient = crate::cutaway::light::Ambient::of(&moment.look);
+    let ambient = crate::display::light::Ambient::of(&moment.look);
     let mut collected = collect_pieces(frame, office, moment);
     collected.extend(signs(office, floor.floor_idx, board));
     let sorted = depth_sort(
@@ -239,7 +239,7 @@ pub(crate) fn compose_at<'a>(
         lights: lights(frame, office, moment, floor.floor_idx, ambient),
         ambient,
         ground: Ground::of(theme, moment.look.ground_tint),
-        flash: crate::cutaway::light::Flash::of(&moment.sky),
+        flash: crate::display::light::Flash::of(&moment.sky),
         hovers: pieces.iter().filter_map(Piece::hover).collect(),
         pieces,
         pack,
@@ -307,7 +307,7 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
             continue;
         };
         for &effect in effects {
-            let riding = crate::cutaway::effects::Riding {
+            let riding = crate::display::effects::Riding {
                 effect,
                 head: None,
                 pen,
@@ -325,7 +325,7 @@ fn lights(
     office: Office<'_>,
     moment: &Moment,
     floor_idx: usize,
-    ambient: crate::cutaway::light::Ambient,
+    ambient: crate::display::light::Ambient,
 ) -> Vec<LightPiece> {
     let Office {
         layout,
@@ -382,9 +382,9 @@ fn lights(
         .chain(&lights.monitor_halos)
         .chain(std::iter::once(&lights.neon))
         .filter_map(|e| {
-            crate::cutaway::light::LightView::of(
+            crate::display::light::LightView::of(
                 e,
-                crate::cutaway::light::tint_of(e.kind, theme, frame.neon),
+                crate::display::light::tint_of(e.kind, theme, frame.neon),
                 ambient,
                 pen,
                 (layout.buf_w, layout.buf_h),
@@ -1200,7 +1200,7 @@ fn riders(
     key: &crate::character::CharacterKey,
     (w, at): (u16, crate::layout::Point),
     scale: RenderScale,
-) -> Vec<crate::cutaway::effects::Riding> {
+) -> Vec<crate::display::effects::Riding> {
     let d = key.frame.density.get();
     let Some(pen) = Pen::new(scale, d) else {
         return Vec::new();
@@ -1211,12 +1211,12 @@ fn riders(
         Some(dress) => {
             let (d, frame_w) = (i32::from(d), i32::from(w) * i32::from(d));
             let x = i32::from(dress.head.x);
-            Some(crate::cutaway::effects::ArtPoint {
+            Some(crate::display::effects::ArtPoint {
                 x: i32::from(at.x) * d + if key.frame.flip_x { frame_w - 1 - x } else { x },
                 y: i32::from(at.y) * d + dress.crest,
             })
         }
-        None if d == 1 => Some(crate::cutaway::effects::ArtPoint {
+        None if d == 1 => Some(crate::display::effects::ArtPoint {
             x: i32::from(at.x + w / 2),
             y: i32::from(at.y),
         }),
@@ -1224,7 +1224,7 @@ fn riders(
     };
     c.effects
         .iter()
-        .map(|&effect| crate::cutaway::effects::Riding { effect, head, pen })
+        .map(|&effect| crate::display::effects::Riding { effect, head, pen })
         .collect()
 }
 
@@ -1386,7 +1386,7 @@ pub(crate) fn push_windows(
     let d = density.get();
     let sky = crate::celestial::SkyView::of(moment, layout.buf_w, layout.wall_band_h(), theme);
     // The bolt lights the glass and all it shows, over the weather on it.
-    let bolt = crate::cutaway::light::bolt_steps(&moment.sky);
+    let bolt = crate::display::light::bolt_steps(&moment.sky);
     let mut bolt_lift = crate::dither::Stepped::new(bolt as i8);
     for bay in layout.window_bays() {
         let size = Size {

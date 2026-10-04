@@ -9,8 +9,8 @@ use std::sync::Arc;
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::format::Pack;
 
-use crate::cutaway::light::Ambient;
 use crate::cutaway::paint::paint;
+use crate::display::light::Ambient;
 use crate::display::{Hovers, Office, Showing, Span, compose};
 use crate::floor::SteppedFloor;
 use crate::layout::{Bounds, SceneLayout};
@@ -57,7 +57,7 @@ struct Epoch {
     scale: RenderScale,
     ambient: Ambient,
     ground: crate::display::Ground,
-    flash: crate::cutaway::light::Flash,
+    flash: crate::display::light::Flash,
 }
 
 impl PartialEq for Epoch {

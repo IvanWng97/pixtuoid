@@ -4,6 +4,7 @@ use super::*;
 use crate::anim::{Motion, epoch_ms};
 use crate::character::test_support::{color_of, make_slot, make_slot_cwd};
 use crate::character::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY, tool_glow_tint};
+use crate::cutaway::wall::paint_wall;
 use crate::floor::{FloorInputs, PetInputs};
 use crate::layout::CHARACTER_SPRITE_W;
 use crate::layout::Size;
@@ -15,7 +16,6 @@ use crate::sim::anchors::{
 };
 use crate::sim::seat::{Seat, settle_seat};
 use crate::sim::{CharacterGlow, CharacterPlacement, SimStores};
-use crate::wall::paint_wall;
 use pixtuoid_core::sprite::Frame;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;

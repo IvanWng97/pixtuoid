@@ -87,11 +87,11 @@ pub(crate) struct DisplayList<'a> {
     pub(super) lights: Vec<LightPiece>,
     /// How dark the room is: every non-emissive pixel is painted under it, so a
     /// change repaints the whole frame.
-    pub(super) ambient: crate::cutaway::light::Ambient,
+    pub(super) ambient: crate::display::light::Ambient,
     /// The carpet the backdrop lays: a change repaints the whole frame too.
     pub(super) ground: Ground,
     /// How far lightning lifts the room: a change repaints the whole frame.
-    pub(super) flash: crate::cutaway::light::Flash,
+    pub(super) flash: crate::display::light::Flash,
     /// The figures' hovers, in `pieces`' order.
     pub(super) hovers: super::Hovers,
     // What it was built with, so painting it cannot use anything else: a
@@ -175,7 +175,7 @@ impl Piece {
 /// frame does ([`net_pass`](crate::cutaway::light::net_pass)).
 pub(crate) struct LightPiece {
     pub(crate) span: Span,
-    pub(crate) view: crate::cutaway::light::LightView,
+    pub(crate) view: crate::display::light::LightView,
     pub(crate) fingerprint: u64,
 }
 
@@ -215,7 +215,7 @@ impl<'a> DisplayList<'a> {
         &self.lights
     }
 
-    pub(crate) fn ambient(&self) -> crate::cutaway::light::Ambient {
+    pub(crate) fn ambient(&self) -> crate::display::light::Ambient {
         self.ambient
     }
 
@@ -223,7 +223,7 @@ impl<'a> DisplayList<'a> {
         self.ground
     }
 
-    pub(crate) fn flash(&self) -> crate::cutaway::light::Flash {
+    pub(crate) fn flash(&self) -> crate::display::light::Flash {
         self.flash
     }
 
@@ -445,7 +445,7 @@ pub(crate) enum PieceKind {
         body: Span,
     },
     /// An effect riding on the figure pushed beside it.
-    Effect(crate::cutaway::effects::Riding),
+    Effect(crate::display::effects::Riding),
     Badge {
         badge: Badge,
     },
