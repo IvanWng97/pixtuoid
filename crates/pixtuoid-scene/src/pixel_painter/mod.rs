@@ -11,7 +11,6 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
-use pixtuoid_core::state::DaemonState;
 use pixtuoid_core::{AgentSlot, SceneState};
 
 use crate::chitchat::{ActiveChitchat, ChitchatBubble};
@@ -53,19 +52,8 @@ pub struct MascotFrame {
     pub w: u16,
     /// The painted sprite's pixel height (paired with `w`).
     pub h: u16,
-    /// Human-readable gateway name (e.g. "OpenClaw").
-    pub name: &'static str,
-    /// WHICH instance of that gateway this mascot is, so a hover over one of
-    /// two concurrent lobsters names the one under the cursor. `None` when the
-    /// source runs a single instance whose id means nothing to the user.
-    pub instance: Option<String>,
-    /// An agent run is in flight. Keyed on the run state, NOT the session count
-    /// — a single-user gateway holds one persistent session even at rest.
-    pub busy: bool,
-    /// Gateway up but its model backend is failing every run.
-    pub degraded: bool,
-    /// Number of sessions the gateway currently holds (tooltip detail).
-    pub active_sessions: u32,
+    /// What it says about its gateway.
+    pub card: crate::creatures::GatewayCard,
 }
 
 /// Where a character's sprite was drawn.
@@ -483,7 +471,7 @@ fn enqueue_gateway_mascots<'a>(
                 anim_name: m.anim_name,
                 frame_idx: m.frame_idx,
                 effects: &m.effects,
-                degraded: m.state == DaemonState::Degraded,
+                degraded: m.card.degraded,
             },
         });
     }
@@ -495,11 +483,7 @@ impl MascotFrame {
             pos: m.pos,
             w,
             h,
-            name: m.name,
-            instance: m.instance.clone(),
-            busy: m.state == DaemonState::Busy,
-            degraded: m.state == DaemonState::Degraded,
-            active_sessions: m.active_sessions,
+            card: m.card.clone(),
         }
     }
 }

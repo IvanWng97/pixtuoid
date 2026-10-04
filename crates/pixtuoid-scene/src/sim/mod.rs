@@ -11,14 +11,17 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 
 use pixtuoid_core::id::normalize_path_key;
+use pixtuoid_core::source::daemon::DaemonInstanceKey;
 use pixtuoid_core::sprite::format::Pack;
-use pixtuoid_core::state::{ActivityState, DaemonState, FloorLocalDeskIndex};
+use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 
 use crate::anim::{Beat, Timing};
 use crate::chitchat::{self, ActiveChitchat, ChitchatBubble, VenueKey};
-use crate::creatures::{gateway_mascot_def, mascot_position, mascot_seed, pet_position};
+use crate::creatures::{
+    GatewayCard, gateway_mascot_def, mascot_position, mascot_seed, pet_position,
+};
 use crate::effects::{self, Effect};
 use crate::floor::{CoffeeState, FloorInputs, FloorMeta, PetInputs, VacancyDim};
 use crate::layout::{Pivot, Point, SceneLayout, Size, WALKING_Y_OFF};
@@ -130,16 +133,10 @@ pub(crate) struct MascotPlacement {
     pub(crate) anim_name: &'static str,
     /// The frame within `anim_name`.
     pub(crate) frame_idx: usize,
-    /// The gateway's display name.
-    pub(crate) name: &'static str,
-    /// The instance id, when its source runs more than one.
-    pub(crate) instance: Option<String>,
-    /// Its presence's [`display_state`](pixtuoid_core::state::DaemonPresence::display_state).
-    pub(crate) state: DaemonState,
+    /// What it says about its gateway.
+    pub(crate) card: GatewayCard,
     /// What rides on it this tick: a bubble per run in flight.
     pub(crate) effects: Vec<Effect>,
-    /// Sessions the gateway holds.
-    pub(crate) active_sessions: u32,
 }
 
 /// A coffee on a desk.
@@ -510,6 +507,7 @@ fn mascot_placements(
         .daemons()
         .filter_map(|(source, instance, presence)| {
             let def = gateway_mascot_def(source)?;
+            let card = GatewayCard::of(scene, &DaemonInstanceKey::new(source, instance.clone()))?;
             let seed = mascot_seed(source, instance);
             let (pos, anim_name) =
                 mascot_position(layout, presence, def.walk, def.rest, timing, seed)?;
@@ -524,19 +522,12 @@ fn mascot_placements(
                 size,
                 anim_name,
                 frame_idx,
-                name: def.display_name,
-                // Only worth showing when there is something to disambiguate, and
-                // that is per SOURCE: two gateways of ONE daemon need their ports,
-                // while two daemon sources already read apart by name and sprite.
-                instance: (scene.daemons().filter(|(s, _, _)| *s == source).count() > 1)
-                    .then(|| instance.as_str().to_string()),
-                state: presence.display_state(),
+                card,
                 effects: if runs > 0 {
                     effects::mascot_bubbles(pos, size.h, runs, beat).collect()
                 } else {
                     Vec::new()
                 },
-                active_sessions: presence.active_sessions,
             })
         })
         .collect()

@@ -440,7 +440,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                     .unwrap_or_else(|| kind.default_name());
                 paint_pet_tooltip(f, kind, anim, on_cooldown, display_name, at, theme);
             } else if let Some(m) = topmost_mascot_at(&mascots, cell) {
-                paint_mascot_tooltip(f, m, at, theme);
+                paint_mascot_tooltip(f, &m.card, at, theme);
             } else if let Some(label) = hit_test_furniture(&layout, cell) {
                 paint_furniture_tooltip(f, label, at, theme);
             }
@@ -615,18 +615,20 @@ mod tests {
             pos: Point { x: 40, y },
             w: 14,
             h,
-            name: "OpenClaw",
-            instance: Some(instance.to_string()),
-            busy: false,
-            degraded: false,
-            active_sessions: 0,
+            card: pixtuoid_scene::display::GatewayCard {
+                name: "OpenClaw",
+                instance: Some(instance.to_string()),
+                busy: false,
+                degraded: false,
+                active_sessions: 0,
+            },
         };
         // The tall one's centre is north of the short one's, yet its feet are
         // south of them, so it sorts after it.
         let (tall, short) = (frame("tall", 50, 30), frame("short", 56, 6));
         let cell = CellArea::half_block(40, short.pos.y / 2);
         let hit = |paint_order: &[MascotFrame]| {
-            topmost_mascot_at(paint_order, cell).and_then(|m| m.instance.clone())
+            topmost_mascot_at(paint_order, cell).and_then(|m| m.card.instance.clone())
         };
         assert_eq!(hit(&[short.clone(), tall.clone()]).as_deref(), Some("tall"));
         assert_eq!(hit(&[tall, short]).as_deref(), Some("short"));

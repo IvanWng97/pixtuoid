@@ -35,7 +35,7 @@ impl Hover {
     }
 }
 
-/// Who a [`Hover`] names.
+/// Who a hover names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HoverTarget {
     /// An agent's character.

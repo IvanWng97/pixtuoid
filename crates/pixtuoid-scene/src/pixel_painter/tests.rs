@@ -3302,38 +3302,31 @@ fn every_other_desk_stands_a_cabinet_starting_with_the_first() {
     );
 }
 
-/// The painter projects a mascot's one `DaemonState` onto the hover's and the
-/// sprite's flags; each state lights exactly its own.
+/// A mascot's card reaches its hover, and its sprite greys exactly when the
+/// card says its gateway is degraded.
 #[test]
-fn a_mascots_state_reaches_its_hover_and_its_sprite() {
-    use pixtuoid_core::state::DaemonState;
+fn a_mascots_card_reaches_its_hover_and_its_sprite() {
     let def = crate::creatures::gateway_mascot_def(pixtuoid_core::source::openclaw::SOURCE_NAME)
         .expect("openclaw has a mascot");
-    for (state, busy, degraded) in [
-        (DaemonState::Idle, false, false),
-        (DaemonState::Busy, true, false),
-        (DaemonState::Degraded, false, true),
-        (DaemonState::Down, false, false),
-    ] {
+    for degraded in [false, true] {
+        let card = crate::creatures::GatewayCard {
+            name: def.display_name,
+            instance: None,
+            busy: false,
+            degraded,
+            active_sessions: 0,
+        };
         let mascot = crate::sim::MascotPlacement {
             pos: Point { x: 60, y: 60 },
             size: Size { w: 14, h: 12 },
             anim_name: def.walk,
             frame_idx: 0,
-            name: def.display_name,
-            instance: None,
-            state,
+            card: card.clone(),
             effects: Vec::new(),
-            active_sessions: 0,
         };
         let mut drawables = Vec::new();
         enqueue_gateway_mascots(std::slice::from_ref(&mascot), &mut drawables);
-        let hover = MascotFrame::of(&mascot, 0, 0);
-        assert_eq!(
-            (hover.busy, hover.degraded),
-            (busy, degraded),
-            "{state:?} hover"
-        );
+        assert_eq!(MascotFrame::of(&mascot, 0, 0).card, card, "the hover");
         let [
             Drawable {
                 kind:
@@ -3344,9 +3337,9 @@ fn a_mascots_state_reaches_its_hover_and_its_sprite() {
             },
         ] = drawables.as_slice()
         else {
-            panic!("{state:?}: one mascot drawable");
+            panic!("one mascot drawable");
         };
-        assert_eq!(*drawn, degraded, "{state:?} sprite");
+        assert_eq!(*drawn, degraded, "the sprite");
     }
 }
 
@@ -3386,8 +3379,8 @@ fn sim_step_walks_a_mascot_in_for_each_gateway_present() {
     let [mascot] = frame.mascots.as_slice() else {
         panic!("one gateway, one mascot: {:?}", frame.mascots);
     };
-    assert_eq!(mascot.name, "OpenClaw");
-    assert_eq!(mascot.instance, None, "a lone instance needs no port");
+    assert_eq!(mascot.card.name, "OpenClaw");
+    assert_eq!(mascot.card.instance, None, "a lone instance needs no port");
 }
 
 /// A mascot whose anim the pack lacks paints nothing, so it lists nothing to
@@ -3435,7 +3428,7 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
         .expect("the bundled pack draws the mascot");
     let mut ghost = drawn.clone();
     ghost.anim_name = "does_not_exist";
-    ghost.instance = Some("ghost".into());
+    ghost.card.instance = Some("ghost".into());
     frame.mascots.push(ghost);
 
     let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
@@ -3460,7 +3453,7 @@ fn a_mascot_whose_anim_is_missing_is_not_hoverable() {
     let listed: Vec<_> = hover
         .mascots
         .iter()
-        .map(|m| (m.instance.clone(), (m.w, m.h)))
+        .map(|m| (m.card.instance.clone(), (m.w, m.h)))
         .collect();
     assert_eq!(listed, vec![(None, art)]);
 }

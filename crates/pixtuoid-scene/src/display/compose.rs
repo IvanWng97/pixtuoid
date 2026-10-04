@@ -258,13 +258,12 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
         (p.pos, p.anim_name, p.frame_idx, flip, false, &p.effects)
     });
     let mascots = frame.mascots.iter().map(|m| {
-        let degraded = m.state == pixtuoid_core::state::DaemonState::Degraded;
         (
             m.pos,
             m.anim_name,
             m.frame_idx,
             Flip::None,
-            degraded,
+            m.card.degraded,
             &m.effects,
         )
     });

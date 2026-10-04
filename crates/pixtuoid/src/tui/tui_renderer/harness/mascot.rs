@@ -148,8 +148,8 @@ fn two_gateways_render_two_independent_mascots() {
 
 #[test]
 fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
-    // The PAINTER owns this decision (`MascotFrame.instance`) and the only way to
-    // observe it is the hover text.
+    // `GatewayCard::of` owns this decision (`GatewayCard.instance`) and the only
+    // way to observe it is the hover text.
     let (entered, seen) = (t0() - Duration::from_secs(20), t0());
     let gateway_tooltips = |ports: &[&str]| -> Vec<String> {
         let scene = gateway_scene_at(ports, entered, seen);

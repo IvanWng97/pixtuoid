@@ -8,6 +8,7 @@ mod list;
 mod order;
 pub(crate) mod pen;
 
+pub use crate::creatures::GatewayCard;
 pub use compose::{Office, Showing};
 pub(crate) use compose::{PLATE_PAD, board_runs, compose, desk_span, face_rows, indicator_plate};
 pub use hover::{HoverTarget, Hovers, PetHover};

@@ -4025,9 +4025,13 @@ mod tests {
             size: crate::layout::Size { w: 14, h: 12 },
             anim_name: "lobster_walk",
             frame_idx: 0,
-            name: "OpenClaw",
-            instance: None,
-            state: pixtuoid_core::state::DaemonState::Busy,
+            card: crate::creatures::GatewayCard {
+                name: "OpenClaw",
+                instance: None,
+                busy: true,
+                degraded: false,
+                active_sessions: 1,
+            },
             effects: crate::effects::mascot_bubbles(
                 lobster,
                 12,
@@ -4035,13 +4039,16 @@ mod tests {
                 Motion::Full.beat(std::time::UNIX_EPOCH),
             )
             .collect(),
-            active_sessions: 1,
         }];
         // a second gateway, degraded, nearer the viewer so it sorts last
         let sick = Point { x: 110, y: 84 };
         frame.mascots.push(crate::sim::MascotPlacement {
             pos: sick,
-            state: pixtuoid_core::state::DaemonState::Degraded,
+            card: crate::creatures::GatewayCard {
+                busy: false,
+                degraded: true,
+                ..frame.mascots[0].card.clone()
+            },
             effects: Vec::new(),
             ..frame.mascots[0].clone()
         });
