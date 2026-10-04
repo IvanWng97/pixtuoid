@@ -201,9 +201,10 @@ def run_matrix(job, out_dirs, work, intermediates):
 
 
 # H.264 and VP9 both require even width/height. `neighbor`: the pixel-art rule
-# (no smoothing), where swscale's default is bicubic; set through `scaler`,
-# since the algorithm in `flags` is deprecated (ffmpeg-scaler).
-SCALE_EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2:scaler=neighbor"
+# (no smoothing), where swscale's default is bicubic. Set in `flags`, which
+# ffmpeg-scaler deprecates for `scaler`: that option exists only from FFmpeg
+# 9.0 (3503b19711), and the apt ffmpeg a CI runner has is older.
+SCALE_EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=neighbor"
 # VP9 constant-quality knob (with `-b:v 0`, no target bitrate).
 VP9_CRF = "36"
 # Without it the muxers stamp every file with ffmpeg's version (MP4's `©too`
