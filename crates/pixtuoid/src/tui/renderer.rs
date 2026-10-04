@@ -385,6 +385,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         agents,
         hovers,
         bubbles: chitchat_bubbles,
+        ..
     }) = ctx.floor.raster.classic_drawn()
     else {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;

@@ -13,13 +13,16 @@ pub mod text;
 
 pub use crate::creatures::GatewayCard;
 pub use compose::{Office, Showing};
-pub(crate) use compose::{PLATE_PAD, board_runs, compose, desk_span, face_rows, indicator_plate};
+pub(crate) use compose::{
+    PLATE_PAD, badge_plate, board_runs, compose, desk_span, face_rows, indicator_plate,
+};
 pub(crate) use hover::Hover;
 pub use hover::{HoverTarget, Hovers, PetHover};
 pub(crate) use list::{
-    Art, Badge, DisplayList, Figure, Flip, LightPiece, Piece, PieceKind, Screen, StoodProp,
-    WindowView, fingerprint,
+    Art, DisplayList, Figure, Flip, LightPiece, Piece, PieceKind, Screen, StoodProp, WindowView,
+    fingerprint,
 };
 #[cfg(test)]
 pub(crate) use order::check_order;
 pub(crate) use order::{Layer, Span, depth_sort};
+pub use text::{TextRole, TextRun, TextSpan};

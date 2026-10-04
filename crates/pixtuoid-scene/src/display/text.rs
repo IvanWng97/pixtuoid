@@ -4,10 +4,14 @@
 //! classic badge's terminal column. The rasterizer's font draws into these
 //! cells.
 
+use pixtuoid_core::sprite::Rgb;
+use pixtuoid_core::{AgentId, AgentSlot};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::display::pen::ArtPx;
+use crate::layout::Point;
+use crate::theme::Theme;
 
 /// A hand-drawn glyph's width in art pixels.
 pub(crate) const GLYPH_W: u16 = 3;
@@ -70,6 +74,75 @@ pub(crate) fn take(text: &str, budget: u16) -> &str {
 /// [`columns`] past all of `text`: where the run after it starts.
 pub(crate) fn advance(text: &str) -> ArtPx {
     columns(cells(text))
+}
+
+/// Logical rows between a badge's anchor and the line it sits on.
+pub const LABEL_GAP: u16 = 2;
+
+/// One line of text a frame shows: its spans laid end to end, on `plate` if it
+/// has one. Its inks are resolved, so a painter reads no theme for it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TextRun {
+    /// The logical point it hangs from: a badge centres over it,
+    /// [`LABEL_GAP`] rows up.
+    pub at: Point,
+    /// Its spans, in reading order.
+    pub spans: Vec<TextSpan>,
+    /// The fill behind it, if any.
+    pub plate: Option<Rgb>,
+    /// What it labels.
+    pub role: TextRole,
+}
+
+/// A stretch of a [`TextRun`] in one ink.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TextSpan {
+    /// What it reads.
+    pub text: String,
+    /// Its colour.
+    pub ink: Rgb,
+}
+
+/// What a [`TextRun`] labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TextRole {
+    /// An agent's name badge.
+    Badge(AgentId),
+}
+
+impl TextRun {
+    /// `agent`'s badge over `anchor` ([`badge_anchor`](crate::sim::anchors::badge_anchor)):
+    /// its marker in the source's hue, then its name in its tone, on the
+    /// badge plate.
+    pub(crate) fn badge(
+        anchor: Point,
+        agent: &AgentSlot,
+        namesakes: &crate::overlay::Namesakes<'_>,
+        theme: &Theme,
+    ) -> Self {
+        let text = namesakes.text(agent);
+        let ink = crate::overlay::badge_ink(&text, crate::overlay::tone_of(agent), theme);
+        Self {
+            at: anchor,
+            spans: vec![
+                TextSpan {
+                    text: crate::overlay::BADGE_MARKER.to_string(),
+                    ink: ink.marker,
+                },
+                TextSpan {
+                    text,
+                    ink: ink.name,
+                },
+            ],
+            plate: Some(crate::overlay::badge_plate(theme)),
+            role: TextRole::Badge(agent.agent_id),
+        }
+    }
+
+    /// Its spans' text, end to end.
+    pub fn text(&self) -> String {
+        self.spans.iter().map(|s| s.text.as_str()).collect()
+    }
 }
 
 #[cfg(test)]

@@ -109,6 +109,8 @@ pub struct ClassicDrawn<'a> {
     pub pixels: &'a mut RgbBuffer,
     /// Every character, in paint order, for its badge.
     pub agents: &'a [AgentFrame],
+    /// Each drawn agent's badge, in paint order.
+    pub texts: &'a [crate::display::TextRun],
     /// What the frame answers a pointer with.
     pub hovers: &'a Hovers,
     /// Active speech bubbles.
@@ -144,6 +146,7 @@ impl Raster {
         Some(ClassicDrawn {
             pixels: &mut classic.buf,
             agents: &classic.hits.agents,
+            texts: &classic.hits.texts,
             hovers: &classic.hits.hovers,
             bubbles: &classic.bubbles,
         })

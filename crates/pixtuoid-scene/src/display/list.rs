@@ -60,21 +60,6 @@ impl Screen {
     }
 }
 
-/// One agent's name badge, painted in the canvas so no terminal text shares a
-/// cell with the image: `overlay`'s text and
-/// [`BadgeInk`](crate::overlay::BadgeInk) on its
-/// [`badge_plate`](crate::overlay::badge_plate). Hung from the CUTAWAY's body:
-/// `overlay::build_overlay`'s anchors hang off the classic-drawn sprite, which
-/// for a sitter is elsewhere.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct Badge {
-    /// Its bottom centre, in logical units: the sprite's centre, clear above
-    /// its head and any raised monitor behind it.
-    pub(crate) at: Point,
-    pub(crate) text: String,
-    pub(crate) tone: crate::overlay::LabelTone,
-}
-
 /// One frame's pieces — the windows' glass, the decor hung on the wall and
 /// everything standing on the ground — built and ordered but not painted.
 ///
@@ -212,11 +197,11 @@ impl<'a> DisplayList<'a> {
         &self.hovers
     }
 
-    /// Each drawn agent's badge, in draw order.
+    /// Each text run, in draw order.
     #[cfg(test)]
-    pub(crate) fn badges(&self) -> impl Iterator<Item = &Badge> + '_ {
+    pub(crate) fn texts(&self) -> impl Iterator<Item = &super::TextRun> + '_ {
         self.pieces.iter().filter_map(|p| match &p.kind {
-            PieceKind::Badge { badge } => Some(badge),
+            PieceKind::Text { run } => Some(run),
             _ => None,
         })
     }
@@ -267,7 +252,7 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
             chair,
             body: _,
         } => (at, shadow, key, chair).hash(&mut h),
-        PieceKind::Badge { ref badge } => badge.hash(&mut h),
+        PieceKind::Text { ref run } => run.hash(&mut h),
         PieceKind::Board { ref board } => board.hash(&mut h),
         PieceKind::Indicator { door, floor } => (door, floor).hash(&mut h),
         PieceKind::Glass { ref view } => view.hash(&mut h),
@@ -315,7 +300,7 @@ impl PieceKind {
             | PieceKind::Creature { .. }
             | PieceKind::Character { .. }
             | PieceKind::Effect(_)
-            | PieceKind::Badge { .. }
+            | PieceKind::Text { .. }
             | PieceKind::Board { .. }
             | PieceKind::Indicator { .. } => false,
         }
@@ -415,8 +400,9 @@ pub(crate) enum PieceKind {
     },
     /// An effect riding on the figure pushed beside it.
     Effect(crate::display::effects::Riding),
-    Badge {
-        badge: Badge,
+    /// A line of text over everything it meets.
+    Text {
+        run: super::TextRun,
     },
     /// The wall board's text, over the neon sign's interior.
     Board {

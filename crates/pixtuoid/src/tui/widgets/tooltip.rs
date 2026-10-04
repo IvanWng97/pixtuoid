@@ -10,7 +10,7 @@ use ratatui::widgets::{Block, Padding, Paragraph};
 
 use super::{StateKind, compact_hms, display_width, source_badge_span, state_color, to_color};
 use crate::tui::renderer::clip_widget_rect;
-use pixtuoid_scene::display::GatewayCard;
+use pixtuoid_scene::display::{GatewayCard, TextRole, TextRun};
 use pixtuoid_scene::overlay::{LabelElement, disambig_suffix};
 use pixtuoid_scene::pet::PetKind;
 use pixtuoid_scene::pixel_painter::AgentFrame;
@@ -80,6 +80,52 @@ pub(crate) fn paint_label_widgets(
             scene_rect,
         ) {
             f.render_widget(para, r);
+        }
+    }
+}
+
+/// Paint each badge in `runs` as terminal text, centred over its anchor's
+/// column in the cell [`LABEL_GAP`](pixtuoid_scene::display::text::LABEL_GAP)
+/// logical rows above it; `hovered`'s reads `▸name` in bold white.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "3b-2 T3 2/2 switches the painters onto it")
+)]
+pub(crate) fn paint_text_runs(
+    f: &mut ratatui::Frame<'_>,
+    runs: &[TextRun],
+    scene_rect: Rect,
+    hovered: Option<AgentId>,
+) {
+    for run in runs {
+        let TextRole::Badge(id) = run.role;
+        let spans = if hovered == Some(id) {
+            let name: String = run.spans.iter().skip(1).map(|s| s.text.as_str()).collect();
+            let style = Style::default()
+                .fg(Color::White)
+                .add_modifier(ratatui::style::Modifier::BOLD);
+            vec![Span::styled(format!("\u{25b8}{name}"), style)]
+        } else {
+            run.spans
+                .iter()
+                .map(|s| Span::styled(s.text.clone(), Style::default().fg(to_color(s.ink))))
+                .collect()
+        };
+        let line = Line::from(spans);
+        let half_w = u16::try_from(line.width() / 2).unwrap_or(u16::MAX);
+        let lx = scene_rect.x + run.at.x.saturating_sub(half_w);
+        let gap = pixtuoid_scene::display::text::LABEL_GAP;
+        let ly = scene_rect.y + run.at.y.saturating_sub(gap) / 2;
+        if let Some(r) = clip_widget_rect(
+            Rect {
+                x: lx,
+                y: ly,
+                width: pixtuoid_scene::overlay::BADGE_CELLS,
+                height: 1,
+            },
+            scene_rect,
+        ) {
+            f.render_widget(Paragraph::new(line), r);
         }
     }
 }

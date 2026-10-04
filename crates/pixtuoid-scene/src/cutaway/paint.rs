@@ -10,8 +10,8 @@ use crate::cutaway::shade::{Ramp, fill, slab};
 use crate::display::compose::{art_size, desk_art, desk_front_h};
 use crate::display::pen::{ArtPx, ArtRect, Pen};
 use crate::display::{
-    Art, Badge, DisplayList, Figure, Flip, Office, PLATE_PAD, PieceKind, Screen, Showing,
-    StoodProp, WindowView, board_runs, compose, desk_span, face_rows, indicator_plate,
+    Art, DisplayList, Figure, Flip, Office, PLATE_PAD, PieceKind, Screen, Showing, StoodProp,
+    TextRun, WindowView, badge_plate, board_runs, compose, desk_span, face_rows, indicator_plate,
 };
 use crate::effects::EffectKind;
 use crate::layout::{Bounds, FixtureKind, Point, SceneLayout, Size};
@@ -69,15 +69,18 @@ impl Screen {
     }
 }
 
-/// Fill `plate` with `ground`, then paint `runs` one after another inside it.
+/// Fill `plate` with `ground`, if any, then paint `runs` one after another
+/// inside it.
 fn paint_plate(
     pen: Pen,
     buf: &mut RgbBuffer,
     plate: ArtRect,
-    ground: pixtuoid_core::sprite::Rgb,
+    ground: Option<pixtuoid_core::sprite::Rgb>,
     runs: &[(&str, pixtuoid_core::sprite::Rgb)],
 ) {
-    pen.fill(buf, plate, ground);
+    if let Some(ground) = ground {
+        pen.fill(buf, plate, ground);
+    }
     let mut x = plate.x.0 + PLATE_PAD;
     for &(text, ink) in runs {
         crate::cutaway::text::paint(pen, buf, (ArtPx(x), plate.y), text, ink);
@@ -85,21 +88,10 @@ fn paint_plate(
     }
 }
 
-/// Paint `badge`'s plate, marker and text.
-fn paint_badge(badge: &Badge, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
-    let ink = crate::overlay::badge_ink(&badge.text, badge.tone, theme);
-    let marker = crate::overlay::BADGE_MARKER.to_string();
-    let runs = [
-        (marker.as_str(), ink.marker),
-        (badge.text.as_str(), ink.name),
-    ];
-    paint_plate(
-        pen,
-        buf,
-        badge.plate(pen),
-        crate::overlay::badge_plate(theme),
-        &runs,
-    );
+/// Paint badge `run` on its plate.
+fn paint_badge(run: &TextRun, pen: Pen, buf: &mut RgbBuffer) {
+    let spans: Vec<_> = run.spans.iter().map(|s| (s.text.as_str(), s.ink)).collect();
+    paint_plate(pen, buf, badge_plate(run, pen), run.plate, &spans);
 }
 
 /// Paint `frame`'s `office` into `buf` as an orthographic cutaway — the
@@ -230,7 +222,7 @@ fn paint_pieces(
                     PieceKind::Glass { .. } => Glow::Pane,
                     // A badge keeps the contrast its theme pins at every hour.
                     PieceKind::Neon { .. }
-                    | PieceKind::Badge { .. }
+                    | PieceKind::Text { .. }
                     | PieceKind::Board { .. }
                     | PieceKind::Indicator { .. } => Glow::Emissive,
                     PieceKind::Effect(r) if r.effect.kind == EffectKind::FlameCrown => {
@@ -322,7 +314,7 @@ fn mark(
         | PieceKind::Effect(_)
         | PieceKind::Neon { .. }
         | PieceKind::Clock { .. }
-        | PieceKind::Badge { .. }
+        | PieceKind::Text { .. }
         | PieceKind::Board { .. }
         | PieceKind::Indicator { .. } => false,
     }
@@ -604,9 +596,7 @@ fn paint_piece(
         }
         PieceKind::Glass { ref view } => paint_glass(view, Pen::for_pack(scale, pack), buf),
         PieceKind::Hung { at, sprite } => paint_wall_decor(at, sprite, pack, scale, buf),
-        PieceKind::Badge { ref badge, .. } => {
-            paint_badge(badge, theme, Pen::for_pack(scale, pack), buf);
-        }
+        PieceKind::Text { ref run } => paint_badge(run, Pen::for_pack(scale, pack), buf),
         PieceKind::Board { ref board } => {
             let pen = Pen::for_pack(scale, pack);
             for (at, seg) in board_runs(board, pen) {
@@ -619,7 +609,7 @@ fn paint_piece(
             let text = crate::layout::floor_indicator_text(floor);
             let plate = indicator_plate(door, floor, pen);
             let runs = [(text.as_str(), theme.ui.neon_brand)];
-            paint_plate(pen, buf, plate, theme.ui.tooltip_bg, &runs);
+            paint_plate(pen, buf, plate, Some(theme.ui.tooltip_bg), &runs);
         }
     }
 }
@@ -1808,7 +1798,7 @@ mod tests {
             pen,
             &mut buf,
             plate,
-            Rgb { r: 1, g: 1, b: 1 },
+            Some(Rgb { r: 1, g: 1, b: 1 }),
             &[(first, a), (second, b)],
         );
         // An `I`'s top bar spans its whole cell, so its first ink is its run's start.
@@ -2310,7 +2300,7 @@ mod tests {
         let badge = list
             .pieces()
             .iter()
-            .find(|p| matches!(p.kind, PieceKind::Badge { .. }))
+            .find(|p| matches!(p.kind, PieceKind::Text { .. }))
             .expect("the badge")
             .span;
         let rider = |kind| {
@@ -3649,7 +3639,7 @@ mod tests {
         let plate = list
             .pieces()
             .iter()
-            .find(|p| matches!(p.kind, PieceKind::Badge { .. }))
+            .find(|p| matches!(p.kind, PieceKind::Text { .. }))
             .expect("the sitter has a badge")
             .span;
         let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
@@ -3826,7 +3816,7 @@ mod tests {
                             kind,
                             PieceKind::Character { .. }
                                 | PieceKind::Effect(_)
-                                | PieceKind::Badge { .. }
+                                | PieceKind::Text { .. }
                         )
                     {
                         continue;
@@ -3961,7 +3951,6 @@ mod tests {
             kinds.into_iter().collect::<Vec<_>>(),
             [
                 "animated",
-                "badge",
                 "board",
                 "chair",
                 "character",
@@ -3977,6 +3966,7 @@ mod tests {
                 "prop",
                 "prop band",
                 "table",
+                "text",
                 "wall"
             ],
             "a piece kind went untested"
@@ -5096,7 +5086,7 @@ mod tests {
             }
             // Each drawn agent's badge, known by its text.
             let namesakes = crate::overlay::Namesakes::of(&frame.agents);
-            let mut badged: Vec<_> = list.badges().map(|b| b.text.clone()).collect();
+            let mut badged: Vec<_> = list.texts().map(|run| run.spans[1].text.clone()).collect();
             let mut drawn: Vec<_> = hovers
                 .iter()
                 .filter_map(|&(id, _)| frame.agents.iter().find(|a| a.agent_id == id))

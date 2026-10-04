@@ -774,7 +774,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             office,
             crate::display::compose::tests::showing(ground, now0),
         );
-        let anchors: Vec<_> = list.badges().map(|b| b.at).collect();
+        let anchors: Vec<_> = list.texts().map(|run| run.at).collect();
         (buf.as_slice().to_vec(), anchors)
     };
 
@@ -3795,6 +3795,33 @@ fn a_figure_hovers_on_the_box_it_is_drawn_in_in_both_looks() {
             );
             assert!(d.y <= f.y, "{d:?} sinks below {f:?}");
         }
+    }
+}
+
+/// Both looks hang each badge from the one anchor: at 1x the cutaway's badge
+/// runs are the classic's, on every frame of a walk to a desk.
+#[test]
+fn both_looks_hang_a_badge_from_the_one_anchor() {
+    let (layout, pack, frames, _) =
+        crate::display::compose::tests::sit_down(crate::layout::Facing::North, 2);
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let (owned, now) = (OwnedSimStores::new(), SystemTime::UNIX_EPOCH);
+    for frame in &frames {
+        let mut scene = SceneState::uniform(16);
+        for agent in &frame.agents {
+            scene.agents.insert(agent.agent_id, agent.clone());
+        }
+        let classic = paint_drawn(&owned, &scene, &layout, &pack, now, frame).texts;
+        let office = crate::display::Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale: crate::render_scale::RenderScale::ONE,
+        };
+        let list = crate::display::compose::tests::list_at(frame, office, 12);
+        let cutaway: Vec<_> = list.texts().cloned().collect();
+        assert!(!classic.is_empty(), "premise: the walker wears a badge");
+        assert_eq!(cutaway, classic);
     }
 }
 

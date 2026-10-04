@@ -10,7 +10,7 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::{AgentSlot, SceneState};
 
-use crate::display::{Hover, HoverTarget, Hovers};
+use crate::display::{Hover, HoverTarget, Hovers, TextRun};
 #[cfg(test)]
 use crate::floor::VacancyDim;
 use crate::frame_cache::FrameCache;
@@ -31,6 +31,8 @@ pub struct AgentFrame {
 #[derive(Default)]
 pub(crate) struct Drawn {
     pub(crate) agents: Vec<AgentFrame>,
+    /// Each drawn agent's badge, in paint order.
+    pub(crate) texts: Vec<TextRun>,
     pub(crate) hovers: Hovers,
 }
 
@@ -260,10 +262,8 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
     enqueue_characters(ctx, frame, &mut drawables);
     enqueue_room_walls(ctx.layout, &mut drawables);
     drawable::sort_drawables(&mut drawables);
-    let mut drawn = Drawn {
-        agents: Vec::new(),
-        hovers: Hovers::default(),
-    };
+    let mut drawn = Drawn::default();
+    let namesakes = crate::overlay::Namesakes::of(ctx.scene.agents.values());
     // A per-pixel diff finds EXACTLY what the foreground wrote. AFTER
     // `paint_shadows`/`paint_ceiling_halos`: both already carry the hour, so folding
     // them in here would apply it twice.
@@ -282,6 +282,11 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
                 agent_id: agent.agent_id,
                 label_anchor,
             });
+            if let Some(agent) = ctx.scene.agents.get(&agent.agent_id) {
+                drawn
+                    .texts
+                    .push(TextRun::badge(label_anchor, agent, &namesakes, ctx.theme));
+            }
         }
         drawn.hovers.push(hover);
     }

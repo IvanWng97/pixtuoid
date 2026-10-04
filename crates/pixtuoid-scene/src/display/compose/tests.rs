@@ -626,15 +626,35 @@ fn a_sitters_depth_holds_through_their_breath() {
     );
 }
 
-/// The badge follows the CUTAWAY's body, not the classic one:
-/// `overlay::build_overlay` hangs off the classic-drawn sprite, which for a
-/// seated agent is not where the cutaway draws them.
+/// A badge `text` hanging from `anchor`.
+fn badge_at(anchor: crate::layout::Point) -> TextRun {
+    TextRun {
+        at: anchor,
+        spans: vec![crate::display::TextSpan {
+            text: "cc".into(),
+            ink: pixtuoid_core::sprite::Rgb { r: 9, g: 9, b: 9 },
+        }],
+        plate: None,
+        role: crate::display::TextRole::Badge(pixtuoid_core::AgentId::from_transcript_path(
+            "/badge.jsonl",
+        )),
+    }
+}
+
+/// The row a badge's plate ends above.
+fn plate_bottom(anchor: crate::layout::Point) -> u16 {
+    let plate = badge_plate(&badge_at(anchor), Pen::UNIT);
+    plate.y.0 + plate.h.0
+}
+
+/// A badge centres over the sprite, [`LABEL_GAP`] rows clear of its head.
 #[test]
-fn a_label_anchor_sits_above_the_head_and_centred_on_the_sprite() {
+fn a_badge_sits_above_the_head_and_centred_on_the_sprite() {
     let at = crate::layout::Point { x: 10, y: 20 };
-    let anchor = label_anchor(at, 8, None);
+    let size = crate::layout::Size { w: 8, h: 12 };
+    let anchor = crate::sim::anchors::badge_anchor(at, size, None);
     assert_eq!(anchor.x, at.x + 4, "centred on the sprite");
-    assert_eq!(at.y - anchor.y, LABEL_GAP, "clear of the head");
+    assert_eq!(at.y - plate_bottom(anchor), LABEL_GAP, "clear of the head");
 }
 
 /// The floor indicator's plate stays in the cell the classic writes it
@@ -710,17 +730,19 @@ fn the_board_writes_inside_the_signs_interior() {
 /// A ceiling ABOVE the head lifts the badge clear of it; one below the head
 /// changes nothing.
 #[test]
-fn a_label_anchor_clears_a_ceiling_above_the_head() {
+fn a_badge_clears_a_ceiling_above_the_head() {
+    use crate::sim::anchors::badge_anchor;
     let at = crate::layout::Point { x: 10, y: 20 };
-    let free = label_anchor(at, 8, None);
-    let raised = label_anchor(at, 8, Some(at.y - 4));
+    let size = crate::layout::Size { w: 8, h: 12 };
+    let free = badge_anchor(at, size, None);
+    let raised = badge_anchor(at, size, Some(at.y - 4));
     assert_eq!(
-        raised.y,
+        plate_bottom(raised),
         at.y - 4 - LABEL_GAP,
         "the badge clears the monitor top by the same gap it clears a head by"
     );
     assert_eq!(raised.x, free.x);
-    assert_eq!(label_anchor(at, 8, Some(at.y + 4)), free);
+    assert_eq!(badge_anchor(at, size, Some(at.y + 4)), free);
 }
 
 /// A figure standing casts its own shadow; sitting, the chair they carry
@@ -938,7 +960,7 @@ pub(crate) fn kind_name(kind: &PieceKind) -> &'static str {
         PieceKind::Glass { .. } => "glass",
         PieceKind::Hung { .. } => "hung decor",
         PieceKind::Effect(_) => "effect",
-        PieceKind::Badge { .. } => "badge",
+        PieceKind::Text { .. } => "text",
         PieceKind::DeskProp(_) => "desk prop",
         PieceKind::Creature { .. } => "creature",
         PieceKind::Board { .. } => "board",

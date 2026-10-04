@@ -559,7 +559,7 @@ mod tests {
             list.pieces()
                 .iter()
                 .filter_map(|p| match &p.kind {
-                    PieceKind::Badge { .. } => None,
+                    PieceKind::Text { .. } => None,
                     PieceKind::Character { figure, body, .. } => {
                         Some((false, *body, Some(figure.key.frame.agent_id)))
                     }
@@ -735,7 +735,7 @@ mod tests {
                 );
                 // Known by its text: the sitter's badge reads otherwise.
                 list.pieces().iter().find(|p| {
-                    matches!(&p.kind, crate::display::PieceKind::Badge { badge } if badge.text == NEIGHBOUR)
+                    matches!(&p.kind, crate::display::PieceKind::Text { run } if run.spans[1].text == NEIGHBOUR)
                 })
                     .map(|p| p.span)
                     .expect("the neighbour's plate")
@@ -785,7 +785,7 @@ mod tests {
             );
             list.pieces()
                 .iter()
-                .find(|p| matches!(p.kind, crate::display::PieceKind::Badge { .. }))
+                .find(|p| matches!(p.kind, crate::display::PieceKind::Text { .. }))
                 .map(|p| (p.span, p.fingerprint))
                 .expect("a badge")
         };

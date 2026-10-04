@@ -6,11 +6,12 @@
 use pixtuoid_core::sprite::format::Pack;
 
 use super::{
-    Art, Badge, DisplayList, Figure, Flip, Layer, LightPiece, Piece, PieceKind, Screen, Span,
-    StoodProp, WindowView, depth_sort, fingerprint,
+    Art, DisplayList, Figure, Flip, Layer, LightPiece, Piece, PieceKind, Screen, Span, StoodProp,
+    WindowView, depth_sort, fingerprint,
 };
 use crate::atmosphere::Moment;
 use crate::display::pen::{ArtPx, ArtRect, Pen};
+use crate::display::text::{LABEL_GAP, TextRun};
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, DESK_H, Depth, Fixture, FixtureKind, Point, SceneLayout, Size, Station, Tie,
@@ -30,9 +31,6 @@ use crate::theme::Theme;
 const DESK_FRONT_NUMER: u16 = 2;
 /// Denominator of [`DESK_FRONT_NUMER`].
 const DESK_FRONT_DENOM: u16 = 5;
-
-/// Logical rows between a head and its name badge.
-const LABEL_GAP: u16 = 2;
 
 /// Art pixels between a plate's sides or bottom and its text ([`PLATE_H`] says why not the top).
 pub(crate) const PLATE_PAD: u16 = 1;
@@ -67,14 +65,15 @@ fn topmost_span(r: ArtRect, pen: Pen) -> Span {
     }
 }
 
-impl Badge {
-    pub(crate) fn plate(&self, pen: Pen) -> ArtRect {
-        plate_at(
-            pen.art(self.at.x),
-            ArtPx(pen.art(self.at.y).0.saturating_sub(PLATE_H)),
-            &format!("{}{}", crate::overlay::BADGE_MARKER, self.text),
-        )
-    }
+/// A badge `run`'s plate on the art grid: centred over its anchor,
+/// [`LABEL_GAP`] rows up.
+pub(crate) fn badge_plate(run: &TextRun, pen: Pen) -> ArtRect {
+    let bottom = pen.art(run.at.y.saturating_sub(LABEL_GAP));
+    plate_at(
+        pen.art(run.at.x),
+        ArtPx(bottom.0.saturating_sub(PLATE_H)),
+        &run.text(),
+    )
 }
 
 /// The floor indicator over the elevator at `door`, naming floor `floor`: a
@@ -462,7 +461,7 @@ pub(crate) fn ground_shadow(
         | PieceKind::Neon { .. }
         | PieceKind::Clock { .. }
         | PieceKind::Effect(_)
-        | PieceKind::Badge { .. }
+        | PieceKind::Text { .. }
         | PieceKind::Board { .. }
         | PieceKind::Indicator { .. } => None,
         PieceKind::Character {
@@ -1180,14 +1179,15 @@ fn push_characters(
             },
         ));
         ride(order, false);
-        let badge = Badge {
-            at: label_anchor(top, w, badge_ceiling),
-            text: namesakes.text(agent),
-            tone: crate::overlay::tone_of(agent),
-        };
+        let anchor = crate::sim::anchors::badge_anchor(
+            top,
+            crate::layout::Size { w, h: h + hair },
+            badge_ceiling,
+        );
+        let run = TextRun::badge(anchor, agent, &namesakes, theme);
         order.push((
-            topmost_span(badge.plate(pen), pen),
-            PieceKind::Badge { badge },
+            topmost_span(badge_plate(&run, pen), pen),
+            PieceKind::Text { run },
         ));
     }
     carried
@@ -1453,27 +1453,6 @@ pub(crate) fn push_windows(
 /// side of its desk half the office sits on.
 fn cutaway_top_left(c: &crate::sim::CharacterPlacement) -> crate::layout::Point {
     c.top_left
-}
-
-/// The badge anchor for a body of `sprite_w` logical columns drawn at `at`:
-/// horizontally centred, [`LABEL_GAP`] logical rows clear of the head — and of
-/// `ceiling`, a logical row the badge must stay above (a raised monitor behind
-/// a back-turned sitter's head).
-///
-/// A free fn so the test can drive THE anchor rather than restate its
-/// arithmetic: a test asserting properties of its own copy stays green for any
-/// change to the real one.
-fn label_anchor(
-    at: crate::layout::Point,
-    sprite_w: u16,
-    ceiling: Option<u16>,
-) -> crate::layout::Point {
-    crate::layout::Point {
-        x: at.x + sprite_w / 2,
-        y: ceiling
-            .map_or(at.y, |top| at.y.min(top))
-            .saturating_sub(LABEL_GAP),
-    }
 }
 
 #[cfg(test)]
