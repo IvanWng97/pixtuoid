@@ -144,6 +144,7 @@ use crate::atmosphere::Moment;
 use crate::lighting::{DeskLights, LightInputs, Lights};
 use background::{
     paint_ground_and_walls, paint_ground_wash, paint_light, paint_neon_halo, paint_shadows,
+    paint_windows,
 };
 use drawable::{Drawable, DrawableKind, Drawn, Layer, enqueue_room_walls, paint_drawable};
 
@@ -160,6 +161,9 @@ pub(crate) struct PaintCtx<'a> {
     timing: crate::anim::Timing,
     /// The sky on `timing`, sampled once for the whole pass.
     sky: crate::sky::Sky,
+    /// The sky the windows look out on where a test parts it from the room's
+    /// [`Self::sky`]; `None` for the room's.
+    outside: Option<crate::sky::Sky>,
     buf: &'a mut RgbBuffer,
     cache: &'a mut FrameCache,
     base_fill: &'a mut background::BaseFillCache,
@@ -188,6 +192,7 @@ impl<'a> PaintCtx<'a> {
             pack: world.pack,
             timing,
             sky: crate::sky::Sky::at(timing, world.floor.weather),
+            outside: None,
             buf,
             cache: &mut caches.sprites,
             base_fill: &mut caches.base_fill,
@@ -239,12 +244,15 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverable
         (buf_w, buf_h),
         "the classic pass draws layout units 1:1"
     );
-    paint_ground_and_walls(
-        ctx.base_fill,
+    paint_ground_and_walls(ctx.base_fill, ctx.buf, top_wall_h, &moment, ctx.theme);
+    let outside = ctx
+        .outside
+        .map(|sky| Moment::resolve(sky, ctx.theme, ctx.floor.altitude, ctx.timing));
+    paint_windows(
         ctx.buf,
         top_wall_h,
         ctx.layout.window_bays(),
-        &moment,
+        outside.as_ref().unwrap_or(&moment),
         ctx.pack,
         ctx.theme,
     );
