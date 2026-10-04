@@ -215,8 +215,8 @@ mod tests {
     use super::{ImageProtocol, Protocol};
 
     /// The bench measures every protocol the cutaway speaks: a new
-    /// `ImageProtocol` fails to compile in the first match until it has a
-    /// `Protocol`, and a new `Protocol` in the second until `ALL` lists it.
+    /// `ImageProtocol` fails to compile here until it has a `Protocol`, whose
+    /// `ALL` entry, beside the enum, is by hand.
     #[test]
     fn all_lists_every_protocol_the_cutaway_speaks() {
         let of = |image: ImageProtocol| match image {
@@ -225,9 +225,6 @@ mod tests {
             ImageProtocol::Iterm2 => Protocol::Iterm2,
         };
         for protocol in Protocol::ALL {
-            match protocol {
-                Protocol::HalfBlock | Protocol::Kitty | Protocol::Sixel | Protocol::Iterm2 => {}
-            }
             if let Some(image) = protocol.image() {
                 assert_eq!(of(image), protocol);
             }
