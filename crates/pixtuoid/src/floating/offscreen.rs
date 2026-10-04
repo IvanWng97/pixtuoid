@@ -63,7 +63,8 @@ impl OfficeRenderer {
         self.session.buf()
     }
 
-    /// The name badges of the LAST rendered frame (call right after `render`).
+    /// The text runs of the LAST rendered frame, badges then the board's (call
+    /// right after `render`).
     pub fn texts(&self) -> &[TextRun] {
         self.session.texts()
     }
@@ -252,9 +253,9 @@ impl<'a> XrgbSurface<'a> {
     }
 }
 
-/// Paint name badges into the upscaled [`XrgbSurface`]. Each label's
-/// `anchor_px` is office-buffer space → multiply by `scale` for screen space; the badge
-/// is centered horizontally over the anchor and sits just above the head. Drawn at
+/// Paint the name badges among `runs` into the upscaled [`XrgbSurface`]. Each
+/// run's `at` is office-buffer space → multiply by `scale` for screen space; the
+/// badge is centered horizontally over it and sits just above the head. Drawn at
 /// native surface res, not upscaled, so it stays a sharp caption over the chunky sprites.
 pub fn paint_labels_into_surface(sb: &mut XrgbSurface<'_>, runs: &[TextRun], scale: i32) {
     for run in runs {
@@ -695,8 +696,8 @@ mod tests {
         }
     }
 
-    /// The badge's ink centres on the anchor scaled to the surface: `anchor_px` is
-    /// already the sprite's top-centre, so any extra offset walks it off the sprite.
+    /// The badge's ink centres on the anchor scaled to the surface: the run's `at`
+    /// is already the sprite's top-centre, so any extra offset walks it off the sprite.
     #[test]
     fn a_badge_centres_its_ink_on_the_scaled_anchor() {
         use pixtuoid_scene::layout::Point;

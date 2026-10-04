@@ -194,22 +194,30 @@ impl TextRun {
         self.spans.iter().map(|s| s.text.as_str()).collect()
     }
 
-    /// The logical cells its line covers: one per cell of its text, a cell
-    /// row tall.
+    /// The logical cells its line covers on the terminal's cell grid, one
+    /// per cell of its text: what the hit test reads and the classic writes.
     pub fn bounds(&self) -> crate::layout::Bounds {
-        let (w, h) = (cells(&self.text()), crate::layout::CELL_ROWS);
+        self.place(cells(&self.text()))
+    }
+
+    /// The logical cells a line `w` cells wide takes where its align puts it:
+    /// the one placement the hit test and every terminal painter read. It
+    /// fills the cell row its anchor's row lies in, [`LABEL_GAP`] rows up for
+    /// [`Align::Over`].
+    pub fn place(&self, w: u16) -> crate::layout::Bounds {
+        let h = crate::layout::CELL_ROWS;
         let x = match self.align {
             Align::Left => self.at.x,
             Align::Right => self.at.x.saturating_sub(w),
             Align::Over | Align::Centre => self.at.x.saturating_sub(w / 2),
         };
-        let y = match self.align {
-            Align::Over => self.at.y.saturating_sub(LABEL_GAP + h),
+        let row = match self.align {
+            Align::Over => self.at.y.saturating_sub(LABEL_GAP),
             Align::Left | Align::Right | Align::Centre => self.at.y,
         };
         crate::layout::Bounds {
             x,
-            y,
+            y: row / h * h,
             width: w,
             height: h,
         }

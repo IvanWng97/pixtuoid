@@ -172,6 +172,22 @@ impl Raster {
         }
     }
 
+    /// The cells of the star the last frame drew, where a pointer opens the
+    /// repo, in either look; `None` before the first or when it drew none.
+    pub fn star(&self) -> Option<crate::layout::Bounds> {
+        match self.shown? {
+            Look::Classic => self
+                .classic
+                .as_ref()?
+                .hits
+                .texts
+                .iter()
+                .find(|run| run.role == crate::display::TextRole::Star)
+                .map(crate::display::TextRun::bounds),
+            Look::Cutaway { .. } => self.cutaway.as_ref()?.star(),
+        }
+    }
+
     /// The text the last frame drawn sets, in either look; `None` before the
     /// first.
     pub fn texts(&self) -> Option<&[crate::display::TextRun]> {

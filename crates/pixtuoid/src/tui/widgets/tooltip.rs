@@ -10,7 +10,7 @@ use ratatui::widgets::{Block, Padding, Paragraph};
 
 use super::{StateKind, compact_hms, display_width, source_badge_span, state_color, to_color};
 use crate::tui::renderer::clip_widget_rect;
-use pixtuoid_scene::display::{Align, GatewayCard, TextRole, TextRun};
+use pixtuoid_scene::display::{GatewayCard, TextRole, TextRun};
 use pixtuoid_scene::overlay::disambig_suffix;
 use pixtuoid_scene::pet::PetKind;
 
@@ -42,9 +42,9 @@ fn flip_x_anchor(mx: u16, tip_w: u16, scene_rect: Rect) -> u16 {
     }
 }
 
-/// Paint `runs` as terminal text, each where its align puts it: a badge in the
-/// cell [`LABEL_GAP`](pixtuoid_scene::display::text::LABEL_GAP) logical rows
-/// over its anchor, any other run in the cell its anchor lies in. The board's
+/// Paint `runs` as terminal text, each in the cells
+/// [`TextRun::place`] gives the line it writes, the cells the hit test reads
+/// (`a_run_paints_the_cells_its_bounds_hit`). The board's
 /// brand and star and the floor indicator are bold, the indicator padded a
 /// cell each side on its plate, and `hovered`'s badge reads `▸name` in bold
 /// white.
@@ -88,23 +88,13 @@ pub(crate) fn paint_text_runs(
                 .collect(),
         };
         let line = Line::from(spans);
-        let w = u16::try_from(line.width()).unwrap_or(u16::MAX);
-        let gap = pixtuoid_scene::display::text::LABEL_GAP;
-        let (x, y, width) = match run.align {
-            Align::Over => (
-                run.at.x.saturating_sub(w / 2),
-                run.at.y.saturating_sub(gap) / 2,
-                pixtuoid_scene::overlay::BADGE_CELLS,
-            ),
-            Align::Centre => (run.at.x.saturating_sub(w / 2), run.at.y / 2, w),
-            Align::Left => (run.at.x, run.at.y / 2, w),
-            Align::Right => (run.at.x.saturating_sub(w), run.at.y / 2, w),
-        };
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        let at = run.place(pixtuoid_scene::display::text::cells(&text));
         if let Some(r) = clip_widget_rect(
             Rect {
-                x: scene_rect.x + x,
-                y: scene_rect.y + y,
-                width,
+                x: scene_rect.x + at.x,
+                y: scene_rect.y + at.y / 2,
+                width: at.width,
                 height: 1,
             },
             scene_rect,
@@ -541,7 +531,7 @@ mod tests {
         };
         super::TextRun {
             at,
-            align: super::Align::Over,
+            align: pixtuoid_scene::display::Align::Over,
             spans: vec![
                 span(
                     &pixtuoid_scene::overlay::BADGE_MARKER.to_string(),
@@ -604,6 +594,56 @@ mod tests {
         assert!(l3.contains("\u{2b22}gw ok"), "gateway chip: {l3:?}");
     }
 
+    /// A run the pointer can name is painted in exactly the cells its
+    /// [`TextRun::bounds`](pixtuoid_scene::display::TextRun::bounds) gives the
+    /// hit test, whichever row its anchor falls on: a board line and its star
+    /// as the classic writes them, and a badge over an odd and an even head.
+    #[test]
+    fn a_run_paints_the_cells_its_bounds_hit() {
+        use pixtuoid_core::state::DaemonState;
+        use pixtuoid_scene::layout::Point;
+        use pixtuoid_scene::overlay::LabelTone;
+        let model = pixtuoid_scene::board::build_board(
+            pixtuoid_scene::board::StateCounts {
+                active: 2,
+                waiting: 1,
+                idle: 1,
+                exiting: 0,
+                total: 4,
+            },
+            0,
+            None,
+            Some(DaemonState::Idle),
+            pixtuoid_scene::anim::Motion::Full,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        let mut runs = model.runs(&theme::NORMAL);
+        for y in [9, 10] {
+            runs.push(badge(
+                Point { x: 40, y },
+                "cc\u{b7}repo",
+                LabelTone::Idle,
+                &theme::NORMAL,
+            ));
+        }
+        let area = Rect::new(0, 0, 120, 44);
+        for run in runs {
+            let mut term = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+            term.draw(|f| super::paint_text_runs(f, std::slice::from_ref(&run), area, None))
+                .unwrap();
+            let buf = term.backend().buffer();
+            let painted: Vec<(u16, u16)> = (0..area.height)
+                .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+                .filter(|&(x, y)| buf[(x, y)] != ratatui::buffer::Cell::default())
+                .collect();
+            let b = run.bounds();
+            let hit: Vec<(u16, u16)> = (b.y / 2..(b.y + b.height).div_ceil(2))
+                .flat_map(|y| (b.x..b.x + b.width).map(move |x| (x, y)))
+                .collect();
+            assert_eq!(painted, hit, "{:?} at {:?}", run.role, run.at);
+        }
+    }
+
     /// The floor indicator centres on its anchor by display columns, not
     /// bytes, padded a cell each side on its plate.
     #[test]
@@ -614,7 +654,7 @@ mod tests {
         let at = Point { x: 28, y: 8 };
         let run = super::TextRun {
             at,
-            align: super::Align::Centre,
+            align: pixtuoid_scene::display::Align::Centre,
             spans: vec![pixtuoid_scene::display::TextSpan {
                 text: text.clone(),
                 ink: theme.ui.neon_brand,

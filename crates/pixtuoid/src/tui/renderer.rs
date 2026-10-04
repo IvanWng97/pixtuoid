@@ -413,7 +413,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     // up for a beat AFTER the card is gone.
     apply_dim(pixels, ctx.onboarding.dim);
 
-    // Badges first, then the signs; a bubble lands between, as it always has.
+    // Badges first, then a bubble over them, then the signs, which a bubble
+    // must not cover.
     let signs = texts
         .iter()
         .position(|run| !matches!(run.role, TextRole::Badge(_)))

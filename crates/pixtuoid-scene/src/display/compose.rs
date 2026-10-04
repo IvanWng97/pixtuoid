@@ -447,17 +447,42 @@ fn signs(
 ) -> Vec<(Span, PieceKind)> {
     let pen = Pen::for_pack(office.scale, office.pack);
     let indicator = TextRun::indicator(office.layout.door, floor_idx + 1, office.theme);
+    let mut drawn: Vec<(u16, ArtRect)> = Vec::new();
     board
         .runs(office.theme)
         .into_iter()
         .chain([indicator])
-        .map(|run| {
-            (
-                topmost_span(run_rect(&run, pen), pen),
-                PieceKind::Text { run },
-            )
+        .filter_map(|run| {
+            let rect = run_rect(&run, pen);
+            // A run yields to one before it on its line: on the base art's grid
+            // the pixel font is too wide for the sign, and the star would write
+            // over the brand (`no_run_overprints_another_on_its_line`).
+            if drawn.iter().any(|&(y, r)| y == run.at.y && meets(r, rect)) {
+                return None;
+            }
+            drawn.push((run.at.y, rect));
+            Some((topmost_span(rect, pen), PieceKind::Text { run }))
         })
         .collect()
+}
+
+/// The logical cells `run`'s line takes on `pen`'s grid ([`run_rect`]): where
+/// a pointer names a run the cutaway drew.
+pub(crate) fn run_box(run: &TextRun, pen: Pen) -> Bounds {
+    let r = run_rect(run, pen);
+    let d = pen.art(1).0;
+    let (x, y) = (pen.logical(r.x), pen.logical(r.y));
+    Bounds {
+        x,
+        y,
+        width: (r.x.0 + r.w.0).div_ceil(d) - x,
+        height: (r.y.0 + r.h.0).div_ceil(d) - y,
+    }
+}
+
+/// Whether `a` and `b` share an art pixel.
+pub(crate) fn meets(a: ArtRect, b: ArtRect) -> bool {
+    a.x.0 < b.x.0 + b.w.0 && b.x.0 < a.x.0 + a.w.0 && a.y.0 < b.y.0 + b.h.0 && b.y.0 < a.y.0 + a.h.0
 }
 
 /// Every piece of the office, each with its [`Span`]. At one depth and layer,

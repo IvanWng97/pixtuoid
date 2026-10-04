@@ -91,6 +91,8 @@ struct Shown {
     footprints: Vec<(Span, u64)>,
     hovers: Hovers,
     texts: Vec<crate::display::TextRun>,
+    /// The cells of the star it drew, if it drew one.
+    star: Option<Bounds>,
 }
 
 impl CutawayCanvas {
@@ -156,6 +158,15 @@ impl CutawayCanvas {
             footprints,
             hovers: list.hovers().clone(),
             texts: list.texts().cloned().collect(),
+            star: list
+                .texts()
+                .find(|run| run.role == crate::display::TextRole::Star)
+                .map(|run| {
+                    crate::display::compose::run_box(
+                        run,
+                        crate::display::pen::Pen::for_pack(scale, &self.pack),
+                    )
+                }),
         });
         CanvasFrame {
             buf: &self.buf,
@@ -176,6 +187,12 @@ impl CutawayCanvas {
     /// The text the last frame sets, in paint order; `None` before the first.
     pub(crate) fn texts(&self) -> Option<&[crate::display::TextRun]> {
         self.shown.as_ref().map(|shown| shown.texts.as_slice())
+    }
+
+    /// The cells of the star the last frame drew; `None` before the first or
+    /// when it drew none.
+    pub(crate) fn star(&self) -> Option<Bounds> {
+        self.shown.as_ref()?.star
     }
 }
 
@@ -837,8 +854,8 @@ mod tests {
         assert_ne!(was.1, now.1, "its tone is in its fingerprint");
     }
 
-    /// The board's lines are pieces of their own: a new tally repaints board
-    /// lines and nothing else.
+    /// The board's lines are pieces of their own: a new tally repaints exactly
+    /// the board lines it changed, the old line's cells and the new one's.
     #[test]
     fn a_new_tally_repaints_only_the_board() {
         let h = Hovering::new();
@@ -854,7 +871,7 @@ mod tests {
             board: &busy,
             ..quiet
         };
-        let board = |showing| -> Vec<Span> {
+        let board = |showing| -> Vec<(Span, u64)> {
             use crate::display::TextRole;
             let office = Office {
                 layout: &h.layout,
@@ -869,7 +886,7 @@ mod tests {
                     matches!(&p.kind, PieceKind::Text { run }
                         if matches!(run.role, TextRole::Brand | TextRole::Star | TextRole::Board))
                 })
-                .map(|p| p.span)
+                .map(|p| (p.span, p.fingerprint))
                 .collect()
         };
         let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
@@ -886,18 +903,23 @@ mod tests {
             h.scale.to_buffer(h.layout.buf_w),
             h.scale.to_buffer(h.layout.buf_h),
         );
-        let lines: Vec<Bounds> = [board(quiet), board(busy)]
+        let (was, now) = (board(quiet), board(busy));
+        let only = |a: &[(Span, u64)], b: &[(Span, u64)]| -> Vec<Span> {
+            a.iter()
+                .filter(|line| !b.contains(line))
+                .map(|&(span, _)| span)
+                .collect()
+        };
+        let want: Vec<Bounds> = only(&was, &now)
             .into_iter()
-            .flatten()
+            .chain(only(&now, &was))
             .filter_map(|s| on_buffer(s, h.scale, size))
             .collect();
-        let Dirty::Rects(rects) = dirty else {
-            panic!("a new tally repaints only where it changed: {dirty:?}");
-        };
         assert!(
-            !rects.is_empty() && rects.iter().all(|r| lines.contains(r)),
-            "{rects:?} outside the board's lines {lines:?}"
+            !want.is_empty(),
+            "the tally changes a board line: {was:?} {now:?} {dirty:?}"
         );
+        assert_eq!(dirty, Dirty::Rects(want));
     }
 
     /// A new layout of the same size repaints everything, even one built after
