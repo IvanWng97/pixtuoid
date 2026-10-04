@@ -77,7 +77,7 @@ fn walkable_target(layout: &SceneLayout, seed: u64, n: u64) -> Point {
         if let Some(cand) = snap_point_to_walkable(&layout.walkable, last) {
             // Walkable is not enough: a cell under a desk's overhang is walkable
             // by invariant #6 and painted over anyway, and a creature RESTS here
-            // for most of its cycle. Walking through one stays fine.
+            // between walks. Walking through one stays fine.
             // And reachable: a creature walks there, and A* from the door's
             // ground cannot reach a pocket the walls close off.
             if layout.is_visually_clear(cand) && layout.reachable.reaches(cand) {
@@ -1183,6 +1183,67 @@ mod tests {
         );
     }
 
+    /// A gateway back up mid-walk-out drops its walk out and walks in again from
+    /// the elevator, once its stagger from the re-anchored `entered_at` is up.
+    #[test]
+    fn a_gateway_back_up_walks_in_again() {
+        let mut office = Office::new(192, 80);
+        let delay = mascot_enter_delay(mascot_seed(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            &DaemonInstanceId::new("18789").expect("non-empty"),
+        ));
+        let mut up = SceneState::default();
+        gateway(&mut up, "18789", DaemonLiveness::UP, 0, 0);
+        let mut ms = delay;
+        while ms < 60_000 {
+            ms += PAINT_MS;
+            office.frame(&up, None, None, ms);
+        }
+        let mut down = SceneState::default();
+        gateway(&mut down, "18789", DaemonLiveness::Down, 0, ms);
+        for _ in 0..3 {
+            ms += PAINT_MS;
+            assert_eq!(
+                lobsters(&office.frame(&down, None, None, ms))[0].1,
+                "lobster_walk"
+            );
+        }
+
+        let back = ms + PAINT_MS;
+        let mut again = SceneState::default();
+        gateway(&mut again, "18789", DaemonLiveness::UP, back, back);
+        assert!(
+            lobsters(&office.frame(&again, None, None, back)).is_empty(),
+            "its walk out is dropped, and it waits out its stagger"
+        );
+        let first = lobsters(&office.frame(&again, None, None, back + delay));
+        let elevator = mascot_elevator(
+            &office
+                .session
+                .floor
+                .ctx
+                .frame_layout(192, 80, office.floor.floor_seed)
+                .expect("lays out"),
+        )
+        .expect("an elevator");
+        let (pos, anim) = first[0];
+        assert_eq!(anim, "lobster_walk", "it walks in again");
+        assert!(
+            pos.x.abs_diff(elevator.x) <= 8 && pos.y.abs_diff(elevator.y) <= 8,
+            "from the elevator: {pos:?} vs {elevator:?}"
+        );
+        assert!(
+            office
+                .session
+                .floor
+                .ctx
+                .creatures
+                .values()
+                .all(|w| !w.leaving()),
+            "no stale walk out is left"
+        );
+    }
+
     /// Losing the elevator would lose the mascot: every narrow office keeps it.
     #[test]
     fn every_narrow_layout_still_draws_its_mascot() {
@@ -1294,7 +1355,7 @@ mod tests {
     }
 
     /// Every pet's walk master faces east too, so both densities face one way.
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     #[test]
     fn every_pet_walk_master_faces_east() {
         let pack = test_pack();
