@@ -9,7 +9,7 @@ Theme/weather lists are read from site/src/{themes,weather}.json (`@themes.json`
 
   just gen-media           # regenerate everything
   just gen-media --only docs   # docs/images/ only
-  just gen-check           # → gen-media.py --check (drift gate)
+  just gen-media-check     # → gen-media.py --check --only docs (evidence on a PR)
 
 --check renders to a temp dir and pixel-diffs every committed PNG (threshold 0,
 via scripts/compare-screenshots.py); video clips (.mp4/.webm) and the animated

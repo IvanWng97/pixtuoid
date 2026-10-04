@@ -31,7 +31,8 @@ build:
 
 `public/wasm/` is gitignored `just gen-wasm` output; without it the office
 silently stays on its poster. `public/demos/` is gitignored too:
-`just gen-media --only site` renders it locally, and CI renders it per build.
+`just gen-media --only site` renders it locally (before `npm run check`, whose
+config asserts each demo exists), and CI renders it per build.
 
 **The architecture diagram renders at build**, in process
 (`config/rehype-beautiful-mermaid.mjs` — no browser); Playwright's Chromium is

@@ -29,6 +29,8 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-site-node
         id: site-node
+      # Before `check`: astro.config.mjs asserts each demo exists.
+      - uses: ./.github/actions/gen-demos
       - name: Audit site dependencies
         working-directory: site
         run: npm run audit
@@ -39,7 +41,6 @@ jobs:
         working-directory: site
         run: npm run check
       - uses: ./.github/actions/gen-wasm
-      - uses: ./.github/actions/gen-demos
       - uses: withastro/action@v6
         # the ticker's build-time merged-PR fetch: unauthenticated quota on
         # shared runner IPs is routinely exhausted -> silent canned-reel fallback

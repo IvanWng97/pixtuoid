@@ -17,9 +17,9 @@ metadata:
 4. Add a row to `site/src/themes.json` (`id` = the kebab-case `name`, plus its
    presentation fields). `theme_gallery_manifest_matches_all_themes` asserts the
    manifest ids == `ALL_THEMES` names — the site never runs the binary, so this
-   bridge test is the only guard that its theme switcher stays in sync. Then run
-   `just gen-media` to regenerate the committed theme stills (else the smoke
-   `gen-check` reds the PR).
+   bridge test is the only guard that its theme switcher stays in sync. The theme
+   stills need no commit: the site's render in CI, the README's regenerate on
+   main (`just gen-media` renders them locally to look).
 5. Theme roles **may share an RGB** (every bundled theme does). What binds you
    are the `*_for_every_theme` legibility guards in `theme/mod.rs`.
 6. Run `just test`; update insta snapshots if the theme list changed.
