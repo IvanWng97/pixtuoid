@@ -17,7 +17,7 @@ use crate::layout::{
 };
 use crate::pack::{
     DESK_CUP_SPRITE, DOOR_SPRITE, MEETING_SOFA_NORTH_SPRITE, NORTH_SOFA_SEAT_ROWS,
-    TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE, drawn_in,
+    TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE,
 };
 use crate::render_scale::RenderScale;
 use crate::sim::SimFrame;
@@ -326,6 +326,7 @@ fn lights(
             indoor_scale: frame.indoor_scale,
             neon: frame.neon,
             beat: moment.timing.beat,
+            bulbs: crate::lighting::DeskBulbs::of(pack),
         },
     );
     let pen = Pen::for_pack(scale, pack);
@@ -396,27 +397,10 @@ fn desk_bulb(
     scale: RenderScale,
 ) -> Option<crate::layout::Point> {
     let span = desk_span(pack, art_name, at, scale)?;
-    let desk = crate::pack::densest_frame(pack, art_name, 0, scale)?;
-    let w = usize::from(desk.frame.width());
-    let (mut n, mut sx, mut sy) = (0u32, 0u32, 0u32);
-    for (i, _) in drawn_in(&desk, &[crate::pack::DESK_BULB_KEY])
-        .iter()
-        .enumerate()
-        .filter(|&(_, &b)| b)
-    {
-        n += 1;
-        sx += (i % w) as u32;
-        sy += (i / w) as u32;
-    }
-    if n == 0 {
-        return None;
-    }
-    // An art pixel's middle, in cells of the layout, rounded to the cell it lies in.
-    let d = f32::from(desk.density.get());
-    let cell = |sum: u32| ((sum as f32 / n as f32 + 0.5) / d) as u16;
+    let (x, y) = crate::pack::bulb_cell(&crate::pack::densest_frame(pack, art_name, 0, scale)?)?;
     Some(crate::layout::Point {
-        x: span.x0 + cell(sx),
-        y: span.y0 + cell(sy),
+        x: span.x0 + x,
+        y: span.y0 + y,
     })
 }
 
@@ -1002,14 +986,14 @@ fn push_desk_props(
         ));
         Some(y)
     };
-    if let (Some(_), Some(at)) = (props.cup, mark("cup")) {
+    if let (Some(_), Some(at)) = (props.cup, mark(crate::pack::CUP_MARK)) {
         stand(DESK_CUP_SPRITE, 0, at);
     }
     let Some(tier) = usize::from(props.token_tier).checked_sub(1) else {
         return;
     };
-    let Some((x, top)) =
-        mark("tower").and_then(|at| Some((at.0, stand(TOKEN_TOWER_SPRITE, tier, at)?)))
+    let Some((x, top)) = mark(crate::pack::TOWER_MARK)
+        .and_then(|at| Some((at.0, stand(TOKEN_TOWER_SPRITE, tier, at)?)))
     else {
         return;
     };

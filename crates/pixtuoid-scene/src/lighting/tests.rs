@@ -8,6 +8,10 @@ use crate::sky::{Sky, Weather};
 /// A desk away from every edge.
 const DESK: Point = Point { x: 40, y: 30 };
 
+fn bulbs() -> DeskBulbs {
+    DeskBulbs::of(&crate::pack::test_default_pack())
+}
+
 /// A WALL-CLOCK-scale epoch — the magnitude [`neon_breath`]'s integer modulo
 /// exists for.
 const WALL_CLOCK_MS: u64 = 1_767_000_000_000;
@@ -31,6 +35,7 @@ fn lights_at(w: u16, h: u16, hour: u32) -> (SceneLayout, Lights) {
             indoor_scale: 1.0,
             neon: NeonLevels::BUSY,
             beat: Beat::at_ms(0),
+            bulbs: crate::lighting::DeskBulbs::of(&crate::pack::test_default_pack()),
         },
     );
     (layout, lights)
@@ -83,6 +88,7 @@ fn the_neon_halo_throws_the_signs_own_levels() {
                 indoor_scale: 1.0,
                 neon: levels,
                 beat,
+                bulbs: bulbs(),
             },
         );
         assert_eq!(
@@ -186,6 +192,7 @@ fn a_monitor_halo_hangs_over_each_lit_screen_only() {
             indoor_scale: 1.0,
             neon: NeonLevels::BUSY,
             beat: Beat::at_ms(0),
+            bulbs: crate::lighting::DeskBulbs::of(&crate::pack::test_default_pack()),
         },
     );
     let kinds: Vec<_> = lights.monitor_halos.iter().map(|h| h.kind).collect();
@@ -214,8 +221,8 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
     // A lamp is a FIXTURE on the desk's west wing, visible from either side; the
     // standby SCREEN is the one that gates on facing.
     for darkness in [0.0_f32, 0.5, 1.0] {
-        let north = desk_lights(DESK, Facing::North, darkness, 1.0);
-        let south = desk_lights(DESK, Facing::South, darkness, 1.0);
+        let north = desk_lights(DESK, (Facing::North, bulbs()), darkness, 1.0);
+        let south = desk_lights(DESK, (Facing::South, bulbs()), darkness, 1.0);
         assert_eq!(
             north.lamp.strength, south.lamp.strength,
             "the lamp may not depend on facing (darkness {darkness})"
@@ -226,7 +233,10 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
         );
     }
     assert!(
-        desk_lights(DESK, Facing::South, 1.0, 1.0).lamp.strength > 0.0,
+        desk_lights(DESK, (Facing::South, bulbs()), 1.0, 1.0)
+            .lamp
+            .strength
+            > 0.0,
         "a viewer-facing desk must still light its lamp after dark"
     );
 }
@@ -238,8 +248,8 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
 fn an_emptied_floor_takes_both_desk_emitters_down_with_the_level() {
     use crate::layout::Facing;
     let min = crate::floor::VacancyDim::MIN_LEVEL;
-    let lit = desk_lights(DESK, Facing::North, 1.0, 1.0);
-    let empty = desk_lights(DESK, Facing::North, 1.0, min);
+    let lit = desk_lights(DESK, (Facing::North, bulbs()), 1.0, 1.0);
+    let empty = desk_lights(DESK, (Facing::North, bulbs()), 1.0, min);
     for (what, lit, empty) in [
         ("lamp", lit.lamp.strength, empty.lamp.strength),
         ("screen_idle", lit.screen_idle, empty.screen_idle),

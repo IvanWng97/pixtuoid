@@ -11,12 +11,14 @@ pub(crate) use density::{DenseFrame, densest_frame};
 #[cfg(test)]
 pub(crate) use lookup::DESK_BEZEL_RAISE;
 pub(crate) use lookup::{
-    CLOCK_FACE_KEY, CLOCK_SPRITE, COOLER_WATER, DESK_BULB_KEY, DESK_CHAIR_SPRITE, DESK_CUP_SPRITE,
-    DOOR_SPRITE, FISH_TANK_SPRITE, MEETING_SOFA_NORTH_SPRITE, MEETING_TABLE_SPRITE,
-    NORTH_SOFA_SEAT_ROWS, PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, TOKEN_SHEET_SPRITE,
-    TOKEN_TOWER_SPRITE, VENDING_MACHINE_SPRITE, WATER_COOLER_SPRITE, animation_frame_at,
-    appliance_frame_index, appliance_overrides, appliance_sprite, desk_art, desk_art_top,
-    desk_sprite_name, drawn_in, fixture_overrides, frame_at, looping_frame_index,
+    CLOCK_FACE_KEY, CLOCK_SPRITE, COOLER_WATER, CUP_MARK, DESK_BULB_KEY, DESK_CHAIR_SPRITE,
+    DESK_CUP_SPRITE, DOOR_SPRITE, FISH_TANK_SPRITE, MEETING_SOFA_NORTH_SPRITE,
+    MEETING_TABLE_SPRITE, NORTH_SOFA_SEAT_ROWS, PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY,
+    TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE, TOWER_MARK, VENDING_MACHINE_SPRITE,
+    WATER_COOLER_SPRITE, animation_frame_at, appliance_frame_index, appliance_overrides,
+    appliance_sprite, bulb_cell, desk_art, desk_art_top, desk_bulb_offset, desk_mark,
+    desk_prop_overrides, desk_sprite_name, drawn_in, fixture_overrides, frame_at,
+    looping_frame_index,
 };
 
 #[cfg(feature = "native")]
@@ -28,7 +30,7 @@ use pixtuoid_core::sprite::error::PackError;
 #[cfg(feature = "native")]
 use pixtuoid_core::sprite::format::{DensityMismatch, FrameCountMismatch, load_pack};
 use pixtuoid_core::sprite::format::{
-    Pack, ValidationReport, load_pack_from_strings, validate_pack_animations,
+    Pack, PackContract, ValidationReport, load_pack_from_strings, validate_pack_animations,
 };
 
 /// Where a sprite pack's custom half comes from. The source decides what a
@@ -66,10 +68,24 @@ fn art_sets() -> Vec<Vec<&'static str>> {
     sets
 }
 
-/// [`validate_pack_animations`], against this crate's painters' art sets and
-/// walks.
+/// The marks every desk's first frame carries: the cup and the token tower
+/// stand there ([`display`](crate::display)'s `push_desk_props`).
+const DESK_MARKS: [(&str, &[&str]); 2] = [
+    (lookup::DESK_SPRITE, &[CUP_MARK, TOWER_MARK]),
+    (lookup::DESK_NORTH_SPRITE, &[CUP_MARK, TOWER_MARK]),
+];
+
+/// [`validate_pack_animations`], against this crate's painters' art sets,
+/// walks and desk marks.
 pub fn validate_pack(pack: &Pack) -> ValidationReport {
-    validate_pack_animations(pack, &art_sets(), &crate::sim::WALKS)
+    validate_pack_animations(
+        pack,
+        &PackContract {
+            art_sets: &art_sets(),
+            walks: &crate::sim::WALKS,
+            marks: &DESK_MARKS,
+        },
+    )
 }
 
 /// Log a custom pack's animation-validation gaps at load time: a pack missing a
@@ -97,6 +113,7 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         missing_hair_views: _,
         overhanging_hair: _,
         walks_without_stride: _,
+        missing_marks: _,
         orphan_hairstyles,
     } = &report;
     for name in missing_required {
@@ -447,6 +464,39 @@ mod tests {
         fn exit(&self, _: &tracing::span::Id) {}
     }
 
+    /// Every key the desk props take a theme colour in is one their art draws,
+    /// at every density: a key renamed in the pack would stop the theme
+    /// reaching the prop.
+    #[test]
+    fn the_desk_props_draw_the_keys_the_theme_recolours() {
+        let pack = test_default_pack();
+        for s in [1, pack.max_density_variant().get()] {
+            let scale = crate::render_scale::RenderScale::new(s).expect("nonzero");
+            for (sprite, frame, keys) in [
+                (
+                    DESK_CUP_SPRITE,
+                    0,
+                    &[lookup::CUP_KEY, lookup::CUP_SHADE_KEY][..],
+                ),
+                (
+                    TOKEN_TOWER_SPRITE,
+                    0,
+                    &[lookup::PAPER_KEY, lookup::PAPER_SHADE_KEY],
+                ),
+                (TOKEN_SHEET_SPRITE, 0, &[lookup::PAPER_KEY]),
+            ] {
+                let art = densest_frame(&pack, sprite, frame, scale)
+                    .expect("the bundled pack draws the prop");
+                for &key in keys {
+                    assert!(
+                        drawn_in(&art, &[key]).contains(&true),
+                        "{sprite} at scale {s} draws no {key:?}"
+                    );
+                }
+            }
+        }
+    }
+
     /// The bundled pack is the one no user validates: a mis-sized `@Nx` variant
     /// in it silently falls back to the upscaled base.
     #[test]
@@ -457,6 +507,31 @@ mod tests {
         // `StandIn::DefaultPack` promises the default draws what a custom pack
         // leaves out.
         assert_eq!(report.warning_count(), 0, "{report:?}");
+    }
+
+    /// A pack that ships no back-turned desk draws its back-turned desks from
+    /// `desk`: it stands their props at `desk`'s marks and lights `desk`'s lamp.
+    #[test]
+    fn a_pack_without_desk_north_stands_its_props_on_desk() {
+        use crate::layout::{Facing, Point};
+        // the base table alone, whichever density variants a build ships
+        let north = "[animations.desk_north]\nframes   = [\"desk_north.sprite\"]\nframe_ms = 600\n";
+        let pack = test_pack_declaring(north, "");
+        let desk = Point { x: 20, y: 30 };
+        for mark in [CUP_MARK, TOWER_MARK] {
+            let at = |facing| desk_mark(&pack, desk, facing, mark);
+            assert!(
+                at(Facing::North).is_some(),
+                "the back-turned {mark} vanished"
+            );
+            assert_eq!(at(Facing::North), at(Facing::South), "{mark}");
+        }
+        let bulb = |facing| desk_bulb_offset(&pack, facing);
+        assert!(
+            bulb(Facing::North).is_some(),
+            "the back-turned lamp went dark"
+        );
+        assert_eq!(bulb(Facing::North), bulb(Facing::South));
     }
 
     /// `build.rs` embeds every sprite in `sprites/default/`, so one no animation,
@@ -743,8 +818,9 @@ mod tests {
         );
     }
 
-    /// A facing does not change how big a desk IS: `desk_north` is taller only above `desk.y`.
-    /// Checked on the edge COLUMNS the monitor never covers — the middle legitimately differs.
+    /// A facing does not change how big a desk IS: `desk_north` is taller only above `desk.y`,
+    /// and below it the same desk mirrored, as its arrangement mirrors the lamp. Checked on the
+    /// edge COLUMNS the monitor never covers — the middle legitimately differs.
     #[test]
     fn both_desk_variants_are_the_same_desk_below_the_monitor() {
         let pack = test_default_pack();
@@ -765,11 +841,11 @@ mod tests {
         for x in edges {
             for dy in 0..(base.height() - raise) {
                 let b = base.get(x, raise + dy);
-                let n = north.get(x, raise + lift + dy);
+                let n = north.get(base.width() - 1 - x, raise + lift + dy);
                 assert_eq!(
                     b, n,
                     "column {x} differs at desk.y+{dy}: the two variants must be \
-                     the same desk below the monitor"
+                     the same desk, mirrored, below the monitor"
                 );
             }
         }

@@ -1462,3 +1462,57 @@ fn ground_standing_wall_decor_sorts_with_the_ground() {
     }
     assert!(standing > 0, "the layouts place floor-standing decor");
 }
+
+/// Both densities place a desk's lamp, cup and tower from one arrangement
+/// (gen-art's `DESK_ARRANGEMENT`): each sits in the same column at 1x and at
+/// the densest art, in either facing. The rows are each density's own.
+#[test]
+fn every_desk_follows_the_one_arrangement() {
+    use crate::layout::{Facing, Point};
+    let pack = test_default_pack();
+    let dense = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
+    let desk = Point { x: 40, y: 30 };
+    for facing in [Facing::North, Facing::South] {
+        let art = crate::pack::desk_sprite_name(facing);
+        let column = |scale: RenderScale, mark: &str| {
+            let f = crate::pack::densest_frame(&pack, art, 0, scale).expect("the desk");
+            let m = f.marks.iter().find(|m| m.name() == mark).expect("the mark");
+            m.x() / f.density.get()
+        };
+        for mark in [crate::pack::CUP_MARK, crate::pack::TOWER_MARK] {
+            assert_eq!(
+                column(dense, mark),
+                column(RenderScale::ONE, mark),
+                "{art}'s {mark} stands in another column at {dense:?}"
+            );
+        }
+        let bulb = |scale| desk_bulb(desk, art, &pack, scale).expect("a bulb").x;
+        assert_eq!(
+            bulb(dense),
+            bulb(RenderScale::ONE),
+            "{art}'s lamp moved wings"
+        );
+    }
+}
+
+/// The classic lights each desk's lamp where its 1x art draws the bulb, in
+/// either facing.
+#[test]
+fn the_classic_lamp_pool_centres_on_the_1x_bulb() {
+    use crate::layout::{Facing, Point};
+    let pack = test_default_pack();
+    let desk = Point { x: 40, y: 30 };
+    for facing in [Facing::North, Facing::South] {
+        let art = crate::pack::desk_sprite_name(facing);
+        let bulb = crate::lighting::DeskBulbs::of(&pack).at(facing);
+        let lights = crate::lighting::DeskLights::new(desk, bulb, 1.0, 0.0);
+        let crate::lighting::Light::Halo { centre, .. } = lights.lamp.light else {
+            panic!("a desk lamp throws a halo");
+        };
+        assert_eq!(
+            Some(centre),
+            desk_bulb(desk, art, &pack, RenderScale::ONE),
+            "{art}'s pool is off its bulb"
+        );
+    }
+}

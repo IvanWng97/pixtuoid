@@ -26,9 +26,33 @@ const DESK_LAMP_MAX: f32 = 0.42;
 /// The standby screen's ceiling. At parity with [`DESK_LAMP_MAX`] the lamp
 /// pool washes the desk's west half out.
 pub(crate) const SCREEN_IDLE_MAX: f32 = 0.55;
-/// Where the desk lamp's bulb hangs from its desk's point, as the 1x desk art
-/// draws it: its `9` cell, under the shade.
-const DESK_LAMP_BULB: (u16, u16) = (1, 1);
+/// Where each facing's desk lamp bulb hangs from its desk's point, as the 1x
+/// art the pack draws there marks it ([`crate::pack::desk_bulb_offset`]);
+/// `None` for art that draws no lamp.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DeskBulbs {
+    facing_viewer: Option<(u16, u16)>,
+    back_turned: Option<(u16, u16)>,
+}
+
+impl DeskBulbs {
+    /// `pack`'s.
+    pub(crate) fn of(pack: &pixtuoid_core::sprite::format::Pack) -> Self {
+        Self {
+            facing_viewer: crate::pack::desk_bulb_offset(pack, Facing::South),
+            back_turned: crate::pack::desk_bulb_offset(pack, Facing::North),
+        }
+    }
+
+    /// A desk facing `facing`'s.
+    pub(crate) fn at(self, facing: Facing) -> Option<(u16, u16)> {
+        if crate::pack::desk_sprite_name(facing) == crate::pack::desk_sprite_name(Facing::North) {
+            self.back_turned
+        } else {
+            self.facing_viewer
+        }
+    }
+}
 const _: () = assert!(DESK_LAMP_MAX < SCREEN_IDLE_MAX);
 
 /// A monitor halo's level.
@@ -293,6 +317,8 @@ pub(crate) struct LightInputs<'a> {
     pub(crate) neon: NeonLevels,
     /// The neon halo's breath steps on it.
     pub(crate) beat: crate::anim::Beat,
+    /// Where each desk's lamp hangs its bulb.
+    pub(crate) bulbs: DeskBulbs,
 }
 
 impl Lights {
@@ -316,7 +342,7 @@ impl Lights {
                 .map(|(i, &desk)| {
                     desk_lights(
                         desk,
-                        layout.desk_facing(FloorLocalDeskIndex(i)),
+                        (layout.desk_facing(FloorLocalDeskIndex(i)), inputs.bulbs),
                         darkness,
                         indoor,
                     )
@@ -363,9 +389,15 @@ impl Lights {
 /// A desk's lights, scaled by `darkness` — `1 − exterior`, so weather counts
 /// and not just the hour — and by `indoor`, which is what an emptied floor
 /// switches off.
-fn desk_lights(desk: Point, facing: Facing, darkness: f32, indoor: f32) -> DeskLights {
+fn desk_lights(
+    desk: Point,
+    (facing, bulbs): (Facing, DeskBulbs),
+    darkness: f32,
+    indoor: f32,
+) -> DeskLights {
     DeskLights::new(
         desk,
+        bulbs.at(facing),
         darkness * indoor,
         screen_idle(facing, darkness, indoor),
     )
@@ -383,12 +415,15 @@ pub(crate) fn screen_idle(facing: Facing, darkness: f32, indoor: f32) -> f32 {
 }
 
 impl DeskLights {
-    /// The lights of a desk at `desk`: its lamp lit to `level`, its pool at
-    /// most [`DESK_LAMP_MAX`], and its standby screen at `screen_idle`.
-    pub(crate) fn new(desk: Point, level: f32, screen_idle: f32) -> Self {
+    /// The lights of a desk at `desk` whose lamp hangs its bulb `bulb` from
+    /// it: its lamp lit to `level` (dark without a bulb), its pool at most
+    /// [`DESK_LAMP_MAX`], and its standby screen at `screen_idle`.
+    pub(crate) fn new(desk: Point, bulb: Option<(u16, u16)>, level: f32, screen_idle: f32) -> Self {
+        let level = if bulb.is_some() { level } else { 0.0 };
+        let (dx, dy) = bulb.unwrap_or_default();
         let bulb = Point {
-            x: desk.x + DESK_LAMP_BULB.0,
-            y: desk.y + DESK_LAMP_BULB.1,
+            x: desk.x + dx,
+            y: desk.y + dy,
         };
         Self {
             lamp: Emitter {

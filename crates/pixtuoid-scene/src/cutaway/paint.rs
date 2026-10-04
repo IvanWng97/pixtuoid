@@ -1230,26 +1230,10 @@ fn paint_desk_prop(
     let Some(f) = crate::pack::densest_frame(pack, prop.sprite, prop.frame, scale) else {
         return;
     };
-    let f_themed = f.recolorable.recolored(&desk_prop_overrides(theme));
+    let f_themed = f
+        .recolorable
+        .recolored(&crate::pack::desk_prop_overrides(theme));
     blit_frame_scaled(&f_themed, prop.at.0, prop.at.1, f.blit_at, buf);
-}
-
-/// The pack keys the desk props draw their cup's body and shadow in.
-const CUP_KEY: char = 'V';
-const CUP_SHADE_KEY: char = '%';
-/// The pack keys the token tower and its sheet draw their paper in.
-const PAPER_KEY: char = '¤';
-const PAPER_SHADE_KEY: char = '!';
-
-/// The pack keys the desk props take from the theme.
-fn desk_prop_overrides(theme: &Theme) -> [(char, pixtuoid_core::sprite::Pixel); 4] {
-    let f = &theme.furniture;
-    [
-        (CUP_KEY, Some(f.coffee_cup)),
-        (CUP_SHADE_KEY, Some(f.coffee_cup_shadow)),
-        (PAPER_KEY, Some(f.paper)),
-        (PAPER_SHADE_KEY, Some(f.paper_shade)),
-    ]
 }
 
 /// The pack keys art takes from the theme.
@@ -1530,10 +1514,7 @@ pub(crate) mod tests {
     use crate::display::compose::{PLATE_H, compose_at, ground_shadow, push_windows};
     use crate::display::{Piece, Span, fingerprint};
     use crate::glass_weather::GlassWeather;
-    use crate::pack::{
-        DESK_CUP_SPRITE, MEETING_SOFA_NORTH_SPRITE, NORTH_SOFA_SEAT_ROWS, TOKEN_SHEET_SPRITE,
-        TOKEN_TOWER_SPRITE, test_default_pack,
-    };
+    use crate::pack::{MEETING_SOFA_NORTH_SPRITE, NORTH_SOFA_SEAT_ROWS, test_default_pack};
 
     /// Relighting recolors the screen KEYS and nothing else — not even a pixel
     /// of another key the same colour as the glass — so the glow is exactly the
@@ -1578,112 +1559,96 @@ pub(crate) mod tests {
     }
 
     /// Each prop stands with its foot on the cell its desk art marks for it, at
-    /// every density, the cup at 1x on the classic's own cell, and a sheet one
-    /// sheet's fall short of landing hangs that many rows over the tower.
+    /// every density and either facing, the cup on the cell its steam rises
+    /// from, and a sheet one sheet's fall short of landing hangs that many rows
+    /// over the tower.
     #[test]
     fn the_desk_props_stand_on_their_marks() {
-        let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
-        let mut frame = frames.last().expect("a seated frame").clone();
-        for d in &mut frame.desks {
-            d.cup = Some(crate::sim::Cup::Steaming);
-            d.token_tier = crate::token_meter::MAX_TIER;
-            d.sheet_fall = Some(1);
-        }
-        for s in [1, pack.max_density_variant().get()] {
-            let scale = RenderScale::new(s).expect("nonzero");
-            let office = Office {
-                layout: &layout,
-                pack: &pack,
-                theme,
-                scale,
-            };
-            let list = list_at(&frame, office, 12);
-            let pieces = list.pieces();
-            let mut stood = 0;
-            for (i, p) in pieces.iter().enumerate() {
-                let PieceKind::Desk { at, art, .. } = p.kind else {
-                    continue;
-                };
-                let desk = crate::pack::densest_frame(&pack, art, 0, scale).expect("art");
-                let k = desk.blit_at.get();
-                let mark = |name: &str| {
-                    let m = desk
-                        .marks
-                        .iter()
-                        .find(|m| m.name() == name)
-                        .expect("a mark");
-                    (
-                        scale.to_buffer(p.span.x0) + m.x() * k,
-                        scale.to_buffer(p.span.y0) + m.y() * k,
-                    )
-                };
-                // This desk's props follow it in the list: cup, tower, sheet.
-                let props: Vec<StoodProp> = pieces[i + 1..]
-                    .iter()
-                    .map_while(|q| match q.kind {
-                        PieceKind::DeskProp(prop) => Some(prop),
-                        _ => None,
-                    })
-                    .collect();
-                let [cup, tower, sheet] = props[..] else {
-                    panic!("desk at {at:?} stood {props:?}");
-                };
-                let foot = |prop: StoodProp| {
-                    let f = crate::pack::densest_frame(&pack, prop.sprite, prop.frame, scale)
-                        .expect("prop art");
-                    let b = f.blit_at.get();
-                    (prop.at.0, prop.at.1 + (f.frame.height() - 1) * b, b)
-                };
-                for (prop, name) in [(cup, "cup"), (tower, "tower")] {
-                    let (x, y, b) = foot(prop);
-                    let (mx, my) = mark(name);
-                    assert_eq!(
-                        (x, y),
-                        (mx, my + k - b),
-                        "at scale {s}, the {name} is off its mark"
-                    );
-                }
-                if s == 1 {
-                    assert_eq!(
-                        (cup.at.0, cup.at.1),
-                        (crate::sim::desk_cup_at(at).x, crate::sim::desk_cup_at(at).y),
-                        "the 1x cup is off the classic's cell"
-                    );
-                }
-                let rest = crate::token_meter::SHEET_FALL_PX - 1;
-                assert_eq!(
-                    (sheet.at.0, sheet.at.1),
-                    (tower.at.0, tower.at.1 - rest * s),
-                    "at scale {s}, the sheet hangs off its fall"
-                );
-                stood += 1;
+        use crate::layout::Facing;
+        for facing in [Facing::North, Facing::South] {
+            let theme = crate::theme::theme_by_name("normal").expect("theme");
+            let (layout, pack, frames, _) = sit_down(facing, 2);
+            let mut frame = frames.last().expect("a seated frame").clone();
+            for d in &mut frame.desks {
+                d.cup = Some(crate::sim::Cup::Steaming);
+                d.token_tier = crate::token_meter::MAX_TIER;
+                d.sheet_fall = Some(1);
             }
-            assert!(stood > 0, "no desk stood its props");
-        }
-    }
-
-    /// Every key the desk props take a theme colour in is one their art draws,
-    /// at every density: a key renamed in the pack would stop the theme
-    /// reaching the prop.
-    #[test]
-    fn the_desk_props_draw_the_keys_the_theme_recolours() {
-        let pack = test_default_pack();
-        for s in [1, pack.max_density_variant().get()] {
-            let scale = RenderScale::new(s).expect("nonzero");
-            for (sprite, frame, keys) in [
-                (DESK_CUP_SPRITE, 0, &[CUP_KEY, CUP_SHADE_KEY][..]),
-                (TOKEN_TOWER_SPRITE, 0, &[PAPER_KEY, PAPER_SHADE_KEY]),
-                (TOKEN_SHEET_SPRITE, 0, &[PAPER_KEY]),
-            ] {
-                let art = crate::pack::densest_frame(&pack, sprite, frame, scale)
-                    .expect("the bundled pack draws the prop");
-                for &key in keys {
-                    assert!(
-                        drawn_in(&art, &[key]).contains(&true),
-                        "{sprite} at scale {s} draws no {key:?}"
+            for s in [1, pack.max_density_variant().get()] {
+                let scale = RenderScale::new(s).expect("nonzero");
+                let office = Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme,
+                    scale,
+                };
+                let list = list_at(&frame, office, 12);
+                let pieces = list.pieces();
+                let mut stood = 0;
+                for (i, p) in pieces.iter().enumerate() {
+                    let PieceKind::Desk { at, art, .. } = p.kind else {
+                        continue;
+                    };
+                    let desk = crate::pack::densest_frame(&pack, art, 0, scale).expect("art");
+                    let k = desk.blit_at.get();
+                    let mark = |name: &str| {
+                        let m = desk
+                            .marks
+                            .iter()
+                            .find(|m| m.name() == name)
+                            .expect("a mark");
+                        (
+                            scale.to_buffer(p.span.x0) + m.x() * k,
+                            scale.to_buffer(p.span.y0) + m.y() * k,
+                        )
+                    };
+                    // This desk's props follow it in the list: cup, tower, sheet.
+                    let props: Vec<StoodProp> = pieces[i + 1..]
+                        .iter()
+                        .map_while(|q| match q.kind {
+                            PieceKind::DeskProp(prop) => Some(prop),
+                            _ => None,
+                        })
+                        .collect();
+                    let [cup, tower, sheet] = props[..] else {
+                        panic!("desk at {at:?} stood {props:?}");
+                    };
+                    let foot = |prop: StoodProp| {
+                        let f = crate::pack::densest_frame(&pack, prop.sprite, prop.frame, scale)
+                            .expect("prop art");
+                        let b = f.blit_at.get();
+                        (prop.at.0, prop.at.1 + (f.frame.height() - 1) * b, b)
+                    };
+                    for (prop, name) in [(cup, "cup"), (tower, "tower")] {
+                        let (x, y, b) = foot(prop);
+                        let (mx, my) = mark(name);
+                        assert_eq!(
+                            (x, y),
+                            (mx, my + k - b),
+                            "at scale {s}, the {name} is off its mark"
+                        );
+                    }
+                    // The steam rises from `desk_cup_at`, in either look.
+                    let facing = if art == crate::pack::desk_sprite_name(Facing::North) {
+                        Facing::North
+                    } else {
+                        Facing::South
+                    };
+                    let steam = crate::sim::desk_cup_at(&pack, at, facing).expect("a cup cell");
+                    assert_eq!(
+                        (cup.at.0 / s, cup.at.1 / s),
+                        (steam.x, steam.y),
+                        "at scale {s}, the {art} cup is off the cell its steam rises from"
                     );
+                    let rest = crate::token_meter::SHEET_FALL_PX - 1;
+                    assert_eq!(
+                        (sheet.at.0, sheet.at.1),
+                        (tower.at.0, tower.at.1 - rest * s),
+                        "at scale {s}, the sheet hangs off its fall"
+                    );
+                    stood += 1;
                 }
+                assert!(stood > 0, "no desk stood its props");
             }
         }
     }

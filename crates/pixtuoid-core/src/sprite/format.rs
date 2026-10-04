@@ -1966,6 +1966,30 @@ pub struct ValidationReport {
     /// Each of the caller's walks the pack ships without a `stride`: it steps
     /// on its clock, so its feet slide whenever its pace changes.
     pub walks_without_stride: Vec<String>,
+    /// Each mark a piece the caller stands props on leaves out: nothing stands
+    /// there, in either look.
+    pub missing_marks: Vec<MissingMark>,
+}
+
+/// A mark a piece's first frame leaves out, at one of its densities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingMark {
+    /// The animation, e.g. `desk@4x`.
+    pub name: String,
+    /// The mark it leaves out, e.g. `cup`.
+    pub mark: &'static str,
+}
+
+/// What only the caller knows of a pack.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PackContract<'a> {
+    /// The sets of pieces a pack should ship whole.
+    pub art_sets: &'a [Vec<&'static str>],
+    /// The animations the caller steps by [`Sprite::stride`].
+    pub walks: &'a [&'static str],
+    /// Each piece the caller stands props on, with the marks its first frame
+    /// carries at every density.
+    pub marks: &'a [(&'static str, &'static [&'static str])],
 }
 
 impl ValidationReport {
@@ -1988,6 +2012,7 @@ impl ValidationReport {
             overhanging_hair: _,
             orphan_hairstyles,
             walks_without_stride: _,
+            missing_marks: _,
         } = self;
         missing_required.len()
             + insufficient_frames.len()
@@ -2016,6 +2041,7 @@ impl ValidationReport {
             overhanging_hair,
             orphan_hairstyles: _,
             walks_without_stride,
+            missing_marks,
         } = self;
         missing_optional.len()
             + partial_sets.len()
@@ -2024,6 +2050,7 @@ impl ValidationReport {
             + missing_hair_views.len()
             + overhanging_hair.len()
             + walks_without_stride.len()
+            + missing_marks.len()
     }
 
     /// True when the pack is unusable; see [`error_count`](Self::error_count).
@@ -2034,17 +2061,17 @@ impl ValidationReport {
 
 /// Check a pack's animations against the required/optional/multi-frame
 /// registries, each density variant against its base, each derived piece
-/// against its source, and against what only the caller knows: `art_sets`,
-/// the sets of pieces a pack should ship whole, and `walks`, the animations it
-/// steps by [`Sprite::stride`].
+/// against its source, and against what only the caller knows
+/// ([`PackContract`]).
 ///
 /// An unauthored variant is not reported missing: a pack that has not been
 /// redrawn at a density is the normal case, not a gap.
-pub fn validate_pack_animations(
-    pack: &Pack,
-    art_sets: &[Vec<&'static str>],
-    walks: &[&'static str],
-) -> ValidationReport {
+pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> ValidationReport {
+    let PackContract {
+        art_sets,
+        walks,
+        marks,
+    } = *contract;
     let mut report = ValidationReport {
         walks_without_stride: walks
             .iter()
@@ -2106,6 +2133,25 @@ pub fn validate_pack_animations(
             Some((name.as_str(), variant, base, density?))
         })
         .collect();
+
+    for &(piece, wanted) in marks {
+        let densities = variants.iter().filter(|v| v.2 == piece).map(|v| (v.0, v.1));
+        for (name, sprite) in pack
+            .animation(piece)
+            .map(|s| (piece, s))
+            .into_iter()
+            .chain(densities)
+        {
+            for &mark in wanted {
+                if !sprite.marks(0).iter().any(|m| m.name() == mark) {
+                    report.missing_marks.push(MissingMark {
+                        name: name.to_owned(),
+                        mark,
+                    });
+                }
+            }
+        }
+    }
 
     let mut check_frames = |name: &str, requirement_key: &str| {
         let min_frames = MULTI_FRAME_REQUIREMENTS
@@ -2284,11 +2330,17 @@ mod validation_floor_tests {
             "[animations.walking]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
              [animations.cat_walk]\nframes=[\"f.sprite\"]\nframe_ms=100\nstride=2\n",
         );
-        let report = validate_pack_animations(&pack, &[], &["walking", "cat_walk", "dog_walk"]);
+        let report = validate_pack_animations(
+            &pack,
+            &PackContract {
+                walks: &["walking", "cat_walk", "dog_walk"],
+                ..PackContract::default()
+            },
+        );
         assert_eq!(report.walks_without_stride, vec!["walking".to_string()]);
         assert_eq!(
             report.error_count(),
-            validate_pack_animations(&pack, &[], &[]).error_count(),
+            validate_pack_animations(&pack, &PackContract::default()).error_count(),
             "a clock walk still renders: no error"
         );
     }
@@ -2372,7 +2424,7 @@ mod validation_floor_tests {
             SIZED_FRAMES,
         );
         assert_eq!(
-            validate_pack_animations(&pack, &[], &[]).unknown,
+            validate_pack_animations(&pack, &PackContract::default()).unknown,
             vec!["desk@02x".to_string()]
         );
         assert_eq!(pack.max_density_variant(), Density::ONE);
@@ -2467,7 +2519,7 @@ mod validation_floor_tests {
              [animations.\"typing_back@2x\"]\nframes=[\"two.sprite\", \"two.sprite\"]\nframe_ms=100\n",
             SIZED_FRAMES,
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert!(
             report.unknown.is_empty()
                 && report.mismatched_density.is_empty()
@@ -2513,7 +2565,7 @@ mod validation_floor_tests {
              [animations.\"typing@2x\"]\nframes=[\"two.sprite\", \"three.sprite\"]\nframe_ms=100\n",
             SIZED_FRAMES,
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert_eq!(
             report.mismatched_density,
             vec![DensityMismatch {
@@ -2534,7 +2586,7 @@ mod validation_floor_tests {
              [animations.\"typing@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n",
             SIZED_FRAMES,
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert_eq!(
             report.mismatched_frame_counts,
             vec![FrameCountMismatch {
@@ -2559,7 +2611,7 @@ mod validation_floor_tests {
              [animations.\"typing@2x\"]\nframes=[\"three.sprite\"]\nframe_ms=100\n",
             SIZED_FRAMES,
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert_eq!(report.mismatched_frame_counts.len(), 1, "{report:?}");
         assert_eq!(
             report.mismatched_density,
@@ -2585,7 +2637,7 @@ mod validation_floor_tests {
         );
         let anim = |n| pack.animation(n).expect("in the pack");
         assert!(variant_redraws(anim("walking"), d(2), anim("walking@2x")));
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert!(report.mismatched_density.is_empty(), "{report:?}");
         assert_eq!(
             report.mismatched_frame_counts,
@@ -2612,7 +2664,7 @@ mod validation_floor_tests {
              [animations.\"standing@2x\"]\nframes=[]\nframe_ms=100\n",
             SIZED_FRAMES,
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         for (name, base, redraws) in [
             ("typing@2x", "typing", true),
             ("walking@2x", "walking", false),
@@ -2637,7 +2689,7 @@ mod validation_floor_tests {
             "[animations.\"typing_back@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n",
             SIZED_FRAMES,
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert_eq!(report.orphan_variants, vec!["typing_back@2x".to_string()]);
         assert!(report.unknown.is_empty(), "{:?}", report.unknown);
     }
@@ -2687,7 +2739,13 @@ mod validation_floor_tests {
     }
 
     fn validate(animations: &str) -> ValidationReport {
-        validate_pack_animations(&pack_with(animations), &sets(), &[])
+        validate_pack_animations(
+            &pack_with(animations),
+            &PackContract {
+                art_sets: &sets(),
+                ..PackContract::default()
+            },
+        )
     }
 
     const ONE: &str = "frames=[\"f.sprite\"]\nframe_ms=100\n";
@@ -2856,9 +2914,41 @@ mod validation_floor_tests {
             }],
             orphan_hairstyles: vec!["mop@2x".to_string()],
             walks_without_stride: vec!["walking".to_string()],
+            missing_marks: vec![MissingMark {
+                name: "desk@4x".to_string(),
+                mark: "cup",
+            }],
         };
         assert_eq!(report.error_count(), 6);
-        assert_eq!(report.warning_count(), 7);
+        assert_eq!(report.warning_count(), 8);
+    }
+
+    /// A piece the caller stands props on, at any of its densities, leaves out
+    /// a mark: nothing would stand there.
+    #[test]
+    fn a_desk_without_its_prop_marks_is_flagged_at_each_density() {
+        let pack = pack_with_frames(
+            "[animations.desk]\nframes=[\"m.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk@2x\"]\nframes=[\"b.sprite\"]\nframe_ms=100\n",
+            &[
+                ("m.sprite", "@frame 0\n@mark cup 0 0\n@mark tower 0 0\nA"),
+                ("b.sprite", "@frame 0\n@mark tower 0 0\nA A\nA A"),
+            ],
+        );
+        let report = validate_pack_animations(
+            &pack,
+            &PackContract {
+                marks: &[("desk", &["cup", "tower"])],
+                ..PackContract::default()
+            },
+        );
+        assert_eq!(
+            report.missing_marks,
+            [MissingMark {
+                name: "desk@2x".to_string(),
+                mark: "cup",
+            }]
+        );
     }
 
     /// Pins the frame-count check's empty case.
@@ -2933,7 +3023,7 @@ mod validation_floor_tests {
                 ("four.sprite", "@frame 0\nA A A A"),
             ],
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert_eq!(
             report.mismatched_density,
             vec![DensityMismatch {
@@ -2977,7 +3067,7 @@ mod validation_floor_tests {
              [animations.\"desk@2x\"]\nframes=[\"variant.sprite\"]\nframe_ms=100\n",
             &[("base.sprite", &base), ("variant.sprite", &variant)],
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         let m = report
             .mismatched_density
             .first()
@@ -2993,7 +3083,7 @@ mod validation_floor_tests {
             "[animations.\"desk@4x\"]\nframes=[\"four.sprite\"]\nframe_ms=100\n",
             &[("four.sprite", "@frame 0\nA A A A")],
         );
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert_eq!(report.orphan_variants, vec!["desk@4x".to_string()]);
         assert!(
             report.mismatched_density.is_empty(),
@@ -3005,7 +3095,7 @@ mod validation_floor_tests {
     #[test]
     fn empty_frames_on_a_required_animation_fails_validation() {
         let pack = pack_with_animation("seated", "[]");
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert!(
             report
                 .insufficient_frames
@@ -3022,7 +3112,7 @@ mod validation_floor_tests {
     #[test]
     fn empty_frames_on_an_optional_furniture_animation_fails_validation() {
         let pack = pack_with_animation("desk", "[]");
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert!(
             report
                 .insufficient_frames
@@ -3036,7 +3126,7 @@ mod validation_floor_tests {
     #[test]
     fn one_frame_on_a_plain_known_animation_passes_validation() {
         let pack = pack_with_animation("seated", "[\"f.sprite\"]");
-        let report = validate_pack_animations(&pack, &[], &[]);
+        let report = validate_pack_animations(&pack, &PackContract::default());
         assert!(
             report.insufficient_frames.is_empty(),
             "a 1-frame seated must not be flagged; got {:?}",
@@ -3065,14 +3155,15 @@ mod validation_floor_tests {
     const MOP: &str = "[hairstyles.\"mop@2x\"]\nfront={ over=\"o.sprite\" }\n";
 
     fn hair_findings(pack: &Pack) -> ValidationReport {
-        let report = validate_pack_animations(pack, &[], &[]);
+        let report = validate_pack_animations(pack, &PackContract::default());
         assert!(report.orphan_variants.is_empty() && report.mismatched_density.is_empty());
         report
     }
 
     /// `report`'s errors and warnings past those of the same pack undressed.
     fn hair_counts(report: &ValidationReport) -> (usize, usize) {
-        let bare = validate_pack_animations(&dressed_pack(FRONT_BODY, "", &[]), &[], &[]);
+        let bare =
+            validate_pack_animations(&dressed_pack(FRONT_BODY, "", &[]), &PackContract::default());
         (
             report.error_count() - bare.error_count(),
             report.warning_count() - bare.warning_count(),
