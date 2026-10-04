@@ -5,7 +5,6 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow, bail};
 use serde_json::Value;
 
 use crate::AgentId;
@@ -16,7 +15,90 @@ use crate::source::{AgentEvent, ToolDetail};
 /// events`. Defined HERE, NOT in the `native`-gated `jsonl` module, so the
 /// registry's `SourceDescriptor` can name it in a `--no-default-features` (wasm)
 /// build.
-pub type LineDecoder = fn(&str, &str, Value) -> Result<Vec<AgentEvent>>;
+pub type LineDecoder = fn(&str, &str, Value) -> DecodeResult<Vec<AgentEvent>>;
+
+/// A decoder's answer: its events, or why it refused the input.
+pub type DecodeResult<T> = std::result::Result<T, DecodeError>;
+
+/// Why a decoder refused a hook payload or a transcript line. The caller logs it
+/// and drops the input; every wire-borne string in it is [`display_safe`].
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum DecodeError {
+    /// The payload isn't a JSON object.
+    #[error("{cli} payload must be an object")]
+    NotAnObject {
+        /// The wire's source name.
+        cli: String,
+    },
+    /// A field the input needs is absent or empty.
+    #[error("{cli} {} missing/empty {field}", .event.as_deref().unwrap_or("payload"))]
+    Missing {
+        /// The wire's source name.
+        cli: String,
+        /// The event the field belongs to, when the wire named one.
+        event: Option<String>,
+        /// The field, or `/`-joined fields any one of which would do.
+        field: &'static str,
+    },
+    /// An event name the decoder has no arm for.
+    #[error("unsupported {cli} event: {event}")]
+    Unsupported {
+        /// The wire's source name.
+        cli: String,
+        /// The event name.
+        event: String,
+    },
+    /// A field present but outside what the wire allows.
+    #[error("{cli} {field}: {reason}")]
+    Invalid {
+        /// The wire's source name.
+        cli: String,
+        /// The field.
+        field: &'static str,
+        /// What was wrong with it.
+        reason: String,
+    },
+}
+
+impl DecodeError {
+    pub(crate) fn not_an_object(cli: &str) -> Self {
+        Self::NotAnObject {
+            cli: display_safe(cli),
+        }
+    }
+
+    pub(crate) fn missing(cli: &str, field: &'static str) -> Self {
+        Self::Missing {
+            cli: display_safe(cli),
+            event: None,
+            field,
+        }
+    }
+
+    pub(crate) fn missing_in(cli: &str, event: &str, field: &'static str) -> Self {
+        Self::Missing {
+            cli: display_safe(cli),
+            event: Some(display_safe(event)),
+            field,
+        }
+    }
+
+    pub(crate) fn unsupported(cli: &str, event: &str) -> Self {
+        Self::Unsupported {
+            cli: display_safe(cli),
+            event: display_safe(event),
+        }
+    }
+
+    pub(crate) fn invalid(cli: &str, field: &'static str, reason: impl std::fmt::Display) -> Self {
+        Self::Invalid {
+            cli: display_safe(cli),
+            field,
+            reason: display_safe(&reason.to_string()),
+        }
+    }
+}
 
 /// The first-sight cwd-extractor fn pointer: ONE parsed transcript line → the
 /// working dir it carries, if any. Each transcript-bearing source's registry row
@@ -231,7 +313,7 @@ fn decodes_to_nothing(
 fn source_owned_arms(
     desc: Option<&'static crate::source::registry::SourceDescriptor>,
     v: &Value,
-) -> Result<Option<Vec<AgentEvent>>> {
+) -> DecodeResult<Option<Vec<AgentEvent>>> {
     use crate::source::registry::HookCustom;
     match desc.and_then(|d| d.hook()).and_then(|h| h.custom) {
         Some(HookCustom::ClaimsAll(decode)) => decode(v).map(Some),
@@ -248,13 +330,13 @@ fn hook_session_id(
     obj: &serde_json::Map<String, Value>,
     source: &str,
     event: &str,
-) -> Result<String> {
+) -> DecodeResult<String> {
     obj.get("session_id")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| {
             super::drift::missing_field(source, event, "session_id");
-            anyhow!("missing/empty session_id")
+            DecodeError::missing_in(source, event, "session_id")
         })
         .map(str::to_string)
 }
@@ -343,10 +425,10 @@ fn hook_effort(agent_id: AgentId, obj: &serde_json::Map<String, Value>) -> Optio
 /// unknown id lands with REAL identity instead of a blank `#N` slot. The
 /// session-lifecycle and custom Subagent arms deliberately do NOT: SessionStart
 /// already carries identity, and an end for an unknown agent proves nothing.
-pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
+pub fn decode_hook_payload(v: Value) -> DecodeResult<Vec<AgentEvent>> {
     let obj = v
         .as_object()
-        .ok_or_else(|| anyhow!("hook payload must be an object"))?;
+        .ok_or_else(|| DecodeError::not_an_object("hook"))?;
     let source = hook_source(obj);
     let desc = crate::source::registry::descriptor_for(source);
     if decodes_to_nothing(source, obj, desc) {
@@ -367,13 +449,13 @@ fn shared_hook_arms(
     obj: &serde_json::Map<String, Value>,
     source: &str,
     desc: Option<&'static crate::source::registry::SourceDescriptor>,
-) -> Result<Vec<AgentEvent>> {
+) -> DecodeResult<Vec<AgentEvent>> {
     let event = obj
         .get("hook_event_name")
         .and_then(|s| s.as_str())
         .ok_or_else(|| {
             super::drift::missing_field(source, "hook", "hook_event_name");
-            anyhow!("missing hook_event_name")
+            DecodeError::missing(source, "hook_event_name")
         })?;
     let session_id = hook_session_id(obj, source, event)?;
     let agent_id = hook_agent_id(desc, obj, source, &session_id);
@@ -495,7 +577,7 @@ fn shared_hook_arms(
         // these session-keyed arms cannot express — see `source_owned_arms`.
         other => {
             super::drift::unknown_event(source, other);
-            bail!("unsupported hook_event_name: {}", display_safe(other))
+            Err(DecodeError::unsupported(source, other))
         }
     }
 }
@@ -579,7 +661,7 @@ pub(crate) const MAX_DECODED_FIELD_CHARS: usize = 80;
 
 /// Make an untrusted wire value safe to DISPLAY: strip control characters, then cap
 /// at [`MAX_DECODED_FIELD_CHARS`]. For the HUMAN sinks that are NOT cell buffers —
-/// the [`super::drift`] breadcrumbs and the unsupported-event `bail!`s, whose
+/// the [`super::drift`] breadcrumbs and [`DecodeError`]'s wire strings, whose
 /// `tracing` writes to raw stderr, which no cell-clipping or presenter sanitize
 /// covers. The binary's `strip_control_chars` is a COPY — keep the two in step.
 pub(crate) fn display_safe(s: &str) -> String {

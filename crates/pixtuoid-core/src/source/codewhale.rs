@@ -33,7 +33,7 @@
 //!   falls to the stale-sweep — the walk resolves a pid there (#528), but no
 //!   `ExitWatch` backend exists to watch it.
 
-use anyhow::{Result, anyhow, bail};
+use crate::source::decoder::DecodeResult as Result;
 use serde_json::Value;
 
 use crate::AgentId;
@@ -58,11 +58,11 @@ const SUBAGENT_TOOLS: &[&str] = &["agent_spawn", "spawn_agent"];
 pub fn decode_cw_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
-        .ok_or_else(|| anyhow!("codewhale hook payload must be an object"))?;
+        .ok_or_else(|| crate::source::decoder::DecodeError::not_an_object(SOURCE_NAME))?;
     let event = obj
         .get("event")
         .and_then(|s| s.as_str())
-        .ok_or_else(|| anyhow!("codewhale payload missing event"))?;
+        .ok_or_else(|| crate::source::decoder::DecodeError::missing(SOURCE_NAME, "event"))?;
 
     // Subagent observer hooks are forwarded RAW from CodeWhale's stdin, so they
     // carry CodeWhale's OWN field names and no `cwd` at all — they must be
@@ -76,7 +76,7 @@ pub fn decode_cw_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .get("cwd")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow!("codewhale payload missing/empty cwd"))?;
+        .ok_or_else(|| crate::source::decoder::DecodeError::missing(SOURCE_NAME, "cwd"))?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, cwd);
 
     // No usable upstream session id exists; the cwd IS the session key, so this
@@ -121,10 +121,10 @@ pub fn decode_cw_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         }]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
-            bail!(
-                "unsupported codewhale hook event: {}",
-                crate::source::decoder::display_safe(other)
-            )
+            Err(crate::source::decoder::DecodeError::unsupported(
+                SOURCE_NAME,
+                other,
+            ))
         }
     }
 }
@@ -150,7 +150,9 @@ fn decode_cw_subagent(
         .get("agent_id")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow!("codewhale {event} missing/empty agent_id"))?;
+        .ok_or_else(|| {
+            crate::source::decoder::DecodeError::missing_in(SOURCE_NAME, event, "agent_id")
+        })?;
     let child_id = AgentId::from_parts(SOURCE_NAME, child);
 
     if !is_spawn {

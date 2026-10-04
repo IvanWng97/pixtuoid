@@ -23,7 +23,7 @@
 //! with no shared key between the file name and hook payloads, a JSONL agent
 //! could never coalesce with the hook agent (guaranteed two sprites).
 
-use anyhow::{Result, anyhow, bail};
+use crate::source::decoder::DecodeResult as Result;
 use serde_json::Value;
 
 use crate::AgentId;
@@ -52,17 +52,17 @@ const SUBAGENT_TOOLS: &[&str] = &["task", "explore", "research", "review", "secu
 pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
-        .ok_or_else(|| anyhow!("reasonix hook payload must be an object"))?;
+        .ok_or_else(|| crate::source::decoder::DecodeError::not_an_object(SOURCE_NAME))?;
     let event = obj
         .get("event")
         .and_then(|s| s.as_str())
-        .ok_or_else(|| anyhow!("reasonix payload missing event"))?;
+        .ok_or_else(|| crate::source::decoder::DecodeError::missing(SOURCE_NAME, "event"))?;
     // An empty cwd would mint a phantom agent that nothing else coalesces with.
     let cwd = obj
         .get("cwd")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow!("reasonix payload missing/empty cwd"))?;
+        .ok_or_else(|| crate::source::decoder::DecodeError::missing(SOURCE_NAME, "cwd"))?;
     // Merged on cwd, either session's end walks the shared sprite out.
     let key = obj
         .get("sessionId")
@@ -181,10 +181,10 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         }]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
-            bail!(
-                "unsupported reasonix hook event: {}",
-                crate::source::decoder::display_safe(other)
-            )
+            Err(crate::source::decoder::DecodeError::unsupported(
+                SOURCE_NAME,
+                other,
+            ))
         }
     }
 }

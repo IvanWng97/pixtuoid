@@ -27,7 +27,7 @@
 //!   No open-FD probe is possible: every append opens and drops the file
 //!   handle, unlike Codex's for-lifetime rollout fd.
 
-use anyhow::{Result, anyhow, bail};
+use crate::source::decoder::DecodeResult as Result;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -86,11 +86,13 @@ pub(crate) const DECODED_XAI_METHOD: &str = XAI_SESSION_UPDATE_METHOD;
 pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
-        .ok_or_else(|| anyhow!("grok hook payload must be an object"))?;
+        .ok_or_else(|| crate::source::decoder::DecodeError::not_an_object(SOURCE_NAME))?;
     let event = obj
         .get("hookEventName")
         .and_then(|s| s.as_str())
-        .ok_or_else(|| anyhow!("grok payload missing hookEventName"))?;
+        .ok_or_else(|| {
+            crate::source::decoder::DecodeError::missing(SOURCE_NAME, "hookEventName")
+        })?;
     let cwd = obj
         .get("cwd")
         .and_then(|s| s.as_str())
@@ -105,7 +107,9 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
         .or(cwd)
-        .ok_or_else(|| anyhow!("grok payload has no sessionId, cwd, or workspaceRoot"))?;
+        .ok_or_else(|| {
+            crate::source::decoder::DecodeError::missing(SOURCE_NAME, "sessionId/cwd/workspaceRoot")
+        })?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, key);
     let cwd_path = || cwd.map(PathBuf::from);
 
@@ -238,7 +242,11 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         "subagent_start" => {
             let Some(child_session_id) = child_key(obj) else {
                 crate::source::drift::missing_field(SOURCE_NAME, event, "subagentId");
-                bail!("grok {event} payload missing subagentId")
+                return Err(crate::source::decoder::DecodeError::missing_in(
+                    SOURCE_NAME,
+                    event,
+                    "subagentId",
+                ));
             };
             let child = AgentId::from_parts(SOURCE_NAME, &child_session_id);
             let mut evs = vec![AgentEvent::SessionStart {
@@ -276,10 +284,10 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         }]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
-            bail!(
-                "unsupported grok hook event: {}",
-                crate::source::decoder::display_safe(other)
-            )
+            Err(crate::source::decoder::DecodeError::unsupported(
+                SOURCE_NAME,
+                other,
+            ))
         }
     }
 }
@@ -310,7 +318,11 @@ fn subagent_child_id(obj: &serde_json::Map<String, Value>, event: &str) -> Resul
         Some(id) => Ok(AgentId::from_parts(SOURCE_NAME, &id)),
         None => {
             crate::source::drift::missing_field(SOURCE_NAME, event, "subagentId");
-            bail!("grok {event} payload missing subagentId")
+            Err(crate::source::decoder::DecodeError::missing_in(
+                SOURCE_NAME,
+                event,
+                "subagentId",
+            ))
         }
     }
 }
