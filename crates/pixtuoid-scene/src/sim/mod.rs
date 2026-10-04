@@ -588,7 +588,7 @@ pub(crate) struct Cues {
     /// Waiting on the human.
     pub(crate) waiting: bool,
     /// Walking, its weight on this foot ([`effects::planted_foot`]).
-    pub(crate) walking: Option<usize>,
+    pub(crate) planted_foot: Option<usize>,
 }
 
 /// What rides on `agent`, whose `w`-wide frame (`None` where its pack lacks
@@ -603,7 +603,10 @@ pub(crate) fn character_effects(
 ) -> Vec<Effect> {
     let Timing { now, beat } = timing;
     let mut out = Vec::new();
-    out.extend(cues.walking.map(|f| effects::walking_dust(top_left, f)));
+    out.extend(
+        cues.planted_foot
+            .map(|f| effects::walking_dust(top_left, f)),
+    );
     if let Some(w) = w
         && crate::burn::slot_burn_tier(agent, now) == crate::burn::BurnTier::Top
     {
@@ -683,7 +686,7 @@ pub(crate) fn resolve_characters(
             let cues = Cues {
                 sleep_seed,
                 waiting: is_waiting,
-                walking: None,
+                planted_foot: None,
             };
             (placement, cues)
         };
@@ -843,7 +846,7 @@ pub(crate) fn resolve_characters(
                         breathes: false,
                     },
                     Cues {
-                        walking: Some(effects::planted_foot(
+                        planted_foot: Some(effects::planted_foot(
                             frame,
                             pack.animation(anim_name).map_or(1, |a| a.frames().len()),
                         )),
