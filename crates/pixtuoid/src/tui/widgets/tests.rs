@@ -132,6 +132,9 @@ fn every_width_is_the_cells_the_buffer_writes() {
         "\u{644}\u{627}",
         "cc\u{b7}\u{1f99e}",
         "a\u{7}b",
+        "\u{ff76}\u{ff9e}",
+        "\u{ff8a}\u{ff9f}",
+        "\u{ff9e}",
     ] {
         let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 40, 1));
         let (x, _) = buf.set_stringn(0, 0, text, usize::MAX, ratatui::style::Style::default());
