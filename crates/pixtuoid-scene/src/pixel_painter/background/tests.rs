@@ -1063,15 +1063,7 @@ fn the_classic_lays_the_carpet_the_model_tints() {
         Motion::Full.timing(now),
     );
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
-    paint_ground_and_walls(
-        &mut BaseFillCache::new(),
-        &mut buf,
-        top_wall_h,
-        window_bays(buf_w, 0..0),
-        &moment,
-        &test_default_pack(),
-        theme,
-    );
+    paint_band(&mut buf, top_wall_h, &moment, theme);
     let carpet = moment.look.carpet(theme);
     let tones = [carpet.lit, carpet.base, carpet.dark];
     let floor_row = buf_h - 1;
