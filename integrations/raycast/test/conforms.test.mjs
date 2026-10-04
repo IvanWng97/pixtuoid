@@ -14,16 +14,21 @@ test("a source row conforms, its optional health null or absent", () => {
   assert.ok(conforms({ ...row, health: "decode drift" }, sourceStatus));
 });
 
-test("a source row missing a field, mistyped, or carrying an unknown one does not", () => {
+test("a source row missing a field or mistyped does not conform", () => {
   const row = { id: "codex", display_name: "Codex", connected: true, cli_present: false };
   const missing = { ...row };
   delete missing.display_name;
   assert.ok(!conforms(missing, sourceStatus));
   assert.ok(!conforms({ ...row, connected: "yes" }, sourceStatus));
   assert.ok(!conforms({ ...row, health: 3 }, sourceStatus));
-  assert.ok(!conforms({ ...row, extra: 1 }, sourceStatus));
   assert.ok(!conforms(null, sourceStatus));
   assert.ok(!conforms([row], sourceStatus));
+});
+
+test("a field a newer CLI adds is ignored, though the schema forbids it", () => {
+  assert.equal(sourceStatus.additionalProperties, false);
+  const row = { id: "codex", display_name: "Codex", connected: true, cli_present: false };
+  assert.ok(conforms({ ...row, since: "0.20.0" }, sourceStatus));
 });
 
 test("an outcome row's token is one the schema's enum names", () => {

@@ -5,7 +5,6 @@ export interface Schema {
   $ref?: string;
   properties?: Record<string, Schema>;
   required?: string[];
-  additionalProperties?: boolean;
   $defs?: Record<string, Schema>;
 }
 
@@ -18,7 +17,9 @@ function typeOf(value: unknown): string {
 
 /** Whether `value` is an instance of `schema`, resolving `#/$defs/…` refs
  *  against `root`: the subset of JSON Schema the contract schemas use. A `$ref`
- *  or keyword outside it fails closed. */
+ *  outside it fails closed. A field the schema doesn't name is ignored (a
+ *  Tolerant Reader): its `additionalProperties: false` types the TS
+ *  interface, and a newer CLI's additions must not break an installed copy. */
 export function conforms(value: unknown, schema: Schema, root: Schema = schema): boolean {
   if (schema.$ref !== undefined) {
     const def = /^#\/\$defs\/(.+)$/.exec(schema.$ref)?.[1];
@@ -38,11 +39,7 @@ export function conforms(value: unknown, schema: Schema, root: Schema = schema):
     if (!(schema.required ?? []).every((key) => key in record)) return false;
     for (const [key, field] of Object.entries(record)) {
       const fieldSchema = properties[key];
-      if (fieldSchema === undefined) {
-        if (schema.additionalProperties === false) return false;
-      } else if (!conforms(field, fieldSchema, root)) {
-        return false;
-      }
+      if (fieldSchema !== undefined && !conforms(field, fieldSchema, root)) return false;
     }
   }
   return true;
