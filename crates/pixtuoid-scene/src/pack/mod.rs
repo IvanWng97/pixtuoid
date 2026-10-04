@@ -29,7 +29,8 @@ use anyhow::{Context, Result};
 use pixtuoid_core::sprite::error::PackError;
 #[cfg(feature = "native")]
 use pixtuoid_core::sprite::format::{
-    DensityMismatch, FrameCountMismatch, MissingMark, OffBeatLoop, UnreadTiming, load_pack,
+    DensityMismatch, FrameCountMismatch, MissingKey, MissingMark, OffBeatLoop, UnreadTiming,
+    load_pack,
 };
 use pixtuoid_core::sprite::format::{
     Pack, PackContract, ValidationReport, load_pack_from_strings, validate_pack_animations,
@@ -70,27 +71,31 @@ fn art_sets() -> Vec<Vec<&'static str>> {
     sets
 }
 
-/// The animations a painter loops on the beat: the looping fixtures, the
-/// typists (`pose::typing_frame`), and every creature pose.
-fn looped_animations() -> Vec<&'static str> {
-    let fixtures = [
-        FISH_TANK_SPRITE,
-        WATER_COOLER_SPRITE,
-        VENDING_MACHINE_SPRITE,
-        PRINTER_SPRITE,
-    ];
+/// The animations a painter loops on the beat, each with the frame its loop
+/// starts at: the looping fixtures, the appliances' busy loops
+/// ([`appliance_frame_index`](lookup::appliance_frame_index)), the typists
+/// (`pose::typing_frame`), and every creature pose.
+fn looped_animations() -> Vec<(&'static str, usize)> {
+    let appliances =
+        [VENDING_MACHINE_SPRITE, PRINTER_SPRITE].map(|name| (name, lookup::APPLIANCE_IDLE_FRAMES));
     let pets = crate::pet::PetKind::ALL
         .iter()
         .flat_map(|k| [k.walk_anim(), k.sit_anim(), k.sleep_anim()]);
     let mascots = pixtuoid_core::source::registry::registered_source_names()
         .filter_map(crate::creatures::gateway_mascot_def)
         .flat_map(|def| [def.walk, def.rest]);
-    fixtures
-        .into_iter()
-        .chain(["typing", "typing_back"])
-        .chain(pets)
-        .chain(mascots)
-        .collect()
+    [
+        FISH_TANK_SPRITE,
+        WATER_COOLER_SPRITE,
+        "typing",
+        "typing_back",
+    ]
+    .into_iter()
+    .chain(pets)
+    .chain(mascots)
+    .map(|name| (name, 0))
+    .chain(appliances)
+    .collect()
 }
 
 /// The marks every desk's first frame carries: the cup and the token tower
@@ -100,8 +105,15 @@ const DESK_MARKS: [(&str, &[&str]); 2] = [
     (lookup::DESK_NORTH_SPRITE, &[CUP_MARK, TOWER_MARK]),
 ];
 
+/// The key every desk draws its lamp's bulb in: its pool centres there
+/// ([`bulb_cell`]).
+const DESK_BULBS: [(&str, char); 2] = [
+    (lookup::DESK_SPRITE, DESK_BULB_KEY),
+    (lookup::DESK_NORTH_SPRITE, DESK_BULB_KEY),
+];
+
 /// [`validate_pack_animations`], against this crate's painters' art sets,
-/// walks, desk marks and loops on the Full beat.
+/// walks, desk marks, desk bulbs and loops on the Full beat.
 pub fn validate_pack(pack: &Pack) -> ValidationReport {
     validate_pack_animations(
         pack,
@@ -111,6 +123,7 @@ pub fn validate_pack(pack: &Pack) -> ValidationReport {
             marks: &DESK_MARKS,
             loops: &looped_animations(),
             beat_ms: crate::anim::FULL_TICK_MS,
+            keys: &DESK_BULBS,
         },
     )
 }
@@ -141,6 +154,7 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         overhanging_hair: _,
         walks_without_stride,
         missing_marks,
+        missing_keys,
         orphan_hairstyles,
         unread_variant_timing,
         off_beat_loops,
@@ -237,6 +251,14 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
             "custom sprite pack art leaves out a mark — nothing stands there, in either look"
         );
     }
+    for MissingKey { name, key } in missing_keys {
+        tracing::warn!(
+            origin,
+            animation = ?name,
+            key = %key,
+            "custom sprite pack art draws no pixel in a light's key — no light rises there"
+        );
+    }
     for style in orphan_hairstyles {
         tracing::warn!(
             origin,
@@ -305,7 +327,7 @@ pub fn load_bundled_pack() -> Result<Pack, PackError> {
 }
 
 /// Every default sprite as `(filename, source)`: every `.sprite` in
-/// `sprites/default/`, listed by `build.rs` (less, without `density-art`, the
+/// `sprites/default/`, listed by `build.rs` (less, without `cutaway-assets`, the
 /// frames only a density variant draws), so a sprite committed there cannot be
 /// left out by omission. `test_pack_with` swaps files within this EXACT set.
 fn bundled_sprite_srcs() -> Vec<(&'static str, &'static str)> {
@@ -604,7 +626,7 @@ mod tests {
             .collect()
     }
 
-    /// The web hero's pack. Nothing runs this suite without `density-art`
+    /// The web hero's pack. Nothing runs this suite without `cutaway-assets`
     /// (`just hack` only checks), so this is the one place it is loaded.
     #[test]
     fn the_pack_without_density_art_loads_whole() {
@@ -637,7 +659,7 @@ mod tests {
     /// What a default run's render scale rounds to (`RenderScale::fit`): a
     /// change to the bundled art's densest variant should be a decision.
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn the_bundled_pack_is_drawn_at_most_at_4x() {
         assert_eq!(test_default_pack().max_density_variant().get(), 4);
     }
@@ -646,7 +668,7 @@ mod tests {
     /// beside the base the classic painter draws, for a city drawn on that
     /// art's grid.
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn every_bundled_building_is_drawn_at_1x_and_4x() {
         let pack = test_default_pack();
         assert!(
@@ -827,15 +849,25 @@ mod tests {
             .frames()[0]
             .clone();
         let row = vec!["W"; usize::from(desk.width()) * 4].join(" ");
-        let rows = vec![row; usize::from(desk.height()) * 4].join("\n");
+        // lit and marked, so the orphan is its only finding
+        let rows = [format!("{DESK_BULB_KEY}{}", &row[1..])]
+            .into_iter()
+            .chain(vec![row; usize::from(desk.height()) * 4 - 1])
+            .collect::<Vec<_>>()
+            .join("\n");
         fs::write(
             tmp.path().join("desk4x.sprite"),
-            // marked, so the orphan is its only finding
             format!("@frame 0\n@mark {CUP_MARK} 0 0\n@mark {TOWER_MARK} 0 0\n{rows}\n"),
         )
         .expect("write desk4x.sprite");
         let toml_path = tmp.path().join("pack.toml");
-        let mut toml = fs::read_to_string(&toml_path).expect("read pack.toml");
+        let mut toml = fs::read_to_string(&toml_path)
+            .expect("read pack.toml")
+            .replacen(
+                "[palette]\n",
+                &format!("[palette]\n\"{DESK_BULB_KEY}\" = \"#fff4c0\"\n"),
+                1,
+            );
         toml.push_str("\n[animations.\"desk@4x\"]\nframes=[\"desk4x.sprite\"]\nframe_ms=100\n");
         fs::write(&toml_path, toml).expect("write pack.toml");
         assert_eq!(load_warns(), own + 1, "the orphan desk@4x warns");

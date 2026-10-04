@@ -233,15 +233,7 @@ pub(crate) const NORTH_SOFA_SEAT_ROWS: u16 = 3;
 /// Which of `art`'s pixels, row by row, it draws in one of `keys`: those that
 /// go transparent when the keys are painted so.
 pub(crate) fn drawn_in(art: &super::DenseFrame<'_>, keys: &[char]) -> Vec<bool> {
-    let without = art
-        .recolorable
-        .recolored(&keys.iter().map(|&k| (k, None)).collect::<Vec<_>>());
-    let (w, h) = (art.frame.width(), art.frame.height());
-    let opaque = |f: &pixtuoid_core::sprite::Frame, x, y| f.get(x, y).and_then(|p| *p).is_some();
-    (0..h)
-        .flat_map(|y| (0..w).map(move |x| (x, y)))
-        .map(|(x, y)| opaque(art.frame, x, y) && !opaque(&without, x, y))
-        .collect()
+    art.recolorable.drawn_in(keys)
 }
 
 /// The pack art a corridor appliance at a `kind` waypoint is drawn from.
@@ -261,16 +253,20 @@ pub(crate) fn appliance_sprite(kind: crate::layout::WaypointKind) -> Option<&'st
     }
 }
 
+/// The frames an appliance's art opens with that stand still: it shows them
+/// idle, and loops the rest while busy.
+pub(crate) const APPLIANCE_IDLE_FRAMES: usize = 1;
+
 /// The frame of an appliance's `anim` showing on `beat`: frame 0 when idle,
-/// else its busy loop — the frames after 0, one each of the art's own
-/// `frame_ms`.
+/// else its busy loop — the frames after the [`APPLIANCE_IDLE_FRAMES`], one
+/// each of the art's own `frame_ms`.
 pub(crate) fn appliance_frame_index(anim: &Sprite, busy: bool, beat: crate::anim::Beat) -> usize {
-    let loop_len = anim.frames().len().saturating_sub(1);
+    let loop_len = anim.frames().len().saturating_sub(APPLIANCE_IDLE_FRAMES);
     if !busy || loop_len == 0 {
         return 0;
     }
     let step = beat.ms() / u64::from(anim.frame_ms().max(1));
-    1 + usize::try_from(step % loop_len as u64).unwrap_or(0)
+    APPLIANCE_IDLE_FRAMES + usize::try_from(step % loop_len as u64).unwrap_or(0)
 }
 
 /// The frame of a looping `anim` showing on `beat`: one each of the art's own

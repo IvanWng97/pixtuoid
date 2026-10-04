@@ -85,6 +85,107 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
     );
 }
 
+/// Mid-change, the carpet and the glass's veil each take the incoming
+/// weather's look on the pixels the dither gives it, keyed on the buffer, and
+/// the going weather's on the rest.
+#[test]
+fn a_change_dithers_the_carpet_and_the_veil_on_the_buffer() {
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let now = crate::localclock::at_hour(12);
+    // Partway through a change of cloud, at a share whose dither, unlike
+    // half's checkerboard, moves with any shift of its key.
+    let moment = || {
+        let mix = crate::sky::WeatherMix::toward(Weather::Clear, Weather::Fog, 0.4);
+        let sky = Sky::at_with(now, Weather::Clear).with_weather(mix);
+        Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now))
+    };
+    let black = Rgb { r: 0, g: 0, b: 0 };
+    let (buf_w, buf_h, top_wall_h) = (64u16, 48u16, 18u16);
+    // Every pixel `paint` draws under `dither` is its incoming end's where the
+    // dither takes it, else its going end's; and each end shows somewhere.
+    let check =
+        |what: &str, takes: &dyn Fn(u16, u16) -> bool, [going, coming, mid]: [RgbBuffer; 3]| {
+            let mut took = [0; 2];
+            for y in 0..mid.height() {
+                for x in 0..mid.width() {
+                    if going.get(x, y) == coming.get(x, y) {
+                        continue;
+                    }
+                    let t = takes(x, y);
+                    let want = if t { coming.get(x, y) } else { going.get(x, y) };
+                    assert_eq!(mid.get(x, y), want, "{what} at ({x}, {y})");
+                    took[usize::from(t)] += 1;
+                }
+            }
+            assert!(took[0] > 0 && took[1] > 0, "{what}: {took:?}");
+        };
+
+    let tint = moment().look.ground_tint_color();
+    let carpet = |tint: Dithered<Rgb>| {
+        let mut m = moment();
+        m.look = m.look.with_ground_tint_color(tint);
+        let mut buf = RgbBuffer::filled(buf_w, buf_h, black);
+        paint_ground_and_walls(
+            &mut BaseFillCache::new(),
+            &mut buf,
+            top_wall_h,
+            window_bays(buf_w, 0..0),
+            &m,
+            &test_default_pack(),
+            theme,
+        );
+        buf
+    };
+    let [from, to] = tint.ends();
+    check(
+        "carpet",
+        &|x, y| tint.takes_to(x, y),
+        [Dithered::solid(from), Dithered::solid(to), tint].map(carpet),
+    );
+
+    let veil = moment().look.glass_veil;
+    // Off the dither's period, so a key from the glass's corner would show.
+    let pane = Bounds {
+        x: 3,
+        y: 5,
+        width: WINDOW_W,
+        height: 30,
+    };
+    let window = |veil| {
+        let m = moment();
+        let mut weather = GlassWeather::of(&m);
+        weather.veil = veil;
+        let city = CityStrip::draw(
+            &test_default_pack(),
+            (WINDOW_W, glass_rows(pane.height)),
+            &m,
+            theme,
+            pixtuoid_core::sprite::format::Density::ONE,
+        );
+        let mut buf = RgbBuffer::filled(48, 40, black);
+        paint_floor_to_ceiling_window(
+            &mut buf,
+            pane,
+            theme.surface.window_frame,
+            0,
+            &m,
+            GlassView {
+                city: &city,
+                run_x0: pane.x,
+                sky: &crate::celestial::SkyView::of(&m, 48, 40, theme),
+                weather,
+            },
+        );
+        buf
+    };
+    let [clear, fog] = veil.ends();
+    check(
+        "veil",
+        &|x, y| veil.takes_to(x, y),
+        [Dithered::solid(clear), Dithered::solid(fog), veil].map(window),
+    );
+}
+
 #[test]
 fn short_buffer_clamps_spill_and_window_without_panic() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
@@ -1155,7 +1256,11 @@ fn the_classic_lays_the_carpet_the_model_tints() {
         &test_default_pack(),
         theme,
     );
-    let carpet = moment.look.carpet(theme);
+    let carpet = moment
+        .look
+        .carpet(theme)
+        .as_solid()
+        .expect("a settled weather");
     let tones = [carpet.lit, carpet.base, carpet.dark];
     let floor_row = buf_h - 1;
     assert!(

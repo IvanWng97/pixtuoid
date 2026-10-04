@@ -17,6 +17,21 @@ fn lights(facing: crate::layout::Facing, darkness: f32, indoor: f32) -> DeskLigh
     desk_lights(DESK, facing, bulbs().at(facing), darkness, indoor)
 }
 
+/// Each facing lights the bulb its own desk art draws, the East and West
+/// facings included.
+#[test]
+fn every_facing_lights_its_own_desks_bulb() {
+    use crate::layout::Facing;
+    let pack = crate::pack::test_default_pack();
+    for facing in [Facing::North, Facing::South, Facing::East, Facing::West] {
+        assert_eq!(
+            DeskBulbs::of(&pack).at(facing),
+            crate::pack::desk_bulb_offset(&pack, facing),
+            "{facing:?}"
+        );
+    }
+}
+
 /// A pack whose desk art draws no bulb lights no lamp, however dark.
 #[test]
 fn desk_art_without_a_bulb_lights_no_lamp() {
@@ -53,6 +68,16 @@ fn desk_art_without_a_bulb_lights_no_lamp() {
             unlit(include_str!("../../sprites/default/desk_north.sprite")),
         ),
     ]);
+    let unlit: Vec<_> = crate::pack::validate_pack(&pack)
+        .missing_keys
+        .into_iter()
+        .map(|m| m.name)
+        .collect();
+    assert_eq!(
+        unlit,
+        ["desk", "desk_north"],
+        "validate-pack names each unlit desk"
+    );
     for facing in [Facing::North, Facing::South] {
         assert!(
             bulbs().at(facing).is_some(),

@@ -489,7 +489,7 @@ fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
 /// Every look of frame `i` of `anim` a viewer could see under `overrides`:
 /// recolored and, where the art marks its head, dressed in each of the pack's
 /// hairstyles.
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn looks(
     pack: &pixtuoid_core::sprite::format::Pack,
     anim: &pixtuoid_core::sprite::Sprite,
@@ -511,7 +511,7 @@ fn looks(
 }
 
 /// Whether recoloring `key` changes some pixel of every look of frame `i`.
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn recolors(
     pack: &pixtuoid_core::sprite::format::Pack,
     anim: &pixtuoid_core::sprite::Sprite,
@@ -529,7 +529,7 @@ fn recolors(
 /// the pack's own color there: `standing` shows all four, at every density,
 /// dressed in whichever hairstyle.
 #[test]
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn the_bundled_pack_draws_every_key_an_agent_recolors() {
     use pixtuoid_core::sprite::format::{Density, density_variant_name};
     let pack = crate::pack::test_default_pack();
@@ -563,7 +563,7 @@ fn the_bundled_pack_draws_every_key_an_agent_recolors() {
 /// (the key itself or one of its `[ramps]` shades), or it shows every agent in
 /// the pack's own colours. Skin and pants may be out of sight.
 #[test]
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
     use pixtuoid_core::sprite::format::{
         Density, OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS, density_variant_name,
@@ -4158,7 +4158,7 @@ fn appliance_at(sprite: &'static str, busy: bool, ms: u64) -> RgbBuffer {
 /// A busy appliance reads busy for most of its loop at every density: fewer
 /// than half its busy frames may show it at rest.
 #[test]
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn a_busy_loop_spends_most_of_its_frames_away_from_rest() {
     let pack = crate::pack::test_default_pack();
     for name in [
@@ -5831,7 +5831,7 @@ fn an_unflipped_character_faces_the_way_its_art_does() {
 /// style's layers are drawn for the art as authored, so profile hair laid on a
 /// flipped body would land on the face side.
 #[test]
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn a_facing_flip_mirrors_the_dressed_frame() {
     let pack = crate::pack::test_default_pack();
     let scale =

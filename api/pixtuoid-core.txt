@@ -1242,6 +1242,24 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::MissingHairView
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::MissingHairView
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::MissingHairView
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::MissingHairView
+pub struct pixtuoid_core::sprite::format::MissingKey
+pub pixtuoid_core::sprite::format::MissingKey::key: char
+pub pixtuoid_core::sprite::format::MissingKey::name: alloc::string::String
+impl core::clone::Clone for pixtuoid_core::sprite::format::MissingKey
+pub fn pixtuoid_core::sprite::format::MissingKey::clone(&self) -> pixtuoid_core::sprite::format::MissingKey
+impl core::cmp::Eq for pixtuoid_core::sprite::format::MissingKey
+impl core::cmp::PartialEq for pixtuoid_core::sprite::format::MissingKey
+pub fn pixtuoid_core::sprite::format::MissingKey::eq(&self, &pixtuoid_core::sprite::format::MissingKey) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::format::MissingKey
+pub fn pixtuoid_core::sprite::format::MissingKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::format::MissingKey
+impl core::marker::Freeze for pixtuoid_core::sprite::format::MissingKey
+impl core::marker::Send for pixtuoid_core::sprite::format::MissingKey
+impl core::marker::Sync for pixtuoid_core::sprite::format::MissingKey
+impl core::marker::Unpin for pixtuoid_core::sprite::format::MissingKey
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::MissingKey
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::MissingKey
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::MissingKey
 pub struct pixtuoid_core::sprite::format::MissingMark
 pub pixtuoid_core::sprite::format::MissingMark::mark: &'static str
 pub pixtuoid_core::sprite::format::MissingMark::name: alloc::string::String
@@ -1345,7 +1363,8 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Pac
 pub struct pixtuoid_core::sprite::format::PackContract<'a>
 pub pixtuoid_core::sprite::format::PackContract::art_sets: &'a [alloc::vec::Vec<&'static str>]
 pub pixtuoid_core::sprite::format::PackContract::beat_ms: u64
-pub pixtuoid_core::sprite::format::PackContract::loops: &'a [&'static str]
+pub pixtuoid_core::sprite::format::PackContract::keys: &'a [(&'static str, char)]
+pub pixtuoid_core::sprite::format::PackContract::loops: &'a [(&'static str, usize)]
 pub pixtuoid_core::sprite::format::PackContract::marks: &'a [(&'static str, &'static [&'static str])]
 pub pixtuoid_core::sprite::format::PackContract::walks: &'a [&'static str]
 impl<'a> core::clone::Clone for pixtuoid_core::sprite::format::PackContract<'a>
@@ -1421,6 +1440,7 @@ pub pixtuoid_core::sprite::format::ValidationReport::insufficient_frames: alloc:
 pub pixtuoid_core::sprite::format::ValidationReport::mismatched_density: alloc::vec::Vec<pixtuoid_core::sprite::format::DensityMismatch>
 pub pixtuoid_core::sprite::format::ValidationReport::mismatched_frame_counts: alloc::vec::Vec<pixtuoid_core::sprite::format::FrameCountMismatch>
 pub pixtuoid_core::sprite::format::ValidationReport::missing_hair_views: alloc::vec::Vec<pixtuoid_core::sprite::format::MissingHairView>
+pub pixtuoid_core::sprite::format::ValidationReport::missing_keys: alloc::vec::Vec<pixtuoid_core::sprite::format::MissingKey>
 pub pixtuoid_core::sprite::format::ValidationReport::missing_marks: alloc::vec::Vec<pixtuoid_core::sprite::format::MissingMark>
 pub pixtuoid_core::sprite::format::ValidationReport::missing_optional: alloc::vec::Vec<pixtuoid_core::sprite::format::MissingOptional>
 pub pixtuoid_core::sprite::format::ValidationReport::missing_required: alloc::vec::Vec<alloc::string::String>
@@ -1585,6 +1605,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::Palette
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::Palette
 pub struct pixtuoid_core::sprite::RecolorableFrame<'a>
 impl pixtuoid_core::sprite::RecolorableFrame<'_>
+pub fn pixtuoid_core::sprite::RecolorableFrame<'_>::drawn_in(&self, &[char]) -> alloc::vec::Vec<bool>
 pub fn pixtuoid_core::sprite::RecolorableFrame<'_>::recolored(&self, &[(char, pixtuoid_core::sprite::Pixel)]) -> pixtuoid_core::sprite::Frame
 impl<'a> core::clone::Clone for pixtuoid_core::sprite::RecolorableFrame<'a>
 pub fn pixtuoid_core::sprite::RecolorableFrame<'a>::clone(&self) -> pixtuoid_core::sprite::RecolorableFrame<'a>

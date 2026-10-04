@@ -90,6 +90,23 @@ impl Pen {
         a.0.saturating_mul(self.k.get())
     }
 
+    /// Copy `from`'s art pixel onto `buf` wherever `take` holds for it.
+    pub(crate) fn take_where(
+        self,
+        buf: &mut RgbBuffer,
+        from: &RgbBuffer,
+        take: impl Fn(ArtPx, ArtPx) -> bool,
+    ) {
+        let k = self.k.get();
+        for y in 0..buf.height().min(from.height()) {
+            for x in 0..buf.width().min(from.width()) {
+                if take(ArtPx(x / k), ArtPx(y / k)) {
+                    buf.put(x, y, from.get(x, y));
+                }
+            }
+        }
+    }
+
     /// Paint `r` solid, clipped to the buffer.
     pub(crate) fn fill(self, buf: &mut RgbBuffer, r: ArtRect, c: Rgb) {
         fill(
@@ -222,7 +239,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn the_bundled_pack_draws_every_variant_at_one_density() {
         let pack = crate::pack::test_default_pack();
         assert_eq!(
@@ -287,6 +304,27 @@ mod tests {
                             "s {s} d {d}: the art pixel at ({x}, {y}) is split"
                         );
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_take_copies_whole_art_pixels_where_it_holds() {
+        let take = |x: ArtPx, y: ArtPx| (x.0 + 2 * y.0).is_multiple_of(3);
+        for (s, d) in [(1u16, 1u16), (8, 4), (12, 4)] {
+            let pen = pen(s, d);
+            let k = s / d;
+            let mut buf = RgbBuffer::filled(9 * k, 9 * k, BG);
+            pen.take_where(&mut buf, &RgbBuffer::filled(9 * k, 9 * k, LIGHT), take);
+            for y in 0..buf.height() {
+                for x in 0..buf.width() {
+                    let want = if take(ArtPx(x / k), ArtPx(y / k)) {
+                        LIGHT
+                    } else {
+                        BG
+                    };
+                    assert_eq!(buf.get(x, y), want, "s {s} d {d}: ({x}, {y})");
                 }
             }
         }

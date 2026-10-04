@@ -1975,6 +1975,9 @@ pub struct ValidationReport {
     /// Each of the caller's loops whose frames don't hold whole beats: the
     /// beat skips or stretches one.
     pub off_beat_loops: Vec<OffBeatLoop>,
+    /// Each palette key a piece the caller lights leaves undrawn: no light
+    /// rises there, in either look.
+    pub missing_keys: Vec<MissingKey>,
 }
 
 /// A density variant's timing that differs from its base's, which is the
@@ -2015,6 +2018,16 @@ pub struct OffBeatLoop {
     pub frame_ms: u32,
 }
 
+/// A palette key a piece's first frame draws no pixel in, at one of its
+/// densities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingKey {
+    /// The animation, e.g. `desk@4x`.
+    pub name: String,
+    /// The key it leaves undrawn.
+    pub key: char,
+}
+
 /// A mark a piece's first frame leaves out, at one of its densities.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MissingMark {
@@ -2035,10 +2048,14 @@ pub struct PackContract<'a> {
     /// carries at every density.
     pub marks: &'a [(&'static str, &'static [&'static str])],
     /// The animations the caller loops on its beat, unless they carry a
-    /// [`stride`](Sprite::stride).
-    pub loops: &'a [&'static str],
+    /// [`stride`](Sprite::stride), each with the frame its loop starts at:
+    /// the frames before it stand still.
+    pub loops: &'a [(&'static str, usize)],
     /// The beat `loops` step on, in ms; 0 checks none.
     pub beat_ms: u64,
+    /// Each piece the caller lights, with the palette key its first frame
+    /// draws the light's source in at every density.
+    pub keys: &'a [(&'static str, char)],
 }
 
 impl ValidationReport {
@@ -2064,6 +2081,7 @@ impl ValidationReport {
             missing_marks: _,
             unread_variant_timing: _,
             off_beat_loops: _,
+            missing_keys: _,
         } = self;
         missing_required.len()
             + insufficient_frames.len()
@@ -2095,6 +2113,7 @@ impl ValidationReport {
             missing_marks,
             unread_variant_timing,
             off_beat_loops,
+            missing_keys,
         } = self;
         missing_optional.len()
             + partial_sets.len()
@@ -2106,6 +2125,7 @@ impl ValidationReport {
             + missing_marks.len()
             + unread_variant_timing.len()
             + off_beat_loops.len()
+            + missing_keys.len()
     }
 
     /// True when the pack is unusable; see [`error_count`](Self::error_count).
@@ -2128,6 +2148,7 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
         marks,
         loops,
         beat_ms,
+        keys,
     } = *contract;
     let mut report = ValidationReport {
         walks_without_stride: walks
@@ -2137,8 +2158,9 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
             .collect(),
         off_beat_loops: loops
             .iter()
-            .filter_map(|&name| Some((name, pack.animation(name)?)))
-            .filter(|(_, a)| a.frames().len() > 1 && a.stride().is_none())
+            .filter_map(|&(name, start)| Some((name, start, pack.animation(name)?)))
+            .filter(|(_, start, a)| a.frames().len() > start + 1 && a.stride().is_none())
+            .map(|(name, _, a)| (name, a))
             .filter(|(_, a)| {
                 u64::from(a.frame_ms())
                     .checked_rem(beat_ms)
@@ -2222,6 +2244,26 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
                         mark,
                     });
                 }
+            }
+        }
+    }
+
+    for &(piece, key) in keys {
+        let densities = variants.iter().filter(|v| v.2 == piece).map(|v| (v.0, v.1));
+        for (name, sprite) in pack
+            .animation(piece)
+            .map(|s| (piece, s))
+            .into_iter()
+            .chain(densities)
+        {
+            let draws = sprite
+                .recolorable(0)
+                .is_some_and(|f| f.drawn_in(&[key]).contains(&true));
+            if !draws {
+                report.missing_keys.push(MissingKey {
+                    name: name.to_owned(),
+                    key,
+                });
             }
         }
     }
@@ -2467,7 +2509,8 @@ mod validation_floor_tests {
     }
 
     /// A caller's loop off its beat is reported, a warning; one on it, a
-    /// one-frame one, a strided one, and any the caller doesn't loop are not.
+    /// one-frame one, a strided one, one whose loop past its still frames is a
+    /// single frame, and any the caller doesn't loop are not.
     #[test]
     fn a_loop_off_the_beat_is_reported() {
         let pack = pack_with(
@@ -2475,12 +2518,19 @@ mod validation_floor_tests {
              [animations.typing_back]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=250\n\
              [animations.fish_tank]\nframes=[\"f.sprite\"]\nframe_ms=300\n\
              [animations.cat_walk]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=300\nstride=2\n\
-             [animations.printer]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=300\n",
+             [animations.printer]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=300\n\
+             [animations.vending_machine]\nframes=[\"f.sprite\", \"f.sprite\"]\nframe_ms=300\n",
         );
         let report = validate_pack_animations(
             &pack,
             &PackContract {
-                loops: &["typing", "typing_back", "fish_tank", "cat_walk"],
+                loops: &[
+                    ("typing", 0),
+                    ("typing_back", 0),
+                    ("fish_tank", 0),
+                    ("cat_walk", 0),
+                    ("vending_machine", 1),
+                ],
                 beat_ms: 125,
                 ..PackContract::default()
             },
@@ -3106,9 +3156,42 @@ mod validation_floor_tests {
                 name: "typing".to_string(),
                 frame_ms: 400,
             }],
+            missing_keys: vec![MissingKey {
+                name: "desk".to_string(),
+                key: '9',
+            }],
         };
         assert_eq!(report.error_count(), 6);
-        assert_eq!(report.warning_count(), 10);
+        assert_eq!(report.warning_count(), 11);
+    }
+
+    /// A piece the caller lights, at any of its densities, draws no pixel in
+    /// its light's key: no light would rise there.
+    #[test]
+    fn a_lit_piece_without_its_key_is_flagged_at_each_density() {
+        let pack = pack_with_frames(
+            "\"9\"=\"#fff000\"\n\
+             [animations.desk]\nframes=[\"lit.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk@2x\"]\nframes=[\"dark.sprite\"]\nframe_ms=100\n",
+            &[
+                ("lit.sprite", "@frame 0\n9"),
+                ("dark.sprite", "@frame 0\nA A\nA A"),
+            ],
+        );
+        let report = validate_pack_animations(
+            &pack,
+            &PackContract {
+                keys: &[("desk", '9')],
+                ..PackContract::default()
+            },
+        );
+        assert_eq!(
+            report.missing_keys,
+            vec![MissingKey {
+                name: "desk@2x".to_string(),
+                key: '9',
+            }]
+        );
     }
 
     /// A piece the caller stands props on, at any of its densities, leaves out
