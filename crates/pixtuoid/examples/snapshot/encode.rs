@@ -393,7 +393,7 @@ pub(crate) struct AnimJob<'a> {
     pub(crate) scene: &'a SceneState,
     pub(crate) pack: &'a Pack,
     pub(crate) theme: &'static Theme,
-    pub(crate) weather: pixtuoid_scene::pixel_painter::WeatherPolicy,
+    pub(crate) weather: pixtuoid_scene::sky::WeatherPolicy,
 }
 
 impl AnimJob<'_> {

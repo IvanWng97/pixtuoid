@@ -4,12 +4,13 @@ use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
 use pixtuoid_core::sprite::format::Pack;
 
+use crate::atmosphere::Carpet;
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::cutaway::shade::{Ramp, fill, slab};
 #[cfg(test)]
 use crate::display::compose::{art_size, desk_art, desk_front_h};
 use crate::display::{
-    Art, Badge, DisplayList, Figure, Flip, Ground, Office, PLATE_PAD, PieceKind, Screen, Showing,
+    Art, Badge, DisplayList, Figure, Flip, Office, PLATE_PAD, PieceKind, Screen, Showing,
     StoodProp, WindowView, board_runs, compose, desk_span, face_rows, indicator_plate,
 };
 use crate::effects::EffectKind;
@@ -123,21 +124,21 @@ pub(crate) fn paint(
     buf: &mut RgbBuffer,
 ) {
     let pen = Pen::for_pack(list.scale(), list.pack());
-    paint_backdrop(layout, list.theme(), list.ground(), list.scale(), pen, buf);
+    paint_backdrop(layout, list.theme(), list.carpet(), list.scale(), pen, buf);
     paint_list(list, cache, buf);
 }
 
 /// Everything under the list's pieces, none of which moves within a layout,
-/// theme, ground, pack and scale.
+/// theme, carpet, pack and scale.
 fn paint_backdrop(
     layout: &SceneLayout,
     theme: &Theme,
-    ground: Ground,
+    carpet: Carpet,
     scale: RenderScale,
     pen: Pen,
     buf: &mut RgbBuffer,
 ) {
-    paint_ground(layout, ground, pen, buf);
+    paint_carpet(layout, carpet, pen, buf);
     for fixture in layout.fixtures() {
         match covering(fixture.kind) {
             Some(Covering::Rug) => paint_rug(fixture.visual, theme, pen, buf),
@@ -663,9 +664,9 @@ pub(crate) fn assert_variant_desk_foot(
         scale.to_buffer(layout.buf_h),
         theme.surface.bg_fallback,
     );
-    paint_ground(
+    paint_carpet(
         layout,
-        Ground::of(theme, tones.ground_tint),
+        tones.carpet(theme),
         Pen::for_pack(scale, base_pack),
         &mut ground,
     );
@@ -841,8 +842,8 @@ fn paint_glass(view: &WindowView, pen: Pen, buf: &mut RgbBuffer) {
 /// The carpet, lit near the windows, falling off south and laid in tiles, on
 /// the art grid: every edge, dither step and seam lands on an art pixel,
 /// whatever the scale.
-fn paint_ground(layout: &SceneLayout, ground: Ground, pen: Pen, buf: &mut RgbBuffer) {
-    let Ground { lit, base, dark } = ground;
+fn paint_carpet(layout: &SceneLayout, carpet: Carpet, pen: Pen, buf: &mut RgbBuffer) {
+    let Carpet { lit, base, dark } = carpet;
 
     let h = pen.art(layout.buf_h);
     let w = pen.art(layout.buf_w);
@@ -1806,7 +1807,7 @@ pub(crate) mod tests {
             "a wall foot off the buffer's own grid, or one anchored at row 0 passes too"
         );
         let s = 8;
-        let (pen, buf) = ground(&layout, s, 4);
+        let (pen, buf) = carpet(&layout, s, 4);
         let luma = |x: u16, y: u16| buf.get(x, y).lightness();
         let k = s / 4;
         let tile = pen.art(GROUND_TILE).0 * k;
@@ -1830,7 +1831,7 @@ pub(crate) mod tests {
     #[test]
     fn a_1x_ground_has_no_seams() {
         let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
-        let (_, buf) = ground(&layout, 1, 1);
+        let (_, buf) = carpet(&layout, 1, 1);
         let y = layout.wall_band_h() + 1;
         assert!(
             (0..buf.width()).all(|x| buf.get(x, y) == crate::theme::NORMAL.surface.carpet_light),
@@ -1838,9 +1839,9 @@ pub(crate) mod tests {
         );
     }
 
-    /// The ground alone at scale `s`, drawn from art at density `d`, in the
+    /// The carpet alone at scale `s`, drawn from art at density `d`, in the
     /// normal theme.
-    fn ground(layout: &SceneLayout, s: u16, d: u16) -> (Pen, RgbBuffer) {
+    fn carpet(layout: &SceneLayout, s: u16, d: u16) -> (Pen, RgbBuffer) {
         let scale = RenderScale::new(s).expect("nonzero");
         let pen = Pen::new(scale, d).expect("d divides s");
         let mut buf = RgbBuffer::filled(
@@ -1848,7 +1849,7 @@ pub(crate) mod tests {
             scale.to_buffer(layout.buf_h),
             pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
         );
-        paint_ground(layout, Ground::plain(&crate::theme::NORMAL), pen, &mut buf);
+        paint_carpet(layout, Carpet::plain(&crate::theme::NORMAL), pen, &mut buf);
         (pen, buf)
     }
 
@@ -1877,7 +1878,7 @@ pub(crate) mod tests {
                 paint_backdrop(
                     &layout,
                     theme,
-                    Ground::plain(theme),
+                    Carpet::plain(theme),
                     scale,
                     Pen::for_pack(scale, &pack),
                     &mut buf,
@@ -2137,7 +2138,7 @@ pub(crate) mod tests {
                 scale.to_buffer(layout.buf_h),
                 theme.surface.bg_fallback,
             );
-            paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut buf);
+            paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut buf);
             let mut order = Vec::new();
             push_windows(office, &moment, &GlassWeather::of(&moment), &mut order);
             let mut again = Vec::new();
@@ -2215,7 +2216,7 @@ pub(crate) mod tests {
             scale.to_buffer(layout.buf_h),
             theme.surface.bg_fallback,
         );
-        paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut buf);
+        paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut buf);
         let k = scale.get() / pen.art(1).0;
         let rows = crate::layout::window_rows(layout.wall_band_h());
         let mut posts = 0;
@@ -2519,7 +2520,7 @@ pub(crate) mod tests {
         paint_backdrop(
             layout,
             list.theme(),
-            list.ground(),
+            list.carpet(),
             list.scale(),
             pen,
             &mut buf,
@@ -2560,7 +2561,7 @@ pub(crate) mod tests {
         paint_backdrop(
             &layout,
             theme,
-            list.ground(),
+            list.carpet(),
             scale,
             Pen::for_pack(scale, &pack),
             &mut night,
@@ -2789,8 +2790,8 @@ pub(crate) mod tests {
             )
         };
         let (mut ground, mut laid) = (blank(), blank());
-        paint_ground(&layout, Ground::plain(theme), pen, &mut ground);
-        paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut laid);
+        paint_carpet(&layout, Carpet::plain(theme), pen, &mut ground);
+        paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut laid);
         let row = scale.to_buffer(layout.wall_band_h());
         for x in 0..ground.width() {
             assert_eq!(
@@ -2985,9 +2986,9 @@ pub(crate) mod tests {
         };
         let (mut night, mut raw) = (blank(), blank());
         let mut cache = CutawayCache::default();
-        paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut night);
+        paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut night);
         paint_list(&list, &mut cache, &mut night);
-        paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut raw);
+        paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut raw);
         for p in list.pieces() {
             paint_piece(&p.kind, &pack, theme, scale, &mut cache, &mut raw);
         }
@@ -3086,7 +3087,7 @@ pub(crate) mod tests {
         let mut cache = CutawayCache::default();
         let painted = |keep: &dyn Fn(&PieceKind) -> bool, cache: &mut _| {
             let mut buf = blank();
-            paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut buf);
+            paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut buf);
             for p in list.pieces().iter().filter(|p| keep(&p.kind)) {
                 paint_piece(&p.kind, &pack, theme, scale, cache, &mut buf);
             }
@@ -3096,7 +3097,7 @@ pub(crate) mod tests {
         let glass = painted(&|k| matches!(k, PieceKind::Glass { .. }), &mut cache);
         let all = painted(&|_| true, &mut cache);
         let mut night = blank();
-        paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut night);
+        paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut night);
         paint_list(&list, &mut cache, &mut night);
         let luma = pixtuoid_core::sprite::Rgb::lightness;
         let (mut kept, mut lifted) = (0, 0);
@@ -3194,8 +3195,8 @@ pub(crate) mod tests {
                 )
             };
             let (mut bare, mut laid) = (blank(), blank());
-            paint_ground(&layout, Ground::plain(theme), pen, &mut bare);
-            paint_backdrop(&layout, theme, Ground::plain(theme), scale, pen, &mut laid);
+            paint_carpet(&layout, Carpet::plain(theme), pen, &mut bare);
+            paint_backdrop(&layout, theme, Carpet::plain(theme), scale, pen, &mut laid);
             for fixture in layout.fixtures() {
                 met.insert(crate::layout::roster::tests::kind_key(fixture.kind));
                 if covering(fixture.kind).is_some() {
@@ -4095,7 +4096,7 @@ pub(crate) mod tests {
         let now = crate::localclock::at_hour(12);
         let ground_in = |w: Weather| {
             let sky = Sky::at_with(now, w);
-            let tint = crate::atmosphere::SkyTones::resolve(&sky, theme).ground_tint;
+            let carpet = crate::atmosphere::SkyTones::resolve(&sky, theme).carpet(theme);
             let list = compose_at(
                 &frame,
                 Office {
@@ -4108,10 +4109,10 @@ pub(crate) mod tests {
                 crate::floor::FloorMeta::ground(),
                 quiet_board(),
             );
-            (list.ground(), tint)
+            (list.carpet(), carpet)
         };
-        let (rain, (tint, share)) = ground_in(Weather::Rain);
-        assert_eq!(rain.base, theme.surface.carpet_base.mix(tint, share));
+        let (rain, model) = ground_in(Weather::Rain);
+        assert_eq!(rain, model, "the list lays the model's carpet");
         assert_ne!(rain, ground_in(Weather::Clear).0);
     }
 
