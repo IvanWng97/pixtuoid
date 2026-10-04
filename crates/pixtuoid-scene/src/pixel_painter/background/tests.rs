@@ -6,6 +6,14 @@ use crate::pack::test_default_pack;
 use crate::sky::{Weather, hour_is_day};
 use std::time::SystemTime;
 
+/// The ground, the wall band `top_wall_h` tall and every window a wall as wide
+/// as `buf` shows, at `moment`.
+fn paint_band(buf: &mut RgbBuffer, top_wall_h: u16, moment: &Moment, theme: &crate::theme::Theme) {
+    paint_ground_and_walls(&mut BaseFillCache::new(), buf, top_wall_h, moment, theme);
+    let bays = window_bays(buf.width(), 0..0);
+    paint_windows(buf, top_wall_h, bays, moment, &test_default_pack(), theme);
+}
+
 #[test]
 fn lightning_flash_lights_the_room_mid_strike_only() {
     let now = SystemTime::UNIX_EPOCH;
@@ -38,43 +46,23 @@ fn lightning_flash_lights_the_room_mid_strike_only() {
 fn storm_window_bolt_brightens_glass_during_the_flash() {
     let now = SystemTime::UNIX_EPOCH;
     let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let (buf_w, top_wall_h) = (60, 30);
     let render_lum = |flash: f32| -> u64 {
         let sky = Sky::at_with(now, Weather::Storm).with_flash(flash);
-        let moment = &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now));
-        let city = CityStrip::draw(
-            &test_default_pack(),
-            (WINDOW_W, 28),
-            moment,
-            theme,
-            pixtuoid_core::sprite::format::Density::ONE,
-        );
-        let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 8, g: 8, b: 10 });
-        paint_floor_to_ceiling_window(
+        let mut buf = RgbBuffer::filled(buf_w, 40, Rgb { r: 8, g: 8, b: 10 });
+        paint_band(
             &mut buf,
-            Bounds {
-                x: 0,
-                y: 0,
-                width: WINDOW_W,
-                height: 30,
-            },
-            theme.surface.window_frame,
-            0,
-            moment,
-            GlassView {
-                city: &city,
-                run_x0: 0,
-                sky: &crate::celestial::SkyView::of(moment, 40, 40, theme),
-                weather: GlassWeather::of(moment),
-            },
+            top_wall_h,
+            &Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now)),
+            theme,
         );
-        let mut sum = 0u64;
-        for y in 1..29u16 {
-            for x in 1..(WINDOW_W - 1) {
+        window_rows(top_wall_h)
+            .flat_map(|y| (0..buf_w).map(move |x| (x, y)))
+            .map(|(x, y)| {
                 let p = buf.get(x, y);
-                sum += p.r as u64 + p.g as u64 + p.b as u64;
-            }
-        }
-        sum
+                u64::from(p.r) + u64::from(p.g) + u64::from(p.b)
+            })
+            .sum()
     };
     let flashing = render_lum(1.0);
     let quiet = render_lum(0.0);
@@ -82,6 +70,77 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
         flashing > quiet,
         "the on-glass bolt must brighten the storm glass during the flash \
          (flash={flashing}, quiet={quiet})"
+    );
+}
+
+/// Mid-change, the carpet and the glass's veil each take the incoming
+/// weather's look on the pixels the dither gives it, keyed on the buffer, and
+/// the going weather's on the rest.
+#[test]
+fn a_change_dithers_the_carpet_and_the_veil_on_the_buffer() {
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let now = crate::localclock::at_hour(12);
+    // Partway through a change of cloud, at a share whose dither, unlike
+    // half's checkerboard, moves with any shift of its key.
+    let moment = || {
+        let mix = crate::sky::WeatherMix::toward(Weather::Clear, Weather::Fog, 0.4);
+        let sky = Sky::at_with(now, Weather::Clear).with_weather(mix);
+        Moment::resolve(sky, theme, 0.0, Motion::Full.timing(now))
+    };
+    let black = Rgb { r: 0, g: 0, b: 0 };
+    let (buf_w, buf_h, top_wall_h) = (64u16, 48u16, 18u16);
+    // Every pixel `paint` draws under `dither` is its incoming end's where the
+    // dither takes it, else its going end's; and each end shows somewhere.
+    let check =
+        |what: &str, takes: &dyn Fn(u16, u16) -> bool, [going, coming, mid]: [RgbBuffer; 3]| {
+            let mut took = [0; 2];
+            for y in 0..mid.height() {
+                for x in 0..mid.width() {
+                    if going.get(x, y) == coming.get(x, y) {
+                        continue;
+                    }
+                    let t = takes(x, y);
+                    let want = if t { coming.get(x, y) } else { going.get(x, y) };
+                    assert_eq!(mid.get(x, y), want, "{what} at ({x}, {y})");
+                    took[usize::from(t)] += 1;
+                }
+            }
+            assert!(took[0] > 0 && took[1] > 0, "{what}: {took:?}");
+        };
+
+    let tint = moment().look.ground_tint_color();
+    let carpet = |tint: Dithered<Rgb>| {
+        let mut m = moment();
+        m.look = m.look.with_ground_tint_color(tint);
+        let mut buf = RgbBuffer::filled(buf_w, buf_h, black);
+        paint_ground_and_walls(&mut BaseFillCache::new(), &mut buf, top_wall_h, &m, theme);
+        buf
+    };
+    let [from, to] = tint.ends();
+    check(
+        "carpet",
+        &|x, y| tint.takes_to(x, y),
+        [Dithered::solid(from), Dithered::solid(to), tint].map(carpet),
+    );
+
+    let veil = moment().look.glass_veil;
+    assert!(
+        window_bays(buf_w, 0..0)
+            .any(|b| b.glass_box(window_rows(top_wall_h)).x % crate::dither::PERIOD != 0),
+        "every glass on the dither's phase: a key from its corner would pass"
+    );
+    let window = |veil| {
+        let mut m = moment();
+        m.look.glass_veil = veil;
+        let mut buf = RgbBuffer::filled(buf_w, buf_h, black);
+        paint_band(&mut buf, top_wall_h, &m, theme);
+        buf
+    };
+    let [clear, fog] = veil.ends();
+    check(
+        "veil",
+        &|x, y| veil.takes_to(x, y),
+        [Dithered::solid(clear), Dithered::solid(fog), veil].map(window),
     );
 }
 
@@ -95,13 +154,10 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     let buf_w = 60u16;
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(12 * 3600);
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
-    paint_ground_and_walls(
-        &mut BaseFillCache::new(),
+    paint_band(
         &mut buf,
         top_wall_h,
-        window_bays(buf_w, 0..0),
         &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.timing(now)),
-        &test_default_pack(),
         theme,
     );
     let spill = crate::lighting::Emitter {
@@ -128,7 +184,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     );
 }
 
-/// Render a full office wall through the real `paint_ground_and_walls` path at a
+/// Render a full office wall through [`paint_band`] at a
 /// forced January `day` + local `hour` + weather.
 fn render_office_on(
     day: u32,
@@ -155,18 +211,15 @@ fn render_office_themed(
     let now = crate::localclock::on_day(day, hour);
     let buf_h = top_wall_h + 4;
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 4, g: 4, b: 6 });
-    paint_ground_and_walls(
-        &mut BaseFillCache::new(),
+    paint_band(
         &mut buf,
         top_wall_h,
-        window_bays(buf_w, 0..0),
         &Moment::resolve(
             Sky::at_with(now, weather),
             theme,
             0.0,
             Motion::Full.timing(now),
         ),
-        &test_default_pack(),
         theme,
     );
     buf
@@ -791,14 +844,12 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
             base_fill,
             &mut buf,
             top_wall_h,
-            window_bays(buf_w, 0..0),
             &Moment::resolve(
                 Sky::at_with(now, weather),
                 theme,
                 0.0,
                 Motion::Full.timing(now),
             ),
-            &test_default_pack(),
             theme,
         );
         buf
@@ -852,9 +903,7 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
             base_fill,
             &mut buf,
             14,
-            window_bays(w, 0..0),
             &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.timing(now)),
-            &test_default_pack(),
             theme,
         );
         buf
@@ -1044,65 +1093,6 @@ fn spill(x: u16, slant: f32) -> crate::lighting::Emitter {
     }
 }
 
-/// Every pane shows its own stretch of the one city, read from the run's west
-/// end.
-#[test]
-fn a_window_shows_the_city_strip_from_its_own_column() {
-    // Overcast noon: no stars and no disc, which key on the screen column, not
-    // the city's; the sky's dither does too, so the far pane sits a whole
-    // number of its periods east.
-    let now = crate::localclock::on_day(15, 12);
-    let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let moment = &Moment::resolve(
-        Sky::at_with(now, Weather::Overcast),
-        theme,
-        0.0,
-        Motion::Full.timing(now),
-    );
-    let sky = crate::celestial::SkyView::of(moment, WINDOW_W * 3, 40, theme);
-    let dx = 7;
-    let far = (WINDOW_W + dx).next_multiple_of(crate::dither::PERIOD);
-    let city = CityStrip::draw(
-        &test_default_pack(),
-        (WINDOW_W * 2, 28),
-        moment,
-        theme,
-        pixtuoid_core::sprite::format::Density::ONE,
-    );
-    let pane = |x: u16, run_x0: u16| {
-        let mut buf = RgbBuffer::filled(WINDOW_W * 3, 30, Rgb { r: 8, g: 8, b: 10 });
-        paint_floor_to_ceiling_window(
-            &mut buf,
-            Bounds {
-                x,
-                y: 0,
-                width: WINDOW_W,
-                height: 30,
-            },
-            theme.surface.window_frame,
-            0,
-            moment,
-            GlassView {
-                city: &city,
-                run_x0,
-                sky: &sky,
-                weather: GlassWeather::of(moment),
-            },
-        );
-        (0..30u16)
-            .flat_map(|y| (0..WINDOW_W).map(move |c| (c, y)))
-            .map(|(c, y)| buf.get(x + c, y))
-            .collect::<Vec<_>>()
-    };
-    let (west, east) = (pane(0, 0), pane(far, far));
-    assert_eq!(west, east, "a pane shows the strip from the run's west end");
-    assert_ne!(
-        pane(dx, 0),
-        west,
-        "a pane {dx} columns east shows a different stretch of city"
-    );
-}
-
 #[test]
 fn the_wall_between_two_windows_is_one_frame_post() {
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
@@ -1113,9 +1103,7 @@ fn the_wall_between_two_windows_is_one_frame_post() {
         &mut BaseFillCache::new(),
         &mut buf,
         top_wall_h,
-        window_bays(buf_w, 0..0),
         &Moment::resolve(Sky::clock(now), theme, 0.0, Motion::Full.timing(now)),
-        &test_default_pack(),
         theme,
     );
     let mut posts = 0;
@@ -1146,16 +1134,12 @@ fn the_classic_lays_the_carpet_the_model_tints() {
         Motion::Full.timing(now),
     );
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
-    paint_ground_and_walls(
-        &mut BaseFillCache::new(),
-        &mut buf,
-        top_wall_h,
-        window_bays(buf_w, 0..0),
-        &moment,
-        &test_default_pack(),
-        theme,
-    );
-    let carpet = moment.look.carpet(theme);
+    paint_band(&mut buf, top_wall_h, &moment, theme);
+    let carpet = moment
+        .look
+        .carpet(theme)
+        .as_solid()
+        .expect("a settled weather");
     let tones = [carpet.lit, carpet.base, carpet.dark];
     let floor_row = buf_h - 1;
     assert!(
