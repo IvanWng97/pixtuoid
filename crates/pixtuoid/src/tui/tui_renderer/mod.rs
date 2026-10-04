@@ -988,7 +988,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.rest_floor(now);
             return drawn;
         };
-        cutaway.paint(fitted, pixels, dirty, now);
+        cutaway.paint(fitted, self.current_floor, pixels, dirty, now);
         let geometry = fitted.geometry();
         let layout = &*frame_layout;
         let mouse = self

@@ -965,3 +965,39 @@ fn a_slide_cancelled_on_its_first_frame_repaints_the_destination_whole() {
     r.render(&scene, pack(), now).expect("render");
     assert_eq!(wire.take().matches(SIXEL).count(), every);
 }
+
+/// A floor can leave the screen without a slide: the top floor's last agent
+/// ends, the floor count drops, and the view clamps to the floor below. That
+/// floor's raster diffs against its own last frame, not the vanished floor
+/// on screen, so the terminal ends up holding exactly what a fresh painter of
+/// that floor sends.
+#[test]
+fn a_floor_clamped_into_view_repaints_whole() {
+    let held = |wire: &str, tiles: &mut std::collections::BTreeMap<u32, Vec<u8>>| {
+        tiles.extend(kitty_images(wire));
+    };
+    let (cols, rows) = (120, 40);
+    let (mut r, wire) = kitty(cols, rows);
+    let mut scene = two_floor_scene();
+    let mut now = t0();
+    let mut terminal = std::collections::BTreeMap::new();
+    r.render(&scene, pack(), now).expect("render");
+    r.navigate_floor(1, now);
+    render_until_settled(&mut r, &scene, pack(), &mut now, 1);
+    scene
+        .agents
+        .remove(&AgentId::from_transcript_path("/n/1.jsonl"));
+    now += ImageProtocol::Kitty.cadence();
+    r.render(&scene, pack(), now).expect("render");
+    assert_eq!(r.current_floor(), 0, "the view clamped");
+    held(&wire.take(), &mut terminal);
+
+    let (mut fresh, fresh_wire) = kitty(cols, rows);
+    fresh.render(&scene, pack(), now).expect("render");
+    let mut want = std::collections::BTreeMap::new();
+    held(&fresh_wire.take(), &mut want);
+    assert!(
+        terminal == want,
+        "the terminal still shows the vanished floor"
+    );
+}

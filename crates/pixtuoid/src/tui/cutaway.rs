@@ -82,9 +82,10 @@ pub(crate) struct TileCutaway {
     /// What the tiles are cut from when sent: the last frame, or a slide's
     /// two composed.
     image: RgbBuffer,
-    /// The last image was a slide's: a floor's own frame after it differs
-    /// anywhere, whatever that floor's raster reports.
-    slid: bool,
+    /// What the last image showed: a floor's raster diffs against its own
+    /// last frame, so any other image before it — a slide, another floor —
+    /// leaves the tiles differing anywhere.
+    shown: Option<Shown>,
     /// The image's top-left cell.
     origin: Position,
     out: Sink,
@@ -99,6 +100,13 @@ pub(crate) struct TileCutaway {
     /// A write failed, perhaps mid-escape: the next one opens with
     /// [`kitty::ST`].
     torn: bool,
+}
+
+/// What a [`TileCutaway`]'s image last showed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shown {
+    Floor(usize),
+    Slide,
 }
 
 impl TileCutaway {
@@ -120,7 +128,7 @@ impl TileCutaway {
             fitted: None,
             tiles: Tiles::new(protocol, cell, fit),
             image: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
-            slid: false,
+            shown: None,
             origin: Position::ORIGIN,
             out,
             pending: Vec::new(),
@@ -168,20 +176,21 @@ impl TileCutaway {
         self.fitted.map(|f| f.fit.logical())
     }
 
-    /// Show `frame` as `fitted`, which may differ from the last only within
-    /// `dirty`, and queue the tiles it changed once the protocol's cadence
-    /// allows; until then they stay owed.
+    /// Show `floor`'s `frame` as `fitted`, which may differ from that floor's
+    /// last only within `dirty`, and queue the tiles it changed once the
+    /// protocol's cadence allows; until then they stay owed.
     pub(crate) fn paint(
         &mut self,
         fitted: Fitted,
+        floor: usize,
         frame: &RgbBuffer,
         dirty: Dirty,
         now: SystemTime,
     ) {
-        let dirty = if std::mem::take(&mut self.slid) {
-            Dirty::All
-        } else {
+        let dirty = if self.shown.replace(Shown::Floor(floor)) == Some(Shown::Floor(floor)) {
             dirty
+        } else {
+            Dirty::All
         };
         if dirty != Dirty::Rects(Vec::new()) {
             self.image.clone_from(frame);
@@ -201,7 +210,7 @@ impl TileCutaway {
         let (w, h) = (slide.leaving.width(), slide.leaving.height());
         let offsets = slide_offsets(slide.t, slide.going_down, f32::from(h));
         self.image = RgbBuffer::filled(w, h, theme.surface.bg_fallback);
-        self.slid = true;
+        self.shown = Some(Shown::Slide);
         for (buf, dy) in [(slide.leaving, offsets.0), (slide.arriving, offsets.1)] {
             for y in 0..h {
                 let src = i32::from(y) - dy;
