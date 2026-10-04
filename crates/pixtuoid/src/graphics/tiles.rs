@@ -66,6 +66,7 @@ pub(crate) struct Changed {
 }
 
 /// The tile grid over one image and the hash each tile was last sent with.
+#[derive(Debug)]
 pub(crate) struct Tiles {
     shape: TileShape,
     cell: CellSize,
