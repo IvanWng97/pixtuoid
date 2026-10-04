@@ -844,15 +844,22 @@ pub(crate) fn queued(
     carried: &[crate::layout::Point],
     keep: impl Fn(FixtureKind) -> bool,
 ) -> Vec<(Span, PieceKind)> {
+    let timing = Motion::Full.timing(std::time::UNIX_EPOCH);
+    queued_at(layout, pack, scale, carried, keep, timing)
+}
+
+/// [`queued`] on `timing`.
+fn queued_at(
+    layout: &SceneLayout,
+    pack: &Pack,
+    scale: RenderScale,
+    carried: &[crate::layout::Point],
+    keep: impl Fn(FixtureKind) -> bool,
+    timing: crate::anim::Timing,
+) -> Vec<(Span, PieceKind)> {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let frame = empty_frame(layout);
-    let now = std::time::UNIX_EPOCH;
-    let moment = Moment::resolve(
-        crate::sky::Sky::clock(now),
-        theme,
-        0.0,
-        Motion::Full.timing(now),
-    );
+    let moment = Moment::resolve(crate::sky::Sky::clock(timing.now), theme, 0.0, timing);
     let inputs = ComposeInputs {
         frame: &frame,
         office: Office {
@@ -1186,6 +1193,70 @@ fn the_lounge_couch_is_drawn_from_behind() {
                 PieceKind::PropBand { sprite, .. } if *sprite == MEETING_SOFA_NORTH_SPRITE
             )),
         "{pieces:?}"
+    );
+}
+
+/// The fish tank and the water cooler loop on the floor's beat: Full steps
+/// them, Calm a [`CALM_TICK_MS`](crate::anim::CALM_TICK_MS) pace slower,
+/// Still never.
+#[test]
+fn a_looping_fixture_plays_on_the_floors_beat() {
+    use crate::anim::{CALM_TICK_MS, FULL_TICK_MS};
+    use crate::pack::{FISH_TANK_SPRITE, WATER_COOLER_SPRITE};
+    let pack = test_default_pack();
+    let looping = |k| matches!(k, FixtureKind::FishTank | FixtureKind::WaterCooler);
+    let layout = many_layouts()
+        .find(|l| {
+            [FixtureKind::FishTank, FixtureKind::WaterCooler]
+                .iter()
+                .all(|&k| l.fixtures().any(|f| f.kind == k))
+        })
+        .expect("a layout with a fish tank and a water cooler");
+    let frame_ms = |sprite| u64::from(pack.animation(sprite).expect("in the pack").frame_ms());
+    let (a, b) = (frame_ms(FISH_TANK_SPRITE), frame_ms(WATER_COOLER_SPRITE));
+    let gcd = |mut x: u64, mut y: u64| {
+        while y != 0 {
+            (x, y) = (y, x % y);
+        }
+        x
+    };
+    // Whole Calm repaints of both loops' frame_ms, so every tier ends on a step.
+    let span_ms = 2 * a / gcd(a, b) * b * (CALM_TICK_MS / FULL_TICK_MS);
+    let steps = |motion: Motion| {
+        let mut steps = std::collections::BTreeMap::<&str, u64>::new();
+        let mut last = std::collections::BTreeMap::new();
+        for ms in (0..=span_ms).step_by(FULL_TICK_MS as usize) {
+            let timing =
+                motion.timing(std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms));
+            for (_, kind) in queued_at(&layout, &pack, RenderScale::ONE, &[], looping, timing) {
+                let PieceKind::Animated { art, .. } = kind else {
+                    panic!("a looping fixture queues an animated piece: {kind:?}");
+                };
+                if last
+                    .insert(art.sprite, art.frame)
+                    .is_some_and(|was| was != art.frame)
+                {
+                    *steps.entry(art.sprite).or_default() += 1;
+                }
+            }
+        }
+        (steps, last)
+    };
+    let (full, _) = steps(Motion::Full);
+    let (calm, _) = steps(Motion::Calm);
+    let (still, held) = steps(Motion::Still);
+    assert_eq!(full.len(), 2, "both loops step on Full: {full:?}");
+    for (sprite, n) in &full {
+        assert_eq!(
+            calm.get(sprite).copied().unwrap_or(0) * (CALM_TICK_MS / FULL_TICK_MS),
+            *n,
+            "{sprite} on Calm steps a quarter as often as on Full"
+        );
+    }
+    assert!(still.is_empty(), "Still moves no loop: {still:?}");
+    assert!(
+        held.values().all(|&f| f == 0),
+        "Still holds the first frame: {held:?}"
     );
 }
 
