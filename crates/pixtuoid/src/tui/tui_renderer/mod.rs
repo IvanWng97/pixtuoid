@@ -17,7 +17,7 @@ use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 
 use crate::tui::renderer::{DrawCtx, PetState, draw_scene, flush_buffer_to_term_at_offset};
-use pixtuoid_scene::display::PetHover;
+use pixtuoid_scene::display::{HoverTarget, Hovers};
 use pixtuoid_scene::floor::{
     FloorInputs, FloorMeta, FloorTransition, FrameInputs, PerFloor, PerOffice, PetInputs,
     num_floors, project_floor_scene, render_floor,
@@ -69,8 +69,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     transition: Option<FloorTransition>,
     mouse_pos: Option<(u16, u16)>,
     cached_layout: Option<Arc<SceneLayout>>,
-    last_pet_pos: Option<PetHover>,
-    last_agents: Vec<pixtuoid_scene::pixel_painter::AgentFrame>,
+    last_hovers: Hovers,
     last_geometry: Option<crate::tui::geometry::SceneGeometry>,
     /// Coffee + venue chitchat, ONE per office — shared across every floor so a
     /// cup survives floor navigation.
@@ -226,8 +225,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             transition: None,
             mouse_pos: None,
             cached_layout: None,
-            last_pet_pos: None,
-            last_agents: Vec::new(),
+            last_hovers: Hovers::default(),
             last_geometry: None,
             office: PerOffice::new(),
             debug_walkable: false,
@@ -369,15 +367,26 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.last_geometry?.area_at(col, row)
     }
 
-    /// [`hit_test_agent`](crate::tui::hit_test::hit_test_agent) against the last
-    /// frame drawn.
+    /// What cell `(col, row)` showed the pointer in the last frame drawn.
+    pub(crate) fn scene_hit_at(
+        &self,
+        col: u16,
+        row: u16,
+    ) -> Option<crate::tui::hit_test::SceneHit<'_>> {
+        let layout = self.cached_layout.as_deref()?;
+        crate::tui::hit_test::scene_hit(&self.last_hovers, layout, self.scene_area_at(col, row)?)
+    }
+
+    /// The agent topmost at cell `(col, row)` in the last frame drawn.
     pub(crate) fn hit_test_agent_at(&self, col: u16, row: u16) -> Option<pixtuoid_core::AgentId> {
-        let area = self.scene_area_at(col, row)?;
         #[cfg(feature = "graphics")]
         if let Some(cutaway) = &self.cutaway {
-            return cutaway.hover_at(area.bounds());
+            return cutaway.hover_at(self.scene_area_at(col, row)?.bounds());
         }
-        crate::tui::hit_test::hit_test_agent(&self.last_agents, area)
+        match self.scene_hit_at(col, row)? {
+            crate::tui::hit_test::SceneHit::Figure(HoverTarget::Agent(id)) => Some(*id),
+            _ => None,
+        }
     }
 
     pub fn current_floor_seed(&self) -> u64 {
@@ -473,8 +482,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.chrome.active_pet.as_ref()
     }
 
-    pub fn cached_pet_pos(&self) -> Option<PetHover> {
-        self.last_pet_pos
+    #[cfg(test)]
+    pub(crate) fn drawn_pet(&self) -> Option<pixtuoid_scene::display::PetHover> {
+        self.last_hovers.pet().copied()
     }
 
     /// Drop per-agent state for agents no longer in `scene` — BOTH halves: the
@@ -643,8 +653,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// must not land on its ghost.
     fn forget_drawn(&mut self) {
         self.cached_layout = None;
-        self.last_pet_pos = None;
-        self.last_agents.clear();
+        self.last_hovers = Hovers::default();
         self.last_geometry = None;
     }
 
@@ -669,8 +678,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         popup_scale: f32,
         now: SystemTime,
     ) {
-        self.last_pet_pos = out.pet_pos;
-        self.last_agents = out.agents;
+        self.last_hovers = out.hovers;
         self.last_geometry = out.geometry;
         // Ambient audio: one AudioFrame per rendered frame, floor-scoped (you hear
         // the floor you're LOOKING AT; rain stays global). The kind-map resolves against
@@ -897,10 +905,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         now: SystemTime,
         nf: usize,
     ) -> Result<()> {
+        use crate::tui::hit_test::{hit_test_coffee_machine, hit_test_furniture};
         use crate::tui::renderer::{
-            DrawOut, TooltipAt, draw_footer_only_frame, hit_test_coffee_machine,
-            hit_test_furniture, paint_coffee_tooltip, paint_footer, paint_furniture_tooltip,
-            paint_hover_tooltip, paint_overlays, scene_rect,
+            DrawOut, TooltipAt, draw_footer_only_frame, paint_coffee_tooltip, paint_footer,
+            paint_furniture_tooltip, paint_hover_tooltip, paint_overlays, scene_rect,
         };
         let size = self.terminal.size()?;
         let scene_area = scene_rect(Rect::new(0, 0, size.width, size.height));

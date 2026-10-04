@@ -845,31 +845,4 @@ mod tests {
             crate::layout::desk_furniture_def().visual.w
         );
     }
-
-    #[test]
-    fn pet_hitboxes_track_the_bundled_pack() {
-        use crate::pet::PetKind;
-        let pack = test_default_pack();
-        for &kind in PetKind::ALL {
-            for anim in [kind.walk_anim(), kind.sit_anim(), kind.sleep_anim()] {
-                let frames = pack
-                    .animation(anim)
-                    .map(|a| a.frames())
-                    .unwrap_or_else(|| panic!("bundled pack carries a '{anim}' sprite"));
-                assert!(!frames.is_empty(), "{anim} has frames");
-                for frame in frames {
-                    let hb = kind.hitbox(anim);
-                    assert_eq!(
-                        (hb.w, hb.h),
-                        (frame.width(), frame.height()),
-                        "{anim} hitbox {}x{} != sprite {}x{} — a pet-sprite resize drifted the click target",
-                        hb.w,
-                        hb.h,
-                        frame.width(),
-                        frame.height()
-                    );
-                }
-            }
-        }
-    }
 }

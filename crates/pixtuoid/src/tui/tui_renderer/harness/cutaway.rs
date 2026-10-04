@@ -152,7 +152,7 @@ fn shrinking_under_the_minimum_refuses_the_cutaway_frame() {
     r.render(&scene, pack(), t0()).expect("render");
     assert!(!wire.take().contains(TRANSMIT));
     assert_eq!(r.scene_area_at(cols / 2, rows / 2), None);
-    assert!(r.cached_pet_pos().is_none());
+    assert!(r.drawn_pet().is_none());
 }
 
 /// A slide the terminal shrinks under mid-way is cancelled, as classic's is:

@@ -24,13 +24,7 @@ use crate::walk::WalkState;
 
 /// Everything the pure-pixel pass observed that the caller still needs.
 pub struct PixelPassResult {
-    /// The office pet's resolved frame this tick (for hit-testing), if present.
-    pub pet_pos: Option<PetHover>,
-    /// Every gateway mascot drawn this tick, in paint order — a source can run
-    /// ANY number of concurrent instances, each independently hoverable.
-    pub mascots: Vec<MascotFrame>,
-    /// Every character drawn this tick, in paint order: the last one covering
-    /// a point is the one on top.
+    /// Every character drawn this tick, in paint order, for its badge.
     pub agents: Vec<AgentFrame>,
     /// Every figure drawn this tick, in paint order.
     pub hovers: Hovers,
@@ -44,40 +38,17 @@ pub struct PixelPassResult {
     pub occupied_waypoints: std::collections::HashSet<usize>,
 }
 
-/// The gateway mascot's screen frame — enough to hover-identify it. Recaptured
-/// each render, since the wandering position is recomputed every frame.
-#[derive(Clone)]
-pub struct MascotFrame {
-    /// The mascot's centre screen position this tick.
-    pub pos: Point,
-    /// The painted sprite's pixel width, read from the pack's real frame so
-    /// the binary's `hit_test_mascot` click box derives from what's drawn.
-    pub w: u16,
-    /// The painted sprite's pixel height (paired with `w`).
-    pub h: u16,
-    /// What it says about its gateway.
-    pub card: crate::creatures::GatewayCard,
-}
-
-/// Where a character's sprite was drawn.
+/// Where a drawn character's badge goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentFrame {
     /// Whose sprite it is.
     pub agent_id: pixtuoid_core::AgentId,
-    /// The sprite's top-left, in buffer pixels.
-    pub top_left: Point,
-    /// The painted frame's pixel width.
-    pub w: u16,
-    /// The painted frame's pixel height.
-    pub h: u16,
     /// Its placement's [`CharacterPlacement::label_anchor`](crate::sim::CharacterPlacement::label_anchor).
     pub label_anchor: Point,
 }
 
-/// What [`paint_frame`] drew that hover can name.
-struct Hoverables {
-    pet_pos: Option<PetHover>,
-    mascots: Vec<MascotFrame>,
+/// What [`paint_frame`] drew that the caller points at or badges.
+struct Drawn {
     agents: Vec<AgentFrame>,
     hovers: Hovers,
 }
@@ -142,7 +113,7 @@ use crate::lighting::{DeskLights, LightInputs, Lights};
 use background::{
     paint_ground_and_walls, paint_ground_wash, paint_light, paint_neon_halo, paint_shadows,
 };
-use drawable::{Drawable, DrawableKind, Drawn, Layer, enqueue_room_walls, paint_drawable};
+use drawable::{Drawable, DrawableKind, Layer, enqueue_room_walls, paint_drawable};
 
 pub use crate::sky::{Weather, WeatherPolicy};
 
@@ -247,12 +218,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         },
     );
     let timing = ctx.world.floor.motion.timing(ctx.world.now);
-    let Hoverables {
-        pet_pos,
-        mascots,
-        agents,
-        hovers,
-    } = paint_frame(
+    let Drawn { agents, hovers } = paint_frame(
         &mut PaintCtx {
             scene: ctx.world.scene,
             layout: ctx.layout,
@@ -271,8 +237,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         &frame,
     );
     PixelPassResult {
-        pet_pos,
-        mascots,
         agents,
         hovers,
         chitchat_bubbles: frame.chitchat_bubbles,
@@ -284,7 +248,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
 /// The PAINT half of the frame: blit the world the sim already advanced. Every
 /// positional/lifecycle decision was made in `sim_step` — this pass only
 /// resolves presentation (theme colors, sprite pixels) and composites.
-fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
+fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
     let agents: &[AgentSlot] = &frame.agents;
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;
@@ -357,17 +321,14 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
     // Every entity gets a `sort_row` — its floor-touching row — so sorting
     // ascending and painting in order puts things closer to the camera in
     // front: the painter's algorithm on a top-down 2D scene.
-    let pet_pos = frame
-        .pet
-        .as_ref()
-        .map(|pet| enqueue_pet(ctx, pet, &mut drawables));
+    if let Some(pet) = &frame.pet {
+        enqueue_pet(ctx, pet, &mut drawables);
+    }
     enqueue_gateway_mascots(ctx.pack, &frame.mascots, &mut drawables);
     enqueue_characters(ctx, frame, &mut drawables);
     enqueue_room_walls(ctx.layout, &mut drawables);
     drawable::sort_drawables(&mut drawables);
-    let mut hover = Hoverables {
-        pet_pos,
-        mascots: Vec::new(),
+    let mut drawn = Drawn {
         agents: Vec::new(),
         hovers: Hovers::default(),
     };
@@ -376,18 +337,21 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
     // them in here would apply it twice.
     let pre_foreground = ctx.buf.clone();
     for d in drawables {
-        if let Some(h) = d.hover {
-            hover.hovers.push(h);
+        paint_drawable(&d.kind, &mut ctx.drawable_ctx());
+        let Some(hover) = d.hover else { continue };
+        // Badged where hoverable: both need its frame drawn.
+        if let DrawableKind::Character {
+            agent,
+            label_anchor,
+            ..
+        } = d.kind
+        {
+            drawn.agents.push(AgentFrame {
+                agent_id: agent.agent_id,
+                label_anchor,
+            });
         }
-        match paint_drawable(&d.kind, &mut ctx.drawable_ctx()) {
-            Some(Drawn::Agent(agent)) => hover.agents.push(agent),
-            Some(Drawn::Mascot { mascot_idx, w, h }) => {
-                hover
-                    .mascots
-                    .push(MascotFrame::of(&frame.mascots[mascot_idx], w, h));
-            }
-            None => {}
-        }
+        drawn.hovers.push(hover);
     }
     // The floor's day/night wash, over the foreground: the overlays above run
     // before any drawable exists, so nothing painted carries a time-of-day term.
@@ -406,7 +370,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
         debug_overlay::paint(ctx.buf, ctx.layout, ctx.scene, ctx.walks);
     }
 
-    hover
+    drawn
 }
 
 /// Map the sim's resolved [`crate::sim::CharacterPlacement`]s 1:1 onto y-sorted
@@ -448,14 +412,14 @@ fn enqueue_pet<'a>(
     ctx: &PaintCtx<'_>,
     pet: &'a crate::sim::PetPlacement,
     drawables: &mut Vec<Drawable<'a>>,
-) -> PetHover {
+) {
     let pos = pet.pos;
     let size = pack_frame_size(ctx.pack, pet.anim_name, pet.frame_idx);
-    let pet_hover = PetHover {
+    let target = HoverTarget::Pet(PetHover {
         kind: pet.kind,
         centre: pos,
         anim: pet.anim_name,
-    };
+    });
     drawables.push(Drawable {
         sort_row: sort_row_at(
             Pivot::Center,
@@ -463,8 +427,7 @@ fn enqueue_pet<'a>(
             size.unwrap_or(crate::sim::PET_FALLBACK).h,
         ),
         layer: Layer::Figure,
-        hover: size
-            .map(|size| Hover::figure(Pivot::Center, pos, size, HoverTarget::Pet(pet_hover))),
+        hover: size.map(|size| Hover::figure(Pivot::Center, pos, size, target)),
         kind: DrawableKind::Pet {
             pos,
             flip: pet.flip,
@@ -473,7 +436,6 @@ fn enqueue_pet<'a>(
             effects: &pet.effects,
         },
     });
-    pet_hover
 }
 
 /// Enqueue the gateway mascots.
@@ -482,7 +444,7 @@ fn enqueue_gateway_mascots<'a>(
     mascots: &'a [crate::sim::MascotPlacement],
     drawables: &mut Vec<Drawable<'a>>,
 ) {
-    for (mascot_idx, m) in mascots.iter().enumerate() {
+    for m in mascots {
         drawables.push(Drawable {
             sort_row: sort_row_at(Pivot::Center, m.pos, m.size.h),
             layer: Layer::Figure,
@@ -495,7 +457,6 @@ fn enqueue_gateway_mascots<'a>(
                 )
             }),
             kind: DrawableKind::GatewayMascot {
-                mascot_idx,
                 pos: m.pos,
                 anim_name: m.anim_name,
                 frame_idx: m.frame_idx,
@@ -503,17 +464,6 @@ fn enqueue_gateway_mascots<'a>(
                 degraded: m.card.degraded,
             },
         });
-    }
-}
-
-impl MascotFrame {
-    fn of(m: &crate::sim::MascotPlacement, w: u16, h: u16) -> Self {
-        Self {
-            pos: m.pos,
-            w,
-            h,
-            card: m.card.clone(),
-        }
     }
 }
 

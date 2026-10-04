@@ -15,7 +15,6 @@ use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 use crate::sim::{Cup, DeskProps, desk_cup_at};
 use pixtuoid_core::AgentSlot;
 
-use super::AgentFrame;
 use super::background::{paint_clock, paint_corridor_runner, paint_neon_panel};
 use super::effects::{paint_effects, paint_screen_glow, paint_screen_idle};
 use super::furniture::{
@@ -26,7 +25,7 @@ use crate::character::{CharacterFrame, SpritePose, character_frame};
 pub(super) use crate::display::Layer;
 use crate::effects::{Effect, STEAM_PUFFS};
 use crate::frame_cache::FrameCache;
-use crate::layout::{Point, SceneLayout, Size};
+use crate::layout::{Pivot, Point, SceneLayout, Size, anchored_top_left};
 use crate::pack::{DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE, desk_art, desk_art_top, frame_at};
 
 /// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
@@ -167,8 +166,6 @@ pub(super) enum DrawableKind<'a> {
     /// agent (lives in `daemons`, not `scene.agents`); y-sorted at its south row
     /// like a pet.
     GatewayMascot {
-        /// Its index in [`SimFrame::mascots`](super::SimFrame::mascots).
-        mascot_idx: usize,
         pos: Point,
         anim_name: &'static str,
         frame_idx: usize,
@@ -213,7 +210,8 @@ pub(super) enum DrawableKind<'a> {
     },
 }
 
-/// Blit `frame` CENTRED on `pos` (origin = `pos − size/2`, saturating).
+/// Blit `frame` centred on `pos` by [`anchored_top_left`], as its hover is
+/// placed.
 ///
 /// Layout units ARE buffer pixels in this pass, so the centring is plain
 /// integer arithmetic. If a scaled classic painter is ever built, halve the
@@ -221,9 +219,8 @@ pub(super) enum DrawableKind<'a> {
 /// width drifts odd-width art half a logical unit off the footprint its mask
 /// stamped, and no scale-1 test can see it.
 fn blit_centered(frame: &Frame, pos: Point, buf: &mut RgbBuffer) {
-    let px = pos.x.saturating_sub(frame.width() / 2);
-    let py = pos.y.saturating_sub(frame.height() / 2);
-    blit_frame(frame, px, py, buf);
+    let at = anchored_top_left(Pivot::Center, pos, frame.width(), frame.height());
+    blit_frame(frame, at.x, at.y, buf);
 }
 
 /// Look up `anim_name`, take its FIRST frame, and [`blit_centered`] it on `pos`
@@ -243,16 +240,9 @@ pub(super) struct DrawableCtx<'a> {
     pub theme: &'a crate::theme::Theme,
 }
 
-/// A hoverable [`paint_drawable`] drew, sized by the frame it blitted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Drawn {
-    Agent(AgentFrame),
-    Mascot { mascot_idx: usize, w: u16, h: u16 },
-}
-
 /// Dispatch one Drawable's paint; character-attached effects paint inline so
 /// they ride along with the character in z-order.
-pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -> Option<Drawn> {
+pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) {
     let buf = &mut *c.buf;
     let cache = &mut *c.cache;
     let (pack, theme) = (c.pack, c.theme);
@@ -291,21 +281,12 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             agent,
             pose,
             top_left,
-            label_anchor,
             effects,
+            ..
         } => {
             paint_effects(buf, effects.iter().filter(|e| e.kind.beneath()), theme);
-            let drawn = paint_character_at(buf, *pose, *top_left, agent, pack, cache, now);
+            paint_character_at(buf, *pose, *top_left, agent, pack, cache, now);
             paint_effects(buf, effects.iter().filter(|e| !e.kind.beneath()), theme);
-            return drawn.map(|Size { w, h }| {
-                Drawn::Agent(AgentFrame {
-                    agent_id: agent.agent_id,
-                    top_left: *top_left,
-                    w,
-                    h,
-                    label_anchor: *label_anchor,
-                })
-            });
         }
         DrawableKind::FilingCabinet { pos } => {
             if let Some(cab) = pack
@@ -387,8 +368,12 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             frame_idx,
             effects,
         } => {
-            let anim = pack.animation(anim_name)?;
-            let frame = frame_at(anim, *frame_idx)?;
+            let Some(frame) = pack
+                .animation(anim_name)
+                .and_then(|a| frame_at(a, *frame_idx))
+            else {
+                return;
+            };
             // Declared out here so the flipped path's temporary outlives the `if`.
             let mirrored;
             let final_frame = if *flip {
@@ -401,26 +386,24 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
             paint_effects(buf, *effects, theme);
         }
         DrawableKind::GatewayMascot {
-            mascot_idx,
             pos,
             anim_name,
             frame_idx,
             effects,
             degraded,
         } => {
-            let anim = pack.animation(anim_name)?;
-            let frame = frame_at(anim, *frame_idx)?;
+            let Some(frame) = pack
+                .animation(anim_name)
+                .and_then(|a| frame_at(a, *frame_idx))
+            else {
+                return;
+            };
             if *degraded {
                 blit_centered(&super::palette::degraded_frame(frame), *pos, buf);
             } else {
                 blit_centered(frame, *pos, buf);
             }
             paint_effects(buf, *effects, theme);
-            return Some(Drawn::Mascot {
-                mascot_idx: *mascot_idx,
-                w: frame.width(),
-                h: frame.height(),
-            });
         }
         DrawableKind::RoomWall { piece, rows } => {
             crate::wall::paint_wall(
@@ -450,7 +433,6 @@ pub(super) fn paint_drawable(kind: &DrawableKind<'_>, c: &mut DrawableCtx<'_>) -
         }
         DrawableKind::Clock { pos } => paint_clock(buf, pos.x, pos.y, now, theme),
     }
-    None
 }
 
 /// The cup, then the `steam` riding on it.
@@ -1213,7 +1195,6 @@ mod tests {
             layer: Layer::Figure,
             hover: None,
             kind: DrawableKind::GatewayMascot {
-                mascot_idx: 0,
                 pos: Point { x: 30, y: 30 },
                 anim_name: "nonexistent_anim",
                 frame_idx: 0,
@@ -1255,7 +1236,6 @@ mod tests {
                 layer: Layer::Figure,
                 hover: None,
                 kind: DrawableKind::GatewayMascot {
-                    mascot_idx: 0,
                     pos,
                     anim_name: def.rest,
                     frame_idx: 0,

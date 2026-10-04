@@ -1156,7 +1156,6 @@ impl pixtuoid_scene::pet::PetKind
 pub const pixtuoid_scene::pet::PetKind::ALL: &'static [pixtuoid_scene::pet::PetKind]
 pub fn pixtuoid_scene::pet::PetKind::default_name(self) -> &'static str
 pub fn pixtuoid_scene::pet::PetKind::from_config_name(&str) -> core::option::Option<Self>
-pub fn pixtuoid_scene::pet::PetKind::hitbox(self, &str) -> pixtuoid_scene::layout::Size
 pub fn pixtuoid_scene::pet::PetKind::sit_anim(self) -> &'static str
 pub fn pixtuoid_scene::pet::PetKind::sleep_anim(self) -> &'static str
 pub fn pixtuoid_scene::pet::PetKind::sleeps_near_idle(self) -> bool
@@ -1328,10 +1327,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::WeatherPolicy
 pub struct pixtuoid_scene::pixel_painter::AgentFrame
 pub pixtuoid_scene::pixel_painter::AgentFrame::agent_id: pixtuoid_core::id::AgentId
-pub pixtuoid_scene::pixel_painter::AgentFrame::h: u16
 pub pixtuoid_scene::pixel_painter::AgentFrame::label_anchor: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pixel_painter::AgentFrame::top_left: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pixel_painter::AgentFrame::w: u16
 impl core::clone::Clone for pixtuoid_scene::pixel_painter::AgentFrame
 pub fn pixtuoid_scene::pixel_painter::AgentFrame::clone(&self) -> pixtuoid_scene::pixel_painter::AgentFrame
 impl core::cmp::Eq for pixtuoid_scene::pixel_painter::AgentFrame
@@ -1348,20 +1344,6 @@ impl core::marker::Unpin for pixtuoid_scene::pixel_painter::AgentFrame
 impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::AgentFrame
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::AgentFrame
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::AgentFrame
-pub struct pixtuoid_scene::pixel_painter::MascotFrame
-pub pixtuoid_scene::pixel_painter::MascotFrame::card: pixtuoid_scene::creatures::GatewayCard
-pub pixtuoid_scene::pixel_painter::MascotFrame::h: u16
-pub pixtuoid_scene::pixel_painter::MascotFrame::pos: pixtuoid_scene::layout::Point
-pub pixtuoid_scene::pixel_painter::MascotFrame::w: u16
-impl core::clone::Clone for pixtuoid_scene::pixel_painter::MascotFrame
-pub fn pixtuoid_scene::pixel_painter::MascotFrame::clone(&self) -> pixtuoid_scene::pixel_painter::MascotFrame
-impl core::marker::Freeze for pixtuoid_scene::pixel_painter::MascotFrame
-impl core::marker::Send for pixtuoid_scene::pixel_painter::MascotFrame
-impl core::marker::Sync for pixtuoid_scene::pixel_painter::MascotFrame
-impl core::marker::Unpin for pixtuoid_scene::pixel_painter::MascotFrame
-impl core::marker::UnsafeUnpin for pixtuoid_scene::pixel_painter::MascotFrame
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::pixel_painter::MascotFrame
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter::MascotFrame
 pub struct pixtuoid_scene::pixel_painter::PixelCtx<'a>
 pub pixtuoid_scene::pixel_painter::PixelCtx::buf: &'a mut pixtuoid_core::sprite::RgbBuffer
 pub pixtuoid_scene::pixel_painter::PixelCtx::chitchat_state: &'a mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>
@@ -1381,10 +1363,9 @@ impl<'a> !core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::pixel_painter
 pub struct pixtuoid_scene::pixel_painter::PixelPassResult
 pub pixtuoid_scene::pixel_painter::PixelPassResult::agents: alloc::vec::Vec<pixtuoid_scene::pixel_painter::AgentFrame>
 pub pixtuoid_scene::pixel_painter::PixelPassResult::chitchat_bubbles: alloc::vec::Vec<pixtuoid_scene::chitchat::ChitchatBubble>
-pub pixtuoid_scene::pixel_painter::PixelPassResult::mascots: alloc::vec::Vec<pixtuoid_scene::pixel_painter::MascotFrame>
+pub pixtuoid_scene::pixel_painter::PixelPassResult::hovers: crate::display::Hovers
 pub pixtuoid_scene::pixel_painter::PixelPassResult::new_coffee_carriers: alloc::vec::Vec<pixtuoid_core::id::AgentId>
 pub pixtuoid_scene::pixel_painter::PixelPassResult::occupied_waypoints: std::collections::hash::set::HashSet<usize>
-pub pixtuoid_scene::pixel_painter::PixelPassResult::pet_pos: core::option::Option<crate::display::PetHover>
 impl core::marker::Freeze for pixtuoid_scene::pixel_painter::PixelPassResult
 impl core::marker::Send for pixtuoid_scene::pixel_painter::PixelPassResult
 impl core::marker::Sync for pixtuoid_scene::pixel_painter::PixelPassResult
