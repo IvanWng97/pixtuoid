@@ -355,10 +355,10 @@ fn pet_rows(pos: Point, anim: &str) -> (u16, u16) {
     (top, top + hitbox.h - 1)
 }
 
-// Probing coords that DO hit while the waypoint is present is what proves the
+// Probing coords that DO hit while the pantry is present is what proves the
 // false comes from the missing-pantry guard rather than an off-counter miss.
 #[test]
-fn coffee_machine_returns_false_when_no_pantry_waypoint() {
+fn coffee_machine_returns_false_without_a_pantry() {
     let mut layout = SceneLayout::compute(160, 200, Some(4)).expect("layout");
     let (mid_x, mid_cell_y) = coffee_mid_cell(&layout);
     assert!(
@@ -366,17 +366,15 @@ fn coffee_machine_returns_false_when_no_pantry_waypoint() {
             &layout,
             crate::tui::geometry::CellArea::half_block(mid_x, mid_cell_y)
         ),
-        "precondition: coffee machine area should hit with the Pantry waypoint present"
+        "precondition: coffee machine area should hit with the pantry present"
     );
-    layout
-        .waypoints
-        .retain(|w| !matches!(w.kind, pixtuoid_scene::layout::WaypointKind::Pantry));
+    layout.pantry = None;
     assert!(
         !hit_test_coffee_machine(
             &layout,
             crate::tui::geometry::CellArea::half_block(mid_x, mid_cell_y)
         ),
-        "no Pantry waypoint ⇒ the early return must yield false at the machine coords"
+        "no pantry ⇒ the early return must yield false at the machine coords"
     );
     assert!(!hit_test_coffee_machine(
         &layout,
