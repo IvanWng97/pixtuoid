@@ -11,7 +11,7 @@
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::display::pen::{ArtPx, ArtRect, Pen};
-use crate::display::text::{ACCENT_ROWS, CAP_H, LINE_H, char_cells, columns};
+use crate::display::text::{ACCENT_ROWS, CAP_H, LINE_H, cells, clusters, columns};
 
 /// A glyph: each line row's ink, the high bit its leftmost pixel.
 type Rows = [u8; LINE_H as usize];
@@ -46,6 +46,15 @@ fn fallback(c: char) -> Option<Rows> {
 /// `c`'s glyph, `None` when neither font draws it.
 fn glyph(c: char) -> Option<Rows> {
     hand_drawn(c).map(rows_of).or_else(|| fallback(c))
+}
+
+/// `cluster`'s glyph: its first character's, when that is as wide as the
+/// cluster's `n` cells. A VS16 heart or a ZWJ sequence is not.
+fn glyph_of(cluster: &str, n: u16) -> Option<Rows> {
+    let first = cluster.chars().next()?;
+    (cells(first.encode_utf8(&mut [0; 4])) == n)
+        .then(|| glyph(first))
+        .flatten()
 }
 
 /// A hand-drawn glyph's [`Rows`], under the accent rows.
@@ -192,12 +201,8 @@ fn hand_drawn(c: char) -> Option<&'static str> {
 /// Paint `text` in `ink` from its top-left `(x, y)`, clipped to the buffer.
 pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text: &str, ink: Rgb) {
     let mut left = x.0;
-    for c in text.chars() {
-        let n = char_cells(c);
-        if n == 0 {
-            continue;
-        }
-        let rows = glyph(c).unwrap_or_else(|| tofu(n));
+    for (cluster, n) in clusters(text) {
+        let rows = glyph_of(cluster, n).unwrap_or_else(|| tofu(n));
         for (dy, mut bits) in (0u16..).zip(rows) {
             let mut dx = 0;
             while bits != 0 {
@@ -222,7 +227,7 @@ pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text:
 mod tests {
     use super::*;
     use crate::anim::Motion;
-    use crate::display::text::{ADVANCE, GLYPH_W, advance, cells, width};
+    use crate::display::text::{ADVANCE, GLYPH_W, advance, width};
 
     /// Every character the wall board and the floor indicator write: each
     /// mood over two flap cycles, each gateway state, many floors.
@@ -427,6 +432,24 @@ mod tests {
         );
     }
 
+    /// A grapheme cluster paints inside the cells it takes, and the run after
+    /// it starts there: a VS16 heart and a ZWJ sequence each take two.
+    #[test]
+    fn a_cluster_paints_inside_its_own_cells() {
+        for cluster in ["\u{2764}\u{fe0f}", "\u{1f469}\u{200d}\u{1f4bb}"] {
+            assert_eq!(cells(cluster), 2, "{cluster:?}");
+            let alone = ink(cluster);
+            assert!(
+                !alone.is_empty() && alone.iter().all(|&(x, _)| x < columns(2).0),
+                "{cluster:?} inks {alone:?}"
+            );
+            assert!(
+                ink(&format!("{cluster}I")).contains(&(columns(2).0, ACCENT_ROWS)),
+                "{cluster:?}: the I's top bar opens the third cell"
+            );
+        }
+    }
+
     /// The one fallback: a character neither font draws is a solid box,
     /// capital-high and its cells wide, so a run never collapses.
     #[test]
@@ -434,7 +457,7 @@ mod tests {
         // Thai, and CJK Extension A: in neither pinned font's subset.
         for (c, n) in [('\u{0e01}', 1), ('\u{3400}', 2)] {
             assert_eq!(glyph(c), None, "{c:?}");
-            assert_eq!(char_cells(c), n, "{c:?}");
+            assert_eq!(cells(c.encode_utf8(&mut [0; 4])), n, "{c:?}");
             let text = c.to_string();
             let want: std::collections::BTreeSet<_> = (0..width(&text).0)
                 .flat_map(|x| (ACCENT_ROWS..ACCENT_ROWS + CAP_H).map(move |y| (x, y)))
@@ -471,7 +494,7 @@ mod tests {
             .zip(glyphs)
             .filter_map(|(&point, rows)| {
                 let c = char::from_u32(u32::from(point))?;
-                let n = char_cells(c);
+                let n = cells(c.encode_utf8(&mut [0; 4]));
                 (!fits(rows, n)).then_some((c, n))
             })
             .collect();

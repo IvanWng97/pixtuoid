@@ -1,10 +1,11 @@
-//! Text as the display list lays it out: a character takes the terminal cells
-//! [`unicode-width`](unicode_width) gives it, each [`ADVANCE`] art pixels wide
-//! on a line [`LINE_H`] tall. At the pack's 4x art a cell is one logical
-//! column, the classic badge's terminal column. The rasterizer's font draws
-//! into these cells.
+//! Text as the display list lays it out: a grapheme cluster takes the cells
+//! ratatui's buffer writes for it, each [`ADVANCE`] art pixels wide on a line
+//! [`LINE_H`] tall. At the pack's 4x art a cell is one logical column, the
+//! classic badge's terminal column. The rasterizer's font draws into these
+//! cells.
 
-use unicode_width::UnicodeWidthChar;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use crate::display::pen::ArtPx;
 
@@ -31,16 +32,39 @@ pub(crate) fn columns(n: u16) -> ArtPx {
     ArtPx(n.saturating_mul(ADVANCE))
 }
 
-/// The terminal cells `c` takes: two for a wide character, none for a
-/// combining mark or a control.
-pub(crate) fn char_cells(c: char) -> u16 {
-    c.width()
-        .map_or(0, |n| u16::try_from(n).unwrap_or(u16::MAX))
+/// The cells `cluster` takes on a terminal: ratatui-core 0.1.2 writes none
+/// for one holding a control (`Buffer::set_stringn`) and else its
+/// `unicode-width` (`CellWidth for str`).
+fn cluster_cells(cluster: &str) -> u16 {
+    if cluster.contains(char::is_control) {
+        return 0;
+    }
+    u16::try_from(cluster.width()).unwrap_or(u16::MAX)
+}
+
+/// Each grapheme cluster of `text` that takes a cell, and the cells it takes.
+pub(crate) fn clusters(text: &str) -> impl Iterator<Item = (&str, u16)> {
+    text.graphemes(true)
+        .map(|cluster| (cluster, cluster_cells(cluster)))
+        .filter(|&(_, n)| n > 0)
 }
 
 /// The cells `text` takes, the one width every run of it is laid out by.
-pub(crate) fn cells(text: &str) -> u16 {
-    text.chars().fold(0, |n, c| n.saturating_add(char_cells(c)))
+pub fn cells(text: &str) -> u16 {
+    clusters(text).fold(0, |sum, (_, n)| sum.saturating_add(n))
+}
+
+/// The longest start of `text` that fits `budget` cells, its clusters whole.
+pub(crate) fn take(text: &str, budget: u16) -> &str {
+    let mut used = 0u16;
+    let end = text
+        .grapheme_indices(true)
+        .find(|&(_, cluster)| {
+            used = used.saturating_add(cluster_cells(cluster));
+            used > budget
+        })
+        .map_or(text.len(), |(i, _)| i);
+    &text[..end]
 }
 
 /// [`columns`] past all of `text`: where the run after it starts.
@@ -51,6 +75,17 @@ pub(crate) fn advance(text: &str) -> ArtPx {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A budget never splits a grapheme cluster: a ZWJ sequence is kept whole
+    /// or dropped whole.
+    #[test]
+    fn a_take_keeps_clusters_whole() {
+        let coder = "\u{1f469}\u{200d}\u{1f4bb}";
+        let text = format!("a{coder}b");
+        assert_eq!(take(&text, 3), format!("a{coder}"));
+        assert_eq!(take(&text, 2), "a");
+        assert_eq!(take(&text, u16::MAX), text);
+    }
 
     #[test]
     fn a_run_is_its_advances_less_the_trailing_gap() {

@@ -119,6 +119,28 @@ fn display_width_counts_terminal_columns_not_chars() {
     assert_eq!(display_width("a\u{0301}"), 1);
 }
 
+/// The one width rule is the cells ratatui's buffer writes, one grapheme
+/// cluster at a time, so a VS16 emoji or a ZWJ sequence takes the same cells
+/// in the cutaway's image, in a truncated badge and on the terminal.
+#[test]
+fn every_width_is_the_cells_the_buffer_writes() {
+    for text in [
+        "[q]uit",
+        "\u{6f22}\u{5b57}",
+        "a\u{301}",
+        "\u{2764}\u{fe0f}",
+        "\u{1f469}\u{200d}\u{1f4bb}",
+        "\u{644}\u{627}",
+        "cc\u{b7}\u{1f99e}",
+        "a\u{7}b",
+    ] {
+        let mut buf = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 40, 1));
+        let (x, _) = buf.set_stringn(0, 0, text, usize::MAX, ratatui::style::Style::default());
+        assert_eq!(pixtuoid_scene::display::text::cells(text), x, "{text:?}");
+        assert_eq!(display_width(text), usize::from(x), "{text:?}");
+    }
+}
+
 #[test]
 fn footer_vocabulary_is_single_column_so_scene_chars_count_matches_display_width() {
     let vocab = "\u{b7}\u{d7}\u{2191}\u{2193}\u{25cf}\u{25d0}\u{25cb}\u{25cc}\u{2b22}\u{25b2}\u{2669}\u{26a0}\u{2026}";

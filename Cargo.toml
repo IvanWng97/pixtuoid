@@ -98,6 +98,8 @@ crossterm          = "0.29"
 # Terminal display-column width — the authority ratatui itself uses, so wide
 # glyphs don't miscount against its layout.
 unicode-width      = "0.2"
+# Grapheme clusters, the unit ratatui's buffer writes a cell for.
+unicode-segmentation = "1"
 clap               = { version = "4", features = ["derive"] }
 palette            = { version = "0.7", default-features = false, features = ["std"] }
 # Dev-only: every test that sets or unsets an env var goes through it, behind
