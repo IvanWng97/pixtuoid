@@ -205,8 +205,9 @@ frame_ms = 600
 frames   = ["standing@4x.sprite"]
 frame_ms = 600
 
-# Seen front or back, a foot never shows its travel, so a person's stride sets only
-# the cadence: about a cycle a second at a wander's pace, the walk's frames.
+# All three person walks share this stride (base-grid pixels per cycle,
+# docs/CONFIGURATION.md). Seen front or back a foot never shows its travel, so it
+# sets only the cadence: about one cycle a second at a wander's pace.
 [animations.walking]
 frames   = ["walking_0.sprite", "walking_1.sprite", "walking_2.sprite", "walking_3.sprite", "walking_4.sprite", "walking_5.sprite", "walking_6.sprite", "walking_7.sprite"]
 frame_ms = 220
