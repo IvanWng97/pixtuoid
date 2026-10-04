@@ -12,7 +12,8 @@ Usage: `test-list-diff.py PR [--head-list FILE] [--base-list FILE]`, in a clone
 with `gh` authenticated. A missing artifact (expired, or its run failed first)
 prints the local `cargo nextest list` that replaces it; a local head list is a
 build of the head itself, so its base is the merge-base. `--selftest` checks the
-pure diff with no network; exit 0 = pass.
+pure halves (parsing, the diff, the trust checks, a corrupt artifact) with no
+network; exit 0 = pass.
 """
 
 from __future__ import annotations

@@ -1164,8 +1164,8 @@ e2e-scrub-selftest:
 star-history-selftest:
     python3 scripts/star-history.py --selftest
 
-# A diff that drops a removed test reads as "removed (0)", the answer a refactor
-# row's lens wants to see.
+# A broken diff or trust check fails silent: it reads "removed (0)", the answer
+# a refactor lens hopes for.
 [doc("Self-test the review lens's test-list diff")]
 [group('meta')]
 test-list-diff-selftest:
