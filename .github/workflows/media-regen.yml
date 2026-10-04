@@ -41,6 +41,8 @@ jobs:
 
   publish:
     needs: render
+    # A dispatch from another branch would publish that branch's render.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions: {}
@@ -73,6 +75,8 @@ jobs:
           git add --all -- docs/images
           git commit --quiet --message "chore(media): regenerate from ${GITHUB_SHA::8}"
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          # Masking covers the secret, not a value derived from it.
+          echo "::add-mask::$auth"
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
             push --force origin "HEAD:refs/heads/$BRANCH"
           if [ "$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null)" != OPEN ]; then
