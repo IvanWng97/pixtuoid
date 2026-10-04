@@ -89,8 +89,8 @@ impl Disc {
         let span_left = f32::from(run.start) + DISC_RADIUS_PX;
         let span_right = (f32::from(run.end) - DISC_RADIUS_PX).max(span_left);
         let cx = span_left + e.azimuth * (span_right - span_left);
-        let horizon_y = top_wall_h as f32 * HORIZON_FRAC;
-        let cy = horizon_y - e.altitude * (top_wall_h as f32 * ARC_RISE_FRAC);
+        let horizon_y = f32::from(top_wall_h) * HORIZON_FRAC;
+        let cy = horizon_y - e.altitude * (f32::from(top_wall_h) * ARC_RISE_FRAC);
         let (lit_frac, lit_right) = match e.kind {
             BodyKind::Sun => (1.0, true),
             BodyKind::Moon => (sky.moon_phase(), sky.moon_waxing()),
@@ -160,15 +160,15 @@ const STAR_TWINKLE_CYCLE_SPAN_BEATS: u64 = 24;
 /// Deterministic sparse star field, hashed on the ABSOLUTE buffer `(px, py)`
 /// so it reads as one continuous sky rather than a per-window reseed.
 fn star_exists(px: u16, py: u16) -> bool {
-    let mut h = (px as u64).wrapping_mul(crate::GOLDEN_GAMMA);
-    h ^= (py as u64).wrapping_mul(crate::MURMUR64A_M);
+    let mut h = u64::from(px).wrapping_mul(crate::GOLDEN_GAMMA);
+    h ^= u64::from(py).wrapping_mul(crate::MURMUR64A_M);
     h = (h ^ (h >> 17)).wrapping_mul(pixtuoid_core::id::SPLITMIX64_M2);
     h.is_multiple_of(STAR_SPARSITY)
 }
 
 /// The star at `(px, py)`'s own seed, which picks its cycle and its turns.
 fn star_seed(px: u16, py: u16) -> u64 {
-    (px as u64).wrapping_mul(131) ^ (py as u64).wrapping_mul(521)
+    u64::from(px).wrapping_mul(131) ^ u64::from(py).wrapping_mul(521)
 }
 
 /// How long a star seeded `seed` holds each turn.

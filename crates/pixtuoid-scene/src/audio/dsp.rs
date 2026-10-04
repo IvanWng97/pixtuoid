@@ -241,8 +241,8 @@ pub fn centroid_hz(buf: &[f32]) -> f32 {
     let (re, im, n, hz_per_bin) = forward_spectrum(buf);
     let (mut num, mut den) = (0.0f64, 0.0f64);
     for (k, (r, i)) in re.iter().zip(&im).take(n / 2 + 1).enumerate() {
-        let p = (r * r + i * i) as f64;
-        num += k as f64 * hz_per_bin as f64 * p;
+        let p = f64::from(r * r + i * i);
+        num += k as f64 * f64::from(hz_per_bin) * p;
         den += p;
     }
     (num / den.max(1e-12)) as f32

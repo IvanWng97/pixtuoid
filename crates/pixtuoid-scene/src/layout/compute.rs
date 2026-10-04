@@ -1128,8 +1128,8 @@ pub(super) fn unreachable_walkable_cells(mask: &WalkableMask, seed: Point) -> Ve
     seen[idx(seed.x, seed.y)] = true;
     while let Some(p) = stack.pop() {
         for (dx, dy) in [(0i32, -1i32), (0, 1), (-1, 0), (1, 0)] {
-            let (nx, ny) = (p.x as i32 + dx, p.y as i32 + dy);
-            if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+            let (nx, ny) = (i32::from(p.x) + dx, i32::from(p.y) + dy);
+            if nx < 0 || ny < 0 || nx >= i32::from(w) || ny >= i32::from(h) {
                 continue;
             }
             let (nx, ny) = (nx as u16, ny as u16);

@@ -49,7 +49,7 @@ fn pantry_steam_dx(anim: &str) -> i16 {
 /// `anim`.
 pub(super) fn pantry_steam_at(pos: Point, anim: &str) -> Point {
     Point {
-        x: (pos.x as i32 + pantry_steam_dx(anim) as i32).max(0) as u16,
+        x: (i32::from(pos.x) + i32::from(pantry_steam_dx(anim))).max(0) as u16,
         y: pos.y.saturating_sub(2),
     }
 }
@@ -521,7 +521,7 @@ fn paint_token_stack(
         buf.put_checked(x, y, c);
     };
     let base_y = desk.y + STACK_BASE_DY;
-    let h = tier as u16 * STACK_PX_PER_TIER;
+    let h = u16::from(tier) * STACK_PX_PER_TIER;
     for i in 0..h {
         let y = base_y.saturating_sub(i);
         let c = if i % 2 == 1 {

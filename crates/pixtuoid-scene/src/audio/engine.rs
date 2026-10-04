@@ -97,7 +97,7 @@ impl AudioEngine {
     /// `None` on a native `recv_timeout`, where the ramp and schedulers still
     /// advance from the held state.
     pub fn tick(&mut self, dt: f32, frame: Option<AudioFrame>) -> TickCommands {
-        self.sched_s += dt as f64;
+        self.sched_s += f64::from(dt);
 
         let events: Vec<OneShot> = if let Some(f) = frame {
             self.wanted = f.stems;

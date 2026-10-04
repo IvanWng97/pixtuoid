@@ -8,7 +8,7 @@ use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 pub(super) fn degraded_pixel(c: Rgb) -> Rgb {
     // By eye: unwell, but not so grey that the dull-red bias below stops showing.
     const SATURATION_DRAIN: f32 = 0.55;
-    let lum = ((c.r as f32) * 0.30 + (c.g as f32) * 0.59 + (c.b as f32) * 0.11) as u8;
+    let lum = (f32::from(c.r) * 0.30 + f32::from(c.g) * 0.59 + f32::from(c.b) * 0.11) as u8;
     let gray = Rgb {
         r: lum,
         g: lum,

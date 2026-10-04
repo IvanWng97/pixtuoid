@@ -477,8 +477,8 @@ pub fn derive_with_routing(
                 // To the CHAIR, not the desk origin: the chair is offset, so a
                 // desk-origin gate re-fires forever once the agent settles on it.
                 let chair = desk_walk_anchor_facing(desk, layout.desk_facing_at(desk));
-                let dist =
-                    (prev.x as i32 - chair.x as i32).abs() + (prev.y as i32 - chair.y as i32).abs();
+                let dist = (i32::from(prev.x) - i32::from(chair.x)).abs()
+                    + (i32::from(prev.y) - i32::from(chair.y)).abs();
                 if dist >= SNAP_BACK_MIN_DIST {
                     let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
                     let p = snapshot_leg_profile(
@@ -666,8 +666,8 @@ fn route_walking_pose(
 }
 
 pub(crate) fn octile_distance(a: Point, b: Point) -> u32 {
-    let dx = (a.x as i32 - b.x as i32).unsigned_abs();
-    let dy = (a.y as i32 - b.y as i32).unsigned_abs();
+    let dx = (i32::from(a.x) - i32::from(b.x)).unsigned_abs();
+    let dy = (i32::from(a.y) - i32::from(b.y)).unsigned_abs();
     crate::pathfind::octile_cost(dx, dy)
 }
 

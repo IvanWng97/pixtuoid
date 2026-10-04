@@ -102,7 +102,7 @@ impl WebAudioDriver {
             }
             _ => {}
         }
-        (WARMUP_STAGES.saturating_sub(self.stage)) as u32
+        u32::from(WARMUP_STAGES.saturating_sub(self.stage))
     }
 
     pub(crate) fn is_ready(&self) -> bool {

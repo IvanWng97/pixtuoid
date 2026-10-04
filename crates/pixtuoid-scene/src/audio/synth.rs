@@ -314,7 +314,7 @@ fn master(buf: &[f32], drive: f32, peak: f32) -> Vec<f32> {
 /// the day and night voices differ on.
 fn ep_pluck_h2(midi: u8, dur_s: f32, vel: f32, h2: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
-    let f = midi_freq(midi as f32);
+    let f = midi_freq(f32::from(midi));
     let tau = std::f32::consts::TAU;
     (0..n)
         .map(|i| {
@@ -466,13 +466,13 @@ fn ep_pluck_vel(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
 /// The plucked-string lead voice ("nylon" family).
 fn pluck_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
-    let f = midi_freq(midi as f32);
+    let f = midi_freq(f32::from(midi));
     let tau = std::f32::consts::TAU;
     let h2 = 0.30 + 0.30 * vel;
     // decay follows pitch (higher strings die faster) and breathes per note; the
     // velocity BITS are the jitter source, not an rng, so identical inputs still
     // render identical buffers (the purity contract)
-    let pitch_k = 1.0 + (midi as f32 - 72.0) * 0.02;
+    let pitch_k = 1.0 + (f32::from(midi) - 72.0) * 0.02;
     let breath = 0.85 + 0.30 * (vel * 137.5).fract();
     let d = 3.4 * pitch_k * breath;
     let mut buf: Vec<f32> = (0..n)
@@ -487,7 +487,7 @@ fn pluck_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
         })
         .collect();
     let pn = n_samples(0.006);
-    let mut prng = NoiseStream::new(((midi as u64) << 32) ^ vel.to_bits() as u64);
+    let mut prng = NoiseStream::new((u64::from(midi) << 32) ^ u64::from(vel.to_bits()));
     let raw: Vec<f32> = (0..pn).map(|_| prng.norm()).collect();
     let pick_noise = bandpass(&raw, 2000.0, 5000.0);
     for (i, &v) in pick_noise.iter().enumerate() {
@@ -502,7 +502,7 @@ fn pluck_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
 /// keeps the transient, held-note plateau envelope.
 fn bass_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
-    let f = midi_freq(midi as f32);
+    let f = midi_freq(f32::from(midi));
     let tau = std::f32::consts::TAU;
     // half-note release: a sub tail crossing into the next root reads as mud
     let env = env_ar(n, 0.03, dur_s * 0.5);
@@ -523,11 +523,11 @@ fn bass_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
 /// 1 : 5.9 : 16.5, fast-dying overtones, a resonator-body thump.
 fn kalimba_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
-    let f = midi_freq(midi as f32);
+    let f = midi_freq(f32::from(midi));
     let tau = std::f32::consts::TAU;
     // higher tines die faster; the vel BITS jitter decay per note, not an rng,
     // so identical inputs still render identical buffers (the purity contract)
-    let pitch_k = (1.0 + (midi as f32 - 72.0) * 0.025).max(0.2); // d stays positive below midi 32
+    let pitch_k = (1.0 + (f32::from(midi) - 72.0) * 0.025).max(0.2); // d stays positive below midi 32
     let breath = 0.9 + 0.2 * (vel * 91.7).fract();
     let d = 2.6 * pitch_k * breath;
     let mut buf: Vec<f32> = (0..n)
@@ -541,7 +541,8 @@ fn kalimba_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
         })
         .collect();
     let pn = n_samples(0.010);
-    let mut prng = NoiseStream::new(0x4B41_4C49 ^ ((midi as u64) << 32) ^ vel.to_bits() as u64);
+    let mut prng =
+        NoiseStream::new(0x4B41_4C49 ^ (u64::from(midi) << 32) ^ u64::from(vel.to_bits()));
     let raw: Vec<f32> = (0..pn).map(|_| prng.norm()).collect();
     let thump = bandpass(&raw, 120.0, 700.0);
     for (i, &v) in thump.iter().enumerate() {
@@ -556,9 +557,9 @@ fn kalimba_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
 /// long ring, the rotating-fan tremolo baked in.
 fn vibe_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
-    let f = midi_freq(midi as f32);
+    let f = midi_freq(f32::from(midi));
     let tau = std::f32::consts::TAU;
-    let pitch_k = 1.0 + (midi as f32 - 69.0) * 0.015;
+    let pitch_k = 1.0 + (f32::from(midi) - 69.0) * 0.015;
     let d = 1.3 * pitch_k;
     // the vel BITS detune the fan rate per note (purity contract, as above)
     let trem_hz = 4.2 + 0.8 * (vel * 53.1).fract();
@@ -574,7 +575,8 @@ fn vibe_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
         })
         .collect();
     let pn = n_samples(0.008);
-    let mut prng = NoiseStream::new(0x5649_4245 ^ ((midi as u64) << 32) ^ vel.to_bits() as u64);
+    let mut prng =
+        NoiseStream::new(0x5649_4245 ^ (u64::from(midi) << 32) ^ u64::from(vel.to_bits()));
     let raw: Vec<f32> = (0..pn).map(|_| prng.norm()).collect();
     let mallet = bandpass(&raw, 600.0, 1800.0);
     for (i, &v) in mallet.iter().enumerate() {
@@ -623,7 +625,7 @@ fn night_pad_core(
         let nd = n_samples(dur);
         let mut sig = vec![0.0f32; nd];
         for (i, &m) in chord.iter().enumerate() {
-            let f = midi_freq(m as f32);
+            let f = midi_freq(f32::from(m));
             let env = env_ar(nd, 0.5 + 0.1 * i as f32, 1.8);
             for (j, slot) in sig.iter_mut().enumerate() {
                 let t = j as f32 / SR;
@@ -634,7 +636,7 @@ fn night_pad_core(
             }
         }
         if let Some((bass_roots, sub_gain)) = sub {
-            let fb = midi_freq(bass_roots[bar % bass_roots.len()] as f32);
+            let fb = midi_freq(f32::from(bass_roots[bar % bass_roots.len()]));
             for half in 0..2 {
                 let hdur = bar_s / 2.0 + 0.4;
                 let hn = n_samples(hdur);
@@ -827,7 +829,7 @@ fn day_pad_core(chords: &[[u8; 4]], bar_s: f32, loop_bars: usize) -> Vec<f32> {
         let nd = n_samples(dur);
         let mut chord_sig = vec![0.0f32; nd];
         for (i, &m) in chord.iter().enumerate() {
-            let f = midi_freq(m as f32);
+            let f = midi_freq(f32::from(m));
             let env = env_ar(nd, 0.25 + 0.08 * i as f32, 1.2);
             for (j, slot) in chord_sig.iter_mut().enumerate() {
                 let t = j as f32 / SR;

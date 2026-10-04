@@ -146,7 +146,7 @@ pub fn personality_for(agent_id: AgentId) -> Personality {
 pub fn takes_trip(agent_id: AgentId, cycle_n: u64) -> bool {
     let p = personality_for(agent_id);
     let mix = agent_id.raw() ^ cycle_n.wrapping_mul(crate::GOLDEN_GAMMA);
-    (mix % 100) < p.trip_chance_pct as u64
+    (mix % 100) < u64::from(p.trip_chance_pct)
 }
 
 /// Per-(agent, cycle) decision: when the agent takes a trip, is it an aimless
@@ -154,7 +154,7 @@ pub fn takes_trip(agent_id: AgentId, cycle_n: u64) -> bool {
 pub fn is_aimless_cycle(agent_id: AgentId, cycle_n: u64) -> bool {
     let p = personality_for(agent_id);
     let type_mix = agent_id.raw() ^ cycle_n.wrapping_mul(pixtuoid_core::id::SPLITMIX64_M1);
-    (type_mix % 100) < p.aimless_pref_pct as u64
+    (type_mix % 100) < u64::from(p.aimless_pref_pct)
 }
 
 /// Per-(agent, cycle) waypoint index. Only meaningful when `takes_trip` is

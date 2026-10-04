@@ -158,7 +158,7 @@ impl Office {
             rgba: Vec::new(),
             pack,
             theme: &NORMAL,
-            seed: seed as u64,
+            seed: u64::from(seed),
             reducer: Reducer::new(),
             beats: hero_script(),
             cursor: 0,
@@ -184,8 +184,8 @@ impl Office {
         // `f64 as u64` saturates (negatives/NaN → 0), so no pre-clamp is needed.
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
         self.last_now = Some(now);
-        let buf_w = w.clamp(1, u16::MAX as u32) as u16;
-        let buf_h = h.clamp(1, u16::MAX as u32) as u16;
+        let buf_w = w.clamp(1, u32::from(u16::MAX)) as u16;
+        let buf_h = h.clamp(1, u32::from(u16::MAX)) as u16;
         // Capacity BEFORE the script advances: the SessionStarts due this
         // frame must allocate desks against the canvas this frame renders.
         self.sync_capacity(buf_w, buf_h);

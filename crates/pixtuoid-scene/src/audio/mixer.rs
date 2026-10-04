@@ -166,14 +166,14 @@ impl TypingScheduler {
         let mut fired = 0u32;
         while self.next_at_s <= now_s {
             if self.burst_left == 0 {
-                let per_s = BURSTS_PER_MIN_AT_FULL / 60.0 * level as f64;
-                let gap = (0.5 + self.rng.unit() as f64) / per_s.max(1e-6);
+                let per_s = BURSTS_PER_MIN_AT_FULL / 60.0 * f64::from(level);
+                let gap = (0.5 + f64::from(self.rng.unit())) / per_s.max(1e-6);
                 self.burst_left = 8 + (self.rng.unit() * 14.0) as u32;
                 self.next_at_s += gap;
             } else {
                 fired += 1;
                 self.burst_left -= 1;
-                let mut gap = 0.066 + 0.030 * self.rng.unit() as f64;
+                let mut gap = 0.066 + 0.030 * f64::from(self.rng.unit());
                 if self.rng.unit() < 0.08 {
                     gap += 0.18;
                 }
@@ -209,11 +209,11 @@ impl DropScheduler {
         let mut fired = 0u32;
         while self.next_at_s <= now_s {
             fired += 1;
-            let gap = (0.4 + 1.2 * self.rng.unit() as f64) / DROPS_PER_S;
+            let gap = (0.4 + 1.2 * f64::from(self.rng.unit())) / DROPS_PER_S;
             self.next_at_s += gap;
             if self.rng.unit() < 0.35 {
                 fired += 1;
-                self.next_at_s += 0.20 + 0.15 * self.rng.unit() as f64;
+                self.next_at_s += 0.20 + 0.15 * f64::from(self.rng.unit());
             }
         }
         fired

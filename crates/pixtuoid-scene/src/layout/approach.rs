@@ -30,8 +30,8 @@ const CARDINAL_DIRS: [(i32, i32); 4] = [(0, -1), (0, 1), (-1, 0), (1, 0)];
 /// Squared Euclidean distance, in `i64` to avoid `u16` overflow before squaring;
 /// never sqrt'd, only compared.
 fn squared_distance(from: Point, to: Point) -> u64 {
-    let ex = from.x as i64 - to.x as i64;
-    let ey = from.y as i64 - to.y as i64;
+    let ex = i64::from(from.x) - i64::from(to.x);
+    let ey = i64::from(from.y) - i64::from(to.y);
     (ex * ex + ey * ey) as u64
 }
 
@@ -101,8 +101,8 @@ pub(crate) fn first_reachable_on_side(
 ) -> Option<Point> {
     let mut entered = false;
     for dist in 1..=SEAT_APPROACH_SCAN {
-        let cx = origin.x as i32 + dx * dist;
-        let cy = origin.y as i32 + dy * dist;
+        let cx = i32::from(origin.x) + dx * dist;
+        let cy = i32::from(origin.y) + dy * dist;
         if cx < 0 || cy < 0 {
             break;
         }
@@ -181,16 +181,16 @@ pub(crate) fn approach_point(
         return allowed.map(|(_, p)| p).unwrap_or(pos);
     } else if let Some(Size { w: fw, h: fh }) = approach_clearance_extent(kind, pantry_counter_size)
     {
-        let (hx, hy) = (fw as i32 / 2, fh as i32 / 2);
+        let (hx, hy) = (i32::from(fw) / 2, i32::from(fh) / 2);
         for (dx, dy) in CARDINAL_DIRS {
             if !def.approach.allows(facing, (dx, dy)) {
                 continue;
             }
             let half = if dx != 0 { hx } else { hy };
             for step in 0..=STAND_SCAN {
-                let dist = half + STAND_CLEARANCE as i32 + step;
-                let cx = pos.x as i32 + dx * dist;
-                let cy = pos.y as i32 + dy * dist;
+                let dist = half + i32::from(STAND_CLEARANCE) + step;
+                let cx = i32::from(pos.x) + dx * dist;
+                let cy = i32::from(pos.y) + dy * dist;
                 if cx < 0 || cy < 0 {
                     break;
                 }

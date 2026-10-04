@@ -82,10 +82,10 @@ impl BaseFillCache {
             self.filled.resize_fill(key.buf_w, key.buf_h, key.wall);
             for y in key.band_h..key.buf_h {
                 for x in 0..key.buf_w {
-                    let hash = (x as u32)
+                    let hash = u32::from(x)
                         .wrapping_mul(73)
-                        .wrapping_add((y as u32).wrapping_mul(151))
-                        ^ ((x as u32).wrapping_mul(11) ^ (y as u32).wrapping_mul(37));
+                        .wrapping_add(u32::from(y).wrapping_mul(151))
+                        ^ (u32::from(x).wrapping_mul(11) ^ u32::from(y).wrapping_mul(37));
                     let carpet = key.carpet.at(x, y);
                     let color = match hash % 17 {
                         0 | 1 => carpet[0],

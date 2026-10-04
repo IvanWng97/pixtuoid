@@ -140,8 +140,8 @@ fn sample_polyline(pts: &[Point], t: f32, fallback: Point) -> Point {
     let mut seg_lens: Vec<f32> = Vec::with_capacity(pts.len() - 1);
     let mut total = 0.0_f32;
     for w in pts.windows(2) {
-        let dx = (w[1].x as i32 - w[0].x as i32).unsigned_abs() as f32;
-        let dy = (w[1].y as i32 - w[0].y as i32).unsigned_abs() as f32;
+        let dx = (i32::from(w[1].x) - i32::from(w[0].x)).unsigned_abs() as f32;
+        let dy = (i32::from(w[1].y) - i32::from(w[0].y)).unsigned_abs() as f32;
         let len = dx.max(dy) + dx.min(dy) * (std::f32::consts::SQRT_2 - 1.0);
         seg_lens.push(len);
         total += len;
@@ -162,8 +162,8 @@ fn sample_polyline(pts: &[Point], t: f32, fallback: Point) -> Point {
             let a = pts[i];
             let b = pts[i + 1];
             return Point {
-                x: (a.x as f32 + (b.x as f32 - a.x as f32) * local_t) as u16,
-                y: (a.y as f32 + (b.y as f32 - a.y as f32) * local_t) as u16,
+                x: (f32::from(a.x) + (f32::from(b.x) - f32::from(a.x)) * local_t) as u16,
+                y: (f32::from(a.y) + (f32::from(b.y) - f32::from(a.y)) * local_t) as u16,
             };
         }
         cumul += slen;
@@ -221,8 +221,8 @@ fn walk_between(layout: &SceneLayout, from: Point, to: Point, t: f32) -> Point {
         sample_polyline(&pts, t, dst)
     } else {
         Point {
-            x: (src.x as f32 + (dst.x as f32 - src.x as f32) * t) as u16,
-            y: (src.y as f32 + (dst.y as f32 - src.y as f32) * t) as u16,
+            x: (f32::from(src.x) + (f32::from(dst.x) - f32::from(src.x)) * t) as u16,
+            y: (f32::from(src.y) + (f32::from(dst.y) - f32::from(src.y)) * t) as u16,
         }
     }
 }
@@ -241,7 +241,7 @@ pub(crate) fn mascot_seed(source: &str, instance: &pixtuoid_core::state::DaemonI
         .bytes()
         .chain(std::iter::once(b'@'))
         .chain(instance.as_str().bytes())
-        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64))
+        .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(u64::from(b)))
 }
 
 /// How long one mascot may be held at the elevator before its walk-in starts.
