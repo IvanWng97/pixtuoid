@@ -34,7 +34,9 @@ function defaultVariant(g: EnrichedVariantGroup): ShowcaseVariant | undefined {
 }
 ---
 
-<figure
+<!-- a div, not a figure: a figure with a figcaption takes no role but its own,
+     and this is the dial's tabpanel -->
+<div
   class="terminal stage crt"
   id={`stage-${c.id}`}
   role="tabpanel"
@@ -172,8 +174,8 @@ function defaultVariant(g: EnrichedVariantGroup): ShowcaseVariant | undefined {
       </button>)}
     </div>
   )}
-  <figcaption class="stage__caption">{description}</figcaption>
-</figure>
+  <p class="stage__caption">{description}</p>
+</div>
 
 <style>
   .stage {

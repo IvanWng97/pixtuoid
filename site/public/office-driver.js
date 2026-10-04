@@ -35,6 +35,18 @@ export function sharedWasm(wasmJsUrl) {
   return window.__pixWasm;
 }
 
+// The engine never strikes in a lightning bucket's last STRIKE_GAP_MS
+// (pixtuoid-scene's sky; config/scrub-quiet.test.mjs pins both against it).
+const LIGHTNING_PERIOD_MS = 15000;
+const STRIKE_GAP_MS = 1000;
+
+// The strike-free instant in `t`'s lightning bucket: where a clock jump lands
+// so it can't start a flash (WCAG 2.3.1 caps flashes at three a second).
+export function quietInstant(t) {
+  const bucket = Math.floor(t / LIGHTNING_PERIOD_MS) * LIGHTNING_PERIOD_MS;
+  return bucket + LIGHTNING_PERIOD_MS - STRIKE_GAP_MS;
+}
+
 // A fresh view over the office's RGBA frame buffer. Re-read ptr AND len on EVERY
 // frame — a resize / `memory.grow` reallocates and invalidates any retained view.
 export function officeFrameView(office, wasm) {

@@ -240,17 +240,6 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
     let vRaf = 0;
     let vBooted = false;
     let scrubHour = vibingTime ? parseFloat(vibingTime.value) : 18;
-    // A scrub jumps the clock, and a jump can land mid-strike: dragging would
-    // flash as often as it lands (WCAG 2.3.1 caps flashes at three a second).
-    // The engine never strikes in a lightning bucket's last STRIKE_GAP_MS
-    // (pixtuoid-scene's sky; config/scrub-quiet.test.mjs pins both), so a jump
-    // lands there.
-    const LIGHTNING_PERIOD_MS = 15000;
-    const STRIKE_GAP_MS = 1000;
-    function quietInstant(t) {
-      const bucket = Math.floor(t / LIGHTNING_PERIOD_MS) * LIGHTNING_PERIOD_MS;
-      return bucket + LIGHTNING_PERIOD_MS - STRIKE_GAP_MS;
-    }
     let vBase = anchorForHour(scrubHour);
     let vStart = Date.now();
 
@@ -352,8 +341,10 @@ const countWord = COUNT_WORDS[channels.length] ?? String(channels.length);
         scrubHour = parseFloat(vibingTime.value);
         updateClock(scrubHour);
         setSliderPhase(scrubHour);
-        // re-anchor: the office keeps living at this hour, from a strike-free instant
-        vBase = quietInstant(anchorForHour(scrubHour));
+        // re-anchor: the office keeps living at this hour. A jump can land
+        // mid-strike, so it lands on a strike-free instant instead.
+        const at = anchorForHour(scrubHour);
+        vBase = vDriver ? vDriver.quietInstant(at) : at;
         vStart = Date.now();
       });
     }

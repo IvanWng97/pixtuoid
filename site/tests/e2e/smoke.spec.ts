@@ -564,7 +564,20 @@ test('a remembered ♩ choice waits for a gesture that grants activation, not an
 }) => {
   // HTML's activation-triggering events exclude an Escape keydown (and a touch's
   // pointerdown): restoring on one would "resume" audio that stays suspended.
+  // Automated Chromium reports activation from navigation on, so the page reads
+  // a stub the test flips.
   const errors = watchErrors(page);
+  await page.addInitScript(() => {
+    const w = window as unknown as { __activated: boolean };
+    w.__activated = false;
+    Object.defineProperty(navigator, 'userActivation', {
+      value: {
+        get isActive() {
+          return w.__activated;
+        },
+      },
+    });
+  });
   await gotoLive(page);
   await page.evaluate(() => localStorage.setItem('pix:audio', '1'));
   await page.reload();
@@ -573,8 +586,14 @@ test('a remembered ♩ choice waits for a gesture that grants activation, not an
   await expect(btn).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
-  await expect(btn, 'an Escape restored the remembered ♩').toHaveAttribute('aria-pressed', 'false');
-  await page.mouse.click(5, 5);
+  await expect(btn, 'a gesture without activation restored the remembered ♩').toHaveAttribute(
+    'aria-pressed',
+    'false'
+  );
+  await page.evaluate(() => {
+    (window as unknown as { __activated: boolean }).__activated = true;
+  });
+  await page.keyboard.press('Shift');
   await expect
     .poll(async () => {
       const pressed = await btn.getAttribute('aria-pressed');
@@ -589,8 +608,9 @@ test('the dracula sequence honours the keyboard-shortcut off-switch (WCAG 2.1.4)
   page,
 }) => {
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
-  await page.addInitScript(() => localStorage.setItem('pix-keys', 'off'));
   await page.goto('./');
+  await page.evaluate(() => localStorage.setItem('pix-keys', 'off'));
+  await page.reload();
   await page.locator('body').click({ position: { x: 5, y: 5 } });
   await page.keyboard.type('dracula');
   await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dracula');
