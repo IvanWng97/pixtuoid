@@ -669,12 +669,7 @@ mod tests {
                 desk,
                 facing: crate::layout::Facing::South,
                 screen_glow: None,
-                lights: crate::lighting::DeskLights::new(
-                    desk,
-                    crate::layout::Facing::South,
-                    0.0,
-                    0.0,
-                ),
+                lights: crate::lighting::DeskLights::new(desk, None, 0.0, 0.0),
                 props: DeskProps {
                     cup: None,
                     token_tier,
@@ -907,12 +902,7 @@ mod tests {
                 desk,
                 facing: crate::layout::Facing::South,
                 screen_glow: None,
-                lights: crate::lighting::DeskLights::new(
-                    desk,
-                    crate::layout::Facing::South,
-                    0.0,
-                    0.0,
-                ),
+                lights: crate::lighting::DeskLights::new(desk, None, 0.0, 0.0),
                 props: DeskProps::default(),
             },
         ] {

@@ -1761,6 +1761,7 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
             indoor_scale: frame.indoor_scale,
             neon: frame.neon,
             beat: ctx.timing.beat,
+            bulbs: crate::lighting::DeskBulbs::of(ctx.pack),
         },
     );
     queue_fixtures(

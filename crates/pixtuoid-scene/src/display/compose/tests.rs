@@ -1433,7 +1433,8 @@ fn the_classic_lamp_pool_centres_on_the_1x_bulb() {
     let desk = Point { x: 40, y: 30 };
     for facing in [Facing::North, Facing::South] {
         let art = crate::pack::desk_sprite_name(facing);
-        let lights = crate::lighting::DeskLights::new(desk, facing, 1.0, 0.0);
+        let bulb = crate::lighting::DeskBulbs::of(&pack).at(facing);
+        let lights = crate::lighting::DeskLights::new(desk, bulb, 1.0, 0.0);
         let crate::lighting::Light::Halo { centre, .. } = lights.lamp.light else {
             panic!("a desk lamp throws a halo");
         };

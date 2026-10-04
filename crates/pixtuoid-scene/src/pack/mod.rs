@@ -16,8 +16,8 @@ pub(crate) use lookup::{
     MEETING_TABLE_SPRITE, NORTH_SOFA_SEAT_ROWS, PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY,
     TOKEN_SHEET_SPRITE, TOKEN_TOWER_SPRITE, TOWER_MARK, VENDING_MACHINE_SPRITE,
     WATER_COOLER_SPRITE, animation_frame_at, appliance_frame_index, appliance_overrides,
-    appliance_sprite, desk_art, desk_art_top, desk_mark, desk_prop_overrides, desk_sprite_name,
-    drawn_in, fixture_overrides, frame_at, looping_frame_index,
+    appliance_sprite, desk_art, desk_art_top, desk_bulb_offset, desk_mark, desk_prop_overrides,
+    desk_sprite_name, drawn_in, fixture_overrides, frame_at, looping_frame_index,
 };
 
 #[cfg(feature = "native")]
@@ -509,7 +509,7 @@ mod tests {
     }
 
     /// A pack that ships no back-turned desk draws its back-turned desks from
-    /// `desk`, and stands their props at `desk`'s marks.
+    /// `desk`: it stands their props at `desk`'s marks and lights `desk`'s lamp.
     #[test]
     fn a_pack_without_desk_north_stands_its_props_on_desk() {
         use crate::layout::{Facing, Point};

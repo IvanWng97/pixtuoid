@@ -326,6 +326,7 @@ fn lights(
             indoor_scale: frame.indoor_scale,
             neon: frame.neon,
             beat: moment.beat,
+            bulbs: crate::lighting::DeskBulbs::of(pack),
         },
     );
     let pen = Pen::for_pack(scale, pack);

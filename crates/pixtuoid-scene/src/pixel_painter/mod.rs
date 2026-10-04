@@ -279,6 +279,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Hoverables {
             indoor_scale: frame.indoor_scale,
             neon: frame.neon,
             beat: ctx.timing.beat,
+            bulbs: crate::lighting::DeskBulbs::of(ctx.pack),
         },
     );
     let top_wall_h = ctx.layout.wall_band_h();

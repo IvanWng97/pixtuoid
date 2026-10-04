@@ -101,11 +101,7 @@ pub(crate) const DESK_NORTH_SPRITE: &str = "desk_north";
 /// plus whatever a taller art adds ABOVE `desk.y`, so it keeps the base
 /// [`DESK_SPRITE`]'s bottom row. Both profiles blit desks from this.
 pub(crate) fn desk_art_top(pack: &Pack, desk_y: u16, art_h: u16) -> u16 {
-    let base_h = pack
-        .animation(DESK_SPRITE)
-        .and_then(|a| a.frames().first())
-        .map_or(0, |f| f.height());
-    desk_y.saturating_sub(DESK_BEZEL_RAISE + art_h.saturating_sub(base_h))
+    desk_y.saturating_sub(DESK_BEZEL_RAISE + art_h.saturating_sub(base_desk_height(pack)))
 }
 
 /// The marks a desk's art stands its cup and its token tower at.
@@ -128,6 +124,39 @@ pub(crate) fn desk_mark(
         x: desk.x + m.x(),
         y: top + m.y() + 1,
     })
+}
+
+/// Where the 1x desk facing `facing` hangs its lamp's bulb from the desk's
+/// point: the middle of its [`DESK_BULB_KEY`] cells on the art [`desk_art`]
+/// draws there; `None` for art that draws no bulb.
+pub(crate) fn desk_bulb_offset(pack: &Pack, facing: crate::layout::Facing) -> Option<(u16, u16)> {
+    let name = pack.piece_or_source(desk_sprite_name(facing))?;
+    let art = super::densest_frame(pack, name, 0, crate::render_scale::RenderScale::ONE)?;
+    let w = usize::from(art.frame.width());
+    let cells: Vec<(u32, u32)> = drawn_in(&art, &[DESK_BULB_KEY])
+        .iter()
+        .enumerate()
+        .filter(|&(_, &bulb)| bulb)
+        .map(|(i, _)| ((i % w) as u32, (i / w) as u32))
+        .collect();
+    let art = art.frame;
+    let n = u32::try_from(cells.len()).ok().filter(|&n| n > 0)?;
+    let mid = |sum: u32| u16::try_from((2 * sum + n) / (2 * n)).ok();
+    let (x, y) = (
+        mid(cells.iter().map(|c| c.0).sum())?,
+        mid(cells.iter().map(|c| c.1).sum())?,
+    );
+    // the art's rows from the desk's: its top is `desk_art_top` off the desk
+    let above = DESK_BEZEL_RAISE + art.height().saturating_sub(base_desk_height(pack));
+    Some((x, y.checked_sub(above)?))
+}
+
+/// The base [`DESK_SPRITE`]'s height, which every desk's art keeps at its
+/// bottom.
+fn base_desk_height(pack: &Pack) -> u16 {
+    pack.animation(DESK_SPRITE)
+        .and_then(|a| a.frames().first())
+        .map_or(0, |f| f.height())
 }
 
 /// The desk art for a seat facing `facing`. Only a back-turned seat needs its

@@ -132,7 +132,7 @@ DESK_GLASS_Y0, DESK_CHIN_Y = 2, 4
 # columns from the art's west edge: the lamp's bulb, the cup's and the token
 # tower's west columns. The viewer-facing desk has its lamp west, the cup beside
 # it and the tower on the east wing; the back-turned one mirrors it. Each
-# density draws its own rows. `pack`'s `every_desk_follows_the_one_arrangement`
+# density draws its own rows. `display::compose`'s `every_desk_follows_the_one_arrangement`
 # holds both densities to it.
 DESK_ARRANGEMENT = {
     "desk": {"bulb": 1, "cup": 2, "tower": 11},
