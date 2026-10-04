@@ -71,6 +71,19 @@ pub struct Rendered<'r> {
     pub occupied_waypoints: HashSet<usize>,
 }
 
+/// The office's raster state, shared by every floor: the cutaway's art.
+#[derive(Default)]
+pub struct OfficeRaster {
+    cutaway: crate::cutaway::paint::CutawayCache,
+}
+
+impl OfficeRaster {
+    /// Drop the cached art, after a theme change.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
 /// One floor's raster state, for every look it has been drawn in: each look's
 /// is built the first time it draws and kept, so a look that switches back and
 /// forth never rebuilds it.
@@ -259,7 +272,7 @@ pub fn render<'r>(
                     now: world.now,
                     board: &board,
                 },
-                office.cutaway_cache,
+                &mut office.raster.cutaway,
             );
             (buf, if switched { Dirty::All } else { dirty })
         }

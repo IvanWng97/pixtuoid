@@ -34,6 +34,29 @@ fn frame_layout_memo_matches_fresh_compute_across_hits_resizes_and_none() {
     );
 }
 
+/// A new layout drops the router's cached paths: `route` revalidates a cached
+/// path against the overlay alone, never the mask, so a stale one would walk
+/// through the new layout's walls.
+#[test]
+fn a_new_layout_drops_the_routers_cached_paths() {
+    use crate::pathfind::Router;
+    use pixtuoid_core::walkable::OccupancyOverlay;
+    let mut ctx = FloorCtx::new();
+    let l = ctx.frame_layout(192, 156, 0).unwrap();
+    let mut walkable = (0..l.buf_h)
+        .flat_map(|y| (0..l.buf_w).map(move |x| crate::layout::Point { x, y }))
+        .filter(|p| l.is_walkable(p.x, p.y));
+    let from = walkable.next().expect("a walkable cell");
+    let to = walkable.next_back().expect("another walkable cell");
+    ctx.router
+        .route(&l.walkable, &OccupancyOverlay::new(), from, to);
+    assert!(!ctx.router.is_empty(), "the route was cached");
+    ctx.frame_layout(192, 156, 0).unwrap();
+    assert!(!ctx.router.is_empty(), "the same layout keeps its paths");
+    ctx.frame_layout(120, 100, 0).unwrap();
+    assert!(ctx.router.is_empty(), "a new layout drops its paths");
+}
+
 #[test]
 fn daemons_projects_onto_the_ground_floor_only() {
     use pixtuoid_core::state::{DaemonInstanceId, DaemonLiveness, DaemonPresence};
@@ -73,9 +96,9 @@ fn door_anim_excludes_arrived_entry_profiles() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let id = AgentId::from_transcript_path("/p/door.jsonl");
     let mut fctx = FloorCtx::new();
-    let mut ms = WalkState::new(id);
+    let mut walk = WalkState::new(id);
     // Entry walk: duration 2000ms + pause 300ms → walk_arrived at 2300ms.
-    ms.entry = Some(crate::walk::WalkLeg {
+    walk.entry = Some(crate::walk::WalkLeg {
         started_at: t0,
         profile: WalkProfile {
             duration_ms: 2000,
@@ -86,7 +109,7 @@ fn door_anim_excludes_arrived_entry_profiles() {
         },
         from: crate::layout::Point { x: 0, y: 0 },
     });
-    fctx.walks.insert(id, ms);
+    fctx.walks.insert(id, walk);
 
     fctx.recompute_door_anim_max_ms(t0 + Duration::from_millis(1000));
     assert_eq!(
@@ -109,10 +132,7 @@ fn floor_ctx_default_equals_new() {
         d.door_anim_max_ms, 0,
         "FloorCtx::default() must match new() (door_anim_max_ms == 0)"
     );
-    assert!(
-        d.walks.is_empty(),
-        "default FloorCtx has no in-flight motion"
-    );
+    assert!(d.walks.is_empty(), "default FloorCtx has no walks");
 }
 
 #[test]
@@ -741,7 +761,7 @@ fn floor_session_render_owns_the_dual_eviction() {
     assert!(layout.is_some(), "a layoutable size renders");
     assert!(
         !session.floor.ctx.walks.contains_key(&gone),
-        "render() evicts the floor half (motion) — the floating-leak class"
+        "render() evicts the floor half (walks) — the floating-leak class"
     );
     assert!(
         !session.office.coffee.map().contains_key(&gone),
@@ -861,7 +881,7 @@ fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
     );
     assert!(
         session.floor.ctx.walks.contains_key(&id),
-        "the sim advanced: the entry leg was snapshotted into motion"
+        "the sim advanced: the entry leg was snapshotted into walks"
     );
     assert!(
         session.floor.ctx.door_anim_max_ms > 0,
@@ -959,7 +979,7 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     let occupied = std::collections::HashSet::new();
     let mut obs = AudioObserver::new();
     let frame = obs.frame(&scene, &occupied, |_| None, FloorMeta::ground(), now);
-    let precip = crate::pixel_painter::precipitation_level(now, crate::sky::WeatherPolicy::Clock);
+    let precip = crate::sky::rain_at(now, crate::sky::WeatherPolicy::Clock);
     assert_eq!(
         frame.stems,
         crate::audio::stem_levels(&crate::board::per_floor_counts(&scene)[0], precip),
@@ -968,7 +988,7 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     assert_eq!(
         frame.track,
         crate::audio::select_track(
-            crate::pixel_painter::is_day_at(now),
+            crate::sky::is_day_at(now),
             precip,
             crate::audio::track_epoch(now),
         ),
@@ -1350,6 +1370,48 @@ fn neon_a_starved_tube_stutters_at_the_calm_pace() {
     assert!(flashed, "the stutter never played at Calm");
 }
 
+/// On every moving tier, ticked at a live painter's [`FRAME`], a starved tube
+/// catches on exactly the frames whose loop time lies in a window, and each
+/// catch and each dark between, timed in loop time from its first frame to
+/// the next's, lasts at least the photosensitive floor, across the cycle's
+/// wrap too.
+#[test]
+fn neon_a_starved_tube_holds_each_flash_and_dark_the_floor() {
+    const CYCLES: u64 = 2;
+    for motion in Motion::ALL {
+        let Some(pace) = motion.pace() else {
+            continue;
+        };
+        let mut neon = NeonState::new();
+        let mut runs: Vec<(bool, u64)> = Vec::new();
+        let frames = CYCLES * NeonState::STUTTER_MS * pace / FRAME.as_millis() as u64;
+        for n in 0..frames {
+            let timing = motion.timing(in_stutter_cycle(0) + FRAME * n as u32);
+            let lit = neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, timing) == NeonLevels::FLASH;
+            let loop_ms = timing.beat.ms();
+            let in_window = NeonState::STUTTER_FLASHES_MS
+                .iter()
+                .any(|&(start, end)| (start..end).contains(&(loop_ms % NeonState::STUTTER_MS)));
+            // The first frame has no step to be drawn across.
+            if n > 0 {
+                assert_eq!(lit, in_window, "{motion:?} at {loop_ms} ms of loop time");
+            }
+            if runs.last().is_none_or(|&(was, _)| was != lit) {
+                runs.push((lit, loop_ms));
+            }
+        }
+        assert!(runs.iter().any(|&(lit, _)| lit), "{motion:?} never flashed");
+        // The first run opens with the frames, not with a catch or a dark.
+        for pair in runs[1..].windows(2) {
+            let ms = pair[1].1 - pair[0].1;
+            assert!(
+                ms >= crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS,
+                "{motion:?}: {runs:?}"
+            );
+        }
+    }
+}
+
 /// At rest a starved tube holds steady: no flash, for the photosensitive.
 #[test]
 fn neon_a_starved_tube_never_flashes_at_rest() {
@@ -1524,7 +1586,7 @@ fn both_painters(
         debug_walkable: false,
     };
     let scale = crate::render_scale::RenderScale::new(4).expect("nonzero");
-    let [classic, cutaway] = [
+    let [classic, cutaway_px] = [
         crate::look::Look::Classic,
         crate::look::Look::Cutaway { scale },
     ]
@@ -1533,7 +1595,7 @@ fn both_painters(
         session.render(look, inputs).expect("lays out");
         session.buf().expect("a frame").as_slice().to_vec()
     });
-    (classic, cutaway)
+    (classic, cutaway_px)
 }
 
 /// Every ambient loop either painter draws reads its floor's beat: two
@@ -1561,14 +1623,14 @@ fn both_painters_paint_one_frame_per_beat() {
                 .with_weather(WeatherPolicy::Forced(weather))
                 .with_motion(motion);
             let pet = Some(&cat);
-            let (classic, cutaway) = both_painters(&scene, floor, pet, t0);
+            let (classic, cutaway_px) = both_painters(&scene, floor, pet, t0);
             let later = both_painters(&scene, floor, pet, t0 + Duration::from_millis(later_ms));
             assert!(
                 classic == later.0,
                 "{motion:?} {weather:?}: the classic moved"
             );
             assert!(
-                cutaway == later.1,
+                cutaway_px == later.1,
                 "{motion:?} {weather:?}: the cutaway moved"
             );
         }
@@ -1582,7 +1644,7 @@ fn a_full_beat_on_moves_both_painters() {
     let t0 = crate::localclock::at_hour(23) + Duration::from_secs(5);
     let scene = ambient_office(t0, false);
     let floor = FloorMeta::ground().with_motion(Motion::Full);
-    let (classic, cutaway) = both_painters(&scene, floor, None, t0);
+    let (classic, cutaway_px) = both_painters(&scene, floor, None, t0);
     let later = both_painters(
         &scene,
         floor,
@@ -1590,7 +1652,7 @@ fn a_full_beat_on_moves_both_painters() {
         t0 + Duration::from_millis(FULL_TICK_MS),
     );
     assert!(classic != later.0, "the classic held still");
-    assert!(cutaway != later.1, "the cutaway held still");
+    assert!(cutaway_px != later.1, "the cutaway held still");
 }
 
 /// The loop clock is closed-form, never accumulated: whatever renderer paints
@@ -1599,7 +1661,7 @@ fn a_full_beat_on_moves_both_painters() {
 fn a_frame_is_a_function_of_its_instant_and_tier() {
     let t = crate::localclock::at_hour(23) + Duration::from_millis(5_321);
     let scene = ambient_office(t, false);
-    for motion in [Motion::Full, Motion::Calm, Motion::Still] {
+    for motion in Motion::ALL {
         let floor = FloorMeta::ground().with_motion(motion);
         let (a, b) = (
             both_painters(&scene, floor, None, t),

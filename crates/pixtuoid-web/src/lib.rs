@@ -1,5 +1,5 @@
 //! `pixtuoid-web` — the WebAssembly canvas painter over the `pixtuoid-scene`
-//! engine: an [`Office`] handle owns everything cross-frame so motion/pose stay
+//! engine: an [`Office`] handle owns everything cross-frame so walks/poses stay
 //! continuous, and `step(now_ms, w, h)` renders one frame into an RGBA staging
 //! buffer JS reads zero-copy via [`Office::frame_ptr`]/[`Office::frame_len`].
 //!
@@ -28,7 +28,7 @@ use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FloorSession, PetInputs, flo
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::pack::load_bundled_pack;
-use pixtuoid_scene::pixel_painter::WeatherPolicy;
+use pixtuoid_scene::sky::WeatherPolicy;
 use pixtuoid_scene::theme::{ALL_THEMES, Theme};
 
 /// A visitor hire's one-shot event, queued OUTSIDE the loop machinery so a
@@ -105,7 +105,7 @@ impl VisitorHires {
 }
 
 /// A live office rendered to a reusable RGBA buffer across frames. Keeping ONE
-/// handle alive across `step` calls is what keeps motion/pose continuous.
+/// handle alive across `step` calls is what keeps walks/poses continuous.
 #[wasm_bindgen]
 pub struct Office {
     scene: SceneState,
@@ -231,7 +231,7 @@ impl Office {
         self.hires.try_hire(base, &self.scene)
     }
 
-    /// Force one of the [`weather_names`](pixtuoid_scene::pixel_painter::weather_names),
+    /// Force one of the [`weather_names`](pixtuoid_scene::sky::weather_names),
     /// or `None` (or an unrecognized name) to follow the clock-based cycle.
     pub fn set_weather(&mut self, name: Option<String>) {
         self.weather = WeatherPolicy::from_name(name.as_deref()).unwrap_or_default();
@@ -250,7 +250,7 @@ impl Office {
     /// site's sky-slider thumb reads this, so it delegates to the engine's ONE
     /// day/night boundary rather than restating it.
     pub fn is_day(&self, hour: f32) -> bool {
-        pixtuoid_scene::pixel_painter::hour_is_day(hour)
+        pixtuoid_scene::sky::hour_is_day(hour)
     }
 
     /// Export the current frame's name-badge labels + neon wall-board TEXT as a
@@ -1008,7 +1008,7 @@ mod tests {
         assert!(
             o.scene.agents.contains_key(&cast_id(5))
                 && o.session.floor.ctx.walks.contains_key(&cast_id(5)),
-            "agent 5 must be live with motion state mid-loop (positive control)"
+            "agent 5 must be live with walk state mid-loop (positive control)"
         );
         // Past agent 5's SessionEnd + the exit grace + sweep.
         while t <= 115_000 {
@@ -1021,7 +1021,7 @@ mod tests {
         );
         assert!(
             !o.session.floor.ctx.walks.contains_key(&cast_id(5)),
-            "agent 5's motion state was evicted with its slot"
+            "agent 5's walk state was evicted with its slot"
         );
         assert!(
             !o.session.office.coffee.map().contains_key(&cast_id(5)),

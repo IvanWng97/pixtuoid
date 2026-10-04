@@ -569,7 +569,7 @@ pub(crate) struct ProofJob<'a> {
     pub(crate) max_desks: usize,
     pub(crate) theme: &'static pixtuoid_scene::theme::Theme,
     pub(crate) pack: &'a std::sync::Arc<pixtuoid_core::sprite::format::Pack>,
-    pub(crate) weather: pixtuoid_scene::pixel_painter::WeatherPolicy,
+    pub(crate) weather: pixtuoid_scene::sky::WeatherPolicy,
 }
 
 pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {

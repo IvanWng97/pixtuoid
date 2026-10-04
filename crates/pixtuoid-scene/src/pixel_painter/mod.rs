@@ -146,38 +146,10 @@ use background::{
 };
 use drawable::{Drawable, DrawableKind, Drawn, Layer, enqueue_room_walls, paint_drawable};
 
-pub use crate::sky::{Weather, WeatherPolicy};
-
-/// The weather names [`WeatherPolicy::from_name`] accepts, canonical order.
-pub fn weather_names() -> Vec<&'static str> {
-    crate::sky::Weather::ALL.iter().map(|w| w.name()).collect()
-}
-
-/// How hard it is raining at `now` under `weather` (0.0 dry … 1.0 storm; snow
-/// and fog are 0.0) — the audio model's weather feed.
-pub fn precipitation_level(now: std::time::SystemTime, weather: WeatherPolicy) -> f32 {
-    crate::sky::Sky::at(crate::anim::Motion::Full.timing(now), weather).precipitation()
-}
-
-/// Whether the office's sky shows the SUN at hour-of-day `hour` (0..24).
-/// Exposed so the wasm painter's `Office::is_day` can hand the site's
-/// sky-slider the SAME day/night boundary the office renders.
-pub fn hour_is_day(hour: f32) -> bool {
-    crate::sky::hour_is_day(hour)
-}
-
-/// Day/night at `now` on the LOCAL clock — the native painters' feed for the
-/// audio track selector (wasm passes its own hour). Same sun window the
-/// lighting renders: the music follows what the office SHOWS.
-pub fn is_day_at(now: std::time::SystemTime) -> bool {
-    crate::sky::hour_is_day(crate::sky::local_hour_frac(now))
-}
-
 /// The paint pass's borrow set — everything `paint_frame` may touch. The only
-/// `&mut`s are the pixel buffer and the paint-local caches (`FrameCache`,
-/// `BaseFillCache`); the sim stores are absent BY TYPE (`motion` is an
-/// immutable view, read by the debug route overlay), so painting cannot move
-/// the world.
+/// `&mut`s are the pixel buffer and the paint-local caches; the sim stores are
+/// absent BY TYPE (`walks` is an immutable view, read by the debug route
+/// overlay), so painting cannot move the world.
 pub(crate) struct PaintCtx<'a> {
     scene: &'a SceneState,
     layout: &'a SceneLayout,

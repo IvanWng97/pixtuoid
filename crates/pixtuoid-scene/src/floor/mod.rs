@@ -226,12 +226,12 @@ impl FloorCtx {
                 p.duration_ms + p.pause_ms
             }
         };
-        self.door_anim_max_ms = self.walks.values().fold(0u64, |acc, ms| {
-            let entry = ms
+        self.door_anim_max_ms = self.walks.values().fold(0u64, |acc, walk| {
+            let entry = walk
                 .entry
                 .as_ref()
                 .map_or(0, |l| in_flight(l.started_at, &l.profile));
-            let exit = ms
+            let exit = walk
                 .exit
                 .as_ref()
                 .map_or(0, |leg| in_flight(leg.started_at, &leg.profile));
@@ -388,15 +388,15 @@ pub fn waypoint_kind_of(
 
 /// The mood [`TrackId`](crate::audio::TrackId) for `now` under `weather` — the
 /// ONE place the day/precip/epoch input wiring lives. Lives here (not `audio`)
-/// because it reaches the lighting layer's `is_day_at`/`precipitation_level`,
+/// because it reaches `sky::is_day_at` and `sky::rain_at`,
 /// which `audio` must not depend on.
 pub fn track_for(
     now: std::time::SystemTime,
     weather: crate::sky::WeatherPolicy,
 ) -> crate::audio::TrackId {
     crate::audio::select_track(
-        crate::pixel_painter::is_day_at(now),
-        crate::pixel_painter::precipitation_level(now, weather),
+        crate::sky::is_day_at(now),
+        crate::sky::rain_at(now, weather),
         crate::audio::track_epoch(now),
     )
 }
@@ -440,7 +440,7 @@ impl AudioObserver {
         // You hear the floor you're LOOKING AT — but rain stays global, since
         // it's weather, not agent activity.
         let counts = crate::board::per_floor_counts(scene)[floor_idx.min(MAX_FLOORS - 1)];
-        let precipitation = crate::pixel_painter::precipitation_level(now, floor.weather);
+        let precipitation = crate::sky::rain_at(now, floor.weather);
         let floor_ids = scene
             .agents
             .iter()
@@ -472,8 +472,8 @@ pub struct PerOffice {
     /// The office-wide [`AudioObserver`] — one cue tracker + reprime latch,
     /// shared across floors.
     pub audio: AudioObserver,
-    /// The cutaway's art, shared by every floor's canvas.
-    pub cutaway_cache: crate::cutaway::paint::CutawayCache,
+    /// The office's raster state, shared by every floor's.
+    pub raster: crate::look::OfficeRaster,
 }
 
 /// The office stores one floor's frame steps and draws with.
@@ -482,8 +482,8 @@ pub struct OfficeStores<'a> {
     pub coffee: &'a mut CoffeeState,
     /// See [`PerOffice::chitchat`].
     pub chitchat: &'a mut HashMap<VenueKey, ActiveChitchat>,
-    /// See [`PerOffice::cutaway_cache`].
-    pub cutaway_cache: &'a mut crate::cutaway::paint::CutawayCache,
+    /// See [`PerOffice::raster`].
+    pub raster: &'a mut crate::look::OfficeRaster,
 }
 
 impl OfficeStores<'_> {
@@ -492,7 +492,7 @@ impl OfficeStores<'_> {
         OfficeStores {
             coffee: self.coffee,
             chitchat: self.chitchat,
-            cutaway_cache: self.cutaway_cache,
+            raster: self.raster,
         }
     }
 }
@@ -508,7 +508,7 @@ impl PerOffice {
         OfficeStores {
             coffee: &mut self.coffee,
             chitchat: &mut self.chitchat,
-            cutaway_cache: &mut self.cutaway_cache,
+            raster: &mut self.raster,
         }
     }
 
@@ -883,12 +883,22 @@ impl NeonFade {
 }
 
 // Every stutter bound on a whole Full tick, so the beat neither skips a flash
-// nor stretches one.
+// nor stretches one; every flash, and the dark up to the next (the cycle's
+// first, past its end), at least the photosensitive floor.
 const _: () = {
+    use crate::anim::{FULL_TICK_MS, PHOTOSENSITIVE_PHASE_MIN_MS};
+    let flashes = NeonState::STUTTER_FLASHES_MS;
     let mut i = 0;
-    while i < NeonState::STUTTER_FLASHES_MS.len() {
-        let (start, end) = NeonState::STUTTER_FLASHES_MS[i];
-        assert!(start % crate::anim::FULL_TICK_MS == 0 && end % crate::anim::FULL_TICK_MS == 0);
+    while i < flashes.len() {
+        let (start, end) = flashes[i];
+        let next = if i + 1 < flashes.len() {
+            flashes[i + 1].0
+        } else {
+            flashes[0].0 + NeonState::STUTTER_MS
+        };
+        assert!(start % FULL_TICK_MS == 0 && end % FULL_TICK_MS == 0);
+        assert!(end - start >= PHOTOSENSITIVE_PHASE_MIN_MS);
+        assert!(next - end >= PHOTOSENSITIVE_PHASE_MIN_MS);
         i += 1;
     }
 };
@@ -960,8 +970,8 @@ impl NeonState {
             .last_tick
             .map(|last| crate::anim::elapsed_ms(now, last));
         self.last_tick = Some(now);
-        // Stepped in loop time, which Calm walks at a quarter of the wall
-        // clock's pace, so Calm plays the stutter slower rather than never.
+        // Stepped in loop time, which `Motion::Calm` paces slower than the wall
+        // clock, so Calm plays the stutter slower rather than never.
         let beat_ms = timing.beat.ms();
         let step_ms = self.last_beat_ms.map(|last| beat_ms.abs_diff(last));
         self.last_beat_ms = Some(beat_ms);

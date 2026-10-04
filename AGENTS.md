@@ -73,11 +73,11 @@ cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 Non-trivial work runs as an arc — pick → grill the design → design gate →
 spec → build (TDD) → self-review → merge gate → wrap. Per-step detail:
 [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-arc-loop). The merge gate is
-[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-merge-gate); the `two-lens-review`
+[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-merge-gate); the `local-review`
 skill runs its local rows. Merging is `@mergifyio queue`; a release PR merges
 by hand.
 
-Repo skills (committed): `two-lens-review`, `beautify-decoration`,
+Repo skills (committed): `local-review`, `beautify-decoration`,
 `add-source`, `add-theme`, `procedural-lofi`.
 
 ## Conventions

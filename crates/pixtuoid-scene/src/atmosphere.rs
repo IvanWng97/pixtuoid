@@ -27,7 +27,7 @@ pub(crate) struct SkyTones {
     /// warm day one, applied in order like the ground's two washes.
     pub(crate) object_wash: [(Rgb, f32); 2],
     /// The weather's cast on the ground, as `(tint, strength)`.
-    pub(crate) ground_tint: (Rgb, f32),
+    ground_tint: (Rgb, f32),
     /// The weather's veil over the window glass, lit for this frame, as
     /// `(color, alpha)`, or `None` where the city shows crisp.
     pub(crate) glass_veil: Option<(Rgb, f32)>,
@@ -95,7 +95,40 @@ const GROUND_TINT_SHARE: f32 = 0.15;
 /// by day and under thick cloud or fog; above it the stars ramp in from nothing.
 const STAR_MIN: f32 = 0.15;
 
+/// The carpet's three tones one frame lays: the theme's, cast by the weather.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Carpet {
+    pub(crate) lit: Rgb,
+    pub(crate) base: Rgb,
+    pub(crate) dark: Rgb,
+}
+
+impl Carpet {
+    /// `theme`'s carpet as it is.
+    #[cfg(test)]
+    pub(crate) fn plain(theme: &Theme) -> Self {
+        let s = &theme.surface;
+        Carpet {
+            lit: s.carpet_light,
+            base: s.carpet_base,
+            dark: s.carpet_dark,
+        }
+    }
+}
+
 impl SkyTones {
+    /// `theme`'s carpet drawn toward [`ground_tint`](Self::ground_tint): the
+    /// one carpet both painters lay.
+    pub(crate) fn carpet(&self, theme: &Theme) -> Carpet {
+        let (tint, share) = self.ground_tint;
+        let s = &theme.surface;
+        Carpet {
+            lit: s.carpet_light.mix(tint, share),
+            base: s.carpet_base.mix(tint, share),
+            dark: s.carpet_dark.mix(tint, share),
+        }
+    }
+
     pub(crate) fn resolve(sky: &Sky, theme: &Theme) -> SkyTones {
         let light = sky.light();
         let (interior, exterior) = (light.interior, light.exterior);

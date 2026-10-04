@@ -108,7 +108,7 @@ struct Chrome {
     audio: crate::audio::AudioHandle,
     /// Transient +/- volume readout (percent); `None` past [`crate::audio::VOLUME_FLASH_MS`].
     volume_flash: Option<u8>,
-    weather: pixtuoid_scene::pixel_painter::WeatherPolicy,
+    weather: pixtuoid_scene::sky::WeatherPolicy,
     motion: pixtuoid_scene::anim::Motion,
 }
 
@@ -254,7 +254,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 onboarding: crate::tui::welcome::OnboardingFrame::default(),
                 audio: crate::audio::AudioHandle::disabled(),
                 volume_flash: None,
-                weather: pixtuoid_scene::pixel_painter::WeatherPolicy::Clock,
+                weather: pixtuoid_scene::sky::WeatherPolicy::Clock,
                 motion: pixtuoid_scene::anim::Motion::Full,
             },
             #[cfg(feature = "graphics")]
@@ -443,12 +443,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             for pf in &mut self.floors {
                 pf.raster.reset_sprite_cache();
             }
-            self.office.cutaway_cache = Default::default();
+            self.office.raster.reset();
         }
     }
 
     /// Which weather every floor shows from the next frame on.
-    pub fn set_weather(&mut self, weather: pixtuoid_scene::pixel_painter::WeatherPolicy) {
+    pub fn set_weather(&mut self, weather: pixtuoid_scene::sky::WeatherPolicy) {
         self.chrome.weather = weather;
     }
 
@@ -614,7 +614,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 OfficeStores {
                     coffee: &mut self.office.coffee,
                     chitchat: &mut transition_chitchat,
-                    cutaway_cache: &mut self.office.cutaway_cache,
+                    raster: &mut self.office.raster,
                 },
                 Look::Classic,
                 RenderInputs {
@@ -873,7 +873,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 OfficeStores {
                     coffee: &mut self.office.coffee,
                     chitchat: &mut transition_chitchat,
-                    cutaway_cache: &mut self.office.cutaway_cache,
+                    raster: &mut self.office.raster,
                 },
                 look,
                 RenderInputs {
