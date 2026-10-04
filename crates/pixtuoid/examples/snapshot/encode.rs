@@ -617,7 +617,12 @@ mod tests {
         let fg = ImgRgb([200u8, 100, 0]);
         assert_eq!(mix_rgb(bg, fg, 0.0), bg);
         assert_eq!(mix_rgb(bg, fg, 1.0), fg);
-        assert_eq!(mix_rgb(bg, fg, 0.5), ImgRgb([100, 100, 100]));
+        let blend = |b, f| pixtuoid::aa_text::blend_channel(b, f, 0.5);
+        assert_eq!(
+            mix_rgb(bg, fg, 0.5),
+            ImgRgb([blend(0, 200), blend(100, 100), blend(200, 0)]),
+            "each channel through the one blend curve"
+        );
     }
 
     #[test]

@@ -319,7 +319,10 @@ mod tests {
     fn blend_channel_endpoints_midpoint_and_clamp() {
         assert_eq!(blend_channel(0, 200, 0.0), 0);
         assert_eq!(blend_channel(0, 200, 1.0), 200);
-        assert_eq!(blend_channel(0, 200, 0.5), 100);
+        // Half the light, not half the code value (which would be 100 and 128).
+        assert_eq!(blend_channel(0, 200, 0.5), 146);
+        assert_eq!(blend_channel(255, 0, 0.5), 188);
+        assert_eq!(blend_channel(200, 0, 0.5), 146, "symmetric in light");
         assert_eq!(blend_channel(0, 200, 2.0), 200, "over-coverage clamps");
         assert_eq!(blend_channel(0, 200, -1.0), 0, "negative clamps");
     }
