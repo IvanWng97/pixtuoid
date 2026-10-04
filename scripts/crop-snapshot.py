@@ -35,9 +35,13 @@ QUADRANTS = {
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("input", type=Path, help="Snapshot PNG to crop")
-    parser.add_argument("--scale", type=int, default=2, help="Nearest-neighbor upscale factor (default 2)")
+    parser.add_argument(
+        "--scale", type=int, default=2, help="Nearest-neighbor upscale factor (default 2)"
+    )
     parser.add_argument("--quadrant", "-q", choices=list(QUADRANTS) + ["all"], default="all",
                         help="Which quadrant to crop (default: all)")
     args = parser.parse_args()

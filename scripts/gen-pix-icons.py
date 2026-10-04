@@ -341,7 +341,13 @@ def emit(name, img, label, out_dir, check, work, stale):
         img.save(cand)
         DIFF_DIR.mkdir(parents=True, exist_ok=True)
         rc = subprocess.run(
-            [sys.executable, str(COMPARE), str(out), str(cand), str(DIFF_DIR / f"diff-{label}-{name}.png")]
+            [
+                sys.executable,
+                str(COMPARE),
+                str(out),
+                str(cand),
+                str(DIFF_DIR / f"diff-{label}-{name}.png"),
+            ]
         ).returncode
         if rc != 0:
             stale.append(f"{tag} (differs)")
@@ -361,7 +367,11 @@ def main():
     work = Path(tempfile.mkdtemp(prefix="gen-pix-icons-"))
     try:
         for name, spec in ICONS.items():
-            rows = sprite_rows(spec["sprite"]) if "sprite" in spec else [r.split() for r in spec["grid"]]
+            rows = (
+                sprite_rows(spec["sprite"])
+                if "sprite" in spec
+                else [r.split() for r in spec["grid"]]
+            )
             img = render(name, rows, pal)
             readme_img = img.resize(
                 (img.width * README_SCALE, img.height * README_SCALE), Image.Resampling.NEAREST

@@ -334,7 +334,8 @@ def grounded(frames):
     """`frames` moved down together until their lowest drawn row is the canvas's
     last: both painters ground and sort a piece on its box's bottom row."""
     blank = min(
-        next((i for i, row in enumerate(reversed(g)) if any(c != T for c in row)), 0) for g in frames
+        next((i for i, row in enumerate(reversed(g)) if any(c != T for c in row)), 0)
+        for g in frames
     )
     return [[[T] * len(g[0])] * blank + g[: len(g) - blank] for g in frames]
 
@@ -375,7 +376,12 @@ def lock(g, x0, y0, x1, y1, w0, w1):
         cx, cy, hw = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, (w0 + (w1 - w0) * t) / 2
         for y in range(int(cy) - 1, int(cy) + 2):
             for x in range(int(cx - hw) - 1, int(cx + hw) + 2):
-                if 1 <= x < len(g[0]) - 1 and 0 <= y < len(g) and abs(x + 0.5 - cx) <= hw and abs(y + 0.5 - cy) <= 0.8:
+                if (
+                    1 <= x < len(g[0]) - 1
+                    and 0 <= y < len(g)
+                    and abs(x + 0.5 - cx) <= hw
+                    and abs(y + 0.5 - cy) <= 0.8
+                ):
                     g[y][x] = HAIR
 
 
@@ -398,7 +404,9 @@ def rim_light(g, strands=(), sparkle=(), lit_top=True):
     mop = {(x, y) for y in range(len(g)) for x in range(len(g[0])) if g[y][x] == HAIR}
     for x, y in mop:
         top_open = (x, y - 2) not in mop
-        if (lit_top or not top_open) and ((x - 1, y - 1) not in mop or top_open or (x - 2, y) not in mop):
+        if (lit_top or not top_open) and (
+            (x - 1, y - 1) not in mop or top_open or (x - 2, y) not in mop
+        ):
             g[y][x] = HAIR_LT
         elif (x + 1, y + 1) not in mop or (x + 2, y) not in mop:
             g[y][x] = HAIR_SH
@@ -456,7 +464,9 @@ def ball(g, cx, cy, r):
     for y in range(len(g)):
         for x in range(1, len(g[0]) - 1):
             d = math.hypot(x + 0.5 - cx, y + 0.5 - cy)
-            if r <= d < r + 1.0 and g[y][x] != T and (y + 0.5 > cy + 1 or x + 0.5 > cx + 1 and cy > 8):
+            if r <= d < r + 1.0 and g[y][x] != T and (
+                y + 0.5 > cy + 1 or x + 0.5 > cx + 1 and cy > 8
+            ):
                 g[y][x] = SILHOUETTE
     curl(g, cx, cy, r)
 
@@ -524,9 +534,9 @@ def crown_finish(c, r=CROWN_R):
     return c
 
 
-MOP_PUFFS = [(FIG_CX, 12.0, 10.8), (6.8, 6.0, 3.6), (10.6, 3.8, 3.4), (15.2, 2.9, 3.4), (19.8, 3.4, 3.4),
-             (24.2, 5.8, 3.6), (4.6, 10.6, 3.6), (26.4, 10.6, 3.6), (4.4, 15.0, 3.4), (26.6, 15.0, 3.4),
-             (5.6, 18.6, 2.8), (25.4, 18.6, 2.8)]
+MOP_PUFFS = [(FIG_CX, 12.0, 10.8), (6.8, 6.0, 3.6), (10.6, 3.8, 3.4), (15.2, 2.9, 3.4),
+             (19.8, 3.4, 3.4), (24.2, 5.8, 3.6), (4.6, 10.6, 3.6), (26.4, 10.6, 3.6),
+             (4.4, 15.0, 3.4), (26.6, 15.0, 3.4), (5.6, 18.6, 2.8), (25.4, 18.6, 2.8)]
 
 
 def style_mop():
@@ -543,15 +553,18 @@ def style_mop():
     terminator(back, FIG_CX, 12.5 + o, 12.5, 8 + o)
     comb(back, [((11, 7), (12, 10)), ((19, 6), (18, 9)), ((15, 11), (16, 14))], o)
     sb = layer()
-    for px, py, r in ((SIDE_CX, SIDE_CY, 11.2), (8, 5, 3.6), (13, 3, 3.6), (18.5, 3.5, 3.4), (22.5, 6.2, 3.2),
-                      (4.5, 11, 3.8), (4.5, 16, 3.6), (6.5, 20, 3.2), (10, 21.5, 3.0)):
+    for px, py, r in ((SIDE_CX, SIDE_CY, 11.2), (8, 5, 3.6), (13, 3, 3.6), (18.5, 3.5, 3.4),
+                      (22.5, 6.2, 3.2), (4.5, 11, 3.8), (4.5, 16, 3.6), (6.5, 20, 3.2),
+                      (10, 21.5, 3.0)):
         disc(sb, px, py + o, r)
     rim_light(sb, [(10, 8 + o), (16, 7 + o), (8, 14 + o)], [(12, 2 + o), (13, 2 + o)])
     c = crown_base(1.2)
     for a in range(0, 360, 40):
-        disc(c, CROWN_CX + math.cos(math.radians(a)) * CROWN_R, CROWN_CY + o + math.sin(math.radians(a)) * CROWN_R, 3.2)
-    return {"front": (b, front_fringe({7: 16, 8: 15, 9: 14, 10: 13, 11: 13, 12: 14, 13: 13, 14: 12, 15: 13, 16: 13,
-                                       17: 12, 18: 13, 19: 14, 20: 13, 21: 13, 22: 14, 23: 15, 24: 16})),
+        disc(c, CROWN_CX + math.cos(math.radians(a)) * CROWN_R,
+             CROWN_CY + o + math.sin(math.radians(a)) * CROWN_R, 3.2)
+    return {"front": (b, front_fringe({7: 16, 8: 15, 9: 14, 10: 13, 11: 13, 12: 14, 13: 13, 14: 12,
+                                       15: 13, 16: 13, 17: 12, 18: 13, 19: 14, 20: 13, 21: 13,
+                                       22: 14, 23: 15, 24: 16})),
             "back": back,
             "side": (sb, side_locks([(19.5, 13, 2.2), (22.5, 12.5, 2.2), (24.5, 11.5, 1.6)])),
             "crown": crown_finish(c, CROWN_R + 1.2), "ears": False}
@@ -565,18 +578,21 @@ MESSY_TUFTS = ((8.5, 5.0, -125, 3.2, 2.8), (12.0, 2.8, -100, 2.8, 2.6), (16.0, 2
 def style_messy():
     """The mop with short tufts breaking its top and sides."""
     b = layer()
-    for px, py, r in ((FIG_CX, 12.5, 10.6), (5.4, 13.0, 3.9), (26.0, 13.0, 3.9), (5.8, 17.4, 3.0), (25.6, 17.4, 3.0)):
+    for px, py, r in ((FIG_CX, 12.5, 10.6), (5.4, 13.0, 3.9), (26.0, 13.0, 3.9), (5.8, 17.4, 3.0),
+                      (25.6, 17.4, 3.0)):
         disc(b, px, py + o, r)
     for t in MESSY_TUFTS:
         tuft(b, t[0], t[1] + o, *t[2:])
     back = [row[:] for row in b]
-    for t in ((10.0, 21.0, 100, 3.0, 2.2), (14.0, 22.0, 85, 3.4, 2.4), (18.0, 22.0, 95, 3.2, 2.4), (22.0, 21.0, 80, 3.0, 2.2)):
+    for t in ((10.0, 21.0, 100, 3.0, 2.2), (14.0, 22.0, 85, 3.4, 2.4), (18.0, 22.0, 95, 3.2, 2.4),
+              (22.0, 21.0, 80, 3.0, 2.2)):
         tuft(back, t[0], t[1] + o, *t[2:])
     for px, py, r in ((6.0, 17.6, 3.0), (25.4, 17.6, 3.0)):
         disc(back, px, py + o, r)
     strands = [(12, 6 + o), (13, 7 + o), (18, 5 + o), (18, 6 + o), (21, 7 + o), (9, 8 + o)]
     rim_light(b, strands, [(10, 3 + o), (11, 3 + o), (15, 2 + o), (16, 2 + o)])
-    rim_light(back, strands + [(10, 12 + o), (16, 15 + o)], [(10, 3 + o), (11, 3 + o), (15, 2 + o), (16, 2 + o)])
+    rim_light(back, strands + [(10, 12 + o), (16, 15 + o)],
+              [(10, 3 + o), (11, 3 + o), (15, 2 + o), (16, 2 + o)])
     sb = layer()
     for px, py, r in ((SIDE_CX, SIDE_CY, 11.0), (4.8, 13, 3.8), (6.2, 18.5, 3.2)):
         disc(sb, px, py + o, r)
@@ -588,8 +604,9 @@ def style_messy():
     for a in range(200, 350, 30):
         tuft(c, CROWN_CX + math.cos(math.radians(a)) * CROWN_R * 0.9,
              CROWN_CY + o + math.sin(math.radians(a)) * CROWN_R * 0.9, a, 3.2, 2.6)
-    return {"front": (b, front_fringe({7: 16, 8: 15, 9: 13, 10: 13, 11: 14, 12: 16, 13: 13, 14: 12, 15: 12, 16: 13,
-                                       17: 13, 18: 15, 19: 13, 20: 12, 21: 13, 22: 14, 23: 15, 24: 16})),
+    return {"front": (b, front_fringe({7: 16, 8: 15, 9: 13, 10: 13, 11: 14, 12: 16, 13: 13, 14: 12,
+                                       15: 12, 16: 13, 17: 13, 18: 15, 19: 13, 20: 12, 21: 13,
+                                       22: 14, 23: 15, 24: 16})),
             "back": back,
             "side": (sb, side_locks([(19.5, 13.5, 2.2), (22.5, 12, 2.2), (25, 13, 1.6)])),
             "crown": crown_finish(c, CROWN_R + 1.2), "ears": False}
@@ -598,11 +615,14 @@ def style_messy():
 def style_side_part():
     """Less volume, parted west of centre, the fringe swept east in one sheet."""
     b = layer()
-    for px, py, r in ((FIG_CX, 12.5, 10.2), (6.0, 14.0, 3.6), (25.0, 14.0, 3.8), (6.4, 18.0, 2.6), (24.8, 18.2, 2.8)):
+    for px, py, r in ((FIG_CX, 12.5, 10.2), (6.0, 14.0, 3.6), (25.0, 14.0, 3.8), (6.4, 18.0, 2.6),
+                      (24.8, 18.2, 2.8)):
         disc(b, px, py + o, r)
-    rim_light(b, [(11, 2 + o), (11, 3 + o), (11, 4 + o), (10, 5 + o), (10, 6 + o)], [(15, 3 + o), (16, 3 + o)])
+    rim_light(b, [(11, 2 + o), (11, 3 + o), (11, 4 + o), (10, 5 + o), (10, 6 + o)],
+              [(15, 3 + o), (16, 3 + o)])
     back = layer()
-    for px, py, r in ((FIG_CX, 12.8, 10.4), (6.0, 14.0, 3.6), (25.0, 14.0, 3.8), (7.0, 18.4, 3.0), (24.2, 18.4, 3.2)):
+    for px, py, r in ((FIG_CX, 12.8, 10.4), (6.0, 14.0, 3.6), (25.0, 14.0, 3.8), (7.0, 18.4, 3.0),
+                      (24.2, 18.4, 3.2)):
         disc(back, px, py + o, r)
     rect(back, 9, 18 + o, 23, 22 + o, HAIR)
     rim_light(back, [], [(15, 3 + o), (16, 3 + o)])
@@ -616,10 +636,12 @@ def style_side_part():
     for y in range(int(CROWN_CY - CROWN_R) + 1 + o, int(CROWN_CY) + 2 + o):  # the part
         if c[y][int(CROWN_CX) - 2] != T:
             c[y][int(CROWN_CX) - 2] = HAIR_SH
-    return {"front": (b, front_fringe({7: 14, 8: 13, 9: 12, 10: 12, 11: 12, 12: 12, 13: 13, 14: 13, 15: 13, 16: 14,
-                                       17: 14, 18: 14, 19: 15, 20: 15, 21: 15, 22: 16, 23: 16, 24: 17})),
+    return {"front": (b, front_fringe({7: 14, 8: 13, 9: 12, 10: 12, 11: 12, 12: 12, 13: 13, 14: 13,
+                                       15: 13, 16: 14, 17: 14, 18: 14, 19: 15, 20: 15, 21: 15,
+                                       22: 16, 23: 16, 24: 17})),
             "back": back,
-            "side": (sb, side_locks([(18.5, 11.5, 2.4), (21.5, 12.5, 2.6), (24.5, 13.5, 2.2)], top=7)),
+            "side": (sb, side_locks([(18.5, 11.5, 2.4), (21.5, 12.5, 2.6), (24.5, 13.5, 2.2)],
+                                    top=7)),
             "crown": c, "ears": False}
 
 
@@ -634,7 +656,8 @@ def style_long():
     for x0 in (1, 5, 9, 22, 26, 30):
         for i in range(3):
             rect(b, max(1, x0 - 2 + i), 35 + o + i, min(FIG_W - 1, x0 + 2 - i), 36 + o + i, HAIR)
-    rim_light(b, [(9, 6 + o), (10, 7 + o), (21, 6 + o), (22, 7 + o), (4, 22 + o), (4, 26 + o), (27, 22 + o), (27, 26 + o)],
+    rim_light(b, [(9, 6 + o), (10, 7 + o), (21, 6 + o), (22, 7 + o), (4, 22 + o), (4, 26 + o),
+                  (27, 22 + o), (27, 26 + o)],
               [(10, 3 + o), (11, 3 + o)])
     back = layer()
     ellipse(back, FIG_CX, 12.2 + o, 11.2, 11.0)
@@ -646,15 +669,16 @@ def style_long():
         rect(back, int(4 + narrow - spread), y, int(28 - narrow + spread), y + 1, HAIR)
     for x0 in (9, 13, 17, 21, 25):
         for i in range(3):
-            rect(back, max(1, x0 - 2 + i), 37 + o + i, min(FIG_W - 1, x0 + 2 - i), 38 + o + i, HAIR)
+            rect(back, max(1, x0 - 2 + i), 37 + o + i, min(FIG_W - 1, x0 + 2 - i), 38 + o + i,
+                 HAIR)
     rim_light(back, [], [(10, 3 + o), (11, 3 + o)])
     terminator(back, FIG_CX, 20.0 + o, 19.0, 20 + o)
     for x in range(7, 25):  # a band of sheen across the crown
         y = 7 + o + abs(x - 15) // 4
         if back[y][x] == HAIR:
             back[y][x] = HAIR_LT
-    comb(back, [((9, 12), (8, 22), (7, 33)), ((15, 14), (15, 24), (14, 35)), ((21, 12), (22, 22), (23, 33)),
-                ((12, 26), (11, 34)), ((19, 26), (20, 34))], o)
+    comb(back, [((9, 12), (8, 22), (7, 33)), ((15, 14), (15, 24), (14, 35)),
+                ((21, 12), (22, 22), (23, 33)), ((12, 26), (11, 34)), ((19, 26), (20, 34))], o)
     sb = layer()
     disc(sb, SIDE_CX, SIDE_CY + o, 11.0)
     lock(sb, 8.5, 12 + o, 6.0, 38 + o, 11, 6)  # full enough to meet the neck
@@ -671,13 +695,15 @@ def style_long():
         for y in range(int(CROWN_CY + 4) + o, int(CROWN_CY + 16) + o):
             if c[y][x0] in (HAIR, HAIR_LT):
                 c[y][x0] = HAIR_SH
-    return {"front": (b, front_fringe({7: 20, 8: 17, 9: 15, 10: 14, 11: 13, 12: 12, 13: 12, 14: 11, 17: 11, 18: 12,
-                                       19: 12, 20: 13, 21: 14, 22: 15, 23: 17, 24: 20})),
+    return {"front": (b, front_fringe({7: 20, 8: 17, 9: 15, 10: 14, 11: 13, 12: 12, 13: 12, 14: 11,
+                                       17: 11, 18: 12, 19: 12, 20: 13, 21: 14, 22: 15, 23: 17,
+                                       24: 20})),
             "back": back, "side": (sb, so), "crown": c, "ears": False}
 
 
 def style_bun():
-    """Pulled back tight into a bun on the crown: combed lines run up to it, the ears show, the bun rises into the headroom."""
+    """Pulled back tight into a bun on the crown: combed lines run up to it, the ears show, the
+    bun rises into the headroom."""
     b = layer()
     ellipse(b, FIG_CX, 13.0 + o, 10.4, 9.6)
     rim_light(b, [(11, 6 + o), (11, 8 + o), (20, 6 + o), (20, 8 + o)])
@@ -687,7 +713,8 @@ def style_bun():
     nape_cut(back)
     rim_light(back)
     terminator(back, FIG_CX, 13.0 + o, 11.5, 8 + o)
-    comb(back, [((8, 17), (10, 12), (13, 8)), ((15, 19), (15, 13), (15, 8)), ((23, 17), (21, 12), (18, 8))], o)
+    comb(back, [((8, 17), (10, 12), (13, 8)), ((15, 19), (15, 13), (15, 8)),
+                ((23, 17), (21, 12), (18, 8))], o)
     ball(back, FIG_CX, 2.6 + o, 4.0)
     sb = layer()
     disc(sb, SIDE_CX, SIDE_CY + 0.5 + o, 10.2)
@@ -695,8 +722,9 @@ def style_bun():
     ball(sb, 5.0, 5.5 + o, 4.0)
     c = crown_finish(crown_base())
     curl(c, CROWN_CX, CROWN_CY - CROWN_R + 3.5 + o, 3.8)
-    return {"front": (b, front_fringe({7: 12, 8: 11, 9: 11, 10: 10, 11: 10, 12: 10, 13: 10, 14: 10, 15: 10, 16: 10,
-                                       17: 10, 18: 10, 19: 10, 20: 10, 21: 10, 22: 11, 23: 11, 24: 12})),
+    return {"front": (b, front_fringe({7: 12, 8: 11, 9: 11, 10: 10, 11: 10, 12: 10, 13: 10, 14: 10,
+                                       15: 10, 16: 10, 17: 10, 18: 10, 19: 10, 20: 10, 21: 10,
+                                       22: 11, 23: 11, 24: 12})),
             "back": back, "side": (sb, side_locks([(20.5, 11, 2.6), (23.5, 11, 2.2)], top=7)),
             "crown": c, "ears": True}
 
@@ -721,8 +749,8 @@ def style_crop():
             if sb[y][x] == HAIR and x > 11 - (y - 18 - o):
                 sb[y][x] = T
     rim_light(sb, [(10, 7 + o), (16, 5 + o)], [(13, 3 + o), (14, 3 + o)])
-    return {"front": (b, front_locks([(8.5, 13, 1.8), (11.5, 13.5, 2.0), (14.5, 12.5, 2.0), (17.5, 13.5, 2.0),
-                                      (20.5, 12.5, 2.0), (23.0, 13, 1.6)])),
+    return {"front": (b, front_locks([(8.5, 13, 1.8), (11.5, 13.5, 2.0), (14.5, 12.5, 2.0),
+                                      (17.5, 13.5, 2.0), (20.5, 12.5, 2.0), (23.0, 13, 1.6)])),
             "back": back, "side": (sb, side_locks([(20.5, 11.5, 2.0), (23.5, 11.5, 1.8)])),
             "crown": crown_finish(crown_base()), "ears": True}
 
@@ -733,7 +761,8 @@ def style_curls():
     ellipse(b, FIG_CX, 12.5 + o, 10.6, 10.0)
     rim_light(b)
     for cy, xs in ((2.8, (10.0, 13.5, 17.0, 20.5)), (5.2, (7.2, 10.6, 14.0, 17.4, 20.8, 24.0)),
-                   (8.0, (5.4, 8.6, 12.0, 15.5, 19.0, 22.4, 25.6)), (11.2, (4.6, 26.4)), (14.4, (4.6, 26.4))):
+                   (8.0, (5.4, 8.6, 12.0, 15.5, 19.0, 22.4, 25.6)), (11.2, (4.6, 26.4)),
+                   (14.4, (4.6, 26.4))):
         for cx in xs:
             curl(b, cx, cy + o, 2.3)
     f = layer()
@@ -743,8 +772,10 @@ def style_curls():
     ellipse(back, FIG_CX, 13.2 + o, 10.4, 9.8)
     rim_light(back)
     for cy, xs in ((2.8, (10.0, 13.5, 17.0, 20.5)), (5.2, (7.2, 10.6, 14.0, 17.4, 20.8, 24.0)),
-                   (8.0, (5.4, 8.6, 12.0, 15.5, 19.0, 22.4, 25.6)), (11.2, (4.6, 7.8, 11.2, 14.6, 18.0, 21.4, 24.6)),
-                   (14.4, (4.8, 8.2, 11.6, 15.0, 18.4, 21.8, 25.2)), (17.6, (6.4, 9.8, 13.2, 16.6, 20.0, 23.6)),
+                   (8.0, (5.4, 8.6, 12.0, 15.5, 19.0, 22.4, 25.6)),
+                   (11.2, (4.6, 7.8, 11.2, 14.6, 18.0, 21.4, 24.6)),
+                   (14.4, (4.8, 8.2, 11.6, 15.0, 18.4, 21.8, 25.2)),
+                   (17.6, (6.4, 9.8, 13.2, 16.6, 20.0, 23.6)),
                    (20.4, (9.6, 13.0, 16.4, 19.8))):
         for cx in xs:
             curl(back, cx, cy + o, 2.3)
@@ -752,8 +783,8 @@ def style_curls():
     disc(sb, SIDE_CX, SIDE_CY + o, 10.8)
     rim_light(sb)
     for cy, xs in ((3.0, (9.5, 13, 16.5, 20)), (5.8, (6.5, 10, 13.5, 17, 20.5, 23.5)),
-                   (8.8, (4.5, 7.8, 11.2, 14.6, 18, 21.4)), (12, (4, 7.2, 10.6)), (15.2, (4.2, 7.6, 11)),
-                   (18.4, (5.4, 8.8)), (21, (8, 11.2))):
+                   (8.8, (4.5, 7.8, 11.2, 14.6, 18, 21.4)), (12, (4, 7.2, 10.6)),
+                   (15.2, (4.2, 7.6, 11)), (18.4, (5.4, 8.8)), (21, (8, 11.2))):
         for cx in xs:
             curl(sb, cx, cy + o, 2.3)
     so = layer()
@@ -770,7 +801,8 @@ def style_curls():
 def style_shaggy():
     """A shaggy mop whose fringe falls in locks to the eyes."""
     b = layer()
-    for px, py, r in ((FIG_CX, 12.0, 10.8), (5.2, 14.5, 3.8), (26.2, 14.5, 3.8), (5.6, 19.0, 2.8), (25.8, 19.0, 2.8)):
+    for px, py, r in ((FIG_CX, 12.0, 10.8), (5.2, 14.5, 3.8), (26.2, 14.5, 3.8), (5.6, 19.0, 2.8),
+                      (25.8, 19.0, 2.8)):
         disc(b, px, py + o, r)
     for t in ((9, 4.5, -120, 2.6, 2.6), (14.5, 2.4, -95, 2.4, 2.6), (20, 3.2, -65, 2.6, 2.6)):
         tuft(b, t[0], t[1] + o, *t[2:])
@@ -781,7 +813,8 @@ def style_shaggy():
               (20.0, 21.5, 85, 4.4, 2.6), (24.0, 20.5, 75, 4.0, 2.4)):
         tuft(back, t[0], t[1] + o, *t[2:])
     rim_light(b, [(12, 5 + o), (18, 5 + o)], [(12, 3 + o), (13, 3 + o)])
-    rim_light(back, [(12, 6 + o), (18, 6 + o), (10, 18 + o), (14, 19 + o), (18, 19 + o), (22, 18 + o)],
+    rim_light(back, [(12, 6 + o), (18, 6 + o), (10, 18 + o), (14, 19 + o), (18, 19 + o),
+                     (22, 18 + o)],
               [(12, 3 + o), (13, 3 + o)])
     sb = layer()
     for px, py, r in ((SIDE_CX, SIDE_CY, 11.0), (4.8, 13.5, 3.8), (6, 19, 3.2), (10, 21.5, 2.8)):
@@ -793,10 +826,12 @@ def style_shaggy():
     for a in range(200, 350, 30):
         tuft(c, CROWN_CX + math.cos(math.radians(a)) * CROWN_R * 0.9,
              CROWN_CY + o + math.sin(math.radians(a)) * CROWN_R * 0.9, a, 3.2, 2.6)
-    return {"front": (b, front_locks([(7.5, 18, 1.8), (10.0, 16.5, 2.2), (13.0, 17.5, 2.4), (16.2, 16.5, 2.4),
-                                      (19.2, 17.5, 2.4), (22.0, 16.5, 2.2), (24.4, 18, 1.8)])),
+    return {"front": (b, front_locks([(7.5, 18, 1.8), (10.0, 16.5, 2.2), (13.0, 17.5, 2.4),
+                                      (16.2, 16.5, 2.4), (19.2, 17.5, 2.4), (22.0, 16.5, 2.2),
+                                      (24.4, 18, 1.8)])),
             "back": back,
-            "side": (sb, side_locks([(17.5, 16, 2.2), (20.5, 17.5, 2.4), (23.5, 16.5, 2.2), (25.5, 15, 1.4)])),
+            "side": (sb, side_locks([(17.5, 16, 2.2), (20.5, 17.5, 2.4), (23.5, 16.5, 2.2),
+                                     (25.5, 15, 1.4)])),
             "crown": crown_finish(c, CROWN_R + 1.2), "ears": False}
 
 
@@ -805,15 +840,16 @@ def style_ponytail():
     b = layer()
     ellipse(b, FIG_CX, 12.5 + o, 10.6, 10.2)
     rim_light(b, [(12, 5 + o), (13, 6 + o)], [(11, 3 + o), (12, 3 + o)])
-    f = front_fringe({7: 15, 8: 14, 9: 13, 10: 12, 11: 12, 12: 12, 13: 12, 14: 12, 15: 12, 16: 12, 17: 12,
-                      18: 12, 19: 13, 20: 13, 21: 14, 22: 15, 23: 16, 24: 17})
+    f = front_fringe({7: 15, 8: 14, 9: 13, 10: 12, 11: 12, 12: 12, 13: 12, 14: 12, 15: 12, 16: 12,
+                      17: 12, 18: 12, 19: 13, 20: 13, 21: 14, 22: 15, 23: 16, 24: 17})
     paste(f, tail(25, 17, 27, 33, 18))
     back = layer()
     ellipse(back, FIG_CX, 12.8 + o, 10.6, 10.0)
     nape_cut(back)
     rim_light(back)
     terminator(back, FIG_CX, 12.8 + o, 12.0, 8 + o)
-    comb(back, [((8, 9), (14, 12), (22, 16)), ((10, 16), (16, 17), (22, 17)), ((13, 5), (18, 9), (23, 15))], o)
+    comb(back, [((8, 9), (14, 12), (22, 16)), ((10, 16), (16, 17), (22, 17)),
+                ((13, 5), (18, 9), (23, 15))], o)
     paste(back, tail(24, 16, 27, 30, 17))
     sb = layer()
     disc(sb, SIDE_CX, SIDE_CY + 0.4 + o, 10.4)
@@ -989,8 +1025,8 @@ def arms_hanging(g, dy, stride):
     forward hand hangs lower."""
     for side, x0 in ((-1, 4), (1, 24)):
         drop = 0 if stride == 0 else (2 if side != stride else -1)
-        rect(g, x0 + (1 if side < 0 else 0), SHOULDER_Y + 2 + dy, x0 + (4 if side < 0 else 3), CUFF_Y + drop + dy,
-             SHIRT if side < 0 else SHIRT_SH)
+        rect(g, x0 + (1 if side < 0 else 0), SHOULDER_Y + 2 + dy, x0 + (4 if side < 0 else 3),
+             CUFF_Y + drop + dy, SHIRT if side < 0 else SHIRT_SH)
         if side < 0:
             rect(g, x0 + 1, SHOULDER_Y + 2 + dy, x0 + 2, CUFF_Y + drop + dy, SHIRT_LT)
         mitt(g, x0, CUFF_Y + drop + dy)
@@ -1075,7 +1111,8 @@ def seated_rear(hands):
 
 
 def standing_body(stride, view, arms=arms_hanging):
-    return lambda g, dy: (legs(g, dy, stride, view), shirt(g, dy, BELT_Y, back=view == "back", sleeves=False),
+    return lambda g, dy: (legs(g, dy, stride, view),
+                          shirt(g, dy, BELT_Y, back=view == "back", sleeves=False),
                           arms(g, dy, stride))
 
 
@@ -1535,7 +1572,8 @@ def blade(g, x0, y0, ang, length, width, lit_side=1, rib=True):
 def planter(g, cx, top, bot, half_top, half_bot, dark=False):
     """A pot tapering from its rim down: lit west, shaded east, a rim a pixel
     proud of the body with its top edge lit."""
-    body, lit_, shade, rim = (SHADOW, SLATE, KEY_DK, SLATE) if dark else (POT, POT_HI, POT_SH, POT_HI)
+    body, lit_, shade, rim = ((SHADOW, SLATE, KEY_DK, SLATE) if dark
+                              else (POT, POT_HI, POT_SH, POT_HI))
     for y in range(top + 2, bot):
         t = (y - top - 2) / max(1, bot - top - 3)
         half = half_top + (half_bot - half_top) * t
@@ -1694,8 +1732,8 @@ def bulletin_board():
     rect(g, 3, 3, 37, 21, CORK)
     for x, y in ((6, 5), (14, 17), (22, 8), (30, 15), (33, 5), (9, 12), (27, 19)):
         put(g, x, y, CORK_SH)
-    for x0, y0, c in ((5, 5, GOLD), (13, 4, CYAN), (22, 6, PINK), (30, 4, OFFWHITE), (8, 13, OFFWHITE),
-                      (18, 13, GOLD), (27, 13, CYAN)):
+    for x0, y0, c in ((5, 5, GOLD), (13, 4, CYAN), (22, 6, PINK), (30, 4, OFFWHITE),
+                      (8, 13, OFFWHITE), (18, 13, GOLD), (27, 13, CYAN)):
         rect(g, x0, y0, x0 + 6, y0 + 6, c)
         rect(g, x0 + 1, y0 + 2, x0 + 5, y0 + 3, PRINT)
         rect(g, x0 + 1, y0 + 4, x0 + 4, y0 + 5, PRINT)
@@ -1807,7 +1845,8 @@ def slide(g, x0, y0, x1, y1):
     w = x1 - x0
     for i in range(3):
         put(g, x0 + 3, y0 + 7 + i * 3, GREY)
-        rect(g, x0 + 5, y0 + 7 + i * 3, x0 + 5 + w * (3 if i % 2 else 4) // 10, y0 + 8 + i * 3, GREY)
+        rect(g, x0 + 5, y0 + 7 + i * 3, x0 + 5 + w * (3 if i % 2 else 4) // 10, y0 + 8 + i * 3,
+             GREY)
     bars = (0.4, 0.65, 0.5, 0.85)
     # the chart hangs from the glass's east edge, so a narrow screen keeps it
     bx, base = x1 - 2 - len(bars) * SLIDE_BAR_PITCH, y1 - 3
@@ -1912,7 +1951,8 @@ def pantry_small():
     rect(g, 3, 3, 12, 22, INK)
     for r in range(4):
         for c in range(3):
-            rect(g, 4 + c * 3, 4 + r * 5, 6 + c * 3, 7 + r * 5, (RED, GOLD, BLUE, LEAF)[(r + c) % 4])
+            rect(g, 4 + c * 3, 4 + r * 5, 6 + c * 3, 7 + r * 5,
+                 (RED, GOLD, BLUE, LEAF)[(r + c) % 4])
     rect(g, 13, 6, 14, 10, CYAN)
     rect(g, 3, 24, 12, 27, KEY_DK)
     fridge(g, 18, 9, 14, 22)
@@ -2296,8 +2336,9 @@ def printer_1x():
         if page >= 2:  # printed as it goes
             put(g, 2, 2, PRINT)
         return g
-    steps = [dict(scan=1, led=True), dict(scan=2, page=1), dict(scan=3, page=2, led=True), dict(scan=4, page=2),
-             dict(page=2, led=True), dict(page=2), dict(page=1, led=True), dict()]
+    steps = [dict(scan=1, led=True), dict(scan=2, page=1), dict(scan=3, page=2, led=True),
+             dict(scan=4, page=2), dict(page=2, led=True), dict(page=2), dict(page=1, led=True),
+             dict()]
     require(len(steps) == PRINT_STEPS, "the printer's steps fill its PRINT_STEPS")
     return [body()] + [body(**f) for f in steps]
 
@@ -2322,12 +2363,15 @@ def meeting_table():
     rect(g, 1, 1, w - 1, front, WOOD)
     rect(g, 1, 1, w - 1, 2, WOOD_LT)
     rect(g, 1, front // 2, w - 1, front // 2 + 1, WOOD_SH)
-    clear = [(x0 - 1, y0 - 1, x1 + 1, y1 + 1) for x0, y0, x1, y1 in (TABLE_LAPTOP, TABLE_PAD, TABLE_MUG)]
+    clear = [(x0 - 1, y0 - 1, x1 + 1, y1 + 1)
+             for x0, y0, x1, y1 in (TABLE_LAPTOP, TABLE_PAD, TABLE_MUG)]
     for _ in range(6):
         y = rng.randrange(3, front - 2)
         sx = rng.randrange(4, w - 12)
         ex = sx + rng.randrange(5, 9)
-        if y == front // 2 or any(y0 <= y < y1 and sx < x1 and ex > x0 for x0, y0, x1, y1 in clear):
+        if y == front // 2 or any(
+            y0 <= y < y1 and sx < x1 and ex > x0 for x0, y0, x1, y1 in clear
+        ):
             continue
         rect(g, sx, y, ex, y + 1, WOOD_SH)
     rect(g, 1, front, w - 1, h - 1, WOOD_SH)
@@ -2644,8 +2688,10 @@ def fish_tank():
                 put(g, x0 + dx + 1, y0 - i, TANK_PLANT_SH)
                 if i % 4 == 2:
                     put(g, x0 + dx - 1, y0 - i, TANK_PLANT)
-        for lane, lag, body, shade in ((TANK_LANES[0], 0, TANK_FISH, TANK_FISH_SH),
-                                       (TANK_LANES[1], TANK_FISH_LAG, TANK_FISH_ALT, TANK_FISH_ALT_SH)):
+        for lane, lag, body, shade in (
+            (TANK_LANES[0], 0, TANK_FISH, TANK_FISH_SH),
+            (TANK_LANES[1], TANK_FISH_LAG, TANK_FISH_ALT, TANK_FISH_ALT_SH),
+        ):
             start, heading = tank_fish_at(step + lag)
             x0, y0 = start * S, lane * S
             fl = TANK_FISH_LEN * S - 2
@@ -2689,7 +2735,10 @@ def fish_tank_1x():
         rect(g, 1, TANK_WATER_ROWS[0], TANK_W - 1, TANK_WATER_ROWS[0] + 1, TANK_LINE)
         for x in range(1, TANK_W - 1):
             put(g, x, TANK_WATER_ROWS[1] - 1, BROWN if x % 2 == 0 else TAN)
-        for lane, lag, body in ((TANK_LANES[0], 0, TANK_FISH), (TANK_LANES[1], TANK_FISH_LAG, TANK_FISH_ALT)):
+        for lane, lag, body in (
+            (TANK_LANES[0], 0, TANK_FISH),
+            (TANK_LANES[1], TANK_FISH_LAG, TANK_FISH_ALT),
+        ):
             start, _ = tank_fish_at(step + lag)
             rect(g, start, lane, start + TANK_FISH_LEN, lane + 1, body)
         row = TANK_BUBBLE_ROWS[step % len(TANK_BUBBLE_ROWS)]
@@ -2749,7 +2798,8 @@ def coat_rack():
             put(g, cx + half, y, shade)  # the east side, turned from the light
             if 2 <= t < (hem - top) * 2 // 3:
                 put(g, cx + outer * 2, y, shade)  # the sleeve's seam
-        rect(g, cx - 1, top, cx + 2, top + 1, WHITE if coat != COATS[2] else OFFWHITE_SH)  # the collar
+        rect(g, cx - 1, top, cx + 2, top + 1,
+             WHITE if coat != COATS[2] else OFFWHITE_SH)  # the collar
         for y in range(top + 1, hem - 1):
             put(g, cx, y, shade)  # the front edge
         rect(g, cx - 4, hem - 1, cx + 5, hem, shade)  # the hem
@@ -3394,7 +3444,8 @@ def orphans(pack, sprites):
     return sorted(
         p.name
         for p in pack.glob("*.sprite")
-        if p.name not in sprites and f"# {PROVENANCE}" in p.read_text(encoding=ENCODING).splitlines()
+        if p.name not in sprites
+        and f"# {PROVENANCE}" in p.read_text(encoding=ENCODING).splitlines()
     )
 
 
@@ -3409,7 +3460,10 @@ def manifest_drift(pack):
         return f"gen-art --check: pack.toml [city] {named} is not the keys drawn in, {CITY}"
     outline = toml.get("characters", {}).get("outline")
     if outline != SILHOUETTE:
-        return f"gen-art --check: pack.toml [characters] outline {outline!r} is not the art's, {SILHOUETTE!r}"
+        return (
+            f"gen-art --check: pack.toml [characters] outline {outline!r} is not the art's, "
+            f"{SILHOUETTE!r}"
+        )
     return None
 
 
@@ -3430,7 +3484,9 @@ def check(pack, sprites):
     if stale and (pack / stale[0]).is_file():
         committed = (pack / stale[0]).read_text(encoding=ENCODING).splitlines()
         drawn = sprites[stale[0]].splitlines()
-        diff = difflib.unified_diff(committed, drawn, f"committed/{stale[0]}", f"drawn/{stale[0]}", n=0, lineterm="")
+        diff = difflib.unified_diff(
+            committed, drawn, f"committed/{stale[0]}", f"drawn/{stale[0]}", n=0, lineterm=""
+        )
         lines.extend(list(diff)[:20])
     return "\n".join(lines)
 
@@ -3460,20 +3516,26 @@ def selftest(sprites):
         require(check(pack, sprites) is not None, "an orphan must fail")
         write(pack, sprites)
         require(check(pack, sprites) is None, "a write must delete the orphan")
-        (pack / "hand.sprite").write_text(f"# copied from {first}: {PROVENANCE}\n@frame 0\n.\n", encoding=ENCODING)
+        (pack / "hand.sprite").write_text(
+            f"# copied from {first}: {PROVENANCE}\n@frame 0\n.\n", encoding=ENCODING
+        )
         require(check(pack, sprites) is None, "hand art quoting the provenance is not an orphan")
         (pack / "pack.toml").write_text('[characters]\noutline = "n"\n', encoding=ENCODING)
         require(check(pack, sprites) is not None, "an outline the art does not draw must fail")
         (pack / "pack.toml").write_text("[pack]\n", encoding=ENCODING)
         require(check(pack, sprites) is not None, "a pack naming no outline must fail")
-        (pack / "pack.toml").write_text(f'[characters]\noutline = "{SILHOUETTE}"\n', encoding=ENCODING)
+        (pack / "pack.toml").write_text(
+            f'[characters]\noutline = "{SILHOUETTE}"\n', encoding=ENCODING
+        )
         require(check(pack, sprites) is None, "the art's own outline passes")
     print(f"gen-art --selftest: OK ({len(sprites)} sprites)")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("pack", nargs="?", type=pathlib.Path, help="the pack directory to write or check")
+    parser.add_argument(
+        "pack", nargs="?", type=pathlib.Path, help="the pack directory to write or check"
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="fail on drift; write nothing")
     mode.add_argument("--selftest", action="store_true", help="prove the check can fail")
@@ -3545,12 +3607,16 @@ def main():
         "meeting_chair": (meeting_chair_1x.__doc__, [meeting_chair_1x()]),
     }
     sprites = {
-        f"{base}@{S}x.sprite": render_sprite(header, grounded(frames), marks=DESK_MARKS.get(base, ()))
+        f"{base}@{S}x.sprite": render_sprite(
+            header, grounded(frames), marks=DESK_MARKS.get(base, ())
+        )
         for base, (header, frames) in pieces.items()
     }
     for pose, (*_, header) in POSES.items():
         body, head = body_frame(pose)
-        sprites[f"{pose}@{S}x.sprite"] = render_sprite(header + "\nBald: the pack's [hairstyles] dress it.", [body], [head])
+        sprites[f"{pose}@{S}x.sprite"] = render_sprite(
+            header + "\nBald: the pack's [hairstyles] dress it.", [body], [head]
+        )
     for style in HAIRSTYLES:
         for view, parts in hair_layers(style).items():
             for part, lyr in zip(("behind", "over"), parts):
@@ -3562,7 +3628,9 @@ def main():
                     )
     classic_marks = {"desk": desk_marks_1x(0), "desk_north": desk_marks_1x(DESK_NORTH_LIFT)}
     sprites |= {
-        f"{base}.sprite": render_sprite(header, grounded(frames), marks=classic_marks.get(base, ()))
+        f"{base}.sprite": render_sprite(
+            header, grounded(frames), marks=classic_marks.get(base, ())
+        )
         for base, (header, frames) in classic.items()
     }
     for anim, (header, texts) in CREATURES.items():
