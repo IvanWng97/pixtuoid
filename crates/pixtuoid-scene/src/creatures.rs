@@ -78,7 +78,9 @@ fn walkable_target(layout: &SceneLayout, seed: u64, n: u64) -> Point {
             // Walkable is not enough: a cell under a desk's overhang is walkable
             // by invariant #6 and painted over anyway, and a creature RESTS here
             // for most of its cycle. Walking through one stays fine.
-            if layout.is_visually_clear(cand) {
+            // And reachable: a creature walks there, and A* from the door's
+            // ground cannot reach a pocket the walls close off.
+            if layout.is_visually_clear(cand) && layout.reachable.reaches(cand) {
                 return cand;
             }
         }
@@ -116,9 +118,6 @@ pub(crate) enum CreatureKey {
 pub(crate) struct Roam {
     pub(crate) gait: Gait,
     pub(crate) rest_ms: u64,
-    /// Full ticks per cycle of its walk at cruise: its pace, by its own
-    /// stride, so its feet stay planted.
-    pub(crate) ticks_per_stride: u64,
 }
 
 impl Roam {
@@ -139,7 +138,6 @@ impl Roam {
                 pause_ms: 0,
             },
             rest_ms,
-            ticks_per_stride: ticks,
         }
     }
 
@@ -191,6 +189,12 @@ impl Walk {
         ground: &mut Ground<'_>,
         now: SystemTime,
     ) -> Option<Self> {
+        // The router answers an unroutable pair with the straight line through
+        // whatever stands between: only a reachable pair walks.
+        let reach = &ground.layout.reachable;
+        if !reach.reaches(from) || !reach.reaches(to) {
+            return None;
+        }
         let path = ground
             .router
             .route(&ground.layout.walkable, ground.overlay, from, to);
@@ -291,6 +295,11 @@ impl CreatureWalk {
     /// Whether it is on its way out, or gone.
     pub(crate) fn leaving(&self) -> bool {
         matches!(self.phase, Phase::Leaving(_) | Phase::Gone)
+    }
+
+    /// Whether it is on a leg at `now`.
+    pub(crate) fn walks_at(&self, now: SystemTime) -> bool {
+        self.stance(now).is_some_and(|s| s.walking.is_some())
     }
 
     /// Whether it has walked out.
@@ -575,7 +584,8 @@ mod tests {
     }
 
     /// A planted foot stays planted: no creature's legs cycle faster than one
-    /// stride per its [`Roam::ticks_per_stride`] Full ticks, nor cover half a stride
+    /// stride per [`PET_TICKS_PER_STRIDE`] Full ticks (the briskest any keeps),
+    /// nor cover half a stride
     /// between two paints, where its distance-stepped frames would alias.
     #[test]
     fn no_creature_outpaces_its_stride() {
@@ -597,7 +607,7 @@ mod tests {
                 .map(|s| u32::from(s.get()) * OCTILE_STRAIGHT_COST)
                 .expect("a creature's walk steps by the ground");
             let cadence =
-                stride as u64 * PAINTS as u64 * PAINT_MS / (roam.ticks_per_stride * FULL_TICK_MS);
+                stride as u64 * PAINTS as u64 * PAINT_MS / (PET_TICKS_PER_STRIDE * FULL_TICK_MS);
             let mut walked = 0;
             for seed in 0..4 {
                 let mut walk = CreatureWalk::at_home(&l, seed, at(0));
@@ -630,23 +640,43 @@ mod tests {
     }
 
     /// The walker's own ground: a walking creature is always on a cell its
-    /// router routes, and a resting one on clear floor no sprite paints over.
+    /// router routes, and a resting one on clear floor no sprite paints over,
+    /// from its home, through its roams, and re-seated after its floor was
+    /// off screen; the narrow offices whose walls close off pockets too.
     #[test]
     fn a_creature_walks_routed_ground_and_rests_on_clear_floor() {
         let pack = test_pack();
-        let roam = Roam::mascot(pack.animation("lobster_walk"), DaemonState::Busy);
+        let roams = [
+            Roam::mascot(pack.animation("lobster_walk"), DaemonState::Busy),
+            Roam::pet(pack.animation(PetKind::Cat.walk_anim())),
+        ];
         let min = crate::layout::min_layout_size();
         let (mut walking, mut resting) = (0u32, 0u32);
-        for (w, h) in [(min.w, min.h), (160, 120), (192, 80), (240, 180)] {
+        let back = 30_000 + 2 * STALE_RESUME_GAP_BASE_MS;
+        for (w, h) in [
+            (min.w, min.h),
+            (55, 45),
+            (80, 46),
+            (120, 46),
+            (160, 120),
+            (192, 80),
+            (240, 180),
+        ] {
             let l = layout(w, h);
-            for seed in 0..4 {
+            for (seed, roam) in (0..8).flat_map(|seed| roams.map(|roam| (seed, roam))) {
                 let mut walk = CreatureWalk::at_home(&l, seed, at(0));
+                let mut stances = drive(&mut walk, roam, &l, Motion::Full, (0, 30_000));
+                stances.extend(drive(
+                    &mut walk,
+                    roam,
+                    &l,
+                    Motion::Full,
+                    (back, back + 30_000),
+                ));
                 for Stance {
                     at: p,
                     walking: leg,
-                } in drive(&mut walk, roam, &l, Motion::Full, (0, 60_000))
-                    .into_iter()
-                    .flatten()
+                } in stances.into_iter().flatten()
                 {
                     if leg.is_some() {
                         assert!(
@@ -892,6 +922,71 @@ mod tests {
         );
     }
 
+    /// Four gateways on one floor rarely crowd: the whole floor is their
+    /// destination rule, so they spread. Crowding is box overlap, the
+    /// pessimistic metric; the bound sits well above what the whole-floor rule
+    /// gives and well below what a small curated spot list gave.
+    #[test]
+    fn four_gateways_rarely_crowd_now_that_the_whole_floor_is_in_play() {
+        const SPRITE_W: u16 = 14;
+        const SPRITE_H: u16 = 12;
+        const CROWDED_MAX_PCT: usize = 60;
+        let pack = test_pack();
+        let roam = Roam::mascot(pack.animation("lobster_walk"), DaemonState::Idle);
+        let l = layout(140, 120);
+        let tracks: Vec<Vec<Point>> = (0..4u32)
+            .map(|i| {
+                let id = DaemonInstanceId::new((18901 + i).to_string()).expect("non-empty");
+                let mut walk = CreatureWalk::at_home(&l, mascot_seed("openclaw", &id), at(0));
+                drive(&mut walk, roam, &l, Motion::Full, (0, 90_000))
+                    .into_iter()
+                    .map(|s| s.expect("in the room").at)
+                    .collect()
+            })
+            .collect();
+        let frames = tracks[0].len();
+        let crowded = (0..frames)
+            .filter(|&f| {
+                (0..4).any(|i| {
+                    ((i + 1)..4).any(|j| {
+                        let (a, b) = (tracks[i][f], tracks[j][f]);
+                        a.x.abs_diff(b.x) < SPRITE_W && a.y.abs_diff(b.y) < SPRITE_H
+                    })
+                })
+            })
+            .count();
+        let pct = 100 * crowded / frames;
+        assert!(
+            pct <= CROWDED_MAX_PCT,
+            "four gateways crowded in {pct}% of {frames} frames — a small destination set is back"
+        );
+    }
+
+    /// A painter that slows an idle office hears while a creature walks, and
+    /// not while it rests.
+    #[test]
+    fn a_walking_creature_is_told_to_the_painter() {
+        let mut office = Office::new(192, 80);
+        let scene = SceneState::default();
+        let cat = Pet::defaulted(PetKind::Cat);
+        let resting = office
+            .frame(&scene, Some(&cat), None, 0)
+            .pet
+            .expect("drawn");
+        assert_ne!(resting.anim_name, PetKind::Cat.walk_anim());
+        assert!(!office.session.a_creature_walks(at(0)));
+        let walking_at = (0..120_000)
+            .step_by(PAINT_MS as usize)
+            .find(|&ms| {
+                office
+                    .frame(&scene, Some(&cat), None, ms)
+                    .pet
+                    .is_some_and(|p| p.anim_name == PetKind::Cat.walk_anim())
+            })
+            .expect("the cat sets off");
+        assert!(office.session.a_creature_walks(at(walking_at)));
+    }
+
     /// A walking pet turns to where its leg heads, both ways; a resting one
     /// in an office of idlers sleeps.
     #[test]
@@ -1048,8 +1143,13 @@ mod tests {
         }
         let mut both = 0;
         for ms in (0..6_000).step_by(PAINT_MS as usize) {
-            let l = lobsters(&office.frame(&scene, None, None, ms));
-            if let [(a, _), (b, _)] = l[..] {
+            let f = office.frame(&scene, None, None, ms);
+            // a sibling still in its stagger is a sibling: the port shows
+            assert!(
+                f.mascots.iter().all(|m| m.instance.is_some()),
+                "a gateway's port hidden at +{ms}ms"
+            );
+            if let [(a, _), (b, _)] = lobsters(&f)[..] {
                 assert_ne!(a, b, "superimposed at +{ms}ms");
                 both += 1;
             }

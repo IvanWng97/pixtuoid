@@ -41,6 +41,11 @@ impl OfficeRenderer {
         }
     }
 
+    /// [`FloorSession::a_creature_walks`].
+    pub(crate) fn a_creature_walks(&self, now: std::time::SystemTime) -> bool {
+        self.session.a_creature_walks(now)
+    }
+
     pub(crate) fn set_audio(&mut self, audio: crate::audio::AudioHandle) {
         self.audio = audio;
     }

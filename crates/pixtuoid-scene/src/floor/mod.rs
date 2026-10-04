@@ -682,6 +682,13 @@ impl FloorSession {
         )
     }
 
+    /// Whether a creature on this floor is mid-walk at `now`: a painter that
+    /// slows while the office is idle keeps its pace while one walks, or its
+    /// legs freeze as it glides.
+    pub fn a_creature_walks(&self, now: SystemTime) -> bool {
+        self.floor.ctx.creatures.values().any(|w| w.walks_at(now))
+    }
+
     /// The rendered pixel buffer (a borrow of the reused allocation).
     pub fn buf(&self) -> &RgbBuffer {
         &self.floor.buf

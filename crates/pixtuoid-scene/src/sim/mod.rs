@@ -628,10 +628,16 @@ fn mascot_placements(
                     // Only worth showing when there is something to disambiguate, and
                     // that is per SOURCE: two gateways of ONE daemon need their ports,
                     // while two daemon sources already read apart by name and sprite.
-                    instance: (drawn
-                        .iter()
-                        .filter(|(k, ..)| k.source() == key.source())
-                        .count()
+                    // The roster's, whether or not a sibling has walked in yet, and
+                    // one still walking out past its entry.
+                    instance: (scene.daemons().filter(|(s, ..)| *s == key.source()).count()
+                        + drawn
+                            .iter()
+                            .filter(|(k, ..)| {
+                                k.source() == key.source()
+                                    && scene.daemon(k.source(), k.instance()).is_none()
+                            })
+                            .count()
                         > 1)
                     .then(|| key.instance().as_str().to_string()),
                     state: *state,
