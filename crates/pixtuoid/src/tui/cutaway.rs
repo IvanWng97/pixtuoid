@@ -95,9 +95,9 @@ pub(crate) struct TileCutaway {
     /// The image's top-left cell.
     origin: Position,
     out: Sink,
-    /// This frame's changed tiles, once the cadence allows; encoded only if
-    /// no text covers them.
-    pending: Vec<Changed>,
+    /// This frame's write, once staged; its tiles encoded only if no text
+    /// covers them.
+    pending: Option<Pending>,
     /// Set once SIXEL or iTerm2 pixels are written, for the unwind
     /// ([`crate::graphics::grid_unwind`]).
     in_grid: &'static AtomicBool,
@@ -105,11 +105,16 @@ pub(crate) struct TileCutaway {
     sent_at: Option<SystemTime>,
     /// The flashes the terminal shows.
     flash: FlashHold<Flashes, Option<Fitted>>,
-    /// The flashes [`Self::pending`] shows.
-    pending_flashes: Flashes,
     /// A write failed, perhaps mid-escape: the next one opens with
     /// [`kitty::ST`].
     torn: bool,
+}
+
+/// A staged write: the tiles it sends and the flashes they show, so only a
+/// write that lands can show them.
+struct Pending {
+    tiles: Vec<Changed>,
+    flashes: Flashes,
 }
 
 /// What a [`TileCutaway`]'s image last showed.
@@ -142,11 +147,10 @@ impl TileCutaway {
             shown: None,
             origin: Position::ORIGIN,
             out,
-            pending: Vec::new(),
+            pending: None,
             in_grid: &crate::graphics::IN_GRID,
             sent_at: None,
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
-            pending_flashes: Flashes::default(),
             torn: false,
         }
     }
@@ -212,7 +216,7 @@ impl TileCutaway {
         if self.flash.holds(flashes, Some(fitted)) {
             self.tiles.owe(&dirty);
             self.image_behind = true;
-            self.pending.clear();
+            self.pending = None;
             return;
         }
         if dirty != Dirty::Rects(Vec::new()) || self.image_behind {
@@ -235,7 +239,7 @@ impl TileCutaway {
         if self.flash.holds(flashes, Some(fitted)) {
             self.tiles.owe(&Dirty::All);
             self.image_behind = true;
-            self.pending.clear();
+            self.pending = None;
             return;
         }
         let (w, h) = (slide.leaving.width(), slide.leaving.height());
@@ -268,8 +272,10 @@ impl TileCutaway {
                 now.duration_since(at)
                     .map_or(true, |since| since >= self.protocol.cadence())
             });
-        self.pending = if due { changed } else { Vec::new() };
-        self.pending_flashes = flashes;
+        self.pending = Some(Pending {
+            tiles: if due { changed } else { Vec::new() },
+            flashes,
+        });
     }
 
     /// Send kitty's tiles before ratatui's flush, so the placeholders it
@@ -296,10 +302,16 @@ impl TileCutaway {
     /// Encode and write the queued tiles but the `covered` ones. A failed
     /// write is logged and leaves its tiles owed, and its flashes unshown.
     fn send(&mut self, covered: &[u32], now: SystemTime) {
-        let mut send = std::mem::take(&mut self.pending);
+        let Some(Pending {
+            tiles: mut send,
+            flashes,
+        }) = self.pending.take()
+        else {
+            return;
+        };
         send.retain(|c| !covered.contains(&c.tile.index));
         if send.is_empty() {
-            self.flash.shown(self.pending_flashes, self.fitted);
+            self.flash.shown(flashes, self.fitted);
             return;
         }
         match self.protocol {
@@ -336,7 +348,7 @@ impl TileCutaway {
                 self.torn = false;
                 self.sent_at = Some(now);
                 self.tiles.sent(&sent);
-                self.flash.shown(self.pending_flashes, self.fitted);
+                self.flash.shown(flashes, self.fitted);
             }
             Err(e) => {
                 self.torn = true;

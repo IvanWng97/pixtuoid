@@ -695,6 +695,40 @@ fn a_resized_terminal_is_never_held() {
     }
 }
 
+/// A write that failed never showed its phase, so a held frame after it
+/// stamps nothing: the phase before it keeps its floor. The failed write
+/// went out unheld to a resized terminal; the one resized back holds.
+#[test]
+fn a_held_frame_after_a_failed_write_stamps_nothing() {
+    use crate::test_flash::{held_frames, storm_strike};
+    let strike = storm_strike();
+    let [_, late, held, _] = held_frames(&strike);
+    let ms = Duration::from_millis(1);
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let (mut r, wire, screen) = on_screen(cols, rows, ImageProtocol::Kitty);
+    r.set_weather(strike.weather);
+    r.set_motion(pixtuoid_scene::anim::Motion::Full);
+    let scene = office();
+    screen.at(late);
+    r.render(&scene, pack(), late).expect("render");
+    let resize = |r: &mut TuiRenderer<Window>, cols, rows| {
+        r.terminal.backend_mut().inner.resize(cols, rows);
+    };
+    resize(&mut r, cols + 8, rows + 4);
+    wire.fail.store(true, Ordering::Relaxed);
+    screen.at(held);
+    r.render(&scene, pack(), held)
+        .expect("a lost transmit is no render error");
+    wire.fail.store(false, Ordering::Relaxed);
+    resize(&mut r, cols, rows);
+    for at in [held + ms, held + 2 * ms] {
+        wire.take();
+        screen.at(at);
+        r.render(&scene, pack(), at).expect("render");
+        assert!(!wire.take().contains(TRANSMIT), "held at {at:?}");
+    }
+}
+
 /// A phase holds the floor from when its write lands, not from when its frame
 /// began: after a slow write, the next phase waits for the floor to pass on
 /// the screen clock, though its frame's own clock says it has.
