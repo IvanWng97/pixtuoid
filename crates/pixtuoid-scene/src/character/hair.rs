@@ -37,7 +37,7 @@ pub(crate) struct Dress {
 }
 
 /// The [`Dress`] of `body`, frame `head`'s art at `density`, for `agent`:
-/// `None` at 1x, in a build without `density-art`, or on an unmarked frame,
+/// `None` at 1x, in a build without `cutaway-assets`, or on an unmarked frame,
 /// which is drawn as it is.
 pub(crate) fn dress_for(
     pack: &Pack,
@@ -46,7 +46,7 @@ pub(crate) fn dress_for(
     head: Option<HeadMark>,
     density: Density,
 ) -> Option<Dress> {
-    let head = head.filter(|_| cfg!(feature = "density-art") && density.get() > 1)?;
+    let head = head.filter(|_| cfg!(feature = "cutaway-assets") && density.get() > 1)?;
     let style = pick(pack, agent).and_then(|name| pack.hairstyle(name, density));
     Some(Dress::of(
         body,
@@ -192,15 +192,15 @@ mod tests {
         g: 100,
         b: 50,
     };
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     const S: Rgb = Rgb {
         r: 240,
         g: 192,
         b: 160,
     };
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     const LINE: Rgb = Rgb { r: 1, g: 1, b: 1 };
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     const TWO: Density = Density::new(2).expect("nonzero");
 
     /// A pack of `body` marked `head` (the `head.front` mark's column and row),
@@ -232,7 +232,7 @@ mod tests {
     const BODY: &str = ". . .\n. . .\n. S .\n. . .\n";
 
     /// `pack`'s body dressed as it would be for `agent` at 2x.
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn dressed(pack: &Pack, agent: AgentId) -> (Dress, Frame) {
         let sprite = pack.animation("seated").expect("the body");
         let body = &sprite.frames()[0];
@@ -270,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn a_frame_is_dressed_only_at_2x_and_up_and_where_it_marks_a_head() {
         let pack = pack_of(BODY, (1, 0), &["mop"]);
         let sprite = pack.animation("seated").expect("the body");
@@ -284,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn a_dressed_frame_lays_the_hair_mark_on_mark_and_outlines_the_union() {
         let pack = pack_of(BODY, (1, 0), &["mop"]);
         let (dress, f) = dressed(&pack, AgentId::from_parts("x", "y"));
@@ -309,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn a_bare_head_is_outlined_as_a_dressed_one_is() {
         let pack = pack_of(". S .\n. . .\n", (1, 0), &[]);
         let (dress, f) = dressed(&pack, AgentId::from_parts("x", "y"));
@@ -327,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn a_gap_the_outline_closes_to_one_pixel_takes_the_line() {
         // Four pixels two apart round a centre none of them touches: the line
         // round each walls the centre in.
@@ -409,7 +409,7 @@ mod tests {
     /// dressed frame first exists here, at runtime, so no generator check can
     /// see it.
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn every_bundled_character_dressed_in_every_style_keeps_its_outline_whole() {
         let pack = crate::pack::test_default_pack();
         let line = pack.character_outline();

@@ -23,9 +23,11 @@ const DOOR_SLOT_EAST: u16 = WINDOW_W + WINDOW_EDGE_MARGIN;
 pub(crate) const NEON_DOOR_WALL_W: u16 = NEON_PANEL.x + NEON_PANEL.width + DOOR_SLOT_EAST;
 /// The windows' top frame row; one wall row stands above it.
 pub(crate) const WINDOW_TOP: u16 = 1;
+/// How thick a window's outer frame is, on every side.
+const FRAME_W: u16 = 1;
 
 /// One window on the north wall.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct WindowBay {
     /// The window's left edge.
     pub(crate) x: u16,
@@ -50,7 +52,21 @@ impl WindowBay {
     /// mullion.
     pub(crate) fn panes(self) -> [Range<u16>; 2] {
         let mullion = self.center_x();
-        [self.x + 1..mullion, mullion + 1..self.span().end - 1]
+        [
+            self.x + FRAME_W..mullion,
+            mullion + 1..self.span().end - FRAME_W,
+        ]
+    }
+
+    /// The glass inside its outer frame over the window `rows`, its mullion
+    /// and transom included.
+    pub(crate) fn glass_box(self, rows: Range<u16>) -> Bounds {
+        Bounds {
+            x: self.x + FRAME_W,
+            y: rows.start + FRAME_W,
+            width: self.w.saturating_sub(2 * FRAME_W),
+            height: glass_rows(rows.end.saturating_sub(rows.start)),
+        }
     }
 }
 
@@ -131,7 +147,7 @@ pub(crate) fn window_rows(band_h: u16) -> Range<u16> {
 /// The glass rows of a window `window_h` tall: all but its top and bottom
 /// frame rows.
 pub(crate) fn glass_rows(window_h: u16) -> u16 {
-    window_h.saturating_sub(2)
+    window_h.saturating_sub(2 * FRAME_W)
 }
 
 /// Where a window's transom crosses it, in percent of its height from the top.
@@ -141,7 +157,12 @@ const TRANSOM_PCT: u16 = 70;
 /// edge, its centre mullion or its transom — which no glass shows through.
 pub(crate) fn window_frame(dx: u16, dy: u16, size: Size) -> bool {
     let Size { w, h } = size;
-    dx == 0 || dx + 1 == w || dy == 0 || dy + 1 == h || dx == w / 2 || dy == h * TRANSOM_PCT / 100
+    dx < FRAME_W
+        || dx + FRAME_W >= w
+        || dy < FRAME_W
+        || dy + FRAME_W >= h
+        || dx == w / 2
+        || dy == h * TRANSOM_PCT / 100
 }
 
 impl SceneLayout {
