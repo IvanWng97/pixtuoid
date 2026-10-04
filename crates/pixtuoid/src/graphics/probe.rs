@@ -6,12 +6,9 @@
 
 use ratatui_image::picker::ProtocolType;
 use ratatui_image::picker::cap_parser::QueryStdioOptions;
-#[cfg(any(unix, test))]
 use ratatui_image::picker::cap_parser::{Parser, Response};
 
-use super::{CellSize, Detected, ImageProtocol, Probe, TermEnv};
-#[cfg(unix)]
-use super::{env_set, env_text};
+use super::{CellSize, Detected, ImageProtocol, Probe, TermEnv, env_set, env_text};
 
 /// What the environment says about the terminal beyond [`TermEnv`], read once
 /// per probe.
@@ -19,7 +16,6 @@ use super::{env_set, env_text};
 /// Every rule on it mirrors ratatui-image 11.0.8's picker, cited per rule: the
 /// cutaway draws through that crate's encoders, so what the plan expects a
 /// terminal to take must be what those encoders were built for.
-#[cfg(any(unix, test))]
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct EnvHints {
     env: TermEnv,
@@ -29,9 +25,7 @@ struct EnvHints {
     iterm_session: bool,
 }
 
-#[cfg(any(unix, test))]
 impl EnvHints {
-    #[cfg(unix)]
     fn read() -> Self {
         Self {
             env: TermEnv::read(),
@@ -94,7 +88,6 @@ impl EnvHints {
 /// SIXEL when it answers both (ratatui-image 11.0.8 `picker.rs:523-533`), then
 /// the iTerm2 guess (`picker.rs:127-131`); the cell from its answer, else from
 /// the kernel's window size.
-#[cfg(any(unix, test))]
 fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSize>) -> Detected {
     let queried = if responses.contains(&Response::Kitty) {
         Some(ImageProtocol::Kitty)
@@ -118,7 +111,6 @@ fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSi
 /// environment names, as upstream falls back when its query goes unanswered
 /// (ratatui-image 11.0.8 `picker.rs:147-157`); with nothing named, it is
 /// [`Probe::NoAnswer`].
-#[cfg(any(unix, test))]
 fn unanswered(hints: &EnvHints, window_cell: Option<CellSize>) -> Probe {
     let d = detected(&[], hints, window_cell);
     if d.protocol.is_some() {
@@ -130,7 +122,6 @@ fn unanswered(hints: &EnvHints, window_cell: Option<CellSize>) -> Probe {
 
 /// Feed one chunk of the reply to `parser`, collecting its responses; `true`
 /// once the device-status reply that ends the query has arrived.
-#[cfg(any(unix, test))]
 fn take_reply(parser: &mut Parser, responses: &mut Vec<Response>, chunk: &[u8]) -> bool {
     for &byte in chunk {
         for response in parser.push(char::from(byte)) {
@@ -145,7 +136,6 @@ fn take_reply(parser: &mut Parser, responses: &mut Vec<Response>, chunk: &[u8]) 
 
 /// The most reply bytes read before a terminal that never sends the status
 /// reply is given up on.
-#[cfg(unix)]
 const MAX_REPLY_BYTES: usize = 4096;
 
 /// Ask the terminal what it can do, when `ask`.
@@ -160,7 +150,6 @@ const MAX_REPLY_BYTES: usize = 4096;
 /// restores the mode only once a reply lands (ratatui-image 11.0.8
 /// `picker.rs:584-622`); and read-only: inside tmux it reads
 /// `allow-passthrough` where upstream turns it on (`picker.rs:328-334`).
-#[cfg(unix)]
 pub(crate) fn probe(ask: bool) -> Probe {
     if !ask {
         return Probe::NotQueried;
@@ -194,7 +183,6 @@ pub(crate) fn probe(ask: bool) -> Probe {
 /// `show-options -A`); `None` when tmux cannot say within
 /// [`GRAPHICS_PROBE_TIMEOUT`](super::GRAPHICS_PROBE_TIMEOUT). Asked only where
 /// [`EnvHints::our_tmux_pane`] holds.
-#[cfg(unix)]
 fn tmux_passthrough() -> Option<bool> {
     use std::process::{Command, Stdio};
     let out = crate::output_within(
@@ -216,52 +204,11 @@ fn tmux_passthrough() -> Option<bool> {
 
 /// A cell's size from the kernel's window size, for a terminal that reports no
 /// cell size of its own.
-#[cfg(unix)]
 fn window_cell() -> Option<CellSize> {
     let size = crossterm::terminal::window_size().ok()?;
-    if size.columns == 0 || size.rows == 0 || size.width == 0 || size.height == 0 {
-        return None;
-    }
-    Some(CellSize {
-        w: size.width / size.columns,
-        h: size.height / size.rows,
-    })
-}
-
-/// Off Unix there is no controlling-terminal primitive yet, so the probe is
-/// upstream's, detached reader and tmux write included. Upstream answers a
-/// timeout with its fallback picker (ratatui-image 11.0.8 `picker.rs:147-157`),
-/// which without a window size — never one on Windows (`picker.rs:453-456`) —
-/// is halfblocks whatever the environment names, so a terminal that never
-/// answers arrives as upstream's answer for it, [`Probe::Answered`] with no
-/// protocol.
-#[cfg(not(unix))]
-pub(crate) fn probe(ask: bool) -> Probe {
-    use ratatui_image::picker::Picker;
-
-    if !ask {
-        return Probe::NotQueried;
-    }
-    let options = QueryStdioOptions {
-        timeout: super::GRAPHICS_PROBE_TIMEOUT,
-        ..QueryStdioOptions::default()
-    };
-    let Ok(picker) = Picker::from_query_stdio_with_options(options) else {
-        return Probe::NotQueried;
-    };
-    let font = picker.font_size();
-    Probe::Answered(Detected {
-        protocol: match picker.protocol_type() {
-            ProtocolType::Kitty => Some(ImageProtocol::Kitty),
-            ProtocolType::Sixel => Some(ImageProtocol::Sixel),
-            ProtocolType::Iterm2 => Some(ImageProtocol::Iterm2),
-            ProtocolType::Halfblocks => None,
-        },
-        cell: Some(CellSize {
-            w: font.width,
-            h: font.height,
-        }),
-        tmux: TermEnv::read().tmux_term(),
+    CellSize::of_window(ratatui::backend::WindowSize {
+        columns_rows: ratatui::layout::Size::new(size.columns, size.rows),
+        pixels: ratatui::layout::Size::new(size.width, size.height),
     })
 }
 
