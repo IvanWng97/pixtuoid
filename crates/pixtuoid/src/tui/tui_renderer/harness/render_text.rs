@@ -106,7 +106,7 @@ fn tool_glow_tint_differs_by_tool() {
         let mut r = build(120, 44, vec![]);
         r.render(&scene, pack(), t0()).unwrap();
         let desk = r.cached_layout().expect("layout").home_desks[0];
-        (r.buf().clone(), desk)
+        (r.buf().expect("a frame").clone(), desk)
     };
     let (edit, desk) = render_tool("Edit src/main.rs");
     let (bash, _) = render_tool("Bash npm test");
@@ -137,7 +137,7 @@ fn weather_variants_render_without_panic_and_vary() {
         let now = t0() + Duration::from_secs(step * 600 + 12 * 3600);
         r.render(&scene, pack(), now).unwrap();
         // Signature the top window strip (where weather effects paint).
-        let buf = r.buf();
+        let buf = r.buf().expect("a frame");
         let mut s: u64 = 0;
         for y in 0..(buf.height() / 4).max(1) {
             for x in (0..buf.width()).step_by(7) {
@@ -197,7 +197,7 @@ fn meeting_room_fills_and_hosts_group_chitchat() {
     let mut r0 = build(160, 56, vec![]);
     r0.render(&SceneState::uniform(cap), pack, now)
         .expect("render");
-    let baseline = r0.buf().clone();
+    let baseline = r0.buf().expect("a frame").clone();
 
     // The layout must actually carry meeting slots (otherwise the test is
     // vacuous — agents could "occupy" the room while just passing through).
@@ -229,7 +229,14 @@ fn meeting_room_fills_and_hosts_group_chitchat() {
         r.render(&scene, pack, now).expect("render");
 
         if !saw_characters {
-            let d = region_diff(&baseline, r.buf(), mr.x, mr.y, mr.width, mr.height);
+            let d = region_diff(
+                &baseline,
+                r.buf().expect("a frame"),
+                mr.x,
+                mr.y,
+                mr.width,
+                mr.height,
+            );
             saw_characters = d > 4_000;
         }
         if chat_iter.is_none() {
@@ -289,7 +296,7 @@ fn meeting_glass_partition_connects_at_window_and_corner() {
         .expect("standard floor has a horizontal divider");
     let top_wall_h = layout.top_margin - 4;
 
-    let buf = r.buf();
+    let buf = r.buf().expect("a frame");
     let dist = |a: pixtuoid_core::sprite::Rgb, b: pixtuoid_core::sprite::Rgb| {
         (a.r as i32 - b.r as i32).abs()
             + (a.g as i32 - b.g as i32).abs()

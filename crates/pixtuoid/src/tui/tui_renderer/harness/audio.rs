@@ -190,7 +190,7 @@ fn footer_note_glyph_tracks_effective_audibility() {
 /// frame, both halves of a floor slide, and the audio frame's rain.
 #[test]
 fn a_forced_weather_reaches_the_frame_both_slide_halves_and_the_rain() {
-    use pixtuoid_scene::pixel_painter::{Weather, WeatherPolicy};
+    use pixtuoid_scene::sky::{Weather, WeatherPolicy};
     let cap = 16;
     let scene = scene_with(
         vec![
@@ -206,12 +206,19 @@ fn a_forced_weather_reaches_the_frame_both_slide_halves_and_the_rain() {
         r.set_weather(WeatherPolicy::Forced(w));
         r.render(&scene, pack(), t0()).expect("render");
         let rain = drain_frames(&rx).last().expect("a frame").stems.rain;
-        let still = r.buf().as_slice().to_vec();
+        let still = r.buf().expect("a frame").as_slice().to_vec();
         r.navigate_floor(1, t0());
         r.render(&scene, pack(), t0() + Duration::from_millis(33))
             .expect("render");
         assert!(r.transition().is_some(), "{w:?}: mid-slide");
-        let halves = [0, 1].map(|f| r.floors[f].buf.as_slice().to_vec());
+        let halves = [0, 1].map(|f| {
+            r.floors[f]
+                .raster
+                .pixels()
+                .expect("a frame")
+                .as_slice()
+                .to_vec()
+        });
         (rain, still, halves)
     };
     let (storm, clear) = (under(Weather::Storm), under(Weather::Clear));

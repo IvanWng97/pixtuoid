@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 
 use common::{fixture_scene, render_hash};
 use pixtuoid_scene::floor::FloorMeta;
-use pixtuoid_scene::pixel_painter::{Weather, WeatherPolicy};
+use pixtuoid_scene::sky::{Weather, WeatherPolicy};
 use pixtuoid_scene::theme;
 
 #[test]

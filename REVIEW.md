@@ -81,7 +81,7 @@ diff touches, first; these rules add to generic defect hunting.
   trap names is primary, and a concrete, reachable extra-layer gap at a trust
   boundary is `issue (non-blocking)`.
 - Risks needing unlikely or unreachable preconditions; performance unless
-  measurable (the TUI ticks at `FRAME_TICK_MS`).
+  measurable (the TUI repaints at `anim::PAINT_FPS`).
 - A missing comment ([comment audit](#design) owns the rest).
 
 ## Lenses
@@ -154,10 +154,11 @@ invariant-breaking sequence against:
 
 ## Escalation
 
-Two lenses are the floor; each matching row adds one focused lens. The first
-column decides; Paths are where it usually fires. A **local** row needs the
-head tree read, built or run, or an upstream fetched, so its local run is
-mandatory ([recorded](docs/CONTRIBUTING.md#the-merge-gate)).
+The two lens bots are the floor; each matching row adds one focused lens. The
+first column decides; Paths are where it usually fires. A **local** row needs
+the head tree read, built or run, or an upstream fetched, so its local run is
+mandatory ([recorded](docs/CONTRIBUTING.md#the-merge-gate)), and that run is
+its focused lens alone: the floor is never re-run locally.
 
 | Diff touches… | Paths | Local | The added lens must… |
 |---|---|---|---|

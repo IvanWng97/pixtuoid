@@ -439,3 +439,71 @@ async fn cwd_split_attach_links_subagent_to_probe_live_stale_parent() {
     );
     handle.abort();
 }
+
+/// A watcher creates no directory: its root is another CLI's, whose presence
+/// auto-detect keys on (`install::grok::detect_installed`). It attaches once the
+/// root appears.
+#[tokio::test]
+async fn an_absent_root_is_never_created_and_is_watched_once_it_appears() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("projects");
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
+    // The poll attaches the watch, so a write landing well inside one interval
+    // after that tick can only arrive through the watch.
+    let poll = Duration::from_secs(3);
+    let watcher = cc_watcher(root.clone())
+        .with_initial_window(Duration::from_secs(60))
+        .with_poll_interval(poll);
+    let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!root.exists(), "the watcher created {root:?}");
+
+    let uuid = "ee000000-0000-7000-8000-00000000000e";
+    let proj = root.join("-Users-me-late");
+    tokio::fs::create_dir_all(&proj).await.unwrap();
+    let session = proj.join(format!("{uuid}.jsonl"));
+    write_lines(&session, &[cc_session_start_line(uuid, "/Users/me/late")]).await;
+    let id = AgentId::from_parts("claude-code", uuid);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut seen = false;
+    while !seen && tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(100), rx.recv()).await
+        {
+            seen = agent_id == id;
+        }
+    }
+    assert!(
+        seen,
+        "a session under the root that appeared was never seen"
+    );
+
+    let mut file = tokio::fs::OpenOptions::new()
+        .append(true)
+        .open(&session)
+        .await
+        .unwrap();
+    let line = cc_tool_use_line(
+        uuid,
+        "/Users/me/late",
+        "tu_late",
+        "Bash",
+        serde_json::json!({"command": "ls"}),
+    );
+    tokio::io::AsyncWriteExt::write_all(&mut file, format!("{line}\n").as_bytes())
+        .await
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + poll / 2;
+    let mut active = false;
+    while !active && tokio::time::Instant::now() < deadline {
+        if let Ok(Some((_, AgentEvent::ActivityStart { agent_id, .. }))) =
+            tokio::time::timeout(Duration::from_millis(50), rx.recv()).await
+        {
+            active = agent_id == id;
+        }
+    }
+    assert!(active, "a write under the appeared root was not watched");
+    assert!(!handle.is_finished(), "the watcher stopped: {handle:?}");
+    handle.abort();
+}
