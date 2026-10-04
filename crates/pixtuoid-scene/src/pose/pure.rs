@@ -11,6 +11,7 @@ use crate::layout::{
 };
 use crate::walk::{WanderKind, WanderTarget};
 use pixtuoid_core::AgentId;
+use pixtuoid_core::sprite::Sprite;
 use pixtuoid_core::state::{ActivityState, AgentSlot};
 
 /// How long after the last event an Idle agent stays in the "thinking" pose
@@ -33,30 +34,44 @@ pub const WANDER_WALK_EST_MS: u64 = 3_500;
 /// Companion estimate: the at-waypoint dwell beat (paired with `WANDER_WALK_EST_MS`).
 pub const WANDER_DWELL_EST_MS: u64 = 18_000;
 
-/// How long the typing loop holds each frame: one Full beat, so a typist
-/// keys on every beat rather than skipping one.
-pub const TYPING_FRAME_MS: u64 = crate::anim::FULL_TICK_MS;
-/// Per-frame duration of the walking animation.
-pub const WALKING_FRAME_MS: u64 = 220;
-/// Frame count of the typing animation loop.
-pub const TYPING_FRAMES: usize = 2;
-/// Frame count of the walking animation loop.
-pub const WALKING_FRAMES: usize = 2;
-
-/// The typing loop's frame for `slot` on `beat`, phased by when it began
-/// typing so neighbours key out of step; the first frame at rest.
-pub(crate) fn typing_frame(slot: &AgentSlot, beat: crate::anim::Beat) -> usize {
+/// The frame of typing loop `anim` for `slot` on `beat`: the art's own loop,
+/// phased by when it began typing so neighbours key out of step; the first
+/// frame at rest.
+pub(crate) fn typing_frame(slot: &AgentSlot, beat: crate::anim::Beat, anim: &Sprite) -> usize {
     if beat.is_rest() {
         return 0;
     }
-    let phase = crate::anim::epoch_ms(slot.state_started_at) / TYPING_FRAME_MS;
-    (beat.ms() / TYPING_FRAME_MS).wrapping_add(phase) as usize % TYPING_FRAMES
+    let frames = anim.frames().len().max(1);
+    let phase = crate::anim::epoch_ms(slot.state_started_at) / u64::from(anim.frame_ms().max(1));
+    let phase = usize::try_from(phase % frames as u64).unwrap_or(0);
+    (crate::pack::looping_frame_index(anim, beat) + phase) % frames
 }
 
-/// The walking sprite's frame index at `elapsed_ms` into the walk — the one
-/// cadence the stateless overlay and the routed walk authority share.
-pub fn walking_frame(elapsed_ms: u64) -> usize {
-    (elapsed_ms / WALKING_FRAME_MS) as usize % WALKING_FRAMES
+/// The frame walk `anim` shows [`travelled`](Pose::Walking::travelled) along
+/// its leg: a full cycle each [`stride`](Sprite::stride). A walk without one
+/// steps on its `frame_ms` from the clock at `now`.
+pub(crate) fn walk_frame(travelled: u32, anim: &Sprite, now: SystemTime) -> usize {
+    let frames = anim.frames().len().max(1) as u64;
+    match anim.stride() {
+        Some(stride) => {
+            let per_cycle =
+                u64::from(stride.get()) * u64::from(crate::pathfind::OCTILE_STRAIGHT_COST);
+            ((u64::from(travelled) * frames / per_cycle) % frames) as usize
+        }
+        // a walk is the agent's doing, not ambient life: the clock, not a beat
+        None => (crate::anim::epoch_ms(now) / u64::from(anim.frame_ms().max(1)) % frames) as usize,
+    }
+}
+
+/// The distance `t_x1000` along a leg `length` long is, both in
+/// [`travelled`](Pose::Walking::travelled)'s unit.
+pub(crate) fn distance_at(t_x1000: u16, length: u32) -> u32 {
+    u32::from(t_x1000) * length / u32::from(crate::physics::PROGRESS_SCALE)
+}
+
+/// How far `t_x1000` along the straight leg `from`→`to` is.
+pub(crate) fn travelled_on(from: Point, to: Point, t_x1000: u16) -> u32 {
+    distance_at(t_x1000, super::octile_distance(from, to))
 }
 
 /// Spawn-window guard for entry routing in `pose::derive_with_routing`: the
@@ -171,22 +186,36 @@ pub enum Pose {
     },
     /// Walking along the current leg between two points.
     Walking {
-        /// Leg start point (buffer pixels).
+        /// Leg start point (layout pixels).
         from: Point,
-        /// Leg end point (buffer pixels).
+        /// Leg end point (layout pixels).
         to: Point,
         /// Progress along the leg, 0..=1000 (thousandths).
         t_x1000: u16,
-        /// Walking animation frame index (`0..WALKING_FRAMES`).
-        frame: usize,
+        /// How far into the whole leg the walker is, in octile units: the
+        /// tenths of a layout pixel A* measures by.
+        travelled: u32,
         /// Whether the agent renders holding a coffee on this leg.
         carrying_coffee: bool,
     },
     /// Standing at a random cubicle_aisle point (not at any waypoint).
     AimlessAt {
-        /// Buffer-pixel point the agent ambled to.
+        /// Layout-pixel point the agent ambled to.
         dest: Point,
     },
+}
+
+impl Pose {
+    /// Walking `t_x1000` along the straight leg `from`→`to`, as far as that is.
+    pub(crate) fn walking(from: Point, to: Point, t_x1000: u16, carrying_coffee: bool) -> Self {
+        Pose::Walking {
+            from,
+            to,
+            t_x1000,
+            travelled: travelled_on(from, to, t_x1000),
+            carrying_coffee,
+        }
+    }
 }
 
 /// Returns `None` if the slot's desk_index is out of range for `layout`.
@@ -240,19 +269,12 @@ pub fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option
 /// path stays linear so it has no per-frame history.
 fn linear_walk_pose(since_ms: u64, from: Point, to: Point) -> Pose {
     let t = (since_ms * 1000 / ENTRY_ANIMATION_MS).min(1000) as u16;
-    let frame = walking_frame(since_ms);
-    Pose::Walking {
-        from,
-        to,
-        t_x1000: t,
-        frame,
-        carrying_coffee: false,
-    }
+    Pose::walking(from, to, t, false)
 }
 
 /// The state→pose tail shared by `derive` and `derive_state_only`, applied
 /// AFTER each caller's own override guards — one place, so the two entry points
-/// can't drift on the thinking window or the frame counters.
+/// can't drift on the thinking window.
 fn state_driven_pose(
     slot: &AgentSlot,
     desk: Point,
@@ -523,12 +545,11 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
     } else if phase_t < walk_out_end {
         let span = walk_out_end - seated_end;
         let t = ((phase_t - seated_end) * 1000 / span) as u16;
-        let frame = walking_frame(elapsed_ms);
         Pose::Walking {
             from: desk,
             to: dest,
             t_x1000: t,
-            frame,
+            travelled: travelled_on(desk, dest, t),
             carrying_coffee: false,
         }
     } else if phase_t < at_wp_end {
@@ -539,13 +560,12 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
         let span = cycle_ms - at_wp_end;
         debug_assert!(span > 0, "idle_pose walk-back span invariant violated");
         let t = ((phase_t - at_wp_end) * 1000 / span) as u16;
-        let frame = walking_frame(elapsed_ms);
         let carrying_coffee = target.kind.carries_coffee();
         Pose::Walking {
             from: dest,
             to: desk,
             t_x1000: t,
-            frame,
+            travelled: travelled_on(dest, desk, t),
             carrying_coffee,
         }
     }

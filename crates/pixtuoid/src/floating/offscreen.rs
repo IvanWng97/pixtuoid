@@ -485,7 +485,12 @@ mod tests {
                 "floor {i} boot cap must match the rendered geometry"
             );
         }
-        let overseed = crate::runtime::boot_capacities_for(w as u16, (h / 2) as u16);
+        let overseed = crate::runtime::boot_capacities_for(
+            crate::graphics::Plan::Classic {
+                reason: crate::graphics::ClassicReason::Disabled,
+            },
+            ratatui::layout::Size::new(w as u16, (h / 2) as u16),
+        );
         assert!(
             overseed[0] >= boot[0],
             "TUI helper over-seeds ({} vs {})",

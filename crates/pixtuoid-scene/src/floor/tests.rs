@@ -1173,7 +1173,7 @@ fn neon_mood(active: usize, waiting: usize, idle: usize) -> crate::board::Office
 const ROOM_LIT: bool = false;
 const ROOM_DIMMED: bool = true;
 /// A live painter's frame tick — well under the shortest stutter flash.
-const FRAME: Duration = Duration::from_millis(33);
+const FRAME: Duration = Duration::from_millis(1000 / crate::anim::PAINT_FPS as u64);
 
 #[test]
 fn neon_first_tick_snaps_to_the_mood() {
@@ -1406,6 +1406,48 @@ fn neon_a_starved_tube_stutters_at_the_calm_pace() {
         })
         .any(|levels| levels == NeonLevels::FLASH);
     assert!(flashed, "the stutter never played at Calm");
+}
+
+/// On every moving tier, ticked at a live painter's [`FRAME`], a starved tube
+/// catches on exactly the frames whose loop time lies in a window, and each
+/// catch and each dark between, timed in loop time from its first frame to
+/// the next's, lasts at least the photosensitive floor, across the cycle's
+/// wrap too.
+#[test]
+fn neon_a_starved_tube_holds_each_flash_and_dark_the_floor() {
+    const CYCLES: u64 = 2;
+    for motion in Motion::ALL {
+        let Some(pace) = motion.pace() else {
+            continue;
+        };
+        let mut neon = NeonState::new();
+        let mut runs: Vec<(bool, u64)> = Vec::new();
+        let frames = CYCLES * NeonState::STUTTER_MS * pace / FRAME.as_millis() as u64;
+        for n in 0..frames {
+            let timing = motion.timing(in_stutter_cycle(0) + FRAME * n as u32);
+            let lit = neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, timing) == NeonLevels::FLASH;
+            let loop_ms = timing.beat.ms();
+            let in_window = NeonState::STUTTER_FLASHES_MS
+                .iter()
+                .any(|&(start, end)| (start..end).contains(&(loop_ms % NeonState::STUTTER_MS)));
+            // The first frame has no step to be drawn across.
+            if n > 0 {
+                assert_eq!(lit, in_window, "{motion:?} at {loop_ms} ms of loop time");
+            }
+            if runs.last().is_none_or(|&(was, _)| was != lit) {
+                runs.push((lit, loop_ms));
+            }
+        }
+        assert!(runs.iter().any(|&(lit, _)| lit), "{motion:?} never flashed");
+        // The first run opens with the frames, not with a catch or a dark.
+        for pair in runs[1..].windows(2) {
+            let ms = pair[1].1 - pair[0].1;
+            assert!(
+                ms >= crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS,
+                "{motion:?}: {runs:?}"
+            );
+        }
+    }
 }
 
 /// At rest a starved tube holds steady: no flash, for the photosensitive.
@@ -1678,7 +1720,7 @@ fn a_full_beat_on_moves_both_painters() {
 fn a_frame_is_a_function_of_its_instant_and_tier() {
     let t = crate::localclock::at_hour(23) + Duration::from_millis(5_321);
     let scene = ambient_office(t, false);
-    for motion in [Motion::Full, Motion::Calm, Motion::Still] {
+    for motion in Motion::ALL {
         let floor = FloorMeta::ground().with_motion(motion);
         let (a, b) = (
             both_painters(&scene, floor, None, t),

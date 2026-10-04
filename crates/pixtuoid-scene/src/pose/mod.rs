@@ -19,16 +19,16 @@ use crate::walk::{
 };
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
+use pure::distance_at;
 pub use pure::{
     ENTRY_ANIMATION_MS, Personality, Pose, STALE_RESUME_GAP_BASE_MS, STALE_RESUME_GAP_RANGE_MS,
-    THINKING_WINDOW_SECS, TYPING_FRAME_MS, TYPING_FRAMES, WALKING_FRAME_MS, WALKING_FRAMES,
-    WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS, aimless_wander_seed, derive, derive_state_only,
-    dwell_ms, est_wander_cycle_ms, is_aimless_cycle, personality_for, pick_aimless_dest,
-    seated_dwell_ms, stale_resume_gap_ms, takes_trip, walking_frame, waypoint_index_for_cycle,
+    THINKING_WINDOW_SECS, WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS, aimless_wander_seed, derive,
+    derive_state_only, dwell_ms, est_wander_cycle_ms, is_aimless_cycle, personality_for,
+    pick_aimless_dest, seated_dwell_ms, stale_resume_gap_ms, takes_trip, waypoint_index_for_cycle,
 };
 // These stay crate-internal: a `pub use` would try to widen their `pub(crate)`
 // visibility.
-pub(crate) use pure::{SpotClaims, resolve_wander_target, typing_frame};
+pub(crate) use pure::{SpotClaims, resolve_wander_target, typing_frame, walk_frame};
 
 use crate::layout::{Point, SceneLayout, desk_walk_anchor_facing};
 use crate::pathfind::Router;
@@ -293,7 +293,6 @@ pub fn derive_with_routing(
         }
 
         let t_x1000 = walk_progress(profile, eff_elapsed);
-        let frame = walking_frame(eff_elapsed);
 
         // Must reproduce the snapshotted profile's endpoints, or the leg's
         // duration no longer matches the distance it renders.
@@ -310,13 +309,7 @@ pub fn derive_with_routing(
             now,
             layout,
             rctx,
-            Pose::Walking {
-                from,
-                to: door_target,
-                t_x1000,
-                frame,
-                carrying_coffee: false,
-            },
+            Pose::walking(from, door_target, t_x1000, false),
             exit_settle,
         );
     }
@@ -378,19 +371,12 @@ pub fn derive_with_routing(
 
         if !walk_arrived(&profile, elapsed_ms) {
             let t_x1000 = walk_progress(&profile, elapsed_ms);
-            let frame = walking_frame(elapsed_ms);
             return route_walking_pose(
                 slot,
                 now,
                 layout,
                 rctx,
-                Pose::Walking {
-                    from,
-                    to: approach,
-                    t_x1000,
-                    frame,
-                    carrying_coffee: false,
-                },
+                Pose::walking(from, approach, t_x1000, false),
                 settle,
             );
         }
@@ -421,20 +407,12 @@ pub fn derive_with_routing(
                 let seat = wf.kind.seat();
                 let (from, chair_settle) = desk_leg_endpoint(desk_point, layout);
                 let settle = Settle::from_pair(chair_settle, seat);
-                let elapsed_phase = crate::anim::elapsed_ms(now, wf.phase_started_at);
-                let frame = walking_frame(elapsed_phase);
                 return route_walking_pose(
                     slot,
                     now,
                     layout,
                     rctx,
-                    Pose::Walking {
-                        from,
-                        to: dest,
-                        t_x1000: wf.t_x1000,
-                        frame,
-                        carrying_coffee: false,
-                    },
+                    Pose::walking(from, dest, wf.t_x1000, false),
                     settle,
                 );
             }
@@ -453,20 +431,12 @@ pub fn derive_with_routing(
                 let seat = wf.kind.seat();
                 let (snap_target, chair_settle) = desk_leg_endpoint(desk_point, layout);
                 let settle = Settle::from_pair(seat, chair_settle);
-                let elapsed_phase = crate::anim::elapsed_ms(now, wf.phase_started_at);
-                let frame = walking_frame(elapsed_phase);
                 return route_walking_pose(
                     slot,
                     now,
                     layout,
                     rctx,
-                    Pose::Walking {
-                        from: wf.dest,
-                        to: snap_target,
-                        t_x1000: wf.t_x1000,
-                        frame,
-                        carrying_coffee,
-                    },
+                    Pose::walking(wf.dest, snap_target, wf.t_x1000, carrying_coffee),
                     settle,
                 );
             }
@@ -554,7 +524,6 @@ pub fn derive_with_routing(
                     raw
                 } else {
                     let t_x1000 = walk_progress(&profile, elapsed_ms);
-                    let frame = walking_frame(elapsed_ms);
                     // Deterministic, so the rendered leg reproduces the armed
                     // profile's endpoint.
                     let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
@@ -562,13 +531,7 @@ pub fn derive_with_routing(
                     // The FROZEN origin from arm time, not the per-frame `prev`:
                     // history holds the advancing walker, so reading it back creeps
                     // `from` deskward and breaks the freeze's `wp.from == from` guard.
-                    Pose::Walking {
-                        from: snap_prev,
-                        to: snap_target,
-                        t_x1000,
-                        frame,
-                        carrying_coffee: false,
-                    }
+                    Pose::walking(snap_prev, snap_target, t_x1000, false)
                 }
             }
             _ => raw,
@@ -603,7 +566,7 @@ fn route_walking_pose(
         from,
         to,
         t_x1000,
-        frame,
+        travelled: _,
         carrying_coffee,
     } = pose
     else {
@@ -669,13 +632,7 @@ fn route_walking_pose(
     if path.len() <= 2 {
         // Record the interpolated position for the next frame's snap-back lookup.
         history.record(slot.agent_id, walking_position(from, to, t_x1000), now);
-        return Some(Pose::Walking {
-            from,
-            to,
-            t_x1000,
-            frame,
-            carrying_coffee,
-        });
+        return Some(Pose::walking(from, to, t_x1000, carrying_coffee));
     }
     // By cumulative OCTILE distance — the metric A* planned with, so timing stays
     // uniform along diagonals.
@@ -687,11 +644,11 @@ fn route_walking_pose(
     if total == 0 {
         return Some(pose);
     }
-    let traveled = (t_x1000 as u32 * total) / 1000;
+    let travelled = distance_at(t_x1000, total);
     let mut acc: u32 = 0;
     for (i, &leg) in leg_lens.iter().enumerate() {
-        if acc + leg >= traveled {
-            let into_leg = traveled - acc;
+        if acc + leg >= travelled {
+            let into_leg = travelled - acc;
             let seg_t = (into_leg * 1000)
                 .checked_div(leg)
                 .map(|t| t.min(1000) as u16)
@@ -702,7 +659,7 @@ fn route_walking_pose(
                 from: path[i],
                 to: path[i + 1],
                 t_x1000: seg_t,
-                frame,
+                travelled,
                 carrying_coffee,
             });
         }
@@ -714,7 +671,7 @@ fn route_walking_pose(
         from: path[last - 1],
         to: path[last],
         t_x1000: 1000,
-        frame,
+        travelled: total,
         carrying_coffee,
     })
 }
