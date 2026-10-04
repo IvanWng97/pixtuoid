@@ -31,8 +31,8 @@ pub(crate) const SCREEN_IDLE_MAX: f32 = 0.55;
 /// `None` for art that draws no lamp.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DeskBulbs {
-    facing_viewer: Option<(u16, u16)>,
-    back_turned: Option<(u16, u16)>,
+    facing_viewer: Option<(u16, i16)>,
+    back_turned: Option<(u16, i16)>,
 }
 
 impl DeskBulbs {
@@ -45,7 +45,7 @@ impl DeskBulbs {
     }
 
     /// A desk facing `facing`'s.
-    pub(crate) fn at(self, facing: Facing) -> Option<(u16, u16)> {
+    pub(crate) fn at(self, facing: Facing) -> Option<(u16, i16)> {
         if crate::pack::desk_sprite_name(facing) == crate::pack::desk_sprite_name(Facing::North) {
             self.back_turned
         } else {
@@ -388,7 +388,7 @@ impl Lights {
 fn desk_lights(
     desk: Point,
     facing: Facing,
-    bulb: Option<(u16, u16)>,
+    bulb: Option<(u16, i16)>,
     darkness: f32,
     indoor: f32,
 ) -> DeskLights {
@@ -415,12 +415,12 @@ impl DeskLights {
     /// The lights of a desk at `desk` whose lamp hangs its bulb `bulb` from
     /// it: its lamp lit to `level` (dark without a bulb), its pool at most
     /// [`DESK_LAMP_MAX`], and its standby screen at `screen_idle`.
-    pub(crate) fn new(desk: Point, bulb: Option<(u16, u16)>, level: f32, screen_idle: f32) -> Self {
+    pub(crate) fn new(desk: Point, bulb: Option<(u16, i16)>, level: f32, screen_idle: f32) -> Self {
         let level = if bulb.is_some() { level } else { 0.0 };
         let (dx, dy) = bulb.unwrap_or_default();
         let bulb = Point {
             x: desk.x + dx,
-            y: desk.y + dy,
+            y: desk.y.saturating_add_signed(dy),
         };
         Self {
             lamp: Emitter {

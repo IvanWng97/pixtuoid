@@ -32,6 +32,27 @@ fn every_facing_lights_its_own_desks_bulb() {
     }
 }
 
+/// A bulb drawn above the desk's own row still lights its lamp, centred on it.
+#[test]
+fn a_bulb_above_the_desk_row_still_lights() {
+    use crate::layout::Facing;
+    // the bulb moved to the art's top row, a row above the desk's point
+    let raised: &'static str = include_str!("../../sprites/default/desk.sprite")
+        .replacen(" 9 ", " D ", 1)
+        .replacen("\n. . .", "\n9 . .", 1)
+        .leak();
+    let pack = crate::pack::test_pack_with(&[("desk.sprite", raised)]);
+    let bulb = DeskBulbs::of(&pack).at(Facing::South);
+    let (_, dy) = bulb.expect("the raised bulb is still a bulb");
+    assert!(dy < 0, "it stands above the desk's row: {dy}");
+    let lights = desk_lights(DESK, Facing::South, bulb, 1.0, 1.0);
+    assert!(lights.lamp.strength > 0.0);
+    let Light::Halo { centre, .. } = lights.lamp.light else {
+        panic!("a desk lamp throws a halo");
+    };
+    assert!(centre.y < DESK.y, "the pool centres on the raised bulb");
+}
+
 /// A pack whose desk art draws no bulb lights no lamp, however dark.
 #[test]
 fn desk_art_without_a_bulb_lights_no_lamp() {

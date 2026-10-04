@@ -127,15 +127,16 @@ pub(crate) fn desk_mark(
 }
 
 /// Where the 1x desk facing `facing` hangs its lamp's bulb from the desk's
-/// point: the middle of its [`DESK_BULB_KEY`] cells on the art [`desk_art`]
-/// draws there; `None` for art that draws no bulb.
-pub(crate) fn desk_bulb_offset(pack: &Pack, facing: crate::layout::Facing) -> Option<(u16, u16)> {
+/// point, the rows signed (a bulb may stand above the desk's row): the middle
+/// of its [`DESK_BULB_KEY`] cells on the art [`desk_art`] draws there; `None`
+/// for art that draws no bulb.
+pub(crate) fn desk_bulb_offset(pack: &Pack, facing: crate::layout::Facing) -> Option<(u16, i16)> {
     let name = pack.piece_or_source(desk_sprite_name(facing))?;
     let art = super::densest_frame(pack, name, 0, crate::render_scale::RenderScale::ONE)?;
     let (x, y) = bulb_cell(&art)?;
     // the art's rows from the desk's: its top is `desk_art_top` off the desk
     let above = DESK_BEZEL_RAISE + art.frame.height().saturating_sub(base_desk_height(pack));
-    Some((x, y.checked_sub(above)?))
+    Some((x, i16::try_from(i32::from(y) - i32::from(above)).ok()?))
 }
 
 /// The layout cell, from `art`'s top-left, that the middle of its
