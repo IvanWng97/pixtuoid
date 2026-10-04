@@ -275,6 +275,14 @@ mod tests {
     }
 
     #[test]
+    fn smoothstep_is_the_hermite_cubic() {
+        assert_eq!(Easing::Smoothstep.apply(0.0), 0.0);
+        assert_eq!(Easing::Smoothstep.apply(1.0), 1.0);
+        // 3t² − 2t³, exact in f32; a linear curve gives 0.25.
+        assert_eq!(Easing::Smoothstep.apply(0.25), 0.15625);
+    }
+
+    #[test]
     fn all_curves_are_monotone_non_decreasing() {
         for curve in [
             Easing::Linear,
