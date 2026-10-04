@@ -831,9 +831,7 @@ fn aimless_fallback_on_a_fully_blocked_mask_returns_the_desk_anchor() {
 /// their frames once per `stride / frames` of ground each.
 #[test]
 fn a_walking_person_never_slides() {
-    use crate::physics::{
-        PROGRESS_SCALE, SPEED_MULT_MAX, WalkIntent, speed_mult, walk_profile, walk_progress,
-    };
+    use crate::physics::{SPEED_MULT_MAX, WalkIntent, speed_mult, walk_profile, walk_progress};
     let pack = crate::pack::test_default_pack();
     let walk = pack.animation("walking").expect("the walk");
     let per_frame = f32::from(walk.stride().expect("a stride").get()) / walk.frames().len() as f32;
@@ -889,7 +887,7 @@ fn a_walking_person_never_slides() {
     ] {
         let profile = walk_profile(length, intent, fastest);
         let turns = steps(profile.duration_ms, &|ms| {
-            u32::from(walk_progress(&profile, ms)) * length / u32::from(PROGRESS_SCALE)
+            distance_at(walk_progress(&profile, ms), length)
         });
         judge(
             &format!("{intent:?}"),
