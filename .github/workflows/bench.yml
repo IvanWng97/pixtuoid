@@ -28,6 +28,8 @@ jobs:
         with:
           prefix-key: v1-rust # match setup-cargo-just's default cache namespace
       - uses: ./.github/actions/setup-just
+      # `bench-pacing` builds the binary, whose default `audio` feature links ALSA.
+      - uses: ./.github/actions/setup-alsa
       - name: Run frame + wire benchmarks (advisory, non-blocking)
         run: just bench
       - name: Run frame pacing (advisory, non-blocking)
