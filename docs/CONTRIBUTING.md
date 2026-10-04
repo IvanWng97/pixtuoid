@@ -40,8 +40,8 @@ runs those locally), it runs the jobs below; all but **hygiene** and zizmor's
 offline audits are invisible to preflight, so a green preflight does not mean a
 green PR.
 
-A PR's pushes run only the **light tier**, every job without
-`if: inputs.full`, and its `ci-gate` judges that tier. Both tiers run on the
+A PR's pushes run only the **light tier** (every job without
+`if: inputs.full`, and the Linux tests), and its `ci-gate` judges that tier. Both tiers run on the
 merge queue's draft PR (`mergify/merge-queue/…`), whose `ci-gate` the queue
 merges on, batching up to `.mergify.yml`'s `batch_size` PRs in one run, and on
 a push to `main` or a manual dispatch

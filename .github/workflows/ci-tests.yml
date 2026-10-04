@@ -15,28 +15,14 @@ env:
 jobs:
   test:
     name: ${{ matrix.platform }}-test
-    if: ${{ inputs.full }}
     strategy:
       fail-fast: false
+      # The light tier tests Linux; the full tier adds what the Linux entry
+      # compiles out: Windows (pipes, atomic-write retries; windows-latest is
+      # tracked to catch hosted-image changes) and macos-14 (Apple Silicon, BSD
+      # CLI, launchd, config paths).
       matrix:
-        include:
-          - platform: linux
-            runner: ubuntu-latest
-            flag: unit
-            timeout: 25
-          # Track windows-latest deliberately: this gate catches hosted-image
-          # changes. Its coverage sees the Windows pipes and atomic-write
-          # retries the Linux entry compiles out.
-          - platform: windows
-            runner: windows-latest
-            flag: windows
-            timeout: 25
-          # macos-14 exercises the Apple Silicon build; macOS diverges on BSD
-          # CLI, launchd, and config paths, which the Linux entry compiles out.
-          - platform: macos
-            runner: macos-14
-            flag: macos
-            timeout: 20
+        include: ${{ fromJSON(inputs.full && '[{"platform":"linux","runner":"ubuntu-latest","flag":"unit","timeout":25},{"platform":"windows","runner":"windows-latest","flag":"windows","timeout":25},{"platform":"macos","runner":"macos-14","flag":"macos","timeout":20}]' || '[{"platform":"linux","runner":"ubuntu-latest","flag":"unit","timeout":25}]') }}
     runs-on: ${{ matrix.runner }}
     # nextest owns per-test hang limits.
     timeout-minutes: ${{ matrix.timeout }}
