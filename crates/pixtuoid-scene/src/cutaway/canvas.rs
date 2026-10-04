@@ -914,6 +914,7 @@ mod tests {
     /// cutaway leaves this file as it found it, and a change to its look
     /// rewrites it (`just gen-cutaway-golden`). Each instant is a local
     /// hour ([`localclock`](crate::localclock)), so any `$TZ` paints it alike.
+    // The golden pins 4x rows, which only `density-art` paints.
     #[cfg(feature = "density-art")]
     #[test]
     fn the_canvas_paints_the_pinned_frames() {

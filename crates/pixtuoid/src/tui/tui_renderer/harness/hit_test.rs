@@ -425,6 +425,82 @@ fn a_pet_over_the_coffee_machine_is_the_hover() {
     );
 }
 
+/// A click on an agent focuses it and a click on the pet pets it, through the
+/// mouse handler itself.
+#[test]
+fn a_click_focuses_an_agent_and_pets_the_pet() {
+    a_click_acts_on_what_it_hits(&mut build(140, 48, vec![PetKind::Cat]));
+}
+
+/// [`a_click_focuses_an_agent_and_pets_the_pet`] on `r`, a renderer with a cat.
+pub(super) fn a_click_acts_on_what_it_hits<B>(r: &mut TuiRenderer<B>)
+where
+    B: Backend<Error: Send + Sync + 'static> + std::borrow::Borrow<TestBackend>,
+{
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    let now = t0() + Duration::from_secs(20);
+    let id = AgentId::from_transcript_path("/click/0.jsonl");
+    let scene = scene_with(vec![active("/click/0.jsonl", 0, "Edit", t0())], 16);
+    r.render(&scene, pack(), now).unwrap();
+    let (_tx, scene_rx) = tokio::sync::watch::channel(Arc::new(scene));
+    let mut ui = crate::tui::ui_state::UiState::new(
+        normal_theme(),
+        crate::tui::welcome::WelcomeUi::from_detected(&[]),
+        false,
+        std::path::PathBuf::from("/tmp/sock"),
+        None,
+    );
+    let cell = |r: &TuiRenderer<B>, hits: &dyn Fn(&SceneHit<'_>) -> bool| {
+        r.frame_buffer()
+            .area()
+            .positions()
+            .find(|p| r.scene_hit_at(p.x, p.y).is_some_and(|h| hits(&h)))
+            .map(|p| (p.x, p.y))
+    };
+    let click = |(column, row)| MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    };
+    let on_agent = cell(r, &|h| matches!(h, SceneHit::Figure(HoverTarget::Agent(_))))
+        .expect("an agent's cell");
+    let mut focused = None;
+    crate::tui::handle_mouse_event(
+        click(on_agent),
+        &mut ui,
+        r,
+        &scene_rx,
+        |slot| focused = Some(slot.agent_id),
+        now,
+    );
+    assert_eq!(focused, Some(id), "the click focuses the agent it hits");
+    let on_pet =
+        cell(r, &|h| matches!(h, SceneHit::Figure(HoverTarget::Pet(_)))).expect("the pet's cell");
+    assert!(
+        r.active_pet_ref().is_none(),
+        "premise: nobody petted it yet"
+    );
+    let mut pet = |r: &mut TuiRenderer<B>, at| {
+        crate::tui::handle_mouse_event(
+            click(on_pet),
+            &mut ui,
+            r,
+            &scene_rx,
+            |_| panic!("the pet is no agent"),
+            at,
+        );
+        r.active_pet_ref().map(|p| (p.petted_at, p.pet_pos))
+    };
+    let centre = r.drawn_pet().expect("the cat").centre;
+    assert_eq!(pet(r, now), Some((now, centre)), "the click pets the cat");
+    assert_eq!(
+        pet(r, now + Duration::from_millis(1)),
+        Some((now, centre)),
+        "a second click while it purrs pets nothing new"
+    );
+}
+
 /// The click handler acts on `scene_hit_at`, so wherever it names a figure or
 /// the coffee machine, the tooltip there names the same thing.
 #[test]

@@ -4023,13 +4023,7 @@ mod tests {
             anim_name: "lobster_walk",
             frame_idx: 0,
             key: crate::creatures::openclaw_key("18789"),
-            card: crate::creatures::GatewayCard {
-                name: "OpenClaw",
-                instance: None,
-                busy: true,
-                degraded: false,
-                active_sessions: 1,
-            },
+            degraded: false,
             effects: crate::effects::mascot_bubbles(
                 lobster,
                 12,
@@ -4042,11 +4036,7 @@ mod tests {
         frame.mascots.push(crate::sim::MascotPlacement {
             pos: sick,
             key: crate::creatures::openclaw_key("18790"),
-            card: crate::creatures::GatewayCard {
-                busy: false,
-                degraded: true,
-                ..frame.mascots[0].card.clone()
-            },
+            degraded: true,
             effects: Vec::new(),
             ..frame.mascots[0].clone()
         });
