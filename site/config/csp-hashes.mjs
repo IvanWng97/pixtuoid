@@ -61,7 +61,18 @@ function decodeAttr(value) {
   return value.replace(/&(?:#x([0-9a-f]+)|#([0-9]+)|([a-z]+));/gi, (ref, hex, dec, name) => {
     if (hex || dec) {
       const cp = hex ? parseInt(hex, 16) : parseInt(dec, 10);
-      if (cp > 0x10ffff) throw new Error(`csp-hashes: ${ref} names no code point`);
+      // HTML's tokenizer remaps these (NUL and surrogates to U+FFFD, 0x80–0x9F
+      // per windows-1252), so a literal decode would hash other text
+      if (
+        cp > 0x10ffff ||
+        cp === 0 ||
+        (cp >= 0xd800 && cp <= 0xdfff) ||
+        (cp >= 0x80 && cp <= 0x9f)
+      ) {
+        throw new Error(
+          `csp-hashes: ${ref} is one HTML's tokenizer may remap; write the character itself`
+        );
+      }
       return String.fromCodePoint(cp);
     }
     const ch = ENTITIES[name.toLowerCase()];
