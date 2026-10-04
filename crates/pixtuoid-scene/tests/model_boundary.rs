@@ -4,9 +4,11 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use syn::visit::Visit;
+
 const RASTERIZERS: [&str; 2] = ["pixel_painter", "cutaway"];
 
-/// Each model file or directory still naming a rasterizer, how many lines do,
+/// Each model file or directory still naming a rasterizer, how many paths do,
 /// and the PR that removes the edge. A fix deletes its entry; a new edge under a
 /// listed path changes its count.
 const KNOWN_EDGES: &[(&str, usize, &str)] = &[
@@ -24,17 +26,72 @@ const KNOWN_EDGES: &[(&str, usize, &str)] = &[
     ("wall.rs", 1, "cutaway::pen: #1253"),
 ];
 
-/// Whether `code` names a rasterizer as a path segment; inside a `use`
-/// statement every segment is a path, so a bare name counts.
-fn names_a_rasterizer(code: &str, in_use: bool) -> bool {
-    RASTERIZERS.iter().any(|name| {
-        code.match_indices(name).any(|(at, _)| {
-            let (before, after) = (&code[..at], &code[at + name.len()..]);
-            let bounded = !before.ends_with(|c: char| c.is_alphanumeric() || c == '_')
-                && !after.starts_with(|c: char| c.is_alphanumeric() || c == '_');
-            bounded && (in_use || before.ends_with("::") || after.starts_with("::"))
-        })
-    })
+fn is_rasterizer(ident: &syn::Ident) -> bool {
+    RASTERIZERS.iter().any(|r| ident == r)
+}
+
+/// Every path in a parsed file that names a rasterizer as a segment, as text.
+/// Parsing, not scanning, so a comment or a string literal never counts.
+#[derive(Default)]
+struct RasterizerPaths(Vec<String>);
+
+impl RasterizerPaths {
+    fn of(source: &str) -> Vec<String> {
+        let file = syn::parse_file(source).expect("source parses");
+        let mut found = Self::default();
+        found.visit_file(&file);
+        found.0
+    }
+
+    /// A macro's arguments are tokens, not syntax: an identifier counts where
+    /// `::` joins it to a neighbour.
+    fn scan_tokens(&mut self, tokens: proc_macro2::TokenStream) {
+        use proc_macro2::TokenTree;
+        let trees: Vec<TokenTree> = tokens.into_iter().collect();
+        let colon =
+            |t: Option<&TokenTree>| matches!(t, Some(TokenTree::Punct(p)) if p.as_char() == ':');
+        for (i, tree) in trees.iter().enumerate() {
+            match tree {
+                TokenTree::Group(g) => self.scan_tokens(g.stream()),
+                TokenTree::Ident(id) if is_rasterizer(id) => {
+                    let after = colon(trees.get(i + 1));
+                    let before = i > 0 && colon(trees.get(i - 1));
+                    if after || before {
+                        self.0.push(format!("{id} in a macro"));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for RasterizerPaths {
+    fn visit_path(&mut self, path: &'ast syn::Path) {
+        if path.segments.iter().any(|s| is_rasterizer(&s.ident)) {
+            let text: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+            self.0.push(text.join("::"));
+        }
+        syn::visit::visit_path(self, path);
+    }
+
+    fn visit_use_tree(&mut self, tree: &'ast syn::UseTree) {
+        let named = match tree {
+            syn::UseTree::Path(p) => Some(&p.ident),
+            syn::UseTree::Name(n) => Some(&n.ident),
+            syn::UseTree::Rename(r) => Some(&r.ident),
+            syn::UseTree::Glob(_) | syn::UseTree::Group(_) => None,
+        };
+        if let Some(id) = named.filter(|id| is_rasterizer(id)) {
+            self.0.push(format!("use {id}"));
+        }
+        syn::visit::visit_use_tree(self, tree);
+    }
+
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        self.scan_tokens(mac.tokens.clone());
+        syn::visit::visit_macro(self, mac);
+    }
 }
 
 fn rust_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
@@ -71,19 +128,10 @@ fn the_model_names_no_rasterizer() {
             continue;
         }
         let text = std::fs::read_to_string(&file).expect("source reads");
-        let mut in_use = false;
-        for (n, line) in text.lines().enumerate() {
-            let code = line.split("//").next().unwrap_or_default();
-            let trimmed = code.trim_start();
-            in_use |= trimmed.starts_with("use ") || trimmed.contains(" use ");
-            let named = names_a_rasterizer(code, in_use);
-            in_use &= !code.contains(';');
-            if !named {
-                continue;
-            }
+        for path in RasterizerPaths::of(&text) {
             match KNOWN_EDGES.iter().find(|(at, ..)| rel.starts_with(at)) {
                 Some((at, ..)) => *met.entry(*at).or_default() += 1,
-                None => stray.push(format!("{rel}:{}: {}", n + 1, line.trim())),
+                None => stray.push(format!("{rel}: {path}")),
             }
         }
     }
@@ -91,7 +139,7 @@ fn the_model_names_no_rasterizer() {
     let listed: BTreeMap<&str, usize> = KNOWN_EDGES.iter().map(|&(at, n, _)| (at, n)).collect();
     assert_eq!(
         met, listed,
-        "a listed edge's line count moved: a fix lowers it (to 0: delete the entry), a new edge needs its own review"
+        "a listed edge's path count moved: a fix lowers it (to 0: delete the entry), a new edge needs its own review"
     );
 }
 
@@ -99,20 +147,22 @@ fn the_model_names_no_rasterizer() {
 fn a_rasterizer_path_is_named_but_its_word_is_not() {
     for named in [
         "use crate::cutaway::pen::Pen;",
-        "crate::pixel_painter::AgentFrame",
+        "fn f() -> crate::pixel_painter::AgentFrame { todo!() }",
         "use super::super::cutaway::text;",
+        "use crate::{\n    cutaway,\n};",
+        "fn f() { assert!(crate::cutaway::text::LINE_H > 0); }",
+        r#"fn f() { let _ = ("http://x", crate::pixel_painter::AgentFrame::default()); }"#,
     ] {
-        assert!(names_a_rasterizer(named, false), "{named}");
+        assert!(!RasterizerPaths::of(named).is_empty(), "{named}");
     }
-    assert!(
-        names_a_rasterizer("    cutaway,", true),
-        "a bare name in a use group"
-    );
     for unnamed in [
-        "let cutaway = classic;",
+        "fn f() { let cutaway = classic; }",
         "fn cutaway_snapshot() {}",
-        "Plan::Cutaway { tmux }",
+        "fn f() { Plan::Cutaway { tmux }; }",
+        r#"fn f() { let _ = "crate::cutaway::pen"; }"#,
+        "/* crate::cutaway::pen */ fn f() {}",
+        "/// [`crate::cutaway::pen`]\nfn f() {}",
     ] {
-        assert!(!names_a_rasterizer(unnamed, false), "{unnamed}");
+        assert!(RasterizerPaths::of(unnamed).is_empty(), "{unnamed}");
     }
 }
