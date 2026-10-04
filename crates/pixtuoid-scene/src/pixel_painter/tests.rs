@@ -14,12 +14,13 @@ use crate::sim::anchors::{
     waypoint_top_left,
 };
 use crate::sim::seat::{Seat, settle_seat};
-use crate::sim::{CharacterGlow, CharacterPlacement, SimStores};
+use crate::sim::{CharacterGlow, CharacterPlacement, SimInputs, SimStores, sim_step};
 use crate::wall::paint_wall;
 use pixtuoid_core::sprite::Frame;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 /// Paint all of `piece` in one call, which the classic's bands add up to.
 fn paint_whole_wall(
@@ -4819,6 +4820,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
 
     let mut escapes: Vec<String> = Vec::new();
+    let mut walking = 0;
     for port in 18900..18924u32 {
         // The pet's roam is keyed on the FLOOR seed, the mascot's on its instance
         // id — vary both, or the pet half of the sweep rides one trajectory.
@@ -4834,11 +4836,12 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
             DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
             boot,
         );
-        // Past the enter stagger + walk-in, then across several wander cycles so
-        // both the walking legs and the resting cells get sampled.
-        for step in 0..24u64 {
+        // One office's stores across the sweep: the creatures walk on state
+        // they keep. Past the enter stagger + walk-in, then across several roams,
+        // so both the walking legs and the resting cells get sampled.
+        let mut owned = OwnedSimStores::new();
+        for step in 0..48u64 {
             let now = boot + Duration::from_millis(6_000 + step * 1_700);
-            let mut owned = OwnedSimStores::new();
             let frame = sim_step(
                 &mut owned.stores(),
                 SimInputs {
@@ -4880,6 +4883,17 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 .pet
                 .as_ref()
                 .map(|p| enqueue_pet(&ctx, p, &mut drawables));
+            walking += frame
+                .mascots
+                .iter()
+                .filter(|m| m.anim_name.contains("walk"))
+                .count()
+                + usize::from(
+                    frame
+                        .pet
+                        .as_ref()
+                        .is_some_and(|p| p.anim_name.contains("walk")),
+                );
             for m in &frame.mascots {
                 let Size { w, h } = m.size;
                 if m.pos.x < w / 2
@@ -4914,6 +4928,10 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     assert!(
         escapes.is_empty(),
         "every roamer must render whole inside the canvas: {escapes:#?}"
+    );
+    assert!(
+        walking > 100,
+        "the sweep must catch them roaming, saw {walking}"
     );
 }
 

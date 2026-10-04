@@ -24,10 +24,9 @@ use crate::script::{
 };
 
 use pixtuoid_scene::audio::OneShotPool;
-use pixtuoid_scene::floor::{
-    FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs, floor_capacity,
-};
+use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FloorSession, PetInputs, floor_capacity};
 use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::pack::load_bundled_pack;
 use pixtuoid_scene::sky::WeatherPolicy;
 use pixtuoid_scene::theme::{ALL_THEMES, Theme};
@@ -114,7 +113,7 @@ pub struct Office {
     /// RGBA staging (the render buffer is packed RGB) — its ptr/len back a JS
     /// view into wasm memory, so blitting is zero-copy on the JS side.
     rgba: Vec<u8>,
-    pack: Pack,
+    pack: std::sync::Arc<Pack>,
     theme: &'static Theme,
     seed: u64,
     reducer: Reducer,
@@ -148,13 +147,14 @@ impl Office {
     /// only if the bundled sprite pack fails to parse.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
-        let pack = load_bundled_pack().map_err(|e| JsError::new(&format!("{e:#}")))?;
+        let pack =
+            std::sync::Arc::new(load_bundled_pack().map_err(|e| JsError::new(&format!("{e:#}")))?);
         Ok(Office {
             // Capacity starts empty and is synced from the CANVAS's own layout
             // on every `step` before any beat fires, so the reducer only admits
             // agents the rendered office can seat.
             scene: SceneState::default(),
-            session: FloorSession::new(),
+            session: FloorSession::new(std::sync::Arc::clone(&pack)),
             rgba: Vec::new(),
             pack,
             theme: ALL_THEMES[0],
@@ -540,8 +540,8 @@ impl Office {
         if self.caps_size == Some((buf_w, buf_h)) {
             return;
         }
-        // The SAME (size, cap=None, seed) computation `render` feeds
-        // `render_floor`, so reducer capacity and painted layout can't drift.
+        // The SAME (size, cap=None, seed) computation `render` lays out, so
+        // reducer capacity and painted layout can't drift.
         let cap = floor_capacity(buf_w, buf_h, self.seed);
         self.scene.floor_capacities = std::array::from_fn(|i| if i == 0 { cap } else { 0 });
         self.caps_size = Some((buf_w, buf_h));
@@ -615,24 +615,28 @@ impl Office {
     fn render(&mut self, now: SystemTime, buf_w: u16, buf_h: u16) {
         // Too-small layouts leave the cleared buffer; never panics.
         let floor_meta = self.floor_meta();
-        self.session.render(FrameInputs {
-            world: FloorInputs {
-                scene: &self.scene,
-                pack: &self.pack,
-                now,
-                floor: floor_meta,
-                pets: PetInputs::default(),
+        self.session.render(
+            Look::Classic,
+            RenderInputs {
+                world: FloorInputs {
+                    scene: &self.scene,
+                    pack: &self.pack,
+                    now,
+                    floor: floor_meta,
+                    pets: PetInputs::default(),
+                },
+                theme: self.theme,
+                size: Size { w: buf_w, h: buf_h },
+                place: Place::default(),
+                debug_walkable: false,
             },
-            theme: self.theme,
-            size: Size { w: buf_w, h: buf_h },
-            debug_walkable: false,
-        });
+        );
     }
 
     /// `Rgb` is not `repr(C)`, so expand into the RGBA staging vec per-pixel
     /// (opaque alpha) — don't cast.
     fn expand_rgba(&mut self) {
-        let px = self.session.buf().as_slice();
+        let px = self.session.buf().map_or(&[][..], |b| b.as_slice());
         self.rgba.clear();
         self.rgba.reserve(px.len() * 4);
         for c in px {

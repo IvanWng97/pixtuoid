@@ -323,8 +323,8 @@ impl Timeline {
     /// clock by the last frame — and a late --navigate-at then never fires.
     ///
     /// This does NOT make the site's `loop`ed clip seam-free, and no timing choice
-    /// can: `mascot_wander` picks each cycle's destination from a hash of the cycle
-    /// NUMBER, so the wander is aperiodic BY DESIGN and frame N is never frame 0
+    /// can: each creature walk's destination is a seeded `walkable_target` draw
+    /// numbered by its roam, so the roaming is aperiodic BY DESIGN and frame N is never frame 0
     /// however the duration is chosen. Closing it would mean a scripted
     /// (non-wandering) timeline for the demo — a media decision, not a rendering one.
     pub(crate) fn elapsed_ms(&self, i: usize) -> u64 {
@@ -391,7 +391,7 @@ pub(crate) struct AnimJob<'a> {
     pub(crate) frames_dir: Option<&'a Path>,
     pub(crate) timeline: Timeline,
     pub(crate) scene: &'a SceneState,
-    pub(crate) pack: &'a Pack,
+    pub(crate) pack: &'a std::sync::Arc<Pack>,
     pub(crate) theme: &'static Theme,
     pub(crate) weather: pixtuoid_scene::sky::WeatherPolicy,
 }
@@ -437,7 +437,12 @@ pub(crate) fn save_renderer_animation(
     navigations: &[(u64, usize)],
     pets: Vec<pixtuoid_scene::pet::Pet>,
 ) -> Result<()> {
-    let mut r = pixtuoid::tui::tui_renderer::TuiRenderer::new(term, job.theme, pets);
+    let mut r = pixtuoid::tui::tui_renderer::TuiRenderer::new(
+        term,
+        job.theme,
+        pets,
+        std::sync::Arc::clone(job.pack),
+    );
     r.set_weather(job.weather);
     let mut fired = vec![false; navigations.len()];
     // 0, not the caller's skip_ms: clap keeps every pre-roll flag off this path
@@ -467,7 +472,7 @@ pub(crate) fn save_animation(
     debug_walkable: bool,
 ) -> Result<()> {
     let scene = job.scene;
-    let mut chitchat_state = std::collections::HashMap::new();
+    let mut office = pixtuoid_scene::floor::PerOffice::new();
     job.encode(
         skip_ms,
         term,
@@ -476,7 +481,7 @@ pub(crate) fn save_animation(
                 debug_walkable,
                 ..DrawCtx::offscreen(
                     floor,
-                    &mut chitchat_state,
+                    office.stores(),
                     job.theme,
                     scene,
                     job.pack,

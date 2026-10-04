@@ -131,7 +131,7 @@ fn injected_coffee_changes_desk_render() {
     let mut base = build(100, 40, vec![]);
     base.render(&scene, pack(), t0()).unwrap();
     base.render(&scene, pack(), t1).unwrap();
-    let baseline = base.buf().clone();
+    let baseline = base.buf().expect("a frame").clone();
     let desk = base.cached_layout().expect("layout").home_desks[0];
 
     let mut r = build(100, 40, vec![]);
@@ -141,7 +141,7 @@ fn injected_coffee_changes_desk_render() {
 
     let d = region_diff(
         &baseline,
-        r.buf(),
+        r.buf().expect("a frame"),
         desk.x.saturating_sub(2),
         desk.y.saturating_sub(6),
         18,
