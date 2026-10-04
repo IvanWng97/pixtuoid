@@ -1005,6 +1005,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         #[cfg(not(unix))]
         let terminate = std::future::pending::<()>();
         tokio::pin!(terminate);
+        let mut due = Instant::now();
         loop {
             let now = ui.now();
             let snapshot = scene_rx.borrow_and_update().clone();
@@ -1021,8 +1022,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 cap_sweep.publish(layout.buf_w, layout.buf_h, desk_cap, &floor_caps);
             }
 
-            let start = Instant::now();
-            let mut polled = event::poll(tick)?;
+            let next = next_due(due, Instant::now(), tick);
+            let mut polled = event::poll(next.saturating_duration_since(Instant::now()))?;
             let mut quit = false;
             while polled {
                 match event::read()? {
@@ -1063,7 +1064,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             }
             // The frame-pacing sleep doubles as the signal-listen window: the crossterm
             // poll above is synchronous, so this is the loop's only await point.
-            let rem = tick.checked_sub(start.elapsed()).unwrap_or(Duration::ZERO);
+            let rem = next.saturating_duration_since(Instant::now());
             tokio::select! {
                 _ = tokio::time::sleep(rem) => {}
                 res = &mut ctrl_c => match res {
@@ -1079,6 +1080,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                 },
                 _ = &mut terminate => break,
             }
+            due = next;
         }
         Ok(())
     })
@@ -1086,6 +1088,46 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
 
     teardown_terminal(&mut renderer.terminal)?;
     result
+}
+
+/// When the frame after one due at `due` is due, its render having ended at
+/// `now`: a paint `period` on from `due`, so neither the render nor a late
+/// wake from the wait pushes every later frame back; or `now`, when the render
+/// overran that, so the loop paints at once and re-anchors there rather than
+/// bursting frames to catch up.
+pub(crate) fn next_due(due: Instant, now: Instant, period: Duration) -> Instant {
+    (due + period).max(now)
+}
+
+#[cfg(test)]
+mod pacing_tests {
+    use super::next_due;
+    use std::time::{Duration, Instant};
+
+    const PERIOD: Duration = Duration::from_millis(33);
+
+    /// The next frame is due a period after the last one was due, wherever in
+    /// that period its render ended: a late wake from the wait or a slow render
+    /// shifts nothing after it.
+    #[test]
+    fn the_next_frame_is_due_a_period_after_the_last_was() {
+        let due = Instant::now();
+        for ended in [1, 5, 32].map(Duration::from_millis) {
+            assert_eq!(next_due(due, due + ended, PERIOD), due + PERIOD);
+        }
+    }
+
+    /// A render that overran its period paints the next frame at once, once:
+    /// the frame after that is a whole period on, not a burst.
+    #[test]
+    fn an_overrun_reanchors_without_a_burst() {
+        let due = Instant::now();
+        let overran = due + 3 * PERIOD;
+        let next = next_due(due, overran, PERIOD);
+        assert_eq!(next, overran);
+        let rendered = next + Duration::from_millis(5);
+        assert_eq!(next_due(next, rendered, PERIOD), overran + PERIOD);
+    }
 }
 
 #[cfg(test)]

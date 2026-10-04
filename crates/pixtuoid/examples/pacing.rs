@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result};
-use pixtuoid::pacing::{Protocol, renderer};
+use pixtuoid::pacing::{Protocol, next_due, renderer};
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
 use pixtuoid_scene::anim::{Motion, PAINT_FPS};
@@ -246,8 +246,9 @@ fn run(
     Ok(out)
 }
 
-/// The production loop's shape on the wall clock: render, then wait a paint
-/// interval for input that never comes. Each frame's interval, observed.
+/// The production loop's pacing on the wall clock: render, then wait for input
+/// that never comes until the next frame is due. Each frame's interval,
+/// observed.
 fn real_clock(
     pack: &Arc<pixtuoid_core::sprite::format::Pack>,
 ) -> Result<(Vec<Duration>, Vec<Duration>)> {
@@ -267,6 +268,7 @@ fn real_clock(
     let clock = Instant::now();
     let (mut renders, mut intervals) = (Vec::new(), Vec::new());
     let mut last = None;
+    let mut due = Instant::now();
     while clock.elapsed() < SCENARIO {
         let begun = Instant::now();
         if let Some(prev) = last.replace(begun) {
@@ -274,7 +276,9 @@ fn real_clock(
         }
         r.render(&scene, pack, start + clock.elapsed())?;
         renders.push(begun.elapsed());
-        std::thread::sleep(tick);
+        let next = next_due(due, Instant::now(), tick);
+        std::thread::sleep(next.saturating_duration_since(Instant::now()));
+        due = next;
     }
     Ok((renders, intervals))
 }
@@ -291,8 +295,8 @@ fn ms(d: Duration) -> f64 {
     d.as_secs_f64() * 1e3
 }
 
-/// Each frame's interval under the production loop today: render, then a full
-/// paint interval of polling.
+/// Each frame's interval under a render-then-poll loop, the TUI's before
+/// deadline pacing: render, then a full paint interval of polling.
 fn sleep_loop(renders: &[Duration], tick: Duration) -> Vec<Duration> {
     renders.iter().map(|&r| r + tick).collect()
 }
@@ -341,7 +345,7 @@ fn main() -> Result<()> {
         "enc",
         "write",
         "over%",
-        "now p95/jit",
+        "poll p95/jit",
         "deadl p95/jit",
         "B p50",
         "B p95"
@@ -352,7 +356,7 @@ fn main() -> Result<()> {
         let col = |f: fn(&Frame) -> Duration| frames.iter().map(f).collect::<Vec<_>>();
         let total = col(|f| f.total);
         let over = total.iter().filter(|&&t| t > tick).count() as f64 * 100.0 / total.len() as f64;
-        let now_loop = sleep_loop(&total, tick);
+        let poll_loop = sleep_loop(&total, tick);
         let deadline = deadline_loop(&total, tick);
         let jitter = |xs: &[Duration]| pct(xs, 95.0).saturating_sub(pct(xs, 50.0));
         let mut bytes: Vec<u64> = frames.iter().map(|f| f.bytes).collect();
@@ -374,8 +378,8 @@ fn main() -> Result<()> {
             ms(pct(&col(|f| f.encode), 50.0)),
             ms(pct(&col(|f| f.write), 50.0)),
             over,
-            ms(pct(&now_loop, 95.0)),
-            ms(jitter(&now_loop)),
+            ms(pct(&poll_loop, 95.0)),
+            ms(jitter(&poll_loop)),
             ms(pct(&deadline, 95.0)),
             ms(jitter(&deadline)),
             byte_pct(50.0),
@@ -390,8 +394,8 @@ fn main() -> Result<()> {
             "encode": stats(&col(|f| f.encode)),
             "write": stats(&col(|f| f.write)),
             "over_budget_pct": over,
-            "interval_render_then_poll": stats(&now_loop),
-            "jitter_render_then_poll_ms": ms(jitter(&now_loop)),
+            "interval_render_then_poll": stats(&poll_loop),
+            "jitter_render_then_poll_ms": ms(jitter(&poll_loop)),
             "interval_deadline": stats(&deadline),
             "jitter_deadline_ms": ms(jitter(&deadline)),
             "bytes_p50": byte_pct(50.0),
@@ -399,7 +403,7 @@ fn main() -> Result<()> {
         }));
     }
     let (renders, observed) = real_clock(&pack)?;
-    let modeled = sleep_loop(&renders, tick);
+    let modeled = deadline_loop(&renders, tick);
     let _ = writeln!(
         stdout,
         "\nreal-clock half-block Full: interval OBSERVED p50/p95/p99 {:.2}/{:.2}/{:.2} ms vs COMPUTED {:.2}/{:.2}/{:.2} ms",
