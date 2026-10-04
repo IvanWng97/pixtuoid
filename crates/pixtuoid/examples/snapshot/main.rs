@@ -219,7 +219,7 @@ struct SnapshotArgs {
     meeting: Option<u8>,
 
     /// Pre-roll a `--gif` capture: advance the simulated clock through the
-    /// real per-frame render (motion state advances) WITHOUT encoding frames
+    /// real per-frame render (walk state advances) WITHOUT encoding frames
     /// for the first N seconds, so the clip starts mid-action. Overrides the
     /// `--meeting` auto-computed warmup. (`--anim` has its own pre-roll knob,
     /// `--anim-skip-ms`.)
@@ -323,15 +323,14 @@ fn parse_navigations(specs: &[String]) -> Result<Vec<(u64, usize)>> {
 fn main() -> Result<()> {
     let args = SnapshotArgs::parse();
 
-    let weather =
-        match pixtuoid_scene::pixel_painter::WeatherPolicy::from_name(args.weather.as_deref()) {
-            Ok(w) => w,
-            Err(valid) => anyhow::bail!(
-                "unknown --weather {:?}; valid: {}",
-                args.weather.unwrap_or_default(),
-                valid.join(" | ")
-            ),
-        };
+    let weather = match pixtuoid_scene::sky::WeatherPolicy::from_name(args.weather.as_deref()) {
+        Ok(w) => w,
+        Err(valid) => anyhow::bail!(
+            "unknown --weather {:?}; valid: {}",
+            args.weather.unwrap_or_default(),
+            valid.join(" | ")
+        ),
+    };
 
     let now = match args.now_hour {
         Some(h) => {

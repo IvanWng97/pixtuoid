@@ -34,6 +34,29 @@ fn frame_layout_memo_matches_fresh_compute_across_hits_resizes_and_none() {
     );
 }
 
+/// A new layout drops the router's cached paths: `route` revalidates a cached
+/// path against the overlay alone, never the mask, so a stale one would walk
+/// through the new layout's walls.
+#[test]
+fn a_new_layout_drops_the_routers_cached_paths() {
+    use crate::pathfind::Router;
+    use pixtuoid_core::walkable::OccupancyOverlay;
+    let mut ctx = FloorCtx::new();
+    let l = ctx.frame_layout(192, 156, 0).unwrap();
+    let mut walkable = (0..l.buf_h)
+        .flat_map(|y| (0..l.buf_w).map(move |x| crate::layout::Point { x, y }))
+        .filter(|p| l.is_walkable(p.x, p.y));
+    let from = walkable.next().expect("a walkable cell");
+    let to = walkable.next_back().expect("another walkable cell");
+    ctx.router
+        .route(&l.walkable, &OccupancyOverlay::new(), from, to);
+    assert!(!ctx.router.is_empty(), "the route was cached");
+    ctx.frame_layout(192, 156, 0).unwrap();
+    assert!(!ctx.router.is_empty(), "the same layout keeps its paths");
+    ctx.frame_layout(120, 100, 0).unwrap();
+    assert!(ctx.router.is_empty(), "a new layout drops its paths");
+}
+
 #[test]
 fn daemons_projects_onto_the_ground_floor_only() {
     use pixtuoid_core::state::{DaemonInstanceId, DaemonLiveness, DaemonPresence};
@@ -73,9 +96,9 @@ fn door_anim_excludes_arrived_entry_profiles() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let id = AgentId::from_transcript_path("/p/door.jsonl");
     let mut fctx = FloorCtx::new();
-    let mut ms = WalkState::new(id);
+    let mut walk = WalkState::new(id);
     // Entry walk: duration 2000ms + pause 300ms → walk_arrived at 2300ms.
-    ms.entry = Some(crate::walk::WalkLeg {
+    walk.entry = Some(crate::walk::WalkLeg {
         started_at: t0,
         profile: WalkProfile {
             duration_ms: 2000,
@@ -86,7 +109,7 @@ fn door_anim_excludes_arrived_entry_profiles() {
         },
         from: crate::layout::Point { x: 0, y: 0 },
     });
-    fctx.walks.insert(id, ms);
+    fctx.walks.insert(id, walk);
 
     fctx.recompute_door_anim_max_ms(t0 + Duration::from_millis(1000));
     assert_eq!(
@@ -109,10 +132,7 @@ fn floor_ctx_default_equals_new() {
         d.door_anim_max_ms, 0,
         "FloorCtx::default() must match new() (door_anim_max_ms == 0)"
     );
-    assert!(
-        d.walks.is_empty(),
-        "default FloorCtx has no in-flight motion"
-    );
+    assert!(d.walks.is_empty(), "default FloorCtx has no walks");
 }
 
 #[test]
@@ -754,7 +774,7 @@ fn floor_session_render_owns_the_dual_eviction() {
     assert!(layout.is_some(), "a layoutable size renders");
     assert!(
         !session.floor.ctx.walks.contains_key(&gone),
-        "render() evicts the floor half (motion) — the floating-leak class"
+        "render() evicts the floor half (walks) — the floating-leak class"
     );
     assert!(
         !session.office.coffee.map().contains_key(&gone),
@@ -866,7 +886,7 @@ fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
     );
     assert!(
         session.floor.ctx.walks.contains_key(&id),
-        "the sim advanced: the entry leg was snapshotted into motion"
+        "the sim advanced: the entry leg was snapshotted into walks"
     );
     assert!(
         session.floor.ctx.door_anim_max_ms > 0,
@@ -1010,7 +1030,7 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     let occupied = std::collections::HashSet::new();
     let mut obs = AudioObserver::new();
     let frame = obs.frame(&scene, &occupied, |_| None, FloorMeta::ground(), now);
-    let precip = crate::pixel_painter::precipitation_level(now, crate::sky::WeatherPolicy::Clock);
+    let precip = crate::sky::rain_at(now, crate::sky::WeatherPolicy::Clock);
     assert_eq!(
         frame.stems,
         crate::audio::stem_levels(&crate::board::per_floor_counts(&scene)[0], precip),
@@ -1019,7 +1039,7 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
     assert_eq!(
         frame.track,
         crate::audio::select_track(
-            crate::pixel_painter::is_day_at(now),
+            crate::sky::is_day_at(now),
             precip,
             crate::audio::track_epoch(now),
         ),
@@ -1450,6 +1470,36 @@ fn neon_a_starved_tube_holds_each_flash_and_dark_the_floor() {
                 "{motion:?}: {runs:?}"
             );
         }
+    }
+}
+
+/// On every tier, ticked at a live painter's [`FRAME`], a starved tube
+/// flashes at most [`PHOTOSENSITIVE_FLASHES_PER_SECOND`] times in any second
+/// of wall time.
+///
+/// [`PHOTOSENSITIVE_FLASHES_PER_SECOND`]: crate::anim::PHOTOSENSITIVE_FLASHES_PER_SECOND
+#[test]
+fn neon_a_starved_tube_flashes_at_most_three_times_a_second() {
+    use crate::anim::{PHOTOSENSITIVE_FLASHES_PER_SECOND, most_flashes_in_a_second};
+    const CYCLES: u64 = 2;
+    let frame_ms = FRAME.as_millis() as u64;
+    for motion in Motion::ALL {
+        let mut neon = NeonState::new();
+        let span = CYCLES * NeonState::STUTTER_MS * motion.pace().unwrap_or(1);
+        let samples = (0..span / frame_ms).map(|n| {
+            let timing = motion.timing(in_stutter_cycle(0) + FRAME * n as u32);
+            let lit = neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, timing) == NeonLevels::FLASH;
+            (n * frame_ms, if lit { 1.0 } else { 0.0 })
+        });
+        let most = most_flashes_in_a_second(samples);
+        assert!(
+            most <= PHOTOSENSITIVE_FLASHES_PER_SECOND,
+            "{motion:?}: {most}"
+        );
+        assert!(
+            motion == Motion::Still || most > 0,
+            "{motion:?} never flashed"
+        );
     }
 }
 
