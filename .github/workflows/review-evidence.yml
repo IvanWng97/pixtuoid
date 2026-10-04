@@ -10,9 +10,6 @@ on:
     paths: ["crates/**", ".cargo/mutants.toml"]
   workflow_dispatch:
     inputs:
-      head:
-        description: "Mutate this commit (default: the dispatched ref)"
-        required: false
       base:
         description: "Mutate the diff from this commit (default: the merge base with main)"
         required: false
@@ -22,7 +19,9 @@ permissions:
 
 concurrency:
   group: review-evidence-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A draft's run skips every job, so it must not cancel the evidence of the
+  # head before it.
+  cancel-in-progress: ${{ !github.event.pull_request.draft }}
 
 jobs:
   plan:
@@ -43,7 +42,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           # The PR head, not the merge ref: the diff is the PR's own.
-          ref: ${{ github.event.pull_request.head.sha || inputs.head || github.sha }}
+          # A dispatch mutates the ref it runs on, so its cache stays that
+          # branch's: checking out any other commit would write untrusted
+          # code's cache under the dispatched branch.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - id: base
