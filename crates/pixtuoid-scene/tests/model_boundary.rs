@@ -1,34 +1,42 @@
 //! The model names no rasterizer: outside `pixel_painter/` and `cutaway/`, no
 //! source file paths into either, but for the edges [`KNOWN_EDGES`] lists.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 const RASTERIZERS: [&str; 2] = ["pixel_painter", "cutaway"];
 
-/// Each model file or directory still naming a rasterizer, and the PR that
-/// removes the edge. A fix deletes its entry.
-const KNOWN_EDGES: &[(&str, &str)] = &[
+/// Each model file or directory still naming a rasterizer, how many lines do,
+/// and the PR that removes the edge. A fix deletes its entry; a new edge under a
+/// listed path changes its count.
+const KNOWN_EDGES: &[(&str, usize, &str)] = &[
     (
         "display/",
+        27,
         "pen, text, light and effects move model-side: #1253",
     ),
     (
         "floor/",
+        7,
         "render_to_rgb_buffer, BaseFillCache and the both-painters tests: #1244; AgentFrame: #1253",
     ),
-    ("overlay.rs", "cutaway::text widths and AgentFrame: #1253"),
-    ("wall.rs", "cutaway::pen: #1253"),
+    (
+        "overlay.rs",
+        6,
+        "cutaway::text widths and AgentFrame: #1253",
+    ),
+    ("wall.rs", 1, "cutaway::pen: #1253"),
 ];
 
-/// Whether `code` names a rasterizer as a path segment.
-fn names_a_rasterizer(code: &str) -> bool {
+/// Whether `code` names a rasterizer as a path segment; inside a `use`
+/// statement every segment is a path, so a bare name counts.
+fn names_a_rasterizer(code: &str, in_use: bool) -> bool {
     RASTERIZERS.iter().any(|name| {
         code.match_indices(name).any(|(at, _)| {
             let (before, after) = (&code[..at], &code[at + name.len()..]);
             let bounded = !before.ends_with(|c: char| c.is_alphanumeric() || c == '_')
                 && !after.starts_with(|c: char| c.is_alphanumeric() || c == '_');
-            bounded && (before.ends_with("::") || after.starts_with("::"))
+            bounded && (in_use || before.ends_with("::") || after.starts_with("::"))
         })
     })
 }
@@ -49,7 +57,7 @@ fn the_model_names_no_rasterizer() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     rust_files(&src, &mut files);
-    let (mut met, mut stray) = (BTreeSet::new(), Vec::new());
+    let (mut met, mut stray) = (BTreeMap::<&str, usize>::new(), Vec::new());
     for file in files {
         let rel: Vec<String> = file
             .strip_prefix(&src)
@@ -67,25 +75,27 @@ fn the_model_names_no_rasterizer() {
             continue;
         }
         let text = std::fs::read_to_string(&file).expect("source reads");
+        let mut in_use = false;
         for (n, line) in text.lines().enumerate() {
             let code = line.split("//").next().unwrap_or_default();
-            if !names_a_rasterizer(code) {
+            let trimmed = code.trim_start();
+            in_use |= trimmed.starts_with("use ") || trimmed.contains(" use ");
+            let named = names_a_rasterizer(code, in_use);
+            in_use &= !code.contains(';');
+            if !named {
                 continue;
             }
-            match KNOWN_EDGES.iter().find(|(at, _)| rel.starts_with(at)) {
-                Some((at, _)) => {
-                    met.insert(*at);
-                }
+            match KNOWN_EDGES.iter().find(|(at, ..)| rel.starts_with(at)) {
+                Some((at, ..)) => *met.entry(*at).or_default() += 1,
                 None => stray.push(format!("{rel}:{}: {}", n + 1, line.trim())),
             }
         }
     }
     assert_eq!(stray, Vec::<String>::new(), "the model names a rasterizer");
-    let listed: BTreeSet<&str> = KNOWN_EDGES.iter().map(|(at, _)| *at).collect();
+    let listed: BTreeMap<&str, usize> = KNOWN_EDGES.iter().map(|&(at, n, _)| (at, n)).collect();
     assert_eq!(
-        listed.difference(&met).collect::<Vec<_>>(),
-        Vec::<&&str>::new(),
-        "listed but never met: delete the entry"
+        met, listed,
+        "a listed edge's line count moved: a fix lowers it (to 0: delete the entry), a new edge needs its own review"
     );
 }
 
@@ -96,13 +106,17 @@ fn a_rasterizer_path_is_named_but_its_word_is_not() {
         "crate::pixel_painter::AgentFrame",
         "use super::super::cutaway::text;",
     ] {
-        assert!(names_a_rasterizer(named), "{named}");
+        assert!(names_a_rasterizer(named, false), "{named}");
     }
+    assert!(
+        names_a_rasterizer("    cutaway,", true),
+        "a bare name in a use group"
+    );
     for unnamed in [
         "let cutaway = classic;",
         "fn cutaway_snapshot() {}",
         "Plan::Cutaway { tmux }",
     ] {
-        assert!(!names_a_rasterizer(unnamed), "{unnamed}");
+        assert!(!names_a_rasterizer(unnamed, false), "{unnamed}");
     }
 }
