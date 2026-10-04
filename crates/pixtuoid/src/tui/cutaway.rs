@@ -194,7 +194,7 @@ impl TileCutaway {
             showing,
             &mut self.cache,
         );
-        if dirty != Dirty::Rects(Vec::new()) {
+        if dirty != Dirty::Unchanged {
             self.image.clone_from(buf);
         }
         let hovers = hovers.clone();

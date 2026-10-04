@@ -42,9 +42,21 @@ pub struct CanvasFrame<'a> {
 pub enum Dirty {
     /// Anywhere.
     All,
-    /// Only inside these, in buffer pixels on whole layout cells; none at all
-    /// when the frame was not painted.
+    /// Only inside these, in buffer pixels on whole layout cells.
     Rects(Vec<Bounds>),
+    /// Nowhere: the frame was not painted.
+    Unchanged,
+}
+
+impl Dirty {
+    /// Only inside `rects`: [`Self::Unchanged`] when there are none.
+    fn within(rects: Vec<Bounds>) -> Self {
+        if rects.is_empty() {
+            Self::Unchanged
+        } else {
+            Self::Rects(rects)
+        }
+    }
 }
 
 /// What every pixel of a frame is painted under, beyond its display list and
@@ -122,7 +134,7 @@ impl CutawayCanvas {
             .collect();
         let size = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
         let dirty = match self.shown.take() {
-            Some(shown) if shown.epoch == epoch => Dirty::Rects(
+            Some(shown) if shown.epoch == epoch => Dirty::within(
                 changed(&shown.footprints, &footprints)
                     .into_iter()
                     .filter_map(|s| on_buffer(s, scale, size))
@@ -130,7 +142,7 @@ impl CutawayCanvas {
             ),
             _ => Dirty::All,
         };
-        if dirty != Dirty::Rects(Vec::new()) {
+        if dirty != Dirty::Unchanged {
             if (self.buf.width(), self.buf.height()) != size {
                 self.buf = RgbBuffer::filled(size.0, size.1, theme.surface.bg_fallback);
             }
@@ -322,9 +334,14 @@ mod tests {
                 let differ: Vec<usize> = (0..full.as_slice().len())
                     .filter(|&i| before.as_slice()[i] != full.as_slice()[i])
                     .collect();
-                match &shown.dirty {
-                    Dirty::All => tally.whole += 1,
-                    Dirty::Rects(rects) => {
+                let rects = match &shown.dirty {
+                    Dirty::All => None,
+                    Dirty::Rects(rects) => Some(rects.as_slice()),
+                    Dirty::Unchanged => Some(&[][..]),
+                };
+                match rects {
+                    None => tally.whole += 1,
+                    Some(rects) => {
                         if rects.is_empty() {
                             tally.skipped += 1;
                         } else {
@@ -485,11 +502,7 @@ mod tests {
                 .dirty
         };
         assert_eq!(dirty(normal(), 2), Dirty::All, "the first frame");
-        assert_eq!(
-            dirty(normal(), 2),
-            Dirty::Rects(Vec::new()),
-            "the same frame"
-        );
+        assert_eq!(dirty(normal(), 2), Dirty::Unchanged, "the same frame");
         assert_eq!(dirty(other, 2), Dirty::All, "a new theme");
         assert_eq!(dirty(other, 3), Dirty::All, "a new scale");
     }
