@@ -77,8 +77,8 @@ pub(crate) struct TileCutaway {
     cache: CutawayCache,
     /// The plan's cell.
     planned: CellSize,
-    /// The window's cell on the first frame, once read.
-    first_window: Option<Option<CellSize>>,
+    /// The window's cell on the first frame that read one.
+    first_window: Option<CellSize>,
     density: Density,
     protocol: ImageProtocol,
     tmux: bool,
@@ -161,9 +161,11 @@ impl TileCutaway {
     /// window's (as [`crate::graphics::probe`] ranks them), until a font zoom
     /// moves the window's cell from what it read on the first frame.
     fn cell_under(&mut self, window: Option<CellSize>) -> CellSize {
-        let first = *self.first_window.get_or_insert(window);
+        if self.first_window.is_none() {
+            self.first_window = window;
+        }
         match window {
-            Some(cell) if window != first => cell,
+            Some(cell) if Some(cell) != self.first_window => cell,
             _ => self.planned,
         }
     }

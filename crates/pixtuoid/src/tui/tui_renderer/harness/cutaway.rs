@@ -336,6 +336,39 @@ fn the_plans_cell_holds_until_the_windows_moves() {
     assert!(wire.take().contains(&first_tile(CELL)), "zoomed back");
 }
 
+/// A window that reports 0 px on the first frame has read nothing, so the
+/// plan's cell holds when the real cell arrives: it is no font zoom.
+#[test]
+fn a_first_frame_with_no_pixels_does_not_pose_as_the_windows_baseline() {
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let padded = CellSize {
+        w: CELL.w + 1,
+        h: CELL.h + 2,
+    };
+    let (mut r, wire) = painter(cols, rows, ImageProtocol::Sixel);
+    r.terminal.backend_mut().zoom(CellSize { w: 0, h: 0 });
+    let scene = office();
+    r.render(&scene, pack(), t0()).expect("render");
+    assert!(wire.take().contains(&first_tile(CELL)), "the plan's cell");
+    r.terminal.backend_mut().zoom(padded);
+    r.render(&scene, pack(), t0() + ImageProtocol::Sixel.cadence())
+        .expect("render");
+    assert_eq!(wire.take(), "", "the plan's cell holds, nothing re-cut");
+    let plan = crate::graphics::Plan::Cutaway {
+        fit: fit(cols, rows),
+        protocol: ImageProtocol::Sixel,
+        cell: CELL,
+        tmux: false,
+        forced: false,
+    };
+    let office = plan.office_extent(ratatui::layout::Size::new(cols, rows));
+    assert_eq!(
+        r.office_extent(),
+        (office.w, office.h),
+        "the boot seed's office"
+    );
+}
+
 /// A font zoom changes the cell's pixels: the window's cell cuts the tiles,
 /// classic paints while the cell is too small for the art, and the cutaway
 /// returns once it fits.
