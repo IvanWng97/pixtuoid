@@ -48,7 +48,7 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, sky: &Sky) {
 /// named field here; a stale hit is invisible to every other gate, so this
 /// key IS the correctness boundary — a new input into the fill loops must
 /// join it.
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 struct BaseFillKey {
     buf_w: u16,
     buf_h: u16,
@@ -61,6 +61,7 @@ struct BaseFillKey {
 /// the largest single cost of a frame (#900's profile) yet their inputs
 /// ([`BaseFillKey`]) change only on a resize, theme swap, or weather-tint
 /// change.
+#[derive(Debug)]
 pub(crate) struct BaseFillCache {
     key: Option<BaseFillKey>,
     filled: RgbBuffer,

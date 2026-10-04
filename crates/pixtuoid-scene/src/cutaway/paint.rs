@@ -429,7 +429,7 @@ impl Placed {
 }
 
 /// What the cutaway keeps across frames, for one pack.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct CutawayCache {
     figures: crate::frame_cache::FrameCache,
     art: ArtCache,
@@ -438,7 +438,7 @@ pub struct CutawayCache {
 
 /// Art found by recolouring, kept across frames; keyed by sprite name, so one
 /// cache serves one pack.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct ArtCache {
     cells: std::collections::HashMap<(&'static str, usize, u16, &'static [char]), Vec<bool>>,
     screens: std::collections::HashMap<(&'static str, u16, Screen), pixtuoid_core::sprite::Frame>,

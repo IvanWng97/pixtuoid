@@ -15,6 +15,7 @@ use crate::source::{Source, TaggedSender};
 /// A pure `~/.claude/projects` transcript watcher: no socket bind, no
 /// presence/pid plumbing. Every source's hooks ride the one socket owned by
 /// [`crate::source::hook::HookRouter`].
+#[derive(Debug)]
 pub struct ClaudeCodeSource {
     /// The watched `~/.claude/projects` transcript root.
     pub projects_root: PathBuf,

@@ -28,13 +28,14 @@ pub struct AgentFrame {
 }
 
 /// What [`paint_frame`] drew that the caller points at or badges.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct Drawn {
     pub(crate) agents: Vec<AgentFrame>,
     pub(crate) hovers: Hovers,
 }
 
 /// The classic's raster state for one floor, kept across frames.
+#[derive(Debug)]
 pub(crate) struct ClassicCaches {
     pub(crate) sprites: FrameCache,
     pub(crate) base_fill: BaseFillCache,

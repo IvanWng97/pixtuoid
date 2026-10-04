@@ -83,6 +83,8 @@ pub struct pixtuoid_core::source::antigravity::AntigravitySource
 pub pixtuoid_core::source::antigravity::AntigravitySource::brain_root: std::path::PathBuf
 impl pixtuoid_core::source::antigravity::AntigravitySource
 pub fn pixtuoid_core::source::antigravity::AntigravitySource::default_paths() -> Self
+impl core::fmt::Debug for pixtuoid_core::source::antigravity::AntigravitySource
+pub fn pixtuoid_core::source::antigravity::AntigravitySource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl pixtuoid_core::Source for pixtuoid_core::source::antigravity::AntigravitySource
 pub fn pixtuoid_core::source::antigravity::AntigravitySource::name(&self) -> &str
 pub async fn pixtuoid_core::source::antigravity::AntigravitySource::run(alloc::boxed::Box<Self>, pixtuoid_core::TaggedSender) -> anyhow::Result<()>
@@ -102,6 +104,8 @@ pub pixtuoid_core::source::claude_code::ClaudeCodeSource::projects_root: std::pa
 impl pixtuoid_core::source::claude_code::ClaudeCodeSource
 pub fn pixtuoid_core::source::claude_code::ClaudeCodeSource::default_paths() -> Self
 pub fn pixtuoid_core::source::claude_code::ClaudeCodeSource::default_socket_path() -> std::path::PathBuf
+impl core::fmt::Debug for pixtuoid_core::source::claude_code::ClaudeCodeSource
+pub fn pixtuoid_core::source::claude_code::ClaudeCodeSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl pixtuoid_core::Source for pixtuoid_core::source::claude_code::ClaudeCodeSource
 pub fn pixtuoid_core::source::claude_code::ClaudeCodeSource::name(&self) -> &str
 pub async fn pixtuoid_core::source::claude_code::ClaudeCodeSource::run(alloc::boxed::Box<Self>, pixtuoid_core::TaggedSender) -> anyhow::Result<()>
@@ -129,6 +133,8 @@ pub pixtuoid_core::source::codex::CodexSource::child_end_unclaims: core::option:
 pub pixtuoid_core::source::codex::CodexSource::sessions_root: std::path::PathBuf
 impl pixtuoid_core::source::codex::CodexSource
 pub fn pixtuoid_core::source::codex::CodexSource::default_paths() -> Self
+impl core::fmt::Debug for pixtuoid_core::source::codex::CodexSource
+pub fn pixtuoid_core::source::codex::CodexSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl pixtuoid_core::Source for pixtuoid_core::source::codex::CodexSource
 pub fn pixtuoid_core::source::codex::CodexSource::name(&self) -> &str
 pub async fn pixtuoid_core::source::codex::CodexSource::run(alloc::boxed::Box<Self>, pixtuoid_core::TaggedSender) -> anyhow::Result<()>
@@ -149,6 +155,8 @@ pub struct pixtuoid_core::source::copilot::CopilotSource
 pub pixtuoid_core::source::copilot::CopilotSource::sessions_root: std::path::PathBuf
 impl pixtuoid_core::source::copilot::CopilotSource
 pub fn pixtuoid_core::source::copilot::CopilotSource::default_paths() -> Self
+impl core::fmt::Debug for pixtuoid_core::source::copilot::CopilotSource
+pub fn pixtuoid_core::source::copilot::CopilotSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl pixtuoid_core::Source for pixtuoid_core::source::copilot::CopilotSource
 pub fn pixtuoid_core::source::copilot::CopilotSource::name(&self) -> &str
 pub async fn pixtuoid_core::source::copilot::CopilotSource::run(alloc::boxed::Box<Self>, pixtuoid_core::TaggedSender) -> anyhow::Result<()>
@@ -247,6 +255,8 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::daemon::Dec
 pub struct pixtuoid_core::source::daemon::PresenceExitWatch
 impl pixtuoid_core::source::daemon::PresenceExitWatch
 pub fn pixtuoid_core::source::daemon::PresenceExitWatch::watch(&self, &pixtuoid_core::source::daemon::DaemonInstanceKey, i32)
+impl core::fmt::Debug for pixtuoid_core::source::daemon::PresenceExitWatch
+pub fn pixtuoid_core::source::daemon::PresenceExitWatch::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_core::source::daemon::PresenceExitWatch
 impl core::marker::Send for pixtuoid_core::source::daemon::PresenceExitWatch
 impl core::marker::Sync for pixtuoid_core::source::daemon::PresenceExitWatch
@@ -340,6 +350,8 @@ pub pixtuoid_core::source::grok::GrokSource::child_end_unclaims: core::option::O
 pub pixtuoid_core::source::grok::GrokSource::sessions_root: std::path::PathBuf
 impl pixtuoid_core::source::grok::GrokSource
 pub fn pixtuoid_core::source::grok::GrokSource::default_paths() -> Self
+impl core::fmt::Debug for pixtuoid_core::source::grok::GrokSource
+pub fn pixtuoid_core::source::grok::GrokSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl pixtuoid_core::Source for pixtuoid_core::source::grok::GrokSource
 pub fn pixtuoid_core::source::grok::GrokSource::name(&self) -> &str
 pub async fn pixtuoid_core::source::grok::GrokSource::run(alloc::boxed::Box<Self>, pixtuoid_core::TaggedSender) -> anyhow::Result<()>
@@ -368,6 +380,8 @@ impl pixtuoid_core::source::hook::HookRouter
 pub fn pixtuoid_core::source::hook::HookRouter::new(std::path::PathBuf) -> Self
 pub fn pixtuoid_core::source::hook::HookRouter::with_child_end_unclaims(self, core::option::Option<pixtuoid_core::source::jsonl::ChildEndUnclaims>) -> Self
 pub fn pixtuoid_core::source::hook::HookRouter::with_presence_tx(self, core::option::Option<pixtuoid_core::source::daemon::PresenceSender>) -> Self
+impl core::fmt::Debug for pixtuoid_core::source::hook::HookRouter
+pub fn pixtuoid_core::source::hook::HookRouter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl pixtuoid_core::Source for pixtuoid_core::source::hook::HookRouter
 pub fn pixtuoid_core::source::hook::HookRouter::name(&self) -> &str
 pub async fn pixtuoid_core::source::hook::HookRouter::run(alloc::boxed::Box<Self>, pixtuoid_core::TaggedSender) -> anyhow::Result<()>
@@ -383,6 +397,8 @@ impl pixtuoid_core::source::hook::HookSocketListener
 pub async fn pixtuoid_core::source::hook::HookSocketListener::bind(impl core::convert::Into<std::path::PathBuf>) -> anyhow::Result<Self>
 pub fn pixtuoid_core::source::hook::HookSocketListener::path(&self) -> &std::path::Path
 pub async fn pixtuoid_core::source::hook::HookSocketListener::run(self, pixtuoid_core::TaggedSender) -> anyhow::Result<()>
+impl core::fmt::Debug for pixtuoid_core::source::hook::HookSocketListener
+pub fn pixtuoid_core::source::hook::HookSocketListener::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl !core::marker::Freeze for pixtuoid_core::source::hook::HookSocketListener
 impl core::marker::Send for pixtuoid_core::source::hook::HookSocketListener
 impl core::marker::Sync for pixtuoid_core::source::hook::HookSocketListener
@@ -434,6 +450,8 @@ impl core::clone::Clone for pixtuoid_core::source::jsonl::ChildEndUnclaims
 pub fn pixtuoid_core::source::jsonl::ChildEndUnclaims::clone(&self) -> pixtuoid_core::source::jsonl::ChildEndUnclaims
 impl core::default::Default for pixtuoid_core::source::jsonl::ChildEndUnclaims
 pub fn pixtuoid_core::source::jsonl::ChildEndUnclaims::default() -> Self
+impl core::fmt::Debug for pixtuoid_core::source::jsonl::ChildEndUnclaims
+pub fn pixtuoid_core::source::jsonl::ChildEndUnclaims::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_core::source::jsonl::ChildEndUnclaims
 impl core::marker::Send for pixtuoid_core::source::jsonl::ChildEndUnclaims
 impl core::marker::Sync for pixtuoid_core::source::jsonl::ChildEndUnclaims
@@ -453,6 +471,8 @@ pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_initial_window(self, cor
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_label_deriver(self, pixtuoid_core::source::jsonl::LabelDeriver) -> Self
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_liveness_probe(self, pixtuoid_core::source::jsonl::LivenessProbe) -> Self
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_path_filter(self, pixtuoid_core::source::decoder::PathFilter) -> Self
+impl core::fmt::Debug for pixtuoid_core::source::jsonl::JsonlWatcher
+pub fn pixtuoid_core::source::jsonl::JsonlWatcher::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_core::source::jsonl::JsonlWatcher
 impl core::marker::Send for pixtuoid_core::source::jsonl::JsonlWatcher
 impl core::marker::Sync for pixtuoid_core::source::jsonl::JsonlWatcher
@@ -519,6 +539,8 @@ pub fn pixtuoid_core::source::manager::SourceManager::spawn_with_health(self, pi
 pub fn pixtuoid_core::source::manager::SourceManager::with_source(self, alloc::boxed::Box<dyn pixtuoid_core::source::DynSource>) -> Self
 impl core::default::Default for pixtuoid_core::source::manager::SourceManager
 pub fn pixtuoid_core::source::manager::SourceManager::default() -> pixtuoid_core::source::manager::SourceManager
+impl core::fmt::Debug for pixtuoid_core::source::manager::SourceManager
+pub fn pixtuoid_core::source::manager::SourceManager::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for pixtuoid_core::source::manager::SourceManager
 impl core::marker::Send for pixtuoid_core::source::manager::SourceManager
 impl !core::marker::Sync for pixtuoid_core::source::manager::SourceManager
@@ -532,6 +554,8 @@ pub pixtuoid_core::source::omp::OmpSource::profile_sessions_roots: alloc::vec::V
 pub pixtuoid_core::source::omp::OmpSource::sessions_root: std::path::PathBuf
 impl pixtuoid_core::source::omp::OmpSource
 pub fn pixtuoid_core::source::omp::OmpSource::default_paths() -> Self
+impl core::fmt::Debug for pixtuoid_core::source::omp::OmpSource
+pub fn pixtuoid_core::source::omp::OmpSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl pixtuoid_core::Source for pixtuoid_core::source::omp::OmpSource
 pub fn pixtuoid_core::source::omp::OmpSource::name(&self) -> &str
 pub async fn pixtuoid_core::source::omp::OmpSource::run(alloc::boxed::Box<Self>, pixtuoid_core::TaggedSender) -> anyhow::Result<()>
