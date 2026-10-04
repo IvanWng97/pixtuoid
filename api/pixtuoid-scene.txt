@@ -1427,10 +1427,10 @@ pub pixtuoid_scene::pose::Pose::SeatedThinking
 pub pixtuoid_scene::pose::Pose::SeatedTyping
 pub pixtuoid_scene::pose::Pose::Walking
 pub pixtuoid_scene::pose::Pose::Walking::carrying_coffee: bool
-pub pixtuoid_scene::pose::Pose::Walking::frame: usize
 pub pixtuoid_scene::pose::Pose::Walking::from: pixtuoid_scene::layout::Point
 pub pixtuoid_scene::pose::Pose::Walking::t_x1000: u16
 pub pixtuoid_scene::pose::Pose::Walking::to: pixtuoid_scene::layout::Point
+pub pixtuoid_scene::pose::Pose::Walking::travelled: u32
 impl core::clone::Clone for pixtuoid_scene::pose::Pose
 pub fn pixtuoid_scene::pose::Pose::clone(&self) -> pixtuoid_scene::pose::Pose
 impl core::cmp::Eq for pixtuoid_scene::pose::Pose
@@ -1503,10 +1503,6 @@ pub const pixtuoid_scene::pose::ENTRY_ANIMATION_MS: u64
 pub const pixtuoid_scene::pose::STALE_RESUME_GAP_BASE_MS: u64
 pub const pixtuoid_scene::pose::STALE_RESUME_GAP_RANGE_MS: u64
 pub const pixtuoid_scene::pose::THINKING_WINDOW_SECS: u64
-pub const pixtuoid_scene::pose::TYPING_FRAMES: usize
-pub const pixtuoid_scene::pose::TYPING_FRAME_MS: u64
-pub const pixtuoid_scene::pose::WALKING_FRAMES: usize
-pub const pixtuoid_scene::pose::WALKING_FRAME_MS: u64
 pub const pixtuoid_scene::pose::WANDER_DWELL_EST_MS: u64
 pub const pixtuoid_scene::pose::WANDER_WALK_EST_MS: u64
 pub fn pixtuoid_scene::pose::aimless_wander_seed(pixtuoid_core::id::AgentId, u64) -> u64
@@ -1521,7 +1517,6 @@ pub fn pixtuoid_scene::pose::pick_aimless_dest(&pixtuoid_scene::layout::SceneLay
 pub fn pixtuoid_scene::pose::seated_dwell_ms(pixtuoid_core::id::AgentId) -> u64
 pub fn pixtuoid_scene::pose::stale_resume_gap_ms(pixtuoid_core::id::AgentId) -> u64
 pub fn pixtuoid_scene::pose::takes_trip(pixtuoid_core::id::AgentId, u64) -> bool
-pub fn pixtuoid_scene::pose::walking_frame(u64) -> usize
 pub fn pixtuoid_scene::pose::waypoint_index_for_cycle(pixtuoid_core::id::AgentId, u64, usize) -> usize
 pub mod pixtuoid_scene::render_scale
 pub struct pixtuoid_scene::render_scale::RenderScale(_)
