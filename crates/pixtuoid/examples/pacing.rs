@@ -260,7 +260,7 @@ fn run(
 /// interval for input that never comes. Each frame's interval, observed.
 fn real_clock(
     pack: &Arc<pixtuoid_core::sprite::format::Pack>,
-) -> Result<(Vec<Duration>, Vec<Duration>)> {
+) -> Result<(Vec<Duration>, Vec<Duration>, &'static str)> {
     let tick = Duration::from_secs(1) / PAINT_FPS;
     let (mut r, _wire) = renderer(
         Protocol::HalfBlock,
@@ -277,6 +277,9 @@ fn real_clock(
     let clock = Instant::now();
     let (mut renders, mut intervals) = (Vec::new(), Vec::new());
     let mut last = None;
+    // Probed once: a failed poll per frame would add its syscall to every
+    // observed interval.
+    let polls = crossterm::event::poll(Duration::ZERO).is_ok();
     while clock.elapsed() < SCENARIO {
         let begun = Instant::now();
         if let Some(prev) = last.replace(begun) {
@@ -284,9 +287,15 @@ fn real_clock(
         }
         r.render(&scene, pack, start + clock.elapsed())?;
         renders.push(begun.elapsed());
-        std::thread::sleep(tick);
+        // The loop's own wait is crossterm's input poll; a CI runner has no
+        // terminal to poll, so it sleeps.
+        if !polls {
+            std::thread::sleep(tick);
+        } else if crossterm::event::poll(tick)? {
+            crossterm::event::read()?;
+        }
     }
-    Ok((renders, intervals))
+    Ok((renders, intervals, if polls { "poll" } else { "sleep" }))
 }
 
 /// The `p`th percentile of `xs`, nearest rank.
@@ -408,11 +417,11 @@ fn main() -> Result<()> {
             "bytes_p95": byte_pct(95.0),
         }));
     }
-    let (renders, observed) = real_clock(&pack)?;
+    let (renders, observed, waited) = real_clock(&pack)?;
     let modeled = sleep_loop(&renders, tick);
     let _ = writeln!(
         stdout,
-        "\nreal-clock half-block Full: interval OBSERVED p50/p95/p99 {:.2}/{:.2}/{:.2} ms vs COMPUTED {:.2}/{:.2}/{:.2} ms",
+        "\nreal-clock half-block Full (waits on {waited}): interval OBSERVED p50/p95/p99 {:.2}/{:.2}/{:.2} ms vs COMPUTED {:.2}/{:.2}/{:.2} ms",
         ms(pct(&observed, 50.0)),
         ms(pct(&observed, 95.0)),
         ms(pct(&observed, 99.0)),
@@ -422,12 +431,18 @@ fn main() -> Result<()> {
     );
     report.push(serde_json::json!({
         "case": "real-clock half-block Full",
+        "waits_on": waited,
         "interval_observed": stats(&observed),
         "interval_computed": stats(&modeled),
     }));
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/pacing");
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join("report.json");
+    let path = PathBuf::from(
+        std::env::args()
+            .nth(1)
+            .context("usage: pacing <report.json>")?,
+    );
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
     std::fs::write(
         &path,
         serde_json::to_string_pretty(&serde_json::json!({
