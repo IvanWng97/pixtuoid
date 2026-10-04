@@ -483,10 +483,10 @@ def paste(dst, src, dx=0, dy=0):
 # Each style draws four views on its own layer canvas, the tallest pose's rows
 # plus HAIR_HEADROOM above for a bun or a tuft: `front` and `side` as
 # (behind, over) pairs, `back` and `crown` as one layer over the body. Every
-# coordinate below is on the pose grid; `o` shifts it onto the layer.
+# coordinate below is on the pose grid; `LIFT` shifts it onto the layer.
 HAIR_HEADROOM = 6
 LAYER_H = STANDING_ROWS * S + HAIR_HEADROOM
-o = HAIR_HEADROOM
+LIFT = HAIR_HEADROOM
 # The skull in profile, and the head seen from above as it lies on the arms.
 SIDE_CX, SIDE_CY = 14.0, 12.5
 CROWN_CX, CROWN_CY, CROWN_R = FIG_CX, 16.5, 10.0
@@ -498,25 +498,25 @@ def layer():
 
 def front_fringe(tips):
     f = layer()
-    fringe(f, tips, FACE_TOP - 4, o)
+    fringe(f, tips, FACE_TOP - 4, LIFT)
     return rim_light(f, lit_top=False)
 
 
 def front_locks(locks):
     f = layer()
-    fringe_locks(f, locks, FACE_TOP - 4, o)
+    fringe_locks(f, locks, FACE_TOP - 4, LIFT)
     return rim_light(f, lit_top=False)
 
 
 def side_locks(locks, top=8):
     f = layer()
-    fringe_locks(f, locks, top, o)
+    fringe_locks(f, locks, top, LIFT)
     return rim_light(f, lit_top=False)
 
 
 def nape_cut(g, half=6, rows=(20, 23)):
     """Hair gathered up leaves the nape bare: clear its middle so the neck shows."""
-    for y in range(rows[0] + o, rows[1] + o):
+    for y in range(rows[0] + LIFT, rows[1] + LIFT):
         for x in range(1, FIG_W - 1):
             if g[y][x] != T and abs(x + 0.5 - FIG_CX) < half:
                 g[y][x] = T
@@ -524,13 +524,13 @@ def nape_cut(g, half=6, rows=(20, 23)):
 
 def crown_base(r_extra=0.0):
     c = layer()
-    disc(c, CROWN_CX, CROWN_CY + o, CROWN_R + r_extra)
+    disc(c, CROWN_CX, CROWN_CY + LIFT, CROWN_R + r_extra)
     return c
 
 
 def crown_finish(c, r=CROWN_R):
     rim_light(c)
-    terminator(c, CROWN_CX, CROWN_CY + o, r + 1.5)
+    terminator(c, CROWN_CX, CROWN_CY + LIFT, r + 1.5)
     return c
 
 
@@ -543,25 +543,27 @@ def style_mop():
     """A round cloud of a mop."""
     b = layer()
     for px, py, r in MOP_PUFFS:
-        disc(b, px, py + o, r)
-    rim_light(b, [(11, 7 + o), (12, 8 + o), (19, 6 + o), (19, 7 + o), (23, 10 + o), (7, 10 + o)],
-              [(9, 3 + o), (10, 3 + o), (14, 2 + o), (15, 2 + o)])
+        disc(b, px, py + LIFT, r)
+    rim_light(b, [(11, 7 + LIFT), (12, 8 + LIFT), (19, 6 + LIFT), (19, 7 + LIFT),
+                  (23, 10 + LIFT), (7, 10 + LIFT)],
+              [(9, 3 + LIFT), (10, 3 + LIFT), (14, 2 + LIFT), (15, 2 + LIFT)])
     back = layer()
     for px, py, r in MOP_PUFFS + [(10.5, 21.5, 3.2), (15.5, 22.2, 3.2), (20.5, 21.5, 3.2)]:
-        disc(back, px, py + (0.5 if r > 10 else 0) + o, r)
-    rim_light(back, [], [(9, 3 + o), (10, 3 + o), (14, 2 + o), (15, 2 + o)])
-    terminator(back, FIG_CX, 12.5 + o, 12.5, 8 + o)
-    comb(back, [((11, 7), (12, 10)), ((19, 6), (18, 9)), ((15, 11), (16, 14))], o)
+        disc(back, px, py + (0.5 if r > 10 else 0) + LIFT, r)
+    rim_light(back, [], [(9, 3 + LIFT), (10, 3 + LIFT), (14, 2 + LIFT), (15, 2 + LIFT)])
+    terminator(back, FIG_CX, 12.5 + LIFT, 12.5, 8 + LIFT)
+    comb(back, [((11, 7), (12, 10)), ((19, 6), (18, 9)), ((15, 11), (16, 14))], LIFT)
     sb = layer()
     for px, py, r in ((SIDE_CX, SIDE_CY, 11.2), (8, 5, 3.6), (13, 3, 3.6), (18.5, 3.5, 3.4),
                       (22.5, 6.2, 3.2), (4.5, 11, 3.8), (4.5, 16, 3.6), (6.5, 20, 3.2),
                       (10, 21.5, 3.0)):
-        disc(sb, px, py + o, r)
-    rim_light(sb, [(10, 8 + o), (16, 7 + o), (8, 14 + o)], [(12, 2 + o), (13, 2 + o)])
+        disc(sb, px, py + LIFT, r)
+    rim_light(sb, [(10, 8 + LIFT), (16, 7 + LIFT), (8, 14 + LIFT)],
+              [(12, 2 + LIFT), (13, 2 + LIFT)])
     c = crown_base(1.2)
     for a in range(0, 360, 40):
         disc(c, CROWN_CX + math.cos(math.radians(a)) * CROWN_R,
-             CROWN_CY + o + math.sin(math.radians(a)) * CROWN_R, 3.2)
+             CROWN_CY + LIFT + math.sin(math.radians(a)) * CROWN_R, 3.2)
     return {"front": (b, front_fringe({7: 16, 8: 15, 9: 14, 10: 13, 11: 13, 12: 14, 13: 13, 14: 12,
                                        15: 13, 16: 13, 17: 12, 18: 13, 19: 14, 20: 13, 21: 13,
                                        22: 14, 23: 15, 24: 16})),
@@ -580,30 +582,31 @@ def style_messy():
     b = layer()
     for px, py, r in ((FIG_CX, 12.5, 10.6), (5.4, 13.0, 3.9), (26.0, 13.0, 3.9), (5.8, 17.4, 3.0),
                       (25.6, 17.4, 3.0)):
-        disc(b, px, py + o, r)
+        disc(b, px, py + LIFT, r)
     for t in MESSY_TUFTS:
-        tuft(b, t[0], t[1] + o, *t[2:])
+        tuft(b, t[0], t[1] + LIFT, *t[2:])
     back = [row[:] for row in b]
     for t in ((10.0, 21.0, 100, 3.0, 2.2), (14.0, 22.0, 85, 3.4, 2.4), (18.0, 22.0, 95, 3.2, 2.4),
               (22.0, 21.0, 80, 3.0, 2.2)):
-        tuft(back, t[0], t[1] + o, *t[2:])
+        tuft(back, t[0], t[1] + LIFT, *t[2:])
     for px, py, r in ((6.0, 17.6, 3.0), (25.4, 17.6, 3.0)):
-        disc(back, px, py + o, r)
-    strands = [(12, 6 + o), (13, 7 + o), (18, 5 + o), (18, 6 + o), (21, 7 + o), (9, 8 + o)]
-    rim_light(b, strands, [(10, 3 + o), (11, 3 + o), (15, 2 + o), (16, 2 + o)])
-    rim_light(back, strands + [(10, 12 + o), (16, 15 + o)],
-              [(10, 3 + o), (11, 3 + o), (15, 2 + o), (16, 2 + o)])
+        disc(back, px, py + LIFT, r)
+    strands = [(12, 6 + LIFT), (13, 7 + LIFT), (18, 5 + LIFT), (18, 6 + LIFT), (21, 7 + LIFT),
+               (9, 8 + LIFT)]
+    rim_light(b, strands, [(10, 3 + LIFT), (11, 3 + LIFT), (15, 2 + LIFT), (16, 2 + LIFT)])
+    rim_light(back, strands + [(10, 12 + LIFT), (16, 15 + LIFT)],
+              [(10, 3 + LIFT), (11, 3 + LIFT), (15, 2 + LIFT), (16, 2 + LIFT)])
     sb = layer()
     for px, py, r in ((SIDE_CX, SIDE_CY, 11.0), (4.8, 13, 3.8), (6.2, 18.5, 3.2)):
-        disc(sb, px, py + o, r)
+        disc(sb, px, py + LIFT, r)
     for t in ((9, 4, -135, 3.4, 2.8), (13.5, 2.4, -105, 3.0, 2.6), (18.5, 2.8, -75, 3.0, 2.6),
               (22.5, 5.5, -40, 3.0, 2.4), (4.5, 8.5, -165, 3.0, 2.4), (5.5, 19.5, 160, 3.0, 2.2)):
-        tuft(sb, t[0], t[1] + o, *t[2:])
-    rim_light(sb, [(11, 7 + o), (17, 6 + o)], [(12, 2 + o), (13, 2 + o)])
+        tuft(sb, t[0], t[1] + LIFT, *t[2:])
+    rim_light(sb, [(11, 7 + LIFT), (17, 6 + LIFT)], [(12, 2 + LIFT), (13, 2 + LIFT)])
     c = crown_base(1.2)
     for a in range(200, 350, 30):
         tuft(c, CROWN_CX + math.cos(math.radians(a)) * CROWN_R * 0.9,
-             CROWN_CY + o + math.sin(math.radians(a)) * CROWN_R * 0.9, a, 3.2, 2.6)
+             CROWN_CY + LIFT + math.sin(math.radians(a)) * CROWN_R * 0.9, a, 3.2, 2.6)
     return {"front": (b, front_fringe({7: 16, 8: 15, 9: 13, 10: 13, 11: 14, 12: 16, 13: 13, 14: 12,
                                        15: 12, 16: 13, 17: 13, 18: 15, 19: 13, 20: 12, 21: 13,
                                        22: 14, 23: 15, 24: 16})),
@@ -617,23 +620,24 @@ def style_side_part():
     b = layer()
     for px, py, r in ((FIG_CX, 12.5, 10.2), (6.0, 14.0, 3.6), (25.0, 14.0, 3.8), (6.4, 18.0, 2.6),
                       (24.8, 18.2, 2.8)):
-        disc(b, px, py + o, r)
-    rim_light(b, [(11, 2 + o), (11, 3 + o), (11, 4 + o), (10, 5 + o), (10, 6 + o)],
-              [(15, 3 + o), (16, 3 + o)])
+        disc(b, px, py + LIFT, r)
+    rim_light(b, [(11, 2 + LIFT), (11, 3 + LIFT), (11, 4 + LIFT), (10, 5 + LIFT), (10, 6 + LIFT)],
+              [(15, 3 + LIFT), (16, 3 + LIFT)])
     back = layer()
     for px, py, r in ((FIG_CX, 12.8, 10.4), (6.0, 14.0, 3.6), (25.0, 14.0, 3.8), (7.0, 18.4, 3.0),
                       (24.2, 18.4, 3.2)):
-        disc(back, px, py + o, r)
-    rect(back, 9, 18 + o, 23, 22 + o, HAIR)
-    rim_light(back, [], [(15, 3 + o), (16, 3 + o)])
-    terminator(back, FIG_CX, 12.8 + o, 12.0, 8 + o)
-    comb(back, [((12, 4), (10, 9), (9, 14)), ((17, 4), (19, 9), (21, 13))], o)
+        disc(back, px, py + LIFT, r)
+    rect(back, 9, 18 + LIFT, 23, 22 + LIFT, HAIR)
+    rim_light(back, [], [(15, 3 + LIFT), (16, 3 + LIFT)])
+    terminator(back, FIG_CX, 12.8 + LIFT, 12.0, 8 + LIFT)
+    comb(back, [((12, 4), (10, 9), (9, 14)), ((17, 4), (19, 9), (21, 13))], LIFT)
     sb = layer()
-    disc(sb, SIDE_CX, SIDE_CY + o, 10.8)
-    ellipse(sb, 7, 17 + o, 4, 5)
-    rim_light(sb, [(10, 5 + o), (8, 9 + o), (7, 13 + o)], [(15, 2 + o), (16, 2 + o)])
+    disc(sb, SIDE_CX, SIDE_CY + LIFT, 10.8)
+    ellipse(sb, 7, 17 + LIFT, 4, 5)
+    rim_light(sb, [(10, 5 + LIFT), (8, 9 + LIFT), (7, 13 + LIFT)],
+              [(15, 2 + LIFT), (16, 2 + LIFT)])
     c = crown_finish(crown_base())
-    for y in range(int(CROWN_CY - CROWN_R) + 1 + o, int(CROWN_CY) + 2 + o):  # the part
+    for y in range(int(CROWN_CY - CROWN_R) + 1 + LIFT, int(CROWN_CY) + 2 + LIFT):  # the part
         if c[y][int(CROWN_CX) - 2] != T:
             c[y][int(CROWN_CX) - 2] = HAIR_SH
     return {"front": (b, front_fringe({7: 14, 8: 13, 9: 12, 10: 12, 11: 12, 12: 12, 13: 13, 14: 13,
@@ -649,50 +653,53 @@ def style_long():
     """Long and parted in the middle, falling behind the shoulders to the
     chest in pointed ends."""
     b = layer()
-    ellipse(b, FIG_CX, 12.0 + o, 11.2, 11.0)
-    for y in range(12 + o, 35 + o):
-        spread = (y - 12 - o) / 23
+    ellipse(b, FIG_CX, 12.0 + LIFT, 11.2, 11.0)
+    for y in range(12 + LIFT, 35 + LIFT):
+        spread = (y - 12 - LIFT) / 23
         rect(b, int(3 - spread * 1.5), y, int(29 + spread * 1.5), y + 1, HAIR)
     for x0 in (1, 5, 9, 22, 26, 30):
         for i in range(3):
-            rect(b, max(1, x0 - 2 + i), 35 + o + i, min(FIG_W - 1, x0 + 2 - i), 36 + o + i, HAIR)
-    rim_light(b, [(9, 6 + o), (10, 7 + o), (21, 6 + o), (22, 7 + o), (4, 22 + o), (4, 26 + o),
-                  (27, 22 + o), (27, 26 + o)],
-              [(10, 3 + o), (11, 3 + o)])
+            rect(b, max(1, x0 - 2 + i), 35 + LIFT + i, min(FIG_W - 1, x0 + 2 - i), 36 + LIFT + i,
+                 HAIR)
+    rim_light(b, [(9, 6 + LIFT), (10, 7 + LIFT), (21, 6 + LIFT), (22, 7 + LIFT),
+                  (4, 22 + LIFT), (4, 26 + LIFT), (27, 22 + LIFT), (27, 26 + LIFT)],
+              [(10, 3 + LIFT), (11, 3 + LIFT)])
     back = layer()
-    ellipse(back, FIG_CX, 12.2 + o, 11.2, 11.0)
+    ellipse(back, FIG_CX, 12.2 + LIFT, 11.2, 11.0)
     # The fall narrows below the head so the shoulders show either side of it:
     # the shirt is how a viewer tells one long-haired back from another.
-    for y in range(12 + o, 37 + o):
-        spread = (y - 12 - o) / 25
-        narrow = min(1.0, (y - 12 - o) / 10) * 4
+    for y in range(12 + LIFT, 37 + LIFT):
+        spread = (y - 12 - LIFT) / 25
+        narrow = min(1.0, (y - 12 - LIFT) / 10) * 4
         rect(back, int(4 + narrow - spread), y, int(28 - narrow + spread), y + 1, HAIR)
     for x0 in (9, 13, 17, 21, 25):
         for i in range(3):
-            rect(back, max(1, x0 - 2 + i), 37 + o + i, min(FIG_W - 1, x0 + 2 - i), 38 + o + i,
+            rect(back, max(1, x0 - 2 + i), 37 + LIFT + i, min(FIG_W - 1, x0 + 2 - i),
+                 38 + LIFT + i,
                  HAIR)
-    rim_light(back, [], [(10, 3 + o), (11, 3 + o)])
-    terminator(back, FIG_CX, 20.0 + o, 19.0, 20 + o)
+    rim_light(back, [], [(10, 3 + LIFT), (11, 3 + LIFT)])
+    terminator(back, FIG_CX, 20.0 + LIFT, 19.0, 20 + LIFT)
     for x in range(7, 25):  # a band of sheen across the crown
-        y = 7 + o + abs(x - 15) // 4
+        y = 7 + LIFT + abs(x - 15) // 4
         if back[y][x] == HAIR:
             back[y][x] = HAIR_LT
     comb(back, [((9, 12), (8, 22), (7, 33)), ((15, 14), (15, 24), (14, 35)),
-                ((21, 12), (22, 22), (23, 33)), ((12, 26), (11, 34)), ((19, 26), (20, 34))], o)
+                ((21, 12), (22, 22), (23, 33)), ((12, 26), (11, 34)), ((19, 26), (20, 34))], LIFT)
     sb = layer()
-    disc(sb, SIDE_CX, SIDE_CY + o, 11.0)
-    lock(sb, 8.5, 12 + o, 6.0, 38 + o, 11, 6)  # full enough to meet the neck
-    rim_light(sb, [(9, 18 + o), (8, 24 + o), (7, 30 + o), (11, 7 + o)], [(14, 2 + o), (15, 2 + o)])
+    disc(sb, SIDE_CX, SIDE_CY + LIFT, 11.0)
+    lock(sb, 8.5, 12 + LIFT, 6.0, 38 + LIFT, 11, 6)  # full enough to meet the neck
+    rim_light(sb, [(9, 18 + LIFT), (8, 24 + LIFT), (7, 30 + LIFT), (11, 7 + LIFT)],
+              [(14, 2 + LIFT), (15, 2 + LIFT)])
     so = side_locks([(19.5, 13, 2.2), (22.5, 12.5, 2.2), (24.5, 12, 1.6)])
     strand = layer()
-    lock(strand, 14.5, 14 + o, 15.0, 24 + o, 3, 2)  # its west edge on the face's
+    lock(strand, 14.5, 14 + LIFT, 15.0, 24 + LIFT, 3, 2)  # its west edge on the face's
     paste(so, rim_light(strand))
     c = layer()
-    ellipse(c, CROWN_CX, CROWN_CY + 4 + o, 12.5, 13.5)
-    disc(c, CROWN_CX, CROWN_CY + o, CROWN_R)
+    ellipse(c, CROWN_CX, CROWN_CY + 4 + LIFT, 12.5, 13.5)
+    disc(c, CROWN_CX, CROWN_CY + LIFT, CROWN_R)
     crown_finish(c)
     for x0 in (6, 11, 16, 21, 26):
-        for y in range(int(CROWN_CY + 4) + o, int(CROWN_CY + 16) + o):
+        for y in range(int(CROWN_CY + 4) + LIFT, int(CROWN_CY + 16) + LIFT):
             if c[y][x0] in (HAIR, HAIR_LT):
                 c[y][x0] = HAIR_SH
     return {"front": (b, front_fringe({7: 20, 8: 17, 9: 15, 10: 14, 11: 13, 12: 12, 13: 12, 14: 11,
@@ -705,23 +712,23 @@ def style_bun():
     """Pulled back tight into a bun on the crown: combed lines run up to it, the ears show, the
     bun rises into the headroom."""
     b = layer()
-    ellipse(b, FIG_CX, 13.0 + o, 10.4, 9.6)
-    rim_light(b, [(11, 6 + o), (11, 8 + o), (20, 6 + o), (20, 8 + o)])
-    ball(b, FIG_CX, 2.6 + o, 4.0)
+    ellipse(b, FIG_CX, 13.0 + LIFT, 10.4, 9.6)
+    rim_light(b, [(11, 6 + LIFT), (11, 8 + LIFT), (20, 6 + LIFT), (20, 8 + LIFT)])
+    ball(b, FIG_CX, 2.6 + LIFT, 4.0)
     back = layer()
-    ellipse(back, FIG_CX, 13.0 + o, 10.2, 9.6)
+    ellipse(back, FIG_CX, 13.0 + LIFT, 10.2, 9.6)
     nape_cut(back)
     rim_light(back)
-    terminator(back, FIG_CX, 13.0 + o, 11.5, 8 + o)
+    terminator(back, FIG_CX, 13.0 + LIFT, 11.5, 8 + LIFT)
     comb(back, [((8, 17), (10, 12), (13, 8)), ((15, 19), (15, 13), (15, 8)),
-                ((23, 17), (21, 12), (18, 8))], o)
-    ball(back, FIG_CX, 2.6 + o, 4.0)
+                ((23, 17), (21, 12), (18, 8))], LIFT)
+    ball(back, FIG_CX, 2.6 + LIFT, 4.0)
     sb = layer()
-    disc(sb, SIDE_CX, SIDE_CY + 0.5 + o, 10.2)
-    rim_light(sb, [(10, 6 + o), (8, 10 + o), (16, 5 + o)])
-    ball(sb, 5.0, 5.5 + o, 4.0)
+    disc(sb, SIDE_CX, SIDE_CY + 0.5 + LIFT, 10.2)
+    rim_light(sb, [(10, 6 + LIFT), (8, 10 + LIFT), (16, 5 + LIFT)])
+    ball(sb, 5.0, 5.5 + LIFT, 4.0)
     c = crown_finish(crown_base())
-    curl(c, CROWN_CX, CROWN_CY - CROWN_R + 3.5 + o, 3.8)
+    curl(c, CROWN_CX, CROWN_CY - CROWN_R + 3.5 + LIFT, 3.8)
     return {"front": (b, front_fringe({7: 12, 8: 11, 9: 11, 10: 10, 11: 10, 12: 10, 13: 10, 14: 10,
                                        15: 10, 16: 10, 17: 10, 18: 10, 19: 10, 20: 10, 21: 10,
                                        22: 11, 23: 11, 24: 12})),
@@ -733,22 +740,23 @@ def style_crop():
     """Short and close to the skull, the fringe cut in points, the ears
     showing."""
     b = layer()
-    ellipse(b, FIG_CX, 13.0 + o, 10.2, 9.6)
-    rim_light(b, [(12, 6 + o), (19, 6 + o)], [(12, 5 + o), (13, 5 + o)])
+    ellipse(b, FIG_CX, 13.0 + LIFT, 10.2, 9.6)
+    rim_light(b, [(12, 6 + LIFT), (19, 6 + LIFT)], [(12, 5 + LIFT), (13, 5 + LIFT)])
     back = layer()
-    ellipse(back, FIG_CX, 13.2 + o, 10.2, 9.4)
-    for y in range(20 + o, 24 + o):  # the nape tapers
+    ellipse(back, FIG_CX, 13.2 + LIFT, 10.2, 9.4)
+    for y in range(20 + LIFT, 24 + LIFT):  # the nape tapers
         for x in range(1, FIG_W - 1):
-            if back[y][x] == HAIR and abs(x + 0.5 - FIG_CX) > 7 - (y - 20 - o):
+            if back[y][x] == HAIR and abs(x + 0.5 - FIG_CX) > 7 - (y - 20 - LIFT):
                 back[y][x] = T
-    rim_light(back, [(12, 7 + o), (19, 7 + o), (15, 12 + o)], [(12, 5 + o), (13, 5 + o)])
+    rim_light(back, [(12, 7 + LIFT), (19, 7 + LIFT), (15, 12 + LIFT)],
+              [(12, 5 + LIFT), (13, 5 + LIFT)])
     sb = layer()
-    disc(sb, SIDE_CX, SIDE_CY + 0.6 + o, 10.0)
-    for y in range(18 + o, 24 + o):
+    disc(sb, SIDE_CX, SIDE_CY + 0.6 + LIFT, 10.0)
+    for y in range(18 + LIFT, 24 + LIFT):
         for x in range(1, FIG_W - 1):
-            if sb[y][x] == HAIR and x > 11 - (y - 18 - o):
+            if sb[y][x] == HAIR and x > 11 - (y - 18 - LIFT):
                 sb[y][x] = T
-    rim_light(sb, [(10, 7 + o), (16, 5 + o)], [(13, 3 + o), (14, 3 + o)])
+    rim_light(sb, [(10, 7 + LIFT), (16, 5 + LIFT)], [(13, 3 + LIFT), (14, 3 + LIFT)])
     return {"front": (b, front_locks([(8.5, 13, 1.8), (11.5, 13.5, 2.0), (14.5, 12.5, 2.0),
                                       (17.5, 13.5, 2.0), (20.5, 12.5, 2.0), (23.0, 13, 1.6)])),
             "back": back, "side": (sb, side_locks([(20.5, 11.5, 2.0), (23.5, 11.5, 1.8)])),
@@ -758,18 +766,18 @@ def style_crop():
 def style_curls():
     """Tight curls in a close cap: rows of small rounds, each lit on its own."""
     b = layer()
-    ellipse(b, FIG_CX, 12.5 + o, 10.6, 10.0)
+    ellipse(b, FIG_CX, 12.5 + LIFT, 10.6, 10.0)
     rim_light(b)
     for cy, xs in ((2.8, (10.0, 13.5, 17.0, 20.5)), (5.2, (7.2, 10.6, 14.0, 17.4, 20.8, 24.0)),
                    (8.0, (5.4, 8.6, 12.0, 15.5, 19.0, 22.4, 25.6)), (11.2, (4.6, 26.4)),
                    (14.4, (4.6, 26.4))):
         for cx in xs:
-            curl(b, cx, cy + o, 2.3)
+            curl(b, cx, cy + LIFT, 2.3)
     f = layer()
     for cx in (8.4, 11.6, 14.8, 18.0, 21.2, 23.8):
-        curl(f, cx, 11.0 + o, 2.0)
+        curl(f, cx, 11.0 + LIFT, 2.0)
     back = layer()
-    ellipse(back, FIG_CX, 13.2 + o, 10.4, 9.8)
+    ellipse(back, FIG_CX, 13.2 + LIFT, 10.4, 9.8)
     rim_light(back)
     for cy, xs in ((2.8, (10.0, 13.5, 17.0, 20.5)), (5.2, (7.2, 10.6, 14.0, 17.4, 20.8, 24.0)),
                    (8.0, (5.4, 8.6, 12.0, 15.5, 19.0, 22.4, 25.6)),
@@ -778,23 +786,23 @@ def style_curls():
                    (17.6, (6.4, 9.8, 13.2, 16.6, 20.0, 23.6)),
                    (20.4, (9.6, 13.0, 16.4, 19.8))):
         for cx in xs:
-            curl(back, cx, cy + o, 2.3)
+            curl(back, cx, cy + LIFT, 2.3)
     sb = layer()
-    disc(sb, SIDE_CX, SIDE_CY + o, 10.8)
+    disc(sb, SIDE_CX, SIDE_CY + LIFT, 10.8)
     rim_light(sb)
     for cy, xs in ((3.0, (9.5, 13, 16.5, 20)), (5.8, (6.5, 10, 13.5, 17, 20.5, 23.5)),
                    (8.8, (4.5, 7.8, 11.2, 14.6, 18, 21.4)), (12, (4, 7.2, 10.6)),
                    (15.2, (4.2, 7.6, 11)), (18.4, (5.4, 8.8)), (21, (8, 11.2))):
         for cx in xs:
-            curl(sb, cx, cy + o, 2.3)
+            curl(sb, cx, cy + LIFT, 2.3)
     so = layer()
     for cx in (20.5, 23.5):
-        curl(so, cx, 10.5 + o, 2.0)
+        curl(so, cx, 10.5 + LIFT, 2.0)
     c = crown_finish(crown_base())
     for rr, n in ((0, 1), (4.5, 6), (8.2, 10)):
         for i in range(n):
             a = 2 * math.pi * i / n
-            curl(c, CROWN_CX + math.cos(a) * rr, CROWN_CY + o + math.sin(a) * rr, 2.3)
+            curl(c, CROWN_CX + math.cos(a) * rr, CROWN_CY + LIFT + math.sin(a) * rr, 2.3)
     return {"front": (b, f), "back": back, "side": (sb, so), "crown": c, "ears": False}
 
 
@@ -803,29 +811,31 @@ def style_shaggy():
     b = layer()
     for px, py, r in ((FIG_CX, 12.0, 10.8), (5.2, 14.5, 3.8), (26.2, 14.5, 3.8), (5.6, 19.0, 2.8),
                       (25.8, 19.0, 2.8)):
-        disc(b, px, py + o, r)
+        disc(b, px, py + LIFT, r)
     for t in ((9, 4.5, -120, 2.6, 2.6), (14.5, 2.4, -95, 2.4, 2.6), (20, 3.2, -65, 2.6, 2.6)):
-        tuft(b, t[0], t[1] + o, *t[2:])
+        tuft(b, t[0], t[1] + LIFT, *t[2:])
     back = [row[:] for row in b]
     for px, py, r in ((FIG_CX, 12.4, 10.8), (5.8, 19.0, 3.0), (25.6, 19.0, 3.0)):
-        disc(back, px, py + o, r)
+        disc(back, px, py + LIFT, r)
     for t in ((8.0, 20.5, 105, 4.0, 2.4), (12.0, 21.5, 92, 4.4, 2.6), (16.0, 22.0, 88, 4.6, 2.6),
               (20.0, 21.5, 85, 4.4, 2.6), (24.0, 20.5, 75, 4.0, 2.4)):
-        tuft(back, t[0], t[1] + o, *t[2:])
-    rim_light(b, [(12, 5 + o), (18, 5 + o)], [(12, 3 + o), (13, 3 + o)])
-    rim_light(back, [(12, 6 + o), (18, 6 + o), (10, 18 + o), (14, 19 + o), (18, 19 + o),
-                     (22, 18 + o)],
-              [(12, 3 + o), (13, 3 + o)])
+        tuft(back, t[0], t[1] + LIFT, *t[2:])
+    rim_light(b, [(12, 5 + LIFT), (18, 5 + LIFT)], [(12, 3 + LIFT), (13, 3 + LIFT)])
+    rim_light(back,
+              [(12, 6 + LIFT), (18, 6 + LIFT), (10, 18 + LIFT), (14, 19 + LIFT), (18, 19 + LIFT),
+                     (22, 18 + LIFT)],
+              [(12, 3 + LIFT), (13, 3 + LIFT)])
     sb = layer()
     for px, py, r in ((SIDE_CX, SIDE_CY, 11.0), (4.8, 13.5, 3.8), (6, 19, 3.2), (10, 21.5, 2.8)):
-        disc(sb, px, py + o, r)
+        disc(sb, px, py + LIFT, r)
     for t in ((10, 3.5, -125, 2.8, 2.6), (15, 2.2, -95, 2.6, 2.6), (20, 3.4, -65, 2.6, 2.4)):
-        tuft(sb, t[0], t[1] + o, *t[2:])
-    rim_light(sb, [(11, 7 + o), (17, 6 + o), (8, 14 + o)], [(13, 2 + o), (14, 2 + o)])
+        tuft(sb, t[0], t[1] + LIFT, *t[2:])
+    rim_light(sb, [(11, 7 + LIFT), (17, 6 + LIFT), (8, 14 + LIFT)],
+              [(13, 2 + LIFT), (14, 2 + LIFT)])
     c = crown_base(1.2)
     for a in range(200, 350, 30):
         tuft(c, CROWN_CX + math.cos(math.radians(a)) * CROWN_R * 0.9,
-             CROWN_CY + o + math.sin(math.radians(a)) * CROWN_R * 0.9, a, 3.2, 2.6)
+             CROWN_CY + LIFT + math.sin(math.radians(a)) * CROWN_R * 0.9, a, 3.2, 2.6)
     return {"front": (b, front_locks([(7.5, 18, 1.8), (10.0, 16.5, 2.2), (13.0, 17.5, 2.4),
                                       (16.2, 16.5, 2.4), (19.2, 17.5, 2.4), (22.0, 16.5, 2.2),
                                       (24.4, 18, 1.8)])),
@@ -838,22 +848,22 @@ def style_shaggy():
 def style_ponytail():
     """Gathered into a ponytail swept over the east shoulder."""
     b = layer()
-    ellipse(b, FIG_CX, 12.5 + o, 10.6, 10.2)
-    rim_light(b, [(12, 5 + o), (13, 6 + o)], [(11, 3 + o), (12, 3 + o)])
+    ellipse(b, FIG_CX, 12.5 + LIFT, 10.6, 10.2)
+    rim_light(b, [(12, 5 + LIFT), (13, 6 + LIFT)], [(11, 3 + LIFT), (12, 3 + LIFT)])
     f = front_fringe({7: 15, 8: 14, 9: 13, 10: 12, 11: 12, 12: 12, 13: 12, 14: 12, 15: 12, 16: 12,
                       17: 12, 18: 12, 19: 13, 20: 13, 21: 14, 22: 15, 23: 16, 24: 17})
     paste(f, tail(25, 17, 27, 33, 18))
     back = layer()
-    ellipse(back, FIG_CX, 12.8 + o, 10.6, 10.0)
+    ellipse(back, FIG_CX, 12.8 + LIFT, 10.6, 10.0)
     nape_cut(back)
     rim_light(back)
-    terminator(back, FIG_CX, 12.8 + o, 12.0, 8 + o)
+    terminator(back, FIG_CX, 12.8 + LIFT, 12.0, 8 + LIFT)
     comb(back, [((8, 9), (14, 12), (22, 16)), ((10, 16), (16, 17), (22, 17)),
-                ((13, 5), (18, 9), (23, 15))], o)
+                ((13, 5), (18, 9), (23, 15))], LIFT)
     paste(back, tail(24, 16, 27, 30, 17))
     sb = layer()
-    disc(sb, SIDE_CX, SIDE_CY + 0.4 + o, 10.4)
-    rim_light(sb, [(10, 6 + o), (8, 10 + o), (13, 9 + o), (16, 12 + o)])
+    disc(sb, SIDE_CX, SIDE_CY + 0.4 + LIFT, 10.4)
+    rim_light(sb, [(10, 6 + LIFT), (8, 10 + LIFT), (13, 9 + LIFT), (16, 12 + LIFT)])
     so = side_locks([(20.5, 11.5, 2.4), (23.5, 12, 2.0)])
     paste(so, tail(9, 17, 10, 33, 18))
     c = crown_finish(crown_base())
@@ -864,11 +874,12 @@ def style_ponytail():
 def tail(x0, y0, x1, y1, tie_y):
     """A ponytail's tail, lit on its own, with its tie."""
     t = layer()
-    lock(t, x0, y0 + o, x1, y1 + o, 5, 2)
-    rim_light(t, [(round(x0 + (x1 - x0) * f), round(y0 + (y1 - y0) * f) + o) for f in (0.4, 0.7)])
+    lock(t, x0, y0 + LIFT, x1, y1 + LIFT, 5, 2)
+    rim_light(t,
+              [(round(x0 + (x1 - x0) * f), round(y0 + (y1 - y0) * f) + LIFT) for f in (0.4, 0.7)])
     for x in range(int(min(x0, x1)) - 2, int(max(x0, x1)) + 3):
-        if 0 <= x < FIG_W and t[int(tie_y) + o][x] != T:
-            t[int(tie_y) + o][x] = HAIR_SH
+        if 0 <= x < FIG_W and t[int(tie_y) + LIFT][x] != T:
+            t[int(tie_y) + LIFT][x] = HAIR_SH
     return t
 
 
@@ -1228,20 +1239,20 @@ def hair_layers(style):
         behind, over = look[view] if view in ("front", "side") else (None, look[view])
         if look["ears"] and view in EARS:
             ears = layer()
-            EARS[view](ears, o)
+            EARS[view](ears, LIFT)
             if view == "side":
                 paste(ears, over)
                 over = ears
             else:
                 if behind is not None:
                     paste(ears, behind)
-                    EARS[view](ears, o)
+                    EARS[view](ears, LIFT)
                 behind = ears
         skin = layer()
         if view == "crown":
-            asleep_body(skin, o, 0)
+            asleep_body(skin, LIFT, 0)
         else:
-            bald_head(view, skin, o)
+            bald_head(view, skin, LIFT)
         views[view] = (
             finished(behind, skin, over) if behind is not None else None,
             finished(over, skin, None),
@@ -3624,7 +3635,7 @@ def main():
                     sprites[hair_file(style, view, part)] = render_sprite(
                         f"The {style} hairstyle, {view} view: the layer {part} the body.",
                         [lyr],
-                        [(view, HEAD_MARK[0], HEAD_MARK[1] + o)],
+                        [(view, HEAD_MARK[0], HEAD_MARK[1] + LIFT)],
                     )
     classic_marks = {"desk": desk_marks_1x(0), "desk_north": desk_marks_1x(DESK_NORTH_LIFT)}
     sprites |= {
