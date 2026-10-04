@@ -28,6 +28,8 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-alsa
       - uses: ./.github/actions/setup-cargo-just
+      # The `demo` gif's optimizer; the runner image doesn't ship it.
+      - run: sudo apt-get install -y -o Acquire::Retries=3 --no-install-recommends gifsicle
       - run: |
           python3 -m venv .venv
           .venv/bin/pip install --quiet -r requirements-dev.txt
