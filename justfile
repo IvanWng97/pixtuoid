@@ -729,10 +729,13 @@ site-demos:
     set -eu
     stamp=target/site-demos.inputs
     want=$(cat scripts/media.json scripts/gen-media.py site/src/themes.json site/src/weather.json | shasum | cut -d' ' -f1)
-    [ -d site/public/demos ] && [ "$(cat "$stamp" 2>/dev/null)" = "$want" ] && exit 0
+    # The rendered listing rides in the stamp, so a lost or half-written demo
+    # re-renders instead of passing on the inputs alone.
+    have() { ls -l site/public/demos 2>/dev/null | shasum | cut -d' ' -f1; }
+    [ "$(cat "$stamp" 2>/dev/null)" = "$want $(have)" ] && exit 0
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
     .venv/bin/python3 scripts/gen-media.py --only site
-    mkdir -p target && echo "$want" > "$stamp"
+    mkdir -p target && echo "$want $(have)" > "$stamp"
 
 [doc('Site dev server with HMR → http://localhost:4321/ (foreground; agents: site-dev-bg)')]
 [group('site')]
