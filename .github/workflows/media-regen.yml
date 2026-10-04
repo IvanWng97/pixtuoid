@@ -55,10 +55,18 @@ jobs:
         with:
           name: media-${{ github.sha }}
           path: rendered
+      # An App installation token, because a GITHUB_TOKEN PR starts no CI; it
+      # is minted per run for this repository alone and expires within the hour.
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.MEDIA_APP_ID }}
+          private-key: ${{ secrets.MEDIA_APP_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
       - env:
-          # A fine-grained PAT, because a GITHUB_TOKEN PR starts no CI. A GitHub
-          # App installation token is the least-privilege upgrade.
-          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           BRANCH: bot/media-regen
         run: |
           set -euo pipefail
@@ -69,8 +77,9 @@ jobs:
             gh pr close "$BRANCH" --comment "main renders these already." --delete-branch 2>/dev/null || true
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          bot="${APP_SLUG}[bot]"
+          git config user.name "$bot"
+          git config user.email "$(gh api "/users/$bot" --jq .id)+$bot@users.noreply.github.com"
           git switch --create "$BRANCH"
           git add --all -- docs/images
           git commit --quiet --message "chore(media): regenerate from ${GITHUB_SHA::8}"
