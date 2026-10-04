@@ -13,8 +13,6 @@
 //!   `deny_unknown_fields`, so the marker round-trips; managed-entry detection
 //!   keys on it (the per-event command's last token is the event name, not the
 //!   binary, so a Codex-style command-basename fallback wouldn't apply).
-//! - Comments/ordering are lost on the `toml::Value` round-trip (a backup is
-//!   taken).
 
 use std::path::{Path, PathBuf};
 

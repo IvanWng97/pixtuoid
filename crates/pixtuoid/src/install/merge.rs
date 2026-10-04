@@ -192,8 +192,13 @@ pub(crate) fn toml_merge_outcome(
     let changed = merged != doc;
     let mut edit: toml_edit::DocumentMut = content.parse()?;
     apply_toml(edit.as_item_mut(), &doc, &merged)?;
+    let mut out = edit.to_string();
+    // toml_edit writes LF; a file that was all-CRLF stays so.
+    if content.contains("\r\n") && !content.replace("\r\n", "").contains('\n') {
+        out = out.replace('\n', "\r\n");
+    }
     Ok(MergeOutcome {
-        content: edit.to_string(),
+        content: out,
         changed,
     })
 }
@@ -224,15 +229,19 @@ fn apply_toml(
             }
         }
         (toml::Value::Array(old), toml::Value::Array(new), toml_edit::Item::ArrayOfTables(aot))
-            if new.iter().all(toml::Value::is_table) =>
+            if !new.is_empty() && new.iter().all(toml::Value::is_table) =>
         {
             let mut kept = vec![false; old.len()];
+            let mut last_reused = None;
+            let mut in_order = true;
             let mut rebuilt = toml_edit::ArrayOfTables::new();
             for value in new {
                 let reuse = (0..old.len()).find(|&i| !kept[i] && old[i] == *value);
                 let table = match reuse.and_then(|i| aot.get(i).map(|t| (i, t.clone()))) {
                     Some((i, t)) => {
                         kept[i] = true;
+                        in_order &= last_reused.is_none_or(|j| j < i);
+                        last_reused = Some(i);
                         t
                     }
                     None => match toml_item(value)? {
@@ -241,6 +250,11 @@ fn apply_toml(
                     },
                 };
                 rebuilt.push(table);
+            }
+            // A reused entry keeps its place in the file, which wins over its
+            // place in the array; reordered, they take the array's.
+            if !in_order {
+                rebuilt.iter_mut().for_each(clear_table_positions);
             }
             *aot = rebuilt;
         }
@@ -265,27 +279,79 @@ fn toml_item(value: &toml::Value) -> anyhow::Result<toml_edit::Item> {
 
 fn clear_positions(item: &mut toml_edit::Item) {
     match item {
-        toml_edit::Item::Table(t) => {
-            t.set_position(None);
-            for (_, child) in t.iter_mut() {
-                clear_positions(child);
-            }
-        }
-        toml_edit::Item::ArrayOfTables(aot) => {
-            for t in aot.iter_mut() {
-                t.set_position(None);
-                for (_, child) in t.iter_mut() {
-                    clear_positions(child);
-                }
-            }
-        }
+        toml_edit::Item::Table(t) => clear_table_positions(t),
+        toml_edit::Item::ArrayOfTables(aot) => aot.iter_mut().for_each(clear_table_positions),
         _ => {}
+    }
+}
+
+fn clear_table_positions(table: &mut toml_edit::Table) {
+    table.set_position(None);
+    for (_, child) in table.iter_mut() {
+        clear_positions(child);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toml_merge_writes_the_merged_order_and_keeps_empty_arrays() {
+        let reorder = toml_merge_outcome("[[a]]\nx = 1\n\n[[a]]\nx = 2\n", |mut d: toml::Value| {
+            d["a"].as_array_mut().unwrap().reverse();
+            d
+        })
+        .unwrap();
+        let xs: Vec<i64> = toml::from_str::<toml::Value>(&reorder.content).unwrap()["a"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["x"].as_integer().unwrap())
+            .collect();
+        assert_eq!(xs, [2, 1], "{}", reorder.content);
+        let emptied = toml_merge_outcome("[[a]]\nx = 1\n", |mut d: toml::Value| {
+            d["a"] = toml::Value::Array(vec![]);
+            d
+        })
+        .unwrap();
+        assert_eq!(
+            toml::from_str::<toml::Value>(&emptied.content).unwrap()["a"],
+            toml::Value::Array(vec![])
+        );
+    }
+
+    /// An owner hook appended after ours: reinstalling moves ours to the end,
+    /// and the next reinstall finds nothing to do.
+    #[test]
+    fn a_reinstall_after_an_owner_hook_settles() {
+        let cmd = "PIXTUOID_SOURCE=codex /opt/bin/pixtuoid-hook";
+        let ours = crate::install::codex::merge_install("", cmd)
+            .unwrap()
+            .content;
+        let owner = format!(
+            "{ours}\n[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"notify-send done\"\n"
+        );
+        let moved = crate::install::codex::merge_install(&owner, cmd).unwrap();
+        let again = crate::install::codex::merge_install(&moved.content, cmd).unwrap();
+        assert!(!again.changed, "{}", moved.content);
+        assert_eq!(again.content, moved.content);
+    }
+
+    #[test]
+    fn a_crlf_file_stays_crlf() {
+        let out = toml_merge_outcome("# note\r\na = 1\r\n", |mut d: toml::Value| {
+            d.as_table_mut().unwrap().insert("b".into(), 2.into());
+            d
+        })
+        .unwrap();
+        assert!(
+            !out.content.replace("\r\n", "").contains('\n'),
+            "{:?}",
+            out.content
+        );
+        assert!(out.content.contains("# note"));
+    }
 
     /// A merge rewrites only what it changed: the owner's comments, on the keys,
     /// tables and hook groups it left equal, survive both directions.
