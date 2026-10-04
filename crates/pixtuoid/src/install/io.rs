@@ -202,6 +202,15 @@ fn sync_parent(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// [`sync_parent`] after a rename that already put the new bytes in place: a
+/// filesystem that refuses a directory fsync (some network and FUSE mounts)
+/// must not turn a write that happened into a reported failure.
+fn sync_parent_after_rename(path: &Path) {
+    if let Err(e) = sync_parent(path) {
+        tracing::warn!(error = %e, path = ?path, "written, but its directory could not be synced");
+    }
+}
+
 /// Read raw config content, following symlinks; "" for a missing file. For a
 /// locked read→merge→write round use [`ConfigLock::read`] instead, so the read
 /// shares the guard's pinned resolution.
@@ -373,7 +382,7 @@ impl ConfigLock {
             f.sync_all()?;
         }
         rename_with_retry(&tmp, &self.target)?;
-        sync_parent(&self.target)?;
+        sync_parent_after_rename(&self.target);
         Ok(())
     }
 }
@@ -419,7 +428,7 @@ fn backup_once_resolved(target: &Path, suffix: &str) -> Result<Option<PathBuf>> 
     // FlushFileBuffers rejects that; the rename is the atomicity.
     dst.sync_all()?;
     rename_with_retry(&tmp, &bak)?;
-    sync_parent(&bak)?;
+    sync_parent_after_rename(&bak);
     Ok(Some(bak))
 }
 

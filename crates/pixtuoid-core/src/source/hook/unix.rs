@@ -203,6 +203,11 @@ fn acquire_bind_lock(path: &Path) -> Result<std::fs::File> {
     }
 }
 
+/// Whether `tmp` fits `sun_path` with its NUL, so the bind can go through it.
+fn binds_via_temp(tmp: &Path) -> bool {
+    tmp.as_os_str().len() < SUN_PATH_CAP
+}
+
 pub(super) struct Listener {
     listener: UnixListener,
     // Never unlocked: the kernel releases it however abruptly the process dies, so
@@ -241,7 +246,7 @@ impl Listener {
         // A PIXTUOID_SOCKET whose FINAL path fits `sun_path` but whose
         // `.<pid>.tmp` twin does not falls back to a direct bind + chmod,
         // re-accepting the pre-chmod micro-TOCTOU.
-        if tmp.as_os_str().len() >= SUN_PATH_CAP {
+        if !binds_via_temp(&tmp) {
             let listener = UnixListener::bind(path)
                 .with_context(|| format!("binding hook socket at {}", path.display()))?;
             tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
@@ -336,6 +341,13 @@ mod tests {
     fn sun_path_cap_is_the_platform_s_field() {
         let want = if cfg!(target_os = "linux") { 108 } else { 104 };
         assert_eq!(SUN_PATH_CAP, want);
+    }
+
+    #[test]
+    fn a_temp_path_binds_only_with_room_for_its_nul() {
+        let of = |len: usize| std::path::PathBuf::from("/".repeat(len));
+        assert!(binds_via_temp(&of(SUN_PATH_CAP - 1)));
+        assert!(!binds_via_temp(&of(SUN_PATH_CAP)));
     }
 
     #[test]
