@@ -113,7 +113,7 @@ fn main() -> Result<()> {
         let mut samples = Vec::with_capacity(ITERS as usize);
         for i in 0..ITERS {
             // Advance time each frame so animation/motion actually re-derives.
-            let now = base + Duration::from_millis((15 + i) * 33);
+            let now = base + Duration::from_millis((15 + i) * pixtuoid_scene::anim::PAINT_FRAME_MS);
             let t = Instant::now();
             let _ = r.render(RenderInputs {
                 world: FloorInputs {
@@ -177,7 +177,7 @@ fn main() -> Result<()> {
         }
         let mut best = f64::MAX;
         for i in 0..60u64 {
-            let now = base + Duration::from_millis((15 + i) * 33);
+            let now = base + Duration::from_millis((15 + i) * pixtuoid_scene::anim::PAINT_FRAME_MS);
             let t = Instant::now();
             let _ = r.render(RenderInputs {
                 world: FloorInputs {

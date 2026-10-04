@@ -1101,9 +1101,10 @@ fn exit_uses_commute_speed_faster_than_wander() {
 /// pose-type boundary, under any desk↔waypoint teleport on this layout.
 const MAX_FRAME_STEP_PX: i32 = 20;
 
-/// Step `slot` for `frames` frames of [`PAINT_FRAME_MS`], sampling `character_top_left` against a
-/// real `AStarRouter`. Returns `(max_chebyshev_step, walking_frame_count)`. `churn`
-/// toggles an interior obstacle every other frame to force A* cache invalidation.
+/// Step `slot` for `frames` frames of [`PAINT_FRAME_MS`], sampling
+/// `character_top_left` against a real `AStarRouter`. Returns
+/// `(max_chebyshev_step, walking_frame_count)`. `churn` toggles an interior
+/// obstacle every other frame to force A* cache invalidation.
 fn max_top_left_step(
     slot: &AgentSlot,
     l: &SceneLayout,
@@ -1728,7 +1729,7 @@ fn frozen_leg_anchor_continuous_across_router_shape_change() {
     // ~40% of the frozen entry duration — mid-walk, where A and B diverge most.
     let entry_id = entry_slot(now).agent_id;
     let dur = walk_profile(octile_path_len(&a).max(1), WalkIntent::Entry, entry_id).duration_ms;
-    let flip_frame = ((dur * 2 / 5) / 33).max(2);
+    let flip_frame = ((dur * 2 / 5) / PAINT_FRAME_MS).max(2);
 
     let mut rig = RouteRig::new(FlipRouter {
         flipped: false,

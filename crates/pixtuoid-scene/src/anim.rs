@@ -483,10 +483,13 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../site/src/components/OfficeBackdrop.astro"
         );
-        let Ok(astro) = std::fs::read_to_string(path) else {
-            // crates.io-packaged test runs don't ship the repo's site/ tree.
+        // crates.io-packaged test runs don't ship the repo's site/ tree.
+        let site = concat!(env!("CARGO_MANIFEST_DIR"), "/../../site");
+        if !std::path::Path::new(site).is_dir() {
             return;
-        };
+        }
+        let astro =
+            std::fs::read_to_string(path).expect("OfficeBackdrop.astro moved or was renamed");
         let frame_ms: u64 = astro
             .lines()
             .find_map(|l| l.trim().strip_prefix("const FRAME_MS = "))

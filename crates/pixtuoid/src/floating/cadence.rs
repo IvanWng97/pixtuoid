@@ -79,8 +79,7 @@ mod tests {
     #[test]
     fn an_active_office_paints_at_active_fps_not_once_per_event_loop_iteration() {
         let painted = paints_over(false, Duration::from_secs(1), Duration::from_millis(1));
-        // 1ms poll quantization rounds each tick up to a whole ms, so the count
-        // lands just under ACTIVE_FPS.
+        // A band, not equality: 1ms poll quantization can slip a tick by a ms.
         assert!(
             (ACTIVE_FPS as usize - 2..=ACTIVE_FPS as usize + 1).contains(&painted),
             "an active office must paint ~ACTIVE_FPS times per second, not once per \
