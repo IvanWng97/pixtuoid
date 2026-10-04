@@ -1,5 +1,5 @@
 //! `pixtuoid-web` — the WebAssembly canvas painter over the `pixtuoid-scene`
-//! engine: an [`Office`] handle owns everything cross-frame so motion/pose stay
+//! engine: an [`Office`] handle owns everything cross-frame so walks/poses stay
 //! continuous, and `step(now_ms, w, h)` renders one frame into an RGBA staging
 //! buffer JS reads zero-copy via [`Office::frame_ptr`]/[`Office::frame_len`].
 //!
@@ -106,7 +106,7 @@ impl VisitorHires {
 }
 
 /// A live office rendered to a reusable RGBA buffer across frames. Keeping ONE
-/// handle alive across `step` calls is what keeps motion/pose continuous.
+/// handle alive across `step` calls is what keeps walks/poses continuous.
 #[wasm_bindgen]
 pub struct Office {
     scene: SceneState,
@@ -1004,7 +1004,7 @@ mod tests {
         assert!(
             o.scene.agents.contains_key(&cast_id(5))
                 && o.session.floor.ctx.walks.contains_key(&cast_id(5)),
-            "agent 5 must be live with motion state mid-loop (positive control)"
+            "agent 5 must be live with walk state mid-loop (positive control)"
         );
         // Past agent 5's SessionEnd + the exit grace + sweep.
         while t <= 115_000 {
@@ -1017,7 +1017,7 @@ mod tests {
         );
         assert!(
             !o.session.floor.ctx.walks.contains_key(&cast_id(5)),
-            "agent 5's motion state was evicted with its slot"
+            "agent 5's walk state was evicted with its slot"
         );
         assert!(
             !o.session.office.coffee.map().contains_key(&cast_id(5)),

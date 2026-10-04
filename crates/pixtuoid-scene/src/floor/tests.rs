@@ -96,9 +96,9 @@ fn door_anim_excludes_arrived_entry_profiles() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let id = AgentId::from_transcript_path("/p/door.jsonl");
     let mut fctx = FloorCtx::new();
-    let mut ms = WalkState::new(id);
+    let mut walk = WalkState::new(id);
     // Entry walk: duration 2000ms + pause 300ms → walk_arrived at 2300ms.
-    ms.entry = Some(crate::walk::WalkLeg {
+    walk.entry = Some(crate::walk::WalkLeg {
         started_at: t0,
         profile: WalkProfile {
             duration_ms: 2000,
@@ -109,7 +109,7 @@ fn door_anim_excludes_arrived_entry_profiles() {
         },
         from: crate::layout::Point { x: 0, y: 0 },
     });
-    fctx.walks.insert(id, ms);
+    fctx.walks.insert(id, walk);
 
     fctx.recompute_door_anim_max_ms(t0 + Duration::from_millis(1000));
     assert_eq!(
@@ -132,10 +132,7 @@ fn floor_ctx_default_equals_new() {
         d.door_anim_max_ms, 0,
         "FloorCtx::default() must match new() (door_anim_max_ms == 0)"
     );
-    assert!(
-        d.walks.is_empty(),
-        "default FloorCtx has no in-flight motion"
-    );
+    assert!(d.walks.is_empty(), "default FloorCtx has no walks");
 }
 
 #[test]
@@ -777,7 +774,7 @@ fn floor_session_render_owns_the_dual_eviction() {
     assert!(layout.is_some(), "a layoutable size renders");
     assert!(
         !session.floor.ctx.walks.contains_key(&gone),
-        "render() evicts the floor half (motion) — the floating-leak class"
+        "render() evicts the floor half (walks) — the floating-leak class"
     );
     assert!(
         !session.office.coffee.map().contains_key(&gone),
@@ -889,7 +886,7 @@ fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
     );
     assert!(
         session.floor.ctx.walks.contains_key(&id),
-        "the sim advanced: the entry leg was snapshotted into motion"
+        "the sim advanced: the entry leg was snapshotted into walks"
     );
     assert!(
         session.floor.ctx.door_anim_max_ms > 0,

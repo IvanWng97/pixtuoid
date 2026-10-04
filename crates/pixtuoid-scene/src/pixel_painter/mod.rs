@@ -178,10 +178,9 @@ pub struct PixelCtx<'a> {
 }
 
 /// The paint pass's borrow set — everything `paint_frame` may touch. The only
-/// `&mut`s are the pixel buffer and the paint-local caches (`FrameCache`,
-/// `BaseFillCache`); the sim stores are absent BY TYPE (`motion` is an
-/// immutable view, read by the debug route overlay), so painting cannot move
-/// the world.
+/// `&mut`s are the pixel buffer and the paint-local caches; the sim stores are
+/// absent BY TYPE (`walks` is an immutable view, read by the debug route
+/// overlay), so painting cannot move the world.
 struct PaintCtx<'a> {
     scene: &'a SceneState,
     layout: &'a SceneLayout,

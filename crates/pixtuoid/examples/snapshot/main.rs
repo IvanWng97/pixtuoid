@@ -219,7 +219,7 @@ struct SnapshotArgs {
     meeting: Option<u8>,
 
     /// Pre-roll a `--gif` capture: advance the simulated clock through the
-    /// real per-frame render (motion state advances) WITHOUT encoding frames
+    /// real per-frame render (walk state advances) WITHOUT encoding frames
     /// for the first N seconds, so the clip starts mid-action. Overrides the
     /// `--meeting` auto-computed warmup. (`--anim` has its own pre-roll knob,
     /// `--anim-skip-ms`.)

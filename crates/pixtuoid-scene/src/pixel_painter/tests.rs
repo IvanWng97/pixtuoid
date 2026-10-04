@@ -3473,7 +3473,7 @@ fn sim_step_fits_every_mascot_frame_on_the_canvas() {
 }
 
 #[test]
-fn sim_step_advances_motion_without_painting() {
+fn sim_step_advances_walks_without_painting() {
     use crate::pose::Pose;
     use std::time::Duration;
     let (scene, layout, id, now0, pack) = sim_rig();
@@ -3534,7 +3534,7 @@ fn sim_step_advances_motion_without_painting() {
             .route
             .walks
             .get(&id)
-            .is_some_and(|m| m.entry.is_some()),
+            .is_some_and(|walk| walk.entry.is_some()),
         "sim_step snapshotted the entry walk profile into the walks map"
     );
 }
@@ -4310,7 +4310,7 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
         .waypoints
         .iter()
         .position(|w| w.kind == crate::layout::WaypointKind::Printer)
-        .expect("printer at 160x96");
+        .expect("the layout places a printer");
     let frame = SimFrame {
         occupied_waypoints: [printer_idx].into(),
         ..empty_frame(&layout)
