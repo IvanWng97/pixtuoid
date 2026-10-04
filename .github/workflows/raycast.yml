@@ -37,6 +37,7 @@ jobs:
       - name: contract types match the committed schemas
         run: npm run gen:contract && git diff --exit-code src/contract.ts src/contract-outcome.ts
       - run: npx tsc --noEmit
+      - run: npm test
       - run: npx eslint .
       # LAST: it resolves advisories live, so at step one someone else's publish
       # skips every check below it (#846/#848).

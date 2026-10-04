@@ -9,6 +9,9 @@ import { promisify } from "node:util";
 // with `npm run gen:contract`.
 import type { SourceStatus } from "./contract";
 import type { OutcomeRow } from "./contract-outcome";
+import { conforms, type Schema } from "./conforms";
+import outcomeRowSchema from "../contract/outcome-row.schema.json";
+import sourceStatusSchema from "../contract/source-status.schema.json";
 
 const pExecFile = promisify(execFile);
 
@@ -30,6 +33,8 @@ export class BinaryNotFoundError extends Error {
   }
 }
 
+// Not raycast-env.d.ts's generated type: `ray build` writes it and needs the
+// macOS app, and CI type-checks with plain `tsc` on Linux.
 interface Preferences {
   binaryPath?: string;
 }
@@ -112,16 +117,25 @@ async function runPixtuoid(args: string[]): Promise<string> {
   }
 }
 
+/** `out` parsed as rows each conforming to `schema`: the installed binary
+ *  may be any version, and a cast checks nothing at runtime. */
+function rowsOf<T>(out: string, schema: Schema, what: string): T[] {
+  const rows: unknown = JSON.parse(out);
+  if (!Array.isArray(rows) || !rows.every((row) => conforms(row, schema))) {
+    throw new Error(`pixtuoid ${what} printed rows this extension can't read — update pixtuoid or the extension`);
+  }
+  return rows as T[];
+}
+
 export async function getSources(): Promise<SourceStatus[]> {
   const out = await runPixtuoid(["sources", "--json"]);
-  return JSON.parse(out) as SourceStatus[];
+  return rowsOf<SourceStatus>(out, sourceStatusSchema, "sources --json");
 }
 
 export async function toggleSource(id: string, connected: boolean): Promise<OutcomeRow> {
   const cmd = connected ? "disconnect" : "connect";
   const out = await runPixtuoid([cmd, id, "--json"]);
-  const rows = JSON.parse(out) as OutcomeRow[];
-  const row = rows[0];
+  const row = rowsOf<OutcomeRow>(out, outcomeRowSchema, `${cmd} --json`)[0];
   // An empty array means the change was NOT applied — never a silent success.
   if (!row) {
     throw new Error(`pixtuoid ${cmd} ${id} returned no outcome`);
