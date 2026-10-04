@@ -5,8 +5,8 @@ use crate::graphics::{CellSize, Fit, ImageProtocol};
 use crate::tui::cutaway::TileCutaway;
 use pixtuoid_core::sprite::format::Density;
 use std::io::Write;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
 
 /// A cell whose natural scale is the bundled art's density, so the image is
 /// the density render itself, one cell per 4×8 image pixels.
@@ -124,15 +124,10 @@ impl ratatui::backend::Backend for Window {
     }
 }
 
-fn arc_pack() -> Arc<Pack> {
-    static PACK: OnceLock<Arc<Pack>> = OnceLock::new();
-    Arc::clone(PACK.get_or_init(|| Arc::new(pack().clone())))
-}
-
 /// The plan's fit over a `cols`×`rows` terminal's scene.
 fn fit(cols: u16, rows: u16) -> Fit {
     let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
-    let fit = Fit::new(CELL, area, arc_pack().max_density_variant()).expect("fits");
+    let fit = Fit::new(CELL, area, pack_arc().max_density_variant()).expect("fits");
     assert_eq!(fit.upscale(), 1);
     assert_eq!(fit.density(), Density::new(4).expect("nonzero"));
     fit
@@ -160,11 +155,11 @@ fn armed(
         pets.into_iter()
             .map(pixtuoid_scene::pet::Pet::defaulted)
             .collect(),
+        pack_arc(),
     );
     let (wire, in_grid) = (Wire::default(), Box::leak(Box::new(AtomicBool::new(false))));
     r.set_cutaway(
         TileCutaway::new(
-            arc_pack(),
             fit(cols, rows),
             CELL,
             protocol,
@@ -216,13 +211,13 @@ fn placeholders_fill_the_scene_and_never_the_footer() {
 
 /// Its star link would launch a browser from a cell showing the image.
 #[test]
-fn the_cutaway_shows_no_wall_display() {
+fn the_cutaway_star_is_not_clickable() {
     let (mut r, _wire) = kitty(120, 40);
     r.render(&office(), pack(), t0()).expect("render");
-    assert!(!r.shows_wall_display());
+    assert!(!r.star_clickable());
     let mut classic = build(120, 40, vec![]);
     classic.render(&office(), pack(), t0()).expect("render");
-    assert!(classic.shows_wall_display());
+    assert!(classic.star_clickable());
 }
 
 /// A refused frame sends no tiles and leaves no hit targets behind.
@@ -397,7 +392,7 @@ fn a_font_zoom_refits_the_cutaway_to_the_windows_cell() {
         h: CELL.h / 2,
     };
     let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
-    assert!(Fit::new(tiny, area, arc_pack().max_density_variant()).is_none());
+    assert!(Fit::new(tiny, area, pack_arc().max_density_variant()).is_none());
     r.terminal.backend_mut().zoom(tiny);
     r.render(&scene, pack(), t0() + cadence * 2)
         .expect("render");
@@ -921,17 +916,11 @@ fn kitty_transmits_before_the_flush_and_sixel_after() {
             Terminal::new(backend).expect("terminal"),
             normal_theme(),
             vec![],
+            pack_arc(),
         );
         r.set_cutaway(
-            TileCutaway::new(
-                arc_pack(),
-                fit(120, 40),
-                CELL,
-                protocol,
-                false,
-                Box::new(wire.clone()),
-            )
-            .arming(Box::leak(Box::new(AtomicBool::new(false)))),
+            TileCutaway::new(fit(120, 40), CELL, protocol, false, Box::new(wire.clone()))
+                .arming(Box::leak(Box::new(AtomicBool::new(false)))),
         );
         r.render(&office(), pack(), t0()).expect("render");
         let sent = wire.take();
@@ -941,4 +930,86 @@ fn kitty_transmits_before_the_flush_and_sixel_after() {
         );
         assert_eq!(image < flush, first, "{protocol:?}");
     }
+}
+
+/// The cutaway's twin of the classic's refused-frame clamp: the door closes
+/// on time while the frame is refused.
+#[test]
+fn a_refused_cutaway_frame_keeps_the_doors_clamp_on_time() {
+    let (mut r, _wire) = kitty(120, 40);
+    let scene = office();
+    r.render(&scene, pack(), t0()).expect("render");
+    assert!(
+        r.floors[0].ctx.door_anim_max_ms > 0,
+        "the entry walk holds the door"
+    );
+    let (small_cols, small_rows) = too_small_terminal();
+    r.terminal.backend_mut().resize(small_cols, small_rows);
+    r.render(&scene, pack(), t0() + Duration::from_secs(600))
+        .expect("render");
+    assert_eq!(r.floors[0].ctx.door_anim_max_ms, 0, "the walk long arrived");
+}
+
+/// A slide cancelled on its first frame never paints, so nothing marks the
+/// screen as the slide's; the destination floor drawn before still repaints
+/// whole once the terminal is back, not as a diff of its own last frame.
+#[test]
+fn a_slide_cancelled_on_its_first_frame_repaints_the_destination_whole() {
+    let (cols, rows) = (120, 40);
+    let (mut r, wire) = painter(cols, rows, ImageProtocol::Sixel);
+    let scene = two_floor_scene();
+    let mut now = t0();
+    r.render(&scene, pack(), now).expect("render");
+    let every = wire.take().matches(SIXEL).count();
+    r.navigate_floor(1, now);
+    render_until_settled(&mut r, &scene, pack(), &mut now, 1);
+    r.navigate_floor(0, now);
+    render_until_settled(&mut r, &scene, pack(), &mut now, 0);
+    r.navigate_floor(1, now);
+    let (small_cols, small_rows) = too_small_terminal();
+    r.terminal.backend_mut().resize(small_cols, small_rows);
+    now += ImageProtocol::Sixel.cadence();
+    r.render(&scene, pack(), now).expect("render");
+    assert_eq!(r.current_floor(), 1);
+    r.terminal.backend_mut().resize(cols, rows);
+    wire.take();
+    now += ImageProtocol::Sixel.cadence();
+    r.render(&scene, pack(), now).expect("render");
+    assert_eq!(wire.take().matches(SIXEL).count(), every);
+}
+
+/// A floor can leave the screen without a slide: the top floor's last agent
+/// ends, the floor count drops, and the view clamps to the floor below. That
+/// floor's raster diffs against its own last frame, not the vanished floor
+/// on screen, so the terminal ends up holding exactly what a fresh painter of
+/// that floor sends.
+#[test]
+fn a_floor_clamped_into_view_repaints_whole() {
+    let held = |wire: &str, tiles: &mut std::collections::BTreeMap<u32, Vec<u8>>| {
+        tiles.extend(kitty_images(wire));
+    };
+    let (cols, rows) = (120, 40);
+    let (mut r, wire) = kitty(cols, rows);
+    let mut scene = two_floor_scene();
+    let mut now = t0();
+    let mut terminal = std::collections::BTreeMap::new();
+    r.render(&scene, pack(), now).expect("render");
+    r.navigate_floor(1, now);
+    render_until_settled(&mut r, &scene, pack(), &mut now, 1);
+    scene
+        .agents
+        .remove(&AgentId::from_transcript_path("/n/1.jsonl"));
+    now += ImageProtocol::Kitty.cadence();
+    r.render(&scene, pack(), now).expect("render");
+    assert_eq!(r.current_floor(), 0, "the view clamped");
+    held(&wire.take(), &mut terminal);
+
+    let (mut fresh, fresh_wire) = kitty(cols, rows);
+    fresh.render(&scene, pack(), now).expect("render");
+    let mut want = std::collections::BTreeMap::new();
+    held(&fresh_wire.take(), &mut want);
+    assert!(
+        terminal == want,
+        "the terminal still shows the vanished floor"
+    );
 }

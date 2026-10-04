@@ -14,7 +14,7 @@ pub(crate) use compose::{PLATE_PAD, board_runs, compose, desk_span, face_rows, i
 pub(crate) use hover::Hover;
 pub use hover::{HoverTarget, Hovers, PetHover};
 pub(crate) use list::{
-    Art, Badge, DisplayList, Figure, Flip, Ground, LightPiece, Piece, PieceKind, Screen, StoodProp,
+    Art, Badge, DisplayList, Figure, Flip, LightPiece, Piece, PieceKind, Screen, StoodProp,
     WindowView, fingerprint,
 };
 #[cfg(test)]

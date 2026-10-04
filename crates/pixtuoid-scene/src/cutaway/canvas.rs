@@ -33,8 +33,6 @@ pub struct CanvasFrame<'a> {
     pub buf: &'a RgbBuffer,
     /// Where it may differ from the canvas's previous frame.
     pub dirty: Dirty,
-    /// What it answers a pointer with.
-    pub hovers: &'a Hovers,
 }
 
 /// Where a frame's pixels may differ from the frame before.
@@ -56,7 +54,7 @@ struct Epoch {
     theme: &'static Theme,
     scale: RenderScale,
     ambient: Ambient,
-    ground: crate::display::Ground,
+    carpet: crate::atmosphere::Carpet,
     flash: crate::cutaway::light::Flash,
 }
 
@@ -66,7 +64,7 @@ impl PartialEq for Epoch {
             && std::ptr::eq(self.theme, other.theme)
             && self.scale == other.scale
             && self.ambient == other.ambient
-            && self.ground == other.ground
+            && self.carpet == other.carpet
             && self.flash == other.flash
     }
 }
@@ -111,7 +109,7 @@ impl CutawayCanvas {
             theme,
             scale,
             ambient: list.ambient(),
-            ground: list.ground(),
+            carpet: list.carpet(),
             flash: list.flash(),
         };
         let footprints: Vec<(Span, u64)> = list
@@ -136,7 +134,7 @@ impl CutawayCanvas {
             }
             paint(layout, &list, cache, &mut self.buf);
         }
-        let shown = self.shown.insert(Shown {
+        self.shown = Some(Shown {
             epoch,
             footprints,
             hovers: list.hovers().clone(),
@@ -144,8 +142,17 @@ impl CutawayCanvas {
         CanvasFrame {
             buf: &self.buf,
             dirty,
-            hovers: &shown.hovers,
         }
+    }
+
+    /// The last frame painted, empty before the first.
+    pub(crate) fn buf(&self) -> &RgbBuffer {
+        &self.buf
+    }
+
+    /// What the last frame answers a pointer with; `None` before the first.
+    pub(crate) fn hovers(&self) -> Option<&Hovers> {
+        self.shown.as_ref().map(|shown| &shown.hovers)
     }
 }
 
@@ -555,16 +562,14 @@ mod tests {
                 frame: frame.clone(),
             };
             let mut cache = crate::cutaway::paint::CutawayCache::default();
-            canvas
-                .frame(
-                    &stepped,
-                    normal(),
-                    self.scale,
-                    crate::display::compose::tests::showing(clear_ground(), Self::now()),
-                    &mut cache,
-                )
-                .hovers
-                .clone()
+            canvas.frame(
+                &stepped,
+                normal(),
+                self.scale,
+                crate::display::compose::tests::showing(clear_ground(), Self::now()),
+                &mut cache,
+            );
+            canvas.hovers().expect("a frame").clone()
         }
     }
 
@@ -917,7 +922,7 @@ mod tests {
         let pack = Arc::new(test_default_pack());
         let (walk_layout, _, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let walk_layout = Arc::new(walk_layout);
-        let office = crate::floor::FloorSession::new()
+        let office = crate::floor::FloorSession::new(Arc::clone(&pack))
             .step(
                 crate::floor::FloorInputs {
                     scene: &pixtuoid_core::SceneState::uniform(16),

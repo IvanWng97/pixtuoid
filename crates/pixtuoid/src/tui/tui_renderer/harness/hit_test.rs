@@ -129,7 +129,7 @@ struct Sprite {
 /// Where the painter blits `id`'s sprite at `now`, sized by the pack's frame.
 fn drawn(r: &TuiRenderer<TestBackend>, scene: &SceneState, id: AgentId, now: SystemTime) -> Sprite {
     let layout = r.cached_layout().expect("rendered layout");
-    let stepped = pixtuoid_scene::floor::FloorSession::new()
+    let stepped = pixtuoid_scene::floor::FloorSession::new(std::sync::Arc::new(pack().clone()))
         .step(
             pixtuoid_scene::floor::FloorInputs {
                 scene,
@@ -322,11 +322,11 @@ fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
     let cat = pixtuoid_scene::pet::Pet::defaulted(PetKind::Cat);
     for (cols, rows) in [(80, 30), (120, 52), (157, 41)] {
         let mut term = Terminal::new(TestBackend::new(cols, rows)).expect("test backend");
-        let mut floor = PerFloor::new();
-        let mut chitchat = std::collections::HashMap::new();
+        let mut floor = PerFloor::new(pack_arc());
+        let mut office = PerOffice::new();
         let mut ctx = DrawCtx::offscreen(
             &mut floor,
-            &mut chitchat,
+            office.stores(),
             normal_theme(),
             &scene,
             pack(),
