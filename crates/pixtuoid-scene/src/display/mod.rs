@@ -17,8 +17,8 @@ pub(crate) use compose::{PLATE_PAD, compose, desk_span, face_rows, run_rect};
 pub(crate) use hover::Hover;
 pub use hover::{HoverTarget, Hovers, PetHover};
 pub(crate) use list::{
-    Art, DisplayList, Figure, Flip, LightPiece, Piece, PieceKind, Screen, StoodProp, WindowView,
-    fingerprint,
+    Art, DisplayList, Emits, Figure, Flip, LightPiece, Piece, PieceKind, Screen, StoodProp,
+    WindowView, fingerprint,
 };
 #[cfg(test)]
 pub(crate) use order::check_order;

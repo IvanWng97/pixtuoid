@@ -10,10 +10,9 @@ use crate::cutaway::shade::{Ramp, fill, slab};
 use crate::display::compose::{art_size, desk_art, desk_front_h};
 use crate::display::pen::{ArtPx, ArtRect, Pen};
 use crate::display::{
-    Align, Art, DisplayList, Figure, Flip, Office, PLATE_PAD, PieceKind, Screen, Showing,
+    Align, Art, DisplayList, Emits, Figure, Flip, Office, PLATE_PAD, PieceKind, Screen, Showing,
     StoodProp, TextRun, WindowView, compose, desk_span, face_rows, run_rect,
 };
-use crate::effects::EffectKind;
 use crate::layout::{Bounds, FixtureKind, Point, SceneLayout, Size};
 use crate::pack::{CLOCK_SPRITE, DOOR_SPRITE, drawn_in};
 use crate::render_scale::RenderScale;
@@ -211,36 +210,11 @@ fn paint_pieces(
                     SHADED_MARK => Glow::Shaded,
                     _ => Glow::Lit,
                 };
-                let glow = match piece.kind {
-                    PieceKind::Glass { .. } => Glow::Pane,
-                    // A badge keeps the contrast its theme pins at every hour.
-                    PieceKind::Neon { .. } | PieceKind::Text { .. } => Glow::Emissive,
-                    PieceKind::Effect(r) if r.effect.kind == EffectKind::FlameCrown => {
-                        Glow::Emissive
-                    }
-                    PieceKind::Desk { .. }
-                    | PieceKind::Prop { .. }
-                    | PieceKind::Animated { .. }
-                    | PieceKind::Hung { .. }
-                    | PieceKind::Door { .. }
-                        if glowing =>
-                    {
-                        marked()
-                    }
-                    PieceKind::Desk { .. }
-                    | PieceKind::Prop { .. }
-                    | PieceKind::Animated { .. }
-                    | PieceKind::Hung { .. }
-                    | PieceKind::Door { .. }
-                    | PieceKind::WallSeg { .. }
-                    | PieceKind::Chair { .. }
-                    | PieceKind::DeskProp(_)
-                    | PieceKind::Creature { .. }
-                    | PieceKind::PropBand { .. }
-                    | PieceKind::Table { .. }
-                    | PieceKind::Character { .. }
-                    | PieceKind::Effect(_)
-                    | PieceKind::Clock { .. } => Glow::Lit,
+                let glow = match piece.kind.emits() {
+                    Emits::Pane => Glow::Pane,
+                    Emits::Emissive => Glow::Emissive,
+                    Emits::ByArt if glowing => marked(),
+                    Emits::ByArt | Emits::Lit => Glow::Lit,
                 };
                 emission.set(x, y, glow);
             }

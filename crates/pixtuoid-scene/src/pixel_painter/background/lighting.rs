@@ -60,36 +60,16 @@ pub(in crate::pixel_painter) fn paint_shadows(
 }
 
 /// Blend `emitter`'s light in `color` over what is already painted, at the
-/// level the model gives each cell.
+/// level the model gives each cell, the window glass included
+/// ([`Emits::Pane`](crate::display::Emits::Pane)).
 pub(in crate::pixel_painter) fn paint_light(buf: &mut RgbBuffer, emitter: &Emitter, color: Rgb) {
-    paint_light_sparing(buf, emitter, color, |_, _| false);
-}
-
-/// The neon sign's halo in `color`, off the window glass, which shows the
-/// outside rather than the wall the sign hangs on.
-pub(in crate::pixel_painter) fn paint_neon_halo(
-    buf: &mut RgbBuffer,
-    layout: &crate::layout::SceneLayout,
-    neon: &Emitter,
-    color: Rgb,
-) {
-    paint_light_sparing(buf, neon, color, |x, y| layout.glass_at(x, y));
-}
-
-/// [`paint_light`], leaving every cell `spared` holds alone.
-fn paint_light_sparing(
-    buf: &mut RgbBuffer,
-    emitter: &Emitter,
-    color: Rgb,
-    spared: impl Fn(u16, u16) -> bool,
-) {
     if emitter.strength <= 0.0 {
         return;
     }
     let ((x0, y0), (x1, y1)) = emitter.bounds();
     let (xs, ys) = (x0..x1.min(buf.width()), y0..y1.min(buf.height()));
     blend_falloff(buf, xs, ys, color, emitter.peak(), |x, y| {
-        (!spared(x, y)).then(|| emitter.level_at(x, y)).flatten()
+        emitter.level_at(x, y)
     });
 }
 
@@ -449,7 +429,7 @@ mod tests {
     }
 
     #[test]
-    fn the_neon_halo_leaves_the_window_glass_alone() {
+    fn the_neon_halo_lifts_the_window_glass_it_falls_on() {
         let layout =
             crate::layout::SceneLayout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS))
                 .expect("192x160 fits");
@@ -473,9 +453,8 @@ mod tests {
             b: 30,
         };
         let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, fill);
-        paint_neon_halo(
+        paint_light(
             &mut buf,
-            &layout,
             &lights.neon,
             Rgb {
                 r: 255,
@@ -491,8 +470,8 @@ mod tests {
             cells.into_iter().partition(|&(x, y)| layout.glass_at(x, y));
         assert!(!glass.is_empty(), "the halo reaches a window");
         assert!(
-            glass.iter().all(|&(x, y)| buf.get(x, y) == fill),
-            "the glass is spared"
+            glass.iter().any(|&(x, y)| buf.get(x, y) != fill),
+            "the glass takes the glow, as the cutaway's does"
         );
         assert!(
             wall.iter().any(|&(x, y)| buf.get(x, y) != fill),

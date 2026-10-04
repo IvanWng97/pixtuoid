@@ -100,9 +100,7 @@ pub(crate) use furniture::paint_area_rug;
 
 use crate::atmosphere::Moment;
 use crate::lighting::{DeskLights, LightInputs, Lights};
-use background::{
-    paint_ground_and_walls, paint_ground_wash, paint_light, paint_neon_halo, paint_shadows,
-};
+use background::{paint_ground_and_walls, paint_ground_wash, paint_light, paint_shadows};
 use drawable::{Drawable, DrawableKind, Layer, enqueue_room_walls, paint_drawable};
 
 /// The paint pass's borrow set — everything `paint_frame` may touch. The only
@@ -288,7 +286,7 @@ pub(crate) fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> Drawn {
     // LATE, so the light lands ON the shelf and the clock instead of hiding
     // behind them; after the wash, since the sign is an emitter and its light
     // isn't dimmed with the room it falls on.
-    paint_neon_halo(ctx.buf, ctx.layout, &lights.neon, neon.halo);
+    paint_light(ctx.buf, &lights.neon, neon.halo);
 
     // LAST, so a Storm strike briefly flares the whole interior (floor, walls,
     // furniture, characters), not just the window strip.

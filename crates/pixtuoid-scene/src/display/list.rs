@@ -268,7 +268,48 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
     h.finish()
 }
 
+/// How a piece takes the room's light: one rule both looks follow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Emits {
+    /// Its own light, which the room's lights still lift: a window's sky, so
+    /// a light that falls on the glass glows on it (#1164's spared glass is
+    /// gone, one rule for both looks).
+    Pane,
+    /// Its own light, as painted: a sign, or text that keeps the contrast its
+    /// theme pins at every hour.
+    Emissive,
+    /// Each pixel as its art marks it: a screen that glows, a bulb.
+    ByArt,
+    /// Darkened with the room, lifted by its lights: most of it.
+    Lit,
+}
+
 impl PieceKind {
+    /// How it takes the room's light.
+    pub(crate) fn emits(&self) -> Emits {
+        match self {
+            PieceKind::Glass { .. } => Emits::Pane,
+            PieceKind::Neon { .. } | PieceKind::Text { .. } => Emits::Emissive,
+            PieceKind::Effect(r) if r.effect.kind == crate::effects::EffectKind::FlameCrown => {
+                Emits::Emissive
+            }
+            PieceKind::Desk { .. }
+            | PieceKind::Prop { .. }
+            | PieceKind::Animated { .. }
+            | PieceKind::Hung { .. }
+            | PieceKind::Door { .. } => Emits::ByArt,
+            PieceKind::WallSeg { .. }
+            | PieceKind::Chair { .. }
+            | PieceKind::DeskProp(_)
+            | PieceKind::Creature { .. }
+            | PieceKind::PropBand { .. }
+            | PieceKind::Table { .. }
+            | PieceKind::Character { .. }
+            | PieceKind::Effect(_)
+            | PieceKind::Clock { .. } => Emits::Lit,
+        }
+    }
+
     /// Whether it recolours what lies under it rather than painting colours of
     /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window's
     /// [`PieceKind::Glass`].

@@ -12,8 +12,7 @@ mod lighting;
 use crate::celestial::SkyView;
 pub(super) use ground_wash::paint_ground_wash;
 pub(super) use lighting::{
-    paint_clock, paint_corridor_runner, paint_light, paint_neon_halo, paint_neon_panel,
-    paint_shadows,
+    paint_clock, paint_corridor_runner, paint_light, paint_neon_panel, paint_shadows,
 };
 
 use pixtuoid_core::sprite::format::Pack;
