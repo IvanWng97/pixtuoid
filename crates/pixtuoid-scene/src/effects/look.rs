@@ -91,11 +91,11 @@ fn plot_steam_puff(
     plot(px, py, theme.effects.coffee_steam, alpha * 0.55);
 }
 
-/// The cell under the foot a walker whose top-left is `walker_top_left` steps on with
-/// stride frame `stride`, where its dust rises.
-pub(crate) fn walking_dust_foot(walker_top_left: Point, stride: u64) -> Point {
+/// The cell under the foot a walker whose top-left is `walker_top_left` steps on in
+/// its walk's frame `frame`, where its dust rises.
+pub(crate) fn walking_dust_foot(walker_top_left: Point, frame: u64) -> Point {
     Point {
-        x: walker_top_left.x + if stride == 0 { 6 } else { 1 },
+        x: walker_top_left.x + if frame == 0 { 6 } else { 1 },
         y: walker_top_left.y + WALKING_Y_OFF,
     }
 }
@@ -103,10 +103,10 @@ pub(crate) fn walking_dust_foot(walker_top_left: Point, stride: u64) -> Point {
 fn plot_walking_dust(
     plot: &mut impl FnMut(u16, u16, Rgb, f32),
     walker_top_left: Point,
-    stride: u64,
+    frame: u64,
     theme: &Theme,
 ) {
-    let foot = walking_dust_foot(walker_top_left, stride);
+    let foot = walking_dust_foot(walker_top_left, frame);
     plot(foot.x, foot.y, theme.effects.walking_dust, 0.45);
 }
 

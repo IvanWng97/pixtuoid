@@ -18,27 +18,27 @@
 //! `crates/pixtuoid/examples/render_bench.rs` measures buffer-size SCALING
 //! through the floating offscreen renderer for the 2.5D design gate.
 
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use criterion::{Criterion, criterion_main};
 use pixtuoid_core::id::AgentId;
-use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::{AgentSlot, SceneState};
 use pixtuoid_scene::board::BoardModel;
 use pixtuoid_scene::cutaway::canvas::CutawayCanvas;
-use pixtuoid_scene::cutaway::paint::{Office, Showing, render_cutaway};
+use pixtuoid_scene::cutaway::paint::render_cutaway;
+use pixtuoid_scene::display::{Office, Showing};
 use pixtuoid_scene::floor::{
-    CoffeeState, FloorCtx, FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs,
-    SteppedFloor, render_floor,
+    FloorInputs, FloorMeta, FloorSession, PerFloor, PerOffice, PetInputs, SteppedFloor,
 };
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::localclock;
-use pixtuoid_scene::pixel_painter::{Weather, WeatherPolicy, hour_is_day};
+use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::render_scale::RenderScale;
+use pixtuoid_scene::sky::{Weather, WeatherPolicy, hour_is_day};
 
 // Inside a weather slot (`sky::WEATHER_CYCLE_SECS`, crate-private) with room to
 // spare, so the `SIM_WINDOW_FRAMES` × `FRAME_STEP_MS` window below never
@@ -131,7 +131,7 @@ fn office_scene(n: usize, max_desks: usize, base: SystemTime, busy: bool) -> Sce
 }
 
 fn render_frame(c: &mut Criterion) {
-    let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack");
+    let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"));
     let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
     let base = SystemTime::UNIX_EPOCH + Duration::from_secs(BASE_EPOCH_SECS);
     let busy = office_scene(12, 16, base, true);
@@ -172,26 +172,22 @@ fn render_frame(c: &mut Criterion) {
     let mut group = c.benchmark_group("render_floor");
     for (name, scene, size) in cases {
         // Hoisted past criterion's per-sample closure; rebuilt at each wrap, where `now` steps back.
-        let mut fctx = FloorCtx::new();
-        let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
-        let mut coffee = CoffeeState::new();
-        let mut chitchat = HashMap::new();
+        let mut floor = PerFloor::new(Arc::clone(&pack));
+        let mut office = PerOffice::new();
         let mut i = 0u32;
         group.bench_function(name, |b| {
             b.iter(|| {
                 if i == 0 {
-                    fctx = FloorCtx::new();
-                    coffee = CoffeeState::new();
-                    chitchat.clear();
+                    floor = PerFloor::new(Arc::clone(&pack));
+                    office = PerOffice::new();
                 }
                 let now = base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS);
                 i = (i + 1) % SIM_WINDOW_FRAMES;
-                render_floor(
-                    &mut fctx,
-                    &mut buf,
-                    &mut coffee,
-                    &mut chitchat,
-                    FrameInputs {
+                pixtuoid_scene::look::render(
+                    &mut floor,
+                    office.stores(),
+                    Look::Classic,
+                    RenderInputs {
                         world: FloorInputs {
                             scene,
                             pack: &pack,
@@ -201,10 +197,12 @@ fn render_frame(c: &mut Criterion) {
                         },
                         theme,
                         size,
+                        place: Place::default(),
                         debug_walkable: false,
                     },
                 )
                 .expect("layout")
+                .layout
             });
         });
     }
@@ -241,7 +239,7 @@ fn render_cutaway_frame(c: &mut Criterion) {
     ] {
         let base = localclock::at_hour(hour);
         let scene = office_scene(12, 16, base, busy);
-        let mut session = FloorSession::new();
+        let mut session = FloorSession::new(Arc::clone(&pack));
         let stepped: Vec<(SystemTime, SteppedFloor, BoardModel)> = (0..CUTAWAY_FRAMES as u64)
             .map(|i| {
                 let now = base + Duration::from_millis(i * FRAME_STEP_MS);

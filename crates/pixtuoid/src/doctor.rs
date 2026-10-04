@@ -728,10 +728,8 @@ impl Ink {
     }
 }
 
-/// DECRQSS only on a real tty and a non-dumb `$TERM` (`probe_ok`): the same
-/// `color_preflight` gate the launcher acts on, so the row matches `run`. Off Unix it also
-/// keeps the graphics probe, which is upstream's and writes its query to stdout, out of a
-/// piped `doctor > file`.
+/// Each query only on a real tty and a non-dumb `$TERM` (`probe_ok`): the same
+/// `color_preflight` gate the launcher acts on, so the rows match `run`.
 fn probe_terminal_caps(
     probe_ok: bool,
     graphics: crate::GraphicsMode,
@@ -739,9 +737,7 @@ fn probe_terminal_caps(
 ) -> (Option<crate::term::Truecolor>, crate::graphics::Plan) {
     let truecolor_probe =
         probe_ok.then(|| crate::term::query_truecolor(crate::term::TRUECOLOR_PROBE_TIMEOUT));
-    let graphics_plan = crate::graphics::plan_this_terminal(graphics, max_density, || {
-        crate::graphics::probe(probe_ok)
-    });
+    let graphics_plan = crate::graphics::plan_this_terminal(graphics, max_density, probe_ok);
     (truecolor_probe, graphics_plan)
 }
 
@@ -952,13 +948,12 @@ fn terminal_category(r: &DoctorReport) -> Category {
     if let Some(row) = crate::term::color_status_row(r.color_pf) {
         details.push(format!("{DETAIL_INDENT}{row}"));
     }
-    // An ATTEMPTED probe that didn't confirm is a warning — the launcher warned about
-    // exactly this terminal and pointed the user here; a skipped probe (piped) stays ✓.
-    let asked = matches!(
-        r.truecolor_probe,
-        Some(crate::term::Truecolor::Answered(_) | crate::term::Truecolor::NoAnswer)
-    );
-    let unconfirmed = asked && !verdict.starts_with("yes");
+    // Same predicate as the launcher's warning, so the two never disagree; a skipped
+    // probe (piped) stays ✓.
+    let unconfirmed = r
+        .truecolor_probe
+        .is_some_and(crate::term::Truecolor::warrants_warning)
+        && !verdict.starts_with("yes");
     let status = if refused || unconfirmed {
         CategoryStatus::Warn
     } else {
@@ -1774,6 +1769,7 @@ mod tests {
             r.truecolor_probe = unasked;
             let c = terminal_category(&r);
             assert_eq!(c.status, CategoryStatus::Ok, "{unasked:?}");
+            assert!(!unasked.is_some_and(Truecolor::warrants_warning));
             assert!(c.summary.contains(says), "{}", c.summary);
         }
     }

@@ -913,17 +913,7 @@ mod tests {
     #[test]
     fn a_walls_sort_bands_tile_its_glass_none_sorting_south_of_its_raw_end() {
         let mut met = 0;
-        for (w, h) in [
-            (
-                crate::layout::compute::MIN_LAYOUT_W,
-                crate::layout::compute::MIN_LAYOUT_H,
-            ),
-            (96, 60),
-            (160, 96),
-            (240, 135),
-            (320, 180),
-            (160, 192),
-        ] {
+        for &(w, h) in crate::layout::roster::tests::CENSUS_SIZES {
             for seed in 0..12 {
                 let l = crate::layout::SceneLayout::compute_with_seed(w, h, None, seed)
                     .expect("lays out");

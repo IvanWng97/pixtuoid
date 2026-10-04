@@ -107,16 +107,16 @@ a lint to dodge the bump.
 1. **Dispatch** `release-plz.yml` from Actions, on `main`. It opens
    `chore(release): vX.Y.Z` from a `release-plz-*` branch, with the workspace
    version, every path-dep requirement, `Cargo.lock` and `CHANGELOG.md`
-   rewritten. The bump level comes from the conventional-commit log — nobody
-   picks it — and the PR body carries the `cargo-semver-checks` verdict.
+   rewritten.
 2. **Review it like any PR, but merge it by hand**: the merge queue refuses it,
    since its update would merge `main` in. If `main` moved, **re-dispatch —
    never "Update branch"**: only a dispatch recomputes `CHANGELOG.md` for the
    new commits, and the merge commit "Update branch" adds counts as a human's,
-   so the next dispatch closes this PR and opens a new number. release-plz has
-   already raised the bump for any break `cargo-semver-checks` detects; raise it further with
+   so the next dispatch closes this PR and opens a new number. Merged behind
+   `main`, or with `main` merged or rebased in, it fails `release-plz.yml`'s
+   `release-merge` and publishes nothing. Raise the bump with
    `cargo set-version --workspace X.Y.Z` (cargo-edit) and push only for a break
-   its lints cannot see. A user-facing change that touched no packaged file
+   `cargo-semver-checks` cannot see. A user-facing change that touched no packaged file
    (`npm/`, `release.yml` packaging) is not in the generated notes — add its line
    to `CHANGELOG.md` by hand as the last commit before merging.
 3. **Merge it** (squash). That merge is the *irreversible* step: the `release` job
@@ -135,22 +135,16 @@ release PR is open, so no merge-time check proves the tree it publishes.
 `cargo-semver-checks` runs inside release-plz on the release PR, not as a CI
 job; `just semver` reproduces its verdict locally.
 
-Each crate's crates.io **Trusted Publisher** record names `release-plz.yml`.
-Renaming that workflow file, or publishing from another one, is rejected until
-the records are updated — the record is keyed on the filename.
-
 Both jobs authenticate with `RELEASE_PLZ_TOKEN`, a fine-grained PAT scoped to
 this repository with Contents and Pull requests read/write; `release-plz.yml`'s
-header says why it cannot be the automatic token, and the action refuses an
-empty one.
+header says why it cannot be the automatic token.
 
 A release PR that release-plz closes and re-opens (it does that when the branch
 carries non-bot commits) leaves a commit you pushed to it — a raised bump —
 behind: `git cherry-pick` it onto the new branch. No committed frame carries the
 version (`BOARD_BRAND`), so a release PR needs no `just gen`.
 
-Merging the release PR is what publishes, so a human owns it. The tag also
-publishes **outside** this repo:
+The tag also publishes **outside** this repo:
 homebrew-core's formula is `autobump: true` and builds from the tag tarball,
 instantly, with DEFAULT features on macOS *and* Linux — the one configuration
 our release never builds. Two consequences:
@@ -194,7 +188,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    gets its entire comment population re-read against `AGENTS.md`'s comment
    rules, and the cleanup rides the same PR (population and dispositions:
    [`REVIEW.md`](../REVIEW.md#design)'s comment audit). Not the merge gate.
-8. **Merge gate** — [the gate](#the-merge-gate); the `two-lens-review` skill
+8. **Merge gate** — [the gate](#the-merge-gate); the `local-review` skill
    runs its local rows; merging is `@mergifyio queue`, a release PR by hand.
 9. **Wrap** — retro; durable lessons go to the agent's own memory layer, not
    new repo docs.
@@ -217,7 +211,7 @@ crate IS.
 | while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
 | once you need a PR number | open it as a draft: the light tier runs, and `ci-gate` stays red by design |
 | once the draft's light tier is green | mark it ready: the full tier and the billed review bots start together, so a failure only the full tier catches costs one extra review round until the bots are chained after CI |
-| before marking ready (optional), or when a REVIEW.md local row matches (mandatory) | the `two-lens-review` skill |
+| when a REVIEW.md local row matches | the `local-review` skill |
 | once [the merge gate](#the-merge-gate) holds | `@mergifyio queue` |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
 
@@ -256,11 +250,10 @@ disposition; zero open confirmed `issue (blocking)`; each matching
 `<!-- local-row:<row>:<head sha> -->`, where `<row>` is the row's first column
 up to any colon or parenthesis, lowercased, each run of non-alphanumerics one
 `-`, leading and trailing `-` dropped, and the sha is the head the run judged;
-a queue update that only merges `main` in leaves the record standing. The local
-[`two-lens-review`](../.claude/skills/two-lens-review/SKILL.md) skill is
-otherwise an optional pre-flight. A published review passes whatever it
-found; a failed or missing status is no review: comment `/claude-review`, else
-split the PR smaller.
+a queue update that only merges `main` in leaves the record standing. The
+[`local-review`](../.claude/skills/local-review/SKILL.md) skill runs those
+rows. A published review passes whatever it found; a failed or missing status
+is no review: comment `/claude-review`, else split the PR smaller.
 
 Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
 entry is a command because no queue condition can confirm a finding or match a
