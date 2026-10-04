@@ -244,9 +244,7 @@ Advisory backstops that surface risk but never gate:
 - **snapbox goldens escape a worktree** — `file!` resolves against the
   outermost `Cargo.toml` ancestor, the main checkout; run or overwrite them
   with `CARGO_RUSTC_CURRENT_DIR=<worktree>`.
-- **Open work stays under the queue's throughput** — at about ten open PRs,
-  stop opening and land: folds, main merges, thread replies, the follow-up
-  drafts the gate requires. A change to a surface an open PR already touches
+- **Fold before opening** — a change to a surface an open PR already touches
   folds into it.
 - **The queue never idles** — it checks PRs serially (`.mergify.yml`'s
   `max_parallel_checks`), so queue every PR
