@@ -131,6 +131,15 @@ impl WalkKinematics {
     }
 }
 
+/// How a walker moves: its cruise speed (octile/ms), its acceleration
+/// (octile/ms²) and its settle on arrival (ms).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Gait {
+    pub(crate) cruise: f32,
+    pub(crate) accel: f32,
+    pub(crate) pause_ms: u64,
+}
+
 /// Freeze a [`WalkProfile`] for one walk leg over `path_len_octile`, with cruise
 /// speed picked by `intent` and per-agent speed/pause personality seeded from
 /// `agent_id`.
@@ -140,23 +149,38 @@ pub fn walk_profile(path_len_octile: u32, intent: WalkIntent, agent_id: AgentId)
         WalkIntent::Entry | WalkIntent::Exit => V_CRUISE_COMMUTE,
         WalkIntent::WanderOut | WalkIntent::WanderBack => V_CRUISE_WANDER,
     };
-    let v = v_base * speed_mult(agent_id);
-    let a = match intent {
+    let accel = match intent {
         WalkIntent::SnapBack => WALK_ACCEL_SNAPBACK,
         _ => WALK_ACCEL,
     };
-    let l = path_len_octile as f32;
+    walk_profile_for(
+        path_len_octile,
+        Gait {
+            cruise: v_base * speed_mult(agent_id),
+            accel,
+            pause_ms: pause_ms_for(agent_id),
+        },
+    )
+}
 
+/// Freeze a [`WalkProfile`] for one walk leg over `path_len_octile` at `gait`.
+pub(crate) fn walk_profile_for(path_len_octile: u32, gait: Gait) -> WalkProfile {
+    let Gait {
+        cruise: v,
+        accel: a,
+        pause_ms,
+    } = gait;
     let duration_ms = if path_len_octile == 0 {
         0u64
     } else {
         // Already in ms: a is octile/ms², so T = sqrt(octile / (octile/ms²)) = ms.
-        WalkKinematics::resolve(l, v, a).total_ms().round() as u64
+        WalkKinematics::resolve(path_len_octile as f32, v, a)
+            .total_ms()
+            .round() as u64
     };
-
     WalkProfile {
         duration_ms,
-        pause_ms: pause_ms_for(agent_id),
+        pause_ms,
         path_len_octile,
         v_cruise: v,
         accel: a,
@@ -263,6 +287,42 @@ pub fn walk_arrived(p: &WalkProfile, elapsed_ms: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every profile `walk_profile` freezes over a sweep of lengths, intents
+    /// and agents, folded to one digest: a refactor of the kinematics leaves
+    /// the people's walks as they were.
+    #[test]
+    fn the_people_s_walk_profiles_are_pinned() {
+        let intents = [
+            WalkIntent::Entry,
+            WalkIntent::Exit,
+            WalkIntent::WanderOut,
+            WalkIntent::WanderBack,
+            WalkIntent::SnapBack,
+        ];
+        let words = [0u32, 1, 7, 10, 99, 100, 1_000, 4_321, 20_000]
+            .into_iter()
+            .flat_map(|len| {
+                intents.into_iter().flat_map(move |intent| {
+                    (0..32).map(move |i| {
+                        let agent = AgentId::from_transcript_path(&format!("/p/pin{i}.jsonl"));
+                        walk_profile(len, intent, agent)
+                    })
+                })
+            });
+        let digest = pixtuoid_core::id::fnv1a(words.flat_map(|p| {
+            [
+                p.duration_ms,
+                p.pause_ms,
+                u64::from(p.path_len_octile),
+                u64::from(p.v_cruise.to_bits()),
+                u64::from(p.accel.to_bits()),
+            ]
+        }));
+        assert_eq!(digest, WALK_PROFILE_DIGEST, "{digest:#018x}");
+    }
+
+    const WALK_PROFILE_DIGEST: u64 = 0xd201_4d4b_4be1_5652;
 
     #[test]
     fn leg_pixels_are_every_position_a_walk_lands_on() {

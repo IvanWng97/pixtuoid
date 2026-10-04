@@ -875,7 +875,6 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
             {
                 renderer.set_active_pet(Some(renderer::PetState {
                     petted_at: now,
-                    pet_pos,
                     kind,
                     floor_idx: renderer.current_floor(),
                 }));

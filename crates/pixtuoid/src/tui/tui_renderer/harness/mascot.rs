@@ -45,10 +45,6 @@ fn harness_gateway() -> pixtuoid_core::state::DaemonInstanceId {
     pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty")
 }
 
-fn mascot_px(r: &mut TuiRenderer<TestBackend>, scene: &SceneState, now: SystemTime) -> usize {
-    mascot_cells(r, scene, now).len()
-}
-
 fn gateway_scene_at(ports: &[&str], entered_at: SystemTime, last_seen: SystemTime) -> SceneState {
     let mut s = SceneState::uniform(16);
     for port in ports {
@@ -68,27 +64,70 @@ fn gateway_scene_at(ports: &[&str], entered_at: SystemTime, last_seen: SystemTim
     s
 }
 
-/// Cells where `scene` differs from `baseline` at the same instant — the
-/// mascot's footprint, whatever the painter did to its colours.
-///
-/// Renders BOTH arms here rather than reading one buffer for an authored RGB:
-/// the foreground wash recolours every drawable, so a colour probe would have to
-/// predict the wash, which couples a presence assertion to the lighting model
-/// and expects a value the code under test computed.
-fn diff_cells(
-    r: &mut TuiRenderer<TestBackend>,
-    scene: &SceneState,
-    baseline: &SceneState,
-    now: SystemTime,
-) -> std::collections::BTreeSet<(u16, u16)> {
-    r.render(baseline, pack(), now).unwrap();
-    let base = r.buf().clone();
-    r.render(scene, pack(), now).unwrap();
-    let buf = r.buf();
-    (0..buf.height())
-        .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
-        .filter(|&(x, y)| buf.get(x, y) != base.get(x, y))
-        .collect()
+/// The renderer under test beside a twin that paints the daemon-free
+/// baseline at every instant it paints: a mascot walks on cross-frame state,
+/// so the baseline must not step the renderer under test, and the twin keeps
+/// every other cross-frame state (the dimming, the neon) in lockstep.
+struct Probe {
+    r: TuiRenderer<TestBackend>,
+    base: TuiRenderer<TestBackend>,
+}
+
+impl Probe {
+    fn new() -> Self {
+        Self {
+            r: build(160, 80, vec![]),
+            base: build(160, 80, vec![]),
+        }
+    }
+
+    /// Cells where `scene` differs from `baseline` at the same instant — the
+    /// mascot's footprint, whatever the painter did to its colours.
+    ///
+    /// Renders BOTH arms here rather than reading one buffer for an authored RGB:
+    /// the foreground wash recolours every drawable, so a colour probe would have to
+    /// predict the wash, which couples a presence assertion to the lighting model
+    /// and expects a value the code under test computed.
+    fn diff(
+        &mut self,
+        scene: &SceneState,
+        baseline: &SceneState,
+        now: SystemTime,
+    ) -> std::collections::BTreeSet<(u16, u16)> {
+        self.base.render(baseline, pack(), now).unwrap();
+        self.r.render(scene, pack(), now).unwrap();
+        let (base, buf) = (self.base.buf(), self.r.buf());
+        (0..buf.height())
+            .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
+            .filter(|&(x, y)| buf.get(x, y) != base.get(x, y))
+            .collect()
+    }
+
+    fn cells(
+        &mut self,
+        scene: &SceneState,
+        now: SystemTime,
+    ) -> std::collections::BTreeSet<(u16, u16)> {
+        self.diff(scene, &no_presence(), now)
+    }
+
+    fn px(&mut self, scene: &SceneState, now: SystemTime) -> usize {
+        self.cells(scene, now).len()
+    }
+
+    /// Bounding box in PIXEL coords, or `None` if the lobster isn't on screen.
+    fn bbox(&mut self, scene: &SceneState, now: SystemTime) -> Option<(u16, u16, u16, u16)> {
+        let (mut x0, mut y0, mut x1, mut y1) = (u16::MAX, u16::MAX, 0u16, 0u16);
+        let mut any = false;
+        for (x, y) in self.cells(scene, now) {
+            any = true;
+            x0 = x0.min(x);
+            y0 = y0.min(y);
+            x1 = x1.max(x);
+            y1 = y1.max(y);
+        }
+        any.then_some((x0, y0, x1, y1))
+    }
 }
 
 /// The daemon-free scene every mascot probe subtracts.
@@ -96,20 +135,12 @@ fn no_presence() -> SceneState {
     SceneState::uniform(16)
 }
 
-fn mascot_cells(
-    r: &mut TuiRenderer<TestBackend>,
-    scene: &SceneState,
-    now: SystemTime,
-) -> std::collections::BTreeSet<(u16, u16)> {
-    diff_cells(r, scene, &no_presence(), now)
-}
-
 #[test]
 fn two_gateways_render_two_independent_mascots() {
     let (entered, seen) = (t0() - Duration::from_secs(20), t0());
     let cells_of = |ports: &[&str]| {
-        let mut r = build(160, 80, vec![]);
-        mascot_cells(&mut r, &gateway_scene_at(ports, entered, seen), t0())
+        let mut p = Probe::new();
+        p.cells(&gateway_scene_at(ports, entered, seen), t0())
     };
     let a = cells_of(&["18789"]);
     let b = cells_of(&["19789"]);
@@ -153,17 +184,17 @@ fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
     let (entered, seen) = (t0() - Duration::from_secs(20), t0());
     let gateway_tooltips = |ports: &[&str]| -> Vec<String> {
         let scene = gateway_scene_at(ports, entered, seen);
-        let mut r = build(160, 80, vec![]);
-        let cells: Vec<_> = mascot_cells(&mut r, &scene, t0()).into_iter().collect();
+        let mut p = Probe::new();
+        let cells: Vec<_> = p.cells(&scene, t0()).into_iter().collect();
         assert!(!cells.is_empty(), "the gateways must paint lobsters");
         let mut out = Vec::new();
         // A stride, not every cell: the hitbox is the painted lobster frame
         // (`MascotFrame.w`), so it still lands inside BOTH mascots without
         // paying a full render per pixel.
         for &(x, y) in cells.iter().step_by(5) {
-            r.set_mouse_pos(Some((x, y / 2)));
-            r.render(&scene, pack(), t0()).unwrap();
-            let text = frame_text(r.frame_buffer());
+            p.r.set_mouse_pos(Some((x, y / 2)));
+            p.r.render(&scene, pack(), t0()).unwrap();
+            let text = frame_text(p.r.frame_buffer());
             if text.contains("gateway") {
                 out.push(text);
             }
@@ -205,13 +236,13 @@ fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
             current_pid: Some(1),
         },
     );
-    let mut r = build(160, 80, vec![]);
-    let cells: Vec<_> = mascot_cells(&mut r, &mixed, t0()).into_iter().collect();
+    let mut p = Probe::new();
+    let cells: Vec<_> = p.cells(&mixed, t0()).into_iter().collect();
     assert!(!cells.is_empty(), "openclaw still paints its lobster");
     for &(x, y) in cells.iter().step_by(5) {
-        r.set_mouse_pos(Some((x, y / 2)));
-        r.render(&mixed, pack(), t0()).unwrap();
-        let text = frame_text(r.frame_buffer());
+        p.r.set_mouse_pos(Some((x, y / 2)));
+        p.r.render(&mixed, pack(), t0()).unwrap();
+        let text = frame_text(p.r.frame_buffer());
         if text.contains("gateway") {
             assert!(
                 !text.contains("18789"),
@@ -250,9 +281,9 @@ fn one_gateway_going_down_leaves_its_sibling_on_the_floor() {
         Some(pixtuoid_core::state::DaemonState::Idle),
         "the sibling gateway is untouched"
     );
-    let mut r = build(160, 80, vec![]);
+    let mut p = Probe::new();
     assert!(
-        mascot_px(&mut r, &scene, t0() + Duration::from_secs(5)) > 0,
+        p.px(&scene, t0() + Duration::from_secs(5)) > 0,
         "the surviving gateway must still paint its lobster"
     );
 }
@@ -262,9 +293,9 @@ fn one_gateway_going_down_leaves_its_sibling_on_the_floor() {
 /// churns between calls would satisfy `> 0` with no mascot drawn at all.
 #[test]
 fn the_mascot_differential_is_signal_not_render_churn() {
-    let mut r = build(160, 80, vec![]);
+    let mut p = Probe::new();
     assert_eq!(
-        diff_cells(&mut r, &no_presence(), &no_presence(), t0()).len(),
+        p.diff(&no_presence(), &no_presence(), t0()).len(),
         0,
         "two renders of the SAME scene must be byte-identical"
     );
@@ -277,7 +308,7 @@ fn the_mascot_differential_is_signal_not_render_churn() {
         t0(),
         0,
     );
-    let cells = mascot_cells(&mut r, &up, t0());
+    let cells = p.cells(&up, t0());
     assert!(!cells.is_empty(), "the fixture must paint a mascot");
     let (xs, ys): (Vec<_>, Vec<_>) = cells.iter().copied().unzip();
     let (w, h) = (
@@ -307,9 +338,9 @@ fn gateway_mascot_present_when_up() {
         t0(),
         0,
     );
-    let mut r = build(160, 80, vec![]);
+    let mut p = Probe::new();
     assert!(
-        mascot_px(&mut r, &scene, t0()) > 10,
+        p.px(&scene, t0()) > 10,
         "a live gateway ⇒ the lobster scuttles the floor"
     );
 }
@@ -328,7 +359,7 @@ fn gateway_mascot_busy_bubbles_track_runs_not_sessions() {
         &["r1", "r2"],
     );
 
-    let mut r = build(160, 80, vec![]);
+    let mut p = Probe::new();
     // Bubbles animate by `now`; scan a few frames so we don't land on an
     // all-off-screen phase.
     let mut runs_add = 0;
@@ -338,10 +369,10 @@ fn gateway_mascot_busy_bubbles_track_runs_not_sessions() {
         // Runs are the ONLY difference between the two scenes, so their diff is
         // the bubbles. The session arm is the negative half: a second session
         // with no runs must move nothing.
-        runs_add = runs_add.max(diff_cells(&mut r, &busy, &idle, now).len());
+        runs_add = runs_add.max(p.diff(&busy, &idle, now).len());
         let more_sessions =
             gateway_scene(pixtuoid_core::state::DaemonLiveness::UP, entered, t0(), 3);
-        session_adds = session_adds.max(diff_cells(&mut r, &more_sessions, &idle, now).len());
+        session_adds = session_adds.max(p.diff(&more_sessions, &idle, now).len());
     }
     assert!(runs_add > 0, "an in-flight run ⇒ activity bubbles render");
     assert_eq!(session_adds, 0, "more idle sessions must NOT bubble");
@@ -349,29 +380,30 @@ fn gateway_mascot_busy_bubbles_track_runs_not_sessions() {
 
 #[test]
 fn gateway_mascot_walks_out_then_is_gone() {
-    let mut r = build(160, 80, vec![]);
-    let leaving = gateway_scene(
-        pixtuoid_core::state::DaemonLiveness::Down,
-        t0() - Duration::from_secs(20),
-        t0() - Duration::from_millis(400),
-        0,
-    );
+    let mut p = Probe::new();
+    let entered = t0() - Duration::from_secs(20);
+    let up = gateway_scene(pixtuoid_core::state::DaemonLiveness::UP, entered, t0(), 0);
+    assert!(p.px(&up, t0()) > 0, "a live gateway's lobster is in");
+
+    let mut now = t0() + Duration::from_secs(1);
+    let down = gateway_scene(pixtuoid_core::state::DaemonLiveness::Down, entered, now, 0);
     assert!(
-        mascot_px(&mut r, &leaving, t0()) > 0,
-        "mid walk-out, the lobster is still visible"
+        p.px(&down, now) > 0,
+        "its gateway dead, the lobster walks out"
     );
 
-    let gone = gateway_scene(
-        pixtuoid_core::state::DaemonLiveness::Down,
-        t0() - Duration::from_secs(30),
-        t0() - Duration::from_secs(10),
-        0,
-    );
+    // Swept from the roster, it walks on until it is out.
+    let mut frames = 0;
+    while p.px(&no_presence(), now) > 0 {
+        now += Duration::from_millis(33);
+        frames += 1;
+        assert!(frames < 3_600, "the lobster never reached the elevator");
+    }
+    assert!(frames > 0, "it walked on past the roster dropping it");
     assert_eq!(
-        mascot_px(&mut r, &gone, t0()),
+        p.px(&down, now),
         0,
-        "after the walk-out, the lobster has left — and a spurious lobster in the \
-         daemon-free baseline would show up here too"
+        "a gateway seen leaving does not walk back in"
     );
 }
 
@@ -383,11 +415,12 @@ fn gateway_mascot_wanders_over_time() {
         t0(),
         0,
     );
-    let mut r = build(160, 80, vec![]);
+    let mut p = Probe::new();
     let mut tops = std::collections::HashSet::new();
     for k in 0..8u64 {
         let now = t0() + Duration::from_secs(k * 3);
-        if let Some(top) = mascot_cells(&mut r, &scene, now)
+        if let Some(top) = p
+            .cells(&scene, now)
             .into_iter()
             .min_by_key(|&(x, y)| (y, x))
         {
@@ -401,24 +434,6 @@ fn gateway_mascot_wanders_over_time() {
     );
 }
 
-/// Bounding box in PIXEL coords, or `None` if the lobster isn't on screen.
-fn mascot_bbox(
-    r: &mut TuiRenderer<TestBackend>,
-    scene: &SceneState,
-    now: SystemTime,
-) -> Option<(u16, u16, u16, u16)> {
-    let (mut x0, mut y0, mut x1, mut y1) = (u16::MAX, u16::MAX, 0u16, 0u16);
-    let mut any = false;
-    for (x, y) in mascot_cells(r, scene, now) {
-        any = true;
-        x0 = x0.min(x);
-        y0 = y0.min(y);
-        x1 = x1.max(x);
-        y1 = y1.max(y);
-    }
-    any.then_some((x0, y0, x1, y1))
-}
-
 #[test]
 fn gateway_mascot_tooltip_on_hover() {
     // entered_at well in the past ⇒ steady wander: a stable lobster to aim at.
@@ -429,26 +444,26 @@ fn gateway_mascot_tooltip_on_hover() {
         0,
     );
     // vec![] = no pet, so the pet hover arm is skipped and the mascot arm runs.
-    let mut r = build(160, 80, vec![]);
-    r.render(&scene, pack(), t0()).unwrap();
+    let mut p = Probe::new();
+    p.r.render(&scene, pack(), t0()).unwrap();
 
     assert!(
-        !frame_text(r.frame_buffer()).contains("gateway"),
+        !frame_text(p.r.frame_buffer()).contains("gateway"),
         "no hover ⇒ no mascot tooltip"
     );
 
-    let (x0, y0, x1, y1) = mascot_bbox(&mut r, &scene, t0()).expect("lobster on screen");
+    let (x0, y0, x1, y1) = p.bbox(&scene, t0()).expect("lobster on screen");
     let cx = (x0 + x1) / 2;
     let cy_px = (y0 + y1) / 2;
     // The hitbox is the painted frame (`MascotFrame.w`), which tolerates the
     // approximate center; half-block ⇒ /2.
-    r.set_mouse_pos(Some((cx, cy_px / 2)));
-    r.render(&scene, pack(), t0()).unwrap();
+    p.r.set_mouse_pos(Some((cx, cy_px / 2)));
+    p.r.render(&scene, pack(), t0()).unwrap();
 
     // The literal "gateway" is exclusive to the mascot arm — pet/coffee/furniture
     // tooltips never say it — so it distinguishes the branch from the fallthroughs.
     assert!(
-        frame_text(r.frame_buffer()).contains("gateway"),
+        frame_text(p.r.frame_buffer()).contains("gateway"),
         "hovering the lobster shows the gateway mascot tooltip"
     );
 }

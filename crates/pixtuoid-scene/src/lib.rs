@@ -42,7 +42,7 @@ pub mod chitchat;
 pub(crate) mod composite;
 pub(crate) mod creatures;
 #[doc(hidden)]
-pub use creatures::PET_CYCLE_MS;
+pub use creatures::PET_LONGEST_REST_MS;
 #[doc(hidden)]
 pub mod cutaway;
 #[doc(hidden)]

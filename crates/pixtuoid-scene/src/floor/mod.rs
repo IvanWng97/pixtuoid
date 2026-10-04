@@ -139,6 +139,8 @@ pub struct FloorCtx {
     pub(crate) neon: NeonState,
     /// Per-agent walk state (physics profiles for entry/exit/wander).
     pub walks: HashMap<AgentId, WalkState>,
+    /// The pet's and the gateway mascots' walks.
+    pub(crate) creatures: HashMap<crate::creatures::CreatureKey, crate::creatures::CreatureWalk>,
     /// Longest in-flight entry- or exit-walk `duration_ms + pause_ms` on this
     /// floor (ms) — drives the door-open cosmetic without a hardcoded window.
     pub door_anim_max_ms: u64,
@@ -168,6 +170,7 @@ impl FloorCtx {
             vacancy_dim: VacancyDim::new(),
             neon: NeonState::new(),
             walks: HashMap::new(),
+            creatures: HashMap::new(),
             door_anim_max_ms: 0,
             layout_memo: None,
         }
@@ -186,6 +189,7 @@ impl FloorCtx {
             vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat,
+            creatures: &mut self.creatures,
         }
     }
 

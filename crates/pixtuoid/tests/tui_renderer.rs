@@ -144,7 +144,6 @@ fn tui_renderer_transition_paints_pets_and_coffee() {
 
     renderer.set_active_pet(Some(pixtuoid::tui::renderer::PetState {
         petted_at: now,
-        pet_pos: pixtuoid_scene::layout::Point { x: 20, y: 20 },
         kind: pixtuoid_scene::pet::PetKind::Cat,
         floor_idx: 0,
     }));

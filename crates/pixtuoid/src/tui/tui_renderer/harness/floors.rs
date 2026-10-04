@@ -1,5 +1,4 @@
 use super::*;
-use pixtuoid_scene::layout::Point;
 
 #[test]
 fn offscreen_floor_freezes_and_resyncs_on_return() {
@@ -426,7 +425,6 @@ fn already_expired_active_pet_clears_on_render() {
     let mut r = build(100, 40, vec![PetKind::Cat]);
     r.set_active_pet(Some(PetState {
         petted_at: t0() - Duration::from_secs(3600), // long expired
-        pet_pos: Point { x: 10, y: 10 },
         kind: PetKind::Cat,
         floor_idx: 0,
     }));

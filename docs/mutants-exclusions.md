@@ -170,22 +170,6 @@ run mutants. Its `&&` sibling one column left IS observable off Windows (`false
 
 ## Deliberately NOT excluded
 
-`mascot_position`'s walk-in boundary (`if entered < MASCOT_ENTER_MS`) is an
-equivalent mutant — the walk-in ends at `walkable_target(seed, 0)` and wander
-cycle 0 departs from that same draw, so both branches render the identical
-`Point`. Stronger since the `mascot_home` beat was deleted: the two endpoints are
-one expression now, not two that happened to agree. But
-its **sibling** boundary, `if age < enter_delay`, is genuinely killable: the stagger
-returns `None` rather than holding at the elevator, so `<=` changes drawn to
-not-drawn at exactly `age == enter_delay`, caught by
-`the_walk_out_starts_from_where_the_mascot_was_when_it_died`.
-
-cargo-mutants describes both **identically** ("replace < with <= in
-mascot_position"), so no regex can exclude one without the other. Hence neither is:
-the walk-in shows up as a known-noise row, documented here, and the stagger one is
-caught. Same call as the `% with /` pair in `mascot_spot_for` before that fn was
-deleted.
-
 **`proc_start.rs` — `imp`'s cfg triplet (#828).** `pid_start_marker` substitutes
 into a per-OS `imp`: `cfg(macos)`, `cfg(linux)`, and a `cfg(not(any(…)))` stub.
 On a macOS host only the first COMPILES, so the other two survive as

@@ -2849,6 +2849,8 @@ struct OwnedSimStores {
     vacancy_dim: VacancyDim,
     neon: crate::floor::NeonState,
     chitchat: std::collections::HashMap<crate::chitchat::VenueKey, crate::chitchat::ActiveChitchat>,
+    creatures:
+        std::collections::HashMap<crate::creatures::CreatureKey, crate::creatures::CreatureWalk>,
 }
 
 impl OwnedSimStores {
@@ -2858,6 +2860,7 @@ impl OwnedSimStores {
             vacancy_dim: VacancyDim::new(),
             neon: crate::floor::NeonState::new(),
             chitchat: std::collections::HashMap::new(),
+            creatures: std::collections::HashMap::new(),
         }
     }
 
@@ -2870,6 +2873,7 @@ impl OwnedSimStores {
             vacancy_dim: &mut self.vacancy_dim,
             neon: &mut self.neon,
             chitchat: &mut self.chitchat,
+            creatures: &mut self.creatures,
         }
     }
 }
@@ -3175,7 +3179,7 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
 }
 
 #[test]
-fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
+fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_stands() {
     let (scene, layout, _, now0, pack) = sim_rig();
     let coffee = HashMap::new();
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
@@ -3220,10 +3224,8 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         "a roaming cat is not being petted"
     );
 
-    let clicked = Point { x: 40, y: 50 };
     let petting = crate::pet::PetState {
         petted_at: now0,
-        pet_pos: clicked,
         kind: pet.kind,
         floor_idx: floor.floor_idx,
     };
@@ -3232,31 +3234,15 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         petting: Some(&petting),
     })
     .expect("the petted cat");
-    assert_eq!(held.pos, clicked);
+    assert_eq!(
+        held.pos, roaming.pos,
+        "held where it stands, not where the click landed"
+    );
     assert_eq!(held.anim_name, pet.kind.sit_anim());
     assert_eq!(
         hearts(&held),
         [0],
         "petted just now: its first heart leaves"
-    );
-
-    // Held in the canvas's corner, its frame is fitted back on.
-    let in_corner = crate::pet::PetState {
-        pet_pos: Point { x: 0, y: 0 },
-        ..petting
-    };
-    let cornered = step(PetInputs {
-        pet: Some(&pet),
-        petting: Some(&in_corner),
-    })
-    .expect("the petted cat");
-    let size = crate::sim::frame_size(&pack, cornered.anim_name, 0, crate::sim::PET_FALLBACK);
-    assert_eq!(
-        cornered.pos,
-        Point {
-            x: size.w / 2,
-            y: size.h / 2
-        }
     );
 
     let upstairs = crate::pet::PetState {
