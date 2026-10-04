@@ -19,10 +19,8 @@ pub(crate) fn parse_json_or_empty(content: &str) -> anyhow::Result<Value> {
 
 /// Bake `hook_path` (JSON-escaped) into a plugin `template` at `placeholder` —
 /// the shared renderer for the code-artifact targets (opencode `.ts`, openclaw
-/// `.js`). JSON strings are a subset of JS string literals EXCEPT U+2028/U+2029
-/// (valid unescaped in JSON, line terminators in JS) — neither occurs in a real
-/// filesystem path, so the result is a valid JS literal for any path the
-/// resolver hands us.
+/// `.js`). A JSON string is a JS string literal since ES2019's
+/// [JSON superset](https://github.com/tc39/proposal-json-superset).
 pub(crate) fn bake_hook_path(
     template: &str,
     placeholder: &str,
@@ -180,6 +178,11 @@ pub(crate) fn flat_json_merge_outcome_uninstall(
 }
 
 /// The TOML analog. No non-object guard — a TOML root is always a table.
+///
+/// `mutate` merges on the plain value; the result is written back onto the
+/// user's own [`toml_edit::DocumentMut`], so every key, table and array-of-tables
+/// entry the merge left equal keeps its comments and layout — the file is
+/// another CLI's, and its owner's notes in it are not ours to drop.
 pub(crate) fn toml_merge_outcome(
     content: &str,
     mutate: impl FnOnce(toml::Value) -> toml::Value,
@@ -187,15 +190,149 @@ pub(crate) fn toml_merge_outcome(
     let doc = parse_toml_or_empty(content)?;
     let merged = mutate(doc.clone());
     let changed = merged != doc;
+    let mut edit: toml_edit::DocumentMut = content.parse()?;
+    apply_toml(edit.as_item_mut(), &doc, &merged)?;
     Ok(MergeOutcome {
-        content: toml::to_string_pretty(&merged)?,
+        content: edit.to_string(),
         changed,
     })
+}
+
+/// Rewrite `item` from `old` to `new`, touching only what differs: a table
+/// recurses key by key, an array of tables reuses each entry an equal one
+/// survives as, and anything else is replaced whole.
+fn apply_toml(
+    item: &mut toml_edit::Item,
+    old: &toml::Value,
+    new: &toml::Value,
+) -> anyhow::Result<()> {
+    if old == new {
+        return Ok(());
+    }
+    match (old, new, item) {
+        (toml::Value::Table(old), toml::Value::Table(new), toml_edit::Item::Table(table)) => {
+            for key in old.keys().filter(|k| !new.contains_key(*k)) {
+                table.remove(key);
+            }
+            for (key, value) in new {
+                match (old.get(key), table.get_mut(key)) {
+                    (Some(was), Some(slot)) => apply_toml(slot, was, value)?,
+                    _ => {
+                        table.insert(key, toml_item(value)?);
+                    }
+                }
+            }
+        }
+        (toml::Value::Array(old), toml::Value::Array(new), toml_edit::Item::ArrayOfTables(aot))
+            if new.iter().all(toml::Value::is_table) =>
+        {
+            let mut kept = vec![false; old.len()];
+            let mut rebuilt = toml_edit::ArrayOfTables::new();
+            for value in new {
+                let reuse = (0..old.len()).find(|&i| !kept[i] && old[i] == *value);
+                let table = match reuse.and_then(|i| aot.get(i).map(|t| (i, t.clone()))) {
+                    Some((i, t)) => {
+                        kept[i] = true;
+                        t
+                    }
+                    None => match toml_item(value)? {
+                        toml_edit::Item::Table(t) => t,
+                        _ => anyhow::bail!("a table entry did not render as a table"),
+                    },
+                };
+                rebuilt.push(table);
+            }
+            *aot = rebuilt;
+        }
+        (_, new, item) => *item = toml_item(new)?,
+    }
+    Ok(())
+}
+
+/// `value` as a fresh `toml_edit` item, positionless so it lays out after its
+/// neighbours instead of claiming another document's place.
+fn toml_item(value: &toml::Value) -> anyhow::Result<toml_edit::Item> {
+    const KEY: &str = "v";
+    let mut wrapper = toml::Table::new();
+    wrapper.insert(KEY.into(), value.clone());
+    let mut doc: toml_edit::DocumentMut = toml::to_string(&wrapper)?.parse()?;
+    let mut item = doc
+        .remove(KEY)
+        .ok_or_else(|| anyhow::anyhow!("a rendered TOML value lost its key"))?;
+    clear_positions(&mut item);
+    Ok(item)
+}
+
+fn clear_positions(item: &mut toml_edit::Item) {
+    match item {
+        toml_edit::Item::Table(t) => {
+            t.set_position(None);
+            for (_, child) in t.iter_mut() {
+                clear_positions(child);
+            }
+        }
+        toml_edit::Item::ArrayOfTables(aot) => {
+            for t in aot.iter_mut() {
+                t.set_position(None);
+                for (_, child) in t.iter_mut() {
+                    clear_positions(child);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A merge rewrites only what it changed: the owner's comments, on the keys,
+    /// tables and hook groups it left equal, survive both directions.
+    #[test]
+    fn toml_merge_keeps_what_it_did_not_change() {
+        let user = "\
+# my model, do not touch
+model = \"o3\" # inline note
+
+[hooks]
+# my own hook
+[[hooks.Stop]]
+command = \"notify-send done\" # theirs
+";
+        let add = |mut d: toml::Value| {
+            let stop = d["hooks"]["Stop"].as_array_mut().unwrap();
+            stop.push(toml::Value::Table(toml::Table::from_iter([(
+                "command".to_string(),
+                toml::Value::from("ours"),
+            )])));
+            d
+        };
+        let out = toml_merge_outcome(user, add).unwrap();
+        assert!(out.changed);
+        for kept in [
+            "# my model, do not touch",
+            "# inline note",
+            "# my own hook",
+            "# theirs",
+        ] {
+            assert!(
+                out.content.contains(kept),
+                "{kept:?} dropped:\n{}",
+                out.content
+            );
+        }
+        assert!(out.content.contains("\"ours\""), "{}", out.content);
+        let back = toml_merge_outcome(&out.content, |mut d: toml::Value| {
+            d["hooks"]["Stop"].as_array_mut().unwrap().pop();
+            d
+        })
+        .unwrap();
+        assert_eq!(
+            back.content, user,
+            "uninstall must restore the owner's bytes"
+        );
+    }
 
     #[test]
     fn flat_json_merge_outcome_install_refuses_a_valid_non_object_root() {
