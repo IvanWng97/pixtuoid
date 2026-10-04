@@ -24,7 +24,7 @@ const IN_BUFFER_SIZE: u32 = 1 << 20;
 /// Owner-only security descriptor via SDDL `D:P(A;;GA;;;OW)` — the named-pipe
 /// equivalent of the Unix socket's umask-0700, closing the default DACL's
 /// Everyone-READ. Held alive for the daemon's lifetime so the raw-pointer
-/// SECURITY_ATTRIBUTES stays valid at every create site.
+/// `SECURITY_ATTRIBUTES` stays valid at every create site.
 struct OwnerOnlySd {
     psd: PSECURITY_DESCRIPTOR,
     attrs: SECURITY_ATTRIBUTES,
@@ -54,7 +54,7 @@ impl OwnerOnlySd {
             ConvertStringSecurityDescriptorToSecurityDescriptorW(
                 windows_sys::w!("D:P(A;;GA;;;OW)"),
                 SDDL_REVISION_1,
-                &mut psd,
+                &raw mut psd,
                 std::ptr::null_mut(),
             )
         };
@@ -72,7 +72,7 @@ impl OwnerOnlySd {
         })
     }
 
-    /// Only ever read by CreateNamedPipeW, for the duration of that call.
+    /// Only ever read by `CreateNamedPipeW`, for the duration of that call.
     fn attributes_ptr(&self) -> *mut c_void {
         std::ptr::from_ref(&self.attrs).cast_mut().cast()
     }
@@ -99,7 +99,7 @@ pub(super) struct Listener {
 /// `first` claims `first_pipe_instance`: ONLY the initial bind may, so a taken
 /// name surfaces as the typed `SocketBusy`. The recreate + next-instance must
 /// NOT claim it — the in-flight instance still holds it, and re-claiming fails
-/// ACCESS_DENIED.
+/// `ACCESS_DENIED`.
 ///
 /// SAFETY: `attributes_ptr` must point at a well-formed `SECURITY_ATTRIBUTES`
 /// whose `lpSecurityDescriptor` is valid for the duration of the call; the kernel

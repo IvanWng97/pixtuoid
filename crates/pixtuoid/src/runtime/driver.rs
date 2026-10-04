@@ -32,6 +32,11 @@ use tokio::sync::watch;
 use super::gate;
 use super::{ConnectedSources, RunConfig, SceneRx, resolve_boot_caps, summarize};
 
+/// Boot the TUI (unless headless) and drive the source pipeline until it exits.
+///
+/// # Errors
+///
+/// If the sprite pack fails to load, the tokio runtime cannot be built, or the headless loop or TUI session fails.
 pub fn run(cfg: RunConfig) -> Result<()> {
     // Before tokio and the boot caps: the query reads the terminal while no
     // other thread does, and once the cutaway paints, the boot seed is the
@@ -321,7 +326,7 @@ async fn headless_loop_with_signal(
             return Ok(());
         }
         tokio::select! {
-            _ = tokio::time::sleep(Duration::from_millis(HEADLESS_SUMMARY_POLL_INTERVAL_MS)) => {
+            () = tokio::time::sleep(Duration::from_millis(HEADLESS_SUMMARY_POLL_INTERVAL_MS)) => {
                 let snapshot = scene_rx.borrow_and_update().clone();
                 let summary = summarize(&snapshot);
                 if summary != prev_summary {

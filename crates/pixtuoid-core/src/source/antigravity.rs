@@ -23,7 +23,11 @@ pub(crate) fn admits_transcript(path: &Path) -> bool {
     path.file_name().and_then(|s| s.to_str()) != Some("transcript_full.jsonl")
 }
 
-/// Decode one Antigravity CLI transcript line into `AgentEvent`s (the step_index / tool_calls JSONL schema).
+/// Decode one Antigravity CLI transcript line into `AgentEvent`s (the `step_index` / `tool_calls` JSONL schema).
+///
+/// # Errors
+///
+/// Never: the `Result` is the [`LineDecoder`](crate::source::decoder::LineDecoder) signature, and a malformed line decodes to `vec![]`.
 pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     let agent_id = AgentId::from_parts(source, transcript_path);
     let Some(obj) = v.as_object() else {
@@ -35,7 +39,7 @@ pub fn decode_ag_line(transcript_path: &str, source: &str, v: Value) -> Result<V
     // leaving the slot stuck Active until the reducer's stale-sweep.
     let Some(step_index) = obj
         .get("step_index")
-        .and_then(|v| v.as_i64())
+        .and_then(serde_json::Value::as_i64)
         .filter(|&s| s >= 0)
     else {
         return Ok(vec![]);

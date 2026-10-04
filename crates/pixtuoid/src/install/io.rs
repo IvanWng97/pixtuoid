@@ -200,7 +200,7 @@ fn read_resolved(target: &Path) -> Result<String> {
 }
 
 /// Rename `from` onto `to`, with a Windows-only bounded retry: `fs::rename` onto
-/// a file another process holds open raises ERROR_SHARING_VIOLATION (os error
+/// a file another process holds open raises `ERROR_SHARING_VIOLATION` (os error
 /// 32), and Claude Code keeps `settings.json` open briefly, so a bare rename can
 /// lose the write. The sleeps match CC's typical hold duration. On Unix the
 /// rename succeeds atomically even while a reader holds the old fd, so a single
@@ -214,7 +214,7 @@ fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
             match std::fs::rename(from, to) {
                 Ok(()) => return Ok(()),
                 Err(_) => {
-                    std::thread::sleep(std::time::Duration::from_millis(RENAME_RETRY_SLEEP_MS))
+                    std::thread::sleep(std::time::Duration::from_millis(RENAME_RETRY_SLEEP_MS));
                 }
             }
         }
@@ -231,7 +231,7 @@ fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
 /// with config-dir write pre-plants at the tmp name is NOT followed (that would
 /// clobber the link's target with our bytes), and the create owns a fresh inode
 /// rather than an adopted one. A pre-existing tmp — our own crash residue, or a
-/// hostile symlink O_NOFOLLOW rejected — is reclaimed ONCE (`remove_file` unlinks
+/// hostile symlink `O_NOFOLLOW` rejected — is reclaimed ONCE (`remove_file` unlinks
 /// the entry itself, never following a symlink; the retry stays hardened). The
 /// final rename onto the RESOLVED target still follows that target's own symlink
 /// (invariant #4) — only the distinct, attacker-controllable tmp is guarded.
@@ -344,9 +344,10 @@ impl ConfigLock {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let perms = std::fs::metadata(&self.target)
-                    .map(|m| m.permissions())
-                    .unwrap_or_else(|_| std::fs::Permissions::from_mode(0o600));
+                let perms = std::fs::metadata(&self.target).map_or_else(
+                    |_| std::fs::Permissions::from_mode(0o600),
+                    |m| m.permissions(),
+                );
                 f.set_permissions(perms)?;
             }
             f.write_all(contents.as_bytes())?;

@@ -110,9 +110,8 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     let Some(p) = crate::install::verify::baked_hook_path(content) else {
         return SchemaParse::broken("could not read HOOK_PATH from the omp extension");
     };
-    let stale = render_extension(&p.to_string_lossy())
-        .map(|want| want.trim() != content.trim())
-        .unwrap_or(false);
+    let stale =
+        render_extension(&p.to_string_lossy()).is_ok_and(|want| want.trim() != content.trim());
     SchemaParse {
         shim: ShimRef::Absolute(p),
         issues: if stale {

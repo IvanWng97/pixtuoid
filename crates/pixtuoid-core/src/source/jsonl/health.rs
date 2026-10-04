@@ -2,7 +2,7 @@
 /// going unreadable mid-run, a broken notify backend, the hook socket's accept
 /// loop erroring). These failures recur on every pass, so an ungated `warn!`
 /// spams the warn-floor log every interval, while total silence leaves the
-/// watcher permanently blind — after a successful bind there is no SourceDeath
+/// watcher permanently blind — after a successful bind there is no `SourceDeath`
 /// path left to report through.
 #[derive(Default)]
 pub(crate) struct FailureLatch {

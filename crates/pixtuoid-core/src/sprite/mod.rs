@@ -188,7 +188,7 @@ impl Rgb {
                 let (mut min, mut max) = (0.0, current.chroma);
                 let mut min_in_gamut = true;
                 while max - min > GAMUT_EPSILON {
-                    current.chroma = (min + max) / 2.0;
+                    current.chroma = f32::midpoint(min, max);
                     if min_in_gamut && lin(current).is_within_bounds() {
                         min = current.chroma;
                         continue;
@@ -267,12 +267,11 @@ impl Palette {
     /// Replace `key`'s entry in place: frames hold its index, so a second slot
     /// for the key would leave them reading the old one.
     fn set(&mut self, key: char, entry: Entry) {
-        match self.index.get(&key).and_then(|&i| self.entries.get_mut(i)) {
-            Some(slot) => slot.1 = entry,
-            None => {
-                self.index.insert(key, self.entries.len());
-                self.entries.push((key, entry));
-            }
+        if let Some(slot) = self.index.get(&key).and_then(|&i| self.entries.get_mut(i)) {
+            slot.1 = entry;
+        } else {
+            self.index.insert(key, self.entries.len());
+            self.entries.push((key, entry));
         }
     }
 

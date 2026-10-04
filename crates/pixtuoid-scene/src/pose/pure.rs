@@ -150,7 +150,7 @@ pub fn takes_trip(agent_id: AgentId, cycle_n: u64) -> bool {
 }
 
 /// Per-(agent, cycle) decision: when the agent takes a trip, is it an aimless
-/// wander (random cubicle_aisle point) or a directed visit to a named waypoint?
+/// wander (random `cubicle_aisle` point) or a directed visit to a named waypoint?
 pub fn is_aimless_cycle(agent_id: AgentId, cycle_n: u64) -> bool {
     let p = personality_for(agent_id);
     let type_mix = agent_id.raw() ^ cycle_n.wrapping_mul(pixtuoid_core::id::SPLITMIX64_M1);
@@ -198,7 +198,7 @@ pub enum Pose {
         /// Whether the agent renders holding a coffee on this leg.
         carrying_coffee: bool,
     },
-    /// Standing at a random cubicle_aisle point (not at any waypoint).
+    /// Standing at a random `cubicle_aisle` point (not at any waypoint).
     AimlessAt {
         /// Layout-pixel point the agent ambled to.
         dest: Point,
@@ -218,7 +218,7 @@ impl Pose {
     }
 }
 
-/// Returns `None` if the slot's desk_index is out of range for `layout`.
+/// Returns `None` if the slot's `desk_index` is out of range for `layout`.
 ///
 /// Priority, first match wins: exit override (walk to the door, then `None`
 /// once the window passes) → entry override (door → desk, regardless of state
@@ -407,7 +407,7 @@ pub(crate) fn in_thinking_window(slot: &AgentSlot, now: SystemTime) -> bool {
     was_active && since_last_event < THINKING_WINDOW_SECS
 }
 
-/// Milliseconds of the current Idle period during which the SeatedThinking gate
+/// Milliseconds of the current Idle period during which the `SeatedThinking` gate
 /// held the agent at its desk. 0 when the agent was never active or when the
 /// window expired before this Idle period began.
 fn thinking_hold_ms(slot: &AgentSlot) -> u64 {

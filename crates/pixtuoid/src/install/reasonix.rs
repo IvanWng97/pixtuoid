@@ -9,7 +9,7 @@
 //!
 //! - `match` is OMITTED: empty = every tool. Any other value is an ANCHORED
 //!   regex, and a malformed one never fires.
-//! - `timeout` is in MILLISECONDS, and on the gating PreToolUse a TIMEOUT BLOCKS
+//! - `timeout` is in MILLISECONDS, and on the gating `PreToolUse` a TIMEOUT BLOCKS
 //!   the user's tool call.
 //! - `_pixtuoid` is the managed-entry sentinel; Go's `json.Unmarshal` ignores
 //!   unknown fields, so Reasonix never sees it.
@@ -25,11 +25,11 @@ use crate::install::merge;
 use crate::install::target::MergeOutcome;
 
 /// Events we register == events we decode, enforced by
-/// `every_registered_reasonix_event_decodes` below. PostToolUseFailure /
-/// StopFailure are deliberately ABSENT: the runner re-fires failures to NATIVE
-/// hooks registered under PostToolUse / Stop with the event re-labeled, and ours
+/// `every_registered_reasonix_event_decodes` below. `PostToolUseFailure` /
+/// `StopFailure` are deliberately ABSENT: the runner re-fires failures to NATIVE
+/// hooks registered under `PostToolUse` / Stop with the event re-labeled, and ours
 /// are native-format — registering both spellings would double-fire every failed
-/// tool/turn for the same decoded ActivityEnd.
+/// tool/turn for the same decoded `ActivityEnd`.
 pub(crate) const REASONIX_EVENTS: &[&str] = &[
     "SessionStart",
     "PreToolUse",
@@ -139,7 +139,7 @@ fn user_config_dir_checked(
 
 /// Reasonix runs the `command` string under a shell (`sh -c` / `cmd.exe /c`), so
 /// the OS forms are [`crate::install::hook_cmd::shell_hook_command`]'s. Err on
-/// non-UTF-8 (prevents the to_string_lossy dead-hook).
+/// non-UTF-8 (prevents the `to_string_lossy` dead-hook).
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     // `_explicit` is Claude's bare-name-vs-absolute switch — Reasonix always
     // embeds the absolute path, so the flag changes nothing here.

@@ -56,7 +56,7 @@ impl DriftScan {
         let Ok(mut f) = std::fs::File::open(lp) else {
             return;
         };
-        let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+        let len = f.metadata().map_or(0, |m| m.len());
         if len < self.offset {
             self.offset = 0;
         }
@@ -444,15 +444,14 @@ impl UiState {
                 dim: welcome::dim_opening(e),
             }
         } else if let Some((closing, from)) = self.onboarding_closing_at {
-            match welcome::dim_closing(from, closing.elapsed().as_millis() as u64) {
-                Some(dim) => OnboardingFrame {
+            if let Some(dim) = welcome::dim_closing(from, closing.elapsed().as_millis() as u64) {
+                OnboardingFrame {
                     dim,
                     ..Default::default()
-                },
-                None => {
-                    self.onboarding_closing_at = None;
-                    OnboardingFrame::default()
                 }
+            } else {
+                self.onboarding_closing_at = None;
+                OnboardingFrame::default()
             }
         } else {
             OnboardingFrame::default()

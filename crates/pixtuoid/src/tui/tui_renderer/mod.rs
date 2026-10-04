@@ -284,7 +284,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// changes, and a slide does not.
     fn office_extent(&self) -> (u16, u16) {
         #[cfg(feature = "graphics")]
-        if let Some(office) = self.cutaway.as_ref().and_then(|c| c.office()) {
+        if let Some(office) = self
+            .cutaway
+            .as_ref()
+            .and_then(super::cutaway::TileCutaway::office)
+        {
             return (office.w, office.h);
         }
         self.buf().map_or((0, 0), |b| (b.width(), b.height()))
@@ -709,6 +713,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 }
 
 impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
+    /// Draw one frame of `scene`, then follow a terminal resize.
+    ///
+    /// # Errors
+    ///
+    /// If querying the terminal size or drawing the frame to the backend fails.
     pub fn render(&mut self, scene: &SceneState, pack: &Pack, now: SystemTime) -> Result<()> {
         self.draw_frame(scene, pack, now)?;
         self.follow_resize();

@@ -33,7 +33,9 @@ fn place(buf: &mut [f32], snippet: &[f32], at_s: f32, gain: f32) {
 
 fn normalize(buf: &mut [f32], peak: f32) {
     let m = buf.iter().fold(0.0f32, |a, &v| a.max(v.abs())).max(1e-9);
-    buf.iter_mut().for_each(|v| *v *= peak / m);
+    for v in buf.iter_mut() {
+        *v *= peak / m;
+    }
 }
 
 /// One mechanical-keyboard stroke — the BRIGHT office clack, most of its energy

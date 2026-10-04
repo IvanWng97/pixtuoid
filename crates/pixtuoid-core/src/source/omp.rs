@@ -212,10 +212,10 @@ fn resolve_omp_agent_dir_parts(env: &OmpEnv) -> Option<(PathBuf, bool, Option<St
 }
 
 fn resolve_omp_agent_dir(env: &OmpEnv) -> PathBuf {
-    resolve_omp_agent_dir_parts(env)
-        .map(|(d, _, _)| d)
-        // Keeps the pre-#880 shape: an unresolvable home is already `/tmp`-rooted.
-        .unwrap_or_else(|| crate::platform::user_home().join(".omp").join(AGENT_SUBDIR))
+    resolve_omp_agent_dir_parts(env).map_or_else(
+        || crate::platform::user_home().join(".omp").join(AGENT_SUBDIR),
+        |(d, _, _)| d,
+    )
 }
 
 /// `getSessionsDir()` = `agentSubdir(undefined, "sessions", "data")`.
@@ -257,7 +257,7 @@ pub fn omp_profile_sessions_dirs() -> Vec<PathBuf> {
                 return Vec::new();
             };
             entries
-                .filter_map(|e| e.ok())
+                .filter_map(std::result::Result::ok)
                 .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
                 .filter_map(|e| e.file_name().into_string().ok())
                 .collect()
@@ -490,7 +490,7 @@ fn stem_chain(path: &Path) -> Vec<String> {
     }
 }
 
-/// AgentId key: the root stem for a root transcript; the `/`-joined stem chain for
+/// `AgentId` key: the root stem for a root transcript; the `/`-joined stem chain for
 /// a (nested) subagent, so `Alpha` under two different sessions never collides.
 /// Also the `session_id` [`decode_omp_line`] mints, so its `SessionStart` and the
 /// watcher's first-sight one agree on one key.
@@ -561,7 +561,7 @@ const TITLE_FIELD: &str = "title";
 pub(crate) const DECODED_EXIT_MARKER: &str = SESSION_EXIT;
 
 /// Appended on every clean teardown, SIGINT/SIGTERM included; its reason/kind is
-/// ignored, because every kind ("normal"|"signal"|"fatal"|"process_exit") IS an
+/// ignored, because every kind ("`normal"|"signal"|"fatal"|"process_exit`") IS an
 /// end. Skipped when the session never produced an assistant message (the
 /// bridge's `session_shutdown` ends that one outright), and SIGKILL writes
 /// nothing — with the bridge `HookPidWatch` catches it; without, the
@@ -583,9 +583,9 @@ const ROLE_TOOL_RESULT: &str = "toolResult";
 const BLOCK_TOOL_CALL: &str = "toolCall";
 
 /// The tool that BLOCKS on human input: its `ActivityStart` binds the reducer's
-/// `gated_before_waiting` gate to the ask's own tool_use_id, so the answer's
+/// `gated_before_waiting` gate to the ask's own `tool_use_id`, so the answer's
 /// `toolResult` resolves the Wait. Ask pairs are appended LAST — a sibling's later
-/// ActivityStart would flip the slot back to Active, drop the gate, and strand the
+/// `ActivityStart` would flip the slot back to Active, drop the gate, and strand the
 /// Wait forever.
 const TOOL_ASK: &str = "ask";
 
@@ -649,6 +649,10 @@ pub(crate) fn omp_head_title(v: &Value) -> Option<String> {
 /// Decode one omp session JSONL line into zero or more `AgentEvent`s.
 /// Unknown entry types / roles and malformed shapes return `vec![]` — the
 /// upstream loader is itself lenient (`parseJsonlLenient`).
+///
+/// # Errors
+///
+/// Never: the `Result` is the [`LineDecoder`](crate::source::decoder::LineDecoder) signature, and a malformed line decodes to `vec![]`.
 pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     let path = Path::new(transcript_path);
     let acting = AgentId::from_parts(source, &omp_id_from_path(path));
@@ -691,7 +695,12 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                         });
                     }
                     if let Some(usage) = msg.get("usage").and_then(|u| u.as_object()) {
-                        let field = |k: &str| usage.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+                        let field = |k: &str| {
+                            usage
+                                .get(k)
+                                .and_then(serde_json::Value::as_u64)
+                                .unwrap_or(0)
+                        };
                         let fresh = field("input")
                             .saturating_add(field("cacheWrite"))
                             .saturating_add(field("output"));
@@ -805,8 +814,10 @@ fn omp_ask_reason(args: Option<&Value>) -> String {
             .and_then(|q| q.as_str())
             .or_else(|| a.get("i").and_then(|i| i.as_str()))
     })
-    .map(|t| ellipsize(t, MAX_DECODED_FIELD_CHARS))
-    .unwrap_or_else(|| "ask".to_string())
+    .map_or_else(
+        || "ask".to_string(),
+        |t| ellipsize(t, MAX_DECODED_FIELD_CHARS),
+    )
 }
 
 // --- extension-bridge hook payloads (#951) ---------------------------------
@@ -848,7 +859,7 @@ pub(crate) const DECODED_HOOK_EVENTS: &[&str] = &[
 /// Identity: `sessionFile` (the ALLOCATED path — omp exposes it before the
 /// lazy persist materializes the JSONL) through the watcher's own
 /// `normalize_path_key` fold then [`omp_id_from_path`], so both transports
-/// mint ONE AgentId per session, nested task children included. `sessionId`
+/// mint ONE `AgentId` per session, nested task children included. `sessionId`
 /// (the bare header UUID, a keyspace no stem can collide with — stems carry
 /// the date shape and `_`) covers `--no-session`, where no transcript will
 /// ever exist to coalesce with.
@@ -863,6 +874,10 @@ pub(crate) const DECODED_HOOK_EVENTS: &[&str] = &[
 /// stamps pids onto Identity events only, and the focus stamp must arm from
 /// BIRTH to cover a bridge-only (never-persisted) session — the exit watch
 /// needs no help, `SessionStart` is already a bind target.
+///
+/// # Errors
+///
+/// Never: a malformed or unknown payload decodes to `vec![]`; the `Result` is the hook-decoder signature.
 pub fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let Some(obj) = v.as_object() else {
         return Ok(vec![]);
@@ -871,12 +886,11 @@ pub fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         crate::source::drift::missing_field(SOURCE_NAME, "hook", "type");
         return Ok(vec![]);
     };
-    let (key, parent_key) = match omp_hook_session_key(obj) {
-        Some(k) => k,
-        None => {
-            crate::source::drift::missing_field(SOURCE_NAME, ty, "sessionFile");
-            return Ok(vec![]);
-        }
+    let (key, parent_key) = if let Some(k) = omp_hook_session_key(obj) {
+        k
+    } else {
+        crate::source::drift::missing_field(SOURCE_NAME, ty, "sessionFile");
+        return Ok(vec![]);
     };
     let agent_id = AgentId::from_parts(SOURCE_NAME, &key);
     let cwd = || {
@@ -939,7 +953,7 @@ pub fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                     reason: omp_approval_reason(obj, tool),
                     tool_use_id: Some(tool_call_id.to_string()),
                 }
-            } else if obj.get("approved").and_then(|a| a.as_bool()) == Some(true) {
+            } else if obj.get("approved").and_then(serde_json::Value::as_bool) == Some(true) {
                 // The resume. copilot's approve-emits-nothing shape doesn't fit
                 // omp: the transcript wrote this call BEFORE the request, so
                 // only this Start can lift the wait.
@@ -1117,8 +1131,7 @@ mod tests {
     #[test]
     fn date_shaped_dirs_above_the_sessions_root_do_not_misclassify() {
         let p = format!(
-            "/home/u/backups/2026-01-01T00-00-00-000Z_snap/agent/sessions/-dev-proj/{stem}.jsonl",
-            stem = ROOT_KEY
+            "/home/u/backups/2026-01-01T00-00-00-000Z_snap/agent/sessions/-dev-proj/{ROOT_KEY}.jsonl"
         );
         assert_eq!(omp_id_from_path(Path::new(&p)), ROOT_KEY);
         assert_eq!(omp_parent_key_from_path(Path::new(&p)), None);
@@ -2447,7 +2460,7 @@ mod tests {
         omp_id_from_path(Path::new(&crate::id::normalize_path_key(raw)))
     }
 
-    /// The folded key as an AgentId, the shape every expectation compares.
+    /// The folded key as an `AgentId`, the shape every expectation compares.
     fn hook_id(raw: &str) -> AgentId {
         AgentId::from_parts("omp", &hook_key(raw))
     }
@@ -2654,7 +2667,10 @@ mod tests {
             ] => {
                 assert_eq!(*agent_id, hook_id(HOOK_ROOT));
                 assert_eq!(tool_use_id.as_deref(), Some("call_1"));
-                assert_eq!(detail.as_ref().map(|d| d.display()), Some("bash"));
+                assert_eq!(
+                    detail.as_ref().map(super::super::ToolDetail::display),
+                    Some("bash")
+                );
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -2704,7 +2720,11 @@ mod tests {
         }));
         match &evs[..] {
             [_, AgentEvent::ActivityStart { detail, .. }] => {
-                assert!(detail.as_ref().is_some_and(|d| d.is_task()));
+                assert!(
+                    detail
+                        .as_ref()
+                        .is_some_and(super::super::ToolDetail::is_task)
+                );
             }
             other => panic!("unexpected: {other:?}"),
         }

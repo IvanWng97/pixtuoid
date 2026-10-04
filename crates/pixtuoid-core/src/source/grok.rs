@@ -6,9 +6,9 @@
 //!   `rewind_marker` instead of truncating). The SIBLING `chat_history.jsonl`
 //!   is REWRITTEN via temp+rename on resume/compaction/rewind — never tail it.
 //! - **Hooks**: JSON envelope on stdin with **camelCase field names and
-//!   snake_case event values** (`hookEventName`, `sessionId`, `toolUseId`, …)
+//!   `snake_case` event values** (`hookEventName`, `sessionId`, `toolUseId`, …)
 //!   — the only spelling pre-1.0 sent, hence the claims-all custom decoder
-//!   below; 1.0.x mirrors every key in CC's snake_case too
+//!   below; 1.0.x mirrors every key in CC's `snake_case` too
 //!   (`grok/tool-run-recorded`), which this decoder still does not read. Hooks
 //!   dispatch SEQUENTIALLY inline on the session actor, so the shim's 200ms
 //!   bound matters here.
@@ -83,6 +83,10 @@ pub(crate) const DECODED_XAI_METHOD: &str = XAI_SESSION_UPDATE_METHOD;
 /// carrier, because grok's `session_end` is unreliable (a TUI quit fires none)
 /// so a stale-swept LIVE session must walk back in on its next prompt.
 /// Anything unrecognized bails: registered-vs-decoded drift must be loud.
+///
+/// # Errors
+///
+/// If the payload is not an object, lacks `hookEventName`, carries none of `sessionId`, `cwd` or `workspaceRoot`, names an unrecognized event, or is a subagent event without `subagentId`.
 pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
@@ -306,16 +310,15 @@ fn transcript_child_key(update: &serde_json::Map<String, Value>) -> Option<&str>
 }
 
 fn subagent_child_id(obj: &serde_json::Map<String, Value>, event: &str) -> Result<AgentId> {
-    match child_key(obj) {
-        Some(id) => Ok(AgentId::from_parts(SOURCE_NAME, &id)),
-        None => {
-            crate::source::drift::missing_field(SOURCE_NAME, event, "subagentId");
-            bail!("grok {event} payload missing subagentId")
-        }
+    if let Some(id) = child_key(obj) {
+        Ok(AgentId::from_parts(SOURCE_NAME, &id))
+    } else {
+        crate::source::drift::missing_field(SOURCE_NAME, event, "subagentId");
+        bail!("grok {event} payload missing subagentId")
     }
 }
 
-/// Grok tool detail: `"name: target"` over grok's snake_case tool vocabulary.
+/// Grok tool detail: `"name: target"` over grok's `snake_case` tool vocabulary.
 ///
 /// **`spawn_subagent` maps to `ToolDetail::Task` ONLY for an explicit
 /// `background: false` (blocking) dispatch — NOT on the CC-style semantic
@@ -347,7 +350,7 @@ fn grok_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
 /// Decode one `updates.jsonl` line. Envelope: `{"timestamp":<unix-secs>,
 /// "method":…,"params":{"sessionId":…,"update":{"sessionUpdate":"<tag>",…}}}`,
 /// where ACP notifications use camelCase fields and the xAI extension's fields
-/// are verbatim snake_case Rust names (`rename_all` covers only the tag).
+/// are verbatim `snake_case` Rust names (`rename_all` covers only the tag).
 ///
 /// The message/thought/plan chunks decode to nothing: a chunk has no paired
 /// end, and the coalescer may even land an xAI line BEFORE the buffered text
@@ -357,6 +360,10 @@ fn grok_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
 /// line's `sessionId`: the path is the watcher's id space, and the two are
 /// equal by construction. The hook transport keys on the same string, so
 /// cross-transport dedup (hook `toolUseId` == ACP `toolCallId`) actually fires.
+///
+/// # Errors
+///
+/// Never: the `Result` is the [`LineDecoder`](crate::source::decoder::LineDecoder) signature, and a malformed line decodes to `vec![]`.
 pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     let agent_id = AgentId::from_parts(source, &grok_id_from_path(Path::new(path)));
     let Some(method) = v.get("method").and_then(|m| m.as_str()) else {
@@ -555,10 +562,10 @@ pub(crate) fn is_updates_jsonl(p: &Path) -> bool {
 /// being the constant `updates`. Equal to every hook event's `sessionId`, so
 /// the two transports coalesce.
 pub fn grok_id_from_path(path: &Path) -> String {
-    path.parent()
-        .and_then(|d| d.file_name())
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+    path.parent().and_then(|d| d.file_name()).map_or_else(
+        || path.to_string_lossy().into_owned(),
+        |n| n.to_string_lossy().into_owned(),
+    )
 }
 
 /// The session's cwd from a transcript path: the GRANDPARENT dir name is
@@ -631,7 +638,7 @@ mod tests {
     }
 
     /// The payload's MAIN event is the LAST decoded one — activity arms
-    /// prepend an `Identity`, subagent_start appends a `Rename`.
+    /// prepend an `Identity`, `subagent_start` appends a `Rename`.
     fn decode(v: Value) -> AgentEvent {
         decode_all(v).pop().expect("at least one event")
     }

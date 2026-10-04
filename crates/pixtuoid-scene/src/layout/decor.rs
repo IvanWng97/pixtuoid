@@ -1004,7 +1004,7 @@ impl PodDecor {
         PodDecor::StandingDesk,
     ];
 
-    /// Geometry kind in the unified [`Furniture`] table. PlantTall resolves to the
+    /// Geometry kind in the unified [`Furniture`] table. `PlantTall` resolves to the
     /// SAME row as the free-standing `PlantKind::Tall`, and PhoneBooth/StandingDesk
     /// to the same rows as their `WaypointKind` twins, so nothing drifts.
     pub const fn furniture(self) -> Furniture {

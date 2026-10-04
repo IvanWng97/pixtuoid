@@ -131,7 +131,7 @@ mod tests {
         .expect("pack builds")
     }
 
-    /// (width, density, blit_at) of `name`'s frame `idx` at scale `s`.
+    /// (width, density, `blit_at`) of `name`'s frame `idx` at scale `s`.
     fn at(pack: &Pack, name: &str, idx: usize, s: u16) -> (u16, u16, u16) {
         let d = densest_frame(pack, name, idx, RenderScale::new(s).expect("nonzero")).expect("art");
         (d.frame.width(), d.density.get(), d.blit_at.get())

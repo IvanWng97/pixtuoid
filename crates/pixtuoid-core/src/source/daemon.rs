@@ -321,8 +321,7 @@ pub fn sweep_presence_ttl(scene: &mut SceneState, source: &str, ttl: PresenceTtl
     for (instance, p) in scene.daemons.instances_of_mut(source) {
         let idle_ms = now
             .duration_since(p.last_seen)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_millis() as u64);
         if p.liveness == DaemonLiveness::Down {
             // Keep the Down entry only until the walk-out has had time to finish.
             if idle_ms >= ttl.down_remove_ms {
@@ -333,10 +332,7 @@ pub fn sweep_presence_ttl(scene: &mut SceneState, source: &str, ttl: PresenceTtl
         } else {
             p.in_flight_runs.retain(|_, started| {
                 now.duration_since(*started)
-                    .map(|d| (d.as_millis() as u64) < ttl.busy_decay_ms)
-                    // A clock regression keeps the lease: a backwards step must not
-                    // expire every run at once.
-                    .unwrap_or(true)
+                    .map_or(true, |d| (d.as_millis() as u64) < ttl.busy_decay_ms)
             });
         }
     }
@@ -401,7 +397,8 @@ mod tests {
         p_opt(s, src).expect("presence entry")
     }
     fn st_at(s: &SceneState, src: &str, id: &str) -> Option<DaemonState> {
-        s.daemon(src, &inst(id)).map(|p| p.display_state())
+        s.daemon(src, &inst(id))
+            .map(crate::state::DaemonPresence::display_state)
     }
     fn st(s: &SceneState, src: &str) -> DaemonState {
         p(s, src).display_state()

@@ -1080,7 +1080,7 @@ fn resolve_connected_covers_every_registered_source() {
     let set = resolve_connected(&cfg);
     let expected: std::collections::HashSet<String> =
         pixtuoid_core::source::registry::registered_source_names()
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .collect();
     assert_eq!(
         set, expected,

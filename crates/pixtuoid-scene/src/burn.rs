@@ -60,9 +60,7 @@ pub fn fresh_effort(slot: &AgentSlot, now: SystemTime) -> Option<&str> {
         }
         let fresh = now
             .duration_since(obs.seen_at)
-            .map(|d| d.as_secs() <= EFFORT_TTL_SECS)
-            // A future-stamped observation (clock skew) counts as fresh.
-            .unwrap_or(true);
+            .map_or(true, |d| d.as_secs() <= EFFORT_TTL_SECS);
         fresh.then_some(&*obs.value)
     })
 }

@@ -41,7 +41,7 @@ fn breath_offset_y(agent_id: pixtuoid_core::AgentId, beat: crate::anim::Beat) ->
     const CYCLE_MS: u64 = 4500;
     let offset_ms = agent_id.raw() % CYCLE_MS;
     let phase = elapsed_ms.wrapping_add(offset_ms) % CYCLE_MS;
-    if phase < CYCLE_MS / 2 { 0 } else { 1 }
+    u16::from(phase >= CYCLE_MS / 2)
 }
 
 pub(crate) fn with_breath(
@@ -55,7 +55,7 @@ pub(crate) fn with_breath(
     }
 }
 
-/// Top-left of a back-view sitter on a mirror_vertical'd couch — higher than a
+/// Top-left of a back-view sitter on a `mirror_vertical`'d couch — higher than a
 /// front-view seat's because `back_couch.sprite` has no transparent
 /// head/face area (hair extends across all top rows), so sitting it lower
 /// overlaps the couch back row.
@@ -204,11 +204,7 @@ pub(crate) fn compute_door_frame_idx(
             }
         } else if elapsed_ms + DOOR_TRANSITION_MS > total_ms {
             let remaining = total_ms.saturating_sub(elapsed_ms);
-            if remaining < DOOR_TRANSITION_MS / 2 {
-                0
-            } else {
-                1
-            }
+            usize::from(remaining >= DOOR_TRANSITION_MS / 2)
         } else {
             2
         }

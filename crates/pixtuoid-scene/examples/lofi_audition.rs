@@ -3,7 +3,7 @@
 //! `synth::gen_beds` chain, so what you hear is what ships.
 //!
 //! Usage:
-//!   cargo run --release -p pixtuoid-scene --example lofi_audition -- \
+//!   cargo run --release -p pixtuoid-scene --example `lofi_audition` -- \
 //!     [--mood day|night] [--seeds N] [--start S] [--out DIR] \
 //!     [--solo pad|sparkle|keys|drums|texture|bass]
 

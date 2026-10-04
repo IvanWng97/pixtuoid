@@ -357,8 +357,8 @@ fn dispatch_key(
     if modal.onboarding_open {
         return match (code, mods) {
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
-            (KeyCode::Up, _) | (KeyCode::Char('k'), _) => KeyAction::OnboardingUp,
-            (KeyCode::Down, _) | (KeyCode::Char('j'), _) => KeyAction::OnboardingDown,
+            (KeyCode::Up | KeyCode::Char('k'), _) => KeyAction::OnboardingUp,
+            (KeyCode::Down | KeyCode::Char('j'), _) => KeyAction::OnboardingDown,
             (KeyCode::Char(' '), _) => KeyAction::OnboardingToggle,
             (KeyCode::Enter, _) => KeyAction::OnboardingConfirm,
             (KeyCode::Esc, _) => KeyAction::OnboardingSkip,
@@ -367,9 +367,7 @@ fn dispatch_key(
     }
     if modal.help_open {
         return match (code, mods) {
-            (KeyCode::Enter, _) | (KeyCode::Esc, _) | (KeyCode::Char('?'), _) => {
-                KeyAction::CloseHelp
-            }
+            (KeyCode::Enter | KeyCode::Esc | KeyCode::Char('?'), _) => KeyAction::CloseHelp,
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
             _ => KeyAction::None,
         };
@@ -387,15 +385,15 @@ fn dispatch_key(
             return match (code, mods) {
                 _ if is_quit_chord(code, mods) => KeyAction::Quit,
                 (KeyCode::Char('y'), _) => KeyAction::ConnectionConfirm,
-                (KeyCode::Char('n'), _) | (KeyCode::Esc, _) => KeyAction::ConnectionCancelConfirm,
+                (KeyCode::Char('n') | KeyCode::Esc, _) => KeyAction::ConnectionCancelConfirm,
                 _ => KeyAction::None,
             };
         }
         return match (code, mods) {
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
-            (KeyCode::Esc, _) | (KeyCode::Char('s'), _) => KeyAction::ConnectionClose,
-            (KeyCode::Up, _) | (KeyCode::Char('k'), _) => KeyAction::ConnectionUp,
-            (KeyCode::Down, _) | (KeyCode::Char('j'), _) => KeyAction::ConnectionDown,
+            (KeyCode::Esc | KeyCode::Char('s'), _) => KeyAction::ConnectionClose,
+            (KeyCode::Up | KeyCode::Char('k'), _) => KeyAction::ConnectionUp,
+            (KeyCode::Down | KeyCode::Char('j'), _) => KeyAction::ConnectionDown,
             (KeyCode::Char('t'), _) => KeyAction::ConnectionToggle,
             _ => KeyAction::None,
         };
@@ -403,13 +401,13 @@ fn dispatch_key(
     if modal.dashboard_open {
         return match (code, mods) {
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
-            (KeyCode::Esc, _) | (KeyCode::Tab, _) => KeyAction::DashboardClose,
+            (KeyCode::Esc | KeyCode::Tab, _) => KeyAction::DashboardClose,
             (KeyCode::Enter, _) => KeyAction::DashboardJump,
             (KeyCode::Char('f'), _) => KeyAction::DashboardFocus,
-            (KeyCode::Up, _) | (KeyCode::Char('k'), _) => KeyAction::DashboardUp,
-            (KeyCode::Down, _) | (KeyCode::Char('j'), _) => KeyAction::DashboardDown,
-            (KeyCode::Left, _) | (KeyCode::Char('h'), _) => KeyAction::DashboardFoldLeft,
-            (KeyCode::Right, _) | (KeyCode::Char('l'), _) => KeyAction::DashboardFoldRight,
+            (KeyCode::Up | KeyCode::Char('k'), _) => KeyAction::DashboardUp,
+            (KeyCode::Down | KeyCode::Char('j'), _) => KeyAction::DashboardDown,
+            (KeyCode::Left | KeyCode::Char('h'), _) => KeyAction::DashboardFoldLeft,
+            (KeyCode::Right | KeyCode::Char('l'), _) => KeyAction::DashboardFoldRight,
             (KeyCode::Char('z'), _) => KeyAction::DashboardFoldAll,
             _ => KeyAction::None,
         };
@@ -434,8 +432,8 @@ fn dispatch_key(
     match code {
         KeyCode::Char('p') => KeyAction::TogglePause,
         KeyCode::Char('m') => KeyAction::ToggleAudioMute,
-        KeyCode::Char('+') | KeyCode::Char('=') => KeyAction::AdjustVolume(true),
-        KeyCode::Char('-') | KeyCode::Char('_') => KeyAction::AdjustVolume(false),
+        KeyCode::Char('+' | '=') => KeyAction::AdjustVolume(true),
+        KeyCode::Char('-' | '_') => KeyAction::AdjustVolume(false),
         KeyCode::Char('t') => KeyAction::OpenThemePicker,
         KeyCode::Char('?') => KeyAction::ToggleHelp,
         KeyCode::Tab => KeyAction::ToggleDashboard,
@@ -465,6 +463,10 @@ pub type Term = Terminal<CrosstermBackend<Stdout>>;
 /// Enters raw mode + the alternate screen ATOMICALLY: a failure after raw mode is on rolls
 /// the terminal all the way back, or the error path strands the user's shell echo-less
 /// and/or on the alt screen. `Terminal::new`'s `.size()` query can fail too.
+///
+/// # Errors
+///
+/// If the Windows console lacks VT support, or enabling raw mode, the alternate screen or mouse capture fails, or the terminal size query fails.
 pub fn setup_terminal() -> Result<Term> {
     // On the WinAPI fallback (no VT), crossterm maps Color::Rgb to console attribute 0
     // and the office renders black-on-black invisible. Gate, don't degrade.
@@ -495,9 +497,13 @@ pub fn setup_terminal() -> Result<Term> {
 ///
 /// Every step runs even when an earlier one fails and the FIRST error is returned — a `?`
 /// after the escape write would skip `disable_raw` exactly when it is needed most. And
-/// DisableMouseCapture must run while raw mode is still ON: on Windows it restores the
+/// `DisableMouseCapture` must run while raw mode is still ON: on Windows it restores the
 /// input mode snapshotted at Enable time (raw-era), so after `disable_raw_mode` it re-raws
 /// the console. Either slip strands the user's shell echo-less.
+///
+/// # Errors
+///
+/// If writing the graphics unwind, the mouse-capture and alternate-screen escapes, or `disable_raw` fails; every step still runs.
 pub fn unwind_terminal_modes<W: std::io::Write>(
     out: &mut W,
     disable_raw: impl FnOnce() -> std::io::Result<()>,
@@ -521,6 +527,11 @@ fn unwind_after<W: std::io::Write>(
     Ok(())
 }
 
+/// Restore the terminal modes and cursor that [`setup_terminal`] changed.
+///
+/// # Errors
+///
+/// If restoring the terminal modes or showing the cursor fails.
 pub fn teardown_terminal(term: &mut Term) -> Result<()> {
     let modes = unwind_terminal_modes(term.backend_mut(), disable_raw_mode);
     // Unconditional: a failed mode restore must not ALSO leave the cursor hidden.
@@ -988,11 +999,11 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
 
     // Yields to onboarding but still STAMPS `last_seen_version`. Gated on the overlay
     // SHOWING, not on `first_run`, which a no-CLI user carries forever.
-    let version_popup = if !onboarding_ui.is_empty() {
+    let version_popup = if onboarding_ui.is_empty() {
+        resolve_version_popup(&config_path)
+    } else {
         let _ = resolve_version_popup(&config_path);
         false
-    } else {
-        resolve_version_popup(&config_path)
     };
     let mut ui = ui_state::UiState::new(theme, onboarding_ui, version_popup, socket_path, log_path);
     let mut cap_sweep = FloorCapacitySweep::new();
@@ -1049,7 +1060,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         );
                     }
                     Event::Mouse(m) => {
-                        handle_mouse_event(m, &mut ui, &mut renderer, &scene_rx, &focus_roots, now)
+                        handle_mouse_event(m, &mut ui, &mut renderer, &scene_rx, &focus_roots, now);
                     }
                     _ => {}
                 }
@@ -1065,7 +1076,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             // poll above is synchronous, so this is the loop's only await point.
             let rem = tick.checked_sub(start.elapsed()).unwrap_or(Duration::ZERO);
             tokio::select! {
-                _ = tokio::time::sleep(rem) => {}
+                () = tokio::time::sleep(rem) => {}
                 res = &mut ctrl_c => match res {
                     Ok(()) => break,
                     Err(e) => {
@@ -1077,7 +1088,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                         ctrl_c = Box::pin(std::future::pending());
                     }
                 },
-                _ = &mut terminate => break,
+                () = &mut terminate => break,
             }
         }
         Ok(())

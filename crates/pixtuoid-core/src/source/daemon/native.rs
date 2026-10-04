@@ -71,7 +71,7 @@ type PresencePidMap = Mutex<HashMap<i32, HashSet<DaemonInstanceKey>>>;
 /// without spawning the platform watcher thread.
 fn note_key(pids: &PresencePidMap, pid: i32, key: &DaemonInstanceKey) {
     pids.lock()
-        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .entry(pid)
         .or_default()
         .insert(key.clone());
@@ -81,7 +81,7 @@ fn note_key(pids: &PresencePidMap, pid: i32, key: &DaemonInstanceKey) {
 /// dies exactly once, taking its whole set with it.
 fn take_keys(pids: &PresencePidMap, pid: i32) -> Vec<DaemonInstanceKey> {
     pids.lock()
-        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .remove(&pid)
         .into_iter()
         .flatten()

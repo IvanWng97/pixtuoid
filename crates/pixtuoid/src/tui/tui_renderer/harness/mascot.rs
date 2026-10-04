@@ -239,14 +239,14 @@ fn one_gateway_going_down_leaves_its_sibling_on_the_floor() {
     assert_eq!(
         scene
             .daemon(pixtuoid_core::source::openclaw::SOURCE_NAME, &a)
-            .map(|p| p.display_state()),
+            .map(pixtuoid_core::state::DaemonPresence::display_state),
         Some(pixtuoid_core::state::DaemonState::Down)
     );
     let b = pixtuoid_core::state::DaemonInstanceId::new("19789").expect("non-empty");
     assert_eq!(
         scene
             .daemon(pixtuoid_core::source::openclaw::SOURCE_NAME, &b)
-            .map(|p| p.display_state()),
+            .map(pixtuoid_core::state::DaemonPresence::display_state),
         Some(pixtuoid_core::state::DaemonState::Idle),
         "the sibling gateway is untouched"
     );
@@ -438,8 +438,8 @@ fn gateway_mascot_tooltip_on_hover() {
     );
 
     let (x0, y0, x1, y1) = mascot_bbox(&mut r, &scene, t0()).expect("lobster on screen");
-    let cx = (x0 + x1) / 2;
-    let cy_px = (y0 + y1) / 2;
+    let cx = u16::midpoint(x0, x1);
+    let cy_px = u16::midpoint(y0, y1);
     // The hitbox is the painted frame (`MascotFrame.w`), which tolerates the
     // approximate center; half-block ⇒ /2.
     r.set_mouse_pos(Some((cx, cy_px / 2)));

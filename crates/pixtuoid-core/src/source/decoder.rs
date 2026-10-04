@@ -90,9 +90,7 @@ pub(crate) fn cwd_basename_label(prefix: &str, cwd: &Path) -> Option<String> {
 /// when it has no row — the single authority, so no deriver hardcodes a prefix
 /// that could drift from the registry.
 pub(crate) fn label_prefix_for(source: &str) -> &str {
-    crate::source::registry::descriptor_for(source)
-        .map(|d| d.label_prefix)
-        .unwrap_or(source)
+    crate::source::registry::descriptor_for(source).map_or(source, |d| d.label_prefix)
 }
 
 /// `"{prefix}·{basename}"` from a working directory, prefix looked up from the
@@ -160,7 +158,7 @@ pub(crate) fn rfc3339_to_epoch_secs(s: &str) -> Option<u64> {
         }
     }
     let offset_secs: i64 = match b.get(i) {
-        Some(b'Z') | Some(b'z') if i + 1 == b.len() => 0,
+        Some(b'Z' | b'z') if i + 1 == b.len() => 0,
         Some(sign @ (b'+' | b'-')) if i + 6 == b.len() && b.get(i + 3) == Some(&b':') => {
             let oh = num(i + 1..i + 3)?;
             let om = num(i + 4..i + 6)?;
@@ -185,7 +183,7 @@ pub(crate) fn rfc3339_to_epoch_secs(s: &str) -> Option<u64> {
 }
 
 /// The CLI a hook envelope belongs to — read ONLY from the shim-owned
-/// `_pixtuoid_source`. CC's public `source` field carries the SessionStart REASON
+/// `_pixtuoid_source`. CC's public `source` field carries the `SessionStart` REASON
 /// (startup/resume/clear/compact), so reading it would namespace the agent under
 /// "startup" and split it from the claude-code-keyed tool/JSONL/SessionEnd events:
 /// an un-reapable ghost.
@@ -205,7 +203,7 @@ fn decodes_to_nothing(
     obj: &serde_json::Map<String, Value>,
     desc: Option<&'static crate::source::registry::SourceDescriptor>,
 ) -> bool {
-    if desc.is_some_and(|d| d.is_daemon()) {
+    if desc.is_some_and(super::registry::SourceDescriptor::is_daemon) {
         return true;
     }
     let cc = source == crate::source::claude_code::SOURCE_NAME;
@@ -225,7 +223,7 @@ fn decodes_to_nothing(
 
 /// A source's OWN hook arms, run before the shared field requirements so an alien
 /// envelope (Reasonix: camelCase, `event` discriminator, no `session_id` at all) or
-/// a subject-changing event (SubagentStart/Stop, whose AgentId is the CHILD's)
+/// a subject-changing event (SubagentStart/Stop, whose `AgentId` is the CHILD's)
 /// decodes in its own module. An `Extend` decoder that declines (`Ok(None)`) falls
 /// through to the shared CC-shaped arms; a `ClaimsAll` decoder cannot.
 fn source_owned_arms(
@@ -241,7 +239,7 @@ fn source_owned_arms(
 }
 
 /// The payload's `session_id`, rejected when missing or EMPTY: an empty one passes
-/// `as_str` but, for Codex (which keys the AgentId on it), would mint a phantom
+/// `as_str` but, for Codex (which keys the `AgentId` on it), would mint a phantom
 /// agent that never coalesces with any rollout. This and `hook_event_name`
 /// breadcrumb undeduped — the two fields are the whole hook plane's chokepoint.
 fn hook_session_id(
@@ -337,12 +335,16 @@ fn hook_effort(agent_id: AgentId, obj: &serde_json::Map<String, Value>) -> Optio
 
 /// Decode one hook payload into the event sequence the reducer applies.
 ///
-/// The tool/permission arms (PreToolUse / PostToolUse / Notification /
-/// PermissionRequest) lead with an [`AgentEvent::Identity`] carrying the payload's
-/// source/session_id/cwd (#221), so the reducer's proof-of-life registration for an
+/// The tool/permission arms (`PreToolUse` / `PostToolUse` / Notification /
+/// `PermissionRequest`) lead with an [`AgentEvent::Identity`] carrying the payload's
+/// `source/session_id/cwd` (#221), so the reducer's proof-of-life registration for an
 /// unknown id lands with REAL identity instead of a blank `#N` slot. The
-/// session-lifecycle and custom Subagent arms deliberately do NOT: SessionStart
+/// session-lifecycle and custom Subagent arms deliberately do NOT: `SessionStart`
 /// already carries identity, and an end for an unknown agent proves nothing.
+///
+/// # Errors
+///
+/// If the payload is not an object, a source-owned decoder rejects it, `hook_event_name` or `session_id` is missing or empty, or the event is unsupported.
 pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
@@ -360,7 +362,7 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
 
 /// The shared CC-shaped arms, for every source whose row has no claiming decoder.
 /// `UserPromptSubmit` ALSO emits `SessionStart` (idempotent in the reducer) because
-/// Codex's tool hooks fire only for shell/apply_patch/MCP — ~25 other handlers fire
+/// Codex's tool hooks fire only for `shell/apply_patch/MCP` — ~25 other handlers fire
 /// nothing (openai/codex#20204) — and hook firing is version-unstable: a
 /// `matcher="*"` group is silently dropped, some builds emit none (openai/codex#21639).
 fn shared_hook_arms(
@@ -502,7 +504,7 @@ fn shared_hook_arms(
 
 /// The dispatch tool's current NAME, renamed from `Task` in CC v2.1.63 with no
 /// announcement. `Workflow` (CC's fleet dispatcher) is DELIBERATELY not a second
-/// entry: its children fire no per-agent tool_use, so one months-long `active_tasks`
+/// entry: its children fire no per-agent `tool_use`, so one months-long `active_tasks`
 /// entry would sweep-EXEMPT every FINISHED fleet subagent until the workflow ends —
 /// worse desk starvation than the gap. Fleet lifecycle rides the Subagent hooks.
 const DISPATCH_TOOL: &str = "Agent";
@@ -590,7 +592,7 @@ pub(crate) fn display_safe(s: &str) -> String {
     ellipsize(&stripped, MAX_DECODED_FIELD_CHARS)
 }
 
-/// The Unicode Bidi_Control characters — category Cf, so `char::is_control` (Cc
+/// The Unicode `Bidi_Control` characters — category Cf, so `char::is_control` (Cc
 /// only) misses them while they REORDER displayed text in a terminal: exactly the
 /// gap the "Trojan Source" class (CVE-2021-42574) rides, where a value renders
 /// differently from its bytes. In range order: ALM; LRM, RLM; LRE, RLE, PDF, LRO,
@@ -1187,7 +1189,7 @@ mod tests {
         }));
         match ev {
             AgentEvent::SessionStart { source, .. } => {
-                assert_eq!(source, crate::source::claude_code::SOURCE_NAME)
+                assert_eq!(source, crate::source::claude_code::SOURCE_NAME);
             }
             other => panic!("expected SessionStart, got {other:?}"),
         }
@@ -1603,13 +1605,15 @@ mod tests {
 
         let covered: HashSet<&str> = table.iter().map(|(n, _)| *n).collect();
         for s in crate::source::registry::registered_source_names() {
-            let daemon = registry::descriptor_for(s).is_some_and(|d| d.is_daemon());
+            let daemon = registry::descriptor_for(s)
+                .is_some_and(super::super::registry::SourceDescriptor::is_daemon);
             if !daemon {
                 assert!(covered.contains(s), "add {s} to the decoder cap table");
             }
         }
         for &c in &covered {
-            let daemon = registry::descriptor_for(c).is_some_and(|d| d.is_daemon());
+            let daemon = registry::descriptor_for(c)
+                .is_some_and(super::super::registry::SourceDescriptor::is_daemon);
             assert!(!daemon, "{c} is a daemon — remove it from the cap table");
         }
     }
@@ -1834,7 +1838,8 @@ mod tests {
 
         let covered: HashSet<&str> = table.iter().map(|(n, _, _)| *n).collect();
         for s in registry::registered_source_names() {
-            let daemon = registry::descriptor_for(s).is_some_and(|d| d.is_daemon());
+            let daemon = registry::descriptor_for(s)
+                .is_some_and(super::super::registry::SourceDescriptor::is_daemon);
             if !daemon {
                 assert!(
                     covered.contains(s),
@@ -1843,7 +1848,8 @@ mod tests {
             }
         }
         for &c in &covered {
-            let daemon = registry::descriptor_for(c).is_some_and(|d| d.is_daemon());
+            let daemon = registry::descriptor_for(c)
+                .is_some_and(super::super::registry::SourceDescriptor::is_daemon);
             assert!(!daemon, "{c} is a daemon — remove it from the cap table");
         }
     }

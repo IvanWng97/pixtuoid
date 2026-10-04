@@ -16,7 +16,7 @@ fn pipe_name(suffix: &str) -> String {
     format!(r"\\.\pipe\pixtuoid-test-{}-{}", std::process::id(), suffix)
 }
 
-/// Named pipes require the client to retry on ERROR_PIPE_BUSY (os error 231) —
+/// Named pipes require the client to retry on `ERROR_PIPE_BUSY` (os error 231) —
 /// the server is between instances (the create-next-before-handoff window).
 async fn connect_client(name: &str) -> tokio::net::windows::named_pipe::NamedPipeClient {
     const MAX_TRIES: u32 = 20;
@@ -262,7 +262,7 @@ async fn clients_reconnect_after_open_close_churn() {
     handle.abort();
 }
 
-/// Windows reports a contended pipe as ACCESS_DENIED (the first instance holds
+/// Windows reports a contended pipe as `ACCESS_DENIED` (the first instance holds
 /// `first_pipe_instance(true)`), which must map to the typed `SocketBusy` for
 /// Unix parity.
 #[tokio::test]

@@ -147,6 +147,10 @@ pub(crate) const DECODED_FIELDS: &[&str] = &[
 /// Decode one `events.jsonl` line into zero or more `AgentEvent`s. Unknown,
 /// ephemeral, or malformed shapes return `vec![]` and never panic — real files
 /// carry embedded-newline / U+2028 corruption (upstream copilot-cli #2649/#2012).
+///
+/// # Errors
+///
+/// Never: the `Result` is the [`LineDecoder`](crate::source::decoder::LineDecoder) signature, and a malformed line decodes to `vec![]`.
 pub fn decode_copilot_line(
     transcript_path: &str,
     source: &str,
@@ -237,10 +241,10 @@ pub fn decode_copilot_line(
             let reason = data
                 .and_then(|d| d.get("permissionRequest"))
                 .and_then(|p| str_at(p, "kind"))
-                // Capped at the decode boundary: `kind` is raw wire content that
-                // persists in the slot + egresses on the headless summary.
-                .map(|k| ellipsize(&format!("permission: {k}"), MAX_DECODED_FIELD_CHARS))
-                .unwrap_or_else(|| "permission".to_string());
+                .map_or_else(
+                    || "permission".to_string(),
+                    |k| ellipsize(&format!("permission: {k}"), MAX_DECODED_FIELD_CHARS),
+                );
             vec![AgentEvent::Waiting {
                 agent_id: acting,
                 reason,
@@ -325,7 +329,7 @@ pub fn decode_copilot_line(
                     details
                         .get(k)
                         .and_then(|b| b.get("tokenCount"))
-                        .and_then(|n| n.as_u64())
+                        .and_then(serde_json::Value::as_u64)
                         .unwrap_or(0)
                 };
                 let fresh = bucket("input")

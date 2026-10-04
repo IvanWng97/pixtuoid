@@ -85,7 +85,7 @@ fn walk_leg_freezes_path_against_midleg_reroute() {
     };
     let mid_a = Point {
         x: door.x,
-        y: (door.y + desk_target.y) / 2,
+        y: u16::midpoint(door.y, desk_target.y),
     };
     let mid_b = Point {
         x: desk_target.x,
@@ -590,8 +590,8 @@ fn multi_segment_path_maps_t_to_segment_via_octile_distance() {
     let door = l.door_threshold;
     let desk = l.home_desks[0];
     let mid = Point {
-        x: (door.x + desk.x) / 2,
-        y: (door.y + desk.y) / 2,
+        x: u16::midpoint(door.x, desk.x),
+        y: u16::midpoint(door.y, desk.y),
     };
     let mut rig = RouteRig::new(StubRouter::corners(vec![door, mid, desk]));
     let p = derive_with_routing(&slot, now, &l, &mut rig.rctx());
@@ -1117,13 +1117,10 @@ fn max_top_left_step(
     let mut rig = RouteRig::new(AStarRouter::new());
     rig.router.set_preferred_zone(l.corridor);
 
-    let ob = l
-        .corridor
-        .map(|c| Point {
-            x: c.x + c.width / 2,
-            y: c.y + 2,
-        })
-        .unwrap_or(Point { x: 40, y: 50 });
+    let ob = l.corridor.map_or(Point { x: 40, y: 50 }, |c| Point {
+        x: c.x + c.width / 2,
+        y: c.y + 2,
+    });
 
     let mut prev: Option<Point> = None;
     let mut max_step = 0i32;

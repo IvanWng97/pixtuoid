@@ -184,7 +184,7 @@ mod tests {
     }
 
     /// Byte-stability across feature unification. The workspace enables
-    /// serde_json's `preserve_order` (`pixtuoid` asks for it), and feature
+    /// `serde_json`'s `preserve_order` (`pixtuoid` asks for it), and feature
     /// unification hands it to every crate — so an object built by `json!({…})`
     /// is sorted under `just test -p pixtuoid-core` and insertion-ordered under
     /// a whole-workspace `just test`. That difference reached the committed
@@ -386,8 +386,7 @@ mod tests {
             if let Some((_, test)) = PINNED_ELSEWHERE.iter().find(|(n, _)| n == name) {
                 let body = src
                     .split_once(&format!("fn {test}("))
-                    .map(|(_, rest)| rest)
-                    .unwrap_or("");
+                    .map_or("", |(_, rest)| rest);
                 assert!(
                     !body.is_empty(),
                     "{name} claims to be pinned by {test}, which its module no longer \

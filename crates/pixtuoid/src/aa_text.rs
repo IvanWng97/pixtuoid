@@ -8,7 +8,7 @@
 //! wasm bundle bloat.
 //!
 //! ONE face by DESIGN. Monaspace Neon natively covers the office's FULL symbol
-//! vocabulary (`★ ◐ ⬢ ▮ ▯ ↳ ◷ ▤`), which JetBrains Mono does not — not even the
+//! vocabulary (`★ ◐ ⬢ ▮ ▯ ↳ ◷ ▤`), which `JetBrains` Mono does not — not even the
 //! Nerd Font patch, whose glyphs live entirely in the Private Use Area. A new
 //! render glyph MUST be Monaspace-covered, never a second face; the gate is
 //! `office_symbol_vocabulary_is_fully_covered`.
@@ -31,7 +31,7 @@ use skrifa::metrics::GlyphMetrics;
 use skrifa::outline::{DrawSettings, OutlineGlyphCollection, OutlinePen};
 use skrifa::{FontRef, GlyphId, MetadataProvider};
 
-/// SemiBold is the weight picked by eye for these small-size pixel surfaces.
+/// `SemiBold` is the weight picked by eye for these small-size pixel surfaces.
 /// License text in `fonts/OFL-Monaspace.txt`.
 const FONT_BYTES: &[u8] = include_bytes!("../fonts/MonaspaceNeon-SemiBold.otf");
 

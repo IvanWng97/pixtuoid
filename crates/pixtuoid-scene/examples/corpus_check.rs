@@ -109,7 +109,7 @@ fn check_file(source: &str, path: &Path, pack: &std::sync::Arc<Pack>) -> Verdict
     }
     v.registered = driven.registered();
     v.drove = !driven.reached.is_empty();
-    v.panics = driven.panics.clone();
+    v.panics.clone_from(&driven.panics);
     if v.registered == 0 {
         return v;
     }
@@ -156,10 +156,7 @@ fn newest_activity(source: &str, body: &[u8]) -> Option<u64> {
 /// `the_whole_roster_is_pinned_row_by_row` is the pin AGENTS.md's magic-number
 /// rule asks for at a cross-language boundary.
 fn roster_row(name: &str, d: &registry::SourceDescriptor, kind: &str) -> String {
-    let probe = d
-        .version_probe
-        .map(|p| p.join(" "))
-        .unwrap_or_else(|| "-".into());
+    let probe = d.version_probe.map_or_else(|| "-".into(), |p| p.join(" "));
     format!(
         "{name}\t{}\t{kind}\t{}\t{probe}",
         d.label_prefix,
@@ -208,13 +205,14 @@ fn main() {
 
     let root = match positional.get(1) {
         Some(r) => PathBuf::from(r),
-        None => match pixtuoid_core::source::resolved_source_root(source) {
-            Some(r) => r,
-            None => {
+        None => {
+            if let Some(r) = pixtuoid_core::source::resolved_source_root(source) {
+                r
+            } else {
                 eprintln!("error: {source:?} has no resolvable root on this host — pass one");
                 std::process::exit(2);
             }
-        },
+        }
     };
     let mut files = pixtuoid_core::harness::transcripts_under(source, &root);
     files.sort();

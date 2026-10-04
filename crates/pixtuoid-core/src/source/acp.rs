@@ -63,7 +63,7 @@ pub(crate) fn decode_session_update(
             )),
         }],
         TOOL_CALL_UPDATE => match str_field("status") {
-            Some(STATUS_COMPLETED) | Some(STATUS_FAILED) => vec![AgentEvent::ActivityEnd {
+            Some(STATUS_COMPLETED | STATUS_FAILED) => vec![AgentEvent::ActivityEnd {
                 agent_id,
                 tool_use_id: tool_call_id(),
             }],

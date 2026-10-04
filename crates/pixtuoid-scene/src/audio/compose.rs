@@ -542,7 +542,7 @@ fn lead_events(
             .map(|_| LEAD_GRID[pick(rng, LEAD_GRID.len())])
             .collect();
         // the lofi push: occasionally a note lands a 16th AHEAD of a strong beat
-        for b in beats.iter_mut() {
+        for b in &mut beats {
             if max_per_bar > 1 && b.fract() == 0.0 && chance(rng, 0.15) {
                 *b -= 0.25;
             }
@@ -561,7 +561,7 @@ fn lead_events(
     let mut rhythm: Vec<Vec<f32>> = phrase_rhythm.clone();
     for statement in &phrase_rhythm {
         let mut beats = statement.clone();
-        for b in beats.iter_mut() {
+        for b in &mut beats {
             if chance(rng, 0.2) {
                 *b = (*b + if chance(rng, 0.5) { 0.5 } else { -0.5 }).clamp(0.5, 3.0);
             }
@@ -579,7 +579,7 @@ fn lead_events(
 
     let mut out: Vec<LeadEvent> = Vec::new();
     let start_pool = chord_tones_in(&bar_chords[0], lo.max(hi.saturating_sub(12)), hi);
-    let mut prev = nearest(&start_pool, (lo + hi) / 2 + 2);
+    let mut prev = nearest(&start_pool, u8::midpoint(lo, hi) + 2);
     let mut last_leap: i16 = 0;
     // bar 4 is reserved for the motif quote, so the lift lands on bar 5
     let peak_bar = 5;

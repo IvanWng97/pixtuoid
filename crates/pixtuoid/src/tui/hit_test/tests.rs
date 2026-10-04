@@ -12,7 +12,7 @@ fn coffee_machine_hit_test_returns_false_for_origin() {
 /// The middle cell of the coffee machine on `layout`'s pantry counter.
 fn coffee_mid_cell(layout: &SceneLayout) -> (u16, u16) {
     let b = layout.coffee_machine().expect("a coffee machine");
-    (b.x + b.width / 2, (b.y + b.height / 2) / 2)
+    (b.x + b.width / 2, u16::midpoint(b.y, b.height / 2))
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn furniture_hit_test_returns_none_for_empty_space() {
 fn furniture_hit_test_finds_desk() {
     let layout = SceneLayout::compute(160, 200, Some(4)).expect("layout");
     let desk = layout.home_desks.first().expect("desk");
-    let cell_y = (desk.y + 2) / 2;
+    let cell_y = u16::midpoint(desk.y, 2);
     assert_eq!(
         hit_test_furniture(
             &layout,
@@ -78,7 +78,7 @@ fn furniture_hit_test_finds_desk() {
 fn furniture_hit_test_finds_elevator() {
     let layout = SceneLayout::compute(160, 200, Some(4)).expect("layout");
     let door = layout.door;
-    let cell_y = (door.y + pixtuoid_scene::layout::ELEVATOR_H / 2) / 2;
+    let cell_y = u16::midpoint(door.y, pixtuoid_scene::layout::ELEVATOR_H / 2);
     assert_eq!(
         hit_test_furniture(
             &layout,
@@ -109,7 +109,7 @@ fn dense_room_1_has_coat_rack_and_doormat() {
         assert_eq!(
             hit_test_furniture(
                 &layout,
-                crate::tui::geometry::CellArea::half_block(cx, (cy + 3) / 2)
+                crate::tui::geometry::CellArea::half_block(cx, u16::midpoint(cy, 3))
             ),
             Some("Coat Rack"),
             "seed {seed}: room 1 must hover its own coat rack"
@@ -119,7 +119,7 @@ fn dense_room_1_has_coat_rack_and_doormat() {
         assert_eq!(
             hit_test_furniture(
                 &layout,
-                crate::tui::geometry::CellArea::half_block(mat_x + 1, (mat_y + 2) / 2)
+                crate::tui::geometry::CellArea::half_block(mat_x + 1, u16::midpoint(mat_y, 2))
             ),
             Some("Doormat"),
             "seed {seed}: room 1 must hover its own doormat"
@@ -396,7 +396,7 @@ fn assert_centered_hover_box(
 ) {
     let (x0, y0) = (pos.x - size.w / 2, pos.y - size.h / 2);
     for mx in pos.x - size.w..pos.x + size.w {
-        for my in (pos.y - size.h) / 2..(pos.y + size.h) / 2 {
+        for my in (pos.y - size.h) / 2..u16::midpoint(pos.y, size.h) {
             let py = my * 2;
             let inside = mx >= x0 && mx < x0 + size.w && py + 1 >= y0 && py < y0 + size.h;
             assert_eq!(

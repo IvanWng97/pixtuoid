@@ -237,7 +237,7 @@ impl<R: Router> WanderRig<R> {
     }
 
     /// The dwell the machine will apply at the agent's current wander
-    /// destination. Only valid once a destination is picked (WalkingOut onward).
+    /// destination. Only valid once a destination is picked (`WalkingOut` onward).
     fn current_dwell_dur(&self) -> u64 {
         match self.state().wander.target.kind {
             WanderKind::Named { kind, .. } => dwell_ms(kind, self.slot.agent_id),

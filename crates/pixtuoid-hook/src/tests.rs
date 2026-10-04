@@ -106,7 +106,7 @@ fn inbound_spoofed_private_key_is_overwritten_when_source_resolves() {
 }
 
 fn argv(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|s| s.to_string()).collect()
+    parts.iter().map(std::string::ToString::to_string).collect()
 }
 
 #[test]

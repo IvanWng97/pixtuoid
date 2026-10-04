@@ -26,16 +26,17 @@ use super::captures::{fixture_lines, fixtures_root, sorted_dirs, transcripts_in}
 
 /// Hook-only-ness comes from the registry row, never a harness-side list — a
 /// second list could mark a JSONL source hook-only and pass the harness without
-/// its LineDecoder ever running.
+/// its `LineDecoder` ever running.
 fn is_hook_only(source: &str) -> bool {
     registry::descriptor_for(source).is_some_and(|d| d.line_decoder().is_none())
 }
 
-/// Daemon sources decode to ZERO AgentEvents — presence rides a sibling channel
+/// Daemon sources decode to ZERO `AgentEvents` — presence rides a sibling channel
 /// into `SceneState::daemons`, so the coalesce-to-one-AgentId contract doesn't
 /// apply (no agent slots).
 fn is_daemon(source: &str) -> bool {
-    registry::descriptor_for(source).is_some_and(|d| d.is_daemon())
+    registry::descriptor_for(source)
+        .is_some_and(pixtuoid_core::source::registry::SourceDescriptor::is_daemon)
 }
 
 struct Decoded {
@@ -70,7 +71,7 @@ fn decode_fixture(source: &str, dir: &Path) -> Decoded {
          or a removed source whose fixtures should be deleted"
     );
     let transcripts = transcripts_in(dir);
-    let expected = if is_hook_only(source) { 0 } else { 1 };
+    let expected = usize::from(!is_hook_only(source));
     assert_eq!(
         transcripts.len(),
         expected,
@@ -346,7 +347,10 @@ fn all_source_fixtures_decode_and_coalesce() {
 
             insta::assert_yaml_snapshot!(format!("{source}__{scenario}"), events);
 
-            let ids: BTreeSet<_> = events.iter().map(|e| e.agent_id()).collect();
+            let ids: BTreeSet<_> = events
+                .iter()
+                .map(pixtuoid_core::AgentEvent::agent_id)
+                .collect();
             assert_eq!(
                 ids.len(),
                 1,

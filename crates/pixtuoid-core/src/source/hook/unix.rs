@@ -13,7 +13,7 @@ use crate::source::jsonl::FailureLatch;
 
 use super::{CONN_TIMEOUT, MAX_CONCURRENT_CONNS, handle_conn};
 
-/// First retry delay after an accept() error. mio/tokio only clear readiness on
+/// First retry delay after an `accept()` error. mio/tokio only clear readiness on
 /// EWOULDBLOCK, so a persistent accept errno (the EMFILE class) returns
 /// Ready(Err) on every await — an unthrottled retry is a 100% CPU spin.
 const ACCEPT_BACKOFF_FIRST: Duration = Duration::from_millis(100);

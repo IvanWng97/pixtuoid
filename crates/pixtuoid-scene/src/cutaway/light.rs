@@ -426,7 +426,7 @@ impl NetMemo {
     }
 }
 
-/// A small fixed key needs mixing, not SipHash.
+/// A small fixed key needs mixing, not `SipHash`.
 #[derive(Default)]
 pub(crate) struct SplitMix(u64);
 

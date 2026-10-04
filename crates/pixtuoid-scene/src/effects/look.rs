@@ -81,11 +81,7 @@ fn plot_steam_puff(
     if alpha < 0.15 {
         return;
     }
-    let wiggle = if (phase / STEAM_WIGGLE_MS).is_multiple_of(2) {
-        0
-    } else {
-        1
-    };
+    let wiggle = u16::from(!(phase / STEAM_WIGGLE_MS).is_multiple_of(2));
     let px = spout.x + wiggle;
     let py = spout.y.saturating_sub(rise + 2);
     plot(px, py, theme.effects.coffee_steam, alpha * 0.55);

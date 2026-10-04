@@ -301,6 +301,11 @@ fn paint_too_small_notice(
     }
 }
 
+/// Draw one classic-look frame (scene, footer, overlays) and report what it painted for hit-testing.
+///
+/// # Errors
+///
+/// If querying the terminal size or drawing the frame to the backend fails.
 pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     ctx: &mut DrawCtx<'_>,
@@ -394,7 +399,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         paint_chitchat_bubbles(f, chitchat_bubbles, agents, actual_scene, theme);
         paint_wall_display(f, &board, actual_scene, theme);
         let door = layout.door;
-        let current = floor_info.map(|fi| fi.current).unwrap_or(1);
+        let current = floor_info.map_or(1, |fi| fi.current);
         paint_elevator_indicator(f, door, current, actual_scene, theme);
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,
@@ -423,8 +428,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                 let display_name = world
                     .pets
                     .pet
-                    .map(|p| p.name.as_str())
-                    .unwrap_or_else(|| kind.default_name());
+                    .map_or_else(|| kind.default_name(), |p| p.name.as_str());
                 paint_pet_tooltip(f, kind, anim, on_cooldown, display_name, at, theme);
             } else if let Some(m) = topmost_mascot_at(mascots, cell) {
                 paint_mascot_tooltip(f, m, at, theme);

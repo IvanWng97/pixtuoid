@@ -1,7 +1,7 @@
 //! Terminal capability detection: the truecolor preflight, and the
 //! controlling-terminal query (`query_tty`) it shares with the graphics probe.
 //! The truecolor warning is a WARN signal, never a gate on Unix — Windows is
-//! the exception, `tui::mod` hard-gates VT there because the WinAPI color
+//! the exception, `tui::mod` hard-gates VT there because the `WinAPI` color
 //! fallback renders black-on-black.
 //!
 //! We do NOT guess truecolor from a `$TERM` name allowlist. Detection ASKS the
@@ -246,16 +246,16 @@ pub(crate) fn query_tty(
     // all-zero is a valid starting value (overwritten on success).
     let mut saved: libc::termios = unsafe { std::mem::zeroed() };
     // SAFETY: `fd` is the open `/dev/tty` above and `saved` an owned `termios`.
-    if unsafe { libc::tcgetattr(fd, &mut saved) } != 0 {
+    if unsafe { libc::tcgetattr(fd, &raw mut saved) } != 0 {
         return None;
     }
     let _restore = TermiosRestore { fd, saved };
 
     let mut raw = saved;
     // SAFETY: `cfmakeraw` only mutates the termios struct in place.
-    unsafe { libc::cfmakeraw(&mut raw) };
+    unsafe { libc::cfmakeraw(&raw mut raw) };
     // SAFETY: applying a well-formed termios to the open tty fd.
-    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw) } != 0 {
+    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw const raw) } != 0 {
         return None;
     }
 
@@ -277,7 +277,7 @@ struct TermiosRestore {
 impl Drop for TermiosRestore {
     fn drop(&mut self) {
         // SAFETY: re-applying the termios we captured from this same fd.
-        unsafe { libc::tcsetattr(self.fd, libc::TCSANOW, &self.saved) };
+        unsafe { libc::tcsetattr(self.fd, libc::TCSANOW, &raw const self.saved) };
     }
 }
 
@@ -329,15 +329,15 @@ fn read_reply(
         // is < FD_SETSIZE by the structural guard at the top of this fn.
         let mut rfds: libc::fd_set = unsafe { std::mem::zeroed() };
         // SAFETY: `fd` is a valid open fd below FD_SETSIZE (the guard above).
-        unsafe { libc::FD_SET(fd, &mut rfds) };
+        unsafe { libc::FD_SET(fd, &raw mut rfds) };
         // SAFETY: one read fd, null write/error sets, a valid timeval.
         let ready = unsafe {
             libc::select(
                 fd + 1,
-                &mut rfds,
+                &raw mut rfds,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
-                &mut tv,
+                &raw mut tv,
             )
         };
         if ready < 0 {
@@ -350,7 +350,7 @@ fn read_reply(
             return false;
         }
         // SAFETY: `rfds` was populated by `select`; checking our fd's membership.
-        if ready == 0 || !unsafe { libc::FD_ISSET(fd, &rfds) } {
+        if ready == 0 || !unsafe { libc::FD_ISSET(fd, &raw const rfds) } {
             return false;
         }
         match tty.read(&mut chunk) {

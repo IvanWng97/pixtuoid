@@ -38,8 +38,7 @@ pub fn floor_seed(floor_idx: usize) -> u64 {
 /// fits. Returns `0` when the buffer is too small for even one cubicle.
 pub fn floor_capacity(buf_w: u16, buf_h: u16, floor_seed: u64) -> usize {
     crate::layout::SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed)
-        .map(|l| l.home_desks.len())
-        .unwrap_or(0)
+        .map_or(0, |l| l.home_desks.len())
 }
 
 /// How many home desks a floor fits when `buf_w × buf_h` PIXELS are painted at
@@ -574,19 +573,18 @@ impl FloorSession {
         inputs: crate::look::RenderInputs<'_>,
     ) -> Option<Arc<crate::layout::SceneLayout>> {
         self.evict_missing(inputs.world.scene);
-        match crate::look::render(&mut self.floor, self.office.stores(), look, inputs) {
-            Some(frame) => {
-                self.last_layout = Some(Arc::clone(&frame.layout));
-                // REPLACE, never extend: the cue tracker fires on edges, so an
-                // accumulating set would re-report stale waypoints forever.
-                self.last_occupied = frame.occupied_waypoints;
-                Some(frame.layout)
-            }
-            None => {
-                self.last_layout = None;
-                self.last_occupied.clear();
-                None
-            }
+        if let Some(frame) =
+            crate::look::render(&mut self.floor, self.office.stores(), look, inputs)
+        {
+            self.last_layout = Some(Arc::clone(&frame.layout));
+            // REPLACE, never extend: the cue tracker fires on edges, so an
+            // accumulating set would re-report stale waypoints forever.
+            self.last_occupied = frame.occupied_waypoints;
+            Some(frame.layout)
+        } else {
+            self.last_layout = None;
+            self.last_occupied.clear();
+            None
         }
     }
 
@@ -771,8 +769,7 @@ impl VacancyDim {
         let dt_ms = self
             .last_update
             .and_then(|prev| now.duration_since(prev).ok())
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_millis() as u64);
         self.last_update = Some(now);
 
         let alpha = 1.0 - (-(dt_ms as f32) / Self::FADE_TAU_MS as f32).exp();

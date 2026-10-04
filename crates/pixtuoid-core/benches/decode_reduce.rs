@@ -77,10 +77,10 @@ fn decode_reduce(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("decode_reduce");
     group.bench_function(format!("jsonl_{TURNS}_turns"), |b| {
-        b.iter(|| transcript.lines(&jsonl))
+        b.iter(|| transcript.lines(&jsonl));
     });
     group.bench_function(format!("hook_{TURNS}_turns"), |b| {
-        b.iter(|| hook.lines(&hooks))
+        b.iter(|| hook.lines(&hooks));
     });
     group.finish();
 }

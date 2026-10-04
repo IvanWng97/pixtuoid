@@ -41,9 +41,9 @@ pub fn cc_id_from_path(path: &Path) -> String {
 }
 
 /// CC's source-specific hook arms — `SubagentStart`/`SubagentStop`, which change
-/// the event's SUBJECT to the child's AgentId; the shared session-keyed arms cannot,
+/// the event's SUBJECT to the child's `AgentId`; the shared session-keyed arms cannot,
 /// and every other CC hook event falls through (`Ok(None)`). Needed despite JSONL
-/// registration: a Workflow-tool fleet's subagents carry no `Agent` tool_use and no
+/// registration: a Workflow-tool fleet's subagents carry no `Agent` `tool_use` and no
 /// end marker, so without `SubagentStop` they hold desks until the stale sweep.
 pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
     use anyhow::anyhow;
@@ -186,18 +186,27 @@ fn fresh_spend(message: &serde_json::Map<String, Value>) -> u64 {
     let Some(usage) = message.get("usage").and_then(|u| u.as_object()) else {
         return 0;
     };
-    let field = |k: &str| usage.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+    let field = |k: &str| {
+        usage
+            .get(k)
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+    };
     field("input_tokens")
         .saturating_add(field("cache_creation_input_tokens"))
         .saturating_add(field("output_tokens"))
 }
 
-/// Decode one CC JSONL transcript line into 0..N AgentEvents, keyed on the
+/// Decode one CC JSONL transcript line into 0..N `AgentEvents`, keyed on the
 /// filename STEM — the hook decoder's `IdKey::SessionId` and the watcher's
 /// deriver key the same way, so every CC keying site coalesces onto one sprite.
 /// There is deliberately NO user-content arm: content is user-controllable and a
 /// message QUOTING the slash-command wrapper would false-positive, so lifecycle
-/// is the SessionEnd hook + the idle sweep.
+/// is the `SessionEnd` hook + the idle sweep.
+///
+/// # Errors
+///
+/// Never: the `Result` is the [`LineDecoder`](crate::source::decoder::LineDecoder) signature, and a malformed line decodes to `vec![]`.
 pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     let agent_id = AgentId::from_parts(source, &cc_id_from_path(Path::new(transcript_path)));
     let Some(obj) = v.as_object() else {

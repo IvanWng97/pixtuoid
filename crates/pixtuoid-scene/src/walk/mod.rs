@@ -235,8 +235,7 @@ pub fn advance_wander(
         .wander
         .phase_started_at
         .checked_add(Duration::from_millis(1))
-        .map(|t| t <= slot.state_started_at)
-        .unwrap_or(true);
+        .is_none_or(|t| t <= slot.state_started_at);
 
     // Stale resume: advanced before, but more than a full wander cycle ago — its
     // floor was off-screen (only the current floor renders) or `now` was frozen
@@ -250,8 +249,7 @@ pub fn advance_wander(
     let is_stale_resume = walk.wander.last_advanced_at != SystemTime::UNIX_EPOCH
         && now
             .duration_since(walk.wander.last_advanced_at)
-            .map(|d| d.as_millis() as u64 > stale_resume_gap_ms(id))
-            .unwrap_or(false);
+            .is_ok_and(|d| d.as_millis() as u64 > stale_resume_gap_ms(id));
 
     if is_fresh || is_stale_resume {
         let elapsed_idle = crate::anim::elapsed_ms(now, slot.state_started_at);
@@ -519,7 +517,7 @@ pub(crate) fn snapshot_leg_profile(
     walk_profile(measured_leg_len(&path, leg.settle), leg.intent, id)
 }
 
-/// Freeze the WanderBack profile. The endpoint is the desk APPROACH cell
+/// Freeze the `WanderBack` profile. The endpoint is the desk APPROACH cell
 /// (matching `seated_top_left` via the chair-glide) so there's no jump on arrival;
 /// this intentionally differs from `core::idle_pose`'s raw `to: desk`, since
 /// only the routed path is user-visible.

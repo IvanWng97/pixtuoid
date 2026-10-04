@@ -26,7 +26,7 @@ struct ProcRow {
 
 /// By NAME because a process table carries nothing structural: on Windows the
 /// ancestor's command line needs `NtQueryInformationProcess`, and "created
-/// within N ms of us" skips the CLI itself at session_start on every OS. Bare STEMS, since
+/// within N ms of us" skips the CLI itself at `session_start` on every OS. Bare STEMS, since
 /// the same shell is `bash` under a Unix `comm` and `bash.exe` in a Toolhelp32
 /// snapshot (Git-Bash/MSYS2 put the latter on Windows). `busybox` is here
 /// because Alpine's `/bin/sh` IS busybox and `comm` reports the real image.
@@ -208,7 +208,7 @@ fn process_snapshot() -> std::collections::HashMap<u32, ProcRow> {
         }
         let mut entry: PROCESSENTRY32W = std::mem::zeroed();
         entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-        if Process32FirstW(snap, &mut entry) != 0 {
+        if Process32FirstW(snap, &raw mut entry) != 0 {
             loop {
                 rows.insert(
                     entry.th32ProcessID,
@@ -217,7 +217,7 @@ fn process_snapshot() -> std::collections::HashMap<u32, ProcRow> {
                         exe: exe_name(&entry.szExeFile),
                     },
                 );
-                if Process32NextW(snap, &mut entry) == 0 {
+                if Process32NextW(snap, &raw mut entry) == 0 {
                     break;
                 }
             }

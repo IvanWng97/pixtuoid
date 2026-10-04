@@ -1,6 +1,6 @@
 //! Integration coverage for what only the REAL binary shows: the
 //! `completions` / `man` packaging dispatch (the generation itself is unit-tested
-//! in `cli.rs`) — that the SHELL arg reaches clap_complete and that stdout stays
+//! in `cli.rs`) — that the SHELL arg reaches `clap_complete` and that stdout stays
 //! the clean artifact channel homebrew-core captures — the fatal-error exit, the
 //! clean exit when a printing command's reader leaves, and `validate-pack`'s
 //! report of a pack's mixed look.
@@ -26,7 +26,7 @@ fn run(args: &[&str]) -> std::process::Output {
 }
 
 /// Iterating `Shell::value_variants()` rather than a hardcoded subset means a
-/// shell clap_complete adds later is covered automatically.
+/// shell `clap_complete` adds later is covered automatically.
 #[test]
 fn completions_emit_a_clean_script_for_every_supported_shell() {
     let shells = clap_complete::Shell::value_variants();

@@ -112,7 +112,12 @@ mod tests {
     // the RECONCILE. A single "after" count would pass even with the gate removed.
     fn drive_hook_gate(payload: &serde_json::Value, connected: &[&str]) -> (usize, usize) {
         use pixtuoid_core::source::decoder::decode_hook_payload;
-        let cs = ConnectedSources::new(connected.iter().map(|s| s.to_string()).collect());
+        let cs = ConnectedSources::new(
+            connected
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+        );
         let mut scene = SceneState::uniform(8);
         let mut reducer = Reducer::new();
         let mut gate_logged = HashSet::new();
@@ -284,7 +289,7 @@ mod tests {
         assert_eq!(
             scene
                 .daemon(oc.source(), oc.instance())
-                .map(|p| p.display_state()),
+                .map(pixtuoid_core::state::DaemonPresence::display_state),
             Some(DaemonState::Idle),
             "apply_presence must land the GatewayUp in scene.daemons"
         );

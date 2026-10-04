@@ -45,7 +45,7 @@ pub const DROP_SEED: u64 = 0xFACE;
 pub const PICK_SEED: u64 = 0xDEAD;
 
 /// Active-agent count at which the office reads BUSY (full band + dense
-/// typing). 1..BUSY_ACTIVE_MIN is the moderate anchor tier; 0 is empty.
+/// typing). `1..BUSY_ACTIVE_MIN` is the moderate anchor tier; 0 is empty.
 const BUSY_ACTIVE_MIN: usize = 3;
 
 /// The rain stem's gain at full precipitation — tuned well under the tier-1
@@ -264,12 +264,12 @@ impl AudioCueTracker {
         use crate::layout::WaypointKind;
 
         let ids: std::collections::HashSet<pixtuoid_core::AgentId> =
-            agent_ids.into_iter().cloned().collect();
+            agent_ids.into_iter().copied().collect();
 
         if !self.primed {
             self.primed = true;
             self.seen_agents = ids;
-            self.occupied = occupied_waypoints.clone();
+            self.occupied.clone_from(occupied_waypoints);
             return Vec::new();
         }
 
@@ -291,7 +291,7 @@ impl AudioCueTracker {
                 _ => {}
             }
         }
-        self.occupied = occupied_waypoints.clone();
+        self.occupied.clone_from(occupied_waypoints);
 
         events
     }
@@ -301,10 +301,8 @@ impl AudioCueTracker {
 fn tier(counts: &StateCounts) -> usize {
     if counts.active >= BUSY_ACTIVE_MIN {
         2
-    } else if counts.active >= 1 {
-        1
     } else {
-        0
+        usize::from(counts.active >= 1)
     }
 }
 

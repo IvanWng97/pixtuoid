@@ -62,7 +62,7 @@ pub(crate) fn plugin_path() -> Result<PathBuf> {
 
 /// Presence probe: dsh's own home, never our artifacts (chicken-and-egg).
 pub(crate) fn detect_installed() -> bool {
-    dsh_home().map(|h| h.exists()).unwrap_or(false)
+    dsh_home().is_ok_and(|h| h.exists())
 }
 
 /// dsh runs plugins under Node and the plugin spawns the shim by embedded
@@ -146,9 +146,9 @@ fn malformed_insert(rows: &[YamlOwned]) -> bool {
     fn falsy(v: &YamlOwned) -> bool {
         matches!(
             v,
-            YamlOwned::Value(ScalarOwned::Null)
-                | YamlOwned::Value(ScalarOwned::Boolean(false))
-                | YamlOwned::Value(ScalarOwned::Integer(0))
+            YamlOwned::Value(
+                ScalarOwned::Null | ScalarOwned::Boolean(false) | ScalarOwned::Integer(0)
+            )
         ) || matches!(v, YamlOwned::Value(ScalarOwned::String(s)) if s.is_empty())
     }
     rows.iter().any(|r| {

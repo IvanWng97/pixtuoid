@@ -39,34 +39,33 @@ pub fn live_grok_session_ids(grok_root: &Path) -> Option<ProbeSnapshot> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(ProbeSnapshot::default()),
         Err(_) => return None,
     };
-    match grok_ids_from_registry(&bytes, crate::source::cc_probe::pid_alive, |pid| {
+    if let Some(snap) = grok_ids_from_registry(&bytes, crate::source::cc_probe::pid_alive, |pid| {
         crate::source::cc_probe::pid_start_time_secs(pid)
     }) {
-        Some(snap) => Some(snap),
-        None => {
-            // A read that hit the cap parses as garbage too, so say which it
-            // was — a truncation reported as upstream drift sends the reader
-            // hunting a format change that never happened.
-            let truncated = bytes.len() as u64 == MAX_SESSION_REGISTRY_BYTES;
-            static SHAPE_DRIFT_WARNED: std::sync::Once = std::sync::Once::new();
-            SHAPE_DRIFT_WARNED.call_once(|| {
-                let cause = if truncated {
-                    "was TRUNCATED at the read cap, so it cannot parse"
-                } else {
-                    "does not parse as the expected [{session_id,pid,cwd,opened_at}] \
-                     array — the registry shape changed upstream"
-                };
-                crate::source::drift::shape_drift(
-                    SOURCE_NAME,
-                    &format!(
-                        "active_sessions.json at {} {cause}; liveness degraded to \
-                         mtime gating",
-                        path.display()
-                    ),
-                );
-            });
-            None
-        }
+        Some(snap)
+    } else {
+        // A read that hit the cap parses as garbage too, so say which it
+        // was — a truncation reported as upstream drift sends the reader
+        // hunting a format change that never happened.
+        let truncated = bytes.len() as u64 == MAX_SESSION_REGISTRY_BYTES;
+        static SHAPE_DRIFT_WARNED: std::sync::Once = std::sync::Once::new();
+        SHAPE_DRIFT_WARNED.call_once(|| {
+            let cause = if truncated {
+                "was TRUNCATED at the read cap, so it cannot parse"
+            } else {
+                "does not parse as the expected [{session_id,pid,cwd,opened_at}] \
+                 array — the registry shape changed upstream"
+            };
+            crate::source::drift::shape_drift(
+                SOURCE_NAME,
+                &format!(
+                    "active_sessions.json at {} {cause}; liveness degraded to \
+                     mtime gating",
+                    path.display()
+                ),
+            );
+        });
+        None
     }
 }
 
@@ -269,7 +268,7 @@ mod tests {
             );
         }
 
-        /// The cap is a MEGAbyte, not a kilobyte: a registry far past any
+        /// The cap is a *megabyte*, not a kilobyte: a registry far past any
         /// plausible kilobyte bound must still be read WHOLE, or a busy host's
         /// sessions silently stop vouching. Padding rides an ignored field so
         /// the document stays valid at every size.

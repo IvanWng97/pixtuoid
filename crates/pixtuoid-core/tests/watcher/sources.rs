@@ -482,7 +482,7 @@ async fn write_omp_header(path: &std::path::Path, id: &str) {
     f.flush().await.unwrap();
 }
 
-/// Drain until `want`'s SessionStart or a deadline; true on arrival.
+/// Drain until `want`'s `SessionStart` or a deadline; true on arrival.
 async fn wait_for_session_start(
     rx: &mut mpsc::Receiver<(Transport, AgentEvent)>,
     want: pixtuoid_core::AgentId,
@@ -671,7 +671,7 @@ async fn omp_oversized_first_sight_uses_the_head_title_through_source_wiring() {
                 rename_labels.push(label);
             }
             Ok(Some((_, AgentEvent::ActivityStart { .. }))) => saw_activity = true,
-            Ok(Some(_)) | Ok(None) | Err(_) => {}
+            Ok(Some(_) | None) | Err(_) => {}
         }
         if rename_seen_at.is_some_and(|at| at.elapsed() >= Duration::from_millis(500)) {
             break;

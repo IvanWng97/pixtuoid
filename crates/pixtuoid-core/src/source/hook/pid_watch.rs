@@ -97,7 +97,9 @@ impl HookPidWatch {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Bindings> {
-        self.bindings.lock().unwrap_or_else(|e| e.into_inner())
+        self.bindings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 

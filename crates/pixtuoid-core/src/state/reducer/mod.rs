@@ -48,7 +48,8 @@ pub const STALE_SHORT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 fn stale_threshold(slot: &AgentSlot) -> Duration {
     stale_threshold_with_caps(
         slot,
-        crate::source::registry::descriptor_for(&slot.source).map(|d| d.caps()),
+        crate::source::registry::descriptor_for(&slot.source)
+            .map(super::super::source::registry::SourceDescriptor::caps),
     )
 }
 
@@ -115,9 +116,9 @@ struct IdentityCtx<'a> {
     cwd: &'a std::path::Path,
 }
 
-/// First-wins identity back-fill (#221): heal EMPTY source/session_id/cwd — an
+/// First-wins identity back-fill (#221): heal EMPTY `source/session_id/cwd` — an
 /// established value is never overwritten. Returns the healed cwd's basename
-/// when THIS call healed the cwd; only the SessionStart arm upgrades a fallback
+/// when THIS call healed the cwd; only the `SessionStart` arm upgrades a fallback
 /// label from it, since `Identity` carries no label authority.
 fn backfill_identity<'a>(slot: &mut AgentSlot, ctx: IdentityCtx<'a>) -> Option<&'a str> {
     if slot.source.is_empty() && !ctx.source.is_empty() {
@@ -481,7 +482,10 @@ impl Reducer {
         detail: &Option<crate::source::ToolDetail>,
         now: SystemTime,
     ) {
-        if detail.as_ref().is_some_and(|d| d.is_task()) {
+        if detail
+            .as_ref()
+            .is_some_and(super::super::source::ToolDetail::is_task)
+        {
             return;
         }
         let Some(slot) = scene.agents.get_mut(&agent_id) else {
@@ -499,7 +503,7 @@ impl Reducer {
         }
     }
 
-    /// A matching tool_use_id means the *gated* tool finished, so a parallel
+    /// A matching `tool_use_id` means the *gated* tool finished, so a parallel
     /// tool's end can't false-clear a pending permission. A None-id end ON THE
     /// HOOK transport is a turn-end (Codex/Reasonix `Stop`) and a pending
     /// approval BLOCKS those CLIs' turns, so the Wait is stale — the Hook gate is
@@ -615,7 +619,7 @@ impl Reducer {
     /// The `ProofOfLife` arm — #220: refresh the sweep exemption, and NOTHING
     /// else. No slot synthesis (this only vouches for already-visible slots),
     /// no state change, no `last_event_at` refresh. An exiting slot is left
-    /// alone so the vouch can't tug against SessionEnd/cascade_exit.
+    /// alone so the vouch can't tug against `SessionEnd/cascade_exit`.
     fn apply_proof_of_life(&mut self, scene: &SceneState, agent_id: AgentId, now: SystemTime) {
         if scene
             .agents
@@ -948,14 +952,13 @@ impl Reducer {
         // chokepoint caps the label at the decode boundary.
         let named = crate::source::decoder::cwd_basename_label(prefix, cwd);
         let has_cwd = named.is_some();
-        let label = match named {
-            Some(l) => crate::state::SlotLabel::cwd_derived(l),
-            None => {
-                // Only an unknown-cwd ghost consumes an ordinal, so labels stay
-                // contiguous instead of skipping the preceding named sessions.
-                self.next_label_n += 1;
-                crate::state::SlotLabel::ordinal_ghost(format!("{prefix}#{}", self.next_label_n))
-            }
+        let label = if let Some(l) = named {
+            crate::state::SlotLabel::cwd_derived(l)
+        } else {
+            // Only an unknown-cwd ghost consumes an ordinal, so labels stay
+            // contiguous instead of skipping the preceding named sessions.
+            self.next_label_n += 1;
+            crate::state::SlotLabel::ordinal_ghost(format!("{prefix}#{}", self.next_label_n))
         };
         // Same-cwd sessions are disambiguated at render time, not with a `·xxxx`.
         scene.agents.insert(
@@ -991,9 +994,9 @@ impl Reducer {
     }
 
     /// Hook transport only: with any Task in flight, hook ActivityStart/End for
-    /// this AgentId is almost certainly subagent work misattributed to the
+    /// this `AgentId` is almost certainly subagent work misattributed to the
     /// parent. Drop it and defer to JSONL, which targets the subagent's own
-    /// AgentId. Two exemptions: the Task's own PostToolUse (its tool_use_id
+    /// `AgentId`. Two exemptions: the Task's own `PostToolUse` (its `tool_use_id`
     /// matches), and a GATED member's Start/End — the parent's own approval
     /// round (#951), which eating would strand in Waiting until the parent's
     /// next own event or the stale sweep.
@@ -1041,7 +1044,7 @@ impl Reducer {
         suppress
     }
 
-    /// Tracks Task tool_use_ids from either transport, marking a parent that
+    /// Tracks Task `tool_use_ids` from either transport, marking a parent that
     /// gains one Active("Delegating") so it doesn't look asleep while subagents
     /// work. b1 subagent-completion inference (CC writes no completion marker):
     /// a drained parent Task means the subtree returned — cascade EXIT to the
@@ -1147,7 +1150,7 @@ impl Reducer {
 
     /// Flip agents with an elapsed `pending_idle_at` to Idle. Resets
     /// `state_started_at` to `now` so the Idle wander state machine starts from
-    /// the visible transition, not the now-stale original ActivityEnd time.
+    /// the visible transition, not the now-stale original `ActivityEnd` time.
     fn expire_pending_idles(&mut self, scene: &mut SceneState, now: SystemTime) {
         for slot in scene.agents.values_mut() {
             let Some(pending) = slot.pending_idle_at else {

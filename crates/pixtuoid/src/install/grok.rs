@@ -38,7 +38,7 @@ const REMOVED_STUB: &str = "{\n  \"_note\": \"pixtuoid hooks removed by disconne
 /// actor, so this caps a wedged shim at 2s instead of the 5s default per event.
 const HOOK_TIMEOUT_SECS: u64 = 2;
 
-/// Registration keys (PascalCase; the wire `hookEventName` values are snake_case).
+/// Registration keys (`PascalCase`; the wire `hookEventName` values are `snake_case`).
 /// Every entry must decode — `every_registered_grok_event_decodes` pins it.
 pub(crate) const GROK_EVENTS: &[&str] = &[
     "SessionStart",
@@ -59,7 +59,7 @@ pub(crate) const GROK_EVENTS: &[&str] = &[
 
 /// `{grok_home}/hooks/pixtuoid.json`, via the SAME `grok_home()` resolution the
 /// watcher's sessions root and the liveness probe ride, so the three can never
-/// disagree. HARD error when neither GROK_HOME nor a home dir resolves: grok's
+/// disagree. HARD error when neither `GROK_HOME` nor a home dir resolves: grok's
 /// hook discovery scans NOTHING in that environment, so writing into
 /// `grok_home()`'s degenerate fallback would land hooks grok never reads.
 pub(crate) fn default_config_path() -> Result<PathBuf> {
@@ -160,9 +160,8 @@ pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcom
 /// Replace our file with the sentinel-free stub. A foreign file (no sentinel
 /// key), an already-removed stub, or empty content is a semantic no-op.
 pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    let ours = serde_json::from_str::<Value>(content.trim())
-        .ok()
-        .is_some_and(|v| v.get(SENTINEL_KEY).is_some());
+    let ours =
+        serde_json::from_str::<Value>(content.trim()).is_ok_and(|v| v.get(SENTINEL_KEY).is_some());
     Ok(MergeOutcome {
         changed: ours,
         content: if ours {

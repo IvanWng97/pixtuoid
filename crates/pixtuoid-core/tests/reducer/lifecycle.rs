@@ -1543,7 +1543,7 @@ fn hook_identity_desk_refusal_is_quiet() {
 }
 
 fn connected_set<const N: usize>(srcs: [&str; N]) -> std::collections::HashSet<String> {
-    srcs.iter().map(|s| s.to_string()).collect()
+    srcs.iter().map(std::string::ToString::to_string).collect()
 }
 
 #[test]

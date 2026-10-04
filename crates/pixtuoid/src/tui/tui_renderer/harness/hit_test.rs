@@ -101,7 +101,7 @@ fn click_hit_test_follows_a_walking_sprite() {
     );
     let (dx, dy) = (
         seat.x + pixtuoid_scene::layout::CHARACTER_SPRITE_W / 2,
-        (seat.y + pixtuoid_scene::layout::CHARACTER_SPRITE_H / 2) / 2,
+        u16::midpoint(seat.y, pixtuoid_scene::layout::CHARACTER_SPRITE_H / 2),
     );
     assert_eq!(r.hit_test_agent_at(dx, dy), Some(id));
 
@@ -208,7 +208,9 @@ fn a_breathing_sitter_is_hit_at_its_drawn_cells_not_its_seat_top_left() {
     };
 
     let mut moved = None;
-    for row in (seat.y / 2).saturating_sub(SWEEP_MARGIN)..=(seat.y + drawn.h) / 2 + SWEEP_MARGIN {
+    for row in
+        (seat.y / 2).saturating_sub(SWEEP_MARGIN)..=u16::midpoint(seat.y, drawn.h) + SWEEP_MARGIN
+    {
         for col in seat.x.saturating_sub(SWEEP_MARGIN)..seat.x + drawn.w + SWEEP_MARGIN {
             let shows = cell_shows(drawn, col, row);
             assert_eq!(

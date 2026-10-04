@@ -1,4 +1,4 @@
-//! Renders the TUI off-screen via ratatui's TestBackend and rasterizes every cell
+//! Renders the TUI off-screen via ratatui's `TestBackend` and rasterizes every cell
 //! into a `CELL_W`×`CELL_H` px tile — of a PNG, an animated GIF (`--gif`) or
 //! `--proof` frame sequences — so the visual output is verifiable without a real
 //! terminal.
@@ -200,7 +200,7 @@ struct SnapshotArgs {
 
     /// Override the `--anim` pre-roll skip (ms). The default skips to the
     /// walk-out (settle/sit follow); set a LARGER value to start the capture at
-    /// a later phase — e.g. desk_dwell + walk + sit_dwell to capture the LEAVE
+    /// a later phase — e.g. `desk_dwell` + walk + `sit_dwell` to capture the LEAVE
     /// (walk-back).
     #[arg(long, requires = "anim", conflicts_with_all = ["pets", "navigate_at"])]
     anim_skip_ms: Option<u64>,
@@ -391,18 +391,15 @@ fn main() -> Result<()> {
             .agents
             .values_mut()
             .find(|a| a.label.as_ref() == label.as_str());
-        match hit {
-            Some(a) => {
-                a.model = Some("claude-fable-5".into());
-                a.effort = Some(pixtuoid_core::state::EffortObservation::new(
-                    "ultra".into(),
-                    now,
-                ));
-            }
-            None => {
-                let labels: Vec<_> = scene.agents.values().map(|a| a.label.to_string()).collect();
-                anyhow::bail!("--flame {label:?} not found in scene; labels: {labels:?}");
-            }
+        if let Some(a) = hit {
+            a.model = Some("claude-fable-5".into());
+            a.effort = Some(pixtuoid_core::state::EffortObservation::new(
+                "ultra".into(),
+                now,
+            ));
+        } else {
+            let labels: Vec<_> = scene.agents.values().map(|a| a.label.to_string()).collect();
+            anyhow::bail!("--flame {label:?} not found in scene; labels: {labels:?}");
         }
     }
     if let Some(state) = args.openclaw {
@@ -462,7 +459,7 @@ fn main() -> Result<()> {
             let kind = match kind_str {
                 "cat" => PetKind::Cat,
                 "dog" => PetKind::Dog,
-                other => anyhow::bail!("unknown --pets {:?}; valid: cat | dog", other),
+                other => anyhow::bail!("unknown --pets {other:?}; valid: cat | dog"),
             };
             vec![Pet {
                 kind,

@@ -151,7 +151,7 @@ impl Source for OmpSource {
         }
         loop {
             tokio::select! {
-                _ = tokio::time::sleep(rescan_interval) => {
+                () = tokio::time::sleep(rescan_interval) => {
                     // Off the worker: the enumeration does blocking fs reads
                     // (the liveness probes set the precedent).
                     let listed = tokio::task::spawn_blocking({

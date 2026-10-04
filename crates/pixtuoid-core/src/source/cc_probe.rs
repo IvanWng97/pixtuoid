@@ -134,7 +134,7 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
 }
 
 /// Deterministic winner between two LIVE entries claiming one sessionId
-/// (#252): read_dir order is unspecified and the binding must not flap.
+/// (#252): `read_dir` order is unspecified and the binding must not flap.
 /// Newest `startedAt` wins, a `startedAt`-carrying entry beats one without
 /// (better-attested), and both-absent-or-equal falls to the larger pid.
 #[cfg(unix)]
@@ -195,7 +195,7 @@ fn parse_registry_entry(bytes: &[u8]) -> RegistryParse {
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) else {
         return RegistryParse::Skip;
     };
-    let Some(pid) = v.get("pid").and_then(|p| p.as_i64()) else {
+    let Some(pid) = v.get("pid").and_then(serde_json::Value::as_i64) else {
         return RegistryParse::ShapeDrift("pid");
     };
     // The strictly-positive narrowing every JSON pid ingress shares (rationale
@@ -209,7 +209,7 @@ fn parse_registry_entry(bytes: &[u8]) -> RegistryParse {
     if session_id.is_empty() {
         return RegistryParse::Skip;
     }
-    let started_at_ms = v.get("startedAt").and_then(|s| s.as_u64());
+    let started_at_ms = v.get("startedAt").and_then(serde_json::Value::as_u64);
     RegistryParse::Entry(RegistryEntry {
         pid,
         session_id: session_id.to_string(),
@@ -255,7 +255,7 @@ pub(crate) fn pid_alive(pid: i32) -> bool {
 }
 
 /// The sessions registry is a SIBLING of the projects root. Derived only when
-/// the parent layout matches (the root's file_name is literally `projects`) —
+/// the parent layout matches (the root's `file_name` is literally `projects`) —
 /// a custom `--projects-root /tmp/fixture` replay points at an arbitrary dir
 /// whose parent could hold an unrelated `sessions/`, so those runs get no
 /// probe and keep the pure-mtime gate.

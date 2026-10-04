@@ -138,7 +138,7 @@ pub(crate) fn flat_json_merge_uninstall(mut doc: Value, sentinel: &str) -> Value
 }
 
 fn is_flat_managed(entry: &Value, sentinel: &str) -> bool {
-    entry.get(sentinel).and_then(|v| v.as_bool()) == Some(true)
+    entry.get(sentinel).and_then(serde_json::Value::as_bool) == Some(true)
 }
 
 /// Parse flat-JSON `content`, REFUSE a valid-but-non-object root (which

@@ -35,7 +35,7 @@ pub(crate) struct WebAudioDriver {
 
 impl WebAudioDriver {
     /// Master is fixed 1.0: the web has no volume UI — mute = JS suspending the
-    /// AudioContext, so the mixer always runs unmuted.
+    /// `AudioContext`, so the mixer always runs unmuted.
     pub(crate) fn new(initial_track: TrackId) -> Self {
         Self {
             rng: NoiseStream::new(BUILD_SEED),
@@ -152,7 +152,7 @@ impl WebAudioDriver {
     /// memory.grow / a track swap moves the data.
     pub(crate) fn loop_buffer(&self, idx: usize) -> &[f32] {
         match LoopStem::ALL.get(idx) {
-            Some(LoopStem::Rain) => self.rain.as_deref().map(Vec::as_slice).unwrap_or(&[]),
+            Some(LoopStem::Rain) => self.rain.as_deref().map_or(&[], Vec::as_slice),
             Some(stem) => match &self.beds {
                 Some(beds) => beds.bed_slice(*stem),
                 None => &[],

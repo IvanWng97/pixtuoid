@@ -62,28 +62,27 @@ fn main() -> Result<()> {
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
 
-    let mut payload: Value = match event_from_argv(&args) {
+    let mut payload: Value = if let Some(event) = event_from_argv(&args) {
         // CodeWhale env-mode: identity arrives as `DEEPSEEK_*` env vars with
         // `--event <name>` baked into the registered command. Critically,
         // CodeWhale does NOT pipe stdin for these events, so the hook child
         // inherits the TUI's terminal stdin and a blind `read_to_string` would
         // BLOCK (freezing the synchronous tool call until the hook timeout) —
         // when `--event` is present we never touch stdin.
-        Some(event) => Value::Object(env_payload(&event)),
-        None => {
-            let mut buf = String::new();
-            if std::io::stdin()
-                .take(STDIN_CAP)
-                .read_to_string(&mut buf)
-                .is_err()
-            {
-                return Ok(());
-            }
-            match serde_json::from_str(&buf) {
-                Ok(v) => v,
-                Err(_) => return Ok(()),
-            }
+        Value::Object(env_payload(&event))
+    } else {
+        let mut buf = String::new();
+        if std::io::stdin()
+            .take(STDIN_CAP)
+            .read_to_string(&mut buf)
+            .is_err()
+        {
+            return Ok(());
         }
+        let Ok(v) = serde_json::from_str(&buf) else {
+            return Ok(());
+        };
+        v
     };
 
     // Everything past here is OUR work on CC's clock — `cli_pid` walks a process
@@ -197,7 +196,7 @@ fn source_from_argv(args: &[String]) -> Option<String> {
 /// Stamp the shim timestamp and, when a source is resolved, the trusted CLI
 /// source under the PRIVATE `_pixtuoid_source` key.
 ///
-/// We deliberately do NOT write the public `source` field: CC's SessionStart
+/// We deliberately do NOT write the public `source` field: CC's `SessionStart`
 /// payload already uses `source` for the start *reason* (startup/resume/clear/
 /// compact), and reading that as the CLI source namespaced the agent under
 /// "startup" — an un-reapable ghost. The private key is shim-OWNED, so any

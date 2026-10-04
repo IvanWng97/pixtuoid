@@ -478,8 +478,12 @@ async fn walk_once_live(
     cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
     seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
 ) -> Vec<(Transport, AgentEvent)> {
-    let live: Arc<Mutex<HashSet<String>>> =
-        Arc::new(Mutex::new(live_ids.iter().map(|s| s.to_string()).collect()));
+    let live: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(
+        live_ids
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect(),
+    ));
     let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
     let source: Arc<str> = Arc::from("test");
     let decoders = SourceDecoders {

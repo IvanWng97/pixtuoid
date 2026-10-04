@@ -18,7 +18,7 @@ use crate::theme::Theme;
 /// tail (`cc·repo`, `cc·repo·1a2b`). The label is WRITTEN core-side as a bare
 /// `·` at THREE sites — `decoder::cwd_basename_label` (the chokepoint),
 /// `claude_code::cc_derive_label`'s project-dir fallback, and the reducer's
-/// SessionStart back-fill, both of which document their bypass — and a crate
+/// `SessionStart` back-fill, both of which document their bypass — and a crate
 /// boundary keeps this const out of reach of all three, so it must MATCH that
 /// char.
 const LABEL_SEP: char = '\u{b7}';

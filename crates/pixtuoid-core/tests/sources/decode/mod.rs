@@ -587,7 +587,7 @@ fn non_dispatch_tool_is_not_task() {
     });
     match decode_activity(payload) {
         AgentEvent::ActivityStart { detail, .. } => {
-            assert!(!detail.expect("detail").is_task(), "Read is not a dispatch")
+            assert!(!detail.expect("detail").is_task(), "Read is not a dispatch");
         }
         other => panic!("got {other:?}"),
     }

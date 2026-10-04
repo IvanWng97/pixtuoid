@@ -588,7 +588,7 @@ fn paint_piece(
             }
         }
         PieceKind::Prop { at, art } | PieceKind::Animated { at, art } => {
-            paint_art(at, art, pack, theme, scale, buf)
+            paint_art(at, art, pack, theme, scale, buf);
         }
         PieceKind::PropBand { at, sprite, rows } => {
             paint_prop_band(at, sprite, rows, pack, scale, buf);
@@ -2974,7 +2974,7 @@ pub(crate) mod tests {
             }
         }
         for kind in ["animated", "door", "neon", "clock"] {
-            let n = seen.get(kind).map_or(0, |s| s.len());
+            let n = seen.get(kind).map_or(0, std::collections::HashSet::len);
             assert!(
                 n > 1,
                 "the {kind} showed one fingerprint across what moves it"
@@ -3564,7 +3564,11 @@ pub(crate) mod tests {
                 };
                 let shadow = ground_shadow(span, &kind, &pack).expect("a desk casts a shadow");
                 let ((_, top), (_, past)) = shadow.bounds();
-                assert_eq!((top + past) / 2, span.depth + 1, "{art} at scale {s}");
+                assert_eq!(
+                    u16::midpoint(top, past),
+                    span.depth + 1,
+                    "{art} at scale {s}"
+                );
             }
         }
     }

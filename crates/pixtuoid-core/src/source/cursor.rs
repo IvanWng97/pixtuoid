@@ -9,7 +9,7 @@
 //! ever wanted.
 //!
 //! The envelope reuses CC's `hook_event_name` field NAME with **camelCase
-//! values**; `tool_name` is PascalCase and the TOP-LEVEL `cwd` is empty —
+//! values**; `tool_name` is `PascalCase` and the TOP-LEVEL `cwd` is empty —
 //! `workspace_roots[0]` is the real workspace. Keyed on `session_id`, present
 //! and CONSISTENT across every CLI event, so concurrent sessions in one project
 //! stay distinct.
@@ -54,6 +54,10 @@ pub const SOURCE_NAME: &str = "cursor";
 /// is HOOK-ONLY: a slot the reducer's proof-of-life pre-pass synthesizes
 /// mid-turn has no JSONL back-fill path, so without the attached identity it
 /// would stay a blank `#N` ghost.
+///
+/// # Errors
+///
+/// If the payload is not an object, lacks `hook_event_name`, carries none of `session_id`, `cwd` or `workspace_roots`, or names an unregistered event.
 pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()

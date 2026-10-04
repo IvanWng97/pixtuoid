@@ -16,7 +16,7 @@
 //! - **Key on `cwd`, NOT `session_id`.** `DEEPSEEK_SESSION_ID` is INCONSISTENT
 //!   across a single session's events — `sess_<8hex>` on session/turn/tool-after
 //!   events but a raw turn UUID on `tool_call_before`, which a different code
-//!   path builds — so keying on it splits every ActivityStart into a second
+//!   path builds — so keying on it splits every `ActivityStart` into a second
 //!   ghost sprite. `DEEPSEEK_WORKSPACE` (the cwd) is the ONE field present and
 //!   identical on EVERY event. Two deliberate consequences: two concurrent
 //!   sessions in ONE workspace render as one sprite, and `tool_use_id` is always
@@ -55,6 +55,10 @@ const SUBAGENT_TOOLS: &[&str] = &["agent_spawn", "spawn_agent"];
 /// The activity arms prepend an [`AgentEvent::Identity`]: CodeWhale is
 /// HOOK-ONLY, so a slot the reducer's proof-of-life pre-pass synthesizes
 /// mid-turn has no JSONL back-fill path.
+///
+/// # Errors
+///
+/// If the payload is not an object, lacks `event`, names an unhandled event, or lacks a non-empty `cwd` (a subagent event needs a non-empty `agent_id` instead).
 pub fn decode_cw_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()

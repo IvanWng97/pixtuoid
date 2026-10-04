@@ -494,22 +494,21 @@ impl CityStrip {
                     let (art, grow) = building
                         .variant(density)
                         .map_or((building.base(), d), |a| (a, 1));
-                    let frame = match recoloured
+                    let frame = if let Some(i) = recoloured
                         .iter()
                         .position(|(n, p, _)| *n == building.name() && *p == plane)
                     {
-                        Some(i) => &recoloured[i].2,
-                        None => {
-                            let Some(f) = art
-                                .sprite()
-                                .recolorable(0)
-                                .map(|f| f.recolored(&c.overrides(materials)))
-                            else {
-                                continue;
-                            };
-                            recoloured.push((building.name(), plane, f));
-                            &recoloured[recoloured.len() - 1].2
-                        }
+                        &recoloured[i].2
+                    } else {
+                        let Some(f) = art
+                            .sprite()
+                            .recolorable(0)
+                            .map(|f| f.recolored(&c.overrides(materials)))
+                        else {
+                            continue;
+                        };
+                        recoloured.push((building.name(), plane, f));
+                        &recoloured[recoloured.len() - 1].2
                     };
                     let (x0, y0) = (x * i32::from(d), top * i32::from(d));
                     let cell = |fx: u16, fy: u16| {
@@ -771,12 +770,11 @@ mod tests {
         let mut lower = false;
         for ((plane, g), (_, t)) in ground.stands().zip(top.stands()) {
             let (g, t) = (rise(38, g), rise(38, t));
-            match plane {
-                Plane::Far => assert_eq!(t, g, "the horizon holds"),
-                _ => {
-                    assert!(t <= g, "{plane:?} never rises");
-                    lower |= t < g;
-                }
+            if plane == Plane::Far {
+                assert_eq!(t, g, "the horizon holds");
+            } else {
+                assert!(t <= g, "{plane:?} never rises");
+                lower |= t < g;
             }
         }
         assert!(lower, "the nearer planes drop away");

@@ -545,14 +545,14 @@ pub(crate) struct AudioHandle {
     tx: std::sync::Arc<std::sync::Mutex<Option<mpsc::SyncSender<AudioFrame>>>>,
     /// Mute is STATE, not an event: it rides this atomic instead of the
     /// droppable frame channel. During the bank-synthesis window the channel
-    /// saturates and try_sends drop — an `m`/`p` keypress there must still
+    /// saturates and `try_sends` drop — an `m`/`p` keypress there must still
     /// land, or the beds fade in unmuted against a footer that says muted.
     muted: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Master volume (f32 bits) — same state-not-event rationale as `muted`.
     volume: std::sync::Arc<std::sync::atomic::AtomicU32>,
     /// The device thread's join handle, so [`shutdown`](Self::shutdown) can WAIT
     /// for `run_loop` to drop its `RodioSink` (the OS device close) before the
-    /// process exits: detached, its teardown races exit, and on macOS CoreAudio a
+    /// process exits: detached, its teardown races exit, and on macOS `CoreAudio` a
     /// half-closed output strands playback (`sudo killall coreaudiod`).
     join: std::sync::Arc<std::sync::Mutex<Option<std::thread::JoinHandle<()>>>>,
 }
@@ -569,14 +569,22 @@ impl AudioHandle {
     }
 
     pub(crate) fn is_enabled(&self) -> bool {
-        self.tx.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+        self.tx
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
     }
 
     /// Push one frame of audio intent. `try_send` — a saturated audio thread
     /// drops frames rather than ever stalling the render loop. A disabled handle drops
     /// it, so callers need no `is_enabled` guard.
     pub(crate) fn frame(&self, frame: AudioFrame) {
-        if let Some(tx) = self.tx.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if let Some(tx) = self
+            .tx
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
             let _ = tx.try_send(frame);
         }
     }
@@ -628,11 +636,14 @@ impl AudioHandle {
                 Ok(join) => {
                     // Replacing the sole sender CLOSES a prior thread's channel — retire that
                     // thread rather than leak one still holding the output.
-                    *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+                    *self
+                        .tx
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(tx);
                     let prior = self
                         .join
                         .lock()
-                        .unwrap_or_else(|e| e.into_inner())
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .replace(join);
                     // Both locks are dropped before the join: the keypress path must never
                     // block holding one.
@@ -650,8 +661,15 @@ impl AudioHandle {
     /// the process exits (see `join`). INVARIANT: only from `AudioController::drop`, after the
     /// painter's loop ended — nothing races `tx`/`join`.
     pub(crate) fn shutdown(&self) {
-        *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        let handle = self.join.lock().unwrap_or_else(|e| e.into_inner()).take();
+        *self
+            .tx
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        let handle = self
+            .join
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
         if let Some(handle) = handle {
             join_with_timeout(handle, SHUTDOWN_JOIN_TIMEOUT);
         }
@@ -677,7 +695,10 @@ impl AudioHandle {
     #[cfg(test)]
     pub(crate) fn install_test_channel(&self) -> mpsc::Receiver<AudioFrame> {
         let (tx, rx) = mpsc::sync_channel(256);
-        *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+        *self
+            .tx
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(tx);
         rx
     }
 }
@@ -806,7 +827,9 @@ fn run_loop(
 
         let frame = match msg {
             Ok(frame) => {
-                if !inited {
+                if inited {
+                    Some(frame)
+                } else {
                     // The first frame's synth stalls the thread: drop the backlog it queued
                     // and re-anchor the clock, so the build's seconds ramp nothing.
                     let beds = TrackBeds::build(&mut rng, frame.track);
@@ -818,8 +841,6 @@ fn run_loop(
                     let fresh = merge_backlog_levels(&rx, frame);
                     last_step = Instant::now();
                     Some(fresh)
-                } else {
-                    Some(frame)
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => None,

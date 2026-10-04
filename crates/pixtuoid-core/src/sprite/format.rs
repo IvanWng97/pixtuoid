@@ -1110,8 +1110,8 @@ impl Pack {
         // A city comes whole or not at all: its buildings are drawn in its own
         // `[city]` materials, which a pack with a city of its own renames.
         if self.buildings.is_empty() {
-            self.buildings = base.buildings.clone();
-            self.city_materials = base.city_materials.clone();
+            self.buildings.clone_from(&base.buildings);
+            self.city_materials.clone_from(&base.city_materials);
         }
     }
 
@@ -1427,6 +1427,10 @@ pub const PACK_MANIFEST: &str = "pack.toml";
 
 /// Load a `Pack` from `dir`'s [`PACK_MANIFEST`] and its on-disk frame files,
 /// guarding each frame path against directory traversal outside `dir`.
+///
+/// # Errors
+///
+/// [`PackError::NoManifest`] if `dir` has no [`PACK_MANIFEST`]; otherwise if a file cannot be read or parsed, a frame path leaves `dir`, or the pack fails validation.
 #[cfg(feature = "native")]
 pub fn load_pack(dir: &Path) -> Result<Pack> {
     let toml_path = dir.join(PACK_MANIFEST);
@@ -1480,6 +1484,10 @@ pub fn load_pack(dir: &Path) -> Result<Pack> {
 }
 
 /// `load_pack` from in-memory strings, so it reads no files.
+///
+/// # Errors
+///
+/// If `pack_toml` does not parse, a frame it names is absent from `frames`, or the pack fails validation.
 pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Result<Pack> {
     let parsed: PackToml =
         toml::from_str(pack_toml).map_err(|source| PackError::Manifest { path: None, source })?;
@@ -1488,7 +1496,7 @@ pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Resul
     build_pack(parsed, &mut |fname| {
         frame_lookup
             .get(fname)
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .ok_or_else(|| PackError::MissingEmbeddedFrame {
                 file: fname.to_owned(),
             })
@@ -2305,7 +2313,7 @@ mod validation_floor_tests {
             pack.animation(name)
                 .expect("loaded")
                 .stride()
-                .map(|s| s.get())
+                .map(std::num::NonZero::get)
         };
         assert_eq!(stride("walking"), Some(12));
         assert_eq!(stride("seated"), None);

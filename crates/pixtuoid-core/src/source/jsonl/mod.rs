@@ -128,7 +128,7 @@ struct WatchCtx<'a> {
     seen: &'a Arc<Mutex<HashMap<PathBuf, bool>>>,
     tx: &'a TaggedSender,
     /// Recency window for the first-sight gate (an older file is seeded at EOF
-    /// without a SessionStart). One window for the whole watch, so every path
+    /// without a `SessionStart`). One window for the whole watch, so every path
     /// that can first-see a file gates identically (#85).
     window: Duration,
     /// Most recent liveness-probe snapshot (session ids in `IdDeriver` space),
@@ -362,6 +362,10 @@ impl JsonlWatcher {
     /// Consume the watcher and drive the watch loop — initial seed, a `RESCAN_DELAY`
     /// rescan, the `DEFAULT_POLL_INTERVAL` poll backstop, and notify events — feeding each decoded
     /// event to `tx`.
+    ///
+    /// # Errors
+    ///
+    /// If the file-watch backend cannot be created, or the watch root cannot be stat'ed or watched.
     pub async fn run(self, tx: TaggedSender) -> Result<()> {
         let cursors: Arc<Mutex<HashMap<PathBuf, u64>>> = Arc::new(Mutex::new(HashMap::new()));
         let seen_sessions: Arc<Mutex<HashMap<PathBuf, bool>>> =
@@ -520,7 +524,7 @@ impl JsonlWatcher {
                     drain_child_end_unclaims(unclaims.as_ref(), decoders, &ctx).await;
                     walk_jsonl(&path, decoders, &ctx).await;
                 }
-                _ = &mut rescan_delay, if !rescan_done => {
+                () = &mut rescan_delay, if !rescan_done => {
                     rescan_done = true;
                     self.run_scan_pass(
                         &ctx, &mut scan_state,

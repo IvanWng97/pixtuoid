@@ -121,7 +121,7 @@ pub(crate) fn flat_json_verify(content: &str, events: &[&str], sentinel: &str) -
             .and_then(|a| a.as_array())
             .and_then(|arr| {
                 arr.iter()
-                    .find(|e| e.get(sentinel).and_then(|v| v.as_bool()) == Some(true))
+                    .find(|e| e.get(sentinel).and_then(serde_json::Value::as_bool) == Some(true))
             });
         match managed {
             Some(entry) => {
@@ -130,8 +130,7 @@ pub(crate) fn flat_json_verify(content: &str, events: &[&str], sentinel: &str) -
                     shim = entry
                         .get("command")
                         .and_then(|c| c.as_str())
-                        .map(shell_shim_ref)
-                        .unwrap_or(ShimRef::Unknown);
+                        .map_or(ShimRef::Unknown, shell_shim_ref);
                 }
             }
             None => missing.push(*ev),

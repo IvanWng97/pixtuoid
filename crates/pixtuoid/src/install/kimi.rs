@@ -89,7 +89,7 @@ pub(crate) fn detect_installed() -> bool {
 
 /// Kimi runs the `command` under a shell (module doc), so the OS forms are
 /// [`crate::install::hook_cmd::shell_hook_command`]'s. Err on non-UTF-8 (prevents
-/// the to_string_lossy dead-hook).
+/// the `to_string_lossy` dead-hook).
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     let p = crate::install::merge::hook_path_str(resolved)?;
     crate::install::hook_cmd::shell_hook_command(p, SOURCE_NAME)
@@ -168,7 +168,7 @@ fn toml_merge_uninstall(mut doc: toml::Value) -> toml::Value {
     if root
         .get("hooks")
         .and_then(|h| h.as_array())
-        .is_some_and(|a| a.is_empty())
+        .is_some_and(std::vec::Vec::is_empty)
     {
         root.remove("hooks");
     }
@@ -209,8 +209,7 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
                     shim = e
                         .get("command")
                         .and_then(|c| c.as_str())
-                        .map(shell_shim_ref)
-                        .unwrap_or(ShimRef::Unknown);
+                        .map_or(ShimRef::Unknown, shell_shim_ref);
                 }
             }
             None => missing.push(*ev),

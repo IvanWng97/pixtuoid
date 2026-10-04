@@ -93,6 +93,10 @@ impl WeatherPolicy {
     /// The policy a CLI or page names: one of
     /// [`weather_names`], case-insensitive,
     /// or `None` for the clock. `Err` carries the valid names.
+    ///
+    /// # Errors
+    ///
+    /// If `name` is `Some` but not one of [`weather_names`].
     pub fn from_name(name: Option<&str>) -> Result<Self, Vec<&'static str>> {
         match name {
             None => Ok(Self::Clock),
@@ -593,8 +597,7 @@ fn body_at(h: f32, nightfall: f32, moon_phase: f32, moon_age: f32) -> SkyBody {
 fn moon_age_at(now: SystemTime) -> f32 {
     let unix_days = now
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs_f32() / 86_400.0)
-        .unwrap_or(0.0);
+        .map_or(0.0, |d| d.as_secs_f32() / 86_400.0);
     (unix_days - NEW_MOON_EPOCH_UNIX_DAYS).rem_euclid(SYNODIC_DAYS)
 }
 

@@ -67,8 +67,8 @@ async fn watcher_emits_proof_of_life_for_probe_live_ids() {
 }
 
 /// The probe starts EMPTY so the initial seed + 250ms rescan gate the stale
-/// file; the id becomes probe-live only afterwards, so the SessionStart can
-/// ONLY come from a poll-arm snapshot refresh and the ProofOfLife only from
+/// file; the id becomes probe-live only afterwards, so the `SessionStart` can
+/// ONLY come from a poll-arm snapshot refresh and the `ProofOfLife` only from
 /// the poll-arm emission. `with_poll_interval` is the test seam — the
 /// production 60s cadence makes the poll arm untestable.
 #[tokio::test]
@@ -466,9 +466,9 @@ async fn probe_panic_changes_nothing() {
 }
 
 /// A probe snapshot binds the vouched session id to its owning OS pid; when
-/// that process dies, the kernel watch (kqueue NOTE_EXIT / pidfd+poll) emits
-/// the SessionEnd within milliseconds. The negative-vouch span stays at its
-/// production 60s DEFAULT, so a SessionEnd inside the 5s window can ONLY have
+/// that process dies, the kernel watch (kqueue `NOTE_EXIT` / pidfd+poll) emits
+/// the `SessionEnd` within milliseconds. The negative-vouch span stays at its
+/// production 60s DEFAULT, so a `SessionEnd` inside the 5s window can ONLY have
 /// come from the instant-exit path.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
@@ -612,7 +612,7 @@ async fn negative_vouch_confirm_unbinds_pid_so_a_later_exit_is_quiet() {
 /// `live` is only rewritten by a HEALTHY probe refresh, so a probe FAILURE
 /// right after the exit would keep the stale snapshot vouching the dead id,
 /// and the re-vouch sweep would replay the parked transcript into a phantom
-/// SessionStart unreachable by every fast rung.
+/// `SessionStart` unreachable by every fast rung.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn instant_exit_under_probe_failure_does_not_resurrect_the_session() {

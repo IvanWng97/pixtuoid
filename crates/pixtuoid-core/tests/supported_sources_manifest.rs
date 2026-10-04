@@ -42,7 +42,7 @@ fn manifest_supported_set_matches_registered_sources() {
         .collect();
 
     let registered: BTreeSet<String> = registry::registered_source_names()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .collect();
 
     assert_eq!(
@@ -78,7 +78,7 @@ fn manifest_rows_are_well_formed() {
         // `featured`'s only consumer is scripts/gen-readme.mjs, NOT the site —
         // which is why site-scoped greps keep flagging it as dead data.
         assert!(
-            s.get("featured").is_some_and(|v| v.is_boolean()),
+            s.get("featured").is_some_and(serde_json::Value::is_boolean),
             "{name}: `featured` must be a bool"
         );
         assert!(
@@ -103,7 +103,7 @@ fn manifest_rows_are_well_formed() {
 
         if status == "planned" {
             assert!(
-                s.get("id").is_none_or(|v| v.is_null()),
+                s.get("id").is_none_or(serde_json::Value::is_null),
                 "{name}: a `planned` source must not carry an `id` (it isn't wired yet)"
             );
         }

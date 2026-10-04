@@ -23,8 +23,7 @@ impl PetState {
     /// Whether the freeze/hearts effect is still playing at `now` (within `PET_DURATION_MS`).
     pub fn is_active(&self, now: SystemTime) -> bool {
         now.duration_since(self.petted_at)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(PET_DURATION_MS + 1)
+            .map_or(PET_DURATION_MS + 1, |d| d.as_millis() as u64)
             < PET_DURATION_MS
     }
 
@@ -242,7 +241,7 @@ mod tests {
         for &kind in PetKind::ALL {
             let ww = kind.hitbox(kind.walk_anim()).w;
             let sw = kind.hitbox(kind.sit_anim()).w;
-            assert!(ww > sw, "{:?} walk should be wider than sit", kind);
+            assert!(ww > sw, "{kind:?} walk should be wider than sit");
         }
     }
 
@@ -251,7 +250,7 @@ mod tests {
         for &kind in PetKind::ALL {
             let sh = kind.hitbox(kind.sit_anim()).h;
             let slh = kind.hitbox(kind.sleep_anim()).h;
-            assert!(slh < sh, "{:?} sleep should be shorter than sit", kind);
+            assert!(slh < sh, "{kind:?} sleep should be shorter than sit");
         }
     }
 

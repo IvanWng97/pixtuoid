@@ -44,7 +44,7 @@ fn lock_pending(shared: &Shared) -> std::sync::MutexGuard<'_, Vec<i32>> {
 }
 
 /// Take everything `watch()` queued since the last wake, DEDUPED. The dedup is
-/// load-bearing for the AlreadyDead path: a duplicate `watch()` of a pid that
+/// load-bearing for the `AlreadyDead` path: a duplicate `watch()` of a pid that
 /// died before the drain would otherwise register → ESRCH → send, then
 /// re-register the batch's second copy and synthesize a SECOND exit.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -183,7 +183,7 @@ mod imp {
             Some(Self { kq })
         }
 
-        /// Trigger the EVFILT_USER ident-0 slot, waking a blocked `kevent`.
+        /// Trigger the `EVFILT_USER` ident-0 slot, waking a blocked `kevent`.
         /// kevent(2) is thread-safe on one kq, so the registering side may call
         /// this while the thread is blocked.
         pub(super) fn wake(&self) {
@@ -208,12 +208,12 @@ mod imp {
         Failed,
     }
 
-    /// Register a NOTE_EXIT knote for `pid`, resolving the registration race
-    /// via EV_RECEIPT: the receipt entry comes back in the SAME call (flags
-    /// carry EV_ERROR; data is 0 on success, the errno otherwise), so a pid
+    /// Register a `NOTE_EXIT` knote for `pid`, resolving the registration race
+    /// via `EV_RECEIPT`: the receipt entry comes back in the SAME call (flags
+    /// carry `EV_ERROR`; data is 0 on success, the errno otherwise), so a pid
     /// that died before this call is detected HERE rather than silently never
-    /// firing. NOTE_EXITSTATUS is deliberately NOT requested — xnu's
-    /// filt_procattach has no credential check for plain NOTE_EXIT, so
+    /// firing. `NOTE_EXITSTATUS` is deliberately NOT requested — xnu's
+    /// `filt_procattach` has no credential check for plain `NOTE_EXIT`, so
     /// same-user non-children (every CC/codex session) are watchable
     /// unprivileged.
     fn register(kq: BorrowedFd, pid: i32) -> Registered {
@@ -345,7 +345,7 @@ mod imp {
     #[derive(Debug)]
     pub(super) struct Backend {
         /// Self-pipe: `wake()` writes a byte; the thread keeps the read end in
-        /// its poll set and drains on wake. Both ends are O_NONBLOCK — a full
+        /// its poll set and drains on wake. Both ends are `O_NONBLOCK` — a full
         /// pipe means a wake is already pending (EAGAIN is success). Owned HERE
         /// (reached through `Arc<Shared>`) so neither side can ever touch a
         /// recycled fd.

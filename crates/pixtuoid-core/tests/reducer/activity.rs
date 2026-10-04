@@ -374,10 +374,10 @@ fn gated_tool_end_while_waiting_resolves_to_idle_after_grace() {
     );
 }
 
-/// CC's recorded gate fires PermissionRequest (no tool_use_id) and then, if the
+/// CC's recorded gate fires `PermissionRequest` (no `tool_use_id`) and then, if the
 /// prompt sits, the idle Notification — both decode to Waiting. The second one
 /// must not erase the tool the first remembered, or the approved tool's
-/// PostToolUse resolves nothing and the slot never leaves Waiting.
+/// `PostToolUse` resolves nothing and the slot never leaves Waiting.
 #[test]
 fn a_second_waiting_keeps_the_gate_the_first_one_remembered() {
     use pixtuoid_core::state::reducer::ACTIVE_GRACE_WINDOW;

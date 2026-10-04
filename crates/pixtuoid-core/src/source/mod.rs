@@ -154,7 +154,7 @@ pub enum AgentEvent {
         agent_id: AgentId,
     },
     /// Identity context a hook decoder attaches IMMEDIATELY AHEAD of a
-    /// tool/permission activity event: hook payloads carry source/session_id/
+    /// tool/permission activity event: hook payloads carry `source/session_id`/
     /// cwd that the activity variants don't, so without this a proof-of-life
     /// registration for an unknown id starts BLANK until the next real
     /// `SessionStart` — for a hook-only source, the whole rest of the turn.

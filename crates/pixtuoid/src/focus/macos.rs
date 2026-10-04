@@ -44,7 +44,7 @@ pub(crate) fn activate_os(pid: i32) -> bool {
     // SAFETY: plain Cocoa calls on a valid pid; see `focusable`.
     unsafe {
         NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
-            .map(|app| {
+            .is_some_and(|app| {
                 #[expect(
                     deprecated,
                     reason = "deprecated on 14+ but still honored; the no-options activate() is cooperative and drops the request while the user interacts elsewhere"
@@ -53,6 +53,5 @@ pub(crate) fn activate_os(pid: i32) -> bool {
                     objc2_app_kit::NSApplicationActivationOptions::NSApplicationActivateIgnoringOtherApps,
                 )
             })
-            .unwrap_or(false)
     }
 }

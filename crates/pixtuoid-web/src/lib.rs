@@ -147,6 +147,10 @@ pub struct Office {
 impl Office {
     /// Build an office seeded with `seed` (drives the layout variant). Errors
     /// only if the bundled sprite pack fails to parse.
+    ///
+    /// # Errors
+    ///
+    /// If the bundled sprite pack fails to load.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
         let pack =
@@ -333,11 +337,13 @@ impl Office {
     /// buffers + tick). JS loops it off `setTimeout(0)` so the multi-second
     /// synthesis never blocks the main thread in one shot.
     pub fn audio_warmup_step(&mut self) -> u32 {
-        self.audio.as_mut().map_or(0, |a| a.warmup_step())
+        self.audio
+            .as_mut()
+            .map_or(0, audio::WebAudioDriver::warmup_step)
     }
 
     /// The engine's sample rate (Hz) — JS builds its `AudioBuffer`s at this rate
-    /// (the browser resamples to the AudioContext rate).
+    /// (the browser resamples to the `AudioContext` rate).
     pub fn audio_sample_rate(&self) -> u32 {
         pixtuoid_scene::audio::dsp::SAMPLE_RATE
     }
@@ -372,13 +378,17 @@ impl Office {
     /// Advance the audio one tick at `now_ms` (the site's pause-shifted clock,
     /// same as `step`) and return the JS glue commands as JSON:
     /// `{"gains":[g0..g6],"plays":[[poolWire,idx,gain],…],"swapped":bool}` — JS
-    /// ramps each GainNode to its gain, spawns the one-shots, and on `swapped`
+    /// ramps each `GainNode` to its gain, spawns the one-shots, and on `swapped`
     /// re-reads the loop buffers.
+    ///
+    /// # Panics
+    ///
+    /// If the audio engine is absent after the readiness check above it, which that check rules out.
     pub fn audio_tick(&mut self, now_ms: f64) -> String {
         let Some(now) = self.last_now else {
             return r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
         };
-        if self.audio.as_ref().map(|a| a.is_ready()) != Some(true) {
+        if self.audio.as_ref().is_none_or(|a| !a.is_ready()) {
             return r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
         }
         // The shared observer composes the whole AudioFrame, single-sourced with
@@ -797,7 +807,7 @@ mod tests {
     }
 
     /// Anchor sim time well past 0 so `exiting_at`-style guards never see the
-    /// UNIX_EPOCH sentinel; the value itself is arbitrary.
+    /// `UNIX_EPOCH` sentinel; the value itself is arbitrary.
     const T0_MS: f64 = 1_000_000_000.0;
 
     #[test]
@@ -1040,7 +1050,7 @@ mod tests {
         let lobster = |o: &Office| {
             o.scene
                 .daemon(gw.source(), gw.instance())
-                .map(|p| p.display_state())
+                .map(pixtuoid_core::state::DaemonPresence::display_state)
         };
         o.step(T0_MS, 160, 96);
         o.step(T0_MS + 10_000.0, 160, 96);

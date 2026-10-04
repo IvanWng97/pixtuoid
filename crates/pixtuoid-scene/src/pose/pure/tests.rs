@@ -49,7 +49,7 @@ fn typing() -> ActivityState {
     }
 }
 
-/// Phase boundary helper mirroring idle_pose's absolute estimate timeline.
+/// Phase boundary helper mirroring `idle_pose`'s absolute estimate timeline.
 fn phases(agent_id: AgentId) -> (u64, u64, u64, u64) {
     let seated_end = seated_dwell_ms(agent_id);
     let walk_out_end = seated_end + WANDER_WALK_EST_MS;
@@ -688,7 +688,7 @@ fn agent_matching(pred: impl Fn(AgentId) -> bool) -> AgentId {
         .expect("id space should contain a matching agent")
 }
 
-/// Build an Idle slot whose SeatedThinking gate releases `hold_ms` into the
+/// Build an Idle slot whose `SeatedThinking` gate releases `hold_ms` into the
 /// Idle period: `last_event_at = state_started_at - (THINKING_WINDOW - hold)`.
 fn thinking_slot(id: AgentId, hold_ms: u64) -> AgentSlot {
     let (mut s, _) = slot(ActivityState::Idle, 0);

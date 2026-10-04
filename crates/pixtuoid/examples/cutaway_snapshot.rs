@@ -3,8 +3,8 @@
 //! and `render_cutaway` paints it into a buffer sized in pixels at `--scale`.
 //!
 //! Usage:
-//!   cargo run --release --example cutaway_snapshot -- <out.png> [--scale N]
-//!       [--agents N] [--theme T] [--logical WxH] [--now-hour H] [--floor I/N]
+//!   cargo run --release --example `cutaway_snapshot` -- <out.png> [--scale N]
+//!       [--agents N] [--theme T] [--logical `WxH`] [--now-hour H] [--floor I/N]
 //!       [--weather W] [--now-day D] [--now-sec S] [--flame I] [--repos a,b,...]
 
 use std::path::PathBuf;

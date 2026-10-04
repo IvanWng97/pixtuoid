@@ -7,7 +7,7 @@ use std::sync::Arc;
 use pixtuoid_scene::audio::mixer::LoopStem;
 
 pub(crate) trait AudioSink: Send {
-    /// Start `stem` looping `samples` (mono f32 @ 44_100) at gain 0.
+    /// Start `stem` looping `samples` (mono f32 @ `44_100`) at gain 0.
     fn start_loop(&mut self, stem: LoopStem, samples: Arc<Vec<f32>>);
     /// Replace a looping stem's buffer — the caller guarantees the stem is at gain
     /// 0, so the cut is inaudible.

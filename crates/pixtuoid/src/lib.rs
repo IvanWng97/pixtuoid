@@ -171,7 +171,7 @@ pub(crate) fn output_within(
     child.wait_with_output().ok()
 }
 
-/// The Unicode Bidi_Control characters. `char::is_control` covers only category
+/// The Unicode `Bidi_Control` characters. `char::is_control` covers only category
 /// Cc; these are Cf and slip through — yet they REORDER displayed text in a
 /// terminal (the "Trojan Source" class, CVE-2021-42574).
 fn is_bidi_control(c: char) -> bool {
@@ -292,7 +292,7 @@ mod tests {
     fn display_path_strips_control_chars_from_a_hostile_path() {
         let hostile = std::path::Path::new("/x/\x1b]0;pwned\x07\x1b[31mhook");
         let got = display_path(hostile);
-        assert!(!got.chars().any(|c| c.is_control()), "{got:?}");
+        assert!(!got.chars().any(char::is_control), "{got:?}");
         assert!(got.contains("hook") && got.contains("/x/"), "{got:?}");
     }
 

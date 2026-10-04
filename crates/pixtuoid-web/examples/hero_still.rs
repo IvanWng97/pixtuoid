@@ -94,25 +94,25 @@ fn main() -> ExitCode {
 
     let t0_ms: f64 = match (arg::<u64>(&args, "--t0-ms"), arg::<u32>(&args, "--hour")) {
         (Some(t0), _) => t0 as f64,
-        (None, Some(hour)) => match hour_to_t0_ms(hour) {
-            Some(t0) => t0,
-            None => {
+        (None, Some(hour)) => {
+            if let Some(t0) = hour_to_t0_ms(hour) {
+                t0
+            } else {
                 eprintln!("--hour must be 0-23, got {hour}");
                 return ExitCode::FAILURE;
             }
-        },
+        }
         (None, None) => {
             eprintln!("{USAGE}");
             return ExitCode::FAILURE;
         }
     };
 
-    let mut office = match Office::new(seed) {
-        Ok(o) => o,
-        Err(_) => {
-            eprintln!("bundled sprite pack failed to parse (build bug)");
-            return ExitCode::FAILURE;
-        }
+    let mut office = if let Ok(o) = Office::new(seed) {
+        o
+    } else {
+        eprintln!("bundled sprite pack failed to parse (build bug)");
+        return ExitCode::FAILURE;
     };
     if let Some(name) = weather {
         office.set_weather(Some(name));

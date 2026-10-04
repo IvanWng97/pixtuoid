@@ -256,10 +256,10 @@ impl<'a> XrgbSurface<'a> {
     /// `text` at `(x, top_y)` in `color`, over a one-pixel drop shadow.
     fn draw_shadowed_text(&mut self, text: &str, x: i32, top_y: i32, font_px: f32, color: u32) {
         crate::aa_text::draw_text_at(text, x + 1, top_y + 1, font_px, |gx, gy, cov| {
-            self.blend(gx, gy, BADGE_SHADOW, cov)
+            self.blend(gx, gy, BADGE_SHADOW, cov);
         });
         crate::aa_text::draw_text_at(text, x, top_y, font_px, |gx, gy, cov| {
-            self.blend(gx, gy, color, cov)
+            self.blend(gx, gy, color, cov);
         });
     }
 }
@@ -736,7 +736,7 @@ mod tests {
         // Glyph side bearings and the 1-px drop shadow, not an offset.
         const ROUNDING_PX: i32 = 2;
         assert!(
-            ((left + right) / 2 - centre).abs() <= ROUNDING_PX,
+            (i32::midpoint(left, right) - centre).abs() <= ROUNDING_PX,
             "ink spans {left}..={right}, centred off the anchor's {centre}"
         );
     }

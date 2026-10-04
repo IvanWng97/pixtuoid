@@ -476,7 +476,10 @@ fn a_stripped_record_does_not_call_its_bytes_verbatim_and_an_exemption_says_why(
             );
         }
     }
-    let pinned: BTreeSet<String> = EXEMPT_FROM_STRIP.iter().map(|s| s.to_string()).collect();
+    let pinned: BTreeSet<String> = EXEMPT_FROM_STRIP
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect();
     assert_eq!(
         exempt, pinned,
         "the exempt set changed — review it here, not only in a record"
@@ -563,9 +566,7 @@ fn a_recorded_capture_that_was_edited_says_so() {
             })
         });
         let edited = c.wire_files().iter().any(|p| {
-            std::fs::read_to_string(p)
-                .map(|b| sentinels.iter().any(|s| hit(&b, s)))
-                .unwrap_or(false)
+            std::fs::read_to_string(p).is_ok_and(|b| sentinels.iter().any(|s| hit(&b, s)))
         });
         if edited && !declares {
             silent.push(c.dir.strip_prefix(sources_root()).unwrap().to_path_buf());

@@ -148,7 +148,7 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 // sentinel — is inert (CC ignores unknown hooks) and is left untouched on
 // install/uninstall.
 fn is_managed_entry(entry: &Value) -> bool {
-    entry.get(SENTINEL_KEY).and_then(|v| v.as_bool()) == Some(true)
+    entry.get(SENTINEL_KEY).and_then(serde_json::Value::as_bool) == Some(true)
 }
 
 /// The one place Claude's nested per-event shape lives; the shared merge treats the

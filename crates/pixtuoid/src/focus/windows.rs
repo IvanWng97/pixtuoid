@@ -36,13 +36,13 @@ impl ProcessTable for OsProcessTable {
             let mut entry: PROCESSENTRY32W = std::mem::zeroed();
             entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
             let mut found = None;
-            if Process32FirstW(snap, &mut entry) != 0 {
+            if Process32FirstW(snap, &raw mut entry) != 0 {
                 loop {
                     if entry.th32ProcessID == pid as u32 {
                         found = i32::try_from(entry.th32ParentProcessID).ok();
                         break;
                     }
-                    if Process32NextW(snap, &mut entry) == 0 {
+                    if Process32NextW(snap, &raw mut entry) == 0 {
                         break;
                     }
                 }
@@ -68,7 +68,7 @@ fn top_level_window_of(pid: i32) -> Option<HWND> {
         let search = unsafe { &mut *(lparam as *mut Search) };
         let mut owner = 0u32;
         // SAFETY: hwnd comes from EnumWindows; owner is our own out-param.
-        unsafe { GetWindowThreadProcessId(hwnd, &mut owner) };
+        unsafe { GetWindowThreadProcessId(hwnd, &raw mut owner) };
         // SAFETY: hwnd comes from EnumWindows, live for the callback.
         if owner == search.pid && unsafe { IsWindowVisible(hwnd) } != 0 {
             search.hwnd = Some(hwnd);
@@ -81,7 +81,7 @@ fn top_level_window_of(pid: i32) -> Option<HWND> {
         hwnd: None,
     };
     // SAFETY: the callback contract above; Search outlives the call.
-    unsafe { EnumWindows(Some(cb), &mut search as *mut _ as LPARAM) };
+    unsafe { EnumWindows(Some(cb), &raw mut search as LPARAM) };
     search.hwnd
 }
 
@@ -133,7 +133,7 @@ fn foreground_input_thread() -> Option<u32> {
     }
     let mut owner = 0u32;
     // SAFETY: `fg` is a live top-level window; `owner` is ours to write.
-    let thread = unsafe { GetWindowThreadProcessId(fg, &mut owner) };
+    let thread = unsafe { GetWindowThreadProcessId(fg, &raw mut owner) };
     // SAFETY: takes no arguments and cannot fail.
     let me = unsafe { GetCurrentThreadId() };
     (thread != 0 && thread != me).then_some(thread)
@@ -170,7 +170,7 @@ fn ensure_message_queue() {
     unsafe {
         let mut msg: MSG = std::mem::zeroed();
         PeekMessageW(
-            &mut msg,
+            &raw mut msg,
             std::ptr::null_mut(),
             WM_USER,
             WM_USER,

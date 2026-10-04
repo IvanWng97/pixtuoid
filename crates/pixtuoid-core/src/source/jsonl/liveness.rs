@@ -324,7 +324,7 @@ impl ProbeLadder {
     /// Remove one session id from every pid's binding set, dropping pids whose
     /// set empties. The bindings inverse of `forget` — a confirmed exit needs
     /// both, because a codex-style process owns many rollouts and may outlive
-    /// this session, so its eventual OS exit must not re-emit a SessionEnd for
+    /// this session, so its eventual OS exit must not re-emit a `SessionEnd` for
     /// an already-confirmed id.
     fn unbind(&mut self, id: &str) {
         self.pid_bindings.retain(|_, ids| {

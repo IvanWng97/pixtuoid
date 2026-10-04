@@ -89,6 +89,10 @@ fn instance_id(raw: String) -> Result<DaemonInstanceId> {
 /// presence deltas. Reads ONLY allowlisted scalar fields — never
 /// `messages`/`prompt`/`sessionFile`, even if the plugin regressed and forwarded them
 /// (defense in depth for the privacy invariant).
+///
+/// # Errors
+///
+/// If the payload is not an object, lacks `type`, or carries a `gatewayPort` that is not a non-zero `u16` port.
 pub fn decode_openclaw_hook_payload(v: &Value) -> Result<DecodedPresence> {
     let obj = v
         .as_object()
@@ -100,7 +104,7 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<DecodedPresence> {
     let instance = gateway_instance(obj, event)?;
     let pid = obj
         .get("_pid")
-        .and_then(|p| p.as_i64())
+        .and_then(serde_json::Value::as_i64)
         .and_then(crate::source::decoder::checked_pid);
     // Presence is ANNOUNCE-only: upstream fires `gateway_start` once per gateway
     // PROCESS start, so a gateway already running when pixtuoid boots stays
@@ -124,8 +128,14 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<DecodedPresence> {
             // separates the two. Both defaults favour an older plugin forwarding
             // neither field: never false-degrade a healthy gateway, never make one
             // un-degradable.
-            let ok = obj.get("success").and_then(|s| s.as_bool()).unwrap_or(true);
-            let errored = obj.get("errored").and_then(|v| v.as_bool()).unwrap_or(true);
+            let ok = obj
+                .get("success")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true);
+            let errored = obj
+                .get("errored")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true);
             let run_key = run_key(obj);
             vec![if ok || !errored {
                 DaemonPresenceUpdate::RunEnded { run_key }

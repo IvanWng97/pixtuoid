@@ -199,8 +199,7 @@ fn marquee_window(s: &str, width: usize, now: SystemTime) -> String {
     let cycle = 2 * pause + 2 * scroll_ms; // > 0
     let elapsed = now
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_millis() as u64);
     let phase = elapsed % cycle;
     let off = if phase < pause {
         0 // hold head

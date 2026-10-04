@@ -143,8 +143,7 @@ impl ActiveChitchat {
 
     fn elapsed_ms(&self, now: SystemTime) -> u64 {
         now.duration_since(self.started_at)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(CHITCHAT_TOTAL_MS)
+            .map_or(CHITCHAT_TOTAL_MS, |d| d.as_millis() as u64)
     }
 
     /// The agent speaking this turn and their line, or `None` once expired / if

@@ -483,7 +483,7 @@ fn a_notice_board_hangs_within_one_pane() {
             let b = f.visual;
             assert!(
                 l.window_bays()
-                    .flat_map(|bay| bay.panes())
+                    .flat_map(super::super::windows::WindowBay::panes)
                     .any(|p| p.start <= b.x && b.x + b.width <= p.end),
                 "{}x{}: {b:?} straddles a frame",
                 l.buf_w,
@@ -524,7 +524,7 @@ fn the_clock_hangs_centred_on_a_window_post() {
         let clock = clock.visual;
         let centre = clock.x + clock.width / 2;
         assert!(
-            super::super::window_posts(l.buf_w).any(|p| (p.start + p.end) / 2 == centre),
+            super::super::window_posts(l.buf_w).any(|p| u16::midpoint(p.start, p.end) == centre),
             "{at}: {clock:?} off every post"
         );
     }

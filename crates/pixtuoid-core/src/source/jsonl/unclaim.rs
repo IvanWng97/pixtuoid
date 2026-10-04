@@ -96,7 +96,7 @@ impl ChildEndUnclaims {
     /// holding only TTL-expired entries reads as non-empty — harmless, the full
     /// drain it admits prunes them; "empty" is never wrong.
     fn is_empty(&self) -> bool {
-        self.entries.lock().map(|e| e.is_empty()).unwrap_or(true)
+        self.entries.lock().map_or(true, |e| e.is_empty())
     }
 }
 
@@ -118,7 +118,7 @@ impl Default for ChildEndUnclaims {
 ///   Codex FD probe keeps vouching an in-flight child's still-open rollout, so a
 ///   removed claim would let `revouch_gated_files` reset the cursor to 0 on the
 ///   next scan — a full stale-activity replay plus an instant re-registration
-///   that negates the SubagentStop end.
+///   that negates the `SubagentStop` end.
 ///
 /// Accepted residual: bytes the child wrote between the hook Stop and this drain
 /// are consumed silently, indistinguishable from pre-stop stragglers without

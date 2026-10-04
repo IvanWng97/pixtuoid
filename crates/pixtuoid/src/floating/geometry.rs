@@ -31,7 +31,7 @@ pub(crate) fn window_visible_on_monitors(
 }
 
 /// Is the cursor `(cx, cy)` within `corner_px` of the bottom-right corner of a `(w, h)`
-/// window? A left-press there resizes the frameless window (SouthEast); elsewhere it drags.
+/// window? A left-press there resizes the frameless window (`SouthEast`); elsewhere it drags.
 pub(crate) fn near_resize_corner(cursor: (f64, f64), size: (u32, u32), corner_px: f64) -> bool {
     let (cx, cy) = cursor;
     let (w, h) = size;

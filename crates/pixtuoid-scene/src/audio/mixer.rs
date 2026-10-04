@@ -99,7 +99,7 @@ impl Mixer {
     }
 
     /// The USER volume (0..1) mapped to bus amplitude: a squared perceptual curve
-    /// (loudness is logarithmic) under the ambient BUS_TRIM. The ONE
+    /// (loudness is logarithmic) under the ambient `BUS_TRIM`. The ONE
     /// volume→amplitude site; the footer keeps showing the user's linear percent.
     fn master_amp(&self) -> f32 {
         self.master * self.master * BUS_TRIM

@@ -85,7 +85,7 @@ fn validate_pack_skeleton_is_ok_and_warns_on_optionals() {
 }
 
 /// Write a deliberately-broken pack: it DROPS the required `seated` animation,
-/// gives `typing` only one frame (needs ≥2 → insufficient_frames), and declares a
+/// gives `typing` only one frame (needs ≥2 → `insufficient_frames`), and declares a
 /// bogus `[animations.foo]` (unknown).
 fn write_broken_pack(dir: &Path) {
     fs::create_dir_all(dir).unwrap();

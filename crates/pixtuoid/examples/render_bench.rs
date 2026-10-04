@@ -3,7 +3,7 @@
 //! (Kitty/iTerm2/SIXEL) resolution cost per frame?
 //!
 //! NOT a committed gate — a design-gate instrument. Run:
-//!   cargo run --release --example render_bench
+//!   cargo run --release --example `render_bench`
 
 use std::path::PathBuf;
 use std::sync::Arc;

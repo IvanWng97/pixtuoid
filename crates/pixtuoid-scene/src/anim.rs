@@ -395,7 +395,7 @@ mod tests {
             for i in 0..=100 {
                 let t = i as f32 / 100.0;
                 let v = curve.apply(t);
-                assert!(v >= prev, "{:?} not monotone at t={t}: {v} < {prev}", curve);
+                assert!(v >= prev, "{curve:?} not monotone at t={t}: {v} < {prev}");
                 prev = v;
             }
         }

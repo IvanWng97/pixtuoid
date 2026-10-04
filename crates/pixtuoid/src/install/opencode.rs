@@ -3,7 +3,7 @@
 //! opencode has no config-level shell hook (and SQLite-only sessions, no
 //! tailable transcript), so pixtuoid drops a plugin file at
 //! `<opencode-config>/plugins/pixtuoid.ts`, which opencode auto-discovers. The
-//! plugin pipes the EventV2 lifecycle/tool/permission stream into the
+//! plugin pipes the `EventV2` lifecycle/tool/permission stream into the
 //! `pixtuoid-hook` shim on stdin; the shim's absolute path is baked in
 //! (JSON-escaped) at install time from the `opencode_plugin.ts` template.
 //!
@@ -69,7 +69,7 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
 /// file — keying on our own artifact would chicken-and-egg (opencode could never
 /// be auto-detected until AFTER we'd installed into it).
 pub(crate) fn detect_installed() -> bool {
-    opencode_config_dir().map(|d| d.exists()).unwrap_or(false)
+    opencode_config_dir().is_ok_and(|d| d.exists())
         || io::home_relative(".local/share/opencode").exists()
 }
 
@@ -127,9 +127,7 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     // without this an upgrader keeps their old `FORWARD` set forever and doctor
     // says fine — and `opencode_plugin_forward_set_is_pinned` makes a change
     // deliberate on the AUTHORING side while leaving the installed base silent.
-    let stale = render_plugin(&p.to_string_lossy())
-        .map(|want| want.trim() != content.trim())
-        .unwrap_or(false);
+    let stale = render_plugin(&p.to_string_lossy()).is_ok_and(|want| want.trim() != content.trim());
     SchemaParse {
         shim: ShimRef::Absolute(p),
         issues: if stale {

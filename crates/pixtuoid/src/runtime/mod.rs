@@ -73,7 +73,9 @@ impl ConnectedSources {
         Self(Arc::new(Mutex::new(initial)))
     }
     fn guard(&self) -> std::sync::MutexGuard<'_, HashSet<String>> {
-        self.0.lock().unwrap_or_else(|e| e.into_inner())
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
     pub fn is_connected(&self, source_id: &str) -> bool {
         self.guard().contains(source_id)
@@ -252,7 +254,7 @@ mod tests {
         );
         let out = format_source_death(&d);
         assert!(
-            !out.chars().any(|c| c.is_control()),
+            !out.chars().any(char::is_control),
             "no control chars may survive into the headless terminal line: {out:?}"
         );
         assert!(out.contains("source 'codex]0;pwned' died"), "got {out:?}");
@@ -321,8 +323,7 @@ mod tests {
         let (buf_w, buf_h) = crate::tui::renderer::scene_buf_size(cols, rows);
         let expected =
             pixtuoid_scene::layout::SceneLayout::compute_with_seed(buf_w, buf_h, None, 0)
-                .map(|l| l.home_desks.len())
-                .unwrap_or(0);
+                .map_or(0, |l| l.home_desks.len());
         assert_eq!(ground_floor(cols, rows), expected);
     }
 
@@ -583,7 +584,7 @@ mod tests {
 
         let out = summarize(&scene);
         assert!(
-            !out.chars().any(|c| c.is_control()),
+            !out.chars().any(char::is_control),
             "summary must carry no control chars (terminal-escape injection): {out:?}"
         );
         assert!(out.contains("repo]0;pwned"), "got: {out}");
