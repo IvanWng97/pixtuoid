@@ -117,6 +117,9 @@ pub(super) async fn scan_root(
                 }
             }
         }
+        // The watcher never creates its CLI's root, so an uninstalled CLI's is
+        // absent: nothing to discover yet, not a failure.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => {
             if root_health.on_failure() {
                 warn!(
