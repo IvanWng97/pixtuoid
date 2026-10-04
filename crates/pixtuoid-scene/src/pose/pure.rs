@@ -160,10 +160,7 @@ pub fn is_aimless_cycle(agent_id: AgentId, cycle_n: u64) -> bool {
 /// Per-(agent, cycle) waypoint index. Only meaningful when `takes_trip` is
 /// true AND `is_aimless_cycle` is false.
 pub fn waypoint_index_for_cycle(agent_id: AgentId, cycle_n: u64, num_waypoints: usize) -> usize {
-    if num_waypoints == 0 {
-        return 0;
-    }
-    ((agent_id.raw() ^ cycle_n) as usize) % num_waypoints
+    crate::spread(agent_id.raw() ^ cycle_n, num_waypoints)
 }
 
 /// The pose an agent renders this frame — the output of pose derivation.

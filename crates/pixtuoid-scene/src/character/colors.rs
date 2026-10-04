@@ -328,15 +328,15 @@ pub(crate) fn agent_overrides(
     glow_tint: Option<Rgb>,
     burn: crate::burn::BurnTier,
 ) -> [(char, Pixel); 4] {
-    let id_seed = agent.agent_id.raw() as usize;
+    let id_seed = agent.agent_id.raw();
     let outfit_seed = outfit_seed_for(agent);
-    let outfit = OUTFITS[outfit_seed as usize % OUTFITS.len()];
+    let outfit = OUTFITS[crate::spread(outfit_seed, OUTFITS.len())];
     let hair = if burn == crate::burn::BurnTier::Normal {
-        HAIR_PRESETS[(id_seed / 7) % HAIR_PRESETS.len()]
+        HAIR_PRESETS[crate::spread(id_seed / 7, HAIR_PRESETS.len())]
     } else {
         EMBER_HAIR
     };
-    let skin = SKIN_PRESETS[(id_seed / 13) % SKIN_PRESETS.len()];
+    let skin = SKIN_PRESETS[crate::spread(id_seed / 13, SKIN_PRESETS.len())];
     let final_skin = if let Some(tint) = glow_tint {
         blend_rgb(skin, tint, 0.18)
     } else {

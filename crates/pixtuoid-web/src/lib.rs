@@ -181,8 +181,7 @@ impl Office {
     /// `performance.now()` and NOT a `requestAnimationFrame` timestamp: those are
     /// ms-since-page-load, which pins the day/night cycle and wall clock at 1970.
     pub fn step(&mut self, now_ms: f64, w: u32, h: u32) {
-        // `f64 as u64` saturates (negatives/NaN → 0), so no pre-clamp is needed.
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
+        let now = epoch_ms(now_ms);
         self.last_now = Some(now);
         let buf_w = w.clamp(1, u32::from(u16::MAX)) as u16;
         let buf_h = h.clamp(1, u32::from(u16::MAX)) as u16;
@@ -454,13 +453,19 @@ pub struct SynthTake {
     epoch: u64,
 }
 
+/// JS's UNIX-epoch milliseconds as a `SystemTime`. `f64 as u64` saturates
+/// (negatives and NaN to 0), so no input needs a pre-clamp.
+fn epoch_ms(ms: f64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_millis(ms as u64)
+}
+
 #[wasm_bindgen]
 impl SynthTake {
     /// `now_ms` = UNIX-epoch milliseconds (the `Office::step` contract) — selects
     /// the same day/night + weather track the office would at that instant.
     #[wasm_bindgen(constructor)]
     pub fn new(now_ms: f64) -> SynthTake {
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
+        let now = epoch_ms(now_ms);
         // `floor::track_for` is the ONE track-pick authority; its TrackId payload
         // IS the track epoch, so the adopt wire's (night, epoch) recovers from it.
         let track = pixtuoid_scene::floor::track_for(now, WeatherPolicy::Clock);

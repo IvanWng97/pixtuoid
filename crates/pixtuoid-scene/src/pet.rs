@@ -146,10 +146,7 @@ impl Pet {
 /// Picks the one pet for a floor from the office's pets (`floor_seed`-indexed);
 /// `None` when none are configured.
 pub fn select_pet_for_floor(floor_seed: u64, pets: &[Pet]) -> Option<&Pet> {
-    if pets.is_empty() {
-        return None;
-    }
-    Some(&pets[(floor_seed as usize) % pets.len()])
+    pets.get(crate::spread(floor_seed, pets.len()))
 }
 
 #[cfg(test)]

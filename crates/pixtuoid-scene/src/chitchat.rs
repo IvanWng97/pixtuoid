@@ -156,7 +156,7 @@ impl ActiveChitchat {
             return None;
         }
         let speaker = self.participants[(turn as usize) % self.participants.len()];
-        let line_idx = (self.seed.wrapping_add(turn) as usize) % CHITCHAT_LINES.len();
+        let line_idx = crate::spread(self.seed.wrapping_add(turn), CHITCHAT_LINES.len());
         Some((speaker, CHITCHAT_LINES[line_idx]))
     }
 }
