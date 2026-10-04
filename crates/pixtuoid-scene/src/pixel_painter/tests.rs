@@ -2910,8 +2910,9 @@ fn reserved_bbox_width(overlay: &OccupancyOverlay, w: u16, h: u16) -> Option<u16
     Some(hi? - lo? + 1)
 }
 
-// The bundled 8-wide pack cannot tell char_w apart from the const, so the
-// differential against a wide (10px) fixture pack is what gives this teeth.
+// The bundled pack's figures are `CHARACTER_SPRITE_W` wide, so it cannot tell
+// char_w apart from the const; the differential against a wide (10px) fixture
+// pack is what gives this teeth.
 #[test]
 fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
     use crate::layout::TEST_DEFAULT_DESKS;

@@ -391,7 +391,6 @@ fn enqueue_pet<'a>(
     }
 }
 
-/// Enqueue the gateway mascots.
 fn enqueue_gateway_mascots<'a>(
     mascots: &'a [crate::sim::MascotPlacement],
     drawables: &mut Vec<Drawable<'a>>,
