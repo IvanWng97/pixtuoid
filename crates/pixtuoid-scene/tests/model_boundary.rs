@@ -10,20 +10,16 @@ const RASTERIZERS: [&str; 2] = ["pixel_painter", "cutaway"];
 /// and the PR that removes the edge. A fix deletes its entry; a new edge under a
 /// listed path changes its count.
 const KNOWN_EDGES: &[(&str, usize, &str)] = &[
-    (
-        "display/",
-        27,
-        "pen, text, light and effects move model-side: #1253",
-    ),
+    ("display/", 27, "pen: #1253; text, light and effects: #1270"),
     (
         "floor/",
         7,
-        "render_to_rgb_buffer, BaseFillCache and the both-painters tests: #1244; AgentFrame: #1253",
+        "render_to_rgb_buffer, BaseFillCache and the both-painters tests: #1244; AgentFrame: #1270",
     ),
     (
         "overlay.rs",
         6,
-        "cutaway::text widths and AgentFrame: #1253",
+        "cutaway::text widths and AgentFrame: #1270",
     ),
     ("wall.rs", 1, "cutaway::pen: #1253"),
 ];
