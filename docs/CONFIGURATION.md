@@ -87,6 +87,8 @@ face derived under it. The recolor keys and `[ramps]` apply at every density.
 A pet's walk (`cat_walk`, `dog_walk`) is drawn facing east: the renderer
 mirrors it when the pet heads west, so a walk drawn facing west walks backwards.
 
+A desk (`desk`, `desk_north`) marks where its cup and token tower stand with `@mark cup <x> <y>` and `@mark tower <x> <y>` on its first frame, at every density; without them it stands neither, and `validate-pack` warns.
+
 A person's walk (`walking`, `walking_back`, `walking_coffee`) takes
 `stride = <pixels>`: how far, on the base grid, the walker travels in one full
 cycle of its frames. Its frames, and its `@Nx` variants', then step by the
