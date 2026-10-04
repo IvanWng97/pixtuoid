@@ -52,9 +52,10 @@ run. The jobs:
 - **docs** (`just doc-check`) — rustdoc with `-D warnings` over private items,
   the bins, the examples and each `DOC_TARGETS` triple, plus the doctests
   nextest skips.
-- **smoke (`just gen-check`) · readme drift (`just gen-readme-check`) · npm
-  package generator (`just npm-check`)** — committed media and icons, README
-  freshness, and the npm package generator + OpenClaw plugin contract.
+- **smoke · readme drift (`just gen-readme-check`) · npm package generator
+  (`just npm-check`)** — generated sprites and README freshness, and the npm
+  package generator + OpenClaw plugin contract. The README's media drift
+  (`just gen-media-check`) is reported there as evidence, not a gate.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
   full suite on a real Windows runner.
 - **other-unix-check** (`just check-other-unix`) — FreeBSD cross-lint for
