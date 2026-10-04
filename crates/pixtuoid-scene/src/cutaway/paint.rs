@@ -80,7 +80,7 @@ fn paint_plate(
     let mut x = plate.x.0 + PLATE_PAD;
     for &(text, ink) in runs {
         crate::cutaway::text::paint(pen, buf, (ArtPx(x), plate.y), text, ink);
-        x += crate::cutaway::text::advance(text).0;
+        x += crate::display::text::advance(text).0;
     }
 }
 
@@ -1773,11 +1773,11 @@ mod tests {
 
     /// A plate's runs and the board's segments step on one grid, wide
     /// characters included: the run after `text` starts
-    /// [`advance`](crate::cutaway::text::advance)`(text)` on.
+    /// [`advance`](crate::display::text::advance)`(text)` on.
     #[test]
     fn plate_runs_and_board_columns_share_one_grid() {
         use crate::board::{BoardSegment, BoardTone};
-        use crate::cutaway::text::advance;
+        use crate::display::text::advance;
         use pixtuoid_core::sprite::Rgb;
         let pen = Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4");
         let (first, second) = ("I日b", "I");

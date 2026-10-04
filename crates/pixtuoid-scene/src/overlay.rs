@@ -138,7 +138,7 @@ impl<'a> Namesakes<'a> {
         } else {
             std::borrow::Cow::Borrowed(&*agent.label)
         };
-        let marker = crate::cutaway::text::char_cells(BADGE_MARKER);
+        let marker = crate::display::text::char_cells(BADGE_MARKER);
         truncate_label(&raw, BADGE_CELLS.saturating_sub(marker)).into_owned()
     }
 }
@@ -167,7 +167,7 @@ pub(crate) fn badge_plate(theme: &Theme) -> Rgb {
 /// not the suffix — otherwise the disambig becomes useless ("TikTok-Android·a"
 /// tells us nothing the base alone wouldn't).
 pub(crate) fn truncate_label(label: &str, budget: u16) -> std::borrow::Cow<'_, str> {
-    use crate::cutaway::text::cells;
+    use crate::display::text::cells;
     use std::borrow::Cow;
     if cells(label) <= budget {
         return Cow::Borrowed(label);
@@ -189,7 +189,7 @@ fn take_cells(text: &str, budget: u16) -> &str {
     let end = text
         .char_indices()
         .find(|&(_, c)| {
-            used = used.saturating_add(crate::cutaway::text::char_cells(c));
+            used = used.saturating_add(crate::display::text::char_cells(c));
             used > budget
         })
         .map_or(text.len(), |(i, _)| i);
@@ -436,7 +436,7 @@ mod tests {
     /// [`BADGE_CELLS`]: super::BADGE_CELLS
     #[test]
     fn a_long_names_badge_fills_its_cells_marker_included() {
-        use crate::cutaway::text::cells;
+        use crate::display::text::cells;
         for label in [
             "cc\u{b7}a-very-long-project-name",
             "cc\u{b7}日本語プロジェクト管理ツール",

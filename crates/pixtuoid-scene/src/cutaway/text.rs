@@ -1,31 +1,17 @@
 //! The cutaway's pixel font: text painted on the art grid, one glyph pixel per
-//! art pixel, never anti-aliased.
+//! art pixel, never anti-aliased, in the cells [`display::text`](crate::display::text)
+//! lays it out by.
 //!
 //! ASCII and the signs' symbols are [`hand_drawn`]; every other character
 //! comes from the [`fallback`] font, two open bitmap fonts
 //! `scripts/gen-fallback-font.py` aligns to the same lines. The workspace's
 //! other face (the binary's `aa_text`) is an anti-aliased OTF this wasm-clean
-//! crate must not embed. A character takes the terminal cells
-//! [`unicode-width`](unicode_width) gives it, each [`ADVANCE`] wide: at the
-//! pack's 4x art one logical column, the classic badge's terminal column.
+//! crate must not embed.
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
-use unicode_width::UnicodeWidthChar;
 
 use crate::display::pen::{ArtPx, ArtRect, Pen};
-
-/// A hand-drawn glyph's width in art pixels.
-const GLYPH_W: u16 = 3;
-/// A cell's width in art pixels: one glyph and its gap.
-const ADVANCE: u16 = GLYPH_W + 1;
-/// The rows above the capitals, which only accents and CJK ink.
-const ACCENT_ROWS: u16 = 2;
-/// A capital's height in art pixels.
-const CAP_H: u16 = 5;
-/// A line's height in art pixels: the accent rows, the capitals, and a row for
-/// descenders, Fusion Pixel 8px's own box. Pinned to the fallback font's
-/// header.
-pub(crate) const LINE_H: u16 = ACCENT_ROWS + CAP_H + 1;
+use crate::display::text::{ACCENT_ROWS, CAP_H, LINE_H, char_cells, columns};
 
 /// A glyph: each line row's ink, the high bit its leftmost pixel.
 type Rows = [u8; LINE_H as usize];
@@ -90,7 +76,7 @@ fn tofu(n: u16) -> Rows {
     rows
 }
 
-/// `c`'s rows from the capital line down, each [`GLYPH_W`] cells of `#` (ink)
+/// `c`'s rows from the capital line down, each [`GLYPH_W`](crate::display::text::GLYPH_W) cells of `#` (ink)
 /// or `.`, separated by spaces; rows not given are blank. Lowercase stands
 /// four rows tall under a one-row ascender.
 fn hand_drawn(c: char) -> Option<&'static str> {
@@ -203,33 +189,6 @@ fn hand_drawn(c: char) -> Option<&'static str> {
     })
 }
 
-/// `text`'s width in art pixels, from its first ink column to its last.
-pub(crate) fn width(text: &str) -> ArtPx {
-    ArtPx(advance(text).0.saturating_sub(1))
-}
-
-/// Art pixels from a run's left edge to where a run `n` cells on starts.
-pub(crate) fn columns(n: u16) -> ArtPx {
-    ArtPx(n.saturating_mul(ADVANCE))
-}
-
-/// The terminal cells `c` takes: two for a wide character, none for a
-/// combining mark or a control.
-pub(crate) fn char_cells(c: char) -> u16 {
-    c.width()
-        .map_or(0, |n| u16::try_from(n).unwrap_or(u16::MAX))
-}
-
-/// The cells `text` takes, the one width every run of it is laid out by.
-pub(crate) fn cells(text: &str) -> u16 {
-    text.chars().fold(0, |n, c| n.saturating_add(char_cells(c)))
-}
-
-/// [`columns`] past all of `text`: where the run after it starts.
-pub(crate) fn advance(text: &str) -> ArtPx {
-    columns(cells(text))
-}
-
 /// Paint `text` in `ink` from its top-left `(x, y)`, clipped to the buffer.
 pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text: &str, ink: Rgb) {
     let mut left = x.0;
@@ -263,6 +222,7 @@ pub(crate) fn paint(pen: Pen, buf: &mut RgbBuffer, (x, y): (ArtPx, ArtPx), text:
 mod tests {
     use super::*;
     use crate::anim::Motion;
+    use crate::display::text::{ADVANCE, GLYPH_W, advance, cells, width};
 
     /// Every character the wall board and the floor indicator write: each
     /// mood over two flap cycles, each gateway state, many floors.
@@ -544,11 +504,5 @@ mod tests {
         assert!(fits(&wide(0b1111_0000), 1));
         assert!(fits(&wide(u8::MAX), 2));
         assert!(!fits(&wide(0b1000_0000), 0));
-    }
-
-    #[test]
-    fn a_run_is_its_advances_less_the_trailing_gap() {
-        assert_eq!(width(""), ArtPx(0));
-        assert_eq!(width("cc\u{b7}a"), ArtPx(4 * ADVANCE - 1));
     }
 }

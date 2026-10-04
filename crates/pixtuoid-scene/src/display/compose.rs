@@ -39,12 +39,12 @@ pub(crate) const PLATE_PAD: u16 = 1;
 
 /// A plate's height on the art grid: padded below only, since the line's
 /// accent rows already clear its capitals above.
-pub(crate) const PLATE_H: u16 = crate::cutaway::text::LINE_H + PLATE_PAD;
+pub(crate) const PLATE_H: u16 = crate::display::text::LINE_H + PLATE_PAD;
 
 /// A plate around `text` on the art grid, centred on column `centre`, its top
 /// at row `top`.
 fn plate_at(centre: ArtPx, top: ArtPx, text: &str) -> ArtRect {
-    let w = crate::cutaway::text::width(text)
+    let w = crate::display::text::width(text)
         .0
         .saturating_add(2 * PLATE_PAD);
     ArtRect {
@@ -88,7 +88,7 @@ pub(crate) fn indicator_plate(door: Point, floor: usize, pen: Pen) -> ArtRect {
         h: ArtPx(
             pen.art(rows.end - rows.start)
                 .0
-                .max(crate::cutaway::text::LINE_H),
+                .max(crate::display::text::LINE_H),
         ),
         ..plate_at(
             pen.art(door.x + crate::layout::ELEVATOR_W / 2),
@@ -109,15 +109,15 @@ pub(crate) fn board_runs(
     let pad = pen
         .art(CELL_ROWS)
         .0
-        .saturating_sub(crate::cutaway::text::LINE_H)
+        .saturating_sub(crate::display::text::LINE_H)
         / 2;
     let at = |col: u16, line: u16| {
         (
-            ArtPx(pen.art(NEON_PANEL_INNER_X).0 + crate::cutaway::text::columns(col).0),
+            ArtPx(pen.art(NEON_PANEL_INNER_X).0 + crate::display::text::columns(col).0),
             ArtPx(pen.art(NEON_PANEL_INNER_Y + line * CELL_ROWS).0 + pad),
         )
     };
-    let cols = |s: &crate::board::BoardSegment| crate::cutaway::text::cells(&s.text);
+    let cols = |s: &crate::board::BoardSegment| crate::display::text::cells(&s.text);
     let mut runs = vec![
         (at(0, 0), &board.brand),
         (
@@ -140,12 +140,12 @@ fn board_span(board: &crate::board::BoardModel, pen: Pen) -> Span {
     let runs = board_runs(board, pen);
     let x1 = runs
         .iter()
-        .map(|((x, _), s)| x.0 + crate::cutaway::text::width(&s.text).0)
+        .map(|((x, _), s)| x.0 + crate::display::text::width(&s.text).0)
         .max()
         .unwrap_or(0);
     let y1 = runs
         .iter()
-        .map(|((_, y), _)| y.0 + crate::cutaway::text::LINE_H)
+        .map(|((_, y), _)| y.0 + crate::display::text::LINE_H)
         .max()
         .unwrap_or(0);
     let (x0, y0) = runs.first().map_or((ArtPx(0), ArtPx(0)), |&(at, _)| at);

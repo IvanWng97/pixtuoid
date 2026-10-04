@@ -7,6 +7,7 @@ mod hover;
 mod list;
 mod order;
 pub(crate) mod pen;
+pub(crate) mod text;
 
 pub use crate::creatures::GatewayCard;
 pub use compose::{Office, Showing};
