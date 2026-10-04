@@ -240,7 +240,7 @@ pub fn load_bundled_pack() -> Result<Pack, PackError> {
 }
 
 /// Every default sprite as `(filename, source)`: every `.sprite` in
-/// `sprites/default/`, listed by `build.rs` (less, without `density-art`, the
+/// `sprites/default/`, listed by `build.rs` (less, without `cutaway-assets`, the
 /// frames only a density variant draws), so a sprite committed there cannot be
 /// left out by omission. `test_pack_with` swaps files within this EXACT set.
 fn bundled_sprite_srcs() -> Vec<(&'static str, &'static str)> {
@@ -516,7 +516,7 @@ mod tests {
             .collect()
     }
 
-    /// The web hero's pack. Nothing runs this suite without `density-art`
+    /// The web hero's pack. Nothing runs this suite without `cutaway-assets`
     /// (`just hack` only checks), so this is the one place it is loaded.
     #[test]
     fn the_pack_without_density_art_loads_whole() {
@@ -549,7 +549,7 @@ mod tests {
     /// What a default run's render scale rounds to (`RenderScale::fit`): a
     /// change to the bundled art's densest variant should be a decision.
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn the_bundled_pack_is_drawn_at_most_at_4x() {
         assert_eq!(test_default_pack().max_density_variant().get(), 4);
     }
@@ -558,7 +558,7 @@ mod tests {
     /// beside the base the classic painter draws, for a city drawn on that
     /// art's grid.
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn every_bundled_building_is_drawn_at_1x_and_4x() {
         let pack = test_default_pack();
         assert!(
