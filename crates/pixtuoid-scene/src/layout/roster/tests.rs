@@ -839,3 +839,33 @@ fn the_pantry_mat_keeps_to_the_pantrys_columns() {
     assert!(met > 0, "the census met a pantry mat");
     assert_eq!(stray, Vec::<String>::new());
 }
+
+/// A desk sorts on the row just south of its art: a walker whose feet stand
+/// there paints over it, and one whose feet are on its last row, behind it,
+/// paints under it.
+#[test]
+fn a_desk_sorts_between_a_walker_behind_it_and_one_in_front() {
+    use crate::layout::{CHARACTER_SPRITE_W, WALKING_Y_OFF};
+    use crate::sim::anchors::walking_top_left;
+    let desk_at = Point { x: 40, y: 40 };
+    let desk = desk_fixtures(&[desk_at], u16::MAX)
+        .find(|f| matches!(f.kind, FixtureKind::Desk(_)))
+        .expect("a desk");
+    let Depth::Sorted { row, tie } = desk.depth else {
+        panic!("a desk sorts: {:?}", desk.depth);
+    };
+    let desk_key = (row, Layer::from(tie));
+    let walker = |feet_y: u16| {
+        let feet = Point {
+            x: desk_at.x,
+            y: feet_y,
+        };
+        (
+            walking_top_left(feet, CHARACTER_SPRITE_W).y + WALKING_Y_OFF,
+            Layer::Figure,
+        )
+    };
+    let south = desk.visual.y + desk.visual.height;
+    assert!(walker(south) > desk_key, "in front of the desk");
+    assert!(walker(south - 1) < desk_key, "behind the desk");
+}
