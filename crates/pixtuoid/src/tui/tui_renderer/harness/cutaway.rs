@@ -503,6 +503,14 @@ fn what_the_tooltip_names_is_what_a_click_acts_on_under_the_cutaway() {
     super::hit_test::the_tooltip_names_what_a_click_acts_on(&mut r, |a| a.label.to_string());
 }
 
+/// A click on an agent focuses it and a click on the pet pets it under the
+/// cutaway too, through the mouse handler itself.
+#[test]
+fn a_click_focuses_an_agent_and_pets_the_pet_under_the_cutaway() {
+    let (mut r, _wire, _) = armed(140, 48, ImageProtocol::Kitty, vec![PetKind::Cat]);
+    super::hit_test::a_click_acts_on_what_it_hits(&mut r);
+}
+
 #[test]
 fn sixel_and_iterm2_draw_changed_tiles_and_nothing_on_an_identical_frame() {
     for (protocol, intro) in [

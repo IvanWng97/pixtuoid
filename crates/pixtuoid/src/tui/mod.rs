@@ -802,7 +802,7 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
     ui: &mut ui_state::UiState,
     renderer: &mut TuiRenderer<B>,
     scene_rx: &SceneRx,
-    focus_roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
+    focus: impl FnOnce(&pixtuoid_core::AgentSlot),
     now: SystemTime,
 ) {
     let left_down = matches!(m.kind, MouseEventKind::Down(MouseButton::Left));
@@ -844,7 +844,7 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
                     Some(SceneHit::Figure(&HoverTarget::Agent(id))) => {
                         let slot = scene_rx.borrow().agents.get(&id).cloned();
                         if let Some(slot) = slot {
-                            crate::focus::focus_slot(&slot, focus_roots);
+                            focus(&slot);
                         }
                     }
                     Some(SceneHit::Coffee) => {
@@ -1031,9 +1031,14 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             },
                         );
                     }
-                    Event::Mouse(m) => {
-                        handle_mouse_event(m, &mut ui, &mut renderer, &scene_rx, &focus_roots, now)
-                    }
+                    Event::Mouse(m) => handle_mouse_event(
+                        m,
+                        &mut ui,
+                        &mut renderer,
+                        &scene_rx,
+                        |slot| crate::focus::focus_slot(slot, &focus_roots),
+                        now,
+                    ),
                     _ => {}
                 }
                 polled = event::poll(Duration::from_millis(0))?;

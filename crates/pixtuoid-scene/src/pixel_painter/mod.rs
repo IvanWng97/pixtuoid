@@ -382,7 +382,7 @@ fn enqueue_gateway_mascots<'a>(
                 anim_name: m.anim_name,
                 frame_idx: m.frame_idx,
                 effects: &m.effects,
-                degraded: m.card.degraded,
+                degraded: m.degraded,
             },
         });
     }

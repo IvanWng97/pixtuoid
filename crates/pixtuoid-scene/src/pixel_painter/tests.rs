@@ -3262,27 +3262,20 @@ fn every_other_desk_stands_a_cabinet_starting_with_the_first() {
 }
 
 /// A mascot hovers as its gateway's instance, and its sprite greys exactly
-/// when its card says the gateway is degraded.
+/// when its gateway is degraded.
 #[test]
-fn a_mascot_hovers_as_its_instance_and_greys_as_its_card_says() {
+fn a_mascot_hovers_as_its_instance_and_greys_when_degraded() {
     let pack = crate::pack::test_default_pack();
     let def = crate::creatures::gateway_mascot_def(pixtuoid_core::source::openclaw::SOURCE_NAME)
         .expect("openclaw has a mascot");
     for degraded in [false, true] {
-        let card = crate::creatures::GatewayCard {
-            name: def.display_name,
-            instance: None,
-            busy: false,
-            degraded,
-            active_sessions: 0,
-        };
         let mascot = crate::sim::MascotPlacement {
             pos: Point { x: 60, y: 60 },
             size: Size { w: 14, h: 12 },
             anim_name: def.walk,
             frame_idx: 0,
             key: crate::creatures::openclaw_key("18789"),
-            card,
+            degraded,
             effects: Vec::new(),
         };
         let mut drawables = Vec::new();
@@ -3345,8 +3338,9 @@ fn sim_step_walks_a_mascot_in_for_each_gateway_present() {
     let [mascot] = frame.mascots.as_slice() else {
         panic!("one gateway, one mascot: {:?}", frame.mascots);
     };
-    assert_eq!(mascot.card.name, "OpenClaw");
-    assert_eq!(mascot.card.instance, None, "a lone instance needs no port");
+    let card = crate::creatures::GatewayCard::of(&scene, &mascot.key).expect("its card");
+    assert_eq!(card.name, "OpenClaw");
+    assert_eq!(card.instance, None, "a lone instance needs no port");
 }
 
 /// A mascot whose anim the pack lacks paints nothing, so it lists nothing to

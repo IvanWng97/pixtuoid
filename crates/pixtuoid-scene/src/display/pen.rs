@@ -1,11 +1,7 @@
-//! The cutaway's one grid: the art pixel.
-//!
-//! The sprites are authored at a density `d` — `d` art pixels per logical unit —
-//! and a render at scale `s` blits each art pixel `s / d` buffer pixels square.
-//! Whatever else the cutaway paints lands on that same grid, so nothing in the
-//! room is finer or coarser than the art beside it: a pixel-art frame mixes no
-//! pixel sizes. Painting through a [`Pen`] is what holds that, because it has no
-//! way to address a buffer pixel.
+//! The art pixel, the grid every look places and paints on: sprites are
+//! authored `d` art pixels per logical unit, and a render at scale `s` blits
+//! each `s / d` buffer pixels square, so a frame mixes no pixel sizes. Painting
+//! through a [`Pen`] holds that, because a pen can't address a buffer pixel.
 
 use std::num::NonZeroU16;
 

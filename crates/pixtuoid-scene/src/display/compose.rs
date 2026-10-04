@@ -272,7 +272,7 @@ fn push_creatures(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, P
             m.anim_name,
             m.frame_idx,
             Flip::None,
-            m.card.degraded,
+            m.degraded,
             &m.effects,
             m.target(),
         )

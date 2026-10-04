@@ -146,8 +146,9 @@ pub(crate) struct MascotPlacement {
     pub(crate) frame_idx: usize,
     /// Which gateway instance it is.
     pub(crate) key: DaemonInstanceKey,
-    /// What it says about its gateway.
-    pub(crate) card: GatewayCard,
+    /// Its gateway's backend fails every run ([`GatewayCard::degraded`]), so
+    /// it greys.
+    pub(crate) degraded: bool,
     /// What rides on it this tick: a bubble per run in flight.
     pub(crate) effects: Vec<Effect>,
 }
@@ -528,7 +529,7 @@ fn mascot_placements(
         .filter_map(|(source, instance, presence)| {
             let def = gateway_mascot_def(source)?;
             let key = DaemonInstanceKey::new(source, instance.clone());
-            let card = GatewayCard::of(scene, &key)?;
+            let degraded = GatewayCard::of(scene, &key)?.degraded;
             let seed = mascot_seed(source, instance);
             let (pos, anim_name) =
                 mascot_position(layout, presence, def.walk, def.rest, timing, seed)?;
@@ -544,7 +545,7 @@ fn mascot_placements(
                 anim_name,
                 frame_idx,
                 key,
-                card,
+                degraded,
                 effects: if runs > 0 {
                     effects::mascot_bubbles(pos, size.h, runs, beat).collect()
                 } else {
