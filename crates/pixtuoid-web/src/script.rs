@@ -15,6 +15,7 @@ use pixtuoid_core::source::{
 };
 use pixtuoid_core::{AgentEvent, AgentId, ToolDetail, Transport};
 
+#[derive(Debug)]
 pub(crate) struct Beat {
     pub at_ms: u64,
     pub transport: Transport,
@@ -172,6 +173,7 @@ pub(crate) fn hire_beats(id: AgentId, session: String) -> Vec<(u64, AgentEvent)>
 /// deliberately NOT a [`Beat`]/`AgentEvent` (invariant #2: the one event
 /// channel is `AgentId`-pure) — these ride their own lane and land through the
 /// REAL `source::daemon::apply_presence` state machine.
+#[derive(Debug)]
 pub(crate) struct PresenceBeat {
     pub at_ms: u64,
     pub update: DaemonPresenceUpdate,

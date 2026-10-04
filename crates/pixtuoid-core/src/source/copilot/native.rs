@@ -23,6 +23,7 @@ fn copilot_session_ended(tail: &[u8]) -> bool {
 }
 
 /// Source that watches the Copilot session-state directory.
+#[derive(Debug)]
 pub struct CopilotSource {
     /// The watched Copilot `session-state` root; each session's `events.jsonl` lives under it.
     pub sessions_root: PathBuf,

@@ -45,7 +45,7 @@ pub struct Place {
 }
 
 /// One floor's frame, beyond its stores.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct RenderInputs<'a> {
     /// The floor it shows.
     pub world: FloorInputs<'a>,
@@ -60,6 +60,7 @@ pub struct RenderInputs<'a> {
 }
 
 /// One frame from [`render`].
+#[derive(Debug)]
 pub struct Rendered<'r> {
     /// The whole frame.
     pub pixels: &'r RgbBuffer,
@@ -72,7 +73,7 @@ pub struct Rendered<'r> {
 }
 
 /// The office's raster state, shared by every floor: the cutaway's art.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct OfficeRaster {
     cutaway: crate::cutaway::paint::CutawayCache,
 }
@@ -87,6 +88,7 @@ impl OfficeRaster {
 /// One floor's raster state, for every look it has been drawn in: each look's
 /// is built the first time it draws and kept, so a look that switches back and
 /// forth never rebuilds it.
+#[derive(Debug)]
 pub struct Raster {
     // The pack the cutaway draws; the sim's (`FloorInputs::pack`) must be it.
     pack: Arc<Pack>,
@@ -96,6 +98,7 @@ pub struct Raster {
     shown: Option<Look>,
 }
 
+#[derive(Debug)]
 struct Classic {
     buf: RgbBuffer,
     caches: ClassicCaches,
@@ -107,6 +110,7 @@ struct Classic {
 
 /// What the last classic frame drew besides its pixels, for a painter that
 /// sets the classic's text and hit-tests it itself.
+#[derive(Debug)]
 pub struct ClassicDrawn<'a> {
     /// The frame, for a painter's own wash over it (a modal's dim).
     pub pixels: &'a mut RgbBuffer,
