@@ -1,15 +1,12 @@
 //! The sky as a MODEL: the weather, the sun and the moon, lightning timing, and
 //! the light they let into the office.
 //!
-//! Painters read it through one [`Sky`] sampled per frame, so no two of them can
+//! Painters read it through one `Sky` sampled per frame, so no two of them can
 //! disagree about the hour, the weather or whether lightning is striking.
 //! Nothing here knows a theme or a pixel.
 
 use std::time::{Duration, SystemTime};
 
-use pixtuoid_core::sprite::Rgb;
-
-#[cfg(test)]
 use crate::anim::Motion;
 
 #[cfg(test)]
@@ -65,6 +62,14 @@ impl Weather {
         }
     }
 
+    /// Whether something falls: rain or snow.
+    pub(crate) const fn falls(self) -> bool {
+        matches!(
+            self,
+            Weather::Rain | Weather::Storm | Weather::Windy | Weather::Snow
+        )
+    }
+
     /// Parse a CLI name (case-insensitive) back to a variant.
     pub(crate) fn from_name(s: &str) -> Option<Weather> {
         let s = s.trim().to_ascii_lowercase();
@@ -76,8 +81,8 @@ impl Weather {
 /// rendered side by side each show their own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WeatherPolicy {
-    /// The clock's pick, one per `WEATHER_CYCLE_SECS` slot, each slot's last
-    /// `TRANSITION_SECS` stepping into the next one's.
+    /// The clock's pick, one per `WEATHER_CYCLE_MS` slot, each slot's last
+    /// `TRANSITION_MS` easing into the next one's.
     #[default]
     Clock,
     /// This weather, whatever the clock, never mixed.
@@ -86,14 +91,14 @@ pub enum WeatherPolicy {
 
 impl WeatherPolicy {
     /// The policy a CLI or page names: one of
-    /// [`weather_names`](crate::pixel_painter::weather_names), case-insensitive,
+    /// [`weather_names`], case-insensitive,
     /// or `None` for the clock. `Err` carries the valid names.
     pub fn from_name(name: Option<&str>) -> Result<Self, Vec<&'static str>> {
         match name {
             None => Ok(Self::Clock),
             Some(s) => Weather::from_name(s)
                 .map(Self::Forced)
-                .ok_or_else(crate::pixel_painter::weather_names),
+                .ok_or_else(weather_names),
         }
     }
 
@@ -104,28 +109,126 @@ impl WeatherPolicy {
             Self::Forced(w) => WeatherMix::pure(w),
         }
     }
+    /// [`weather_at`](Self::weather_at) `ms` after the Unix epoch.
+    pub(crate) fn weather_at_ms(self, ms: u64) -> WeatherMix {
+        self.weather_at(SystemTime::UNIX_EPOCH + Duration::from_millis(ms))
+    }
 }
 
 /// How long one weather holds before the next slot picks again.
-const WEATHER_CYCLE_SECS: u64 = 600;
+pub(crate) const WEATHER_CYCLE_MS: u64 = 600_000;
 /// How much of a slot's end the next slot's weather takes to come in, so every
 /// slot opens on its own weather, pure.
-const TRANSITION_SECS: u64 = 120;
-/// The steps a transition comes in by, held equally long: the look moves on a
-/// ramp, never smoothly, which also keeps each step one repaint.
-pub(crate) const TRANSITION_STEPS: u64 = 8;
-const _: () = assert!(
-    TRANSITION_SECS.is_multiple_of(TRANSITION_STEPS) && TRANSITION_SECS < WEATHER_CYCLE_SECS
-);
+pub(crate) const TRANSITION_MS: u64 = 120_000;
+const _: () = assert!(TRANSITION_MS < WEATHER_CYCLE_MS);
+
+/// What a transition moves, each across its own [`Stage`] of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Element {
+    Cloud,
+    /// What falls.
+    Precipitation,
+    /// Whether a storm's strikes fire.
+    Lightning,
+}
+
+impl Element {
+    #[cfg(test)]
+    pub(crate) const ALL: [Element; 3] =
+        [Element::Cloud, Element::Precipitation, Element::Lightning];
+}
+
+/// How a transition changes what falls, which orders its elements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Course {
+    /// From a dry sky into precipitation.
+    Wetting,
+    /// From other precipitation into a storm.
+    Storming,
+    /// Neither: dry to dry, or one precipitation to another.
+    Shifting,
+}
+
+impl Course {
+    /// The course `from → to` runs, and whether it runs it backward (drying,
+    /// calming).
+    fn of(from: Weather, to: Weather) -> (Course, bool) {
+        match (from.falls(), to.falls()) {
+            (false, true) => (Course::Wetting, false),
+            (true, false) => (Course::Wetting, true),
+            _ if to == Weather::Storm => (Course::Storming, false),
+            _ if from == Weather::Storm => (Course::Storming, true),
+            _ => (Course::Shifting, false),
+        }
+    }
+
+    /// Its [`Stages`], run forward.
+    fn stages(self) -> &'static Stages {
+        match self {
+            Course::Wetting => &WETTING,
+            Course::Storming => &STORMING,
+            Course::Shifting => &SHIFTING,
+        }
+    }
+}
+
+/// How far from either end of a transition precipitation settles, as a share
+/// of it: a fall landing in the next slot shows by that slot's weather, so one
+/// no longer than this began under it too.
+const FALL_SETTLE: f32 = 0.1;
+/// How far from either end of a transition lightning settles, as a share of it.
+const LIGHTNING_SETTLE: f32 = 0.1;
+
+/// A `(start, end)` span of a transition, as shares of it.
+type Stage = (f32, f32);
+
+/// One [`Course`]'s [`Stage`] per [`Element`].
+struct Stages {
+    cloud: Stage,
+    precipitation: Stage,
+    lightning: Stage,
+}
+
+impl Stages {
+    fn of(&self, element: Element) -> Stage {
+        match element {
+            Element::Cloud => self.cloud,
+            Element::Precipitation => self.precipitation,
+            Element::Lightning => self.lightning,
+        }
+    }
+}
+
+/// The cloud gathers, then the rain falls, a storm's lightning last.
+const WETTING: Stages = Stages {
+    cloud: (0.0, 0.5),
+    precipitation: (0.5, 1.0 - FALL_SETTLE),
+    lightning: (0.7, 1.0 - LIGHTNING_SETTLE),
+};
+
+/// The rain heavies, then the lightning starts.
+const STORMING: Stages = Stages {
+    cloud: (0.0, 1.0),
+    precipitation: (FALL_SETTLE, 0.5),
+    lightning: (0.5, 1.0 - LIGHTNING_SETTLE),
+};
+
+/// Everything together.
+const SHIFTING: Stages = Stages {
+    cloud: (0.0, 1.0),
+    precipitation: (FALL_SETTLE, 1.0 - FALL_SETTLE),
+    lightning: (LIGHTNING_SETTLE, 1.0 - LIGHTNING_SETTLE),
+};
 
 /// The weather a frame shows: one weather, or, mid-transition, the next
-/// slot's coming in over it. Every parameter the painters read is each
-/// weather's preset, lerped by its [`share`](Self::share).
+/// slot's coming in over it, each [`Element`] eased across its own [`Stage`]
+/// by [`Easing::Smoothstep`](crate::anim::Easing::Smoothstep).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct WeatherMix {
     from: Weather,
     to: Weather,
-    /// How far `to` has come in, `0..1`; 0 when `from == to`.
+    /// How far through the transition, `0..1`, linear in time; 0 when
+    /// `from == to`.
     progress: f32,
 }
 
@@ -138,64 +241,83 @@ impl WeatherMix {
         }
     }
 
-    /// `from` giving way to `to`, `step` of [`TRANSITION_STEPS`] in: each step
-    /// an equal share, the one after the last landing on `to` alone.
-    pub(crate) fn stepped(from: Weather, to: Weather, step: u64) -> Self {
+    /// `from` giving way to `to`, `progress` of the way through the transition.
+    pub(crate) fn toward(from: Weather, to: Weather, progress: f32) -> Self {
         if from == to {
             return Self::pure(from);
         }
-        Self {
-            from,
-            to,
-            progress: step as f32 / (TRANSITION_STEPS + 1) as f32,
-        }
+        Self { from, to, progress }
     }
 
-    /// Each weather the frame shows, with its share of it; the shares sum to 1.
-    pub(crate) fn parts(self) -> impl Iterator<Item = (Weather, f32)> {
-        [(self.from, 1.0 - self.progress), (self.to, self.progress)]
+    /// The weather going and the weather coming; one weather twice when pure.
+    pub(crate) fn ends(self) -> [Weather; 2] {
+        [self.from, self.to]
+    }
+
+    /// Whether one weather holds, none coming in.
+    pub(crate) fn is_pure(self) -> bool {
+        self.from == self.to
+    }
+
+    /// `element`'s share of the incoming weather, `0..=1`.
+    pub(crate) fn incoming(self, element: Element) -> f32 {
+        if self.is_pure() {
+            return 0.0;
+        }
+        let (course, backward) = Course::of(self.from, self.to);
+        let (start, end) = course.stages().of(element);
+        // Run backward, a stage mirrors, so rain stops before the sky clears
+        // and lightning before the rain eases.
+        let (start, end) = if backward {
+            (1.0 - end, 1.0 - start)
+        } else {
+            (start, end)
+        };
+        crate::anim::Easing::Smoothstep.apply((self.progress - start) / (end - start))
+    }
+
+    /// Each weather the frame shows in `element`, with its share; the shares
+    /// sum to 1.
+    pub(crate) fn parts(self, element: Element) -> impl Iterator<Item = (Weather, f32)> {
+        let incoming = self.incoming(element);
+        [(self.from, 1.0 - incoming), (self.to, incoming)]
             .into_iter()
             .filter(|&(_, share)| share > 0.0)
     }
 
-    /// How much of the frame `w` is, `0..=1`.
-    pub(crate) fn share(self, w: Weather) -> f32 {
-        self.parts()
+    /// How much of `element` is `w`'s, `0..=1`.
+    pub(crate) fn share(self, element: Element, w: Weather) -> f32 {
+        self.parts(element)
             .filter(|&(part, _)| part == w)
             .map(|(_, share)| share)
             .sum()
     }
 
-    /// A per-weather preset value, lerped by share: a pure weather's exactly.
-    pub(crate) fn lerp(self, preset: impl Fn(Weather) -> f32) -> f32 {
-        self.parts().map(|(w, share)| preset(w) * share).sum()
-    }
-
-    /// A per-weather preset colour, mixed by share: a pure weather's exactly.
-    pub(crate) fn mix(self, preset: impl Fn(Weather) -> Rgb) -> Rgb {
-        if self.from == self.to {
-            return preset(self.from);
-        }
-        preset(self.from).mix(preset(self.to), self.progress)
+    /// A per-weather preset value, lerped by `element`'s shares: a pure
+    /// weather's exactly.
+    pub(crate) fn lerp(self, element: Element, preset: impl Fn(Weather) -> f32) -> f32 {
+        self.parts(element)
+            .map(|(w, share)| preset(w) * share)
+            .sum()
     }
 }
 
 /// The clock's weather at `now`: its slot's pick, with the next slot's coming
-/// in over the slot's last [`TRANSITION_SECS`].
+/// in over the slot's last [`TRANSITION_MS`].
 fn clock_weather(now: SystemTime) -> WeatherMix {
-    let secs = crate::anim::epoch_ms(now) / 1000;
-    let (slot, into) = (secs / WEATHER_CYCLE_SECS, secs % WEATHER_CYCLE_SECS);
-    match into.checked_sub(WEATHER_CYCLE_SECS - TRANSITION_SECS) {
+    let ms = crate::anim::epoch_ms(now);
+    let (slot, into) = (ms / WEATHER_CYCLE_MS, ms % WEATHER_CYCLE_MS);
+    match into.checked_sub(WEATHER_CYCLE_MS - TRANSITION_MS) {
         None => WeatherMix::pure(slot_weather(slot)),
-        Some(since) => WeatherMix::stepped(
+        Some(since) => WeatherMix::toward(
             slot_weather(slot),
             slot_weather(slot + 1),
-            since * TRANSITION_STEPS / TRANSITION_SECS + 1,
+            since as f32 / TRANSITION_MS as f32,
         ),
     }
 }
 
-/// The weather [`WEATHER_CYCLE_SECS`] slot `slot` picks: one hashed draw.
+/// The weather [`WEATHER_CYCLE_MS`] slot `slot` picks: one hashed draw.
 fn slot_weather(slot: u64) -> Weather {
     match crate::splitmix_draw(slot, 1) % 15 {
         0..=5 => Weather::Clear,
@@ -341,8 +463,25 @@ fn arc_progress(h: f32, rise: f32, set: f32) -> f32 {
 /// Whether the sky shows the SUN (not the moon) at hour-of-day `h` (0..24) — the
 /// ONE definition of the day/night boundary, so the sky body and any external
 /// consumer can't drift from a second hardcoded copy.
-pub(crate) fn hour_is_day(h: f32) -> bool {
+pub fn hour_is_day(h: f32) -> bool {
     (SUN_RISE_H..SUN_SET_H).contains(&h)
+}
+
+/// Day/night at `now` on the LOCAL clock: the native painters' feed for the
+/// audio track selector (wasm passes its own hour to [`hour_is_day`]).
+pub(crate) fn is_day_at(now: SystemTime) -> bool {
+    hour_is_day(local_hour_frac(now))
+}
+
+/// The weather names [`WeatherPolicy::from_name`] accepts, canonical order.
+pub fn weather_names() -> Vec<&'static str> {
+    Weather::ALL.iter().map(|w| w.name()).collect()
+}
+
+/// How hard it is raining at `now` under `policy` (0.0 dry … 1.0 storm; snow
+/// and fog are 0.0): the audio model's weather feed.
+pub(crate) fn rain_at(now: SystemTime, policy: WeatherPolicy) -> f32 {
+    Sky::at(crate::anim::Motion::Full.timing(now), policy).rain()
 }
 
 /// What a wall clock reads at `now`, local time.
@@ -467,43 +606,52 @@ fn moon_phase_at(now: SystemTime) -> f32 {
 /// Lightning cadence: one strike per bucket this long, at a hashed offset
 /// ([`strike_offset`]) — a much faster cadence reads as a hyperactive storm.
 const LIGHTNING_PERIOD_MS: u64 = 15000;
-// Every change of weather, a transition's step or a slot's start, falls on a
-// bucket's start, which no strike runs across: a strike lights under the
-// weather it started in.
-const _: () =
-    assert!((TRANSITION_SECS / TRANSITION_STEPS * 1000).is_multiple_of(LIGHTNING_PERIOD_MS));
-/// The shortest a flash's phase may last: each of [`LIGHTNING_PHASES`] holds
-/// this long, the photosensitive-safe bound, and a whole Full beat so none is
-/// skipped.
-const MIN_FLASH_PHASE_MS: u64 = crate::anim::FULL_TICK_MS;
-/// A strike's levels in order, each held [`MIN_FLASH_PHASE_MS`]: the primary
+// A slot's start is a bucket's start on every moving tier's loop clock, so no
+// strike runs into the next slot's weather.
+const _: () = {
+    let mut i = 0;
+    while i < Motion::ALL.len() {
+        if let Some(pace) = Motion::ALL[i].pace() {
+            assert!(WEATHER_CYCLE_MS.is_multiple_of(crate::anim::FULL_TICK_MS * pace));
+            assert!((WEATHER_CYCLE_MS / pace).is_multiple_of(LIGHTNING_PERIOD_MS));
+        }
+        i += 1;
+    }
+};
+/// How long each of [`STRIKE_LEVELS`] holds: a whole Full beat, so the beat
+/// neither skips one nor stretches it.
+const STRIKE_PHASE_MS: u64 = crate::anim::FULL_TICK_MS;
+const _: () = assert!(
+    STRIKE_PHASE_MS >= crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS
+        && STRIKE_GAP_MS >= crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS
+);
+/// A strike's levels in order, each held [`STRIKE_PHASE_MS`]: the primary
 /// strike, a brief dim, an after-flash, so it reads as a flicker rather than a
 /// single blink.
-const LIGHTNING_PHASES: [f32; 3] = [1.0, 0.15, 0.55];
+const STRIKE_LEVELS: [f32; 3] = [1.0, 0.15, 0.55];
 /// How long one strike's [`lightning_envelope`] window lasts.
-const LIGHTNING_FLASH_MS: u64 = LIGHTNING_PHASES.len() as u64 * MIN_FLASH_PHASE_MS;
+const STRIKE_MS: u64 = STRIKE_LEVELS.len() as u64 * STRIKE_PHASE_MS;
 /// The least dark time between one strike's end and the next's start, so two
 /// strikes never put more than three flashes in a second.
-const FLASH_SEPARATION_MS: u64 = 1000;
+const STRIKE_GAP_MS: u64 = 1000;
 
 /// Intensity envelope (0..1) of a lightning flash given ms since the strike
-/// began: its [`LIGHTNING_PHASES`] in turn, then 0.
+/// began: its [`STRIKE_LEVELS`] in turn, then 0.
 fn lightning_envelope(since_strike_ms: u64) -> f32 {
-    usize::try_from(since_strike_ms / MIN_FLASH_PHASE_MS)
+    usize::try_from(since_strike_ms / STRIKE_PHASE_MS)
         .ok()
-        .and_then(|i| LIGHTNING_PHASES.get(i).copied())
+        .and_then(|i| STRIKE_LEVELS.get(i).copied())
         .unwrap_or(0.0)
 }
 
 /// Per-bucket strike offset (ms into the bucket) so strikes don't fire on a
 /// fixed metronome. Each `LIGHTNING_PERIOD_MS`-long bucket hashes to its own
-/// offset, leaving the flash and [`FLASH_SEPARATION_MS`] after it inside the
+/// offset, leaving the flash and [`STRIKE_GAP_MS`] after it inside the
 /// bucket, so the next bucket's strike is never too close. It lands on a
 /// phase boundary, so each phase holds whole beats.
 fn strike_offset(bucket: u64) -> u64 {
-    let off = crate::splitmix_draw(bucket, 1)
-        % (LIGHTNING_PERIOD_MS - LIGHTNING_FLASH_MS - FLASH_SEPARATION_MS);
-    off / MIN_FLASH_PHASE_MS * MIN_FLASH_PHASE_MS
+    let off = crate::splitmix_draw(bucket, 1) % (LIGHTNING_PERIOD_MS - STRIKE_MS - STRIKE_GAP_MS);
+    off / STRIKE_PHASE_MS * STRIKE_PHASE_MS
 }
 
 /// Whether `bucket`'s strike fires under a sky `storm` of storm, `0..=1`: a
@@ -525,14 +673,16 @@ fn flash_level_at(beat: crate::anim::Beat, policy: WeatherPolicy) -> f32 {
     let strike_ms = bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket);
     let Some(since) = elapsed_ms
         .checked_sub(strike_ms)
-        .filter(|&since| since < LIGHTNING_FLASH_MS)
+        .filter(|&since| since < STRIKE_MS)
     else {
         return 0.0;
     };
-    // The storm's share at the strike's start: a ramp step mid-strike would
-    // otherwise cut its phases short of `MIN_FLASH_PHASE_MS`.
-    let at_strike = std::time::UNIX_EPOCH + Duration::from_millis(beat.wall_ms(strike_ms));
-    if strikes(bucket, policy.weather_at(at_strike).share(Weather::Storm)) {
+    // The storm's share at the strike's start: the share moving mid-strike
+    // would otherwise cut its phases short of `STRIKE_PHASE_MS`.
+    let storm = policy
+        .weather_at_ms(beat.wall_ms(strike_ms))
+        .share(Element::Lightning, Weather::Storm);
+    if strikes(bucket, storm) {
         lightning_envelope(since)
     } else {
         0.0
@@ -552,6 +702,7 @@ pub(crate) struct InteriorLight {
 /// The sky at one instant, sampled once per frame.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Sky {
+    policy: WeatherPolicy,
     weather: WeatherMix,
     body: SkyBody,
     moon_phase: f32,
@@ -561,18 +712,19 @@ pub(crate) struct Sky {
 }
 
 impl Sky {
-    pub(crate) fn at(timing: crate::anim::Timing, weather: WeatherPolicy) -> Self {
+    pub(crate) fn at(timing: crate::anim::Timing, policy: WeatherPolicy) -> Self {
         let now = timing.now;
         let (moon_phase, moon_age) = (moon_phase_at(now), moon_age_at(now));
         let h = local_hour_frac(now);
         let nightfall = nightfall(h);
         Self {
-            weather: weather.weather_at(now),
+            policy,
+            weather: policy.weather_at(now),
             body: body_at(h, nightfall, moon_phase, moon_age),
             moon_phase,
             moon_waxing: moon_age < SYNODIC_DAYS / 2.0,
             nightfall,
-            flash: flash_level_at(timing.beat, weather),
+            flash: flash_level_at(timing.beat, policy),
         }
     }
 
@@ -596,7 +748,9 @@ impl Sky {
     }
 
     /// This sky under `weather` — a painter test's transition without the
-    /// clock arithmetic that places one.
+    /// clock arithmetic that places one. Its [`policy`](Self::policy) stays
+    /// as it was, so a `GlassWeather` built from it on a moving beat follows
+    /// the policy, not `weather`.
     #[cfg(test)]
     pub(crate) fn with_weather(self, weather: WeatherMix) -> Self {
         Self { weather, ..self }
@@ -606,12 +760,19 @@ impl Sky {
         self.weather
     }
 
+    /// The policy this sky was sampled under: the weather at any other instant.
+    pub(crate) fn policy(&self) -> WeatherPolicy {
+        self.policy
+    }
+
     pub(crate) fn body(&self) -> &SkyBody {
         &self.body
     }
 
     pub(crate) fn transmission(&self) -> Transmission {
-        let channel = |of: fn(Transmission) -> f32| self.weather.lerp(|w| of(transmission(w)));
+        let channel = |of: fn(Transmission) -> f32| {
+            self.weather.lerp(Element::Cloud, |w| of(transmission(w)))
+        };
         Transmission {
             direct: channel(|t| t.direct),
             diffuse: channel(|t| t.diffuse),
@@ -635,14 +796,14 @@ impl Sky {
         self.nightfall
     }
 
-    /// [`flash_level_at`] at this instant: zero except under a storm.
+    /// [`flash_level_at`] at this instant.
     pub(crate) fn flash(&self) -> f32 {
         self.flash
     }
 
     /// [`rain_level`] under this sky's weather.
-    pub(crate) fn precipitation(&self) -> f32 {
-        self.weather.lerp(rain_level)
+    pub(crate) fn rain(&self) -> f32 {
+        self.weather.lerp(Element::Precipitation, rain_level)
     }
 
     pub(crate) fn light(&self) -> InteriorLight {
@@ -656,7 +817,7 @@ impl Sky {
             BodyKind::Moon => 0.0,
         };
         let interior = (body.lum * (direct * K_BEAM + through.diffuse * K_FILL)).clamp(0.0, 1.0);
-        let night_min = self.weather.lerp(city_bounce) * self.nightfall;
+        let night_min = self.weather.lerp(Element::Cloud, city_bounce) * self.nightfall;
         InteriorLight {
             interior,
             exterior: (interior + night_min).min(1.0),

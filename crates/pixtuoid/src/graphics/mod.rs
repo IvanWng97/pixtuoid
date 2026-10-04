@@ -22,14 +22,14 @@ use ratatui::layout::Size as TermSize;
 pub(crate) mod iterm2;
 #[cfg(feature = "graphics")]
 pub(crate) mod kitty;
-#[cfg(feature = "graphics")]
+#[cfg(all(feature = "graphics", unix))]
 mod probe;
 #[cfg(feature = "graphics")]
 pub(crate) mod sixel;
 #[cfg(feature = "graphics")]
 pub(crate) mod tiles;
 
-#[cfg(feature = "graphics")]
+#[cfg(all(feature = "graphics", unix))]
 pub(crate) use probe::probe;
 
 /// A tile's extent in cells; [`ImageProtocol::tile`] is the authority.
@@ -41,19 +41,16 @@ pub(crate) struct TileShape {
     pub(crate) rows: u16,
 }
 
-/// How long each wait of the capability probe may take: on Unix, the query start
-/// to finish, where [`probe()`] reads the reply itself, and, inside tmux, the
-/// `allow-passthrough` read before it; on Windows, each read of the reply, since
-/// the upstream probe restarts the clock on every one (ratatui-image 11.0.8
-/// `picker.rs:615`).
+/// How long each wait of the capability probe may take: the query start to
+/// finish, and, inside tmux, the `allow-passthrough` read before it.
 ///
-/// The query ends with a device-status request (ratatui-image 11.0.8
-/// `cap_parser.rs:132-134`), so a terminal that answers ends the wait the
+/// The query ends with a device-status request (ratatui-image 11.1.0
+/// `cap_parser.rs:157-159`), so a terminal that answers ends the wait the
 /// moment its reply is complete; the budget is only spent where no reply comes
-/// (a ConPTY that drops replies, a hidden tmux pane refusing passthrough), which
-/// is why it can outlast [`crate::term::TRUECOLOR_PROBE_TIMEOUT`], whose query
-/// has no such terminator.
-#[cfg(feature = "graphics")]
+/// (a hidden tmux pane refusing passthrough), which is why it can outlast
+/// [`crate::term::TRUECOLOR_PROBE_TIMEOUT`], whose query has no such
+/// terminator.
+#[cfg(all(feature = "graphics", unix))]
 pub(crate) const GRAPHICS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// A graphics protocol the terminal speaks and the cutaway can be handed over.
@@ -103,6 +100,21 @@ pub(crate) struct CellSize {
     pub(crate) w: u16,
     /// Cell height in pixels.
     pub(crate) h: u16,
+}
+
+impl CellSize {
+    /// The cell of a `window`, `None` where it reports no pixels.
+    #[cfg(feature = "graphics")]
+    pub(crate) fn of_window(window: ratatui::backend::WindowSize) -> Option<Self> {
+        let (cells, px) = (window.columns_rows, window.pixels);
+        if cells.width == 0 || cells.height == 0 || px.width == 0 || px.height == 0 {
+            return None;
+        }
+        Some(Self {
+            w: px.width / cells.width,
+            h: px.height / cells.height,
+        })
+    }
 }
 
 /// What the user asked for: `--graphics`, else the `graphics` config key.
@@ -156,15 +168,13 @@ impl GraphicsMode {
 pub(crate) enum ClassicReason {
     /// `--graphics off`.
     Disabled,
-    /// This build has no `graphics` feature, so there is no query to run.
+    /// This build has no query to run ([`probe()`]).
     Unsupported,
     /// The terminal was never asked.
     NotQueried,
     /// The terminal was asked and its reply never completed.
     NoAnswer,
-    /// The terminal answered, and it has no graphics protocol — or, off Unix,
-    /// never answered: upstream's probe there folds a silence into no protocol
-    /// (see [`probe()`]).
+    /// The terminal answered, and it has no graphics protocol.
     NoProtocol,
     /// Inside tmux with `allow-passthrough` off: no image, and no query for
     /// one, reaches the terminal (tmux(1), `allow-passthrough`).
@@ -180,11 +190,7 @@ pub(crate) enum ClassicReason {
     /// without it. kitty's Unicode placeholders are ordinary cells tmux stores
     /// and redraws.
     TmuxNeedsKitty(ImageProtocol),
-    /// The terminal has a protocol, but its cell is too small for any scale the
-    /// pack's art lands on: a cell whose natural scale lies further than
-    /// [`RenderScale::fit`]'s bound from every multiple of the pack's densest
-    /// art, or a 1-px cell, where one pixel per logical unit IS the classic
-    /// density.
+    /// The terminal has a protocol, but its cell has no [`Fit`].
     CellTooSmall {
         /// The cell the terminal reported.
         cell: CellSize,
@@ -226,8 +232,7 @@ fn env_text(name: &str) -> Option<String> {
     pixtuoid_core::platform::text_env(name).filter(|v| !v.trim().is_empty())
 }
 
-/// A marker variable, presence only: [`path_env`](pixtuoid_core::platform::path_env)'s
-/// rule, so a non-UTF-8 value (`$TMUX` holds a path) is set and a blank one is not.
+/// A marker variable, presence only, by [`path_env`](pixtuoid_core::platform::path_env)'s rule.
 fn env_set(name: &str) -> bool {
     pixtuoid_core::platform::path_env(name).is_some()
 }
@@ -254,18 +259,18 @@ impl TermEnv {
         }
     }
 
-    /// Upstream's test before wrapping every image in passthrough
-    /// (ratatui-image 11.0.8 `picker.rs:320-326`), on every platform.
-    fn tmux_term(&self) -> bool {
-        self.term.as_deref().is_some_and(|t| t.starts_with("tmux"))
+    /// Inside tmux: a tmux client (`$TMUX`), or the `TERM`/`TERM_PROGRAM` test
+    /// upstream wraps every image on (ratatui-image 11.1.0
+    /// `picker.rs:341-347`, which a tmux `TERM` carried over ssh also passes).
+    fn tmux(&self) -> bool {
+        self.tmux_client
+            || self.term.as_deref().is_some_and(|t| t.starts_with("tmux"))
             || self.term_program.as_deref() == Some("tmux")
     }
 
-    /// A tmux client, or a tmux terminal name carried over ssh: either way tmux
-    /// redraws every repaint.
     fn link(&self) -> Link {
         Link {
-            tmux: self.tmux_client || self.tmux_term(),
+            tmux: self.tmux(),
             ssh: self.ssh,
         }
     }
@@ -329,16 +334,15 @@ pub(crate) enum Probe {
     /// environment alone where the reply never completed but the environment
     /// names a protocol, as upstream falls back (see [`probe()`]).
     #[cfg_attr(
-        all(not(feature = "graphics"), not(test)),
-        expect(dead_code, reason = "only the graphics probe returns it")
+        all(not(all(feature = "graphics", unix)), not(test)),
+        expect(dead_code, reason = "only the Unix graphics probe returns it")
     )]
     Answered(Detected),
     /// The terminal was never asked: the caller said not to, or no controlling
     /// terminal took the query.
     NotQueried,
     /// The terminal was asked, its reply never completed, and the environment
-    /// names no protocol to fall back on. Only the Unix probe can tell (see
-    /// [`probe()`]).
+    /// names no protocol to fall back on.
     #[cfg_attr(
         all(not(all(feature = "graphics", unix)), not(test)),
         expect(dead_code, reason = "only the Unix graphics probe returns it")
@@ -350,8 +354,7 @@ pub(crate) enum Probe {
         expect(dead_code, reason = "only the Unix graphics probe returns it")
     )]
     TmuxPassthroughOff,
-    /// This build cannot ask: it has no `graphics` feature, or, for `run`, no
-    /// cancellable probe (see [`run_probe`]).
+    /// This build cannot ask ([`probe()`]).
     #[cfg_attr(
         all(feature = "graphics", unix, not(test)),
         expect(
@@ -396,10 +399,13 @@ impl Fit {
     /// fitted to `max_density` (the pack's
     /// [`max_density_variant`](pixtuoid_core::sprite::format::Pack::max_density_variant)),
     /// over an image `area` cells big. `None` when no multiple of it lies within
-    /// the fit's bound.
+    /// the fit's bound, or the scale is 1.
     pub(crate) fn new(cell: CellSize, area: TermSize, max_density: Density) -> Option<Self> {
         let fit = Self {
-            scale: RenderScale::fit(raw_scale_for_cell(cell), max_density)?,
+            // Scale 1 IS the classic density: an encode per frame that draws
+            // the identical picture.
+            scale: RenderScale::fit(raw_scale_for_cell(cell), max_density)
+                .filter(|scale| scale.get() > 1)?,
             density: max_density,
             render: RenderScale::new(max_density.get())?,
             logical: Size { w: 0, h: 0 },
@@ -481,11 +487,8 @@ pub(crate) fn resolve(
     };
     // The cell before tmux: a user told to switch to kitty should not then
     // find the cell was too small all along.
-    let fit = match Fit::new(cell, area, max_density) {
-        // Scale 1 IS the classic density: an encode per frame that draws the
-        // identical picture.
-        Some(fit) if fit.scale().get() > 1 => fit,
-        _ => return classic(ClassicReason::CellTooSmall { cell, max_density }),
+    let Some(fit) = Fit::new(cell, area, max_density) else {
+        return classic(ClassicReason::CellTooSmall { cell, max_density });
     };
     if d.tmux && protocol != ImageProtocol::Kitty {
         return classic(ClassicReason::TmuxNeedsKitty(protocol));
@@ -504,18 +507,17 @@ impl ClassicReason {
     pub(crate) fn describe(self) -> String {
         match self {
             Self::Disabled => "disabled by --graphics off".to_string(),
-            Self::Unsupported => "this build has no terminal-graphics support".to_string(),
+            Self::Unsupported => "this build cannot ask the terminal for graphics (not on Unix, \
+                 or built without `graphics`)"
+                .to_string(),
             Self::NotQueried => "the terminal was not asked (stdout is not a terminal, there \
                  is no controlling terminal, or $TERM is dumb) — run in an interactive \
                  terminal to see what it supports"
                 .to_string(),
             Self::NoAnswer => "the terminal did not answer the capability query".to_string(),
-            Self::NoProtocol if cfg!(unix) => {
+            Self::NoProtocol => {
                 "terminal reports no graphics protocol (kitty/iterm2/sixel)".to_string()
             }
-            Self::NoProtocol => "terminal reports no graphics protocol (kitty/iterm2/sixel), \
-                 or did not answer the capability query"
-                .to_string(),
             Self::TmuxPassthroughOff => "inside tmux with allow-passthrough off — \
                  `set -g allow-passthrough on` lets kitty graphics through"
                 .to_string(),
@@ -542,14 +544,10 @@ impl ClassicReason {
 }
 
 /// The plan for the terminal this process runs in: the one call `run` and
-/// `doctor` both make, so `doctor` prints the plan `run` carries. `ask` is the
-/// caller's probe; the area and the size read are shared.
-pub(crate) fn plan_this_terminal(
-    mode: GraphicsMode,
-    max_density: Density,
-    ask: impl FnOnce() -> Probe,
-) -> Plan {
-    detect(mode, max_density, terminal_cells(), ask)
+/// `doctor` both make, probe included, so `doctor` prints the plan `run`
+/// carries. `ask` is whether the terminal may be asked.
+pub(crate) fn plan_this_terminal(mode: GraphicsMode, max_density: Density, ask: bool) -> Plan {
+    detect(mode, max_density, terminal_cells(), || probe(ask))
 }
 
 /// The plan for a terminal `term` cells big. `ask` is the terminal query,
@@ -582,27 +580,33 @@ fn image_area(term: TermSize) -> TermSize {
 
 /// The terminal's size in cells; empty when there is none to measure, where the
 /// graphics probe is not asked either.
-fn terminal_cells() -> TermSize {
+pub(crate) fn terminal_cells() -> TermSize {
     crossterm::terminal::size()
         .map(|(width, height)| TermSize { width, height })
         .unwrap_or_default()
 }
 
-/// `run`'s probe: [`probe()`], the cancellable one, on Unix.
-#[cfg(all(feature = "graphics", unix))]
-pub(crate) fn run_probe() -> Probe {
-    probe(true)
-}
-
 /// Without the `graphics` feature there is no probe, and off Unix the only one
-/// is upstream's, whose reader outlives its timeout and would steal the TUI's
-/// keys (see [`probe()`]), so `run` does not ask.
+/// is upstream's, whose detached reader outlives its timeout and would steal
+/// the TUI's keys (ratatui-image 11.1.0 `picker.rs:606-643`), so nothing asks.
 #[cfg(not(all(feature = "graphics", unix)))]
-pub(crate) fn run_probe() -> Probe {
+pub(crate) fn probe(_ask: bool) -> Probe {
     Probe::Unsupported
 }
 
 impl Plan {
+    /// The office's logical extent on a terminal `term` cells big: what the
+    /// plan's painter lays out there.
+    pub(crate) fn office_extent(self, term: TermSize) -> Size {
+        match self {
+            Plan::Cutaway { fit, cell, .. } => fit.over(cell, image_area(term)).logical(),
+            Plan::Classic { .. } => {
+                let (w, h) = crate::tui::renderer::scene_buf_size(term.width, term.height);
+                Size { w, h }
+            }
+        }
+    }
+
     /// The plan as `doctor`'s `graphics:` line: for a cutaway, everything a
     /// tester reports back from a terminal, and how to get it when `run`'s
     /// own setting is `off`; for classic, why it fell back.
@@ -701,13 +705,6 @@ pub(crate) fn grid_unwind(drew: bool) -> Vec<u8> {
     } else {
         Vec::new()
     }
-}
-
-/// Built without the `graphics` feature: there is no query to run, whatever
-/// the terminal.
-#[cfg(not(feature = "graphics"))]
-pub(crate) fn probe(_ask: bool) -> Probe {
-    Probe::Unsupported
 }
 
 #[cfg(test)]
@@ -1076,6 +1073,23 @@ mod tests {
         );
     }
 
+    /// `run` and `doctor` plan through the one probe this platform has, so
+    /// neither prints a protocol the other never sees: off Unix, or without the
+    /// feature, it never asks.
+    #[test]
+    fn the_platform_probe_asks_only_where_run_can() {
+        let can_ask = cfg!(all(feature = "graphics", unix));
+        let unasked = if can_ask {
+            Probe::NotQueried
+        } else {
+            Probe::Unsupported
+        };
+        assert_eq!(probe(false), unasked, "doctor, piped");
+        if !can_ask {
+            assert_eq!(probe(true), Probe::Unsupported, "run");
+        }
+    }
+
     /// Every other mode asks exactly once and plans from the answer.
     #[test]
     fn every_other_mode_asks_once_and_plans_from_the_answer() {
@@ -1273,12 +1287,6 @@ mod tests {
     /// until it gets a row here.
     #[test]
     fn every_classic_reason_prints_its_own_row() {
-        let no_protocol = if cfg!(unix) {
-            "terminal reports no graphics protocol (kitty/iterm2/sixel)"
-        } else {
-            "terminal reports no graphics protocol (kitty/iterm2/sixel), or did not answer \
-             the capability query"
-        };
         let cases = [
             (
                 GraphicsMode::Off,
@@ -1290,7 +1298,8 @@ mod tests {
                 GraphicsMode::Auto,
                 Probe::Unsupported,
                 BUNDLED,
-                "this build has no terminal-graphics support",
+                "this build cannot ask the terminal for graphics (not on Unix, or built without \
+                 `graphics`)",
             ),
             (
                 GraphicsMode::Auto,
@@ -1310,7 +1319,7 @@ mod tests {
                 GraphicsMode::Auto,
                 answered(None, CELL_8X16, false),
                 BUNDLED,
-                no_protocol,
+                "terminal reports no graphics protocol (kitty/iterm2/sixel)",
             ),
             (
                 GraphicsMode::Auto,

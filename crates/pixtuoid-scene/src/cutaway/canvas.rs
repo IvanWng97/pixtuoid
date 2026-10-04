@@ -55,7 +55,7 @@ struct Epoch {
     theme: &'static Theme,
     scale: RenderScale,
     ambient: Ambient,
-    ground: crate::display::Ground,
+    carpet: crate::dither::Dithered<crate::atmosphere::Carpet>,
     flash: crate::cutaway::light::Flash,
 }
 
@@ -65,7 +65,7 @@ impl PartialEq for Epoch {
             && std::ptr::eq(self.theme, other.theme)
             && self.scale == other.scale
             && self.ambient == other.ambient
-            && self.ground == other.ground
+            && self.carpet == other.carpet
             && self.flash == other.flash
     }
 }
@@ -111,7 +111,7 @@ impl CutawayCanvas {
             theme,
             scale,
             ambient: list.ambient(),
-            ground: list.ground(),
+            carpet: list.carpet(),
             flash: list.flash(),
         };
         let footprints: Vec<(Span, u64)> = list
@@ -146,6 +146,11 @@ impl CutawayCanvas {
             buf: &self.buf,
             dirty,
         }
+    }
+
+    /// The last frame painted, empty before the first.
+    pub(crate) fn buf(&self) -> &RgbBuffer {
+        &self.buf
     }
 
     /// The agent the last frame shows topmost over `area`, in LOGICAL units
@@ -882,7 +887,7 @@ mod tests {
 
     /// The digests [`the_canvas_paints_the_pinned_frames`] pins, one frame a
     /// line.
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     const PINNED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/cutaway/canvas.golden");
 
     /// Every pixel of a fixed set of frames, as committed: a refactor of the
@@ -890,7 +895,7 @@ mod tests {
     /// rewrites it (`just gen-cutaway-golden`). Each instant is a local
     /// hour ([`localclock`](crate::localclock)), so any `$TZ` paints it alike.
     // Without the density art every frame is d=1, and the d4 rows would go unchecked.
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     #[test]
     fn the_canvas_paints_the_pinned_frames() {
         use crate::sky::{Weather, WeatherPolicy};
@@ -898,7 +903,7 @@ mod tests {
         let pack = Arc::new(test_default_pack());
         let (walk_layout, _, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let walk_layout = Arc::new(walk_layout);
-        let office = crate::floor::FloorSession::new()
+        let office = crate::floor::FloorSession::new(Arc::clone(&pack))
             .step(
                 crate::floor::FloorInputs {
                     scene: &pixtuoid_core::SceneState::uniform(16),

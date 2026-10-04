@@ -417,7 +417,6 @@ impl JsonlWatcher {
                 }
             }
         };
-        let _ = tokio::fs::create_dir_all(&self.root).await;
         let mut watcher: Box<dyn Watcher + Send> = match TEST_POLL_OVERRIDE.get().copied() {
             // `with_compare_contents` detects changes by hashing file contents, not
             // just mtime/size, so truncate-rewrites are caught reliably.
@@ -429,7 +428,14 @@ impl JsonlWatcher {
             )?),
             None => Box::new(RecommendedWatcher::new(event_handler, Config::default())?),
         };
-        watcher.watch(&self.root, RecursiveMode::Recursive)?;
+        // The root is another CLI's, and auto-detect keys on its presence, so it
+        // is never created: until it appears, the poll's scan (an absent root is
+        // a healthy observation) stands in for the watch. One that can't even be
+        // stat'ed is a watch failure (#157).
+        let mut watching = tokio::fs::try_exists(&self.root).await?;
+        if watching {
+            watcher.watch(&self.root, RecursiveMode::Recursive)?;
+        }
 
         let source_arc: Arc<str> = Arc::from(self.source_name.as_str());
         let unclaims = self.child_end_unclaims.clone();
@@ -510,6 +516,10 @@ impl JsonlWatcher {
                     ).await;
                 }
                 _ = poll.tick() => {
+                    if !watching && tokio::fs::try_exists(&self.root).await.unwrap_or(false) {
+                        watcher.watch(&self.root, RecursiveMode::Recursive)?;
+                        watching = true;
+                    }
                     self.run_scan_pass(
                         &ctx, &mut scan_state,
                         exit_watch.as_ref(), unclaims.as_ref(), decoders, true,

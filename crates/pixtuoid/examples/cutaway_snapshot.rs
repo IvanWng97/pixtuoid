@@ -5,7 +5,7 @@
 //! Usage:
 //!   cargo run --release --example cutaway_snapshot -- <out.png> [--scale N]
 //!       [--agents N] [--theme T] [--logical WxH] [--now-hour H] [--floor I/N]
-//!       [--weather W] [--now-day D] [--now-min M] [--flame I] [--repos a,b,...]
+//!       [--weather W] [--now-day D] [--now-sec S] [--flame I] [--repos a,b,...]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,13 +13,11 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
 use image::{Rgb as ImgRgb, RgbImage};
-use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::cutaway::paint::render_cutaway;
-use pixtuoid_scene::display::{Office, Showing};
-use pixtuoid_scene::floor::{FloorMeta, FloorSession, SteppedFloor};
+use pixtuoid_scene::floor::{FloorMeta, FloorSession};
 use pixtuoid_scene::layout::Size;
+use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::render_scale::RenderScale;
 use pixtuoid_scene::theme::theme_by_name;
 
@@ -88,7 +86,7 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow!("usage: see the `//!` header of examples/cutaway_snapshot.rs"))?;
 
     let (mut scale_n, mut agents, mut theme_name) = (None, 10usize, "tokyo-night".to_string());
-    let (mut now_hour, mut now_min, mut floor) = (None::<u32>, 0u64, (0usize, 1usize));
+    let (mut now_hour, mut now_sec, mut floor) = (None::<u32>, 0u64, (0usize, 1usize));
     // 1 = the clock's base date, as the classic snapshot's `--now-day`.
     let mut now_day = 1u32;
     let mut weather = None::<String>;
@@ -117,8 +115,9 @@ fn main() -> Result<()> {
             }
             "--now-hour" => now_hour = Some(val("--now-hour")?.parse().context("bad --now-hour")?),
             "--now-day" => now_day = val("--now-day")?.parse().context("bad --now-day")?,
-            // Minutes past `--now-hour`: a weather transition runs mid-hour.
-            "--now-min" => now_min = val("--now-min")?.parse().context("bad --now-min")?,
+            // Seconds past `--now-hour`, fine enough to sample a weather
+            // transition.
+            "--now-sec" => now_sec = val("--now-sec")?.parse().context("bad --now-sec")?,
             "--weather" => weather = Some(val("--weather")?),
             "--repos" => repos = val("--repos")?.split(',').map(str::to_string).collect(),
             // The `I`th agent burns at the Top tier, crowned in flame.
@@ -139,14 +138,14 @@ fn main() -> Result<()> {
     }
     let theme =
         theme_by_name(&theme_name).ok_or_else(|| anyhow!("unknown theme {theme_name:?}"))?;
-    let pack = pixtuoid_scene::pack::load_bundled_pack()?;
+    let pack = Arc::new(pixtuoid_scene::pack::load_bundled_pack()?);
     // Defaults to the pack's densest art, the density it was drawn for.
     let scale_n = scale_n.unwrap_or_else(|| pack.max_density_variant().get());
     let scale = RenderScale::new(scale_n).ok_or_else(|| anyhow!("--scale must be nonzero"))?;
     // The sky otherwise cycles its weather with the clock, so an hour alone
     // does not say what the room looks like.
-    let policy = pixtuoid_scene::pixel_painter::WeatherPolicy::from_name(weather.as_deref())
-        .map_err(|valid| {
+    let policy =
+        pixtuoid_scene::sky::WeatherPolicy::from_name(weather.as_deref()).map_err(|valid| {
             anyhow!(
                 "unknown --weather {weather:?}; valid: {}",
                 valid.join(" | ")
@@ -157,10 +156,10 @@ fn main() -> Result<()> {
             .with_context(|| format!("invalid --now-day/--now-hour {now_day}:{h}"))?,
         None => SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
     };
-    if now_min >= 60 || (now_min > 0 && now_hour.is_none()) {
-        return Err(anyhow!("--now-min wants 0..60 and a --now-hour"));
+    if now_sec >= 3600 || (now_sec > 0 && now_hour.is_none()) {
+        return Err(anyhow!("--now-sec wants 0..3600 and a --now-hour"));
     }
-    let now = now + Duration::from_secs(60 * now_min);
+    let now = now + Duration::from_secs(now_sec);
     let meta = FloorMeta::for_floor(floor.0, floor.1).with_weather(policy);
 
     let mut scene = SceneState::uniform(64);
@@ -178,40 +177,31 @@ fn main() -> Result<()> {
         ));
     }
 
-    // The real sim, at LOGICAL size — the cutaway is its second reader.
-    let mut session = FloorSession::new();
-    let SteppedFloor { layout, frame } = session
-        .step(
-            pixtuoid_scene::floor::FloorInputs {
-                scene: &scene,
-                pack: &pack,
-                now,
-                floor: meta,
-                pets: pixtuoid_scene::floor::PetInputs::default(),
+    // The real sim, at LOGICAL size, drawn through the painters' one entry.
+    let mut session = FloorSession::new(Arc::clone(&pack));
+    let layout = session
+        .render(
+            Look::Cutaway { scale },
+            RenderInputs {
+                world: pixtuoid_scene::floor::FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: meta,
+                    pets: pixtuoid_scene::floor::PetInputs::default(),
+                },
+                theme,
+                size: Size { w: lw, h: lh },
+                place: Place {
+                    gateway: pixtuoid_scene::board::office_gateway(&scene),
+                    floor: None,
+                },
+                debug_walkable: false,
             },
-            Size { w: lw, h: lh },
         )
         .ok_or_else(|| anyhow!("{lw}x{lh} does not lay out"))?;
-
-    let (bw, bh) = (scale.to_buffer(lw), scale.to_buffer(lh));
-    let mut buf = RgbBuffer::filled(bw, bh, theme.surface.bg_fallback);
-    let mut cache = pixtuoid_scene::cutaway::paint::CutawayCache::default();
-    render_cutaway(
-        &frame,
-        Office {
-            layout: &layout,
-            pack: &pack,
-            theme,
-            scale,
-        },
-        Showing {
-            floor: meta,
-            now,
-            board: &session.board(&scene, meta.motion, now),
-        },
-        &mut cache,
-        &mut buf,
-    );
+    let buf = session.buf().ok_or_else(|| anyhow!("no frame drawn"))?;
+    let (bw, bh) = (buf.width(), buf.height());
 
     let mut img = RgbImage::new(u32::from(bw), u32::from(bh));
     for (i, px) in buf.as_slice().iter().enumerate() {
@@ -221,9 +211,9 @@ fn main() -> Result<()> {
     img.save(&out).with_context(|| format!("writing {out}"))?;
     eprintln!(
         "wrote {out} ({bw}x{bh} = {lw}x{lh} logical @{scale_n}x, \
-         {} desks, {} characters)",
+         {} desks, {} agents)",
         layout.home_desks.len(),
-        frame.characters.len()
+        scene.agents.len()
     );
     Ok(())
 }

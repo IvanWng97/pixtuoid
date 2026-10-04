@@ -66,9 +66,10 @@ fn art_sets() -> Vec<Vec<&'static str>> {
     sets
 }
 
-/// [`validate_pack_animations`], against this crate's painters' art sets.
+/// [`validate_pack_animations`], against this crate's painters' art sets and
+/// walks.
 pub fn validate_pack(pack: &Pack) -> ValidationReport {
-    validate_pack_animations(pack, &art_sets())
+    validate_pack_animations(pack, &art_sets(), &crate::sim::WALKS)
 }
 
 /// Log a custom pack's animation-validation gaps at load time: a pack missing a
@@ -95,6 +96,7 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         unmarked_heads: _,
         missing_hair_views: _,
         overhanging_hair: _,
+        walks_without_stride: _,
         orphan_hairstyles,
     } = &report;
     for name in missing_required {
@@ -224,7 +226,7 @@ pub fn load_bundled_pack() -> Result<Pack, PackError> {
 }
 
 /// Every default sprite as `(filename, source)`: every `.sprite` in
-/// `sprites/default/`, listed by `build.rs` (less, without `density-art`, the
+/// `sprites/default/`, listed by `build.rs` (less, without `cutaway-assets`, the
 /// frames only a density variant draws), so a sprite committed there cannot be
 /// left out by omission. `test_pack_with` swaps files within this EXACT set.
 fn bundled_sprite_srcs() -> Vec<(&'static str, &'static str)> {
@@ -277,6 +279,21 @@ pub(crate) fn test_pack_with(overrides: &[(&str, &'static str)]) -> Pack {
     load_pack_from_strings(BUNDLED_PACK_TOML, &srcs).expect("the test pack loads")
 }
 
+/// The bundled pack with its manifest's `old` text read as `new`, for a test
+/// of what a pack declares.
+#[cfg(test)]
+pub(crate) fn test_pack_declaring(old: &str, new: &str) -> Pack {
+    assert!(
+        BUNDLED_PACK_TOML.contains(old),
+        "the bundled manifest says {old:?}"
+    );
+    load_pack_from_strings(
+        &BUNDLED_PACK_TOML.replacen(old, new, 1),
+        &bundled_sprite_srcs(),
+    )
+    .expect("the test pack loads")
+}
+
 #[cfg(test)]
 #[path = "../../build_support/density_art.rs"]
 mod density_art;
@@ -299,8 +316,24 @@ mod tests {
     /// no-alias test on whole-tick loops leaves.
     #[test]
     fn every_bundled_loop_holds_its_frames_whole_beats() {
+        loops_hold_whole_beats("default", &test_default_pack());
+    }
+
+    /// The same of the binary's example packs: `init-pack` starts a pack from
+    /// the skeleton.
+    #[test]
+    #[cfg(feature = "native")]
+    fn every_example_pack_loop_holds_its_frames_whole_beats() {
+        let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../pixtuoid/sprites");
+        for name in ["robot", "skeleton"] {
+            let pack = pixtuoid_core::sprite::format::load_pack(&examples.join(name))
+                .expect("an example pack");
+            loops_hold_whole_beats(name, &pack);
+        }
+    }
+
+    fn loops_hold_whole_beats(pack_name: &str, pack: &Pack) {
         use pixtuoid_core::sprite::format::density_variant_name;
-        let pack = test_default_pack();
         let pets = crate::pet::PetKind::ALL
             .iter()
             .flat_map(|k| [k.walk_anim(), k.sit_anim(), k.sleep_anim()]);
@@ -314,7 +347,13 @@ mod tests {
             VENDING_MACHINE_SPRITE,
             PRINTER_SPRITE,
         ];
-        let looped = fixtures.into_iter().chain(pets).chain(mascots);
+        // a typist keys on the art's own time (`pose::typing_frame`)
+        let typists = ["typing", "typing_back"];
+        let looped = fixtures
+            .into_iter()
+            .chain(typists)
+            .chain(pets)
+            .chain(mascots);
         for base in looped {
             let names = std::iter::once(base.to_string()).chain(
                 pack.density_variants()
@@ -328,15 +367,10 @@ mod tests {
                 let frame_ms = u64::from(anim.frame_ms());
                 assert!(
                     anim.frames().len() < 2 || frame_ms % crate::anim::FULL_TICK_MS == 0,
-                    "{name}: {frame_ms} ms is not whole beats"
+                    "{pack_name} {name}: {frame_ms} ms is not whole beats"
                 );
             }
         }
-        assert_eq!(
-            pack.animation("typing").map(|a| u64::from(a.frame_ms())),
-            Some(crate::pose::TYPING_FRAME_MS),
-            "the pack's typing loop says what the sim keys it by"
-        );
     }
 
     #[test]
@@ -452,7 +486,7 @@ mod tests {
             .collect()
     }
 
-    /// The web hero's pack. Nothing runs this suite without `density-art`
+    /// The web hero's pack. Nothing runs this suite without `cutaway-assets`
     /// (`just hack` only checks), so this is the one place it is loaded.
     #[test]
     fn the_pack_without_density_art_loads_whole() {
@@ -485,7 +519,7 @@ mod tests {
     /// What a default run's render scale rounds to (`RenderScale::fit`): a
     /// change to the bundled art's densest variant should be a decision.
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn the_bundled_pack_is_drawn_at_most_at_4x() {
         assert_eq!(test_default_pack().max_density_variant().get(), 4);
     }
@@ -494,7 +528,7 @@ mod tests {
     /// beside the base the classic painter draws, for a city drawn on that
     /// art's grid.
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn every_bundled_building_is_drawn_at_1x_and_4x() {
         let pack = test_default_pack();
         assert!(

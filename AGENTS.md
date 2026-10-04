@@ -73,11 +73,11 @@ cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 Non-trivial work runs as an arc — pick → grill the design → design gate →
 spec → build (TDD) → self-review → merge gate → wrap. Per-step detail:
 [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-arc-loop). The merge gate is
-[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-merge-gate); the `two-lens-review`
+[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-merge-gate); the `local-review`
 skill runs its local rows. Merging is `@mergifyio queue`; a release PR merges
 by hand.
 
-Repo skills (committed): `two-lens-review`, `beautify-decoration`,
+Repo skills (committed): `local-review`, `beautify-decoration`,
 `add-source`, `add-theme`, `procedural-lofi`.
 
 ## Conventions
@@ -97,7 +97,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 
 ## Architecture invariants (load-bearing)
 
-1. **`pixtuoid-core` and `pixtuoid-scene` have no terminal/window/audio-device deps** (compiler-enforced by crate boundary; `just arch`). New render targets are thin painters over `pixtuoid_scene::floor::render_floor` / `pixel_painter::render_to_rgb_buffer`.
+1. **`pixtuoid-core` and `pixtuoid-scene` have no terminal/window/audio-device deps** (compiler-enforced by crate boundary; `just arch`). New render targets are thin painters over `pixtuoid_scene::look::render`.
 2. **Agent events flow through ONE channel** `mpsc::Sender<(Transport, AgentEvent)>`; the `Transport` tag drives hook-wins dedup — producers tag their own events. Daemon presence rides a separate `AgentId`-free channel (`PresenceMsg { key: DaemonInstanceKey, delta }`) and never enters `Reducer::apply`.
 3. **`Source` trait is the only seam** for a transcript-bearing CLI; per-source format knowledge lives in that source's decoder. Exceptions: hook-only CLIs (Reasonix) and the shared ACP wire standard (`source/acp.rs`, reused by grok) — [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#adding-a-new-agent-cli) step 3 and `source/acp.rs`'s header.
 4. **Hook install writes through symlinks** (`resolve_symlink` in `install/io.rs`) — critical for stow-managed configs; Windows keeps the bounded rename-retry.
@@ -130,7 +130,7 @@ taller-cell terminals; bundled base character sprites max at 8×12 px (their
 
 ## Where to look
 
-- Tool call → sprite: `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → watch channel → `TuiRenderer::render` → `pixtuoid_scene::pixel_painter::render_to_rgb_buffer` → `tui::renderer::draw_scene`.
+- Tool call → sprite: `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → watch channel → `TuiRenderer::render` → `pixtuoid_scene::look::render` → `tui::renderer::draw_scene`.
 - Architecture + data flow: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Rust+site+Raycast spanning change: [`docs/PARALLEL-DELIVERY.md`](docs/PARALLEL-DELIVERY.md). What to run when: [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-running-order).
 - Refactoring the channel type, `Source` trait, `AgentEvent`, or reducer signature touches all four test areas (`tests/reducer/`, `tests/e2e.rs`, `tests/transport/socket.rs`, `tests/watcher/`) + `runtime/driver.rs`; a new `AgentEvent` variant needs an `agent_id()` arm.
 - Adding an agent CLI: source module + `SourceDescriptor` row (`source/registry.rs`) + `runtime/driver.rs` wiring + `site/src/sources.json` row; full checklist in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#adding-a-new-agent-cli); `add-source` skill drives it.

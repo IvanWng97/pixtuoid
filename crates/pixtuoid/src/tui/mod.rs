@@ -575,7 +575,7 @@ pub(crate) struct TuiSession {
 }
 
 /// Whether a left-click at `(col, row)` landed on the wall's star/repo link, given the
-/// terminal's `(cols, rows)`. Callers MUST gate this on `renderer.shows_wall_display()`, or
+/// terminal's `(cols, rows)`. Callers MUST gate this on `renderer.star_clickable()`, or
 /// a hit phantom-launches a browser where none is painted.
 fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
     let scene = renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
@@ -850,7 +850,7 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
         }
         MouseEventKind::Down(MouseButton::Left) => {
             renderer.set_mouse_pos(Some((m.column, m.row)));
-            let on_star = renderer.shows_wall_display()
+            let on_star = renderer.star_clickable()
                 && crossterm::terminal::size().is_ok_and(|t| star_clicked(m.column, m.row, t));
             if on_star {
                 let _ = open::that(widgets::REPO_URL);
@@ -928,7 +928,6 @@ fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
 fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     renderer: &mut TuiRenderer<B>,
     plan: crate::graphics::Plan,
-    pack: &Arc<pixtuoid_core::sprite::format::Pack>,
 ) {
     match plan {
         #[cfg(feature = "graphics")]
@@ -939,7 +938,6 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             tmux,
             ..
         } => renderer.set_cutaway(cutaway::TileCutaway::new(
-            Arc::clone(pack),
             fit,
             cell,
             protocol,
@@ -973,9 +971,9 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         audio_cfg,
     } = session;
     let term = setup_terminal()?;
-    let mut renderer = TuiRenderer::new(term, theme, pets);
+    let mut renderer = TuiRenderer::new(term, theme, pets, Arc::clone(&pack));
     renderer.set_motion(motion);
-    paint_plan(&mut renderer, plan, &pack);
+    paint_plan(&mut renderer, plan);
     // A LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins
     // the device thread it owns.
     let mut audio_ctl = crate::audio::AudioController::new(audio_cfg, config_path.clone());
@@ -997,11 +995,9 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         resolve_version_popup(&config_path)
     };
     let mut ui = ui_state::UiState::new(theme, onboarding_ui, version_popup, socket_path, log_path);
-    let mut last_layout_sig: Option<(u16, u16)> = None;
     let mut cap_sweep = FloorCapacitySweep::new();
 
-    const FRAME_TICK_MS: u64 = 33;
-    let tick = Duration::from_millis(FRAME_TICK_MS);
+    let tick = Duration::from_secs(1) / pixtuoid_scene::anim::PAINT_FPS;
     let result: Result<()> = (async {
         let mut ctrl_c = pin_ctrl_c();
         #[cfg(unix)]
@@ -1013,12 +1009,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             let now = ui.now();
             let snapshot = scene_rx.borrow_and_update().clone();
             renderer.evict_missing(&snapshot);
-            let sig = renderer.scene_extent();
-            if last_layout_sig != Some(sig) {
-                renderer.invalidate_routes();
-                renderer.cancel_transition();
-                last_layout_sig = Some(sig);
-            }
             let health = source_health.borrow_and_update().clone();
             ui.build_frames(now, &snapshot, &health)
                 .apply_to(&mut renderer, now);
@@ -2193,6 +2183,9 @@ mod apply_key_action_tests {
                     Terminal::new(TestBackend::new(80, 24)).expect("test backend"),
                     &theme::NORMAL,
                     Vec::new(),
+                    std::sync::Arc::new(
+                        pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"),
+                    ),
                 ),
                 // UNMUTED, because a MUTED controller hides pause (`set_paused` ORs the
                 // mute flag in).
