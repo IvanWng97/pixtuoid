@@ -484,7 +484,6 @@ run_report failure skipped "" >/dev/null 2>&1 &&
 run_report success skipped declined-head >/dev/null ||
     fail "the absence report exited non-zero on an open PR it declined"
 assert_status '.state == "failure" and .sha == "declined-head"' "an open PR declined for its base still fails its lens"
-# A late run on a merged PR would overwrite its head's published verdict.
 run_report success skipped merged-head closed >/dev/null ||
     fail "the absence report exited non-zero on a closed PR"
 [[ ! -e "$posted_statuses" ]] ||
@@ -610,11 +609,13 @@ wait_check="$(STEP_NAME="$wait_step" yq -e -r '.jobs[].steps[] | select(.name ==
 [[ "$wait_check" == "$(yq -e -r '.jobs.gate.name' .github/workflows/ci.yml)" ]] ||
     fail "\"$wait_step\" waits for $wait_check, not ci.yml's gate"
 
-# Each call answers the next of FAKE_CHECK_PAGES, the last one repeating.
+# Each call answers the next of FAKE_CHECK_PAGES, the last one repeating, and
+# logs its endpoint.
 cat >"$fake_bin/gh" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 [[ "$1" == api ]]
+echo "$2" >>"$CHECK_CALLS.endpoints"
 jq_expr="."
 while (($#)); do
     [[ "$1" == --jq ]] && jq_expr="$2"
@@ -660,7 +661,7 @@ assert_wait fail "a skipped ci-gate" "$(check_page github-actions completed skip
 assert_wait fail "another app's passing check of that name" "$(check_page impostor completed success)"
 
 # ── release-plz.yml: only a merged release PR waits for CI and publishes ──
-detect_step="Detect a merged release PR"
+detect_step="Detect a merged release PR; refuse a stale one"
 detect_script="$(workflow_step_script "$release_workflow" "$detect_step")"
 detect_prefix="$(STEP_NAME="$detect_step" yq -e -r '.jobs[].steps[] | select(.name == strenv(STEP_NAME)) | .env.PR_BRANCH_PREFIX' "$release_workflow")" ||
     fail "\"$detect_step\" has no PR_BRANCH_PREFIX"
@@ -669,7 +670,7 @@ detect_prefix="$(STEP_NAME="$detect_step" yq -e -r '.jobs[].steps[] | select(.na
 assert_detect() {
     local expect="$1" label="$2" pages="$3" output_file="$test_dir/detect-output"
     : >"$output_file"
-    rm -f "$test_dir/check-calls"
+    rm -f "$test_dir/check-calls" "$test_dir/check-calls.endpoints"
     if ! PATH="$fake_bin:$PATH" CHECK_CALLS="$test_dir/check-calls" FAKE_CHECK_PAGES="$pages" GH_TOKEN=test-token \
         GITHUB_OUTPUT="$output_file" PR_BRANCH_PREFIX="$detect_prefix" REPOSITORY=owner/repo SHA=abc1234 \
         bash -c "$detect_script" >/dev/null 2>&1; then
@@ -681,9 +682,32 @@ assert_detect() {
     grep -qx "release=$expect" "$output_file" ||
         fail "the release detection did not answer release=$expect for $label: $(<"$output_file")"
 }
-pr_heads() { jq -cn '[$ARGS.positional[] | {head: {ref: .}}]' --args "$@"; }
-assert_detect true "a merged release PR" "$(pr_heads "${detect_prefix}v1.2.3")"
-assert_detect true "a release PR among others" "$(pr_heads feat/x "${detect_prefix}v1.2.3")"
+pr_heads() { jq -cn '[$ARGS.positional[] | {head: {ref: ., sha: "\(.)-head"}}]' --args "$@"; }
+# After a release PR is found: the merge's parent, then the release commit as
+# its comparison with the PR's head lists it first.
+release_pages() {
+    printf '%s\n' '{"parents":[{"sha":"main123"},{"sha":"side123"}]}' \
+        "$(jq -cn --arg parent "$1" --arg committed "$2" '{commits: [
+            {parents: [{sha: $parent}], commit: {author: {date: "2026-10-01T00:00:00Z"}, committer: {date: $committed}}},
+            {parents: [{sha: "x"}, {sha: "y"}], commit: {author: {date: "z"}, committer: {date: "z"}}}]}')"
+}
+release_head="${detect_prefix}v1.2.3"
+assert_endpoints() {
+    local want
+    want="$(printf 'repos/owner/repo/%s\n' commits/abc1234/pulls commits/abc1234 "compare/main123...$release_head-head")"
+    [[ "$(<"$test_dir/check-calls.endpoints")" == "$want" ]] ||
+        fail "the release detection on $1 asked $(<"$test_dir/check-calls.endpoints"), not $want"
+}
+written="2026-10-01T00:00:00Z"
+assert_detect true "a merged release PR" "$(pr_heads "$release_head")"$'\n'"$(release_pages main123 "$written")"
+assert_endpoints "a merged release PR"
+assert_detect true "a release PR among others" "$(pr_heads feat/x "$release_head")"$'\n'"$(release_pages main123 "$written")"
+assert_endpoints "a release PR among others"
+assert_detect error "a release PR cut from an older main" "$(pr_heads "$release_head")"$'\n'"$(release_pages old123 "$written")"
+assert_detect error "a release PR rebased onto main" \
+    "$(pr_heads "$release_head")"$'\n'"$(release_pages main123 2026-10-01T00:05:00Z)"
+assert_detect error "an API failure on the comparison" \
+    "$(pr_heads "$release_head")"$'\n'"$(release_pages main123 "$written" | head -n 1)"$'\n'error
 assert_detect false "an ordinary PR" "$(pr_heads feat/x)"
 assert_detect false "a branch merely naming the prefix" "$(pr_heads "feat/${detect_prefix}x")"
 assert_detect false "a direct push with no PR" "$(pr_heads)"
