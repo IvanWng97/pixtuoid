@@ -5,20 +5,17 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::DaemonState;
 
 use crate::chitchat::ChitchatBubble;
 use crate::cutaway::canvas::{CanvasFrame, CutawayCanvas, Dirty};
+use crate::display::Hovers;
 use crate::floor::{FloorInputs, OfficeStores, PerFloor, step_floor};
 use crate::footer::FooterFloor;
-use crate::layout::{Bounds, SceneLayout, Size};
-use crate::pet::PetFrame;
-use crate::pixel_painter::{
-    AgentFrame, ClassicCaches, Hoverables, MascotFrame, PaintCtx, paint_frame,
-};
+use crate::layout::{SceneLayout, Size};
+use crate::pixel_painter::{AgentFrame, ClassicCaches, Drawn, PaintCtx, paint_frame};
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
@@ -102,8 +99,8 @@ pub struct Raster {
 struct Classic {
     buf: RgbBuffer,
     caches: ClassicCaches,
-    /// What the last frame drew that hover can name.
-    hits: Hoverables,
+    /// What the last frame drew that a pointer finds or a badge hangs from.
+    hits: Drawn,
     /// The last frame's speech bubbles, which only the classic sets as text.
     bubbles: Vec<ChitchatBubble>,
 }
@@ -114,12 +111,10 @@ struct Classic {
 pub struct ClassicDrawn<'a> {
     /// The frame, for a painter's own wash over it (a modal's dim).
     pub pixels: &'a mut RgbBuffer,
-    /// Every character, in paint order: the last over a point is on top.
+    /// Every character, in paint order, for its badge.
     pub agents: &'a [AgentFrame],
-    /// The floor's pet, if drawn.
-    pub pet: Option<PetFrame>,
-    /// Every gateway mascot, in paint order.
-    pub mascots: &'a [MascotFrame],
+    /// What the frame answers a pointer with.
+    pub hovers: &'a Hovers,
     /// Active speech bubbles.
     pub bubbles: &'a [ChitchatBubble],
 }
@@ -139,7 +134,7 @@ impl Raster {
         self.classic.get_or_insert_with(|| Classic {
             buf: RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 }),
             caches: ClassicCaches::new(),
-            hits: Hoverables::default(),
+            hits: Drawn::default(),
             bubbles: Vec::new(),
         })
     }
@@ -153,18 +148,18 @@ impl Raster {
         Some(ClassicDrawn {
             pixels: &mut classic.buf,
             agents: &classic.hits.agents,
-            pet: classic.hits.pet_pos,
-            mascots: &classic.hits.mascots,
+            hovers: &classic.hits.hovers,
             bubbles: &classic.bubbles,
         })
     }
 
-    /// The agent the last frame shows topmost over `area`, in logical units,
-    /// when the cutaway drew it; see [`CutawayCanvas::hover_at`].
-    pub fn hover_at(&self, area: Bounds) -> Option<AgentId> {
-        matches!(self.shown, Some(Look::Cutaway { .. }))
-            .then(|| self.cutaway.as_ref()?.hover_at(area))
-            .flatten()
+    /// What the last frame drawn answers a pointer with, in either look;
+    /// `None` before the first.
+    pub fn hovers(&self) -> Option<&Hovers> {
+        match self.shown? {
+            Look::Classic => self.classic.as_ref().map(|c| &c.hits.hovers),
+            Look::Cutaway { .. } => self.cutaway.as_ref()?.hovers(),
+        }
     }
 
     /// The agents the last classic frame drew, in paint order; none in another look.
@@ -225,7 +220,7 @@ pub fn render<'r>(
             classic
                 .buf
                 .resize_fill(size.w, size.h, theme.surface.bg_fallback);
-            classic.hits = Hoverables::default();
+            classic.hits = Drawn::default();
             classic.bubbles.clear();
             raster.shown = Some(look);
         }
