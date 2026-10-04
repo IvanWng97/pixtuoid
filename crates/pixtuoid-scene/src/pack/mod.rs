@@ -508,6 +508,25 @@ mod tests {
         assert_eq!(report.warning_count(), 0, "{report:?}");
     }
 
+    /// A pack that ships no back-turned desk draws its back-turned desks from
+    /// `desk`, and stands their props at `desk`'s marks.
+    #[test]
+    fn a_pack_without_desk_north_stands_its_props_on_desk() {
+        use crate::layout::{Facing, Point};
+        let north = "[animations.desk_north]\nframes   = [\"desk_north.sprite\"]\nframe_ms = 600\n\n\
+                     [animations.\"desk_north@4x\"]\nframes   = [\"desk_north@4x.sprite\"]\nframe_ms = 600\n\n";
+        let pack = test_pack_declaring(north, "");
+        let desk = Point { x: 20, y: 30 };
+        for mark in [CUP_MARK, TOWER_MARK] {
+            let at = |facing| desk_mark(&pack, desk, facing, mark);
+            assert!(
+                at(Facing::North).is_some(),
+                "the back-turned {mark} vanished"
+            );
+            assert_eq!(at(Facing::North), at(Facing::South), "{mark}");
+        }
+    }
+
     /// `build.rs` embeds every sprite in `sprites/default/`, so one no animation,
     /// hairstyle or building registers — a generated file whose `pack.toml`
     /// entry was never written — ships as dead bytes and draws nothing. A sprite

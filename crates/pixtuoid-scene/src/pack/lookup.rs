@@ -113,14 +113,15 @@ pub(crate) const CUP_MARK: &str = "cup";
 pub(crate) const TOWER_MARK: &str = "tower";
 
 /// Where the 1x desk at `desk` facing `facing` stands the prop its `mark`
-/// names: the column of the prop's west edge and the row past its foot.
+/// names: the column of the prop's west edge and the row past its foot, on
+/// the art [`desk_art`] draws there.
 pub(crate) fn desk_mark(
     pack: &Pack,
     desk: crate::layout::Point,
     facing: crate::layout::Facing,
     mark: &str,
 ) -> Option<crate::layout::Point> {
-    let art = pack.animation(desk_sprite_name(facing))?;
+    let art = pack.animation_or_source(desk_sprite_name(facing))?;
     let top = desk_art_top(pack, desk.y, art.frames().first()?.height());
     let m = art.marks(0).iter().find(|m| m.name() == mark)?;
     Some(crate::layout::Point {

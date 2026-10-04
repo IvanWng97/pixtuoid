@@ -72,7 +72,7 @@ fn walk_without_stride_line(name: &str) -> String {
 
 fn missing_mark_line(m: &MissingMark) -> String {
     format!(
-        "WARN:  \"{}\" has no `@mark {}`: nothing stands there in the cutaway",
+        "WARN:  \"{}\" has no `@mark {}`: nothing stands there in either look",
         strip_control_chars(&m.name),
         m.mark
     )

@@ -215,7 +215,7 @@ def desk_north_1x():
 DESK_PROP_ROW_1X = 3
 # `token_meter`'s `MAX_TIER`: the tower's frames, one per tier.
 TOKEN_MAX_TIER = 3
-# `pixel_painter::drawable`'s `STACK_W` and `STACK_PX_PER_TIER`.
+# The 1x tower's width and rows a tier, which both looks blit.
 TOKEN_W_1X, TOKEN_ROWS_PER_TIER_1X = 3, 2
 
 

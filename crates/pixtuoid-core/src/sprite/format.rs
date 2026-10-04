@@ -1967,7 +1967,7 @@ pub struct ValidationReport {
     /// on its clock, so its feet slide whenever its pace changes.
     pub walks_without_stride: Vec<String>,
     /// Each mark a piece the caller stands props on leaves out: nothing stands
-    /// there.
+    /// there, in either look.
     pub missing_marks: Vec<MissingMark>,
 }
 
