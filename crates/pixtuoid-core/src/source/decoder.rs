@@ -21,7 +21,7 @@ pub type LineDecoder = fn(&str, &str, Value) -> DecodeResult<Vec<AgentEvent>>;
 pub type DecodeResult<T> = std::result::Result<T, DecodeError>;
 
 /// Why a decoder refused a hook payload or a transcript line. The caller logs it
-/// and drops the input; every wire-borne string in it is [`display_safe`].
+/// and drops the input; every wire-borne string in it is `display_safe`d.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum DecodeError {
