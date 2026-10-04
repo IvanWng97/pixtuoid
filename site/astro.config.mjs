@@ -157,10 +157,9 @@ function rehypeRepoLinks() {
 
 // Astro's built-in CSP (`security.csp` below) does NOT hash template-level
 // `is:inline` scripts (verified vs Astro 7.0.5) — the only kind this site has —
-// it appends style hashes (which make browsers IGNORE the 'unsafe-inline'
-// Shiki/mermaid needs), and it emits its <meta> BELOW scripts the layout
-// already wrote, which a meta policy does not govern. This hook closes all
-// three from the BUILT html.
+// nor style attributes, and it emits its <meta> BELOW scripts the layout
+// already wrote, which a meta policy does not govern. This hook hashes every
+// inline script, <style> and style attribute from the BUILT html.
 function cspInlineHashes() {
   return {
     name: 'csp-inline-hashes',
@@ -217,13 +216,12 @@ export default defineConfig({
     }),
   },
   integrations: [sitemap(), cspInlineHashes()],
-  // script-src carries NO 'unsafe-inline' — cspInlineHashes() above supplies the
-  // is:inline hashes instead; 'wasm-unsafe-eval' permits WebAssembly.instantiate
-  // for the live-office hero (wasm compilation ONLY, not JS eval). style-src
-  // KEEPS 'unsafe-inline': Shiki spans and a few style={} attrs are inline STYLE
-  // ATTRIBUTES, which hashes cannot express; the diagram's <style> element rides
-  // the same 'unsafe-inline'. NOTE: security.csp
-  // is build/preview-only by design — `astro dev` serves no CSP.
+  // Neither script-src nor style-src carries 'unsafe-inline': cspInlineHashes()
+  // above supplies the hashes, a style attribute's under 'unsafe-hashes'.
+  // 'wasm-unsafe-eval' permits WebAssembly.instantiate for the live-office hero
+  // (wasm compilation ONLY, not JS eval). No frame-ancestors: a <meta> policy
+  // cannot carry it, and the Pages deploy sets no response headers. NOTE:
+  // security.csp is build/preview-only by design — `astro dev` serves no CSP.
   security: {
     csp: {
       directives: [
@@ -237,7 +235,7 @@ export default defineConfig({
         "form-action 'self'",
       ],
       scriptDirective: { resources: ["'self'", "'wasm-unsafe-eval'"] },
-      styleDirective: { resources: ["'self'", "'unsafe-inline'"] },
+      styleDirective: { resources: ["'self'"] },
     },
   },
   prefetch: { prefetchAll: true, defaultStrategy: 'hover' },

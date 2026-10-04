@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { inlineScriptHashes, rewriteCspMeta } from './csp-hashes.mjs';
+import { inlineScriptHashes, inlineStyleHashes, rewriteCspMeta } from './csp-hashes.mjs';
 
 const sha = (s) => `'sha256-${createHash('sha256').update(s, 'utf8').digest('base64')}'`;
 
@@ -37,15 +37,41 @@ test('data-src is not mistaken for src', () => {
   assert.ok(inlineScriptHashes('<script data-src="x">run()</script>').has(sha('run()')));
 });
 
-test('rewriteCspMeta injects script hashes and strips style hashes', () => {
+test("rewriteCspMeta replaces the build's hashes with the page's own", () => {
   const html =
     '<head><meta http-equiv="content-security-policy" content="script-src \'self\'; ' +
-    "style-src 'self' 'unsafe-inline' 'sha256-OLD'\">" +
-    '<script>x()</script></head>';
+    "style-src 'self' 'sha256-OLD'\">" +
+    '<script>x()</script><style>a{b:c}</style></head><body><p style="color: red">.</p></body>';
   const out = rewriteCspMeta(html);
   assert.ok(out.includes(sha('x()')), 'script-src gains the inline hash');
-  assert.ok(!out.includes("'sha256-OLD'"), 'style-src hashes are dropped');
-  assert.ok(out.includes("style-src 'self' 'unsafe-inline'"), "'unsafe-inline' survives hash-free");
+  assert.ok(!out.includes("'sha256-OLD'"), "the build's stale hash is dropped");
+  assert.ok(
+    out.includes(`style-src 'self' 'unsafe-hashes'`),
+    'a style attribute needs unsafe-hashes'
+  );
+  assert.ok(out.includes(sha('a{b:c}')), 'the <style> element is hashed');
+  assert.ok(out.includes(sha('color: red')), 'the style attribute is hashed');
+});
+
+test('a style attribute is hashed as parsed: its character references decoded', () => {
+  const { hashes } = inlineStyleHashes(
+    `<i style="font-family: &quot;A&amp;B&quot;; x: &#39;&#x27;"></i>`
+  );
+  assert.ok(hashes.has(sha(`font-family: "A&B"; x: ''`)));
+});
+
+test('style text inside a script or style body, or a data-style attribute, is not an attribute', () => {
+  const { hashes, attributes } = inlineStyleHashes(
+    '<script>const s = \'<b style="x">\';</script><style>q{}</style><b data-style="y">'
+  );
+  assert.equal(attributes, false);
+  assert.deepEqual([...hashes], [sha('q{}')]);
+});
+
+test('a page with no style attribute asks no unsafe-hashes', () => {
+  const html =
+    '<head><meta http-equiv="content-security-policy" content="style-src \'self\'"><style>a{}</style></head>';
+  assert.ok(!rewriteCspMeta(html).includes('unsafe-hashes'));
 });
 
 test('rewriteCspMeta returns null when no CSP meta is present', () => {

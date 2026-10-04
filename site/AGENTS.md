@@ -57,10 +57,11 @@ Every generated artifact, manifest seam, and rendered-copy sharp edge:
 `cspInlineHashes()` in `astro.config.mjs` owns the WHY; `config/csp-hashes.mjs`
 owns the parse. The rules a page author needs: an `is:inline` script needs NO
 manual CSP step; a hand-written `public/*.js` loaded by URL rides
-`script-src 'self'`; `style-src` must stay hash-free (one hash disables
-unsafe-inline for the directive, and inline style ATTRIBUTES cannot be hashed —
-so keep Prism's class-based highlighting, not Shiki). `astro dev` serves NO
-CSP; regressions surface in `just site-e2e`'s console watchdog.
+`script-src 'self'`; an inline `<style>` or `style` attribute needs none
+either — each is hashed, an attribute's under `'unsafe-hashes'`, but one set
+at runtime (`setAttribute('style', …)`, `style.cssText`, markup through
+`innerHTML`) is blocked: set `el.style.<property>` instead. `astro dev` serves NO CSP; regressions surface in
+`just site-e2e`'s console watchdog.
 
 ## Dev server (agent-driving)
 
