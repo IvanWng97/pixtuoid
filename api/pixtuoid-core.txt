@@ -307,7 +307,7 @@ pub pixtuoid_core::source::decoder::DecodeError::Invalid::field: &'static str
 pub pixtuoid_core::source::decoder::DecodeError::Invalid::reason: alloc::string::String
 #[non_exhaustive] pub pixtuoid_core::source::decoder::DecodeError::Missing
 pub pixtuoid_core::source::decoder::DecodeError::Missing::cli: alloc::string::String
-pub pixtuoid_core::source::decoder::DecodeError::Missing::event: core::option::Option<alloc::string::String>
+pub pixtuoid_core::source::decoder::DecodeError::Missing::context: core::option::Option<alloc::string::String>
 pub pixtuoid_core::source::decoder::DecodeError::Missing::field: &'static str
 #[non_exhaustive] pub pixtuoid_core::source::decoder::DecodeError::NotAnObject
 pub pixtuoid_core::source::decoder::DecodeError::NotAnObject::cli: alloc::string::String

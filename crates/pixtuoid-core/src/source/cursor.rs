@@ -36,7 +36,7 @@
 //!   arrive through a different non-shell ancestor, so the pid is not stable and
 //!   corroboration often withholds the arm (#896).
 
-use crate::source::decoder::DecodeResult as Result;
+use crate::source::decoder::{DecodeError, DecodeResult as Result};
 use serde_json::Value;
 
 use crate::AgentId;
@@ -57,13 +57,11 @@ pub const SOURCE_NAME: &str = "cursor";
 pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
-        .ok_or_else(|| crate::source::decoder::DecodeError::not_an_object(SOURCE_NAME))?;
+        .ok_or_else(|| DecodeError::not_an_object(SOURCE_NAME))?;
     let event = obj
         .get("hook_event_name")
         .and_then(|s| s.as_str())
-        .ok_or_else(|| {
-            crate::source::decoder::DecodeError::missing(SOURCE_NAME, "hook_event_name")
-        })?;
+        .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "hook_event_name"))?;
     // The top-level `cwd` is EMPTY/absent in CLI hook payloads —
     // `workspace_roots[0]` is the real one. Label/cwd only, NOT the AgentId key.
     let workspace = obj
@@ -86,12 +84,7 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
         .or(workspace)
-        .ok_or_else(|| {
-            crate::source::decoder::DecodeError::missing(
-                SOURCE_NAME,
-                "session_id|cwd|workspace_roots",
-            )
-        })?;
+        .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "session_id|cwd|workspace_roots"))?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, key);
     let cwd = workspace.unwrap_or("");
 
@@ -151,10 +144,7 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         }]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
-            Err(crate::source::decoder::DecodeError::unsupported(
-                SOURCE_NAME,
-                other,
-            ))
+            Err(DecodeError::unsupported(SOURCE_NAME, other))
         }
     };
     let mut evs = decoded?;

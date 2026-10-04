@@ -19,7 +19,7 @@
 
 use std::num::NonZeroU16;
 
-use crate::source::decoder::DecodeResult as Result;
+use crate::source::decoder::{DecodeError, DecodeResult as Result};
 use serde_json::Value;
 
 use crate::source::daemon::{DaemonPresenceUpdate, DecodedPresence};
@@ -71,10 +71,7 @@ fn gateway_instance(obj: &serde_json::Map<String, Value>, event: &str) -> Result
         .and_then(|n| u16::try_from(n).ok())
         .and_then(NonZeroU16::new)
         .ok_or_else(|| {
-            // This Err is logged at the `warn` floor = RAW stderr, and serde_json's
-            // Display escapes Cc but not DEL or the Cf bidi overrides.
-            let raw = crate::source::decoder::display_safe(&raw.to_string());
-            crate::source::decoder::DecodeError::invalid(
+            DecodeError::invalid(
                 SOURCE_NAME,
                 GATEWAY_PORT_FIELD,
                 format_args!("must be a port in 1..=65535, got {raw}"),
@@ -86,9 +83,8 @@ fn gateway_instance(obj: &serde_json::Map<String, Value>, event: &str) -> Result
 /// [`DaemonInstanceId::new`] for an id that is statically non-empty. The `None` arm
 /// is unreachable, but production code must not `unwrap`, so it degrades to an error.
 fn instance_id(raw: String) -> Result<DaemonInstanceId> {
-    DaemonInstanceId::new(raw).ok_or_else(|| {
-        crate::source::decoder::DecodeError::invalid(SOURCE_NAME, "gateway instance id", "blank")
-    })
+    DaemonInstanceId::new(raw)
+        .ok_or_else(|| DecodeError::invalid(SOURCE_NAME, "gateway instance id", "blank"))
 }
 
 /// Decode one OpenClaw plugin envelope into the sending gateway's identity plus its
@@ -98,11 +94,11 @@ fn instance_id(raw: String) -> Result<DaemonInstanceId> {
 pub fn decode_openclaw_hook_payload(v: &Value) -> Result<DecodedPresence> {
     let obj = v
         .as_object()
-        .ok_or_else(|| crate::source::decoder::DecodeError::not_an_object(SOURCE_NAME))?;
+        .ok_or_else(|| DecodeError::not_an_object(SOURCE_NAME))?;
     let event = obj
         .get("type")
         .and_then(|s| s.as_str())
-        .ok_or_else(|| crate::source::decoder::DecodeError::missing(SOURCE_NAME, "type"))?;
+        .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "type"))?;
     let instance = gateway_instance(obj, event)?;
     let pid = obj
         .get("_pid")

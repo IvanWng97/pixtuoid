@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::source::decoder::DecodeResult as Result;
+use crate::source::decoder::{DecodeError, DecodeResult as Result};
 use serde_json::{Map, Value};
 
 use crate::AgentId;
@@ -69,7 +69,7 @@ pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<Vec<AgentEven
             .get("session_id")
             .and_then(|s| s.as_str())
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| crate::source::decoder::DecodeError::missing(SOURCE_NAME, "session_id"))?
+            .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "session_id"))?
             .to_string();
         let child = obj
             .get("agent_id")
@@ -86,13 +86,8 @@ pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<Vec<AgentEven
         // tree (cascade / liveness / readiness).
         "SubagentStart" => {
             let (session_id, child) = guards(obj)?;
-            let child = child.ok_or_else(|| {
-                crate::source::decoder::DecodeError::missing_in(
-                    SOURCE_NAME,
-                    "SubagentStart",
-                    "agent_id",
-                )
-            })?;
+            let child = child
+                .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "SubagentStart", "agent_id"))?;
             let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
             Ok(Some(vec![AgentEvent::SessionStart {
                 agent_id: AgentId::from_parts(SOURCE_NAME, &child),
@@ -107,13 +102,8 @@ pub(crate) fn decode_codex_hook_custom(v: &Value) -> Result<Option<Vec<AgentEven
         // leaves a harmless no-op plus that same fallback.
         "SubagentStop" => {
             let (_session_id, child) = guards(obj)?;
-            let child = child.ok_or_else(|| {
-                crate::source::decoder::DecodeError::missing_in(
-                    SOURCE_NAME,
-                    "SubagentStop",
-                    "agent_id",
-                )
-            })?;
+            let child = child
+                .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "SubagentStop", "agent_id"))?;
             Ok(Some(vec![AgentEvent::SessionEnd {
                 agent_id: AgentId::from_parts(SOURCE_NAME, &child),
                 as_child: true,

@@ -34,12 +34,13 @@ pub enum DecodeError {
     },
     /// A field the input needs is absent or empty.
     #[non_exhaustive]
-    #[error("{cli} {} has no {field}", .event.as_deref().unwrap_or("payload"))]
+    #[error("{cli} {} has no {field}", .context.as_deref().unwrap_or("payload"))]
     Missing {
         /// The wire's source name.
         cli: String,
-        /// The event or part of the payload the field belongs to.
-        event: Option<String>,
+        /// The event or part of the payload the field belongs to, when it
+        /// isn't the payload itself.
+        context: Option<String>,
         /// The field, or `|`-joined fields any one of which would do.
         field: &'static str,
     },
@@ -75,15 +76,15 @@ impl DecodeError {
     pub(crate) fn missing(cli: &str, field: &'static str) -> Self {
         Self::Missing {
             cli: display_safe(cli),
-            event: None,
+            context: None,
             field,
         }
     }
 
-    pub(crate) fn missing_in(cli: &str, event: &str, field: &'static str) -> Self {
+    pub(crate) fn missing_in(cli: &str, context: &str, field: &'static str) -> Self {
         Self::Missing {
             cli: display_safe(cli),
-            event: Some(display_safe(event)),
+            context: Some(display_safe(context)),
             field,
         }
     }

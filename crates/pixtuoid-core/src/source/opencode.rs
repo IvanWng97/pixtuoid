@@ -32,7 +32,7 @@
 //!   `server.instance.disposed` carries only a `directory` (no session ids), so
 //!   it is NOT decoded — the pid-watch covers instance teardown.
 
-use crate::source::decoder::DecodeResult as Result;
+use crate::source::decoder::{DecodeError, DecodeResult as Result};
 use serde_json::Value;
 
 use crate::AgentId;
@@ -56,11 +56,11 @@ const SUBAGENT_TOOLS: &[&str] = &["task"];
 pub fn decode_oc_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
-        .ok_or_else(|| crate::source::decoder::DecodeError::not_an_object(SOURCE_NAME))?;
+        .ok_or_else(|| DecodeError::not_an_object(SOURCE_NAME))?;
     let event = obj
         .get("type")
         .and_then(|s| s.as_str())
-        .ok_or_else(|| crate::source::decoder::DecodeError::missing(SOURCE_NAME, "type"))?;
+        .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "type"))?;
     // `properties` is the EventV2 `data`.
     let props_val = obj.get("properties").unwrap_or(&Value::Null);
     let empty = serde_json::Map::new();
@@ -117,16 +117,12 @@ fn decode_session_lifecycle(
     let info = props
         .get("info")
         .and_then(|i| i.as_object())
-        .ok_or_else(|| {
-            crate::source::decoder::DecodeError::missing_in(SOURCE_NAME, "session", "info")
-        })?;
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "session", "info"))?;
     let session_id = info
         .get("id")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            crate::source::decoder::DecodeError::missing_in(SOURCE_NAME, "session info", "id")
-        })?;
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "session info", "id"))?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, session_id);
     let parent = info
         .get("parentID")
@@ -178,13 +174,7 @@ fn decode_tool_part(props: &serde_json::Map<String, Value>) -> Result<Vec<AgentE
         .get("sessionID")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            crate::source::decoder::DecodeError::missing_in(
-                SOURCE_NAME,
-                "message.part.updated",
-                "sessionID",
-            )
-        })?;
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "message.part.updated", "sessionID"))?;
     let part = match props.get("part").and_then(|p| p.as_object()) {
         Some(p) => p,
         None => return Ok(vec![]),
@@ -250,9 +240,7 @@ fn decode_permission(props: &Value) -> Result<Vec<AgentEvent>> {
         .get("sessionID")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            crate::source::decoder::DecodeError::missing_in(SOURCE_NAME, "permission", "sessionID")
-        })?;
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "permission", "sessionID"))?;
     let agent_id = AgentId::from_parts(SOURCE_NAME, session_id);
     const KEYS: &[&str] = &["action", "permission", "title", "pattern", "type", "tool"];
     let reason = crate::source::decoder::first_present_str(props, KEYS)
