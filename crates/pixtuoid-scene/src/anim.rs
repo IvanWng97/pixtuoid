@@ -475,4 +475,25 @@ mod tests {
             "expected ease-out to be past 80% at midpoint; got {eased}"
         );
     }
+
+    /// The site's backdrop runs the wasm office on its own frame gate.
+    #[test]
+    fn the_site_backdrop_paints_at_paint_fps() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../site/src/components/OfficeBackdrop.astro"
+        );
+        let Ok(astro) = std::fs::read_to_string(path) else {
+            // crates.io-packaged test runs don't ship the repo's site/ tree.
+            return;
+        };
+        let frame_ms: u64 = astro
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("const FRAME_MS = "))
+            .and_then(|v| v.strip_suffix(';'))
+            .expect("OfficeBackdrop.astro's `const FRAME_MS = <ms>;` moved or was renamed")
+            .parse()
+            .expect("FRAME_MS is a whole ms literal");
+        assert_eq!(frame_ms, PAINT_FRAME_MS, "OfficeBackdrop.astro's FRAME_MS");
+    }
 }
