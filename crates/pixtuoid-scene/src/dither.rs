@@ -44,6 +44,7 @@ pub(crate) struct Dithered<T> {
 
 impl<T: Copy> Dithered<T> {
     /// `value` on every pixel.
+    #[cfg(test)]
     pub(crate) fn solid(value: T) -> Self {
         Self {
             from: value,
