@@ -16,7 +16,8 @@ pub(crate) use lookup::{
     NORTH_SOFA_SEAT_ROWS, PRINTER_SPRITE, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY, TOKEN_SHEET_SPRITE,
     TOKEN_TOWER_SPRITE, VENDING_MACHINE_SPRITE, WATER_COOLER_SPRITE, animation_frame_at,
     appliance_frame_index, appliance_overrides, appliance_sprite, desk_art, desk_art_top,
-    desk_sprite_name, drawn_in, fixture_overrides, frame_at, looping_frame_index,
+    desk_prop_overrides, desk_sprite_name, drawn_in, fixture_overrides, frame_at,
+    looping_frame_index,
 };
 
 #[cfg(feature = "native")]
@@ -445,6 +446,39 @@ mod tests {
         }
         fn enter(&self, _: &tracing::span::Id) {}
         fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    /// Every key the desk props take a theme colour in is one their art draws,
+    /// at every density: a key renamed in the pack would stop the theme
+    /// reaching the prop.
+    #[test]
+    fn the_desk_props_draw_the_keys_the_theme_recolours() {
+        let pack = test_default_pack();
+        for s in [1, pack.max_density_variant().get()] {
+            let scale = crate::render_scale::RenderScale::new(s).expect("nonzero");
+            for (sprite, frame, keys) in [
+                (
+                    DESK_CUP_SPRITE,
+                    0,
+                    &[lookup::CUP_KEY, lookup::CUP_SHADE_KEY][..],
+                ),
+                (
+                    TOKEN_TOWER_SPRITE,
+                    0,
+                    &[lookup::PAPER_KEY, lookup::PAPER_SHADE_KEY],
+                ),
+                (TOKEN_SHEET_SPRITE, 0, &[lookup::PAPER_KEY]),
+            ] {
+                let art = densest_frame(&pack, sprite, frame, scale)
+                    .expect("the bundled pack draws the prop");
+                for &key in keys {
+                    assert!(
+                        drawn_in(&art, &[key]).contains(&true),
+                        "{sprite} at scale {s} draws no {key:?}"
+                    );
+                }
+            }
+        }
     }
 
     /// The bundled pack is the one no user validates: a mis-sized `@Nx` variant

@@ -1229,26 +1229,10 @@ fn paint_desk_prop(
     let Some(f) = crate::pack::densest_frame(pack, prop.sprite, prop.frame, scale) else {
         return;
     };
-    let f_themed = f.recolorable.recolored(&desk_prop_overrides(theme));
+    let f_themed = f
+        .recolorable
+        .recolored(&crate::pack::desk_prop_overrides(theme));
     blit_frame_scaled(&f_themed, prop.at.0, prop.at.1, f.blit_at, buf);
-}
-
-/// The pack keys the desk props draw their cup's body and shadow in.
-const CUP_KEY: char = 'V';
-const CUP_SHADE_KEY: char = '%';
-/// The pack keys the token tower and its sheet draw their paper in.
-const PAPER_KEY: char = '¤';
-const PAPER_SHADE_KEY: char = '!';
-
-/// The pack keys the desk props take from the theme.
-fn desk_prop_overrides(theme: &Theme) -> [(char, pixtuoid_core::sprite::Pixel); 4] {
-    let f = &theme.furniture;
-    [
-        (CUP_KEY, Some(f.coffee_cup)),
-        (CUP_SHADE_KEY, Some(f.coffee_cup_shadow)),
-        (PAPER_KEY, Some(f.paper)),
-        (PAPER_SHADE_KEY, Some(f.paper_shade)),
-    ]
 }
 
 /// The pack keys art takes from the theme.
@@ -1529,10 +1513,7 @@ pub(crate) mod tests {
     use crate::display::compose::{PLATE_H, compose_at, ground_shadow, push_windows};
     use crate::display::{Piece, Span, fingerprint};
     use crate::glass_weather::GlassWeather;
-    use crate::pack::{
-        DESK_CUP_SPRITE, MEETING_SOFA_NORTH_SPRITE, NORTH_SOFA_SEAT_ROWS, TOKEN_SHEET_SPRITE,
-        TOKEN_TOWER_SPRITE, test_default_pack,
-    };
+    use crate::pack::{MEETING_SOFA_NORTH_SPRITE, NORTH_SOFA_SEAT_ROWS, test_default_pack};
 
     /// Relighting recolors the screen KEYS and nothing else — not even a pixel
     /// of another key the same colour as the glass — so the glow is exactly the
@@ -1659,31 +1640,6 @@ pub(crate) mod tests {
                 stood += 1;
             }
             assert!(stood > 0, "no desk stood its props");
-        }
-    }
-
-    /// Every key the desk props take a theme colour in is one their art draws,
-    /// at every density: a key renamed in the pack would stop the theme
-    /// reaching the prop.
-    #[test]
-    fn the_desk_props_draw_the_keys_the_theme_recolours() {
-        let pack = test_default_pack();
-        for s in [1, pack.max_density_variant().get()] {
-            let scale = RenderScale::new(s).expect("nonzero");
-            for (sprite, frame, keys) in [
-                (DESK_CUP_SPRITE, 0, &[CUP_KEY, CUP_SHADE_KEY][..]),
-                (TOKEN_TOWER_SPRITE, 0, &[PAPER_KEY, PAPER_SHADE_KEY]),
-                (TOKEN_SHEET_SPRITE, 0, &[PAPER_KEY]),
-            ] {
-                let art = crate::pack::densest_frame(&pack, sprite, frame, scale)
-                    .expect("the bundled pack draws the prop");
-                for &key in keys {
-                    assert!(
-                        drawn_in(&art, &[key]).contains(&true),
-                        "{sprite} at scale {s} draws no {key:?}"
-                    );
-                }
-            }
         }
     }
 

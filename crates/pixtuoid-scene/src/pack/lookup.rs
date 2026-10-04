@@ -24,6 +24,24 @@ pub(crate) const COOLER_WATER: Rgb = Rgb {
     b: 230,
 };
 
+/// The pack keys the desk props draw their cup's body and shadow in.
+pub(super) const CUP_KEY: char = 'V';
+pub(super) const CUP_SHADE_KEY: char = '%';
+/// The pack keys the token tower and its sheet draw their paper in.
+pub(super) const PAPER_KEY: char = '¤';
+pub(super) const PAPER_SHADE_KEY: char = '!';
+
+/// The pack keys the desk props take from the theme.
+pub(crate) fn desk_prop_overrides(theme: &crate::theme::Theme) -> [(char, Pixel); 4] {
+    let f = &theme.furniture;
+    [
+        (CUP_KEY, Some(f.coffee_cup)),
+        (CUP_SHADE_KEY, Some(f.coffee_cup_shadow)),
+        (PAPER_KEY, Some(f.paper)),
+        (PAPER_SHADE_KEY, Some(f.paper_shade)),
+    ]
+}
+
 /// The fixtures' [`appliance_overrides`].
 pub(crate) fn fixture_overrides(theme: &crate::theme::Theme) -> [(char, Pixel); 16] {
     let (f, o) = (&theme.furniture, &theme.office);
