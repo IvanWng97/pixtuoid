@@ -276,8 +276,10 @@ impl Office {
             .session
             .texts()
             .iter()
-            .filter_map(|run| match run.spans.as_slice() {
-                [marker, name] => Some((run.at, run.text(), marker.ink, name.ink)),
+            .filter_map(|run| match (run.role, run.spans.as_slice()) {
+                (pixtuoid_scene::display::TextRole::Badge(_), [marker, name]) => {
+                    Some((run.at, run.text(), marker.ink, name.ink))
+                }
                 _ => None,
             })
             .collect();
@@ -954,6 +956,7 @@ mod tests {
             .session
             .texts()
             .iter()
+            .filter(|run| matches!(run.role, pixtuoid_scene::display::TextRole::Badge(_)))
             .map(|run| (u64::from(run.at.x), u64::from(run.at.y)))
             .collect();
         assert!(!want.is_empty(), "premise: agents are drawn");

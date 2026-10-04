@@ -774,7 +774,7 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             office,
             crate::display::compose::tests::showing(ground, now0),
         );
-        let anchors: Vec<_> = list.texts().map(|run| run.at).collect();
+        let anchors: Vec<_> = list.badges().map(|run| run.at).collect();
         (buf.as_slice().to_vec(), anchors)
     };
 
@@ -3823,7 +3823,7 @@ fn both_looks_hang_a_badge_from_the_one_anchor() {
             scale: crate::render_scale::RenderScale::ONE,
         };
         let list = crate::display::compose::tests::list_at(frame, office, 12);
-        let cutaway: Vec<_> = list.texts().cloned().collect();
+        let cutaway: Vec<_> = list.badges().cloned().collect();
         assert!(!classic.is_empty(), "premise: the walker wears a badge");
         assert_eq!(cutaway, classic);
     }
@@ -5255,8 +5255,9 @@ fn badged_ids(drawn: &Drawn) -> Vec<pixtuoid_core::AgentId> {
     drawn
         .texts
         .iter()
-        .map(|run| match run.role {
-            crate::display::TextRole::Badge(id) => id,
+        .filter_map(|run| match run.role {
+            crate::display::TextRole::Badge(id) => Some(id),
+            _ => None,
         })
         .collect()
 }

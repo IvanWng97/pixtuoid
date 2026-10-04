@@ -10,7 +10,7 @@ use ratatui::widgets::{Block, Padding, Paragraph};
 
 use super::{StateKind, compact_hms, display_width, source_badge_span, state_color, to_color};
 use crate::tui::renderer::clip_widget_rect;
-use pixtuoid_scene::display::{GatewayCard, TextRole, TextRun};
+use pixtuoid_scene::display::{Align, GatewayCard, TextRole, TextRun};
 use pixtuoid_scene::overlay::disambig_suffix;
 use pixtuoid_scene::pet::PetKind;
 
@@ -42,39 +42,69 @@ fn flip_x_anchor(mx: u16, tip_w: u16, scene_rect: Rect) -> u16 {
     }
 }
 
-/// Paint each badge in `runs` as terminal text, centred over its anchor's
-/// column in the cell [`LABEL_GAP`](pixtuoid_scene::display::text::LABEL_GAP)
-/// logical rows above it; `hovered`'s reads `▸name` in bold white.
+/// Paint `runs` as terminal text, each where its align puts it: a badge in the
+/// cell [`LABEL_GAP`](pixtuoid_scene::display::text::LABEL_GAP) logical rows
+/// over its anchor, any other run in the cell its anchor lies in. The board's
+/// brand and star and the floor indicator are bold, the indicator padded a
+/// cell each side on its plate, and `hovered`'s badge reads `▸name` in bold
+/// white.
 pub(crate) fn paint_text_runs(
     f: &mut ratatui::Frame<'_>,
     runs: &[TextRun],
     scene_rect: Rect,
     hovered: Option<AgentId>,
 ) {
+    use ratatui::style::Modifier;
     for run in runs {
-        let TextRole::Badge(id) = run.role;
-        let spans = if hovered == Some(id) {
-            let name: String = run.spans.iter().skip(1).map(|s| s.text.as_str()).collect();
-            let style = Style::default()
-                .fg(Color::White)
-                .add_modifier(ratatui::style::Modifier::BOLD);
-            vec![Span::styled(format!("\u{25b8}{name}"), style)]
-        } else {
-            run.spans
+        let bold = matches!(
+            run.role,
+            TextRole::Brand | TextRole::Star | TextRole::Indicator
+        );
+        let style = |ink| {
+            let style = Style::default().fg(to_color(ink));
+            if bold {
+                style.add_modifier(Modifier::BOLD)
+            } else {
+                style
+            }
+        };
+        let spans = match (run.role, run.plate) {
+            (TextRole::Badge(id), _) if hovered == Some(id) => {
+                let name: String = run.spans.iter().skip(1).map(|s| s.text.as_str()).collect();
+                let style = Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD);
+                vec![Span::styled(format!("\u{25b8}{name}"), style)]
+            }
+            (TextRole::Indicator, Some(plate)) => run
+                .spans
                 .iter()
-                .map(|s| Span::styled(s.text.clone(), Style::default().fg(to_color(s.ink))))
-                .collect()
+                .map(|s| Span::styled(format!(" {} ", s.text), style(s.ink).bg(to_color(plate))))
+                .collect(),
+            _ => run
+                .spans
+                .iter()
+                .map(|s| Span::styled(s.text.clone(), style(s.ink)))
+                .collect(),
         };
         let line = Line::from(spans);
-        let half_w = u16::try_from(line.width() / 2).unwrap_or(u16::MAX);
-        let lx = scene_rect.x + run.at.x.saturating_sub(half_w);
+        let w = u16::try_from(line.width()).unwrap_or(u16::MAX);
         let gap = pixtuoid_scene::display::text::LABEL_GAP;
-        let ly = scene_rect.y + run.at.y.saturating_sub(gap) / 2;
+        let (x, y, width) = match run.align {
+            Align::Over => (
+                run.at.x.saturating_sub(w / 2),
+                run.at.y.saturating_sub(gap) / 2,
+                pixtuoid_scene::overlay::BADGE_CELLS,
+            ),
+            Align::Centre => (run.at.x.saturating_sub(w / 2), run.at.y / 2, w),
+            Align::Left => (run.at.x, run.at.y / 2, w),
+            Align::Right => (run.at.x.saturating_sub(w), run.at.y / 2, w),
+        };
         if let Some(r) = clip_widget_rect(
             Rect {
-                x: lx,
-                y: ly,
-                width: pixtuoid_scene::overlay::BADGE_CELLS,
+                x: scene_rect.x + x,
+                y: scene_rect.y + y,
+                width,
                 height: 1,
             },
             scene_rect,
@@ -511,6 +541,7 @@ mod tests {
         };
         super::TextRun {
             at,
+            align: super::Align::Over,
             spans: vec![
                 span(
                     &pixtuoid_scene::overlay::BADGE_MARKER.to_string(),
@@ -523,6 +554,93 @@ mod tests {
                 "/badge/0.jsonl",
             )),
         }
+    }
+
+    /// The board's lines land on the neon sign's interior: the brand leading
+    /// L1, the star flush to its right, the mood on L2 and the context on L3.
+    #[test]
+    fn the_board_runs_land_on_the_signs_interior() {
+        use pixtuoid_core::state::DaemonState;
+        use pixtuoid_scene::layout::{NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y};
+        let counts = pixtuoid_scene::board::StateCounts {
+            active: 2,
+            waiting: 1,
+            idle: 1,
+            exiting: 0,
+            total: 4,
+        };
+        let model = pixtuoid_scene::board::build_board(
+            counts,
+            0,
+            None,
+            Some(DaemonState::Idle),
+            pixtuoid_scene::anim::Motion::Full,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
+        let mut term = Terminal::new(TestBackend::new(120, 44)).unwrap();
+        let scene_rect = Rect::new(0, 0, 120, 44);
+        term.draw(|f| {
+            super::paint_text_runs(f, &model.runs(&theme::NORMAL), scene_rect, None);
+        })
+        .unwrap();
+        let buf = term.backend().buffer();
+        let row = |line: u16| -> String {
+            (0..NEON_PANEL_INNER_W)
+                .map(|dx| buf[(NEON_PANEL_INNER_X + dx, NEON_PANEL_INNER_Y / 2 + line)].symbol())
+                .collect()
+        };
+        let (l1, l2, l3) = (row(0), row(1), row(2));
+        assert!(
+            l1.starts_with(pixtuoid_scene::board::BOARD_BRAND),
+            "brand leads L1: {l1:?}"
+        );
+        assert!(l1.ends_with("\u{2605} Star"), "star flush right: {l1:?}");
+        assert!(
+            l2.contains("\u{25b2}1 wait")
+                && l2.contains("\u{25cf}2 work")
+                && l2.contains("\u{25cb}1 idle"),
+            "mood pulse (UNIX_EPOCH opens on the tally): {l2:?}"
+        );
+        assert!(l3.contains("\u{2b22}gw ok"), "gateway chip: {l3:?}");
+    }
+
+    /// The floor indicator centres on its anchor by display columns, not
+    /// bytes, padded a cell each side on its plate.
+    #[test]
+    fn the_indicator_centres_by_display_columns_on_its_plate() {
+        use pixtuoid_scene::layout::Point;
+        let theme = &theme::NORMAL;
+        let text = pixtuoid_scene::layout::floor_indicator_text(1);
+        let at = Point { x: 28, y: 8 };
+        let run = super::TextRun {
+            at,
+            align: super::Align::Centre,
+            spans: vec![pixtuoid_scene::display::TextSpan {
+                text: text.clone(),
+                ink: theme.ui.neon_brand,
+            }],
+            plate: Some(theme.ui.tooltip_bg),
+            role: super::TextRole::Indicator,
+        };
+        let mut term = Terminal::new(TestBackend::new(80, 30)).unwrap();
+        term.draw(|f| super::paint_text_runs(f, &[run], Rect::new(0, 0, 80, 30), None))
+            .unwrap();
+        let buf = term.backend().buffer();
+        let bg = super::to_color(theme.ui.tooltip_bg);
+        let cols: Vec<u16> = (0..80u16)
+            .filter(|&x| buf[(x, at.y / 2)].style().bg == Some(bg))
+            .collect();
+        let padded = format!(" {text} ");
+        assert_eq!(
+            cols.len(),
+            padded.chars().count(),
+            "its display-column width"
+        );
+        assert_eq!(
+            cols.first(),
+            Some(&(at.x - cols.len() as u16 / 2)),
+            "centred on its anchor"
+        );
     }
 
     /// A badge's text centres on its anchor, the sprite's top-centre.
@@ -618,7 +736,9 @@ mod tests {
             LabelTone::Idle,
             &theme::NORMAL,
         );
-        let super::TextRole::Badge(id) = speaker.role;
+        let super::TextRole::Badge(id) = speaker.role else {
+            unreachable!("built a badge");
+        };
         term.draw(|f| {
             let speakers = std::slice::from_ref(&speaker);
             super::paint_text_runs(f, speakers, scene_rect, None);

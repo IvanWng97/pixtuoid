@@ -630,6 +630,7 @@ fn a_sitters_depth_holds_through_their_breath() {
 fn badge_at(anchor: crate::layout::Point) -> TextRun {
     TextRun {
         at: anchor,
+        align: Align::Over,
         spans: vec![crate::display::TextSpan {
             text: "cc".into(),
             ink: pixtuoid_core::sprite::Rgb { r: 9, g: 9, b: 9 },
@@ -675,7 +676,8 @@ fn the_floor_indicator_stays_in_its_cell() {
         let pen = Pen::new(RenderScale::new(d.get()).expect("nonzero"), d.get())
             .expect("d divides itself");
         for floor in [1, 12, 99] {
-            let plate = indicator_plate(door, floor, pen);
+            let run = TextRun::indicator(door, floor, &crate::theme::NORMAL);
+            let plate = run_rect(&run, pen);
             let span = topmost_span(plate, pen);
             assert!(
                 rows.contains(&span.y0) && rows.contains(&span.y1),
@@ -696,15 +698,13 @@ fn the_star_sits_flush_with_the_interior_at_every_scale() {
     let pack = test_default_pack();
     for s in [1, pack.max_density_variant().get()] {
         let pen = Pen::for_pack(RenderScale::new(s).expect("nonzero"), &pack);
-        let board = quiet_board();
-        let runs = board_runs(board, pen);
-        let ((x, _), star) = runs[1];
+        let star = quiet_board()
+            .runs(&crate::theme::NORMAL)
+            .into_iter()
+            .find(|run| run.role == crate::display::TextRole::Star)
+            .expect("the star");
         assert_eq!(
-            star.text, board.star.text,
-            "premise: the second run is the star"
-        );
-        assert_eq!(
-            x.0 + crate::display::text::advance(&star.text).0,
+            run_rect(&star, pen).x.0 + crate::display::text::advance(&star.text()).0,
             pen.art(NEON_PANEL_INNER_X + NEON_PANEL_INNER_W).0,
             "at scale {s}"
         );
@@ -739,14 +739,18 @@ fn the_board_writes_inside_the_signs_interior() {
             crate::anim::Motion::Full,
             now,
         );
-        let span = board_span(&board, Pen::for_pack(scale, &pack));
-        assert!(
-            span.x0 >= NEON_PANEL_INNER_X
-                && span.x1 < NEON_PANEL_INNER_X + NEON_PANEL_INNER_W
-                && span.y0 >= NEON_PANEL_INNER_Y
-                && span.y1 < NEON_PANEL_INNER_Y + NEON_PANEL_INNER_H,
-            "{span:?} at +{ms}ms"
-        );
+        let pen = Pen::for_pack(scale, &pack);
+        for run in board.runs(&crate::theme::NORMAL) {
+            let span = topmost_span(run_rect(&run, pen), pen);
+            assert!(
+                span.x0 >= NEON_PANEL_INNER_X
+                    && span.x1 < NEON_PANEL_INNER_X + NEON_PANEL_INNER_W
+                    && span.y0 >= NEON_PANEL_INNER_Y
+                    && span.y1 < NEON_PANEL_INNER_Y + NEON_PANEL_INNER_H,
+                "{:?} {span:?} at +{ms}ms",
+                run.role
+            );
+        }
     }
 }
 
@@ -986,8 +990,6 @@ pub(crate) fn kind_name(kind: &PieceKind) -> &'static str {
         PieceKind::Text { .. } => "text",
         PieceKind::DeskProp(_) => "desk prop",
         PieceKind::Creature { .. } => "creature",
-        PieceKind::Board { .. } => "board",
-        PieceKind::Indicator { .. } => "indicator",
     }
 }
 

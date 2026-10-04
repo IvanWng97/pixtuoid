@@ -83,9 +83,10 @@ pub const LABEL_GAP: u16 = 2;
 /// has one. Its inks are resolved, so a painter reads no theme for it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TextRun {
-    /// The logical point it hangs from: a badge centres over it,
-    /// [`LABEL_GAP`] rows up.
+    /// The logical point it is placed by, as `align` says.
     pub at: Point,
+    /// Where `at` lies on its line.
+    pub align: Align,
     /// Its spans, in reading order.
     pub spans: Vec<TextSpan>,
     /// The fill behind it, if any.
@@ -103,11 +104,32 @@ pub struct TextSpan {
     pub ink: Rgb,
 }
 
+/// Where a [`TextRun`]'s `at` lies on its line, a cell row tall.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Align {
+    /// Centred over it, [`LABEL_GAP`] rows above: a badge over a head.
+    Over,
+    /// At its top-left.
+    Left,
+    /// At its top-right.
+    Right,
+    /// At its top-centre.
+    Centre,
+}
+
 /// What a [`TextRun`] labels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TextRole {
     /// An agent's name badge.
     Badge(AgentId),
+    /// The wall board's brand.
+    Brand,
+    /// The wall board's star: a link to the repo.
+    Star,
+    /// A line of the wall board's mood or context.
+    Board,
+    /// The floor indicator over the elevator.
+    Indicator,
 }
 
 impl TextRun {
@@ -124,6 +146,7 @@ impl TextRun {
         let ink = crate::overlay::badge_ink(&text, crate::overlay::tone_of(agent), theme);
         Self {
             at: anchor,
+            align: Align::Over,
             spans: vec![
                 TextSpan {
                     text: crate::overlay::BADGE_MARKER.to_string(),
@@ -139,9 +162,48 @@ impl TextRun {
         }
     }
 
+    /// The floor indicator naming floor `floor` (one-based) over the elevator
+    /// at `door`: centred on the door, in the cell over it, on the badge plate.
+    pub(crate) fn indicator(door: Point, floor: usize, theme: &Theme) -> Self {
+        Self {
+            at: Point {
+                x: door.x + crate::layout::ELEVATOR_W / 2,
+                y: crate::layout::floor_indicator_rows(door.y).start,
+            },
+            align: Align::Centre,
+            spans: vec![TextSpan {
+                text: crate::layout::floor_indicator_text(floor),
+                ink: theme.ui.neon_brand,
+            }],
+            plate: Some(crate::overlay::badge_plate(theme)),
+            role: TextRole::Indicator,
+        }
+    }
+
     /// Its spans' text, end to end.
     pub fn text(&self) -> String {
         self.spans.iter().map(|s| s.text.as_str()).collect()
+    }
+
+    /// The logical cells its line covers: one per cell of its text, a cell
+    /// row tall.
+    pub fn bounds(&self) -> crate::layout::Bounds {
+        let (w, h) = (cells(&self.text()), crate::layout::CELL_ROWS);
+        let x = match self.align {
+            Align::Left => self.at.x,
+            Align::Right => self.at.x.saturating_sub(w),
+            Align::Over | Align::Centre => self.at.x.saturating_sub(w / 2),
+        };
+        let y = match self.align {
+            Align::Over => self.at.y.saturating_sub(LABEL_GAP + h),
+            Align::Left | Align::Right | Align::Centre => self.at.y,
+        };
+        crate::layout::Bounds {
+            x,
+            y,
+            width: w,
+            height: h,
+        }
     }
 }
 

@@ -107,7 +107,8 @@ struct Classic {
 pub struct ClassicDrawn<'a> {
     /// The frame, for a painter's own wash over it (a modal's dim).
     pub pixels: &'a mut RgbBuffer,
-    /// Each drawn agent's badge, in paint order.
+    /// Its text in paint order: each drawn agent's badge, then the wall
+    /// board's lines and the floor indicator.
     pub texts: &'a [crate::display::TextRun],
     /// What the frame answers a pointer with.
     pub hovers: &'a Hovers,
@@ -158,12 +159,21 @@ impl Raster {
         }
     }
 
-    /// The badges the last classic frame drew, in paint order; none in another
+    /// The text the last classic frame set, in paint order; none in another
     /// look.
     pub(crate) fn classic_texts(&self) -> &[crate::display::TextRun] {
         match (self.shown, &self.classic) {
             (Some(Look::Classic), Some(classic)) => &classic.hits.texts,
             _ => &[],
+        }
+    }
+
+    /// The text the last frame drawn sets, in either look; `None` before the
+    /// first.
+    pub fn texts(&self) -> Option<&[crate::display::TextRun]> {
+        match self.shown? {
+            Look::Classic => self.classic.as_ref().map(|c| c.hits.texts.as_slice()),
+            Look::Cutaway { .. } => self.cutaway.as_ref()?.texts(),
         }
     }
 
@@ -227,6 +237,13 @@ pub fn render<'r>(
         .shown
         .replace(look)
         .is_none_or(|was| std::mem::discriminant(&was) != std::mem::discriminant(&look));
+    let board = crate::board::wall_board(
+        world.scene,
+        place.gateway,
+        place.floor,
+        world.floor.motion,
+        world.now,
+    );
     let (pixels, dirty) = match look {
         Look::Classic => {
             let classic = raster.classic();
@@ -245,17 +262,16 @@ pub fn render<'r>(
                 ),
                 &stepped.frame,
             );
+            classic.hits.texts.extend(board.runs(theme));
+            classic.hits.texts.push(crate::display::TextRun::indicator(
+                stepped.layout.door,
+                world.floor.floor_idx + 1,
+                theme,
+            ));
             classic.bubbles = std::mem::take(&mut stepped.frame.chitchat_bubbles);
             (&classic.buf, Dirty::All)
         }
         Look::Cutaway { scale } => {
-            let board = crate::board::wall_board(
-                world.scene,
-                place.gateway,
-                place.floor,
-                world.floor.motion,
-                world.now,
-            );
             let canvas = raster
                 .cutaway
                 .get_or_insert_with(|| CutawayCanvas::new(Arc::clone(&raster.pack)));

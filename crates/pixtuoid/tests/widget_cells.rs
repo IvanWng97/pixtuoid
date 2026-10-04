@@ -119,6 +119,7 @@ fn chitchat_bubble_text_appears_in_buffer() {
     let id = pixtuoid_core::AgentId::from_transcript_path("/chat/0.jsonl");
     let speaker = TextRun {
         at: Point { x: 30, y: 40 },
+        align: pixtuoid_scene::display::Align::Over,
         spans: Vec::new(),
         plate: None,
         role: TextRole::Badge(id),

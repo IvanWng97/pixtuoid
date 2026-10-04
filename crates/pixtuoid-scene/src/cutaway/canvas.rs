@@ -86,6 +86,7 @@ struct Shown {
     /// Every piece's reach and every light's span, each with its fingerprint.
     footprints: Vec<(Span, u64)>,
     hovers: Hovers,
+    texts: Vec<crate::display::TextRun>,
 }
 
 impl CutawayCanvas {
@@ -150,6 +151,7 @@ impl CutawayCanvas {
             epoch,
             footprints,
             hovers: list.hovers().clone(),
+            texts: list.texts().cloned().collect(),
         });
         CanvasFrame {
             buf: &self.buf,
@@ -165,6 +167,11 @@ impl CutawayCanvas {
     /// What the last frame answers a pointer with; `None` before the first.
     pub(crate) fn hovers(&self) -> Option<&Hovers> {
         self.shown.as_ref().map(|shown| &shown.hovers)
+    }
+
+    /// The text the last frame sets, in paint order; `None` before the first.
+    pub(crate) fn texts(&self) -> Option<&[crate::display::TextRun]> {
+        self.shown.as_ref().map(|shown| shown.texts.as_slice())
     }
 }
 
@@ -826,8 +833,8 @@ mod tests {
         assert_ne!(was.1, now.1, "its tone is in its fingerprint");
     }
 
-    /// The board's text is a piece of its own: a new tally repaints the board
-    /// and nothing else.
+    /// The board's lines are pieces of their own: a new tally repaints board
+    /// lines and nothing else.
     #[test]
     fn a_new_tally_repaints_only_the_board() {
         let h = Hovering::new();
@@ -843,7 +850,8 @@ mod tests {
             board: &busy,
             ..quiet
         };
-        let board = |showing| {
+        let board = |showing| -> Vec<Span> {
+            use crate::display::TextRole;
             let office = Office {
                 layout: &h.layout,
                 pack: &h.pack,
@@ -853,9 +861,12 @@ mod tests {
             compose(seated, office, showing)
                 .pieces()
                 .iter()
-                .find(|p| matches!(p.kind, crate::display::PieceKind::Board { .. }))
+                .filter(|p| {
+                    matches!(&p.kind, PieceKind::Text { run }
+                        if matches!(run.role, TextRole::Brand | TextRole::Star | TextRole::Board))
+                })
                 .map(|p| p.span)
-                .expect("the board")
+                .collect()
         };
         let mut canvas = CutawayCanvas::new(Arc::clone(&h.pack));
         h.show(&mut canvas, seated);
@@ -871,11 +882,18 @@ mod tests {
             h.scale.to_buffer(h.layout.buf_w),
             h.scale.to_buffer(h.layout.buf_h),
         );
-        let want: Vec<Bounds> = [board(quiet), board(busy)]
+        let lines: Vec<Bounds> = [board(quiet), board(busy)]
             .into_iter()
+            .flatten()
             .filter_map(|s| on_buffer(s, h.scale, size))
             .collect();
-        assert_eq!(dirty, Dirty::Rects(want));
+        let Dirty::Rects(rects) = dirty else {
+            panic!("a new tally repaints only where it changed: {dirty:?}");
+        };
+        assert!(
+            !rects.is_empty() && rects.iter().all(|r| lines.contains(r)),
+            "{rects:?} outside the board's lines {lines:?}"
+        );
     }
 
     /// A new layout of the same size repaints everything, even one built after

@@ -10,8 +10,8 @@ use crate::cutaway::shade::{Ramp, fill, slab};
 use crate::display::compose::{art_size, desk_art, desk_front_h};
 use crate::display::pen::{ArtPx, ArtRect, Pen};
 use crate::display::{
-    Art, DisplayList, Figure, Flip, Office, PLATE_PAD, PieceKind, Screen, Showing, StoodProp,
-    TextRun, WindowView, badge_plate, board_runs, compose, desk_span, face_rows, indicator_plate,
+    Align, Art, DisplayList, Figure, Flip, Office, PLATE_PAD, PieceKind, Screen, Showing,
+    StoodProp, TextRun, WindowView, compose, desk_span, face_rows, run_rect,
 };
 use crate::effects::EffectKind;
 use crate::layout::{Bounds, FixtureKind, Point, SceneLayout, Size};
@@ -69,29 +69,22 @@ impl Screen {
     }
 }
 
-/// Fill `plate` with `ground`, if any, then paint `runs` one after another
-/// inside it.
-fn paint_plate(
-    pen: Pen,
-    buf: &mut RgbBuffer,
-    plate: ArtRect,
-    ground: Option<pixtuoid_core::sprite::Rgb>,
-    runs: &[(&str, pixtuoid_core::sprite::Rgb)],
-) {
-    if let Some(ground) = ground {
-        pen.fill(buf, plate, ground);
+/// Paint `run`: its plate, if it has one, then its spans end to end from its
+/// line's start, inside the plate's pad where it sits on one.
+fn paint_run(run: &TextRun, pen: Pen, buf: &mut RgbBuffer) {
+    let rect = run_rect(run, pen);
+    if let Some(ground) = run.plate {
+        pen.fill(buf, rect, ground);
     }
-    let mut x = plate.x.0 + PLATE_PAD;
-    for &(text, ink) in runs {
-        crate::cutaway::text::paint(pen, buf, (ArtPx(x), plate.y), text, ink);
-        x += crate::display::text::advance(text).0;
+    let inset = match run.align {
+        Align::Over | Align::Centre => PLATE_PAD,
+        Align::Left | Align::Right => 0,
+    };
+    let mut x = rect.x.0 + inset;
+    for span in &run.spans {
+        crate::cutaway::text::paint(pen, buf, (ArtPx(x), rect.y), &span.text, span.ink);
+        x += crate::display::text::advance(&span.text).0;
     }
-}
-
-/// Paint badge `run` on its plate.
-fn paint_badge(run: &TextRun, pen: Pen, buf: &mut RgbBuffer) {
-    let spans: Vec<_> = run.spans.iter().map(|s| (s.text.as_str(), s.ink)).collect();
-    paint_plate(pen, buf, badge_plate(run, pen), run.plate, &spans);
 }
 
 /// Paint `frame`'s `office` into `buf` as an orthographic cutaway — the
@@ -221,10 +214,7 @@ fn paint_pieces(
                 let glow = match piece.kind {
                     PieceKind::Glass { .. } => Glow::Pane,
                     // A badge keeps the contrast its theme pins at every hour.
-                    PieceKind::Neon { .. }
-                    | PieceKind::Text { .. }
-                    | PieceKind::Board { .. }
-                    | PieceKind::Indicator { .. } => Glow::Emissive,
+                    PieceKind::Neon { .. } | PieceKind::Text { .. } => Glow::Emissive,
                     PieceKind::Effect(r) if r.effect.kind == EffectKind::FlameCrown => {
                         Glow::Emissive
                     }
@@ -314,9 +304,7 @@ fn mark(
         | PieceKind::Effect(_)
         | PieceKind::Neon { .. }
         | PieceKind::Clock { .. }
-        | PieceKind::Text { .. }
-        | PieceKind::Board { .. }
-        | PieceKind::Indicator { .. } => false,
+        | PieceKind::Text { .. } => false,
     }
 }
 
@@ -596,21 +584,7 @@ fn paint_piece(
         }
         PieceKind::Glass { ref view } => paint_glass(view, Pen::for_pack(scale, pack), buf),
         PieceKind::Hung { at, sprite } => paint_wall_decor(at, sprite, pack, scale, buf),
-        PieceKind::Text { ref run } => paint_badge(run, Pen::for_pack(scale, pack), buf),
-        PieceKind::Board { ref board } => {
-            let pen = Pen::for_pack(scale, pack);
-            for (at, seg) in board_runs(board, pen) {
-                let ink = crate::board::tone_rgb(seg.tone, theme);
-                crate::cutaway::text::paint(pen, buf, at, &seg.text, ink);
-            }
-        }
-        PieceKind::Indicator { door, floor } => {
-            let pen = Pen::for_pack(scale, pack);
-            let text = crate::layout::floor_indicator_text(floor);
-            let plate = indicator_plate(door, floor, pen);
-            let runs = [(text.as_str(), theme.ui.neon_brand)];
-            paint_plate(pen, buf, plate, Some(theme.ui.tooltip_bg), &runs);
-        }
+        PieceKind::Text { ref run } => paint_run(run, Pen::for_pack(scale, pack), buf),
     }
 }
 
@@ -1521,7 +1495,7 @@ mod tests {
         base_size, empty_frame, kind_name, list_at, lively_office, many_layouts, queued,
         quiet_board, showing, sit_down, sit_down_as, sit_down_in,
     };
-    use crate::display::compose::{PLATE_H, compose_at, ground_shadow, push_windows};
+    use crate::display::compose::{compose_at, ground_shadow, push_windows};
     use crate::display::{Piece, Span, fingerprint};
     use crate::glass_weather::GlassWeather;
     use crate::pack::{
@@ -1764,51 +1738,52 @@ mod tests {
         assert_eq!(far.x, near.x, "the seat side never moves the centring");
     }
 
-    /// A plate's runs and the board's segments step on one grid, wide
-    /// characters included: the run after `text` starts
+    /// A run's spans step on one grid, wide characters included, on a plate
+    /// or off one: the span after `text` starts
     /// [`advance`](crate::display::text::advance)`(text)` on.
     #[test]
-    fn plate_runs_and_board_columns_share_one_grid() {
-        use crate::board::{BoardSegment, BoardTone};
+    fn a_runs_spans_step_on_one_grid_on_a_plate_or_off_one() {
         use crate::display::text::advance;
+        use crate::display::{TextRole, TextSpan};
         use pixtuoid_core::sprite::Rgb;
         let pen = Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4");
         let (first, second) = ("I日b", "I");
-        let mut board = quiet_board().clone();
-        board.mood = [first, second]
-            .map(|text| BoardSegment {
-                text: text.into(),
-                tone: BoardTone::Idle,
-            })
-            .to_vec();
-        // Brand, star, then the mood line's segments.
-        let runs = board_runs(&board, pen);
-        let ((x0, _), _) = runs[2];
-        let ((x1, _), _) = runs[3];
-        assert_eq!(x1.0 - x0.0, advance(first).0, "the board");
         let (a, b) = (Rgb { r: 255, g: 0, b: 0 }, Rgb { r: 0, g: 255, b: 0 });
-        let mut buf = RgbBuffer::filled(64, 16, Rgb { r: 0, g: 0, b: 0 });
-        let plate = ArtRect {
-            x: ArtPx(0),
-            y: ArtPx(0),
-            w: ArtPx(40),
-            h: ArtPx(PLATE_H),
-        };
-        paint_plate(
-            pen,
-            &mut buf,
-            plate,
-            Some(Rgb { r: 1, g: 1, b: 1 }),
-            &[(first, a), (second, b)],
-        );
-        // An `I`'s top bar spans its whole cell, so its first ink is its run's start.
-        let left =
-            |ink| (0..buf.width()).find(|&x| (0..buf.height()).any(|y| buf.get(x, y) == ink));
-        let (la, lb) = (
-            left(a).expect("the first run"),
-            left(b).expect("the second run"),
-        );
-        assert_eq!(lb - la, advance(first).0, "the plate");
+        for (align, plate, role) in [
+            (Align::Left, None, TextRole::Board),
+            (
+                Align::Centre,
+                Some(Rgb { r: 1, g: 1, b: 1 }),
+                TextRole::Indicator,
+            ),
+        ] {
+            let run = TextRun {
+                at: Point { x: 8, y: 0 },
+                align,
+                spans: vec![
+                    TextSpan {
+                        text: first.into(),
+                        ink: a,
+                    },
+                    TextSpan {
+                        text: second.into(),
+                        ink: b,
+                    },
+                ],
+                plate,
+                role,
+            };
+            let mut buf = RgbBuffer::filled(96, 16, Rgb { r: 0, g: 0, b: 0 });
+            paint_run(&run, pen, &mut buf);
+            // An `I`'s top bar spans its whole cell, so its first ink is its span's start.
+            let left =
+                |ink| (0..buf.width()).find(|&x| (0..buf.height()).any(|y| buf.get(x, y) == ink));
+            let (la, lb) = (
+                left(a).expect("the first span"),
+                left(b).expect("the second span"),
+            );
+            assert_eq!(lb - la, advance(first).0, "{align:?}");
+        }
     }
 
     /// The layout leaves walkable rows between the wall band and `top_margin`.
@@ -3951,7 +3926,6 @@ mod tests {
             kinds.into_iter().collect::<Vec<_>>(),
             [
                 "animated",
-                "board",
                 "chair",
                 "character",
                 "clock",
@@ -3961,7 +3935,6 @@ mod tests {
                 "effect",
                 "glass",
                 "hung decor",
-                "indicator",
                 "neon",
                 "prop",
                 "prop band",
@@ -5086,7 +5059,7 @@ mod tests {
             }
             // Each drawn agent's badge, known by its text.
             let namesakes = crate::overlay::Namesakes::of(&frame.agents);
-            let mut badged: Vec<_> = list.texts().map(|run| run.spans[1].text.clone()).collect();
+            let mut badged: Vec<_> = list.badges().map(|run| run.spans[1].text.clone()).collect();
             let mut drawn: Vec<_> = hovers
                 .iter()
                 .filter_map(|&(id, _)| frame.agents.iter().find(|a| a.agent_id == id))

@@ -209,15 +209,28 @@ fn placeholders_fill_the_scene_and_never_the_footer() {
     assert_eq!(placeholders_in_row(&r, rows - 1), 0);
 }
 
-/// Its star link would launch a browser from a cell showing the image.
+/// The board's star is a link in both looks: the pointer finds it on the
+/// cells it is drawn on, the image's as the half-blocks'.
 #[test]
-fn the_cutaway_star_is_not_clickable() {
-    let (mut r, _wire) = kitty(120, 40);
-    r.render(&office(), pack(), t0()).expect("render");
-    assert!(!r.star_clickable());
+fn the_star_is_clickable_in_both_looks() {
+    use crate::tui::hit_test::SceneHit;
+    let (mut cutaway, _wire) = kitty(120, 40);
+    cutaway.render(&office(), pack(), t0()).expect("render");
     let mut classic = build(120, 40, vec![]);
     classic.render(&office(), pack(), t0()).expect("render");
-    assert!(classic.star_clickable());
+    let star_cells = |r: &dyn Fn(u16, u16) -> bool| {
+        (0..40u16)
+            .flat_map(|row| (0..120u16).map(move |col| (col, row)))
+            .filter(|&(col, row)| r(col, row))
+            .collect::<Vec<_>>()
+    };
+    let on_classic = star_cells(&|c, r| matches!(classic.scene_hit_at(c, r), Some(SceneHit::Star)));
+    let on_cutaway = star_cells(&|c, r| matches!(cutaway.scene_hit_at(c, r), Some(SceneHit::Star)));
+    assert!(!on_classic.is_empty(), "the classic's star is a link");
+    assert_eq!(
+        on_cutaway, on_classic,
+        "the cutaway's star is the same link"
+    );
 }
 
 /// A refused frame sends no tiles and leaves no hit targets behind.

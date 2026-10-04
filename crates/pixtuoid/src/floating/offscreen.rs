@@ -4,7 +4,6 @@
 //! `pixtuoid_scene::floor::FloorSession` across frames so walks stay continuous.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::{MAX_FLOORS, SceneState};
@@ -66,17 +65,6 @@ impl OfficeRenderer {
     /// The name badges of the LAST rendered frame (call right after `render`).
     pub fn texts(&self) -> &[TextRun] {
         self.session.texts()
-    }
-
-    /// The neon wall-board model for the current scene, its flap moving as
-    /// `motion` says.
-    pub fn board(
-        &self,
-        scene: &SceneState,
-        motion: pixtuoid_scene::anim::Motion,
-        now: SystemTime,
-    ) -> pixtuoid_scene::board::BoardModel {
-        self.session.board(scene, motion, now)
     }
 
     /// The status-footer model for the current scene — single-floor, so `floor = None`
@@ -266,9 +254,11 @@ impl<'a> XrgbSurface<'a> {
 /// `anchor_px` is office-buffer space → multiply by `scale` for screen space; the badge
 /// is centered horizontally over the anchor and sits just above the head. Drawn at
 /// native surface res, not upscaled, so it stays a sharp caption over the chunky sprites.
-pub fn paint_labels_into_surface(sb: &mut XrgbSurface<'_>, badges: &[TextRun], scale: i32) {
-    for run in badges {
-        let [marker, name] = run.spans.as_slice() else {
+pub fn paint_labels_into_surface(sb: &mut XrgbSurface<'_>, runs: &[TextRun], scale: i32) {
+    for run in runs {
+        let (pixtuoid_scene::display::TextRole::Badge(_), [marker, name]) =
+            (run.role, run.spans.as_slice())
+        else {
             continue;
         };
         let tw = crate::aa_text::text_width(&run.text(), LABEL_FONT_PX);
@@ -286,21 +276,12 @@ pub fn paint_labels_into_surface(sb: &mut XrgbSurface<'_>, badges: &[TextRun], s
 /// text ANCHORS to it and SCALES with the office `scale` (unlike the fixed-height name
 /// badges) — the three rows always fit inside the glowing frame. At a very small office
 /// scale the rows would be sub-legible; there we leave the panel empty rather than mush.
-pub fn paint_wall_board_into_surface(
-    sb: &mut XrgbSurface<'_>,
-    board: &pixtuoid_scene::board::BoardModel,
-    scale: i32,
-    theme: &Theme,
-) {
-    use pixtuoid_scene::layout::{
-        NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
-    };
+pub fn paint_wall_board_into_surface(sb: &mut XrgbSurface<'_>, runs: &[TextRun], scale: i32) {
+    use pixtuoid_scene::display::{Align, TextRole};
+    use pixtuoid_scene::layout::NEON_PANEL_INNER_H;
     if scale <= 0 {
         return;
     }
-    let inner_x = NEON_PANEL_INNER_X as i32 * scale;
-    let inner_y = NEON_PANEL_INNER_Y as i32 * scale;
-    let inner_w = NEON_PANEL_INNER_W as i32 * scale;
     let row_h = NEON_PANEL_INNER_H as i32 * scale / 3;
     // Below this a row can't hold a legible glyph — leave the empty glowing panel.
     const MIN_ROW_PX: i32 = 4;
@@ -309,31 +290,25 @@ pub fn paint_wall_board_into_surface(
     }
     // Fill ~85% of the row so descenders don't collide with the next row.
     let font_px = row_h as f32 * 0.85;
-    let glow = |tone| pack_xrgb(pixtuoid_scene::board::tone_rgb(tone, theme));
-
-    sb.draw_shadowed_text(
-        &board.brand.text,
-        inner_x,
-        inner_y,
-        font_px,
-        glow(board.brand.tone),
-    );
-    let star_w = crate::aa_text::text_width(&board.star.text, font_px);
-    let star_x = inner_x + (inner_w - star_w).max(0);
-    sb.draw_shadowed_text(
-        &board.star.text,
-        star_x,
-        inner_y,
-        font_px,
-        glow(board.star.tone),
-    );
-
-    for (row, segs) in [(1, &board.mood), (2, &board.context)] {
-        let mut x = inner_x;
-        let y = inner_y + row * row_h;
-        for seg in segs {
-            sb.draw_shadowed_text(&seg.text, x, y, font_px, glow(seg.tone));
-            x += crate::aa_text::text_width(&seg.text, font_px);
+    let board = runs
+        .iter()
+        .filter(|run| matches!(run.role, TextRole::Brand | TextRole::Star | TextRole::Board));
+    for run in board {
+        let width: i32 = run
+            .spans
+            .iter()
+            .map(|s| crate::aa_text::text_width(&s.text, font_px))
+            .sum();
+        let at = run.at.x as i32 * scale;
+        let mut x = match run.align {
+            Align::Right => (at - width).max(0),
+            Align::Over | Align::Centre => at - width / 2,
+            Align::Left => at,
+        };
+        let y = run.at.y as i32 * scale;
+        for span in &run.spans {
+            sb.draw_shadowed_text(&span.text, x, y, font_px, pack_xrgb(span.ink));
+            x += crate::aa_text::text_width(&span.text, font_px);
         }
     }
 }
@@ -380,6 +355,7 @@ mod tests {
         };
         TextRun {
             at,
+            align: pixtuoid_scene::display::Align::Over,
             spans: vec![
                 span(
                     &pixtuoid_scene::overlay::BADGE_MARKER.to_string(),
@@ -841,14 +817,14 @@ mod tests {
             pixtuoid_scene::anim::Motion::Full,
             std::time::SystemTime::UNIX_EPOCH,
         );
+        let runs = board.runs(theme);
         let scale = 8i32;
         let (w, h) = (320usize, 96usize);
         let mut sb = vec![0u32; w * h];
         paint_wall_board_into_surface(
             &mut XrgbSurface::new(&mut sb, w, h).expect("sized"),
-            &board,
+            &runs,
             scale,
-            theme,
         );
         assert!(
             sb.contains(&pack_xrgb(theme.ui.neon_brand)),
@@ -861,9 +837,8 @@ mod tests {
         let mut tiny = vec![0u32; w * h];
         paint_wall_board_into_surface(
             &mut XrgbSurface::new(&mut tiny, w, h).expect("sized"),
-            &board,
+            &runs,
             1,
-            theme,
         );
         assert!(
             tiny.iter().all(|&p| p == 0),
@@ -1183,7 +1158,11 @@ mod tests {
             place: pixtuoid_scene::look::Place::default(),
             debug_walkable: false,
         });
-        let badges = renderer.texts();
+        let badges: Vec<_> = renderer
+            .texts()
+            .iter()
+            .filter(|run| matches!(run.role, pixtuoid_scene::display::TextRole::Badge(_)))
+            .collect();
         assert_eq!(badges.len(), 1, "one seeded agent → one name badge");
         let anchor = badges[0].at;
         assert!(

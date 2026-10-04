@@ -6,7 +6,6 @@ use pixtuoid_scene::board::{StateCounts, gateway_rollup, per_floor_counts, scene
 use pixtuoid_scene::footer::{FooterFloor, FooterInputs};
 use std::path::PathBuf;
 use std::sync::Arc;
-use wall_board::BOARD_W;
 
 fn stat_slot(path: &str, state: ActivityState, exiting: bool) -> AgentSlot {
     let now = SystemTime::UNIX_EPOCH;
@@ -764,14 +763,5 @@ fn footer_cross_floor_alarm_points_at_waiting_floor() {
     assert!(
         line.contains("\u{25b2}F2"),
         "cross-floor waiting cue: {line}"
-    );
-}
-
-#[test]
-fn board_width_pins_to_neon_panel_interior() {
-    assert_eq!(
-        BOARD_W,
-        pixtuoid_scene::layout::NEON_PANEL_INNER_W,
-        "board width must equal the painted panel's dark interior width"
     );
 }

@@ -164,7 +164,10 @@ fn main() -> Result<()> {
             },
             theme,
             size: Size { w: ow, h: oh },
-            place: pixtuoid_scene::look::Place::default(),
+            place: pixtuoid_scene::look::Place {
+                gateway: pixtuoid_scene::board::office_gateway(&scene),
+                floor: None,
+            },
             debug_walkable: false,
         })
         .expect("a frame");
@@ -174,16 +177,10 @@ fn main() -> Result<()> {
     surf.fill_upscaled(buf, scale as usize);
     let (bw, bh) = (buf.width(), buf.height());
     paint_labels_into_surface(&mut surf, renderer.texts(), scale as i32);
-    let board = renderer.board(
-        &scene,
-        pixtuoid_scene::floor::FloorMeta::ground().motion,
-        now,
-    );
     pixtuoid::floating::offscreen::paint_wall_board_into_surface(
         &mut surf,
-        &board,
+        renderer.texts(),
         scale as i32,
-        theme,
     );
     // Audible so the ♩ suffix shows; no transient flash in a static snapshot.
     let budget = pixtuoid::floating::offscreen::footer_budget(ww);

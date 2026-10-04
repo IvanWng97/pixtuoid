@@ -4,7 +4,7 @@ use pixtuoid_core::sprite::format::Pack;
 
 use super::Span;
 use crate::atmosphere::Carpet;
-use crate::layout::{Bounds, Point};
+use crate::layout::Bounds;
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
@@ -198,10 +198,18 @@ impl<'a> DisplayList<'a> {
     }
 
     /// Each text run, in draw order.
-    #[cfg(test)]
     pub(crate) fn texts(&self) -> impl Iterator<Item = &super::TextRun> + '_ {
         self.pieces.iter().filter_map(|p| match &p.kind {
             PieceKind::Text { run } => Some(run),
+            _ => None,
+        })
+    }
+
+    /// Each agent's badge, in draw order.
+    #[cfg(test)]
+    pub(crate) fn badges(&self) -> impl Iterator<Item = &super::TextRun> + '_ {
+        self.pieces.iter().filter_map(|p| match &p.kind {
+            PieceKind::Text { run } if matches!(run.role, super::TextRole::Badge(_)) => Some(run),
             _ => None,
         })
     }
@@ -253,8 +261,6 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
             body: _,
         } => (at, shadow, key, chair).hash(&mut h),
         PieceKind::Text { ref run } => run.hash(&mut h),
-        PieceKind::Board { ref board } => board.hash(&mut h),
-        PieceKind::Indicator { door, floor } => (door, floor).hash(&mut h),
         PieceKind::Glass { ref view } => view.hash(&mut h),
         PieceKind::Hung { at, sprite } => (at, sprite).hash(&mut h),
         PieceKind::Effect(riding) => riding.hash(&mut h),
@@ -300,9 +306,7 @@ impl PieceKind {
             | PieceKind::Creature { .. }
             | PieceKind::Character { .. }
             | PieceKind::Effect(_)
-            | PieceKind::Text { .. }
-            | PieceKind::Board { .. }
-            | PieceKind::Indicator { .. } => false,
+            | PieceKind::Text { .. } => false,
         }
     }
 }
@@ -403,15 +407,6 @@ pub(crate) enum PieceKind {
     /// A line of text over everything it meets.
     Text {
         run: super::TextRun,
-    },
-    /// The wall board's text, over the neon sign's interior.
-    Board {
-        board: crate::board::BoardModel,
-    },
-    /// The floor indicator over the elevator at `door`.
-    Indicator {
-        door: Point,
-        floor: usize,
     },
 }
 

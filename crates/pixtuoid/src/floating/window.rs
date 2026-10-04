@@ -174,7 +174,10 @@ impl FloatingApp {
             },
             theme: self.theme,
             size: Size { w: buf_w, h: buf_h },
-            place: Place::default(),
+            place: Place {
+                gateway: pixtuoid_scene::board::office_gateway(&scene),
+                floor: None,
+            },
             debug_walkable: false,
         });
         let Some(surface) = self.surface.as_mut() else {
@@ -195,12 +198,10 @@ impl FloatingApp {
         };
         surf.fill_upscaled(office, scale);
         super::offscreen::paint_labels_into_surface(&mut surf, self.renderer.texts(), scale as i32);
-        let board = self.renderer.board(&scene, floor_meta.motion, now);
         super::offscreen::paint_wall_board_into_surface(
             &mut surf,
-            &board,
+            self.renderer.texts(),
             scale as i32,
-            self.theme,
         );
         let budget = super::offscreen::footer_budget(win_w);
         let footer = self

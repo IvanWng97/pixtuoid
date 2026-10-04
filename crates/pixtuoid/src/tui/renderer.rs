@@ -13,7 +13,7 @@ use ratatui::style::Color;
 
 use std::sync::Arc;
 
-use pixtuoid_scene::display::{GatewayCard, HoverTarget, Hovers, PetHover};
+use pixtuoid_scene::display::{GatewayCard, HoverTarget, Hovers, PetHover, TextRole, TextRun};
 use pixtuoid_scene::floor::{FloorInputs, OfficeStores, PerFloor};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
 use pixtuoid_scene::layout::{SceneLayout, Size};
@@ -24,9 +24,8 @@ pub(crate) use crate::tui::hit_test::{SceneHit, scene_hit};
 pub(crate) use crate::tui::widgets::{TooltipAt, paint_hover_tooltip};
 pub(super) use crate::tui::widgets::{
     paint_chitchat_bubbles, paint_coffee_tooltip, paint_connection_panel, paint_dashboard,
-    paint_elevator_indicator, paint_footer, paint_furniture_tooltip, paint_help_overlay,
-    paint_mascot_tooltip, paint_pet_tooltip, paint_text_runs, paint_theme_picker,
-    paint_version_popup, paint_wall_display, paint_welcome,
+    paint_footer, paint_furniture_tooltip, paint_help_overlay, paint_mascot_tooltip,
+    paint_pet_tooltip, paint_text_runs, paint_theme_picker, paint_version_popup, paint_welcome,
 };
 
 pub use pixtuoid_scene::pet::PetState;
@@ -105,6 +104,8 @@ pub struct DrawOut {
     /// `None` when the frame was refused.
     pub layout: Option<Arc<SceneLayout>>,
     pub hovers: Hovers,
+    /// The board's star, a link the pointer finds.
+    pub star: Option<pixtuoid_scene::layout::Bounds>,
     pub occupied_waypoints: std::collections::HashSet<usize>,
     /// Where the frame lies under the cells; `None` when it was refused.
     pub(crate) geometry: Option<SceneGeometry>,
@@ -324,6 +325,7 @@ pub(crate) fn paint_scene_tooltip(
         }
         SceneHit::Coffee => paint_coffee_tooltip(f, at, theme),
         SceneHit::Furniture(label) => paint_furniture_tooltip(f, label, at, theme),
+        SceneHit::Star => {}
     }
 }
 
@@ -343,7 +345,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let world = ctx.world;
     let FloorInputs { scene, now, .. } = world;
     let footer = FooterInputs::new(scene, ctx.footer);
-    let floor_info = footer.context.floor;
     let overlays = OverlayFrame {
         theme_picker: ctx.theme_picker,
         dashboard: ctx.dashboard,
@@ -367,7 +368,10 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             world,
             theme,
             size: Size { w: buf_w, h: buf_h },
-            place: Place::default(),
+            place: Place {
+                gateway: footer.context.gateway,
+                floor: footer.context.floor,
+            },
             debug_walkable: ctx.debug_walkable,
         },
     );
@@ -393,7 +397,12 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 
     let mouse_pos = ctx.mouse_pos;
     let geometry = SceneGeometry::half_block(scene_rect);
-    let hit = mouse_pos.and_then(|(mx, my)| scene_hit(hovers, &layout, geometry.area_at(mx, my)?));
+    let star = texts
+        .iter()
+        .find(|run| run.role == TextRole::Star)
+        .map(TextRun::bounds);
+    let hit =
+        mouse_pos.and_then(|(mx, my)| scene_hit(hovers, star, &layout, geometry.area_at(mx, my)?));
     let hovered = match hit {
         Some(SceneHit::Figure(HoverTarget::Agent(id))) => Some(*id),
         _ => None,
@@ -403,13 +412,12 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     // up for a beat AFTER the card is gone.
     apply_dim(pixels, ctx.onboarding.dim);
 
-    let board = pixtuoid_scene::board::wall_board(
-        scene,
-        footer.context.gateway,
-        footer.context.floor,
-        ctx.world.floor.motion,
-        now,
-    );
+    // Badges first, then the signs; a bubble lands between, as it always has.
+    let signs = texts
+        .iter()
+        .position(|run| !matches!(run.role, TextRole::Badge(_)))
+        .unwrap_or(texts.len());
+    let (badges, signs) = texts.split_at(signs);
     let buf = &*pixels;
     term.draw(|f| {
         // Re-derive rects from the actual frame buffer to guard against
@@ -418,12 +426,9 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
         paint_footer(f, &footer, actual_full, theme);
         flush_buffer_to_term(f, buf, actual_scene);
-        paint_text_runs(f, texts, actual_scene, hovered);
-        paint_chitchat_bubbles(f, chitchat_bubbles, texts, actual_scene, theme);
-        paint_wall_display(f, &board, actual_scene, theme);
-        let door = layout.door;
-        let current = floor_info.map(|fi| fi.current).unwrap_or(1);
-        paint_elevator_indicator(f, door, current, actual_scene, theme);
+        paint_text_runs(f, badges, actual_scene, hovered);
+        paint_chitchat_bubbles(f, chitchat_bubbles, badges, actual_scene, theme);
+        paint_text_runs(f, signs, actual_scene, None);
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,
             my,
@@ -437,6 +442,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     Ok(DrawOut {
         layout: Some(layout),
         hovers: hovers.clone(),
+        star,
         occupied_waypoints,
         geometry: Some(geometry),
     })

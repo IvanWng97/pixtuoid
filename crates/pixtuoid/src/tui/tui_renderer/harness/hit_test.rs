@@ -339,7 +339,8 @@ fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
             out.layout.as_deref().expect("drawn"),
             out.geometry.expect("drawn"),
         );
-        let hits = |at: CellArea| crate::tui::hit_test::scene_hit(&out.hovers, layout, at);
+        let hits =
+            |at: CellArea| crate::tui::hit_test::scene_hit(&out.hovers, out.star, layout, at);
         let mut seen = [false; 5];
         for (col, row) in (0..rows).flat_map(|row| (0..cols).map(move |col| (col, row))) {
             let half_block = hits(CellArea::half_block(col, row));
@@ -564,7 +565,7 @@ pub(super) fn the_tooltip_names_what_a_click_acts_on<B>(
                 (2, format!("OpenClaw:{} gateway", key.instance().as_str()))
             }
             Some(SceneHit::Coffee) => (3, "Buy Ivan a coffee".to_string()),
-            Some(SceneHit::Furniture(_)) | None => continue,
+            Some(SceneHit::Star | SceneHit::Furniture(_)) | None => continue,
         };
         seen[kind] = true;
         named.push(((col, row), says));

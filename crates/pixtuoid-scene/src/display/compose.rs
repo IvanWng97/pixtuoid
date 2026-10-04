@@ -11,7 +11,7 @@ use super::{
 };
 use crate::atmosphere::Moment;
 use crate::display::pen::{ArtPx, ArtRect, Pen};
-use crate::display::text::{LABEL_GAP, TextRun};
+use crate::display::text::{Align, LABEL_GAP, TextRun};
 use crate::glass_weather::GlassWeather;
 use crate::layout::{
     Bounds, DESK_H, Depth, Fixture, FixtureKind, Point, SceneLayout, Size, Station, Tie,
@@ -76,86 +76,35 @@ pub(crate) fn badge_plate(run: &TextRun, pen: Pen) -> ArtRect {
     )
 }
 
-/// The floor indicator over the elevator at `door`, naming floor `floor`: a
-/// plate filling the cell the classic writes it across
-/// ([`floor_indicator_rows`](crate::layout::floor_indicator_rows)), not a
-/// badge's [`PLATE_H`], which would run into the door below. Under the pack's
-/// density the cell is shorter than a line, and the plate keeps the line.
-pub(crate) fn indicator_plate(door: Point, floor: usize, pen: Pen) -> ArtRect {
-    let rows = crate::layout::floor_indicator_rows(door.y);
-    ArtRect {
-        h: ArtPx(
-            pen.art(rows.end - rows.start)
-                .0
-                .max(crate::display::text::LINE_H),
-        ),
-        ..plate_at(
-            pen.art(door.x + crate::layout::ELEVATOR_W / 2),
-            pen.art(rows.start),
-            &crate::layout::floor_indicator_text(floor),
-        )
-    }
-}
-
-/// Each run of `board` and its top-left on the art grid, as the classic's
-/// terminal board lays it: line `i` on the neon interior's `i`th cell row,
-/// one cell a column, the star flush with the interior's right edge.
-pub(crate) fn board_runs(
-    board: &crate::board::BoardModel,
-    pen: Pen,
-) -> Vec<((ArtPx, ArtPx), &crate::board::BoardSegment)> {
-    use crate::layout::{CELL_ROWS, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y};
-    let pad = pen
-        .art(CELL_ROWS)
-        .0
-        .saturating_sub(crate::display::text::LINE_H)
-        / 2;
-    let at = |col: u16, line: u16| {
-        (
-            ArtPx(pen.art(NEON_PANEL_INNER_X).0 + crate::display::text::columns(col).0),
-            ArtPx(pen.art(NEON_PANEL_INNER_Y + line * CELL_ROWS).0 + pad),
-        )
-    };
-    let cols = |s: &crate::board::BoardSegment| crate::display::text::cells(&s.text);
-    let right = pen.art(NEON_PANEL_INNER_X + NEON_PANEL_INNER_W).0;
-    let star = (
-        ArtPx(right.saturating_sub(crate::display::text::advance(&board.star.text).0)),
-        at(0, 0).1,
-    );
-    let mut runs = vec![(at(0, 0), &board.brand), (star, &board.star)];
-    for (line, segs) in (1..).zip([&board.mood, &board.context]) {
-        let mut col = 0;
-        for seg in segs {
-            runs.push((at(col, line), seg));
-            col += cols(seg);
+/// Where `run`'s line lands on the art grid: the plate a badge or the floor
+/// indicator sits on, else the box its glyphs ink. The indicator's plate fills
+/// the cell the classic writes it across, not a badge's [`PLATE_H`], which
+/// would run into the door below; under the pack's density the cell is
+/// shorter than a line, and the plate keeps the line.
+pub(crate) fn run_rect(run: &TextRun, pen: Pen) -> ArtRect {
+    use crate::display::text::{LINE_H, advance, width};
+    let text = run.text();
+    let cell = pen.art(crate::layout::CELL_ROWS).0;
+    match run.align {
+        Align::Over => badge_plate(run, pen),
+        Align::Centre => ArtRect {
+            h: ArtPx(cell.max(LINE_H)),
+            ..plate_at(pen.art(run.at.x), pen.art(run.at.y), &text)
+        },
+        Align::Left | Align::Right => {
+            let x = pen.art(run.at.x).0;
+            let x = match run.align {
+                Align::Right => x.saturating_sub(advance(&text).0),
+                _ => x,
+            };
+            ArtRect {
+                x: ArtPx(x),
+                y: ArtPx(pen.art(run.at.y).0 + cell.saturating_sub(LINE_H) / 2),
+                w: ArtPx(width(&text).0.max(1)),
+                h: ArtPx(LINE_H),
+            }
         }
     }
-    runs
-}
-
-/// The cells `board`'s text covers.
-fn board_span(board: &crate::board::BoardModel, pen: Pen) -> Span {
-    let runs = board_runs(board, pen);
-    let x1 = runs
-        .iter()
-        .map(|((x, _), s)| x.0 + crate::display::text::width(&s.text).0)
-        .max()
-        .unwrap_or(0);
-    let y1 = runs
-        .iter()
-        .map(|((_, y), _)| y.0 + crate::display::text::LINE_H)
-        .max()
-        .unwrap_or(0);
-    let (x0, y0) = runs.first().map_or((ArtPx(0), ArtPx(0)), |&(at, _)| at);
-    topmost_span(
-        ArtRect {
-            x: x0,
-            y: y0,
-            w: ArtPx(x1.saturating_sub(x0.0).max(1)),
-            h: ArtPx(y1.saturating_sub(y0.0).max(1)),
-        },
-        pen,
-    )
 }
 
 /// What a cutaway frame is drawn with and the next one is too: the office
@@ -460,9 +409,7 @@ pub(crate) fn ground_shadow(
         | PieceKind::Neon { .. }
         | PieceKind::Clock { .. }
         | PieceKind::Effect(_)
-        | PieceKind::Text { .. }
-        | PieceKind::Board { .. }
-        | PieceKind::Indicator { .. } => None,
+        | PieceKind::Text { .. } => None,
         PieceKind::Character {
             ref figure,
             body,
@@ -491,27 +438,26 @@ pub(crate) fn ground_shadow(
     }
 }
 
-/// The room's signs: the wall board's text, and the floor indicator naming
-/// floor `floor_idx`.
+/// The room's signs: the wall board's lines, and the floor indicator naming
+/// floor `floor_idx`'s number over the elevator.
 fn signs(
     office: Office<'_>,
     floor_idx: usize,
     board: &crate::board::BoardModel,
-) -> [(Span, PieceKind); 2] {
+) -> Vec<(Span, PieceKind)> {
     let pen = Pen::for_pack(office.scale, office.pack);
-    let (door, floor) = (office.layout.door, floor_idx + 1);
-    [
-        (
-            board_span(board, pen),
-            PieceKind::Board {
-                board: board.clone(),
-            },
-        ),
-        (
-            topmost_span(indicator_plate(door, floor, pen), pen),
-            PieceKind::Indicator { door, floor },
-        ),
-    ]
+    let indicator = TextRun::indicator(office.layout.door, floor_idx + 1, office.theme);
+    board
+        .runs(office.theme)
+        .into_iter()
+        .chain([indicator])
+        .map(|run| {
+            (
+                topmost_span(run_rect(&run, pen), pen),
+                PieceKind::Text { run },
+            )
+        })
+        .collect()
 }
 
 /// Every piece of the office, each with its [`Span`]. At one depth and layer,
