@@ -27,7 +27,7 @@ paraphrase here.
    mechanical check (test lists, mutations, renders, a walk), `opus` only for
    a design gate. CI already built the evidence; a lens builds only what it
    can't show (a render, a WALK, a domain probe):
-   - the test list: `scripts/test-list-diff.py <pr>`;
+   - the test list: `scripts/test-list-diff.py <pr>` (Linux's: a Windows- or macOS-only test is checked on its OS);
    - mutants: the `review-evidence` artifact of
      [`review-evidence.yml`](../../../.github/workflows/review-evidence.yml)'s
      run at the head (`gh run download <run> -n review-evidence`). Its
