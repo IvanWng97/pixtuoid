@@ -5,10 +5,10 @@ use pixtuoid_core::sprite::blit::blit_frame_scaled;
 use pixtuoid_core::sprite::format::Pack;
 
 use crate::atmosphere::Carpet;
-use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::cutaway::shade::{Ramp, fill, slab};
 #[cfg(test)]
 use crate::display::compose::{art_size, desk_art, desk_front_h};
+use crate::display::pen::{ArtPx, ArtRect, Pen};
 use crate::display::{
     Art, Badge, DisplayList, Figure, Flip, Office, PLATE_PAD, PieceKind, Screen, Showing,
     StoodProp, board_runs, compose, desk_span, face_rows, indicator_plate,
@@ -573,7 +573,9 @@ fn paint_piece(
         }
         PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
         PieceKind::DeskProp(prop) => paint_desk_prop(prop, pack, theme, scale, buf),
-        PieceKind::Creature { at, art, degraded } => {
+        PieceKind::Creature {
+            at, art, degraded, ..
+        } => {
             paint_creature(at, art, degraded, pack, scale, buf);
         }
         PieceKind::Effect(ref riding) => riding.paint(theme, buf),
@@ -1524,7 +1526,7 @@ fn paint_chair(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
     use crate::anim::Motion;
     use crate::atmosphere::Moment;
@@ -3913,7 +3915,7 @@ pub(crate) mod tests {
             .collect()
     }
 
-    pub(crate) fn moment_at(w: crate::sky::Weather, now: std::time::SystemTime) -> Moment {
+    fn moment_at(w: crate::sky::Weather, now: std::time::SystemTime) -> Moment {
         Moment::resolve(
             crate::sky::Sky::at_with(now, w),
             &crate::theme::NORMAL,
@@ -4201,15 +4203,9 @@ pub(crate) mod tests {
         }
     }
 
-    /// The pet and the gateway mascots stand as figures: each paints only
-    /// inside its span at every density, sorts on its feet's row as the
-    /// classic sorts it, faces as the sim turns it, grounds its shadow, and has
-    /// what rides on it straight after it; a degraded gateway's art is greyed.
-    #[test]
-    fn creatures_stand_as_figures_with_their_riders_after_them() {
-        use crate::layout::{Pivot, sort_row_at};
-        let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pack = test_default_pack();
+    /// A cat and two gateways of one source, the second degraded and nearer
+    /// the viewer, so it sorts last.
+    fn creatures() -> (SceneLayout, SimFrame) {
         let layout = SceneLayout::compute_with_seed(160, 96, None, 0).expect("lays out");
         let mut frame = empty_frame(&layout);
         let (cat, lobster) = (Point { x: 40, y: 70 }, Point { x: 110, y: 70 });
@@ -4226,9 +4222,8 @@ pub(crate) mod tests {
             size: crate::layout::Size { w: 14, h: 12 },
             anim_name: "lobster_walk",
             frame_idx: 0,
-            name: "OpenClaw",
-            instance: None,
-            state: pixtuoid_core::state::DaemonState::Busy,
+            key: crate::creatures::openclaw_key("18789"),
+            degraded: false,
             effects: crate::effects::mascot_bubbles(
                 lobster,
                 12,
@@ -4236,16 +4231,133 @@ pub(crate) mod tests {
                 Motion::Full.beat(std::time::UNIX_EPOCH),
             )
             .collect(),
-            active_sessions: 1,
         }];
-        // a second gateway, degraded, nearer the viewer so it sorts last
         let sick = Point { x: 110, y: 84 };
         frame.mascots.push(crate::sim::MascotPlacement {
             pos: sick,
-            state: pixtuoid_core::state::DaemonState::Degraded,
+            key: crate::creatures::openclaw_key("18790"),
+            degraded: true,
             effects: Vec::new(),
             ..frame.mascots[0].clone()
         });
+        (layout, frame)
+    }
+
+    /// The pet and each gateway hover on their art as themselves, in paint
+    /// order.
+    #[test]
+    fn the_cutaway_lists_the_pet_and_each_mascot_as_hovers() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = test_default_pack();
+        let (layout, frame) = creatures();
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale: RenderScale::ONE,
+        };
+        let list = list_at(&frame, office, 12);
+        let creatures: Vec<_> = list
+            .pieces()
+            .iter()
+            .filter_map(|p| match &p.kind {
+                PieceKind::Creature { who, .. } => Some(crate::display::Hover {
+                    at: p.span.bounds(),
+                    target: who.clone(),
+                }),
+                _ => None,
+            })
+            .collect();
+        let expected: Vec<_> = std::iter::once(frame.pet.as_ref().expect("the cat").target())
+            .chain(
+                frame
+                    .mascots
+                    .iter()
+                    .map(crate::sim::MascotPlacement::target),
+            )
+            .collect();
+        assert_eq!(
+            creatures
+                .iter()
+                .map(|h| h.target.clone())
+                .collect::<Vec<_>>(),
+            expected,
+            "premise: the cat, then each gateway"
+        );
+        assert_eq!(list.hovers().listed(), creatures);
+    }
+
+    /// What rides on a figure never covers it from the pointer: every cell of
+    /// an effect over its body names the figure.
+    #[test]
+    fn an_effect_never_blocks_its_figure() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
+        let mut frame = frames.last().expect("a seated frame").clone();
+        for c in &mut frame.characters {
+            c.effects = every_effect(c.top_left);
+        }
+        let id = crate::display::HoverTarget::Agent(
+            frame.agents[frame.characters[0].agent_idx].agent_id,
+        );
+        for s in [1, pack.max_density_variant().get()] {
+            let office = Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale: RenderScale::new(s).expect("nonzero"),
+            };
+            let list = list_at(&frame, office, 12);
+            let body = list
+                .pieces()
+                .iter()
+                .find_map(|p| match p.kind {
+                    PieceKind::Character { body, .. } => Some(body),
+                    _ => None,
+                })
+                .expect("the sitter");
+            let mut over = 0;
+            for p in list.pieces() {
+                let PieceKind::Effect(riding) = p.kind else {
+                    continue;
+                };
+                let e = p.span;
+                for y in e.y0.max(body.y0)..=e.y1.min(body.y1) {
+                    for x in e.x0.max(body.x0)..=e.x1.min(body.x1) {
+                        over += 1;
+                        let cell = Bounds {
+                            x,
+                            y,
+                            width: 1,
+                            height: 1,
+                        };
+                        assert_eq!(
+                            list.hovers().at(cell),
+                            Some(&id),
+                            "at scale {s}, {:?} at {cell:?}",
+                            riding.effect.kind
+                        );
+                    }
+                }
+            }
+            assert!(
+                over > 0,
+                "premise: at scale {s} an effect lies over the body"
+            );
+        }
+    }
+
+    /// The pet and the gateway mascots stand as figures: each paints only
+    /// inside its span at every density, sorts on its feet's row as the
+    /// classic sorts it, faces as the sim turns it, grounds its shadow, and has
+    /// what rides on it straight after it; a degraded gateway's art is greyed.
+    #[test]
+    fn creatures_stand_as_figures_with_their_riders_after_them() {
+        use crate::layout::{Pivot, sort_row_at};
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let pack = test_default_pack();
+        let (layout, frame) = creatures();
+        let lobster = frame.mascots[0].pos;
         let riders = [
             frame.pet.as_ref().map_or(0, |p| p.effects.len()),
             frame.mascots[0].effects.len(),
@@ -4274,7 +4386,10 @@ pub(crate) mod tests {
             for (((&i, ridden), flip), sick) in creatures.iter().zip(riders).zip(facing).zip(sickly)
             {
                 let p = &pieces[i];
-                let PieceKind::Creature { at, art, degraded } = p.kind else {
+                let PieceKind::Creature {
+                    at, art, degraded, ..
+                } = p.kind
+                else {
                     unreachable!("filtered to creatures");
                 };
                 assert_eq!(art.flip, flip, "at scale {s} {} faces wrong", art.sprite);
@@ -4309,6 +4424,7 @@ pub(crate) mod tests {
                 at: lobster,
                 art: Art::still("lobster_rest"),
                 degraded,
+                who: frame.mascots[0].target(),
             };
             assert_ne!(
                 painted_alone(&lobster_kind(true), &layout, &pack, theme, scale),
@@ -5232,8 +5348,21 @@ pub(crate) mod tests {
                 .filter(|p| matches!(p.kind, PieceKind::Character { .. }))
                 .collect();
             let hovers: Vec<(pixtuoid_core::AgentId, Span)> = list
-                .hover_spans()
-                .filter_map(|(body, agent)| Some((agent?, body)))
+                .hovers()
+                .listed()
+                .iter()
+                .map(|h| match h.target {
+                    crate::display::HoverTarget::Agent(id) => {
+                        let Bounds {
+                            x,
+                            y,
+                            width,
+                            height,
+                        } = h.at;
+                        (id, Span::new(x, y, width, height, 0))
+                    }
+                    ref other => panic!("{other:?} in an office of agents"),
+                })
                 .collect();
             assert_eq!(hovers.len(), pieces.len());
             assert_eq!(hovers.len(), frame.characters.len());
@@ -5272,7 +5401,7 @@ pub(crate) mod tests {
 
     /// One of each effect a figure carries, riding on its `top_left`, each at a
     /// step it shows at.
-    pub(crate) fn every_effect(top_left: crate::layout::Point) -> Vec<crate::effects::Effect> {
+    fn every_effect(top_left: crate::layout::Point) -> Vec<crate::effects::Effect> {
         let at = |ms| std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms);
         vec![
             crate::effects::walking_dust(top_left, 0),
@@ -5315,7 +5444,7 @@ pub(crate) mod tests {
     }
 
     /// `frame`'s list at `now`, under a clear sky.
-    pub(crate) fn list_now<'a>(
+    fn list_now<'a>(
         frame: &SimFrame,
         office: Office<'a>,
         now: std::time::SystemTime,
