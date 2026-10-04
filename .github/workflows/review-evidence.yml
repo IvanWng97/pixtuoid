@@ -59,7 +59,10 @@ jobs:
           MUTANTS_PER_SHARD: 25
         run: |
           git diff "$BASE...HEAD" > pr.diff
-          count=$(cargo mutants --in-diff pr.diff --list | wc -l | tr -d ' ')
+          # Listed first, so a cargo-mutants failure fails the step instead of
+          # counting as no mutants.
+          listed=$(cargo mutants --in-diff pr.diff --list)
+          count=$(printf '%s' "$listed" | grep -c . || true)
           # About MUTANTS_PER_SHARD fit a shard's time box; past four shards'
           # worth, the four jobs run the first four of more round-robin
           # shards: an even sample rather than a run that times out.
@@ -120,8 +123,10 @@ jobs:
           SHARDS: ${{ needs.plan.outputs.shards }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          shopt -s nullglob
-          outcomes=(shards/*/outcomes.json)
+          # One matching artifact extracts into shards/ itself, more into
+          # shards/<name>/, so search at any depth.
+          mkdir -p shards out
+          mapfile -t outcomes < <(find shards -name outcomes.json)
           # A shard is whole only once cargo-mutants stamps its end_time.
           jq -n --arg base "$BASE" --arg head "$HEAD_SHA" --arg run "$RUN_ID" \
             --argjson listed "$LISTED" --argjson shards "$SHARDS" \
@@ -136,15 +141,13 @@ jobs:
               missed: ($s | map(.missed) | add // 0),
               timeout: ($s | map(.timeout) | add // 0),
               unviable: ($s | map(.unviable) | add // 0)
-            }' "${outcomes[@]:-/dev/null}" > manifest.json
-          cat shards/*/missed.txt > missed.txt 2>/dev/null || true
-          cat shards/*/timeout.txt > timeout.txt 2>/dev/null || true
-          cat manifest.json
+            }' "${outcomes[@]:-/dev/null}" > out/manifest.json
+          for list in missed timeout; do
+            find shards -name "$list.txt" -exec cat {} + > "out/$list.txt"
+          done
+          cat out/manifest.json
       - uses: actions/upload-artifact@v7
         with:
           name: review-evidence
-          path: |
-            manifest.json
-            missed.txt
-            timeout.txt
+          path: out/
           retention-days: 30
