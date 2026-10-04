@@ -153,8 +153,9 @@ invariant-breaking sequence against:
      never a placeholder.
 7. **Sourced practice**: a PR body, design or comment calling an approach best
    practice, idiomatic or standard cites what it was checked against (a doc
-   URL or `path:line`). A missing source is `issue (non-blocking)`; a source
-   that contradicts the change is blocking.
+   URL or `path:line`). A missing or contradicting source is
+   `issue (non-blocking)`, blocking only under [Severity](#severity)'s rule:
+   verified against the code as a correctness, security or invariant breach.
 
 ## Escalation
 
