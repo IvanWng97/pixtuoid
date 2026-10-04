@@ -59,7 +59,7 @@ fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
 /// own front, so someone on the first row south of the art stands in FRONT
 /// of the desk, not behind a face that is never drawn.
 #[test]
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn someone_just_south_of_a_variant_desk_sorts_in_front_of_it() {
     let pack = test_default_pack();
     let scale = RenderScale::new(pack.max_density_variant().get()).expect("nonzero");
@@ -642,7 +642,7 @@ fn a_label_anchor_sits_above_the_head_and_centred_on_the_sprite() {
 /// across, its text whole, at every density the pack draws: a row lower
 /// and it covers the top of the elevator door, over everything.
 #[test]
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn the_floor_indicator_stays_in_its_cell() {
     use crate::cutaway::text::LINE_H;
     let pack = crate::pack::test_default_pack();
@@ -672,7 +672,7 @@ fn the_floor_indicator_stays_in_its_cell() {
 /// At the pack's 4x art the board writes inside the neon sign's dark
 /// interior, as the classic's terminal board does, however full its lines.
 #[test]
-#[cfg(feature = "density-art")]
+#[cfg(feature = "cutaway-assets")]
 fn the_board_writes_inside_the_signs_interior() {
     use crate::layout::{
         NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,

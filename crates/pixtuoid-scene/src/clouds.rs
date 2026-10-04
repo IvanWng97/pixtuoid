@@ -11,7 +11,7 @@ use pixtuoid_core::sprite::Rgb;
 
 use crate::atmosphere::Moment;
 use crate::outside::{Cell, WindowView};
-use crate::sky::Weather;
+use crate::sky::{Element, Weather};
 
 /// A deterministic stream of `0..1` draws.
 struct Rng(u64);
@@ -577,8 +577,7 @@ impl Lighting {
 /// A strike: where its light gathers, and its bolt.
 #[derive(Debug, Clone, PartialEq)]
 struct Strike {
-    /// The flash's centre, its radius, and whether it lights its mass from
-    /// inside (no bolt).
+    /// The flash's centre, in units.
     at: (f32, f32),
     radius: f32,
     /// The mass it lights from inside, or `None` for a bolt's base.
@@ -701,7 +700,7 @@ pub(crate) struct Clouds {
     /// The grid the rasters are drawn on, cells to the unit.
     d: u16,
     lighting: Lighting,
-    /// Each weather's tones under this light, by the weather's index.
+    /// Each weather's tones under this light.
     tones: Vec<(Weather, [Rgb; 3])>,
     diffuse: bool,
     heaviness: f32,
@@ -735,8 +734,8 @@ impl Clouds {
         let light = LightKey {
             night: step(night, LIGHT_STEPS),
             sunset: step(moment.look.golden_hour, LIGHT_STEPS),
-            heaviness: step(weather.lerp(heaviness), LIGHT_STEPS),
-            storm: step(weather.share(Weather::Storm), LIGHT_STEPS),
+            heaviness: step(weather.lerp(Element::Cloud, heaviness), LIGHT_STEPS),
+            storm: step(weather.share(Element::Cloud, Weather::Storm), LIGHT_STEPS),
         };
         let night = unstep(light.night, LIGHT_STEPS);
         let sunset = unstep(light.sunset, LIGHT_STEPS);
@@ -744,7 +743,7 @@ impl Clouds {
         let lighting = Lighting::mixed(day, sunset, night);
         let heavy = unstep(light.heaviness, LIGHT_STEPS);
         let tones = weather
-            .parts()
+            .parts(Element::Cloud)
             .map(|(w, _)| {
                 let k = heaviness(w);
                 let mut t = [0, 1, 2].map(|i| lighting.tones[i].mix(STORM_GREY[i], k));
@@ -764,10 +763,11 @@ impl Clouds {
             heaviness: heavy,
             storm: unstep(light.storm, LIGHT_STEPS),
             night,
-            rain: weather.share(Weather::Rain) + 0.8 * weather.share(Weather::Storm),
+            rain: weather.share(Element::Precipitation, Weather::Rain)
+                + 0.8 * weather.share(Element::Precipitation, Weather::Storm),
             strike: None,
         };
-        for (w, share) in weather.parts() {
+        for (w, share) in weather.parts(Element::Cloud) {
             let full = deck(w, span_f, glass_h_f);
             let widest = full
                 .iter()
@@ -877,17 +877,31 @@ impl Clouds {
 
     /// The flat base of the nearest mass over column `x`, where a bolt from it
     /// starts; `None` with no mass overhead.
-    pub(crate) fn base_at(&self, x: f32) -> Option<f32> {
-        self.nearest_over(x)
-            .map(|i| self.masses[i].base_at(x - self.masses[i].off))
+    /// Each mass's drift this frame, in whole cells of a grid `d` to the unit.
+    fn drift(&self, d: u16) -> Vec<i32> {
+        let df = f32::from(d);
+        self.masses
+            .iter()
+            .map(|m| (m.off * df).round() as i32)
+            .collect()
     }
 
+    /// The nearest mass's band at `(col, row)` cells from the run's west end
+    /// and the glass's top, each mass drifted by its `drift`, and which mass.
+    fn band_at(&self, drift: &[i32], col: i32, row: i32) -> Option<(Band, usize)> {
+        (0..self.masses.len())
+            .rev()
+            .find_map(|m| self.rasters[m].at(col - drift[m], row).map(|b| (b, m)))
+    }
+
+    /// The nearest mass with a lobe within [`BOLT_REACH`] of its radius over
+    /// `x`.
     fn nearest_over(&self, x: f32) -> Option<usize> {
         (0..self.masses.len()).rev().find(|&i| {
             let m = &self.masses[i];
             m.lobes
                 .iter()
-                .any(|l| l.r > 0.0 && (x - m.off - l.x).abs() < l.r)
+                .any(|l| l.r > 0.0 && (x - m.off - l.x).abs() < l.r * BOLT_REACH)
         })
     }
 
@@ -895,7 +909,7 @@ impl Clouds {
         let mut r = Rng(bucket.wrapping_mul(31).wrapping_add(7));
         let x = span * r.between(0.15, 0.85);
         let i = self.nearest_over(x)?;
-        let base = self.base_at(x)?;
+        let base = self.masses[i].base_at(x - self.masses[i].off);
         let intra = r.u() < 0.4;
         let step = if flash > 0.9 {
             2
@@ -935,27 +949,11 @@ impl Clouds {
         if cols == 0 || rows == 0 {
             return;
         }
-        // The glass's grid, by glass offset: its west edge's column on the run's.
-        let mut west = None;
-        view.paint(|cell, c| {
-            if west.is_none() {
-                west = Some(i32::from(cell.at.0) - i32::from(cell.glass.0) - i32::from(run_x0 * d));
-            }
-            c
-        });
-        let Some(west) = west else { return };
-        let drift: Vec<i32> = self
-            .masses
-            .iter()
-            .map(|m| (m.off * df).round() as i32)
-            .collect();
+        // the glass's west edge's column on the run's grid
+        let west = i32::from(view.glass_origin().0) - i32::from(run_x0 * d);
+        let drift = self.drift(d);
         let mut px: Vec<Option<(Band, usize)>> = (0..rows * cols)
-            .map(|i| {
-                let (col, row) = (west + (i % cols) as i32, (i / cols) as i32);
-                (0..self.masses.len())
-                    .rev()
-                    .find_map(|m| self.rasters[m].at(col - drift[m], row).map(|b| (b, m)))
-            })
+            .map(|i| self.band_at(&drift, west + (i % cols) as i32, (i / cols) as i32))
             .collect();
         if d == 1 {
             despeckle(&mut px, cols, rows);
@@ -1171,6 +1169,10 @@ const STORM_OCCLUDE: f32 = 0.4;
 const VIRGA_DEPTH: f32 = 4.5;
 /// The units between two rain shafts.
 const VIRGA_PITCH: u32 = 3;
+
+/// How far out along a lobe's radius a strike may fall: under a mass's body,
+/// where its drawn bottom reaches its base, never its fringe, which curls up.
+const BOLT_REACH: f32 = 0.5;
 
 /// The sun's altitude, from the horizon's 0, above which its clouds wear
 /// their full day tones.
@@ -1433,25 +1435,36 @@ mod tests {
         }
     }
 
-    /// A strike's bolt drops from the base of the mass over it.
+    /// A strike's bolt hangs off a drawn cloud: a mass draws the cell its
+    /// top starts in or the one over it, at every density.
     #[test]
-    fn the_bolt_starts_at_its_cloud_base() {
+    fn the_bolt_hangs_off_a_drawn_cloud() {
+        let now = crate::localclock::at_hour(12);
+        let sky = Sky::at_with(now, Weather::Storm).with_flash(1.0);
+        let moment = Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
         let mut bolts = 0;
-        for bucket in 0..40 {
-            let c = clouds(Weather::Storm, 12, 1.0);
-            let Some(s) = c.strike_at(bucket, 1.0, f32::from(SPAN), f32::from(GLASS_H)) else {
-                continue;
-            };
-            let Some(trunk) = s.bolt.first() else {
-                continue;
-            };
-            let (x, y) = trunk[0];
-            assert_eq!(
-                Some(y),
-                c.base_at(x),
-                "bucket {bucket}'s bolt hangs off its base"
+        for d in [1u16, 4] {
+            let c = Clouds::of(&moment, (SPAN, GLASS_H), d, None);
+            let drift = c.drift(d);
+            assert!(
+                drift.iter().any(|&o| o != 0),
+                "a drifted deck, so the drift counts"
             );
-            bolts += 1;
+            for bucket in 0..40 {
+                let Some(s) = c.strike_at(bucket, 1.0, f32::from(SPAN), f32::from(GLASS_H)) else {
+                    continue;
+                };
+                let Some(&(x, y)) = s.bolt.first().and_then(|trunk| trunk.first()) else {
+                    continue;
+                };
+                let df = f32::from(d);
+                let (col, row) = ((x * df) as i32, (y * df) as i32);
+                assert!(
+                    (row - 1..=row).any(|r| c.band_at(&drift, col, r).is_some()),
+                    "d {d}, bucket {bucket}: the bolt's top at ({col}, {row}) hangs off no cloud"
+                );
+                bolts += 1;
+            }
         }
         assert!(bolts > 0, "the sample must strike a bolt");
     }

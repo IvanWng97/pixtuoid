@@ -161,6 +161,14 @@ impl WindowView {
         )
     }
 
+    /// The glass's top-left cell on the painter's grid.
+    pub(crate) fn glass_origin(&self) -> (u16, u16) {
+        (
+            self.glass.x.saturating_mul(self.d),
+            self.glass.y.saturating_mul(self.d),
+        )
+    }
+
     /// Cell `i` of [`px`](Self::px), from the window's top-left.
     fn offset(&self, i: usize) -> (u16, u16) {
         let cols = usize::from(self.cols()).max(1);
@@ -444,11 +452,13 @@ pub(crate) mod tests {
             (Weather::Overcast, Weather::Storm),
             (Weather::Storm, Weather::Clear),
         ];
-        let skies = Weather::ALL.map(WeatherMix::pure).into_iter().chain(
-            transitions
+        let skies =
+            Weather::ALL
+                .map(WeatherMix::pure)
                 .into_iter()
-                .flat_map(|(from, to)| [1, 3, 5, 7].map(|k| WeatherMix::stepped(from, to, k))),
-        );
+                .chain(transitions.into_iter().flat_map(|(from, to)| {
+                    [0.2, 0.4, 0.6, 0.8].map(|p| WeatherMix::toward(from, to, p))
+                }));
         let mut cache = crate::clouds::CloudCache::default();
         let evening = crate::localclock::at_hour(17);
         for weather in skies {
@@ -475,7 +485,8 @@ pub(crate) mod tests {
         let (one, dense) = (Density::ONE, pack.max_density_variant());
         let overcast = WeatherMix::pure(Weather::Overcast);
         let fog = WeatherMix::pure(Weather::Fog);
-        let windy = |k| WeatherMix::stepped(Weather::Clear, Weather::Windy, k);
+        // one heaviness bucket all the way across
+        let fogging = |p| WeatherMix::toward(Weather::Overcast, Weather::Fog, p);
         let wide = (crate::layout::WINDOW_W * 5, 32);
         let tall = (crate::layout::WINDOW_W * 3, 40);
         let pairs = [
@@ -500,11 +511,10 @@ pub(crate) mod tests {
                 frame(overcast, 0, wall, one),
                 frame(fog, 0, wall, one),
             ),
-            // one light bucket, two shares
             (
                 "share",
-                frame(windy(1), 0, wall, one),
-                frame(windy(2), 0, wall, one),
+                frame(fogging(0.3), 0, wall, one),
+                frame(fogging(0.6), 0, wall, one),
             ),
             (
                 "light",
