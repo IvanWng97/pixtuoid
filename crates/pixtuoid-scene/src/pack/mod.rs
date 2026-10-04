@@ -513,8 +513,8 @@ mod tests {
     #[test]
     fn a_pack_without_desk_north_stands_its_props_on_desk() {
         use crate::layout::{Facing, Point};
-        let north = "[animations.desk_north]\nframes   = [\"desk_north.sprite\"]\nframe_ms = 600\n\n\
-                     [animations.\"desk_north@4x\"]\nframes   = [\"desk_north@4x.sprite\"]\nframe_ms = 600\n\n";
+        // the base table alone, whichever density variants a build ships
+        let north = "[animations.desk_north]\nframes   = [\"desk_north.sprite\"]\nframe_ms = 600\n";
         let pack = test_pack_declaring(north, "");
         let desk = Point { x: 20, y: 30 };
         for mark in [CUP_MARK, TOWER_MARK] {
