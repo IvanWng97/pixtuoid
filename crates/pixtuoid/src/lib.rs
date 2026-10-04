@@ -266,15 +266,43 @@ pub(crate) mod test_io {
 /// the frames it is drawn on, and what reached the screen.
 #[cfg(test)]
 pub(crate) mod test_flash {
+    use std::sync::OnceLock;
     use std::time::{Duration, SystemTime};
 
+    use pixtuoid_core::sprite::format::Pack;
+    use pixtuoid_core::state::{MAX_FLOORS, SceneState};
     use pixtuoid_scene::anim::{FULL_TICK_MS, Motion, PHOTOSENSITIVE_PHASE_MIN_MS};
-    use pixtuoid_scene::flash::{FlashPhase, flash_phase};
-    use pixtuoid_scene::floor::{FloorCtx, FloorMeta};
+    use pixtuoid_scene::flash::FlashPhase;
+    use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs};
     use pixtuoid_scene::pixel_painter::{Weather, WeatherPolicy};
 
     /// How long a probe looks for a flash before the test gives up on it.
     const MINUTE_MS: u64 = 60_000;
+
+    /// The bundled pack, parsed once per test process.
+    pub(crate) fn pack() -> &'static Pack {
+        static PACK: OnceLock<Pack> = OnceLock::new();
+        PACK.get_or_init(|| pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"))
+    }
+
+    /// What an empty floor's frame flashes at `at`, rendered on `session` as a
+    /// painter renders it.
+    fn rendered_flash(session: &mut FloorSession, floor: FloorMeta, at: SystemTime) -> FlashPhase {
+        let scene = SceneState::new([8; MAX_FLOORS]);
+        session.render(FrameInputs {
+            world: FloorInputs {
+                scene: &scene,
+                pack: pack(),
+                now: at,
+                floor,
+                pets: PetInputs::default(),
+            },
+            theme: pixtuoid_scene::theme::ALL_THEMES[0],
+            size: pixtuoid_scene::layout::min_layout_size(),
+            debug_walkable: false,
+        });
+        session.flash()
+    }
 
     /// A forced storm's first strike after local noon, on a Full floor.
     pub(crate) struct Strike {
@@ -291,23 +319,27 @@ pub(crate) mod test_flash {
         let floor = FloorMeta::for_floor(0, 1)
             .with_weather(weather)
             .with_motion(Motion::Full);
-        // A floor never stepped: its neon is no stutter's, so only the sky flashes.
-        let unstepped = FloorCtx::new();
-        let phase = |at| flash_phase(floor, &unstepped, at);
+        // A fresh floor each instant: a room never left to dim, so only the sky flashes.
+        let phase = |at| rendered_flash(&mut FloorSession::new(), floor, at);
         let noon = pixtuoid_scene::localclock::at_hour_min(12, 0);
         let start = (0..MINUTE_MS)
             .step_by(FULL_TICK_MS as usize)
             .map(|n| noon + ms(n))
             .find(|&at| phase(at) != FlashPhase::default())
             .expect("a storm strikes within a minute");
-        let end = (0..MINUTE_MS)
+        let mut changes = vec![start];
+        let mut was = phase(start);
+        let end = (1..MINUTE_MS)
             .map(|n| start + ms(n))
-            .find(|&at| phase(at) == FlashPhase::default())
+            .find(|&at| {
+                let now = phase(at);
+                if now != was {
+                    changes.push(at);
+                    was = now;
+                }
+                now == FlashPhase::default()
+            })
             .expect("a strike ends within a minute");
-        let changes = (0..=end.duration_since(start).expect("ends after").as_millis() as u64)
-            .map(|n| start + ms(n))
-            .filter(|&at| phase(at) != phase(at - ms(1)))
-            .collect();
         Strike {
             weather,
             start,
@@ -338,31 +370,18 @@ pub(crate) mod test_flash {
         pub(crate) changes: usize,
     }
 
-    pub(crate) fn starved_stutter(pack: &pixtuoid_core::sprite::format::Pack) -> Stutter {
-        use pixtuoid_scene::floor::{CoffeeState, FloorInputs, PetInputs, VacancyDim, step_floor};
+    pub(crate) fn starved_stutter() -> Stutter {
+        use pixtuoid_scene::floor::VacancyDim;
         const BURST_MS: u64 = 1_000;
         let ms = Duration::from_millis;
         let weather = WeatherPolicy::Forced(Weather::Clear);
         let floor = FloorMeta::for_floor(0, 1)
             .with_weather(weather)
             .with_motion(Motion::Full);
-        let scene = pixtuoid_core::state::SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
         let noon = pixtuoid_scene::localclock::at_hour_min(12, 0);
         let setup = [noon, noon + ms(VacancyDim::EMPTY_DEBOUNCE_MS)];
-        let (mut ctx, mut coffee) = (FloorCtx::new(), CoffeeState::default());
-        let mut chitchat = std::collections::HashMap::new();
-        let mut phase = |at| {
-            let inputs = FloorInputs {
-                scene: &scene,
-                pack,
-                now: at,
-                floor,
-                pets: PetInputs::default(),
-            };
-            let size = pixtuoid_scene::layout::Size { w: 160, h: 96 };
-            step_floor(&mut ctx, &mut coffee, &mut chitchat, inputs, size).expect("lays out");
-            flash_phase(floor, &ctx, at)
-        };
+        let mut session = FloorSession::new();
+        let mut phase = |at| rendered_flash(&mut session, floor, at);
         phase(setup[0]);
         let mut was = phase(setup[1]);
         let mut last = setup[1];

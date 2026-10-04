@@ -379,6 +379,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         pet_pos,
         mascots,
         agents,
+        flash,
         chitchat_bubbles,
         new_coffee_carriers,
         occupied_waypoints,
@@ -392,8 +393,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         chitchat_state: ctx.chitchat_state,
         debug_walkable: ctx.debug_walkable,
     });
-    let flashes = [pixtuoid_scene::flash::flash_phase(world.floor, ctx.store, now); 2];
-    if ctx.flash.as_ref().is_some_and(|f| f.holds(flashes, now)) {
+    let flashes = [flash; 2];
+    if ctx.flash.as_ref().is_some_and(|f| f.holds(flashes)) {
         return Ok(DrawOut {
             new_coffee_carriers,
             held: true,
@@ -464,7 +465,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         paint_overlays(f, &overlays, now, actual_full, theme);
     })?;
     if let Some(flash) = ctx.flash.as_deref_mut() {
-        flash.shown(flashes, now);
+        flash.shown(flashes);
     }
     Ok(DrawOut {
         layout: Some(layout),

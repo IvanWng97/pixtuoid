@@ -59,27 +59,28 @@ fn each_strike_phase_holds_the_floor_on_screen_in_half_blocks() {
     let tick = Duration::from_millis(crate::tui::FRAME_TICK_MS);
     for (frame, offset) in frame_grid(tick) {
         let (cols, rows) = crate::tui::renderer::min_terminal_size();
-        let mut r = build(cols, rows, vec![]);
+        let (mut r, screen) = half_blocks_on_screen(cols, rows);
         r.set_weather(strike.weather);
         r.set_motion(pixtuoid_scene::anim::Motion::Full);
         let scene = scene_with(vec![idle("/s/0.jsonl", 0, t0())], 16);
         let mut now = strike.start - lead(frame) + offset;
+        screen.at(now);
         r.render(&scene, pack(), now).expect("render");
-        let cells = crate::tui::renderer::scene_rect(r.frame_buffer().area);
-        let mut shown = r.frame_buffer().clone();
+        let cells = crate::tui::renderer::scene_rect(flushed(&r).area);
+        let mut shown = flushed(&r).clone();
         let mut changed = Vec::new();
         while now < strike.end + lead(frame) {
             now += frame;
+            screen.at(now);
             r.render(&scene, pack(), now).expect("render");
-            let flushed = r.frame_buffer();
             let differ = cells
                 .positions()
-                .filter(|&p| flushed[p] != shown[p])
+                .filter(|&p| flushed(&r)[p] != shown[p])
                 .count();
             if 2 * differ > cells.area() as usize {
                 changed.push(now);
             }
-            shown = flushed.clone();
+            shown = flushed(&r).clone();
         }
         let at = format!("a frame each {frame:?} from +{offset:?}");
         assert_each_phase_holds_the_floor(&changed, strike.changes.len(), &at);
@@ -96,7 +97,7 @@ fn a_held_frame_leaves_the_terminal_and_its_hit_targets_alone() {
     let [dark, late, held, shown] = held_frames(&strike);
     for sliding in [false, true] {
         let (cols, rows) = crate::tui::renderer::min_terminal_size();
-        let mut r = build(cols, rows, vec![]);
+        let (mut r, screen) = half_blocks_on_screen(cols, rows);
         r.set_weather(strike.weather);
         r.set_motion(pixtuoid_scene::anim::Motion::Full);
         let scene = two_floor_scene();
@@ -104,17 +105,92 @@ fn a_held_frame_leaves_the_terminal_and_its_hit_targets_alone() {
             r.navigate_floor(1, dark);
         }
         for at in [dark, late] {
+            screen.at(at);
             r.render(&scene, pack(), at).expect("render");
         }
-        let before = r.frame_buffer().clone();
+        let before = flushed(&r).clone();
         let layout = r.cached_layout().map(|l| l as *const SceneLayout);
+        screen.at(held);
         r.render(&scene, pack(), held).expect("render");
-        assert_eq!(*r.frame_buffer(), before, "sliding {sliding}: held");
+        assert_eq!(*flushed(&r), before, "sliding {sliding}: held");
         assert_eq!(r.cached_layout().map(|l| l as *const SceneLayout), layout);
+        screen.at(shown);
         r.render(&scene, pack(), shown).expect("render");
-        assert_ne!(*r.frame_buffer(), before, "sliding {sliding}: shown");
+        assert_ne!(*flushed(&r), before, "sliding {sliding}: shown");
         assert_eq!(r.transition().is_some(), sliding);
     }
+}
+
+/// A phase holds the floor from when its flush lands, not from when its frame
+/// began: after a slow flush, the next phase waits for the floor to pass on
+/// the screen clock, though its frame's own clock says it has.
+#[test]
+fn a_slow_flushs_phase_holds_the_floor_from_when_it_lands() {
+    use crate::test_flash::storm_strike;
+    const SLOW: Duration = Duration::from_millis(60);
+    let floor = Duration::from_millis(pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS);
+    let strike = storm_strike();
+    let [first, second] = [strike.changes[0], strike.changes[1]];
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let (mut r, screen) = half_blocks_on_screen(cols, rows);
+    r.set_weather(strike.weather);
+    r.set_motion(pixtuoid_scene::anim::Motion::Full);
+    let scene = scene_with(vec![idle("/s/0.jsonl", 0, t0())], 16);
+    screen.at(first - 2 * floor);
+    r.render(&scene, pack(), first - 2 * floor).expect("render");
+    r.terminal.backend_mut().slow = Some((screen.clone(), SLOW));
+    screen.at(first);
+    r.render(&scene, pack(), first).expect("render");
+    let landed = screen.now();
+    r.terminal.backend_mut().slow = None;
+    let before = flushed(&r).clone();
+    assert!(
+        second.duration_since(first).expect("in order") >= floor,
+        "the frame clock says the floor has passed"
+    );
+    screen.at(second);
+    r.render(&scene, pack(), second).expect("render");
+    assert_eq!(
+        *flushed(&r),
+        before,
+        "held until the slow flush's phase shows the floor"
+    );
+    let shown = std::time::UNIX_EPOCH + landed + floor;
+    screen.at(shown);
+    r.render(&scene, pack(), shown).expect("render");
+    assert_ne!(*flushed(&r), before, "shown once it has");
+}
+
+/// A pause freezes the frame clock inside a hold; the screen clock runs on,
+/// so the hold runs out and the paused frame, with a theme change, is flushed.
+#[test]
+fn a_pause_inside_a_hold_never_wedges_the_half_blocks() {
+    use crate::test_flash::{held_frames, storm_strike};
+    let floor = Duration::from_millis(pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS);
+    let strike = storm_strike();
+    let [dark, late, paused, _] = held_frames(&strike);
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let (mut r, screen) = half_blocks_on_screen(cols, rows);
+    r.set_weather(strike.weather);
+    r.set_motion(pixtuoid_scene::anim::Motion::Full);
+    let scene = scene_with(vec![idle("/s/0.jsonl", 0, t0())], 16);
+    for at in [dark, late] {
+        screen.at(at);
+        r.render(&scene, pack(), at).expect("render");
+    }
+    let before = flushed(&r).clone();
+    screen.at(paused);
+    r.render(&scene, pack(), paused).expect("render");
+    assert_eq!(*flushed(&r), before, "held");
+    r.set_theme(dark_theme());
+    screen.at(late);
+    screen.advance(floor);
+    r.render(&scene, pack(), paused).expect("render");
+    assert_ne!(
+        *flushed(&r),
+        before,
+        "the paused frame was flushed once the hold ran out"
+    );
 }
 
 /// A starved neon's every catch, and every dark between, stays on screen at
@@ -125,37 +201,40 @@ fn each_stutter_phase_holds_the_floor_on_screen_in_half_blocks() {
     use crate::test_flash::{
         assert_each_phase_holds_the_floor, frame_grid, lead, neon_tube, starved_stutter,
     };
-    let stutter = starved_stutter(pack());
+    let stutter = starved_stutter();
     let tick = Duration::from_millis(crate::tui::FRAME_TICK_MS);
     let scene = scene_with(vec![], 16);
     for (frame, offset) in frame_grid(tick) {
         let (cols, rows) = crate::tui::renderer::min_terminal_size();
-        let mut r = build(cols, rows, vec![]);
+        let (mut r, screen) = half_blocks_on_screen(cols, rows);
         r.set_weather(stutter.weather);
         r.set_motion(pixtuoid_scene::anim::Motion::Full);
         for at in stutter.setup {
+            screen.at(at);
             r.render(&scene, pack(), at).expect("render");
         }
-        let cells = crate::tui::renderer::scene_rect(r.frame_buffer().area);
+        let cells = crate::tui::renderer::scene_rect(flushed(&r).area);
         let tube: Vec<ratatui::layout::Position> = cells
             .positions()
             .filter(|p| neon_tube(p.x - cells.x, 2 * (p.y - cells.y)))
             .collect();
-        let snapshot = |r: &TuiRenderer<TestBackend>| -> Vec<ratatui::buffer::Cell> {
-            tube.iter().map(|&p| r.frame_buffer()[p].clone()).collect()
+        let snapshot = |r: &TuiRenderer<Slow>| -> Vec<ratatui::buffer::Cell> {
+            tube.iter().map(|&p| flushed(r)[p].clone()).collect()
         };
         let mut now = stutter.start - lead(frame) + offset;
+        screen.at(now);
         r.render(&scene, pack(), now).expect("render");
         let mut shown = snapshot(&r);
         let mut changed = Vec::new();
         while now < stutter.end + lead(frame) {
             now += frame;
+            screen.at(now);
             r.render(&scene, pack(), now).expect("render");
-            let flushed = snapshot(&r);
-            if flushed != shown {
+            let shot = snapshot(&r);
+            if shot != shown {
                 changed.push(now);
             }
-            shown = flushed;
+            shown = shot;
         }
         let at = format!("a frame each {frame:?} from +{offset:?}");
         assert_each_phase_holds_the_floor(&changed, stutter.changes, &at);

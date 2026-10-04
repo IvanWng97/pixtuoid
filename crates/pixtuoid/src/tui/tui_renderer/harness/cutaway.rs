@@ -16,11 +16,13 @@ const TRANSMIT: &str = "\x1b_Ga=T,";
 const SIXEL: &str = "\x1bP9;1q";
 const ITERM2: &str = "\x1b]1337;File=";
 
-/// The terminal's side of the transmits; set `fail` to make it refuse them.
+/// The terminal's side of the transmits; set `fail` to make it refuse them,
+/// or `slow` to make a flush take that long on a screen clock.
 #[derive(Clone, Default)]
 struct Wire {
     bytes: Arc<Mutex<Vec<u8>>>,
     fail: Arc<AtomicBool>,
+    slow: Arc<Mutex<Option<(pixtuoid_scene::flash::ManualClock, Duration)>>>,
 }
 
 impl Write for Wire {
@@ -32,6 +34,9 @@ impl Write for Wire {
         Ok(buf.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
+        if let Some((screen, latency)) = &*self.slow.lock().expect("lock") {
+            screen.advance(*latency);
+        }
         Ok(())
     }
 }
@@ -42,6 +47,25 @@ impl Wire {
         let bytes = std::mem::take(&mut *self.bytes.lock().expect("lock"));
         String::from_utf8(bytes).expect("escapes are ascii")
     }
+}
+
+/// [`painter`], its flashes held on a screen clock the test moves.
+fn on_screen(
+    cols: u16,
+    rows: u16,
+    protocol: ImageProtocol,
+) -> (
+    TuiRenderer<TestBackend>,
+    Wire,
+    pixtuoid_scene::flash::ManualClock,
+) {
+    let (mut r, wire) = painter(cols, rows, protocol);
+    let screen = pixtuoid_scene::flash::ManualClock::default();
+    r.cutaway
+        .as_mut()
+        .expect("a cutaway")
+        .hold_on(screen.clock());
+    (r, wire, screen)
 }
 
 fn arc_pack() -> Arc<Pack> {
@@ -323,16 +347,18 @@ fn each_strike_phase_holds_the_floor_on_screen_at_every_protocols_cadence() {
     ] {
         for (frame, offset) in frame_grid(tick) {
             let (cols, rows) = crate::tui::renderer::min_terminal_size();
-            let (mut r, wire) = painter(cols, rows, protocol);
+            let (mut r, wire, screen) = on_screen(cols, rows, protocol);
             r.set_weather(strike.weather);
             r.set_motion(pixtuoid_scene::anim::Motion::Full);
             let scene = office();
             let mut now = strike.start - lead(frame) + offset;
+            screen.at(now);
             r.render(&scene, pack(), now).expect("render");
             let tiles = wire.take().matches(intro(protocol)).count();
             let mut changed = Vec::new();
             while now < strike.end + lead(frame) {
                 now += frame;
+                screen.at(now);
                 r.render(&scene, pack(), now).expect("render");
                 if 2 * wire.take().matches(intro(protocol)).count() > tiles {
                     changed.push(now);
@@ -352,20 +378,141 @@ fn a_held_slide_frame_sends_nothing() {
     let strike = storm_strike();
     let [dark, late, held, shown] = held_frames(&strike);
     let (cols, rows) = crate::tui::renderer::min_terminal_size();
-    let (mut r, wire) = kitty(cols, rows);
+    let (mut r, wire, screen) = on_screen(cols, rows, ImageProtocol::Kitty);
     r.set_weather(strike.weather);
     r.set_motion(pixtuoid_scene::anim::Motion::Full);
     let scene = two_floor_scene();
     r.navigate_floor(1, dark);
     for at in [dark, late] {
+        screen.at(at);
         r.render(&scene, pack(), at).expect("render");
     }
     wire.take();
+    screen.at(held);
     r.render(&scene, pack(), held).expect("render");
     assert_eq!(wire.take(), "", "held");
+    screen.at(shown);
     r.render(&scene, pack(), shown).expect("render");
     assert!(wire.take().contains(TRANSMIT), "shown");
     assert!(r.transition().is_some(), "still sliding");
+}
+
+/// A phase holds the floor from when its write lands, not from when its frame
+/// began: after a slow write, the next phase waits for the floor to pass on
+/// the screen clock, though its frame's own clock says it has.
+#[test]
+fn a_slow_writes_phase_holds_the_floor_from_when_it_lands() {
+    use crate::test_flash::storm_strike;
+    const SLOW: Duration = Duration::from_millis(60);
+    let floor = Duration::from_millis(pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS);
+    let strike = storm_strike();
+    let [first, second] = [strike.changes[0], strike.changes[1]];
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let (mut r, wire, screen) = on_screen(cols, rows, ImageProtocol::Kitty);
+    r.set_weather(strike.weather);
+    r.set_motion(pixtuoid_scene::anim::Motion::Full);
+    let scene = office();
+    screen.at(first - 2 * floor);
+    r.render(&scene, pack(), first - 2 * floor).expect("render");
+    *wire.slow.lock().expect("lock") = Some((screen.clone(), SLOW));
+    screen.at(first);
+    r.render(&scene, pack(), first).expect("render");
+    let landed = screen.now();
+    *wire.slow.lock().expect("lock") = None;
+    wire.take();
+    assert!(
+        second.duration_since(first).expect("in order") >= floor,
+        "the frame clock says the floor has passed"
+    );
+    screen.at(second);
+    r.render(&scene, pack(), second).expect("render");
+    assert_eq!(
+        wire.take(),
+        "",
+        "held until the slow write's phase shows the floor"
+    );
+    let shown = std::time::UNIX_EPOCH + landed + floor;
+    screen.at(shown);
+    r.render(&scene, pack(), shown).expect("render");
+    assert!(wire.take().contains(TRANSMIT), "shown once it has");
+}
+
+/// A pause freezes the frame clock inside a hold; the screen clock runs on,
+/// so the hold runs out and the paused frame, with a theme change, is sent.
+#[test]
+fn a_pause_inside_a_hold_never_wedges_the_repaint() {
+    use crate::test_flash::{held_frames, storm_strike};
+    let floor = Duration::from_millis(pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS);
+    let strike = storm_strike();
+    let [dark, late, paused, _] = held_frames(&strike);
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let (mut r, wire, screen) = on_screen(cols, rows, ImageProtocol::Kitty);
+    r.set_weather(strike.weather);
+    r.set_motion(pixtuoid_scene::anim::Motion::Full);
+    let scene = office();
+    for at in [dark, late] {
+        screen.at(at);
+        r.render(&scene, pack(), at).expect("render");
+    }
+    wire.take();
+    screen.at(paused);
+    r.render(&scene, pack(), paused).expect("render");
+    assert_eq!(wire.take(), "", "held");
+    r.set_theme(dark_theme());
+    screen.at(late);
+    screen.advance(floor);
+    r.render(&scene, pack(), paused).expect("render");
+    assert!(
+        wire.take().contains(TRANSMIT),
+        "the paused frame went out once the hold ran out"
+    );
+}
+
+/// When a modal covers every tile, a strike shows in the half-blocks of the
+/// cells it leaves free, and each phase there holds the floor too: a frame
+/// that sends no tile still marks its phase as shown.
+#[test]
+fn each_strike_phase_holds_the_floor_in_the_half_blocks_under_a_full_modal() {
+    use crate::test_flash::{assert_each_phase_holds_the_floor, frame_grid, lead, storm_strike};
+    const HALF_BLOCK: &str = "\u{2580}";
+    let strike = storm_strike();
+    let tick = Duration::from_millis(crate::tui::FRAME_TICK_MS);
+    for (frame, offset) in frame_grid(tick) {
+        let (cols, rows) = crate::tui::renderer::min_terminal_size();
+        let (mut r, wire, screen) = on_screen(cols, rows, ImageProtocol::Sixel);
+        r.set_weather(strike.weather);
+        r.set_motion(pixtuoid_scene::anim::Motion::Full);
+        r.set_help_open(true);
+        let scene = office();
+        let mut now = strike.start - lead(frame) + offset;
+        screen.at(now);
+        r.render(&scene, pack(), now).expect("render");
+        let free: Vec<ratatui::layout::Position> = r
+            .frame_buffer()
+            .area
+            .positions()
+            .filter(|&p| r.frame_buffer()[p].symbol() == HALF_BLOCK)
+            .collect();
+        let half_blocks = |r: &TuiRenderer<TestBackend>| -> Vec<ratatui::buffer::Cell> {
+            free.iter().map(|&p| r.frame_buffer()[p].clone()).collect()
+        };
+        let mut shown = half_blocks(&r);
+        let mut changed = Vec::new();
+        while now < strike.end + lead(frame) {
+            now += frame;
+            screen.at(now);
+            r.render(&scene, pack(), now).expect("render");
+            assert!(!wire.take().contains(SIXEL), "the modal covers every tile");
+            let flushed = half_blocks(&r);
+            let differ = flushed.iter().zip(&shown).filter(|(a, b)| a != b).count();
+            if 2 * differ > free.len() {
+                changed.push(now);
+            }
+            shown = flushed;
+        }
+        let at = format!("a frame each {frame:?} from +{offset:?}");
+        assert_each_phase_holds_the_floor(&changed, strike.changes.len(), &at);
+    }
 }
 
 /// A starved neon's every catch, and every dark between, stays on screen at
@@ -377,7 +524,7 @@ fn each_stutter_phase_holds_the_floor_on_screen_at_every_protocols_cadence() {
     use crate::test_flash::{
         assert_each_phase_holds_the_floor, frame_grid, lead, neon_tube, starved_stutter,
     };
-    let stutter = starved_stutter(pack());
+    let stutter = starved_stutter();
     let tick = Duration::from_millis(crate::tui::FRAME_TICK_MS);
     let scene = scene_with(vec![], 16);
     let (cols, rows) = crate::tui::renderer::min_terminal_size();
@@ -408,18 +555,21 @@ fn each_stutter_phase_holds_the_floor_on_screen_at_every_protocols_cadence() {
             }),
         };
         for (frame, offset) in frame_grid(tick) {
-            let (mut r, wire) = painter(cols, rows, protocol);
+            let (mut r, wire, screen) = on_screen(cols, rows, protocol);
             r.set_weather(stutter.weather);
             r.set_motion(pixtuoid_scene::anim::Motion::Full);
             for at in stutter.setup {
+                screen.at(at);
                 r.render(&scene, pack(), at).expect("render");
             }
             let mut now = stutter.start - lead(frame) + offset;
+            screen.at(now);
             r.render(&scene, pack(), now).expect("render");
             wire.take();
             let mut changed = Vec::new();
             while now < stutter.end + lead(frame) {
                 now += frame;
+                screen.at(now);
                 r.render(&scene, pack(), now).expect("render");
                 if tube_sent(&wire.take()) {
                     changed.push(now);

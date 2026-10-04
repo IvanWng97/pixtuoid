@@ -241,6 +241,7 @@ pub(crate) fn compose_at<'a>(
         ambient,
         ground: Ground::of(theme, moment.look.ground_tint),
         flash: crate::cutaway::light::Flash::of(&moment.sky),
+        flash_phase: crate::flash::FlashPhase::of(&moment.sky, frame),
         pack,
         theme,
         scale,

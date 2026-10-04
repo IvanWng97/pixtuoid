@@ -381,6 +381,8 @@ pub struct FloorFrame {
     pub occupied_waypoints: std::collections::HashSet<usize>,
     /// Every character drawn this frame, in paint order.
     pub agents: Vec<crate::pixel_painter::AgentFrame>,
+    /// What of the frame flashes, for a painter's hold.
+    pub flash: crate::flash::FlashPhase,
 }
 
 /// THE shared headless frame seam: scene → `RgbBuffer`, one floor, one frame.
@@ -419,6 +421,7 @@ pub fn render_floor(
         layout,
         occupied_waypoints: result.occupied_waypoints,
         agents: result.agents,
+        flash: result.flash,
     })
 }
 
@@ -593,6 +596,8 @@ pub struct FloorSession {
     /// The sprites the last `render` drew, which [`FloorSession::overlay`]
     /// labels.
     last_agents: Vec<crate::pixel_painter::AgentFrame>,
+    /// What of the last `render`'s frame flashes.
+    last_flash: crate::flash::FlashPhase,
 }
 
 impl FloorSession {
@@ -604,7 +609,14 @@ impl FloorSession {
             last_layout: None,
             last_occupied: std::collections::HashSet::new(),
             last_agents: Vec::new(),
+            last_flash: crate::flash::FlashPhase::default(),
         }
+    }
+
+    /// What of the last [`render`](Self::render)'s frame flashes; nothing
+    /// before the first, or when it could not lay out.
+    pub fn flash(&self) -> crate::flash::FlashPhase {
+        self.last_flash
     }
 
     /// Drop per-agent state for agents no longer in `scene` — BOTH halves of the
@@ -633,18 +645,21 @@ impl FloorSession {
                 layout,
                 occupied_waypoints,
                 agents,
+                flash,
             }) => {
                 self.last_layout = Some(Arc::clone(&layout));
                 // REPLACE, never extend: the cue tracker fires on edges, so an
                 // accumulating set would re-report stale waypoints forever.
                 self.last_occupied = occupied_waypoints;
                 self.last_agents = agents;
+                self.last_flash = flash;
                 Some(layout)
             }
             None => {
                 self.last_layout = None;
                 self.last_occupied.clear();
                 self.last_agents.clear();
+                self.last_flash = crate::flash::FlashPhase::default();
                 None
             }
         }

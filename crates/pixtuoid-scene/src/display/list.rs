@@ -92,6 +92,8 @@ pub(crate) struct DisplayList<'a> {
     pub(super) ground: Ground,
     /// How far lightning lifts the room: a change repaints the whole frame.
     pub(super) flash: crate::cutaway::light::Flash,
+    /// What of the frame flashes, for a painter's hold.
+    pub(super) flash_phase: crate::flash::FlashPhase,
     // What it was built with, so painting it cannot use anything else: a
     // figure's key names its density, which only the build's scale picks.
     pub(super) pack: &'a Pack,
@@ -205,6 +207,10 @@ impl<'a> DisplayList<'a> {
 
     pub(crate) fn flash(&self) -> crate::cutaway::light::Flash {
         self.flash
+    }
+
+    pub(crate) fn flash_phase(&self) -> crate::flash::FlashPhase {
+        self.flash_phase
     }
 
     pub(crate) fn pack(&self) -> &'a Pack {

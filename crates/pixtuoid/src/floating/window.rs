@@ -209,7 +209,7 @@ impl FloatingApp {
         super::offscreen::paint_footer_into_surface(&mut surf, &footer, self.theme);
         window.pre_present_notify();
         if sb.present().is_ok() {
-            self.renderer.presented(now);
+            self.renderer.presented();
         }
     }
 }

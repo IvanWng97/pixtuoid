@@ -102,14 +102,7 @@ impl Tiles {
             self.sent = vec![None; (across * down) as usize];
             self.owed = (0..self.sent.len() as u32).collect();
         }
-        match dirty {
-            Dirty::All => self.owed.extend(0..self.sent.len() as u32),
-            Dirty::Rects(rects) => {
-                for &r in rects {
-                    self.owed.extend(self.reached(r));
-                }
-            }
-        }
+        self.owe(dirty);
         let mut owed = std::mem::take(&mut self.owed);
         let mut changed = Vec::new();
         owed.retain(|&index| {
@@ -123,6 +116,18 @@ impl Tiles {
         });
         self.owed = owed;
         changed
+    }
+
+    /// Owe the tiles `dirty` reaches, for a frame painted but not sent.
+    pub(crate) fn owe(&mut self, dirty: &Dirty) {
+        match dirty {
+            Dirty::All => self.owed.extend(0..self.sent.len() as u32),
+            Dirty::Rects(rects) => {
+                for &r in rects {
+                    self.owed.extend(self.reached(r));
+                }
+            }
+        }
     }
 
     /// Record `tiles` as on the terminal, once their bytes are written.

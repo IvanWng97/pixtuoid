@@ -4,7 +4,8 @@
 //! buffer JS reads zero-copy via [`Office::frame_ptr`]/[`Office::frame_len`].
 //!
 //! Time is a PARAMETER (`now_ms` from JS): the engine never calls
-//! `SystemTime::now()` (it panics on wasm32-unknown-unknown).
+//! `SystemTime::now()` (it panics on wasm32-unknown-unknown). Only the flash
+//! hold reads a clock of its own, [`page_clock`], when a frame is written.
 
 mod audio;
 mod script;
@@ -24,7 +25,7 @@ use crate::script::{
 };
 
 use pixtuoid_scene::audio::OneShotPool;
-use pixtuoid_scene::flash::{FlashHold, FlashPhase, flash_phase};
+use pixtuoid_scene::flash::{FlashHold, FlashPhase, ScreenClock};
 use pixtuoid_scene::floor::{
     FloorInputs, FloorMeta, FloorSession, FrameInputs, PetInputs, floor_capacity,
 };
@@ -106,6 +107,25 @@ impl VisitorHires {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = performance, js_name = now)]
+    fn performance_now() -> f64;
+}
+
+/// The page's monotonic clock, `performance.now()`, for the flash hold.
+#[cfg(target_arch = "wasm32")]
+fn page_clock() -> ScreenClock {
+    std::sync::Arc::new(|| Duration::from_secs_f64(performance_now().max(0.0) / 1_000.0))
+}
+
+/// The host's monotonic clock, where the office runs natively.
+#[cfg(not(target_arch = "wasm32"))]
+fn page_clock() -> ScreenClock {
+    pixtuoid_scene::flash::monotonic()
+}
+
 /// A live office rendered to a reusable RGBA buffer across frames. Keeping ONE
 /// handle alive across `step` calls is what keeps motion/pose continuous.
 #[wasm_bindgen]
@@ -172,7 +192,7 @@ impl Office {
             last_now: None,
             caps_size: None,
             weather: WeatherPolicy::Clock,
-            flash: FlashHold::default(),
+            flash: FlashHold::on(page_clock()),
             audio: None,
             adopting: None,
         })
@@ -207,14 +227,15 @@ impl Office {
         // — load-bearing: the looped script REUSES agent ids, and a returning cast
         // member with stale walk legs teleports in.
         self.render(now, buf_w, buf_h);
-        let flash = flash_phase(self.floor_meta(), &self.session.floor.ctx, now);
+        let flash = self.session.flash();
         // A canvas of a new shape gets this frame whatever it shows.
         let same_shape = self.rgba.len() == self.session.buf().as_slice().len() * 4;
-        if same_shape && self.flash.holds(flash, now) {
+        if same_shape && self.flash.holds(flash) {
             return;
         }
         self.expand_rgba();
-        self.flash.shown(flash, now);
+        // The page draws what `step` leaves in the same task, straight after.
+        self.flash.shown(flash);
     }
 
     /// Pointer to the RGBA frame in wasm linear memory (`w*h*4` bytes).
@@ -714,6 +735,7 @@ fn push_board_segments(
 mod tests {
     use super::*;
     use crate::script::cast_id;
+    use pixtuoid_scene::flash::ManualClock;
 
     /// `Office::new`'s error arm constructs a `JsError`, so unwrap via match.
     fn office() -> Office {
@@ -857,6 +879,56 @@ mod tests {
             .expect("OfficeBackdrop.astro declares FRAME_MS")
     }
 
+    /// A storm office whose flashes are held on a screen clock the test moves.
+    fn storm_on_screen() -> (Office, ManualClock) {
+        let mut o = office();
+        o.set_weather(Some("storm".into()));
+        let screen = ManualClock::default();
+        o.flash = FlashHold::on(screen.clock());
+        (o, screen)
+    }
+
+    /// A storm's first strike after [`T0_MS`]: when its phases change, in ms,
+    /// the first its start, and when it ends.
+    struct Strike {
+        changes: Vec<u64>,
+        end: u64,
+    }
+
+    /// Read from a probe office's own composed phase, forward in time only.
+    fn storm_strike() -> Strike {
+        use pixtuoid_scene::anim::FULL_TICK_MS;
+        const MINUTE_MS: u64 = 60_000;
+        let (mut probe, _) = storm_on_screen();
+        let mut phase = |ms: u64| {
+            probe.step(ms as f64, 160, 96);
+            probe.session.flash()
+        };
+        let t0 = T0_MS as u64;
+        let start = (t0..t0 + MINUTE_MS)
+            .step_by(FULL_TICK_MS as usize)
+            .find(|&ms| phase(ms) != FlashPhase::default())
+            .expect("a storm strikes within a minute");
+        let (mut was, mut changes) = (phase(start), vec![start]);
+        let end = (start + 1..start + MINUTE_MS)
+            .find(|&ms| {
+                let now = phase(ms);
+                if now != was {
+                    changes.push(ms);
+                    was = now;
+                }
+                now == FlashPhase::default()
+            })
+            .expect("a strike ends within a minute");
+        Strike { changes, end }
+    }
+
+    /// Step `o` to `ms` with its screen clock there too.
+    fn step_at(o: &mut Office, screen: &ManualClock, ms: u64) {
+        screen.at(SystemTime::UNIX_EPOCH + Duration::from_millis(ms));
+        o.step(ms as f64, 160, 96);
+    }
+
     /// Each phase of a strike stays on the page at least the photosensitive
     /// floor at the backdrop's paint gate, its frames landing on a phase's
     /// start or half a frame after: the frame `step` leaves is the one the
@@ -864,49 +936,31 @@ mod tests {
     /// of the pixels is a change of phase.
     #[test]
     fn each_strike_phase_holds_the_floor_on_the_page() {
-        use pixtuoid_scene::anim::{FULL_TICK_MS, PHOTOSENSITIVE_PHASE_MIN_MS};
-        const MINUTE_MS: u64 = 60_000;
-        let storm = || {
-            let mut o = office();
-            o.set_weather(Some("storm".into()));
-            o
-        };
-        let floor = storm().floor_meta();
-        let unstepped = pixtuoid_scene::floor::FloorCtx::new();
-        let phase = |ms: u64| {
-            let at = SystemTime::UNIX_EPOCH + Duration::from_millis(ms);
-            flash_phase(floor, &unstepped, at)
-        };
-        let t0 = T0_MS as u64;
-        let start = (t0..t0 + MINUTE_MS)
-            .step_by(FULL_TICK_MS as usize)
-            .find(|&ms| phase(ms) != FlashPhase::default())
-            .expect("a storm strikes within a minute");
-        let end = (start..start + MINUTE_MS)
-            .find(|&ms| phase(ms) == FlashPhase::default())
-            .expect("a strike ends within a minute");
-        let changes = (start..=end)
-            .filter(|&ms| phase(ms) != phase(ms - 1))
-            .count();
+        use pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS;
+        let strike = storm_strike();
         let frame = backdrop_frame_ms();
         // The dark before has shown the floor, as the gap between strikes sees to.
         let lead = frame * (PHOTOSENSITIVE_PHASE_MIN_MS.div_ceil(frame) + 1);
         for offset in [0, frame / 2] {
-            let mut o = storm();
-            let mut now = start - lead + offset;
-            o.step(now as f64, 160, 96);
+            let (mut o, screen) = storm_on_screen();
+            let mut now = strike.changes[0] - lead + offset;
+            step_at(&mut o, &screen, now);
             let mut shown = o.frame().to_vec();
             let mut changed = Vec::new();
-            while now < end + lead {
+            while now < strike.end + lead {
                 now += frame;
-                o.step(now as f64, 160, 96);
+                step_at(&mut o, &screen, now);
                 let pixels = o.frame().chunks(4).zip(shown.chunks(4));
                 if 2 * pixels.filter(|(a, b)| a != b).count() > shown.len() / 4 {
                     changed.push(now);
                 }
                 shown = o.frame().to_vec();
             }
-            assert_eq!(changed.len(), changes, "+{offset} ms: {changed:?}");
+            assert_eq!(
+                changed.len(),
+                strike.changes.len(),
+                "+{offset} ms: {changed:?}"
+            );
             for pair in changed.windows(2) {
                 let shown_ms = pair[1] - pair[0];
                 assert!(
@@ -915,6 +969,48 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A phase holds the floor from when its frame is written, not from the
+    /// instant `step` is handed: after a slow step, the next phase waits for
+    /// the floor to pass on the screen clock, though the page's own clock says
+    /// it has.
+    #[test]
+    fn a_slow_steps_phase_holds_the_floor_from_when_it_lands() {
+        use pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS as FLOOR_MS;
+        const SLOW_MS: u64 = 60;
+        let strike = storm_strike();
+        let [first, second] = [strike.changes[0], strike.changes[1]];
+        let (mut o, screen) = storm_on_screen();
+        step_at(&mut o, &screen, first - 2 * FLOOR_MS);
+        screen.at(SystemTime::UNIX_EPOCH + Duration::from_millis(first + SLOW_MS));
+        o.step(first as f64, 160, 96);
+        let shown = o.frame().to_vec();
+        assert!(second - first >= FLOOR_MS, "the page's clock says it has");
+        step_at(&mut o, &screen, second);
+        assert!(o.frame() == shown.as_slice(), "held");
+        step_at(&mut o, &screen, first + SLOW_MS + FLOOR_MS);
+        assert!(o.frame() != shown.as_slice(), "shown once the floor has");
+    }
+
+    /// A paused page steps at one frozen instant, to repaint a resized canvas;
+    /// a hold that instant lands inside still runs out on the screen clock, so
+    /// the held frame goes out.
+    #[test]
+    fn a_pause_inside_a_hold_never_wedges_the_page() {
+        use pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS as FLOOR_MS;
+        let next = storm_strike().changes[1];
+        let (mut o, screen) = storm_on_screen();
+        step_at(&mut o, &screen, next - 1);
+        let shown = o.frame().to_vec();
+        step_at(&mut o, &screen, next);
+        assert!(o.frame() == shown.as_slice(), "held");
+        screen.advance(Duration::from_millis(FLOOR_MS));
+        o.step(next as f64, 160, 96);
+        assert!(
+            o.frame() != shown.as_slice(),
+            "the paused frame went out once the hold ran out"
+        );
     }
 
     #[test]

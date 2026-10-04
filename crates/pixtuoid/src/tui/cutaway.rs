@@ -22,7 +22,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_scene::cutaway::canvas::{CanvasFrame, CutawayCanvas, Dirty};
 use pixtuoid_scene::cutaway::paint::CutawayCache;
 use pixtuoid_scene::display::Showing;
-use pixtuoid_scene::flash::{FlashHold, FlashPhase, Flashes};
+use pixtuoid_scene::flash::{FlashHold, Flashes};
 use pixtuoid_scene::floor::SteppedFloor;
 use pixtuoid_scene::layout::{Bounds, Size};
 use pixtuoid_scene::theme::Theme;
@@ -40,8 +40,6 @@ use crate::tui::renderer::set_half_block;
 pub(crate) struct Slide<'a> {
     pub(crate) leaving: (&'a SteppedFloor, Showing<'a>),
     pub(crate) arriving: (&'a SteppedFloor, Showing<'a>),
-    /// Each floor's flash, the leaving one's first.
-    pub(crate) flashes: Flashes,
     pub(crate) t: f32,
     pub(crate) going_down: bool,
 }
@@ -71,6 +69,9 @@ pub(crate) struct TileCutaway {
     /// What the tiles are cut from when sent: the canvas's last frame, or a
     /// slide's two composed.
     image: RgbBuffer,
+    /// The canvas painted a frame the flash hold kept back: [`Self::image`]
+    /// lags it whatever the next frame's damage.
+    image_behind: bool,
     /// The image's top-left cell.
     origin: Position,
     out: Sink,
@@ -113,12 +114,13 @@ impl TileCutaway {
             scene: Rect::default(),
             tiles: Tiles::new(protocol, cell, fit),
             image: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
+            image_behind: false,
             origin: Position::ORIGIN,
             out,
             pending: Vec::new(),
             in_grid: &crate::graphics::IN_GRID,
             sent_at: None,
-            flash: FlashHold::default(),
+            flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
             pending_flashes: Flashes::default(),
             torn: false,
         }
@@ -136,33 +138,35 @@ impl TileCutaway {
         self.fit.logical()
     }
 
-    /// Paint `stepped`, which shows `flash`, its top-left cell at `origin`,
-    /// and queue the tiles it changed once the protocol's cadence allows;
-    /// until then they stay owed. A frame the flash hold keeps back is not
-    /// painted, so the screen keeps the last.
+    /// Paint `stepped`, its top-left cell at `origin`, and queue the tiles it
+    /// changed once the protocol's cadence allows; until then they stay owed.
+    /// A frame the flash hold keeps back is painted but not sent, so the
+    /// terminal, and the half-blocks of the tiles under text, keep the last.
     pub(crate) fn paint(
         &mut self,
         stepped: &SteppedFloor,
-        flash: FlashPhase,
         theme: &'static Theme,
         showing: Showing<'_>,
         origin: Position,
     ) {
         let now = showing.now;
-        let flashes = [flash; 2];
-        if self.flash.holds(flashes, now) {
-            self.pending.clear();
-            return;
-        }
-        let CanvasFrame { buf, dirty } = self.canvas.frame(
+        let CanvasFrame { buf, dirty, flash } = self.canvas.frame(
             stepped,
             theme,
             self.fit.render_scale(),
             showing,
             &mut self.cache,
         );
-        if dirty != Dirty::Rects(Vec::new()) {
+        let flashes = [flash; 2];
+        if self.flash.holds(flashes) {
+            self.tiles.owe(&dirty);
+            self.image_behind = true;
+            self.pending.clear();
+            return;
+        }
+        if dirty != Dirty::Rects(Vec::new()) || self.image_behind {
             self.image.clone_from(buf);
+            self.image_behind = false;
         }
         self.stage(&dirty, flashes, now, origin);
     }
@@ -176,11 +180,6 @@ impl TileCutaway {
         now: SystemTime,
         origin: Position,
     ) {
-        let flashes = slide.flashes;
-        if self.flash.holds(flashes, now) {
-            self.pending.clear();
-            return;
-        }
         let scale = self.fit.render_scale();
         let leaving = self.canvas.frame(
             slide.leaving.0,
@@ -196,6 +195,13 @@ impl TileCutaway {
             slide.arriving.1,
             &mut self.cache,
         );
+        let flashes = [leaving.flash, arriving.flash];
+        if self.flash.holds(flashes) {
+            self.tiles.owe(&Dirty::All);
+            self.image_behind = true;
+            self.pending.clear();
+            return;
+        }
         let (w, h) = (leaving.buf.width(), leaving.buf.height());
         let offsets = slide_offsets(slide.t, slide.going_down, f32::from(h));
         self.image = RgbBuffer::filled(w, h, theme.surface.bg_fallback);
@@ -256,7 +262,7 @@ impl TileCutaway {
         let mut send = std::mem::take(&mut self.pending);
         send.retain(|c| !covered.contains(&c.tile.index));
         if send.is_empty() {
-            self.flash.shown(self.pending_flashes, now);
+            self.flash.shown(self.pending_flashes);
             return;
         }
         match self.protocol {
@@ -293,7 +299,7 @@ impl TileCutaway {
                 self.torn = false;
                 self.sent_at = Some(now);
                 self.tiles.sent(&sent);
-                self.flash.shown(self.pending_flashes, now);
+                self.flash.shown(self.pending_flashes);
             }
             Err(e) => {
                 self.torn = true;
@@ -321,6 +327,12 @@ impl TileCutaway {
     pub(crate) fn arming(mut self, in_grid: &'static AtomicBool) -> Self {
         self.in_grid = in_grid;
         self
+    }
+
+    /// Hold flashes on `screen` in place of the process's monotonic clock.
+    #[cfg(test)]
+    pub(crate) fn hold_on(&mut self, screen: pixtuoid_scene::flash::ScreenClock) {
+        self.flash = FlashHold::on(screen);
     }
 
     /// Show every tile in `scene`'s cells of `buf`, before the frame's text

@@ -32,6 +32,8 @@ pub struct PixelPassResult {
     /// Every character drawn this tick, in paint order: the last one covering
     /// a point is the one on top.
     pub agents: Vec<AgentFrame>,
+    /// What of the frame flashes, for a painter's hold.
+    pub flash: crate::flash::FlashPhase,
     /// Active speech bubbles this frame, for the caller's widget pass.
     pub chitchat_bubbles: Vec<ChitchatBubble>,
     /// Agent ids observed in `Walking { carrying_coffee: true }` this frame.
@@ -255,6 +257,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         },
     );
     let timing = ctx.world.floor.motion.timing(ctx.world.now);
+    let sky = crate::sky::Sky::at(timing, ctx.world.floor.weather);
     let Hoverables {
         pet_pos,
         mascots,
@@ -265,7 +268,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             layout: ctx.layout,
             pack: ctx.world.pack,
             timing,
-            sky: crate::sky::Sky::at(timing, ctx.world.floor.weather),
+            sky,
             buf: &mut *ctx.buf,
             cache: &mut ctx.store.cache,
             base_fill: &mut ctx.store.base_fill,
@@ -281,6 +284,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
         pet_pos,
         mascots,
         agents,
+        flash: crate::flash::FlashPhase::of(&sky, &frame),
         chitchat_bubbles: frame.chitchat_bubbles,
         new_coffee_carriers: frame.new_coffee_carriers,
         occupied_waypoints: frame.occupied_waypoints,

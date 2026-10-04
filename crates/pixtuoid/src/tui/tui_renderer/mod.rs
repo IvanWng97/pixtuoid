@@ -249,7 +249,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 weather: pixtuoid_scene::pixel_painter::WeatherPolicy::Clock,
                 motion: pixtuoid_scene::anim::Motion::Full,
             },
-            flash: Default::default(),
+            flash: pixtuoid_scene::flash::FlashHold::on(pixtuoid_scene::flash::monotonic()),
             #[cfg(feature = "graphics")]
             cutaway: None,
         }
@@ -592,7 +592,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         // Recording the from-floor's carriers before the to-floor render can't
         // change the to-floor's pixels: an agent lives on exactly ONE floor, and
         // each projected floor scene paints only its own agents' coffee state.
-        render_floor(
+        let leaving = render_floor(
             from_ctx,
             from_buf,
             &mut self.office.coffee,
@@ -606,7 +606,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 debug_walkable: self.debug_walkable,
             },
         );
-        render_floor(
+        let arriving = render_floor(
             to_ctx,
             to_buf,
             &mut self.office.coffee,
@@ -619,10 +619,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             },
         );
 
-        let flashes = [(from_floor, &*from_ctx), (to_floor, &*to_ctx)].map(|(i, ctx)| {
-            pixtuoid_scene::flash::flash_phase(self.chrome.floor_meta(i, nf), ctx, now)
-        });
-        if self.flash.holds(flashes, now) {
+        let flashes = [leaving, arriving].map(|f| f.map(|f| f.flash).unwrap_or_default());
+        if self.flash.holds(flashes) {
             return Ok(());
         }
 
@@ -644,7 +642,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             flush_buffer_to_term_at_offset(f, to_buf, actual_scene, to_offset);
             crate::tui::renderer::paint_overlays(f, &overlays, now, actual_full, theme);
         })?;
-        self.flash.shown(flashes, now);
+        self.flash.shown(flashes);
 
         self.chrome.popup.last_scale = popup_scale;
         Ok(())
@@ -874,14 +872,10 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             crate::tui::renderer::wall_board(&footer, floor_scene, world.floor.motion, now)
         });
         let showing = |floor, board| pixtuoid_scene::display::Showing { floor, now, board };
-        let flashes = [(from_floor, from_world), (to_floor, to_world)].map(|(i, world)| {
-            pixtuoid_scene::flash::flash_phase(world.floor, &self.floors[i].ctx, now)
-        });
         cutaway.paint_slide(
             crate::tui::cutaway::Slide {
                 leaving: (&from_stepped, showing(from_world.floor, &boards[0])),
                 arriving: (&to_stepped, showing(to_world.floor, &boards[1])),
-                flashes,
                 t,
                 going_down,
             },
@@ -960,8 +954,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             now,
             board: &board,
         };
-        let flash = pixtuoid_scene::flash::flash_phase(world.floor, &pf.ctx, now);
-        cutaway.paint(&stepped, flash, theme, showing, scene_area.as_position());
+        cutaway.paint(&stepped, theme, showing, scene_area.as_position());
         let geometry = cutaway.geometry(scene_area);
         let layout = &stepped.layout;
         let mouse = self

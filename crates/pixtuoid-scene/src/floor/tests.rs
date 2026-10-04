@@ -1453,28 +1453,20 @@ fn neon_a_starved_tube_holds_each_flash_and_dark_the_floor() {
     }
 }
 
-/// A starved tube's catch is its own flash phase, from the tick that draws
-/// it to the one that ends it.
+/// A starved tube records the catch it draws, from the tick that draws it to
+/// the one that ends it.
 #[test]
-fn neon_a_starved_tubes_catch_is_a_flash_phase() {
-    let clear = FloorMeta::ground().with_weather(crate::sky::WeatherPolicy::Forced(
-        crate::sky::Weather::Clear,
-    ));
-    let mut ctx = FloorCtx::new();
+fn neon_records_the_catch_it_draws() {
+    let mut neon = NeonState::new();
     let mut tick = |ms| {
         let at = in_stutter_cycle(ms);
-        let levels = ctx
-            .neon
-            .tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Full.clock(at));
-        (levels, crate::flash::flash_phase(clear, &ctx, at))
+        let levels = neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, Motion::Full.timing(at));
+        (levels == NeonLevels::FLASH, neon.stutters())
     };
     let (start, end) = NeonState::STUTTER_FLASHES_MS[0];
-    let (_, before) = tick(start - crate::anim::FULL_TICK_MS);
-    let (levels, during) = tick(start);
-    let (_, after) = tick(end);
-    assert_eq!(levels, NeonLevels::FLASH);
-    assert_ne!(during, before);
-    assert_eq!(after, before);
+    assert_eq!(tick(start - crate::anim::FULL_TICK_MS), (false, false));
+    assert_eq!(tick(start), (true, true));
+    assert_eq!(tick(end), (false, false));
 }
 
 /// At rest a starved tube holds steady: no flash, for the photosensitive.
