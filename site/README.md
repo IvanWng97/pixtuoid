@@ -94,16 +94,16 @@ would resize/blur it.
 Manifest-driven (`Showcase` → `ChannelStage`), defined in
 **`src/showcase.json`** alongside `src/themes.json`, `src/weather.json`,
 `src/features.json`, `src/install.json`. Channel kinds: **`clip`** (mp4 +
-webm + poster from `just gen-media`), **`variant-set`** (screenshot grid via
+webm + poster from `just gen-media --only site`), **`variant-set`** (screenshot grid via
 `variantsRef`/`variants`), **`soon`** (placeholder). `astro.config.mjs`
 enforces the invariants at build time (one default live channel, unique ids,
 assets present, features↔showcase bijection).
 
-**Adding a demo channel**: one `showcase.json` entry + `just gen-media`
+**Adding a demo channel**: one `showcase.json` entry + `just gen-media --only site`
 assets (a `clip` channel also adds its render + `encode_clip` block in
 `scripts/gen-media.py`). No component edits.
 
-**Adding a theme**: one row in `src/themes.json` + `just gen-media`. Chips,
+**Adding a theme**: one row in `src/themes.json` + `just gen-media --only site`. Chips,
 counts, retint, and renders all pick it up automatically.
 
 ## Custom domain & deploy
