@@ -96,7 +96,7 @@ impl WeatherPolicy {
     ///
     /// # Errors
     ///
-    /// If `name` is `Some` but none of them; the `Err` carries the valid names.
+    /// If `name` is `Some` but none of [`weather_names`]; the `Err` carries them.
     pub fn from_name(name: Option<&str>) -> Result<Self, Vec<&'static str>> {
         match name {
             None => Ok(Self::Clock),
