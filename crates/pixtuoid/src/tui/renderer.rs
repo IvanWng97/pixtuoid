@@ -220,7 +220,7 @@ pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
 /// `min_layout_size` in the terminal's own units — rows carry TWO buffer pixels
 /// (half-block), the footer takes its own, and the painter's own floor can outrank
 /// the layout's. The notice states it and the harness derives its fixtures from it;
-/// `runtime::capacity_for_terminal` holds the INVERSE and reads the same `FOOTER_ROWS`.
+/// [`scene_buf_size`] is its inverse.
 pub(crate) fn min_terminal_size() -> (u16, u16) {
     let min = pixtuoid_scene::layout::min_layout_size();
     (min.w.max(MIN_SCENE_WIDTH), advertised_rows(min.h))
