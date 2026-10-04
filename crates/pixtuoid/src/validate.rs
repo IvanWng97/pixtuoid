@@ -3,7 +3,7 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 use pixtuoid_core::sprite::format::{
-    DensityMismatch, FrameCountMismatch, HairOverhang, MissingHairView, MissingMark,
+    DensityMismatch, FrameCountMismatch, HairOverhang, MissingHairView, MissingKey, MissingMark,
     MissingOptional, OrphanDerived, PartialSet, StandIn, UnmarkedHead, ValidationReport, load_pack,
 };
 
@@ -75,6 +75,14 @@ fn missing_mark_line(m: &MissingMark) -> String {
         "WARN:  \"{}\" has no `@mark {}`: nothing stands there in either look",
         strip_control_chars(&m.name),
         m.mark
+    )
+}
+
+fn missing_key_line(m: &MissingKey) -> String {
+    format!(
+        "WARN:  \"{}\" draws no pixel in key '{}': no light rises there in either look",
+        strip_control_chars(&m.name),
+        strip_control_chars(&m.key.to_string())
     )
 }
 
@@ -192,6 +200,7 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
         orphan_hairstyles,
         walks_without_stride,
         missing_marks,
+        missing_keys,
     } = &report;
     // ERROR diagnostics and the final tally go to stderr so stdout stays the
     // parseable channel even when a caller redirects it.
@@ -231,6 +240,9 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
     }
     for m in missing_marks {
         writeln!(out, "{}", missing_mark_line(m))?;
+    }
+    for m in missing_keys {
+        writeln!(out, "{}", missing_key_line(m))?;
     }
     for u in unmarked_heads {
         writeln!(out, "{}", unmarked_head_line(u))?;

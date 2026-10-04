@@ -28,7 +28,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use pixtuoid_core::sprite::error::PackError;
 #[cfg(feature = "native")]
-use pixtuoid_core::sprite::format::{DensityMismatch, FrameCountMismatch, MissingMark, load_pack};
+use pixtuoid_core::sprite::format::{
+    DensityMismatch, FrameCountMismatch, MissingKey, MissingMark, load_pack,
+};
 use pixtuoid_core::sprite::format::{
     Pack, PackContract, ValidationReport, load_pack_from_strings, validate_pack_animations,
 };
@@ -75,8 +77,15 @@ const DESK_MARKS: [(&str, &[&str]); 2] = [
     (lookup::DESK_NORTH_SPRITE, &[CUP_MARK, TOWER_MARK]),
 ];
 
+/// The key every desk draws its lamp's bulb in: its pool centres there
+/// ([`bulb_cell`]).
+const DESK_BULBS: [(&str, char); 2] = [
+    (lookup::DESK_SPRITE, DESK_BULB_KEY),
+    (lookup::DESK_NORTH_SPRITE, DESK_BULB_KEY),
+];
+
 /// [`validate_pack_animations`], against this crate's painters' art sets,
-/// walks and desk marks.
+/// walks, desk marks and desk bulbs.
 pub fn validate_pack(pack: &Pack) -> ValidationReport {
     validate_pack_animations(
         pack,
@@ -84,6 +93,7 @@ pub fn validate_pack(pack: &Pack) -> ValidationReport {
             art_sets: &art_sets(),
             walks: &crate::sim::WALKS,
             marks: &DESK_MARKS,
+            keys: &DESK_BULBS,
         },
     )
 }
@@ -114,6 +124,7 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         overhanging_hair: _,
         walks_without_stride: _,
         missing_marks,
+        missing_keys,
         orphan_hairstyles,
     } = &report;
     for name in missing_required {
@@ -182,6 +193,14 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
             animation = ?name,
             mark,
             "custom sprite pack art leaves out a mark — nothing stands there, in either look"
+        );
+    }
+    for MissingKey { name, key } in missing_keys {
+        tracing::warn!(
+            origin,
+            animation = ?name,
+            key = %key,
+            "custom sprite pack art draws no pixel in a light's key — no light rises there"
         );
     }
     for style in orphan_hairstyles {
@@ -790,15 +809,25 @@ mod tests {
             .frames()[0]
             .clone();
         let row = vec!["W"; usize::from(desk.width()) * 4].join(" ");
-        let rows = vec![row; usize::from(desk.height()) * 4].join("\n");
+        // lit and marked, so the orphan is its only finding
+        let rows = [format!("{DESK_BULB_KEY}{}", &row[1..])]
+            .into_iter()
+            .chain(vec![row; usize::from(desk.height()) * 4 - 1])
+            .collect::<Vec<_>>()
+            .join("\n");
         fs::write(
             tmp.path().join("desk4x.sprite"),
-            // marked, so the orphan is its only finding
             format!("@frame 0\n@mark {CUP_MARK} 0 0\n@mark {TOWER_MARK} 0 0\n{rows}\n"),
         )
         .expect("write desk4x.sprite");
         let toml_path = tmp.path().join("pack.toml");
-        let mut toml = fs::read_to_string(&toml_path).expect("read pack.toml");
+        let mut toml = fs::read_to_string(&toml_path)
+            .expect("read pack.toml")
+            .replacen(
+                "[palette]\n",
+                &format!("[palette]\n\"{DESK_BULB_KEY}\" = \"#fff4c0\"\n"),
+                1,
+            );
         toml.push_str("\n[animations.\"desk@4x\"]\nframes=[\"desk4x.sprite\"]\nframe_ms=100\n");
         fs::write(&toml_path, toml).expect("write pack.toml");
         assert_eq!(load_warns(), 1, "the orphan desk@4x warns");

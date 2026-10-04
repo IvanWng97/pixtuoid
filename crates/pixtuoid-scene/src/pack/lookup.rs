@@ -233,15 +233,7 @@ pub(crate) const NORTH_SOFA_SEAT_ROWS: u16 = 3;
 /// Which of `art`'s pixels, row by row, it draws in one of `keys`: those that
 /// go transparent when the keys are painted so.
 pub(crate) fn drawn_in(art: &super::DenseFrame<'_>, keys: &[char]) -> Vec<bool> {
-    let without = art
-        .recolorable
-        .recolored(&keys.iter().map(|&k| (k, None)).collect::<Vec<_>>());
-    let (w, h) = (art.frame.width(), art.frame.height());
-    let opaque = |f: &pixtuoid_core::sprite::Frame, x, y| f.get(x, y).and_then(|p| *p).is_some();
-    (0..h)
-        .flat_map(|y| (0..w).map(move |x| (x, y)))
-        .map(|(x, y)| opaque(art.frame, x, y) && !opaque(&without, x, y))
-        .collect()
+    art.recolorable.drawn_in(keys)
 }
 
 /// The pack art a corridor appliance at a `kind` waypoint is drawn from.

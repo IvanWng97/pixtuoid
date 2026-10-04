@@ -1969,6 +1969,19 @@ pub struct ValidationReport {
     /// Each mark a piece the caller stands props on leaves out: nothing stands
     /// there, in either look.
     pub missing_marks: Vec<MissingMark>,
+    /// Each palette key a piece the caller lights leaves undrawn: no light
+    /// rises there, in either look.
+    pub missing_keys: Vec<MissingKey>,
+}
+
+/// A palette key a piece's first frame draws no pixel in, at one of its
+/// densities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingKey {
+    /// The animation, e.g. `desk@4x`.
+    pub name: String,
+    /// The key it leaves undrawn.
+    pub key: char,
 }
 
 /// A mark a piece's first frame leaves out, at one of its densities.
@@ -1990,6 +2003,9 @@ pub struct PackContract<'a> {
     /// Each piece the caller stands props on, with the marks its first frame
     /// carries at every density.
     pub marks: &'a [(&'static str, &'static [&'static str])],
+    /// Each piece the caller lights, with the palette key its first frame
+    /// draws the light's source in at every density.
+    pub keys: &'a [(&'static str, char)],
 }
 
 impl ValidationReport {
@@ -2013,6 +2029,7 @@ impl ValidationReport {
             orphan_hairstyles,
             walks_without_stride: _,
             missing_marks: _,
+            missing_keys: _,
         } = self;
         missing_required.len()
             + insufficient_frames.len()
@@ -2042,6 +2059,7 @@ impl ValidationReport {
             orphan_hairstyles: _,
             walks_without_stride,
             missing_marks,
+            missing_keys,
         } = self;
         missing_optional.len()
             + partial_sets.len()
@@ -2051,6 +2069,7 @@ impl ValidationReport {
             + overhanging_hair.len()
             + walks_without_stride.len()
             + missing_marks.len()
+            + missing_keys.len()
     }
 
     /// True when the pack is unusable; see [`error_count`](Self::error_count).
@@ -2071,6 +2090,7 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
         art_sets,
         walks,
         marks,
+        keys,
     } = *contract;
     let mut report = ValidationReport {
         walks_without_stride: walks
@@ -2149,6 +2169,26 @@ pub fn validate_pack_animations(pack: &Pack, contract: &PackContract<'_>) -> Val
                         mark,
                     });
                 }
+            }
+        }
+    }
+
+    for &(piece, key) in keys {
+        let densities = variants.iter().filter(|v| v.2 == piece).map(|v| (v.0, v.1));
+        for (name, sprite) in pack
+            .animation(piece)
+            .map(|s| (piece, s))
+            .into_iter()
+            .chain(densities)
+        {
+            let draws = sprite
+                .recolorable(0)
+                .is_some_and(|f| f.drawn_in(&[key]).contains(&true));
+            if !draws {
+                report.missing_keys.push(MissingKey {
+                    name: name.to_owned(),
+                    key,
+                });
             }
         }
     }
@@ -2918,9 +2958,42 @@ mod validation_floor_tests {
                 name: "desk@4x".to_string(),
                 mark: "cup",
             }],
+            missing_keys: vec![MissingKey {
+                name: "desk".to_string(),
+                key: '9',
+            }],
         };
         assert_eq!(report.error_count(), 6);
-        assert_eq!(report.warning_count(), 8);
+        assert_eq!(report.warning_count(), 9);
+    }
+
+    /// A piece the caller lights, at any of its densities, draws no pixel in
+    /// its light's key: no light would rise there.
+    #[test]
+    fn a_lit_piece_without_its_key_is_flagged_at_each_density() {
+        let pack = pack_with_frames(
+            "\"9\"=\"#fff000\"\n\
+             [animations.desk]\nframes=[\"lit.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk@2x\"]\nframes=[\"dark.sprite\"]\nframe_ms=100\n",
+            &[
+                ("lit.sprite", "@frame 0\n9"),
+                ("dark.sprite", "@frame 0\nA A\nA A"),
+            ],
+        );
+        let report = validate_pack_animations(
+            &pack,
+            &PackContract {
+                keys: &[("desk", '9')],
+                ..PackContract::default()
+            },
+        );
+        assert_eq!(
+            report.missing_keys,
+            vec![MissingKey {
+                name: "desk@2x".to_string(),
+                key: '9',
+            }]
+        );
     }
 
     /// A piece the caller stands props on, at any of its densities, leaves out
