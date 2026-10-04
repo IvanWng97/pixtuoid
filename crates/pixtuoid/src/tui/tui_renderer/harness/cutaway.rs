@@ -466,6 +466,19 @@ fn a_failed_write_re_sends_next_frame() {
     assert!(sent.contains(TRANSMIT));
 }
 
+/// A cutaway slide whose two floors can't be borrowed apart (one floor,
+/// twice) ends at once, rather than warning every frame for its duration.
+#[test]
+fn an_unborrowable_cutaway_slide_cancels() {
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let (mut r, _wire) = painter(cols, rows, ImageProtocol::Kitty);
+    let scene = two_floor_scene();
+    r.render(&scene, pack(), t0()).expect("render");
+    r.transition = Some(pixtuoid_scene::floor::FloorTransition::new(0, 0, t0()));
+    r.render(&scene, pack(), t0()).expect("render");
+    assert!(r.transition().is_none());
+}
+
 #[test]
 fn a_redraw_re_sends_every_tile() {
     let (mut r, wire) = kitty(120, 40);

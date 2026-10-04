@@ -103,6 +103,20 @@ fn floor_transition_completes_and_lands() {
     );
 }
 
+/// A slide whose two floors can't be borrowed apart (one floor, twice) ends at
+/// once, rather than warning every frame for its whole duration.
+#[test]
+fn an_unborrowable_slide_cancels() {
+    let p = pack();
+    let scene = two_floor_scene();
+    let mut r = build(100, 40, vec![]);
+    let now = t0();
+    r.render(&scene, p, now).unwrap();
+    r.transition = Some(pixtuoid_scene::floor::FloorTransition::new(0, 0, now));
+    r.render(&scene, p, now).unwrap();
+    assert!(r.transition().is_none());
+}
+
 #[test]
 fn navigation_blocked_during_active_transition() {
     let cap = 16;

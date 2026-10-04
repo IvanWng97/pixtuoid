@@ -148,8 +148,10 @@ impl AssetBank {
             OneShotPool::Drop => self.drops.len(),
             OneShotPool::DoorChime | OneShotPool::PrinterWhir | OneShotPool::VendingDrop => 1,
         };
-        // `build` and `adopt` fill every pool, so the modulo has a buffer to land on.
-        self.get(pool, index % size)
+        // `build` and `adopt` fill every pool; an empty one would play silence.
+        index
+            .checked_rem(size)
+            .and_then(|i| self.get(pool, i))
             .map_or_else(Default::default, Arc::clone)
     }
 }

@@ -90,6 +90,19 @@ fn daemons_projects_onto_the_ground_floor_only() {
     );
 }
 
+/// A floor past the building's projects as an empty one, agreeing with
+/// `build_floor_scene`: the last real floor's agents don't leak through.
+#[test]
+fn a_floor_past_the_building_projects_empty() {
+    use pixtuoid_core::state::MAX_FLOORS;
+    let scene = make_scene(2 * MAX_FLOORS, 2);
+    assert!(scene.agents.values().any(|a| a.floor_idx == MAX_FLOORS - 1));
+    assert!(build_floor_scene(&scene, MAX_FLOORS).is_empty());
+    let past = project_floor_scene(&scene, MAX_FLOORS);
+    assert!(past.agents.is_empty());
+    assert_eq!(past.total_capacity(), 0);
+}
+
 #[test]
 fn door_anim_excludes_arrived_entry_profiles() {
     use crate::walk::WalkState;
