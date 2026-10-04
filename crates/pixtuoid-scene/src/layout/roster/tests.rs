@@ -37,7 +37,8 @@ pub(crate) fn kind_key(kind: FixtureKind) -> &'static str {
     }
 }
 
-/// Every kind's census key: the census fails on a kind placed but missing here.
+/// Every kind's census key: [`every_fixture_kind_is_placed_on_some_office`]
+/// fails on a kind placed but missing here.
 pub(crate) fn every_kind_key() -> BTreeSet<&'static str> {
     [
         "Desk",
@@ -73,8 +74,8 @@ pub(crate) fn every_kind_key() -> BTreeSet<&'static str> {
     .collect()
 }
 
-/// The offices the census and the hover sweep lay out.
-fn offices() -> impl Iterator<Item = SceneLayout> {
+/// Sizes × seeds that between them place every fixture kind.
+pub(crate) fn offices() -> impl Iterator<Item = SceneLayout> {
     [
         (96u16, 60u16),
         (160, 120),
@@ -235,30 +236,29 @@ fn the_floor_lamp_base_is_its_sprite_south_row() {
     assert_eq!((base.x, base.y), (lamp.x, lamp.y - h / 2 + h - 1));
 }
 
-/// The large columns' last one is the falsifier for the large/small split:
-/// outside the small machine but inside the large one.
 #[test]
 fn the_coffee_machine_follows_the_counter_size() {
     let mut l = SceneLayout::compute(160, 200, Some(4)).expect("fits");
-    let wp = *l
-        .waypoints
-        .iter()
-        .find(|w| w.kind == WaypointKind::Pantry)
-        .expect("a pantry");
     for w in [super::super::PANTRY_COUNTER_LARGE_W, 20] {
-        let h = l.pantry_counter_size().h;
-        l.pantry.as_mut().expect("a pantry").counter_size = Size { w, h };
+        let p = l.pantry.as_mut().expect("a pantry");
+        p.counter_size.w = w;
+        let counter = p.counter_rect().expect("a counter");
         let (lo, hi) = coffee_machine_cols(w);
-        let b = l.coffee_machine().expect("a coffee machine");
-        assert_eq!(b.x, wp.pos.x - w / 2 + lo, "{w}");
-        assert_eq!(b.width, hi - lo, "{w}");
-        assert_eq!((b.y, b.height), (wp.pos.y - h / 2, h), "{w}");
+        assert_eq!(
+            l.coffee_machine(),
+            Some(Bounds {
+                x: counter.x + lo,
+                width: hi - lo,
+                ..counter
+            }),
+            "{w}"
+        );
     }
     assert_ne!(
         coffee_machine_cols(super::super::PANTRY_COUNTER_LARGE_W),
         coffee_machine_cols(20)
     );
-    l.waypoints.retain(|w| w.kind != WaypointKind::Pantry);
+    l.pantry = None;
     assert_eq!(l.coffee_machine(), None);
 }
 
@@ -329,30 +329,35 @@ fn a_standing_fixture_casts_its_shadow_under_its_whole_box() {
     assert!(desks > 0, "the sweep saw a desk");
 }
 
-/// The sizes the north-wall census rendered, the narrowest sweep walls and
-/// the committed heroes' buffers (`scripts/media.json`), each at a few seeds.
-fn north_wall_census() -> impl Iterator<Item = SceneLayout> {
-    [
-        (
-            super::super::compute::MIN_LAYOUT_W,
-            super::super::compute::MIN_LAYOUT_H,
-        ),
-        (super::super::compute::MIN_LAYOUT_W, 80),
-        (96, 60),
-        (120, 72),
-        (140, 80),
-        (160, 96),
-        (192, 108),
-        (240, 135),
-        (320, 180),
-        (160, 192),
-        (176, 99),
-        (208, 176),
-        (231, 130),
-    ]
-    .into_iter()
-    .flat_map(|(w, h)| {
-        (0..3).map(move |seed| {
+/// The sizes the roster invariants sweep, each at [`CENSUS_SEEDS`]: the layout
+/// floor, a spread of window-grid widths, the committed heroes' buffers
+/// (`scripts/media.json`) and two mid sizes that place a lounge and an island.
+pub(crate) const CENSUS_SIZES: &[(u16, u16)] = &[
+    (
+        super::super::compute::MIN_LAYOUT_W,
+        super::super::compute::MIN_LAYOUT_H,
+    ),
+    (super::super::compute::MIN_LAYOUT_W, 80),
+    (96, 60),
+    (120, 72),
+    (140, 80),
+    (160, 96),
+    (192, 108),
+    (200, 120),
+    (240, 135),
+    (240, 144),
+    (320, 180),
+    (160, 192),
+    (176, 99),
+    (208, 176),
+    (231, 130),
+];
+
+pub(crate) const CENSUS_SEEDS: std::ops::Range<u64> = 0..4;
+
+fn census() -> impl Iterator<Item = SceneLayout> {
+    CENSUS_SIZES.iter().flat_map(|&(w, h)| {
+        CENSUS_SEEDS.map(move |seed| {
             SceneLayout::compute_with_seed(w, h, None, seed).expect("a census size lays out")
         })
     })
@@ -370,7 +375,7 @@ fn is_exit_sign(k: &FixtureKind) -> bool {
 
 #[test]
 fn the_door_is_centred_in_the_last_window_slot() {
-    for l in north_wall_census() {
+    for l in census() {
         let at = format!("{}x{}", l.buf_w, l.buf_h);
         let door = l.door_rect();
         let roster = l.fixtures().find(|f| f.kind == FixtureKind::Door);
@@ -401,7 +406,7 @@ fn the_door_is_centred_in_the_last_window_slot() {
 #[test]
 fn the_exit_sign_hangs_centred_over_the_door_indicator_below_the_window_head() {
     let mut met = 0;
-    for l in north_wall_census().chain(offices()) {
+    for l in census().chain(offices()) {
         let at = format!("{}x{}", l.buf_w, l.buf_h);
         let Some(sign) = l.fixtures().find(|f| is_exit_sign(&f.kind)) else {
             continue;
@@ -431,7 +436,7 @@ fn the_exit_sign_hangs_centred_over_the_door_indicator_below_the_window_head() {
 #[test]
 fn a_notice_board_hangs_within_one_pane() {
     let mut met = 0;
-    for l in north_wall_census().chain(offices()) {
+    for l in census().chain(offices()) {
         for f in l.fixtures() {
             let FixtureKind::NoticeBoard { .. } = f.kind else {
                 continue;
@@ -468,7 +473,7 @@ fn snapping_to_a_pane_keeps_the_notice_board() {
 #[test]
 fn the_clock_hangs_centred_on_a_window_post() {
     let mut met = 0;
-    for l in north_wall_census() {
+    for l in census() {
         let at = format!("{}x{}", l.buf_w, l.buf_h);
         let Some(clock) = l.fixtures().find(|f| f.kind == FixtureKind::Clock) else {
             assert!(
@@ -525,7 +530,7 @@ fn no_two_fixtures_overlap_but_by_design() {
     let on_runner =
         |f: &Fixture, g: &Fixture| f.kind == FixtureKind::Runner && g.contact().is_some();
     let (mut met, mut stray) = (BTreeSet::new(), Vec::new());
-    for l in north_wall_census().chain(offices()) {
+    for l in census().chain(offices()) {
         let fixtures: Vec<Fixture> = l.fixtures().collect();
         for (i, a) in fixtures.iter().enumerate() {
             for b in fixtures[i + 1..]
@@ -560,7 +565,7 @@ fn no_two_fixtures_overlap_but_by_design() {
 fn no_meeting_furniture_or_plant_blocks_a_doorway() {
     use super::super::rooms::walls::WALL_H;
     let mut met = 0;
-    for l in offices().chain(north_wall_census()) {
+    for l in offices().chain(census()) {
         for d in &l.doorways {
             met += 1;
             // The cut ends are the jambs' own cells, so the opening lies between.
