@@ -523,6 +523,11 @@ fn strikes(bucket: u64, storm: f32) -> bool {
     (draw as f32) < storm * (1u64 << f32::MANTISSA_DIGITS) as f32
 }
 
+/// The lightning bucket `beat` falls in: what seeds its strike's look.
+pub(crate) fn strike_bucket(beat: crate::anim::Beat) -> u64 {
+    beat.ms() / LIGHTNING_PERIOD_MS
+}
+
 /// [`lightning_envelope`] on `beat` under `policy`, or 0 when not mid-strike
 /// or at rest.
 fn flash_level_at(beat: crate::anim::Beat, policy: WeatherPolicy) -> f32 {
@@ -530,7 +535,7 @@ fn flash_level_at(beat: crate::anim::Beat, policy: WeatherPolicy) -> f32 {
         return 0.0;
     }
     let elapsed_ms = beat.ms();
-    let bucket = elapsed_ms / LIGHTNING_PERIOD_MS;
+    let bucket = strike_bucket(beat);
     let strike_ms = bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket);
     let Some(since) = elapsed_ms
         .checked_sub(strike_ms)

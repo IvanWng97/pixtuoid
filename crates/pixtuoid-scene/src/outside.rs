@@ -185,6 +185,7 @@ impl WindowView {
 /// on one painter's grid.
 pub(crate) struct Outside {
     sky: SkyView,
+    clouds: crate::clouds::Clouds,
     city: CityStrip,
     /// The column, in units, the city's west end stands at.
     run_x0: u16,
@@ -209,6 +210,7 @@ impl Outside {
         let glass_h = crate::layout::glass_rows(rows.end - rows.start);
         Self {
             sky: SkyView::of(moment, buf_w, band_h, theme),
+            clouds: crate::clouds::Clouds::of(moment, run.end - run.start, glass_h),
             city: CityStrip::draw(pack, (run.end - run.start, glass_h), moment, theme, density),
             run_x0: run.start,
             weather,
@@ -221,6 +223,7 @@ impl Outside {
     /// the one order every painter draws it in.
     pub(crate) fn through(&self, bay: WindowBay) -> WindowView {
         let mut view = self.sky.window(bay, self.rows.clone(), self.d);
+        self.clouds.paint(&mut view, self.run_x0);
         self.city.paint(&mut view, self.run_x0);
         self.weather.paint(&mut view);
         view
@@ -343,6 +346,39 @@ pub(crate) mod tests {
                 glass: (0, 0),
             })
         );
+    }
+
+    /// Whatever the sky outside draws (its clouds, a strike's flash and bolt,
+    /// the weather on the glass), the window's joinery is the frame's alone.
+    #[test]
+    fn nothing_outside_reaches_the_joinery() {
+        let theme = &crate::theme::NORMAL;
+        let pack = crate::pack::test_default_pack();
+        let wall = (crate::layout::WINDOW_W * 3, 32);
+        for s in every_sky() {
+            let moment =
+                Moment::resolve(s.sky, theme, 0.0, crate::anim::Motion::Full.timing(s.now));
+            for d in [Density::ONE, pack.max_density_variant()] {
+                let outside =
+                    Outside::of(&moment, &pack, theme, wall, d, GlassWeather::of(&moment));
+                let rows = window_rows(wall.1);
+                for x in [0, crate::layout::WINDOW_W, 2 * crate::layout::WINDOW_W] {
+                    let bay = WindowBay {
+                        x,
+                        w: crate::layout::WINDOW_W,
+                        idx: 0,
+                    };
+                    let bare =
+                        WindowView::new(bay, rows.clone(), d.get(), |_| Rgb { r: 0, g: 0, b: 0 });
+                    assert_eq!(
+                        outside.through(bay).joinery().collect::<Vec<_>>(),
+                        bare.joinery().collect::<Vec<_>>(),
+                        "{} at {d:?}: the joinery moved",
+                        s.name
+                    );
+                }
+            }
+        }
     }
 
     #[test]

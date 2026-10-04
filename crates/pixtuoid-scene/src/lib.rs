@@ -39,6 +39,7 @@ pub mod burn;
 pub(crate) mod celestial;
 pub(crate) mod character;
 pub mod chitchat;
+pub(crate) mod clouds;
 pub(crate) mod composite;
 pub(crate) mod creatures;
 #[doc(hidden)]

@@ -187,15 +187,21 @@ fn count_cool_bright(buf: &RgbBuffer, top_wall_h: u16) -> usize {
         .count()
 }
 
-/// Count faint-white STAR pixels in the same sky-only top-third band. The base
-/// night sky never gets close to this threshold on its own — only a `STAR_COLOR`
-/// blend lifts a pixel this bright.
-fn count_faint_white(buf: &RgbBuffer, top_wall_h: u16) -> usize {
+/// The stars in the upper sky band: lone faint-white cells, where a cloud's
+/// moonlit edge runs on.
+fn count_stars(buf: &RgbBuffer, top_wall_h: u16) -> usize {
+    let bright = |x: u16, y: u16| {
+        let p = buf.get(x, y);
+        p.r > 90 && p.g > 90 && p.b > 90
+    };
     (1..(top_wall_h / 3).max(2))
-        .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
+        .flat_map(|y| (1..buf.width() - 1).map(move |x| (x, y)))
         .filter(|&(x, y)| {
-            let p = buf.get(x, y);
-            p.r > 90 && p.g > 90 && p.b > 90
+            bright(x, y)
+                && !bright(x - 1, y)
+                && !bright(x + 1, y)
+                && !bright(x, y - 1)
+                && !bright(x, y + 1)
         })
         .count()
 }
@@ -396,8 +402,8 @@ fn stars_appear_on_a_clear_night_and_vanish_under_overcast() {
     for (day, hour) in [moonless, high_moon] {
         let clear = render_office_on(day, hour, Weather::Clear, buf_w, top_wall_h);
         let overcast = render_office_on(day, hour, Weather::Overcast, buf_w, top_wall_h);
-        let clear_n = count_faint_white(&clear, top_wall_h);
-        let overcast_n = count_faint_white(&overcast, top_wall_h);
+        let clear_n = count_stars(&clear, top_wall_h);
+        let overcast_n = count_stars(&overcast, top_wall_h);
         assert!(
             clear_n >= 3,
             "day {day} {hour}:00: a clear night should show some stars, got {clear_n}"
