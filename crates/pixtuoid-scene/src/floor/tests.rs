@@ -581,12 +581,38 @@ fn transition_escapes_a_backward_clock_step() {
     );
 }
 
+/// One classic frame of `scene` at `now` through `session`'s entry.
+fn classic_frame(
+    session: &mut FloorSession,
+    pack: &Arc<pixtuoid_core::sprite::format::Pack>,
+    scene: &SceneState,
+    now: SystemTime,
+    floor: FloorMeta,
+    size: Size,
+) -> Option<Arc<crate::layout::SceneLayout>> {
+    session.render(
+        crate::look::Look::Classic,
+        crate::look::RenderInputs {
+            world: FloorInputs {
+                scene,
+                pack,
+                now,
+                floor,
+                pets: PetInputs::default(),
+            },
+            theme: crate::theme::theme_by_name("normal").expect("normal theme exists"),
+            size,
+            place: crate::look::Place::default(),
+            debug_walkable: false,
+        },
+    )
+}
+
 #[test]
-fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
+fn the_classic_paints_the_flame_crown_for_a_top_tier_agent() {
     // Driven through the FULL pass: a projection or sim/paint hop dropping
     // slot.model/effort fails here while the unit-level paint test stays green.
-    let pack = crate::pack::test_default_pack();
-    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let pack = Arc::new(crate::pack::test_default_pack());
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     let mut scene = make_scene(1, 8);
     let slot = scene.agents.values_mut().next().expect("one agent");
@@ -595,27 +621,14 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
         "ultra".into(),
         now,
     ));
-    let mut fctx = FloorCtx::new();
-    let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
-    let mut coffee = CoffeeState::new();
-    let mut chitchat = HashMap::new();
-    render_floor(
-        &mut fctx,
-        &mut buf,
-        &mut coffee,
-        &mut chitchat,
-        FrameInputs {
-            world: FloorInputs {
-                scene: &scene,
-                pack: &pack,
-                now,
-                floor: FloorMeta::ground(),
-                pets: PetInputs::default(),
-            },
-            theme,
-            size: Size { w: 192, h: 160 },
-            debug_walkable: false,
-        },
+    let mut session = FloorSession::new(Arc::clone(&pack));
+    classic_frame(
+        &mut session,
+        &pack,
+        &scene,
+        now,
+        FloorMeta::ground(),
+        Size { w: 192, h: 160 },
     )
     .expect("layout");
     // Against the SAME scene with the crown's inputs cleared: the foreground's
@@ -626,29 +639,20 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
     let slot = plain.agents.values_mut().next().expect("one agent");
     slot.model = None;
     slot.effort = None;
-    let mut fctx2 = FloorCtx::new();
-    let mut buf2 = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
-    let mut coffee2 = CoffeeState::new();
-    let mut chitchat2 = HashMap::new();
-    render_floor(
-        &mut fctx2,
-        &mut buf2,
-        &mut coffee2,
-        &mut chitchat2,
-        FrameInputs {
-            world: FloorInputs {
-                scene: &plain,
-                pack: &pack,
-                now,
-                floor: FloorMeta::ground(),
-                pets: PetInputs::default(),
-            },
-            theme,
-            size: Size { w: 192, h: 160 },
-            debug_walkable: false,
-        },
+    let mut session2 = FloorSession::new(Arc::clone(&pack));
+    classic_frame(
+        &mut session2,
+        &pack,
+        &plain,
+        now,
+        FloorMeta::ground(),
+        Size { w: 192, h: 160 },
     )
     .expect("layout");
+    let (buf, buf2) = (
+        session.buf().expect("classic buffer"),
+        session2.buf().expect("classic buffer"),
+    );
     // What this pins is that model/effort REACH the painter through projection
     // and the sim/paint hop — not that the crown itself drew. The burn tier also
     // tints the sprite over the crown's own pixels, so no scoping of this diff
@@ -665,61 +669,40 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
 }
 
 #[test]
-fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
-    let pack = crate::pack::test_default_pack();
-    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+fn the_classic_paints_records_coffee_state_and_survives_a_tiny_buffer() {
+    let pack = Arc::new(crate::pack::test_default_pack());
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     let scene = SceneState::new([8; MAX_FLOORS]);
-    let mut fctx = FloorCtx::new();
-    let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
-    let mut coffee = CoffeeState::new();
-    let mut chitchat = HashMap::new();
+    let mut session = FloorSession::new(Arc::clone(&pack));
 
-    let none = render_floor(
-        &mut fctx,
-        &mut buf,
-        &mut coffee,
-        &mut chitchat,
-        FrameInputs {
-            world: FloorInputs {
-                scene: &scene,
-                pack: &pack,
-                now,
-                floor: FloorMeta::ground(),
-                pets: PetInputs::default(),
-            },
-            theme,
-            size: Size { w: 8, h: 8 },
-            debug_walkable: false,
-        },
+    let none = classic_frame(
+        &mut session,
+        &pack,
+        &scene,
+        now,
+        FloorMeta::ground(),
+        Size { w: 8, h: 8 },
     );
     assert!(none.is_none(), "an unlayoutable size returns None");
+    let buf = session.buf().expect("classic buffer");
     assert_eq!(
         (buf.width(), buf.height()),
         (8, 8),
         "the buffer was still sized"
     );
 
-    let layout = render_floor(
-        &mut fctx,
-        &mut buf,
-        &mut coffee,
-        &mut chitchat,
-        FrameInputs {
-            world: FloorInputs {
-                scene: &scene,
-                pack: &pack,
-                now,
-                floor: FloorMeta::ground(),
-                pets: PetInputs::default(),
-            },
-            theme,
-            size: Size { w: 160, h: 96 },
-            debug_walkable: false,
-        },
+    let layout = classic_frame(
+        &mut session,
+        &pack,
+        &scene,
+        now,
+        FloorMeta::ground(),
+        Size { w: 160, h: 96 },
     );
     assert!(layout.is_some(), "a layoutable size returns the layout");
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let bg = theme.surface.bg_fallback;
+    let buf = session.buf().expect("classic buffer");
     assert!(
         buf.as_slice()
             .iter()
@@ -735,7 +718,7 @@ fn floor_session_render_owns_the_dual_eviction() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let gone = AgentId::from_parts("claude-code", "session-evict");
     let mut session = FloorSession::new(Arc::clone(&pack));
-    session.floor.walks.insert(gone, WalkState::new(gone));
+    session.floor.ctx.walks.insert(gone, WalkState::new(gone));
     session.office.coffee.insert(gone, now);
 
     let scene = SceneState::new([8; MAX_FLOORS]);
@@ -757,7 +740,7 @@ fn floor_session_render_owns_the_dual_eviction() {
     );
     assert!(layout.is_some(), "a layoutable size renders");
     assert!(
-        !session.floor.walks.contains_key(&gone),
+        !session.floor.ctx.walks.contains_key(&gone),
         "render() evicts the floor half (motion) — the floating-leak class"
     );
     assert!(
@@ -877,11 +860,11 @@ fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
         "the frame carries the agent's routed pose"
     );
     assert!(
-        session.floor.walks.contains_key(&id),
+        session.floor.ctx.walks.contains_key(&id),
         "the sim advanced: the entry leg was snapshotted into motion"
     );
     assert!(
-        session.floor.door_anim_max_ms > 0,
+        session.floor.ctx.door_anim_max_ms > 0,
         "the epilogue ran headlessly: the in-flight entry drives the door clamp"
     );
     assert!(session.buf().is_none(), "no pixel buffer was bought");
@@ -925,6 +908,7 @@ fn step_hands_back_the_layout_the_sim_stepped_on() {
         .expect("a layoutable size steps");
     let memoized = session
         .floor
+        .ctx
         .frame_layout(size.w, size.h, meta.floor_seed)
         .expect("the memoized layout");
     assert!(Arc::ptr_eq(&stepped.layout, &memoized));
@@ -934,13 +918,13 @@ fn step_hands_back_the_layout_the_sim_stepped_on() {
 /// other floor's agents: their coffee must outlive it.
 #[test]
 fn stepping_a_projected_floor_keeps_other_floors_coffee() {
-    let pack = crate::pack::test_default_pack();
+    let pack = Arc::new(crate::pack::test_default_pack());
     let scene = make_scene(17, 16);
     let downstairs = AgentId::from_transcript_path("/p/0.jsonl");
     assert_eq!(scene.agents[&downstairs].floor_idx, 0);
     let mut office = PerOffice::new();
     office.coffee.insert(downstairs, t0());
-    let mut upstairs = PerFloor::new();
+    let mut upstairs = PerFloor::new(Arc::clone(&pack));
     let projected = project_floor_scene(&scene, 1);
     let stepped = step_floor(
         &mut upstairs.ctx,
@@ -961,14 +945,9 @@ fn stepping_a_projected_floor_keeps_other_floors_coffee() {
 
 #[test]
 fn session_types_default_equals_new() {
-    assert_eq!(PerFloor::default().ctx.door_anim_max_ms, 0);
-    assert_eq!(
-        (
-            PerFloor::default().buf.width(),
-            PerFloor::default().buf.height()
-        ),
-        (0, 0)
-    );
+    let floor = PerFloor::new(Arc::new(crate::pack::test_default_pack()));
+    assert_eq!(floor.ctx.door_anim_max_ms, 0);
+    assert!(floor.raster.pixels().is_none());
     assert!(PerOffice::default().coffee.map().is_empty());
     assert!(PerOffice::default().chitchat.is_empty());
 }
@@ -1070,35 +1049,25 @@ fn the_foreground_layer_is_lit_by_the_clock() {
     // clock alone.
     let clear = crate::sky::WeatherPolicy::Forced(crate::sky::Weather::Clear);
     let render = |now: SystemTime| {
-        let pack = crate::pack::test_default_pack();
-        let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+        let pack = Arc::new(crate::pack::test_default_pack());
         let scene = make_scene(6, 8);
-        let mut fctx = FloorCtx::new();
-        let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
-        let mut coffee = CoffeeState::new();
-        let mut chitchat = HashMap::new();
-        render_floor(
-            &mut fctx,
-            &mut buf,
-            &mut coffee,
-            &mut chitchat,
-            FrameInputs {
-                world: FloorInputs {
-                    scene: &scene,
-                    pack: &pack,
-                    now,
-                    floor: FloorMeta::ground().with_weather(clear),
-                    pets: PetInputs::default(),
-                },
-                theme,
-                size: Size { w: 192, h: 160 },
-                debug_walkable: false,
-            },
+        let mut session = FloorSession::new(Arc::clone(&pack));
+        classic_frame(
+            &mut session,
+            &pack,
+            &scene,
+            now,
+            FloorMeta::ground().with_weather(clear),
+            Size { w: 192, h: 160 },
         )
         .expect("layout");
-        buf
+        session
     };
-    let (noon, night) = (render(at_hour(12)), render(at_hour(2)));
+    let (noon_session, night_session) = (render(at_hour(12)), render(at_hour(2)));
+    let (noon, night) = (
+        noon_session.buf().expect("classic buffer"),
+        night_session.buf().expect("classic buffer"),
+    );
     let (w, h) = (noon.width(), noon.height());
     let frozen = |x: u16, y: u16| noon.get(x, y) == night.get(x, y);
     // CLUSTERED, not counted. Two different blends can round to one u8, so a few
@@ -1452,38 +1421,31 @@ fn neon_never_flashes_while_lit_or_while_still_coasting_down() {
 /// The classic looks out from its own floor.
 #[test]
 fn the_classic_sees_the_skyline_from_its_floors_altitude() {
-    let pack = crate::pack::test_default_pack();
-    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let pack = Arc::new(crate::pack::test_default_pack());
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = make_scene(1, 8);
     let render = |floor_meta: FloorMeta| {
-        let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
-        render_floor(
-            &mut FloorCtx::new(),
-            &mut buf,
-            &mut CoffeeState::new(),
-            &mut HashMap::new(),
-            FrameInputs {
-                world: FloorInputs {
-                    scene: &scene,
-                    pack: &pack,
-                    now,
-                    floor: floor_meta,
-                    pets: PetInputs::default(),
-                },
-                theme,
-                size: Size { w: 192, h: 160 },
-                debug_walkable: false,
-            },
+        let mut session = FloorSession::new(Arc::clone(&pack));
+        classic_frame(
+            &mut session,
+            &pack,
+            &scene,
+            now,
+            floor_meta,
+            Size { w: 192, h: 160 },
         )
         .expect("layout");
-        buf
+        session
     };
-    let ground = render(FloorMeta::ground());
-    let top = render(FloorMeta {
-        altitude: 1.0,
-        ..FloorMeta::ground()
-    });
+    let (ground_session, top_session) = (
+        render(FloorMeta::ground()),
+        render(FloorMeta {
+            altitude: 1.0,
+            ..FloorMeta::ground()
+        }),
+    );
+    let ground = ground_session.buf().expect("classic buffer");
+    let top = top_session.buf().expect("classic buffer");
     assert!(
         (0..ground.height())
             .flat_map(|y| (0..ground.width()).map(move |x| (x, y)))

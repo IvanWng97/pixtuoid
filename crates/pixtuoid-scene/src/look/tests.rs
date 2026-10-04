@@ -5,7 +5,7 @@ use pixtuoid_core::state::{ActivityState, GlobalDeskIndex};
 use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 
 use super::*;
-use crate::floor::{FloorMeta, FrameInputs, PetInputs, render_floor};
+use crate::floor::{FloorMeta, PerOffice, PetInputs};
 
 const SIZE: Size = Size { w: 192, h: 160 };
 
@@ -70,68 +70,39 @@ fn inputs<'a>(scene: &'a SceneState, pack: &'a Pack, now: SystemTime) -> RenderI
     }
 }
 
-/// The entry draws the classic exactly as the old seam (`render_floor`) did,
-/// and leaves the office and floor stores as it left them — the coffee every
-/// carrier stamps and the door's clamp included — frame after frame.
+/// The entry runs the sim's epilogue every frame it steps: a carrier's cup is
+/// stamped with the frame that saw it, and the door's clamp is the frame's own.
 #[test]
-fn the_classic_entry_is_the_old_seam_frame_for_frame() {
+fn the_entry_runs_the_epilogue_every_frame() {
     let pack = Arc::new(crate::pack::test_default_pack());
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = office(t0);
-    let (mut old_floor, mut old_buf, mut old_office) = (
-        FloorCtx::new(),
-        RgbBuffer::filled(0, 0, theme().surface.bg_fallback),
-        PerOffice::new(),
-    );
-    let (mut floor, mut raster, mut new_office) = (
-        FloorCtx::new(),
-        Raster::new(Arc::clone(&pack)),
-        PerOffice::new(),
-    );
+    let (mut floor, mut office) = (PerFloor::new(Arc::clone(&pack)), PerOffice::new());
     let mut coffee_seen = false;
     let mut door_seen = false;
     for step in 0..1_200u64 {
         let now = t0 + Duration::from_millis(step * 500);
-        let old = render_floor(
-            &mut old_floor,
-            &mut old_buf,
-            &mut old_office.coffee,
-            &mut old_office.chitchat,
-            FrameInputs {
-                world: inputs(&scene, &pack, now).world,
-                theme: theme(),
-                size: SIZE,
-                debug_walkable: false,
-            },
-        )
-        .expect("lays out");
-        let new = render(
+        let before = office.coffee.map().clone();
+        render(
             &mut floor,
-            &mut raster,
-            &mut new_office,
+            office.stores(),
             Look::Classic,
             inputs(&scene, &pack, now),
         )
         .expect("lays out");
-        assert!(
-            new.pixels.as_slice() == old_buf.as_slice(),
-            "step {step}: the frames differ"
-        );
+        for (id, at) in office.coffee.map() {
+            if !before.contains_key(id) {
+                assert_eq!(*at, now, "step {step}: a cup stamped off its frame");
+                coffee_seen = true;
+            }
+        }
+        let clamp = floor.ctx.door_anim_max_ms;
+        floor.ctx.recompute_door_anim_max_ms(now);
         assert_eq!(
-            new.occupied_waypoints, old.occupied_waypoints,
-            "step {step}"
+            clamp, floor.ctx.door_anim_max_ms,
+            "step {step}: a stale door clamp"
         );
-        assert_eq!(
-            new_office.coffee.map(),
-            old_office.coffee.map(),
-            "step {step}"
-        );
-        assert_eq!(
-            floor.door_anim_max_ms, old_floor.door_anim_max_ms,
-            "step {step}"
-        );
-        coffee_seen |= !new_office.coffee.map().is_empty();
-        door_seen |= floor.door_anim_max_ms > 0;
+        door_seen |= clamp > 0;
         if coffee_seen && door_seen {
             break;
         }
@@ -153,18 +124,13 @@ fn a_floor_switching_looks_repaints_whole_and_keeps_each_raster() {
     let pack = Arc::new(crate::pack::test_default_pack());
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = office(t0);
-    let (mut floor, mut raster, mut office) = (
-        FloorCtx::new(),
-        Raster::new(Arc::clone(&pack)),
-        PerOffice::new(),
-    );
+    let (mut floor, mut office) = (PerFloor::new(Arc::clone(&pack)), PerOffice::new());
     let scale = RenderScale::new(2).expect("nonzero");
     let cutaway = Look::Cutaway { scale };
-    let mut frame = |raster: &mut Raster, look, ms: u64| {
+    let mut frame = |floor: &mut PerFloor, look, ms: u64| {
         let r = render(
-            &mut floor,
-            raster,
-            &mut office,
+            floor,
+            office.stores(),
             look,
             inputs(&scene, &pack, t0 + Duration::from_millis(ms)),
         )
@@ -174,23 +140,23 @@ fn a_floor_switching_looks_repaints_whole_and_keeps_each_raster() {
     let classic_size = (SIZE.w, SIZE.h);
     let cutaway_size = (scale.to_buffer(SIZE.w), scale.to_buffer(SIZE.h));
     assert_eq!(
-        frame(&mut raster, Look::Classic, 0),
+        frame(&mut floor, Look::Classic, 0),
         (Dirty::All, classic_size)
     );
-    assert_eq!(frame(&mut raster, cutaway, 1), (Dirty::All, cutaway_size));
+    assert_eq!(frame(&mut floor, cutaway, 1), (Dirty::All, cutaway_size));
     assert_ne!(
-        frame(&mut raster, cutaway, 1).0,
+        frame(&mut floor, cutaway, 1).0,
         Dirty::All,
         "an unchanged frame"
     );
     assert_eq!(
-        frame(&mut raster, Look::Classic, 2),
+        frame(&mut floor, Look::Classic, 2),
         (Dirty::All, classic_size)
     );
-    let canvas = raster.cutaway.as_ref().map(std::ptr::from_ref);
-    assert_eq!(frame(&mut raster, cutaway, 3), (Dirty::All, cutaway_size));
+    let canvas = floor.raster.cutaway.as_ref().map(std::ptr::from_ref);
+    assert_eq!(frame(&mut floor, cutaway, 3), (Dirty::All, cutaway_size));
     assert_eq!(
-        raster.cutaway.as_ref().map(std::ptr::from_ref),
+        floor.raster.cutaway.as_ref().map(std::ptr::from_ref),
         canvas,
         "switching back rebuilt the cutaway's canvas"
     );

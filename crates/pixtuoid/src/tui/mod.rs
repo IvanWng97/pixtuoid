@@ -928,7 +928,6 @@ fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
 fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     renderer: &mut TuiRenderer<B>,
     plan: crate::graphics::Plan,
-    pack: &Arc<pixtuoid_core::sprite::format::Pack>,
 ) {
     match plan {
         #[cfg(feature = "graphics")]
@@ -939,7 +938,6 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             tmux,
             ..
         } => renderer.set_cutaway(cutaway::TileCutaway::new(
-            Arc::clone(pack),
             fit,
             cell,
             protocol,
@@ -973,9 +971,9 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         audio_cfg,
     } = session;
     let term = setup_terminal()?;
-    let mut renderer = TuiRenderer::new(term, theme, pets);
+    let mut renderer = TuiRenderer::new(term, theme, pets, Arc::clone(&pack));
     renderer.set_motion(motion);
-    paint_plan(&mut renderer, plan, &pack);
+    paint_plan(&mut renderer, plan);
     // A LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins
     // the device thread it owns.
     let mut audio_ctl = crate::audio::AudioController::new(audio_cfg, config_path.clone());
@@ -2186,6 +2184,9 @@ mod apply_key_action_tests {
                     Terminal::new(TestBackend::new(80, 24)).expect("test backend"),
                     &theme::NORMAL,
                     Vec::new(),
+                    std::sync::Arc::new(
+                        pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"),
+                    ),
                 ),
                 // UNMUTED, because a MUTED controller hides pause (`set_paused` ORs the
                 // mute flag in).

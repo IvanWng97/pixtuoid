@@ -5,15 +5,20 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::DaemonState;
 
+use crate::chitchat::ChitchatBubble;
 use crate::cutaway::canvas::{CanvasFrame, CutawayCanvas, Dirty};
-use crate::floor::{FloorCtx, FloorInputs, PerOffice, step_floor};
+use crate::floor::{FloorInputs, OfficeStores, PerFloor, step_floor};
 use crate::footer::FooterFloor;
-use crate::layout::{SceneLayout, Size};
-use crate::pixel_painter::{ClassicCaches, Hoverables, PaintCtx, paint_frame};
+use crate::layout::{Bounds, SceneLayout, Size};
+use crate::pet::PetFrame;
+use crate::pixel_painter::{
+    AgentFrame, ClassicCaches, Hoverables, MascotFrame, PaintCtx, paint_frame,
+};
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
@@ -83,6 +88,23 @@ struct Classic {
     caches: ClassicCaches,
     /// What the last frame drew that hover can name.
     hits: Hoverables,
+    /// The last frame's speech bubbles, which only the classic sets as text.
+    bubbles: Vec<ChitchatBubble>,
+}
+
+/// What the last classic frame drew besides its pixels, for a painter that
+/// sets the classic's text and hit-tests it itself.
+pub struct ClassicDrawn<'a> {
+    /// The frame, for a painter's own wash over it (a modal's dim).
+    pub pixels: &'a mut RgbBuffer,
+    /// Every character, in paint order: the last over a point is on top.
+    pub agents: &'a [AgentFrame],
+    /// The floor's pet, if drawn.
+    pub pet: Option<PetFrame>,
+    /// Every gateway mascot, in paint order.
+    pub mascots: &'a [MascotFrame],
+    /// Active speech bubbles.
+    pub bubbles: &'a [ChitchatBubble],
 }
 
 impl Raster {
@@ -101,7 +123,31 @@ impl Raster {
             buf: RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 }),
             caches: ClassicCaches::new(),
             hits: Hoverables::default(),
+            bubbles: Vec::new(),
         })
+    }
+
+    /// The last frame, when the classic drew it.
+    pub fn classic_drawn(&mut self) -> Option<ClassicDrawn<'_>> {
+        let classic = self
+            .classic
+            .as_mut()
+            .filter(|_| self.shown == Some(Look::Classic))?;
+        Some(ClassicDrawn {
+            pixels: &mut classic.buf,
+            agents: &classic.hits.agents,
+            pet: classic.hits.pet_pos,
+            mascots: &classic.hits.mascots,
+            bubbles: &classic.bubbles,
+        })
+    }
+
+    /// The agent the last frame shows topmost over `area`, in logical units,
+    /// when the cutaway drew it; see [`CutawayCanvas::hover_at`].
+    pub fn hover_at(&self, area: Bounds) -> Option<AgentId> {
+        matches!(self.shown, Some(Look::Cutaway { .. }))
+            .then(|| self.cutaway.as_ref()?.hover_at(area))
+            .flatten()
     }
 
     /// The agents the last classic frame drew, in paint order; none in another look.
@@ -109,6 +155,13 @@ impl Raster {
         match (self.shown, &self.classic) {
             (Some(Look::Classic), Some(classic)) => &classic.hits.agents,
             _ => &[],
+        }
+    }
+
+    /// Drop the classic's recolored sprites of agents no longer in `scene`.
+    pub(crate) fn evict_missing(&mut self, scene: &pixtuoid_core::SceneState) {
+        if let Some(classic) = &mut self.classic {
+            classic.caches.sprites.evict_missing(scene);
         }
     }
 
@@ -128,15 +181,15 @@ impl Raster {
     }
 }
 
-/// Step `floor` one frame and draw it in `look` on `raster`: the one frame
+/// Step `floor` one frame and draw it in `look` on its raster: the one frame
 /// entry every painter calls. `None` when `inputs.size` can't lay out.
 pub fn render<'r>(
-    floor: &mut FloorCtx,
-    raster: &'r mut Raster,
-    office: &mut PerOffice,
+    floor: &'r mut PerFloor,
+    office: OfficeStores<'_>,
     look: Look,
     inputs: RenderInputs<'_>,
 ) -> Option<Rendered<'r>> {
+    let PerFloor { ctx, raster } = floor;
     let RenderInputs {
         world,
         theme,
@@ -148,8 +201,7 @@ pub fn render<'r>(
         std::ptr::eq(world.pack, &*raster.pack),
         "the sim steps one pack and the raster draws another"
     );
-    let Some(stepped) = step_floor(floor, &mut office.coffee, &mut office.chitchat, world, size)
-    else {
+    let Some(mut stepped) = step_floor(ctx, office.coffee, office.chitchat, world, size) else {
         if look == Look::Classic {
             raster
                 .classic()
@@ -176,11 +228,12 @@ pub fn render<'r>(
                     theme,
                     &mut classic.caches,
                     &mut classic.buf,
-                    &floor.walks,
+                    &ctx.walks,
                     debug_walkable,
                 ),
                 &stepped.frame,
             );
+            classic.bubbles = std::mem::take(&mut stepped.frame.chitchat_bubbles);
             (&classic.buf, Dirty::All)
         }
         Look::Cutaway { scale } => {
@@ -203,7 +256,7 @@ pub fn render<'r>(
                     now: world.now,
                     board: &board,
                 },
-                &mut office.cutaway_cache,
+                office.cutaway_cache,
             );
             (buf, if switched { Dirty::All } else { dirty })
         }

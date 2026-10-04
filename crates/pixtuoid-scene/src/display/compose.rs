@@ -325,7 +325,7 @@ fn lights(
             floor_idx,
             indoor_scale: frame.indoor_scale,
             neon: frame.neon,
-            beat: moment.beat,
+            beat: moment.timing.beat,
         },
     );
     let pen = Pen::for_pack(scale, pack);
@@ -510,7 +510,7 @@ fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<
     };
     let mut order: Vec<(Span, PieceKind)> = Vec::new();
     push_windows(office, moment, &GlassWeather::of(moment), &mut order);
-    let carried = push_characters(frame, office, moment.now, &mut order);
+    let carried = push_characters(frame, office, moment.timing.now, &mut order);
     push_creatures(frame, office, &mut order);
     for fixture in layout.fixtures() {
         push_fixture(fixture, inputs, &carried, &mut order);
@@ -666,7 +666,7 @@ fn push_fixture(
                     let busy = frame.occupied_waypoints.contains(&waypoint);
                     let art = Art {
                         sprite,
-                        frame: crate::pack::appliance_frame_index(anim, busy, moment.beat),
+                        frame: crate::pack::appliance_frame_index(anim, busy, moment.timing.beat),
                         flip: Flip::None,
                     };
                     push_art(order, pack, wp.pos, art, depth, Playback::Looping);
@@ -790,7 +790,7 @@ fn push_fixture(
             pack,
             centre,
             crate::pack::FISH_TANK_SPRITE,
-            moment.beat,
+            moment.timing.beat,
             depth,
         ),
         K::WaterCooler => push_looping(
@@ -798,7 +798,7 @@ fn push_fixture(
             pack,
             centre,
             crate::pack::WATER_COOLER_SPRITE,
-            moment.beat,
+            moment.timing.beat,
             depth,
         ),
         K::Door => {
@@ -832,7 +832,7 @@ fn push_fixture(
                 Span::new(b.x, b.y, b.width, b.height, 0).with_depth(depth),
                 PieceKind::Clock {
                     at: top_left,
-                    reading: crate::sky::clock_reading(moment.now),
+                    reading: crate::sky::clock_reading(moment.timing.now),
                 },
             ));
         }

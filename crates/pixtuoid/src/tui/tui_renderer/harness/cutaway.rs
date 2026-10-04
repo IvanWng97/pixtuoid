@@ -5,8 +5,8 @@ use crate::graphics::{CellSize, Fit, ImageProtocol};
 use crate::tui::cutaway::TileCutaway;
 use pixtuoid_core::sprite::format::Density;
 use std::io::Write;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
 
 /// A cell whose natural scale is the bundled art's density, so the image is
 /// the density render itself, one cell per 4×8 image pixels.
@@ -124,15 +124,10 @@ impl ratatui::backend::Backend for Window {
     }
 }
 
-fn arc_pack() -> Arc<Pack> {
-    static PACK: OnceLock<Arc<Pack>> = OnceLock::new();
-    Arc::clone(PACK.get_or_init(|| Arc::new(pack().clone())))
-}
-
 /// The plan's fit over a `cols`×`rows` terminal's scene.
 fn fit(cols: u16, rows: u16) -> Fit {
     let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
-    let fit = Fit::new(CELL, area, arc_pack().max_density_variant()).expect("fits");
+    let fit = Fit::new(CELL, area, pack_arc().max_density_variant()).expect("fits");
     assert_eq!(fit.upscale(), 1);
     assert_eq!(fit.density(), Density::new(4).expect("nonzero"));
     fit
@@ -157,11 +152,11 @@ fn armed(
         Terminal::new(Window::new(cols, rows)).expect("terminal"),
         normal_theme(),
         vec![],
+        pack_arc(),
     );
     let (wire, in_grid) = (Wire::default(), Box::leak(Box::new(AtomicBool::new(false))));
     r.set_cutaway(
         TileCutaway::new(
-            arc_pack(),
             fit(cols, rows),
             CELL,
             protocol,
@@ -361,7 +356,7 @@ fn a_font_zoom_refits_the_cutaway_to_the_windows_cell() {
         h: CELL.h / 2,
     };
     let area = crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)).as_size();
-    assert!(Fit::new(tiny, area, arc_pack().max_density_variant()).is_none());
+    assert!(Fit::new(tiny, area, pack_arc().max_density_variant()).is_none());
     r.terminal.backend_mut().zoom(tiny);
     r.render(&scene, pack(), t0() + cadence * 2)
         .expect("render");
@@ -876,17 +871,11 @@ fn kitty_transmits_before_the_flush_and_sixel_after() {
             Terminal::new(backend).expect("terminal"),
             normal_theme(),
             vec![],
+            pack_arc(),
         );
         r.set_cutaway(
-            TileCutaway::new(
-                arc_pack(),
-                fit(120, 40),
-                CELL,
-                protocol,
-                false,
-                Box::new(wire.clone()),
-            )
-            .arming(Box::leak(Box::new(AtomicBool::new(false)))),
+            TileCutaway::new(fit(120, 40), CELL, protocol, false, Box::new(wire.clone()))
+                .arming(Box::leak(Box::new(AtomicBool::new(false)))),
         );
         r.render(&office(), pack(), t0()).expect("render");
         let sent = wire.take();

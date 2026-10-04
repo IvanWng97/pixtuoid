@@ -3,7 +3,7 @@ use pixtuoid_scene::layout::Point;
 
 #[test]
 fn offscreen_floor_freezes_and_resyncs_on_return() {
-    let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack");
+    let pack = pack_arc();
     let theme = pixtuoid_scene::theme::ALL_THEMES[0];
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
@@ -18,7 +18,7 @@ fn offscreen_floor_freezes_and_resyncs_on_return() {
     scene.agents.insert(b, slot(b, 1, cap, t0));
 
     let term = Terminal::new(TestBackend::new(100, 40)).expect("test backend");
-    let mut r = TuiRenderer::new(term, theme, vec![]);
+    let mut r = TuiRenderer::new(term, theme, vec![], Arc::clone(&pack));
 
     // Warm up floor 0 so agent A's WalkState initialises and wanders.
     let mut now = t0;
@@ -159,7 +159,7 @@ fn floor_buffers_grow_on_overflow() {
     let now = t0();
     let one = scene_with(vec![idle("/g/0.jsonl", 0, t0())], cap);
     r.render(&one, pack(), now).unwrap();
-    assert!(r.floor_buf(1).is_none(), "only one floor allocated");
+    assert!(r.floors.get(1).is_none(), "only one floor allocated");
 
     let two = scene_with(
         vec![
@@ -170,8 +170,8 @@ fn floor_buffers_grow_on_overflow() {
     );
     r.render(&two, pack(), now).unwrap();
     assert!(
-        r.floor_buf(1).is_some(),
-        "floor-1 buffer allocated after overflow"
+        r.floors.get(1).is_some(),
+        "floor-1 state allocated after overflow"
     );
 }
 
@@ -256,6 +256,7 @@ fn transition_at_narrow_terminal_paints_no_agents_no_panic() {
         Terminal::new(TestBackend::new(30, 40)).expect("test backend"),
         normal_theme(),
         vec![],
+        pack_arc(),
     );
     let mut now = t0();
     r.render(&scene, pack(), now).expect("render at 30 cols");
@@ -479,7 +480,7 @@ fn theme_picker_renders_during_floor_transition() {
 /// on floor 0, so a board built from it would drop the `⬢gw` chip upstairs.
 #[test]
 fn the_wall_board_upstairs_shows_the_breadcrumb_and_the_office_gateway() {
-    let pack = pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack");
+    let pack = pack_arc();
     let theme = pixtuoid_scene::theme::ALL_THEMES[0];
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let cap = 16;
@@ -502,7 +503,7 @@ fn the_wall_board_upstairs_shows_the_breadcrumb_and_the_office_gateway() {
     );
 
     let term = Terminal::new(TestBackend::new(120, 44)).expect("test backend");
-    let mut r = TuiRenderer::new(term, theme, vec![]);
+    let mut r = TuiRenderer::new(term, theme, vec![], Arc::clone(&pack));
     let mut now = t0;
     r.render(&scene, &pack, now).expect("render");
     r.navigate_floor(1, now);

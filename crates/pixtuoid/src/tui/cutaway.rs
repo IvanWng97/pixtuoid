@@ -12,18 +12,13 @@
 //!   frame as half-blocks meanwhile.
 
 use std::io::Write;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
-use pixtuoid_core::AgentId;
-use pixtuoid_core::sprite::format::{Density, Pack};
+use pixtuoid_core::sprite::format::Density;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
-use pixtuoid_scene::cutaway::canvas::{CanvasFrame, CutawayCanvas, Dirty};
-use pixtuoid_scene::cutaway::paint::CutawayCache;
-use pixtuoid_scene::display::Showing;
-use pixtuoid_scene::floor::SteppedFloor;
-use pixtuoid_scene::layout::{Bounds, Size};
+use pixtuoid_scene::cutaway::canvas::Dirty;
+use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::theme::Theme;
 use ratatui::buffer::{Buffer, Cell, CellDiffOption};
 use ratatui::layout::{Position, Rect};
@@ -34,11 +29,11 @@ use crate::tui::geometry::SceneGeometry;
 use crate::tui::geometry::slide_offsets;
 use crate::tui::renderer::set_half_block;
 
-/// A floor slide's two floors, each as it shows with its own wall board, at
-/// progress `t` of a [`FloorTransition`](pixtuoid_scene::floor::FloorTransition).
+/// A floor slide's two floors' frames at progress `t` of a
+/// [`FloorTransition`](pixtuoid_scene::floor::FloorTransition).
 pub(crate) struct Slide<'a> {
-    pub(crate) leaving: (&'a SteppedFloor, Showing<'a>),
-    pub(crate) arriving: (&'a SteppedFloor, Showing<'a>),
+    pub(crate) leaving: &'a RgbBuffer,
+    pub(crate) arriving: &'a RgbBuffer,
     pub(crate) t: f32,
     pub(crate) going_down: bool,
 }
@@ -70,12 +65,8 @@ impl Fitted {
     }
 }
 
-/// The cutaway's canvas, its tiles, and what of them the terminal holds.
+/// The cutaway's tiles, and what of them the terminal holds.
 pub(crate) struct TileCutaway {
-    canvas: CutawayCanvas,
-    /// The floor arriving in a slide, while `canvas` paints the one leaving.
-    arriving: CutawayCanvas,
-    cache: CutawayCache,
     /// The plan's cell.
     planned: CellSize,
     /// The window's cell on the first frame, once read.
@@ -88,9 +79,12 @@ pub(crate) struct TileCutaway {
     /// `None` while classic paints.
     fitted: Option<Fitted>,
     tiles: Tiles,
-    /// What the tiles are cut from when sent: the canvas's last frame, or a
-    /// slide's two composed.
+    /// What the tiles are cut from when sent: the last frame, or a slide's
+    /// two composed.
     image: RgbBuffer,
+    /// The last image was a slide's: a floor's own frame after it differs
+    /// anywhere, whatever that floor's raster reports.
+    slid: bool,
     /// The image's top-left cell.
     origin: Position,
     out: Sink,
@@ -110,7 +104,6 @@ pub(crate) struct TileCutaway {
 impl TileCutaway {
     /// [`crate::graphics::Plan::Cutaway`]'s parts, transmitting into `out`.
     pub(crate) fn new(
-        pack: Arc<Pack>,
         fit: Fit,
         cell: CellSize,
         protocol: ImageProtocol,
@@ -118,9 +111,6 @@ impl TileCutaway {
         out: Sink,
     ) -> Self {
         Self {
-            canvas: CutawayCanvas::new(Arc::clone(&pack)),
-            arriving: CutawayCanvas::new(pack),
-            cache: CutawayCache::default(),
             planned: cell,
             first_window: None,
             density: fit.density(),
@@ -130,6 +120,7 @@ impl TileCutaway {
             fitted: None,
             tiles: Tiles::new(protocol, cell, fit),
             image: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
+            slid: false,
             origin: Position::ORIGIN,
             out,
             pending: Vec::new(),
@@ -175,31 +166,29 @@ impl TileCutaway {
         self.fitted.map(|f| f.fit.logical())
     }
 
-    /// Paint `stepped` as `fitted`, and queue the tiles it changed once the
-    /// protocol's cadence allows; until then they stay owed.
+    /// Show `frame` as `fitted`, which may differ from the last only within
+    /// `dirty`, and queue the tiles it changed once the protocol's cadence
+    /// allows; until then they stay owed.
     pub(crate) fn paint(
         &mut self,
         fitted: Fitted,
-        stepped: &SteppedFloor,
-        theme: &'static Theme,
-        showing: Showing<'_>,
+        frame: &RgbBuffer,
+        dirty: Dirty,
+        now: SystemTime,
     ) {
-        let now = showing.now;
-        let CanvasFrame { buf, dirty } = self.canvas.frame(
-            stepped,
-            theme,
-            fitted.fit.render_scale(),
-            showing,
-            &mut self.cache,
-        );
+        let dirty = if std::mem::take(&mut self.slid) {
+            Dirty::All
+        } else {
+            dirty
+        };
         if dirty != Dirty::Rects(Vec::new()) {
-            self.image.clone_from(buf);
+            self.image.clone_from(frame);
         }
         self.stage(&dirty, now, fitted.scene.as_position());
     }
 
-    /// Paint both floors of `slide`, composed as it places them, and queue
-    /// the tiles that changed as [`Self::paint`] does.
+    /// Show both floors of `slide`, composed as it places them, and queue the
+    /// tiles that changed as [`Self::paint`] does.
     pub(crate) fn paint_slide(
         &mut self,
         fitted: Fitted,
@@ -207,25 +196,11 @@ impl TileCutaway {
         theme: &'static Theme,
         now: SystemTime,
     ) {
-        let scale = fitted.fit.render_scale();
-        let leaving = self.canvas.frame(
-            slide.leaving.0,
-            theme,
-            scale,
-            slide.leaving.1,
-            &mut self.cache,
-        );
-        let arriving = self.arriving.frame(
-            slide.arriving.0,
-            theme,
-            scale,
-            slide.arriving.1,
-            &mut self.cache,
-        );
-        let (w, h) = (leaving.buf.width(), leaving.buf.height());
+        let (w, h) = (slide.leaving.width(), slide.leaving.height());
         let offsets = slide_offsets(slide.t, slide.going_down, f32::from(h));
         self.image = RgbBuffer::filled(w, h, theme.surface.bg_fallback);
-        for (buf, dy) in [(leaving.buf, offsets.0), (arriving.buf, offsets.1)] {
+        self.slid = true;
+        for (buf, dy) in [(slide.leaving, offsets.0), (slide.arriving, offsets.1)] {
             for y in 0..h {
                 let src = i32::from(y) - dy;
                 if let Ok(src) = u16::try_from(src)
@@ -410,20 +385,9 @@ impl TileCutaway {
         covered
     }
 
-    /// [`CutawayCanvas::hover_at`] on the last frame painted.
-    pub(crate) fn hover_at(&self, area: Bounds) -> Option<AgentId> {
-        self.canvas.hover_at(area)
-    }
-
     /// Owe every tile again: the terminal may have dropped them.
     pub(crate) fn forget(&mut self) {
         self.tiles.forget();
-    }
-
-    /// Drop the recolored sprites, as a theme change must
-    /// ([`TuiRenderer::set_theme`](crate::tui::tui_renderer::TuiRenderer::set_theme)).
-    pub(crate) fn reset_cache(&mut self) {
-        self.cache = CutawayCache::default();
     }
 }
 
