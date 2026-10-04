@@ -1412,6 +1412,36 @@ fn neon_a_starved_tube_holds_each_flash_and_dark_the_floor() {
     }
 }
 
+/// On every tier, ticked at a live painter's [`FRAME`], a starved tube
+/// flashes at most [`PHOTOSENSITIVE_FLASHES_PER_SECOND`] times in any second
+/// of wall time.
+///
+/// [`PHOTOSENSITIVE_FLASHES_PER_SECOND`]: crate::anim::PHOTOSENSITIVE_FLASHES_PER_SECOND
+#[test]
+fn neon_a_starved_tube_flashes_at_most_three_times_a_second() {
+    use crate::anim::{PHOTOSENSITIVE_FLASHES_PER_SECOND, most_flashes_in_a_second};
+    const CYCLES: u64 = 2;
+    let frame_ms = FRAME.as_millis() as u64;
+    for motion in Motion::ALL {
+        let mut neon = NeonState::new();
+        let span = CYCLES * NeonState::STUTTER_MS * motion.pace().unwrap_or(1);
+        let samples = (0..span / frame_ms).map(|n| {
+            let timing = motion.timing(in_stutter_cycle(0) + FRAME * n as u32);
+            let lit = neon.tick(neon_mood(0, 0, 0), ROOM_DIMMED, timing) == NeonLevels::FLASH;
+            (n * frame_ms, if lit { 1.0 } else { 0.0 })
+        });
+        let most = most_flashes_in_a_second(samples);
+        assert!(
+            most <= PHOTOSENSITIVE_FLASHES_PER_SECOND,
+            "{motion:?}: {most}"
+        );
+        assert!(
+            motion == Motion::Still || most > 0,
+            "{motion:?} never flashed"
+        );
+    }
+}
+
 /// At rest a starved tube holds steady: no flash, for the photosensitive.
 #[test]
 fn neon_a_starved_tube_never_flashes_at_rest() {
