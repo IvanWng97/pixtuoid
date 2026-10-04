@@ -396,60 +396,136 @@ pub(crate) mod tests {
     }
 
     /// A frame drawn through the office's cloud cache is the frame drawn
-    /// without it, byte for byte, as the masses drift and the light steps
-    /// through an evening, at both densities on one cache; and a drift alone
-    /// draws nothing new.
+    /// without it, byte for byte: as the masses drift and the light steps
+    /// through an evening, in every weather and across transitions, at both
+    /// densities on one cache; after a frame that differs from it in any one
+    /// of the raster's inputs alone; and a drift alone draws nothing new.
     #[test]
     fn the_cloud_cache_draws_what_a_fresh_frame_draws() {
+        use crate::sky::WeatherMix;
         let theme = &crate::theme::NORMAL;
         let pack = crate::pack::test_default_pack();
         let wall = (crate::layout::WINDOW_W * 3, 32);
-        let bays = [0, crate::layout::WINDOW_W, 2 * crate::layout::WINDOW_W].map(|x| WindowBay {
-            x,
-            w: crate::layout::WINDOW_W,
-            idx: 0,
-        });
-        let pixels =
-            |moment: &Moment, d: Density, cache: Option<&mut crate::clouds::CloudCache>| {
-                let outside = Outside::of(
-                    moment,
-                    &pack,
-                    theme,
-                    wall,
-                    d,
-                    GlassWeather::of(moment),
-                    cache,
-                );
-                bays.map(|bay| outside.through(bay).cells().collect::<Vec<_>>())
-            };
-        let moment = |weather: Weather, now: std::time::SystemTime| {
+        let pixels = |moment: &Moment,
+                      wall: (u16, u16),
+                      d: Density,
+                      cache: Option<&mut crate::clouds::CloudCache>| {
+            let outside = Outside::of(
+                moment,
+                &pack,
+                theme,
+                wall,
+                d,
+                GlassWeather::of(moment),
+                cache,
+            );
+            (0..wall.0)
+                .step_by(usize::from(crate::layout::WINDOW_W))
+                .map(|x| {
+                    let bay = WindowBay {
+                        x,
+                        w: crate::layout::WINDOW_W,
+                        idx: 0,
+                    };
+                    outside.through(bay).cells().collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        let moment = |weather: WeatherMix, now: std::time::SystemTime| {
             Moment::resolve(
-                Sky::at_with(now, weather),
+                Sky::at_with(now, Weather::Clear).with_weather(weather),
                 theme,
                 0.0,
                 crate::anim::Motion::Full.timing(now),
             )
         };
+        let transitions = [
+            (Weather::Clear, Weather::Rain),
+            (Weather::Overcast, Weather::Storm),
+            (Weather::Storm, Weather::Clear),
+        ];
+        let skies = Weather::ALL.map(WeatherMix::pure).into_iter().chain(
+            transitions
+                .into_iter()
+                .flat_map(|(from, to)| [1, 3, 5, 7].map(|k| WeatherMix::stepped(from, to, k))),
+        );
         let mut cache = crate::clouds::CloudCache::default();
         let evening = crate::localclock::at_hour(17);
-        for weather in Weather::ALL {
-            for minutes in [0, 1, 90, 120, 121, 300] {
+        for weather in skies {
+            for minutes in [0, 1, 120, 300] {
                 let now = evening + std::time::Duration::from_secs(minutes * 60);
                 let moment = moment(weather, now);
                 for d in [Density::ONE, pack.max_density_variant()] {
                     assert_eq!(
-                        pixels(&moment, d, Some(&mut cache)),
-                        pixels(&moment, d, None),
+                        pixels(&moment, wall, d, Some(&mut cache)),
+                        pixels(&moment, wall, d, None),
                         "{weather:?} at 17h+{minutes}m, {d:?}"
                     );
                 }
             }
         }
 
-        let mut cache = crate::clouds::CloudCache::default();
+        // Each pair differs in one input: a key that drops it serves the
+        // first frame's rasters to the second.
         let noon = crate::localclock::at_hour(12);
+        let frame = |mix, hours: u64, wall, d| {
+            let now = noon + std::time::Duration::from_secs(hours * 3600);
+            (moment(mix, now), wall, d)
+        };
+        let (one, dense) = (Density::ONE, pack.max_density_variant());
+        let overcast = WeatherMix::pure(Weather::Overcast);
+        let fog = WeatherMix::pure(Weather::Fog);
+        let windy = |k| WeatherMix::stepped(Weather::Clear, Weather::Windy, k);
+        let wide = (crate::layout::WINDOW_W * 5, 32);
+        let tall = (crate::layout::WINDOW_W * 3, 40);
+        let pairs = [
+            (
+                "span",
+                frame(overcast, 0, wall, one),
+                frame(overcast, 0, wide, one),
+            ),
+            (
+                "glass",
+                frame(overcast, 0, wall, one),
+                frame(overcast, 0, tall, one),
+            ),
+            (
+                "density",
+                frame(overcast, 0, wall, one),
+                frame(overcast, 0, wall, dense),
+            ),
+            // one deck kind, one light bucket
+            (
+                "weather",
+                frame(overcast, 0, wall, one),
+                frame(fog, 0, wall, one),
+            ),
+            // one light bucket, two shares
+            (
+                "share",
+                frame(windy(1), 0, wall, one),
+                frame(windy(2), 0, wall, one),
+            ),
+            (
+                "light",
+                frame(overcast, 0, wall, one),
+                frame(overcast, 7, wall, one),
+            ),
+        ];
+        for (input, (a, wall_a, d_a), (b, wall_b, d_b)) in &pairs {
+            let mut cache = crate::clouds::CloudCache::default();
+            let _ = pixels(a, *wall_a, *d_a, Some(&mut cache));
+            assert_eq!(
+                pixels(b, *wall_b, *d_b, Some(&mut cache)),
+                pixels(b, *wall_b, *d_b, None),
+                "a frame apart in its {input} drew the other's clouds"
+            );
+        }
+
+        let mut cache = crate::clouds::CloudCache::default();
         let _ = pixels(
-            &moment(Weather::Overcast, noon),
+            &moment(overcast, noon),
+            wall,
             Density::ONE,
             Some(&mut cache),
         );
@@ -457,7 +533,8 @@ pub(crate) mod tests {
         assert!(drawn > 0, "an overcast deck draws its masses");
         let later = noon + std::time::Duration::from_secs(60);
         let _ = pixels(
-            &moment(Weather::Overcast, later),
+            &moment(overcast, later),
+            wall,
             Density::ONE,
             Some(&mut cache),
         );

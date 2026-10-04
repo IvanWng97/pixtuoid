@@ -664,7 +664,9 @@ pub(crate) struct CloudCache {
 }
 
 impl CloudCache {
-    /// Room for two weathers' decks across a transition, at both densities.
+    /// Room for a transition's two decks on both looks' grids
+    /// (`the_cache_holds_a_transition_in_both_looks`): one office draws one
+    /// wall per look.
     const CAPACITY: usize = 64;
 
     #[cfg(test)]
@@ -723,7 +725,8 @@ impl Clouds {
         let (span_f, glass_h_f) = (f32::from(span), f32::from(glass_h));
         let d = d.max(1);
         let weather = moment.sky.weather();
-        let secs = moment.timing.beat.ms() as f32 / 1000.0;
+        // f64: an epoch-scale beat in f32 steps in minutes, freezing then jumping the deck
+        let secs = moment.timing.beat.ms() as f64 / 1000.0;
         let body = moment.sky.body();
         let night = match body.kind {
             crate::sky::BodyKind::Sun => 1.0 - ease(body.altitude / FULL_DAY_ALTITUDE),
@@ -775,7 +778,8 @@ impl Clouds {
                 .fold(0.0, f32::max);
             let share = step(ease(share), SHARE_STEPS);
             for m in full {
-                let west = drifted_west(m.anchor, secs * m.layer.drift(), span_f, widest);
+                let west =
+                    drifted_west(m.anchor, secs * f64::from(m.layer.drift()), span_f, widest);
                 let mass = m.grown(unstep(share, SHARE_STEPS), west - m.anchor);
                 let key = RasterKey {
                     weather: w,
@@ -1176,8 +1180,9 @@ const FULL_DAY_ALTITUDE: f32 = 0.3;
 /// units east over a run `span` wide, its deck's widest mass `widest` wide: it
 /// wraps a period the run plus two of the widest long, so it leaves the run's
 /// east end whole before it comes back round its west.
-fn drifted_west(x0: f32, travelled: f32, span: f32, widest: f32) -> f32 {
-    (x0 + widest + travelled).rem_euclid(span + 2.0 * widest) - widest
+fn drifted_west(x0: f32, travelled: f64, span: f32, widest: f32) -> f32 {
+    let period = f64::from(span + 2.0 * widest);
+    ((f64::from(x0 + widest) + travelled).rem_euclid(period) as f32) - widest
 }
 
 /// A share eased in and out: a mass forms slowly, then fills, then settles.
@@ -1334,6 +1339,53 @@ mod tests {
         Clouds::of(&moment, (SPAN, GLASS_H), 1, None)
     }
 
+    /// A transition's two fullest decks, on the classic's grid and the
+    /// cutaway's, fit the cache: a frame never evicts a mass it draws.
+    #[test]
+    fn the_cache_holds_a_transition_in_both_looks() {
+        let fullest = Weather::ALL
+            .map(|w| deck(w, f32::from(SPAN), f32::from(GLASS_H)).len())
+            .into_iter()
+            .max()
+            .unwrap_or(0);
+        assert!(
+            CloudCache::CAPACITY >= 2 * 2 * fullest,
+            "{fullest} masses a deck"
+        );
+    }
+
+    /// At a real clock's time each mass drifts its layer's pace every beat:
+    /// no freeze, no jump.
+    #[test]
+    fn masses_drift_smoothly_at_a_real_clock() {
+        let at = |ms: u64| {
+            let now = crate::localclock::at_hour(12) + Duration::from_millis(ms);
+            let sky = Sky::at_with(now, Weather::Overcast);
+            let moment = Moment::resolve(sky, &crate::theme::NORMAL, 0.0, Motion::Full.timing(now));
+            Clouds::of(&moment, (SPAN, GLASS_H), 1, None).masses
+        };
+        let beat = crate::anim::FULL_TICK_MS;
+        let first = at(0);
+        assert!(!first.is_empty());
+        for k in 1..=8 {
+            let (before, after) = (at((k - 1) * beat), at(k * beat));
+            for (a, b) in before.iter().zip(&after) {
+                assert_eq!(a.id, b.id);
+                let moved = b.off - a.off;
+                // a wrap moves it a whole period back, out of sight
+                if moved.abs() >= f32::from(SPAN) {
+                    continue;
+                }
+                let pace = a.layer.drift() * beat as f32 / 1000.0;
+                assert!(
+                    (moved - pace).abs() < pace / 4.0,
+                    "beat {k}, mass {}: moved {moved}, its pace {pace}",
+                    a.id
+                );
+            }
+        }
+    }
+
     /// A drifting mass wraps only out of sight: it has left the run's east end
     /// whole, and comes back round wholly west of its west end.
     #[test]
@@ -1342,7 +1394,7 @@ mod tests {
         for width in [5.0, 16.0, widest] {
             let mut prev = drifted_west(10.0, 0.0, span, widest);
             for step in 1..20_000 {
-                let west = drifted_west(10.0, step as f32 * 0.05, span, widest);
+                let west = drifted_west(10.0, f64::from(step) * 0.05, span, widest);
                 if west < prev {
                     assert!(prev >= span, "wrapped at {prev}, still on the run");
                     assert!(
