@@ -9,8 +9,8 @@ use pixtuoid_core::sprite::Rgb;
 use crate::display::Span;
 use crate::display::pen::Pen;
 use crate::effects::look::{
-    FLAME_CORE, FLAME_DEEP, FLAME_MID, FLAME_TIP, SLEEP_Z_MAX_RISE, plot_effect, sleep_z_fade,
-    walking_dust_foot,
+    FLAME_CORE, FLAME_DEEP, FLAME_MID, FLAME_TIP, SLEEP_Z_1X, SLEEP_Z_MAX_RISE, WAITING_MARK_1X,
+    plot_effect, sleep_z_fade, walking_dust_foot,
 };
 use crate::effects::{Effect, EffectKind};
 use crate::theme::Theme;
@@ -151,19 +151,6 @@ const DUST: &[&str] = &[
     "#.#.#.#", //
 ];
 
-/// The base art's sleep z: the classic's glyph.
-const SLEEP_Z_1X: &[&str] = &[
-    "##", //
-    ".#", //
-    "##", //
-];
-/// The base art's waiting mark: the classic's glyph.
-const WAITING_MARK_1X: &[&str] = &[
-    "###", //
-    "..#", //
-    ".#.", //
-    ".#.", //
-];
 /// Columns from the base art's head to the west edge of what floats beside it:
 /// past the head, and the badge centred over it.
 const BESIDE_DX_1X: i32 = 5;
@@ -296,7 +283,15 @@ mod tests {
     /// count, so a ragged row would sit it off its mark.
     #[test]
     fn every_look_is_a_rectangle() {
-        for glyph in [SLEEP_Z, WAITING_MARK, DUST, FLAME_CROWN[0], FLAME_CROWN[1]] {
+        for glyph in [
+            SLEEP_Z,
+            WAITING_MARK,
+            SLEEP_Z_1X,
+            WAITING_MARK_1X,
+            DUST,
+            FLAME_CROWN[0],
+            FLAME_CROWN[1],
+        ] {
             assert!(
                 glyph.iter().all(|row| row.len() == glyph[0].len()),
                 "{glyph:?}"
