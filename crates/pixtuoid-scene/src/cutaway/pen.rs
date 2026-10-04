@@ -222,7 +222,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg(feature = "density-art")]
+    #[cfg(feature = "cutaway-assets")]
     fn the_bundled_pack_draws_every_variant_at_one_density() {
         let pack = crate::pack::test_default_pack();
         assert_eq!(
