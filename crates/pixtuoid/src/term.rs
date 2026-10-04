@@ -149,23 +149,41 @@ pub(crate) fn shown_env(v: Option<&str>) -> String {
     }
 }
 
+/// What asking the terminal whether it keeps 24-bit color learned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Truecolor {
+    /// It answered: `true` when it echoed the 24-bit color back.
+    Answered(bool),
+    /// It was asked, and no usable reply came.
+    NoAnswer,
+    /// Nothing asked it: no terminal took the query, or this platform has none
+    /// to send.
+    CantAsk,
+}
+
+impl Truecolor {
+    /// Whether the launcher's stderr warning and doctor's ⚠ row fire. Both read
+    /// this, so they cannot disagree; `CantAsk` stays quiet because a platform
+    /// with nothing to ask would nag on every launch.
+    pub fn warrants_warning(self) -> bool {
+        matches!(self, Self::NoAnswer | Self::Answered(false))
+    }
+}
+
 /// The truecolor verdict, naming HOW it was determined so a "colors look wrong"
-/// report is self-diagnosable. `probe` is the `query_truecolor` result;
-/// `probe_skipped` separates "asked, no answer" from "never asked" (piped /
-/// `$TERM=dumb`), so a piped report doesn't claim the terminal went silent.
-pub(crate) fn truecolor_verdict(
-    colorterm: Option<&str>,
-    probe: Option<bool>,
-    probe_skipped: bool,
-) -> &'static str {
+/// report is self-diagnosable. `probe` is the `query_truecolor` result, `None`
+/// when the caller never ran it (piped / `$TERM=dumb`); only an asked probe may
+/// claim the terminal went silent.
+pub(crate) fn truecolor_verdict(colorterm: Option<&str>, probe: Option<Truecolor>) -> &'static str {
     if colorterm_is_truecolor(colorterm) {
         "yes (COLORTERM)"
     } else {
         match probe {
-            Some(true) => "yes (terminal query)",
-            Some(false) => "no (terminal downsamples)",
-            None if probe_skipped => "unknown (probe skipped — no color-capable tty)",
-            None => "unknown (terminal did not answer)",
+            Some(Truecolor::Answered(true)) => "yes (terminal query)",
+            Some(Truecolor::Answered(false)) => "no (terminal downsamples)",
+            Some(Truecolor::NoAnswer) => "unknown (terminal did not answer)",
+            Some(Truecolor::CantAsk) => "unknown (the terminal can't be asked)",
+            None => "unknown (probe skipped — no color-capable tty)",
         }
     }
 }
@@ -177,12 +195,11 @@ pub(crate) fn truecolor_verdict(
 #[cfg(unix)]
 const DECRQSS_TRUECOLOR_PROBE: &[u8] = b"\x1b[48;2;1;2;3m\x1bP$qm\x1b\\\x1b[0m";
 
-/// Ask the terminal whether it is truecolor by querying it directly. Returns
-/// `None` on any I/O failure or no answer.
+/// Ask the terminal whether it is truecolor by querying it directly.
 #[cfg(unix)]
-pub fn query_truecolor(timeout: std::time::Duration) -> Option<bool> {
+pub fn query_truecolor(timeout: std::time::Duration) -> Truecolor {
     let mut reply = Vec::new();
-    query_tty(
+    let asked = query_tty(
         DECRQSS_TRUECOLOR_PROBE,
         timeout,
         MAX_DECRQSS_RESPONSE_BYTES,
@@ -190,8 +207,11 @@ pub fn query_truecolor(timeout: std::time::Duration) -> Option<bool> {
             reply.extend_from_slice(chunk);
             response_terminated(&reply)
         },
-    )?;
-    parse_decrqss_truecolor(&reply)
+    );
+    match asked {
+        None => Truecolor::CantAsk,
+        Some(_) => parse_decrqss_truecolor(&reply).map_or(Truecolor::NoAnswer, Truecolor::Answered),
+    }
 }
 
 /// Write `query` to the controlling terminal and hand each chunk of its reply
@@ -358,8 +378,8 @@ fn response_terminated(buf: &[u8]) -> bool {
 /// Non-Unix stub: Windows hard-gates VT separately in `tui::mod`, so there is no
 /// preflight query there.
 #[cfg(not(unix))]
-pub fn query_truecolor(_timeout: std::time::Duration) -> Option<bool> {
-    None
+pub fn query_truecolor(_timeout: std::time::Duration) -> Truecolor {
+    Truecolor::CantAsk
 }
 
 #[cfg(test)]
@@ -476,29 +496,52 @@ mod tests {
     }
 
     #[test]
+    fn cant_ask_never_warns_the_launcher_or_doctor() {
+        for (probe, warns) in [
+            (Truecolor::Answered(true), false),
+            (Truecolor::Answered(false), true),
+            (Truecolor::NoAnswer, true),
+            (Truecolor::CantAsk, false),
+        ] {
+            assert_eq!(probe.warrants_warning(), warns, "{probe:?}");
+        }
+    }
+
+    #[test]
     fn truecolor_verdict_names_how_it_was_determined() {
         assert_eq!(
-            truecolor_verdict(Some("truecolor"), None, true),
+            truecolor_verdict(Some("truecolor"), None),
             "yes (COLORTERM)"
         );
         assert_eq!(
-            truecolor_verdict(None, Some(true), false),
+            truecolor_verdict(None, Some(Truecolor::Answered(true))),
             "yes (terminal query)"
         );
         assert_eq!(
-            truecolor_verdict(None, Some(false), false),
+            truecolor_verdict(None, Some(Truecolor::Answered(false))),
             "no (terminal downsamples)"
         );
         assert_eq!(
-            truecolor_verdict(None, None, false),
+            truecolor_verdict(None, Some(Truecolor::NoAnswer)),
             "unknown (terminal did not answer)"
         );
-        // A skipped probe is not an unanswered one — piped runs must not claim
-        // the terminal went silent.
+        // Neither a skipped probe nor one nothing could send is an unanswered
+        // one: neither may claim the terminal went silent.
         assert_eq!(
-            truecolor_verdict(None, None, true),
+            truecolor_verdict(None, None),
             "unknown (probe skipped — no color-capable tty)"
         );
+        assert_eq!(
+            truecolor_verdict(None, Some(Truecolor::CantAsk)),
+            "unknown (the terminal can't be asked)"
+        );
+    }
+
+    /// Off Unix there is no query to send, so nothing is ever asked.
+    #[cfg(not(unix))]
+    #[test]
+    fn off_unix_the_truecolor_query_cannot_ask() {
+        assert_eq!(query_truecolor(TRUECOLOR_PROBE_TIMEOUT), Truecolor::CantAsk);
     }
 
     #[test]
