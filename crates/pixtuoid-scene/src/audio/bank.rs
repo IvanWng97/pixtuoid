@@ -1,6 +1,7 @@
 //! The pre-rendered sample banks — the ONE place the office's sounds are
-//! synthesized into buffers, so the native rodio gateway and the wasm WebAudio
-//! painter build byte-identical audio. Pure: no device deps.
+//! synthesized into buffers, for the native rodio gateway and the wasm WebAudio
+//! painter alike: the same synthesis, not the same bits, as [`f32::sin`]'s and
+//! [`f32::exp`]'s precision varies by platform. Pure: no device deps.
 //!
 //! The `rng` DRAW ORDER is the sound — `AssetBank::build` then
 //! `TrackBeds::build` continue ONE stream in the ratified order, so every
