@@ -371,7 +371,7 @@ pub fn advance_wander(
         walk.wander.last_advanced_at = now;
     }
 
-    // `result.0` == `ms.wander.phase` in every arm, so the frame's
+    // `result.0` == `walk.wander.phase` in every arm, so the frame's
     // `phase_started_at`/`target` always describe the returned phase.
     let (phase, t_x1000) = result;
     WanderFrame {
