@@ -86,7 +86,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     debug_walkable: bool,
     chrome: Chrome,
     /// The flashes the half-blocks show; the cutaway holds its own.
-    flash: pixtuoid_scene::flash::FlashHold<pixtuoid_scene::flash::Flashes>,
+    flash: pixtuoid_scene::flash::FlashHold<pixtuoid_scene::flash::Flashes, ratatui::layout::Size>,
     /// The cutaway, painted as terminal images in place of the half-blocks.
     #[cfg(feature = "graphics")]
     cutaway: Option<crate::tui::cutaway::TileCutaway>,
@@ -637,7 +637,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 crate::tui::renderer::apply_dim(drawn.pixels, onboarding_dim);
             }
         }
-        if self.flash.holds(flashes) {
+        if self.flash.holds(flashes, term_size) {
             return Ok(());
         }
         let (Some(from_buf), Some(to_buf)) = (from.raster.pixels(), to.raster.pixels()) else {
@@ -657,7 +657,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             flush_buffer_to_term_at_offset(f, to_buf, actual_scene, to_offset);
             crate::tui::renderer::paint_overlays(f, &overlays, now, actual_full, theme);
         })?;
-        self.flash.shown(flashes);
+        self.flash.shown(flashes, term_size);
 
         self.chrome.popup.last_scale = popup_scale;
         Ok(())

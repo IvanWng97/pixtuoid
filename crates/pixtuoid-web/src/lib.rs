@@ -5,7 +5,7 @@
 //!
 //! Time is a PARAMETER (`now_ms` from JS): the engine never calls
 //! `SystemTime::now()` (it panics on wasm32-unknown-unknown). Only the flash
-//! hold reads a clock of its own, [`page_clock`], when a frame is written.
+//! hold reads a clock of its own, `page_clock`, when a frame is written.
 
 mod audio;
 mod script;
@@ -155,7 +155,7 @@ pub struct Office {
     caps_size: Option<(u16, u16)>,
     weather: WeatherPolicy,
     /// The flash the page shows: the frame `step` leaves is the one it draws.
-    flash: FlashHold<FlashPhase>,
+    flash: FlashHold<FlashPhase, (u16, u16)>,
     /// The WebAudio engine — `None` until the visitor clicks ♩ (browser autoplay
     /// policy: no sound without a gesture).
     audio: Option<audio::WebAudioDriver>,
@@ -228,15 +228,13 @@ impl Office {
         // member with stale walk legs teleports in.
         self.render(now, buf_w, buf_h);
         let flash = self.session.flash();
-        // A canvas of a new shape gets this frame whatever it shows.
-        let pixels = self.session.buf().map_or(0, |b| b.as_slice().len());
-        let same_shape = self.rgba.len() == pixels * 4;
-        if same_shape && self.flash.holds(flash) {
+        let shape = (buf_w, buf_h);
+        if self.flash.holds(flash, shape) {
             return;
         }
         self.expand_rgba();
         // The page draws what `step` leaves in the same task, straight after.
-        self.flash.shown(flash);
+        self.flash.shown(flash, shape);
     }
 
     /// Pointer to the RGBA frame in wasm linear memory (`w*h*4` bytes).

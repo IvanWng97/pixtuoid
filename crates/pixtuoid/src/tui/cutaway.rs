@@ -104,7 +104,7 @@ pub(crate) struct TileCutaway {
     /// When the last transmits were written, for the protocol's cadence.
     sent_at: Option<SystemTime>,
     /// The flashes the terminal shows.
-    flash: FlashHold<Flashes>,
+    flash: FlashHold<Flashes, Option<Fitted>>,
     /// The flashes [`Self::pending`] shows.
     pending_flashes: Flashes,
     /// A write failed, perhaps mid-escape: the next one opens with
@@ -209,7 +209,7 @@ impl TileCutaway {
             Dirty::All
         };
         let flashes = [flash; 2];
-        if self.flash.holds(flashes) {
+        if self.flash.holds(flashes, Some(fitted)) {
             self.tiles.owe(&dirty);
             self.image_behind = true;
             self.pending.clear();
@@ -232,7 +232,7 @@ impl TileCutaway {
         now: SystemTime,
     ) {
         let flashes = slide.flashes;
-        if self.flash.holds(flashes) {
+        if self.flash.holds(flashes, Some(fitted)) {
             self.tiles.owe(&Dirty::All);
             self.image_behind = true;
             self.pending.clear();
@@ -299,7 +299,7 @@ impl TileCutaway {
         let mut send = std::mem::take(&mut self.pending);
         send.retain(|c| !covered.contains(&c.tile.index));
         if send.is_empty() {
-            self.flash.shown(self.pending_flashes);
+            self.flash.shown(self.pending_flashes, self.fitted);
             return;
         }
         match self.protocol {
@@ -336,7 +336,7 @@ impl TileCutaway {
                 self.torn = false;
                 self.sent_at = Some(now);
                 self.tiles.sent(&sent);
-                self.flash.shown(self.pending_flashes);
+                self.flash.shown(self.pending_flashes, self.fitted);
             }
             Err(e) => {
                 self.torn = true;

@@ -34,9 +34,10 @@ pub struct OfficeRenderer {
     /// Ambient-audio gateway. Inert unless installed.
     audio: crate::audio::AudioHandle,
     /// The flash the window shows.
-    flash: FlashHold<FlashPhase>,
-    /// The flash the last [`render_live`](Self::render_live) handed out.
-    rendered: FlashPhase,
+    flash: FlashHold<FlashPhase, (u32, u32)>,
+    /// The flash the last [`render_live`](Self::render_live) handed out, and
+    /// the window it was for.
+    rendered: (FlashPhase, (u32, u32)),
 }
 
 impl OfficeRenderer {
@@ -46,7 +47,7 @@ impl OfficeRenderer {
             session: FloorSession::new(pack),
             audio: crate::audio::AudioHandle::disabled(),
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
-            rendered: FlashPhase::default(),
+            rendered: (FlashPhase::default(), (0, 0)),
         }
     }
 
@@ -69,23 +70,28 @@ impl OfficeRenderer {
         self.session.buf()
     }
 
-    /// [`render`](Self::render) for the window on screen: `None` also when the
-    /// flash hold keeps the frame back, so the window keeps the last. A frame
-    /// handed out is [`presented`](Self::presented) once it shows.
-    pub fn render_live(&mut self, inputs: RenderInputs<'_>) -> Option<&RgbBuffer> {
+    /// [`render`](Self::render) for the window on screen, `window` physical
+    /// pixels: `None` also when the flash hold keeps the frame back, so the
+    /// window keeps the last. A frame handed out is
+    /// [`presented`](Self::presented) once it shows.
+    pub fn render_live(
+        &mut self,
+        inputs: RenderInputs<'_>,
+        window: (u32, u32),
+    ) -> Option<&RgbBuffer> {
         self.render(inputs);
         let flash = self.session.flash();
-        if self.flash.holds(flash) {
+        if self.flash.holds(flash, window) {
             return None;
         }
-        self.rendered = flash;
+        self.rendered = (flash, window);
         self.session.buf()
     }
 
     /// The frame [`render_live`](Self::render_live) last handed out finished
     /// presenting just now.
     pub fn presented(&mut self) {
-        self.flash.shown(self.rendered);
+        self.flash.shown(self.rendered.0, self.rendered.1);
     }
 
     /// Build the name-badge overlay for the LAST rendered frame (call right after
@@ -496,6 +502,8 @@ mod tests {
         present_takes: Duration,
         /// What the window shows.
         shown: RgbBuffer,
+        /// The window's physical pixels.
+        px: (u32, u32),
     }
 
     impl Window {
@@ -512,6 +520,7 @@ mod tests {
                 screen,
                 present_takes: Duration::ZERO,
                 shown: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
+                px: (160, 96),
             }
         }
 
@@ -520,25 +529,47 @@ mod tests {
         fn present(&mut self, now: SystemTime) -> RgbBuffer {
             let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
             self.screen.at(now);
-            let frame = self.renderer.render_live(RenderInputs {
-                world: FloorInputs {
-                    scene: &self.scene,
-                    pack: crate::test_flash::pack(),
-                    now,
-                    floor: self.floor,
-                    pets: PetInputs::default(),
+            let frame = self.renderer.render_live(
+                RenderInputs {
+                    world: FloorInputs {
+                        scene: &self.scene,
+                        pack: crate::test_flash::pack(),
+                        now,
+                        floor: self.floor,
+                        pets: PetInputs::default(),
+                    },
+                    theme,
+                    size: Size { w: 160, h: 96 },
+                    place: pixtuoid_scene::look::Place::default(),
+                    debug_walkable: false,
                 },
-                theme,
-                size: Size { w: 160, h: 96 },
-                place: pixtuoid_scene::look::Place::default(),
-                debug_walkable: false,
-            });
+                self.px,
+            );
             if let Some(frame) = frame {
                 self.shown = frame.clone();
                 self.screen.advance(self.present_takes);
                 self.renderer.presented();
             }
             self.shown.clone()
+        }
+    }
+
+    /// A window resized under a hold gets its frame at once: a screen of a new
+    /// shape shows nothing to hold. The same frame unresized is held.
+    #[test]
+    fn a_resized_window_is_never_held() {
+        use crate::test_flash::{held_frames, storm_strike};
+        let strike = storm_strike();
+        let [dark, late, held, _] = held_frames(&strike);
+        for resized in [false, true] {
+            let mut window = Window::new(strike.weather);
+            window.present(dark);
+            let before = window.present(late);
+            if resized {
+                window.px = (window.px.0 * 2, window.px.1 * 2);
+            }
+            let after = window.present(held);
+            assert_eq!(after.as_slice() != before.as_slice(), resized);
         }
     }
 

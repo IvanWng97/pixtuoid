@@ -160,23 +160,26 @@ impl FloatingApp {
             pixtuoid_scene::pet::select_pet_for_floor(floor_meta.floor_seed, &self.pets);
         // ONE clock read, so the overlays below annotate the frame actually rendered.
         let now = SystemTime::now();
-        let office = self.renderer.render_live(RenderInputs {
-            world: FloorInputs {
-                scene: &scene,
-                pack: &self.pack,
-                now,
-                floor: floor_meta,
-                pets: PetInputs {
-                    pet: floor_pet,
-                    // Click-to-pet needs window pointer hit-testing (deferred).
-                    petting: None,
+        let office = self.renderer.render_live(
+            RenderInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &self.pack,
+                    now,
+                    floor: floor_meta,
+                    pets: PetInputs {
+                        pet: floor_pet,
+                        // Click-to-pet needs window pointer hit-testing (deferred).
+                        petting: None,
+                    },
                 },
+                theme: self.theme,
+                size: Size { w: buf_w, h: buf_h },
+                place: Place::default(),
+                debug_walkable: false,
             },
-            theme: self.theme,
-            size: Size { w: buf_w, h: buf_h },
-            place: Place::default(),
-            debug_walkable: false,
-        });
+            (win_w, win_h),
+        );
         let Some(surface) = self.surface.as_mut() else {
             return;
         };

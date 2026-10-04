@@ -42,28 +42,30 @@ pub fn monotonic() -> ScreenClock {
     Arc::new(move || origin.elapsed())
 }
 
-/// The phases a painter's screen shows, `P`, and when they finished reaching
-/// it on the painter's [`ScreenClock`]: a write showing others goes out the
-/// moment its frame is painted, but not before those on screen have shown
-/// [`PHOTOSENSITIVE_PHASE_MIN_MS`]. A held frame is still painted; only its
-/// write waits.
-pub struct FlashHold<P> {
-    shown: Option<(P, Duration)>,
+/// The phases a painter's screen shows, `P`, on a screen of shape `S`, and when
+/// they finished reaching it on the painter's [`ScreenClock`]: a write showing
+/// others goes out the moment its frame is painted, but not before those on
+/// screen have shown [`PHOTOSENSITIVE_PHASE_MIN_MS`]. A held frame is still
+/// painted; only its write waits. A screen of a new shape shows nothing to
+/// hold, so its write goes out whatever it shows.
+pub struct FlashHold<P, S> {
+    shown: Option<(P, S, Duration)>,
     clock: ScreenClock,
 }
 
-impl<P: Copy + PartialEq> FlashHold<P> {
+impl<P: Copy + PartialEq, S: Copy + PartialEq> FlashHold<P, S> {
     /// A hold on `clock`.
     pub fn on(clock: ScreenClock) -> Self {
         Self { shown: None, clock }
     }
 
-    /// Whether a write showing `phases` waits, now. A clock run backward reads
-    /// as elapsed, so the screen never freezes.
-    pub fn holds(&self, phases: P) -> bool {
+    /// Whether a write showing `phases` to a screen shaped `shape` waits, now.
+    /// A clock run backward reads as elapsed, so the screen never freezes.
+    pub fn holds(&self, phases: P, shape: S) -> bool {
         let now = (self.clock)();
-        self.shown.is_some_and(|(on, since)| {
+        self.shown.is_some_and(|(on, on_shape, since)| {
             on != phases
+                && on_shape == shape
                 && now
                     .checked_sub(since)
                     .is_some_and(|d| d < Duration::from_millis(PHOTOSENSITIVE_PHASE_MIN_MS))
@@ -73,13 +75,15 @@ impl<P: Copy + PartialEq> FlashHold<P> {
     /// Whether a write showing `phases` changes the screen's: it goes out at
     /// once, whatever the painter's cadence.
     pub fn changes(&self, phases: P) -> bool {
-        self.shown.is_none_or(|(on, _)| on != phases)
+        self.shown.is_none_or(|(on, ..)| on != phases)
     }
 
-    /// A write showing `phases` finished reaching the screen just now.
-    pub fn shown(&mut self, phases: P) {
-        if self.changes(phases) {
-            self.shown = Some((phases, (self.clock)()));
+    /// A write showing `phases` finished reaching a screen shaped `shape` just
+    /// now.
+    pub fn shown(&mut self, phases: P, shape: S) {
+        match &mut self.shown {
+            Some((on, on_shape, _)) if *on == phases => *on_shape = shape,
+            _ => self.shown = Some((phases, shape, (self.clock)())),
         }
     }
 }
@@ -129,6 +133,7 @@ mod tests {
     use super::*;
 
     const FLOOR: Duration = Duration::from_millis(PHOTOSENSITIVE_PHASE_MIN_MS);
+    const SHAPE: (u16, u16) = (80, 24);
 
     fn at(ms: u64) -> SystemTime {
         SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000) + Duration::from_millis(ms)
@@ -142,20 +147,43 @@ mod tests {
         let screen = ManualClock::default();
         let mut hold = FlashHold::on(screen.clock());
         screen.at(at(0));
-        assert!(!hold.holds(1), "an empty screen holds nothing");
+        assert!(!hold.holds(1, SHAPE), "an empty screen holds nothing");
         assert!(hold.changes(1));
-        hold.shown(1);
+        hold.shown(1, SHAPE);
         screen.at(at(50));
-        hold.shown(1);
+        hold.shown(1, SHAPE);
         let floor = FLOOR.as_millis() as u64;
         screen.at(at(floor - 1));
-        assert!(hold.holds(2), "timed from the first showing");
-        assert!(!hold.holds(1), "the phases on screen never wait");
+        assert!(hold.holds(2, SHAPE), "timed from the first showing");
+        assert!(!hold.holds(1, SHAPE), "the phases on screen never wait");
         assert!(!hold.changes(1) && hold.changes(2));
         screen.at(at(floor));
-        assert!(!hold.holds(2));
+        assert!(!hold.holds(2, SHAPE));
         screen.at(at(0) - Duration::from_millis(1));
-        assert!(!hold.holds(2), "a clock run backward");
+        assert!(!hold.holds(2, SHAPE), "a clock run backward");
+    }
+
+    /// A screen of a new shape (a resize, a font zoom) shows nothing to hold:
+    /// its write goes out at once. Phases shown on it are timed from their
+    /// first showing, on whatever shape.
+    #[test]
+    fn a_reshaped_screen_is_never_held() {
+        let screen = ManualClock::default();
+        let mut hold = FlashHold::on(screen.clock());
+        screen.at(at(0));
+        hold.shown(1, SHAPE);
+        screen.at(at(10));
+        assert!(!hold.holds(2, (SHAPE.0 + 1, SHAPE.1)), "resized");
+        hold.shown(1, (SHAPE.0 + 1, SHAPE.1));
+        assert!(
+            hold.holds(2, (SHAPE.0 + 1, SHAPE.1)),
+            "the new shape holds once shown"
+        );
+        screen.at(at(FLOOR.as_millis() as u64));
+        assert!(
+            !hold.holds(2, (SHAPE.0 + 1, SHAPE.1)),
+            "timed from the phase's first showing, not the reshape"
+        );
     }
 
     /// The phase is the composed frame's own: its sky's strike level, each a

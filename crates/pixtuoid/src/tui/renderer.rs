@@ -59,7 +59,7 @@ pub struct DrawCtx<'a> {
     pub onboarding: &'a crate::tui::welcome::OnboardingFrame,
     /// The flashes the terminal shows, for a live painter; a still has none
     /// to hold.
-    pub flash: Option<&'a mut FlashHold<Flashes>>,
+    pub flash: Option<&'a mut FlashHold<Flashes, ratatui::layout::Size>>,
 }
 
 impl<'a> DrawCtx<'a> {
@@ -363,7 +363,11 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         return Ok(DrawOut::default());
     };
     let flashes = [flash; 2];
-    if ctx.flash.as_ref().is_some_and(|f| f.holds(flashes)) {
+    if ctx
+        .flash
+        .as_ref()
+        .is_some_and(|f| f.holds(flashes, term_size))
+    {
         return Ok(DrawOut {
             held: true,
             ..DrawOut::default()
@@ -450,7 +454,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         paint_overlays(f, &overlays, now, actual_full, theme);
     })?;
     if let Some(flash) = ctx.flash.as_deref_mut() {
-        flash.shown(flashes);
+        flash.shown(flashes, term_size);
     }
     Ok(DrawOut {
         layout: Some(layout),

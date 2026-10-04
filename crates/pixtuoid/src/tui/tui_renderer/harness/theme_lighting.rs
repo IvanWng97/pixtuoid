@@ -135,6 +135,40 @@ fn a_held_frame_leaves_the_terminal_and_its_hit_targets_alone() {
     }
 }
 
+/// A terminal resized under a hold gets its frame at once, alone or sliding:
+/// a screen of a new shape shows nothing to hold.
+#[test]
+fn a_resized_terminal_is_never_held_in_half_blocks() {
+    use crate::test_flash::{held_frames, storm_strike};
+    let strike = storm_strike();
+    let [dark, late, held, _] = held_frames(&strike);
+    for sliding in [false, true] {
+        let (cols, rows) = crate::tui::renderer::min_terminal_size();
+        let (mut r, screen) = half_blocks_on_screen(cols, rows);
+        r.set_weather(strike.weather);
+        r.set_motion(pixtuoid_scene::anim::Motion::Full);
+        let scene = two_floor_scene();
+        if sliding {
+            r.navigate_floor(1, dark);
+        }
+        for at in [dark, late] {
+            screen.at(at);
+            r.render(&scene, pack(), at).expect("render");
+        }
+        let resized = ratatui::layout::Rect::new(0, 0, cols + 8, rows + 4);
+        r.terminal
+            .backend_mut()
+            .inner
+            .resize(resized.width, resized.height);
+        let mut stale = flushed(&r).clone();
+        stale.resize(resized);
+        screen.at(held);
+        r.render(&scene, pack(), held).expect("render");
+        assert_eq!(flushed(&r).area, resized);
+        assert_ne!(*flushed(&r), stale, "sliding {sliding}: drawn");
+    }
+}
+
 /// A phase holds the floor from when its flush lands, not from when its frame
 /// began: after a slow flush, the next phase waits for the floor to pass on
 /// the screen clock, though its frame's own clock says it has.

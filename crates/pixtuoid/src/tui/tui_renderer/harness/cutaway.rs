@@ -667,6 +667,34 @@ fn a_held_slide_frame_sends_nothing() {
     assert!(r.transition().is_some(), "still sliding");
 }
 
+/// A terminal resized under a hold gets its frame at once, alone or sliding:
+/// a screen of a new shape shows nothing to hold.
+#[test]
+fn a_resized_terminal_is_never_held() {
+    use crate::test_flash::{held_frames, storm_strike};
+    let strike = storm_strike();
+    let [dark, late, held, _] = held_frames(&strike);
+    for sliding in [false, true] {
+        let (cols, rows) = crate::tui::renderer::min_terminal_size();
+        let (mut r, wire, screen) = on_screen(cols, rows, ImageProtocol::Kitty);
+        r.set_weather(strike.weather);
+        r.set_motion(pixtuoid_scene::anim::Motion::Full);
+        let scene = two_floor_scene();
+        if sliding {
+            r.navigate_floor(1, dark);
+        }
+        for at in [dark, late] {
+            screen.at(at);
+            r.render(&scene, pack(), at).expect("render");
+        }
+        wire.take();
+        r.terminal.backend_mut().inner.resize(cols + 8, rows + 4);
+        screen.at(held);
+        r.render(&scene, pack(), held).expect("render");
+        assert!(wire.take().contains(TRANSMIT), "sliding {sliding}: sent");
+    }
+}
+
 /// A phase holds the floor from when its write lands, not from when its frame
 /// began: after a slow write, the next phase waits for the floor to pass on
 /// the screen clock, though its frame's own clock says it has.
