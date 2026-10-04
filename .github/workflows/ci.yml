@@ -4,10 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
-    # ready_for_review re-runs a head that a draft judged only at the light
-    # tier. converted_to_draft is left out: a draft cannot merge, so re-judging
-    # an unchanged head at the light tier would buy nothing.
-    types: [opened, synchronize, reopened, ready_for_review]
+    # Not ready_for_review: a PR runs the light tier draft or not, so marking it
+    # ready would re-judge an unchanged head at the same tier.
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 concurrency:
@@ -23,35 +22,48 @@ concurrency:
 permissions:
   contents: read
 
-# `full` is false only on a draft PR (off pull_request the flag dereferences to
-# an empty string, which `!` makes true); a draft skips the `if: inputs.full`
-# jobs to spare the macOS and Windows queue, and require-jobs counts those skips
-# red, so its ci-gate is red by construction.
 jobs:
+  # Two-step CI (docs.mergify.com/merge-queue/two-step): a PR's pushes run the
+  # light tier and pass ci-gate on it; the full tier runs on the merge queue's
+  # draft PR, where .mergify.yml's merge_conditions read ci-gate, and on main.
+  tier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      full: ${{ steps.tier.outputs.full }}
+    steps:
+      - id: tier
+        env:
+          FULL: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'mergify/merge-queue/') }}
+        run: echo "full=$FULL" >> "$GITHUB_OUTPUT"
+
   lint:
     name: Lint & Hygiene
     uses: ./.github/workflows/ci-lint.yml
 
   builds:
     name: Builds & Packaging
+    needs: tier
     uses: ./.github/workflows/ci-builds.yml
     with:
-      full: ${{ !github.event.pull_request.draft }}
+      full: ${{ needs.tier.outputs.full == 'true' }}
 
   tests:
     name: Test Suite & Coverage
+    needs: tier
     permissions:
       contents: read
       id-token: write
     uses: ./.github/workflows/ci-tests.yml
     with:
-      full: ${{ !github.event.pull_request.draft }}
+      full: ${{ needs.tier.outputs.full == 'true' }}
 
   site:
     name: Site
+    needs: tier
     uses: ./.github/workflows/site.yml
     with:
-      full: ${{ !github.event.pull_request.draft }}
+      full: ${{ needs.tier.outputs.full == 'true' }}
 
   gate:
     name: ci-gate

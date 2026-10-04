@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       full:
-        description: 'False on a draft PR: only the jobs without `if: inputs.full` run'
+        description: 'False on a PR outside the merge queue: only the jobs without `if: inputs.full` run'
         type: boolean
         required: true
 
@@ -156,3 +156,4 @@ jobs:
         with:
           results: ${{ toJSON(needs) }}
           label: "Required test job failed"
+          allow-skipped: ${{ !inputs.full }}

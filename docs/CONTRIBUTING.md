@@ -40,12 +40,13 @@ runs those locally), it runs the jobs below; all but **hygiene** and zizmor's
 offline audits are invisible to preflight, so a green preflight does not mean a
 green PR.
 
-A draft PR runs only the **light tier**, every job without
-`if: inputs.full`; a ready PR, a push to `main` and a manual dispatch run
-both tiers, and CodeQL and CodSpeed skip drafts. The skipped jobs make a draft's `ci-gate` red by design,
-so read its light-tier verdict from the individual job checks. If a ready PR's
-`ci-gate` reports only a draft run, re-run the cancelled `ready_for_review`
-run. The jobs:
+A PR's pushes run only the **light tier**, every job without
+`if: inputs.full`, and its `ci-gate` judges that tier. Both tiers run on the
+merge queue's draft PR (`mergify/merge-queue/…`), whose `ci-gate` the queue
+merges on, batching up to `.mergify.yml`'s `batch_size` PRs in one run, and on
+a push to `main` or a manual dispatch
+([two-step CI](https://docs.mergify.com/merge-queue/two-step/)). CodeQL and
+CodSpeed skip drafts. The jobs:
 
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
@@ -209,8 +210,8 @@ crate IS.
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` |
 | before push | nothing — the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
 | while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
-| once you need a PR number | open it as a draft: the light tier runs, and `ci-gate` stays red by design |
-| once the draft's light tier is green | mark it ready: the full tier and the billed review bots start together, so a failure only the full tier catches costs one extra review round until the bots are chained after CI |
+| once you need a PR number | open it as a draft: the light tier runs, and the billed review bots wait |
+| once the draft's light tier is green | mark it ready: the review bots start; a failure only the full tier catches surfaces in the queue, which dequeues the PR |
 | when a REVIEW.md local row matches | the `local-review` skill |
 | once [the merge gate](#the-merge-gate) holds | `@mergifyio queue` |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |

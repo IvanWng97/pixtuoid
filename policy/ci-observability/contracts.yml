@@ -358,6 +358,24 @@
       .jobs.required.steps |= map(
         if .uses == "./.github/actions/require-jobs" then .["continue-on-error"] = true else . end)
 
+- id: only-the-light-tier-passes-skipped-jobs
+  file:
+    - .github/workflows/ci-builds.yml
+    - .github/workflows/ci-tests.yml
+    - .github/workflows/site.yml
+  why: >-
+    A PR's light tier skips its full-only jobs by design and must still pass
+    ci-gate to enter the queue; the full tier judges the same jobs on the
+    queue's draft PR, so a skip counted green there would merge an untested
+    tree.
+  assert: |
+    [.jobs.required.steps[] | select(.uses == "./.github/actions/require-jobs")]
+    | all(.with["allow-skipped"] == "${{ !inputs.full }}")
+  break:
+    - |
+      .jobs.required.steps |= map(
+        if .uses == "./.github/actions/require-jobs" then .with["allow-skipped"] = "true" else . end)
+
 - id: ci-gate-judges-every-group
   file: .github/workflows/ci.yml
   why: >-
@@ -545,3 +563,23 @@
     - |
       (.package.metadata.deb.assets[] | select(.[0] | contains("fonts")) | .[0])
       = "../pixtuoid/fonts/*.txt"
+
+- id: queue-restates-branch-protection
+  file: .mergify.yml
+  why: >-
+    Branch protection is not injected (the bots never review the queue's draft
+    PR), so the queue admits a PR only on the checks restated here; one missing
+    lets a PR queue without it, and the merge then stalls on GitHub's own rule.
+    The draft PR is judged on the full tier's ci-gate alone.
+  assert: |
+    all(.queue_rules[];
+      .branch_protection_injection_mode == "none"
+      and ((["check-success = ci-gate", "check-success = GitGuardian Security Checks",
+             "check-success = claude-review/correctness", "check-success = claude-review/design",
+             "#review-threads-unresolved = 0"] - .queue_conditions) == [])
+      and .merge_conditions == ["check-success = ci-gate"])
+  break:
+    - .queue_rules[0].queue_conditions |= map(select(. != "check-success = claude-review/design"))
+    - .queue_rules[0].queue_conditions |= map(select(. != "#review-threads-unresolved = 0"))
+    - .queue_rules[0].branch_protection_injection_mode = "queue"
+    - .queue_rules[0].merge_conditions = []
