@@ -62,7 +62,7 @@ for (const c of showcase) {
     );
     if (missing.length)
       throw new Error(
-        `astro.config: showcase.json live clip "${c.id}" missing public/demos/ asset(s): ${missing.join(', ')} — run just gen-media`
+        `astro.config: showcase.json live clip "${c.id}" missing public/demos/ asset(s): ${missing.join(', ')} — run just site-demos`
       );
     if (!Number.isFinite(c.w) || !Number.isFinite(c.h))
       throw new Error(
