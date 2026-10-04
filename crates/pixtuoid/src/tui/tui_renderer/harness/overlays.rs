@@ -6,7 +6,7 @@ fn walkable_debug_toggle_tints_blocked_pixels_and_is_reversible() {
     let mut r = build(120, 60, vec![]);
     let now = t0();
     r.render(&scene, pack(), now).unwrap();
-    let before = r.buf().clone();
+    let before = r.buf().expect("a frame").clone();
 
     // A known-blocked pixel from the live mask, below the busy top wall band.
     let layout = r.cached_layout().expect("layout").clone();
@@ -17,7 +17,7 @@ fn walkable_debug_toggle_tints_blocked_pixels_and_is_reversible() {
 
     r.set_debug_walkable(true);
     r.render(&scene, pack(), now).unwrap();
-    let on = r.buf().clone();
+    let on = r.buf().expect("a frame").clone();
     // A warm cell's red channel barely rises while green/blue drop, so measure
     // DISTANCE to the blocked tint (220,60,60) rather than the red channel.
     let to_red = |c: pixtuoid_core::sprite::Rgb| {
@@ -37,7 +37,14 @@ fn walkable_debug_toggle_tints_blocked_pixels_and_is_reversible() {
 
     r.set_debug_walkable(false);
     r.render(&scene, pack(), now).unwrap();
-    let off_diff = region_diff(&before, r.buf(), 0, 0, before.width(), before.height());
+    let off_diff = region_diff(
+        &before,
+        r.buf().expect("a frame"),
+        0,
+        0,
+        before.width(),
+        before.height(),
+    );
     assert!(
         off_diff < 200,
         "toggling the debug layer off must restore the scene (diff={off_diff})"
@@ -198,7 +205,13 @@ fn onboarding_dims_the_office_buffer() {
 
     let mut base = build(100, 40, vec![]);
     base.render(&scene, pack(), t0()).unwrap();
-    let bright = avg_lum(base.buf(), 0, 0, base.buf().width(), base.buf().height());
+    let bright = avg_lum(
+        base.buf().expect("a frame"),
+        0,
+        0,
+        base.buf().expect("a frame").width(),
+        base.buf().expect("a frame").height(),
+    );
 
     // The card paints on the cell layer, not the buffer, so this measures the
     // office pixel buffer only.
@@ -217,11 +230,11 @@ fn onboarding_dims_the_office_buffer() {
     });
     dimmed.render(&scene, pack(), t0()).unwrap();
     let dim = avg_lum(
-        dimmed.buf(),
+        dimmed.buf().expect("a frame"),
         0,
         0,
-        dimmed.buf().width(),
-        dimmed.buf().height(),
+        dimmed.buf().expect("a frame").width(),
+        dimmed.buf().expect("a frame").height(),
     );
 
     assert!(

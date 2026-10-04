@@ -449,7 +449,7 @@ impl CityStrip {
         theme: &Theme,
         density: Density,
     ) -> Self {
-        let (look, altitude, beat) = (&moment.look, moment.altitude, moment.beat);
+        let (look, altitude, beat) = (&moment.look, moment.altitude, moment.timing.beat);
         let d = density.get();
         let mut strip = CityStrip {
             w: run_w.saturating_mul(d),

@@ -14,12 +14,13 @@ use crate::sim::anchors::{
     waypoint_top_left,
 };
 use crate::sim::seat::{Seat, settle_seat};
-use crate::sim::{CharacterGlow, CharacterPlacement, SimStores};
+use crate::sim::{CharacterGlow, CharacterPlacement, SimInputs, SimStores, sim_step};
 use crate::wall::paint_wall;
 use pixtuoid_core::sprite::Frame;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 /// Paint all of `piece` in one call, which the classic's bands add up to.
 fn paint_whole_wall(

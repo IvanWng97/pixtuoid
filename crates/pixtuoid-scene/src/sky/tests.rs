@@ -260,11 +260,11 @@ fn lightning_envelope_is_a_two_pulse_then_dark() {
 }
 
 /// A strike stays inside the photosensitive-safe envelope: at most four
-/// phases, each at least [`PHOTOSENSITIVE_PHASE_MIN_MS`], and at most three
-/// flashes a second, where a flash is a rise and a fall of 10% of full
-/// luminance.
+/// phases, each at least [`PHOTOSENSITIVE_PHASE_MIN_MS`], and at most
+/// [`PHOTOSENSITIVE_FLASHES_PER_SECOND`] flashes in any second.
 ///
 /// [`PHOTOSENSITIVE_PHASE_MIN_MS`]: crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS
+/// [`PHOTOSENSITIVE_FLASHES_PER_SECOND`]: crate::anim::PHOTOSENSITIVE_FLASHES_PER_SECOND
 #[test]
 fn a_strike_keeps_the_photosensitive_flash_bounds() {
     let levels: Vec<f32> = (0..=STRIKE_MS).map(lightning_envelope).collect();
@@ -282,18 +282,42 @@ fn a_strike_keeps_the_photosensitive_flash_bounds() {
             .all(|&(_, len)| len >= crate::anim::PHOTOSENSITIVE_PHASE_MIN_MS),
         "{lit:?}"
     );
-    let changes: Vec<f32> = std::iter::once(0.0)
-        .chain(phases.iter().map(|&(l, _)| l))
-        .collect::<Vec<_>>()
-        .windows(2)
-        .map(|w| w[1] - w[0])
-        .filter(|d| d.abs() >= 0.1)
-        .collect();
-    let opposing = changes
-        .windows(2)
-        .filter(|w| w[0].signum() != w[1].signum())
-        .count();
-    assert!(opposing.div_ceil(2) <= 3, "{changes:?}");
+    let flashes = crate::anim::most_flashes_in_a_second(
+        std::iter::once((0, 0.0)).chain((0..=STRIKE_MS).map(|ms| (ms, lightning_envelope(ms)))),
+    );
+    assert!(
+        flashes <= crate::anim::PHOTOSENSITIVE_FLASHES_PER_SECOND,
+        "{phases:?}"
+    );
+}
+
+/// A full storm on every tier, sampled at a live painter's rate across many
+/// strikes: never more than [`PHOTOSENSITIVE_FLASHES_PER_SECOND`] flashes in
+/// any second of wall time.
+///
+/// [`PHOTOSENSITIVE_FLASHES_PER_SECOND`]: crate::anim::PHOTOSENSITIVE_FLASHES_PER_SECOND
+#[test]
+fn a_storm_flashes_at_most_three_times_a_second_on_every_tier() {
+    use crate::anim::{Motion, PAINT_FPS, PHOTOSENSITIVE_FLASHES_PER_SECOND};
+    const BUCKETS: u64 = 40;
+    let frame_ms = 1000 / u64::from(PAINT_FPS);
+    let storm = WeatherPolicy::Forced(Weather::Storm);
+    for motion in Motion::ALL {
+        let span = BUCKETS * LIGHTNING_PERIOD_MS * motion.pace().unwrap_or(1);
+        let samples = (0..span).step_by(frame_ms as usize).map(|ms| {
+            let wall = std::time::UNIX_EPOCH + Duration::from_millis(ms);
+            (ms, flash_level_at(motion.beat(wall), storm))
+        });
+        let most = crate::anim::most_flashes_in_a_second(samples);
+        assert!(
+            most <= PHOTOSENSITIVE_FLASHES_PER_SECOND,
+            "{motion:?}: {most}"
+        );
+        assert!(
+            motion == Motion::Still || most > 0,
+            "{motion:?} never struck"
+        );
+    }
 }
 
 /// Two strikes never fall within a second of each other, so their flashes

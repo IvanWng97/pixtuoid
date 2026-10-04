@@ -261,7 +261,7 @@ impl SkyView {
         Self {
             disc,
             stars: look.star_strength > 0.0,
-            beat: moment.beat,
+            beat: moment.timing.beat,
             sky,
             star: over(STAR_COLOR, look.star_strength * STAR_ALPHA_MAX),
             lit: over(core, vis),

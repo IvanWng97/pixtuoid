@@ -3441,7 +3441,7 @@ pub(crate) mod tests {
         let (walk_layout, _, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let walking = &frames[frames.len() / 2];
         let seated = frames.last().expect("a seated frame");
-        let office = FloorSession::new()
+        let office = FloorSession::new(std::sync::Arc::new(pack.clone()))
             .step(
                 crate::floor::FloorInputs {
                     scene: &pixtuoid_core::SceneState::uniform(16),
@@ -3676,7 +3676,7 @@ pub(crate) mod tests {
             pixtuoid_core::sprite::Rgb { r: 1, g: 2, b: 3 };
         let pack = test_default_pack();
         let theme = &crate::theme::NORMAL;
-        let office = FloorSession::new()
+        let office = FloorSession::new(std::sync::Arc::new(pack.clone()))
             .step(
                 crate::floor::FloorInputs {
                     scene: &pixtuoid_core::SceneState::uniform(16),
@@ -3806,7 +3806,7 @@ pub(crate) mod tests {
     fn a_window_is_drawn_before_whatever_hangs_over_it() {
         use crate::floor::{FloorMeta, FloorSession};
         let pack = test_default_pack();
-        let office = FloorSession::new()
+        let office = FloorSession::new(std::sync::Arc::new(pack.clone()))
             .step(
                 crate::floor::FloorInputs {
                     scene: &pixtuoid_core::SceneState::uniform(16),
@@ -4114,7 +4114,7 @@ pub(crate) mod tests {
         // ...and offices whose sizes gate in the pieces 160x96 lacks, empty.
         let pack = test_default_pack();
         for (w, h) in [(240u16, 144u16), (100, 60)] {
-            let stepped = FloorSession::new()
+            let stepped = FloorSession::new(std::sync::Arc::new(pack.clone()))
                 .step(
                     crate::floor::FloorInputs {
                         scene: &pixtuoid_core::SceneState::uniform(16),
