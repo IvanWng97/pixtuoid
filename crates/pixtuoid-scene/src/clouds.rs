@@ -234,7 +234,6 @@ const RELIEF: f32 = 0.5;
 /// The closing's reach: a notch, tooth or slit narrower fills.
 const CLOSE: f32 = 1.0;
 
-/// A heap: one or two big top lobes, smaller side lobes, a filled base.
 /// A cumulus's crown: the chance of a second crown lobe, each lobe's radius
 /// and its sway aside as shares of the mass's width, and how far its radius
 /// sits it below the top.
@@ -261,6 +260,7 @@ const SKIRT_SPAN: f32 = 0.9;
 const SKIRT_JITTER: f32 = 0.6;
 const SKIRT_SIT: f32 = 0.6;
 
+/// A heap: one or two big top lobes, smaller side lobes, a filled base.
 fn cumulus(r: &mut Rng, cx: f32, base: f32, width: f32, height: f32) -> Vec<Lobe> {
     let mut lobes = Vec::new();
     for _ in 0..1 + usize::from(r.u() < CROWN_SECOND) {
@@ -296,8 +296,6 @@ fn cumulus(r: &mut Rng, cx: f32, base: f32, width: f32, height: f32) -> Vec<Lobe
     lobes
 }
 
-/// A cumulonimbus: a broad heap, a column narrowing as it climbs, and an anvil
-/// spread flat across its top at `anvil_y`.
 /// A cumulonimbus: its heap's height and its anvil's row as shares of the
 /// glass, how near the anvil its column stops, how far the column narrows
 /// at the top, each column lobe's radius and sway as shares of the width and
@@ -317,6 +315,8 @@ const ANVIL_FROM: f32 = 0.95;
 const ANVIL_SPAN: f32 = 1.9;
 const ANVIL_RAGGED: (f32, f32) = (-0.4, 0.6);
 
+/// A cumulonimbus: a broad heap, a column narrowing as it climbs, and an anvil
+/// spread flat across its top at `anvil_y`.
 fn tower(r: &mut Rng, cx: f32, base: f32, width: f32, glass_h: f32) -> Vec<Lobe> {
     let mut lobes = cumulus(r, cx, base, width, glass_h * HEAP_H);
     let anvil_y = glass_h * ANVIL_Y;
