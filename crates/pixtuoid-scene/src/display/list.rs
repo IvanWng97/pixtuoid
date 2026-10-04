@@ -6,6 +6,7 @@ use super::Span;
 use crate::atmosphere::Carpet;
 use crate::dither::Dithered;
 use crate::layout::Bounds;
+use crate::outside::WindowView;
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
@@ -61,7 +62,7 @@ impl Screen {
     }
 }
 
-/// One frame's pieces — the windows' glass, the decor hung on the wall and
+/// One frame's pieces — the windows, the decor hung on the wall and
 /// everything standing on the ground — built and ordered but not painted.
 ///
 /// ONE ordered list, so a character and the desk it sits at resolve against each
@@ -262,7 +263,7 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
             body: _,
         } => (at, shadow, key, chair).hash(&mut h),
         PieceKind::Text { ref run } => run.hash(&mut h),
-        PieceKind::Glass { ref view } => view.hash(&mut h),
+        PieceKind::Window { ref view, frame } => (view, frame).hash(&mut h),
         PieceKind::Hung { at, sprite } => (at, sprite).hash(&mut h),
         PieceKind::Effect(riding) => riding.hash(&mut h),
     }
@@ -271,11 +272,12 @@ pub(crate) fn fingerprint(kind: &PieceKind) -> u64 {
 
 /// How a piece takes the room's light: one rule both looks follow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Emits {
-    /// Its own light, which the room's lights still lift: a window's sky, so
-    /// a light that falls on the glass glows on it (#1164's spared glass is
-    /// gone, one rule for both looks).
-    Pane,
+pub(crate) enum Emits<'a> {
+    /// A window. What its glass shows ([`WindowView::shows`]) is its own light,
+    /// which the room's lights still lift, so a light that falls on the glass
+    /// glows on it (#1164's spared glass is gone, one rule for both looks). Its
+    /// joinery is lit.
+    Pane(&'a WindowView),
     /// Its own light, as painted: a sign, or text that keeps the contrast its
     /// theme pins at every hour.
     Emissive,
@@ -287,9 +289,9 @@ pub(crate) enum Emits {
 
 impl PieceKind {
     /// How it takes the room's light.
-    pub(crate) fn emits(&self) -> Emits {
+    pub(crate) fn emits(&self) -> Emits<'_> {
         match self {
-            PieceKind::Glass { .. } => Emits::Pane,
+            PieceKind::Window { view, .. } => Emits::Pane(view),
             PieceKind::Neon { .. } | PieceKind::Text { .. } => Emits::Emissive,
             PieceKind::Effect(r) if r.effect.kind == crate::effects::EffectKind::FlameCrown => {
                 Emits::Emissive
@@ -312,8 +314,8 @@ impl PieceKind {
     }
 
     /// Whether it recolours what lies under it rather than painting colours of
-    /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window's
-    /// [`PieceKind::Glass`].
+    /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window
+    /// ([`PieceKind::Window`]).
     #[cfg_attr(
         not(test),
         expect(dead_code, reason = "the incremental canvas repaints under it")
@@ -342,7 +344,7 @@ impl PieceKind {
             | PieceKind::Door { .. }
             | PieceKind::Neon { .. }
             | PieceKind::Clock { .. }
-            | PieceKind::Glass { .. }
+            | PieceKind::Window { .. }
             | PieceKind::Desk { .. }
             | PieceKind::DeskProp(_)
             | PieceKind::Creature { .. }
@@ -363,9 +365,10 @@ impl PieceKind {
 /// paint fn writes lies inside its span.
 #[derive(Debug)]
 pub(crate) enum PieceKind {
-    /// One window's glass and what it looks out on.
-    Glass {
+    /// One window: its glass, then its joinery in `frame`.
+    Window {
         view: WindowView,
+        frame: pixtuoid_core::sprite::Rgb,
     },
     /// Decor hung on the north band, blitted at its top-left `at`.
     Hung {
@@ -511,14 +514,4 @@ impl std::fmt::Debug for Figure {
             .field("frame_idx", &self.key.frame.frame_idx)
             .finish()
     }
-}
-
-/// What one window shows this frame, resolved when the list is built: the
-/// art pixels of its box from its top-left, row by row, `None` on its frame.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct WindowView {
-    pub(crate) x: u16,
-    pub(crate) y: u16,
-    pub(crate) w: u16,
-    pub(crate) px: Vec<Option<pixtuoid_core::sprite::Rgb>>,
 }

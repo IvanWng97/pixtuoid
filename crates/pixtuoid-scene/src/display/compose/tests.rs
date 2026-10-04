@@ -991,7 +991,7 @@ pub(crate) fn kind_name(kind: &PieceKind) -> &'static str {
         PieceKind::Neon { .. } => "neon",
         PieceKind::Clock { .. } => "clock",
         PieceKind::Character { .. } => "character",
-        PieceKind::Glass { .. } => "glass",
+        PieceKind::Window { .. } => "window",
         PieceKind::Hung { .. } => "hung decor",
         PieceKind::Effect(_) => "effect",
         PieceKind::Text { .. } => "text",
