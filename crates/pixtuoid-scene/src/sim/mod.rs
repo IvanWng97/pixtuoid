@@ -849,6 +849,7 @@ pub(crate) fn resolve_characters(
                         planted_foot: Some(effects::planted_foot(
                             frame,
                             pack.animation(anim_name).map_or(1, |a| a.frames().len()),
+                            flip,
                         )),
                         ..Cues::default()
                     },

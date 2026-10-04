@@ -980,20 +980,25 @@ fn a_base_walker_keeps_the_standing_figure() {
     }
 }
 
-/// A walker's dust rises under a foot on the ground, in every frame of its walk.
+/// A walker's dust rises under a foot on the ground, in every frame of its
+/// walk, heading east or mirrored west.
 #[test]
 fn a_walker_s_dust_rises_under_its_planted_foot() {
     let pack = crate::pack::test_default_pack();
     for name in crate::sim::WALKS {
         let frames = pack.animation(name).expect("a walk").frames();
         for (i, f) in frames.iter().enumerate() {
-            let foot = crate::effects::planted_foot(i, frames.len());
-            let x = crate::effects::look::walking_dust_foot(Point { x: 0, y: 0 }, foot as u64).x;
-            let ground = f.height() - 1;
-            assert!(
-                f.get(x, ground).copied().flatten().is_some(),
-                "{name} {i}: dust under a lifted foot"
-            );
+            for flip in [false, true] {
+                let foot = crate::effects::planted_foot(i, frames.len(), flip);
+                let x =
+                    crate::effects::look::walking_dust_foot(Point { x: 0, y: 0 }, foot as u64).x;
+                let art_x = if flip { f.width() - 1 - x } else { x };
+                let ground = f.height() - 1;
+                assert!(
+                    f.get(art_x, ground).copied().flatten().is_some(),
+                    "{name} {i} (flip {flip}): dust under a lifted foot"
+                );
+            }
         }
     }
 }
