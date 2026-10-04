@@ -66,13 +66,19 @@ fn px_per_unit(px: f32) -> f32 {
     px / (ascent - descent)
 }
 
-/// Linear per-channel coverage blend of `fg` over `bg` — THE one blend curve
-/// every AA-text surface composites with, so a future curve change (e.g.
-/// gamma-correct blending) lands once. `cov` is clamped here so callers don't
-/// each re-clamp.
+/// Coverage blend of `fg` over `bg`, in linear light — THE one blend curve
+/// every AA-text surface composites with. Mixing the sRGB-encoded bytes instead
+/// thins bright text on a dark ground and haloes colour on colour (FreeType,
+/// <https://freetype.org/freetype2/docs/hinting/text-rendering-general.html>).
+/// `cov` is clamped here so callers don't each re-clamp.
 pub fn blend_channel(bg: u8, fg: u8, cov: f32) -> u8 {
     let a = cov.clamp(0.0, 1.0);
-    (bg as f32 + (fg as f32 - bg as f32) * a).round() as u8
+    let lin = |c: u8| palette::Srgb::new(c, c, c).into_linear::<f32>().red;
+    let (b, f) = (lin(bg), lin(fg));
+    let mixed = b + (f - b) * a;
+    palette::Srgb::<f32>::from_linear(palette::LinSrgb::new(mixed, mixed, mixed))
+        .into_format::<u8>()
+        .red
 }
 
 /// The face's glyph for `ch`, falling back to `.notdef` on a cmap miss — so an

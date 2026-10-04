@@ -2681,6 +2681,7 @@ dependencies = [
  "miniz_oxide",
  "objc2-app-kit",
  "open",
+ "palette",
  "pixtuoid-core",
  "pixtuoid-scene",
  "png",
