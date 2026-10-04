@@ -34,13 +34,22 @@ pub(crate) fn columns(n: u16) -> ArtPx {
 
 /// The cells `cluster` takes on a terminal: ratatui-core 0.1.2 writes none
 /// for one holding a control (`Buffer::set_stringn`) and else its
-/// `unicode-width` (`CellWidth for str`).
+/// `unicode-width` plus one per halfwidth (semi-)voiced sound mark
+/// (`CellWidth for str`, `buffer/cell_width.rs:42-43`).
 fn cluster_cells(cluster: &str) -> u16 {
     if cluster.contains(char::is_control) {
         return 0;
     }
-    u16::try_from(cluster.width()).unwrap_or(u16::MAX)
+    let marks = cluster
+        .chars()
+        .filter(|c| HALFWIDTH_SOUND_MARKS.contains(c))
+        .count();
+    u16::try_from(cluster.width() + marks).unwrap_or(u16::MAX)
 }
+
+/// U+FF9E and U+FF9F, which `unicode-width` gives no width but a terminal
+/// draws in a cell of their own (ratatui-core's `count_halfwidth_sound_marks`).
+const HALFWIDTH_SOUND_MARKS: [char; 2] = ['\u{ff9e}', '\u{ff9f}'];
 
 /// Each grapheme cluster of `text` that takes a cell, and the cells it takes.
 pub(crate) fn clusters(text: &str) -> impl Iterator<Item = (&str, u16)> {
