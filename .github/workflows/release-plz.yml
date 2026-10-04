@@ -22,10 +22,10 @@ on:
 # needs no write.
 # The action's git-config step fails loudly on an empty token.
 #
-# ACCEPTED RISK, stated because the pin that used to state it is gone: both
-# jobs now COMPILE inside the step that holds this token — `cargo-semver-checks`
-# on the release PR, `cargo publish` on the tag — so every dependency build
-# script runs with a repository-scoped write credential in its environment.
+# ACCEPTED RISK: both jobs COMPILE inside the step that holds this token —
+# `cargo-semver-checks` on the release PR, `cargo publish` on the tag — so every
+# dependency build script runs with a repository-scoped write credential in its
+# environment.
 # `release-plz.toml` turned both on deliberately. The mechanism that bounds it
 # is a GitHub App installation token (~1 h, `actions/create-github-app-token`),
 # which release-plz documents and its own repository uses; switching is a
@@ -101,7 +101,7 @@ jobs:
     outputs:
       release: ${{ steps.detect.outputs.release }}
     steps:
-      - name: Detect a merged release PR
+      - name: Detect a merged release PR; refuse a stale one
         id: detect
         env:
           GH_TOKEN: ${{ github.token }}
@@ -110,8 +110,23 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          release="$(gh api "repos/$REPOSITORY/commits/$SHA/pulls" \
-            --jq "any(.[]; .head.ref | startswith(\"$PR_BRANCH_PREFIX\"))")"
+          head="$(gh api "repos/$REPOSITORY/commits/$SHA/pulls" \
+            --jq "[.[] | select(.head.ref | startswith(\"$PR_BRANCH_PREFIX\")) | .head.sha][0] // \"\"")"
+          release=false
+          if [[ -n "$head" ]]; then
+            # Its CHANGELOG and semver verdict cover only the main release-plz
+            # wrote its commit on, so that commit must sit on the merge's
+            # parent unrewritten: createCommitOnBranch stamps both its dates
+            # at once, and a rebase moves the committer date alone.
+            parent="$(gh api "repos/$REPOSITORY/commits/$SHA" --jq '.parents[0].sha')"
+            stale="$(gh api "repos/$REPOSITORY/compare/$parent...$head" \
+              --jq ".commits[0] | .parents[0].sha != \"$parent\" or .commit.author.date != .commit.committer.date")"
+            if [[ "$stale" != false ]]; then
+              echo "::error::the release PR merged at ${SHA::7} was not cut from main@${parent::7} (main moved after its dispatch, or was merged or rebased into it), so its changelog misses commits and nothing is published. Revert this commit, then re-dispatch release-plz.yml (docs/CONTRIBUTING.md#cutting-the-release)"
+              exit 1
+            fi
+            release=true
+          fi
           echo "release=$release" >>"$GITHUB_OUTPUT"
           echo "a merged release PR at ${SHA::7}: $release"
 
@@ -190,8 +205,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
   # release-plz tags only a commit whose PR came from a `release-plz-*` branch,
-  # and exits GREEN when it declines; a detection miss above skips it outright.
-  # Either way main is left at a version release.yml never sees, so this runs
+  # and exits GREEN when it declines; a detection miss above skips it outright,
+  # and a refused stale release PR leaves its version untagged until reverted.
+  # Each way main is left at a version release.yml never sees, so this runs
   # on every push, whatever `release` did, to turn that red.
   #
   # At rest main always sits at a released version, so "the workspace version
@@ -217,6 +233,6 @@ jobs:
           if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
             echo "v$version is tagged"
           else
-            echo "::error::main@${GITHUB_SHA::7} is at v$version but no tag v$version exists, so release.yml has not run for it. release-plz tags only a merged release-plz-* branch (release-plz.toml release_always). Re-running this workflow is the fix that keeps the changelog: a hand-pushed tag (git tag v$version $GITHUB_SHA && git push origin v$version) still builds and publishes, but its GitHub release has no body, because the changelog lives in the draft release-plz would have created"
+            echo "::error::main@${GITHUB_SHA::7} is at v$version but no tag v$version exists, so release.yml has not run for it. release-plz tags only a merged release-plz-* branch (release-plz.toml release_always). If release-merge refused a stale release PR at an earlier push, revert that merge and never tag it. Otherwise re-running this workflow is the fix that keeps the changelog: a hand-pushed tag (git tag v$version $GITHUB_SHA && git push origin v$version) still builds and publishes, but its GitHub release has no body, because the changelog lives in the draft release-plz would have created"
             exit 1
           fi
