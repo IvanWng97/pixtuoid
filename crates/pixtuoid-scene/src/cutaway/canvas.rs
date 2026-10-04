@@ -55,7 +55,7 @@ struct Epoch {
     theme: &'static Theme,
     scale: RenderScale,
     ambient: Ambient,
-    ground: crate::display::Ground,
+    carpet: crate::atmosphere::Carpet,
     flash: crate::cutaway::light::Flash,
 }
 
@@ -65,7 +65,7 @@ impl PartialEq for Epoch {
             && std::ptr::eq(self.theme, other.theme)
             && self.scale == other.scale
             && self.ambient == other.ambient
-            && self.ground == other.ground
+            && self.carpet == other.carpet
             && self.flash == other.flash
     }
 }
@@ -111,7 +111,7 @@ impl CutawayCanvas {
             theme,
             scale,
             ambient: list.ambient(),
-            ground: list.ground(),
+            carpet: list.carpet(),
             flash: list.flash(),
         };
         let footprints: Vec<(Span, u64)> = list
@@ -146,6 +146,11 @@ impl CutawayCanvas {
             buf: &self.buf,
             dirty,
         }
+    }
+
+    /// The last frame painted, empty before the first.
+    pub(crate) fn buf(&self) -> &RgbBuffer {
+        &self.buf
     }
 
     /// The agent the last frame shows topmost over `area`, in LOGICAL units
@@ -898,7 +903,7 @@ mod tests {
         let pack = Arc::new(test_default_pack());
         let (walk_layout, _, frames, _) = sit_down(crate::layout::Facing::North, 2);
         let walk_layout = Arc::new(walk_layout);
-        let office = crate::floor::FloorSession::new()
+        let office = crate::floor::FloorSession::new(Arc::clone(&pack))
             .step(
                 crate::floor::FloorInputs {
                     scene: &pixtuoid_core::SceneState::uniform(16),

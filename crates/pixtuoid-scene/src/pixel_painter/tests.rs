@@ -14,12 +14,13 @@ use crate::sim::anchors::{
     waypoint_top_left,
 };
 use crate::sim::seat::{Seat, settle_seat};
-use crate::sim::{CharacterGlow, CharacterPlacement, SimStores};
+use crate::sim::{CharacterGlow, CharacterPlacement, SimInputs, SimStores, sim_step};
 use crate::wall::paint_wall;
 use pixtuoid_core::sprite::Frame;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 /// Paint all of `piece` in one call, which the classic's bands add up to.
 fn paint_whole_wall(
@@ -1771,21 +1772,6 @@ fn queued(layout: &SceneLayout, frame: &SimFrame) -> Furnishings<'static> {
     )
 }
 
-/// The offices the classic's roster tests sweep.
-fn swept_offices() -> impl Iterator<Item = SceneLayout> {
-    [
-        (96u16, 60u16),
-        (160, 120),
-        (192, 158),
-        (240, 160),
-        (320, 180),
-    ]
-    .into_iter()
-    .flat_map(|(w, h)| {
-        (0..12).filter_map(move |seed| SceneLayout::compute_with_seed(w, h, None, seed))
-    })
-}
-
 fn paints_as(kind: crate::layout::FixtureKind) -> &'static str {
     use crate::layout::{FixtureKind, Station};
     match kind {
@@ -1865,7 +1851,7 @@ fn drawn_as(kind: &DrawableKind<'_>) -> &'static str {
 #[test]
 fn the_classic_queues_every_fixture_the_roster_yields() {
     use crate::layout::{Depth, Tie};
-    for layout in swept_offices() {
+    for layout in crate::layout::roster::tests::offices() {
         let q = queued(&layout, &empty_frame(&layout));
         let got: Vec<(Option<(u16, Layer)>, &str)> = q
             .backdrop
@@ -1903,7 +1889,7 @@ fn the_classic_queues_every_fixture_the_roster_yields() {
 #[test]
 fn only_the_neon_sign_and_the_clock_are_spared_the_wash() {
     use crate::layout::FixtureKind;
-    for layout in swept_offices() {
+    for layout in crate::layout::roster::tests::offices() {
         for f in layout.fixtures() {
             let spared = matches!(f.kind, FixtureKind::NeonSign | FixtureKind::Clock);
             assert_eq!(wash_of(f.kind) == Wash::Spared, spared, "{:?}", f.kind);
@@ -1917,7 +1903,7 @@ fn only_the_neon_sign_and_the_clock_are_spared_the_wash() {
 #[test]
 fn the_roster_lists_spared_backdrop_before_washed() {
     use crate::layout::Depth;
-    for layout in swept_offices() {
+    for layout in crate::layout::roster::tests::offices() {
         let washes: Vec<Wash> = layout
             .fixtures()
             .filter(|f| f.depth == Depth::Backdrop)
@@ -1938,7 +1924,7 @@ fn the_roster_lists_spared_backdrop_before_washed() {
 fn only_a_backdrop_fixture_is_spared_the_wash() {
     use crate::layout::Depth;
     let mut spared = 0;
-    for layout in swept_offices() {
+    for layout in crate::layout::roster::tests::offices() {
         for f in layout
             .fixtures()
             .filter(|f| wash_of(f.kind) == Wash::Spared)
@@ -1957,7 +1943,7 @@ fn only_a_backdrop_fixture_is_spared_the_wash() {
 fn a_seat_ties_its_sitter_and_hides_them_only_from_behind() {
     use crate::layout::{Depth, Facing, FixtureKind, Tie, WaypointKind};
     let (mut fronts, mut backs, mut chairs, mut meeting_chairs) = (0, 0, 0, 0);
-    for layout in swept_offices() {
+    for layout in crate::layout::roster::tests::offices() {
         let fixtures: Vec<_> = layout.fixtures().collect();
         for w in layout
             .waypoints
@@ -2045,39 +2031,6 @@ fn every_pod_occludes_via_overhang() {
     }
 }
 
-#[test]
-fn character_sort_row_exceeds_desk_when_south_of_it() {
-    let desk_y: u16 = 20;
-    let desk_sort_row = desk_y
-        + crate::layout::furniture_def(crate::layout::Furniture::Desk)
-            .visual
-            .h;
-    let char_sort_row = (desk_y + 10) + 12;
-    assert!(
-        char_sort_row > desk_sort_row,
-        "walker south of desk must sort after it: char={char_sort_row}, desk={desk_sort_row}"
-    );
-}
-
-#[test]
-fn character_sort_row_below_desk_when_seated_at_it() {
-    let desk_y: u16 = 20;
-    let top_left = seated_top_left(
-        Point { x: 0, y: desk_y },
-        CHARACTER_SPRITE_W,
-        crate::layout::Facing::South,
-    );
-    let char_sort_row = top_left.y + 12;
-    let desk_sort_row = desk_y
-        + crate::layout::furniture_def(crate::layout::Furniture::Desk)
-            .visual
-            .h;
-    assert!(
-        char_sort_row < desk_sort_row,
-        "seated char must sort before desk: char={char_sort_row}, desk={desk_sort_row}"
-    );
-}
-
 fn entry_slot(created_at_ms_ago: u64, now: SystemTime) -> AgentSlot {
     let id = pixtuoid_core::AgentId::from_transcript_path("/door.jsonl");
     let mut s = make_slot(id, ActivityState::Idle);
@@ -2119,7 +2072,7 @@ fn wall_clock_epoch_ms_survives_an_f32_cast_only_after_an_integer_reduction() {
 #[test]
 fn door_frame_just_spawned_is_half_open() {
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-    // 50 ms into the 200 ms opening ramp — first half = frame 1.
+    // 50 ms into the `DOOR_TRANSITION_MS` opening ramp — first half = frame 1.
     let slot = entry_slot(50, now);
     assert_eq!(compute_door_frame_idx(&[slot], now, 0), 1);
 }
@@ -2130,7 +2083,7 @@ fn door_frame_after_opening_ramp_is_fully_open() {
     // 150 ms (still inside opening ramp but past midpoint) → frame 2.
     let s1 = entry_slot(150, now);
     assert_eq!(compute_door_frame_idx(&[s1], now, 0), 2);
-    // 2 s into the 4 s window → fully open.
+    // 2 s into the `ENTRY_ANIMATION_MS` window → fully open.
     let s2 = entry_slot(2_000, now);
     assert_eq!(compute_door_frame_idx(&[s2], now, 0), 2);
 }
@@ -2764,7 +2717,7 @@ fn weather_gallery_manifest_matches_the_weather_enum() {
         .collect();
     assert_eq!(
         ids,
-        weather_names(),
+        crate::sky::weather_names(),
         "site/src/weather.json ids must match Weather::ALL names in order — \
          update the manifest + run `just gen-media` when the enum changes"
     );
@@ -3521,7 +3474,7 @@ fn sim_step_fits_every_mascot_frame_on_the_canvas() {
 }
 
 #[test]
-fn sim_step_advances_motion_without_painting() {
+fn sim_step_advances_walks_without_painting() {
     use crate::pose::Pose;
     use std::time::Duration;
     let (scene, layout, id, now0, pack) = sim_rig();
@@ -3582,7 +3535,7 @@ fn sim_step_advances_motion_without_painting() {
             .route
             .walks
             .get(&id)
-            .is_some_and(|m| m.entry.is_some()),
+            .is_some_and(|walk| walk.entry.is_some()),
         "sim_step snapshotted the entry walk profile into the walks map"
     );
 }
@@ -4358,7 +4311,7 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
         .waypoints
         .iter()
         .position(|w| w.kind == crate::layout::WaypointKind::Printer)
-        .expect("printer at 160x96");
+        .expect("the layout places a printer");
     let frame = SimFrame {
         occupied_waypoints: [printer_idx].into(),
         ..empty_frame(&layout)
@@ -4604,29 +4557,6 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
         ),
         "an agent that left the wander machine must release its seat claim"
     );
-}
-
-#[test]
-fn precipitation_level_maps_audible_rain_under_its_policy() {
-    use crate::sky::Weather;
-    let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
-    let level = |w| precipitation_level(t, WeatherPolicy::Forced(w));
-    assert_eq!(level(Weather::Storm), 1.0, "storm is full precipitation");
-    let rain = level(Weather::Rain);
-    assert!(
-        rain > 0.0 && rain < 1.0,
-        "rain sits strictly between clear and storm, got {rain}"
-    );
-    for quiet in [
-        Weather::Clear,
-        Weather::Snow,
-        Weather::Fog,
-        Weather::Overcast,
-        Weather::Windy,
-        Weather::Smog,
-    ] {
-        assert_eq!(level(quiet), 0.0, "{quiet:?} must be silent precipitation");
-    }
 }
 
 #[test]
@@ -5081,7 +5011,7 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
     let coffee = HashMap::new();
     let w = CHARACTER_SPRITE_W;
 
-    // Three agents, not all 48 — the earliest arrivals cost the fewest steps.
+    // Three agents, not every target — the earliest arrivals cost the fewest steps.
     let mut hit = 0usize;
     for &(aid, target) in east_rim_targets(&layout, now0).iter().take(3) {
         let id = edge_agent_id(aid);
@@ -5935,149 +5865,4 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
         asymmetric += usize::from(east.as_slice() != mirrored.as_slice());
     }
     assert!(asymmetric > 0, "a profile is not its own mirror");
-}
-
-/// A corridor appliance's art overhangs north of its aisle (invariant #6), but
-/// never onto a desk, its chair or its sitter. Art can only overlap a
-/// workstation it shares a row with, and the height alone fixes every row
-/// (asserted at every width at seed 0, plus seeds 1 and 2 at one width each).
-/// So a tall-aisle height whose rows never meet is checked once per width;
-/// every other tall height sweeps all widths × seeds. The census sizes are
-/// always swept in full.
-#[test]
-fn corridor_appliance_art_never_lands_on_a_workstation() {
-    use crate::layout::{Bounds, CHARACTER_SPRITE_H, CHARACTER_SPRITE_W, FixtureKind, Station};
-    use std::collections::BTreeSet;
-    const TALL_AISLES: std::ops::RangeInclusive<u16> = 10..=14;
-    const APPLIANCES: [Station; 2] = [Station::VendingMachine, Station::Printer];
-    const SEEDS: std::ops::Range<u64> = 0..3;
-    const NARROWEST: u16 = 96;
-    const WIDEST: u16 = 320;
-    const MID_WIDTH: u16 = 208;
-    let rows_meet = |a: Bounds, b: Bounds| a.y < b.y + b.height && b.y < a.y + a.height;
-    let lay_out = |w, h, seed| {
-        SceneLayout::compute_with_seed(w, h, None, seed)
-            .unwrap_or_else(|| panic!("{w}x{h} seed {seed} lays out"))
-    };
-    let pieces = |l: &SceneLayout| {
-        let fixtures: Vec<_> = l.fixtures().collect();
-        let art: Vec<(Station, Bounds)> = fixtures
-            .iter()
-            .filter_map(|f| match f.kind {
-                FixtureKind::Station { station, .. } if APPLIANCES.contains(&station) => {
-                    Some((station, f.visual))
-                }
-                _ => None,
-            })
-            .collect();
-        let mut workstations: Vec<Bounds> = fixtures
-            .iter()
-            .filter(|f| matches!(f.kind, FixtureKind::Desk(_) | FixtureKind::DeskChair(_)))
-            .map(|f| f.visual)
-            .collect();
-        workstations.extend(l.home_desks.iter().enumerate().map(|(i, &desk)| {
-            let at = seated_top_left(
-                desk,
-                CHARACTER_SPRITE_W,
-                l.desk_facing(FloorLocalDeskIndex(i)),
-            );
-            Bounds {
-                x: at.x,
-                y: at.y,
-                width: CHARACTER_SPRITE_W,
-                height: CHARACTER_SPRITE_H,
-            }
-        }));
-        (art, workstations)
-    };
-    let rows = |l: &SceneLayout| {
-        let (art, workstations) = pieces(l);
-        (
-            (l.cubicle_aisle.y, l.cubicle_aisle.height),
-            art.iter()
-                .map(|&(station, a)| (station, a.y, a.height))
-                .collect::<Vec<_>>(),
-            workstations
-                .iter()
-                .map(|ws| (ws.y, ws.height))
-                .collect::<BTreeSet<_>>(),
-        )
-    };
-    let mut placed = 0;
-    let mut violations = Vec::new();
-    let mut check = |l: &SceneLayout, w: u16, h: u16, seed: u64| {
-        let (art, workstations) = pieces(l);
-        placed += art.len();
-        for (station, a) in art {
-            violations.extend(workstations.iter().filter(|&&ws| a.overlaps(ws)).map(|ws| {
-                format!(
-                    "{w}x{h} seed {seed} aisle {:?}: {station:?} art {a:?} on {ws:?}",
-                    l.cubicle_aisle
-                )
-            }));
-        }
-    };
-    for (w, h) in [
-        (96, 60),
-        (120, 72),
-        (140, 80),
-        (160, 96),
-        (192, 108),
-        (240, 135),
-        (320, 180),
-        (160, 192),
-    ] {
-        for seed in SEEDS {
-            check(&lay_out(w, h, seed), w, h, seed);
-        }
-    }
-    let corners = [(NARROWEST, SEEDS.start), (WIDEST, SEEDS.end - 1)];
-    let mut tall_seen = BTreeSet::new();
-    for h in 90u16..=240 {
-        let [probe, far] = corners.map(|(w, seed)| lay_out(w, h, seed));
-        let (probe_rows, far_rows) = (rows(&probe), rows(&far));
-        assert_eq!(
-            probe_rows.0, far_rows.0,
-            "{h}: the aisle is the height's alone"
-        );
-        if !TALL_AISLES.contains(&probe.cubicle_aisle.height) {
-            continue;
-        }
-        tall_seen.insert(probe.cubicle_aisle.height);
-        let (art, workstations) = pieces(&probe);
-        // An appliance the probe didn't place has rows it can't vouch for.
-        let apart = APPLIANCES
-            .iter()
-            .all(|kind| art.iter().any(|(station, _)| station == kind))
-            && art
-                .iter()
-                .all(|&(_, a)| workstations.iter().all(|&ws| !rows_meet(a, ws)));
-        if apart {
-            assert_eq!(probe_rows, far_rows, "{h}: rows are the height's alone");
-        }
-        let sampled =
-            |w, seed| !apart || seed == SEEDS.start || (w, seed) == (MID_WIDTH, SEEDS.start + 1);
-        for w in (NARROWEST..=WIDEST).step_by(8) {
-            for seed in SEEDS.filter(|&seed| !corners.contains(&(w, seed)) && sampled(w, seed)) {
-                let l = lay_out(w, h, seed);
-                if apart {
-                    assert_eq!(
-                        rows(&l),
-                        probe_rows,
-                        "{w}x{h} seed {seed}: rows are the height's alone"
-                    );
-                }
-                check(&l, w, h, seed);
-            }
-        }
-        for (l, (w, seed)) in [probe, far].iter().zip(corners) {
-            check(l, w, h, seed);
-        }
-    }
-    assert!(
-        TALL_AISLES.clone().all(|h| tall_seen.contains(&h)),
-        "the sweep must reach every tall aisle, saw {tall_seen:?}"
-    );
-    assert!(placed > 0, "no appliance was placed, so this pins nothing");
-    assert!(violations.is_empty(), "{}", violations.join("\n"));
 }

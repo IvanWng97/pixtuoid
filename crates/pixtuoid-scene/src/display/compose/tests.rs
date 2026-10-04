@@ -401,7 +401,7 @@ pub(crate) fn sit_down_as(
             last_usage: None,
         },
     );
-    let mut session = FloorSession::new();
+    let mut session = FloorSession::new(std::sync::Arc::new(pack.clone()));
     let mut frames = Vec::new();
     let mut seated_at = None;
     for n in 1..=1200u64 {

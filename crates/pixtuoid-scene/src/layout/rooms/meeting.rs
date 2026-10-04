@@ -164,6 +164,7 @@ impl MeetingRoom {
 
     /// The entrance doormat's sprite box (bordered rug on the cubicle side, one
     /// clear column east of the room's east wall) — `None` on a room too narrow.
+    /// The roster's mat also gives way to what stands over it.
     pub fn doormat_rect(&self) -> Option<Bounds> {
         let b = self.bounds;
         // Lazy `.then`: `b.height / 2 - 2` must not run for a sub-gate room.

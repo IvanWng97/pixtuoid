@@ -35,4 +35,4 @@ while these two were red, caught only by the full suite. Run
 
 - `just gen-contract` only if you touched the `--json`/`SourceStatus`/`OutcomeRow`
   SHAPE (adding a row doesn't).
-- `just preflight full` before the PR, then run the **two-lens-review** skill.
+- `just preflight full` before the PR, then run the **local-review** skill.
