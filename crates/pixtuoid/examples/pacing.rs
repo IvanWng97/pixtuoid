@@ -112,14 +112,18 @@ fn cases() -> Vec<Case> {
             cell: HALF_BLOCK_CELL,
             motion,
         });
-        for (protocol, label) in [
-            (Protocol::Kitty, "kitty"),
-            (Protocol::Sixel, "sixel"),
-            (Protocol::Iterm2, "iterm2"),
-        ] {
+        for protocol in Protocol::ALL
+            .into_iter()
+            .filter(|&p| p != Protocol::HalfBlock)
+        {
             for cell in CUTAWAY_CELLS {
                 out.push(Case {
-                    name: format!("{label} cutaway cell {}x{} {motion:?}", cell.0, cell.1),
+                    name: format!(
+                        "{} cutaway cell {}x{} {motion:?}",
+                        protocol.name(),
+                        cell.0,
+                        cell.1
+                    ),
                     protocol,
                     cell,
                     motion,
