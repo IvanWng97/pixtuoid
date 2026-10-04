@@ -710,6 +710,7 @@ fn snap_point_to_walkable_returns_walkable_cell() {
 
 /// A Router that does NOT override `set_preferred_zone`, so calling it hits the
 /// trait DEFAULT no-op body.
+#[derive(Debug)]
 struct NoZoneRouter;
 impl Router for NoZoneRouter {
     fn route(

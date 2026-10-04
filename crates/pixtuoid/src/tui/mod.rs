@@ -29,6 +29,8 @@ use ratatui::backend::CrosstermBackend;
 use tui_renderer::TuiRenderer;
 
 use crate::runtime::SceneRx;
+use crate::tui::hit_test::SceneHit;
+use pixtuoid_scene::display::{HoverTarget, PetHover};
 use pixtuoid_scene::{pet, theme};
 
 /// Which overlay (if any) currently owns input, plus the one count the picker needs.
@@ -106,23 +108,6 @@ enum KeyAction {
     OnboardingSkip,
     /// Ctrl-L: repaint the whole screen, images included.
     Redraw,
-}
-
-fn focus_clicked_agent<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
-    renderer: &TuiRenderer<B>,
-    scene_rx: &SceneRx,
-    focus_roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
-    col: u16,
-    row: u16,
-) -> bool {
-    let Some(id) = renderer.hit_test_agent_at(col, row) else {
-        return false;
-    };
-    let Some(slot) = scene_rx.borrow().agents.get(&id).cloned() else {
-        return false;
-    };
-    crate::focus::focus_slot(&slot, focus_roots);
-    true
 }
 
 /// Opens the live gate only on `Ok`, matching [`crate::sources::connect`]'s flag rollback
@@ -817,7 +802,7 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
     ui: &mut ui_state::UiState,
     renderer: &mut TuiRenderer<B>,
     scene_rx: &SceneRx,
-    focus_roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
+    focus: impl FnOnce(&pixtuoid_core::AgentSlot),
     now: SystemTime,
 ) {
     let left_down = matches!(m.kind, MouseEventKind::Down(MouseButton::Left));
@@ -854,31 +839,29 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
                 && crossterm::terminal::size().is_ok_and(|t| star_clicked(m.column, m.row, t));
             if on_star {
                 let _ = open::that(widgets::REPO_URL);
-            } else if focus_clicked_agent(renderer, scene_rx, focus_roots, m.column, m.row) {
-                // Empty on purpose: the click was consumed. The coffee-before-pet order below
-                // is the half no mechanism holds — keep it in step with `renderer::draw_scene`.
-            } else if let Some(at) = renderer.scene_area_at(m.column, m.row)
-                && renderer
-                    .cached_layout()
-                    .is_some_and(|layout| renderer::hit_test_coffee_machine(layout, at))
-            {
-                let _ = open::that("https://buymeacoffee.com/IvanWng97");
-            } else if let Some(pixtuoid_scene::pet::PetFrame {
-                pos: pet_pos,
-                anim,
-                kind,
-            }) = renderer.cached_pet_pos()
-                && renderer.active_pet_ref().is_none_or(|p| !p.is_active(now))
-                && renderer
-                    .scene_area_at(m.column, m.row)
-                    .is_some_and(|at| renderer::hit_test_pet(kind, pet_pos, anim, at))
-            {
-                renderer.set_active_pet(Some(renderer::PetState {
-                    petted_at: now,
-                    pet_pos,
-                    kind,
-                    floor_idx: renderer.current_floor(),
-                }));
+            } else {
+                match renderer.scene_hit_at(m.column, m.row) {
+                    Some(SceneHit::Figure(&HoverTarget::Agent(id))) => {
+                        let slot = scene_rx.borrow().agents.get(&id).cloned();
+                        if let Some(slot) = slot {
+                            focus(&slot);
+                        }
+                    }
+                    Some(SceneHit::Coffee) => {
+                        let _ = open::that("https://buymeacoffee.com/IvanWng97");
+                    }
+                    Some(SceneHit::Figure(&HoverTarget::Pet(PetHover {
+                        centre, kind, ..
+                    }))) if renderer.active_pet_ref().is_none_or(|p| !p.is_active(now)) => {
+                        renderer.set_active_pet(Some(renderer::PetState {
+                            petted_at: now,
+                            pet_pos: centre,
+                            kind,
+                            floor_idx: renderer.current_floor(),
+                        }));
+                    }
+                    _ => {}
+                }
             }
         }
         _ => {}
@@ -1053,9 +1036,14 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             },
                         );
                     }
-                    Event::Mouse(m) => {
-                        handle_mouse_event(m, &mut ui, &mut renderer, &scene_rx, &focus_roots, now)
-                    }
+                    Event::Mouse(m) => handle_mouse_event(
+                        m,
+                        &mut ui,
+                        &mut renderer,
+                        &scene_rx,
+                        |slot| crate::focus::focus_slot(slot, &focus_roots),
+                        now,
+                    ),
                     _ => {}
                 }
                 polled = event::poll(Duration::from_millis(0))?;

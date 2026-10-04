@@ -53,6 +53,14 @@ pub struct FlashHold<P, S> {
     clock: ScreenClock,
 }
 
+impl<P: std::fmt::Debug, S: std::fmt::Debug> std::fmt::Debug for FlashHold<P, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FlashHold")
+            .field("shown", &self.shown)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<P: Copy + PartialEq, S: Copy + PartialEq> FlashHold<P, S> {
     /// A hold on `clock`.
     pub fn on(clock: ScreenClock) -> Self {
@@ -90,7 +98,7 @@ impl<P: Copy + PartialEq, S: Copy + PartialEq> FlashHold<P, S> {
 
 /// A [`ScreenClock`] a test moves by hand.
 #[doc(hidden)]
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ManualClock(Arc<Mutex<Duration>>);
 
 impl ManualClock {

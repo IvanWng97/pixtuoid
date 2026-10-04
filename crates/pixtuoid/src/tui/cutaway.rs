@@ -117,6 +117,20 @@ struct Pending {
     flashes: Flashes,
 }
 
+impl std::fmt::Debug for TileCutaway {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TileCutaway")
+            .field("planned", &self.planned)
+            .field("density", &self.density)
+            .field("protocol", &self.protocol)
+            .field("tmux", &self.tmux)
+            .field("origin", &self.origin)
+            .field("pending", &self.pending.as_ref().map(|p| p.tiles.len()))
+            .field("torn", &self.torn)
+            .finish_non_exhaustive()
+    }
+}
+
 /// What a [`TileCutaway`]'s image last showed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Shown {

@@ -15,6 +15,7 @@ pub type PresenceSender = tokio::sync::mpsc::UnboundedSender<PresenceMsg>;
 /// instant abrupt-down rung — reusing the AGNOSTIC `ExitWatch` (pid → channel,
 /// no `AgentId` coupling), NOT `HookPidWatch` (which emits an AgentSlot-shaped
 /// `SessionEnd` the non-slot mascot can't consume).
+#[derive(Debug)]
 pub struct PresenceExitWatch {
     inner: crate::source::exit_watch::ExitWatch,
     /// pid → the daemon instances to take Down when it dies. SET-valued so a
